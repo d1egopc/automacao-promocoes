@@ -1,7 +1,11 @@
 const express = require("express");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-const { renderizarSalvar } = require("./renderer.service");
+const {
+  renderizarSalvar,
+  telemetriaRendererSocial,
+  iniciarTelemetriaRendererSocial
+} = require("./renderer.service");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -40,7 +44,8 @@ function criarApp() {
       ok: true,
       service: "optimus-social-art-renderer",
       storage: texto(process.env.SOCIAL_ART_STORAGE_PROVIDER || "r2"),
-      tokenConfigurado: Boolean(tokenInterno())
+      tokenConfigurado: Boolean(tokenInterno()),
+      runtime: telemetriaRendererSocial()
     });
   });
 
@@ -71,6 +76,7 @@ if (require.main === module) {
   const port = Number(process.env.PORT || 8080);
   criarApp().listen(port, () => {
     console.log("[SOCIAL-ARTE-RENDERER-ONLINE]", JSON.stringify({ port }));
+    iniciarTelemetriaRendererSocial();
   });
 }
 

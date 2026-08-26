@@ -488,6 +488,14 @@ function resumoBancoAssociativoV2(banco = BANCO_ASSOCIATIVO_V2) {
   };
 }
 
+function tamanhoCacheCopyLocalV2Bruto() {
+  return cacheLocalV2.size;
+}
+
+function tamanhoHistoricoCopyLocalV2() {
+  return historicoLocalV2.size;
+}
+
 module.exports = {
   TTL_COPY_LOCAL_V2_MS,
   MAX_CACHE_COPY_LOCAL_V2,
@@ -513,6 +521,8 @@ module.exports = {
   removerExpiradasCopyLocalV2,
   limparCacheCopyLocalV2,
   tamanhoCacheCopyLocalV2,
+  tamanhoCacheCopyLocalV2Bruto,
+  tamanhoHistoricoCopyLocalV2,
   resolverCopyLocalV2,
   resumoBancoAssociativoV2
 };

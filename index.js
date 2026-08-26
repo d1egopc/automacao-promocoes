@@ -21,6 +21,10 @@ const {
 const {
   criarRotasObservabilidadeAdmin
 } = require("./modules/observabilidade/admin.routes");
+const {
+  intervaloConfiguradoMs,
+  iniciarInfraMemoryTelemetry
+} = require("./modules/telemetria/infra-memory-snapshot");
 
 const {
   initEngineDatabase,
@@ -267,6 +271,9 @@ const filaOfertas = require("./utils/fila-ofertas");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
+const cacheCopyInteligenteV1 = require("./modules/copy-inteligente/cache");
+const cacheCopyInteligenteV2 = require("./modules/copy-inteligente/cache-v2");
+const copyLocalV2Service = require("./modules/copy-inteligente/copy-local-v2.service");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
 const {
   extrairEvidenciasRadarLocal,
@@ -27220,6 +27227,80 @@ console.log("[BOOT] Dados iniciais carregados:", {
   destinosClientes: Object.keys(destinosPorCliente || {}).length
 });
 
+function totalItensObjetoListasInfraMemoria(valor = {}) {
+  return Object.values(valor || {}).reduce((total, lista) => {
+    if (Array.isArray(lista)) return total + lista.length;
+    return total;
+  }, 0);
+}
+
+function iniciarInfraMemoryTelemetryOperacional() {
+  return iniciarInfraMemoryTelemetry({
+    fontes: () => ({
+      sessoes,
+      statusSessao,
+      sessoesMeta,
+      fila,
+      usuarios,
+      configsPorCliente,
+      destinosPorCliente,
+      integracoesPorCliente,
+      estruturas: {
+        copyV1Cache: () => cacheCopyInteligenteV1.tamanhoCacheCopyInteligenteBruto(),
+        copyV1Historico: () => cacheCopyInteligenteV1.tamanhoHistoricoCopyInteligente(),
+        copyV2Cache: () => cacheCopyInteligenteV2.tamanhoCacheCopyV2Bruto(),
+        copyLocalV2Cache: () => copyLocalV2Service.tamanhoCacheCopyLocalV2Bruto(),
+        copyLocalV2Historico: () => copyLocalV2Service.tamanhoHistoricoCopyLocalV2(),
+        logsThrottle,
+        radarListenerRecentes,
+        radarBloqueiosRecentes,
+        filaInteligenteUltimoAbastecimento,
+        diagnosticosFilaPorCliente,
+        perfBackgroundAtivos,
+        cooldownSessaoIndisponivelPorWorkspace,
+        ultimoLogSessaoIndisponivelPorWorkspace,
+        mutacaoFilaPorCliente,
+        controleEnvio,
+        controleIntervaloEnvioPorCliente,
+        historicoOfertas,
+        cuponsAtivos,
+        qrCodes,
+        destinosPorSessao,
+        destinosPorSessaoItens: () => totalItensObjetoListasInfraMemoria(destinosPorSessao),
+        gruposPorSessao,
+        gruposPorSessaoItens: () => totalItensObjetoListasInfraMemoria(gruposPorSessao),
+        reconectando,
+        inicializandoWhatsApp,
+        tentativasReconexaoWhatsApp,
+        ultimoMotivoDisconnectWhatsApp,
+        geracoesSocketWhatsapp,
+        sessoesMeta,
+        configsPorCliente,
+        destinosPorCliente,
+        integracoesPorCliente
+      },
+      timers: {
+        infraMemorySnapshot: { ativo: true, intervaloMs: intervaloConfiguradoMs() },
+        filaGlobal: { ativo: true, intervaloMs: 10 * 1000 },
+        decairConfiancaCupons: { ativo: true, intervaloMs: 4 * 60 * 60 * 1000 },
+        campanhasAgendamentos: {
+          ativo: String(process.env.CAMPANHAS_AGENDAMENTOS_ATIVO || "true").toLowerCase() !== "false",
+          intervaloMs: Number(process.env.CAMPANHAS_AGENDAMENTOS_INTERVALO_MS || 60000)
+        },
+        engineOrquestrador: { ativo: true, intervaloMs: 120000 },
+        manualV2Scheduler: { ativo: true, intervaloMs: null },
+        manualV2Retention: { ativo: true, intervaloMs: null },
+        mensageiroProgramacoes: { ativo: true, intervaloMs: null },
+        socialScheduler: { ativo: true, intervaloMs: null },
+        mercadoPagoReconciliacao: {
+          ativo: Boolean(global.__optimusMercadoPagoReconciliationScheduler),
+          intervaloMs: null
+        }
+      }
+    })
+  });
+}
+
 app.listen(PORT, () => {
   console.log("[API]🟢🧠 API ONLINE NA PORTA " + PORT);
   iniciarManualV2SchedulerOperacional();
@@ -27228,6 +27309,7 @@ app.listen(PORT, () => {
     getSock: (sessaoId) => sessoes[sessaoId],
     getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
   });
+  iniciarInfraMemoryTelemetryOperacional();
 
 decairConfiancaCupons();
 

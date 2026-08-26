@@ -82,6 +82,10 @@ function tamanhoCacheCopyV2() {
   return cacheV2.size;
 }
 
+function tamanhoCacheCopyV2Bruto() {
+  return cacheV2.size;
+}
+
 module.exports = {
   TTL_COPY_V2_MS,
   MAX_ENTRIES_COPY_V2,
@@ -92,5 +96,6 @@ module.exports = {
   salvarCacheCopyV2,
   removerExpiradasCopyV2,
   limparCacheCopyV2,
-  tamanhoCacheCopyV2
+  tamanhoCacheCopyV2,
+  tamanhoCacheCopyV2Bruto
 };

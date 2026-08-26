@@ -3,6 +3,10 @@ const { baixarImagemSegura } = require("./image-proxy");
 const socialArtStorage = require("./social-art-storage");
 
 let browserPromise = null;
+let timerTelemetriaRendererSocial = null;
+
+const TAG_SOCIAL_RENDERER_MEMORY_SNAPSHOT = "[SOCIAL-RENDERER-MEMORY-SNAPSHOT]";
+const INTERVALO_SOCIAL_RENDERER_MEMORY_SNAPSHOT_MS = 5 * 60 * 1000;
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -10,6 +14,71 @@ function texto(valor = "") {
 
 function log(evento = "", dados = {}) {
   console.log(evento, JSON.stringify(dados));
+}
+
+function numeroSeguro(valor = 0) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero >= 0 ? Math.round(numero) : 0;
+}
+
+function mb(valor = 0) {
+  return Math.round((numeroSeguro(valor) / 1024 / 1024) * 10) / 10;
+}
+
+function telemetriaRendererSocial(memoria = process.memoryUsage()) {
+  const rss = numeroSeguro(memoria.rss);
+  const heapUsed = numeroSeguro(memoria.heapUsed);
+  const heapTotal = numeroSeguro(memoria.heapTotal);
+  const external = numeroSeguro(memoria.external);
+  const arrayBuffers = numeroSeguro(memoria.arrayBuffers);
+
+  return {
+    memoria: {
+      rss,
+      heapUsed,
+      heapTotal,
+      external,
+      arrayBuffers,
+      rssMb: mb(rss),
+      heapUsedMb: mb(heapUsed),
+      heapTotalMb: mb(heapTotal),
+      externalMb: mb(external),
+      arrayBuffersMb: mb(arrayBuffers)
+    },
+    browserAtivo: Boolean(browserPromise)
+  };
+}
+
+function iniciarTelemetriaRendererSocial(opcoes = {}) {
+  if (String(process.env.SOCIAL_RENDERER_MEMORY_SNAPSHOT_ENABLED || "true").toLowerCase() === "false") {
+    return { ok: true, iniciado: false, motivo: "desabilitado" };
+  }
+  if (timerTelemetriaRendererSocial) return { ok: true, iniciado: false, motivo: "ja_iniciado" };
+
+  const configurado = Number(opcoes.intervaloMs || process.env.SOCIAL_RENDERER_MEMORY_SNAPSHOT_INTERVAL_MS);
+  const intervaloMs = Number.isFinite(configurado) && configurado > 0
+    ? Math.max(60 * 1000, Math.round(configurado))
+    : INTERVALO_SOCIAL_RENDERER_MEMORY_SNAPSHOT_MS;
+  const logger = typeof opcoes.logger === "function" ? opcoes.logger : console.log;
+  const setIntervalFn = typeof opcoes.setIntervalFn === "function" ? opcoes.setIntervalFn : setInterval;
+
+  timerTelemetriaRendererSocial = setIntervalFn(() => {
+    logger(TAG_SOCIAL_RENDERER_MEMORY_SNAPSHOT, JSON.stringify({
+      versao: 1,
+      coletadoEm: new Date().toISOString(),
+      ...telemetriaRendererSocial()
+    }));
+  }, intervaloMs);
+  if (typeof timerTelemetriaRendererSocial?.unref === "function") timerTelemetriaRendererSocial.unref();
+
+  return { ok: true, iniciado: true, intervaloMs };
+}
+
+function pararTelemetriaRendererSocial(clearIntervalFn = clearInterval) {
+  if (!timerTelemetriaRendererSocial) return false;
+  clearIntervalFn(timerTelemetriaRendererSocial);
+  timerTelemetriaRendererSocial = null;
+  return true;
 }
 
 function escaparHtml(valor = "") {
@@ -295,5 +364,10 @@ module.exports = {
   htmlPreview,
   renderizarPng,
   renderizarSalvar,
-  encerrarBrowser
+  encerrarBrowser,
+  TAG_SOCIAL_RENDERER_MEMORY_SNAPSHOT,
+  INTERVALO_SOCIAL_RENDERER_MEMORY_SNAPSHOT_MS,
+  telemetriaRendererSocial,
+  iniciarTelemetriaRendererSocial,
+  pararTelemetriaRendererSocial
 };

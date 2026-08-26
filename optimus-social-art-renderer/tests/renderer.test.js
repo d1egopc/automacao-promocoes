@@ -5,7 +5,15 @@ const {
 } = require("../src/contract");
 const { validarUrlImagem, detectarMime, ipPrivado } = require("../src/image-proxy");
 const { caminhoArte, urlPublica, salvar } = require("../src/social-art-storage");
-const { htmlPreview, renderizarSalvar } = require("../src/renderer.service");
+const {
+  htmlPreview,
+  renderizarSalvar,
+  TAG_SOCIAL_RENDERER_MEMORY_SNAPSHOT,
+  telemetriaRendererSocial,
+  iniciarTelemetriaRendererSocial,
+  pararTelemetriaRendererSocial
+} = require("../src/renderer.service");
+const { criarApp } = require("../src/server");
 
 process.env.SOCIAL_ART_PUBLIC_BASE_URL = "https://cdn.optimus.test/";
 process.env.SOCIAL_ART_STORAGE_PROVIDER = "r2";
@@ -83,6 +91,28 @@ function fakeBrowser() {
       return page;
     }
   };
+}
+
+async function requestJson(app, path) {
+  return new Promise(resolve => {
+    const server = app.listen(0, () => {
+      const { port } = server.address();
+      const req = require("http").request({
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "GET"
+      }, res => {
+        let body = "";
+        res.on("data", chunk => { body += chunk; });
+        res.on("end", () => {
+          server.close();
+          resolve({ status: res.statusCode, body: body ? JSON.parse(body) : null });
+        });
+      });
+      req.end();
+    });
+  });
 }
 
 (async () => {
@@ -177,6 +207,40 @@ function fakeBrowser() {
   assert.throws(() => validarUrlImagem("file:///tmp/a.jpg"), /imagem_protocolo_invalido/);
   assert.strictEqual(ipPrivado("10.0.0.1"), true);
   assert.strictEqual(detectarMime(Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8])), "image/png");
+
+  const runtimeRenderer = telemetriaRendererSocial({
+    rss: 11 * 1024 * 1024,
+    heapUsed: 5 * 1024 * 1024,
+    heapTotal: 9 * 1024 * 1024,
+    external: 2 * 1024 * 1024,
+    arrayBuffers: 1024 * 1024
+  });
+  assert.strictEqual(runtimeRenderer.memoria.rssMb, 11);
+  assert.strictEqual(runtimeRenderer.memoria.heapUsedMb, 5);
+  assert.strictEqual(runtimeRenderer.browserAtivo, false);
+
+  let callbackTelemetriaRenderer = null;
+  const logsTelemetriaRenderer = [];
+  const inicioTelemetria = iniciarTelemetriaRendererSocial({
+    intervaloMs: 60000,
+    logger: (tag, payload) => logsTelemetriaRenderer.push({ tag, payload }),
+    setIntervalFn: (fn, intervaloMs) => {
+      assert.strictEqual(intervaloMs, 60000);
+      callbackTelemetriaRenderer = fn;
+      return { unref() {} };
+    }
+  });
+  assert.strictEqual(inicioTelemetria.iniciado, true);
+  callbackTelemetriaRenderer();
+  assert.strictEqual(logsTelemetriaRenderer[0].tag, TAG_SOCIAL_RENDERER_MEMORY_SNAPSHOT);
+  assert.strictEqual(JSON.stringify(logsTelemetriaRenderer).includes("token"), false);
+  assert.strictEqual(pararTelemetriaRendererSocial(() => {}), true);
+
+  const health = await requestJson(criarApp(), "/health");
+  assert.strictEqual(health.status, 200);
+  assert.strictEqual(health.body.ok, true);
+  assert.strictEqual(typeof health.body.runtime.browserAtivo, "boolean");
+  assert.strictEqual(Number.isFinite(health.body.runtime.memoria.rss), true);
 
   const key = caminhoArte({ clienteId: "cliente_a", ofertaId: "oferta_a", hash: normal.hash });
   assert.strictEqual(key, `posts/cliente_a/oferta_a/${normal.hash}.png`);

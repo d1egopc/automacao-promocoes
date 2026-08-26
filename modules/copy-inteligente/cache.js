@@ -79,6 +79,14 @@ function tamanhoCacheCopyInteligente() {
   return cache.size;
 }
 
+function tamanhoCacheCopyInteligenteBruto() {
+  return cache.size;
+}
+
+function tamanhoHistoricoCopyInteligente() {
+  return historico.size;
+}
+
 module.exports = {
   TTL_PADRAO_MS,
   LIMITE_HISTORICO,
@@ -89,5 +97,7 @@ module.exports = {
   fraseImediatamenteAnterior,
   registrarFrase,
   limparCacheCopyInteligente,
-  tamanhoCacheCopyInteligente
+  tamanhoCacheCopyInteligente,
+  tamanhoCacheCopyInteligenteBruto,
+  tamanhoHistoricoCopyInteligente
 };
