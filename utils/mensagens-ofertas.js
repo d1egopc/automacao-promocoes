@@ -62,38 +62,105 @@ function tituloIaLiberadoRender(opcoes = {}) {
   return opcoes?.plano?.recursos?.tituloIa === true;
 }
 
+function fonteTituloApresentacaoLocal({ destino = {}, resultado = {}, tituloIaPreExistente = false } = {}) {
+  if (normalizarTituloOfertaDestino(destino?.tituloOferta) !== "ia") return "original";
+  if (!resultado || typeof resultado !== "object") return "original";
+  if (resultado.fallbackOriginal) return "original";
+  if (resultado.fonte === copyInteligente.FONTE_COPY_LOCAL_V2) return "local_v2";
+  if (resultado.fonte === "copy_inteligente_v1") return "v1";
+  if (resultado.usouTituloIa && tituloIaPreExistente) return "tituloIa_explicito";
+  if (resultado.usouTituloIa) return "tituloIa_explicito";
+  return "original";
+}
+
+function registrarObservabilidadeTituloOferta({
+  oferta = {},
+  destino = {},
+  resultado = {},
+  copyLocalV2Resolvida = null,
+  copyResolvida = null,
+  tituloIaPreExistente = false
+} = {}) {
+  try {
+    const fonteTitulo = fonteTituloApresentacaoLocal({ destino, resultado, tituloIaPreExistente });
+    const payload = {
+      fonteTitulo,
+      tituloIaPreExistente: Boolean(tituloIaPreExistente),
+      categoriaRecebidaLocalV2: textoMensagemExistenteLocal(oferta.categoria || oferta.categoriaProduto || ""),
+      cacheHit: resultado.cacheHit === true
+    };
+
+    if (fonteTitulo === "local_v2") {
+      payload.fraseIdLocalV2 = textoMensagemExistenteLocal(copyLocalV2Resolvida?.fraseId || "");
+      payload.familiaLocalV2 = textoMensagemExistenteLocal(copyLocalV2Resolvida?.familia || "");
+      payload.intencaoLocalV2 = textoMensagemExistenteLocal(copyLocalV2Resolvida?.intencao || "");
+      payload.cacheHit = copyLocalV2Resolvida?.cacheHit === true;
+    }
+
+    if (fonteTitulo === "v1") {
+      payload.cacheHit = copyResolvida?.cacheHit === true;
+    }
+
+    console.log("[TITULO-APRESENTACAO-OBS]", JSON.stringify(payload));
+  } catch (_) {
+    // Observabilidade de titulo nunca pode interferir no envio.
+  }
+}
+
 function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}) {
   const original = tituloApresentacaoValido(oferta.titulo) ||
     tituloApresentacaoValido(oferta.nome) ||
     "Oferta";
+  const tituloIaPreExistente = Boolean(primeiroTituloIaValido(oferta));
 
   if (normalizarTituloOfertaDestino(destino?.tituloOferta) !== "ia") {
-    return {
+    const resultado = {
       titulo: original,
       modo: "original",
       usouTituloIa: false,
       fallbackOriginal: false
     };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      tituloIaPreExistente
+    });
+    return resultado;
   }
 
   if (!tituloIaLiberadoRender(opcoes)) {
-    return {
+    const resultado = {
       titulo: original,
       modo: "ia",
       usouTituloIa: false,
       fallbackOriginal: true,
       motivo: "feature_tituloIa_indisponivel"
     };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      tituloIaPreExistente
+    });
+    return resultado;
   }
 
   const tituloIa = primeiroTituloIaValido(oferta);
   if (tituloIa) {
-    return {
+    const resultado = {
       titulo: tituloIa,
       modo: "ia",
       usouTituloIa: true,
       fallbackOriginal: false
     };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      tituloIaPreExistente
+    });
+    return resultado;
   }
 
   let copyLocalV2Resolvida = null;
@@ -111,7 +178,7 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
     };
   }
   if (copyLocalV2Resolvida?.ok && tituloApresentacaoValido(copyLocalV2Resolvida.tituloIa)) {
-    return {
+    const resultado = {
       titulo: copyLocalV2Resolvida.tituloIa,
       modo: "ia",
       usouTituloIa: true,
@@ -120,6 +187,14 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       fonte: copyLocalV2Resolvida.fonte || "banco_associativo_local_v2",
       cacheHit: copyLocalV2Resolvida.cacheHit === true
     };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      copyLocalV2Resolvida,
+      tituloIaPreExistente
+    });
+    return resultado;
   }
 
   let copyResolvida = null;
@@ -137,7 +212,7 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
     };
   }
   if (copyResolvida?.ok && tituloApresentacaoValido(copyResolvida.tituloIa)) {
-    return {
+    const resultado = {
       titulo: copyResolvida.tituloIa,
       modo: "ia",
       usouTituloIa: true,
@@ -146,15 +221,32 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       fonte: copyResolvida.fonte || "copy_inteligente_v1",
       cacheHit: copyResolvida.cacheHit === true
     };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      copyResolvida,
+      tituloIaPreExistente
+    });
+    return resultado;
   }
 
-  return {
+  const resultado = {
     titulo: original,
     modo: "ia",
     usouTituloIa: false,
     fallbackOriginal: true,
     motivo: copyResolvida?.motivoFallback || copyLocalV2Resolvida?.motivoFallback || "titulo_ia_indisponivel"
   };
+  registrarObservabilidadeTituloOferta({
+    oferta,
+    destino,
+    resultado,
+    copyLocalV2Resolvida,
+    copyResolvida,
+    tituloIaPreExistente
+  });
+  return resultado;
 }
 
 function resolverMensagemExistente(oferta = {}, opcoes = {}, ofertaOficial = {}) {
@@ -562,6 +654,12 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     ...opcoes,
     clienteId
   });
+  const tituloIaPreExistente = Boolean(primeiroTituloIaValido(ofertaComFatosBase));
+  const fonteTitulo = fonteTituloApresentacaoLocal({
+    destino,
+    resultado: tituloApresentacao,
+    tituloIaPreExistente
+  });
   const ofertaApresentacao = {
     ...ofertaComFatosBase,
     clienteId,
@@ -625,6 +723,18 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       contratoFinalAplicado: ofertaOficial.contratoFinalAplicado === true ||
         ofertaOficial.contratoComercialFinalResolvido === true ||
         ofertaOficial.contratoComercialFinal?.resolvido === true,
+      fonteTitulo,
+      tituloIaPreExistente,
+      categoriaRecebidaLocalV2: ofertaComFatosBase.categoria || ofertaComFatosBase.categoriaProduto || "",
+      categoriaExibidaTemplate: ofertaOficial.categoria || ofertaOficial.categoriaProduto || "",
+      ...(fonteTitulo === "local_v2" ? {
+        fraseIdLocalV2: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? (tituloApresentacao.fraseId || "") : "",
+        familiaLocalV2: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? (tituloApresentacao.familia || "") : "",
+        intencaoLocalV2: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? (tituloApresentacao.intencao || "") : "",
+        cacheHit: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? tituloApresentacao.cacheHit === true : false
+      } : {
+        cacheHit: tituloApresentacao.cacheHit === true
+      }),
       origemApresentacao: valorLogCurto(ofertaOficial.origemApresentacao || ""),
       templatePersonalizado: rendererEscolhido === "template_personalizado" || rendererEscolhido === "template_legado",
       templateUniversal: rendererEscolhido === "template_universal",

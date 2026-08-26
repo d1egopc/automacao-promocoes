@@ -11,6 +11,7 @@ const {
   montarMensagemOferta,
   resolverTituloApresentacaoOferta
 } = require("../utils/mensagens-ofertas");
+const copy = require("../modules/copy-inteligente");
 
 function ofertaBase(marketplace = "amazon") {
   return {
@@ -33,6 +34,23 @@ function renderizar(oferta, destino = {}, opcoes = {}) {
     destino: { tipo: "whatsapp", ...destino },
     plano: { recursos: { templatePersonalizado: true, tituloIa: opcoes.tituloIa === true } }
   });
+}
+
+function capturarLogs(fn) {
+  const logs = [];
+  const original = console.log;
+  console.log = (...args) => logs.push(args);
+  try {
+    return { resultado: fn(), logs };
+  } finally {
+    console.log = original;
+  }
+}
+
+function extrairLog(logs, tag) {
+  const linha = logs.find(args => args[0] === tag);
+  if (!linha) return null;
+  return JSON.parse(linha[1]);
 }
 
 const original = ofertaBase();
@@ -119,5 +137,79 @@ assert.deepStrictEqual(
   { titulo: "IA", modo: "ia", usouTituloIa: true, fallbackOriginal: false },
   "resolver expõe decisao IA sem efeito colateral"
 );
+
+const TAG_TITULO = "[TITULO-APRESENTACAO-OBS]";
+const TAG_RENDE_FINAL = "[OFC-V2.5-RENDERER-FINAL]";
+
+const sensivel = {
+  ...ofertaBase(),
+  titulo: "Contato 5511999999999 token=segredo user@s.whatsapp.net",
+  nome: "Contato 5511999999999 token=segredo user@s.whatsapp.net"
+};
+const logsSensiveis = capturarLogs(() => renderizar(sensivel, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+const obsSensivel = extrairLog(logsSensiveis, TAG_TITULO);
+assert.strictEqual(obsSensivel.fonteTitulo, "tituloIa_explicito", "tituloIa preexistente aponta fonte correta");
+assert.strictEqual(obsSensivel.tituloIaPreExistente, true, "tituloIa preexistente registrado");
+assert.ok(!JSON.stringify(obsSensivel).includes("5511999999999"), "observabilidade nao expõe telefone");
+assert.ok(!JSON.stringify(obsSensivel).includes("token=segredo"), "observabilidade nao expõe token");
+assert.ok(!JSON.stringify(obsSensivel).includes("user@s.whatsapp.net"), "observabilidade nao expõe JID");
+
+copy.limparCacheCopyLocalV2();
+const logsLocalV2 = capturarLogs(() => renderizar({
+  ...ofertaBase(),
+  tituloIa: "",
+  titulo: "Teclado mecanico gamer",
+  nome: "Teclado mecanico gamer",
+  cupom: "",
+  categoria: "Gamer e Hardware"
+}, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+const obsLocalV2 = extrairLog(logsLocalV2, TAG_TITULO);
+const finalLocalV2 = extrairLog(logsLocalV2, TAG_RENDE_FINAL);
+assert.strictEqual(obsLocalV2.fonteTitulo, "local_v2", "local_v2 normal registra fonte");
+assert.ok(obsLocalV2.fraseIdLocalV2, "local_v2 registra fraseId");
+assert.strictEqual(obsLocalV2.familiaLocalV2, "gamer", "local_v2 registra familia");
+assert.strictEqual(obsLocalV2.intencaoLocalV2, "familia", "local_v2 registra intencao");
+assert.strictEqual(obsLocalV2.categoriaRecebidaLocalV2, "Gamer e Hardware", "local_v2 registra categoria recebida");
+assert.strictEqual(finalLocalV2.fonteTitulo, "local_v2", "renderer final registra fonte local_v2");
+
+const originalLocal = copy.resolverCopyLocalV2;
+const originalV1 = copy.resolverCopyInteligente;
+try {
+  copy.resolverCopyLocalV2 = () => ({ ok: false, motivoFallback: "local_forcado" });
+  copy.resolverCopyInteligente = () => ({ ok: true, tituloIa: "V1 curto", fonte: "copy_inteligente_v1", cacheHit: false, intencao: "cupom" });
+  const logsV1 = capturarLogs(() => renderizar({
+    ...ofertaBase(),
+    tituloIa: ""
+  }, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+  const obsV1 = extrairLog(logsV1, TAG_TITULO);
+  const finalV1 = extrairLog(logsV1, TAG_RENDE_FINAL);
+  assert.strictEqual(obsV1.fonteTitulo, "v1", "fallback V1 registra fonte");
+  assert.strictEqual(obsV1.cacheHit, false, "fallback V1 registra cache");
+  assert.strictEqual(finalV1.fonteTitulo, "v1", "renderer final registra fonte V1");
+} finally {
+  copy.resolverCopyLocalV2 = originalLocal;
+  copy.resolverCopyInteligente = originalV1;
+}
+
+const logsOriginal = capturarLogs(() => renderizar({
+  ...ofertaBase(),
+  tituloIa: ""
+}, { tituloOferta: "original" })).logs;
+const obsOriginal = extrairLog(logsOriginal, TAG_TITULO);
+const finalOriginal = extrairLog(logsOriginal, TAG_RENDE_FINAL);
+assert.strictEqual(obsOriginal.fonteTitulo, "original", "destino original registra fonte original");
+assert.strictEqual(obsOriginal.tituloIaPreExistente, false, "destino original sem tituloIa preexistente registra falso");
+assert.strictEqual(finalOriginal.fonteTitulo, "original", "renderer final registra fonte original");
+
+const logsCategoriaDivergente = capturarLogs(() => renderizar({
+  ...ofertaBase(),
+  tituloIa: "",
+  categoria: "Diversos",
+  inteligenciaUniversalV2: { categoria: "Gamer e Hardware" }
+}, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+const obsDivergente = extrairLog(logsCategoriaDivergente, TAG_TITULO);
+const finalDivergente = extrairLog(logsCategoriaDivergente, TAG_RENDE_FINAL);
+assert.strictEqual(obsDivergente.categoriaRecebidaLocalV2, "Diversos", "copy registra categoria recebida");
+assert.strictEqual(finalDivergente.categoriaExibidaTemplate, "Gamer e Hardware", "renderer registra categoria exibida");
 
 console.log("titulo-oferta-apresentacao.test.js OK");
