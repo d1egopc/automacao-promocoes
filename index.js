@@ -272,6 +272,7 @@ const {
 } = require("./utils/mensagens-ofertas");
 
 const filaOfertas = require("./utils/fila-ofertas");
+const { criarFilaStore } = require("./modules/fila/fila-store");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
@@ -858,6 +859,8 @@ aliexpress: {
 };
 
 let fila = [];
+const filaStore = criarFilaStore(fila);
+let ultimoLogFilaStoreMetrics = 0;
 let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
 const mutacaoFilaPorCliente = new Set();
@@ -2283,6 +2286,22 @@ function erroSalvarFilaCliente(clienteId = "admin") {
   };
 }
 
+function logFilaStoreMetrics(motivo = "snapshot", extras = {}, forcar = false) {
+  const agora = Date.now();
+  if (!forcar && agora - ultimoLogFilaStoreMetrics < 5 * 60 * 1000) return;
+  ultimoLogFilaStoreMetrics = agora;
+  console.log("[FILA-STORE-METRICS]", JSON.stringify(filaStore.snapshotMetricas({
+    motivo,
+    ...extras
+  })));
+}
+
+function reconstruirFilaStoreCliente(clienteId = "admin", motivo = "sincronizacao") {
+  const cliente = String(clienteId || "admin");
+  filaStore.rebuildCliente(fila, cliente, { motivo });
+  logFilaStoreMetrics(motivo, { clienteId: cliente });
+}
+
 function salvarFila(clienteId = "admin") {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   aplicarDiversidadeFila(clienteId);
@@ -2297,13 +2316,15 @@ function salvarFila(clienteId = "admin") {
     }
   };
 
-  return filaOfertas.salvarFila({
+  const salvou = filaOfertas.salvarFila({
     fila,
     clienteId,
     getFilaFile,
     writeClienteJson,
     logger: loggerFila
   });
+  if (salvou) reconstruirFilaStoreCliente(clienteId, "salvarFila");
+  return salvou;
   });
 }
 
@@ -2317,6 +2338,7 @@ function carregarFila(clienteId = "admin") {
     logger: console
   });
 
+  reconstruirFilaStoreCliente(clienteId, "carregarFila");
   return fila;
   });
 }
@@ -2386,8 +2408,16 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
   const linkAfiliado = normalizarChaveFilaEngine(itemFila.linkAfiliado || itemFila.link || itemFila.linkFinal || "");
   const titulo = normalizarChaveFilaEngine(itemFila.titulo || itemFila.nome || "");
   const preco = numeroComparavelFilaEngine(itemFila.preco || itemFila.precoAtual);
+  if (engineOfertaId && fila.some(item =>
+    String(item?.clienteId || "admin") === cliente &&
+    String(item.engineOfertaId || "") === String(engineOfertaId)
+  )) {
+    return true;
+  }
+  const candidatosIndexados = filaStore.candidatosPorFingerprint(itemFila);
+  const itensConsulta = candidatosIndexados.ok ? candidatosIndexados.itens : fila;
 
-  return fila.some(item => {
+  return itensConsulta.some(item => {
     if (String(item?.clienteId || "admin") !== cliente) return false;
     if (engineOfertaId && String(item.engineOfertaId || "") === String(engineOfertaId)) return true;
 
@@ -2494,7 +2524,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       clienteId: cliente,
       engineOfertaId: itemFinal.engineOfertaId || null,
       itemId: itemFinal.id || "",
-      totalCliente: fila.filter(item => String(item?.clienteId || "admin") === cliente).length
+      totalCliente: filaStore.itensPorCliente(cliente).length
     });
 
     medidorFilaGlobal.fim({
@@ -7496,9 +7526,11 @@ const destinosOrdenados = destinosCompativeis
   })
   .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
 
+const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });
 const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta, {
   logger: console,
-  logarLegado: true
+  logarLegado: true,
+  obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : fila
 });
 if (!repeticaoExecutor.ok) {
   resumoFila.motivoPulo = repeticaoExecutor.motivo;
@@ -9555,21 +9587,23 @@ app.delete("/fila/limpar", auth, (req, res) => {
 app.delete("/fila/:index", auth, (req, res) => {
   const index = Number(req.params.index);
   const clienteId = getClienteId(req);
+  const resolucaoIndice = filaStore.resolverIndiceGlobalLegado(fila, clienteId, index);
 
-  if (isNaN(index) || index < 0 || index >= fila.length) {
+  if (resolucaoIndice.motivo === "indice_invalido") {
     return res.status(400).send("Índice inválido");
   }
 
-  const oferta = fila[index];
+  const oferta = resolucaoIndice.item;
 
-  if ((oferta.clienteId || "admin") !== clienteId) {
+  if (!resolucaoIndice.ok) {
     return res.status(403).json({
       ok: false,
       erro: "Sem permissão para remover esta oferta"
     });
   }
 
-  const removido = fila.splice(index, 1);
+  const removido = fila.splice(resolucaoIndice.indexReal, 1);
+  filaStore.removerItem(removido[0]);
 
   salvarFila(clienteId);
 
@@ -9646,29 +9680,27 @@ app.post("/fila/item/:id/enviar-agora", auth, async (req, res) => {
 app.post("/fila/:index/enviar-agora", auth, async (req, res) => {
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
-
-const filaCliente = fila.filter(o =>
-  String(o.clienteId || "admin") === String(clienteIdReq)
-);
 const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
+const resolucaoIndice = filaStore.resolverIndiceClienteLegado(fila, clienteIdReq, index, {
+  idEsperado: idBody,
+  preferirPendente: true
+});
 
-if (isNaN(index) || index < 0 || index >= filaCliente.length) {
+if (!resolucaoIndice.ok && resolucaoIndice.motivo === "indice_invalido") {
+  return res.status(400).json({
+    ok: false,
+    erro: "Índice inválido"
+  });
+}
+if (!resolucaoIndice.ok || !resolucaoIndice.item) {
   return res.status(400).json({
     ok: false,
     erro: "Índice inválido"
   });
 }
 
-let oferta = idBody
-  ? filaCliente.find(item => String(item.id || "") === idBody)
-  : filaCliente[index];
-
-if (!oferta || oferta.status !== "pendente") {
-  const pendentesCliente = filaCliente.filter(item => item.status === "pendente");
-  oferta = pendentesCliente[index] || oferta;
-}
-
-const indexReal = fila.findIndex(o => o === oferta);
+let oferta = resolucaoIndice.item;
+const indexReal = resolucaoIndice.indexReal;
 
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
@@ -9687,12 +9719,14 @@ const indexReal = fila.findIndex(o => o === oferta);
   });
 
 if (indexReal >= 0) {
+  filaStore.removerItem(oferta);
   fila.splice(indexReal, 1);
   filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
     clienteId: clienteIdReq,
     origem: oferta.origem || "enviar_agora",
     logger: console
   });
+  reconstruirFilaStoreCliente(clienteIdReq, "enviar_agora_reordenar");
 }
 
   const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
