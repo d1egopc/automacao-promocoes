@@ -273,6 +273,7 @@ const {
 
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
+const { criarControladorFilaV2Shadow } = require("./modules/fila/fila-v2-shadow");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
@@ -355,6 +356,7 @@ const workspaceRegistry = require("./modules/workspace");
 const {
   storage,
   getClientePath,
+  getClienteJsonPath,
   readClienteJson,
   writeClienteJson,
   listClientes,
@@ -860,6 +862,11 @@ aliexpress: {
 
 let fila = [];
 const filaStore = criarFilaStore(fila);
+const filaV2Shadow = criarControladorFilaV2Shadow({
+  writeClienteJson,
+  getClienteJsonPath,
+  logger: console
+});
 let ultimoLogFilaStoreMetrics = 0;
 let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
@@ -2302,6 +2309,15 @@ function reconstruirFilaStoreCliente(clienteId = "admin", motivo = "sincronizaca
   logFilaStoreMetrics(motivo, { clienteId: cliente });
 }
 
+function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
+  return filaV2Shadow.projetarSeNecessario({
+    fila,
+    clienteId,
+    motivo,
+    ...opcoes
+  });
+}
+
 function salvarFila(clienteId = "admin") {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   aplicarDiversidadeFila(clienteId);
@@ -2323,7 +2339,10 @@ function salvarFila(clienteId = "admin") {
     writeClienteJson,
     logger: loggerFila
   });
-  if (salvou) reconstruirFilaStoreCliente(clienteId, "salvarFila");
+  if (salvou) {
+    reconstruirFilaStoreCliente(clienteId, "salvarFila");
+    projetarFilaV2ShadowCliente(clienteId, "salvarFila");
+  }
   return salvou;
   });
 }
@@ -2339,6 +2358,7 @@ function carregarFila(clienteId = "admin") {
   });
 
   reconstruirFilaStoreCliente(clienteId, "carregarFila");
+  projetarFilaV2ShadowCliente(clienteId, "carregarFila");
   return fila;
   });
 }
