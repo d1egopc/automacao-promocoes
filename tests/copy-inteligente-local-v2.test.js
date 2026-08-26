@@ -8,6 +8,7 @@ process.env.DATA_DIR = dataDir;
 
 const { CATEGORIAS_OPTIMUS } = require("../marketplaces/inteligencia/categorias-globais");
 const copy = require("../modules/copy-inteligente");
+const { validarCopyV2 } = require("../modules/copy-inteligente/validator-v2");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 function planoTituloIa(ativo = true) {
@@ -61,6 +62,44 @@ for (const categoria of CATEGORIAS_OPTIMUS) {
 assert.strictEqual(copy.familiaDaCategoriaCopyV2("Diversos"), "oportunidade", "Diversos -> oportunidade");
 assert.strictEqual(copy.familiaDaCategoriaCopyV2("Climatização e Ventilação"), "climatizacao", "Climatizacao preservada");
 assert.strictEqual(copy.resolverFamiliaOfertaCopyLocalV2(ofertaBase({ categoria: "Casa" })).familia, "casa", "alias legado Casa -> familia casa");
+
+assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 468, "V2.3 adiciona quantidade esperada de ganchos humanos");
+
+const totalV23PorFamilia = {};
+const estruturasV23PorFamilia = {};
+let totalComEmojiV23 = 0;
+let totalSemEmojiV23 = 0;
+for (const fraseV23 of copy.EXPANSAO_HUMANA_V23) {
+  totalV23PorFamilia[fraseV23.familia] = (totalV23PorFamilia[fraseV23.familia] || 0) + 1;
+  const estrutura = copy.estruturaFraseCopyLocalV2(fraseV23.texto);
+  estruturasV23PorFamilia[fraseV23.familia] = estruturasV23PorFamilia[fraseV23.familia] || new Set();
+  estruturasV23PorFamilia[fraseV23.familia].add(estrutura);
+  if (/\p{Extended_Pictographic}/u.test(fraseV23.texto)) totalComEmojiV23 += 1;
+  else totalSemEmojiV23 += 1;
+
+  const exige = Array.isArray(fraseV23.exige) ? fraseV23.exige : [];
+  const validacao = validarCopyV2({
+    textoGerado: fraseV23.texto,
+    contexto: {
+      fatosPermitidos: {
+        cupom: exige.includes("cupom"),
+        resgate: exige.includes("resgate"),
+        beneficioSeguro: exige.includes("beneficio"),
+        descontoOficial: exige.includes("desconto"),
+        freteGratis: exige.includes("freteGratis"),
+        parcelamento: exige.includes("parcelamento")
+      }
+    }
+  });
+  assert.strictEqual(validacao.valida, true, `V2.3 valida frase ${fraseV23.id}: ${validacao.motivoCodigo}`);
+}
+
+for (const familia of ["gamer", "celulares", "moda", "calcados", "casa", "cozinha_pratica", "pet", "ferramentas", "mercado", "beleza", "computadores", "oportunidade"]) {
+  assert.ok(totalV23PorFamilia[familia] >= 35, `V2.3 tem ao menos 35 ganchos para ${familia}`);
+  assert.ok(estruturasV23PorFamilia[familia].size >= 18, `V2.3 varia estrutura em ${familia}`);
+}
+assert.ok(totalComEmojiV23 >= 40, "V2.3 usa emojis emocionais em parte do banco");
+assert.ok(totalSemEmojiV23 > totalComEmojiV23 * 5, "V2.3 nao obriga emoji em todo gancho");
 
 const casosFamilia = [
   ["gamer", ofertaBase({ id: "fam_gamer", engineOfertaId: "fam_gamer", categoria: "Gamer e Hardware" }), "gamer"],
@@ -167,6 +206,26 @@ assert.strictEqual(
   "cozinha",
   "titulo refina subcontexto cozinha dentro da familia casa"
 );
+
+const casosComerciaisContextuaisV23 = [
+  ["gamer_cupom", { categoria: "Gamer e Hardware", titulo: "Teclado mecanico gamer", cupom: "PROMO10" }, "gamer", "cupom"],
+  ["calcados_cupom", { categoria: "Tênis e Chinelos", titulo: "Tenis Nike Revolution", cupom: "PROMO10" }, "calcados", "cupom"],
+  ["casa_desconto", { categoria: "Casa, Móveis e Decoração", titulo: "Organizador para cozinha", descontoPercentual: 20 }, "casa", "economia"],
+  ["celular_parcelamento", { categoria: "Celulares e Smartphones", titulo: "Smartphone Samsung Galaxy A56", parcelamento: "10x sem juros" }, "celulares", "parcelamento"]
+];
+
+copy.limparCacheCopyLocalV2();
+for (const [nome, extra, familiaEsperada, intencaoEsperada] of casosComerciaisContextuaisV23) {
+  const res = resolver(ofertaSimplesFamilia({
+    id: `v23_${nome}`,
+    engineOfertaId: `v23_${nome}`,
+    ...extra
+  }), { clienteId: `workspace_v23_${nome}` });
+  assert.strictEqual(res.ok, true, `${nome}: resolve copy local contextual`);
+  assert.strictEqual(res.familia, familiaEsperada, `${nome}: familia preservada`);
+  assert.strictEqual(res.intencao, intencaoEsperada, `${nome}: intencao comercial preservada`);
+  assert.ok(/_v23_/.test(res.fraseId), `${nome}: usa frase contextual V2.3`);
+}
 
 copy.limparCacheCopyLocalV2();
 const semCupom = resolver(ofertaBase({ id: "sem_cupom", engineOfertaId: "sem_cupom", categoria: "Diversos" }), {
@@ -419,7 +478,8 @@ assert.ok(!sourceLocal.includes("oferta.titulo =") && !sourceLocal.includes("ofe
 const resumo = copy.resumoBancoAssociativoV2();
 assert.strictEqual(copy.BANCO_ASSOCIATIVO_V2_BASE.length, 196, "as 196 frases antigas continuam preservadas como base");
 assert.strictEqual(copy.EXPANSAO_HUMANA_V21.length, 675, "Copy Local V2.1 adiciona 675 frases humanas");
-assert.strictEqual(resumo.total, 871, "banco associativo V2.1 totaliza 871 frases ativas");
+assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 468, "Copy Local V2.3 adiciona 468 ganchos humanos");
+assert.strictEqual(resumo.total, 1339, "banco associativo V2.3 totaliza 1339 frases ativas");
 assert.strictEqual(copy.MAX_CARACTERES_COPY_V2, 90, "validator V2.1 aceita ate 90 caracteres");
 assert.strictEqual(copy.MAX_PALAVRAS_COPY_V2, 16, "validator V2.1 aceita ate 16 palavras");
 assert.ok(resumo.porIntencao.familia >= 700, "maioria das frases e contextual por familia");
@@ -511,5 +571,22 @@ for (let i = 0; i < 45; i += 1) {
 }
 assert.strictEqual(contarRepeticoesImediatas(seqGamerExpandida), 0, "banco expandido gamer nao repete imediatamente");
 assert.ok(new Set(seqGamerExpandida).size >= 20, "banco expandido amplia variedade gamer");
+
+copy.limparCacheCopyLocalV2();
+const seqV23Computadores = [];
+for (let i = 0; i < 30; i += 1) {
+  const res = resolver(ofertaSimplesFamilia({
+    id: `v23_pc_${i}`,
+    engineOfertaId: `v23_pc_${i}`,
+    categoria: "Computadores e Informatica",
+    titulo: `Notebook Lenovo IdeaPad ${i}`
+  }), { clienteId: "workspace_v23_pc_30" });
+  assert.strictEqual(res.ok, true, `V2.3 computadores resolve ${i}`);
+  assert.strictEqual(res.familia, "computadores", `V2.3 computadores familia ${i}`);
+  seqV23Computadores.push(res);
+}
+assert.strictEqual(contarRepeticoesImediatas(seqV23Computadores.map(item => item.tituloIa)), 0, "V2.3 nao repete texto imediato em 30 ofertas");
+const estruturasPc = seqV23Computadores.map(item => copy.estruturaFraseCopyLocalV2(item.tituloIa));
+assert.ok(new Set(estruturasPc).size >= 10, "V2.3 varia começos/estruturas em 30 ofertas");
 
 console.log("copy-inteligente-local-v2.test.js OK");

@@ -284,6 +284,10 @@ function filtrarFrasesCopyLocalV2(banco = BANCO_ASSOCIATIVO_V2, contexto = {}) {
   const lista = Array.isArray(banco) ? banco : [];
   const candidatas = lista.filter(frase => fraseElegivelCopyLocalV2(frase, contexto));
   if (candidatas.length) {
+    if (INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2.includes(texto(contexto.intencao))) {
+      const contextuais = candidatas.filter(frase => texto(frase.familia) === texto(contexto.familia));
+      if (contextuais.length) return contextuais;
+    }
     const subcontexto = texto(contexto.subcontexto);
     const especificas = subcontexto
       ? candidatas.filter(frase => (Array.isArray(frase.palavrasContexto) ? frase.palavrasContexto.map(texto) : []).includes(subcontexto))
@@ -301,6 +305,20 @@ function filtrarFrasesCopyLocalV2(banco = BANCO_ASSOCIATIVO_V2, contexto = {}) {
 
 function ultimasFrasesCopyLocalV2(chave = "") {
   return historicoLocalV2.get(String(chave || "")) || [];
+}
+
+function estruturaFraseCopyLocalV2(fraseTexto = "") {
+  const base = normalizar(fraseTexto)
+    .replace(/^[^\w]+/, "")
+    .replace(/\b(?:mesmo|ai|aqui|so)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const palavras = base.split(/\s+/).filter(Boolean);
+  if (!palavras.length) return "";
+  if (["vai", "olha", "tem", "essa", "esse", "seu", "sua", "quem", "para", "ja", "nao"].includes(palavras[0])) {
+    return palavras.slice(0, 2).join(" ");
+  }
+  return palavras[0];
 }
 
 function registrarFraseCopyLocalV2(chave = "", fraseTexto = "") {
@@ -334,7 +352,12 @@ function escolherFrasePonderadaCopyLocalV2({ frases = [], chaveOferta = "", hist
     : candidatas;
   const recentes = new Set(historico);
   const foraDoHistorico = elegiveis.filter(item => !recentes.has(texto(item.texto)));
-  const pool = foraDoHistorico.length ? foraDoHistorico : elegiveis;
+  const estruturasRecentes = new Set(historico.slice(0, 6).map(estruturaFraseCopyLocalV2).filter(Boolean));
+  const semEstruturaRecente = foraDoHistorico.filter(item => {
+    const estrutura = estruturaFraseCopyLocalV2(item.texto);
+    return !estrutura || !estruturasRecentes.has(estrutura);
+  });
+  const pool = semEstruturaRecente.length ? semEstruturaRecente : foraDoHistorico.length ? foraDoHistorico : elegiveis;
   const escolhida = foraDoHistorico.length
     ? escolherPorPesoLocalV2(pool, chaveOferta)
     : [...pool].sort((a, b) => {
@@ -482,6 +505,7 @@ module.exports = {
   filtrarFrasesCopyLocalV2,
   chaveCacheCopyLocalV2,
   escolherFrasePonderadaCopyLocalV2,
+  estruturaFraseCopyLocalV2,
   historicoKeyCopyLocalV2,
   ultimasFrasesCopyLocalV2,
   lerCacheCopyLocalV2,
