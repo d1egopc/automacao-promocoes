@@ -63,7 +63,7 @@ assert.strictEqual(copy.familiaDaCategoriaCopyV2("Diversos"), "oportunidade", "D
 assert.strictEqual(copy.familiaDaCategoriaCopyV2("Climatização e Ventilação"), "climatizacao", "Climatizacao preservada");
 assert.strictEqual(copy.resolverFamiliaOfertaCopyLocalV2(ofertaBase({ categoria: "Casa" })).familia, "casa", "alias legado Casa -> familia casa");
 
-assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 468, "V2.3 adiciona quantidade esperada de ganchos humanos");
+assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 558, "V2.3 adiciona quantidade esperada de ganchos humanos");
 
 const totalV23PorFamilia = {};
 const estruturasV23PorFamilia = {};
@@ -225,6 +225,123 @@ for (const [nome, extra, familiaEsperada, intencaoEsperada] of casosComerciaisCo
   assert.strictEqual(res.familia, familiaEsperada, `${nome}: familia preservada`);
   assert.strictEqual(res.intencao, intencaoEsperada, `${nome}: intencao comercial preservada`);
   assert.ok(/_v23_/.test(res.fraseId), `${nome}: usa frase contextual V2.3`);
+}
+
+function origemFraseBanco(fraseBanco = {}) {
+  if (/_generico_humano_v23_/.test(fraseBanco.id)) return "v23_generico";
+  if (/_humano_v23_/.test(fraseBanco.id)) return "v23_contextual";
+  if (/_v21_/.test(fraseBanco.id)) return "v21";
+  return "base";
+}
+
+function poolCopyLocalV2(oferta) {
+  const sinais = copy.normalizarSinaisCopy(oferta);
+  const familia = copy.resolverFamiliaOfertaCopyLocalV2(oferta, sinais);
+  const intencao = copy.resolverIntencaoCopyLocalV2(sinais, familia.familia);
+  const contexto = {
+    ...familia,
+    intencao: intencao.intencao,
+    sinais,
+    subcontexto: familia.subcontexto || "",
+    chaveOferta: oferta.id
+  };
+  return copy.filtrarFrasesCopyLocalV2(copy.BANCO_ASSOCIATIVO_V2, contexto);
+}
+
+function distribuicaoResolucaoComercial({ nome, categoria, sinal, total = 30 }) {
+  copy.limparCacheCopyLocalV2();
+  const contagem = { v23_contextual: 0, v23_generico: 0, v21: 0, base: 0 };
+  const frases = [];
+  for (let i = 0; i < total; i += 1) {
+    const res = resolver(ofertaSimplesFamilia({
+      id: `${nome}_${i}`,
+      engineOfertaId: `${nome}_${i}`,
+      categoria,
+      titulo: `Oferta comercial segura ${nome} ${i}`,
+      ...sinal
+    }), { clienteId: `workspace_${nome}` });
+    assert.strictEqual(res.ok, true, `${nome}: resolve item ${i}`);
+    const fraseBanco = copy.BANCO_ASSOCIATIVO_V2.find(item => item.id === res.fraseId);
+    assert.ok(fraseBanco, `${nome}: frase existe no banco ${res.fraseId}`);
+    contagem[origemFraseBanco(fraseBanco)] += 1;
+    frases.push(res.tituloIa);
+  }
+  assert.strictEqual(contarRepeticoesImediatas(frases), 0, `${nome}: preserva anti-repeticao imediata`);
+  return contagem;
+}
+
+const genericasComerciaisV23 = copy.EXPANSAO_HUMANA_V23.filter(item => item.familia === "qualquer" && item.eixo === "comercial_generico");
+const totalGenericoPorIntencao = genericasComerciaisV23.reduce((acc, item) => {
+  const intencao = item.intencoes[0];
+  acc[intencao] = (acc[intencao] || 0) + 1;
+  assert.strictEqual(item.peso, 36, `fallback generico V2.3 tem peso 36: ${item.id}`);
+  return acc;
+}, {});
+assert.deepStrictEqual(totalGenericoPorIntencao, {
+  beneficio: 18,
+  cupom: 18,
+  economia: 18,
+  parcelamento: 18,
+  resgate: 18
+}, "V2.3 adiciona 18 fallbacks humanos genericos por intencao comercial");
+
+const cenariosFallbackComercial = [
+  ["fallback_diversos_beneficio", "Diversos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
+  ["fallback_esporte_beneficio", "Esporte e Suplementos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
+  ["fallback_casa_eletro_beneficio", "Eletrodomésticos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
+  ["fallback_esporte_cupom", "Esporte e Suplementos", { cupom: "PROMO10" }, "cupom"],
+  ["fallback_eletronicos_economia", "Eletrônicos", { descontoPercentual: 15 }, "economia"],
+  ["fallback_esporte_parcelamento", "Esporte e Suplementos", { parcelamento: "10x sem juros" }, "parcelamento"],
+  ["fallback_mercado_resgate", "Alimentos e Mercearia", { linkResgate: "https://resgate.example/oferta" }, "resgate"]
+];
+
+for (const [nome, categoria, sinal, intencaoEsperada] of cenariosFallbackComercial) {
+  const oferta = ofertaSimplesFamilia({
+    id: `${nome}_pool`,
+    engineOfertaId: `${nome}_pool`,
+    categoria,
+    ...sinal
+  });
+  const pool = poolCopyLocalV2(oferta);
+  const genericas = pool.filter(item => origemFraseBanco(item) === "v23_generico");
+  const legadas = pool.filter(item => origemFraseBanco(item) === "base");
+  assert.strictEqual(genericas.length, 18, `${nome}: fallback V2.3 generico entra no pool`);
+  assert.ok(legadas.length >= 1, `${nome}: legado comercial continua elegivel`);
+  assert.ok(
+    genericas.reduce((total, item) => total + item.peso, 0) > legadas.reduce((total, item) => total + item.peso, 0),
+    `${nome}: peso V2.3 generico supera legado`
+  );
+  assert.ok(genericas.every(item => item.intencoes.includes(intencaoEsperada)), `${nome}: fallback usa intencao correta`);
+
+  const dist = distribuicaoResolucaoComercial({ nome, categoria, sinal });
+  assert.ok(dist.v23_generico >= 18, `${nome}: V2.3 generico predomina em 30 resolucoes`);
+}
+
+const cenariosContextuaisPreservados = [
+  ["contextual_celulares_cupom", "Celulares e Smartphones", { cupom: "PROMO10" }, "celulares"],
+  ["contextual_gamer_cupom", "Gamer e Hardware", { cupom: "PROMO10" }, "gamer"],
+  ["contextual_calcados_cupom", "Tênis e Chinelos", { cupom: "PROMO10" }, "calcados"],
+  ["contextual_casa_cupom", "Casa, Móveis e Decoração", { cupom: "PROMO10" }, "casa"],
+  ["contextual_pet_beneficio", "Pet Shop e Fazendinha", { beneficioTexto: "Beneficio no app" }, "pet"],
+  ["contextual_beleza_resgate", "Perfumaria, Farmácia e Beleza", { linkResgate: "https://resgate.example/beleza" }, "beleza"],
+  ["contextual_computadores_parcelamento", "Computadores e Notebook", { parcelamento: "10x sem juros" }, "computadores"]
+];
+
+for (const [nome, categoria, sinal, familiaEsperada] of cenariosContextuaisPreservados) {
+  const pool = poolCopyLocalV2(ofertaSimplesFamilia({
+    id: `${nome}_pool`,
+    engineOfertaId: `${nome}_pool`,
+    categoria,
+    titulo: `Oferta contextual segura ${nome}`,
+    ...sinal
+  }));
+  assert.ok(pool.some(item => origemFraseBanco(item) === "v23_contextual"), `${nome}: contextual V2.3 segue elegivel`);
+  assert.ok(!pool.some(item => origemFraseBanco(item) === "v23_generico"), `${nome}: generico nao atravessa contextual`);
+  assert.ok(pool.every(item => item.familia === familiaEsperada), `${nome}: pool comercial preserva familia contextual`);
+
+  const dist = distribuicaoResolucaoComercial({ nome, categoria, sinal });
+  assert.strictEqual(dist.v23_generico, 0, `${nome}: generico nao vence quando ha contextual`);
+  assert.ok(dist.v23_contextual > dist.base, `${nome}: contextual V2.3 segue predominante`);
 }
 
 copy.limparCacheCopyLocalV2();
@@ -478,8 +595,8 @@ assert.ok(!sourceLocal.includes("oferta.titulo =") && !sourceLocal.includes("ofe
 const resumo = copy.resumoBancoAssociativoV2();
 assert.strictEqual(copy.BANCO_ASSOCIATIVO_V2_BASE.length, 196, "as 196 frases antigas continuam preservadas como base");
 assert.strictEqual(copy.EXPANSAO_HUMANA_V21.length, 675, "Copy Local V2.1 adiciona 675 frases humanas");
-assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 468, "Copy Local V2.3 adiciona 468 ganchos humanos");
-assert.strictEqual(resumo.total, 1339, "banco associativo V2.3 totaliza 1339 frases ativas");
+assert.strictEqual(copy.EXPANSAO_HUMANA_V23.length, 558, "Copy Local V2.3 adiciona 558 ganchos humanos");
+assert.strictEqual(resumo.total, 1429, "banco associativo V2.3 totaliza 1429 frases ativas");
 assert.strictEqual(copy.MAX_CARACTERES_COPY_V2, 90, "validator V2.1 aceita ate 90 caracteres");
 assert.strictEqual(copy.MAX_PALAVRAS_COPY_V2, 16, "validator V2.1 aceita ate 16 palavras");
 assert.ok(resumo.porIntencao.familia >= 700, "maioria das frases e contextual por familia");
