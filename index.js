@@ -274,6 +274,7 @@ const {
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
 const { criarControladorFilaV2Shadow } = require("./modules/fila/fila-v2-shadow");
+const { criarControladorFilaOperacionalV2 } = require("./modules/fila/fila-operacional-v2");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
@@ -865,6 +866,13 @@ const filaStore = criarFilaStore(fila);
 const filaV2Shadow = criarControladorFilaV2Shadow({
   writeClienteJson,
   getClienteJsonPath,
+  logger: console
+});
+const filaOperacionalV2 = criarControladorFilaOperacionalV2({
+  readClienteJson,
+  writeClienteJson,
+  getClienteJsonPath,
+  getClientePath,
   logger: console
 });
 let ultimoLogFilaStoreMetrics = 0;
@@ -2342,6 +2350,11 @@ function salvarFila(clienteId = "admin") {
   if (salvou) {
     reconstruirFilaStoreCliente(clienteId, "salvarFila");
     projetarFilaV2ShadowCliente(clienteId, "salvarFila");
+    filaOperacionalV2.prepararSeHabilitado({
+      fila,
+      clienteId,
+      motivo: "salvarFila"
+    });
   }
   return salvou;
   });
@@ -2359,6 +2372,11 @@ function carregarFila(clienteId = "admin") {
 
   reconstruirFilaStoreCliente(clienteId, "carregarFila");
   projetarFilaV2ShadowCliente(clienteId, "carregarFila");
+  filaOperacionalV2.prepararSeHabilitado({
+    fila,
+    clienteId,
+    motivo: "carregarFila"
+  });
   return fila;
   });
 }
