@@ -25,6 +25,10 @@ const {
   intervaloConfiguradoMs,
   iniciarInfraMemoryTelemetry
 } = require("./modules/telemetria/infra-memory-snapshot");
+const {
+  criarMedidorEngineMemoryStage,
+  resumirFilaPorStatus
+} = require("./modules/telemetria/engine-memory-stage");
 
 const {
   initEngineDatabase,
@@ -2399,10 +2403,20 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
 }
 
 function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
+  const medidorFilaGlobal = criarMedidorEngineMemoryStage("engine_v2_fila_global", {
+    ofertaId: itemFila.engineOfertaId || itemFila.ofertaId || null,
+    marketplace: itemFila.marketplace || itemFila.origemMarketplace || ""
+  });
   try {
     const cliente = String(clienteId || itemFila.clienteId || "admin").trim() || "admin";
     if (!usuarioAtivoOperacional(cliente)) {
       logUsuarioInativoOperacional(cliente, "engine_distributor_fila");
+      medidorFilaGlobal.fim({
+        ok: false,
+        motivo: "usuario_inativo",
+        bytesFilaGlobal: "nao_medido",
+        ...resumirFilaPorStatus(fila)
+      });
       return { ok: false, motivo: "usuario_inativo" };
     }
 
@@ -2424,6 +2438,13 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
         linkOriginal: itemFinal.linkOriginal || "",
         linkAfiliado: itemFinal.linkAfiliado || itemFinal.link || ""
       });
+      medidorFilaGlobal.fim({
+        ok: false,
+        duplicada: true,
+        motivo: "duplicidade_fila",
+        bytesFilaGlobal: "nao_medido",
+        ...resumirFilaPorStatus(fila)
+      });
       return { ok: false, duplicada: true, motivo: "duplicidade_fila" };
     }
 
@@ -2440,6 +2461,12 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
         engineOfertaId: itemFinal.engineOfertaId || null,
         motivo
       });
+      medidorFilaGlobal.fim({
+        ok: false,
+        motivo,
+        bytesFilaGlobal: "nao_medido",
+        ...resumirFilaPorStatus(fila)
+      });
       return { ok: false, motivo, itemFila: itemFinal };
     }
 
@@ -2452,6 +2479,14 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
         engineOfertaId: itemFinal.engineOfertaId || null,
         motivo: erroFila.motivo
       });
+      medidorFilaGlobal.fim({
+        ok: false,
+        salvou: false,
+        motivo: erroFila.motivo,
+        erroEtapa: erroFila.erro,
+        bytesFilaGlobal: "nao_medido",
+        ...resumirFilaPorStatus(fila)
+      });
       return { ok: false, motivo: erroFila.motivo, erro: erroFila.erro };
     }
 
@@ -2462,12 +2497,25 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       totalCliente: fila.filter(item => String(item?.clienteId || "admin") === cliente).length
     });
 
+    medidorFilaGlobal.fim({
+      ok: true,
+      salvou: true,
+      bytesFilaGlobal: "nao_medido",
+      ...resumirFilaPorStatus(fila)
+    });
     return { ok: true, itemFila: itemFinal };
   } catch (e) {
     console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
       ok: false,
       clienteId,
       erro: e.message
+    });
+    medidorFilaGlobal.fim({
+      ok: false,
+      motivo: classificarErroFila(e.message),
+      erroEtapa: e.message,
+      bytesFilaGlobal: "nao_medido",
+      ...resumirFilaPorStatus(fila)
     });
     return { ok: false, motivo: classificarErroFila(e.message), erro: e.message };
   }

@@ -10,6 +10,9 @@ const {
   LEASE_JOBS_ATIVOS_PADRAO_MINUTOS
 } = require("../jobs.service");
 const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
+const {
+  criarMedidorEngineMemoryStage
+} = require("../../telemetria/engine-memory-stage");
 
 const ENV_SHADOW = "OPTIMUS_AUTO_CLEAN_SHADOW";
 const ENV_EXECUTE = "OPTIMUS_AUTO_CLEAN_EXECUTE";
@@ -602,6 +605,9 @@ function extrairTimestampFila(item = {}) {
 
 function auditarFilaJson(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const medidorAutoCleanFila = criarMedidorEngineMemoryStage("auto_clean_shadow_fila_json", {
+    limite: politica.loteLimite
+  });
   const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
   const fsImpl = opcoes.fs || fs;
   const agoraMs = Number(opcoes.agoraMs || Date.now());
@@ -619,10 +625,20 @@ function auditarFilaJson(opcoes = {}) {
     removiveis: 0,
     integrais: 0,
     bytesRecuperaveisCompactacao: 0,
-    orphanWorkspaces: 0
+    orphanWorkspaces: 0,
+    workspacesLidos: 0
   };
 
-  if (!fsImpl.existsSync(clientesDir)) return criarResumoOrigem("fila_json", "fila_json", registros, limite);
+  if (!fsImpl.existsSync(clientesDir)) {
+    medidorAutoCleanFila.fim({
+      ok: true,
+      autoCleanShadowBytesLidos: 0,
+      autoCleanShadowBytesSerializados: 0,
+      autoCleanItensLidos: 0,
+      autoCleanWorkspaces: 0
+    });
+    return criarResumoOrigem("fila_json", "fila_json", registros, limite);
+  }
 
   for (const workspaceId of fsImpl.readdirSync(clientesDir).sort()) {
     if (registros.length >= limite) break;
@@ -631,6 +647,7 @@ function auditarFilaJson(opcoes = {}) {
     if (workspaceClassificacao === "orphan_workspace") resumoExtra.orphanWorkspaces += 1;
     const filaPath = path.join(clientesDir, workspaceId, "fila.json");
     if (!fsImpl.existsSync(filaPath)) continue;
+    resumoExtra.workspacesLidos += 1;
     let stats;
     try { stats = fsImpl.statSync(filaPath); } catch { continue; }
     resumoExtra.bytesTotais += Number(stats.size || 0);
@@ -676,6 +693,13 @@ function auditarFilaJson(opcoes = {}) {
   }
 
   const resumo = criarResumoOrigem("fila_json", "fila_json", registros, limite);
+  medidorAutoCleanFila.fim({
+    ok: true,
+    autoCleanShadowBytesLidos: resumoExtra.bytesTotais,
+    autoCleanShadowBytesSerializados: registros.reduce((soma, item) => soma + Number(item.bytesEstimados || 0), 0),
+    autoCleanItensLidos: resumoExtra.totalItens,
+    autoCleanWorkspaces: resumoExtra.workspacesLidos
+  });
   return {
     ...resumo,
     ...resumoExtra,

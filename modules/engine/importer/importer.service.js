@@ -65,6 +65,11 @@ const {
   registrarOfertaUniversalCriada
 } = require("../ofc/commercial-events.service");
 const { classificarLinkEngine } = require("../link-role.service");
+const {
+  criarMedidorEngineMemoryStage,
+  registrarPontoEngineMemoryStage,
+  medirBytesJsonSeguro
+} = require("../../telemetria/engine-memory-stage");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -2504,6 +2509,10 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
     };
   }
 
+  const medirConsultaMemoria = criarMedidorEngineMemoryStage("engine_v2_memoria_consulta", {
+    jobId: job.id || null,
+    marketplace
+  });
   const resultado = await queryEngine(
     `SELECT o.id, o.marketplace, o.titulo, o.titulo_normalizado,
             o.preco, o.preco_original, o.cupom, o.tipo_cupom,
@@ -2539,6 +2548,18 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
       LIMIT 300`,
     [clienteId, marketplace, job.oferta_id || null]
   );
+  const rowsMemoriaBruta = resultado.ok && Array.isArray(resultado.resultado?.rows)
+    ? resultado.resultado.rows
+    : [];
+  const bytesMemoriaHistorica = medirBytesJsonSeguro(rowsMemoriaBruta, {
+    permitirSerializar: true,
+    maxItens: 300
+  });
+  medirConsultaMemoria.fim({
+    ok: resultado.ok === true,
+    rowsMemoriaV2PorJob: rowsMemoriaBruta.length,
+    bytesMemoriaHistorica
+  });
 
   if (!resultado.ok) {
     console.log("[ENGINE-V2-MEMORIA-ERRO]", JSON.stringify({
@@ -2556,7 +2577,17 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
     };
   }
 
-  const memoria = resultado.resultado.rows.map(mapearOfertaMemoria);
+  const medirMapeamentoMemoria = criarMedidorEngineMemoryStage("engine_v2_memoria_mapear_rows", {
+    jobId: job.id || null,
+    marketplace,
+    rowsMemoriaV2PorJob: rowsMemoriaBruta.length,
+    bytesMemoriaHistorica
+  });
+  const memoria = rowsMemoriaBruta.map(mapearOfertaMemoria);
+  medirMapeamentoMemoria.fim({
+    ok: true,
+    rowsMemoriaV2PorJob: memoria.length
+  });
   console.log("[ENGINE-V2-MEMORIA]", JSON.stringify({
     jobId: job.id,
     clienteId,
@@ -3276,6 +3307,17 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       calculadoEm: comercialNormalizadoV24.calculadoEm
     }));
   }
+  registrarPontoEngineMemoryStage("engine_v2_metadata_final_montada", {
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+    bytesMetadataFinal: "nao_medido"
+  });
+  const medirOfertaUniversal = criarMedidorEngineMemoryStage("engine_v2_oferta_universal_montar", {
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || ""
+  });
   const ofertaUniversalInicial = montarOfertaUniversalEngine({
     oferta,
     ofertaEntrada,
@@ -3285,6 +3327,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     metadata: metadataFinal,
     status: statusPersistencia,
     motivo: motivoPersistencia || ""
+  });
+  const bytesOfertaUniversal = medirBytesJsonSeguro(ofertaUniversalInicial, {
+    permitirSerializar: true,
+    maxChaves: 80
+  });
+  medirOfertaUniversal.fim({
+    ok: true,
+    bytesOfertaUniversal
   });
   const validacaoOfertaUniversal = validarContratoOfertaUniversal(ofertaUniversalInicial);
   metadataFinal = {
@@ -3346,8 +3396,24 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   ];
 
   let resultado;
+  const medirMetadataStringify = criarMedidorEngineMemoryStage("engine_v2_metadata_json_stringify", {
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || ""
+  });
   const metadataOferta = JSON.stringify(metadataFinal);
+  medirMetadataStringify.fim({
+    ok: true,
+    bytesMetadataFinal: medirBytesJsonSeguro(metadataOferta),
+    metadataSerializada: true
+  });
   const usarMetadata = await engineOfertasTemMetadata();
+  const medirPersistenciaOferta = criarMedidorEngineMemoryStage("engine_v2_oferta_universal_persistencia", {
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+    usarMetadata
+  });
 
   if (job.oferta_id) {
     if (usarMetadata) {
@@ -3439,14 +3505,27 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   }
 
   if (!resultado.ok) {
+    medirPersistenciaOferta.fim({
+      ok: false,
+      motivo: resultado.motivo || "oferta_gravacao_falhou",
+      erroEtapa: resultado.erro || ""
+    });
     logEngineImporterErro({ jobId: job.id, etapa: "oferta_gravada", motivo: resultado.motivo, erro: resultado.erro || "" });
     return { ok: false, motivo: resultado.motivo || "oferta_gravacao_falhou", erro: resultado.erro || "" };
   }
 
   const ofertaId = resultado.resultado.rows[0]?.id;
   if (!ofertaId) {
+    medirPersistenciaOferta.fim({
+      ok: false,
+      motivo: "oferta_nao_retornada"
+    });
     return { ok: false, motivo: "oferta_nao_retornada" };
   }
+  medirPersistenciaOferta.fim({
+    ok: true,
+    ofertaId
+  });
 
   if (usarMetadata) {
     const ofertaUniversalPersistida = congelarOfertaUniversal({
@@ -3458,14 +3537,29 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       ...metadataFinal,
       ofertaUniversal: ofertaUniversalPersistida
     };
+    const metadataFinalPersistida = JSON.stringify(metadataFinal);
+    const medirPersistenciaMetadata = criarMedidorEngineMemoryStage("engine_v2_oferta_universal_metadata_persistida", {
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+      ofertaId,
+      bytesMetadataFinal: medirBytesJsonSeguro(metadataFinalPersistida),
+      bytesOfertaUniversal: medirBytesJsonSeguro(ofertaUniversalPersistida, {
+        permitirSerializar: true,
+        maxChaves: 80
+      })
+    });
     const atualizacaoMetadata = await queryEngine(
       `UPDATE engine_ofertas
           SET metadata = $2::jsonb,
               atualizada_em = NOW()
         WHERE id = $1
         RETURNING id`,
-      [ofertaId, JSON.stringify(metadataFinal)]
+      [ofertaId, metadataFinalPersistida]
     );
+    medirPersistenciaMetadata.fim({
+      ok: atualizacaoMetadata.ok === true
+    });
     if (!atualizacaoMetadata.ok) {
       logEngineImporterErro({
         jobId: job.id,

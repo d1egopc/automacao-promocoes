@@ -37,6 +37,9 @@ const {
   logUsuarioInativoIgnorado
 } = require("../../../utils/usuarios-atividade");
 const coberturaRadar = require("../../radar/cobertura-v1");
+const {
+  criarMedidorEngineMemoryStage
+} = require("../../telemetria/engine-memory-stage");
 
 const ADAPTERS = {
   mercadolivre: importarMercadoLivreEngine,
@@ -347,6 +350,11 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
   resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
 
   for (const job of jobs.jobs) {
+    const medidorJob = criarMedidorEngineMemoryStage("engine_v2_job_final", {
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      marketplace: marketplaceJob(job)
+    });
     try {
       const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
         registrarProcessamento,
@@ -356,17 +364,31 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
       if (frescorPreImporter.expirou) {
         resumo.expiradosPreImporter += 1;
         motivoAdicionar(resumo, frescorPreImporter.motivo);
+        medidorJob.fim({
+          ok: true,
+          motivo: frescorPreImporter.motivo || "expirado_pre_importer"
+        });
         continue;
       }
 
       resumo.processados += 1;
       const resultado = await importarJobPronto(job, { deps }, resumo);
       if (resultado.ignorado) resumo.processados -= 1;
+      medidorJob.fim({
+        ok: resultado.ok !== false,
+        motivo: resultado.motivo || "",
+        ofertaId: resultado.ofertaId || null
+      });
     } catch (e) {
       resumo.erros += 1;
       motivoAdicionar(resumo, "erro_importacao");
       logEngineImporterErro({ jobId: job.id, etapa: "importar_job", motivo: "erro_importacao", erro: e.message });
       await marcarJobErroImportacao(job.id, "erro_importacao", { erro: e.message });
+      medidorJob.fim({
+        ok: false,
+        motivo: "erro_importacao",
+        erroEtapa: e.message
+      });
     }
   }
 

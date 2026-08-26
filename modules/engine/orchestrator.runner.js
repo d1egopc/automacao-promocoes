@@ -6,6 +6,11 @@ const {
   autoCleanShadowAtivo,
   executarAutoCleanShadowSeguro
 } = require("./auto-clean/auto-clean.service");
+const {
+  criarMedidorEngineMemoryStage,
+  registrarPontoEngineMemoryStage,
+  resumirJobsPorEtapaEngineMemory
+} = require("../telemetria/engine-memory-stage");
 
 function limiteOperacionalSeguro(nomeEnv, padrao, maximo) {
   const configurado = Number(process.env[nomeEnv] || padrao);
@@ -205,6 +210,12 @@ async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
 
 async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
   const inicioMs = Date.now();
+  const medidorMemoria = criarMedidorEngineMemoryStage("orchestrator_etapa", {
+    rodadaId: contextoPerf.rodadaId || "",
+    etapaOrquestrador: nome,
+    marketplace: args?.marketplace || "",
+    limite: args?.limite || null
+  });
   logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-ETAPA-INICIO]", {
     rodadaId: contextoPerf.rodadaId || "",
     etapa: nome,
@@ -219,6 +230,10 @@ async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
     funcao: fn?.name || "anonima",
     args,
     inicioMs
+  });
+  medidorMemoria.fim({
+    ok: resultado.ok !== false,
+    jobsPorEtapa: resumirJobsPorEtapaEngineMemory(resultado)
   });
   return resultado;
 }
@@ -250,6 +265,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   let okPerfBackground = true;
   const inicio = Date.now();
   const rodadaId = criarRodadaIdPerf();
+  const medidorRodada = criarMedidorEngineMemoryStage("orchestrator_total", { rodadaId });
   const limitesRodada = { ...LIMITES_PADRAO, ...(limites || {}) };
   const resumo = {
     ok: true,
@@ -263,6 +279,10 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     etapa: "inicio_rodada",
     inicioMs: inicio,
     itensProcessados: { limites: limitesRodada }
+  });
+  registrarPontoEngineMemoryStage("orchestrator_inicio", {
+    rodadaId,
+    jobsPorEtapa: {}
   });
 
   console.log("[ENGINE-ORQUESTRADOR-INICIO]", {
@@ -474,6 +494,16 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     return { ok: false, erro: e.message };
   } finally {
     engineOrquestradorRodando = false;
+    medidorRodada.fim({
+      ok: resumo.ok !== false,
+      jobsPorEtapa: Object.values(resumo.etapas || {}).reduce((acc, etapa) => {
+        const parcial = resumirJobsPorEtapaEngineMemory(etapa);
+        for (const [chave, valor] of Object.entries(parcial)) {
+          acc[chave] = (acc[chave] || 0) + Number(valor || 0);
+        }
+        return acc;
+      }, {})
+    });
     finalizarPerfBackground(okPerfBackground, { engineRodadaId: rodadaId });
   }
 }

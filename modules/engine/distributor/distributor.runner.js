@@ -23,6 +23,9 @@ const {
 } = require("../logger");
 const coberturaRadar = require("../../radar/cobertura-v1");
 const {
+  criarMedidorEngineMemoryStage
+} = require("../../telemetria/engine-memory-stage");
+const {
   registrarDistribuicaoFinal,
   registrarFilaClienteAdicionada
 } = require("../ofc/commercial-events.service");
@@ -708,6 +711,11 @@ async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
 }
 
 async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null) {
+  const medidorFanout = criarMedidorEngineMemoryStage("engine_v2_distributor_fanout", {
+    ofertaId: oferta.id || null,
+    jobId: oferta.job_id || null,
+    marketplace: oferta.marketplace || ""
+  });
   logEngineDistribuidorOferta({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, marketplace: oferta.marketplace });
   coberturaRadar.registrar("engine_distributor_inicio", {
     ...contextoCoberturaDistributor(oferta),
@@ -744,6 +752,12 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   });
 
   const validacao = await validarOfertaParaDistribuicao(oferta, contexto);
+  medidorFanout.fim({
+    ok: validacao.ok === true,
+    motivo: validacao.motivo || "",
+    destinosCompativeis: validacao.destinosCompativeis || 0,
+    destinosTotal: validacao.detalhes?.destinosTotal || validacao.destinosTotal || 0
+  });
   await registrarEtapaDistribuicao(oferta.job_id, "validar_oferta", validacao.ok ? "ok" : "retida", validacao.ok ? "oferta_validada" : validacao.motivo, validacao);
 
   if (!validacao.ok) {
@@ -902,7 +916,18 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   const contextoFila = flowAtivo && flow?.aceitarAgora === true
     ? { ...contexto, flowManagerDecisao: flow }
     : contexto;
+  const medidorFila = criarMedidorEngineMemoryStage("engine_v2_fila", {
+    ofertaId: oferta.id || null,
+    jobId: oferta.job_id || null,
+    marketplace: oferta.marketplace || ""
+  });
   const fila = await adicionarOfertaNaFilaCliente(oferta, contextoFila);
+  medidorFila.fim({
+    ok: fila.ok === true,
+    filaOk: fila.ok === true,
+    motivo: fila.motivo || "",
+    ofertaId: oferta.id || null
+  });
   await registrarEtapaDistribuicao(oferta.job_id, "adicionar_fila", fila.ok ? "ok" : "retida", fila.ok ? "adicionada_fila" : fila.motivo, {
     clienteId: oferta.cliente_id,
     itemId: fila.itemFila?.id || null
@@ -1000,6 +1025,10 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
     motivos: {},
     distributorVivo: criarResumoDistributorVivo(limiteFinal)
   };
+  const medidorDistributorLote = criarMedidorEngineMemoryStage("engine_v2_distributor_lote", {
+    marketplace: marketplace || "",
+    limite: limiteFinal
+  });
 
   const contextoFinal = {
     ...contexto,
@@ -1026,6 +1055,16 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
 
     if (!busca.ok) {
       logEngineDistribuidorErro({ etapa: "buscar_ofertas", motivo: busca.motivo || "buscar_ofertas_falhou", erro: busca.erro || "" });
+      medidorDistributorLote.fim({
+        ok: false,
+        motivo: busca.motivo || "buscar_ofertas_falhou",
+        erroEtapa: busca.erro || "",
+        processadas: resumo.processadas,
+        adicionadasFila: resumo.adicionadasFila,
+        retidas: resumo.retidas,
+        erros: resumo.erros,
+        candidatosProcessados: idsProcessados.size
+      });
       return {
         ...resumo,
         ok: false,
@@ -1113,6 +1152,15 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
       aplicouMudancas: resumo.bufferVivoFuncional.overridesFlow > 0 || resumo.bufferVivoFuncional.bloqueiosBuffer > 0
     }));
   }
+  medidorDistributorLote.fim({
+    ok: resumo.ok !== false,
+    processadas: resumo.processadas,
+    adicionadasFila: resumo.adicionadasFila,
+    retidas: resumo.retidas,
+    erros: resumo.erros,
+    candidatosProcessados: idsProcessados.size,
+    maxCandidatos
+  });
   return resumo;
 }
 

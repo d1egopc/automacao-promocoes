@@ -1,5 +1,9 @@
 const { queryEngine } = require("../database");
 const { minutosLeaseJobsAtivos } = require("../jobs.service");
+const {
+  criarMedidorEngineMemoryStage,
+  medirBytesJsonSeguro
+} = require("../../telemetria/engine-memory-stage");
 
 const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
@@ -18,6 +22,9 @@ function linhaUnica(resultado, fallback = {}) {
 async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 } = {}) {
   const janela = limitarInteiro(janelaMinutos, 15, 1, 120);
   const limite = limitarInteiro(limiteAmostra, 2000, 1, 5000);
+  const medidorOfc = criarMedidorEngineMemoryStage("ofc_amostra_circulavel", {
+    limite
+  });
   const leaseMinutos = minutosLeaseJobsAtivos();
   const condicaoVivoSql = `
            (
@@ -183,6 +190,18 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
 
   const consultas = [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra];
   const falha = consultas.find(item => !item.ok);
+  const amostraRows = amostra.ok && Array.isArray(amostra.resultado?.rows)
+    ? amostra.resultado.rows
+    : [];
+  medidorOfc.fim({
+    ok: !falha,
+    ofcAmostraCirculavelRows: amostraRows.length,
+    ofcAmostraCirculavelBytes: medirBytesJsonSeguro(amostraRows, {
+      permitirSerializar: true,
+      maxItens: 200
+    }),
+    motivo: falha?.motivo || ""
+  });
 
   return {
     ok: !falha,
@@ -211,7 +230,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
       )
     },
     radarOferta: linhaUnica(radarOferta, { total: 0, media_ms: 0 }),
-    amostraCirculavel: amostra.ok ? amostra.resultado?.rows || [] : [],
+    amostraCirculavel: amostraRows,
     erro: falha?.erro || "",
     motivo: falha?.motivo || ""
   };
