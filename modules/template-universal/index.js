@@ -114,6 +114,29 @@ function linhaComPrefixo(prefixo = "", valor = "", opcoes = {}) {
   return `${prefixo} ${opcoes.negrito ? `*${item}*` : item}`;
 }
 
+function textoComecaComEmoji(valor = "") {
+  return /^[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u.test(normalizarTexto(valor));
+}
+
+function linhaGanchoCopyLocal(campos = {}) {
+  const gancho = textoComercialRenderizavel(campos.ganchoCopyLocal);
+  if (!gancho) return "";
+  if (normalizarComparacao(gancho) === normalizarComparacao(campos.tituloProdutoApresentacao)) return "";
+  if (textoComecaComEmoji(gancho)) return gancho;
+  return linhaComPrefixo(campos.emojiGanchoCopyLocal || "✨", gancho);
+}
+
+function blocoTituloApresentacao(campos = {}) {
+  if (campos.tituloProdutoApresentacaoAtivo && campos.tituloProdutoApresentacao) {
+    return [
+      linhaComPrefixo(campos.emojiTituloProduto || "🔥", campos.tituloProdutoApresentacao, { negrito: true }),
+      linhaGanchoCopyLocal(campos)
+    ];
+  }
+
+  return [linhaComPrefixo("🔥", campos.titulo, { negrito: true })];
+}
+
 function beneficioComercialSeguro(valor = "") {
   const texto = normalizarTexto(valor);
   if (!texto) return false;
@@ -332,6 +355,11 @@ function selecionarCamposUniversais(oferta = {}) {
 
   return {
     titulo: normalizarTexto(ofertaApresentacao.titulo),
+    tituloProdutoApresentacaoAtivo: ofertaApresentacao.tituloProdutoApresentacaoAtivo === true,
+    tituloProdutoApresentacao: normalizarTexto(ofertaApresentacao.tituloProdutoApresentacao),
+    ganchoCopyLocal: normalizarTexto(ofertaApresentacao.ganchoCopyLocal),
+    emojiTituloProduto: normalizarTexto(ofertaApresentacao.emojiTituloProduto),
+    emojiGanchoCopyLocal: normalizarTexto(ofertaApresentacao.emojiGanchoCopyLocal),
     marketplace: normalizarTexto(ofertaApresentacao.marketplace),
     precoAtual: contratoFinal.precoPor ?? ofertaApresentacao.precoAtual,
     precoOriginal: contratoFinal.precoDe ?? ofertaApresentacao.precoOriginal,
@@ -676,7 +704,7 @@ function montarTemplateUniversalOficial({
   linksPc,
   linksProduto
 }) {
-  adicionarBloco(blocos, [linhaComPrefixo("🔥", campos.titulo, { negrito: true })]);
+  adicionarBloco(blocos, blocoTituloApresentacao(campos));
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
     categoriaConfiavel(campos) ? `📂 ${campos.categoria}` : "",

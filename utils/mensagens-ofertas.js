@@ -67,7 +67,7 @@ function fonteTituloApresentacaoLocal({ destino = {}, resultado = {}, tituloIaPr
   if (!resultado || typeof resultado !== "object") return "original";
   if (resultado.fallbackOriginal) return "original";
   if (resultado.fonte === copyInteligente.FONTE_COPY_LOCAL_V2) return "local_v2";
-  if (resultado.fonte === "copy_inteligente_v1") return "v1";
+  if (resultado.fonte === "copy_inteligente_v1" || resultado.fonte === "banco_frases_v1") return "v1";
   if (resultado.usouTituloIa && tituloIaPreExistente) return "tituloIa_explicito";
   if (resultado.usouTituloIa) return "tituloIa_explicito";
   return "original";
@@ -184,6 +184,10 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       usouTituloIa: true,
       fallbackOriginal: false,
       intencao: copyLocalV2Resolvida.intencao || "",
+      fraseId: copyLocalV2Resolvida.fraseId || "",
+      familia: copyLocalV2Resolvida.familia || "",
+      categoriaOficial: copyLocalV2Resolvida.categoriaOficial || "",
+      subcontexto: copyLocalV2Resolvida.subcontexto || "",
       fonte: copyLocalV2Resolvida.fonte || "banco_associativo_local_v2",
       cacheHit: copyLocalV2Resolvida.cacheHit === true
     };
@@ -397,6 +401,268 @@ function textoBlocoOfcV24Local(documento = {}, ...tipos) {
   return normalizarTextoLocal(bloco.textoOriginal || bloco.valor || "");
 }
 
+const LIMITE_TITULO_PRODUTO_PRESERVADO = 96;
+const LIMITE_TITULO_PRODUTO_APRESENTACAO = 72;
+
+function tituloIaCandidatosLocal(oferta = {}) {
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  return [
+    oferta.tituloIa,
+    oferta.tituloIA,
+    oferta.tituloInteligente,
+    oferta.copy?.tituloIa,
+    oferta.copyInteligente?.tituloIa,
+    metadata.tituloIa,
+    metadata.tituloIA,
+    metadata.tituloInteligente,
+    metadata.copy?.tituloIa,
+    metadata.copyInteligente?.tituloIa
+  ].map(tituloApresentacaoValido).filter(Boolean);
+}
+
+function removerUrlsTituloProdutoLocal(valor = "") {
+  return normalizarTextoLocal(valor)
+    .replace(/https?:\/\/\S+|www\.\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function limparMarcadoresTituloProdutoLocal(valor = "") {
+  return removerUrlsTituloProdutoLocal(valor)
+    .replace(/^[\s\-*>#.:;!]+/, "")
+    .replace(/^(?:an[uú]ncio|#\s*an[uú]ncio|oferta)\b\s*:?\s*/i, "")
+    .replace(/^[()\[\]{}\s\-*>#.:;!]+/, "")
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function linhaComercialNaoFactualLocal(linha = "") {
+  const texto = normalizarTextoLocal(linha);
+  const n = normalizarComparacaoLocal(texto);
+  if (!texto || !n) return true;
+  if (/https?:\/\//i.test(texto)) return true;
+  if (/(?:R\$|US\$|\$|€|£)\s*\d|\b\d+[,.]\d{2}\b/i.test(texto)) return true;
+  if (/^(?:de|por|pre[cç]o|valor|cupom|c[oó]digo|resgate|link|confira|categoria|marketplace|loja)\b/.test(n)) return true;
+  if (/\b(?:cupom|resgate|frete gratis|frete gr[aá]tis|economia|cashback|parcelamento)\b/.test(n) && n.split(/\s+/).length <= 8) return true;
+  return false;
+}
+
+function extrairTituloFactualDeTextoLocal(valor = "") {
+  const linhas = normalizarTextoLocal(valor)
+    .split(/\r?\n+/)
+    .map(limparMarcadoresTituloProdutoLocal)
+    .filter(Boolean);
+
+  for (const linha of linhas) {
+    if (!linhaComercialNaoFactualLocal(linha)) return linha;
+  }
+
+  const unico = limparMarcadoresTituloProdutoLocal(valor);
+  return linhaComercialNaoFactualLocal(unico) ? "" : unico;
+}
+
+function tituloIgualTituloIaLocal(titulo = "", oferta = {}) {
+  const alvo = normalizarComparacaoLocal(titulo);
+  if (!alvo) return false;
+  return tituloIaCandidatosLocal(oferta).some(item => normalizarComparacaoLocal(item) === alvo);
+}
+
+function candidatosTituloProdutoLocal(oferta = {}) {
+  const metadata = objetoLocal(oferta.metadata);
+  const radarMirror = objetoLocal(metadata.radarMirror || metadata.radarEspelhoComercial || oferta.radarMirror || oferta.radarEspelhoComercial);
+  const documento = documentoOfcV24Local(oferta);
+  const documentoDireto = objetoLocal(oferta.documentoComercialCanonico);
+  const v2 = objetoLocal(oferta.inteligenciaUniversalV2);
+  const candidatos = [];
+  const adicionarTexto = (fonte, valor) => {
+    const texto = textoMensagemExistenteLocal(valor);
+    const titulo = texto ? extrairTituloFactualDeTextoLocal(texto) : "";
+    if (titulo) candidatos.push({ fonte, titulo });
+  };
+  const adicionarCampo = (fonte, valor) => {
+    const texto = textoMensagemExistenteLocal(valor);
+    const titulo = texto ? limparMarcadoresTituloProdutoLocal(texto) : "";
+    if (titulo) candidatos.push({ fonte, titulo });
+  };
+
+  adicionarTexto("textoOriginal", oferta.textoOriginal || metadata.textoOriginal || radarMirror.texto?.original || radarMirror.textoOriginal);
+  adicionarTexto("textoComercialOriginal", oferta.textoComercialOriginal || metadata.textoComercialOriginal || radarMirror.textoComercialOriginal);
+  adicionarTexto("documentoComercialCanonico", oferta.documentoComercialCanonico || metadata.documentoComercialCanonico || radarMirror.documentoComercialCanonico);
+  adicionarCampo("titulo", oferta.titulo);
+  adicionarCampo("nome", oferta.nome);
+  adicionarCampo("documento.tituloOriginal", documento.tituloOriginal || documentoDireto.tituloOriginal);
+  adicionarCampo("documento.bloco_titulo", textoBlocoOfcV24Local(documento, "titulo"));
+  adicionarCampo("inteligencia.titulo", v2.titulo || v2.tituloOriginal || v2.tituloNormalizado);
+  adicionarCampo("tituloOriginal", oferta.tituloOriginal);
+
+  return candidatos;
+}
+
+function tokensCriticosTituloProdutoLocal(valor = "") {
+  const semCompatibilidade = normalizarTextoLocal(valor).replace(/\bcompat[ií]vel\s+com\b[\s\S]*$/i, "");
+  const matches = semCompatibilidade.match(/\b(?:[A-Z]{1,6}\d{2,}[A-Z0-9-]*|\d+\s*(?:gb|tb|mb|mah|w|kw|v|hz|mhz|ghz|mm|cm|m|ml|l|kg|g|un|und|pcs|pe[cç]as)|usb-c|tipo\s+c|5g|4g)\b/gi);
+  return [...new Set((matches || []).map(item => normalizarComparacaoLocal(item).replace(/\s+/g, "")))];
+}
+
+function preservaTokensCriticosTituloLocal(original = "", candidato = "") {
+  const base = normalizarComparacaoLocal(candidato).replace(/\s+/g, "");
+  return tokensCriticosTituloProdutoLocal(original).every(token => base.includes(token));
+}
+
+function compactarTituloProdutoLocal(titulo = "") {
+  const original = limparMarcadoresTituloProdutoLocal(titulo);
+  if (!original) return { titulo: "", limpo: false, modo: "fallback" };
+  if (original.length <= LIMITE_TITULO_PRODUTO_PRESERVADO) {
+    return { titulo: original, limpo: false, modo: "preservado" };
+  }
+
+  let candidato = original
+    .replace(/\s*(?:\||-)\s*(?:Mercado Livre|Amazon|Shopee|AliExpress|KaBuM!?|Kabum BR|BR Kabum|promo[cç][aã]o|oferta)\s*$/i, "")
+    .replace(/\bcompat[ií]vel\s+com\b[\s\S]*$/i, "")
+    .replace(/\s+(?:com\s+)?(?:cupom|desconto|frete\s+gr[aá]tis)\b[\s\S]*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (candidato.length > LIMITE_TITULO_PRODUTO_APRESENTACAO) {
+    const palavras = candidato.split(/\s+/);
+    const selecionadas = [];
+    for (const palavra of palavras) {
+      const proximo = [...selecionadas, palavra].join(" ");
+      if (proximo.length > LIMITE_TITULO_PRODUTO_APRESENTACAO) break;
+      selecionadas.push(palavra);
+    }
+    candidato = selecionadas.join(" ").trim();
+  }
+
+  if (candidato.length < 12 || !preservaTokensCriticosTituloLocal(original, candidato)) {
+    return { titulo: original, limpo: false, modo: "fallback" };
+  }
+
+  return {
+    titulo: candidato || original,
+    limpo: candidato !== original,
+    modo: candidato !== original ? "limpo" : "preservado"
+  };
+}
+
+function resolverTituloProdutoApresentacao(oferta = {}) {
+  for (const candidato of candidatosTituloProdutoLocal(oferta)) {
+    if (tituloIgualTituloIaLocal(candidato.titulo, oferta)) continue;
+    const resolvido = compactarTituloProdutoLocal(candidato.titulo);
+    if (resolvido.titulo) {
+      return {
+        titulo: resolvido.titulo,
+        fonteTituloProduto: candidato.fonte,
+        tituloProdutoLimpo: resolvido.limpo === true,
+        modoTituloProduto: resolvido.modo
+      };
+    }
+  }
+
+  return {
+    titulo: "Oferta",
+    fonteTituloProduto: "fallback_factual",
+    tituloProdutoLimpo: false,
+    modoTituloProduto: "fallback"
+  };
+}
+
+function resolverEmojiSemanticoTitulo(oferta = {}, contexto = {}) {
+  const titulo = normalizarComparacaoLocal(contexto.tituloProduto || oferta.titulo || oferta.nome || "");
+  const categoria = normalizarComparacaoLocal(oferta.inteligenciaUniversalV2?.categoria || oferta.categoria || oferta.categoriaProduto || "");
+  const subcontexto = normalizarComparacaoLocal(contexto.subcontexto || contexto.subcontextoGancho || "");
+  let familia = textoMensagemExistenteLocal(contexto.familia || contexto.familiaGancho || contexto.familiaLocalV2 || "");
+  try {
+    familia = familia || copyInteligente.resolverFamiliaOfertaCopyLocalV2?.(oferta)?.familia || "";
+  } catch (_) {
+    familia = "";
+  }
+  const base = `${categoria} ${titulo}`;
+  const escolher = (emoji, origem) => ({ emoji, origem });
+
+  if (familia === "calcados") return escolher("👟", "subcontexto_calcados");
+  if (["casa", "casa_eletro", "cozinha_pratica"].includes(familia) &&
+    (subcontexto === "cozinha" || /\b(?:cozinha|panela|air fryer|fogao|forno|cooktop)\b/.test(base))) {
+    return escolher("🍳", "subcontexto_cozinha");
+  }
+  if (familia === "bebidas" && /\b(?:cerveja|chopp)\b/.test(base)) return escolher("🍺", "subcontexto_cerveja");
+  if (familia === "pesca_camping" && (subcontexto === "camping" || /\b(?:camping|barraca|trilha)\b/.test(base))) {
+    return escolher("🏕️", "subcontexto_camping");
+  }
+  if (familia === "pesca_camping" && (subcontexto === "pesca" || /\b(?:pesca|vara de pesca|molinete|carretilha)\b/.test(base))) {
+    return escolher("🎣", "subcontexto_pesca");
+  }
+
+  const porFamilia = {
+    celulares: "📱",
+    computadores: "💻",
+    gamer: "🎮",
+    games: "🎮",
+    perifericos: "🖥️",
+    casa: "🏠",
+    casa_eletro: "🏠",
+    ferramentas: "🔧",
+    automotivo: "🚗",
+    bebe: "🍼",
+    infantil: "🧸",
+    brinquedos: "🧸",
+    pet: "🐾",
+    beleza: "💄",
+    mercado: "🛒",
+    climatizacao: "❄️",
+    iluminacao: "💡",
+    audio_tv: "🎧",
+    eletronicos: "⚡"
+  };
+  if (familia === "moda") {
+    if (/\bfeminina\b/.test(categoria)) return escolher("👗", "familia_moda_feminina");
+    if (/\bmasculina\b/.test(categoria)) return escolher("👕", "familia_moda_masculina");
+    return escolher("✨", "familia_moda_neutra");
+  }
+  if (familia === "bebidas") return escolher("✨", "familia_bebidas_neutra");
+  if (porFamilia[familia]) return escolher(porFamilia[familia], `familia_${familia}`);
+  return escolher("🔥", "fallback_universal");
+}
+
+function resolverGanchoCopyLocalApresentacao(tituloApresentacao = {}, fonteGancho = "") {
+  if (!tituloApresentacao?.usouTituloIa || tituloApresentacao?.fallbackOriginal) {
+    return {
+      gancho: "",
+      fonteGancho: "indisponivel",
+      fraseIdGancho: "",
+      familiaGancho: "",
+      intencaoGancho: ""
+    };
+  }
+
+  return {
+    gancho: tituloApresentacaoValido(tituloApresentacao.titulo),
+    fonteGancho: fonteGancho || tituloApresentacao.fonte || "tituloIa_explicito",
+    fraseIdGancho: textoMensagemExistenteLocal(tituloApresentacao.fraseId || ""),
+    familiaGancho: textoMensagemExistenteLocal(tituloApresentacao.familia || ""),
+    intencaoGancho: textoMensagemExistenteLocal(tituloApresentacao.intencao || "")
+  };
+}
+
+function camposTituloProdutoGanchoLocal(oferta = {}) {
+  return {
+    tituloProdutoApresentacaoAtivo: oferta.tituloProdutoApresentacaoAtivo === true,
+    tituloProdutoApresentacao: textoMensagemExistenteLocal(oferta.tituloProdutoApresentacao || ""),
+    fonteTituloProduto: textoMensagemExistenteLocal(oferta.fonteTituloProduto || ""),
+    tituloProdutoLimpo: oferta.tituloProdutoLimpo === true,
+    modoTituloProduto: textoMensagemExistenteLocal(oferta.modoTituloProduto || ""),
+    ganchoCopyLocal: textoMensagemExistenteLocal(oferta.ganchoCopyLocal || ""),
+    fonteGancho: textoMensagemExistenteLocal(oferta.fonteGancho || ""),
+    fraseIdGancho: textoMensagemExistenteLocal(oferta.fraseIdGancho || ""),
+    familiaGancho: textoMensagemExistenteLocal(oferta.familiaGancho || ""),
+    intencaoGancho: textoMensagemExistenteLocal(oferta.intencaoGancho || ""),
+    emojiTituloProduto: textoMensagemExistenteLocal(oferta.emojiTituloProduto || ""),
+    emojiSemanticoOrigem: textoMensagemExistenteLocal(oferta.emojiSemanticoOrigem || ""),
+    emojiGanchoCopyLocal: textoMensagemExistenteLocal(oferta.emojiGanchoCopyLocal || "")
+  };
+}
+
 function urlBlocoOfcV24Local(documento = {}, ...tipos) {
   const bloco = blocoOfcV24Local(documento, ...tipos);
   return normalizarTextoLocal(bloco.valorEstruturado?.url || bloco.url || bloco.textoOriginal || "");
@@ -457,7 +723,10 @@ function aplicarFatosOfcV24ComoEntrada(oferta = {}) {
 }
 
 function montarEntradaTemplateUniversalOficial(oferta = {}) {
-  return prepararDadosOficiaisTemplate(oferta, { modo: "universal" });
+  return {
+    ...prepararDadosOficiaisTemplate(oferta, { modo: "universal" }),
+    ...camposTituloProdutoGanchoLocal(oferta)
+  };
 }
 
 function montarOfertaRenderizacaoOficial(oferta = {}) {
@@ -486,7 +755,8 @@ function montarOfertaRenderizacaoOficial(oferta = {}) {
     linkAfiliado,
     linkFinal: oferta.linkFinal || linkAfiliado,
     link: oferta.link || linkAfiliado,
-    fonteDadosMensagem: "dados_oficiais_template"
+    fonteDadosMensagem: "dados_oficiais_template",
+    ...camposTituloProdutoGanchoLocal(oferta)
   };
 }
 
@@ -660,10 +930,44 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
     resultado: tituloApresentacao,
     tituloIaPreExistente
   });
+  const tituloProdutoAtivo = normalizarTituloOfertaDestino(destino?.tituloOferta) === "ia" &&
+    tituloIaLiberadoRender(opcoes);
+  const tituloProdutoApresentacao = tituloProdutoAtivo
+    ? resolverTituloProdutoApresentacao(ofertaComFatosBase)
+    : { titulo: "", fonteTituloProduto: "", tituloProdutoLimpo: false, modoTituloProduto: "" };
+  const ganchoCopyLocal = tituloProdutoAtivo
+    ? resolverGanchoCopyLocalApresentacao(tituloApresentacao, fonteTitulo)
+    : {
+      gancho: "",
+      fonteGancho: "",
+      fraseIdGancho: "",
+      familiaGancho: "",
+      intencaoGancho: ""
+    };
+  const emojiTituloProduto = tituloProdutoAtivo
+    ? resolverEmojiSemanticoTitulo(ofertaComFatosBase, {
+      tituloProduto: tituloProdutoApresentacao.titulo,
+      familiaGancho: ganchoCopyLocal.familiaGancho,
+      subcontextoGancho: tituloApresentacao.subcontexto
+    })
+    : { emoji: "", origem: "" };
   const ofertaApresentacao = {
     ...ofertaComFatosBase,
     clienteId,
-    titulo: tituloApresentacao.titulo
+    titulo: tituloApresentacao.titulo,
+    tituloProdutoApresentacaoAtivo: tituloProdutoAtivo,
+    tituloProdutoApresentacao: tituloProdutoAtivo ? tituloProdutoApresentacao.titulo : "",
+    fonteTituloProduto: tituloProdutoAtivo ? tituloProdutoApresentacao.fonteTituloProduto : "",
+    tituloProdutoLimpo: tituloProdutoAtivo ? tituloProdutoApresentacao.tituloProdutoLimpo === true : false,
+    modoTituloProduto: tituloProdutoAtivo ? tituloProdutoApresentacao.modoTituloProduto : "",
+    ganchoCopyLocal: tituloProdutoAtivo ? ganchoCopyLocal.gancho : "",
+    fonteGancho: tituloProdutoAtivo ? ganchoCopyLocal.fonteGancho : "",
+    fraseIdGancho: tituloProdutoAtivo ? ganchoCopyLocal.fraseIdGancho : "",
+    familiaGancho: tituloProdutoAtivo ? ganchoCopyLocal.familiaGancho : "",
+    intencaoGancho: tituloProdutoAtivo ? ganchoCopyLocal.intencaoGancho : "",
+    emojiTituloProduto: tituloProdutoAtivo ? emojiTituloProduto.emoji : "",
+    emojiSemanticoOrigem: tituloProdutoAtivo ? emojiTituloProduto.origem : "",
+    emojiGanchoCopyLocal: tituloProdutoAtivo && ganchoCopyLocal.gancho ? "✨" : ""
   };
   const ofertaEntradaComFatosOfc = aplicarFatosOfcV24ComoEntrada(ofertaApresentacao);
   const ofertaOficial = montarOfertaRenderizacaoOficial(ofertaEntradaComFatosOfc);
@@ -727,6 +1031,13 @@ function montarMensagemOferta(oferta = {}, opcoes = {}) {
       tituloIaPreExistente,
       categoriaRecebidaLocalV2: ofertaComFatosBase.categoria || ofertaComFatosBase.categoriaProduto || "",
       categoriaExibidaTemplate: ofertaOficial.categoria || ofertaOficial.categoriaProduto || "",
+      fonteTituloProduto: valorLogCurto(ofertaOficial.fonteTituloProduto || ""),
+      tituloProdutoLimpo: ofertaOficial.tituloProdutoLimpo === true,
+      fonteGancho: valorLogCurto(ofertaOficial.fonteGancho || ""),
+      fraseIdGancho: valorLogCurto(ofertaOficial.fraseIdGancho || ""),
+      familiaGancho: valorLogCurto(ofertaOficial.familiaGancho || ""),
+      intencaoGancho: valorLogCurto(ofertaOficial.intencaoGancho || ""),
+      emojiSemanticoOrigem: valorLogCurto(ofertaOficial.emojiSemanticoOrigem || ""),
       ...(fonteTitulo === "local_v2" ? {
         fraseIdLocalV2: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? (tituloApresentacao.fraseId || "") : "",
         familiaLocalV2: tituloApresentacao.fonte === copyInteligente.FONTE_COPY_LOCAL_V2 ? (tituloApresentacao.familia || "") : "",
@@ -882,6 +1193,8 @@ module.exports = {
   montarLinhaParcelamento,
   montarLegendaOferta,
   montarLegendaShopee,
+  resolverTituloProdutoApresentacao,
+  resolverEmojiSemanticoTitulo,
   tituloIaLiberadoRender,
   parsePreco: normalizarPreco,
   formatarDesconto: montarLinhaDesconto,

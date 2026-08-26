@@ -97,6 +97,77 @@ assert.strictEqual(resolver(ofertaBase({ id: "sub_setup", engineOfertaId: "sub_s
 assert.strictEqual(resolver(ofertaBase({ id: "sub_limpeza", engineOfertaId: "sub_limpeza", categoria: "Limpeza", titulo: "Robo aspirador inteligente" })).subcontexto, "limpeza_pratica", "subcontexto limpeza seguro");
 assert.strictEqual(resolver(ofertaBase({ id: "sub_ambiguo", engineOfertaId: "sub_ambiguo", categoria: "Periféricos", titulo: "Monitor Full HD" })).subcontexto, "", "termo ambiguo nao especializa");
 
+const ofertaSimplesFamilia = (extra = {}) => ofertaBase({
+  precoOriginal: "",
+  descontoPercentual: "",
+  cupom: "",
+  ...extra
+});
+
+const casosAutoridadeFamilia = [
+  ["notebook_alias_informatica", ofertaSimplesFamilia({
+    id: "auth_notebook_alias",
+    engineOfertaId: "auth_notebook_alias",
+    categoria: "Computadores e Informatica",
+    titulo: "Notebook Lenovo IdeaPad Intel Core i5 16GB 512GB SSD"
+  }), "Computadores e Notebook", "computadores", "familia"],
+  ["computadores_gamer_incidental", ofertaSimplesFamilia({
+    id: "auth_pc_gamer_incidental",
+    engineOfertaId: "auth_pc_gamer_incidental",
+    categoria: "Computadores e Informatica",
+    titulo: "Notebook Lenovo gamer Intel Core i5 16GB 512GB SSD"
+  }), "Computadores e Notebook", "computadores", "familia"],
+  ["cabo_usb_c_informatica", ofertaSimplesFamilia({
+    id: "auth_cabo_usb_c",
+    engineOfertaId: "auth_cabo_usb_c",
+    categoria: "Informatica",
+    titulo: "Cabo USB-C 60W trancado 2m para celular e notebook"
+  }), "Computadores e Notebook", "computadores", "familia"],
+  ["smartphone_celulares", ofertaSimplesFamilia({
+    id: "auth_smartphone",
+    engineOfertaId: "auth_smartphone",
+    categoria: "Celulares e Smartphones",
+    titulo: "Smartphone Samsung Galaxy A56 5G 256GB"
+  }), "Celulares e Smartphones", "celulares", "familia"],
+  ["gamer_hardware_setup", ofertaSimplesFamilia({
+    id: "auth_gamer_setup",
+    engineOfertaId: "auth_gamer_setup",
+    categoria: "Gamer e Hardware",
+    titulo: "SSD NVMe para setup gamer"
+  }), "Gamer e Hardware", "gamer", "familia"],
+  ["casa_panela_cozinha", ofertaSimplesFamilia({
+    id: "auth_casa_panela",
+    engineOfertaId: "auth_casa_panela",
+    categoria: "Casa, Móveis e Decoração",
+    titulo: "Panela de pressao inox 4,5L"
+  }), "Casa, Móveis e Decoração", "casa", "familia"],
+  ["diversos_indicativo_seguro", ofertaSimplesFamilia({
+    id: "auth_diversos_indicativo",
+    engineOfertaId: "auth_diversos_indicativo",
+    categoria: "Diversos",
+    titulo: "Smartphone Samsung Galaxy A56 5G 256GB"
+  }), "Diversos", "oportunidade", "oportunidade"]
+];
+
+copy.limparCacheCopyLocalV2();
+for (const [nome, oferta, categoriaEsperada, familiaEsperada, intencaoEsperada] of casosAutoridadeFamilia) {
+  const res = resolver(oferta, { clienteId: `workspace_${nome}` });
+  assert.strictEqual(res.ok, true, `${nome}: resolve copy local`);
+  assert.strictEqual(res.categoriaOficial, categoriaEsperada, `${nome}: categoria oficial tem autoridade`);
+  assert.strictEqual(res.familia, familiaEsperada, `${nome}: familia respeita categoria oficial`);
+  assert.strictEqual(res.intencao, intencaoEsperada, `${nome}: intencao esperada`);
+}
+assert.strictEqual(
+  resolver(ofertaSimplesFamilia({
+    id: "auth_casa_panela_sub",
+    engineOfertaId: "auth_casa_panela_sub",
+    categoria: "Casa, Móveis e Decoração",
+    titulo: "Panela de pressao inox 4,5L"
+  }), { clienteId: "workspace_auth_casa_panela_sub" }).subcontexto,
+  "cozinha",
+  "titulo refina subcontexto cozinha dentro da familia casa"
+);
+
 copy.limparCacheCopyLocalV2();
 const semCupom = resolver(ofertaBase({ id: "sem_cupom", engineOfertaId: "sem_cupom", categoria: "Diversos" }), {
   banco: [{ id: "danger_cupom", texto: "Tem cupom nessa oferta", familia: "qualquer", intencoes: ["cupom"], exige: ["cupom"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
@@ -316,7 +387,9 @@ const explicit = renderizar(ofertaBase({ id: "explicit", engineOfertaId: "explic
 assert.ok(explicit.includes("Titulo IA Explicito"), "tituloIa explicito preserva precedencia homologada");
 
 const msgLocal = renderizar(ofertaBase({ id: "render_local", engineOfertaId: "render_local", tituloIa: "", categoria: "Gamer e Hardware" }));
-assert.ok(!msgLocal.includes("Produto Original Oficial"), "destino IA usa Banco Local V2 quando nao ha tituloIa explicito");
+const blocoTituloLocal = msgLocal.split("\n\n")[0] || "";
+assert.ok(msgLocal.includes("*Produto Original Oficial*"), "destino IA preserva titulo factual quando usa Banco Local V2");
+assert.ok(blocoTituloLocal.split("\n").length >= 2, "destino IA renderiza gancho Local V2 abaixo do titulo factual");
 
 const snapshot = JSON.parse(JSON.stringify(ofertaFanout));
 renderizar(ofertaFanout, { tituloOferta: "ia" });

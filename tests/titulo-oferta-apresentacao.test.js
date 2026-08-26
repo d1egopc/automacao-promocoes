@@ -9,7 +9,9 @@ process.env.DATA_DIR = dataDir;
 const { criarTemplate } = require("../modules/templates-clientes/service");
 const {
   montarMensagemOferta,
-  resolverTituloApresentacaoOferta
+  resolverTituloApresentacaoOferta,
+  resolverTituloProdutoApresentacao,
+  resolverEmojiSemanticoTitulo
 } = require("../utils/mensagens-ofertas");
 const copy = require("../modules/copy-inteligente");
 
@@ -78,7 +80,7 @@ assert.ok(!mensagemIaSemFeature.includes("Titulo IA Curto"), "destino IA sem fea
 
 const mensagemIa = renderizar(original, { tituloOferta: "ia" }, { tituloIa: true });
 assert.ok(mensagemIa.includes("Titulo IA Curto"), "destino IA usa tituloIa valido");
-assert.ok(!mensagemIa.includes("Produto Original Oficial"), "titulo original nao substitui tituloIa valido");
+assert.ok(mensagemIa.includes("*Produto Original Oficial*"), "destino IA usa titulo factual em destaque");
 
 for (const tituloIa of ["", " ", "undefined", "null", "NaN"]) {
   const mensagem = renderizar({ ...ofertaBase(), tituloIa }, { tituloOferta: "ia" }, { tituloIa: true });
@@ -102,6 +104,7 @@ const mensagemFanoutOriginal = renderizar(original, { id: "destino_original", ti
 const mensagemFanoutIa = renderizar(original, { id: "destino_ia", tituloOferta: "ia" }, { tituloIa: true });
 assert.ok(mensagemFanoutOriginal.includes("Produto Original Oficial"), "fanout destino original mantem original");
 assert.ok(mensagemFanoutIa.includes("Titulo IA Curto"), "fanout destino IA usa IA sem mutar a oferta");
+assert.ok(mensagemFanoutIa.includes("*Produto Original Oficial*"), "fanout destino IA inclui titulo factual sem mutar a oferta");
 assert.deepStrictEqual(original, snapshotOriginal, "fanout nao muta objeto compartilhado");
 
 const template = criarTemplate("cliente_titulo_oferta", {
@@ -138,8 +141,146 @@ assert.deepStrictEqual(
   "resolver expõe decisao IA sem efeito colateral"
 );
 
+const tituloCurto = resolverTituloProdutoApresentacao({
+  titulo: "Samsung Galaxy A56 5G 256GB",
+  tituloIa: "Celular interessante para ficar de olho."
+});
+assert.strictEqual(tituloCurto.titulo, "Samsung Galaxy A56 5G 256GB", "titulo curto factual fica inalterado");
+assert.strictEqual(tituloCurto.tituloProdutoLimpo, false, "titulo curto nao marca limpeza artificial");
+
+const tituloLongo = resolverTituloProdutoApresentacao({
+  titulo: "Cabo USB-C 60W Trancado 2M reforcado para notebook celular tablet compativel com iPhone Samsung Motorola Xiaomi Lenovo Acer Dell HP e outros modelos",
+  tituloIa: "Achado simples no radar."
+});
+assert.ok(tituloLongo.titulo.length < 96, "titulo longo fica compacto");
+assert.ok(tituloLongo.titulo.includes("USB-C"), "compactacao preserva USB-C");
+assert.ok(tituloLongo.titulo.includes("60W"), "compactacao preserva potencia");
+assert.ok(tituloLongo.titulo.includes("2M"), "compactacao preserva tamanho");
+assert.strictEqual(tituloLongo.tituloProdutoLimpo, true, "titulo longo marca limpeza quando remove cauda");
+
+for (const esperado of [
+  "Notebook Lenovo Ideapad 15 Ryzen 5 8GB 512GB",
+  "Panela Inox Itatiaia 40L",
+  "Tênis Nike Revolution 7 Masculino 42"
+]) {
+  assert.strictEqual(
+    resolverTituloProdutoApresentacao({ titulo: esperado, tituloIa: "Gancho humano curto" }).titulo,
+    esperado,
+    `preserva marca/modelo/capacidade/tamanho: ${esperado}`
+  );
+}
+
+assert.deepStrictEqual(
+  resolverTituloProdutoApresentacao({ tituloIa: "Achado simples no radar para quem gosta de novidade." }),
+  {
+    titulo: "Oferta",
+    fonteTituloProduto: "fallback_factual",
+    tituloProdutoLimpo: false,
+    modoTituloProduto: "fallback"
+  },
+  "tituloIa sozinho nao vira identidade factual"
+);
+
+const tituloIaNaoIdentidade = renderizar({
+  ...ofertaBase(),
+  titulo: "Achado simples no radar para quem gosta de novidade.",
+  tituloIa: "Achado simples no radar para quem gosta de novidade.",
+  nome: "Teclado Gamer Redragon Kumara RGB"
+}, { tituloOferta: "ia" }, { tituloIa: true });
+assert.ok(tituloIaNaoIdentidade.includes("*Teclado Gamer Redragon Kumara RGB*"), "tituloIa preexistente nao vira identidade factual");
+assert.ok(tituloIaNaoIdentidade.includes("Achado simples no radar para quem gosta de novidade."), "tituloIa preexistente continua como gancho");
+
+assert.deepStrictEqual(
+  resolverEmojiSemanticoTitulo({ categoria: "Gamer e Hardware", titulo: "Teclado Gamer RGB" }),
+  { emoji: "🎮", origem: "familia_gamer" },
+  "emoji semantico segue familia reconhecida"
+);
+
 const TAG_TITULO = "[TITULO-APRESENTACAO-OBS]";
 const TAG_RENDE_FINAL = "[OFC-V2.5-RENDERER-FINAL]";
+
+function renderizarComObsSemantica(extra = {}) {
+  copy.limparCacheCopyLocalV2();
+  const oferta = {
+    ...ofertaBase(),
+    id: extra.id || "semantica_render",
+    engineOfertaId: extra.engineOfertaId || extra.id || "semantica_render",
+    tituloIa: "",
+    cupom: "",
+    precoOriginal: "",
+    descontoPercentual: "",
+    ...extra
+  };
+  const capturado = capturarLogs(() => renderizar(oferta, { tituloOferta: "ia" }, { tituloIa: true }));
+  return {
+    mensagem: capturado.resultado,
+    final: extrairLog(capturado.logs, TAG_RENDE_FINAL)
+  };
+}
+
+const renderNotebook = renderizarComObsSemantica({
+  id: "semantica_notebook",
+  categoria: "Computadores e Informatica",
+  titulo: "Notebook Lenovo IdeaPad Intel Core i5 16GB 512GB SSD",
+  nome: "Notebook Lenovo IdeaPad Intel Core i5 16GB 512GB SSD"
+});
+assert.ok(renderNotebook.mensagem.startsWith("💻 *Notebook Lenovo IdeaPad Intel Core i5 16GB 512GB SSD*"), "notebook usa emoji computadores");
+assert.strictEqual(renderNotebook.final.familiaGancho, "computadores", "notebook usa gancho computadores");
+assert.strictEqual(renderNotebook.final.emojiSemanticoOrigem, "familia_computadores", "notebook registra emoji computadores");
+
+const renderComputadorGamerIncidental = renderizarComObsSemantica({
+  id: "semantica_pc_gamer_incidental",
+  categoria: "Computadores e Informatica",
+  titulo: "Notebook Lenovo gamer Intel Core i5 16GB 512GB SSD",
+  nome: "Notebook Lenovo gamer Intel Core i5 16GB 512GB SSD"
+});
+assert.ok(renderComputadorGamerIncidental.mensagem.startsWith("💻 *Notebook Lenovo gamer Intel Core i5 16GB 512GB SSD*"), "termo gamer incidental nao muda emoji computadores");
+assert.strictEqual(renderComputadorGamerIncidental.final.familiaGancho, "computadores", "termo gamer incidental nao muda gancho computadores");
+
+const renderCaboUsb = renderizarComObsSemantica({
+  id: "semantica_cabo_usb",
+  categoria: "Informatica",
+  titulo: "Cabo USB-C 60W trancado 2m para celular e notebook",
+  nome: "Cabo USB-C 60W trancado 2m para celular e notebook"
+});
+assert.ok(renderCaboUsb.mensagem.startsWith("💻 *Cabo USB-C 60W trancado 2m para celular e notebook*"), "cabo USB-C de informatica nao vira celulares por palavra incidental");
+assert.strictEqual(renderCaboUsb.final.familiaGancho, "computadores", "cabo USB-C preserva familia informatica/computadores");
+
+const renderSmartphone = renderizarComObsSemantica({
+  id: "semantica_smartphone",
+  categoria: "Celulares e Smartphones",
+  titulo: "Smartphone Samsung Galaxy A56 5G 256GB",
+  nome: "Smartphone Samsung Galaxy A56 5G 256GB"
+});
+assert.ok(renderSmartphone.mensagem.startsWith("📱 *Smartphone Samsung Galaxy A56 5G 256GB*"), "smartphone usa emoji celulares");
+assert.strictEqual(renderSmartphone.final.familiaGancho, "celulares", "smartphone usa gancho celulares");
+
+const renderGamer = renderizarComObsSemantica({
+  id: "semantica_gamer",
+  categoria: "Gamer e Hardware",
+  titulo: "SSD NVMe para setup gamer",
+  nome: "SSD NVMe para setup gamer"
+});
+assert.ok(renderGamer.mensagem.startsWith("🎮 *SSD NVMe para setup gamer*"), "gamer oficial usa emoji gamer");
+assert.strictEqual(renderGamer.final.familiaGancho, "gamer", "gamer oficial usa gancho gamer");
+
+const renderCasaCozinha = renderizarComObsSemantica({
+  id: "semantica_casa_cozinha",
+  categoria: "Casa, Móveis e Decoração",
+  titulo: "Panela de pressao inox 4,5L",
+  nome: "Panela de pressao inox 4,5L"
+});
+assert.ok(renderCasaCozinha.mensagem.startsWith("🍳 *Panela de pressao inox 4,5L*"), "casa com panela refina emoji cozinha");
+assert.strictEqual(renderCasaCozinha.final.familiaGancho, "casa", "casa com panela preserva familia casa");
+
+const renderDiversosIndicativo = renderizarComObsSemantica({
+  id: "semantica_diversos_indicativo",
+  categoria: "Diversos",
+  titulo: "Smartphone Samsung Galaxy A56 5G 256GB",
+  nome: "Smartphone Samsung Galaxy A56 5G 256GB"
+});
+assert.ok(renderDiversosIndicativo.mensagem.startsWith("🔥 *Smartphone Samsung Galaxy A56 5G 256GB*"), "Diversos indicativo mantem fallback seguro de emoji");
+assert.strictEqual(renderDiversosIndicativo.final.familiaGancho, "oportunidade", "Diversos indicativo mantem familia oportunidade");
 
 const sensivel = {
   ...ofertaBase(),
@@ -171,12 +312,19 @@ assert.strictEqual(obsLocalV2.familiaLocalV2, "gamer", "local_v2 registra famili
 assert.strictEqual(obsLocalV2.intencaoLocalV2, "familia", "local_v2 registra intencao");
 assert.strictEqual(obsLocalV2.categoriaRecebidaLocalV2, "Gamer e Hardware", "local_v2 registra categoria recebida");
 assert.strictEqual(finalLocalV2.fonteTitulo, "local_v2", "renderer final registra fonte local_v2");
+assert.strictEqual(finalLocalV2.fonteTituloProduto, "titulo", "renderer final registra fonte do titulo factual");
+assert.strictEqual(finalLocalV2.tituloProdutoLimpo, false, "renderer final registra se titulo factual foi limpo");
+assert.strictEqual(finalLocalV2.fonteGancho, "local_v2", "renderer final registra fonte do gancho");
+assert.ok(finalLocalV2.fraseIdGancho, "renderer final registra fraseId do gancho");
+assert.strictEqual(finalLocalV2.familiaGancho, "gamer", "renderer final registra familia do gancho");
+assert.strictEqual(finalLocalV2.intencaoGancho, "familia", "renderer final registra intencao do gancho");
+assert.strictEqual(finalLocalV2.emojiSemanticoOrigem, "familia_gamer", "renderer final registra origem do emoji");
 
 const originalLocal = copy.resolverCopyLocalV2;
 const originalV1 = copy.resolverCopyInteligente;
 try {
   copy.resolverCopyLocalV2 = () => ({ ok: false, motivoFallback: "local_forcado" });
-  copy.resolverCopyInteligente = () => ({ ok: true, tituloIa: "V1 curto", fonte: "copy_inteligente_v1", cacheHit: false, intencao: "cupom" });
+  copy.resolverCopyInteligente = () => ({ ok: true, tituloIa: "V1 curto", fonte: "banco_frases_v1", cacheHit: false, intencao: "cupom" });
   const logsV1 = capturarLogs(() => renderizar({
     ...ofertaBase(),
     tituloIa: ""
@@ -211,5 +359,6 @@ const obsDivergente = extrairLog(logsCategoriaDivergente, TAG_TITULO);
 const finalDivergente = extrairLog(logsCategoriaDivergente, TAG_RENDE_FINAL);
 assert.strictEqual(obsDivergente.categoriaRecebidaLocalV2, "Diversos", "copy registra categoria recebida");
 assert.strictEqual(finalDivergente.categoriaExibidaTemplate, "Gamer e Hardware", "renderer registra categoria exibida");
+assert.strictEqual(finalDivergente.fonteTituloProduto, "titulo", "categoria divergente preserva fonte factual rastreavel");
 
 console.log("titulo-oferta-apresentacao.test.js OK");
