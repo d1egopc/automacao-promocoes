@@ -132,6 +132,7 @@ const REGRAS = [
       "aparelho de pressao", "soro fisiologico", "pasta de dente",
       "creme dental", "alicate de cuticula", "cortador de unha",
       "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial",
+      "creme renovador para os pes", "creme para os pes", "reconstrutor capilar",
       "limpador facial", "antioleosidade", "creamy", "corretivo", "base maquiagem", "base corretivo",
       "base liquida", "base facial", "maquiagem", "luva nitrilica"
     ],
@@ -320,7 +321,7 @@ const REGRAS = [
   regra(CATEGORIA.eletroportateis, {
     prioridade: 72,
     fortes: [
-      "cafeteira", "maquina de cafe", "air fryer", "fritadeira sem oleo",
+      "cafeteira", "maquina de cafe", "air fryer", "airfryer", "fritadeira sem oleo",
       "liquidificador", "mixer", "processador de alimentos", "batedeira",
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
       "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira",
@@ -339,6 +340,7 @@ const REGRAS = [
     fortes: [
       "tenis", "chinelo", "havaianas", "sandalia", "rasteira", "rasteirinha",
       "tamanco", "sapatilha", "sapatenis", "crocs", "papete", "mocassim",
+      "chuteira",
       "bota", "botina", "coturno", "sapato", "salto"
     ],
     palavras: [
@@ -346,6 +348,13 @@ const REGRAS = [
       "piccadilly", "puma", "reebok", "new balance", "kappa", "pegada",
       "democrata", "ferracini", "beira rio", "moleca", "molekinha",
       "via marte", "dakota", "tenis corrida", "tenis casual", "tenis esportivo"
+    ],
+    negativas: [
+      "camiseta masculina", "camisa masculina", "camisa social masculina",
+      "polo masculina", "short masculino", "short virgulado",
+      "bermuda masculina", "regata masculina", "moletom masculino",
+      "jaqueta masculina", "calca masculina", "calca jogger masculina",
+      "calca moletom masculina", "moda masculina", "camisa polo masculina"
     ]
   }),
 
@@ -377,14 +386,19 @@ const REGRAS = [
       "camisa polo", "camiseta masculina", "camisa masculina",
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
       "calca jeans masculina", "bermuda masculina", "short masculino",
+      "short virgulado",
       "calca jogger masculina", "calca moletom masculina",
       "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
-      "meia flanelada", "t shirt insider"
+      "meia flanelada", "t shirt insider",
+      "camisa adidas masculina", "camisa nike masculina", "camisa puma masculina",
+      "camiseta adidas masculina", "camiseta nike masculina", "camiseta puma masculina",
+      "polo adidas masculina", "polo nike masculina", "polo puma masculina",
+      "short adidas masculino", "short nike masculino", "short puma masculino"
     ],
     palavras: [
       "kit camiseta masculina", "calca masculina", "calca sarja masculina", "kit bermudas masculinas", "bermudas masculinas", "polo masculina",
       "bermuda masculina", "shorts masculino", "camisa polo masculina",
-      "calca moletom masculina", "camisa xadrez masculina", "blusa masculina",
+      "calca moletom masculina", "camisa xadrez masculina", "blusa masculina", "short virgulado",
       "casaco masculino", "colete masculino", "conjunto masculino",
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
       "carteira masculina", "cinto masculino", "meia masculina",
@@ -400,13 +414,17 @@ const REGRAS = [
       "creatina", "pre treino", "albumina", "barra de proteina",
       "suplemento", "hipercalorico", "bcaa", "glutamina", "protein crush",
       "colageno", "colageno hidrolisado", "colagentek", "vitafor", "bike", "bicicleta",
-      "esteira", "eliptico", "yoga", "pilates", "balanca bioimpedancia"
+      "esteira", "eliptico", "yoga", "pilates", "balanca bioimpedancia",
+      "sodio potassio magnesio", "bebida isotonica"
     ],
     palavras: [
       "faixa elastica", "short academia", "camiseta academia", "dry fit",
       "legging esportiva", "top esportivo", "bola de futebol", "luva academia",
       "corda de pular", "coqueteleira", "omega 3", "termogenico",
       "multivitaminico", "barra fixa", "roda abdominal", "hand grip",
+      "suplemento de eletrolitos", "eletrólitos para hidratacao",
+      "repositor eletrolitico", "repositor hidroeletrolitico",
+      "isotonico", "isotonica", "snack proteico",
       "garmin", "integralmedica", "max titanium", "growth supplements", "patins"
     ]
   }),
@@ -456,7 +474,7 @@ const REGRAS = [
       "cabide", "marmita", "tapete banheiro", "porta escova",
       "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro",
       "jogo de toalhas", "espremedor de alho", "molde para bolo",
-      "mala de viagem"
+      "mala de viagem", "cama box", "colchao", "colchao casal"
     ],
     palavras: [
       "cortador de legumes", "ralador", "assadeira", "garrafa termica",
@@ -468,7 +486,7 @@ const REGRAS = [
       "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco",
       "pote de vidro", "potes de vidro", "pote plastico", "pote hermetico", "porta escova banheiro", "organizador cozinha", "organizador banheiro", "jogo de cama", "roupa de cama", "cuba banheiro", "louca banheiro", "fechadura digital", "fechadura eletronica",
       "jogo de toalha", "toalhas banho", "molde ajustavel", "molde ajustavel para bolo",
-      "mala polipropileno", "utensilio cozinha",
+      "mala polipropileno", "utensilio cozinha", "conjunto bistro", "bistro", "varanda", "sacada", "area gourmet", "arara para roupas", "arara de roupas", "arara roupas",
     ],
     negativas: [
       "tapete higienico", "tapete higienico pet", "pet", "gato", "cachorro"
@@ -555,7 +573,7 @@ const REGRAS = [
       "tapete automotivo", "capa banco", "volante esportivo", "bomba de ar",
       "inflador de pneus", "bomba calibrador", "bomba para pneu",
       "compressor veicular", "compressor de ar 12v", "auxiliar de partida",
-      "pulverizador automotivo", "chave de roda", "palheta limpador",
+      "pulverizador automotivo", "chave de roda", "palheta limpador", "pneus",
       "oleo motor", "rack teto", "bagageiro teto"
     ]
   }),

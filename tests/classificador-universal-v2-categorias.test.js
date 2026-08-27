@@ -28,6 +28,10 @@ function assertCategoriaEm(titulo, esperadas, extras = {}) {
   );
 }
 
+function assertNaoCategoria(titulo, categoriaProibida, extras = {}) {
+  assert.notStrictEqual(classificarTitulo(titulo, extras), categoriaProibida, titulo);
+}
+
 function assertNuncaPesca(titulo, extras = {}) {
   assert.notStrictEqual(classificarTitulo(titulo, extras), "Pesca e Camping", titulo);
 }
@@ -41,11 +45,38 @@ assertCategoria("Water Cooler Kalkan Aura 360mm ARGB Intel AMD", "Gamer e Hardwa
 assertNuncaPesca("Cooler Kalkan Aura 360mm ARGB");
 assertCategoriaEm("Cooler Kalkan Aura 360mm ARGB", ["Gamer e Hardware", "Diversos"]);
 assertCategoria("Air Cooler DeepCool AG400", "Gamer e Hardware");
+assertCategoria("Airfryer WAP 4,5L", "Eletroportáteis", {
+  categoria: "Casa, Móveis e Decoração"
+});
 assertCategoria("SSD Kootion 1TB NVMe", "Gamer e Hardware");
 assertCategoria("Memoria RAM JUHOR DDR4 8GB 3200MHz", "Gamer e Hardware");
 assertCategoria("Memoria RAM Gudga DDR4 8GB 3200MHz", "Gamer e Hardware");
 assertCategoria("Ryzen 7 5700X", "Gamer e Hardware");
 assertCategoria("Ventoinha Jungle Leopard ARGB 120mm", "Gamer e Hardware");
+
+assertCategoria("SHORT VIRGULADO", "Roupas e Moda Masculina", {
+  categoria: "Tênis e Chinelos"
+});
+assertCategoria("short masculino", "Roupas e Moda Masculina");
+assertCategoria("short Adidas masculino", "Roupas e Moda Masculina");
+assertCategoria("camisa Adidas masculina", "Roupas e Moda Masculina");
+assertCategoria("camiseta Nike masculina", "Roupas e Moda Masculina");
+for (const marca of ["Nike", "Adidas", "Puma"]) {
+  assertCategoria(`camiseta masculina ${marca}`, "Roupas e Moda Masculina", {
+    categoria: "Tênis e Chinelos"
+  });
+}
+assertCategoria("polo masculina", "Roupas e Moda Masculina", {
+  categoria: "Tênis e Chinelos"
+});
+assertCategoria("polo Puma masculina", "Roupas e Moda Masculina");
+assertCategoria("camisa Adidas masculina", "Roupas e Moda Masculina");
+assertCategoria("Tênis Nike masculino", "Tênis e Chinelos");
+assertCategoria("Tênis Adidas", "Tênis e Chinelos");
+assertCategoria("Chinelo Puma", "Tênis e Chinelos");
+assertCategoria("chuteira Puma masculina", "Tênis e Chinelos");
+assertCategoria("chinelo Nike masculino", "Tênis e Chinelos");
+assertCategoria("kit tênis + camiseta", "Tênis e Chinelos");
 
 assertCategoriaEm("Teclado AULA HERO 68HE magnetico", ["Periféricos", "Gamer e Hardware"]);
 assertCategoriaEm("Mouse ATK A9 Air Ultimate", ["Periféricos", "Games e Console"]);
@@ -56,11 +87,32 @@ assertCategoriaEm("Controle Sem Fio Machenike G1 Hall Effect", ["Games e Console
 
 assertCategoriaEm("TV Stick Android 13 Pro 4K", ["Audio TV", "Eletrônicos"]);
 assertCategoria("Limpador Facial Antioleosidade 300ml CREAMY", "Perfumaria, Farmácia e Beleza");
+assertCategoria("creme renovador para os pés", "Perfumaria, Farmácia e Beleza");
+assertCategoria("reconstrutor capilar", "Perfumaria, Farmácia e Beleza");
+assertCategoria("gloss", "Perfumaria, Farmácia e Beleza");
+assertCategoria("batom", "Perfumaria, Farmácia e Beleza");
 
 assertCategoria("Vara de pesca com molinete e isca artificial", "Pesca e Camping");
 assertCategoria("Caixa térmica Coleman para camping", "Pesca e Camping");
 assertCategoria("Barraca camping com saco de dormir", "Pesca e Camping");
 assertNuncaPesca("Lanterna led USB para escritorio");
+assertCategoria("whey protein", "Esporte e Suplementos");
+assertCategoria("Eletrólitos Ocean Drop Sódio Potássio Magnésio 180g", "Esporte e Suplementos");
+assertCategoria("suplemento de eletrólitos", "Esporte e Suplementos");
+assertCategoria("eletrólitos para hidratação", "Esporte e Suplementos");
+assertCategoria("bebida isotônica", "Esporte e Suplementos");
+assertCategoria("repositor eletrolítico", "Esporte e Suplementos");
+assertCategoria("isotonico", "Esporte e Suplementos");
+assertCategoria("isotônico", "Esporte e Suplementos");
+assertCategoria("snack proteico high protein", "Esporte e Suplementos");
+assertNaoCategoria("eletrólitos em contexto culinário", "Esporte e Suplementos");
+assertNaoCategoria("solução eletrolítica industrial", "Esporte e Suplementos");
+assertNaoCategoria("eletrólitos para bateria", "Esporte e Suplementos");
+assertCategoria("pneus aro 14", "Automotivo");
+assertCategoria("cama box queen", "Casa, Móveis e Decoração");
+assertCategoria("colchão casal", "Casa, Móveis e Decoração");
+assertCategoria("conjunto bistrô varanda sacada área gourmet", "Casa, Móveis e Decoração");
+assertCategoria("arara para roupas", "Casa, Móveis e Decoração");
 
 assertCategoria("Cupom IFPC5HAQ ou BRGM1 moedas no APP abra o produto no link", "Diversos");
 
