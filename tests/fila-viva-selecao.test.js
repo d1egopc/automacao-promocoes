@@ -133,15 +133,21 @@ function oferta(id, minutos, overrides = {}) {
 {
   const indexPath = path.join(__dirname, "..", "index.js");
   const fonteIndex = fs.readFileSync(indexPath, "utf8");
-  const inicio = fonteIndex.indexOf("function selecionarProximaOfertaFila");
-  const fim = fonteIndex.indexOf("function aplicarDiversidadeFila", inicio);
-  assert(inicio >= 0 && fim > inicio, "trecho selecionarProximaOfertaFila deve existir");
-  const trecho = fonteIndex.slice(inicio, fim);
+  const inicioCore = fonteIndex.indexOf("function selecionarProximaOfertaFilaCore");
+  const fimCore = fonteIndex.indexOf("function selecionarProximaOfertaFila(", inicioCore);
+  const inicioWrapper = fonteIndex.indexOf("function selecionarProximaOfertaFila");
+  const fimWrapper = fonteIndex.indexOf("function aplicarDiversidadeFila", inicioWrapper);
+  assert(inicioCore >= 0 && fimCore > inicioCore, "trecho selecionarProximaOfertaFilaCore deve existir");
+  assert(inicioWrapper >= 0 && fimWrapper > inicioWrapper, "trecho selecionarProximaOfertaFila deve existir");
+  const trechoCore = fonteIndex.slice(inicioCore, fimCore);
+  const trechoWrapper = fonteIndex.slice(inicioWrapper, fimWrapper);
 
-  assert(trecho.includes("avaliarOfertaParaSelecaoFilaViva"), "executor deve avaliar destinos liberados antes de escolher oferta");
-  assert(trecho.includes("ordenarOfertasFilaViva"), "executor deve usar ranking vivo em vez de FIFO puro");
+  assert(trechoCore.includes("avaliarOfertaParaSelecaoFilaViva"), "executor deve avaliar destinos liberados antes de escolher oferta");
+  assert(trechoCore.includes("ordenarOfertasFilaViva"), "executor deve usar ranking vivo em vez de FIFO puro");
+  assert(trechoWrapper.includes("selecionarProximaOfertaFilaCore"), "wrapper oficial deve delegar ao core read-only");
+  assert(trechoWrapper.includes("compararSelecao"), "wrapper oficial deve registrar dual-read de selecao");
   assert(
-    !trecho.includes("proximaTentativaEnvioEm) && proxima > Date.now()) return false"),
+    !trechoCore.includes("proximaTentativaEnvioEm) && proxima > Date.now()) return false"),
     "projecao historica nao deve bloquear selecao viva"
   );
 }

@@ -275,6 +275,7 @@ const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
 const { criarControladorFilaV2Shadow } = require("./modules/fila/fila-v2-shadow");
 const { criarControladorFilaOperacionalV2 } = require("./modules/fila/fila-operacional-v2");
+const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const integracoesUtils = require("./utils/integracoes");
@@ -873,6 +874,10 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   writeClienteJson,
   getClienteJsonPath,
   getClientePath,
+  logger: console
+});
+const filaDualRead = criarControladorFilaDualRead({
+  env: process.env,
   logger: console
 });
 let ultimoLogFilaStoreMetrics = 0;
@@ -2119,6 +2124,24 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
   };
 }
 
+function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opcoes = {}) {
+  const agora = Number(opcoes.agora || Date.now());
+  const configPadrao = opcoes.configPadrao || config;
+  const configsCliente = opcoes.configsPorCliente || configsPorCliente;
+
+  return filaDualRead.selecionarFilaReadOnly({
+    fila: Array.isArray(colecao) ? colecao : [],
+    clienteIdAlvo,
+    agora,
+    configPadrao,
+    configsPorCliente: configsCliente,
+    ordenarPendentesPorPrioridade,
+    ofertaExpiradaParaEnvio,
+    avaliarOfertaParaSelecaoFilaViva,
+    ordenarOfertasFilaViva
+  });
+}
+
 function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const clienteLog = String(clienteIdAlvo || "admin");
   sanearExpiradosFila(clienteLog);
@@ -2130,61 +2153,58 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     console.log("🧠 Diagnóstico da fila", diagnostico);
   }
 
-  const pendentes = fila.filter(o => {
+  const agora = Date.now();
+  let expirouAlguma = false;
+  for (const oferta of fila) {
     const mesmoCliente =
       !clienteIdAlvo ||
-      String(o.clienteId || "admin") === String(clienteIdAlvo);
-
-    if (!mesmoCliente) return false;
-    if (o.status !== "pendente") return false;
-
-    const clienteIdOferta = o.clienteId || "admin";
-    const configClienteOferta =
-      configsPorCliente?.[clienteIdOferta] || config;
-
-    return configClienteOferta.automacaoAtiva === true;
-  });
-
-  let expirouAlguma = false;
-  const candidatosVivos = [];
-  const contadoresFilaViva = {
-    avaliadas: 0,
-    expiradas: 0,
-    semDestinoCompativel: 0,
-    semDestinoLiberadoAgora: 0,
-    outrosBloqueios: 0
-  };
-  const agora = Date.now();
-
-  for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
-    contadoresFilaViva.avaliadas += 1;
-
-    if (ofertaExpiradaParaEnvio(oferta, agora)) {
-      marcarOfertaExpirada(oferta);
-      expirouAlguma = true;
-      contadoresFilaViva.expiradas += 1;
-      continue;
-    }
-
-    const clienteIdOferta = oferta.clienteId || "admin";
-    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
-    const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
-
-    if (avaliacao.elegivel) {
-      candidatosVivos.push(avaliacao);
-      continue;
-    }
-
-    if (avaliacao.motivo === "sem_destino_compativel") {
-      contadoresFilaViva.semDestinoCompativel += 1;
-    } else if (avaliacao.motivo === "sem_destino_liberado_agora") {
-      contadoresFilaViva.semDestinoLiberadoAgora += 1;
-    } else {
-      contadoresFilaViva.outrosBloqueios += 1;
-    }
+      String(oferta?.clienteId || "admin") === String(clienteIdAlvo);
+    if (!mesmoCliente) continue;
+    if (oferta?.status !== "pendente") continue;
+    if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;
+    marcarOfertaExpirada(oferta);
+    expirouAlguma = true;
   }
 
-  const selecionada = ordenarOfertasFilaViva(candidatosVivos, { agora })[0];
+  const resultadoSelecao = selecionarProximaOfertaFilaCore(fila, clienteIdAlvo, {
+    agora
+  });
+  const selecionada = resultadoSelecao.selecionada;
+  const contadoresFilaViva = resultadoSelecao.contadores;
+
+  if (modoDualRead(process.env)) {
+    const leituraShadow = filaDualRead.lerFilaVivaComCooldown(
+      clienteLog,
+      {
+        filaLegada: fila,
+        agora,
+        logger: console
+      },
+      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaViva(clienteLeitura, {
+        ...depsLeitura,
+        filaLegada: fila,
+        logger: console
+      })
+    );
+    const selecaoShadow = leituraShadow.ok && !leituraShadow.fallbackLegado
+      ? selecionarProximaOfertaFilaCore(leituraShadow.itens, clienteIdAlvo, {
+          agora
+        })
+      : null;
+
+    filaDualRead.compararSelecao({
+      clienteId: clienteLog,
+      legado: resultadoSelecao,
+      sombra: selecaoShadow,
+      contexto: {
+        componente: "executor_selecao",
+        shadowFallback: Boolean(leituraShadow.fallbackLegado),
+        shadowMotivo: leituraShadow.motivoFallback || leituraShadow.motivo || ""
+      },
+      logger: console,
+      forcar: false
+    });
+  }
 
   if (selecionada) {
     if (expirouAlguma) {
@@ -7564,12 +7584,57 @@ const destinosOrdenados = destinosCompativeis
   })
   .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
 
+const leituraDualReadViva = modoDualRead(process.env)
+  ? filaDualRead.lerFilaVivaComCooldown(
+      clienteId,
+      {
+        filaLegada: fila,
+        agora: Date.now(),
+        logger: console
+      },
+      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaViva(clienteLeitura, {
+        ...depsLeitura,
+        filaLegada: fila,
+        logger: console
+      })
+    )
+  : null;
+
 const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });
 const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta, {
   logger: console,
   logarLegado: true,
   obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : fila
 });
+if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
+  const repeticaoExecutorDual = filaOfertas.consultarEnvioRecenteExecutor2h(leituraDualReadViva.itens, oferta, {
+    logger: console,
+    logarLegado: true,
+    obterItens: () => leituraDualReadViva.itens
+  });
+  filaDualRead.compararAntidup({
+    clienteId,
+    legado: repeticaoExecutor,
+    sombra: repeticaoExecutorDual,
+    contexto: {
+      componente: "anti_repeticao_executor_2h",
+      shadowFallback: false
+    },
+    logger: console
+  });
+} else {
+  filaDualRead.compararAntidup({
+    clienteId,
+    legado: repeticaoExecutor,
+    sombra: null,
+    contexto: {
+      componente: "anti_repeticao_executor_2h",
+      shadowFallback: true,
+      shadowMotivo: leituraDualReadViva?.motivoFallback || leituraDualReadViva?.motivo || ""
+    },
+    logger: console
+  });
+}
 if (!repeticaoExecutor.ok) {
   resumoFila.motivoPulo = repeticaoExecutor.motivo;
   registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
@@ -7637,6 +7702,33 @@ if (repeticaoExecutor.bloqueada) {
 const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(fila, oferta, {
   clienteId
 });
+if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
+  const duplicidadeShadow = filaOfertas.avaliarDuplicidadeAntesProcessarFila(leituraDualReadViva.itens, oferta, {
+    clienteId
+  });
+  filaDualRead.compararAntidup({
+    clienteId,
+    legado: duplicidadeProcessamento,
+    sombra: duplicidadeShadow,
+    contexto: {
+      componente: "anti_duplicidade_processamento",
+      shadowFallback: false
+    },
+    logger: console
+  });
+} else {
+  filaDualRead.compararAntidup({
+    clienteId,
+    legado: duplicidadeProcessamento,
+    sombra: null,
+    contexto: {
+      componente: "anti_duplicidade_processamento",
+      shadowFallback: true,
+      shadowMotivo: leituraDualReadViva?.motivoFallback || leituraDualReadViva?.motivo || ""
+    },
+    logger: console
+  });
+}
 if (!duplicidadeProcessamento.ok) {
   resumoFila.motivoPulo = duplicidadeProcessamento.motivo;
   registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {

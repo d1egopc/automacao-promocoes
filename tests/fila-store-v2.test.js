@@ -22,6 +22,8 @@ const {
   criarControladorFilaV2Shadow
 } = require("../modules/fila/fila-v2-shadow");
 const filaOperacionalV2 = require("../modules/fila/fila-operacional-v2");
+const filaDualRead = require("../modules/fila/fila-dual-read");
+const { ordenarOfertasFilaViva } = require("../modules/executor/fila-viva.service");
 
 const AGORA = new Date("2026-08-26T14:00:00.000Z").getTime();
 
@@ -979,6 +981,225 @@ function criarDepsFilaOperacionalTeste() {
   assert.strictEqual(comparacaoOk.divergencias, 0);
   assert.strictEqual(comparacaoDivergente.ok, false);
   assert.strictEqual(comparacaoDivergente.idsAusentes[0], "p_comp");
+}
+
+{
+  const filaOriginal = [
+    oferta("selecionada", { prioridadeEnvio: 20, score: 70 }),
+    oferta("expirada", {
+      prioridadeEnvio: 100,
+      score: 95,
+      expiraEm: new Date(AGORA - 1000).toISOString()
+    }),
+    oferta("bloqueada", { prioridadeEnvio: 80, score: 88 })
+  ];
+  const snapshot = JSON.parse(JSON.stringify(filaOriginal));
+
+  const resultado = filaDualRead.selecionarFilaReadOnly({
+    fila: filaOriginal,
+    clienteIdAlvo: "cliente_a",
+    agora: AGORA,
+    configPadrao: { automacaoAtiva: true },
+    configsPorCliente: { cliente_a: { automacaoAtiva: true } },
+    ordenarPendentesPorPrioridade: pendentes => [...pendentes].sort((a, b) =>
+      Number(b.prioridadeEnvio || 0) - Number(a.prioridadeEnvio || 0)
+    ),
+    ofertaExpiradaParaEnvio: ofertaAtual => Boolean(ofertaAtual.expiraEm),
+    avaliarOfertaParaSelecaoFilaViva: (ofertaAtual, clienteAtual, configAtual) => ({
+      elegivel: ofertaAtual.id !== "bloqueada" && configAtual.automacaoAtiva === true,
+      motivo: ofertaAtual.id === "bloqueada" ? "sem_destino_liberado_agora" : "destino_liberado",
+      oferta: ofertaAtual,
+      destinosCompativeis: 1,
+      destinosLiberados: [{ id: "destino_1" }],
+      ranking: {
+        lane: ofertaAtual.id === "selecionada" ? "agua_nova" : "fresca_em_risco",
+        scoreFinal: ofertaAtual.id === "selecionada" ? 99 : 80,
+        idadeMs: 1
+      }
+    }),
+    ordenarOfertasFilaViva
+  });
+
+  assert.strictEqual(resultado.selecionada.oferta.id, "selecionada");
+  assert.deepStrictEqual(filaOriginal, snapshot, "core read-only nao pode mutar a fila de entrada");
+}
+
+{
+  const logs = [];
+  const controlador = filaDualRead.criarControladorFilaDualRead({
+    env: { FILA_V2_DUAL_READ_ATIVA: "true" },
+    intervaloMs: 0,
+    logger: { log: (...args) => logs.push(args.join(" ")) }
+  });
+  const legado = {
+    ok: true,
+    motivo: "selecionada",
+    selecionada: {
+      oferta: {
+        id: "oferta_1",
+        titulo: "titulo sensivel",
+        linkOriginal: "https://sensivel"
+      },
+      ranking: {
+        lane: "agua_nova",
+        scoreFinal: 98
+      },
+      destinosCompativeis: 1,
+      destinosLiberados: [{}]
+    },
+    totalPendentes: 2,
+    totalElegiveis: 1,
+    contadores: { avaliadas: 1 }
+  };
+  const sombra = {
+    ...legado,
+    selecionada: {
+      oferta: {
+        id: "oferta_1",
+        titulo: "titulo sombra",
+        linkOriginal: "https://sombra"
+      },
+      ranking: {
+        lane: "agua_nova",
+        scoreFinal: 99
+      },
+      destinosCompativeis: 1,
+      destinosLiberados: [{}]
+    }
+  };
+
+  const equivalencia = controlador.compararSelecao({
+    clienteId: "cliente_dual",
+    legado,
+    sombra,
+    contexto: { shadowFallback: false },
+    forcar: true
+  });
+  const divergencia = controlador.compararSelecao({
+    clienteId: "cliente_dual",
+    legado,
+    sombra: {
+      ...sombra,
+      selecionada: {
+        oferta: { id: "oferta_2" },
+        ranking: { lane: "fresca_em_risco", scoreFinal: 1 },
+        destinosCompativeis: 1,
+        destinosLiberados: [{}]
+      }
+    },
+    contexto: { shadowFallback: false },
+    forcar: true
+  });
+
+  assert.strictEqual(equivalencia.equivalente, true);
+  assert.strictEqual(equivalencia.divergente, false);
+  assert.strictEqual(divergencia.divergente, true);
+  assert(logs.some(linha => linha.includes("[FILA-V2-DUAL-READ]")));
+  assert(!logs.join("\n").includes("titulo sensivel"), "telemetria dual-read nao deve carregar titulo");
+  assert(!logs.join("\n").includes("https://sensivel"), "telemetria dual-read nao deve carregar links");
+}
+
+{
+  const logs = [];
+  const controlador = filaDualRead.criarControladorFilaDualRead({
+    env: { FILA_V2_DUAL_READ_ATIVA: "true" },
+    intervaloMs: 0,
+    logger: { log: (...args) => logs.push(args.join(" ")) }
+  });
+  const legado = {
+    ok: true,
+    bloqueada: true,
+    motivo: "repetida_no_executor_2h",
+    statusAnterior: "enviado",
+    ofertaAnterior: {
+      id: "antiga_1",
+      titulo: "nunca logar",
+      linkOriginal: "https://antiga"
+    },
+    identidade: "cliente_a|produto_1",
+    enviadaEmAnterior: "2026-08-26T10:00:00.000Z"
+  };
+  const sombra = {
+    ...legado
+  };
+
+  const equivalencia = controlador.compararAntidup({
+    clienteId: "cliente_dual",
+    legado,
+    sombra,
+    contexto: { shadowFallback: false },
+    forcar: true
+  });
+  const divergencia = controlador.compararAntidup({
+    clienteId: "cliente_dual",
+    legado,
+    sombra: {
+      ...legado,
+      bloqueada: false,
+      motivo: "sem_envio_equivalente_recente"
+    },
+    contexto: { shadowFallback: false },
+    forcar: true
+  });
+
+  assert.strictEqual(equivalencia.equivalente, true);
+  assert.strictEqual(divergencia.divergente, true);
+  assert(logs.some(linha => linha.includes("[FILA-V2-DUAL-READ]")));
+  assert(!logs.join("\n").includes("nunca logar"), "telemetria dual-read nao deve carregar payload sensivel");
+  assert(!logs.join("\n").includes("https://antiga"), "telemetria dual-read nao deve carregar links");
+}
+
+{
+  let chamadas = 0;
+  const controlador = filaDualRead.criarControladorFilaDualRead({
+    env: { FILA_V2_DUAL_READ_ATIVA: "true" },
+    cooldownRecuperacaoMs: 1000,
+    intervaloMs: 0,
+    logger: { log: () => {} }
+  });
+
+  const leitura1 = controlador.lerFilaVivaComCooldown(
+    "cliente_cooldown",
+    { agora: 1000 },
+    () => {
+      chamadas += 1;
+      return {
+        ok: false,
+        fallbackLegado: true,
+        motivoFallback: "viva_divergente_legado"
+      };
+    }
+  );
+  const leitura2 = controlador.lerFilaVivaComCooldown(
+    "cliente_cooldown",
+    { agora: 1300 },
+    () => {
+      chamadas += 1;
+      return {
+        ok: false,
+        fallbackLegado: true,
+        motivoFallback: "viva_divergente_legado"
+      };
+    }
+  );
+  const leitura3 = controlador.lerFilaVivaComCooldown(
+    "cliente_cooldown",
+    { agora: 2201 },
+    () => {
+      chamadas += 1;
+      return {
+        ok: true,
+        fallbackLegado: false,
+        itens: [],
+        entradas: []
+      };
+    }
+  );
+
+  assert.strictEqual(chamadas, 2, "recovery invalido nao deve repetir dentro do cooldown");
+  assert.strictEqual(leitura1.fallbackLegado, true);
+  assert.strictEqual(leitura2.recuperacaoBloqueada, true);
+  assert.strictEqual(leitura3.ok, true);
 }
 
 console.log("fila-store-v2.test.js OK");
