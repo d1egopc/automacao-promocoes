@@ -17,9 +17,12 @@ const {
 } = require("./fila-v2-shadow");
 
 const FLAG_OPERACIONAL_ATIVA = "FILA_V2_OPERACIONAL_ATIVA";
+const FLAG_ROLLOUT_ATIVO = "FILA_V2_OPERACIONAL_ROLLOUT";
+const FLAG_CANARY_CLIENTES = "FILA_V2_OPERACIONAL_CANARY_CLIENTES";
 const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
 const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
+const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
 const cacheChavesHistorico = new Map();
 
 function texto(valor = "") {
@@ -76,6 +79,40 @@ function normalizarEntradaViva(valor = {}, indice = 0, agora = Date.now()) {
 
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
+}
+
+function modoRollout(valor = "") {
+  const modo = texto(valor).toLowerCase();
+  if (["legacy", "canary", "global"].includes(modo)) return modo;
+  return "legacy";
+}
+
+function listaCanaryClientes(valor = "") {
+  return [...new Set(
+    texto(valor)
+      .split(/[\s,;|]+/)
+      .map(clienteSeguro)
+      .filter(Boolean)
+  )];
+}
+
+function resolverModoOperacional(env = process.env) {
+  return {
+    operacionalAtivo: flagAtiva(FLAG_OPERACIONAL_ATIVA, env),
+    shadow2B1Ativo: flagAtiva(FLAG_2B1_SHADOW_ATIVA, env),
+    rolloutOperacional: modoRollout(env?.[FLAG_ROLLOUT_ATIVO] || ""),
+    canaryClientes: listaCanaryClientes(env?.[FLAG_CANARY_CLIENTES] || "")
+  };
+}
+
+function deveUsarFilaV2Operacional(clienteId = "admin", env = process.env) {
+  const modo = resolverModoOperacional(env);
+  if (modo.operacionalAtivo) return true;
+  if (modo.rolloutOperacional === "global") return true;
+  if (modo.rolloutOperacional === "canary") {
+    return modo.canaryClientes.includes(clienteSeguro(clienteId));
+  }
+  return false;
 }
 
 function normalizarEntradasViva(valor = [], agora = Date.now()) {
@@ -775,9 +812,72 @@ function flagAtiva(nome, env = process.env) {
 }
 
 function modoOperacional(env = process.env) {
+  return resolverModoOperacional(env);
+}
+
+function sincronizarCanaryEscrita(params = {}, deps = {}, opcoes = {}) {
+  const cliente = clienteSeguro(params.clienteId || "admin");
+  const env = opcoes.env || deps.env || process.env;
+  const modo = resolverModoOperacional(env);
+
+  if (!deveUsarFilaV2Operacional(cliente, env)) {
+    return {
+      ok: true,
+      pulou: true,
+      motivo: "rollout_desativado",
+      ...modo
+    };
+  }
+
+  const inicio = process.hrtime.bigint();
+  const filaLegada = Array.isArray(params.fila)
+    ? params.fila.filter(item => clienteSeguro(item?.clienteId || "admin") === cliente)
+    : lerFilaLegada(cliente, { ...opcoes, ...deps });
+  const agora = params.agora || deps.agora || Date.now();
+  const projecao = projetarFilaV2(filaLegada, { agora });
+  const escrita = escreverFilaViva(cliente, projecao.viva, { ...opcoes, ...deps, agora });
+  const comparacao = compararVivaComLegado(cliente, projecao.viva, filaLegada, { ...opcoes, ...deps, agora });
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+  const logger = params.logger || deps.logger || opcoes.logger || console;
+
+  logOperacional(logger, {
+    versao: 1,
+    evento: "canary_write_operacional",
+    clienteId: cliente,
+    rollout: modo.rolloutOperacional,
+    canaryClientes: modo.canaryClientes.length,
+    ok: escrita.ok === true && comparacao.ok === true,
+    totalLegado: projecao.totalLegado,
+    totalViva: projecao.totalViva,
+    totalHistorico: projecao.totalHistorico,
+    divergencias: comparacao.divergencias || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    fallbackLegado: escrita.ok !== true || comparacao.ok !== true,
+    duracaoMs
+  });
+
+  console.log(TAG_CANARY_WRITER, JSON.stringify({
+    versao: 1,
+    clienteId: cliente,
+    rollout: modo.rolloutOperacional,
+    canaryAtivo: true,
+    ok: escrita.ok === true && comparacao.ok === true,
+    totalLegado: projecao.totalLegado,
+    totalViva: projecao.totalViva,
+    totalHistorico: projecao.totalHistorico,
+    divergencias: comparacao.divergencias || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    fallbackLegado: escrita.ok !== true || comparacao.ok !== true,
+    duracaoMs
+  }));
+
   return {
-    operacionalAtivo: flagAtiva(FLAG_OPERACIONAL_ATIVA, env),
-    shadow2B1Ativo: flagAtiva(FLAG_2B1_SHADOW_ATIVA, env)
+    ok: escrita.ok === true && comparacao.ok === true,
+    pulou: false,
+    ...modo,
+    projecao,
+    escrita,
+    comparacao
   };
 }
 
@@ -827,6 +927,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
 
   return {
     prepararSeHabilitado,
+    deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env),
+    sincronizarCanaryEscrita: (params = {}, deps = {}) => sincronizarCanaryEscrita(params, deps, opcoes),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
@@ -838,9 +940,12 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
 
 module.exports = {
   FLAG_OPERACIONAL_ATIVA,
+  FLAG_ROLLOUT_ATIVO,
+  FLAG_CANARY_CLIENTES,
   FLAG_2B1_SHADOW_ATIVA,
   HISTORICO_INCREMENTAL_DIR,
   TAG_TELEMETRIA,
+  TAG_CANARY_WRITER,
   normalizarEntradasViva,
   lerFilaViva,
   escreverFilaViva,
@@ -850,6 +955,7 @@ module.exports = {
   compararVivaComLegado,
   itemTerminalParaHistorico,
   modoOperacional,
+  deveUsarFilaV2Operacional,
   criarControladorFilaOperacionalV2,
   limparCacheHistorico
 };

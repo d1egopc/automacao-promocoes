@@ -503,6 +503,109 @@ function criarDepsFilaOperacionalTeste() {
 }
 
 {
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env: {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: "cliente_a,cliente_c"
+    },
+    ...deps
+  });
+  const clienteA = "cliente_a";
+  const clienteB = "cliente_b";
+  const clienteC = "cliente_c";
+  const filaLegada = [
+    oferta("a_vivo", { clienteId: clienteA, status: "pendente" }),
+    oferta("a_recent", {
+      clienteId: clienteA,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 30 * 60 * 1000).toISOString()
+    }),
+    oferta("a_hist", {
+      clienteId: clienteA,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    }),
+    oferta("b_vivo", { clienteId: clienteB, status: "pendente" }),
+    oferta("b_hist", {
+      clienteId: clienteB,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+
+  deps.writeClienteJson(clienteA, "fila.json", filaLegada.filter(item => item.clienteId === clienteA));
+  deps.writeClienteJson(clienteB, "fila.json", filaLegada.filter(item => item.clienteId === clienteB));
+
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional(clienteA), true);
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional(clienteB), false);
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional(clienteC), true);
+
+  const canaryA = controlador.sincronizarCanaryEscrita({
+    clienteId: clienteA,
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "teste_canario"
+  });
+  const skipB = controlador.sincronizarCanaryEscrita({
+    clienteId: clienteB,
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "teste_legado"
+  });
+
+  assert.strictEqual(canaryA.ok, true);
+  assert.strictEqual(canaryA.pulou, false);
+  assert.deepStrictEqual(
+    deps.readClienteJson(clienteA, "fila-viva.json", []).map(item => item.id),
+    ["a_vivo", "a_recent"],
+    "workspace canario deve escrever fila viva sem misturar cliente"
+  );
+  assert.deepStrictEqual(
+    deps.readClienteJson(clienteB, "fila-viva.json", []),
+    [],
+    "workspace legado nao deve receber escrita canaria"
+  );
+  assert.strictEqual(skipB.pulou, true);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env: {
+      FILA_V2_OPERACIONAL_ROLLOUT: "global"
+    },
+    ...deps
+  });
+  const workspaceNovo = "workspace_novo";
+  const filaLegada = [
+    oferta("novo_vivo", { clienteId: workspaceNovo, status: "pendente" }),
+    oferta("novo_hist", {
+      clienteId: workspaceNovo,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+
+  deps.writeClienteJson(workspaceNovo, "fila.json", filaLegada);
+
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional(workspaceNovo), true);
+  const global = controlador.sincronizarCanaryEscrita({
+    clienteId: workspaceNovo,
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "global_rollout"
+  });
+
+  assert.strictEqual(global.ok, true);
+  assert.deepStrictEqual(
+    deps.readClienteJson(workspaceNovo, "fila-viva.json", []).map(item => item.id),
+    ["novo_vivo"],
+    "workspace novo em rollout global deve participar automaticamente"
+  );
+}
+
+{
   const { deps, logs } = criarDepsFilaOperacionalTeste();
   const clienteId = "cliente_recovery";
   const filaLegada = [

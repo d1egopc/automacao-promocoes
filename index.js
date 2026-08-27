@@ -870,6 +870,7 @@ const filaV2Shadow = criarControladorFilaV2Shadow({
   logger: console
 });
 const filaOperacionalV2 = criarControladorFilaOperacionalV2({
+  env: process.env,
   readClienteJson,
   writeClienteJson,
   getClienteJsonPath,
@@ -2578,6 +2579,14 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       return { ok: false, motivo: erroFila.motivo, erro: erroFila.erro };
     }
 
+    const canary = filaOperacionalV2.sincronizarCanaryEscrita({
+      clienteId: cliente,
+      fila,
+      motivo: "engine_distributor_write",
+      agora: Date.now(),
+      logger: console
+    });
+
     console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
       clienteId: cliente,
       engineOfertaId: itemFinal.engineOfertaId || null,
@@ -2588,6 +2597,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
     medidorFilaGlobal.fim({
       ok: true,
       salvou: true,
+      canaryV2: canary?.pulou === false && canary?.ok === true,
       bytesFilaGlobal: "nao_medido",
       ...resumirFilaPorStatus(fila)
     });
