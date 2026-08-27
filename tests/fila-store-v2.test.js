@@ -538,6 +538,66 @@ function criarDepsFilaOperacionalTeste() {
 
 {
   const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_coerente";
+  const filaLegada = [
+    oferta("vivo_1", { clienteId, status: "pendente" }),
+    oferta("recente_2", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 15 * 60 * 1000).toISOString()
+    }),
+    oferta("hist_3", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  const projetada = projetarFilaV2(filaLegada, { agora: AGORA });
+  deps.writeClienteJson(clienteId, "fila.json", filaLegada);
+  deps.writeClienteJson(clienteId, "fila-viva.json", projetada.viva.map(entrada => entrada.item));
+
+  const leitura = filaOperacionalV2.lerFilaViva(clienteId, { ...deps, agora: AGORA });
+
+  assert.strictEqual(leitura.ok, true);
+  assert.strictEqual(leitura.recovery, false);
+  assert.strictEqual(leitura.fonte, "fila_viva");
+  assert.strictEqual(leitura.comparacao.ok, true);
+  assert.deepStrictEqual(leitura.itens.map(item => item.id), ["vivo_1", "recente_2"]);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_divergente";
+  const filaLegada = [
+    oferta("vivo_1", { clienteId, status: "pendente" }),
+    oferta("recente_2", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 15 * 60 * 1000).toISOString()
+    }),
+    oferta("hist_3", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  deps.writeClienteJson(clienteId, "fila.json", filaLegada);
+  deps.writeClienteJson(clienteId, "fila-viva.json", [
+    oferta("vivo_1", { clienteId, status: "processando" }),
+    oferta("extra_9", { clienteId, status: "pendente" })
+  ]);
+
+  const leitura = filaOperacionalV2.lerFilaViva(clienteId, { ...deps, agora: AGORA });
+
+  assert.strictEqual(leitura.ok, true);
+  assert.strictEqual(leitura.recovery, true, "fila viva divergente deve cair para recovery conservador");
+  assert.strictEqual(leitura.motivoFallback, "viva_divergente_legado");
+  assert(leitura.comparacao.divergencias > 0);
+  assert(leitura.comparacao.idsAusentes.includes("recente_2"));
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
   const clienteId = "cliente_corrupto";
   deps.writeClienteJson(clienteId, "fila.json", [oferta("ok_corrupto", { clienteId })]);
   fs.writeFileSync(deps.getClienteJsonPath(clienteId, "fila-viva.json"), "{ json parcial");
@@ -576,6 +636,178 @@ function criarDepsFilaOperacionalTeste() {
   assert.strictEqual(leitura.fallbackLegado, true);
   assert.strictEqual(leitura.motivoFallback, "arquivo_principal_ausente_tmp_presente");
   assert.deepStrictEqual(leitura.itens.map(item => item.id), ["ok_parcial"]);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_sem_legado";
+  fs.writeFileSync(deps.getClienteJsonPath(clienteId, "fila-viva.json"), JSON.stringify([
+    oferta("somente_viva", { clienteId, status: "pendente" })
+  ]));
+
+  const leitura = filaOperacionalV2.lerFilaViva(clienteId, { ...deps, agora: AGORA });
+
+  assert.strictEqual(leitura.ok, true);
+  assert.strictEqual(leitura.fallbackLegado, true, "sem fila.json autoridade deve cair para recovery do legado");
+  assert.strictEqual(leitura.recovery, true);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_coerente";
+  const filaLegada = [
+    oferta("vivo_1", { clienteId, status: "pendente" }),
+    oferta("recente_2", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 15 * 60 * 1000).toISOString()
+    }),
+    oferta("hist_3", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  const projetada = projetarFilaV2(filaLegada, { agora: AGORA });
+  deps.writeClienteJson(clienteId, "fila.json", filaLegada);
+  deps.writeClienteJson(clienteId, "fila-viva.json", projetada.viva.map(entrada => entrada.item));
+
+  const leitura = filaOperacionalV2.lerFilaViva(clienteId, { ...deps, agora: AGORA });
+
+  assert.strictEqual(leitura.ok, true);
+  assert.strictEqual(leitura.recovery, false);
+  assert.strictEqual(leitura.fonte, "fila_viva");
+  assert.strictEqual(leitura.comparacao.ok, true);
+  assert.deepStrictEqual(leitura.itens.map(item => item.id), ["vivo_1", "recente_2"]);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_divergente";
+  const filaLegada = [
+    oferta("vivo_1", { clienteId, status: "pendente" }),
+    oferta("recente_2", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 15 * 60 * 1000).toISOString()
+    }),
+    oferta("hist_3", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 5 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  deps.writeClienteJson(clienteId, "fila.json", filaLegada);
+  deps.writeClienteJson(clienteId, "fila-viva.json", [
+    oferta("vivo_1", { clienteId, status: "processando" }),
+    oferta("extra_9", { clienteId, status: "pendente" })
+  ]);
+
+  const leitura = filaOperacionalV2.lerFilaViva(clienteId, { ...deps, agora: AGORA });
+
+  assert.strictEqual(leitura.ok, true);
+  assert.strictEqual(leitura.recovery, true, "fila viva divergente deve cair para recovery conservador");
+  assert.strictEqual(leitura.motivoFallback, "viva_divergente_legado");
+  assert(leitura.comparacao.divergencias > 0);
+  assert(leitura.comparacao.idsAusentes.includes("recente_2"));
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_posicao";
+  const base = oferta("terminal_pos", {
+    clienteId,
+    status: "enviado",
+    enviadoEm: new Date(AGORA - 4 * 60 * 60 * 1000).toISOString()
+  });
+  const entradaPrimeira = {
+    posicaoLegada: 1,
+    bucket: "historico",
+    motivoBucket: "status_terminal",
+    status: "enviado",
+    id: "terminal_pos",
+    item: base
+  };
+  const entradaReordenada = {
+    ...entradaPrimeira,
+    posicaoLegada: 99
+  };
+
+  const primeiro = filaOperacionalV2.appendHistoricoIncremental(clienteId, entradaPrimeira, { ...deps, agora: AGORA });
+  const segundo = filaOperacionalV2.appendHistoricoIncremental(clienteId, entradaReordenada, { ...deps, agora: AGORA });
+  const linhas = fs.readFileSync(primeiro.file, "utf8").trim().split(/\r?\n/);
+
+  assert.strictEqual(primeiro.ok, true);
+  assert.strictEqual(segundo.ok, true);
+  assert.strictEqual(segundo.idempotente, true, "reordem nao deve duplicar historico");
+  assert.strictEqual(linhas.length, 1);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_cache";
+  const base = oferta("cache_1", {
+    clienteId,
+    status: "enviado",
+    enviadoEm: new Date(AGORA - 4 * 60 * 60 * 1000).toISOString()
+  });
+  const entrada = {
+    posicaoLegada: 1,
+    bucket: "historico",
+    motivoBucket: "status_terminal",
+    status: "enviado",
+    id: "cache_1",
+    item: base
+  };
+  const file = filaOperacionalV2.appendHistoricoIncremental(clienteId, entrada, { ...deps, agora: AGORA }).file;
+  for (let i = 0; i < 9999; i += 1) {
+    fs.appendFileSync(file, `${JSON.stringify({
+      versao: 1,
+      chave: `fake_${i}`,
+      chaveLegada: `fake_legada_${i}`,
+      clienteId,
+      id: `fake_${i}`,
+      status: "enviado",
+      posicaoLegada: i + 2,
+      motivoBucket: "status_terminal",
+      registradoEm: new Date(AGORA).toISOString(),
+      item: { id: `fake_${i}`, status: "enviado", clienteId }
+    })}\n`);
+  }
+  filaOperacionalV2.limparCacheHistorico();
+
+  const contador = { reads: 0 };
+  const fsContado = {
+    ...fs,
+    readFileSync(...args) {
+      contador.reads += 1;
+      return fs.readFileSync(...args);
+    }
+  };
+
+  const primeiro = filaOperacionalV2.appendHistoricoIncremental(clienteId, entrada, {
+    ...deps,
+    fs: fsContado,
+    agora: AGORA
+  });
+  const segundo = filaOperacionalV2.appendHistoricoIncremental(clienteId, entrada, {
+    ...deps,
+    fs: fsContado,
+    agora: AGORA
+  });
+
+  assert.strictEqual(primeiro.ok, true);
+  assert.strictEqual(segundo.idempotente, true);
+  assert.strictEqual(contador.reads, 1, "cache quente nao deve reler segmento inteiro no segundo append");
+
+  filaOperacionalV2.limparCacheHistorico();
+  const terceiro = filaOperacionalV2.appendHistoricoIncremental(clienteId, entrada, {
+    ...deps,
+    fs: fsContado,
+    agora: AGORA
+  });
+  assert.strictEqual(terceiro.idempotente, true);
+  assert.strictEqual(contador.reads, 2, "cache vazio deve reconstruir o indice do segmento");
 }
 
 {
@@ -622,6 +854,41 @@ function criarDepsFilaOperacionalTeste() {
     ["pendente_move"],
     "terminal so deve sair da viva depois do historico persistido"
   );
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_viva_falha";
+  const enviadaAntiga = oferta("terminal_viva_falha", {
+    clienteId,
+    status: "enviado",
+    enviadoEm: new Date(AGORA - 4 * 60 * 60 * 1000).toISOString()
+  });
+  const pendente = oferta("pendente_viva_falha", { clienteId, status: "pendente" });
+  const filaViva = filaOperacionalV2.normalizarEntradasViva([pendente, enviadaAntiga], AGORA);
+  const snapshot = JSON.parse(JSON.stringify(filaViva));
+
+  const resultado = filaOperacionalV2.moverTerminalParaHistorico(clienteId, filaViva, enviadaAntiga, {
+    ...deps,
+    writeClienteJson: () => {
+      throw new Error("viva_indisponivel");
+    },
+    agora: AGORA
+  });
+  const segundo = filaOperacionalV2.moverTerminalParaHistorico(clienteId, filaViva, enviadaAntiga, {
+    ...deps,
+    writeClienteJson: () => {
+      throw new Error("viva_indisponivel");
+    },
+    agora: AGORA
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.removeuDaViva, false);
+  assert.strictEqual(resultado.historico.ok, true);
+  assert.strictEqual(segundo.ok, false);
+  assert.strictEqual(segundo.historico.idempotente, true);
+  assert.deepStrictEqual(filaViva, snapshot, "falha na viva nao pode mutar o array de entrada");
 }
 
 {
@@ -675,6 +942,23 @@ function criarDepsFilaOperacionalTeste() {
     true,
     "enviado antigo pode sair da viva apos persistir historico"
   );
+}
+
+{
+  const clienteId = "cliente_reorder_compare";
+  const filaLegada = [
+    oferta("a", { clienteId, status: "pendente" }),
+    oferta("b", {
+      clienteId,
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 3 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  const vivaReordenada = [];
+  const comparacao = filaOperacionalV2.compararVivaComLegado(clienteId, vivaReordenada, filaLegada, { agora: AGORA });
+
+  assert.strictEqual(comparacao.ok, false, "ordem e contagem divergentes devem ser detectadas");
+  assert(comparacao.idsAusentes.includes("a") || comparacao.idsExtras.includes("a"));
 }
 
 {
