@@ -23,6 +23,13 @@ const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
 const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
 const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
+const TAG_2C = "[FILA-V2-2C]";
+const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
+const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
+const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
+const DEFAULT_CHECKPOINT_MUTACOES = 25;
+const DEFAULT_CHECKPOINT_INTERVALO_MS = 60_000;
+const DEFAULT_CHECKPOINT_MAX_DIRTY_MS = 120_000;
 const cacheChavesHistorico = new Map();
 
 function texto(valor = "") {
@@ -139,6 +146,20 @@ function tamanhoArquivo(file = "", fsImpl = fs) {
   }
 }
 
+function statArquivoSeguro(file = "", fsImpl = fs) {
+  try {
+    if (!file || !fsImpl.existsSync(file)) return { existe: false, bytes: 0, mtimeMs: 0 };
+    const stat = fsImpl.statSync(file);
+    return {
+      existe: true,
+      bytes: Number(stat.size || 0),
+      mtimeMs: Number(stat.mtimeMs || 0)
+    };
+  } catch {
+    return { existe: false, bytes: 0, mtimeMs: 0 };
+  }
+}
+
 function tamanhoJsonBytes(valor) {
   try {
     return Buffer.byteLength(JSON.stringify(valor), "utf8");
@@ -147,10 +168,31 @@ function tamanhoJsonBytes(valor) {
   }
 }
 
+function numeroLimite(valor, padrao, minimo, maximo) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return padrao;
+  return Math.min(maximo, Math.max(minimo, Math.floor(numero)));
+}
+
+function politicaCheckpointLegado(env = process.env) {
+  return {
+    mutacoes: numeroLimite(env?.[FLAG_CHECKPOINT_MUTACOES], DEFAULT_CHECKPOINT_MUTACOES, 1, 1000),
+    intervaloMs: numeroLimite(env?.[FLAG_CHECKPOINT_INTERVALO_MS], DEFAULT_CHECKPOINT_INTERVALO_MS, 5_000, 3_600_000),
+    maxDirtyMs: numeroLimite(env?.[FLAG_CHECKPOINT_MAX_DIRTY_MS], DEFAULT_CHECKPOINT_MAX_DIRTY_MS, 5_000, 3_600_000)
+  };
+}
+
 function logOperacional(logger = console, payload = {}) {
   try {
     const destino = logger && typeof logger.log === "function" ? logger : console;
     destino.log(TAG_TELEMETRIA, JSON.stringify(payload));
+  } catch {}
+}
+
+function log2C(logger = console, payload = {}) {
+  try {
+    const destino = logger && typeof logger.log === "function" ? logger : console;
+    destino.log(TAG_2C, JSON.stringify(payload));
   } catch {}
 }
 
@@ -176,14 +218,17 @@ function lerJsonArquivoDireto(file = "", fallback = null, fsImpl = fs) {
       return { ok: false, motivo: "arquivo_vazio", valor: fallback, bytes };
     }
     const valor = JSON.parse(textoArquivo);
-    return { ok: true, motivo: "ok", valor, bytes };
+    const stat = statArquivoSeguro(file, fsImpl);
+    return { ok: true, motivo: "ok", valor, bytes, mtimeMs: stat.mtimeMs || 0 };
   } catch (erro) {
+    const stat = statArquivoSeguro(file, fsImpl);
     return {
       ok: false,
       motivo: "json_corrompido",
       erro: erro?.message || "erro_json",
       valor: fallback,
-      bytes: tamanhoArquivo(file, fsImpl)
+      bytes: stat.bytes || tamanhoArquivo(file, fsImpl),
+      mtimeMs: stat.mtimeMs || 0
     };
   }
 }
@@ -254,6 +299,194 @@ function chaveHistoricoAtual(clienteId = "admin", item = {}, posicaoLegada = -1)
   return crypto.createHash("sha1").update(base).digest("hex");
 }
 
+function normalizarChave(valor = "") {
+  return texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function numeroComparavel(valor) {
+  if (valor === null || valor === undefined || valor === "") return "";
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero.toFixed(2) : texto(valor);
+}
+
+function identidadesItemFilaV2(item = {}) {
+  const identidades = [];
+  const camposId = [
+    item.id,
+    item.ofertaId,
+    item.oferta_id,
+    item.engineOfertaId,
+    item.engine_oferta_id,
+    item.idOferta
+  ];
+
+  for (const valor of camposId) {
+    const id = texto(valor);
+    if (id) identidades.push(`id:${id}`);
+  }
+
+  const produtoId = normalizarChave(item.produtoId || item.produto_id || item.sku || "");
+  if (produtoId) identidades.push(`produto:${produtoId}`);
+
+  const linkOriginal = normalizarChave(item.linkOriginal || item.link_original || "");
+  const linkAfiliado = normalizarChave(item.linkAfiliado || item.link || item.linkFinal || "");
+  if (linkOriginal) identidades.push(`link:${linkOriginal}`);
+  if (linkAfiliado) identidades.push(`link:${linkAfiliado}`);
+
+  const titulo = normalizarChave(item.titulo || item.nome || "");
+  const preco = numeroComparavel(item.preco || item.precoAtual);
+  if (titulo && preco) identidades.push(`titulo_preco:${titulo}|${preco}`);
+
+  return [...new Set(identidades)];
+}
+
+function identidadePrincipalItemFilaV2(item = {}, indice = -1) {
+  return identidadesItemFilaV2(item)[0] || `indice:${indice}`;
+}
+
+function rankStatusFilaV2(status = "") {
+  const valor = statusItem({ status });
+  if (["enviado", "enviada", "finalizado", "concluido", "concluida"].includes(valor)) return 60;
+  if (["expirada_operacional", "expirado", "expirada", "cancelada", "descartada"].includes(valor)) return 55;
+  if (["enviando", "processando"].includes(valor)) return 45;
+  if (["erro", "falha", "retida"].includes(valor)) return 35;
+  if (["pendente", "novo", "nova"].includes(valor)) return 20;
+  return 10;
+}
+
+function escolherItemMaisAvancadoFilaV2(atual = {}, candidato = {}) {
+  const rankAtual = rankStatusFilaV2(statusItem(atual));
+  const rankCandidato = rankStatusFilaV2(statusItem(candidato));
+  if (rankCandidato > rankAtual) return { item: candidato, trocou: true, motivo: "status_mais_avancado" };
+  return { item: atual, trocou: false, motivo: "preservar_legado_ou_empate" };
+}
+
+function mesclarFilaLegadaComViva(clienteId = "admin", filaLegadaCliente = [], entradasViva = [], opcoes = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const agora = opcoes.agora || Date.now();
+  const filaFinal = [];
+  const indicePorIdentidade = new Map();
+  let itensInseridos = 0;
+  let itensAtualizados = 0;
+  let duplicatasEvitadas = 0;
+  let statusPreservados = 0;
+
+  for (const item of lista(filaLegadaCliente)) {
+    if (clienteSeguro(item?.clienteId || "admin") !== cliente) continue;
+    const indice = filaFinal.length;
+    filaFinal.push(item);
+    for (const identidade of identidadesItemFilaV2(item)) {
+      if (!indicePorIdentidade.has(identidade)) indicePorIdentidade.set(identidade, indice);
+    }
+  }
+
+  for (const entrada of normalizarEntradasViva(entradasViva, agora)) {
+    if (entrada.bucket !== "viva") continue;
+    const itemViva = entrada.item || {};
+    if (clienteSeguro(itemViva?.clienteId || cliente) !== cliente) continue;
+    const identidades = identidadesItemFilaV2(itemViva);
+    let indiceExistente = -1;
+    for (const identidade of identidades) {
+      if (indicePorIdentidade.has(identidade)) {
+        indiceExistente = indicePorIdentidade.get(identidade);
+        break;
+      }
+    }
+
+    if (indiceExistente >= 0) {
+      duplicatasEvitadas += 1;
+      const itemLegado = filaFinal[indiceExistente] || {};
+      const itemVivaComIndice = {
+        ...itemViva,
+        posicaoLegada: Number.isInteger(Number(itemLegado.posicaoLegada))
+          ? Number(itemLegado.posicaoLegada)
+          : indiceExistente
+      };
+      const escolhido = escolherItemMaisAvancadoFilaV2(itemLegado, itemVivaComIndice);
+      if (escolhido.trocou) {
+        filaFinal[indiceExistente] = escolhido.item;
+        itensAtualizados += 1;
+      } else {
+        statusPreservados += 1;
+      }
+      for (const identidade of identidades) {
+        if (!indicePorIdentidade.has(identidade)) indicePorIdentidade.set(identidade, indiceExistente);
+      }
+      continue;
+    }
+
+    const indiceNovo = filaFinal.length;
+    filaFinal.push({
+      ...itemViva,
+      posicaoLegada: Number.isInteger(Number(entrada.posicaoLegada)) ? Number(entrada.posicaoLegada) : indiceNovo
+    });
+    itensInseridos += 1;
+    for (const identidade of identidades) indicePorIdentidade.set(identidade, indiceNovo);
+    if (!identidades.length) indicePorIdentidade.set(identidadePrincipalItemFilaV2(itemViva, indiceNovo), indiceNovo);
+  }
+
+  return {
+    ok: true,
+    clienteId: cliente,
+    filaCliente: filaFinal,
+    totalLegado: lista(filaLegadaCliente).length,
+    totalViva: normalizarEntradasViva(entradasViva, agora).filter(entrada => entrada.bucket === "viva").length,
+    totalFinal: filaFinal.length,
+    itensInseridos,
+    itensAtualizados,
+    duplicatasEvitadas,
+    statusPreservados
+  };
+}
+
+function lerFilaVivaParaMerge(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminhoViva, [], fsImpl);
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      entradas: [],
+      bytes: leitura.bytes || 0,
+      mtimeMs: leitura.mtimeMs || 0
+    };
+  }
+
+  return {
+    ok: true,
+    motivo: leitura.motivo,
+    entradas: normalizarEntradasViva(leitura.valor, deps.agora || Date.now()),
+    bytes: leitura.bytes || 0,
+    mtimeMs: leitura.mtimeMs || 0
+  };
+}
+
+function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const viva = statArquivoSeguro(caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps), fsImpl);
+  const legado = statArquivoSeguro(caminhoJsonCliente(cliente, FILA_LEGADA_ARQUIVO, deps), fsImpl);
+  return {
+    ok: true,
+    clienteId: cliente,
+    vivaExiste: viva.existe,
+    legadoExiste: legado.existe,
+    vivaMtimeMs: viva.mtimeMs,
+    legadoMtimeMs: legado.mtimeMs,
+    bytesFilaViva: viva.bytes,
+    bytesLegado: legado.bytes,
+    maisNova: viva.existe && (!legado.existe || viva.mtimeMs > legado.mtimeMs)
+  };
+}
+
 function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
   const escritor = deps.writeClienteJson || writeClienteJson;
   if (typeof escritor !== "function") {
@@ -276,6 +509,103 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
       erro: erro?.message || "erro_escrita"
     };
   }
+}
+
+function inserirItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const fsImpl = deps.fs || fs;
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminhoViva, [], fsImpl);
+
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "insert_viva_incremental",
+      clienteId: cliente,
+      ok: false,
+      fallbackLegado: true,
+      motivo: leitura.motivo,
+      bytesLidosViva: leitura.bytes || 0,
+      insertVivaMs: duracaoMs
+    });
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      fallbackLegado: true,
+      bytesLidosViva: leitura.bytes || 0,
+      insertVivaMs: duracaoMs
+    };
+  }
+
+  const entradasExistentes = normalizarEntradasViva(leitura.valor, agora)
+    .filter(entrada => entrada.bucket === "viva");
+  const posicaoLegada = Number.isInteger(Number(deps.posicaoLegada))
+    ? Number(deps.posicaoLegada)
+    : entradasExistentes.length;
+  const entradaNova = normalizarEntradaViva(item, posicaoLegada, agora);
+
+  if (entradaNova.bucket !== "viva") {
+    const historico = appendHistoricoIncremental(cliente, entradaNova, { ...deps, agora });
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "insert_terminal_historico_incremental",
+      clienteId: cliente,
+      ok: historico.ok === true,
+      motivo: historico.motivo,
+      bytesHistorico: historico.bytes || 0,
+      insertVivaMs: duracaoMs
+    });
+    return {
+      ok: historico.ok === true,
+      motivo: historico.motivo,
+      entrada: entradaNova,
+      item: entradaNova.item,
+      terminalHistorico: true,
+      bytesHistorico: historico.bytes || 0,
+      insertVivaMs: duracaoMs
+    };
+  }
+
+  const idNovo = entradaNova.id;
+  const jaExiste = entradasExistentes.some(entrada => entrada.id === idNovo);
+  const entradasAtualizadas = jaExiste
+    ? entradasExistentes.map(entrada => entrada.id === idNovo ? entradaNova : entrada)
+    : entradasExistentes.concat(entradaNova);
+  const escrita = escreverFilaViva(cliente, entradasAtualizadas, { ...deps, agora });
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+
+  if (escrita.ok !== true || deps.logSucesso === true) {
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "insert_viva_incremental",
+      clienteId: cliente,
+      ok: escrita.ok === true,
+      fallbackLegado: escrita.ok !== true,
+      idempotente: jaExiste,
+      totalViva: escrita.totalViva || entradasAtualizadas.length,
+      bytesLidosViva: leitura.bytes || 0,
+      bytesFilaViva: escrita.bytesFilaViva || 0,
+      insertVivaMs: duracaoMs
+    });
+  }
+
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.motivo,
+    entrada: entradaNova,
+    item: entradaNova.item,
+    idempotente: jaExiste,
+    totalViva: escrita.totalViva || entradasAtualizadas.length,
+    bytesLidosViva: leitura.bytes || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    insertVivaMs: duracaoMs,
+    fallbackLegado: escrita.ok !== true
+  };
 }
 
 function recuperarFilaVivaDoLegado(clienteId = "admin", deps = {}) {
@@ -881,6 +1211,168 @@ function sincronizarCanaryEscrita(params = {}, deps = {}, opcoes = {}) {
   };
 }
 
+function criarControladorCheckpointLegadoV2(opcoes = {}) {
+  const politica = opcoes.politica || politicaCheckpointLegado(opcoes.env || process.env);
+  const estados = new Map();
+
+  function obterEstado(clienteId = "admin") {
+    const cliente = clienteSeguro(clienteId);
+    if (!estados.has(cliente)) {
+      estados.set(cliente, {
+        clienteId: cliente,
+        dirty: false,
+        mutacoes: 0,
+        dirtyDesde: 0,
+        ultimoCheckpoint: 0,
+        checkpoints: 0,
+        ultimoMotivo: "",
+        generation: 0,
+        checkpointEmAndamento: false,
+        checkpointGeneration: 0,
+        checkpointMutacoes: 0,
+        checkpointConcurrentSkip: 0
+      });
+    }
+    return estados.get(cliente);
+  }
+
+  function snapshot(clienteId = "admin", agora = Date.now()) {
+    const estado = obterEstado(clienteId);
+    return {
+      clienteId: estado.clienteId,
+      dirty: estado.dirty,
+      mutacoes: estado.mutacoes,
+      dirtyAgeMs: estado.dirty && estado.dirtyDesde ? Math.max(0, agora - estado.dirtyDesde) : 0,
+      checkpoints: estado.checkpoints,
+      ultimoMotivo: estado.ultimoMotivo,
+      generation: estado.generation,
+      checkpointEmAndamento: estado.checkpointEmAndamento,
+      checkpointGeneration: estado.checkpointGeneration,
+      checkpointConcurrentSkip: estado.checkpointConcurrentSkip
+    };
+  }
+
+  function marcarDirty(clienteId = "admin", motivo = "mutacao_viva", agora = Date.now()) {
+    const estado = obterEstado(clienteId);
+    if (!estado.dirty) {
+      estado.dirty = true;
+      estado.dirtyDesde = agora;
+    }
+    estado.mutacoes += 1;
+    estado.ultimoMotivo = texto(motivo || "mutacao_viva");
+    estado.generation += 1;
+    return snapshot(clienteId, agora);
+  }
+
+  function deveCheckpoint(clienteId = "admin", opcoesCheckpoint = {}) {
+    const agora = opcoesCheckpoint.agora || Date.now();
+    const estado = obterEstado(clienteId);
+    if (!estado.dirty) return { deve: false, motivo: "limpo", estado: snapshot(clienteId, agora), politica };
+    if (opcoesCheckpoint.forcar) return { deve: true, motivo: opcoesCheckpoint.motivo || "forcado", estado: snapshot(clienteId, agora), politica };
+    const dirtyAgeMs = estado.dirtyDesde ? Math.max(0, agora - estado.dirtyDesde) : 0;
+    const desdeCheckpointMs = estado.ultimoCheckpoint ? Math.max(0, agora - estado.ultimoCheckpoint) : dirtyAgeMs;
+    if (estado.mutacoes >= politica.mutacoes) {
+      return { deve: true, motivo: "mutacoes", estado: snapshot(clienteId, agora), politica };
+    }
+    if (desdeCheckpointMs >= politica.intervaloMs) {
+      return { deve: true, motivo: "intervalo", estado: snapshot(clienteId, agora), politica };
+    }
+    if (dirtyAgeMs >= politica.maxDirtyMs) {
+      return { deve: true, motivo: "max_dirty", estado: snapshot(clienteId, agora), politica };
+    }
+    return { deve: false, motivo: "aguardando_batch", estado: snapshot(clienteId, agora), politica };
+  }
+
+  function iniciarCheckpoint(clienteId = "admin", opcoesCheckpoint = {}) {
+    const agora = opcoesCheckpoint.agora || Date.now();
+    const estado = obterEstado(clienteId);
+    if (estado.checkpointEmAndamento) {
+      estado.checkpointConcurrentSkip += 1;
+      return {
+        deve: false,
+        motivo: "checkpoint_em_andamento",
+        checkpointConcurrentSkip: true,
+        estado: snapshot(clienteId, agora),
+        politica
+      };
+    }
+
+    const decisao = deveCheckpoint(clienteId, opcoesCheckpoint);
+    if (!decisao.deve) return decisao;
+
+    estado.checkpointEmAndamento = true;
+    estado.checkpointGeneration = estado.generation;
+    estado.checkpointMutacoes = estado.mutacoes;
+    return {
+      ...decisao,
+      generationInicial: estado.checkpointGeneration,
+      mutacoesCapturadas: estado.checkpointMutacoes,
+      estado: snapshot(clienteId, agora)
+    };
+  }
+
+  function concluirCheckpoint(clienteId = "admin", opcoesConclusao = {}) {
+    const agora = opcoesConclusao.agora || Date.now();
+    const estado = obterEstado(clienteId);
+    const generationInicial = Number(opcoesConclusao.generationInicial || estado.checkpointGeneration || 0);
+    const mutacoesCapturadas = Number(opcoesConclusao.mutacoesCapturadas || estado.checkpointMutacoes || 0);
+
+    estado.checkpointEmAndamento = false;
+    estado.checkpointGeneration = 0;
+    estado.checkpointMutacoes = 0;
+
+    if (opcoesConclusao.ok !== true) {
+      estado.dirty = true;
+      if (!estado.dirtyDesde) estado.dirtyDesde = agora;
+      estado.ultimoMotivo = texto(opcoesConclusao.motivo || "checkpoint_falhou");
+      return snapshot(clienteId, agora);
+    }
+
+    if (estado.generation === generationInicial) {
+      estado.dirty = false;
+      estado.mutacoes = 0;
+      estado.dirtyDesde = 0;
+    } else {
+      estado.dirty = true;
+      estado.mutacoes = Math.max(1, estado.mutacoes - mutacoesCapturadas);
+      if (!estado.dirtyDesde) estado.dirtyDesde = agora;
+    }
+    estado.ultimoCheckpoint = agora;
+    estado.checkpoints += 1;
+    estado.ultimoMotivo = texto(opcoesConclusao.motivo || "checkpoint_confirmado");
+    return snapshot(clienteId, agora);
+  }
+
+  function confirmarCheckpoint(clienteId = "admin", opcoesConfirmacao = {}) {
+    const agora = opcoesConfirmacao.agora || Date.now();
+    const estado = obterEstado(clienteId);
+    estado.dirty = false;
+    estado.mutacoes = 0;
+    estado.dirtyDesde = 0;
+    estado.ultimoCheckpoint = agora;
+    estado.checkpoints += 1;
+    estado.ultimoMotivo = texto(opcoesConfirmacao.motivo || "checkpoint_confirmado");
+    return snapshot(clienteId, agora);
+  }
+
+  function pendentes(agora = Date.now()) {
+    return Array.from(estados.values())
+      .filter(estado => estado.dirty)
+      .map(estado => snapshot(estado.clienteId, agora));
+  }
+
+  return {
+    politica,
+    marcarDirty,
+    deveCheckpoint,
+    iniciarCheckpoint,
+    concluirCheckpoint,
+    confirmarCheckpoint,
+    snapshot,
+    pendentes
+  };
+}
+
 function criarControladorFilaOperacionalV2(opcoes = {}) {
   function prepararSeHabilitado(params = {}) {
     const modo = modoOperacional(opcoes.env || process.env);
@@ -929,6 +1421,10 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     prepararSeHabilitado,
     deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env),
     sincronizarCanaryEscrita: (params = {}, deps = {}) => sincronizarCanaryEscrita(params, deps, opcoes),
+    inserirItemFilaVivaIncremental: (clienteId, item, deps = {}) => inserirItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
+    lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
+    filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
+    mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
@@ -943,17 +1439,34 @@ module.exports = {
   FLAG_ROLLOUT_ATIVO,
   FLAG_CANARY_CLIENTES,
   FLAG_2B1_SHADOW_ATIVA,
+  FLAG_CHECKPOINT_MUTACOES,
+  FLAG_CHECKPOINT_INTERVALO_MS,
+  FLAG_CHECKPOINT_MAX_DIRTY_MS,
   HISTORICO_INCREMENTAL_DIR,
   TAG_TELEMETRIA,
   TAG_CANARY_WRITER,
+  TAG_2C,
+  DEFAULT_CHECKPOINT_MUTACOES,
+  DEFAULT_CHECKPOINT_INTERVALO_MS,
+  DEFAULT_CHECKPOINT_MAX_DIRTY_MS,
   normalizarEntradasViva,
+  identidadesItemFilaV2,
+  identidadePrincipalItemFilaV2,
+  rankStatusFilaV2,
+  escolherItemMaisAvancadoFilaV2,
+  mesclarFilaLegadaComViva,
+  lerFilaVivaParaMerge,
+  filaVivaMaisNovaQueLegado,
   lerFilaViva,
   escreverFilaViva,
+  inserirItemFilaVivaIncremental,
   recuperarFilaVivaDoLegado,
   appendHistoricoIncremental,
   moverTerminalParaHistorico,
   compararVivaComLegado,
   itemTerminalParaHistorico,
+  politicaCheckpointLegado,
+  criarControladorCheckpointLegadoV2,
   modoOperacional,
   deveUsarFilaV2Operacional,
   criarControladorFilaOperacionalV2,

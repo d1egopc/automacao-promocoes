@@ -1305,4 +1305,220 @@ function criarDepsFilaOperacionalTeste() {
   assert.strictEqual(leitura3.ok, true);
 }
 
+function criarStorageTemporarioFilaV2() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fila-v2-2c-"));
+  const getClienteJsonPath = (clienteId, arquivo) => path.join(dir, clienteId, arquivo);
+  const writeClienteJson = (clienteId, arquivo, dados) => {
+    const destino = getClienteJsonPath(clienteId, arquivo);
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.writeFileSync(destino, JSON.stringify(dados), "utf8");
+    return true;
+  };
+  return { dir, getClienteJsonPath, writeClienteJson };
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const item = oferta("v2c_insert", { clienteId: "cliente_2c", status: "pendente" });
+  const resultado = filaOperacionalV2.inserirItemFilaVivaIncremental("cliente_2c", item, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA,
+    posicaoLegada: 17
+  });
+
+  const vivaPath = storage.getClienteJsonPath("cliente_2c", FILA_VIVA_ARQUIVO);
+  const legadoPath = storage.getClienteJsonPath("cliente_2c", "fila.json");
+  const viva = JSON.parse(fs.readFileSync(vivaPath, "utf8"));
+
+  assert.strictEqual(resultado.ok, true, "insert 2C deve persistir na fila viva");
+  assert.strictEqual(viva.length, 1);
+  assert.strictEqual(viva[0].id, "v2c_insert");
+  assert.strictEqual(viva[0].posicaoLegada, 17, "posicao legada deve ser preservada para rotas por indice");
+  assert.strictEqual(fs.existsSync(legadoPath), false, "insert 2C nao deve escrever fila.json no hot path");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const vivaPath = storage.getClienteJsonPath("cliente_corrupto", FILA_VIVA_ARQUIVO);
+  fs.mkdirSync(path.dirname(vivaPath), { recursive: true });
+  fs.writeFileSync(vivaPath, "{json quebrado", "utf8");
+
+  const resultado = filaOperacionalV2.inserirItemFilaVivaIncremental(
+    "cliente_corrupto",
+    oferta("nao_persistir", { clienteId: "cliente_corrupto" }),
+    {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      logger: { log: () => {} },
+      agora: AGORA
+    }
+  );
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.fallbackLegado, true, "viva corrompida deve cair para legado seguro");
+  assert.strictEqual(resultado.motivo, "json_corrompido");
+}
+
+{
+  const controlador = filaOperacionalV2.criarControladorCheckpointLegadoV2({
+    politica: { mutacoes: 2, intervaloMs: 1000, maxDirtyMs: 3000 }
+  });
+
+  controlador.marcarDirty("cliente_checkpoint", "insert", 1000);
+  assert.strictEqual(controlador.deveCheckpoint("cliente_checkpoint", { agora: 1200 }).deve, false);
+  controlador.marcarDirty("cliente_checkpoint", "insert", 1300);
+  assert.strictEqual(controlador.deveCheckpoint("cliente_checkpoint", { agora: 1300 }).motivo, "mutacoes");
+  controlador.confirmarCheckpoint("cliente_checkpoint", { agora: 1400 });
+  assert.strictEqual(controlador.snapshot("cliente_checkpoint", 1500).dirty, false);
+
+  controlador.marcarDirty("cliente_checkpoint", "insert", 2000);
+  assert.strictEqual(controlador.deveCheckpoint("cliente_checkpoint", { agora: 2600 }).deve, true);
+  assert.strictEqual(controlador.deveCheckpoint("cliente_checkpoint", { agora: 2600 }).motivo, "intervalo");
+  controlador.confirmarCheckpoint("cliente_checkpoint", { agora: 2600 });
+
+  const controladorMaxDirty = filaOperacionalV2.criarControladorCheckpointLegadoV2({
+    politica: { mutacoes: 50, intervaloMs: 10000, maxDirtyMs: 3000 }
+  });
+  controladorMaxDirty.marcarDirty("cliente_checkpoint", "insert", 3000);
+  assert.strictEqual(controladorMaxDirty.deveCheckpoint("cliente_checkpoint", { agora: 6101 }).motivo, "max_dirty");
+}
+
+{
+  const fila = [];
+  const store = criarFilaStore(fila);
+  const item = oferta("ponte_memoria", { clienteId: "cliente_ponte" });
+  fila.push(item);
+  const update = store.atualizarItem(item, { motivo: "fila_v2_2c_insert", agora: AGORA });
+
+  assert.strictEqual(update, true);
+  assert.strictEqual(store.itensPorCliente("cliente_ponte").length, 1, "FilaStore deve aceitar update incremental");
+  assert.strictEqual(store.snapshotMetricas({}).atualizacoes, 1, "update incremental nao deve exigir rebuild completo");
+}
+
+{
+  const legado = [
+    oferta("merge_a", { clienteId: "cliente_merge", status: "pendente" }),
+    oferta("merge_b", { clienteId: "cliente_merge", status: "processando" })
+  ];
+  const vivaEntries = [
+    { id: "merge_a", bucket: "viva", item: oferta("merge_a", { clienteId: "cliente_merge", status: "enviado", enviadoEm: new Date(AGORA).toISOString() }) },
+    { id: "merge_c", bucket: "viva", posicaoLegada: 2, item: oferta("merge_c", { clienteId: "cliente_merge", status: "pendente" }) },
+    { id: "merge_c_duplicado", bucket: "viva", posicaoLegada: 2, item: oferta("merge_c", { clienteId: "cliente_merge", status: "pendente" }) }
+  ];
+
+  const merge = filaOperacionalV2.mesclarFilaLegadaComViva("cliente_merge", legado, vivaEntries, { agora: AGORA });
+  const ids = merge.filaCliente.map(item => item.id);
+
+  assert.deepStrictEqual(ids, ["merge_a", "merge_b", "merge_c"], "merge deve preservar ordem legada e anexar vivo ausente uma vez");
+  assert.strictEqual(merge.itensInseridos, 1);
+  assert.strictEqual(merge.itensAtualizados, 1);
+  assert.strictEqual(merge.duplicatasEvitadas, 2);
+  assert.strictEqual(merge.filaCliente[0].status, "enviado", "status mais avancado da viva deve proteger memoria antes do checkpoint");
+  assert.strictEqual(merge.filaCliente[2].posicaoLegada, 2, "item vivo anexado deve ganhar posicao legada compativel");
+}
+
+{
+  const legado = [
+    oferta("merge_status", { clienteId: "cliente_merge_status", status: "enviado", enviadoEm: new Date(AGORA).toISOString() })
+  ];
+  const vivaEntries = [
+    { id: "merge_status", bucket: "viva", item: oferta("merge_status", { clienteId: "cliente_merge_status", status: "pendente" }) }
+  ];
+
+  const merge = filaOperacionalV2.mesclarFilaLegadaComViva("cliente_merge_status", legado, vivaEntries, { agora: AGORA });
+
+  assert.strictEqual(merge.filaCliente.length, 1);
+  assert.strictEqual(merge.filaCliente[0].status, "enviado", "viva antiga nao deve regredir status legado mais avancado");
+  assert.strictEqual(merge.statusPreservados, 1);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const vivaPath = storage.getClienteJsonPath("cliente_merge_corrupto", FILA_VIVA_ARQUIVO);
+  fs.mkdirSync(path.dirname(vivaPath), { recursive: true });
+  fs.writeFileSync(vivaPath, "{viva quebrada", "utf8");
+
+  const leitura = filaOperacionalV2.lerFilaVivaParaMerge("cliente_merge_corrupto", {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(leitura.ok, false);
+  assert.strictEqual(leitura.motivo, "json_corrompido");
+  assert.deepStrictEqual(leitura.entradas, [], "viva invalida nao deve participar do merge");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_recovery_mtime";
+  const legadoPath = storage.getClienteJsonPath(cliente, "fila.json");
+  const vivaPath = storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO);
+  fs.mkdirSync(path.dirname(legadoPath), { recursive: true });
+  fs.writeFileSync(legadoPath, JSON.stringify([oferta("legado_mtime", { clienteId: cliente })]), "utf8");
+  fs.writeFileSync(vivaPath, JSON.stringify([{ item: oferta("viva_mtime", { clienteId: cliente }), bucket: "viva", posicaoLegada: 1 }]), "utf8");
+  fs.utimesSync(legadoPath, new Date(AGORA - 10_000), new Date(AGORA - 10_000));
+  fs.utimesSync(vivaPath, new Date(AGORA), new Date(AGORA));
+
+  const vivaMaisNova = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath
+  });
+  assert.strictEqual(vivaMaisNova.maisNova, true, "recovery so deve ser elegivel quando viva for mais nova que legado");
+
+  fs.utimesSync(legadoPath, new Date(AGORA + 10_000), new Date(AGORA + 10_000));
+  const legadoMaisNovo = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath
+  });
+  assert.strictEqual(legadoMaisNovo.maisNova, false, "viva antiga nao deve sobrepor legado mais recente");
+}
+
+{
+  const controlador = filaOperacionalV2.criarControladorCheckpointLegadoV2({
+    politica: { mutacoes: 1, intervaloMs: 10000, maxDirtyMs: 20000 }
+  });
+
+  controlador.marcarDirty("cliente_generation", "insert_1", 1000);
+  const inicio = controlador.iniciarCheckpoint("cliente_generation", { agora: 1001 });
+  assert.strictEqual(inicio.deve, true);
+  assert.strictEqual(inicio.generationInicial, 1);
+
+  const concorrente = controlador.iniciarCheckpoint("cliente_generation", { agora: 1002 });
+  assert.strictEqual(concorrente.deve, false);
+  assert.strictEqual(concorrente.checkpointConcurrentSkip, true, "checkpoint simultaneo deve ser ignorado por cliente");
+
+  controlador.marcarDirty("cliente_generation", "insert_durante_checkpoint", 1003);
+  const conclusao = controlador.concluirCheckpoint("cliente_generation", {
+    ok: true,
+    generationInicial: inicio.generationInicial,
+    mutacoesCapturadas: inicio.mutacoesCapturadas,
+    agora: 1004
+  });
+
+  assert.strictEqual(conclusao.dirty, true, "mutacao durante checkpoint deve manter dirty");
+  assert.strictEqual(conclusao.generation, 2);
+  assert.strictEqual(conclusao.mutacoes, 1);
+  assert.strictEqual(conclusao.checkpointConcurrentSkip, 1);
+}
+
+{
+  const controlador = filaOperacionalV2.criarControladorCheckpointLegadoV2({
+    politica: { mutacoes: 1, intervaloMs: 10000, maxDirtyMs: 20000 }
+  });
+
+  controlador.marcarDirty("cliente_falha_checkpoint", "insert", 2000);
+  const inicio = controlador.iniciarCheckpoint("cliente_falha_checkpoint", { agora: 2001 });
+  const conclusao = controlador.concluirCheckpoint("cliente_falha_checkpoint", {
+    ok: false,
+    generationInicial: inicio.generationInicial,
+    mutacoesCapturadas: inicio.mutacoesCapturadas,
+    agora: 2002,
+    motivo: "falha_write"
+  });
+
+  assert.strictEqual(conclusao.dirty, true, "falha no checkpoint nunca deve limpar dirty");
+  assert.strictEqual(conclusao.ultimoMotivo, "falha_write");
+}
+
 console.log("fila-store-v2.test.js OK");

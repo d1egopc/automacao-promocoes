@@ -274,7 +274,10 @@ const {
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
 const { criarControladorFilaV2Shadow } = require("./modules/fila/fila-v2-shadow");
-const { criarControladorFilaOperacionalV2 } = require("./modules/fila/fila-operacional-v2");
+const {
+  criarControladorFilaOperacionalV2,
+  criarControladorCheckpointLegadoV2
+} = require("./modules/fila/fila-operacional-v2");
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
@@ -877,10 +880,14 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   getClientePath,
   logger: console
 });
+const checkpointFilaV2 = criarControladorCheckpointLegadoV2({
+  env: process.env
+});
 const filaDualRead = criarControladorFilaDualRead({
   env: process.env,
   logger: console
 });
+const metricasFilaV22CPorCliente = new Map();
 let ultimoLogFilaStoreMetrics = 0;
 let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
@@ -2332,10 +2339,133 @@ function logFilaStoreMetrics(motivo = "snapshot", extras = {}, forcar = false) {
   })));
 }
 
+function tamanhoArquivoSeguro(caminho = "") {
+  try {
+    return caminho && fs.existsSync(caminho) ? fs.statSync(caminho).size : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function logFilaV22C(payload = {}) {
+  try {
+    console.log("[FILA-V2-2C]", JSON.stringify({
+      versao: 1,
+      ...payload,
+      timestamp: new Date().toISOString()
+    }));
+  } catch {}
+}
+
+function estadoMetricasFilaV22C(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  if (!metricasFilaV22CPorCliente.has(cliente)) {
+    metricasFilaV22CPorCliente.set(cliente, {
+      clienteId: cliente,
+      inserts: 0,
+      insertVivaMsTotal: 0,
+      insertVivaMsMax: 0,
+      updateIncrementalCount: 0,
+      updateIncrementalMsTotal: 0,
+      updateIncrementalMsMax: 0,
+      bytesFilaVivaMax: 0,
+      fallbackLegadoCount: 0,
+      dirtyMergeCount: 0,
+      dirtyMergeItems: 0,
+      recoveryVivaMaisNovaCount: 0,
+      filaStoreIncrementalFallbackCount: 0,
+      checkpointConcurrentSkip: 0,
+      ultimoLog: 0
+    });
+  }
+  return metricasFilaV22CPorCliente.get(cliente);
+}
+
+function snapshotMetricasFilaV22C(clienteId = "admin", resetar = false) {
+  const estado = estadoMetricasFilaV22C(clienteId);
+  const snapshot = {
+    inserts: estado.inserts,
+    insertVivaMsMedio: estado.inserts ? Math.round(estado.insertVivaMsTotal / estado.inserts) : 0,
+    insertVivaMsMax: estado.insertVivaMsMax,
+    updateIncrementalCount: estado.updateIncrementalCount,
+    updateIncrementalMsMedio: estado.updateIncrementalCount ? Math.round(estado.updateIncrementalMsTotal / estado.updateIncrementalCount) : 0,
+    updateIncrementalMsMax: estado.updateIncrementalMsMax,
+    bytesFilaVivaMax: estado.bytesFilaVivaMax,
+    fallbackLegadoCount: estado.fallbackLegadoCount,
+    dirtyMergeCount: estado.dirtyMergeCount,
+    dirtyMergeItems: estado.dirtyMergeItems,
+    recoveryVivaMaisNovaCount: estado.recoveryVivaMaisNovaCount,
+    filaStoreIncrementalFallbackCount: estado.filaStoreIncrementalFallbackCount,
+    checkpointConcurrentSkip: estado.checkpointConcurrentSkip
+  };
+  if (resetar) {
+    estado.inserts = 0;
+    estado.insertVivaMsTotal = 0;
+    estado.insertVivaMsMax = 0;
+    estado.updateIncrementalCount = 0;
+    estado.updateIncrementalMsTotal = 0;
+    estado.updateIncrementalMsMax = 0;
+    estado.bytesFilaVivaMax = 0;
+    estado.fallbackLegadoCount = 0;
+    estado.dirtyMergeCount = 0;
+    estado.dirtyMergeItems = 0;
+    estado.recoveryVivaMaisNovaCount = 0;
+    estado.filaStoreIncrementalFallbackCount = 0;
+    estado.checkpointConcurrentSkip = 0;
+  }
+  return snapshot;
+}
+
+function registrarMetricasFilaV22C(clienteId = "admin", dados = {}) {
+  const estado = estadoMetricasFilaV22C(clienteId);
+  const insertMs = Number(dados.insertVivaMs || 0);
+  const updateMs = Number(dados.updateIncrementalMs || 0);
+  const registraInsert = Object.prototype.hasOwnProperty.call(dados, "insertVivaMs")
+    || Object.prototype.hasOwnProperty.call(dados, "bytesFilaViva")
+    || Number(dados.fallbackLegadoCount || 0) > 0;
+  if (registraInsert) {
+    estado.inserts += 1;
+    estado.insertVivaMsTotal += Number.isFinite(insertMs) ? insertMs : 0;
+    estado.insertVivaMsMax = Math.max(estado.insertVivaMsMax, Number.isFinite(insertMs) ? insertMs : 0);
+  }
+  estado.updateIncrementalCount += Number(dados.updateIncrementalCount || 0);
+  estado.updateIncrementalMsTotal += Number.isFinite(updateMs) ? updateMs : 0;
+  estado.updateIncrementalMsMax = Math.max(estado.updateIncrementalMsMax, Number.isFinite(updateMs) ? updateMs : 0);
+  estado.bytesFilaVivaMax = Math.max(estado.bytesFilaVivaMax, Number(dados.bytesFilaViva || 0));
+  estado.fallbackLegadoCount += Number(dados.fallbackLegadoCount || 0);
+  estado.dirtyMergeCount += Number(dados.dirtyMergeCount || 0);
+  estado.dirtyMergeItems += Number(dados.dirtyMergeItems || 0);
+  estado.recoveryVivaMaisNovaCount += Number(dados.recoveryVivaMaisNovaCount || 0);
+  estado.filaStoreIncrementalFallbackCount += Number(dados.filaStoreIncrementalFallbackCount || 0);
+  estado.checkpointConcurrentSkip += Number(dados.checkpointConcurrentSkip || 0);
+
+  const agora = Date.now();
+  if (!estado.ultimoLog || agora - estado.ultimoLog >= 5 * 60 * 1000) {
+    estado.ultimoLog = agora;
+    logFilaV22C({
+      evento: "hot_path_resumo",
+      clienteId: estado.clienteId,
+      ...snapshotMetricasFilaV22C(estado.clienteId, false)
+    });
+  }
+}
+
 function reconstruirFilaStoreCliente(clienteId = "admin", motivo = "sincronizacao") {
   const cliente = String(clienteId || "admin");
   filaStore.rebuildCliente(fila, cliente, { motivo });
-  logFilaStoreMetrics(motivo, { clienteId: cliente });
+  logFilaStoreMetrics(motivo, { clienteId: cliente, rebuildCompletoCount: 1 });
+}
+
+function atualizarFilaStoreIncrementalFilaV2(item = {}, clienteId = "admin", motivo = "fila_v2_2c_insert") {
+  const inicio = Date.now();
+  const ok = filaStore.atualizarItem(item, { motivo });
+  return {
+    ok: ok !== false,
+    clienteId: String(clienteId || "admin"),
+    updateIncrementalCount: ok === false ? 0 : 1,
+    updateIncrementalMs: Date.now() - inicio,
+    totalCliente: filaStore.itensPorCliente(String(clienteId || "admin")).length
+  };
 }
 
 function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
@@ -2347,7 +2477,69 @@ function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizaca
   });
 }
 
-function salvarFila(clienteId = "admin") {
+function aplicarMergeVivaOperacionalCliente(clienteId = "admin", motivo = "merge", opcoes = {}) {
+  const cliente = String(clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { ok: true, pulou: true, motivo: "v2_desabilitada" };
+  }
+
+  const inicio = Date.now();
+  const leitura = filaOperacionalV2.lerFilaVivaParaMerge(cliente, {
+    agora: opcoes.agora || Date.now(),
+    logger: console
+  });
+
+  if (!leitura.ok) {
+    registrarMetricasFilaV22C(cliente, { dirtyMergeCount: 1 });
+    logFilaV22C({
+      evento: "dirty_merge_fallback_legado",
+      clienteId: cliente,
+      ok: false,
+      motivo: leitura.motivo || "viva_indisponivel",
+      dirty: checkpointFilaV2.snapshot(cliente).dirty,
+      bytesFilaViva: leitura.bytes || 0,
+      dirtyMergeMs: Date.now() - inicio
+    });
+    return { ok: false, fallbackLegado: true, motivo: leitura.motivo || "viva_indisponivel" };
+  }
+
+  const filaClienteLegada = fila.filter(item => String(item?.clienteId || "admin") === cliente);
+  const merge = filaOperacionalV2.mesclarFilaLegadaComViva(cliente, filaClienteLegada, leitura.entradas, {
+    agora: opcoes.agora || Date.now()
+  });
+  const itensAlterados = Number(merge.itensInseridos || 0) + Number(merge.itensAtualizados || 0);
+
+  if (itensAlterados > 0) {
+    const filaSemCliente = fila.filter(item => String(item?.clienteId || "admin") !== cliente);
+    fila = [...filaSemCliente, ...merge.filaCliente];
+    registrarMetricasFilaV22C(cliente, {
+      dirtyMergeCount: 1,
+      dirtyMergeItems: itensAlterados,
+      recoveryVivaMaisNovaCount: opcoes.recovery === true ? Number(merge.itensInseridos || 0) : 0
+    });
+    logFilaV22C({
+      evento: opcoes.recovery === true ? "recovery_viva_mais_nova" : "dirty_merge_memoria",
+      clienteId: cliente,
+      ok: true,
+      motivo,
+      dirty: checkpointFilaV2.snapshot(cliente).dirty,
+      dirtyMergeItems: itensAlterados,
+      itensInseridos: merge.itensInseridos || 0,
+      itensAtualizados: merge.itensAtualizados || 0,
+      duplicatasEvitadas: merge.duplicatasEvitadas || 0,
+      statusPreservados: merge.statusPreservados || 0,
+      totalLegado: merge.totalLegado || 0,
+      totalViva: merge.totalViva || 0,
+      totalFinal: merge.totalFinal || 0,
+      bytesFilaViva: leitura.bytes || 0,
+      dirtyMergeMs: Date.now() - inicio
+    });
+  }
+
+  return { ok: true, pulou: itensAlterados === 0, motivo, leitura, merge };
+}
+
+function salvarFila(clienteId = "admin", opcoes = {}) {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   aplicarDiversidadeFila(clienteId);
   ultimoErroSalvarFilaPorCliente.delete(String(clienteId || "admin"));
@@ -2369,17 +2561,114 @@ function salvarFila(clienteId = "admin") {
     logger: loggerFila
   });
   if (salvou) {
-    reconstruirFilaStoreCliente(clienteId, "salvarFila");
-    projetarFilaV2ShadowCliente(clienteId, "salvarFila");
-    filaOperacionalV2.prepararSeHabilitado({
-      fila,
-      clienteId,
-      motivo: "salvarFila"
-    });
+    const motivo = opcoes.motivo || "salvarFila";
+    if (opcoes.rebuildCompleto !== false) reconstruirFilaStoreCliente(clienteId, motivo);
+    if (opcoes.shadowCompleto !== false) projetarFilaV2ShadowCliente(clienteId, motivo);
+    if (opcoes.prepararV2 !== false) {
+      filaOperacionalV2.prepararSeHabilitado({
+        fila,
+        clienteId,
+        motivo
+      });
+    }
   }
   return salvou;
   });
 }
+
+function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
+  const cliente = String(clienteId || "admin");
+  const agora = Date.now();
+  const decisao = checkpointFilaV2.iniciarCheckpoint(cliente, {
+    agora,
+    forcar: opcoes.forcar === true,
+    motivo
+  });
+  if (!decisao.deve) {
+    if (decisao.checkpointConcurrentSkip) {
+      registrarMetricasFilaV22C(cliente, { checkpointConcurrentSkip: 1 });
+      logFilaV22C({
+        evento: "checkpoint_concurrent_skip",
+        clienteId: cliente,
+        ok: true,
+        motivo: decisao.motivo,
+        checkpointGeneration: decisao.estado?.checkpointGeneration || 0,
+        checkpointConcurrentSkip: decisao.estado?.checkpointConcurrentSkip || 0
+      });
+    }
+    return { ok: true, pulou: true, motivo: decisao.motivo, estado: decisao.estado };
+  }
+
+  const inicio = Date.now();
+  const mergeAntesCheckpoint = aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
+    recovery: false
+  });
+  const salvou = salvarFila(cliente, { motivo: `fila_v2_2c_${decisao.motivo || motivo}` });
+  const duracaoMs = Date.now() - inicio;
+  const bytesCheckpoint = tamanhoArquivoSeguro(getFilaFile(cliente));
+
+  if (salvou) {
+    const estado = checkpointFilaV2.concluirCheckpoint(cliente, {
+      ok: true,
+      generationInicial: decisao.generationInicial,
+      mutacoesCapturadas: decisao.mutacoesCapturadas,
+      agora: Date.now(),
+      motivo: decisao.motivo || motivo
+    });
+    logFilaV22C({
+      evento: "checkpoint_legado_batched",
+      clienteId: cliente,
+      ok: true,
+      motivo: decisao.motivo,
+      checkpointCount: estado.checkpoints,
+      checkpointMutations: decisao.mutacoesCapturadas || decisao.estado?.mutacoes || 0,
+      checkpointGeneration: decisao.generationInicial || 0,
+      checkpointConcurrentSkip: estado.checkpointConcurrentSkip || 0,
+      dirtyAposCheckpoint: estado.dirty,
+      mergeAntesCheckpoint: mergeAntesCheckpoint?.merge ? {
+        itensInseridos: mergeAntesCheckpoint.merge.itensInseridos || 0,
+        itensAtualizados: mergeAntesCheckpoint.merge.itensAtualizados || 0
+      } : null,
+      checkpointLegadoMs: duracaoMs,
+      bytesCheckpoint,
+      hotPathResumo: snapshotMetricasFilaV22C(cliente, true),
+      politica: decisao.politica
+    });
+    return { ok: true, motivo: decisao.motivo, estado, checkpointLegadoMs: duracaoMs, bytesCheckpoint };
+  }
+
+  const estadoFalha = checkpointFilaV2.concluirCheckpoint(cliente, {
+    ok: false,
+    generationInicial: decisao.generationInicial,
+    mutacoesCapturadas: decisao.mutacoesCapturadas,
+    agora: Date.now(),
+    motivo: erroSalvarFilaCliente(cliente).motivo
+  });
+  logFilaV22C({
+    evento: "checkpoint_legado_batched",
+    clienteId: cliente,
+    ok: false,
+    motivo: erroSalvarFilaCliente(cliente).motivo,
+    checkpointMutations: decisao.mutacoesCapturadas || decisao.estado?.mutacoes || 0,
+    checkpointGeneration: decisao.generationInicial || 0,
+    checkpointConcurrentSkip: estadoFalha.checkpointConcurrentSkip || 0,
+    checkpointLegadoMs: duracaoMs,
+    bytesCheckpoint
+  });
+  return { ok: false, motivo: erroSalvarFilaCliente(cliente).motivo, estado: estadoFalha, checkpointLegadoMs: duracaoMs };
+}
+
+function executarCheckpointsFilaV22CVencidos(motivo = "ciclo") {
+  const agora = Date.now();
+  const pendentes = checkpointFilaV2.pendentes(agora);
+  for (const estado of pendentes) {
+    checkpointLegadoFilaV22C(estado.clienteId, motivo);
+  }
+}
+
+process.once("beforeExit", () => {
+  executarCheckpointsFilaV22CVencidos("shutdown");
+});
 
 function carregarFila(clienteId = "admin") {
   return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
@@ -2391,6 +2680,15 @@ function carregarFila(clienteId = "admin") {
     logger: console
   });
 
+  const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
+  const estadoArquivosV2 = dirty
+    ? { maisNova: true }
+    : filaOperacionalV2.filaVivaMaisNovaQueLegado(clienteId);
+  if (dirty || estadoArquivosV2.maisNova) {
+    aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : "carregarFila_recovery", {
+      recovery: !dirty
+    });
+  }
   reconstruirFilaStoreCliente(clienteId, "carregarFila");
   projetarFilaV2ShadowCliente(clienteId, "carregarFila");
   filaOperacionalV2.prepararSeHabilitado({
@@ -2509,7 +2807,10 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       return { ok: false, motivo: "usuario_inativo" };
     }
 
-    carregarFila(cliente);
+    const usarFilaV2HotPath = filaOperacionalV2.deveUsarFilaV2Operacional(cliente);
+    if (!usarFilaV2HotPath) {
+      carregarFila(cliente);
+    }
 
     const itemFinal = {
       ...itemFila,
@@ -2535,6 +2836,130 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
         ...resumirFilaPorStatus(fila)
       });
       return { ok: false, duplicada: true, motivo: "duplicidade_fila" };
+    }
+
+    if (usarFilaV2HotPath) {
+      return executarMutacaoFilaCliente(cliente, "fila_v2_2c_insert", () => {
+        const filaValidacao = [];
+        const itemValidacao = { ...itemFinal };
+        const validado = filaOfertas.adicionarOfertaFila(filaValidacao, itemValidacao, {
+          clienteId: cliente,
+          origem: itemValidacao.origem || "engine",
+          logger: console
+        });
+        const itemPersistente = filaValidacao[0] || itemValidacao;
+
+        if (!validado) {
+          const motivo = itemPersistente.antiRepeticao2h?.motivo || "fila_porta_bloqueada";
+          console.log("[ENGINE-DISTRIBUIDOR-FILA-RECUSADA]", {
+            clienteId: cliente,
+            engineOfertaId: itemPersistente.engineOfertaId || null,
+            motivo
+          });
+          medidorFilaGlobal.fim({
+            ok: false,
+            motivo,
+            filaV2HotPath: true,
+            bytesFilaGlobal: "nao_medido",
+            ...resumirFilaPorStatus(fila)
+          });
+          return { ok: false, motivo, itemFila: itemPersistente };
+        }
+
+        const persistenciaViva = filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, itemPersistente, {
+          posicaoLegada: fila.length,
+          agora: Date.now(),
+          logger: console
+        });
+
+        if (!persistenciaViva.ok) {
+          fila.push(itemPersistente);
+          const salvouFallback = salvarFila(cliente, { motivo: "fila_v2_2c_fallback_legado" });
+          registrarMetricasFilaV22C(cliente, {
+            insertVivaMs: persistenciaViva.insertVivaMs || 0,
+            fallbackLegadoCount: 1
+          });
+          logFilaV22C({
+            evento: "fallback_legado_insert",
+            clienteId: cliente,
+            ok: salvouFallback === true,
+            motivo: persistenciaViva.motivo || "falha_viva",
+            fallbackLegadoCount: 1,
+            insertVivaMs: persistenciaViva.insertVivaMs || 0
+          });
+
+          if (!salvouFallback) {
+            const erroFila = erroSalvarFilaCliente(cliente);
+            medidorFilaGlobal.fim({
+              ok: false,
+              salvou: false,
+              motivo: erroFila.motivo,
+              erroEtapa: erroFila.erro,
+              filaV2HotPath: true,
+              fallbackLegado: true,
+              bytesFilaGlobal: "nao_medido",
+              ...resumirFilaPorStatus(fila)
+            });
+            return { ok: false, motivo: erroFila.motivo, erro: erroFila.erro };
+          }
+
+          medidorFilaGlobal.fim({
+            ok: true,
+            salvou: true,
+            filaV2HotPath: true,
+            fallbackLegado: true,
+            bytesFilaGlobal: "nao_medido",
+            ...resumirFilaPorStatus(fila)
+          });
+          return { ok: true, itemFila: itemPersistente, fallbackLegado: true };
+        }
+
+        fila.push(itemPersistente);
+        const updateIncremental = atualizarFilaStoreIncrementalFilaV2(itemPersistente, cliente, "fila_v2_2c_insert");
+        if (!updateIncremental.ok) {
+          reconstruirFilaStoreCliente(cliente, "fila_v2_2c_incremental_fallback");
+          updateIncremental.filaStoreIncrementalFallbackCount = 1;
+          logFilaV22C({
+            evento: "fila_store_incremental_fallback",
+            clienteId: cliente,
+            ok: true,
+            motivo: "atualizar_item_falhou_rebuild_cliente",
+            updateIncrementalMs: updateIncremental.updateIncrementalMs || 0,
+            totalCliente: filaStore.itensPorCliente(cliente).length
+          });
+        }
+        registrarMetricasFilaV22C(cliente, {
+          insertVivaMs: persistenciaViva.insertVivaMs || 0,
+          bytesFilaViva: persistenciaViva.bytesFilaViva || 0,
+          updateIncrementalCount: updateIncremental.updateIncrementalCount,
+          updateIncrementalMs: updateIncremental.updateIncrementalMs,
+          filaStoreIncrementalFallbackCount: updateIncremental.filaStoreIncrementalFallbackCount || 0
+        });
+        const dirty = checkpointFilaV2.marcarDirty(cliente, "insert_viva", Date.now());
+        const checkpoint = checkpointLegadoFilaV22C(cliente, "insert_batch");
+
+        console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
+          clienteId: cliente,
+          engineOfertaId: itemPersistente.engineOfertaId || null,
+          itemId: itemPersistente.id || "",
+          totalCliente: filaStore.itensPorCliente(cliente).length,
+          filaV2HotPath: true,
+          checkpointPendente: checkpoint?.pulou === true,
+          checkpointMotivo: checkpoint?.motivo || "",
+          checkpointMutations: dirty.mutacoes,
+          dirtyAgeMs: dirty.dirtyAgeMs
+        });
+
+        medidorFilaGlobal.fim({
+          ok: true,
+          salvou: checkpoint?.pulou !== true,
+          filaV2HotPath: true,
+          checkpointPendente: checkpoint?.pulou === true,
+          bytesFilaGlobal: "checkpoint_batched",
+          ...resumirFilaPorStatus(fila)
+        });
+        return { ok: true, itemFila: itemPersistente, checkpointPendente: checkpoint?.pulou === true };
+      });
     }
 
     const adicionou = filaOfertas.adicionarOfertaFila(fila, itemFinal, {
@@ -28121,6 +28546,7 @@ async function rodarProcessadorFilaGlobal() {
     okPerf = false;
     throw e;
   } finally {
+    executarCheckpointsFilaV22CVencidos("fila_intervalo");
     processadorFilaGlobalRodando = false;
     finalizarPerf(okPerf, {
       usuariosDisparados: usuariosAvaliados,
