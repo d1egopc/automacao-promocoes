@@ -345,6 +345,33 @@ function identidadesItemFilaV2(item = {}) {
   return [...new Set(identidades)];
 }
 
+function identidadesEntradaFilaV2(entrada = {}) {
+  const normalizada = normalizarEntradaViva(entrada, entrada?.posicaoLegada || -1, Date.now());
+  return [
+    normalizada.id ? `id:${normalizada.id}` : "",
+    ...identidadesItemFilaV2(normalizada.item || {})
+  ].filter(Boolean);
+}
+
+function entradasReferemMesmoItemFilaV2(entrada = {}, item = {}) {
+  const identidadesEntrada = new Set(identidadesEntradaFilaV2(entrada));
+  const identidadesAlvo = [
+    idItem(item, item?.posicaoLegada || -1) ? `id:${idItem(item, item?.posicaoLegada || -1)}` : "",
+    ...identidadesItemFilaV2(item)
+  ].filter(Boolean);
+  return identidadesAlvo.some(chave => identidadesEntrada.has(chave));
+}
+
+function itemTerminal(item = {}, agora = Date.now()) {
+  return classificarItemFilaV2(item, { agora }).bucket === "historico";
+}
+
+function preservarTerminalContraRegressao(atual = {}, candidato = {}, permitirRegressao = false, agora = Date.now()) {
+  if (permitirRegressao) return candidato;
+  if (itemTerminal(atual, agora) && !itemTerminal(candidato, agora)) return atual;
+  return candidato;
+}
+
 function identidadePrincipalItemFilaV2(item = {}, indice = -1) {
   return identidadesItemFilaV2(item)[0] || `indice:${indice}`;
 }
@@ -608,6 +635,211 @@ function inserirItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
   };
 }
 
+function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const fsImpl = deps.fs || fs;
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminhoViva, [], fsImpl);
+
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "update_viva_incremental",
+      clienteId: cliente,
+      ok: false,
+      fallbackLegado: true,
+      motivo: leitura.motivo,
+      bytesLidosViva: leitura.bytes || 0,
+      updateVivaMs: duracaoMs
+    });
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      fallbackLegado: true,
+      atualizouViva: false,
+      removeuDaViva: false,
+      bytesLidosViva: leitura.bytes || 0,
+      updateVivaMs: duracaoMs
+    };
+  }
+
+  const entradasExistentes = normalizarEntradasViva(leitura.valor, agora)
+    .filter(entrada => entrada.bucket === "viva");
+  const indice = entradasExistentes.findIndex(entrada => entradasReferemMesmoItemFilaV2(entrada, item));
+  if (indice < 0) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return {
+      ok: true,
+      idempotente: true,
+      motivo: "item_nao_encontrado_na_viva",
+      atualizouViva: false,
+      removeuDaViva: false,
+      totalViva: entradasExistentes.length,
+      bytesLidosViva: leitura.bytes || 0,
+      updateVivaMs: duracaoMs
+    };
+  }
+
+  const entradaAtual = entradasExistentes[indice];
+  const posicaoFinal = Number.isInteger(Number(deps.posicaoLegada))
+    ? Number(deps.posicaoLegada)
+    : entradaAtual.posicaoLegada;
+  const itemAtualizado = preservarTerminalContraRegressao(
+    entradaAtual.item || {},
+    { ...item, posicaoLegada: item.posicaoLegada ?? posicaoFinal },
+    deps.permitirRegressaoStatus === true,
+    agora
+  );
+  const classificacao = classificarItemFilaV2(itemAtualizado, { agora });
+
+  if (classificacao.bucket === "historico") {
+    const transicao = moverTerminalParaHistorico(cliente, entradasExistentes, {
+      ...entradaAtual,
+      item: itemAtualizado,
+      status: statusItem(itemAtualizado),
+      bucket: "historico",
+      motivoBucket: classificacao.motivo || "status_terminal"
+    }, { ...deps, agora });
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return {
+      ok: transicao.ok === true,
+      motivo: transicao.motivo,
+      atualizouViva: false,
+      removeuDaViva: transicao.removeuDaViva === true,
+      totalViva: transicao.filaViva?.length ?? entradasExistentes.length,
+      bytesLidosViva: leitura.bytes || 0,
+      bytesFilaViva: transicao.escrita?.bytesFilaViva || 0,
+      updateVivaMs: duracaoMs,
+      fallbackLegado: transicao.ok !== true,
+      historico: transicao.historico
+    };
+  }
+
+  const entradaAtualizada = normalizarEntradaViva({
+    ...entradaAtual,
+    posicaoLegada: posicaoFinal,
+    bucket: "viva",
+    motivoBucket: classificacao.motivo || entradaAtual.motivoBucket || "",
+    status: statusItem(itemAtualizado),
+    item: itemAtualizado
+  }, posicaoFinal, agora);
+  const entradasAtualizadas = entradasExistentes.map((entrada, i) => i === indice ? entradaAtualizada : entrada);
+  const escrita = escreverFilaViva(cliente, entradasAtualizadas, { ...deps, agora });
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+
+  if (escrita.ok !== true || deps.logSucesso === true) {
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "update_viva_incremental",
+      clienteId: cliente,
+      ok: escrita.ok === true,
+      fallbackLegado: escrita.ok !== true,
+      status: entradaAtualizada.status,
+      totalViva: escrita.totalViva || entradasAtualizadas.length,
+      bytesLidosViva: leitura.bytes || 0,
+      bytesFilaViva: escrita.bytesFilaViva || 0,
+      updateVivaMs: duracaoMs
+    });
+  }
+
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.motivo,
+    entrada: entradaAtualizada,
+    item: entradaAtualizada.item,
+    atualizouViva: escrita.ok === true,
+    removeuDaViva: false,
+    totalViva: escrita.totalViva || entradasAtualizadas.length,
+    bytesLidosViva: leitura.bytes || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    updateVivaMs: duracaoMs,
+    fallbackLegado: escrita.ok !== true
+  };
+}
+
+function removerItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const fsImpl = deps.fs || fs;
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminhoViva, [], fsImpl);
+
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "removal_viva_incremental",
+      clienteId: cliente,
+      ok: false,
+      fallbackLegado: true,
+      motivo: leitura.motivo,
+      bytesLidosViva: leitura.bytes || 0,
+      removalVivaMs: duracaoMs
+    });
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      fallbackLegado: true,
+      removeuDaViva: false,
+      bytesLidosViva: leitura.bytes || 0,
+      removalVivaMs: duracaoMs
+    };
+  }
+
+  const entradasExistentes = normalizarEntradasViva(leitura.valor, agora)
+    .filter(entrada => entrada.bucket === "viva");
+  const entradasAtualizadas = entradasExistentes.filter(entrada => !entradasReferemMesmoItemFilaV2(entrada, item));
+  const removeu = entradasAtualizadas.length !== entradasExistentes.length;
+
+  if (!removeu) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return {
+      ok: true,
+      idempotente: true,
+      motivo: "item_ausente_na_viva",
+      removeuDaViva: false,
+      totalViva: entradasExistentes.length,
+      bytesLidosViva: leitura.bytes || 0,
+      removalVivaMs: duracaoMs
+    };
+  }
+
+  const escrita = escreverFilaViva(cliente, entradasAtualizadas, { ...deps, agora });
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+
+  if (escrita.ok !== true || deps.logSucesso === true) {
+    log2C(deps.logger, {
+      versao: 1,
+      evento: "removal_viva_incremental",
+      clienteId: cliente,
+      ok: escrita.ok === true,
+      fallbackLegado: escrita.ok !== true,
+      totalVivaAntes: entradasExistentes.length,
+      totalVivaDepois: escrita.totalViva || entradasAtualizadas.length,
+      bytesLidosViva: leitura.bytes || 0,
+      bytesFilaViva: escrita.bytesFilaViva || 0,
+      removalVivaMs: duracaoMs
+    });
+  }
+
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.motivo,
+    removeuDaViva: escrita.ok === true,
+    totalViva: escrita.totalViva || entradasAtualizadas.length,
+    bytesLidosViva: leitura.bytes || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    removalVivaMs: duracaoMs,
+    fallbackLegado: escrita.ok !== true
+  };
+}
+
 function recuperarFilaVivaDoLegado(clienteId = "admin", deps = {}) {
   const inicio = process.hrtime.bigint();
   const cliente = clienteSeguro(clienteId);
@@ -729,6 +961,7 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
   const fsImpl = deps.fs || fs;
   const file = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
   const leitura = lerJsonArquivoDireto(file, null, fsImpl);
+  const permitirRecovery = deps.permitirRecovery !== false;
 
   if (leitura.ok && Array.isArray(leitura.valor)) {
     const entradas = normalizarEntradasViva(leitura.valor, deps.agora || Date.now())
@@ -736,12 +969,42 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
     const legado = deps.filaLegada || lerFilaLegada(cliente, deps);
     const comparacao = compararVivaComLegado(cliente, entradas, legado, deps);
     if (!comparacao.ok) {
+      const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+      if (!permitirRecovery) {
+        logOperacional(deps.logger, {
+          versao: 1,
+          evento: "divergencia_viva_legado",
+          clienteId: cliente,
+          ok: false,
+          totalLegado: comparacao.totalLegado,
+          totalViva: comparacao.totalVivaAtual,
+          divergencias: comparacao.divergencias,
+          idsRecentesAusentes: comparacao.idsRecentesAusentes.length,
+          idsDuplicados: comparacao.idsDuplicados.length,
+          idsExtras: comparacao.idsExtras.length,
+          idsAusentes: comparacao.idsAusentes.length,
+          recoveryBloqueado: true,
+          duracaoMs
+        });
+        return {
+          ok: false,
+          fonte: "fila_viva",
+          recovery: false,
+          recuperacaoBloqueada: true,
+          sideEffectBlocked: true,
+          fallbackLegado: true,
+          motivoFallback: "viva_divergente_legado",
+          entradas,
+          itens: entradas.map(entrada => entrada.item),
+          bytes: leitura.bytes || 0,
+          comparacao
+        };
+      }
       const recovery = recuperarFilaVivaDoLegado(cliente, {
         ...deps,
         motivoRecovery: "viva_divergente_legado",
         logger: deps.logger
       });
-      const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
       logOperacional(deps.logger, {
         versao: 1,
         evento: "divergencia_viva_legado",
@@ -787,6 +1050,34 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
     };
   }
 
+  if (!permitirRecovery) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    logOperacional(deps.logger, {
+      versao: 1,
+      evento: "read_fila_viva_indisponivel",
+      clienteId: cliente,
+      ok: false,
+      fonte: "fila_viva",
+      motivo: leitura.motivo,
+      recoveryBloqueado: true,
+      bytesFilaViva: leitura.bytes || 0,
+      duracaoMs
+    });
+    return {
+      ok: false,
+      fonte: "fila_viva",
+      recovery: false,
+      recuperacaoBloqueada: true,
+      sideEffectBlocked: true,
+      fallbackLegado: true,
+      motivoFallback: leitura.motivo,
+      erroFallback: leitura.erro || "",
+      entradas: [],
+      itens: [],
+      bytes: leitura.bytes || 0
+    };
+  }
+
   const recovery = recuperarFilaVivaDoLegado(cliente, {
     ...deps,
     motivoRecovery: leitura.motivo,
@@ -798,6 +1089,10 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
     motivoFallback: leitura.motivo,
     erroFallback: leitura.erro || ""
   };
+}
+
+function lerFilaVivaReadOnly(clienteId = "admin", deps = {}) {
+  return lerFilaViva(clienteId, { ...deps, permitirRecovery: false });
 }
 
 function dataSegmentoHistorico(item = {}, agora = Date.now()) {
@@ -1068,7 +1363,16 @@ function moverTerminalParaHistorico(clienteId = "admin", filaViva = [], alvo = {
   const cliente = clienteSeguro(clienteId);
   const entradas = normalizarEntradasViva(filaViva, deps.agora || Date.now());
   const alvoId = idItem(alvo?.item || alvo, alvo?.posicaoLegada || -1);
-  const entrada = entradas.find(item => item.id === alvoId) ||
+  const entradaEncontrada = entradas.find(item => item.id === alvoId);
+  const entrada = entradaEncontrada
+    ? {
+        ...entradaEncontrada,
+        item: alvo?.item || alvo || entradaEncontrada.item,
+        status: statusItem(alvo?.item || alvo || entradaEncontrada.item),
+        bucket: alvo?.bucket || entradaEncontrada.bucket,
+        motivoBucket: alvo?.motivoBucket || entradaEncontrada.motivoBucket
+      }
+    :
     normalizarEntradaViva(alvo?.item ? alvo : { item: alvo, posicaoLegada: alvo?.posicaoLegada }, alvo?.posicaoLegada || -1, deps.agora || Date.now());
 
   if (!itemTerminalParaHistorico(entrada.item, deps.agora || Date.now())) {
@@ -1422,10 +1726,13 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env),
     sincronizarCanaryEscrita: (params = {}, deps = {}) => sincronizarCanaryEscrita(params, deps, opcoes),
     inserirItemFilaVivaIncremental: (clienteId, item, deps = {}) => inserirItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
+    atualizarItemFilaVivaIncremental: (clienteId, item, deps = {}) => atualizarItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
+    removerItemFilaVivaIncremental: (clienteId, item, deps = {}) => removerItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
     lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
+    lerFilaVivaReadOnly: (clienteId, deps = {}) => lerFilaVivaReadOnly(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     moverTerminalParaHistorico: (clienteId, filaViva, alvo, deps = {}) => moverTerminalParaHistorico(clienteId, filaViva, alvo, { ...opcoes, ...deps }),
@@ -1458,8 +1765,11 @@ module.exports = {
   lerFilaVivaParaMerge,
   filaVivaMaisNovaQueLegado,
   lerFilaViva,
+  lerFilaVivaReadOnly,
   escreverFilaViva,
   inserirItemFilaVivaIncremental,
+  atualizarItemFilaVivaIncremental,
+  removerItemFilaVivaIncremental,
   recuperarFilaVivaDoLegado,
   appendHistoricoIncremental,
   moverTerminalParaHistorico,

@@ -1307,6 +1307,7 @@ function criarDepsFilaOperacionalTeste() {
 
 function criarStorageTemporarioFilaV2() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fila-v2-2c-"));
+  const getClientePath = clienteId => path.join(dir, clienteId);
   const getClienteJsonPath = (clienteId, arquivo) => path.join(dir, clienteId, arquivo);
   const writeClienteJson = (clienteId, arquivo, dados) => {
     const destino = getClienteJsonPath(clienteId, arquivo);
@@ -1314,7 +1315,7 @@ function criarStorageTemporarioFilaV2() {
     fs.writeFileSync(destino, JSON.stringify(dados), "utf8");
     return true;
   };
-  return { dir, getClienteJsonPath, writeClienteJson };
+  return { dir, getClientePath, getClienteJsonPath, writeClienteJson };
 }
 
 {
@@ -1472,6 +1473,211 @@ function criarStorageTemporarioFilaV2() {
     getClienteJsonPath: storage.getClienteJsonPath
   });
   assert.strictEqual(legadoMaisNovo.maisNova, false, "viva antiga nao deve sobrepor legado mais recente");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_dual_read_only";
+  const legado = [oferta("legado_only", { clienteId: cliente })];
+  const vivaDivergente = [{ item: oferta("viva_extra", { clienteId: cliente }), bucket: "viva", posicaoLegada: 0 }];
+  storage.writeClienteJson(cliente, "fila.json", legado);
+  storage.writeClienteJson(cliente, FILA_VIVA_ARQUIVO, vivaDivergente);
+  const vivaPath = storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO);
+  const conteudoAntes = fs.readFileSync(vivaPath, "utf8");
+  let writes = 0;
+
+  const leitura = filaOperacionalV2.lerFilaVivaReadOnly(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: () => {
+      writes += 1;
+      throw new Error("dual-read nao pode escrever");
+    },
+    filaLegada: legado,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(leitura.ok, false, "dual-read divergente deve cair para legado");
+  assert.strictEqual(leitura.fallbackLegado, true);
+  assert.strictEqual(leitura.recovery, false, "dual-read nao pode executar recovery");
+  assert.strictEqual(leitura.sideEffectBlocked, true, "side effect deve ficar bloqueado no shadow");
+  assert.strictEqual(writes, 0, "dual-read read-only nao pode escrever fila-viva");
+  assert.strictEqual(fs.readFileSync(vivaPath, "utf8"), conteudoAntes, "fila-viva deve permanecer intacta");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_update_enviado_recente";
+  const itemPendente = oferta("update_recente", { clienteId: cliente, status: "pendente" });
+  filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, itemPendente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA,
+    posicaoLegada: 4
+  });
+
+  const itemEnviado = {
+    ...itemPendente,
+    status: "enviado",
+    enviadoEm: new Date(AGORA - 10 * 60 * 1000).toISOString(),
+    statusDetalhe: "Enviado no teste"
+  };
+  const update = filaOperacionalV2.atualizarItemFilaVivaIncremental(cliente, itemEnviado, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+  const comparacao = filaOperacionalV2.compararVivaComLegado(cliente, viva, [itemEnviado], { agora: AGORA });
+
+  assert.strictEqual(update.ok, true);
+  assert.strictEqual(update.atualizouViva, true, "enviado recente <2h deve atualizar e permanecer vivo");
+  assert.strictEqual(viva.length, 1);
+  assert.strictEqual(viva[0].item.status, "enviado");
+  assert.strictEqual(viva[0].posicaoLegada, 4, "update deve preservar posicao legada");
+  assert.strictEqual(comparacao.ok, true, "enviado recente atualizado nao deve gerar idsExtras");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_update_terminal";
+  const itemPendente = oferta("update_terminal", { clienteId: cliente, status: "pendente" });
+  filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, itemPendente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA,
+    posicaoLegada: 2
+  });
+
+  const itemRetidoTerminal = {
+    ...itemPendente,
+    status: "retida",
+    motivoRetencao: "duplicata",
+    retidaEm: new Date(AGORA).toISOString()
+  };
+  const update = filaOperacionalV2.atualizarItemFilaVivaIncremental(cliente, itemRetidoTerminal, {
+    getClientePath: storage.getClientePath,
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+  const historicoDir = path.join(path.dirname(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO)), "fila-historico-incremental");
+
+  assert.strictEqual(update.ok, true);
+  assert.strictEqual(update.removeuDaViva, true, "terminal deve sair da viva apos historico persistido");
+  assert.strictEqual(viva.length, 0);
+  assert.strictEqual(fs.existsSync(historicoDir), true, "terminal deve ser registrado no historico incremental");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_remocao_viva";
+  const item = oferta("remover_viva", { clienteId: cliente });
+  filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, item, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  const remocao = filaOperacionalV2.removerItemFilaVivaIncremental(cliente, item, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+  const comparacao = filaOperacionalV2.compararVivaComLegado(cliente, viva, [], { agora: AGORA });
+
+  assert.strictEqual(remocao.ok, true);
+  assert.strictEqual(remocao.removeuDaViva, true, "remocao oficial deve remover item stale da viva");
+  assert.strictEqual(viva.length, 0);
+  assert.strictEqual(comparacao.ok, true);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_reprocessar_viva";
+  const itemEnviado = oferta("reprocessar_viva", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: new Date(AGORA - 5 * 60 * 1000).toISOString()
+  });
+  filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, itemEnviado, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  const itemReprocessado = {
+    ...itemEnviado,
+    status: "pendente",
+    enviadoEm: "",
+    dataEnvio: "",
+    statusDetalhe: "Reprocessada manualmente"
+  };
+  const update = filaOperacionalV2.atualizarItemFilaVivaIncremental(cliente, itemReprocessado, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    permitirRegressaoStatus: true,
+    agora: AGORA
+  });
+  const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+
+  assert.strictEqual(update.ok, true);
+  assert.strictEqual(update.atualizouViva, true);
+  assert.strictEqual(viva.length, 1, "reprocessar nao pode duplicar item");
+  assert.strictEqual(viva[0].item.status, "pendente");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const clienteA = "cliente_multi_a";
+  const clienteB = "cliente_multi_b";
+  const clienteC = "cliente_multi_c";
+  const itemA = oferta("multi_a", { clienteId: clienteA });
+  const itemB = oferta("multi_b", { clienteId: clienteB });
+  const itemC = oferta("multi_c", { clienteId: clienteC });
+  for (const [cliente, item] of [[clienteA, itemA], [clienteB, itemB], [clienteC, itemC]]) {
+    filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+  }
+
+  filaOperacionalV2.removerItemFilaVivaIncremental(clienteA, itemA, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const leituraB = filaOperacionalV2.lerFilaVivaReadOnly(clienteB, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    filaLegada: [itemB],
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const leituraC = filaOperacionalV2.lerFilaVivaReadOnly(clienteC, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    filaLegada: [itemC],
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(JSON.parse(fs.readFileSync(storage.getClienteJsonPath(clienteA, FILA_VIVA_ARQUIVO), "utf8")).length, 0);
+  assert.strictEqual(leituraB.ok, true, "mutacao em A nao pode tocar workspace B");
+  assert.strictEqual(leituraC.ok, true, "workspace canario separado deve manter propria viva");
+  assert.strictEqual(leituraB.itens[0].id, "multi_b");
+  assert.strictEqual(leituraC.itens[0].id, "multi_c");
 }
 
 {

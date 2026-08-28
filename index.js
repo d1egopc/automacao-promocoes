@@ -2188,12 +2188,15 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
         agora,
         logger: console
       },
-      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaViva(clienteLeitura, {
+      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaVivaReadOnly(clienteLeitura, {
         ...depsLeitura,
         filaLegada: fila,
         logger: console
       })
     );
+    if (leituraShadow.sideEffectBlocked) {
+      registrarMetricasFilaV22C(clienteLog, { dualReadSideEffectBlockedCount: 1 });
+    }
     const selecaoShadow = leituraShadow.ok && !leituraShadow.fallbackLegado
       ? selecionarProximaOfertaFilaCore(leituraShadow.itens, clienteIdAlvo, {
           agora
@@ -2375,6 +2378,9 @@ function estadoMetricasFilaV22C(clienteId = "admin") {
       recoveryVivaMaisNovaCount: 0,
       filaStoreIncrementalFallbackCount: 0,
       checkpointConcurrentSkip: 0,
+      vivaStatusUpdateCount: 0,
+      vivaRemovalCount: 0,
+      dualReadSideEffectBlockedCount: 0,
       ultimoLog: 0
     });
   }
@@ -2396,7 +2402,10 @@ function snapshotMetricasFilaV22C(clienteId = "admin", resetar = false) {
     dirtyMergeItems: estado.dirtyMergeItems,
     recoveryVivaMaisNovaCount: estado.recoveryVivaMaisNovaCount,
     filaStoreIncrementalFallbackCount: estado.filaStoreIncrementalFallbackCount,
-    checkpointConcurrentSkip: estado.checkpointConcurrentSkip
+    checkpointConcurrentSkip: estado.checkpointConcurrentSkip,
+    vivaStatusUpdateCount: estado.vivaStatusUpdateCount,
+    vivaRemovalCount: estado.vivaRemovalCount,
+    dualReadSideEffectBlockedCount: estado.dualReadSideEffectBlockedCount
   };
   if (resetar) {
     estado.inserts = 0;
@@ -2412,6 +2421,9 @@ function snapshotMetricasFilaV22C(clienteId = "admin", resetar = false) {
     estado.recoveryVivaMaisNovaCount = 0;
     estado.filaStoreIncrementalFallbackCount = 0;
     estado.checkpointConcurrentSkip = 0;
+    estado.vivaStatusUpdateCount = 0;
+    estado.vivaRemovalCount = 0;
+    estado.dualReadSideEffectBlockedCount = 0;
   }
   return snapshot;
 }
@@ -2438,6 +2450,9 @@ function registrarMetricasFilaV22C(clienteId = "admin", dados = {}) {
   estado.recoveryVivaMaisNovaCount += Number(dados.recoveryVivaMaisNovaCount || 0);
   estado.filaStoreIncrementalFallbackCount += Number(dados.filaStoreIncrementalFallbackCount || 0);
   estado.checkpointConcurrentSkip += Number(dados.checkpointConcurrentSkip || 0);
+  estado.vivaStatusUpdateCount += Number(dados.vivaStatusUpdateCount || 0);
+  estado.vivaRemovalCount += Number(dados.vivaRemovalCount || 0);
+  estado.dualReadSideEffectBlockedCount += Number(dados.dualReadSideEffectBlockedCount || 0);
 
   const agora = Date.now();
   if (!estado.ultimoLog || agora - estado.ultimoLog >= 5 * 60 * 1000) {
@@ -2466,6 +2481,42 @@ function atualizarFilaStoreIncrementalFilaV2(item = {}, clienteId = "admin", mot
     updateIncrementalMs: Date.now() - inicio,
     totalCliente: filaStore.itensPorCliente(String(clienteId || "admin")).length
   };
+}
+
+function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "mutacao_legado", opcoes = {}) {
+  const cliente = String(clienteId || item?.clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { ok: true, pulou: true, motivo: "v2_desabilitada" };
+  }
+  const itemSincronizado = Number.isInteger(Number(opcoes.posicaoLegada))
+    ? { ...item, posicaoLegada: Number(opcoes.posicaoLegada) }
+    : item;
+  const resultado = filaOperacionalV2.atualizarItemFilaVivaIncremental(cliente, itemSincronizado, {
+    agora: Date.now(),
+    logger: console,
+    permitirRegressaoStatus: opcoes.permitirRegressaoStatus === true,
+    logSucesso: opcoes.logSucesso === true
+  });
+  registrarMetricasFilaV22C(cliente, {
+    vivaStatusUpdateCount: resultado.atualizouViva ? 1 : 0,
+    vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
+  });
+  return { ...resultado, motivoSync: motivo, item: itemSincronizado };
+}
+
+function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado") {
+  const cliente = String(clienteId || item?.clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { ok: true, pulou: true, motivo: "v2_desabilitada" };
+  }
+  const resultado = filaOperacionalV2.removerItemFilaVivaIncremental(cliente, item, {
+    agora: Date.now(),
+    logger: console
+  });
+  registrarMetricasFilaV22C(cliente, {
+    vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
+  });
+  return { ...resultado, motivoSync: motivo };
 }
 
 function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
@@ -7595,6 +7646,9 @@ async function processarFila(clienteIdAlvo = null) {
   const salvarFilaSeAlterada = (cliente = clienteFila) => {
     if (!filaAlterada) return false;
     const salvou = salvarFila(cliente);
+    if (salvou && oferta) {
+      sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada");
+    }
     filaAlterada = false;
     return salvou;
   };
@@ -8027,13 +8081,16 @@ const leituraDualReadViva = modoDualRead(process.env)
         agora: Date.now(),
         logger: console
       },
-      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaViva(clienteLeitura, {
+      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaVivaReadOnly(clienteLeitura, {
         ...depsLeitura,
         filaLegada: fila,
         logger: console
       })
     )
   : null;
+if (leituraDualReadViva?.sideEffectBlocked) {
+  registrarMetricasFilaV22C(clienteId, { dualReadSideEffectBlockedCount: 1 });
+}
 
 const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });
 const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta, {
@@ -10111,8 +10168,9 @@ app.delete("/fila/item/:id", auth, (req, res) => {
     });
   }
 
-  fila.splice(index, 1);
+  const removido = fila.splice(index, 1);
   salvarFila(clienteId);
+  removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id");
 
   return res.json({
     ok: true,
@@ -10171,6 +10229,7 @@ app.delete("/fila/:index", auth, (req, res) => {
   filaStore.removerItem(removido[0]);
 
   salvarFila(clienteId);
+  removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice");
 
   logOptimus("FILA", "Oferta removida", {
     clienteId,
@@ -10207,6 +10266,9 @@ app.post("/fila/:id/reprocessar", auth, (req, res) => {
   oferta.reprocessadaEm = new Date().toISOString();
 
   salvarFila(clienteId);
+  sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
+    permitirRegressaoStatus: true
+  });
 
   logOptimus("FILA", "Reprocessada manualmente", {
     clienteId,
@@ -10292,6 +10354,10 @@ if (indexReal >= 0) {
     logger: console
   });
   reconstruirFilaStoreCliente(clienteIdReq, "enviar_agora_reordenar");
+  sincronizarItemFilaVivaAposMutacao(clienteIdReq, oferta, "rota_enviar_agora_reordenar", {
+    permitirRegressaoStatus: true,
+    posicaoLegada: 0
+  });
 }
 
   const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
@@ -12335,6 +12401,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   if (!analiseDestinos.compativeis.length) {
     marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
     salvarFila(clienteId);
+    sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida");
 
     logOptimus("FILA", "Enviar Agora reteve oferta", {
       clienteId,
@@ -12451,6 +12518,9 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
         ? "Aguardando limite diario do destino"
         : "Nenhum destino confirmou envio manual";
     salvarFila(clienteId);
+    sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
+      permitirRegressaoStatus: true
+    });
 
     return {
       ok: false,
@@ -12476,6 +12546,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   });
 
   salvarFila(clienteId);
+  sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado");
 
   return {
     ok: true,
