@@ -40,6 +40,19 @@ function renderizar(oferta, destino = {}, plano = planoTituloIa(true)) {
   });
 }
 
+function renderizarComV1Isolada(oferta, destino = {}, plano = planoTituloIa(true)) {
+  const originalC3 = copy.resolverCopyC3;
+  const originalLocalV2 = copy.resolverCopyLocalV2;
+  try {
+    copy.resolverCopyC3 = () => ({ ok: false, motivoFallback: "sem_fatos_c3" });
+    copy.resolverCopyLocalV2 = () => ({ ok: false, tituloIa: "", motivoFallback: "local_v2_indisponivel_teste" });
+    return renderizar(oferta, destino, plano);
+  } finally {
+    copy.resolverCopyC3 = originalC3;
+    copy.resolverCopyLocalV2 = originalLocalV2;
+  }
+}
+
 copy.limparCacheCopyInteligente();
 
 assert.strictEqual(copy.resolverIntencaoCopy(ofertaBase({ linkResgate: "https://shopee.test/resgate", cupom: "PROMO10" })).intencao, "resgate", "resgate vence cupom");
@@ -165,11 +178,11 @@ const snapshot = JSON.parse(JSON.stringify(ofertaFanout));
 renderizar(ofertaFanout, { tituloOferta: "ia" });
 assert.deepStrictEqual(ofertaFanout, snapshot, "oferta/fila/universal nao muta");
 
-const mensagemResgate = renderizar(ofertaBase({ id: "copy_resgate", engineOfertaId: "copy_resgate", marketplace: "shopee", linkResgate: "https://shopee.test/resgate", cupom: "PROMO10" }));
+const mensagemResgate = renderizarComV1Isolada(ofertaBase({ id: "copy_resgate", engineOfertaId: "copy_resgate", marketplace: "shopee", linkResgate: "https://shopee.test/resgate", cupom: "PROMO10" }));
 assert.ok(mensagemResgate.includes("resgate") || mensagemResgate.includes("beneficio"), "resgate real gera copy de resgate");
 
 for (const marketplace of ["mercadolivre", "shopee", "amazon", "aliexpress", "awin", "kabum"]) {
-  const msg = renderizar(ofertaBase({ id: `copy_${marketplace}`, engineOfertaId: `copy_${marketplace}`, marketplace, categoria: "Casa" }));
+  const msg = renderizarComV1Isolada(ofertaBase({ id: `copy_${marketplace}`, engineOfertaId: `copy_${marketplace}`, marketplace, categoria: "Casa" }));
   assert.ok(msg.includes("casa") || msg.includes("pratica") || msg.includes("upgrade"), `marketplace ${marketplace} compativel`);
 }
 
@@ -182,7 +195,7 @@ const template = criarTemplate("cliente_copy", {
     { tipo: "link", ativo: true, ordem: 30 }
   ]
 }).template;
-const personalizada = renderizar(ofertaBase({ id: "copy_tpl", engineOfertaId: "copy_tpl", categoria: "Gamer e Hardware" }), { templateId: template.id });
+const personalizada = renderizarComV1Isolada(ofertaBase({ id: "copy_tpl", engineOfertaId: "copy_tpl", categoria: "Gamer e Hardware" }), { templateId: template.id });
 assert.ok(personalizada.includes("setup") || personalizada.includes("upgrade"), "template personalizado recebe copy");
 
 const camposComerciais = ofertaBase({ cupom: "PROMO10", categoria: "Casa", score: 99 });
@@ -196,6 +209,10 @@ assert.strictEqual(camposComerciais.score, 99, "score intacto no objeto");
 
 const originalService = copy.resolverCopyInteligente;
 const originalLocalV2Service = copy.resolverCopyLocalV2;
+const originalC3Service = copy.resolverCopyC3;
+copy.resolverCopyC3 = () => {
+  throw new Error("falha simulada c3");
+};
 copy.resolverCopyLocalV2 = () => {
   throw new Error("falha simulada local v2");
 };
@@ -204,6 +221,7 @@ copy.resolverCopyInteligente = () => {
 };
 const fallbackErro = renderizar(ofertaBase({ id: "copy_erro", engineOfertaId: "copy_erro", categoria: "Gamer e Hardware" }));
 assert.ok(fallbackErro.includes("Produto Original Oficial"), "erro do motor cai para original");
+copy.resolverCopyC3 = originalC3Service;
 copy.resolverCopyInteligente = originalService;
 copy.resolverCopyLocalV2 = originalLocalV2Service;
 

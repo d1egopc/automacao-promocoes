@@ -158,7 +158,7 @@ function contemTermoProibidoCopyC3(valor = "") {
 }
 
 function recursoCopyC3Ativo(plano = {}) {
-  return plano?.recursos?.copyC3Factual === true;
+  return plano?.recursos?.tituloIa === true;
 }
 
 function destinoIaAtivo(destino = {}) {

@@ -10,7 +10,7 @@ const copy = require("../modules/copy-inteligente");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 const destinoIa = { id: "destino_c3", tipo: "whatsapp", tituloOferta: "ia" };
-const planoC3 = { recursos: { tituloIa: true, templatePersonalizado: true, copyC3Factual: true } };
+const planoC3 = { recursos: { tituloIa: true, templatePersonalizado: true } };
 
 function ofertaBase(extra = {}) {
   return {
@@ -347,8 +347,13 @@ assert.ok(mensagem.includes("PROMO10"), "Template preserva cupom oficial");
 assert.ok(mensagem.includes("https://meli.la/afiliado"), "Template preserva link oficial");
 assert.deepStrictEqual(ofertaRender, snapshotRender, "renderizacao com C3 nao muta oferta compartilhada/fanout");
 
-const planoSemC3 = { recursos: { tituloIa: true, templatePersonalizado: true, copyC3Factual: false } };
-const c3Desligada = copy.resolverCopyC3({ oferta: ofertaRender, destino: destinoIa, clienteId: "cliente_c3", plano: planoSemC3 });
-assert.strictEqual(c3Desligada.ok, false, "recurso desligado preserva fallback Local V2/V1");
+const planoSemTituloIa = { recursos: { tituloIa: false, templatePersonalizado: true, copyC3Factual: true } };
+const c3SemTituloIa = copy.resolverCopyC3({ oferta: ofertaRender, destino: destinoIa, clienteId: "cliente_c3", plano: planoSemTituloIa });
+assert.strictEqual(c3SemTituloIa.ok, false, "tituloIa desligado preserva fallback Local V2/V1");
+assert.strictEqual(c3SemTituloIa.motivoFallback, "copy_c3_desabilitada", "C3 usa tituloIa como gate oficial");
+
+const planoCopyC3FactualLegadoFalse = { recursos: { tituloIa: true, templatePersonalizado: true, copyC3Factual: false } };
+const c3Promovida = copy.resolverCopyC3({ oferta: ofertaRender, destino: destinoIa, clienteId: "cliente_c3", plano: planoCopyC3FactualLegadoFalse });
+assert.strictEqual(c3Promovida.ok, true, "copyC3Factual legado false nao bloqueia C3 quando tituloIa esta ativo");
 
 console.log("copy-inteligente-c3.test.js OK");

@@ -199,6 +199,16 @@ assert.deepStrictEqual(
 const TAG_TITULO = "[TITULO-APRESENTACAO-OBS]";
 const TAG_RENDE_FINAL = "[OFC-V2.5-RENDERER-FINAL]";
 
+function comC3SemResultado(fn) {
+  const originalC3 = copy.resolverCopyC3;
+  try {
+    copy.resolverCopyC3 = () => ({ ok: false, motivoFallback: "sem_fatos_c3" });
+    return fn();
+  } finally {
+    copy.resolverCopyC3 = originalC3;
+  }
+}
+
 function renderizarComObsSemantica(extra = {}) {
   copy.limparCacheCopyLocalV2();
   const oferta = {
@@ -211,12 +221,60 @@ function renderizarComObsSemantica(extra = {}) {
     descontoPercentual: "",
     ...extra
   };
-  const capturado = capturarLogs(() => renderizar(oferta, { tituloOferta: "ia" }, { tituloIa: true }));
+  const capturado = comC3SemResultado(() =>
+    capturarLogs(() => renderizar(oferta, { tituloOferta: "ia" }, { tituloIa: true }))
+  );
   return {
     mensagem: capturado.resultado,
     final: extrairLog(capturado.logs, TAG_RENDE_FINAL)
   };
 }
+
+let chamadasC3CopyOff = 0;
+const originalC3CopyOff = copy.resolverCopyC3;
+try {
+  copy.resolverCopyC3 = (...args) => {
+    chamadasC3CopyOff += 1;
+    return originalC3CopyOff(...args);
+  };
+  renderizar({
+    ...ofertaBase(),
+    tituloIa: "",
+    tituloFactual: "Produto factual com cupom"
+  }, { tituloOferta: "original" }, { tituloIa: true });
+} finally {
+  copy.resolverCopyC3 = originalC3CopyOff;
+}
+assert.strictEqual(chamadasC3CopyOff, 0, "Copy OFF nao chama C3");
+
+let chamadasC3TituloIaOff = 0;
+const originalC3TituloIaOff = copy.resolverCopyC3;
+try {
+  copy.resolverCopyC3 = (...args) => {
+    chamadasC3TituloIaOff += 1;
+    return originalC3TituloIaOff(...args);
+  };
+  renderizar({
+    ...ofertaBase(),
+    tituloIa: "",
+    tituloFactual: "Produto factual com cupom"
+  }, { tituloOferta: "ia" }, { tituloIa: false });
+} finally {
+  copy.resolverCopyC3 = originalC3TituloIaOff;
+}
+assert.strictEqual(chamadasC3TituloIaOff, 0, "tituloIa=false nao chama C3");
+
+const logsC3Padrao = capturarLogs(() => renderizar({
+  ...ofertaBase(),
+  id: "c3_padrao_copy_on",
+  engineOfertaId: "c3_padrao_copy_on",
+  tituloIa: "",
+  tituloFactual: "Lava e Seca Philco 10kg",
+  categoria: "Eletrodomésticos"
+}, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+const obsC3Padrao = extrairLog(logsC3Padrao, TAG_TITULO);
+assert.strictEqual(obsC3Padrao.fonteTitulo, "copy_c3", "Copy ON com tituloIa usa C3 como motor padrao");
+assert.ok(obsC3Padrao.fraseIdC3, "C3 registra fraseId quando vence");
 
 const renderNotebook = renderizarComObsSemantica({
   id: "semantica_notebook",
@@ -296,14 +354,14 @@ assert.ok(!JSON.stringify(obsSensivel).includes("token=segredo"), "observabilida
 assert.ok(!JSON.stringify(obsSensivel).includes("user@s.whatsapp.net"), "observabilidade nao expõe JID");
 
 copy.limparCacheCopyLocalV2();
-const logsLocalV2 = capturarLogs(() => renderizar({
+const logsLocalV2 = comC3SemResultado(() => capturarLogs(() => renderizar({
   ...ofertaBase(),
   tituloIa: "",
   titulo: "Teclado mecanico gamer",
   nome: "Teclado mecanico gamer",
   cupom: "",
   categoria: "Gamer e Hardware"
-}, { tituloOferta: "ia" }, { tituloIa: true })).logs;
+}, { tituloOferta: "ia" }, { tituloIa: true }))).logs;
 const obsLocalV2 = extrairLog(logsLocalV2, TAG_TITULO);
 const finalLocalV2 = extrairLog(logsLocalV2, TAG_RENDE_FINAL);
 assert.strictEqual(obsLocalV2.fonteTitulo, "local_v2", "local_v2 normal registra fonte");
@@ -322,7 +380,9 @@ assert.strictEqual(finalLocalV2.emojiSemanticoOrigem, "familia_gamer", "renderer
 
 const originalLocal = copy.resolverCopyLocalV2;
 const originalV1 = copy.resolverCopyInteligente;
+const originalC3 = copy.resolverCopyC3;
 try {
+  copy.resolverCopyC3 = () => ({ ok: false, motivoFallback: "sem_fatos_c3" });
   copy.resolverCopyLocalV2 = () => ({ ok: false, motivoFallback: "local_forcado" });
   copy.resolverCopyInteligente = () => ({ ok: true, tituloIa: "V1 curto", fonte: "banco_frases_v1", cacheHit: false, intencao: "cupom" });
   const logsV1 = capturarLogs(() => renderizar({
@@ -335,6 +395,7 @@ try {
   assert.strictEqual(obsV1.cacheHit, false, "fallback V1 registra cache");
   assert.strictEqual(finalV1.fonteTitulo, "v1", "renderer final registra fonte V1");
 } finally {
+  copy.resolverCopyC3 = originalC3;
   copy.resolverCopyLocalV2 = originalLocal;
   copy.resolverCopyInteligente = originalV1;
 }
