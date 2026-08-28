@@ -1133,6 +1133,73 @@ function criarDepsFilaOperacionalTeste() {
 }
 
 {
+  const clienteId = "cliente_amostra_divergencia";
+  const filaLegada = [
+    oferta("legado_presente", { clienteId, status: "pendente" }),
+    oferta("legado_ausente", { clienteId, status: "pendente" })
+  ];
+  const viva = filaOperacionalV2.normalizarEntradasViva([
+    oferta("legado_presente", { clienteId, status: "pendente" }),
+    ...Array.from({ length: 7 }, (_, indice) => oferta(`extra_${indice + 1}`, {
+      clienteId,
+      status: indice % 2 === 0 ? "pendente" : "processando",
+      titulo: `Titulo sensivel extra ${indice + 1}`,
+      linkAfiliado: `https://sensivel.local/${indice + 1}`
+    }))
+  ], AGORA);
+
+  const comparacao = filaOperacionalV2.compararVivaComLegado(clienteId, viva, filaLegada, { agora: AGORA });
+  const payloadAmostras = JSON.stringify({
+    extras: comparacao.amostraExtrasNaViva,
+    ausentes: comparacao.amostraAusentesNaViva,
+    duplicados: comparacao.amostraDuplicadosNaViva
+  });
+
+  assert.strictEqual(comparacao.ok, false);
+  assert.strictEqual(comparacao.idsExtras[0], "extra_1", "idsExtras continuam representando viva - legado");
+  assert.strictEqual(comparacao.idsAusentes[0], "legado_ausente", "idsAusentes continuam representando legado - viva");
+  assert.strictEqual(comparacao.amostraExtrasNaViva.length, 5, "amostra de extras deve ser limitada");
+  assert.strictEqual(comparacao.amostraExtrasNaViva[0].id, "extra_1");
+  assert.strictEqual(comparacao.amostraExtrasNaViva[0].status, "pendente");
+  assert.strictEqual(comparacao.amostraExtrasNaViva[0].posicaoLegada, 1);
+  assert(!payloadAmostras.includes("Titulo sensivel"), "amostra nao deve incluir titulo/payload");
+  assert(!payloadAmostras.includes("https://sensivel.local"), "amostra nao deve incluir link");
+}
+
+{
+  const { deps, logs } = criarDepsFilaOperacionalTeste();
+  const clienteId = "cliente_log_divergencia";
+  const filaLegada = [
+    oferta("legado_log", { clienteId, status: "pendente" })
+  ];
+  const viva = filaOperacionalV2.normalizarEntradasViva([
+    oferta("legado_log", { clienteId, status: "pendente" }),
+    oferta("extra_log", {
+      clienteId,
+      status: "pendente",
+      titulo: "Titulo sigiloso do extra",
+      linkAfiliado: "https://nao-logar.local/produto"
+    })
+  ], AGORA);
+
+  deps.writeClienteJson(clienteId, FILA_VIVA_ARQUIVO, viva);
+
+  const leitura = filaOperacionalV2.lerFilaVivaReadOnly(clienteId, {
+    ...deps,
+    filaLegada,
+    agora: AGORA
+  });
+  const logDivergencia = logs.find(linha => linha.includes("divergencia_viva_legado")) || "";
+
+  assert.strictEqual(leitura.sideEffectBlocked, true);
+  assert(logDivergencia.includes("extrasNaViva"), "log deve separar extras na viva");
+  assert(logDivergencia.includes("amostraExtrasNaViva"), "log deve carregar amostra limitada");
+  assert(logDivergencia.includes("extra_log"), "amostra deve identificar o item divergente");
+  assert(!logDivergencia.includes("Titulo sigiloso"), "log nao deve carregar titulo/payload");
+  assert(!logDivergencia.includes("https://nao-logar.local"), "log nao deve carregar link");
+}
+
+{
   const filaOriginal = [
     oferta("selecionada", { prioridadeEnvio: 20, score: 70 }),
     oferta("expirada", {

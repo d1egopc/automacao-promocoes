@@ -1122,6 +1122,17 @@ function compararVivaComLegadoInterno(clienteId = "admin", entradasViva = [], fi
     if (!mapaEsperado.has(id)) idsExtras.push(id);
   }
 
+  const amostrarDivergencias = (ids = [], mapa = new Map(), limite = 5) => ids.slice(0, limite).map(id => {
+    const entrada = mapa.get(id) || {};
+    return {
+      id,
+      status: entrada.status || statusItem(entrada.item || {}),
+      posicaoLegada: Number.isInteger(Number(entrada.posicaoLegada)) ? Number(entrada.posicaoLegada) : null,
+      bucket: entrada.bucket || "",
+      motivoBucket: entrada.motivoBucket || ""
+    };
+  });
+
   const divergencias =
     idsAusentes.length +
     idsExtras.length +
@@ -1139,6 +1150,9 @@ function compararVivaComLegadoInterno(clienteId = "admin", entradasViva = [], fi
     statusDivergentes: Array.from(new Set(statusDivergentes)).slice(0, 20),
     idsDuplicados: idsDuplicados.slice(0, 20),
     idsRecentesAusentes: idsRecentesAusentes.slice(0, 20),
+    amostraExtrasNaViva: amostrarDivergencias(idsExtras, mapaAtual),
+    amostraAusentesNaViva: amostrarDivergencias(idsAusentes, mapaEsperado),
+    amostraDuplicadosNaViva: amostrarDivergencias(idsDuplicados, mapaAtual),
     divergencias
   };
 }
@@ -1171,6 +1185,12 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
           idsDuplicados: comparacao.idsDuplicados.length,
           idsExtras: comparacao.idsExtras.length,
           idsAusentes: comparacao.idsAusentes.length,
+          extrasNaViva: comparacao.idsExtras.length,
+          ausentesNaViva: comparacao.idsAusentes.length,
+          duplicadosNaViva: comparacao.idsDuplicados.length,
+          amostraExtrasNaViva: comparacao.amostraExtrasNaViva,
+          amostraAusentesNaViva: comparacao.amostraAusentesNaViva,
+          amostraDuplicadosNaViva: comparacao.amostraDuplicadosNaViva,
           recoveryBloqueado: true,
           duracaoMs
         });
@@ -1205,6 +1225,12 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
         idsDuplicados: comparacao.idsDuplicados.length,
         idsExtras: comparacao.idsExtras.length,
         idsAusentes: comparacao.idsAusentes.length,
+        extrasNaViva: comparacao.idsExtras.length,
+        ausentesNaViva: comparacao.idsAusentes.length,
+        duplicadosNaViva: comparacao.idsDuplicados.length,
+        amostraExtrasNaViva: comparacao.amostraExtrasNaViva,
+        amostraAusentesNaViva: comparacao.amostraAusentesNaViva,
+        amostraDuplicadosNaViva: comparacao.amostraDuplicadosNaViva,
         duracaoMs
       });
       return {

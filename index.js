@@ -3220,10 +3220,15 @@ function salvarUsuarios() {
 
 // ================= CREDITOS =================
 
+function buscarUsuarioPorIdSeguro(listaUsuarios = [], clienteId = "") {
+  if (!Array.isArray(listaUsuarios)) return null;
+  return listaUsuarios.find(
+    usuario => usuario && String(usuario.id) === String(clienteId)
+  ) || null;
+}
+
 function obterUsuario(clienteId) {
-  return usuarios.find(
-    u => String(u.id) === String(clienteId)
-  );
+  return buscarUsuarioPorIdSeguro(usuarios, clienteId);
 }
 
 function obterPlanoUsuarioObjeto(usuario = {}) {
@@ -7547,12 +7552,20 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
 // ================= FUNCAO PROCESSA FILA =================
 
+function sanitizarErroFilaResumo(valor = "") {
+  return String(valor || "")
+    .replace(/[^\w .:()/-]/g, "")
+    .slice(0, 160);
+}
+
 function logProcessarFilaResumo(dados = {}) {
   console.log("[FILA-PROCESSAR-RESUMO]", JSON.stringify({
     clienteId: dados.clienteId || "",
+    fase: dados.fase || "",
     ofertasExaminadas: Number(dados.ofertasExaminadas || 0),
     ofertaSelecionada: dados.ofertaSelecionada || "",
     motivoPulo: dados.motivoPulo || "",
+    erro: sanitizarErroFilaResumo(dados.erro || ""),
     duracaoMs: Number(dados.duracaoMs || 0),
     cpuMs: Number(dados.cpuMs || 0),
     sobreposicaoEvitada: dados.sobreposicaoEvitada === true
@@ -7635,6 +7648,7 @@ async function processarFila(clienteIdAlvo = null) {
   const cpuInicioProcessarFila = process.cpuUsage();
   const resumoFila = {
     clienteId: clienteFila,
+    fase: "inicio",
     ofertasExaminadas: 0,
     ofertaSelecionada: "",
     motivoPulo: "",
@@ -7731,14 +7745,18 @@ async function processarFila(clienteIdAlvo = null) {
 
     liberarCooldownSessaoIndisponivel(clienteFila, "sessao_disponivel");
 
+    resumoFila.fase = "carregar_fila";
     // Fonte oficial da fila: /data/clientes/<clienteId>/fila.json; `fila` e cache do executor.
     carregarFila(clienteFila);
+    resumoFila.fase = "sanear_fila";
     sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
+    resumoFila.fase = "selecionar_oferta";
     oferta = selecionarProximaOfertaFila(clienteFila);
 
 if (!oferta) {
+  resumoFila.fase = "diagnostico_sem_oferta";
   const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
     diagnosticarFilaCliente(clienteFila);
   resumoFila.ofertasExaminadas = diagnosticoFila.pendentesTotal || 0;
@@ -7895,8 +7913,9 @@ if (!sessoes[idSessao]) {
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
+resumoFila.fase = "resolver_usuario_plano";
 const usuarioOferta =
-  usuarios.find(u => String(u.id) === String(clienteId)) || null;
+  buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
 const plano =
   getPlanoPorNome(usuarioOferta?.plano || "") || {};
@@ -8943,6 +8962,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
  } catch (e) {
   okPerf = false;
+  resumoFila.erro = e.message || "erro";
   resumoFila.motivoPulo = `erro:${e.message || "erro"}`;
   console.log("[ERRO] ERRO:", e.message);
 
@@ -10035,9 +10055,7 @@ app.get("/automacao/status", (req, res) => {
     ...configCliente
   };
 
-  const usuario = usuarios.find(
-    u => String(u.id) === String(clienteId)
-  );
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
   const itensCliente = fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
@@ -10629,7 +10647,7 @@ async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
 }
 
 function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, operador = {}) {
-  const usuario = usuarios.find(u => String(u.id) === String(usuarioId));
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, usuarioId);
   if (!usuario) {
     const erro = new Error("Usuario nao encontrado");
     erro.statusCode = 404;
@@ -11091,7 +11109,7 @@ app.delete("/admin/planos/:nome", exigirAdminMasterEstrito, (req, res) => {
   }
 
   const usuariosUsandoPlano = usuarios.filter(
-    u => String(u.plano).toLowerCase() === String(nome).toLowerCase()
+    u => String(u?.plano || "").toLowerCase() === String(nome).toLowerCase()
   );
 
   if (usuariosUsandoPlano.length > 0) {
@@ -11161,7 +11179,7 @@ app.delete("/admin/usuarios/:id", exigirAdminMasterEstrito, (req, res) => {
     });
   }
 
-  const usuarioExcluir = usuarios.find(u => String(u.id) === String(id));
+  const usuarioExcluir = buscarUsuarioPorIdSeguro(usuarios, id);
 
   if (!usuarioExcluir) {
     logAuditoriaExclusaoAdmin({
@@ -11196,7 +11214,7 @@ app.delete("/admin/usuarios/:id", exigirAdminMasterEstrito, (req, res) => {
   const antes = usuarios.length;
   const teardownRuntime = desmontarRuntimeExclusivoWorkspace(id);
 
-  usuarios = usuarios.filter(u => String(u.id) !== String(id));
+  usuarios = usuarios.filter(u => !u || String(u.id) !== String(id));
 
   if (usuarios.length === antes) {
     return res.status(404).json({
@@ -11248,7 +11266,7 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
   }
 
   const existe = usuarios.find(
-    u => u.email.toLowerCase() === body.email.toLowerCase()
+    u => String(u?.email || "").toLowerCase() === body.email.toLowerCase()
   );
 
   if (existe) {
@@ -11336,9 +11354,7 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
 
   const { id } = req.params;
 
-  const usuario = usuarios.find(
-    u => String(u.id) === String(id)
-  );
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, id);
 
   if (!usuario) {
     return res.status(404).json({
@@ -11628,7 +11644,7 @@ function isAdminMaster(req) {
   const clienteId = String(decoded?.clienteId || "").trim();
   if (!clienteId) return false;
 
-  const usuario = usuarios.find(u => u.id === clienteId);
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
   return usuarioEhAdminMaster(usuario);
 }
@@ -11638,7 +11654,7 @@ function isAdminMaster(req) {
 
 function getUsuarioAtual(req) {
   const clienteId = getClienteId(req);
-  return usuarios.find(u => u.id === clienteId) || null;
+  return buscarUsuarioPorIdSeguro(usuarios, clienteId);
 }
 
 function getPlanoUsuario(req) {
@@ -11671,7 +11687,7 @@ function usuarioTemRecurso(req, recurso) {
 }
 
 function clienteTemRecursoPlano(clienteId = "admin", recurso = "") {
-  const usuario = usuarios.find(u => String(u.id) === String(clienteId)) || null;
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
   if (!usuario) return false;
 
@@ -11685,7 +11701,7 @@ function clienteTemRecursoPlano(clienteId = "admin", recurso = "") {
 }
 
 function clienteTemRecursoMensageiro(clienteId = "admin") {
-  const usuario = usuarios.find(u => u.id === clienteId) || null;
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
   if (!usuario) return clienteId === "admin";
   if (usuarioEhAdminMaster(usuario)) return true;
@@ -11873,9 +11889,7 @@ function auth(req, res, next) {
       motivo: "jwt_sem_clienteId"
     });
 
-    const usuarioExiste = usuarios.find(u =>
-      String(u.id) === String(clienteId)
-    );
+    const usuarioExiste = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
     if (!usuarioExiste || usuarioExiste.ativo === false) {
       return res.status(401).json({
@@ -12465,7 +12479,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   }
 
   const usuarioOferta =
-    usuarios.find(u => String(u.id) === String(clienteId)) || null;
+    buscarUsuarioPorIdSeguro(usuarios, clienteId);
   const plano = getPlanoPorNome(usuarioOferta?.plano || "") || {};
 
   let enviouParaAlgumDestino = false;
@@ -14778,7 +14792,7 @@ function carregarRadarConfigAdminMaster() {
 
 function getUsuarioClienteRadar(clienteId = "admin") {
   const cid = String(clienteId || "admin");
-  const usuario = usuarios.find(u => String(u.id) === cid);
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, cid);
 
   if (usuario) return usuario;
 
@@ -14807,6 +14821,7 @@ function listarClientesElegiveisRadar() {
   }
 
   for (const usuario of usuarios) {
+    if (!usuario) continue;
     const clienteId = String(usuario?.id || "").trim();
     if (!usuarioAtivoOperacional(clienteId)) {
       logUsuarioInativoOperacional(clienteId, "radar_clientes_elegiveis");
@@ -20715,7 +20730,7 @@ function registrarAlertaIntegracaoManualV2(...args) {
 }
 
 function resolverPlanoManualV2Scheduler(clienteId = "admin") {
-  const usuario = usuarios.find(u => String(u?.id || "") === String(clienteId || "")) || null;
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
   if (!usuario) return null;
 
   const nomePlano = String(usuario.plano || "").trim().toLowerCase();
@@ -20963,7 +20978,7 @@ function gerarTokenRecuperacaoSenhaSeguro() {
 function obterUsuarioPorEmailNormalizado(email = "") {
   const alvo = normalizarEmailAuth(email);
   if (!alvo) return null;
-  return usuarios.find(u => normalizarEmailAuth(u.email) === alvo) || null;
+  return usuarios.find(u => u && normalizarEmailAuth(u.email) === alvo) || null;
 }
 
 function usuarioElegivelRecuperacaoSenha(usuario = {}) {
@@ -21246,8 +21261,10 @@ function encontrarUsuarioPorGoogleSub(googleSub = "") {
   const sub = String(googleSub || "").trim();
   if (!sub) return null;
   return usuarios.find(usuario =>
-    String(usuario.googleSub || "") === sub ||
-    String(usuario.provedoresAuth?.google?.sub || "") === sub
+    usuario && (
+      String(usuario.googleSub || "") === sub ||
+      String(usuario.provedoresAuth?.google?.sub || "") === sub
+    )
   ) || null;
 }
 
@@ -21390,8 +21407,10 @@ app.post("/login", async (req, res) => {
   const login = String(user || "").trim().toLowerCase();
 
   const usuario = perf.etapaSync("buscar_usuario", () => usuarios.find(u =>
-    String(u.email || "").toLowerCase() === login ||
-    String(u.id || "").toLowerCase() === login
+    u && (
+      String(u.email || "").toLowerCase() === login ||
+      String(u.id || "").toLowerCase() === login
+    )
   ));
 
   if (!usuario) {
@@ -21589,9 +21608,7 @@ app.get("/me", (req, res) => {
   const perf = criarPerfTimer("PERF ME", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
-  const usuario = perf.etapaSync("buscar_usuario", () => usuarios.find(
-    u => String(u.id) === String(clienteId)
-  ));
+  const usuario = perf.etapaSync("buscar_usuario", () => buscarUsuarioPorIdSeguro(usuarios, clienteId));
 
   if (!usuario) {
     perf.fim({ clienteId, statusCode: 404, usuarioEncontrado: false });
@@ -25085,6 +25102,7 @@ async function distribuirOfertaParaClientes(ofertaBase) {
   ofertaBase = prepararOfertaGlobal(ofertaBase);
 
   for (const usuario of usuarios) {
+    if (!usuario) continue;
     if (!usuarioAtivoOperacional(usuario?.id)) {
       logUsuarioInativoOperacional(usuario?.id, "distribuidor_legado");
       continue;
@@ -27935,6 +27953,7 @@ initEngineDatabase()
   });
 
 for (const usuario of usuarios) {
+  if (!usuario) continue;
   carregarFila(usuario.id);
 }
 
@@ -28256,7 +28275,7 @@ async function rodarMarketplaceEspecifico(marketplace = "", opcoes = {}) {
 let runnerLockKey = "";
 
 // Farejador global roda apenas no ADMIN MASTER
-const admin = usuarios.find(u => u.papel === "admin_master");
+const admin = usuarios.find(u => u && u.papel === "admin_master");
 
 if (!admin) {
   console.log("[AVISO] Nenhum admin master encontrado. Farejador global bloqueado.");
@@ -28348,6 +28367,7 @@ logOptimus(categoriaMarketplaceLog, "Início da rodada", {
 });
 
 for (const usuario of usuarios) {
+  if (!usuario) continue;
   if (!usuario?.ativo) continue;
 
   const clienteId = usuario.id;
@@ -28639,6 +28659,7 @@ async function rodarProcessadorFilaGlobal() {
   }
 
   for (const usuario of usuarios) {
+    if (!usuario) continue;
     const clienteId = String(usuario?.id || "").trim();
     const puloRapido = avaliarPuloRapidoClienteFila(usuario);
     if (puloRapido.motivo) {
