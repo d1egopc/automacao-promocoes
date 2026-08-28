@@ -443,6 +443,52 @@ function duplicidadeEngineLegada(fila, itemFila, clienteId = "cliente_a") {
   assert.strictEqual(chamadas.length, 2, "somente projecoes reais devem logar");
 }
 
+{
+  const escritas = [];
+  const logs = [];
+  const controlador = criarControladorFilaV2Shadow({
+    intervaloMs: 1000,
+    devePularShadowCompleto: ({ clienteId }) => clienteId === "cliente_canario",
+    writeClienteJson: (cliente, arquivo) => {
+      escritas.push({ cliente, arquivo });
+      return true;
+    },
+    getClienteJsonPath: (cliente, arquivo) => `${cliente}/${arquivo}`,
+    logger: { log: (...args) => logs.push(args.join(" ")) }
+  });
+
+  const canario = controlador.projetarSeNecessario({
+    fila: [oferta("canario_vivo", { clienteId: "cliente_canario" })],
+    clienteId: "cliente_canario",
+    agora: AGORA,
+    motivo: "salvarFila"
+  });
+  const canarioThrottled = controlador.projetarSeNecessario({
+    fila: [oferta("canario_vivo_2", { clienteId: "cliente_canario" })],
+    clienteId: "cliente_canario",
+    agora: AGORA + 500,
+    motivo: "carregarFila"
+  });
+  const legado = controlador.projetarSeNecessario({
+    fila: [oferta("legado_vivo", { clienteId: "cliente_legado" })],
+    clienteId: "cliente_legado",
+    agora: AGORA,
+    motivo: "salvarFila"
+  });
+
+  assert.strictEqual(canario.ok, true);
+  assert.strictEqual(canario.shadowCompletoEvitado, true, "canario V2 deve evitar projecao shadow completa");
+  assert.strictEqual(canarioThrottled.pulou, true, "skip de shadow completo tambem deve respeitar throttle");
+  assert.strictEqual(legado.ok, true);
+  assert.deepStrictEqual(
+    escritas.map(item => `${item.cliente}/${item.arquivo}`),
+    ["cliente_legado/fila-viva.json", "cliente_legado/fila-historico.json"],
+    "workspace fora do canario deve manter shadow completo legado"
+  );
+  assert(logs.some(linha => linha.includes("shadowCompletoEvitado")), "telemetria deve registrar shadow completo evitado");
+  assert(!logs.join("\n").includes("Oferta canario_vivo"), "telemetria de skip nao deve registrar payload");
+}
+
 function criarDepsFilaOperacionalTeste() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-operacional-v2-"));
   const logs = [];

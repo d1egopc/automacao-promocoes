@@ -867,11 +867,6 @@ aliexpress: {
 
 let fila = [];
 const filaStore = criarFilaStore(fila);
-const filaV2Shadow = criarControladorFilaV2Shadow({
-  writeClienteJson,
-  getClienteJsonPath,
-  logger: console
-});
 const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   env: process.env,
   readClienteJson,
@@ -879,6 +874,12 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   getClienteJsonPath,
   getClientePath,
   logger: console
+});
+const filaV2Shadow = criarControladorFilaV2Shadow({
+  writeClienteJson,
+  getClienteJsonPath,
+  logger: console,
+  devePularShadowCompleto: ({ clienteId }) => filaOperacionalV2.deveUsarFilaV2Operacional(clienteId)
 });
 const checkpointFilaV2 = criarControladorCheckpointLegadoV2({
   env: process.env

@@ -259,6 +259,41 @@ function logShadow(logger = console, payload = {}) {
   destino.log("[FILA-V2-SHADOW]", JSON.stringify(payload));
 }
 
+function shadowCompletoEvitado(opcoes = {}, params = {}, clienteId = "admin") {
+  if (typeof opcoes.devePularShadowCompleto === "function") {
+    try {
+      return opcoes.devePularShadowCompleto({
+        clienteId,
+        motivo: params.motivo || "snapshot",
+        agora: params.agora || Date.now()
+      }) === true;
+    } catch {
+      return false;
+    }
+  }
+  return opcoes.pularShadowCompleto === true;
+}
+
+function logShadowCompletoEvitado(logger = console, params = {}, clienteId = "admin") {
+  const payload = {
+    versao: 2,
+    motivo: params.motivo || "snapshot",
+    clienteId,
+    pulou: true,
+    shadowCompletoEvitado: true,
+    motivoSkip: "fila_v2_operacional_habilitada",
+    totalLegado: "nao_medido",
+    totalViva: "nao_medido",
+    totalHistorico: "nao_medido",
+    bytesFilaJson: "nao_medido",
+    bytesFilaVivaJson: "nao_medido",
+    bytesFilaHistoricoJson: "nao_medido",
+    tempoProjecaoMs: 0
+  };
+  logShadow(logger, payload);
+  return { ok: true, ...payload };
+}
+
 function projetarFilaV2Shadow({
   fila = [],
   clienteId = "admin",
@@ -365,6 +400,9 @@ function criarControladorFilaV2Shadow(opcoes = {}) {
       return { ok: true, pulou: true, motivo: "throttle_shadow", clienteId: cliente };
     }
     ultimoPorCliente.set(cliente, agora);
+    if (shadowCompletoEvitado(opcoes, params, cliente)) {
+      return logShadowCompletoEvitado(params.logger || opcoes.logger, params, cliente);
+    }
     return projetarFilaV2Shadow({ ...opcoes, ...params, clienteId: cliente, agora });
   }
 
