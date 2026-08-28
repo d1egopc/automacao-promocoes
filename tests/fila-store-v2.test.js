@@ -1316,6 +1316,65 @@ function criarDepsFilaOperacionalTeste() {
 }
 
 {
+  const controlador = filaDualRead.criarControladorFilaDualRead({
+    env: { FILA_V2_DUAL_READ_ATIVA: "true" },
+    intervaloMs: 0,
+    logger: { log: () => {} }
+  });
+  const semCandidato = {
+    ok: true,
+    motivo: "sem_candidato",
+    selecionada: null,
+    totalPendentes: 3,
+    totalElegiveis: 0,
+    contadores: { avaliadas: 3 }
+  };
+
+  const comparacaoSemCandidato = controlador.compararSelecao({
+    clienteId: "cliente_sem_candidato",
+    legado: semCandidato,
+    sombra: semCandidato,
+    contexto: { componente: "executor_selecao" },
+    forcar: true
+  });
+
+  assert.strictEqual(comparacaoSemCandidato.equivalente, true);
+  assert.strictEqual(comparacaoSemCandidato.legado.motivo, "sem_candidato");
+  assert.strictEqual(comparacaoSemCandidato.legado.selecionadaId, "");
+  assert.strictEqual(comparacaoSemCandidato.legado.totalPendentes, 3);
+  assert.strictEqual(comparacaoSemCandidato.legado.avaliadas, 3);
+
+  const ofertaComIds = {
+    id: "id_primario",
+    eventoId: "evento_nao_usado",
+    ofertaId: "oferta_secundaria",
+    engineOfertaId: "engine_terciario"
+  };
+  const selecionadaComIds = {
+    ok: true,
+    motivo: "selecionada",
+    selecionada: {
+      oferta: ofertaComIds,
+      ranking: { lane: "agua_nova", scoreFinal: 88 },
+      destinosCompativeis: 1,
+      destinosLiberados: [{}]
+    },
+    totalPendentes: 1,
+    totalElegiveis: 1,
+    contadores: { avaliadas: 1 }
+  };
+  const comparacaoComIds = controlador.compararSelecao({
+    clienteId: "cliente_com_ids",
+    legado: selecionadaComIds,
+    sombra: selecionadaComIds,
+    contexto: { componente: "executor_selecao" },
+    forcar: true
+  });
+
+  assert.strictEqual(comparacaoComIds.legado.selecionadaId, "id_primario");
+}
+
+{
   const logs = [];
   const controlador = filaDualRead.criarControladorFilaDualRead({
     env: { FILA_V2_DUAL_READ_ATIVA: "true" },

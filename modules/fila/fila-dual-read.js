@@ -11,12 +11,13 @@ function texto(valor = "") {
 }
 
 function idOferta(oferta = {}) {
+  const item = oferta && typeof oferta === "object" ? oferta : {};
   return texto(
-    oferta.id ||
-    oferta.ofertaId ||
-    oferta.engineOfertaId ||
-    oferta.engine_oferta_id ||
-    oferta.idOferta
+    item.id ||
+    item.ofertaId ||
+    item.engineOfertaId ||
+    item.engine_oferta_id ||
+    item.idOferta
   );
 }
 
