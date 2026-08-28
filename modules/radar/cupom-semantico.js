@@ -74,6 +74,14 @@ const PALAVRAS_BLOQUEADAS = new Set([
   "OR"
 ]);
 
+const MARCADORES_INSTRUCIONAIS_COLAPSADOS = new Set([
+  "ABAIXODOPRECODOPRODUTO",
+  "ABAIXODOPRECO",
+  "PRECODOPRODUTO",
+  "ABAIXODOVALOR",
+  "CONFIRAABAIXO"
+]);
+
 function pareceUrlOuParametro(valor = "") {
   const original = texto(valor);
   return /https?:\/\//i.test(original) ||
@@ -119,6 +127,9 @@ function removerUrls(valor = "") {
 }
 
 function pareceTrechoConcatenadoDeFrase(codigo = "") {
+  const compacto = semAcentosUpper(codigo).replace(/[^A-Z0-9]/g, "");
+  if (MARCADORES_INSTRUCIONAIS_COLAPSADOS.has(compacto)) return true;
+
   return /(?:^|_)O?CUPOM(?:DE|AQUI|$)/i.test(codigo) ||
     /(?:TODOS.*CUPONS?.*(?:PAGINA|ANUNCIO)|CUPONS?DESTA|DAPAGINA|DESTAPAGINA|DISPONIVEL|ANUNCIO|MENSAGEM|DETECTADO|HTTPS?)/i.test(codigo) ||
     /^(?:ABRA|ABRIR|ACESSE|CLIQUE|TOQUE|CONFIRA|VEJA|VAI)(?:O|A|OS|AS)?[A-Z0-9]*(?:PRODUTO|APARECER|PAGINA|ANUNCIO|APP|APLICATIVO|LINK|LOJA|SITE)/i.test(codigo);

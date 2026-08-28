@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const radarCupomMensagem = require("../utils/radar-cupom-mensagem");
 const {
+  extrairCodigosCupomSemanticos,
   normalizarCodigoCupomSemantico,
   normalizarCuponsSemanticos
 } = require("../modules/radar/cupom-semantico");
@@ -332,6 +333,42 @@ function criarMirrorComTextoComercial(textoOriginal, ajustes = {}) {
   assert.deepStrictEqual(normalizarCuponsSemanticos("Resgate todos os cupons desta página:"), []);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Use cupom: CUPOMDANOITE ou resgate no anuncio"), ["CUPOMDANOITE"]);
   assert.deepStrictEqual(normalizarCuponsSemanticos("Aplique o cupom MLSAUDE para obter o desconto."), ["MLSAUDE"]);
+}
+
+{
+  for (const falso of [
+    "ABAIXODOPRECODOPRODUTO_",
+    "ABAIXODOPRECODOPRODUTO",
+    "abaixo do preco do produto_",
+    "abaixo do preço do produto_",
+    "Abaixo do Preco do Produto",
+    "abaixo_do_preco_do_produto_",
+    "ABAIXO-DO-PRECO-DO-PRODUTO"
+  ]) {
+    assert.strictEqual(normalizarCodigoCupomSemantico(falso), "");
+  }
+
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Cupom: abaixo do preco do produto_"), []);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Cupom: abaixo do preço do produto_"), []);
+  assert.deepStrictEqual(normalizarCuponsSemanticos("Cupom: abaixo do preco do produto_"), []);
+  assert.strictEqual(radarCupomMensagem.normalizarCupomMensagemRadar("ABAIXODOPRECODOPRODUTO_"), "");
+  assert.deepStrictEqual(
+    radarCupomMensagem.extrairCuponsMultiplosRadar("Cupom: abaixo do preco do produto_").cupons,
+    []
+  );
+
+  for (const real of ["PROMO20", "PROMO_20", "PROMO-20", "MELI20", "APP20", "OFERTA_2026"]) {
+    assert.strictEqual(normalizarCodigoCupomSemantico(real), real);
+  }
+}
+
+{
+  const resultado = montarOfertaEspelhoTeste(criarMirrorComCupom("ABAIXODOPRECODOPRODUTO_", "Cupom: abaixo do preco do produto_"));
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.oferta.cupom, "");
+  assert.strictEqual(resultado.oferta.codigoCupom, "");
+  assert.strictEqual(resultado.oferta.cupomTexto, "");
+  assert.deepStrictEqual(resultado.oferta.codigosCupom, []);
 }
 
 {
