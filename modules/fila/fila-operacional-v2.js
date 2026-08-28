@@ -16,12 +16,14 @@ const {
   projetarFilaV2
 } = require("./fila-v2-shadow");
 
+const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FLAG_OPERACIONAL_ATIVA = "FILA_V2_OPERACIONAL_ATIVA";
 const FLAG_ROLLOUT_ATIVO = "FILA_V2_OPERACIONAL_ROLLOUT";
 const FLAG_CANARY_CLIENTES = "FILA_V2_OPERACIONAL_CANARY_CLIENTES";
 const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
 const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
+const TAG_MANIFEST = "[FILA-V2-MANIFEST]";
 const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
 const TAG_2C = "[FILA-V2-2C]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
@@ -196,6 +198,13 @@ function log2C(logger = console, payload = {}) {
   } catch {}
 }
 
+function logManifest(logger = console, payload = {}) {
+  try {
+    const destino = logger && typeof logger.log === "function" ? logger : console;
+    destino.log(TAG_MANIFEST, JSON.stringify(payload));
+  } catch {}
+}
+
 function hashCurto(valor = "") {
   return crypto.createHash("sha1").update(String(valor || "")).digest("hex").slice(0, 12);
 }
@@ -243,6 +252,185 @@ function lerFilaLegada(clienteId = "admin", deps = {}) {
   } catch {
     return [];
   }
+}
+
+function numeroManifesto(valor, padrao = 0) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero < 0) return padrao;
+  return Math.floor(numero);
+}
+
+function normalizarManifestoFilaV2(valor = {}, clienteId = "admin", agora = Date.now()) {
+  const bruto = valor && typeof valor === "object" ? valor : {};
+  const vivaGeneration = numeroManifesto(bruto.vivaGeneration, 0);
+  const checkpointGeneration = Math.min(vivaGeneration, numeroManifesto(bruto.checkpointGeneration, 0));
+  const dirtyBruto = bruto.dirtyGeneration;
+  const dirtyGeneration = dirtyBruto === null || dirtyBruto === undefined || dirtyBruto === ""
+    ? null
+    : numeroManifesto(dirtyBruto, checkpointGeneration < vivaGeneration ? checkpointGeneration + 1 : 0);
+  return {
+    version: 1,
+    clienteId: clienteSeguro(clienteId),
+    vivaGeneration,
+    checkpointGeneration,
+    dirtyGeneration: checkpointGeneration >= vivaGeneration ? null : dirtyGeneration,
+    itemCount: numeroManifesto(bruto.itemCount, 0),
+    lastMutationAt: texto(bruto.lastMutationAt || ""),
+    lastCheckpointAt: texto(bruto.lastCheckpointAt || ""),
+    updatedAt: texto(bruto.updatedAt || agoraIso(agora))
+  };
+}
+
+function lerManifestoFilaV2(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const file = caminhoJsonCliente(cliente, FILA_V2_MANIFEST_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(file, null, fsImpl);
+  if (!leitura.ok) {
+    if (!["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+      logManifest(deps.logger, {
+        evento: "manifest_read_error",
+        clienteId: cliente,
+        motivo: leitura.motivo,
+        erro: leitura.erro || "",
+        bytes: leitura.bytes || 0
+      });
+    }
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro || "",
+      manifesto: normalizarManifestoFilaV2({}, cliente, deps.agora || Date.now()),
+      bytes: leitura.bytes || 0
+    };
+  }
+  return {
+    ok: true,
+    motivo: "ok",
+    manifesto: normalizarManifestoFilaV2(leitura.valor, cliente, deps.agora || Date.now()),
+    bytes: leitura.bytes || 0,
+    mtimeMs: leitura.mtimeMs || 0
+  };
+}
+
+function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
+  const base = normalizarManifestoFilaV2(atual, clienteId, agora);
+  const temViva = Object.prototype.hasOwnProperty.call(patch, "vivaGeneration");
+  const temCheckpoint = Object.prototype.hasOwnProperty.call(patch, "checkpointGeneration");
+  const vivaGeneration = Math.max(base.vivaGeneration, temViva ? numeroManifesto(patch.vivaGeneration, base.vivaGeneration) : base.vivaGeneration);
+  const checkpointDesejado = temCheckpoint ? numeroManifesto(patch.checkpointGeneration, base.checkpointGeneration) : base.checkpointGeneration;
+  const checkpointGeneration = Math.min(vivaGeneration, Math.max(base.checkpointGeneration, checkpointDesejado));
+
+  let dirtyGeneration = base.dirtyGeneration;
+  if (Object.prototype.hasOwnProperty.call(patch, "dirtyGeneration")) {
+    if (patch.dirtyGeneration === null) {
+      dirtyGeneration = null;
+    } else {
+      const dirtyPatch = numeroManifesto(patch.dirtyGeneration, vivaGeneration);
+      dirtyGeneration = dirtyGeneration === null ? dirtyPatch : Math.min(dirtyGeneration, dirtyPatch);
+    }
+  }
+  if (checkpointGeneration >= vivaGeneration) {
+    dirtyGeneration = null;
+  } else if (dirtyGeneration === null) {
+    dirtyGeneration = Math.max(1, checkpointGeneration + 1);
+  } else if (dirtyGeneration <= checkpointGeneration) {
+    dirtyGeneration = checkpointGeneration + 1;
+  }
+
+  return {
+    version: 1,
+    clienteId: clienteSeguro(clienteId),
+    vivaGeneration,
+    checkpointGeneration,
+    dirtyGeneration,
+    itemCount: Object.prototype.hasOwnProperty.call(patch, "itemCount")
+      ? numeroManifesto(patch.itemCount, base.itemCount)
+      : base.itemCount,
+    lastMutationAt: texto(patch.lastMutationAt || base.lastMutationAt || ""),
+    lastCheckpointAt: texto(patch.lastCheckpointAt || base.lastCheckpointAt || ""),
+    updatedAt: agoraIso(agora)
+  };
+}
+
+function escreverManifestoFilaV2(clienteId = "admin", patch = {}, deps = {}, evento = "manifest_write") {
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const leitura = lerManifestoFilaV2(cliente, deps);
+  const manifesto = mesclarManifestoFilaV2(leitura.manifesto, patch, cliente, agora);
+  const escritor = deps.writeClienteJson || writeClienteJson;
+  try {
+    const ok = typeof escritor === "function"
+      ? escritor(cliente, FILA_V2_MANIFEST_ARQUIVO, manifesto)
+      : false;
+    if (ok === false) throw new Error("write_retorno_false");
+    logManifest(deps.logger, {
+      evento,
+      clienteId: cliente,
+      vivaGeneration: manifesto.vivaGeneration,
+      checkpointGeneration: manifesto.checkpointGeneration,
+      dirtyGeneration: manifesto.dirtyGeneration,
+      itemCount: manifesto.itemCount,
+      motivo: patch.motivo || ""
+    });
+    return { ok: true, motivo: "manifesto_escrito", manifesto, leitura };
+  } catch (erro) {
+    logManifest(deps.logger, {
+      evento: "manifest_write_error",
+      clienteId: cliente,
+      vivaGeneration: manifesto.vivaGeneration,
+      checkpointGeneration: manifesto.checkpointGeneration,
+      dirtyGeneration: manifesto.dirtyGeneration,
+      itemCount: manifesto.itemCount,
+      motivo: patch.motivo || "",
+      erro: erro?.message || "erro_manifesto"
+    });
+    return {
+      ok: false,
+      motivo: "erro_escrita_manifesto",
+      erro: erro?.message || "erro_manifesto",
+      manifesto,
+      leitura
+    };
+  }
+}
+
+function registrarManifestoMutacaoObservacional(clienteId = "admin", dados = {}, deps = {}) {
+  let generation = numeroManifesto(dados.generation, 0);
+  if (generation <= 0 && dados.incrementarSemGeneration === true) {
+    const leituraAtual = lerManifestoFilaV2(clienteId, deps);
+    generation = (leituraAtual.manifesto?.vivaGeneration || 0) + 1;
+  }
+  if (generation <= 0) {
+    return { ok: true, pulou: true, motivo: "generation_indisponivel" };
+  }
+  const patch = {
+    vivaGeneration: generation,
+    dirtyGeneration: dados.checkpointSincronizado === true ? null : (dados.dirtyGeneration ?? generation),
+    itemCount: dados.itemCount,
+    lastMutationAt: agoraIso(deps.agora || Date.now()),
+    motivo: dados.motivo || "mutacao_viva"
+  };
+  if (dados.checkpointSincronizado === true) {
+    patch.checkpointGeneration = generation;
+    patch.lastCheckpointAt = patch.lastMutationAt;
+  }
+  return escreverManifestoFilaV2(clienteId, patch, deps, "manifest_write");
+}
+
+function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = {}, deps = {}) {
+  const generation = numeroManifesto(dados.checkpointGeneration ?? dados.generation, 0);
+  if (generation <= 0) {
+    return { ok: true, pulou: true, motivo: "checkpoint_generation_indisponivel" };
+  }
+  return escreverManifestoFilaV2(clienteId, {
+    vivaGeneration: generation,
+    checkpointGeneration: generation,
+    dirtyGeneration: null,
+    itemCount: dados.itemCount,
+    lastCheckpointAt: agoraIso(deps.agora || Date.now()),
+    motivo: dados.motivo || "checkpoint"
+  }, deps, "manifest_checkpoint");
 }
 
 function cloneSet(set = new Set()) {
@@ -1737,11 +1925,15 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     moverTerminalParaHistorico: (clienteId, filaViva, alvo, deps = {}) => moverTerminalParaHistorico(clienteId, filaViva, alvo, { ...opcoes, ...deps }),
     compararVivaComLegado: (clienteId, entradasViva, filaLegada, deps = {}) => compararVivaComLegado(clienteId, entradasViva, filaLegada, { ...opcoes, ...deps }),
+    lerManifestoFilaV2: (clienteId, deps = {}) => lerManifestoFilaV2(clienteId, { ...opcoes, ...deps }),
+    registrarManifestoMutacaoObservacional: (clienteId, dados = {}, deps = {}) => registrarManifestoMutacaoObservacional(clienteId, dados, { ...opcoes, ...deps }),
+    registrarManifestoCheckpointObservacional: (clienteId, dados = {}, deps = {}) => registrarManifestoCheckpointObservacional(clienteId, dados, { ...opcoes, ...deps }),
     resetarCacheHistoricoParaTeste: limparCacheHistorico
   };
 }
 
 module.exports = {
+  FILA_V2_MANIFEST_ARQUIVO,
   FLAG_OPERACIONAL_ATIVA,
   FLAG_ROLLOUT_ATIVO,
   FLAG_CANARY_CLIENTES,
@@ -1751,6 +1943,7 @@ module.exports = {
   FLAG_CHECKPOINT_MAX_DIRTY_MS,
   HISTORICO_INCREMENTAL_DIR,
   TAG_TELEMETRIA,
+  TAG_MANIFEST,
   TAG_CANARY_WRITER,
   TAG_2C,
   DEFAULT_CHECKPOINT_MUTACOES,
@@ -1774,6 +1967,9 @@ module.exports = {
   appendHistoricoIncremental,
   moverTerminalParaHistorico,
   compararVivaComLegado,
+  lerManifestoFilaV2,
+  registrarManifestoMutacaoObservacional,
+  registrarManifestoCheckpointObservacional,
   itemTerminalParaHistorico,
   politicaCheckpointLegado,
   criarControladorCheckpointLegadoV2,

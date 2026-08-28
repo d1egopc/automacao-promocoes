@@ -2484,6 +2484,27 @@ function atualizarFilaStoreIncrementalFilaV2(item = {}, clienteId = "admin", mot
   };
 }
 
+function registrarManifestoVivaAposMutacao(clienteId = "admin", resultado = {}, motivo = "mutacao_viva", opcoes = {}) {
+  const cliente = String(clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { ok: true, pulou: true, motivo: "v2_desabilitada" };
+  }
+  if (!resultado || resultado.ok !== true) {
+    return { ok: true, pulou: true, motivo: "viva_nao_persistida" };
+  }
+  return filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: opcoes.generation,
+    dirtyGeneration: opcoes.dirtyGeneration,
+    incrementarSemGeneration: opcoes.incrementarSemGeneration === true,
+    checkpointSincronizado: opcoes.checkpointSincronizado === true,
+    itemCount: resultado.totalViva,
+    motivo
+  }, {
+    agora: Date.now(),
+    logger: console
+  });
+}
+
 function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "mutacao_legado", opcoes = {}) {
   const cliente = String(clienteId || item?.clienteId || "admin");
   if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
@@ -2502,6 +2523,12 @@ function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, moti
     vivaStatusUpdateCount: resultado.atualizouViva ? 1 : 0,
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
+  if (resultado.atualizouViva || resultado.removeuDaViva) {
+    registrarManifestoVivaAposMutacao(cliente, resultado, motivo, {
+      incrementarSemGeneration: true,
+      checkpointSincronizado: true
+    });
+  }
   return { ...resultado, motivoSync: motivo, item: itemSincronizado };
 }
 
@@ -2517,6 +2544,12 @@ function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo =
   registrarMetricasFilaV22C(cliente, {
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
+  if (resultado.removeuDaViva) {
+    registrarManifestoVivaAposMutacao(cliente, resultado, motivo, {
+      incrementarSemGeneration: true,
+      checkpointSincronizado: true
+    });
+  }
   return { ...resultado, motivoSync: motivo };
 }
 
@@ -2660,6 +2693,13 @@ function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", op
   const bytesCheckpoint = tamanhoArquivoSeguro(getFilaFile(cliente));
 
   if (salvou) {
+    filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+      checkpointGeneration: decisao.generationInicial,
+      motivo: decisao.motivo || motivo
+    }, {
+      agora: Date.now(),
+      logger: console
+    });
     const estado = checkpointFilaV2.concluirCheckpoint(cliente, {
       ok: true,
       generationInicial: decisao.generationInicial,
@@ -2988,6 +3028,10 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
           filaStoreIncrementalFallbackCount: updateIncremental.filaStoreIncrementalFallbackCount || 0
         });
         const dirty = checkpointFilaV2.marcarDirty(cliente, "insert_viva", Date.now());
+        registrarManifestoVivaAposMutacao(cliente, persistenciaViva, "insert_viva", {
+          generation: dirty.generation,
+          dirtyGeneration: dirty.generation
+        });
         const checkpoint = checkpointLegadoFilaV22C(cliente, "insert_batch");
 
         console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {

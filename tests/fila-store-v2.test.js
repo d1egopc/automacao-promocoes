@@ -1388,6 +1388,174 @@ function criarStorageTemporarioFilaV2() {
 
 {
   const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto";
+  const logs = [];
+  const item = oferta("manifesto_insert", { clienteId: cliente, status: "pendente" });
+  const viva = filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, item, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA,
+    posicaoLegada: 4
+  });
+  const manifesto = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 1,
+    dirtyGeneration: 1,
+    itemCount: viva.totalViva,
+    motivo: "insert_viva"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: (...args) => logs.push(args.join(" ")) },
+    agora: AGORA
+  });
+  const lido = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(viva.ok, true);
+  assert.strictEqual(manifesto.ok, true);
+  assert.strictEqual(lido.manifesto.vivaGeneration, 1, "vivaGeneration deve refletir generation operacional");
+  assert.strictEqual(lido.manifesto.checkpointGeneration, 0);
+  assert.strictEqual(lido.manifesto.dirtyGeneration, 1);
+  assert.strictEqual(lido.manifesto.itemCount, 1);
+  assert(logs.some(linha => linha.includes("[FILA-V2-MANIFEST]") && linha.includes("manifest_write")));
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_falha";
+  const item = oferta("manifesto_falha", { clienteId: cliente, status: "pendente" });
+  const viva = filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, item, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA,
+    posicaoLegada: 1
+  });
+  const manifesto = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 1,
+    dirtyGeneration: 1,
+    itemCount: viva.totalViva,
+    motivo: "insert_viva"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: (clienteId, arquivo, dados) => {
+      if (arquivo === filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO) throw new Error("falha_manifesto");
+      return storage.writeClienteJson(clienteId, arquivo, dados);
+    },
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(viva.ok, true, "fila-viva deve continuar duravel");
+  assert.strictEqual(manifesto.ok, false, "falha no manifesto deve ser observacional");
+  assert.strictEqual(JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8")).length, 1);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_checkpoint";
+  const logs = [];
+  const mutacao = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 2,
+    dirtyGeneration: 2,
+    itemCount: 3,
+    motivo: "insert_viva"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const checkpoint = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    checkpointGeneration: 2,
+    itemCount: 3,
+    motivo: "mutacoes"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: (...args) => logs.push(args.join(" ")) },
+    agora: AGORA + 1000
+  });
+
+  assert.strictEqual(mutacao.ok, true);
+  assert.strictEqual(checkpoint.ok, true);
+  assert.strictEqual(checkpoint.manifesto.vivaGeneration, 2);
+  assert.strictEqual(checkpoint.manifesto.checkpointGeneration, 2);
+  assert.strictEqual(checkpoint.manifesto.dirtyGeneration, null);
+  assert(logs.some(linha => linha.includes("manifest_checkpoint")));
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_monotonico";
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 5,
+    dirtyGeneration: 5,
+    itemCount: 5,
+    motivo: "insert_viva"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 3,
+    dirtyGeneration: 3,
+    itemCount: 3,
+    motivo: "write_antigo"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 1
+  });
+  const checkpointParcial = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    checkpointGeneration: 4,
+    itemCount: 4,
+    motivo: "checkpoint_parcial"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 1
+  });
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 3,
+    dirtyGeneration: 3,
+    itemCount: 3,
+    motivo: "write_antigo_apos_checkpoint"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 1
+  });
+  const checkpoint = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    checkpointGeneration: 9,
+    itemCount: 9,
+    motivo: "checkpoint_recuperado"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 2
+  });
+
+  assert.strictEqual(checkpointParcial.manifesto.vivaGeneration, 5);
+  assert.strictEqual(checkpointParcial.manifesto.checkpointGeneration, 4);
+  assert.strictEqual(checkpointParcial.manifesto.dirtyGeneration, 5, "dirty nao deve regressar para antes do checkpoint");
+  assert.strictEqual(checkpoint.manifesto.vivaGeneration, 9, "checkpoint posterior pode recuperar manifesto ausente/desatualizado");
+  assert.strictEqual(checkpoint.manifesto.checkpointGeneration, 9);
+  assert.strictEqual(checkpoint.manifesto.dirtyGeneration, null);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
   const vivaPath = storage.getClienteJsonPath("cliente_corrupto", FILA_VIVA_ARQUIVO);
   fs.mkdirSync(path.dirname(vivaPath), { recursive: true });
   fs.writeFileSync(vivaPath, "{json quebrado", "utf8");
@@ -1503,16 +1671,18 @@ function criarStorageTemporarioFilaV2() {
   const cliente = "cliente_recovery_mtime";
   const legadoPath = storage.getClienteJsonPath(cliente, "fila.json");
   const vivaPath = storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO);
+  const manifestoPath = storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO);
   fs.mkdirSync(path.dirname(legadoPath), { recursive: true });
   fs.writeFileSync(legadoPath, JSON.stringify([oferta("legado_mtime", { clienteId: cliente })]), "utf8");
   fs.writeFileSync(vivaPath, JSON.stringify([{ item: oferta("viva_mtime", { clienteId: cliente }), bucket: "viva", posicaoLegada: 1 }]), "utf8");
+  fs.writeFileSync(manifestoPath, "{manifesto quebrado", "utf8");
   fs.utimesSync(legadoPath, new Date(AGORA - 10_000), new Date(AGORA - 10_000));
   fs.utimesSync(vivaPath, new Date(AGORA), new Date(AGORA));
 
   const vivaMaisNova = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente, {
     getClienteJsonPath: storage.getClienteJsonPath
   });
-  assert.strictEqual(vivaMaisNova.maisNova, true, "recovery so deve ser elegivel quando viva for mais nova que legado");
+  assert.strictEqual(vivaMaisNova.maisNova, true, "2D.3a nao deve consultar manifesto para decidir recovery");
 
   fs.utimesSync(legadoPath, new Date(AGORA + 10_000), new Date(AGORA + 10_000));
   const legadoMaisNovo = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente, {
