@@ -1817,6 +1817,264 @@ function criarStorageTemporarioFilaV2() {
   assert.strictEqual(legadoMaisNovo.maisNova, false, "viva antiga nao deve sobrepor legado mais recente");
 }
 
+function escreverArquivosRecoveryComparacao(storage, cliente, { vivaMtime, legadoMtime, manifesto }) {
+  const legadoPath = storage.getClienteJsonPath(cliente, "fila.json");
+  const vivaPath = storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO);
+  const manifestoPath = storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO);
+  fs.mkdirSync(path.dirname(legadoPath), { recursive: true });
+  fs.writeFileSync(legadoPath, JSON.stringify([oferta(`${cliente}_legado`, { clienteId: cliente })]), "utf8");
+  fs.writeFileSync(vivaPath, JSON.stringify([{ item: oferta(`${cliente}_viva`, { clienteId: cliente }), bucket: "viva", posicaoLegada: 0 }]), "utf8");
+  if (manifesto !== undefined) {
+    fs.writeFileSync(
+      manifestoPath,
+      typeof manifesto === "string" ? manifesto : JSON.stringify(manifesto),
+      "utf8"
+    );
+  }
+  fs.utimesSync(legadoPath, new Date(legadoMtime), new Date(legadoMtime));
+  fs.utimesSync(vivaPath, new Date(vivaMtime), new Date(vivaMtime));
+  return { legadoPath, vivaPath, manifestoPath };
+}
+
+function avaliarRecoveryComparacaoTeste(nome, config) {
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = `cliente_manifest_mtime_${nome}`;
+  const logs = [];
+  const paths = escreverArquivosRecoveryComparacao(storage, cliente, config);
+  const leituras = [];
+  const existsChecks = [];
+  const fsObservado = {
+    existsSync: (file) => {
+      existsChecks.push(file);
+      return fs.existsSync(file);
+    },
+    statSync: fs.statSync.bind(fs),
+    readFileSync: (file, encoding) => {
+      leituras.push(file);
+      return fs.readFileSync(file, encoding);
+    }
+  };
+
+  const resultado = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    fs: fsObservado,
+    env: config.env || {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    },
+    agora: config.agora || AGORA,
+    logger: { log: (...args) => logs.push(args.join(" ")) }
+  });
+  const comparacao = resultado.recoveryComparacaoManifesto;
+
+  const manifestoConsultado = existsChecks.includes(paths.manifestoPath) || leituras.includes(paths.manifestoPath);
+  const esperaComparacao = config.esperaComparacao !== false;
+  if (esperaComparacao) {
+    assert(manifestoConsultado, "cliente V2 deve consultar manifesto pequeno para comparacao observacional");
+    assert(
+      leituras.every(file => file === paths.manifestoPath),
+      "2D.3b nao deve ler fila.json/fila-viva.json para telemetria, apenas stat e manifest pequeno"
+    );
+    if (config.esperaLog !== false) {
+      assert(logs.some(linha => linha.includes("[FILA-V2-RECOVERY-COMPARACAO]")), "comparacao manifesto x mtime deve ser logada");
+    }
+  } else {
+    assert.strictEqual(manifestoConsultado, false, "cliente legado/off-canary nao deve consultar manifesto 2D.3b");
+    assert.strictEqual(logs.some(linha => linha.includes("[FILA-V2-RECOVERY-COMPARACAO]")), false, "cliente legado/off-canary nao deve gerar telemetria 2D.3b");
+  }
+
+  return { resultado, comparacao, logs, leituras, existsChecks, paths };
+}
+
+{
+  filaOperacionalV2.resetarThrottleRecoveryComparacaoParaTeste();
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("off_canary_sem_custo", {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA,
+    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    env: {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: "outro_cliente"
+    },
+    esperaComparacao: false
+  });
+  assert.strictEqual(resultado.maisNova, true, "mtime continua autoridade para cliente legado/off-canary");
+  assert.strictEqual(comparacao.resultadoComparacao, "telemetria_desativada");
+  assert.strictEqual(filaOperacionalV2.tamanhoThrottleRecoveryComparacaoParaTeste(), 0, "cliente off-canary nao deve criar estado de throttle");
+}
+
+{
+  filaOperacionalV2.resetarThrottleRecoveryComparacaoParaTeste();
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("equivalente_limpo", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 7, checkpointGeneration: 7, itemCount: 1 }
+  });
+  assert.strictEqual(resultado.maisNova, false);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, true);
+  assert.strictEqual(comparacao.manifestRecoveryNeeded, false);
+  assert.strictEqual(comparacao.resultadoComparacao, "equivalente");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("equivalente_recovery", {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA,
+    manifesto: { vivaGeneration: 8, checkpointGeneration: 7, itemCount: 1 }
+  });
+  assert.strictEqual(resultado.maisNova, true);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, true);
+  assert.strictEqual(comparacao.manifestRecoveryNeeded, true);
+  assert.strictEqual(comparacao.resultadoComparacao, "equivalente");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("manifest_sim_mtime_nao", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 9, checkpointGeneration: 8, itemCount: 1 }
+  });
+  assert.strictEqual(resultado.maisNova, false, "manifesto nao pode disparar recovery quando mtime nao recupera");
+  assert.strictEqual(comparacao.manifestRecoveryNeeded, true);
+  assert.strictEqual(comparacao.resultadoComparacao, "manifest_recuperaria_mtime_nao");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("mtime_sim_manifest_nao", {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA,
+    manifesto: { vivaGeneration: 10, checkpointGeneration: 10, itemCount: 1 }
+  });
+  assert.strictEqual(resultado.maisNova, true, "mtime continua autoridade e recuperaria mesmo com manifesto sincronizado");
+  assert.strictEqual(comparacao.manifestRecoveryNeeded, false);
+  assert.strictEqual(comparacao.resultadoComparacao, "mtime_recuperaria_manifest_nao");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("manifest_ausente", {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA
+  });
+  assert.strictEqual(resultado.maisNova, true);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, false);
+  assert.strictEqual(comparacao.resultadoComparacao, "manifest_indisponivel");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("manifest_corrompido", {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA,
+    manifesto: "{manifesto quebrado"
+  });
+  assert.strictEqual(resultado.maisNova, true);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, false);
+  assert.strictEqual(comparacao.resultadoComparacao, "manifest_indisponivel");
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("checkpoint_maior_viva", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 3, checkpointGeneration: 4, itemCount: 1 }
+  });
+  assert.strictEqual(resultado.maisNova, false);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, false, "checkpoint > viva torna manifesto inconclusivo");
+  assert.strictEqual(comparacao.resultadoComparacao, "manifest_indisponivel");
+}
+
+for (const [nome, manifesto] of [
+  ["geracao_null", { vivaGeneration: null, checkpointGeneration: null, itemCount: 1 }],
+  ["geracao_string_vazia", { vivaGeneration: "", checkpointGeneration: "", itemCount: 1 }],
+  ["geracao_whitespace", { vivaGeneration: "   ", checkpointGeneration: 0, itemCount: 1 }],
+  ["geracao_negativa", { vivaGeneration: -1, checkpointGeneration: 0, itemCount: 1 }],
+  ["geracao_textual", { vivaGeneration: "NaN", checkpointGeneration: 0, itemCount: 1 }],
+  ["geracao_array", { vivaGeneration: [1], checkpointGeneration: 0, itemCount: 1 }]
+]) {
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste(nome, {
+    vivaMtime: AGORA + 10_000,
+    legadoMtime: AGORA,
+    manifesto
+  });
+  assert.strictEqual(resultado.maisNova, true, `mtime deve seguir autoridade com manifesto invalido: ${nome}`);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, false, `manifesto invalido deve ficar indisponivel: ${nome}`);
+  assert.strictEqual(comparacao.resultadoComparacao, "manifest_indisponivel", `manifesto invalido deve ser inconclusivo: ${nome}`);
+}
+
+{
+  const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("geracao_zero_valida", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 }
+  });
+  assert.strictEqual(resultado.maisNova, false);
+  assert.strictEqual(comparacao.manifestDecisionAvailable, true, "geracao 0 numerica faz parte do estado inicial valido do manifesto");
+  assert.strictEqual(comparacao.manifestRecoveryNeeded, false);
+  assert.strictEqual(comparacao.resultadoComparacao, "equivalente");
+}
+
+{
+  filaOperacionalV2.resetarThrottleRecoveryComparacaoParaTeste();
+  avaliarRecoveryComparacaoTeste("throttle_mesma_chave", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    agora: AGORA
+  });
+  avaliarRecoveryComparacaoTeste("throttle_mesma_chave", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    agora: AGORA + 1_000,
+    esperaLog: false
+  });
+  assert.strictEqual(filaOperacionalV2.tamanhoThrottleRecoveryComparacaoParaTeste(), 1, "logs equivalentes do mesmo cliente devem reutilizar a mesma chave");
+}
+
+{
+  filaOperacionalV2.resetarThrottleRecoveryComparacaoParaTeste();
+  const limite = filaOperacionalV2.RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS;
+  for (let i = 0; i < limite + 50; i += 1) {
+    avaliarRecoveryComparacaoTeste(`throttle_cap_${i}`, {
+      vivaMtime: AGORA,
+      legadoMtime: AGORA + 10_000,
+      manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+      agora: AGORA
+    });
+  }
+  assert(
+    filaOperacionalV2.tamanhoThrottleRecoveryComparacaoParaTeste() <= limite,
+    "throttle deve manter limite global de entradas"
+  );
+  avaliarRecoveryComparacaoTeste("throttle_prune_idade", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    agora: AGORA + 10 * 60 * 1000
+  });
+  assert(
+    filaOperacionalV2.tamanhoThrottleRecoveryComparacaoParaTeste() < limite,
+    "entradas antigas devem ser removidas no prune condicional"
+  );
+}
+
+{
+  filaOperacionalV2.resetarThrottleRecoveryComparacaoParaTeste();
+  const primeira = avaliarRecoveryComparacaoTeste("divergencia_imediata", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    agora: AGORA
+  });
+  const segunda = avaliarRecoveryComparacaoTeste("divergencia_imediata", {
+    vivaMtime: AGORA,
+    legadoMtime: AGORA + 10_000,
+    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    agora: AGORA + 1_000
+  });
+  assert(primeira.logs.some(linha => linha.includes("manifest_recuperaria_mtime_nao")));
+  assert(segunda.logs.some(linha => linha.includes("manifest_recuperaria_mtime_nao")), "divergencia deve continuar logando imediatamente");
+}
+
 {
   const storage = criarStorageTemporarioFilaV2();
   const cliente = "cliente_dual_read_only";

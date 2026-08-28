@@ -26,13 +26,18 @@ const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
 const TAG_MANIFEST = "[FILA-V2-MANIFEST]";
 const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
 const TAG_2C = "[FILA-V2-2C]";
+const TAG_RECOVERY_COMPARACAO = "[FILA-V2-RECOVERY-COMPARACAO]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
 const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
 const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
 const DEFAULT_CHECKPOINT_MUTACOES = 25;
 const DEFAULT_CHECKPOINT_INTERVALO_MS = 60_000;
 const DEFAULT_CHECKPOINT_MAX_DIRTY_MS = 120_000;
+const RECOVERY_COMPARACAO_THROTTLE_MS = 5 * 60 * 1000;
+const RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS = 2048;
+const RECOVERY_COMPARACAO_THROTTLE_TARGET_ENTRADAS = 1536;
 const cacheChavesHistorico = new Map();
+const recoveryComparacaoLogThrottle = new Map();
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -205,6 +210,13 @@ function logManifest(logger = console, payload = {}) {
   } catch {}
 }
 
+function logRecoveryComparacao(logger = console, payload = {}) {
+  try {
+    const destino = logger && typeof logger.log === "function" ? logger : console;
+    destino.log(TAG_RECOVERY_COMPARACAO, JSON.stringify(payload));
+  } catch {}
+}
+
 function hashCurto(valor = "") {
   return crypto.createHash("sha1").update(String(valor || "")).digest("hex").slice(0, 12);
 }
@@ -311,6 +323,90 @@ function lerManifestoFilaV2(clienteId = "admin", deps = {}) {
     bytes: leitura.bytes || 0,
     mtimeMs: leitura.mtimeMs || 0
   };
+}
+
+function avaliarRecoveryPeloManifesto(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const file = caminhoJsonCliente(cliente, FILA_V2_MANIFEST_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(file, null, fsImpl);
+  if (!leitura.ok) {
+    return {
+      available: false,
+      motivo: leitura.motivo,
+      recoveryNeeded: false,
+      vivaGeneration: 0,
+      checkpointGeneration: 0
+    };
+  }
+
+  const bruto = leitura.valor && typeof leitura.valor === "object" ? leitura.valor : {};
+  const vivaGeneration = bruto.vivaGeneration;
+  const checkpointGeneration = bruto.checkpointGeneration;
+  const valido = Number.isInteger(vivaGeneration) &&
+    Number.isInteger(checkpointGeneration) &&
+    vivaGeneration >= 0 &&
+    checkpointGeneration >= 0 &&
+    checkpointGeneration <= vivaGeneration;
+
+  if (!valido) {
+    return {
+      available: false,
+      motivo: "manifesto_invalido",
+      recoveryNeeded: false,
+      vivaGeneration: 0,
+      checkpointGeneration: 0
+    };
+  }
+
+  return {
+    available: true,
+    motivo: "ok",
+    recoveryNeeded: vivaGeneration > checkpointGeneration,
+    vivaGeneration,
+    checkpointGeneration
+  };
+}
+
+function classificarComparacaoRecovery(mtimeRecoveryNeeded = false, manifestDecision = {}) {
+  if (!manifestDecision.available) return "manifest_indisponivel";
+  if (Boolean(mtimeRecoveryNeeded) === Boolean(manifestDecision.recoveryNeeded)) return "equivalente";
+  if (manifestDecision.recoveryNeeded && !mtimeRecoveryNeeded) return "manifest_recuperaria_mtime_nao";
+  return "mtime_recuperaria_manifest_nao";
+}
+
+function podarThrottleRecoveryComparacao(agora = Date.now()) {
+  if (recoveryComparacaoLogThrottle.size < RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS) return;
+  for (const [chave, timestamp] of recoveryComparacaoLogThrottle.entries()) {
+    if (agora - timestamp >= RECOVERY_COMPARACAO_THROTTLE_MS) {
+      recoveryComparacaoLogThrottle.delete(chave);
+    }
+  }
+  if (recoveryComparacaoLogThrottle.size < RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS) return;
+  const ordenadas = [...recoveryComparacaoLogThrottle.entries()]
+    .sort((a, b) => a[1] - b[1]);
+  const remover = Math.max(0, recoveryComparacaoLogThrottle.size - RECOVERY_COMPARACAO_THROTTLE_TARGET_ENTRADAS);
+  for (let i = 0; i < remover; i += 1) {
+    recoveryComparacaoLogThrottle.delete(ordenadas[i][0]);
+  }
+}
+
+function deveLogarComparacaoRecovery(clienteId = "admin", resultadoComparacao = "", agora = Date.now()) {
+  if (resultadoComparacao !== "equivalente" && resultadoComparacao !== "manifest_indisponivel") return true;
+  const chave = `${clienteSeguro(clienteId)}|${resultadoComparacao}`;
+  const ultimo = recoveryComparacaoLogThrottle.get(chave) || 0;
+  if (agora - ultimo < RECOVERY_COMPARACAO_THROTTLE_MS) return false;
+  podarThrottleRecoveryComparacao(agora);
+  recoveryComparacaoLogThrottle.set(chave, agora);
+  return true;
+}
+
+function resetarThrottleRecoveryComparacaoParaTeste() {
+  recoveryComparacaoLogThrottle.clear();
+}
+
+function tamanhoThrottleRecoveryComparacaoParaTeste() {
+  return recoveryComparacaoLogThrottle.size;
 }
 
 function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
@@ -687,8 +783,36 @@ function lerFilaVivaParaMerge(clienteId = "admin", deps = {}) {
 function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const fsImpl = deps.fs || fs;
+  const agora = deps.agora || Date.now();
   const viva = statArquivoSeguro(caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps), fsImpl);
   const legado = statArquivoSeguro(caminhoJsonCliente(cliente, FILA_LEGADA_ARQUIVO, deps), fsImpl);
+  const maisNova = viva.existe && (!legado.existe || viva.mtimeMs > legado.mtimeMs);
+  let manifestDecision = {
+    available: false,
+    recoveryNeeded: false,
+    vivaGeneration: 0,
+    checkpointGeneration: 0
+  };
+  let resultadoComparacao = "telemetria_desativada";
+  const compararManifesto = deveUsarFilaV2Operacional(cliente, deps.env || process.env);
+  if (compararManifesto) {
+    manifestDecision = avaliarRecoveryPeloManifesto(cliente, deps);
+    resultadoComparacao = classificarComparacaoRecovery(maisNova, manifestDecision);
+    if (deveLogarComparacaoRecovery(cliente, resultadoComparacao, agora)) {
+      logRecoveryComparacao(deps.logger, {
+        versao: 1,
+        clienteId: cliente,
+        mtimeRecoveryNeeded: maisNova,
+        manifestRecoveryNeeded: manifestDecision.available ? manifestDecision.recoveryNeeded : false,
+        manifestDecisionAvailable: manifestDecision.available,
+        resultadoComparacao,
+        vivaGeneration: manifestDecision.vivaGeneration || 0,
+        checkpointGeneration: manifestDecision.checkpointGeneration || 0,
+        mtimeViva: viva.mtimeMs,
+        mtimeLegado: legado.mtimeMs
+      });
+    }
+  }
   return {
     ok: true,
     clienteId: cliente,
@@ -698,7 +822,14 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
     legadoMtimeMs: legado.mtimeMs,
     bytesFilaViva: viva.bytes,
     bytesLegado: legado.bytes,
-    maisNova: viva.existe && (!legado.existe || viva.mtimeMs > legado.mtimeMs)
+    maisNova,
+    recoveryComparacaoManifesto: {
+      manifestDecisionAvailable: manifestDecision.available,
+      manifestRecoveryNeeded: manifestDecision.available ? manifestDecision.recoveryNeeded : false,
+      resultadoComparacao,
+      vivaGeneration: manifestDecision.vivaGeneration || 0,
+      checkpointGeneration: manifestDecision.checkpointGeneration || 0
+    }
   };
 }
 
@@ -1972,6 +2103,8 @@ module.exports = {
   TAG_MANIFEST,
   TAG_CANARY_WRITER,
   TAG_2C,
+  TAG_RECOVERY_COMPARACAO,
+  RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS,
   DEFAULT_CHECKPOINT_MUTACOES,
   DEFAULT_CHECKPOINT_INTERVALO_MS,
   DEFAULT_CHECKPOINT_MAX_DIRTY_MS,
@@ -1993,6 +2126,7 @@ module.exports = {
   appendHistoricoIncremental,
   moverTerminalParaHistorico,
   compararVivaComLegado,
+  avaliarRecoveryPeloManifesto,
   lerManifestoFilaV2,
   registrarManifestoMutacaoObservacional,
   registrarManifestoCheckpointObservacional,
@@ -2002,5 +2136,7 @@ module.exports = {
   modoOperacional,
   deveUsarFilaV2Operacional,
   criarControladorFilaOperacionalV2,
-  limparCacheHistorico
+  limparCacheHistorico,
+  resetarThrottleRecoveryComparacaoParaTeste,
+  tamanhoThrottleRecoveryComparacaoParaTeste
 };
