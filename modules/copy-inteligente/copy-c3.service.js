@@ -27,39 +27,74 @@ const FRASES_COPY_C3 = Object.freeze({
     { id: "c3_resgate_003", texto: "Essa trouxe um resgate para colocar na conta." }
   ],
   cupom: [
-    { id: "c3_cupom_001", texto: "Tem cupom confirmado nessa oferta." },
-    { id: "c3_cupom_002", texto: "O cupom entrou como detalhe extra por aqui." },
-    { id: "c3_cupom_003", texto: "Quando tem cupom no meio, vale olhar duas vezes." }
+    { id: "c3_cupom_001", texto: "Quando tem cupom no meio, vale olhar duas vezes." },
+    { id: "c3_cupom_002", texto: "Esse aqui ganhou um empurrao por causa do cupom." },
+    { id: "c3_cupom_003", texto: "Eu nao passaria reto sem olhar o cupom primeiro." },
+    { id: "c3_cupom_004", texto: "Cupom muda a leitura dessa oferta." },
+    { id: "c3_cupom_005", texto: "Essa ficou mais interessante com cupom na jogada." },
+    { id: "c3_cupom_006", texto: "Olha esse aqui com calma antes de fechar a compra." },
+    { id: "c3_cupom_007", texto: "O produto ja chamou; o cupom ajuda na decisao." },
+    { id: "c3_cupom_008", texto: "Essa e daquelas em que o cupom pede uma segunda olhada." }
   ],
   desconto_real: [
-    { id: "c3_desconto_real_001", texto: "A diferenca entre os valores e real: {percentual}%." },
-    { id: "c3_desconto_real_002", texto: "Aqui o De/Por confirma {economia} de diferenca." },
-    { id: "c3_desconto_real_003", texto: "Esse desconto da para comprovar pelo preco anterior." }
+    { id: "c3_desconto_real_001", texto: "Aqui a diferenca no valor chama atencao." },
+    { id: "c3_desconto_real_002", texto: "Esse caiu bem em relacao ao preco anterior." },
+    { id: "c3_desconto_real_003", texto: "Aqui a comparacao com o valor anterior ficou interessante." },
+    { id: "c3_desconto_real_004", texto: "A conta ficou melhor do que parecia de primeira." },
+    { id: "c3_desconto_real_005", texto: "Quando o valor muda assim, eu paro para olhar." },
+    { id: "c3_desconto_real_006", texto: "A diferenca vem de uma referencia real de preco." },
+    { id: "c3_desconto_real_007", texto: "A diferenca aqui nao passou batida." },
+    { id: "c3_desconto_real_008", texto: "Esse merece a olhada justamente pela mudanca no valor." }
   ],
   valor_efetivo: [
-    { id: "c3_valor_efetivo_001", texto: "O valor efetivo ficou abaixo do preco exibido." },
-    { id: "c3_valor_efetivo_002", texto: "Tem valor efetivo confirmado para considerar aqui." },
-    { id: "c3_valor_efetivo_003", texto: "A conta final ficou diferente do preco de vitrine." }
+    { id: "c3_valor_efetivo_001", texto: "A conta final aqui fica mais interessante que a vitrine." },
+    { id: "c3_valor_efetivo_002", texto: "Tem uma condicao na conta que vale olhar com calma." },
+    { id: "c3_valor_efetivo_003", texto: "O numero final mudou a historia dessa oferta." },
+    { id: "c3_valor_efetivo_004", texto: "Antes de comparar, vale olhar a conta completa." },
+    { id: "c3_valor_efetivo_005", texto: "Essa fica melhor quando voce considera o valor efetivo." },
+    { id: "c3_valor_efetivo_006", texto: "Aqui nao e so preco de vitrine; tem conta final envolvida." },
+    { id: "c3_valor_efetivo_007", texto: "A parte boa aparece quando fecha a conta." },
+    { id: "c3_valor_efetivo_008", texto: "Esse detalhe na conta muda o jeito de avaliar." }
   ],
   marca_preco: [
-    { id: "c3_marca_preco_001", texto: "{marca} por {preco} chamou atencao por aqui." },
-    { id: "c3_marca_preco_002", texto: "Para quem acompanha {marca}, esse valor merece uma olhada." },
-    { id: "c3_marca_preco_003", texto: "{marca} apareceu com preco para comparar sem pressa." }
+    { id: "c3_marca_preco_001", texto: "Para quem acompanha {marca}, esse aqui merece uma olhada." },
+    { id: "c3_marca_preco_002", texto: "{marca} apareceu no meio das ofertas e eu parei." },
+    { id: "c3_marca_preco_003", texto: "Esse da {marca} entrou na lista para comparar com calma." },
+    { id: "c3_marca_preco_004", texto: "Se {marca} estava no seu radar, olha esse aqui." },
+    { id: "c3_marca_preco_005", texto: "O nome {marca} ja faz a gente olhar com mais atencao." },
+    { id: "c3_marca_preco_006", texto: "{marca} com esse contexto comercial chamou minha atencao." },
+    { id: "c3_marca_preco_007", texto: "Essa opcao da {marca} nao passou despercebida." },
+    { id: "c3_marca_preco_008", texto: "Quando aparece {marca}, vale pelo menos comparar." }
   ],
   categoria: [
-    { id: "c3_categoria_001", texto: "Para quem estava olhando {categoria}, essa entrou no radar." },
-    { id: "c3_categoria_002", texto: "Essa conversa bem com quem procura {categoria}." },
-    { id: "c3_categoria_003", texto: "Dentro de {categoria}, essa merece alguns segundos." }
+    { id: "c3_categoria_001", texto: "Para quem estava de olho em {categoria}, essa entrou no radar." },
+    { id: "c3_categoria_002", texto: "Essa combina com quem estava procurando {categoria}." },
+    { id: "c3_categoria_003", texto: "Dentro de {categoria}, essa merece alguns segundos." },
+    { id: "c3_categoria_004", texto: "Se voce vinha olhando {categoria}, para nessa aqui." },
+    { id: "c3_categoria_005", texto: "Essa tem cara de achado para quem busca {categoria}." },
+    { id: "c3_categoria_006", texto: "Separei essa pelo contexto de {categoria}." },
+    { id: "c3_categoria_007", texto: "Para esse tipo de compra, essa opcao merece uma olhada." },
+    { id: "c3_categoria_008", texto: "Essa apareceu bem no meio do que combina com {categoria}." }
   ],
   preco: [
-    { id: "c3_preco_001", texto: "Olha por quanto ficou: {preco}." },
-    { id: "c3_preco_002", texto: "Esse valor chamou atencao por aqui: {preco}." },
-    { id: "c3_preco_003", texto: "Para comparar antes de comprar, o preco esta aqui: {preco}." }
+    { id: "c3_preco_001", texto: "O preco foi o motivo de eu separar essa aqui." },
+    { id: "c3_preco_002", texto: "Essa entrou no radar pelo valor." },
+    { id: "c3_preco_003", texto: "Vale comparar essa antes de decidir." },
+    { id: "c3_preco_004", texto: "Trouxe essa porque o valor chamou atencao." },
+    { id: "c3_preco_005", texto: "Daquelas para olhar o preco com calma." },
+    { id: "c3_preco_006", texto: "Essa merece alguns segundos antes de passar." },
+    { id: "c3_preco_007", texto: "O tipo de achado que vale colocar lado a lado." },
+    { id: "c3_preco_008", texto: "Passando essa porque a conta merece uma olhada." }
   ],
   fallback: [
     { id: "c3_fallback_001", texto: "Achado simples para olhar com calma." },
-    { id: "c3_fallback_002", texto: "Essa oferta merece uma conferida sem exagero." },
-    { id: "c3_fallback_003", texto: "Vale dar uma olhada nessa antes de seguir." }
+    { id: "c3_fallback_002", texto: "Essa merece uma conferida sem exagero." },
+    { id: "c3_fallback_003", texto: "Vale dar uma olhada nessa antes de seguir." },
+    { id: "c3_fallback_004", texto: "Deixei essa separada porque pode fazer sentido." },
+    { id: "c3_fallback_005", texto: "Essa passou pelo radar e vale alguns segundos." },
+    { id: "c3_fallback_006", texto: "Olha essa com calma antes de seguir." },
+    { id: "c3_fallback_007", texto: "Um achado discreto, mas que merece atencao." },
+    { id: "c3_fallback_008", texto: "Sem exagero: essa vale uma espiada." }
   ]
 });
 
@@ -106,6 +141,17 @@ function hashEstavelCopyC3(valor = "") {
   return hash >>> 0;
 }
 
+function indiceDeterministicoCopyC3(assinatura = "", tamanho = 1) {
+  const limite = Number(tamanho) || 1;
+  let hash = hashEstavelCopyC3(assinatura);
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 2246822519) >>> 0;
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 3266489917) >>> 0;
+  hash ^= hash >>> 16;
+  return (hash >>> 0) % limite;
+}
+
 function contemTermoProibidoCopyC3(valor = "") {
   const normalizado = textoMinusculo(valor);
   return TERMOS_PROIBIDOS_COPY_C3.some(termo => normalizado.includes(termo));
@@ -124,6 +170,25 @@ function categoriaFinalCopyC3(oferta = {}) {
     ? oferta.inteligenciaUniversalV2
     : {};
   return texto(v2.categoria) || texto(oferta.categoria) || texto(oferta.categoriaProduto);
+}
+
+function categoriaApresentacaoCopyC3(categoria = "") {
+  const normalizada = textoMinusculo(categoria);
+  if (!normalizada || normalizada === "diversos") return "";
+  if (/eletroportateis|eletrodomesticos/.test(normalizada)) return "itens para casa";
+  if (/casa|moveis|decoracao/.test(normalizada)) return "coisas para casa";
+  if (/perfumaria|farmacia|beleza/.test(normalizada)) return "itens de beleza e cuidado";
+  if (/ferramenta/.test(normalizada)) return "ferramentas";
+  if (/gamer|hardware|periferic/.test(normalizada)) return "setup e tecnologia";
+  if (/computadores|informatica|notebook/.test(normalizada)) return "informatica";
+  if (/celular|smartphone/.test(normalizada)) return "celulares";
+  if (/tenis|chinelo|calcad/.test(normalizada)) return "calcados";
+  if (/roupas|moda/.test(normalizada)) return "moda";
+  if (/esporte|suplemento/.test(normalizada)) return "itens de esporte e suplementos";
+  if (/automotivo|carro|moto/.test(normalizada)) return "itens automotivos";
+  if (/pet/.test(normalizada)) return "coisas para pet";
+  if (/mercado|alimento|bebida/.test(normalizada)) return "itens de mercado";
+  return "";
 }
 
 function marcaConfiavelCopyC3(oferta = {}) {
@@ -197,6 +262,7 @@ function extrairFatosCopyC3(oferta = {}) {
   return {
     tituloFactual,
     categoria,
+    categoriaApresentacao: categoriaApresentacaoCopyC3(categoria),
     familia: familiaDaCategoriaCopyV2(categoria),
     marketplace: texto(oferta.marketplace),
     precoAtual,
@@ -218,7 +284,7 @@ function escolherFatoCopyC3(fatos = {}) {
   if (fatos.descontoReal) return { intencao: "desconto_real", fatoUsado: "desconto_real_comprovado", confianca: "alta" };
   if (fatos.valorEfetivo !== null && fatos.valorEfetivo !== undefined) return { intencao: "valor_efetivo", fatoUsado: "valor_efetivo_comprovado", confianca: "alta" };
   if (fatos.marca && fatos.precoFormatado) return { intencao: "marca_preco", fatoUsado: "marca_preco", confianca: "media" };
-  if (fatos.categoria && fatos.categoria !== "Diversos") return { intencao: "categoria", fatoUsado: "categoria_final", confianca: "media" };
+  if (fatos.categoria && fatos.categoria !== "Diversos" && fatos.categoriaApresentacao) return { intencao: "categoria", fatoUsado: "categoria_final", confianca: "media" };
   if (fatos.precoFormatado) return { intencao: "preco", fatoUsado: "preco_comercial_oficial", confianca: "media" };
   return { intencao: "fallback", fatoUsado: "fallback_neutro", confianca: "baixa" };
 }
@@ -230,7 +296,7 @@ function aplicarVariaveisCopyC3(textoFrase = "", fatos = {}) {
     .replace(/\{economia\}/g, formatarMoedaCopyC3(desconto.economia) || "")
     .replace(/\{preco\}/g, fatos.precoFormatado || "")
     .replace(/\{marca\}/g, fatos.marca || "")
-    .replace(/\{categoria\}/g, fatos.categoria || "essa categoria")
+    .replace(/\{categoria\}/g, fatos.categoriaApresentacao || "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -249,7 +315,7 @@ function escolherFraseCopyC3({ fatos = {}, decisao = {}, oferta = {}, clienteId 
     fatos.categoria,
     decisao.intencao
   ].map(texto).join("|");
-  const indice = hashEstavelCopyC3(assinatura) % pool.length;
+  const indice = indiceDeterministicoCopyC3(assinatura, pool.length);
   const escolhida = pool[indice];
   return {
     fraseId: escolhida.id,

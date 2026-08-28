@@ -73,6 +73,35 @@ function assertSemTermosProibidos(saida) {
   }
 }
 
+function normalizarTextoTeste(valor = "") {
+  return String(valor || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function assertNaoRepeteDadoTemplate(gancho = "", dados = []) {
+  const normalizado = normalizarTextoTeste(gancho);
+  for (const dado of dados) {
+    const texto = normalizarTextoTeste(dado);
+    if (!texto) continue;
+    assert.ok(!normalizado.includes(texto), `gancho C3 nao deve repetir dado do template: ${dado}`);
+  }
+}
+
+function distribuicaoFrases(intencao, montarOferta) {
+  const histograma = {};
+  for (let i = 0; i < 10; i += 1) {
+    const resultado = resolver(montarOferta(i));
+    assert.strictEqual(resultado.intencao, intencao, `intencao esperada em amostra ${i}`);
+    histograma[resultado.fraseId] = (histograma[resultado.fraseId] || 0) + 1;
+  }
+  return histograma;
+}
+
+function assertDistribuicaoRazoavel(histograma, mensagem) {
+  const contagens = Object.values(histograma);
+  assert.ok(contagens.length >= 4, `${mensagem}: deve usar pelo menos 4 frases em 10 ofertas`);
+  assert.ok(Math.max(...contagens) <= 5, `${mensagem}: nenhuma frase deve concentrar mais de 5/10`);
+}
+
 function assertNaoUsaIntencao(oferta, intencao, mensagem) {
   const resultado = resolver(oferta);
   assert.notStrictEqual(resultado.intencao, intencao, mensagem);
@@ -85,7 +114,9 @@ const cupom = resolver(ofertaBase({ id: "c3_cupom", engineOfertaId: "c3_cupom", 
 assert.strictEqual(cupom.ok, true, "cupom confirmado gera gancho C3");
 assert.strictEqual(cupom.intencao, "cupom");
 assert.strictEqual(cupom.fatoUsado, "cupom_confirmado");
-assert.ok(/cupom/i.test(cupom.ganchoComercialC3), "gancho cita cupom confirmado");
+assert.ok(/cupom|compra|olhada|oferta/i.test(cupom.ganchoComercialC3), "gancho interpreta o contexto de cupom");
+assert.ok(!/confirmad|identificad|codigo|c[oó]digo/i.test(cupom.ganchoComercialC3), "cupom nao soa como log tecnico");
+assertNaoRepeteDadoTemplate(cupom.ganchoComercialC3, ["PROMO10"]);
 assert.ok(!/%|R\$/i.test(cupom.ganchoComercialC3), "cupom sem desconto numerico nao inventa percentual/valor");
 assertSemTermosProibidos(cupom.ganchoComercialC3);
 
@@ -93,13 +124,15 @@ const desconto = resolver(ofertaBase({ id: "c3_desconto", engineOfertaId: "c3_de
 assert.strictEqual(desconto.ok, true, "desconto real gera gancho C3");
 assert.strictEqual(desconto.intencao, "desconto_real");
 assert.strictEqual(desconto.fatoUsado, "desconto_real_comprovado");
-assert.ok(/25|R\$\s?50,00|De\/Por|desconto/i.test(desconto.ganchoComercialC3), "gancho pode usar matematica comprovada");
+assert.ok(/valor|preco|desconto|De\/Por|conta|diferenca/i.test(desconto.ganchoComercialC3), "gancho interpreta desconto real");
+assertNaoRepeteDadoTemplate(desconto.ganchoComercialC3, ["R$ 150,00", "R$ 200,00", "R$ 50,00", "25%"]);
 assertSemTermosProibidos(desconto.ganchoComercialC3);
 
 const precoSemDesconto = resolver(ofertaBase({ id: "c3_preco", engineOfertaId: "c3_preco", tituloFactual: "", categoria: "Diversos", precoOriginal: "", precoAtual: 89, preco: 89, cupom: "" }));
 assert.strictEqual(precoSemDesconto.ok, true, "preco sem desconto gera gancho factual");
 assert.strictEqual(precoSemDesconto.intencao, "preco");
-assert.ok(/R\$\s?89,00/.test(precoSemDesconto.ganchoComercialC3), "gancho usa preco oficial");
+assert.ok(/preco|valor|comparar|conta|olhada|segundos/i.test(precoSemDesconto.ganchoComercialC3), "gancho interpreta preco oficial");
+assertNaoRepeteDadoTemplate(precoSemDesconto.ganchoComercialC3, ["R$ 89,00"]);
 assert.ok(!/desconto|cupom|beneficio|resgate/i.test(precoSemDesconto.ganchoComercialC3), "preco simples nao inventa fato comercial");
 
 const beneficio = assertNaoUsaIntencao(
@@ -126,6 +159,74 @@ const valorEfetivo = resolver(ofertaBase({
 }));
 assert.strictEqual(valorEfetivo.ok, true, "valor efetivo comprovado gera gancho C3");
 assert.strictEqual(valorEfetivo.intencao, "valor_efetivo");
+assertNaoRepeteDadoTemplate(valorEfetivo.ganchoComercialC3, ["R$ 120,00", "R$ 150,00"]);
+assert.ok(/conta|condicao|valor|vitrine|avaliar/i.test(valorEfetivo.ganchoComercialC3), "valor efetivo deve ser interpretado sem repetir numero");
+
+const categoriaHumana = resolver(ofertaBase({
+  id: "c3_categoria_humana",
+  engineOfertaId: "c3_categoria_humana",
+  tituloFactual: "Creme renovador para os pes",
+  categoria: "Perfumaria, Farmácia e Beleza",
+  preco: "",
+  precoAtual: "",
+  precoOriginal: "",
+  cupom: ""
+}));
+assert.strictEqual(categoriaHumana.ok, true, "categoria conhecida pode gerar gancho C3");
+assert.strictEqual(categoriaHumana.intencao, "categoria");
+assert.strictEqual(categoriaHumana.categoriaOficial, "Perfumaria, Farmácia e Beleza", "categoria operacional e preservada");
+assertNaoRepeteDadoTemplate(categoriaHumana.ganchoComercialC3, ["Perfumaria, Farmácia e Beleza"]);
+assert.ok(/beleza|cuidado|tipo de compra|radar/i.test(categoriaHumana.ganchoComercialC3), "categoria usa apresentacao humana");
+
+const categoriaSemApresentacao = resolver(ofertaBase({
+  id: "c3_categoria_sem_apresentacao",
+  engineOfertaId: "c3_categoria_sem_apresentacao",
+  tituloFactual: "Produto de categoria nova",
+  categoria: "Categoria Experimental Interna",
+  preco: 77,
+  precoAtual: 77,
+  precoOriginal: "",
+  cupom: ""
+}));
+assert.strictEqual(categoriaSemApresentacao.ok, true, "categoria sem apresentacao cai para fato seguro seguinte");
+assert.notStrictEqual(categoriaSemApresentacao.intencao, "categoria", "taxonomia desconhecida nao vira gancho bruto");
+assertNaoRepeteDadoTemplate(categoriaSemApresentacao.ganchoComercialC3, ["Categoria Experimental Interna"]);
+
+for (const intencao of ["cupom", "desconto_real", "valor_efetivo", "marca_preco", "categoria", "preco", "fallback"]) {
+  const pool = copy.FRASES_COPY_C3[intencao];
+  assert.ok(pool.length >= 6, `${intencao}: pool ativo deve ter variedade minima`);
+  for (const frase of pool) {
+    assert.ok(!/confirmad|identificad|fato confirmado/i.test(frase.texto), `${frase.id}: frase ativa nao deve soar como sistema`);
+    assert.ok(!/cupom:\s|\bR\$\b/i.test(frase.texto), `${frase.id}: frase ativa nao deve reproduzir linha do template`);
+  }
+}
+
+assertDistribuicaoRazoavel(distribuicaoFrases("preco", i => ofertaBase({
+  id: `c3_dist_preco_${i}`,
+  engineOfertaId: `c3_dist_preco_${i}`,
+  tituloFactual: "",
+  categoria: "Diversos",
+  precoOriginal: "",
+  precoAtual: 50 + i,
+  preco: 50 + i,
+  cupom: ""
+})), "preco");
+
+assertDistribuicaoRazoavel(distribuicaoFrases("cupom", i => ofertaBase({
+  id: `c3_dist_cupom_${i}`,
+  engineOfertaId: `c3_dist_cupom_${i}`,
+  precoOriginal: "",
+  cupom: `CUPOM${i}`
+})), "cupom");
+
+assertDistribuicaoRazoavel(distribuicaoFrases("desconto_real", i => ofertaBase({
+  id: `c3_dist_desconto_${i}`,
+  engineOfertaId: `c3_dist_desconto_${i}`,
+  precoOriginal: 150 + i,
+  precoAtual: 100 + i,
+  preco: 100 + i,
+  cupom: ""
+})), "desconto real");
 
 for (const [nome, extra] of [
   ["resgate_texto_incerto", { resgate: "consulte condicoes de resgate" }],
