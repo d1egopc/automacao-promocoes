@@ -2693,13 +2693,18 @@ function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", op
   const mergeAntesCheckpoint = aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
     recovery: false
   });
+  const manifestoAntesCheckpoint = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+    agora,
+    logger: console
+  });
+  const vivaGenerationAlvoCheckpoint = manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
   const salvou = salvarFila(cliente, { motivo: `fila_v2_2c_${decisao.motivo || motivo}` });
   const duracaoMs = Date.now() - inicio;
   const bytesCheckpoint = tamanhoArquivoSeguro(getFilaFile(cliente));
 
   if (salvou) {
     filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
-      checkpointGeneration: decisao.generationInicial,
+      targetGeneration: vivaGenerationAlvoCheckpoint,
       motivo: decisao.motivo || motivo
     }, {
       agora: Date.now(),

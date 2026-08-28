@@ -17,6 +17,7 @@ const {
 } = require("./fila-v2-shadow");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
+const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
 const FLAG_OPERACIONAL_ATIVA = "FILA_V2_OPERACIONAL_ATIVA";
 const FLAG_ROLLOUT_ATIVO = "FILA_V2_OPERACIONAL_ROLLOUT";
 const FLAG_CANARY_CLIENTES = "FILA_V2_OPERACIONAL_CANARY_CLIENTES";
@@ -272,23 +273,47 @@ function numeroManifesto(valor, padrao = 0) {
   return Math.floor(numero);
 }
 
+function numeroManifestoEstrito(valor) {
+  return Number.isInteger(valor) && valor >= 0 ? valor : null;
+}
+
 function normalizarManifestoFilaV2(valor = {}, clienteId = "admin", agora = Date.now()) {
   const bruto = valor && typeof valor === "object" ? valor : {};
+  const manifestVersion = numeroManifesto(bruto.manifestVersion ?? bruto.version, 1);
   const vivaGeneration = numeroManifesto(bruto.vivaGeneration, 0);
-  const checkpointGeneration = Math.min(vivaGeneration, numeroManifesto(bruto.checkpointGeneration, 0));
-  const dirtyBruto = bruto.dirtyGeneration;
-  const dirtyGeneration = dirtyBruto === null || dirtyBruto === undefined || dirtyBruto === ""
-    ? null
-    : numeroManifesto(dirtyBruto, checkpointGeneration < vivaGeneration ? checkpointGeneration + 1 : 0);
+  const temDurableCheckpointGeneration = Object.prototype.hasOwnProperty.call(
+    bruto,
+    "durableCheckpointGeneration"
+  );
+  const durableCheckpointGeneration = Math.min(
+    vivaGeneration,
+    temDurableCheckpointGeneration
+      ? numeroManifesto(bruto.durableCheckpointGeneration, 0)
+      : 0
+  );
+  const dirtyGeneration = vivaGeneration > durableCheckpointGeneration
+    ? Math.min(
+        vivaGeneration,
+        Math.max(
+          durableCheckpointGeneration + 1,
+          numeroManifesto(bruto.dirtyGeneration, durableCheckpointGeneration + 1)
+        )
+      )
+    : null;
   return {
-    version: 1,
+    version: manifestVersion,
+    manifestVersion,
     clienteId: clienteSeguro(clienteId),
     vivaGeneration,
-    checkpointGeneration,
-    dirtyGeneration: checkpointGeneration >= vivaGeneration ? null : dirtyGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    durableCheckpointGeneration,
+    dirtyGeneration,
     itemCount: numeroManifesto(bruto.itemCount, 0),
     lastMutationAt: texto(bruto.lastMutationAt || ""),
     lastCheckpointAt: texto(bruto.lastCheckpointAt || ""),
+    lastDurableCheckpointAt: texto(bruto.lastDurableCheckpointAt || bruto.lastCheckpointAt || ""),
+    lastVivaWriteReason: texto(bruto.lastVivaWriteReason || ""),
+    lastCheckpointReason: texto(bruto.lastCheckpointReason || ""),
     updatedAt: texto(bruto.updatedAt || agoraIso(agora))
   };
 }
@@ -341,30 +366,35 @@ function avaliarRecoveryPeloManifesto(clienteId = "admin", deps = {}) {
   }
 
   const bruto = leitura.valor && typeof leitura.valor === "object" ? leitura.valor : {};
-  const vivaGeneration = bruto.vivaGeneration;
-  const checkpointGeneration = bruto.checkpointGeneration;
-  const valido = Number.isInteger(vivaGeneration) &&
-    Number.isInteger(checkpointGeneration) &&
-    vivaGeneration >= 0 &&
-    checkpointGeneration >= 0 &&
-    checkpointGeneration <= vivaGeneration;
+  const manifestVersion = numeroManifestoEstrito(bruto.manifestVersion ?? bruto.version);
+  const vivaGeneration = numeroManifestoEstrito(bruto.vivaGeneration);
+  const durableCheckpointGeneration = numeroManifestoEstrito(bruto.durableCheckpointGeneration);
+  const valido = manifestVersion !== null &&
+    manifestVersion >= FILA_V2_MANIFEST_VERSION_ATUAL &&
+    vivaGeneration !== null &&
+    durableCheckpointGeneration !== null &&
+    durableCheckpointGeneration <= vivaGeneration;
 
   if (!valido) {
     return {
       available: false,
-      motivo: "manifesto_invalido",
+      motivo: manifestVersion !== null && manifestVersion < FILA_V2_MANIFEST_VERSION_ATUAL
+        ? "manifesto_v1_sem_durable"
+        : "manifesto_invalido",
       recoveryNeeded: false,
       vivaGeneration: 0,
-      checkpointGeneration: 0
+      checkpointGeneration: 0,
+      durableCheckpointGeneration: 0
     };
   }
 
   return {
     available: true,
     motivo: "ok",
-    recoveryNeeded: vivaGeneration > checkpointGeneration,
+    recoveryNeeded: vivaGeneration > durableCheckpointGeneration,
     vivaGeneration,
-    checkpointGeneration
+    checkpointGeneration: durableCheckpointGeneration,
+    durableCheckpointGeneration
   };
 }
 
@@ -412,10 +442,16 @@ function tamanhoThrottleRecoveryComparacaoParaTeste() {
 function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
   const base = normalizarManifestoFilaV2(atual, clienteId, agora);
   const temViva = Object.prototype.hasOwnProperty.call(patch, "vivaGeneration");
-  const temCheckpoint = Object.prototype.hasOwnProperty.call(patch, "checkpointGeneration");
+  const temDurable = Object.prototype.hasOwnProperty.call(patch, "durableCheckpointGeneration") ||
+    Object.prototype.hasOwnProperty.call(patch, "checkpointGeneration");
   const vivaGeneration = Math.max(base.vivaGeneration, temViva ? numeroManifesto(patch.vivaGeneration, base.vivaGeneration) : base.vivaGeneration);
-  const checkpointDesejado = temCheckpoint ? numeroManifesto(patch.checkpointGeneration, base.checkpointGeneration) : base.checkpointGeneration;
-  const checkpointGeneration = Math.min(vivaGeneration, Math.max(base.checkpointGeneration, checkpointDesejado));
+  const durableDesejado = temDurable
+    ? numeroManifesto(
+        patch.durableCheckpointGeneration ?? patch.checkpointGeneration,
+        base.durableCheckpointGeneration
+      )
+    : base.durableCheckpointGeneration;
+  const durableCheckpointGeneration = Math.min(vivaGeneration, Math.max(base.durableCheckpointGeneration, durableDesejado));
 
   let dirtyGeneration = base.dirtyGeneration;
   if (Object.prototype.hasOwnProperty.call(patch, "dirtyGeneration")) {
@@ -426,25 +462,32 @@ function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", ago
       dirtyGeneration = dirtyGeneration === null ? dirtyPatch : Math.min(dirtyGeneration, dirtyPatch);
     }
   }
-  if (checkpointGeneration >= vivaGeneration) {
+  if (durableCheckpointGeneration >= vivaGeneration) {
     dirtyGeneration = null;
   } else if (dirtyGeneration === null) {
-    dirtyGeneration = Math.max(1, checkpointGeneration + 1);
-  } else if (dirtyGeneration <= checkpointGeneration) {
-    dirtyGeneration = checkpointGeneration + 1;
+    dirtyGeneration = Math.max(1, durableCheckpointGeneration + 1);
+  } else if (dirtyGeneration <= durableCheckpointGeneration) {
+    dirtyGeneration = durableCheckpointGeneration + 1;
+  } else if (dirtyGeneration > vivaGeneration) {
+    dirtyGeneration = vivaGeneration;
   }
 
   return {
-    version: 1,
+    version: FILA_V2_MANIFEST_VERSION_ATUAL,
+    manifestVersion: FILA_V2_MANIFEST_VERSION_ATUAL,
     clienteId: clienteSeguro(clienteId),
     vivaGeneration,
-    checkpointGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    durableCheckpointGeneration,
     dirtyGeneration,
     itemCount: Object.prototype.hasOwnProperty.call(patch, "itemCount")
       ? numeroManifesto(patch.itemCount, base.itemCount)
       : base.itemCount,
     lastMutationAt: texto(patch.lastMutationAt || base.lastMutationAt || ""),
     lastCheckpointAt: texto(patch.lastCheckpointAt || base.lastCheckpointAt || ""),
+    lastDurableCheckpointAt: texto(patch.lastDurableCheckpointAt || base.lastDurableCheckpointAt || ""),
+    lastVivaWriteReason: texto(patch.lastVivaWriteReason || base.lastVivaWriteReason || ""),
+    lastCheckpointReason: texto(patch.lastCheckpointReason || base.lastCheckpointReason || ""),
     updatedAt: agoraIso(agora)
   };
 }
@@ -465,6 +508,7 @@ function escreverManifestoFilaV2(clienteId = "admin", patch = {}, deps = {}, eve
       clienteId: cliente,
       vivaGeneration: manifesto.vivaGeneration,
       checkpointGeneration: manifesto.checkpointGeneration,
+      durableCheckpointGeneration: manifesto.durableCheckpointGeneration,
       dirtyGeneration: manifesto.dirtyGeneration,
       itemCount: manifesto.itemCount,
       motivo: patch.motivo || ""
@@ -476,6 +520,7 @@ function escreverManifestoFilaV2(clienteId = "admin", patch = {}, deps = {}, eve
       clienteId: cliente,
       vivaGeneration: manifesto.vivaGeneration,
       checkpointGeneration: manifesto.checkpointGeneration,
+      durableCheckpointGeneration: manifesto.durableCheckpointGeneration,
       dirtyGeneration: manifesto.dirtyGeneration,
       itemCount: manifesto.itemCount,
       motivo: patch.motivo || "",
@@ -492,39 +537,60 @@ function escreverManifestoFilaV2(clienteId = "admin", patch = {}, deps = {}, eve
 }
 
 function registrarManifestoMutacaoObservacional(clienteId = "admin", dados = {}, deps = {}) {
-  let generation = numeroManifesto(dados.generation, 0);
-  if (generation <= 0 && dados.incrementarSemGeneration === true) {
-    const leituraAtual = lerManifestoFilaV2(clienteId, deps);
-    generation = (leituraAtual.manifesto?.vivaGeneration || 0) + 1;
-  }
-  if (generation <= 0) {
-    return { ok: true, pulou: true, motivo: "generation_indisponivel" };
-  }
+  const leituraAtual = lerManifestoFilaV2(clienteId, deps);
+  const base = leituraAtual.manifesto || normalizarManifestoFilaV2({}, clienteId, deps.agora || Date.now());
+  const generation = base.vivaGeneration + 1;
+  const checkpointSincronizado = dados.checkpointSincronizado === true;
+  const durableCheckpointGeneration = checkpointSincronizado
+    ? generation
+    : base.durableCheckpointGeneration;
   const patch = {
     vivaGeneration: generation,
-    dirtyGeneration: dados.checkpointSincronizado === true ? null : (dados.dirtyGeneration ?? generation),
+    durableCheckpointGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    dirtyGeneration: checkpointSincronizado ? null : Math.min(generation, durableCheckpointGeneration + 1),
     itemCount: dados.itemCount,
     lastMutationAt: agoraIso(deps.agora || Date.now()),
+    lastVivaWriteReason: dados.motivo || "mutacao_viva",
     motivo: dados.motivo || "mutacao_viva"
   };
-  if (dados.checkpointSincronizado === true) {
-    patch.checkpointGeneration = generation;
+  if (checkpointSincronizado) {
     patch.lastCheckpointAt = patch.lastMutationAt;
+    patch.lastDurableCheckpointAt = patch.lastMutationAt;
+    patch.lastCheckpointReason = dados.motivo || "mutacao_viva_sincronizada";
   }
   return escreverManifestoFilaV2(clienteId, patch, deps, "manifest_write");
 }
 
 function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = {}, deps = {}) {
-  const generation = numeroManifesto(dados.checkpointGeneration ?? dados.generation, 0);
-  if (generation <= 0) {
+  const leituraAtual = lerManifestoFilaV2(clienteId, deps);
+  const base = leituraAtual.manifesto || normalizarManifestoFilaV2({}, clienteId, deps.agora || Date.now());
+  const generationAlvo = numeroManifesto(
+    dados.targetGeneration ??
+      dados.vivaGenerationAlvo ??
+      dados.durableCheckpointGeneration ??
+      dados.checkpointGeneration ??
+      dados.generation,
+    0
+  );
+  if (generationAlvo <= 0) {
     return { ok: true, pulou: true, motivo: "checkpoint_generation_indisponivel" };
   }
+  const durableCheckpointGeneration = Math.min(
+    base.vivaGeneration,
+    Math.max(base.durableCheckpointGeneration, generationAlvo)
+  );
   return escreverManifestoFilaV2(clienteId, {
-    vivaGeneration: generation,
-    checkpointGeneration: generation,
-    dirtyGeneration: null,
+    vivaGeneration: base.vivaGeneration,
+    durableCheckpointGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    dirtyGeneration: base.vivaGeneration > durableCheckpointGeneration
+      ? durableCheckpointGeneration + 1
+      : null,
     itemCount: dados.itemCount,
     lastCheckpointAt: agoraIso(deps.agora || Date.now()),
+    lastDurableCheckpointAt: agoraIso(deps.agora || Date.now()),
+    lastCheckpointReason: dados.motivo || "checkpoint",
     motivo: dados.motivo || "checkpoint"
   }, deps, "manifest_checkpoint");
 }
@@ -791,7 +857,8 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
     available: false,
     recoveryNeeded: false,
     vivaGeneration: 0,
-    checkpointGeneration: 0
+    checkpointGeneration: 0,
+    durableCheckpointGeneration: 0
   };
   let resultadoComparacao = "telemetria_desativada";
   const compararManifesto = deveUsarFilaV2Operacional(cliente, deps.env || process.env);
@@ -808,6 +875,7 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
         resultadoComparacao,
         vivaGeneration: manifestDecision.vivaGeneration || 0,
         checkpointGeneration: manifestDecision.checkpointGeneration || 0,
+        durableCheckpointGeneration: manifestDecision.durableCheckpointGeneration || 0,
         mtimeViva: viva.mtimeMs,
         mtimeLegado: legado.mtimeMs
       });
@@ -828,7 +896,8 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
       manifestRecoveryNeeded: manifestDecision.available ? manifestDecision.recoveryNeeded : false,
       resultadoComparacao,
       vivaGeneration: manifestDecision.vivaGeneration || 0,
-      checkpointGeneration: manifestDecision.checkpointGeneration || 0
+      checkpointGeneration: manifestDecision.checkpointGeneration || 0,
+      durableCheckpointGeneration: manifestDecision.durableCheckpointGeneration || 0
     }
   };
 }

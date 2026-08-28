@@ -1543,8 +1543,10 @@ function criarStorageTemporarioFilaV2() {
 
   assert.strictEqual(viva.ok, true);
   assert.strictEqual(manifesto.ok, true);
-  assert.strictEqual(lido.manifesto.vivaGeneration, 1, "vivaGeneration deve refletir generation operacional");
+  assert.strictEqual(lido.manifesto.manifestVersion, 2);
+  assert.strictEqual(lido.manifesto.vivaGeneration, 1, "vivaGeneration deve refletir generation persistida da viva");
   assert.strictEqual(lido.manifesto.checkpointGeneration, 0);
+  assert.strictEqual(lido.manifesto.durableCheckpointGeneration, 0);
   assert.strictEqual(lido.manifesto.dirtyGeneration, 1);
   assert.strictEqual(lido.manifesto.itemCount, 1);
   assert(logs.some(linha => linha.includes("[FILA-V2-MANIFEST]") && linha.includes("manifest_write")));
@@ -1583,6 +1585,33 @@ function criarStorageTemporarioFilaV2() {
 
 {
   const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_sem_viva";
+  const vivaPath = storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO);
+  fs.mkdirSync(path.dirname(vivaPath), { recursive: true });
+  fs.writeFileSync(vivaPath, "{viva quebrada", "utf8");
+
+  const viva = filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, oferta("viva_falha_manifesto_neutro", {
+    clienteId: cliente,
+    status: "pendente"
+  }), {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const lido = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(viva.ok, false, "falha antes de salvar viva nao deve ser tratada como mutacao duravel");
+  assert.strictEqual(lido.manifesto.vivaGeneration, 0, "manifesto nao deve avancar quando fila-viva nao foi salva");
+  assert.strictEqual(lido.manifesto.durableCheckpointGeneration, 0);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
   const cliente = "cliente_manifesto_checkpoint";
   const logs = [];
   const mutacao = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
@@ -1596,8 +1625,19 @@ function criarStorageTemporarioFilaV2() {
     logger: { log: () => {} },
     agora: AGORA
   });
+  const mutacao2 = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 2,
+    dirtyGeneration: 2,
+    itemCount: 3,
+    motivo: "insert_viva_2"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 500
+  });
   const checkpoint = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
-    checkpointGeneration: 2,
+    targetGeneration: 2,
     itemCount: 3,
     motivo: "mutacoes"
   }, {
@@ -1608,20 +1648,20 @@ function criarStorageTemporarioFilaV2() {
   });
 
   assert.strictEqual(mutacao.ok, true);
+  assert.strictEqual(mutacao2.ok, true);
   assert.strictEqual(checkpoint.ok, true);
   assert.strictEqual(checkpoint.manifesto.vivaGeneration, 2);
   assert.strictEqual(checkpoint.manifesto.checkpointGeneration, 2);
+  assert.strictEqual(checkpoint.manifesto.durableCheckpointGeneration, 2);
   assert.strictEqual(checkpoint.manifesto.dirtyGeneration, null);
   assert(logs.some(linha => linha.includes("manifest_checkpoint")));
 }
 
 {
   const storage = criarStorageTemporarioFilaV2();
-  const cliente = "cliente_manifesto_monotonico";
+  const cliente = "cliente_checkpoint_falha_manifesto";
   filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
-    generation: 5,
-    dirtyGeneration: 5,
-    itemCount: 5,
+    itemCount: 2,
     motivo: "insert_viva"
   }, {
     getClienteJsonPath: storage.getClienteJsonPath,
@@ -1629,19 +1669,57 @@ function criarStorageTemporarioFilaV2() {
     logger: { log: () => {} },
     agora: AGORA
   });
-  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
-    generation: 3,
+  const checkpointFalho = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    targetGeneration: 1,
+    itemCount: 2,
+    motivo: "checkpoint_falho"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: (clienteId, arquivo, dados) => {
+      if (arquivo === filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO) throw new Error("falha_checkpoint_manifesto");
+      return storage.writeClienteJson(clienteId, arquivo, dados);
+    },
+    logger: { log: () => {} },
+    agora: AGORA + 1
+  });
+  const lido = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    logger: { log: () => {} },
+    agora: AGORA + 2
+  });
+
+  assert.strictEqual(checkpointFalho.ok, false, "falha ao gravar manifesto de checkpoint permanece observacional");
+  assert.strictEqual(lido.manifesto.vivaGeneration, 1);
+  assert.strictEqual(lido.manifesto.durableCheckpointGeneration, 0, "durable nao deve avancar se o manifesto nao persistiu");
+  assert.strictEqual(lido.manifesto.dirtyGeneration, 1);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_monotonico";
+  storage.writeClienteJson(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO, {
+    version: 2,
+    manifestVersion: 2,
+    clienteId: cliente,
+    vivaGeneration: 5,
+    checkpointGeneration: 2,
+    durableCheckpointGeneration: 2,
     dirtyGeneration: 3,
-    itemCount: 3,
-    motivo: "write_antigo"
+    itemCount: 5
+  });
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    generation: 1,
+    dirtyGeneration: 1,
+    itemCount: 5,
+    motivo: "controller_generation_antiga"
   }, {
     getClienteJsonPath: storage.getClienteJsonPath,
     writeClienteJson: storage.writeClienteJson,
     logger: { log: () => {} },
-    agora: AGORA + 1
+    agora: AGORA
   });
   const checkpointParcial = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
-    checkpointGeneration: 4,
+    targetGeneration: 4,
     itemCount: 4,
     motivo: "checkpoint_parcial"
   }, {
@@ -1662,7 +1740,7 @@ function criarStorageTemporarioFilaV2() {
     agora: AGORA + 1
   });
   const checkpoint = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
-    checkpointGeneration: 9,
+    targetGeneration: 99,
     itemCount: 9,
     motivo: "checkpoint_recuperado"
   }, {
@@ -1672,12 +1750,91 @@ function criarStorageTemporarioFilaV2() {
     agora: AGORA + 2
   });
 
-  assert.strictEqual(checkpointParcial.manifesto.vivaGeneration, 5);
+  assert.strictEqual(checkpointParcial.manifesto.vivaGeneration, 6);
   assert.strictEqual(checkpointParcial.manifesto.checkpointGeneration, 4);
+  assert.strictEqual(checkpointParcial.manifesto.durableCheckpointGeneration, 4);
   assert.strictEqual(checkpointParcial.manifesto.dirtyGeneration, 5, "dirty nao deve regressar para antes do checkpoint");
-  assert.strictEqual(checkpoint.manifesto.vivaGeneration, 9, "checkpoint posterior pode recuperar manifesto ausente/desatualizado");
-  assert.strictEqual(checkpoint.manifesto.checkpointGeneration, 9);
+  assert.strictEqual(checkpoint.manifesto.vivaGeneration, 7, "checkpoint nao deve inflar vivaGeneration acima das mutacoes persistidas");
+  assert.strictEqual(checkpoint.manifesto.checkpointGeneration, 7);
+  assert.strictEqual(checkpoint.manifesto.durableCheckpointGeneration, 7);
   assert.strictEqual(checkpoint.manifesto.dirtyGeneration, null);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_v1_legado";
+  storage.writeClienteJson(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO, {
+    version: 1,
+    clienteId: cliente,
+    vivaGeneration: 10,
+    checkpointGeneration: 10,
+    dirtyGeneration: null,
+    itemCount: 10
+  });
+  const decisaoAntes = filaOperacionalV2.avaliarRecoveryPeloManifesto(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath
+  });
+  assert.strictEqual(decisaoAntes.available, false, "manifesto v1 nao deve virar autoridade de checkpoint duravel");
+  assert.strictEqual(decisaoAntes.motivo, "manifesto_v1_sem_durable");
+
+  const mutacaoSincronizada = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    checkpointSincronizado: true,
+    itemCount: 11,
+    motivo: "sync_legado_seguro"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(mutacaoSincronizada.ok, true);
+  assert.strictEqual(mutacaoSincronizada.manifesto.manifestVersion, 2);
+  assert.strictEqual(mutacaoSincronizada.manifesto.vivaGeneration, 11);
+  assert.strictEqual(mutacaoSincronizada.manifesto.durableCheckpointGeneration, 11);
+  assert.strictEqual(mutacaoSincronizada.manifesto.dirtyGeneration, null);
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_checkpoint_mutacao_concorrente";
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    itemCount: 1,
+    motivo: "insert_x"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+  const targetGeneration = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    logger: { log: () => {} },
+    agora: AGORA
+  }).manifesto.vivaGeneration;
+  filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    itemCount: 2,
+    motivo: "insert_y_durante_checkpoint"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 1
+  });
+  const checkpoint = filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    targetGeneration,
+    itemCount: 2,
+    motivo: "checkpoint_capturou_x"
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA + 2
+  });
+
+  assert.strictEqual(checkpoint.manifesto.vivaGeneration, 2);
+  assert.strictEqual(checkpoint.manifesto.durableCheckpointGeneration, 1);
+  assert.strictEqual(checkpoint.manifesto.dirtyGeneration, 2, "mutacao posterior ao target continua dirty");
 }
 
 {
@@ -1836,6 +1993,17 @@ function escreverArquivosRecoveryComparacao(storage, cliente, { vivaMtime, legad
   return { legadoPath, vivaPath, manifestoPath };
 }
 
+function manifestoRecoveryV2(vivaGeneration, durableCheckpointGeneration, itemCount = 1) {
+  return {
+    version: 2,
+    manifestVersion: 2,
+    vivaGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    durableCheckpointGeneration,
+    itemCount
+  };
+}
+
 function avaliarRecoveryComparacaoTeste(nome, config) {
   const storage = criarStorageTemporarioFilaV2();
   const cliente = `cliente_manifest_mtime_${nome}`;
@@ -1891,7 +2059,7 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("off_canary_sem_custo", {
     vivaMtime: AGORA + 10_000,
     legadoMtime: AGORA,
-    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    manifesto: manifestoRecoveryV2(1, 0),
     env: {
       FILA_V2_OPERACIONAL_ROLLOUT: "canary",
       FILA_V2_OPERACIONAL_CANARY_CLIENTES: "outro_cliente"
@@ -1908,7 +2076,7 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("equivalente_limpo", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 7, checkpointGeneration: 7, itemCount: 1 }
+    manifesto: manifestoRecoveryV2(7, 7)
   });
   assert.strictEqual(resultado.maisNova, false);
   assert.strictEqual(comparacao.manifestDecisionAvailable, true);
@@ -1920,7 +2088,7 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("equivalente_recovery", {
     vivaMtime: AGORA + 10_000,
     legadoMtime: AGORA,
-    manifesto: { vivaGeneration: 8, checkpointGeneration: 7, itemCount: 1 }
+    manifesto: manifestoRecoveryV2(8, 7)
   });
   assert.strictEqual(resultado.maisNova, true);
   assert.strictEqual(comparacao.manifestDecisionAvailable, true);
@@ -1932,7 +2100,7 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("manifest_sim_mtime_nao", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 9, checkpointGeneration: 8, itemCount: 1 }
+    manifesto: manifestoRecoveryV2(9, 8)
   });
   assert.strictEqual(resultado.maisNova, false, "manifesto nao pode disparar recovery quando mtime nao recupera");
   assert.strictEqual(comparacao.manifestRecoveryNeeded, true);
@@ -1943,7 +2111,7 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("mtime_sim_manifest_nao", {
     vivaMtime: AGORA + 10_000,
     legadoMtime: AGORA,
-    manifesto: { vivaGeneration: 10, checkpointGeneration: 10, itemCount: 1 }
+    manifesto: manifestoRecoveryV2(10, 10)
   });
   assert.strictEqual(resultado.maisNova, true, "mtime continua autoridade e recuperaria mesmo com manifesto sincronizado");
   assert.strictEqual(comparacao.manifestRecoveryNeeded, false);
@@ -1975,7 +2143,14 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("checkpoint_maior_viva", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 3, checkpointGeneration: 4, itemCount: 1 }
+    manifesto: {
+      version: 2,
+      manifestVersion: 2,
+      vivaGeneration: 3,
+      checkpointGeneration: 4,
+      durableCheckpointGeneration: 4,
+      itemCount: 1
+    }
   });
   assert.strictEqual(resultado.maisNova, false);
   assert.strictEqual(comparacao.manifestDecisionAvailable, false, "checkpoint > viva torna manifesto inconclusivo");
@@ -1983,12 +2158,12 @@ function avaliarRecoveryComparacaoTeste(nome, config) {
 }
 
 for (const [nome, manifesto] of [
-  ["geracao_null", { vivaGeneration: null, checkpointGeneration: null, itemCount: 1 }],
-  ["geracao_string_vazia", { vivaGeneration: "", checkpointGeneration: "", itemCount: 1 }],
-  ["geracao_whitespace", { vivaGeneration: "   ", checkpointGeneration: 0, itemCount: 1 }],
-  ["geracao_negativa", { vivaGeneration: -1, checkpointGeneration: 0, itemCount: 1 }],
-  ["geracao_textual", { vivaGeneration: "NaN", checkpointGeneration: 0, itemCount: 1 }],
-  ["geracao_array", { vivaGeneration: [1], checkpointGeneration: 0, itemCount: 1 }]
+  ["geracao_null", { version: 2, manifestVersion: 2, vivaGeneration: null, durableCheckpointGeneration: null, itemCount: 1 }],
+  ["geracao_string_vazia", { version: 2, manifestVersion: 2, vivaGeneration: "", durableCheckpointGeneration: "", itemCount: 1 }],
+  ["geracao_whitespace", { version: 2, manifestVersion: 2, vivaGeneration: "   ", durableCheckpointGeneration: 0, itemCount: 1 }],
+  ["geracao_negativa", { version: 2, manifestVersion: 2, vivaGeneration: -1, durableCheckpointGeneration: 0, itemCount: 1 }],
+  ["geracao_textual", { version: 2, manifestVersion: 2, vivaGeneration: "NaN", durableCheckpointGeneration: 0, itemCount: 1 }],
+  ["geracao_array", { version: 2, manifestVersion: 2, vivaGeneration: [1], durableCheckpointGeneration: 0, itemCount: 1 }]
 ]) {
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste(nome, {
     vivaMtime: AGORA + 10_000,
@@ -2004,7 +2179,7 @@ for (const [nome, manifesto] of [
   const { resultado, comparacao } = avaliarRecoveryComparacaoTeste("geracao_zero_valida", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 }
+    manifesto: manifestoRecoveryV2(0, 0, 0)
   });
   assert.strictEqual(resultado.maisNova, false);
   assert.strictEqual(comparacao.manifestDecisionAvailable, true, "geracao 0 numerica faz parte do estado inicial valido do manifesto");
@@ -2017,13 +2192,13 @@ for (const [nome, manifesto] of [
   avaliarRecoveryComparacaoTeste("throttle_mesma_chave", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    manifesto: manifestoRecoveryV2(0, 0, 0),
     agora: AGORA
   });
   avaliarRecoveryComparacaoTeste("throttle_mesma_chave", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    manifesto: manifestoRecoveryV2(0, 0, 0),
     agora: AGORA + 1_000,
     esperaLog: false
   });
@@ -2037,7 +2212,7 @@ for (const [nome, manifesto] of [
     avaliarRecoveryComparacaoTeste(`throttle_cap_${i}`, {
       vivaMtime: AGORA,
       legadoMtime: AGORA + 10_000,
-      manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+      manifesto: manifestoRecoveryV2(0, 0, 0),
       agora: AGORA
     });
   }
@@ -2048,7 +2223,7 @@ for (const [nome, manifesto] of [
   avaliarRecoveryComparacaoTeste("throttle_prune_idade", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 0, checkpointGeneration: 0, itemCount: 0 },
+    manifesto: manifestoRecoveryV2(0, 0, 0),
     agora: AGORA + 10 * 60 * 1000
   });
   assert(
@@ -2062,13 +2237,13 @@ for (const [nome, manifesto] of [
   const primeira = avaliarRecoveryComparacaoTeste("divergencia_imediata", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    manifesto: manifestoRecoveryV2(1, 0),
     agora: AGORA
   });
   const segunda = avaliarRecoveryComparacaoTeste("divergencia_imediata", {
     vivaMtime: AGORA,
     legadoMtime: AGORA + 10_000,
-    manifesto: { vivaGeneration: 1, checkpointGeneration: 0, itemCount: 1 },
+    manifesto: manifestoRecoveryV2(1, 0),
     agora: AGORA + 1_000
   });
   assert(primeira.logs.some(linha => linha.includes("manifest_recuperaria_mtime_nao")));
