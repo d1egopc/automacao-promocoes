@@ -66,6 +66,7 @@ function fonteTituloApresentacaoLocal({ destino = {}, resultado = {}, tituloIaPr
   if (normalizarTituloOfertaDestino(destino?.tituloOferta) !== "ia") return "original";
   if (!resultado || typeof resultado !== "object") return "original";
   if (resultado.fallbackOriginal) return "original";
+  if (resultado.fonte === copyInteligente.FONTE_COPY_C3) return "copy_c3";
   if (resultado.fonte === copyInteligente.FONTE_COPY_LOCAL_V2) return "local_v2";
   if (resultado.fonte === "copy_inteligente_v1" || resultado.fonte === "banco_frases_v1") return "v1";
   if (resultado.usouTituloIa && tituloIaPreExistente) return "tituloIa_explicito";
@@ -78,6 +79,7 @@ function registrarObservabilidadeTituloOferta({
   destino = {},
   resultado = {},
   copyLocalV2Resolvida = null,
+  copyC3Resolvida = null,
   copyResolvida = null,
   tituloIaPreExistente = false
 } = {}) {
@@ -95,6 +97,15 @@ function registrarObservabilidadeTituloOferta({
       payload.familiaLocalV2 = textoMensagemExistenteLocal(copyLocalV2Resolvida?.familia || "");
       payload.intencaoLocalV2 = textoMensagemExistenteLocal(copyLocalV2Resolvida?.intencao || "");
       payload.cacheHit = copyLocalV2Resolvida?.cacheHit === true;
+    }
+
+    if (fonteTitulo === "copy_c3") {
+      payload.fraseIdC3 = textoMensagemExistenteLocal(copyC3Resolvida?.fraseId || "");
+      payload.fatoUsadoC3 = textoMensagemExistenteLocal(copyC3Resolvida?.fatoUsado || "");
+      payload.familiaC3 = textoMensagemExistenteLocal(copyC3Resolvida?.familia || "");
+      payload.intencaoC3 = textoMensagemExistenteLocal(copyC3Resolvida?.intencao || "");
+      payload.confiancaC3 = textoMensagemExistenteLocal(copyC3Resolvida?.confianca || "");
+      payload.cacheHit = false;
     }
 
     if (fonteTitulo === "v1") {
@@ -158,6 +169,45 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       oferta,
       destino,
       resultado,
+      tituloIaPreExistente
+    });
+    return resultado;
+  }
+
+  let copyC3Resolvida = null;
+  try {
+    copyC3Resolvida = copyInteligente.resolverCopyC3({
+      oferta,
+      destino,
+      clienteId: opcoes.clienteId || oferta.clienteId || "admin",
+      plano: opcoes.plano || {}
+    });
+  } catch (err) {
+    copyC3Resolvida = {
+      ok: false,
+      motivoFallback: "copy_c3_erro"
+    };
+  }
+  if (copyC3Resolvida?.ok && tituloApresentacaoValido(copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa)) {
+    const resultado = {
+      titulo: copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa,
+      modo: "ia",
+      usouTituloIa: true,
+      fallbackOriginal: false,
+      intencao: copyC3Resolvida.intencao || "",
+      fraseId: copyC3Resolvida.fraseId || "",
+      familia: copyC3Resolvida.familia || "",
+      categoriaOficial: copyC3Resolvida.categoriaOficial || "",
+      fatoUsado: copyC3Resolvida.fatoUsado || "",
+      confianca: copyC3Resolvida.confianca || "",
+      fonte: copyC3Resolvida.fonte || copyInteligente.FONTE_COPY_C3,
+      cacheHit: false
+    };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      copyC3Resolvida,
       tituloIaPreExistente
     });
     return resultado;
@@ -470,6 +520,8 @@ function tituloIgualTituloIaLocal(titulo = "", oferta = {}) {
 
 function candidatosTituloProdutoLocal(oferta = {}) {
   const metadata = objetoLocal(oferta.metadata);
+  const autoridadeFactual = objetoLocal(metadata.autoridadeFactual || oferta.autoridadeFactual);
+  const produtoMetadata = objetoLocal(metadata.produto || oferta.produto);
   const radarMirror = objetoLocal(metadata.radarMirror || metadata.radarEspelhoComercial || oferta.radarMirror || oferta.radarEspelhoComercial);
   const documento = documentoOfcV24Local(oferta);
   const documentoDireto = objetoLocal(oferta.documentoComercialCanonico);
@@ -486,6 +538,9 @@ function candidatosTituloProdutoLocal(oferta = {}) {
     if (titulo) candidatos.push({ fonte, titulo });
   };
 
+  adicionarCampo("tituloFactual", oferta.tituloFactual);
+  adicionarCampo("autoridadeFactual.titulo", autoridadeFactual.tituloFactual || autoridadeFactual.titulo);
+  adicionarCampo("metadata.produto.titulo", produtoMetadata.titulo || produtoMetadata.nome || produtoMetadata.name);
   adicionarTexto("textoOriginal", oferta.textoOriginal || metadata.textoOriginal || radarMirror.texto?.original || radarMirror.textoOriginal);
   adicionarTexto("textoComercialOriginal", oferta.textoComercialOriginal || metadata.textoComercialOriginal || radarMirror.textoComercialOriginal);
   adicionarTexto("documentoComercialCanonico", oferta.documentoComercialCanonico || metadata.documentoComercialCanonico || radarMirror.documentoComercialCanonico);

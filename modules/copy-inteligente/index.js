@@ -13,6 +13,7 @@ const cacheV2 = require("./cache-v2");
 const quotaV2 = require("./quota-v2");
 const observabilidadeV2 = require("./observabilidade-v2");
 const serviceV2 = require("./copy-v2.service");
+const serviceC3 = require("./copy-c3.service");
 
 module.exports = {
   ...banco,
@@ -29,5 +30,6 @@ module.exports = {
   ...cacheV2,
   ...quotaV2,
   ...observabilidadeV2,
-  ...serviceV2
+  ...serviceV2,
+  ...serviceC3
 };
