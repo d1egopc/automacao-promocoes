@@ -2073,7 +2073,12 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
   let motivoBloqueio = "";
 
   for (const item of analiseDestinos.compativeis) {
-    const destino = item.destino;
+    const destino = item?.destino;
+
+    if (!destinoOperacionalValido(destino)) {
+      motivoBloqueio = motivoBloqueio || "destino_invalido";
+      continue;
+    }
 
     if (destinoJaEnviadoFanout(oferta, destino)) {
       motivoBloqueio = motivoBloqueio || "fanout_destino_ja_enviado";
@@ -3762,20 +3767,30 @@ function numeroIntervaloValido(valor) {
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
 
+function destinoOperacionalValido(destino) {
+  return Boolean(destino && typeof destino === "object" && !Array.isArray(destino));
+}
+
+function destinoOperacionalSeguro(destino = {}) {
+  return destinoOperacionalValido(destino) ? destino : {};
+}
+
 function destinoIdIntervalo(destino = {}) {
+  const destinoSeguro = destinoOperacionalSeguro(destino);
   return String(
-    destino.id ||
-    destino.destinoId ||
-    destino.conexaoId ||
-    destino.chatId ||
-    destino.grupoId ||
-    destino.nome ||
+    destinoSeguro.id ||
+    destinoSeguro.destinoId ||
+    destinoSeguro.conexaoId ||
+    destinoSeguro.chatId ||
+    destinoSeguro.grupoId ||
+    destinoSeguro.nome ||
     "destino"
   );
 }
 
 function canalDestinoIntervalo(destino = {}) {
-  return String(destino.tipo || destino.canal || "").toLowerCase();
+  const destinoSeguro = destinoOperacionalSeguro(destino);
+  return String(destinoSeguro.tipo || destinoSeguro.canal || "").toLowerCase();
 }
 
 function dataIsoIntervalo(ms = 0) {
@@ -6163,11 +6178,12 @@ function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, confi
 // ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
 function destinoDentroHorario(destino = {}) {
-  return destinosUtils.destinoDentroHorario(destino);
+  return destinosUtils.destinoDentroHorario(destinoOperacionalSeguro(destino));
 }
 
 function destinoNomeLog(destino = {}) {
-  return String(destino.nome || destino.titulo || destino.label || destino.id || destino.conexaoId || "Destino");
+  const destinoSeguro = destinoOperacionalSeguro(destino);
+  return String(destinoSeguro.nome || destinoSeguro.titulo || destinoSeguro.label || destinoSeguro.id || destinoSeguro.conexaoId || "Destino");
 }
 
 function categoriasDestinoDebug(destino = {}) {
@@ -6415,17 +6431,19 @@ function logExecutorDestinoDiagnostico({
 }
 
 function destinoChaveControle(clienteId = "admin", destino = {}) {
-  return `${clienteId}_${destino.id || destino.nome || destino.conexaoId || destino.chatId || "destino"}`;
+  const destinoSeguro = destinoOperacionalSeguro(destino);
+  return `${clienteId}_${destinoSeguro.id || destinoSeguro.nome || destinoSeguro.conexaoId || destinoSeguro.chatId || "destino"}`;
 }
 
 function limiteDiarioDestino(destino = {}) {
+  const destinoSeguro = destinoOperacionalSeguro(destino);
   const limite = Number(
-    destino.limiteDiario ??
-    destino.limiteDiarioEnvios ??
-    destino.maximoDiario ??
-    destino.maxPorDia ??
-    destino.maxEnviosDia ??
-    destino.enviosPorDia ??
+    destinoSeguro.limiteDiario ??
+    destinoSeguro.limiteDiarioEnvios ??
+    destinoSeguro.maximoDiario ??
+    destinoSeguro.maxPorDia ??
+    destinoSeguro.maxEnviosDia ??
+    destinoSeguro.enviosPorDia ??
     0
   );
 
@@ -6439,9 +6457,10 @@ function dataBRHoje() {
 }
 
 function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
+  const destinoSeguro = destinoOperacionalSeguro(destino);
   const hoje = dataBRHoje();
-  const nomeDestino = destinoNomeLog(destino);
-  const idDestino = String(destino.id || destino.conexaoId || destino.chatId || "");
+  const nomeDestino = destinoNomeLog(destinoSeguro);
+  const idDestino = String(destinoSeguro.id || destinoSeguro.conexaoId || destinoSeguro.chatId || "");
 
   return fila.filter(item => String(item.clienteId || "admin") === String(clienteId))
     .flatMap(item => Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [])

@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 
 const {
   calcularScoreFilaViva,
@@ -149,5 +150,74 @@ function oferta(id, minutos, overrides = {}) {
   assert(
     !trechoCore.includes("proximaTentativaEnvioEm) && proxima > Date.now()) return false"),
     "projecao historica nao deve bloquear selecao viva"
+  );
+}
+
+{
+  const indexPath = path.join(__dirname, "..", "index.js");
+  const fonteIndex = fs.readFileSync(indexPath, "utf8");
+  const inicioDestinoSeguro = fonteIndex.indexOf("function destinoOperacionalValido");
+  const fimDestinoSeguro = fonteIndex.indexOf("function dataIsoIntervalo", inicioDestinoSeguro);
+  const inicioChaveControle = fonteIndex.indexOf("function destinoChaveControle");
+  const fimChaveControle = fonteIndex.indexOf("function limiteDiarioDestino", inicioChaveControle);
+
+  assert(inicioDestinoSeguro >= 0 && fimDestinoSeguro > inicioDestinoSeguro, "helpers seguros de destino devem existir");
+  assert(inicioChaveControle >= 0 && fimChaveControle > inicioChaveControle, "destinoChaveControle deve existir");
+
+  const sandbox = {};
+  vm.runInNewContext(`
+    ${fonteIndex.slice(inicioDestinoSeguro, fimDestinoSeguro)}
+    ${fonteIndex.slice(inicioChaveControle, fimChaveControle)}
+    resultado = {
+      destinoIdIntervalo,
+      canalDestinoIntervalo,
+      destinoChaveControle
+    };
+  `, sandbox);
+
+  assert.doesNotThrow(
+    () => sandbox.resultado.destinoChaveControle("user_40qdblgt", null),
+    "destino null nao deve quebrar selecao ao montar chave de intervalo"
+  );
+  assert.strictEqual(
+    sandbox.resultado.destinoChaveControle("user_40qdblgt", null),
+    "user_40qdblgt_destino",
+    "destino null usa chave neutra sem promover destino invalido"
+  );
+  assert.strictEqual(
+    sandbox.resultado.destinoIdIntervalo(null),
+    "destino",
+    "destino null usa id neutro nos diagnosticos"
+  );
+  assert.strictEqual(
+    sandbox.resultado.canalDestinoIntervalo(null),
+    "",
+    "destino null nao inventa canal"
+  );
+  assert.strictEqual(
+    sandbox.resultado.destinoChaveControle("cliente", { id: "destino_1", nome: "Grupo A" }),
+    "cliente_destino_1",
+    "destino valido preserva chave por id"
+  );
+}
+
+{
+  const indexPath = path.join(__dirname, "..", "index.js");
+  const fonteIndex = fs.readFileSync(indexPath, "utf8");
+  const inicioAvaliacao = fonteIndex.indexOf("function avaliarOfertaParaSelecaoFilaViva");
+  const fimAvaliacao = fonteIndex.indexOf("function selecionarProximaOfertaFilaCore", inicioAvaliacao);
+  assert(inicioAvaliacao >= 0 && fimAvaliacao > inicioAvaliacao, "avaliacao de selecao viva deve existir");
+
+  const trechoAvaliacao = fonteIndex.slice(inicioAvaliacao, fimAvaliacao);
+  const posGuardaDestino = trechoAvaliacao.indexOf("!destinoOperacionalValido(destino)");
+  const posFanout = trechoAvaliacao.indexOf("destinoJaEnviadoFanout(oferta, destino)");
+  const posIntervalo = trechoAvaliacao.indexOf("intervaloDestinoInfo(clienteIdOferta, destino");
+
+  assert(posGuardaDestino >= 0, "destino invalido deve ser bloqueado antes da avaliacao operacional");
+  assert(posFanout > posGuardaDestino, "fanout so deve avaliar destino valido");
+  assert(posIntervalo > posGuardaDestino, "intervalo so deve avaliar destino valido");
+  assert(
+    trechoAvaliacao.includes('motivoBloqueio = motivoBloqueio || "destino_invalido"'),
+    "destino invalido deve registrar motivo sem selecionar/remover/duplicar oferta"
   );
 }
