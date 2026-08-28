@@ -15,6 +15,7 @@ const {
   classificarItemFilaV2,
   projetarFilaV2
 } = require("./fila-v2-shadow");
+const manifestStateRepository = require("./fila-manifest-state.repository");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -28,6 +29,7 @@ const TAG_MANIFEST = "[FILA-V2-MANIFEST]";
 const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
 const TAG_2C = "[FILA-V2-2C]";
 const TAG_RECOVERY_COMPARACAO = "[FILA-V2-RECOVERY-COMPARACAO]";
+const TAG_MANIFEST_STATE = "[FILA-V2-MANIFEST-STATE]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
 const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
 const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
@@ -37,8 +39,12 @@ const DEFAULT_CHECKPOINT_MAX_DIRTY_MS = 120_000;
 const RECOVERY_COMPARACAO_THROTTLE_MS = 5 * 60 * 1000;
 const RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS = 2048;
 const RECOVERY_COMPARACAO_THROTTLE_TARGET_ENTRADAS = 1536;
+const MANIFEST_STATE_THROTTLE_MS = 5 * 60 * 1000;
+const MANIFEST_STATE_THROTTLE_MAX_ENTRADAS = 2048;
+const MANIFEST_STATE_THROTTLE_TARGET_ENTRADAS = 1536;
 const cacheChavesHistorico = new Map();
 const recoveryComparacaoLogThrottle = new Map();
+const manifestStateLogThrottle = new Map();
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -218,6 +224,13 @@ function logRecoveryComparacao(logger = console, payload = {}) {
   } catch {}
 }
 
+function logManifestState(logger = console, payload = {}) {
+  try {
+    const destino = logger && typeof logger.log === "function" ? logger : console;
+    destino.log(TAG_MANIFEST_STATE, JSON.stringify(payload));
+  } catch {}
+}
+
 function hashCurto(valor = "") {
   return crypto.createHash("sha1").update(String(valor || "")).digest("hex").slice(0, 12);
 }
@@ -361,7 +374,8 @@ function avaliarRecoveryPeloManifesto(clienteId = "admin", deps = {}) {
       motivo: leitura.motivo,
       recoveryNeeded: false,
       vivaGeneration: 0,
-      checkpointGeneration: 0
+      checkpointGeneration: 0,
+      manifesto: null
     };
   }
 
@@ -384,7 +398,8 @@ function avaliarRecoveryPeloManifesto(clienteId = "admin", deps = {}) {
       recoveryNeeded: false,
       vivaGeneration: 0,
       checkpointGeneration: 0,
-      durableCheckpointGeneration: 0
+      durableCheckpointGeneration: 0,
+      manifesto: null
     };
   }
 
@@ -394,7 +409,16 @@ function avaliarRecoveryPeloManifesto(clienteId = "admin", deps = {}) {
     recoveryNeeded: vivaGeneration > durableCheckpointGeneration,
     vivaGeneration,
     checkpointGeneration: durableCheckpointGeneration,
-    durableCheckpointGeneration
+    durableCheckpointGeneration,
+    manifesto: {
+      manifestVersion,
+      vivaGeneration,
+      checkpointGeneration: durableCheckpointGeneration,
+      durableCheckpointGeneration,
+      dirtyGeneration: bruto.dirtyGeneration === null
+        ? null
+        : numeroManifestoEstrito(bruto.dirtyGeneration)
+    }
   };
 }
 
@@ -437,6 +461,126 @@ function resetarThrottleRecoveryComparacaoParaTeste() {
 
 function tamanhoThrottleRecoveryComparacaoParaTeste() {
   return recoveryComparacaoLogThrottle.size;
+}
+
+function podarThrottleManifestState(agora = Date.now()) {
+  if (manifestStateLogThrottle.size < MANIFEST_STATE_THROTTLE_MAX_ENTRADAS) return;
+  for (const [chave, timestamp] of manifestStateLogThrottle.entries()) {
+    if (agora - timestamp >= MANIFEST_STATE_THROTTLE_MS) {
+      manifestStateLogThrottle.delete(chave);
+    }
+  }
+  if (manifestStateLogThrottle.size < MANIFEST_STATE_THROTTLE_MAX_ENTRADAS) return;
+  const ordenadas = [...manifestStateLogThrottle.entries()]
+    .sort((a, b) => a[1] - b[1]);
+  const remover = Math.max(0, manifestStateLogThrottle.size - MANIFEST_STATE_THROTTLE_TARGET_ENTRADAS);
+  for (let i = 0; i < remover; i += 1) {
+    manifestStateLogThrottle.delete(ordenadas[i][0]);
+  }
+}
+
+function deveLogarManifestState(clienteId = "admin", resultado = "", agora = Date.now()) {
+  if (resultado !== "db_json_equivalente" && resultado !== "db_indisponivel") return true;
+  const chave = `${clienteSeguro(clienteId)}|${resultado}`;
+  const ultimo = manifestStateLogThrottle.get(chave) || 0;
+  if (agora - ultimo < MANIFEST_STATE_THROTTLE_MS) return false;
+  podarThrottleManifestState(agora);
+  manifestStateLogThrottle.set(chave, agora);
+  return true;
+}
+
+function resetarThrottleManifestStateParaTeste() {
+  manifestStateLogThrottle.clear();
+}
+
+function tamanhoThrottleManifestStateParaTeste() {
+  return manifestStateLogThrottle.size;
+}
+
+function repositoryManifestState(deps = {}) {
+  return deps.manifestStateRepository || manifestStateRepository;
+}
+
+function deveUsarManifestStatePostgres(clienteId = "admin", deps = {}) {
+  if (deps.manifestStatePostgres === false) return false;
+  if (!deveUsarFilaV2Operacional(clienteId, deps.env || process.env)) return false;
+  if (deps.manifestStateRepository) return true;
+  return Boolean(process.env.DATABASE_URL);
+}
+
+function compararDbJsonManifestState(clienteId = "admin", dbResultado = {}, jsonManifest = {}, contexto = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const repo = repositoryManifestState(deps);
+  const dbState = dbResultado?.state || null;
+  const comparacao = typeof repo.compararDbJson === "function"
+    ? repo.compararDbJson(dbState, jsonManifest)
+    : { resultado: dbState ? "db_json_indisponivel" : "db_indisponivel" };
+  const resultado = dbResultado?.ok === false
+    ? "db_indisponivel"
+    : comparacao.resultado;
+  const agora = contexto.agora || deps.agora || Date.now();
+
+  if (deveLogarManifestState(cliente, resultado, agora)) {
+    logManifestState(deps.logger, {
+      versao: 1,
+      evento: contexto.evento || "db_json_comparacao",
+      clienteId: cliente,
+      resultado,
+      motivo: contexto.motivo || dbResultado?.motivo || "",
+      mtimeRecoveryNeeded: contexto.mtimeRecoveryNeeded,
+      dbRevision: dbState?.revision ?? null,
+      dbVivaGeneration: dbState?.vivaGeneration ?? null,
+      dbDurableCheckpointGeneration: dbState?.durableCheckpointGeneration ?? null,
+      dbDirtyGeneration: dbState?.dirtyGeneration ?? null,
+      jsonVivaGeneration: jsonManifest?.vivaGeneration ?? null,
+      jsonDurableCheckpointGeneration: jsonManifest?.durableCheckpointGeneration ?? null,
+      jsonDirtyGeneration: jsonManifest?.dirtyGeneration ?? null
+    });
+  }
+
+  return { ...comparacao, resultado };
+}
+
+function executarManifestStateAsync(clienteId = "admin", operacao = "", payload = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: true, pulou: true, motivo: "manifest_state_desabilitado" };
+  }
+  const repo = repositoryManifestState(deps);
+  const logger = deps.logger || console;
+
+  Promise.resolve()
+    .then(async () => {
+      let resultado;
+      if (operacao === "checkpoint") {
+        resultado = await repo.confirmarCheckpointDuravel(cliente, payload, deps);
+      } else if (operacao === "legacy_sync") {
+        resultado = await repo.registrarLegacySyncDuravel(cliente, payload, deps);
+      } else if (operacao === "read") {
+        resultado = await repo.lerStateObservacional(cliente, deps);
+      } else {
+        resultado = await repo.registrarMutacaoDuravel(cliente, payload, deps);
+      }
+      compararDbJsonManifestState(cliente, resultado, payload.jsonManifest, {
+        evento: payload.evento || `db_${operacao}`,
+        motivo: payload.motivo || operacao,
+        mtimeRecoveryNeeded: payload.mtimeRecoveryNeeded,
+        agora: payload.agora
+      }, { ...deps, logger });
+    })
+    .catch(erro => {
+      if (deveLogarManifestState(cliente, "db_indisponivel", deps.agora || Date.now())) {
+        logManifestState(logger, {
+          versao: 1,
+          evento: payload.evento || `db_${operacao}`,
+          clienteId: cliente,
+          resultado: "db_indisponivel",
+          motivo: erro?.message || "manifest_state_async_error"
+        });
+      }
+    });
+
+  return { ok: true, observacional: true, motivo: "manifest_state_agendado" };
 }
 
 function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
@@ -559,7 +703,19 @@ function registrarManifestoMutacaoObservacional(clienteId = "admin", dados = {},
     patch.lastDurableCheckpointAt = patch.lastMutationAt;
     patch.lastCheckpointReason = dados.motivo || "mutacao_viva_sincronizada";
   }
-  return escreverManifestoFilaV2(clienteId, patch, deps, "manifest_write");
+  const resultado = escreverManifestoFilaV2(clienteId, patch, deps, "manifest_write");
+  if (resultado.ok === true) {
+    executarManifestStateAsync(clienteId, checkpointSincronizado ? "legacy_sync" : "mutacao", {
+      bootstrapManifest: base,
+      checkpointSincronizado,
+      itemCount: dados.itemCount,
+      motivo: dados.motivo || "mutacao_viva",
+      jsonManifest: resultado.manifesto,
+      evento: "db_manifest_mutacao",
+      agora: deps.agora || Date.now()
+    }, deps);
+  }
+  return resultado;
 }
 
 function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = {}, deps = {}) {
@@ -580,7 +736,7 @@ function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = 
     base.vivaGeneration,
     Math.max(base.durableCheckpointGeneration, generationAlvo)
   );
-  return escreverManifestoFilaV2(clienteId, {
+  const resultado = escreverManifestoFilaV2(clienteId, {
     vivaGeneration: base.vivaGeneration,
     durableCheckpointGeneration,
     checkpointGeneration: durableCheckpointGeneration,
@@ -593,6 +749,18 @@ function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = 
     lastCheckpointReason: dados.motivo || "checkpoint",
     motivo: dados.motivo || "checkpoint"
   }, deps, "manifest_checkpoint");
+  if (resultado.ok === true) {
+    executarManifestStateAsync(clienteId, "checkpoint", {
+      bootstrapManifest: base,
+      targetGeneration: generationAlvo,
+      itemCount: dados.itemCount,
+      motivo: dados.motivo || "checkpoint",
+      jsonManifest: resultado.manifesto,
+      evento: "db_manifest_checkpoint",
+      agora: deps.agora || Date.now()
+    }, deps);
+  }
+  return resultado;
 }
 
 function cloneSet(set = new Set()) {
@@ -865,6 +1033,13 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
   if (compararManifesto) {
     manifestDecision = avaliarRecoveryPeloManifesto(cliente, deps);
     resultadoComparacao = classificarComparacaoRecovery(maisNova, manifestDecision);
+    executarManifestStateAsync(cliente, "read", {
+      jsonManifest: manifestDecision.manifesto,
+      evento: "db_manifest_recovery_comparacao",
+      motivo: resultadoComparacao,
+      mtimeRecoveryNeeded: maisNova,
+      agora
+    }, deps);
     if (deveLogarComparacaoRecovery(cliente, resultadoComparacao, agora)) {
       logRecoveryComparacao(deps.logger, {
         versao: 1,
@@ -2173,7 +2348,9 @@ module.exports = {
   TAG_CANARY_WRITER,
   TAG_2C,
   TAG_RECOVERY_COMPARACAO,
+  TAG_MANIFEST_STATE,
   RECOVERY_COMPARACAO_THROTTLE_MAX_ENTRADAS,
+  MANIFEST_STATE_THROTTLE_MAX_ENTRADAS,
   DEFAULT_CHECKPOINT_MUTACOES,
   DEFAULT_CHECKPOINT_INTERVALO_MS,
   DEFAULT_CHECKPOINT_MAX_DIRTY_MS,
@@ -2207,5 +2384,7 @@ module.exports = {
   criarControladorFilaOperacionalV2,
   limparCacheHistorico,
   resetarThrottleRecoveryComparacaoParaTeste,
-  tamanhoThrottleRecoveryComparacaoParaTeste
+  tamanhoThrottleRecoveryComparacaoParaTeste,
+  resetarThrottleManifestStateParaTeste,
+  tamanhoThrottleManifestStateParaTeste
 };

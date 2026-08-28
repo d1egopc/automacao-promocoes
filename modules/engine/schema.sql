@@ -176,6 +176,26 @@ ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS origem_pipeline T
 ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS chave_idempotencia TEXT;
 ALTER TABLE engine_eventos_comerciais ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS queue_manifest_state (
+  cliente_id TEXT PRIMARY KEY,
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  viva_generation BIGINT NOT NULL DEFAULT 0 CHECK (viva_generation >= 0),
+  durable_checkpoint_generation BIGINT NOT NULL DEFAULT 0 CHECK (durable_checkpoint_generation >= 0),
+  dirty_generation BIGINT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (durable_checkpoint_generation <= viva_generation),
+  CHECK (
+    (viva_generation = durable_checkpoint_generation AND dirty_generation IS NULL)
+    OR
+    (
+      viva_generation > durable_checkpoint_generation
+      AND dirty_generation IS NOT NULL
+      AND dirty_generation > durable_checkpoint_generation
+      AND dirty_generation <= viva_generation
+    )
+  )
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_brutos_uuid
   ON engine_eventos_brutos (uuid);
 CREATE INDEX IF NOT EXISTS idx_engine_eventos_brutos_capturado_em
