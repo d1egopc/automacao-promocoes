@@ -403,7 +403,8 @@ const REGRAS = [
       "terno masculino", "blazer masculino", "pijama masculino", "sunga",
       "carteira masculina", "cinto masculino", "meia masculina",
       "pares de meia", "pares de meias", "kit pares de meias", "kit meias",
-      "sportee insider", "camiseta insider"
+      "sportee insider", "camiseta insider", "kit camisetas masculinas",
+      "camisetas masculinas"
     ]
   }),
 
@@ -440,7 +441,8 @@ const REGRAS = [
       "ferramentas profissional", "profissional eletricista", "eletricista",
       "motosserra", "eletrosserra", "serra de corte", "serra marmore",
       "serra ceramica", "serra granito", "ferramenta serralheiro",
-      "conjunto de chave", "jogo de chaves"
+      "conjunto de chave", "jogo de chaves", "maquina assentar pisos",
+      "assentar pisos"
     ],
     palavras: [
       "chave inglesa", "chave allen", "chave soquete", "soquete", "soquetes", "alicate universal",
@@ -481,12 +483,15 @@ const REGRAS = [
       "garrafa termica inox", "garrafa termica cafe", "copo termico inox",
       "cadeira de escritorio", "escrivaninha", "nicho", "prateleira",
       "sapateira", "cabeceira", "poltrona", "estante", "aparador",
+      "conjunto sala de jantar", "sala de jantar", "kit motor portao",
+      "motor de portao", "motor para portao", "motor rossi", "portao dz",
       "revestimento ripado", "autocolante", "alicate aplicador", "botao de pressao",
       "varal", "lixeira", "torneira", "banheiro", "cozinha", "organizador",
       "caixa organizadora", "escorredor", "misturador monocomando", "rede de dormir", "utensilios churrasco", "conjunto churrasco",
       "pote de vidro", "potes de vidro", "pote plastico", "pote hermetico", "porta escova banheiro", "organizador cozinha", "organizador banheiro", "jogo de cama", "roupa de cama", "cuba banheiro", "louca banheiro", "fechadura digital", "fechadura eletronica",
       "jogo de toalha", "toalhas banho", "molde ajustavel", "molde ajustavel para bolo",
       "mala polipropileno", "utensilio cozinha", "conjunto bistro", "bistro", "varanda", "sacada", "area gourmet", "arara para roupas", "arara de roupas", "arara roupas",
+      "ducha higienica",
     ],
     negativas: [
       "tapete higienico", "tapete higienico pet", "pet", "gato", "cachorro"
@@ -499,14 +504,16 @@ const REGRAS = [
       "luminaria", "lustre", "pendente led", "refletor", "refletor led",
       "lampada", "painel led", "plafon", "spot led", "fita led",
       "tomada", "interruptor", "disjuntor", "sensor de presenca",
-      "fio eletrico", "cabo eletrico"
+      "fio eletrico", "cabo eletrico", "chuveiro eletrico",
+      "chuveiro eletronico", "ducha eletrica", "ducha eletronica",
+      "maxi ducha"
     ],
     palavras: [
       "arandela", "trilho eletrificado", "perfil led", "fonte led",
       "driver led", "mangueira led", "pisca pisca", "luminaria solar",
       "painel solar", "fotocelula", "quadro distribuicao", "contator",
       "rele", "campainha", "canaleta eletrica", "adaptador tomada",
-      "regua energia"
+      "regua energia", "lorenzetti"
     ]
   }),
 

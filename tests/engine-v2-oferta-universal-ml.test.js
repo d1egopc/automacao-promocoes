@@ -121,6 +121,64 @@ function ofertaMlAdapter(extras = {}) {
   };
 }
 
+function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, precoAntigo = 199, cupom = "PROMO50", linkProduto = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v", linkResgate = "https://cupom.exemplo/resgate" } = {}) {
+  return {
+    versao: 1,
+    origem: { clienteId: "workspace_ml", tipo: "whatsapp" },
+    texto: { original: textoOriginal || `${tituloCapturado}\nPor R$ ${preco}\nCupom ${cupom}\n${linkProduto}` },
+    produto: { tituloCapturado },
+    preco: {
+      atualCapturado: preco,
+      anteriorCapturado: precoAntigo,
+      confianca: "alta",
+      condicionado: false,
+      condicaoTexto: null,
+      tipoCapturado: "final",
+      evidenciaCapturada: `Por R$ ${preco}`,
+      marcadorComercial: "por"
+    },
+    cupom: {
+      codigoCapturado: cupom,
+      textoCapturado: `Cupom ${cupom}`,
+      condicaoCapturada: `Use ${cupom}`,
+      confianca: "alta"
+    },
+    links: {
+      encontrados: [linkProduto, linkResgate].filter(Boolean),
+      produtoOriginal: linkProduto,
+      resgateCupom: linkResgate,
+      adicionais: [],
+      quantidadeEncontrada: linkResgate ? 2 : 1
+    },
+    comercial: {
+      precoAtual: { valor: preco, confianca: "alta", evidencia: `Por R$ ${preco}`, tipo: "final" },
+      precoAntigo: { valor: precoAntigo, confianca: "media", evidencia: `De R$ ${precoAntigo}` },
+      precoPix: { valor: null, confianca: "ausente", evidencia: null },
+      precoBoleto: { valor: null, confianca: "ausente", evidencia: null },
+      precoCartao: { valor: null, confianca: "ausente", evidencia: null },
+      parcelamento: { quantidade: null, valorParcela: null, semJuros: false, confianca: "ausente" },
+      descontoPercentual: { valor: null, confianca: "ausente", evidencia: null },
+      cupom: { codigo: cupom, texto: `Cupom ${cupom}`, instrucao: `Use ${cupom}`, confianca: "alta", provavel: false },
+      cashback: { valor: null, confianca: "ausente", evidencia: null },
+      freteGratis: { valor: false, confianca: "ausente", evidencia: null },
+      moedasShopee: { valor: null, confianca: "ausente", evidencia: null },
+      brindes: [],
+      condicoesEspeciais: [],
+      links: {
+        produto: linkProduto,
+        resgate: linkResgate,
+        classificados: [
+          { link: linkProduto, tipo: "produto" },
+          ...(linkResgate ? [{ link: linkResgate, tipo: "resgate" }] : [])
+        ]
+      },
+      marketplace: { valor: "mercadolivre", confianca: "alta", evidencia: "mercadolivre" },
+      categoria: { valor: "Diversos", confianca: "baixa", evidencia: "" }
+    },
+    comparacaoImportador: {}
+  };
+}
+
 (async () => {
   {
     const {
@@ -485,6 +543,192 @@ function ofertaMlAdapter(extras = {}) {
   assert(possuiLog(logsGravacao, "[OFERTA-UNIVERSAL-VALIDADA]"));
   assert(possuiLog(logsGravacao, "[ENGINE-V2-INTELIGENCIA-APLICADA]"));
   assert(possuiLog(logsGravacao, "[ENGINE-V2-AFILIACAO-CONCLUIDA]"));
+
+  {
+    metadataInserida = null;
+    metadataPersistida = null;
+    const ofertaEntradaBloqueada = ofertaMlAdapter({
+      titulo: "windows",
+      nome: "windows",
+      preco: 199,
+      precoAtual: 199,
+      precoOriginal: 249,
+      categoria: "Mercado Livre",
+      cupom: "",
+      imagem: "https://http2.mlstatic.com/D_NQ_NP_FURADEIRA-MLB.jpg",
+      linkOriginal: "https://meli.la/furadeira",
+      linkExpandido: "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v",
+      linkAfiliado: "https://meli.la/afiliado-furadeira",
+      metadata: {
+        adapter: "mercadolivre",
+        produto: { produtoId: "MLB777777" },
+        radarMirror: radarMirrorMlFactual({
+          tituloCapturado: "Furadeira E Parafusadeira De Impacto 2 Baterias 2000mah 21v",
+          preco: 149,
+          precoAntigo: 199,
+          cupom: "PROMO50"
+        })
+      }
+    });
+
+    const { retorno: gravacaoAntiDiversos } = await capturarLogs(() => importerService.gravarOfertaEngine(
+      { id: 321, evento_id: 221, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+      {
+        id: 221,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "Furadeira E Parafusadeira De Impacto 2 Baterias 2000mah 21v\nPor R$ 149\nCupom PROMO50\nhttps://meli.la/furadeira"
+      },
+      {
+        id: 421,
+        url_original: "https://meli.la/furadeira",
+        url_expandida: "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v",
+        marketplace_detectado: "mercadolivre"
+      },
+      ofertaEntradaBloqueada
+    ));
+
+    assert.strictEqual(gravacaoAntiDiversos.ok, true);
+    assert.strictEqual(gravacaoAntiDiversos.oferta.categoria, "Ferramentas");
+    assert.strictEqual(gravacaoAntiDiversos.oferta.tituloFactual, "Furadeira E Parafusadeira De Impacto 2 Baterias 2000mah 21v");
+    assert.strictEqual(gravacaoAntiDiversos.oferta.preco, 149);
+    assert.strictEqual(gravacaoAntiDiversos.oferta.cupom, "PROMO50");
+    assert.strictEqual(gravacaoAntiDiversos.oferta.linkAfiliado, "https://meli.la/afiliado-furadeira");
+    assert.strictEqual(gravacaoAntiDiversos.oferta.imagem, "https://http2.mlstatic.com/D_NQ_NP_FURADEIRA-MLB.jpg");
+    assert.strictEqual(metadataPersistida.autoridadeFactual.tituloOrigem, "oferta.titulo");
+    assert.strictEqual(metadataPersistida.autoridadeFactual.categoriaFinal, "Ferramentas");
+    assert.strictEqual(metadataPersistida.ofertaUniversal.produto.categoriaNormalizada, "Ferramentas");
+    assert.strictEqual(metadataPersistida.ofertaUniversal.comercial.precoAtual, 149);
+    assert.strictEqual(metadataPersistida.ofertaUniversal.comercial.cupom, "PROMO50");
+  }
+
+  {
+    metadataInserida = null;
+    metadataPersistida = null;
+    const ofertaComSlogan = ofertaMlAdapter({
+      titulo: "ROUPA QUE JA SAI SECA E LUXO",
+      nome: "ROUPA QUE JA SAI SECA E LUXO",
+      preco: 199,
+      precoAtual: 199,
+      categoria: "Diversos",
+      cupom: "",
+      imagem: "https://http2.mlstatic.com/D_NQ_NP_LAVA-MLB.jpg",
+      linkOriginal: "https://meli.la/lava-seca",
+      linkExpandido: "https://produto.mercadolivre.com.br/MLB-888888-lava-e-seca-philco-10kg",
+      linkAfiliado: "https://meli.la/afiliado-lava-seca",
+      metadata: {
+        adapter: "mercadolivre",
+        produto: {
+          produtoId: "MLB888888",
+          titulo: "Lava e Seca Philco 10kg"
+        },
+        radarMirror: radarMirrorMlFactual({
+          tituloCapturado: "ROUPA QUE JA SAI SECA E LUXO",
+          textoOriginal: "ROUPA QUE JA SAI SECA E LUXO\nLava e Seca Philco 10kg\nPor R$ 149\nCupom PROMO50\nhttps://meli.la/lava-seca",
+          preco: 149,
+          precoAntigo: 199,
+          cupom: "PROMO50",
+          linkProduto: "https://produto.mercadolivre.com.br/MLB-888888-lava-e-seca-philco-10kg"
+        })
+      }
+    });
+
+    const { retorno: gravacaoSlogan } = await capturarLogs(() => importerService.gravarOfertaEngine(
+      { id: 322, evento_id: 222, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+      {
+        id: 222,
+        origem: "radar",
+        origem_tipo: "whatsapp",
+        grupo_id: "grupo@g.us",
+        texto_original: "ROUPA QUE JA SAI SECA E LUXO\nLava e Seca Philco 10kg\nPor R$ 149\nCupom PROMO50\nhttps://meli.la/lava-seca"
+      },
+      {
+        id: 422,
+        url_original: "https://meli.la/lava-seca",
+        url_expandida: "https://produto.mercadolivre.com.br/MLB-888888-lava-e-seca-philco-10kg",
+        marketplace_detectado: "mercadolivre"
+      },
+      ofertaComSlogan
+    ));
+
+    assert.strictEqual(gravacaoSlogan.ok, true);
+    assert.strictEqual(gravacaoSlogan.oferta.titulo, "ROUPA QUE JA SAI SECA E LUXO");
+    assert.strictEqual(gravacaoSlogan.oferta.tituloFactual, "Lava e Seca Philco 10kg");
+    assert.strictEqual(gravacaoSlogan.oferta.categoria, "Eletrodomésticos");
+    assert.strictEqual(gravacaoSlogan.oferta.preco, 149);
+    assert.strictEqual(gravacaoSlogan.oferta.cupom, "PROMO50");
+    assert.strictEqual(gravacaoSlogan.oferta.linkOriginal, "https://meli.la/lava-seca");
+    assert.strictEqual(gravacaoSlogan.oferta.linkAfiliado, "https://meli.la/afiliado-lava-seca");
+    assert.strictEqual(gravacaoSlogan.oferta.imagem, "https://http2.mlstatic.com/D_NQ_NP_LAVA-MLB.jpg");
+    assert.strictEqual(metadataPersistida.precedenciaComercial.textoComercialOriginal.includes("ROUPA QUE JA SAI SECA E LUXO"), true);
+    assert.strictEqual(metadataPersistida.autoridadeFactual.tituloOrigem, "metadata.produto.titulo");
+    assert.strictEqual(metadataPersistida.autoridadeFactual.categoriaFinal, "Eletrodomésticos");
+  }
+
+  {
+    const preservada = importerService.reclassificarCategoriaFinalEngine({
+      marketplace: "mercadolivre",
+      titulo: "windows",
+      tituloFactual: "Furadeira e Parafusadeira 21v",
+      categoria: "Ferramentas"
+    }, {}, { marketplace: "mercadolivre" });
+    assert.strictEqual(preservada.reclassificada, false);
+    assert.strictEqual(preservada.motivo, "categoria_especifica_preservada");
+    assert.strictEqual(preservada.oferta.categoria, "Ferramentas");
+  }
+
+  {
+    const ofertaSlug = {
+      marketplace: "mercadolivre",
+      titulo: "windows",
+      nome: "windows",
+      categoria: "Diversos",
+      preco: 199,
+      cupom: "PROMO50",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v?utm_source=teste&utm_campaign=campanha",
+      linkAfiliado: "https://meli.la/afiliado-furadeira",
+      imagem: "https://http2.mlstatic.com/D_NQ_NP_FURADEIRA-MLB.jpg"
+    };
+    const porSlug = importerService.reclassificarCategoriaFinalEngine(ofertaSlug, {}, { marketplace: "mercadolivre" });
+
+    assert.strictEqual(porSlug.reclassificada, true);
+    assert.strictEqual(porSlug.motivo, "titulo_factual");
+    assert.strictEqual(porSlug.oferta.tituloFactual, "furadeira parafusadeira impacto 21v");
+    assert.strictEqual(porSlug.tituloFactualOrigem, "slug_link_produto");
+    assert.strictEqual(porSlug.oferta.categoria, "Ferramentas");
+    assert.strictEqual(porSlug.oferta.tituloFactual.includes("utm"), false);
+    assert.strictEqual(porSlug.oferta.tituloFactual.includes("MLB"), false);
+    assert.strictEqual(porSlug.oferta.preco, ofertaSlug.preco);
+    assert.strictEqual(porSlug.oferta.cupom, ofertaSlug.cupom);
+    assert.strictEqual(porSlug.oferta.linkOriginal, ofertaSlug.linkOriginal);
+    assert.strictEqual(porSlug.oferta.linkAfiliado, ofertaSlug.linkAfiliado);
+    assert.strictEqual(porSlug.oferta.imagem, ofertaSlug.imagem);
+  }
+
+  {
+    const slugInsuficiente = importerService.reclassificarCategoriaFinalEngine({
+      marketplace: "mercadolivre",
+      titulo: "windows",
+      nome: "windows",
+      categoria: "Diversos",
+      preco: 199,
+      cupom: "PROMO50",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-999999-produto-mercadolivre?utm_source=teste",
+      linkAfiliado: "https://meli.la/afiliado-generico",
+      imagem: "https://http2.mlstatic.com/D_NQ_NP_GENERICO-MLB.jpg"
+    }, {}, { marketplace: "mercadolivre" });
+
+    assert.strictEqual(slugInsuficiente.reclassificada, false);
+    assert.strictEqual(slugInsuficiente.motivo, "titulo_generico_indisponivel");
+    assert.strictEqual(slugInsuficiente.oferta.categoria, "Diversos");
+    assert.strictEqual(slugInsuficiente.oferta.tituloFactual, undefined);
+    assert.strictEqual(slugInsuficiente.oferta.preco, 199);
+    assert.strictEqual(slugInsuficiente.oferta.cupom, "PROMO50");
+    assert.strictEqual(slugInsuficiente.oferta.linkOriginal, "https://produto.mercadolivre.com.br/MLB-999999-produto-mercadolivre?utm_source=teste");
+    assert.strictEqual(slugInsuficiente.oferta.linkAfiliado, "https://meli.la/afiliado-generico");
+    assert.strictEqual(slugInsuficiente.oferta.imagem, "https://http2.mlstatic.com/D_NQ_NP_GENERICO-MLB.jpg");
+  }
 
   {
     const { retorno: gravacaoComImagem, chamadas } = await comFetchMock([], () => importerService.gravarOfertaEngine(

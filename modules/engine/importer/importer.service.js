@@ -144,7 +144,99 @@ function tituloGenericoMarketplaceEngine(titulo = "", marketplace = "") {
   if (chaveMarketplace === "aliexpress") {
     return ["produtoaliexpress", "ofertaaliexpress", "aliexpress"].includes(chaveTitulo);
   }
+  if (chaveMarketplace === "mercadolivre") {
+    return [
+      "produtomercadolivre",
+      "mercadolivre",
+      "windows",
+      "justamoment",
+      "attentionrequired",
+      "accessdenied",
+      "verificacao",
+      "verifiquesevoceeumrobo"
+    ].includes(chaveTitulo);
+  }
   return false;
+}
+
+function tituloPareceSloganComercialEngine(titulo = "") {
+  const texto = normalizarTitulo(titulo);
+  if (!texto) return true;
+
+  const contemProduto = /\b(?:air\s*fryer|airfryer|aspirador|furadeira|parafusadeira|ducha|chuveiro|lavadora|lava\s*e\s*seca|secadora|camisa|camiseta|polo|short|tenis|chinelo|smartphone|notebook|monitor|perfume|whey|creatina|pneu|colchao|cama\s*box)\b/.test(texto);
+  if (contemProduto) return false;
+  if (/^(?:corre|olha|confere|cupom|promocao|promo|oferta|desconto)\b/.test(texto)) return true;
+  if (/\b(?:ta barato|esta barato|baratinho|imperdivel|luxo|so por|sai por)\b/.test(texto)) return true;
+
+  const original = normalizarTexto(titulo);
+  const letras = original.replace(/[^\p{L}]/gu, "");
+  const maiusculas = letras && letras === letras.toUpperCase() && letras.length >= 12;
+  if (maiusculas && !/\d/.test(original) && texto.split(/\s+/).length >= 4) return true;
+
+  return false;
+}
+
+function tituloFactualConfiavelEngine(titulo = "", marketplace = "") {
+  const tituloLimpo = normalizarTexto(titulo);
+  if (!tituloLimpo) return false;
+  if (tituloGenericoMarketplaceEngine(tituloLimpo, marketplace)) return false;
+  if (tituloPareceSloganComercialEngine(tituloLimpo)) return false;
+  return true;
+}
+
+function tituloFactualDoSlugMercadoLivreEngine(...urls) {
+  for (const url of urls) {
+    const valor = normalizarTexto(url);
+    if (!valor) continue;
+    try {
+      const parsed = new URL(valor);
+      const host = parsed.hostname.toLowerCase();
+      if (!host.includes("mercadolivre.com")) continue;
+      const segmentos = parsed.pathname.split("/").map(item => item.trim()).filter(Boolean);
+      for (const segmento of segmentos) {
+        if (/^p$/i.test(segmento) || /^MLB\d+$/i.test(segmento)) continue;
+        const titulo = normalizarTexto(
+          decodeURIComponent(segmento)
+            .replace(/^MLB-?\d+-?/i, "")
+            .replace(/-/g, " ")
+        );
+        if (titulo.split(/\s+/).length >= 3 && tituloFactualConfiavelEngine(titulo, "mercadolivre")) {
+          return titulo;
+        }
+      }
+    } catch (_) {
+      continue;
+    }
+  }
+  return "";
+}
+
+function resolverTituloFactualEngine(oferta = {}, metadataFinal = {}, job = {}) {
+  const marketplace = normalizarTexto(oferta.marketplace || job.marketplace || job.marketplace_detectado || "");
+  const metadata = objetoSeguro(metadataFinal);
+  const produto = objetoSeguro(metadata.produto || oferta.metadata?.produto);
+  const precedencia = objetoSeguro(metadata.precedenciaComercial);
+  const candidatos = [
+    ["metadata.produto.titulo", produto.titulo || produto.nome || produto.name || produto.title],
+    ["metadata.produto.tituloOriginal", produto.tituloOriginal || produto.tituloFactual],
+    ["oferta.titulo", oferta.titulo || oferta.nome],
+    ["oferta.tituloFactual", oferta.tituloFactual],
+    ["slug_link_produto", tituloFactualDoSlugMercadoLivreEngine(
+      oferta.linkExpandido,
+      oferta.linkOriginal,
+      oferta.linkProdutoOriginal,
+      precedencia.linkProdutoOriginal
+    )]
+  ];
+
+  for (const [origem, valor] of candidatos) {
+    const titulo = normalizarTexto(valor || "");
+    if (tituloFactualConfiavelEngine(titulo, marketplace)) {
+      return { titulo, origem };
+    }
+  }
+
+  return { titulo: "", origem: "indisponivel" };
 }
 
 function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job = {}) {
@@ -156,7 +248,7 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
     .replace(/[^a-z0-9]+/g, "")
     .trim();
 
-  if (marketplaceChave !== "aliexpress") {
+  if (!["aliexpress", "mercadolivre"].includes(marketplaceChave)) {
     return { oferta, metadataFinal, reclassificada: false, motivo: "marketplace_nao_alvo" };
   }
 
@@ -165,17 +257,21 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
     return { oferta, metadataFinal, reclassificada: false, motivo: "categoria_especifica_preservada" };
   }
 
-  const titulo = normalizarTexto(oferta.titulo || oferta.nome || "");
-  if (tituloGenericoMarketplaceEngine(titulo, marketplaceChave)) {
-    return { oferta, metadataFinal, reclassificada: false, motivo: "titulo_generico_indisponivel" };
+  const tituloFactual = resolverTituloFactualEngine(oferta, metadataFinal, job);
+  if (!tituloFactual.titulo) {
+    const tituloBase = normalizarTexto(oferta.titulo || oferta.nome || "");
+    const motivo = tituloGenericoMarketplaceEngine(tituloBase, marketplaceChave)
+      ? "titulo_generico_indisponivel"
+      : "titulo_factual_indisponivel";
+    return { oferta, metadataFinal, reclassificada: false, motivo };
   }
 
   const categoriaFinal = classificarCategoriaOferta({
-    titulo,
-    nome: titulo,
+    titulo: tituloFactual.titulo,
+    nome: tituloFactual.titulo,
     marketplace,
     categoria: ""
-  }, titulo);
+  }, tituloFactual.titulo);
 
   if (!categoriaFinal || categoriaGenericaEngine(categoriaFinal)) {
     return { oferta, metadataFinal, reclassificada: false, motivo: "classificador_sem_categoria_confiavel" };
@@ -185,9 +281,16 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
   const comparativo = objetoSeguro(inteligencia.comparativo);
 
   return {
-    oferta: { ...oferta, categoria: categoriaFinal },
+    oferta: { ...oferta, categoria: categoriaFinal, tituloFactual: tituloFactual.titulo },
     metadataFinal: {
       ...metadataFinal,
+      autoridadeFactual: {
+        ...objetoSeguro(metadataFinal.autoridadeFactual),
+        titulo: tituloFactual.titulo,
+        tituloOrigem: tituloFactual.origem,
+        categoriaAnterior,
+        categoriaFinal
+      },
       inteligenciaUniversalV2: {
         ...inteligencia,
         categoria: categoriaFinal,
@@ -198,9 +301,10 @@ function reclassificarCategoriaFinalEngine(oferta = {}, metadataFinal = {}, job 
       }
     },
     reclassificada: true,
-    motivo: "titulo_final_radar",
+    motivo: "titulo_factual",
     categoriaAnterior,
-    categoriaFinal
+    categoriaFinal,
+    tituloFactualOrigem: tituloFactual.origem
   };
 }
 function normalizarTitulo(titulo = "") {
@@ -561,11 +665,20 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
   const tituloImportado = normalizarTexto(resultado.titulo || resultado.nome || "");
   const marketplaceTitulo = normalizarTexto(resultado.marketplace || job.marketplace || job.marketplace_detectado);
   const tituloSeguro = tituloComercialUniversalValido(tituloImportado, { marketplace: marketplaceTitulo }) ? tituloImportado : "";
+  const tituloFactual = resolverTituloFactualEngine({
+    ...resultado,
+    titulo: tituloSeguro,
+    nome: tituloSeguro,
+    marketplace: marketplaceTitulo,
+    linkOriginal: resultado.linkOriginal || "",
+    linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
+  }, resultado.metadata || {}, job);
 
   return {
     ok: resultado.ok !== false,
     marketplace: marketplaceTitulo,
     titulo: tituloSeguro,
+    tituloFactual: tituloFactual.titulo,
     tituloNormalizado: normalizarTitulo(tituloSeguro),
     preco: normalizarNumero(resultado.preco || resultado.precoAtual || produtoMetadata.precoAtual || produtoMetadata.preco),
     precoOriginal: normalizarNumero(resultado.precoOriginal || resultado.precoAntigo || produtoMetadata.precoOriginal || produtoMetadata.precoAntigo),
@@ -3735,6 +3848,8 @@ module.exports = {
   avaliarGateIdentidadeMercadoLivre,
   resolverCategoriaEngine,
   reclassificarCategoriaFinalEngine,
+  resolverTituloFactualEngine,
+  tituloFactualConfiavelEngine,
   buscarImagemCanonicaMercadoLivre,
   buscarImagemOficialMercadoLivrePorMlb,
   extrairImagemOficialMercadoLivreApi,

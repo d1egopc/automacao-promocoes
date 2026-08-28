@@ -48,6 +48,8 @@ assertCategoria("Air Cooler DeepCool AG400", "Gamer e Hardware");
 assertCategoria("Airfryer WAP 4,5L", "Eletroportáteis", {
   categoria: "Casa, Móveis e Decoração"
 });
+assertCategoria("Aspirador de Pó e Água Wap GTW Inox 12 1400W com Bocal de Sopro", "Eletroportáteis");
+assertCategoria("Air Fryer Philco 6,5L Visor Glass e Redstone 1700W - 127v", "Eletroportáteis");
 assertCategoria("SSD Kootion 1TB NVMe", "Gamer e Hardware");
 assertCategoria("Memoria RAM JUHOR DDR4 8GB 3200MHz", "Gamer e Hardware");
 assertCategoria("Memoria RAM Gudga DDR4 8GB 3200MHz", "Gamer e Hardware");
@@ -77,6 +79,7 @@ assertCategoria("Chinelo Puma", "Tênis e Chinelos");
 assertCategoria("chuteira Puma masculina", "Tênis e Chinelos");
 assertCategoria("chinelo Nike masculino", "Tênis e Chinelos");
 assertCategoria("kit tênis + camiseta", "Tênis e Chinelos");
+assertCategoria("Kit 2 Camisetas Masculinas Dry Wolf Alpha", "Roupas e Moda Masculina");
 
 assertCategoriaEm("Teclado AULA HERO 68HE magnetico", ["Periféricos", "Gamer e Hardware"]);
 assertCategoriaEm("Mouse ATK A9 Air Ultimate", ["Periféricos", "Games e Console"]);
@@ -113,8 +116,15 @@ assertCategoria("cama box queen", "Casa, Móveis e Decoração");
 assertCategoria("colchão casal", "Casa, Móveis e Decoração");
 assertCategoria("conjunto bistrô varanda sacada área gourmet", "Casa, Móveis e Decoração");
 assertCategoria("arara para roupas", "Casa, Móveis e Decoração");
+assertCategoria("Lorenzetti Maxi Ducha Ultra Branco 127v", "Iluminação e Elétrica");
+assertCategoria("Chuveiro Eletrônico Lorenzetti Acqua Duo Ultra", "Iluminação e Elétrica");
+assertCategoria("Ducha Higiênica 1/4 Volta 304 Inox", "Casa, Móveis e Decoração");
+assertCategoria("Kit Motor Rossi Portão Dz Nano Turbo 600kg", "Casa, Móveis e Decoração");
+assertCategoria("Conjunto Sala de Jantar Mesa 4 Cadeiras", "Casa, Móveis e Decoração");
+assertCategoria("Maquina Assentar Pisos Porcelanatos Ceramicas", "Ferramentas");
 
 assertCategoria("Cupom IFPC5HAQ ou BRGM1 moedas no APP abra o produto no link", "Diversos");
+assertCategoria("Kit 2 Camisetas Dry Wolf Alpha", "Diversos");
 
 {
   const resultado = classificarCategoriaUniversal({
