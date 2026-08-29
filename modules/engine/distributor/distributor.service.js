@@ -1086,7 +1086,7 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   });
 
   if (typeof deps.adicionarOfertaNaFilaGlobal === "function") {
-    const resultadoMemoria = deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila);
+    const resultadoMemoria = await deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila);
 
     if (resultadoMemoria?.duplicada) {
       console.log("[ENGINE-DISTRIBUIDOR-FILA-DUPLICADA]", {

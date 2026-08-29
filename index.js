@@ -893,6 +893,7 @@ let ultimoLogFilaStoreMetrics = 0;
 let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
 const mutacaoFilaPorCliente = new Set();
+const mutacaoFilaAsyncPorCliente = new Map();
 let controleEnvio = {}; // por cliente
 let controleIntervaloEnvioPorCliente = {};
 let historicoOfertas = {};
@@ -2318,6 +2319,51 @@ function executarMutacaoFilaCliente(clienteId = "admin", fluxo = "fila", mutacao
   }
 }
 
+async function executarMutacaoFilaClienteAsync(clienteId = "admin", fluxo = "fila", mutacao = () => null) {
+  const cliente = String(clienteId || "admin");
+  const inicio = Date.now();
+  const anterior = mutacaoFilaAsyncPorCliente.get(cliente) || Promise.resolve();
+  const sobreposta = mutacaoFilaPorCliente.has(cliente) || mutacaoFilaAsyncPorCliente.has(cliente);
+  let liberarAtual = () => {};
+  const bloqueioAtual = new Promise(resolve => {
+    liberarAtual = resolve;
+  });
+  const cadeiaAtual = anterior.catch(() => {}).then(() => bloqueioAtual);
+  mutacaoFilaAsyncPorCliente.set(cliente, cadeiaAtual);
+
+  if (sobreposta) {
+    console.log("[FILA-MUTACAO-SERIALIZADA]", JSON.stringify({
+      clienteId: cliente,
+      fluxo,
+      motivo: "mutacao_async_reentrante",
+      timestamp: new Date().toISOString()
+    }));
+  }
+
+  await anterior.catch(() => {});
+  mutacaoFilaPorCliente.add(cliente);
+
+  try {
+    return await mutacao();
+  } finally {
+    mutacaoFilaPorCliente.delete(cliente);
+    liberarAtual();
+    if (mutacaoFilaAsyncPorCliente.get(cliente) === cadeiaAtual) {
+      mutacaoFilaAsyncPorCliente.delete(cliente);
+    }
+    const duracaoMs = Date.now() - inicio;
+    if (sobreposta || duracaoMs > 100) {
+      console.log("[FILA-MUTACAO-SERIALIZADA]", JSON.stringify({
+        clienteId: cliente,
+        fluxo,
+        duracaoMs,
+        async: true,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  }
+}
+
 const ultimoErroSalvarFilaPorCliente = new Map();
 
 function classificarErroFila(mensagem = "") {
@@ -2510,7 +2556,7 @@ function registrarManifestoVivaAposMutacao(clienteId = "admin", resultado = {}, 
   });
 }
 
-function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "mutacao_legado", opcoes = {}) {
+async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "mutacao_legado", opcoes = {}) {
   const cliente = String(clienteId || item?.clienteId || "admin");
   if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
     return { ok: true, pulou: true, motivo: "v2_desabilitada" };
@@ -2518,43 +2564,33 @@ function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}, moti
   const itemSincronizado = Number.isInteger(Number(opcoes.posicaoLegada))
     ? { ...item, posicaoLegada: Number(opcoes.posicaoLegada) }
     : item;
-  const resultado = filaOperacionalV2.atualizarItemFilaVivaIncremental(cliente, itemSincronizado, {
+  const resultado = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, itemSincronizado, {
     agora: Date.now(),
     logger: console,
     permitirRegressaoStatus: opcoes.permitirRegressaoStatus === true,
-    logSucesso: opcoes.logSucesso === true
+    logSucesso: opcoes.logSucesso === true,
+    motivo
   });
   registrarMetricasFilaV22C(cliente, {
     vivaStatusUpdateCount: resultado.atualizouViva ? 1 : 0,
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
-  if (resultado.atualizouViva || resultado.removeuDaViva) {
-    registrarManifestoVivaAposMutacao(cliente, resultado, motivo, {
-      incrementarSemGeneration: true,
-      checkpointSincronizado: true
-    });
-  }
   return { ...resultado, motivoSync: motivo, item: itemSincronizado };
 }
 
-function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado") {
+async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado") {
   const cliente = String(clienteId || item?.clienteId || "admin");
   if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
     return { ok: true, pulou: true, motivo: "v2_desabilitada" };
   }
-  const resultado = filaOperacionalV2.removerItemFilaVivaIncremental(cliente, item, {
+  const resultado = await filaOperacionalV2.removerItemFilaVivaCoordenado(cliente, item, {
     agora: Date.now(),
-    logger: console
+    logger: console,
+    motivo
   });
   registrarMetricasFilaV22C(cliente, {
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
-  if (resultado.removeuDaViva) {
-    registrarManifestoVivaAposMutacao(cliente, resultado, motivo, {
-      incrementarSemGeneration: true,
-      checkpointSincronizado: true
-    });
-  }
   return { ...resultado, motivoSync: motivo };
 }
 
@@ -2666,7 +2702,7 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
   });
 }
 
-function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
+async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const agora = Date.now();
   const decisao = checkpointFilaV2.iniciarCheckpoint(cliente, {
@@ -2693,17 +2729,30 @@ function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", op
   const mergeAntesCheckpoint = aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
     recovery: false
   });
-  const manifestoAntesCheckpoint = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+  const targetDb = await filaOperacionalV2.capturarTargetCheckpointCoordenado(cliente, {
+    motivo: decisao.motivo || motivo
+  }, {
     agora,
     logger: console
   });
-  const vivaGenerationAlvoCheckpoint = manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
-  const salvou = salvarFila(cliente, { motivo: `fila_v2_2c_${decisao.motivo || motivo}` });
+  const manifestoAntesCheckpoint = targetDb.ok === true
+    ? { manifesto: { vivaGeneration: targetDb.targetGeneration || 0 } }
+    : filaOperacionalV2.lerManifestoFilaV2(cliente, {
+        agora,
+        logger: console
+      });
+  const vivaGenerationAlvoCheckpoint = targetDb.ok === true
+    ? targetDb.targetGeneration || 0
+    : manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
+  const salvou = salvarFila(cliente, {
+    motivo: `fila_v2_2c_${decisao.motivo || motivo}`,
+    prepararV2: false
+  });
   const duracaoMs = Date.now() - inicio;
   const bytesCheckpoint = tamanhoArquivoSeguro(getFilaFile(cliente));
 
   if (salvou) {
-    filaOperacionalV2.registrarManifestoCheckpointObservacional(cliente, {
+    const checkpointDuravel = await filaOperacionalV2.confirmarCheckpointCoordenado(cliente, {
       targetGeneration: vivaGenerationAlvoCheckpoint,
       motivo: decisao.motivo || motivo
     }, {
@@ -2725,6 +2774,8 @@ function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", op
       checkpointCount: estado.checkpoints,
       checkpointMutations: decisao.mutacoesCapturadas || decisao.estado?.mutacoes || 0,
       checkpointGeneration: decisao.generationInicial || 0,
+      durableCheckpointGeneration: checkpointDuravel?.dbState?.durableCheckpointGeneration || 0,
+      dbCheckpointOk: checkpointDuravel?.ok === true,
       checkpointConcurrentSkip: estado.checkpointConcurrentSkip || 0,
       dirtyAposCheckpoint: estado.dirty,
       mergeAntesCheckpoint: mergeAntesCheckpoint?.merge ? {
@@ -2760,16 +2811,16 @@ function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", op
   return { ok: false, motivo: erroSalvarFilaCliente(cliente).motivo, estado: estadoFalha, checkpointLegadoMs: duracaoMs };
 }
 
-function executarCheckpointsFilaV22CVencidos(motivo = "ciclo") {
+async function executarCheckpointsFilaV22CVencidos(motivo = "ciclo") {
   const agora = Date.now();
   const pendentes = checkpointFilaV2.pendentes(agora);
   for (const estado of pendentes) {
-    checkpointLegadoFilaV22C(estado.clienteId, motivo);
+    await checkpointLegadoFilaV22C(estado.clienteId, motivo);
   }
 }
 
 process.once("beforeExit", () => {
-  executarCheckpointsFilaV22CVencidos("shutdown");
+  void executarCheckpointsFilaV22CVencidos("shutdown");
 });
 
 function carregarFila(clienteId = "admin") {
@@ -2891,7 +2942,7 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
   });
 }
 
-function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
+async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
   const medidorFilaGlobal = criarMedidorEngineMemoryStage("engine_v2_fila_global", {
     ofertaId: itemFila.engineOfertaId || itemFila.ofertaId || null,
     marketplace: itemFila.marketplace || itemFila.origemMarketplace || ""
@@ -2941,7 +2992,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
     }
 
     if (usarFilaV2HotPath) {
-      return executarMutacaoFilaCliente(cliente, "fila_v2_2c_insert", () => {
+      return executarMutacaoFilaClienteAsync(cliente, "fila_v2_2c_insert", async () => {
         const filaValidacao = [];
         const itemValidacao = { ...itemFinal };
         const validado = filaOfertas.adicionarOfertaFila(filaValidacao, itemValidacao, {
@@ -2968,10 +3019,11 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
           return { ok: false, motivo, itemFila: itemPersistente };
         }
 
-        const persistenciaViva = filaOperacionalV2.inserirItemFilaVivaIncremental(cliente, itemPersistente, {
+        const persistenciaViva = await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, itemPersistente, {
           posicaoLegada: fila.length,
           agora: Date.now(),
-          logger: console
+          logger: console,
+          motivo: "insert_viva"
         });
 
         if (!persistenciaViva.ok) {
@@ -3038,11 +3090,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
           filaStoreIncrementalFallbackCount: updateIncremental.filaStoreIncrementalFallbackCount || 0
         });
         const dirty = checkpointFilaV2.marcarDirty(cliente, "insert_viva", Date.now());
-        registrarManifestoVivaAposMutacao(cliente, persistenciaViva, "insert_viva", {
-          generation: dirty.generation,
-          dirtyGeneration: dirty.generation
-        });
-        const checkpoint = checkpointLegadoFilaV22C(cliente, "insert_batch");
+        const checkpoint = await checkpointLegadoFilaV22C(cliente, "insert_batch");
 
         console.log("[ENGINE-DISTRIBUIDOR-FILA-MEMORIA]", {
           clienteId: cliente,
@@ -3110,7 +3158,7 @@ function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
       return { ok: false, motivo: erroFila.motivo, erro: erroFila.erro };
     }
 
-    const canary = filaOperacionalV2.sincronizarCanaryEscrita({
+    const canary = await filaOperacionalV2.sincronizarCanaryEscritaCoordenada({
       clienteId: cliente,
       fila,
       motivo: "engine_distributor_write",
@@ -7726,11 +7774,11 @@ async function processarFila(clienteIdAlvo = null) {
   const marcarFilaAlterada = () => {
     filaAlterada = true;
   };
-  const salvarFilaSeAlterada = (cliente = clienteFila) => {
+  const salvarFilaSeAlterada = async (cliente = clienteFila) => {
     if (!filaAlterada) return false;
     const salvou = salvarFila(cliente);
     if (salvou && oferta) {
-      sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada");
+      await sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada");
     }
     filaAlterada = false;
     return salvou;
@@ -7833,7 +7881,7 @@ if (!usuarioAtivoOperacional(clienteId)) {
 if (oferta.sessaoId === "sessao1") {
   oferta.sessaoId = normalizarSessaoId(clienteId, "sessao1");
   marcarFilaAlterada();
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
 }
 
 const configCliente =
@@ -8091,7 +8139,7 @@ if (!destinosCompativeis.length) {
     rejeitados: analiseDestinosFila.rejeitados?.map(item => item?.analise?.motivo || "").filter(Boolean) || []
   });
   marcarFilaAlterada();
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
     decisao: "retido",
     motivo: "item_retido",
@@ -8145,7 +8193,7 @@ if (!disponibilidadeAntesReserva.ok) {
     filaRecebeu: true,
     statusFilaAntes: oferta.status || "pendente"
   });
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
@@ -8229,7 +8277,7 @@ if (!repeticaoExecutor.ok) {
     motivo: repeticaoExecutor.motivo,
     erro: repeticaoExecutor.erro || ""
   }));
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -8275,7 +8323,7 @@ if (repeticaoExecutor.bloqueada) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -8357,7 +8405,7 @@ if (duplicidadeProcessamento.bloquear) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -8398,7 +8446,7 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
   statusNovo: reservaProcessamento.statusNovo,
   processandoEm: reservaProcessamento.processandoEm
 }));
-salvarFilaSeAlterada(clienteId);
+await salvarFilaSeAlterada(clienteId);
 
 let ofertaComercialConfirmadaVitrine = null;
 const destinosEnviadosTelemetria = [];
@@ -8828,7 +8876,7 @@ if (resumoFanout.aguardando > 0 || (!enviouParaAlgumDestino && decisaoSemEnvio.s
     oferta,
     Math.max(30 * 1000, Math.min(menorEsperaFanout || menorEsperaIntervalo || 5 * 60 * 1000, 15 * 60 * 1000))
   );
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
     decisao: "pendente",
     motivo: motivoCoberturaDestino(motivoAguardandoFanout),
@@ -8900,7 +8948,7 @@ if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0) {
     dentroJanela: dentroJanelaExecutor,
     statusFinal: "erro"
   });
-  salvarFilaSeAlterada(clienteId);
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -8980,7 +9028,7 @@ logExecutorDestinoDiagnostico({
   statusFinal: "enviado"
 });
 
-salvarFilaSeAlterada(clienteId);
+await salvarFilaSeAlterada(clienteId);
 
 console.log("[ENVIO] Enviado com controle de tempo");
 
@@ -9002,7 +9050,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
     if (erroFila.ok) {
       oferta = erroFila.oferta;
       marcarFilaAlterada();
-      salvarFilaSeAlterada(clienteErro);
+      await salvarFilaSeAlterada(clienteErro);
       registrarCoberturaExecutor("executor_erro", oferta, clienteErro, {}, {
         decisao: "erro",
         motivo: "erro",
@@ -10239,7 +10287,7 @@ app.post("/automacao/toggle", (req, res) => {
 });
 
 
-app.delete("/fila/item/:id", auth, (req, res) => {
+app.delete("/fila/item/:id", auth, async (req, res) => {
   const clienteId = getClienteId(req);
   const id = req.params.id;
 
@@ -10257,7 +10305,7 @@ app.delete("/fila/item/:id", auth, (req, res) => {
 
   const removido = fila.splice(index, 1);
   salvarFila(clienteId);
-  removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id");
+  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id");
 
   return res.json({
     ok: true,
@@ -10294,7 +10342,7 @@ app.delete("/fila/limpar", auth, (req, res) => {
   });
 });
 
-app.delete("/fila/:index", auth, (req, res) => {
+app.delete("/fila/:index", auth, async (req, res) => {
   const index = Number(req.params.index);
   const clienteId = getClienteId(req);
   const resolucaoIndice = filaStore.resolverIndiceGlobalLegado(fila, clienteId, index);
@@ -10316,7 +10364,7 @@ app.delete("/fila/:index", auth, (req, res) => {
   filaStore.removerItem(removido[0]);
 
   salvarFila(clienteId);
-  removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice");
+  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice");
 
   logOptimus("FILA", "Oferta removida", {
     clienteId,
@@ -10329,7 +10377,7 @@ app.delete("/fila/:index", auth, (req, res) => {
   });
 });
 
-app.post("/fila/:id/reprocessar", auth, (req, res) => {
+app.post("/fila/:id/reprocessar", auth, async (req, res) => {
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
 
@@ -10353,7 +10401,7 @@ app.post("/fila/:id/reprocessar", auth, (req, res) => {
   oferta.reprocessadaEm = new Date().toISOString();
 
   salvarFila(clienteId);
-  sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
+  await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
     permitirRegressaoStatus: true
   });
 
@@ -10441,7 +10489,7 @@ if (indexReal >= 0) {
     logger: console
   });
   reconstruirFilaStoreCliente(clienteIdReq, "enviar_agora_reordenar");
-  sincronizarItemFilaVivaAposMutacao(clienteIdReq, oferta, "rota_enviar_agora_reordenar", {
+  await sincronizarItemFilaVivaAposMutacao(clienteIdReq, oferta, "rota_enviar_agora_reordenar", {
     permitirRegressaoStatus: true,
     posicaoLegada: 0
   });
@@ -12484,7 +12532,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   if (!analiseDestinos.compativeis.length) {
     marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
     salvarFila(clienteId);
-    sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida");
+    await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida");
 
     logOptimus("FILA", "Enviar Agora reteve oferta", {
       clienteId,
@@ -12601,7 +12649,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
         ? "Aguardando limite diario do destino"
         : "Nenhum destino confirmou envio manual";
     salvarFila(clienteId);
-    sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
+    await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
       permitirRegressaoStatus: true
     });
 
@@ -12629,7 +12677,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   });
 
   salvarFila(clienteId);
-  sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado");
+  await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado");
 
   return {
     ok: true,
@@ -28707,7 +28755,7 @@ async function rodarProcessadorFilaGlobal() {
     okPerf = false;
     throw e;
   } finally {
-    executarCheckpointsFilaV22CVencidos("fila_intervalo");
+    await executarCheckpointsFilaV22CVencidos("fila_intervalo");
     processadorFilaGlobalRodando = false;
     finalizarPerf(okPerf, {
       usuariosDisparados: usuariosAvaliados,

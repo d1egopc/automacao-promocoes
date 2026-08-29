@@ -583,6 +583,100 @@ function executarManifestStateAsync(clienteId = "admin", operacao = "", payload 
   return { ok: true, observacional: true, motivo: "manifest_state_agendado" };
 }
 
+function patchManifestoMutacaoCoordenada(state = {}, nextGeneration = 0, dados = {}, resultadoArquivo = {}, agora = Date.now()) {
+  const checkpointSincronizado = dados.checkpointSincronizado === true;
+  const durableCheckpointGeneration = checkpointSincronizado
+    ? nextGeneration
+    : numeroManifesto(state.durableCheckpointGeneration, 0);
+  return {
+    vivaGeneration: nextGeneration,
+    durableCheckpointGeneration,
+    checkpointGeneration: durableCheckpointGeneration,
+    dirtyGeneration: checkpointSincronizado
+      ? null
+      : (state.dirtyGeneration || durableCheckpointGeneration + 1),
+    itemCount: resultadoArquivo?.totalViva ?? dados.itemCount,
+    lastMutationAt: agoraIso(agora),
+    lastVivaWriteReason: dados.motivo || "mutacao_viva",
+    motivo: dados.motivo || "mutacao_viva",
+    ...(checkpointSincronizado ? {
+      lastCheckpointAt: agoraIso(agora),
+      lastDurableCheckpointAt: agoraIso(agora),
+      lastCheckpointReason: dados.motivo || "mutacao_viva_sincronizada"
+    } : {})
+  };
+}
+
+async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "mutacao", escritor = null, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+  }
+  if (typeof escritor !== "function") {
+    return { ok: false, motivo: "writer_indisponivel" };
+  }
+
+  const repo = repositoryManifestState(deps);
+  const agora = deps.agora || Date.now();
+  const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
+  let resultadoArquivo = null;
+  let resultadoManifesto = null;
+
+  const resultadoDb = await repo.registrarMutacaoDuravel(cliente, {
+    bootstrapManifest: bootstrap,
+    checkpointSincronizado: deps.checkpointSincronizado === true,
+    motivo: deps.motivo || operacao,
+    escreverArquivo: async ({ state, nextGeneration }) => {
+      resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration });
+      if (resultadoArquivo === false || resultadoArquivo?.ok === false) {
+        return resultadoArquivo || { ok: false, motivo: "writer_retorno_false" };
+      }
+      resultadoManifesto = escreverManifestoFilaV2(
+        cliente,
+        patchManifestoMutacaoCoordenada(state, nextGeneration, {
+          ...deps,
+          motivo: deps.motivo || operacao
+        }, resultadoArquivo, agora),
+        deps,
+        "manifest_write"
+      );
+      if (resultadoManifesto.ok !== true) return resultadoManifesto;
+      return { ok: true };
+    }
+  }, deps);
+
+  compararDbJsonManifestState(cliente, resultadoDb, resultadoManifesto?.manifesto, {
+    evento: deps.evento || `db_${operacao}_coordenado`,
+    motivo: resultadoDb?.motivo || deps.motivo || operacao,
+    agora
+  }, deps);
+
+  if (resultadoDb.ok !== true) {
+    return {
+      ok: false,
+      motivo: resultadoDb.motivo || "db_lock_falhou",
+      erro: resultadoDb.erro || "",
+      dbIndisponivel: true,
+      resultadoDb,
+      resultadoArquivo,
+      resultadoManifesto
+    };
+  }
+
+  return {
+    ...(resultadoArquivo || {}),
+    ok: true,
+    motivo: resultadoArquivo?.motivo || resultadoDb.motivo || "escrita_v2_coordenada",
+    coordenada: true,
+    generation: resultadoDb.state?.vivaGeneration || 0,
+    dbState: resultadoDb.state,
+    manifest: resultadoManifesto?.manifesto || null,
+    resultadoDb,
+    resultadoArquivo,
+    resultadoManifesto
+  };
+}
+
 function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
   const base = normalizarManifestoFilaV2(atual, clienteId, agora);
   const temViva = Object.prototype.hasOwnProperty.call(patch, "vivaGeneration");
@@ -761,6 +855,77 @@ function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = 
     }, deps);
   }
   return resultado;
+}
+
+async function capturarTargetCheckpointCoordenado(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+  }
+  const repo = repositoryManifestState(deps);
+  const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
+  return repo.capturarTargetCheckpoint(cliente, {
+    ...dados,
+    bootstrapManifest: dados.bootstrapManifest || bootstrap
+  }, deps);
+}
+
+async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+  }
+  const repo = repositoryManifestState(deps);
+  const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
+  const resultadoDb = await repo.confirmarCheckpointDuravel(cliente, {
+    ...dados,
+    bootstrapManifest: dados.bootstrapManifest || bootstrap
+  }, deps);
+
+  if (resultadoDb.ok !== true) {
+    compararDbJsonManifestState(cliente, resultadoDb, bootstrap, {
+      evento: dados.evento || "db_checkpoint_coordenado",
+      motivo: resultadoDb.motivo || dados.motivo || "checkpoint",
+      agora: deps.agora || Date.now()
+    }, deps);
+    return {
+      ok: false,
+      motivo: resultadoDb.motivo || "checkpoint_db_falhou",
+      erro: resultadoDb.erro || "",
+      dbIndisponivel: true,
+      resultadoDb
+    };
+  }
+
+  const state = resultadoDb.state || {};
+  const manifesto = escreverManifestoFilaV2(cliente, {
+    vivaGeneration: state.vivaGeneration,
+    durableCheckpointGeneration: state.durableCheckpointGeneration,
+    checkpointGeneration: state.durableCheckpointGeneration,
+    dirtyGeneration: state.dirtyGeneration,
+    itemCount: dados.itemCount,
+    lastCheckpointAt: agoraIso(deps.agora || Date.now()),
+    lastDurableCheckpointAt: agoraIso(deps.agora || Date.now()),
+    lastCheckpointReason: dados.motivo || "checkpoint",
+    motivo: dados.motivo || "checkpoint"
+  }, deps, "manifest_checkpoint");
+
+  compararDbJsonManifestState(cliente, resultadoDb, manifesto?.manifesto, {
+    evento: dados.evento || "db_checkpoint_coordenado",
+    motivo: resultadoDb.motivo || dados.motivo || "checkpoint",
+    agora: deps.agora || Date.now()
+  }, deps);
+
+  return {
+    ok: manifesto.ok === true,
+    motivo: manifesto.ok === true ? resultadoDb.motivo : manifesto.motivo,
+    generation: state.vivaGeneration || 0,
+    targetGeneration: dados.targetGeneration,
+    dbState: state,
+    manifest: manifesto.manifesto,
+    resultadoDb,
+    resultadoManifesto: manifesto
+  };
 }
 
 function cloneSet(set = new Set()) {
@@ -1440,6 +1605,70 @@ function recuperarFilaVivaDoLegado(clienteId = "admin", deps = {}) {
   };
 }
 
+async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
+  return executarEscritaFilaV2Coordenada(
+    clienteId,
+    "insert_viva",
+    ({ nextGeneration }) => inserirItemFilaVivaIncremental(clienteId, item, {
+      ...deps,
+      generation: nextGeneration
+    }),
+    {
+      ...deps,
+      checkpointSincronizado: false,
+      motivo: deps.motivo || "insert_viva"
+    }
+  );
+}
+
+async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
+  return executarEscritaFilaV2Coordenada(
+    clienteId,
+    "legacy_sync_update",
+    ({ nextGeneration }) => atualizarItemFilaVivaIncremental(clienteId, item, {
+      ...deps,
+      generation: nextGeneration
+    }),
+    {
+      ...deps,
+      checkpointSincronizado: true,
+      motivo: deps.motivo || "legacy_sync_update"
+    }
+  );
+}
+
+async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
+  return executarEscritaFilaV2Coordenada(
+    clienteId,
+    "legacy_sync_remove",
+    ({ nextGeneration }) => removerItemFilaVivaIncremental(clienteId, item, {
+      ...deps,
+      generation: nextGeneration
+    }),
+    {
+      ...deps,
+      checkpointSincronizado: true,
+      motivo: deps.motivo || "legacy_sync_remove"
+    }
+  );
+}
+
+async function recuperarFilaVivaDoLegadoCoordenado(clienteId = "admin", deps = {}) {
+  return executarEscritaFilaV2Coordenada(
+    clienteId,
+    "recovery_viva",
+    ({ nextGeneration }) => recuperarFilaVivaDoLegado(clienteId, {
+      ...deps,
+      generation: nextGeneration
+    }),
+    {
+      ...deps,
+      checkpointSincronizado: true,
+      motivo: deps.motivo || deps.motivoRecovery || "recovery_viva"
+    }
+  );
+}
+
 function mapaPorId(entradas = []) {
   const mapa = new Map();
   for (const entrada of lista(entradas)) {
@@ -1545,9 +1774,9 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
       .filter(entrada => entrada.bucket === "viva");
     const legado = deps.filaLegada || lerFilaLegada(cliente, deps);
     const comparacao = compararVivaComLegado(cliente, entradas, legado, deps);
-    if (!comparacao.ok) {
-      const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
-      if (!permitirRecovery) {
+      if (!comparacao.ok) {
+        const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+      if (!permitirRecovery || deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
         logOperacional(deps.logger, {
           versao: 1,
           evento: "divergencia_viva_legado",
@@ -1567,6 +1796,7 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
           amostraAusentesNaViva: comparacao.amostraAusentesNaViva,
           amostraDuplicadosNaViva: comparacao.amostraDuplicadosNaViva,
           recoveryBloqueado: true,
+          recoveryRequerLock: permitirRecovery === true,
           duracaoMs
         });
         return {
@@ -1649,6 +1879,35 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
       fonte: "fila_viva",
       motivo: leitura.motivo,
       recoveryBloqueado: true,
+      bytesFilaViva: leitura.bytes || 0,
+      duracaoMs
+    });
+    return {
+      ok: false,
+      fonte: "fila_viva",
+      recovery: false,
+      recuperacaoBloqueada: true,
+      sideEffectBlocked: true,
+      fallbackLegado: true,
+      motivoFallback: leitura.motivo,
+      erroFallback: leitura.erro || "",
+      entradas: [],
+      itens: [],
+      bytes: leitura.bytes || 0
+    };
+  }
+
+  if (deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    logOperacional(deps.logger, {
+      versao: 1,
+      evento: "read_fila_viva_indisponivel",
+      clienteId: cliente,
+      ok: false,
+      fonte: "fila_viva",
+      motivo: leitura.motivo,
+      recoveryBloqueado: true,
+      recoveryRequerLock: true,
       bytesFilaViva: leitura.bytes || 0,
       duracaoMs
     });
@@ -2104,6 +2363,81 @@ function sincronizarCanaryEscrita(params = {}, deps = {}, opcoes = {}) {
   };
 }
 
+async function sincronizarCanaryEscritaCoordenada(params = {}, deps = {}, opcoes = {}) {
+  const cliente = clienteSeguro(params.clienteId || "admin");
+  const env = opcoes.env || deps.env || process.env;
+  const modo = resolverModoOperacional(env);
+
+  if (!deveUsarFilaV2Operacional(cliente, env)) {
+    return {
+      ok: true,
+      pulou: true,
+      motivo: "rollout_desativado",
+      ...modo
+    };
+  }
+
+  const inicio = process.hrtime.bigint();
+  const filaLegada = Array.isArray(params.fila)
+    ? params.fila.filter(item => clienteSeguro(item?.clienteId || "admin") === cliente)
+    : lerFilaLegada(cliente, { ...opcoes, ...deps });
+  const agora = params.agora || deps.agora || Date.now();
+  let projecao = null;
+  let comparacao = null;
+  const logger = params.logger || deps.logger || opcoes.logger || console;
+
+  const escrita = await executarEscritaFilaV2Coordenada(
+    cliente,
+    "canary_write_operacional",
+    () => {
+      projecao = projetarFilaV2(filaLegada, { agora });
+      const resultadoEscrita = escreverFilaViva(cliente, projecao.viva, { ...opcoes, ...deps, agora });
+      comparacao = compararVivaComLegado(cliente, projecao.viva, filaLegada, { ...opcoes, ...deps, agora });
+      return resultadoEscrita.ok === true && comparacao.ok === true
+        ? { ...resultadoEscrita, totalViva: projecao.totalViva }
+        : {
+            ok: false,
+            motivo: resultadoEscrita.ok !== true ? resultadoEscrita.motivo : "comparacao_viva_legado_falhou",
+            totalViva: projecao.totalViva
+          };
+    },
+    {
+      ...opcoes,
+      ...deps,
+      agora,
+      logger,
+      checkpointSincronizado: true,
+      motivo: params.motivo || "canary_write_operacional"
+    }
+  );
+
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+  logOperacional(logger, {
+    versao: 1,
+    evento: "canary_write_operacional",
+    clienteId: cliente,
+    rollout: modo.rolloutOperacional,
+    canaryClientes: modo.canaryClientes.length,
+    ok: escrita.ok === true && (!comparacao || comparacao.ok === true),
+    coordenada: true,
+    totalLegado: projecao?.totalLegado || filaLegada.length,
+    totalViva: projecao?.totalViva || escrita.totalViva || 0,
+    totalHistorico: projecao?.totalHistorico || 0,
+    divergencias: comparacao?.divergencias || 0,
+    bytesFilaViva: escrita.bytesFilaViva || 0,
+    fallbackLegado: escrita.ok !== true || (comparacao && comparacao.ok !== true),
+    duracaoMs
+  });
+
+  return {
+    ...escrita,
+    pulou: false,
+    ...modo,
+    projecao,
+    comparacao
+  };
+}
+
 function criarControladorCheckpointLegadoV2(opcoes = {}) {
   const politica = opcoes.politica || politicaCheckpointLegado(opcoes.env || process.env);
   const estados = new Map();
@@ -2269,11 +2603,14 @@ function criarControladorCheckpointLegadoV2(opcoes = {}) {
 function criarControladorFilaOperacionalV2(opcoes = {}) {
   function prepararSeHabilitado(params = {}) {
     const modo = modoOperacional(opcoes.env || process.env);
+    const cliente = clienteSeguro(params.clienteId || "admin");
+    if (deveUsarFilaV2Operacional(cliente, opcoes.env || process.env)) {
+      return { ok: true, pulou: true, motivo: "operacional_requer_lock", ...modo };
+    }
     if (!modo.shadow2B1Ativo && !modo.operacionalAtivo) {
       return { ok: true, pulou: true, motivo: "flag_desativada", ...modo };
     }
 
-    const cliente = clienteSeguro(params.clienteId || "admin");
     const filaLegada = Array.isArray(params.fila)
       ? params.fila.filter(item => clienteSeguro(item?.clienteId || "admin") === cliente)
       : lerFilaLegada(cliente, { ...opcoes, ...params });
@@ -2314,9 +2651,16 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     prepararSeHabilitado,
     deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env),
     sincronizarCanaryEscrita: (params = {}, deps = {}) => sincronizarCanaryEscrita(params, deps, opcoes),
+    sincronizarCanaryEscritaCoordenada: (params = {}, deps = {}) => sincronizarCanaryEscritaCoordenada(params, deps, opcoes),
     inserirItemFilaVivaIncremental: (clienteId, item, deps = {}) => inserirItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
     atualizarItemFilaVivaIncremental: (clienteId, item, deps = {}) => atualizarItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
     removerItemFilaVivaIncremental: (clienteId, item, deps = {}) => removerItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
+    inserirItemFilaVivaCoordenado: (clienteId, item, deps = {}) => inserirItemFilaVivaCoordenado(clienteId, item, { ...opcoes, ...deps }),
+    atualizarItemFilaVivaCoordenado: (clienteId, item, deps = {}) => atualizarItemFilaVivaCoordenado(clienteId, item, { ...opcoes, ...deps }),
+    removerItemFilaVivaCoordenado: (clienteId, item, deps = {}) => removerItemFilaVivaCoordenado(clienteId, item, { ...opcoes, ...deps }),
+    recuperarFilaVivaDoLegadoCoordenado: (clienteId, deps = {}) => recuperarFilaVivaDoLegadoCoordenado(clienteId, { ...opcoes, ...deps }),
+    capturarTargetCheckpointCoordenado: (clienteId, dados = {}, deps = {}) => capturarTargetCheckpointCoordenado(clienteId, dados, { ...opcoes, ...deps }),
+    confirmarCheckpointCoordenado: (clienteId, dados = {}, deps = {}) => confirmarCheckpointCoordenado(clienteId, dados, { ...opcoes, ...deps }),
     lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
@@ -2369,9 +2713,16 @@ module.exports = {
   atualizarItemFilaVivaIncremental,
   removerItemFilaVivaIncremental,
   recuperarFilaVivaDoLegado,
+  inserirItemFilaVivaCoordenado,
+  atualizarItemFilaVivaCoordenado,
+  removerItemFilaVivaCoordenado,
+  recuperarFilaVivaDoLegadoCoordenado,
   appendHistoricoIncremental,
   moverTerminalParaHistorico,
   compararVivaComLegado,
+  executarEscritaFilaV2Coordenada,
+  capturarTargetCheckpointCoordenado,
+  confirmarCheckpointCoordenado,
   avaliarRecoveryPeloManifesto,
   lerManifestoFilaV2,
   registrarManifestoMutacaoObservacional,

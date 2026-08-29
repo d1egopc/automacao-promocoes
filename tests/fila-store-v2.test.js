@@ -1490,6 +1490,109 @@ function criarStorageTemporarioFilaV2() {
   return { dir, getClientePath, getClienteJsonPath, writeClienteJson };
 }
 
+function criarManifestStateRepositoryFake(opcoes = {}) {
+  const states = new Map();
+  const locks = new Map();
+  const chamadas = [];
+
+  function estadoInicial(clienteId) {
+    return {
+      clienteId,
+      revision: 0,
+      vivaGeneration: 0,
+      durableCheckpointGeneration: 0,
+      dirtyGeneration: null
+    };
+  }
+
+  function normalizar(clienteId, state) {
+    return {
+      ...estadoInicial(clienteId),
+      ...(state || {}),
+      clienteId
+    };
+  }
+
+  async function serializar(clienteId, callback) {
+    const anterior = locks.get(clienteId) || Promise.resolve();
+    let liberar = () => {};
+    const bloqueio = new Promise(resolve => {
+      liberar = resolve;
+    });
+    const cadeia = anterior.catch(() => {}).then(() => bloqueio);
+    locks.set(clienteId, cadeia);
+    await anterior.catch(() => {});
+    try {
+      return await callback();
+    } finally {
+      liberar();
+      if (locks.get(clienteId) === cadeia) locks.delete(clienteId);
+    }
+  }
+
+  return {
+    chamadas,
+    states,
+    compararDbJson: () => ({ resultado: "db_json_equivalente", equivalente: true }),
+    async registrarMutacaoDuravel(clienteId, dados = {}) {
+      chamadas.push({ tipo: dados.checkpointSincronizado ? "legacy_sync" : "mutacao", clienteId });
+      if (opcoes.falharMutacao) return { ok: false, motivo: "db_indisponivel" };
+      return serializar(clienteId, async () => {
+        const atual = normalizar(clienteId, states.get(clienteId));
+        const nextGeneration = atual.vivaGeneration + 1;
+        if (typeof dados.escreverArquivo === "function") {
+          const escrita = await dados.escreverArquivo({ clienteId, state: atual, nextGeneration });
+          if (escrita === false || escrita?.ok === false) {
+            return { ok: false, motivo: escrita?.motivo || "arquivo_falhou" };
+          }
+        }
+        const durableCheckpointGeneration = dados.checkpointSincronizado === true
+          ? nextGeneration
+          : atual.durableCheckpointGeneration;
+        const dirtyGeneration = nextGeneration > durableCheckpointGeneration
+          ? (atual.dirtyGeneration || durableCheckpointGeneration + 1)
+          : null;
+        const state = {
+          clienteId,
+          revision: atual.revision + 1,
+          vivaGeneration: nextGeneration,
+          durableCheckpointGeneration,
+          dirtyGeneration
+        };
+        states.set(clienteId, state);
+        return { ok: true, motivo: dados.motivo || "ok", state };
+      });
+    },
+    async capturarTargetCheckpoint(clienteId) {
+      chamadas.push({ tipo: "capturar_checkpoint", clienteId });
+      const state = normalizar(clienteId, states.get(clienteId));
+      return { ok: true, clienteId, targetGeneration: state.vivaGeneration, state };
+    },
+    async confirmarCheckpointDuravel(clienteId, dados = {}) {
+      chamadas.push({ tipo: "confirmar_checkpoint", clienteId });
+      return serializar(clienteId, async () => {
+        const atual = normalizar(clienteId, states.get(clienteId));
+        const target = Number(dados.targetGeneration || 0);
+        const durableCheckpointGeneration = Math.min(
+          atual.vivaGeneration,
+          Math.max(atual.durableCheckpointGeneration, target)
+        );
+        const dirtyGeneration = atual.vivaGeneration > durableCheckpointGeneration
+          ? Math.max(durableCheckpointGeneration + 1, atual.dirtyGeneration || durableCheckpointGeneration + 1)
+          : null;
+        const state = {
+          ...atual,
+          revision: atual.revision + 1,
+          durableCheckpointGeneration,
+          dirtyGeneration
+        };
+        states.set(clienteId, state);
+        return { ok: true, motivo: "checkpoint_confirmado", state };
+      });
+    }
+  };
+}
+
 {
   const storage = criarStorageTemporarioFilaV2();
   const item = oferta("v2c_insert", { clienteId: "cliente_2c", status: "pendente" });
@@ -2502,4 +2605,202 @@ for (const [nome, manifesto] of [
   assert.strictEqual(conclusao.ultimoMotivo, "falha_write");
 }
 
-console.log("fila-store-v2.test.js OK");
+async function testarPromocaoLockPostgresOperacional() {
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_lock_duas_inserts";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+
+    const [a, b] = await Promise.all([
+      filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("lock_a", { clienteId: cliente }), {
+        getClienteJsonPath: storage.getClienteJsonPath,
+        writeClienteJson: storage.writeClienteJson,
+        manifestStateRepository: repoFake,
+        env,
+        logger: { log: () => {} },
+        agora: AGORA
+      }),
+      filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("lock_b", { clienteId: cliente }), {
+        getClienteJsonPath: storage.getClienteJsonPath,
+        writeClienteJson: storage.writeClienteJson,
+        manifestStateRepository: repoFake,
+        env,
+        logger: { log: () => {} },
+        agora: AGORA + 1
+      })
+    ]);
+
+    const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+    const manifest = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      logger: { log: () => {} },
+      agora: AGORA
+    }).manifesto;
+
+    assert.strictEqual(a.ok, true);
+    assert.strictEqual(b.ok, true);
+    assert.deepStrictEqual([a.generation, b.generation].sort((x, y) => x - y), [1, 2], "geracoes coordenadas nao podem duplicar");
+    assert.strictEqual(viva.length, 2, "duas inserts simultaneas devem persistir exatamente uma vez cada");
+    assert.strictEqual(manifest.vivaGeneration, 2, "manifest JSON deve refletir generation fornecida pelo protocolo DB");
+    assert.strictEqual(repoFake.states.get(cliente).vivaGeneration, 2);
+    assert.strictEqual(repoFake.states.get(cliente).durableCheckpointGeneration, 0);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const clienteA = "cliente_lock_a";
+    const clienteB = "cliente_lock_b";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "global"
+    };
+    const [a, b] = await Promise.all([
+      filaOperacionalV2.inserirItemFilaVivaCoordenado(clienteA, oferta("a1", { clienteId: clienteA }), {
+        getClienteJsonPath: storage.getClienteJsonPath,
+        writeClienteJson: storage.writeClienteJson,
+        manifestStateRepository: repoFake,
+        env,
+        logger: { log: () => {} },
+        agora: AGORA
+      }),
+      filaOperacionalV2.inserirItemFilaVivaCoordenado(clienteB, oferta("b1", { clienteId: clienteB }), {
+        getClienteJsonPath: storage.getClienteJsonPath,
+        writeClienteJson: storage.writeClienteJson,
+        manifestStateRepository: repoFake,
+        env,
+        logger: { log: () => {} },
+        agora: AGORA
+      })
+    ]);
+
+    assert.strictEqual(a.generation, 1);
+    assert.strictEqual(b.generation, 1, "clientes diferentes mantem geracao independente e paralela");
+    assert.strictEqual(repoFake.states.get(clienteA).vivaGeneration, 1);
+    assert.strictEqual(repoFake.states.get(clienteB).vivaGeneration, 1);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake({ falharMutacao: true });
+    const cliente = "cliente_db_indisponivel_insert";
+    const resultado = await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("sem_db", { clienteId: cliente }), {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO)), false, "DB indisponivel nao autoriza write de fila-viva");
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO)), false, "DB indisponivel nao inventa manifest generation");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_off_canary_lock";
+    const resultado = await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("off_canary", { clienteId: cliente }), {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: "outro_cliente"
+      },
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "manifest_state_desabilitado");
+    assert.strictEqual(repoFake.chamadas.length, 0, "off-canary nao pode abrir protocolo DB");
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO)), false, "off-canary nao pode escrever viva pelo helper V2");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_update_remove_lock";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    const item = oferta("update_remove_lock", { clienteId: cliente });
+    await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+    const update = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, {
+      ...item,
+      status: "processando"
+    }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1
+    });
+    const remove = await filaOperacionalV2.removerItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 2
+    });
+    const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+    const state = repoFake.states.get(cliente);
+
+    assert.strictEqual(update.ok, true);
+    assert.strictEqual(update.atualizouViva, true);
+    assert.strictEqual(remove.ok, true);
+    assert.strictEqual(remove.removeuDaViva, true);
+    assert.strictEqual(viva.length, 0);
+    assert.strictEqual(state.vivaGeneration, 3);
+    assert.strictEqual(state.durableCheckpointGeneration, 3, "sync legado protegido deve nascer duravel");
+    assert.strictEqual(state.dirtyGeneration, null);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+      env: {
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: "cliente_preparar_lock"
+      },
+      ...storage
+    });
+    const resultado = controlador.prepararSeHabilitado({
+      clienteId: "cliente_preparar_lock",
+      fila: [oferta("preparar_lock", { clienteId: "cliente_preparar_lock" })],
+      agora: AGORA
+    });
+
+    assert.strictEqual(resultado.pulou, true);
+    assert.strictEqual(resultado.motivo, "operacional_requer_lock", "preparacao operacional nao pode escrever viva fora do lock");
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath("cliente_preparar_lock", FILA_VIVA_ARQUIVO)), false);
+  }
+}
+
+testarPromocaoLockPostgresOperacional()
+  .then(() => {
+    console.log("fila-store-v2.test.js OK");
+  })
+  .catch(erro => {
+    console.error(erro);
+    process.exitCode = 1;
+  });
