@@ -33,6 +33,9 @@ const TAG_MANIFEST_STATE = "[FILA-V2-MANIFEST-STATE]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
 const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
 const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
+const FILA_VIVA_PROOF_ARQUIVO = "fila-viva.proof.json";
+const FILA_LEGADA_PROOF_ARQUIVO = "fila.proof.json";
+const FILA_V2_FILE_PROOF_VERSION = 1;
 const DEFAULT_CHECKPOINT_MUTACOES = 25;
 const DEFAULT_CHECKPOINT_INTERVALO_MS = 60_000;
 const DEFAULT_CHECKPOINT_MAX_DIRTY_MS = 120_000;
@@ -167,11 +170,82 @@ function statArquivoSeguro(file = "", fsImpl = fs) {
     return {
       existe: true,
       bytes: Number(stat.size || 0),
-      mtimeMs: Number(stat.mtimeMs || 0)
+      size: Number(stat.size || 0),
+      mtimeMs: Number(stat.mtimeMs || 0),
+      ctimeMs: Number.isFinite(Number(stat.ctimeMs)) ? Number(stat.ctimeMs) : null,
+      ino: Number.isFinite(Number(stat.ino)) ? Number(stat.ino) : null,
+      dev: Number.isFinite(Number(stat.dev)) ? Number(stat.dev) : null
     };
   } catch {
     return { existe: false, bytes: 0, mtimeMs: 0 };
   }
+}
+
+function gerarFileRevision() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function proofArquivo(clienteId = "admin", arquivo = "", dados = {}, stat = {}, agora = Date.now()) {
+  const generation = Number.isInteger(Number(dados.generation))
+    ? Number(dados.generation)
+    : Number(dados.targetGeneration || 0);
+  return {
+    proofVersion: FILA_V2_FILE_PROOF_VERSION,
+    clienteId: clienteSeguro(clienteId),
+    arquivo: texto(arquivo),
+    generation,
+    targetGeneration: generation,
+    fileRevision: texto(dados.fileRevision),
+    size: Number(stat.size ?? stat.bytes ?? 0),
+    mtimeMs: Number(stat.mtimeMs || 0),
+    ctimeMs: Number.isFinite(Number(stat.ctimeMs)) ? Number(stat.ctimeMs) : null,
+    ino: Number.isFinite(Number(stat.ino)) ? Number(stat.ino) : null,
+    dev: Number.isFinite(Number(stat.dev)) ? Number(stat.dev) : null,
+    publishedAt: agoraIso(agora)
+  };
+}
+
+function publicarProofArquivo(clienteId = "admin", arquivoProof = "", proof = {}, deps = {}) {
+  const escritor = deps.writeClienteJson || writeClienteJson;
+  if (typeof escritor !== "function") return { ok: false, motivo: "writeClienteJson_indisponivel" };
+  try {
+    const ok = escritor(clienteSeguro(clienteId), arquivoProof, proof);
+    return {
+      ok: ok !== false,
+      motivo: ok === false ? "proof_write_false" : "proof_escrito",
+      proof
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "proof_write_error",
+      erro: erro?.message || "erro_proof",
+      proof
+    };
+  }
+}
+
+function publicarProofFilaViva(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const caminho = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const stat = statArquivoSeguro(caminho, fsImpl);
+  if (!stat.existe) return { ok: false, motivo: "fila_viva_inexistente_para_proof" };
+  const proof = proofArquivo(cliente, FILA_VIVA_ARQUIVO, dados, stat, deps.agora || Date.now());
+  if (!proof.fileRevision) return { ok: false, motivo: "file_revision_invalido", proof };
+  return publicarProofArquivo(cliente, FILA_VIVA_PROOF_ARQUIVO, proof, deps);
+}
+
+function publicarProofFilaLegada(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const caminho = caminhoJsonCliente(cliente, FILA_LEGADA_ARQUIVO, deps);
+  const stat = statArquivoSeguro(caminho, fsImpl);
+  if (!stat.existe) return { ok: false, motivo: "fila_legada_inexistente_para_proof" };
+  const proof = proofArquivo(cliente, FILA_LEGADA_ARQUIVO, dados, stat, deps.agora || Date.now());
+  if (!proof.fileRevision) return { ok: false, motivo: "file_revision_invalido", proof };
+  return publicarProofArquivo(cliente, FILA_LEGADA_PROOF_ARQUIVO, proof, deps);
 }
 
 function tamanhoJsonBytes(valor) {
@@ -327,6 +401,8 @@ function normalizarManifestoFilaV2(valor = {}, clienteId = "admin", agora = Date
     lastDurableCheckpointAt: texto(bruto.lastDurableCheckpointAt || bruto.lastCheckpointAt || ""),
     lastVivaWriteReason: texto(bruto.lastVivaWriteReason || ""),
     lastCheckpointReason: texto(bruto.lastCheckpointReason || ""),
+    vivaFileProof: bruto.vivaFileProof && typeof bruto.vivaFileProof === "object" ? bruto.vivaFileProof : null,
+    legacyFileProof: bruto.legacyFileProof && typeof bruto.legacyFileProof === "object" ? bruto.legacyFileProof : null,
     updatedAt: texto(bruto.updatedAt || agoraIso(agora))
   };
 }
@@ -643,11 +719,13 @@ function patchManifestoMutacaoCoordenada(state = {}, nextGeneration = 0, dados =
     itemCount: resultadoArquivo?.totalViva ?? dados.itemCount,
     lastMutationAt: agoraIso(agora),
     lastVivaWriteReason: dados.motivo || "mutacao_viva",
+    vivaFileProof: resultadoArquivo?.vivaFileProof || state.vivaFileProof || null,
     motivo: dados.motivo || "mutacao_viva",
     ...(checkpointSincronizado ? {
       lastCheckpointAt: agoraIso(agora),
       lastDurableCheckpointAt: agoraIso(agora),
-      lastCheckpointReason: dados.motivo || "mutacao_viva_sincronizada"
+      lastCheckpointReason: dados.motivo || "mutacao_viva_sincronizada",
+      legacyFileProof: resultadoArquivo?.legacyFileProof || state.legacyFileProof || null
     } : {})
   };
 }
@@ -670,9 +748,10 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
   const resultadoDb = await repo.registrarMutacaoDuravel(cliente, {
     bootstrapManifest: bootstrap,
     checkpointSincronizado: deps.checkpointSincronizado === true,
+    fileRevision: deps.fileRevision || gerarFileRevision(),
     motivo: deps.motivo || operacao,
-    escreverArquivo: async ({ state, nextGeneration }) => {
-      resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration });
+    escreverArquivo: async ({ state, nextGeneration, fileRevision }) => {
+      resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration, fileRevision });
       if (resultadoArquivo === false || resultadoArquivo?.ok === false) {
         return resultadoArquivo || { ok: false, motivo: "writer_retorno_false" };
       }
@@ -686,7 +765,11 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
         "manifest_write"
       );
       if (resultadoManifesto.ok !== true) return resultadoManifesto;
-      return { ok: true };
+      return {
+        ok: true,
+        vivaFileProof: resultadoArquivo?.vivaFileProof || null,
+        legacyFileProof: resultadoArquivo?.legacyFileProof || null
+      };
     }
   }, deps);
 
@@ -771,6 +854,12 @@ function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", ago
     lastDurableCheckpointAt: texto(patch.lastDurableCheckpointAt || base.lastDurableCheckpointAt || ""),
     lastVivaWriteReason: texto(patch.lastVivaWriteReason || base.lastVivaWriteReason || ""),
     lastCheckpointReason: texto(patch.lastCheckpointReason || base.lastCheckpointReason || ""),
+    vivaFileProof: Object.prototype.hasOwnProperty.call(patch, "vivaFileProof")
+      ? (patch.vivaFileProof || null)
+      : (base.vivaFileProof || null),
+    legacyFileProof: Object.prototype.hasOwnProperty.call(patch, "legacyFileProof")
+      ? (patch.legacyFileProof || null)
+      : (base.legacyFileProof || null),
     updatedAt: agoraIso(agora)
   };
 }
@@ -886,6 +975,8 @@ function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = 
     lastCheckpointAt: agoraIso(deps.agora || Date.now()),
     lastDurableCheckpointAt: agoraIso(deps.agora || Date.now()),
     lastCheckpointReason: dados.motivo || "checkpoint",
+    vivaFileProof: base.vivaFileProof || null,
+    legacyFileProof: base.legacyFileProof || null,
     motivo: dados.motivo || "checkpoint"
   }, deps, "manifest_checkpoint");
   if (resultado.ok === true) {
@@ -952,6 +1043,8 @@ async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, de
     lastCheckpointAt: agoraIso(deps.agora || Date.now()),
     lastDurableCheckpointAt: agoraIso(deps.agora || Date.now()),
     lastCheckpointReason: dados.motivo || "checkpoint",
+    vivaFileProof: state.vivaFileProof || null,
+    legacyFileProof: state.legacyFileProof || resultadoDb.legacyFileProof || null,
     motivo: dados.motivo || "checkpoint"
   }, deps, "manifest_checkpoint");
 
@@ -1295,12 +1388,32 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
   const normalizada = normalizarEntradasViva(entradas, deps.agora || Date.now())
     .filter(entrada => entrada.bucket === "viva");
   try {
-    const ok = escritor(clienteSeguro(clienteId), FILA_VIVA_ARQUIVO, normalizada);
+    const cliente = clienteSeguro(clienteId);
+    const ok = escritor(cliente, FILA_VIVA_ARQUIVO, normalizada);
+    let vivaFileProof = null;
+    if (ok !== false && deps.publicarFileProof === true) {
+      const proof = publicarProofFilaViva(cliente, {
+        generation: deps.generation,
+        fileRevision: deps.fileRevision
+      }, deps);
+      if (proof.ok !== true) {
+        return {
+          ok: false,
+          motivo: proof.motivo || "proof_viva_falhou",
+          erro: proof.erro || "",
+          totalViva: normalizada.length,
+          bytesFilaViva: tamanhoJsonBytes(normalizada),
+          vivaFileProof: proof.proof || null
+        };
+      }
+      vivaFileProof = proof.proof;
+    }
     return {
       ok: ok !== false,
       motivo: ok === false ? "write_retorno_false" : "fila_viva_escrita",
       totalViva: normalizada.length,
-      bytesFilaViva: tamanhoJsonBytes(normalizada)
+      bytesFilaViva: tamanhoJsonBytes(normalizada),
+      vivaFileProof
     };
   } catch (erro) {
     return {
@@ -1403,6 +1516,7 @@ function inserirItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
     bytesFilaViva: escrita.bytesFilaViva || 0,
+    vivaFileProof: escrita.vivaFileProof || null,
     insertVivaMs: duracaoMs,
     fallbackLegado: escrita.ok !== true
   };
@@ -1529,6 +1643,7 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
     bytesFilaViva: escrita.bytesFilaViva || 0,
+    vivaFileProof: escrita.vivaFileProof || null,
     updateVivaMs: duracaoMs,
     fallbackLegado: escrita.ok !== true
   };
@@ -1608,6 +1723,7 @@ function removerItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
     bytesFilaViva: escrita.bytesFilaViva || 0,
+    vivaFileProof: escrita.vivaFileProof || null,
     removalVivaMs: duracaoMs,
     fallbackLegado: escrita.ok !== true
   };
@@ -1646,7 +1762,8 @@ function recuperarFilaVivaDoLegado(clienteId = "admin", deps = {}) {
     entradas: projecao.viva,
     itens: projecao.viva.map(entrada => entrada.item),
     projecao,
-    escrita
+    escrita,
+    vivaFileProof: escrita.vivaFileProof || null
   };
 }
 
@@ -1654,9 +1771,11 @@ async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "insert_viva",
-    ({ nextGeneration }) => inserirItemFilaVivaIncremental(clienteId, item, {
+    ({ nextGeneration, fileRevision }) => inserirItemFilaVivaIncremental(clienteId, item, {
       ...deps,
-      generation: nextGeneration
+      generation: nextGeneration,
+      fileRevision,
+      publicarFileProof: true
     }),
     {
       ...deps,
@@ -1670,9 +1789,11 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_update",
-    ({ nextGeneration }) => atualizarItemFilaVivaIncremental(clienteId, item, {
+    ({ nextGeneration, fileRevision }) => atualizarItemFilaVivaIncremental(clienteId, item, {
       ...deps,
-      generation: nextGeneration
+      generation: nextGeneration,
+      fileRevision,
+      publicarFileProof: true
     }),
     {
       ...deps,
@@ -1686,9 +1807,11 @@ async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_remove",
-    ({ nextGeneration }) => removerItemFilaVivaIncremental(clienteId, item, {
+    ({ nextGeneration, fileRevision }) => removerItemFilaVivaIncremental(clienteId, item, {
       ...deps,
-      generation: nextGeneration
+      generation: nextGeneration,
+      fileRevision,
+      publicarFileProof: true
     }),
     {
       ...deps,
@@ -1702,9 +1825,11 @@ async function recuperarFilaVivaDoLegadoCoordenado(clienteId = "admin", deps = {
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "recovery_viva",
-    ({ nextGeneration }) => recuperarFilaVivaDoLegado(clienteId, {
+    ({ nextGeneration, fileRevision }) => recuperarFilaVivaDoLegado(clienteId, {
       ...deps,
-      generation: nextGeneration
+      generation: nextGeneration,
+      fileRevision,
+      publicarFileProof: true
     }),
     {
       ...deps,
@@ -2434,9 +2559,16 @@ async function sincronizarCanaryEscritaCoordenada(params = {}, deps = {}, opcoes
   const escrita = await executarEscritaFilaV2Coordenada(
     cliente,
     "canary_write_operacional",
-    () => {
+    ({ nextGeneration, fileRevision }) => {
       projecao = projetarFilaV2(filaLegada, { agora });
-      const resultadoEscrita = escreverFilaViva(cliente, projecao.viva, { ...opcoes, ...deps, agora });
+      const resultadoEscrita = escreverFilaViva(cliente, projecao.viva, {
+        ...opcoes,
+        ...deps,
+        agora,
+        generation: nextGeneration,
+        fileRevision,
+        publicarFileProof: true
+      });
       comparacao = compararVivaComLegado(cliente, projecao.viva, filaLegada, { ...opcoes, ...deps, agora });
       return resultadoEscrita.ok === true && comparacao.ok === true
         ? { ...resultadoEscrita, totalViva: projecao.totalViva }
@@ -2731,6 +2863,9 @@ module.exports = {
   FLAG_CHECKPOINT_MUTACOES,
   FLAG_CHECKPOINT_INTERVALO_MS,
   FLAG_CHECKPOINT_MAX_DIRTY_MS,
+  FILA_VIVA_PROOF_ARQUIVO,
+  FILA_LEGADA_PROOF_ARQUIVO,
+  FILA_V2_FILE_PROOF_VERSION,
   HISTORICO_INCREMENTAL_DIR,
   TAG_TELEMETRIA,
   TAG_MANIFEST,
@@ -2754,6 +2889,8 @@ module.exports = {
   lerFilaViva,
   lerFilaVivaReadOnly,
   escreverFilaViva,
+  publicarProofFilaViva,
+  publicarProofFilaLegada,
   inserirItemFilaVivaIncremental,
   atualizarItemFilaVivaIncremental,
   removerItemFilaVivaIncremental,

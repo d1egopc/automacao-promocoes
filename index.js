@@ -2702,6 +2702,76 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
   });
 }
 
+function checkpointRevisionSeguro(revision = "") {
+  const valor = String(revision || "").trim();
+  return /^[a-zA-Z0-9_.-]{8,128}$/.test(valor) ? valor : "";
+}
+
+function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision = "") {
+  const cliente = String(clienteId || "admin");
+  const revision = checkpointRevisionSeguro(checkpointRevision);
+  if (!revision) return { ok: false, motivo: "checkpoint_revision_invalido" };
+  try {
+    const file = path.resolve(getFilaFile(cliente));
+    const dir = path.dirname(file);
+    fs.mkdirSync(dir, { recursive: true });
+    const tempPath = path.resolve(dir, `fila.json.tmp.${revision}`);
+    if (path.dirname(tempPath) !== dir) return { ok: false, motivo: "checkpoint_temp_inseguro" };
+    const filaCliente = fila.filter(o => String(o?.clienteId || "admin") === String(cliente));
+    fs.writeFileSync(tempPath, JSON.stringify(filaCliente, null, 2), "utf8");
+    const stat = fs.statSync(tempPath);
+    return {
+      ok: true,
+      clienteId: cliente,
+      file,
+      tempPath,
+      checkpointRevision: revision,
+      itens: filaCliente.length,
+      bytes: Number(stat.size || 0)
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "checkpoint_temp_write_error",
+      erro: erro?.message || "erro_checkpoint_temp"
+    };
+  }
+}
+
+function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
+  const cliente = String(clienteId || "admin");
+  const revision = checkpointRevisionSeguro(dados.checkpointRevision);
+  const tempPath = path.resolve(String(dados.tempPath || ""));
+  const finalPath = path.resolve(getFilaFile(cliente));
+  const dir = path.dirname(finalPath);
+  if (!revision) return { ok: false, motivo: "checkpoint_revision_invalido" };
+  if (path.dirname(tempPath) !== dir || path.basename(tempPath) !== `fila.json.tmp.${revision}`) {
+    return { ok: false, motivo: "checkpoint_temp_inseguro" };
+  }
+  try {
+    if (!fs.existsSync(tempPath)) return { ok: false, motivo: "checkpoint_temp_ausente" };
+    fs.renameSync(tempPath, finalPath);
+    const proof = filaOperacionalV2.publicarProofFilaLegada(cliente, {
+      targetGeneration: dados.targetGeneration,
+      fileRevision: revision
+    }, {
+      getClienteJsonPath,
+      writeClienteJson,
+      fs,
+      agora: Date.now(),
+      logger: console
+    });
+    if (proof.ok !== true) return { ok: false, motivo: proof.motivo || "proof_checkpoint_falhou", erro: proof.erro || "" };
+    return { ok: true, legacyFileProof: proof.proof, proof: proof.proof };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "checkpoint_publish_error",
+      erro: erro?.message || "erro_checkpoint_publish"
+    };
+  }
+}
+
 async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const agora = Date.now();
@@ -2744,23 +2814,46 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
   const vivaGenerationAlvoCheckpoint = targetDb.ok === true
     ? targetDb.targetGeneration || 0
     : manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
-  const salvou = salvarFila(cliente, {
-    motivo: `fila_v2_2c_${decisao.motivo || motivo}`,
-    prepararV2: false
-  });
+  const checkpointTemp = targetDb.ok === true
+    ? prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision)
+    : { ok: false, motivo: "checkpoint_db_indisponivel" };
+  const salvou = checkpointTemp.ok === true
+    ? true
+    : (
+        targetDb.ok === true
+          ? false
+          : salvarFila(cliente, {
+              motivo: `fila_v2_2c_${decisao.motivo || motivo}`,
+              prepararV2: false
+            })
+      );
   const duracaoMs = Date.now() - inicio;
   const bytesCheckpoint = tamanhoArquivoSeguro(getFilaFile(cliente));
 
   if (salvou) {
-    const checkpointDuravel = await filaOperacionalV2.confirmarCheckpointCoordenado(cliente, {
-      targetGeneration: vivaGenerationAlvoCheckpoint,
-      motivo: decisao.motivo || motivo
-    }, {
-      agora: Date.now(),
-      logger: console
-    });
+    const checkpointDuravel = checkpointTemp.ok === true
+      ? await filaOperacionalV2.confirmarCheckpointCoordenado(cliente, {
+          targetGeneration: vivaGenerationAlvoCheckpoint,
+          checkpointRevision: targetDb.checkpointRevision,
+          motivo: decisao.motivo || motivo,
+          publicarCheckpoint: ({ targetGeneration, checkpointRevision }) => publicarCheckpointLegadoTempV2(cliente, {
+            tempPath: checkpointTemp.tempPath,
+            targetGeneration,
+            checkpointRevision
+          })
+        }, {
+          agora: Date.now(),
+          logger: console
+        })
+      : await filaOperacionalV2.confirmarCheckpointCoordenado(cliente, {
+          targetGeneration: vivaGenerationAlvoCheckpoint,
+          motivo: decisao.motivo || motivo
+        }, {
+          agora: Date.now(),
+          logger: console
+        });
     const estado = checkpointFilaV2.concluirCheckpoint(cliente, {
-      ok: true,
+      ok: checkpointDuravel?.ok !== false,
       generationInicial: decisao.generationInicial,
       mutacoesCapturadas: decisao.mutacoesCapturadas,
       agora: Date.now(),
@@ -2776,6 +2869,9 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       checkpointGeneration: decisao.generationInicial || 0,
       durableCheckpointGeneration: checkpointDuravel?.dbState?.durableCheckpointGeneration || 0,
       dbCheckpointOk: checkpointDuravel?.ok === true,
+      checkpointRevision: targetDb?.checkpointRevision || "",
+      checkpointPublicacaoFisica: checkpointTemp.ok === true,
+      checkpointPublicacaoMotivo: checkpointTemp.motivo || checkpointDuravel?.motivo || "",
       checkpointConcurrentSkip: estado.checkpointConcurrentSkip || 0,
       dirtyAposCheckpoint: estado.dirty,
       mergeAntesCheckpoint: mergeAntesCheckpoint?.merge ? {
@@ -2787,28 +2883,37 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       hotPathResumo: snapshotMetricasFilaV22C(cliente, true),
       politica: decisao.politica
     });
-    return { ok: true, motivo: decisao.motivo, estado, checkpointLegadoMs: duracaoMs, bytesCheckpoint };
+    return {
+      ok: checkpointDuravel?.ok !== false,
+      motivo: checkpointDuravel?.motivo || decisao.motivo,
+      estado,
+      checkpointLegadoMs: duracaoMs,
+      bytesCheckpoint
+    };
   }
 
+  const motivoFalhaCheckpoint = checkpointTemp.ok === false && targetDb.ok === true
+    ? checkpointTemp.motivo
+    : erroSalvarFilaCliente(cliente).motivo;
   const estadoFalha = checkpointFilaV2.concluirCheckpoint(cliente, {
     ok: false,
     generationInicial: decisao.generationInicial,
     mutacoesCapturadas: decisao.mutacoesCapturadas,
     agora: Date.now(),
-    motivo: erroSalvarFilaCliente(cliente).motivo
+    motivo: motivoFalhaCheckpoint
   });
   logFilaV22C({
     evento: "checkpoint_legado_batched",
     clienteId: cliente,
     ok: false,
-    motivo: erroSalvarFilaCliente(cliente).motivo,
+    motivo: motivoFalhaCheckpoint,
     checkpointMutations: decisao.mutacoesCapturadas || decisao.estado?.mutacoes || 0,
     checkpointGeneration: decisao.generationInicial || 0,
     checkpointConcurrentSkip: estadoFalha.checkpointConcurrentSkip || 0,
     checkpointLegadoMs: duracaoMs,
     bytesCheckpoint
   });
-  return { ok: false, motivo: erroSalvarFilaCliente(cliente).motivo, estado: estadoFalha, checkpointLegadoMs: duracaoMs };
+  return { ok: false, motivo: motivoFalhaCheckpoint, estado: estadoFalha, checkpointLegadoMs: duracaoMs };
 }
 
 async function executarCheckpointsFilaV22CVencidos(motivo = "ciclo") {

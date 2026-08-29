@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const { getEnginePool } = require("../engine/database");
 const { normalizarClienteId } = require("../../utils/storage");
 
@@ -16,6 +17,11 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
   authority_ready_generation BIGINT,
   authority_ready_revision BIGINT,
   authority_ready_at TIMESTAMPTZ,
+  viva_file_proof JSONB,
+  legacy_file_proof JSONB,
+  pending_checkpoint_revision TEXT,
+  pending_checkpoint_target_generation BIGINT,
+  pending_checkpoint_started_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (durable_checkpoint_generation <= viva_generation),
   CHECK (
@@ -42,6 +48,11 @@ ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEA
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_at TIMESTAMPTZ;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS viva_file_proof JSONB;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS legacy_file_proof JSONB;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_revision TEXT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_target_generation BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_started_at TIMESTAMPTZ;
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -76,6 +87,41 @@ function numeroDb(valor, padrao = 0) {
   const numero = Number(valor);
   if (!Number.isFinite(numero) || numero < 0) return padrao;
   return Math.floor(numero);
+}
+
+function textoSeguro(valor = "") {
+  return String(valor || "").trim();
+}
+
+function gerarRevisionArquivo() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function normalizarProof(valor = null) {
+  if (!valor || typeof valor !== "object") return null;
+  const proofVersion = numeroInteiroNaoNegativo(Number(valor.proofVersion));
+  const generation = numeroInteiroNaoNegativo(Number(valor.generation ?? valor.targetGeneration));
+  const size = numeroInteiroNaoNegativo(Number(valor.size));
+  const mtimeMs = Number(valor.mtimeMs);
+  const fileRevision = textoSeguro(valor.fileRevision);
+  if (proofVersion === null || generation === null || size === null || !Number.isFinite(mtimeMs) || !fileRevision) {
+    return null;
+  }
+  return {
+    proofVersion,
+    clienteId: textoSeguro(valor.clienteId),
+    arquivo: textoSeguro(valor.arquivo),
+    generation,
+    targetGeneration: generation,
+    fileRevision,
+    size,
+    mtimeMs,
+    ctimeMs: Number.isFinite(Number(valor.ctimeMs)) ? Number(valor.ctimeMs) : null,
+    ino: Number.isFinite(Number(valor.ino)) ? Number(valor.ino) : null,
+    dev: Number.isFinite(Number(valor.dev)) ? Number(valor.dev) : null,
+    publishedAt: textoSeguro(valor.publishedAt)
+  };
 }
 
 function estadoZero(clienteId = "admin") {
@@ -132,6 +178,13 @@ function normalizarStateDb(row = {}, clienteId = "admin") {
       ? null
       : numeroDb(authorityReadyRevisionBruta, 0),
     authorityReadyAt: row.authority_ready_at || row.authorityReadyAt || null,
+    vivaFileProof: normalizarProof(row.viva_file_proof ?? row.vivaFileProof),
+    legacyFileProof: normalizarProof(row.legacy_file_proof ?? row.legacyFileProof),
+    pendingCheckpointRevision: textoSeguro(row.pending_checkpoint_revision ?? row.pendingCheckpointRevision),
+    pendingCheckpointTargetGeneration: row.pending_checkpoint_target_generation === null || row.pendingCheckpointTargetGeneration === null
+      ? null
+      : numeroInteiroNaoNegativo(Number(row.pending_checkpoint_target_generation ?? row.pendingCheckpointTargetGeneration)),
+    pendingCheckpointStartedAt: row.pending_checkpoint_started_at || row.pendingCheckpointStartedAt || null,
     updatedAt: row.updated_at || row.updatedAt || null
   };
 
@@ -249,7 +302,10 @@ async function garantirLinhaCliente(client, clienteId = "admin", manifestoBootst
 
   const resultado = await client.query(
     `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation,
-            authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at, updated_at
+            authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at,
+            viva_file_proof, legacy_file_proof,
+            pending_checkpoint_revision, pending_checkpoint_target_generation, pending_checkpoint_started_at,
+            updated_at
        FROM ${TABELA}
       WHERE cliente_id = $1
       FOR UPDATE`,
@@ -275,17 +331,30 @@ async function atualizarState(client, state = {}, motivo = "manifest_state") {
             authority_ready_generation = $6,
             authority_ready_revision = CASE WHEN $5 THEN revision + 1 ELSE NULL END,
             authority_ready_at = CASE WHEN $5 THEN NOW() ELSE NULL END,
+            viva_file_proof = $7,
+            legacy_file_proof = $8,
+            pending_checkpoint_revision = $9,
+            pending_checkpoint_target_generation = $10,
+            pending_checkpoint_started_at = $11,
             updated_at = NOW()
       WHERE cliente_id = $1
       RETURNING cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation,
-                authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at, updated_at`,
+                authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at,
+                viva_file_proof, legacy_file_proof,
+                pending_checkpoint_revision, pending_checkpoint_target_generation, pending_checkpoint_started_at,
+                updated_at`,
     [
       clienteSeguro(state.clienteId),
       state.vivaGeneration,
       state.durableCheckpointGeneration,
       dirtyGeneration,
       authorityReady,
-      authorityReadyGeneration
+      authorityReadyGeneration,
+      state.vivaFileProof || null,
+      state.legacyFileProof || null,
+      state.pendingCheckpointRevision || null,
+      state.pendingCheckpointTargetGeneration ?? null,
+      state.pendingCheckpointStartedAt || null
     ]
   );
   return {
@@ -421,6 +490,11 @@ async function prepararReadinessAutoridade(clienteId = "admin", dados = {}, deps
       clienteId: cliente,
       revision: atual.revision,
       ...reconciliado,
+      vivaFileProof: atual.vivaFileProof,
+      legacyFileProof: atual.legacyFileProof,
+      pendingCheckpointRevision: atual.pendingCheckpointRevision || null,
+      pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
+      pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
       authorityReady: true
     }, dbPrecisaAvancar || jsonPrecisaAlinhar ? "authority_readiness_bootstrap_reconciliado" : "authority_readiness_ready");
 
@@ -441,9 +515,11 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
     const nextGeneration = atual.vivaGeneration + 1;
+    const fileRevision = textoSeguro(dados.fileRevision);
+    let escrita = null;
 
     if (typeof dados.escreverArquivo === "function") {
-      const escrita = await dados.escreverArquivo({ clienteId: cliente, state: atual, nextGeneration });
+      escrita = await dados.escreverArquivo({ clienteId: cliente, state: atual, nextGeneration, fileRevision });
       if (escrita === false || escrita?.ok === false) {
         const erro = new Error(escrita?.motivo || "arquivo_viva_falhou");
         erro.codigo = "arquivo_viva_falhou";
@@ -463,7 +539,13 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
       clienteId: cliente,
       vivaGeneration: nextGeneration,
       durableCheckpointGeneration,
-      dirtyGeneration
+      dirtyGeneration,
+      vivaFileProof: normalizarProof(escrita?.vivaFileProof) || atual.vivaFileProof,
+      legacyFileProof: escrita?.legacyFileProof ? normalizarProof(escrita.legacyFileProof) : atual.legacyFileProof,
+      pendingCheckpointRevision: atual.pendingCheckpointRevision || null,
+      pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
+      pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
+      authorityReady: false
     }, dados.motivo || "manifest_state_mutacao");
   }, deps);
 }
@@ -473,12 +555,23 @@ async function capturarTargetCheckpoint(clienteId = "admin", dados = {}, deps = 
   return comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const state = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    const checkpointRevision = textoSeguro(dados.checkpointRevision) || gerarRevisionArquivo();
+    const startedAt = new Date().toISOString();
+    const pendente = await atualizarState(client, {
+      ...state,
+      pendingCheckpointRevision: checkpointRevision,
+      pendingCheckpointTargetGeneration: state.vivaGeneration,
+      pendingCheckpointStartedAt: startedAt,
+      authorityReady: false
+    }, dados.motivo || "checkpoint_target_capturado");
     return {
       ok: true,
       motivo: "checkpoint_target_capturado",
       clienteId: cliente,
       targetGeneration: state.vivaGeneration,
-      state
+      checkpointRevision,
+      pendingCheckpointRevision: checkpointRevision,
+      state: pendente.state || state
     };
   }, deps);
 }
@@ -491,6 +584,37 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
   return comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    const checkpointRevision = textoSeguro(dados.checkpointRevision);
+    if (checkpointRevision) {
+      if (atual.pendingCheckpointRevision !== checkpointRevision ||
+          atual.pendingCheckpointTargetGeneration !== target) {
+        return {
+          ok: false,
+          motivo: "checkpoint_revision_nao_pertence",
+          clienteId: cliente,
+          targetGeneration: target,
+          checkpointRevision,
+          state: atual
+        };
+      }
+    }
+
+    let legacyFileProof = normalizarProof(dados.legacyFileProof) || atual.legacyFileProof;
+    if (typeof dados.publicarCheckpoint === "function") {
+      const publicacao = await dados.publicarCheckpoint({
+        clienteId: cliente,
+        state: atual,
+        targetGeneration: target,
+        checkpointRevision
+      });
+      if (publicacao === false || publicacao?.ok === false) {
+        const erro = new Error(publicacao?.motivo || "checkpoint_publicacao_falhou");
+        erro.codigo = "checkpoint_publicacao_falhou";
+        throw erro;
+      }
+      legacyFileProof = normalizarProof(publicacao?.legacyFileProof || publicacao?.proof) || legacyFileProof;
+    }
+
     const durableCheckpointGeneration = Math.min(
       atual.vivaGeneration,
       Math.max(atual.durableCheckpointGeneration, target)
@@ -502,12 +626,23 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
         )
       : null;
 
-    return atualizarState(client, {
+    const confirmado = await atualizarState(client, {
       clienteId: cliente,
       vivaGeneration: atual.vivaGeneration,
       durableCheckpointGeneration,
-      dirtyGeneration
+      dirtyGeneration,
+      vivaFileProof: atual.vivaFileProof,
+      legacyFileProof,
+      pendingCheckpointRevision: null,
+      pendingCheckpointTargetGeneration: null,
+      pendingCheckpointStartedAt: null,
+      authorityReady: false
     }, dados.motivo || "manifest_state_checkpoint");
+    return {
+      ...confirmado,
+      checkpointRevision,
+      legacyFileProof
+    };
   }, deps);
 }
 
@@ -532,9 +667,11 @@ async function lerStateObservacional(clienteId = "admin", deps = {}) {
     const resultado = await client.query(
     `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at
          , authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at
-         FROM ${TABELA}
-        WHERE cliente_id = $1
-        LIMIT 1`,
+         , viva_file_proof, legacy_file_proof
+         , pending_checkpoint_revision, pending_checkpoint_target_generation, pending_checkpoint_started_at
+          FROM ${TABELA}
+         WHERE cliente_id = $1
+         LIMIT 1`,
       [cliente]
     );
     if (!resultado.rows?.[0]) return { ok: false, motivo: "state_ausente", clienteId: cliente };

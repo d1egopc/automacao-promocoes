@@ -31,6 +31,11 @@ function criarPoolFake(opcoes = {}) {
       authority_ready_generation: atual.authority_ready_generation ?? null,
       authority_ready_revision: atual.authority_ready_revision ?? null,
       authority_ready_at: atual.authority_ready_at || null,
+      viva_file_proof: atual.viva_file_proof || null,
+      legacy_file_proof: atual.legacy_file_proof || null,
+      pending_checkpoint_revision: atual.pending_checkpoint_revision || null,
+      pending_checkpoint_target_generation: atual.pending_checkpoint_target_generation ?? null,
+      pending_checkpoint_started_at: atual.pending_checkpoint_started_at || null,
       updated_at: atual.updated_at || new Date("2026-08-28T00:00:00.000Z")
     };
   }
@@ -99,6 +104,11 @@ function criarPoolFake(opcoes = {}) {
                 authority_ready_generation: null,
                 authority_ready_revision: null,
                 authority_ready_at: null,
+                viva_file_proof: null,
+                legacy_file_proof: null,
+                pending_checkpoint_revision: null,
+                pending_checkpoint_target_generation: null,
+                pending_checkpoint_started_at: null,
                 updated_at: new Date("2026-08-28T00:00:00.000Z")
               });
             }
@@ -115,7 +125,19 @@ function criarPoolFake(opcoes = {}) {
           }
           if (/^UPDATE queue_manifest_state/i.test(texto)) {
             if (opcoes.falharUpdate) throw new Error("update_falhou");
-            const [clienteId, viva, durable, dirty, authorityReady, authorityReadyGeneration] = params;
+            const [
+              clienteId,
+              viva,
+              durable,
+              dirty,
+              authorityReady,
+              authorityReadyGeneration,
+              vivaFileProof,
+              legacyFileProof,
+              pendingCheckpointRevision,
+              pendingCheckpointTargetGeneration,
+              pendingCheckpointStartedAt
+            ] = params;
             const atual = state.get(clienteId) || {
               revision: 0,
               viva_generation: 0,
@@ -124,7 +146,12 @@ function criarPoolFake(opcoes = {}) {
               authority_ready: false,
               authority_ready_generation: null,
               authority_ready_revision: null,
-              authority_ready_at: null
+              authority_ready_at: null,
+              viva_file_proof: null,
+              legacy_file_proof: null,
+              pending_checkpoint_revision: null,
+              pending_checkpoint_target_generation: null,
+              pending_checkpoint_started_at: null
             };
             const proximaRevision = Number(atual.revision || 0) + 1;
             const pronto = authorityReady === true;
@@ -137,6 +164,13 @@ function criarPoolFake(opcoes = {}) {
               authority_ready_generation: pronto ? Number(authorityReadyGeneration || 0) : null,
               authority_ready_revision: pronto ? proximaRevision : null,
               authority_ready_at: pronto ? new Date("2026-08-28T00:00:01.000Z") : null,
+              viva_file_proof: vivaFileProof || null,
+              legacy_file_proof: legacyFileProof || null,
+              pending_checkpoint_revision: pendingCheckpointRevision || null,
+              pending_checkpoint_target_generation: pendingCheckpointTargetGeneration === null || pendingCheckpointTargetGeneration === undefined
+                ? null
+                : Number(pendingCheckpointTargetGeneration),
+              pending_checkpoint_started_at: pendingCheckpointStartedAt || null,
               updated_at: new Date("2026-08-28T00:00:01.000Z")
             });
             return { rows: [row(clienteId)], rowCount: 1 };
@@ -174,6 +208,9 @@ function aguardarFilaAsync() {
   assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("durable_checkpoint_generation <= viva_generation"));
   assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("authority_ready BOOLEAN"));
   assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("queue_manifest_state_authority_ready_check"));
+  assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("viva_file_proof JSONB"));
+  assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("legacy_file_proof JSONB"));
+  assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("pending_checkpoint_revision TEXT"));
 
   assert.strictEqual(repo.bootstrapValido({
     manifestVersion: 1,
@@ -243,6 +280,7 @@ function aguardarFilaAsync() {
     await repo.registrarMutacaoDuravel("cliente_checkpoint", { motivo: "insert_durante_checkpoint" }, { pool });
     const checkpoint = await repo.confirmarCheckpointDuravel("cliente_checkpoint", {
       targetGeneration: target.targetGeneration,
+      checkpointRevision: target.checkpointRevision,
       motivo: "checkpoint"
     }, { pool });
 
@@ -262,6 +300,86 @@ function aguardarFilaAsync() {
     assert.strictEqual(recente.state.durableCheckpointGeneration, 2);
     assert.strictEqual(antigo.state.durableCheckpointGeneration, 2, "checkpoint antigo terminando depois nao regride durable");
     assert.strictEqual(antigo.state.dirtyGeneration, null);
+  }
+
+  {
+    const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_checkpoint_proof", { motivo: "insert_1" }, { pool });
+    const target = await repo.capturarTargetCheckpoint("cliente_checkpoint_proof", {}, { pool });
+    let publicacoes = 0;
+    const checkpoint = await repo.confirmarCheckpointDuravel("cliente_checkpoint_proof", {
+      targetGeneration: target.targetGeneration,
+      checkpointRevision: target.checkpointRevision,
+      publicarCheckpoint: async ({ checkpointRevision, targetGeneration }) => {
+        publicacoes += 1;
+        assert.strictEqual(checkpointRevision, target.checkpointRevision);
+        assert.strictEqual(targetGeneration, 1);
+        return {
+          ok: true,
+          legacyFileProof: {
+            proofVersion: 1,
+            clienteId: "cliente_checkpoint_proof",
+            arquivo: "fila.json",
+            generation: 1,
+            targetGeneration: 1,
+            fileRevision: checkpointRevision,
+            size: 123,
+            mtimeMs: 456,
+            publishedAt: "2026-08-28T00:00:02.000Z"
+          }
+        };
+      }
+    }, { pool });
+
+    assert.strictEqual(publicacoes, 1, "publicacao final ocorre apenas apos revalidar pending sob lock");
+    assert.strictEqual(checkpoint.ok, true);
+    assert.strictEqual(checkpoint.state.legacyFileProof.fileRevision, target.checkpointRevision);
+    assert.strictEqual(checkpoint.state.pendingCheckpointRevision, "");
+    assert.strictEqual(checkpoint.state.durableCheckpointGeneration, 1);
+  }
+
+  {
+    const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_checkpoint_antigo", {}, { pool });
+    const antigo = await repo.capturarTargetCheckpoint("cliente_checkpoint_antigo", {
+      checkpointRevision: "checkpoint_antigo"
+    }, { pool });
+    const novo = await repo.capturarTargetCheckpoint("cliente_checkpoint_antigo", {
+      checkpointRevision: "checkpoint_novo"
+    }, { pool });
+    let publicouAntigo = false;
+    const confirmacaoAntiga = await repo.confirmarCheckpointDuravel("cliente_checkpoint_antigo", {
+      targetGeneration: antigo.targetGeneration,
+      checkpointRevision: antigo.checkpointRevision,
+      publicarCheckpoint: async () => {
+        publicouAntigo = true;
+        return { ok: true };
+      }
+    }, { pool });
+    const confirmacaoNova = await repo.confirmarCheckpointDuravel("cliente_checkpoint_antigo", {
+      targetGeneration: novo.targetGeneration,
+      checkpointRevision: novo.checkpointRevision,
+      publicarCheckpoint: async ({ checkpointRevision }) => ({
+        ok: true,
+        legacyFileProof: {
+          proofVersion: 1,
+          clienteId: "cliente_checkpoint_antigo",
+          arquivo: "fila.json",
+          generation: novo.targetGeneration,
+          targetGeneration: novo.targetGeneration,
+          fileRevision: checkpointRevision,
+          size: 10,
+          mtimeMs: 20,
+          publishedAt: "2026-08-28T00:00:03.000Z"
+        }
+      })
+    }, { pool });
+
+    assert.strictEqual(confirmacaoAntiga.ok, false, "checkpoint antigo perde propriedade antes do rename");
+    assert.strictEqual(confirmacaoAntiga.motivo, "checkpoint_revision_nao_pertence");
+    assert.strictEqual(publicouAntigo, false, "checkpoint antigo nao pode publicar fisicamente depois de substituido");
+    assert.strictEqual(confirmacaoNova.ok, true);
+    assert.strictEqual(confirmacaoNova.state.durableCheckpointGeneration, antigo.targetGeneration);
   }
 
   {

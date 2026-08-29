@@ -186,6 +186,11 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
   authority_ready_generation BIGINT,
   authority_ready_revision BIGINT,
   authority_ready_at TIMESTAMPTZ,
+  viva_file_proof JSONB,
+  legacy_file_proof JSONB,
+  pending_checkpoint_revision TEXT,
+  pending_checkpoint_target_generation BIGINT,
+  pending_checkpoint_started_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (durable_checkpoint_generation <= viva_generation),
   CHECK (
@@ -212,6 +217,11 @@ ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEA
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_at TIMESTAMPTZ;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS viva_file_proof JSONB;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS legacy_file_proof JSONB;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_revision TEXT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_target_generation BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS pending_checkpoint_started_at TIMESTAMPTZ;
 DO $$
 BEGIN
   IF NOT EXISTS (

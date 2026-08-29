@@ -1505,7 +1505,12 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
       authorityReady: false,
       authorityReadyGeneration: null,
       authorityReadyRevision: null,
-      authorityReadyAt: null
+      authorityReadyAt: null,
+      vivaFileProof: null,
+      legacyFileProof: null,
+      pendingCheckpointRevision: "",
+      pendingCheckpointTargetGeneration: null,
+      pendingCheckpointStartedAt: null
     };
   }
 
@@ -1544,8 +1549,10 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
       return serializar(clienteId, async () => {
         const atual = normalizar(clienteId, states.get(clienteId));
         const nextGeneration = atual.vivaGeneration + 1;
+        const fileRevision = dados.fileRevision || `rev_${nextGeneration}`;
+        let escrita = null;
         if (typeof dados.escreverArquivo === "function") {
-          const escrita = await dados.escreverArquivo({ clienteId, state: atual, nextGeneration });
+          escrita = await dados.escreverArquivo({ clienteId, state: atual, nextGeneration, fileRevision });
           if (escrita === false || escrita?.ok === false) {
             return { ok: false, motivo: escrita?.motivo || "arquivo_falhou" };
           }
@@ -1565,22 +1572,54 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           authorityReady: false,
           authorityReadyGeneration: null,
           authorityReadyRevision: null,
-          authorityReadyAt: null
+          authorityReadyAt: null,
+          vivaFileProof: escrita?.vivaFileProof || atual.vivaFileProof,
+          legacyFileProof: escrita?.legacyFileProof || atual.legacyFileProof,
+          pendingCheckpointRevision: atual.pendingCheckpointRevision || "",
+          pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
+          pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null
         };
         states.set(clienteId, state);
         return { ok: true, motivo: dados.motivo || "ok", state };
       });
     },
-    async capturarTargetCheckpoint(clienteId) {
+    async capturarTargetCheckpoint(clienteId, dados = {}) {
       chamadas.push({ tipo: "capturar_checkpoint", clienteId });
       const state = normalizar(clienteId, states.get(clienteId));
-      return { ok: true, clienteId, targetGeneration: state.vivaGeneration, state };
+      const checkpointRevision = dados.checkpointRevision || `checkpoint_${state.vivaGeneration + 1}`;
+      const atualizado = {
+        ...state,
+        revision: state.revision + 1,
+        pendingCheckpointRevision: checkpointRevision,
+        pendingCheckpointTargetGeneration: state.vivaGeneration,
+        pendingCheckpointStartedAt: "2026-08-28T00:00:00.000Z"
+      };
+      states.set(clienteId, atualizado);
+      return { ok: true, clienteId, targetGeneration: state.vivaGeneration, checkpointRevision, state: atualizado };
     },
     async confirmarCheckpointDuravel(clienteId, dados = {}) {
       chamadas.push({ tipo: "confirmar_checkpoint", clienteId });
       return serializar(clienteId, async () => {
         const atual = normalizar(clienteId, states.get(clienteId));
         const target = Number(dados.targetGeneration || 0);
+        if (dados.checkpointRevision &&
+            (atual.pendingCheckpointRevision !== dados.checkpointRevision ||
+              atual.pendingCheckpointTargetGeneration !== target)) {
+          return { ok: false, motivo: "checkpoint_revision_nao_pertence", state: atual };
+        }
+        let legacyFileProof = atual.legacyFileProof;
+        if (typeof dados.publicarCheckpoint === "function") {
+          const publicacao = await dados.publicarCheckpoint({
+            clienteId,
+            state: atual,
+            targetGeneration: target,
+            checkpointRevision: dados.checkpointRevision
+          });
+          if (publicacao === false || publicacao?.ok === false) {
+            return { ok: false, motivo: publicacao?.motivo || "checkpoint_publicacao_falhou", state: atual };
+          }
+          legacyFileProof = publicacao.legacyFileProof || publicacao.proof || legacyFileProof;
+        }
         const durableCheckpointGeneration = Math.min(
           atual.vivaGeneration,
           Math.max(atual.durableCheckpointGeneration, target)
@@ -1596,7 +1635,11 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           authorityReady: false,
           authorityReadyGeneration: null,
           authorityReadyRevision: null,
-          authorityReadyAt: null
+          authorityReadyAt: null,
+          legacyFileProof,
+          pendingCheckpointRevision: "",
+          pendingCheckpointTargetGeneration: null,
+          pendingCheckpointStartedAt: null
         };
         states.set(clienteId, state);
         return { ok: true, motivo: "checkpoint_confirmado", state };
@@ -2816,6 +2859,121 @@ async function testarPromocaoLockPostgresOperacional() {
     assert.strictEqual(state.vivaGeneration, 3);
     assert.strictEqual(state.durableCheckpointGeneration, 3, "sync legado protegido deve nascer duravel");
     assert.strictEqual(state.dirtyGeneration, null);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_file_proof_viva";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    const resultado = await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("proof_viva", { clienteId: cliente }), {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+    const proofPath = storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO);
+    const proof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+    const manifest = filaOperacionalV2.lerManifestoFilaV2(cliente, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      logger: { log: () => {} }
+    }).manifesto;
+
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(proof.arquivo, FILA_VIVA_ARQUIVO);
+    assert.strictEqual(proof.generation, resultado.generation);
+    assert.strictEqual(typeof proof.fileRevision, "string");
+    assert(proof.fileRevision.length > 0, "proof precisa ligar generation a uma publicacao fisica");
+    assert.strictEqual(repoFake.states.get(cliente).vivaFileProof.fileRevision, proof.fileRevision);
+    assert.strictEqual(manifest.vivaFileProof.fileRevision, proof.fileRevision);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_file_proof_falha";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    const resultado = await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, oferta("proof_falha", { clienteId: cliente }), {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: (clienteId, arquivo, dados) => {
+        if (arquivo === filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO) throw new Error("proof_falhou");
+        return storage.writeClienteJson(clienteId, arquivo, dados);
+      },
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+
+    assert.strictEqual(resultado.ok, false, "falha entre viva e proof nao pode confirmar generation no DB");
+    assert.strictEqual(repoFake.states.has(cliente), false, "DB fake faz rollback logico quando proof falha");
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO)), true, "arquivo publicado sem proof fica para fallback conservador por mtime");
+    assert.strictEqual(fs.existsSync(storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO)), false);
+  }
+
+  {
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_checkpoint_file_proof";
+    await repoFake.registrarMutacaoDuravel(cliente, {
+      fileRevision: "viva_rev_1",
+      escreverArquivo: async ({ nextGeneration, fileRevision }) => ({
+        ok: true,
+        vivaFileProof: {
+          proofVersion: 1,
+          clienteId: cliente,
+          arquivo: FILA_VIVA_ARQUIVO,
+          generation: nextGeneration,
+          targetGeneration: nextGeneration,
+          fileRevision,
+          size: 50,
+          mtimeMs: 60,
+          publishedAt: "2026-08-28T00:00:00.000Z"
+        }
+      })
+    });
+    const alvoA = await repoFake.capturarTargetCheckpoint(cliente, { checkpointRevision: "checkpoint_a" });
+    const alvoB = await repoFake.capturarTargetCheckpoint(cliente, { checkpointRevision: "checkpoint_b" });
+    let publicouA = false;
+    const antigo = await repoFake.confirmarCheckpointDuravel(cliente, {
+      targetGeneration: alvoA.targetGeneration,
+      checkpointRevision: alvoA.checkpointRevision,
+      publicarCheckpoint: async () => {
+        publicouA = true;
+        return { ok: true };
+      }
+    });
+    const novo = await repoFake.confirmarCheckpointDuravel(cliente, {
+      targetGeneration: alvoB.targetGeneration,
+      checkpointRevision: alvoB.checkpointRevision,
+      publicarCheckpoint: async ({ checkpointRevision, targetGeneration }) => ({
+        ok: true,
+        legacyFileProof: {
+          proofVersion: 1,
+          clienteId: cliente,
+          arquivo: "fila.json",
+          generation: targetGeneration,
+          targetGeneration,
+          fileRevision: checkpointRevision,
+          size: 70,
+          mtimeMs: 80,
+          publishedAt: "2026-08-28T00:00:01.000Z"
+        }
+      })
+    });
+
+    assert.strictEqual(antigo.ok, false);
+    assert.strictEqual(publicouA, false, "checkpoint antigo nao executa publicacao fisica apos perder pending");
+    assert.strictEqual(novo.ok, true);
+    assert.strictEqual(repoFake.states.get(cliente).legacyFileProof.fileRevision, "checkpoint_b");
+    assert.strictEqual(repoFake.states.get(cliente).durableCheckpointGeneration, 1);
   }
 
   {
