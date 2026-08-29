@@ -182,6 +182,10 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
   viva_generation BIGINT NOT NULL DEFAULT 0 CHECK (viva_generation >= 0),
   durable_checkpoint_generation BIGINT NOT NULL DEFAULT 0 CHECK (durable_checkpoint_generation >= 0),
   dirty_generation BIGINT,
+  authority_ready BOOLEAN NOT NULL DEFAULT FALSE,
+  authority_ready_generation BIGINT,
+  authority_ready_revision BIGINT,
+  authority_ready_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (durable_checkpoint_generation <= viva_generation),
   CHECK (
@@ -193,8 +197,41 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
       AND dirty_generation > durable_checkpoint_generation
       AND dirty_generation <= viva_generation
     )
+  ),
+  CHECK (
+    authority_ready = FALSE
+    OR (
+      authority_ready_generation IS NOT NULL
+      AND authority_ready_revision IS NOT NULL
+      AND authority_ready_generation = viva_generation
+      AND authority_ready_revision <= revision
+    )
   )
 );
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_at TIMESTAMPTZ;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conname = 'queue_manifest_state_authority_ready_check'
+  ) THEN
+    ALTER TABLE queue_manifest_state
+      ADD CONSTRAINT queue_manifest_state_authority_ready_check
+      CHECK (
+        authority_ready = FALSE
+        OR (
+          authority_ready_generation IS NOT NULL
+          AND authority_ready_revision IS NOT NULL
+          AND authority_ready_generation = viva_generation
+          AND authority_ready_revision <= revision
+        )
+      );
+  END IF;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_eventos_brutos_uuid
   ON engine_eventos_brutos (uuid);

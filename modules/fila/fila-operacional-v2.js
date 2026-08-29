@@ -532,6 +532,9 @@ function compararDbJsonManifestState(clienteId = "admin", dbResultado = {}, json
       dbVivaGeneration: dbState?.vivaGeneration ?? null,
       dbDurableCheckpointGeneration: dbState?.durableCheckpointGeneration ?? null,
       dbDirtyGeneration: dbState?.dirtyGeneration ?? null,
+      dbAuthorityReady: dbState?.authorityReady === true,
+      dbAuthorityReadyGeneration: dbState?.authorityReadyGeneration ?? null,
+      dbAuthorityReadyRevision: dbState?.authorityReadyRevision ?? null,
       jsonVivaGeneration: jsonManifest?.vivaGeneration ?? null,
       jsonDurableCheckpointGeneration: jsonManifest?.durableCheckpointGeneration ?? null,
       jsonDirtyGeneration: jsonManifest?.dirtyGeneration ?? null
@@ -539,6 +542,46 @@ function compararDbJsonManifestState(clienteId = "admin", dbResultado = {}, json
   }
 
   return { ...comparacao, resultado };
+}
+
+async function prepararReadinessAutoridadeRecovery(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: true, pulou: true, motivo: "manifest_state_desabilitado" };
+  }
+  const repo = repositoryManifestState(deps);
+  if (typeof repo.prepararReadinessAutoridade !== "function") {
+    return { ok: false, motivo: "repository_sem_readiness" };
+  }
+  const fsImpl = deps.fs || fs;
+  const manifestoPath = caminhoJsonCliente(cliente, FILA_V2_MANIFEST_ARQUIVO, deps);
+  const resultado = await repo.prepararReadinessAutoridade(cliente, {
+    lerManifesto: () => {
+      const leitura = lerJsonArquivoDireto(manifestoPath, null, fsImpl);
+      if (!leitura.ok) {
+        return {
+          ok: false,
+          motivo: leitura.motivo,
+          erro: leitura.erro || "",
+          bytes: leitura.bytes || 0
+        };
+      }
+      return {
+        ok: true,
+        manifesto: leitura.valor,
+        bytes: leitura.bytes || 0,
+        mtimeMs: leitura.mtimeMs || 0
+      };
+    },
+    escreverManifesto: ({ reconciliado }) => escreverManifestoFilaV2(cliente, {
+      vivaGeneration: reconciliado.vivaGeneration,
+      durableCheckpointGeneration: reconciliado.durableCheckpointGeneration,
+      checkpointGeneration: reconciliado.durableCheckpointGeneration,
+      dirtyGeneration: reconciliado.dirtyGeneration,
+      motivo: "authority_readiness_bootstrap"
+    }, deps, "manifest_authority_bootstrap")
+  }, deps);
+  return resultado;
 }
 
 function executarManifestStateAsync(clienteId = "admin", operacao = "", payload = {}, deps = {}) {
@@ -558,10 +601,12 @@ function executarManifestStateAsync(clienteId = "admin", operacao = "", payload 
         resultado = await repo.registrarLegacySyncDuravel(cliente, payload, deps);
       } else if (operacao === "read") {
         resultado = await repo.lerStateObservacional(cliente, deps);
+      } else if (operacao === "authority_bootstrap") {
+        resultado = await prepararReadinessAutoridadeRecovery(cliente, deps);
       } else {
         resultado = await repo.registrarMutacaoDuravel(cliente, payload, deps);
       }
-      compararDbJsonManifestState(cliente, resultado, payload.jsonManifest, {
+      compararDbJsonManifestState(cliente, resultado, resultado?.jsonManifest || payload.jsonManifest, {
         evento: payload.evento || `db_${operacao}`,
         motivo: payload.motivo || operacao,
         mtimeRecoveryNeeded: payload.mtimeRecoveryNeeded,
@@ -1198,7 +1243,7 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
   if (compararManifesto) {
     manifestDecision = avaliarRecoveryPeloManifesto(cliente, deps);
     resultadoComparacao = classificarComparacaoRecovery(maisNova, manifestDecision);
-    executarManifestStateAsync(cliente, "read", {
+    executarManifestStateAsync(cliente, "authority_bootstrap", {
       jsonManifest: manifestDecision.manifesto,
       evento: "db_manifest_recovery_comparacao",
       motivo: resultadoComparacao,
@@ -2723,6 +2768,7 @@ module.exports = {
   executarEscritaFilaV2Coordenada,
   capturarTargetCheckpointCoordenado,
   confirmarCheckpointCoordenado,
+  prepararReadinessAutoridadeRecovery,
   avaliarRecoveryPeloManifesto,
   lerManifestoFilaV2,
   registrarManifestoMutacaoObservacional,

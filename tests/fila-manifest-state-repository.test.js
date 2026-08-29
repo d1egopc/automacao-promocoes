@@ -27,6 +27,10 @@ function criarPoolFake(opcoes = {}) {
       viva_generation: atual.viva_generation,
       durable_checkpoint_generation: atual.durable_checkpoint_generation,
       dirty_generation: atual.dirty_generation,
+      authority_ready: atual.authority_ready || false,
+      authority_ready_generation: atual.authority_ready_generation ?? null,
+      authority_ready_revision: atual.authority_ready_revision ?? null,
+      authority_ready_at: atual.authority_ready_at || null,
       updated_at: atual.updated_at || new Date("2026-08-28T00:00:00.000Z")
     };
   }
@@ -91,6 +95,10 @@ function criarPoolFake(opcoes = {}) {
                 viva_generation: Number(viva || 0),
                 durable_checkpoint_generation: Number(durable || 0),
                 dirty_generation: dirty === null || dirty === undefined ? null : Number(dirty),
+                authority_ready: false,
+                authority_ready_generation: null,
+                authority_ready_revision: null,
+                authority_ready_at: null,
                 updated_at: new Date("2026-08-28T00:00:00.000Z")
               });
             }
@@ -107,18 +115,28 @@ function criarPoolFake(opcoes = {}) {
           }
           if (/^UPDATE queue_manifest_state/i.test(texto)) {
             if (opcoes.falharUpdate) throw new Error("update_falhou");
-            const [clienteId, viva, durable, dirty] = params;
+            const [clienteId, viva, durable, dirty, authorityReady, authorityReadyGeneration] = params;
             const atual = state.get(clienteId) || {
               revision: 0,
               viva_generation: 0,
               durable_checkpoint_generation: 0,
-              dirty_generation: null
+              dirty_generation: null,
+              authority_ready: false,
+              authority_ready_generation: null,
+              authority_ready_revision: null,
+              authority_ready_at: null
             };
+            const proximaRevision = Number(atual.revision || 0) + 1;
+            const pronto = authorityReady === true;
             state.set(clienteId, {
-              revision: Number(atual.revision || 0) + 1,
+              revision: proximaRevision,
               viva_generation: Number(viva || 0),
               durable_checkpoint_generation: Number(durable || 0),
               dirty_generation: dirty === null || dirty === undefined ? null : Number(dirty),
+              authority_ready: pronto,
+              authority_ready_generation: pronto ? Number(authorityReadyGeneration || 0) : null,
+              authority_ready_revision: pronto ? proximaRevision : null,
+              authority_ready_at: pronto ? new Date("2026-08-28T00:00:01.000Z") : null,
               updated_at: new Date("2026-08-28T00:00:01.000Z")
             });
             return { rows: [row(clienteId)], rowCount: 1 };
@@ -154,6 +172,8 @@ function aguardarFilaAsync() {
 (async () => {
   assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("PRIMARY KEY"));
   assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("durable_checkpoint_generation <= viva_generation"));
+  assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("authority_ready BOOLEAN"));
+  assert(repo.SQL_SCHEMA_QUEUE_MANIFEST_STATE.includes("queue_manifest_state_authority_ready_check"));
 
   assert.strictEqual(repo.bootstrapValido({
     manifestVersion: 1,
@@ -312,6 +332,243 @@ function aguardarFilaAsync() {
   }
 
   {
+    const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_ready_igual", { motivo: "insert" }, { pool });
+    const resultado = await repo.prepararReadinessAutoridade("cliente_ready_igual", {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 1,
+          durableCheckpointGeneration: 0,
+          dirtyGeneration: 1
+        }
+      }),
+      escreverManifesto: () => {
+        throw new Error("nao_deveria_alinhar_json");
+      }
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, true, "DB == JSON deve marcar readiness");
+    assert.strictEqual(resultado.state.authorityReady, true);
+    assert.strictEqual(resultado.state.authorityReadyGeneration, 1);
+    assert.strictEqual(resultado.state.authorityReadyRevision, resultado.state.revision);
+  }
+
+  {
+    const pool = criarPoolFake();
+    const resultado = await repo.prepararReadinessAutoridade("cliente_json_a_frente", {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 5,
+          durableCheckpointGeneration: 3,
+          dirtyGeneration: 4
+        }
+      })
+    }, { pool });
+    const leitura = await repo.lerStateObservacional("cliente_json_a_frente", { pool });
+
+    assert.strictEqual(resultado.ready, true, "JSON valido a frente deve avançar DB monotonicamente");
+    assert.strictEqual(resultado.dbPrecisaAvancar, true);
+    assert.strictEqual(leitura.state.vivaGeneration, 5);
+    assert.strictEqual(leitura.state.durableCheckpointGeneration, 3);
+    assert.strictEqual(leitura.state.dirtyGeneration, 4);
+    assert.strictEqual(leitura.state.authorityReady, true);
+  }
+
+  {
+    const pool = criarPoolFake();
+    await repo.registrarLegacySyncDuravel("cliente_db_a_frente", { motivo: "sync_1" }, { pool });
+    await repo.registrarLegacySyncDuravel("cliente_db_a_frente", { motivo: "sync_2" }, { pool });
+    const writes = [];
+    const resultado = await repo.prepararReadinessAutoridade("cliente_db_a_frente", {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 1,
+          durableCheckpointGeneration: 1,
+          dirtyGeneration: null
+        }
+      }),
+      escreverManifesto: ({ reconciliado }) => {
+        writes.push(reconciliado);
+        return {
+          ok: true,
+          manifesto: {
+            manifestVersion: 2,
+            ...reconciliado
+          }
+        };
+      }
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, true, "DB a frente pode alinhar apenas Manifest pequeno");
+    assert.strictEqual(resultado.jsonPrecisaAlinhar, true);
+    assert.strictEqual(writes.length, 1);
+    assert.strictEqual(writes[0].vivaGeneration, 2, "bootstrap nunca diminui geracao do DB");
+    assert.strictEqual(resultado.state.vivaGeneration, 2);
+    assert.strictEqual(resultado.state.durableCheckpointGeneration, 2);
+  }
+
+  {
+    const pool = criarPoolFake();
+    const resultado = await repo.prepararReadinessAutoridade("cliente_dirty_valido", {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 9,
+          durableCheckpointGeneration: 7,
+          dirtyGeneration: 8
+        }
+      })
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, true, "dirty coerente pode ficar ready");
+    assert.strictEqual(resultado.state.dirtyGeneration, 8);
+  }
+
+  {
+    const pool = criarPoolFake();
+    const resultado = await repo.prepararReadinessAutoridade("cliente_dirty_invalido", {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 9,
+          durableCheckpointGeneration: 7,
+          dirtyGeneration: null
+        }
+      })
+    }, { pool });
+    const leitura = await repo.lerStateObservacional("cliente_dirty_invalido", { pool });
+
+    assert.strictEqual(resultado.ready, false, "dirty invalido nao pode marcar readiness");
+    assert.strictEqual(resultado.motivo, "manifest_invalido");
+    assert.strictEqual(leitura.state.authorityReady, false);
+  }
+
+  {
+    const pool = criarPoolFake();
+    const ausente = await repo.prepararReadinessAutoridade("cliente_manifest_ausente", {
+      lerManifesto: () => ({ ok: false, motivo: "arquivo_ausente" })
+    }, { pool });
+    const corrompido = await repo.prepararReadinessAutoridade("cliente_manifest_corrompido", {
+      lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: "x" } })
+    }, { pool });
+
+    assert.strictEqual(ausente.ready, false, "manifest ausente fica not ready");
+    assert.strictEqual(corrompido.ready, false, "manifest corrompido/invalido fica not ready");
+  }
+
+  {
+    const pool = criarPoolFake();
+    const ordem = [];
+    const a = repo.prepararReadinessAutoridade("cliente_ready_concorrente", {
+      lerManifesto: async () => {
+        ordem.push("a_ler");
+        await new Promise(resolve => setTimeout(resolve, 5));
+        return {
+          ok: true,
+          manifesto: {
+            manifestVersion: 2,
+            vivaGeneration: 1,
+            durableCheckpointGeneration: 0,
+            dirtyGeneration: 1
+          }
+        };
+      }
+    }, { pool });
+    const b = repo.prepararReadinessAutoridade("cliente_ready_concorrente", {
+      lerManifesto: () => {
+        ordem.push("b_ler");
+        return {
+          ok: true,
+          manifesto: {
+            manifestVersion: 2,
+            vivaGeneration: 1,
+            durableCheckpointGeneration: 0,
+            dirtyGeneration: 1
+          }
+        };
+      }
+    }, { pool });
+    const [ra, rb] = await Promise.all([a, b]);
+
+    assert.strictEqual(ra.ready, true);
+    assert.strictEqual(rb.ready, true);
+    assert.deepStrictEqual(ordem, ["a_ler", "b_ler"], "bootstrap do mesmo cliente deve respeitar lock");
+  }
+
+  {
+    const pool = criarPoolFake();
+    const [a, b] = await Promise.all([
+      repo.prepararReadinessAutoridade("cliente_ready_a", {
+        lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: 1, durableCheckpointGeneration: 1, dirtyGeneration: null } })
+      }, { pool }),
+      repo.prepararReadinessAutoridade("cliente_ready_b", {
+        lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: 2, durableCheckpointGeneration: 1, dirtyGeneration: 2 } })
+      }, { pool })
+    ]);
+
+    assert.strictEqual(a.state.vivaGeneration, 1);
+    assert.strictEqual(b.state.vivaGeneration, 2, "clientes diferentes mantem readiness independente");
+  }
+
+  {
+    const semDb = await repo.prepararReadinessAutoridade("cliente_ready_sem_db", {
+      lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: 1, durableCheckpointGeneration: 1, dirtyGeneration: null } })
+    }, { pool: null });
+
+    assert.strictEqual(semDb.ok, false);
+    assert.strictEqual(semDb.motivo, "pool_indisponivel");
+  }
+
+  {
+    const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_revision_stale", { motivo: "insert" }, { pool });
+    const resultado = await repo.prepararReadinessAutoridade("cliente_revision_stale", {
+      expectedRevision: 0,
+      lerManifesto: () => {
+        throw new Error("nao_deveria_ler_manifesto_com_revision_stale");
+      }
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, false, "revision stale nao pode marcar readiness");
+    assert.strictEqual(resultado.motivo, "revision_stale");
+  }
+
+  {
+    const pool = criarPoolFake();
+    await repo.registrarLegacySyncDuravel("cliente_writer_falha", { motivo: "sync" }, { pool });
+    const resultado = await repo.prepararReadinessAutoridade("cliente_writer_falha", {
+      lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: 0, durableCheckpointGeneration: 0, dirtyGeneration: null } }),
+      escreverManifesto: () => ({ ok: false, motivo: "write_manifest_falhou" })
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, false, "falha antes da confirmacao nao pode marcar readiness");
+    assert.strictEqual(resultado.motivo, "write_manifest_falhou");
+  }
+
+  {
+    const pool = criarPoolFake();
+    for (let i = 0; i < 10; i += 1) {
+      await repo.registrarLegacySyncDuravel("cliente_nao_regride", { motivo: `sync_${i}` }, { pool });
+    }
+    const resultado = await repo.prepararReadinessAutoridade("cliente_nao_regride", {
+      lerManifesto: () => ({ ok: true, manifesto: { manifestVersion: 2, vivaGeneration: 5, durableCheckpointGeneration: 5, dirtyGeneration: null } }),
+      escreverManifesto: ({ reconciliado }) => ({ ok: true, manifesto: { manifestVersion: 2, ...reconciliado } })
+    }, { pool });
+
+    assert.strictEqual(resultado.ready, true);
+    assert.strictEqual(resultado.state.vivaGeneration, 10, "bootstrap nunca pode diminuir vivaGeneration");
+    assert.strictEqual(resultado.state.durableCheckpointGeneration, 10, "bootstrap nunca pode diminuir durableCheckpointGeneration");
+  }
+
+  {
     const storage = criarStorageTemp();
     const cliente = "cliente_integracao_db";
     const chamadas = [];
@@ -325,6 +582,29 @@ function aguardarFilaAsync() {
           state: {
             clienteId,
             revision: 1,
+            vivaGeneration: 1,
+            durableCheckpointGeneration: 0,
+            dirtyGeneration: 1
+          }
+        };
+      },
+      async prepararReadinessAutoridade(clienteId) {
+        chamadas.push({ tipo: "authority_bootstrap", clienteId });
+        return {
+          ok: true,
+          ready: true,
+          state: {
+            clienteId,
+            revision: 2,
+            vivaGeneration: 1,
+            durableCheckpointGeneration: 0,
+            dirtyGeneration: 1,
+            authorityReady: true,
+            authorityReadyGeneration: 1,
+            authorityReadyRevision: 2
+          },
+          jsonManifest: {
+            manifestVersion: 2,
             vivaGeneration: 1,
             durableCheckpointGeneration: 0,
             dirtyGeneration: 1
@@ -357,7 +637,8 @@ function aguardarFilaAsync() {
     await aguardarFilaAsync();
 
     assert.strictEqual(resultado.maisNova, true, "mtime continua autoridade operacional");
-    assert.strictEqual(chamadas.length, 1, "canario V2 deve consultar DB observacional pequeno");
+    assert.strictEqual(chamadas.length, 1, "canario V2 deve preparar readiness por DB pequeno");
+    assert.strictEqual(chamadas[0].tipo, "authority_bootstrap");
     assert(logs.some(linha => linha.includes("[FILA-V2-MANIFEST-STATE]")));
   }
 

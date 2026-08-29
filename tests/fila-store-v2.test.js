@@ -1501,7 +1501,11 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
       revision: 0,
       vivaGeneration: 0,
       durableCheckpointGeneration: 0,
-      dirtyGeneration: null
+      dirtyGeneration: null,
+      authorityReady: false,
+      authorityReadyGeneration: null,
+      authorityReadyRevision: null,
+      authorityReadyAt: null
     };
   }
 
@@ -1557,7 +1561,11 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           revision: atual.revision + 1,
           vivaGeneration: nextGeneration,
           durableCheckpointGeneration,
-          dirtyGeneration
+          dirtyGeneration,
+          authorityReady: false,
+          authorityReadyGeneration: null,
+          authorityReadyRevision: null,
+          authorityReadyAt: null
         };
         states.set(clienteId, state);
         return { ok: true, motivo: dados.motivo || "ok", state };
@@ -1584,10 +1592,45 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           ...atual,
           revision: atual.revision + 1,
           durableCheckpointGeneration,
-          dirtyGeneration
+          dirtyGeneration,
+          authorityReady: false,
+          authorityReadyGeneration: null,
+          authorityReadyRevision: null,
+          authorityReadyAt: null
         };
         states.set(clienteId, state);
         return { ok: true, motivo: "checkpoint_confirmado", state };
+      });
+    },
+    async prepararReadinessAutoridade(clienteId, dados = {}) {
+      chamadas.push({ tipo: "authority_bootstrap", clienteId });
+      return serializar(clienteId, async () => {
+        const atual = normalizar(clienteId, states.get(clienteId));
+        const leitura = typeof dados.lerManifesto === "function"
+          ? await dados.lerManifesto({ clienteId, state: atual })
+          : { ok: false };
+        if (leitura.ok !== true) return { ok: true, ready: false, motivo: leitura.motivo || "manifest_indisponivel", state: atual };
+        const manifest = leitura.manifesto || {};
+        const vivaGeneration = Math.max(atual.vivaGeneration, Number(manifest.vivaGeneration || 0));
+        const durableCheckpointGeneration = Math.min(
+          vivaGeneration,
+          Math.max(atual.durableCheckpointGeneration, Number(manifest.durableCheckpointGeneration || 0))
+        );
+        const dirtyGeneration = vivaGeneration > durableCheckpointGeneration
+          ? Math.max(durableCheckpointGeneration + 1, atual.dirtyGeneration || Number(manifest.dirtyGeneration || durableCheckpointGeneration + 1))
+          : null;
+        const state = {
+          ...atual,
+          revision: atual.revision + 1,
+          vivaGeneration,
+          durableCheckpointGeneration,
+          dirtyGeneration,
+          authorityReady: true,
+          authorityReadyGeneration: vivaGeneration,
+          authorityReadyRevision: atual.revision + 1
+        };
+        states.set(clienteId, state);
+        return { ok: true, ready: true, motivo: "authority_readiness_ready", state, jsonManifest: manifest };
       });
     }
   };

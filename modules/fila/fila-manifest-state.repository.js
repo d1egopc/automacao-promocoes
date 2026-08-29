@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
   viva_generation BIGINT NOT NULL DEFAULT 0 CHECK (viva_generation >= 0),
   durable_checkpoint_generation BIGINT NOT NULL DEFAULT 0 CHECK (durable_checkpoint_generation >= 0),
   dirty_generation BIGINT,
+  authority_ready BOOLEAN NOT NULL DEFAULT FALSE,
+  authority_ready_generation BIGINT,
+  authority_ready_revision BIGINT,
+  authority_ready_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (durable_checkpoint_generation <= viva_generation),
   CHECK (
@@ -23,8 +27,41 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
       AND dirty_generation > durable_checkpoint_generation
       AND dirty_generation <= viva_generation
     )
+  ),
+  CHECK (
+    authority_ready = FALSE
+    OR (
+      authority_ready_generation IS NOT NULL
+      AND authority_ready_revision IS NOT NULL
+      AND authority_ready_generation = viva_generation
+      AND authority_ready_revision <= revision
+    )
   )
 );
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
+ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_at TIMESTAMPTZ;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conname = 'queue_manifest_state_authority_ready_check'
+  ) THEN
+    ALTER TABLE queue_manifest_state
+      ADD CONSTRAINT queue_manifest_state_authority_ready_check
+      CHECK (
+        authority_ready = FALSE
+        OR (
+          authority_ready_generation IS NOT NULL
+          AND authority_ready_revision IS NOT NULL
+          AND authority_ready_generation = viva_generation
+          AND authority_ready_revision <= revision
+        )
+      );
+  END IF;
+END $$;
 `;
 
 function clienteSeguro(clienteId = "admin") {
@@ -73,6 +110,9 @@ function validarState(state = {}) {
 }
 
 function normalizarStateDb(row = {}, clienteId = "admin") {
+  const authorityReady = row.authority_ready === true || row.authorityReady === true;
+  const authorityReadyGenerationBruta = row.authority_ready_generation ?? row.authorityReadyGeneration;
+  const authorityReadyRevisionBruta = row.authority_ready_revision ?? row.authorityReadyRevision;
   const state = {
     clienteId: clienteSeguro(row.cliente_id || row.clienteId || clienteId),
     revision: numeroDb(row.revision, 0),
@@ -84,6 +124,14 @@ function normalizarStateDb(row = {}, clienteId = "admin") {
     dirtyGeneration: row.dirty_generation === null || row.dirtyGeneration === null
       ? null
       : numeroDb(row.dirty_generation ?? row.dirtyGeneration, 0),
+    authorityReady,
+    authorityReadyGeneration: authorityReadyGenerationBruta === null || authorityReadyGenerationBruta === undefined
+      ? null
+      : numeroDb(authorityReadyGenerationBruta, 0),
+    authorityReadyRevision: authorityReadyRevisionBruta === null || authorityReadyRevisionBruta === undefined
+      ? null
+      : numeroDb(authorityReadyRevisionBruta, 0),
+    authorityReadyAt: row.authority_ready_at || row.authorityReadyAt || null,
     updatedAt: row.updated_at || row.updatedAt || null
   };
 
@@ -98,6 +146,19 @@ function normalizarStateDb(row = {}, clienteId = "admin") {
     state.dirtyGeneration > state.vivaGeneration
   ) {
     state.dirtyGeneration = state.durableCheckpointGeneration + 1;
+  }
+  if (
+    state.authorityReady &&
+    (
+      state.authorityReadyGeneration !== state.vivaGeneration ||
+      !Number.isInteger(state.authorityReadyRevision) ||
+      state.authorityReadyRevision > state.revision
+    )
+  ) {
+    state.authorityReady = false;
+    state.authorityReadyGeneration = null;
+    state.authorityReadyRevision = null;
+    state.authorityReadyAt = null;
   }
   return state;
 }
@@ -187,7 +248,8 @@ async function garantirLinhaCliente(client, clienteId = "admin", manifestoBootst
   );
 
   const resultado = await client.query(
-    `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at
+    `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation,
+            authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at, updated_at
        FROM ${TABELA}
       WHERE cliente_id = $1
       FOR UPDATE`,
@@ -201,20 +263,29 @@ async function atualizarState(client, state = {}, motivo = "manifest_state") {
   const dirtyGeneration = state.vivaGeneration > state.durableCheckpointGeneration
     ? state.dirtyGeneration || state.durableCheckpointGeneration + 1
     : null;
+  const authorityReady = state.authorityReady === true;
+  const authorityReadyGeneration = authorityReady ? state.vivaGeneration : null;
   const resultado = await client.query(
     `UPDATE ${TABELA}
         SET revision = revision + 1,
             viva_generation = $2,
             durable_checkpoint_generation = $3,
             dirty_generation = $4,
+            authority_ready = $5,
+            authority_ready_generation = $6,
+            authority_ready_revision = CASE WHEN $5 THEN revision + 1 ELSE NULL END,
+            authority_ready_at = CASE WHEN $5 THEN NOW() ELSE NULL END,
             updated_at = NOW()
       WHERE cliente_id = $1
-      RETURNING cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at`,
+      RETURNING cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation,
+                authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at, updated_at`,
     [
       clienteSeguro(state.clienteId),
       state.vivaGeneration,
       state.durableCheckpointGeneration,
-      dirtyGeneration
+      dirtyGeneration,
+      authorityReady,
+      authorityReadyGeneration
     ]
   );
   return {
@@ -222,6 +293,146 @@ async function atualizarState(client, state = {}, motivo = "manifest_state") {
     motivo,
     state: normalizarStateDb(resultado.rows?.[0] || state, state.clienteId)
   };
+}
+
+function estadoLogico(state = {}) {
+  return {
+    vivaGeneration: numeroDb(state.vivaGeneration, 0),
+    durableCheckpointGeneration: numeroDb(state.durableCheckpointGeneration, 0),
+    dirtyGeneration: state.dirtyGeneration === null || state.dirtyGeneration === undefined
+      ? null
+      : numeroDb(state.dirtyGeneration, 0)
+  };
+}
+
+function estadosLogicosEquivalentes(a = {}, b = {}) {
+  const left = estadoLogico(a);
+  const right = estadoLogico(b);
+  return left.vivaGeneration === right.vivaGeneration &&
+    left.durableCheckpointGeneration === right.durableCheckpointGeneration &&
+    left.dirtyGeneration === right.dirtyGeneration;
+}
+
+function reconciliarEstadosMonotonico(dbState = {}, jsonState = {}) {
+  const db = estadoLogico(dbState);
+  const json = estadoLogico(jsonState);
+  const vivaGeneration = Math.max(db.vivaGeneration, json.vivaGeneration);
+  const durableCheckpointGeneration = Math.min(
+    vivaGeneration,
+    Math.max(db.durableCheckpointGeneration, json.durableCheckpointGeneration)
+  );
+  let dirtyGeneration = null;
+  if (vivaGeneration > durableCheckpointGeneration) {
+    const candidatos = [db.dirtyGeneration, json.dirtyGeneration]
+      .filter(valor => Number.isInteger(valor) && valor > durableCheckpointGeneration && valor <= vivaGeneration);
+    dirtyGeneration = candidatos.length
+      ? Math.min(...candidatos)
+      : durableCheckpointGeneration + 1;
+  }
+  return {
+    vivaGeneration,
+    durableCheckpointGeneration,
+    dirtyGeneration
+  };
+}
+
+async function prepararReadinessAutoridade(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  return comTransacao(async (client) => {
+    await inicializarSchemaQueueManifestState(client);
+    const atual = await garantirLinhaCliente(client, cliente, {});
+    const expectedRevision = numeroInteiroNaoNegativo(dados.expectedRevision);
+    if (expectedRevision !== null && expectedRevision !== atual.revision) {
+      if (atual.authorityReady) {
+        await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_revision_stale");
+      }
+      return {
+        ok: true,
+        ready: false,
+        motivo: "revision_stale",
+        clienteId: cliente,
+        state: atual
+      };
+    }
+
+    if (typeof dados.lerManifesto !== "function") {
+      if (atual.authorityReady) {
+        const invalidado = await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_manifest_reader_missing");
+        return { ...invalidado, ready: false, motivo: "manifest_reader_indisponivel" };
+      }
+      return { ok: true, ready: false, motivo: "manifest_reader_indisponivel", clienteId: cliente, state: atual };
+    }
+
+    const leituraManifesto = await dados.lerManifesto({ clienteId: cliente, state: atual });
+    if (leituraManifesto?.ok !== true) {
+      if (atual.authorityReady) {
+        const invalidado = await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_manifest_indisponivel");
+        return { ...invalidado, ready: false, motivo: leituraManifesto?.motivo || "manifest_indisponivel" };
+      }
+      return {
+        ok: true,
+        ready: false,
+        motivo: leituraManifesto?.motivo || "manifest_indisponivel",
+        clienteId: cliente,
+        state: atual
+      };
+    }
+
+    const jsonState = bootstrapValido(leituraManifesto.manifesto);
+    if (!jsonState) {
+      if (atual.authorityReady) {
+        const invalidado = await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_manifest_invalido");
+        return { ...invalidado, ready: false, motivo: "manifest_invalido" };
+      }
+      return { ok: true, ready: false, motivo: "manifest_invalido", clienteId: cliente, state: atual };
+    }
+
+    const reconciliado = reconciliarEstadosMonotonico(atual, jsonState);
+    const dbPrecisaAvancar = !estadosLogicosEquivalentes(atual, reconciliado);
+    const jsonPrecisaAlinhar = !estadosLogicosEquivalentes(jsonState, reconciliado);
+    let jsonManifestFinal = leituraManifesto.manifesto;
+
+    if (jsonPrecisaAlinhar) {
+      if (typeof dados.escreverManifesto !== "function") {
+        if (atual.authorityReady) {
+          const invalidado = await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_manifest_writer_missing");
+          return { ...invalidado, ready: false, motivo: "manifest_writer_indisponivel" };
+        }
+        return { ok: true, ready: false, motivo: "manifest_writer_indisponivel", clienteId: cliente, state: atual };
+      }
+      const escritaManifesto = await dados.escreverManifesto({
+        clienteId: cliente,
+        state: atual,
+        manifestoAtual: leituraManifesto.manifesto,
+        reconciliado
+      });
+      if (escritaManifesto === false || escritaManifesto?.ok === false) {
+        const motivo = escritaManifesto?.motivo || "manifest_write_falhou";
+        if (atual.authorityReady) {
+          const invalidado = await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_manifest_write_falhou");
+          return { ...invalidado, ready: false, motivo };
+        }
+        return { ok: true, ready: false, motivo, clienteId: cliente, state: atual };
+      }
+      jsonManifestFinal = escritaManifesto.manifesto || jsonManifestFinal;
+    }
+
+    const resultado = await atualizarState(client, {
+      clienteId: cliente,
+      revision: atual.revision,
+      ...reconciliado,
+      authorityReady: true
+    }, dbPrecisaAvancar || jsonPrecisaAlinhar ? "authority_readiness_bootstrap_reconciliado" : "authority_readiness_ready");
+
+    return {
+      ...resultado,
+      ready: resultado.ok === true && resultado.state?.authorityReady === true,
+      reconciliado: dbPrecisaAvancar || jsonPrecisaAlinhar,
+      dbPrecisaAvancar,
+      jsonPrecisaAlinhar,
+      jsonManifest: jsonManifestFinal
+    };
+  }, deps);
 }
 
 async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {}) {
@@ -319,7 +530,8 @@ async function lerStateObservacional(clienteId = "admin", deps = {}) {
   try {
     await inicializarSchemaQueueManifestState(client);
     const resultado = await client.query(
-      `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at
+    `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at
+         , authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at
          FROM ${TABELA}
         WHERE cliente_id = $1
         LIMIT 1`,
@@ -353,7 +565,8 @@ function compararDbJson(dbState = null, jsonManifest = null) {
     dbState.dirtyGeneration === json.dirtyGeneration;
   return {
     resultado: equivalente ? "db_json_equivalente" : "db_json_divergente",
-    equivalente
+    equivalente,
+    dbAuthorityReady: dbState.authorityReady === true
   };
 }
 
@@ -369,7 +582,9 @@ module.exports = {
   inicializarSchemaQueueManifestState,
   lerStateObservacional,
   normalizarStateDb,
+  prepararReadinessAutoridade,
   registrarLegacySyncDuravel,
   registrarMutacaoDuravel,
+  reconciliarEstadosMonotonico,
   validarState
 };
