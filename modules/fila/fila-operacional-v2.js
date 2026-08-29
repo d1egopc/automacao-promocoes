@@ -2850,6 +2850,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     lerManifestoFilaV2: (clienteId, deps = {}) => lerManifestoFilaV2(clienteId, { ...opcoes, ...deps }),
     registrarManifestoMutacaoObservacional: (clienteId, dados = {}, deps = {}) => registrarManifestoMutacaoObservacional(clienteId, dados, { ...opcoes, ...deps }),
     registrarManifestoCheckpointObservacional: (clienteId, dados = {}, deps = {}) => registrarManifestoCheckpointObservacional(clienteId, dados, { ...opcoes, ...deps }),
+    publicarProofFilaLegada: (clienteId, dados = {}, deps = {}) => publicarProofFilaLegada(clienteId, dados, { ...opcoes, ...deps }),
     resetarCacheHistoricoParaTeste: limparCacheHistorico
   };
 }

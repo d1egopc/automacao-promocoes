@@ -550,6 +550,36 @@ function criarDepsFilaOperacionalTeste() {
 
 {
   const { deps } = criarDepsFilaOperacionalTeste();
+  const cliente = "cliente_proof_legado";
+  const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env: {},
+    ...deps,
+    agora: AGORA
+  });
+  assert.strictEqual(typeof controlador, "object");
+  assert.strictEqual(typeof controlador.publicarProofFilaLegada, "function");
+  assert.strictEqual(typeof controlador.prepararSeHabilitado, "function");
+
+  deps.writeClienteJson(cliente, "fila.json", [oferta("proof_1", { clienteId: cliente })]);
+  const resultado = controlador.publicarProofFilaLegada(cliente, {
+    targetGeneration: 42,
+    fileRevision: "checkpoint_revision_teste"
+  }, {
+    agora: AGORA + 1234
+  });
+  const proof = deps.readClienteJson(cliente, filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO, null);
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(proof.clienteId, cliente);
+  assert.strictEqual(proof.arquivo, "fila.json");
+  assert.strictEqual(proof.generation, 42);
+  assert.strictEqual(proof.targetGeneration, 42);
+  assert.strictEqual(proof.fileRevision, "checkpoint_revision_teste");
+  assert.strictEqual(proof.publishedAt, new Date(AGORA + 1234).toISOString());
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
   const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
     env: {
       FILA_V2_OPERACIONAL_ROLLOUT: "canary",
