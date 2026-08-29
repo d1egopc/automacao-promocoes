@@ -23,6 +23,7 @@ const FLAG_OPERACIONAL_ATIVA = "FILA_V2_OPERACIONAL_ATIVA";
 const FLAG_ROLLOUT_ATIVO = "FILA_V2_OPERACIONAL_ROLLOUT";
 const FLAG_CANARY_CLIENTES = "FILA_V2_OPERACIONAL_CANARY_CLIENTES";
 const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
+const FLAG_RECOVERY_AUTORIDADE = "FILA_V2_RECOVERY_AUTORIDADE";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
 const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
 const TAG_MANIFEST = "[FILA-V2-MANIFEST]";
@@ -139,6 +140,11 @@ function deveUsarFilaV2Operacional(clienteId = "admin", env = process.env) {
   return false;
 }
 
+function autoridadeRecovery(env = process.env) {
+  const valor = texto(env?.[FLAG_RECOVERY_AUTORIDADE] || "").toLowerCase();
+  return valor === "generation" ? "generation" : "mtime";
+}
+
 function normalizarEntradasViva(valor = [], agora = Date.now()) {
   return lista(valor).map((item, indice) => normalizarEntradaViva(item, indice, agora));
 }
@@ -248,6 +254,156 @@ function publicarProofFilaLegada(clienteId = "admin", dados = {}, deps = {}) {
   return publicarProofArquivo(cliente, FILA_LEGADA_PROOF_ARQUIVO, proof, deps);
 }
 
+function numeroProofEstrito(valor) {
+  const numero = Number(valor);
+  return Number.isInteger(numero) && numero >= 0 ? numero : null;
+}
+
+function normalizarProofAutoridade(valor = null) {
+  if (!valor || typeof valor !== "object") return null;
+  const proofVersion = numeroProofEstrito(valor.proofVersion);
+  const generation = numeroProofEstrito(valor.generation ?? valor.targetGeneration);
+  const size = numeroProofEstrito(valor.size);
+  const mtimeMs = Number(valor.mtimeMs);
+  const fileRevision = texto(valor.fileRevision);
+  if (proofVersion !== FILA_V2_FILE_PROOF_VERSION ||
+      generation === null ||
+      size === null ||
+      !Number.isFinite(mtimeMs) ||
+      !fileRevision) {
+    return null;
+  }
+  return {
+    proofVersion,
+    clienteId: texto(valor.clienteId),
+    arquivo: texto(valor.arquivo),
+    generation,
+    targetGeneration: generation,
+    fileRevision,
+    size,
+    mtimeMs,
+    ctimeMs: Number.isFinite(Number(valor.ctimeMs)) ? Number(valor.ctimeMs) : null,
+    ino: Number.isFinite(Number(valor.ino)) ? Number(valor.ino) : null,
+    dev: Number.isFinite(Number(valor.dev)) ? Number(valor.dev) : null
+  };
+}
+
+function mtimeCompatível(a, b) {
+  return Math.abs(Number(a || 0) - Number(b || 0)) <= 1;
+}
+
+function dirtyGenerationCoerente(vivaGeneration, durableCheckpointGeneration, dirtyGeneration) {
+  if (vivaGeneration === durableCheckpointGeneration) return dirtyGeneration === null;
+  return Number.isInteger(dirtyGeneration) &&
+    dirtyGeneration > durableCheckpointGeneration &&
+    dirtyGeneration <= vivaGeneration;
+}
+
+function validarStateRecoveryGeneration(state = {}) {
+  const vivaGeneration = numeroProofEstrito(state.vivaGeneration);
+  const durableCheckpointGeneration = numeroProofEstrito(state.durableCheckpointGeneration);
+  const revision = numeroProofEstrito(state.revision);
+  const dirtyGeneration = state.dirtyGeneration === null
+    ? null
+    : numeroProofEstrito(state.dirtyGeneration);
+  if (vivaGeneration === null || durableCheckpointGeneration === null || revision === null) {
+    return { ok: false, motivo: "generation_invalida" };
+  }
+  if (durableCheckpointGeneration > vivaGeneration) {
+    return { ok: false, motivo: "generation_invalida" };
+  }
+  if (!dirtyGenerationCoerente(vivaGeneration, durableCheckpointGeneration, dirtyGeneration)) {
+    return { ok: false, motivo: "generation_invalida" };
+  }
+  if (state.authorityReady !== true ||
+      Number(state.authorityReadyGeneration) !== vivaGeneration ||
+      !Number.isInteger(Number(state.authorityReadyRevision)) ||
+      Number(state.authorityReadyRevision) > revision) {
+    return { ok: false, motivo: "authority_not_ready" };
+  }
+  if (state.pendingCheckpointRevision || state.pendingCheckpointTargetGeneration !== null) {
+    return { ok: false, motivo: "pending_ambiguo" };
+  }
+  return { ok: true };
+}
+
+function validarManifestoRecoveryGeneration(clienteId = "admin", state = {}, deps = {}) {
+  const leitura = lerManifestoFilaV2(clienteId, deps);
+  if (leitura.ok !== true) return { ok: false, motivo: leitura.motivo || "manifest_ausente" };
+  const manifesto = leitura.manifesto || {};
+  if (Number(manifesto.vivaGeneration) !== Number(state.vivaGeneration) ||
+      Number(manifesto.durableCheckpointGeneration) !== Number(state.durableCheckpointGeneration) ||
+      (manifesto.dirtyGeneration ?? null) !== (state.dirtyGeneration ?? null)) {
+    return { ok: false, motivo: "manifest_mismatch" };
+  }
+  return { ok: true, manifesto };
+}
+
+function validarProofPublicado(clienteId = "admin", config = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const proofDb = normalizarProofAutoridade(config.proofDb);
+  if (!proofDb) return { ok: false, motivo: `${config.prefixo}_proof_ausente` };
+
+  const proofPath = caminhoJsonCliente(cliente, config.arquivoProof, deps);
+  const leituraProof = lerJsonArquivoDireto(proofPath, null, fsImpl);
+  if (leituraProof.ok !== true) return { ok: false, motivo: `${config.prefixo}_proof_ausente` };
+  const proofArquivo = normalizarProofAutoridade(leituraProof.valor);
+  if (!proofArquivo) return { ok: false, motivo: `${config.prefixo}_proof_mismatch` };
+
+  const generationEsperada = Number(config.generation);
+  if (proofDb.clienteId !== cliente ||
+      proofArquivo.clienteId !== cliente ||
+      proofDb.arquivo !== config.arquivoDados ||
+      proofArquivo.arquivo !== config.arquivoDados ||
+      proofDb.generation !== generationEsperada ||
+      proofArquivo.generation !== generationEsperada ||
+      proofDb.fileRevision !== proofArquivo.fileRevision ||
+      proofDb.size !== proofArquivo.size ||
+      !mtimeCompatível(proofDb.mtimeMs, proofArquivo.mtimeMs)) {
+    return { ok: false, motivo: `${config.prefixo}_proof_mismatch` };
+  }
+
+  const stat = statArquivoSeguro(caminhoJsonCliente(cliente, config.arquivoDados, deps), fsImpl);
+  if (!stat.existe) return { ok: false, motivo: "arquivo_ausente" };
+  if (Number(stat.size ?? stat.bytes) !== proofArquivo.size ||
+      !mtimeCompatível(stat.mtimeMs, proofArquivo.mtimeMs)) {
+    return { ok: false, motivo: "stat_mismatch" };
+  }
+
+  return { ok: true, proof: proofArquivo, stat };
+}
+
+function validarEstadoFisicoRecoveryGeneration(clienteId = "admin", state = {}, deps = {}) {
+  const stateValido = validarStateRecoveryGeneration(state);
+  if (!stateValido.ok) return stateValido;
+
+  const manifesto = validarManifestoRecoveryGeneration(clienteId, state, deps);
+  if (!manifesto.ok) return manifesto;
+
+  const vivaProof = validarProofPublicado(clienteId, {
+    prefixo: "viva",
+    arquivoDados: FILA_VIVA_ARQUIVO,
+    arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+    generation: state.vivaGeneration,
+    proofDb: state.vivaFileProof
+  }, deps);
+  if (!vivaProof.ok) return vivaProof;
+
+  if (Number(state.vivaGeneration) === Number(state.durableCheckpointGeneration)) {
+    const legacyProof = validarProofPublicado(clienteId, {
+      prefixo: "legacy",
+      arquivoDados: FILA_LEGADA_ARQUIVO,
+      arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+      generation: state.durableCheckpointGeneration,
+      proofDb: state.legacyFileProof
+    }, deps);
+    if (!legacyProof.ok) return legacyProof;
+  }
+
+  return { ok: true, manifesto: manifesto.manifesto, vivaProof: vivaProof.proof };
+}
+
 function tamanhoJsonBytes(valor) {
   try {
     return Buffer.byteLength(JSON.stringify(valor), "utf8");
@@ -303,6 +459,13 @@ function logManifestState(logger = console, payload = {}) {
     const destino = logger && typeof logger.log === "function" ? logger : console;
     destino.log(TAG_MANIFEST_STATE, JSON.stringify(payload));
   } catch {}
+}
+
+function logRecoveryAuthority(logger = console, payload = {}, agora = Date.now()) {
+  const cliente = clienteSeguro(payload.clienteId || "admin");
+  const resultado = texto(payload.resultado || "recovery_authority");
+  if (!deveLogarManifestState(cliente, resultado, agora)) return;
+  logManifestState(logger, payload);
 }
 
 function hashCurto(valor = "") {
@@ -1378,6 +1541,142 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
       durableCheckpointGeneration: manifestDecision.durableCheckpointGeneration || 0
     }
   };
+}
+
+async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const ctx = contexto && typeof contexto === "object" ? contexto : { contexto };
+  const autoridadeSolicitada = autoridadeRecovery(deps.env || process.env);
+  const resultadoMtime = () => {
+    const decisao = filaVivaMaisNovaQueLegado(cliente, deps);
+    return {
+      ok: decisao.ok !== false,
+      clienteId: cliente,
+      autoridadeSolicitada,
+      autoridadeUsada: "mtime",
+      generationConclusiva: false,
+      maisNova: decisao.maisNova === true,
+      recoveryAplicado: false,
+      fallbackMtime: autoridadeSolicitada === "generation",
+      motivo: autoridadeSolicitada === "generation" ? "fallback_mtime" : "authority_mtime",
+      decisaoMtime: decisao
+    };
+  };
+
+  if (autoridadeSolicitada !== "generation") {
+    const resultado = resultadoMtime();
+    logRecoveryAuthority(deps.logger, {
+      versao: 1,
+      evento: "recovery_authority",
+      clienteId: cliente,
+      contexto: texto(ctx.contexto || ""),
+      resultado: "authority_mtime",
+      autoridadeSolicitada,
+      autoridadeUsada: "mtime",
+      maisNova: resultado.maisNova
+    }, deps.agora || Date.now());
+    return resultado;
+  }
+
+  if (!deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
+    const resultado = resultadoMtime();
+    resultado.motivo = "off_canary_fallback_mtime";
+    logRecoveryAuthority(deps.logger, {
+      versao: 1,
+      evento: "recovery_authority",
+      clienteId: cliente,
+      contexto: texto(ctx.contexto || ""),
+      resultado: "authority_generation_fallback_mtime",
+      motivo: "off_canary",
+      autoridadeSolicitada,
+      autoridadeUsada: "mtime",
+      maisNova: resultado.maisNova
+    }, deps.agora || Date.now());
+    return resultado;
+  }
+
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.avaliarAutoridadeRecovery !== "function") {
+    const resultado = resultadoMtime();
+    resultado.motivo = "db_indisponivel";
+    logRecoveryAuthority(deps.logger, {
+      versao: 1,
+      evento: "recovery_authority",
+      clienteId: cliente,
+      contexto: texto(ctx.contexto || ""),
+      resultado: "authority_generation_fallback_mtime",
+      motivo: "db_indisponivel",
+      autoridadeSolicitada,
+      autoridadeUsada: "mtime",
+      maisNova: resultado.maisNova
+    }, deps.agora || Date.now());
+    return resultado;
+  }
+
+  let decisaoGeneration;
+  try {
+    decisaoGeneration = await repo.avaliarAutoridadeRecovery(cliente, {
+      contexto: texto(ctx.contexto || ""),
+      validarEstadoFisico: ({ state }) => validarEstadoFisicoRecoveryGeneration(cliente, state, deps)
+    }, deps);
+  } catch (erro) {
+    decisaoGeneration = {
+      ok: false,
+      conclusiva: false,
+      fallbackMtime: true,
+      motivo: erro?.message || "db_indisponivel"
+    };
+  }
+
+  if (decisaoGeneration?.ok === true && decisaoGeneration.conclusiva === true) {
+    const maisNova = decisaoGeneration.maisNova === true;
+    logRecoveryAuthority(deps.logger, {
+      versao: 1,
+      evento: "recovery_authority",
+      clienteId: cliente,
+      contexto: texto(ctx.contexto || ""),
+      resultado: "authority_generation_conclusiva",
+      motivo: decisaoGeneration.motivo || "",
+      autoridadeSolicitada,
+      autoridadeUsada: "generation",
+      maisNova,
+      dbRevision: decisaoGeneration.state?.revision ?? null,
+      dbVivaGeneration: decisaoGeneration.state?.vivaGeneration ?? null,
+      dbDurableCheckpointGeneration: decisaoGeneration.state?.durableCheckpointGeneration ?? null,
+      dbDirtyGeneration: decisaoGeneration.state?.dirtyGeneration ?? null
+    }, deps.agora || Date.now());
+    return {
+      ok: true,
+      clienteId: cliente,
+      autoridadeSolicitada,
+      autoridadeUsada: "generation",
+      generationConclusiva: true,
+      maisNova,
+      recoveryAplicado: false,
+      fallbackMtime: false,
+      motivo: decisaoGeneration.motivo || (maisNova ? "generation_viva_mais_nova" : "generation_legado_cobre_viva"),
+      state: decisaoGeneration.state || null
+    };
+  }
+
+  const resultado = resultadoMtime();
+  resultado.motivo = decisaoGeneration?.motivo || "generation_inconclusiva";
+  logRecoveryAuthority(deps.logger, {
+    versao: 1,
+    evento: "recovery_authority",
+    clienteId: cliente,
+    contexto: texto(ctx.contexto || ""),
+    resultado: "authority_generation_fallback_mtime",
+    motivo: resultado.motivo,
+    autoridadeSolicitada,
+    autoridadeUsada: "mtime",
+    maisNova: resultado.maisNova,
+    dbRevision: decisaoGeneration?.state?.revision ?? null,
+    dbVivaGeneration: decisaoGeneration?.state?.vivaGeneration ?? null,
+    dbDurableCheckpointGeneration: decisaoGeneration?.state?.durableCheckpointGeneration ?? null,
+    dbDirtyGeneration: decisaoGeneration?.state?.dirtyGeneration ?? null
+  }, deps.agora || Date.now());
+  return resultado;
 }
 
 function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
@@ -2840,6 +3139,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     confirmarCheckpointCoordenado: (clienteId, dados = {}, deps = {}) => confirmarCheckpointCoordenado(clienteId, dados, { ...opcoes, ...deps }),
     lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
+    reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
     lerFilaVivaReadOnly: (clienteId, deps = {}) => lerFilaVivaReadOnly(clienteId, { ...opcoes, ...deps }),
@@ -2861,6 +3161,7 @@ module.exports = {
   FLAG_ROLLOUT_ATIVO,
   FLAG_CANARY_CLIENTES,
   FLAG_2B1_SHADOW_ATIVA,
+  FLAG_RECOVERY_AUTORIDADE,
   FLAG_CHECKPOINT_MUTACOES,
   FLAG_CHECKPOINT_INTERVALO_MS,
   FLAG_CHECKPOINT_MAX_DIRTY_MS,
@@ -2887,6 +3188,8 @@ module.exports = {
   mesclarFilaLegadaComViva,
   lerFilaVivaParaMerge,
   filaVivaMaisNovaQueLegado,
+  reconciliarFilaV2ParaLeitura,
+  autoridadeRecovery,
   lerFilaViva,
   lerFilaVivaReadOnly,
   escreverFilaViva,

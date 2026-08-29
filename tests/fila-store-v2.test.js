@@ -1705,6 +1705,38 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
         states.set(clienteId, state);
         return { ok: true, ready: true, motivo: "authority_readiness_ready", state, jsonManifest: manifest };
       });
+    },
+    async avaliarAutoridadeRecovery(clienteId, dados = {}) {
+      chamadas.push({ tipo: "authority_recovery", clienteId });
+      return serializar(clienteId, async () => {
+        if (opcoes.falharRecoveryAuthority) return { ok: false, motivo: "db_indisponivel" };
+        const state = normalizar(clienteId, states.get(clienteId));
+        if (!states.has(clienteId)) {
+          return { ok: true, conclusiva: false, fallbackMtime: true, motivo: "state_ausente", state };
+        }
+        if (state.authorityReady !== true) {
+          return { ok: true, conclusiva: false, fallbackMtime: true, motivo: "authority_not_ready", state };
+        }
+        if (state.pendingCheckpointRevision || state.pendingCheckpointTargetGeneration !== null) {
+          return { ok: true, conclusiva: false, fallbackMtime: true, motivo: "pending_ambiguo", state };
+        }
+        if (typeof dados.validarEstadoFisico === "function") {
+          const validacao = await dados.validarEstadoFisico({ clienteId, state });
+          if (validacao?.ok !== true) {
+            return { ok: true, conclusiva: false, fallbackMtime: true, motivo: validacao?.motivo || "proof_invalida", state };
+          }
+        }
+        return {
+          ok: true,
+          conclusiva: true,
+          fallbackMtime: false,
+          motivo: state.vivaGeneration > state.durableCheckpointGeneration
+            ? "generation_viva_mais_nova"
+            : "generation_legado_cobre_viva",
+          maisNova: state.vivaGeneration > state.durableCheckpointGeneration,
+          state
+        };
+      });
     }
   };
 }
@@ -2221,6 +2253,86 @@ function manifestoRecoveryV2(vivaGeneration, durableCheckpointGeneration, itemCo
     durableCheckpointGeneration,
     itemCount
   };
+}
+
+function escreverArquivoComProof(storage, cliente, arquivo, arquivoProof, dados, generation, fileRevision, mtime = AGORA) {
+  storage.writeClienteJson(cliente, arquivo, dados);
+  const arquivoPath = storage.getClienteJsonPath(cliente, arquivo);
+  fs.utimesSync(arquivoPath, new Date(mtime), new Date(mtime));
+  const stat = fs.statSync(arquivoPath);
+  const proof = {
+    proofVersion: filaOperacionalV2.FILA_V2_FILE_PROOF_VERSION,
+    clienteId: cliente,
+    arquivo,
+    generation,
+    targetGeneration: generation,
+    fileRevision,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    publishedAt: new Date(mtime).toISOString()
+  };
+  storage.writeClienteJson(cliente, arquivoProof, proof);
+  return proof;
+}
+
+function escreverEstadoGenerationAuthority(storage, repoFake, cliente, config = {}) {
+  const vivaGeneration = config.vivaGeneration ?? 1;
+  const durableCheckpointGeneration = config.durableCheckpointGeneration ?? vivaGeneration;
+  const dirtyGeneration = Object.prototype.hasOwnProperty.call(config, "dirtyGeneration")
+    ? config.dirtyGeneration
+    : (vivaGeneration > durableCheckpointGeneration ? durableCheckpointGeneration + 1 : null);
+  const vivaProof = config.vivaProof === false ? null : escreverArquivoComProof(
+    storage,
+    cliente,
+    FILA_VIVA_ARQUIVO,
+    filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO,
+    [{ item: oferta(`${cliente}_viva`, { clienteId: cliente }), bucket: "viva", posicaoLegada: 0 }],
+    config.vivaProofGeneration ?? vivaGeneration,
+    config.vivaFileRevision || `viva_${vivaGeneration}`,
+    config.vivaMtime ?? AGORA
+  );
+  const legacyProof = config.legacyProof === false ? null : escreverArquivoComProof(
+    storage,
+    cliente,
+    "fila.json",
+    filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO,
+    [oferta(`${cliente}_legado`, { clienteId: cliente })],
+    config.legacyProofGeneration ?? durableCheckpointGeneration,
+    config.legacyFileRevision || `legacy_${durableCheckpointGeneration}`,
+    config.legacyMtime ?? (AGORA - 1000)
+  );
+  if (config.manifest !== false) {
+    storage.writeClienteJson(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO, config.manifest || {
+      manifestVersion: 2,
+      version: 2,
+      vivaGeneration,
+      checkpointGeneration: durableCheckpointGeneration,
+      durableCheckpointGeneration,
+      dirtyGeneration,
+      vivaFileProof: vivaProof,
+      legacyFileProof: legacyProof,
+      itemCount: 1
+    });
+  }
+  repoFake.states.set(cliente, {
+    clienteId: cliente,
+    revision: config.revision ?? 10,
+    vivaGeneration,
+    durableCheckpointGeneration,
+    dirtyGeneration,
+    authorityReady: config.authorityReady !== false,
+    authorityReadyGeneration: config.authorityReadyGeneration ?? vivaGeneration,
+    authorityReadyRevision: config.authorityReadyRevision ?? 10,
+    authorityReadyAt: "2026-08-28T00:00:00.000Z",
+    vivaFileProof: config.dbVivaProof === false ? null : vivaProof,
+    legacyFileProof: config.dbLegacyProof === false ? null : legacyProof,
+    pendingCheckpointRevision: config.pendingCheckpointRevision || "",
+    pendingCheckpointTargetGeneration: Object.prototype.hasOwnProperty.call(config, "pendingCheckpointTargetGeneration")
+      ? config.pendingCheckpointTargetGeneration
+      : null,
+    pendingCheckpointStartedAt: null
+  });
+  return { vivaProof, legacyProof };
 }
 
 function avaliarRecoveryComparacaoTeste(nome, config) {
@@ -3024,6 +3136,216 @@ async function testarPromocaoLockPostgresOperacional() {
     assert.strictEqual(resultado.pulou, true);
     assert.strictEqual(resultado.motivo, "operacional_requer_lock", "preparacao operacional nao pode escrever viva fora do lock");
     assert.strictEqual(fs.existsSync(storage.getClienteJsonPath("cliente_preparar_lock", FILA_VIVA_ARQUIVO)), false);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_authority_mtime_default";
+    escreverArquivosRecoveryComparacao(storage, cliente, {
+      vivaMtime: AGORA,
+      legadoMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {},
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.maisNova, true);
+    assert.strictEqual(repoFake.chamadas.some(chamada => chamada.tipo === "authority_recovery"), false, "flag ausente nao consulta authority PG");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_authority_flag_invalida";
+    escreverArquivosRecoveryComparacao(storage, cliente, {
+      vivaMtime: AGORA,
+      legadoMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: { FILA_V2_RECOVERY_AUTORIDADE: "outra" },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeSolicitada, "mtime");
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(repoFake.chamadas.some(chamada => chamada.tipo === "authority_recovery"), false, "flag invalida cai para mtime sem PG de authority");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_off_canary";
+    escreverArquivosRecoveryComparacao(storage, cliente, {
+      vivaMtime: AGORA,
+      legadoMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: "outro_cliente"
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.fallbackMtime, true);
+    assert.strictEqual(repoFake.chamadas.length, 0, "off-canary nao pode consultar PG de authority");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_ready_false";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, { authorityReady: false, vivaMtime: AGORA, legacyMtime: AGORA - 1000 });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.motivo, "authority_not_ready");
+    assert.strictEqual(resultado.maisNova, true);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake({ falharRecoveryAuthority: true });
+    const cliente = "cliente_generation_db_indisponivel";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, { vivaMtime: AGORA, legacyMtime: AGORA - 1000 });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.motivo, "db_indisponivel");
+  }
+
+  for (const [nome, config, motivo] of [
+    ["manifest_ausente", { manifest: false }, "arquivo_ausente"],
+    ["manifest_mismatch", { manifest: { manifestVersion: 2, vivaGeneration: 9, durableCheckpointGeneration: 9, dirtyGeneration: null } }, "manifest_mismatch"],
+    ["viva_proof_ausente", { vivaProof: false, dbVivaProof: false }, "viva_proof_ausente"],
+    ["viva_proof_mismatch", { vivaProofGeneration: 9 }, "viva_proof_mismatch"],
+    ["pending", { pendingCheckpointRevision: "checkpoint_aberto", pendingCheckpointTargetGeneration: 1 }, "pending_ambiguo"],
+    ["dirty_incoerente", { vivaGeneration: 2, durableCheckpointGeneration: 1, dirtyGeneration: null }, "generation_invalida"]
+  ]) {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = `cliente_generation_fallback_${nome}`;
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      ...config,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime", `${nome} deve cair para mtime`);
+    assert.strictEqual(resultado.generationConclusiva, false);
+    assert.strictEqual(resultado.motivo, motivo);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_nao_suprime_sem_legacy_proof";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 2,
+      durableCheckpointGeneration: 2,
+      dirtyGeneration: null,
+      legacyProof: false,
+      dbLegacyProof: false,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.maisNova, true, "sem proof legado generation nao pode suprimir recovery que mtime faria");
+    assert.strictEqual(resultado.motivo, "legacy_proof_ausente");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_viva_mais_nova";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 2,
+      durableCheckpointGeneration: 1,
+      dirtyGeneration: 2,
+      vivaMtime: AGORA - 1000,
+      legacyMtime: AGORA
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "generation");
+    assert.strictEqual(resultado.generationConclusiva, true);
+    assert.strictEqual(resultado.maisNova, true, "generation pode recuperar viva mesmo quando mtime nao recuperaria");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_legado_cobre_viva";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 3,
+      durableCheckpointGeneration: 3,
+      dirtyGeneration: null,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA - 1000
+    });
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "teste" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "generation");
+    assert.strictEqual(resultado.maisNova, false, "generation so pode suprimir mtime com proof legado valido");
   }
 }
 

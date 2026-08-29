@@ -30,15 +30,15 @@ const processarFila = trechoEntre(
 );
 
 assert(
-  pos(processarFila, "carregarFila(clienteFila);") <
+  pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
     pos(processarFila, "sanearExpiradosFila(clienteFila)"),
-  "executor deve recarregar a fila oficial antes de sanear expirados"
+  "executor deve reconciliar a fila oficial antes de sanear expirados"
 );
 
 assert(
-  pos(processarFila, "carregarFila(clienteFila);") <
+  pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
     pos(processarFila, "selecionarProximaOfertaFila(clienteFila)"),
-  "executor deve recarregar a fila oficial antes de selecionar pendente"
+  "executor deve reconciliar a fila oficial antes de selecionar pendente"
 );
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-unica-"));

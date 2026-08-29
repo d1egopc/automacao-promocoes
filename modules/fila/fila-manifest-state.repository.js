@@ -803,6 +803,97 @@ async function lerStateObservacional(clienteId = "admin", deps = {}) {
   }
 }
 
+async function avaliarAutoridadeRecovery(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  return comTransacao(async (client) => {
+    const resultado = await client.query(
+      `SELECT cliente_id, revision, viva_generation, durable_checkpoint_generation, dirty_generation, updated_at
+         , authority_ready, authority_ready_generation, authority_ready_revision, authority_ready_at
+         , viva_file_proof, legacy_file_proof
+         , pending_checkpoint_revision, pending_checkpoint_target_generation, pending_checkpoint_started_at
+          FROM ${TABELA}
+         WHERE cliente_id = $1
+         FOR UPDATE`,
+      [cliente]
+    );
+    if (!resultado.rows?.[0]) {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: "state_ausente",
+        clienteId: cliente
+      };
+    }
+
+    const state = normalizarStateDb(resultado.rows[0], cliente);
+    if (!validarState(state)) {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: "generation_invalida",
+        clienteId: cliente,
+        state
+      };
+    }
+    if (state.authorityReady !== true) {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: "authority_not_ready",
+        clienteId: cliente,
+        state
+      };
+    }
+    if (state.pendingCheckpointRevision || state.pendingCheckpointTargetGeneration !== null) {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: "pending_ambiguo",
+        clienteId: cliente,
+        state
+      };
+    }
+
+    if (typeof dados.validarEstadoFisico !== "function") {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: "validador_fisico_indisponivel",
+        clienteId: cliente,
+        state
+      };
+    }
+
+    const validacao = await dados.validarEstadoFisico({ clienteId: cliente, state });
+    if (validacao?.ok !== true) {
+      return {
+        ok: true,
+        conclusiva: false,
+        fallbackMtime: true,
+        motivo: validacao?.motivo || "proof_invalida",
+        clienteId: cliente,
+        state
+      };
+    }
+
+    const maisNova = state.vivaGeneration > state.durableCheckpointGeneration;
+    return {
+      ok: true,
+      conclusiva: true,
+      fallbackMtime: false,
+      motivo: maisNova ? "generation_viva_mais_nova" : "generation_legado_cobre_viva",
+      clienteId: cliente,
+      maisNova,
+      state
+    };
+  }, deps);
+}
+
 function compararDbJson(dbState = null, jsonManifest = null) {
   if (!dbState) return { resultado: "db_indisponivel" };
   const json = bootstrapValido(jsonManifest);
@@ -821,6 +912,7 @@ module.exports = {
   SQL_SCHEMA_QUEUE_MANIFEST_STATE,
   TABELA,
   bootstrapValido,
+  avaliarAutoridadeRecovery,
   capturarTargetCheckpoint,
   compararDbJson,
   confirmarCheckpointDuravel,

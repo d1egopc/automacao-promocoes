@@ -3064,8 +3064,7 @@ process.once("beforeExit", () => {
   void executarCheckpointsFilaV22CVencidos("shutdown");
 });
 
-function carregarFila(clienteId = "admin") {
-  return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
+function carregarFilaLegadaOficial(clienteId = "admin") {
   fila = filaOfertas.carregarFila({
     fila,
     clienteId,
@@ -3073,7 +3072,23 @@ function carregarFila(clienteId = "admin") {
     readClienteJson,
     logger: console
   });
+  return fila;
+}
 
+function finalizarCarregamentoFilaCliente(clienteId = "admin") {
+  reconstruirFilaStoreCliente(clienteId, "carregarFila");
+  projetarFilaV2ShadowCliente(clienteId, "carregarFila");
+  filaOperacionalV2.prepararSeHabilitado({
+    fila,
+    clienteId,
+    motivo: "carregarFila"
+  });
+  return fila;
+}
+
+function carregarFila(clienteId = "admin") {
+  return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
+  carregarFilaLegadaOficial(clienteId);
   const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
   const estadoArquivosV2 = dirty
     ? { maisNova: true }
@@ -3083,14 +3098,37 @@ function carregarFila(clienteId = "admin") {
       recovery: !dirty
     });
   }
-  reconstruirFilaStoreCliente(clienteId, "carregarFila");
-  projetarFilaV2ShadowCliente(clienteId, "carregarFila");
-  filaOperacionalV2.prepararSeHabilitado({
-    fila,
-    clienteId,
-    motivo: "carregarFila"
+  return finalizarCarregamentoFilaCliente(clienteId);
   });
-  return fila;
+}
+
+async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto = "leitura") {
+  return executarMutacaoFilaClienteAsync(clienteId, `reconciliar_fila_v2_${contexto}`, async () => {
+    carregarFilaLegadaOficial(clienteId);
+    const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
+    const estadoArquivosV2 = dirty
+      ? {
+          ok: true,
+          autoridadeSolicitada: "dirty",
+          autoridadeUsada: "dirty",
+          generationConclusiva: false,
+          maisNova: true,
+          fallbackMtime: false,
+          motivo: "dirty_local"
+        }
+      : await filaOperacionalV2.reconciliarFilaV2ParaLeitura(clienteId, { contexto });
+    let recoveryAplicado = false;
+    if (dirty || estadoArquivosV2.maisNova) {
+      aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : `carregarFila_recovery_${contexto}`, {
+        recovery: !dirty
+      });
+      recoveryAplicado = true;
+    }
+    finalizarCarregamentoFilaCliente(clienteId);
+    return {
+      ...estadoArquivosV2,
+      recoveryAplicado
+    };
   });
 }
 
@@ -8060,7 +8098,7 @@ async function processarFila(clienteIdAlvo = null) {
 
     resumoFila.fase = "carregar_fila";
     // Fonte oficial da fila: /data/clientes/<clienteId>/fila.json; `fila` e cache do executor.
-    carregarFila(clienteFila);
+    await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
     resumoFila.fase = "sanear_fila";
     sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
@@ -19771,7 +19809,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   const oferta = preparado.oferta;
-  carregarFila(clienteId);
+  await reconciliarFilaV2ParaLeituraCliente(clienteId, "radar");
 
   const diagnosticoCupomRepetido = diagnosticarRadarCupomRepetido(clienteId, oferta);
 

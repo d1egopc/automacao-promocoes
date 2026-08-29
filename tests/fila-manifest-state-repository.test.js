@@ -428,6 +428,66 @@ function aguardarFilaAsync() {
   }
 
   {
+    const pool = criarPoolFake();
+    pool.state.set("cliente_authority_repo_ready", {
+      revision: 7,
+      viva_generation: 3,
+      durable_checkpoint_generation: 2,
+      dirty_generation: 3,
+      authority_ready: true,
+      authority_ready_generation: 3,
+      authority_ready_revision: 7,
+      authority_ready_at: new Date("2026-08-28T00:00:00.000Z"),
+      viva_file_proof: {
+        proofVersion: 1,
+        clienteId: "cliente_authority_repo_ready",
+        arquivo: "fila-viva.json",
+        generation: 3,
+        fileRevision: "viva_3",
+        size: 10,
+        mtimeMs: 20
+      },
+      legacy_file_proof: null,
+      pending_checkpoint_revision: null,
+      pending_checkpoint_target_generation: null
+    });
+    const resultado = await repo.avaliarAutoridadeRecovery("cliente_authority_repo_ready", {
+      validarEstadoFisico: () => ({ ok: true })
+    }, { pool });
+    const leitura = await repo.lerStateObservacional("cliente_authority_repo_ready", { pool });
+
+    assert.strictEqual(resultado.conclusiva, true, "state ready e proof valido deve ser conclusivo");
+    assert.strictEqual(resultado.maisNova, true);
+    assert.strictEqual(leitura.state.revision, 7, "decisao de authority nao pode atualizar state");
+  }
+
+  {
+    const pool = criarPoolFake();
+    pool.state.set("cliente_authority_repo_not_ready", {
+      revision: 1,
+      viva_generation: 1,
+      durable_checkpoint_generation: 1,
+      dirty_generation: null,
+      authority_ready: false,
+      authority_ready_generation: null,
+      authority_ready_revision: null,
+      viva_file_proof: null,
+      legacy_file_proof: null,
+      pending_checkpoint_revision: null,
+      pending_checkpoint_target_generation: null
+    });
+    const resultado = await repo.avaliarAutoridadeRecovery("cliente_authority_repo_not_ready", {
+      validarEstadoFisico: () => {
+        throw new Error("nao_deveria_validar_fisico");
+      }
+    }, { pool });
+
+    assert.strictEqual(resultado.conclusiva, false);
+    assert.strictEqual(resultado.fallbackMtime, true);
+    assert.strictEqual(resultado.motivo, "authority_not_ready");
+  }
+
+  {
     const state = {
       clienteId: "cliente_cmp",
       revision: 3,
