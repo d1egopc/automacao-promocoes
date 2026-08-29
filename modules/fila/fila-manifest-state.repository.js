@@ -143,6 +143,17 @@ function normalizarProof(valor = null) {
   };
 }
 
+function proofLegadoCobreGeneration(valor = null, clienteId = "admin", generation = 0) {
+  const proof = normalizarProof(valor);
+  const cliente = clienteSeguro(clienteId);
+  const alvo = numeroInteiroNaoNegativo(generation);
+  if (!proof || alvo === null) return null;
+  if (proof.clienteId !== cliente) return null;
+  if (proof.arquivo !== "fila.json") return null;
+  if (proof.generation !== alvo) return null;
+  return proof;
+}
+
 function estadoZero(clienteId = "admin") {
   return {
     clienteId: clienteSeguro(clienteId),
@@ -548,7 +559,8 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
       }
     }
 
-    const checkpointSincronizado = dados.checkpointSincronizado === true;
+    const legacyFileProofNovo = proofLegadoCobreGeneration(escrita?.legacyFileProof, cliente, nextGeneration);
+    const checkpointSincronizado = dados.checkpointSincronizado === true && Boolean(legacyFileProofNovo);
     const durableCheckpointGeneration = checkpointSincronizado
       ? nextGeneration
       : atual.durableCheckpointGeneration;
@@ -562,7 +574,7 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
       durableCheckpointGeneration,
       dirtyGeneration,
       vivaFileProof: normalizarProof(escrita?.vivaFileProof) || atual.vivaFileProof,
-      legacyFileProof: escrita?.legacyFileProof ? normalizarProof(escrita.legacyFileProof) : atual.legacyFileProof,
+      legacyFileProof: checkpointSincronizado ? legacyFileProofNovo : atual.legacyFileProof,
       pendingCheckpointRevision: atual.pendingCheckpointRevision || null,
       pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
       pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
@@ -694,9 +706,13 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
       legacyFileProof = normalizarProof(publicacao?.legacyFileProof || publicacao?.proof) || legacyFileProof;
     }
 
+    const legacyFileProofConfirmado = proofLegadoCobreGeneration(legacyFileProof, cliente, target);
+    const targetDuravel = legacyFileProofConfirmado
+      ? target
+      : atual.durableCheckpointGeneration;
     const durableCheckpointGeneration = Math.min(
       atual.vivaGeneration,
-      Math.max(atual.durableCheckpointGeneration, target)
+      Math.max(atual.durableCheckpointGeneration, targetDuravel)
     );
     const dirtyGeneration = atual.vivaGeneration > durableCheckpointGeneration
       ? Math.max(
@@ -713,7 +729,7 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
         durableCheckpointGeneration,
         dirtyGeneration,
         vivaFileProof: atual.vivaFileProof,
-        legacyFileProof,
+        legacyFileProof: legacyFileProofConfirmado || atual.legacyFileProof,
         pendingCheckpointRevision: null,
         pendingCheckpointTargetGeneration: null,
         pendingCheckpointStartedAt: null,

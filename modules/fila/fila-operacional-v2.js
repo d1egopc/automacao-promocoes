@@ -868,7 +868,11 @@ function executarManifestStateAsync(clienteId = "admin", operacao = "", payload 
 }
 
 function patchManifestoMutacaoCoordenada(state = {}, nextGeneration = 0, dados = {}, resultadoArquivo = {}, agora = Date.now()) {
-  const checkpointSincronizado = dados.checkpointSincronizado === true;
+  const legacyFileProof = normalizarProofAutoridade(resultadoArquivo?.legacyFileProof);
+  const checkpointSincronizado = dados.checkpointSincronizado === true &&
+    Boolean(legacyFileProof) &&
+    legacyFileProof.generation === Number(nextGeneration) &&
+    legacyFileProof.arquivo === FILA_LEGADA_ARQUIVO;
   const durableCheckpointGeneration = checkpointSincronizado
     ? nextGeneration
     : numeroManifesto(state.durableCheckpointGeneration, 0);
@@ -888,8 +892,30 @@ function patchManifestoMutacaoCoordenada(state = {}, nextGeneration = 0, dados =
       lastCheckpointAt: agoraIso(agora),
       lastDurableCheckpointAt: agoraIso(agora),
       lastCheckpointReason: dados.motivo || "mutacao_viva_sincronizada",
-      legacyFileProof: resultadoArquivo?.legacyFileProof || state.legacyFileProof || null
+      legacyFileProof
     } : {})
+  };
+}
+
+function anexarProofLegadoSeSolicitado(clienteId = "admin", resultado = {}, generation = 0, fileRevision = "", deps = {}) {
+  if (deps.publicarLegacyProof !== true || resultado?.ok !== true) return resultado;
+  const proof = publicarProofFilaLegada(clienteId, {
+    targetGeneration: generation,
+    fileRevision: deps.legacyFileRevision || fileRevision
+  }, deps);
+  if (proof.ok !== true) {
+    return {
+      ...resultado,
+      legacyFileProof: null,
+      legacyFileProofOk: false,
+      legacyFileProofMotivo: proof.motivo || "proof_legado_falhou",
+      legacyFileProofErro: proof.erro || ""
+    };
+  }
+  return {
+    ...resultado,
+    legacyFileProof: proof.proof,
+    legacyFileProofOk: true
   };
 }
 
@@ -1075,7 +1101,11 @@ function registrarManifestoMutacaoObservacional(clienteId = "admin", dados = {},
   const leituraAtual = lerManifestoFilaV2(clienteId, deps);
   const base = leituraAtual.manifesto || normalizarManifestoFilaV2({}, clienteId, deps.agora || Date.now());
   const generation = base.vivaGeneration + 1;
-  const checkpointSincronizado = dados.checkpointSincronizado === true;
+  const legacyFileProof = normalizarProofAutoridade(dados.legacyFileProof);
+  const checkpointSincronizado = dados.checkpointSincronizado === true &&
+    Boolean(legacyFileProof) &&
+    legacyFileProof.generation === generation &&
+    legacyFileProof.arquivo === FILA_LEGADA_ARQUIVO;
   const durableCheckpointGeneration = checkpointSincronizado
     ? generation
     : base.durableCheckpointGeneration;
@@ -1093,6 +1123,7 @@ function registrarManifestoMutacaoObservacional(clienteId = "admin", dados = {},
     patch.lastCheckpointAt = patch.lastMutationAt;
     patch.lastDurableCheckpointAt = patch.lastMutationAt;
     patch.lastCheckpointReason = dados.motivo || "mutacao_viva_sincronizada";
+    patch.legacyFileProof = legacyFileProof;
   }
   const resultado = escreverManifestoFilaV2(clienteId, patch, deps, "manifest_write");
   if (resultado.ok === true) {
@@ -2088,12 +2119,15 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_update",
-    ({ nextGeneration, fileRevision }) => atualizarItemFilaVivaIncremental(clienteId, item, {
-      ...deps,
-      generation: nextGeneration,
-      fileRevision,
-      publicarFileProof: true
-    }),
+    ({ nextGeneration, fileRevision }) => {
+      const resultado = atualizarItemFilaVivaIncremental(clienteId, item, {
+        ...deps,
+        generation: nextGeneration,
+        fileRevision,
+        publicarFileProof: true
+      });
+      return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
+    },
     {
       ...deps,
       checkpointSincronizado: true,
@@ -2106,12 +2140,15 @@ async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_remove",
-    ({ nextGeneration, fileRevision }) => removerItemFilaVivaIncremental(clienteId, item, {
-      ...deps,
-      generation: nextGeneration,
-      fileRevision,
-      publicarFileProof: true
-    }),
+    ({ nextGeneration, fileRevision }) => {
+      const resultado = removerItemFilaVivaIncremental(clienteId, item, {
+        ...deps,
+        generation: nextGeneration,
+        fileRevision,
+        publicarFileProof: true
+      });
+      return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
+    },
     {
       ...deps,
       checkpointSincronizado: true,
@@ -2124,12 +2161,18 @@ async function recuperarFilaVivaDoLegadoCoordenado(clienteId = "admin", deps = {
   return executarEscritaFilaV2Coordenada(
     clienteId,
     "recovery_viva",
-    ({ nextGeneration, fileRevision }) => recuperarFilaVivaDoLegado(clienteId, {
-      ...deps,
-      generation: nextGeneration,
-      fileRevision,
-      publicarFileProof: true
-    }),
+    ({ nextGeneration, fileRevision }) => {
+      const resultado = recuperarFilaVivaDoLegado(clienteId, {
+        ...deps,
+        generation: nextGeneration,
+        fileRevision,
+        publicarFileProof: true
+      });
+      return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, {
+        ...deps,
+        publicarLegacyProof: true
+      });
+    },
     {
       ...deps,
       checkpointSincronizado: true,

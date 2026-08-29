@@ -281,7 +281,18 @@ function aguardarFilaAsync() {
     const checkpoint = await repo.confirmarCheckpointDuravel("cliente_checkpoint", {
       targetGeneration: target.targetGeneration,
       checkpointRevision: target.checkpointRevision,
-      motivo: "checkpoint"
+      motivo: "checkpoint",
+      legacyFileProof: {
+        proofVersion: 1,
+        clienteId: "cliente_checkpoint",
+        arquivo: "fila.json",
+        generation: target.targetGeneration,
+        targetGeneration: target.targetGeneration,
+        fileRevision: target.checkpointRevision,
+        size: 100,
+        mtimeMs: 200,
+        publishedAt: "2026-08-28T00:00:01.000Z"
+      }
     }, { pool });
 
     assert.strictEqual(target.targetGeneration, 1);
@@ -294,7 +305,20 @@ function aguardarFilaAsync() {
     const pool = criarPoolFake();
     await repo.registrarMutacaoDuravel("cliente_dois_checkpoints", {}, { pool });
     await repo.registrarMutacaoDuravel("cliente_dois_checkpoints", {}, { pool });
-    const recente = await repo.confirmarCheckpointDuravel("cliente_dois_checkpoints", { targetGeneration: 2 }, { pool });
+    const recente = await repo.confirmarCheckpointDuravel("cliente_dois_checkpoints", {
+      targetGeneration: 2,
+      legacyFileProof: {
+        proofVersion: 1,
+        clienteId: "cliente_dois_checkpoints",
+        arquivo: "fila.json",
+        generation: 2,
+        targetGeneration: 2,
+        fileRevision: "checkpoint_recente",
+        size: 100,
+        mtimeMs: 200,
+        publishedAt: "2026-08-28T00:00:01.000Z"
+      }
+    }, { pool });
     const antigo = await repo.confirmarCheckpointDuravel("cliente_dois_checkpoints", { targetGeneration: 1 }, { pool });
 
     assert.strictEqual(recente.state.durableCheckpointGeneration, 2);
@@ -399,8 +423,55 @@ function aguardarFilaAsync() {
       motivo: "executor_salvar_alterada"
     }, { pool });
     assert.strictEqual(sync.state.vivaGeneration, 1);
+    assert.strictEqual(sync.state.durableCheckpointGeneration, 0);
+    assert.strictEqual(sync.state.dirtyGeneration, 1, "sync legado sem proof fisico deve ficar fail-closed");
+  }
+
+  {
+    const pool = criarPoolFake();
+    const sync = await repo.registrarLegacySyncDuravel("cliente_legacy_sync_proof", {
+      motivo: "executor_salvar_alterada",
+      escreverArquivo: () => ({
+        ok: true,
+        legacyFileProof: {
+          proofVersion: 1,
+          clienteId: "cliente_legacy_sync_proof",
+          arquivo: "fila.json",
+          generation: 1,
+          fileRevision: "legacy_rev_1",
+          size: 123,
+          mtimeMs: 456,
+          publishedAt: "2026-08-29T00:00:00.000Z"
+        }
+      })
+    }, { pool });
+    assert.strictEqual(sync.state.vivaGeneration, 1);
     assert.strictEqual(sync.state.durableCheckpointGeneration, 1);
-    assert.strictEqual(sync.state.dirtyGeneration, null, "sync legado ja representa fila.json salva");
+    assert.strictEqual(sync.state.dirtyGeneration, null, "proof legado fresco permite avancar durable");
+    assert.strictEqual(sync.state.legacyFileProof.fileRevision, "legacy_rev_1");
+  }
+
+  {
+    const pool = criarPoolFake();
+    const sync = await repo.registrarLegacySyncDuravel("cliente_legacy_sync_stale", {
+      motivo: "executor_salvar_alterada",
+      escreverArquivo: () => ({
+        ok: true,
+        legacyFileProof: {
+          proofVersion: 1,
+          clienteId: "cliente_legacy_sync_stale",
+          arquivo: "fila.json",
+          generation: 0,
+          fileRevision: "legacy_rev_stale",
+          size: 123,
+          mtimeMs: 456,
+          publishedAt: "2026-08-29T00:00:00.000Z"
+        }
+      })
+    }, { pool });
+    assert.strictEqual(sync.state.vivaGeneration, 1);
+    assert.strictEqual(sync.state.durableCheckpointGeneration, 0);
+    assert.strictEqual(sync.state.dirtyGeneration, 1, "proof stale nao pode avancar durable");
   }
 
   {
@@ -588,7 +659,8 @@ function aguardarFilaAsync() {
     assert.strictEqual(writes.length, 1);
     assert.strictEqual(writes[0].vivaGeneration, 2, "bootstrap nunca diminui geracao do DB");
     assert.strictEqual(resultado.state.vivaGeneration, 2);
-    assert.strictEqual(resultado.state.durableCheckpointGeneration, 2);
+    assert.strictEqual(resultado.state.durableCheckpointGeneration, 1);
+    assert.strictEqual(resultado.state.dirtyGeneration, 2);
   }
 
   {
@@ -743,7 +815,8 @@ function aguardarFilaAsync() {
 
     assert.strictEqual(resultado.ready, true);
     assert.strictEqual(resultado.state.vivaGeneration, 10, "bootstrap nunca pode diminuir vivaGeneration");
-    assert.strictEqual(resultado.state.durableCheckpointGeneration, 10, "bootstrap nunca pode diminuir durableCheckpointGeneration");
+    assert.strictEqual(resultado.state.durableCheckpointGeneration, 5, "bootstrap nao deve inventar durable sem prova");
+    assert.strictEqual(resultado.state.dirtyGeneration, 6);
   }
 
   {

@@ -1587,7 +1587,14 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
             return { ok: false, motivo: escrita?.motivo || "arquivo_falhou" };
           }
         }
-        const durableCheckpointGeneration = dados.checkpointSincronizado === true
+        const legacyFileProofNovo = escrita?.legacyFileProof &&
+          escrita.legacyFileProof.clienteId === clienteId &&
+          escrita.legacyFileProof.arquivo === "fila.json" &&
+          Number(escrita.legacyFileProof.generation) === nextGeneration
+            ? escrita.legacyFileProof
+            : null;
+        const checkpointSincronizado = dados.checkpointSincronizado === true && Boolean(legacyFileProofNovo);
+        const durableCheckpointGeneration = checkpointSincronizado
           ? nextGeneration
           : atual.durableCheckpointGeneration;
         const dirtyGeneration = nextGeneration > durableCheckpointGeneration
@@ -1604,7 +1611,7 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           authorityReadyRevision: null,
           authorityReadyAt: null,
           vivaFileProof: escrita?.vivaFileProof || atual.vivaFileProof,
-          legacyFileProof: escrita?.legacyFileProof || atual.legacyFileProof,
+          legacyFileProof: checkpointSincronizado ? legacyFileProofNovo : atual.legacyFileProof,
           pendingCheckpointRevision: atual.pendingCheckpointRevision || "",
           pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
           pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null
@@ -1650,9 +1657,16 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           }
           legacyFileProof = publicacao.legacyFileProof || publicacao.proof || legacyFileProof;
         }
+        const legacyFileProofConfirmado = legacyFileProof &&
+          legacyFileProof.clienteId === clienteId &&
+          legacyFileProof.arquivo === "fila.json" &&
+          Number(legacyFileProof.generation) === target
+            ? legacyFileProof
+            : null;
+        const targetDuravel = legacyFileProofConfirmado ? target : atual.durableCheckpointGeneration;
         const durableCheckpointGeneration = Math.min(
           atual.vivaGeneration,
-          Math.max(atual.durableCheckpointGeneration, target)
+          Math.max(atual.durableCheckpointGeneration, targetDuravel)
         );
         const dirtyGeneration = atual.vivaGeneration > durableCheckpointGeneration
           ? Math.max(durableCheckpointGeneration + 1, atual.dirtyGeneration || durableCheckpointGeneration + 1)
@@ -1666,7 +1680,7 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           authorityReadyGeneration: null,
           authorityReadyRevision: null,
           authorityReadyAt: null,
-          legacyFileProof,
+          legacyFileProof: legacyFileProofConfirmado || atual.legacyFileProof,
           pendingCheckpointRevision: "",
           pendingCheckpointTargetGeneration: null,
           pendingCheckpointStartedAt: null
@@ -2042,8 +2056,49 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
   assert.strictEqual(mutacaoSincronizada.ok, true);
   assert.strictEqual(mutacaoSincronizada.manifesto.manifestVersion, 2);
   assert.strictEqual(mutacaoSincronizada.manifesto.vivaGeneration, 11);
+  assert.strictEqual(mutacaoSincronizada.manifesto.durableCheckpointGeneration, 0);
+  assert.strictEqual(mutacaoSincronizada.manifesto.dirtyGeneration, 1, "manifest sem proof legado fica fail-closed");
+}
+
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_manifesto_sync_legado_com_proof";
+  storage.writeClienteJson(cliente, filaOperacionalV2.FILA_V2_MANIFEST_ARQUIVO, {
+    version: 2,
+    manifestVersion: 2,
+    clienteId: cliente,
+    vivaGeneration: 10,
+    checkpointGeneration: 10,
+    durableCheckpointGeneration: 10,
+    dirtyGeneration: null,
+    itemCount: 10
+  });
+  const mutacaoSincronizada = filaOperacionalV2.registrarManifestoMutacaoObservacional(cliente, {
+    checkpointSincronizado: true,
+    itemCount: 11,
+    motivo: "sync_legado_seguro",
+    legacyFileProof: {
+      proofVersion: 1,
+      clienteId: cliente,
+      arquivo: "fila.json",
+      generation: 11,
+      fileRevision: "legacy_manifest_11",
+      size: 123,
+      mtimeMs: 456,
+      publishedAt: "2026-08-29T00:00:00.000Z"
+    }
+  }, {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: storage.writeClienteJson,
+    logger: { log: () => {} },
+    agora: AGORA
+  });
+
+  assert.strictEqual(mutacaoSincronizada.ok, true);
+  assert.strictEqual(mutacaoSincronizada.manifesto.vivaGeneration, 11);
   assert.strictEqual(mutacaoSincronizada.manifesto.durableCheckpointGeneration, 11);
   assert.strictEqual(mutacaoSincronizada.manifesto.dirtyGeneration, null);
+  assert.strictEqual(mutacaoSincronizada.manifesto.legacyFileProof.fileRevision, "legacy_manifest_11");
 }
 
 {
@@ -2999,8 +3054,50 @@ async function testarPromocaoLockPostgresOperacional() {
     assert.strictEqual(remove.removeuDaViva, true);
     assert.strictEqual(viva.length, 0);
     assert.strictEqual(state.vivaGeneration, 3);
-    assert.strictEqual(state.durableCheckpointGeneration, 3, "sync legado protegido deve nascer duravel");
+    assert.strictEqual(state.durableCheckpointGeneration, 0, "sync sem proof legado fresco nao pode avancar durable");
+    assert.strictEqual(state.dirtyGeneration, 1);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_update_legacy_proof_lock";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    const item = oferta("update_legacy_proof_lock", { clienteId: cliente });
+    await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+    const itemAtualizado = { ...item, status: "processando" };
+    storage.writeClienteJson(cliente, "fila.json", [itemAtualizado]);
+    const update = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, itemAtualizado, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1,
+      publicarLegacyProof: true
+    });
+    const state = repoFake.states.get(cliente);
+    const proofPath = storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO);
+    const proof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+
+    assert.strictEqual(update.ok, true);
+    assert.strictEqual(update.legacyFileProofOk, true);
+    assert.strictEqual(proof.arquivo, "fila.json");
+    assert.strictEqual(proof.generation, 2);
+    assert.strictEqual(state.vivaGeneration, 2);
+    assert.strictEqual(state.durableCheckpointGeneration, 2, "proof legado fresco permite fechar durable");
     assert.strictEqual(state.dirtyGeneration, null);
+    assert.strictEqual(state.legacyFileProof.fileRevision, proof.fileRevision);
   }
 
   {

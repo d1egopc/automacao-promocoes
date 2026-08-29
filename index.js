@@ -2569,6 +2569,7 @@ async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}
     logger: console,
     permitirRegressaoStatus: opcoes.permitirRegressaoStatus === true,
     logSucesso: opcoes.logSucesso === true,
+    publicarLegacyProof: opcoes.publicarLegacyProof === true,
     motivo
   });
   registrarMetricasFilaV22C(cliente, {
@@ -2578,7 +2579,7 @@ async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}
   return { ...resultado, motivoSync: motivo, item: itemSincronizado };
 }
 
-async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado") {
+async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado", opcoes = {}) {
   const cliente = String(clienteId || item?.clienteId || "admin");
   if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
     return { ok: true, pulou: true, motivo: "v2_desabilitada" };
@@ -2586,6 +2587,7 @@ async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, mo
   const resultado = await filaOperacionalV2.removerItemFilaVivaCoordenado(cliente, item, {
     agora: Date.now(),
     logger: console,
+    publicarLegacyProof: opcoes.publicarLegacyProof === true,
     motivo
   });
   registrarMetricasFilaV22C(cliente, {
@@ -8057,7 +8059,9 @@ async function processarFila(clienteIdAlvo = null) {
     if (!filaAlterada) return false;
     const salvou = salvarFila(cliente);
     if (salvou && oferta) {
-      await sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada");
+      await sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada", {
+        publicarLegacyProof: true
+      });
     }
     filaAlterada = false;
     return salvou;
@@ -10583,8 +10587,10 @@ app.delete("/fila/item/:id", auth, async (req, res) => {
   }
 
   const removido = fila.splice(index, 1);
-  salvarFila(clienteId);
-  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id");
+  const salvouLegado = salvarFila(clienteId);
+  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id", {
+    publicarLegacyProof: salvouLegado === true
+  });
 
   return res.json({
     ok: true,
@@ -10642,8 +10648,10 @@ app.delete("/fila/:index", auth, async (req, res) => {
   const removido = fila.splice(resolucaoIndice.indexReal, 1);
   filaStore.removerItem(removido[0]);
 
-  salvarFila(clienteId);
-  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice");
+  const salvouLegado = salvarFila(clienteId);
+  await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice", {
+    publicarLegacyProof: salvouLegado === true
+  });
 
   logOptimus("FILA", "Oferta removida", {
     clienteId,
@@ -10679,9 +10687,10 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
   delete oferta.proximaTentativaEnvioEm;
   oferta.reprocessadaEm = new Date().toISOString();
 
-  salvarFila(clienteId);
+  const salvouLegado = salvarFila(clienteId);
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
-    permitirRegressaoStatus: true
+    permitirRegressaoStatus: true,
+    publicarLegacyProof: salvouLegado === true
   });
 
   logOptimus("FILA", "Reprocessada manualmente", {
@@ -12810,8 +12819,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   if (!analiseDestinos.compativeis.length) {
     marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
-    salvarFila(clienteId);
-    await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida");
+    const salvouLegado = salvarFila(clienteId);
+    await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida", {
+      publicarLegacyProof: salvouLegado === true
+    });
 
     logOptimus("FILA", "Enviar Agora reteve oferta", {
       clienteId,
@@ -12927,9 +12938,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       : pulouPorLimiteDiario
         ? "Aguardando limite diario do destino"
         : "Nenhum destino confirmou envio manual";
-    salvarFila(clienteId);
+    const salvouLegado = salvarFila(clienteId);
     await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
-      permitirRegressaoStatus: true
+      permitirRegressaoStatus: true,
+      publicarLegacyProof: salvouLegado === true
     });
 
     return {
@@ -12955,8 +12967,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     data: oferta.enviadoEm
   });
 
-  salvarFila(clienteId);
-  await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado");
+  const salvouLegado = salvarFila(clienteId);
+  await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado", {
+    publicarLegacyProof: salvouLegado === true
+  });
 
   return {
     ok: true,
