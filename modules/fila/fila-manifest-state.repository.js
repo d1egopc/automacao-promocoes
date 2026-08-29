@@ -93,6 +93,25 @@ function textoSeguro(valor = "") {
   return String(valor || "").trim();
 }
 
+function erroSanitizado(erro) {
+  return {
+    code: String(erro?.code || erro?.codigo || "").slice(0, 80),
+    name: String(erro?.name || "").slice(0, 80),
+    message: String(erro?.message || "").replace(/[\r\n]+/g, " ").slice(0, 160)
+  };
+}
+
+function logCheckpointB2C(deps = {}, payload = {}) {
+  try {
+    const logger = deps?.logger && typeof deps.logger.log === "function" ? deps.logger : console;
+    logger.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
+      evento: "checkpoint_b2c",
+      timestamp: new Date().toISOString(),
+      ...payload
+    }));
+  } catch (_) {}
+}
+
 function gerarRevisionArquivo() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return crypto.randomBytes(16).toString("hex");
@@ -272,7 +291,9 @@ async function comTransacao(callback, deps = {}) {
     return {
       ok: false,
       motivo: erro?.codigo || erro?.message || "transacao_manifest_state_falhou",
-      erro: erro?.message || "erro_manifest_state"
+      erro: erro?.message || "erro_manifest_state",
+      motivoDetalhado: erro?.motivoDetalhado || "",
+      erroDetalhado: erro?.erroDetalhado || ""
     };
   } finally {
     if (client && typeof client.release === "function") client.release();
@@ -588,6 +609,22 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
     if (checkpointRevision) {
       if (atual.pendingCheckpointRevision !== checkpointRevision ||
           atual.pendingCheckpointTargetGeneration !== target) {
+        logCheckpointB2C(deps, {
+          clienteId: cliente,
+          subfase: atual.pendingCheckpointRevision !== checkpointRevision
+            ? "checkpoint_pending_mismatch"
+            : "checkpoint_target_mismatch",
+          ok: false,
+          motivo: atual.pendingCheckpointRevision !== checkpointRevision
+            ? "checkpoint_pending_mismatch"
+            : "checkpoint_target_mismatch",
+          checkpointRevision,
+          pendingCheckpointRevision: atual.pendingCheckpointRevision || "",
+          targetGeneration: target,
+          pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration,
+          vivaGeneration: atual.vivaGeneration,
+          durableCheckpointGeneration: atual.durableCheckpointGeneration
+        });
         return {
           ok: false,
           motivo: "checkpoint_revision_nao_pertence",
@@ -597,19 +634,61 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
           state: atual
         };
       }
+      logCheckpointB2C(deps, {
+        clienteId: cliente,
+        subfase: "checkpoint_pending_validado",
+        ok: true,
+        checkpointRevision,
+        targetGeneration: target,
+        vivaGeneration: atual.vivaGeneration,
+        durableCheckpointGeneration: atual.durableCheckpointGeneration
+      });
     }
 
     let legacyFileProof = normalizarProof(dados.legacyFileProof) || atual.legacyFileProof;
     if (typeof dados.publicarCheckpoint === "function") {
-      const publicacao = await dados.publicarCheckpoint({
-        clienteId: cliente,
-        state: atual,
-        targetGeneration: target,
-        checkpointRevision
-      });
+      let publicacao;
+      try {
+        publicacao = await dados.publicarCheckpoint({
+          clienteId: cliente,
+          state: atual,
+          targetGeneration: target,
+          checkpointRevision
+        });
+      } catch (erroCallback) {
+        logCheckpointB2C(deps, {
+          clienteId: cliente,
+          subfase: "checkpoint_publish_callback_error",
+          ok: false,
+          motivo: "checkpoint_publish_callback_error",
+          checkpointRevision,
+          targetGeneration: target,
+          vivaGeneration: atual.vivaGeneration,
+          durableCheckpointGeneration: atual.durableCheckpointGeneration,
+          erro: erroSanitizado(erroCallback)
+        });
+        const erro = new Error("checkpoint_publish_callback_error");
+        erro.codigo = "checkpoint_publicacao_falhou";
+        erro.motivoDetalhado = "checkpoint_publish_callback_error";
+        erro.erroDetalhado = erroCallback?.message || "";
+        throw erro;
+      }
       if (publicacao === false || publicacao?.ok === false) {
         const erro = new Error(publicacao?.motivo || "checkpoint_publicacao_falhou");
         erro.codigo = "checkpoint_publicacao_falhou";
+        erro.motivoDetalhado = publicacao?.motivoDetalhado || publicacao?.motivo || "checkpoint_publicacao_falhou";
+        erro.erroDetalhado = publicacao?.erro || "";
+        logCheckpointB2C(deps, {
+          clienteId: cliente,
+          subfase: erro.motivoDetalhado || "checkpoint_publish_callback_error",
+          ok: false,
+          motivo: erro.motivoDetalhado || "checkpoint_publicacao_falhou",
+          checkpointRevision,
+          targetGeneration: target,
+          vivaGeneration: atual.vivaGeneration,
+          durableCheckpointGeneration: atual.durableCheckpointGeneration,
+          erro: String(erro.erroDetalhado || "").slice(0, 160)
+        });
         throw erro;
       }
       legacyFileProof = normalizarProof(publicacao?.legacyFileProof || publicacao?.proof) || legacyFileProof;
@@ -626,18 +705,49 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
         )
       : null;
 
-    const confirmado = await atualizarState(client, {
+    let confirmado;
+    try {
+      confirmado = await atualizarState(client, {
+        clienteId: cliente,
+        vivaGeneration: atual.vivaGeneration,
+        durableCheckpointGeneration,
+        dirtyGeneration,
+        vivaFileProof: atual.vivaFileProof,
+        legacyFileProof,
+        pendingCheckpointRevision: null,
+        pendingCheckpointTargetGeneration: null,
+        pendingCheckpointStartedAt: null,
+        authorityReady: false
+      }, dados.motivo || "manifest_state_checkpoint");
+    } catch (erroDb) {
+      logCheckpointB2C(deps, {
+        clienteId: cliente,
+        subfase: "checkpoint_db_confirm_error",
+        ok: false,
+        motivo: "checkpoint_db_confirm_error",
+        checkpointRevision,
+        targetGeneration: target,
+        vivaGeneration: atual.vivaGeneration,
+        durableCheckpointGeneration,
+        dirtyGeneration,
+        erro: erroSanitizado(erroDb)
+      });
+      const erro = new Error("checkpoint_db_confirm_error");
+      erro.codigo = "checkpoint_db_confirm_error";
+      erro.motivoDetalhado = "checkpoint_db_confirm_error";
+      erro.erroDetalhado = erroDb?.message || "";
+      throw erro;
+    }
+    logCheckpointB2C(deps, {
       clienteId: cliente,
-      vivaGeneration: atual.vivaGeneration,
-      durableCheckpointGeneration,
-      dirtyGeneration,
-      vivaFileProof: atual.vivaFileProof,
-      legacyFileProof,
-      pendingCheckpointRevision: null,
-      pendingCheckpointTargetGeneration: null,
-      pendingCheckpointStartedAt: null,
-      authorityReady: false
-    }, dados.motivo || "manifest_state_checkpoint");
+      subfase: "checkpoint_db_confirmacao_ok",
+      ok: true,
+      checkpointRevision,
+      targetGeneration: target,
+      vivaGeneration: confirmado.state?.vivaGeneration || 0,
+      durableCheckpointGeneration: confirmado.state?.durableCheckpointGeneration || 0,
+      dirtyGeneration: confirmado.state?.dirtyGeneration ?? null
+    });
     return {
       ...confirmado,
       checkpointRevision,

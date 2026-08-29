@@ -2707,6 +2707,22 @@ function checkpointRevisionSeguro(revision = "") {
   return /^[a-zA-Z0-9_.-]{8,128}$/.test(valor) ? valor : "";
 }
 
+function erroCheckpointSanitizado(erro) {
+  return {
+    code: String(erro?.code || erro?.codigo || "").slice(0, 80),
+    name: String(erro?.name || "").slice(0, 80),
+    message: String(erro?.message || "").replace(/[\r\n]+/g, " ").slice(0, 160)
+  };
+}
+
+function logCheckpointB2C(clienteId = "admin", payload = {}) {
+  logFilaV22C({
+    evento: "checkpoint_b2c",
+    clienteId,
+    ...payload
+  });
+}
+
 function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision = "") {
   const cliente = String(clienteId || "admin");
   const revision = checkpointRevisionSeguro(checkpointRevision);
@@ -2744,13 +2760,91 @@ function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
   const tempPath = path.resolve(String(dados.tempPath || ""));
   const finalPath = path.resolve(getFilaFile(cliente));
   const dir = path.dirname(finalPath);
-  if (!revision) return { ok: false, motivo: "checkpoint_revision_invalido" };
+  logCheckpointB2C(cliente, {
+    subfase: "checkpoint_b2c_inicio",
+    checkpointRevision: revision,
+    targetGeneration: dados.targetGeneration || 0
+  });
+  if (!revision) return { ok: false, motivo: "checkpoint_revision_invalido", motivoDetalhado: "checkpoint_revision_invalido" };
   if (path.dirname(tempPath) !== dir || path.basename(tempPath) !== `fila.json.tmp.${revision}`) {
-    return { ok: false, motivo: "checkpoint_temp_inseguro" };
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_temp_validado",
+      ok: false,
+      motivo: "checkpoint_temp_inseguro",
+      checkpointRevision: revision,
+      tempPresente: false
+    });
+    return { ok: false, motivo: "checkpoint_temp_inseguro", motivoDetalhado: "checkpoint_temp_inseguro" };
   }
   try {
-    if (!fs.existsSync(tempPath)) return { ok: false, motivo: "checkpoint_temp_ausente" };
-    fs.renameSync(tempPath, finalPath);
+    const tempPresente = fs.existsSync(tempPath);
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_temp_validado",
+      ok: tempPresente,
+      motivo: tempPresente ? "ok" : "checkpoint_temp_ausente",
+      checkpointRevision: revision,
+      tempPresente
+    });
+    if (!tempPresente) return { ok: false, motivo: "checkpoint_temp_ausente", motivoDetalhado: "checkpoint_temp_ausente" };
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_antes_rename",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0
+    });
+    try {
+      fs.renameSync(tempPath, finalPath);
+    } catch (erro) {
+      logCheckpointB2C(cliente, {
+        subfase: "checkpoint_antes_rename",
+        ok: false,
+        motivo: "checkpoint_rename_error",
+        checkpointRevision: revision,
+        targetGeneration: dados.targetGeneration || 0,
+        erro: erroCheckpointSanitizado(erro)
+      });
+      return {
+        ok: false,
+        motivo: "checkpoint_publicacao_falhou",
+        motivoDetalhado: "checkpoint_rename_error",
+        erro: erro?.message || "erro_checkpoint_rename"
+      };
+    }
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_rename_ok",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0
+    });
+    let statFinal;
+    try {
+      statFinal = fs.statSync(finalPath);
+    } catch (erro) {
+      logCheckpointB2C(cliente, {
+        subfase: "checkpoint_stat_ok",
+        ok: false,
+        motivo: "checkpoint_stat_error",
+        checkpointRevision: revision,
+        targetGeneration: dados.targetGeneration || 0,
+        erro: erroCheckpointSanitizado(erro)
+      });
+      return {
+        ok: false,
+        motivo: "checkpoint_publicacao_falhou",
+        motivoDetalhado: "checkpoint_stat_error",
+        erro: erro?.message || "erro_checkpoint_stat"
+      };
+    }
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_stat_ok",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0,
+      bytes: Number(statFinal.size || 0),
+      mtimeMs: Number(statFinal.mtimeMs || 0)
+    });
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_proof_antes_write",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0
+    });
     const proof = filaOperacionalV2.publicarProofFilaLegada(cliente, {
       targetGeneration: dados.targetGeneration,
       fileRevision: revision
@@ -2761,12 +2855,47 @@ function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
       agora: Date.now(),
       logger: console
     });
-    if (proof.ok !== true) return { ok: false, motivo: proof.motivo || "proof_checkpoint_falhou", erro: proof.erro || "" };
+    if (proof.ok !== true) {
+      logCheckpointB2C(cliente, {
+        subfase: "checkpoint_proof_write_error",
+        ok: false,
+        motivo: proof.motivo || "checkpoint_proof_write_error",
+        checkpointRevision: revision,
+        targetGeneration: dados.targetGeneration || 0,
+        erro: String(proof.erro || "").slice(0, 160)
+      });
+      return {
+        ok: false,
+        motivo: "checkpoint_publicacao_falhou",
+        motivoDetalhado: proof.motivo || "checkpoint_proof_write_error",
+        erro: proof.erro || ""
+      };
+    }
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_proof_write_ok",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0
+    });
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_manifest_proof_ok",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0
+    });
     return { ok: true, legacyFileProof: proof.proof, proof: proof.proof };
   } catch (erro) {
+    const erroSeguro = erroCheckpointSanitizado(erro);
+    logCheckpointB2C(cliente, {
+      subfase: "checkpoint_publish_callback_error",
+      ok: false,
+      motivo: erro?.code === "EXDEV" ? "checkpoint_rename_error" : "checkpoint_publish_callback_error",
+      checkpointRevision: revision,
+      targetGeneration: dados.targetGeneration || 0,
+      erro: erroSeguro
+    });
     return {
       ok: false,
-      motivo: "checkpoint_publish_error",
+      motivo: "checkpoint_publicacao_falhou",
+      motivoDetalhado: erro?.code === "EXDEV" ? "checkpoint_rename_error" : "checkpoint_publish_callback_error",
       erro: erro?.message || "erro_checkpoint_publish"
     };
   }
@@ -2870,8 +2999,15 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       durableCheckpointGeneration: checkpointDuravel?.dbState?.durableCheckpointGeneration || 0,
       dbCheckpointOk: checkpointDuravel?.ok === true,
       checkpointRevision: targetDb?.checkpointRevision || "",
-      checkpointPublicacaoFisica: checkpointTemp.ok === true,
+      checkpointTempPreparado: checkpointTemp.ok === true,
+      checkpointPublicacaoFisica: checkpointDuravel?.ok === true,
+      checkpointPublicacaoFinalConfirmada: checkpointDuravel?.ok === true,
       checkpointPublicacaoMotivo: checkpointTemp.motivo || checkpointDuravel?.motivo || "",
+      checkpointPublicacaoMotivoDetalhado: checkpointTemp.motivoDetalhado ||
+        checkpointDuravel?.motivoDetalhado ||
+        checkpointDuravel?.resultadoDb?.motivoDetalhado ||
+        "",
+      checkpointPublicacaoErroDetalhado: String(checkpointDuravel?.resultadoDb?.erroDetalhado || "").slice(0, 160),
       checkpointConcurrentSkip: estado.checkpointConcurrentSkip || 0,
       dirtyAposCheckpoint: estado.dirty,
       mergeAntesCheckpoint: mergeAntesCheckpoint?.merge ? {
