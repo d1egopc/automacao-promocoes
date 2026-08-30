@@ -274,6 +274,15 @@ assert(
   "diagnostico e selecao devem compartilhar a mesma colecao por cliente no ciclo"
 );
 
+assert(
+  pos(selecaoExecutor, "const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog, {") >
+    pos(selecaoExecutor, "if (selecionada)") &&
+    selecaoExecutor.includes("filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)") &&
+    selecaoExecutor.includes("? fonteClienteHotState.itens") &&
+    selecaoExecutor.includes(": null"),
+  "diagnostico final sem elegivel deve reutilizar hot state conclusivo e preservar fallback global quando ausente"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"

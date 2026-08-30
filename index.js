@@ -2419,7 +2419,11 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     return selecionada.oferta;
   }
 
-  const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
+  const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog, {
+    filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
+      ? fonteClienteHotState.itens
+      : null
+  });
   diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
   if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
