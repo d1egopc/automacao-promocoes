@@ -157,6 +157,28 @@ assert(
   "expiracao V2 inconclusiva deve preservar fallback legado em vez de descartar mutacao"
 );
 
+const saneamentoExpiracao = trechoEntre(
+  "function candidatosExpiracaoFilaV2",
+  "const filaInteligenteUltimoAbastecimento"
+);
+
+assert(
+    saneamentoExpiracao.includes("filaOperacionalV2.deveUsarFilaV2Operacional(cliente)") &&
+    saneamentoExpiracao.includes("filaOperacionalV2.lerFilaVivaParaMerge(cliente, {") &&
+    saneamentoExpiracao.includes("leitura.motivo !== \"ok\"") &&
+    saneamentoExpiracao.includes("entrada?.bucket === \"viva\"") &&
+    saneamentoExpiracao.includes(".map(entrada => entrada.item)"),
+  "saneamento V2 deve selecionar candidatos do hot state da fila-viva sem consultar residuos legacy-only"
+);
+
+assert(
+  saneamentoExpiracao.includes("const itensCandidatos = fonteCandidatos?.itens || fila") &&
+    saneamentoExpiracao.includes("if (!usandoFilaViva && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
+    saneamentoExpiracao.includes("if (oferta.status !== \"pendente\") continue;") &&
+    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\");"),
+  "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"

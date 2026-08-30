@@ -1461,13 +1461,40 @@ async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], 
   };
 }
 
+function candidatosExpiracaoFilaV2(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) return null;
+
+  const leitura = filaOperacionalV2.lerFilaVivaParaMerge(cliente, {
+    logger: console
+  });
+  if (!leitura?.ok || leitura.motivo !== "ok") return null;
+
+  const itens = Array.isArray(leitura.entradas)
+    ? leitura.entradas
+        .filter(entrada => entrada?.bucket === "viva")
+        .map(entrada => entrada.item)
+        .filter(item => item && typeof item === "object")
+    : [];
+
+  return {
+    fonte: "fila_viva",
+    itens,
+    totalViva: itens.length,
+    bytesFilaViva: leitura.bytes || 0
+  };
+}
+
 async function sanearExpiradosFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
+  const fonteCandidatos = candidatosExpiracaoFilaV2(cliente);
+  const itensCandidatos = fonteCandidatos?.itens || fila;
+  const usandoFilaViva = fonteCandidatos?.fonte === "fila_viva";
   let alterou = false;
   const itensAlterados = [];
 
-  for (const oferta of fila) {
-    if (String(oferta?.clienteId || "admin") !== cliente) continue;
+  for (const oferta of itensCandidatos) {
+    if (!usandoFilaViva && String(oferta?.clienteId || "admin") !== cliente) continue;
     if (oferta.status !== "pendente") continue;
     const saneamento = sanearExpiracaoOperacionalFilaItem(oferta);
     if (saneamento.alterou) {
