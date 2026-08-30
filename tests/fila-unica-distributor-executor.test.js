@@ -94,6 +94,57 @@ assert(
   "fast path deve materializar hot state por cliente, incluindo caso de zero pendentes"
 );
 
+const puloRapidoV2 = trechoEntre(
+  "async function reconciliarPuloRapidoFilaV2",
+  "async function rodarProcessadorFilaGlobal"
+);
+
+assert(
+    puloRapidoV2.includes("puloRapido?.motivo !== \"sem_pendentes\"") &&
+    puloRapidoV2.includes("enviandoAgoraPorCliente[cliente]") &&
+    puloRapidoV2.includes("process.env.FILA_V2_RECOVERY_AUTORIDADE") &&
+    puloRapidoV2.includes("!== \"generation\"") &&
+    puloRapidoV2.includes("!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)"),
+  "preflight do pulo rapido deve ser restrito a sem_pendentes V2 com authority generation"
+);
+
+assert(
+  pos(puloRapidoV2, "await reconciliarFilaV2ParaLeituraCliente(cliente, \"executor\");") <
+    pos(puloRapidoV2, "pendentes = fila.filter"),
+  "runner deve reconciliar hot state V2 antes de confirmar sem_pendentes"
+);
+
+assert(
+  puloRapidoV2.includes("executor_v2_fast_skip_sem_pendentes") &&
+    puloRapidoV2.includes("bytesFilaJsonLidos: 0"),
+  "sem_pendentes conclusivo em V2 deve registrar fast skip sem ler fila.json"
+);
+
+const runnerGlobal = trechoEntre(
+  "async function rodarProcessadorFilaGlobal",
+  "setInterval(() =>"
+);
+
+assert(
+  pos(runnerGlobal, "const puloRapido = avaliarPuloRapidoClienteFila(usuario);") <
+    pos(runnerGlobal, "await reconciliarPuloRapidoFilaV2(clienteId, puloRapido);") &&
+    pos(runnerGlobal, "await reconciliarPuloRapidoFilaV2(clienteId, puloRapido);") <
+    pos(runnerGlobal, "logProcessarFilaResumo({"),
+  "runner real deve executar a fronteira V2 antes de registrar o pulo rapido sem_pendentes"
+);
+
+assert(
+  runnerGlobal.includes("await processarFila(clienteId, { reconciliacaoFilaV2: puloV2.reconciliacao });"),
+  "runner real deve encaminhar pendentes V2 ao executor reutilizando o preflight do mesmo ciclo"
+);
+
+assert(
+  processarFila.includes("reconciliacaoPreviaFilaV2") &&
+    processarFila.includes("resumoFila.reconciliacaoFilaV2Reutilizada = true") &&
+    processarFila.includes("await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");"),
+  "processarFila deve reutilizar o preflight recebido do runner e evitar segunda reconciliacao"
+);
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-unica-"));
 const dataDirAnterior = process.env.DATA_DIR;
 process.env.DATA_DIR = root;

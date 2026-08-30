@@ -8202,7 +8202,7 @@ function motivoCoberturaDestino(motivo = "") {
   return mapa[chave] || chave || "outro motivo existente";
 }
 
-async function processarFila(clienteIdAlvo = null) {
+async function processarFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteFila = clienteIdAlvo || "admin";
   const inicioProcessarFila = process.hrtime.bigint();
   const cpuInicioProcessarFila = process.cpuUsage();
@@ -8358,7 +8358,13 @@ async function processarFila(clienteIdAlvo = null) {
 
     resumoFila.fase = "carregar_fila";
     // Fonte oficial da fila: /data/clientes/<clienteId>/fila.json; `fila` e cache do executor.
-    await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
+    const reconciliacaoPreviaFilaV2 = opcoes?.reconciliacaoFilaV2;
+    const clienteReconciliacaoPrevia = String(reconciliacaoPreviaFilaV2?.clienteId || clienteFila);
+    if (reconciliacaoPreviaFilaV2 && clienteReconciliacaoPrevia === clienteFila) {
+      resumoFila.reconciliacaoFilaV2Reutilizada = true;
+    } else {
+      await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
+    }
     resumoFila.fase = "sanear_fila";
     sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
@@ -29271,6 +29277,54 @@ function avaliarPuloRapidoClienteFila(usuario = {}) {
   return { motivo: "", pendentes };
 }
 
+async function reconciliarPuloRapidoFilaV2(clienteId = "admin", puloRapido = {}) {
+  const cliente = String(clienteId || "").trim();
+  if (!cliente || puloRapido?.motivo !== "sem_pendentes") {
+    return { aplicavel: false };
+  }
+  if (enviandoAgoraPorCliente[cliente]) {
+    return { aplicavel: false };
+  }
+  if (String(process.env.FILA_V2_RECOVERY_AUTORIDADE || "mtime").trim().toLowerCase() !== "generation") {
+    return { aplicavel: false };
+  }
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { aplicavel: false };
+  }
+
+  const reconciliacao = await reconciliarFilaV2ParaLeituraCliente(cliente, "executor");
+  const pendentes = fila.filter(item => {
+    if (String(item?.clienteId || "admin") !== cliente) return false;
+    if (item?.status !== "pendente") return false;
+    const proxima = item.proximaTentativaEnvioEm ? Date.parse(item.proximaTentativaEnvioEm) : NaN;
+    return !(Number.isFinite(proxima) && proxima > Date.now());
+  }).length;
+
+  if (reconciliacao?.fastPathExecutor === true && pendentes === 0) {
+    logFilaV22C({
+      evento: "executor_v2_fast_skip_sem_pendentes",
+      clienteId: cliente,
+      ok: true,
+      motivo: reconciliacao.motivo || "executor_v2_fast_read",
+      authorityMotivo: reconciliacao.motivo || "",
+      pendentes,
+      bytesFilaJsonLidos: 0,
+      bytesFilaViva: reconciliacao.leituraFastPath?.bytesFilaViva || 0,
+      vivaGeneration: reconciliacao.state?.vivaGeneration ?? null,
+      durableCheckpointGeneration: reconciliacao.state?.durableCheckpointGeneration ?? null,
+      dirtyGeneration: reconciliacao.state?.dirtyGeneration ?? null
+    });
+  }
+
+  return {
+    aplicavel: true,
+    reconciliacao,
+    pendentes,
+    motivo: pendentes > 0 ? "" : "sem_pendentes",
+    fastPathExecutor: reconciliacao?.fastPathExecutor === true
+  };
+}
+
 async function rodarProcessadorFilaGlobal() {
   if (processadorFilaGlobalRodando) {
     console.log("[FILA-PROCESSADOR-GLOBAL-SKIP]", JSON.stringify({
@@ -29302,11 +29356,20 @@ async function rodarProcessadorFilaGlobal() {
     const clienteId = String(usuario?.id || "").trim();
     const puloRapido = avaliarPuloRapidoClienteFila(usuario);
     if (puloRapido.motivo) {
+      const puloV2 = await reconciliarPuloRapidoFilaV2(clienteId, puloRapido);
+      if (puloV2.aplicavel && !puloV2.motivo) {
+        usuariosAvaliados += 1;
+        await processarFila(clienteId, { reconciliacaoFilaV2: puloV2.reconciliacao });
+        await cederEventLoopFila();
+        continue;
+      }
+      const motivoPulo = puloV2.aplicavel ? puloV2.motivo : puloRapido.motivo;
+      const pendentesPulo = puloV2.aplicavel ? puloV2.pendentes : puloRapido.pendentes;
       usuariosPulados += 1;
       logProcessarFilaResumo({
         clienteId,
-        ofertasExaminadas: puloRapido.pendentes,
-        motivoPulo: puloRapido.motivo,
+        ofertasExaminadas: pendentesPulo,
+        motivoPulo,
         duracaoMs: 0,
         cpuMs: 0,
         sobreposicaoEvitada: false
