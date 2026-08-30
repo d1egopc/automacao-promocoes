@@ -1390,15 +1390,90 @@ function marcarOfertaExpirada(oferta = {}) {
   });
 }
 
-function sanearExpiradosFila(clienteId = "admin") {
+async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], motivo = "expiracao") {
+  const cliente = String(clienteId || "admin");
+  const itens = Array.isArray(itensAlterados)
+    ? itensAlterados.filter(item => item && typeof item === "object")
+    : [];
+
+  if (!itens.length) {
+    return { ok: true, alterou: false, checkpointOnly: false };
+  }
+
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    const salvou = salvarFila(cliente, { origem: "expiracao", motivo });
+    return { ok: salvou === true, alterou: true, salvouLegado: salvou === true };
+  }
+
+  let ultimoSync = null;
+  let confirmadas = 0;
+  let removidasDaViva = 0;
+
+  for (const item of itens) {
+    const syncViva = await sincronizarItemFilaVivaAposMutacao(cliente, item, `${motivo}_checkpoint_only`, {
+      checkpointSincronizado: false,
+      exigirMutacao: true,
+      publicarLegacyProof: false
+    });
+
+    ultimoSync = syncViva;
+    if (!syncVivaMutacaoConfirmada(syncViva)) {
+      const salvou = salvarFila(cliente, {
+        origem: "expiracao",
+        motivo: `${motivo}_fallback_legado`
+      });
+      return {
+        ok: salvou === true,
+        alterou: true,
+        fallbackLegado: true,
+        motivo: syncViva?.motivo || syncViva?.motivoSync || "expiracao_sync_viva_nao_confirmada"
+      };
+    }
+
+    confirmadas += 1;
+    if (syncViva?.removeuDaViva) {
+      removidasDaViva += 1;
+    }
+  }
+
+  const dirty = checkpointFilaV2.marcarDirty(cliente, `${motivo}_checkpoint_only`, Date.now());
+  logFilaV22C({
+    evento: "legacy_rewrite_evitado_checkpoint_only",
+    clienteId: cliente,
+    ok: true,
+    motivo,
+    checkpointOnly: true,
+    origem: "expiracao",
+    vivaGeneration: ultimoSync?.generation || ultimoSync?.dbState?.vivaGeneration || 0,
+    durableCheckpointGeneration: ultimoSync?.dbState?.durableCheckpointGeneration || 0,
+    dirtyGeneration: ultimoSync?.dbState?.dirtyGeneration ?? null,
+    checkpointMutations: dirty.mutacoes || 0,
+    dirtyAgeMs: dirty.dirtyAgeMs || 0,
+    vivaStatusUpdateCount: confirmadas,
+    vivaRemovalCount: removidasDaViva
+  });
+
+  return {
+    ok: true,
+    alterou: true,
+    checkpointOnly: true,
+    confirmadas
+  };
+}
+
+async function sanearExpiradosFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   let alterou = false;
+  const itensAlterados = [];
 
   for (const oferta of fila) {
     if (String(oferta?.clienteId || "admin") !== cliente) continue;
     if (oferta.status !== "pendente") continue;
     const saneamento = sanearExpiracaoOperacionalFilaItem(oferta);
-    if (saneamento.alterou) alterou = true;
+    if (saneamento.alterou) {
+      alterou = true;
+      itensAlterados.push(oferta);
+    }
     if (!saneamento.expirou) continue;
 
     console.log("[FILA-EXPIRADA-OPERACIONAL]", {
@@ -1410,7 +1485,7 @@ function sanearExpiradosFila(clienteId = "admin") {
   }
 
   if (alterou) {
-    salvarFila(cliente, { origem: "expiracao" });
+    await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento");
   }
 
   return alterou;
@@ -2158,9 +2233,9 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
   });
 }
 
-function selecionarProximaOfertaFila(clienteIdAlvo = null) {
+async function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const clienteLog = String(clienteIdAlvo || "admin");
-  sanearExpiradosFila(clienteLog);
+  await sanearExpiradosFila(clienteLog);
   const diagnostico = diagnosticarFilaCliente(clienteLog);
 
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
@@ -2171,6 +2246,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
 
   const agora = Date.now();
   let expirouAlguma = false;
+  const expiradasSelecao = [];
   for (const oferta of fila) {
     const mesmoCliente =
       !clienteIdAlvo ||
@@ -2180,6 +2256,11 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;
     marcarOfertaExpirada(oferta);
     expirouAlguma = true;
+    expiradasSelecao.push(oferta);
+  }
+
+  if (expirouAlguma) {
+    await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao");
   }
 
   const resultadoSelecao = selecionarProximaOfertaFilaCore(fila, clienteIdAlvo, {
@@ -2226,10 +2307,6 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   }
 
   if (selecionada) {
-    if (expirouAlguma) {
-      salvarFila(selecionada.oferta.clienteId || clienteIdAlvo || "admin", { origem: "expiracao" });
-    }
-
     selecionada.oferta.filaVivaSelecao = {
       selecionadaEm: new Date(agora).toISOString(),
       lane: selecionada.ranking.lane,
@@ -2255,10 +2332,6 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     }
 
     return selecionada.oferta;
-  }
-
-  if (expirouAlguma) {
-    salvarFila(clienteIdAlvo || "admin", { origem: "expiracao" });
   }
 
   const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
@@ -8419,11 +8492,11 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
       await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
     }
     resumoFila.fase = "sanear_fila";
-    sanearExpiradosFila(clienteFila);
+    await sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
     resumoFila.fase = "selecionar_oferta";
-    oferta = selecionarProximaOfertaFila(clienteFila);
+    oferta = await selecionarProximaOfertaFila(clienteFila);
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";
@@ -10232,7 +10305,12 @@ function filtrarItensHistoricoFila(itensCliente = [], query = {}) {
 app.get("/fila", auth, (req, res) => {
   const clienteId = getClienteId(req);
 
-  sanearExpiradosFila(clienteId);
+  sanearExpiradosFila(clienteId).catch((erro) => {
+    console.warn("[FILA-EXPIRACAO-ROTA-ERRO]", {
+      clienteId,
+      erro: erro && erro.message ? erro.message : String(erro)
+    });
+  });
 
   const itensCliente = fila.filter((o) =>
     (o.clienteId || "admin") === clienteId

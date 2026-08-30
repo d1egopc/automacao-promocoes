@@ -39,7 +39,7 @@ assert(
 
 assert(
   pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
-    pos(processarFila, "selecionarProximaOfertaFila(clienteFila)"),
+    pos(processarFila, "await selecionarProximaOfertaFila(clienteFila)"),
   "executor deve reconciliar a fila oficial antes de selecionar pendente"
 );
 
@@ -124,6 +124,37 @@ assert(
     !logWriteLegadoFila.includes("publicarProof") &&
     !logWriteLegadoFila.includes("confirmarCheckpoint"),
   "telemetria de write legado deve usar apenas stat O(1), sem query PG, proof, checkpoint ou payload"
+);
+
+const persistirExpiracao = trechoEntre(
+  "async function persistirExpiracaoFila",
+  "async function sanearExpiradosFila"
+);
+
+assert(
+  persistirExpiracao.includes("!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)") &&
+    persistirExpiracao.includes("salvarFila(cliente, { origem: \"expiracao\", motivo });"),
+  "expiracao deve preservar rewrite legado para off-V2"
+);
+
+assert(
+  persistirExpiracao.includes("await sincronizarItemFilaVivaAposMutacao(cliente, item, `${motivo}_checkpoint_only`, {") &&
+    persistirExpiracao.includes("checkpointSincronizado: false") &&
+    persistirExpiracao.includes("exigirMutacao: true") &&
+    persistirExpiracao.includes("publicarLegacyProof: false"),
+  "expiracao em V2 deve espelhar mutacao na viva, abrir dirty e nao renovar proof legado"
+);
+
+assert(
+  persistirExpiracao.includes("syncVivaMutacaoConfirmada(syncViva)") &&
+    persistirExpiracao.includes("legacy_rewrite_evitado_checkpoint_only") &&
+    persistirExpiracao.includes("origem: \"expiracao\""),
+  "expiracao V2 confirmada deve evitar rewrite imediato de fila.json com observabilidade checkpoint-only"
+);
+
+assert(
+  persistirExpiracao.includes("motivo: `${motivo}_fallback_legado`"),
+  "expiracao V2 inconclusiva deve preservar fallback legado em vez de descartar mutacao"
 );
 
 const salvarFilaCentral = trechoEntre(
