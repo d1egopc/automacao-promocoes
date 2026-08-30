@@ -9237,7 +9237,11 @@ if (repeticaoExecutor.bloqueada) {
   return;
 }
 
-const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(fila, oferta, {
+const colecaoDuplicidadeProcessamento = (
+  fonteClienteHotStateSelecao?.conclusiva === true &&
+  Array.isArray(fonteClienteHotStateSelecao.itens)
+) ? fonteClienteHotStateSelecao.itens : fila;
+const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {
   clienteId
 });
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {

@@ -302,6 +302,20 @@ assert(
   "diagnostico final sem elegivel deve reutilizar hot state conclusivo e preservar fallback global quando ausente"
 );
 
+assert(
+  processarFila.includes("const colecaoDuplicidadeProcessamento = (") &&
+    processarFila.includes("fonteClienteHotStateSelecao?.conclusiva === true") &&
+    processarFila.includes("Array.isArray(fonteClienteHotStateSelecao.itens)") &&
+    processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
+    processarFila.includes("avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {"),
+  "anti-dup do executor V2 conclusivo deve usar hot state do cliente e preservar fila global como fallback"
+);
+
+assert(
+  processarFila.includes("filaOfertas.reservarOfertaProcessandoFila(fila, oferta, {"),
+  "reserva processando deve permanecer no mecanismo atual e fora deste corte"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"
@@ -734,6 +748,150 @@ try {
     );
     assert.strictEqual(hotStateCliente[0].cupom, duplicataAntiga.cupom, "cupom nao deve ser alterado pelo saneamento");
     assert.strictEqual(hotStateCliente[0].linkAfiliado, duplicataAntiga.linkAfiliado, "link afiliado deve ser preservado");
+  }
+
+  {
+    const agora = Date.parse("2026-08-08T20:30:00.000Z");
+    const identidadeBase = {
+      produtoId: "MLB-anti-dup-hot-state",
+      titulo: "Console Portatil Pro",
+      preco: 153,
+      precoAtual: 153,
+      marketplace: "mercadolivre",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-anti-dup-hot-state",
+      linkAfiliado: "https://mercadolivre.com.br/MLB-anti-dup-hot-state?aff=1",
+      cupom: "CUPOM10"
+    };
+
+    function resumoDuplicidade(resultado) {
+      return {
+        ok: resultado.ok,
+        bloquear: resultado.bloquear,
+        motivo: resultado.motivo,
+        statusAnterior: resultado.statusAnterior || "",
+        ofertaAnteriorId: resultado.ofertaAnterior?.id || ""
+      };
+    }
+
+    function compararDuplicidade(caso, itemAnterior, itemAtual, esperado) {
+      const outroCliente = criarItem(controle, `${caso}_cliente_b`, {
+        ...identidadeBase,
+        status: "processando",
+        destinoId: `destino_${controle}`
+      });
+      const global = [itemAnterior, outroCliente, itemAtual];
+      const hotStateCliente = [itemAnterior, itemAtual];
+      const resultadoGlobal = filaOfertas.avaliarDuplicidadeAntesProcessarFila(global, itemAtual, {
+        clienteId: wolff,
+        agora
+      });
+      const resultadoHotState = filaOfertas.avaliarDuplicidadeAntesProcessarFila(hotStateCliente, itemAtual, {
+        clienteId: wolff,
+        agora
+      });
+
+      assert.deepStrictEqual(
+        resumoDuplicidade(resultadoHotState),
+        resumoDuplicidade(resultadoGlobal),
+        `${caso}: hot state do cliente deve preservar a decisao da global filtrada`
+      );
+      assert.strictEqual(resultadoHotState.bloquear, esperado.bloquear, `${caso}: decisao bloquear preservada`);
+      assert.strictEqual(resultadoHotState.motivo, esperado.motivo, `${caso}: motivo preservado`);
+      assert.strictEqual(
+        resultadoHotState.ofertaAnterior,
+        itemAnterior,
+        `${caso}: cliente A deve decidir apenas com seu proprio item anterior`
+      );
+      assert.strictEqual(outroCliente.status, "processando", `${caso}: cliente B nao pode participar da decisao`);
+      assert.strictEqual(itemAtual.cupom, identidadeBase.cupom, `${caso}: cupom deve ser preservado`);
+      assert.strictEqual(itemAtual.linkAfiliado, identidadeBase.linkAfiliado, `${caso}: link afiliado deve ser preservado`);
+
+      if (resultadoHotState.bloquear) {
+        filaOfertas.marcarOfertaRetidaDuplicidadeFila(itemAtual, resultadoHotState.motivo, {
+          identidade: resultadoHotState.identidade,
+          ofertaAnteriorId: resultadoHotState.ofertaAnterior?.id || "",
+          agoraIso: "2026-08-08T20:30:00.000Z"
+        });
+        assert.strictEqual(itemAtual.status, "retida", `${caso}: retencao posterior deve permanecer identica`);
+        assert.strictEqual(itemAtual.motivoRetencao, esperado.motivo, `${caso}: motivo da retencao preservado`);
+        assert.strictEqual(itemAnterior.status, esperado.statusAnterior, `${caso}: item anterior nao deve ser mutado`);
+      }
+    }
+
+    compararDuplicidade(
+      "pendente",
+      criarItem(wolff, "dup_pendente_antiga", {
+        ...identidadeBase,
+        status: "pendente",
+        criadoEm: "08/08/2026, 17:00:00",
+        dataEntradaFila: "2026-08-08T20:00:00.000Z"
+      }),
+      criarItem(wolff, "dup_pendente_atual", {
+        ...identidadeBase,
+        status: "pendente",
+        criadoEm: "08/08/2026, 17:10:00",
+        dataEntradaFila: "2026-08-08T20:10:00.000Z"
+      }),
+      { bloquear: true, motivo: "duplicata_pendente_com_precedencia", statusAnterior: "pendente" }
+    );
+
+    compararDuplicidade(
+      "processando",
+      criarItem(wolff, "dup_processando_anterior", {
+        ...identidadeBase,
+        status: "processando"
+      }),
+      criarItem(wolff, "dup_processando_atual", {
+        ...identidadeBase,
+        status: "pendente"
+      }),
+      { bloquear: true, motivo: "duplicata_ja_processando", statusAnterior: "processando" }
+    );
+
+    compararDuplicidade(
+      "enviando",
+      criarItem(wolff, "dup_enviando_anterior", {
+        ...identidadeBase,
+        status: "enviando"
+      }),
+      criarItem(wolff, "dup_enviando_atual", {
+        ...identidadeBase,
+        status: "pendente"
+      }),
+      { bloquear: true, motivo: "duplicata_ja_processando", statusAnterior: "enviando" }
+    );
+
+    compararDuplicidade(
+      "enviado_recente_2h",
+      criarItem(wolff, "dup_enviado_recente", {
+        ...identidadeBase,
+        status: "enviado",
+        enviadoEm: "2026-08-08T20:00:00.000Z"
+      }),
+      criarItem(wolff, "dup_enviado_atual", {
+        ...identidadeBase,
+        status: "pendente"
+      }),
+      { bloquear: true, motivo: "repetida_no_executor_2h", statusAnterior: "enviado" }
+    );
+
+    const enviadoAntigo = criarItem(wolff, "dup_enviado_antigo", {
+      ...identidadeBase,
+      status: "enviado",
+      enviadoEm: "2026-08-08T17:00:00.000Z"
+    });
+    const enviadoAntigoAtual = criarItem(wolff, "dup_enviado_antigo_atual", {
+      ...identidadeBase,
+      status: "pendente"
+    });
+    const resultadoAntigo = filaOfertas.avaliarDuplicidadeAntesProcessarFila(
+      [enviadoAntigo, enviadoAntigoAtual],
+      enviadoAntigoAtual,
+      { clienteId: wolff, agora }
+    );
+    assert.strictEqual(resultadoAntigo.ok, true, "item antigo fora da janela deve avaliar com sucesso");
+    assert.strictEqual(resultadoAntigo.bloquear, false, "enviado antigo fora de 2h nao deve bloquear indevidamente");
+    assert.strictEqual(resultadoAntigo.motivo, "sem_duplicidade_ativa", "historico antigo deve preservar regra atual");
   }
 
   const itemA = criarItem(wolff, "wolff_a");
