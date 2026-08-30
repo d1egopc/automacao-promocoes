@@ -434,15 +434,33 @@ assert(
   bootLazyInativo.includes("if (usuario.ativo === false)") &&
     pos(bootLazyInativo, "marcarFilaClienteNaoInicializada(usuario.id, \"boot_usuario_inativo\");") <
       pos(bootLazyInativo, "carregarFila(usuario.id);"),
-  "boot deve pular somente usuario.ativo === false e carregar ativos como antes"
+  "boot deve preservar lazy homologado para usuario.ativo === false"
+);
+
+assert(
+  bootLazyInativo.includes("const configClienteBoot = configsPorCliente?.[usuario.id] || config;") &&
+    bootLazyInativo.includes("if (configClienteBoot.automacaoAtiva !== true)") &&
+    bootLazyInativo.includes("marcarFilaClienteNaoInicializada(usuario.id, \"boot_automacao_desligada\");") &&
+    pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") <
+      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+  "boot deve deixar ativo com automacaoAtiva diferente de true em lazy sem carregar fila"
+);
+
+assert(
+  pos(bootLazyInativo, "if (usuario.ativo === false)") <
+    pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") &&
+    pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") <
+      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+  "boot deve carregar normalmente somente ativo com automacaoAtiva true"
 );
 
 assert(
   bootLazyInativo.includes("continue;") &&
-    !bootLazyInativo.includes("automacaoAtiva") &&
+    bootLazyInativo.includes("boot_usuario_inativo") &&
+    bootLazyInativo.includes("boot_automacao_desligada") &&
     !bootLazyInativo.includes("destino") &&
     !bootLazyInativo.includes("creditos"),
-  "primeiro corte lazy nao deve usar automacao, destino, credito ou outro sinal para pular boot"
+  "segundo corte lazy deve usar apenas config de automacao ja carregada, sem destino, credito ou outro sinal pesado"
 );
 
 assert(
@@ -495,6 +513,52 @@ assert(
     rotaPutUsuario.includes("if (body.ativo === true && ativoAntes === false)") &&
     rotaPutUsuario.includes("garantirFilaClienteInicializadaHttp(res, id, \"reativacao_usuario\")"),
   "reativacao de usuario deve disparar lazy load oficial antes de responder sucesso"
+);
+
+const rotaAutomacaoToggle = trechoEntre(
+  'app.post("/automacao/toggle"',
+  'app.delete("/fila/item/:id"'
+);
+
+assert(
+  rotaAutomacaoToggle.includes('app.post("/automacao/toggle", async (req, res) =>') &&
+    rotaAutomacaoToggle.includes("const proximoEstadoAutomacao =") &&
+    rotaAutomacaoToggle.includes("if (proximoEstadoAutomacao === true)") &&
+    pos(rotaAutomacaoToggle, "garantirFilaClienteInicializadaHttp(res, clienteId, \"ativacao_automacao\")") <
+      pos(rotaAutomacaoToggle, "configsPorCliente[clienteId].automacaoAtiva =") &&
+    pos(rotaAutomacaoToggle, "configsPorCliente[clienteId].automacaoAtiva =") <
+      pos(rotaAutomacaoToggle, "salvarConfigsClientes();"),
+  "toggle de automacao deve inicializar fila antes de tornar automacao ativa persistida"
+);
+
+const rotaMinhaConfig = trechoEntre(
+  'app.post("/minha-config"',
+  'app.post("/config"'
+);
+
+assert(
+  rotaMinhaConfig.includes('app.post("/minha-config", async (req, res) =>') &&
+    rotaMinhaConfig.includes("const configAtual = configsPorCliente[clienteId] || {};") &&
+    rotaMinhaConfig.includes("if (body.automacaoAtiva === true && configAtual.automacaoAtiva !== true)") &&
+    pos(rotaMinhaConfig, "garantirFilaClienteInicializadaHttp(res, clienteId, \"ativacao_automacao_minha_config\")") <
+      pos(rotaMinhaConfig, "configsPorCliente[clienteId] = {"),
+  "minha-config deve inicializar fila antes de gravar automacaoAtiva true"
+);
+
+const rotaConfig = trechoEntre(
+  'app.post("/config"',
+  "// ===================== FUNCAO ADMIN MASTER"
+);
+
+assert(
+  rotaConfig.includes('app.post("/config", async (req, res) =>') &&
+    rotaConfig.includes("const ativandoAutomacao =") &&
+    rotaConfig.includes("body.automacaoAtiva === true && configCliente.automacaoAtiva !== true") &&
+    pos(rotaConfig, "garantirFilaClienteInicializadaHttp(res, clienteId, \"ativacao_automacao_config\")") <
+      pos(rotaConfig, "configCliente.automacaoAtiva =") &&
+    pos(rotaConfig, "configCliente.automacaoAtiva =") <
+      pos(rotaConfig, "salvarConfigsClientes();"),
+  "config deve inicializar fila antes de gravar automacaoAtiva true"
 );
 
 [

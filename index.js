@@ -11167,7 +11167,7 @@ app.get("/automacao", (req, res) => {
   });
 });
 
-app.post("/automacao/toggle", (req, res) => {
+app.post("/automacao/toggle", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
@@ -11179,8 +11179,15 @@ app.post("/automacao/toggle", (req, res) => {
 
   configsPorCliente[clienteId] = configsPorCliente[clienteId] || {};
 
-  configsPorCliente[clienteId].automacaoAtiva =
+  const proximoEstadoAutomacao =
     !configsPorCliente[clienteId].automacaoAtiva;
+
+  if (proximoEstadoAutomacao === true) {
+    if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "ativacao_automacao"))) return;
+  }
+
+  configsPorCliente[clienteId].automacaoAtiva =
+    proximoEstadoAutomacao;
 
   salvarConfigsClientes();
 
@@ -12471,12 +12478,17 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   });
 });
 
-app.post("/minha-config", (req, res) => {
+app.post("/minha-config", async (req, res) => {
   const clienteId = getClienteId(req);
   const body = req.body || {};
+  const configAtual = configsPorCliente[clienteId] || {};
+
+  if (body.automacaoAtiva === true && configAtual.automacaoAtiva !== true) {
+    if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "ativacao_automacao_minha_config"))) return;
+  }
 
   configsPorCliente[clienteId] = {
-    ...configsPorCliente[clienteId],
+    ...configAtual,
     ...body
   };
 
@@ -12489,7 +12501,7 @@ app.post("/minha-config", (req, res) => {
   });
 });
 
-app.post("/config", (req, res) => {
+app.post("/config", async (req, res) => {
 
   const clienteId = getClienteId(req);
 
@@ -12592,6 +12604,13 @@ if (body.pausarMadrugada != null) {
   // ================= CONFIG CLIENTE =================
 
  if (body.automacaoAtiva != null) {
+  const ativandoAutomacao =
+    body.automacaoAtiva === true && configCliente.automacaoAtiva !== true;
+
+  if (ativandoAutomacao) {
+    if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "ativacao_automacao_config"))) return;
+  }
+
   configCliente.automacaoAtiva =
     body.automacaoAtiva === true;
 
@@ -28996,6 +29015,11 @@ for (const usuario of usuarios) {
   if (!usuario) continue;
   if (usuario.ativo === false) {
     marcarFilaClienteNaoInicializada(usuario.id, "boot_usuario_inativo");
+    continue;
+  }
+  const configClienteBoot = configsPorCliente?.[usuario.id] || config;
+  if (configClienteBoot.automacaoAtiva !== true) {
+    marcarFilaClienteNaoInicializada(usuario.id, "boot_automacao_desligada");
     continue;
   }
   carregarFila(usuario.id);
