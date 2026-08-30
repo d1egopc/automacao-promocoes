@@ -895,6 +895,11 @@ let enviandoAgoraPorCliente = {};
 let processadorFilaGlobalRodando = false;
 const mutacaoFilaPorCliente = new Set();
 const mutacaoFilaAsyncPorCliente = new Map();
+const ESTADO_FILA_CLIENTE_INICIALIZADO = "INICIALIZADO";
+const ESTADO_FILA_CLIENTE_NAO_INICIALIZADO = "NAO_INICIALIZADO";
+const ESTADO_FILA_CLIENTE_INICIALIZANDO = "INICIALIZANDO";
+const estadoInicializacaoFilaCliente = new Map();
+const inicializacaoFilaClienteEmAndamento = new Map();
 let controleEnvio = {}; // por cliente
 let controleIntervaloEnvioPorCliente = {};
 let historicoOfertas = {};
@@ -1784,6 +1789,8 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       resultado.statusEntradaFila = "bloqueada_antes_fila";
       return resultado;
     }
+
+    await garantirFilaClienteInicializada(cliente, "fila_inteligente_abastecer");
 
     const filaControlada = [];
 
@@ -3018,6 +3025,18 @@ function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration 
 
 function salvarFila(clienteId = "admin", opcoes = {}) {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
+  const estadoInicializacao = estadoFilaClienteInicializacao(clienteId);
+  if (estadoInicializacao !== ESTADO_FILA_CLIENTE_INICIALIZADO) {
+    console.warn("[FILA-LAZY-WORKSPACE-ERRO]", JSON.stringify({
+      clienteId: normalizarClienteInicializacaoFila(clienteId),
+      estado: estadoInicializacao,
+      motivo: "salvar_fila_sem_inicializacao",
+      origem: normalizarOrigemWriteLegadoFila(opcoes),
+      timestamp: new Date().toISOString()
+    }));
+    return false;
+  }
+
   const inicioSalvarFila = Date.now();
   aplicarDiversidadeFila(clienteId);
   ultimoErroSalvarFilaPorCliente.delete(String(clienteId || "admin"));
@@ -3440,6 +3459,7 @@ function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
     clienteId,
     motivo: "carregarFila"
   });
+  marcarFilaClienteInicializada(clienteId, opcoes.motivo || "carregarFila");
   return fila;
 }
 
@@ -3457,6 +3477,97 @@ function carregarFila(clienteId = "admin") {
   }
   return finalizarCarregamentoFilaCliente(clienteId);
   });
+}
+
+function normalizarClienteInicializacaoFila(clienteId = "admin") {
+  return String(clienteId || "admin").trim() || "admin";
+}
+
+function estadoFilaClienteInicializacao(clienteId = "admin") {
+  const cliente = normalizarClienteInicializacaoFila(clienteId);
+  return estadoInicializacaoFilaCliente.get(cliente) || ESTADO_FILA_CLIENTE_INICIALIZADO;
+}
+
+function marcarFilaClienteNaoInicializada(clienteId = "admin", motivo = "boot_usuario_inativo") {
+  const cliente = normalizarClienteInicializacaoFila(clienteId);
+  if (estadoInicializacaoFilaCliente.get(cliente) === ESTADO_FILA_CLIENTE_NAO_INICIALIZADO) return;
+  estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_NAO_INICIALIZADO);
+  console.log("[FILA-LAZY-WORKSPACE]", JSON.stringify({
+    clienteId: cliente,
+    estado: ESTADO_FILA_CLIENTE_NAO_INICIALIZADO,
+    motivo,
+    timestamp: new Date().toISOString()
+  }));
+}
+
+function marcarFilaClienteInicializada(clienteId = "admin", motivo = "carregarFila") {
+  const cliente = normalizarClienteInicializacaoFila(clienteId);
+  const estadoAnterior = estadoInicializacaoFilaCliente.get(cliente);
+  estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZADO);
+  inicializacaoFilaClienteEmAndamento.delete(cliente);
+  if (estadoAnterior !== ESTADO_FILA_CLIENTE_NAO_INICIALIZADO && estadoAnterior !== ESTADO_FILA_CLIENTE_INICIALIZANDO) {
+    return;
+  }
+  console.log("[FILA-LAZY-WORKSPACE]", JSON.stringify({
+    clienteId: cliente,
+    estado: ESTADO_FILA_CLIENTE_INICIALIZADO,
+    motivo,
+    timestamp: new Date().toISOString()
+  }));
+}
+
+async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "uso_fila") {
+  const cliente = normalizarClienteInicializacaoFila(clienteId);
+  const estadoAtual = estadoFilaClienteInicializacao(cliente);
+  if (estadoAtual === ESTADO_FILA_CLIENTE_INICIALIZADO) {
+    return { ok: true, clienteId: cliente, estado: estadoAtual, carregou: false };
+  }
+
+  const emAndamento = inicializacaoFilaClienteEmAndamento.get(cliente);
+  if (emAndamento) return emAndamento;
+
+  const inicializacao = Promise.resolve()
+    .then(() => {
+      estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO);
+      carregarFila(cliente);
+      return {
+        ok: true,
+        clienteId: cliente,
+        estado: ESTADO_FILA_CLIENTE_INICIALIZADO,
+        carregou: true
+      };
+    })
+    .catch((erro) => {
+      estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_NAO_INICIALIZADO);
+      console.warn("[FILA-LAZY-WORKSPACE-ERRO]", JSON.stringify({
+        clienteId: cliente,
+        estado: ESTADO_FILA_CLIENTE_NAO_INICIALIZADO,
+        motivo,
+        erro: erro && erro.message ? erro.message : String(erro),
+        timestamp: new Date().toISOString()
+      }));
+      throw erro;
+    })
+    .finally(() => {
+      inicializacaoFilaClienteEmAndamento.delete(cliente);
+    });
+
+  inicializacaoFilaClienteEmAndamento.set(cliente, inicializacao);
+  return inicializacao;
+}
+
+async function garantirFilaClienteInicializadaHttp(res, clienteId = "admin", motivo = "rota_fila") {
+  try {
+    await garantirFilaClienteInicializada(clienteId, motivo);
+    return true;
+  } catch (erro) {
+    res.status(503).json({
+      ok: false,
+      motivo: "fila_nao_inicializada",
+      erro: erro && erro.message ? erro.message : "Falha ao inicializar fila do cliente"
+    });
+    return false;
+  }
 }
 
 async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto = "leitura") {
@@ -3648,6 +3759,19 @@ async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila =
         ...resumirFilaPorStatus(fila)
       });
       return { ok: false, motivo: "usuario_inativo" };
+    }
+
+    try {
+      await garantirFilaClienteInicializada(cliente, "engine_distributor_fila");
+    } catch (erro) {
+      medidorFilaGlobal.fim({
+        ok: false,
+        motivo: "fila_nao_inicializada",
+        erro: erro && erro.message ? erro.message : String(erro),
+        bytesFilaGlobal: "nao_medido",
+        ...resumirFilaPorStatus(fila)
+      });
+      return { ok: false, motivo: "fila_nao_inicializada", erro: erro?.message || String(erro) };
     }
 
     const usarFilaV2HotPath = filaOperacionalV2.deveUsarFilaV2Operacional(cliente);
@@ -8434,6 +8558,24 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
     return;
   }
 
+  try {
+    await garantirFilaClienteInicializada(clienteFila, "executor_processar_fila");
+  } catch (erro) {
+    resumoFila.motivoPulo = "fila_nao_inicializada";
+    coberturaRadar.registrar("executor_bloqueado", {
+      clienteId: clienteFila,
+      decisao: "bloqueado",
+      motivo: resumoFila.motivoPulo
+    });
+    const cpu = process.cpuUsage(cpuInicioProcessarFila);
+    logProcessarFilaResumo({
+      ...resumoFila,
+      duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
+      cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+    });
+    return;
+  }
+
   if (enviandoAgoraPorCliente[clienteFila]) {
     resumoFila.motivoPulo = "envio_em_execucao";
     resumoFila.sobreposicaoEvitada = true;
@@ -9880,7 +10022,7 @@ registrarMiddlewaresOperacionais(app, {
 
 // ============== POST FILA ENVIO =================
 
-app.post("/fila", auth, (req, res) => {
+app.post("/fila", auth, async (req, res) => {
   try {
     const body = req.body || {};
     const clienteId = getClienteId(req);
@@ -9891,6 +10033,8 @@ app.post("/fila", auth, (req, res) => {
         erro: "Usuário não identificado"
       });
     }
+
+    if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_post_fila"))) return;
 
     const resultado = adicionarManualNaFila(body, {
       fila,
@@ -9987,6 +10131,8 @@ const oferta = {
 };
 
  const clienteId = oferta.clienteId || "admin";
+
+if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_enviar_manual"))) return;
 
 if (deveIgnorarOfertaRepetida(oferta)) {
   return res.json({
@@ -10387,8 +10533,9 @@ function filtrarItensHistoricoFila(itensCliente = [], query = {}) {
   });
 }
 
-app.get("/fila", auth, (req, res) => {
+app.get("/fila", auth, async (req, res) => {
   const clienteId = getClienteId(req);
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila"))) return;
 
   sanearExpiradosFila(clienteId).catch((erro) => {
     console.warn("[FILA-EXPIRACAO-ROTA-ERRO]", {
@@ -10872,7 +11019,7 @@ app.delete("/destinos/:id", (req, res) => {
 
 // ================= AUTOMAÇÃO POR CLIENTE =================
 
-app.get("/automacao/status", (req, res) => {
+app.get("/automacao/status", async (req, res) => {
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
@@ -10881,6 +11028,8 @@ app.get("/automacao/status", (req, res) => {
       erro: "Usuário não identificado"
     });
   }
+
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_automacao_status"))) return;
 
   const configCliente = configsPorCliente?.[clienteId] || {};
   const configFinal = {
@@ -11051,6 +11200,7 @@ app.post("/automacao/toggle", (req, res) => {
 app.delete("/fila/item/:id", auth, async (req, res) => {
   const clienteId = getClienteId(req);
   const id = req.params.id;
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_remover_item_id"))) return;
 
   const index = fila.findIndex(item =>
     String(item.id) === String(id) &&
@@ -11080,9 +11230,10 @@ app.delete("/fila/item/:id", auth, async (req, res) => {
   });
 });
 
-app.delete("/fila/limpar", auth, (req, res) => {
+app.delete("/fila/limpar", auth, async (req, res) => {
   const clienteId = getClienteId(req);
   const status = req.query.status;
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_limpar_fila"))) return;
 
   const limpeza = filaOfertas.limparFilaAntiga(fila, {
     clienteId,
@@ -11112,6 +11263,7 @@ app.delete("/fila/limpar", auth, (req, res) => {
 app.delete("/fila/:index", auth, async (req, res) => {
   const index = Number(req.params.index);
   const clienteId = getClienteId(req);
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_remover_indice"))) return;
   const resolucaoIndice = filaStore.resolverIndiceGlobalLegado(fila, clienteId, index);
 
   if (resolucaoIndice.motivo === "indice_invalido") {
@@ -11153,6 +11305,7 @@ app.delete("/fila/:index", auth, async (req, res) => {
 app.post("/fila/:id/reprocessar", auth, async (req, res) => {
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_reprocessar"))) return;
 
   const oferta = fila.find(item =>
     String(item.id || "") === id &&
@@ -11201,6 +11354,7 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
 app.post("/fila/item/:id/enviar-agora", auth, async (req, res) => {
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
+  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_enviar_agora_id"))) return;
   const oferta = fila.find(item =>
     String(item.id || "") === id &&
     String(item.clienteId || "admin") === String(clienteId)
@@ -11221,6 +11375,7 @@ app.post("/fila/:index/enviar-agora", auth, async (req, res) => {
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
 const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();
+if (!(await garantirFilaClienteInicializadaHttp(res, clienteIdReq, "rota_enviar_agora_indice"))) return;
 const resolucaoIndice = filaStore.resolverIndiceClienteLegado(fila, clienteIdReq, index, {
   idEsperado: idBody,
   preferirPendente: true
@@ -12214,6 +12369,7 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   }
 
   const body = req.body || {};
+  const ativoAntes = usuario.ativo !== false;
   const creditosAntes = Number(usuario.creditos ?? 0);
   const planoAntes = String(usuario.plano || "").trim();
   const planoInformado = Object.prototype.hasOwnProperty.call(body, "plano");
@@ -12304,6 +12460,10 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
     new Date().toISOString();
 
   salvarUsuarios();
+
+  if (body.ativo === true && ativoAntes === false) {
+    if (!(await garantirFilaClienteInicializadaHttp(res, id, "reativacao_usuario"))) return;
+  }
 
   return res.json({
     ok: true,
@@ -19601,6 +19761,16 @@ function retidaCanonicaJaExiste(clienteId = "admin", oferta = {}) {
 }
 
 function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
+  if (estadoFilaClienteInicializacao(clienteId) !== ESTADO_FILA_CLIENTE_INICIALIZADO) {
+    console.warn("[FILA-LAZY-WORKSPACE-ERRO]", JSON.stringify({
+      clienteId: normalizarClienteInicializacaoFila(clienteId),
+      estado: estadoFilaClienteInicializacao(clienteId),
+      motivo: "radar_retida_sem_inicializacao",
+      timestamp: new Date().toISOString()
+    }));
+    return { ok: false, motivo: "fila_nao_inicializada" };
+  }
+
   marcarOfertaRetida(oferta, "retida_sem_destino_compativel");
   oferta.statusRadar = "retida";
   oferta.radarNaFila = false;
@@ -24398,6 +24568,7 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
     aplicarPrioridadeEnvioOferta(novaOferta);
 
     if (opcoes.teste !== true) {
+      await garantirFilaClienteInicializada(clienteId, "importador_kabum_manual");
       const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-kabum-awin");
 
       if (adicionou) {
@@ -25435,6 +25606,7 @@ novaOferta.statusDetalhe = novaOferta.statusDetalhe || "Na fila";
 validarCupomMonetarioOferta(novaOferta);
 aplicarPrioridadeEnvioOferta(novaOferta);
 
+await garantirFilaClienteInicializada(clienteId, "importador_magalu_manual");
 const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
 
 if (adicionou) {
@@ -26882,8 +27054,9 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
        continue;
      }
 
-      filaOfertas.adicionarOfertaFila(fila, ofertaFinal, {
-        clienteId,
+      await garantirFilaClienteInicializada(clienteId, "importador_awin_feed");
+       filaOfertas.adicionarOfertaFila(fila, ofertaFinal, {
+         clienteId,
         origem: ofertaFinal.origem || "feed_awin",
         logger: console
       });
@@ -28821,6 +28994,10 @@ initEngineDatabase()
 
 for (const usuario of usuarios) {
   if (!usuario) continue;
+  if (usuario.ativo === false) {
+    marcarFilaClienteNaoInicializada(usuario.id, "boot_usuario_inativo");
+    continue;
+  }
   carregarFila(usuario.id);
 }
 

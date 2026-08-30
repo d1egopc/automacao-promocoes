@@ -280,6 +280,14 @@ const salvarFilaCentral = trechoEntre(
 );
 
 assert(
+  pos(salvarFilaCentral, "const estadoInicializacao = estadoFilaClienteInicializacao(clienteId);") <
+    pos(salvarFilaCentral, "const salvou = filaOfertas.salvarFila({") &&
+    salvarFilaCentral.includes("motivo: \"salvar_fila_sem_inicializacao\"") &&
+    salvarFilaCentral.includes("return false;"),
+  "salvarFila deve falhar fechado antes de write legado quando o cliente estiver NAO_INICIALIZADO"
+);
+
+assert(
   pos(salvarFilaCentral, "const salvou = filaOfertas.salvarFila({") <
     pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") &&
     pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") <
@@ -375,6 +383,138 @@ assert(
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao"),
   "processarFila deve encaminhar hot state por cliente para diagnostico/selecao sem refiltrar a global"
 );
+
+const lazyWorkspaceState = trechoEntre(
+  "const ESTADO_FILA_CLIENTE_INICIALIZADO",
+  "async function reconciliarFilaV2ParaLeituraCliente"
+);
+
+assert(
+  lazyWorkspaceState.includes("ESTADO_FILA_CLIENTE_NAO_INICIALIZADO = \"NAO_INICIALIZADO\"") &&
+    lazyWorkspaceState.includes("estadoInicializacaoFilaCliente = new Map()") &&
+    lazyWorkspaceState.includes("inicializacaoFilaClienteEmAndamento = new Map()"),
+  "lazy de workspace inativo deve ter estado explicito por cliente e nao confundir nao inicializado com fila vazia"
+);
+
+assert(
+  lazyWorkspaceState.includes("if (estadoAtual === ESTADO_FILA_CLIENTE_INICIALIZADO)") &&
+    lazyWorkspaceState.includes("const emAndamento = inicializacaoFilaClienteEmAndamento.get(cliente)") &&
+    lazyWorkspaceState.includes("if (emAndamento) return emAndamento") &&
+    lazyWorkspaceState.includes("inicializacaoFilaClienteEmAndamento.set(cliente, inicializacao)"),
+  "guard lazy deve ser no-op apos inicializacao e single-flight durante inicializacao concorrente"
+);
+
+assert(
+  lazyWorkspaceState.includes("estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO)") &&
+    lazyWorkspaceState.includes("carregarFila(cliente)") &&
+    lazyWorkspaceState.includes("estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_NAO_INICIALIZADO)") &&
+    lazyWorkspaceState.includes("throw erro"),
+  "guard lazy deve usar o loader oficial, marcar inicializando e falhar fechado sem produzir falso vazio"
+);
+
+const finalizarCarregamentoLazy = trechoEntre(
+  "function finalizarCarregamentoFilaCliente",
+  "function carregarFila"
+);
+
+assert(
+  pos(finalizarCarregamentoLazy, "reconstruirFilaStoreCliente(clienteId, opcoes.motivo || \"carregarFila\", opcoes);") <
+    pos(finalizarCarregamentoLazy, "marcarFilaClienteInicializada(clienteId, opcoes.motivo || \"carregarFila\");"),
+  "cliente so pode virar INICIALIZADO depois de rebuild/reconciliacao oficial"
+);
+
+const bootLazyInativo = (() => {
+  const fimBoot = fonteIndex.lastIndexOf("function garantirIdsFila");
+  const marcadorBoot = fonteIndex.lastIndexOf("for (const usuario of usuarios) {", fimBoot);
+  assert(marcadorBoot >= 0 && fimBoot > marcadorBoot, "loop de boot de fila deve existir");
+  return fonteIndex.slice(marcadorBoot, fimBoot);
+})();
+
+assert(
+  bootLazyInativo.includes("if (usuario.ativo === false)") &&
+    pos(bootLazyInativo, "marcarFilaClienteNaoInicializada(usuario.id, \"boot_usuario_inativo\");") <
+      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+  "boot deve pular somente usuario.ativo === false e carregar ativos como antes"
+);
+
+assert(
+  bootLazyInativo.includes("continue;") &&
+    !bootLazyInativo.includes("automacaoAtiva") &&
+    !bootLazyInativo.includes("destino") &&
+    !bootLazyInativo.includes("creditos"),
+  "primeiro corte lazy nao deve usar automacao, destino, credito ou outro sinal para pular boot"
+);
+
+assert(
+  processarFila.includes("await garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\");") &&
+    pos(processarFila, "if (!usuarioAtivoOperacional(clienteFila))") <
+      pos(processarFila, "await garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\");"),
+  "executor deve manter bloqueio de inativo antes do guard e carregar lazy antes da primeira operacao real"
+);
+
+const adicionarFilaGlobalEngine = trechoEntre(
+  "async function adicionarOfertaNaFilaGlobalEngine",
+  "function garantirIdsFila"
+);
+
+assert(
+  adicionarFilaGlobalEngine.includes("await garantirFilaClienteInicializada(cliente, \"engine_distributor_fila\");") &&
+    pos(adicionarFilaGlobalEngine, "if (!usuarioAtivoOperacional(cliente))") <
+      pos(adicionarFilaGlobalEngine, "await garantirFilaClienteInicializada(cliente, \"engine_distributor_fila\");") &&
+    pos(adicionarFilaGlobalEngine, "await garantirFilaClienteInicializada(cliente, \"engine_distributor_fila\");") <
+      pos(adicionarFilaGlobalEngine, "itemEngineDuplicadoFilaGlobal(cliente, itemFinal)"),
+  "Distributor/engine deve carregar lazy depois do bloqueio de inativo e antes de dedupe/insercao"
+);
+
+assert(
+  adicionarFilaGlobalEngine.includes("motivo: \"fila_nao_inicializada\"") &&
+    adicionarFilaGlobalEngine.includes("return { ok: false, motivo: \"fila_nao_inicializada\""),
+  "falha do lazy no Distributor deve ser fail-closed"
+);
+
+[
+  "fila_inteligente_abastecer",
+  "radar_retida_sem_inicializacao",
+  "importador_kabum_manual",
+  "importador_magalu_manual",
+  "importador_awin_feed"
+].forEach((motivo) => {
+  assert(
+    fonteIndex.includes(`"${motivo}"`),
+    `${motivo} deve proteger produtor direto que acessa ou muta fila real`
+  );
+});
+
+const rotaPutUsuario = trechoEntre(
+  'app.put("/admin/usuarios/:id"',
+  'app.post("/minha-config"'
+);
+
+assert(
+  rotaPutUsuario.includes("const ativoAntes = usuario.ativo !== false;") &&
+    rotaPutUsuario.includes("if (body.ativo === true && ativoAntes === false)") &&
+    rotaPutUsuario.includes("garantirFilaClienteInicializadaHttp(res, id, \"reativacao_usuario\")"),
+  "reativacao de usuario deve disparar lazy load oficial antes de responder sucesso"
+);
+
+[
+  "rota_post_fila",
+  "rota_enviar_manual",
+  "rota_get_fila",
+  "rota_automacao_status",
+  "rota_remover_item_id",
+  "rota_limpar_fila",
+  "rota_remover_indice",
+  "rota_reprocessar",
+  "rota_enviar_agora_id",
+  "rota_enviar_agora_indice"
+].forEach((motivo) => {
+  assert(
+    fonteIndex.includes(`garantirFilaClienteInicializadaHttp(res,`) &&
+      fonteIndex.includes(`"${motivo}"`),
+    `${motivo} deve proteger entrypoint que acessa ou muta fila real`
+  );
+});
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-unica-"));
 const dataDirAnterior = process.env.DATA_DIR;
