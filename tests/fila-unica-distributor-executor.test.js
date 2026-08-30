@@ -39,7 +39,7 @@ assert(
 
 assert(
   pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
-    pos(processarFila, "await selecionarProximaOfertaFila(clienteFila)"),
+    pos(processarFila, "await selecionarProximaOfertaFila(clienteFila, {"),
   "executor deve reconciliar a fila oficial antes de selecionar pendente"
 );
 
@@ -94,6 +94,31 @@ assert(
     fastPathExecutor.includes("hotState: true") &&
     fastPathExecutor.includes("pendentes"),
   "fast path deve materializar hot state por cliente, incluindo caso de zero pendentes"
+);
+
+assert(
+  fastPathExecutor.includes("const filaSemCliente = fila.filter") &&
+    fastPathExecutor.includes("fila = [...filaSemCliente, ...filaClienteHotState]"),
+  "primeiro corte TOP 2 nao deve alterar a reidratacao global do fast path"
+);
+
+const fonteHotStateExecutor = trechoEntre(
+  "function fonteClienteHotStateExecutorV2",
+  "function avaliarOfertaParaSelecaoFilaViva"
+);
+
+assert(
+  fonteHotStateExecutor.includes("reconciliacao.fastPathExecutor !== true") &&
+    fonteHotStateExecutor.includes("reconciliacao.generationConclusiva !== true") &&
+    fonteHotStateExecutor.includes("return null"),
+  "fonte por cliente so pode ser usada quando o fast path V2 tiver authority conclusiva"
+);
+
+assert(
+  fonteHotStateExecutor.includes("filaStore.itensPorCliente(cliente)") &&
+    !fonteHotStateExecutor.includes("lerFilaVivaParaMerge") &&
+    !fonteHotStateExecutor.includes("reconciliarFilaV2ParaLeitura"),
+  "fonte por cliente deve reutilizar hot state indexado sem segunda leitura da fila-viva"
 );
 
 const logWriteLegadoFila = trechoEntre(
@@ -210,6 +235,45 @@ assert(
   "expiracao_selecao deve preservar regra, mutacao e persistencia checkpoint-only existentes"
 );
 
+const diagnosticoFila = trechoEntre(
+  "function diagnosticarFilaCliente",
+  "function fonteClienteHotStateExecutorV2"
+);
+
+assert(
+  diagnosticoFila.includes("const fonteClienteConfiavel = Array.isArray(opcoes.filaClienteHotState)") &&
+    diagnosticoFila.includes("? opcoes.filaClienteHotState") &&
+    diagnosticoFila.includes(": fila.filter"),
+  "diagnostico deve usar visao por cliente no caminho V2 conclusivo e preservar fallback global"
+);
+
+assert(
+  diagnosticoFila.includes("pendentesGlobal: fonteClienteConfiavel") &&
+    diagnosticoFila.includes("? null") &&
+    diagnosticoFila.includes(": fila.filter(o => o?.status === \"pendente\").length"),
+  "diagnostico V2 conclusivo nao deve filtrar a fila global apenas para telemetria"
+);
+
+const selecaoExecutor = trechoEntre(
+  "async function selecionarProximaOfertaFila",
+  "function aplicarDiversidadeFila"
+);
+
+assert(
+  selecaoExecutor.includes("const fonteClienteHotState = opcoes?.fonteClienteHotState") &&
+    selecaoExecutor.includes("const colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)") &&
+    selecaoExecutor.includes("? fonteClienteHotState.itens") &&
+    selecaoExecutor.includes(": fila"),
+  "selecao V2 conclusiva deve usar a visao por cliente ja disponivel e fallback legado deve continuar usando fila global"
+);
+
+assert(
+  selecaoExecutor.includes("diagnosticarFilaCliente(clienteLog, {") &&
+    selecaoExecutor.includes("filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)") &&
+    selecaoExecutor.includes("selecionarProximaOfertaFilaCore(colecaoSelecao, clienteIdAlvo, {"),
+  "diagnostico e selecao devem compartilhar a mesma colecao por cliente no ciclo"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"
@@ -262,8 +326,16 @@ assert(
 
 assert(
   pos(puloRapidoV2, "await reconciliarFilaV2ParaLeituraCliente(cliente, \"executor\");") <
-    pos(puloRapidoV2, "pendentes = fila.filter"),
+    pos(puloRapidoV2, "const fonteClienteHotState = fonteClienteHotStateExecutorV2(cliente, reconciliacao);") &&
+    pos(puloRapidoV2, "const fonteClienteHotState = fonteClienteHotStateExecutorV2(cliente, reconciliacao);") <
+    pos(puloRapidoV2, "const basePendentes = Array.isArray(fonteClienteHotState?.itens) ? fonteClienteHotState.itens : fila;"),
   "runner deve reconciliar hot state V2 antes de confirmar sem_pendentes"
+);
+
+assert(
+  puloRapidoV2.includes("const basePendentes = Array.isArray(fonteClienteHotState?.itens) ? fonteClienteHotState.itens : fila;") &&
+    puloRapidoV2.includes("if (!fonteClienteHotState && String(item?.clienteId || \"admin\") !== cliente) return false;"),
+  "pulo rapido V2 conclusivo deve contar pendentes pela visao por cliente e preservar fallback global"
 );
 
 assert(
@@ -293,8 +365,15 @@ assert(
 assert(
   processarFila.includes("reconciliacaoPreviaFilaV2") &&
     processarFila.includes("resumoFila.reconciliacaoFilaV2Reutilizada = true") &&
-    processarFila.includes("await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");"),
+    processarFila.includes("reconciliacaoLeituraFilaV2 = await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");"),
   "processarFila deve reutilizar o preflight recebido do runner e evitar segunda reconciliacao"
+);
+
+assert(
+  processarFila.includes("const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
+    processarFila.includes("await selecionarProximaOfertaFila(clienteFila, {") &&
+    processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao"),
+  "processarFila deve encaminhar hot state por cliente para diagnostico/selecao sem refiltrar a global"
 );
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-unica-"));

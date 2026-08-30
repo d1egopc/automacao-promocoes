@@ -10,6 +10,9 @@ const {
   laneFrescorFilaViva,
   ordenarOfertasFilaViva
 } = require("../modules/executor/fila-viva.service");
+const {
+  selecionarFilaReadOnly
+} = require("../modules/fila/fila-dual-read");
 
 const agora = Date.parse("2026-08-19T15:00:00.000Z");
 
@@ -128,6 +131,104 @@ function oferta(id, minutos, overrides = {}) {
   assert(
     variosWorkspaces.every(resultados => resultados.every(r => r.destinosDisponiveis === 1 && r.lane === "agua_nova")),
     "ranking deve ser calculado por oferta/workspace sem estado global compartilhado"
+  );
+}
+
+{
+  const cliente = "workspace_alvo";
+  const outroCliente = "workspace_outro";
+  const configPadrao = { automacaoAtiva: true };
+  const configsPorCliente = {
+    [cliente]: configPadrao,
+    [outroCliente]: configPadrao
+  };
+  const ordenacaoPrioridade = itens => [...itens].sort(
+    (a, b) => Number(b.prioridadeEnvio || 0) - Number(a.prioridadeEnvio || 0)
+  );
+  const ofertaExpirada = item => item.expirada === true;
+  const avaliarOferta = (item, clienteIdOferta) => {
+    if (item.proximaTentativaEnvioEm && Date.parse(item.proximaTentativaEnvioEm) > agora) {
+      return { elegivel: false, motivo: "sem_destino_liberado_agora", destinosLiberados: [] };
+    }
+    return {
+      elegivel: true,
+      motivo: "destino_liberado",
+      oferta: item,
+      destinosCompativeis: 1,
+      destinosLiberados: [{ destino: `${clienteIdOferta}_telegram` }],
+      ranking: calcularScoreFilaViva(item, {
+        agora,
+        destinosCompativeis: 1,
+        destinosDisponiveis: 1
+      })
+    };
+  };
+
+  const candidatoBaixo = oferta("alvo_baixo", 2, {
+    clienteId: cliente,
+    prioridadeEnvio: 10
+  });
+  const candidatoPrioritario = oferta("alvo_prioritario", 2, {
+    clienteId: cliente,
+    prioridadeEnvio: 100
+  });
+  const candidatoIntervalo = oferta("alvo_intervalo", 1, {
+    clienteId: cliente,
+    prioridadeEnvio: 500,
+    proximaTentativaEnvioEm: new Date(agora + 60_000).toISOString()
+  });
+  const candidatoOutroCliente = oferta("outro_prioritario", 1, {
+    clienteId: outroCliente,
+    prioridadeEnvio: 1000
+  });
+  const globalComOutroCliente = [
+    candidatoOutroCliente,
+    candidatoIntervalo,
+    candidatoBaixo,
+    candidatoPrioritario
+  ];
+  const hotStateCliente = [
+    candidatoIntervalo,
+    candidatoBaixo,
+    candidatoPrioritario
+  ];
+  const parametros = {
+    clienteIdAlvo: cliente,
+    agora,
+    configPadrao,
+    configsPorCliente,
+    ordenarPendentesPorPrioridade: ordenacaoPrioridade,
+    ofertaExpiradaParaEnvio: ofertaExpirada,
+    avaliarOfertaParaSelecaoFilaViva: avaliarOferta,
+    ordenarOfertasFilaViva
+  };
+
+  const selecaoGlobal = selecionarFilaReadOnly({
+    ...parametros,
+    fila: globalComOutroCliente
+  });
+  const selecaoHotState = selecionarFilaReadOnly({
+    ...parametros,
+    fila: hotStateCliente
+  });
+
+  assert.strictEqual(
+    selecaoHotState.selecionada.oferta.id,
+    selecaoGlobal.selecionada.oferta.id,
+    "visao por cliente deve produzir a mesma oferta selecionada do caminho global"
+  );
+  assert.strictEqual(
+    selecaoHotState.selecionada.oferta.id,
+    "alvo_prioritario",
+    "prioridade deve permanecer identica na selecao por hot state"
+  );
+  assert(
+    selecaoHotState.candidatosVivos.every(item => item.oferta.clienteId === cliente),
+    "item de outro cliente nao pode entrar na decisao por hot state"
+  );
+  assert(
+    !selecaoHotState.candidatosVivos.some(item => item.oferta.id === "alvo_intervalo"),
+    "intervalo/proxima tentativa deve permanecer bloqueando candidato no hot state"
   );
 }
 

@@ -2041,20 +2041,25 @@ function motivoPrincipalDiagnosticoFila(diagnostico = {}) {
   return principal?.[0] || "outros_motivos";
 }
 
-function diagnosticarFilaCliente(clienteIdAlvo = null) {
+function diagnosticarFilaCliente(clienteIdAlvo = null, opcoes = {}) {
   const cliente = String(clienteIdAlvo || "admin");
   const agora = Date.now();
   const foraHorario = filaForaHorarioConfigurado();
-  const itensCliente = fila.filter(o =>
-    String(o?.clienteId || "admin") === cliente
-  );
+  const fonteClienteConfiavel = Array.isArray(opcoes.filaClienteHotState);
+  const itensCliente = fonteClienteConfiavel
+    ? opcoes.filaClienteHotState
+    : fila.filter(o =>
+        String(o?.clienteId || "admin") === cliente
+      );
   const pendentesCliente = itensCliente.filter(o => o?.status === "pendente");
 
   const diagnostico = {
     clienteIdAlvo: cliente,
     totalGlobal: fila.length,
     totalCliente: itensCliente.length,
-    pendentesGlobal: fila.filter(o => o?.status === "pendente").length,
+    pendentesGlobal: fonteClienteConfiavel
+      ? null
+      : fila.filter(o => o?.status === "pendente").length,
     pendentesTotal: pendentesCliente.length,
     elegiveisAgora: 0,
     bloqueadasPorAutomacaoDesligada: 0,
@@ -2143,6 +2148,27 @@ function diagnosticarFilaCliente(clienteIdAlvo = null) {
   diagnostico.motivoPrincipal = motivoPrincipalDiagnosticoFila(diagnostico);
 
   return diagnostico;
+}
+
+function fonteClienteHotStateExecutorV2(clienteId = "admin", reconciliacao = {}) {
+  const cliente = String(clienteId || "admin");
+  if (
+    !reconciliacao ||
+    reconciliacao.fastPathExecutor !== true ||
+    reconciliacao.generationConclusiva !== true
+  ) {
+    return null;
+  }
+
+  const itens = filaStore.itensPorCliente(cliente);
+  return {
+    fonte: "fila_store_hot_state_executor_v2",
+    clienteId: cliente,
+    conclusiva: true,
+    itens,
+    totalCliente: itens.length,
+    totalGlobal: fila.length
+  };
 }
 
 function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin", configClienteOferta = config, opcoes = {}) {
@@ -2273,10 +2299,18 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
   });
 }
 
-async function selecionarProximaOfertaFila(clienteIdAlvo = null) {
+async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteLog = String(clienteIdAlvo || "admin");
   await sanearExpiradosFila(clienteLog);
-  const diagnostico = diagnosticarFilaCliente(clienteLog);
+  const fonteClienteHotState = opcoes?.fonteClienteHotState;
+  const colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
+    ? fonteClienteHotState.itens
+    : fila;
+  const diagnostico = diagnosticarFilaCliente(clienteLog, {
+    filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
+      ? fonteClienteHotState.itens
+      : null
+  });
 
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
 
@@ -2307,7 +2341,7 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null) {
     await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao");
   }
 
-  const resultadoSelecao = selecionarProximaOfertaFilaCore(fila, clienteIdAlvo, {
+  const resultadoSelecao = selecionarProximaOfertaFilaCore(colecaoSelecao, clienteIdAlvo, {
     agora
   });
   const selecionada = resultadoSelecao.selecionada;
@@ -8530,22 +8564,29 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
     // Fonte oficial da fila: /data/clientes/<clienteId>/fila.json; `fila` e cache do executor.
     const reconciliacaoPreviaFilaV2 = opcoes?.reconciliacaoFilaV2;
     const clienteReconciliacaoPrevia = String(reconciliacaoPreviaFilaV2?.clienteId || clienteFila);
+    let reconciliacaoLeituraFilaV2 = null;
     if (reconciliacaoPreviaFilaV2 && clienteReconciliacaoPrevia === clienteFila) {
       resumoFila.reconciliacaoFilaV2Reutilizada = true;
+      reconciliacaoLeituraFilaV2 = reconciliacaoPreviaFilaV2;
     } else {
-      await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
+      reconciliacaoLeituraFilaV2 = await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
     }
     resumoFila.fase = "sanear_fila";
     await sanearExpiradosFila(clienteFila);
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
 
     resumoFila.fase = "selecionar_oferta";
-    oferta = await selecionarProximaOfertaFila(clienteFila);
+    const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
+    oferta = await selecionarProximaOfertaFila(clienteFila, {
+      fonteClienteHotState: fonteClienteHotStateSelecao
+    });
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";
   const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
-    diagnosticarFilaCliente(clienteFila);
+    diagnosticarFilaCliente(clienteFila, {
+      filaClienteHotState: fonteClienteHotStateSelecao?.itens || null
+    });
   resumoFila.ofertasExaminadas = diagnosticoFila.pendentesTotal || 0;
   resumoFila.motivoPulo = diagnosticoFila.motivoPrincipal || "sem_oferta_elegivel";
 
@@ -29474,8 +29515,10 @@ async function reconciliarPuloRapidoFilaV2(clienteId = "admin", puloRapido = {})
   }
 
   const reconciliacao = await reconciliarFilaV2ParaLeituraCliente(cliente, "executor");
-  const pendentes = fila.filter(item => {
-    if (String(item?.clienteId || "admin") !== cliente) return false;
+  const fonteClienteHotState = fonteClienteHotStateExecutorV2(cliente, reconciliacao);
+  const basePendentes = Array.isArray(fonteClienteHotState?.itens) ? fonteClienteHotState.itens : fila;
+  const pendentes = basePendentes.filter(item => {
+    if (!fonteClienteHotState && String(item?.clienteId || "admin") !== cliente) return false;
     if (item?.status !== "pendente") return false;
     const proxima = item.proximaTentativaEnvioEm ? Date.parse(item.proximaTentativaEnvioEm) : NaN;
     return !(Number.isFinite(proxima) && proxima > Date.now());
