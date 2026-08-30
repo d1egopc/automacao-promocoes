@@ -231,13 +231,38 @@ function carregarFilaCliente(clienteId = "admin", deps = {}) {
 }
 
 function salvarFilaCliente(clienteId = "admin", filaCliente = [], deps = {}) {
-  return filaOfertas.salvarFila({
+  const inicio = Date.now();
+  const ok = filaOfertas.salvarFila({
     fila: filaCliente,
     clienteId,
     getFilaFile: id => getFilaFileSeguro(deps, id),
     writeClienteJson: deps.writeClienteJson,
     logger: console
   });
+  if (ok) {
+    try {
+      const file = getFilaFileSeguro(deps, clienteId);
+      const stat = fs.existsSync(file) ? fs.statSync(file) : null;
+      console.log("[FILA-LEGACY-WRITE]", JSON.stringify({
+        versao: 1,
+        clienteId: String(clienteId || "admin"),
+        origem: "distributor_fallback",
+        caller: "modules_engine_distributor_salvarFilaCliente",
+        arquivo: "fila.json",
+        bytes: stat ? stat.size : null,
+        tempoMs: Date.now() - inicio,
+        v2Operacional: null,
+        recoveryAuthority: String(process.env.FILA_V2_RECOVERY_AUTORIDADE || "mtime").toLowerCase() === "generation"
+          ? "generation"
+          : "mtime",
+        vivaGeneration: null,
+        durableCheckpointGeneration: null,
+        dirtyGeneration: null,
+        timestamp: new Date().toISOString()
+      }));
+    } catch {}
+  }
+  return ok;
 }
 
 function obterDestinosCliente(clienteId = "admin", contexto = {}) {

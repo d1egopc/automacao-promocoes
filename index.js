@@ -1410,7 +1410,7 @@ function sanearExpiradosFila(clienteId = "admin") {
   }
 
   if (alterou) {
-    salvarFila(cliente);
+    salvarFila(cliente, { origem: "expiracao" });
   }
 
   return alterou;
@@ -1703,7 +1703,7 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
       integracoesPorCliente,
       getIntegracaoCliente,
       fila: filaControlada,
-      salvarFila: () => salvarFila(cliente),
+      salvarFila: () => salvarFila(cliente, { origem: "importador" }),
       prepararOfertaGlobal,
       ofertaJaExiste,
       deveIgnorarOfertaRepetida,
@@ -1740,7 +1740,7 @@ async function abastecerFilaComMercadoLivre(clienteId = "admin", limite = 3) {
           : "sem_ofertas_tentadas";
 
     if (resultado.adicionadas > 0) {
-      salvarFila(cliente);
+      salvarFila(cliente, { origem: "importador" });
     }
   } catch (e) {
     resultado.erros.push(e.message || "erro_abastecimento_mercadolivre");
@@ -2227,7 +2227,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
 
   if (selecionada) {
     if (expirouAlguma) {
-      salvarFila(selecionada.oferta.clienteId || clienteIdAlvo || "admin");
+      salvarFila(selecionada.oferta.clienteId || clienteIdAlvo || "admin", { origem: "expiracao" });
     }
 
     selecionada.oferta.filaVivaSelecao = {
@@ -2258,7 +2258,7 @@ function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   }
 
   if (expirouAlguma) {
-    salvarFila(clienteIdAlvo || "admin");
+    salvarFila(clienteIdAlvo || "admin", { origem: "expiracao" });
   }
 
   const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog);
@@ -2401,6 +2401,52 @@ function tamanhoArquivoSeguro(caminho = "") {
   } catch {
     return 0;
   }
+}
+
+function normalizarOrigemWriteLegadoFila(opcoes = {}) {
+  const valor = String(opcoes.origem || opcoes.caller || opcoes.motivo || "").trim().toLowerCase();
+  if (!valor) return "nao_identificada";
+  if (valor.includes("checkpoint")) return "checkpoint_b1";
+  if (valor.includes("executor")) return "executor";
+  if (valor.includes("expir")) return "expiracao";
+  if (valor.includes("sane")) return "saneamento";
+  if (valor.includes("boot") || valor.includes("startup") || valor.includes("garantir_id")) return "boot";
+  if (valor.includes("auto_clean") || valor.includes("autoclean")) return "auto_clean";
+  if (valor.includes("radar")) return "radar";
+  if (valor.includes("import") || valor.includes("abastec") || valor.includes("awin") || valor.includes("kabum") || valor.includes("magalu")) return "importador";
+  if (valor.includes("rota") || valor.includes("manual")) return "rota_manual";
+  if (valor.includes("enviar_agora")) return "enviar_agora";
+  if (valor.includes("distributor")) return "distributor_fallback";
+  if (valor.includes("engine") || valor.includes("fallback_legado")) return "engine_fallback";
+  return valor.replace(/[^a-z0-9_:-]+/g, "_").slice(0, 80) || "outro";
+}
+
+function logWriteLegadoFila(clienteId = "admin", opcoes = {}, contexto = {}) {
+  try {
+    const cliente = String(clienteId || "admin");
+    const caminho = getFilaFile(cliente);
+    const stat = fs.existsSync(caminho) ? fs.statSync(caminho) : null;
+    const snapshot = checkpointFilaV2.snapshot(cliente);
+    const v2Operacional = filaOperacionalV2.deveUsarFilaV2Operacional(cliente);
+    const recoveryAuthority = String(process.env.FILA_V2_RECOVERY_AUTORIDADE || "mtime").toLowerCase() === "generation"
+      ? "generation"
+      : "mtime";
+    console.log("[FILA-LEGACY-WRITE]", JSON.stringify({
+      versao: 1,
+      clienteId: cliente,
+      origem: normalizarOrigemWriteLegadoFila(opcoes),
+      caller: String(opcoes.caller || opcoes.motivo || opcoes.origem || "nao_identificada").slice(0, 120),
+      arquivo: "fila.json",
+      bytes: stat ? stat.size : null,
+      tempoMs: Number.isFinite(Number(contexto.tempoMs)) ? Math.round(Number(contexto.tempoMs)) : null,
+      v2Operacional,
+      recoveryAuthority,
+      vivaGeneration: Number.isFinite(Number(snapshot.generation)) ? Number(snapshot.generation) : null,
+      durableCheckpointGeneration: Number.isFinite(Number(snapshot.checkpointGeneration)) ? Number(snapshot.checkpointGeneration) : null,
+      dirtyGeneration: snapshot.dirty && Number.isFinite(Number(snapshot.generation)) ? Number(snapshot.generation) : null,
+      timestamp: new Date().toISOString()
+    }));
+  } catch {}
 }
 
 function logFilaV22C(payload = {}) {
@@ -2821,6 +2867,7 @@ function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration 
 
 function salvarFila(clienteId = "admin", opcoes = {}) {
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
+  const inicioSalvarFila = Date.now();
   aplicarDiversidadeFila(clienteId);
   ultimoErroSalvarFilaPorCliente.delete(String(clienteId || "admin"));
 
@@ -2842,6 +2889,9 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
   });
   if (salvou) {
     const motivo = opcoes.motivo || "salvarFila";
+    logWriteLegadoFila(clienteId, opcoes, {
+      tempoMs: Date.now() - inicioSalvarFila
+    });
     if (opcoes.rebuildCompleto !== false) reconstruirFilaStoreCliente(clienteId, motivo);
     if (opcoes.shadowCompleto !== false) projetarFilaV2ShadowCliente(clienteId, motivo);
     if (opcoes.prepararV2 !== false) {
@@ -3108,7 +3158,8 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
           ? false
           : salvarFila(cliente, {
               motivo: `fila_v2_2c_${decisao.motivo || motivo}`,
-              prepararV2: false
+              prepararV2: false,
+              origem: "checkpoint_b1"
             })
       );
   const duracaoMs = Date.now() - inicio;
@@ -3354,7 +3405,7 @@ function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "proc
 
   const saneadasCliente = Number(resultado.saneadasPorCliente?.[String(clienteId || "admin")] || 0);
   if (saneadasCliente > 0) {
-    salvarFila(clienteId);
+    salvarFila(clienteId, { origem: "saneamento" });
     console.log("[FILA-DUPLICATA-PENDENTE-RETIDA]", JSON.stringify({
       clienteId,
       fluxo,
@@ -3516,7 +3567,7 @@ async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila =
 
         if (!persistenciaViva.ok) {
           fila.push(itemPersistente);
-          const salvouFallback = salvarFila(cliente, { motivo: "fila_v2_2c_fallback_legado" });
+          const salvouFallback = salvarFila(cliente, { motivo: "fila_v2_2c_fallback_legado", origem: "engine_fallback" });
           registrarMetricasFilaV22C(cliente, {
             insertVivaMs: persistenciaViva.insertVivaMs || 0,
             fallbackLegadoCount: 1
@@ -3626,7 +3677,7 @@ async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila =
       return { ok: false, motivo, itemFila: itemFinal };
     }
 
-    const salvou = salvarFila(cliente, { motivo: "engine_distributor_write" });
+    const salvou = salvarFila(cliente, { motivo: "engine_distributor_write", origem: "distributor_fallback" });
 
     if (!salvou) {
       const erroFila = erroSalvarFilaCliente(cliente);
@@ -3696,7 +3747,7 @@ function garantirIdsFila() {
   }
 
   if (alterou) {
-    salvarFila(clienteId)
+    salvarFila(clienteId, { origem: "boot" })
     console.log("[FILA] IDs corrigidos em itens antigos da fila");
   }
 }
@@ -8310,9 +8361,11 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
       motivo: usarCheckpointOnlyV2
         ? "executor_salvar_alterada_fallback_legado"
         : "executor_salvar_alterada",
+      origem: "executor",
       v2LegacyProofPolicy: "caller_proof"
     } : {
-      motivo: "executor_salvar_alterada"
+      motivo: "executor_salvar_alterada",
+      origem: "executor"
     });
     if (salvou && oferta) {
       await sincronizarItemFilaVivaAposMutacao(clienteSeguroFila, oferta, "executor_salvar_alterada", {
@@ -9799,7 +9852,7 @@ filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
   origem: oferta.origem || "manual",
   logger: console
 });
-salvarFila(clienteId);
+salvarFila(clienteId, { origem: "rota_manual" });
 
 const configCliente =
   configsPorCliente?.[clienteId] || config;
@@ -10851,6 +10904,7 @@ app.delete("/fila/item/:id", auth, async (req, res) => {
   const removido = fila.splice(index, 1);
   const salvouLegado = salvarFila(clienteId, {
     motivo: "rota_remover_item_id",
+    origem: "rota_manual",
     v2LegacyProofPolicy: "caller_proof"
   });
   await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id", {
@@ -10874,7 +10928,7 @@ app.delete("/fila/limpar", auth, (req, res) => {
   fila = limpeza.fila;
   const removidos = limpeza.removidos;
 
-  salvarFila(clienteId);
+  salvarFila(clienteId, { origem: "rota_manual" });
 
   logOptimus("FILA", "Limpeza da fila", {
     clienteId,
@@ -10915,6 +10969,7 @@ app.delete("/fila/:index", auth, async (req, res) => {
 
   const salvouLegado = salvarFila(clienteId, {
     motivo: "rota_remover_indice",
+    origem: "rota_manual",
     v2LegacyProofPolicy: "caller_proof"
   });
   await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice", {
@@ -10957,6 +11012,7 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
 
   const salvouLegado = salvarFila(clienteId, {
     motivo: "rota_reprocessar",
+    origem: "rota_manual",
     v2LegacyProofPolicy: "caller_proof"
   });
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
@@ -13092,6 +13148,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
     const salvouLegado = salvarFila(clienteId, {
       motivo: "enviar_agora_retida",
+      origem: "enviar_agora",
       v2LegacyProofPolicy: "caller_proof"
     });
     await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida", {
@@ -13214,6 +13271,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
         : "Nenhum destino confirmou envio manual";
     const salvouLegado = salvarFila(clienteId, {
       motivo: "enviar_agora_pendente",
+      origem: "enviar_agora",
       v2LegacyProofPolicy: "caller_proof"
     });
     await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
@@ -13246,6 +13304,7 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   const salvouLegado = salvarFila(clienteId, {
     motivo: "enviar_agora_enviado",
+    origem: "enviar_agora",
     v2LegacyProofPolicy: "caller_proof"
   });
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado", {
@@ -19430,7 +19489,7 @@ function reterRadarSemDestinoCliente(clienteId = "admin", oferta = {}) {
     logger: console
   });
   registrarTratamentoRadar(clienteId, oferta, "retida");
-  salvarFila(clienteId);
+  salvarFila(clienteId, { origem: "radar" });
 
   logOptimus("FILA", "Radar retido sem destino compativel", {
     clienteId,
@@ -20257,7 +20316,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
   registrarOfertaVista(oferta);
   registrarTratamentoRadar(clienteId, oferta, "fila");
-  salvarFila(clienteId);
+  salvarFila(clienteId, { origem: "radar" });
   coberturaRadar.registrar("fila_ok", {
     ...contextoCoberturaRadarOferta(oferta, clienteId),
     decisao: "aceito",
@@ -24187,7 +24246,7 @@ async function importarKabumManualRequest(req, res, opcoes = {}) {
           motivo: "origem_manual_ou_radar"
         });
         logPrioridadeFila(novaOferta);
-        salvarFila(clienteId);
+        salvarFila(clienteId, { origem: "importador" });
       }
     }
 
@@ -25217,7 +25276,7 @@ const adicionou = adicionarOfertaNaFila(fila, novaOferta, "manual-magalu");
 
 if (adicionou) {
   logPrioridadeFila(novaOferta);
-  salvarFila(clienteId);
+  salvarFila(clienteId, { origem: "importador" });
 }
 
     return res.json({
@@ -25914,7 +25973,7 @@ if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
     origem: ofertaCliente.origem || "distribuidor",
     logger: console
   });
-  salvarFila(clienteId);
+  salvarFila(clienteId, { origem: "distributor_fallback" });
   continue;
 }
 
@@ -25932,7 +25991,7 @@ filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
   logger: console
 });
 
-salvarFila(clienteId);
+salvarFila(clienteId, { origem: "distributor_fallback" });
 
 console.log("[INFO] Oferta distribuda para cliente:", {
   clienteId,
@@ -26670,7 +26729,7 @@ async function farejarAwin(clienteId = "admin", deps = {}) {
      if (categoriaOferta) categoriasRodada[categoriaOferta] = (categoriasRodada[categoriaOferta] || 0) + 1;
 
      if (typeof salvarFila === "function") {
-       salvarFila(clienteId);
+       salvarFila(clienteId, { origem: "importador" });
      }
    }
 
@@ -28620,7 +28679,7 @@ function garantirIdsFila() {
   });
 
   if (alterou) {
-    salvarFila();
+    salvarFila("admin", { origem: "boot" });
     console.log("[FILA] IDs antigos da fila corrigidos");
   }
 }
@@ -28638,7 +28697,7 @@ if (!global.__optimusFilaDuplicatasPendentesSaneada) {
     }));
   } else if (saneamentoFila.alterou) {
     for (const [clienteId, quantidade] of Object.entries(saneamentoFila.saneadasPorCliente)) {
-      salvarFila(clienteId);
+      salvarFila(clienteId, { origem: "boot" });
       console.log("[ANTI-REPETICAO-SANEAMENTO-2H]", JSON.stringify({
         clienteId,
         quantidadeSaneada: quantidade

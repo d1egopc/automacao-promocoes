@@ -9,6 +9,8 @@ const filaOfertas = require("../utils/fila-ofertas");
 
 const indexPath = path.join(__dirname, "..", "index.js");
 const fonteIndex = fs.readFileSync(indexPath, "utf8");
+const distributorPath = path.join(__dirname, "..", "modules", "engine", "distributor", "distributor.service.js");
+const fonteDistributor = fs.readFileSync(distributorPath, "utf8");
 
 function trechoEntre(inicio, fim) {
   const a = fonteIndex.indexOf(inicio);
@@ -92,6 +94,72 @@ assert(
     fastPathExecutor.includes("hotState: true") &&
     fastPathExecutor.includes("pendentes"),
   "fast path deve materializar hot state por cliente, incluindo caso de zero pendentes"
+);
+
+const logWriteLegadoFila = trechoEntre(
+  "function logWriteLegadoFila",
+  "function logFilaV22C"
+);
+
+assert(
+  logWriteLegadoFila.includes("[FILA-LEGACY-WRITE]") &&
+    logWriteLegadoFila.includes("clienteId: cliente") &&
+    logWriteLegadoFila.includes("origem: normalizarOrigemWriteLegadoFila(opcoes)") &&
+    logWriteLegadoFila.includes("arquivo: \"fila.json\"") &&
+    logWriteLegadoFila.includes("bytes: stat ? stat.size : null") &&
+    logWriteLegadoFila.includes("tempoMs:") &&
+    logWriteLegadoFila.includes("v2Operacional") &&
+    logWriteLegadoFila.includes("recoveryAuthority") &&
+    logWriteLegadoFila.includes("vivaGeneration") &&
+    logWriteLegadoFila.includes("durableCheckpointGeneration") &&
+    logWriteLegadoFila.includes("dirtyGeneration"),
+  "write legado deve emitir telemetria central barata com cliente, origem, arquivo, bytes, tempo, V2 e generations observaveis"
+);
+
+assert(
+  logWriteLegadoFila.includes("fs.statSync(caminho)") &&
+    !logWriteLegadoFila.includes("manifestStateRepository") &&
+    !logWriteLegadoFila.includes("queryEngine") &&
+    !logWriteLegadoFila.includes("await ") &&
+    !logWriteLegadoFila.includes("publicarProof") &&
+    !logWriteLegadoFila.includes("confirmarCheckpoint"),
+  "telemetria de write legado deve usar apenas stat O(1), sem query PG, proof, checkpoint ou payload"
+);
+
+const salvarFilaCentral = trechoEntre(
+  "function salvarFila",
+  "function checkpointRevisionSeguro"
+);
+
+assert(
+  pos(salvarFilaCentral, "const salvou = filaOfertas.salvarFila({") <
+    pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") &&
+    pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") <
+    pos(salvarFilaCentral, "registrarRewriteLegadoSemProofV2(clienteId, motivo, opcoes);"),
+  "telemetria deve rodar somente depois do write legado bem-sucedido e antes da invalidacao diagnostica existente"
+);
+
+assert(
+  ["checkpoint_b1", "executor", "expiracao", "saneamento", "boot", "radar", "importador", "rota_manual", "enviar_agora", "distributor_fallback", "engine_fallback"]
+    .every(origem => fonteIndex.includes(`origem: "${origem}"`) || fonteIndex.includes(`return "${origem}"`)),
+  "call sites instrumentados devem distinguir as origens principais sem stack trace"
+);
+
+const salvarFilaClienteDistributor = (() => {
+  const inicio = fonteDistributor.indexOf("function salvarFilaCliente");
+  const fim = fonteDistributor.indexOf("function obterDestinosCliente", inicio);
+  assert(inicio >= 0 && fim > inicio, "salvarFilaCliente do distributor deve existir");
+  return fonteDistributor.slice(inicio, fim);
+})();
+
+assert(
+  salvarFilaClienteDistributor.includes("[FILA-LEGACY-WRITE]") &&
+    salvarFilaClienteDistributor.includes("origem: \"distributor_fallback\"") &&
+    salvarFilaClienteDistributor.includes("caller: \"modules_engine_distributor_salvarFilaCliente\"") &&
+    salvarFilaClienteDistributor.includes("vivaGeneration: null") &&
+    !salvarFilaClienteDistributor.includes("publicarProof") &&
+    !salvarFilaClienteDistributor.includes("confirmarCheckpoint"),
+  "fallback direto do distributor deve logar write legado sem participar de proof/generation"
 );
 
 const puloRapidoV2 = trechoEntre(
