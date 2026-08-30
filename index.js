@@ -3658,8 +3658,14 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
   });
 }
 
-function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "processador_fila") {
-  const resultado = filaOfertas.sanearDuplicatasPendentes2h(fila);
+function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "processador_fila", opcoes = {}) {
+  const fonteClienteHotState = opcoes?.fonteClienteHotState;
+  const usandoHotStateCliente = (
+    fonteClienteHotState?.conclusiva === true &&
+    Array.isArray(fonteClienteHotState.itens)
+  );
+  const colecaoSaneamento = usandoHotStateCliente ? fonteClienteHotState.itens : fila;
+  const resultado = filaOfertas.sanearDuplicatasPendentes2h(colecaoSaneamento);
   if (!resultado.ok) {
     console.log("[ANTI-REPETICAO-SANEAMENTO-ERRO]", JSON.stringify({
       clienteId,
@@ -8719,10 +8725,12 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
     }
     resumoFila.fase = "sanear_fila";
     await sanearExpiradosFila(clienteFila);
-    sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila");
+    const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
+    sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila", {
+      fonteClienteHotState: fonteClienteHotStateSelecao
+    });
 
     resumoFila.fase = "selecionar_oferta";
-    const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
     oferta = await selecionarProximaOfertaFila(clienteFila, {
       fonteClienteHotState: fonteClienteHotStateSelecao
     });

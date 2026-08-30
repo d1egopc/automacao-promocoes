@@ -77,6 +77,25 @@ assert(
   "fast path e fallback devem registrar que o preflight nao leu payload de fila.json"
 );
 
+const saneamentoDuplicatasCliente = trechoEntre(
+  "function sanearDuplicatasPendentesFilaCliente",
+  "function podeAdicionarOfertaAutomaticaFila"
+);
+
+assert(
+  saneamentoDuplicatasCliente.includes("fonteClienteHotState?.conclusiva === true") &&
+    saneamentoDuplicatasCliente.includes("Array.isArray(fonteClienteHotState.itens)") &&
+    saneamentoDuplicatasCliente.includes("const colecaoSaneamento = usandoHotStateCliente ? fonteClienteHotState.itens : fila") &&
+    saneamentoDuplicatasCliente.includes("filaOfertas.sanearDuplicatasPendentes2h(colecaoSaneamento)"),
+  "saneamento de duplicatas deve usar hot state do cliente somente quando a fonte V2 for conclusiva"
+);
+
+assert(
+  saneamentoDuplicatasCliente.includes("const saneadasCliente = Number(resultado.saneadasPorCliente?.[String(clienteId || \"admin\")] || 0)") &&
+    saneamentoDuplicatasCliente.includes("salvarFila(clienteId, { origem: \"saneamento\" })"),
+  "saneamento por hot state deve preservar persistencia existente quando houver mutacao do cliente"
+);
+
 const fastPathExecutor = trechoEntre(
   "function aplicarFastPathExecutorFilaViva",
   "function salvarFila"
@@ -388,9 +407,11 @@ assert(
 
 assert(
   processarFila.includes("const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
+    processarFila.includes("sanearDuplicatasPendentesFilaCliente(clienteFila, \"processar_fila\", {") &&
+    processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao") &&
     processarFila.includes("await selecionarProximaOfertaFila(clienteFila, {") &&
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao"),
-  "processarFila deve encaminhar hot state por cliente para diagnostico/selecao sem refiltrar a global"
+  "processarFila deve encaminhar hot state por cliente para saneamento/diagnostico/selecao sem refiltrar a global"
 );
 
 const lazyWorkspaceState = trechoEntre(
@@ -654,6 +675,67 @@ function pendentes(cache, clienteId) {
 }
 
 try {
+  {
+    const duplicataAntiga = criarItem(wolff, "dup_antiga", {
+      titulo: "Notebook Gamer",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-duplicado",
+      linkAfiliado: "https://mercadolivre.com.br/MLB-duplicado?aff=1",
+      criadoEm: "24/07/2026, 19:00:00",
+      dataEntradaFila: "2026-07-24T22:00:00.000Z"
+    });
+    const duplicataNova = criarItem(wolff, "dup_nova", {
+      titulo: "Notebook Gamer",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-duplicado",
+      linkAfiliado: "https://mercadolivre.com.br/MLB-duplicado?aff=2",
+      criadoEm: "24/07/2026, 19:05:00",
+      dataEntradaFila: "2026-07-24T22:05:00.000Z"
+    });
+    const outroCliente = criarItem(controle, "dup_outro_cliente", {
+      titulo: "Notebook Gamer",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-duplicado",
+      criadoEm: "24/07/2026, 19:03:00",
+      dataEntradaFila: "2026-07-24T22:03:00.000Z"
+    });
+    const globalEquivalente = [
+      { ...duplicataAntiga },
+      { ...duplicataNova },
+      { ...outroCliente }
+    ];
+    const hotStateCliente = [
+      { ...duplicataAntiga },
+      { ...duplicataNova }
+    ];
+
+    const resultadoGlobal = filaOfertas.sanearDuplicatasPendentes2h(globalEquivalente, {
+      agora: Date.parse("2026-07-24T22:30:00.000Z")
+    });
+    const resultadoHotState = filaOfertas.sanearDuplicatasPendentes2h(hotStateCliente, {
+      agora: Date.parse("2026-07-24T22:30:00.000Z")
+    });
+
+    assert.strictEqual(resultadoHotState.ok, true, "saneamento por hot state deve continuar valido");
+    assert.strictEqual(
+      resultadoHotState.totalSaneado,
+      Number(resultadoGlobal.saneadasPorCliente?.[wolff] || 0),
+      "hot state do cliente deve sanear o mesmo total que o global filtrado para o cliente"
+    );
+    assert.strictEqual(hotStateCliente[0].status, "pendente", "sobrevivente mais antiga deve ser preservada");
+    assert.strictEqual(hotStateCliente[1].status, "retida", "duplicata do mesmo cliente deve ser retida");
+    assert.strictEqual(globalEquivalente[2].status, "pendente", "cliente B nao pode influenciar mutacao do cliente A");
+    assert.strictEqual(
+      hotStateCliente[1].motivoRetencao,
+      globalEquivalente[1].motivoRetencao,
+      "mutacao/status do hot state deve permanecer identica ao saneamento global"
+    );
+    assert.strictEqual(
+      hotStateCliente[1].antiRepeticao2h?.motivo,
+      "repetida_pendente_saneada_2h",
+      "anti-repeat deve manter marcador oficial de saneamento"
+    );
+    assert.strictEqual(hotStateCliente[0].cupom, duplicataAntiga.cupom, "cupom nao deve ser alterado pelo saneamento");
+    assert.strictEqual(hotStateCliente[0].linkAfiliado, duplicataAntiga.linkAfiliado, "link afiliado deve ser preservado");
+  }
+
   const itemA = criarItem(wolff, "wolff_a");
   const itemB = criarItem(wolff, "wolff_b", { preco: 46.55 });
 
