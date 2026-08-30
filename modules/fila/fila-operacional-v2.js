@@ -22,6 +22,7 @@ const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
 const FLAG_OPERACIONAL_ATIVA = "FILA_V2_OPERACIONAL_ATIVA";
 const FLAG_ROLLOUT_ATIVO = "FILA_V2_OPERACIONAL_ROLLOUT";
 const FLAG_CANARY_CLIENTES = "FILA_V2_OPERACIONAL_CANARY_CLIENTES";
+const FLAG_BLOCKLIST_CLIENTES = "FILA_V2_OPERACIONAL_BLOCKLIST_CLIENTES";
 const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
 const FLAG_RECOVERY_AUTORIDADE = "FILA_V2_RECOVERY_AUTORIDADE";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
@@ -108,7 +109,7 @@ function lista(valor) {
 
 function modoRollout(valor = "") {
   const modo = texto(valor).toLowerCase();
-  if (["legacy", "canary", "global"].includes(modo)) return modo;
+  if (["legacy", "canary", "auto", "global"].includes(modo)) return modo;
   return "legacy";
 }
 
@@ -126,17 +127,55 @@ function resolverModoOperacional(env = process.env) {
     operacionalAtivo: flagAtiva(FLAG_OPERACIONAL_ATIVA, env),
     shadow2B1Ativo: flagAtiva(FLAG_2B1_SHADOW_ATIVA, env),
     rolloutOperacional: modoRollout(env?.[FLAG_ROLLOUT_ATIVO] || ""),
-    canaryClientes: listaCanaryClientes(env?.[FLAG_CANARY_CLIENTES] || "")
+    canaryClientes: listaCanaryClientes(env?.[FLAG_CANARY_CLIENTES] || ""),
+    blocklistClientes: listaCanaryClientes(env?.[FLAG_BLOCKLIST_CLIENTES] || "")
   };
 }
 
-function deveUsarFilaV2Operacional(clienteId = "admin", env = process.env) {
+function resultadoBooleanoSincrono(valor) {
+  if (valor && typeof valor.then === "function") return null;
+  if (typeof valor === "boolean") return valor;
+  if (valor && typeof valor === "object") {
+    if (typeof valor.elegivel === "boolean") return valor.elegivel;
+    if (typeof valor.ativo === "boolean") return valor.ativo;
+    if (typeof valor.ok === "boolean") return valor.ok;
+  }
+  return null;
+}
+
+function workspaceElegivelAuto(clienteId = "admin", contexto = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fonte = contexto && typeof contexto === "object" ? contexto : {};
+  const avaliadores = [
+    fonte.workspaceElegivelFilaV2,
+    fonte.workspaceAtivoOperacional,
+    fonte.usuarioAtivoOperacional
+  ].filter(fn => typeof fn === "function");
+
+  for (const avaliar of avaliadores) {
+    try {
+      const resultado = resultadoBooleanoSincrono(avaliar(cliente));
+      if (resultado !== null) return resultado;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  if (fonte.workspaceExiste === true && fonte.workspaceAtivo === true) return true;
+  if (fonte.usuario && typeof fonte.usuario === "object") return fonte.usuario.ativo === true;
+  return false;
+}
+
+function deveUsarFilaV2Operacional(clienteId = "admin", env = process.env, contexto = {}) {
+  const cliente = clienteSeguro(clienteId);
   const modo = resolverModoOperacional(env);
+  if (modo.blocklistClientes.includes(cliente)) return false;
   if (modo.operacionalAtivo) return true;
   if (modo.rolloutOperacional === "global") return true;
   if (modo.rolloutOperacional === "canary") {
-    return modo.canaryClientes.includes(clienteSeguro(clienteId));
+    return modo.canaryClientes.includes(cliente);
   }
+  if (modo.rolloutOperacional === "auto") return workspaceElegivelAuto(cliente, contexto);
   return false;
 }
 
@@ -750,7 +789,7 @@ function repositoryManifestState(deps = {}) {
 
 function deveUsarManifestStatePostgres(clienteId = "admin", deps = {}) {
   if (deps.manifestStatePostgres === false) return false;
-  if (!deveUsarFilaV2Operacional(clienteId, deps.env || process.env)) return false;
+  if (!deveUsarFilaV2Operacional(clienteId, deps.env || process.env, deps)) return false;
   if (deps.manifestStateRepository) return true;
   return Boolean(process.env.DATABASE_URL);
 }
@@ -1559,7 +1598,7 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
     durableCheckpointGeneration: 0
   };
   let resultadoComparacao = "telemetria_desativada";
-  const compararManifesto = deveUsarFilaV2Operacional(cliente, deps.env || process.env);
+  const compararManifesto = deveUsarFilaV2Operacional(cliente, deps.env || process.env, deps);
   if (compararManifesto) {
     manifestDecision = avaliarRecoveryPeloManifesto(cliente, deps);
     resultadoComparacao = classificarComparacaoRecovery(maisNova, manifestDecision);
@@ -1642,7 +1681,7 @@ async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, 
     return resultado;
   }
 
-  if (!deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
+  if (!deveUsarFilaV2Operacional(cliente, deps.env || process.env, deps)) {
     const resultado = resultadoMtime();
     resultado.motivo = "off_canary_fallback_mtime";
     logRecoveryAuthority(deps.logger, {
@@ -2326,7 +2365,7 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
     const comparacao = compararVivaComLegado(cliente, entradas, legado, deps);
       if (!comparacao.ok) {
         const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
-      if (!permitirRecovery || deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
+      if (!permitirRecovery || deveUsarFilaV2Operacional(cliente, deps.env || process.env, deps)) {
         logOperacional(deps.logger, {
           versao: 1,
           evento: "divergencia_viva_legado",
@@ -2447,7 +2486,7 @@ function lerFilaViva(clienteId = "admin", deps = {}) {
     };
   }
 
-  if (deveUsarFilaV2Operacional(cliente, deps.env || process.env)) {
+  if (deveUsarFilaV2Operacional(cliente, deps.env || process.env, deps)) {
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
     logOperacional(deps.logger, {
       versao: 1,
@@ -2852,7 +2891,7 @@ function sincronizarCanaryEscrita(params = {}, deps = {}, opcoes = {}) {
   const env = opcoes.env || deps.env || process.env;
   const modo = resolverModoOperacional(env);
 
-  if (!deveUsarFilaV2Operacional(cliente, env)) {
+  if (!deveUsarFilaV2Operacional(cliente, env, { ...opcoes, ...deps, ...params })) {
     return {
       ok: true,
       pulou: true,
@@ -2918,7 +2957,7 @@ async function sincronizarCanaryEscritaCoordenada(params = {}, deps = {}, opcoes
   const env = opcoes.env || deps.env || process.env;
   const modo = resolverModoOperacional(env);
 
-  if (!deveUsarFilaV2Operacional(cliente, env)) {
+  if (!deveUsarFilaV2Operacional(cliente, env, { ...opcoes, ...deps, ...params })) {
     return {
       ok: true,
       pulou: true,
@@ -3161,7 +3200,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
   function prepararSeHabilitado(params = {}) {
     const modo = modoOperacional(opcoes.env || process.env);
     const cliente = clienteSeguro(params.clienteId || "admin");
-    if (deveUsarFilaV2Operacional(cliente, opcoes.env || process.env)) {
+    if (deveUsarFilaV2Operacional(cliente, opcoes.env || process.env, { ...opcoes, ...params })) {
       return { ok: true, pulou: true, motivo: "operacional_requer_lock", ...modo };
     }
     if (!modo.shadow2B1Ativo && !modo.operacionalAtivo) {
@@ -3206,7 +3245,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
 
   return {
     prepararSeHabilitado,
-    deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env),
+    deveUsarFilaV2Operacional: clienteId => deveUsarFilaV2Operacional(clienteId, opcoes.env || process.env, opcoes),
     sincronizarCanaryEscrita: (params = {}, deps = {}) => sincronizarCanaryEscrita(params, deps, opcoes),
     sincronizarCanaryEscritaCoordenada: (params = {}, deps = {}) => sincronizarCanaryEscritaCoordenada(params, deps, opcoes),
     inserirItemFilaVivaIncremental: (clienteId, item, deps = {}) => inserirItemFilaVivaIncremental(clienteId, item, { ...opcoes, ...deps }),
@@ -3242,6 +3281,7 @@ module.exports = {
   FLAG_OPERACIONAL_ATIVA,
   FLAG_ROLLOUT_ATIVO,
   FLAG_CANARY_CLIENTES,
+  FLAG_BLOCKLIST_CLIENTES,
   FLAG_2B1_SHADOW_ATIVA,
   FLAG_RECOVERY_AUTORIDADE,
   FLAG_CHECKPOINT_MUTACOES,

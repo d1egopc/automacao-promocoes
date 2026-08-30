@@ -649,6 +649,85 @@ function criarDepsFilaOperacionalTeste() {
   const { deps } = criarDepsFilaOperacionalTeste();
   const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
     env: {
+      FILA_V2_OPERACIONAL_ROLLOUT: "auto",
+      FILA_V2_OPERACIONAL_BLOCKLIST_CLIENTES: "cliente_bloqueado"
+    },
+    workspaceAtivoOperacional: clienteId => clienteId === "cliente_auto",
+    ...deps
+  });
+  const filaLegada = [
+    oferta("auto_vivo", { clienteId: "cliente_auto", status: "pendente" }),
+    oferta("inativo_vivo", { clienteId: "cliente_inativo", status: "pendente" }),
+    oferta("bloqueado_vivo", { clienteId: "cliente_bloqueado", status: "pendente" })
+  ];
+
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional("cliente_auto"), true);
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional("cliente_inativo"), false);
+  assert.strictEqual(controlador.deveUsarFilaV2Operacional("cliente_bloqueado"), false);
+
+  const auto = controlador.sincronizarCanaryEscrita({
+    clienteId: "cliente_auto",
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "auto_rollout"
+  });
+  const inativo = controlador.sincronizarCanaryEscrita({
+    clienteId: "cliente_inativo",
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "auto_inativo"
+  });
+  const bloqueado = controlador.sincronizarCanaryEscrita({
+    clienteId: "cliente_bloqueado",
+    fila: filaLegada,
+    agora: AGORA,
+    motivo: "auto_blocklist"
+  });
+
+  assert.strictEqual(auto.ok, true);
+  assert.strictEqual(auto.pulou, false, "workspace ativo em auto deve entrar sem lista manual");
+  assert.deepStrictEqual(
+    deps.readClienteJson("cliente_auto", "fila-viva.json", []).map(item => item.id),
+    ["auto_vivo"],
+    "auto deve fazer bootstrap lazy somente quando ha operacao real de fila"
+  );
+  assert.strictEqual(inativo.pulou, true, "workspace inativo deve permanecer legado em auto");
+  assert.strictEqual(bloqueado.pulou, true, "blocklist deve forcar rollback individual");
+  assert.deepStrictEqual(deps.readClienteJson("cliente_inativo", "fila-viva.json", []), []);
+  assert.deepStrictEqual(deps.readClienteJson("cliente_bloqueado", "fila-viva.json", []), []);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env: {
+      FILA_V2_OPERACIONAL_ROLLOUT: "auto"
+    },
+    workspaceAtivoOperacional: () => Promise.resolve(true),
+    ...deps
+  });
+  const cliente = "cliente_auto_async";
+
+  assert.strictEqual(
+    controlador.deveUsarFilaV2Operacional(cliente),
+    false,
+    "gate auto deve falhar fechado quando a elegibilidade exigir Promise"
+  );
+  const resultado = controlador.sincronizarCanaryEscrita({
+    clienteId: cliente,
+    fila: [oferta("async_vivo", { clienteId: cliente })],
+    agora: AGORA,
+    motivo: "auto_async_invalido"
+  });
+
+  assert.strictEqual(resultado.pulou, true);
+  assert.deepStrictEqual(deps.readClienteJson(cliente, "fila-viva.json", []), []);
+}
+
+{
+  const { deps } = criarDepsFilaOperacionalTeste();
+  const controlador = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env: {
       FILA_V2_OPERACIONAL_ROLLOUT: "global"
     },
     ...deps

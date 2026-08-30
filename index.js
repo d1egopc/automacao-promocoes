@@ -873,6 +873,7 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   writeClienteJson,
   getClienteJsonPath,
   getClientePath,
+  workspaceAtivoOperacional: clienteId => usuarioAtivoOperacional(clienteId),
   logger: console
 });
 const filaV2Shadow = criarControladorFilaV2Shadow({
