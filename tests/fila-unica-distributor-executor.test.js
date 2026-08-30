@@ -41,6 +41,59 @@ assert(
   "executor deve reconciliar a fila oficial antes de selecionar pendente"
 );
 
+const reconciliarExecutor = trechoEntre(
+  "async function reconciliarFilaV2ParaLeituraCliente",
+  "function sanearDuplicatasPendentesFilaCliente"
+);
+
+assert(
+  pos(reconciliarExecutor, "contextoTexto === \"executor\"") <
+    pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+  "executor deve avaliar o preflight V2 antes de ler a fila legada"
+);
+
+assert(
+  pos(reconciliarExecutor, "await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {") <
+    pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+  "preflight generation do executor deve acontecer antes do parse de fila.json"
+);
+
+assert(
+  reconciliarExecutor.includes("aplicarFastPathExecutorFilaViva(cliente, decisaoPreflightExecutor)"),
+  "generation conclusiva deve usar a fila viva no fast path do executor"
+);
+
+assert(
+  reconciliarExecutor.includes("decisaoPreflightExecutor ||") &&
+    pos(reconciliarExecutor, "decisaoPreflightExecutor ||") > pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+  "fallback legado deve reutilizar o preflight e nao reconciliar duas vezes no mesmo ciclo"
+);
+
+assert(
+  reconciliarExecutor.includes("bytesFilaJsonLidos: 0") &&
+    reconciliarExecutor.includes("executor_v2_legacy_fallback"),
+  "fast path e fallback devem registrar que o preflight nao leu payload de fila.json"
+);
+
+const fastPathExecutor = trechoEntre(
+  "function aplicarFastPathExecutorFilaViva",
+  "function salvarFila"
+);
+
+assert(
+  fastPathExecutor.includes("lerFilaVivaParaMerge") &&
+    !fastPathExecutor.includes("carregarFilaLegadaOficial") &&
+    !fastPathExecutor.includes("filaOfertas.carregarFila"),
+  "fast path do executor deve carregar somente fila-viva, sem chamar loader legado"
+);
+
+assert(
+  fastPathExecutor.includes("filaClienteHotState") &&
+    fastPathExecutor.includes("hotState: true") &&
+    fastPathExecutor.includes("pendentes"),
+  "fast path deve materializar hot state por cliente, incluindo caso de zero pendentes"
+);
+
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-fila-unica-"));
 const dataDirAnterior = process.env.DATA_DIR;
 process.env.DATA_DIR = root;

@@ -3824,6 +3824,46 @@ async function testarPromocaoLockPostgresOperacional() {
     assert.strictEqual(resultado.autoridadeUsada, "generation");
     assert.strictEqual(resultado.maisNova, false, "generation so pode suprimir mtime com proof legado valido");
   }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_generation_preflight_sem_payload_legado";
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 4,
+      durableCheckpointGeneration: 4,
+      dirtyGeneration: null,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA - 1000
+    });
+    const fsSemPayloadLegado = {
+      existsSync: file => fs.existsSync(file),
+      statSync: file => fs.statSync(file),
+      mkdirSync: (...args) => fs.mkdirSync(...args),
+      writeFileSync: (...args) => fs.writeFileSync(...args),
+      readFileSync: (file, ...args) => {
+        if (path.basename(String(file)) === "fila.json") {
+          throw new Error("payload_legado_nao_deve_ser_lido_no_preflight_generation");
+        }
+        return fs.readFileSync(file, ...args);
+      }
+    };
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "executor_preflight" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      fs: fsSemPayloadLegado,
+      env: {
+        FILA_V2_RECOVERY_AUTORIDADE: "generation",
+        FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+        FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+      },
+      logger: { log: () => {} }
+    });
+    assert.strictEqual(resultado.autoridadeUsada, "generation");
+    assert.strictEqual(resultado.generationConclusiva, true);
+    assert.strictEqual(resultado.maisNova, false);
+    assert.strictEqual(repoFake.chamadas.filter(chamada => chamada.tipo === "authority_recovery").length, 1);
+  }
 }
 
 testarPromocaoLockPostgresOperacional()

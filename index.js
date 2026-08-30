@@ -2518,10 +2518,15 @@ function registrarMetricasFilaV22C(clienteId = "admin", dados = {}) {
   }
 }
 
-function reconstruirFilaStoreCliente(clienteId = "admin", motivo = "sincronizacao") {
+function reconstruirFilaStoreCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
   const cliente = String(clienteId || "admin");
-  filaStore.rebuildCliente(fila, cliente, { motivo });
-  logFilaStoreMetrics(motivo, { clienteId: cliente, rebuildCompletoCount: 1 });
+  const base = Array.isArray(opcoes.filaClienteHotState) ? opcoes.filaClienteHotState : fila;
+  filaStore.rebuildCliente(base, cliente, { motivo });
+  logFilaStoreMetrics(motivo, {
+    clienteId: cliente,
+    rebuildCompletoCount: opcoes.hotState === true ? 0 : 1,
+    rebuildHotStateCount: opcoes.hotState === true ? 1 : 0
+  });
 }
 
 function atualizarFilaStoreIncrementalFilaV2(item = {}, clienteId = "admin", motivo = "fila_v2_2c_insert") {
@@ -2728,6 +2733,90 @@ function aplicarMergeVivaOperacionalCliente(clienteId = "admin", motivo = "merge
   }
 
   return { ok: true, pulou: itensAlterados === 0, motivo, leitura, merge };
+}
+
+function itensFilaVivaParaExecutorV2(clienteId = "admin", leitura = {}) {
+  const cliente = String(clienteId || "admin");
+  const entradas = Array.isArray(leitura?.entradas) ? leitura.entradas : [];
+  return entradas
+    .filter(entrada => entrada && entrada.bucket === "viva" && entrada.item && typeof entrada.item === "object")
+    .map((entrada, indice) => {
+      const item = entrada.item;
+      const posicaoLegada = Number.isInteger(Number(item.posicaoLegada))
+        ? Number(item.posicaoLegada)
+        : (
+            Number.isInteger(Number(entrada.posicaoLegada))
+              ? Number(entrada.posicaoLegada)
+              : indice
+          );
+      return {
+        ...item,
+        clienteId: String(item.clienteId || cliente),
+        posicaoLegada
+      };
+    })
+    .filter(item => String(item?.clienteId || "admin") === cliente);
+}
+
+function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration = {}, opcoes = {}) {
+  const cliente = String(clienteId || "admin");
+  const inicio = Date.now();
+  const leitura = filaOperacionalV2.lerFilaVivaParaMerge(cliente, {
+    agora: opcoes.agora || Date.now(),
+    logger: console
+  });
+
+  if (!leitura.ok) {
+    logFilaV22C({
+      evento: "executor_v2_legacy_fallback",
+      clienteId: cliente,
+      ok: false,
+      motivo: leitura.motivo || "viva_indisponivel",
+      authorityMotivo: decisaoGeneration?.motivo || "",
+      bytesFilaJsonLidos: 0,
+      bytesFilaViva: leitura.bytes || 0,
+      fastPathMs: Date.now() - inicio
+    });
+    return { ok: false, motivo: leitura.motivo || "viva_indisponivel", leitura };
+  }
+
+  const filaClienteHotState = itensFilaVivaParaExecutorV2(cliente, leitura);
+  const filaSemCliente = fila.filter(item => String(item?.clienteId || "admin") !== cliente);
+  fila = [...filaSemCliente, ...filaClienteHotState];
+  finalizarCarregamentoFilaCliente(cliente, {
+    motivo: "executor_v2_fast_read",
+    filaClienteHotState,
+    hotState: true
+  });
+
+  const pendentes = filaClienteHotState
+    .filter(item => String(item?.status || "pendente").toLowerCase() === "pendente")
+    .length;
+  logFilaV22C({
+    evento: "executor_v2_fast_read",
+    clienteId: cliente,
+    ok: true,
+    motivo: decisaoGeneration?.motivo || "generation_conclusiva",
+    authorityMotivo: decisaoGeneration?.motivo || "",
+    maisNova: decisaoGeneration?.maisNova === true,
+    totalViva: leitura.entradas.length,
+    totalExecutor: filaClienteHotState.length,
+    pendentes,
+    bytesFilaJsonLidos: 0,
+    bytesFilaViva: leitura.bytes || 0,
+    vivaGeneration: decisaoGeneration?.state?.vivaGeneration ?? null,
+    durableCheckpointGeneration: decisaoGeneration?.state?.durableCheckpointGeneration ?? null,
+    dirtyGeneration: decisaoGeneration?.state?.dirtyGeneration ?? null,
+    fastPathMs: Date.now() - inicio
+  });
+
+  return {
+    ok: true,
+    motivo: "executor_v2_fast_read",
+    leitura,
+    filaClienteHotState,
+    pendentes
+  };
 }
 
 function salvarFila(clienteId = "admin", opcoes = {}) {
@@ -3141,8 +3230,8 @@ function carregarFilaLegadaOficial(clienteId = "admin") {
   return fila;
 }
 
-function finalizarCarregamentoFilaCliente(clienteId = "admin") {
-  reconstruirFilaStoreCliente(clienteId, "carregarFila");
+function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
+  reconstruirFilaStoreCliente(clienteId, opcoes.motivo || "carregarFila", opcoes);
   projetarFilaV2ShadowCliente(clienteId, "carregarFila");
   filaOperacionalV2.prepararSeHabilitado({
     fila,
@@ -3170,6 +3259,57 @@ function carregarFila(clienteId = "admin") {
 
 async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto = "leitura") {
   return executarMutacaoFilaClienteAsync(clienteId, `reconciliar_fila_v2_${contexto}`, async () => {
+    const cliente = String(clienteId || "admin");
+    const contextoTexto = String(contexto || "leitura");
+    let decisaoPreflightExecutor = null;
+    const dirtyAntesPreflight = checkpointFilaV2.snapshot(cliente).dirty;
+
+    if (contextoTexto === "executor" && dirtyAntesPreflight !== true) {
+      decisaoPreflightExecutor = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
+        contexto: contextoTexto,
+        preflight: true
+      });
+      if (decisaoPreflightExecutor?.generationConclusiva === true) {
+        const fastPath = aplicarFastPathExecutorFilaViva(cliente, decisaoPreflightExecutor);
+        if (fastPath.ok === true) {
+          return {
+            ...decisaoPreflightExecutor,
+            recoveryAplicado: false,
+            fastPathExecutor: true,
+            leituraFastPath: {
+              totalExecutor: fastPath.filaClienteHotState.length,
+              pendentes: fastPath.pendentes,
+              bytesFilaJsonLidos: 0,
+              bytesFilaViva: fastPath.leitura.bytes || 0
+            }
+          };
+        }
+        const decisaoMtime = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente);
+        decisaoPreflightExecutor = {
+          ok: decisaoMtime.ok !== false,
+          clienteId: cliente,
+          autoridadeSolicitada: "generation",
+          autoridadeUsada: "mtime",
+          generationConclusiva: false,
+          maisNova: decisaoMtime.maisNova === true,
+          recoveryAplicado: false,
+          fallbackMtime: true,
+          motivo: fastPath.motivo || "fast_path_viva_indisponivel",
+          decisaoMtime
+        };
+      } else {
+        logFilaV22C({
+          evento: "executor_v2_legacy_fallback",
+          clienteId: cliente,
+          ok: true,
+          motivo: decisaoPreflightExecutor?.motivo || "generation_inconclusiva",
+          autoridadeUsada: decisaoPreflightExecutor?.autoridadeUsada || "",
+          fallbackMtime: decisaoPreflightExecutor?.fallbackMtime === true,
+          bytesFilaJsonLidos: 0
+        });
+      }
+    }
+
     carregarFilaLegadaOficial(clienteId);
     const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
     const estadoArquivosV2 = dirty
@@ -3182,7 +3322,10 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
           fallbackMtime: false,
           motivo: "dirty_local"
         }
-      : await filaOperacionalV2.reconciliarFilaV2ParaLeitura(clienteId, { contexto });
+      : (
+          decisaoPreflightExecutor ||
+          await filaOperacionalV2.reconciliarFilaV2ParaLeitura(clienteId, { contexto })
+        );
     let recoveryAplicado = false;
     if (dirty || estadoArquivosV2.maisNova) {
       aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : `carregarFila_recovery_${contexto}`, {
