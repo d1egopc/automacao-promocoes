@@ -312,8 +312,12 @@ assert(
 );
 
 assert(
-  processarFila.includes("filaOfertas.reservarOfertaProcessandoFila(fila, oferta, {"),
-  "reserva processando deve permanecer no mecanismo atual e fora deste corte"
+  processarFila.includes("const colecaoReservaProcessamento = (") &&
+    processarFila.includes("fonteClienteHotStateSelecao?.conclusiva === true") &&
+    processarFila.includes("Array.isArray(fonteClienteHotStateSelecao.itens)") &&
+    processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
+    processarFila.includes("reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta, {"),
+  "reserva processando deve usar hot state do cliente no V2 conclusivo e preservar fila global como fallback"
 );
 
 const salvarFilaCentral = trechoEntre(
@@ -939,12 +943,23 @@ try {
     "fila controle nao pode conter item de outro workspace"
   );
 
-  const alvoEnvio = pendentes(cacheExecutor, wolff)[0];
-  const reserva = filaOfertas.reservarOfertaProcessandoFila(cacheExecutor, alvoEnvio, {
+  const hotStateWolff = pendentes(cacheExecutor, wolff);
+  const alvoEnvio = hotStateWolff[0];
+  const reserva = filaOfertas.reservarOfertaProcessandoFila(hotStateWolff, alvoEnvio, {
     clienteId: wolff,
     agoraIso: "2026-08-08T18:05:00.000Z"
   });
-  assert.strictEqual(reserva.ok, true, "executor deve reservar pendente antes do envio");
+  assert.strictEqual(reserva.ok, true, "executor deve reservar pendente antes do envio usando hot state do cliente");
+  assert.strictEqual(
+    cacheExecutor.find(item => item.id === alvoEnvio.id && item.clienteId === wolff)?.status,
+    "processando",
+    "mutacao da reserva por hot state deve refletir nas mesmas referencias do cache executor"
+  );
+  assert.strictEqual(
+    cacheExecutor.find(item => item.clienteId === controle)?.status,
+    "pendente",
+    "reserva por hot state do cliente nao deve alterar item de outro workspace"
+  );
 
   const finalizacao = filaOfertas.finalizarOfertaEnviadaFila(cacheExecutor, alvoEnvio, {
     clienteId: wolff,

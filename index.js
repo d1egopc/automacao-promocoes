@@ -9323,7 +9323,11 @@ if (duplicidadeProcessamento.bloquear) {
   return;
 }
 
-const reservaProcessamento = filaOfertas.reservarOfertaProcessandoFila(fila, oferta, {
+const colecaoReservaProcessamento = (
+  fonteClienteHotStateSelecao?.conclusiva === true &&
+  Array.isArray(fonteClienteHotStateSelecao.itens)
+) ? fonteClienteHotStateSelecao.itens : fila;
+const reservaProcessamento = filaOfertas.reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta, {
   clienteId
 });
 if (!reservaProcessamento.ok) {
