@@ -179,6 +179,37 @@ assert(
   "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
 );
 
+const selecaoExpiracao = trechoEntre(
+  "async function candidatosExpiracaoSelecaoFilaV2",
+  "const resultadoSelecao = selecionarProximaOfertaFilaCore"
+);
+
+assert(
+  selecaoExpiracao.includes("filaOperacionalV2.deveUsarFilaV2Operacional(cliente)") &&
+    selecaoExpiracao.includes("await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {") &&
+    selecaoExpiracao.includes("contexto: \"expiracao_selecao\"") &&
+    selecaoExpiracao.includes("if (decisao?.generationConclusiva !== true) return null;") &&
+    selecaoExpiracao.includes("return candidatosExpiracaoFilaV2(cliente);"),
+  "expiracao_selecao V2 deve usar fila-viva somente quando authority generation for conclusiva"
+);
+
+assert(
+  selecaoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);") &&
+    selecaoExpiracao.includes("const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;") &&
+    selecaoExpiracao.includes("const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === \"fila_viva\";") &&
+    selecaoExpiracao.includes("for (const oferta of itensExpiracaoSelecao)") &&
+    selecaoExpiracao.includes("if (!usandoFilaVivaExpiracaoSelecao && !mesmoCliente) continue;"),
+  "expiracao_selecao deve ignorar stale global quando V2 conclusiva fornecer hot state da fila-viva"
+);
+
+assert(
+  selecaoExpiracao.includes("if (oferta?.status !== \"pendente\") continue;") &&
+    selecaoExpiracao.includes("if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;") &&
+    selecaoExpiracao.includes("marcarOfertaExpirada(oferta);") &&
+    selecaoExpiracao.includes("await persistirExpiracaoFila(clienteIdAlvo || \"admin\", expiradasSelecao, \"expiracao_selecao\");"),
+  "expiracao_selecao deve preservar regra, mutacao e persistencia checkpoint-only existentes"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"

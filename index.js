@@ -1485,6 +1485,19 @@ function candidatosExpiracaoFilaV2(clienteId = "admin") {
   };
 }
 
+async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) return null;
+
+  const decisao = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
+    contexto: "expiracao_selecao",
+    preflight: true
+  });
+  if (decisao?.generationConclusiva !== true) return null;
+
+  return candidatosExpiracaoFilaV2(cliente);
+}
+
 async function sanearExpiradosFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
   const fonteCandidatos = candidatosExpiracaoFilaV2(cliente);
@@ -2274,11 +2287,15 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null) {
   const agora = Date.now();
   let expirouAlguma = false;
   const expiradasSelecao = [];
-  for (const oferta of fila) {
+  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);
+  const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;
+  const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === "fila_viva";
+
+  for (const oferta of itensExpiracaoSelecao) {
     const mesmoCliente =
       !clienteIdAlvo ||
       String(oferta?.clienteId || "admin") === String(clienteIdAlvo);
-    if (!mesmoCliente) continue;
+    if (!usandoFilaVivaExpiracaoSelecao && !mesmoCliente) continue;
     if (oferta?.status !== "pendente") continue;
     if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;
     marcarOfertaExpirada(oferta);
