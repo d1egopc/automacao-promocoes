@@ -527,6 +527,77 @@ function aguardarFilaAsync() {
   }
 
   {
+    const pool = criarPoolFake();
+    const logs = [];
+    const logger = {
+      log: (tag, payload) => logs.push({ tag, payload: JSON.parse(payload) })
+    };
+
+    const falhaParse = await repo.registrarMutacaoDuravel("cliente_parse_falha", {
+      motivo: "expiracao_saneamento_checkpoint_only",
+      escreverArquivo: () => ({
+        ok: false,
+        motivo: "json_corrompido",
+        etapa: "parse",
+        codigoErro: "parse_invalido",
+        errno: null,
+        path: "C:/Users/Liva D1EGOPC/Documents/BACKEND-OFICIAL-2026/data/clientes/cliente_parse_falha/fila-viva.json",
+        itemId: "oferta_parse",
+        statusAntes: "pendente",
+        statusDepois: "expirado",
+        causaInterna: "parse_invalido",
+        item: {
+          titulo: "payload sensivel que nao deve aparecer",
+          linkAfiliado: "https://exemplo.invalid/segredo"
+        }
+      })
+    }, { pool, logger });
+
+    const falhaRename = await repo.registrarMutacaoDuravel("cliente_rename_falha", {
+      motivo: "expiracao_saneamento_checkpoint_only",
+      escreverArquivo: () => ({
+        ok: false,
+        motivo: "erro_escrita_fila_viva",
+        etapa: "write",
+        codigoErro: "EXDEV",
+        errno: -18,
+        path: "cliente_rename_falha/fila-viva.json",
+        itemId: "oferta_rename",
+        statusAntes: "processando",
+        statusDepois: "expirado",
+        causaInterna: "rename_atomic_write"
+      })
+    }, { pool, logger });
+
+    const eventos = logs.map(log => log.payload);
+    const textoLogs = JSON.stringify(eventos);
+    const selectsForUpdate = pool.chamadas.filter(chamada =>
+      /^SELECT .* FROM queue_manifest_state .* FOR UPDATE$/i.test(chamada.sql)
+    );
+
+    assert.strictEqual(falhaParse.ok, false);
+    assert.strictEqual(falhaParse.motivo, "arquivo_viva_falhou", "motivo funcional externo permanece conservador");
+    assert.strictEqual(falhaParse.motivoDetalhado, "parse_invalido");
+    assert.strictEqual(falhaParse.detalheArquivoViva.etapa, "parse");
+    assert.strictEqual(falhaParse.detalheArquivoViva.codigoErro, "parse_invalido");
+    assert.strictEqual(falhaParse.detalheArquivoViva.path, "cliente_parse_falha/fila-viva.json");
+    assert.strictEqual(falhaParse.detalheArquivoViva.itemId, "oferta_parse");
+    assert.strictEqual(falhaRename.motivo, "arquivo_viva_falhou");
+    assert.strictEqual(falhaRename.detalheArquivoViva.etapa, "write");
+    assert.strictEqual(falhaRename.detalheArquivoViva.codigoErro, "EXDEV");
+    assert.strictEqual(falhaRename.detalheArquivoViva.errno, -18);
+    assert.strictEqual(eventos.length, 2, "deve logar somente um resumo por falha de arquivo");
+    assert(eventos.every(evento => evento.evento === "arquivo_viva_falhou"));
+    assert.strictEqual(eventos[0].vivaGeneration, 0);
+    assert.strictEqual(eventos[0].durableCheckpointGeneration, 0);
+    assert.strictEqual(eventos[0].dirtyGeneration, null);
+    assert.strictEqual(selectsForUpdate.length, 2, "instrumentacao nao deve adicionar SELECT/PG extra");
+    assert(!textoLogs.includes("payload sensivel"), "log nao pode carregar payload da fila");
+    assert(!textoLogs.includes("linkAfiliado"), "log nao pode carregar campos sensiveis do item");
+    assert(!textoLogs.includes("Documents/BACKEND-OFICIAL-2026"), "log nao deve expor caminho local completo");
+  }
+
+  {
     const pool = criarPoolFake({ falharUpdate: true });
     const falhaSql = await repo.registrarMutacaoDuravel("cliente_sql_falha", {}, { pool });
     const leitura = await repo.lerStateObservacional("cliente_sql_falha", { pool });

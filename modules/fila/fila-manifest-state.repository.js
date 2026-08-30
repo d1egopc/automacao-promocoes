@@ -93,6 +93,10 @@ function textoSeguro(valor = "") {
   return String(valor || "").trim();
 }
 
+function textoCurto(valor = "", limite = 160) {
+  return textoSeguro(valor).replace(/[\r\n]+/g, " ").slice(0, limite);
+}
+
 function erroSanitizado(erro) {
   return {
     code: String(erro?.code || erro?.codigo || "").slice(0, 80),
@@ -110,6 +114,64 @@ function logCheckpointB2C(deps = {}, payload = {}) {
       ...payload
     }));
   } catch (_) {}
+}
+
+function logFalhaArquivoViva(deps = {}, payload = {}) {
+  try {
+    const logger = deps?.logger && typeof deps.logger.log === "function" ? deps.logger : console;
+    logger.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
+      versao: 1,
+      evento: "arquivo_viva_falhou",
+      timestamp: new Date().toISOString(),
+      ...payload
+    }));
+  } catch (_) {}
+}
+
+function valorDetalheArquivo(escrita = {}, chave = "", fallback = "") {
+  if (!escrita || typeof escrita !== "object") return fallback;
+  return escrita[chave] ?? escrita.detalheArquivoViva?.[chave] ?? fallback;
+}
+
+function pathSeguroArquivoViva(valor = "", clienteId = "admin") {
+  const normalizado = textoCurto(valor, 500).replace(/\\/g, "/");
+  if (!normalizado) return "";
+  const cliente = clienteSeguro(clienteId).toLowerCase();
+  const partes = normalizado.split("/").filter(Boolean);
+  const indiceCliente = partes.findIndex(parte => parte.toLowerCase() === cliente);
+  const seguro = indiceCliente >= 0
+    ? partes.slice(indiceCliente).join("/")
+    : partes.slice(-2).join("/");
+  return textoCurto(seguro, 200);
+}
+
+function detalheFalhaArquivoViva(escrita, contexto = {}) {
+  const objeto = escrita && typeof escrita === "object" ? escrita : {};
+  const causaInterna = textoCurto(
+    valorDetalheArquivo(objeto, "causaInterna",
+      valorDetalheArquivo(objeto, "motivo",
+        escrita === false ? "writer_retorno_false" : "arquivo_viva_falhou")),
+    160
+  );
+  return {
+    clienteId: contexto.clienteId,
+    operacao: textoCurto(contexto.operacao || "manifest_state_mutacao", 80),
+    etapa: textoCurto(valorDetalheArquivo(objeto, "etapa", "write"), 80),
+    codigoErro: textoCurto(valorDetalheArquivo(objeto, "codigoErro", causaInterna || "arquivo_viva_falhou"), 80),
+    errno: valorDetalheArquivo(objeto, "errno", null),
+    path: pathSeguroArquivoViva(valorDetalheArquivo(objeto, "path", ""), contexto.clienteId),
+    itemId: textoCurto(valorDetalheArquivo(objeto, "itemId", objeto.entrada?.id || objeto.item?.id || ""), 120),
+    statusAntes: textoCurto(valorDetalheArquivo(objeto, "statusAntes", ""), 80),
+    statusDepois: textoCurto(valorDetalheArquivo(objeto, "statusDepois", objeto.status || objeto.entrada?.status || ""), 80),
+    vivaGeneration: contexto.state?.vivaGeneration ?? null,
+    durableCheckpointGeneration: contexto.state?.durableCheckpointGeneration ?? null,
+    dirtyGeneration: contexto.state?.dirtyGeneration ?? null,
+    tentativa: Number.isInteger(Number(valorDetalheArquivo(objeto, "tentativa", 1)))
+      ? Number(valorDetalheArquivo(objeto, "tentativa", 1))
+      : 1,
+    duracaoMs: Number.isFinite(Number(contexto.duracaoMs)) ? Number(contexto.duracaoMs) : null,
+    causaInterna
+  };
 }
 
 function gerarRevisionArquivo() {
@@ -304,7 +366,8 @@ async function comTransacao(callback, deps = {}) {
       motivo: erro?.codigo || erro?.message || "transacao_manifest_state_falhou",
       erro: erro?.message || "erro_manifest_state",
       motivoDetalhado: erro?.motivoDetalhado || "",
-      erroDetalhado: erro?.erroDetalhado || ""
+      erroDetalhado: erro?.erroDetalhado || "",
+      detalheArquivoViva: erro?.detalheArquivoViva || null
     };
   } finally {
     if (client && typeof client.release === "function") client.release();
@@ -551,10 +614,23 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
     let escrita = null;
 
     if (typeof dados.escreverArquivo === "function") {
+      const inicioArquivo = process.hrtime.bigint();
       escrita = await dados.escreverArquivo({ clienteId: cliente, state: atual, nextGeneration, fileRevision });
       if (escrita === false || escrita?.ok === false) {
+        const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicioArquivo) / 1e6);
+        const detalhe = detalheFalhaArquivoViva(escrita, {
+          clienteId: cliente,
+          operacao: dados.motivo || "manifest_state_mutacao",
+          state: atual,
+          nextGeneration,
+          duracaoMs
+        });
+        logFalhaArquivoViva(deps, detalhe);
         const erro = new Error(escrita?.motivo || "arquivo_viva_falhou");
         erro.codigo = "arquivo_viva_falhou";
+        erro.motivoDetalhado = detalhe.causaInterna || "";
+        erro.erroDetalhado = detalhe.codigoErro || "";
+        erro.detalheArquivoViva = detalhe;
         throw erro;
       }
     }

@@ -55,6 +55,10 @@ function texto(valor = "") {
   return String(valor || "").trim();
 }
 
+function textoCurto(valor = "", limite = 160) {
+  return texto(valor).replace(/[\r\n]+/g, " ").slice(0, limite);
+}
+
 function clienteSeguro(clienteId = "admin") {
   return texto(clienteId || "admin") || "admin";
 }
@@ -191,6 +195,50 @@ function normalizarEntradasViva(valor = [], agora = Date.now()) {
 function caminhoJsonCliente(clienteId = "admin", arquivo = "", deps = {}) {
   const resolver = deps.getClienteJsonPath || getClienteJsonPath;
   return typeof resolver === "function" ? resolver(clienteSeguro(clienteId), arquivo) : "";
+}
+
+function caminhoSeguroArquivo(file = "", clienteId = "admin") {
+  const normalizado = texto(file).replace(/\\/g, "/");
+  if (!normalizado) return "";
+  const cliente = clienteSeguro(clienteId).toLowerCase();
+  const partes = normalizado.split("/").filter(Boolean);
+  const indiceCliente = partes.findIndex(parte => parte.toLowerCase() === cliente);
+  const seguro = indiceCliente >= 0
+    ? partes.slice(indiceCliente).join("/")
+    : partes.slice(-2).join("/");
+  return textoCurto(seguro, 200);
+}
+
+function errnoSeguro(erro = {}) {
+  const numero = Number(erro?.errno);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+function causaInternaArquivo(erro = {}, etapa = "write", causaPadrao = "") {
+  const code = texto(erro?.code || erro?.codigo || "");
+  const name = texto(erro?.name || "");
+  const message = texto(erro?.message || "").toLowerCase();
+  if (code === "ENOENT") return etapa === "stat" ? "arquivo_ausente" : "diretorio_ou_arquivo_ausente";
+  if (["EACCES", "EPERM"].includes(code)) return "permissao";
+  if (["EBUSY", "ELOCKED", "EAGAIN"].includes(code)) return "concorrencia_lock";
+  if (code === "EXDEV") return "rename_atomic_write";
+  if (["ENOSPC", "EIO"].includes(code)) return "write_parcial_ou_io";
+  if (name === "SyntaxError") return "parse_invalido";
+  if (name === "TypeError" && /circular|serialize|serializ/i.test(message)) return "erro_serializacao";
+  if (/partial|parcial/.test(message)) return "write_parcial";
+  if (/generation|geracao|geração/.test(message)) return "geracao_inconsistente";
+  if (/item.*invalid|item.*invalido|item_invalido/.test(message)) return "item_invalido";
+  return texto(causaPadrao || erro?.message || etapa);
+}
+
+function detalheErroArquivo(erro = {}, etapa = "write", causaInterna = "") {
+  const causa = causaInternaArquivo(erro, etapa, causaInterna);
+  return {
+    etapa,
+    codigoErro: textoCurto(erro?.code || erro?.codigo || erro?.name || causa || etapa, 80),
+    errno: errnoSeguro(erro),
+    causaInterna: textoCurto(causa, 160)
+  };
 }
 
 function caminhoDirCliente(clienteId = "admin", deps = {}) {
@@ -520,7 +568,19 @@ function hashCurto(valor = "") {
 }
 
 function lerJsonArquivoDireto(file = "", fallback = null, fsImpl = fs) {
-  if (!file) return { ok: false, motivo: "caminho_indisponivel", valor: fallback, bytes: 0 };
+  if (!file) {
+    return {
+      ok: false,
+      motivo: "caminho_indisponivel",
+      valor: fallback,
+      bytes: 0,
+      etapa: "path",
+      codigoErro: "caminho_indisponivel",
+      errno: null,
+      causaInterna: "caminho_indisponivel"
+    };
+  }
+  let etapa = "stat";
   try {
     if (!fsImpl.existsSync(file)) {
       const tmpExiste = fsImpl.existsSync(`${file}.tmp`);
@@ -528,26 +588,49 @@ function lerJsonArquivoDireto(file = "", fallback = null, fsImpl = fs) {
         ok: false,
         motivo: tmpExiste ? "arquivo_principal_ausente_tmp_presente" : "arquivo_ausente",
         valor: fallback,
-        bytes: 0
+        bytes: 0,
+        etapa: "stat",
+        codigoErro: tmpExiste ? "arquivo_principal_ausente_tmp_presente" : "arquivo_ausente",
+        errno: null,
+        causaInterna: tmpExiste ? "arquivo_principal_ausente_tmp_presente" : "arquivo_ausente"
       };
     }
+    etapa = "read";
     const textoArquivo = fsImpl.readFileSync(file, "utf8");
     const bytes = Buffer.byteLength(textoArquivo || "", "utf8");
     if (!textoArquivo.trim()) {
-      return { ok: false, motivo: "arquivo_vazio", valor: fallback, bytes };
+      return {
+        ok: false,
+        motivo: "arquivo_vazio",
+        valor: fallback,
+        bytes,
+        etapa: "read",
+        codigoErro: "arquivo_vazio",
+        errno: null,
+        causaInterna: "arquivo_vazio"
+      };
     }
+    etapa = "parse";
     const valor = JSON.parse(textoArquivo);
+    etapa = "stat";
     const stat = statArquivoSeguro(file, fsImpl);
     return { ok: true, motivo: "ok", valor, bytes, mtimeMs: stat.mtimeMs || 0 };
   } catch (erro) {
     const stat = statArquivoSeguro(file, fsImpl);
+    const parseInvalido = etapa === "parse" || erro instanceof SyntaxError;
+    const detalhe = detalheErroArquivo(
+      erro,
+      parseInvalido ? "parse" : etapa,
+      parseInvalido ? "parse_invalido" : `erro_${etapa}`
+    );
     return {
       ok: false,
       motivo: "json_corrompido",
       erro: erro?.message || "erro_json",
       valor: fallback,
       bytes: stat.bytes || tamanhoArquivo(file, fsImpl),
-      mtimeMs: stat.mtimeMs || 0
+      mtimeMs: stat.mtimeMs || 0,
+      ...detalhe
     };
   }
 }
@@ -1790,12 +1873,20 @@ async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, 
 function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
   const escritor = deps.writeClienteJson || writeClienteJson;
   if (typeof escritor !== "function") {
-    return { ok: false, motivo: "writeClienteJson_indisponivel" };
+    return {
+      ok: false,
+      motivo: "writeClienteJson_indisponivel",
+      etapa: "write",
+      codigoErro: "writeClienteJson_indisponivel",
+      errno: null,
+      causaInterna: "writeClienteJson_indisponivel"
+    };
   }
   const normalizada = normalizarEntradasViva(entradas, deps.agora || Date.now())
     .filter(entrada => entrada.bucket === "viva");
+  const cliente = clienteSeguro(clienteId);
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
   try {
-    const cliente = clienteSeguro(clienteId);
     const ok = escritor(cliente, FILA_VIVA_ARQUIVO, normalizada);
     let vivaFileProof = null;
     if (ok !== false && deps.publicarFileProof === true) {
@@ -1810,7 +1901,12 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
           erro: proof.erro || "",
           totalViva: normalizada.length,
           bytesFilaViva: tamanhoJsonBytes(normalizada),
-          vivaFileProof: proof.proof || null
+          vivaFileProof: proof.proof || null,
+          etapa: "proof",
+          codigoErro: textoCurto(proof.motivo || "proof_viva_falhou", 80),
+          errno: null,
+          path: caminhoSeguroArquivo(caminhoViva, cliente),
+          causaInterna: textoCurto(proof.erro || proof.motivo || "proof_viva_falhou", 160)
         };
       }
       vivaFileProof = proof.proof;
@@ -1820,13 +1916,21 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
       motivo: ok === false ? "write_retorno_false" : "fila_viva_escrita",
       totalViva: normalizada.length,
       bytesFilaViva: tamanhoJsonBytes(normalizada),
-      vivaFileProof
+      vivaFileProof,
+      etapa: ok === false ? "write" : "",
+      codigoErro: ok === false ? "write_retorno_false" : "",
+      errno: null,
+      path: ok === false ? caminhoSeguroArquivo(caminhoViva, cliente) : "",
+      causaInterna: ok === false ? "write_retorno_false" : ""
     };
   } catch (erro) {
+    const detalhe = detalheErroArquivo(erro, "write", "erro_escrita_fila_viva");
     return {
       ok: false,
       motivo: "erro_escrita_fila_viva",
-      erro: erro?.message || "erro_escrita"
+      erro: erro?.message || "erro_escrita",
+      ...detalhe,
+      path: caminhoSeguroArquivo(caminhoViva, cliente)
     };
   }
 }
@@ -1856,6 +1960,14 @@ function inserirItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
       motivo: leitura.motivo,
       erro: leitura.erro,
       fallbackLegado: true,
+      etapa: leitura.etapa || "read",
+      codigoErro: leitura.codigoErro || leitura.motivo,
+      errno: leitura.errno ?? null,
+      path: caminhoSeguroArquivo(caminhoViva, cliente),
+      itemId: idItem(item),
+      statusAntes: "",
+      statusDepois: statusItem(item),
+      causaInterna: leitura.causaInterna || leitura.motivo,
       bytesLidosViva: leitura.bytes || 0,
       insertVivaMs: duracaoMs
     };
@@ -1919,6 +2031,14 @@ function inserirItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
     motivo: escrita.motivo,
     entrada: entradaNova,
     item: entradaNova.item,
+    etapa: escrita.etapa || "",
+    codigoErro: escrita.codigoErro || "",
+    errno: escrita.errno ?? null,
+    path: escrita.path || caminhoSeguroArquivo(caminhoViva, cliente),
+    itemId: entradaNova.id,
+    statusAntes: "",
+    statusDepois: entradaNova.status,
+    causaInterna: escrita.causaInterna || "",
     idempotente: jaExiste,
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
@@ -1956,6 +2076,14 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
       fallbackLegado: true,
       atualizouViva: false,
       removeuDaViva: false,
+      etapa: leitura.etapa || "read",
+      codigoErro: leitura.codigoErro || leitura.motivo,
+      errno: leitura.errno ?? null,
+      path: caminhoSeguroArquivo(caminhoViva, cliente),
+      itemId: idItem(item),
+      statusAntes: "",
+      statusDepois: statusItem(item),
+      causaInterna: leitura.causaInterna || leitura.motivo,
       bytesLidosViva: leitura.bytes || 0,
       updateVivaMs: duracaoMs
     };
@@ -1972,6 +2100,14 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
       motivo: "item_nao_encontrado_na_viva",
       atualizouViva: false,
       removeuDaViva: false,
+      etapa: "validacao_item",
+      codigoErro: "item_nao_encontrado_na_viva",
+      errno: null,
+      path: caminhoSeguroArquivo(caminhoViva, cliente),
+      itemId: idItem(item),
+      statusAntes: "",
+      statusDepois: statusItem(item),
+      causaInterna: "item_nao_encontrado_na_viva",
       totalViva: entradasExistentes.length,
       bytesLidosViva: leitura.bytes || 0,
       updateVivaMs: duracaoMs
@@ -2047,6 +2183,14 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
     item: entradaAtualizada.item,
     atualizouViva: escrita.ok === true,
     removeuDaViva: false,
+    etapa: escrita.etapa || "",
+    codigoErro: escrita.codigoErro || "",
+    errno: escrita.errno ?? null,
+    path: escrita.path || caminhoSeguroArquivo(caminhoViva, cliente),
+    itemId: entradaAtualizada.id,
+    statusAntes: entradaAtual.status || "",
+    statusDepois: entradaAtualizada.status,
+    causaInterna: escrita.causaInterna || "",
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
     bytesFilaViva: escrita.bytesFilaViva || 0,
@@ -2082,6 +2226,14 @@ function removerItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
       erro: leitura.erro,
       fallbackLegado: true,
       removeuDaViva: false,
+      etapa: leitura.etapa || "read",
+      codigoErro: leitura.codigoErro || leitura.motivo,
+      errno: leitura.errno ?? null,
+      path: caminhoSeguroArquivo(caminhoViva, cliente),
+      itemId: idItem(item),
+      statusAntes: "",
+      statusDepois: statusItem(item),
+      causaInterna: leitura.causaInterna || leitura.motivo,
       bytesLidosViva: leitura.bytes || 0,
       removalVivaMs: duracaoMs
     };
@@ -2099,6 +2251,14 @@ function removerItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
       idempotente: true,
       motivo: "item_ausente_na_viva",
       removeuDaViva: false,
+      etapa: "validacao_item",
+      codigoErro: "item_ausente_na_viva",
+      errno: null,
+      path: caminhoSeguroArquivo(caminhoViva, cliente),
+      itemId: idItem(item),
+      statusAntes: "",
+      statusDepois: statusItem(item),
+      causaInterna: "item_ausente_na_viva",
       totalViva: entradasExistentes.length,
       bytesLidosViva: leitura.bytes || 0,
       removalVivaMs: duracaoMs
@@ -2127,6 +2287,14 @@ function removerItemFilaVivaIncremental(clienteId = "admin", item = {}, deps = {
     ok: escrita.ok === true,
     motivo: escrita.motivo,
     removeuDaViva: escrita.ok === true,
+    etapa: escrita.etapa || "",
+    codigoErro: escrita.codigoErro || "",
+    errno: escrita.errno ?? null,
+    path: escrita.path || caminhoSeguroArquivo(caminhoViva, cliente),
+    itemId: idItem(item),
+    statusAntes: statusItem(item),
+    statusDepois: "",
+    causaInterna: escrita.causaInterna || "",
     totalViva: escrita.totalViva || entradasAtualizadas.length,
     bytesLidosViva: leitura.bytes || 0,
     bytesFilaViva: escrita.bytesFilaViva || 0,
@@ -2700,7 +2868,19 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
   };
 
   if (!file) {
-    return { ok: false, motivo: "caminho_historico_indisponivel", chave };
+    return {
+      ok: false,
+      motivo: "caminho_historico_indisponivel",
+      chave,
+      etapa: "path",
+      codigoErro: "caminho_historico_indisponivel",
+      errno: null,
+      path: "",
+      itemId: entrada.id || idItem(item, entrada.posicaoLegada),
+      statusAntes: entrada.status || statusItem(item),
+      statusDepois: "historico",
+      causaInterna: "caminho_historico_indisponivel"
+    };
   }
 
   try {
@@ -2795,7 +2975,12 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
       erro: erro?.message || "erro_append",
       chave,
       chaveLegada,
-      file
+      file,
+      ...detalheErroArquivo(erro, "historico_append", "erro_append_historico"),
+      path: caminhoSeguroArquivo(file, cliente),
+      itemId: entrada.id || idItem(item, entrada.posicaoLegada),
+      statusAntes: entrada.status || statusItem(item),
+      statusDepois: "historico"
     };
   }
 }
@@ -2823,7 +3008,18 @@ function moverTerminalParaHistorico(clienteId = "admin", filaViva = [], alvo = {
     normalizarEntradaViva(alvo?.item ? alvo : { item: alvo, posicaoLegada: alvo?.posicaoLegada }, alvo?.posicaoLegada || -1, deps.agora || Date.now());
 
   if (!itemTerminalParaHistorico(entrada.item, deps.agora || Date.now())) {
-    return { ok: false, motivo: "item_nao_terminal", removeuDaViva: false };
+    return {
+      ok: false,
+      motivo: "item_nao_terminal",
+      removeuDaViva: false,
+      etapa: "validacao_item",
+      codigoErro: "item_nao_terminal",
+      errno: null,
+      itemId: entrada.id,
+      statusAntes: entrada.status || statusItem(entrada.item),
+      statusDepois: statusItem(entrada.item),
+      causaInterna: "item_nao_terminal"
+    };
   }
 
   const historico = appendHistoricoIncremental(cliente, entrada, deps);
@@ -2840,6 +3036,14 @@ function moverTerminalParaHistorico(clienteId = "admin", filaViva = [], alvo = {
       ok: false,
       motivo: "historico_falhou_item_permanece_vivo",
       removeuDaViva: false,
+      etapa: historico.etapa || "historico_append",
+      codigoErro: historico.codigoErro || historico.motivo,
+      errno: historico.errno ?? null,
+      path: historico.path || caminhoSeguroArquivo(historico.file || "", cliente),
+      itemId: entrada.id,
+      statusAntes: entrada.status || statusItem(entrada.item),
+      statusDepois: "historico",
+      causaInterna: historico.causaInterna || historico.motivo,
       historico
     };
   }
@@ -2878,6 +3082,14 @@ function moverTerminalParaHistorico(clienteId = "admin", filaViva = [], alvo = {
     ok: escrita.ok === true,
     motivo: escrita.ok ? "terminal_movido_para_historico" : "historico_ok_viva_nao_atualizada",
     removeuDaViva: escrita.ok === true,
+    etapa: escrita.etapa || "",
+    codigoErro: escrita.codigoErro || "",
+    errno: escrita.errno ?? null,
+    path: escrita.path || caminhoSeguroArquivo(caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps), cliente),
+    itemId: entrada.id,
+    statusAntes: entrada.status || statusItem(entrada.item),
+    statusDepois: "historico",
+    causaInterna: escrita.causaInterna || "",
     historico,
     escrita,
     filaViva: escrita.ok ? restante : entradas

@@ -1599,6 +1599,37 @@ function criarStorageTemporarioFilaV2() {
   return { dir, getClientePath, getClienteJsonPath, writeClienteJson };
 }
 
+{
+  const storage = criarStorageTemporarioFilaV2();
+  const cliente = "cliente_diag_writer";
+  const permissao = filaOperacionalV2.escreverFilaViva(cliente, [oferta("diag_perm", { clienteId: cliente })], {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: () => {
+      const erro = new Error("permission denied");
+      erro.code = "EACCES";
+      erro.errno = -13;
+      throw erro;
+    }
+  });
+  const serializacao = filaOperacionalV2.escreverFilaViva(cliente, [oferta("diag_json", { clienteId: cliente })], {
+    getClienteJsonPath: storage.getClienteJsonPath,
+    writeClienteJson: () => {
+      throw new TypeError("Converting circular structure to JSON");
+    }
+  });
+
+  assert.strictEqual(permissao.ok, false);
+  assert.strictEqual(permissao.motivo, "erro_escrita_fila_viva", "motivo funcional do writer permanece igual");
+  assert.strictEqual(permissao.codigoErro, "EACCES");
+  assert.strictEqual(permissao.errno, -13);
+  assert.strictEqual(permissao.causaInterna, "permissao");
+  assert.strictEqual(permissao.path, "cliente_diag_writer/fila-viva.json");
+  assert.strictEqual(serializacao.ok, false);
+  assert.strictEqual(serializacao.motivo, "erro_escrita_fila_viva");
+  assert.strictEqual(serializacao.codigoErro, "TypeError");
+  assert.strictEqual(serializacao.causaInterna, "erro_serializacao");
+}
+
 function criarManifestStateRepositoryFake(opcoes = {}) {
   const states = new Map();
   const locks = new Map();
