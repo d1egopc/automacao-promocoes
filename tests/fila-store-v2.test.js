@@ -3294,6 +3294,165 @@ async function testarPromocaoLockPostgresOperacional() {
   {
     const storage = criarStorageTemporarioFilaV2();
     const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_executor_checkpoint_only";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente,
+      FILA_V2_RECOVERY_AUTORIDADE: "generation"
+    };
+    const item = oferta("checkpoint_only", { clienteId: cliente });
+    storage.writeClienteJson(cliente, "fila.json", [item]);
+    fs.utimesSync(storage.getClienteJsonPath(cliente, "fila.json"), new Date(AGORA - 10_000), new Date(AGORA - 10_000));
+    await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+
+    const atualizado = { ...item, status: "processando", statusDetalhe: "Reservada pelo Executor" };
+    const sync = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, atualizado, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1,
+      checkpointSincronizado: false,
+      exigirMutacao: true
+    });
+    const state = repoFake.states.get(cliente);
+    const viva = JSON.parse(fs.readFileSync(storage.getClienteJsonPath(cliente, FILA_VIVA_ARQUIVO), "utf8"));
+    const legacyProofPath = storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO);
+    const recovery = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "restart_checkpoint_only" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} }
+    });
+
+    assert.strictEqual(sync.ok, true);
+    assert.strictEqual(sync.atualizouViva, true);
+    assert.strictEqual(state.vivaGeneration, 2);
+    assert.strictEqual(state.durableCheckpointGeneration, 0, "rewrite legado adiado nao pode avancar durable");
+    assert.strictEqual(state.dirtyGeneration, 1, "dirty permanece aberto ate o checkpoint B1");
+    assert.strictEqual(fs.existsSync(legacyProofPath), false, "checkpoint-only nao publica proof legado artificial");
+    assert.strictEqual(viva[0].item.status, "processando");
+    assert.strictEqual(recovery.autoridadeUsada, "mtime", "readiness falsa nao deve suprimir fallback conservador");
+    assert.strictEqual(recovery.maisNova, true, "restart antes do checkpoint deve preservar a mutacao viva");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_checkpoint_only_sem_mutacao";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    storage.writeClienteJson(cliente, FILA_VIVA_ARQUIVO, []);
+    const resultado = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, oferta("ausente", { clienteId: cliente }), {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      checkpointSincronizado: false,
+      exigirMutacao: true
+    });
+
+    assert.strictEqual(resultado.ok, false, "checkpoint-only nao pode aceitar update sem mutacao real na viva");
+    assert.strictEqual(repoFake.states.has(cliente), false, "falha antes da escrita nao pode criar generation fantasma");
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_multiplas_mutacoes_checkpoint_only";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente
+    };
+    const item = oferta("multi_checkpoint_only", { clienteId: cliente });
+    await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+    const primeira = { ...item, status: "processando", statusDetalhe: "primeira mutacao" };
+    await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, primeira, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1,
+      checkpointSincronizado: false,
+      exigirMutacao: true
+    });
+    const segunda = { ...primeira, statusDetalhe: "segunda mutacao antes do checkpoint" };
+    await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, segunda, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 2,
+      checkpointSincronizado: false,
+      exigirMutacao: true
+    });
+    const antesCheckpoint = repoFake.states.get(cliente);
+    const alvo = await filaOperacionalV2.capturarTargetCheckpointCoordenado(cliente, {
+      motivo: "checkpoint_teste"
+    }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 3
+    });
+    const checkpoint = await filaOperacionalV2.confirmarCheckpointCoordenado(cliente, {
+      targetGeneration: alvo.targetGeneration,
+      checkpointRevision: alvo.checkpointRevision,
+      motivo: "checkpoint_teste",
+      publicarCheckpoint: ({ targetGeneration, checkpointRevision }) => {
+        storage.writeClienteJson(cliente, "fila.json", [segunda]);
+        const proof = filaOperacionalV2.publicarProofFilaLegada(cliente, {
+          targetGeneration,
+          fileRevision: checkpointRevision
+        }, {
+          getClienteJsonPath: storage.getClienteJsonPath,
+          writeClienteJson: storage.writeClienteJson
+        });
+        return { ok: proof.ok === true, legacyFileProof: proof.proof };
+      }
+    }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 4
+    });
+    const depoisCheckpoint = repoFake.states.get(cliente);
+
+    assert.strictEqual(antesCheckpoint.vivaGeneration, 3);
+    assert.strictEqual(antesCheckpoint.durableCheckpointGeneration, 0);
+    assert.strictEqual(checkpoint.ok, true);
+    assert.strictEqual(depoisCheckpoint.durableCheckpointGeneration, 3, "B1 posterior converge o snapshot legado");
+    assert.strictEqual(depoisCheckpoint.dirtyGeneration, null);
+    assert.strictEqual(depoisCheckpoint.legacyFileProof.generation, 3);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
     const cliente = "cliente_stat_mismatch_detalhado";
     const env = {
       FILA_V2_OPERACIONAL_ROLLOUT: "canary",

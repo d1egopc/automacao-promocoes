@@ -2195,7 +2195,7 @@ async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
 async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
   return executarEscritaFilaV2Coordenada(
     clienteId,
-    "legacy_sync_update",
+    deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update",
     ({ nextGeneration, fileRevision }) => {
       const resultado = atualizarItemFilaVivaIncremental(clienteId, item, {
         ...deps,
@@ -2203,12 +2203,22 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
         fileRevision,
         publicarFileProof: true
       });
+      if (deps.exigirMutacao === true &&
+          resultado?.atualizouViva !== true &&
+          resultado?.removeuDaViva !== true &&
+          resultado?.terminalHistorico !== true) {
+        return {
+          ...resultado,
+          ok: false,
+          motivo: resultado?.motivo || "mutacao_viva_nao_confirmada"
+        };
+      }
       return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
     },
     {
       ...deps,
-      checkpointSincronizado: true,
-      motivo: deps.motivo || "legacy_sync_update"
+      checkpointSincronizado: deps.checkpointSincronizado === false ? false : true,
+      motivo: deps.motivo || (deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update")
     }
   );
 }

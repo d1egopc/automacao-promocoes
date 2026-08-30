@@ -2570,6 +2570,8 @@ async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}
     logger: console,
     permitirRegressaoStatus: opcoes.permitirRegressaoStatus === true,
     logSucesso: opcoes.logSucesso === true,
+    checkpointSincronizado: opcoes.checkpointSincronizado === false ? false : true,
+    exigirMutacao: opcoes.exigirMutacao === true,
     publicarLegacyProof: opcoes.publicarLegacyProof === true,
     motivo
   });
@@ -2581,6 +2583,19 @@ async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}
     await invalidarAuthorityReadyV2(cliente, `${motivo}_legacy_proof_falhou`);
   }
   return { ...resultado, motivoSync: motivo, item: itemSincronizado };
+}
+
+function syncVivaMutacaoConfirmada(resultado = {}) {
+  return Boolean(
+    resultado &&
+    resultado.ok === true &&
+    resultado.fallbackLegado !== true &&
+    (
+      resultado.atualizouViva === true ||
+      resultado.removeuDaViva === true ||
+      resultado.terminalHistorico === true
+    )
+  );
 }
 
 async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, motivo = "remocao_legado", opcoes = {}) {
@@ -8106,14 +8121,58 @@ async function processarFila(clienteIdAlvo = null) {
   };
   const salvarFilaSeAlterada = async (cliente = clienteFila) => {
     if (!filaAlterada) return false;
-    const salvou = salvarFila(cliente, oferta ? {
-      motivo: "executor_salvar_alterada",
+    const clienteSeguroFila = String(cliente || "admin");
+    const usarCheckpointOnlyV2 = Boolean(
+      oferta &&
+      filaOperacionalV2.deveUsarFilaV2Operacional(clienteSeguroFila)
+    );
+
+    if (usarCheckpointOnlyV2) {
+      const syncViva = await sincronizarItemFilaVivaAposMutacao(
+        clienteSeguroFila,
+        oferta,
+        "executor_salvar_alterada_checkpoint_only",
+        {
+          checkpointSincronizado: false,
+          exigirMutacao: true,
+          publicarLegacyProof: false
+        }
+      );
+      if (syncVivaMutacaoConfirmada(syncViva)) {
+        const dirty = checkpointFilaV2.marcarDirty(
+          clienteSeguroFila,
+          "executor_salvar_alterada_checkpoint_only",
+          Date.now()
+        );
+        logFilaV22C({
+          evento: "legacy_rewrite_evitado_checkpoint_only",
+          clienteId: clienteSeguroFila,
+          ok: true,
+          motivo: "executor_salvar_alterada",
+          checkpointOnly: true,
+          vivaGeneration: syncViva.generation || syncViva.dbState?.vivaGeneration || 0,
+          durableCheckpointGeneration: syncViva.dbState?.durableCheckpointGeneration || 0,
+          dirtyGeneration: syncViva.dbState?.dirtyGeneration ?? null,
+          checkpointMutations: dirty.mutacoes || 0,
+          dirtyAgeMs: dirty.dirtyAgeMs || 0,
+          vivaStatusUpdateCount: syncViva.atualizouViva ? 1 : 0,
+          vivaRemovalCount: syncViva.removeuDaViva ? 1 : 0
+        });
+        filaAlterada = false;
+        return true;
+      }
+    }
+
+    const salvou = salvarFila(clienteSeguroFila, oferta ? {
+      motivo: usarCheckpointOnlyV2
+        ? "executor_salvar_alterada_fallback_legado"
+        : "executor_salvar_alterada",
       v2LegacyProofPolicy: "caller_proof"
     } : {
       motivo: "executor_salvar_alterada"
     });
     if (salvou && oferta) {
-      await sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada", {
+      await sincronizarItemFilaVivaAposMutacao(clienteSeguroFila, oferta, "executor_salvar_alterada", {
         publicarLegacyProof: true
       });
     }
