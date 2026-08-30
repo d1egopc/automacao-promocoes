@@ -62,6 +62,31 @@ function capturarLogger() {
   };
 }
 
+function criarFsContadorFilaJson() {
+  const leiturasFila = [];
+  const escritas = [];
+  return {
+    leiturasFila,
+    escritas,
+    fs: {
+      existsSync: (...args) => fs.existsSync(...args),
+      statSync: (...args) => fs.statSync(...args),
+      lstatSync: (...args) => fs.lstatSync(...args),
+      readdirSync: (...args) => fs.readdirSync(...args),
+      readFileSync: (file, ...args) => {
+        if (String(file || "").endsWith(`${path.sep}fila.json`)) leiturasFila.push(file);
+        return fs.readFileSync(file, ...args);
+      },
+      writeFileSync: (file, ...args) => {
+        escritas.push(file);
+        return fs.writeFileSync(file, ...args);
+      },
+      renameSync: (...args) => fs.renameSync(...args),
+      unlinkSync: (...args) => fs.unlinkSync(...args)
+    }
+  };
+}
+
 function criarPoolJobsAutoClean(batches = []) {
   const chamadas = [];
   let indiceBatch = 0;
@@ -372,6 +397,7 @@ async function testarFilaJsonShadow() {
   const dir = tempDir();
   const clienteDir = path.join(dir, "clientes", "user_40qdblgt");
   const filaPath = path.join(clienteDir, "fila.json");
+  escreverJson(path.join(dir, "usuarios.json"), [{ id: "user_40qdblgt", ativo: true }]);
   const fila = [];
   for (let i = 0; i < 150; i += 1) {
     fila.push({ id: `enviado_${i}`, status: "enviado", enviadoEm: isoAtras(48 * 60 * 60 * 1000), titulo: "Oferta teste" });
@@ -380,20 +406,89 @@ async function testarFilaJsonShadow() {
   escreverJson(filaPath, fila);
   const antes = fs.readFileSync(filaPath, "utf8");
 
-  const resumo = auditarFilaJson({ dataDir: dir, agoraMs: AGORA, loteLimite: 100 });
+  const contadorLeve = criarFsContadorFilaJson();
+  const resumoLeve = auditarFilaJson({ dataDir: dir, agoraMs: AGORA, loteLimite: 100, fs: contadorLeve.fs });
+  assert.strictEqual(resumoLeve.workspacesVistos, 1);
+  assert.strictEqual(resumoLeve.workspacesStatOnly, 1);
+  assert.strictEqual(resumoLeve.workspacesDeepRead, 0);
+  assert.strictEqual(resumoLeve.bytesFilaJsonLidos, 0, "auditoria leve nao le bytes de fila.json");
+  assert.strictEqual(contadorLeve.leiturasFila.length, 0, "V2/default nao deve fazer full read/parse de fila.json");
+  assert.strictEqual(contadorLeve.escritas.length, 0, "shadow nao introduz writes");
+
+  const resumo = auditarFilaJson({ dataDir: dir, agoraMs: AGORA, loteLimite: 100, deepAuditFilaJson: true });
   assert.strictEqual(resumo.quantidade, 100, "lote nao deve ultrapassar 100");
   assert.strictEqual(resumo.elegiveis, 100);
+  assert.strictEqual(resumo.workspacesDeepRead, 1);
+  assert.ok(resumo.bytesFilaJsonLidos > 0, "deep audit deve expor bytes efetivamente lidos");
   assert.strictEqual(resumo.aplicouMudancas, false);
   assert.strictEqual(fs.readFileSync(filaPath, "utf8"), antes, "shadow nao reescreve fila");
 
   const dirInvalido = tempDir();
   const filaInvalida = path.join(dirInvalido, "clientes", "user_invalido", "fila.json");
+  escreverJson(path.join(dirInvalido, "usuarios.json"), [{ id: "user_invalido", ativo: true }]);
   mkdirp(path.dirname(filaInvalida));
   fs.writeFileSync(filaInvalida, "{ json invalido");
   const invalidaAntes = fs.readFileSync(filaInvalida, "utf8");
-  const resumoInvalido = auditarFilaJson({ dataDir: dirInvalido, agoraMs: AGORA });
+  const resumoInvalido = auditarFilaJson({ dataDir: dirInvalido, agoraMs: AGORA, deepAuditFilaJson: true });
   assert.strictEqual(resumoInvalido.filasInvalidas, 1);
   assert.strictEqual(fs.readFileSync(filaInvalida, "utf8"), invalidaAntes, "fila invalida nao e reescrita");
+}
+
+async function testarFilaJsonShadowFaseCModoLeve() {
+  const dir = tempDir();
+  escreverJson(path.join(dir, "usuarios.json"), [
+    { id: "user_ativo_a", ativo: true },
+    { id: "user_ativo_b", ativo: true },
+    { id: "user_ativo_c", ativo: true },
+    { id: "user_inativo", ativo: false }
+  ]);
+  for (const workspace of ["user_ativo_a", "user_ativo_b", "user_ativo_c", "user_inativo", "user_orfao"]) {
+    escreverJson(path.join(dir, "clientes", workspace, "fila.json"), [
+      { id: `${workspace}_enviado`, status: "enviado", enviadoEm: isoAtras(48 * 60 * 60 * 1000), payload: "x".repeat(256) }
+    ]);
+  }
+
+  const contadorDefault = criarFsContadorFilaJson();
+  const resumoDefault = auditarFilaJson({
+    dataDir: dir,
+    agoraMs: AGORA,
+    workspacesFilaPorCiclo: 5,
+    fs: contadorDefault.fs
+  });
+
+  assert.strictEqual(resumoDefault.workspacesVistos, 5, "limite real de workspaces por ciclo deve ser respeitado");
+  assert.strictEqual(resumoDefault.workspacesPulados, 2, "inativo e orfao identificaveis devem ser pulados");
+  assert.strictEqual(resumoDefault.workspacesStatOnly, 3);
+  assert.strictEqual(resumoDefault.workspacesDeepRead, 0);
+  assert.strictEqual(resumoDefault.bytesFilaJsonLidos, 0);
+  assert.strictEqual(contadorDefault.leiturasFila.length, 0, "default stat-only nao faz readFile de fila.json");
+  assert.strictEqual(contadorDefault.escritas.length, 0, "shadow leve nao grava arquivos");
+
+  const contadorDeep = criarFsContadorFilaJson();
+  const resumoDeepLimitado = auditarFilaJson({
+    dataDir: dir,
+    agoraMs: AGORA,
+    workspacesFilaPorCiclo: 5,
+    deepAuditFilaJson: true,
+    deepAuditFilaJsonLimite: 1,
+    fs: contadorDeep.fs
+  });
+
+  assert.strictEqual(resumoDeepLimitado.workspacesVistos, 5);
+  assert.strictEqual(resumoDeepLimitado.workspacesPulados, 2);
+  assert.strictEqual(resumoDeepLimitado.workspacesDeepRead, 1, "deep audit deve ser amostral/limitado");
+  assert.strictEqual(resumoDeepLimitado.workspacesStatOnly, 2);
+  assert.strictEqual(contadorDeep.leiturasFila.length, 1, "cenario novo limita full read/parsing");
+  assert.ok(resumoDeepLimitado.bytesFilaJsonLidos > 0);
+
+  const resumoLimitado = auditarFilaJson({
+    dataDir: dir,
+    agoraMs: AGORA,
+    workspacesFilaPorCiclo: 2,
+    deepAuditFilaJson: true,
+    deepAuditFilaJsonLimite: 1
+  });
+  assert.strictEqual(resumoLimitado.workspacesVistos, 2, "N workspaces nao devem ser todos auditados no mesmo ciclo");
 }
 
 async function testarArquivosProtegidosEShadow() {
@@ -896,6 +991,7 @@ async function testarFailOpenEFlags() {
   await testarMatrizStatusOficial();
   await testarDependenciasProtegidas();
   await testarFilaJsonShadow();
+  await testarFilaJsonShadowFaseCModoLeve();
   await testarArquivosProtegidosEShadow();
   await testarMemoriaComercialIntacta();
   await testarPostgresShadowEDependencias();

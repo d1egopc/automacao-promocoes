@@ -130,7 +130,7 @@ function itemBase(extra = {}) {
   assert.strictEqual(dryRun.removiveis, 1);
   assert.strictEqual(fs.readFileSync(filaPath, "utf8"), antes, "dryRun nao grava");
 
-  const shadow = autoClean.auditarFilaJson({ dataDir, agoraMs: AGORA, loteLimite: 100 });
+  const shadow = autoClean.auditarFilaJson({ dataDir, agoraMs: AGORA, loteLimite: 100, deepAuditFilaJson: true });
   assert.strictEqual(shadow.politicaCentral, "fila_historico_policy_v1", "Auto-Clean reutiliza politica central");
   assert.strictEqual(shadow.compactaveis, 1);
   assert.strictEqual(shadow.removiveis, 1);

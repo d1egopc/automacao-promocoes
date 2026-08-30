@@ -505,7 +505,13 @@ function sanitizarLogPayload(payload = {}) {
     "classificacao",
     "orphanWorkspaces",
     "workspaces",
-    "workspaceClassificacao"
+    "workspaceClassificacao",
+    "workspacesVistos",
+    "workspacesPulados",
+    "workspacesStatOnly",
+    "workspacesDeepRead",
+    "bytesFilaJsonLidos",
+    "duracaoFilaJsonMs"
   ];
   const saida = {};
   for (const chave of permitido) {
@@ -603,8 +609,14 @@ function extrairTimestampFila(item = {}) {
   return { campo: null, ms: null };
 }
 
+function limiteDeepAuditFilaJson(opcoes = {}, politica = criarPoliticaRetencao(opcoes)) {
+  if (opcoes.deepAuditFilaJson !== true) return 0;
+  return limitarInteiro(opcoes.deepAuditFilaJsonLimite, 1, 1, politica.workspacesFilaPorCiclo);
+}
+
 function auditarFilaJson(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const inicioFilaJsonMs = Date.now();
   const medidorAutoCleanFila = criarMedidorEngineMemoryStage("auto_clean_shadow_fila_json", {
     limite: politica.loteLimite
   });
@@ -613,7 +625,8 @@ function auditarFilaJson(opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const limite = politica.loteLimite;
   const clientesDir = path.join(dataDir, "clientes");
-  const orfaos = new Set(detectarOrphanWorkspacesAutoClean({ ...opcoes, politica }).map(item => item.workspaceId));
+  const usuariosMeta = lerUsuariosAutoClean(dataDir, fsImpl);
+  const deepAuditLimite = limiteDeepAuditFilaJson(opcoes, politica);
   const registros = [];
   const resumoExtra = {
     filasInvalidas: 0,
@@ -626,33 +639,97 @@ function auditarFilaJson(opcoes = {}) {
     integrais: 0,
     bytesRecuperaveisCompactacao: 0,
     orphanWorkspaces: 0,
-    workspacesLidos: 0
+    workspacesLidos: 0,
+    workspacesVistos: 0,
+    workspacesPulados: 0,
+    workspacesStatOnly: 0,
+    workspacesDeepRead: 0,
+    bytesFilaJsonLidos: 0,
+    duracaoFilaJsonMs: 0
   };
 
   if (!fsImpl.existsSync(clientesDir)) {
+    const duracaoFilaJsonMs = Date.now() - inicioFilaJsonMs;
     medidorAutoCleanFila.fim({
       ok: true,
       autoCleanShadowBytesLidos: 0,
       autoCleanShadowBytesSerializados: 0,
       autoCleanItensLidos: 0,
-      autoCleanWorkspaces: 0
+      autoCleanWorkspaces: 0,
+      workspacesVistos: 0,
+      workspacesPulados: 0,
+      workspacesStatOnly: 0,
+      workspacesDeepRead: 0,
+      bytesFilaJsonLidos: 0,
+      duracaoFilaJsonMs
     });
-    return criarResumoOrigem("fila_json", "fila_json", registros, limite);
+    return {
+      ...criarResumoOrigem("fila_json", "fila_json", registros, limite),
+      ...resumoExtra,
+      duracaoFilaJsonMs
+    };
   }
 
-  for (const workspaceId of fsImpl.readdirSync(clientesDir).sort()) {
-    if (registros.length >= limite) break;
-    if (SENSIVEL_RE.test(workspaceId)) continue;
-    const workspaceClassificacao = orfaos.has(workspaceId) ? "orphan_workspace" : "workspace_registrado";
-    if (workspaceClassificacao === "orphan_workspace") resumoExtra.orphanWorkspaces += 1;
+  const workspaces = listarWorkspacesFila(dataDir, fsImpl).slice(0, politica.workspacesFilaPorCiclo);
+  for (const workspaceId of workspaces) {
+    resumoExtra.workspacesVistos += 1;
+    const usuarioMeta = usuariosMeta?.porId?.get(workspaceId);
+    const workspaceClassificacao = usuariosMeta && !usuariosMeta.ids.has(workspaceId)
+      ? "orphan_workspace"
+      : usuarioMeta?.ativo === false
+        ? "workspace_inativo"
+        : usuarioMeta?.ativo === true
+          ? "workspace_ativo"
+          : "workspace_desconhecido";
+    if (workspaceClassificacao === "orphan_workspace") {
+      resumoExtra.orphanWorkspaces += 1;
+      resumoExtra.workspacesPulados += 1;
+      continue;
+    }
+    if (workspaceClassificacao === "workspace_inativo") {
+      resumoExtra.workspacesPulados += 1;
+      continue;
+    }
     const filaPath = path.join(clientesDir, workspaceId, "fila.json");
-    if (!fsImpl.existsSync(filaPath)) continue;
-    resumoExtra.workspacesLidos += 1;
+    if (!fsImpl.existsSync(filaPath)) {
+      resumoExtra.workspacesPulados += 1;
+      continue;
+    }
     let stats;
-    try { stats = fsImpl.statSync(filaPath); } catch { continue; }
+    try { stats = fsImpl.statSync(filaPath); } catch {
+      resumoExtra.workspacesPulados += 1;
+      continue;
+    }
     resumoExtra.bytesTotais += Number(stats.size || 0);
+    const deveDeepRead = resumoExtra.workspacesDeepRead < deepAuditLimite && registros.length < limite;
+    if (!deveDeepRead) {
+      resumoExtra.workspacesStatOnly += 1;
+      if (registros.length < limite) {
+        registros.push({
+          origem: "fila_json",
+          tipoRegistro: "fila_json",
+          status: "stat_only",
+          idadeMs: Number.isFinite(Number(stats.mtimeMs)) ? Math.max(0, agoraMs - Number(stats.mtimeMs)) : null,
+          ttlMs: null,
+          elegivel: false,
+          motivo: "auditoria_leve_stat_only",
+          bytesEstimados: 0,
+          bytesFilaJsonStat: Number(stats.size || 0),
+          workspaceId,
+          workspaceClassificacao,
+          aplicouMudancas: false
+        });
+      }
+      continue;
+    }
+    resumoExtra.workspacesDeepRead += 1;
+    resumoExtra.workspacesLidos += 1;
     let fila;
-    try { fila = JSON.parse(fsImpl.readFileSync(filaPath, "utf8")); } catch {
+    try {
+      const textoFila = fsImpl.readFileSync(filaPath, "utf8");
+      resumoExtra.bytesFilaJsonLidos += Buffer.byteLength(textoFila || "", "utf8");
+      fila = JSON.parse(textoFila);
+    } catch {
       resumoExtra.filasInvalidas += 1;
       continue;
     }
@@ -693,12 +770,19 @@ function auditarFilaJson(opcoes = {}) {
   }
 
   const resumo = criarResumoOrigem("fila_json", "fila_json", registros, limite);
+  resumoExtra.duracaoFilaJsonMs = Date.now() - inicioFilaJsonMs;
   medidorAutoCleanFila.fim({
     ok: true,
-    autoCleanShadowBytesLidos: resumoExtra.bytesTotais,
+    autoCleanShadowBytesLidos: resumoExtra.bytesFilaJsonLidos,
     autoCleanShadowBytesSerializados: registros.reduce((soma, item) => soma + Number(item.bytesEstimados || 0), 0),
     autoCleanItensLidos: resumoExtra.totalItens,
-    autoCleanWorkspaces: resumoExtra.workspacesLidos
+    autoCleanWorkspaces: resumoExtra.workspacesDeepRead,
+    workspacesVistos: resumoExtra.workspacesVistos,
+    workspacesPulados: resumoExtra.workspacesPulados,
+    workspacesStatOnly: resumoExtra.workspacesStatOnly,
+    workspacesDeepRead: resumoExtra.workspacesDeepRead,
+    bytesFilaJsonLidos: resumoExtra.bytesFilaJsonLidos,
+    duracaoFilaJsonMs: resumoExtra.duracaoFilaJsonMs
   });
   return {
     ...resumo,
@@ -1314,19 +1398,29 @@ function listarWorkspacesFila(dataDir, fsImpl = fs) {
   }
 }
 
-function lerUsuariosIdsAutoClean(dataDir, fsImpl = fs) {
+function lerUsuariosAutoClean(dataDir, fsImpl = fs) {
   const usuariosPath = path.join(dataDir, "usuarios.json");
   try {
     if (!fsImpl.existsSync(usuariosPath)) return null;
     const usuarios = JSON.parse(fsImpl.readFileSync(usuariosPath, "utf8"));
-    return new Set(
-      (Array.isArray(usuarios) ? usuarios : [])
-        .map(usuario => String(usuario?.id || "").trim())
-        .filter(Boolean)
-    );
+    const porId = new Map();
+    for (const usuario of Array.isArray(usuarios) ? usuarios : []) {
+      const id = String(usuario?.id || "").trim();
+      if (!id) continue;
+      porId.set(id, {
+        id,
+        ativo: usuario?.ativo === false ? false : usuario?.ativo === true ? true : null
+      });
+    }
+    return { ids: new Set(porId.keys()), porId };
   } catch {
     return null;
   }
+}
+
+function lerUsuariosIdsAutoClean(dataDir, fsImpl = fs) {
+  const usuarios = lerUsuariosAutoClean(dataDir, fsImpl);
+  return usuarios?.ids || null;
 }
 
 function detectarOrphanWorkspacesAutoClean(opcoes = {}) {
