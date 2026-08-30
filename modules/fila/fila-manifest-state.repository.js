@@ -780,6 +780,26 @@ async function registrarLegacySyncDuravel(clienteId = "admin", dados = {}, deps 
   }, deps);
 }
 
+async function invalidarAuthorityReady(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  return comTransacao(async (client) => {
+    await inicializarSchemaQueueManifestState(client);
+    const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    return atualizarState(client, {
+      clienteId: cliente,
+      vivaGeneration: atual.vivaGeneration,
+      durableCheckpointGeneration: atual.durableCheckpointGeneration,
+      dirtyGeneration: atual.dirtyGeneration,
+      vivaFileProof: atual.vivaFileProof,
+      legacyFileProof: atual.legacyFileProof,
+      pendingCheckpointRevision: atual.pendingCheckpointRevision || null,
+      pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
+      pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
+      authorityReady: false
+    }, dados.motivo || "authority_ready_invalidada");
+  }, deps);
+}
+
 async function lerStateObservacional(clienteId = "admin", deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const pool = poolPadrao(deps);
@@ -893,7 +913,8 @@ async function avaliarAutoridadeRecovery(clienteId = "admin", dados = {}, deps =
         fallbackMtime: true,
         motivo: validacao?.motivo || "proof_invalida",
         clienteId: cliente,
-        state
+        state,
+        validacao
       };
     }
 
@@ -938,6 +959,7 @@ module.exports = {
   lerStateObservacional,
   normalizarStateDb,
   prepararReadinessAutoridade,
+  invalidarAuthorityReady,
   registrarLegacySyncDuravel,
   registrarMutacaoDuravel,
   reconciliarEstadosMonotonico,

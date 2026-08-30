@@ -453,6 +453,48 @@ function aguardarFilaAsync() {
 
   {
     const pool = criarPoolFake();
+    const cliente = "cliente_invalidar_ready";
+    await repo.registrarLegacySyncDuravel(cliente, {
+      motivo: "executor_salvar_alterada",
+      escreverArquivo: () => ({
+        ok: true,
+        legacyFileProof: {
+          proofVersion: 1,
+          clienteId: cliente,
+          arquivo: "fila.json",
+          generation: 1,
+          fileRevision: "legacy_rev_ready",
+          size: 123,
+          mtimeMs: 456,
+          publishedAt: "2026-08-29T00:00:00.000Z"
+        }
+      })
+    }, { pool });
+    await repo.prepararReadinessAutoridade(cliente, {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 1,
+          durableCheckpointGeneration: 1,
+          dirtyGeneration: null
+        }
+      })
+    }, { pool });
+    const pronto = await repo.lerStateObservacional(cliente, { pool });
+    const invalidado = await repo.invalidarAuthorityReady(cliente, {
+      motivo: "salvarFila_sem_proof"
+    }, { pool });
+
+    assert.strictEqual(pronto.state.authorityReady, true);
+    assert.strictEqual(invalidado.state.vivaGeneration, 1, "invalidacao nao altera viva");
+    assert.strictEqual(invalidado.state.durableCheckpointGeneration, 1, "invalidacao nao altera durable");
+    assert.strictEqual(invalidado.state.dirtyGeneration, null, "invalidacao nao inventa dirty quando generation ja estava duravel");
+    assert.strictEqual(invalidado.state.authorityReady, false, "rewrite sem proof invalida readiness");
+  }
+
+  {
+    const pool = criarPoolFake();
     const sync = await repo.registrarLegacySyncDuravel("cliente_legacy_sync_stale", {
       motivo: "executor_salvar_alterada",
       escreverArquivo: () => ({

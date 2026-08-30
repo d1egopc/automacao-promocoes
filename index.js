@@ -2576,6 +2576,9 @@ async function sincronizarItemFilaVivaAposMutacao(clienteId = "admin", item = {}
     vivaStatusUpdateCount: resultado.atualizouViva ? 1 : 0,
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
+  if (opcoes.publicarLegacyProof === true && resultado.legacyFileProofOk !== true) {
+    await invalidarAuthorityReadyV2(cliente, `${motivo}_legacy_proof_falhou`);
+  }
   return { ...resultado, motivoSync: motivo, item: itemSincronizado };
 }
 
@@ -2593,7 +2596,51 @@ async function removerItemFilaVivaAposMutacao(clienteId = "admin", item = {}, mo
   registrarMetricasFilaV22C(cliente, {
     vivaRemovalCount: resultado.removeuDaViva ? 1 : 0
   });
+  if (opcoes.publicarLegacyProof === true && resultado.legacyFileProofOk !== true) {
+    await invalidarAuthorityReadyV2(cliente, `${motivo}_legacy_proof_falhou`);
+  }
   return { ...resultado, motivoSync: motivo };
+}
+
+async function invalidarAuthorityReadyV2(clienteId = "admin", motivo = "legacy_rewrite_sem_proof") {
+  const cliente = String(clienteId || "admin");
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return { ok: true, pulou: true, motivo: "v2_desabilitada" };
+  }
+  if (typeof filaOperacionalV2.invalidarAuthorityReadyPorRewriteLegado !== "function") {
+    return { ok: false, motivo: "invalidacao_authority_indisponivel" };
+  }
+
+  try {
+    return await filaOperacionalV2.invalidarAuthorityReadyPorRewriteLegado(cliente, {
+      motivo,
+      evento: "db_legacy_rewrite_sem_proof"
+    }, {
+      agora: Date.now(),
+      logger: console
+    });
+  } catch (erro) {
+    console.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
+      versao: 1,
+      evento: "db_legacy_rewrite_sem_proof",
+      clienteId: cliente,
+      resultado: "db_indisponivel",
+      motivo: "legacy_rewrite_invalidation_error",
+      erro: erro?.message || "erro_invalidar_authority_ready"
+    }));
+    return { ok: false, motivo: "legacy_rewrite_invalidation_error", erro: erro?.message || "" };
+  }
+}
+
+function registrarRewriteLegadoSemProofV2(clienteId = "admin", motivo = "salvarFila", opcoes = {}) {
+  if (opcoes.v2LegacyProofPolicy === "caller_proof" || opcoes.invalidarAuthorityReadyV2 === false) {
+    return { ok: true, pulou: true, motivo: "proof_legado_tratado_pelo_caller" };
+  }
+
+  const cliente = String(clienteId || "admin");
+  Promise.resolve(invalidarAuthorityReadyV2(cliente, `${motivo || "salvarFila"}_sem_legacy_proof`)).catch(() => {});
+
+  return { ok: true, agendado: true, motivo: "authority_ready_invalidation_agendada" };
 }
 
 function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
@@ -2699,6 +2746,7 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
         motivo
       });
     }
+    registrarRewriteLegadoSemProofV2(clienteId, motivo, opcoes);
   }
   return salvou;
   });
@@ -3419,7 +3467,7 @@ async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila =
       return { ok: false, motivo, itemFila: itemFinal };
     }
 
-    const salvou = salvarFila(cliente);
+    const salvou = salvarFila(cliente, { motivo: "engine_distributor_write" });
 
     if (!salvou) {
       const erroFila = erroSalvarFilaCliente(cliente);
@@ -8057,7 +8105,12 @@ async function processarFila(clienteIdAlvo = null) {
   };
   const salvarFilaSeAlterada = async (cliente = clienteFila) => {
     if (!filaAlterada) return false;
-    const salvou = salvarFila(cliente);
+    const salvou = salvarFila(cliente, oferta ? {
+      motivo: "executor_salvar_alterada",
+      v2LegacyProofPolicy: "caller_proof"
+    } : {
+      motivo: "executor_salvar_alterada"
+    });
     if (salvou && oferta) {
       await sincronizarItemFilaVivaAposMutacao(cliente, oferta, "executor_salvar_alterada", {
         publicarLegacyProof: true
@@ -10587,7 +10640,10 @@ app.delete("/fila/item/:id", auth, async (req, res) => {
   }
 
   const removido = fila.splice(index, 1);
-  const salvouLegado = salvarFila(clienteId);
+  const salvouLegado = salvarFila(clienteId, {
+    motivo: "rota_remover_item_id",
+    v2LegacyProofPolicy: "caller_proof"
+  });
   await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_item_id", {
     publicarLegacyProof: salvouLegado === true
   });
@@ -10648,7 +10704,10 @@ app.delete("/fila/:index", auth, async (req, res) => {
   const removido = fila.splice(resolucaoIndice.indexReal, 1);
   filaStore.removerItem(removido[0]);
 
-  const salvouLegado = salvarFila(clienteId);
+  const salvouLegado = salvarFila(clienteId, {
+    motivo: "rota_remover_indice",
+    v2LegacyProofPolicy: "caller_proof"
+  });
   await removerItemFilaVivaAposMutacao(clienteId, removido[0], "rota_remover_indice", {
     publicarLegacyProof: salvouLegado === true
   });
@@ -10687,7 +10746,10 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
   delete oferta.proximaTentativaEnvioEm;
   oferta.reprocessadaEm = new Date().toISOString();
 
-  const salvouLegado = salvarFila(clienteId);
+  const salvouLegado = salvarFila(clienteId, {
+    motivo: "rota_reprocessar",
+    v2LegacyProofPolicy: "caller_proof"
+  });
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
     permitirRegressaoStatus: true,
     publicarLegacyProof: salvouLegado === true
@@ -12819,7 +12881,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
 
   if (!analiseDestinos.compativeis.length) {
     marcarOfertaRetida(oferta, analiseDestinos.motivoRetencao);
-    const salvouLegado = salvarFila(clienteId);
+    const salvouLegado = salvarFila(clienteId, {
+      motivo: "enviar_agora_retida",
+      v2LegacyProofPolicy: "caller_proof"
+    });
     await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_retida", {
       publicarLegacyProof: salvouLegado === true
     });
@@ -12938,7 +13003,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       : pulouPorLimiteDiario
         ? "Aguardando limite diario do destino"
         : "Nenhum destino confirmou envio manual";
-    const salvouLegado = salvarFila(clienteId);
+    const salvouLegado = salvarFila(clienteId, {
+      motivo: "enviar_agora_pendente",
+      v2LegacyProofPolicy: "caller_proof"
+    });
     await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_pendente", {
       permitirRegressaoStatus: true,
       publicarLegacyProof: salvouLegado === true
@@ -12967,7 +13035,10 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     data: oferta.enviadoEm
   });
 
-  const salvouLegado = salvarFila(clienteId);
+  const salvouLegado = salvarFila(clienteId, {
+    motivo: "enviar_agora_enviado",
+    v2LegacyProofPolicy: "caller_proof"
+  });
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "enviar_agora_enviado", {
     publicarLegacyProof: salvouLegado === true
   });

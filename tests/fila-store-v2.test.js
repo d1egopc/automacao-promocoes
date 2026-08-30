@@ -1737,7 +1737,7 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
         if (typeof dados.validarEstadoFisico === "function") {
           const validacao = await dados.validarEstadoFisico({ clienteId, state });
           if (validacao?.ok !== true) {
-            return { ok: true, conclusiva: false, fallbackMtime: true, motivo: validacao?.motivo || "proof_invalida", state };
+            return { ok: true, conclusiva: false, fallbackMtime: true, motivo: validacao?.motivo || "proof_invalida", state, validacao };
           }
         }
         return {
@@ -1750,6 +1750,22 @@ function criarManifestStateRepositoryFake(opcoes = {}) {
           maisNova: state.vivaGeneration > state.durableCheckpointGeneration,
           state
         };
+      });
+    },
+    async invalidarAuthorityReady(clienteId, dados = {}) {
+      chamadas.push({ tipo: "invalidar_authority_ready", clienteId });
+      return serializar(clienteId, async () => {
+        const atual = normalizar(clienteId, states.get(clienteId));
+        const state = {
+          ...atual,
+          revision: atual.revision + 1,
+          authorityReady: false,
+          authorityReadyGeneration: null,
+          authorityReadyRevision: null,
+          authorityReadyAt: null
+        };
+        states.set(clienteId, state);
+        return { ok: true, motivo: dados.motivo || "authority_ready_invalidada", state };
       });
     }
   };
@@ -3098,6 +3114,132 @@ async function testarPromocaoLockPostgresOperacional() {
     assert.strictEqual(state.durableCheckpointGeneration, 2, "proof legado fresco permite fechar durable");
     assert.strictEqual(state.dirtyGeneration, null);
     assert.strictEqual(state.legacyFileProof.fileRevision, proof.fileRevision);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_rewrite_sem_proof_fail_closed";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente,
+      FILA_V2_RECOVERY_AUTORIDADE: "generation"
+    };
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 5,
+      durableCheckpointGeneration: 5,
+      dirtyGeneration: null,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA
+    });
+    const antes = repoFake.states.get(cliente);
+    const invalidacao = await filaOperacionalV2.invalidarAuthorityReadyPorRewriteLegado(cliente, {
+      motivo: "salvarFila_sem_proof"
+    }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1
+    });
+    const depois = repoFake.states.get(cliente);
+
+    assert.strictEqual(invalidacao.ok, true);
+    assert.strictEqual(depois.vivaGeneration, antes.vivaGeneration, "invalidacao nao pode mexer na geracao viva");
+    assert.strictEqual(depois.durableCheckpointGeneration, antes.durableCheckpointGeneration, "durable nao deve regredir nem avancar");
+    assert.strictEqual(depois.authorityReady, false, "rewrite sem proof fica fail-closed");
+    assert.strictEqual(repoFake.chamadas.some(chamada => chamada.tipo === "invalidar_authority_ready"), true);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_rewrite_com_proof_renovado";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente,
+      FILA_V2_RECOVERY_AUTORIDADE: "generation"
+    };
+    const item = oferta("rewrite_proof", { clienteId: cliente });
+    await filaOperacionalV2.inserirItemFilaVivaCoordenado(cliente, item, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA
+    });
+    const itemAtualizado = { ...item, status: "processando", statusDetalhe: "primeiro save" };
+    storage.writeClienteJson(cliente, "fila.json", [itemAtualizado]);
+    const primeira = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, itemAtualizado, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 1,
+      publicarLegacyProof: true
+    });
+    const proofPrimeiro = JSON.parse(fs.readFileSync(
+      storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO),
+      "utf8"
+    ));
+    const itemSegundo = { ...itemAtualizado, statusDetalhe: "segundo save muda tamanho fisico" };
+    storage.writeClienteJson(cliente, "fila.json", [itemSegundo]);
+    const segunda = await filaOperacionalV2.atualizarItemFilaVivaCoordenado(cliente, itemSegundo, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      writeClienteJson: storage.writeClienteJson,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} },
+      agora: AGORA + 2,
+      publicarLegacyProof: true
+    });
+    const proofSegundo = JSON.parse(fs.readFileSync(
+      storage.getClienteJsonPath(cliente, filaOperacionalV2.FILA_LEGADA_PROOF_ARQUIVO),
+      "utf8"
+    ));
+    const statAtual = fs.statSync(storage.getClienteJsonPath(cliente, "fila.json"));
+    const state = repoFake.states.get(cliente);
+
+    assert.strictEqual(primeira.legacyFileProofOk, true);
+    assert.strictEqual(segunda.legacyFileProofOk, true);
+    assert.notStrictEqual(proofPrimeiro.fileRevision, proofSegundo.fileRevision, "cada publicacao deve ganhar revision propria");
+    assert.strictEqual(proofSegundo.size, statAtual.size, "proof renovado deve provar o arquivo final atual");
+    assert(Math.abs(proofSegundo.mtimeMs - statAtual.mtimeMs) <= 1, "proof renovado preserva validacao stat/mtime");
+    assert.strictEqual(state.durableCheckpointGeneration, state.vivaGeneration, "sync com proof fresco pode fechar durable");
+    assert.strictEqual(state.legacyFileProof.fileRevision, proofSegundo.fileRevision);
+  }
+
+  {
+    const storage = criarStorageTemporarioFilaV2();
+    const repoFake = criarManifestStateRepositoryFake();
+    const cliente = "cliente_stat_mismatch_detalhado";
+    const env = {
+      FILA_V2_OPERACIONAL_ROLLOUT: "canary",
+      FILA_V2_OPERACIONAL_CANARY_CLIENTES: cliente,
+      FILA_V2_RECOVERY_AUTORIDADE: "generation"
+    };
+    escreverEstadoGenerationAuthority(storage, repoFake, cliente, {
+      vivaGeneration: 7,
+      durableCheckpointGeneration: 7,
+      dirtyGeneration: null,
+      vivaMtime: AGORA,
+      legacyMtime: AGORA
+    });
+    fs.appendFileSync(storage.getClienteJsonPath(cliente, "fila.json"), "\n ");
+    const resultado = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, { contexto: "stat_mismatch" }, {
+      getClienteJsonPath: storage.getClienteJsonPath,
+      manifestStateRepository: repoFake,
+      env,
+      logger: { log: () => {} }
+    });
+
+    assert.strictEqual(resultado.autoridadeUsada, "mtime");
+    assert.strictEqual(resultado.motivo, "stat_mismatch");
+    assert.strictEqual(resultado.validacaoGeneration.arquivo, "fila.json");
+    assert.notStrictEqual(resultado.validacaoGeneration.proofSize, resultado.validacaoGeneration.statSize, "telemetria barata deve mostrar tamanho proof/stat");
   }
 
   {

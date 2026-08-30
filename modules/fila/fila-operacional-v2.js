@@ -368,7 +368,15 @@ function validarProofPublicado(clienteId = "admin", config = {}, deps = {}) {
   if (!stat.existe) return { ok: false, motivo: "arquivo_ausente" };
   if (Number(stat.size ?? stat.bytes) !== proofArquivo.size ||
       !mtimeCompatível(stat.mtimeMs, proofArquivo.mtimeMs)) {
-    return { ok: false, motivo: "stat_mismatch" };
+    return {
+      ok: false,
+      motivo: "stat_mismatch",
+      arquivo: config.arquivoDados,
+      proofSize: proofArquivo.size,
+      statSize: Number(stat.size ?? stat.bytes),
+      proofMtimeMs: proofArquivo.mtimeMs,
+      statMtimeMs: stat.mtimeMs
+    };
   }
 
   return { ok: true, proof: proofArquivo, stat };
@@ -992,6 +1000,31 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
     resultadoArquivo,
     resultadoManifesto
   };
+}
+
+async function invalidarAuthorityReadyPorRewriteLegado(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (!deveUsarManifestStatePostgres(cliente, deps)) {
+    return { ok: true, pulou: true, motivo: "manifest_state_desabilitado" };
+  }
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.invalidarAuthorityReady !== "function") {
+    return { ok: false, motivo: "repo_sem_invalidacao_authority_ready" };
+  }
+
+  const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
+  const resultadoDb = await repo.invalidarAuthorityReady(cliente, {
+    bootstrapManifest: bootstrap,
+    motivo: dados.motivo || "legacy_rewrite_sem_proof"
+  }, deps);
+
+  compararDbJsonManifestState(cliente, resultadoDb, bootstrap, {
+    evento: dados.evento || "db_legacy_rewrite_sem_proof",
+    motivo: resultadoDb?.motivo || dados.motivo || "legacy_rewrite_sem_proof",
+    agora: deps.agora || Date.now()
+  }, deps);
+
+  return resultadoDb;
 }
 
 function mesclarManifestoFilaV2(atual = {}, patch = {}, clienteId = "admin", agora = Date.now()) {
@@ -1692,6 +1725,7 @@ async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, 
 
   const resultado = resultadoMtime();
   resultado.motivo = decisaoGeneration?.motivo || "generation_inconclusiva";
+  resultado.validacaoGeneration = decisaoGeneration?.validacao || null;
   logRecoveryAuthority(deps.logger, {
     versao: 1,
     evento: "recovery_authority",
@@ -1705,7 +1739,11 @@ async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, 
     dbRevision: decisaoGeneration?.state?.revision ?? null,
     dbVivaGeneration: decisaoGeneration?.state?.vivaGeneration ?? null,
     dbDurableCheckpointGeneration: decisaoGeneration?.state?.durableCheckpointGeneration ?? null,
-    dbDirtyGeneration: decisaoGeneration?.state?.dirtyGeneration ?? null
+    dbDirtyGeneration: decisaoGeneration?.state?.dirtyGeneration ?? null,
+    proofSize: decisaoGeneration?.validacao?.proofSize ?? null,
+    statSize: decisaoGeneration?.validacao?.statSize ?? null,
+    proofMtimeMs: decisaoGeneration?.validacao?.proofMtimeMs ?? null,
+    statMtimeMs: decisaoGeneration?.validacao?.statMtimeMs ?? null
   }, deps.agora || Date.now());
   return resultado;
 }
@@ -3180,6 +3218,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     recuperarFilaVivaDoLegadoCoordenado: (clienteId, deps = {}) => recuperarFilaVivaDoLegadoCoordenado(clienteId, { ...opcoes, ...deps }),
     capturarTargetCheckpointCoordenado: (clienteId, dados = {}, deps = {}) => capturarTargetCheckpointCoordenado(clienteId, dados, { ...opcoes, ...deps }),
     confirmarCheckpointCoordenado: (clienteId, dados = {}, deps = {}) => confirmarCheckpointCoordenado(clienteId, dados, { ...opcoes, ...deps }),
+    invalidarAuthorityReadyPorRewriteLegado: (clienteId, dados = {}, deps = {}) => invalidarAuthorityReadyPorRewriteLegado(clienteId, dados, { ...opcoes, ...deps }),
     lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
     reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
@@ -3252,6 +3291,7 @@ module.exports = {
   executarEscritaFilaV2Coordenada,
   capturarTargetCheckpointCoordenado,
   confirmarCheckpointCoordenado,
+  invalidarAuthorityReadyPorRewriteLegado,
   prepararReadinessAutoridadeRecovery,
   avaliarRecoveryPeloManifesto,
   lerManifestoFilaV2,
