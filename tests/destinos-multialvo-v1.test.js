@@ -42,6 +42,20 @@ function cincoGrupos() {
 }
 
 {
+  const normalizado = multi.aplicarContratoMultiAlvoDestino(waDestino({
+    grupo: "alias_stale@g.us",
+    grupoId: "grupo_id_stale@g.us",
+    chatId: "chat_stale@g.us",
+    gruposWhatsapp: ["lista_stale@g.us"],
+    alvos: [{ grupoId: "alvo_oficial@g.us", nome: "Grupo Oficial" }]
+  }));
+  assert.strictEqual(normalizado.alvos.length, 1, "alvos explicitos continuam sendo a fonte canonica");
+  assert.strictEqual(normalizado.alvos[0].grupoId, "alvo_oficial@g.us");
+  assert.strictEqual(normalizado.grupo, "alvo_oficial@g.us", "alias legado grupo deve espelhar o alvo canonico");
+  assert.deepStrictEqual(normalizado.gruposWhatsapp, ["alvo_oficial@g.us"], "alias legado lista deve espelhar o alvo canonico");
+}
+
+{
   const normalizado = multi.aplicarContratoMultiAlvoDestino(discordDestino());
   assert.strictEqual(normalizado.alvos.length, 1, "destino legado Discord vira alvos[1]");
   assert.strictEqual(normalizado.alvos[0].channelId, "canal_1");

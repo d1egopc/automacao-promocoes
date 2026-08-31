@@ -43,6 +43,14 @@ const destinosPorCliente = {
       gruposWhatsapp: ["120363-off@g.us"]
     },
     {
+      id: "wa_power_off",
+      nome: "WA Power OFF",
+      tipo: "whatsapp",
+      ativo: false,
+      conexaoId: "sessao_a",
+      gruposWhatsapp: ["120363-power-off@g.us"]
+    },
+    {
       id: "dc_ok",
       nome: "Discord Ofertas",
       tipo: "discord",
@@ -302,6 +310,19 @@ function assertSemSegredos(valor) {
 
       assert.strictEqual(resposta.status, 400);
       assert.strictEqual(resposta.body.motivo, "manual_v2_destino_indisponivel");
+    }
+
+    {
+      const oferta = criarOferta("cliente_a", "oferta_power_off");
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/agendar`, "cliente_a", {
+        destinosIds: ["wa_power_off"],
+        dataHoraLocal: "2026-08-16T14:30",
+        timezone: "America/Sao_Paulo"
+      });
+
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "manual_v2_destino_indisponivel", "Power OFF nao deve ser agendavel");
+      assert.strictEqual(storage.buscarOfertaManualV2("cliente_a", oferta.id).status, "salva");
     }
 
     {

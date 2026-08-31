@@ -390,6 +390,18 @@ function criarRotasManualV2(deps = {}) {
         destinosIds.includes(destino.id)
       );
 
+      const todosDestinosUtilizaveis =
+        destinosEscolhidos.length === destinosIds.length &&
+        destinosEscolhidos.every((destino) => destino.utilizavel === true);
+      if (!todosDestinosUtilizaveis) {
+        return res.status(400).json({
+          ok: false,
+          erro: "manual_v2_destino_indisponivel",
+          motivo: "manual_v2_destino_indisponivel",
+          destinos: destinosEscolhidos
+        });
+      }
+
       storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
         status: "enviando"
       }, storageOptions);

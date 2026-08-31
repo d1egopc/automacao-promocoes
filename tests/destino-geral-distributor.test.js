@@ -104,6 +104,16 @@ function contexto(destinosWorkspace) {
     assert.strictEqual(inativoMaisRestrito.ok, false);
     assert.strictEqual(inativoMaisRestrito.motivo, "categoria_incompativel", "destino inativo nao deve mascarar rejeicao ativa por categoria");
 
+    const semPowerExplicito = destinos.analisarDestinoOferta(
+      destino({ ativo: undefined, todasCategorias: true, categorias: ["geral"] }),
+      oferta({ categoria: "Diversos" })
+    );
+    assert.strictEqual(semPowerExplicito.aceita, false, "somente ativo=true liga o destino");
+    assert.strictEqual(semPowerExplicito.motivo, "destino_inativo");
+    assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: true })), true);
+    assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: false })), false);
+    assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: undefined })), false);
+
     const categoriasOficiais = destinos.categoriasOficiaisDestinoNormalizadas();
     assert(categoriasOficiais.length > 5, "lista oficial de categorias selecionaveis deve estar disponivel");
     assert.strictEqual(destinos.listaCategoriasEhSnapshotCompleto(categoriasOficiais), true);

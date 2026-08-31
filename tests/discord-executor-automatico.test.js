@@ -65,6 +65,7 @@ assert.ok(blocoTelegram.includes("https://api.telegram.org/bot"), "Telegram cont
 assert.ok(!blocoTelegram.includes("enviarDiscord"), "Telegram nao deve conhecer sender Discord");
 
 const blocoDiagnostico = blocoEntre("function diagnosticarDisponibilidadeEnvioWorkspace", "function logEnvioDestinoDebug");
+assert.ok(blocoDiagnostico.includes(".filter(destinosUtils.destinoPowerAtivo)"), "Diagnostico automatico deve usar Power canonico antes de disponibilidade/cadencia");
 assert.ok(blocoDiagnostico.includes("const destinosDiscord = destinosBase.filter(destinoEhDiscord)"), "Diagnostico deve reconhecer Discord explicitamente");
 assert.ok(blocoDiagnostico.includes("diagnosticarDestinoDiscordAptoEnvio"), "Diagnostico nao deve considerar Discord apto apenas por existir");
 assert.ok(blocoDiagnostico.includes('tipo !== "discord"'), "Discord deve sair de destinosOutros genericos");

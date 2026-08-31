@@ -2,8 +2,12 @@ const {
   buscarOfertaManualV2
 } = require("./manual-offers.storage");
 const {
-  listarDestinosManuaisV2Async
+  listarDestinosManuaisV2Async,
+  listarDestinosCliente
 } = require("./manual-destinations");
+const {
+  normalizarAlvosDestino
+} = require("../../utils/destinos-multialvo");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -32,25 +36,28 @@ function nomeDestino(destino = {}) {
   return texto(destino.nome || destino.titulo || destino.label || destino.destino || destinoId(destino));
 }
 
-function listarDestinosCliente(destinosPorCliente = {}, clienteId = "admin") {
-  const origem = destinosPorCliente?.[clienteId];
-  if (Array.isArray(origem)) return origem;
-  if (origem && typeof origem === "object") {
-    return Object.values(origem).flatMap((item) => Array.isArray(item) ? item : []);
-  }
-  return [];
-}
-
 function conexaoWhatsapp(destino = {}) {
-  return texto(destino.conexaoId || destino.sessao || destino.sessaoId || destino.idSessao);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "whatsapp") || {};
+  return texto(alvo.conexaoId || alvo.sessao || destino.conexaoId || destino.sessao || destino.sessaoId || destino.idSessao);
 }
 
 function grupoWhatsapp(destino = {}) {
-  return texto(destino.grupo || destino.chatId || destino.canal || lista(destino.gruposWhatsapp)[0]);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "whatsapp") || {};
+  return texto(alvo.grupoId || destino.grupo || destino.grupoId || destino.chatId || destino.canal || lista(destino.gruposWhatsapp)[0]);
+}
+
+function gruposWhatsappDestino(destino = {}) {
+  const alvos = normalizarAlvosDestino(destino)
+    .filter((item) => item.tipo === "whatsapp")
+    .map((item) => texto(item.grupoId))
+    .filter(Boolean);
+  if (alvos.length) return alvos;
+  return [grupoWhatsapp(destino)].filter(Boolean);
 }
 
 function canalDiscord(destino = {}) {
-  return texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "discord") || {};
+  return texto(alvo.channelId || alvo.canalId || destino.channelId || destino.canalId || destino.grupo || destino.canal);
 }
 
 function imagemDiscordManual(oferta = {}) {
@@ -189,19 +196,21 @@ function montarMensagemManualV2(oferta = {}, destino = {}, deps = {}) {
 
 async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
   const conexaoId = conexaoWhatsapp(destino);
-  const grupo = grupoWhatsapp(destino);
+  const grupos = gruposWhatsappDestino(destino);
   const sock = deps.sessoes?.[conexaoId];
   if (!sock) throw new Error("Sessao WhatsApp desconectada");
-  if (!grupo) throw new Error("Grupo WhatsApp nao definido");
+  if (!grupos.length) throw new Error("Grupo WhatsApp nao definido");
   if (typeof deps.enviarWhatsApp !== "function") throw new Error("Primitiva WhatsApp indisponivel");
 
-  await deps.enviarWhatsApp({
-    sock,
-    grupo,
-    mensagem,
-    midia: texto(oferta.imagem) ? { origem: "imagemUrl", imagemUrl: texto(oferta.imagem) } : null,
-    corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
-  });
+  for (const grupo of grupos) {
+    await deps.enviarWhatsApp({
+      sock,
+      grupo,
+      mensagem,
+      midia: texto(oferta.imagem) ? { origem: "imagemUrl", imagemUrl: texto(oferta.imagem) } : null,
+      corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
+    });
+  }
 }
 
 async function enviarTelegramManual({ destino, mensagem, deps, clienteId }) {

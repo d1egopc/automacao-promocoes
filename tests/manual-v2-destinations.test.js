@@ -430,6 +430,48 @@ function assertSemSegredos(destinos) {
     destinosPorCliente: {
       cliente_a: [
         {
+          id: "wa_sem_power",
+          nome: "WA Sem Power Explicito",
+          tipo: "whatsapp",
+          conexaoId: "sessao_a",
+          gruposWhatsapp: ["120363@g.us"]
+        },
+        {
+          id: "wa_alias_stale",
+          nome: "WA Alvos Oficiais",
+          tipo: "whatsapp",
+          ativo: true,
+          conexaoId: "sessao_a",
+          grupo: "stale@g.us",
+          gruposWhatsapp: ["stale@g.us"],
+          alvos: [{ grupoId: "alvo-oficial@g.us", nome: "Grupo Oficial" }]
+        }
+      ]
+    },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  const semPower = destinos.find((item) => item.id === "wa_sem_power");
+  assert.strictEqual(semPower.ativo, false, "Power canonico exige ativo === true");
+  assert.strictEqual(semPower.utilizavel, false, "Destino sem Power true nao deve ser elegivel no Manual");
+  assert.strictEqual(semPower.motivoIndisponivel, "Destino inativo");
+
+  const oficial = destinos.find((item) => item.id === "wa_alias_stale");
+  assert.strictEqual(oficial.utilizavel, true);
+  assert.strictEqual(oficial.identificacaoVisual, "alvo-oficial@g.us", "alvos oficiais prevalecem sobre aliases stale");
+}
+
+{
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: {
+      cliente_a: [
+        {
           id: "dc_ofertas_gerais",
           nome: "Discord Ofertas Gerais",
           tipo: "discord",

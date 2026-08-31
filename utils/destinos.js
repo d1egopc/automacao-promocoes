@@ -200,8 +200,12 @@ function destinoAceitaOferta(destino, oferta, opcoes = {}) {
   return analisarDestinoOferta(destino, oferta, opcoes).aceita;
 }
 
+function destinoPowerAtivo(destino = {}) {
+  return Boolean(destino && typeof destino === "object" && destino.ativo === true);
+}
+
 function analisarDestinoOferta(destino, oferta, opcoes = {}) {
-  if (!destino?.ativo) {
+  if (!destinoPowerAtivo(destino)) {
     return {
       aceita: false,
       motivo: "destino_inativo",
@@ -356,6 +360,7 @@ module.exports = {
   destinoAceitaTodasCategorias,
   normalizarDestinoContratoCategorias,
   expandirMarketplacesDestino,
+  destinoPowerAtivo,
   categoriaPermitidaNoDestino,
   analisarDestinoOferta,
   destinoAceitaOferta,

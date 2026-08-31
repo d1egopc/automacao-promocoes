@@ -1,3 +1,10 @@
+const {
+  destinoPowerAtivo
+} = require("../../utils/destinos");
+const {
+  normalizarAlvosDestino
+} = require("../../utils/destinos-multialvo");
+
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -22,11 +29,13 @@ function nomeDestino(destino = {}) {
 }
 
 function conexaoWhatsapp(destino = {}) {
-  return texto(destino.conexaoId || destino.sessao || destino.sessaoId || destino.idSessao);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "whatsapp") || {};
+  return texto(alvo.conexaoId || alvo.sessao || destino.conexaoId || destino.sessao || destino.sessaoId || destino.idSessao);
 }
 
 function grupoWhatsapp(destino = {}) {
-  return texto(destino.grupo || destino.chatId || destino.canal || lista(destino.gruposWhatsapp)[0]);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "whatsapp") || {};
+  return texto(alvo.grupoId || destino.grupo || destino.grupoId || destino.chatId || destino.canal || lista(destino.gruposWhatsapp)[0]);
 }
 
 function chatIdDestino(destino = {}) {
@@ -42,11 +51,13 @@ function chatIdDestino(destino = {}) {
 }
 
 function conexaoDiscord(destino = {}) {
-  return texto(destino.conexaoId || destino.sessao || destino.idConexao);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "discord") || {};
+  return texto(alvo.conexaoId || alvo.sessao || destino.conexaoId || destino.sessao || destino.idConexao);
 }
 
 function canalDiscord(destino = {}) {
-  return texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
+  const alvo = normalizarAlvosDestino(destino).find((item) => item.tipo === "discord") || {};
+  return texto(alvo.channelId || alvo.canalId || destino.channelId || destino.canalId || destino.grupo || destino.canal);
 }
 
 function chavesTelegram(destino = {}) {
@@ -211,7 +222,7 @@ function destinoVisualSeguro(destino = {}, contexto = {}) {
 
 function motivoIndisponivel(destino = {}, contexto = {}) {
   const tipo = tipoDestino(destino);
-  if (destino.ativo === false) return "Destino inativo";
+  if (!destinoPowerAtivo(destino)) return "Destino inativo";
 
   if (tipo === "whatsapp") {
     if (!planoPermite(contexto.plano, "whatsapp")) return "Canal indisponivel no plano atual";
@@ -261,7 +272,7 @@ function sanitizarDestinoManualV2(destino = {}, contexto = {}) {
     id,
     nome: nomeDestino(destino),
     tipo: tipoDestino(destino),
-    ativo: destino.ativo !== false,
+    ativo: destinoPowerAtivo(destino),
     utilizavel: Boolean(id && !motivo),
     motivoIndisponivel: id ? motivo : "Destino sem identificador",
     identificacaoVisual: destinoVisualSeguro(destino, contexto)
@@ -351,6 +362,7 @@ async function listarDestinosManuaisV2Async(clienteId = "admin", deps = {}) {
 module.exports = {
   listarDestinosManuaisV2,
   listarDestinosManuaisV2Async,
+  listarDestinosCliente,
   resolverContextoDiscordManualV2,
   sanitizarDestinoManualV2
 };

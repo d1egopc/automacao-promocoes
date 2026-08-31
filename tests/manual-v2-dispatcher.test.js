@@ -49,6 +49,39 @@ const destinosPorCliente = {
       gruposWhatsapp: ["120363@g.us"]
     },
     {
+      id: "wa_stale_alias",
+      nome: "WA Alvo Oficial",
+      tipo: "whatsapp",
+      ativo: true,
+      conexaoId: "sessao_a",
+      grupo: "stale@g.us",
+      gruposWhatsapp: ["stale@g.us"],
+      alvos: [{ grupoId: "alvo-oficial@g.us", nome: "Grupo Oficial" }]
+    },
+    {
+      id: "wa_multi",
+      nome: "WA Multi",
+      tipo: "whatsapp",
+      ativo: true,
+      conexaoId: "sessao_a",
+      grupo: "stale-multi@g.us",
+      alvos: [
+        { grupoId: "g1@g.us" },
+        { grupoId: "g2@g.us" },
+        { grupoId: "g3@g.us" },
+        { grupoId: "g4@g.us" },
+        { grupoId: "g5@g.us" }
+      ]
+    },
+    {
+      id: "wa_power_off",
+      nome: "WA Power OFF",
+      tipo: "whatsapp",
+      ativo: false,
+      conexaoId: "sessao_a",
+      gruposWhatsapp: ["off@g.us"]
+    },
+    {
       id: "wa_down",
       nome: "WA Desconectado",
       tipo: "whatsapp",
@@ -268,6 +301,50 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.debitos[0].clienteId, "cliente_a");
     assert.ok(chamadas.wa[0].mensagem.includes("Oferta Manual A"));
     assertSemSegredos(retorno);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_stale_alias"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.enviados, 1);
+    assert.strictEqual(chamadas.wa.length, 1);
+    assert.strictEqual(chamadas.wa[0].grupo, "alvo-oficial@g.us", "Manual deve usar alvos oficiais antes de aliases stale");
+    assert.strictEqual(chamadas.debitos.length, 1);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_multi"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.enviados, 1, "resultado permanece por destino logico");
+    assert.strictEqual(chamadas.wa.length, 5, "fanout fisico deve enviar para todos os 5 alvos");
+    assert.deepStrictEqual(chamadas.wa.map((item) => item.grupo), ["g1@g.us", "g2@g.us", "g3@g.us", "g4@g.us", "g5@g.us"]);
+    assert.strictEqual(chamadas.debitos.length, 1, "credito permanece por destino logico");
+  }
+
+  {
+    const { deps, chamadas } = baseDeps();
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_power_off"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.resultados[0].erro, "Destino inativo");
+    assert.strictEqual(chamadas.wa.length, 0);
+    assert.strictEqual(chamadas.debitos.length, 0);
   }
 
   {

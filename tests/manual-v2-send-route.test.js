@@ -36,6 +36,14 @@ const destinosPorCliente = {
       ativo: true,
       conexaoId: "discord_a",
       channelId: "canal_discord"
+    },
+    {
+      id: "wa_power_off",
+      nome: "WA Power OFF",
+      tipo: "whatsapp",
+      ativo: false,
+      conexaoId: "sessao_a",
+      gruposWhatsapp: ["off@g.us"]
     }
   ],
   cliente_b: [
@@ -448,6 +456,19 @@ function criarOferta(clienteId, id, extra = {}) {
       assert.strictEqual(resposta.body.motivo, "manual_v2_destinos_obrigatorios");
       assert.strictEqual(chamadas.length, chamadasAntes);
       assert.strictEqual(storage.buscarOfertaManualV2("cliente_a", oferta.id).status, "salva");
+    }
+
+    {
+      const oferta = criarOferta("cliente_a", "oferta_power_off");
+      const chamadasAntes = chamadas.length;
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["wa_power_off"]
+      });
+
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "manual_v2_destino_indisponivel");
+      assert.strictEqual(chamadas.length, chamadasAntes, "Power OFF nao deve chamar dispatcher");
+      assert.strictEqual(storage.buscarOfertaManualV2("cliente_a", oferta.id).status, "salva", "Power OFF nao deve marcar enviando");
     }
 
     {

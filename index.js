@@ -7207,7 +7207,7 @@ function diagnosticarDisponibilidadeEnvioWorkspace(clienteId = "admin", opcoes =
   const destinosCompativeis = Array.isArray(opcoes.destinosCompativeis) ? opcoes.destinosCompativeis : [];
   const destinosBase = destinosCompativeis.length
     ? destinosCompativeis.map(item => item.destino || item).filter(Boolean)
-    : obterDestinosInteligentesCliente(clienteId, configCliente).filter(destino => destino?.ativo !== false);
+    : obterDestinosInteligentesCliente(clienteId, configCliente).filter(destinosUtils.destinoPowerAtivo);
 
   const destinosWhatsapp = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "whatsapp");
   const destinosTelegram = destinosBase.filter(destino => String(destino?.tipo || "").toLowerCase() === "telegram");
@@ -8944,7 +8944,7 @@ const motivosSemEnvio = [];
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
-const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter(destino => destino?.ativo !== false).length;
+const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter(destinosUtils.destinoPowerAtivo).length;
 let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
@@ -29725,7 +29725,7 @@ function avaliarPuloRapidoClienteFila(usuario = {}) {
   }
 
   const destinosRapidos = obterDestinosInteligentesCliente(clienteId, configCliente);
-  const temDestinoAtivoRapido = destinosRapidos.some(destino => destino?.ativo !== false);
+  const temDestinoAtivoRapido = destinosRapidos.some(destinosUtils.destinoPowerAtivo);
   if (!temDestinoAtivoRapido) {
     return { motivo: "sem_destino_ativo", pendentes: 0 };
   }

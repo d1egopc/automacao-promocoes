@@ -11,6 +11,9 @@ const {
   processarAgendamentosManuaisV2Cliente,
   limparLocksMemoriaManualV2
 } = require("../modules/manual-v2/manual-scheduler");
+const {
+  enviarOfertaManualV2
+} = require("../modules/manual-v2/manual-dispatcher");
 
 const NOW = "2026-08-15T12:00:00.000Z";
 const storageOptions = { now: () => NOW };
@@ -183,6 +186,60 @@ function assertSemSegredos(valor) {
     assert.strictEqual(persistida.agendamentoLockId || "", "");
     assert.strictEqual(persistida.agendamentoLockEm || "", "");
     assertSemSegredos(persistida);
+  }
+
+  {
+    const clienteId = "cliente_power_off";
+    const oferta = agendarOferta(clienteId, "oferta_power_off_runtime", "2026-08-15T11:55:00.000Z", {
+      destinosIds: ["destino_wa"],
+      destinosAgendados: [{
+        id: "destino_wa",
+        nome: "Grupo Ofertas",
+        tipo: "whatsapp",
+        ativo: true,
+        utilizavel: true,
+        identificacaoVisual: "Grupo Ofertas"
+      }]
+    });
+    const chamadas = [];
+    const resposta = await processarOfertaAgendadaManualV2({ clienteId, ofertaId: oferta.id }, depsScheduler(enviarOfertaManualV2, {
+      destinosPorCliente: {
+        [clienteId]: [{
+          id: "destino_wa",
+          nome: "Grupo Ofertas",
+          tipo: "whatsapp",
+          ativo: false,
+          conexaoId: "sessao_a",
+          gruposWhatsapp: ["120363@g.us"]
+        }]
+      },
+      sessoes: {
+        sessao_a: { id: "sock_a" }
+      },
+      statusSessao: {
+        sessao_a: "open"
+      },
+      plano: {
+        recursos: {
+          whatsapp: true
+        }
+      },
+      usuarioTemCreditos: () => true,
+      debitarCreditos: () => {
+        throw new Error("nao_deve_debitar_power_off");
+      },
+      montarMensagemOferta: () => "MSG",
+      enviarWhatsApp: async (payload) => {
+        chamadas.push(payload);
+      }
+    }));
+
+    assert.strictEqual(resposta.ok, false);
+    assert.strictEqual(chamadas.length, 0, "ON->OFF antes do horario nao pode enviar");
+    const persistida = storage.buscarOfertaManualV2(clienteId, oferta.id);
+    assert.strictEqual(persistida.status, "erro");
+    assert.strictEqual(persistida.envioManual.enviados, 0);
+    assert.strictEqual(persistida.envioManual.erroResumo, "Grupo Ofertas: Destino inativo");
   }
 
   {
