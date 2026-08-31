@@ -133,6 +133,17 @@ async function importarMercadoLivreManualV2(urlManual = "", opcoes = {}) {
     getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre
   });
+  if (!produto || typeof produto !== "object") {
+    return {
+      ok: false,
+      erro: "mercadolivre_importacao_sem_dados_confiaveis",
+      motivo: "mercadolivre_importacao_sem_dados_confiaveis",
+      aviso: "Nao foi possivel importar dados confiaveis do Mercado Livre.",
+      marketplaceDetectado: "mercadolivre",
+      parseOnly: true,
+      urlOriginal
+    };
+  }
   const dados = produto && typeof produto === "object" ? produto : {};
   const precoAnterior = precoAnteriorManualMercadoLivre(dados);
   const avisos = avisosMercadoLivre(dados, precoAnterior);

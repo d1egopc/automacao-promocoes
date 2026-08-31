@@ -79,9 +79,94 @@ async function testarPreservacaoCandidatosImagem() {
   assert.deepStrictEqual(produto.metadata.produto.pictures, produto.pictures);
 }
 
+async function testarCaptchaHttp200FailClosed() {
+  const html = `
+    <html>
+      <head><title>windows</title></head>
+      <body>
+        <h1>Verifique se voce e um robo</h1>
+        <script>window.__STATE__ = {"title":"windows"};</script>
+      </body>
+    </html>
+  `;
+
+  global.fetch = async () => ({
+    status: 200,
+    url: "https://www.mercadolivre.com.br/captcha/wall/logged?go=https%3A%2F%2Fproduto.mercadolivre.com.br%2FMLB-123-produto-real-_JM",
+    text: async () => html
+  });
+
+  const produto = await importarMercadoLivre("https://produto.mercadolivre.com.br/MLB-123-produto-real-_JM", "cliente_ml", {
+    getIntegracaoCliente: () => ({ credenciais: {} }),
+    gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/afiliado",
+    contextoEngine: { clienteId: "cliente_ml", jobId: "job_captcha" }
+  });
+
+  assert.strictEqual(produto, null, "captcha/wall HTTP 200 nao pode virar produto importado");
+}
+
+async function testarTituloTecnicoSemBloqueioFailClosed() {
+  const html = `
+    <html>
+      <head>
+        <meta property="og:title" content="Just a moment" />
+        <script type="application/ld+json">
+          {"@context":"https://schema.org","@type":"Product","name":"Just a moment","offers":{"price":"199.90"}}
+        </script>
+      </head>
+      <body><h1>Just a moment</h1></body>
+    </html>
+  `;
+
+  global.fetch = async () => ({
+    status: 200,
+    url: "https://produto.mercadolivre.com.br/MLB-456",
+    text: async () => html
+  });
+
+  const produto = await importarMercadoLivre("https://produto.mercadolivre.com.br/MLB-456", "cliente_ml", {
+    getIntegracaoCliente: () => ({ credenciais: {} }),
+    gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/afiliado",
+    contextoEngine: { clienteId: "cliente_ml", jobId: "job_titulo_tecnico" }
+  });
+
+  assert.strictEqual(produto, null, "titulo tecnico nao pode virar titulo de produto");
+}
+
+async function testarWindowsNaoViraTituloProduto() {
+  const html = `
+    <html>
+      <head>
+        <meta property="og:title" content="windows" />
+        <script type="application/ld+json">
+          {"@context":"https://schema.org","@type":"Product","name":"windows","offers":{"price":"199.90"}}
+        </script>
+      </head>
+      <body><h1>windows</h1></body>
+    </html>
+  `;
+
+  global.fetch = async () => ({
+    status: 200,
+    url: "https://produto.mercadolivre.com.br/MLB-789",
+    text: async () => html
+  });
+
+  const produto = await importarMercadoLivre("https://produto.mercadolivre.com.br/MLB-789", "cliente_ml", {
+    getIntegracaoCliente: () => ({ credenciais: {} }),
+    gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/afiliado",
+    contextoEngine: { clienteId: "cliente_ml", jobId: "job_windows" }
+  });
+
+  assert.strictEqual(produto, null, "windows nao pode virar titulo de produto Mercado Livre");
+}
+
 (async () => {
   try {
     await testarPreservacaoCandidatosImagem();
+    await testarCaptchaHttp200FailClosed();
+    await testarTituloTecnicoSemBloqueioFailClosed();
+    await testarWindowsNaoViraTituloProduto();
     console.log("mercadolivre-imagem-candidatos.test.js ok");
   } finally {
     global.fetch = originalFetch;

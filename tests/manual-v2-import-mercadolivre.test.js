@@ -151,6 +151,20 @@ function criarDeps(produto, chamadas = []) {
 }
 
 {
+  const resultado = await importarMercadoLivreManualV2(
+    "https://produto.mercadolivre.com.br/MLB-000",
+    criarDeps(null)
+  );
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "mercadolivre_importacao_sem_dados_confiaveis");
+  assert.strictEqual(resultado.marketplaceDetectado, "mercadolivre");
+  assert.strictEqual(resultado.parseOnly, true);
+  assert.strictEqual(resultado.titulo, undefined, "falha do importador nao pode preencher windows como titulo");
+  assert.strictEqual(resultado.imagem, undefined, "falha do importador nao pode inventar imagem");
+}
+
+{
   const arquivoManual = getClienteJsonPath("cliente_ml", "manual_ofertas_v2.json");
   const arquivoFila = getClienteJsonPath("cliente_ml", "fila.json");
   assert.strictEqual(fs.existsSync(arquivoManual), false, "adapter parse-only nao salva oferta manual");

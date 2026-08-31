@@ -323,7 +323,33 @@ function normalizarTextoMlImportador(texto = "") {
 
 function tituloGenericoMercadoLivre(titulo = "") {
   const normalizado = normalizarTextoMlImportador(titulo);
-  return !normalizado || normalizado === "produto mercado livre";
+  if (!normalizado || normalizado === "produto mercado livre") return true;
+  const chave = normalizado
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+  return [
+    "windows",
+    "justamoment",
+    "attentionrequired",
+    "accessdenied",
+    "verificacao",
+    "verifiquesevoceeumrobo",
+    "robotcheck",
+    "checkingyourbrowser"
+  ].includes(chave);
+}
+
+function respostaBloqueadaMercadoLivre({ status = 0, url = "", html = "" } = {}) {
+  const urlFinal = String(url || "");
+  const htmlRecebido = String(html || "");
+  return (
+    status === 403 ||
+    status === 429 ||
+    /(?:account-verification|login|\/captcha\/|\/captcha\b|\/wall\/|challenge|access[-_]?denied)/i.test(urlFinal) ||
+    /(?:account-verification|access denied|attention required|just a moment|robot check|checking your browser|captcha\/wall|verifique[^<]{0,80}rob[oô]?)/i.test(htmlRecebido)
+  );
 }
 
 function formatarPrecoMlImportador(numero = 0) {
@@ -667,11 +693,11 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       imagemOg ? "og:image" :
       imagemTwitter ? "twitter:image" :
       "nenhuma";
-    const bloqueioOperacional =
-      response.status === 403 ||
-      response.status === 429 ||
-      response.url.includes("account-verification") ||
-      response.url.includes("login");
+    const bloqueioOperacional = respostaBloqueadaMercadoLivre({
+      status: response.status,
+      url: response.url || url,
+      html
+    });
     const temBloqueioAuditoria = Boolean(
       bloqueioOperacional ||
       /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html)
@@ -859,6 +885,23 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       urlOriginal: url,
       urlFinal: response.url
     });
+
+    if (tituloGenericoMercadoLivre(produtoComFallbackRadar.titulo || produtoComFallbackRadar.nome || "")) {
+      console.log("[ML-IMPORTACAO-BLOQUEADA]", JSON.stringify({
+        clienteId: contextoEngine.clienteId || clienteIdAlvo,
+        jobId: contextoEngine.jobId || null,
+        urlOriginal: url,
+        urlFinal: response.url || url,
+        statusHttp: response.status,
+        motivo: "titulo_generico_sem_fonte_confiavel",
+        tituloExtraido: produtoComFallbackRadar.titulo || produtoComFallbackRadar.nome || ""
+      }));
+      perf.fim("bloqueado_titulo_generico", {
+        httpStatus: response.status,
+        urlFinal: response.url || url
+      });
+      return null;
+    }
 
     console.log("[ML-HTML-AUDITORIA]", JSON.stringify({
       clienteId: contextoEngine.clienteId || clienteIdAlvo,
