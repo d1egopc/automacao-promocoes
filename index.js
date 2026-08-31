@@ -281,6 +281,7 @@ const {
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
+const destinosCanonicos = require("./utils/destinos-canonicos");
 const integracoesUtils = require("./utils/integracoes");
 const cacheCopyInteligenteV1 = require("./modules/copy-inteligente/cache");
 const cacheCopyInteligenteV2 = require("./modules/copy-inteligente/cache-v2");
@@ -28023,10 +28024,11 @@ const limiteDestinos = isAdminMaster(req)
     config.destinosPorSessao = {};
   }
 
-  destinosPorCliente[clienteId] =
-  destinosPorCliente[clienteId] || {};
-
- destinosPorCliente[clienteId][id] = destinos;
+  destinosPorCliente[clienteId] = destinosCanonicos.atualizarDestinosCanonicosWorkspace(
+    destinosPorCliente?.[clienteId],
+    destinos,
+    { normalizarDestino: normalizarDestinoContrato }
+  );
 
  salvarDestinosClientes();
   console.log("[DESTINO]💾 Destinos salvos na config:", id, destinos);
@@ -28045,8 +28047,14 @@ app.get("/destinos/:id", (req, res) => {
   req.params.id
  );
 
+  const destinosCanonicosCliente = destinosCanonicos.listarDestinosCanonicosWorkspace(
+    destinosPorCliente?.[clienteId],
+    { normalizarDestino: normalizarDestinoContrato }
+  );
   const destinos =
-    normalizarDestinosContrato(destinosPorCliente?.[clienteId]?.[id] || []);
+    destinosCanonicosCliente.length
+      ? destinosCanonicosCliente
+      : normalizarDestinosContrato(destinosPorSessao?.[id] || []);
 
   return res.json({
     ok: true,

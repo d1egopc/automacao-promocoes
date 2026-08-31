@@ -7,6 +7,7 @@ const {
   listarDestinosManuaisV2
 } = require("../modules/manual-v2/manual-destinations");
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
+const destinosCanonicos = require("../utils/destinos-canonicos");
 
 const planoCompleto = {
   recursos: {
@@ -183,6 +184,117 @@ function assertSemSegredos(destinos) {
   for (const termo of ["SEGREDO", "botToken", "token", "secret", "cookies", "segredoInterno", "chat_ok", "chat_sem_config", "chat_b", "DISCORD_TOKEN_NAO_SAIR", "BOT_DISCORD_NAO_SAIR", "guild_a", "guild_nao_sair", "canal_ok", "canal_sem_send"]) {
     assert.ok(!texto.includes(termo), `retorno sanitizado nao pode conter ${termo}`);
   }
+}
+
+{
+  const origemCanonica = [
+    {
+      id: "op_geral",
+      nome: "OP GERAL",
+      tipo: "whatsapp",
+      ativo: true,
+      conexaoId: "sessao_a",
+      alvos: [{ grupoId: "op-geral@g.us" }]
+    },
+    {
+      id: "telegram_d1",
+      nome: "TELEGRAM D1EGOPC",
+      tipo: "telegram",
+      ativo: false,
+      telegramDestinos: ["chat_ok"]
+    },
+    {
+      id: "discord",
+      nome: "Discord",
+      tipo: "discord",
+      ativo: false,
+      conexaoId: "discord_a",
+      channelId: "canal_ok"
+    },
+    {
+      id: "discord_hw",
+      nome: "Discord Hardware",
+      tipo: "discord",
+      ativo: false,
+      conexaoId: "discord_a",
+      channelId: "canal_ok"
+    },
+    {
+      id: "diegopc_oficial",
+      nome: "DIEGOPC OFERTAS OFICIAL",
+      tipo: "whatsapp",
+      ativo: false,
+      conexaoId: "sessao_a",
+      alvos: [{ grupoId: "oficial@g.us" }]
+    }
+  ];
+  const atualizacaoSessao = origemCanonica.map((destino) => ({
+    ...destino,
+    ativo: destino.id !== "op_geral"
+  }));
+  const canonica = destinosCanonicos.atualizarDestinosCanonicosWorkspace(origemCanonica, atualizacaoSessao);
+  canonica.sessao_a = atualizacaoSessao;
+  const serializada = JSON.parse(JSON.stringify({ cliente_a: canonica })).cliente_a;
+  const destinos = listarDestinosManuaisV2("cliente_a", {
+    destinosPorCliente: { cliente_a: serializada },
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    plano: planoCompleto,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true })
+  });
+
+  assert.strictEqual(Array.isArray(canonica), true, "fonte canonica continua array serializavel");
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(serializada, "sessao_a"), false, "serializacao nao depende de propriedade sessao pendurada em Array");
+  assert.deepStrictEqual(
+    destinos.map((item) => [item.id, item.ativo, item.utilizavel]),
+    [
+      ["op_geral", false, false],
+      ["telegram_d1", true, true],
+      ["discord", true, true],
+      ["discord_hw", true, true],
+      ["diegopc_oficial", true, true]
+    ],
+    "Manual deve ler o mesmo Power persistido na colecao canonica apos update por destinoId"
+  );
+}
+
+{
+  const todosOn = ["op_geral", "telegram_d1", "discord", "discord_hw", "diegopc_oficial"].map((id) => ({
+    id,
+    nome: id,
+    tipo: id.startsWith("discord") ? "discord" : id.startsWith("telegram") ? "telegram" : "whatsapp",
+    ativo: true,
+    conexaoId: id.startsWith("discord") ? "discord_a" : "sessao_a",
+    channelId: "canal_ok",
+    telegramDestinos: ["chat_ok"],
+    gruposWhatsapp: ["grupo@g.us"]
+  }));
+  const todosOff = destinosCanonicos.atualizarDestinosCanonicosWorkspace(
+    todosOn,
+    todosOn.map((destino) => ({ ...destino, ativo: false }))
+  );
+  const opOnOutrosOff = destinosCanonicos.atualizarDestinosCanonicosWorkspace(
+    todosOff,
+    todosOff.map((destino) => ({ ...destino, ativo: destino.id === "op_geral" }))
+  );
+  const opAlternada = destinosCanonicos.atualizarDestinosCanonicosWorkspace(
+    destinosCanonicos.atualizarDestinosCanonicosWorkspace(opOnOutrosOff, [{ ...opOnOutrosOff[0], ativo: false }]),
+    [{ ...opOnOutrosOff[0], ativo: true }]
+  );
+
+  assert.ok(todosOn.every((destino) => destino.ativo === true), "todos ON continuam elegiveis quanto ao Power");
+  assert.ok(todosOff.every((destino) => destino.ativo === false), "todos OFF persistem OFF na colecao canonica");
+  assert.strictEqual(opOnOutrosOff.find((destino) => destino.id === "op_geral").ativo, true, "OP GERAL ON isolado permanece ON");
+  assert.ok(opOnOutrosOff.filter((destino) => destino.id !== "op_geral").every((destino) => destino.ativo === false), "outros destinos permanecem OFF");
+  assert.strictEqual(opAlternada.find((destino) => destino.id === "op_geral").ativo, true, "alternancia ON-OFF-ON persiste por destinoId");
+  assert.strictEqual(
+    destinosCanonicos.atualizarDestinosCanonicosWorkspace([], [{ nome: "Legado sem id", ativo: true }]).length,
+    1,
+    "destino legado sem id nao deve ser descartado silenciosamente"
+  );
 }
 
 {
@@ -627,6 +739,16 @@ async function request(server, clienteId = "cliente_a", plano = "") {
         assert.ok(!fonte.includes(termo), `Manual V2 destinos nao pode referenciar ${termo}`);
       }
     }
+
+    const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+    assert.ok(
+      indexFonte.includes("destinosCanonicos.atualizarDestinosCanonicosWorkspace("),
+      "POST /destinos/:id deve atualizar a fonte canonica do workspace"
+    );
+    assert.ok(
+      !indexFonte.includes("destinosPorCliente[clienteId][id] = destinos"),
+      "POST /destinos/:id nao pode pendurar sessao em Array"
+    );
 
     console.log("manual-v2-destinations.test.js ok");
   })
