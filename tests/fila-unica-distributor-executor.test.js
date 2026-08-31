@@ -320,6 +320,16 @@ assert(
   "reserva processando deve usar hot state do cliente no V2 conclusivo e preservar fila global como fallback"
 );
 
+assert(
+  processarFila.includes("let colecaoPosEnvioProcessamento = fila;") &&
+    processarFila.includes("colecaoPosEnvioProcessamento = (") &&
+    processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
+    processarFila.includes("relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId })") &&
+    processarFila.includes("finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {") &&
+    processarFila.includes("marcarErroEnvioFila(colecaoPosEnvioProcessamento, oferta, {"),
+  "pos-envio V2 conclusivo deve relocalizar, finalizar e marcar erro pelo hot state, preservando fila global como fallback"
+);
+
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"
@@ -961,12 +971,36 @@ try {
     "reserva por hot state do cliente nao deve alterar item de outro workspace"
   );
 
-  const finalizacao = filaOfertas.finalizarOfertaEnviadaFila(cacheExecutor, alvoEnvio, {
+  const relocalizacaoPosEnvio = filaOfertas.relocalizarOfertaFila(hotStateWolff, alvoEnvio, {
+    clienteId: wolff
+  });
+  assert.strictEqual(relocalizacaoPosEnvio.ok, true, "pos-envio deve relocalizar pelo hot state do cliente");
+  assert.strictEqual(
+    relocalizacaoPosEnvio.oferta,
+    alvoEnvio,
+    "hot state deve preservar a mesma referencia operacional selecionada/reservada"
+  );
+
+  alvoEnvio.destinosEstado = [{ chave: "whatsapp:destino_a", estado: "enviado", motivo: "envio_confirmado" }];
+  const finalizacao = filaOfertas.finalizarOfertaEnviadaFila(hotStateWolff, alvoEnvio, {
     clienteId: wolff,
     enviadoEm: "2026-08-08T18:06:00.000Z",
     statusDetalhe: "Enviada para 1 destino(s)"
   });
-  assert.strictEqual(finalizacao.ok, true, "executor deve finalizar o item relocalizado");
+  assert.strictEqual(finalizacao.ok, true, "executor deve finalizar o item relocalizado pelo hot state");
+  assert.strictEqual(
+    cacheExecutor.find(item => item.id === alvoEnvio.id && item.clienteId === wolff)?.status,
+    "enviado",
+    "finalizacao por hot state deve refletir nas mesmas referencias do cache executor"
+  );
+  assert.strictEqual(
+    cacheExecutor.find(item => item.clienteId === controle)?.status,
+    "pendente",
+    "finalizacao por hot state do cliente nao deve alterar outro workspace"
+  );
+  assert.strictEqual(alvoEnvio.destinosEstado[0].estado, "enviado", "destino enviado deve ser preservado");
+  assert.strictEqual(alvoEnvio.cupom, itemA.cupom, "cupom deve ser preservado na finalizacao");
+  assert.strictEqual(alvoEnvio.linkAfiliado, itemA.linkAfiliado, "link afiliado deve ser preservado na finalizacao");
   salvarOficial(wolff, cacheExecutor);
 
   const cacheAposEnvio = carregarOficial([], wolff);
@@ -987,6 +1021,52 @@ try {
     1,
     "restart deve recarregar pendentes persistidos"
   );
+
+  {
+    const parcial = criarItem(wolff, "wolff_parcial", {
+      destinosEstado: [{ chave: "whatsapp:destino_a", estado: "aguardando", motivo: "intervalo" }]
+    });
+    const outroClienteParcial = criarItem(controle, "controle_parcial");
+    const cacheParcial = [parcial, outroClienteParcial];
+    const hotStateParcial = [parcial];
+    const reservaParcial = filaOfertas.reservarOfertaProcessandoFila(hotStateParcial, parcial, {
+      clienteId: wolff,
+      agoraIso: "2026-08-08T18:07:00.000Z"
+    });
+    assert.strictEqual(reservaParcial.ok, true, "reserva parcial deve usar hot state");
+    parcial.status = "pendente";
+    parcial.processandoEm = "";
+    parcial.statusDetalhe = "Aguardando envio: intervalo";
+    assert.strictEqual(cacheParcial[0].status, "pendente", "item deve poder voltar a pendente apos destino futuro");
+    assert.strictEqual(
+      cacheParcial[0].destinosEstado[0].estado,
+      "aguardando",
+      "destino em intervalo deve permanecer preservado no mesmo objeto"
+    );
+    assert.strictEqual(cacheParcial[1].status, "pendente", "workspace B nao deve ser percorrido no hot state parcial");
+  }
+
+  {
+    const erro = criarItem(wolff, "wolff_erro", {
+      status: "processando",
+      destinosEstado: [{ chave: "telegram:destino_b", estado: "erro_definitivo", motivo: "falha_envio" }],
+      proximaTentativaEnvioEm: "2026-08-08T18:20:00.000Z"
+    });
+    const outroClienteErro = criarItem(controle, "controle_erro", { status: "processando" });
+    const hotStateErro = [erro];
+    const erroFila = filaOfertas.marcarErroEnvioFila(hotStateErro, erro, {
+      clienteId: wolff,
+      erro: "falha teste",
+      erroEm: "2026-08-08T18:08:00.000Z",
+      statusDetalhe: "Erro no envio: falha teste"
+    });
+    assert.strictEqual(erroFila.ok, true, "erro de envio deve ser marcado pelo hot state");
+    assert.strictEqual(erro.status, "erro", "status de erro deve ser preservado");
+    assert.strictEqual(erro.erro, "falha teste", "mensagem de erro/retry deve ser preservada");
+    assert.strictEqual(erro.destinosEstado[0].estado, "erro_definitivo", "destino em erro deve ser preservado");
+    assert.strictEqual(erro.proximaTentativaEnvioEm, "2026-08-08T18:20:00.000Z", "retry existente deve ser preservado");
+    assert.strictEqual(outroClienteErro.status, "processando", "erro por hot state nao deve alterar cliente B");
+  }
 
   let cacheProcessoRodando = carregarOficial([], wolff);
   assert.strictEqual(pendentes(cacheProcessoRodando, wolff).length, 1);

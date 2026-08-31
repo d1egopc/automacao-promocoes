@@ -8612,6 +8612,7 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
   const finalizarPerf = iniciarPerfBackground(`processar_fila:${clienteFila}`);
   let okPerf = true;
   let oferta = null;
+  let colecaoPosEnvioProcessamento = fila;
   let filaAlterada = false;
   const marcarFilaAlterada = () => {
     filaAlterada = true;
@@ -8726,6 +8727,10 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
     resumoFila.fase = "sanear_fila";
     await sanearExpiradosFila(clienteFila);
     const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
+    colecaoPosEnvioProcessamento = (
+      fonteClienteHotStateSelecao?.conclusiva === true &&
+      Array.isArray(fonteClienteHotStateSelecao.itens)
+    ) ? fonteClienteHotStateSelecao.itens : fila;
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila", {
       fonteClienteHotState: fonteClienteHotStateSelecao
     });
@@ -9736,7 +9741,7 @@ for (const item of destinosOrdenados) {
   }
 }
 
-const relocalizacaoPosEnvio = filaOfertas.relocalizarOfertaFila(fila, oferta, { clienteId });
+const relocalizacaoPosEnvio = filaOfertas.relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId });
 if (!relocalizacaoPosEnvio.ok || !relocalizacaoPosEnvio.oferta) {
   resumoFila.motivoPulo = "oferta_nao_relocalizada_pos_envio";
   console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
@@ -9874,7 +9879,7 @@ if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0) {
 ultimoEnvioFila = Date.now();
 
 resumoFila.motivoPulo = "";
-const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(fila, oferta, {
+const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {
   clienteId,
   enviadoEm: new Date().toISOString(),
   statusDetalhe: `Enviada para ${totalDestinosEnviadosFanout} destino(s)`
@@ -9958,7 +9963,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
 
   if (oferta) {
     const clienteErro = oferta.clienteId || clienteFila || "admin";
-    const erroFila = filaOfertas.marcarErroEnvioFila(fila, oferta, {
+    const erroFila = filaOfertas.marcarErroEnvioFila(colecaoPosEnvioProcessamento, oferta, {
       clienteId: clienteErro,
       erro: e.message,
       erroEm: new Date().toISOString(),
