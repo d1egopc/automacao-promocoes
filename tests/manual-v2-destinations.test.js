@@ -749,6 +749,46 @@ async function request(server, clienteId = "cliente_a", plano = "") {
       !indexFonte.includes("destinosPorCliente[clienteId][id] = destinos"),
       "POST /destinos/:id nao pode pendurar sessao em Array"
     );
+    assert.ok(
+      indexFonte.includes("function aplicarNoStoreDestinos(req, res)"),
+      "Rotas de destinos devem ter helper sem cache para evitar snapshot stale"
+    );
+    assert.ok(
+      indexFonte.includes('delete req.headers["if-none-match"]') &&
+      indexFonte.includes('delete req.headers["if-modified-since"]'),
+      "GET /destinos nao deve responder 304 com validadores condicionais stale"
+    );
+
+    const trechoGetDestinos = indexFonte.slice(
+      indexFonte.indexOf('app.get("/destinos"'),
+      indexFonte.indexOf('app.post("/destinos"')
+    );
+    const trechoPostDestinos = indexFonte.slice(
+      indexFonte.indexOf('app.post("/destinos"'),
+      indexFonte.indexOf('app.delete("/destinos/:id"')
+    );
+    assert.ok(
+      trechoGetDestinos.includes("aplicarNoStoreDestinos(req, res);"),
+      "GET /destinos deve sempre retornar estado autoritativo sem cache"
+    );
+    assert.ok(
+      trechoPostDestinos.includes("aplicarNoStoreDestinos(req, res);"),
+      "POST /destinos deve devolver resposta autoritativa sem cache"
+    );
+
+    const trechoPostDestinosSessao = indexFonte.slice(
+      indexFonte.indexOf('app.post("/destinos/:id"'),
+      indexFonte.indexOf('app.get("/destinos/:id"')
+    );
+    const trechoGetDestinosSessao = indexFonte.slice(
+      indexFonte.indexOf('app.get("/destinos/:id"'),
+      indexFonte.indexOf("// ================ CAMPANHAS")
+    );
+    assert.ok(
+      trechoPostDestinosSessao.includes("aplicarNoStoreDestinos(req, res);") &&
+      trechoGetDestinosSessao.includes("aplicarNoStoreDestinos(req, res);"),
+      "Rotas compativeis /destinos/:id tambem devem devolver estado sem cache"
+    );
 
     console.log("manual-v2-destinations.test.js ok");
   })

@@ -4264,6 +4264,17 @@ function salvarDestinosClientes() {
   salvarMapaClientesJson("destinos.json", destinosPorCliente);
 }
 
+function aplicarNoStoreDestinos(req, res) {
+  if (req?.headers && typeof req.headers === "object") {
+    delete req.headers["if-none-match"];
+    delete req.headers["if-modified-since"];
+  }
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("Surrogate-Control", "no-store");
+}
+
 function normalizarTemplateIdDestinoContrato(valor) {
   const id = String(valor || "").trim();
   if (!id || id === "padrao_optimus") return id || null;
@@ -11003,6 +11014,7 @@ app.post("/telegram/:id/testar", testarTelegram);
 // ============== DESTINOS INTELIGENTES =================
 
 app.get("/destinos", (req, res) => {
+  aplicarNoStoreDestinos(req, res);
   const perf = criarPerfTimer("PERF DESTINOS", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => exigirClienteAutenticado(req, res));
   if (!clienteId) {
@@ -11020,6 +11032,7 @@ app.get("/destinos", (req, res) => {
 });
 
 app.post("/destinos", async (req, res) => {
+  aplicarNoStoreDestinos(req, res);
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
 
@@ -11058,6 +11071,7 @@ app.post("/destinos", async (req, res) => {
 });
 
 app.delete("/destinos/:id", (req, res) => {
+  aplicarNoStoreDestinos(req, res);
   const clienteId = getClienteId(req);
 
   const { id } = req.params;
@@ -27992,6 +28006,7 @@ app.get("/fila/status", (req, res) => {
 // =================== POST DESTINOS ================================
 
 app.post("/destinos/:id", (req, res) => {
+  aplicarNoStoreDestinos(req, res);
   const destinos = normalizarDestinosContrato(req.body?.destinos);
 
   if (!Array.isArray(destinos)) {
@@ -28040,6 +28055,7 @@ const limiteDestinos = isAdminMaster(req)
 });
 
 app.get("/destinos/:id", (req, res) => {
+  aplicarNoStoreDestinos(req, res);
   const clienteId = getClienteId(req);
 
   const id = normalizarSessaoId(
