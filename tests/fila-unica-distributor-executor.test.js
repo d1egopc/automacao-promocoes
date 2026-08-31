@@ -312,6 +312,17 @@ assert(
 );
 
 assert(
+  processarFila.includes("const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });") &&
+    processarFila.includes("const colecaoFallbackEnvioRecenteExecutor = (") &&
+    processarFila.includes("fonteClienteHotStateSelecao?.conclusiva === true") &&
+    processarFila.includes("Array.isArray(fonteClienteHotStateSelecao.itens)") &&
+    processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
+    processarFila.includes("consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {") &&
+    processarFila.includes("obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor"),
+  "anti-repeat deve manter FilaStore como primeira fonte e usar hot state do cliente como fallback no V2 conclusivo"
+);
+
+assert(
   processarFila.includes("const colecaoReservaProcessamento = (") &&
     processarFila.includes("fonteClienteHotStateSelecao?.conclusiva === true") &&
     processarFila.includes("Array.isArray(fonteClienteHotStateSelecao.itens)") &&
@@ -906,6 +917,97 @@ try {
     assert.strictEqual(resultadoAntigo.ok, true, "item antigo fora da janela deve avaliar com sucesso");
     assert.strictEqual(resultadoAntigo.bloquear, false, "enviado antigo fora de 2h nao deve bloquear indevidamente");
     assert.strictEqual(resultadoAntigo.motivo, "sem_duplicidade_ativa", "historico antigo deve preservar regra atual");
+  }
+
+  {
+    const agora = Date.parse("2026-08-08T21:30:00.000Z");
+    const enviadaRecente = criarItem(wolff, "repeat_enviado_recente_hot_state", {
+      produtoId: "MLB-repeat-hot-state",
+      marketplace: "mercadolivre",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-repeat-hot-state",
+      linkAfiliado: "https://mercadolivre.com.br/MLB-repeat-hot-state?aff=1",
+      preco: 190,
+      precoAtual: 190,
+      status: "enviado",
+      enviadoEm: "2026-08-08T20:00:00.000Z",
+      cupom: "HOT10"
+    });
+    const enviadaAntiga = criarItem(wolff, "repeat_enviado_antigo_hot_state", {
+      ...enviadaRecente,
+      id: "repeat_enviado_antigo_hot_state",
+      status: "enviado",
+      enviadoEm: "2026-08-08T18:00:00.000Z"
+    });
+    const envioComMelhoria = criarItem(wolff, "repeat_melhoria_hot_state", {
+      ...enviadaRecente,
+      id: "repeat_melhoria_hot_state",
+      status: "enviado",
+      preco: 220,
+      precoAtual: 220,
+      enviadoEm: "2026-08-08T20:45:00.000Z"
+    });
+    const atual = criarItem(wolff, "repeat_atual_hot_state", {
+      ...enviadaRecente,
+      id: "repeat_atual_hot_state",
+      status: "pendente",
+      enviadoEm: "",
+      preco: 190,
+      precoAtual: 190
+    });
+    const atualMelhorada = criarItem(wolff, "repeat_atual_melhorada_hot_state", {
+      ...atual,
+      id: "repeat_atual_melhorada_hot_state",
+      preco: 180,
+      precoAtual: 180
+    });
+    const outroCliente = criarItem(controle, "repeat_cliente_b", {
+      ...enviadaRecente,
+      clienteId: controle,
+      status: "enviado",
+      enviadoEm: "2026-08-08T21:00:00.000Z"
+    });
+    const hotStateCliente = [enviadaRecente, enviadaAntiga, envioComMelhoria, atual, atualMelhorada];
+    const global = [outroCliente, ...hotStateCliente];
+    const fallbackGlobal = filaOfertas.consultarEnvioRecenteExecutor2h(global, atual, {
+      agora,
+      obterItens: () => global
+    });
+    const fallbackHotState = filaOfertas.consultarEnvioRecenteExecutor2h(hotStateCliente, atual, {
+      agora,
+      obterItens: () => hotStateCliente
+    });
+    assert.deepStrictEqual(
+      {
+        ok: fallbackHotState.ok,
+        bloqueada: fallbackHotState.bloqueada,
+        motivo: fallbackHotState.motivo,
+        ofertaAnteriorId: fallbackHotState.ofertaAnterior?.id || ""
+      },
+      {
+        ok: fallbackGlobal.ok,
+        bloqueada: fallbackGlobal.bloqueada,
+        motivo: fallbackGlobal.motivo,
+        ofertaAnteriorId: fallbackGlobal.ofertaAnterior?.id || ""
+      },
+      "fallback anti-repeat por hot state deve preservar decisao da global filtrada"
+    );
+    assert.strictEqual(fallbackHotState.bloqueada, true, "envio recente menor que 2h deve continuar bloqueando");
+    assert.strictEqual(fallbackHotState.ofertaAnterior, enviadaRecente, "cliente A deve decidir com seu proprio historico recente");
+    assert.strictEqual(outroCliente.status, "enviado", "cliente B nao deve participar da decisao de anti-repeat");
+
+    const foraJanela = filaOfertas.consultarEnvioRecenteExecutor2h([enviadaAntiga, atual], atual, {
+      agora,
+      obterItens: () => [enviadaAntiga, atual]
+    });
+    assert.strictEqual(foraJanela.bloqueada, false, "envio fora da janela de 2h deve continuar liberando");
+
+    const melhoria = filaOfertas.consultarEnvioRecenteExecutor2h([envioComMelhoria, atualMelhorada], atualMelhorada, {
+      agora,
+      obterItens: () => [envioComMelhoria, atualMelhorada]
+    });
+    assert.strictEqual(melhoria.bloqueada, false, "melhoria comercial valida deve continuar liberando repeat");
+    assert.strictEqual(atual.cupom, "HOT10", "cupom deve ser preservado pela consulta anti-repeat");
+    assert.strictEqual(atual.linkAfiliado, "https://mercadolivre.com.br/MLB-repeat-hot-state?aff=1", "link afiliado deve ser preservado");
   }
 
   const itemA = criarItem(wolff, "wolff_a");

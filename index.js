@@ -9144,10 +9144,14 @@ if (leituraDualReadViva?.sideEffectBlocked) {
 }
 
 const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });
-const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(fila, oferta, {
+const colecaoFallbackEnvioRecenteExecutor = (
+  fonteClienteHotStateSelecao?.conclusiva === true &&
+  Array.isArray(fonteClienteHotStateSelecao.itens)
+) ? fonteClienteHotStateSelecao.itens : fila;
+const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {
   logger: console,
   logarLegado: true,
-  obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : fila
+  obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor
 });
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
   const repeticaoExecutorDual = filaOfertas.consultarEnvioRecenteExecutor2h(leituraDualReadViva.itens, oferta, {
