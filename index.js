@@ -1395,7 +1395,7 @@ function marcarOfertaExpirada(oferta = {}) {
   });
 }
 
-async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], motivo = "expiracao") {
+async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], motivo = "expiracao", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const itens = Array.isArray(itensAlterados)
     ? itensAlterados.filter(item => item && typeof item === "object")
@@ -1423,6 +1423,7 @@ async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], 
 
     ultimoSync = syncViva;
     if (!syncVivaMutacaoConfirmada(syncViva)) {
+      materializarFilaClienteHotStateNaGlobal(cliente, opcoes.filaClienteHotState, `${motivo}_fallback_legado`);
       const salvou = salvarFila(cliente, {
         origem: "expiracao",
         motivo: `${motivo}_fallback_legado`
@@ -1530,7 +1531,9 @@ async function sanearExpiradosFila(clienteId = "admin") {
   }
 
   if (alterou) {
-    await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento");
+    await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento", {
+      filaClienteHotState: usandoFilaViva ? itensCandidatos : null
+    });
   }
 
   return alterou;
@@ -2345,7 +2348,9 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   }
 
   if (expirouAlguma) {
-    await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao");
+    await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao", {
+      filaClienteHotState: usandoFilaVivaExpiracaoSelecao ? itensExpiracaoSelecao : null
+    });
   }
 
   const resultadoSelecao = selecionarProximaOfertaFilaCore(colecaoSelecao, clienteIdAlvo, {
@@ -2966,6 +2971,18 @@ function itensFilaVivaParaExecutorV2(clienteId = "admin", leitura = {}) {
     .filter(item => String(item?.clienteId || "admin") === cliente);
 }
 
+function materializarFilaClienteHotStateNaGlobal(clienteId = "admin", filaClienteHotState = null, motivo = "fallback_legado") {
+  const cliente = String(clienteId || "admin");
+  if (!Array.isArray(filaClienteHotState)) {
+    return { ok: false, pulou: true, motivo: "hot_state_indisponivel" };
+  }
+  const itensCliente = filaClienteHotState
+    .filter(item => item && typeof item === "object" && String(item?.clienteId || "admin") === cliente);
+  const filaSemCliente = fila.filter(item => String(item?.clienteId || "admin") !== cliente);
+  fila = [...filaSemCliente, ...itensCliente];
+  return { ok: true, clienteId: cliente, motivo, totalCliente: itensCliente.length };
+}
+
 function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration = {}, opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const inicio = Date.now();
@@ -2989,8 +3006,6 @@ function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration 
   }
 
   const filaClienteHotState = itensFilaVivaParaExecutorV2(cliente, leitura);
-  const filaSemCliente = fila.filter(item => String(item?.clienteId || "admin") !== cliente);
-  fila = [...filaSemCliente, ...filaClienteHotState];
   finalizarCarregamentoFilaCliente(cliente, {
     motivo: "executor_v2_fast_read",
     filaClienteHotState,
@@ -3677,6 +3692,9 @@ function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "proc
 
   const saneadasCliente = Number(resultado.saneadasPorCliente?.[String(clienteId || "admin")] || 0);
   if (saneadasCliente > 0) {
+    if (usandoHotStateCliente) {
+      materializarFilaClienteHotStateNaGlobal(clienteId, fonteClienteHotState.itens, "saneamento_duplicatas_fallback_legado");
+    }
     salvarFila(clienteId, { origem: "saneamento" });
     console.log("[FILA-DUPLICATA-PENDENTE-RETIDA]", JSON.stringify({
       clienteId,
@@ -8659,6 +8677,14 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
         filaAlterada = false;
         return true;
       }
+    }
+
+    if (usarCheckpointOnlyV2 && fonteClienteHotStateSelecao?.conclusiva === true) {
+      materializarFilaClienteHotStateNaGlobal(
+        clienteSeguroFila,
+        fonteClienteHotStateSelecao.itens,
+        "executor_salvar_alterada_fallback_legado"
+      );
     }
 
     const salvou = salvarFila(clienteSeguroFila, oferta ? {

@@ -92,8 +92,9 @@ assert(
 
 assert(
   saneamentoDuplicatasCliente.includes("const saneadasCliente = Number(resultado.saneadasPorCliente?.[String(clienteId || \"admin\")] || 0)") &&
+    saneamentoDuplicatasCliente.includes("materializarFilaClienteHotStateNaGlobal(clienteId, fonteClienteHotState.itens, \"saneamento_duplicatas_fallback_legado\")") &&
     saneamentoDuplicatasCliente.includes("salvarFila(clienteId, { origem: \"saneamento\" })"),
-  "saneamento por hot state deve preservar persistencia existente quando houver mutacao do cliente"
+  "saneamento por hot state deve materializar o workspace antes da persistencia legada existente"
 );
 
 const fastPathExecutor = trechoEntre(
@@ -116,9 +117,22 @@ assert(
 );
 
 assert(
-  fastPathExecutor.includes("const filaSemCliente = fila.filter") &&
-    fastPathExecutor.includes("fila = [...filaSemCliente, ...filaClienteHotState]"),
-  "primeiro corte TOP 2 nao deve alterar a reidratacao global do fast path"
+  !fastPathExecutor.includes("const filaSemCliente = fila.filter") &&
+    !fastPathExecutor.includes("fila = [...filaSemCliente, ...filaClienteHotState]"),
+  "fast path V2 conclusivo nao deve reidratar a fila global com filter+spread recorrente"
+);
+
+const materializacaoHotState = trechoEntre(
+  "function materializarFilaClienteHotStateNaGlobal",
+  "function aplicarFastPathExecutorFilaViva"
+);
+
+assert(
+  materializacaoHotState.includes("Array.isArray(filaClienteHotState)") &&
+    materializacaoHotState.includes("String(item?.clienteId || \"admin\") === cliente") &&
+    materializacaoHotState.includes("const filaSemCliente = fila.filter(item => String(item?.clienteId || \"admin\") !== cliente)") &&
+    materializacaoHotState.includes("fila = [...filaSemCliente, ...itensCliente]"),
+  "materializacao sob demanda deve substituir somente a fatia do workspace atual por hot state"
 );
 
 const fonteHotStateExecutor = trechoEntre(
@@ -197,8 +211,9 @@ assert(
 );
 
 assert(
-  persistirExpiracao.includes("motivo: `${motivo}_fallback_legado`"),
-  "expiracao V2 inconclusiva deve preservar fallback legado em vez de descartar mutacao"
+  persistirExpiracao.includes("materializarFilaClienteHotStateNaGlobal(cliente, opcoes.filaClienteHotState, `${motivo}_fallback_legado`)") &&
+    persistirExpiracao.includes("motivo: `${motivo}_fallback_legado`"),
+  "expiracao V2 inconclusiva deve materializar hot state antes de preservar fallback legado"
 );
 
 const saneamentoExpiracao = trechoEntre(
@@ -219,7 +234,8 @@ assert(
   saneamentoExpiracao.includes("const itensCandidatos = fonteCandidatos?.itens || fila") &&
     saneamentoExpiracao.includes("if (!usandoFilaViva && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
     saneamentoExpiracao.includes("if (oferta.status !== \"pendente\") continue;") &&
-    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\");"),
+    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
+    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null"),
   "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
 );
 
@@ -250,7 +266,8 @@ assert(
   selecaoExpiracao.includes("if (oferta?.status !== \"pendente\") continue;") &&
     selecaoExpiracao.includes("if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;") &&
     selecaoExpiracao.includes("marcarOfertaExpirada(oferta);") &&
-    selecaoExpiracao.includes("await persistirExpiracaoFila(clienteIdAlvo || \"admin\", expiradasSelecao, \"expiracao_selecao\");"),
+    selecaoExpiracao.includes("await persistirExpiracaoFila(clienteIdAlvo || \"admin\", expiradasSelecao, \"expiracao_selecao\", {") &&
+    selecaoExpiracao.includes("filaClienteHotState: usandoFilaVivaExpiracaoSelecao ? itensExpiracaoSelecao : null"),
   "expiracao_selecao deve preservar regra, mutacao e persistencia checkpoint-only existentes"
 );
 
@@ -344,6 +361,20 @@ assert(
 const salvarFilaCentral = trechoEntre(
   "function salvarFila",
   "function checkpointRevisionSeguro"
+);
+
+const salvarFilaSeAlteradaExecutor = trechoEntre(
+  "const salvarFilaSeAlterada = async",
+  "try {"
+);
+
+assert(
+  salvarFilaSeAlteradaExecutor.includes("syncVivaMutacaoConfirmada(syncViva)") &&
+    salvarFilaSeAlteradaExecutor.includes("materializarFilaClienteHotStateNaGlobal(") &&
+    salvarFilaSeAlteradaExecutor.includes("fonteClienteHotStateSelecao.itens") &&
+    pos(salvarFilaSeAlteradaExecutor, "materializarFilaClienteHotStateNaGlobal(") <
+      pos(salvarFilaSeAlteradaExecutor, "const salvou = salvarFila(clienteSeguroFila"),
+  "fallback legado do executor deve materializar hot state do cliente imediatamente antes de salvarFila"
 );
 
 assert(
