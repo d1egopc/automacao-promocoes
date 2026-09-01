@@ -231,6 +231,7 @@ const saasFundacao = require("./utils/saas-fundacao");
 const {
   resolverFinanceiroUsuarioSaas
 } = require("./utils/saas-financeiro-estado");
+const cleanInstallBootstrap = require("./utils/clean-install-bootstrap");
 const {
   criarAdminMasterEstrito
 } = require("./utils/admin-auth-estrito");
@@ -4981,12 +4982,16 @@ function desmontarRuntimeExclusivoWorkspace(clienteId = "", opcoes = {}) {
 // ================ FUNCAO CRIAR PLANO =====================
 
 function criarPlanosPadrao() {
-  if (Object.keys(planos || {}).length) return;
-
-  console.log("[SAAS-PLANOS-AUDITORIA] Nenhum plano persistido encontrado; planos padrao nao sao recriados automaticamente. Admin Master e a autoridade comercial.");
-  return;
-
-
+  const resultado = cleanInstallBootstrap.bootstrapPlanosOficiais({
+    planos,
+    salvarPlanos
+  });
+  if (resultado.alterou) {
+    console.log("[CLEAN-INSTALL-BOOTSTRAP] Planos oficiais criados", {
+      total: resultado.total,
+      fonte: resultado.fonte
+    });
+  }
 }
 
 function normalizarRecursosPlanosRuntime() {
@@ -5021,6 +5026,7 @@ function auditarUsuariosComPlanoAusente() {
 
   const inconsistentes = (Array.isArray(usuarios) ? usuarios : [])
     .filter(usuario => {
+      if (usuarioEhAdminMaster(usuario)) return false;
       const planoUsuario = normalizarTexto(usuario?.plano || "");
       return planoUsuario && !planosExistentes.has(planoUsuario);
     })
@@ -5109,31 +5115,25 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
   mensageiro.carregarMensageiro();
   socialModule.inicializarSocialModule({ logger: console });
 
-   criarPlanosPadrao();
-   normalizarRecursosPlanosRuntime();
-   auditarUsuariosComPlanoAusente();
+  criarPlanosPadrao();
+  normalizarRecursosPlanosRuntime();
+  auditarUsuariosComPlanoAusente();
 
+  const bootstrapAdmin = cleanInstallBootstrap.bootstrapAdminMaster({
+    usuarios,
+    env: process.env,
+    gerarSenhaHashSync,
+    salvarUsuarios
+  });
 
-if (!usuarios.length) {
-console.log("[INFO] CRIANDO ADMIN PADRO");
-  usuarios = [
- {
-  id: "admin",
-  nome: "Diego",
-  email: "admin@optimus.local",
-  senha: "fzt976",
-  papel: "admin_master",
-  plano: "master",
-  creditos: 999999,
-  ativo: true,
-  criadoEm: new Date().toISOString()
-}
-  ];
-
-  salvarUsuarios();
-
-  console.log("[OK]✅ Usurio admin inicial criado");
-}
+  if (bootstrapAdmin.alterou) {
+    console.log("[CLEAN-INSTALL-BOOTSTRAP] Admin Master criado", {
+      id: bootstrapAdmin.id,
+      email: bootstrapAdmin.email
+    });
+  } else if (bootstrapAdmin.motivo === "env_admin_master_incompleta") {
+    console.log("[CLEAN-INSTALL-BOOTSTRAP] Admin Master nao criado; envs de bootstrap ausentes ou invalidas");
+  }
 
   } catch (e) {
     console.error("[ERRO] ERRO AO CARREGAR CONFIG:", e.message);
@@ -5150,20 +5150,28 @@ function normalizarFormatoLinkOptimus(valor = "/r") {
   return linksPuros.normalizarFormatoLinkOptimus(valor);
 }
 
+function resolverDominioPublicoOptimusFallback() {
+  return linksPuros.resolverDominioPublicoOptimusEnv(process.env);
+}
+
 function resolverDominioBaseLinkOptimus(configBase = config) {
-  return linksPuros.resolverDominioBaseLinkOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  const fallback = resolverDominioPublicoOptimusFallback();
+  return linksPuros.resolverDominioBaseLinkOptimus(configBase, fallback.dominio);
 }
 
 function montarUrlLinkOptimus(codigo = "", configBase = config) {
-  return linksPuros.montarUrlLinkOptimus(codigo, configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  const fallback = resolverDominioPublicoOptimusFallback();
+  return linksPuros.montarUrlLinkOptimus(codigo, configBase, fallback.dominio);
 }
 
 function origemDominioLinkOptimus(configBase = config) {
-  return linksPuros.origemDominioLinkOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  const fallback = resolverDominioPublicoOptimusFallback();
+  return linksPuros.origemDominioLinkOptimus(configBase, fallback.dominio, fallback.origem);
 }
 
 function montarRespostaConfigLinksOptimus(configBase = config) {
-  return linksPuros.montarRespostaConfigLinksOptimus(configBase, process.env.RAILWAY_PUBLIC_DOMAIN || "");
+  const fallback = resolverDominioPublicoOptimusFallback();
+  return linksPuros.montarRespostaConfigLinksOptimus(configBase, fallback.dominio, fallback.origem);
 }
 
 function normalizarDominioConfigLinkOptimus(valor = "") {
@@ -5272,13 +5280,14 @@ function extrairLinkAfiliadoOferta(oferta = {}) {
 }
 
 function localizarLinkOptimusExistente({ clienteId = "", linkOriginal = "", marketplace = "", configBase = config } = {}) {
+  const fallback = resolverDominioPublicoOptimusFallback();
   return linksPuros.localizarLinkOptimusExistente({
     clienteId,
     linkOriginal,
     marketplace,
     repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig }),
     configBase,
-    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || ""
+    dominioFallback: fallback.dominio
   });
 }
 
@@ -5290,20 +5299,22 @@ function gerarCodigoLinkOptimus(configBase = config) {
 
 function criarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
   const configBase = opcoes.configGlobal || config;
+  const fallback = resolverDominioPublicoOptimusFallback();
   return linksPuros.criarLinkOptimus(linkOriginal, marketplace, {
     ...opcoes,
     configGlobal: configBase,
-    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || "",
+    dominioFallback: fallback.dominio,
     repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig })
   });
 }
 
 function gerarLinkOptimus(linkOriginal = "", marketplace = "", opcoes = {}) {
   const configBase = opcoes.configGlobal || config;
+  const fallback = resolverDominioPublicoOptimusFallback();
   return linksPuros.gerarLinkOptimus(linkOriginal, marketplace, {
     ...opcoes,
     configGlobal: configBase,
-    dominioFallback: process.env.RAILWAY_PUBLIC_DOMAIN || "",
+    dominioFallback: fallback.dominio,
     repository: linksPuros.criarLinkOptimusRepository({ configBase, salvarConfig })
   });
 }
@@ -21970,6 +21981,14 @@ async function gerarSenhaHash(senhaInformada = "") {
     throw new Error("senha_obrigatoria");
   }
   return bcrypt.hash(senha, 10);
+}
+
+function gerarSenhaHashSync(senhaInformada = "") {
+  const senha = String(senhaInformada || "");
+  if (!senha) {
+    throw new Error("senha_obrigatoria");
+  }
+  return bcrypt.hashSync(senha, 10);
 }
 
 async function diagnosticarSenhaUsuario(usuario = {}, senhaInformada = "") {

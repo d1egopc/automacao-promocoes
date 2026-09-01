@@ -423,8 +423,8 @@ const helperPlano = trechoEntre(indexFonte, "function getPlanoPorNome", "// ====
 assert.ok(!helperPlano.includes("planos?.free"), "resolver plano nao deve cair em free hardcoded");
 
 const criacaoPlanos = trechoEntre(indexFonte, "function criarPlanosPadrao", "function normalizarRecursosPlanosRuntime");
-assert.ok(!/\b(free|pro|premium|enterprise|ultimate|starter)\b/i.test(criacaoPlanos), "runtime nao deve recriar planos por nome");
-assert.ok(!criacaoPlanos.includes("salvarPlanos()"), "runtime nao deve persistir planos padrao automaticamente");
+assert.ok(!/\b(free|pro|premium|enterprise|ultimate|starter|beta teste|plano loja)\b/i.test(criacaoPlanos), "runtime nao deve manter catalogo de planos inline por nome");
+assert.ok(criacaoPlanos.includes("bootstrapPlanosOficiais"), "runtime deve delegar seed idempotente ao bootstrap oficial de clean install");
 
 const blocoCreditos = trechoEntre(indexFonte, "// ================= CREDITOS =================", "// ================= FUNCAO SALVA PLANO");
 assert.ok(!blocoCreditos.includes("CREDITOS_PLANO"), "creditos nao devem usar mapa estatico");

@@ -5,6 +5,7 @@ const {
   normalizarDominioLinkOptimus,
   normalizarFormatoLinkOptimus,
   resolverDominioBaseLinkOptimus,
+  resolverDominioPublicoOptimusEnv,
   montarUrlLinkOptimus,
   origemDominioLinkOptimus,
   montarRespostaConfigLinksOptimus,
@@ -55,8 +56,23 @@ assert.deepStrictEqual(
   { dominio: "https://railway.test", origem: "railway" }
 );
 assert.deepStrictEqual(
+  origemDominioLinkOptimus({ linksOptimus: { dominio: "" } }, "https://vps.test/", "env"),
+  { dominio: "https://vps.test", origem: "env" }
+);
+assert.deepStrictEqual(
   origemDominioLinkOptimus({ linksOptimus: { dominio: "" } }, ""),
   { dominio: "", origem: "indisponivel" }
+);
+assert.deepStrictEqual(
+  resolverDominioPublicoOptimusEnv({
+    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br/",
+    RAILWAY_PUBLIC_DOMAIN: "railway.test"
+  }),
+  { dominio: "https://go.optimuspromo.com.br", origem: "env" }
+);
+assert.deepStrictEqual(
+  resolverDominioPublicoOptimusEnv({ RAILWAY_PUBLIC_DOMAIN: "railway.test" }),
+  { dominio: "https://railway.test", origem: "railway" }
 );
 assert.deepStrictEqual(
   montarRespostaConfigLinksOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://railway.test/"),

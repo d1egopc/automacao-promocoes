@@ -46,6 +46,7 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext([
   extrairFuncao("normalizarDominioLinkOptimus"),
+  extrairFuncao("resolverDominioPublicoOptimusFallback"),
   extrairFuncao("origemDominioLinkOptimus"),
   extrairFuncao("montarRespostaConfigLinksOptimus"),
   extrairFuncao("normalizarDominioConfigLinkOptimus"),
@@ -96,6 +97,19 @@ assert.deepStrictEqual(serializar(res.body), {
 });
 
 res = criarRes();
+sandbox.process.env = {
+  OPTIMUS_PUBLIC_BASE_URL: "https://go-vps.optimuspromo.com.br",
+  RAILWAY_PUBLIC_DOMAIN: "automacao-promocoes-production.up.railway.app"
+};
+sandbox.responderAdminConfigLinksOptimus(reqAdmin(), res);
+assert.strictEqual(res.statusCode, 200);
+assert.deepStrictEqual(serializar(res.body.linksOptimus), {
+  dominio: "",
+  dominioEfetivo: "https://go-vps.optimuspromo.com.br",
+  origem: "env"
+});
+
+res = criarRes();
 sandbox.responderAdminConfigLinksOptimus({ usuario: { id: "cliente", papel: "cliente" }, body: {} }, res);
 assert.strictEqual(res.statusCode, 403, "usuario comum nao pode consultar");
 
@@ -117,8 +131,8 @@ res = criarRes();
 sandbox.salvarAdminConfigLinksOptimus(reqAdmin({ dominio: "" }), res);
 assert.strictEqual(res.statusCode, 200);
 assert.strictEqual(res.body.linksOptimus.dominio, "");
-assert.strictEqual(res.body.linksOptimus.dominioEfetivo, "https://automacao-promocoes-production.up.railway.app");
-assert.strictEqual(res.body.linksOptimus.origem, "railway");
+assert.strictEqual(res.body.linksOptimus.dominioEfetivo, "https://go-vps.optimuspromo.com.br");
+assert.strictEqual(res.body.linksOptimus.origem, "env");
 assert.strictEqual(sandbox.config.linksOptimus.dominio, "");
 
 res = criarRes();
