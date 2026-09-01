@@ -277,6 +277,13 @@ function criarRetornoBase(ok = false, ofertaId = "", erro = "") {
   };
 }
 
+function destinosPorClienteAtual(deps = {}) {
+  if (typeof deps.getDestinosPorCliente === "function") {
+    return deps.getDestinosPorCliente() || {};
+  }
+  return deps.destinosPorCliente || {};
+}
+
 async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destinosIds = [] } = {}, deps = {}) {
   const cliente = texto(clienteId) || "admin";
   const idOferta = texto(ofertaId);
@@ -295,9 +302,10 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
   const plano = typeof deps.resolverPlanoManualV2 === "function"
     ? deps.resolverPlanoManualV2(cliente)
     : deps.plano || {};
-  const destinosOriginais = listarDestinosCliente(deps.destinosPorCliente || {}, cliente);
+  const destinosPorCliente = destinosPorClienteAtual(deps);
+  const destinosOriginais = listarDestinosCliente(destinosPorCliente, cliente);
   const destinosSanitizados = await listarDestinosManuaisV2Async(cliente, {
-    destinosPorCliente: deps.destinosPorCliente || {},
+    destinosPorCliente,
     configsPorCliente: deps.configsPorCliente || {},
     sessoes: deps.sessoes || {},
     statusSessao: deps.statusSessao || {},

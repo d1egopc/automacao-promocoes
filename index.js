@@ -21867,7 +21867,7 @@ function resolverPlanoManualV2Scheduler(clienteId = "admin") {
 
 function iniciarManualV2SchedulerOperacional() {
   const resultado = iniciarManualV2Scheduler({
-    destinosPorCliente,
+    getDestinosPorCliente: () => destinosPorCliente,
     configsPorCliente,
     sessoes,
     statusSessao,
@@ -21913,7 +21913,7 @@ function iniciarManualV2RetentionOperacional() {
 
 app.use("/manual-v2", criarRotasManualV2({
   getClienteId,
-  destinosPorCliente,
+  getDestinosPorCliente: () => destinosPorCliente,
   configsPorCliente,
   sessoes,
   statusSessao,

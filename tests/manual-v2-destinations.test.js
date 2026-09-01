@@ -688,7 +688,105 @@ async function request(server, clienteId = "cliente_a", plano = "") {
   return { status: res.status, cacheControl: res.headers.get("cache-control") || "", body: await res.json() };
 }
 
+async function requestJson(server, metodo, caminho, clienteId = "cliente_a", body) {
+  const headers = { "x-cliente-id": clienteId };
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const res = await fetch(`http://127.0.0.1:${server.address().port}${caminho}`, {
+    method: metodo,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+function destinosPowerHar(idsAtivos = []) {
+  const ativos = new Set(idsAtivos);
+  return [
+    ["op_geral", "OP GERAL", "whatsapp"],
+    ["telegram_d1", "TELEGRAM D1EGOPC", "telegram"],
+    ["discord", "Discord", "discord"],
+    ["discord_hw", "Discord Hardware", "discord"],
+    ["diegopc_oficial", "DIEGOPC OFERTAS OFICIAL", "whatsapp"]
+  ].map(([id, nome, tipo]) => ({
+    id,
+    nome,
+    tipo,
+    ativo: ativos.has(id),
+    conexaoId: tipo === "discord" ? "discord_a" : "sessao_a",
+    channelId: tipo === "discord" ? "canal_ok" : "",
+    telegramDestinos: tipo === "telegram" ? ["chat_ok"] : [],
+    gruposWhatsapp: tipo === "whatsapp" ? [`${id}@g.us`] : []
+  }));
+}
+
+async function testarRotaManualUsaStoreVivaAposSubstituicao() {
+  let storeAtual = {
+    cliente_a: destinosPowerHar([])
+  };
+  const app = express();
+  app.use(express.json());
+  app.get("/destinos", (req, res) => {
+    res.json(storeAtual[req.header("x-cliente-id") || "cliente_a"] || []);
+  });
+  app.post("/destinos", (req, res) => {
+    const clienteId = req.header("x-cliente-id") || "cliente_a";
+    storeAtual = {
+      ...storeAtual,
+      [clienteId]: req.body
+    };
+    res.json({ ok: true, destinos: storeAtual[clienteId] });
+  });
+  app.use("/manual-v2", criarRotasManualV2({
+    getClienteId: (req) => req.header("x-cliente-id") || "cliente_a",
+    getDestinosPorCliente: () => storeAtual,
+    configsPorCliente,
+    sessoes,
+    statusSessao,
+    discordConexoes,
+    discordCanaisPorConexao,
+    enviarDiscord: async () => ({ ok: true }),
+    getPlanoUsuario: () => planoCompleto
+  }));
+
+  const server = await ouvir(app);
+  try {
+    const opOn = destinosPowerHar(["op_geral"]);
+    const postOpOn = await requestJson(server, "POST", "/destinos", "cliente_a", opOn);
+    const getDestinosOpOn = await requestJson(server, "GET", "/destinos", "cliente_a");
+    const manualOpOn = await request(server, "cliente_a");
+    assert.strictEqual(postOpOn.body.destinos.find((item) => item.id === "op_geral").ativo, true);
+    assert.strictEqual(getDestinosOpOn.body.find((item) => item.id === "op_geral").ativo, true);
+    assert.strictEqual(manualOpOn.body.destinos.find((item) => item.id === "op_geral").ativo, true);
+    assert.strictEqual(manualOpOn.body.destinos.find((item) => item.id === "op_geral").utilizavel, true);
+    assert.ok(
+      manualOpOn.body.destinos.filter((item) => item.id !== "op_geral").every((item) => item.ativo === false),
+      "Manual nao pode continuar preso ao snapshot todos OFF"
+    );
+
+    await requestJson(server, "POST", "/destinos", "cliente_a", destinosPowerHar([]));
+    const getDestinosOff = await requestJson(server, "GET", "/destinos", "cliente_a");
+    const manualOff = await request(server, "cliente_a");
+    assert.strictEqual(getDestinosOff.body.filter((item) => item.ativo === true).length, 0);
+    assert.strictEqual(manualOff.body.destinos.filter((item) => item.ativo === true).length, 0);
+    assert.ok(manualOff.body.destinos.every((item) => item.utilizavel === false));
+
+    await requestJson(server, "POST", "/destinos", "cliente_a", destinosPowerHar([
+      "op_geral",
+      "telegram_d1",
+      "discord",
+      "discord_hw",
+      "diegopc_oficial"
+    ]));
+    const manualOn = await request(server, "cliente_a");
+    assert.strictEqual(manualOn.body.destinos.filter((item) => item.ativo === true).length, 5);
+    assert.strictEqual(manualOn.body.destinos.filter((item) => item.utilizavel === true).length, 5);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 (async function testarRota() {
+  await testarRotaManualUsaStoreVivaAposSubstituicao();
   const server = await ouvir(criarApp());
   try {
     const respostaA = await request(server, "cliente_a");

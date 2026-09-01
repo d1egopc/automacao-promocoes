@@ -183,12 +183,19 @@ function criarRotasManualV2(deps = {}) {
     return getClienteId(req) || "admin";
   }
 
+  function destinosPorClienteAtual() {
+    if (typeof deps.getDestinosPorCliente === "function") {
+      return deps.getDestinosPorCliente() || {};
+    }
+    return deps.destinosPorCliente || {};
+  }
+
   function depsDestinos(req, clienteId) {
     const plano = typeof deps.getPlanoUsuario === "function"
       ? deps.getPlanoUsuario(req)
       : deps.plano || {};
     return {
-      destinosPorCliente: deps.destinosPorCliente || {},
+      destinosPorCliente: destinosPorClienteAtual(),
       configsPorCliente: deps.configsPorCliente || {},
       sessoes: deps.sessoes || {},
       statusSessao: deps.statusSessao || {},
@@ -423,6 +430,8 @@ function criarRotasManualV2(deps = {}) {
         montarMensagemOferta: deps.montarMensagemOferta,
         enviarWhatsApp: deps.enviarWhatsApp,
         enviarTelegram: deps.enviarTelegram,
+        destinosPorCliente: destinosPorClienteAtual(),
+        getDestinosPorCliente: deps.getDestinosPorCliente,
         listarConexoesDiscord: deps.listarConexoesDiscord,
         listarCanaisDiscord: deps.listarCanaisDiscord,
         enviarDiscord: deps.enviarDiscord,
