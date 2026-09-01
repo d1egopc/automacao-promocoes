@@ -198,6 +198,9 @@ const criarRotasVitrine = require("./modules/vitrine/routes");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
 const {
+  criarRotasPlatformVariables
+} = require("./modules/platform-variables");
+const {
   criarRotasFinanceiroMercadoPago,
   criarWebhookMercadoPago,
   iniciarSchedulerReconciliacaoMercadoPago
@@ -13059,6 +13062,7 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
   getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
+app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
