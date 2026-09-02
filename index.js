@@ -221,9 +221,6 @@ const {
   enviarDiscord
 } = require("./modules/discord/discord-sender");
 const {
-  obterConfigDiscord
-} = require("./modules/discord/discord-oauth");
-const {
   normalizarLimitesPlano,
   normalizarListaMarketplaces,
   dentroDoLimite,
@@ -4585,7 +4582,6 @@ function diagnosticarDestinoDiscordAptoEnvio(clienteId = "admin", destino = {}) 
   if (!destinoEhDiscord(destino)) return { ok: false, motivo: "nao_discord" };
   if (!clienteTemRecursoDiscord(clienteId)) return { ok: false, motivo: "discord_plano_indisponivel" };
   if (typeof enviarDiscord !== "function") return { ok: false, motivo: "discord_sender_indisponivel" };
-  if (!textoDiscordExecutor(obterConfigDiscord(process.env).botToken)) return { ok: false, motivo: "discord_config_indisponivel" };
   if (!destinoDiscordTemIdentidadeCanal(destino)) return { ok: false, motivo: "discord_destino_incompleto" };
 
   const conexaoId = textoDiscordExecutor(destino.conexaoId || destino.sessao || destino.idConexao);

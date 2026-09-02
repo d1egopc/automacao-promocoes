@@ -75,6 +75,15 @@ function textoJson(valor) {
   return JSON.stringify(valor);
 }
 
+function criarResolverPlatformVariables(valores = {}) {
+  return async (nome) => {
+    if (Object.prototype.hasOwnProperty.call(valores, nome)) {
+      return { ok: true, source: "platform_variables", nome, value: valores[nome] };
+    }
+    return { ok: false, source: "missing", nome, value: null };
+  };
+}
+
 (async () => {
 const storage = criarStorageMemoria();
 const http = criarHttpDiscord();
@@ -101,6 +110,19 @@ assert.strictEqual(canais.length, 2, "Apenas canais texto/anuncio devem ser reto
 assert.strictEqual(canais.find((c) => c.id === "canal_ok").utilizavel, true, "Canal com view+send deve ser utilizavel");
 assert.strictEqual(canais.find((c) => c.id === "canal_sem_send").utilizavel, false, "Canal sem Send Messages deve ser indisponivel");
 assert.ok(!textoJson(canais).match(/token|secret|Authorization|permission_overwrites|permissions/i), "Retorno de canais deve ser sanitizado");
+
+const httpPainel = criarHttpDiscord();
+await listarCanaisDiscord({
+  guildId: "guild_a",
+  env: { DISCORD_BOT_TOKEN: "bot_env_antigo" },
+  httpClient: httpPainel.client,
+  getPlatformVariableImpl: criarResolverPlatformVariables({ DISCORD_BOT_TOKEN: "bot_painel_nao_vaza" })
+});
+assert.ok(
+  httpPainel.chamadas.every((c) => c.options.headers.Authorization === "Bot bot_painel_nao_vaza"),
+  "Listagem de canais deve consumir bot token do painel em vez de ENV"
+);
+assert.ok(!textoJson(canais).includes("bot_painel_nao_vaza"), "Token do painel nao deve sair em payload de canais");
 
 const destinoValidado = await validarDestinoDiscord({
   clienteId: "cliente_a",

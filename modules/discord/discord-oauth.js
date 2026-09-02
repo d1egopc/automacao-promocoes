@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { getPlatformVariable } = require("../platform-variables");
 
 const DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
@@ -6,9 +7,32 @@ const DISCORD_SCOPE = "bot identify";
 const DISCORD_PERMISSIONS = String(1024 + 2048 + 16384 + 32768);
 const STATE_TTL = "10m";
 const STATE_TTL_MS = 10 * 60 * 1000;
+const DISCORD_CLIENT_ID = "DISCORD_CLIENT_ID";
+const DISCORD_CLIENT_SECRET = "DISCORD_CLIENT_SECRET";
+const DISCORD_BOT_TOKEN = "DISCORD_BOT_TOKEN";
+const DISCORD_REDIRECT_URI = "DISCORD_REDIRECT_URI";
+const DISCORD_IMAGE_ALLOWED_HOSTS = "DISCORD_IMAGE_ALLOWED_HOSTS";
+const DISCORD_VARIAVEIS = new Set([
+  DISCORD_CLIENT_ID,
+  DISCORD_CLIENT_SECRET,
+  DISCORD_BOT_TOKEN,
+  DISCORD_REDIRECT_URI,
+  DISCORD_IMAGE_ALLOWED_HOSTS
+]);
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function validarRedirectUriDiscord(valor = "") {
+  const uri = texto(valor);
+  if (!uri) return "";
+  try {
+    const url = new URL(uri);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
 function obterConfigDiscord(env = process.env) {
@@ -16,7 +40,55 @@ function obterConfigDiscord(env = process.env) {
     clientId: texto(env.DISCORD_CLIENT_ID),
     clientSecret: texto(env.DISCORD_CLIENT_SECRET),
     botToken: texto(env.DISCORD_BOT_TOKEN),
-    redirectUri: texto(env.DISCORD_REDIRECT_URI)
+    redirectUri: validarRedirectUriDiscord(env.DISCORD_REDIRECT_URI),
+    imageAllowedHosts: texto(env.DISCORD_IMAGE_ALLOWED_HOSTS)
+  };
+}
+
+async function obterPlatformVariableDiscord(nome, {
+  env = process.env,
+  getPlatformVariableImpl = getPlatformVariable,
+  defaultValue = ""
+} = {}) {
+  if (!DISCORD_VARIAVEIS.has(nome)) {
+    throw new Error("discord_platform_variable_nao_homologada");
+  }
+  try {
+    const resultado = await getPlatformVariableImpl(nome, {
+      envFallback: true,
+      defaultValue
+    });
+    if (resultado?.ok === true) return resultado.value;
+  } catch {
+    // Mantem compatibilidade temporaria com ENV quando a central estiver indisponivel.
+  }
+  if (Object.prototype.hasOwnProperty.call(env, nome)) return env[nome];
+  return defaultValue;
+}
+
+async function obterConfigDiscordAsync({
+  env = process.env,
+  getPlatformVariableImpl = getPlatformVariable
+} = {}) {
+  const [
+    clientId,
+    clientSecret,
+    botToken,
+    redirectUri,
+    imageAllowedHosts
+  ] = await Promise.all([
+    obterPlatformVariableDiscord(DISCORD_CLIENT_ID, { env, getPlatformVariableImpl }),
+    obterPlatformVariableDiscord(DISCORD_CLIENT_SECRET, { env, getPlatformVariableImpl }),
+    obterPlatformVariableDiscord(DISCORD_BOT_TOKEN, { env, getPlatformVariableImpl }),
+    obterPlatformVariableDiscord(DISCORD_REDIRECT_URI, { env, getPlatformVariableImpl }),
+    obterPlatformVariableDiscord(DISCORD_IMAGE_ALLOWED_HOSTS, { env, getPlatformVariableImpl })
+  ]);
+  return {
+    clientId: texto(clientId),
+    clientSecret: texto(clientSecret),
+    botToken: texto(botToken),
+    redirectUri: validarRedirectUriDiscord(redirectUri),
+    imageAllowedHosts: texto(imageAllowedHosts)
   };
 }
 
@@ -64,8 +136,7 @@ function validarStateDiscord(state = "", { jwt, secret = "" } = {}) {
   };
 }
 
-function criarUrlConexaoDiscord({ clienteId = "", env = process.env, jwt, secret = "", registrarStateDiscordOAuth } = {}) {
-  const config = obterConfigDiscord(env);
+function criarUrlConexaoDiscordComConfig({ clienteId = "", config = {}, jwt, secret = "", registrarStateDiscordOAuth } = {}) {
   if (!validarConfigConectar(config)) {
     const erro = new Error("discord_config_incompleta");
     erro.codigo = "discord_config_incompleta";
@@ -102,6 +173,34 @@ function criarUrlConexaoDiscord({ clienteId = "", env = process.env, jwt, secret
     state: state.token,
     nonce: state.nonce
   };
+}
+
+function criarUrlConexaoDiscord({ clienteId = "", env = process.env, jwt, secret = "", registrarStateDiscordOAuth } = {}) {
+  return criarUrlConexaoDiscordComConfig({
+    clienteId,
+    config: obterConfigDiscord(env),
+    jwt,
+    secret,
+    registrarStateDiscordOAuth
+  });
+}
+
+async function criarUrlConexaoDiscordAsync({
+  clienteId = "",
+  env = process.env,
+  jwt,
+  secret = "",
+  registrarStateDiscordOAuth,
+  getPlatformVariableImpl = getPlatformVariable
+} = {}) {
+  const config = await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
+  return criarUrlConexaoDiscordComConfig({
+    clienteId,
+    config,
+    jwt,
+    secret,
+    registrarStateDiscordOAuth
+  });
 }
 
 async function trocarCodigoDiscord({ code = "", config = {}, httpClient } = {}) {
@@ -160,9 +259,10 @@ async function processarCallbackDiscord({
   secret = "",
   httpClient,
   salvarConexaoDiscord,
-  consumirStateDiscordOAuth
+  consumirStateDiscordOAuth,
+  getPlatformVariableImpl = getPlatformVariable
 } = {}) {
-  const config = obterConfigDiscord(env);
+  const config = await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
   if (!validarConfigCallback(config)) {
     const erro = new Error("discord_config_incompleta");
     erro.codigo = "discord_config_incompleta";
@@ -206,9 +306,11 @@ module.exports = {
   DISCORD_PERMISSIONS,
   STATE_TTL_MS,
   obterConfigDiscord,
+  obterConfigDiscordAsync,
   criarStateDiscord,
   validarStateDiscord,
   criarUrlConexaoDiscord,
+  criarUrlConexaoDiscordAsync,
   trocarCodigoDiscord,
   buscarGuildDiscord,
   guildDoTokenOAuth,

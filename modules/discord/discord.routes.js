@@ -1,6 +1,6 @@
 const express = require("express");
 const {
-  criarUrlConexaoDiscord,
+  criarUrlConexaoDiscordAsync,
   processarCallbackDiscord
 } = require("./discord-oauth");
 const {
@@ -56,20 +56,22 @@ function criarRotasDiscord(deps = {}) {
   const env = deps.env || process.env;
   const httpClient = deps.httpClient;
   const storageDeps = deps.storageDeps || {};
+  const getPlatformVariableImpl = deps.getPlatformVariableImpl;
 
-  router.get("/conectar", (req, res) => {
+  router.get("/conectar", async (req, res) => {
     const clienteId = getClienteId(req);
     if (!usuarioTemRecurso(req, "discord")) {
       return res.status(403).json(erroRecursoDiscordPlano());
     }
 
     try {
-      const resultado = criarUrlConexaoDiscord({
+      const resultado = await criarUrlConexaoDiscordAsync({
         clienteId,
         env,
         jwt,
         secret,
-        registrarStateDiscordOAuth: (id, dados) => registrarStateDiscordOAuth(id, dados, storageDeps)
+        registrarStateDiscordOAuth: (id, dados) => registrarStateDiscordOAuth(id, dados, storageDeps),
+        getPlatformVariableImpl
       });
       return res.json({ ok: true, url: resultado.url });
     } catch (erro) {
@@ -89,7 +91,8 @@ function criarRotasDiscord(deps = {}) {
         salvarConexaoDiscord: (clienteId, dados) => {
           validarCotaConexaoDiscord(clienteId, dados?.guildId);
           return salvarConexaoDiscord(clienteId, dados, storageDeps);
-        }
+        },
+        getPlatformVariableImpl
       });
 
       return res.redirect(302, DISCORD_CALLBACK_SUCESSO_URL);
@@ -124,7 +127,7 @@ function criarRotasDiscord(deps = {}) {
     }
 
     try {
-      const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient });
+      const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient, getPlatformVariableImpl });
       return res.json({ ok: true, canais });
     } catch (erro) {
       return res.status(502).json({ ok: false, erro: erroMensagem(erro, "Falha ao listar canais Discord") });
@@ -153,7 +156,7 @@ function criarRotasDiscord(deps = {}) {
     }
 
     try {
-      const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient });
+      const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient, getPlatformVariableImpl });
       const canal = canais.find((item) => item.id === channelId);
       if (!canal) {
         return res.status(404).json({ ok: false, erro: "Canal Discord nao encontrado" });
@@ -166,7 +169,8 @@ function criarRotasDiscord(deps = {}) {
         channelId: canal.id,
         mensagem: MENSAGEM_TESTE_DISCORD,
         env,
-        httpClient
+        httpClient,
+        getPlatformVariableImpl
       });
       if (!resultado.ok) {
         return res.status(resultado.statusHttp || 502).json({

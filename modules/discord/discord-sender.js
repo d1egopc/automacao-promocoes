@@ -1,4 +1,4 @@
-const { obterConfigDiscord, DISCORD_API_BASE } = require("./discord-oauth");
+const { obterConfigDiscordAsync, DISCORD_API_BASE } = require("./discord-oauth");
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
@@ -152,8 +152,9 @@ function criarFormData({ mensagem = "", imagem = {} } = {}) {
   return form;
 }
 
-async function baixarImagemDiscord({ imagemUrl = "", env = process.env, httpClient } = {}) {
-  const hostsPermitidos = listaHosts(env.DISCORD_IMAGE_ALLOWED_HOSTS);
+async function baixarImagemDiscord({ imagemUrl = "", env = process.env, httpClient, getPlatformVariableImpl, config = null } = {}) {
+  const configDiscord = config || await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
+  const hostsPermitidos = listaHosts(configDiscord.imageAllowedHosts);
   if (!hostsPermitidos.length) return { ok: false, erro: "discord_imagem_host_nao_permitido" };
 
   const url = validarUrlImagem(imagemUrl, hostsPermitidos);
@@ -225,10 +226,10 @@ function validarRespostaMensagemDiscord(resposta = {}, channelId = "") {
   };
 }
 
-async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", env = process.env, httpClient, now = () => new Date() } = {}) {
+async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", env = process.env, httpClient, now = () => new Date(), getPlatformVariableImpl } = {}) {
   const canal = texto(channelId);
   const conteudo = texto(mensagem);
-  const config = obterConfigDiscord(env);
+  const config = await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
 
   if (!config.botToken) return respostaErro({ channelId: canal, erro: "discord_bot_token_ausente" });
   if (!canal) return respostaErro({ channelId: canal, erro: "discord_channel_id_ausente" });
@@ -245,7 +246,7 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", en
   let imagemEnviada = false;
 
   if (texto(imagemUrl)) {
-    const imagem = await baixarImagemDiscord({ imagemUrl, env, httpClient });
+    const imagem = await baixarImagemDiscord({ imagemUrl, env, httpClient, getPlatformVariableImpl, config });
     if (!imagem.ok) {
       return respostaErro({
         channelId: canal,

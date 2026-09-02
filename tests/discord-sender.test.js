@@ -60,6 +60,20 @@ function textoJson(valor) {
   return JSON.stringify(valor);
 }
 
+function criarResolverPlatformVariables(valores = {}) {
+  return async (nome) => {
+    if (Object.prototype.hasOwnProperty.call(valores, nome)) {
+      return {
+        ok: true,
+        source: "platform_variables",
+        nome,
+        value: valores[nome]
+      };
+    }
+    return { ok: false, source: "missing", nome, value: null };
+  };
+}
+
 (async () => {
   {
     const http = criarHttp();
@@ -354,6 +368,111 @@ function textoJson(valor) {
     });
     assert.ok(!textoJson(resultado).includes("bot_token_nao_vaza"));
     assert.ok(!textoJson(resultado).match(/Authorization|Bot /i));
+  }
+
+  {
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Oferta via painel",
+      env: {
+        DISCORD_BOT_TOKEN: "bot_env_antigo",
+        DISCORD_IMAGE_ALLOWED_HOSTS: "evil.example"
+      },
+      httpClient: http.client,
+      getPlatformVariableImpl: criarResolverPlatformVariables({
+        DISCORD_BOT_TOKEN: "bot_painel_nao_vaza",
+        DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com"
+      })
+    });
+    assert.strictEqual(resultado.ok, true);
+    const post = http.chamadas.find((c) => c.metodo === "POST");
+    assert.strictEqual(post.options.headers.Authorization, "Bot bot_painel_nao_vaza", "Bot token do painel deve ter precedencia sobre ENV");
+    assert.ok(!textoJson(resultado).includes("bot_painel_nao_vaza"), "Resultado nao deve vazar bot token do painel");
+  }
+
+  {
+    const http = criarHttp();
+    const imagem = await baixarImagemDiscord({
+      imagemUrl: "https://m.media-amazon.com/produto.png",
+      env: { DISCORD_IMAGE_ALLOWED_HOSTS: "evil.example" },
+      httpClient: http.client,
+      getPlatformVariableImpl: criarResolverPlatformVariables({
+        DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com,host-nao-comprovado.test,*"
+      })
+    });
+    assert.strictEqual(imagem.ok, true, "Host comprovado vindo do painel deve ser permitido");
+
+    const httpBloqueado = criarHttp();
+    const imagemBloqueada = await baixarImagemDiscord({
+      imagemUrl: "https://host-nao-comprovado.test/produto.png",
+      env: { DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com" },
+      httpClient: httpBloqueado.client,
+      getPlatformVariableImpl: criarResolverPlatformVariables({
+        DISCORD_IMAGE_ALLOWED_HOSTS: "host-nao-comprovado.test,*"
+      })
+    });
+    assert.strictEqual(imagemBloqueada.ok, false, "Painel nao pode ampliar allowlist alem dos hosts comprovados");
+    assert.strictEqual(imagemBloqueada.erro, "discord_imagem_host_nao_permitido");
+    assert.strictEqual(httpBloqueado.chamadas.length, 0);
+  }
+
+  {
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Fallback ENV",
+      env: ENV,
+      httpClient: http.client,
+      getPlatformVariableImpl: criarResolverPlatformVariables({})
+    });
+    assert.strictEqual(resultado.ok, true, "ENV deve seguir como fallback temporario");
+    const post = http.chamadas.find((c) => c.metodo === "POST");
+    assert.strictEqual(post.options.headers.Authorization, `Bot ${ENV.DISCORD_BOT_TOKEN}`);
+  }
+
+  {
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Sem token",
+      env: {},
+      httpClient: http.client,
+      getPlatformVariableImpl: criarResolverPlatformVariables({})
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.erro, "discord_bot_token_ausente");
+    assert.strictEqual(http.chamadas.length, 0, "Ausencia de painel e ENV deve falhar sem chamar Discord");
+  }
+
+  {
+    const http = criarHttp();
+    let tokenAtual = "bot_runtime_1";
+    const resolverRuntime = async (nome) => {
+      if (nome === "DISCORD_BOT_TOKEN") {
+        return { ok: true, source: "platform_variables", nome, value: tokenAtual };
+      }
+      return { ok: false, source: "missing", nome, value: null };
+    };
+    await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Runtime 1",
+      env: {},
+      httpClient: http.client,
+      getPlatformVariableImpl: resolverRuntime
+    });
+    tokenAtual = "bot_runtime_2";
+    await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Runtime 2",
+      env: {},
+      httpClient: http.client,
+      getPlatformVariableImpl: resolverRuntime
+    });
+    const autorizacoes = http.chamadas
+      .filter((c) => c.metodo === "POST")
+      .map((c) => c.options.headers.Authorization);
+    assert.deepStrictEqual(autorizacoes, ["Bot bot_runtime_1", "Bot bot_runtime_2"], "Mudanca runtime do token deve valer sem restart");
   }
 
   {

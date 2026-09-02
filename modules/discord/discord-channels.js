@@ -1,4 +1,4 @@
-const { obterConfigDiscord, DISCORD_API_BASE } = require("./discord-oauth");
+const { obterConfigDiscordAsync, DISCORD_API_BASE } = require("./discord-oauth");
 
 const CANAL_TEXTO_GUILD = 0;
 const CANAL_ANUNCIO_GUILD = 5;
@@ -154,8 +154,8 @@ function permissoesEfetivasCanal({ guildId = "", botId = "", membro = {}, roles 
   return permissoes;
 }
 
-async function listarCanaisDiscord({ guildId = "", env = process.env, httpClient } = {}) {
-  const config = obterConfigDiscord(env);
+async function listarCanaisDiscord({ guildId = "", env = process.env, httpClient, getPlatformVariableImpl } = {}) {
+  const config = await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
   if (!config.botToken) throw new Error("discord_bot_token_ausente");
 
   const canais = await listarCanaisBrutos({ guildId, httpClient, config });
@@ -180,7 +180,7 @@ async function listarCanaisDiscord({ guildId = "", env = process.env, httpClient
     });
 }
 
-async function validarDestinoDiscord({ clienteId = "", destino = {}, conexoes = [], env = process.env, httpClient } = {}) {
+async function validarDestinoDiscord({ clienteId = "", destino = {}, conexoes = [], env = process.env, httpClient, getPlatformVariableImpl } = {}) {
   const conexaoId = texto(destino.conexaoId || destino.sessao || destino.idConexao);
   const channelId = texto(destino.channelId || destino.canalId || destino.grupo || destino.canal);
   const conexao = conexoes.find((item) => texto(item.id) === conexaoId);
@@ -190,7 +190,7 @@ async function validarDestinoDiscord({ clienteId = "", destino = {}, conexoes = 
   if (!texto(conexao.guildId)) throw new Error("discord_guild_id_ausente");
   if (!channelId) throw new Error("discord_channel_id_ausente");
 
-  const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient });
+  const canais = await listarCanaisDiscord({ guildId: conexao.guildId, env, httpClient, getPlatformVariableImpl });
   const canal = canais.find((item) => item.id === channelId);
   if (!canal) throw new Error("discord_canal_nao_encontrado");
   if (!canal.utilizavel) throw new Error("discord_canal_indisponivel");

@@ -74,7 +74,7 @@ assert.ok(blocoDiagnostico.includes('"discord_indisponivel"'), "Diagnostico deve
 
 assert.ok(indexFonte.includes("function diagnosticarDestinoDiscordAptoEnvio"), "Helper de disponibilidade Discord deve existir");
 assert.ok(indexFonte.includes("typeof enviarDiscord !== \"function\""), "Disponibilidade deve exigir sender Discord");
-assert.ok(indexFonte.includes("obterConfigDiscord(process.env).botToken"), "Disponibilidade deve exigir bot token via config Discord encapsulada");
+assert.ok(!indexFonte.includes("obterConfigDiscord(process.env).botToken"), "Diagnostico sincrono nao deve fazer pre-veto ENV-only do bot token");
 assert.ok(indexFonte.includes("listarConexoesDiscord(clienteId).find"), "Disponibilidade deve validar conexao do workspace");
 
 for (const proibido of [

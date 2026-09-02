@@ -21,9 +21,18 @@ function erroNaoEncontrado(nome) {
   return erro;
 }
 
+const VARIAVEIS_SECRET_OBRIGATORIAS = new Set([
+  "DISCORD_CLIENT_SECRET",
+  "DISCORD_BOT_TOKEN"
+]);
+
+function tipoEfetivoVariavel(nome, tipo) {
+  return VARIAVEIS_SECRET_OBRIGATORIAS.has(normalizarNomeVariavel(nome)) ? "secret" : tipo;
+}
+
 function payloadSeguro(registro, { env = process.env, incluirValor = true } = {}) {
   const valor = descriptografarValor(registro, { env });
-  const tipo = registro.type || registro.tipo;
+  const tipo = tipoEfetivoVariavel(registro.name || registro.nome, registro.type || registro.tipo);
   const ehSecret = tipo === "secret";
   return {
     nome: registro.name || registro.nome,
@@ -82,7 +91,7 @@ function criarPlatformVariablesService({ repository = criarPlatformVariablesRepo
       validarChaveMestraDisponivel(env);
       await garantirSchema();
       const nomeNormalizado = normalizarNomeVariavel(nome);
-      const tipoNormalizado = normalizarTipoVariavel(tipo);
+      const tipoNormalizado = tipoEfetivoVariavel(nomeNormalizado, normalizarTipoVariavel(tipo));
       const valorNormalizado = normalizarValorParaArmazenamento(valor, tipoNormalizado);
       const criptografado = criptografarValor(valorNormalizado, { env });
       const registro = await repository.salvar({

@@ -221,6 +221,26 @@ async function testarSchemaIdempotente() {
   assert.strictEqual(criadaBool.status, 201);
   assert.strictEqual(criadaBool.body.variavel.value, true);
 
+  const discordSecretTexto = await request(app, "POST", "/admin/platform-variables", {
+    token: tokenAdmin,
+    body: { nome: "DISCORD_BOT_TOKEN", tipo: "text", valor: "discord-bot-token-nao-vaza" }
+  });
+  assert.strictEqual(discordSecretTexto.status, 201, "Discord bot token pode ser salvo pelo painel");
+  assert.strictEqual(discordSecretTexto.body.variavel.tipo, "secret", "Discord bot token e secret por nome");
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(discordSecretTexto.body.variavel, "value"), false, "Discord bot token nao volta em claro mesmo se enviado como text");
+  assert.ok(!JSON.stringify(discordSecretTexto.body).includes("discord-bot-token-nao-vaza"), "API nao vaza token Discord");
+  const discordSecretInterno = await service.getPlatformVariable("DISCORD_BOT_TOKEN");
+  assert.strictEqual(discordSecretInterno.value, "discord-bot-token-nao-vaza", "Resolvedor interno descriptografa token Discord");
+
+  const discordClientSecretTexto = await request(app, "POST", "/admin/platform-variables", {
+    token: tokenAdmin,
+    body: { nome: "DISCORD_CLIENT_SECRET", tipo: "url", valor: "discord-client-secret-nao-vaza" }
+  });
+  assert.strictEqual(discordClientSecretTexto.status, 201);
+  assert.strictEqual(discordClientSecretTexto.body.variavel.tipo, "secret", "Discord client secret e secret por nome");
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(discordClientSecretTexto.body.variavel, "value"), false);
+  assert.ok(!JSON.stringify(discordClientSecretTexto.body).includes("discord-client-secret-nao-vaza"), "API nao vaza client secret Discord");
+
   const remover = await request(app, "DELETE", "/admin/platform-variables/TEST_SECRET", { token: tokenAdmin });
   assert.strictEqual(remover.status, 200, "delete remove");
   const depoisDelete = await service.getPlatformVariable("TEST_SECRET");
