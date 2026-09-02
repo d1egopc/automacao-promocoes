@@ -29,6 +29,10 @@ const {
   criarMedidorEngineMemoryStage,
   resumirFilaPorStatus
 } = require("./modules/telemetria/engine-memory-stage");
+const {
+  getGoogleClientId,
+  payloadGoogleConfigPublica
+} = require("./modules/google-platform-config");
 
 const {
   initEngineDatabase,
@@ -11788,10 +11792,14 @@ function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, ope
   };
 }
 
-app.get("/public/saas-config", (req, res) => {
+app.get("/public/saas-config", async (req, res) => {
+  const configPublica = payloadSaasConfigPublico();
   return res.json({
     ok: true,
-    config: payloadSaasConfigPublico()
+    config: {
+      ...configPublica,
+      ...(await payloadGoogleConfigPublica())
+    }
   });
 });
 
@@ -22309,10 +22317,6 @@ const googleAuthRateLimit = rateLimit({
   }
 });
 
-function getGoogleClientId() {
-  return String(process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
-}
-
 function normalizarBooleanoGoogle(valor) {
   return valor === true || String(valor || "").toLowerCase() === "true";
 }
@@ -22341,7 +22345,7 @@ async function carregarGoogleJwks() {
 
 async function validarGoogleIdToken(idToken = "") {
   const token = String(idToken || "").trim();
-  const clientId = getGoogleClientId();
+  const clientId = await getGoogleClientId();
 
   if (!clientId) {
     const erro = new Error("Google Client ID nao configurado");

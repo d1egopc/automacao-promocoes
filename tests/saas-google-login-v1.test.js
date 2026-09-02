@@ -308,6 +308,16 @@ function trechoEntre(inicio, fim) {
   try {
     await esperarServidor(port, proc);
 
+    const configPublica = await request({
+      method: "GET",
+      port,
+      path: "/public/saas-config"
+    });
+    assert.strictEqual(configPublica.status, 200);
+    assert.strictEqual(configPublica.body.config.googleClientId, clientId, "/public/saas-config deve expor o Client ID efetivo do backend");
+    assert.ok(!JSON.stringify(configPublica.body).includes("GOOGLE_JWKS_JSON"), "config publica nao deve expor JWKS/variaveis internas");
+    assert.ok(!JSON.stringify(configPublica.body).includes("PRIVATE KEY"), "config publica nao deve expor segredo");
+
     const antesUsuarios = readJson(path.join(dataDir, "usuarios.json"), []);
     const workspaceAntes = JSON.stringify(readJson(path.join(dataDir, "configs_clientes.json"), {}).user_existente);
 
@@ -917,6 +927,7 @@ function trechoEntre(inicio, fim) {
     assert.ok(blocoGoogle.includes("issuer: GOOGLE_ISSUERS_VALIDOS"), "validacao deve checar issuer");
     assert.ok(blocoGoogle.includes("audience: clientId"), "validacao deve checar audience");
     assert.ok(blocoGoogle.includes('algorithms: ["RS256"]'), "validacao deve restringir algoritmo");
+    assert.ok(blocoGoogle.includes("await getGoogleClientId()"), "Google deve resolver Client ID em runtime por requisicao");
     assert.ok(!/if\s*\([^)]*plano\s*===|free|premium|enterprise|ultimate/i.test(blocoGoogle), "Google Login nao pode hardcodar plano");
 
     console.log("saas-google-login-v1.test.js OK");
