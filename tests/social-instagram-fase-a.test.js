@@ -194,7 +194,7 @@ function salvarFilaCliente(clienteId, itens) {
   })));
 }
 
-function iniciarInstagramPelaRota(retornoFrontend) {
+async function iniciarInstagramPelaRota(retornoFrontend) {
   const router = criarRotasSocial({
     getClienteId: () => "cliente_rota",
     usuarioTemRecurso: () => true
@@ -213,7 +213,7 @@ function iniciarInstagramPelaRota(retornoFrontend) {
       return dados;
     }
   };
-  camada.route.stack[0].handle({
+  await camada.route.stack[0].handle({
     usuario: { papel: "admin_master" },
     query: { retornoFrontend }
   }, res);
@@ -221,7 +221,7 @@ function iniciarInstagramPelaRota(retornoFrontend) {
 }
 
 (async () => {
-  const inicioRotaOficial = iniciarInstagramPelaRota("https://optimuspromo.vercel.app");
+  const inicioRotaOficial = await iniciarInstagramPelaRota("https://optimuspromo.vercel.app");
   const stateRotaOficial = new URL(inicioRotaOficial.authUrl).searchParams.get("state");
   assert.strictEqual(
     instagram.decodificarStateInstagram(stateRotaOficial).retornoFrontend,
@@ -229,7 +229,7 @@ function iniciarInstagramPelaRota(retornoFrontend) {
     "origem oficial iniciadora deve ser preservada"
   );
 
-  const inicioRotaExterna = iniciarInstagramPelaRota("https://externo-invalido.test");
+  const inicioRotaExterna = await iniciarInstagramPelaRota("https://externo-invalido.test");
   const stateRotaExterna = new URL(inicioRotaExterna.authUrl).searchParams.get("state");
   assert.strictEqual(
     instagram.decodificarStateInstagram(stateRotaExterna).retornoFrontend,

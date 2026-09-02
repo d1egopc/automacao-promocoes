@@ -15,7 +15,7 @@ const socialMediaStorage = require("./social-media-storage");
 const {
   consultarAtivosMeta,
   concluirCallbackMeta,
-  iniciarConexaoMeta
+  iniciarConexaoMetaAsync
 } = require("./facebook");
 const {
   concluirCallbackInstagram,
@@ -23,15 +23,20 @@ const {
   diagnosticarComentariosPublicacaoInstagram,
   getPublicacaoInstagram,
   getInteracaoInstagram,
-  iniciarConexaoInstagram,
+  iniciarConexaoInstagramAsync,
   lerConexaoInstagram,
   listarInteracoesInstagram,
   listarPublicacoesInstagram,
   limparConexaoInstagram,
   processarWebhookInstagram,
   sanitizarConexaoInstagram,
-  validarAssinaturaWebhookInstagram
+  validarAssinaturaWebhookInstagramAsync
 } = require("./instagram");
+const {
+  obterConfigMetaAsync,
+  obterConfigInstagramAsync,
+  obterInstagramWebhookVerifyTokenAsync
+} = require("./platform-config");
 
 const FRONTEND_URL_OFICIAL_SOCIAL = "https://www.optimuspromo.com.br";
 const FRONTEND_URLS_COMPATIVEIS_SOCIAL = [
@@ -92,6 +97,8 @@ function criarRotasSocial(deps = {}) {
   const usuarioTemRecurso = typeof deps.usuarioTemRecurso === "function"
     ? deps.usuarioTemRecurso
     : () => true;
+  const env = deps.env || process.env;
+  const getPlatformVariableImpl = deps.getPlatformVariableImpl;
 
   function socialPermitido(req) {
     return req.usuario?.papel === "admin_master" || usuarioTemRecurso(req, "social");
@@ -479,16 +486,18 @@ function criarRotasSocial(deps = {}) {
     }
   });
 
-  router.get("/meta/conectar", (req, res) => {
+  router.get("/meta/conectar", async (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
     }
 
     try {
       const clienteId = cliente(req);
-      const inicio = iniciarConexaoMeta({
+      const inicio = await iniciarConexaoMetaAsync({
         clienteId,
-        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || "",
+        env,
+        getPlatformVariableImpl
       });
 
       logSocial("[SOCIAL-META-OAUTH-INICIO]", {
@@ -519,21 +528,24 @@ function criarRotasSocial(deps = {}) {
   router.get("/meta/callback", async (req, res) => {
     console.log("[SOCIAL-META-CALLBACK-ENTROU]");
     try {
+      const configMeta = await obterConfigMetaAsync({ env, getPlatformVariableImpl });
       logSocial("[SOCIAL-META-CALLBACK-INICIO]", {
         codeFinal: String(req.query?.code || "").slice(-6),
         temState: Boolean(req.query?.state),
         redirectUriQuery: req.query?.redirectUri || req.query?.redirect_uri || "",
         env: {
-          META_APP_ID: Boolean(process.env.META_APP_ID),
-          META_APP_SECRET: Boolean(process.env.META_APP_SECRET),
-          META_REDIRECT_URI: Boolean(process.env.META_REDIRECT_URI)
+          META_APP_ID: Boolean(configMeta.appId),
+          META_APP_SECRET: Boolean(configMeta.appSecret),
+          META_REDIRECT_URI: Boolean(configMeta.redirectUri)
         }
       });
 
       const resultado = await concluirCallbackMeta({
         code: req.query?.code || "",
         state: req.query?.state || "",
-        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || "",
+        env,
+        getPlatformVariableImpl
       });
       const salvo = storage.setConexaoMetaSocial(resultado.clienteId, resultado);
       const meta = storage.sanitizarConexaoMeta(salvo);
@@ -598,19 +610,21 @@ function criarRotasSocial(deps = {}) {
     return res.json(payloadStatusInstagram(lerConexaoInstagram(clienteId)));
   });
 
-  router.get("/instagram/conectar", (req, res) => {
+  router.get("/instagram/conectar", async (req, res) => {
     if (!socialPermitido(req)) {
       return res.status(403).json({ ok: false, erro: "Social Module nao disponivel no plano" });
     }
 
     try {
       const clienteId = cliente(req);
-      const inicio = iniciarConexaoInstagram({
+      const inicio = await iniciarConexaoInstagramAsync({
         clienteId,
         redirectUri: req.query?.redirectUri || req.query?.redirect_uri || "",
         retornoFrontend: frontendUrlSocialOficial(
           req.query?.retornoFrontend || req.query?.frontendOrigin || ""
-        )
+        ),
+        env,
+        getPlatformVariableImpl
       });
 
       logSocial("[SOCIAL-INSTAGRAM-OAUTH-INICIO]", {
@@ -637,26 +651,30 @@ function criarRotasSocial(deps = {}) {
   router.get("/instagram/callback", async (req, res) => {
     let contextoState = {};
     try {
-      contextoState = decodificarStateInstagram(req.query?.state || "");
+      const configInstagram = await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+      contextoState = decodificarStateInstagram(req.query?.state || "", { config: configInstagram });
     } catch {
       contextoState = {};
     }
 
     try {
+      const configInstagram = await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
       logSocial("[SOCIAL-INSTAGRAM-CALLBACK-INICIO]", {
         codePresente: Boolean(req.query?.code),
         temState: Boolean(req.query?.state),
         env: {
-          INSTAGRAM_APP_ID: Boolean(process.env.INSTAGRAM_APP_ID),
-          INSTAGRAM_APP_SECRET: Boolean(process.env.INSTAGRAM_APP_SECRET),
-          INSTAGRAM_REDIRECT_URI: Boolean(process.env.INSTAGRAM_REDIRECT_URI)
+          INSTAGRAM_APP_ID: Boolean(configInstagram.appId),
+          INSTAGRAM_APP_SECRET: Boolean(configInstagram.appSecret),
+          INSTAGRAM_REDIRECT_URI: Boolean(configInstagram.redirectUri)
         }
       });
 
       const conexao = await concluirCallbackInstagram({
         code: req.query?.code || "",
         state: req.query?.state || "",
-        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || ""
+        redirectUri: req.query?.redirectUri || req.query?.redirect_uri || "",
+        env,
+        getPlatformVariableImpl
       });
       const instagram = sanitizarConexaoInstagram(conexao);
 
@@ -780,8 +798,8 @@ function criarRotasSocial(deps = {}) {
     }
   });
 
-  router.get("/instagram/webhook", (req, res) => {
-    const verifyToken = String(process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || "").trim();
+  router.get("/instagram/webhook", async (req, res) => {
+    const verifyToken = String(await obterInstagramWebhookVerifyTokenAsync({ env, getPlatformVariableImpl }) || "").trim();
     const mode = String(req.query?.["hub.mode"] || "").trim();
     const token = String(req.query?.["hub.verify_token"] || "").trim();
     const challenge = String(req.query?.["hub.challenge"] || "").trim();
@@ -793,7 +811,7 @@ function criarRotasSocial(deps = {}) {
     return res.status(403).json({ ok: false, erro: "verify_token_invalido" });
   });
 
-  router.post("/instagram/webhook", (req, res) => {
+  router.post("/instagram/webhook", async (req, res) => {
     logSocial("[INSTAGRAM-WEBHOOK-POST-RECEBIDO]", {
       recebidoEm: new Date().toISOString(),
       metodo: req.method,
@@ -815,7 +833,12 @@ function criarRotasSocial(deps = {}) {
       motivo: "",
       algoritmo: algoritmoDetectado
     });
-    const assinaturaValida = validarAssinaturaWebhookInstagram({ assinatura, rawBody });
+    const assinaturaValida = await validarAssinaturaWebhookInstagramAsync({
+      assinatura,
+      rawBody,
+      env,
+      getPlatformVariableImpl
+    });
     if (!assinaturaValida) {
       logSocial("[INSTAGRAM-WEBHOOK-ASSINATURA-INVALIDA]", {
         status: "invalida",
@@ -834,7 +857,9 @@ function criarRotasSocial(deps = {}) {
       processarWebhookInstagram({
         payload: req.body || {},
         assinatura,
-        rawBody
+        rawBody,
+        env,
+        getPlatformVariableImpl
       }).catch(e => {
         logErroSocial({ erro: e.message || "webhook_instagram_falhou", rota: "POST /social/instagram/webhook" });
       });

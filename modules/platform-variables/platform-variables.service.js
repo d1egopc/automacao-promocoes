@@ -23,7 +23,11 @@ function erroNaoEncontrado(nome) {
 
 const VARIAVEIS_SECRET_OBRIGATORIAS = new Set([
   "DISCORD_CLIENT_SECRET",
-  "DISCORD_BOT_TOKEN"
+  "DISCORD_BOT_TOKEN",
+  "META_APP_SECRET",
+  "INSTAGRAM_APP_SECRET",
+  "INSTAGRAM_OAUTH_STATE_SECRET",
+  "INSTAGRAM_WEBHOOK_VERIFY_TOKEN"
 ]);
 
 function tipoEfetivoVariavel(nome, tipo) {

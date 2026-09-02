@@ -241,6 +241,24 @@ async function testarSchemaIdempotente() {
   assert.strictEqual(Object.prototype.hasOwnProperty.call(discordClientSecretTexto.body.variavel, "value"), false);
   assert.ok(!JSON.stringify(discordClientSecretTexto.body).includes("discord-client-secret-nao-vaza"), "API nao vaza client secret Discord");
 
+  for (const nomeSecret of [
+    "META_APP_SECRET",
+    "INSTAGRAM_APP_SECRET",
+    "INSTAGRAM_OAUTH_STATE_SECRET",
+    "INSTAGRAM_WEBHOOK_VERIFY_TOKEN"
+  ]) {
+    const valor = `${nomeSecret.toLowerCase()}-nao-vaza`;
+    const resposta = await request(app, "POST", "/admin/platform-variables", {
+      token: tokenAdmin,
+      body: { nome: nomeSecret, tipo: "text", valor }
+    });
+    assert.strictEqual(resposta.status, 201, `${nomeSecret} pode ser salvo pelo painel`);
+    assert.strictEqual(resposta.body.variavel.tipo, "secret", `${nomeSecret} e secret por nome`);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(resposta.body.variavel, "value"), false, `${nomeSecret} nao retorna em claro`);
+    assert.ok(!JSON.stringify(resposta.body).includes(valor), `${nomeSecret} nao vaza na API`);
+    assert.strictEqual((await service.getPlatformVariable(nomeSecret)).value, valor, `${nomeSecret} descriptografa internamente`);
+  }
+
   const remover = await request(app, "DELETE", "/admin/platform-variables/TEST_SECRET", { token: tokenAdmin });
   assert.strictEqual(remover.status, 200, "delete remove");
   const depoisDelete = await service.getPlatformVariable("TEST_SECRET");

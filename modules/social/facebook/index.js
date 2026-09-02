@@ -1,5 +1,10 @@
 const axios = require("axios");
 const crypto = require("crypto");
+const {
+  obterConfigMetaEnv,
+  obterConfigMetaAsync,
+  urlHttps
+} = require("../platform-config");
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || "v20.0";
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -49,33 +54,33 @@ function clienteIdSeguro(clienteId = "admin") {
   return valor;
 }
 
-function appIdMeta() {
-  return texto(process.env.META_APP_ID);
+function appIdMeta(config = null) {
+  return texto(config?.appId ?? process.env.META_APP_ID);
 }
 
-function appSecretMeta() {
-  return texto(process.env.META_APP_SECRET);
+function appSecretMeta(config = null) {
+  return texto(config?.appSecret ?? process.env.META_APP_SECRET);
 }
 
-function redirectUriMeta(valor = "") {
-  return texto(valor || process.env.META_REDIRECT_URI);
+function redirectUriMeta(valor = "", config = null) {
+  return urlHttps(valor || config?.redirectUri || process.env.META_REDIRECT_URI);
 }
 
 function configIdMeta() {
   return texto(process.env.META_CONFIG_ID);
 }
 
-function segredoStateMeta() {
-  return texto(process.env.META_OAUTH_STATE_SECRET || appSecretMeta() || "social-meta-state-local");
+function segredoStateMeta(config = null) {
+  return texto(process.env.META_OAUTH_STATE_SECRET || appSecretMeta(config) || "social-meta-state-local");
 }
 
 function base64UrlJson(dados = {}) {
   return Buffer.from(JSON.stringify(dados)).toString("base64url");
 }
 
-function assinarEstado(payload = "") {
+function assinarEstado(payload = "", config = null) {
   return crypto
-    .createHmac("sha256", segredoStateMeta())
+    .createHmac("sha256", segredoStateMeta(config))
     .update(payload)
     .digest("base64url");
 }
@@ -188,23 +193,23 @@ function logRespostaMetaTokenBruta(resposta = {}, contexto = {}) {
   });
 }
 
-function criarStateMeta(clienteId = "admin", redirectUri = "") {
+function criarStateMeta(clienteId = "admin", redirectUri = "", { config = null } = {}) {
   const payload = base64UrlJson({
     clienteId: clienteIdSeguro(clienteId),
-    redirectUri: redirectUriMeta(redirectUri),
+    redirectUri: redirectUriMeta(redirectUri, config),
     nonce: crypto.randomBytes(12).toString("hex"),
     exp: Date.now() + 15 * 60 * 1000
   });
-  return `${payload}.${assinarEstado(payload)}`;
+  return `${payload}.${assinarEstado(payload, config)}`;
 }
 
-function validarStateMeta(state = "") {
+function validarStateMeta(state = "", { config = null } = {}) {
   const [payload, assinatura] = texto(state).split(".");
   if (!payload || !assinatura) {
     throw new Error("state_invalido");
   }
 
-  const assinaturaEsperada = assinarEstado(payload);
+  const assinaturaEsperada = assinarEstado(payload, config);
   const assinaturaBuffer = Buffer.from(assinatura);
   const esperadaBuffer = Buffer.from(assinaturaEsperada);
 
@@ -227,20 +232,21 @@ function validarStateMeta(state = "") {
 
   return {
     clienteId,
-    redirectUri: redirectUriMeta(dados.redirectUri),
+    redirectUri: redirectUriMeta(dados.redirectUri, config),
     exp: dados.exp
   };
 }
 
-function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
-  const appId = appIdMeta();
-  const uri = redirectUriMeta(redirectUri);
+function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "", env = process.env, config = null } = {}) {
+  const configEfetiva = config || obterConfigMetaEnv({ env });
+  const appId = appIdMeta(configEfetiva);
+  const uri = redirectUriMeta(redirectUri, configEfetiva);
   const configId = configIdMeta();
 
   if (!appId) throw new Error("meta_app_id_ausente");
   if (!uri) throw new Error("meta_redirect_uri_ausente");
 
-  const state = criarStateMeta(clienteId, uri);
+  const state = criarStateMeta(clienteId, uri, { config: configEfetiva });
   const params = new URLSearchParams({
     client_id: appId,
     redirect_uri: uri,
@@ -270,16 +276,34 @@ function iniciarConexaoMeta({ clienteId = "admin", redirectUri = "" } = {}) {
   };
 }
 
+async function iniciarConexaoMetaAsync({
+  clienteId = "admin",
+  redirectUri = "",
+  env = process.env,
+  getPlatformVariableImpl
+} = {}) {
+  const config = await obterConfigMetaAsync({ env, getPlatformVariableImpl });
+  return iniciarConexaoMeta({ clienteId, redirectUri, env, config });
+}
+
 function calcularExpiracao(expiresIn) {
   const segundos = Number(expiresIn || 0);
   if (!Number.isFinite(segundos) || segundos <= 0) return "";
   return new Date(Date.now() + segundos * 1000).toISOString();
 }
 
-async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = axios } = {}) {
-  const appId = appIdMeta();
-  const appSecret = appSecretMeta();
-  const uri = redirectUriMeta(redirectUri);
+async function trocarCodePorToken({
+  code = "",
+  redirectUri = "",
+  httpClient = axios,
+  env = process.env,
+  getPlatformVariableImpl,
+  config = null
+} = {}) {
+  const configEfetiva = config || await obterConfigMetaAsync({ env, getPlatformVariableImpl });
+  const appId = appIdMeta(configEfetiva);
+  const appSecret = appSecretMeta(configEfetiva);
+  const uri = redirectUriMeta(redirectUri, configEfetiva);
 
   if (!appId) throw new Error("meta_app_id_ausente");
   if (!appSecret) throw new Error("meta_app_secret_ausente");
@@ -295,7 +319,7 @@ async function trocarCodePorToken({ code = "", redirectUri = "", httpClient = ax
     env: {
       META_APP_ID: Boolean(appId),
       META_APP_SECRET: Boolean(appSecret),
-      META_REDIRECT_URI: Boolean(process.env.META_REDIRECT_URI)
+      META_REDIRECT_URI: Boolean(uri)
     }
   });
 
@@ -501,10 +525,18 @@ async function consultarAtivosMeta({ clienteId = "", accessToken = "", selecaoAt
   }
 }
 
-async function concluirCallbackMeta({ code = "", state = "", redirectUri = "", httpClient = axios } = {}) {
-  const estado = validarStateMeta(state);
-  const uri = redirectUriMeta(redirectUri || estado.redirectUri);
-  const token = await trocarCodePorToken({ code, redirectUri: uri, httpClient });
+async function concluirCallbackMeta({
+  code = "",
+  state = "",
+  redirectUri = "",
+  httpClient = axios,
+  env = process.env,
+  getPlatformVariableImpl
+} = {}) {
+  const config = await obterConfigMetaAsync({ env, getPlatformVariableImpl });
+  const estado = validarStateMeta(state, { config });
+  const uri = redirectUriMeta(redirectUri || estado.redirectUri, config);
+  const token = await trocarCodePorToken({ code, redirectUri: uri, httpClient, env, getPlatformVariableImpl, config });
   await diagnosticarPermissoesMeta({ accessToken: token.access_token, httpClient });
   const ativos = await consultarAtivosMeta({
     clienteId: estado.clienteId,
@@ -561,6 +593,7 @@ module.exports = {
   consultarAtivosMeta,
   concluirCallbackMeta,
   iniciarConexaoMeta,
+  iniciarConexaoMetaAsync,
   scopesConexaoMeta,
   scopesPublicacaoFuturaMeta,
   validarStateMeta

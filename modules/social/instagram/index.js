@@ -9,6 +9,10 @@ const {
   logUsuarioInativoIgnorado
 } = require("../../../utils/usuarios-atividade");
 const { logSocial } = require("../logs");
+const {
+  obterConfigInstagramEnv,
+  obterConfigInstagramAsync
+} = require("../platform-config");
 
 const INSTAGRAM_AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
@@ -213,24 +217,24 @@ function linkFinalPublicacaoLivre(publicacao = {}) {
     urlHttpsDeCampos(publicacao.cta, ["urlDestino"]);
 }
 
-function appIdInstagram() {
-  return texto(process.env.INSTAGRAM_APP_ID);
+function appIdInstagram(config = null) {
+  return texto(config?.appId ?? process.env.INSTAGRAM_APP_ID);
 }
 
-function appSecretInstagram() {
-  return texto(process.env.INSTAGRAM_APP_SECRET);
+function appSecretInstagram(config = null) {
+  return texto(config?.appSecret ?? process.env.INSTAGRAM_APP_SECRET);
 }
 
-function appSecretMeta() {
-  return texto(process.env.META_APP_SECRET);
+function appSecretMeta(config = null) {
+  return texto(config?.metaAppSecret ?? process.env.META_APP_SECRET);
 }
 
-function redirectUriInstagram(valor = "") {
-  return texto(valor || process.env.INSTAGRAM_REDIRECT_URI);
+function redirectUriInstagram(valor = "", config = null) {
+  return urlHttps(valor || config?.redirectUri || process.env.INSTAGRAM_REDIRECT_URI);
 }
 
-function segredoStateInstagram() {
-  return texto(process.env.INSTAGRAM_OAUTH_STATE_SECRET || appSecretInstagram() || "social-instagram-state-local");
+function segredoStateInstagram(config = null) {
+  return texto(config?.oauthStateSecret || process.env.INSTAGRAM_OAUTH_STATE_SECRET || appSecretInstagram(config) || "social-instagram-state-local");
 }
 
 function criarInstagramPadrao(clienteId = "admin") {
@@ -269,14 +273,14 @@ function base64UrlJson(dados = {}) {
   return Buffer.from(JSON.stringify(dados)).toString("base64url");
 }
 
-function assinarState(payload = "") {
+function assinarState(payload = "", config = null) {
   return crypto
-    .createHmac("sha256", segredoStateInstagram())
+    .createHmac("sha256", segredoStateInstagram(config))
     .update(payload)
     .digest("base64url");
 }
 
-function gerarStateInstagram(clienteId = "admin", retornoFrontend = "") {
+function gerarStateInstagram(clienteId = "admin", retornoFrontend = "", { config = null } = {}) {
   const nonce = crypto.randomBytes(16).toString("hex");
   const payload = base64UrlJson({
     clienteId: texto(clienteId || "admin"),
@@ -286,15 +290,15 @@ function gerarStateInstagram(clienteId = "admin", retornoFrontend = "") {
   });
   return {
     nonce,
-    state: `${payload}.${assinarState(payload)}`
+    state: `${payload}.${assinarState(payload, config)}`
   };
 }
 
-function decodificarStateInstagram(state = "") {
+function decodificarStateInstagram(state = "", { config = null } = {}) {
   const [payload, assinatura] = texto(state).split(".");
   if (!payload || !assinatura) throw new Error("state_invalido");
 
-  const esperada = assinarState(payload);
+  const esperada = assinarState(payload, config);
   const recebidaBuffer = Buffer.from(assinatura);
   const esperadaBuffer = Buffer.from(esperada);
   if (
@@ -917,13 +921,14 @@ function scopesInstagramConexao() {
   return [SCOPE_BASICO, SCOPE_PUBLICAR_CONTEUDO, SCOPE_GERENCIAR_COMENTARIOS, SCOPE_GERENCIAR_MENSAGENS];
 }
 
-function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "", retornoFrontend = "" } = {}) {
-  const appId = appIdInstagram();
-  const uri = redirectUriInstagram(redirectUri);
-  if (!appId || !appSecretInstagram() || !uri) throw new Error("instagram_nao_configurado");
+function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "", retornoFrontend = "", env = process.env, config = null } = {}) {
+  const configEfetiva = config || obterConfigInstagramEnv({ env });
+  const appId = appIdInstagram(configEfetiva);
+  const uri = redirectUriInstagram(redirectUri, configEfetiva);
+  if (!appId || !appSecretInstagram(configEfetiva) || !uri) throw new Error("instagram_nao_configurado");
 
-  const { nonce, state } = gerarStateInstagram(clienteId, retornoFrontend);
-  const { exp } = decodificarStateInstagram(state);
+  const { nonce, state } = gerarStateInstagram(clienteId, retornoFrontend, { config: configEfetiva });
+  const { exp } = decodificarStateInstagram(state, { config: configEfetiva });
   registrarStatePendente(clienteId, nonce, exp);
 
   const params = new URLSearchParams({
@@ -944,6 +949,17 @@ function iniciarConexaoInstagram({ clienteId = "admin", redirectUri = "", retorn
     state,
     scopes: scopesInstagramConexao()
   };
+}
+
+async function iniciarConexaoInstagramAsync({
+  clienteId = "admin",
+  redirectUri = "",
+  retornoFrontend = "",
+  env = process.env,
+  getPlatformVariableImpl
+} = {}) {
+  const config = await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+  return iniciarConexaoInstagram({ clienteId, redirectUri, retornoFrontend, env, config });
 }
 
 function normalizarToken(dados = {}) {
@@ -1018,11 +1034,15 @@ async function trocarCodePorTokenCurto({
   clienteId = "",
   code = "",
   redirectUri = "",
-  httpClient = httpClientPadrao()
+  httpClient = httpClientPadrao(),
+  env = process.env,
+  getPlatformVariableImpl,
+  config = null
 } = {}) {
-  const appId = appIdInstagram();
-  const appSecret = appSecretInstagram();
-  const uri = redirectUriInstagram(redirectUri);
+  const configEfetiva = config || await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+  const appId = appIdInstagram(configEfetiva);
+  const appSecret = appSecretInstagram(configEfetiva);
+  const uri = redirectUriInstagram(redirectUri, configEfetiva);
   if (!appId || !appSecret || !uri) throw new Error("instagram_nao_configurado");
   if (!texto(code)) throw new Error("code_ausente");
 
@@ -1072,9 +1092,13 @@ async function trocarCodePorTokenCurto({
 async function trocarTokenLongaDuracao({
   clienteId = "",
   accessToken = "",
-  httpClient = httpClientPadrao()
+  httpClient = httpClientPadrao(),
+  env = process.env,
+  getPlatformVariableImpl,
+  config = null
 } = {}) {
-  const appSecret = appSecretInstagram();
+  const configEfetiva = config || await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+  const appSecret = appSecretInstagram(configEfetiva);
   if (!appSecret) throw new Error("instagram_nao_configurado");
   if (!texto(accessToken)) throw new Error("token_longo_falhou");
 
@@ -2052,7 +2076,13 @@ function assinaturaWebhookConfere({ recebido = "", rawBody = Buffer.alloc(0), se
   }
 }
 
-function validarAssinaturaWebhookInstagram({ assinatura = "", rawBody = Buffer.alloc(0), secret = "" } = {}) {
+function validarAssinaturaWebhookInstagram(opcoes = {}) {
+  const entrada = typeof opcoes === "string" ? { assinatura: opcoes } : (opcoes || {});
+  const {
+    assinatura = "",
+    rawBody = Buffer.alloc(0),
+    secret = ""
+  } = entrada;
   const valor = texto(assinatura);
   if (!valor || !valor.startsWith("sha256=")) return false;
   const recebido = valor.slice("sha256=".length);
@@ -2065,6 +2095,39 @@ function validarAssinaturaWebhookInstagram({ assinatura = "", rawBody = Buffer.a
   const candidatos = [
     { origem: "meta_app_secret", secret: appSecretMeta() },
     { origem: "instagram_app_secret", secret: appSecretInstagram() }
+  ].filter(item => texto(item.secret));
+
+  for (const candidato of candidatos) {
+    if (assinaturaWebhookConfere({ recebido, rawBody, secret: candidato.secret })) {
+      logSocial("[INSTAGRAM-WEBHOOK-SECRET-CORRESPONDENTE]", {
+        origem: candidato.origem
+      });
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function validarAssinaturaWebhookInstagramAsync({
+  assinatura = "",
+  rawBody = Buffer.alloc(0),
+  secret = "",
+  env = process.env,
+  getPlatformVariableImpl,
+  config = null
+} = {}) {
+  const segredoExplicito = texto(secret);
+  if (segredoExplicito) {
+    return validarAssinaturaWebhookInstagram({ assinatura, rawBody, secret: segredoExplicito });
+  }
+  const configEfetiva = config || await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+  const valor = texto(assinatura);
+  if (!valor || !valor.startsWith("sha256=")) return false;
+  const recebido = valor.slice("sha256=".length);
+  const candidatos = [
+    { origem: "meta_app_secret", secret: appSecretMeta(configEfetiva) },
+    { origem: "instagram_app_secret", secret: appSecretInstagram(configEfetiva) }
   ].filter(item => texto(item.secret));
 
   for (const candidato of candidatos) {
@@ -2768,9 +2831,17 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
   return { status: atual.statusGeral, interacao: interacaoSanitizada(atual) };
 }
 
-async function processarWebhookInstagram({ payload = {}, assinatura = "", rawBody = null, httpClient = httpClientPadrao() } = {}) {
+async function processarWebhookInstagram({
+  payload = {},
+  assinatura = "",
+  rawBody = null,
+  httpClient = httpClientPadrao(),
+  env = process.env,
+  getPlatformVariableImpl,
+  config = null
+} = {}) {
   const raw = rawBodyBuffer(payload, rawBody);
-  if (!validarAssinaturaWebhookInstagram({ assinatura, rawBody: raw })) {
+  if (!await validarAssinaturaWebhookInstagramAsync({ assinatura, rawBody: raw, env, getPlatformVariableImpl, config })) {
     throw new Error("assinatura_invalida");
   }
   const resumo = resumoPayloadWebhookInstagram(payload);
@@ -2845,22 +2916,36 @@ function persistirConexaoOAuthInstagram(clienteId = "", etapa = "", montarDados 
   }
 }
 
-async function concluirCallbackInstagram({ code = "", state = "", redirectUri = "", httpClient = httpClientPadrao() } = {}) {
+async function concluirCallbackInstagram({
+  code = "",
+  state = "",
+  redirectUri = "",
+  httpClient = httpClientPadrao(),
+  env = process.env,
+  getPlatformVariableImpl
+} = {}) {
   if (!texto(code)) throw new Error("code_ausente");
 
-  const estado = decodificarStateInstagram(state);
+  const config = await obterConfigInstagramAsync({ env, getPlatformVariableImpl });
+  const estado = decodificarStateInstagram(state, { config });
   consumirStatePendente(estado.clienteId, estado.nonce);
-  const uri = redirectUriInstagram(redirectUri);
+  const uri = redirectUriInstagram(redirectUri, config);
   const tokenCurto = await trocarCodePorTokenCurto({
     clienteId: estado.clienteId,
     code,
     redirectUri: uri,
-    httpClient
+    httpClient,
+    env,
+    getPlatformVariableImpl,
+    config
   });
   const tokenLongo = await trocarTokenLongaDuracao({
     clienteId: estado.clienteId,
     accessToken: tokenCurto.access_token,
-    httpClient
+    httpClient,
+    env,
+    getPlatformVariableImpl,
+    config
   });
   const token = normalizarToken(tokenLongo);
   const conta = await consultarContaInstagram({
@@ -2991,6 +3076,7 @@ module.exports = {
   criarAdaptadorInstagram,
   criarInstagramPadrao,
   iniciarConexaoInstagram,
+  iniciarConexaoInstagramAsync,
   concluirCallbackInstagram,
   diagnosticarComentariosPublicacaoInstagram,
   consultarAssinaturasWebhookContaInstagram,
@@ -3009,6 +3095,7 @@ module.exports = {
   diagnosticarComentarioInstagram,
   diagnosticarPermissoesTokenInstagram,
   validarAssinaturaWebhookInstagram,
+  validarAssinaturaWebhookInstagramAsync,
   normalizarEventosWebhookInstagram,
   sanitizarGatilhoInstagram,
   contemGatilhoSeguro,
