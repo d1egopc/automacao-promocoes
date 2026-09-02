@@ -8,6 +8,17 @@ const {
 } = require("./post-visual-template.contract");
 const storage = require("./storage");
 const { logSocial } = require("./logs");
+const { getPlatformVariable } = require("../platform-variables");
+
+const SOCIAL_ART_RENDERER_URL = "SOCIAL_ART_RENDERER_URL";
+const SOCIAL_ART_RENDERER_TOKEN = "SOCIAL_ART_RENDERER_TOKEN";
+const SOCIAL_ART_RENDERER_TIMEOUT_MS = "SOCIAL_ART_RENDERER_TIMEOUT_MS";
+const SOCIAL_ART_RENDERER_TIMEOUT_PADRAO_MS = 20000;
+const SOCIAL_ART_RENDERER_VARIAVEIS = new Set([
+  SOCIAL_ART_RENDERER_URL,
+  SOCIAL_ART_RENDERER_TOKEN,
+  SOCIAL_ART_RENDERER_TIMEOUT_MS
+]);
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -32,6 +43,68 @@ function validarUrlHttps(valor = "") {
   }
   if (parsed.protocol !== "https:") throw new Error("social_art_url_publica_invalida");
   return parsed.toString();
+}
+
+function timeoutRendererMs(valor, padrao = SOCIAL_ART_RENDERER_TIMEOUT_PADRAO_MS) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero) || numero <= 0) return padrao;
+  return Math.max(1000, Math.trunc(numero));
+}
+
+function timeoutRendererValido(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) && numero > 0;
+}
+
+async function obterPlatformVariableHomologada(nome, {
+  defaultValue,
+  getPlatformVariableImpl = getPlatformVariable,
+  env = process.env
+} = {}) {
+  if (!SOCIAL_ART_RENDERER_VARIAVEIS.has(nome)) {
+    throw new Error("social_art_platform_variable_nao_homologada");
+  }
+  try {
+    const resultado = await getPlatformVariableImpl(nome, {
+      envFallback: true,
+      defaultValue
+    });
+    if (resultado?.ok === true) return resultado.value;
+  } catch {
+    // Mantem o renderer funcional com ENV enquanto a central nao estiver disponivel.
+  }
+  if (Object.prototype.hasOwnProperty.call(env, nome)) return env[nome];
+  return defaultValue;
+}
+
+async function resolverConfigRendererSocial({
+  timeoutMs,
+  getPlatformVariableImpl = getPlatformVariable,
+  env = process.env
+} = {}) {
+  const [url, token] = await Promise.all([
+    obterPlatformVariableHomologada(SOCIAL_ART_RENDERER_URL, { getPlatformVariableImpl, env, defaultValue: "" }),
+    obterPlatformVariableHomologada(SOCIAL_ART_RENDERER_TOKEN, { getPlatformVariableImpl, env, defaultValue: "" })
+  ]);
+  let timeoutResolvido = timeoutMs;
+  if (timeoutResolvido === undefined) {
+    try {
+      const resultadoTimeout = await getPlatformVariableImpl(SOCIAL_ART_RENDERER_TIMEOUT_MS, { envFallback: false });
+      if (resultadoTimeout?.ok === true && timeoutRendererValido(resultadoTimeout.value)) {
+        timeoutResolvido = resultadoTimeout.value;
+      }
+    } catch {
+      timeoutResolvido = undefined;
+    }
+  }
+  if (timeoutResolvido === undefined && timeoutRendererValido(env?.[SOCIAL_ART_RENDERER_TIMEOUT_MS])) {
+    timeoutResolvido = env[SOCIAL_ART_RENDERER_TIMEOUT_MS];
+  }
+  return {
+    base: texto(url).replace(/\/+$/, ""),
+    token: texto(token),
+    timeoutMs: timeoutRendererMs(timeoutResolvido)
+  };
 }
 
 function templateVisualCliente(clienteId = "admin", templateId = "padrao-instagram") {
@@ -61,17 +134,22 @@ async function renderizarArtePublicacaoSocial({
   templateId = "padrao-instagram",
   gatilho = null,
   fetchImpl = globalThis.fetch,
-  timeoutMs = Number(process.env.SOCIAL_ART_RENDERER_TIMEOUT_MS || 20000)
+  timeoutMs,
+  getPlatformVariableImpl = getPlatformVariable,
+  env = process.env
 } = {}) {
-  const base = texto(process.env.SOCIAL_ART_RENDERER_URL).replace(/\/+$/, "");
-  const token = texto(process.env.SOCIAL_ART_RENDERER_TOKEN);
+  const { base, token, timeoutMs: timeoutFinalMs } = await resolverConfigRendererSocial({
+    timeoutMs,
+    getPlatformVariableImpl,
+    env
+  });
   if (!base || !token) throw new Error("social_art_renderer_nao_configurado");
   if (typeof fetchImpl !== "function") throw new Error("social_art_fetch_indisponivel");
 
   const payload = montarPayloadArteSocial({ clienteId, ofertaId, oferta, templateId, gatilho });
   const endpoint = `${base}/render/social/post-art`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs || 20000));
+  const timer = setTimeout(() => controller.abort(), timeoutFinalMs);
 
   logSocial("[SOCIAL-ARTE-PUBLICACAO]", {
     clienteId,
@@ -122,5 +200,6 @@ module.exports = {
   validarUrlHttps,
   templateVisualCliente,
   montarPayloadArteSocial,
+  resolverConfigRendererSocial,
   renderizarArtePublicacaoSocial
 };
