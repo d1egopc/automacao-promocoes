@@ -245,7 +245,9 @@ async function testarSchemaIdempotente() {
     "META_APP_SECRET",
     "INSTAGRAM_APP_SECRET",
     "INSTAGRAM_OAUTH_STATE_SECRET",
-    "INSTAGRAM_WEBHOOK_VERIFY_TOKEN"
+    "INSTAGRAM_WEBHOOK_VERIFY_TOKEN",
+    "MERCADOPAGO_ACCESS_TOKEN",
+    "MERCADOPAGO_WEBHOOK_SECRET"
   ]) {
     const valor = `${nomeSecret.toLowerCase()}-nao-vaza`;
     const resposta = await request(app, "POST", "/admin/platform-variables", {

@@ -12,6 +12,11 @@ const {
   processarFinancialPaymentEvent
 } = require("./financeiro.service");
 const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository");
+const {
+  ambienteMercadoPagoTesteFromConfig,
+  mercadoPagoConfigEnv,
+  resolverConfigMercadoPago
+} = require("./mercadopago-platform-config");
 
 const PROVIDER_MERCADOPAGO = "mercadopago";
 const MERCADOPAGO_API_BASE = "https://api.mercadopago.com";
@@ -378,16 +383,7 @@ function sanitizarRequestMercadoPago(path = "", body = null, headers = {}) {
 }
 
 function mercadoPagoConfig(env = process.env) {
-  const accessToken = texto(env.MERCADOPAGO_ACCESS_TOKEN);
-  const webhookSecret = texto(env.MERCADOPAGO_WEBHOOK_SECRET);
-  const ambiente = textoLower(env.MERCADOPAGO_ENV || "test") || "test";
-  return {
-    configurado: Boolean(accessToken),
-    webhookConfigurado: Boolean(webhookSecret),
-    accessToken,
-    webhookSecret,
-    ambiente
-  };
+  return mercadoPagoConfigEnv(env);
 }
 
 function criarExternalPaymentIdMercadoPago(clienteId = "", planoId = "") {
@@ -814,11 +810,16 @@ async function criarCobrancaMercadoPagoPix({
   env = process.env,
   agora = new Date(),
   metadata = {},
-  permitirPlanoPagoEmBreveInterno = false
+  permitirPlanoPagoEmBreveInterno = false,
+  config = null,
+  getPlatformVariableImpl
 } = {}) {
-  const config = mercadoPagoConfig(env);
-  const sandboxTeste = ambienteMercadoPagoTeste(env);
-  if (!config.configurado && !client) {
+  const configEfetiva = config || await resolverConfigMercadoPago({ env, getPlatformVariableImpl });
+  const sandboxTeste = ambienteMercadoPagoTesteFromConfig(configEfetiva);
+  if (!configEfetiva.ambienteValido) {
+    return { ok: false, codigo: "mercadopago_env_invalido", status: "nao_configurado" };
+  }
+  if (!configEfetiva.configurado && !client) {
     return { ok: false, codigo: "mercadopago_nao_configurado", status: "nao_configurado" };
   }
 
@@ -861,7 +862,7 @@ async function criarCobrancaMercadoPagoPix({
   if (paymentAtualizado && typeof paymentAtualizado === "object") {
     payment.id = paymentAtualizado.id || payment.id;
   }
-  const mpClient = client || criarMercadoPagoHttpClient({ accessToken: config.accessToken });
+  const mpClient = client || criarMercadoPagoHttpClient({ accessToken: configEfetiva.accessToken });
   const orderBody = montarOrderPix({
     payment,
     planSnapshot,
@@ -933,16 +934,21 @@ async function processarOrderMercadoPago({
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
   env = process.env,
-  agora = new Date()
+  agora = new Date(),
+  config = null,
+  getPlatformVariableImpl
 } = {}) {
-  const config = mercadoPagoConfig(env);
+  const configEfetiva = config || await resolverConfigMercadoPago({ env, getPlatformVariableImpl });
   const dataId = texto(orderId);
   if (!dataId) return { ok: false, statusHttp: 400, codigo: "mercadopago_data_id_obrigatorio" };
-  if (!config.configurado && !client) {
+  if (!configEfetiva.ambienteValido) {
+    return { ok: false, statusHttp: 503, codigo: "mercadopago_env_invalido" };
+  }
+  if (!configEfetiva.configurado && !client) {
     return { ok: false, statusHttp: 503, codigo: "mercadopago_nao_configurado" };
   }
 
-  const mpClient = client || criarMercadoPagoHttpClient({ accessToken: config.accessToken });
+  const mpClient = client || criarMercadoPagoHttpClient({ accessToken: configEfetiva.accessToken });
   const order = await mpClient.obterOrder(dataId);
   const externalReference = extrairExternalReference(order);
   if (!externalReference) {
@@ -970,7 +976,7 @@ async function processarOrderMercadoPago({
   const amountCentsPayment = Number(payment.amount_cents ?? payment.amountCents);
   const currencyPayment = normalizarMoeda(payment.currency);
   const metadataPayment = metadataObjeto(payment.metadata);
-  const usarValorProviderSandbox = ambienteMercadoPagoTeste(env) &&
+  const usarValorProviderSandbox = ambienteMercadoPagoTesteFromConfig(configEfetiva) &&
     metadataPayment.pixSandboxPredefined === true &&
     numeroInteiro(metadataPayment.providerAmountCents, 0) > 0;
   const amountCentsEsperado = usarValorProviderSandbox
@@ -1062,10 +1068,15 @@ async function reconciliarOrdersMercadoPagoPendentes({
   agora = new Date(),
   limite = 10,
   maxTentativas = MERCADOPAGO_RECONCILIATION_MAX_ATTEMPTS,
-  ttlMs = MERCADOPAGO_RECONCILIATION_TTL_MS
+  ttlMs = MERCADOPAGO_RECONCILIATION_TTL_MS,
+  config = null,
+  getPlatformVariableImpl
 } = {}) {
-  const config = mercadoPagoConfig(env);
-  if (!config.configurado && !client) {
+  const configEfetiva = config || await resolverConfigMercadoPago({ env, getPlatformVariableImpl });
+  if (!configEfetiva.ambienteValido) {
+    return { ok: true, pulada: true, codigo: "mercadopago_env_invalido", processados: 0 };
+  }
+  if (!configEfetiva.configurado && !client) {
     return { ok: true, pulada: true, codigo: "mercadopago_nao_configurado", processados: 0 };
   }
   if (typeof repositorio?.listarPaymentsMercadoPagoParaReconciliacao !== "function") {
@@ -1118,6 +1129,7 @@ async function reconciliarOrdersMercadoPagoPendentes({
         repositorio,
         client,
         env,
+        config: configEfetiva,
         agora
       });
       const statusReconciliacao = reconciliationStatusParaResultado(resultado);
@@ -1178,9 +1190,10 @@ async function processarWebhookMercadoPago({
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
   env = process.env,
-  agora = new Date()
+  agora = new Date(),
+  getPlatformVariableImpl
 } = {}) {
-  const config = mercadoPagoConfig(env);
+  const config = await resolverConfigMercadoPago({ env, getPlatformVariableImpl });
   const queryDataId = texto(query["data.id"] || query.data_id);
   const bodyDataId = texto(body?.data?.id || body?.resource);
   const dataId = texto(queryDataId || bodyDataId);
@@ -1207,6 +1220,7 @@ async function processarWebhookMercadoPago({
   ));
 
   if (!assinatura.ok) return { ok: false, statusHttp: 401, codigo: assinatura.codigo };
+  if (!config.ambienteValido) return { ok: false, statusHttp: 503, codigo: "mercadopago_env_invalido" };
   return processarOrderMercadoPago({
     orderId: dataId,
     origem: "webhook",
@@ -1214,6 +1228,7 @@ async function processarWebhookMercadoPago({
     repositorio,
     client,
     env,
+    config,
     agora
   });
 }
@@ -1230,6 +1245,7 @@ module.exports = {
   processarOrderMercadoPago,
   processarWebhookMercadoPago,
   reconciliarOrdersMercadoPagoPendentes,
+  resolverConfigMercadoPago,
   sanitizarErroMercadoPago,
   validarAssinaturaWebhookMercadoPago
 };

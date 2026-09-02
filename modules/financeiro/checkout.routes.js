@@ -171,6 +171,7 @@ function criarRotasCheckoutFinanceiro({
   repositorio = criarRepositorioFinanceiroPostgres(),
   client = null,
   env = process.env,
+  getPlatformVariableImpl,
   agora = () => new Date(),
   renovarFinanceiroUsuario = null,
   resolverFinanceiroUsuario = null
@@ -223,6 +224,7 @@ function criarRotasCheckoutFinanceiro({
           repositorio,
           client,
           env,
+          getPlatformVariableImpl,
           agora: agora(),
           permitirPlanoPagoEmBreveInterno: false,
           metadata: {
