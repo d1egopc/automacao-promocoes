@@ -520,6 +520,12 @@ function hashCurtoSeguro(valor = "") {
   };
 }
 
+function normalizarDataIdAssinaturaMercadoPago(dataId = "", { origemQuery = false } = {}) {
+  const id = texto(dataId);
+  if (origemQuery === true && /^[a-z0-9]+$/i.test(id)) return id.toLowerCase();
+  return id;
+}
+
 function diagnosticoAssinaturaWebhookMercadoPago({
   xSignature = "",
   xRequestId = "",
@@ -608,13 +614,14 @@ function validarAssinaturaWebhookMercadoPago({
   xSignature = "",
   xRequestId = "",
   dataId = "",
-  secret = ""
+  secret = "",
+  origemQuery = false
 } = {}) {
   const assinatura = parseSignatureHeader(xSignature);
   const ts = assinatura.ts;
   const hash = assinatura.v1;
   const requestId = texto(xRequestId);
-  const id = texto(dataId);
+  const id = normalizarDataIdAssinaturaMercadoPago(dataId, { origemQuery });
   const segredo = texto(secret);
   const sdkDisponivel = Boolean(WebhookSignatureValidator && typeof WebhookSignatureValidator.validate === "function");
 
@@ -637,8 +644,8 @@ function validarAssinaturaWebhookMercadoPago({
     };
   }
 
-  const manual = validarAssinaturaManualWebhookMercadoPago({ xSignature, xRequestId, dataId, secret });
-  const sdk = validarAssinaturaSdkWebhookMercadoPago({ xSignature, xRequestId, dataId, secret });
+  const manual = validarAssinaturaManualWebhookMercadoPago({ xSignature, xRequestId, dataId: id, secret });
+  const sdk = validarAssinaturaSdkWebhookMercadoPago({ xSignature, xRequestId, dataId: id, secret });
   const sdkValido = sdk.ok === true;
   const manualValido = manual.ok === true;
 
@@ -1197,19 +1204,23 @@ async function processarWebhookMercadoPago({
   const queryDataId = texto(query["data.id"] || query.data_id);
   const bodyDataId = texto(body?.data?.id || body?.resource);
   const dataId = texto(queryDataId || bodyDataId);
+  const dataIdAssinatura = normalizarDataIdAssinaturaMercadoPago(dataId, {
+    origemQuery: Boolean(queryDataId)
+  });
   const xSignature = headers["x-signature"] || headers["X-Signature"];
   const xRequestId = headers["x-request-id"] || headers["X-Request-Id"];
   const assinatura = validarAssinaturaWebhookMercadoPago({
     xSignature,
     xRequestId,
     dataId,
-    secret: config.webhookSecret
+    secret: config.webhookSecret,
+    origemQuery: Boolean(queryDataId)
   });
   console.log("[MERCADOPAGO-WEBHOOK-ASSINATURA-DIAGNOSTICO]", JSON.stringify(
     diagnosticoAssinaturaWebhookMercadoPago({
       xSignature,
       xRequestId,
-      dataId,
+      dataId: dataIdAssinatura,
       secret: config.webhookSecret,
       queryDataIdPresente: Boolean(queryDataId),
       bodyDataIdPresente: Boolean(bodyDataId),

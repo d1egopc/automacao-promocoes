@@ -1178,27 +1178,69 @@ function fechar(server) {
     xSignature: assinaturaUppercase["x-signature"],
     xRequestId: assinaturaUppercase["x-request-id"],
     dataId: dataIdUppercase,
-    secret: "secret"
+    secret: "secret",
+    origemQuery: true
   });
-  assert.strictEqual(validacaoUppercase.ok, true, "data.id uppercase real-style valida preservando casing original");
-  assert.strictEqual(validacaoUppercase.manualValido, true);
-  assert.strictEqual(validacaoUppercase.sdkValido, true);
-  assert.strictEqual(validacaoUppercase.autoridade, "sdk");
+  assert.strictEqual(
+    validacaoUppercase.codigo,
+    "mercadopago_assinatura_invalida",
+    "data.id alfanumerico da query nao valida com manifest uppercase"
+  );
+  assert.strictEqual(validacaoUppercase.manualValido, false);
+  assert.strictEqual(validacaoUppercase.sdkValido, false);
 
   const assinaturaLowercase = assinaturaComDataIdLowercase("secret", dataIdUppercase);
   const validacaoLowercase = financeiro.validarAssinaturaWebhookMercadoPago({
     xSignature: assinaturaLowercase["x-signature"],
     xRequestId: assinaturaLowercase["x-request-id"],
     dataId: dataIdUppercase,
+    secret: "secret",
+    origemQuery: true
+  });
+  assert.strictEqual(validacaoLowercase.ok, true, "data.id alfanumerico da query valida normalizado para lowercase");
+  assert.strictEqual(validacaoLowercase.manualValido, true);
+  assert.strictEqual(validacaoLowercase.sdkValido, true);
+  assert.strictEqual(validacaoLowercase.autoridade, "sdk");
+
+  const validacaoBodyUppercase = financeiro.validarAssinaturaWebhookMercadoPago({
+    xSignature: assinaturaUppercase["x-signature"],
+    xRequestId: assinaturaUppercase["x-request-id"],
+    dataId: dataIdUppercase,
     secret: "secret"
   });
+  assert.strictEqual(validacaoBodyUppercase.ok, true, "fallback por body preserva casing original");
+
+  const repoWebhookReal = new RepoMemoria();
+  const clientWebhookReal = new FakeMercadoPagoClient();
+  const cobrancaWebhookReal = await cobrarPix({
+    repo: repoWebhookReal,
+    client: clientWebhookReal,
+    externalPaymentId: "mp_pay_order_real"
+  });
+  const webhookRealOrderId = "ORDTST01QWERTY123456";
+  clientWebhookReal.setOrder(webhookRealOrderId, {
+    id: webhookRealOrderId,
+    status: "processed",
+    status_detail: "accredited",
+    total_amount: "34.90",
+    currency_id: "BRL",
+    external_reference: cobrancaWebhookReal.externalPaymentId,
+    transactions: { payments: [{ amount: "34.90", status: "processed", status_detail: "accredited" }] }
+  });
+  const webhookReal = await financeiro.processarWebhookMercadoPago({
+    headers: assinaturaComDataIdLowercase("secret", webhookRealOrderId),
+    query: { "data.id": webhookRealOrderId },
+    body: { id: "wh_order_real_uppercase", data: { id: webhookRealOrderId.toLowerCase() } },
+    repositorio: repoWebhookReal,
+    client: clientWebhookReal,
+    env: { MERCADOPAGO_WEBHOOK_SECRET: "secret" }
+  });
   assert.strictEqual(
-    validacaoLowercase.codigo,
-    "mercadopago_assinatura_invalida",
-    "assinatura calculada sobre lowercase nao valida para data.id uppercase"
+    webhookReal.ok,
+    true,
+    "webhook real Orders valida assinatura lowercase e preserva orderId uppercase para consulta"
   );
-  assert.strictEqual(validacaoLowercase.manualValido, false);
-  assert.strictEqual(validacaoLowercase.sdkValido, false);
+  assert.strictEqual(webhookReal.orderId, webhookRealOrderId);
 
   const validacaoSegredoErrado = financeiro.validarAssinaturaWebhookMercadoPago({
     xSignature: assinaturaUppercase["x-signature"],
