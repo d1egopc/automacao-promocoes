@@ -4,7 +4,8 @@ const {
   criarLinkOptimus,
   criarLinkOptimusRepository,
   localizarLinkOptimusExistente,
-  montarUrlLinkOptimus
+  montarUrlLinkOptimus,
+  resolverDominioPublicoOptimusEnv
 } = require("../modules/links");
 
 const config = {
@@ -90,5 +91,18 @@ const railway = criarLinkOptimus("https://afiliado.test/outro", "amazon", {
 });
 assert.strictEqual(railway.ok, true);
 assert.ok(railway.url.startsWith("https://backend-railway.optimus.test/r/"));
+
+config.linksOptimus.dominio = "";
+const vps = criarLinkOptimus("https://afiliado.test/vps", "mercadolivre", {
+  clienteId: "cliente_a",
+  configGlobal: config,
+  repository,
+  dominioFallback: resolverDominioPublicoOptimusEnv({
+    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br",
+    RAILWAY_PUBLIC_DOMAIN: "automacao-promocoes-production.up.railway.app"
+  }).dominio
+});
+assert.strictEqual(vps.ok, true);
+assert.ok(vps.url.startsWith("https://go.optimuspromo.com.br/r/"));
 
 console.log("link-optimus-repository: ok");

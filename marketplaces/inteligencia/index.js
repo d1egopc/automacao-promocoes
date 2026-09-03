@@ -4,6 +4,11 @@ const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
+const {
+  normalizarFormatoLinkOptimus,
+  resolverDominioBaseLinkOptimus,
+  resolverDominioPublicoOptimusEnv
+} = require("../../modules/links");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -114,7 +119,7 @@ let config = {
 
 linksOptimus: {
   ativo: true,
-  dominio: "https://automacao-promocoes-production.up.railway.app",
+  dominio: "",
   formato: "/r",
   rastrearCliques: true
 },
@@ -1209,11 +1214,15 @@ function gerarLinkOptimus(linkOriginal = "", marketplace = "") {
 
   config.linksGerados = config.linksGerados || {};
 
-  const dominio =
-    config.linksOptimus.dominio || "https://optimus-promo.com";
+  const fallback = resolverDominioPublicoOptimusEnv(process.env);
+  const dominio = resolverDominioBaseLinkOptimus(config, fallback.dominio);
+
+  if (!dominio) {
+    return linkOriginal;
+  }
 
   const formato =
-    config.linksOptimus.formato || "/r";
+    normalizarFormatoLinkOptimus(config.linksOptimus.formato || "/r");
 
   const codigo = Math.random()
     .toString(36)
