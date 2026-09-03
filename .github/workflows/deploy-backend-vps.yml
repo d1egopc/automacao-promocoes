@@ -1,0 +1,112 @@
+name: Deploy Backend VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-backend-vps
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: node --check index.js
+
+      - name: Encoding audit
+        run: npm run audit:encoding
+
+      - name: Critical tests
+        run: |
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+
+  deploy:
+    name: Deploy VPS
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          test -n "$VPS_SSH_KEY"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/optimus_vps_key
+          chmod 600 ~/.ssh/optimus_vps_key
+          ssh-keyscan -p "$VPS_PORT" "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy backend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/optimus_vps_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" <<'EOF'
+          set -Eeuo pipefail
+          cd /opt/optimus/backend
+          git pull --ff-only origin main
+          cd /opt/optimus/infra
+          docker compose -f compose.yml build backend
+          docker compose -f compose.yml up -d backend
+          docker compose -f compose.yml ps backend
+          EOF
+
+      - name: Health check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for tentativa in {1..10}; do
+            if curl -fsS https://go.optimuspromo.com.br/; then
+              exit 0
+            fi
+            echo "Health check ainda indisponivel. Tentativa ${tentativa}/10."
+            sleep 3
+          done
+          exit 1
+
+      - name: Backend logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/optimus_vps_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            'cd /opt/optimus/infra && docker compose -f compose.yml logs --tail=200 backend'
