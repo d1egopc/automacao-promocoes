@@ -8,6 +8,9 @@ const {
 const {
   normalizarAlvosDestino
 } = require("../../utils/destinos-multialvo");
+const {
+  normalizarModoLinkDestino
+} = require("../links/link-optimus");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -194,6 +197,46 @@ function montarMensagemManualV2(oferta = {}, destino = {}, deps = {}) {
   ].filter(Boolean).join("\n");
 }
 
+function destinoUsaLinkOptimus(destino = {}) {
+  return normalizarModoLinkDestino(destino?.modoLink) === "optimus";
+}
+
+function erroLinkOptimusManualV2(motivo = "manual_v2_link_optimus_nao_aplicado") {
+  const erro = new Error(motivo);
+  erro.codigo = motivo;
+  erro.motivo = motivo;
+  return erro;
+}
+
+function resolverOfertaLinkManualV2({ oferta = {}, destino = {}, clienteId = "admin", plano = null, deps = {} } = {}) {
+  const modoOptimus = destinoUsaLinkOptimus(destino);
+  if (typeof deps.resolverLinkOfertaPorDestino !== "function") {
+    if (modoOptimus) throw erroLinkOptimusManualV2("manual_v2_link_optimus_resolver_indisponivel");
+    return oferta;
+  }
+
+  let resultado;
+  try {
+    resultado = deps.resolverLinkOfertaPorDestino({
+      oferta,
+      destino,
+      clienteId,
+      plano,
+      recursos: plano?.recursos,
+      configGlobal: deps.configGlobal
+    });
+  } catch (_erro) {
+    if (modoOptimus) throw erroLinkOptimusManualV2("manual_v2_link_optimus_resolucao_falhou");
+    return oferta;
+  }
+
+  if (modoOptimus && (resultado?.aplicado !== true || !resultado?.oferta)) {
+    throw erroLinkOptimusManualV2("manual_v2_link_optimus_nao_aplicado");
+  }
+
+  return resultado?.oferta || oferta;
+}
+
 async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
   const conexaoId = conexaoWhatsapp(destino);
   const grupos = gruposWhatsappDestino(destino);
@@ -368,15 +411,22 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
     }
 
     try {
-      const mensagem = montarMensagemManualV2(oferta, destino, { ...deps, plano });
+      const ofertaParaMensagem = resolverOfertaLinkManualV2({
+        oferta,
+        destino,
+        clienteId: cliente,
+        plano,
+        deps
+      });
+      const mensagem = montarMensagemManualV2(ofertaParaMensagem, destino, { ...deps, plano });
       const tipo = tipoDestino(destino);
       let detalhesEnvio = {};
       if (tipo === "telegram") {
         await enviarTelegramManual({ destino, mensagem, deps, clienteId: cliente });
       } else if (tipo === "whatsapp") {
-        await enviarWhatsappManual({ destino, oferta, mensagem, deps });
+        await enviarWhatsappManual({ destino, oferta: ofertaParaMensagem, mensagem, deps });
       } else if (tipo === "discord") {
-        detalhesEnvio = await enviarDiscordManual({ destino, oferta, mensagem, deps });
+        detalhesEnvio = await enviarDiscordManual({ destino, oferta: ofertaParaMensagem, mensagem, deps });
       } else {
         throw new Error("Canal indisponivel");
       }

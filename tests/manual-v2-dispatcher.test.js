@@ -49,6 +49,15 @@ const destinosPorCliente = {
       gruposWhatsapp: ["120363@g.us"]
     },
     {
+      id: "wa_link_optimus",
+      nome: "WA Link Optimus",
+      tipo: "whatsapp",
+      ativo: true,
+      modoLink: "optimus",
+      conexaoId: "sessao_a",
+      gruposWhatsapp: ["120363-optimus@g.us"]
+    },
+    {
       id: "wa_stale_alias",
       nome: "WA Alvo Oficial",
       tipo: "whatsapp",
@@ -779,6 +788,158 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://amzn.to/produto");
     assert.strictEqual(chamadas.templates[0].opcoes.clienteId, "cliente_a");
     assert.strictEqual(chamadas.templates[0].opcoes.canal, "whatsapp");
+  }
+
+  {
+    const chamadasResolver = [];
+    const { deps, chamadas } = baseDeps({
+      plano: {
+        recursos: {
+          whatsapp: true,
+          telegram: true,
+          discord: true,
+          linkOptimus: true
+        }
+      },
+      resolverLinkOfertaPorDestino: ({ oferta, destino, clienteId, plano }) => {
+        chamadasResolver.push({ destinoId: destino.id, clienteId, linkOptimus: plano?.recursos?.linkOptimus });
+        return {
+          aplicado: true,
+          linkFinal: "https://go.optimuspromo.com.br/r/manual123",
+          oferta: {
+            ...oferta,
+            linkAfiliadoOriginal: oferta.urlAfiliada,
+            linkOriginalAntesLinkOptimus: oferta.urlAfiliada,
+            linkAfiliado: "https://go.optimuspromo.com.br/r/manual123",
+            linkFinal: "https://go.optimuspromo.com.br/r/manual123",
+            link: "https://go.optimuspromo.com.br/r/manual123",
+            urlAfiliada: "https://go.optimuspromo.com.br/r/manual123",
+            linkOptimusAplicado: true
+          }
+        };
+      }
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_link_optimus"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.enviados, 1);
+    assert.strictEqual(chamadasResolver.length, 1);
+    assert.deepStrictEqual(chamadasResolver[0], {
+      destinoId: "wa_link_optimus",
+      clienteId: "cliente_a",
+      linkOptimus: true
+    });
+    assert.strictEqual(chamadas.templates.length, 1);
+    assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://go.optimuspromo.com.br/r/manual123");
+    assert.strictEqual(chamadas.templates[0].oferta.linkFinal, "https://go.optimuspromo.com.br/r/manual123");
+    assert.strictEqual(chamadas.templates[0].oferta.urlOriginal, ofertaA.urlOriginal, "URL original do produto deve ser preservada");
+    assert.strictEqual(chamadas.wa[0].mensagem.includes("https://go.optimuspromo.com.br/r/manual123"), true);
+    assert.strictEqual(ofertaA.urlAfiliada, "https://amzn.to/produto", "oferta persistida original nao deve ser mutada");
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      plano: {
+        recursos: {
+          whatsapp: true,
+          telegram: true,
+          discord: true,
+          linkOptimus: true
+        }
+      },
+      resolverLinkOfertaPorDestino: ({ oferta }) => ({
+        aplicado: false,
+        motivo: "dominio_ausente",
+        oferta,
+        linkFinal: oferta.urlAfiliada
+      })
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_link_optimus"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.enviados, 0);
+    assert.strictEqual(retorno.erros, 1);
+    assert.strictEqual(retorno.resultados[0].erro, "manual_v2_link_optimus_nao_aplicado");
+    assert.strictEqual(chamadas.templates.length, 0, "fallback original nao pode chegar ao template em modo optimus");
+    assert.strictEqual(chamadas.wa.length, 0, "modo optimus com falha nao deve enviar link original");
+    assert.strictEqual(chamadas.debitos.length, 0);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      plano: {
+        recursos: {
+          whatsapp: true,
+          telegram: true,
+          discord: true,
+          linkOptimus: true
+        }
+      }
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_link_optimus"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.enviados, 0);
+    assert.strictEqual(retorno.resultados[0].erro, "manual_v2_link_optimus_resolver_indisponivel");
+    assert.strictEqual(chamadas.templates.length, 0);
+    assert.strictEqual(chamadas.wa.length, 0);
+    assert.strictEqual(chamadas.debitos.length, 0);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      resolverLinkOfertaPorDestino: () => {
+        throw new Error("falha interna nao exposta");
+      }
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.enviados, 1);
+    assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://amzn.to/produto");
+    assert.strictEqual(chamadas.wa[0].mensagem.includes("https://amzn.to/produto"), true);
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      resolverLinkOfertaPorDestino: ({ oferta }) => ({
+        aplicado: false,
+        motivo: "modo_original",
+        oferta,
+        linkFinal: oferta.urlAfiliada
+      })
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_a",
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.enviados, 1);
+    assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://amzn.to/produto");
+    assert.strictEqual(chamadas.wa[0].mensagem.includes("https://amzn.to/produto"), true);
   }
 
   {

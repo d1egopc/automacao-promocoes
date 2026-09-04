@@ -27,6 +27,7 @@ const dependenciasObrigatorias = [
   "gerarDeepLinkAwin: gerarDeepLinkAwinManualV2",
   "gerarLinkCurtoAliExpress: gerarLinkCurtoAliExpressManualV2",
   "gerarLinkOptimus: gerarLinkOptimusManualV2",
+  "resolverLinkOfertaPorDestino",
   "obterProgramaAwin: obterProgramaAwinManualV2",
   "registrarSucessoIntegracao: registrarSucessoIntegracaoManualV2",
   "registrarAlertaIntegracao: registrarAlertaIntegracaoManualV2"
