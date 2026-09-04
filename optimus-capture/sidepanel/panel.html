@@ -1,0 +1,97 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Optimus Capture</title>
+    <link rel="stylesheet" href="./panel.css">
+  </head>
+  <body>
+    <main class="app">
+      <header class="topo">
+        <div>
+          <strong>OPTIMUS CAPTURE</strong>
+          <span id="statusConexao" class="status">Desconectado</span>
+        </div>
+        <button id="botaoSair" class="link-button" hidden>Sair</button>
+      </header>
+
+      <section id="loginView" class="view">
+        <label>
+          Usuario ou email
+          <input id="loginUser" autocomplete="username" type="text">
+        </label>
+        <label>
+          Senha
+          <input id="loginPass" autocomplete="current-password" type="password">
+        </label>
+        <button id="botaoConectar" class="primary">Conectar com Optimus</button>
+        <p id="handoffStatus" class="estado" hidden></p>
+        <div class="divisor"><span></span><small>ou entre com senha</small><span></span></div>
+        <button id="botaoLogin" class="secondary">Entrar no Optimus</button>
+        <p id="loginErro" class="erro" hidden></p>
+      </section>
+
+      <section id="captureView" class="view" hidden>
+        <div class="workspace">
+          <span id="usuarioResumo"></span>
+          <button id="botaoCapturar" class="secondary">Atualizar captura</button>
+        </div>
+
+        <section id="estadoPagina" class="estado"></section>
+
+        <section id="produtoView" class="produto" hidden>
+          <img id="produtoImagem" alt="" class="produto-imagem">
+          <div class="marketplace">Mercado Livre</div>
+          <label>
+            Titulo
+            <textarea id="campoTitulo" rows="3"></textarea>
+          </label>
+          <div class="grid">
+            <label>
+              Preco atual
+              <input id="campoPrecoAtual" inputmode="decimal" type="text">
+            </label>
+            <label>
+              Preco anterior
+              <input id="campoPrecoAnterior" inputmode="decimal" type="text">
+            </label>
+          </div>
+          <div class="grid">
+            <label>
+              Desconto
+              <input id="campoDesconto" type="text" readonly>
+            </label>
+            <label>
+              Cupom
+              <input id="campoCupom" type="text">
+            </label>
+          </div>
+
+          <div class="status-lista">
+            <span id="statusProduto">Produto capturado</span>
+            <span id="statusLink">Preview ainda nao gerado</span>
+          </div>
+
+          <button id="botaoPreview" class="primary">Gerar preview Optimus</button>
+          <div class="acoes-futuras">
+            <button disabled>Enviar agora</button>
+            <button disabled>Salvar no Optimus</button>
+            <small>Disponivel na proxima etapa.</small>
+          </div>
+        </section>
+
+        <section id="previewView" class="preview" hidden></section>
+      </section>
+    </main>
+
+    <script src="../services/storage.js"></script>
+    <script src="../services/api.js"></script>
+    <script src="../services/handoff.js"></script>
+    <script src="../services/auth.js"></script>
+    <script src="../core/product-contract.js"></script>
+    <script src="../core/marketplace-detector.js"></script>
+    <script src="./panel.js"></script>
+  </body>
+</html>
+
