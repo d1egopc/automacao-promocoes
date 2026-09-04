@@ -17,6 +17,9 @@
       </header>
 
       <section id="loginView" class="view">
+        <button id="botaoConectar" class="primary">Conectar com Optimus</button>
+        <p id="handoffStatus" class="estado" hidden></p>
+        <div class="divisor"><span></span><small>ou entre com senha</small><span></span></div>
         <label>
           Usuario ou email
           <input id="loginUser" autocomplete="username" type="text">
@@ -25,10 +28,7 @@
           Senha
           <input id="loginPass" autocomplete="current-password" type="password">
         </label>
-        <button id="botaoConectar" class="primary">Conectar com Optimus</button>
-        <p id="handoffStatus" class="estado" hidden></p>
-        <div class="divisor"><span></span><small>ou entre com senha</small><span></span></div>
-        <button id="botaoLogin" class="secondary">Entrar no Optimus</button>
+        <button id="botaoLogin" class="secondary">Entrar com senha</button>
         <p id="loginErro" class="erro" hidden></p>
       </section>
 
@@ -41,7 +41,9 @@
         <section id="estadoPagina" class="estado"></section>
 
         <section id="produtoView" class="produto" hidden>
-          <img id="produtoImagem" alt="" class="produto-imagem">
+          <div class="produto-media">
+            <img id="produtoImagem" alt="" class="produto-imagem">
+          </div>
           <div class="marketplace">Mercado Livre</div>
           <label>
             Titulo
@@ -68,17 +70,17 @@
             </label>
           </div>
 
+          <div class="acoes-futuras">
+            <button id="botaoSalvar" disabled>Salvar no Optimus</button>
+            <button disabled title="Disponivel na proxima etapa">Enviar agora</button>
+          </div>
+
           <div class="status-lista">
             <span id="statusProduto">Produto capturado</span>
             <span id="statusLink">Preview ainda nao gerado</span>
           </div>
 
-          <button id="botaoPreview" class="primary">Gerar preview Optimus</button>
-          <div class="acoes-futuras">
-            <button disabled>Enviar agora</button>
-            <button disabled>Salvar no Optimus</button>
-            <small>Disponivel na proxima etapa.</small>
-          </div>
+          <button id="botaoPreview" class="primary" hidden>Gerar preview Optimus</button>
         </section>
 
         <section id="previewView" class="preview" hidden></section>

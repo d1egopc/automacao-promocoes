@@ -1,10 +1,16 @@
 const assert = require("assert");
+const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 
 const raiz = path.join(__dirname, "..", "optimus-capture");
 const detector = require(path.join(raiz, "core", "marketplace-detector.js"));
 const contrato = require(path.join(raiz, "core", "product-contract.js"));
 const ml = require(path.join(raiz, "adapters", "mercadolivre.js"));
+const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
+const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
+const panelHtml = fs.readFileSync(path.join(raiz, "sidepanel", "panel.html"), "utf8");
+const panelCss = fs.readFileSync(path.join(raiz, "sidepanel", "panel.css"), "utf8");
 
 function htmlProdutoJsonLd() {
   return `
@@ -57,11 +63,251 @@ function htmlPrecoAmbiguo() {
   `;
 }
 
+function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", atual = "72.16", incluirOriginal = true } = {}) {
+  return `
+    <html>
+      <head>
+        <title>Produto real com preco de | Mercado Livre</title>
+        <meta property="og:title" content="Produto real com preco de">
+        <meta property="og:image" content="https://http2.mlstatic.com/D_NQ_NP_DOM.webp">
+        <meta itemprop="price" content="${atual}">
+      </head>
+      <body>
+        <div class="ui-pdp-price" id="_R_8kb2hcp9vqra_">
+          ${incluirOriginal ? `
+            <s
+              class="andes-money-amount ui-pdp-price__part ui-pdp-price__original-value andes-money-amount--previous"
+              aria-label="Antes: ${anterior} reais com ${centavos} centavos"
+              data-andes-money-amount="true">
+              <span data-andes-money-amount-fraction="true">${anterior}</span>
+              <span data-andes-money-amount-cents="true">${centavos}</span>
+            </s>
+          ` : ""}
+          <span class="andes-money-amount" itemprop="offers" data-andes-money-amount="true">
+            <span data-andes-money-amount-fraction="true">72</span>
+            <span data-andes-money-amount-cents="true">16</span>
+          </span>
+          <span>44% OFF</span>
+          <span>12x R$ 7,11</span>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 (async function main() {
   {
     const deteccao = detector.detectarMarketplacePorUrl("https://produto.mercadolivre.com.br/MLB-123-produto-_JM");
     assert.strictEqual(deteccao.suportado, true);
     assert.strictEqual(deteccao.marketplace, "mercadolivre");
+  }
+
+  {
+    assert.ok(panelFonte.includes("tabs.onActivated.addListener"));
+    assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
+    assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
+    assert.ok(panelFonte.includes("state.ultimoPreviewKey === previewKey"));
+    assert.ok(panelFonte.includes("gerarPreview({ automatico: true })"));
+    assert.ok(panelFonte.includes('new Intl.NumberFormat("pt-BR"'));
+    assert.ok(panelFonte.includes("formatarMoeda"));
+    assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden'));
+    assert.ok(panelHtml.includes('id="botaoSalvar" disabled'));
+    assert.ok(panelCss.includes("button:disabled"));
+    assert.ok(panelCss.includes("cursor: default"));
+    assert.ok(panelCss.includes('button[data-estado="salvo"]:disabled'));
+    assert.ok(apiFonte.includes("function salvarOfertaManualV2"));
+    assert.ok(apiFonte.includes('requestJson("/manual-v2/ofertas"'));
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        elementos.set(id, {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        });
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let onUpdated = null;
+    let urlAtual = "https://produto.mercadolivre.com.br/MLB-111-produto-a-_JM";
+    let produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto A",
+      precoAtual: 60.31,
+      precoAnterior: 124.45,
+      imagem: "https://http2.mlstatic.com/a.webp"
+    };
+    let previews = 0;
+    let saves = 0;
+    let falharSave = false;
+    let resolverSavePendente = null;
+    const payloadsPreview = [];
+    const ofertasSalvas = [];
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({ tag, textContent: "", children: [], append(...itens) { this.children.push(...itens); } }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 1, url: urlAtual }];
+          },
+          async sendMessage() {
+            return { produto: produtoAtual };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: {
+            addListener(callback) {
+              onUpdated = callback;
+            }
+          }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          payloadsPreview.push(payload);
+          return {
+            oferta: {
+              clienteId: "cliente_ignorado_pelo_frontend",
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              precoAnterior: payload.precoAnterior,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://meli.la/teste"
+            }
+          };
+        },
+        async salvarOfertaManualV2(_token, oferta) {
+          saves += 1;
+          ofertasSalvas.push(oferta);
+          if (resolverSavePendente) {
+            await new Promise((resolve) => {
+              resolverSavePendente = resolve;
+            });
+            resolverSavePendente = null;
+          }
+          if (falharSave) {
+            const erro = new Error("falha_temporaria");
+            erro.status = 503;
+            throw erro;
+          }
+          return {
+            ok: true,
+            oferta: {
+              id: `manual_salvo_${saves}`,
+              ...oferta
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.strictEqual(previews, 1);
+    assert.strictEqual(elemento("statusConexao").textContent, "Conectado - DiegoPC");
+    assert.strictEqual(elemento("loginView").hidden, true);
+    assert.strictEqual(elemento("produtoView").hidden, false);
+    assert.strictEqual(elemento("campoPrecoAtual").value, "R$ 60,31");
+    assert.strictEqual(elemento("campoPrecoAnterior").value, "R$ 124,45");
+    assert.strictEqual(payloadsPreview[0].precoAtual, 60.31);
+    assert.strictEqual(payloadsPreview[0].precoAnterior, 124.45);
+    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A - R$ 60,31");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+
+    resolverSavePendente = true;
+    const primeiroSave = elemento("botaoSalvar").listeners.click();
+    const segundoSave = elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(saves, 1, "duplo clique rapido nao deve gerar dois saves");
+    assert.strictEqual(elemento("botaoSalvar").disabled, true);
+    assert.strictEqual(elemento("botaoSalvar").textContent, "Salvando...");
+    resolverSavePendente();
+    await Promise.all([primeiroSave, segundoSave]);
+    assert.strictEqual(previews, 1, "salvar nao deve chamar preview/capture novamente");
+    assert.strictEqual(saves, 1);
+    assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
+    assert.strictEqual(elemento("botaoSalvar").disabled, true);
+    assert.strictEqual(elemento("botaoSalvar").textContent, "Salvo no Optimus");
+    assert.strictEqual(elemento("botaoSalvar").dataset.estado, "salvo");
+    assert.strictEqual(ofertasSalvas[0].urlAfiliada, "https://meli.la/teste");
+    assert.strictEqual(ofertasSalvas[0].precoAtual, 60.31);
+    assert.ok(!("clienteId" in ofertasSalvas[0]));
+    await elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(saves, 1, "mesmo preview salvo nao deve salvar novamente");
+
+    onUpdated(1, { status: "complete" });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 1);
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-222-produto-b-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto B",
+      precoAtual: 1249.9,
+      imagem: "https://http2.mlstatic.com/b.webp"
+    };
+    onUpdated(1, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 2);
+    assert.strictEqual(elemento("campoTitulo").value, "Produto B");
+    assert.strictEqual(elemento("campoPrecoAtual").value, "R$ 1.249,90");
+    assert.strictEqual(elemento("campoPrecoAnterior").value, "");
+    assert.strictEqual(payloadsPreview[1].precoAtual, 1249.9);
+    assert.strictEqual(payloadsPreview[1].precoAnterior, "");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoSalvar").dataset.estado, "");
+
+    falharSave = true;
+    await elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(saves, 2);
+    assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel salvar. Tente novamente.");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    falharSave = false;
+    await elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(saves, 3);
+    assert.strictEqual(ofertasSalvas[2].precoAtual, 1249.9);
+    assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
   }
 
   {
@@ -82,6 +328,36 @@ function htmlPrecoAmbiguo() {
     assert.strictEqual(produto.imagem, "https://http2.mlstatic.com/D_NQ_NP_456.webp");
     assert.strictEqual(produto.cupom, "SEMDEMORA");
     assert.strictEqual(produto.completo, true);
+  }
+
+  {
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlPrecoAnteriorDomMercadoLivre(),
+      "https://produto.mercadolivre.com.br/MLB-999-produto-real-_JM"
+    );
+    assert.strictEqual(produto.precoAtual, 72.16);
+    assert.strictEqual(produto.precoAnterior, 129.9);
+    assert.notStrictEqual(produto.precoAnterior, 7.11);
+    assert.strictEqual(produto.descontoPercentual, 44);
+    assert.strictEqual(produto.imagem, "https://http2.mlstatic.com/D_NQ_NP_DOM.webp");
+  }
+
+  {
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlPrecoAnteriorDomMercadoLivre({ incluirOriginal: false }),
+      "https://produto.mercadolivre.com.br/MLB-999-produto-sem-de-_JM"
+    );
+    assert.strictEqual(produto.precoAtual, 72.16);
+    assert.strictEqual(produto.precoAnterior, null);
+  }
+
+  {
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlPrecoAnteriorDomMercadoLivre({ anterior: "72", centavos: "16" }),
+      "https://produto.mercadolivre.com.br/MLB-999-produto-original-igual-_JM"
+    );
+    assert.strictEqual(produto.precoAtual, 72.16);
+    assert.strictEqual(produto.precoAnterior, null);
   }
 
   {

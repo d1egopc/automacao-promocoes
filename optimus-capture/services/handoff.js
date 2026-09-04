@@ -56,13 +56,14 @@
   async function conectarComOptimus(opcoes = {}) {
     const api = opcoes.api || global.OptimusCaptureApi;
     const chromeTabs = opcoes.chromeTabs || global.chrome?.tabs;
+    const abrirUrl = typeof opcoes.abrirUrl === "function" ? opcoes.abrirUrl : null;
     const intervaloMs = Number(opcoes.intervaloMs || 2000);
     const maxTentativas = Number(opcoes.maxTentativas || 90);
     const esperarImpl = opcoes.esperar || esperar;
     const onStatus = typeof opcoes.onStatus === "function" ? opcoes.onStatus : () => undefined;
 
     if (!api?.iniciarCaptureHandoff || !api?.trocarCaptureHandoff) throw new Error("api_handoff_indisponivel");
-    if (!chromeTabs?.create) throw new Error("chrome_tabs_indisponivel");
+    if (!abrirUrl && !chromeTabs?.create) throw new Error("chrome_tabs_indisponivel");
 
     const codeVerifier = gerarTokenUrlSeguro(48);
     const state = gerarTokenUrlSeguro(32);
@@ -72,7 +73,12 @@
     const handoffId = texto(iniciado?.handoffId);
     if (!handoffId) throw new Error("handoff_id_ausente");
 
-    await chromeTabs.create({ url: urlConexao(api, handoffId, state), active: true });
+    const url = urlConexao(api, handoffId, state);
+    if (abrirUrl) {
+      await abrirUrl(url);
+    } else {
+      await chromeTabs.create({ url, active: true });
+    }
     onStatus("Autorize no Optimus. A extensao vai concluir automaticamente.");
 
     for (let tentativa = 0; tentativa < maxTentativas; tentativa += 1) {

@@ -9,6 +9,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -17,8 +21,8 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 16px;
+  gap: 10px;
+  padding: 12px;
 }
 
 .topo {
@@ -46,13 +50,13 @@ small {
 .preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 9px;
 }
 
 label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   color: #344054;
   font-size: 12px;
   font-weight: 600;
@@ -63,7 +67,7 @@ textarea {
   width: 100%;
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  padding: 10px 11px;
+  padding: 8px 10px;
   color: #101828;
   font: inherit;
   font-size: 14px;
@@ -72,12 +76,13 @@ textarea {
 
 textarea {
   resize: vertical;
+  min-height: 58px;
 }
 
 button {
   border: 0;
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 9px 10px;
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -85,8 +90,14 @@ button {
 }
 
 button:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.55;
+}
+
+button[data-estado="salvo"]:disabled {
+  color: #027a48;
+  background: #d1fadf;
+  opacity: 1;
 }
 
 .primary {
@@ -116,7 +127,7 @@ button:disabled {
 .erro {
   margin: 0;
   border-radius: 8px;
-  padding: 10px;
+  padding: 8px 10px;
   font-size: 13px;
   background: #fff7e6;
   color: #7a4b00;
@@ -127,8 +138,14 @@ button:disabled {
   color: #b42318;
 }
 
+.produto-media {
+  display: flex;
+  justify-content: center;
+}
+
 .produto-imagem {
-  width: 100%;
+  width: 80%;
+  max-width: 230px;
   aspect-ratio: 1 / 1;
   border-radius: 8px;
   object-fit: contain;
@@ -139,20 +156,32 @@ button:disabled {
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 
 .status-lista {
-  display: grid;
-  gap: 6px;
-  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: #667085;
+  font-size: 12px;
 }
 
-.status-lista span,
+.status-lista span {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.status-lista span + span::before {
+  content: "· ";
+}
+
 .preview {
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  padding: 10px;
+  padding: 8px 10px;
   background: #fff;
 }
 
@@ -161,10 +190,6 @@ button:disabled {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   align-items: center;
-}
-
-.acoes-futuras small {
-  grid-column: 1 / -1;
 }
 
 .preview h2 {

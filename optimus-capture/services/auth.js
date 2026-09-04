@@ -2,7 +2,6 @@
   const storage = global.OptimusCaptureStorage || require("./storage");
   const api = global.OptimusCaptureApi || require("./api");
   const handoff = global.OptimusCaptureHandoff || require("./handoff");
-  const handoff = global.OptimusCaptureHandoff || require("./handoff");
 
   function usuarioPublico(payload) {
     const usuario = payload?.usuario || payload?.user || {};
@@ -60,28 +59,6 @@
       abrirUrl: opcoes.abrirUrl
     });
     const token = String(resposta?.token || "");
-    if (!token) throw new Error("token_ausente");
-    const confirmado = await api.me(token);
-    const auth = {
-      token,
-      usuario: usuarioPublico(confirmado),
-      autenticadoEm: new Date().toISOString(),
-      origem: "capture_handoff"
-    };
-    await storage.salvarAuth(auth);
-    return auth;
-  }
-
-  async function conectarComOptimus(opcoes = {}) {
-    const resposta = await handoff.conectarComOptimus({
-      api,
-      onStatus: opcoes.onStatus,
-      intervaloMs: opcoes.intervaloMs,
-      maxTentativas: opcoes.maxTentativas,
-      esperar: opcoes.esperar,
-      chromeTabs: opcoes.chromeTabs
-    });
-    const token = [REDACTED_SECRET] || "");
     if (!token) throw new Error("token_ausente");
     const confirmado = await api.me(token);
     const auth = {

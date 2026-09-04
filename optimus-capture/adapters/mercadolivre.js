@@ -58,6 +58,12 @@
     return limparTexto((String(html || "").match(re) || [])[1] || "");
   }
 
+  function metaItemprop(html, propriedade) {
+    const alvo = propriedade.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`<meta\\b(?=[^>]*itemprop=["']${alvo}["'])(?=[^>]*content=["']([^"']+)["'])[^>]*>`, "i");
+    return limparTexto((String(html || "").match(re) || [])[1] || "");
+  }
+
   function tituloHtml(html) {
     return limparTexto((String(html || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "")
       .replace(/\s*\|\s*Mercado Livre.*$/i, "");
@@ -88,6 +94,49 @@
     ]
       .map(contrato.precoNumero)
       .filter(numero => numero && (!precoAtual || numero > precoAtual));
+    return candidatos[0] || null;
+  }
+
+  function textoHtmlFragmento(html = "") {
+    return limparTexto(String(html || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&"));
+  }
+
+  function valorMoneyAmountAndes(html = "") {
+    const textoEntrada = String(html || "");
+    const fracao = textoHtmlFragmento(
+      (textoEntrada.match(/<span\b(?=[^>]*data-andes-money-amount-fraction=["']true["'])[^>]*>([\s\S]*?)<\/span>/i) || [])[1] || ""
+    );
+    if (!fracao) return null;
+
+    const centavos = textoHtmlFragmento(
+      (textoEntrada.match(/<span\b(?=[^>]*data-andes-money-amount-cents=["']true["'])[^>]*>([\s\S]*?)<\/span>/i) || [])[1] || ""
+    );
+    const inteiro = fracao.replace(/[^\d]/g, "");
+    if (!inteiro) return null;
+    const centavosNormalizados = centavos
+      ? centavos.replace(/[^\d]/g, "").padEnd(2, "0").slice(0, 2)
+      : "00";
+    const numero = Number(`${inteiro}.${centavosNormalizados || "00"}`);
+    return Number.isFinite(numero) && numero > 0 ? numero : null;
+  }
+
+  function precoAnteriorDomMercadoLivre(html, precoAtual) {
+    const textoEntrada = String(html || "");
+    if (!textoEntrada.includes("ui-pdp-price") || !textoEntrada.includes("ui-pdp-price__original-value")) {
+      return null;
+    }
+
+    const candidatos = [];
+    const re = /<([a-z0-9]+)\b(?=[^>]*class=["'][^"']*\bui-pdp-price__original-value\b)[^>]*>([\s\S]*?)<\/\1>/gi;
+    let match;
+    while ((match = re.exec(textoEntrada))) {
+      const numero = valorMoneyAmountAndes(match[2] || "");
+      if (numero && (!precoAtual || numero > precoAtual)) candidatos.push(numero);
+    }
+
     return candidatos[0] || null;
   }
 
@@ -148,10 +197,13 @@
     const ogImage = meta(htmlTexto, "og:image");
     const titulo = limparTexto(produtoJson?.name || ogTitle || tituloHtml(htmlTexto));
     const precoJson = precoJsonLd(produtoJson);
-    const precosTexto = precoJson ? [] : valoresPrecoNoTexto(textoPagina);
-    const precoAmbiguo = !precoJson && precosTexto.length > 1;
-    const precoAtual = precoJson || (precosTexto.length === 1 ? precosTexto[0] : null);
-    const precoAnterior = precoAnteriorJsonLd(produtoJson, precoAtual) ||
+    const precoMeta = contrato.precoNumero(metaItemprop(htmlTexto, "price"));
+    const precoEstruturado = precoJson || precoMeta;
+    const precosTexto = precoEstruturado ? [] : valoresPrecoNoTexto(textoPagina);
+    const precoAmbiguo = !precoEstruturado && precosTexto.length > 1;
+    const precoAtual = precoEstruturado || (precosTexto.length === 1 ? precosTexto[0] : null);
+    const precoAnterior = precoAnteriorDomMercadoLivre(htmlTexto, precoAtual) ||
+      precoAnteriorJsonLd(produtoJson, precoAtual) ||
       precoAnteriorNoTexto(textoPagina, precoAtual);
     const imagem = contrato.urlHttp(imagemJsonLd(produtoJson) || ogImage);
     const fonte = produtoJson ? "json_ld" : (ogTitle || ogImage ? "og_meta" : "dom_visivel");

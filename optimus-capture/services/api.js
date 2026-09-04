@@ -1,8 +1,6 @@
 ﻿(function publicarApi(global) {
   const API_BASE = "https://go.optimuspromo.com.br";
-  const APP_BASE = API_BASE;
-  const APP_BASE = API_BASE;
-  const APP_BASE = API_BASE;
+  const APP_BASE = "https://www.optimuspromo.com.br";
 
   function texto(valor) {
     return String(valor ?? "").trim();
@@ -63,17 +61,11 @@
     });
   }
 
-  function iniciarCaptureHandoff(payload) {
-    return requestJson("/auth/capture/handoff/iniciar", {
+  function salvarOfertaManualV2(token, oferta) {
+    return requestJson("/manual-v2/ofertas", {
       method: "POST",
-      body: payload || {}
-    });
-  }
-
-  function trocarCaptureHandoff(payload) {
-    return requestJson("/auth/capture/handoff/trocar", {
-      method: "POST",
-      body: payload || {}
+      token,
+      body: { oferta: oferta || {} }
     });
   }
 
@@ -91,19 +83,6 @@
     });
   }
 
-  function iniciarCaptureHandoff(payload) {
-    return requestJson("/auth/capture/handoff/iniciar", {
-      method: "POST",
-      body: payload || {}
-    });
-  }
-
-  function trocarCaptureHandoff(payload) {
-    return requestJson("/auth/capture/handoff/trocar", {
-      method: "POST",
-      body: payload || {}
-    });
-  }
 
   const api = {
     API_BASE,
@@ -113,11 +92,10 @@
     login,
     me,
     gerarPreviewCapture,
+    salvarOfertaManualV2,
     iniciarCaptureHandoff,
     trocarCaptureHandoff
   };
   global.OptimusCaptureApi = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
-
-
