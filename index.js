@@ -21850,6 +21850,10 @@ function gerarLinkAfiliadoMercadoLivreManualV2(...args) {
   return gerarLinkAfiliadoMercadoLivre(...args);
 }
 
+function gerarLinkAfiliadoClienteManualV2(...args) {
+  return gerarLinkAfiliadoCliente(...args);
+}
+
 function gerarDeepLinkAwinManualV2(...args) {
   return gerarDeepLinkAwin(...args);
 }
@@ -21943,7 +21947,7 @@ app.use("/manual-v2", criarRotasManualV2({
   debitarCreditos,
   montarMensagemOferta,
   resolverLinkOfertaPorDestino,
-  gerarLinkAfiliadoCliente,
+  gerarLinkAfiliadoCliente: gerarLinkAfiliadoClienteManualV2,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,
   listarConexoesDiscord,
