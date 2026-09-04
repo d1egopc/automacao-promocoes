@@ -89,7 +89,7 @@ function criarRotasCaptureHandoff(deps = {}) {
         });
       }
       service.consumirHandoff(validacao.handoffId);
-      const token = [REDACTED_SECRET]
+      const token = emitirJwtOptimusUsuario(usuario);
       return res.json({
         ok: true,
         token,
