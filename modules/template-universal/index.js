@@ -435,6 +435,30 @@ function instrucaoCupomDeterministica(cupom = "") {
   return codigo ? `Aplique o cupom ${codigo} para obter o valor.` : "";
 }
 
+function chaveCupomInstrucao(valor = "") {
+  return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
+}
+
+function instrucaoComercialSubstituiPadraoCupom(instrucao = "", cupom = "") {
+  const texto = textoComercialRenderizavel(instrucao);
+  const codigo = chaveCupomInstrucao(cupom);
+  if (!texto || !codigo) return false;
+
+  const normalizado = normalizarComparacao(texto);
+  if (!chaveCupomInstrucao(texto).includes(codigo)) return false;
+  if (!/\b(?:aplique|use|utilize|resgate|ative)\b/.test(normalizado)) return false;
+  if (!/\b(?:cupom|voucher)\b/.test(normalizado)) return false;
+  return /\b(?:pix|valor|preco|chegar|obter|desconto|finalizar|condicao|carrinho|app)\b/.test(normalizado);
+}
+
+function instrucaoCupomParaTemplate(campos = {}, beneficioComercial = "", precoFinal = "") {
+  const instrucaoComercial = montarInstrucaoComercial(campos, beneficioComercial, precoFinal);
+  if (instrucaoComercialSubstituiPadraoCupom(instrucaoComercial, campos.cupom)) {
+    return instrucaoComercial;
+  }
+  return instrucaoCupomDeterministica(campos.cupom);
+}
+
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (!precoAtual) return precoAtual;
   if (normalizarComparacao(campos.condicaoPrecoPor) === "pix" && !textoIndicaPix(precoAtual)) return `${precoAtual} no Pix`;
@@ -704,6 +728,9 @@ function montarTemplateUniversalOficial({
   linksPc,
   linksProduto
 }) {
+  const instrucaoCupom = campos.cupom
+    ? instrucaoCupomParaTemplate(campos, beneficioComercial, precoAtualComCondicao)
+    : "";
   adicionarBloco(blocos, blocoTituloApresentacao(campos));
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
@@ -720,7 +747,7 @@ function montarTemplateUniversalOficial({
   ]);
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
-    campos.cupom ? linhaComPrefixo("⚡", instrucaoCupomDeterministica(campos.cupom)) : "",
+    instrucaoCupom ? linhaComPrefixo("⚡", instrucaoCupom) : "",
     beneficioComercial ? linhaComPrefixo("🎁", beneficioComercial) : "",
     ...detalhesComerciais
   ]);

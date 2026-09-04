@@ -592,6 +592,48 @@ const msgFraseReal = gerarTemplateUniversal({
 assertContem(msgFraseReal, "Aplique o cupom PROMO10 para obter o valor.");
 assertNaoContem(msgFraseReal, "Aplique o cupom de 10% no anuncio");
 
+const msgBraeCupomPix = gerarTemplateUniversal({
+  titulo: "Brae tratamento capilar",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Cupom: FULLRESGATE0309\nAplique o cupom FULLRESGATE0309 + Pix para chegar neste valor.",
+  precoAtual: 129.9,
+  cupom: "FULLRESGATE0309",
+  instrucaoCupom: "Aplique o cupom FULLRESGATE0309 + Pix para chegar neste valor.",
+  linkAfiliado: "https://go.optimus/brae"
+});
+assert.strictEqual(contarOcorrencias(msgBraeCupomPix, "Aplique o cupom FULLRESGATE0309 + Pix para chegar neste valor."), 1);
+assertNaoContem(msgBraeCupomPix, "Aplique o cupom FULLRESGATE0309 para obter o valor.");
+
+const msgRtxSemInstrucaoRica = gerarTemplateUniversal({
+  titulo: "RTX 4060 oferta",
+  marketplace: "KaBuM",
+  textoOriginal: "Cupom: ECONOMIZASEMPRE\nOferta por tempo limitado",
+  precoAtual: 1899.9,
+  cupom: "ECONOMIZASEMPRE",
+  linkAfiliado: "https://go.optimus/rtx"
+});
+assertContem(msgRtxSemInstrucaoRica, "Aplique o cupom ECONOMIZASEMPRE para obter o valor.");
+
+const msgCupomInformativo = gerarTemplateUniversal({
+  titulo: "Cupom informativo",
+  marketplace: "Amazon",
+  textoOriginal: "Cupom: INFO10\nCupom INFO10 disponivel na pagina.",
+  precoAtual: 99.9,
+  cupom: "INFO10",
+  instrucaoCupom: "Cupom INFO10 disponivel na pagina.",
+  linkAfiliado: "https://go.optimus/info10"
+});
+assertContem(msgCupomInformativo, "Aplique o cupom INFO10 para obter o valor.");
+
+const msgSemCupomControle = gerarTemplateUniversal({
+  titulo: "Oferta sem cupom",
+  marketplace: "Shopee",
+  precoAtual: 49.9,
+  instrucaoCupom: "Aplique o cupom SEMCODIGO + Pix para chegar neste valor.",
+  linkAfiliado: "https://go.optimus/sem-cupom"
+});
+assertNaoContem(msgSemCupomControle, "Aplique o cupom");
+
 const msgCalcaMl = gerarTemplateUniversal({
   titulo: "ML Calca Jeans",
   marketplace: "Mercado Livre",
