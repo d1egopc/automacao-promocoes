@@ -349,7 +349,8 @@ function avisoFinalTemplate(oferta = {}) {
 }
 
 function selecionarCamposUniversais(oferta = {}) {
-  const ofertaApresentacao = resolverContratoComercialFinal(normalizarApresentacaoComercial(oferta));
+  const ofertaNormalizada = normalizarApresentacaoComercial(oferta);
+  const ofertaApresentacao = resolverContratoComercialFinal(ofertaNormalizada);
   const contratoFinal = ofertaApresentacao.contratoComercialFinal || {};
   const cupom = normalizarTexto(contratoFinal.cupomCodigo || ofertaApresentacao.cupom);
 
@@ -411,7 +412,7 @@ function selecionarCamposUniversais(oferta = {}) {
     linkMoedas: normalizarTexto(ofertaApresentacao.linkMoedas),
     avaliacao: normalizarTexto(ofertaApresentacao.avaliacao || ofertaApresentacao.rating || ofertaApresentacao.nota),
     quantidadeAvaliacoes: normalizarTexto(ofertaApresentacao.quantidadeAvaliacoes || ofertaApresentacao.totalAvaliacoes || ofertaApresentacao.avaliacoes || ofertaApresentacao.reviews),
-    beneficio: textoComercialRenderizavel(contratoFinal.beneficio !== undefined ? contratoFinal.beneficio : ofertaApresentacao.beneficio),
+    beneficio: beneficioComercialPrincipal(contratoFinal, ofertaApresentacao, cupom, ofertaNormalizada),
     beneficios: normalizarBeneficios(contratoFinal.beneficio ? [contratoFinal.beneficio] : ofertaApresentacao.beneficios),
     score: ofertaApresentacao.score,
     prioridade: ofertaApresentacao.prioridade,
@@ -457,6 +458,59 @@ function instrucaoCupomParaTemplate(campos = {}, beneficioComercial = "", precoF
     return instrucaoComercial;
   }
   return instrucaoCupomDeterministica(campos.cupom);
+}
+
+function beneficioCupomRedundanteComInstrucaoPadrao(beneficio = "", campos = {}, instrucaoCupom = "") {
+  const texto = textoComercialRenderizavel(beneficio);
+  const codigo = chaveCupomInstrucao(campos.cupom);
+  if (!texto || !codigo || !instrucaoCupomDeterministica(campos.cupom)) return false;
+  if (!instrucaoCupom || !normalizarComparacao(instrucaoCupom).includes("cupom")) return false;
+  if (!chaveCupomInstrucao(texto).includes(codigo)) return false;
+
+  const normalizado = normalizarComparacao(texto);
+  if (!/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|resgatem|ative|ativar)\b/.test(normalizado)) return false;
+  if (!/\b(?:cupom|voucher|codigo|cod)\b/.test(normalizado)) return false;
+  if (/https?:\/\/\S+|www\.\S+/i.test(texto)) return false;
+
+  const codigoNormalizado = normalizarComparacao(campos.cupom).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sobra = normalizado
+    .replace(new RegExp(`\\b${codigoNormalizado}\\b`, "g"), " ")
+    .replace(/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|resgatem|ative|ativar|o|a|os|as|um|uma|cupom|cupons|voucher|codigo|cod|para|pra|obter|ter|chegar|neste|nesse|nesta|nessa|valor|preco|por|com|de|do|da|dos|das|e)\b/g, " ")
+    .replace(/[^a-z0-9%$]+/g, " ")
+    .trim();
+
+  return !sobra;
+}
+
+function beneficioCupomComInformacaoAdicional(beneficio = "", cupom = "") {
+  const texto = textoComercialRenderizavel(beneficio);
+  const codigo = chaveCupomInstrucao(cupom);
+  if (!texto || !codigo) return false;
+  if (!chaveCupomInstrucao(texto).includes(codigo)) return false;
+
+  const normalizado = normalizarComparacao(texto);
+  if (!/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|resgatem|ative|ativar)\b/.test(normalizado)) return false;
+  if (!/\b(?:cupom|voucher|codigo|cod)\b/.test(normalizado)) return false;
+  return /\b(?:pagina|link|pix|app|aplicativo|moeda|moedas|frete|cashback|carrinho|finalizar)\b/.test(normalizado);
+}
+
+function beneficioComercialPrincipal(contratoFinal = {}, ofertaApresentacao = {}, cupom = "", ofertaNormalizada = {}) {
+  const beneficioContrato = contratoFinal.beneficio !== undefined
+    ? textoComercialRenderizavel(contratoFinal.beneficio)
+    : "";
+  if (beneficioContrato) return beneficioContrato;
+  if (contratoFinal.beneficio === undefined) return textoComercialRenderizavel(ofertaApresentacao.beneficio);
+
+  return [
+    ofertaApresentacao.beneficio,
+    ofertaApresentacao.beneficioTexto,
+    ofertaApresentacao.beneficioExtra,
+    ofertaNormalizada.beneficio,
+    ofertaNormalizada.beneficioTexto,
+    ofertaNormalizada.beneficioExtra
+  ].map(textoComercialRenderizavel).find(beneficio =>
+    beneficioCupomComInformacaoAdicional(beneficio, cupom)
+  ) || "";
 }
 
 function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
@@ -731,6 +785,9 @@ function montarTemplateUniversalOficial({
   const instrucaoCupom = campos.cupom
     ? instrucaoCupomParaTemplate(campos, beneficioComercial, precoAtualComCondicao)
     : "";
+  const beneficioComercialRenderizavel = beneficioCupomRedundanteComInstrucaoPadrao(beneficioComercial, campos, instrucaoCupom)
+    ? ""
+    : beneficioComercial;
   adicionarBloco(blocos, blocoTituloApresentacao(campos));
   adicionarBloco(blocos, [
     campos.marketplace ? `🛍️ ${marketplaceBonito(campos.marketplace)}` : "",
@@ -748,7 +805,7 @@ function montarTemplateUniversalOficial({
   adicionarBloco(blocos, [
     campos.cupom ? `🎟️ Cupom: *${campos.cupom}*` : "",
     instrucaoCupom ? linhaComPrefixo("⚡", instrucaoCupom) : "",
-    beneficioComercial ? linhaComPrefixo("🎁", beneficioComercial) : "",
+    beneficioComercialRenderizavel ? linhaComPrefixo("🎁", beneficioComercialRenderizavel) : "",
     ...detalhesComerciais
   ]);
   const shopee = marketplaceShopeeTemplate(campos.marketplace);

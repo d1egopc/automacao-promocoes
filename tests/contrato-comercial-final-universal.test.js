@@ -625,6 +625,87 @@ const msgCupomInformativo = gerarTemplateUniversal({
 });
 assertContem(msgCupomInformativo, "Aplique o cupom INFO10 para obter o valor.");
 
+const msgCupomResgateSimplesSemDemora = gerarTemplateUniversal({
+  titulo: "ML cupom SEMDEMORA",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Cupom: SEMDEMORA\nResgate o cupom: SEMDEMORA",
+  precoAtual: 79.9,
+  cupom: "SEMDEMORA",
+  beneficioTexto: "Resgate o cupom: SEMDEMORA",
+  linkAfiliado: "https://go.optimus/semdemora"
+});
+assertContem(msgCupomResgateSimplesSemDemora, "Cupom: *SEMDEMORA*");
+assertContem(msgCupomResgateSimplesSemDemora, "Aplique o cupom SEMDEMORA para obter o valor.");
+assertNaoContem(msgCupomResgateSimplesSemDemora, "🎁 Resgate o cupom: SEMDEMORA");
+
+const msgCupomResgateSimplesPrecinhos = gerarTemplateUniversal({
+  titulo: "ML cupom PRECINHOS",
+  marketplace: "Mercado Livre",
+  textoOriginal: "Cupom: PRECINHOS\nResgate o cupom: PRECINHOS",
+  precoAtual: 129.9,
+  cupom: "PRECINHOS",
+  beneficioExtra: "Resgate o cupom: PRECINHOS",
+  linkAfiliado: "https://go.optimus/precinhos"
+});
+assertContem(msgCupomResgateSimplesPrecinhos, "Cupom: *PRECINHOS*");
+assertContem(msgCupomResgateSimplesPrecinhos, "Aplique o cupom PRECINHOS para obter o valor.");
+assertNaoContem(msgCupomResgateSimplesPrecinhos, "🎁 Resgate o cupom: PRECINHOS");
+
+const msgResgateNaPaginaPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com acao na pagina",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Resgate o cupom CUPOMX na página antes de finalizar",
+  linkAfiliado: "https://go.optimus/resgate-pagina"
+});
+assertContem(msgResgateNaPaginaPreservado, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgResgateNaPaginaPreservado, "🎁 Resgate o cupom CUPOMX na página antes de finalizar");
+
+const msgAtiveNoLinkPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com link",
+  marketplace: "Shopee",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Ative o cupom CUPOMX no link",
+  linkAfiliado: "https://go.optimus/ative-link"
+});
+assertContem(msgAtiveNoLinkPreservado, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgAtiveNoLinkPreservado, "🎁 Ative o cupom CUPOMX no link");
+
+const msgCupomPixPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com Pix",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Use o cupom CUPOMX + Pix",
+  linkAfiliado: "https://go.optimus/cupom-pix"
+});
+assertContem(msgCupomPixPreservado, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgCupomPixPreservado, "🎁 Use o cupom CUPOMX + Pix");
+
+const msgBeneficiosRicosPreservados = gerarTemplateUniversal({
+  titulo: "Cupom com beneficio real",
+  marketplace: "AliExpress",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Use o cupom CUPOMX + moedas",
+  linkAfiliado: "https://go.optimus/moedas"
+});
+assertContem(msgBeneficiosRicosPreservados, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgBeneficiosRicosPreservados, "🎁 Use o cupom CUPOMX + moedas");
+
+const msgBeneficioAppFreteCashbackPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com app frete cashback",
+  marketplace: "Amazon",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Use o cupom CUPOMX no app para frete gratis e cashback",
+  linkAfiliado: "https://go.optimus/app-frete-cashback"
+});
+assertContem(msgBeneficioAppFreteCashbackPreservado, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgBeneficioAppFreteCashbackPreservado, "🎁 Use o cupom CUPOMX no app para frete gratis e cashback");
+
 const msgSemCupomControle = gerarTemplateUniversal({
   titulo: "Oferta sem cupom",
   marketplace: "Shopee",
