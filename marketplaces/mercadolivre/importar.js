@@ -713,6 +713,16 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
     });
 
     if (bloqueioOperacional) {
+      if (typeof deps.registrarBloqueioOperacionalMercadoLivre === "function") {
+        try {
+          deps.registrarBloqueioOperacionalMercadoLivre({
+            motivo: "ml_wall_captcha",
+            statusHttp: response.status,
+            urlFinal: response.url || url,
+            temBloqueio: temBloqueioAuditoria === true
+          });
+        } catch {}
+      }
       console.log("[ML-HTML-AUDITORIA]", JSON.stringify({
         clienteId: contextoEngine.clienteId || clienteIdAlvo,
         jobId: contextoEngine.jobId || null,

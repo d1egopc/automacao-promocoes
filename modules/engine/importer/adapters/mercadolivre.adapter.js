@@ -1,6 +1,7 @@
 const { queryEngine } = require("../../database");
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { resolverImagemUniversal } = require("../../../../modules/imagens/resolver-imagem-universal");
 const { resumoLinksClassificados } = require("../../link-role.service");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
@@ -291,6 +292,255 @@ function extrairPrecoRadarMercadoLivre(evento = {}) {
     evento.precoRadar ??
     ""
   );
+}
+
+function extrairPrecoAnteriorRadarMercadoLivre(evento = {}) {
+  const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
+  const preco = objetoSeguro(radarMirror.preco);
+  const comercial = objetoSeguro(radarMirror.comercial);
+  return numeroMercadoLivre(
+    preco.anteriorCapturado ??
+    comercial.precoAntigo?.valor ??
+    comercial.precoAnterior?.valor ??
+    comercial.precoAntigo ??
+    comercial.precoAnterior ??
+    ""
+  );
+}
+
+function extrairCupomRadarMercadoLivre(evento = {}) {
+  const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
+  const cupom = objetoSeguro(radarMirror.cupom);
+  const comercial = objetoSeguro(radarMirror.comercial);
+  const cupomComercial = objetoSeguro(comercial.cupom);
+  return textoMercadoLivre(
+    cupom.codigoCapturado ||
+    cupom.codigo ||
+    cupomComercial.codigo ||
+    cupomComercial.valor ||
+    ""
+  );
+}
+
+function extrairBeneficioRadarMercadoLivre(evento = {}) {
+  const radarMirror = objetoSeguro(objetoSeguro(evento.metadata).radarMirror);
+  const cupom = objetoSeguro(radarMirror.cupom);
+  const comercial = objetoSeguro(radarMirror.comercial);
+  const cupomComercial = objetoSeguro(comercial.cupom);
+  return textoMercadoLivre(
+    cupom.condicaoCapturada ||
+    cupom.textoCapturado ||
+    cupomComercial.instrucao ||
+    cupomComercial.texto ||
+    radarMirror.beneficioTexto ||
+    radarMirror.beneficioExtra ||
+    ""
+  );
+}
+
+function tituloTecnicoBloqueadoMercadoLivre(titulo = "") {
+  const normalizado = normalizarTextoIdentidadeMercadoLivre(titulo);
+  if (!normalizado) return true;
+  if (normalizado === "windows") return true;
+  const termosBloqueados = [
+    "just a moment",
+    "attention required",
+    "access denied",
+    "verificacao",
+    "captcha",
+    "robot check",
+    "checking your browser"
+  ];
+  return termosBloqueados.some(termo => normalizado.includes(termo));
+}
+
+function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
+  const metadataEvento = objetoSeguro(evento.metadata);
+  const radarMirror = objetoSeguro(metadataEvento.radarMirror);
+  const resolvida = resolverImagemUniversal({
+    metadata: { radarMirror }
+  }, {
+    evento,
+    job
+  });
+
+  if (!resolvida.imagem || resolvida.imagemEnviavel === false || resolvida.imagemDuravel === false) {
+    return {
+      imagem: "",
+      imagemOrigem: "nenhuma",
+      imagemStatus: resolvida.imagemStatus || "nao_resolvida",
+      imagemTentativas: resolvida.imagemTentativas || []
+    };
+  }
+
+  return {
+    imagem: resolvida.imagem,
+    imagemOrigem: resolvida.imagemOrigem || "radar_mirror/mensagem",
+    imagemStatus: resolvida.imagemStatus || "radar_mirror_preservada",
+    imagemTentativas: resolvida.imagemTentativas || []
+  };
+}
+
+async function montarFallbackRadarMercadoLivre({
+  job = {},
+  evento = {},
+  links = [],
+  clienteId = "",
+  integracao = {},
+  deps = {},
+  urlOriginalEngine = "",
+  urlImportador = "",
+  linkExpandidoEngine = "",
+  expandiuMeliLa = false,
+  resolucaoProduto = {},
+  falhaImportador = {}
+} = {}) {
+  const titulo = extrairTituloRadarMercadoLivre(evento);
+  const preco = extrairPrecoRadarMercadoLivre(evento);
+  const precoOriginal = extrairPrecoAnteriorRadarMercadoLivre(evento);
+  const cupom = extrairCupomRadarMercadoLivre(evento);
+  const beneficioTexto = extrairBeneficioRadarMercadoLivre(evento);
+  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo));
+  const temPreco = Number.isFinite(preco) && preco > 0;
+  const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
+  let linkAfiliado = "";
+
+  if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
+    try {
+      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlImportador || linkExpandidoEngine || urlOriginalEngine, integracao, { clienteId }));
+    } catch {}
+  }
+
+  const imagemRadar = resolverImagemRadarFallbackMercadoLivre(evento, job);
+  const suficiente = temTitulo && temPreco && temUrl && Boolean(linkAfiliado);
+  const logBase = {
+    jobId: job.id || null,
+    eventoId: job.evento_id || evento.id || null,
+    clienteId,
+    motivo: falhaImportador.motivo || "ml_wall_captcha",
+    temTitulo,
+    temPreco,
+    temCupom: Boolean(cupom),
+    temImagem: Boolean(imagemRadar.imagem),
+    imagemOrigem: imagemRadar.imagemOrigem || "nenhuma",
+    temLinkAfiliado: Boolean(linkAfiliado)
+  };
+
+  if (!suficiente) {
+    console.log("[ENGINE-ML-FALLBACK-RADAR]", JSON.stringify({
+      ...logBase,
+      resultado: "fallback_insuficiente"
+    }));
+    return {
+      ok: false,
+      motivo: "fallback_radar_insuficiente",
+      marketplace: "mercadolivre",
+      linkOriginal: urlOriginalEngine,
+      metadata: {
+        fallbackMercadoLivreRadar: true,
+        origemComercial: "radar",
+        motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
+        insuficiente: {
+          titulo: !temTitulo,
+          preco: !temPreco,
+          url: !temUrl,
+          linkAfiliado: !linkAfiliado
+        }
+      }
+    };
+  }
+
+  const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
+    links,
+    evento,
+    clienteId,
+    integracao,
+    deps,
+    urlOriginalEngine,
+    urlImportador,
+    linkExpandidoEngine,
+    linkAfiliadoPrincipal: linkAfiliado
+  });
+  const produtoFallback = {
+    titulo,
+    nome: titulo,
+    precoAtual: preco,
+    preco,
+    precoOriginal: Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "",
+    imagem: imagemRadar.imagem,
+    imagemOrigem: imagemRadar.imagemOrigem,
+    linkOriginal: urlOriginalEngine,
+    linkExpandido: linkExpandidoEngine || urlImportador,
+    urlFinal: linkExpandidoEngine || urlImportador,
+    linkAfiliado,
+    categoria: classificarCategoriaOferta({ titulo, nome: titulo }, titulo),
+    cupom,
+    cupomTipo: cupom ? "texto_radar" : "",
+    avisoCupom: beneficioTexto,
+    beneficioTexto,
+    beneficioExtra: beneficioTexto,
+    marketplace: "mercadolivre"
+  };
+  const ofertaAdapter = {
+    ok: true,
+    marketplace: "mercadolivre",
+    titulo,
+    preco,
+    precoOriginal: produtoFallback.precoOriginal,
+    descontoPercentual: "",
+    economia: "",
+    imagem: imagemRadar.imagem,
+    imagemOrigem: imagemRadar.imagemOrigem,
+    imagemStatus: imagemRadar.imagemStatus,
+    imagemTentativas: imagemRadar.imagemTentativas,
+    linkOriginal: urlOriginalEngine,
+    linkExpandido: linkExpandidoEngine || urlImportador,
+    linkAfiliado,
+    categoria: produtoFallback.categoria,
+    cupom,
+    cupomTipo: produtoFallback.cupomTipo,
+    tipoCupom: produtoFallback.cupomTipo,
+    avisoCupom: beneficioTexto,
+    beneficioTexto,
+    beneficioExtra: beneficioTexto,
+    parcelamento: "",
+    freteGratis: false,
+    cashback: "",
+    descontoPix: "",
+    descontoApp: "",
+    score: null,
+    metadata: {
+      adapter: "mercadolivre",
+      fallbackMercadoLivreRadar: true,
+      origemComercial: "radar",
+      origemPreco: "texto_radar",
+      origemTitulo: "texto_radar",
+      origemImagem: imagemRadar.imagemOrigem || "nenhuma",
+      motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
+      jobId: job.id,
+      eventoId: job.evento_id,
+      linkOriginalEngine: urlOriginalEngine,
+      linkExpandidoEngine: linkExpandidoEngine || urlImportador,
+      expandiuMeliLa,
+      resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+      linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
+      linksComerciais: linksConvertidosMercadoLivre,
+      radarMirror: objetoSeguro(objetoSeguro(evento.metadata).radarMirror),
+      produto: {
+        ...produtoFallback,
+        metadata: {
+          fallbackMercadoLivreRadar: true
+        }
+      }
+    }
+  };
+
+  console.log("[ENGINE-ML-FALLBACK-RADAR]", JSON.stringify({
+    ...logBase,
+    resultado: "oferta_recuperada"
+  }));
+
+  return ofertaAdapter;
 }
 
 function avaliarDivergenciaPrecoMercadoLivre(precoRadar, precoImportador) {
@@ -760,10 +1010,18 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   });
 
   const textoOriginalRadar = String(evento.texto_original || evento.textoOriginal || "").trim();
+  let falhaImportadorMercadoLivre = null;
   const produto = await deps.importarMercadoLivre(urlImportador, clienteId, {
     getIntegracaoCliente: deps.getIntegracaoCliente,
     gerarLinkAfiliadoMercadoLivre: deps.gerarLinkAfiliadoMercadoLivre,
     textoOriginal: textoOriginalRadar,
+    registrarBloqueioOperacionalMercadoLivre(diagnostico = {}) {
+      falhaImportadorMercadoLivre = {
+        motivo: diagnostico.motivo || "ml_wall_captcha",
+        statusHttp: diagnostico.statusHttp ?? null,
+        temBloqueio: diagnostico.temBloqueio === true
+      };
+    },
     contextoRadar: {
       textoOriginal: textoOriginalRadar,
       grupoId: evento.grupo_id || "",
@@ -801,6 +1059,22 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   }));
 
   if (!produto) {
+    if (falhaImportadorMercadoLivre?.motivo === "ml_wall_captcha") {
+      return montarFallbackRadarMercadoLivre({
+        job,
+        evento,
+        links,
+        clienteId,
+        integracao,
+        deps,
+        urlOriginalEngine,
+        urlImportador,
+        linkExpandidoEngine,
+        expandiuMeliLa,
+        resolucaoProduto,
+        falhaImportador: falhaImportadorMercadoLivre
+      });
+    }
     return { ok: false, motivo: "importador_sem_retorno", marketplace: "mercadolivre", linkOriginal: urlOriginalEngine };
   }
 
@@ -865,6 +1139,9 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const avisoCupom = produto.avisoCupom || "";
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
   const imagensMercadoLivre = metadadosImagemMercadoLivre(produto);
+  const precoRadarComercial = extrairPrecoRadarMercadoLivre(evento);
+  const temPrecoRadarComercial = Number.isFinite(precoRadarComercial) && precoRadarComercial > 0;
+  const precoComercial = temPrecoRadarComercial ? precoRadarComercial : (produto.precoAtual || produto.preco || "");
   const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
     links,
     evento,
@@ -881,7 +1158,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     ok: true,
     marketplace: "mercadolivre",
     titulo: produto.titulo || produto.nome || "",
-    preco: produto.precoAtual || produto.preco || "",
+    preco: precoComercial,
     precoOriginal: produto.precoOriginal || produto.precoAntigo || "",
     descontoPercentual: produto.descontoPercentual || "",
     economia: produto.economia || "",
@@ -955,6 +1232,7 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         score: ofertaEnriquecida.score
       },
       adapter: "mercadolivre",
+      origemPreco: temPrecoRadarComercial ? "texto_radar" : "importador_ml",
       jobId: job.id,
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
@@ -987,4 +1265,3 @@ module.exports = {
     similaridadeTituloMercadoLivre
   }
 };
-
