@@ -21933,6 +21933,7 @@ function iniciarManualV2RetentionOperacional() {
 
 app.use("/manual-v2", criarRotasManualV2({
   getClienteId,
+  exigirClienteAutenticado,
   getDestinosPorCliente: () => destinosPorCliente,
   configsPorCliente,
   sessoes,
@@ -21942,6 +21943,7 @@ app.use("/manual-v2", criarRotasManualV2({
   debitarCreditos,
   montarMensagemOferta,
   resolverLinkOfertaPorDestino,
+  gerarLinkAfiliadoCliente,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,
   listarConexoesDiscord,

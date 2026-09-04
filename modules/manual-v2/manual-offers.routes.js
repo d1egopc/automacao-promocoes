@@ -14,6 +14,9 @@ const {
 const {
   enviarOfertaManualV2
 } = require("./manual-dispatcher");
+const {
+  gerarPreviewCaptureManualV2
+} = require("./manual-capture.service");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -167,6 +170,9 @@ function criarRotasManualV2(deps = {}) {
     ? deps.metricasImportacaoMagaluManualV2
     : metricasImportacaoMagaluManualV2;
   const dispatcherManual = typeof deps.enviarOfertaManualV2 === "function" ? deps.enviarOfertaManualV2 : enviarOfertaManualV2;
+  const gerarPreviewCapture = typeof deps.gerarPreviewCaptureManualV2 === "function"
+    ? deps.gerarPreviewCaptureManualV2
+    : gerarPreviewCaptureManualV2;
   const storage = {
     listarOfertasManuaisV2: deps.listarOfertasManuaisV2 || storagePadrao.listarOfertasManuaisV2,
     buscarOfertaManualV2: deps.buscarOfertaManualV2 || storagePadrao.buscarOfertaManualV2,
@@ -181,6 +187,20 @@ function criarRotasManualV2(deps = {}) {
 
   function cliente(req) {
     return getClienteId(req) || "admin";
+  }
+
+  function clienteAutenticado(req, res) {
+    if (typeof deps.exigirClienteAutenticado === "function") {
+      return deps.exigirClienteAutenticado(req, res);
+    }
+    const clienteId = getClienteId(req);
+    if (clienteId) return clienteId;
+    res.status(401).json({
+      ok: false,
+      erro: "cliente_nao_autenticado",
+      motivo: "cliente_nao_autenticado"
+    });
+    return null;
   }
 
   function destinosPorClienteAtual() {
@@ -280,6 +300,54 @@ function criarRotasManualV2(deps = {}) {
       });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_importacao_falhou"));
+    }
+  });
+
+  router.post("/capture/ofertas", async (req, res) => {
+    const clienteId = clienteAutenticado(req, res);
+    if (!clienteId) return undefined;
+
+    try {
+      const resultado = await gerarPreviewCapture(req.body || {}, {
+        clienteId,
+        gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
+        now: typeof deps.now === "function" ? deps.now() : undefined
+      });
+
+      const logger = deps.logger || console;
+      if (logger && typeof logger.log === "function") {
+        logger.log("[MANUAL-CAPTURE-PREVIEW]", {
+          clienteId,
+          marketplace: resultado?.oferta?.marketplace || "",
+          resultado: "ok",
+          motivo: "",
+          host: (() => {
+            try {
+              return new URL(resultado?.oferta?.urlOriginal || "").hostname;
+            } catch {
+              return "";
+            }
+          })()
+        });
+      }
+
+      return res.json(resultado);
+    } catch (e) {
+      const status = statusErro(e);
+      const host = texto(e.host || "");
+      const marketplace = texto(req.body?.marketplace);
+      const motivo = e.codigo || e.motivo || e.message || "manual_v2_capture_falhou";
+      const logger = deps.logger || console;
+      if (logger && typeof logger.log === "function") {
+        logger.log("[MANUAL-CAPTURE-PREVIEW]", {
+          clienteId,
+          marketplace,
+          resultado: "erro",
+          motivo,
+          host
+        });
+      }
+      return res.status(status).json(payloadErro(e, "manual_v2_capture_falhou"));
     }
   });
 
