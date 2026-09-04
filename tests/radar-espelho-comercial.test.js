@@ -336,6 +336,35 @@ function criarMirrorComTextoComercial(textoOriginal, ajustes = {}) {
 }
 
 {
+  const textoMalbec = [
+    "NOVO CUPOM NO KIT MALBEC QUE NÃO TINHA ERRO",
+    "Kit Presente Malbec (3 itens)",
+    "De R$ 299 por R$ 183,52 no Pix",
+    "Resgate o cupom: SEMDEMORA"
+  ].join("\n");
+  const codigosMalbec = extrairCodigosCupomSemanticos(textoMalbec);
+  assert.strictEqual(codigosMalbec[0], "SEMDEMORA");
+  assert.strictEqual(codigosMalbec.includes("NOKITMALBECQUENAOTINHAERRO"), false);
+  assert.strictEqual(radarCupomMensagem.analisarBeneficiosMensagemRadar(textoMalbec, []).cupom, "SEMDEMORA");
+  assert.deepStrictEqual(
+    extrairCodigosCupomSemanticos("NOVO CUPOM NO KIT MALBEC QUE NÃO TINHA ERRO"),
+    []
+  );
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Cupom: SEMDEMORA"), ["SEMDEMORA"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Use o cupom SEMDEMORA"), ["SEMDEMORA"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Resgate o cupom: SEMDEMORA"), ["SEMDEMORA"]);
+  assert.deepStrictEqual(
+    extrairCodigosCupomSemanticos("Cupom: CUPOMREALMENTELONGODECLARADO2026"),
+    ["CUPOMREALMENTELONGODECLARADO2026"]
+  );
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Cupom: ABC10 ou XYZ20"), ["ABC10", "XYZ20"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Amazon\nCupom: PRIME10"), ["PRIME10"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Shopee\nCupom: SHOPEE10"), ["SHOPEE10"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("AliExpress\nCupom: ALI10"), ["ALI10"]);
+  assert.deepStrictEqual(extrairCodigosCupomSemanticos("Mercado Livre\nCupom: MELI20"), ["MELI20"]);
+}
+
+{
   for (const falso of [
     "ABAIXODOPRECODOPRODUTO_",
     "ABAIXODOPRECODOPRODUTO",

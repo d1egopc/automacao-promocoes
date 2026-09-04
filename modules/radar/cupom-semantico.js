@@ -142,21 +142,41 @@ function pareceInstrucaoImperativaSemMarcador(valor = "") {
   return /^\s*(?:abra|abrir|acesse|clique|toque|confira|veja|vai\s+aparecer|aparecer[aá]?)\b/i.test(original);
 }
 
+function pareceFraseNaturalSemCodigo(valor = "") {
+  const original = texto(valor);
+  if (!original) return false;
+  if (/[0-9_-]/.test(original)) return false;
+
+  const palavras = semAcentosUpper(original)
+    .replace(/[^A-Z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (palavras.length < 4) return false;
+  const conectores = new Set(["NO", "NA", "NOS", "NAS", "DO", "DA", "DOS", "DAS", "DE", "QUE", "PARA", "PRA", "COM", "SEM"]);
+  const iniciaComoFrase = conectores.has(palavras[0]) || ["NOVO", "NOVA", "NOVOS", "NOVAS"].includes(palavras[0]);
+  const conectoresEncontrados = palavras.filter(palavra => conectores.has(palavra)).length;
+
+  return iniciaComoFrase || conectoresEncontrados >= 2;
+}
+
 function normalizarCodigoCupomSemantico(candidato = "") {
   const original = texto(candidato);
   if (!original) return "";
+  if (/\r?\n/.test(original)) return "";
   if (pareceUrlOuParametro(original)) return "";
   if (pareceFrasePercentualSemCodigo(original)) return "";
   if (pareceBeneficioSemCodigo(original)) return "";
   if (pareceInstrucaoImperativaSemMarcador(original)) return "";
+  if (pareceFraseNaturalSemCodigo(original)) return "";
   if (pareceSlugCurtoDeUrl(original)) return "";
 
   const limpo = limparMarcadorCupom(original)
     .replace(/[^A-Z0-9_-]/g, "")
     .trim();
 
-  if (!limpo || limpo.length < 4 || limpo.length > 30) return "";
-  if (!/^[A-Z0-9][A-Z0-9_-]{3,29}$/.test(limpo)) return "";
+  if (!limpo || limpo.length < 4) return "";
+  if (!/^[A-Z0-9][A-Z0-9_-]{3,}$/.test(limpo)) return "";
   if (pareceCodigoDerivadoDeDesconto(limpo)) return "";
   if (pareceSlugCurtoDeUrl(limpo)) return "";
   if (/^CUPOM[_-]?$/i.test(limpo)) return "";
@@ -174,21 +194,30 @@ function separarPossiveisCodigos(trecho = "") {
     .filter(Boolean);
 }
 
-function adicionarCodigo(resultado, vistos, candidato = "") {
+function adicionarCodigo(resultado, vistos, candidato = "", origem = {}) {
   const codigo = normalizarCodigoCupomSemantico(candidato);
   if (!codigo || vistos.has(codigo)) return;
   vistos.add(codigo);
-  resultado.push(codigo);
+  resultado.push({
+    codigo,
+    prioridade: origem.prioridade ?? 1,
+    ordem: origem.ordem ?? resultado.length
+  });
 }
 
-function extrairCodigosCupomSemanticos(textoFonte = "") {
+function extrairCandidatosCupomSemanticos(textoFonte = "") {
   const fonte = String(textoFonte || "");
   const resultado = [];
   const vistos = new Set();
+  let ordem = 0;
   const linhas = fonte.split(/\r?\n/);
-  const padroes = [
+  const padroesExplicitos = [
+    /^\s*(?:[-*\u2022]\s*)?(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher)\s*[:\-]\s*([^\n]+)/i,
+    /^\s*(?:[-*\u2022]\s*)?(?:use|utilize|aplique|aplicar|resgate|resgatar|ative|ativar)\s+(?:o\s+)?(?:cupom|codigo|c[o\u00f3]digo|voucher)\s*[:\-]?\s*([^\n]+)/i
+  ];
+  const padroesInferidos = [
     /\b(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher)\s*[:\-]?\s*([^\n]+)/gi,
-    /\b(?:use|utilize|aplique|aplicar|com)\s+(?:o\s+)?(?:cupom|codigo|c[o\u00f3]digo)\s*[:\-]?\s*([^\n]+)/gi,
+    /\b(?:use|utilize|aplique|aplicar|resgate|resgatar|ative|ativar|com)\s+(?:o\s+)?(?:cupom|codigo|c[o\u00f3]digo|voucher)\s*[:\-]?\s*([^\n]+)/gi,
     /\b(?:use|utilize)\s+([A-Z0-9][A-Z0-9_-]{3,29})(?=$|\s+(?:e\s+ganhe|com\s+desconto|no\s+app|na\s+loja))/gi
   ];
 
@@ -197,24 +226,46 @@ function extrairCodigosCupomSemanticos(textoFonte = "") {
     const linha = removerUrls(linhaOriginal);
     if (/^\s*(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher)\s*:?\s*$/i.test(linha)) {
       for (const parte of separarPossiveisCodigos(linhas[indice + 1] || "")) {
-        adicionarCodigo(resultado, vistos, parte);
+        adicionarCodigo(resultado, vistos, parte, { prioridade: 0, ordem: ordem++ });
       }
       continue;
     }
 
-    for (const padrao of padroes) {
+    for (const padrao of padroesExplicitos) {
+      const match = linha.match(padrao);
+      if (!match) continue;
+      const trecho = texto(match[1] || "");
+      if (!trecho || pareceFrasePercentualSemCodigo(trecho) || pareceFrasePercentualSemCodigo(linha) || pareceBeneficioSemCodigo(trecho) || pareceBeneficioSemCodigo(linhaOriginal)) continue;
+      for (const parte of separarPossiveisCodigos(trecho)) {
+        adicionarCodigo(resultado, vistos, parte, { prioridade: 0, ordem: ordem++ });
+      }
+    }
+
+    for (const padrao of padroesInferidos) {
       let match;
       while ((match = padrao.exec(linha))) {
         const trecho = texto(match[1] || "");
         if (!trecho || pareceFrasePercentualSemCodigo(trecho) || pareceFrasePercentualSemCodigo(linha) || pareceBeneficioSemCodigo(trecho) || pareceBeneficioSemCodigo(linhaOriginal)) continue;
         for (const parte of separarPossiveisCodigos(trecho)) {
-          adicionarCodigo(resultado, vistos, parte);
+          adicionarCodigo(resultado, vistos, parte, { prioridade: 1, ordem: ordem++ });
         }
       }
     }
   }
 
-  return resultado;
+  return resultado.sort((a, b) => a.prioridade - b.prioridade || a.ordem - b.ordem);
+}
+
+function extrairCodigosCupomSemanticos(textoFonte = "") {
+  const resultado = extrairCandidatosCupomSemanticos(textoFonte);
+  return resultado.map(item => item.codigo);
+}
+
+function adicionarCodigoNormalizado(resultado, vistos, candidato = "") {
+  const codigo = normalizarCodigoCupomSemantico(candidato);
+  if (!codigo || vistos.has(codigo)) return;
+  vistos.add(codigo);
+  resultado.push(codigo);
 }
 
 function normalizarCuponsSemanticos(valores = []) {
@@ -224,7 +275,7 @@ function normalizarCuponsSemanticos(valores = []) {
 
   for (const entrada of entradas) {
     if (Array.isArray(entrada)) {
-      for (const item of normalizarCuponsSemanticos(entrada)) adicionarCodigo(resultado, vistos, item);
+      for (const item of normalizarCuponsSemanticos(entrada)) adicionarCodigoNormalizado(resultado, vistos, item);
       continue;
     }
 
@@ -233,7 +284,7 @@ function normalizarCuponsSemanticos(valores = []) {
 
     const extraidos = extrairCodigosCupomSemanticos(original);
     if (extraidos.length) {
-      for (const codigo of extraidos) adicionarCodigo(resultado, vistos, codigo);
+      for (const codigo of extraidos) adicionarCodigoNormalizado(resultado, vistos, codigo);
       continue;
     }
 
@@ -241,6 +292,7 @@ function normalizarCuponsSemanticos(valores = []) {
       pareceFrasePercentualSemCodigo(original) ||
       pareceBeneficioSemCodigo(original) ||
       pareceInstrucaoImperativaSemMarcador(original) ||
+      pareceFraseNaturalSemCodigo(original) ||
       pareceSlugCurtoDeUrl(original) ||
       /\r?\n/.test(original) ||
       /https?:\/\/|www\./i.test(original) ||
@@ -250,7 +302,7 @@ function normalizarCuponsSemanticos(valores = []) {
     }
 
     for (const parte of separarPossiveisCodigos(original)) {
-      adicionarCodigo(resultado, vistos, parte);
+      adicionarCodigoNormalizado(resultado, vistos, parte);
     }
   }
 
