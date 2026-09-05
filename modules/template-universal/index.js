@@ -368,6 +368,8 @@ function selecionarCamposUniversais(oferta = {}) {
     precoMax: contratoFinal.precoMax ?? ofertaApresentacao.precoMax,
     temVariacaoPreco: contratoFinal.temVariacaoPreco === true || ofertaApresentacao.temVariacaoPreco === true,
     condicaoPrecoPor: normalizarTexto(contratoFinal.condicaoPrecoPor || ofertaApresentacao.condicaoPrecoPor),
+    condicaoPrecoPorEntrada: normalizarTexto(oferta.condicaoPrecoPor),
+    fonteImportacaoAdapter: normalizarTexto(ofertaApresentacao.fonteImportacao?.adapter || ofertaNormalizada.fonteImportacao?.adapter || oferta.fonteImportacao?.adapter),
     precoPixDistinto: contratoFinal.precoPixDistinto ?? ofertaApresentacao.precoPixDistinto ?? null,
     valorEfetivo: ofertaApresentacao.valorEfetivo,
     valorEfetivoOrigem: normalizarTexto(ofertaApresentacao.valorEfetivoOrigem),
@@ -523,6 +525,12 @@ function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (campos.precoPix && normalizarComparacao(campos.precoPix) !== normalizarComparacao(precoAtual)) return precoAtual;
   if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
   return precoAtual;
+}
+
+function precoAtualKabumCapturePix(campos = {}) {
+  return normalizarComparacao(campos.marketplace).replace(/[^a-z0-9]+/g, "") === "kabum" &&
+    normalizarComparacao(campos.fonteImportacaoAdapter).replace(/[^a-z0-9]+/g, "_") === "optimus_capture_v1" &&
+    normalizarComparacao(campos.condicaoPrecoPorEntrada || campos.condicaoPrecoPor) === "pix";
 }
 
 function precoFaixaAtualTemplate(campos = {}) {
@@ -780,6 +788,7 @@ function montarTemplateUniversalOficial({
   blocos,
   precoOriginal,
   precoFaixaAtual,
+  precoAtual,
   precoAtualComCondicao,
   descontoCalculado,
   descontoPercentual,
@@ -809,7 +818,7 @@ function montarTemplateUniversalOficial({
   ]);
   adicionarBloco(blocos, [
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
-    precoFaixaAtual ? `✅ A partir de: *${precoFaixaAtual}*` : (precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : ""),
+    precoFaixaAtual ? `✅ A partir de: *${precoFaixaAtual}*` : (precoAtualComCondicao ? `✅ ${precoAtualKabumCapturePix(campos) ? "À vista no PIX" : "Por"}: *${precoAtualKabumCapturePix(campos) ? precoAtual : precoAtualComCondicao}*` : ""),
     descontoCalculado != null && descontoCalculado > 0 ? `📉 ${descontoCalculado.toFixed(0)}% OFF` : "",
     campos.parcelamento ? linhaComPrefixo("💳", campos.parcelamento) : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
@@ -905,6 +914,7 @@ function gerarTemplateUniversal(oferta = {}) {
     blocos,
     precoOriginal,
     precoFaixaAtual,
+    precoAtual,
     precoAtualComCondicao,
     descontoCalculado,
     descontoPercentual,

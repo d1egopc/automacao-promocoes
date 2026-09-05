@@ -177,6 +177,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     precoMin,
     precoMax,
     temVariacaoPreco,
+    condicaoPrecoPor: "",
 
     imagem: primeiroTexto(entrada.imagem, entrada.image, entrada.imageUrl, entrada.foto, entrada.thumbnail),
     categoria: primeiroTexto(entrada.categoria, entrada.categoriaProduto),
@@ -209,6 +210,14 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     agendamentoTentativas: inteiroNaoNegativo(entrada.agendamentoTentativas),
     agendamentoErroResumo: primeiroTexto(entrada.agendamentoErroResumo).slice(0, 1000)
   };
+
+  if (
+    oferta.marketplace === "kabum" &&
+    oferta.fonteImportacao.adapter === "optimus_capture_v1" &&
+    primeiroTexto(entrada.condicaoPrecoPor, entrada.condicao_preco_por).toLowerCase() === "pix"
+  ) {
+    oferta.condicaoPrecoPor = "pix";
+  }
 
   if (oferta.temVariacaoPreco && !texto(entrada.precoAtual) && !texto(entrada.preco) && !texto(entrada.precoPor)) {
     oferta.precoAtual = "";

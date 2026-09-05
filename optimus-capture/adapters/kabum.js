@@ -174,6 +174,7 @@
       titulo: tituloKabum(documento, html),
       precoAtual,
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
+      condicaoPrecoPor: bloco ? "pix" : "",
       imagem: imagemKabum(documento, html),
       cupom: "",
       fonte: "dom_kabum_v1",

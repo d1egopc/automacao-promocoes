@@ -92,6 +92,50 @@ const shopeeFaixa = gerarTemplateUniversal({
 assert.ok(shopeeFaixa.includes("✅ A partir de: *R$ 67,99*"), "faixa Shopee renderiza minimo como a partir de");
 assert.ok(!shopeeFaixa.includes("✅ Por: *R$ 67,99*"), "faixa Shopee nao renderiza minimo como preco unico");
 
+const kabumCapturePix = gerarTemplateUniversal({
+  titulo: "Placa de Video ASUS RTX 5090 32GB GDDR7",
+  marketplace: "kabum",
+  precoAtual: 775.99,
+  precoAnterior: 1333.32,
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://www.awin1.com/kabum-capture"
+});
+assert.ok(kabumCapturePix.includes("✅ À vista no PIX: *R$ 775,99*"), "KaBuM Capture Pix usa rotulo semantico");
+assert.ok(!kabumCapturePix.includes("✅ Por: *R$ 775,99*"), "KaBuM Capture Pix nao duplica Por");
+assert.ok(!kabumCapturePix.includes("R$ 775,99 no Pix"), "KaBuM Capture Pix nao duplica Pix no valor");
+
+const kabumSemCondicao = gerarTemplateUniversal({
+  titulo: "KaBuM manual sem prova Pix",
+  marketplace: "kabum",
+  precoAtual: 775.99,
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://www.awin1.com/kabum-sem-pix"
+});
+assert.ok(kabumSemCondicao.includes("✅ Por: *R$ 775,99*"), "KaBuM sem condicao preserva Por");
+assert.ok(!kabumSemCondicao.includes("À vista no PIX"), "KaBuM sem condicao nao inventa Pix");
+
+const kabumManualPix = gerarTemplateUniversal({
+  titulo: "KaBuM manual com Pix legado",
+  marketplace: "kabum",
+  precoAtual: 775.99,
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "kabum-awin.manual.adapter" },
+  linkAfiliado: "https://www.awin1.com/kabum-manual"
+});
+assert.ok(kabumManualPix.includes("✅ Por: *R$ 775,99*"), "KaBuM manual legado preserva rotulo padrao");
+assert.ok(!kabumManualPix.includes("À vista no PIX"), "rotulo especial fica restrito ao Capture KaBuM");
+
+const mlPixPermanecePadrao = gerarTemplateUniversal({
+  titulo: "Mercado Livre Pix",
+  marketplace: "mercadolivre",
+  precoAtual: 99.9,
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://go.optimus/r/ml"
+});
+assert.ok(mlPixPermanecePadrao.includes("✅ Por: *R$ 99,90*"), "ML nao recebe rotulo KaBuM nem promove Pix sem evidencia");
+
 const personalizado = renderizarTemplatePersonalizado({
   oferta: {
     ...ofertaBase,

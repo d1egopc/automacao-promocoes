@@ -367,6 +367,9 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   if (precoAtualNumero === null && !faixaPreco) {
     throw erroCapture("capture_preco_invalido", 400, { host: urlValidada.host });
   }
+  const condicaoPrecoPor = marketplace === "kabum" && texto(entrada.condicaoPrecoPor).toLowerCase() === "pix"
+    ? "pix"
+    : "";
 
   const baseConversao = {
     marketplace,
@@ -376,6 +379,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     precoMin: faixaPreco?.precoMin || "",
     precoMax: faixaPreco?.precoMax || "",
     temVariacaoPreco: faixaPreco?.temVariacaoPreco === true,
+    condicaoPrecoPor,
     imagem: sanitizarUrlOpcional(entrada.imagem || entrada.image || entrada.imageUrl),
     cupom: texto(entrada.cupom || entrada.codigoCupom),
     categoria: texto(entrada.categoria || entrada.categoriaProduto),
@@ -405,7 +409,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
       parseOnly: true,
       camposConfiaveis: faixaPreco
         ? ["titulo", "precoMin", "precoMax", "urlOriginal", "urlAfiliada"]
-        : ["titulo", "precoAtual", "urlOriginal", "urlAfiliada"],
+        : ["titulo", "precoAtual", ...(condicaoPrecoPor ? ["condicaoPrecoPor"] : []), "urlOriginal", "urlAfiliada"],
       camposAusentes: [],
       avisos: []
     }

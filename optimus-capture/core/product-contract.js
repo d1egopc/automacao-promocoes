@@ -50,6 +50,7 @@
     const precoAtual = temVariacaoPreco ? null : precoNumero(bruto.precoAtual);
     const precoAnterior = precoNumero(bruto.precoAnterior);
     const warnings = Array.isArray(bruto.warnings) ? bruto.warnings.map(texto).filter(Boolean) : [];
+    const condicaoPrecoPor = texto(bruto.condicaoPrecoPor).toLowerCase() === "pix" ? "pix" : "";
     const produto = {
       marketplace: texto(bruto.marketplace || "mercadolivre").toLowerCase(),
       urlOriginal: urlHttp(bruto.urlOriginal || bruto.url),
@@ -59,6 +60,7 @@
       precoMin: faixa?.precoMin || null,
       precoMax: faixa?.precoMax || null,
       temVariacaoPreco,
+      condicaoPrecoPor,
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
       origem: "optimus_capture_v1",
@@ -89,6 +91,7 @@
       precoMin: normalizado.precoMin || "",
       precoMax: normalizado.precoMax || "",
       temVariacaoPreco: normalizado.temVariacaoPreco,
+      condicaoPrecoPor: normalizado.condicaoPrecoPor,
       imagem: normalizado.imagem,
       cupom: normalizado.cupom,
       origem: normalizado.origem

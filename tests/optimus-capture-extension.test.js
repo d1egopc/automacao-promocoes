@@ -880,10 +880,12 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.titulo, "Placa de Video ASUS RTX 5090 32GB GDDR7");
     assert.strictEqual(produto.precoAtual, 4946.99);
     assert.strictEqual(produto.precoAnterior, 8235.28);
+    assert.strictEqual(produto.condicaoPrecoPor, "pix");
     assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/944475/placa.jpg");
     assert.strictEqual(produto.cupom, "");
     assert.strictEqual(produto.fonte, "dom_kabum_v1");
     assert.strictEqual(produto.completo, true);
+    assert.strictEqual(contrato.payloadPreview(produto).condicaoPrecoPor, "pix");
     assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
@@ -918,6 +920,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     const documento = documentoKabumFixture({ incluirBlocoPix: false });
     const produto = kabum.capturarKabumDaPagina(documento, documento.location);
     assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.condicaoPrecoPor, "");
     assert.strictEqual(produto.completo, false);
     assert.ok(produto.warnings.includes("preco_atual_ausente"));
     assert.ok(produto.warnings.includes("preco_kabum_sem_bloco_pix_h4"));
@@ -2694,6 +2697,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       titulo: "Produto editado",
       precoAtual: "129,90",
       precoAnterior: "199,90",
+      condicaoPrecoPor: "boleto",
       imagem: "https://http2.mlstatic.com/imagem.webp",
       cupom: "sem demora",
       origem: "cliente_malicioso"
@@ -2707,6 +2711,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       precoMin: "",
       precoMax: "",
       temVariacaoPreco: false,
+      condicaoPrecoPor: "",
       imagem: "https://http2.mlstatic.com/imagem.webp",
       cupom: "SEM DEMORA",
       origem: "optimus_capture_v1"

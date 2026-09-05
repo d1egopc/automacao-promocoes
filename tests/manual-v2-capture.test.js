@@ -158,6 +158,7 @@ function payloadKabumValido(extra = {}) {
     titulo: "Placa de Video ASUS RTX 5090 32GB GDDR7",
     precoAtual: 4946.99,
     precoAnterior: 8235.28,
+    condicaoPrecoPor: "pix",
     imagem: "https://images.kabum.com.br/produtos/fotos/944475/placa.jpg",
     cupom: "",
     categoria: "Gamer e Hardware",
@@ -602,13 +603,22 @@ function arquivoOfertas(clienteId) {
         assert.strictEqual(resposta.body.oferta.marketplace, "kabum");
         assert.strictEqual(resposta.body.oferta.urlOriginal, "https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=capture");
         assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=123&ued=kabum");
+        assert.strictEqual(resposta.body.oferta.condicaoPrecoPor, "pix");
+        assert.ok(resposta.body.oferta.fonteImportacao.camposConfiaveis.includes("condicaoPrecoPor"));
         assert.deepStrictEqual(chamadasKabum.map(chamada => chamada.tipo), ["generic"]);
         assert.strictEqual(chamadasKabum[0].clienteId, "cliente_kabum");
         assert.strictEqual(chamadasKabum[0].marketplace, "kabum");
         assert.strictEqual(chamadasKabum[0].linkOriginal, "https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=capture");
         assert.strictEqual(chamadasKabum[0].ofertaBase.urlOriginal, chamadasKabum[0].linkOriginal);
+        assert.strictEqual(chamadasKabum[0].ofertaBase.condicaoPrecoPor, "pix");
         const serializado = JSON.stringify(resposta.body);
         assert.ok(!serializado.includes("nao_deve_ir_para_backend"));
+
+        const save = await request(serverKabum, "POST", "/manual-v2/ofertas", "cliente_kabum", {
+          oferta: resposta.body.oferta
+        });
+        assert.strictEqual(save.status, 201);
+        assert.strictEqual(save.body.oferta.condicaoPrecoPor, "pix");
       } finally {
         await new Promise(resolve => serverKabum.close(resolve));
       }
