@@ -460,13 +460,31 @@ function criarNoKabum({ texto = "", tagName = "DIV", filhos = [], style = {}, at
 function criarImagemKabum({
   src,
   currentSrc = "",
+  srcset = "",
+  dataSrc = "",
+  dataSrcset = "",
   naturalWidth = 1000,
   naturalHeight = 1000,
   clientWidth = 0,
   clientHeight = 0,
-  alt = ""
+  alt = "",
+  sources = []
 } = {}) {
-  return {
+  const sourceNodes = sources.map((source) => ({
+    tagName: "SOURCE",
+    getAttribute(nome) {
+      return source[nome] || "";
+    }
+  }));
+  const picture = sourceNodes.length
+    ? {
+        tagName: "PICTURE",
+        querySelectorAll(seletor) {
+          return String(seletor || "").toLowerCase() === "source" ? sourceNodes : [];
+        }
+      }
+    : null;
+  const img = {
     src,
     currentSrc,
     naturalWidth,
@@ -476,12 +494,17 @@ function criarImagemKabum({
     width: clientWidth,
     height: clientHeight,
     alt,
+    parentElement: picture,
     getAttribute(nome) {
       if (nome === "src") return src || "";
+      if (nome === "srcset") return srcset || "";
+      if (nome === "data-src") return dataSrc || "";
+      if (nome === "data-srcset") return dataSrcset || "";
       if (nome === "alt") return alt || "";
       return "";
     }
   };
+  return img;
 }
 
 function documentoKabumFixture({
@@ -927,6 +950,52 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
+  }
+
+  {
+    const pequena = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_m.jpg";
+    const hq = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_gg.jpg";
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/701357/placa-mae-msi-mag-x870e-tomahawk-wifi",
+      ogImagem: pequena,
+      imagens: [
+        criarImagemKabum({
+          src: pequena,
+          currentSrc: pequena,
+          srcset: `${pequena} 200w, ${hq} 1000w`,
+          naturalWidth: 200,
+          naturalHeight: 200,
+          clientWidth: 200,
+          clientHeight: 200
+        })
+      ]
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, hq);
+  }
+
+  {
+    const pequena = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_m.jpg";
+    const hq = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_gg.jpg";
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/701357/placa-mae-msi-mag-x870e-tomahawk-wifi",
+      ogImagem: pequena,
+      imagens: [
+        criarImagemKabum({
+          src: pequena,
+          currentSrc: pequena,
+          naturalWidth: 200,
+          naturalHeight: 200,
+          clientWidth: 500,
+          clientHeight: 500,
+          sources: [
+            { srcset: `${pequena} 1x, ${hq} 2x` }
+          ]
+        })
+      ]
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, hq);
   }
 
   {

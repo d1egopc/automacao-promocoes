@@ -143,41 +143,141 @@
     }
   }
 
-  function dimensoesImagemProduto(img) {
+  function numeroPositivo(valor) {
+    const numero = Number(valor || 0);
+    return Number.isFinite(numero) && numero > 0 ? numero : 0;
+  }
+
+  function candidatosSrcset(valor = "") {
+    return texto(valor)
+      .split(",")
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map((item) => {
+        const partes = item.split(/\s+/).filter(Boolean);
+        const src = partes.shift() || "";
+        const descritor = partes[0] || "";
+        const largura = descritor.match(/^(\d+)w$/i);
+        const densidade = descritor.match(/^([0-9]+(?:\.[0-9]+)?)x$/i);
+        return {
+          src,
+          larguraDescriptor: largura ? Number(largura[1]) : 0,
+          densidadeDescriptor: densidade ? Number(densidade[1]) : 0
+        };
+      });
+  }
+
+  function atributosUrlImagem(img) {
+    return [
+      img?.currentSrc,
+      img?.src,
+      img?.getAttribute?.("src"),
+      img?.getAttribute?.("data-src"),
+      img?.getAttribute?.("data-original"),
+      img?.getAttribute?.("data-lazy"),
+      img?.getAttribute?.("data-lazy-src")
+    ];
+  }
+
+  function atributosSrcsetImagem(no) {
+    return [
+      no?.getAttribute?.("srcset"),
+      no?.getAttribute?.("data-srcset"),
+      no?.getAttribute?.("data-lazy-srcset")
+    ];
+  }
+
+  function sourcesPictureImagem(img) {
+    const picture = texto(img?.parentElement?.tagName).toLowerCase() === "picture"
+      ? img.parentElement
+      : img?.closest?.("picture");
+    return Array.from(picture?.querySelectorAll?.("source") || []);
+  }
+
+  function dimensoesImagemProduto(img, candidato = {}) {
     const naturalWidth = Number(img?.naturalWidth || 0);
     const naturalHeight = Number(img?.naturalHeight || 0);
     const clientWidth = Number(img?.clientWidth || img?.width || 0);
     const clientHeight = Number(img?.clientHeight || img?.height || 0);
-    if (naturalWidth < 300 || naturalHeight < 300) return null;
-    const proporcao = naturalWidth / naturalHeight;
-    if (!Number.isFinite(proporcao) || proporcao < 0.45 || proporcao > 2.2) return null;
+    const larguraDescriptor = numeroPositivo(candidato.larguraDescriptor);
+    const densidadeDescriptor = numeroPositivo(candidato.densidadeDescriptor);
+    const larguraPorDensidade = densidadeDescriptor && clientWidth
+      ? clientWidth * densidadeDescriptor
+      : 0;
+    const alturaPorDensidade = densidadeDescriptor && clientHeight
+      ? clientHeight * densidadeDescriptor
+      : 0;
+    const larguraEvidencia = Math.max(naturalWidth, larguraDescriptor, larguraPorDensidade);
+    const alturaEvidencia = Math.max(naturalHeight, larguraDescriptor, alturaPorDensidade);
+    if (larguraEvidencia < 300 || alturaEvidencia < 300) return null;
+
+    const proporcoes = [
+      naturalWidth && naturalHeight ? naturalWidth / naturalHeight : 0,
+      clientWidth && clientHeight ? clientWidth / clientHeight : 0
+    ].filter(Number.isFinite).filter(Boolean);
+    if (proporcoes.some(proporcao => proporcao < 0.45 || proporcao > 2.2)) return null;
+
+    const areaDescriptor = larguraDescriptor
+      ? larguraDescriptor * larguraDescriptor
+      : (larguraPorDensidade * alturaPorDensidade);
     return {
       areaRenderizada: Math.max(0, clientWidth) * Math.max(0, clientHeight),
-      areaNatural: naturalWidth * naturalHeight
+      areaNatural: naturalWidth * naturalHeight,
+      areaDescriptor,
+      larguraDescriptor,
+      densidadeDescriptor
     };
+  }
+
+  function candidatosImagemProduto(img, indice, produtoId) {
+    const candidatos = [];
+    const adicionar = (src, extra = {}) => {
+      const url = urlImagemProdutoKabum(src, produtoId);
+      if (!url) return;
+      const dimensoes = dimensoesImagemProduto(img, extra);
+      if (!dimensoes) return;
+      candidatos.push({ src: url, indice, ...dimensoes });
+    };
+
+    atributosUrlImagem(img).forEach(src => adicionar(src));
+    atributosSrcsetImagem(img).forEach((srcset) => {
+      candidatosSrcset(srcset).forEach(candidato => adicionar(candidato.src, candidato));
+    });
+    sourcesPictureImagem(img).forEach((source) => {
+      atributosSrcsetImagem(source).forEach((srcset) => {
+        candidatosSrcset(srcset).forEach(candidato => adicionar(candidato.src, candidato));
+      });
+    });
+
+    return candidatos;
+  }
+
+  function qualidadeImagemProduto(candidata = {}) {
+    return Math.max(candidata.areaNatural || 0, candidata.areaDescriptor || 0);
+  }
+
+  function melhorImagemProduto(atual, candidata) {
+    if (!atual) return candidata;
+    const qualidadeAtual = qualidadeImagemProduto(atual);
+    const qualidadeCandidata = qualidadeImagemProduto(candidata);
+    if (candidata.areaRenderizada > atual.areaRenderizada) return candidata;
+    if (candidata.areaRenderizada < atual.areaRenderizada) return atual;
+    if (qualidadeCandidata > qualidadeAtual) return candidata;
+    if (qualidadeCandidata < qualidadeAtual) return atual;
+    if ((candidata.larguraDescriptor || 0) > (atual.larguraDescriptor || 0)) return candidata;
+    if ((candidata.larguraDescriptor || 0) < (atual.larguraDescriptor || 0)) return atual;
+    if ((candidata.densidadeDescriptor || 0) > (atual.densidadeDescriptor || 0)) return candidata;
+    if ((candidata.densidadeDescriptor || 0) < (atual.densidadeDescriptor || 0)) return atual;
+    return candidata.indice < atual.indice ? candidata : atual;
   }
 
   function imagemKabum(documento, html, produtoId = "") {
     const candidatas = Array.from(documento?.images || []);
     let melhor = null;
     candidatas.forEach((img, indice) => {
-      const src = urlImagemProdutoKabum(img?.currentSrc || img?.src || img?.getAttribute?.("src") || "", produtoId);
-      if (!src) return;
-      const dimensoes = dimensoesImagemProduto(img);
-      if (!dimensoes) return;
-      const candidata = { src, indice, ...dimensoes };
-      if (
-        !melhor ||
-        candidata.areaRenderizada > melhor.areaRenderizada ||
-        (candidata.areaRenderizada === melhor.areaRenderizada && candidata.areaNatural > melhor.areaNatural) ||
-        (
-          candidata.areaRenderizada === melhor.areaRenderizada &&
-          candidata.areaNatural === melhor.areaNatural &&
-          candidata.indice < melhor.indice
-        )
-      ) {
-        melhor = candidata;
-      }
+      candidatosImagemProduto(img, indice, produtoId).forEach((candidata) => {
+        melhor = melhorImagemProduto(melhor, candidata);
+      });
     });
     if (melhor?.src) return melhor.src;
 
