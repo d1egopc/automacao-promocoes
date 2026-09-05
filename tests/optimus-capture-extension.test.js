@@ -598,6 +598,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
     assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
     assert.ok(panelFonte.includes("state.ultimoPreviewKey === previewKey"));
+    assert.ok(panelFonte.includes("state.previewOferta && state.previewKey === previewKey"));
     assert.ok(panelFonte.includes("gerarPreview({ automatico: true })"));
     assert.ok(panelFonte.includes('new Intl.NumberFormat("pt-BR"'));
     assert.ok(panelFonte.includes("formatarMoeda"));
@@ -1876,6 +1877,198 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(envios, 4);
     assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let onUpdated = null;
+    let urlAtual = "https://produto.mercadolivre.com.br/MLB-111-produto-a-_JM";
+    let produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto A",
+      precoAtual: 60.31,
+      imagem: "https://http2.mlstatic.com/a.webp"
+    };
+    let previews = 0;
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 11, url: urlAtual }];
+          },
+          async sendMessage() {
+            return { produto: produtoAtual };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: {
+            addListener(callback) {
+              onUpdated = callback;
+            }
+          }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://go.optimuspromo.com.br/r/teste"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.strictEqual(previews, 1);
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+
+    onUpdated(11, { status: "complete" });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 1, "mesmo produto com preview valido preserva dedupe");
+
+    urlAtual = "";
+    onUpdated(11, { status: "complete" });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(elemento("emptyView").hidden, false);
+
+    urlAtual = produtoAtual.urlOriginal;
+    onUpdated(11, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 2, "produto A apos estado vazio deve recriar preview");
+    assert.strictEqual(elemento("campoTitulo").value, "Produto A");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-222-produto-b-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "",
+      precoAtual: null,
+      imagem: "https://http2.mlstatic.com/b.webp"
+    };
+    onUpdated(11, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 1700));
+    assert.strictEqual(previews, 2, "produto B incompleto nao deve gerar preview");
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-111-produto-a-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto A",
+      precoAtual: 60.31,
+      imagem: "https://http2.mlstatic.com/a.webp"
+    };
+    onUpdated(11, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 3, "produto A apos produto incompleto deve reprocessar");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-333-produto-c-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto C",
+      precoAtual: 77.7,
+      imagem: "https://http2.mlstatic.com/c.webp"
+    };
+    onUpdated(11, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 4);
+    assert.strictEqual(elemento("campoTitulo").value, "Produto C");
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-111-produto-a-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto A",
+      precoAtual: 60.31,
+      imagem: "https://http2.mlstatic.com/a.webp"
+    };
+    onUpdated(11, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 5, "produto A apos produto B valido deve funcionar");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
   }
 
   {

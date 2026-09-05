@@ -599,7 +599,7 @@
       return;
     }
     const previewKey = chavePreview(produto);
-    if (automatico && state.ultimoPreviewKey === previewKey) {
+    if (automatico && state.ultimoPreviewKey === previewKey && state.previewOferta && state.previewKey === previewKey) {
       return;
     }
     state.enviandoPreview = true;
