@@ -339,6 +339,26 @@ function ofertaRadarEspelhoComercial(oferta = {}) {
     Boolean(oferta.metadata?.radarEspelhoComercial?.contratoComercial);
 }
 
+function condicaoPixKabumCapture(oferta = {}) {
+  if (ofertaRadarEspelhoComercial(oferta)) return false;
+  const marketplace = normalizarComparacao(oferta.marketplace).replace(/[^a-z0-9]+/g, "");
+  const condicao = normalizarComparacao(oferta.condicaoPrecoPor || oferta.condicao_preco_por);
+  const adapter = normalizarComparacao(oferta.fonteImportacao?.adapter).replace(/[^a-z0-9]+/g, "_");
+  return marketplace === "kabum" && condicao === "pix" && adapter === "optimus_capture_v1";
+}
+
+function preservarCondicaoPixKabumCapture(dados = {}, oferta = {}) {
+  if (!condicaoPixKabumCapture(oferta)) return dados;
+  return {
+    ...dados,
+    condicaoPrecoPor: "pix",
+    fonteImportacao: {
+      ...(dados.fonteImportacao && typeof dados.fonteImportacao === "object" ? dados.fonteImportacao : {}),
+      adapter: "optimus_capture_v1"
+    }
+  };
+}
+
 function prepararDadosUniversaisTemplate(oferta = {}) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
   const pix = camposPixPublicaveis(oferta, v2);
@@ -395,7 +415,12 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     textoComercialCanonico: oferta.textoComercialCanonico || oferta.documentoComercialCanonico || ""
   };
 
-  if (!radarEspelho) return resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta));
+  if (!radarEspelho) {
+    return preservarCondicaoPixKabumCapture(
+      resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
+      oferta
+    );
+  }
 
   return resolverContratoComercialFinal(normalizarApresentacaoComercial({
     ...dados,
@@ -506,7 +531,10 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
 
   dados.precoExibido = dados.precoAtual;
   dados.fontePrecoExibido = "preco_atual";
-  return resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta));
+  return preservarCondicaoPixKabumCapture(
+    resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
+    oferta
+  );
 }
 
 function prepararDadosOficiaisTemplate(oferta = {}, opcoes = {}) {

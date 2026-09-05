@@ -2,6 +2,7 @@
 
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 const estrelas = (n) => "\u2B50".repeat(n);
 const possuiLinha = (texto, linha) => String(texto).split(/\r?\n/).some(item => item.trim() === linha);
@@ -135,6 +136,87 @@ const mlPixPermanecePadrao = gerarTemplateUniversal({
   linkAfiliado: "https://go.optimus/r/ml"
 });
 assert.ok(mlPixPermanecePadrao.includes("✅ Por: *R$ 99,90*"), "ML nao recebe rotulo KaBuM nem promove Pix sem evidencia");
+
+const mensagemEnvioKabumCapturePix = montarMensagemOferta({
+  titulo: "KaBuM Capture Pix no envio",
+  marketplace: "kabum",
+  precoAtual: "541.99",
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://www.awin1.com/kabum-capture-pix"
+}, {
+  clienteId: "cliente_template_kabum_capture",
+  destino: { id: "destino_whatsapp", tipo: "whatsapp" },
+  canal: "whatsapp",
+  plano: { recursos: { templatePersonalizado: false } }
+});
+assert.ok(mensagemEnvioKabumCapturePix.includes("✅ À vista no PIX: *R$ 541,99*"), "Enviar Agora preserva Pix do KaBuM Capture");
+assert.ok(!mensagemEnvioKabumCapturePix.includes("✅ Por: *R$ 541,99*"), "Enviar Agora nao rebaixa KaBuM Capture Pix para Por");
+
+const mensagemEnvioKabumCaptureSemPix = montarMensagemOferta({
+  titulo: "KaBuM Capture sem Pix",
+  marketplace: "kabum",
+  precoAtual: "541.99",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://www.awin1.com/kabum-capture-sem-pix"
+}, {
+  clienteId: "cliente_template_kabum_capture",
+  destino: { id: "destino_whatsapp", tipo: "whatsapp" },
+  canal: "whatsapp",
+  plano: { recursos: { templatePersonalizado: false } }
+});
+assert.ok(mensagemEnvioKabumCaptureSemPix.includes("✅ Por: *R$ 541,99*"), "KaBuM Capture sem Pix preserva Por no envio");
+assert.ok(!mensagemEnvioKabumCaptureSemPix.includes("À vista no PIX"), "KaBuM Capture sem Pix nao inventa condicao Pix");
+
+const mensagemEnvioKabumNaoCapturePix = montarMensagemOferta({
+  titulo: "KaBuM nao Capture com Pix",
+  marketplace: "kabum",
+  precoAtual: "541.99",
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "kabum-awin.manual.adapter" },
+  linkAfiliado: "https://www.awin1.com/kabum-manual-pix"
+}, {
+  clienteId: "cliente_template_kabum_manual",
+  destino: { id: "destino_whatsapp", tipo: "whatsapp" },
+  canal: "whatsapp",
+  plano: { recursos: { templatePersonalizado: false } }
+});
+assert.ok(mensagemEnvioKabumNaoCapturePix.includes("✅ Por: *R$ 541,99*"), "KaBuM nao-Capture nao recebe rotulo Pix no envio");
+assert.ok(!mensagemEnvioKabumNaoCapturePix.includes("À vista no PIX"), "rotulo Pix segue restrito ao Capture KaBuM");
+
+const mensagemEnvioMlPix = montarMensagemOferta({
+  titulo: "Mercado Livre Pix no envio",
+  marketplace: "mercadolivre",
+  precoAtual: "99.90",
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://go.optimus/r/ml-pix"
+}, {
+  clienteId: "cliente_template_ml",
+  destino: { id: "destino_whatsapp", tipo: "whatsapp" },
+  canal: "whatsapp",
+  plano: { recursos: { templatePersonalizado: false } }
+});
+assert.ok(mensagemEnvioMlPix.includes("✅ Por: *R$ 99,90*"), "outros marketplaces continuam sem rotulo KaBuM Pix");
+assert.ok(!mensagemEnvioMlPix.includes("À vista no PIX"), "ML nao herda regra KaBuM Capture");
+
+const mensagemEnvioRadarKabumPix = montarMensagemOferta({
+  titulo: "Radar KaBuM preservado",
+  origem: "radar",
+  radar: true,
+  marketplace: "kabum",
+  precoAtual: "541.99",
+  condicaoPrecoPor: "pix",
+  fonteImportacao: { adapter: "optimus_capture_v1" },
+  linkAfiliado: "https://go.optimus/r/radar-kabum"
+}, {
+  clienteId: "cliente_template_radar",
+  destino: { id: "destino_whatsapp", tipo: "whatsapp" },
+  canal: "whatsapp",
+  plano: { recursos: { templatePersonalizado: false } }
+});
+assert.ok(mensagemEnvioRadarKabumPix.includes("✅ Por: *R$ 541,99*"), "Radar nao recebe regra nova do KaBuM Capture");
+assert.ok(!mensagemEnvioRadarKabumPix.includes("À vista no PIX"), "Radar continua sem rotulo Pix por transporte Capture");
 
 const personalizado = renderizarTemplatePersonalizado({
   oferta: {
