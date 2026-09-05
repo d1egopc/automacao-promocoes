@@ -403,6 +403,11 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelFonte.includes("enviarMensagemCapturaComRecuperacao"));
     assert.ok(panelFonte.includes("abaPermaneceNaCaptura"));
     assert.ok(panelFonte.includes("state.capturaPendente = true"));
+    assert.ok(panelFonte.includes("AMAZON_RETRY_DELAYS_MS"));
+    assert.ok(panelFonte.includes("[OPTIMUS-CAPTURE-TIMING]"));
+    assert.ok(apiFonte.includes("AbortController"));
+    assert.ok(apiFonte.includes("tempo_limite_esgotado"));
+    assert.ok(apiFonte.includes("timeoutMs: 45000"));
     assert.ok(panelHtml.includes('id="destinosView"'));
     assert.ok(panelCss.includes("button:disabled"));
     assert.ok(panelCss.includes("cursor: default"));
@@ -461,6 +466,411 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(produto.warnings.includes("preco_atual_ausente"));
     assert.notStrictEqual(produto.precoAtual, 66.61);
     assert.notStrictEqual(produto.precoAtual, 20);
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let previews = 0;
+    let sendMessages = 0;
+    const delays = [];
+    const urlAtual = "https://www.amazon.com.br/Soundbar-TCL/dp/B0G2T13LT6";
+    const produtos = [
+      {
+        marketplace: "amazon",
+        urlOriginal: urlAtual,
+        titulo: "",
+        precoAtual: null,
+        imagem: "https://m.media-amazon.com/images/I/parcial.jpg",
+        completo: false
+      },
+      {
+        marketplace: "amazon",
+        urlOriginal: urlAtual,
+        titulo: "Soundbar TCL",
+        precoAtual: null,
+        imagem: "https://m.media-amazon.com/images/I/parcial.jpg",
+        completo: false
+      },
+      {
+        marketplace: "amazon",
+        urlOriginal: urlAtual,
+        titulo: "Soundbar TCL",
+        precoAtual: 798.99,
+        imagem: "https://m.media-amazon.com/images/I/soundbar.jpg",
+        completo: true
+      }
+    ];
+    const contexto = {
+      console,
+      setTimeout(callback, ms) {
+        delays.push(ms);
+        return setTimeout(callback, 0);
+      },
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 9, url: urlAtual }];
+          },
+          async sendMessage() {
+            sendMessages += 1;
+            return { ok: true, produto: produtos[Math.min(sendMessages - 1, produtos.length - 1)] };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          assert.strictEqual(sendMessages, 3, "preview so deve iniciar depois da captura local valida");
+          assert.strictEqual(payload.marketplace, "amazon");
+          assert.strictEqual(payload.titulo, "Soundbar TCL");
+          assert.strictEqual(payload.precoAtual, 798.99);
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://www.amazon.com.br/dp/B0G2T13LT6?tag=teste"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.strictEqual(sendMessages, 3, "Amazon deve parar a recuperacao assim que a captura ficar valida");
+    assert.strictEqual(previews, 1, "captura valida deve gerar um unico preview");
+    assert.ok(delays.includes(500));
+    assert.ok(delays.includes(1000));
+    assert.ok(!delays.includes(1600), "retry final nao deve ocorrer depois de captura valida");
+    assert.strictEqual(elemento("campoTitulo").value, "Soundbar TCL");
+    assert.strictEqual(elemento("campoPrecoAtual").value, "R$ 798,99");
+    assert.strictEqual(elemento("statusProduto").textContent, "Produto capturado");
+    assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let previews = 0;
+    let sendMessages = 0;
+    const delays = [];
+    const urlAtual = "https://www.amazon.com.br/Soundbar-TCL/dp/B0G2T13LT6";
+    const contexto = {
+      console,
+      setTimeout(callback, ms) {
+        delays.push(ms);
+        return setTimeout(callback, 0);
+      },
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 10, url: urlAtual }];
+          },
+          async sendMessage() {
+            sendMessages += 1;
+            return {
+              ok: true,
+              produto: {
+                marketplace: "amazon",
+                urlOriginal: urlAtual,
+                titulo: "",
+                precoAtual: null,
+                imagem: "https://m.media-amazon.com/images/I/parcial.jpg",
+                completo: false
+              }
+            };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture() {
+          previews += 1;
+          throw new Error("preview_nao_deveria_ser_chamado");
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.strictEqual(sendMessages, 4, "Amazon incompleta deve ter limite de uma tentativa inicial e tres recuperacoes");
+    assert.deepStrictEqual(delays.filter((ms) => [500, 1000, 1600].includes(ms)), [500, 1000, 1600]);
+    assert.strictEqual(previews, 0, "captura Amazon incompleta nao deve chamar preview/backend");
+    assert.strictEqual(elemento("campoTitulo").value, "", "card parcial nao deve expor titulo/imagem como produto capturado");
+    assert.strictEqual(elemento("produtoImagem").hidden, true);
+    assert.strictEqual(elemento("statusProduto").textContent, "Captura incompleta");
+    assert.strictEqual(elemento("botaoSalvar").disabled, true);
+    assert.strictEqual(elemento("botaoEnviar").disabled, true);
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let previews = 0;
+    let sendMessages = 0;
+    const delays = [];
+    let urlAtual = "https://www.amazon.com.br/Produto-A/dp/B0G2T13LT6";
+    const urlB = "https://www.amazon.com.br/Produto-B/dp/B0H9T13LT6";
+    const contexto = {
+      console,
+      setTimeout(callback, ms) {
+        delays.push(ms);
+        if (ms === 500) urlAtual = urlB;
+        return setTimeout(callback, 0);
+      },
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 11, url: urlAtual }];
+          },
+          async get(_abaId) {
+            return { id: 11, url: urlAtual };
+          },
+          async sendMessage() {
+            sendMessages += 1;
+            return {
+              ok: true,
+              produto: {
+                marketplace: "amazon",
+                urlOriginal: "https://www.amazon.com.br/Produto-A/dp/B0G2T13LT6",
+                titulo: "",
+                precoAtual: null,
+                imagem: "https://m.media-amazon.com/images/I/parcial.jpg",
+                completo: false
+              }
+            };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture() {
+          previews += 1;
+          throw new Error("preview_nao_deveria_ser_chamado");
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    assert.strictEqual(sendMessages, 1, "troca de URL deve cancelar retries antigos antes de nova leitura");
+    assert.strictEqual(previews, 0);
+    assert.ok(delays.includes(500));
+    assert.ok(!delays.includes(1000));
+    assert.strictEqual(elemento("botaoSalvar").disabled, true);
+    assert.strictEqual(elemento("botaoEnviar").disabled, true);
   }
 
   {
@@ -1528,6 +1938,31 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       cupom: "SEM DEMORA",
       origem: "optimus_capture_v1"
     });
+  }
+
+  {
+    const fetchOriginal = global.fetch;
+    let abortado = false;
+    try {
+      global.fetch = async (_url, options = {}) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          abortado = true;
+          const erro = new Error("abortado");
+          erro.name = "AbortError";
+          reject(erro);
+        });
+      });
+      delete require.cache[require.resolve(path.join(raiz, "services", "api.js"))];
+      const apiTimeout = require(path.join(raiz, "services", "api.js"));
+      await assert.rejects(
+        apiTimeout.requestJson("/manual-v2/capture/ofertas", { timeoutMs: 1 }),
+        (erro) => erro.message === "tempo_limite_esgotado" && erro.status === 408
+      );
+      assert.strictEqual(abortado, true, "requestJson deve abortar quando timeoutMs expira");
+    } finally {
+      global.fetch = fetchOriginal;
+      delete require.cache[require.resolve(path.join(raiz, "services", "api.js"))];
+    }
   }
 
   {

@@ -16,11 +16,33 @@
       "content-type": "application/json",
       ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {})
     };
-    const res = await fetch(endpoint(path), {
-      method: opts.method || "GET",
-      headers,
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body)
-    });
+    const timeoutMs = Number(opts.timeoutMs || 0);
+    const usarTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortController !== "undefined";
+    const controller = usarTimeout ? new AbortController() : null;
+    let timeoutId = null;
+    if (controller) {
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
+
+    let res;
+    try {
+      res = await fetch(endpoint(path), {
+        method: opts.method || "GET",
+        headers,
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        ...(controller ? { signal: controller.signal } : {})
+      });
+    } catch (erro) {
+      if (erro?.name === "AbortError") {
+        const timeoutErro = new Error("tempo_limite_esgotado");
+        timeoutErro.status = 408;
+        throw timeoutErro;
+      }
+      throw erro;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
     let body = null;
     try {
       body = await res.json();
@@ -57,7 +79,8 @@
     return requestJson("/manual-v2/capture/ofertas", {
       method: "POST",
       token,
-      body: produto
+      body: produto,
+      timeoutMs: 45000
     });
   }
 

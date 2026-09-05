@@ -15,6 +15,7 @@
     capturando: false,
     capturaPendente: false,
     capturaTimer: null,
+    capturaExecucaoId: 0,
     eventosAbasRegistrados: false,
     ultimaUrlCapturada: "",
     ultimoPreviewKey: "",
@@ -29,6 +30,7 @@
     enviandoAgora: false,
     previewEnviadoKey: ""
   };
+  const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
 
   function setTexto(id, valor) {
     const node = el(id);
@@ -42,6 +44,47 @@
 
   function valor(id) {
     return el(id)?.value || "";
+  }
+
+  function agoraMs() {
+    if (global.performance && typeof global.performance.now === "function") {
+      return global.performance.now();
+    }
+    return Date.now();
+  }
+
+  function duracaoMs(inicioMs) {
+    return Math.max(0, Math.round(agoraMs() - inicioMs));
+  }
+
+  function asinSeguro(valor = "") {
+    try {
+      const url = new URL(String(valor || ""));
+      if (typeof detector.asinProdutoAmazon === "function") {
+        return detector.asinProdutoAmazon(url);
+      }
+    } catch {
+      return "";
+    }
+    return "";
+  }
+
+  function logTiming(evento, dados = {}) {
+    try {
+      const seguro = {
+        evento: String(evento || ""),
+        marketplace: dados.marketplace || "",
+        asin: dados.asin || "",
+        tentativa: dados.tentativa,
+        motivo: dados.motivo || "",
+        duracaoMs: dados.duracaoMs,
+        duracaoTotalMs: dados.duracaoTotalMs
+      };
+      Object.keys(seguro).forEach((chave) => seguro[chave] === undefined && delete seguro[chave]);
+      console.log("[OPTIMUS-CAPTURE-TIMING]", seguro);
+    } catch {
+      // Telemetria local nunca interfere na captura.
+    }
   }
 
   const formatadorMoedaPtBr = new Intl.NumberFormat("pt-BR", {
@@ -192,6 +235,17 @@
     return normalizado && Boolean(produto.titulo && (produto.precoAtual || produto.precoMin) && produto.urlOriginal);
   }
 
+  function motivoAmazonIncompleta(produto = {}, deteccao = {}) {
+    if (String(produto.marketplace || "").toLowerCase() !== "amazon") return "";
+    if (!produto.urlOriginal) return "url_ausente";
+    const asin = deteccao.asin || asinSeguro(produto.urlOriginal);
+    if (!asin) return "asin_ausente";
+    if (!produto.titulo) return "titulo_ausente";
+    if (!produto.precoAtual) return "preco_atual_ausente";
+    if (!capturaUtilizavel(produto)) return "captura_incompleta";
+    return "";
+  }
+
   function renderizarDestinos() {
     const lista = el("destinosLista");
     if (!lista) return;
@@ -278,19 +332,67 @@
       mensagem.includes("extension context invalidated");
   }
 
-  async function enviarMensagemCapturaComRecuperacao(abaId) {
+  async function enviarTentativaCaptura(abaId, contexto = {}) {
+    const inicio = agoraMs();
+    const resposta = await chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+    const produto = contrato.normalizarProdutoCapturado(resposta?.produto || {});
+    logTiming("adapter_concluido", {
+      marketplace: contexto.marketplace,
+      asin: contexto.asin || asinSeguro(produto.urlOriginal),
+      tentativa: contexto.tentativa,
+      motivo: resposta?.motivo || motivoAmazonIncompleta(produto, contexto.deteccao),
+      duracaoMs: duracaoMs(inicio),
+      duracaoTotalMs: contexto.inicioCapturaMs ? duracaoMs(contexto.inicioCapturaMs) : undefined
+    });
+    return resposta;
+  }
+
+  async function enviarMensagemCapturaComRecuperacao(abaId, contexto = {}) {
+    const amazon = contexto.marketplace === "amazon";
     try {
-      const resposta = await chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+      const resposta = await enviarTentativaCaptura(abaId, { ...contexto, tentativa: 1 });
       const produto = contrato.normalizarProdutoCapturado(resposta?.produto || {});
+      if (amazon) {
+        const motivo = motivoAmazonIncompleta(produto, contexto.deteccao);
+        if (!motivo) return resposta;
+        logTiming("captura_incompleta", {
+          marketplace: "amazon",
+          asin: contexto.asin || asinSeguro(produto.urlOriginal),
+          tentativa: 1,
+          motivo,
+          duracaoTotalMs: contexto.inicioCapturaMs ? duracaoMs(contexto.inicioCapturaMs) : undefined
+        });
+        for (let indice = 0; indice < AMAZON_RETRY_DELAYS_MS.length; indice += 1) {
+          const delayMs = AMAZON_RETRY_DELAYS_MS[indice];
+          logTiming("retry_amazon", {
+            marketplace: "amazon",
+            asin: contexto.asin || asinSeguro(produto.urlOriginal),
+            tentativa: indice + 2,
+            motivo,
+            duracaoMs: delayMs,
+            duracaoTotalMs: contexto.inicioCapturaMs ? duracaoMs(contexto.inicioCapturaMs) : undefined
+          });
+          await esperar(delayMs);
+          if (typeof contexto.continua === "function" && !await contexto.continua()) {
+            throw new Error("captura_cancelada_por_url");
+          }
+          const tentativa = await enviarTentativaCaptura(abaId, { ...contexto, tentativa: indice + 2 });
+          const produtoTentativa = contrato.normalizarProdutoCapturado(tentativa?.produto || {});
+          const motivoTentativa = motivoAmazonIncompleta(produtoTentativa, contexto.deteccao);
+          if (!motivoTentativa) return tentativa;
+          if (indice === AMAZON_RETRY_DELAYS_MS.length - 1) return tentativa;
+        }
+        return resposta;
+      }
       if (resposta?.ok === false || !capturaUtilizavel(produto)) {
         await esperar(900);
-        return chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+        return enviarTentativaCaptura(abaId, { ...contexto, tentativa: 2 });
       }
       return resposta;
     } catch (erro) {
       if (!erroCanalMensagem(erro)) throw erro;
       await esperar(900);
-      return chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+      return enviarTentativaCaptura(abaId, { ...contexto, tentativa: 2 });
     }
   }
 
@@ -345,6 +447,9 @@
       state.capturaPendente = true;
       return;
     }
+    const inicioCapturaMs = agoraMs();
+    const capturaExecucaoId = state.capturaExecucaoId + 1;
+    state.capturaExecucaoId = capturaExecucaoId;
     state.capturando = true;
     state.capturaPendente = false;
     setHidden("previewView", true);
@@ -360,12 +465,17 @@
       }
 
       const deteccao = detector.detectarMarketplacePorUrl(aba.url);
+      logTiming("captura_inicio", {
+        marketplace: deteccao.marketplace || "",
+        asin: deteccao.asin || asinSeguro(aba.url),
+        tentativa: 1
+      });
       if (!deteccao.suportado) {
         state.ultimaUrlCapturada = "";
         state.ultimoPreviewKey = "";
         limparSaveCompleto();
         prepararFichaVazia();
-        setTexto("estadoPagina", ["pagina_mercadolivre_sem_produto", "pagina_shopee_sem_produto"].includes(deteccao.motivo)
+        setTexto("estadoPagina", ["pagina_mercadolivre_sem_produto", "pagina_shopee_sem_produto", "pagina_amazon_sem_produto"].includes(deteccao.motivo)
           ? "Abra um produto para capturar."
           : "Pagina ainda nao suportada pelo Optimus Capture.");
         return;
@@ -386,13 +496,36 @@
         return;
       }
       prepararFichaVazia();
-      const resposta = await enviarMensagemCapturaComRecuperacao(aba.id);
+      const resposta = await enviarMensagemCapturaComRecuperacao(aba.id, {
+        marketplace: deteccao.marketplace,
+        asin: deteccao.asin || asinSeguro(urlCaptura),
+        deteccao,
+        inicioCapturaMs,
+        continua: async () => state.capturaExecucaoId === capturaExecucaoId && await abaPermaneceNaCaptura(aba.id, urlCaptura)
+      });
       if (!await abaPermaneceNaCaptura(aba.id, urlCaptura)) {
         state.capturaPendente = true;
         return;
       }
       if (!resposta?.produto) {
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
+        return;
+      }
+      const produtoNormalizado = contrato.normalizarProdutoCapturado(resposta.produto);
+      const motivoAmazon = deteccao.marketplace === "amazon"
+        ? motivoAmazonIncompleta(produtoNormalizado, deteccao)
+        : "";
+      if (motivoAmazon) {
+        state.ultimaUrlCapturada = "";
+        setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
+        setTexto("statusProduto", "Captura incompleta");
+        setTexto("statusLink", "Aguardando dados da Amazon");
+        logTiming("captura_incompleta", {
+          marketplace: "amazon",
+          asin: deteccao.asin || asinSeguro(produtoNormalizado.urlOriginal),
+          motivo: motivoAmazon,
+          duracaoTotalMs: duracaoMs(inicioCapturaMs)
+        });
         return;
       }
       const produto = preencherProduto(resposta.produto);
@@ -406,8 +539,13 @@
         return;
       }
       state.ultimaUrlCapturada = produto.urlOriginal || urlCaptura;
+      logTiming("captura_local_valida", {
+        marketplace: produto.marketplace,
+        asin: deteccao.asin || asinSeguro(produto.urlOriginal),
+        duracaoTotalMs: duracaoMs(inicioCapturaMs)
+      });
       setTexto("estadoPagina", "Preparando oferta...");
-      await gerarPreview({ automatico: true });
+      await gerarPreview({ automatico: true, inicioCapturaMs });
     } catch {
       setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
     } finally {
@@ -454,7 +592,19 @@
     setTexto("estadoPagina", "Preparando oferta...");
     setTexto("statusLink", "Preparando oferta...");
     try {
+      const inicioPostMs = agoraMs();
+      logTiming("preview_post_inicio", {
+        marketplace: produto.marketplace,
+        asin: asinSeguro(produto.urlOriginal),
+        duracaoTotalMs: opcoes.inicioCapturaMs ? duracaoMs(opcoes.inicioCapturaMs) : undefined
+      });
       const resposta = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto));
+      logTiming("preview_post_fim", {
+        marketplace: produto.marketplace,
+        asin: asinSeguro(produto.urlOriginal),
+        duracaoMs: duracaoMs(inicioPostMs),
+        duracaoTotalMs: opcoes.inicioCapturaMs ? duracaoMs(opcoes.inicioCapturaMs) : undefined
+      });
       if (chavePreview(produtoEditado()) !== previewKey) {
         state.previewPendente = true;
         return;
@@ -493,6 +643,11 @@
       atualizarBotaoEnviar();
       setTexto("estadoPagina", "Oferta pronta");
       setTexto("statusLink", "Oferta pronta");
+      logTiming("preview_pronto", {
+        marketplace: produto.marketplace,
+        asin: asinSeguro(produto.urlOriginal),
+        duracaoTotalMs: opcoes.inicioCapturaMs ? duracaoMs(opcoes.inicioCapturaMs) : undefined
+      });
     } catch (erro) {
       if (erro?.status === 401) {
         await auth.sair();
