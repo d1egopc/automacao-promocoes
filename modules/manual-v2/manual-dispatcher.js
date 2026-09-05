@@ -74,6 +74,20 @@ function imagemDiscordManual(oferta = {}) {
   );
 }
 
+function diagnosticoImagemKabumCaptureManualV2(oferta = {}) {
+  const marketplace = texto(oferta.marketplace).toLowerCase();
+  const adapter = texto(oferta.fonteImportacao?.adapter);
+  if (marketplace !== "kabum" || adapter !== "optimus_capture_v1") return null;
+
+  return {
+    manualV2: true,
+    marketplace: "kabum",
+    adapter,
+    clienteId: texto(oferta.clienteId),
+    ofertaId: texto(oferta.id)
+  };
+}
+
 function chavesTelegram(destino = {}) {
   return [
     destino.id,
@@ -246,11 +260,18 @@ async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
   if (typeof deps.enviarWhatsApp !== "function") throw new Error("Primitiva WhatsApp indisponivel");
 
   for (const grupo of grupos) {
+    const diagnosticoImagem = diagnosticoImagemKabumCaptureManualV2(oferta);
     await deps.enviarWhatsApp({
       sock,
       grupo,
       mensagem,
-      midia: texto(oferta.imagem) ? { origem: "imagemUrl", imagemUrl: texto(oferta.imagem) } : null,
+      midia: texto(oferta.imagem)
+        ? {
+            origem: "imagemUrl",
+            imagemUrl: texto(oferta.imagem),
+            ...(diagnosticoImagem ? { diagnosticoImagemManualV2: diagnosticoImagem } : {})
+          }
+        : null,
       corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
     });
   }

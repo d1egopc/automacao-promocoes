@@ -14,7 +14,7 @@ const {
   marcarMidiaEmUso,
   excluirMidiaTemporaria
 } = require("../campanhas/midiaTemporaria");
-const { enviarCampanhaManual } = require("../campanhas/enviarCampanha");
+const { enviarCampanhaManual, enviarWhatsApp } = require("../campanhas/enviarCampanha");
 
 function png() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64, 1)]);
@@ -90,6 +90,56 @@ async function publicar(extra = {}, opcoes = {}) {
   const texto = await publicar({ destinosIds: ["wa"] });
   assert.strictEqual(texto.resultado.enviados, 1, "texto deve enviar via WhatsApp");
   assert.strictEqual(texto.sock.chamadas[0].msg.text, "Campanha oficial");
+
+  {
+    const envAnterior = process.env.MANUAL_V2_KABUM_IMAGEM_DIAGNOSTICO;
+    const axiosPath = require.resolve("axios");
+    const axiosOriginal = require(axiosPath);
+    const warnOriginal = console.warn;
+    const avisos = [];
+    process.env.MANUAL_V2_KABUM_IMAGEM_DIAGNOSTICO = "1";
+    require.cache[axiosPath].exports = {
+      get: async () => {
+        throw new Error("falha_controlada_diagnostico");
+      }
+    };
+    console.warn = (marcador, dados) => avisos.push({ marcador, dados });
+
+    try {
+      const sock = criarSock();
+      const imagemUrl = "https://images.kabum.com.br/produtos/fotos/123456/produto_gg.jpg";
+      await enviarWhatsApp({
+        sock,
+        grupo: "grupo_a",
+        mensagem: "Campanha oficial",
+        midia: {
+          origem: "imagemUrl",
+          imagemUrl,
+          diagnosticoImagemManualV2: {
+            manualV2: true,
+            marketplace: "kabum",
+            adapter: "optimus_capture_v1",
+            clienteId: "cliente_a",
+            ofertaId: "oferta_kabum_capture"
+          }
+        },
+        corrigirImagemUrl: url => url
+      });
+
+      assert.strictEqual(sock.chamadas.length, 1, "falha do diagnostico nao deve bloquear envio");
+      assert.strictEqual(sock.chamadas[0].msg.image.url, imagemUrl);
+      assert.strictEqual(avisos[0].marcador, "[MANUAL-V2-KABUM-IMAGEM-DIAGNOSTICO]");
+      assert.strictEqual(avisos[0].dados.ok, false);
+    } finally {
+      if (envAnterior === undefined) {
+        delete process.env.MANUAL_V2_KABUM_IMAGEM_DIAGNOSTICO;
+      } else {
+        process.env.MANUAL_V2_KABUM_IMAGEM_DIAGNOSTICO = envAnterior;
+      }
+      require.cache[axiosPath].exports = axiosOriginal;
+      console.warn = warnOriginal;
+    }
+  }
 
   const antiga = await publicar({ imagemUrl: "https://cdn.optimus.test/arte.jpg" });
   assert.strictEqual(antiga.resultado.enviados, 2, "imagemUrl antiga deve continuar funcionando");

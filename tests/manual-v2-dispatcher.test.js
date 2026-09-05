@@ -309,7 +309,40 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(chamadas.debitos.length, 1);
     assert.strictEqual(chamadas.debitos[0].clienteId, "cliente_a");
     assert.ok(chamadas.wa[0].mensagem.includes("Oferta Manual A"));
+    assert.strictEqual(chamadas.wa[0].midia.diagnosticoImagemManualV2, undefined);
     assertSemSegredos(retorno);
+  }
+
+  {
+    const ofertaKabumCapture = {
+      ...ofertaA,
+      id: "oferta_kabum_capture",
+      marketplace: "kabum",
+      imagem: "https://images.kabum.com.br/produtos/fotos/123456/produto_gg.jpg",
+      fonteImportacao: {
+        adapter: "optimus_capture_v1"
+      }
+    };
+    const { deps, chamadas } = baseDeps({
+      buscarOfertaManualV2: () => ofertaKabumCapture
+    });
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: "oferta_kabum_capture",
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(chamadas.wa.length, 1);
+    assert.strictEqual(chamadas.wa[0].midia.origem, "imagemUrl");
+    assert.strictEqual(chamadas.wa[0].midia.imagemUrl, ofertaKabumCapture.imagem);
+    assert.deepStrictEqual(chamadas.wa[0].midia.diagnosticoImagemManualV2, {
+      manualV2: true,
+      marketplace: "kabum",
+      adapter: "optimus_capture_v1",
+      clienteId: "cliente_a",
+      ofertaId: "oferta_kabum_capture"
+    });
   }
 
   {

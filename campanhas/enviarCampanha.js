@@ -8,8 +8,12 @@ const {
 const {
   registrarHistoricoCampanha
 } = require("./historicoCampanhas");
+const crypto = require("crypto");
 
 const TIPOS_MIDIA_UPLOAD = new Set(["imagem", "video", "documento"]);
+const FLAG_DIAGNOSTICO_KABUM_MANUAL_V2 = "MANUAL_V2_KABUM_IMAGEM_DIAGNOSTICO";
+const LOG_DIAGNOSTICO_KABUM_MANUAL_V2 = "[MANUAL-V2-KABUM-IMAGEM-DIAGNOSTICO]";
+const TIMEOUT_DIAGNOSTICO_KABUM_MANUAL_V2_MS = 15000;
 
 async function httpPostPadrao(url, body, config = {}) {
   if (typeof fetch !== "function") {
@@ -231,6 +235,81 @@ function base64ImagemLegada(imagemUrl = "") {
   return { buffer: Buffer.from(base64Data, "base64"), mimeType, ext };
 }
 
+function flagAtiva(valor = "") {
+  return ["1", "true", "sim", "yes", "on"].includes(String(valor || "").trim().toLowerCase());
+}
+
+function diagnosticoKabumManualV2Ativo(contexto = {}) {
+  return flagAtiva(process.env[FLAG_DIAGNOSTICO_KABUM_MANUAL_V2]) &&
+    contexto?.manualV2 === true &&
+    String(contexto?.marketplace || "").trim().toLowerCase() === "kabum" &&
+    String(contexto?.adapter || "").trim() === "optimus_capture_v1";
+}
+
+async function metadadosImagemBuffer(buffer) {
+  try {
+    const sharp = require("sharp");
+    const metadata = await sharp(buffer).metadata();
+    return {
+      largura: Number(metadata.width || 0) || 0,
+      altura: Number(metadata.height || 0) || 0,
+      formato: texto(metadata.format || "")
+    };
+  } catch (_e) {
+    return {
+      largura: 0,
+      altura: 0,
+      formato: ""
+    };
+  }
+}
+
+async function registrarDiagnosticoImagemKabumManualV2({ contexto = {}, imagemUrlOriginal = "", imagemUrlFinal = "" } = {}) {
+  if (!diagnosticoKabumManualV2Ativo(contexto)) return;
+
+  try {
+    const axios = require("axios");
+    const resposta = await axios.get(imagemUrlFinal, {
+      responseType: "arraybuffer",
+      timeout: TIMEOUT_DIAGNOSTICO_KABUM_MANUAL_V2_MS,
+      validateStatus: () => true
+    });
+    const buffer = Buffer.isBuffer(resposta.data)
+      ? resposta.data
+      : Buffer.from(resposta.data || "");
+    const metadata = await metadadosImagemBuffer(buffer);
+    const headers = resposta.headers || {};
+
+    console.log(LOG_DIAGNOSTICO_KABUM_MANUAL_V2, {
+      ok: true,
+      clienteId: texto(contexto.clienteId),
+      ofertaId: texto(contexto.ofertaId),
+      marketplace: "kabum",
+      adapter: "optimus_capture_v1",
+      urlFinal: imagemUrlFinal,
+      urlOriginalIgualFinal: texto(imagemUrlOriginal) === texto(imagemUrlFinal),
+      httpStatus: Number(resposta.status || 0) || 0,
+      contentType: texto(headers["content-type"]),
+      contentLength: texto(headers["content-length"]),
+      bytesRecebidos: buffer.length,
+      largura: metadata.largura,
+      altura: metadata.altura,
+      formato: metadata.formato,
+      sha256: crypto.createHash("sha256").update(buffer).digest("hex")
+    });
+  } catch (e) {
+    console.warn(LOG_DIAGNOSTICO_KABUM_MANUAL_V2, {
+      ok: false,
+      clienteId: texto(contexto.clienteId),
+      ofertaId: texto(contexto.ofertaId),
+      marketplace: "kabum",
+      adapter: "optimus_capture_v1",
+      urlFinal: imagemUrlFinal,
+      erro: texto(e?.message || "diagnostico_falhou").slice(0, 160)
+    });
+  }
+}
+
 async function aguardar(ms = 0) {
   const tempo = Number(ms);
   if (!Number.isFinite(tempo) || tempo <= 0) return;
@@ -250,8 +329,15 @@ async function enviarWhatsApp({ sock, grupo, mensagem, midia, corrigirImagemUrl 
       return;
     }
 
+    const imagemUrlFinal = corrigirImagemUrl(midia.imagemUrl) || midia.imagemUrl;
+    await registrarDiagnosticoImagemKabumManualV2({
+      contexto: midia.diagnosticoImagemManualV2,
+      imagemUrlOriginal: midia.imagemUrl,
+      imagemUrlFinal
+    });
+
     await sock.sendMessage(grupo, {
-      image: { url: corrigirImagemUrl(midia.imagemUrl) || midia.imagemUrl },
+      image: { url: imagemUrlFinal },
       caption: mensagem
     });
     return;
