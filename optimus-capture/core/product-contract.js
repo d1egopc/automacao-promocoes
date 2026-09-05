@@ -37,9 +37,17 @@
     return Math.round(((anterior - atual) / anterior) * 100);
   }
 
+  function temFaixaRealPreco(precoMin, precoMax) {
+    const min = precoNumero(precoMin);
+    const max = precoNumero(precoMax);
+    return min && max && max > min ? { precoMin: min, precoMax: max } : null;
+  }
+
   function normalizarProdutoCapturado(entrada) {
     const bruto = entrada && typeof entrada === "object" ? entrada : {};
-    const precoAtual = precoNumero(bruto.precoAtual);
+    const faixa = temFaixaRealPreco(bruto.precoMin, bruto.precoMax);
+    const temVariacaoPreco = bruto.temVariacaoPreco === true && Boolean(faixa);
+    const precoAtual = temVariacaoPreco ? null : precoNumero(bruto.precoAtual);
     const precoAnterior = precoNumero(bruto.precoAnterior);
     const warnings = Array.isArray(bruto.warnings) ? bruto.warnings.map(texto).filter(Boolean) : [];
     const produto = {
@@ -48,6 +56,9 @@
       titulo: texto(bruto.titulo),
       precoAtual,
       precoAnterior,
+      precoMin: faixa?.precoMin || null,
+      precoMax: faixa?.precoMax || null,
+      temVariacaoPreco,
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
       origem: "optimus_capture_v1",
@@ -58,11 +69,11 @@
 
     if (!produto.urlOriginal) warnings.push("url_original_invalida");
     if (!produto.titulo) warnings.push("titulo_ausente");
-    if (!produto.precoAtual) warnings.push(produto.precoAmbiguo ? "preco_ambiguo" : "preco_atual_ausente");
+    if (!produto.precoAtual && !produto.precoMin) warnings.push(produto.precoAmbiguo ? "preco_ambiguo" : "preco_atual_ausente");
     if (!produto.imagem) warnings.push("imagem_ausente");
 
     produto.descontoPercentual = descontoPercentual(produto.precoAtual, produto.precoAnterior);
-    produto.completo = Boolean(produto.urlOriginal && produto.titulo && produto.precoAtual);
+    produto.completo = Boolean(produto.urlOriginal && produto.titulo && (produto.precoAtual || produto.precoMin));
     produto.requerConferencia = produto.precoAmbiguo === true || !produto.completo;
     return produto;
   }
@@ -73,8 +84,11 @@
       marketplace: normalizado.marketplace,
       urlOriginal: normalizado.urlOriginal,
       titulo: normalizado.titulo,
-      precoAtual: normalizado.precoAtual,
+      precoAtual: normalizado.temVariacaoPreco ? "" : normalizado.precoAtual,
       precoAnterior: normalizado.precoAnterior || "",
+      precoMin: normalizado.precoMin || "",
+      precoMax: normalizado.precoMax || "",
+      temVariacaoPreco: normalizado.temVariacaoPreco,
       imagem: normalizado.imagem,
       cupom: normalizado.cupom,
       origem: normalizado.origem
@@ -86,6 +100,7 @@
     precoNumero,
     urlHttp,
     descontoPercentual,
+    temFaixaRealPreco,
     normalizarProdutoCapturado,
     payloadPreview
   };

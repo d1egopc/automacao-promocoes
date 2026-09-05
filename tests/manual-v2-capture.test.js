@@ -287,6 +287,43 @@ function arquivoOfertas(clienteId) {
     }
 
     {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_shopee", payloadShopeeValido({
+        precoAtual: "",
+        precoAnterior: "",
+        precoMin: 67.99,
+        precoMax: 99.99,
+        temVariacaoPreco: true
+      }));
+      assert.strictEqual(resposta.status, 200);
+      assert.strictEqual(resposta.body.oferta.precoAtual, "", "faixa Shopee nao vira preco unico");
+      assert.strictEqual(resposta.body.oferta.precoMin, "67.99");
+      assert.strictEqual(resposta.body.oferta.precoMax, "99.99");
+      assert.strictEqual(resposta.body.oferta.temVariacaoPreco, true);
+      assert.ok(resposta.body.oferta.fonteImportacao.camposConfiaveis.includes("precoMin"));
+      assert.ok(resposta.body.oferta.fonteImportacao.camposConfiaveis.includes("precoMax"));
+
+      const save = await request(server, "POST", "/manual-v2/ofertas", "cliente_shopee", {
+        oferta: resposta.body.oferta
+      });
+      assert.strictEqual(save.status, 201);
+      assert.strictEqual(save.body.oferta.precoAtual, "");
+      assert.strictEqual(save.body.oferta.precoMin, "67.99");
+      assert.strictEqual(save.body.oferta.precoMax, "99.99");
+      assert.strictEqual(save.body.oferta.temVariacaoPreco, true);
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_shopee", payloadShopeeValido({
+        precoAtual: "1% OFF",
+        precoMin: "",
+        precoMax: "",
+        temVariacaoPreco: false
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "capture_preco_invalido");
+    }
+
+    {
       const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadShopeeValido({
         urlOriginal: "https://s.shopee.com.br/abc123"
       }));

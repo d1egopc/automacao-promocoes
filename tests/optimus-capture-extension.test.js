@@ -160,6 +160,84 @@ function documentoShopeeFixture({ comPrecoAnterior = false } = {}) {
   };
 }
 
+function documentoShopeeFaixaFixture() {
+  const url = "https://shopee.com.br/product/123456/555555";
+  const imagem = "https://down-br.img.susercontent.com/file/faixa.webp";
+  const titulo = {
+    textContent: "Triturador De Alimentos Carne e Legumes Multiprocessador Eletrico",
+    innerText: "Triturador De Alimentos Carne e Legumes Multiprocessador Eletrico"
+  };
+  const secaoPreco = {
+    textContent: "R$67,99 - R$99,99 R$79,99 - R$180,00 -15% 12x R$ 6,60",
+    innerText: "R$67,99 - R$99,99\nR$79,99 - R$180,00\n-15%\n12x R$ 6,60"
+  };
+  const main = {
+    textContent: `${titulo.textContent} ${secaoPreco.textContent}`,
+    innerText: `${titulo.textContent}\n${secaoPreco.innerText}`,
+    querySelector(seletor) {
+      if (seletor === "h1") return titulo;
+      if (seletor === 'section[aria-live="polite"]') return secaoPreco;
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `<html><head><meta property="og:image" content="${imagem}"></head><body><div role="main"><h1>${titulo.textContent}</h1><img elementtiming="shopee:heroComponentPaint" src="${imagem}"><section aria-live="polite">${secaoPreco.innerText}</section></div></body></html>`
+    },
+    body: main,
+    querySelector(seletor) {
+      if (seletor === 'div[role="main"], main') return main;
+      if (seletor === 'img[elementtiming="shopee:heroComponentPaint"]') {
+        return { src: imagem, currentSrc: "", getAttribute: () => imagem };
+      }
+      return null;
+    }
+  };
+}
+
+function documentoShopeePercentualFixture({ incluirPreco = true } = {}) {
+  const url = "https://shopee.com.br/product/123456/666666";
+  const imagem = "https://down-br.img.susercontent.com/file/mochila.webp";
+  const titulo = {
+    textContent: "Mochila Esportiva Unissex com Compartimento para Notebook",
+    innerText: "Mochila Esportiva Unissex com Compartimento para Notebook"
+  };
+  const secaoPreco = {
+    textContent: incluirPreco ? "R$69,00 1% OFF" : "1% OFF",
+    innerText: incluirPreco ? "R$69,00\n1% OFF" : "1% OFF"
+  };
+  const main = {
+    textContent: `${titulo.textContent} ${secaoPreco.textContent}`,
+    innerText: `${titulo.textContent}\n${secaoPreco.innerText}`,
+    querySelector(seletor) {
+      if (seletor === "h1") return titulo;
+      if (seletor === 'section[aria-live="polite"]') return secaoPreco;
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `<html><head><meta property="og:image" content="${imagem}"></head><body><div role="main"><h1>${titulo.textContent}</h1><img elementtiming="shopee:heroComponentPaint" src="${imagem}"><section aria-live="polite">${secaoPreco.innerText}</section></div></body></html>`
+    },
+    body: main,
+    querySelector(seletor) {
+      if (seletor === 'div[role="main"], main') return main;
+      if (seletor === 'img[elementtiming="shopee:heroComponentPaint"]') {
+        return { src: imagem, currentSrc: "", getAttribute: () => imagem };
+      }
+      return null;
+    }
+  };
+}
+
 function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   const url = "https://shopee.com.br/product/555/999";
   const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
@@ -288,6 +366,45 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     });
     assert.strictEqual(payload.marketplace, "shopee");
     assert.strictEqual(payload.precoAtual, 212.90);
+    assert.strictEqual(payload.temVariacaoPreco, false);
+  }
+
+  {
+    const documento = documentoShopeeFaixaFixture();
+    const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.precoMin, 67.99);
+    assert.strictEqual(produto.precoMax, 99.99);
+    assert.strictEqual(produto.temVariacaoPreco, true);
+    assert.strictEqual(produto.precoAnterior, null);
+    assert.strictEqual(produto.completo, true);
+    assert.notStrictEqual(produto.precoAtual, 67.99, "minimo da faixa nao vira preco unico");
+    assert.notStrictEqual(produto.precoMin, 6.60, "parcelamento nao vira preco minimo");
+    const payload = contrato.payloadPreview(produto);
+    assert.strictEqual(payload.precoAtual, "");
+    assert.strictEqual(payload.precoMin, 67.99);
+    assert.strictEqual(payload.precoMax, 99.99);
+    assert.strictEqual(payload.temVariacaoPreco, true);
+  }
+
+  {
+    const produto = shopee.capturarShopeeDaPagina(
+      documentoShopeePercentualFixture(),
+      { href: "https://shopee.com.br/product/123456/666666" }
+    );
+    assert.strictEqual(produto.precoAtual, 69.00);
+    assert.notStrictEqual(produto.precoAtual, 1.00, "percentual nunca vira preco");
+  }
+
+  {
+    const produto = shopee.capturarShopeeDaPagina(
+      documentoShopeePercentualFixture({ incluirPreco: false }),
+      { href: "https://shopee.com.br/product/123456/666666" }
+    );
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.precoMin, null);
+    assert.strictEqual(produto.completo, false);
+    assert.ok(produto.warnings.includes("preco_atual_ausente"));
   }
 
   {
@@ -641,6 +758,135 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(envios, 4);
     assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let previews = 0;
+    const produtoAtual = {
+      marketplace: "shopee",
+      urlOriginal: "https://shopee.com.br/product/123456/555555",
+      titulo: "Triturador De Alimentos",
+      precoAtual: null,
+      precoMin: 67.99,
+      precoMax: 99.99,
+      temVariacaoPreco: true,
+      imagem: "https://down-br.img.susercontent.com/file/faixa.webp",
+      completo: true
+    };
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 8, url: produtoAtual.urlOriginal }];
+          },
+          async sendMessage() {
+            return { ok: true, produto: produtoAtual };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          assert.strictEqual(payload.precoAtual, "");
+          assert.strictEqual(payload.precoMin, 67.99);
+          assert.strictEqual(payload.precoMax, 99.99);
+          assert.strictEqual(payload.temVariacaoPreco, true);
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              precoMin: payload.precoMin,
+              precoMax: payload.precoMax,
+              temVariacaoPreco: payload.temVariacaoPreco,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.strictEqual(previews, 1);
+    assert.strictEqual(elemento("campoPrecoAtual").value, "A partir de R$ 67,99");
+    assert.strictEqual(elemento("previewView").children[1].textContent, "Triturador De Alimentos - A partir de R$ 67,99");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
   }
 
   {
@@ -1147,6 +1393,9 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       titulo: "Produto editado",
       precoAtual: 129.9,
       precoAnterior: 199.9,
+      precoMin: "",
+      precoMax: "",
+      temVariacaoPreco: false,
       imagem: "https://http2.mlstatic.com/imagem.webp",
       cupom: "SEM DEMORA",
       origem: "optimus_capture_v1"

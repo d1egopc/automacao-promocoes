@@ -80,6 +80,18 @@ const semAvaliacaoReal = gerarTemplateUniversal({
 });
 assert.ok(!semAvaliacaoReal.includes("â­ 100"), "score interno nao vira avaliacao visual");
 
+const shopeeFaixa = gerarTemplateUniversal({
+  titulo: "Triturador De Alimentos",
+  marketplace: "Shopee",
+  precoAtual: "",
+  precoMin: 67.99,
+  precoMax: 99.99,
+  temVariacaoPreco: true,
+  linkAfiliado: "https://s.shopee.com.br/faixa"
+});
+assert.ok(shopeeFaixa.includes("✅ A partir de: *R$ 67,99*"), "faixa Shopee renderiza minimo como a partir de");
+assert.ok(!shopeeFaixa.includes("✅ Por: *R$ 67,99*"), "faixa Shopee nao renderiza minimo como preco unico");
+
 const personalizado = renderizarTemplatePersonalizado({
   oferta: {
     ...ofertaBase,

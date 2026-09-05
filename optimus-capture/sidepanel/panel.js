@@ -55,11 +55,22 @@
     return formatadorMoedaPtBr.format(numero).replace(/[\u00a0\u202f]/g, " ");
   }
 
+  function textoPrecoProduto(produto = {}) {
+    if (produto.temVariacaoPreco && produto.precoMin) {
+      const minimo = formatarMoeda(produto.precoMin);
+      return minimo ? `A partir de ${minimo}` : "";
+    }
+    return formatarMoeda(produto.precoAtual);
+  }
+
   function chavePreview(produto = {}) {
     return [
       produto.urlOriginal || "",
       produto.titulo || "",
       produto.precoAtual || "",
+      produto.precoMin || "",
+      produto.precoMax || "",
+      produto.temVariacaoPreco === true ? "variacao" : "",
       produto.imagem || "",
       produto.cupom || ""
     ].join("|");
@@ -177,7 +188,7 @@
 
   function capturaUtilizavel(produto = {}) {
     const normalizado = produto.completo === true && !produto.requerConferencia;
-    return normalizado && Boolean(produto.titulo && produto.precoAtual && produto.urlOriginal);
+    return normalizado && Boolean(produto.titulo && (produto.precoAtual || produto.precoMin) && produto.urlOriginal);
   }
 
   function renderizarDestinos() {
@@ -311,7 +322,7 @@
     el("produtoImagem").src = state.produto.imagem || "";
     el("produtoImagem").hidden = !state.produto.imagem;
     el("campoTitulo").value = state.produto.titulo || "";
-    el("campoPrecoAtual").value = formatarMoeda(state.produto.precoAtual);
+    el("campoPrecoAtual").value = textoPrecoProduto(state.produto);
     el("campoPrecoAnterior").value = formatarMoeda(state.produto.precoAnterior);
     el("campoCupom").value = state.produto.cupom || "";
     el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
@@ -412,6 +423,9 @@
       ...(state.produto || {}),
       titulo: valor("campoTitulo"),
       precoAtual: valor("campoPrecoAtual"),
+      precoMin: state.produto?.precoMin || "",
+      precoMax: state.produto?.precoMax || "",
+      temVariacaoPreco: state.produto?.temVariacaoPreco === true,
       precoAnterior: valor("campoPrecoAnterior"),
       cupom: valor("campoCupom")
     });
@@ -425,7 +439,7 @@
       return;
     }
     const produto = produtoEditado();
-    if (!produto.precoAtual) {
+    if (!produto.precoAtual && !produto.precoMin) {
       setTexto("statusProduto", "Captura incompleta");
       setTexto("statusLink", automatico ? "Nao foi possivel preparar a oferta" : "Preco precisa de conferencia.");
       return;
@@ -451,7 +465,14 @@
       titulo.textContent = "Preview aprovado";
       const resumo = document.createElement("p");
       const tituloResumo = oferta.titulo || produto.titulo;
-      const precoResumo = formatarMoeda(oferta.precoAtual || produto.precoAtual);
+      const precoResumo = textoPrecoProduto({
+        ...produto,
+        ...oferta,
+        precoAtual: oferta.precoAtual || produto.precoAtual,
+        precoMin: oferta.precoMin || produto.precoMin,
+        precoMax: oferta.precoMax || produto.precoMax,
+        temVariacaoPreco: oferta.temVariacaoPreco === true || produto.temVariacaoPreco === true
+      });
       resumo.textContent = precoResumo ? `${tituloResumo} - ${precoResumo}` : tituloResumo;
       const link = document.createElement("p");
       link.textContent = oferta.urlAfiliada ? "Link afiliado gerado pelo Optimus." : "Link afiliado nao retornado.";

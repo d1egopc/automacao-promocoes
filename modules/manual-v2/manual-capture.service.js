@@ -41,6 +41,15 @@ function precoNumero(valor) {
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
 
+function faixaPrecoValida(entrada = {}) {
+  const min = precoNumero(entrada.precoMin ?? entrada.preco_min);
+  const max = precoNumero(entrada.precoMax ?? entrada.preco_max);
+  if (min === null || max === null || max <= min) {
+    return null;
+  }
+  return { precoMin: min, precoMax: max, temVariacaoPreco: true };
+}
+
 function tituloTecnicoOuInutil(valor = "") {
   const titulo = texto(valor);
   if (!titulo) return true;
@@ -203,16 +212,24 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     throw erroCapture("capture_titulo_invalido", 400, { host: urlValidada.host });
   }
 
-  const precoAtualNumero = precoNumero(entrada.precoAtual ?? entrada.preco ?? entrada.valor ?? entrada.price);
-  if (precoAtualNumero === null) {
+  const faixaPreco = marketplace === "shopee" && entrada.temVariacaoPreco === true
+    ? faixaPrecoValida(entrada)
+    : null;
+  const precoAtualNumero = faixaPreco
+    ? null
+    : precoNumero(entrada.precoAtual ?? entrada.preco ?? entrada.valor ?? entrada.price);
+  if (precoAtualNumero === null && !faixaPreco) {
     throw erroCapture("capture_preco_invalido", 400, { host: urlValidada.host });
   }
 
   const baseConversao = {
     marketplace,
     titulo,
-    precoAtual: precoAtualNumero,
-    precoAnterior: entrada.precoAnterior,
+    precoAtual: faixaPreco ? "" : precoAtualNumero,
+    precoAnterior: faixaPreco ? "" : entrada.precoAnterior,
+    precoMin: faixaPreco?.precoMin || "",
+    precoMax: faixaPreco?.precoMax || "",
+    temVariacaoPreco: faixaPreco?.temVariacaoPreco === true,
     imagem: sanitizarUrlOpcional(entrada.imagem || entrada.image || entrada.imageUrl),
     cupom: texto(entrada.cupom || entrada.codigoCupom),
     categoria: texto(entrada.categoria || entrada.categoriaProduto),
@@ -233,13 +250,15 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
 
   const ofertaNormalizada = normalizarOfertaManualV2({
     ...baseConversao,
-    precoAtual: precoAtualNumero,
+    precoAtual: faixaPreco ? "" : precoAtualNumero,
     urlAfiliada,
     fonteImportacao: {
       marketplaceDetectado: marketplace,
       adapter: "optimus_capture_v1",
       parseOnly: true,
-      camposConfiaveis: ["titulo", "precoAtual", "urlOriginal", "urlAfiliada"],
+      camposConfiaveis: faixaPreco
+        ? ["titulo", "precoMin", "precoMax", "urlOriginal", "urlAfiliada"]
+        : ["titulo", "precoAtual", "urlOriginal", "urlAfiliada"],
       camposAusentes: [],
       avisos: []
     }

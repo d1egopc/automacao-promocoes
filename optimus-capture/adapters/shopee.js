@@ -91,6 +91,19 @@
     return contrato.precoNumero(match?.[1] || "");
   }
 
+  function extrairFaixaPreco(textoEntrada = "") {
+    const valor = texto(textoEntrada);
+    const moeda = "(R\\$\\s*[0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{2}|R\\$\\s*[0-9]+(?:[.,][0-9]{2})?)";
+    const re = new RegExp(`${moeda}\\s*(?:-|a|ate|até)\\s*${moeda}`, "i");
+    const match = valor.match(re);
+    if (!match) return null;
+
+    const min = contrato.precoNumero(match[1]);
+    const max = contrato.precoNumero(match[2]);
+    if (!min || !max || max <= min) return null;
+    return { precoMin: min, precoMax: max, temVariacaoPreco: true };
+  }
+
   function linhasPrecoPrincipal(documento) {
     const main = documento?.querySelector?.('div[role="main"], main') || documento?.body || null;
     return linhasVisiveis(main)
@@ -104,15 +117,32 @@
     return main.querySelector('section[aria-live="polite"]') || null;
   }
 
-  function precoAtualShopee(documento, html) {
+  function precosAtuaisShopee(documento, html) {
     const bloco = blocoPrecoPrincipal(documento);
-    const precoBloco = extrairPrimeiroPreco(textoVisivel(bloco));
-    if (precoBloco) return precoBloco;
+    const textoBloco = textoVisivel(bloco);
+    const faixaBloco = extrairFaixaPreco(textoBloco);
+    if (faixaBloco) return { precoAtual: null, ...faixaBloco };
+    const precoBloco = extrairPrimeiroPreco(textoBloco);
+    if (precoBloco) return { precoAtual: precoBloco, precoMin: null, precoMax: null, temVariacaoPreco: false };
     const htmlBloco = (String(html || "").match(/<section\b(?=[^>]*aria-live=["']polite["'])[^>]*>([\s\S]*?)<\/section>/i) || [])[1] || "";
-    const precoHtml = extrairPrimeiroPreco(textoHtmlFragmento(htmlBloco));
-    if (precoHtml) return precoHtml;
+    const textoHtml = textoHtmlFragmento(htmlBloco);
+    const faixaHtml = extrairFaixaPreco(textoHtml);
+    if (faixaHtml) return { precoAtual: null, ...faixaHtml };
+    const precoHtml = extrairPrimeiroPreco(textoHtml);
+    if (precoHtml) return { precoAtual: precoHtml, precoMin: null, precoMax: null, temVariacaoPreco: false };
     const [linhaPrincipal] = linhasPrecoPrincipal(documento);
-    return extrairPrimeiroPreco(linhaPrincipal);
+    const faixaLinha = extrairFaixaPreco(linhaPrincipal);
+    if (faixaLinha) return { precoAtual: null, ...faixaLinha };
+    return {
+      precoAtual: extrairPrimeiroPreco(linhaPrincipal),
+      precoMin: null,
+      precoMax: null,
+      temVariacaoPreco: false
+    };
+  }
+
+  function precoAtualShopee(documento, html) {
+    return precosAtuaisShopee(documento, html).precoAtual;
   }
 
   function precoAnteriorEstrutural(documento, precoAtual) {
@@ -135,15 +165,20 @@
   function capturarShopeeDaPagina(documento, locationObjeto, htmlOverride) {
     const url = locationObjeto?.href || documento?.location?.href || "";
     const html = htmlOverride || documento?.documentElement?.outerHTML || "";
-    const precoAtual = precoAtualShopee(documento, html);
-    const precoAnterior = precoAnteriorEstrutural(documento, precoAtual);
+    const precos = precosAtuaisShopee(documento, html);
+    const precoAnterior = precos.temVariacaoPreco
+      ? null
+      : precoAnteriorEstrutural(documento, precos.precoAtual);
 
     return contrato.normalizarProdutoCapturado({
       marketplace: "shopee",
       urlOriginal: url,
       titulo: tituloFallbackMain(documento, html),
-      precoAtual,
-      precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
+      precoAtual: precos.temVariacaoPreco ? "" : precos.precoAtual,
+      precoMin: precos.precoMin,
+      precoMax: precos.precoMax,
+      temVariacaoPreco: precos.temVariacaoPreco,
+      precoAnterior: precoAnterior && precos.precoAtual && precoAnterior > precos.precoAtual ? precoAnterior : "",
       imagem: imagemHero(documento, html),
       cupom: "",
       fonte: "dom_shopee_v1",
@@ -155,6 +190,7 @@
     capturarShopeeDaPagina,
     capturarShopeeDeHtml,
     precoAtualShopee,
+    precosAtuaisShopee,
     precoAnteriorEstrutural
   };
   global.OptimusCaptureShopee = api;

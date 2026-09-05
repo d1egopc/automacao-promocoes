@@ -364,6 +364,9 @@ function selecionarCamposUniversais(oferta = {}) {
     marketplace: normalizarTexto(ofertaApresentacao.marketplace),
     precoAtual: contratoFinal.precoPor ?? ofertaApresentacao.precoAtual,
     precoOriginal: contratoFinal.precoDe ?? ofertaApresentacao.precoOriginal,
+    precoMin: contratoFinal.precoMin ?? ofertaApresentacao.precoMin,
+    precoMax: contratoFinal.precoMax ?? ofertaApresentacao.precoMax,
+    temVariacaoPreco: contratoFinal.temVariacaoPreco === true || ofertaApresentacao.temVariacaoPreco === true,
     condicaoPrecoPor: normalizarTexto(contratoFinal.condicaoPrecoPor || ofertaApresentacao.condicaoPrecoPor),
     precoPixDistinto: contratoFinal.precoPixDistinto ?? ofertaApresentacao.precoPixDistinto ?? null,
     valorEfetivo: ofertaApresentacao.valorEfetivo,
@@ -520,6 +523,14 @@ function textoPrecoAtualComCondicao(precoAtual = "", campos = {}) {
   if (campos.precoPix && normalizarComparacao(campos.precoPix) !== normalizarComparacao(precoAtual)) return precoAtual;
   if (textoIndicaPix(condicaoPix)) return `${precoAtual} no Pix`;
   return precoAtual;
+}
+
+function precoFaixaAtualTemplate(campos = {}) {
+  if (campos.temVariacaoPreco !== true) return "";
+  const min = normalizarNumero(campos.precoMin);
+  const max = normalizarNumero(campos.precoMax);
+  if (min == null || max == null || max <= min) return "";
+  return formatarMoeda(min);
 }
 
 function economiaReal(precoOriginal, precoAtual, economia) {
@@ -768,6 +779,7 @@ function montarTemplateUniversalOficial({
   campos,
   blocos,
   precoOriginal,
+  precoFaixaAtual,
   precoAtualComCondicao,
   descontoCalculado,
   descontoPercentual,
@@ -797,7 +809,7 @@ function montarTemplateUniversalOficial({
   ]);
   adicionarBloco(blocos, [
     precoOriginal ? `❌ De: *${precoOriginal}*` : "",
-    precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : "",
+    precoFaixaAtual ? `✅ A partir de: *${precoFaixaAtual}*` : (precoAtualComCondicao ? `✅ Por: *${precoAtualComCondicao}*` : ""),
     descontoCalculado != null && descontoCalculado > 0 ? `📉 ${descontoCalculado.toFixed(0)}% OFF` : "",
     campos.parcelamento ? linhaComPrefixo("💳", campos.parcelamento) : "",
     economia ? `💸 Economia: *${economia}${descontoPercentual != null && descontoPercentual > 0 ? ` (${descontoPercentual.toFixed(0)}%)` : ""}*` : ""
@@ -823,18 +835,21 @@ function gerarTemplateUniversal(oferta = {}) {
   campos.precoPix = "";
   const blocos = [];
   const precoAtualExibido = campos.precoAtual;
+  const precoFaixaAtual = precoFaixaAtualTemplate(campos);
   const precoAtualNumero = normalizarNumero(precoAtualExibido);
   const precoOriginalNumero = normalizarNumero(campos.precoOriginal);
-  const precoAtual = formatarMoeda(precoAtualExibido) || normalizarTexto(precoAtualExibido);
-  const precoAtualComCondicao = textoPrecoAtualComCondicao(precoAtual, campos);
-  const precoOriginal = precoOriginalNumero != null &&
+  const precoAtual = precoFaixaAtual ? "" : (formatarMoeda(precoAtualExibido) || normalizarTexto(precoAtualExibido));
+  const precoAtualComCondicao = precoFaixaAtual ? "" : textoPrecoAtualComCondicao(precoAtual, campos);
+  const precoOriginal = !precoFaixaAtual && precoOriginalNumero != null &&
     precoAtualNumero != null &&
     precoOriginalNumero > precoAtualNumero
       ? formatarMoeda(campos.precoOriginal)
       : "";
   const economiaNumero = normalizarNumero(campos.economia);
   const descontoPercentual = normalizarNumero(campos.descontoPercentual);
-  const descontoCalculado = descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
+  const descontoCalculado = precoFaixaAtual
+    ? descontoPercentual
+    : descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
@@ -889,6 +904,7 @@ function gerarTemplateUniversal(oferta = {}) {
     campos,
     blocos,
     precoOriginal,
+    precoFaixaAtual,
     precoAtualComCondicao,
     descontoCalculado,
     descontoPercentual,
