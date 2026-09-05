@@ -20,7 +20,12 @@
     previewKey: "",
     salvandoOferta: false,
     ofertaSalvaId: "",
-    previewSalvoKey: ""
+    previewSalvoKey: "",
+    destinos: [],
+    destinosSelecionados: new Set(),
+    carregandoDestinos: false,
+    enviandoAgora: false,
+    previewEnviadoKey: ""
   };
 
   function setTexto(id, valor) {
@@ -62,6 +67,10 @@
     return Boolean(state.previewKey && state.previewSalvoKey === state.previewKey);
   }
 
+  function previewEnviadoAtual() {
+    return Boolean(state.previewKey && state.previewEnviadoKey === state.previewKey);
+  }
+
   function atualizarBotaoSalvar() {
     const botao = el("botaoSalvar");
     if (!botao) return;
@@ -75,12 +84,46 @@
       : (salvo ? "Salvo no Optimus" : "Salvar no Optimus");
   }
 
+  function atualizarBotaoConfirmarEnvio() {
+    const botao = el("botaoConfirmarEnvio");
+    if (!botao) return;
+    botao.disabled = state.enviandoAgora || state.destinosSelecionados.size < 1;
+    botao.textContent = state.enviandoAgora ? "Enviando..." : "Confirmar envio";
+  }
+
+  function atualizarBotaoEnviar() {
+    const botao = el("botaoEnviar");
+    if (!botao) return;
+    const temPreview = Boolean(state.previewOferta && state.previewKey);
+    const enviado = previewEnviadoAtual();
+    botao.disabled = !temPreview || state.enviandoAgora || state.carregandoDestinos || enviado;
+    botao.dataset.estado = enviado ? "salvo" : (state.enviandoAgora ? "salvando" : "");
+    botao.textContent = state.enviandoAgora
+      ? "Enviando..."
+      : (enviado ? "Enviado" : "Enviar agora");
+    botao.title = enviado ? "Oferta ja enviada para o preview atual" : "";
+  }
+
+  function ocultarDestinos() {
+    setHidden("destinosView", true);
+    const lista = el("destinosLista");
+    if (lista) lista.innerHTML = "";
+    state.destinosSelecionados = new Set();
+    atualizarBotaoConfirmarEnvio();
+  }
+
   function limparPreviewAtual() {
     state.previewOferta = null;
     state.previewKey = "";
     state.salvandoOferta = false;
     state.ofertaSalvaId = "";
+    state.enviandoAgora = false;
+    state.carregandoDestinos = false;
+    state.destinos = [];
+    state.previewEnviadoKey = "";
+    ocultarDestinos();
     atualizarBotaoSalvar();
+    atualizarBotaoEnviar();
   }
 
   function limparSaveCompleto() {
@@ -98,6 +141,87 @@
       ...campos
     } = oferta && typeof oferta === "object" ? oferta : {};
     return campos;
+  }
+
+  function destinoSeguro(destino = {}) {
+    const tipo = String(destino.tipo || "").toLowerCase();
+    return {
+      id: String(destino.id || "").trim(),
+      nome: String(destino.nome || destino.identificacaoVisual || destino.id || "").trim(),
+      tipo: ["telegram", "discord"].includes(tipo) ? tipo : "whatsapp",
+      ativo: destino.ativo !== false,
+      utilizavel: destino.utilizavel === true,
+      motivoIndisponivel: String(destino.motivoIndisponivel || "").trim(),
+      identificacaoVisual: String(destino.identificacaoVisual || "").trim()
+    };
+  }
+
+  function tipoDestinoLabel(tipo = "") {
+    if (tipo === "telegram") return "Telegram";
+    if (tipo === "discord") return "Discord";
+    return "WhatsApp";
+  }
+
+  function destinosUtilizaveis() {
+    return state.destinos.filter((destino) => destino.id && destino.ativo && destino.utilizavel);
+  }
+
+  function renderizarDestinos() {
+    const lista = el("destinosLista");
+    if (!lista) return;
+    lista.innerHTML = "";
+
+    if (state.carregandoDestinos) {
+      const vazio = document.createElement("p");
+      vazio.className = "destino-vazio";
+      vazio.textContent = "Carregando destinos...";
+      lista.append(vazio);
+      atualizarBotaoConfirmarEnvio();
+      return;
+    }
+
+    if (!state.destinos.length) {
+      const vazio = document.createElement("p");
+      vazio.className = "destino-vazio";
+      vazio.textContent = "Nenhum destino disponivel.";
+      lista.append(vazio);
+      atualizarBotaoConfirmarEnvio();
+      return;
+    }
+
+    for (const destino of state.destinos) {
+      const utilizavel = destino.id && destino.ativo && destino.utilizavel;
+      const label = document.createElement("label");
+      label.className = utilizavel ? "destino-opcao" : "destino-opcao indisponivel";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = destino.id;
+      checkbox.disabled = !utilizavel;
+      checkbox.checked = state.destinosSelecionados.has(destino.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          state.destinosSelecionados.add(destino.id);
+        } else {
+          state.destinosSelecionados.delete(destino.id);
+        }
+        atualizarBotaoConfirmarEnvio();
+      });
+
+      const textoDestino = document.createElement("span");
+      textoDestino.textContent = destino.nome || destino.identificacaoVisual || destino.id;
+      const meta = document.createElement("span");
+      meta.className = "destino-tipo";
+      meta.textContent = utilizavel
+        ? tipoDestinoLabel(destino.tipo)
+        : `${tipoDestinoLabel(destino.tipo)} - ${destino.motivoIndisponivel || "indisponivel"}`;
+      const corpo = document.createElement("span");
+      corpo.append(textoDestino, meta);
+      label.append(checkbox, corpo);
+      lista.append(label);
+    }
+
+    atualizarBotaoConfirmarEnvio();
   }
 
   function limparCapturaAgendada() {
@@ -255,7 +379,12 @@
       if (state.previewSalvoKey !== previewKey) {
         state.ofertaSalvaId = "";
       }
+      if (state.previewEnviadoKey !== previewKey) {
+        state.previewEnviadoKey = "";
+      }
+      ocultarDestinos();
       atualizarBotaoSalvar();
+      atualizarBotaoEnviar();
       setTexto("statusLink", oferta.urlAfiliada ? "Link afiliado gerado" : "Preview gerado");
     } catch (erro) {
       if (erro?.status === 401) {
@@ -273,6 +402,31 @@
     }
   }
 
+  async function salvarPreviewAtual() {
+    if (!state.auth?.token || !state.previewOferta || !state.previewKey) return "";
+    if (state.ofertaSalvaId && previewSalvoAtual()) return state.ofertaSalvaId;
+    if (state.salvandoOferta) throw new Error("salvamento_em_andamento");
+    const previewKey = state.previewKey;
+    const oferta = ofertaPreviewParaSalvar(state.previewOferta);
+    state.salvandoOferta = true;
+    atualizarBotaoSalvar();
+    atualizarBotaoEnviar();
+
+    try {
+      const resposta = await api.salvarOfertaManualV2(state.auth.token, oferta);
+      if (state.previewKey !== previewKey) throw new Error("preview_alterado");
+      const ofertaId = String(resposta?.oferta?.id || "");
+      if (!ofertaId) throw new Error("oferta_salva_sem_id");
+      state.ofertaSalvaId = ofertaId;
+      state.previewSalvoKey = previewKey;
+      return ofertaId;
+    } finally {
+      state.salvandoOferta = false;
+      atualizarBotaoSalvar();
+      atualizarBotaoEnviar();
+    }
+  }
+
   async function salvarNoOptimus() {
     if (!state.auth?.token || state.salvandoOferta) return;
     if (!state.previewOferta || !state.previewKey || previewSalvoAtual()) {
@@ -280,16 +434,10 @@
       return;
     }
 
-    const previewKey = state.previewKey;
-    const oferta = ofertaPreviewParaSalvar(state.previewOferta);
-    state.salvandoOferta = true;
-    atualizarBotaoSalvar();
     setTexto("statusLink", "Salvando...");
 
     try {
-      const resposta = await api.salvarOfertaManualV2(state.auth.token, oferta);
-      state.ofertaSalvaId = String(resposta?.oferta?.id || "");
-      state.previewSalvoKey = previewKey;
+      await salvarPreviewAtual();
       setTexto("statusLink", "Salvo na Galeria do Optimus");
     } catch (erro) {
       if (erro?.status === 401) {
@@ -300,8 +448,94 @@
       }
       setTexto("statusLink", "Nao foi possivel salvar. Tente novamente.");
     } finally {
-      state.salvandoOferta = false;
       atualizarBotaoSalvar();
+      atualizarBotaoEnviar();
+    }
+  }
+
+  async function abrirSeletorEnvio() {
+    if (!state.auth?.token || !state.previewOferta || !state.previewKey || state.enviandoAgora || previewEnviadoAtual()) {
+      atualizarBotaoEnviar();
+      return;
+    }
+
+    setHidden("destinosView", false);
+    state.carregandoDestinos = true;
+    state.destinos = [];
+    state.destinosSelecionados = new Set();
+    setTexto("statusLink", "Carregando destinos...");
+    renderizarDestinos();
+    atualizarBotaoEnviar();
+
+    try {
+      const resposta = await api.listarDestinosManualV2(state.auth.token);
+      state.destinos = Array.isArray(resposta?.destinos)
+        ? resposta.destinos.map(destinoSeguro).filter((destino) => destino.id)
+        : [];
+      setTexto("statusLink", destinosUtilizaveis().length
+        ? "Selecione os destinos para enviar."
+        : "Nenhum destino disponivel.");
+    } catch (erro) {
+      if (erro?.status === 401) {
+        await auth.sair();
+        state.auth = null;
+        renderAuth();
+        return;
+      }
+      setTexto("statusLink", "Nao foi possivel carregar destinos.");
+    } finally {
+      state.carregandoDestinos = false;
+      renderizarDestinos();
+      atualizarBotaoEnviar();
+    }
+  }
+
+  async function confirmarEnviarAgora() {
+    if (!state.auth?.token || state.enviandoAgora || previewEnviadoAtual()) return;
+    const idsUtilizaveis = new Set(destinosUtilizaveis().map((destino) => destino.id));
+    const destinosIds = Array.from(state.destinosSelecionados).filter((id) => idsUtilizaveis.has(id));
+    if (!destinosIds.length) {
+      setTexto("statusLink", "Selecione ao menos um destino.");
+      atualizarBotaoConfirmarEnvio();
+      return;
+    }
+
+    const previewKey = state.previewKey;
+    state.enviandoAgora = true;
+    setTexto("statusLink", "Enviando...");
+    atualizarBotaoEnviar();
+    atualizarBotaoSalvar();
+    atualizarBotaoConfirmarEnvio();
+
+    try {
+      const ofertaId = await salvarPreviewAtual();
+      if (!ofertaId) throw new Error("oferta_nao_salva");
+      if (state.previewKey !== previewKey) throw new Error("preview_alterado");
+      const resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds);
+      if (state.previewKey !== previewKey) return;
+      const envio = resposta?.envio || {};
+      const enviados = Number(envio.enviados || 0);
+      const erros = Number(envio.erros || 0);
+      if (enviados > 0) {
+        state.previewEnviadoKey = previewKey;
+        ocultarDestinos();
+      }
+      setTexto("statusLink", erros > 0
+        ? `Enviado: ${enviados} • Erros: ${erros}`
+        : `Enviado para ${enviados} destino(s)`);
+    } catch (erro) {
+      if (erro?.status === 401) {
+        await auth.sair();
+        state.auth = null;
+        renderAuth();
+        return;
+      }
+      setTexto("statusLink", `Nao foi possivel enviar: ${String(erro?.message || "envio_falhou").slice(0, 80)}`);
+    } finally {
+      state.enviandoAgora = false;
+      atualizarBotaoEnviar();
+      atualizarBotaoSalvar();
+      atualizarBotaoConfirmarEnvio();
     }
   }
 
@@ -396,6 +630,9 @@
     el("botaoCapturar").addEventListener("click", () => capturar({ forcar: true }));
     el("botaoPreview").addEventListener("click", gerarPreview);
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
+    el("botaoEnviar").addEventListener("click", abrirSeletorEnvio);
+    el("botaoConfirmarEnvio").addEventListener("click", confirmarEnviarAgora);
+    el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     try {
       state.auth = await auth.restaurarSessao();
     } catch {

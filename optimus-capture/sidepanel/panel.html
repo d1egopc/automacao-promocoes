@@ -72,8 +72,17 @@
 
           <div class="acoes-futuras">
             <button id="botaoSalvar" disabled>Salvar no Optimus</button>
-            <button disabled title="Disponivel na proxima etapa">Enviar agora</button>
+            <button id="botaoEnviar" disabled>Enviar agora</button>
           </div>
+
+          <section id="destinosView" class="destinos-view" hidden>
+            <div class="destinos-topo">
+              <strong>Destinos</strong>
+              <button id="botaoCancelarEnvio" class="link-button" type="button">Fechar</button>
+            </div>
+            <div id="destinosLista" class="destinos-lista"></div>
+            <button id="botaoConfirmarEnvio" class="primary" disabled>Confirmar envio</button>
+          </section>
 
           <div class="status-lista">
             <span id="statusProduto">Produto capturado</span>

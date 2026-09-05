@@ -112,18 +112,26 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.ok(panelFonte.includes("formatarMoeda"));
     assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden'));
     assert.ok(panelHtml.includes('id="botaoSalvar" disabled'));
+    assert.ok(panelHtml.includes('id="botaoEnviar" disabled'));
+    assert.ok(panelHtml.includes('id="destinosView"'));
     assert.ok(panelCss.includes("button:disabled"));
     assert.ok(panelCss.includes("cursor: default"));
     assert.ok(panelCss.includes('button[data-estado="salvo"]:disabled'));
+    assert.ok(panelCss.includes(".destino-opcao"));
     assert.ok(apiFonte.includes("function salvarOfertaManualV2"));
     assert.ok(apiFonte.includes('requestJson("/manual-v2/ofertas"'));
+    assert.ok(apiFonte.includes("function listarDestinosManualV2"));
+    assert.ok(apiFonte.includes('requestJson(`/manual-v2/destinos?_=${Date.now()}`'));
+    assert.ok(apiFonte.includes("function enviarAgoraManualV2"));
+    assert.ok(apiFonte.includes('body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }'));
+    assert.ok(!apiFonte.includes("clienteId"));
   }
 
   {
     const elementos = new Map();
     function elemento(id) {
       if (!elementos.has(id)) {
-        elementos.set(id, {
+        const node = {
           id,
           hidden: false,
           textContent: "",
@@ -132,7 +140,7 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
           disabled: false,
           dataset: {},
           title: "",
-          innerHTML: "",
+          _innerHTML: "",
           children: [],
           listeners: {},
           addEventListener(evento, callback) {
@@ -141,7 +149,17 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
           append(...itens) {
             this.children.push(...itens);
           }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
         });
+        elementos.set(id, node);
       }
       return elementos.get(id);
     }
@@ -159,17 +177,34 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     };
     let previews = 0;
     let saves = 0;
+    let destinosRequests = 0;
+    let envios = 0;
     let falharSave = false;
+    let falharEnvio = false;
     let resolverSavePendente = null;
     const payloadsPreview = [];
     const ofertasSalvas = [];
+    const enviosPayloads = [];
     const contexto = {
       console,
       setTimeout,
       clearTimeout,
       document: {
         getElementById: elemento,
-        createElement: (tag) => ({ tag, textContent: "", children: [], append(...itens) { this.children.push(...itens); } }),
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
         addEventListener(evento, callback) {
           if (evento === "DOMContentLoaded") domReady = callback;
         }
@@ -232,6 +267,43 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
               ...oferta
             }
           };
+        },
+        async listarDestinosManualV2(token) {
+          assert.strictEqual(token, "jwt_teste");
+          destinosRequests += 1;
+          return {
+            ok: true,
+            destinos: [
+              { id: "wa_ok", nome: "WA Ofertas", tipo: "whatsapp", ativo: true, utilizavel: true },
+              { id: "tg_ok", nome: "TG Ofertas", tipo: "telegram", ativo: true, utilizavel: true },
+              {
+                id: "dc_off",
+                nome: "Discord OFF",
+                tipo: "discord",
+                ativo: false,
+                utilizavel: false,
+                motivoIndisponivel: "Destino inativo"
+              }
+            ]
+          };
+        },
+        async enviarAgoraManualV2(token, ofertaId, destinosIds) {
+          assert.strictEqual(token, "jwt_teste");
+          envios += 1;
+          enviosPayloads.push({ ofertaId, destinosIds });
+          if (falharEnvio) {
+            const erro = new Error("envio_temporario");
+            erro.status = 409;
+            throw erro;
+          }
+          return {
+            ok: true,
+            envio: {
+              enviados: destinosIds.length,
+              erros: 0,
+              creditosDebitados: destinosIds.length
+            }
+          };
         }
       },
       OptimusCaptureContract: contrato,
@@ -275,6 +347,31 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     await elemento("botaoSalvar").listeners.click();
     assert.strictEqual(saves, 1, "mesmo preview salvo nao deve salvar novamente");
 
+    await elemento("botaoEnviar").listeners.click();
+    assert.strictEqual(destinosRequests, 1);
+    assert.strictEqual(elemento("destinosView").hidden, false);
+    assert.strictEqual(elemento("destinosLista").children.length, 3);
+    const destinoWa = elemento("destinosLista").children[0].children[0];
+    const destinoTg = elemento("destinosLista").children[1].children[0];
+    const destinoDiscordOff = elemento("destinosLista").children[2].children[0];
+    assert.strictEqual(destinoDiscordOff.disabled, true);
+    destinoWa.checked = true;
+    destinoWa.listeners.change();
+    destinoTg.checked = true;
+    destinoTg.listeners.change();
+    assert.strictEqual(elemento("botaoConfirmarEnvio").disabled, false);
+    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(envios, 1);
+    assert.strictEqual(enviosPayloads[0].ofertaId, "manual_salvo_1");
+    assert.deepStrictEqual(Array.from(enviosPayloads[0].destinosIds), ["wa_ok", "tg_ok"]);
+    assert.strictEqual(saves, 1, "oferta ja salva deve reutilizar ofertaSalvaId");
+    assert.strictEqual(previews, 1, "enviar nao deve chamar preview/capture novamente");
+    assert.strictEqual(elemento("statusLink").textContent, "Enviado para 2 destino(s)");
+    assert.strictEqual(elemento("botaoEnviar").disabled, true);
+    assert.strictEqual(elemento("botaoEnviar").textContent, "Enviado");
+    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(envios, 1, "mesmo preview enviado nao deve enviar novamente");
+
     onUpdated(1, { status: "complete" });
     await new Promise(resolve => setTimeout(resolve, 760));
     assert.strictEqual(previews, 1);
@@ -296,18 +393,70 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.strictEqual(payloadsPreview[1].precoAtual, 1249.9);
     assert.strictEqual(payloadsPreview[1].precoAnterior, "");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
     assert.strictEqual(elemento("botaoSalvar").dataset.estado, "");
+
+    await elemento("botaoEnviar").listeners.click();
+    elemento("destinosLista").children[0].children[0].checked = true;
+    elemento("destinosLista").children[0].children[0].listeners.change();
+    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(envios, 2);
+    assert.strictEqual(saves, 2, "preview nao salvo deve ser salvo uma unica vez antes do envio");
+    assert.strictEqual(enviosPayloads[1].ofertaId, "manual_salvo_2");
+    assert.deepStrictEqual(Array.from(enviosPayloads[1].destinosIds), ["wa_ok"]);
+    assert.strictEqual(ofertasSalvas[1].urlAfiliada, "https://meli.la/teste");
+    assert.ok(!("clienteId" in ofertasSalvas[1]));
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-333-produto-c-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto C",
+      precoAtual: 89.9,
+      imagem: "https://http2.mlstatic.com/c.webp"
+    };
+    onUpdated(1, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    assert.strictEqual(previews, 3);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
 
     falharSave = true;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 2);
+    assert.strictEqual(saves, 3);
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel salvar. Tente novamente.");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(envios, 2, "falha no save nao deve chamar enviar-agora");
     falharSave = false;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 3);
-    assert.strictEqual(ofertasSalvas[2].precoAtual, 1249.9);
+    assert.strictEqual(saves, 4);
+    assert.strictEqual(ofertasSalvas[3].precoAtual, 89.9);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
+
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-444-produto-d-_JM";
+    produtoAtual = {
+      marketplace: "mercadolivre",
+      urlOriginal: urlAtual,
+      titulo: "Produto D",
+      precoAtual: 77.7,
+      imagem: "https://http2.mlstatic.com/d.webp"
+    };
+    onUpdated(1, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    falharEnvio = true;
+    await elemento("botaoEnviar").listeners.click();
+    elemento("destinosLista").children[0].children[0].checked = true;
+    elemento("destinosLista").children[0].children[0].listeners.change();
+    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(saves, 5);
+    assert.strictEqual(envios, 3);
+    assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_5");
+    assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel enviar: envio_temporario");
+    falharEnvio = false;
+    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(saves, 5, "falha no envio preserva ID salvo para retry seguro");
+    assert.strictEqual(envios, 4);
+    assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");
+    assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
   }
 
   {

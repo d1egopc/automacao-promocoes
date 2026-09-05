@@ -192,6 +192,62 @@ button[data-estado="salvo"]:disabled {
   align-items: center;
 }
 
+.destinos-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.destinos-topo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.destinos-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.destino-opcao {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: #f9fafb;
+}
+
+.destino-opcao input {
+  width: auto;
+}
+
+.destino-tipo {
+  display: block;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.destino-opcao.indisponivel {
+  opacity: 0.58;
+}
+
+.destino-vazio {
+  margin: 0;
+  color: #667085;
+  font-size: 12px;
+}
+
 .preview h2 {
   margin: 0;
   font-size: 14px;

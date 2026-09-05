@@ -69,6 +69,18 @@
     });
   }
 
+  function listarDestinosManualV2(token) {
+    return requestJson(`/manual-v2/destinos?_=${Date.now()}`, { token });
+  }
+
+  function enviarAgoraManualV2(token, ofertaId, destinosIds) {
+    return requestJson(`/manual-v2/ofertas/${encodeURIComponent(texto(ofertaId))}/enviar-agora`, {
+      method: "POST",
+      token,
+      body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }
+    });
+  }
+
   function iniciarCaptureHandoff(payload) {
     return requestJson("/auth/capture/handoff/iniciar", {
       method: "POST",
@@ -93,6 +105,8 @@
     me,
     gerarPreviewCapture,
     salvarOfertaManualV2,
+    listarDestinosManualV2,
+    enviarAgoraManualV2,
     iniciarCaptureHandoff,
     trocarCaptureHandoff
   };
