@@ -2,6 +2,13 @@ const {
   normalizarMarketplaceManualV2,
   normalizarOfertaManualV2
 } = require("./manual-offers.contract");
+const {
+  gerarShortLinkShopee
+} = require("../../marketplaces/shopee/importar");
+const {
+  extrairIdsShopee,
+  urlShopeeValida
+} = require("../../marketplaces/shopee/normalizacao");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -86,6 +93,38 @@ function urlMercadoLivreSegura(urlOriginal = "") {
   return { ok: true, url: url.toString(), host };
 }
 
+function urlShopeeCaptureSegura(urlOriginal = "") {
+  const valor = texto(urlOriginal);
+  if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
+    return { ok: false, motivo: "shopee_shortlink_capture_inseguro", host };
+  }
+
+  if (!urlShopeeValida(url.toString())) {
+    return { ok: false, motivo: "url_shopee_invalida", host };
+  }
+
+  const ids = extrairIdsShopee(url.toString());
+  if (!ids.itemId) {
+    return { ok: false, motivo: "url_shopee_produto_invalida", host };
+  }
+
+  return { ok: true, url: url.toString(), host, ids };
+}
+
 function sanitizarUrlOpcional(valor = "") {
   const entrada = texto(valor);
   if (!entrada) return "";
@@ -107,6 +146,40 @@ function respostaPreview(ofertaNormalizada = {}) {
   return oferta;
 }
 
+async function gerarLinkAfiliadoCapture(clienteId, marketplace, urlValidada, baseConversao, deps = {}) {
+  if (marketplace === "shopee") {
+    const getIntegracaoCliente = deps.getIntegracaoCliente;
+    if (typeof getIntegracaoCliente !== "function") {
+      throw erroCapture("integracao_shopee_indisponivel", 503, { host: urlValidada.host });
+    }
+
+    const integracao = getIntegracaoCliente(clienteId, "shopee") || {};
+    const gerarShortLink = typeof deps.gerarShortLinkShopee === "function"
+      ? deps.gerarShortLinkShopee
+      : gerarShortLinkShopee;
+    const resultado = await gerarShortLink(urlValidada.url, integracao, [], {
+      fetch: deps.fetch || global.fetch
+    });
+
+    if (!resultado?.ok || !texto(resultado.shortLink)) {
+      throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
+    }
+    return texto(resultado.shortLink);
+  }
+
+  const gerarLinkAfiliadoCliente = deps.gerarLinkAfiliadoCliente;
+  if (typeof gerarLinkAfiliadoCliente !== "function") {
+    throw erroCapture("conversao_afiliada_indisponivel", 503, { host: urlValidada.host });
+  }
+
+  return texto(await gerarLinkAfiliadoCliente(
+    clienteId,
+    marketplace,
+    urlValidada.url,
+    baseConversao
+  ));
+}
+
 async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   const clienteId = texto(deps.clienteId);
   if (!clienteId) {
@@ -114,11 +187,13 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   }
 
   const marketplace = normalizarMarketplaceManualV2(entrada.marketplace);
-  if (marketplace !== "mercadolivre") {
+  if (!["mercadolivre", "shopee"].includes(marketplace)) {
     throw erroCapture("capture_marketplace_nao_suportado", 400);
   }
 
-  const urlValidada = urlMercadoLivreSegura(entrada.urlOriginal || entrada.url || entrada.linkOriginal);
+  const urlValidada = marketplace === "shopee"
+    ? urlShopeeCaptureSegura(entrada.urlOriginal || entrada.url || entrada.linkOriginal)
+    : urlMercadoLivreSegura(entrada.urlOriginal || entrada.url || entrada.linkOriginal);
   if (!urlValidada.ok) {
     throw erroCapture(urlValidada.motivo, 400, { host: urlValidada.host || "" });
   }
@@ -131,11 +206,6 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   const precoAtualNumero = precoNumero(entrada.precoAtual ?? entrada.preco ?? entrada.valor ?? entrada.price);
   if (precoAtualNumero === null) {
     throw erroCapture("capture_preco_invalido", 400, { host: urlValidada.host });
-  }
-
-  const gerarLinkAfiliadoCliente = deps.gerarLinkAfiliadoCliente;
-  if (typeof gerarLinkAfiliadoCliente !== "function") {
-    throw erroCapture("conversao_afiliada_indisponivel", 503, { host: urlValidada.host });
   }
 
   const baseConversao = {
@@ -152,12 +222,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
 
   let urlAfiliada = "";
   try {
-    urlAfiliada = texto(await gerarLinkAfiliadoCliente(
-      clienteId,
-      marketplace,
-      urlValidada.url,
-      baseConversao
-    ));
+    urlAfiliada = await gerarLinkAfiliadoCapture(clienteId, marketplace, urlValidada, baseConversao, deps);
   } catch {
     throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
   }
@@ -195,6 +260,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
 module.exports = {
   gerarPreviewCaptureManualV2,
   urlMercadoLivreSegura,
+  urlShopeeCaptureSegura,
   precoNumero,
   tituloTecnicoOuInutil
 };

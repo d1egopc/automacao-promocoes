@@ -1,6 +1,7 @@
 (function publicarRegistry(global) {
   const detector = global.OptimusCaptureDetector || require("../core/marketplace-detector");
   const mercadoLivre = global.OptimusCaptureMercadoLivre || require("./mercadolivre");
+  const shopee = global.OptimusCaptureShopee || require("./shopee");
 
   function capturarPaginaAtual(documento, locationObjeto) {
     const url = locationObjeto?.href || documento?.location?.href || "";
@@ -16,6 +17,15 @@
 
     if (deteccao.marketplace === "mercadolivre") {
       const produto = mercadoLivre.capturarMercadoLivreDaPagina(documento, locationObjeto);
+      return {
+        ok: produto.completo === true,
+        motivo: produto.completo ? "" : "captura_incompleta",
+        produto
+      };
+    }
+
+    if (deteccao.marketplace === "shopee") {
+      const produto = shopee.capturarShopeeDaPagina(documento, locationObjeto);
       return {
         ok: produto.completo === true,
         motivo: produto.completo ? "" : "captura_incompleta",

@@ -45,8 +45,21 @@ function criarApp(opcoes = {}) {
       throw new Error("importador_nao_deveria_ser_chamado");
     },
     gerarLinkAfiliadoCliente: opcoes.gerarLinkAfiliadoCliente || (async (clienteId, marketplace, linkOriginal, ofertaBase) => {
-      chamadas.push({ clienteId, marketplace, linkOriginal, ofertaBase });
+      chamadas.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
       return "https://meli.la/captureOk";
+    }),
+    getIntegracaoCliente: opcoes.getIntegracaoCliente || ((clienteId, marketplace) => {
+      chamadas.push({ tipo: "integracao", clienteId, marketplace });
+      return { credenciais: { appId: "app_teste", secret: "secret_teste" } };
+    }),
+    gerarShortLinkShopee: opcoes.gerarShortLinkShopee || (async (originUrl, integracao) => {
+      chamadas.push({
+        tipo: "shortlink_shopee",
+        originUrl,
+        temAppId: Boolean(integracao?.credenciais?.appId),
+        temSecret: Boolean(integracao?.credenciais?.secret)
+      });
+      return { ok: true, shortLink: "https://s.shopee.com.br/captureOk" };
     }),
     logger,
     storageOptions: {
@@ -88,6 +101,21 @@ function payloadValido(extra = {}) {
     cupom: "SEMDEMORA",
     categoria: "beleza",
     parcelamento: "10x sem juros",
+    origem: "optimus_capture_v1",
+    ...extra
+  };
+}
+
+function payloadShopeeValido(extra = {}) {
+  return {
+    marketplace: "shopee",
+    urlOriginal: "https://shopee.com.br/product/123456/987654",
+    titulo: "Tenis de Corrida Unissex Respiravel Challenger 6 - Olympikus",
+    precoAtual: 212.9,
+    precoAnterior: "",
+    imagem: "https://down-br.img.susercontent.com/file/produto-hero.webp",
+    cupom: "",
+    categoria: "",
     origem: "optimus_capture_v1",
     ...extra
   };
@@ -235,6 +263,43 @@ function arquivoOfertas(clienteId) {
       assert.ok(!serializado.includes("token_secreto"));
       assert.ok(!("id" in resposta.body.oferta), "preview nao deve criar id persistente falso");
       assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://meli.la/captureOk");
+    }
+
+    {
+      const antes = chamadas.length;
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_shopee", payloadShopeeValido({
+        clienteId: "cliente_malicioso",
+        appId: "nao_deve_ir_para_backend",
+        secret: "nao_deve_ir_para_backend"
+      }));
+      assert.strictEqual(resposta.status, 200);
+      assert.strictEqual(resposta.body.ok, true);
+      assert.strictEqual(resposta.body.oferta.clienteId, "cliente_shopee");
+      assert.strictEqual(resposta.body.oferta.marketplace, "shopee");
+      assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://s.shopee.com.br/captureOk");
+      const chamadasShopee = chamadas.slice(antes);
+      assert.ok(chamadasShopee.some(chamada => chamada.tipo === "integracao" && chamada.clienteId === "cliente_shopee" && chamada.marketplace === "shopee"));
+      assert.ok(chamadasShopee.some(chamada => chamada.tipo === "shortlink_shopee" && chamada.originUrl === "https://shopee.com.br/product/123456/987654"));
+      assert.ok(!chamadasShopee.some(chamada => chamada.tipo === "generic" && chamada.marketplace === "shopee"), "Capture Shopee nao deve usar conversor por keyword");
+      const serializado = JSON.stringify(resposta.body);
+      assert.ok(!serializado.includes("nao_deve_ir_para_backend"));
+      assert.ok(!serializado.includes("secret_teste"));
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadShopeeValido({
+        urlOriginal: "https://s.shopee.com.br/abc123"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "shopee_shortlink_capture_inseguro");
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadShopeeValido({
+        urlOriginal: "https://shopee.com.br/m/cupom-de-desconto"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "url_shopee_produto_invalida");
     }
 
     {

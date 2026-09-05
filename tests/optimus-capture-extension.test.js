@@ -7,10 +7,12 @@ const raiz = path.join(__dirname, "..", "optimus-capture");
 const detector = require(path.join(raiz, "core", "marketplace-detector.js"));
 const contrato = require(path.join(raiz, "core", "product-contract.js"));
 const ml = require(path.join(raiz, "adapters", "mercadolivre.js"));
+const shopee = require(path.join(raiz, "adapters", "shopee.js"));
 const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
 const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
 const panelHtml = fs.readFileSync(path.join(raiz, "sidepanel", "panel.html"), "utf8");
 const panelCss = fs.readFileSync(path.join(raiz, "sidepanel", "panel.css"), "utf8");
+const manifestFonte = fs.readFileSync(path.join(raiz, "manifest.json"), "utf8");
 
 function htmlProdutoJsonLd() {
   return `
@@ -95,11 +97,125 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
   `;
 }
 
+function documentoShopeeFixture({ comPrecoAnterior = false } = {}) {
+  const url = "https://shopee.com.br/product/123456/987654";
+  const imagem = "https://down-br.img.susercontent.com/file/produto-hero.webp";
+  const titulo = {
+    textContent: "Tenis de Corrida Unissex Respiravel Challenger 6 - Olympikus",
+    innerText: "Tenis de Corrida Unissex Respiravel Challenger 6 - Olympikus"
+  };
+  const secaoPreco = {
+    textContent: "R$212,90 no Pix com cupom > ou R$249,00 sem cupom em outros metodos de pagamento",
+    innerText: "R$212,90 no Pix com cupom > ou R$249,00 sem cupom em outros metodos de pagamento"
+  };
+  const precoAnterior = {
+    textContent: "R$ 299,90",
+    innerText: "R$ 299,90",
+    getAttribute: () => "Antes: R$ 299,90"
+  };
+  const main = {
+    textContent: `${titulo.textContent} ${secaoPreco.textContent}`,
+    innerText: `${titulo.textContent} ${secaoPreco.textContent}`,
+    querySelector(seletor) {
+      if (seletor === "h1") return titulo;
+      if (seletor === 'section[aria-live="polite"]') return secaoPreco;
+      return null;
+    },
+    querySelectorAll() {
+      return comPrecoAnterior ? [precoAnterior] : [];
+    }
+  };
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `
+        <html>
+          <head><meta property="og:image" content="${imagem}"></head>
+          <body>
+            <div role="main">
+              <h1>${titulo.textContent}</h1>
+              <img elementtiming="shopee:heroComponentPaint" src="${imagem}">
+              <section aria-live="polite">
+                <div>R$212,90</div>
+                <p>no Pix com cupom ></p>
+                <p>ou R$249,00 sem cupom em outros metodos de pagamento</p>
+              </section>
+            </div>
+          </body>
+        </html>
+      `
+    },
+    body: main,
+    querySelector(seletor) {
+      if (seletor === 'div[role="main"], main') return main;
+      if (seletor === 'img[elementtiming="shopee:heroComponentPaint"]') {
+        return {
+          src: imagem,
+          currentSrc: "",
+          getAttribute: () => imagem
+        };
+      }
+      return null;
+    }
+  };
+}
+
+function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
+  const url = "https://shopee.com.br/product/555/999";
+  const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
+  const titulo = "Kit 4 Baby Tee Feminina - Blusa Slim Fit Manga Curta Blusa de Compressao Varias Cores Ajuste Perfeito Candy Color";
+  const anterior = {
+    textContent: "R$130,90",
+    innerText: "R$130,90",
+    getAttribute: () => "Antes: R$130,90"
+  };
+  const main = {
+    textContent: `${titulo}\nR$59,90\nR$130,90\n-54%`,
+    innerText: `${titulo}\nR$59,90\nR$130,90\n-54%`,
+    querySelector() {
+      return null;
+    },
+    querySelectorAll(seletor) {
+      if (/original|previous|aria-label|\bdel\b|\bs\b/.test(seletor)) {
+        return precoAnteriorEstrutural ? [anterior] : [];
+      }
+      return [];
+    }
+  };
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `<html><body><div role="main">${titulo}<span>R$59,90</span><span>R$130,90</span><span>-54%</span></div></body></html>`
+    },
+    body: main,
+    querySelector(seletor) {
+      if (seletor === 'div[role="main"], main') return main;
+      if (seletor === 'img[elementtiming="shopee:heroComponentPaint"]') {
+        return {
+          src: imagem,
+          currentSrc: "",
+          getAttribute: () => imagem
+        };
+      }
+      return null;
+    }
+  };
+}
+
 (async function main() {
   {
     const deteccao = detector.detectarMarketplacePorUrl("https://produto.mercadolivre.com.br/MLB-123-produto-_JM");
     assert.strictEqual(deteccao.suportado, true);
     assert.strictEqual(deteccao.marketplace, "mercadolivre");
+  }
+
+  {
+    const deteccao = detector.detectarMarketplacePorUrl("https://shopee.com.br/product/123456/987654");
+    assert.strictEqual(deteccao.suportado, true);
+    assert.strictEqual(deteccao.marketplace, "shopee");
+    const shortlink = detector.detectarMarketplacePorUrl("https://s.shopee.com.br/abc123");
+    assert.strictEqual(shortlink.suportado, false);
+    assert.strictEqual(shortlink.motivo, "shopee_shortlink_requer_url_real");
   }
 
   {
@@ -113,6 +229,16 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden'));
     assert.ok(panelHtml.includes('id="botaoSalvar" disabled'));
     assert.ok(panelHtml.includes('id="botaoEnviar" disabled'));
+    assert.ok(!panelHtml.includes("botaoCapturar"));
+    assert.ok(!panelFonte.includes("botaoCapturar"));
+    assert.ok(!panelHtml.includes("Atualizar captura"));
+    assert.ok(!panelHtml.includes("Preview ainda nao gerado"));
+    assert.ok(!panelFonte.includes("Preview ainda nao gerado"));
+    assert.ok(!panelFonte.includes("Clique em Atualizar captura"));
+    assert.ok(!panelFonte.includes("MutationObserver"));
+    assert.ok(panelFonte.includes("enviarMensagemCapturaComRecuperacao"));
+    assert.ok(panelFonte.includes("abaPermaneceNaCaptura"));
+    assert.ok(panelFonte.includes("state.capturaPendente = true"));
     assert.ok(panelHtml.includes('id="destinosView"'));
     assert.ok(panelCss.includes("button:disabled"));
     assert.ok(panelCss.includes("cursor: default"));
@@ -125,6 +251,61 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.ok(apiFonte.includes("function enviarAgoraManualV2"));
     assert.ok(apiFonte.includes('body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }'));
     assert.ok(!apiFonte.includes("clienteId"));
+    assert.ok(manifestFonte.includes("https://shopee.com.br/*"));
+    assert.ok(manifestFonte.includes("adapters/shopee.js"));
+    assert.ok(panelFonte.includes("marketplaceLabel"));
+    assert.ok(!panelHtml.includes("<div class=\"marketplace\">Mercado Livre</div>"));
+  }
+
+  {
+    const documento = documentoShopeeFixture();
+    const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
+    assert.strictEqual(produto.marketplace, "shopee");
+    assert.strictEqual(produto.titulo, "Tenis de Corrida Unissex Respiravel Challenger 6 - Olympikus");
+    assert.strictEqual(produto.imagem, "https://down-br.img.susercontent.com/file/produto-hero.webp");
+    assert.strictEqual(produto.precoAtual, 212.90);
+    assert.strictEqual(produto.precoAnterior, null);
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.fonte, "dom_shopee_v1");
+    assert.strictEqual(produto.completo, true);
+  }
+
+  {
+    const documento = documentoShopeeFixture({ comPrecoAnterior: true });
+    const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, 212.90);
+    assert.strictEqual(produto.precoAnterior, 299.90);
+    assert.notStrictEqual(produto.precoAnterior, 249.00);
+  }
+
+  {
+    const payload = contrato.payloadPreview({
+      marketplace: "shopee",
+      urlOriginal: "https://shopee.com.br/product/123456/987654",
+      titulo: "Produto Shopee",
+      precoAtual: 212.90,
+      imagem: "https://down-br.img.susercontent.com/file/produto.webp"
+    });
+    assert.strictEqual(payload.marketplace, "shopee");
+    assert.strictEqual(payload.precoAtual, 212.90);
+  }
+
+  {
+    const documento = documentoShopeeSpaFixture();
+    const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
+    assert.strictEqual(produto.titulo, "Kit 4 Baby Tee Feminina - Blusa Slim Fit Manga Curta Blusa de Compressao Varias Cores Ajuste Perfeito Candy Color");
+    assert.strictEqual(produto.precoAtual, 59.90);
+    assert.strictEqual(produto.precoAnterior, null, "segundo preco textual nao deve virar preco anterior");
+    assert.strictEqual(produto.imagem, "https://down-br.img.susercontent.com/file/baby-tee.webp");
+    assert.strictEqual(produto.completo, true);
+  }
+
+  {
+    const documento = documentoShopeeSpaFixture({ precoAnteriorEstrutural: true });
+    const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, 59.90);
+    assert.strictEqual(produto.precoAnterior, 130.90);
+    assert.strictEqual(produto.descontoPercentual, 54);
   }
 
   {
@@ -325,7 +506,10 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.strictEqual(payloadsPreview[0].precoAtual, 60.31);
     assert.strictEqual(payloadsPreview[0].precoAnterior, 124.45);
     assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A - R$ 60,31");
+    assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta");
+    assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
 
     resolverSavePendente = true;
     const primeiroSave = elemento("botaoSalvar").listeners.click();
@@ -457,6 +641,424 @@ function htmlPrecoAnteriorDomMercadoLivre({ anterior = "129", centavos = "90", a
     assert.strictEqual(envios, 4);
     assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let onUpdated = null;
+    let previews = 0;
+    let urlAtual = "https://shopee.com.br/product/123456/987654";
+    let produtoAtual = {
+      marketplace: "shopee",
+      urlOriginal: urlAtual,
+      titulo: "Mochila Esportiva Unissex com Compartimento para Notebook Braze OIWB221802 - Olympikus",
+      precoAtual: 76.87,
+      precoAnterior: "",
+      imagem: "https://down-br.img.susercontent.com/file/mochila.webp",
+      cupom: ""
+    };
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 2, url: urlAtual }];
+          },
+          async sendMessage() {
+            return { ok: true, produto: produtoAtual };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: {
+            addListener(callback) {
+              onUpdated = callback;
+            }
+          }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              precoAnterior: payload.precoAnterior,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.strictEqual(previews, 1, "Shopee capturada deve gerar preview automaticamente");
+    assert.strictEqual(elemento("produtoMarketplace").textContent, "Shopee");
+    assert.strictEqual(elemento("campoTitulo").value, produtoAtual.titulo);
+    assert.strictEqual(elemento("campoPrecoAtual").value, "R$ 76,87");
+    assert.strictEqual(elemento("campoPrecoAnterior").value, "");
+    assert.strictEqual(elemento("campoCupom").value, "");
+    assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta");
+    assert.strictEqual(elemento("statusProduto").textContent, "Produto capturado");
+    assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+
+    produtoAtual = {
+      marketplace: "shopee",
+      urlOriginal: "https://shopee.com.br/product/123456/111111",
+      titulo: "",
+      precoAtual: null,
+      imagem: "https://down-br.img.susercontent.com/file/incompleto.webp"
+    };
+    urlAtual = produtoAtual.urlOriginal;
+    onUpdated(2, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 1700));
+    assert.strictEqual(previews, 1, "captura invalida nao deve gerar preview");
+    assert.strictEqual(elemento("statusProduto").textContent, "Captura incompleta");
+    assert.strictEqual(elemento("estadoPagina").textContent, "Nao foi possivel capturar este produto.");
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let previews = 0;
+    let sendMessages = 0;
+    const urlAtual = "https://shopee.com.br/product/123456/222222";
+    const produtoAtual = {
+      marketplace: "shopee",
+      urlOriginal: urlAtual,
+      titulo: "Produto Shopee Recuperado",
+      precoAtual: 59.90,
+      imagem: "https://down-br.img.susercontent.com/file/recuperado.webp"
+    };
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 4, url: urlAtual }];
+          },
+          async sendMessage() {
+            sendMessages += 1;
+            if (sendMessages === 1) {
+              throw new Error("A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received");
+            }
+            return { ok: true, produto: produtoAtual };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 950));
+    assert.strictEqual(sendMessages, 2, "falha de canal deve gerar uma unica recuperacao");
+    assert.strictEqual(previews, 1, "recuperacao valida deve gerar um unico preview");
+    assert.strictEqual(elemento("campoTitulo").value, "Produto Shopee Recuperado");
+    assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let onUpdated = null;
+    let resolverProdutoA = null;
+    let previews = 0;
+    let urlAtual = "https://shopee.com.br/product/123456/333333";
+    const produtoA = {
+      marketplace: "shopee",
+      urlOriginal: urlAtual,
+      titulo: "Produto A Antigo",
+      precoAtual: 49.90,
+      imagem: "https://down-br.img.susercontent.com/file/a.webp"
+    };
+    const produtoB = {
+      marketplace: "shopee",
+      urlOriginal: "https://shopee.com.br/product/123456/444444",
+      titulo: "Produto B Atual",
+      precoAtual: 79.90,
+      imagem: "https://down-br.img.susercontent.com/file/b.webp"
+    };
+    let sendMessages = 0;
+    const payloadsPreview = [];
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 5, url: urlAtual }];
+          },
+          async sendMessage() {
+            sendMessages += 1;
+            if (sendMessages === 1) {
+              return new Promise((resolve) => {
+                resolverProdutoA = () => resolve({ ok: true, produto: produtoA });
+              });
+            }
+            return { ok: true, produto: produtoB };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: {
+            addListener(callback) {
+              onUpdated = callback;
+            }
+          }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {
+        async gerarPreviewCapture(_token, payload) {
+          previews += 1;
+          payloadsPreview.push(payload);
+          return {
+            oferta: {
+              titulo: payload.titulo,
+              precoAtual: payload.precoAtual,
+              urlOriginal: payload.urlOriginal,
+              urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+            }
+          };
+        }
+      },
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    const inicializacao = domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    urlAtual = produtoB.urlOriginal;
+    onUpdated(5, { url: urlAtual });
+    resolverProdutoA();
+    await inicializacao;
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert.strictEqual(previews, 1, "resposta antiga nao deve gerar preview do produto A");
+    assert.strictEqual(payloadsPreview[0].titulo, "Produto B Atual");
+    assert.strictEqual(elemento("campoTitulo").value, "Produto B Atual");
+    assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta");
+    assert.notStrictEqual(elemento("estadoPagina").textContent, "Nenhuma aba ativa disponivel.");
   }
 
   {

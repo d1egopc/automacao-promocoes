@@ -311,6 +311,9 @@ function criarRotasManualV2(deps = {}) {
       const resultado = await gerarPreviewCapture(req.body || {}, {
         clienteId,
         gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
+        getIntegracaoCliente: deps.getIntegracaoCliente,
+        gerarShortLinkShopee: deps.gerarShortLinkShopee,
+        fetch: deps.fetch,
         now: typeof deps.now === "function" ? deps.now() : undefined
       });
 

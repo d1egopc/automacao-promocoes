@@ -9,9 +9,11 @@
     auth: null,
     produto: null,
     enviandoPreview: false,
+    previewPendente: false,
     conectando: false,
     capturaInicialExecutada: false,
     capturando: false,
+    capturaPendente: false,
     capturaTimer: null,
     eventosAbasRegistrados: false,
     ultimaUrlCapturada: "",
@@ -166,6 +168,18 @@
     return state.destinos.filter((destino) => destino.id && destino.ativo && destino.utilizavel);
   }
 
+  function marketplaceLabel(marketplace = "") {
+    const valor = String(marketplace || "").toLowerCase();
+    if (valor === "shopee") return "Shopee";
+    if (valor === "mercadolivre") return "Mercado Livre";
+    return "Marketplace";
+  }
+
+  function capturaUtilizavel(produto = {}) {
+    const normalizado = produto.completo === true && !produto.requerConferencia;
+    return normalizado && Boolean(produto.titulo && produto.precoAtual && produto.urlOriginal);
+  }
+
   function renderizarDestinos() {
     const lista = el("destinosLista");
     if (!lista) return;
@@ -231,13 +245,48 @@
     }
   }
 
-  function agendarCapturaAutomatica() {
+  function esperar(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function agendarCapturaAutomatica(delayMs = 700) {
     if (!state.auth?.token) return;
     limparCapturaAgendada();
     state.capturaTimer = setTimeout(() => {
       state.capturaTimer = null;
       void capturar({ automatico: true });
-    }, 700);
+    }, delayMs);
+  }
+
+  function erroCanalMensagem(erro) {
+    const mensagem = String(erro?.message || erro || "").toLowerCase();
+    return mensagem.includes("receiving end does not exist") ||
+      mensagem.includes("message channel closed") ||
+      mensagem.includes("could not establish connection") ||
+      mensagem.includes("extension context invalidated");
+  }
+
+  async function enviarMensagemCapturaComRecuperacao(abaId) {
+    try {
+      const resposta = await chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+      const produto = contrato.normalizarProdutoCapturado(resposta?.produto || {});
+      if (resposta?.ok === false || !capturaUtilizavel(produto)) {
+        await esperar(900);
+        return chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+      }
+      return resposta;
+    } catch (erro) {
+      if (!erroCanalMensagem(erro)) throw erro;
+      await esperar(900);
+      return chrome.tabs.sendMessage(abaId, { type: "OPTIMUS_CAPTURE_PAGE" });
+    }
+  }
+
+  async function abaPermaneceNaCaptura(abaId, urlCaptura) {
+    const abaAtual = await abaAtiva();
+    const deteccaoAtual = detector.detectarMarketplacePorUrl(abaAtual?.url || "");
+    const urlAtual = deteccaoAtual.url || abaAtual?.url || "";
+    return Boolean(abaAtual?.id === abaId && deteccaoAtual.suportado && urlAtual === urlCaptura);
   }
 
   function prepararFichaVazia() {
@@ -251,8 +300,9 @@
     el("campoPrecoAnterior").value = "";
     el("campoCupom").value = "";
     el("campoDesconto").value = "";
+    setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
-    setTexto("statusLink", "Preview ainda nao gerado");
+    setTexto("statusLink", "Aguardando captura");
   }
 
   function preencherProduto(produto) {
@@ -265,8 +315,9 @@
     el("campoPrecoAnterior").value = formatarMoeda(state.produto.precoAnterior);
     el("campoCupom").value = state.produto.cupom || "";
     el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
-    setTexto("statusProduto", state.produto.requerConferencia ? "Dados precisam de conferencia" : "Produto capturado");
-    setTexto("statusLink", "Preview ainda nao gerado");
+    setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
+    setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
+    setTexto("statusLink", capturaUtilizavel(state.produto) ? "Preparando oferta..." : "Nao foi possivel preparar a oferta");
     return state.produto;
   }
 
@@ -278,8 +329,12 @@
   async function capturar(opcoes = {}) {
     const automatico = opcoes.automatico === true;
     const forcar = opcoes.forcar === true;
-    if (state.capturando && !forcar) return;
+    if (state.capturando && !forcar) {
+      state.capturaPendente = true;
+      return;
+    }
     state.capturando = true;
+    state.capturaPendente = false;
     setHidden("previewView", true);
     setTexto("estadoPagina", "Identificando oferta...");
     setHidden("estadoPagina", false);
@@ -298,7 +353,7 @@
         state.ultimoPreviewKey = "";
         limparSaveCompleto();
         prepararFichaVazia();
-        setTexto("estadoPagina", deteccao.motivo === "pagina_mercadolivre_sem_produto"
+        setTexto("estadoPagina", ["pagina_mercadolivre_sem_produto", "pagina_shopee_sem_produto"].includes(deteccao.motivo)
           ? "Abra um produto para capturar."
           : "Pagina ainda nao suportada pelo Optimus Capture.");
         return;
@@ -306,30 +361,49 @@
 
       const urlCaptura = deteccao.url || aba.url;
       if (automatico && !forcar && state.ultimaUrlCapturada === urlCaptura && state.produto?.urlOriginal === urlCaptura) {
-        setTexto("estadoPagina", "Oferta identificada");
-        if (!state.produto.requerConferencia && state.ultimoPreviewKey !== chavePreview(state.produto)) {
-          void gerarPreview({ automatico: true });
+        if (capturaUtilizavel(state.produto)) {
+          if (state.ultimoPreviewKey !== chavePreview(state.produto)) {
+            setTexto("estadoPagina", "Preparando oferta...");
+            await gerarPreview({ automatico: true });
+          } else {
+            setTexto("estadoPagina", "Oferta pronta");
+          }
+        } else {
+          setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         }
         return;
       }
       prepararFichaVazia();
-      const resposta = await chrome.tabs.sendMessage(aba.id, { type: "OPTIMUS_CAPTURE_PAGE" });
+      const resposta = await enviarMensagemCapturaComRecuperacao(aba.id);
+      if (!await abaPermaneceNaCaptura(aba.id, urlCaptura)) {
+        state.capturaPendente = true;
+        return;
+      }
       if (!resposta?.produto) {
-        setTexto("estadoPagina", "Produto nao reconhecido nesta pagina.");
+        setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         return;
       }
       const produto = preencherProduto(resposta.produto);
-      state.ultimaUrlCapturada = produto.urlOriginal || urlCaptura;
-      setTexto("estadoPagina", produto.requerConferencia
-        ? "Produto detectado. Confira os campos antes do preview."
-        : "Oferta identificada");
-      if (!produto.requerConferencia) {
-        void gerarPreview({ automatico: true });
+      if (!await abaPermaneceNaCaptura(aba.id, urlCaptura)) {
+        state.capturaPendente = true;
+        return;
       }
+      if (!capturaUtilizavel(produto)) {
+        state.ultimaUrlCapturada = "";
+        setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
+        return;
+      }
+      state.ultimaUrlCapturada = produto.urlOriginal || urlCaptura;
+      setTexto("estadoPagina", "Preparando oferta...");
+      await gerarPreview({ automatico: true });
     } catch {
-      setTexto("estadoPagina", "Produto ainda nao carregado. Clique em Atualizar captura.");
+      setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
     } finally {
       state.capturando = false;
+      if (state.capturaPendente && state.auth?.token) {
+        state.capturaPendente = false;
+        agendarCapturaAutomatica(120);
+      }
     }
   }
 
@@ -345,10 +419,15 @@
 
   async function gerarPreview(opcoes = {}) {
     const automatico = opcoes.automatico === true;
-    if (!state.auth?.token || state.enviandoPreview) return;
+    if (!state.auth?.token) return;
+    if (state.enviandoPreview) {
+      if (automatico) state.previewPendente = true;
+      return;
+    }
     const produto = produtoEditado();
     if (!produto.precoAtual) {
-      if (!automatico) setTexto("statusLink", "Preco precisa de conferencia.");
+      setTexto("statusProduto", "Captura incompleta");
+      setTexto("statusLink", automatico ? "Nao foi possivel preparar a oferta" : "Preco precisa de conferencia.");
       return;
     }
     const previewKey = chavePreview(produto);
@@ -357,9 +436,14 @@
     }
     state.enviandoPreview = true;
     el("botaoPreview").disabled = true;
-    setTexto("statusLink", "Gerando preview no Optimus...");
+    setTexto("estadoPagina", "Preparando oferta...");
+    setTexto("statusLink", "Preparando oferta...");
     try {
       const resposta = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto));
+      if (chavePreview(produtoEditado()) !== previewKey) {
+        state.previewPendente = true;
+        return;
+      }
       const oferta = resposta?.oferta || {};
       const preview = el("previewView");
       preview.innerHTML = "";
@@ -385,7 +469,8 @@
       ocultarDestinos();
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
-      setTexto("statusLink", oferta.urlAfiliada ? "Link afiliado gerado" : "Preview gerado");
+      setTexto("estadoPagina", "Oferta pronta");
+      setTexto("statusLink", "Oferta pronta");
     } catch (erro) {
       if (erro?.status === 401) {
         await auth.sair();
@@ -393,12 +478,17 @@
         renderAuth();
         return;
       }
+      setTexto("estadoPagina", "Nao foi possivel preparar a oferta.");
       setTexto("statusLink", automatico
-        ? "Preview ainda nao gerado. Clique em Atualizar captura."
+        ? "Nao foi possivel preparar a oferta"
         : `Erro: ${String(erro?.message || "preview_falhou").slice(0, 90)}`);
     } finally {
       state.enviandoPreview = false;
       el("botaoPreview").disabled = false;
+      if (state.previewPendente && state.auth?.token) {
+        state.previewPendente = false;
+        void gerarPreview({ automatico: true });
+      }
     }
   }
 
@@ -627,7 +717,6 @@
     el("botaoConectar").addEventListener("click", conectarComOptimus);
     el("botaoLogin").addEventListener("click", entrar);
     el("botaoSair").addEventListener("click", sair);
-    el("botaoCapturar").addEventListener("click", () => capturar({ forcar: true }));
     el("botaoPreview").addEventListener("click", gerarPreview);
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
     el("botaoEnviar").addEventListener("click", abrirSeletorEnvio);

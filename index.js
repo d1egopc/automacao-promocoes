@@ -21961,6 +21961,7 @@ app.use("/manual-v2", criarRotasManualV2({
   montarMensagemOferta,
   resolverLinkOfertaPorDestino,
   gerarLinkAfiliadoCliente: gerarLinkAfiliadoClienteManualV2,
+  getIntegracaoCliente,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,
   listarConexoesDiscord,
