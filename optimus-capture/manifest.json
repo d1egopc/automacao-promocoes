@@ -26,7 +26,9 @@
     "https://shopee.com.br/*",
     "https://www.shopee.com.br/*",
     "https://aliexpress.com/*",
-    "https://*.aliexpress.com/*"
+    "https://*.aliexpress.com/*",
+    "https://kabum.com.br/*",
+    "https://www.kabum.com.br/*"
   ],
   "content_scripts": [
     {
@@ -38,7 +40,9 @@
         "https://shopee.com.br/*",
         "https://www.shopee.com.br/*",
         "https://aliexpress.com/*",
-        "https://*.aliexpress.com/*"
+        "https://*.aliexpress.com/*",
+        "https://kabum.com.br/*",
+        "https://www.kabum.com.br/*"
       ],
       "js": [
         "core/product-contract.js",
@@ -47,6 +51,7 @@
         "adapters/amazon.js",
         "adapters/shopee.js",
         "adapters/aliexpress.js",
+        "adapters/kabum.js",
         "adapters/registry.js",
         "content/capture-content.js"
       ],

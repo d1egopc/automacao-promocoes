@@ -140,6 +140,10 @@ function asinAmazonUrl(url) {
   return match?.[1] || "";
 }
 
+function produtoIdKabumUrl(url) {
+  return texto(url?.pathname).match(/\/produto\/(\d{3,20})(?:\/|$)/i)?.[1] || "";
+}
+
 function urlAmazonCaptureSegura(urlOriginal = "") {
   const valor = texto(urlOriginal);
   if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
@@ -170,6 +174,38 @@ function urlAmazonCaptureSegura(urlOriginal = "") {
   }
 
   return { ok: true, url: url.toString(), host, asin };
+}
+
+function urlKabumCaptureSegura(urlOriginal = "") {
+  const valor = texto(urlOriginal);
+  if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) {
+    return { ok: false, motivo: "kabum_awin_capture_inseguro", host };
+  }
+
+  if (host !== "kabum.com.br" && !host.endsWith(".kabum.com.br")) {
+    return { ok: false, motivo: "url_kabum_invalida", host };
+  }
+
+  const produtoId = produtoIdKabumUrl(url);
+  if (!produtoId) {
+    return { ok: false, motivo: "url_kabum_produto_invalida", host };
+  }
+
+  return { ok: true, url: url.toString(), host, produtoId };
 }
 
 function itemIdAliExpressUrl(url) {
@@ -218,6 +254,35 @@ function sanitizarUrlOpcional(valor = "") {
   } catch {
     return "";
   }
+}
+
+function validarUrlAfiliadaCapture(urlAfiliada = "", marketplace = "", urlValidada = {}) {
+  const valor = texto(urlAfiliada);
+  if (!valor) return "";
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return "";
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return "";
+  }
+
+  if (valor === urlValidada.url) {
+    return "";
+  }
+
+  if (marketplace === "kabum") {
+    const urlKabum = urlKabumCaptureSegura(url.toString());
+    if (urlKabum.ok && urlKabum.produtoId && urlKabum.produtoId === urlValidada.produtoId) {
+      return "";
+    }
+  }
+
+  return url.toString();
 }
 
 function respostaPreview(ofertaNormalizada = {}) {
@@ -270,7 +335,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   }
 
   const marketplace = normalizarMarketplaceManualV2(entrada.marketplace);
-  if (!["mercadolivre", "shopee", "amazon", "aliexpress"].includes(marketplace)) {
+  if (!["mercadolivre", "shopee", "amazon", "aliexpress", "kabum"].includes(marketplace)) {
     throw erroCapture("capture_marketplace_nao_suportado", 400);
   }
 
@@ -281,7 +346,9 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
       ? urlAmazonCaptureSegura(urlEntrada)
       : (marketplace === "aliexpress"
         ? urlAliExpressCaptureSegura(urlEntrada)
-        : urlMercadoLivreSegura(urlEntrada)));
+        : (marketplace === "kabum"
+          ? urlKabumCaptureSegura(urlEntrada)
+          : urlMercadoLivreSegura(urlEntrada))));
   if (!urlValidada.ok) {
     throw erroCapture(urlValidada.motivo, 400, { host: urlValidada.host || "" });
   }
@@ -323,7 +390,8 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
   }
 
-  if (!urlAfiliada || urlAfiliada === urlValidada.url) {
+  urlAfiliada = validarUrlAfiliadaCapture(urlAfiliada, marketplace, urlValidada);
+  if (!urlAfiliada) {
     throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
   }
 
@@ -361,6 +429,8 @@ module.exports = {
   urlShopeeCaptureSegura,
   urlAmazonCaptureSegura,
   urlAliExpressCaptureSegura,
+  urlKabumCaptureSegura,
+  validarUrlAfiliadaCapture,
   precoNumero,
   tituloTecnicoOuInutil
 };

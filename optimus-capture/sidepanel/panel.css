@@ -27,9 +27,23 @@ body {
 
 .topo {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.marca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.logo-mini {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
 .topo strong {
@@ -51,6 +65,111 @@ small {
   display: flex;
   flex-direction: column;
   gap: 9px;
+}
+
+.login-hero,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.login-hero {
+  padding: 12px 8px 4px;
+}
+
+.login-hero strong,
+.empty-state strong {
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.login-hero p,
+.empty-state p {
+  max-width: 270px;
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.logo-grande,
+.logo-vazio {
+  width: min(42vw, 148px);
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.empty-state {
+  min-height: 360px;
+  justify-content: center;
+  padding: 20px 10px;
+}
+
+.logo-vazio {
+  width: min(50vw, 168px);
+}
+
+.scanner {
+  position: relative;
+  width: min(72vw, 220px);
+  height: 34px;
+  margin-top: 2px;
+}
+
+.scanner-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(22, 93, 255, 0), rgba(22, 93, 255, 0.34), rgba(255, 45, 45, 0.28), rgba(22, 93, 255, 0));
+}
+
+.scanner-lupa {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  width: 19px;
+  height: 19px;
+  border: 2px solid #165dff;
+  border-radius: 50%;
+  box-shadow: 0 0 14px rgba(22, 93, 255, 0.32);
+  animation: scanner-lupa 2.8s ease-in-out infinite alternate;
+}
+
+.scanner-lupa::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 2px;
+  right: -6px;
+  bottom: -3px;
+  border-radius: 999px;
+  background: #165dff;
+  transform: rotate(45deg);
+  transform-origin: center;
+}
+
+@keyframes scanner-lupa {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(min(72vw, 220px) - 22px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanner-lupa {
+    animation: none;
+    left: calc(50% - 10px);
+  }
 }
 
 label {
@@ -108,6 +227,16 @@ button[data-estado="salvo"]:disabled {
 .secondary {
   color: #165dff;
   background: #e9efff;
+}
+
+.primary:hover:not(:disabled),
+.acoes-futuras button:hover:not(:disabled) {
+  background: #0f4bd9;
+}
+
+.acoes-futuras button:not(:disabled) {
+  color: #fff;
+  background: #165dff;
 }
 
 .link-button {

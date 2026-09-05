@@ -151,6 +151,21 @@ function payloadAliExpressValido(extra = {}) {
   };
 }
 
+function payloadKabumValido(extra = {}) {
+  return {
+    marketplace: "kabum",
+    urlOriginal: "https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=capture",
+    titulo: "Placa de Video ASUS RTX 5090 32GB GDDR7",
+    precoAtual: 4946.99,
+    precoAnterior: 8235.28,
+    imagem: "https://images.kabum.com.br/produtos/fotos/944475/placa.jpg",
+    cupom: "",
+    categoria: "Gamer e Hardware",
+    origem: "optimus_capture_v1",
+    ...extra
+  };
+}
+
 function arquivoOfertas(clienteId) {
   return getClienteJsonPath(clienteId, "manual_ofertas_v2.json");
 }
@@ -565,6 +580,141 @@ function arquivoOfertas(clienteId) {
     }
 
     {
+      const chamadasKabum = [];
+      const { app: appKabum } = criarApp({
+        chamadas: chamadasKabum,
+        gerarLinkAfiliadoCliente: async (clienteId, marketplace, linkOriginal, ofertaBase) => {
+          chamadasKabum.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
+          return "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=123&ued=kabum";
+        }
+      });
+      const serverKabum = await ouvir(appKabum);
+      try {
+        const resposta = await request(serverKabum, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido({
+          clienteId: "cliente_malicioso",
+          publisherId: "nao_deve_ir_para_backend",
+          apiToken: "nao_deve_ir_para_backend",
+          advertiserId: "nao_deve_ir_para_backend"
+        }));
+        assert.strictEqual(resposta.status, 200);
+        assert.strictEqual(resposta.body.ok, true);
+        assert.strictEqual(resposta.body.oferta.clienteId, "cliente_kabum");
+        assert.strictEqual(resposta.body.oferta.marketplace, "kabum");
+        assert.strictEqual(resposta.body.oferta.urlOriginal, "https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=capture");
+        assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=123&ued=kabum");
+        assert.deepStrictEqual(chamadasKabum.map(chamada => chamada.tipo), ["generic"]);
+        assert.strictEqual(chamadasKabum[0].clienteId, "cliente_kabum");
+        assert.strictEqual(chamadasKabum[0].marketplace, "kabum");
+        assert.strictEqual(chamadasKabum[0].linkOriginal, "https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=capture");
+        assert.strictEqual(chamadasKabum[0].ofertaBase.urlOriginal, chamadasKabum[0].linkOriginal);
+        const serializado = JSON.stringify(resposta.body);
+        assert.ok(!serializado.includes("nao_deve_ir_para_backend"));
+      } finally {
+        await new Promise(resolve => serverKabum.close(resolve));
+      }
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido({
+        urlOriginal: "https://www.kabum.com.br/busca/placa-de-video"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "url_kabum_produto_invalida");
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido({
+        urlOriginal: "https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F944475"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "kabum_awin_capture_inseguro");
+    }
+
+    {
+      const { app: appKabumTextoInvalido } = criarApp({
+        gerarLinkAfiliadoCliente: async () => "texto_invalido"
+      });
+      const serverKabumTextoInvalido = await ouvir(appKabumTextoInvalido);
+      try {
+        const resposta = await request(serverKabumTextoInvalido, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverKabumTextoInvalido.close(resolve));
+      }
+    }
+
+    {
+      const { app: appKabumFtp } = criarApp({
+        gerarLinkAfiliadoCliente: async () => "ftp://awin.example/deeplink"
+      });
+      const serverKabumFtp = await ouvir(appKabumFtp);
+      try {
+        const resposta = await request(serverKabumFtp, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverKabumFtp.close(resolve));
+      }
+    }
+
+    {
+      const { app: appKabumVazio } = criarApp({
+        gerarLinkAfiliadoCliente: async () => ""
+      });
+      const serverKabumVazio = await ouvir(appKabumVazio);
+      try {
+        const resposta = await request(serverKabumVazio, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverKabumVazio.close(resolve));
+      }
+    }
+
+    {
+      const { app: appKabumOriginal } = criarApp({
+        gerarLinkAfiliadoCliente: async (_clienteId, _marketplace, linkOriginal) => linkOriginal
+      });
+      const serverKabumOriginal = await ouvir(appKabumOriginal);
+      try {
+        const resposta = await request(serverKabumOriginal, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverKabumOriginal.close(resolve));
+      }
+    }
+
+    {
+      const { app: appKabumMesmoProduto } = criarApp({
+        gerarLinkAfiliadoCliente: async () => "https://kabum.com.br/produto/944475/placa-de-video#reviews"
+      });
+      const serverKabumMesmoProduto = await ouvir(appKabumMesmoProduto);
+      try {
+        const resposta = await request(serverKabumMesmoProduto, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverKabumMesmoProduto.close(resolve));
+      }
+    }
+
+    {
+      const { app: appKabumAfiliadaDistinta } = criarApp({
+        gerarLinkAfiliadoCliente: async () => "https://go.afiliado.example/kabum/944475"
+      });
+      const serverKabumAfiliadaDistinta = await ouvir(appKabumAfiliadaDistinta);
+      try {
+        const resposta = await request(serverKabumAfiliadaDistinta, "POST", "/manual-v2/capture/ofertas", "cliente_kabum", payloadKabumValido());
+        assert.strictEqual(resposta.status, 200);
+        assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://go.afiliado.example/kabum/944475");
+      } finally {
+        await new Promise(resolve => serverKabumAfiliadaDistinta.close(resolve));
+      }
+    }
+
+    {
       const lista = await request(server, "GET", "/manual-v2/ofertas", "cliente_a");
       assert.strictEqual(lista.status, 200);
       assert.deepStrictEqual(lista.body.ofertas, []);
@@ -584,6 +734,8 @@ function arquivoOfertas(clienteId) {
       assert.ok(!fonteCapture.includes("mercadolivre.manual.adapter"));
       assert.ok(!fonteCapture.includes("importarAmazon"));
       assert.ok(!fonteCapture.includes("amazon.manual.adapter"));
+      assert.ok(!fonteCapture.includes("importarProdutoKabum"));
+      assert.ok(!fonteCapture.includes("kabum-awin.manual.adapter"));
       assert.ok(!fonteRotas.includes("importarMercadoLivre"));
     }
 

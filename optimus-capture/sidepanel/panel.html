@@ -8,15 +8,23 @@
   </head>
   <body>
     <main class="app">
-      <header class="topo">
-        <div>
+      <header id="topo" class="topo">
+        <div class="marca">
+          <img src="../assets/logo-optimus.png" alt="" class="logo-mini">
+          <div>
           <strong>OPTIMUS CAPTURE</strong>
           <span id="statusConexao" class="status">Desconectado</span>
+          </div>
         </div>
         <button id="botaoSair" class="link-button" hidden>Sair</button>
       </header>
 
       <section id="loginView" class="view">
+        <div class="login-hero">
+          <img src="../assets/logo-optimus.png" alt="Optimus" class="logo-grande">
+          <strong>OPTIMUS CAPTURE</strong>
+          <p>Conecte sua conta para comecar</p>
+        </div>
         <button id="botaoConectar" class="primary">Conectar com Optimus</button>
         <p id="handoffStatus" class="estado" hidden></p>
         <div class="divisor"><span></span><small>ou entre com senha</small><span></span></div>
@@ -36,6 +44,16 @@
         <div class="workspace">
           <span id="usuarioResumo"></span>
         </div>
+
+        <section id="emptyView" class="empty-state" hidden>
+          <img src="../assets/logo-optimus.png" alt="Optimus" class="logo-vazio">
+          <strong>MONITORANDO A ABA ATUAL</strong>
+          <p>Abra um produto em uma loja integrada. O Optimus identifica a oferta automaticamente.</p>
+          <div class="scanner" aria-hidden="true">
+            <span class="scanner-track"></span>
+            <span class="scanner-lupa"></span>
+          </div>
+        </section>
 
         <section id="estadoPagina" class="estado"></section>
 

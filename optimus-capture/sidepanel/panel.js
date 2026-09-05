@@ -42,6 +42,10 @@
     if (node) node.hidden = hidden;
   }
 
+  function setBodyState(valor) {
+    if (document.body?.dataset) document.body.dataset.estado = valor;
+  }
+
   function valor(id) {
     return el(id)?.value || "";
   }
@@ -227,6 +231,7 @@
     if (valor === "shopee") return "Shopee";
     if (valor === "amazon") return "Amazon";
     if (valor === "aliexpress") return "AliExpress";
+    if (valor === "kabum") return "KaBuM";
     if (valor === "mercadolivre") return "Mercado Livre";
     return "Marketplace";
   }
@@ -407,6 +412,8 @@
   function prepararFichaVazia() {
     state.produto = null;
     limparPreviewAtual();
+    setHidden("emptyView", true);
+    setHidden("estadoPagina", false);
     setHidden("produtoView", false);
     el("produtoImagem").src = "";
     el("produtoImagem").hidden = true;
@@ -422,6 +429,8 @@
 
   function preencherProduto(produto) {
     state.produto = contrato.normalizarProdutoCapturado(produto);
+    setHidden("emptyView", true);
+    setHidden("estadoPagina", false);
     setHidden("produtoView", false);
     el("produtoImagem").src = state.produto.imagem || "";
     el("produtoImagem").hidden = !state.produto.imagem;
@@ -441,6 +450,15 @@
     return abas?.[0] || null;
   }
 
+  function mostrarEstadoVazio() {
+    state.produto = null;
+    limparSaveCompleto();
+    setHidden("produtoView", true);
+    setHidden("previewView", true);
+    setHidden("estadoPagina", true);
+    setHidden("emptyView", false);
+  }
+
   async function capturar(opcoes = {}) {
     const automatico = opcoes.automatico === true;
     const forcar = opcoes.forcar === true;
@@ -456,12 +474,12 @@
     setHidden("previewView", true);
     setTexto("estadoPagina", "Identificando oferta...");
     setHidden("estadoPagina", false);
-    if (!state.produto) prepararFichaVazia();
+    setHidden("emptyView", true);
 
     try {
       const aba = await abaAtiva();
       if (!aba?.id || !aba.url) {
-        setTexto("estadoPagina", "Nenhuma aba ativa disponivel.");
+        mostrarEstadoVazio();
         return;
       }
 
@@ -474,11 +492,7 @@
       if (!deteccao.suportado) {
         state.ultimaUrlCapturada = "";
         state.ultimoPreviewKey = "";
-        limparSaveCompleto();
-        prepararFichaVazia();
-        setTexto("estadoPagina", ["pagina_mercadolivre_sem_produto", "pagina_shopee_sem_produto", "pagina_amazon_sem_produto"].includes(deteccao.motivo)
-          ? "Abra um produto para capturar."
-          : "Pagina ainda nao suportada pelo Optimus Capture.");
+        mostrarEstadoVazio();
         return;
       }
 
@@ -809,6 +823,8 @@
 
   function renderAuth() {
     const autenticado = Boolean(state.auth?.token);
+    setBodyState(autenticado ? "autenticado" : "desconectado");
+    setHidden("topo", !autenticado);
     setHidden("loginView", autenticado);
     setHidden("captureView", !autenticado);
     setHidden("botaoSair", !autenticado);
@@ -824,6 +840,9 @@
     } else {
       state.capturaInicialExecutada = false;
       setTexto("statusConexao", "Desconectado");
+      setHidden("emptyView", true);
+      setHidden("produtoView", true);
+      setHidden("previewView", true);
     }
   }
 

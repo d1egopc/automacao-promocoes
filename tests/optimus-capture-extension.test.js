@@ -10,6 +10,7 @@ const ml = require(path.join(raiz, "adapters", "mercadolivre.js"));
 const amazon = require(path.join(raiz, "adapters", "amazon.js"));
 const shopee = require(path.join(raiz, "adapters", "shopee.js"));
 const aliexpress = require(path.join(raiz, "adapters", "aliexpress.js"));
+const kabum = require(path.join(raiz, "adapters", "kabum.js"));
 const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
 const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
 const panelHtml = fs.readFileSync(path.join(raiz, "sidepanel", "panel.html"), "utf8");
@@ -408,6 +409,101 @@ function documentoAliExpressFixture({
   };
 }
 
+function criarNoKabum({ texto = "", tagName = "DIV", filhos = [], style = {}, attrs = {} } = {}) {
+  const no = {
+    tagName,
+    textContent: texto,
+    innerText: texto,
+    parentElement: null,
+    style,
+    src: attrs.src || "",
+    currentSrc: attrs.currentSrc || "",
+    getAttribute(nome) {
+      return attrs[nome] || "";
+    },
+    querySelectorAll(seletor) {
+      const resultados = [];
+      const seletores = String(seletor || "").split(",").map(item => item.trim().toLowerCase());
+      function combina(alvo) {
+        const tag = String(alvo.tagName || "").toLowerCase();
+        return seletores.some((item) => {
+          if (item === tag) return true;
+          if (item === "s" || item === "del" || item === "span" || item === "p" || item === "h1" || item === "h4" || item === "img") {
+            return tag === item;
+          }
+          if (item === "section" || item === "article" || item === "div") {
+            return tag === item;
+          }
+          return false;
+        });
+      }
+      function caminhar(alvo) {
+        for (const filho of alvo.children || []) {
+          if (combina(filho)) resultados.push(filho);
+          caminhar(filho);
+        }
+      }
+      caminhar(no);
+      return resultados;
+    },
+    querySelector(seletor) {
+      return this.querySelectorAll(seletor)[0] || null;
+    },
+    children: filhos
+  };
+  for (const filho of filhos) {
+    filho.parentElement = no;
+  }
+  return no;
+}
+
+function documentoKabumFixture({
+  url = "https://www.kabum.com.br/produto/944475/placa-de-video",
+  titulo = "Placa de Video ASUS RTX 5090 32GB GDDR7",
+  precoAtual = "R$ 4.946,99",
+  precoAnterior = "R$ 8.235,28",
+  parcela = "10x R$ 581,99",
+  incluirBlocoPix = true,
+  incluirAnterior = true,
+  frete = "Frete R$ 19,90",
+  prime = "Economia PRIME R$ 50,00"
+} = {}) {
+  const h1 = criarNoKabum({ texto: titulo, tagName: "H1" });
+  const h4 = criarNoKabum({ texto: precoAtual, tagName: "H4" });
+  const anterior = criarNoKabum({
+    texto: precoAnterior,
+    tagName: "SPAN",
+    style: { textDecorationLine: "line-through" },
+    attrs: { style: "text-decoration: line-through;" }
+  });
+  const blocoPreco = criarNoKabum({
+    texto: `${precoAnterior} ${precoAtual} À vista no PIX com 15% de desconto ${parcela} ${frete} ${prime}`,
+    filhos: incluirAnterior ? [anterior, h4] : [h4]
+  });
+  const parcelamento = criarNoKabum({ texto: parcela, tagName: "P" });
+  const root = criarNoKabum({
+    texto: `${titulo} ${incluirBlocoPix ? blocoPreco.textContent : parcela}`,
+    filhos: incluirBlocoPix ? [h1, blocoPreco, parcelamento] : [h1, parcelamento]
+  });
+
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `
+        <html>
+          <head><meta property="og:image" content="https://images.kabum.com.br/produtos/fotos/944475/placa.jpg"></head>
+          <body><main>${root.textContent}</main></body>
+        </html>
+      `
+    },
+    body: root,
+    querySelector(seletor) {
+      if (seletor === "main, [role='main']") return root;
+      return root.querySelector(seletor);
+    }
+  };
+}
+
 function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   const url = "https://shopee.com.br/product/555/999";
   const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
@@ -488,6 +584,16 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const deteccao = detector.detectarMarketplacePorUrl("https://www.kabum.com.br/produto/944475/placa-de-video?utm_source=x");
+    assert.strictEqual(deteccao.suportado, true);
+    assert.strictEqual(deteccao.marketplace, "kabum");
+    assert.strictEqual(deteccao.produtoId, "944475");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://www.kabum.com.br/").motivo, "pagina_kabum_sem_produto");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://www.kabum.com.br/busca/placa").suportado, false);
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F944475").motivo, "kabum_awin_requer_url_real");
+  }
+
+  {
     assert.ok(panelFonte.includes("tabs.onActivated.addListener"));
     assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
     assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
@@ -508,8 +614,18 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelFonte.includes("enviarMensagemCapturaComRecuperacao"));
     assert.ok(panelFonte.includes("abaPermaneceNaCaptura"));
     assert.ok(panelFonte.includes("state.capturaPendente = true"));
+    assert.ok(panelFonte.includes("mostrarEstadoVazio"));
     assert.ok(panelFonte.includes("AMAZON_RETRY_DELAYS_MS"));
     assert.ok(panelFonte.includes("[OPTIMUS-CAPTURE-TIMING]"));
+    assert.ok(panelHtml.includes("../assets/logo-optimus.png"));
+    assert.ok(panelHtml.includes('id="emptyView"'));
+    assert.ok(panelHtml.includes("MONITORANDO A ABA ATUAL"));
+    assert.ok(panelHtml.includes("scanner-lupa"));
+    assert.ok(panelCss.includes(".logo-mini"));
+    assert.ok(panelCss.includes(".empty-state"));
+    assert.ok(panelCss.includes("@keyframes scanner-lupa"));
+    assert.ok(panelCss.includes("@media (prefers-reduced-motion: reduce)"));
+    assert.ok(panelCss.includes(".acoes-futuras button:not(:disabled)"));
     assert.ok(apiFonte.includes("AbortController"));
     assert.ok(apiFonte.includes("tempo_limite_esgotado"));
     assert.ok(apiFonte.includes("timeoutMs: 45000"));
@@ -531,10 +647,189 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(manifestFonte.includes("adapters/amazon.js"));
     assert.ok(manifestFonte.includes("https://*.aliexpress.com/*"));
     assert.ok(manifestFonte.includes("adapters/aliexpress.js"));
+    assert.ok(manifestFonte.includes("https://www.kabum.com.br/*"));
+    assert.ok(manifestFonte.includes("adapters/kabum.js"));
     assert.ok(panelFonte.includes("marketplaceLabel"));
     assert.ok(panelFonte.includes('valor === "amazon"'));
     assert.ok(panelFonte.includes('valor === "aliexpress"'));
+    assert.ok(panelFonte.includes('valor === "kabum"'));
     assert.ok(!panelHtml.includes("<div class=\"marketplace\">Mercado Livre</div>"));
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          _innerHTML: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        Object.defineProperty(node, "innerHTML", {
+          get() {
+            return this._innerHTML;
+          },
+          set(valor) {
+            this._innerHTML = String(valor || "");
+            this.children = [];
+          }
+        });
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    let capturasSolicitadas = 0;
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        body: { dataset: {} },
+        getElementById: elemento,
+        createElement: (tag) => ({
+          tag,
+          textContent: "",
+          children: [],
+          listeners: {},
+          value: "",
+          checked: false,
+          disabled: false,
+          className: "",
+          append(...itens) { this.children.push(...itens); },
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          }
+        }),
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          async query() {
+            return [{ id: 10, url: "https://www.google.com/search?q=oferta" }];
+          },
+          async sendMessage() {
+            capturasSolicitadas += 1;
+            return { ok: false };
+          },
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return { token: "jwt_teste", usuario: { nome: "DiegoPC" } };
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {},
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.strictEqual(contexto.document.body.dataset.estado, "autenticado");
+    assert.strictEqual(elemento("topo").hidden, false);
+    assert.strictEqual(elemento("loginView").hidden, true);
+    assert.strictEqual(elemento("captureView").hidden, false);
+    assert.strictEqual(elemento("emptyView").hidden, false);
+    assert.strictEqual(elemento("produtoView").hidden, true);
+    assert.strictEqual(elemento("previewView").hidden, true);
+    assert.strictEqual(elemento("estadoPagina").hidden, true);
+    assert.strictEqual(elemento("statusConexao").textContent, "Conectado - DiegoPC");
+    assert.strictEqual(capturasSolicitadas, 0, "aba comum nao deve chamar content capture");
+  }
+
+  {
+    const elementos = new Map();
+    function elemento(id) {
+      if (!elementos.has(id)) {
+        const node = {
+          id,
+          hidden: false,
+          textContent: "",
+          value: "",
+          src: "",
+          disabled: false,
+          dataset: {},
+          title: "",
+          children: [],
+          listeners: {},
+          addEventListener(evento, callback) {
+            this.listeners[evento] = callback;
+          },
+          append(...itens) {
+            this.children.push(...itens);
+          }
+        };
+        elementos.set(id, node);
+      }
+      return elementos.get(id);
+    }
+
+    let domReady = null;
+    const contexto = {
+      console,
+      setTimeout,
+      clearTimeout,
+      document: {
+        body: { dataset: {} },
+        getElementById: elemento,
+        addEventListener(evento, callback) {
+          if (evento === "DOMContentLoaded") domReady = callback;
+        }
+      },
+      chrome: {
+        tabs: {
+          onActivated: { addListener() {} },
+          onUpdated: { addListener() {} }
+        }
+      },
+      OptimusCaptureAuth: {
+        async restaurarSessao() {
+          return null;
+        },
+        async sair() {}
+      },
+      OptimusCaptureApi: {},
+      OptimusCaptureContract: contrato,
+      OptimusCaptureDetector: detector
+    };
+    contexto.globalThis = contexto;
+    contexto.window = contexto;
+    vm.createContext(contexto);
+    vm.runInContext(panelFonte, contexto);
+
+    await domReady();
+    assert.strictEqual(contexto.document.body.dataset.estado, "desconectado");
+    assert.strictEqual(elemento("topo").hidden, true);
+    assert.strictEqual(elemento("loginView").hidden, false);
+    assert.strictEqual(elemento("captureView").hidden, true);
+    assert.strictEqual(elemento("emptyView").hidden, true);
+    assert.strictEqual(elemento("produtoView").hidden, true);
+    assert.strictEqual(elemento("previewView").hidden, true);
   }
 
   {
@@ -574,6 +869,57 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(produto.warnings.includes("preco_atual_ausente"));
     assert.notStrictEqual(produto.precoAtual, 66.61);
     assert.notStrictEqual(produto.precoAtual, 20);
+  }
+
+  {
+    const documento = documentoKabumFixture();
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.marketplace, "kabum");
+    assert.strictEqual(produto.produtoId, "944475");
+    assert.strictEqual(produto.titulo, "Placa de Video ASUS RTX 5090 32GB GDDR7");
+    assert.strictEqual(produto.precoAtual, 4946.99);
+    assert.strictEqual(produto.precoAnterior, 8235.28);
+    assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/944475/placa.jpg");
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.fonte, "dom_kabum_v1");
+    assert.strictEqual(produto.completo, true);
+    assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
+    assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
+    assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
+  }
+
+  {
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/921292/water-cooler",
+      titulo: "Water Cooler Gamer RGB 360mm",
+      precoAtual: "R$ 569,99",
+      precoAnterior: "R$ 777,77",
+      parcela: "10x R$ 63,33"
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.produtoId, "921292");
+    assert.strictEqual(produto.precoAtual, 569.99);
+    assert.strictEqual(produto.precoAnterior, 777.77);
+    assert.notStrictEqual(produto.precoAtual, 63.33);
+  }
+
+  {
+    const documento = documentoKabumFixture({
+      precoAtual: "R$ 777,77",
+      precoAnterior: "R$ 569,99"
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, 777.77);
+    assert.strictEqual(produto.precoAnterior, null, "preco anterior menor que atual deve ser rejeitado");
+  }
+
+  {
+    const documento = documentoKabumFixture({ incluirBlocoPix: false });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.completo, false);
+    assert.ok(produto.warnings.includes("preco_atual_ausente"));
+    assert.ok(produto.warnings.includes("preco_kabum_sem_bloco_pix_h4"));
   }
 
   {

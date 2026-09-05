@@ -34,10 +34,19 @@
     return host === "aliexpress.com" || host.endsWith(".aliexpress.com");
   }
 
+  function hostKabum(hostname) {
+    const host = texto(hostname).toLowerCase().replace(/^www\./, "");
+    return host === "kabum.com.br" || host.endsWith(".kabum.com.br");
+  }
+
   function asinProdutoAmazon(url) {
     const pathname = texto(url?.pathname).toUpperCase();
     const match = pathname.match(/\/(?:DP|GP\/PRODUCT)\/([A-Z0-9]{10})(?:\/|$)/);
     return match?.[1] || "";
+  }
+
+  function produtoIdKabum(url) {
+    return texto(url?.pathname).match(/\/produto\/(\d{3,20})(?:\/|$)/i)?.[1] || "";
   }
 
   function itemIdProdutoAliExpress(url) {
@@ -117,6 +126,26 @@
       };
     }
 
+    if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) {
+      return {
+        suportado: false,
+        marketplace: "kabum",
+        motivo: "kabum_awin_requer_url_real",
+        url: url.toString()
+      };
+    }
+
+    if (hostKabum(host)) {
+      const produtoId = produtoIdKabum(url);
+      return {
+        suportado: Boolean(produtoId),
+        marketplace: "kabum",
+        motivo: produtoId ? "" : "pagina_kabum_sem_produto",
+        produtoId,
+        url: url.toString()
+      };
+    }
+
     if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
       return {
         suportado: false,
@@ -139,7 +168,7 @@
     return { suportado: false, marketplace: "", motivo: "marketplace_nao_suportado", url: url.toString() };
   }
 
-  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, hostAliExpress, asinProdutoAmazon, itemIdProdutoAliExpress };
+  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, hostAliExpress, hostKabum, asinProdutoAmazon, produtoIdKabum, itemIdProdutoAliExpress };
   global.OptimusCaptureDetector = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
