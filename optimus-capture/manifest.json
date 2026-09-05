@@ -21,6 +21,8 @@
     "https://go.optimuspromo.com.br/*",
     "https://*.mercadolivre.com.br/*",
     "https://*.mercadolibre.com/*",
+    "https://amazon.com.br/*",
+    "https://www.amazon.com.br/*",
     "https://shopee.com.br/*",
     "https://www.shopee.com.br/*"
   ],
@@ -29,6 +31,8 @@
       "matches": [
         "https://*.mercadolivre.com.br/*",
         "https://*.mercadolibre.com/*",
+        "https://amazon.com.br/*",
+        "https://www.amazon.com.br/*",
         "https://shopee.com.br/*",
         "https://www.shopee.com.br/*"
       ],
@@ -36,6 +40,7 @@
         "core/product-contract.js",
         "core/marketplace-detector.js",
         "adapters/mercadolivre.js",
+        "adapters/amazon.js",
         "adapters/shopee.js",
         "adapters/registry.js",
         "content/capture-content.js"

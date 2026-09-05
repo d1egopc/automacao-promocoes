@@ -121,6 +121,21 @@ function payloadShopeeValido(extra = {}) {
   };
 }
 
+function payloadAmazonValido(extra = {}) {
+  return {
+    marketplace: "amazon",
+    urlOriginal: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1",
+    titulo: "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H",
+    precoAtual: 798.99,
+    precoAnterior: 1099.00,
+    imagem: "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg",
+    cupom: "",
+    categoria: "",
+    origem: "optimus_capture_v1",
+    ...extra
+  };
+}
+
 function arquivoOfertas(clienteId) {
   return getClienteJsonPath(clienteId, "manual_ofertas_v2.json");
 }
@@ -147,14 +162,6 @@ function arquivoOfertas(clienteId) {
       assert.strictEqual(resposta.body.oferta.clienteId, "cliente_a");
       assert.strictEqual(chamadas.at(-1).clienteId, "cliente_a");
       assert.strictEqual(chamadas.at(-1).ofertaBase.titulo, "Produto real capturado");
-    }
-
-    {
-      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadValido({
-        marketplace: "amazon"
-      }));
-      assert.strictEqual(resposta.status, 400);
-      assert.strictEqual(resposta.body.motivo, "capture_marketplace_nao_suportado");
     }
 
     {
@@ -340,6 +347,89 @@ function arquivoOfertas(clienteId) {
     }
 
     {
+      const { app: appAmazon, chamadas: chamadasAmazonApp } = criarApp({
+        gerarLinkAfiliadoCliente: async (clienteId, marketplace, linkOriginal, ofertaBase) => {
+          chamadasAmazonApp.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
+          const url = new URL(linkOriginal);
+          url.searchParams.set("tag", "capture-20");
+          return url.toString();
+        }
+      });
+      const serverAmazon = await ouvir(appAmazon);
+      try {
+        const resposta = await request(serverAmazon, "POST", "/manual-v2/capture/ofertas", "cliente_amazon", payloadAmazonValido({
+          clienteId: "cliente_malicioso",
+          trackingId: "nao_deve_ir_para_backend"
+        }));
+        assert.strictEqual(resposta.status, 200);
+        assert.strictEqual(resposta.body.ok, true);
+        assert.strictEqual(resposta.body.oferta.clienteId, "cliente_amazon");
+        assert.strictEqual(resposta.body.oferta.marketplace, "amazon");
+        assert.strictEqual(resposta.body.oferta.titulo, "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H");
+        assert.strictEqual(resposta.body.oferta.precoAtual, "798.99");
+        assert.strictEqual(resposta.body.oferta.precoAnterior, "1099");
+        assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1&tag=capture-20");
+        assert.deepStrictEqual(chamadasAmazonApp.map(chamada => chamada.tipo), ["generic"]);
+        assert.strictEqual(chamadasAmazonApp[0].clienteId, "cliente_amazon");
+        assert.strictEqual(chamadasAmazonApp[0].marketplace, "amazon");
+        assert.strictEqual(chamadasAmazonApp[0].linkOriginal, "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1");
+        assert.strictEqual(chamadasAmazonApp[0].ofertaBase.urlOriginal, chamadasAmazonApp[0].linkOriginal);
+        assert.ok(!JSON.stringify(resposta.body).includes("nao_deve_ir_para_backend"));
+      } finally {
+        await new Promise(resolve => serverAmazon.close(resolve));
+      }
+    }
+
+    {
+      const antes = chamadas.length;
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_amazon", payloadAmazonValido({
+        clienteId: "cliente_malicioso",
+        trackingId: "nao_deve_ir_para_backend"
+      }));
+      assert.strictEqual(resposta.status, 200);
+      assert.strictEqual(resposta.body.ok, true);
+      assert.strictEqual(resposta.body.oferta.clienteId, "cliente_amazon");
+      assert.strictEqual(resposta.body.oferta.marketplace, "amazon");
+      const chamadasAmazon = chamadas.slice(antes);
+      assert.deepStrictEqual(chamadasAmazon.map(chamada => chamada.tipo), ["generic"]);
+      assert.strictEqual(chamadasAmazon[0].clienteId, "cliente_amazon");
+      assert.strictEqual(chamadasAmazon[0].marketplace, "amazon");
+      assert.strictEqual(chamadasAmazon[0].linkOriginal, "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1");
+      assert.strictEqual(chamadasAmazon[0].ofertaBase.urlOriginal, chamadasAmazon[0].linkOriginal);
+      assert.ok(!JSON.stringify(resposta.body).includes("nao_deve_ir_para_backend"));
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_amazon", payloadAmazonValido({
+        urlOriginal: "https://www.amazon.com.br/s?k=soundbar"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "url_amazon_produto_invalida");
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_amazon", payloadAmazonValido({
+        urlOriginal: "https://amzn.to/abc123"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "amazon_shortlink_capture_inseguro");
+    }
+
+    {
+      const { app: appAmazonFalha } = criarApp({
+        gerarLinkAfiliadoCliente: async () => ""
+      });
+      const serverAmazonFalha = await ouvir(appAmazonFalha);
+      try {
+        const resposta = await request(serverAmazonFalha, "POST", "/manual-v2/capture/ofertas", "cliente_amazon", payloadAmazonValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverAmazonFalha.close(resolve));
+      }
+    }
+
+    {
       const lista = await request(server, "GET", "/manual-v2/ofertas", "cliente_a");
       assert.strictEqual(lista.status, 200);
       assert.deepStrictEqual(lista.body.ofertas, []);
@@ -357,6 +447,8 @@ function arquivoOfertas(clienteId) {
       );
       assert.ok(!fonteCapture.includes("importarMercadoLivre"));
       assert.ok(!fonteCapture.includes("mercadolivre.manual.adapter"));
+      assert.ok(!fonteCapture.includes("importarAmazon"));
+      assert.ok(!fonteCapture.includes("amazon.manual.adapter"));
       assert.ok(!fonteRotas.includes("importarMercadoLivre"));
     }
 

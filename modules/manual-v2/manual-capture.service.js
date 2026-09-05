@@ -134,6 +134,44 @@ function urlShopeeCaptureSegura(urlOriginal = "") {
   return { ok: true, url: url.toString(), host, ids };
 }
 
+function asinAmazonUrl(url) {
+  const pathname = texto(url?.pathname).toUpperCase();
+  const match = pathname.match(/\/(?:DP|GP\/PRODUCT)\/([A-Z0-9]{10})(?:\/|$)/);
+  return match?.[1] || "";
+}
+
+function urlAmazonCaptureSegura(urlOriginal = "") {
+  const valor = texto(urlOriginal);
+  if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "amzn.to" || host.endsWith(".amzn.to")) {
+    return { ok: false, motivo: "amazon_shortlink_capture_inseguro", host };
+  }
+
+  if (host !== "amazon.com.br" && !host.endsWith(".amazon.com.br")) {
+    return { ok: false, motivo: "url_amazon_invalida", host };
+  }
+
+  const asin = asinAmazonUrl(url);
+  if (!asin) {
+    return { ok: false, motivo: "url_amazon_produto_invalida", host };
+  }
+
+  return { ok: true, url: url.toString(), host, asin };
+}
+
 function sanitizarUrlOpcional(valor = "") {
   const entrada = texto(valor);
   if (!entrada) return "";
@@ -196,13 +234,16 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   }
 
   const marketplace = normalizarMarketplaceManualV2(entrada.marketplace);
-  if (!["mercadolivre", "shopee"].includes(marketplace)) {
+  if (!["mercadolivre", "shopee", "amazon"].includes(marketplace)) {
     throw erroCapture("capture_marketplace_nao_suportado", 400);
   }
 
+  const urlEntrada = entrada.urlOriginal || entrada.url || entrada.linkOriginal;
   const urlValidada = marketplace === "shopee"
-    ? urlShopeeCaptureSegura(entrada.urlOriginal || entrada.url || entrada.linkOriginal)
-    : urlMercadoLivreSegura(entrada.urlOriginal || entrada.url || entrada.linkOriginal);
+    ? urlShopeeCaptureSegura(urlEntrada)
+    : (marketplace === "amazon"
+      ? urlAmazonCaptureSegura(urlEntrada)
+      : urlMercadoLivreSegura(urlEntrada));
   if (!urlValidada.ok) {
     throw erroCapture(urlValidada.motivo, 400, { host: urlValidada.host || "" });
   }
@@ -280,6 +321,7 @@ module.exports = {
   gerarPreviewCaptureManualV2,
   urlMercadoLivreSegura,
   urlShopeeCaptureSegura,
+  urlAmazonCaptureSegura,
   precoNumero,
   tituloTecnicoOuInutil
 };

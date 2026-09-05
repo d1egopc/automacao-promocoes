@@ -182,6 +182,7 @@
   function marketplaceLabel(marketplace = "") {
     const valor = String(marketplace || "").toLowerCase();
     if (valor === "shopee") return "Shopee";
+    if (valor === "amazon") return "Amazon";
     if (valor === "mercadolivre") return "Mercado Livre";
     return "Marketplace";
   }

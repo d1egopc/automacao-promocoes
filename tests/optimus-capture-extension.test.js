@@ -7,6 +7,7 @@ const raiz = path.join(__dirname, "..", "optimus-capture");
 const detector = require(path.join(raiz, "core", "marketplace-detector.js"));
 const contrato = require(path.join(raiz, "core", "product-contract.js"));
 const ml = require(path.join(raiz, "adapters", "mercadolivre.js"));
+const amazon = require(path.join(raiz, "adapters", "amazon.js"));
 const shopee = require(path.join(raiz, "adapters", "shopee.js"));
 const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
 const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
@@ -238,6 +239,82 @@ function documentoShopeePercentualFixture({ incluirPreco = true } = {}) {
   };
 }
 
+function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg" } = {}) {
+  const url = "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1";
+  const titulo = "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H";
+  const imagemSrc = "https://m.media-amazon.com/images/I/soundbar-SX522.jpg";
+  const tituloNo = { textContent: ` ${titulo} `, innerText: ` ${titulo} ` };
+  const imagemNo = {
+    src: imagemSrc,
+    currentSrc: "",
+    getAttribute(nome) {
+      if (nome === "data-old-hires") return oldHires;
+      if (nome === "src") return imagemSrc;
+      return "";
+    }
+  };
+  const precoAtualNo = {
+    textContent: "R$ 798,99",
+    innerText: "R$ 798,99",
+    querySelector(seletor) {
+      if (seletor === ".a-price-whole") return { textContent: "798", innerText: "798" };
+      if (seletor === ".a-price-fraction") return { textContent: "99", innerText: "99" };
+      if (seletor === ".a-offscreen") return { textContent: "R$798,99", innerText: "R$798,99" };
+      return null;
+    }
+  };
+  const precoAnteriorNo = {
+    textContent: "R$1.099,00",
+    innerText: "R$1.099,00",
+    querySelector(seletor) {
+      if (seletor === ".a-offscreen") return { textContent: "R$1.099,00", innerText: "R$1.099,00" };
+      return null;
+    }
+  };
+  const descontoNo = { textContent: "-27%", innerText: "-27%" };
+  const blocoPreco = {
+    textContent: "R$ 798,99 R$1.099,00 -27% 12x de R$66,61 25% off na 1a compra com cartao Amazon Insira o codigo CARTAO90 Exclusivo Prime Salve o cupom R$20 : VEMPRIME99.",
+    innerText: "R$ 798,99\nR$1.099,00\n-27%\n12x de R$66,61\n25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90.\nExclusivo Prime: Salve o cupom R$20 : VEMPRIME99.",
+    querySelector(seletor) {
+      if (seletor === ".priceToPay") return semPrecoPrincipal ? null : precoAtualNo;
+      if (seletor === ".savingsPercentage") return descontoNo;
+      return null;
+    },
+    querySelectorAll(seletor) {
+      if (seletor.includes("apex-basisprice-value")) return [precoAnteriorNo];
+      return [];
+    }
+  };
+
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `
+        <html>
+          <head><meta property="og:image" content="https://m.media-amazon.com/images/I/soundbar-og.jpg"></head>
+          <body>
+            <span id="productTitle">${titulo}</span>
+            <img id="landingImage" data-old-hires="${oldHires || ""}" src="${imagemSrc}">
+            <div id="corePriceDisplay_desktop_feature_div">
+              <span class="priceToPay"><span class="a-price-whole">798</span><span class="a-price-fraction">99</span></span>
+              <span class="apex-basisprice-value a-text-price"><span class="a-offscreen">R$1.099,00</span></span>
+              <span class="savingsPercentage">-27%</span>
+              <span>12x de R$66,61</span>
+              <div id="promoPriceBlockMessage_feature_div">25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90. Exclusivo Prime: Salve o cupom R$20 : VEMPRIME99.</div>
+            </div>
+          </body>
+        </html>
+      `
+    },
+    querySelector(seletor) {
+      if (seletor === "#productTitle") return tituloNo;
+      if (seletor === "#landingImage") return imagemNo;
+      if (seletor === "#corePriceDisplay_desktop_feature_div") return blocoPreco;
+      return null;
+    }
+  };
+}
+
 function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   const url = "https://shopee.com.br/product/555/999";
   const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
@@ -297,6 +374,15 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const deteccao = detector.detectarMarketplacePorUrl("https://www.amazon.com.br/Soundbar-TCL/dp/B0G2T13LT6?th=1");
+    assert.strictEqual(deteccao.suportado, true);
+    assert.strictEqual(deteccao.marketplace, "amazon");
+    assert.strictEqual(deteccao.asin, "B0G2T13LT6");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://amzn.to/abc123").motivo, "amazon_shortlink_requer_url_real");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://www.amazon.com.br/s?k=soundbar").motivo, "pagina_amazon_sem_produto");
+  }
+
+  {
     assert.ok(panelFonte.includes("tabs.onActivated.addListener"));
     assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
     assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
@@ -331,8 +417,50 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(!apiFonte.includes("clienteId"));
     assert.ok(manifestFonte.includes("https://shopee.com.br/*"));
     assert.ok(manifestFonte.includes("adapters/shopee.js"));
+    assert.ok(manifestFonte.includes("https://www.amazon.com.br/*"));
+    assert.ok(manifestFonte.includes("adapters/amazon.js"));
     assert.ok(panelFonte.includes("marketplaceLabel"));
+    assert.ok(panelFonte.includes('valor === "amazon"'));
     assert.ok(!panelHtml.includes("<div class=\"marketplace\">Mercado Livre</div>"));
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture(),
+      { href: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1" }
+    );
+    assert.strictEqual(produto.marketplace, "amazon");
+    assert.strictEqual(produto.titulo, "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H");
+    assert.strictEqual(produto.precoAtual, 798.99);
+    assert.strictEqual(produto.precoAnterior, 1099.00);
+    assert.strictEqual(produto.descontoPercentual, 27);
+    assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg");
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.fonte, "dom_amazon_v1");
+    assert.strictEqual(produto.completo, true);
+    assert.notStrictEqual(produto.precoAtual, 66.61, "parcelamento nao vira preco atual");
+    assert.notStrictEqual(produto.precoAtual, 20, "beneficio R$20 nao vira preco");
+    assert.notStrictEqual(produto.descontoPercentual, 25, "beneficio de cartao nao vira desconto principal");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({ oldHires: "" }),
+      { href: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6" }
+    );
+    assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SX522.jpg");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({ semPrecoPrincipal: true }),
+      { href: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6" }
+    );
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.completo, false);
+    assert.ok(produto.warnings.includes("preco_atual_ausente"));
+    assert.notStrictEqual(produto.precoAtual, 66.61);
+    assert.notStrictEqual(produto.precoAtual, 20);
   }
 
   {

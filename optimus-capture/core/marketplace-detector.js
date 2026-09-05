@@ -24,6 +24,17 @@
     return host === "shopee.com.br" || host.endsWith(".shopee.com.br");
   }
 
+  function hostAmazon(hostname) {
+    const host = texto(hostname).toLowerCase().replace(/^www\./, "");
+    return host === "amazon.com.br" || host.endsWith(".amazon.com.br");
+  }
+
+  function asinProdutoAmazon(url) {
+    const pathname = texto(url?.pathname).toUpperCase();
+    const match = pathname.match(/\/(?:DP|GP\/PRODUCT)\/([A-Z0-9]{10})(?:\/|$)/);
+    return match?.[1] || "";
+  }
+
   function idsProdutoShopee(url) {
     const alvo = `${url.pathname}${url.search}`;
     if (/\/product\/\d+\/\d+/i.test(alvo)) return true;
@@ -57,6 +68,26 @@
       };
     }
 
+    if (host === "amzn.to" || host.endsWith(".amzn.to")) {
+      return {
+        suportado: false,
+        marketplace: "amazon",
+        motivo: "amazon_shortlink_requer_url_real",
+        url: url.toString()
+      };
+    }
+
+    if (hostAmazon(host)) {
+      const asin = asinProdutoAmazon(url);
+      return {
+        suportado: Boolean(asin),
+        marketplace: "amazon",
+        motivo: asin ? "" : "pagina_amazon_sem_produto",
+        asin,
+        url: url.toString()
+      };
+    }
+
     if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
       return {
         suportado: false,
@@ -79,7 +110,7 @@
     return { suportado: false, marketplace: "", motivo: "marketplace_nao_suportado", url: url.toString() };
   }
 
-  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee };
+  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, asinProdutoAmazon };
   global.OptimusCaptureDetector = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);
