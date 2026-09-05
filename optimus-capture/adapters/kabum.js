@@ -129,7 +129,58 @@
     return null;
   }
 
-  function imagemKabum(documento, html) {
+  function urlImagemProdutoKabum(src = "", produtoId = "") {
+    const url = contrato.urlHttp(src);
+    if (!url || !produtoId) return null;
+    try {
+      const parsed = new URL(url);
+      const host = texto(parsed.hostname).toLowerCase();
+      if (host !== "images.kabum.com.br" && host !== "static.kabum.com.br") return null;
+      if (!parsed.pathname.startsWith(`/produtos/fotos/${produtoId}/`)) return null;
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  function dimensoesImagemProduto(img) {
+    const naturalWidth = Number(img?.naturalWidth || 0);
+    const naturalHeight = Number(img?.naturalHeight || 0);
+    const clientWidth = Number(img?.clientWidth || img?.width || 0);
+    const clientHeight = Number(img?.clientHeight || img?.height || 0);
+    if (naturalWidth < 300 || naturalHeight < 300) return null;
+    const proporcao = naturalWidth / naturalHeight;
+    if (!Number.isFinite(proporcao) || proporcao < 0.45 || proporcao > 2.2) return null;
+    return {
+      areaRenderizada: Math.max(0, clientWidth) * Math.max(0, clientHeight),
+      areaNatural: naturalWidth * naturalHeight
+    };
+  }
+
+  function imagemKabum(documento, html, produtoId = "") {
+    const candidatas = Array.from(documento?.images || []);
+    let melhor = null;
+    candidatas.forEach((img, indice) => {
+      const src = urlImagemProdutoKabum(img?.currentSrc || img?.src || img?.getAttribute?.("src") || "", produtoId);
+      if (!src) return;
+      const dimensoes = dimensoesImagemProduto(img);
+      if (!dimensoes) return;
+      const candidata = { src, indice, ...dimensoes };
+      if (
+        !melhor ||
+        candidata.areaRenderizada > melhor.areaRenderizada ||
+        (candidata.areaRenderizada === melhor.areaRenderizada && candidata.areaNatural > melhor.areaNatural) ||
+        (
+          candidata.areaRenderizada === melhor.areaRenderizada &&
+          candidata.areaNatural === melhor.areaNatural &&
+          candidata.indice < melhor.indice
+        )
+      ) {
+        melhor = candidata;
+      }
+    });
+    if (melhor?.src) return melhor.src;
+
     const og = contrato.urlHttp(meta(html, "og:image"));
     if (og) return og;
 
@@ -175,7 +226,7 @@
       precoAtual,
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
       condicaoPrecoPor: bloco ? "pix" : "",
-      imagem: imagemKabum(documento, html),
+      imagem: imagemKabum(documento, html, produtoId),
       cupom: "",
       fonte: "dom_kabum_v1",
       warnings

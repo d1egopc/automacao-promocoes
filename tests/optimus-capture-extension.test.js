@@ -457,6 +457,33 @@ function criarNoKabum({ texto = "", tagName = "DIV", filhos = [], style = {}, at
   return no;
 }
 
+function criarImagemKabum({
+  src,
+  currentSrc = "",
+  naturalWidth = 1000,
+  naturalHeight = 1000,
+  clientWidth = 0,
+  clientHeight = 0,
+  alt = ""
+} = {}) {
+  return {
+    src,
+    currentSrc,
+    naturalWidth,
+    naturalHeight,
+    clientWidth,
+    clientHeight,
+    width: clientWidth,
+    height: clientHeight,
+    alt,
+    getAttribute(nome) {
+      if (nome === "src") return src || "";
+      if (nome === "alt") return alt || "";
+      return "";
+    }
+  };
+}
+
 function documentoKabumFixture({
   url = "https://www.kabum.com.br/produto/944475/placa-de-video",
   titulo = "Placa de Video ASUS RTX 5090 32GB GDDR7",
@@ -466,7 +493,9 @@ function documentoKabumFixture({
   incluirBlocoPix = true,
   incluirAnterior = true,
   frete = "Frete R$ 19,90",
-  prime = "Economia PRIME R$ 50,00"
+  prime = "Economia PRIME R$ 50,00",
+  ogImagem = "https://images.kabum.com.br/produtos/fotos/944475/placa.jpg",
+  imagens = []
 } = {}) {
   const h1 = criarNoKabum({ texto: titulo, tagName: "H1" });
   const h4 = criarNoKabum({ texto: precoAtual, tagName: "H4" });
@@ -491,11 +520,12 @@ function documentoKabumFixture({
     documentElement: {
       outerHTML: `
         <html>
-          <head><meta property="og:image" content="https://images.kabum.com.br/produtos/fotos/944475/placa.jpg"></head>
+          <head><meta property="og:image" content="${ogImagem}"></head>
           <body><main>${root.textContent}</main></body>
         </html>
       `
     },
+    images: imagens,
     body: root,
     querySelector(seletor) {
       if (seletor === "main, [role='main']") return root;
@@ -897,6 +927,99 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
+  }
+
+  {
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/280890/monitor-gamer",
+      ogImagem: "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_m.jpg",
+      imagens: [
+        criarImagemKabum({
+          src: "https://images.kabum.com.br/produtos/fotos/999999/recomendacao_gg.jpg",
+          naturalWidth: 1000,
+          naturalHeight: 1000,
+          clientWidth: 420,
+          clientHeight: 420
+        }),
+        criarImagemKabum({
+          src: "https://images.kabum.com.br/produtos/fotos/banner/campanha_gg.jpg",
+          naturalWidth: 1216,
+          naturalHeight: 161,
+          clientWidth: 712,
+          clientHeight: 94
+        }),
+        criarImagemKabum({
+          src: "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_gg.jpg",
+          currentSrc: "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_gg.jpg",
+          naturalWidth: 1000,
+          naturalHeight: 1000,
+          clientWidth: 712,
+          clientHeight: 614
+        }),
+        criarImagemKabum({
+          src: "https://static.kabum.com.br/selo-oferta.png",
+          naturalWidth: 90,
+          naturalHeight: 90,
+          clientWidth: 90,
+          clientHeight: 90
+        })
+      ]
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_gg.jpg");
+    assert.notStrictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_m.jpg");
+  }
+
+  {
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/280890/monitor-gamer",
+      ogImagem: "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_m.jpg",
+      imagens: [
+        criarImagemKabum({
+          src: "https://images.kabum.com.br/produtos/fotos/999999/recomendacao_gg.jpg",
+          naturalWidth: 1000,
+          naturalHeight: 1000,
+          clientWidth: 712,
+          clientHeight: 614
+        }),
+        criarImagemKabum({
+          src: "https://images.kabum.com.br/produtos/fotos/280890/selo-pequeno.jpg",
+          naturalWidth: 120,
+          naturalHeight: 120,
+          clientWidth: 120,
+          clientHeight: 120
+        })
+      ]
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_m.jpg");
+  }
+
+  {
+    const primeira = "https://images.kabum.com.br/produtos/fotos/280890/foto-a_gg.jpg";
+    const segunda = "https://images.kabum.com.br/produtos/fotos/280890/foto-b_gg.jpg";
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/280890/monitor-gamer",
+      ogImagem: "https://images.kabum.com.br/produtos/fotos/280890/monitor_1722881948_m.jpg",
+      imagens: [
+        criarImagemKabum({
+          src: primeira,
+          naturalWidth: 1000,
+          naturalHeight: 1000,
+          clientWidth: 300,
+          clientHeight: 300
+        }),
+        criarImagemKabum({
+          src: segunda,
+          naturalWidth: 1000,
+          naturalHeight: 1000,
+          clientWidth: 300,
+          clientHeight: 300
+        })
+      ]
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, primeira);
   }
 
   {
