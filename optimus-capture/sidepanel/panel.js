@@ -226,6 +226,7 @@
     const valor = String(marketplace || "").toLowerCase();
     if (valor === "shopee") return "Shopee";
     if (valor === "amazon") return "Amazon";
+    if (valor === "aliexpress") return "AliExpress";
     if (valor === "mercadolivre") return "Mercado Livre";
     return "Marketplace";
   }

@@ -172,6 +172,42 @@ function urlAmazonCaptureSegura(urlOriginal = "") {
   return { ok: true, url: url.toString(), host, asin };
 }
 
+function itemIdAliExpressUrl(url) {
+  return texto(url?.pathname).match(/\/item\/(\d{10,})\.html/i)?.[1] || "";
+}
+
+function urlAliExpressCaptureSegura(urlOriginal = "") {
+  const valor = texto(urlOriginal);
+  if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (host === "a.aliexpress.com" || host === "s.click.aliexpress.com") {
+    return { ok: false, motivo: "aliexpress_shortlink_capture_inseguro", host };
+  }
+
+  if (host !== "aliexpress.com" && !host.endsWith(".aliexpress.com")) {
+    return { ok: false, motivo: "url_aliexpress_invalida", host };
+  }
+
+  const itemId = itemIdAliExpressUrl(url);
+  if (!itemId) {
+    return { ok: false, motivo: "url_aliexpress_produto_invalida", host };
+  }
+
+  return { ok: true, url: `https://${url.hostname.toLowerCase()}/item/${itemId}.html`, host, itemId };
+}
+
 function sanitizarUrlOpcional(valor = "") {
   const entrada = texto(valor);
   if (!entrada) return "";
@@ -234,7 +270,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   }
 
   const marketplace = normalizarMarketplaceManualV2(entrada.marketplace);
-  if (!["mercadolivre", "shopee", "amazon"].includes(marketplace)) {
+  if (!["mercadolivre", "shopee", "amazon", "aliexpress"].includes(marketplace)) {
     throw erroCapture("capture_marketplace_nao_suportado", 400);
   }
 
@@ -243,7 +279,9 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     ? urlShopeeCaptureSegura(urlEntrada)
     : (marketplace === "amazon"
       ? urlAmazonCaptureSegura(urlEntrada)
-      : urlMercadoLivreSegura(urlEntrada));
+      : (marketplace === "aliexpress"
+        ? urlAliExpressCaptureSegura(urlEntrada)
+        : urlMercadoLivreSegura(urlEntrada)));
   if (!urlValidada.ok) {
     throw erroCapture(urlValidada.motivo, 400, { host: urlValidada.host || "" });
   }
@@ -253,7 +291,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     throw erroCapture("capture_titulo_invalido", 400, { host: urlValidada.host });
   }
 
-  const faixaPreco = marketplace === "shopee" && entrada.temVariacaoPreco === true
+  const faixaPreco = ["shopee", "aliexpress"].includes(marketplace) && entrada.temVariacaoPreco === true
     ? faixaPrecoValida(entrada)
     : null;
   const precoAtualNumero = faixaPreco
@@ -322,6 +360,7 @@ module.exports = {
   urlMercadoLivreSegura,
   urlShopeeCaptureSegura,
   urlAmazonCaptureSegura,
+  urlAliExpressCaptureSegura,
   precoNumero,
   tituloTecnicoOuInutil
 };

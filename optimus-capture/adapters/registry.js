@@ -3,6 +3,7 @@
   const mercadoLivre = global.OptimusCaptureMercadoLivre || require("./mercadolivre");
   const amazon = global.OptimusCaptureAmazon || require("./amazon");
   const shopee = global.OptimusCaptureShopee || require("./shopee");
+  const aliexpress = global.OptimusCaptureAliExpress || require("./aliexpress");
 
   function capturarPaginaAtual(documento, locationObjeto) {
     const url = locationObjeto?.href || documento?.location?.href || "";
@@ -36,6 +37,15 @@
 
     if (deteccao.marketplace === "amazon") {
       const produto = amazon.capturarAmazonDaPagina(documento, locationObjeto);
+      return {
+        ok: produto.completo === true,
+        motivo: produto.completo ? "" : "captura_incompleta",
+        produto
+      };
+    }
+
+    if (deteccao.marketplace === "aliexpress") {
+      const produto = aliexpress.capturarAliExpressDaPagina(documento, locationObjeto);
       return {
         ok: produto.completo === true,
         motivo: produto.completo ? "" : "captura_incompleta",

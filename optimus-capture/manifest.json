@@ -24,7 +24,9 @@
     "https://amazon.com.br/*",
     "https://www.amazon.com.br/*",
     "https://shopee.com.br/*",
-    "https://www.shopee.com.br/*"
+    "https://www.shopee.com.br/*",
+    "https://aliexpress.com/*",
+    "https://*.aliexpress.com/*"
   ],
   "content_scripts": [
     {
@@ -34,7 +36,9 @@
         "https://amazon.com.br/*",
         "https://www.amazon.com.br/*",
         "https://shopee.com.br/*",
-        "https://www.shopee.com.br/*"
+        "https://www.shopee.com.br/*",
+        "https://aliexpress.com/*",
+        "https://*.aliexpress.com/*"
       ],
       "js": [
         "core/product-contract.js",
@@ -42,6 +46,7 @@
         "adapters/mercadolivre.js",
         "adapters/amazon.js",
         "adapters/shopee.js",
+        "adapters/aliexpress.js",
         "adapters/registry.js",
         "content/capture-content.js"
       ],

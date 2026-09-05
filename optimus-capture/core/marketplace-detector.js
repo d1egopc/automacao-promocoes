@@ -29,10 +29,19 @@
     return host === "amazon.com.br" || host.endsWith(".amazon.com.br");
   }
 
+  function hostAliExpress(hostname) {
+    const host = texto(hostname).toLowerCase().replace(/^www\./, "");
+    return host === "aliexpress.com" || host.endsWith(".aliexpress.com");
+  }
+
   function asinProdutoAmazon(url) {
     const pathname = texto(url?.pathname).toUpperCase();
     const match = pathname.match(/\/(?:DP|GP\/PRODUCT)\/([A-Z0-9]{10})(?:\/|$)/);
     return match?.[1] || "";
+  }
+
+  function itemIdProdutoAliExpress(url) {
+    return texto(url?.pathname).match(/\/item\/(\d{10,})\.html/i)?.[1] || "";
   }
 
   function idsProdutoShopee(url) {
@@ -88,6 +97,26 @@
       };
     }
 
+    if (host === "a.aliexpress.com" || host === "s.click.aliexpress.com") {
+      return {
+        suportado: false,
+        marketplace: "aliexpress",
+        motivo: "aliexpress_shortlink_requer_url_real",
+        url: url.toString()
+      };
+    }
+
+    if (hostAliExpress(host)) {
+      const itemId = itemIdProdutoAliExpress(url);
+      return {
+        suportado: Boolean(itemId),
+        marketplace: "aliexpress",
+        motivo: itemId ? "" : "pagina_aliexpress_sem_produto",
+        itemId,
+        url: itemId ? `https://${url.hostname.toLowerCase()}/item/${itemId}.html` : url.toString()
+      };
+    }
+
     if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
       return {
         suportado: false,
@@ -110,7 +139,7 @@
     return { suportado: false, marketplace: "", motivo: "marketplace_nao_suportado", url: url.toString() };
   }
 
-  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, asinProdutoAmazon };
+  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, hostAliExpress, asinProdutoAmazon, itemIdProdutoAliExpress };
   global.OptimusCaptureDetector = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

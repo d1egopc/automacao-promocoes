@@ -136,6 +136,21 @@ function payloadAmazonValido(extra = {}) {
   };
 }
 
+function payloadAliExpressValido(extra = {}) {
+  return {
+    marketplace: "aliexpress",
+    urlOriginal: "https://pt.aliexpress.com/item/1005007871648778.html?spm=tracking",
+    titulo: "Mini Projetor Portatil AliExpress Full HD",
+    precoAtual: 213.25,
+    precoAnterior: "",
+    imagem: "https://ae01.alicdn.com/kf/projetor.jpg",
+    cupom: "",
+    categoria: "",
+    origem: "optimus_capture_v1",
+    ...extra
+  };
+}
+
 function arquivoOfertas(clienteId) {
   return getClienteJsonPath(clienteId, "manual_ofertas_v2.json");
 }
@@ -426,6 +441,126 @@ function arquivoOfertas(clienteId) {
         assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
       } finally {
         await new Promise(resolve => serverAmazonFalha.close(resolve));
+      }
+    }
+
+    {
+      const chamadasAli = [];
+      const { app: appAli } = criarApp({
+        chamadas: chamadasAli,
+        gerarLinkAfiliadoCliente: async (clienteId, marketplace, linkOriginal, ofertaBase) => {
+          chamadasAli.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
+          return "https://s.click.aliexpress.com/e/_captureAli";
+        }
+      });
+      const serverAli = await ouvir(appAli);
+      try {
+        const resposta = await request(serverAli, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido({
+          clienteId: "cliente_malicioso",
+          appKey: "nao_deve_ir_para_backend",
+          secret: "nao_deve_ir_para_backend",
+          trackingId: "nao_deve_ir_para_backend"
+        }));
+        assert.strictEqual(resposta.status, 200);
+        assert.strictEqual(resposta.body.ok, true);
+        assert.strictEqual(resposta.body.oferta.clienteId, "cliente_aliexpress");
+        assert.strictEqual(resposta.body.oferta.marketplace, "aliexpress");
+        assert.strictEqual(resposta.body.oferta.urlOriginal, "https://pt.aliexpress.com/item/1005007871648778.html");
+        assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://s.click.aliexpress.com/e/_captureAli");
+        assert.deepStrictEqual(chamadasAli.map(chamada => chamada.tipo), ["generic"]);
+        assert.strictEqual(chamadasAli[0].clienteId, "cliente_aliexpress");
+        assert.strictEqual(chamadasAli[0].marketplace, "aliexpress");
+        assert.strictEqual(chamadasAli[0].linkOriginal, "https://pt.aliexpress.com/item/1005007871648778.html");
+        assert.strictEqual(chamadasAli[0].ofertaBase.urlOriginal, chamadasAli[0].linkOriginal);
+        const serializado = JSON.stringify(resposta.body);
+        assert.ok(!serializado.includes("nao_deve_ir_para_backend"));
+      } finally {
+        await new Promise(resolve => serverAli.close(resolve));
+      }
+    }
+
+    {
+      const chamadasAli = [];
+      const { app: appAliFaixa } = criarApp({
+        chamadas: chamadasAli,
+        gerarLinkAfiliadoCliente: async (clienteId, marketplace, linkOriginal, ofertaBase) => {
+          chamadasAli.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
+          return "https://s.click.aliexpress.com/e/_captureAliFaixa";
+        }
+      });
+      const serverAliFaixa = await ouvir(appAliFaixa);
+      try {
+        const resposta = await request(serverAliFaixa, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido({
+          precoAtual: "",
+          precoMin: 67.99,
+          precoMax: 99.99,
+          temVariacaoPreco: true
+        }));
+        assert.strictEqual(resposta.status, 200);
+        assert.strictEqual(resposta.body.oferta.precoAtual, "", "faixa AliExpress nao vira preco unico");
+        assert.strictEqual(resposta.body.oferta.precoMin, "67.99");
+        assert.strictEqual(resposta.body.oferta.precoMax, "99.99");
+        assert.strictEqual(resposta.body.oferta.temVariacaoPreco, true);
+        assert.ok(resposta.body.oferta.fonteImportacao.camposConfiaveis.includes("precoMin"));
+        assert.ok(resposta.body.oferta.fonteImportacao.camposConfiaveis.includes("precoMax"));
+      } finally {
+        await new Promise(resolve => serverAliFaixa.close(resolve));
+      }
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido({
+        urlOriginal: "https://a.aliexpress.com/_mTeste"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "aliexpress_shortlink_capture_inseguro");
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido({
+        urlOriginal: "https://pt.aliexpress.com/w/wholesale-projetor.html"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "url_aliexpress_produto_invalida");
+    }
+
+    {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido({
+        urlOriginal: "https://pt.aliexpress.com/w/wholesale-projetor.html?itemId=1005007871648778"
+      }));
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.motivo, "url_aliexpress_produto_invalida");
+    }
+
+    {
+      const { app: appAliOriginal } = criarApp({
+        gerarLinkAfiliadoCliente: async (_clienteId, _marketplace, linkOriginal) => linkOriginal
+      });
+      const serverAliOriginal = await ouvir(appAliOriginal);
+      try {
+        const resposta = await request(serverAliOriginal, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+        assert.ok(!JSON.stringify(resposta.body).includes("sem_comissao"));
+      } finally {
+        await new Promise(resolve => serverAliOriginal.close(resolve));
+      }
+    }
+
+    {
+      const { app: appAliFalha } = criarApp({
+        gerarLinkAfiliadoCliente: async () => {
+          throw new Error("falha_api_aliexpress");
+        }
+      });
+      const serverAliFalha = await ouvir(appAliFalha);
+      try {
+        const resposta = await request(serverAliFalha, "POST", "/manual-v2/capture/ofertas", "cliente_aliexpress", payloadAliExpressValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+        assert.ok(!JSON.stringify(resposta.body).includes("Produto sem comissao"));
+      } finally {
+        await new Promise(resolve => serverAliFalha.close(resolve));
       }
     }
 

@@ -9,6 +9,7 @@ const contrato = require(path.join(raiz, "core", "product-contract.js"));
 const ml = require(path.join(raiz, "adapters", "mercadolivre.js"));
 const amazon = require(path.join(raiz, "adapters", "amazon.js"));
 const shopee = require(path.join(raiz, "adapters", "shopee.js"));
+const aliexpress = require(path.join(raiz, "adapters", "aliexpress.js"));
 const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
 const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
 const panelHtml = fs.readFileSync(path.join(raiz, "sidepanel", "panel.html"), "utf8");
@@ -315,6 +316,98 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
   };
 }
 
+function jsonLdAliExpressProduto(extra = {}) {
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: extra.name || "Mini Projetor Portatil AliExpress Full HD",
+    image: Object.prototype.hasOwnProperty.call(extra, "image") ? extra.image : ["https://ae01.alicdn.com/kf/projetor.jpg"],
+    offers: extra.offers || {
+      "@type": "Offer",
+      price: "213.25",
+      priceCurrency: "BRL",
+      url: "https://pt.aliexpress.com/item/1005007871648778.html"
+    }
+  });
+}
+
+function documentoAliExpressFixture({
+  url = "https://pt.aliexpress.com/item/1005007871648778.html?spm=tracking",
+  titulo = "Mini Projetor Portatil AliExpress Full HD",
+  tituloVisual = titulo,
+  precoTexto = "R$ 213,25",
+  jsonLd = jsonLdAliExpressProduto({ name: titulo }),
+  imagem = "https://ae01.alicdn.com/kf/projetor.jpg",
+  precoAnterior = "",
+  precoEstrutural = true,
+  ogImagem = imagem
+} = {}) {
+  const tituloNo = {
+    textContent: tituloVisual,
+    innerText: tituloVisual
+  };
+  const h1Aliexpress = { textContent: "Aliexpress", innerText: "Aliexpress" };
+  const h1Ia = { textContent: "Resumo do item com IA", innerText: "Resumo do item com IA" };
+  const precoNo = {
+    textContent: precoTexto,
+    innerText: precoTexto
+  };
+  const anteriorNo = {
+    textContent: precoAnterior,
+    innerText: precoAnterior,
+    getAttribute: () => precoAnterior ? `Antes: ${precoAnterior}` : ""
+  };
+  const main = {
+    textContent: `${h1Aliexpress.textContent}\n${tituloVisual}\n${h1Ia.textContent}\n${precoTexto}\n${precoAnterior}`,
+    innerText: `${h1Aliexpress.innerText}\n${tituloVisual}\n${h1Ia.innerText}\n${precoTexto}\n${precoAnterior}`,
+    querySelector(seletor) {
+      if (seletor === "img") return { src: imagem, currentSrc: "", getAttribute: () => imagem };
+      return null;
+    },
+    querySelectorAll(seletor) {
+      if (seletor.includes("title") || seletor.includes("h1") || seletor.includes("heading")) {
+        return [h1Aliexpress, tituloNo, h1Ia];
+      }
+      if (precoEstrutural && seletor.includes("product-price")) {
+        return [precoNo];
+      }
+      if (/original|previous|old|aria-label|\bdel\b|\bs\b/.test(seletor)) {
+        return precoAnterior ? [anteriorNo] : [];
+      }
+      return [];
+    }
+  };
+
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `
+        <html>
+          <head>
+            ${ogImagem ? `<meta property="og:image" content="${ogImagem}">` : ""}
+            <script type="application/ld+json">${jsonLd}</script>
+          </head>
+          <body>
+            <div role="main">
+              <h1>Aliexpress</h1>
+              <h1>${tituloVisual}</h1>
+              <h1>Resumo do item com IA</h1>
+              <div data-pl="product-price">${precoTexto}</div>
+              ${precoAnterior ? `<s>${precoAnterior}</s>` : ""}
+              <img src="${imagem}">
+            </div>
+          </body>
+        </html>
+      `
+    },
+    body: main,
+    querySelector(seletor) {
+      if (seletor === 'div[role="main"], main') return main;
+      return null;
+    }
+  };
+}
+
 function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   const url = "https://shopee.com.br/product/555/999";
   const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
@@ -383,6 +476,18 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const deteccao = detector.detectarMarketplacePorUrl("https://pt.aliexpress.com/item/1005007871648778.html?spm=tracking");
+    assert.strictEqual(deteccao.suportado, true);
+    assert.strictEqual(deteccao.marketplace, "aliexpress");
+    assert.strictEqual(deteccao.itemId, "1005007871648778");
+    assert.strictEqual(deteccao.url, "https://pt.aliexpress.com/item/1005007871648778.html");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://a.aliexpress.com/_mTeste").motivo, "aliexpress_shortlink_requer_url_real");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://pt.aliexpress.com/w/wholesale-projetor.html").motivo, "pagina_aliexpress_sem_produto");
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://pt.aliexpress.com/w/wholesale-projetor.html?itemId=1005007871648778").suportado, false);
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://login.aliexpress.com/").motivo, "pagina_aliexpress_sem_produto");
+  }
+
+  {
     assert.ok(panelFonte.includes("tabs.onActivated.addListener"));
     assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
     assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
@@ -424,8 +529,11 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(manifestFonte.includes("adapters/shopee.js"));
     assert.ok(manifestFonte.includes("https://www.amazon.com.br/*"));
     assert.ok(manifestFonte.includes("adapters/amazon.js"));
+    assert.ok(manifestFonte.includes("https://*.aliexpress.com/*"));
+    assert.ok(manifestFonte.includes("adapters/aliexpress.js"));
     assert.ok(panelFonte.includes("marketplaceLabel"));
     assert.ok(panelFonte.includes('valor === "amazon"'));
+    assert.ok(panelFonte.includes('valor === "aliexpress"'));
     assert.ok(!panelHtml.includes("<div class=\"marketplace\">Mercado Livre</div>"));
   }
 
@@ -961,6 +1069,132 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAtual, 59.90);
     assert.strictEqual(produto.precoAnterior, 130.90);
     assert.strictEqual(produto.descontoPercentual, 54);
+  }
+
+  {
+    const documento = documentoAliExpressFixture();
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.marketplace, "aliexpress");
+    assert.strictEqual(produto.urlOriginal, "https://pt.aliexpress.com/item/1005007871648778.html");
+    assert.strictEqual(produto.titulo, "Mini Projetor Portatil AliExpress Full HD");
+    assert.notStrictEqual(produto.titulo, "Aliexpress");
+    assert.notStrictEqual(produto.titulo, "Resumo do item com IA");
+    assert.strictEqual(produto.precoAtual, 213.25);
+    assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/kf/projetor.jpg");
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.completo, true);
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "Stern R$ 258,29\n2% de desconto extra ao usar moedas\nR$134,66 x 3 sem juros\nPoupe R$313,29\nR$43,69+ em impostos estimados",
+      jsonLd: jsonLdAliExpressProduto({
+        name: "Produto AliExpress com fallback JSON-LD",
+        offers: {
+          "@type": "Offer",
+          price: "403.99",
+          priceCurrency: "BRL",
+          url: "https://pt.aliexpress.com/item/1005011981610735.html"
+        }
+      }),
+      url: "https://pt.aliexpress.com/item/1005011981610735.html",
+      precoEstrutural: false
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, 403.99);
+    assert.notStrictEqual(produto.precoAtual, 258.29);
+    assert.notStrictEqual(produto.precoAtual, 2);
+    assert.notStrictEqual(produto.precoAtual, 134.66);
+    assert.notStrictEqual(produto.precoAtual, 313.29);
+    assert.notStrictEqual(produto.precoAtual, 43.69);
+    assert.strictEqual(produto.fonte, "json_ld_aliexpress_v1");
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "Stern R$ 258,29",
+      jsonLd: jsonLdAliExpressProduto({
+        offers: {
+          "@type": "Offer",
+          price: "403.99"
+        }
+      }),
+      precoEstrutural: false
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.completo, false);
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "",
+      jsonLd: jsonLdAliExpressProduto({
+        offers: {
+          "@type": "Offer",
+          price: "403.99",
+          priceCurrency: "USD"
+        }
+      }),
+      precoEstrutural: false
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.completo, false);
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "R$67,99 - R$99,99\nR$19,54 x 12 meses\n-15%",
+      jsonLd: jsonLdAliExpressProduto({
+        offers: {
+          "@type": "AggregateOffer",
+          lowPrice: "67.99",
+          highPrice: "99.99",
+          priceCurrency: "BRL"
+        }
+      })
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.precoMin, 67.99);
+    assert.strictEqual(produto.precoMax, 99.99);
+    assert.strictEqual(produto.temVariacaoPreco, true);
+    assert.notStrictEqual(produto.precoMin, 15);
+    assert.notStrictEqual(produto.precoMin, 19.54);
+    const payload = contrato.payloadPreview(produto);
+    assert.strictEqual(payload.precoAtual, "");
+    assert.strictEqual(payload.precoMin, 67.99);
+    assert.strictEqual(payload.precoMax, 99.99);
+    assert.strictEqual(payload.temVariacaoPreco, true);
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "2% de desconto extra ao usar moedas\nR$19,54 x 12 meses",
+      jsonLd: "{}"
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null);
+    assert.strictEqual(produto.precoMin, null);
+    assert.strictEqual(produto.completo, false);
+    assert.ok(produto.warnings.includes("preco_atual_ausente"));
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      jsonLd: jsonLdAliExpressProduto({ image: "" }),
+      imagem: "https://ae01.alicdn.com/kf/banner-generico.jpg",
+      ogImagem: ""
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.imagem, "");
+  }
+
+  {
+    const fonteAli = fs.readFileSync(path.join(raiz, "adapters", "aliexpress.js"), "utf8");
+    assert.ok(!/appKey|trackingId|client_secret|access_token|cookie/i.test(fonteAli));
+    assert.ok(!fonteAli.includes("fetch("));
   }
 
   {
