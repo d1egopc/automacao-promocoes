@@ -55,11 +55,12 @@ function criarAdapters(chamadas = []) {
   return adapters;
 }
 
-function criarApp(chamadasImportacao = [], storageOptions = {}) {
+function criarApp(chamadasImportacao = [], storageOptions = {}, overrides = {}) {
   const app = express();
   const adapters = criarAdapters(chamadasImportacao);
   app.use(express.json());
   app.use("/manual-v2", criarRotasManualV2({
+    ...overrides,
     getClienteId: (req) => req.header("x-cliente-id") || "cliente_a",
     storageOptions,
     importarUrlManualV2: (url, opcoes = {}) => importarUrlManualV2(url, {
@@ -264,6 +265,139 @@ try {
   {
     assert.strictEqual(fs.existsSync(arquivoCliente("cliente_a", "fila.json")), false, "rotas Manual V2 nao escrevem fila do cliente A");
     assert.strictEqual(fs.existsSync(arquivoCliente("cliente_b", "fila.json")), false, "rotas Manual V2 nao escrevem fila do cliente B");
+  }
+
+  {
+    const chamadasVitrine = [];
+    let seqVitrine = 0;
+    const appVitrine = criarApp([], {
+      now: () => "2026-08-14T16:00:00.000Z",
+      idFactory: () => `manual_v2_vitrine_${++seqVitrine}`
+    }, {
+      clienteTemRecurso: (clienteId, recurso) => clienteId === "cliente_vitrine" && recurso === "vitrine",
+      montarOfertaVitrine: (oferta) => ({
+        idPublico: oferta.id,
+        ofertaId: oferta.id,
+        titulo: oferta.titulo,
+        marketplace: oferta.marketplace,
+        precoAtual: oferta.precoAtual
+      }),
+      upsertOfertaVitrine: (clienteId, oferta) => {
+        chamadasVitrine.push({ clienteId, oferta });
+        return { ok: true, motivo: "publicada", oferta };
+      }
+    });
+    const serverVitrine = await ouvir(appVitrine);
+
+    try {
+      const configInicial = await request(serverVitrine, "GET", "/manual-v2/config", "cliente_vitrine");
+      assert.strictEqual(configInicial.status, 200);
+      assert.deepStrictEqual(configInicial.body.config, {
+        automacoesNovasOfertas: {
+          vitrine: {
+            ativa: false
+          }
+        }
+      });
+
+      const ofertaFlagOff = await request(serverVitrine, "POST", "/manual-v2/ofertas", "cliente_vitrine", {
+        marketplace: "mercadolivre",
+        titulo: "Oferta sem vitrine",
+        precoAtual: "10,00"
+      });
+      assert.strictEqual(ofertaFlagOff.status, 201);
+      assert.strictEqual(ofertaFlagOff.body.vitrinePublicacao, undefined, "flag OFF nao altera contrato de criacao");
+      assert.strictEqual(chamadasVitrine.length, 0, "flag OFF nao publica na vitrine");
+
+      const configSalva = await request(serverVitrine, "PUT", "/manual-v2/config", "cliente_vitrine", {
+        automacoesNovasOfertas: {
+          vitrine: { ativa: true },
+          social: { ativa: true }
+        }
+      });
+      assert.strictEqual(configSalva.status, 200);
+      assert.strictEqual(configSalva.body.config.automacoesNovasOfertas.vitrine.ativa, true);
+      assert.strictEqual(
+        Object.prototype.hasOwnProperty.call(configSalva.body.config.automacoesNovasOfertas, "social"),
+        false,
+        "Social fica fora desta fase"
+      );
+
+      const criadaComVitrine = await request(serverVitrine, "POST", "/manual-v2/ofertas", "cliente_vitrine", {
+        clienteId: "cliente_forjado",
+        marketplace: "kabum",
+        titulo: "Oferta com vitrine",
+        precoAtual: "99,90"
+      });
+      assert.strictEqual(criadaComVitrine.status, 201);
+      assert.strictEqual(criadaComVitrine.body.oferta.clienteId, "cliente_vitrine", "workspace vem do request autenticado");
+      assert.deepStrictEqual(criadaComVitrine.body.vitrinePublicacao, {
+        ok: true,
+        motivo: "publicada"
+      });
+      assert.strictEqual(chamadasVitrine.length, 1);
+      assert.strictEqual(chamadasVitrine[0].clienteId, "cliente_vitrine");
+      assert.strictEqual(chamadasVitrine[0].oferta.ofertaId, criadaComVitrine.body.oferta.id);
+
+      const editadaComFlagOn = await request(serverVitrine, "PUT", `/manual-v2/ofertas/${criadaComVitrine.body.oferta.id}`, "cliente_vitrine", {
+        titulo: "Oferta editada nao duplica"
+      });
+      assert.strictEqual(editadaComFlagOn.status, 200);
+      assert.strictEqual(chamadasVitrine.length, 1, "edicao nao deriva nova oferta para vitrine");
+
+      await request(serverVitrine, "PUT", "/manual-v2/config", "cliente_sem_vitrine", {
+        automacoesNovasOfertas: {
+          vitrine: { ativa: true }
+        }
+      });
+      const criadaSemRecurso = await request(serverVitrine, "POST", "/manual-v2/ofertas", "cliente_sem_vitrine", {
+        marketplace: "amazon",
+        titulo: "Oferta sem recurso",
+        precoAtual: "55,55"
+      });
+      assert.strictEqual(criadaSemRecurso.status, 201);
+      assert.strictEqual(criadaSemRecurso.body.vitrinePublicacao.ok, false);
+      assert.strictEqual(criadaSemRecurso.body.vitrinePublicacao.motivo, "recurso_indisponivel");
+      assert.strictEqual(chamadasVitrine.length, 1, "sem recurso oficial vitrine nao chama upsert");
+    } finally {
+      await new Promise(resolve => serverVitrine.close(resolve));
+    }
+  }
+
+  {
+    const appFalhaVitrine = criarApp([], {
+      now: () => "2026-08-14T16:30:00.000Z",
+      idFactory: () => "manual_v2_vitrine_falha"
+    }, {
+      clienteTemRecurso: () => true,
+      montarOfertaVitrine: (oferta) => ({ idPublico: oferta.id, ofertaId: oferta.id, titulo: oferta.titulo }),
+      upsertOfertaVitrine: () => {
+        throw new Error("falha_storage_vitrine_teste");
+      }
+    });
+    const serverFalhaVitrine = await ouvir(appFalhaVitrine);
+
+    try {
+      await request(serverFalhaVitrine, "PUT", "/manual-v2/config", "cliente_falha_vitrine", {
+        automacoesNovasOfertas: {
+          vitrine: { ativa: true }
+        }
+      });
+      const resposta = await request(serverFalhaVitrine, "POST", "/manual-v2/ofertas", "cliente_falha_vitrine", {
+        marketplace: "shopee",
+        titulo: "Oferta preservada mesmo com falha de vitrine",
+        precoAtual: "77,77"
+      });
+      assert.strictEqual(resposta.status, 201);
+      assert.strictEqual(resposta.body.ok, true);
+      assert.strictEqual(resposta.body.vitrinePublicacao.ok, false);
+      assert.strictEqual(resposta.body.vitrinePublicacao.motivo, "manual_v2_vitrine_derivacao_falhou");
+
+      const lista = await request(serverFalhaVitrine, "GET", "/manual-v2/ofertas", "cliente_falha_vitrine");
+      assert.deepStrictEqual(lista.body.ofertas.map(oferta => oferta.id), ["manual_v2_vitrine_falha"]);
+    } finally {
+      await new Promise(resolve => serverFalhaVitrine.close(resolve));
+    }
   }
 
   {

@@ -215,7 +215,13 @@ const {
   criarWebhookMercadoPago,
   iniciarSchedulerReconciliacaoMercadoPago
 } = require("./modules/financeiro/mercadopago.routes");
-const { publicarOfertaConfirmadaVitrine } = require("./modules/vitrine/hook");
+const {
+  montarOfertaVitrine,
+  publicarOfertaConfirmadaVitrine
+} = require("./modules/vitrine/hook");
+const {
+  upsertOfertaVitrine
+} = require("./modules/vitrine/storage");
 const {
   capturarOfertaComercialConfirmadaVitrine,
   montarOfertaParaVitrinePosEnvio
@@ -21956,11 +21962,14 @@ app.use("/manual-v2", criarRotasManualV2({
   sessoes,
   statusSessao,
   getPlanoUsuario,
+  clienteTemRecurso: clienteTemRecursoPlano,
   usuarioTemCreditos,
   debitarCreditos,
   montarMensagemOferta,
   resolverLinkOfertaPorDestino,
   gerarLinkAfiliadoCliente: gerarLinkAfiliadoClienteManualV2,
+  montarOfertaVitrine,
+  upsertOfertaVitrine,
   getIntegracaoCliente,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,

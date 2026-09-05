@@ -10,6 +10,7 @@ const {
 } = require("./manual-offers.contract");
 
 const ARQUIVO_OFERTAS_MANUAL_V2 = "manual_ofertas_v2.json";
+const ARQUIVO_CONFIG_MANUAL_V2 = "manual_config_v2.json";
 
 function agoraIso() {
   return new Date().toISOString();
@@ -39,6 +40,19 @@ function listaTexto(valor) {
   return lista(valor)
     .map(texto)
     .filter(Boolean);
+}
+
+function normalizarConfigManualV2(config = {}) {
+  const automacoes = config && typeof config === "object" ? config.automacoesNovasOfertas || {} : {};
+  const vitrine = automacoes && typeof automacoes === "object" ? automacoes.vitrine || {} : {};
+
+  return {
+    automacoesNovasOfertas: {
+      vitrine: {
+        ativa: vitrine.ativa === true
+      }
+    }
+  };
 }
 
 function sanitizarDestinoEscolhido(destino = {}) {
@@ -168,6 +182,21 @@ function salvarListaCliente(clienteId = "admin", lista = [], deps = {}) {
 
 function listarOfertasManuaisV2(clienteId = "admin", deps = {}) {
   return lerListaCliente(clienteId, deps);
+}
+
+function lerConfigManualV2(clienteId = "admin", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const config = storage.readClienteJson(id, ARQUIVO_CONFIG_MANUAL_V2, {});
+  return normalizarConfigManualV2(config);
+}
+
+function salvarConfigManualV2(clienteId = "admin", entrada = {}, deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const config = normalizarConfigManualV2(entrada?.config || entrada || {});
+  storage.writeClienteJson(id, ARQUIVO_CONFIG_MANUAL_V2, config);
+  return config;
 }
 
 function buscarOfertaManualV2(clienteId = "admin", ofertaId = "", deps = {}) {
@@ -455,7 +484,11 @@ function cancelarAgendamentoOfertaManualV2(clienteId = "admin", ofertaId = "", d
 
 module.exports = {
   ARQUIVO_OFERTAS_MANUAL_V2,
+  ARQUIVO_CONFIG_MANUAL_V2,
+  normalizarConfigManualV2,
   listarOfertasManuaisV2,
+  lerConfigManualV2,
+  salvarConfigManualV2,
   buscarOfertaManualV2,
   criarOfertaManualV2,
   atualizarOfertaManualV2,

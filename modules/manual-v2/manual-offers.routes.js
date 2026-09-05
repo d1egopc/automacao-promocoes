@@ -17,6 +17,8 @@ const {
 const {
   gerarPreviewCaptureManualV2
 } = require("./manual-capture.service");
+const vitrineHookPadrao = require("../vitrine/hook");
+const vitrineStoragePadrao = require("../vitrine/storage");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -156,6 +158,13 @@ function bloquearAgendamentoPorStatus(oferta = {}) {
   }
 }
 
+function diagnosticoVitrinePublicacao(resultado = {}) {
+  return {
+    ok: resultado.ok === true,
+    motivo: texto(resultado.motivo || (resultado.ok === true ? "publicada" : "vitrine_nao_publicada"))
+  };
+}
+
 function criarRotasManualV2(deps = {}) {
   const router = express.Router();
   const getClienteId = typeof deps.getClienteId === "function" ? deps.getClienteId : () => "admin";
@@ -175,6 +184,8 @@ function criarRotasManualV2(deps = {}) {
     : gerarPreviewCaptureManualV2;
   const storage = {
     listarOfertasManuaisV2: deps.listarOfertasManuaisV2 || storagePadrao.listarOfertasManuaisV2,
+    lerConfigManualV2: deps.lerConfigManualV2 || storagePadrao.lerConfigManualV2,
+    salvarConfigManualV2: deps.salvarConfigManualV2 || storagePadrao.salvarConfigManualV2,
     buscarOfertaManualV2: deps.buscarOfertaManualV2 || storagePadrao.buscarOfertaManualV2,
     criarOfertaManualV2: deps.criarOfertaManualV2 || storagePadrao.criarOfertaManualV2,
     atualizarOfertaManualV2: deps.atualizarOfertaManualV2 || storagePadrao.atualizarOfertaManualV2,
@@ -208,6 +219,52 @@ function criarRotasManualV2(deps = {}) {
       return deps.getDestinosPorCliente() || {};
     }
     return deps.destinosPorCliente || {};
+  }
+
+  function derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta) {
+    const logger = deps.logger || console;
+
+    try {
+      const config = storage.lerConfigManualV2(clienteId, deps.storageOptions || {});
+      if (config.automacoesNovasOfertas?.vitrine?.ativa !== true) {
+        return { acionada: false, ok: false, motivo: "manual_v2_vitrine_flag_inativa" };
+      }
+
+      const temRecurso = typeof deps.clienteTemRecurso === "function"
+        ? deps.clienteTemRecurso(clienteId, "vitrine")
+        : false;
+      if (temRecurso !== true) {
+        return { acionada: true, ok: false, motivo: "recurso_indisponivel" };
+      }
+
+      const montarOfertaVitrine = typeof deps.montarOfertaVitrine === "function"
+        ? deps.montarOfertaVitrine
+        : vitrineHookPadrao.montarOfertaVitrine;
+      const upsertOfertaVitrine = typeof deps.upsertOfertaVitrine === "function"
+        ? deps.upsertOfertaVitrine
+        : vitrineStoragePadrao.upsertOfertaVitrine;
+      if (typeof montarOfertaVitrine !== "function" || typeof upsertOfertaVitrine !== "function") {
+        return { acionada: true, ok: false, motivo: "vitrine_indisponivel" };
+      }
+
+      const ofertaVitrine = montarOfertaVitrine(oferta);
+      const resultado = upsertOfertaVitrine(clienteId, ofertaVitrine, deps.vitrineStorageOptions || deps.storageOptions || {});
+      return {
+        acionada: true,
+        ok: resultado?.ok === true,
+        motivo: resultado?.motivo || (resultado?.ok === true ? "publicada" : "vitrine_nao_publicada")
+      };
+    } catch (e) {
+      if (logger && typeof logger.warn === "function") {
+        logger.warn("[MANUAL-V2-VITRINE-DERIVACAO-FALHA]", {
+          clienteId,
+          ofertaId: texto(oferta?.id || oferta?.ofertaId || ""),
+          marketplace: texto(oferta?.marketplace || ""),
+          motivo: "manual_v2_vitrine_derivacao_falhou"
+        });
+      }
+      return { acionada: true, ok: false, motivo: "manual_v2_vitrine_derivacao_falhou" };
+    }
   }
 
   function depsDestinos(req, clienteId) {
@@ -395,13 +452,43 @@ function criarRotasManualV2(deps = {}) {
     }
   });
 
+  router.get("/config", (req, res) => {
+    try {
+      const config = storage.lerConfigManualV2(cliente(req), deps.storageOptions || {});
+      return res.json({
+        ok: true,
+        config
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_config_falhou"));
+    }
+  });
+
+  router.put("/config", (req, res) => {
+    try {
+      const config = storage.salvarConfigManualV2(cliente(req), req.body?.config || req.body || {}, deps.storageOptions || {});
+      return res.json({
+        ok: true,
+        config
+      });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_config_salvar_falhou"));
+    }
+  });
+
   router.post("/ofertas", (req, res) => {
     try {
-      const oferta = storage.criarOfertaManualV2(cliente(req), req.body?.oferta || req.body || {}, deps.storageOptions || {});
-      return res.status(201).json({
+      const clienteId = cliente(req);
+      const oferta = storage.criarOfertaManualV2(clienteId, req.body?.oferta || req.body || {}, deps.storageOptions || {});
+      const vitrinePublicacao = derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta);
+      const resposta = {
         ok: true,
         oferta
-      });
+      };
+      if (vitrinePublicacao.acionada === true) {
+        resposta.vitrinePublicacao = diagnosticoVitrinePublicacao(vitrinePublicacao);
+      }
+      return res.status(201).json(resposta);
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_criacao_falhou"));
     }
