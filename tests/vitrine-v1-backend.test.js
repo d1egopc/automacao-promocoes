@@ -168,7 +168,7 @@ async function main() {
 
   const agora = Date.now();
   const ofertas = [];
-  for (let i = 0; i < 110; i += 1) {
+  for (let i = 0; i < 192; i += 1) {
     ofertas.push({
       id: `oferta-${i}`,
       titulo: `Oferta ${i}`,
@@ -193,16 +193,28 @@ async function main() {
   });
 
   const retidas = storage.aplicarRetencaoOfertas(ofertas, agora);
-  assert.strictEqual(retidas.length, storage.VITRINE_MAX_OFERTAS, "Retencao deve limitar a 100 ofertas");
+  assert.strictEqual(retidas.length, storage.VITRINE_MAX_OFERTAS, "Retencao deve limitar a 192 ofertas");
   assert.ok(!retidas.some((oferta) => oferta.id === "velha"), "Retencao deve remover ofertas acima de 72h");
+  const comExcedente = storage.aplicarRetencaoOfertas([
+    {
+      id: "oferta-193",
+      titulo: "Oferta 193",
+      ultimoEnvioEm: new Date(agora + 1000).toISOString()
+    },
+    ...ofertas
+  ], agora + 1000);
+  assert.strictEqual(comExcedente.length, storage.VITRINE_MAX_OFERTAS, "Hard cap deve continuar limitando o estoque publico");
+  assert.strictEqual(comExcedente[0].id, "oferta-193", "Oferta 193 deve entrar no topo");
+  assert.ok(!comExcedente.some((oferta) => oferta.id === "oferta-191"), "Hard cap deve remover a mais antiga elegivel quando cheio");
   assert.ok(!retidas.some((oferta) => oferta.clienteId || oferta.engineJobId || oferta.token), "Payload publico deve ser sanitizado");
   assert.strictEqual(retidas[0].linksComerciais.length, 1, "CTA comercial publico deve usar apenas redirect Optimus");
   assert.strictEqual(retidas[0].linksComerciais[0].url, "https://go.optimuspromo.com.br/r/abc123");
-  const pagina = storage.paginarOfertasPublicas(ofertas, { page: 2, limit: 20 });
-  assert.strictEqual(pagina.ofertas.length, 20, "Paginacao publica deve respeitar limit");
+  const pagina = storage.paginarOfertasPublicas(ofertas, { page: 2, limit: 24 });
+  assert.strictEqual(pagina.ofertas.length, 24, "Paginacao publica deve respeitar limit");
   assert.strictEqual(pagina.pagination.page, 2);
   assert.strictEqual(pagina.pagination.total, storage.VITRINE_MAX_OFERTAS);
-  assert.strictEqual(pagina.ofertas[0].id, "oferta-20", "Pagina 2 deve continuar ordenada por ofertas mais novas");
+  assert.strictEqual(pagina.pagination.totalPages, 8, "192 ofertas com limit 24 devem resultar em 8 paginas");
+  assert.strictEqual(pagina.ofertas[0].id, "oferta-24", "Pagina 2 deve continuar ordenada por ofertas mais novas");
 
   const upsertDeps = criarDeps();
   storage.salvarConfigVitrine("cliente-upsert", { ativa: true, slug: "upsert", nomePublico: "Upsert" }, upsertDeps);
@@ -280,12 +292,13 @@ async function main() {
 
   const appPublico = express();
   appPublico.use(criarRotasVitrine({ publico: true, ...deps }));
-  const publicoOk = await request(appPublico, "GET", "/v/loja-a?page=2&limit=20");
+  const publicoOk = await request(appPublico, "GET", "/v/loja-a?page=2&limit=24");
   assert.strictEqual(publicoOk.status, 200);
   assert.strictEqual(publicoOk.body.vitrine.slug, "loja-a");
-  assert.strictEqual(publicoOk.body.vitrine.ofertas.length, 20);
+  assert.strictEqual(publicoOk.body.vitrine.ofertas.length, 24);
   assert.strictEqual(publicoOk.body.vitrine.pagination.page, 2);
   assert.strictEqual(publicoOk.body.vitrine.pagination.total, storage.VITRINE_MAX_OFERTAS);
+  assert.strictEqual(publicoOk.body.vitrine.pagination.totalPages, 8);
 
   const publicoInativo = await request(appPublico, "GET", "/v/loja-inativa");
   assert.strictEqual(publicoInativo.status, 404);

@@ -3,7 +3,7 @@
 const ARQUIVO_VITRINE = "vitrine.json";
 const ARQUIVO_SLUGS = "vitrine-slugs.json";
 const VITRINE_RETENCAO_MS = 72 * 60 * 60 * 1000;
-const VITRINE_MAX_OFERTAS = 100;
+const VITRINE_MAX_OFERTAS = 192;
 const VITRINE_LIMIT_PADRAO = 20;
 const VITRINE_LIMIT_MAXIMO = 50;
 
