@@ -7394,21 +7394,65 @@ function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
   const hoje = dataBRHoje();
   const nomeDestino = destinoNomeLog(destinoSeguro);
   const idDestino = String(destinoSeguro.id || destinoSeguro.conexaoId || destinoSeguro.chatId || "");
+  const filaCliente = fila.filter(item => String(item.clienteId || "admin") === String(clienteId));
+  let usados = 0;
+  let quantidadeMatchesPorNome = 0;
+  let quantidadeMatchesPorId = 0;
+  let quantidadeMatchesNomeEIdMesmoRegistro = 0;
+  const ofertasDistintasComMatch = new Set();
+  const statusDosItensComMatch = {};
+  let menorDataMatch = "";
+  let maiorDataMatch = "";
 
-  return fila.filter(item => String(item.clienteId || "admin") === String(clienteId))
-    .flatMap(item => Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [])
-    .filter(envio => {
+  filaCliente.forEach((item, indiceItem) => {
+    const destinosEnviados = Array.isArray(item.destinosEnviados) ? item.destinosEnviados : [];
+    destinosEnviados.forEach(envio => {
       const data = String(envio.dataEnvio || envio.data || "");
-      if (!data.includes(hoje)) return false;
+      if (!data.includes(hoje)) return;
 
       const nomeEnvio = String(envio.nome || envio.destino || "");
       const idEnvio = String(envio.id || envio.destinoId || envio.conexaoId || envio.chatId || envio.grupo || "");
+      const matchNome = nomeEnvio === nomeDestino;
+      const matchId = Boolean(idDestino && idEnvio === idDestino);
+      const matchTotal = matchNome || matchId;
 
-      return (
-        nomeEnvio === nomeDestino ||
-        (idDestino && idEnvio === idDestino)
-      );
-    }).length;
+      if (matchNome) quantidadeMatchesPorNome += 1;
+      if (matchId) quantidadeMatchesPorId += 1;
+      if (matchNome && matchId) quantidadeMatchesNomeEIdMesmoRegistro += 1;
+      if (!matchTotal) return;
+
+      usados += 1;
+      const chaveOferta = item.id || item.filaItemId || item.engineOfertaId || indiceItem;
+      ofertasDistintasComMatch.add(String(chaveOferta));
+      const statusItem = String(item.status || item.estado || "sem_status").trim().toLowerCase() || "sem_status";
+      statusDosItensComMatch[statusItem] = (statusDosItensComMatch[statusItem] || 0) + 1;
+      if (!menorDataMatch || data < menorDataMatch) menorDataMatch = data;
+      if (!maiorDataMatch || data > maiorDataMatch) maiorDataMatch = data;
+    });
+  });
+
+  if (usados > 0) {
+    console.log("[EXECUTOR-LIMITE-DIARIO-DIAGNOSTICO]", {
+      clienteId,
+      destinoId: idDestino,
+      destinoNome: nomeDestino,
+      tipoDestino: String(destinoSeguro.tipo || destinoSeguro.canal || destinoSeguro.tipoMidia || destinoSeguro.destinoTipo || ""),
+      dataBR: hoje,
+      usados,
+      quantidadeItensFilaCliente: filaCliente.length,
+      quantidadeItensComDestinosEnviados: filaCliente.filter(item => Array.isArray(item.destinosEnviados) && item.destinosEnviados.length > 0).length,
+      quantidadeMatchesPorNome,
+      quantidadeMatchesPorId,
+      quantidadeMatchesTotal: usados,
+      quantidadeMatchesNomeEIdMesmoRegistro,
+      quantidadeOfertasDistintasComMatch: ofertasDistintasComMatch.size,
+      statusDosItensComMatch,
+      menorDataMatch,
+      maiorDataMatch
+    });
+  }
+
+  return usados;
 }
 
 function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
