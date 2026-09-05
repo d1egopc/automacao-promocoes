@@ -223,6 +223,7 @@ function criarRotasManualV2(deps = {}) {
 
   function derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta) {
     const logger = deps.logger || console;
+    let etapa = "config";
 
     try {
       const config = storage.lerConfigManualV2(clienteId, deps.storageOptions || {});
@@ -230,6 +231,7 @@ function criarRotasManualV2(deps = {}) {
         return { acionada: false, ok: false, motivo: "manual_v2_vitrine_flag_inativa" };
       }
 
+      etapa = "feature_gate";
       const temRecurso = typeof deps.clienteTemRecurso === "function"
         ? deps.clienteTemRecurso(clienteId, "vitrine")
         : false;
@@ -237,6 +239,7 @@ function criarRotasManualV2(deps = {}) {
         return { acionada: true, ok: false, motivo: "recurso_indisponivel" };
       }
 
+      etapa = "dependencias";
       const montarOfertaVitrine = typeof deps.montarOfertaVitrine === "function"
         ? deps.montarOfertaVitrine
         : vitrineHookPadrao.montarOfertaVitrine;
@@ -247,7 +250,9 @@ function criarRotasManualV2(deps = {}) {
         return { acionada: true, ok: false, motivo: "vitrine_indisponivel" };
       }
 
+      etapa = "montar";
       const ofertaVitrine = montarOfertaVitrine(oferta);
+      etapa = "upsert";
       const resultado = upsertOfertaVitrine(clienteId, ofertaVitrine, deps.vitrineStorageOptions || deps.storageOptions || {});
       return {
         acionada: true,
@@ -260,6 +265,9 @@ function criarRotasManualV2(deps = {}) {
           clienteId,
           ofertaId: texto(oferta?.id || oferta?.ofertaId || ""),
           marketplace: texto(oferta?.marketplace || ""),
+          etapa,
+          errorName: texto(e?.name || "Error").slice(0, 80),
+          errorMessage: texto(e?.message || "erro").slice(0, 180),
           motivo: "manual_v2_vitrine_derivacao_falhou"
         });
       }

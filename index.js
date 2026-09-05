@@ -21970,6 +21970,10 @@ app.use("/manual-v2", criarRotasManualV2({
   gerarLinkAfiliadoCliente: gerarLinkAfiliadoClienteManualV2,
   montarOfertaVitrine,
   upsertOfertaVitrine,
+  vitrineStorageOptions: {
+    readClienteJson,
+    writeClienteJson
+  },
   getIntegracaoCliente,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,

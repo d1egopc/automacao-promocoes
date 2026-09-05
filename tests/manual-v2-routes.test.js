@@ -7,7 +7,9 @@ const express = require("express");
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-manual-v2-routes-"));
 
 const {
-  getClienteJsonPath
+  getClienteJsonPath,
+  readClienteJson,
+  writeClienteJson
 } = require("../utils/storage");
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
 const {
@@ -361,6 +363,92 @@ try {
       assert.strictEqual(chamadasVitrine.length, 1, "sem recurso oficial vitrine nao chama upsert");
     } finally {
       await new Promise(resolve => serverVitrine.close(resolve));
+    }
+  }
+
+  {
+    const chamadasStorageVitrine = [];
+    let seqVitrineReal = 0;
+    const vitrineStorageOptions = {
+      readClienteJson: (clienteId, arquivo, fallback) => {
+        chamadasStorageVitrine.push({ tipo: "read", clienteId, arquivo });
+        return readClienteJson(clienteId, arquivo, fallback);
+      },
+      writeClienteJson: (clienteId, arquivo, dados) => {
+        chamadasStorageVitrine.push({ tipo: "write", clienteId, arquivo });
+        return writeClienteJson(clienteId, arquivo, dados);
+      }
+    };
+    const appVitrineReal = criarApp([], {
+      now: () => "2026-08-14T16:20:00.000Z",
+      idFactory: () => `manual_v2_vitrine_real_${++seqVitrineReal}`
+    }, {
+      clienteTemRecurso: (clienteId, recurso) =>
+        ["cliente_vitrine_real", "cliente_vitrine_inativa"].includes(clienteId) && recurso === "vitrine",
+      vitrineStorageOptions
+    });
+    const serverVitrineReal = await ouvir(appVitrineReal);
+
+    try {
+      writeClienteJson("cliente_vitrine_real", "vitrine.json", {
+        config: {
+          ativa: true,
+          slug: "cliente-vitrine-real",
+          nomePublico: "Cliente Vitrine Real"
+        },
+        ofertas: []
+      });
+      await request(serverVitrineReal, "PUT", "/manual-v2/config", "cliente_vitrine_real", {
+        automacoesNovasOfertas: {
+          vitrine: { ativa: true }
+        }
+      });
+
+      const criadaComStorageReal = await request(serverVitrineReal, "POST", "/manual-v2/ofertas", "cliente_vitrine_real", {
+        marketplace: "mercadolivre",
+        titulo: "Oferta com storage real",
+        precoAtual: "88,88",
+        linkAfiliado: "https://go.optimuspromo.com.br/r/manual-v2-vitrine-real"
+      });
+      assert.strictEqual(criadaComStorageReal.status, 201);
+      assert.deepStrictEqual(criadaComStorageReal.body.vitrinePublicacao, {
+        ok: true,
+        motivo: "publicada"
+      });
+      assert.ok(
+        chamadasStorageVitrine.some((chamada) =>
+          chamada.tipo === "read" &&
+          chamada.clienteId === "cliente_vitrine_real" &&
+          chamada.arquivo === "vitrine.json"
+        ),
+        "readClienteJson oficial deve chegar ao upsert real da Vitrine"
+      );
+      assert.ok(
+        chamadasStorageVitrine.some((chamada) =>
+          chamada.tipo === "write" &&
+          chamada.clienteId === "cliente_vitrine_real" &&
+          chamada.arquivo === "vitrine.json"
+        ),
+        "writeClienteJson oficial deve chegar ao upsert real da Vitrine"
+      );
+
+      await request(serverVitrineReal, "PUT", "/manual-v2/config", "cliente_vitrine_inativa", {
+        automacoesNovasOfertas: {
+          vitrine: { ativa: true }
+        }
+      });
+      const criadaComVitrineInativa = await request(serverVitrineReal, "POST", "/manual-v2/ofertas", "cliente_vitrine_inativa", {
+        marketplace: "amazon",
+        titulo: "Oferta com vitrine inativa",
+        precoAtual: "44,44"
+      });
+      assert.strictEqual(criadaComVitrineInativa.status, 201);
+      assert.deepStrictEqual(criadaComVitrineInativa.body.vitrinePublicacao, {
+        ok: false,
+        motivo: "vitrine_inativa"
+      });
+    } finally {
+      await new Promise(resolve => serverVitrineReal.close(resolve));
     }
   }
 
