@@ -619,6 +619,12 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelFonte.includes("AMAZON_RETRY_DELAYS_MS"));
     assert.ok(panelFonte.includes("[OPTIMUS-CAPTURE-TIMING]"));
     assert.ok(panelHtml.includes("../assets/logo-optimus.png"));
+    const manifestJson = JSON.parse(manifestFonte);
+    for (const size of ["16", "32", "48", "128"]) {
+      assert.strictEqual(manifestJson.icons[size], `assets/icon-${size}.png`);
+      assert.strictEqual(manifestJson.action.default_icon[size], `assets/icon-${size}.png`);
+      assert.ok(fs.existsSync(path.join(raiz, "assets", `icon-${size}.png`)));
+    }
     assert.ok(panelHtml.includes('id="emptyView"'));
     assert.ok(panelHtml.includes("MONITORANDO A ABA ATUAL"));
     assert.ok(panelHtml.includes("scanner-lupa"));

@@ -3,8 +3,20 @@
   "name": "Optimus Capture",
   "description": "Capture produtos abertos no navegador e gere preview no Optimus Promo.",
   "version": "0.1.0",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
   "action": {
-    "default_title": "Optimus Capture"
+    "default_title": "Optimus Capture",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
   },
   "background": {
     "service_worker": "background/service-worker.js"
