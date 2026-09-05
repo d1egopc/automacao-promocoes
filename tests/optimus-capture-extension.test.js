@@ -605,6 +605,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden'));
     assert.ok(panelHtml.includes('id="botaoSalvar" disabled'));
     assert.ok(panelHtml.includes('id="botaoEnviar" disabled'));
+    assert.ok(!panelHtml.includes("botaoConfirmarEnvio"));
+    assert.ok(!panelHtml.includes("Confirmar envio"));
     assert.ok(!panelHtml.includes("botaoCapturar"));
     assert.ok(!panelFonte.includes("botaoCapturar"));
     assert.ok(!panelHtml.includes("Atualizar captura"));
@@ -1608,6 +1610,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     let falharSave = false;
     let falharEnvio = false;
     let resolverSavePendente = null;
+    let envioPendente = false;
+    let liberarEnvioPendente = null;
     const payloadsPreview = [];
     const ofertasSalvas = [];
     const enviosPayloads = [];
@@ -1717,6 +1721,13 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
           assert.strictEqual(token, "jwt_teste");
           envios += 1;
           enviosPayloads.push({ ofertaId, destinosIds });
+          if (envioPendente) {
+            await new Promise((resolve) => {
+              liberarEnvioPendente = resolve;
+            });
+            envioPendente = false;
+            liberarEnvioPendente = null;
+          }
           if (falharEnvio) {
             const erro = new Error("envio_temporario");
             erro.status = 409;
@@ -1778,18 +1789,23 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(destinosRequests, 1);
+    assert.strictEqual(envios, 0, "primeiro clique em Enviar agora apenas abre destinos");
     assert.strictEqual(elemento("destinosView").hidden, false);
     assert.strictEqual(elemento("destinosLista").children.length, 3);
     const destinoWa = elemento("destinosLista").children[0].children[0];
     const destinoTg = elemento("destinosLista").children[1].children[0];
     const destinoDiscordOff = elemento("destinosLista").children[2].children[0];
     assert.strictEqual(destinoDiscordOff.disabled, true);
+    assert.strictEqual(elemento("botaoEnviar").disabled, true);
+    await elemento("botaoEnviar").listeners.click();
+    assert.strictEqual(envios, 0, "sem destino selecionado nao deve enviar");
+    assert.strictEqual(elemento("statusLink").textContent, "Selecione ao menos um destino.");
     destinoWa.checked = true;
     destinoWa.listeners.change();
     destinoTg.checked = true;
     destinoTg.listeners.change();
-    assert.strictEqual(elemento("botaoConfirmarEnvio").disabled, false);
-    await elemento("botaoConfirmarEnvio").listeners.click();
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+    await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(envios, 1);
     assert.strictEqual(enviosPayloads[0].ofertaId, "manual_salvo_1");
     assert.deepStrictEqual(Array.from(enviosPayloads[0].destinosIds), ["wa_ok", "tg_ok"]);
@@ -1798,7 +1814,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 2 destino(s)");
     assert.strictEqual(elemento("botaoEnviar").disabled, true);
     assert.strictEqual(elemento("botaoEnviar").textContent, "Enviado");
-    await elemento("botaoConfirmarEnvio").listeners.click();
+    await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(envios, 1, "mesmo preview enviado nao deve enviar novamente");
 
     onUpdated(1, { status: "complete" });
@@ -1828,7 +1844,13 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     await elemento("botaoEnviar").listeners.click();
     elemento("destinosLista").children[0].children[0].checked = true;
     elemento("destinosLista").children[0].children[0].listeners.change();
-    await elemento("botaoConfirmarEnvio").listeners.click();
+    envioPendente = true;
+    const primeiroEnvio = elemento("botaoEnviar").listeners.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const segundoEnvio = elemento("botaoEnviar").listeners.click();
+    assert.strictEqual(envios, 2, "duplo clique em Enviar agora durante envio nao deve duplicar POST");
+    liberarEnvioPendente();
+    await Promise.all([primeiroEnvio, segundoEnvio]);
     assert.strictEqual(envios, 2);
     assert.strictEqual(saves, 2, "preview nao salvo deve ser salvo uma unica vez antes do envio");
     assert.strictEqual(enviosPayloads[1].ofertaId, "manual_salvo_2");
@@ -1875,13 +1897,13 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     await elemento("botaoEnviar").listeners.click();
     elemento("destinosLista").children[0].children[0].checked = true;
     elemento("destinosLista").children[0].children[0].listeners.change();
-    await elemento("botaoConfirmarEnvio").listeners.click();
+    await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(saves, 5);
     assert.strictEqual(envios, 3);
     assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_5");
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel enviar: envio_temporario");
     falharEnvio = false;
-    await elemento("botaoConfirmarEnvio").listeners.click();
+    await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(saves, 5, "falha no envio preserva ID salvo para retry seguro");
     assert.strictEqual(envios, 4);
     assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");

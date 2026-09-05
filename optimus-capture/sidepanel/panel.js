@@ -144,23 +144,24 @@
       : (salvo ? "Salvo no Optimus" : "Salvar no Optimus");
   }
 
-  function atualizarBotaoConfirmarEnvio() {
-    const botao = el("botaoConfirmarEnvio");
-    if (!botao) return;
-    botao.disabled = state.enviandoAgora || state.destinosSelecionados.size < 1;
-    botao.textContent = state.enviandoAgora ? "Enviando..." : "Confirmar envio";
-  }
-
   function atualizarBotaoEnviar() {
     const botao = el("botaoEnviar");
     if (!botao) return;
     const temPreview = Boolean(state.previewOferta && state.previewKey);
     const enviado = previewEnviadoAtual();
-    botao.disabled = !temPreview || state.enviandoAgora || state.carregandoDestinos || enviado;
+    const destinosView = el("destinosView");
+    const seletorAberto = Boolean(destinosView && !destinosView.hidden);
+    const idsUtilizaveis = new Set(destinosUtilizaveis().map((destino) => destino.id));
+    const temDestinoSelecionado = Array.from(state.destinosSelecionados).some((id) => idsUtilizaveis.has(id));
+    botao.disabled = !temPreview ||
+      state.enviandoAgora ||
+      state.carregandoDestinos ||
+      enviado ||
+      (seletorAberto && !temDestinoSelecionado);
     botao.dataset.estado = enviado ? "salvo" : (state.enviandoAgora ? "salvando" : "");
     botao.textContent = state.enviandoAgora
       ? "Enviando..."
-      : (enviado ? "Enviado" : "Enviar agora");
+      : (state.carregandoDestinos ? "Carregando..." : (enviado ? "Enviado" : "Enviar agora"));
     botao.title = enviado ? "Oferta ja enviada para o preview atual" : "";
   }
 
@@ -169,7 +170,7 @@
     const lista = el("destinosLista");
     if (lista) lista.innerHTML = "";
     state.destinosSelecionados = new Set();
-    atualizarBotaoConfirmarEnvio();
+    atualizarBotaoEnviar();
   }
 
   function limparPreviewAtual() {
@@ -262,7 +263,7 @@
       vazio.className = "destino-vazio";
       vazio.textContent = "Carregando destinos...";
       lista.append(vazio);
-      atualizarBotaoConfirmarEnvio();
+      atualizarBotaoEnviar();
       return;
     }
 
@@ -271,7 +272,7 @@
       vazio.className = "destino-vazio";
       vazio.textContent = "Nenhum destino disponivel.";
       lista.append(vazio);
-      atualizarBotaoConfirmarEnvio();
+      atualizarBotaoEnviar();
       return;
     }
 
@@ -291,7 +292,7 @@
         } else {
           state.destinosSelecionados.delete(destino.id);
         }
-        atualizarBotaoConfirmarEnvio();
+        atualizarBotaoEnviar();
       });
 
       const textoDestino = document.createElement("span");
@@ -307,7 +308,7 @@
       lista.append(label);
     }
 
-    atualizarBotaoConfirmarEnvio();
+    atualizarBotaoEnviar();
   }
 
   function limparCapturaAgendada() {
@@ -778,7 +779,7 @@
     const destinosIds = Array.from(state.destinosSelecionados).filter((id) => idsUtilizaveis.has(id));
     if (!destinosIds.length) {
       setTexto("statusLink", "Selecione ao menos um destino.");
-      atualizarBotaoConfirmarEnvio();
+      atualizarBotaoEnviar();
       return;
     }
 
@@ -787,7 +788,6 @@
     setTexto("statusLink", "Enviando...");
     atualizarBotaoEnviar();
     atualizarBotaoSalvar();
-    atualizarBotaoConfirmarEnvio();
 
     try {
       const ofertaId = await salvarPreviewAtual();
@@ -817,8 +817,20 @@
       state.enviandoAgora = false;
       atualizarBotaoEnviar();
       atualizarBotaoSalvar();
-      atualizarBotaoConfirmarEnvio();
     }
+  }
+
+  async function acionarEnviarAgora() {
+    if (!state.auth?.token || !state.previewOferta || !state.previewKey || state.enviandoAgora || previewEnviadoAtual()) {
+      atualizarBotaoEnviar();
+      return;
+    }
+    const destinosView = el("destinosView");
+    if (!destinosView || destinosView.hidden) {
+      await abrirSeletorEnvio();
+      return;
+    }
+    await confirmarEnviarAgora();
   }
 
   function renderAuth() {
@@ -916,8 +928,7 @@
     el("botaoSair").addEventListener("click", sair);
     el("botaoPreview").addEventListener("click", gerarPreview);
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
-    el("botaoEnviar").addEventListener("click", abrirSeletorEnvio);
-    el("botaoConfirmarEnvio").addEventListener("click", confirmarEnviarAgora);
+    el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     try {
       state.auth = await auth.restaurarSessao();
