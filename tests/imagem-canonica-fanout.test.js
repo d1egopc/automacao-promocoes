@@ -1236,6 +1236,314 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(itemFila.linkAfiliado, "https://meli.la/workspace-d1");
   }
 
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const saveCount = { count: 0 };
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9820,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-1010101010-produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-ml")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB1010101010",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-1010101010-produto"
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      storage: storageDuravel(saveCount, "radar-thumbnail-ml-materializada"),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-ml-materializada"));
+    assert.strictEqual(resultado.imagemOrigem, "radar_mirror/thumbnail");
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const imagemLimpaMl = "https://http2.mlstatic.com/D_NQ_NP_2X_101010-MLB2020202020_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9821,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-2020202020-produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-nao-usar-ml")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB2020202020",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-2020202020-produto",
+        imagemCandidatos: [
+          { url: imagemLimpaMl, origem: "pictures.secure_url", produtoIdDetectado: "MLB2020202020", width: 640, height: 640 }
+        ]
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, imagemLimpaMl);
+    assert.strictEqual(resultado.imagemOrigem, "imagemCandidatos[0].url");
+    assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const radarMensagem = url("radar-mensagem-prioritaria");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9822,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3030303030-produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMensagem,
+            imagemOriginal: mmg("radar-thumbnail-nao-prioriza")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB3030303030",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-3030303030-produto"
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMensagem);
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
+    assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const thumbnailMl = "https://http2.mlstatic.com/D_NQ_NP_2X_202020-MLB4040404040_012026-T.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9823,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-4040404040-produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-apos-ml-thumb")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB4040404040",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-4040404040-produto",
+        imagem: thumbnailMl,
+        imagemOrigem: "secure_thumbnail"
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, thumbnailMl);
+    assert.strictEqual(resultado.imagemStatus, "mercadolivre_thumbnail_fallback");
+    assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9824,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-5050505050-produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-falha")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB5050505050",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-5050505050-produto"
+      }
+    }, {
+      fetchImpl: fetchImagemInvalida(fetchCount),
+      storage: storageSemImagem(),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const saveCount = { count: 0 };
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9825,
+      marketplace: "amazon",
+      linksExtraidos: ["https://link.amazon/B0TESTE"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-amazon")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "amazon",
+        linkAfiliado: "https://link.amazon/B0TESTE?tag=d1egopcoff-20"
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount),
+      storage: storageDuravel(saveCount, "radar-thumbnail-amazon-materializada")
+    });
+
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-amazon-materializada"));
+    assert.strictEqual(resultado.imagemOrigem, "radar_mirror/thumbnail");
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9826,
+      marketplace: "amazon",
+      linksExtraidos: ["https://www.amazon.com.br/dp/B0TESTE"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-amazon-nao-usar")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "amazon",
+        imagem: url("amazon-adapter-boa"),
+        imagemOrigem: "jsonLd.image"
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount)
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("amazon-adapter-boa"));
+    assert.strictEqual(resultado.imagemOrigem, "imagem");
+    assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const fetchCount = { count: 0 };
+    const cacheBom = url("cache-bom-outro-marketplace");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9827,
+      marketplace: "shopee",
+      linksExtraidos: ["https://shopee.com.br/produto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "thumbnail",
+            imagemOriginal: mmg("radar-thumbnail-cache-nao-usar")
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "shopee",
+        metadata: {
+          imagemCacheCanonico: {
+            imagemCanonicaDuravel: cacheBom,
+            imagemOrigem: "imagem",
+            imagemStatus: "preservada",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    }, {
+      fetchImpl: fetchImagemOk(fetchCount)
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, cacheBom);
+    assert.strictEqual(resultado.cacheHit, true);
+    assert.strictEqual(fetchCount.count, 0);
+  }
+
   console.log("imagem-canonica-fanout.test.js OK");
 })().catch((e) => {
   console.error(e);

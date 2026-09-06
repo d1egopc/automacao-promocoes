@@ -106,9 +106,18 @@ function origemRadarMensagem(radarMirror = {}) {
   return origem === "mensagem" || origem === "radar_mirror/mensagem";
 }
 
-function encontrarImagemRadarMirrorMensagem(metadataEvento = {}) {
+function origemRadarThumbnail(radarMirror = {}) {
+  const midia = objetoSeguro(radarMirror.midia);
+  const origem = texto(midia.imagemOrigem || radarMirror.imagemOrigem).toLowerCase();
+  return origem === "thumbnail" || origem === "radar_mirror/thumbnail";
+}
+
+function encontrarImagemRadarMirror(metadataEvento = {}, { permitirThumbnailFallback = false } = {}) {
   const radarMirror = objetoSeguro(metadataEvento.radarMirror);
-  if (!origemRadarMensagem(radarMirror)) return { radarMirror: null, imagemOriginal: "" };
+  const origem = origemRadarMensagem(radarMirror)
+    ? "radar_mirror/mensagem"
+    : (permitirThumbnailFallback && origemRadarThumbnail(radarMirror) ? "radar_mirror/thumbnail" : "");
+  if (!origem) return { radarMirror: null, imagemOriginal: "", origem: "" };
   const midia = objetoSeguro(radarMirror.midia);
   const imagemOriginal = texto(
     midia.imagemMaterializada ||
@@ -124,7 +133,11 @@ function encontrarImagemRadarMirrorMensagem(metadataEvento = {}) {
     midia.imagemUrl ||
     radarMirror.imagemUrl
   );
-  return { radarMirror, imagemOriginal };
+  return { radarMirror, imagemOriginal, origem };
+}
+
+function encontrarImagemRadarMirrorMensagem(metadataEvento = {}) {
+  return encontrarImagemRadarMirror(metadataEvento);
 }
 
 function nomeLogicoImagemCanonica({ eventoId = "", marketplace = "", produtoId = "" } = {}) {
@@ -206,13 +219,15 @@ function resultadoImagemPreliminar({ chave, eventoId, marketplace, produtoId, st
   });
 }
 
-async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId, metadataEvento, deps = {} } = {}) {
-  const { imagemOriginal } = encontrarImagemRadarMirrorMensagem(metadataEvento);
+async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId, metadataEvento, deps = {}, permitirThumbnailFallback = false } = {}) {
+  const { imagemOriginal, origem } = encontrarImagemRadarMirror(metadataEvento, { permitirThumbnailFallback });
   if (!imagemOriginal) return null;
   const validacao = imagemUrlValidaUniversal(imagemOriginal);
   if (!validacao.ok) {
     return resultadoImagemCanonica({ chave, eventoId, marketplace, produtoId, motivo: validacao.motivo || "radar_url_invalida" });
   }
+  const statusPreservada = origem === "radar_mirror/thumbnail" ? "radar_mirror_thumbnail_preservada" : "radar_mirror_preservada";
+  const statusMaterializada = origem === "radar_mirror/thumbnail" ? "radar_mirror_thumbnail_materializada" : "radar_mirror_materializada";
 
   if (!imagemUrlEfemeraUniversal(validacao.url)) {
     return resultadoImagemCanonica({
@@ -221,8 +236,8 @@ async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId,
       marketplace,
       produtoId,
       imagem: validacao.url,
-      origem: "radar_mirror/mensagem",
-      status: "radar_mirror_preservada"
+      origem,
+      status: statusPreservada
     });
   }
 
@@ -236,7 +251,7 @@ async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId,
       materializacoes: 1,
       radarMirrorMaterializacao: {
         status: "falha",
-        origem: "radar_mirror/mensagem",
+        origem,
         urlOriginal: validacao.url,
         motivo,
         statusHttp: download.statusHttp ?? null,
@@ -262,8 +277,8 @@ async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId,
       marketplace,
       produtoId,
       imagem: salva.url,
-      origem: "radar_mirror/mensagem",
-      status: "radar_mirror_materializada",
+      origem,
+      status: statusMaterializada,
       materializada: true,
       extra: {
         urlOriginal: validacao.url,
@@ -280,7 +295,7 @@ async function resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId,
       materializacoes: 1,
       radarMirrorMaterializacao: {
         status: "falha",
-        origem: "radar_mirror/mensagem",
+        origem,
         urlOriginal: validacao.url,
         motivo,
         statusHttp: download.statusHttp ?? null,
@@ -1096,6 +1111,34 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       resolvida: fallbackImagemMlBaixa,
       cacheAtual,
       linkResolvido: linkResolvidoImagem
+    });
+    cacheImagemCanonicaEvento.set(chave, resultado);
+    return { ...resultado, cacheHit: false };
+  }
+
+  const radarThumbnail = await resolverPorRadarMirror({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    metadataEvento,
+    deps,
+    permitirThumbnailFallback: true
+  });
+  if (radarThumbnail?.ok) {
+    const resultado = resultadoFinalDeImagemResolvida({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      resolvida: radarThumbnail,
+      origemFallback: "radar_mirror/thumbnail",
+      statusFallback: radarThumbnail.imagemStatus || "radar_mirror_thumbnail_materializada",
+      extra: {
+        materializacoes: Number(cacheAtual.materializacoes || 0) + Number(radarThumbnail.materializacoes || 0),
+        ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+        linkResolvido: linkResolvidoImagem
+      }
     });
     cacheImagemCanonicaEvento.set(chave, resultado);
     return { ...resultado, cacheHit: false };
