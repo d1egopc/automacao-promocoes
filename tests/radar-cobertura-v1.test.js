@@ -254,6 +254,8 @@ function mockModulo(relativo, exports) {
   {
     limparModulo("../modules/engine/inbox.service");
     const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    const linkAmazonAmzlink = "https://amzlink.to/az0fHbL0X9wOi";
+    const linkAmazonLinkAmazon = "https://link.amazon/B0i8eiZ9S";
     let marketplaceEvento = "";
     let entradaJobs = null;
     mockModulo("../modules/engine/database", {
@@ -283,8 +285,8 @@ function mockModulo(relativo, exports) {
       origem: "radar",
       origemTipo: "whatsapp",
       grupoId: "grupo@g.us",
-      textoOriginal: `Oferta Amazon ${linkAmazonDivulgador}`,
-      linksExtraidos: [linkAmazonDivulgador],
+      textoOriginal: `Oferta Amazon ${linkAmazonDivulgador}\n${linkAmazonAmzlink}\n${linkAmazonLinkAmazon}`,
+      linksExtraidos: [linkAmazonDivulgador, linkAmazonAmzlink, linkAmazonLinkAmazon],
       metadata: { coberturaTraceId: "cov_amzn_divulgador" }
     }, { clientes: ["cliente_1"] }));
     const eventos = payloadsCobertura(logs);
@@ -292,7 +294,7 @@ function mockModulo(relativo, exports) {
     assert.strictEqual(retorno.ok, true);
     assert.strictEqual(marketplaceEvento, "amazon");
     assert.strictEqual(entradaJobs.marketplaceDetectado, "amazon");
-    assert.deepStrictEqual(entradaJobs.linksExtraidos, [linkAmazonDivulgador]);
+    assert.deepStrictEqual(entradaJobs.linksExtraidos, [linkAmazonDivulgador, linkAmazonAmzlink, linkAmazonLinkAmazon]);
     assert(eventos.some(evento =>
       evento.etapa === "engine_evento_criado" &&
       evento.marketplace === "amazon" &&
@@ -654,6 +656,10 @@ function mockModulo(relativo, exports) {
     const linkMercadoLivre = "https://meli.la/2HRuzPf";
     const linkShopee = "https://s.shopee.com.br/903wBcqhYS";
     const linkAmazonDivulgador = "https://amzn.divulgador.link/gUXR2tSr";
+    const linkAmazonAmzlink = "https://amzlink.to/az0fHbL0X9wOi";
+    const linkAmazonLinkAmazon = "https://link.amazon/B0i8eiZ9S";
+    const linkAmazonBr = "https://www.amazon.com.br/dp/B0ABCDEF12";
+    const linkAmazonAmznTo = "https://amzn.to/abc123";
     const linkAwinKabum = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=1062989&clickref=sophie&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F516956";
     const linkKabumDireto = "https://www.kabum.com.br/produto/516956/stream-deck";
     const linkDesconhecido = "https://links.example.invalid/produto";
@@ -668,7 +674,11 @@ function mockModulo(relativo, exports) {
 
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkMercadoLivre), "mercadolivre");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkShopee), "shopee");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonBr), "amazon");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonAmznTo), "amazon");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonDivulgador), "amazon");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonAmzlink), "amazon");
+    assert.strictEqual(normalizers.detectarMarketplaceLink(linkAmazonLinkAmazon), "amazon");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkAwinKabum), "awin");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkKabumDireto), "kabum");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkDesconhecido), "");

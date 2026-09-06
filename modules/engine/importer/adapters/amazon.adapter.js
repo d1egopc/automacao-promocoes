@@ -2,6 +2,7 @@ const { classificarCategoriaOferta } = require("../../../../marketplaces/intelig
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { queryEngine } = require("../../database");
 const { resumoLinksClassificados } = require("../../link-role.service");
+const { detectarMarketplaceLink } = require("../../normalizers");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -16,6 +17,10 @@ function primeiroValor(...valores) {
     if (valorPresente(valor)) return valor;
   }
   return "";
+}
+
+function linkAmazonReconhecido(url = "") {
+  return detectarMarketplaceLink(url) === "amazon";
 }
 
 function escolherLinkAmazon(links = [], evento = {}) {
@@ -38,7 +43,7 @@ function escolherLinkAmazon(links = [], evento = {}) {
       ...candidato,
       url: texto(candidato.url)
     }))
-    .find(candidato => /amazon\.|amzn\.to/i.test(candidato.url)) || { url: "", link: null, campo: "" };
+    .find(candidato => linkAmazonReconhecido(candidato.url)) || { url: "", link: null, campo: "" };
 }
 
 function urlOcorrenciaAmazon(link = {}) {
@@ -56,7 +61,7 @@ async function converterOcorrenciasAmazon({ links = [], evento = {}, clienteId =
 
   for (const [indice, link] of (Array.isArray(links) ? links : []).entries()) {
     const urlOriginal = urlOcorrenciaAmazon(link);
-    if (!urlOriginal || !/amazon\.|amzn\.to/i.test(urlOriginal)) {
+    if (!urlOriginal || !linkAmazonReconhecido(urlOriginal)) {
       saida.push(link);
       continue;
     }
@@ -495,7 +500,6 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
-
 
 
 

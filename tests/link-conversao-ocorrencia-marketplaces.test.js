@@ -102,6 +102,62 @@ async function testarAmazonProdutoAssinatura() {
   assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.urlAfiliadaWorkspace), [afiliadoProduto, afiliadoAssinatura]);
 }
 
+async function testarAmazonHostsReconhecidosComoCandidatos() {
+  const urlsAmazon = [
+    "https://www.amazon.com.br/dp/B0ABCDEF12",
+    "https://amzn.to/abc123",
+    "https://amzn.divulgador.link/qh8OxEcb",
+    "https://amzlink.to/az0fHbL0X9wOi",
+    "https://link.amazon/B0i8eiZ9S"
+  ];
+
+  for (const url of urlsAmazon) {
+    const chamadas = [];
+    const resultado = await importarAmazonEngine({
+      job: { id: `amazon-${url}`, evento_id: 120, cliente_id: "D1" },
+      evento: { texto_original: `Amazon\n${url}`, marketplace: "amazon" },
+      links: [ocorrencia(url, 1)],
+      deps: {
+        getIntegracaoCliente: () => ({ credenciais: { trackingId: "d1-20" } }),
+        importarAmazon: async (urlRecebida) => {
+          chamadas.push(urlRecebida);
+          return {
+            titulo: "Produto Amazon Shortlink",
+            precoAtual: "99",
+            imagem: "https://img.test/amazon-shortlink.jpg",
+            linkAfiliado: "https://amzn.to/afiliado-d1",
+            linkFinal: "https://amzn.to/afiliado-d1",
+            link: "https://amzn.to/afiliado-d1",
+            categoria: "Amazon"
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.ok, true, `${url} deve ser aceito pelo importer Amazon`);
+    assert.deepStrictEqual(chamadas, [url], `${url} deve ser entregue ao importador Amazon`);
+    assert.strictEqual(resultado.linkOriginal, url);
+  }
+
+  const chamadasOutroMarketplace = [];
+  const outroMarketplace = await importarAmazonEngine({
+    job: { id: "amazon-host-externo", evento_id: 121, cliente_id: "D1" },
+    evento: { texto_original: "Mercado Livre\nhttps://meli.la/2HRuzPf", marketplace: "amazon" },
+    links: [ocorrencia("https://meli.la/2HRuzPf", 1)],
+    deps: {
+      getIntegracaoCliente: () => ({ credenciais: { trackingId: "d1-20" } }),
+      importarAmazon: async (urlRecebida) => {
+        chamadasOutroMarketplace.push(urlRecebida);
+        return null;
+      }
+    }
+  });
+
+  assert.strictEqual(outroMarketplace.ok, false);
+  assert.strictEqual(outroMarketplace.motivo, "link_amazon_nao_encontrado");
+  assert.deepStrictEqual(chamadasOutroMarketplace, []);
+}
+
 async function testarKabumAwinDeeplinksDistintos() {
   const destinoA = "https://www.kabum.com.br/produto/111/produto-a";
   const destinoB = "https://www.kabum.com.br/produto/222/produto-b";
@@ -612,6 +668,7 @@ async function testarFalhaNaoVazaOriginal() {
 async function main() {
   await testarMercadoLivreAB();
   await testarAmazonProdutoAssinatura();
+  await testarAmazonHostsReconhecidosComoCandidatos();
   await testarKabumAwinDeeplinksDistintos();
   await testarKabumAwinUmLinkNaoDuplicaEPreservaUed();
   await testarKabumAwinDuplicadoPreservaDuasOcorrencias();

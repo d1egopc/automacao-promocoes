@@ -18,6 +18,21 @@ function normalizarLinksExtraidos(links = []) {
   )];
 }
 
+function hostAmazonReconhecido(host = "") {
+  const normalizado = normalizarTexto(host).toLowerCase().replace(/^www\./, "");
+  return normalizado === "amzn.divulgador.link" ||
+    normalizado.endsWith(".amzn.divulgador.link") ||
+    normalizado === "amazon.com.br" ||
+    normalizado.endsWith(".amazon.com.br") ||
+    normalizado === "amzn.to" ||
+    normalizado.endsWith(".amzn.to") ||
+    normalizado === "amzlink.to" ||
+    normalizado.endsWith(".amzlink.to") ||
+    normalizado === "link.amazon" ||
+    normalizado.endsWith(".link.amazon") ||
+    normalizado.includes("amazon.");
+}
+
 function detectarMarketplaceLink(url = "") {
   const texto = normalizarTexto(url).toLowerCase();
   if (!texto) return "";
@@ -25,8 +40,7 @@ function detectarMarketplaceLink(url = "") {
     const host = new URL(texto).hostname.toLowerCase().replace(/^www\./, "");
     if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
     if (host === "shopee.com.br" || host.endsWith(".shopee.com.br") || host.includes("shopee.")) return "shopee";
-    if (host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link")) return "amazon";
-    if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to" || host.endsWith(".amzn.to") || host.includes("amazon.")) return "amazon";
+    if (hostAmazonReconhecido(host)) return "amazon";
     if (host.includes("aliexpress.")) return "aliexpress";
     if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
     if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
@@ -35,8 +49,7 @@ function detectarMarketplaceLink(url = "") {
 
   if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
   if (texto.includes("shopee.")) return "shopee";
-  if (texto.includes("amzn.divulgador.link")) return "amazon";
-  if (texto.includes("amazon.") || texto.includes("amzn.to")) return "amazon";
+  if (texto.includes("amzn.divulgador.link") || texto.includes("amazon.") || texto.includes("amzn.to") || texto.includes("amzlink.to") || texto.includes("link.amazon")) return "amazon";
   if (texto.includes("magazineluiza.com") || texto.includes("magazinevoce.com.br") || texto.includes("magazineluiza.onelink.me") || texto.includes("magalu.")) return "magalu";
   if (texto.includes("aliexpress.")) return "aliexpress";
   if (texto.includes("kabum.com.br")) return "kabum";
