@@ -208,6 +208,7 @@ const criarRotasVitrine = require("./modules/vitrine/routes");
 const {
   criarRotasClonadorGrupos,
   criarRepositorioClonadorGrupos,
+  criarBridgeClonadorGrupos,
   criarServicoClonadorGrupos
 } = require("./modules/clonador-grupos");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
@@ -21988,6 +21989,12 @@ const clonadorGruposService = criarServicoClonadorGrupos({
   extrairLinksMensagem: extrairLinksRadar,
   logger: console
 });
+const clonadorGruposBridge = criarBridgeClonadorGrupos({
+  repository: clonadorGruposRepository,
+  resolverRedirectUniversal,
+  registrarEventoBruto,
+  logger: console
+});
 
 app.use("/clonador-grupos", criarRotasClonadorGrupos({
   service: clonadorGruposService,
@@ -29310,6 +29317,9 @@ initEngineDatabase()
         gateAtivo: {
           diagnosticarDisponibilidadeEnvioWorkspace
         }
+      }),
+      processarEntradasClonador: () => clonadorGruposBridge.processarCapturasPendentes({
+        limite: Number(process.env.CLONADOR_GRUPOS_ENGINE_BRIDGE_LIMITE || 5)
       })
     });
   })

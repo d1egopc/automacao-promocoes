@@ -64,6 +64,10 @@ function limitarBuffer(valor = 50) {
   return Math.max(1, Math.min(100, Math.floor(numero)));
 }
 
+function jsonObjeto(valor = {}) {
+  return JSON.stringify(valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {});
+}
+
 function criarRepositorioClonadorGrupos(opcoes = {}) {
   const query = opcoes.queryEngine || queryEngine;
   const pool = opcoes.pool || getEnginePool;
@@ -341,6 +345,61 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     return row ? { inserido: true, item: normalizarBuffer(row) } : { inserido: false, item: null };
   }
 
+  async function reivindicarProximaCaptura(opcoes = {}) {
+    await pronto();
+    const clienteId = texto(opcoes.clienteId || opcoes.cliente_id);
+    const timeoutMinutos = Math.max(1, Math.min(60, Number(opcoes.timeoutMinutos || 15)));
+    const resultado = await executar(`
+      WITH candidata AS (
+        SELECT id
+          FROM clonador_grupos_buffer
+         WHERE ($1::text = '' OR cliente_id = $1)
+           AND (
+             status = 'capturada'
+             OR (status = 'processando' AND updated_at < NOW() - ($2::text || ' minutes')::interval)
+           )
+         ORDER BY capturado_em ASC, id ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+      )
+      UPDATE clonador_grupos_buffer b
+         SET status = 'processando',
+             updated_at = NOW(),
+             metadata = COALESCE(b.metadata, '{}'::jsonb) || $3::jsonb
+        FROM candidata
+       WHERE b.id = candidata.id
+       RETURNING b.id, b.cliente_id, b.sessao_id, b.grupo_jid, b.grupo_nome, b.mensagem_id,
+         b.texto_original, b.links, b.capturado_em, b.status, b.metadata, b.created_at, b.updated_at
+    `, [
+      clienteId,
+      String(timeoutMinutos),
+      jsonObjeto({
+        clonadorGruposBridge: {
+          status: "processando",
+          reivindicadoEm: new Date().toISOString()
+        }
+      })
+    ], query);
+    const row = resultado.rows[0] || null;
+    return row ? normalizarBuffer(row) : null;
+  }
+
+  async function atualizarBufferStatus(bufferId = "", status = "capturada", metadata = {}) {
+    await pronto();
+    const statusNormalizado = normalizarStatusBuffer(status);
+    const resultado = await executar(`
+      UPDATE clonador_grupos_buffer
+         SET status = $2,
+             updated_at = NOW(),
+             metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+       WHERE id = $1
+       RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+         texto_original, links, capturado_em, status, metadata, created_at, updated_at
+    `, [Number(bufferId), statusNormalizado, jsonObjeto(metadata)], query);
+    const row = resultado.rows[0] || null;
+    return row ? normalizarBuffer(row) : null;
+  }
+
   async function listarBuffer(clienteId = "", filtros = {}) {
     await pronto();
     const status = texto(filtros.status).toLowerCase();
@@ -366,6 +425,8 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     listarDestinos,
     substituirDestinos,
     inserirBufferCaptura,
+    reivindicarProximaCaptura,
+    atualizarBufferStatus,
     listarBuffer
   };
 }

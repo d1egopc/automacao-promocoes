@@ -1458,6 +1458,145 @@ function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
+function eventoOrigemClonadorGrupos(evento = {}, job = {}, metadata = {}) {
+  const origem = normalizarTexto(evento.origem || evento.origem_tipo || metadata.origem || "").toLowerCase();
+  const metadataEvento = objetoSeguro(job.metadata?.metadataEvento);
+  return origem === "clonador_grupos" ||
+    Boolean(objetoSeguro(metadata.clonadorGrupos).bufferId) ||
+    Boolean(objetoSeguro(evento.metadata).clonadorGrupos) ||
+    Boolean(objetoSeguro(metadataEvento.clonadorGrupos).bufferId);
+}
+
+function comercialCapturadoClonador(metadata = {}, evento = {}, job = {}) {
+  if (!eventoOrigemClonadorGrupos(evento, job, metadata)) return null;
+  const metadataEvento = objetoSeguro(job.metadata?.metadataEvento);
+  const fontes = [
+    metadata.comercialCapturado,
+    objetoSeguro(evento.metadata).comercialCapturado,
+    metadataEvento.comercialCapturado,
+    objetoSeguro(metadata.metadataEvento).comercialCapturado
+  ];
+  const contrato = fontes.find(item => item && typeof item === "object" && !Array.isArray(item)) || null;
+  if (!contrato || normalizarTexto(contrato.origem).toLowerCase() !== "clonador_grupos") return null;
+  return contrato;
+}
+
+function aplicarComercialCapturadoClonador({ oferta = {}, ofertaEntrada = {}, evento = {}, job = {} } = {}) {
+  const metadataAtual = {
+    ...objetoSeguro(job.metadata?.metadataEvento),
+    ...objetoSeguro(evento.metadata),
+    ...objetoSeguro(ofertaEntrada.metadata),
+    ...objetoSeguro(oferta.metadata)
+  };
+  const contrato = comercialCapturadoClonador(metadataAtual, evento, job);
+  if (!contrato) return { oferta, ofertaEntrada, metadata: metadataAtual, aplicado: false, camposAplicados: [] };
+
+  let proximaOferta = { ...oferta };
+  let proximaEntrada = { ...ofertaEntrada };
+  const camposAplicados = [];
+  const precoAtual = normalizarNumero(contrato.precoAtual);
+  const precoAnterior = normalizarNumero(contrato.precoAnterior);
+  const cupom = normalizarTexto(contrato.cupom || contrato.codigoCupom || "");
+  const beneficio = normalizarTexto(contrato.beneficioTexto || contrato.beneficioExtra || "");
+
+  if (precoAtual !== null) {
+    proximaOferta = {
+      ...proximaOferta,
+      preco: precoAtual,
+      precoAtual,
+      precoPor: precoAtual,
+      precoPublicacao: precoAtual,
+      precoOrigem: "clonador_grupos"
+    };
+    proximaEntrada = {
+      ...proximaEntrada,
+      preco: precoAtual,
+      precoAtual,
+      precoOrigem: "clonador_grupos"
+    };
+    camposAplicados.push("precoAtual");
+  }
+
+  if (precoAnterior !== null && (precoAtual === null || precoAnterior > precoAtual)) {
+    proximaOferta = {
+      ...proximaOferta,
+      precoOriginal: precoAnterior,
+      precoAnterior,
+      precoAntigo: precoAnterior
+    };
+    proximaEntrada = {
+      ...proximaEntrada,
+      precoOriginal: precoAnterior,
+      precoAnterior,
+      precoAntigo: precoAnterior
+    };
+    camposAplicados.push("precoAnterior");
+  }
+
+  if (cupom) {
+    proximaOferta = {
+      ...proximaOferta,
+      cupom,
+      codigoCupom: cupom,
+      codigo_cupom: cupom,
+      cupomOrigem: "clonador_grupos",
+      cupomConfirmado: true
+    };
+    proximaEntrada = {
+      ...proximaEntrada,
+      cupom,
+      codigoCupom: cupom,
+      codigo_cupom: cupom,
+      cupomOrigem: "clonador_grupos",
+      cupomConfirmado: true
+    };
+    camposAplicados.push("cupom");
+  }
+
+  if (beneficio) {
+    proximaEntrada = {
+      ...proximaEntrada,
+      beneficioTexto: beneficio,
+      beneficioExtra: beneficio,
+      avisoCupom: beneficio
+    };
+    proximaOferta = {
+      ...proximaOferta,
+      beneficioTexto: beneficio,
+      beneficioExtra: beneficio,
+      avisoCupom: beneficio
+    };
+    camposAplicados.push("beneficio");
+  }
+
+  const metadataFinal = {
+    ...metadataAtual,
+    comercialCapturado: contrato,
+    comercialCapturadoAplicado: {
+      origem: "clonador_grupos",
+      camposAplicados,
+      aplicado: camposAplicados.length > 0
+    }
+  };
+
+  proximaOferta.metadata = {
+    ...objetoSeguro(proximaOferta.metadata),
+    ...metadataFinal
+  };
+  proximaEntrada.metadata = {
+    ...objetoSeguro(proximaEntrada.metadata),
+    ...metadataFinal
+  };
+
+  return {
+    oferta: proximaOferta,
+    ofertaEntrada: proximaEntrada,
+    metadata: metadataFinal,
+    aplicado: camposAplicados.length > 0,
+    camposAplicados
+  };
+}
+
 function encontrarRadarMirrorMensagem(oferta = {}, contexto = {}) {
   const fontes = [
     oferta?.metadata?.radarMirror,
@@ -2991,6 +3130,17 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       : "ausente_no_importador"
   });
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  const comercialClonador = aplicarComercialCapturadoClonador({ oferta, ofertaEntrada, evento, job });
+  oferta = comercialClonador.oferta || oferta;
+  ofertaEntrada = comercialClonador.ofertaEntrada || ofertaEntrada;
+  if (comercialClonador.aplicado) {
+    console.log("[CLONADOR-COMERCIAL-CAPTURADO-APLICADO]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      workspaceId: job.cliente_id || job.clienteId || "",
+      camposAplicados: comercialClonador.camposAplicados || []
+    }));
+  }
   if (fidelidadeTraceIdPrincipal) {
     oferta = {
       ...oferta,
@@ -3857,6 +4007,7 @@ module.exports = {
   montarUrlImagemPolycardMl,
   validarImagemPolycardMercadoLivre,
   materializarImagemRadarMirrorSeNecessario,
+  aplicarComercialCapturadoClonador,
   aplicarPonteIntegridadeComercial,
   ocorrenciasRadarComerciais,
   aplicarGuardaOcorrenciasRadar

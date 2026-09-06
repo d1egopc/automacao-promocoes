@@ -279,8 +279,52 @@ function obterDestinosCliente(clienteId = "admin", contexto = {}) {
   return [];
 }
 
+function destinoIdDistribuidor(destino = {}) {
+  return normalizarTexto(destino.id || destino.destinoId || destino.destino_id || "");
+}
+
+function origemClonadorGruposOferta(oferta = {}) {
+  const metadata = objetoSeguro(oferta.metadata);
+  const jobMetadata = objetoSeguro(oferta.job_metadata);
+  const eventoMetadata = objetoSeguro(oferta.evento_metadata);
+  const metadataEventoJob = objetoSeguro(jobMetadata.metadataEvento);
+  const metadataEventoOferta = objetoSeguro(metadata.metadataEvento);
+  const origens = [
+    oferta.origem,
+    metadata.origem,
+    eventoMetadata.origem,
+    metadataEventoJob.origem,
+    metadataEventoOferta.origem
+  ];
+  return origens.some(origem => normalizarTexto(origem).toLowerCase() === "clonador_grupos");
+}
+
+function metadataClonadorGruposOferta(oferta = {}) {
+  if (!origemClonadorGruposOferta(oferta)) return null;
+  const metadata = objetoSeguro(oferta.metadata);
+  const jobMetadata = objetoSeguro(oferta.job_metadata);
+  const eventoMetadata = objetoSeguro(oferta.evento_metadata);
+  const fontes = [
+    metadata.clonadorGrupos,
+    objetoSeguro(jobMetadata.metadataEvento).clonadorGrupos,
+    eventoMetadata.clonadorGrupos
+  ];
+  return fontes.find(item => item && typeof item === "object" && !Array.isArray(item)) || null;
+}
+
+function filtrarDestinosClonadorGrupos(destinos = [], oferta = {}) {
+  const clonadorGrupos = metadataClonadorGruposOferta(oferta);
+  if (!clonadorGrupos) return destinos;
+  const destinoIds = Array.isArray(clonadorGrupos.destinoIds)
+    ? clonadorGrupos.destinoIds.map(normalizarTexto).filter(Boolean)
+    : [];
+  if (!destinoIds.length) return [];
+  const autorizados = new Set(destinoIds);
+  return destinos.filter(destino => autorizados.has(destinoIdDistribuidor(destino)));
+}
+
 function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {}) {
-  const destinos = obterDestinosCliente(clienteId, contexto);
+  const destinos = filtrarDestinosClonadorGrupos(obterDestinosCliente(clienteId, contexto), oferta);
   const compativeis = [];
   const rejeitados = [];
   const categorias = categoriasCandidatasOferta(oferta);
@@ -705,7 +749,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
     etapa: "buscar_ofertas_distribuiveis",
     queryResumo: "SELECT engine_ofertas JOIN engine_jobs_cliente",
     sql: `WITH candidatos_distribuiveis AS (
-      SELECT o.id, o.uuid, o.evento_id, o.link_id, o.marketplace, o.titulo,
+      SELECT o.id, o.uuid, o.evento_id, e.origem, o.link_id, o.marketplace, o.titulo,
              o.preco, o.preco_original, o.cupom, o.tipo_cupom, o.beneficio_extra,
              o.imagem, o.link_original, o.link_expandido,
              o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
@@ -729,7 +773,7 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
         LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
        WHERE ${filtros.join(" AND ")}
     )
-    SELECT id, uuid, evento_id, link_id, marketplace, titulo,
+    SELECT id, uuid, evento_id, origem, link_id, marketplace, titulo,
            preco, preco_original, cupom, tipo_cupom, beneficio_extra,
            imagem, link_original, link_expandido,
            link_afiliado, categoria, score, prioridade, status, motivo_status,
@@ -1189,6 +1233,7 @@ module.exports = {
   resolverImagemFilaEngine,
   ofertaJaExisteNaFila,
   categoriasCandidatasOferta,
+  filtrarDestinosClonadorGrupos,
   marketplaceEquivalentesDistribuidor,
   motivoDistribuicaoDefinitivo
 };

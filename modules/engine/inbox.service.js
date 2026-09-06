@@ -164,17 +164,32 @@ async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
   }
 }
 
-function localizarRedirectRadar(metadata = {}, linkResolvido = "") {
-  const redirects = Array.isArray(metadata?.redirectsRadar) ? metadata.redirectsRadar : [];
-  return redirects.find(item => String(item?.linkResolvido || "") === String(linkResolvido || "")) || null;
+function listarRedirectsEvento(metadata = {}) {
+  return [
+    ...(Array.isArray(metadata?.redirectsRadar) ? metadata.redirectsRadar : []),
+    ...(Array.isArray(metadata?.redirects) ? metadata.redirects : []),
+    ...(Array.isArray(metadata?.clonadorGrupos?.redirects) ? metadata.clonadorGrupos.redirects : [])
+  ];
+}
+
+function urlResolvidaRedirect(item = {}) {
+  return item?.linkResolvido || item?.urlExpandida || item?.urlFinal || "";
+}
+
+function localizarRedirectEvento(metadata = {}, linkResolvido = "") {
+  const alvo = String(linkResolvido || "");
+  return listarRedirectsEvento(metadata).find(item =>
+    String(urlResolvidaRedirect(item)) === alvo ||
+    String(item?.linkOriginalCapturado || "") === alvo
+  ) || null;
 }
 
 async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, evento = {}) {
   for (const link of links) {
-    const redirectRadar = localizarRedirectRadar(metadataEvento, link);
-    const urlOriginal = redirectRadar?.linkOriginalCapturado || link;
+    const redirectEvento = localizarRedirectEvento(metadataEvento, link);
+    const urlOriginal = redirectEvento?.linkOriginalCapturado || link;
     const urlNormalizada = normalizarUrl(urlOriginal);
-    const urlExpandida = redirectRadar?.linkResolvido || null;
+    const urlExpandida = urlResolvidaRedirect(redirectEvento) || null;
     const marketplaceDetectado = detectarMarketplaceLink(urlExpandida || urlNormalizada || urlOriginal);
     const classificacao = classificarLinkEngine({
       marketplace: marketplaceDetectado,
@@ -185,8 +200,8 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
         url_expandida: urlExpandida,
         marketplace_detectado: marketplaceDetectado,
         metadata: {
-          linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
-          linkResolvido: redirectRadar?.linkResolvido || ""
+          linkOriginalCapturado: redirectEvento?.linkOriginalCapturado || "",
+          linkResolvido: urlResolvidaRedirect(redirectEvento)
         }
       },
       url: urlExpandida || urlNormalizada || urlOriginal
@@ -205,14 +220,14 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
         urlExpandida,
         dominioUrl(urlOriginal),
         urlExpandida ? dominioUrl(urlExpandida) : null,
-        redirectRadar ? redirectRadar.status === "resolvido" : null,
-        redirectRadar ? (redirectRadar.motivo || redirectRadar.status || "") : null,
+        redirectEvento ? redirectEvento.status === "resolvido" : null,
+        redirectEvento ? (redirectEvento.motivo || redirectEvento.status || "") : null,
         marketplaceDetectado,
         jsonbParam({
           fase: "1.1",
-          linkOriginalCapturado: redirectRadar?.linkOriginalCapturado || "",
-          linkResolvido: redirectRadar?.linkResolvido || "",
-          tipoLink: redirectRadar ? "redirect_conhecido" : "direto",
+          linkOriginalCapturado: redirectEvento?.linkOriginalCapturado || "",
+          linkResolvido: urlResolvidaRedirect(redirectEvento),
+          tipoLink: redirectEvento ? "redirect_conhecido" : "direto",
           papelLink: classificacao.papelLink,
           papelLinkMotivo: classificacao.motivo,
           papelLinkConfianca: classificacao.confianca,

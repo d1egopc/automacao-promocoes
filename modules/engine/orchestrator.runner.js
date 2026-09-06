@@ -250,6 +250,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     getContextoDistribuidor,
     getDepsImportador,
     getDepsDistribuidor,
+    processarEntradasClonador,
     limites = {}
   } = opcoes;
 
@@ -301,6 +302,10 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
       }, { rodadaId });
+    }
+
+    if (typeof processarEntradasClonador === "function") {
+      resumo.etapas.clonadorGrupos = await executarEtapaRastreada("clonador_grupos_entrada", processarEntradasClonador, {}, { rodadaId });
     }
 
     let inicioFornecedorMs = Date.now();
