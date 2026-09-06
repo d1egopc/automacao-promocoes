@@ -53,14 +53,42 @@ function contarAtual({ fila, clienteId = "admin", destino = {}, hoje }) {
     dataBRHoje: () => hoje,
     destinoOperacionalSeguro: valor => valor || {},
     destinoNomeLog: valor => String(valor.nome || valor.titulo || valor.label || valor.id || valor.conexaoId || "Destino"),
+    limiteDiarioDestino: valor => Number(valor.maxPorDia || valor.limiteDiario || 0),
     Set
   };
   contexto.clienteId = clienteId;
   contexto.destino = destino;
   vm.createContext(contexto);
-  vm.runInContext(`${extrairFuncao("contarEnviosDestinoHoje")}; resultado = contarEnviosDestinoHoje(clienteId, destino);`, contexto);
+  vm.runInContext(
+    `${extrairFuncao("emitirDiagnosticoUnicidadeLimiteDiario")}; ${extrairFuncao("contarEnviosDestinoHoje")}; resultado = contarEnviosDestinoHoje(clienteId, destino);`,
+    contexto
+  );
 
   return { usados: contexto.resultado, logs };
+}
+
+function contarAtualDuasVezesMesmoProcesso({ fila, clienteId = "admin", destino = {}, hoje }) {
+  const logs = [];
+  const contexto = {
+    fila,
+    console: {
+      log: (...args) => logs.push(args)
+    },
+    dataBRHoje: () => hoje,
+    destinoOperacionalSeguro: valor => valor || {},
+    destinoNomeLog: valor => String(valor.nome || valor.titulo || valor.label || valor.id || valor.conexaoId || "Destino"),
+    limiteDiarioDestino: valor => Number(valor.maxPorDia || valor.limiteDiario || 0),
+    Set
+  };
+  contexto.clienteId = clienteId;
+  contexto.destino = destino;
+  vm.createContext(contexto);
+  vm.runInContext(
+    `${extrairFuncao("emitirDiagnosticoUnicidadeLimiteDiario")}; ${extrairFuncao("contarEnviosDestinoHoje")}; primeiro = contarEnviosDestinoHoje(clienteId, destino); segundo = contarEnviosDestinoHoje(clienteId, destino);`,
+    contexto
+  );
+
+  return { primeiro: contexto.primeiro, segundo: contexto.segundo, logs };
 }
 
 const hoje = "05/09/2026";
@@ -68,7 +96,8 @@ const outroDia = "04/09/2026";
 const destino = {
   id: "destino_1",
   nome: "Op Geral Testes",
-  tipo: "whatsapp"
+  tipo: "whatsapp",
+  maxPorDia: 1
 };
 
 const cenarios = [
@@ -112,7 +141,7 @@ for (const cenario of cenarios) {
   assert.strictEqual(atual.usados, esperado, cenario.nome);
   if (esperado > 0) {
     assert.strictEqual(atual.logs.length, 1, `${cenario.nome}: deve logar uma vez quando usados > 0`);
-    assert.strictEqual(atual.logs[0][0], "[EXECUTOR-LIMITE-DIARIO-DIAGNOSTICO]");
+    assert.strictEqual(atual.logs[0][0], "[EXECUTOR-LIMITE-DIARIO-UNICIDADE]");
   } else {
     assert.strictEqual(atual.logs.length, 0, `${cenario.nome}: nao deve logar quando usados = 0`);
   }
@@ -124,7 +153,94 @@ const simultaneo = contarAtual({
   destino,
   hoje
 });
-assert.strictEqual(simultaneo.logs[0][1].quantidadeMatchesNomeEIdMesmoRegistro, 1);
-assert.strictEqual(simultaneo.logs[0][1].quantidadeMatchesTotal, 1);
+assert.strictEqual(simultaneo.logs[0][1].matchesTotal, 1);
+assert.strictEqual(simultaneo.logs[0][1].assinaturasEstruturaisDuplicadas, 0);
+
+const duplicataEstrutural = contarAtual({
+  fila: [
+    {
+      clienteId: "user_a",
+      id: "oferta_1",
+      status: "enviado",
+      destinosEnviados: [
+        { nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: hoje },
+        { nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: hoje }
+      ]
+    }
+  ],
+  clienteId: "user_a",
+  destino,
+  hoje
+});
+assert.strictEqual(duplicataEstrutural.usados, 2);
+assert.strictEqual(duplicataEstrutural.logs[0][1].assinaturasEstruturaisUnicas, 1);
+assert.strictEqual(duplicataEstrutural.logs[0][1].assinaturasEstruturaisDuplicadas, 1);
+assert.strictEqual(duplicataEstrutural.logs[0][1].maiorMultiplicidadeEstrutural, 2);
+
+const duplicataSemItemId = contarAtual({
+  fila: [
+    {
+      clienteId: "user_a",
+      id: "oferta_1",
+      status: "enviado",
+      destinosEnviados: [{ nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: hoje }]
+    },
+    {
+      clienteId: "user_a",
+      id: "oferta_2",
+      status: "enviado",
+      destinosEnviados: [{ nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: hoje }]
+    }
+  ],
+  clienteId: "user_a",
+  destino,
+  hoje
+});
+assert.strictEqual(duplicataSemItemId.usados, 2);
+assert.strictEqual(duplicataSemItemId.logs[0][1].assinaturasEstruturaisUnicas, 2);
+assert.strictEqual(duplicataSemItemId.logs[0][1].assinaturasEstruturaisDuplicadas, 0);
+assert.strictEqual(duplicataSemItemId.logs[0][1].assinaturasSemItemIdUnicas, 1);
+assert.strictEqual(duplicataSemItemId.logs[0][1].assinaturasSemItemIdDuplicadas, 1);
+assert.strictEqual(duplicataSemItemId.logs[0][1].maiorMultiplicidadeSemItemId, 2);
+
+const datasDiferentes = contarAtual({
+  fila: [
+    {
+      clienteId: "user_a",
+      id: "oferta_1",
+      status: "enviado",
+      destinosEnviados: [
+        { nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: `${hoje} 10:00:00` },
+        { nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: `${hoje} 10:01:00` }
+      ]
+    }
+  ],
+  clienteId: "user_a",
+  destino,
+  hoje
+});
+assert.strictEqual(datasDiferentes.usados, 2);
+assert.strictEqual(datasDiferentes.logs[0][1].assinaturasEstruturaisUnicas, 2);
+assert.strictEqual(datasDiferentes.logs[0][1].assinaturasEstruturaisDuplicadas, 0);
+assert.strictEqual(datasDiferentes.logs[0][1].assinaturasSemItemIdUnicas, 2);
+assert.strictEqual(datasDiferentes.logs[0][1].assinaturasSemItemIdDuplicadas, 0);
+
+const antiSpam = contarAtualDuasVezesMesmoProcesso({
+  fila: [
+    {
+      clienteId: "user_a",
+      id: "oferta_1",
+      status: "enviado",
+      destinosEnviados: [{ nome: destino.nome, id: destino.id, tipo: "whatsapp", dataEnvio: hoje }]
+    }
+  ],
+  clienteId: "user_a",
+  destino,
+  hoje
+});
+assert.strictEqual(antiSpam.primeiro, 1);
+assert.strictEqual(antiSpam.segundo, 1);
+assert.strictEqual(antiSpam.logs.length, 1);
+assert.strictEqual(antiSpam.logs[0][0], "[EXECUTOR-LIMITE-DIARIO-UNICIDADE]");
 
 console.log("executor-destino-diagnostico.test.js OK");

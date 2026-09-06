@@ -7389,18 +7389,97 @@ function dataBRHoje() {
   });
 }
 
+function emitirDiagnosticoUnicidadeLimiteDiario({
+  clienteId = "admin",
+  destinoSeguro = {},
+  hoje = "",
+  nomeDestino = "",
+  idDestino = "",
+  filaCliente = [],
+  matches = [],
+  usados = 0,
+  limite = 0
+} = {}) {
+  if (usados <= 0) return;
+  if (Number.isFinite(Number(limite)) && Number(limite) > 0 && usados < Number(limite)) return;
+
+  const cacheKey = "__optimusExecutorLimiteDiarioUnicidadeEmitidos";
+  if (!globalThis[cacheKey] || typeof globalThis[cacheKey].has !== "function") {
+    globalThis[cacheKey] = new Set();
+  }
+
+  const chaveDestino = idDestino || nomeDestino || "destino";
+  const chaveLog = `${String(clienteId)}|${String(chaveDestino)}|${String(hoje)}`;
+  if (globalThis[cacheKey].has(chaveLog)) return;
+  globalThis[cacheKey].add(chaveLog);
+
+  const incrementar = (mapa, chave) => {
+    const chaveSegura = String(chave || "");
+    mapa.set(chaveSegura, (mapa.get(chaveSegura) || 0) + 1);
+  };
+  const contarDuplicadas = (mapa) => [...mapa.values()].filter(valor => valor > 1).length;
+  const maiorMultiplicidade = (mapa) => Math.max(0, ...mapa.values());
+
+  const idsGlobal = new Map();
+  filaCliente.forEach((item, indiceItem) => {
+    const itemId = String(item?.id || item?.filaItemId || item?.engineOfertaId || `indice:${indiceItem}`);
+    incrementar(idsGlobal, itemId);
+  });
+
+  const idsMatches = new Map();
+  const assinaturasEstruturais = new Map();
+  const assinaturasSemItemId = new Map();
+
+  matches.forEach(match => {
+    const item = match?.item || {};
+    const envio = match?.envio || {};
+    const itemId = String(item.id || item.filaItemId || item.engineOfertaId || `indice:${match?.indiceItem}`);
+    const destinoRegistroId = String(envio.id || envio.destinoId || envio.conexaoId || envio.chatId || envio.grupo || idDestino || "");
+    const tipoRegistro = String(envio.tipo || destinoSeguro.tipo || destinoSeguro.canal || destinoSeguro.tipoMidia || destinoSeguro.destinoTipo || "");
+    const dataEnvio = String(match?.data || envio.dataEnvio || envio.data || "");
+
+    incrementar(idsMatches, itemId);
+    incrementar(assinaturasEstruturais, `${String(clienteId)}|${itemId}|${destinoRegistroId}|${tipoRegistro}|${dataEnvio}`);
+    incrementar(assinaturasSemItemId, `${String(clienteId)}|${destinoRegistroId}|${tipoRegistro}|${dataEnvio}`);
+  });
+
+  console.log("[EXECUTOR-LIMITE-DIARIO-UNICIDADE]", {
+    clienteId,
+    destinoId: idDestino,
+    destinoNome: nomeDestino,
+    tipoDestino: String(destinoSeguro.tipo || destinoSeguro.canal || destinoSeguro.tipoMidia || destinoSeguro.destinoTipo || ""),
+    dataBR: hoje,
+    usados,
+    totalGlobalCliente: filaCliente.length,
+    idsUnicosGlobal: idsGlobal.size,
+    idsDuplicadosGlobal: contarDuplicadas(idsGlobal),
+    maiorMultiplicidadeId: maiorMultiplicidade(idsGlobal),
+    matchesTotal: matches.length,
+    itemIdsUnicosNosMatches: idsMatches.size,
+    itemIdsDuplicadosNosMatches: contarDuplicadas(idsMatches),
+    assinaturasEstruturaisUnicas: assinaturasEstruturais.size,
+    assinaturasEstruturaisDuplicadas: contarDuplicadas(assinaturasEstruturais),
+    maiorMultiplicidadeEstrutural: maiorMultiplicidade(assinaturasEstruturais),
+    assinaturasSemItemIdUnicas: assinaturasSemItemId.size,
+    assinaturasSemItemIdDuplicadas: contarDuplicadas(assinaturasSemItemId),
+    maiorMultiplicidadeSemItemId: maiorMultiplicidade(assinaturasSemItemId)
+  });
+}
+
 function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
   const destinoSeguro = destinoOperacionalSeguro(destino);
   const hoje = dataBRHoje();
   const nomeDestino = destinoNomeLog(destinoSeguro);
   const idDestino = String(destinoSeguro.id || destinoSeguro.conexaoId || destinoSeguro.chatId || "");
   const filaCliente = fila.filter(item => String(item.clienteId || "admin") === String(clienteId));
+  const limite = limiteDiarioDestino(destinoSeguro);
   let usados = 0;
   let quantidadeMatchesPorNome = 0;
   let quantidadeMatchesPorId = 0;
   let quantidadeMatchesNomeEIdMesmoRegistro = 0;
   const ofertasDistintasComMatch = new Set();
   const statusDosItensComMatch = {};
+  const matchesUnicidade = [];
   let menorDataMatch = "";
   let maiorDataMatch = "";
 
@@ -7426,31 +7505,23 @@ function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
       ofertasDistintasComMatch.add(String(chaveOferta));
       const statusItem = String(item.status || item.estado || "sem_status").trim().toLowerCase() || "sem_status";
       statusDosItensComMatch[statusItem] = (statusDosItensComMatch[statusItem] || 0) + 1;
+      matchesUnicidade.push({ item, indiceItem, envio, data });
       if (!menorDataMatch || data < menorDataMatch) menorDataMatch = data;
       if (!maiorDataMatch || data > maiorDataMatch) maiorDataMatch = data;
     });
   });
 
-  if (usados > 0) {
-    console.log("[EXECUTOR-LIMITE-DIARIO-DIAGNOSTICO]", {
-      clienteId,
-      destinoId: idDestino,
-      destinoNome: nomeDestino,
-      tipoDestino: String(destinoSeguro.tipo || destinoSeguro.canal || destinoSeguro.tipoMidia || destinoSeguro.destinoTipo || ""),
-      dataBR: hoje,
-      usados,
-      quantidadeItensFilaCliente: filaCliente.length,
-      quantidadeItensComDestinosEnviados: filaCliente.filter(item => Array.isArray(item.destinosEnviados) && item.destinosEnviados.length > 0).length,
-      quantidadeMatchesPorNome,
-      quantidadeMatchesPorId,
-      quantidadeMatchesTotal: usados,
-      quantidadeMatchesNomeEIdMesmoRegistro,
-      quantidadeOfertasDistintasComMatch: ofertasDistintasComMatch.size,
-      statusDosItensComMatch,
-      menorDataMatch,
-      maiorDataMatch
-    });
-  }
+  emitirDiagnosticoUnicidadeLimiteDiario({
+    clienteId,
+    destinoSeguro,
+    hoje,
+    nomeDestino,
+    idDestino,
+    filaCliente,
+    matches: matchesUnicidade,
+    usados,
+    limite
+  });
 
   return usados;
 }
