@@ -3,6 +3,7 @@
 const { getEnginePool, queryEngine } = require("../engine/database");
 
 const MAX_FONTES_ATIVAS = 4;
+const STATUS_BUFFER_VALIDOS = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
 
 let schemaPromise = null;
 
@@ -50,6 +51,17 @@ function serializarFontes(fontes = []) {
 
 function serializarDestinos(destinoIds = []) {
   return destinoIds.map(destinoId => ({ destino_id: texto(destinoId) }));
+}
+
+function normalizarStatusBuffer(status = "") {
+  const valor = texto(status || "capturada").toLowerCase();
+  return STATUS_BUFFER_VALIDOS.has(valor) ? valor : "capturada";
+}
+
+function limitarBuffer(valor = 50) {
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return 50;
+  return Math.max(1, Math.min(100, Math.floor(numero)));
 }
 
 function criarRepositorioClonadorGrupos(opcoes = {}) {
@@ -120,12 +132,34 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
           UNIQUE (cliente_id, destino_id)
         );
 
+        CREATE TABLE IF NOT EXISTS clonador_grupos_buffer (
+          id BIGSERIAL PRIMARY KEY,
+          cliente_id TEXT NOT NULL,
+          sessao_id TEXT NOT NULL,
+          grupo_jid TEXT NOT NULL,
+          grupo_nome TEXT NOT NULL DEFAULT '',
+          mensagem_id TEXT NOT NULL,
+          texto_original TEXT NOT NULL DEFAULT '',
+          links JSONB NOT NULL DEFAULT '[]'::jsonb,
+          capturado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          status TEXT NOT NULL DEFAULT 'capturada',
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (cliente_id, sessao_id, grupo_jid, mensagem_id),
+          CHECK (status IN ('capturada', 'processando', 'pronta', 'encaminhada', 'repetida', 'erro'))
+        );
+
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_fontes_cliente
           ON clonador_grupos_fontes (cliente_id);
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_fontes_ativas
           ON clonador_grupos_fontes (cliente_id, ativo);
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_destinos_cliente
           ON clonador_grupos_destinos (cliente_id);
+        CREATE INDEX IF NOT EXISTS idx_clonador_grupos_buffer_cliente_status
+          ON clonador_grupos_buffer (cliente_id, status, capturado_em DESC);
+        CREATE INDEX IF NOT EXISTS idx_clonador_grupos_buffer_fonte
+          ON clonador_grupos_buffer (cliente_id, sessao_id, grupo_jid, capturado_em DESC);
       `, [], query).catch((erro) => {
         schemaPromise = null;
         throw erro;
@@ -167,6 +201,24 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
       destinoId: texto(row.destino_id),
       criadoEm: row.criado_em ? new Date(row.criado_em).toISOString() : "",
       atualizadoEm: row.atualizado_em ? new Date(row.atualizado_em).toISOString() : ""
+    };
+  }
+
+  function normalizarBuffer(row = {}) {
+    return {
+      id: row.id ? String(row.id) : "",
+      clienteId: texto(row.cliente_id),
+      sessaoId: texto(row.sessao_id),
+      grupoJid: texto(row.grupo_jid),
+      grupoNome: texto(row.grupo_nome),
+      mensagemId: texto(row.mensagem_id),
+      textoOriginal: String(row.texto_original ?? ""),
+      links: Array.isArray(row.links) ? row.links : [],
+      capturadoEm: row.capturado_em ? new Date(row.capturado_em).toISOString() : "",
+      status: normalizarStatusBuffer(row.status),
+      metadata: row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata) ? row.metadata : {},
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : "",
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : ""
     };
   }
 
@@ -261,6 +313,50 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     });
   }
 
+  async function inserirBufferCaptura(item = {}) {
+    await pronto();
+    const resultado = await executar(`
+      INSERT INTO clonador_grupos_buffer (
+        cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        texto_original, links, capturado_em, status, metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, COALESCE($8::timestamptz, NOW()), $9, $10::jsonb)
+      ON CONFLICT (cliente_id, sessao_id, grupo_jid, mensagem_id)
+      DO NOTHING
+      RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        texto_original, links, capturado_em, status, metadata, created_at, updated_at
+    `, [
+      texto(item.clienteId || item.cliente_id),
+      texto(item.sessaoId || item.sessao_id),
+      texto(item.grupoJid || item.grupo_jid),
+      texto(item.grupoNome || item.grupo_nome),
+      texto(item.mensagemId || item.mensagem_id),
+      String(item.textoOriginal ?? item.texto_original ?? ""),
+      JSON.stringify(Array.isArray(item.links) ? item.links : []),
+      item.capturadoEm || item.capturado_em || null,
+      normalizarStatusBuffer(item.status),
+      JSON.stringify(item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata : {})
+    ], query);
+    const row = resultado.rows[0] || null;
+    return row ? { inserido: true, item: normalizarBuffer(row) } : { inserido: false, item: null };
+  }
+
+  async function listarBuffer(clienteId = "", filtros = {}) {
+    await pronto();
+    const status = texto(filtros.status).toLowerCase();
+    const statusFiltro = STATUS_BUFFER_VALIDOS.has(status) ? status : "";
+    const resultado = await executar(`
+      SELECT id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        texto_original, links, capturado_em, status, metadata, created_at, updated_at
+        FROM clonador_grupos_buffer
+       WHERE cliente_id = $1
+         AND ($2::text = '' OR status = $2)
+       ORDER BY capturado_em DESC, id DESC
+       LIMIT $3
+    `, [texto(clienteId), statusFiltro, limitarBuffer(filtros.limit)], query);
+    return resultado.rows.map(normalizarBuffer);
+  }
+
   return {
     prepararSchema,
     lerConfig,
@@ -268,10 +364,13 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     listarFontes,
     substituirFontes,
     listarDestinos,
-    substituirDestinos
+    substituirDestinos,
+    inserirBufferCaptura,
+    listarBuffer
   };
 }
 
 module.exports = {
-  criarRepositorioClonadorGrupos
+  criarRepositorioClonadorGrupos,
+  STATUS_BUFFER_VALIDOS
 };

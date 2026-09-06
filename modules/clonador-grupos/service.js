@@ -1,6 +1,7 @@
 "use strict";
 
 const MAX_FONTES_ATIVAS = 4;
+const STATUS_BUFFER = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -35,6 +36,84 @@ function normalizarFonteEntrada(fonte = {}) {
 
 function normalizarDestinoEntrada(valor) {
   return texto(typeof valor === "string" ? valor : valor?.destinoId || valor?.id);
+}
+
+function normalizarLinksEntrada(links = []) {
+  const vistos = new Set();
+  const saida = [];
+  for (const link of Array.isArray(links) ? links : []) {
+    const valor = texto(link);
+    if (!valor || vistos.has(valor)) continue;
+    vistos.add(valor);
+    saida.push(valor);
+  }
+  return saida.slice(0, 20);
+}
+
+function extrairMensagemInterna(mensagem = {}) {
+  let atual = mensagem?.message || mensagem || {};
+  for (let i = 0; i < 8; i += 1) {
+    if (atual?.ephemeralMessage?.message) {
+      atual = atual.ephemeralMessage.message;
+      continue;
+    }
+    if (atual?.viewOnceMessage?.message) {
+      atual = atual.viewOnceMessage.message;
+      continue;
+    }
+    if (atual?.viewOnceMessageV2?.message) {
+      atual = atual.viewOnceMessageV2.message;
+      continue;
+    }
+    if (atual?.documentWithCaptionMessage?.message) {
+      atual = atual.documentWithCaptionMessage.message;
+      continue;
+    }
+    break;
+  }
+  return atual || {};
+}
+
+function extrairTextoMensagemBasico(mensagem = {}) {
+  const conteudo = extrairMensagemInterna(mensagem);
+  return [
+    conteudo.conversation,
+    conteudo.extendedTextMessage?.text,
+    conteudo.imageMessage?.caption,
+    conteudo.videoMessage?.caption,
+    conteudo.documentMessage?.caption
+  ].filter(Boolean).join("\n").trim();
+}
+
+function timestampMensagemIso(valor = null) {
+  const bruto = typeof valor === "object" && valor !== null && typeof valor.toNumber === "function"
+    ? valor.toNumber()
+    : Number(valor || 0);
+  if (!Number.isFinite(bruto) || bruto <= 0) return new Date().toISOString();
+  const ms = bruto > 1000000000000 ? bruto : bruto * 1000;
+  return new Date(ms).toISOString();
+}
+
+function tipoMensagem(conteudo = {}) {
+  return Object.keys(conteudo || {}).find(chave => Boolean(conteudo[chave])) || "";
+}
+
+function metadadosSegurosMensagem(mensagem = {}, extras = {}) {
+  const conteudo = extrairMensagemInterna(mensagem);
+  const tipo = tipoMensagem(conteudo);
+  return {
+    origem: "whatsapp",
+    participant: texto(mensagem?.key?.participant || mensagem?.participant),
+    pushName: texto(mensagem?.pushName),
+    fromMe: mensagem?.key?.fromMe === true,
+    tipoMensagem: tipo,
+    messageTimestamp: mensagem?.messageTimestamp || null,
+    midia: {
+      presente: Boolean(conteudo.imageMessage || conteudo.videoMessage || conteudo.documentMessage || conteudo.audioMessage || conteudo.stickerMessage),
+      tipo: conteudo.imageMessage ? "image" : conteudo.videoMessage ? "video" : conteudo.documentMessage ? "document" : conteudo.audioMessage ? "audio" : conteudo.stickerMessage ? "sticker" : ""
+    },
+    ...extras
+  };
 }
 
 function deduplicarFontes(fontes = []) {
@@ -74,6 +153,13 @@ function criarServicoClonadorGrupos(deps = {}) {
       ? deps.usuarioTemRecurso(req, "clonador_grupos")
       : req?.usuario?.papel === "admin_master";
     if (!permitido) throw erro("recurso_nao_disponivel_no_plano", 403, { recurso: "clonador_grupos" });
+  }
+
+  function clienteTemFeatureRuntime(clienteId) {
+    if (typeof deps.clienteTemRecurso === "function") {
+      return deps.clienteTemRecurso(clienteId, "clonador_grupos") === true;
+    }
+    return false;
   }
 
   function listarSessoesWorkspace(clienteId) {
@@ -231,6 +317,100 @@ function criarServicoClonadorGrupos(deps = {}) {
     return { ok: true, destinos: await repo.substituirDestinos(clienteId, destinoIds) };
   }
 
+  async function listarBuffer(req, query = {}) {
+    exigirFeature(req);
+    const clienteId = exigirCliente(req);
+    const status = texto(query.status).toLowerCase();
+    if (status && !STATUS_BUFFER.has(status)) throw erro("status_buffer_invalido", 400, { status });
+    return {
+      ok: true,
+      itens: await repo.listarBuffer(clienteId, {
+        status,
+        limit: query.limit
+      })
+    };
+  }
+
+  async function capturarMensagemWhatsapp(entrada = {}) {
+    const logger = deps.logger || console;
+    const clienteId = texto(entrada.clienteId);
+    const sessaoId = texto(entrada.sessaoId);
+    const mensagem = entrada.mensagem || {};
+    const grupoJid = texto(entrada.grupoJid || mensagem?.key?.remoteJid);
+    const mensagemId = texto(entrada.mensagemId || mensagem?.key?.id);
+
+    try {
+      if (!clienteId || !sessaoId) return { ok: true, capturada: false, motivo: "workspace_ou_sessao_ausente" };
+      if (!grupoJid.endsWith("@g.us")) return { ok: true, capturada: false, motivo: "nao_grupo" };
+      if (mensagem?.key?.fromMe === true) return { ok: true, capturada: false, motivo: "mensagem_propria" };
+      if (!mensagemId) return { ok: true, capturada: false, motivo: "mensagem_id_ausente" };
+      if (!clienteTemFeatureRuntime(clienteId)) return { ok: true, capturada: false, motivo: "recurso_indisponivel" };
+
+      const config = await repo.lerConfig(clienteId);
+      if (config?.ativo !== true) return { ok: true, capturada: false, motivo: "config_inativa" };
+
+      const fontes = await repo.listarFontes(clienteId);
+      const fonte = fontes.find(item =>
+        item?.ativo !== false &&
+        texto(item.sessaoId) === sessaoId &&
+        texto(item.grupoJid) === grupoJid
+      );
+      if (!fonte) return { ok: true, capturada: false, motivo: "fonte_nao_selecionada" };
+
+      const textoExtraido = typeof deps.extrairTextoMensagem === "function"
+        ? deps.extrairTextoMensagem(mensagem)
+        : extrairTextoMensagemBasico(mensagem);
+      const textoOriginal = String(textoExtraido ?? "");
+      const links = typeof deps.extrairLinksMensagem === "function"
+        ? normalizarLinksEntrada(deps.extrairLinksMensagem(textoOriginal))
+        : normalizarLinksEntrada(String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || []);
+      const metadata = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
+      const grupoNome = texto(entrada.grupoNome || fonte.grupoNome);
+
+      const resultado = await repo.inserirBufferCaptura({
+        clienteId,
+        sessaoId,
+        grupoJid,
+        grupoNome,
+        mensagemId,
+        textoOriginal,
+        links,
+        capturadoEm: entrada.capturadoEm || timestampMensagemIso(mensagem.messageTimestamp),
+        status: "capturada",
+        metadata
+      });
+
+      if (resultado.inserido && typeof logger.log === "function") {
+        logger.log("[CLONADOR-CAPTURA]", JSON.stringify({
+          clienteId,
+          sessaoId,
+          grupoJid,
+          mensagemId,
+          links: links.length,
+          tamanhoTexto: textoOriginal.length
+        }));
+      }
+
+      return {
+        ok: true,
+        capturada: resultado.inserido === true,
+        motivo: resultado.inserido ? "capturada" : "duplicada",
+        item: resultado.item
+      };
+    } catch (e) {
+      if (typeof logger.log === "function") {
+        logger.log("[CLONADOR-CAPTURA-IGNORADA]", JSON.stringify({
+          clienteId,
+          sessaoId,
+          grupoJid,
+          mensagemId,
+          motivo: e.codigo || e.message || "erro_captura"
+        }));
+      }
+      return { ok: false, capturada: false, motivo: e.codigo || e.message || "erro_captura" };
+    }
+  }
+
   return {
     obterConfig,
     salvarConfig,
@@ -239,7 +419,9 @@ function criarServicoClonadorGrupos(deps = {}) {
     salvarFontes,
     listarDestinosElegiveis,
     listarDestinosSelecionados,
-    salvarDestinos
+    salvarDestinos,
+    listarBuffer,
+    capturarMensagemWhatsapp
   };
 }
 

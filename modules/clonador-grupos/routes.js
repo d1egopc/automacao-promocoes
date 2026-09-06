@@ -44,6 +44,8 @@ function criarRotasClonadorGrupos(deps = {}) {
   router.get("/destinos/selecionados", responder((req) => service.listarDestinosSelecionados(req)));
   router.put("/destinos", responder((req) => service.salvarDestinos(req, req.body || {})));
 
+  router.get("/buffer", responder((req) => service.listarBuffer(req, req.query || {})));
+
   return router;
 }
 

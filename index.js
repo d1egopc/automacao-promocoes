@@ -205,7 +205,11 @@ const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
-const { criarRotasClonadorGrupos } = require("./modules/clonador-grupos");
+const {
+  criarRotasClonadorGrupos,
+  criarRepositorioClonadorGrupos,
+  criarServicoClonadorGrupos
+} = require("./modules/clonador-grupos");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
 const {
@@ -21969,14 +21973,25 @@ app.use("/mensageiro", criarRotasMensageiro({
 
 // =============== ROTA DO CLONADOR DE GRUPOS =================
 
-app.use("/clonador-grupos", criarRotasClonadorGrupos({
+const clonadorGruposRepository = criarRepositorioClonadorGrupos();
+const clonadorGruposService = criarServicoClonadorGrupos({
+  repository: clonadorGruposRepository,
   getClienteId,
   usuarioTemRecurso,
+  clienteTemRecurso: clienteTemRecursoPlano,
   listarSessoesWorkspace: (clienteId) => listarSessoesExclusivasWorkspace(clienteId),
   listarGruposSessao: (clienteId, sessaoId) => carregarGruposSessao(sessaoId, { force: true, clienteId }),
   listarDestinosOficiais: (clienteId) => normalizarDestinosContrato(
     obterDestinosInteligentesCliente(clienteId, configsPorCliente?.[clienteId] || config)
-  )
+  ),
+  extrairTextoMensagem: extrairTextoMensagemRadar,
+  extrairLinksMensagem: extrairLinksRadar,
+  logger: console
+});
+
+app.use("/clonador-grupos", criarRotasClonadorGrupos({
+  service: clonadorGruposService,
+  repository: clonadorGruposRepository
 }));
 
 // =============== ROTA DO SOCIAL MODULE =================
@@ -28932,6 +28947,14 @@ registrarListenerUnicoSocket({
         sock,
         mensagem,
         planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+      });
+
+      await clonadorGruposService.capturarMensagemWhatsapp({
+        clienteId: clienteIdMensageiro,
+        sessaoId: id,
+        grupoJid: mensagem?.key?.remoteJid || "",
+        grupoNome: obterNomeGrupoRadar(id, mensagem?.key?.remoteJid || ""),
+        mensagem
       });
     }
     coberturaRadar.registrar("listener_lote_fim", {
