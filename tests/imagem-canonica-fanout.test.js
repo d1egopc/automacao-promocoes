@@ -355,7 +355,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(resultado.imagemCanonicaDuravel, url("adapter-image"));
-    assert.strictEqual(resultado.imagemOrigem, "imagem");
+    assert.strictEqual(resultado.imagemOrigem, "adapter.imagem");
     assert.strictEqual(resultado.imagemCanonicaFinal, true);
   }
 
@@ -719,6 +719,216 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       assert.strictEqual(resultado.imagemCanonicaDuravel, imagem, titulo);
       assert.strictEqual(resultado.imagemCanonicaFinal, true, titulo);
     }
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_111111-MLB7777777777_012026-T.webp";
+    const maior = "https://http2.mlstatic.com/D_NQ_NP_2X_111111-MLB7777777777_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9800,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-7777777777-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB7777777777",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-7777777777-produto-correto",
+        imagem: thumbnail,
+        imagemOrigem: "polycard.picture_template",
+        imagemCandidatos: [
+          { url: thumbnail, origem: "polycard.picture_template" },
+          { url: maior, origem: "pictures.secure_url", width: 320, height: 320 }
+        ]
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, maior);
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const thumbnailCache = "https://http2.mlstatic.com/D_NQ_NP_2X_777777-MLB7777777778_012026-T.webp";
+    const maior = "https://http2.mlstatic.com/D_NQ_NP_2X_777777-MLB7777777778_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9805,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-7777777778-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB7777777778",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-7777777778-produto-correto",
+        imagemCandidatos: [
+          { url: maior, origem: "pictures.secure_url", width: 320, height: 320 }
+        ],
+        metadata: {
+          imagemCacheCanonico: {
+            produtoId: "MLB7777777778",
+            imagemCanonicaDuravel: thumbnailCache,
+            imagemOrigem: "polycard.picture_template",
+            imagemStatus: "importador_ml_mlb",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, maior);
+    assert.strictEqual(resultado.cacheHit, false);
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_222222-MLB8888888888_012026-T.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9801,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-8888888888-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB8888888888",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-8888888888-produto-correto",
+        imagem: thumbnail,
+        imagemOrigem: "polycard.picture_template"
+      }
+    }, {
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, thumbnail);
+    assert.strictEqual(resultado.imagemStatus, "mercadolivre_thumbnail_fallback");
+    assert.strictEqual(resultado.imagemQualidadeMercadoLivre, "baixa_fallback_final");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const imagemMaior = "https://http2.mlstatic.com/D_NQ_NP_2X_333333-MLB9999999991_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9802,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-9999999991-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB9999999991",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-9999999991-produto-correto",
+        imagem: imagemMaior,
+        imagemOrigem: "polycard.picture_template"
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, imagemMaior);
+    assert.strictEqual(resultado.imagemCanonicaFinal, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_444444-MLB9999999992_012026-T.webp";
+    const radarMaterializada = url("radar-materializada-ml-thumbnail");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9803,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-9999999992-produto-correto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMaterializada
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB9999999992",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-9999999992-produto-correto",
+        imagem: thumbnail,
+        imagemOrigem: "polycard.picture_template"
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const thumbnailCorreta = "https://http2.mlstatic.com/D_NQ_NP_2X_555555-MLB9999999993_012026-T.webp";
+    const grandeOutroProduto = "https://http2.mlstatic.com/D_NQ_NP_2X_666666-MLB0000000000_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9804,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-9999999993-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB9999999993",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-9999999993-produto-correto",
+        imagem: thumbnailCorreta,
+        imagemOrigem: "polycard.picture_template",
+        imagemCandidatos: [
+          {
+            url: grandeOutroProduto,
+            origem: "pictures.secure_url",
+            produtoIdDetectado: "MLB1234567890",
+            width: 1200,
+            height: 1200
+          }
+        ]
+      }
+    }, {
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" }),
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, thumbnailCorreta);
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, grandeOutroProduto);
   }
 
   {

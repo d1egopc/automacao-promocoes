@@ -544,6 +544,159 @@ function resultadoFinalDeImagemResolvida({ chave, eventoId, marketplace, produto
   });
 }
 
+function imagemUrlNormalizada(valor = "") {
+  const validacao = imagemUrlValidaUniversal(valor);
+  return validacao.ok ? validacao.url : texto(valor);
+}
+
+function extrairDimensoesImagemMl(valor = {}) {
+  const dimensoes = objetoSeguro(valor);
+  const largura = Number(
+    dimensoes.width ??
+    dimensoes.w ??
+    dimensoes.largura ??
+    dimensoes.imagemLargura ??
+    dimensoes.imageWidth
+  );
+  const altura = Number(
+    dimensoes.height ??
+    dimensoes.h ??
+    dimensoes.altura ??
+    dimensoes.imagemAltura ??
+    dimensoes.imageHeight
+  );
+  if (Number.isFinite(largura) && Number.isFinite(altura) && largura > 0 && altura > 0) {
+    return { largura, altura };
+  }
+
+  const textoDimensoes = texto(dimensoes.size || dimensoes.dimensions || dimensoes.dimensoes || "");
+  const match = textoDimensoes.match(/\b(\d{2,5})\s*x\s*(\d{2,5})\b/i);
+  return match ? { largura: Number(match[1]), altura: Number(match[2]) } : null;
+}
+
+function classificarQualidadeImagemMercadoLivre(url = "", metadados = {}) {
+  const imagem = texto(url);
+  const dimensoes = extrairDimensoesImagemMl(metadados);
+  const varianteT = /-T\.webp(?:$|[?#])/i.test(imagem);
+  const dimensaoPequena = Boolean(dimensoes && dimensoes.largura <= 160 && dimensoes.altura <= 160);
+  return {
+    baixa: varianteT || dimensaoPequena,
+    motivo: varianteT ? "mercadolivre_thumbnail_t" : (dimensaoPequena ? "mercadolivre_dimensao_ate_160" : ""),
+    variante: varianteT ? "T" : "",
+    dimensoes
+  };
+}
+
+function extrairMlbObjetoImagemMercadoLivre(valor = {}) {
+  const item = objetoSeguro(valor);
+  const candidatos = [
+    item.produtoIdDetectado,
+    item.produtoId,
+    item.mlb,
+    item.itemId,
+    item.item_id
+  ];
+  for (const candidato of candidatos) {
+    const bruto = texto(candidato);
+    if (!bruto) continue;
+    const mlb = extrairMlb(bruto) || bruto.replace(/[^0-9]/g, "");
+    if (mlb) return `MLB${mlb}`;
+  }
+
+  const links = [
+    item.linkOriginal,
+    item.linkExpandido,
+    item.linkAfiliado,
+    item.urlFinal,
+    item.linkResolvido,
+    item.permalink,
+    item.urlProduto,
+    item.produtoUrl
+  ];
+  for (const link of links) {
+    const mlb = extrairMlb(link);
+    if (mlb) return `MLB${mlb}`;
+  }
+
+  return "";
+}
+
+function candidatoImagemMlCompativelComProduto(valor = {}, produtoId = "") {
+  const esperado = texto(produtoId).toUpperCase();
+  if (!esperado) return true;
+  const detectado = extrairMlbObjetoImagemMercadoLivre(valor);
+  return !detectado || detectado === esperado;
+}
+
+function sanitizarCandidatosImagemMercadoLivre(valor, { produtoId = "", urlsBaixaQualidade = new Set() } = {}, profundidade = 0) {
+  if (valor == null || profundidade > 7) return valor;
+
+  if (typeof valor === "string") {
+    const normalizada = imagemUrlNormalizada(valor);
+    return urlsBaixaQualidade.has(normalizada) ? "" : valor;
+  }
+
+  if (Array.isArray(valor)) {
+    return valor
+      .map((item) => sanitizarCandidatosImagemMercadoLivre(item, { produtoId, urlsBaixaQualidade }, profundidade + 1))
+      .filter((item) => item !== null && item !== undefined && item !== "");
+  }
+
+  if (typeof valor !== "object") return valor;
+  if (!candidatoImagemMlCompativelComProduto(valor, produtoId)) return null;
+
+  const urlObjeto = imagemUrlNormalizada(valor.url || valor.secure_url || valor.secureUrl || valor.src || valor.imageUrl || valor.imagemUrl || "");
+  if (urlObjeto && urlsBaixaQualidade.has(urlObjeto)) return null;
+
+  const saida = {};
+  for (const [chave, item] of Object.entries(valor)) {
+    const sanitizado = sanitizarCandidatosImagemMercadoLivre(item, { produtoId, urlsBaixaQualidade }, profundidade + 1);
+    if (sanitizado !== null && sanitizado !== undefined && sanitizado !== "") saida[chave] = sanitizado;
+  }
+  return saida;
+}
+
+function montarResultadoFallbackImagemMlBaixa({ chave, eventoId, marketplace, produtoId, resolvida = {}, cacheAtual = {}, linkResolvido = "" } = {}) {
+  return resultadoFinalDeImagemResolvida({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    resolvida,
+    origemFallback: resolvida.imagemOrigem || "importador_ml_mlb",
+    statusFallback: "mercadolivre_thumbnail_fallback",
+    extra: {
+      materializacoes: Number(cacheAtual.materializacoes || 0),
+      ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+      linkResolvido,
+      imagemQualidadeMercadoLivre: "baixa_fallback_final"
+    }
+  });
+}
+
+function resolverImagemUniversalMercadoLivrePreferindoQualidade(ofertaImagem = {}, contexto = {}, { produtoId = "", urlsBaixaQualidade = new Set(), fallbackBaixa = null } = {}) {
+  let fallbackImagemMlBaixa = fallbackBaixa;
+  const urlsBaixas = new Set([...urlsBaixaQualidade]);
+
+  for (let tentativa = 0; tentativa < 8; tentativa += 1) {
+    const ofertaDisputa = sanitizarCandidatosImagemMercadoLivre(ofertaImagem, { produtoId, urlsBaixaQualidade: urlsBaixas }) || {};
+    const resolvida = resolverImagemUniversal(ofertaDisputa, contexto);
+    if (!resolvida.imagem) return { resolvida: null, fallbackBaixa: fallbackImagemMlBaixa, urlsBaixaQualidade: urlsBaixas };
+
+    const qualidadeMl = classificarQualidadeImagemMercadoLivre(resolvida.imagem, resolvida);
+    if (!qualidadeMl.baixa) return { resolvida, fallbackBaixa: fallbackImagemMlBaixa, urlsBaixaQualidade: urlsBaixas };
+
+    urlsBaixas.add(imagemUrlNormalizada(resolvida.imagem));
+    fallbackImagemMlBaixa = fallbackImagemMlBaixa || {
+      ...resolvida,
+      imagemStatus: "mercadolivre_thumbnail_fallback",
+      imagemQualidadeMercadoLivre: qualidadeMl
+    };
+  }
+
+  return { resolvida: null, fallbackBaixa: fallbackImagemMlBaixa, urlsBaixaQualidade: urlsBaixas };
+}
+
 async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
   const eventoId = entrada.eventoId;
   const marketplace = normalizarMarketplace(entrada.marketplace || entrada.marketplaceDetectado || entrada.ofertaEnriquecida?.marketplace || "");
@@ -571,11 +724,33 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
     ...objetoSeguro(objetoSeguro(ofertaEnriquecida.metadata).imagemCacheCanonico),
     ...objetoSeguro(cacheImagemCanonicaEvento.get(chave))
   };
+  const ehMercadoLivreComMlb = marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase());
+  let fallbackImagemMlBaixa = null;
+  const urlsMlBaixaQualidade = new Set();
+  const linkResolvidoImagem = ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || "";
+
   if (cacheAtual.imagemCanonicaDuravel && cacheAtual.imagemCanonicaFinal === true) {
-    return { ...cacheAtual, cacheHit: true };
+    if (!ehMercadoLivreComMlb) {
+      return { ...cacheAtual, cacheHit: true };
+    }
+
+    const qualidadeCacheMl = classificarQualidadeImagemMercadoLivre(cacheAtual.imagemCanonicaDuravel, cacheAtual);
+    if (!qualidadeCacheMl.baixa) {
+      return { ...cacheAtual, cacheHit: true };
+    }
+
+    urlsMlBaixaQualidade.add(imagemUrlNormalizada(cacheAtual.imagemCanonicaDuravel));
+    fallbackImagemMlBaixa = {
+      imagem: cacheAtual.imagemCanonicaDuravel,
+      imagemUrl: cacheAtual.imagemCanonicaDuravel,
+      imagemOrigem: cacheAtual.imagemOrigem || "cache_canonico_ml",
+      imagemStatus: "mercadolivre_thumbnail_fallback",
+      imagemQualidadeMercadoLivre: qualidadeCacheMl,
+      imagemTentativas: cacheAtual.imagemTentativas || []
+    };
   }
 
-  if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+  if (ehMercadoLivreComMlb) {
     const imagemImportador = texto(ofertaEnriquecida.imagem || ofertaEnriquecida.imagemUrl || "");
     const imagemImportadorResolvida = resolverImagemUniversal({
       imagem: imagemImportador,
@@ -583,34 +758,54 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       imagemConfianca: 120
     });
     if (imagemImportadorResolvida.imagem) {
-      const resultado = resultadoFinalDeImagemResolvida({
-        chave,
-        eventoId,
-        marketplace,
-        produtoId,
-        resolvida: {
+      const qualidadeMl = classificarQualidadeImagemMercadoLivre(imagemImportadorResolvida.imagem, ofertaEnriquecida);
+      if (qualidadeMl.baixa) {
+        urlsMlBaixaQualidade.add(imagemUrlNormalizada(imagemImportadorResolvida.imagem));
+        fallbackImagemMlBaixa = {
           ...imagemImportadorResolvida,
           imagemOrigem: ofertaEnriquecida.imagemOrigem || "importador_ml_mlb",
-          imagemStatus: "importador_ml_mlb"
-        },
-        extra: {
-          materializacoes: Number(cacheAtual.materializacoes || 0),
-          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
-          linkResolvido: ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || ""
-        }
-      });
-      cacheImagemCanonicaEvento.set(chave, resultado);
-      return { ...resultado, cacheHit: false };
+          imagemStatus: "mercadolivre_thumbnail_fallback",
+          imagemQualidadeMercadoLivre: qualidadeMl
+        };
+      } else {
+        const resultado = resultadoFinalDeImagemResolvida({
+          chave,
+          eventoId,
+          marketplace,
+          produtoId,
+          resolvida: {
+            ...imagemImportadorResolvida,
+            imagemOrigem: ofertaEnriquecida.imagemOrigem || "importador_ml_mlb",
+            imagemStatus: "importador_ml_mlb"
+          },
+          extra: {
+            materializacoes: Number(cacheAtual.materializacoes || 0),
+            ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+            linkResolvido: linkResolvidoImagem
+          }
+        });
+        cacheImagemCanonicaEvento.set(chave, resultado);
+        return { ...resultado, cacheHit: false };
+      }
     }
   }
 
   const ofertaImagem = montarOfertaImagemFinal(metadataEvento, ofertaEnriquecida);
-  const resolvida = resolverImagemUniversal(ofertaImagem, {
+  const contextoImagem = {
     evento: { metadata: metadataEvento },
     job: { metadata: { metadataEvento } },
     ofertaEntrada: entrada.ofertaEntrada,
     link: entrada.link
-  });
+  };
+  const disputaMl = ehMercadoLivreComMlb
+    ? resolverImagemUniversalMercadoLivrePreferindoQualidade(ofertaImagem, contextoImagem, {
+        produtoId,
+        urlsBaixaQualidade: urlsMlBaixaQualidade,
+        fallbackBaixa: fallbackImagemMlBaixa
+      })
+    : { resolvida: resolverImagemUniversal(ofertaImagem, contextoImagem), fallbackBaixa: fallbackImagemMlBaixa };
+  const resolvida = disputaMl.resolvida || {};
+  fallbackImagemMlBaixa = disputaMl.fallbackBaixa || fallbackImagemMlBaixa;
   if (resolvida.imagem) {
     const resultado = resultadoFinalDeImagemResolvida({
       chave,
@@ -621,7 +816,7 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       extra: {
         materializacoes: Number(cacheAtual.materializacoes || 0),
         ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
-        linkResolvido: ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || ""
+        linkResolvido: linkResolvidoImagem
       }
     });
     cacheImagemCanonicaEvento.set(chave, resultado);
@@ -629,7 +824,7 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
   }
 
   let ultimoMotivo = "nenhuma_fonte_de_imagem";
-  if (marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase())) {
+  if (ehMercadoLivreComMlb) {
     const oficial = await buscarImagemOficialMl(produtoId, deps);
     const oficialResolvida = resolverImagemUniversal({ imagem: oficial.imagem || "" });
     if (oficialResolvida.imagem) {
@@ -679,6 +874,20 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       return { ...resultado, cacheHit: false };
     }
     ultimoMotivo = historico.motivo || ultimoMotivo;
+  }
+
+  if (fallbackImagemMlBaixa?.imagem) {
+    const resultado = montarResultadoFallbackImagemMlBaixa({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      resolvida: fallbackImagemMlBaixa,
+      cacheAtual,
+      linkResolvido: linkResolvidoImagem
+    });
+    cacheImagemCanonicaEvento.set(chave, resultado);
+    return { ...resultado, cacheHit: false };
   }
 
   const semImagemFinal = resultadoImagemCanonica({
