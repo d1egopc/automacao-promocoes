@@ -10190,8 +10190,13 @@ const {
   default: makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
-  DisconnectReason
+  DisconnectReason,
+  downloadMediaMessage
 } = require("@whiskeysockets/baileys");
+const {
+  materializarImagemRadarWhatsApp,
+  aplicarMidiaMaterializadaRadarMirror
+} = require("./modules/radar/whatsapp-media-materializer");
 const {
   ESTADOS_WHATSAPP,
   auditarAuthSessao,
@@ -19146,7 +19151,10 @@ async function processarMensagemRadar({
   capturadaEm,
   raw,
   debugPayloadSemLink,
-  coberturaTraceId
+  coberturaTraceId,
+  radarMidiaMaterializada,
+  sock,
+  downloadMediaMessageImpl
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
@@ -19380,7 +19388,20 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
 });
 
 const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
-const radarMirrorBase = criarRadarMirror({
+const radarMidiaMaterializadaFinal = radarMidiaMaterializada || (
+  origemTipoFinal === "whatsapp" && links.length && typeof downloadMediaMessageImpl === "function"
+    ? await materializarImagemRadarWhatsApp({
+        mensagem: raw,
+        sock,
+        sessaoId: sessaoIdTexto,
+        remoteJid: grupoIdTexto,
+        grupoNome: grupoNomeTexto,
+        clienteId: "engine",
+        downloadMediaMessageImpl
+      })
+    : null
+);
+let radarMirrorBase = criarRadarMirror({
   origemTipo: origemTipoFinal,
   clienteId: adminMasterId,
   sessaoId: sessaoIdTexto,
@@ -19397,6 +19418,7 @@ const radarMirrorBase = criarRadarMirror({
   fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   mensagemId: raw?.key?.id || ""
 });
+radarMirrorBase = aplicarMidiaMaterializadaRadarMirror(radarMirrorBase, radarMidiaMaterializadaFinal);
 fidelidadeObs.registrarSnapshot("radar_mirror", {
   fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   clienteId: adminMasterId,
@@ -19850,7 +19872,9 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, cobe
     texto: textoExtraido,
     raw: mensagem,
     debugPayloadSemLink,
-    coberturaTraceId
+    coberturaTraceId,
+    sock,
+    downloadMediaMessageImpl: downloadMediaMessage
   });
 }
 
