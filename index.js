@@ -205,6 +205,7 @@ const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
+const { criarRotasClonadorGrupos } = require("./modules/clonador-grupos");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
 const {
@@ -5026,6 +5027,9 @@ function normalizarRecursosPlanosRuntime() {
     }
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "copyIaGenerativa")) {
       plano.recursos.copyIaGenerativa = false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "clonador_grupos")) {
+      plano.recursos.clonador_grupos = false;
     }
   }
 }
@@ -12243,6 +12247,7 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       discord: booleanPlano("discord", recursosAnteriores.discord),
       automacao: booleanPlano("automacao", recursosAnteriores.automacao),
       vitrine: booleanPlano("vitrine", recursosAnteriores.vitrine),
+      clonador_grupos: booleanPlano("clonador_grupos", recursosAnteriores.clonador_grupos),
       social: booleanPlano("social", recursosAnteriores.social)
     },
 
@@ -21958,6 +21963,18 @@ app.use("/mensageiro", criarRotasMensageiro({
     }
     return null;
   }
+}));
+
+// =============== ROTA DO CLONADOR DE GRUPOS =================
+
+app.use("/clonador-grupos", criarRotasClonadorGrupos({
+  getClienteId,
+  usuarioTemRecurso,
+  listarSessoesWorkspace: (clienteId) => listarSessoesExclusivasWorkspace(clienteId),
+  listarGruposSessao: (clienteId, sessaoId) => carregarGruposSessao(sessaoId, { force: true, clienteId }),
+  listarDestinosOficiais: (clienteId) => normalizarDestinosContrato(
+    obterDestinosInteligentesCliente(clienteId, configsPorCliente?.[clienteId] || config)
+  )
 }));
 
 // =============== ROTA DO SOCIAL MODULE =================

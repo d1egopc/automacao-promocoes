@@ -92,6 +92,9 @@ function normalizarCatalogoBootstrap(planos = {}) {
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "copyIaGenerativa")) {
       plano.recursos.copyIaGenerativa = false;
     }
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "clonador_grupos")) {
+      plano.recursos.clonador_grupos = false;
+    }
   }
   return catalogo;
 }
