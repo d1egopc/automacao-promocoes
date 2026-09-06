@@ -285,8 +285,8 @@ function pareceCupomRealShopee(codigo = "") {
 function extrairBeneficioTextoShopee(textoRadar = "") {
   const fonte = String(textoRadar || "");
   const beneficio =
-    fonte.match(/(?:cupom\s+de\s+)?R\$\s*\d{1,5}(?:[.,]\d{1,2})?\s*OFF/i)?.[0] ||
-    fonte.match(/\d{1,3}%\s*OFF/i)?.[0] ||
+    fonte.match(/(?:cupom\s+de\s+)?R\$\s*\d{1,5}(?:[.,]\d{1,2})?\s*OFF(?:\s+(?:a\s+partir\s+de|acima\s+de|em\s+compras\s+(?:a\s+partir|acima)\s+de|nas\s+compras\s+(?:a\s+partir|acima)\s+de)\s+R\$\s*\d{1,5}(?:[.,]\d{1,2})?)?/i)?.[0] ||
+    fonte.match(/\d{1,3}%\s*OFF(?:\s+(?:a\s+partir\s+de|acima\s+de|em\s+compras\s+(?:a\s+partir|acima)\s+de|nas\s+compras\s+(?:a\s+partir|acima)\s+de)\s+R\$\s*\d{1,5}(?:[.,]\d{1,2})?)?/i)?.[0] ||
     fonte.match(/(?:no pix|pague via pix|\d{1,2}x\s+no\s+(?:cartao|cart.o))/i)?.[0] ||
     "";
 

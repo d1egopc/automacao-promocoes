@@ -55,13 +55,18 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   const marketplaceDuplicado = n.split(/\s+/).length === 2
     && n.split(/\s+/)[0] === n.split(/\s+/)[1]
     && marketplaces.has(n.split(/\s+/)[0]);
+  const tituloBruto = limpo.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const linhaPromocionalCupom = /\b(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|\b\d{1,3}\s*%\s*off\b/.test(tituloBruto) &&
+    (/\b(?:cupom|voucher|codigo|cod|use|aplique|resgate|a\s+partir\s+de|acima\s+de|compras)\b/.test(tituloBruto) ||
+      /^(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|^\d{1,3}\s*%\s*off\b/.test(tituloBruto));
 
   if (marketplaces.has(n) || (marketplaceCompacto && compacto === marketplaceCompacto)) return false;
   if (cuponsContexto.has(compacto)) return false;
   if (marketplaceDuplicado) return false;
+  if (linhaPromocionalCupom) return false;
   if (/^(?:amazon|mercado\s*livre|mercadolivre|shopee|ali\s*express|aliexpress)\s+(?:amazon|mercado\s*livre|mercadolivre|shopee|ali\s*express|aliexpress)$/.test(n)) return false;
   if (/^\d{1,3}$/.test(n) && /%/.test(limpo)) return false;
-  if (/^(?:cupom|codigo|cod|voucher|resgate|frete|gratis|cashback|score|prioridade|motivo|erro|falha|debug|log|interno)\b/.test(n)) return false;
+  if (/^(?:cupom|codigo|cod|voucher|resgate|link|links|carrinho|frete|gratis|cashback|score|prioridade|motivo|erro|falha|debug|log|interno)\b/.test(n)) return false;
   if (/^(?:por|de|pix|parcel|avaliacao|beneficio|oferta|desconto)\b/.test(n) && !/\b(?:kit|smart|tenis|produto|tv|fone|monitor|notebook|perfume|whey)\b/.test(n)) return false;
   if (/^[A-Z0-9_-]{4,24}$/.test(limpo) && /[A-Z]/.test(limpo) && /\d/.test(limpo)) return false;
   if (!/[\p{L}\p{N}]/u.test(limpo)) return false;

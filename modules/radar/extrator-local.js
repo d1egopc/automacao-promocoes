@@ -182,6 +182,7 @@ function extrairLinhasCandidatasTitulo(texto = "", links = []) {
     .map(linha => linha.trim())
     .map(limparMarcadoresTitulo)
     .filter(Boolean)
+    .filter(linha => !linhaPromocionalCupomSemProduto(linha))
     .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !linhaComercialNaoTitulo(linha))
     .filter(linha => !linksSet.has(linha))
     .filter(linha => !/(?:https?:\/\/|www\.)/i.test(linha))
@@ -189,6 +190,17 @@ function extrairLinhasCandidatasTitulo(texto = "", links = []) {
     .filter(linha => pontuarLinhaTituloProduto(linha) >= 6 || !/(?:^|\s)(?:r\$|\d+[,.]\d{2}|\d+\s*x\s*de|cupom|codigo|c[oó]digo|frete|economize|desconto|pix|pre[cç]o|cart[aã]o|boleto)(?:\s|:|$)/i.test(linha))
     .filter(linha => !/^(?:use|aplique|resgate|compre|garanta|corre|aproveite)\b/i.test(linha))
     .filter(linha => !/^[@#]/.test(linha));
+}
+
+function linhaPromocionalCupomSemProduto(linha = "") {
+  const limpa = normalizarTexto(linha);
+  if (!limpa) return true;
+  const normalizada = textoSemAcentos(limpa).toLowerCase();
+  const mencionaBeneficio = /\b(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|\b\d{1,3}\s*%\s*off\b/.test(normalizada);
+  const mencionaCupom = /\b(?:cupom|voucher|codigo|cod|use|aplique|resgate)\b/.test(normalizada) || /\b[A-Z0-9_-]{4,40}\b/.test(limpa);
+  const mencionaCondicao = /\b(?:a\s+partir\s+de|acima\s+de|em\s+compras\s+(?:a\s+partir|acima)\s+de|nas\s+compras\s+(?:a\s+partir|acima)\s+de)\b/.test(normalizada);
+  const comecaComBeneficio = /^(?:r\$\s*)?\d{1,5}(?:[.,]\d{1,2})?\s*(?:off|de\s+desconto)|^\d{1,3}\s*%\s*off\b/.test(normalizada);
+  return Boolean(mencionaBeneficio && (mencionaCupom || mencionaCondicao || comecaComBeneficio));
 }
 
 function limparMarcadoresTitulo(linha = "") {
@@ -201,6 +213,7 @@ function limparMarcadoresTitulo(linha = "") {
 function linhaComercialNaoTitulo(linha = "") {
   const limpa = removerMarcadoresFormatacaoComercial(linha).trim();
   if (!limpa) return true;
+  if (/^\s*(?:link|links|resgate|resgatar|carrinho)\b/i.test(limpa)) return true;
   if (/^\s*[0-5](?:[,.]\d)?\s*\(\d{2,6}\)/.test(limpa)) return true;
   if (/^\s*(?:cupom|c[oó]digo|codigo)\s*:/i.test(limpa)) return true;
   if (/^\s*(?:ou\s*)?\d{1,2}\s*x\s*(?:de\s*)?(?:r\$\s*)?\d/i.test(limpa)) return true;
