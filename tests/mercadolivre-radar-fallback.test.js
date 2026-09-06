@@ -3,6 +3,7 @@ const assert = require("assert");
 const { importarMercadoLivreEngine } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
 
 const URL_PRODUTO = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v-_JM";
+const URL_PRODUTO_BERMUDA = "https://produto.mercadolivre.com.br/MLB-3382028526-kit-3-bermuda-masculina-sarja-short-jeans-social-brim-lisa-_JM";
 const URL_AFILIADA = "https://meli.la/cliente-fallback";
 
 function job(extras = {}) {
@@ -49,6 +50,65 @@ function eventoRadar({
           cupom: { codigo: cupom, instrucao: `Use ${cupom}`, confianca: "alta" }
         },
         ...(midia ? { midia } : {})
+      }
+    }
+  };
+}
+
+function eventoClonador({
+  titulo = "Kit 3 Bermuda Masculina Sarja Short Jeans Social Brim Lisa",
+  preco = 106.94,
+  precoAnterior = 183,
+  cupom = "OFERTASEMPRE",
+  beneficio = "Aplique o cupom OFERTASEMPRE + Pix para chegar neste valor.",
+  origem = "clonador_grupos"
+} = {}) {
+  const campos = {};
+  if (titulo) campos.titulo = true;
+  if (preco !== null && preco !== undefined && preco !== "") campos.precoAtual = true;
+  if (precoAnterior !== null && precoAnterior !== undefined && precoAnterior !== "") campos.precoAnterior = true;
+  if (cupom) campos.cupom = true;
+  if (beneficio) campos.beneficio = true;
+  return {
+    id: 655,
+    evento_id: 655,
+    origem,
+    origem_tipo: "whatsapp",
+    grupo_id: "grupo-clonador@g.us",
+    grupo_nome: "Clonador ML",
+    texto_original: [
+      "PRECINHO DE 107 LEVA 3 BERMUDAS",
+      "",
+      titulo || "",
+      "",
+      "De: R$ 183",
+      "Por: R$ 106,94 no Pix",
+      "",
+      "Cupom: OFERTASEMPRE",
+      "",
+      URL_PRODUTO_BERMUDA,
+      "",
+      beneficio || ""
+    ].join("\n"),
+    links_extraidos: [URL_PRODUTO_BERMUDA],
+    metadata: {
+      clonadorGrupos: {
+        bufferId: "6",
+        destinoIds: ["destino_autorizado"],
+        sessaoId: "sessao_a",
+        grupoJid: "grupo-clonador@g.us",
+        grupoNome: "Clonador ML"
+      },
+      comercialCapturado: {
+        versao: "clonador_comercial_capturado_v1",
+        origem: "clonador_grupos",
+        tituloCapturado: titulo || "",
+        precoAtual: preco,
+        precoAnterior,
+        cupom,
+        beneficioTexto: beneficio,
+        beneficioExtra: beneficio,
+        campos
       }
     }
   };
@@ -287,6 +347,72 @@ async function testarWallComFalhaAfiliadoFalhaSeguro() {
   assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
 }
 
+async function testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem() {
+  const contexto = depsBase({ wall: true });
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador(),
+    links: links(URL_PRODUTO_BERMUDA),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, true);
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreRadar, undefined);
+  assert.strictEqual(resultado.metadata.origemComercial, "clonador_grupos");
+  assert.strictEqual(resultado.metadata.origemPreco, "clonador_grupos");
+  assert.strictEqual(resultado.metadata.origemTitulo, "clonador_grupos");
+  assert.strictEqual(resultado.titulo, "Kit 3 Bermuda Masculina Sarja Short Jeans Social Brim Lisa");
+  assert.strictEqual(resultado.preco, 106.94);
+  assert.strictEqual(resultado.precoOriginal, 183);
+  assert.strictEqual(resultado.cupom, "OFERTASEMPRE");
+  assert.ok(resultado.beneficioExtra.includes("OFERTASEMPRE + Pix"));
+  assert.strictEqual(resultado.produtoIdDetectado, "MLB3382028526");
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.metadata.origemImagem, "nenhuma");
+  assert.strictEqual(resultado.linkAfiliado, URL_AFILIADA);
+  assert.ok(!resultado.metadata.radarMirror);
+}
+
+async function testarOrigemDiferenteNaoUsaComercialCapturadoClonador() {
+  const contexto = depsBase({ wall: true });
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador({ origem: "engine" }),
+    links: links(URL_PRODUTO_BERMUDA),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, undefined);
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreRadar, true);
+}
+
+async function testarWallClonadorSemTituloOuPrecoFalhaSeguro() {
+  const contextoSemTitulo = depsBase({ wall: true });
+  const semTitulo = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador({ titulo: "" }),
+    links: links(URL_PRODUTO_BERMUDA),
+    deps: contextoSemTitulo.deps
+  });
+  assert.strictEqual(semTitulo.ok, false);
+  assert.strictEqual(semTitulo.motivo, "fallback_clonador_insuficiente");
+  assert.strictEqual(semTitulo.metadata.insuficiente.titulo, true);
+
+  const contextoSemPreco = depsBase({ wall: true });
+  const semPreco = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador({ preco: null }),
+    links: links(URL_PRODUTO_BERMUDA),
+    deps: contextoSemPreco.deps
+  });
+  assert.strictEqual(semPreco.ok, false);
+  assert.strictEqual(semPreco.motivo, "fallback_clonador_insuficiente");
+  assert.strictEqual(semPreco.metadata.insuficiente.preco, true);
+}
+
 async function testarErroGenericoNaoAtivaFallback() {
   const contexto = depsBase({ produto: null, wall: false });
   const resultado = await importarMercadoLivreEngine({
@@ -311,6 +437,9 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarTituloLegitimoComWindowsContinuaAceito();
   await testarWallSemPrecoFalhaSeguro();
   await testarWallComFalhaAfiliadoFalhaSeguro();
+  await testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem();
+  await testarOrigemDiferenteNaoUsaComercialCapturadoClonador();
+  await testarWallClonadorSemTituloOuPrecoFalhaSeguro();
   await testarErroGenericoNaoAtivaFallback();
   console.log("mercadolivre-radar-fallback.test.js OK");
 })().catch((erro) => {

@@ -231,6 +231,46 @@ function testarComercialCapturado() {
   assert.ok(beneficio.beneficioExtra.includes("R$ 50 OFF a partir de R$ 249"));
   assert.ok(!beneficio.campos.precoAtual, "valor de cupom nao deve virar preco atual");
   assert.ok(!beneficio.campos.precoAnterior, "minimo de cupom nao deve virar preco anterior isolado");
+
+  const bermuda = montarComercialCapturado({
+    textoOriginal: [
+      "PRECINHO DE 107 LEVA 3 BERMUDAS",
+      "",
+      "Kit 3 Bermuda Masculina Sarja Short Jeans Social Brim Lisa",
+      "",
+      "De: R$ 183",
+      "Por: R$ 106,94 no Pix",
+      "",
+      "Cupom: OFERTASEMPRE",
+      "",
+      "Confira aqui: https://meli.la/2CX5cwy",
+      "",
+      "Aplique o cupom OFERTASEMPRE + Pix para chegar neste valor."
+    ].join("\n"),
+    links: ["https://meli.la/2CX5cwy"],
+    marketplaceDetectado: "mercadolivre"
+  });
+  assert.strictEqual(bermuda.tituloCapturado, "Kit 3 Bermuda Masculina Sarja Short Jeans Social Brim Lisa");
+  assert.notStrictEqual(bermuda.tituloCapturado, "PRECINHO DE 107 LEVA 3 BERMUDAS");
+  assert.strictEqual(bermuda.precoAtual, 106.94);
+  assert.strictEqual(bermuda.precoAnterior, 183);
+  assert.strictEqual(bermuda.cupom, "OFERTASEMPRE");
+  assert.ok(bermuda.beneficioExtra.includes("OFERTASEMPRE + Pix"));
+  assert.ok(!bermuda.radarMirror);
+
+  const chamadaGenerica = montarComercialCapturado({
+    textoOriginal: "Compre antes que acabe\nPor: R$ 106,94\nhttps://meli.la/x",
+    links: ["https://meli.la/x"],
+    marketplaceDetectado: "mercadolivre"
+  });
+  assert.ok(!chamadaGenerica.tituloCapturado, "CTA generico nao deve virar titulo confiavel");
+
+  const chamadaSemelhante = montarComercialCapturado({
+    textoOriginal: "Aproveite antes que acabe\nPor: R$ 106,94\nhttps://meli.la/y",
+    links: ["https://meli.la/y"],
+    marketplaceDetectado: "mercadolivre"
+  });
+  assert.ok(!chamadaSemelhante.tituloCapturado, "CTA de urgencia nao deve virar titulo confiavel");
 }
 
 function testarAplicacaoComercialNeutraImporter() {

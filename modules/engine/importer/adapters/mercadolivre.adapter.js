@@ -381,6 +381,232 @@ function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
   };
 }
 
+function origemClonadorGruposMercadoLivre(evento = {}, job = {}) {
+  const metadataEvento = objetoSeguro(evento.metadata);
+  const metadataJob = objetoSeguro(job.metadata);
+  const metadataJobEvento = objetoSeguro(metadataJob.metadataEvento);
+  const origem = textoMercadoLivre(
+    evento.origem ||
+    metadataEvento.origem ||
+    metadataJobEvento.origem ||
+    ""
+  ).toLowerCase();
+  return origem === "clonador_grupos";
+}
+
+function contratoComercialClonadorMercadoLivre(evento = {}, job = {}) {
+  if (!origemClonadorGruposMercadoLivre(evento, job)) return null;
+  const metadataEvento = objetoSeguro(evento.metadata);
+  const metadataJob = objetoSeguro(job.metadata);
+  const metadataJobEvento = objetoSeguro(metadataJob.metadataEvento);
+  const contrato = objetoSeguro(metadataEvento.comercialCapturado || metadataJobEvento.comercialCapturado);
+  if (textoMercadoLivre(contrato.origem).toLowerCase() !== "clonador_grupos") return null;
+  return contrato;
+}
+
+function extrairTituloClonadorMercadoLivre(evento = {}, job = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  if (!contrato) return "";
+  return textoMercadoLivre(contrato.tituloCapturado || contrato.titulo || "");
+}
+
+function extrairPrecoClonadorMercadoLivre(evento = {}, job = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  if (!contrato) return null;
+  return numeroMercadoLivre(contrato.precoAtual ?? contrato.preco ?? "");
+}
+
+function extrairPrecoAnteriorClonadorMercadoLivre(evento = {}, job = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  if (!contrato) return null;
+  return numeroMercadoLivre(contrato.precoAnterior ?? contrato.precoOriginal ?? contrato.precoAntigo ?? "");
+}
+
+function extrairCupomClonadorMercadoLivre(evento = {}, job = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  if (!contrato) return "";
+  return textoMercadoLivre(contrato.cupom || contrato.codigoCupom || "");
+}
+
+function extrairBeneficioClonadorMercadoLivre(evento = {}, job = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  if (!contrato) return "";
+  return textoMercadoLivre(contrato.beneficioTexto || contrato.beneficioExtra || contrato.condicaoComercial || "");
+}
+
+async function montarFallbackClonadorMercadoLivre({
+  job = {},
+  evento = {},
+  links = [],
+  clienteId = "",
+  integracao = {},
+  deps = {},
+  urlOriginalEngine = "",
+  urlImportador = "",
+  linkExpandidoEngine = "",
+  expandiuMeliLa = false,
+  resolucaoProduto = {},
+  falhaImportador = {}
+} = {}) {
+  const contrato = contratoComercialClonadorMercadoLivre(evento, job);
+  const titulo = extrairTituloClonadorMercadoLivre(evento, job);
+  const preco = extrairPrecoClonadorMercadoLivre(evento, job);
+  const precoOriginal = extrairPrecoAnteriorClonadorMercadoLivre(evento, job);
+  const cupom = extrairCupomClonadorMercadoLivre(evento, job);
+  const beneficioTexto = extrairBeneficioClonadorMercadoLivre(evento, job);
+  const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo));
+  const temPreco = Number.isFinite(preco) && preco > 0;
+  const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
+  const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
+  const produtoIdDetectado = extrairMlbMercadoLivre(linkExpandidoEngine || urlImportador || urlOriginalEngine);
+  let linkAfiliado = "";
+
+  if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
+    try {
+      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlProduto, integracao, { clienteId }));
+    } catch {}
+  }
+
+  const suficiente = Boolean(contrato) && temTitulo && temPreco && temUrl && Boolean(linkAfiliado);
+  const logBase = {
+    jobId: job.id || null,
+    eventoId: job.evento_id || evento.id || null,
+    clienteId,
+    motivo: falhaImportador.motivo || "ml_wall_captcha",
+    temContrato: Boolean(contrato),
+    temTitulo,
+    temPreco,
+    temCupom: Boolean(cupom),
+    temLinkAfiliado: Boolean(linkAfiliado)
+  };
+
+  if (!suficiente) {
+    console.log("[ENGINE-ML-FALLBACK-CLONADOR]", JSON.stringify({
+      ...logBase,
+      resultado: "fallback_insuficiente"
+    }));
+    return {
+      ok: false,
+      motivo: "fallback_clonador_insuficiente",
+      marketplace: "mercadolivre",
+      linkOriginal: urlOriginalEngine,
+      metadata: {
+        fallbackMercadoLivreClonador: true,
+        origemComercial: "clonador_grupos",
+        motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
+        insuficiente: {
+          contrato: !contrato,
+          titulo: !temTitulo,
+          preco: !temPreco,
+          url: !temUrl,
+          linkAfiliado: !linkAfiliado
+        }
+      }
+    };
+  }
+
+  const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
+    links,
+    evento,
+    clienteId,
+    integracao,
+    deps,
+    urlOriginalEngine,
+    urlImportador,
+    linkExpandidoEngine,
+    linkAfiliadoPrincipal: linkAfiliado
+  });
+  const categoria = classificarCategoriaOferta({ titulo, nome: titulo }, titulo);
+  const precoOriginalValido = Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "";
+  const produtoFallback = {
+    titulo,
+    nome: titulo,
+    precoAtual: preco,
+    preco,
+    precoOriginal: precoOriginalValido,
+    imagem: "",
+    imagemOrigem: "nenhuma",
+    linkOriginal: urlOriginalEngine,
+    linkExpandido: linkExpandidoEngine || urlImportador,
+    urlFinal: linkExpandidoEngine || urlImportador,
+    linkAfiliado,
+    categoria,
+    cupom,
+    cupomTipo: cupom ? "texto_clonador" : "",
+    avisoCupom: beneficioTexto,
+    beneficioTexto,
+    beneficioExtra: beneficioTexto,
+    marketplace: "mercadolivre",
+    produtoId: produtoIdDetectado,
+    produtoIdDetectado
+  };
+  const metadataEvento = objetoSeguro(evento.metadata);
+  const ofertaAdapter = {
+    ok: true,
+    marketplace: "mercadolivre",
+    titulo,
+    preco,
+    precoOriginal: precoOriginalValido,
+    descontoPercentual: "",
+    economia: "",
+    imagem: "",
+    imagemOrigem: "nenhuma",
+    imagemStatus: "nao_resolvida",
+    imagemTentativas: [],
+    linkOriginal: urlOriginalEngine,
+    linkExpandido: linkExpandidoEngine || urlImportador,
+    linkAfiliado,
+    categoria,
+    cupom,
+    cupomTipo: produtoFallback.cupomTipo,
+    tipoCupom: produtoFallback.cupomTipo,
+    avisoCupom: beneficioTexto,
+    beneficioTexto,
+    beneficioExtra: beneficioTexto,
+    parcelamento: "",
+    freteGratis: false,
+    cashback: "",
+    descontoPix: "",
+    descontoApp: "",
+    score: null,
+    produtoId: produtoIdDetectado,
+    produtoIdDetectado,
+    metadata: {
+      adapter: "mercadolivre",
+      fallbackMercadoLivreClonador: true,
+      origemComercial: "clonador_grupos",
+      origemPreco: "clonador_grupos",
+      origemTitulo: "clonador_grupos",
+      origemImagem: "nenhuma",
+      motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
+      jobId: job.id,
+      eventoId: job.evento_id,
+      linkOriginalEngine: urlOriginalEngine,
+      linkExpandidoEngine: linkExpandidoEngine || urlImportador,
+      expandiuMeliLa,
+      resolucaoProduto: resolucaoProduto.resolucaoRadar || null,
+      linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
+      linksComerciais: linksConvertidosMercadoLivre,
+      comercialCapturado: contrato,
+      clonadorGrupos: objetoSeguro(metadataEvento.clonadorGrupos),
+      produto: {
+        ...produtoFallback,
+        metadata: {
+          fallbackMercadoLivreClonador: true
+        }
+      }
+    }
+  };
+
+  console.log("[ENGINE-ML-FALLBACK-CLONADOR]", JSON.stringify({
+    ...logBase,
+    produtoIdDetectado,
+    resultado: "oferta_recuperada"
+  }));
+
+  return ofertaAdapter;
+}
+
 async function montarFallbackRadarMercadoLivre({
   job = {},
   evento = {},
@@ -1060,6 +1286,22 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
 
   if (!produto) {
     if (falhaImportadorMercadoLivre?.motivo === "ml_wall_captcha") {
+      if (origemClonadorGruposMercadoLivre(evento, job)) {
+        return montarFallbackClonadorMercadoLivre({
+          job,
+          evento,
+          links,
+          clienteId,
+          integracao,
+          deps,
+          urlOriginalEngine,
+          urlImportador,
+          linkExpandidoEngine,
+          expandiuMeliLa,
+          resolucaoProduto,
+          falhaImportador: falhaImportadorMercadoLivre
+        });
+      }
       return montarFallbackRadarMercadoLivre({
         job,
         evento,
