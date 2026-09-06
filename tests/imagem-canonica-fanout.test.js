@@ -932,6 +932,264 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
   }
 
   {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarMaterializada = url("radar-tatuada-tenis");
+    const imagemLimpaMl = "https://http2.mlstatic.com/D_NQ_NP_2X_777777-MLB1111222233_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9810,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-1111222233-produto-correto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMaterializada
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB1111222233",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-1111222233-produto-correto",
+        imagemCandidatos: [
+          { url: imagemLimpaMl, origem: "pictures.secure_url", produtoIdDetectado: "MLB1111222233", width: 320, height: 320 }
+        ]
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, imagemLimpaMl);
+    assert.strictEqual(resultado.imagemOrigem, "pictures.secure_url");
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarMaterializada = url("radar-tatuada-perfume");
+    const imagemOutroMlb = "https://http2.mlstatic.com/D_NQ_NP_2X_888888-MLB4444555566_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9811,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-2222333344-produto-correto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMaterializada
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB2222333344",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-2222333344-produto-correto",
+        imagemCandidatos: [
+          { url: imagemOutroMlb, origem: "pictures.secure_url", produtoIdDetectado: "MLB4444555566", width: 800, height: 800 }
+        ]
+      }
+    }, {
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, imagemOutroMlb);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarMaterializada = url("radar-tatuada-thumbnail");
+    const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_999999-MLB3333444455_012026-T.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9812,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-3333444455-produto-correto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMaterializada
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB3333444455",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-3333444455-produto-correto",
+        imagemCandidatos: [
+          { url: thumbnail, origem: "secure_thumbnail", produtoIdDetectado: "MLB3333444455", width: 160, height: 160 }
+        ]
+      }
+    }, {
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, thumbnail);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarMaterializada = url("radar-sem-candidato-seguro");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9813,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-4444555566-produto-correto"],
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemMaterializada: radarMaterializada
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB4444555566",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-4444555566-produto-correto",
+        imagemCandidatos: [url("sem-origem-ml")]
+      }
+    }, {
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const imagemCacheBoa = "https://http2.mlstatic.com/D_NQ_NP_2X_111111-MLB5555666677_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9814,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-5555666677-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB5555666677",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-5555666677-produto-correto",
+        metadata: {
+          imagemCacheCanonico: {
+            produtoId: "MLB5555666677",
+            imagemCanonicaDuravel: imagemCacheBoa,
+            imagemOrigem: "pictures.secure_url",
+            imagemStatus: "importador_ml_mlb",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    }, {
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, imagemCacheBoa);
+    assert.strictEqual(resultado.cacheHit, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarCache = url("radar-cache-final");
+    const imagemLimpaMl = "https://http2.mlstatic.com/D_NQ_NP_2X_222222-MLB6666777788_012026-V.webp";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9815,
+      marketplace: "mercadolivre",
+      linksExtraidos: ["https://produto.mercadolivre.com.br/MLB-6666777788-produto-correto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        produtoIdDetectado: "MLB6666777788",
+        linkExpandido: "https://produto.mercadolivre.com.br/MLB-6666777788-produto-correto",
+        imagemCandidatos: [
+          { url: imagemLimpaMl, origem: "jsonLd.image", produtoIdDetectado: "MLB6666777788", width: 500, height: 500 }
+        ],
+        metadata: {
+          imagemCacheCanonico: {
+            produtoId: "MLB6666777788",
+            imagemCanonicaDuravel: radarCache,
+            imagemOrigem: "radar_mirror/mensagem",
+            imagemStatus: "radar_mirror_materializada",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    }, {
+      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
+      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, imagemLimpaMl);
+    assert.strictEqual(resultado.cacheHit, false);
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, radarCache);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarCache = url("radar-cache-amazon");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9816,
+      marketplace: "amazon",
+      linksExtraidos: ["https://www.amazon.com.br/produto"],
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "amazon",
+        imagem: url("amazon-limpa"),
+        imagemOrigem: "jsonLd.image",
+        metadata: {
+          imagemCacheCanonico: {
+            imagemCanonicaDuravel: radarCache,
+            imagemOrigem: "radar_mirror/mensagem",
+            imagemStatus: "radar_mirror_materializada",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarCache);
+    assert.strictEqual(resultado.cacheHit, true);
+  }
+
+  {
     const { retorno, metadatas } = await fanoutComImagemCanonica({
       metadataEvento: {
         radarMirror: {
