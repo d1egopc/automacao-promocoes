@@ -2,6 +2,102 @@ const { normalizarNumeroMoeda } = require("../../utils/moeda");
 const {
   credencialFingerprintIntegracao
 } = require("../../utils/alertas-integracoes");
+
+function normalizarHostAmazon(url = "") {
+  try {
+    return new URL(String(url || "").trim()).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function ehShortlinkAmazonExterno(url = "") {
+  const host = normalizarHostAmazon(url);
+  return host === "amzn.to" ||
+    host.endsWith(".amzn.to") ||
+    host === "amzlink.to" ||
+    host.endsWith(".amzlink.to") ||
+    host === "link.amazon" ||
+    host.endsWith(".link.amazon") ||
+    host === "amzn.divulgador.link" ||
+    host.endsWith(".amzn.divulgador.link");
+}
+
+function ehUrlAmazonDireta(url = "") {
+  const host = normalizarHostAmazon(url);
+  return host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host.includes("amazon.");
+}
+
+function extrairAsinAmazonUrl(url = "") {
+  try {
+    const u = new URL(String(url || "").trim());
+    return (
+      u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
+      u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1] ||
+      u.pathname.match(/\/([A-Z0-9]{10})(?:\/|$)/i)?.[1] ||
+      ""
+    ).toUpperCase();
+  } catch {
+    return "";
+  }
+}
+
+function extrairUrlAmazonAninhada(url = "") {
+  try {
+    const u = new URL(String(url || "").trim());
+    const chaves = ["btn_url", "url", "u", "target", "redirect", "destination", "dest", "link"];
+    for (const chave of chaves) {
+      const valor = u.searchParams.get(chave);
+      if (!valor) continue;
+      let decodificado = valor;
+      for (let tentativa = 0; tentativa < 3 && /%[0-9a-f]{2}/i.test(decodificado); tentativa += 1) {
+        try {
+          const proximo = decodeURIComponent(decodificado);
+          if (proximo === decodificado) break;
+          decodificado = proximo;
+        } catch {
+          break;
+        }
+      }
+      if (ehUrlAmazonDireta(decodificado) && extrairAsinAmazonUrl(decodificado)) return decodificado;
+    }
+  } catch {}
+  return "";
+}
+
+function urlAmazonDiretaComAsin(url = "") {
+  if (ehUrlAmazonDireta(url) && extrairAsinAmazonUrl(url)) return String(url || "").trim();
+  return extrairUrlAmazonAninhada(url);
+}
+
+async function resolverUrlAmazonShortlink(url = "", deps = {}, config = {}) {
+  if (!ehShortlinkAmazonExterno(url) || typeof deps.resolverRedirectUniversal !== "function") return "";
+
+  try {
+    const resultado = await deps.resolverRedirectUniversal(url, {
+      timeout: config?.redirectTimeoutMs || config?.timeoutRedirectAmazon || 4500,
+      maxRedirects: 5,
+      maxHtmlHops: 2
+    });
+    return (
+      urlAmazonDiretaComAsin(resultado?.urlExpandida || "") ||
+      urlAmazonDiretaComAsin(resultado?.urlFinal || "") ||
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function escolherBaseAfiliacaoAmazon({ urlEntrada = "", urlRedirect = "", urlFinalFetch = "" } = {}) {
+  return (
+    urlAmazonDiretaComAsin(urlRedirect) ||
+    urlAmazonDiretaComAsin(urlFinalFetch) ||
+    urlAmazonDiretaComAsin(urlEntrada) ||
+    urlEntrada
+  );
+}
+
 function criarImportarAmazon(deps = {}) {
   const {
     extrairJsonLd,
@@ -15,17 +111,21 @@ function criarImportarAmazon(deps = {}) {
     detectarAvisoCupomAmazon,
     escolherCupomParaOfertaAmazon,
     registrarSucessoIntegracao,
-    registrarAlertaIntegracao
+    registrarAlertaIntegracao,
+    resolverRedirectUniversal
   } = deps;
 
   return async function importarAmazon(url, config = {}) {
     if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
       url = "https://" + url;
     }
+    const urlEntradaAmazon = url;
+    const urlRedirectAmazon = await resolverUrlAmazonShortlink(urlEntradaAmazon, { resolverRedirectUniversal }, config);
+    const urlBuscaAmazon = urlRedirectAmazon || urlEntradaAmazon;
 
     const cookies = config?.credenciais?.cookies || "";
 
-    const response = await fetch(url, {
+    const response = await fetch(urlBuscaAmazon, {
       method: "GET",
       headers: {
         "User-Agent":
@@ -340,7 +440,7 @@ function criarImportarAmazon(deps = {}) {
       if (!valorBrutoPreco) valorBrutoPreco = precoTextoRadar.preco;
       preco = precoTextoRadar.preco;
       console.log("[AMZ-PRECO-FALLBACK-RADAR]", {
-        url,
+        url: urlBuscaAmazon,
         origem: precoTextoRadar.origem,
         precoTexto: precoTextoRadar.preco,
         precoHtmlAnterior: precoNumeroHtmlInicial || ""
@@ -349,7 +449,7 @@ function criarImportarAmazon(deps = {}) {
 
     console.log("[AMZ-PRECO-ORIGEM]", JSON.stringify({
       titulo: htmlDecode(titulo).replace("Amazon.com.br:", "").replace("Amazon.com:", "").trim(),
-      url,
+      url: urlBuscaAmazon,
       origemPreco,
       valorBruto: valorBrutoPreco,
       valorNormalizado: preco,
@@ -410,7 +510,7 @@ function criarImportarAmazon(deps = {}) {
     const imagemAmazon = extrairImagemAmazon();
     const imagem = imagemAmazon.imagem || "";
 
-    let linkAfiliado = url;
+    let linkAfiliado = urlEntradaAmazon;
 
    const trackingId =
    config?.credenciais?.trackingId ||
@@ -421,11 +521,19 @@ function criarImportarAmazon(deps = {}) {
 
     if (trackingId) {
       try {
-        const u = new URL(url);
+        const baseAfiliacao = escolherBaseAfiliacaoAmazon({
+          urlEntrada: urlEntradaAmazon,
+          urlRedirect: urlRedirectAmazon,
+          urlFinalFetch: response.url || ""
+        });
+        if (ehShortlinkAmazonExterno(urlEntradaAmazon) && !urlAmazonDiretaComAsin(baseAfiliacao)) {
+          throw new Error("amazon_shortlink_sem_asin_resolvido");
+        }
+        const u = new URL(baseAfiliacao);
         u.searchParams.set("tag", trackingId);
         linkAfiliado = u.toString();
       } catch {
-        linkAfiliado = url;
+        linkAfiliado = urlEntradaAmazon;
       }
     }
 
@@ -436,7 +544,7 @@ function criarImportarAmazon(deps = {}) {
 
     console.log("[AMZ-IMAGEM-ORIGEM]", JSON.stringify({
       titulo: tituloLimpo,
-      url,
+      url: urlBuscaAmazon,
       temImagem: Boolean(imagem),
       origemImagem: imagemAmazon.origemImagem || "nenhuma",
       imagemPreview: String(corrigirImagemUrl(imagem) || imagem || "").slice(0, 140)
@@ -445,8 +553,8 @@ function criarImportarAmazon(deps = {}) {
     console.log("[AMZ-HTML-AUDITORIA]", JSON.stringify({
       clienteId: contextoEngine.clienteId || config.clienteId || "",
       jobId: contextoEngine.jobId || null,
-      urlOriginal: url,
-      urlFinal: response.url || url,
+      urlOriginal: urlEntradaAmazon,
+      urlFinal: response.url || urlBuscaAmazon,
       statusHttp: response.status,
       tamanhoHtml: html.length,
       temCaptcha: temCaptchaAuditoria,
@@ -573,4 +681,3 @@ const linkFinal = usarLinksOptimus
 module.exports = {
   criarImportarAmazon
 };
-

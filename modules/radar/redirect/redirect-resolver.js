@@ -30,7 +30,11 @@ function detectarMarketplaceRedirect(url = "") {
   if (!host) return "";
   if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
   if (host === "shopee.com.br" || host.endsWith(".shopee.com.br")) return "shopee";
-  if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") || host === "amzn.to" || host.endsWith(".amzn.to")) return "amazon";
+  if (host === "amazon.com.br" || host.endsWith(".amazon.com.br") ||
+    host === "amzn.to" || host.endsWith(".amzn.to") ||
+    host === "amzlink.to" || host.endsWith(".amzlink.to") ||
+    host === "link.amazon" || host.endsWith(".link.amazon") ||
+    host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link")) return "amazon";
   if (reconhecerLinkAliExpressRedirect(url)) return "aliexpress";
   if (host.includes("aliexpress.")) return "aliexpress";
   if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "awin";
@@ -183,7 +187,7 @@ function urlAbsoluta(candidata = "", base = "") {
   try {
     let valor = decodificarEscapesUrl(candidata).replace(/^["'`]+|["'`]+$/g, "");
     if (!valor) return "";
-    if (/^(?:www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:\/|$)/i.test(valor)) {
+    if (/^(?:www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|amzlink\.to|link\.amazon|amzn\.divulgador\.link|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:\/|$)/i.test(valor)) {
       valor = `https://${valor.replace(/^www\./i, "www.")}`;
     }
     const url = new URL(valor, texto(base));
@@ -248,7 +252,11 @@ function pontuarUrlMarketplace(url = "") {
   const valor = texto(url).toLowerCase();
   let pontos = 0;
   if (/\bmlb-?\d+/i.test(valor) || /meli\.la\//i.test(valor)) pontos += 5;
-  if (/amazon\.com\.br\/(?:dp|gp\/product)\//i.test(valor) || /amzn\.to\//i.test(valor)) pontos += 5;
+  if (/amazon\.com\.br\/(?:dp|gp\/product)\//i.test(valor) ||
+    /amzn\.to\//i.test(valor) ||
+    /amzlink\.to\//i.test(valor) ||
+    /link\.amazon\//i.test(valor) ||
+    /amzn\.divulgador\.link\//i.test(valor)) pontos += 5;
   if (/s\.shopee\.com\.br\//i.test(valor) || /shopee\.com\.br\/.*-i\.\d+\.\d+/i.test(valor)) pontos += 5;
   if (/aliexpress\.[^/]+\/(?:item|e)\//i.test(valor)) pontos += 5;
   if (/a\.aliexpress\.com\//i.test(valor) || /s\.click\.aliexpress\.com\//i.test(valor)) pontos += 5;
@@ -262,7 +270,7 @@ function pontuarUrlMarketplace(url = "") {
 
 function extrairUrlsMarketplaceHtml(html = "", base = "") {
   const fonte = decodificarEscapesUrl(html);
-  const regex = /(?:(?:https?:)?\/\/|www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:[^\s"'`<>\\)]*)/gi;
+  const regex = /(?:(?:https?:)?\/\/|www\.)?(?:[\w-]+\.)*(?:mercadolivre\.com(?:\.br)?|meli\.la|shopee\.com\.br|amazon\.com\.br|amzn\.to|amzlink\.to|link\.amazon|amzn\.divulgador\.link|aliexpress\.[a-z.]+|kabum\.com\.br|awin1?\.com)(?:[^\s"'`<>\\)]*)/gi;
   const urls = [];
 
   for (const match of fonte.matchAll(regex)) {
@@ -659,6 +667,12 @@ registrarResolverRedirect({
   nome: "aoferta",
   dominios: ["aoferta.net"],
   resolver: resolverAOferta
+});
+
+registrarResolverRedirect({
+  nome: "amazon_shortlink",
+  dominios: ["amzn.to", "amzlink.to", "link.amazon", "amzn.divulgador.link"],
+  resolver: resolverHttpGenerico
 });
 
 module.exports = {
