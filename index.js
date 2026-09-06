@@ -8995,16 +8995,6 @@ if (!clienteAtivo) {
   return;
 }
 
-    if (!podeRodarAgora()) {
-      resumoFila.motivoPulo = "fora_janela_global";
-      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
-        decisao: "bloqueado",
-        motivo: "fora_da_janela",
-        filaRecebeu: true
-      });
-      return;
-    }
-
   const agora = Date.now();
 
     let idSessao =
@@ -30017,17 +30007,6 @@ async function rodarProcessadorFilaGlobal() {
   let usuariosAvaliados = 0;
   let usuariosPulados = 0;
   try {
-  if (!podeRodarAgora()) {
-    const agora = Date.now();
-
-    if (agora - ultimoLogPausaFila > 5 * 60 * 1000) {
-      logOptimus("FILA", "Fila pausada fora do horario configurado");
-      ultimoLogPausaFila = agora;
-    }
-
-    return;
-  }
-
   for (const usuario of usuarios) {
     if (!usuario) continue;
     const clienteId = String(usuario?.id || "").trim();
