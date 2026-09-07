@@ -95,6 +95,9 @@ function normalizarCatalogoBootstrap(planos = {}) {
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "clonador_grupos")) {
       plano.recursos.clonador_grupos = false;
     }
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "identidade_visual_ofertas")) {
+      plano.recursos.identidade_visual_ofertas = "desabilitada";
+    }
   }
   return catalogo;
 }

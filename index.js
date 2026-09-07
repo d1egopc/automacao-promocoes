@@ -211,6 +211,12 @@ const {
   criarBridgeClonadorGrupos,
   criarServicoClonadorGrupos
 } = require("./modules/clonador-grupos");
+const {
+  criarRotasIdentidadeVisualOfertas,
+  criarRepositorioIdentidadeVisualOfertas,
+  criarServicoIdentidadeVisualOfertas,
+  normalizarPoliticaIdentidadeVisual
+} = require("./modules/identidade-visual-ofertas");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
 const {
@@ -5041,6 +5047,9 @@ function normalizarRecursosPlanosRuntime() {
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "clonador_grupos")) {
       plano.recursos.clonador_grupos = false;
     }
+    plano.recursos.identidade_visual_ofertas = normalizarPoliticaIdentidadeVisual(
+      plano.recursos.identidade_visual_ofertas
+    );
   }
 }
 
@@ -12260,6 +12269,11 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       automacao: booleanPlano("automacao", recursosAnteriores.automacao),
       vitrine: booleanPlano("vitrine", recursosAnteriores.vitrine),
       clonador_grupos: booleanPlano("clonador_grupos", recursosAnteriores.clonador_grupos),
+      identidade_visual_ofertas: normalizarPoliticaIdentidadeVisual(
+        Object.prototype.hasOwnProperty.call(recursosBody, "identidade_visual_ofertas")
+          ? recursosBody.identidade_visual_ofertas
+          : recursosAnteriores.identidade_visual_ofertas
+      ),
       social: booleanPlano("social", recursosAnteriores.social)
     },
 
@@ -13504,6 +13518,8 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
         writeClienteJson,
         getClientePath,
         adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
+        getPlanoCliente: resolverPlanoManualV2Scheduler,
         gateAtivo: {
           diagnosticarDisponibilidadeEnvioWorkspace
         }
@@ -22006,6 +22022,22 @@ app.use("/clonador-grupos", criarRotasClonadorGrupos({
   repository: clonadorGruposRepository
 }));
 
+// =============== ROTA DE IDENTIDADE VISUAL DAS OFERTAS =================
+
+const identidadeVisualOfertasRepository = criarRepositorioIdentidadeVisualOfertas({
+  readClienteJson,
+  writeClienteJson
+});
+const identidadeVisualOfertasService = criarServicoIdentidadeVisualOfertas({
+  repository: identidadeVisualOfertasRepository
+});
+
+app.use("/identidade-visual-ofertas", criarRotasIdentidadeVisualOfertas({
+  getClienteId,
+  getPlanoUsuario,
+  service: identidadeVisualOfertasService
+}));
+
 // =============== ROTA DO SOCIAL MODULE =================
 
 app.use("/social", criarRotasSocial({
@@ -22155,6 +22187,7 @@ app.use("/manual-v2", criarRotasManualV2({
   listarConexoesDiscord,
   listarCanaisDiscord,
   enviarDiscord,
+  aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
   env: process.env,
   corrigirImagemUrl,
   httpClient: axios,
@@ -29319,6 +29352,8 @@ initEngineDatabase()
         writeClienteJson,
         getClientePath,
         adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
+        getPlanoCliente: resolverPlanoManualV2Scheduler,
         gateAtivo: {
           diagnosticarDisponibilidadeEnvioWorkspace
         }

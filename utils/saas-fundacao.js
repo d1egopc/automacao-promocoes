@@ -220,6 +220,13 @@ function recursosPublicos(valor = {}) {
     if (!id) return acc;
     if (idLower.includes("senha") || idLower.includes("token") || idLower.includes("secret") || idLower.includes("segredo")) return acc;
     if (idLower.includes("admin") || idLower.includes("master")) return acc;
+    if (id === "identidade_visual_ofertas") {
+      const politica = textoLower(ativo);
+      if (["obrigatoria", "obrigatoria_editavel", "opcional_editavel"].includes(politica)) {
+        acc[id] = politica;
+      }
+      return acc;
+    }
     if (booleano(ativo, false)) acc[id] = true;
     return acc;
   }, {});

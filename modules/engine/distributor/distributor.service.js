@@ -1041,6 +1041,35 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   }
 
   let itemFila = montarItemFilaEngine(oferta);
+  if (typeof deps.aplicarIdentidadeVisualOferta === "function") {
+    try {
+      const identidadeVisual = await deps.aplicarIdentidadeVisualOferta({
+        clienteId,
+        oferta,
+        imagemAtual: itemFila.imagem,
+        contexto: {
+          fluxo: "engine_distributor",
+          etapa: "pre_fila",
+          origem: oferta.origem || oferta.fonte || oferta.metadata?.origem || "engine"
+        }
+      }, deps);
+
+      if (identidadeVisual && typeof identidadeVisual === "object") {
+        const imagemFinalIdentidade = normalizarTexto(identidadeVisual.imagemFinal || itemFila.imagem || "");
+        itemFila = {
+          ...itemFila,
+          imagem: imagemFinalIdentidade,
+          imagemUrl: imagemFinalIdentidade
+        };
+      }
+    } catch (erro) {
+      console.log("[IDENTIDADE-VISUAL-OFERTAS-PASSTHROUGH]", {
+        clienteId,
+        ofertaId: oferta.id || "",
+        motivo: erro?.message || "erro_identidade_visual"
+      });
+    }
+  }
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, itemFila, itemFila.metadata, contexto)
     : "";

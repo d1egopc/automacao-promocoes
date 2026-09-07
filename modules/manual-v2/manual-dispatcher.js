@@ -394,6 +394,29 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
   const debitarCreditos = typeof deps.debitarCreditos === "function"
     ? deps.debitarCreditos
     : () => true;
+  let ofertaBaseMensagem = oferta;
+  if (typeof deps.aplicarIdentidadeVisualOferta === "function") {
+    try {
+      const identidadeVisual = await deps.aplicarIdentidadeVisualOferta({
+        clienteId: cliente,
+        oferta,
+        imagemAtual: imagemDiscordManual(oferta),
+        contexto: {
+          fluxo: "manual_v2",
+          etapa: "pre_envio",
+          origem: oferta.origem || "manual_v2"
+        }
+      }, { ...deps, plano });
+      const imagemIdentidadeVisual = texto(identidadeVisual?.imagemFinal || imagemDiscordManual(oferta));
+      ofertaBaseMensagem = {
+        ...oferta,
+        imagem: imagemIdentidadeVisual,
+        imagemUrl: imagemIdentidadeVisual
+      };
+    } catch (_erro) {
+      ofertaBaseMensagem = oferta;
+    }
+  }
 
   for (const destinoIdSolicitado of idsSolicitados) {
     const destinoSeguro = mapaSanitizado.get(destinoIdSolicitado);
@@ -433,7 +456,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
 
     try {
       const ofertaParaMensagem = resolverOfertaLinkManualV2({
-        oferta,
+        oferta: ofertaBaseMensagem,
         destino,
         clienteId: cliente,
         plano,
