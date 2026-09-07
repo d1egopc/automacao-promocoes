@@ -7,22 +7,31 @@ const {
   contrasteTextoAutomatico
 } = require("./paleta");
 
-const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2";
+const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2.1";
 const CANVAS = 1080;
-const FAIXA_ALTURA = 224;
-const FILETE_ALTURA = 12;
+const FAIXA_ALTURA = 208;
+const FILETE_ALTURA = 10;
 const AREA_PRODUTO_ALTURA = CANVAS - FAIXA_ALTURA - FILETE_ALTURA;
 const BASE_Y = AREA_PRODUTO_ALTURA + FILETE_ALTURA;
-const LOGO_SLOT = Object.freeze({ width: 224, height: 132, left: 62, top: BASE_Y + 46 });
+const LOGO_SLOT = Object.freeze({ width: 236, height: 140, left: 56, top: BASE_Y + 34 });
 const FRASE_SAFE_AREA = Object.freeze({
-  left: 336,
-  top: BASE_Y + 34,
-  width: 704,
-  height: FAIXA_ALTURA - 68,
+  left: 350,
+  top: BASE_Y + 28,
+  width: 700,
+  height: FAIXA_ALTURA - 56,
   maxLines: 2,
   minFontSize: 40,
-  maxFontSize: 62
+  maxFontSize: 56
 });
+const FONTE_RENDERER_IDENTIDADE_VISUAL = "'OptimusOferta', 'DejaVu Sans', Arial, Helvetica, sans-serif";
+const CSS_FONTE_RENDERER_IDENTIDADE_VISUAL = `
+  @font-face {
+    font-family: 'OptimusOferta';
+    src: url('file:///usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf') format('truetype');
+    font-weight: 900;
+    font-style: normal;
+  }
+`;
 const LIMITE_IMAGEM_ORIGINAL_BYTES = 8 * 1024 * 1024;
 const LIMITE_UPLOAD_LOGO_BYTES = 2 * 1024 * 1024;
 const MIMES_IMAGEM_PERMITIDOS = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -89,7 +98,8 @@ function svgTextoMedicao(conteudo = "", fontSize = 48) {
   return Buffer.from(`
     <svg width="1400" height="160" viewBox="0 0 1400 160" xmlns="http://www.w3.org/2000/svg">
       <rect width="100%" height="100%" fill="transparent"/>
-      <text x="12" y="92" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="900" letter-spacing="0" fill="#111">${escapeXml(conteudo)}</text>
+      <style>${CSS_FONTE_RENDERER_IDENTIDADE_VISUAL}</style>
+      <text x="12" y="92" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${fontSize}" font-weight="900" letter-spacing="0" fill="#111">${escapeXml(conteudo)}</text>
     </svg>
   `);
 }
@@ -199,20 +209,22 @@ async function svgOverlay(config = {}) {
   const corProfunda = misturarCores(corFaixa, "#000000", 0.24);
   const corMeio = misturarCores(corFaixa, "#ffffff", 0.06);
   const corLuz = misturarCores(corFaixa, "#ffffff", 0.16);
-  const corStroke = corTexto === "#FFFFFF" ? "rgba(15,23,42,0.22)" : "rgba(255,255,255,0.34)";
+  const corStroke = corTexto === "#FFFFFF" ? "#0f172a" : "#ffffff";
+  const strokeOpacity = corTexto === "#FFFFFF" ? "0.12" : "0.22";
   const frase = texto(config.frase).slice(0, 80) || "AS MELHORES OFERTAS, EM UM SÓ LUGAR";
   const layoutFrase = await montarLayoutFrase(frase);
   const textoSombraSvg = layoutFrase.linhas
-    .map((linha, idx) => `<text x="${layoutFrase.x + 2}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight + 3}" font-family="Arial, Helvetica, sans-serif" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="#000000" opacity="0.14">${escapeXml(linha)}</text>`)
+    .map((linha, idx) => `<text x="${layoutFrase.x + 2}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight + 3}" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="#000000" opacity="0.1">${escapeXml(linha)}</text>`)
     .join("");
   const textoSvg = layoutFrase.linhas
-    .map((linha, idx) => `<text x="${layoutFrase.x}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight}" font-family="Arial, Helvetica, sans-serif" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="${corTexto}" stroke="${corStroke}" stroke-width="1.5" paint-order="stroke">${escapeXml(linha)}</text>`)
+    .map((linha, idx) => `<text x="${layoutFrase.x}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight}" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="${corTexto}" stroke="${corStroke}" stroke-opacity="${strokeOpacity}" stroke-width="1" paint-order="stroke">${escapeXml(linha)}</text>`)
     .join("");
 
   return {
     buffer: Buffer.from(`
     <svg width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}" xmlns="http://www.w3.org/2000/svg">
       <defs>
+        <style>${CSS_FONTE_RENDERER_IDENTIDADE_VISUAL}</style>
         <linearGradient id="base" x1="0" y1="${BASE_Y}" x2="${CANVAS}" y2="${CANVAS}" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="${corProfunda}"/>
           <stop offset="0.58" stop-color="${corMeio}"/>
@@ -225,9 +237,8 @@ async function svgOverlay(config = {}) {
       </defs>
       <rect x="0" y="${AREA_PRODUTO_ALTURA}" width="${CANVAS}" height="${FILETE_ALTURA}" fill="${corFaixa}" opacity="0.9"/>
       <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="${FAIXA_ALTURA}" fill="url(#base)"/>
-      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="56" fill="url(#brilho)"/>
-      <rect x="42" y="${BASE_Y + 34}" width="270" height="${FAIXA_ALTURA - 68}" rx="30" fill="#ffffff" opacity="0.065"/>
-      <rect x="314" y="${BASE_Y + 46}" width="2" height="${FAIXA_ALTURA - 92}" fill="${corTexto}" opacity="0.2"/>
+      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="46" fill="url(#brilho)"/>
+      <rect x="318" y="${BASE_Y + 36}" width="2" height="${FAIXA_ALTURA - 72}" fill="${corTexto}" opacity="0.22"/>
       ${textoSombraSvg}
       ${textoSvg}
     </svg>
@@ -255,7 +266,7 @@ async function normalizarProdutoParaCanvas(buffer) {
     .rotate()
     .resize({
       width: 1000,
-      height: AREA_PRODUTO_ALTURA - 92,
+      height: AREA_PRODUTO_ALTURA - 82,
       fit: "contain",
       withoutEnlargement: false,
       background: { r: 255, g: 255, b: 255, alpha: 0 }
@@ -369,6 +380,7 @@ module.exports = {
   FILETE_ALTURA,
   LOGO_SLOT,
   FRASE_SAFE_AREA,
+  FONTE_RENDERER_IDENTIDADE_VISUAL,
   LIMITE_IMAGEM_ORIGINAL_BYTES,
   LIMITE_UPLOAD_LOGO_BYTES,
   MIMES_IMAGEM_PERMITIDOS,

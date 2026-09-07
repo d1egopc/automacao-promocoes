@@ -105,7 +105,7 @@ async function main() {
       logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
       config: { frase: "AS MELHORES OFERTAS, EM UM SÓ LUGAR", corIdentidade: "azul" }
     });
-    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2");
+    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2.1");
     assert.strictEqual(renderPadrao.metadata.width, 1080, "renderer V2 deve manter largura 1080");
     assert.strictEqual(renderPadrao.metadata.height, 1080, "renderer V2 deve manter altura 1080");
     assert.deepStrictEqual(
@@ -115,6 +115,7 @@ async function main() {
     );
     assert.ok(renderPadrao.metadata.fraseLayout.fontSize >= identidadeVisual.FRASE_SAFE_AREA.minFontSize);
     assert.ok(renderPadrao.metadata.fraseLayout.linhas.length <= 2, "frase default deve caber em ate 2 linhas");
+    assert.ok(identidadeVisual.FAIXA_ALTURA < 224, "faixa V2.1 deve devolver mais area ao produto");
     assert.ok(renderPadrao.metadata.productRenderedY >= 0, "produto deve iniciar dentro da area util");
     assert.ok(
       renderPadrao.metadata.productRenderedY + renderPadrao.metadata.productRenderedHeight <= identidadeVisual.AREA_PRODUTO_ALTURA,
@@ -146,6 +147,14 @@ async function main() {
     const fonteRenderer = fs.readFileSync(path.join(__dirname, "..", "modules", "identidade-visual-ofertas", "renderer.js"), "utf8");
     assert.ok(fonteRenderer.includes('fit: "contain"'), "produto e logo devem continuar usando contain");
     assert.ok(!fonteRenderer.includes('fit: "fill"'), "renderer nao deve distorcer produto/logo com fill");
+    assert.ok(fonteRenderer.includes("DejaVuSans-Bold.ttf"), "renderer deve apontar fonte deterministica do container");
+    assert.ok(!fonteRenderer.includes("rgba("), "SVG do renderer nao deve depender de rgba em atributos de texto");
+    assert.ok(!fonteRenderer.includes('opacity="0.065"'), "logo deve ficar limpa, sem painel translucido");
+    assert.ok(!fonteRenderer.includes('x="42"'), "renderer nao deve manter a caixa antiga atras da logo");
+
+    const dockerfile = fs.readFileSync(path.join(__dirname, "..", "Dockerfile"), "utf8");
+    assert.ok(dockerfile.includes("fontconfig"), "container deve instalar fontconfig");
+    assert.ok(dockerfile.includes("fonts-dejavu-core"), "container deve instalar fonte DejaVu versionada pela imagem");
 
     let downloads = 0;
     const repo = criarRepoMemoria({
