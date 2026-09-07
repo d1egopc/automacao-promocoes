@@ -1,5 +1,6 @@
 const { classificarCategoriaOferta } = require("../../../../marketplaces/inteligencia/classificador-categorias");
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
+const { tituloComercialUniversalValido } = require("../../../radar/comercial-precedencia");
 const { queryEngine } = require("../../database");
 const { resumoLinksClassificados } = require("../../link-role.service");
 const { detectarMarketplaceLink } = require("../../normalizers");
@@ -17,6 +18,102 @@ function primeiroValor(...valores) {
     if (valorPresente(valor)) return valor;
   }
   return "";
+}
+
+function objeto(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function primeiroObjeto(...valores) {
+  for (const valor of valores) {
+    const atual = objeto(valor);
+    if (Object.keys(atual).length) return atual;
+  }
+  return {};
+}
+
+function tituloGenericoAmazonEngine(titulo = "") {
+  const normalizado = texto(titulo)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+  return !normalizado || normalizado === "produtoamazon";
+}
+
+function importacaoAmazonBloqueada(produto = {}) {
+  if (produto?.temCaptcha === true || produto?.temRobotCheck === true) return true;
+  const sinais = texto([
+    produto?.aviso,
+    produto?.motivo,
+    produto?.erro,
+    produto?.diagnostico,
+    produto?.status
+  ].filter(Boolean).join(" "));
+  return /captcha|robot\s*check|automated\s+access|api-services-support@amazon/i.test(sinais);
+}
+
+function radarMirrorAmazon(evento = {}, job = {}) {
+  const metadataEvento = objeto(evento.metadata);
+  const metadataJob = objeto(job.metadata);
+  const metadataJobEvento = objeto(metadataJob.metadataEvento);
+  return primeiroObjeto(
+    evento.radarMirror,
+    metadataEvento.radarMirror,
+    metadataJob.radarMirror,
+    metadataJobEvento.radarMirror
+  );
+}
+
+function tituloRadarSeguroAmazon(evento = {}, job = {}) {
+  const mirror = radarMirrorAmazon(evento, job);
+  const candidatos = [
+    mirror?.produto?.tituloCapturado,
+    mirror?.tituloCapturado,
+    mirror?.titulo
+  ];
+
+  for (const candidato of candidatos) {
+    const titulo = texto(candidato);
+    if (tituloComercialUniversalValido(titulo, { marketplace: "amazon" })) return titulo;
+  }
+
+  return "";
+}
+
+function selecionarTituloAmazonConfiavel(produto = {}, evento = {}, job = {}) {
+  const tituloImportador = primeiroValor(produto.titulo, produto.nome);
+  const importadorBloqueado = importacaoAmazonBloqueada(produto);
+  const tituloGenerico = tituloGenericoAmazonEngine(tituloImportador);
+
+  if (
+    !importadorBloqueado &&
+    !tituloGenerico &&
+    tituloComercialUniversalValido(tituloImportador, { marketplace: "amazon" })
+  ) {
+    return {
+      titulo: tituloImportador,
+      origem: "amazon_importer",
+      tituloImportadorIgnorado: "",
+      importadorBloqueado,
+      tituloGenerico
+    };
+  }
+
+  const tituloRadar = tituloRadarSeguroAmazon(evento, job);
+  return {
+    titulo: tituloRadar,
+    origem: tituloRadar ? "radar_mirror" : "",
+    tituloImportadorIgnorado: tituloImportador,
+    importadorBloqueado,
+    tituloGenerico
+  };
+}
+
+function imagemAmazonConfiavel(produto = {}) {
+  if (importacaoAmazonBloqueada(produto)) return "";
+  return primeiroValor(produto.imagem, produto.image, produto.thumbnail, produto.imagemUrl);
 }
 
 function linkAmazonReconhecido(url = "") {
@@ -442,13 +539,15 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
     linkAfiliadoPrincipal: linkAfiliado
   });
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || "";
+  const tituloAmazon = selecionarTituloAmazonConfiavel(produto, evento, job);
+  const imagemAmazon = imagemAmazonConfiavel(produto);
   const ofertaAdapter = {
     ok: true,
     marketplace: "amazon",
-    titulo: produto.titulo || produto.nome || "",
+    titulo: tituloAmazon.titulo,
     preco: produto.precoAtual || produto.preco || "",
     precoOriginal: produto.precoOriginal || produto.precoAntigo || "",
-    imagem: produto.imagem || "",
+    imagem: imagemAmazon,
     linkOriginal: urlOriginalEngine,
     linkExpandido: produto.linkOriginal || urlOriginalEngine,
     linkAfiliado,
@@ -467,7 +566,12 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
     score: produto.score || null
   };
 
-  const auditoriaV2 = auditarV2Amazon({ job, produto, ofertaAdapter });
+  const produtoAuditoria = {
+    ...produto,
+    titulo: tituloAmazon.titulo,
+    nome: tituloAmazon.titulo
+  };
+  const auditoriaV2 = auditarV2Amazon({ job, produto: produtoAuditoria, ofertaAdapter });
   const ofertaEnriquecida = enriquecerComV2(ofertaAdapter, auditoriaV2, produto);
 
   return {
@@ -481,6 +585,16 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
       linksComerciais: linksConvertidosAmazon,
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarAmazon(textoOriginalEvento(evento)).cupom),
       camposProduto: Object.keys(produto || {}),
+      diagnosticoAmazon: {
+        temCaptcha: produto.temCaptcha === true,
+        temRobotCheck: produto.temRobotCheck === true,
+        statusHttp: produto.statusHttp ?? null,
+        origemImagem: produto.origemImagem || "nenhuma",
+        tituloOrigem: tituloAmazon.origem,
+        tituloImportadorIgnorado: tituloAmazon.tituloImportadorIgnorado,
+        tituloGenerico: tituloAmazon.tituloGenerico === true,
+        importadorBloqueado: tituloAmazon.importadorBloqueado === true
+      },
       produto,
       auditoriaInteligenciaUniversalV2: auditoriaV2 ? {
         fonteFinal: false,
@@ -500,8 +614,6 @@ async function importarAmazonEngine({ job = {}, evento = {}, links = [], deps = 
 module.exports = {
   importarAmazonEngine
 };
-
-
 
 
 

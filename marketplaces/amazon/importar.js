@@ -673,7 +673,11 @@ const linkFinal = usarLinksOptimus
       link: linkFinal,
       linkAfiliado: linkFinal,
       imagem: corrigirImagemUrl(imagem) || imagem,
-      categoria: "Amazon"
+      categoria: "Amazon",
+      statusHttp: response.status,
+      temCaptcha: temCaptchaAuditoria,
+      temRobotCheck: temRobotCheckAuditoria,
+      origemImagem: imagemAmazon.origemImagem || "nenhuma"
     };
   };
 }
