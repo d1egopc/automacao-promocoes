@@ -12,7 +12,7 @@ process.env.IDENTIDADE_VISUAL_PUBLIC_BASE_URL = "https://go.test";
 const identidadeVisual = require("../modules/identidade-visual-ofertas");
 const storage = identidadeVisual.storageIdentidadeVisualOfertas;
 
-const AMOSTRAS_DIR = path.join(__dirname, ".tmp", "identidade-visual-amostras");
+const AMOSTRAS_DIR = path.join(process.env.DATA_DIR, "identidade-visual-amostras");
 
 function criarRepoMemoria(configInicial = {}) {
   const store = { ...configInicial };
@@ -75,6 +75,14 @@ async function pixel(pathImagem, x, y) {
 async function main() {
   try {
     assert.ok(fs.existsSync(storage.LOGO_OFICIAL_PATH), "logo oficial precisa existir em assets/identidade-visual");
+    assert.ok(
+      storage.LOGO_OFICIAL_PATH.includes(path.join("assets", "identidade-visual", "optimus-oficial.png")),
+      "logo oficial deve continuar no caminho versionado assets/identidade-visual"
+    );
+    assert.ok(
+      storage.lerLogoBuffer("admin", "optimus_oficial").length > 0,
+      "lerLogoBuffer deve carregar o asset oficial"
+    );
     assert.strictEqual(
       identidadeVisual.normalizarConfigIdentidadeVisual({ logo: "https://externo/logo.png" }).logo,
       undefined,
@@ -92,6 +100,53 @@ async function main() {
     );
 
     const produto = await bufferPng({ width: 720, height: 720, fill: "#2563eb", label: "NORMAL" });
+    const renderPadrao = await identidadeVisual.renderizarIdentidadeVisualBuffer({
+      imagemBuffer: produto,
+      logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
+      config: { frase: "AS MELHORES OFERTAS, EM UM SÓ LUGAR", corIdentidade: "azul" }
+    });
+    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2");
+    assert.strictEqual(renderPadrao.metadata.width, 1080, "renderer V2 deve manter largura 1080");
+    assert.strictEqual(renderPadrao.metadata.height, 1080, "renderer V2 deve manter altura 1080");
+    assert.deepStrictEqual(
+      renderPadrao.metadata.fraseLayout.linhas,
+      ["AS MELHORES OFERTAS,", "EM UM SÓ LUGAR"],
+      "frase default deve aparecer na composicao em ate 2 linhas"
+    );
+    assert.ok(renderPadrao.metadata.fraseLayout.fontSize >= identidadeVisual.FRASE_SAFE_AREA.minFontSize);
+    assert.ok(renderPadrao.metadata.fraseLayout.linhas.length <= 2, "frase default deve caber em ate 2 linhas");
+    assert.ok(renderPadrao.metadata.productRenderedY >= 0, "produto deve iniciar dentro da area util");
+    assert.ok(
+      renderPadrao.metadata.productRenderedY + renderPadrao.metadata.productRenderedHeight <= identidadeVisual.AREA_PRODUTO_ALTURA,
+      "produto deve ficar contido antes da faixa"
+    );
+    assert.deepStrictEqual(renderPadrao.metadata.logoSlot, identidadeVisual.LOGO_SLOT, "logo oficial deve usar slot V2");
+
+    const renderFraseLonga = await identidadeVisual.renderizarIdentidadeVisualBuffer({
+      imagemBuffer: produto,
+      logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
+      config: {
+        frase: "Uma frase promocional grande o suficiente para validar quebra segura no preview real",
+        corIdentidade: "preto"
+      }
+    });
+    const layoutLongo = renderFraseLonga.metadata.fraseLayout;
+    const limiteInferior = layoutLongo.safeArea.top + layoutLongo.safeArea.height;
+    assert.ok(layoutLongo.linhas.length <= 2, "frase longa deve caber em ate 2 linhas");
+    assert.ok(
+      layoutLongo.baselineY + (layoutLongo.linhas.length - 1) * layoutLongo.lineHeight <= limiteInferior,
+      "nenhuma linha deve sair da safe area vertical"
+    );
+    assert.ok(
+      layoutLongo.x >= layoutLongo.safeArea.left &&
+        layoutLongo.x + layoutLongo.safeArea.width <= identidadeVisual.CANVAS,
+      "frase deve respeitar safe area horizontal"
+    );
+
+    const fonteRenderer = fs.readFileSync(path.join(__dirname, "..", "modules", "identidade-visual-ofertas", "renderer.js"), "utf8");
+    assert.ok(fonteRenderer.includes('fit: "contain"'), "produto e logo devem continuar usando contain");
+    assert.ok(!fonteRenderer.includes('fit: "fill"'), "renderer nao deve distorcer produto/logo com fill");
+
     let downloads = 0;
     const repo = criarRepoMemoria({
       workspace_render: {

@@ -164,6 +164,47 @@ async function main() {
     });
     assert.strictEqual(opcional.configEfetiva.ativo, false, "opcional_editavel respeita ativo do workspace");
 
+    const estadoAntesPreview = JSON.stringify(repo.store);
+    const previewObrigatorio = await service.gerarPreview("workspace_custom", {
+      frase: "Tentativa de troca",
+      corIdentidade: "verde",
+      ativo: false
+    }, {
+      plano: { recursos: { identidade_visual_ofertas: "obrigatoria" } }
+    });
+    assert.strictEqual(previewObrigatorio.aplicada, true, "preview obrigatorio deve renderizar identidade");
+    assert.strictEqual(previewObrigatorio.configEfetiva.logo, "optimus_oficial", "preview obrigatorio deve forcar logo oficial");
+    assert.strictEqual(previewObrigatorio.configEfetiva.frase, "AS MELHORES OFERTAS, EM UM SÓ LUGAR", "preview obrigatorio deve forcar frase oficial");
+    assert.strictEqual(previewObrigatorio.configEfetiva.ativo, true, "preview obrigatorio nao pode ser desligado");
+    assert.strictEqual(previewObrigatorio.preview.rendererVersion, "identidade-visual-ofertas-v2");
+    assert.ok(/^data:image\/png;base64,/.test(previewObrigatorio.preview.dataUrl), "preview deve devolver PNG base64");
+    assert.strictEqual(previewObrigatorio.preview.persistida, false, "preview nao deve persistir arte");
+    assert.strictEqual(JSON.stringify(repo.store), estadoAntesPreview, "preview nao deve alterar config do workspace");
+
+    const previewOpcionalOff = await service.gerarPreview("workspace_custom", {
+      ativo: false,
+      frase: "Minha curadoria",
+      corIdentidade: "vermelho"
+    }, {
+      plano: { recursos: { identidade_visual_ofertas: "opcional_editavel" } }
+    });
+    assert.strictEqual(previewOpcionalOff.aplicada, false, "opcional desligada deve respeitar estado atual");
+    assert.strictEqual(previewOpcionalOff.motivo, "config_inativa");
+    assert.ok(/^data:image\/png;base64,/.test(previewOpcionalOff.preview.dataUrl), "preview desligado deve devolver estado visual claro");
+
+    const previewDeps = identidadeVisual.criarServicoIdentidadeVisualOfertas({
+      repository: criarRepoMemoria(),
+      adicionarOfertaNaFilaGlobal: () => {
+        throw new Error("preview_nao_deve_criar_fila");
+      },
+      debitarCreditos: () => {
+        throw new Error("preview_nao_deve_consumir_credito");
+      }
+    });
+    await previewDeps.gerarPreview("workspace_preview_deps", {}, {
+      plano: { recursos: { identidade_visual_ofertas: "obrigatoria_editavel" } }
+    });
+
     assert.throws(
       () => service.atualizarConfig("workspace_custom", { ativo: false }, {
         plano: { recursos: { identidade_visual_ofertas: "obrigatoria_editavel" } }
@@ -226,10 +267,25 @@ async function main() {
     assert.strictEqual(patchConfig.body.config.corIdentidade, "verde");
     assert.strictEqual(patchConfig.body.configEfetiva.ativo, false);
 
+    const previewRota = await requestJson(app, "POST", "/identidade-visual-ofertas/preview", {
+      ativo: true,
+      frase: "Preview real pelo backend",
+      corIdentidade: "rosa"
+    });
+    assert.strictEqual(previewRota.status, 200);
+    assert.strictEqual(previewRota.body.ok, true);
+    assert.strictEqual(previewRota.body.aplicada, true);
+    assert.strictEqual(previewRota.body.preview.rendererVersion, "identidade-visual-ofertas-v2");
+    assert.ok(/^data:image\/png;base64,/.test(previewRota.body.preview.dataUrl), "rota preview deve usar renderer real");
+
     const fonteModulo = fs.readFileSync(path.join(__dirname, "..", "modules", "identidade-visual-ofertas", "service.js"), "utf8");
     assert.ok(!/origem\s*===\s*["']radar["']/.test(fonteModulo), "servico nao pode ter renderer/regra especifica de Radar");
     assert.ok(!/origem\s*===\s*["']clonador_grupos["']/.test(fonteModulo), "servico nao pode ter renderer/regra especifica de Clonador");
     assert.ok(!/Template Universal|montarMensagemOferta/.test(fonteModulo), "foundation nao deve tocar Template Universal");
+    assert.ok(
+      fonteModulo.includes("renderizarIdentidadeVisualBuffer") && fonteModulo.includes("gerarPreview"),
+      "preview deve usar o mesmo renderer oficial"
+    );
 
     const { adicionarOfertaNaFilaCliente } = require("../modules/engine/distributor/distributor.service");
     const chamadasEngine = [];

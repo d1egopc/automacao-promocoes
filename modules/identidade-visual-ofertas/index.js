@@ -12,6 +12,7 @@ const {
   resolverConfigIdentidadeVisualOferta,
   atualizarConfigIdentidadeVisualOferta,
   uploadLogoIdentidadeVisualOferta,
+  gerarPreviewIdentidadeVisualOferta,
   CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
   LAYOUT_IDENTIDADE_VISUAL_OFERTAS
 } = require("./service");
@@ -34,6 +35,7 @@ module.exports = {
   resolverConfigIdentidadeVisualOferta,
   atualizarConfigIdentidadeVisualOferta,
   uploadLogoIdentidadeVisualOferta,
+  gerarPreviewIdentidadeVisualOferta,
   CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
   LAYOUT_IDENTIDADE_VISUAL_OFERTAS,
   normalizarConfigIdentidadeVisual,

@@ -70,6 +70,17 @@ function criarRotasIdentidadeVisualOfertas(deps = {}) {
     }
   });
 
+  router.post("/preview", async (req, res) => {
+    try {
+      return res.json({
+        ok: true,
+        ...(await service.gerarPreview(cliente(req), req.body?.config || req.body || {}, opcoes(req)))
+      });
+    } catch (erro) {
+      return res.status(statusErro(erro)).json(payloadErro(erro));
+    }
+  });
+
   router.post(
     "/logo/upload",
     express.raw({
