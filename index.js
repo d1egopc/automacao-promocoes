@@ -3796,9 +3796,15 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
     const itemLinkAfiliado = normalizarChaveFilaEngine(item.linkAfiliado || item.link || item.linkFinal || "");
     const itemTitulo = normalizarChaveFilaEngine(item.titulo || item.nome || "");
     const itemPreco = numeroComparavelFilaEngine(item.preco || item.precoAtual);
+    const linksOriginaisDiferentes = Boolean(
+      linkOriginal && itemLinkOriginal && linkOriginal !== itemLinkOriginal
+    );
 
-    if (linkOriginal && (linkOriginal === itemLinkOriginal || linkOriginal === itemLinkAfiliado)) return true;
-    if (linkAfiliado && (linkAfiliado === itemLinkAfiliado || linkAfiliado === itemLinkOriginal)) return true;
+    if (linkOriginal && linkOriginal === itemLinkOriginal) return true;
+    if (!linksOriginaisDiferentes) {
+      if (linkOriginal && linkOriginal === itemLinkAfiliado) return true;
+      if (linkAfiliado && (linkAfiliado === itemLinkAfiliado || linkAfiliado === itemLinkOriginal)) return true;
+    }
     return Boolean(titulo && preco && titulo === itemTitulo && preco === itemPreco);
   });
 }
@@ -30220,5 +30226,4 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-
 

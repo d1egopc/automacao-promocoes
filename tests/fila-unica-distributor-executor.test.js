@@ -590,6 +590,83 @@ assert(
   "falha do lazy no Distributor deve ser fail-closed"
 );
 
+const fonteDeduplicacaoEngine = trechoEntre(
+  "function normalizarChaveFilaEngine",
+  "async function adicionarOfertaNaFilaGlobalEngine"
+);
+const criarDeduplicadorEngine = new Function(
+  "fila",
+  "filaStore",
+  `${fonteDeduplicacaoEngine}; return itemEngineDuplicadoFilaGlobal;`
+);
+
+function itemEngineDuplicado(candidatos, itemFila) {
+  const deduplicar = criarDeduplicadorEngine(candidatos, {
+    candidatosPorFingerprint() {
+      return { ok: false, itens: [] };
+    }
+  });
+  return deduplicar("user_teste", itemFila);
+}
+
+const itemFilaBase = {
+  clienteId: "user_teste",
+  engineOfertaId: "oferta_antiga",
+  linkOriginal: "https://meli.la/produto-antigo",
+  linkAfiliado: "https://meli.la/link-afiliado-compartilhado",
+  titulo: "Produto antigo",
+  preco: 100
+};
+
+assert.strictEqual(
+  itemEngineDuplicado([itemFilaBase], { ...itemFilaBase }),
+  true,
+  "mesmo engineOfertaId deve continuar duplicando"
+);
+assert.strictEqual(
+  itemEngineDuplicado([itemFilaBase], {
+    ...itemFilaBase,
+    engineOfertaId: "oferta_nova",
+    linkAfiliado: "https://meli.la/outro-afiliado",
+    titulo: "Outro titulo",
+    preco: 200
+  }),
+  true,
+  "mesmo link original deve continuar duplicando"
+);
+assert.strictEqual(
+  itemEngineDuplicado([itemFilaBase], {
+    ...itemFilaBase,
+    engineOfertaId: "oferta_nova",
+    linkOriginal: "https://meli.la/outro-produto",
+    linkAfiliado: "https://meli.la/outro-afiliado"
+  }),
+  true,
+  "mesmo titulo e preco deve continuar duplicando"
+);
+assert.strictEqual(
+  itemEngineDuplicado([itemFilaBase], {
+    ...itemFilaBase,
+    engineOfertaId: "oferta_nova",
+    linkOriginal: "https://meli.la/produto-novo",
+    titulo: "Produto novo",
+    preco: 200
+  }),
+  false,
+  "links originais diferentes nao devem duplicar apenas pelo link afiliado curto"
+);
+assert.strictEqual(
+  itemEngineDuplicado([{ ...itemFilaBase, linkOriginal: "" }], {
+    ...itemFilaBase,
+    engineOfertaId: "oferta_nova",
+    linkOriginal: "",
+    titulo: "Produto novo",
+    preco: 200
+  }),
+  true,
+  "sem link original deve preservar deduplicacao segura pelo link afiliado"
+);
+
 [
   "fila_inteligente_abastecer",
   "radar_retida_sem_inicializacao",
