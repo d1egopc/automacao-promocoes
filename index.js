@@ -215,7 +215,8 @@ const {
   criarRotasIdentidadeVisualOfertas,
   criarRepositorioIdentidadeVisualOfertas,
   criarServicoIdentidadeVisualOfertas,
-  normalizarPoliticaIdentidadeVisual
+  normalizarPoliticaIdentidadeVisual,
+  storageIdentidadeVisualOfertas
 } = require("./modules/identidade-visual-ofertas");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
@@ -6401,6 +6402,43 @@ function configurarRotaPublicaMidiaSocial() {
 }
 
 configurarRotaPublicaMidiaSocial();
+
+function configurarRotaPublicaIdentidadeVisualOfertas() {
+  const raiz = path.resolve(storageIdentidadeVisualOfertas.raizPublica());
+  const raizAssets = path.resolve(__dirname, "assets", "identidade-visual");
+  app.use("/assets/identidade-visual", express.static(raizAssets, {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+    immutable: true,
+    maxAge: "30d",
+    redirect: false,
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }));
+
+  app.use("/identidade-visual-ofertas/public", express.static(raiz, {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+    immutable: true,
+    maxAge: "30d",
+    redirect: false,
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }));
+
+  console.log("[IDENTIDADE-VISUAL-PUBLICA]", {
+    rota: "/identidade-visual-ofertas/public",
+    storageConfigurado: true
+  });
+}
+
+configurarRotaPublicaIdentidadeVisualOfertas();
 
 const horarioInicio = 9;
 const horarioFim = 23;
@@ -22029,7 +22067,8 @@ const identidadeVisualOfertasRepository = criarRepositorioIdentidadeVisualOferta
   writeClienteJson
 });
 const identidadeVisualOfertasService = criarServicoIdentidadeVisualOfertas({
-  repository: identidadeVisualOfertasRepository
+  repository: identidadeVisualOfertasRepository,
+  httpClient: axios
 });
 
 app.use("/identidade-visual-ofertas", criarRotasIdentidadeVisualOfertas({

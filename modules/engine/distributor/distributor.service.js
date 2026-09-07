@@ -1059,7 +1059,16 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
         itemFila = {
           ...itemFila,
           imagem: imagemFinalIdentidade,
-          imagemUrl: imagemFinalIdentidade
+          imagemUrl: imagemFinalIdentidade,
+          metadata: {
+            ...(itemFila.metadata && typeof itemFila.metadata === "object" ? itemFila.metadata : {}),
+            identidadeVisual: identidadeVisual.metadata || {
+              aplicada: identidadeVisual.aplicada === true,
+              motivo: identidadeVisual.motivo || "",
+              original: identidadeVisual.imagemOriginal || itemFila.imagem || "",
+              final: imagemFinalIdentidade
+            }
+          }
         };
       }
     } catch (erro) {

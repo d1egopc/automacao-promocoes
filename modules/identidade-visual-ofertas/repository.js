@@ -5,6 +5,10 @@ const {
   writeClienteJson,
   normalizarClienteId
 } = require("../../utils/storage");
+const {
+  normalizarCorIdentidade,
+  normalizarCorLegadaParaIdentidade
+} = require("./paleta");
 
 const ARQUIVO_CONFIG_IDENTIDADE_VISUAL = "identidade-visual-ofertas.json";
 
@@ -16,9 +20,12 @@ function clonar(valor) {
   return JSON.parse(JSON.stringify(valor));
 }
 
-function normalizarCor(valor = "") {
-  const cor = texto(valor);
-  return /^#[0-9a-fA-F]{6}$/.test(cor) ? cor.toUpperCase() : "";
+function normalizarLogoRef(valor = "") {
+  const logo = texto(valor);
+  if (!logo) return "";
+  if (logo === "optimus_oficial") return "optimus_oficial";
+  const match = logo.match(/^cliente:([a-f0-9]{32,64})$/i);
+  return match ? `cliente:${match[1].toLowerCase()}` : "";
 }
 
 function normalizarConfigIdentidadeVisual(config = {}) {
@@ -29,17 +36,16 @@ function normalizarConfigIdentidadeVisual(config = {}) {
     saida.ativo = fonte.ativo !== false;
   }
 
-  const logo = texto(fonte.logo || fonte.logoUrl || fonte.logoAsset);
+  const logo = normalizarLogoRef(fonte.logo || fonte.logoAsset);
   if (logo) saida.logo = logo;
 
   const frase = texto(fonte.frase || fonte.texto || fonte.slogan);
-  if (frase) saida.frase = frase.slice(0, 120);
+  if (frase) saida.frase = frase.slice(0, 80);
 
-  const corFaixa = normalizarCor(fonte.corFaixa);
-  if (corFaixa) saida.corFaixa = corFaixa;
-
-  const corTexto = normalizarCor(fonte.corTexto);
-  if (corTexto) saida.corTexto = corTexto;
+  const corIdentidade =
+    normalizarCorIdentidade(fonte.corIdentidade) ||
+    normalizarCorLegadaParaIdentidade(fonte.corFaixa);
+  if (corIdentidade) saida.corIdentidade = corIdentidade;
 
   return saida;
 }
@@ -83,5 +89,6 @@ function criarRepositorioIdentidadeVisualOfertas(deps = {}) {
 module.exports = {
   ARQUIVO_CONFIG_IDENTIDADE_VISUAL,
   normalizarConfigIdentidadeVisual,
+  normalizarLogoRef,
   criarRepositorioIdentidadeVisualOfertas
 };

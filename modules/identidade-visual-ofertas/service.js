@@ -4,6 +4,11 @@ const {
   criarRepositorioIdentidadeVisualOfertas,
   normalizarConfigIdentidadeVisual
 } = require("./repository");
+const storageIdentidadeVisual = require("./storage");
+const rendererIdentidadeVisual = require("./renderer");
+const {
+  listarPaletaIdentidadeVisual
+} = require("./paleta");
 const {
   POLITICAS_IDENTIDADE_VISUAL_OFERTAS,
   resolverPoliticaIdentidadeVisualPlano
@@ -13,11 +18,31 @@ const CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS = Object.freeze({
   ativo: true,
   logo: "optimus_oficial",
   frase: "AS MELHORES OFERTAS, EM UM SÓ LUGAR",
-  corFaixa: "#111827",
-  corTexto: "#FFFFFF"
+  corIdentidade: "azul"
 });
 
-const CAMPOS_CONFIG_EDITAVEIS = ["logo", "frase", "corFaixa", "corTexto"];
+const CAMPOS_CONFIG_EDITAVEIS = ["logo", "frase", "corIdentidade"];
+
+const LAYOUT_IDENTIDADE_VISUAL_OFERTAS = Object.freeze({
+  rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+  largura: rendererIdentidadeVisual.CANVAS,
+  altura: rendererIdentidadeVisual.CANVAS,
+  formato: "png",
+  molde: "v1_fixo",
+  areaProduto: {
+    x: 0,
+    y: 0,
+    largura: rendererIdentidadeVisual.CANVAS,
+    altura: rendererIdentidadeVisual.AREA_PRODUTO_ALTURA,
+    fit: "contain"
+  },
+  faixaInferior: {
+    x: 0,
+    y: rendererIdentidadeVisual.AREA_PRODUTO_ALTURA + 10,
+    largura: rendererIdentidadeVisual.CANVAS,
+    altura: rendererIdentidadeVisual.FAIXA_ALTURA
+  }
+});
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -32,6 +57,16 @@ function erroIdentidadeVisual(codigo, statusCode = 400) {
   erro.codigo = codigo;
   erro.statusCode = statusCode;
   return erro;
+}
+
+function logIdentidadeVisual(evento, dados = {}) {
+  console.log(evento, {
+    clienteId: dados.clienteId || "",
+    ofertaId: dados.ofertaId || "",
+    motivo: dados.motivo || "",
+    cacheKey: dados.cacheKey ? String(dados.cacheKey).slice(0, 16) : "",
+    rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL
+  });
 }
 
 function resolverPlanoIdentidadeVisual(clienteId = "admin", deps = {}) {
@@ -55,6 +90,13 @@ function montarConfigEfetiva(configWorkspace = {}, politicaResolvida = {}) {
     };
   }
 
+  if (politicaResolvida.politica === POLITICAS_IDENTIDADE_VISUAL_OFERTAS.OBRIGATORIA) {
+    return {
+      ...CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
+      ativo: true
+    };
+  }
+
   if (politicaResolvida.obrigatoria) {
     return {
       ...config,
@@ -65,6 +107,19 @@ function montarConfigEfetiva(configWorkspace = {}, politicaResolvida = {}) {
   return {
     ...config,
     ativo: config.ativo !== false
+  };
+}
+
+function enriquecerRespostaConfig(clienteId = "admin", resposta = {}) {
+  const configEfetiva = resposta.configEfetiva || {};
+  return {
+    ...resposta,
+    configEfetiva: {
+      ...configEfetiva,
+      logoUrl: storageIdentidadeVisual.resolverLogoUrl(clienteId, configEfetiva.logo)
+    },
+    paleta: listarPaletaIdentidadeVisual(),
+    layout: clonar(LAYOUT_IDENTIDADE_VISUAL_OFERTAS)
   };
 }
 
@@ -81,7 +136,7 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
     const configWorkspace = repository.lerConfig(clienteId);
     const configEfetiva = montarConfigEfetiva(configWorkspace, politica);
 
-    return {
+    return enriquecerRespostaConfig(clienteId, {
       politica: politica.politica,
       habilitada: politica.habilitada,
       obrigatoria: politica.obrigatoria,
@@ -90,7 +145,7 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
       config: configWorkspace,
       configPadrao: clonar(CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS),
       configEfetiva
-    };
+    });
   }
 
   function atualizarConfig(clienteId = "admin", patch = {}, opcoes = {}) {
@@ -119,6 +174,35 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
 
     repository.atualizarConfig(clienteId, alteracoes);
     return resolverConfig(clienteId, opcoes);
+  }
+
+  async function uploadLogo(clienteId = "admin", { buffer, mimeType = "" } = {}, opcoes = {}) {
+    const politica = resolverPolitica(clienteId, opcoes);
+
+    if (politica.politica === POLITICAS_IDENTIDADE_VISUAL_OFERTAS.DESABILITADA) {
+      throw erroIdentidadeVisual("identidade_visual_ofertas_desabilitada", 403);
+    }
+
+    if (!politica.editavel) {
+      throw erroIdentidadeVisual("identidade_visual_ofertas_edicao_bloqueada", 403);
+    }
+
+    const normalizada = await rendererIdentidadeVisual.normalizarLogoUpload(buffer, mimeType);
+    const logo = storageIdentidadeVisual.salvarLogoCliente(clienteId, normalizada);
+    repository.atualizarConfig(clienteId, { logo: logo.ref });
+    logIdentidadeVisual("[IDENTIDADE-VISUAL-LOGO-UPLOAD]", {
+      clienteId,
+      motivo: "logo_salva",
+      cacheKey: logo.hash
+    });
+    return {
+      ...resolverConfig(clienteId, opcoes),
+      logo: {
+        ref: logo.ref,
+        url: logo.url,
+        hash: logo.hash.slice(0, 16)
+      }
+    };
   }
 
   async function aplicarIdentidadeVisualOferta({ clienteId = "admin", oferta = {}, imagemAtual = "", contexto = {} } = {}, opcoes = {}) {
@@ -161,20 +245,101 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
       };
     }
 
-    return {
-      aplicada: false,
+    const ofertaId = oferta.id || oferta.oferta_id || oferta.uuid || "";
+    const configHash = rendererIdentidadeVisual.configHashIdentidadeVisual(resolucao.configEfetiva);
+    const cacheKey = rendererIdentidadeVisual.cacheKeyIdentidadeVisual({
+      clienteId,
       imagemOriginal,
-      imagemFinal: imagemOriginal,
-      motivo: "renderer_nao_implementado",
-      politica: resolucao.politica,
-      configEfetiva: resolucao.configEfetiva,
-      contexto
-    };
+      configHash
+    });
+    const destino = storageIdentidadeVisual.caminhoRenderizado(clienteId, cacheKey);
+
+    if (storageIdentidadeVisual.existeArquivo(destino.path)) {
+      logIdentidadeVisual("[IDENTIDADE-VISUAL-CACHE]", { clienteId, ofertaId, cacheKey, motivo: "cache_hit" });
+      return {
+        aplicada: true,
+        imagemOriginal,
+        imagemFinal: destino.url,
+        motivo: "cache_hit",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: destino.url,
+          configHash,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          cacheKey,
+          cacheHit: true
+        },
+        contexto
+      };
+    }
+
+    try {
+      const imagemBuffer = typeof deps.baixarImagemBuffer === "function"
+        ? await deps.baixarImagemBuffer(imagemOriginal, opcoes)
+        : await rendererIdentidadeVisual.baixarImagemComoBuffer(imagemOriginal, {
+            httpClient: opcoes.httpClient || deps.httpClient,
+            timeoutMs: opcoes.timeoutMs
+          });
+      const logoBuffer = storageIdentidadeVisual.lerLogoBuffer(clienteId, resolucao.configEfetiva.logo);
+      const render = await rendererIdentidadeVisual.renderizarIdentidadeVisualBuffer({
+        imagemBuffer,
+        logoBuffer,
+        config: resolucao.configEfetiva
+      });
+      storageIdentidadeVisual.salvarBufferPublico(destino, render.buffer);
+      logIdentidadeVisual("[IDENTIDADE-VISUAL-APLICADA]", { clienteId, ofertaId, cacheKey, motivo: "render_ok" });
+      return {
+        aplicada: true,
+        imagemOriginal,
+        imagemFinal: destino.url,
+        motivo: "render_ok",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: destino.url,
+          configHash,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          cacheKey,
+          cacheHit: false,
+          aplicadoEm: new Date().toISOString(),
+          ...render.metadata
+        },
+        contexto
+      };
+    } catch (erro) {
+      logIdentidadeVisual("[IDENTIDADE-VISUAL-FALLBACK]", {
+        clienteId,
+        ofertaId,
+        cacheKey,
+        motivo: erro?.message || "render_fallback"
+      });
+      return {
+        aplicada: false,
+        imagemOriginal,
+        imagemFinal: imagemOriginal,
+        motivo: "render_fallback",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: imagemOriginal,
+          configHash,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          fallback: true,
+          motivoFallback: erro?.message || "render_fallback"
+        },
+        contexto
+      };
+    }
   }
 
   return {
     resolverConfig,
     atualizarConfig,
+    uploadLogo,
     aplicarIdentidadeVisualOferta
   };
 }
@@ -183,8 +348,10 @@ const servicoPadrao = criarServicoIdentidadeVisualOfertas();
 
 module.exports = {
   CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
+  LAYOUT_IDENTIDADE_VISUAL_OFERTAS,
   criarServicoIdentidadeVisualOfertas,
   resolverConfigIdentidadeVisualOferta: servicoPadrao.resolverConfig,
   atualizarConfigIdentidadeVisualOferta: servicoPadrao.atualizarConfig,
+  uploadLogoIdentidadeVisualOferta: servicoPadrao.uploadLogo,
   aplicarIdentidadeVisualOferta: servicoPadrao.aplicarIdentidadeVisualOferta
 };

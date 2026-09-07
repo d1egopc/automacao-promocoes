@@ -124,24 +124,40 @@ async function main() {
       }
     );
 
+    const logoClienteSalvo = `cliente:${"a".repeat(64)}`;
     const repo = criarRepoMemoria({
       workspace_custom: {
         ativo: false,
-        logo: "https://cdn.example/logo.webp",
+        logo: logoClienteSalvo,
         frase: "Minha curadoria",
-        corFaixa: "#AA00FF",
-        corTexto: "#00AAFF"
+        corIdentidade: "vermelho"
       }
     });
     const service = identidadeVisual.criarServicoIdentidadeVisualOfertas({
-      repository: repo
+      repository: repo,
+      baixarImagemBuffer: async () => {
+        throw new Error("download_indisponivel");
+      }
     });
+
+    const obrigatoriaFixa = service.resolverConfig("workspace_custom", {
+      plano: { recursos: { identidade_visual_ofertas: "obrigatoria" } }
+    });
+    assert.strictEqual(obrigatoriaFixa.configEfetiva.ativo, true, "politica obrigatoria deve aplicar identidade ativa");
+    assert.strictEqual(obrigatoriaFixa.configEfetiva.logo, "optimus_oficial", "politica obrigatoria deve forcar logo oficial");
+    assert.strictEqual(obrigatoriaFixa.configEfetiva.frase, "AS MELHORES OFERTAS, EM UM SÓ LUGAR", "politica obrigatoria deve forcar frase oficial");
+    assert.strictEqual(obrigatoriaFixa.configEfetiva.corIdentidade, "azul", "politica obrigatoria deve forcar cor oficial");
+    assert.strictEqual(repo.store.workspace_custom.logo, logoClienteSalvo, "politica obrigatoria nao deve apagar logo salva");
+    assert.strictEqual(repo.store.workspace_custom.frase, "Minha curadoria", "politica obrigatoria nao deve apagar frase salva");
+    assert.strictEqual(repo.store.workspace_custom.corIdentidade, "vermelho", "politica obrigatoria nao deve apagar cor salva");
 
     const obrigatoria = service.resolverConfig("workspace_custom", {
       plano: { recursos: { identidade_visual_ofertas: "obrigatoria_editavel" } }
     });
     assert.strictEqual(obrigatoria.configEfetiva.ativo, true, "politica obrigatoria liga a identidade mesmo com config off");
+    assert.strictEqual(obrigatoria.configEfetiva.logo, logoClienteSalvo, "obrigatoria_editavel deve restaurar logo salva");
     assert.strictEqual(obrigatoria.configEfetiva.frase, "Minha curadoria", "customizacao deve sobreviver a troca de politica");
+    assert.strictEqual(obrigatoria.configEfetiva.corIdentidade, "vermelho", "obrigatoria_editavel deve restaurar cor salva");
 
     const opcional = service.resolverConfig("workspace_custom", {
       plano: { recursos: { identidade_visual_ofertas: "opcional_editavel" } }
@@ -172,8 +188,8 @@ async function main() {
       plano: { recursos: { identidade_visual_ofertas: "obrigatoria" } }
     });
     assert.strictEqual(passthrough.aplicada, false);
-    assert.strictEqual(passthrough.motivo, "renderer_nao_implementado");
-    assert.strictEqual(passthrough.imagemFinal, "https://img.example/oferta.jpg", "foundation nao altera imagem real");
+    assert.strictEqual(passthrough.motivo, "render_fallback");
+    assert.strictEqual(passthrough.imagemFinal, "https://img.example/oferta.jpg", "falha de render deve preservar imagem original");
 
     const semImagem = await service.aplicarIdentidadeVisualOferta({
       clienteId: "workspace_custom",
@@ -203,11 +219,11 @@ async function main() {
     const patchConfig = await requestJson(app, "PATCH", "/identidade-visual-ofertas/config", {
       ativo: false,
       frase: "Ofertas selecionadas",
-      corFaixa: "#123456",
-      corTexto: "#ABCDEF"
+      corIdentidade: "verde"
     });
     assert.strictEqual(patchConfig.status, 200);
     assert.strictEqual(patchConfig.body.config.ativo, false);
+    assert.strictEqual(patchConfig.body.config.corIdentidade, "verde");
     assert.strictEqual(patchConfig.body.configEfetiva.ativo, false);
 
     const fonteModulo = fs.readFileSync(path.join(__dirname, "..", "modules", "identidade-visual-ofertas", "service.js"), "utf8");

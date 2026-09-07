@@ -3,15 +3,21 @@
 const criarRotasIdentidadeVisualOfertas = require("./routes");
 const {
   criarRepositorioIdentidadeVisualOfertas,
-  normalizarConfigIdentidadeVisual
+  normalizarConfigIdentidadeVisual,
+  normalizarLogoRef
 } = require("./repository");
 const {
   criarServicoIdentidadeVisualOfertas,
   aplicarIdentidadeVisualOferta,
   resolverConfigIdentidadeVisualOferta,
   atualizarConfigIdentidadeVisualOferta,
-  CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS
+  uploadLogoIdentidadeVisualOferta,
+  CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
+  LAYOUT_IDENTIDADE_VISUAL_OFERTAS
 } = require("./service");
+const storageIdentidadeVisualOfertas = require("./storage");
+const renderer = require("./renderer");
+const paleta = require("./paleta");
 const {
   POLITICAS_IDENTIDADE_VISUAL_OFERTAS,
   normalizarPoliticaIdentidadeVisual,
@@ -27,11 +33,17 @@ module.exports = {
   aplicarIdentidadeVisualOferta,
   resolverConfigIdentidadeVisualOferta,
   atualizarConfigIdentidadeVisualOferta,
+  uploadLogoIdentidadeVisualOferta,
   CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
+  LAYOUT_IDENTIDADE_VISUAL_OFERTAS,
   normalizarConfigIdentidadeVisual,
+  normalizarLogoRef,
+  storageIdentidadeVisualOfertas,
   POLITICAS_IDENTIDADE_VISUAL_OFERTAS,
   normalizarPoliticaIdentidadeVisual,
   resolverPermissoesPoliticaIdentidadeVisual,
   normalizarRecursoPlanoIdentidadeVisual,
-  resolverPoliticaIdentidadeVisualPlano
+  resolverPoliticaIdentidadeVisualPlano,
+  ...renderer,
+  ...paleta
 };

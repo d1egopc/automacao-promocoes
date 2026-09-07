@@ -4,6 +4,10 @@ const express = require("express");
 const {
   criarServicoIdentidadeVisualOfertas
 } = require("./service");
+const {
+  LIMITE_UPLOAD_LOGO_BYTES,
+  MIMES_IMAGEM_PERMITIDOS
+} = require("./renderer");
 
 function statusErro(erro) {
   return erro.statusCode || 500;
@@ -65,6 +69,37 @@ function criarRotasIdentidadeVisualOfertas(deps = {}) {
       return res.status(statusErro(erro)).json(payloadErro(erro));
     }
   });
+
+  router.post(
+    "/logo/upload",
+    express.raw({
+      type: Array.from(MIMES_IMAGEM_PERMITIDOS),
+      limit: LIMITE_UPLOAD_LOGO_BYTES
+    }),
+    async (req, res) => {
+      try {
+        return res.json({
+          ok: true,
+          ...(await service.uploadLogo(cliente(req), {
+            buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+            mimeType: req.headers["content-type"] || ""
+          }, opcoes(req)))
+        });
+      } catch (erro) {
+        return res.status(statusErro(erro)).json(payloadErro(erro));
+      }
+    },
+    (erro, req, res, next) => {
+      if (erro?.type === "entity.too.large") {
+        return res.status(413).json(payloadErro({
+          codigo: "identidade_visual_logo_tamanho_excedido",
+          message: "identidade_visual_logo_tamanho_excedido",
+          statusCode: 413
+        }));
+      }
+      return next(erro);
+    }
+  );
 
   return router;
 }
