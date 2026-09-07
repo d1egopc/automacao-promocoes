@@ -59,7 +59,8 @@ const {
 } = require("./modules/engine/database");
 
 const {
-  iniciarOrquestradorEngine
+  iniciarOrquestradorEngine,
+  iniciarCicloEntradaClonador
 } = require("./modules/engine/orchestrator.runner");
 const {
   sanearExpiracaoOperacionalFilaItem
@@ -29355,6 +29356,13 @@ console.log("[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO]", {
 
 initEngineDatabase()
   .then(() => {
+    iniciarCicloEntradaClonador({
+      intervaloMs: 120000,
+      processarEntradasClonador: () => clonadorGruposBridge.processarCapturasPendentes({
+        limite: Number(process.env.CLONADOR_GRUPOS_ENGINE_BRIDGE_LIMITE || 5)
+      })
+    });
+
     iniciarOrquestradorEngine({
       intervaloMs: 120000,
       processarJobsPendentesEngine: (opcoes = {}) => processarJobsPendentesEngine({
@@ -29396,9 +29404,6 @@ initEngineDatabase()
         gateAtivo: {
           diagnosticarDisponibilidadeEnvioWorkspace
         }
-      }),
-      processarEntradasClonador: () => clonadorGruposBridge.processarCapturasPendentes({
-        limite: Number(process.env.CLONADOR_GRUPOS_ENGINE_BRIDGE_LIMITE || 5)
       })
     });
   })

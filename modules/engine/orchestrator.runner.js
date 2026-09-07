@@ -1,5 +1,7 @@
 let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
+let clonadorGruposEntradaRodando = false;
+let clonadorGruposEntradaIntervalo = null;
 
 const { executarObservabilidadeOfc } = require("./ofc");
 const {
@@ -250,7 +252,6 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     getContextoDistribuidor,
     getDepsImportador,
     getDepsDistribuidor,
-    processarEntradasClonador,
     limites = {}
   } = opcoes;
 
@@ -302,10 +303,6 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
       }, { rodadaId });
-    }
-
-    if (typeof processarEntradasClonador === "function") {
-      resumo.etapas.clonadorGrupos = await executarEtapaRastreada("clonador_grupos_entrada", processarEntradasClonador, {}, { rodadaId });
     }
 
     let inicioFornecedorMs = Date.now();
@@ -513,6 +510,68 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   }
 }
 
+async function executarCicloEntradaClonador(opcoes = {}) {
+  const { processarEntradasClonador } = opcoes;
+
+  if (typeof processarEntradasClonador !== "function") {
+    return { ok: false, motivo: "processar_entradas_clonador_indisponivel" };
+  }
+
+  if (clonadorGruposEntradaRodando) {
+    console.log("[CLONADOR-GRUPOS-ENTRADA-PULADO-EM-EXECUCAO]", {
+      motivo: "rodada_em_execucao"
+    });
+    return { ok: true, pulado: true, motivo: "rodada_em_execucao" };
+  }
+
+  clonadorGruposEntradaRodando = true;
+  const rodadaId = `clonador_grupos_entrada_${Date.now()}`;
+
+  try {
+    return await executarEtapaRastreada("clonador_grupos_entrada", processarEntradasClonador, {}, { rodadaId });
+  } catch (e) {
+    console.log("[CLONADOR-GRUPOS-ENTRADA-ERRO]", {
+      etapa: "intervalo",
+      erro: e.message
+    });
+    return { ok: false, nome: "clonador_grupos_entrada", erro: e.message };
+  } finally {
+    clonadorGruposEntradaRodando = false;
+  }
+}
+
+function iniciarCicloEntradaClonador(opcoes = {}) {
+  if (clonadorGruposEntradaIntervalo) {
+    return { ok: true, jaIniciado: true };
+  }
+
+  const intervaloMs = Number(opcoes.intervaloMs || 120000);
+  const intervaloFinal = Number.isFinite(intervaloMs) && intervaloMs > 0 ? intervaloMs : 120000;
+  const setIntervalFn = typeof opcoes.setIntervalFn === "function" ? opcoes.setIntervalFn : setInterval;
+
+  console.log("[CLONADOR-GRUPOS-ENTRADA-WORKER-INICIALIZADO]", {
+    intervaloMs: intervaloFinal
+  });
+
+  clonadorGruposEntradaIntervalo = setIntervalFn(() => {
+    console.log("[CLONADOR-GRUPOS-ENTRADA-CICLO-INICIO]", {
+      intervaloMs: intervaloFinal
+    });
+    executarCicloEntradaClonador(opcoes).catch((e) => {
+      console.log("[CLONADOR-GRUPOS-ENTRADA-WORKER-ERRO]", {
+        etapa: "intervalo",
+        erro: e.message
+      });
+    });
+  }, intervaloFinal);
+
+  if (typeof clonadorGruposEntradaIntervalo?.unref === "function") {
+    clonadorGruposEntradaIntervalo.unref();
+  }
+
+  return { ok: true, intervaloMs: intervaloFinal };
+}
+
 function iniciarOrquestradorEngine(opcoes = {}) {
   if (engineOrquestradorIntervalo) {
     return { ok: true, jaIniciado: true };
@@ -550,6 +609,8 @@ function iniciarOrquestradorEngine(opcoes = {}) {
 
 module.exports = {
   iniciarOrquestradorEngine,
+  iniciarCicloEntradaClonador,
   executarRodadaEngineOrquestrador,
+  executarCicloEntradaClonador,
   dimensionarLimitePreImporter
 };
