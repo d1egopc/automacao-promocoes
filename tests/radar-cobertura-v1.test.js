@@ -143,8 +143,8 @@ function mockModulo(relativo, exports) {
     mockModulo("../modules/engine/database", {
       queryEngine: async (sql, params = []) => {
         if (/SELECT id\s+FROM engine_eventos_brutos/i.test(sql)) {
-          jsonbRecebidos.push(params[2]);
-          JSON.parse(params[2]);
+          jsonbRecebidos.push(params[3]);
+          JSON.parse(params[3]);
           return { ok: true, resultado: { rows: [] }, metricas: {} };
         }
         if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {

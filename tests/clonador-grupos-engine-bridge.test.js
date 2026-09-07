@@ -32,6 +32,23 @@ function clone(valor) {
   return JSON.parse(JSON.stringify(valor));
 }
 
+function limparModulo(relativo) {
+  const resolvido = require.resolve(relativo);
+  delete require.cache[resolvido];
+  return resolvido;
+}
+
+function mockModulo(relativo, exports) {
+  const resolvido = limparModulo(relativo);
+  require.cache[resolvido] = {
+    id: resolvido,
+    filename: resolvido,
+    loaded: true,
+    exports
+  };
+  return resolvido;
+}
+
 function criarRepoMemoria() {
   const estado = {
     buffer: [],
@@ -210,6 +227,111 @@ async function testarWorkspaceNaoUsaDestinosDeOutroCliente() {
   await bridge.processarCapturasPendentes({ limite: 1 });
   assert.deepStrictEqual(eventos[0].opcoes.clientes, ["workspace_a"]);
   assert.deepStrictEqual(eventos[0].evento.metadata.clonadorGrupos.destinoIds, ["destino_a"]);
+}
+
+async function testarDeduplicacaoIsoladaPorOrigem() {
+  limparModulo("../modules/engine/inbox.service");
+  const eventos = [];
+  let proximoId = 1;
+
+  mockModulo("../modules/engine/database", {
+    queryEngine: async (sql, params = []) => {
+      if (/SELECT id\s+FROM engine_eventos_brutos\s+WHERE COALESCE\(origem/i.test(sql)) {
+        assert.strictEqual(params.length, 4, "dedup deve receber origem, grupo, texto e links");
+        const [origem, grupoId, textoOriginal, linksJson] = params;
+        const encontrado = [...eventos].reverse().find(evento =>
+          evento.origem === origem &&
+          evento.grupoId === grupoId &&
+          evento.textoOriginal === textoOriginal &&
+          JSON.stringify(evento.linksExtraidos) === linksJson
+        );
+        return { ok: true, resultado: { rows: encontrado ? [{ id: encontrado.id }] : [] }, metricas: {} };
+      }
+
+      if (/INSERT INTO engine_eventos_brutos/i.test(sql)) {
+        const hashEvento = params[9];
+        if (eventos.some(evento => evento.hashEvento === hashEvento)) {
+          return { ok: true, resultado: { rows: [] }, metricas: {} };
+        }
+        const evento = {
+          id: proximoId++,
+          origem: params[0],
+          grupoId: params[4],
+          textoOriginal: params[6],
+          linksExtraidos: JSON.parse(params[7]),
+          hashEvento,
+          metadata: JSON.parse(params[10])
+        };
+        eventos.push(evento);
+        return { ok: true, resultado: { rows: [{ id: evento.id }] }, metricas: {} };
+      }
+
+      if (/SELECT id\s+FROM engine_eventos_brutos\s+WHERE hash_evento/i.test(sql)) {
+        const encontrado = eventos.find(evento => evento.hashEvento === params[0]);
+        return { ok: true, resultado: { rows: encontrado ? [{ id: encontrado.id }] : [] }, metricas: {} };
+      }
+
+      if (/INSERT INTO engine_links/i.test(sql)) {
+        return { ok: true, resultado: { rows: [] }, metricas: {} };
+      }
+
+      throw new Error(`query_nao_esperada: ${sql}`);
+    }
+  });
+  mockModulo("../modules/engine/jobs.service", {
+    criarJobsParaClientes: async () => ({ ok: true, criados: 1, existentes: 0 })
+  });
+
+  const { registrarEventoBruto } = require("../modules/engine/inbox.service");
+  const registrar = (origem, sufixo, metadata = {}) => registrarEventoBruto({
+    origem,
+    fonte: origem,
+    origemTipo: "whatsapp",
+    grupoId: `grupo_${sufixo}@g.us`,
+    textoOriginal: `Oferta igual ${sufixo}`,
+    linksExtraidos: [`https://meli.la/${sufixo}`],
+    capturadoEm: "2026-09-07T12:00:00.000Z",
+    metadata
+  }, { clientes: ["workspace_a"] });
+
+  const radar1 = await registrar("radar", "radar_mesma_origem", { radarMirror: { versao: 1 } });
+  const radar2 = await registrar("radar", "radar_mesma_origem", { radarMirror: { versao: 2 } });
+  assert.strictEqual(radar1.duplicado, false);
+  assert.strictEqual(radar2.duplicado, true, "Radar deve continuar deduplicando Radar");
+  assert.strictEqual(radar2.id, radar1.id);
+
+  const metadataClonador = {
+    clonadorGrupos: { bufferId: "buffer_1", destinoIds: ["destino_clone"] },
+    comercialCapturado: { origem: "clonador_grupos", precoAtual: 99.9 }
+  };
+  const clonador1 = await registrar("clonador_grupos", "clonador_mesma_origem", metadataClonador);
+  const clonador2 = await registrar("clonador_grupos", "clonador_mesma_origem", metadataClonador);
+  assert.strictEqual(clonador1.duplicado, false);
+  assert.strictEqual(clonador2.duplicado, true, "Clonador deve continuar deduplicando Clonador");
+  assert.strictEqual(clonador2.id, clonador1.id);
+
+  const radarAntes = await registrar("radar", "radar_depois_clonador", { radarMirror: { versao: 1 } });
+  const clonadorDepois = await registrar("clonador_grupos", "radar_depois_clonador", metadataClonador);
+  assert.strictEqual(radarAntes.duplicado, false);
+  assert.strictEqual(clonadorDepois.duplicado, false, "Radar seguido de Clonador deve criar outro evento");
+  assert.notStrictEqual(clonadorDepois.id, radarAntes.id);
+
+  const clonadorAntes = await registrar("clonador_grupos", "clonador_depois_radar", metadataClonador);
+  const radarDepois = await registrar("radar", "clonador_depois_radar", { radarMirror: { versao: 1 } });
+  assert.strictEqual(clonadorAntes.duplicado, false);
+  assert.strictEqual(radarDepois.duplicado, false, "Clonador seguido de Radar deve criar outro evento");
+  assert.notStrictEqual(radarDepois.id, clonadorAntes.id);
+
+  const eventosClonador = eventos.filter(evento => evento.origem === "clonador_grupos");
+  assert(eventosClonador.every(evento => evento.metadata.clonadorGrupos));
+  assert(eventosClonador.every(evento => evento.metadata.comercialCapturado));
+  assert(eventosClonador.every(evento =>
+    JSON.stringify(evento.metadata.clonadorGrupos.destinoIds) === JSON.stringify(["destino_clone"])
+  ));
+
+  const eventosRadar = eventos.filter(evento => evento.origem === "radar");
+  assert(eventosRadar.every(evento => !evento.metadata.clonadorGrupos));
+  assert(eventosRadar.every(evento => !evento.metadata.comercialCapturado));
 }
 
 function testarComercialCapturado() {
@@ -445,6 +567,7 @@ async function main() {
     await testarFalhaRedirectPreservaOriginal();
     await testarErroBridgeNaoDerrubaPipeline();
     await testarWorkspaceNaoUsaDestinosDeOutroCliente();
+    await testarDeduplicacaoIsoladaPorOrigem();
     testarComercialCapturado();
     testarAplicacaoComercialNeutraImporter();
     await testarFiltroDestinosClonador();

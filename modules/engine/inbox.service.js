@@ -64,6 +64,7 @@ function gerarHashEvento(evento = {}) {
     ? Math.floor(capturadoEmMs / janelaCincoMinutosMs)
     : Math.floor(Date.now() / janelaCincoMinutosMs);
   const base = JSON.stringify({
+    origem: evento.origem || "",
     grupoId: evento.grupoId || "",
     textoOriginal: evento.textoOriginal || "",
     linksExtraidos: evento.linksExtraidos || [],
@@ -124,13 +125,14 @@ async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {
     const resultado = await queryEngine(
       `SELECT id
          FROM engine_eventos_brutos
-        WHERE COALESCE(grupo_id, '') = COALESCE($1, '')
-          AND COALESCE(texto_original, '') = COALESCE($2, '')
-          AND links_extraidos = $3::jsonb
+        WHERE COALESCE(origem, '') = COALESCE($1, '')
+          AND COALESCE(grupo_id, '') = COALESCE($2, '')
+          AND COALESCE(texto_original, '') = COALESCE($3, '')
+          AND links_extraidos = $4::jsonb
           AND criado_em >= NOW() - INTERVAL '5 minutes'
         ORDER BY id DESC
         LIMIT 1`,
-      [evento.grupoId, evento.textoOriginal, jsonbParam(evento.linksExtraidos, [])]
+      [evento.origem, evento.grupoId, evento.textoOriginal, jsonbParam(evento.linksExtraidos, [])]
     );
 
     const duplicado = resultado.ok ? (resultado.resultado.rows[0] || null) : null;
