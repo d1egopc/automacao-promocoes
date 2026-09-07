@@ -4312,6 +4312,10 @@ function normalizarTituloOfertaDestino(valor = "") {
   return String(valor || "").trim().toLowerCase() === "ia" ? "ia" : "original";
 }
 
+function normalizarOrigemOfertasDestino(valor = "") {
+  return destinosUtils.normalizarOrigemOfertasDestino(valor);
+}
+
 function normalizarDestinoContrato(destino = {}) {
   if (!destino || typeof destino !== "object" || Array.isArray(destino)) return destino;
   const normalizado = destinosUtils.normalizarDestinoContratoCategorias({
@@ -4319,7 +4323,8 @@ function normalizarDestinoContrato(destino = {}) {
     templateId: normalizarTemplateIdDestinoContrato(destino.templateId),
     prioridadeCupomAtiva: destino.prioridadeCupomAtiva === true,
     modoLink: normalizarModoLinkDestino(destino.modoLink),
-    tituloOferta: normalizarTituloOfertaDestino(destino.tituloOferta)
+    tituloOferta: normalizarTituloOfertaDestino(destino.tituloOferta),
+    origemOfertas: normalizarOrigemOfertasDestino(destino.origemOfertas)
   });
   return destinosMultiAlvo.aplicarContratoMultiAlvoDestino(normalizado);
 }

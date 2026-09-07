@@ -336,11 +336,16 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
 
     for (const categoria of categorias.length ? categorias : [oferta.categoria || oferta.categoriaProduto || ""]) {
       const analise = destinosUtils.analisarDestinoOferta(destinoNormalizado, {
+        origem: oferta.origem,
+        fonte: oferta.fonte,
         marketplace: oferta.marketplace,
         categoria,
         categoriaProduto: categoria,
         titulo: oferta.titulo,
-        termo: oferta.titulo
+        termo: oferta.titulo,
+        metadata: oferta.metadata,
+        evento_metadata: oferta.evento_metadata,
+        job_metadata: oferta.job_metadata
       });
       const analiseComCategoria = { ...analise, categoriaUsada: categoria };
 
@@ -448,6 +453,7 @@ function motivoDestinoRetido(analise = {}) {
   if (ativosOuTodos.length && ativosOuTodos.every(item => item.analise?.motivo === "marketplace")) return "marketplace_bloqueado";
   if (ativosOuTodos.some(item => item.analise?.motivo === "categoria" && item.analise?.aceitaMarketplace === true)) return "categoria_incompativel";
   if (ativosOuTodos.length && ativosOuTodos.every(item => item.analise?.motivo === "categoria")) return "categoria_incompativel";
+  if (ativosOuTodos.length && ativosOuTodos.every(item => item.analise?.motivo === "origem_nao_permitida")) return "origem_nao_permitida";
   return "sem_destino";
 }
 

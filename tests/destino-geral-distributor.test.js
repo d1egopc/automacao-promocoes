@@ -65,6 +65,8 @@ function contexto(destinosWorkspace) {
     assert.strictEqual(destinos.categoriaDestinoEhGeral("todas"), true);
     assert.strictEqual(destinos.categoriaDestinoEhGeral("Todas as categorias"), true);
     assert.strictEqual(destinos.listaCategoriasDestinoEhGeral([]), false, "lista vazia sem flag nao representa todas as categorias");
+    assert.strictEqual(destinos.normalizarOrigemOfertasDestino(undefined), "ambos", "destino legado sem origemOfertas deve normalizar para ambos");
+    assert.strictEqual(destinos.normalizarOrigemOfertasDestino("valor_invalido"), "ambos", "origemOfertas invalida deve preservar comportamento legado");
 
     const geralDiversos = await distributor.validarOfertaParaDistribuicao(
       oferta({ categoria: "Diversos" }),
@@ -113,6 +115,35 @@ function contexto(destinosWorkspace) {
     assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: true })), true);
     assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: false })), false);
     assert.strictEqual(destinos.destinoPowerAtivo(destino({ ativo: undefined })), false);
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "ambos" }), oferta({ origem: "radar" })).aceita,
+      true,
+      "origemOfertas=ambos aceita Radar"
+    );
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "ambos" }), oferta({ origem: "clonador_grupos" })).aceita,
+      true,
+      "origemOfertas=ambos aceita Clonador"
+    );
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "optimus" }), oferta({ origem: "radar" })).aceita,
+      true,
+      "origemOfertas=optimus aceita origem normal"
+    );
+    const cloneEmOptimus = destinos.analisarDestinoOferta(
+      destino({ origemOfertas: "optimus" }),
+      oferta({ origem: "clonador_grupos" })
+    );
+    assert.strictEqual(cloneEmOptimus.aceita, false, "origemOfertas=optimus rejeita Clonador");
+    assert.strictEqual(cloneEmOptimus.motivo, "origem_nao_permitida");
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "clonador" }), oferta({ origem: "clonador_grupos" })).aceita,
+      true,
+      "origemOfertas=clonador aceita Clonador"
+    );
+    const radarEmClone = destinos.analisarDestinoOferta(destino({ origemOfertas: "clonador" }), oferta({ origem: "radar" }));
+    assert.strictEqual(radarEmClone.aceita, false, "origemOfertas=clonador rejeita Radar");
+    assert.strictEqual(radarEmClone.motivo, "origem_nao_permitida");
 
     const categoriasOficiais = destinos.categoriasOficiaisDestinoNormalizadas();
     assert(categoriasOficiais.length > 5, "lista oficial de categorias selecionaveis deve estar disponivel");
@@ -144,6 +175,7 @@ function contexto(destinosWorkspace) {
 
     const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
     assert(indexFonte.includes("destinosUtils.normalizarDestinoContratoCategorias"), "endpoint de destinos deve persistir wildcard/flag, nao snapshot enumerado");
+    assert(indexFonte.includes("origemOfertas: normalizarOrigemOfertasDestino(destino.origemOfertas)"), "endpoint de destinos deve normalizar origemOfertas com default ambos");
 
     const outroWorkspaceRestrito = await distributor.validarOfertaParaDistribuicao(
       oferta({ cliente_id: "workspace_existente", categoria: "Diversos" }),

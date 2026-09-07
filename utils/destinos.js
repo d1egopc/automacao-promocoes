@@ -99,6 +99,13 @@ function normalizarDestino(valor = "") {
     .trim();
 }
 
+function normalizarOrigemOfertasDestino(valor = "") {
+  const origem = normalizarDestino(valor);
+  if (origem === "optimus") return "optimus";
+  if (origem === "clonador" || origem === "clone") return "clonador";
+  return "ambos";
+}
+
 function normalizarCategoriaDestino(valor = "") {
   const slug = normalizarDestino(valor);
   return ALIASES_CATEGORIA_DESTINO[slug] || slug;
@@ -204,6 +211,35 @@ function destinoPowerAtivo(destino = {}) {
   return Boolean(destino && typeof destino === "object" && destino.ativo === true);
 }
 
+function objetoDestinoSeguro(valor = {}) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function origemOfertaEhClonadorGrupos(oferta = {}) {
+  const metadata = objetoDestinoSeguro(oferta?.metadata);
+  const jobMetadata = objetoDestinoSeguro(oferta?.job_metadata);
+  const eventoMetadata = objetoDestinoSeguro(oferta?.evento_metadata);
+  const metadataEventoJob = objetoDestinoSeguro(jobMetadata.metadataEvento);
+  const metadataEventoOferta = objetoDestinoSeguro(metadata.metadataEvento);
+  const origens = [
+    oferta?.origem,
+    oferta?.fonte,
+    metadata.origem,
+    eventoMetadata.origem,
+    metadataEventoJob.origem,
+    metadataEventoOferta.origem
+  ];
+  return origens.some(origem => String(origem || "").trim().toLowerCase() === "clonador_grupos");
+}
+
+function destinoAceitaOrigemOferta(destino = {}, oferta = {}) {
+  const origemOfertasDestino = normalizarOrigemOfertasDestino(destino?.origemOfertas);
+  const origemClonadorGrupos = origemOfertaEhClonadorGrupos(oferta);
+  if (origemOfertasDestino === "ambos") return true;
+  if (origemOfertasDestino === "clonador") return origemClonadorGrupos;
+  return !origemClonadorGrupos;
+}
+
 function analisarDestinoOferta(destino, oferta, opcoes = {}) {
   if (!destinoPowerAtivo(destino)) {
     return {
@@ -213,6 +249,23 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
       categoriaOferta: "",
       aceitaMarketplace: false,
       aceitaCategoria: false
+    };
+  }
+
+  const origemOfertasDestino = normalizarOrigemOfertasDestino(destino?.origemOfertas);
+  const origemClonadorGrupos = origemOfertaEhClonadorGrupos(oferta);
+  const aceitaOrigem = destinoAceitaOrigemOferta(destino, oferta);
+  if (!aceitaOrigem) {
+    return {
+      aceita: false,
+      motivo: "origem_nao_permitida",
+      marketplaceOferta: "",
+      categoriaOferta: "",
+      aceitaMarketplace: false,
+      aceitaCategoria: false,
+      aceitaOrigem,
+      origemOfertasDestino,
+      origemOferta: origemClonadorGrupos ? "clonador_grupos" : "optimus"
     };
   }
 
@@ -282,7 +335,10 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
     marketplacesDestino,
     categoriaOferta,
     aceitaMarketplace,
-    aceitaCategoria
+    aceitaCategoria,
+    aceitaOrigem,
+    origemOfertasDestino,
+    origemOferta: origemClonadorGrupos ? "clonador_grupos" : "optimus"
   };
 }
 
@@ -359,6 +415,9 @@ module.exports = {
   listaCategoriasEhSnapshotCompleto,
   destinoAceitaTodasCategorias,
   normalizarDestinoContratoCategorias,
+  normalizarOrigemOfertasDestino,
+  origemOfertaEhClonadorGrupos,
+  destinoAceitaOrigemOferta,
   expandirMarketplacesDestino,
   destinoPowerAtivo,
   categoriaPermitidaNoDestino,

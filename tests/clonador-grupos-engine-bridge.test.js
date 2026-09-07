@@ -400,6 +400,33 @@ async function testarFiltroDestinosClonador() {
   });
   assert.strictEqual(validacaoSemBroadcast.ok, false);
   assert.strictEqual(validacaoSemBroadcast.detalhes.destinosTotal, 0);
+
+  const validacaoOrigemClonador = await validarOfertaParaDistribuicao(oferta, {
+    clientesValidos: ["workspace_a"],
+    marketplacesAtivosPorCliente: { workspace_a: ["mercadolivre"] },
+    destinosPorCliente: { workspace_a: [destino({ id: "destino_ok", origemOfertas: "clonador" })] }
+  });
+  assert.strictEqual(validacaoOrigemClonador.ok, true, "destinoIds autorizado + origemOfertas=clonador segue para regras normais");
+  assert.strictEqual(validacaoOrigemClonador.destinosCompativeis, 1);
+
+  const validacaoOrigemBloqueada = await validarOfertaParaDistribuicao(oferta, {
+    clientesValidos: ["workspace_a"],
+    marketplacesAtivosPorCliente: { workspace_a: ["mercadolivre"] },
+    destinosPorCliente: { workspace_a: [destino({ id: "destino_ok", origemOfertas: "optimus" })] }
+  });
+  assert.strictEqual(validacaoOrigemBloqueada.ok, false, "Clonador autorizado nao pode furar destino configurado para Optimus");
+  assert.strictEqual(validacaoOrigemBloqueada.motivo, "origem_nao_permitida");
+
+  const validacaoMetadataAcidental = await validarOfertaParaDistribuicao({
+    ...oferta,
+    origem: "radar",
+    metadata: { clonadorGrupos: { destinoIds: ["destino_bloqueado"] } }
+  }, {
+    clientesValidos: ["workspace_a"],
+    marketplacesAtivosPorCliente: { workspace_a: ["mercadolivre"] },
+    destinosPorCliente: { workspace_a: [destino({ id: "destino_ok", origemOfertas: "optimus" })] }
+  });
+  assert.strictEqual(validacaoMetadataAcidental.ok, true, "metadata clonador acidental sem origem clonador_grupos nao limita destino normal");
 }
 
 function testarEscopoEstrutural() {
