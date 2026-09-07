@@ -206,15 +206,17 @@ async function montarLayoutFrase(frase = "") {
 async function svgOverlay(config = {}) {
   const corFaixa = corHexIdentidade(config.corIdentidade || "azul");
   const corTexto = contrasteTextoAutomatico(corFaixa);
-  const corProfunda = misturarCores(corFaixa, "#000000", 0.24);
-  const corMeio = misturarCores(corFaixa, "#ffffff", 0.06);
-  const corLuz = misturarCores(corFaixa, "#ffffff", 0.16);
+  const corProfunda = misturarCores(corFaixa, "#000000", 0.42);
+  const corSombra = misturarCores(corFaixa, "#000000", 0.22);
+  const corMeio = misturarCores(corFaixa, "#ffffff", 0.05);
+  const corLuz = misturarCores(corFaixa, "#ffffff", 0.18);
+  const corFilete = misturarCores(corFaixa, "#ffffff", 0.28);
   const corStroke = corTexto === "#FFFFFF" ? "#0f172a" : "#ffffff";
-  const strokeOpacity = corTexto === "#FFFFFF" ? "0.12" : "0.22";
+  const strokeOpacity = corTexto === "#FFFFFF" ? "0.1" : "0.2";
   const frase = texto(config.frase).slice(0, 80) || "AS MELHORES OFERTAS, EM UM SÓ LUGAR";
   const layoutFrase = await montarLayoutFrase(frase);
   const textoSombraSvg = layoutFrase.linhas
-    .map((linha, idx) => `<text x="${layoutFrase.x + 2}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight + 3}" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="#000000" opacity="0.1">${escapeXml(linha)}</text>`)
+    .map((linha, idx) => `<text x="${layoutFrase.x + 2}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight + 3}" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="#000000" opacity="0.11">${escapeXml(linha)}</text>`)
     .join("");
   const textoSvg = layoutFrase.linhas
     .map((linha, idx) => `<text x="${layoutFrase.x}" y="${layoutFrase.baselineY + idx * layoutFrase.lineHeight}" font-family="${FONTE_RENDERER_IDENTIDADE_VISUAL}" font-size="${layoutFrase.fontSize}" font-weight="900" letter-spacing="0" fill="${corTexto}" stroke="${corStroke}" stroke-opacity="${strokeOpacity}" stroke-width="1" paint-order="stroke">${escapeXml(linha)}</text>`)
@@ -227,18 +229,45 @@ async function svgOverlay(config = {}) {
         <style>${CSS_FONTE_RENDERER_IDENTIDADE_VISUAL}</style>
         <linearGradient id="base" x1="0" y1="${BASE_Y}" x2="${CANVAS}" y2="${CANVAS}" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="${corProfunda}"/>
-          <stop offset="0.58" stop-color="${corMeio}"/>
+          <stop offset="0.34" stop-color="${corSombra}"/>
+          <stop offset="0.72" stop-color="${corMeio}"/>
           <stop offset="1" stop-color="${corLuz}"/>
         </linearGradient>
-        <linearGradient id="brilho" x1="0" y1="${BASE_Y}" x2="0" y2="${CANVAS}" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#ffffff" stop-opacity="0.13"/>
+        <linearGradient id="filete" x1="0" y1="${AREA_PRODUTO_ALTURA}" x2="${CANVAS}" y2="${AREA_PRODUTO_ALTURA}" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="${corProfunda}"/>
+          <stop offset="0.5" stop-color="${corFilete}"/>
+          <stop offset="1" stop-color="${corLuz}"/>
+        </linearGradient>
+        <linearGradient id="brilho" x1="0" y1="${BASE_Y}" x2="0" y2="${BASE_Y + 92}" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0.11"/>
           <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
         </linearGradient>
+        <linearGradient id="profundidade" x1="0" y1="${BASE_Y}" x2="0" y2="${CANVAS}" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#000000" stop-opacity="0"/>
+          <stop offset="1" stop-color="#000000" stop-opacity="0.16"/>
+        </linearGradient>
+        <linearGradient id="divisor" x1="0" y1="${BASE_Y + 32}" x2="0" y2="${CANVAS - 32}" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="${corTexto}" stop-opacity="0"/>
+          <stop offset="0.22" stop-color="${corTexto}" stop-opacity="0.32"/>
+          <stop offset="0.78" stop-color="${corTexto}" stop-opacity="0.24"/>
+          <stop offset="1" stop-color="${corTexto}" stop-opacity="0"/>
+        </linearGradient>
+        <radialGradient id="luzTexto" cx="78%" cy="44%" r="68%">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+          <stop offset="0.62" stop-color="#ffffff" stop-opacity="0.04"/>
+          <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
       </defs>
-      <rect x="0" y="${AREA_PRODUTO_ALTURA}" width="${CANVAS}" height="${FILETE_ALTURA}" fill="${corFaixa}" opacity="0.9"/>
+      <rect x="0" y="${AREA_PRODUTO_ALTURA}" width="${CANVAS}" height="${FILETE_ALTURA}" fill="url(#filete)" opacity="0.96"/>
       <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="${FAIXA_ALTURA}" fill="url(#base)"/>
-      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="46" fill="url(#brilho)"/>
-      <rect x="318" y="${BASE_Y + 36}" width="2" height="${FAIXA_ALTURA - 72}" fill="${corTexto}" opacity="0.22"/>
+      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="92" fill="url(#brilho)"/>
+      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="${FAIXA_ALTURA}" fill="url(#luzTexto)"/>
+      <rect x="0" y="${BASE_Y}" width="${CANVAS}" height="${FAIXA_ALTURA}" fill="url(#profundidade)"/>
+      <path d="M${FRASE_SAFE_AREA.left + 40} ${BASE_Y + 20} L${CANVAS} ${BASE_Y + 20}" stroke="${corTexto}" stroke-opacity="0.08" stroke-width="1"/>
+      <path d="M${FRASE_SAFE_AREA.left + 12} ${CANVAS - 25} L${CANVAS - 54} ${CANVAS - 25}" stroke="#000000" stroke-opacity="0.1" stroke-width="1"/>
+      <path d="M${CANVAS - 230} ${BASE_Y} L${CANVAS} ${BASE_Y + 118}" stroke="#ffffff" stroke-opacity="0.055" stroke-width="28"/>
+      <path d="M${CANVAS - 135} ${BASE_Y} L${CANVAS} ${BASE_Y + 70}" stroke="#ffffff" stroke-opacity="0.045" stroke-width="12"/>
+      <rect x="318" y="${BASE_Y + 34}" width="2" height="${FAIXA_ALTURA - 68}" fill="url(#divisor)"/>
       ${textoSombraSvg}
       ${textoSvg}
     </svg>
