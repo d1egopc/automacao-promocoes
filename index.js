@@ -7956,16 +7956,55 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     });
     let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
     let erroImagemEnvio = "";
-    const enviarTextoWhatsapp = async () => sock.sendMessage(
-      grupo,
-      await montarPayloadTextoWhatsappPorTipoMidia({
+    const telemetriaMidiaV2 = {};
+    const imagemParaPreview = avaliarImagemEnviavelExecutor(oferta, {
+      ...destino,
+      tipoMidia: "imagem_completa"
+    });
+    const registrarTelemetriaMidiaV2 = ({ sucesso = false, erroFinal = "", envioPayloadTipo = "" } = {}) => {
+      oferta.logsEnvio = Array.isArray(oferta.logsEnvio) ? oferta.logsEnvio : [];
+      oferta.logsEnvio.push({
+        tipo: "telemetria_tipo_midia_v2",
+        data: new Date().toISOString(),
+        filaItemId: String(oferta.id || oferta.filaItemId || ""),
+        ofertaId: String(oferta.engineOfertaId || oferta.ofertaId || oferta.id || ""),
+        destinoId: String(destino.id || destino.destinoId || ""),
+        marketplace: String(oferta.marketplace || oferta.mercado || ""),
+        tipoMidia: tipoMidiaDestinoExecutor(destino) || "legado_imagem",
+        imagemPresente: Boolean(oferta.imagem),
+        imagemEnviavel: Boolean(imagemParaPreview.ok),
+        previewTentado: Boolean(telemetriaMidiaV2.previewTentado),
+        jpegThumbnailPresente: Boolean(telemetriaMidiaV2.jpegThumbnailPresente),
+        jpegThumbnailBytes: Number(telemetriaMidiaV2.jpegThumbnailBytes || 0),
+        hqTentado: Boolean(telemetriaMidiaV2.hqTentado),
+        hqAnexado: Boolean(telemetriaMidiaV2.hqAnexado),
+        motivoFallback: String(telemetriaMidiaV2.motivoFallback || ""),
+        matchedTextPresente: Boolean(telemetriaMidiaV2.matchedTextPresente),
+        envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "imagem_completa",
+        sucesso: Boolean(sucesso),
+        falhaFinal: erroFinal || ""
+      });
+    };
+    const enviarTextoWhatsapp = async () => {
+      const payload = await montarPayloadTextoWhatsappPorTipoMidia({
         mensagem,
         destino,
         linkFinal: opcoes.linkFinal || "",
         oferta,
-        upload: sock.waUploadToServer
-      })
-    );
+        upload: sock.waUploadToServer,
+        telemetria: telemetriaMidiaV2
+      });
+      try {
+        await sock.sendMessage(grupo, payload);
+        registrarTelemetriaMidiaV2({ sucesso: true });
+      } catch (erroTexto) {
+        registrarTelemetriaMidiaV2({
+          sucesso: false,
+          erroFinal: "send_message_erro"
+        });
+        throw erroTexto;
+      }
+    };
     if (!imagemEnvioExecutor.ok) {
       if (imagemEnvioExecutor.tinhaImagem) {
         console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
@@ -7987,6 +8026,10 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             url: imagemEnvioExecutor.url
           },
           caption: mensagem
+        });
+        registrarTelemetriaMidiaV2({
+          sucesso: true,
+          envioPayloadTipo: "imagem_completa"
         });
       } catch (erroImagem) {
         fallbackTextoPorImagem = true;

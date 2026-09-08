@@ -13,6 +13,7 @@ assert.ok(helperFonte.includes('"imagem_completa"'), "imagem_completa deve ter c
 assert.ok(helperFonte.includes('"imagem_link"'), "imagem_link deve ter caminho explicito");
 assert.ok(helperFonte.includes('"texto_link"'), "texto_link deve ter caminho explicito");
 assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "Executor deve encaminhar o linkFinal oficial");
+assert.ok(indexFonte.includes('tipo: "telemetria_tipo_midia_v2"'), "Executor deve persistir telemetria de mídia no item da fila");
 assert.ok(helperFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
 assert.ok(helperFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
 assert.ok(helperFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");
@@ -67,6 +68,7 @@ async function main() {
   assert.equal(helpers.destinoUsaImagemExecutor({ tipoMidia: "imagem_completa" }), true, "imagem_completa deve anexar imagem");
 
   const template = "Cupom: TESTE\\nhttps://auxiliar.example/cupom\\nhttps://oficial.example/produto";
+  const telemetriaRich = {};
   const payloadImagemLink = await helpers.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
     destino: { tipoMidia: "imagem_link" },
@@ -77,7 +79,8 @@ async function main() {
       preco: 99.9,
       imagem: "https://images.example/produto.jpg"
     },
-    upload
+    upload,
+    telemetria: telemetriaRich
   });
   assert.equal(payloadImagemLink.text, template, "imagem_link nao pode alterar o Template");
   assert.equal(imagensBaixadas[0], "https://images.example/produto.jpg", "imagem_link deve usar somente a imagem ja resolvida da oferta");
@@ -91,6 +94,25 @@ async function main() {
   assert.equal(uploadsHq[0].opcoes.upload, upload, "HQ deve usar upload autenticado da sessao WhatsApp");
   assert.equal(uploadsHq[0].opcoes.mediaTypeOverride, "thumbnail-link");
   assert.equal(payloadImagemLink.linkPreview.highQualityThumbnail.directPath, "/mms/thumbnail-link");
+  assert.deepEqual(telemetriaRich, {
+    tipoMidia: "imagem_link",
+    imagemPresente: true,
+    previewTentado: true,
+    jpegThumbnailPresente: true,
+    jpegThumbnailBytes: payloadImagemLink.linkPreview.jpegThumbnail.length,
+    hqTentado: true,
+    hqAnexado: true,
+    motivoFallback: "",
+    matchedTextPresente: true,
+    larguraJpegThumbnail: 4,
+    alturaJpegThumbnail: 4,
+    larguraHq: 4,
+    alturaHq: 4,
+    bytesHq: uploadsHq[0].image.length,
+    envioPayloadTipo: "imagem_link_rich"
+  }, "rich preview deve produzir telemetria sanitizada completa");
+  assert.equal(JSON.stringify(telemetriaRich).includes("oficial.example"), false, "telemetria persistivel nao pode conter linkFinal");
+  assert.equal(JSON.stringify(telemetriaRich).includes(template), false, "telemetria persistivel nao pode conter Template");
   assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.highQualityThumbnail.mediaKey));
   assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.jpegThumbnail));
   assert.equal(logsHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && contexto.hqAnexado), true);
@@ -110,7 +132,19 @@ async function main() {
   });
   assert.deepEqual(payloadFalha, { text: template, linkPreview: null }, "falha de preview deve manter envio textual seguro");
 
+  const telemetriaFalha = {};
+  await helpersComFalha.montarPayloadTextoWhatsappPorTipoMidia({
+    mensagem: template,
+    destino: { tipoMidia: "imagem_link" },
+    linkFinal: "https://oficial.example/produto",
+    oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" },
+    telemetria: telemetriaFalha
+  });
+  assert.equal(telemetriaFalha.envioPayloadTipo, "imagem_link_text_fallback");
+  assert.equal(telemetriaFalha.motivoFallback, "preview_materializacao_erro");
+
   const logsFalhaHq = [];
+  const telemetriaFalhaHq = {};
   const helpersComFalhaHq = carregarHelpersTipoMidia({
     baixarImagemComoBuffer: async () => imagemOriginal,
     sharp,
@@ -122,12 +156,16 @@ async function main() {
     destino: { tipoMidia: "imagem_link" },
     linkFinal: "https://oficial.example/produto",
     oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" },
-    upload
+    upload,
+    telemetria: telemetriaFalhaHq
   });
   assert.ok(payloadFalhaHq.linkPreview.jpegThumbnail, "falha HQ deve preservar preview JPEG atual");
   assert.equal(payloadFalhaHq.linkPreview.highQualityThumbnail, undefined, "falha HQ nao pode impedir envio");
   assert.equal(logsFalhaHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]" && contexto.motivoFallback === "hq_upload_erro"), true);
   assert.equal(logsFalhaHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && !contexto.hqAnexado && contexto.motivoFallback === "hq_upload_erro"), true);
+  assert.equal(telemetriaFalhaHq.envioPayloadTipo, "imagem_link_rich", "falha de HQ nao pode reclassificar preview JPEG valido como fallback textual");
+  assert.equal(telemetriaFalhaHq.hqAnexado, false);
+  assert.equal(telemetriaFalhaHq.motivoFallback, "hq_upload_erro");
 
   for (const campoAusente of ["directPath", "mediaKey"]) {
     const logsRetornoIncompleto = [];

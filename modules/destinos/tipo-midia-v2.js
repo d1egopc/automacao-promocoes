@@ -22,12 +22,20 @@ function descricaoPreview(oferta = {}) {
   return [marketplace, preco ? `Por R$ ${preco}` : ""].filter(Boolean).join(" · ");
 }
 
-async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prepareWAMessageMedia, baixarImagem = baixarImagemComoBuffer, logger = console } = {}) {
+function registrarTelemetria(telemetria, valores = {}) {
+  if (!telemetria || typeof telemetria !== "object") return;
+  Object.assign(telemetria, valores);
+}
+
+async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prepareWAMessageMedia, baixarImagem = baixarImagemComoBuffer, logger = console, telemetria = null } = {}) {
   const url = textoPreview(linkFinal);
   const title = textoPreview(oferta.titulo || oferta.nome);
   const description = descricaoPreview(oferta);
   const imagem = textoPreview(oferta.imagem);
-  if (!url || !title || !description || !imagem) return null;
+  if (!url || !title || !description || !imagem) {
+    registrarTelemetria(telemetria, { motivoFallback: "dados_preview_incompletos" });
+    return null;
+  }
 
   const imagemBuffer = await baixarImagem(imagem);
   const jpegThumbnail = await sharp(imagemBuffer, { limitInputPixels: 24_000_000 })
@@ -35,7 +43,10 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
     .resize({ width: 192, height: 192, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 75, mozjpeg: true })
     .toBuffer();
-  if (!Buffer.isBuffer(jpegThumbnail) || jpegThumbnail.length === 0) return null;
+  if (!Buffer.isBuffer(jpegThumbnail) || jpegThumbnail.length === 0) {
+    registrarTelemetria(telemetria, { motivoFallback: "jpeg_thumbnail_indisponivel" });
+    return null;
+  }
 
   const preview = { "matched-text": url, title, description, jpegThumbnail };
   const dimensoes = async (buffer) => {
@@ -47,7 +58,22 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
     }
   };
   const dimensoesJpeg = await dimensoes(jpegThumbnail);
+  registrarTelemetria(telemetria, {
+    jpegThumbnailPresente: true,
+    jpegThumbnailBytes: jpegThumbnail.length,
+    larguraJpegThumbnail: dimensoesJpeg.largura,
+    alturaJpegThumbnail: dimensoesJpeg.altura,
+    matchedTextPresente: Boolean(preview["matched-text"])
+  });
   const registrarHq = ({ hqTentado = false, hqAnexado = false, motivoFallback = "", imagemHq = null, dimensoesHq = null, highQualityThumbnail = null } = {}) => {
+    registrarTelemetria(telemetria, {
+      hqTentado,
+      hqAnexado,
+      motivoFallback: motivoFallback || "",
+      larguraHq: dimensoesHq?.largura || null,
+      alturaHq: dimensoesHq?.altura || null,
+      bytesHq: Buffer.isBuffer(imagemHq) ? imagemHq.length : null
+    });
     logger.log("[EXECUTOR-LINK-PREVIEW-HQ]", {
       ofertaId: String(oferta.id || oferta.ofertaId || oferta.engineOfertaId || "") || null,
       filaItemId: String(oferta.filaItemId || oferta.itemFilaId || "") || null,
@@ -107,14 +133,30 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
   return preview;
 }
 
-async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {}, upload, prepareWAMessageMedia, baixarImagem, logger = console } = {}) {
+async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {}, upload, prepareWAMessageMedia, baixarImagem, logger = console, telemetria = null } = {}) {
   const tipoMidia = tipoMidiaDestino(destino);
-  if (tipoMidia === "texto_link") return { text: mensagem, linkPreview: null };
+  registrarTelemetria(telemetria, {
+    tipoMidia: tipoMidia || "legado_imagem",
+    imagemPresente: Boolean(textoPreview(oferta.imagem)),
+    previewTentado: tipoMidia === "imagem_link",
+    jpegThumbnailPresente: false,
+    jpegThumbnailBytes: 0,
+    hqTentado: false,
+    hqAnexado: false,
+    motivoFallback: "",
+    matchedTextPresente: false
+  });
+  if (tipoMidia === "texto_link") {
+    registrarTelemetria(telemetria, { envioPayloadTipo: "texto_link" });
+    return { text: mensagem, linkPreview: null };
+  }
   if (tipoMidia !== "imagem_link") return { text: mensagem };
   try {
-    const preview = await montarPreviewWhatsapp({ oferta, linkFinal, upload, prepareWAMessageMedia, baixarImagem, logger });
+    const preview = await montarPreviewWhatsapp({ oferta, linkFinal, upload, prepareWAMessageMedia, baixarImagem, logger, telemetria });
+    registrarTelemetria(telemetria, { envioPayloadTipo: preview ? "imagem_link_rich" : "imagem_link_text_fallback" });
     return preview ? { text: mensagem, linkPreview: preview } : { text: mensagem, linkPreview: null };
   } catch (erro) {
+    registrarTelemetria(telemetria, { motivoFallback: "preview_materializacao_erro", envioPayloadTipo: "imagem_link_text_fallback" });
     logger.log("[EXECUTOR-LINK-PREVIEW-FALLBACK]", {
       destino: destino.nome || destino.id || "",
       motivo: erro?.message || "link_preview_indisponivel"
