@@ -605,6 +605,8 @@ function criarRotasManualV2(deps = {}) {
         discordSenderDisponivel: deps.discordSenderDisponivel,
         env: deps.env || process.env,
         corrigirImagemUrl: deps.corrigirImagemUrl,
+        baixarImagemComoBuffer: deps.baixarImagemComoBuffer,
+        prepareWAMessageMedia: deps.prepareWAMessageMedia,
         httpClient: deps.httpClient,
         aplicarIdentidadeVisualOferta: deps.aplicarIdentidadeVisualOferta,
         now: deps.now

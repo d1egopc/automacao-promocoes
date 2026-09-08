@@ -1,6 +1,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const sharp = require("sharp");
 
 const {
   enviarOfertaManualV2,
@@ -380,6 +381,57 @@ function assertSemSegredos(retorno) {
     assert.ok(chamadas.wa[0].mensagem.includes("Oferta Manual A"));
     assert.strictEqual(chamadas.wa[0].midia.diagnosticoImagemManualV2, undefined);
     assertSemSegredos(retorno);
+  }
+
+  {
+    const imagemPreview = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: { r: 10, g: 20, b: 30 } }
+    }).jpeg().toBuffer();
+    const destinosComTipoMidia = {
+      cliente_a: destinosPorCliente.cliente_a.map((destino) => ({ ...destino }))
+    };
+    const destinoWa = destinosComTipoMidia.cliente_a.find((destino) => destino.id === "wa_ok");
+    const destinoTg = destinosComTipoMidia.cliente_a.find((destino) => destino.id === "tg_ok");
+    const destinoDiscord = destinosComTipoMidia.cliente_a.find((destino) => destino.id === "dc_ok");
+    const { deps, chamadas } = baseDeps({
+      destinosPorCliente: destinosComTipoMidia,
+      baixarImagemComoBuffer: async () => imagemPreview,
+      prepareWAMessageMedia: async () => ({ imageMessage: {} })
+    });
+
+    destinoWa.tipoMidia = "imagem_completa";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.ok(chamadas.wa.at(-1).midia, "Manual WhatsApp imagem_completa preserva imagem + caption");
+    assert.strictEqual(chamadas.wa.at(-1).payload, null);
+
+    destinoWa.tipoMidia = "imagem_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.strictEqual(chamadas.wa.at(-1).midia, null, "Manual WhatsApp imagem_link nao anexa imagem");
+    assert.strictEqual(chamadas.wa.at(-1).payload.linkPreview["matched-text"], ofertaA.urlAfiliada, "Manual WhatsApp usa linkFinal afiliado no card");
+
+    destinoWa.tipoMidia = "texto_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.deepStrictEqual(chamadas.wa.at(-1).payload.linkPreview, null, "Manual WhatsApp texto_link suprime preview");
+
+    destinoTg.tipoMidia = "imagem_completa";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["tg_ok"] }, deps);
+    assert.ok(chamadas.tg.at(-1).midia, "Manual Telegram imagem_completa envia foto");
+    destinoTg.tipoMidia = "imagem_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["tg_ok"] }, deps);
+    assert.strictEqual(chamadas.tg.at(-1).midia, null, "Manual Telegram imagem_link envia texto para unfurl nativo");
+    destinoTg.tipoMidia = "texto_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["tg_ok"] }, deps);
+    assert.deepStrictEqual(chamadas.tg.at(-1).payload.link_preview_options, { is_disabled: true }, "Manual Telegram texto_link suprime preview");
+
+    destinoDiscord.tipoMidia = "imagem_completa";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["dc_ok"] }, deps);
+    assert.strictEqual(chamadas.discord.at(-1).imagemUrl, ofertaA.imagem, "Manual Discord imagem_completa preserva anexo");
+    destinoDiscord.tipoMidia = "imagem_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["dc_ok"] }, deps);
+    assert.strictEqual(chamadas.discord.at(-1).imagemUrl, "", "Manual Discord imagem_link permite embed sem anexo");
+    destinoDiscord.tipoMidia = "texto_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["dc_ok"] }, deps);
+    assert.strictEqual(chamadas.discord.at(-1).suprimirEmbeds, true, "Manual Discord texto_link suprime embed");
   }
 
   {

@@ -316,7 +316,11 @@ async function aguardar(ms = 0) {
   await new Promise(resolve => setTimeout(resolve, tempo));
 }
 
-async function enviarWhatsApp({ sock, grupo, mensagem, midia, corrigirImagemUrl }) {
+async function enviarWhatsApp({ sock, grupo, mensagem, midia, payload, corrigirImagemUrl }) {
+  if (payload) {
+    await sock.sendMessage(grupo, payload);
+    return;
+  }
   if (!midia) {
     await sock.sendMessage(grupo, { text: mensagem });
     return;
@@ -417,7 +421,14 @@ async function enviarTelegramImagemUrl({ httpClient, tel, mensagem, imagemUrl, c
   );
 }
 
-async function enviarTelegram({ httpClient, tel, mensagem, midia, corrigirImagemUrl }) {
+async function enviarTelegram({ httpClient, tel, mensagem, midia, payload, corrigirImagemUrl }) {
+  if (payload) {
+    await httpClient.post(
+      `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+      payload
+    );
+    return;
+  }
   if (!midia) {
     await httpClient.post(
       `https://api.telegram.org/bot${tel.botToken}/sendMessage`,

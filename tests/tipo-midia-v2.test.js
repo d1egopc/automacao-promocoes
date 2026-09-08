@@ -1,40 +1,33 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
-const vm = require("vm");
 const sharp = require("sharp");
 const { enviarDiscord } = require("../modules/discord/discord-sender");
+const tipoMidiaV2 = require("../modules/destinos/tipo-midia-v2");
 
 const raiz = path.resolve(__dirname, "..");
 const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
+const helperFonte = fs.readFileSync(path.join(raiz, "modules", "destinos", "tipo-midia-v2.js"), "utf8");
 
-assert.ok(indexFonte.includes('"imagem_completa"'), "imagem_completa deve ter caminho explicito");
-assert.ok(indexFonte.includes('"imagem_link"'), "imagem_link deve ter caminho explicito");
-assert.ok(indexFonte.includes('"texto_link"'), "texto_link deve ter caminho explicito");
+assert.ok(helperFonte.includes('"imagem_completa"'), "imagem_completa deve ter caminho explicito");
+assert.ok(helperFonte.includes('"imagem_link"'), "imagem_link deve ter caminho explicito");
+assert.ok(helperFonte.includes('"texto_link"'), "texto_link deve ter caminho explicito");
 assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "Executor deve encaminhar o linkFinal oficial");
-assert.ok(indexFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
-assert.ok(indexFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
-assert.ok(indexFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");
-assert.ok(indexFonte.includes('mediaTypeOverride: "thumbnail-link"'), "imagem_link deve usar o upload oficial de thumbnail-link");
-assert.ok(indexFonte.includes('return { text: mensagem, linkPreview: null };'), "texto_link e fallback devem suprimir preview");
-assert.ok(indexFonte.includes('link_preview_options: { is_disabled: true }'), "Telegram deve suprimir preview para texto_link");
+assert.ok(helperFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
+assert.ok(helperFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
+assert.ok(helperFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");
+assert.ok(helperFonte.includes('mediaTypeOverride: "thumbnail-link"'), "imagem_link deve usar o upload oficial de thumbnail-link");
+assert.ok(helperFonte.includes('linkPreview: null'), "texto_link e fallback devem suprimir preview");
+assert.ok(helperFonte.includes('link_preview_options: { is_disabled: true }'), "Telegram deve suprimir preview para texto_link");
 assert.ok(indexFonte.includes('imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : ""'), "imagem_completa deve preservar anexo atual");
 
 function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp, prepareWAMessageMedia, logs = [] } = {}) {
-  const inicio = indexFonte.indexOf("function tipoMidiaDestinoExecutor");
-  const fim = indexFonte.indexOf("function montarPayloadTextoTelegramPorTipoMidia", inicio);
-  assert.ok(inicio >= 0 && fim > inicio, "helpers de tipo de midia devem existir no Executor");
-  const contexto = {
-    baixarImagemComoBuffer,
-    sharp,
-    prepareWAMessageMedia,
-    Buffer,
-    normalizarPrecoTextoBR: (valor) => Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    console: { log(...args) { logs.push(args); } }
+  const logger = { log(...args) { logs.push(args); } };
+  return {
+    destinoUsaImagemExecutor: tipoMidiaV2.destinoUsaImagem,
+    montarPreviewManualWhatsapp: (entrada) => tipoMidiaV2.montarPreviewWhatsapp({ ...entrada, baixarImagem: baixarImagemComoBuffer, prepareWAMessageMedia, logger }),
+    montarPayloadTextoWhatsappPorTipoMidia: (entrada) => tipoMidiaV2.montarPayloadTextoWhatsappPorTipoMidia({ ...entrada, baixarImagem: baixarImagemComoBuffer, prepareWAMessageMedia, logger })
   };
-  vm.createContext(contexto);
-  vm.runInContext(`${indexFonte.slice(inicio, fim)}; this.helpers = { destinoUsaImagemExecutor, montarPreviewManualWhatsapp, montarPayloadTextoWhatsappPorTipoMidia };`, contexto);
-  return contexto.helpers;
 }
 
 async function main() {

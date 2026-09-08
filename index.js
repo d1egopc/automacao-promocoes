@@ -7,6 +7,7 @@ const zlib = require("zlib");
 const sharp = require("sharp");
 const { normalizarPrecoTextoBR } = require("./utils/moeda");
 const { baixarImagemComoBuffer } = require("./modules/identidade-visual-ofertas/renderer");
+const tipoMidiaV2 = require("./modules/destinos/tipo-midia-v2");
 const {
   preservarCandidatosImagemUniversal,
   resolverImagemUniversal,
@@ -22197,6 +22198,8 @@ function iniciarManualV2SchedulerOperacional() {
     listarConexoesDiscord,
     listarCanaisDiscord,
     enviarDiscord,
+    baixarImagemComoBuffer,
+    prepareWAMessageMedia,
     env: process.env,
     corrigirImagemUrl,
     httpClient: axios,
@@ -22255,6 +22258,8 @@ app.use("/manual-v2", criarRotasManualV2({
   listarConexoesDiscord,
   listarCanaisDiscord,
   enviarDiscord,
+  baixarImagemComoBuffer,
+  prepareWAMessageMedia,
   aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
   env: process.env,
   corrigirImagemUrl,
@@ -25401,13 +25406,11 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
 }
 
 function tipoMidiaDestinoExecutor(destino = {}) {
-  return String(destino.tipoMidia || "").trim().toLowerCase();
+  return tipoMidiaV2.tipoMidiaDestino(destino);
 }
 
 function destinoUsaImagemExecutor(destino = {}) {
-  const tipoMidia = tipoMidiaDestinoExecutor(destino);
-  if (tipoMidia === "imagem_completa") return true;
-  return !["texto", "imagem_link", "texto_link"].includes(tipoMidia);
+  return tipoMidiaV2.destinoUsaImagem(destino);
 }
 
 function textoPreviewManualWhatsapp(valor = "") {
@@ -25537,35 +25540,19 @@ async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "", upload
 }
 
 async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {}, upload } = {}) {
-  const tipoMidia = tipoMidiaDestinoExecutor(destino);
-  if (tipoMidia === "texto_link") {
-    return { text: mensagem, linkPreview: null };
-  }
-
-  if (tipoMidia !== "imagem_link") return { text: mensagem };
-
-  try {
-    const preview = await montarPreviewManualWhatsapp({ oferta, linkFinal, upload });
-    return preview
-      ? { text: mensagem, linkPreview: preview }
-      : { text: mensagem, linkPreview: null };
-  } catch (erro) {
-    console.log("[EXECUTOR-LINK-PREVIEW-FALLBACK]", {
-      destino: destino.nome || destino.id || "",
-      motivo: erro?.message || "link_preview_indisponivel"
-    });
-    return { text: mensagem, linkPreview: null };
-  }
+  return tipoMidiaV2.montarPayloadTextoWhatsappPorTipoMidia({
+    mensagem,
+    destino,
+    linkFinal,
+    oferta,
+    upload,
+    prepareWAMessageMedia,
+    logger: console
+  });
 }
 
 function montarPayloadTextoTelegramPorTipoMidia({ chatId = "", mensagem = "", destino = {} } = {}) {
-  return {
-    chat_id: chatId,
-    text: mensagem,
-    ...(tipoMidiaDestinoExecutor(destino) === "texto_link"
-      ? { link_preview_options: { is_disabled: true } }
-      : {})
-  };
+  return tipoMidiaV2.montarPayloadTextoTelegramPorTipoMidia({ chatId, mensagem, destino });
 }
 async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
   try {

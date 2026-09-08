@@ -11,6 +11,7 @@ const {
 const {
   normalizarModoLinkDestino
 } = require("../links/link-optimus");
+const tipoMidiaV2 = require("../destinos/tipo-midia-v2");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -265,11 +266,23 @@ async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
 
   for (const grupo of grupos) {
     const diagnosticoImagem = diagnosticoImagemKabumCaptureManualV2(oferta);
+    const usarImagem = tipoMidiaV2.destinoUsaImagem(destino);
+    const payload = usarImagem ? null : await tipoMidiaV2.montarPayloadTextoWhatsappPorTipoMidia({
+      mensagem,
+      destino,
+      linkFinal: texto(oferta.linkFinal || oferta.linkAfiliado || oferta.urlAfiliada),
+      oferta,
+      upload: sock.waUploadToServer,
+      baixarImagem: deps.baixarImagemComoBuffer,
+      prepareWAMessageMedia: deps.prepareWAMessageMedia,
+      logger: deps.logger || console
+    });
     await deps.enviarWhatsApp({
       sock,
       grupo,
       mensagem,
-      midia: texto(oferta.imagem)
+      payload,
+      midia: usarImagem && texto(oferta.imagem)
         ? {
             origem: "imagemUrl",
             imagemUrl: texto(oferta.imagem),
@@ -281,13 +294,14 @@ async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
   }
 }
 
-async function enviarTelegramManual({ destino, mensagem, deps, clienteId }) {
+async function enviarTelegramManual({ destino, oferta, mensagem, deps, clienteId }) {
   const telegram = resolverTelegramDestino(destino, listarTelegramsCliente(deps.configsPorCliente || {}, clienteId));
   if (!telegram || !telegram.ativo || !telegram.botToken || !telegram.chatId) {
     throw new Error("Telegram nao configurado");
   }
   if (typeof deps.enviarTelegram !== "function") throw new Error("Primitiva Telegram indisponivel");
 
+  const usarImagem = tipoMidiaV2.destinoUsaImagem(destino);
   await deps.enviarTelegram({
     httpClient: deps.httpClient,
     tel: {
@@ -295,7 +309,14 @@ async function enviarTelegramManual({ destino, mensagem, deps, clienteId }) {
       chatId: telegram.chatId
     },
     mensagem,
-    midia: null,
+    payload: usarImagem ? null : tipoMidiaV2.montarPayloadTextoTelegramPorTipoMidia({
+      chatId: telegram.chatId,
+      mensagem,
+      destino
+    }),
+    midia: usarImagem && texto(oferta?.imagem)
+      ? { origem: "imagemUrl", imagemUrl: texto(oferta.imagem) }
+      : null,
     corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
   });
 }
@@ -308,7 +329,7 @@ async function enviarDiscordManual({ destino, oferta, mensagem, deps }) {
   const resultado = await deps.enviarDiscord({
     channelId,
     mensagem,
-    imagemUrl: imagemDiscordManual(oferta),
+    ...tipoMidiaV2.opcoesDiscordPorTipoMidia(destino, imagemDiscordManual(oferta)),
     env: deps.env || process.env,
     httpClient: deps.httpClient,
     now: deps.now
@@ -470,7 +491,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       const tipo = tipoDestino(destino);
       let detalhesEnvio = {};
       if (tipo === "telegram") {
-        await enviarTelegramManual({ destino, mensagem, deps, clienteId: cliente });
+        await enviarTelegramManual({ destino, oferta: ofertaParaMensagem, mensagem, deps, clienteId: cliente });
       } else if (tipo === "whatsapp") {
         await enviarWhatsappManual({ destino, oferta: ofertaParaMensagem, mensagem, deps });
       } else if (tipo === "discord") {
