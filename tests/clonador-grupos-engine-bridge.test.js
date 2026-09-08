@@ -147,11 +147,13 @@ async function testarBridgeRegistraUmaVez() {
   assert.strictEqual(resultado.prontas, 1);
   assert.strictEqual(eventos.length, 1);
   assert.strictEqual(eventos[0].evento.origem, "clonador_grupos");
+  assert.strictEqual(eventos[0].evento.origemFluxo, "clonador_grupos");
   assert.strictEqual(eventos[0].evento.fonte, "clonador_grupos");
   assert.strictEqual(eventos[0].evento.origemTipo, "whatsapp");
   assert.deepStrictEqual(eventos[0].opcoes.clientes, ["workspace_a"]);
   assert.deepStrictEqual(eventos[0].evento.linksExtraidos, ["https://www.mercadolivre.com.br/p/MLB123"]);
   assert.strictEqual(eventos[0].evento.metadata.clonadorGrupos.bufferId, "101");
+  assert.strictEqual(eventos[0].evento.metadata.origemFluxo, "clonador_grupos");
   assert.deepStrictEqual(eventos[0].evento.metadata.clonadorGrupos.destinoIds, ["destino_ok"]);
   assert.ok(!eventos[0].evento.metadata.radarMirror);
   assert.strictEqual(repo.estado.buffer[0].status, "pronta");

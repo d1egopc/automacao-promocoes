@@ -14,6 +14,7 @@ const {
 } = require("./logger");
 const coberturaRadar = require("../radar/cobertura-v1");
 const { classificarLinkEngine } = require("./link-role.service");
+const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -310,6 +311,8 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const hashEvento = eventoBruto.hashEvento || eventoBruto.hash_evento || gerarHashEvento(evento);
   const marketplaceDetectado = eventoBruto.marketplaceDetectado || eventoBruto.marketplace_detectado || marketplacePrincipal(evento.linksExtraidos);
   const metadataEvento = eventoBruto.metadata && typeof eventoBruto.metadata === "object" ? eventoBruto.metadata : {};
+  const origemFluxo = resolverOrigemFluxo(eventoBruto, { metadata: metadataEvento });
+  const metadataEventoFinal = origemFluxo ? { ...metadataEvento, origemFluxo } : metadataEvento;
   const clientes = opcoes.clientes || eventoBruto.clientes || ["admin"];
   const contextoCobertura = {
     coberturaTraceId: eventoBruto.coberturaTraceId || metadataEvento.coberturaTraceId || "",
@@ -342,7 +345,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         clientes,
         marketplaceDetectado,
         linksExtraidos: evento.linksExtraidos,
-        metadataEvento: eventoBruto.metadata || {}
+        metadataEvento: metadataEventoFinal
       });
       logEngineEventoBrutoDuplicado({ id: duplicado.id, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
       coberturaRadar.registrar("engine_evento_duplicado", {
@@ -364,7 +367,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
     }
 
     const linksSerializados = jsonbParam(evento.linksExtraidos, []);
-    const metadataSerializada = jsonbParam(eventoBruto.metadata, {});
+    const metadataSerializada = jsonbParam(metadataEventoFinal, {});
     const insert = await queryEngine(
       `INSERT INTO engine_eventos_brutos (
          origem, fonte, origem_tipo, sessao_id, grupo_id, grupo_nome,
@@ -395,7 +398,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         insert,
         linksExtraidos: evento.linksExtraidos,
         linksSerializados,
-        metadata: eventoBruto.metadata,
+        metadata: metadataEventoFinal,
         metadataSerializada
       });
       logEngineEventoBrutoErro({ motivo: insert.motivo || "insert_falhou", erro: insert.erro || "", diagnostico });
@@ -425,7 +428,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
             clientes,
             marketplaceDetectado,
             linksExtraidos: evento.linksExtraidos,
-            metadataEvento: eventoBruto.metadata || {}
+            metadataEvento: metadataEventoFinal
           })
         : { criados: 0, existentes: 0 };
       logEngineEventoBrutoDuplicado({ grupoId: evento.grupoId, links: evento.linksExtraidos.length, hashEvento });
@@ -447,7 +450,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       };
     }
 
-    await salvarLinksEvento(id, evento.linksExtraidos, eventoBruto.metadata || {}, evento);
+    await salvarLinksEvento(id, evento.linksExtraidos, metadataEventoFinal, evento);
 
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 
@@ -456,7 +459,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       clientes,
       marketplaceDetectado,
       linksExtraidos: evento.linksExtraidos,
-      metadataEvento: eventoBruto.metadata || {}
+      metadataEvento: metadataEventoFinal
     });
 
     coberturaRadar.registrar("engine_evento_criado", {

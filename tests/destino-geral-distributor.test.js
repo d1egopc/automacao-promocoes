@@ -141,6 +141,31 @@ function contexto(destinosWorkspace) {
       true,
       "origemOfertas=clonador aceita Clonador"
     );
+    const cloneExplicito = oferta({
+      origem: "engine",
+      origemFluxo: "clonador_grupos",
+      metadata: {}
+    });
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "clonador" }), cloneExplicito).aceita,
+      true,
+      "origemFluxo explicita deve ser a autoridade para destino Clonador"
+    );
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "optimus" }), cloneExplicito).aceita,
+      false,
+      "origemFluxo Clonador deve ser rejeitada por destino Optimus"
+    );
+    const optimusExplicitoComMetadataLegada = oferta({
+      origem: "engine",
+      origemFluxo: "optimus",
+      metadata: { clonadorGrupos: { bufferId: "legado_inconsistente" } }
+    });
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "optimus" }), optimusExplicitoComMetadataLegada).aceita,
+      true,
+      "identidade explicita deve preceder inferencia legada"
+    );
     assert.strictEqual(
       destinos.origemOfertaEhClonadorGrupos(oferta({
         origem: "engine",

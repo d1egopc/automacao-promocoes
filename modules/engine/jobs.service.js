@@ -16,6 +16,7 @@ const {
   resolverImagemCanonicaEvento,
   aplicarImagemCanonicaMetadata
 } = require("../imagens/cache-canonico-evento");
+const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 
 const CONFIRMACAO_RETENCAO_JOBS_POSTGRES = "LIMPAR_JOBS_POSTGRES_FINALIZADOS_12H";
 const RETENCAO_JOBS_LOCK_ID = 902260733;
@@ -250,8 +251,10 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     deps
   });
   const metadataEventoCanonico = aplicarImagemCanonicaMetadata(metadataEvento, imagemCanonicaEvento);
+  const origemFluxo = resolverOrigemFluxo({ metadata: metadataEventoCanonico });
   const metadataJob = {
     fase: "1.1",
+    ...(origemFluxo ? { origemFluxo } : {}),
     ...(coberturaRadar.flagAtiva() && metadataEventoCanonico?.coberturaTraceId ? { coberturaTraceId: metadataEventoCanonico.coberturaTraceId } : {}),
     ...(coberturaRadar.flagAtiva() && metadataEventoCanonico?.fidelidadeTraceId ? { fidelidadeTraceId: metadataEventoCanonico.fidelidadeTraceId } : {}),
     imagemRadar: metadataEventoCanonico?.imagem || metadataEventoCanonico?.image || metadataEventoCanonico?.thumbnail || metadataEventoCanonico?.imagemUrl || "",

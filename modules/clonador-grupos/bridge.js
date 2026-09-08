@@ -250,6 +250,7 @@ function criarBridgeClonadorGrupos(deps = {}) {
     });
 
     const metadata = {
+      origemFluxo: "clonador_grupos",
       clonadorGrupos: {
         bufferId: texto(item.id),
         mensagemId: texto(item.mensagemId),
@@ -265,6 +266,7 @@ function criarBridgeClonadorGrupos(deps = {}) {
 
     const resultado = await registrar({
       origem: "clonador_grupos",
+      origemFluxo: "clonador_grupos",
       fonte: "clonador_grupos",
       origemTipo: "whatsapp",
       sessaoId: item.sessaoId,

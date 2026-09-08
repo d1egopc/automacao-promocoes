@@ -68,7 +68,10 @@ async function main() {
     assert.strictEqual(normal.ok, true, "insert normal permanece operacional");
     const insertNormal = chamadas.find(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql));
     assert.strictEqual(insertNormal.params[7], '["https://meli.la/normal"]');
-    assert.strictEqual(insertNormal.params[10], '{"origem":"teste"}');
+    assert.deepStrictEqual(JSON.parse(insertNormal.params[10]), {
+      origem: "teste",
+      origemFluxo: "optimus"
+    });
 
     const highIsolado = String.fromCharCode(0xD800);
     const lowIsolado = String.fromCharCode(0xDC00);

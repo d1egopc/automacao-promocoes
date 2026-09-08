@@ -1,3 +1,5 @@
+const { resolverOrigemFluxoExplicita } = require("./origem-fluxo");
+
 const ALIASES_CATEGORIA_DESTINO = {
   bebes: "bebeseacessorios",
   bebe: "bebeseacessorios",
@@ -216,6 +218,8 @@ function objetoDestinoSeguro(valor = {}) {
 }
 
 function origemOfertaEhClonadorGrupos(oferta = {}) {
+  const origemFluxo = resolverOrigemFluxoExplicita(oferta);
+  if (origemFluxo) return origemFluxo === "clonador_grupos";
   const metadata = objetoDestinoSeguro(oferta?.metadata);
   const jobMetadata = objetoDestinoSeguro(oferta?.job_metadata);
   const eventoMetadata = objetoDestinoSeguro(oferta?.evento_metadata);

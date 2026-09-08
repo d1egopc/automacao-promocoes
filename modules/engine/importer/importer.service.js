@@ -54,6 +54,7 @@ const {
   congelarOfertaUniversal,
   resumoOfertaUniversalLog
 } = require("../oferta-universal.contract");
+const { resolverOrigemFluxo } = require("../../../utils/origem-fluxo");
 const { normalizarDadosComerciais } = require("../../ofc-v2/normalizador-comercial");
 const {
   construirEspelhoComercialV24FailOpen,
@@ -673,9 +674,11 @@ function normalizarOfertaImportada(resultado = {}, job = {}) {
     linkOriginal: resultado.linkOriginal || "",
     linkExpandido: resultado.linkExpandido || resultado.urlFinal || ""
   }, resultado.metadata || {}, job);
+  const origemFluxo = resolverOrigemFluxo(resultado, job);
 
   return {
     ok: resultado.ok !== false,
+    ...(origemFluxo ? { origemFluxo } : {}),
     marketplace: marketplaceTitulo,
     titulo: tituloSeguro,
     tituloFactual: tituloFactual.titulo,
@@ -3094,6 +3097,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 }
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}, deps = {}) {
+  const origemFluxo = resolverOrigemFluxo(ofertaEntrada, job, evento);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(ofertaEntrada, ofertaEntrada.metadata, evento, evento.metadata, job, link)
     : "";
@@ -3130,6 +3134,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       : "ausente_no_importador"
   });
   let oferta = normalizarOfertaImportada(ofertaEntrada, job);
+  if (origemFluxo && !oferta.origemFluxo) oferta = { ...oferta, origemFluxo };
   const comercialClonador = aplicarComercialCapturadoClonador({ oferta, ofertaEntrada, evento, job });
   oferta = comercialClonador.oferta || oferta;
   ofertaEntrada = comercialClonador.ofertaEntrada || ofertaEntrada;
@@ -3383,6 +3388,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ...metadataEvento,
     ...metadataBase,
     ...objetoSeguro(sombraV2.metadata || {}),
+    ...(origemFluxo ? { origemFluxo } : {}),
     ...(coberturaTraceIdPrincipal ? { coberturaTraceId: coberturaTraceIdPrincipal } : {}),
     ...(fidelidadeTraceIdPrincipal ? { fidelidadeTraceId: fidelidadeTraceIdPrincipal } : {}),
     imagemOrigem: imagemOrigemFinal,

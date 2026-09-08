@@ -19614,6 +19614,7 @@ coberturaRadar.registrar("radar_mirror_criado", {
 const temRedirectConhecidoRadar = links.some(linkEngineV2Radar);
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
+  origemFluxo: "optimus",
   origemTipo: origemTipoFinal,
   sessaoId: sessaoIdTexto,
   grupoId: grupoIdTexto,
@@ -19625,6 +19626,7 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   metadata: {
     ...mergeRadarMirrorMetadata({}, radarMirrorBase),
+    origemFluxo: "optimus",
     ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {})
   }
 });

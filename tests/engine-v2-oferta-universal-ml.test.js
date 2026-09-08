@@ -513,10 +513,17 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
 
   const importerService = require("../modules/engine/importer/importer.service");
   const { logs: logsGravacao, retorno: gravacao } = await capturarLogs(() => importerService.gravarOfertaEngine(
-    { id: 301, evento_id: 201, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
+    {
+      id: 301,
+      evento_id: 201,
+      cliente_id: "workspace_ml",
+      marketplace: "mercadolivre",
+      metadata: { origemFluxo: "optimus", metadataEvento: { origemFluxo: "optimus" } }
+    },
     {
       id: 201,
       origem: "radar",
+      metadata: { origemFluxo: "optimus" },
       origem_tipo: "whatsapp",
       grupo_id: "grupo@g.us",
       texto_original: "Jaqueta Puffer Hering De R$ 299 por R$ 155 Cupom MODAPRAVC https://meli.la/2Ud5obn"
@@ -535,6 +542,9 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
   assert(metadataInserida.ofertaUniversal);
   assert(metadataPersistida.ofertaUniversal);
   assert.strictEqual(metadataPersistida.ofertaUniversal.ofertaId, 701);
+  assert.strictEqual(metadataPersistida.origemFluxo, "optimus");
+  assert.strictEqual(metadataPersistida.ofertaUniversal.origem, "engine_importer");
+  assert.strictEqual(metadataPersistida.ofertaUniversal.origemFluxo, "optimus");
   assert.strictEqual(metadataPersistida.ofertaUniversal.produto.titulo, "Jaqueta Puffer Hering");
   assert.strictEqual(metadataPersistida.ofertaUniversal.midia.imagemPrincipal, "https://http2.mlstatic.com/D_NQ_NP_123-MLB.jpg");
   assert.strictEqual(metadataPersistida.ofertaUniversal.afiliacao.urlAfiliada, "https://meli.la/afiliado123");

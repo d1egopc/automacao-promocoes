@@ -22,6 +22,7 @@ const {
 const {
   motivoDistribuicaoDefinitivo
 } = require("./motivos-definitivos");
+const { resolverOrigemFluxo } = require("../../../utils/origem-fluxo");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -284,6 +285,8 @@ function destinoIdDistribuidor(destino = {}) {
 }
 
 function origemClonadorGruposOferta(oferta = {}) {
+  const origemFluxo = resolverOrigemFluxo(oferta);
+  if (origemFluxo) return origemFluxo === "clonador_grupos";
   const metadata = objetoSeguro(oferta.metadata);
   const jobMetadata = objetoSeguro(oferta.job_metadata);
   const eventoMetadata = objetoSeguro(oferta.evento_metadata);
@@ -337,6 +340,7 @@ function analisarDestinosOferta(clienteId = "admin", oferta = {}, contexto = {})
     for (const categoria of categorias.length ? categorias : [oferta.categoria || oferta.categoriaProduto || ""]) {
       const analise = destinosUtils.analisarDestinoOferta(destinoNormalizado, {
         origem: oferta.origem,
+        origemFluxo: resolverOrigemFluxo(oferta),
         fonte: oferta.fonte,
         marketplace: oferta.marketplace,
         categoria,
@@ -666,6 +670,7 @@ function montarItemFilaEngine(oferta = {}) {
   });
   const imagemFinal = imagemPiloto.usarImagemEspelho ? imagemPiloto.imagem : imagemResolvida.imagem;
   const camposComerciaisRadar = copiarCamposComerciaisRadarFila(oferta);
+  const origemFluxo = resolverOrigemFluxo(oferta);
 
   return {
     id: `engine_${oferta.id}_${Date.now()}`,
@@ -711,6 +716,7 @@ function montarItemFilaEngine(oferta = {}) {
     beneficioExtra,
     beneficioTexto: beneficioExtra,
     origem: "engine",
+    ...(origemFluxo ? { origemFluxo } : {}),
     origemDetalhe: "Engine V2",
     metadata: oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {},
     status: "pendente",

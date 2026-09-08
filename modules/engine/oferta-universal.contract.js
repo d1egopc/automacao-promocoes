@@ -1,4 +1,5 @@
 const SCHEMA_VERSION = "engine-v2-oferta-universal-3a";
+const { normalizarOrigemFluxo } = require("../../utils/origem-fluxo");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -100,6 +101,7 @@ function montarOfertaUniversalEngine({
   const linkOriginal = texto(oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal);
   const linkCanonico = texto(oferta.linkExpandido || link.url_expandida || link.url_normalizada || ofertaEntrada.linkExpandido || ofertaEntrada.urlFinal);
   const linkAfiliado = texto(oferta.linkAfiliado);
+  const origemFluxo = normalizarOrigemFluxo(oferta.origemFluxo || metadata.origemFluxo);
 
   return {
     ofertaId: oferta.id || job.oferta_id || null,
@@ -108,6 +110,7 @@ function montarOfertaUniversalEngine({
     jobId: job.id || null,
     workspaceId: texto(job.workspaceId || job.cliente_id || job.clienteId) || null,
     origem: texto(oferta.origem || "engine_importer") || null,
+    ...(origemFluxo ? { origemFluxo } : {}),
     marketplace: texto(oferta.marketplace || job.marketplace || job.marketplace_detectado) || null,
     produto: {
       idExterno: resolverProdutoId(oferta, { ...metadata, produto: produtoMetadata }),
