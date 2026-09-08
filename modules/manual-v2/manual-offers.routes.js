@@ -606,6 +606,7 @@ function criarRotasManualV2(deps = {}) {
         env: deps.env || process.env,
         corrigirImagemUrl: deps.corrigirImagemUrl,
         httpClient: deps.httpClient,
+        aplicarIdentidadeVisualOferta: deps.aplicarIdentidadeVisualOferta,
         now: deps.now
       });
 

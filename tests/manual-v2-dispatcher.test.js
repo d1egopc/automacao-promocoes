@@ -293,6 +293,73 @@ function assertSemSegredos(retorno) {
 
 (async function main() {
   {
+    const ofertaCapture = {
+      ...ofertaA,
+      id: "oferta_capture_identidade",
+      fonteImportacao: { adapter: "optimus_capture_v1" }
+    };
+    const chamadasIdentidade = [];
+    const { deps, chamadas } = baseDeps({
+      buscarOfertaManualV2: (_clienteId, ofertaId) => ofertaId === ofertaCapture.id ? ofertaCapture : null,
+      aplicarIdentidadeVisualOferta: async (entrada) => {
+        chamadasIdentidade.push(entrada);
+        return {
+          aplicada: true,
+          imagemFinal: "https://img.example/oferta-capture-vestida.png"
+        };
+      }
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: ofertaCapture.id,
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(chamadasIdentidade.length, 1, "Capture deve usar a dependencia oficial de Identidade Visual");
+    assert.strictEqual(chamadasIdentidade[0].oferta.fonteImportacao.adapter, "optimus_capture_v1");
+    assert.strictEqual(chamadasIdentidade[0].imagemAtual, ofertaCapture.imagem);
+    assert.strictEqual(chamadas.wa[0].midia.imagemUrl, "https://img.example/oferta-capture-vestida.png", "WhatsApp deve receber a imagem vestida retornada pelo servico oficial");
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      aplicarIdentidadeVisualOferta: async (entrada) => ({
+        aplicada: false,
+        motivo: "politica_desabilitada",
+        imagemFinal: entrada.imagemAtual
+      })
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: ofertaA.id,
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(chamadas.wa[0].midia.imagemUrl, ofertaA.imagem, "politica desabilitada preserva a imagem original pelo retorno oficial");
+  }
+
+  {
+    const { deps, chamadas } = baseDeps({
+      aplicarIdentidadeVisualOferta: async () => {
+        throw new Error("renderer_falhou_controlado");
+      }
+    });
+
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a",
+      ofertaId: ofertaA.id,
+      destinosIds: ["wa_ok"]
+    }, deps);
+
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(chamadas.wa[0].midia.imagemUrl, ofertaA.imagem, "falha do renderer preserva o fallback oficial de imagem original");
+  }
+
+  {
     const { deps, chamadas } = baseDeps();
     const retorno = await enviarOfertaManualV2({
       clienteId: "cliente_a",

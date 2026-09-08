@@ -71,7 +71,7 @@ const configsPorCliente = {
   }
 };
 
-function criarApp(dispatcher, storageOptions) {
+function criarApp(dispatcher, storageOptions, extraDeps = {}) {
   const app = express();
   app.use(express.json());
   app.use("/manual-v2", criarRotasManualV2({
@@ -108,7 +108,8 @@ function criarApp(dispatcher, storageOptions) {
       }]
     },
     discordSenderDisponivel: true,
-    enviarOfertaManualV2: dispatcher
+    enviarOfertaManualV2: dispatcher,
+    ...extraDeps
   }));
   return app;
 }
@@ -167,6 +168,10 @@ function criarOferta(clienteId, id, extra = {}) {
   };
   const chamadas = [];
   let modo = "sucesso";
+  const aplicarIdentidadeVisualOferta = async () => ({
+    aplicada: true,
+    imagemFinal: "https://img.example/vestida.png"
+  });
   const dispatcher = async (entrada, deps) => {
     chamadas.push({ entrada, deps });
     assert.deepStrictEqual(Object.keys(entrada).sort(), ["clienteId", "destinosIds", "ofertaId"].sort());
@@ -314,7 +319,7 @@ function criarOferta(clienteId, id, extra = {}) {
     };
   };
 
-  const server = await ouvir(criarApp(dispatcher, storageOptions));
+  const server = await ouvir(criarApp(dispatcher, storageOptions, { aplicarIdentidadeVisualOferta }));
   try {
     {
       const oferta = criarOferta("cliente_a", "oferta_sucesso");
@@ -330,6 +335,11 @@ function criarOferta(clienteId, id, extra = {}) {
       assert.ok(resposta.body.oferta.enviadoEm);
       assert.strictEqual(resposta.body.oferta.envioManual.creditosDebitados, 1);
       assert.strictEqual(resposta.body.oferta.envioManual.enviados, 1);
+      assert.strictEqual(
+        chamadas[0].deps.aplicarIdentidadeVisualOferta,
+        aplicarIdentidadeVisualOferta,
+        "enviar agora deve encaminhar a dependencia oficial de Identidade Visual ao dispatcher"
+      );
       assertSemSegredos(resposta.body);
 
       const persistida = storage.buscarOfertaManualV2("cliente_a", oferta.id);
