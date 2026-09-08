@@ -7953,6 +7953,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     });
     let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
     let erroImagemEnvio = "";
+    const enviarTextoWhatsapp = async () => sock.sendMessage(
+      grupo,
+      await montarPayloadTextoWhatsappPorTipoMidia({
+        mensagem,
+        destino,
+        linkFinal: opcoes.linkFinal || ""
+      })
+    );
     if (!imagemEnvioExecutor.ok) {
       if (imagemEnvioExecutor.tinhaImagem) {
         console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
@@ -7966,7 +7974,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagemOrigem: oferta.imagemOrigem || ""
         }));
       }
-      await sock.sendMessage(grupo, { text: mensagem });
+      await enviarTextoWhatsapp();
     } else {
       try {
         await sock.sendMessage(grupo, {
@@ -7989,7 +7997,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagemStatus: oferta.imagemStatus || "",
           imagemOrigem: oferta.imagemOrigem || ""
         }));
-        await sock.sendMessage(grupo, { text: mensagem });
+        await enviarTextoWhatsapp();
       }
     }
 
@@ -8149,6 +8157,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           channelId: destinoDiscordValidado.channelId,
           mensagem,
           imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
+          suprimirEmbeds: tipoMidiaDestinoExecutor(destinoDiscordValidado) === "texto_link",
           env: process.env,
           httpClient: axios
         });
@@ -8492,10 +8501,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           }
           await axios.post(
             `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
-            {
-              chat_id: tel.chatId,
-              text: mensagem
-            }
+            montarPayloadTextoTelegramPorTipoMidia({
+              chatId: tel.chatId,
+              mensagem,
+              destino
+            })
           );
         } else {
           try {
@@ -8523,10 +8533,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             }));
             await axios.post(
               `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
-              {
-                chat_id: tel.chatId,
-                text: mensagem
-              }
+              montarPayloadTextoTelegramPorTipoMidia({
+                chatId: tel.chatId,
+                mensagem,
+                destino
+              })
             );
           }
         }
@@ -9904,7 +9915,8 @@ for (const item of destinosOrdenados) {
     oferta,
     mensagem,
     clienteId,
-    configCliente
+    configCliente,
+    { linkFinal: linkOfertaDestino.linkFinal || "" }
   );
   const resultadoEnvio =
     typeof enviado === "object" && enviado !== null
@@ -10261,7 +10273,8 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
-  downloadMediaMessage
+  downloadMediaMessage,
+  getUrlInfo
 } = require("@whiskeysockets/baileys");
 const {
   materializarImagemRadarWhatsApp,
@@ -13878,7 +13891,11 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       mensagem,
       clienteId,
       configCliente,
-      { ignorarHorario: true, envioManual: true }
+      {
+        ignorarHorario: true,
+        envioManual: true,
+        linkFinal: linkOfertaDestino.linkFinal || ""
+      }
     );
     const resultado =
       typeof resultadoEnvio === "object" && resultadoEnvio !== null
@@ -25365,7 +25382,7 @@ function corrigirImagemUrl(imagem) {
 
 function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
   const imagem = corrigirImagemUrl(oferta.imagem) || oferta.imagem || "";
-  if (String(destino.tipoMidia || "").toLowerCase() === "texto") {
+  if (!destinoUsaImagemExecutor(destino)) {
     return { ok: false, url: "", motivo: "destino_tipo_midia_texto", tinhaImagem: Boolean(imagem) };
   }
   if (!imagem) return { ok: false, url: "", motivo: "imagem_ausente", tinhaImagem: false };
@@ -25376,6 +25393,48 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
     return { ok: false, url: imagem, motivo: "imagem_nao_enviavel", tinhaImagem: true };
   }
   return { ok: true, url: imagem, motivo: "", tinhaImagem: true };
+}
+
+function tipoMidiaDestinoExecutor(destino = {}) {
+  return String(destino.tipoMidia || "").trim().toLowerCase();
+}
+
+function destinoUsaImagemExecutor(destino = {}) {
+  const tipoMidia = tipoMidiaDestinoExecutor(destino);
+  if (tipoMidia === "imagem_completa") return true;
+  return !["texto", "imagem_link", "texto_link"].includes(tipoMidia);
+}
+
+async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "" } = {}) {
+  const tipoMidia = tipoMidiaDestinoExecutor(destino);
+  if (tipoMidia === "texto_link") {
+    return { text: mensagem, linkPreview: null };
+  }
+
+  if (tipoMidia !== "imagem_link") return { text: mensagem };
+
+  try {
+    const preview = linkFinal ? await getUrlInfo(linkFinal) : null;
+    return preview
+      ? { text: mensagem, linkPreview: preview }
+      : { text: mensagem, linkPreview: null };
+  } catch (erro) {
+    console.log("[EXECUTOR-LINK-PREVIEW-FALLBACK]", {
+      destino: destino.nome || destino.id || "",
+      motivo: erro?.message || "link_preview_indisponivel"
+    });
+    return { text: mensagem, linkPreview: null };
+  }
+}
+
+function montarPayloadTextoTelegramPorTipoMidia({ chatId = "", mensagem = "", destino = {} } = {}) {
+  return {
+    chat_id: chatId,
+    text: mensagem,
+    ...(tipoMidiaDestinoExecutor(destino) === "texto_link"
+      ? { link_preview_options: { is_disabled: true } }
+      : {})
+  };
 }
 async function buscarCsrfTokenMercadoLivre(cookies, contexto = {}) {
   try {
@@ -30226,4 +30285,3 @@ setInterval(() => {
     });
   });
 }, 10 * 1000);
-

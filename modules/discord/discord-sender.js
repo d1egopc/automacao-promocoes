@@ -226,12 +226,12 @@ function validarRespostaMensagemDiscord(resposta = {}, channelId = "") {
   };
 }
 
-async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", env = process.env, httpClient, now = () => new Date(), getPlatformVariableImpl } = {}) {
+async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", suprimirEmbeds = false, env = process.env, httpClient, now = () => new Date(), getPlatformVariableImpl, config = null } = {}) {
   const canal = texto(channelId);
   const conteudo = texto(mensagem);
-  const config = await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
+  const configDiscord = config || await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
 
-  if (!config.botToken) return respostaErro({ channelId: canal, erro: "discord_bot_token_ausente" });
+  if (!configDiscord.botToken) return respostaErro({ channelId: canal, erro: "discord_bot_token_ausente" });
   if (!canal) return respostaErro({ channelId: canal, erro: "discord_channel_id_ausente" });
   if (!conteudo && !texto(imagemUrl)) return respostaErro({ channelId: canal, erro: "discord_mensagem_vazia" });
   if (conteudo.length > DISCORD_MESSAGE_LIMIT) {
@@ -241,12 +241,12 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", en
     return respostaErro({ channelId: canal, erro: "discord_http_indisponivel" });
   }
 
-  let body = { content: conteudo };
-  let headers = { Authorization: `Bot ${config.botToken}` };
+  let body = { content: conteudo, ...(suprimirEmbeds ? { flags: 4 } : {}) };
+  let headers = { Authorization: `Bot ${configDiscord.botToken}` };
   let imagemEnviada = false;
 
   if (texto(imagemUrl)) {
-    const imagem = await baixarImagemDiscord({ imagemUrl, env, httpClient, getPlatformVariableImpl, config });
+    const imagem = await baixarImagemDiscord({ imagemUrl, env, httpClient, getPlatformVariableImpl, config: configDiscord });
     if (!imagem.ok) {
       return respostaErro({
         channelId: canal,
@@ -257,7 +257,7 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", en
 
     try {
       body = criarFormData({ mensagem: conteudo, imagem });
-      headers = { Authorization: `Bot ${config.botToken}` };
+      headers = { Authorization: `Bot ${configDiscord.botToken}` };
       imagemEnviada = true;
     } catch (erro) {
       return respostaErro({ channelId: canal, erro: erro.message || "discord_imagem_invalida" });
