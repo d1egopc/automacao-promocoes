@@ -20,7 +20,7 @@ assert.ok(indexFonte.includes('return { text: mensagem, linkPreview: null };'), 
 assert.ok(indexFonte.includes('link_preview_options: { is_disabled: true }'), "Telegram deve suprimir preview para texto_link");
 assert.ok(indexFonte.includes('imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : ""'), "imagem_completa deve preservar anexo atual");
 
-function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp, prepareWAMessageMedia } = {}) {
+function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp, prepareWAMessageMedia, logs = [] } = {}) {
   const inicio = indexFonte.indexOf("function tipoMidiaDestinoExecutor");
   const fim = indexFonte.indexOf("function montarPayloadTextoTelegramPorTipoMidia", inicio);
   assert.ok(inicio >= 0 && fim > inicio, "helpers de tipo de midia devem existir no Executor");
@@ -30,7 +30,7 @@ function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp, prepareWAMess
     prepareWAMessageMedia,
     Buffer,
     normalizarPrecoTextoBR: (valor) => Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    console: { log() {} }
+    console: { log(...args) { logs.push(args); } }
   };
   vm.createContext(contexto);
   vm.runInContext(`${indexFonte.slice(inicio, fim)}; this.helpers = { destinoUsaImagemExecutor, montarPreviewManualWhatsapp, montarPayloadTextoWhatsappPorTipoMidia };`, contexto);
@@ -44,6 +44,7 @@ async function main() {
   const imagemOriginal = await sharp({
     create: { width: 4, height: 4, channels: 3, background: { r: 12, g: 34, b: 56 } }
   }).png().toBuffer();
+  const logsHq = [];
   const helpers = carregarHelpersTipoMidia({
     baixarImagemComoBuffer: async (url) => {
       imagensBaixadas.push(url);
@@ -63,7 +64,8 @@ async function main() {
           fileEncSha256: Buffer.alloc(32, 3)
         }
       };
-    }
+    },
+    logs: logsHq
   });
   assert.equal(helpers.destinoUsaImagemExecutor({}), true, "legado ausente deve continuar com imagem");
   assert.equal(helpers.destinoUsaImagemExecutor({ tipoMidia: "imagem" }), true, "legado imagem deve continuar com imagem");
@@ -97,6 +99,10 @@ async function main() {
   assert.equal(uploadsHq[0].opcoes.mediaTypeOverride, "thumbnail-link");
   assert.equal(payloadImagemLink.linkPreview.highQualityThumbnail.directPath, "/mms/thumbnail-link");
   assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.highQualityThumbnail.mediaKey));
+  assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.jpegThumbnail));
+  assert.equal(logsHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && contexto.hqAnexado), true);
+  assert.equal(JSON.stringify(logsHq).includes("oficial.example"), false, "telemetria HQ nao pode expor linkFinal");
+  assert.equal(JSON.stringify(logsHq).includes(template), false, "telemetria HQ nao pode expor Template");
 
   const helpersComFalha = carregarHelpersTipoMidia({
     baixarImagemComoBuffer: async () => { throw new Error("falha prevista"); },
@@ -111,10 +117,12 @@ async function main() {
   });
   assert.deepEqual(payloadFalha, { text: template, linkPreview: null }, "falha de preview deve manter envio textual seguro");
 
+  const logsFalhaHq = [];
   const helpersComFalhaHq = carregarHelpersTipoMidia({
     baixarImagemComoBuffer: async () => imagemOriginal,
     sharp,
-    prepareWAMessageMedia: async () => { throw new Error("falha upload hq"); }
+    prepareWAMessageMedia: async () => { throw new Error("falha upload hq"); },
+    logs: logsFalhaHq
   });
   const payloadFalhaHq = await helpersComFalhaHq.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
@@ -125,6 +133,41 @@ async function main() {
   });
   assert.ok(payloadFalhaHq.linkPreview.jpegThumbnail, "falha HQ deve preservar preview JPEG atual");
   assert.equal(payloadFalhaHq.linkPreview.highQualityThumbnail, undefined, "falha HQ nao pode impedir envio");
+  assert.equal(logsFalhaHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]" && contexto.motivoFallback === "hq_upload_erro"), true);
+  assert.equal(logsFalhaHq.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && !contexto.hqAnexado && contexto.motivoFallback === "hq_upload_erro"), true);
+
+  for (const campoAusente of ["directPath", "mediaKey"]) {
+    const logsRetornoIncompleto = [];
+    const helpersComRetornoIncompleto = carregarHelpersTipoMidia({
+      baixarImagemComoBuffer: async () => imagemOriginal,
+      sharp,
+      prepareWAMessageMedia: async () => {
+        const imageMessage = {
+          directPath: "/mms/thumbnail-link",
+          mediaKey: Buffer.alloc(32, 1),
+          mediaKeyTimestamp: 123,
+          width: 800,
+          height: 800,
+          fileSha256: Buffer.alloc(32, 2),
+          fileEncSha256: Buffer.alloc(32, 3)
+        };
+        delete imageMessage[campoAusente];
+        return { imageMessage };
+      },
+      logs: logsRetornoIncompleto
+    });
+    const payloadRetornoIncompleto = await helpersComRetornoIncompleto.montarPayloadTextoWhatsappPorTipoMidia({
+      mensagem: template,
+      destino: { tipoMidia: "imagem_link" },
+      linkFinal: "https://oficial.example/produto",
+      oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" },
+      upload
+    });
+    assert.ok(Buffer.isBuffer(payloadRetornoIncompleto.linkPreview.jpegThumbnail));
+    assert.equal(payloadRetornoIncompleto.linkPreview.highQualityThumbnail, undefined);
+    assert.equal(logsRetornoIncompleto.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]" && contexto.motivoFallback === "hq_retorno_incompleto"), true);
+    assert.equal(logsRetornoIncompleto.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && !contexto.hqAnexado && contexto.motivoFallback === "hq_retorno_incompleto" && contexto.camposHq[campoAusente] === false), true);
+  }
 
   const payloadTextoLink = await helpers.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,

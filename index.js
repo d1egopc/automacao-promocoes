@@ -25442,24 +25442,95 @@ async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "", upload
     jpegThumbnail
   };
 
-  if (typeof upload !== "function") return preview;
+  const dimensoesImagemPreview = async (buffer) => {
+    try {
+      const metadata = await sharp(buffer, { limitInputPixels: 24_000_000 }).metadata();
+      return {
+        largura: Number(metadata?.width) || null,
+        altura: Number(metadata?.height) || null
+      };
+    } catch {
+      return { largura: null, altura: null };
+    }
+  };
+  const dimensoesJpeg = await dimensoesImagemPreview(jpegThumbnail);
+  const logPreviewHq = ({ hqTentado = false, hqAnexado = false, motivoFallback = "", imagemHq = null, dimensoesHq = null, highQualityThumbnail = null } = {}) => {
+    const camposHq = {
+      directPath: Boolean(highQualityThumbnail?.directPath),
+      mediaKey: Boolean(highQualityThumbnail?.mediaKey),
+      fileEncSha256: Boolean(highQualityThumbnail?.fileEncSha256),
+      fileSha256: Boolean(highQualityThumbnail?.fileSha256),
+      mediaKeyTimestamp: Boolean(highQualityThumbnail?.mediaKeyTimestamp)
+    };
+    console.log("[EXECUTOR-LINK-PREVIEW-HQ]", {
+      ofertaId: String(oferta.id || oferta.ofertaId || oferta.engineOfertaId || "") || null,
+      filaItemId: String(oferta.filaItemId || oferta.itemFilaId || "") || null,
+      hqTentado,
+      hqAnexado,
+      motivoFallback: motivoFallback || null,
+      larguraHq: dimensoesHq?.largura || null,
+      alturaHq: dimensoesHq?.altura || null,
+      bytesHq: Buffer.isBuffer(imagemHq) ? imagemHq.length : null,
+      larguraHqPayload: Number(highQualityThumbnail?.width) || null,
+      alturaHqPayload: Number(highQualityThumbnail?.height) || null,
+      larguraJpegThumbnail: dimensoesJpeg.largura,
+      alturaJpegThumbnail: dimensoesJpeg.altura,
+      bytesJpegThumbnail: jpegThumbnail.length,
+      camposHq,
+      previewType: highQualityThumbnail?.previewType || preview.previewType || null
+    });
+  };
+
+  if (typeof upload !== "function") {
+    logPreviewHq({ motivoFallback: "upload_indisponivel" });
+    return preview;
+  }
   try {
     const imagemHq = await sharp(imagemBuffer, { limitInputPixels: 24_000_000 })
       .rotate()
       .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 80, mozjpeg: true })
       .toBuffer();
+    const dimensoesHq = await dimensoesImagemPreview(imagemHq);
     const { imageMessage } = await prepareWAMessageMedia(
       { image: imagemHq },
       { upload, mediaTypeOverride: "thumbnail-link" }
     );
-    if (imageMessage?.directPath && imageMessage?.mediaKey) {
-      preview.highQualityThumbnail = imageMessage;
+    const camposObrigatorios = [
+      "directPath",
+      "mediaKey",
+      "fileEncSha256",
+      "fileSha256",
+      "mediaKeyTimestamp",
+      "width",
+      "height"
+    ];
+    const retornoCompleto = camposObrigatorios.every((campo) => Boolean(imageMessage?.[campo]));
+    if (retornoCompleto) {
+      const highQualityThumbnail = {};
+      for (const campo of [
+        "directPath",
+        "mediaKey",
+        "fileEncSha256",
+        "fileSha256",
+        "mediaKeyTimestamp",
+        "width",
+        "height",
+        "mimetype",
+        "fileLength",
+        "previewType"
+      ]) {
+        if (imageMessage[campo] !== undefined) highQualityThumbnail[campo] = imageMessage[campo];
+      }
+      preview.highQualityThumbnail = highQualityThumbnail;
+      logPreviewHq({ hqTentado: true, hqAnexado: true, imagemHq, dimensoesHq, highQualityThumbnail });
+    } else {
+      console.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", { motivoFallback: "hq_retorno_incompleto" });
+      logPreviewHq({ hqTentado: true, motivoFallback: "hq_retorno_incompleto", imagemHq, dimensoesHq, highQualityThumbnail: imageMessage });
     }
   } catch (erro) {
-    console.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", {
-      motivo: erro?.message || "link_preview_hq_indisponivel"
-    });
+    console.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", { motivoFallback: "hq_upload_erro" });
+    logPreviewHq({ hqTentado: true, motivoFallback: "hq_upload_erro" });
   }
 
   return preview;
