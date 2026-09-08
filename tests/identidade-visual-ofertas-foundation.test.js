@@ -176,7 +176,7 @@ async function main() {
     assert.strictEqual(previewObrigatorio.configEfetiva.logo, "optimus_oficial", "preview obrigatorio deve forcar logo oficial");
     assert.strictEqual(previewObrigatorio.configEfetiva.frase, "AS MELHORES OFERTAS, EM UM SÓ LUGAR", "preview obrigatorio deve forcar frase oficial");
     assert.strictEqual(previewObrigatorio.configEfetiva.ativo, true, "preview obrigatorio nao pode ser desligado");
-    assert.strictEqual(previewObrigatorio.preview.rendererVersion, "identidade-visual-ofertas-v2.1");
+    assert.strictEqual(previewObrigatorio.preview.rendererVersion, "identidade-visual-ofertas-v2.2");
     assert.ok(/^data:image\/png;base64,/.test(previewObrigatorio.preview.dataUrl), "preview deve devolver PNG base64");
     assert.strictEqual(previewObrigatorio.preview.persistida, false, "preview nao deve persistir arte");
     assert.strictEqual(JSON.stringify(repo.store), estadoAntesPreview, "preview nao deve alterar config do workspace");
@@ -275,7 +275,7 @@ async function main() {
     assert.strictEqual(previewRota.status, 200);
     assert.strictEqual(previewRota.body.ok, true);
     assert.strictEqual(previewRota.body.aplicada, true);
-    assert.strictEqual(previewRota.body.preview.rendererVersion, "identidade-visual-ofertas-v2.1");
+    assert.strictEqual(previewRota.body.preview.rendererVersion, "identidade-visual-ofertas-v2.2");
     assert.ok(/^data:image\/png;base64,/.test(previewRota.body.preview.dataUrl), "rota preview deve usar renderer real");
 
     const fonteModulo = fs.readFileSync(path.join(__dirname, "..", "modules", "identidade-visual-ofertas", "service.js"), "utf8");

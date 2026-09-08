@@ -105,7 +105,7 @@ async function main() {
       logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
       config: { frase: "AS MELHORES OFERTAS, EM UM SÓ LUGAR", corIdentidade: "azul" }
     });
-    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2.1");
+    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2.2");
     assert.strictEqual(renderPadrao.metadata.width, 1080, "renderer V2 deve manter largura 1080");
     assert.strictEqual(renderPadrao.metadata.height, 1080, "renderer V2 deve manter altura 1080");
     assert.deepStrictEqual(
@@ -115,13 +115,23 @@ async function main() {
     );
     assert.ok(renderPadrao.metadata.fraseLayout.fontSize >= identidadeVisual.FRASE_SAFE_AREA.minFontSize);
     assert.ok(renderPadrao.metadata.fraseLayout.linhas.length <= 2, "frase default deve caber em ate 2 linhas");
-    assert.ok(identidadeVisual.FAIXA_ALTURA < 224, "faixa V2.1 deve devolver mais area ao produto");
-    assert.ok(renderPadrao.metadata.productRenderedY >= 0, "produto deve iniciar dentro da area util");
-    assert.ok(
-      renderPadrao.metadata.productRenderedY + renderPadrao.metadata.productRenderedHeight <= identidadeVisual.AREA_PRODUTO_ALTURA,
-      "produto deve ficar contido antes da faixa"
+    assert.strictEqual(identidadeVisual.FAIXA_ALTURA, 208, "faixa V2.2 deve preservar a altura aprovada");
+    assert.strictEqual(identidadeVisual.FILETE_ALTURA, 10, "filete superior deve preservar a altura aprovada");
+    assert.strictEqual(identidadeVisual.AREA_PRODUTO_ALTURA, 862, "inicio da faixa deve permanecer congelado");
+    assert.strictEqual(identidadeVisual.AREA_COMPOSICAO_IMAGEM_ALTURA, 976, "imagem deve centralizar na area ampliada V2.2");
+    assert.deepStrictEqual(
+      renderPadrao.metadata.productContainBox,
+      { width: 1000, height: 960 },
+      "produto deve preservar contain no box V2.2 aprovado"
     );
-    assert.deepStrictEqual(renderPadrao.metadata.logoSlot, identidadeVisual.LOGO_SLOT, "logo oficial deve usar slot V2");
+    assert.strictEqual(renderPadrao.metadata.productRenderedX, 40, "produto deve manter centralizacao horizontal");
+    assert.strictEqual(renderPadrao.metadata.productRenderedY, 8, "produto deve manter centralizacao vertical na area ampliada");
+    assert.strictEqual(renderPadrao.metadata.productBehindBannerHeight, 96, "imagem deve manter zona sacrificavel de 96px atras da faixa");
+    assert.deepStrictEqual(
+      renderPadrao.metadata.logoSlot,
+      { width: 248, height: 147, left: 56, top: 902 },
+      "logo oficial deve usar o slot V2.2 aprovado"
+    );
 
     const renderFraseLonga = await identidadeVisual.renderizarIdentidadeVisualBuffer({
       imagemBuffer: produto,

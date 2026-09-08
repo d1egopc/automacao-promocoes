@@ -7,13 +7,16 @@ const {
   contrasteTextoAutomatico
 } = require("./paleta");
 
-const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2.1";
+const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2.2";
 const CANVAS = 1080;
 const FAIXA_ALTURA = 208;
 const FILETE_ALTURA = 10;
 const AREA_PRODUTO_ALTURA = CANVAS - FAIXA_ALTURA - FILETE_ALTURA;
 const BASE_Y = AREA_PRODUTO_ALTURA + FILETE_ALTURA;
-const LOGO_SLOT = Object.freeze({ width: 236, height: 140, left: 56, top: BASE_Y + 34 });
+const AREA_COMPOSICAO_IMAGEM_ALTURA = 976;
+const IMAGEM_PRODUTO_MAX_WIDTH = 1000;
+const IMAGEM_PRODUTO_MAX_HEIGHT = 960;
+const LOGO_SLOT = Object.freeze({ width: 248, height: 147, left: 56, top: BASE_Y + 30 });
 const FRASE_SAFE_AREA = Object.freeze({
   left: 350,
   top: BASE_Y + 28,
@@ -294,8 +297,8 @@ async function normalizarProdutoParaCanvas(buffer) {
   return sharp(buffer, { limitInputPixels: 40_000_000 })
     .rotate()
     .resize({
-      width: 1000,
-      height: AREA_PRODUTO_ALTURA - 82,
+      width: IMAGEM_PRODUTO_MAX_WIDTH,
+      height: IMAGEM_PRODUTO_MAX_HEIGHT,
       fit: "contain",
       withoutEnlargement: false,
       background: { r: 255, g: 255, b: 255, alpha: 0 }
@@ -359,7 +362,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
   const overlay = await svgOverlay(config);
 
   const produtoX = Math.round((CANVAS - (metaProdutoNormalizado.width || 0)) / 2);
-  const produtoY = Math.round((AREA_PRODUTO_ALTURA - (metaProdutoNormalizado.height || 0)) / 2);
+  const produtoY = Math.round((AREA_COMPOSICAO_IMAGEM_ALTURA - (metaProdutoNormalizado.height || 0)) / 2);
   const corIdentidade = texto(config.corIdentidade || "azul");
   const corHex = corHexIdentidade(corIdentidade);
   const corTexto = contrasteTextoAutomatico(corHex);
@@ -392,6 +395,12 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
       productRenderedHeight: metaProdutoNormalizado.height || 0,
       productRenderedX: Math.max(0, produtoX),
       productRenderedY: Math.max(0, produtoY),
+      productCompositionHeight: AREA_COMPOSICAO_IMAGEM_ALTURA,
+      productContainBox: {
+        width: IMAGEM_PRODUTO_MAX_WIDTH,
+        height: IMAGEM_PRODUTO_MAX_HEIGHT
+      },
+      productBehindBannerHeight: Math.max(0, produtoY + (metaProdutoNormalizado.height || 0) - BASE_Y),
       corIdentidade,
       corHex,
       corTexto,
@@ -406,7 +415,10 @@ module.exports = {
   CANVAS,
   FAIXA_ALTURA,
   AREA_PRODUTO_ALTURA,
+  AREA_COMPOSICAO_IMAGEM_ALTURA,
   FILETE_ALTURA,
+  IMAGEM_PRODUTO_MAX_WIDTH,
+  IMAGEM_PRODUTO_MAX_HEIGHT,
   LOGO_SLOT,
   FRASE_SAFE_AREA,
   FONTE_RENDERER_IDENTIDADE_VISUAL,
