@@ -651,11 +651,12 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(panelFonte.includes("tabs.onUpdated.addListener"));
     assert.ok(panelFonte.includes("agendarCapturaAutomatica"));
     assert.ok(panelFonte.includes("state.ultimoPreviewKey === previewKey"));
-    assert.ok(panelFonte.includes("state.previewOferta && state.previewKey === previewKey"));
+    assert.ok(panelFonte.includes("previewCorrespondeAoFormulario"));
     assert.ok(panelFonte.includes("gerarPreview({ automatico: true })"));
+    assert.ok(panelFonte.includes("PREVIEW_DEBOUNCE_MS = 450"));
     assert.ok(panelFonte.includes('new Intl.NumberFormat("pt-BR"'));
     assert.ok(panelFonte.includes("formatarMoeda"));
-    assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden'));
+    assert.ok(panelHtml.includes('id="botaoPreview" class="primary" hidden>Atualizar preview'));
     assert.ok(panelHtml.includes('id="botaoSalvar" disabled'));
     assert.ok(panelHtml.includes('id="botaoEnviar" disabled'));
     assert.ok(!panelHtml.includes("botaoConfirmarEnvio"));
@@ -2505,6 +2506,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     let domReady = null;
     let onUpdated = null;
     let previews = 0;
+    let falharProximoPreview = false;
+    let resolverPreviewPendente = null;
     const ofertasSalvas = [];
     let urlAtual = "https://shopee.com.br/product/123456/987654";
     let produtoAtual = {
@@ -2565,6 +2568,25 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       OptimusCaptureApi: {
         async gerarPreviewCapture(_token, payload) {
           previews += 1;
+          if (falharProximoPreview) {
+            falharProximoPreview = false;
+            throw new Error("preview_indisponivel");
+          }
+          if (resolverPreviewPendente === null && payload.titulo === "Produto A aguardando") {
+            return new Promise((resolve) => {
+              resolverPreviewPendente = () => resolve({
+                oferta: {
+                  titulo: payload.titulo,
+                  precoAtual: payload.precoAtual,
+                  precoAnterior: payload.precoAnterior,
+                  cupom: payload.cupom,
+                  observacoes: payload.observacoes,
+                  urlOriginal: payload.urlOriginal,
+                  urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+                }
+              });
+            });
+          }
           return {
           oferta: {
             titulo: payload.titulo,
@@ -2604,13 +2626,36 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
 
-    elemento("campoCupom").value = "MANUAL10";
-    elemento("campoObservacoes").value = "Compra internacional · impostos estimados";
-    elemento("campoCupom").listeners.input();
+    elemento("campoTitulo").value = "Produto A atualizado";
+    elemento("campoTitulo").listeners.input();
+    assert.strictEqual(elemento("previewView").hidden, false, "edicao mantem o ultimo preview visivel");
+    assert.strictEqual(elemento("statusLink").textContent, "Preview desatualizado");
+    assert.strictEqual(elemento("botaoPreview").hidden, false, "edicao expoe atualizacao manual");
     assert.strictEqual(elemento("botaoSalvar").disabled, true, "edicao manual invalida o preview anterior");
     assert.strictEqual(elemento("botaoEnviar").disabled, true, "envio exige preview regenerado");
-    await elemento("botaoPreview").listeners.click();
-    assert.strictEqual(previews, 2);
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.strictEqual(previews, 2, "titulo gera um preview automatico apos debounce");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false);
+    assert.strictEqual(elemento("botaoEnviar").disabled, false);
+
+    elemento("campoPrecoAtual").value = "R$ 75,00";
+    elemento("campoPrecoAtual").listeners.input();
+    assert.strictEqual(elemento("botaoSalvar").disabled, true, "preco atual deixa preview desatualizado");
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.strictEqual(previews, 3, "preco atual gera preview novo");
+
+    elemento("campoPrecoAnterior").value = "R$ 99,90";
+    elemento("campoPrecoAnterior").listeners.input();
+    assert.strictEqual(elemento("botaoEnviar").disabled, true, "preco anterior deixa preview desatualizado");
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.strictEqual(previews, 4, "preco anterior participa da chave do preview");
+
+    elemento("campoCupom").value = "MANUAL10";
+    elemento("campoCupom").listeners.input();
+    elemento("campoObservacoes").value = "Compra internacional · impostos estimados";
+    elemento("campoObservacoes").listeners.input();
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.strictEqual(previews, 5, "edicoes consecutivas geram somente o preview final");
     await elemento("botaoSalvar").listeners.click();
     assert.strictEqual(ofertasSalvas.length, 1);
     assert.strictEqual(ofertasSalvas[0].cupom, "MANUAL10");
@@ -2618,9 +2663,24 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     elemento("campoObservacoes").value = "Compra internacional · impostos atualizados";
     elemento("campoObservacoes").listeners.input();
+    falharProximoPreview = true;
+    await new Promise(resolve => setTimeout(resolve, 520));
+    assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel atualizar o preview");
+    assert.strictEqual(elemento("botaoPreview").hidden, false, "falha mantem atualizacao manual disponivel");
+    assert.strictEqual(elemento("botaoSalvar").disabled, true);
+    assert.strictEqual(elemento("botaoEnviar").disabled, true);
     await elemento("botaoPreview").listeners.click();
-    assert.strictEqual(previews, 3, "edicao somente da observacao tambem gera preview novo");
+    assert.strictEqual(previews, 7, "edicao somente da observacao tambem gera preview novo apos fallback");
     assert.strictEqual(elemento("botaoSalvar").disabled, false, "preview de observacao alterada pode ser salvo");
+
+    elemento("campoTitulo").value = "Produto A aguardando";
+    elemento("campoTitulo").listeners.input();
+    await new Promise(resolve => setTimeout(resolve, 520));
+    elemento("campoTitulo").value = "Produto A final";
+    elemento("campoTitulo").listeners.input();
+    resolverPreviewPendente();
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A final - R$ 75,00", "resposta antiga nao sobrescreve o formulario novo");
 
     produtoAtual = {
       marketplace: "shopee",
@@ -2632,7 +2692,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     urlAtual = produtoAtual.urlOriginal;
     onUpdated(2, { url: urlAtual });
     await new Promise(resolve => setTimeout(resolve, 1700));
-    assert.strictEqual(previews, 3, "captura invalida nao deve gerar preview");
+    assert.strictEqual(previews, 9, "captura invalida nao deve gerar preview");
     assert.strictEqual(elemento("statusProduto").textContent, "Captura incompleta");
     assert.strictEqual(elemento("estadoPagina").textContent, "Nao foi possivel capturar este produto.");
   }

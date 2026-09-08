@@ -21,6 +21,8 @@
     ultimoPreviewKey: "",
     previewOferta: null,
     previewKey: "",
+    previewDesatualizado: false,
+    previewTimer: null,
     salvandoOferta: false,
     ofertaSalvaId: "",
     previewSalvoKey: "",
@@ -31,6 +33,7 @@
     previewEnviadoKey: ""
   };
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
+  const PREVIEW_DEBOUNCE_MS = 450;
 
   function setTexto(id, valor) {
     const node = el(id);
@@ -115,6 +118,7 @@
       produto.urlOriginal || "",
       produto.titulo || "",
       produto.precoAtual || "",
+      produto.precoAnterior || "",
       produto.precoMin || "",
       produto.precoMax || "",
       produto.temVariacaoPreco === true ? "variacao" : "",
@@ -128,6 +132,15 @@
     return Boolean(state.previewKey && state.previewSalvoKey === state.previewKey);
   }
 
+  function previewCorrespondeAoFormulario() {
+    return Boolean(
+      state.previewOferta &&
+      state.previewKey &&
+      !state.previewDesatualizado &&
+      state.previewKey === chavePreview(produtoEditado())
+    );
+  }
+
   function previewEnviadoAtual() {
     return Boolean(state.previewKey && state.previewEnviadoKey === state.previewKey);
   }
@@ -135,7 +148,7 @@
   function atualizarBotaoSalvar() {
     const botao = el("botaoSalvar");
     if (!botao) return;
-    const temPreview = Boolean(state.previewOferta && state.previewKey);
+    const temPreview = previewCorrespondeAoFormulario();
     const salvo = previewSalvoAtual();
     botao.disabled = state.salvandoOferta || !temPreview || salvo;
     botao.dataset.estado = salvo ? "salvo" : (state.salvandoOferta ? "salvando" : "");
@@ -148,7 +161,7 @@
   function atualizarBotaoEnviar() {
     const botao = el("botaoEnviar");
     if (!botao) return;
-    const temPreview = Boolean(state.previewOferta && state.previewKey);
+    const temPreview = previewCorrespondeAoFormulario();
     const enviado = previewEnviadoAtual();
     const destinosView = el("destinosView");
     const seletorAberto = Boolean(destinosView && !destinosView.hidden);
@@ -175,8 +188,11 @@
   }
 
   function limparPreviewAtual() {
+    if (state.previewTimer) clearTimeout(state.previewTimer);
+    state.previewTimer = null;
     state.previewOferta = null;
     state.previewKey = "";
+    state.previewDesatualizado = false;
     state.salvandoOferta = false;
     state.ofertaSalvaId = "";
     state.enviandoAgora = false;
@@ -186,6 +202,22 @@
     ocultarDestinos();
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
+  }
+
+  function atualizarDescontoDerivado() {
+    const campo = el("campoDesconto");
+    if (!campo) return;
+    const desconto = produtoEditado().descontoPercentual;
+    campo.value = desconto ? `${desconto}%` : "";
+  }
+
+  function agendarAtualizacaoPreview() {
+    if (state.previewTimer) clearTimeout(state.previewTimer);
+    state.previewTimer = setTimeout(() => {
+      state.previewTimer = null;
+      if (!state.previewDesatualizado || !state.auth?.token) return;
+      void gerarPreview({ automatico: true });
+    }, PREVIEW_DEBOUNCE_MS);
   }
 
   function limparSaveCompleto() {
@@ -503,7 +535,8 @@
       const urlCaptura = deteccao.url || aba.url;
       if (automatico && !forcar && state.ultimaUrlCapturada === urlCaptura && state.produto?.urlOriginal === urlCaptura) {
         if (capturaUtilizavel(state.produto)) {
-          if (state.ultimoPreviewKey !== chavePreview(state.produto)) {
+          const previewKeyAtual = chavePreview(produtoEditado());
+          if (!previewCorrespondeAoFormulario() || state.ultimoPreviewKey !== previewKeyAtual) {
             setTexto("estadoPagina", "Preparando oferta...");
             await gerarPreview({ automatico: true });
           } else {
@@ -591,10 +624,14 @@
   }
 
   function invalidarPreviewPorEdicao() {
-    limparPreviewAtual();
-    setHidden("previewView", true);
-    setTexto("estadoPagina", "Atualize o preview para salvar ou enviar");
-    setTexto("statusLink", "Preview precisa ser atualizado");
+    atualizarDescontoDerivado();
+    state.previewDesatualizado = true;
+    setTexto("estadoPagina", "Preview desatualizado");
+    setTexto("statusLink", "Preview desatualizado");
+    setHidden("botaoPreview", false);
+    atualizarBotaoSalvar();
+    atualizarBotaoEnviar();
+    agendarAtualizacaoPreview();
   }
 
   async function gerarPreview(opcoes = {}) {
@@ -611,7 +648,7 @@
       return;
     }
     const previewKey = chavePreview(produto);
-    if (automatico && state.ultimoPreviewKey === previewKey && state.previewOferta && state.previewKey === previewKey) {
+    if (automatico && state.ultimoPreviewKey === previewKey && previewCorrespondeAoFormulario()) {
       return;
     }
     state.enviandoPreview = true;
@@ -659,6 +696,8 @@
       state.ultimoPreviewKey = previewKey;
       state.previewOferta = ofertaPreviewParaSalvar(oferta);
       state.previewKey = previewKey;
+      state.previewDesatualizado = false;
+      setHidden("botaoPreview", true);
       if (state.previewSalvoKey !== previewKey) {
         state.ofertaSalvaId = "";
       }
@@ -684,8 +723,9 @@
       }
       setTexto("estadoPagina", "Nao foi possivel preparar a oferta.");
       setTexto("statusLink", automatico
-        ? "Nao foi possivel preparar a oferta"
+        ? "Nao foi possivel atualizar o preview"
         : `Erro: ${String(erro?.message || "preview_falhou").slice(0, 90)}`);
+      setHidden("botaoPreview", false);
     } finally {
       state.enviandoPreview = false;
       el("botaoPreview").disabled = false;
@@ -697,7 +737,7 @@
   }
 
   async function salvarPreviewAtual() {
-    if (!state.auth?.token || !state.previewOferta || !state.previewKey) return "";
+    if (!state.auth?.token || !previewCorrespondeAoFormulario()) return "";
     if (state.ofertaSalvaId && previewSalvoAtual()) return state.ofertaSalvaId;
     if (state.salvandoOferta) throw new Error("salvamento_em_andamento");
     const previewKey = state.previewKey;
@@ -723,7 +763,7 @@
 
   async function salvarNoOptimus() {
     if (!state.auth?.token || state.salvandoOferta) return;
-    if (!state.previewOferta || !state.previewKey || previewSalvoAtual()) {
+    if (!previewCorrespondeAoFormulario() || previewSalvoAtual()) {
       atualizarBotaoSalvar();
       return;
     }
@@ -748,7 +788,7 @@
   }
 
   async function abrirSeletorEnvio() {
-    if (!state.auth?.token || !state.previewOferta || !state.previewKey || state.enviandoAgora || previewEnviadoAtual()) {
+    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.enviandoAgora || previewEnviadoAtual()) {
       atualizarBotaoEnviar();
       return;
     }
@@ -785,7 +825,7 @@
   }
 
   async function confirmarEnviarAgora() {
-    if (!state.auth?.token || state.enviandoAgora || previewEnviadoAtual()) return;
+    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.enviandoAgora || previewEnviadoAtual()) return;
     const idsUtilizaveis = new Set(destinosUtilizaveis().map((destino) => destino.id));
     const destinosIds = Array.from(state.destinosSelecionados).filter((id) => idsUtilizaveis.has(id));
     if (!destinosIds.length) {
@@ -832,7 +872,7 @@
   }
 
   async function acionarEnviarAgora() {
-    if (!state.auth?.token || !state.previewOferta || !state.previewKey || state.enviandoAgora || previewEnviadoAtual()) {
+    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.enviandoAgora || previewEnviadoAtual()) {
       atualizarBotaoEnviar();
       return;
     }
@@ -941,6 +981,9 @@
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
     el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
+    el("campoTitulo").addEventListener("input", invalidarPreviewPorEdicao);
+    el("campoPrecoAtual").addEventListener("input", invalidarPreviewPorEdicao);
+    el("campoPrecoAnterior").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoCupom").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoObservacoes").addEventListener("input", invalidarPreviewPorEdicao);
     try {
