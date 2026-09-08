@@ -14,17 +14,20 @@ assert.ok(indexFonte.includes('"texto_link"'), "texto_link deve ter caminho expl
 assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "Executor deve encaminhar o linkFinal oficial");
 assert.ok(indexFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
 assert.ok(indexFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
+assert.ok(indexFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");
+assert.ok(indexFonte.includes('mediaTypeOverride: "thumbnail-link"'), "imagem_link deve usar o upload oficial de thumbnail-link");
 assert.ok(indexFonte.includes('return { text: mensagem, linkPreview: null };'), "texto_link e fallback devem suprimir preview");
 assert.ok(indexFonte.includes('link_preview_options: { is_disabled: true }'), "Telegram deve suprimir preview para texto_link");
 assert.ok(indexFonte.includes('imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : ""'), "imagem_completa deve preservar anexo atual");
 
-function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp } = {}) {
+function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp, prepareWAMessageMedia } = {}) {
   const inicio = indexFonte.indexOf("function tipoMidiaDestinoExecutor");
   const fim = indexFonte.indexOf("function montarPayloadTextoTelegramPorTipoMidia", inicio);
   assert.ok(inicio >= 0 && fim > inicio, "helpers de tipo de midia devem existir no Executor");
   const contexto = {
     baixarImagemComoBuffer,
     sharp,
+    prepareWAMessageMedia,
     Buffer,
     normalizarPrecoTextoBR: (valor) => Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     console: { log() {} }
@@ -36,6 +39,8 @@ function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp } = {}) {
 
 async function main() {
   const imagensBaixadas = [];
+  const uploadsHq = [];
+  const upload = async () => ({});
   const imagemOriginal = await sharp({
     create: { width: 4, height: 4, channels: 3, background: { r: 12, g: 34, b: 56 } }
   }).png().toBuffer();
@@ -44,7 +49,21 @@ async function main() {
       imagensBaixadas.push(url);
       return imagemOriginal;
     },
-    sharp
+    sharp,
+    prepareWAMessageMedia: async ({ image }, opcoes) => {
+      uploadsHq.push({ image, opcoes });
+      return {
+        imageMessage: {
+          directPath: "/mms/thumbnail-link",
+          mediaKey: Buffer.alloc(32, 1),
+          mediaKeyTimestamp: 123,
+          width: 800,
+          height: 800,
+          fileSha256: Buffer.alloc(32, 2),
+          fileEncSha256: Buffer.alloc(32, 3)
+        }
+      };
+    }
   });
   assert.equal(helpers.destinoUsaImagemExecutor({}), true, "legado ausente deve continuar com imagem");
   assert.equal(helpers.destinoUsaImagemExecutor({ tipoMidia: "imagem" }), true, "legado imagem deve continuar com imagem");
@@ -62,7 +81,8 @@ async function main() {
       marketplace: "Shopee",
       preco: 99.9,
       imagem: "https://images.example/produto.jpg"
-    }
+    },
+    upload
   });
   assert.equal(payloadImagemLink.text, template, "imagem_link nao pode alterar o Template");
   assert.equal(imagensBaixadas[0], "https://images.example/produto.jpg", "imagem_link deve usar somente a imagem ja resolvida da oferta");
@@ -71,10 +91,17 @@ async function main() {
   assert.equal(payloadImagemLink.linkPreview.description, "Shopee · Por R$ 99,90");
   assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.jpegThumbnail), "imagem_link deve produzir thumbnail JPEG Buffer");
   assert.equal(payloadImagemLink.linkPreview.jpegThumbnail.subarray(0, 2).toString("hex"), "ffd8", "thumbnail deve ser JPEG real");
+  assert.equal(uploadsHq.length, 1, "imagem_link deve preparar thumbnail HQ uma unica vez");
+  assert.ok(Buffer.isBuffer(uploadsHq[0].image), "HQ deve reutilizar buffer da imagem sem novo download");
+  assert.equal(uploadsHq[0].opcoes.upload, upload, "HQ deve usar upload autenticado da sessao WhatsApp");
+  assert.equal(uploadsHq[0].opcoes.mediaTypeOverride, "thumbnail-link");
+  assert.equal(payloadImagemLink.linkPreview.highQualityThumbnail.directPath, "/mms/thumbnail-link");
+  assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.highQualityThumbnail.mediaKey));
 
   const helpersComFalha = carregarHelpersTipoMidia({
     baixarImagemComoBuffer: async () => { throw new Error("falha prevista"); },
-    sharp
+    sharp,
+    prepareWAMessageMedia: async () => ({})
   });
   const payloadFalha = await helpersComFalha.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
@@ -83,6 +110,21 @@ async function main() {
     oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" }
   });
   assert.deepEqual(payloadFalha, { text: template, linkPreview: null }, "falha de preview deve manter envio textual seguro");
+
+  const helpersComFalhaHq = carregarHelpersTipoMidia({
+    baixarImagemComoBuffer: async () => imagemOriginal,
+    sharp,
+    prepareWAMessageMedia: async () => { throw new Error("falha upload hq"); }
+  });
+  const payloadFalhaHq = await helpersComFalhaHq.montarPayloadTextoWhatsappPorTipoMidia({
+    mensagem: template,
+    destino: { tipoMidia: "imagem_link" },
+    linkFinal: "https://oficial.example/produto",
+    oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" },
+    upload
+  });
+  assert.ok(payloadFalhaHq.linkPreview.jpegThumbnail, "falha HQ deve preservar preview JPEG atual");
+  assert.equal(payloadFalhaHq.linkPreview.highQualityThumbnail, undefined, "falha HQ nao pode impedir envio");
 
   const payloadTextoLink = await helpers.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
@@ -108,6 +150,11 @@ async function main() {
   const rico = await generateWAMessageContent({ text: template, linkPreview: previewOficial }, opcoes);
   assert.equal(rico.extendedTextMessage.text, template, "imagem_link nao pode alterar o Template");
   assert.equal(rico.extendedTextMessage.matchedText, previewOficial["matched-text"], "preview deve apontar ao linkFinal oficial");
+  assert.equal(rico.extendedTextMessage.thumbnailDirectPath, "/mms/thumbnail-link", "Baileys deve serializar o thumbnail HQ");
+  assert.equal(rico.extendedTextMessage.thumbnailWidth, 800);
+  assert.equal(rico.extendedTextMessage.thumbnailHeight, 800);
+  assert.ok(Buffer.isBuffer(rico.extendedTextMessage.thumbnailSha256));
+  assert.ok(Buffer.isBuffer(rico.extendedTextMessage.thumbnailEncSha256));
 
   const semPreview = await generateWAMessageContent({ text: template, linkPreview: null }, opcoes);
   assert.equal(semPreview.extendedTextMessage.text, template, "texto_link nao pode alterar o Template");

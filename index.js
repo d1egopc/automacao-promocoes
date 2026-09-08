@@ -7961,7 +7961,8 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         mensagem,
         destino,
         linkFinal: opcoes.linkFinal || "",
-        oferta
+        oferta,
+        upload: sock.waUploadToServer
       })
     );
     if (!imagemEnvioExecutor.ok) {
@@ -10276,7 +10277,8 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
-  downloadMediaMessage
+  downloadMediaMessage,
+  prepareWAMessageMedia
 } = require("@whiskeysockets/baileys");
 const {
   materializarImagemRadarWhatsApp,
@@ -25417,7 +25419,7 @@ function descricaoPreviewManualWhatsapp(oferta = {}) {
   return [marketplace, preco ? `Por R$ ${preco}` : ""].filter(Boolean).join(" · ");
 }
 
-async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "" } = {}) {
+async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "", upload } = {}) {
   const url = textoPreviewManualWhatsapp(linkFinal);
   const title = textoPreviewManualWhatsapp(oferta.titulo || oferta.nome);
   const description = descricaoPreviewManualWhatsapp(oferta);
@@ -25432,15 +25434,37 @@ async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "" } = {})
     .toBuffer();
 
   if (!Buffer.isBuffer(jpegThumbnail) || jpegThumbnail.length === 0) return null;
-  return {
+  const preview = {
     "matched-text": url,
     title,
     description,
     jpegThumbnail
   };
+
+  if (typeof upload !== "function") return preview;
+  try {
+    const imagemHq = await sharp(imagemBuffer, { limitInputPixels: 24_000_000 })
+      .rotate()
+      .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 80, mozjpeg: true })
+      .toBuffer();
+    const { imageMessage } = await prepareWAMessageMedia(
+      { image: imagemHq },
+      { upload, mediaTypeOverride: "thumbnail-link" }
+    );
+    if (imageMessage?.directPath && imageMessage?.mediaKey) {
+      preview.highQualityThumbnail = imageMessage;
+    }
+  } catch (erro) {
+    console.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", {
+      motivo: erro?.message || "link_preview_hq_indisponivel"
+    });
+  }
+
+  return preview;
 }
 
-async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {} } = {}) {
+async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {}, upload } = {}) {
   const tipoMidia = tipoMidiaDestinoExecutor(destino);
   if (tipoMidia === "texto_link") {
     return { text: mensagem, linkPreview: null };
@@ -25449,7 +25473,7 @@ async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino =
   if (tipoMidia !== "imagem_link") return { text: mensagem };
 
   try {
-    const preview = await montarPreviewManualWhatsapp({ oferta, linkFinal });
+    const preview = await montarPreviewManualWhatsapp({ oferta, linkFinal, upload });
     return preview
       ? { text: mensagem, linkPreview: preview }
       : { text: mensagem, linkPreview: null };
