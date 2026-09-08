@@ -70,6 +70,46 @@ async function main() {
     assert.strictEqual(insertNormal.params[7], '["https://meli.la/normal"]');
     assert.strictEqual(insertNormal.params[10], '{"origem":"teste"}');
 
+    const highIsolado = String.fromCharCode(0xD800);
+    const lowIsolado = String.fromCharCode(0xDC00);
+    const emojiValido = "🚀";
+    const entradaComSurrogates = {
+      ascii: "Oferta ASCII",
+      acentos: "Ação promoção São Paulo",
+      emojiValido,
+      emojis: `🔥 ${emojiValido} ✅`,
+      highIsolado: `antes${highIsolado}depois`,
+      lowIsolado: `antes${lowIsolado}depois`,
+      nested: {
+        valor: `n${highIsolado}x${lowIsolado}fim`,
+        [`chave${lowIsolado}`]: "valor"
+      },
+      lista: ["normal", `a${highIsolado}b`, emojiValido]
+    };
+    const sanitizado = await inbox.registrarEventoBruto({
+      origem: "clonador_grupos",
+      origemTipo: "whatsapp",
+      grupoId: "grupo-surrogate@g.us",
+      textoOriginal: "Oferta com Unicode",
+      linksExtraidos: ["https://meli.la/valido", `https://meli.la/${highIsolado}`],
+      metadata: entradaComSurrogates
+    }, { clientes: ["workspace_teste"] });
+    assert.strictEqual(sanitizado.ok, true, "surrogates isolados devem ser sanitizados antes do INSERT JSONB");
+    const insertSanitizado = chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql))[1];
+    const linksSanitizados = JSON.parse(insertSanitizado.params[7]);
+    const metadataSanitizada = JSON.parse(insertSanitizado.params[10]);
+    assert.deepStrictEqual(linksSanitizados, ["https://meli.la/valido", "https://meli.la/�"]);
+    assert.strictEqual(metadataSanitizada.ascii, "Oferta ASCII");
+    assert.strictEqual(metadataSanitizada.acentos, "Ação promoção São Paulo");
+    assert.strictEqual(metadataSanitizada.emojiValido, emojiValido, "par válido deve permanecer idêntico");
+    assert.strictEqual(metadataSanitizada.emojis, `🔥 ${emojiValido} ✅`, "múltiplos emojis válidos devem permanecer idênticos");
+    assert.strictEqual(metadataSanitizada.highIsolado, "antes�depois");
+    assert.strictEqual(metadataSanitizada.lowIsolado, "antes�depois");
+    assert.strictEqual(metadataSanitizada.nested.valor, "n�x�fim", "texto restante deve ser preservado");
+    assert.strictEqual(metadataSanitizada.nested["chave�"], "valor", "chaves JSON também devem ser seguras");
+    assert.deepStrictEqual(metadataSanitizada.lista, ["normal", "a�b", emojiValido]);
+    assert.strictEqual(JSON.parse(JSON.stringify(metadataSanitizada)).emojiValido, emojiValido, "resultado final deve continuar JSON válido");
+
     falharInsert = true;
     const retorno = await inbox.registrarEventoBruto({
       origem: "clonador_grupos",
@@ -83,7 +123,7 @@ async function main() {
     assert.strictEqual(retorno.ok, false);
     assert.strictEqual(retorno.motivo, "query_falhou");
     assert.strictEqual(retorno.erro, "invalid input syntax for type json");
-    assert.strictEqual(chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql)).length, 2);
+    assert.strictEqual(chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql)).length, 3);
 
     const diagnostico = retorno.diagnostico;
     assert.deepStrictEqual(diagnostico.postgres, {

@@ -127,7 +127,27 @@ function diagnosticoErroInsertEvento({ insert = {}, linksExtraidos, linksSeriali
 
 function sanitizarJsonbValor(valor) {
   if (typeof valor === "string") {
-    return valor.replace(/\u0000/g, "");
+    let textoSanitizado = "";
+    for (let indice = 0; indice < valor.length; indice += 1) {
+      const codigo = valor.charCodeAt(indice);
+      const highSurrogate = codigo >= 0xD800 && codigo <= 0xDBFF;
+      const lowSurrogate = codigo >= 0xDC00 && codigo <= 0xDFFF;
+
+      if (highSurrogate) {
+        const proximo = valor.charCodeAt(indice + 1);
+        if (proximo >= 0xDC00 && proximo <= 0xDFFF) {
+          textoSanitizado += valor[indice] + valor[indice + 1];
+          indice += 1;
+        } else {
+          textoSanitizado += "\uFFFD";
+        }
+      } else if (lowSurrogate) {
+        textoSanitizado += "\uFFFD";
+      } else {
+        textoSanitizado += valor[indice];
+      }
+    }
+    return textoSanitizado.replace(/\u0000/g, "");
   }
   if (Array.isArray(valor)) {
     return valor.map(sanitizarJsonbValor);
@@ -135,7 +155,7 @@ function sanitizarJsonbValor(valor) {
   if (valor && typeof valor === "object") {
     const saida = {};
     for (const [chave, item] of Object.entries(valor)) {
-      saida[chave] = sanitizarJsonbValor(item);
+      saida[sanitizarJsonbValor(chave)] = sanitizarJsonbValor(item);
     }
     return saida;
   }
