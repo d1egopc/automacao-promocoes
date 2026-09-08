@@ -631,7 +631,8 @@ function resolverLinha(bloco, oferta = {}) {
     return linhaComPrefixo("💰", cashback);
   }
   if (tipo === "oportunidade") {
-    return classificacaoVisualOferta(oferta);
+    const oportunidade = classificacaoVisualOferta(oferta);
+    return oportunidade ? `✰ Avaliação\n${oportunidade}` : "";
   }
   if (tipo === "descricao_adicional") {
     const descricao = primeiroTexto(oferta.descricaoAdicional, oferta.descricao, oferta.textoResumo, oferta.mensagemResumo);

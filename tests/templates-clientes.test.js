@@ -78,13 +78,14 @@ const templateOrdemSalva = criarTemplate("cliente_a", {
   blocos: [
     { tipo: "cta", ativo: true, ordem: 10 },
     { tipo: "avaliacao", ativo: true, ordem: 20 },
-    { tipo: "cupom", ativo: true, ordem: 30 }
+    { tipo: "vendas", ativo: true, ordem: 30 },
+    { tipo: "cupom", ativo: true, ordem: 40 }
   ]
 }).template;
 assert.deepStrictEqual(
   buscarTemplate("cliente_a", templateOrdemSalva.id).blocos.map(bloco => bloco.tipo),
-  ["cta", "avaliacao", "cupom"],
-  "template antigo/salvo preserva ordem recebida e nao e reordenado pelo catalogo"
+  ["cta", "avaliacao", "vendas", "cupom"],
+  "template antigo/salvo preserva avaliacao e vendas recebidas sem reordenar pelo catalogo"
 );
 
 assertThrowsCodigo(() => criarTemplate("cliente_a", { ...payloadValido, nome: " " }), "template_nome_invalido");
@@ -202,12 +203,9 @@ for (const trecho of [
   "📉 38% OFF",
   "🎟️ Cupom: PROMO10",
   "⚡ Aplique o cupom PROMO10 para obter o valor.",
-  estrelas(5),
+  `✰ Avaliação\n${estrelas(5)}`,
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
-  "✰ Avaliação\n⭐⭐⭐⭐⭐",
-  "👥 1.240 avaliacoes",
-  "🛒 5.200 vendidos",
   "🎟️ Resgate:",
   "📱 APP:",
   "🪙 Moedas:",
@@ -219,6 +217,26 @@ for (const trecho of [
 ]) {
   assert.ok(renderCompletoV11.mensagem.includes(trecho), `preview inclui: ${trecho}`);
 }
+assert.ok(!renderCompletoV11.mensagem.includes("1.240 avaliacoes"), "preview demonstrativo nao usa quantidade de avaliacoes ficticia");
+assert.ok(!renderCompletoV11.mensagem.includes("5.200 vendidos"), "preview demonstrativo nao usa vendas ficticias");
+const renderCompatibilidadeAvaliacaoVendas = renderizarTemplatePersonalizado({
+  oferta: {
+    ...ofertaPreviewV11,
+    avaliacao: "4,8/5",
+    vendas: 5200
+  },
+  template: {
+    id: "tpl_compatibilidade_avaliacao_vendas",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "avaliacao", ativo: true, ordem: 10 },
+      { tipo: "vendas", ativo: true, ordem: 20 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(renderCompatibilidadeAvaliacaoVendas.mensagem.includes("✰ Avaliação\n⭐⭐⭐⭐⭐"), "template antigo continua renderizando avaliacao real quando houver dado");
+assert.ok(renderCompatibilidadeAvaliacaoVendas.mensagem.includes("🛒 5.200 vendidos"), "template antigo continua renderizando vendas reais quando houver dado");
 assert.ok(!renderCompletoV11.mensagem.includes("Pix:"), "preview personalizado nao renderiza linha Pix propria");
 assert.ok(!/[\u00c3\u00c5\u00a2\u00ef\u00bf\u00bd\uFFFD]/u.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
 
