@@ -341,7 +341,8 @@ function documentoAliExpressFixture({
   imagem = "https://ae01.alicdn.com/kf/projetor.jpg",
   precoAnterior = "",
   precoEstrutural = true,
-  ogImagem = imagem
+  ogImagem = imagem,
+  condicaoComercial = ""
 } = {}) {
   const tituloNo = {
     textContent: tituloVisual,
@@ -359,8 +360,8 @@ function documentoAliExpressFixture({
     getAttribute: () => precoAnterior ? `Antes: ${precoAnterior}` : ""
   };
   const main = {
-    textContent: `${h1Aliexpress.textContent}\n${tituloVisual}\n${h1Ia.textContent}\n${precoTexto}\n${precoAnterior}`,
-    innerText: `${h1Aliexpress.innerText}\n${tituloVisual}\n${h1Ia.innerText}\n${precoTexto}\n${precoAnterior}`,
+    textContent: `${h1Aliexpress.textContent}\n${tituloVisual}\n${h1Ia.textContent}\n${precoTexto}\n${precoAnterior}\n${condicaoComercial}`,
+    innerText: `${h1Aliexpress.innerText}\n${tituloVisual}\n${h1Ia.innerText}\n${precoTexto}\n${precoAnterior}\n${condicaoComercial}`,
     querySelector(seletor) {
       if (seletor === "img") return { src: imagem, currentSrc: "", getAttribute: () => imagem };
       return null;
@@ -393,9 +394,10 @@ function documentoAliExpressFixture({
               <h1>Aliexpress</h1>
               <h1>${tituloVisual}</h1>
               <h1>Resumo do item com IA</h1>
-              <div data-pl="product-price">${precoTexto}</div>
-              ${precoAnterior ? `<s>${precoAnterior}</s>` : ""}
-              <img src="${imagem}">
+               <div data-pl="product-price">${precoTexto}</div>
+               ${precoAnterior ? `<s>${precoAnterior}</s>` : ""}
+               ${condicaoComercial ? `<div>${condicaoComercial}</div>` : ""}
+               <img src="${imagem}">
             </div>
           </body>
         </html>
@@ -1680,6 +1682,37 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
   {
     const documento = documentoAliExpressFixture({
+      condicaoComercial: "Produto já no Brasil"
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.observacoes, "Produto já no Brasil");
+    assert.strictEqual(produto.precoAtual, 213.25);
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/kf/projetor.jpg");
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      condicaoComercial: "Compra internacional, R$23,83+ em impostos estimados."
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.observacoes, "Compra internacional, R$23,83+ em impostos estimados.");
+    assert.strictEqual(produto.precoAtual, 213.25);
+    assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.imagem, "https://ae01.alicdn.com/kf/projetor.jpg");
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
+      precoTexto: "R$ 213,25\nR$43,69+ em impostos estimados"
+    });
+    const produto = aliexpress.capturarAliExpressDaPagina(documento, documento.location);
+    assert.strictEqual(produto.observacoes, "", "imposto isolado nao e condicao comercial explicita");
+    assert.strictEqual(produto.precoAtual, 213.25);
+  }
+
+  {
+    const documento = documentoAliExpressFixture({
       precoTexto: "Stern R$ 258,29\n2% de desconto extra ao usar moedas\nR$134,66 x 3 sem juros\nPoupe R$313,29\nR$43,69+ em impostos estimados",
       jsonLd: jsonLdAliExpressProduto({
         name: "Produto AliExpress com fallback JSON-LD",
@@ -2673,6 +2706,18 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(previews, 7, "edicao somente da observacao tambem gera preview novo apos fallback");
     assert.strictEqual(elemento("botaoSalvar").disabled, false, "preview de observacao alterada pode ser salvo");
 
+    produtoAtual = {
+      ...produtoAtual,
+      observacoes: "Produto já no Brasil"
+    };
+    onUpdated(2, { status: "complete" });
+    await new Promise(resolve => setTimeout(resolve, 850));
+    assert.strictEqual(
+      elemento("campoObservacoes").value,
+      "Compra internacional · impostos atualizados",
+      "recaptura da mesma pagina preserva a observacao manual"
+    );
+
     elemento("campoTitulo").value = "Produto A aguardando";
     elemento("campoTitulo").listeners.input();
     await new Promise(resolve => setTimeout(resolve, 520));
@@ -2695,6 +2740,24 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(previews, 9, "captura invalida nao deve gerar preview");
     assert.strictEqual(elemento("statusProduto").textContent, "Captura incompleta");
     assert.strictEqual(elemento("estadoPagina").textContent, "Nao foi possivel capturar este produto.");
+
+    produtoAtual = {
+      marketplace: "shopee",
+      urlOriginal: "https://shopee.com.br/product/123456/333333",
+      titulo: "Produto novo com sugestao propria",
+      precoAtual: 76.87,
+      precoAnterior: "",
+      imagem: "https://down-br.img.susercontent.com/file/mochila.webp",
+      observacoes: "Produto já no Brasil"
+    };
+    urlAtual = produtoAtual.urlOriginal;
+    onUpdated(2, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 850));
+    assert.strictEqual(
+      elemento("campoObservacoes").value,
+      "Produto já no Brasil",
+      "novo produto recebe sua propria sugestao automatica"
+    );
   }
 
   {

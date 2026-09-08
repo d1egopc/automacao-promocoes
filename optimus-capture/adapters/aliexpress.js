@@ -155,6 +155,18 @@
       .filter(Boolean);
   }
 
+  function observacaoComercialVisivel(documento) {
+    const linhas = linhasVisiveis(blocoPrincipal(documento));
+    for (const linha of linhas) {
+      const nacional = linha.match(/\bproduto\s+j[áa]\s+no\s+brasil\b/i);
+      if (nacional) return limparTexto(nacional[0]);
+
+      const internacional = linha.match(/\bcompra\s+internacional\s*,?\s*R\$\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}\s*\+?\s*em\s+impostos?\s+estimados?\.?/i);
+      if (internacional) return limparTexto(internacional[0]);
+    }
+    return "";
+  }
+
   function linhaPrecoConfiavel(linha = "") {
     return /R\$/i.test(linha) &&
       !/(\d+\s*x|x\s*\d+|parcela|parcelamento|frete|envio|imposto|taxa|econom|poupe|moeda|coin|cashback|cupom|avali|vendid|estoque|stern)/i.test(linha);
@@ -274,6 +286,7 @@
       precoAnterior: precoAnterior && baseAnterior && precoAnterior > baseAnterior ? precoAnterior : "",
       imagem: imagemPrincipal(documento, html, produtoJson),
       cupom: "",
+      observacoes: observacaoComercialVisivel(documento),
       fonte: precosVisual.precoAtual || precosVisual.precoMin ? "dom_aliexpress_v1" : "json_ld_aliexpress_v1",
       warnings
     });
@@ -286,6 +299,7 @@
     primeiroProdutoJsonLd,
     precosJsonLd,
     precosVisuais,
+    observacaoComercialVisivel,
     itemIdAliExpress
   };
   global.OptimusCaptureAliExpress = api;

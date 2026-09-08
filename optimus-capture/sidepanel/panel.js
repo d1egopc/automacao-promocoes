@@ -18,6 +18,8 @@
     capturaExecucaoId: 0,
     eventosAbasRegistrados: false,
     ultimaUrlCapturada: "",
+    observacaoManualUrl: "",
+    observacaoManualValor: "",
     ultimoPreviewKey: "",
     previewOferta: null,
     previewKey: "",
@@ -464,6 +466,14 @@
 
   function preencherProduto(produto) {
     state.produto = contrato.normalizarProdutoCapturado(produto);
+    const preservarObservacaoManual = Boolean(
+      state.observacaoManualUrl &&
+      state.observacaoManualUrl === state.produto.urlOriginal
+    );
+    if (!preservarObservacaoManual) {
+      state.observacaoManualUrl = "";
+      state.observacaoManualValor = "";
+    }
     setHidden("emptyView", true);
     setHidden("estadoPagina", false);
     setHidden("produtoView", false);
@@ -473,7 +483,9 @@
     el("campoPrecoAtual").value = textoPrecoProduto(state.produto);
     el("campoPrecoAnterior").value = formatarMoeda(state.produto.precoAnterior);
     el("campoCupom").value = state.produto.cupom || "";
-    el("campoObservacoes").value = state.produto.observacoes || "";
+    el("campoObservacoes").value = preservarObservacaoManual
+      ? state.observacaoManualValor
+      : (state.produto.observacoes || "");
     el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
     setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
     setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
@@ -632,6 +644,12 @@
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
     agendarAtualizacaoPreview();
+  }
+
+  function invalidarPreviewPorObservacaoManual() {
+    state.observacaoManualUrl = String(state.produto?.urlOriginal || "").trim();
+    state.observacaoManualValor = valor("campoObservacoes");
+    invalidarPreviewPorEdicao();
   }
 
   async function gerarPreview(opcoes = {}) {
@@ -985,7 +1003,7 @@
     el("campoPrecoAtual").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoPrecoAnterior").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoCupom").addEventListener("input", invalidarPreviewPorEdicao);
-    el("campoObservacoes").addEventListener("input", invalidarPreviewPorEdicao);
+    el("campoObservacoes").addEventListener("input", invalidarPreviewPorObservacaoManual);
     try {
       state.auth = await auth.restaurarSessao();
     } catch {
