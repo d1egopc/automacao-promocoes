@@ -119,7 +119,8 @@
       produto.precoMax || "",
       produto.temVariacaoPreco === true ? "variacao" : "",
       produto.imagem || "",
-      produto.cupom || ""
+      produto.cupom || "",
+      produto.observacoes || ""
     ].join("|");
   }
 
@@ -422,6 +423,7 @@
     el("campoPrecoAtual").value = "";
     el("campoPrecoAnterior").value = "";
     el("campoCupom").value = "";
+    el("campoObservacoes").value = "";
     el("campoDesconto").value = "";
     setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
@@ -439,6 +441,7 @@
     el("campoPrecoAtual").value = textoPrecoProduto(state.produto);
     el("campoPrecoAnterior").value = formatarMoeda(state.produto.precoAnterior);
     el("campoCupom").value = state.produto.cupom || "";
+    el("campoObservacoes").value = state.produto.observacoes || "";
     el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
     setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
     setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
@@ -582,8 +585,16 @@
       precoMax: state.produto?.precoMax || "",
       temVariacaoPreco: state.produto?.temVariacaoPreco === true,
       precoAnterior: valor("campoPrecoAnterior"),
-      cupom: valor("campoCupom")
+      cupom: valor("campoCupom"),
+      observacoes: valor("campoObservacoes")
     });
+  }
+
+  function invalidarPreviewPorEdicao() {
+    limparPreviewAtual();
+    setHidden("previewView", true);
+    setTexto("estadoPagina", "Atualize o preview para salvar ou enviar");
+    setTexto("statusLink", "Preview precisa ser atualizado");
   }
 
   async function gerarPreview(opcoes = {}) {
@@ -930,6 +941,8 @@
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
     el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
+    el("campoCupom").addEventListener("input", invalidarPreviewPorEdicao);
+    el("campoObservacoes").addEventListener("input", invalidarPreviewPorEdicao);
     try {
       state.auth = await auth.restaurarSessao();
     } catch {

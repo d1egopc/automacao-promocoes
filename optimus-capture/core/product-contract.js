@@ -63,6 +63,7 @@
       condicaoPrecoPor,
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
+      observacoes: texto(bruto.observacoes),
       origem: "optimus_capture_v1",
       fonte: texto(bruto.fonte),
       precoAmbiguo: bruto.precoAmbiguo === true,
@@ -94,6 +95,7 @@
       condicaoPrecoPor: normalizado.condicaoPrecoPor,
       imagem: normalizado.imagem,
       cupom: normalizado.cupom,
+      observacoes: normalizado.observacoes,
       origem: normalizado.origem
     };
   }

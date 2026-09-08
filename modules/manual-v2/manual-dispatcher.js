@@ -176,6 +176,9 @@ function resultadoSucesso({
 
 function adaptarOfertaManualParaTemplate(oferta = {}) {
   const linkFinal = texto(oferta.urlAfiliada || oferta.urlOriginal);
+  const observacoes = Array.isArray(oferta.observacoes)
+    ? oferta.observacoes
+    : [texto(oferta.observacoes)].filter(Boolean);
   return {
     ...oferta,
     nome: texto(oferta.titulo || oferta.nome),
@@ -188,6 +191,7 @@ function adaptarOfertaManualParaTemplate(oferta = {}) {
     linkAfiliado: linkFinal,
     linkFinal,
     categoriaProduto: texto(oferta.categoria || oferta.categoriaProduto),
+    observacoes,
     origem: "manual_v2",
     manualV2: true
   };

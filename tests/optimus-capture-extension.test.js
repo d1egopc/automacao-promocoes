@@ -2505,6 +2505,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     let domReady = null;
     let onUpdated = null;
     let previews = 0;
+    const ofertasSalvas = [];
     let urlAtual = "https://shopee.com.br/product/123456/987654";
     let produtoAtual = {
       marketplace: "shopee",
@@ -2565,15 +2566,21 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
         async gerarPreviewCapture(_token, payload) {
           previews += 1;
           return {
-            oferta: {
-              titulo: payload.titulo,
-              precoAtual: payload.precoAtual,
-              precoAnterior: payload.precoAnterior,
-              urlOriginal: payload.urlOriginal,
-              urlAfiliada: "https://shopee.com.br/oferta-afiliada"
-            }
-          };
-        }
+          oferta: {
+            titulo: payload.titulo,
+            precoAtual: payload.precoAtual,
+            precoAnterior: payload.precoAnterior,
+            cupom: payload.cupom,
+            observacoes: payload.observacoes,
+            urlOriginal: payload.urlOriginal,
+            urlAfiliada: "https://shopee.com.br/oferta-afiliada"
+          }
+        };
+      },
+      async salvarOfertaManualV2(_token, oferta) {
+        ofertasSalvas.push(oferta);
+        return { oferta: { ...oferta, id: `oferta_${ofertasSalvas.length}` } };
+      }
       },
       OptimusCaptureContract: contrato,
       OptimusCaptureDetector: detector
@@ -2597,6 +2604,24 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
 
+    elemento("campoCupom").value = "MANUAL10";
+    elemento("campoObservacoes").value = "Compra internacional · impostos estimados";
+    elemento("campoCupom").listeners.input();
+    assert.strictEqual(elemento("botaoSalvar").disabled, true, "edicao manual invalida o preview anterior");
+    assert.strictEqual(elemento("botaoEnviar").disabled, true, "envio exige preview regenerado");
+    await elemento("botaoPreview").listeners.click();
+    assert.strictEqual(previews, 2);
+    await elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(ofertasSalvas.length, 1);
+    assert.strictEqual(ofertasSalvas[0].cupom, "MANUAL10");
+    assert.strictEqual(ofertasSalvas[0].observacoes, "Compra internacional · impostos estimados");
+
+    elemento("campoObservacoes").value = "Compra internacional · impostos atualizados";
+    elemento("campoObservacoes").listeners.input();
+    await elemento("botaoPreview").listeners.click();
+    assert.strictEqual(previews, 3, "edicao somente da observacao tambem gera preview novo");
+    assert.strictEqual(elemento("botaoSalvar").disabled, false, "preview de observacao alterada pode ser salvo");
+
     produtoAtual = {
       marketplace: "shopee",
       urlOriginal: "https://shopee.com.br/product/123456/111111",
@@ -2607,7 +2632,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     urlAtual = produtoAtual.urlOriginal;
     onUpdated(2, { url: urlAtual });
     await new Promise(resolve => setTimeout(resolve, 1700));
-    assert.strictEqual(previews, 1, "captura invalida nao deve gerar preview");
+    assert.strictEqual(previews, 3, "captura invalida nao deve gerar preview");
     assert.strictEqual(elemento("statusProduto").textContent, "Captura incompleta");
     assert.strictEqual(elemento("estadoPagina").textContent, "Nao foi possivel capturar este produto.");
   }
@@ -2962,6 +2987,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       condicaoPrecoPor: "boleto",
       imagem: "https://http2.mlstatic.com/imagem.webp",
       cupom: "sem demora",
+      observacoes: "Compra internacional · impostos estimados",
       origem: "cliente_malicioso"
     });
     assert.deepStrictEqual(payload, {
@@ -2976,6 +3002,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       condicaoPrecoPor: "",
       imagem: "https://http2.mlstatic.com/imagem.webp",
       cupom: "SEM DEMORA",
+      observacoes: "Compra internacional · impostos estimados",
       origem: "optimus_capture_v1"
     });
   }

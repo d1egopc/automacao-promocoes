@@ -382,6 +382,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     condicaoPrecoPor,
     imagem: sanitizarUrlOpcional(entrada.imagem || entrada.image || entrada.imageUrl),
     cupom: texto(entrada.cupom || entrada.codigoCupom),
+    observacoes: texto(entrada.observacoes || entrada.observacao || entrada.aviso),
     categoria: texto(entrada.categoria || entrada.categoriaProduto),
     parcelamento: texto(entrada.parcelamento || entrada.parcelas),
     urlOriginal: urlValidada.url

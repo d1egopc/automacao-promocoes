@@ -7,6 +7,7 @@ const {
   adaptarOfertaManualParaTemplate,
   imagemDiscordManual
 } = require("../modules/manual-v2/manual-dispatcher");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
 const ofertaA = {
   id: "oferta_a",
@@ -872,6 +873,24 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(adaptada.precoAntigo, "149,90");
     assert.strictEqual(adaptada.linkAfiliado, "https://amzn.to/produto");
     assert.strictEqual(adaptada.categoriaProduto, "eletronicos");
+    assert.deepStrictEqual(adaptarOfertaManualParaTemplate({
+      ...ofertaA,
+      observacoes: "Compra internacional · impostos estimados"
+    }).observacoes, ["Compra internacional · impostos estimados"]);
+    assert.deepStrictEqual(adaptarOfertaManualParaTemplate({
+      ...ofertaA,
+      observacoes: ""
+    }).observacoes, []);
+    const mensagemComObservacao = montarMensagemOferta(adaptarOfertaManualParaTemplate({
+      ...ofertaA,
+      clienteId: "cliente_manual_observacoes",
+      observacoes: "Compra internacional · impostos estimados"
+    }), {
+      clienteId: "cliente_manual_observacoes",
+      destino: { id: "destino_manual_observacoes", tipo: "whatsapp" },
+      plano: {}
+    });
+    assert.ok(mensagemComObservacao.includes("Compra internacional · impostos estimados"));
     assert.strictEqual(adaptada.manualV2, true);
   }
 
@@ -885,6 +904,7 @@ function assertSemSegredos(retorno) {
 
     assert.strictEqual(chamadas.templates.length, 1);
     assert.strictEqual(chamadas.templates[0].oferta.manualV2, true);
+    assert.strictEqual(chamadas.templates[0].oferta.cupom, "MANUAL10");
     assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://amzn.to/produto");
     assert.strictEqual(chamadas.templates[0].opcoes.clienteId, "cliente_a");
     assert.strictEqual(chamadas.templates[0].opcoes.canal, "whatsapp");

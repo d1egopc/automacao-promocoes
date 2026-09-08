@@ -185,14 +185,25 @@ function arquivoOfertas(clienteId) {
 
     {
       const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadValido({
-        clienteId: "cliente_malicioso"
+        clienteId: "cliente_malicioso",
+        cupom: "MANUAL10",
+        observacoes: "Compra internacional · impostos estimados"
       }));
       assert.strictEqual(resposta.status, 200);
       assert.strictEqual(resposta.body.ok, true);
       assert.strictEqual(resposta.body.salva, false);
       assert.strictEqual(resposta.body.oferta.clienteId, "cliente_a");
+      assert.strictEqual(resposta.body.oferta.cupom, "MANUAL10");
+      assert.strictEqual(resposta.body.oferta.observacoes, "Compra internacional · impostos estimados");
       assert.strictEqual(chamadas.at(-1).clienteId, "cliente_a");
       assert.strictEqual(chamadas.at(-1).ofertaBase.titulo, "Produto real capturado");
+
+      const save = await request(server, "POST", "/manual-v2/ofertas", "cliente_cupom_manual", {
+        oferta: resposta.body.oferta
+      });
+      assert.strictEqual(save.status, 201);
+      assert.strictEqual(save.body.oferta.cupom, "MANUAL10");
+      assert.strictEqual(save.body.oferta.observacoes, "Compra internacional · impostos estimados");
     }
 
     {
