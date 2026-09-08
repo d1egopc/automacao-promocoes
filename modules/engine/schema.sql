@@ -149,6 +149,19 @@ CREATE TABLE IF NOT EXISTS engine_processamentos (
 ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS uuid UUID DEFAULT gen_random_uuid();
 ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS detalhes JSONB DEFAULT '{}'::jsonb;
 
+-- Estado operacional minimo para alternancia futura entre as veias da Engine.
+-- Nao contem jobs, ofertas ou regra comercial; e atualizado pelo claim da etapa.
+CREATE TABLE IF NOT EXISTS engine_fairness_origem_fluxo (
+  cliente_id TEXT NOT NULL,
+  etapa TEXT NOT NULL CHECK (etapa IN ('diagnostico_final', 'validacao_final')),
+  lane TEXT NOT NULL CHECK (lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada')),
+  ultima_origem_atendida TEXT CHECK (ultima_origem_atendida IS NULL OR ultima_origem_atendida IN ('optimus', 'clonador_grupos')),
+  ultimo_atendimento_em TIMESTAMPTZ,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (cliente_id, etapa, lane)
+);
+
 CREATE TABLE IF NOT EXISTS engine_eventos_comerciais (
   id BIGSERIAL PRIMARY KEY,
   tipo_evento TEXT NOT NULL,
