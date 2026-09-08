@@ -4,7 +4,9 @@ const path = require("path");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
+const sharp = require("sharp");
 const { normalizarPrecoTextoBR } = require("./utils/moeda");
+const { baixarImagemComoBuffer } = require("./modules/identidade-visual-ofertas/renderer");
 const {
   preservarCandidatosImagemUniversal,
   resolverImagemUniversal,
@@ -7958,7 +7960,8 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       await montarPayloadTextoWhatsappPorTipoMidia({
         mensagem,
         destino,
-        linkFinal: opcoes.linkFinal || ""
+        linkFinal: opcoes.linkFinal || "",
+        oferta
       })
     );
     if (!imagemEnvioExecutor.ok) {
@@ -10273,8 +10276,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
-  downloadMediaMessage,
-  getUrlInfo
+  downloadMediaMessage
 } = require("@whiskeysockets/baileys");
 const {
   materializarImagemRadarWhatsApp,
@@ -25405,7 +25407,40 @@ function destinoUsaImagemExecutor(destino = {}) {
   return !["texto", "imagem_link", "texto_link"].includes(tipoMidia);
 }
 
-async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "" } = {}) {
+function textoPreviewManualWhatsapp(valor = "") {
+  return String(valor ?? "").replace(/\s+/g, " ").trim();
+}
+
+function descricaoPreviewManualWhatsapp(oferta = {}) {
+  const marketplace = textoPreviewManualWhatsapp(oferta.marketplace);
+  const preco = normalizarPrecoTextoBR(oferta.preco ?? oferta.precoAtual);
+  return [marketplace, preco ? `Por R$ ${preco}` : ""].filter(Boolean).join(" · ");
+}
+
+async function montarPreviewManualWhatsapp({ oferta = {}, linkFinal = "" } = {}) {
+  const url = textoPreviewManualWhatsapp(linkFinal);
+  const title = textoPreviewManualWhatsapp(oferta.titulo || oferta.nome);
+  const description = descricaoPreviewManualWhatsapp(oferta);
+  const imagem = textoPreviewManualWhatsapp(oferta.imagem);
+  if (!url || !title || !description || !imagem) return null;
+
+  const imagemBuffer = await baixarImagemComoBuffer(imagem);
+  const jpegThumbnail = await sharp(imagemBuffer, { limitInputPixels: 24_000_000 })
+    .rotate()
+    .resize({ width: 192, height: 192, fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 75, mozjpeg: true })
+    .toBuffer();
+
+  if (!Buffer.isBuffer(jpegThumbnail) || jpegThumbnail.length === 0) return null;
+  return {
+    "matched-text": url,
+    title,
+    description,
+    jpegThumbnail
+  };
+}
+
+async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino = {}, linkFinal = "", oferta = {} } = {}) {
   const tipoMidia = tipoMidiaDestinoExecutor(destino);
   if (tipoMidia === "texto_link") {
     return { text: mensagem, linkPreview: null };
@@ -25414,7 +25449,7 @@ async function montarPayloadTextoWhatsappPorTipoMidia({ mensagem = "", destino =
   if (tipoMidia !== "imagem_link") return { text: mensagem };
 
   try {
-    const preview = linkFinal ? await getUrlInfo(linkFinal) : null;
+    const preview = await montarPreviewManualWhatsapp({ oferta, linkFinal });
     return preview
       ? { text: mensagem, linkPreview: preview }
       : { text: mensagem, linkPreview: null };

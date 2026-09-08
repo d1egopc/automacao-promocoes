@@ -2,6 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const sharp = require("sharp");
 const { enviarDiscord } = require("../modules/discord/discord-sender");
 
 const raiz = path.resolve(__dirname, "..");
@@ -11,26 +12,39 @@ assert.ok(indexFonte.includes('"imagem_completa"'), "imagem_completa deve ter ca
 assert.ok(indexFonte.includes('"imagem_link"'), "imagem_link deve ter caminho explicito");
 assert.ok(indexFonte.includes('"texto_link"'), "texto_link deve ter caminho explicito");
 assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "Executor deve encaminhar o linkFinal oficial");
-assert.ok(indexFonte.includes('await getUrlInfo(linkFinal)'), "imagem_link deve gerar preview pelo linkFinal");
+assert.ok(indexFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
+assert.ok(indexFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
 assert.ok(indexFonte.includes('return { text: mensagem, linkPreview: null };'), "texto_link e fallback devem suprimir preview");
 assert.ok(indexFonte.includes('link_preview_options: { is_disabled: true }'), "Telegram deve suprimir preview para texto_link");
 assert.ok(indexFonte.includes('imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : ""'), "imagem_completa deve preservar anexo atual");
 
-function carregarHelpersTipoMidia(getUrlInfo) {
+function carregarHelpersTipoMidia({ baixarImagemComoBuffer, sharp } = {}) {
   const inicio = indexFonte.indexOf("function tipoMidiaDestinoExecutor");
   const fim = indexFonte.indexOf("function montarPayloadTextoTelegramPorTipoMidia", inicio);
   assert.ok(inicio >= 0 && fim > inicio, "helpers de tipo de midia devem existir no Executor");
-  const contexto = { getUrlInfo, console: { log() {} } };
+  const contexto = {
+    baixarImagemComoBuffer,
+    sharp,
+    Buffer,
+    normalizarPrecoTextoBR: (valor) => Number(valor).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    console: { log() {} }
+  };
   vm.createContext(contexto);
-  vm.runInContext(`${indexFonte.slice(inicio, fim)}; this.helpers = { destinoUsaImagemExecutor, montarPayloadTextoWhatsappPorTipoMidia };`, contexto);
+  vm.runInContext(`${indexFonte.slice(inicio, fim)}; this.helpers = { destinoUsaImagemExecutor, montarPreviewManualWhatsapp, montarPayloadTextoWhatsappPorTipoMidia };`, contexto);
   return contexto.helpers;
 }
 
 async function main() {
-  const chamadasPreview = [];
-  const helpers = carregarHelpersTipoMidia(async (url) => {
-    chamadasPreview.push(url);
-    return { "matched-text": url, title: "Produto oficial" };
+  const imagensBaixadas = [];
+  const imagemOriginal = await sharp({
+    create: { width: 4, height: 4, channels: 3, background: { r: 12, g: 34, b: 56 } }
+  }).png().toBuffer();
+  const helpers = carregarHelpersTipoMidia({
+    baixarImagemComoBuffer: async (url) => {
+      imagensBaixadas.push(url);
+      return imagemOriginal;
+    },
+    sharp
   });
   assert.equal(helpers.destinoUsaImagemExecutor({}), true, "legado ausente deve continuar com imagem");
   assert.equal(helpers.destinoUsaImagemExecutor({ tipoMidia: "imagem" }), true, "legado imagem deve continuar com imagem");
@@ -42,17 +56,31 @@ async function main() {
   const payloadImagemLink = await helpers.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
     destino: { tipoMidia: "imagem_link" },
-    linkFinal: "https://oficial.example/produto"
+    linkFinal: "https://oficial.example/produto",
+    oferta: {
+      titulo: "Produto oficial",
+      marketplace: "Shopee",
+      preco: 99.9,
+      imagem: "https://images.example/produto.jpg"
+    }
   });
   assert.equal(payloadImagemLink.text, template, "imagem_link nao pode alterar o Template");
-  assert.equal(chamadasPreview[0], "https://oficial.example/produto", "imagem_link deve consultar somente linkFinal");
-  assert.equal(payloadImagemLink.linkPreview["matched-text"], "https://oficial.example/produto");
+  assert.equal(imagensBaixadas[0], "https://images.example/produto.jpg", "imagem_link deve usar somente a imagem ja resolvida da oferta");
+  assert.equal(payloadImagemLink.linkPreview["matched-text"], "https://oficial.example/produto", "card deve usar somente linkFinal, nunca o link de cupom");
+  assert.equal(payloadImagemLink.linkPreview.title, "Produto oficial");
+  assert.equal(payloadImagemLink.linkPreview.description, "Shopee · Por R$ 99,90");
+  assert.ok(Buffer.isBuffer(payloadImagemLink.linkPreview.jpegThumbnail), "imagem_link deve produzir thumbnail JPEG Buffer");
+  assert.equal(payloadImagemLink.linkPreview.jpegThumbnail.subarray(0, 2).toString("hex"), "ffd8", "thumbnail deve ser JPEG real");
 
-  const helpersComFalha = carregarHelpersTipoMidia(async () => { throw new Error("falha prevista"); });
+  const helpersComFalha = carregarHelpersTipoMidia({
+    baixarImagemComoBuffer: async () => { throw new Error("falha prevista"); },
+    sharp
+  });
   const payloadFalha = await helpersComFalha.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,
     destino: { tipoMidia: "imagem_link" },
-    linkFinal: "https://oficial.example/produto"
+    linkFinal: "https://oficial.example/produto",
+    oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" }
   });
   assert.deepEqual(payloadFalha, { text: template, linkPreview: null }, "falha de preview deve manter envio textual seguro");
 
@@ -71,11 +99,7 @@ async function main() {
   assert.deepEqual(payloadTextoLegado, { text: template }, "texto legado deve preservar preview automatico atual");
 
   const { generateWAMessageContent } = await import("@whiskeysockets/baileys/lib/Utils/messages.js");
-  const previewOficial = {
-    "matched-text": "https://oficial.example/produto",
-    title: "Produto oficial",
-    description: "Card oficial"
-  };
+  const previewOficial = payloadImagemLink.linkPreview;
   const opcoes = {
     logger: { debug() {}, warn() {}, error() {} },
     getUrlInfo: async () => { throw new Error("nao deve buscar outra URL"); },
