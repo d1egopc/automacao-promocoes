@@ -8,6 +8,7 @@ process.env.DATA_DIR = dataDir;
 
 const {
   criarTemplate,
+  atualizarTemplate,
   buscarTemplate,
   duplicarTemplate,
   listarTemplates,
@@ -44,6 +45,25 @@ const payloadValido = {
   blocos: blocosBase,
   rodape: { ativo: true, texto: "Linha 1\nLinha 2 #promo @optimus" }
 };
+
+const templateDiscord = criarTemplate("cliente_a", {
+  ...payloadValido,
+  nome: "Discord permitido",
+  canais: ["discord"]
+}).template;
+assert.deepStrictEqual(templateDiscord.canais, ["discord"], "Discord deve persistir como canal de template");
+const templateComDiscord = atualizarTemplate("cliente_a", templateDiscord.id, {
+  ...templateDiscord,
+  canais: ["whatsapp", "discord"]
+}).template;
+assert.deepStrictEqual(templateComDiscord.canais, ["whatsapp", "discord"], "atualizacao deve preservar Discord");
+assert.deepStrictEqual(buscarTemplate("cliente_a", templateDiscord.id).canais, ["whatsapp", "discord"], "Discord deve sobreviver a recarga");
+const previewDiscordDireto = previewTemplate("cliente_a", {
+  canal: "discord",
+  template: { ...payloadValido, canais: ["discord"] }
+});
+assert.strictEqual(previewDiscordDireto.ok, false, "preview Discord nao deve criar renderer artificial");
+assert.strictEqual(previewDiscordDireto.erro, "canal_invalido", "renderer deve continuar recusando preview Discord");
 
 const criado = criarTemplate("cliente_a", payloadValido).template;
 assert.ok(criado.id.startsWith("tpl_"), "cria template valido com ID backend");

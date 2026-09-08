@@ -1,4 +1,4 @@
-const { CANAIS_PERMITIDOS, getBlocoCatalogo, tiposBlocosOficiais } = require("./catalogo-blocos");
+const { CANAIS_TEMPLATES_PERMITIDOS, getBlocoCatalogo, tiposBlocosOficiais } = require("./catalogo-blocos");
 
 const SCHEMA_VERSION = 1;
 
@@ -34,7 +34,7 @@ function validarCanais(canais) {
 
   for (const canal of entrada) {
     const normalizado = textoLimpo(canal).toLowerCase();
-    if (!CANAIS_PERMITIDOS.includes(normalizado)) {
+    if (!CANAIS_TEMPLATES_PERMITIDOS.includes(normalizado)) {
       throw erroValidacao("template_canal_invalido", { canal: normalizado });
     }
     if (!vistos.has(normalizado)) {

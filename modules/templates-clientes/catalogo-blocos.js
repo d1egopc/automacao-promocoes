@@ -1,6 +1,7 @@
 const { classificarBlocoComercial, togglePodeOcultarBloco } = require("./politica-blocos-comerciais");
 
 const CANAIS_PERMITIDOS = ["whatsapp", "telegram", "social"];
+const CANAIS_TEMPLATES_PERMITIDOS = [...CANAIS_PERMITIDOS, "discord"];
 
 function bloco({
   tipo,
@@ -320,6 +321,7 @@ function tiposBlocosOficiais() {
 
 module.exports = {
   CANAIS_PERMITIDOS,
+  CANAIS_TEMPLATES_PERMITIDOS,
   CATALOGO_BLOCOS,
   listarCatalogoBlocos,
   getBlocoCatalogo,
