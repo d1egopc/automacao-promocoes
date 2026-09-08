@@ -204,8 +204,19 @@ function beneficioDuplicaOutroPapel(valor = "", oferta = {}) {
   });
 }
 
+function observacoesComerciaisOptimusCapture(oferta = {}) {
+  if (oferta.manualV2 !== true || oferta.fonteImportacao?.adapter !== "optimus_capture_v1") return [];
+  const observacoes = Array.isArray(oferta.observacoes) ? oferta.observacoes : [oferta.observacoes];
+  return observacoes.map(textoUtil).filter(Boolean);
+}
+
 function valorBeneficio(oferta = {}) {
-  if (oferta.contratoComercialFinal?.beneficio !== undefined) return textoUtil(oferta.contratoComercialFinal.beneficio);
+  const observacoesCapture = observacoesComerciaisOptimusCapture(oferta);
+  if (oferta.contratoComercialFinal?.beneficio !== undefined) {
+    const beneficioContrato = textoUtil(oferta.contratoComercialFinal.beneficio);
+    if (beneficioContrato) return beneficioContrato;
+    return observacoesCapture.find(item => !beneficioDuplicaOutroPapel(item, oferta)) || "";
+  }
   const candidatos = [];
   if (Array.isArray(oferta.beneficios)) {
     candidatos.push(...oferta.beneficios);
@@ -218,10 +229,13 @@ function valorBeneficio(oferta = {}) {
     oferta.beneficioDetectado
   );
 
-  return candidatos.map(textoUtil).find(item =>
+  const beneficioExistente = candidatos.map(textoUtil).find(item =>
     beneficioValidoPorPapel(item, oferta) &&
     !beneficioDuplicaOutroPapel(item, oferta)
-  ) || "";
+  );
+  if (beneficioExistente) return beneficioExistente;
+
+  return beneficioExistente || observacoesCapture.find(item => !beneficioDuplicaOutroPapel(item, oferta)) || "";
 }
 
 function valorFrete(oferta = {}) {
@@ -765,7 +779,11 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   }
 
   const blocos = Array.isArray(template.blocos) ? [...template.blocos] : [];
-  const ofertaOficial = prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" });
+  const ofertaOficial = {
+    ...prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" }),
+    manualV2: oferta.manualV2 === true,
+    fonteImportacao: oferta.fonteImportacao
+  };
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)
     : "";

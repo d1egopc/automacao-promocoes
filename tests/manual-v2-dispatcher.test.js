@@ -8,6 +8,7 @@ const {
   imagemDiscordManual
 } = require("../modules/manual-v2/manual-dispatcher");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
+const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
 
 const ofertaA = {
   id: "oferta_a",
@@ -892,6 +893,65 @@ function assertSemSegredos(retorno) {
     });
     assert.ok(mensagemComObservacao.includes("Compra internacional · impostos estimados"));
     assert.strictEqual(adaptada.manualV2, true);
+  }
+
+  {
+    const templateComBeneficio = {
+      id: "tpl_capture_observacoes",
+      canais: ["whatsapp"],
+      blocos: [
+        { tipo: "beneficio", ativo: true, ordem: 10 },
+        { tipo: "cupom", ativo: true, ordem: 20 },
+        { tipo: "preco_por", ativo: true, ordem: 30 },
+        { tipo: "link", ativo: true, ordem: 40 }
+      ]
+    };
+    const renderCapture = observacoes => renderizarTemplatePersonalizado({
+      oferta: adaptarOfertaManualParaTemplate({
+        ...ofertaA,
+        fonteImportacao: { adapter: "optimus_capture_v1" },
+        cupom: "",
+        observacoes
+      }),
+      template: templateComBeneficio,
+      canal: "whatsapp"
+    });
+
+    const observacaoLivre = renderCapture("Condição comercial definida pelo cliente");
+    assert.ok(observacaoLivre.mensagem.includes("Condição comercial definida pelo cliente"), "Capture renderiza observacao comercial livre no beneficio");
+
+    const produtoNoBrasil = renderCapture("Produto já no Brasil");
+    assert.ok(produtoNoBrasil.mensagem.includes("Produto já no Brasil"), "Capture renderiza condicao Produto já no Brasil");
+
+    const compraInternacional = renderCapture("Compra internacional, R$23,83+ em impostos estimados.");
+    assert.ok(compraInternacional.mensagem.includes("Compra internacional, R$23,83+ em impostos estimados."), "Capture preserva a condicao internacional completa");
+
+    const observacaoTecnicaOutroAdapter = renderizarTemplatePersonalizado({
+      oferta: adaptarOfertaManualParaTemplate({
+        ...ofertaA,
+        fonteImportacao: { adapter: "kabum_awin_manual_v1" },
+        cupom: "",
+        observacoes: "awin_deeplink_ausente_url_afiliada_vazia"
+      }),
+      template: templateComBeneficio,
+      canal: "whatsapp"
+    });
+    assert.ok(!observacaoTecnicaOutroAdapter.mensagem.includes("awin_deeplink_ausente_url_afiliada_vazia"), "observacao tecnica de adapter nao-Capture nao e promovida");
+
+    const cupomNoBlocoProprio = renderizarTemplatePersonalizado({
+      oferta: adaptarOfertaManualParaTemplate({
+        ...ofertaA,
+        fonteImportacao: { adapter: "optimus_capture_v1" },
+        cupom: "MANUAL10",
+        observacoes: "MANUAL10"
+      }),
+      template: templateComBeneficio,
+      canal: "whatsapp"
+    });
+    assert.ok(cupomNoBlocoProprio.mensagem.includes("🎟️ Cupom: MANUAL10"), "cupom continua no bloco proprio");
+    assert.ok(!cupomNoBlocoProprio.mensagem.includes("⚡ MANUAL10"), "observacao duplicada de cupom nao gera beneficio paralelo");
+    assert.ok(cupomNoBlocoProprio.mensagem.includes("✅ Por:"), "preco continua renderizado");
+    assert.ok(cupomNoBlocoProprio.mensagem.includes(ofertaA.urlAfiliada), "link continua renderizado");
   }
 
   {
