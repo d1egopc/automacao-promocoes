@@ -33,7 +33,7 @@
     if (titulo.length < 8 || titulo.length > 240) return "";
     if (!/[a-zA-ZÀ-ÿ]/.test(titulo)) return "";
     if (/^(kabum|br kabum|loja kabum)$/i.test(titulo)) return "";
-    if (/(R\$|\d+x|pix|cupom|frete|parcel|desconto|economia|prime|^-\d+%$)/i.test(titulo)) return "";
+    if (/(R\$|\b\d+\s*x(?:\s+de)?\s+R\$|pix|cupom|frete|parcel|desconto|economia|prime|^-\d+%$)/i.test(titulo)) return "";
     return titulo.replace(/\s*(?:\||-)\s*(?:KaBuM!?|Kabum BR|BR Kabum)\s*$/i, "").trim();
   }
 

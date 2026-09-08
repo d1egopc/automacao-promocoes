@@ -953,6 +953,48 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const tituloRyzen5700X = "Processador AMD Ryzen 7 5700X, 3.4GHz (4.6GHz Max Turbo), Cache 36MB, 8 Nucleos, 16 Threads, AM4, Sem Video Integrado - 100-100000926WOF";
+    const documento = documentoKabumFixture({
+      url: "https://www.kabum.com.br/produto/320797/processador-amd-ryzen-7-5700x",
+      titulo: tituloRyzen5700X,
+      precoAtual: "R$ 1.299,99",
+      precoAnterior: "R$ 2.686,16",
+      ogImagem: "https://images.kabum.com.br/produtos/fotos/320797/ryzen-5700x.jpg"
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.titulo, tituloRyzen5700X, "modelo 5700X nao pode ser confundido com parcelamento");
+    assert.strictEqual(produto.completo, true, "caso real equivalente deve ficar completo");
+    assert.strictEqual(produto.precoAtual, 1299.99);
+    assert.strictEqual(produto.precoAnterior, 2686.16);
+    assert.strictEqual(produto.condicaoPrecoPor, "pix");
+    assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/320797/ryzen-5700x.jpg");
+  }
+
+  {
+    const tituloRyzen5600X = "Processador AMD Ryzen 5 5600X, 3.7GHz, 6 Nucleos, 12 Threads, AM4";
+    const documento = documentoKabumFixture({ titulo: tituloRyzen5600X });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.titulo, tituloRyzen5600X, "modelo 5600X nao pode ser confundido com parcelamento");
+  }
+
+  for (const tituloComercial of ["10x R$ 152,94", "10 x R$ 152,94", "12x de R$ 100,00"]) {
+    const documento = documentoKabumFixture({ titulo: tituloComercial });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.titulo, "", `${tituloComercial} deve continuar rejeitado como titulo comercial`);
+  }
+
+  {
+    const tituloRyzen5700X = "Processador AMD Ryzen 7 5700X, AM4";
+    const documentoOg = documentoKabumFixture({ titulo: "" });
+    documentoOg.documentElement.outerHTML = `<html><head><meta property="og:title" content="${tituloRyzen5700X}"><meta property="og:image" content="https://images.kabum.com.br/produtos/fotos/944475/placa.jpg"></head></html>`;
+    assert.strictEqual(kabum.capturarKabumDaPagina(documentoOg, documentoOg.location).titulo, tituloRyzen5700X, "og:title com 5700X deve ser aceito");
+
+    const documentoTitle = documentoKabumFixture({ titulo: "" });
+    documentoTitle.documentElement.outerHTML = `<html><head><title>${tituloRyzen5700X} | KaBuM!</title><meta property="og:image" content="https://images.kabum.com.br/produtos/fotos/944475/placa.jpg"></head></html>`;
+    assert.strictEqual(kabum.capturarKabumDaPagina(documentoTitle, documentoTitle.location).titulo, tituloRyzen5700X, "title com 5700X deve ser aceito");
+  }
+
+  {
     const pequena = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_m.jpg";
     const hq = "https://images.kabum.com.br/produtos/fotos/701357/placa-mae-msi-x870e_gg.jpg";
     const documento = documentoKabumFixture({
