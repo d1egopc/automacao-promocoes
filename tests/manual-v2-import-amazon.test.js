@@ -13,6 +13,7 @@ const {
   precoAnteriorManualAmazon,
   origemPrecoAnteriorComprovadaAmazon,
   detectarBloqueioAmazon,
+  canonicalizarUrlEntradaAmazonManual,
   limparLinkAmazonManual
 } = require("../modules/manual-v2/adapters/amazon.manual.adapter");
 
@@ -57,7 +58,29 @@ function criarDeps(produto, chamadas = []) {
     precoAntigoOrigem: "a-text-price .a-offscreen"
   }), "299,90");
   assert.strictEqual(detectarBloqueioAmazon({ aviso: "captcha solicitado" }), true);
+  assert.strictEqual(
+    canonicalizarUrlEntradaAmazonManual("https://www.amazon.com.br/Produto/dp/B0ABCDEF12/ref=sr_1_1?tag=externa-20&pd_rd_i=B0ABCDEF12&pf_rd_p=x&psc=1"),
+    "https://www.amazon.com.br/dp/B0ABCDEF12"
+  );
   assert.strictEqual(limparLinkAmazonManual("https://www.amazon.com.br/Produto/dp/B0ABCDEF12?tag=tag-20&ref=x"), "https://www.amazon.com.br/dp/B0ABCDEF12?tag=tag-20");
+}
+
+{
+  const chamadas = [];
+  const oferta = await importarAmazonManualV2(
+    "https://www.amazon.com.br/Produto/dp/B0ABCDEF12/ref=sr_1_1?tag=externa-20&pd_rd_i=B0ABCDEF12&psc=1",
+    criarDeps({
+      marketplace: "amazon",
+      linkOriginal: "https://www.amazon.com.br/dp/B0ABCDEF12?tag=workspace-20",
+      linkAfiliado: "https://www.amazon.com.br/dp/B0ABCDEF12?tag=workspace-20",
+      titulo: "Produto Amazon Canonico",
+      precoAtual: "129,90",
+      imagem: "https://images-na.ssl-images-amazon.com/produto.jpg"
+    }, chamadas)
+  );
+
+  assert.strictEqual(chamadas[1].url, "https://www.amazon.com.br/dp/B0ABCDEF12", "conversor recebe apenas a URL canonica sem tag externa");
+  assert.strictEqual(oferta.urlAfiliada, "https://www.amazon.com.br/dp/B0ABCDEF12?tag=workspace-20", "tag oficial retornada pelo conversor continua autoridade");
 }
 
 {

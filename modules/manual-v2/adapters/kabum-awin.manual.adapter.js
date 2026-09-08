@@ -44,6 +44,24 @@ function urlKabumProduto(url = "") {
   }
 }
 
+function canonicalizarUrlEntradaKabumManual(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "kabum.com.br" || !/^\/produto\/\d+(?:\/|$)/i.test(parsed.pathname)) {
+      return texto(url);
+    }
+
+    parsed.protocol = "https:";
+    parsed.hostname = "www.kabum.com.br";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return texto(url);
+  }
+}
+
 function produtoKabumGenerico(produto = {}) {
   const titulo = normalizarChave(produto.titulo || produto.nome);
   const motivo = normalizarChave(
@@ -198,6 +216,7 @@ async function importarKabumAwinManualV2(urlManual = "", opcoes = {}) {
   if (!urlOriginal) {
     throw new Error("url_manual_obrigatoria");
   }
+  const urlEntradaCanonica = canonicalizarUrlEntradaKabumManual(urlOriginal);
 
   const clienteId = texto(opcoes.clienteId) || "admin";
   const importarProdutoKabumViaAwin = typeof opcoes.importarProdutoKabumViaAwin === "function"
@@ -208,23 +227,23 @@ async function importarKabumAwinManualV2(urlManual = "", opcoes = {}) {
   let produto = {};
   let erroImportacao = "";
   try {
-    produto = await importarProdutoKabumViaAwin(urlOriginal, clienteId, {
+    produto = await importarProdutoKabumViaAwin(urlEntradaCanonica, clienteId, {
       gerarDeepLinkAwin
     });
   } catch (erro) {
     erroImportacao = erro?.motivo || erro?.codigo || erro?.message || "kabum_importador_falhou";
     produto = {
-      linkOriginal: urlOriginal,
+      linkOriginal: urlEntradaCanonica,
       aviso: erroImportacao
     };
   }
 
   const dados = produto && typeof produto === "object" ? produto : {};
-  const produtoId = produtoIdKabumManual(dados, urlOriginal);
-  const generico = produtoKabumGenerico(dados) || !produtoId || !urlKabumProduto(primeiroTexto(dados.linkOriginal, urlOriginal));
+  const produtoId = produtoIdKabumManual(dados, urlEntradaCanonica);
+  const generico = produtoKabumGenerico(dados) || !produtoId || !urlKabumProduto(primeiroTexto(dados.linkOriginal, urlEntradaCanonica));
   const usarDados = !generico;
   const precoAnterior = usarDados ? precoAnteriorManualKabum(dados) : "";
-  const urlAfiliada = usarDados ? urlAfiliadaAwinGerada(dados, urlOriginal) : "";
+  const urlAfiliada = usarDados ? urlAfiliadaAwinGerada(dados, urlEntradaCanonica) : "";
   const avisos = avisosKabumAwin(dados, {
     generico,
     urlAfiliada,
@@ -238,7 +257,7 @@ async function importarKabumAwinManualV2(urlManual = "", opcoes = {}) {
   const oferta = normalizarOfertaManualV2(
     {
       marketplace: "kabum",
-      urlOriginal: primeiroTexto(dados.linkOriginal, urlOriginal),
+      urlOriginal: primeiroTexto(dados.linkOriginal, urlEntradaCanonica),
       urlAfiliada,
       titulo: usarDados ? primeiroTexto(dados.titulo, dados.nome) : "",
       precoAtual: usarDados ? primeiroTexto(dados.precoAtual, dados.preco) : "",
@@ -277,6 +296,7 @@ async function importarKabumAwinManualV2(urlManual = "", opcoes = {}) {
 module.exports = {
   ADAPTER_KABUM_AWIN_MANUAL_V2,
   importarKabumAwinManualV2,
+  canonicalizarUrlEntradaKabumManual,
   produtoIdKabumManual,
   produtoKabumGenerico,
   precoAnteriorManualKabum,

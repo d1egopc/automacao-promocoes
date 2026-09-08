@@ -13,6 +13,7 @@ const {
   produtoIdKabumManual,
   produtoKabumGenerico,
   precoAnteriorManualKabum,
+  canonicalizarUrlEntradaKabumManual,
   urlAfiliadaAwinGerada
 } = require("../modules/manual-v2/adapters/kabum-awin.manual.adapter");
 
@@ -62,6 +63,30 @@ function criarDeps(produto, chamadas = []) {
   assert.strictEqual(urlAfiliadaAwinGerada({
     linkAfiliado: "https://www.kabum.com.br/produto/944475/produto"
   }, "https://www.kabum.com.br/produto/944475/produto"), "");
+  assert.strictEqual(
+    canonicalizarUrlEntradaKabumManual("https://www.kabum.com.br/produto/944475/produto-teste?utm_source=capture&gclid=abc#detalhes"),
+    "https://www.kabum.com.br/produto/944475/produto-teste"
+  );
+}
+
+{
+  const chamadas = [];
+  const deeplinkAwin = "https://www.awin1.com/cread.php?awinmid=17729&awinaffid=123&ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F944475%2Fproduto-teste";
+  const oferta = await importarKabumAwinManualV2(
+    "https://www.kabum.com.br/produto/944475/produto-teste?utm_source=capture&gclid=abc",
+    criarDeps({
+      marketplace: "kabum",
+      produtoIdCanonico: "944475",
+      linkOriginal: "https://www.kabum.com.br/produto/944475/produto-teste",
+      linkAfiliado: deeplinkAwin,
+      titulo: "Produto KaBuM Canonico",
+      precoAtual: "R$ 799,90",
+      imagem: "https://images.kabum.com.br/produtos/fotos/944475/produto.jpg"
+    }, chamadas)
+  );
+
+  assert.strictEqual(chamadas[0].url, "https://www.kabum.com.br/produto/944475/produto-teste", "Link Builder recebe a URL de destino sem parametros de navegacao");
+  assert.strictEqual(oferta.urlAfiliada, deeplinkAwin, "deeplink AWIN retornado permanece opaco e inalterado");
 }
 
 {

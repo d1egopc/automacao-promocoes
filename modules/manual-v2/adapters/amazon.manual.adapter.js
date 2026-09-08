@@ -104,14 +104,29 @@ function corrigirImagemUrl(url = "") {
     .replace("&amp;", "&");
 }
 
+function extrairAsinAmazonManual(url = "") {
+  try {
+    const u = new URL(String(url || "").trim());
+    return (
+      u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
+      u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1] ||
+      u.pathname.match(/\/([A-Z0-9]{10})(?:\/|$)/i)?.[1] ||
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function canonicalizarUrlEntradaAmazonManual(url = "") {
+  const asin = extrairAsinAmazonManual(url);
+  return asin ? `https://www.amazon.com.br/dp/${asin}` : texto(url);
+}
+
 function limparLinkAmazonManual(url = "") {
   try {
     const u = new URL(String(url || "").trim());
-    const asin =
-      u.pathname.match(/\/dp\/([A-Z0-9]{10})/i)?.[1] ||
-      u.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i)?.[1] ||
-      u.pathname.match(/\/([A-Z0-9]{10})(?:\/|$)/i)?.[1];
-
+    const asin = extrairAsinAmazonManual(url);
     if (!asin) return u.toString();
     const tag = u.searchParams.get("tag") || "";
     return tag
@@ -254,6 +269,7 @@ async function importarAmazonManualV2(urlManual = "", opcoes = {}) {
   if (!urlOriginal) {
     throw new Error("url_manual_obrigatoria");
   }
+  const urlEntradaCanonica = canonicalizarUrlEntradaAmazonManual(urlOriginal);
 
   const clienteId = texto(opcoes.clienteId) || "admin";
   const importarAmazon = criarImportadorAmazonManualV2(opcoes);
@@ -263,7 +279,7 @@ async function importarAmazonManualV2(urlManual = "", opcoes = {}) {
       : null) ||
     {};
 
-  const produto = await importarAmazon(urlOriginal, {
+  const produto = await importarAmazon(urlEntradaCanonica, {
     ...integracao,
     clienteId,
     credenciais: integracao?.credenciais || {}
@@ -279,7 +295,7 @@ async function importarAmazonManualV2(urlManual = "", opcoes = {}) {
   const oferta = normalizarOfertaManualV2(
     {
       marketplace: "amazon",
-      urlOriginal: primeiroTexto(dados.linkOriginal, dados.urlOriginal, urlOriginal),
+      urlOriginal: primeiroTexto(dados.linkOriginal, dados.urlOriginal, urlEntradaCanonica),
       urlAfiliada: primeiroTexto(dados.linkAfiliado, dados.linkFinal, dados.link),
       titulo,
       precoAtual: bloqueado ? "" : primeiroTexto(dados.precoAtual, dados.preco),
@@ -314,5 +330,7 @@ module.exports = {
   precoAnteriorManualAmazon,
   origemPrecoAnteriorComprovadaAmazon,
   detectarBloqueioAmazon,
+  extrairAsinAmazonManual,
+  canonicalizarUrlEntradaAmazonManual,
   limparLinkAmazonManual
 };
