@@ -208,6 +208,32 @@ async function testarErroBridgeNaoDerrubaPipeline() {
   assert.strictEqual(repo.estado.buffer[0].status, "erro");
 }
 
+async function testarDiagnosticoInboxPropagadoParaBuffer() {
+  const repo = criarRepoMemoria();
+  repo.estado.destinos.set("workspace_a", [{ destinoId: "destino_ok" }]);
+  repo.adicionarBuffer(itemBuffer({ id: "105_diagnostico", mensagemId: "msg_diagnostico" }));
+  const diagnostico = {
+    operacao: "evento_insert",
+    postgres: { code: "22P02", position: "231", detail: 'Token "[redigido]" is invalid.', constraint: null },
+    parametros: {
+      links_extraidos: { tipo: "object", array: true, tamanhoSerializado: 42, hashSerializado: "a".repeat(64), jsonStringifyOk: true, jsonParseSerializadoOk: true },
+      metadata: { tipo: "object", array: false, tamanhoSerializado: 84, hashSerializado: "b".repeat(64), jsonStringifyOk: true, jsonParseSerializadoOk: true }
+    }
+  };
+  const bridge = criarBridgeClonadorGrupos({
+    repository: repo,
+    resolverRedirectUniversal: async () => ({ ok: false, status: "ignorado" }),
+    registrarEventoBruto: async () => ({ ok: false, motivo: "query_falhou", erro: "invalid input syntax for type json", diagnostico }),
+    logger: { log() {} }
+  });
+
+  const resultado = await bridge.processarCapturasPendentes({ limite: 1 });
+  assert.strictEqual(resultado.erros, 1);
+  const buffer = repo.estado.buffer.find(item => item.id === "105_diagnostico");
+  assert.strictEqual(buffer.status, "erro");
+  assert.deepStrictEqual(buffer.metadata.clonadorGruposBridge.diagnostico, diagnostico);
+}
+
 async function testarWorkspaceNaoUsaDestinosDeOutroCliente() {
   const repo = criarRepoMemoria();
   repo.estado.destinos.set("workspace_a", [{ destinoId: "destino_a" }]);
@@ -566,6 +592,7 @@ async function main() {
     await testarConcorrenciaNaoDuplica();
     await testarFalhaRedirectPreservaOriginal();
     await testarErroBridgeNaoDerrubaPipeline();
+    await testarDiagnosticoInboxPropagadoParaBuffer();
     await testarWorkspaceNaoUsaDestinosDeOutroCliente();
     await testarDeduplicacaoIsoladaPorOrigem();
     testarComercialCapturado();

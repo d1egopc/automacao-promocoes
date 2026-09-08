@@ -260,9 +260,15 @@ async function recriarPoolEngineSeNecessario({ clientPool, erroDb, duranteConnec
 
 function erroSanitizadoDb(erro) {
   const mensagem = String(erro?.message || "erro_desconhecido").slice(0, 180);
+  const detalhe = String(erro?.detail || "")
+    .replace(/"[^"\\]*(?:\\.[^"\\]*)*"/g, '"[redigido]"')
+    .slice(0, 180);
   return {
     erroCodigo: erro?.code ? String(erro.code).slice(0, 40) : null,
     erroMensagem: mensagem,
+    erroPosicao: erro?.position ? String(erro.position).slice(0, 40) : null,
+    erroDetalhe: detalhe || null,
+    erroConstraint: erro?.constraint ? String(erro.constraint).slice(0, 120) : null,
     connectionTerminated: /connection terminated unexpectedly/i.test(mensagem)
   };
 }
@@ -456,6 +462,10 @@ async function queryEngine(texto, params = []) {
       ok: false,
       motivo: "query_falhou",
       erro: e.message,
+      erroCodigo: erroDb.erroCodigo,
+      erroPosicao: erroDb.erroPosicao,
+      erroDetalhe: erroDb.erroDetalhe,
+      erroConstraint: erroDb.erroConstraint,
       metricas: { tempoPoolMs, tempoSqlMs }
     };
   } finally {

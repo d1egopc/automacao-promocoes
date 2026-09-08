@@ -293,6 +293,7 @@ function criarBridgeClonadorGrupos(deps = {}) {
           status: "erro",
           motivo: resultado?.motivo || "registrar_evento_falhou",
           erro: resultado?.erro || "",
+          ...(resultado?.diagnostico ? { diagnostico: resultado.diagnostico } : {}),
           atualizadoEm: new Date().toISOString()
         }
       });

@@ -84,6 +84,47 @@ function jsonbParam(valor, fallback) {
   return serializado === undefined ? JSON.stringify(fallback) : serializado;
 }
 
+function diagnosticoJsonbSeguro(valor, serializado = "") {
+  let stringifyOk = true;
+  try {
+    JSON.stringify(valor);
+  } catch (_) {
+    stringifyOk = false;
+  }
+
+  let parseOk = true;
+  try {
+    JSON.parse(serializado);
+  } catch (_) {
+    parseOk = false;
+  }
+
+  return {
+    tipo: typeof valor,
+    array: Array.isArray(valor),
+    tamanhoSerializado: Buffer.byteLength(String(serializado || ""), "utf8"),
+    hashSerializado: crypto.createHash("sha256").update(String(serializado || "")).digest("hex"),
+    jsonStringifyOk: stringifyOk,
+    jsonParseSerializadoOk: parseOk
+  };
+}
+
+function diagnosticoErroInsertEvento({ insert = {}, linksExtraidos, linksSerializados, metadata, metadataSerializada } = {}) {
+  return {
+    operacao: "evento_insert",
+    postgres: {
+      code: insert.erroCodigo || null,
+      position: insert.erroPosicao || null,
+      detail: insert.erroDetalhe || null,
+      constraint: insert.erroConstraint || null
+    },
+    parametros: {
+      links_extraidos: diagnosticoJsonbSeguro(linksExtraidos, linksSerializados),
+      metadata: diagnosticoJsonbSeguro(metadata, metadataSerializada)
+    }
+  };
+}
+
 function sanitizarJsonbValor(valor) {
   if (typeof valor === "string") {
     return valor.replace(/\u0000/g, "");
@@ -302,6 +343,8 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       };
     }
 
+    const linksSerializados = jsonbParam(evento.linksExtraidos, []);
+    const metadataSerializada = jsonbParam(eventoBruto.metadata, {});
     const insert = await queryEngine(
       `INSERT INTO engine_eventos_brutos (
          origem, fonte, origem_tipo, sessao_id, grupo_id, grupo_nome,
@@ -319,23 +362,30 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         evento.grupoId,
         evento.grupoNome,
         evento.textoOriginal,
-        jsonbParam(evento.linksExtraidos, []),
+        linksSerializados,
         marketplaceDetectado,
         hashEvento,
-        jsonbParam(eventoBruto.metadata, {}),
+        metadataSerializada,
         evento.capturadoEm
       ]
     );
 
     if (!insert.ok) {
-      logEngineEventoBrutoErro({ motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" });
+      const diagnostico = diagnosticoErroInsertEvento({
+        insert,
+        linksExtraidos: evento.linksExtraidos,
+        linksSerializados,
+        metadata: eventoBruto.metadata,
+        metadataSerializada
+      });
+      logEngineEventoBrutoErro({ motivo: insert.motivo || "insert_falhou", erro: insert.erro || "", diagnostico });
       coberturaRadar.registrar("engine_evento_erro", {
         ...contextoCobertura,
         decisao: "erro",
         motivo: insert.motivo || "insert_falhou",
         erro: insert.erro || ""
       });
-      return { ok: false, motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" };
+      return { ok: false, motivo: insert.motivo || "insert_falhou", erro: insert.erro || "", diagnostico };
     }
 
     const id = insert.resultado.rows[0]?.id;
