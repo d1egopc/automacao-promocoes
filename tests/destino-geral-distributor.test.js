@@ -141,6 +141,52 @@ function contexto(destinosWorkspace) {
       true,
       "origemOfertas=clonador aceita Clonador"
     );
+    assert.strictEqual(
+      destinos.origemOfertaEhClonadorGrupos(oferta({
+        origem: "engine",
+        metadata: { clonadorGrupos: { bufferId: "1152" } }
+      })),
+      true,
+      "metadata.clonadorGrupos identifica a oferta de fila como Clonador"
+    );
+    assert.strictEqual(
+      destinos.origemOfertaEhClonadorGrupos(oferta({
+        origem: "engine",
+        metadata: { metadataEvento: { origem: "clonador_grupos" } }
+      })),
+      true,
+      "metadataEvento.origem continua identificando Clonador"
+    );
+    assert.strictEqual(
+      destinos.origemOfertaEhClonadorGrupos(oferta({
+        origem: "engine_importer",
+        metadata: { origemComercial: "capturada" }
+      })),
+      false,
+      "engine_importer sem evidencia do Clonador continua sendo Optimus"
+    );
+    assert.strictEqual(
+      destinos.origemOfertaEhClonadorGrupos(oferta({
+        origem: "radar",
+        metadata: { clonadorGrupos: { destinoIds: ["destino_clone"] } }
+      })),
+      false,
+      "metadata generica sem o rastro estrutural do bridge nao cria falso positivo"
+    );
+    const itemFilaClonador = oferta({
+      origem: "engine",
+      metadata: { clonadorGrupos: { bufferId: "1152", destinoIds: ["destino_clone"] } }
+    });
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ id: "destino_clone", origemOfertas: "clonador" }), itemFilaClonador).aceita,
+      true,
+      "item real de fila com origem=engine e metadata.clonadorGrupos entra no destino Clone"
+    );
+    assert.strictEqual(
+      destinos.analisarDestinoOferta(destino({ origemOfertas: "optimus" }), itemFilaClonador).aceita,
+      false,
+      "item de fila Clonador continua bloqueado em destino Optimus"
+    );
     const radarEmClone = destinos.analisarDestinoOferta(destino({ origemOfertas: "clonador" }), oferta({ origem: "radar" }));
     assert.strictEqual(radarEmClone.aceita, false, "origemOfertas=clonador rejeita Radar");
     assert.strictEqual(radarEmClone.motivo, "origem_nao_permitida");

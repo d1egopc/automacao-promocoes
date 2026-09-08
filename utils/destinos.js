@@ -221,6 +221,8 @@ function origemOfertaEhClonadorGrupos(oferta = {}) {
   const eventoMetadata = objetoDestinoSeguro(oferta?.evento_metadata);
   const metadataEventoJob = objetoDestinoSeguro(jobMetadata.metadataEvento);
   const metadataEventoOferta = objetoDestinoSeguro(metadata.metadataEvento);
+  const metadataClonadorGrupos = objetoDestinoSeguro(metadata.clonadorGrupos);
+  const possuiRastroEstruturalClonador = Boolean(String(metadataClonadorGrupos.bufferId || "").trim());
   const origens = [
     oferta?.origem,
     oferta?.fonte,
@@ -229,7 +231,10 @@ function origemOfertaEhClonadorGrupos(oferta = {}) {
     metadataEventoJob.origem,
     metadataEventoOferta.origem
   ];
-  return origens.some(origem => String(origem || "").trim().toLowerCase() === "clonador_grupos");
+  return (
+    origens.some(origem => String(origem || "").trim().toLowerCase() === "clonador_grupos") ||
+    possuiRastroEstruturalClonador
+  );
 }
 
 function destinoAceitaOrigemOferta(destino = {}, oferta = {}) {
