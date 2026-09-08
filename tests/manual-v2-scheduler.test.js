@@ -189,6 +189,25 @@ function assertSemSegredos(valor) {
   }
 
   {
+    const clienteId = "cliente_identidade_visual_agendada";
+    const oferta = agendarOferta(clienteId, "oferta_identidade_visual_agendada", "2026-08-15T11:55:00.000Z");
+    const aplicarIdentidadeVisualOferta = async () => ({ imagemFinal: "https://img.example/vestida.jpg" });
+    let depsRecebidas = null;
+
+    const resposta = await processarOfertaAgendadaManualV2({ clienteId, ofertaId: oferta.id }, depsScheduler(async (_entrada, deps) => {
+      depsRecebidas = deps;
+      return sucesso();
+    }, { aplicarIdentidadeVisualOferta }));
+
+    assert.strictEqual(resposta.ok, true);
+    assert.strictEqual(
+      depsRecebidas.aplicarIdentidadeVisualOferta,
+      aplicarIdentidadeVisualOferta,
+      "scheduler deve encaminhar ao dispatcher a mesma dependencia oficial de Identidade Visual"
+    );
+  }
+
+  {
     const clienteId = "cliente_power_off";
     const oferta = agendarOferta(clienteId, "oferta_power_off_runtime", "2026-08-15T11:55:00.000Z", {
       destinosIds: ["destino_wa"],
@@ -404,6 +423,16 @@ function assertSemSegredos(valor) {
     for (const termo of proibidos) {
       assert.ok(!fonteScheduler.includes(termo), `scheduler Manual V2 nao pode referenciar ${termo}`);
     }
+
+    const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+    const bootstrapScheduler = fonteIndex.slice(
+      fonteIndex.indexOf("function iniciarManualV2SchedulerOperacional()"),
+      fonteIndex.indexOf("function iniciarManualV2RetentionOperacional()")
+    );
+    assert.ok(
+      bootstrapScheduler.includes("aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta"),
+      "bootstrap do scheduler deve injetar o servico oficial de Identidade Visual"
+    );
   }
 
   console.log("manual-v2-scheduler.test.js ok");

@@ -22201,6 +22201,7 @@ function iniciarManualV2SchedulerOperacional() {
     corrigirImagemUrl,
     httpClient: axios,
     enviarOfertaManualV2: enviarOfertaManualV2Dispatcher,
+    aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
     intervalMs: process.env.MANUAL_V2_SCHEDULER_INTERVAL_MS,
     logger: console
   });
