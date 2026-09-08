@@ -490,8 +490,99 @@ async function testarRepositorioTransacional() {
   }
 }
 
+function testarClaimFairEntreWorkspaces() {
+  const fonte = fs.readFileSync(path.join(raiz, "modules/clonador-grupos/repository.js"), "utf8");
+
+  assert.ok(
+    /WITH pendentes_por_workspace[\s\S]*?SELECT DISTINCT ON \(b\.cliente_id\)/.test(fonte),
+    "claim deve eleger uma candidata por workspace antes de escolher o proximo buffer"
+  );
+  assert.ok(
+    /MAX\(h\.updated_at\)[\s\S]*?h\.status IN \('processando', 'pronta', 'encaminhada', 'repetida', 'erro'\)/.test(fonte),
+    "ultimo atendimento deve usar apenas estados tocados pelo bridge, nunca insercoes capturadas"
+  );
+  assert.ok(
+    /ORDER BY p\.ultimo_atendimento ASC NULLS FIRST, p\.capturado_em ASC, p\.id_representante ASC/.test(fonte),
+    "workspace sem atendimento previo deve ser atendido antes; empates preservam antiguidade"
+  );
+  assert.ok(
+    /JOIN workspace_escolhido w ON w\.cliente_id = b\.cliente_id[\s\S]*?ORDER BY b\.capturado_em ASC, b\.id ASC/.test(fonte),
+    "dentro do workspace escolhido a ordem deve continuar capturado_em ASC, id ASC"
+  );
+  assert.strictEqual(
+    (fonte.match(/FOR UPDATE(?: OF b)? SKIP LOCKED/g) || []).length,
+    2,
+    "workspace representativo e buffer final devem permanecer protegidos por SKIP LOCKED"
+  );
+  assert.ok(
+    /status = 'processando' AND b\.updated_at < NOW\(\) - \(\$2::text \|\| ' minutes'\)::interval/.test(fonte),
+    "recuperacao de processando obsoleto deve continuar no claim final"
+  );
+}
+
+function selecionarClaimFairMemoria(itens = [], agoraMs = Date.now()) {
+  const pendentes = itens.filter(item =>
+    item.status === "capturada" ||
+    (item.status === "processando" && Number(item.updatedAt || 0) < agoraMs - 15 * 60 * 1000)
+  );
+  const porWorkspace = new Map();
+  for (const item of pendentes) {
+    const lista = porWorkspace.get(item.clienteId) || [];
+    lista.push(item);
+    porWorkspace.set(item.clienteId, lista);
+  }
+  const tocados = itens.filter(item => ["processando", "pronta", "encaminhada", "repetida", "erro"].includes(item.status));
+  const workspace = [...porWorkspace.keys()].sort((a, b) => {
+    const ultimoA = Math.max(...tocados.filter(item => item.clienteId === a).map(item => Number(item.updatedAt || 0)), -Infinity);
+    const ultimoB = Math.max(...tocados.filter(item => item.clienteId === b).map(item => Number(item.updatedAt || 0)), -Infinity);
+    if (ultimoA !== ultimoB) return ultimoA - ultimoB;
+    const primeiraA = porWorkspace.get(a).sort((x, y) => x.capturadoEm - y.capturadoEm || x.id - y.id)[0];
+    const primeiraB = porWorkspace.get(b).sort((x, y) => x.capturadoEm - y.capturadoEm || x.id - y.id)[0];
+    return primeiraA.capturadoEm - primeiraB.capturadoEm || primeiraA.id - primeiraB.id;
+  })[0];
+  return (porWorkspace.get(workspace) || []).sort((a, b) => a.capturadoEm - b.capturadoEm || a.id - b.id)[0] || null;
+}
+
+function testarPoliticaFairnessBridge() {
+  const itens = [
+    ...Array.from({ length: 50 }, (_, i) => ({ id: i + 1, clienteId: "a", capturadoEm: i + 1, status: "capturada", updatedAt: 0 })),
+    ...Array.from({ length: 2 }, (_, i) => ({ id: 101 + i, clienteId: "b", capturadoEm: 101 + i, status: "capturada", updatedAt: 0 })),
+    ...Array.from({ length: 3 }, (_, i) => ({ id: 201 + i, clienteId: "c", capturadoEm: 201 + i, status: "capturada", updatedAt: 0 }))
+  ];
+  const atendidos = [];
+  for (let agora = 1; agora <= 5; agora += 1) {
+    const item = selecionarClaimFairMemoria(itens, agora);
+    atendidos.push(item.clienteId);
+    item.status = "processando";
+    item.updatedAt = agora;
+  }
+  assert.ok(atendidos.includes("b") && atendidos.includes("c"), "A=50/B=2/C=3 deve atender B e C no primeiro lote de cinco");
+  assert.deepStrictEqual(atendidos, ["a", "b", "c", "a", "b"]);
+
+  const unico = Array.from({ length: 5 }, (_, i) => ({ id: i + 1, clienteId: "unico", capturadoEm: i + 1, status: "capturada", updatedAt: 0 }));
+  for (let agora = 1; agora <= 5; agora += 1) {
+    const item = selecionarClaimFairMemoria(unico, agora);
+    assert.ok(item, "workspace unico deve continuar usando todos os slots");
+    item.status = "processando";
+    item.updatedAt = agora;
+  }
+
+  const ordemInterna = [
+    { id: 20, clienteId: "a", capturadoEm: 20, status: "capturada", updatedAt: 0 },
+    { id: 10, clienteId: "a", capturadoEm: 10, status: "capturada", updatedAt: 0 },
+    { id: 30, clienteId: "b", capturadoEm: 30, status: "pronta", updatedAt: 1 }
+  ];
+  const escolhido = selecionarClaimFairMemoria(ordemInterna, 2);
+  assert.strictEqual(escolhido.id, 10, "dentro do workspace escolhido deve preservar capturado_em ASC, id ASC");
+
+  const obsoleto = [{ id: 1, clienteId: "a", capturadoEm: 1, status: "processando", updatedAt: 0 }];
+  assert.strictEqual(selecionarClaimFairMemoria(obsoleto, 16 * 60 * 1000).id, 1, "processando obsoleto continua recuperavel");
+}
+
 async function main() {
   await testarRepositorioTransacional();
+  testarClaimFairEntreWorkspaces();
+  testarPoliticaFairnessBridge();
 
   const repo = criarRepoMemoria();
   const app = criarApp(repo);

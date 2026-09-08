@@ -350,15 +350,42 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     const clienteId = texto(opcoes.clienteId || opcoes.cliente_id);
     const timeoutMinutos = Math.max(1, Math.min(60, Number(opcoes.timeoutMinutos || 15)));
     const resultado = await executar(`
-      WITH candidata AS (
-        SELECT id
-          FROM clonador_grupos_buffer
-         WHERE ($1::text = '' OR cliente_id = $1)
+      WITH pendentes_por_workspace AS (
+        SELECT DISTINCT ON (b.cliente_id)
+          b.id AS id_representante,
+          b.cliente_id,
+          b.capturado_em,
+          (
+            SELECT MAX(h.updated_at)
+              FROM clonador_grupos_buffer h
+             WHERE h.cliente_id = b.cliente_id
+               AND h.status IN ('processando', 'pronta', 'encaminhada', 'repetida', 'erro')
+          ) AS ultimo_atendimento
+          FROM clonador_grupos_buffer b
+         WHERE ($1::text = '' OR b.cliente_id = $1)
            AND (
-             status = 'capturada'
-             OR (status = 'processando' AND updated_at < NOW() - ($2::text || ' minutes')::interval)
+             b.status = 'capturada'
+             OR (b.status = 'processando' AND b.updated_at < NOW() - ($2::text || ' minutes')::interval)
            )
-         ORDER BY capturado_em ASC, id ASC
+         ORDER BY b.cliente_id, b.capturado_em ASC, b.id ASC
+      ),
+      workspace_escolhido AS (
+        SELECT b.cliente_id
+          FROM pendentes_por_workspace p
+          JOIN clonador_grupos_buffer b ON b.id = p.id_representante
+         ORDER BY p.ultimo_atendimento ASC NULLS FIRST, p.capturado_em ASC, p.id_representante ASC
+         FOR UPDATE OF b SKIP LOCKED
+         LIMIT 1
+      ),
+      candidata AS (
+        SELECT b.id
+          FROM clonador_grupos_buffer b
+          JOIN workspace_escolhido w ON w.cliente_id = b.cliente_id
+         WHERE (
+           b.status = 'capturada'
+           OR (b.status = 'processando' AND b.updated_at < NOW() - ($2::text || ' minutes')::interval)
+         )
+         ORDER BY b.capturado_em ASC, b.id ASC
          FOR UPDATE SKIP LOCKED
          LIMIT 1
       )
