@@ -85,6 +85,8 @@ function criarResolverPlatformVariables(valores = {}) {
     });
     assert.strictEqual(resultado.ok, true, "Texto deve enviar com sucesso");
     assert.strictEqual(resultado.messageId, "msg_123");
+    assert.strictEqual(resultado.checkpointClassificacao, "enviado");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_sucesso");
     assert.strictEqual(resultado.imagemEnviada, false);
     assert.strictEqual(http.chamadas.length, 1);
     assert.ok(http.chamadas[0].url.endsWith("/channels/canal_1/messages"));
@@ -102,6 +104,7 @@ function criarResolverPlatformVariables(valores = {}) {
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_resposta_sem_message_id");
     assert.strictEqual(resultado.statusHttp, 200);
+    assert.strictEqual(resultado.checkpointClassificacao, "ambigua", "2xx sem provider id nao prova ausencia de efeito externo");
   }
 
   {
@@ -271,6 +274,8 @@ function criarResolverPlatformVariables(valores = {}) {
     });
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_imagem_tipo_invalido");
+    assert.strictEqual(resultado.checkpointClassificacao, "falha_confirmada", "falha de imagem ocorre antes do POST ao Discord");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_preflight_imagem");
     assert.strictEqual(http.chamadas.filter((c) => c.metodo === "POST").length, 0, "Imagem invalida nao envia texto por decisao automatica");
   }
 
@@ -304,6 +309,7 @@ function criarResolverPlatformVariables(valores = {}) {
       assert.strictEqual(resultado.ok, false);
       assert.strictEqual(resultado.erro, esperado);
       assert.strictEqual(resultado.statusHttp, status);
+      assert.strictEqual(resultado.checkpointClassificacao, status < 500 ? "falha_confirmada" : "ambigua");
     }
   }
 
@@ -318,6 +324,25 @@ function criarResolverPlatformVariables(valores = {}) {
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_rate_limit");
     assert.strictEqual(resultado.retryAfterMs, 1500);
+    assert.strictEqual(resultado.checkpointClassificacao, "falha_confirmada", "429 recebido do Discord confirma rejeicao da tentativa");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_http_rejeitado");
+  }
+
+  {
+    const timeout = new Error("socket timeout");
+    timeout.code = "ECONNRESET";
+    const http = criarHttp({ postError: timeout });
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem: "Oferta com transporte incerto",
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.statusHttp, null);
+    assert.strictEqual(resultado.checkpointClassificacao, "ambigua", "ausencia de resposta HTTP nao prova ausencia de envio");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_transport_ambiguo");
+    assert.strictEqual(http.chamadas.filter(item => item.metodo === "POST").length, 1, "erro ocorreu apos iniciar a tentativa HTTP");
   }
 
   {
@@ -331,6 +356,8 @@ function criarResolverPlatformVariables(valores = {}) {
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_mensagem_muito_longa");
     assert.strictEqual(http.chamadas.length, 0);
+    assert.strictEqual(resultado.checkpointClassificacao, "falha_confirmada");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_preflight_payload");
   }
 
   {
@@ -343,6 +370,8 @@ function criarResolverPlatformVariables(valores = {}) {
     });
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_bot_token_ausente");
+    assert.strictEqual(resultado.checkpointClassificacao, "falha_confirmada");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_preflight_config");
   }
 
   {
@@ -355,6 +384,8 @@ function criarResolverPlatformVariables(valores = {}) {
     });
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.erro, "discord_channel_id_ausente");
+    assert.strictEqual(resultado.checkpointClassificacao, "falha_confirmada");
+    assert.strictEqual(resultado.checkpointMotivo, "discord_preflight_destino");
   }
 
   {

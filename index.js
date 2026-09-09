@@ -8270,8 +8270,19 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             });
             if (!resultadoDiscord?.ok) {
               const erro = new Error(resultadoDiscord?.erro || "discord_nao_enviado");
-              const statusHttpDiscord = Number(resultadoDiscord?.statusHttp || 0);
-              erro.checkpointFalhaConfirmada = statusHttpDiscord >= 400 && statusHttpDiscord < 600;
+              const classificacaoCheckpointDiscord = resultadoDiscord?.checkpointClassificacao === "falha_confirmada"
+                ? "falha_confirmada"
+                : "ambigua";
+              const motivoCheckpointDiscord = String(resultadoDiscord?.checkpointMotivo || "discord_resultado_desconhecido")
+                .replace(/[^a-z0-9_]/gi, "")
+                .slice(0, 80) || "discord_resultado_desconhecido";
+              console.log("[FILA-DISCORD-CHECKPOINT]", {
+                classificacao: classificacaoCheckpointDiscord,
+                motivo: motivoCheckpointDiscord,
+                statusHttp: Number(resultadoDiscord?.statusHttp || 0) || null
+              });
+              erro.checkpointFalhaConfirmada = classificacaoCheckpointDiscord === "falha_confirmada";
+              erro.checkpointMotivoTecnico = motivoCheckpointDiscord;
               throw erro;
             }
             return { valor: resultadoDiscord, providerMessageId: resultadoDiscord.messageId || "" };

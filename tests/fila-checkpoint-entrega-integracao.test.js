@@ -28,7 +28,8 @@ assert.match(whatsapp, /registrarCreditoCheckpoint\(checkpointEnvioWhatsapp\)/);
 const discord = trecho('// ================= ENVIO DISCORD', '// ================= ENVIO TELEGRAM');
 assert.match(discord, /canal:\s*"discord"/);
 assert.match(discord, /providerMessageId:\s*resultadoDiscord\.messageId/);
-assert.match(discord, /statusHttpDiscord >= 400 && statusHttpDiscord < 600/);
+assert.match(discord, /resultadoDiscord\?\.checkpointClassificacao === "falha_confirmada"/);
+assert.match(discord, /\[FILA-DISCORD-CHECKPOINT\]/);
 assert.match(discord, /registrarCreditoCheckpoint\(checkpointDiscord\)/);
 
 const telegram = trecho('// ================= ENVIO TELEGRAM', '  } catch (e) {');

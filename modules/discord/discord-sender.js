@@ -54,7 +54,28 @@ function retryAfterMs(data = {}, headers = {}) {
   return null;
 }
 
-function respostaErro({ channelId = "", erro = "", status = null, retryAfter = null } = {}) {
+function classificacaoCheckpointHttp(status = null) {
+  const codigo = Number(status || 0) || 0;
+  if (codigo >= 400 && codigo < 500) {
+    return {
+      checkpointClassificacao: "falha_confirmada",
+      checkpointMotivo: "discord_http_rejeitado"
+    };
+  }
+  return {
+    checkpointClassificacao: "ambigua",
+    checkpointMotivo: codigo >= 500 ? "discord_http_servidor_ambiguo" : "discord_resposta_invalida"
+  };
+}
+
+function respostaErro({
+  channelId = "",
+  erro = "",
+  status = null,
+  retryAfter = null,
+  checkpointClassificacao = "ambigua",
+  checkpointMotivo = "discord_resultado_desconhecido"
+} = {}) {
   return {
     ok: false,
     channelId: texto(channelId),
@@ -63,7 +84,9 @@ function respostaErro({ channelId = "", erro = "", status = null, retryAfter = n
     imagemEnviada: false,
     erro: texto(erro) || "discord_envio_falhou",
     statusHttp: status,
-    retryAfterMs: retryAfter
+    retryAfterMs: retryAfter,
+    checkpointClassificacao,
+    checkpointMotivo
   };
 }
 
@@ -204,41 +227,70 @@ function dataEnvio(now) {
 function validarRespostaMensagemDiscord(resposta = {}, channelId = "") {
   const status = Number(resposta?.status || 0) || 0;
   if (status < 200 || status >= 300) {
-    return { ok: false, erro: "discord_status_http_invalido", statusHttp: status || null };
+    return {
+      ok: false,
+      erro: "discord_status_http_invalido",
+      statusHttp: status || null,
+      ...classificacaoCheckpointHttp(status)
+    };
   }
 
   const data = resposta?.data || {};
   const messageId = texto(data.id);
   if (!messageId) {
-    return { ok: false, erro: "discord_resposta_sem_message_id", statusHttp: status };
+    return {
+      ok: false,
+      erro: "discord_resposta_sem_message_id",
+      statusHttp: status,
+      checkpointClassificacao: "ambigua",
+      checkpointMotivo: "discord_resposta_invalida"
+    };
   }
 
   const channelIdResposta = texto(data.channel_id || data.channelId);
   if (channelIdResposta && channelIdResposta !== texto(channelId)) {
-    return { ok: false, erro: "discord_channel_resposta_divergente", statusHttp: status };
+    return {
+      ok: false,
+      erro: "discord_channel_resposta_divergente",
+      statusHttp: status,
+      checkpointClassificacao: "ambigua",
+      checkpointMotivo: "discord_resposta_invalida"
+    };
   }
 
   return {
     ok: true,
     data,
     messageId,
-    statusHttp: status
+    statusHttp: status,
+    checkpointClassificacao: "enviado",
+    checkpointMotivo: "discord_sucesso"
   };
 }
 
 async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", suprimirEmbeds = false, env = process.env, httpClient, now = () => new Date(), getPlatformVariableImpl, config = null } = {}) {
   const canal = texto(channelId);
   const conteudo = texto(mensagem);
-  const configDiscord = config || await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
+  let configDiscord;
+  try {
+    configDiscord = config || await obterConfigDiscordAsync({ env, getPlatformVariableImpl });
+  } catch {
+    return respostaErro({
+      channelId: canal,
+      erro: "discord_config_indisponivel",
+      checkpointClassificacao: "falha_confirmada",
+      checkpointMotivo: "discord_preflight_config"
+    });
+  }
 
-  if (!configDiscord.botToken) return respostaErro({ channelId: canal, erro: "discord_bot_token_ausente" });
-  if (!canal) return respostaErro({ channelId: canal, erro: "discord_channel_id_ausente" });
-  if (!conteudo && !texto(imagemUrl)) return respostaErro({ channelId: canal, erro: "discord_mensagem_vazia" });
+  if (!configDiscord.botToken) return respostaErro({ channelId: canal, erro: "discord_bot_token_ausente", checkpointClassificacao: "falha_confirmada", checkpointMotivo: "discord_preflight_config" });
+  if (!canal) return respostaErro({ channelId: canal, erro: "discord_channel_id_ausente", checkpointClassificacao: "falha_confirmada", checkpointMotivo: "discord_preflight_destino" });
+  if (!conteudo && !texto(imagemUrl)) return respostaErro({ channelId: canal, erro: "discord_mensagem_vazia", checkpointClassificacao: "falha_confirmada", checkpointMotivo: "discord_preflight_payload" });
   if (conteudo.length > DISCORD_MESSAGE_LIMIT) {
-    return respostaErro({ channelId: canal, erro: "discord_mensagem_muito_longa" });
+    return respostaErro({ channelId: canal, erro: "discord_mensagem_muito_longa", checkpointClassificacao: "falha_confirmada", checkpointMotivo: "discord_preflight_payload" });
   }
   if (!httpClient || typeof httpClient.post !== "function") {
-    return respostaErro({ channelId: canal, erro: "discord_http_indisponivel" });
+    return respostaErro({ channelId: canal, erro: "discord_http_indisponivel", checkpointClassificacao: "falha_confirmada", checkpointMotivo: "discord_preflight_http" });
   }
 
   let body = { content: conteudo, ...(suprimirEmbeds ? { flags: 4 } : {}) };
@@ -251,7 +303,9 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", su
       return respostaErro({
         channelId: canal,
         erro: imagem.erro,
-        status: imagem.statusHttp || null
+        status: imagem.statusHttp || null,
+        checkpointClassificacao: "falha_confirmada",
+        checkpointMotivo: "discord_preflight_imagem"
       });
     }
 
@@ -260,7 +314,12 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", su
       headers = { Authorization: `Bot ${configDiscord.botToken}` };
       imagemEnviada = true;
     } catch (erro) {
-      return respostaErro({ channelId: canal, erro: erro.message || "discord_imagem_invalida" });
+      return respostaErro({
+        channelId: canal,
+        erro: erro.message || "discord_imagem_invalida",
+        checkpointClassificacao: "falha_confirmada",
+        checkpointMotivo: "discord_preflight_payload"
+      });
     }
   }
 
@@ -275,7 +334,9 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", su
       return respostaErro({
         channelId: canal,
         erro: validacao.erro,
-        status: validacao.statusHttp || null
+        status: validacao.statusHttp || null,
+        checkpointClassificacao: validacao.checkpointClassificacao,
+        checkpointMotivo: validacao.checkpointMotivo
       });
     }
     const data = validacao.data || {};
@@ -286,7 +347,9 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", su
       enviadoEm: texto(data.timestamp) || dataEnvio(now),
       imagemEnviada,
       erro: "",
-      statusHttp: validacao.statusHttp
+      statusHttp: validacao.statusHttp,
+      checkpointClassificacao: validacao.checkpointClassificacao,
+      checkpointMotivo: validacao.checkpointMotivo
     };
   } catch (erro) {
     const status = statusHttp(erro);
@@ -294,7 +357,9 @@ async function enviarDiscord({ channelId = "", mensagem = "", imagemUrl = "", su
       channelId: canal,
       erro: erroDiscordPorStatus(status),
       status,
-      retryAfter: status === 429 ? retryAfterMs(erro?.response?.data || {}, erro?.response?.headers || {}) : null
+      retryAfter: status === 429 ? retryAfterMs(erro?.response?.data || {}, erro?.response?.headers || {}) : null,
+      ...classificacaoCheckpointHttp(status),
+      ...(status ? {} : { checkpointMotivo: "discord_transport_ambiguo" })
     });
   }
 }
