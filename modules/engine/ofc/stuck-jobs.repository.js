@@ -20,15 +20,15 @@ async function consultarJobsEmCursoSuspeitos({ limite = 100 } = {}) {
             u.status AS ultimo_processamento_status,
             u.motivo AS ultimo_processamento_motivo,
             u.criado_em AS ultimo_processamento_em,
-            EXTRACT(EPOCH FROM (NOW() - j.criado_em))::bigint AS idade_segundos,
+            EXTRACT(EPOCH FROM (NOW() - CASE WHEN j.status = 'validando' THEN COALESCE(j.atualizado_em, j.criado_em) ELSE j.criado_em END))::bigint AS idade_segundos,
             CASE
-              WHEN j.criado_em <= NOW() - INTERVAL '30 minutes' THEN 'suspeito_lock'
+              WHEN CASE WHEN j.status = 'validando' THEN COALESCE(j.atualizado_em, j.criado_em) ELSE j.criado_em END <= NOW() - INTERVAL '30 minutes' THEN 'suspeito_lock'
               ELSE 'em_curso_recente'
             END AS classificacao_suspeita
        FROM engine_jobs_cliente j
        LEFT JOIN ultimo u ON u.job_id = j.id
-      WHERE j.status IN ('processando', 'importando')
-      ORDER BY j.criado_em ASC, j.id ASC
+      WHERE j.status IN ('validando', 'processando', 'importando')
+      ORDER BY CASE WHEN j.status = 'validando' THEN COALESCE(j.atualizado_em, j.criado_em) ELSE j.criado_em END ASC, j.id ASC
       LIMIT $1`,
     [totalLimite]
   );

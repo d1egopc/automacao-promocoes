@@ -9,7 +9,7 @@ const GRUPOS_RESET = Object.freeze({
   NAO_CLASSIFICADO: "NAO_CLASSIFICADOS"
 });
 
-const STATUS_PRESERVAR = Object.freeze(["processando", "importando", "oferta_criada"]);
+const STATUS_PRESERVAR = Object.freeze(["validando", "processando", "importando", "oferta_criada"]);
 const STATUS_EXPIRAR = Object.freeze(["pendente", "pronto_para_importar"]);
 const STATUS_ARQUIVAR = Object.freeze([
   "erro",

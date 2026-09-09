@@ -22,7 +22,7 @@ async function consultarReservatorioOfc() {
                 status,
                 criado_em
            FROM engine_jobs_cliente
-          WHERE status IN ('pendente', 'diagnosticado', 'pronto_para_importar', 'processando', 'importando')
+          WHERE status IN ('pendente', 'diagnosticado', 'validando', 'pronto_para_importar', 'processando', 'importando')
        ) jobs_ofc
       GROUP BY marketplace_ofc, status
       ORDER BY total DESC, marketplace_ofc ASC, status ASC
@@ -36,7 +36,7 @@ async function consultarReservatorioOfc() {
             MIN(criado_em) AS mais_antigo_em,
             MAX(criado_em) AS mais_novo_em
        FROM engine_jobs_cliente
-      WHERE status IN ('pendente', 'diagnosticado', 'pronto_para_importar')
+      WHERE status IN ('pendente', 'diagnosticado', 'validando', 'pronto_para_importar')
       GROUP BY cliente_id, status
       ORDER BY total DESC, cliente_id ASC, status ASC
       LIMIT 60`

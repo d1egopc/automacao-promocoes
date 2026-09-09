@@ -18,6 +18,7 @@ const {
 
 async function testarClassificacaoConservadora() {
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("pendente"), "protegido_ativo");
+  assert.strictEqual(classificarStatusRetencaoJobsPostgres("validando"), "protegido_ativo");
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("processando"), "protegido_ativo");
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("retry"), "protegido_ativo");
   assert.strictEqual(classificarStatusRetencaoJobsPostgres("claimed"), "protegido_ativo");

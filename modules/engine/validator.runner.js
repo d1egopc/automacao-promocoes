@@ -1,5 +1,7 @@
 const {
   buscarJobsDiagnosticados,
+  tentarMarcarValidando,
+  recuperarJobsValidandoStale,
   validarJobDiagnosticadoEngine
 } = require("./validator.service");
 const {
@@ -31,10 +33,24 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
     frescosSelecionados: 0,
     expiradosPreImporter: 0,
     expiradosCandidatosPreImporter: 0,
-    idadeMediaJobsSelecionadosMs: 0
+    idadeMediaJobsSelecionadosMs: 0,
+    recuperadosValidandoStale: 0,
+    claimsPerdidos: 0
   };
 
   logEngineProcessadorInicio({ modo: "validacao", limite: limiteFinal });
+
+  const recovery = await recuperarJobsValidandoStale(limiteFinal);
+  if (!recovery.ok) {
+    logEngineProcessadorErro({ etapa: "recuperar_validando_stale", motivo: recovery.motivo || "recovery_validacao_falhou", erro: recovery.erro || "" });
+    return {
+      ...resumo,
+      ok: false,
+      motivo: recovery.motivo || "recovery_validacao_falhou",
+      erro: recovery.erro || ""
+    };
+  }
+  resumo.recuperadosValidandoStale = recovery.recuperados;
 
   const diagnosticados = await buscarJobsDiagnosticados(limiteFinal);
   if (!diagnosticados.ok) {
@@ -66,6 +82,12 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
         continue;
       }
 
+      const claim = await tentarMarcarValidando(job.id);
+      if (!claim.ok || !claim.claimed) {
+        resumo.claimsPerdidos += 1;
+        continue;
+      }
+
       resumo.processados += 1;
       const resultado = await validarJobDiagnosticadoEngine(job, {
         clientesValidos,
@@ -79,13 +101,19 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
         resumo.erro_validacao += 1;
       }
     } catch (e) {
-      resumo.erro_validacao += 1;
       logEngineProcessadorErro({ modo: "validacao", jobId: job.id, etapa: "validar_job", motivo: "erro_validacao", erro: e.message });
-      await registrarProcessamento(job.id, "validacao_final", "erro", "erro_validacao", {
-        fase: "validacao",
-        erro: e.message
+      const transicao = await marcarJobStatus(job.id, "erro_validacao", "erro_validacao", {
+        statusEsperado: "validando"
       });
-      await marcarJobStatus(job.id, "erro_validacao", "erro_validacao");
+      if (transicao.ok) {
+        resumo.erro_validacao += 1;
+        await registrarProcessamento(job.id, "validacao_final", "erro", "erro_validacao", {
+          fase: "validacao",
+          erro: e.message
+        });
+      } else {
+        resumo.claimsPerdidos += 1;
+      }
     }
   }
 

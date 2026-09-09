@@ -7,6 +7,7 @@ const {
 const {
   calcularCotasFrescorPreImporter
 } = require("./frescor-pre-importer.service");
+const { minutosLeaseJobsAtivos } = require("./jobs.service");
 const { normalizarTexto } = require("./normalizers");
 
 function normalizarMarketplaceEngine(marketplace = "") {
@@ -241,6 +242,72 @@ async function buscarJobsDiagnosticados(limite = 20) {
   return { ok: true, jobs: resultado.resultado.rows };
 }
 
+async function tentarMarcarValidando(jobId) {
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET status = 'validando', atualizado_em = NOW()
+      WHERE id = $1
+        AND status = 'diagnosticado'
+      RETURNING id, status, atualizado_em`,
+    [jobId]
+  );
+
+  if (!resultado.ok) return { ...resultado, claimed: false };
+  const job = resultado.resultado?.rows?.[0] || null;
+  return { ...resultado, claimed: Boolean(job), job };
+}
+
+async function recuperarJobsValidandoStale(limite = 20) {
+  const limiteFinal = limitarJobs(limite);
+  const leaseMinutos = minutosLeaseJobsAtivos();
+  const resultado = await queryEngine(
+    `WITH candidatos AS (
+       SELECT id
+         FROM engine_jobs_cliente
+        WHERE status = 'validando'
+          AND COALESCE(atualizado_em, criado_em) < NOW() - ($1::int * INTERVAL '1 minute')
+        ORDER BY COALESCE(atualizado_em, criado_em) ASC, id ASC
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+     ), recuperados AS (
+       UPDATE engine_jobs_cliente j
+          SET status = 'diagnosticado',
+              motivo_final = 'validacao_lease_recuperado',
+              atualizado_em = NOW()
+         FROM candidatos c
+        WHERE j.id = c.id
+          AND j.status = 'validando'
+       RETURNING j.id
+     ), auditoria AS (
+       INSERT INTO engine_processamentos (job_id, etapa, status, motivo, detalhes)
+       SELECT id,
+              'validacao_recovery',
+              'ok',
+              'validacao_lease_recuperado',
+              jsonb_build_object(
+                'fase', 'validacao',
+                'leaseMinutos', $1,
+                'statusAnterior', 'validando'
+              )
+         FROM recuperados
+       RETURNING job_id
+     )
+     SELECT COUNT(*)::int AS recuperados,
+            COALESCE(array_agg(id ORDER BY id), ARRAY[]::bigint[]) AS ids
+       FROM recuperados`,
+    [leaseMinutos, limiteFinal]
+  );
+
+  if (!resultado.ok) return { ...resultado, recuperados: 0, ids: [], leaseMinutos };
+  const linha = resultado.resultado?.rows?.[0] || {};
+  return {
+    ...resultado,
+    recuperados: Number(linha.recuperados || 0),
+    ids: Array.isArray(linha.ids) ? linha.ids : [],
+    leaseMinutos
+  };
+}
+
 async function registrarEtapaValidacao(jobId, etapa, status, motivo = "", detalhes = {}) {
   return registrarProcessamento(jobId, etapa, status, motivo, {
     ...detalhes,
@@ -249,8 +316,17 @@ async function registrarEtapaValidacao(jobId, etapa, status, motivo = "", detalh
 }
 
 async function finalizarValidacaoJob(job = {}, status = "erro_validacao", motivo = "", detalhes = {}) {
+  const transicao = await marcarJobStatus(job.id, status, motivo || status, {
+    statusEsperado: "validando"
+  });
+  if (!transicao.ok) {
+    return {
+      status: "ignorado_concorrencia",
+      motivo: transicao.motivo || "status_origem_incompativel",
+      ignorado: true
+    };
+  }
   await registrarEtapaValidacao(job.id, "validacao_final", status === "pronto_para_importar" ? "ok" : "erro", motivo || status, detalhes);
-  await marcarJobStatus(job.id, status, motivo || status);
   return { status, motivo: motivo || status };
 }
 
@@ -308,7 +384,10 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
 
 module.exports = {
   buscarJobsDiagnosticados,
+  tentarMarcarValidando,
+  recuperarJobsValidandoStale,
   validarJobDiagnosticadoEngine,
+  finalizarValidacaoJob,
   clienteValidoEngine,
   marketplaceAtivoClienteEngine,
   obterIntegracaoClienteEngine,

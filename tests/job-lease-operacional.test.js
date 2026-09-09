@@ -37,8 +37,8 @@ async function testarFluxoVivoUsaLeasePersistido() {
       /status <> ALL\(\$2::text\[\]\)/i.test(chamada.sql)
     );
     assert.ok(consultaVivos, "fluxo vivo deve separar circulaveis de jobs em lease");
-    assert.deepStrictEqual(consultaVivos.params[0], ["pendente", "pronto_para_importar", "processando", "importando"]);
-    assert.deepStrictEqual(consultaVivos.params[1], ["processando", "importando"]);
+    assert.deepStrictEqual(consultaVivos.params[0], ["pendente", "pronto_para_importar", "validando", "processando", "importando"]);
+    assert.deepStrictEqual(consultaVivos.params[1], ["validando", "processando", "importando"]);
     assert.strictEqual(consultaVivos.params[2], 30);
     assert.ok(
       consultaVivos.sql.includes("COALESCE(atualizado_em, criado_em) >= NOW() - ($3::int * INTERVAL '1 minute')"),
@@ -51,7 +51,7 @@ async function testarFluxoVivoUsaLeasePersistido() {
       chamada.params?.[1] === 30 &&
       /COALESCE\(atualizado_em, criado_em\) >= NOW\(\)/i.test(chamada.sql)
     );
-    assert.ok(consultaEmCurso, "emCursoProtegidos deve contar somente processando/importando frescos");
+    assert.ok(consultaEmCurso, "emCursoProtegidos deve contar validando/processando/importando frescos");
   } finally {
     database.queryEngine = queryOriginal;
     delete require.cache[repositoryPath];

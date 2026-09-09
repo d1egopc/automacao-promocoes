@@ -29,6 +29,7 @@ const STATUS_JOBS_ATIVOS_COM_LEASE = Object.freeze([
 const STATUS_JOBS_ATIVOS_RETENCAO = Object.freeze([
   "pendente",
   "diagnosticado",
+  "validando",
   "pronto",
   "pronto_para_importar",
   "processando",

@@ -320,6 +320,8 @@ async function testarMatrizStatusOficial() {
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivo, true);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.importando.vivo, true);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.processando.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.validando.vivo, true);
+  assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.validando.decisao, "preservar_ativo_recuperar_pelo_validator");
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.importando.vivoAteMinutos, 30);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.processando.vivoAteMinutos, 30);
   assert.strictEqual(MATRIZ_STATUS_AUTO_CLEAN.oferta_criada.vivoAteHoras, 24);

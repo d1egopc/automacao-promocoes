@@ -5,9 +5,9 @@ const {
   medirBytesJsonSeguro
 } = require("../../telemetria/engine-memory-stage");
 
-const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "processando", "importando"];
+const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "validando", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
-const STATUS_EM_CURSO_PROTEGIDOS_FLUXO = ["processando", "importando"];
+const STATUS_EM_CURSO_PROTEGIDOS_FLUXO = ["validando", "processando", "importando"];
 
 function limitarInteiro(valor, padrao, minimo, maximo) {
   const numero = Number(valor);

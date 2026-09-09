@@ -24,6 +24,12 @@ assert(
   resetRepositoryFonte.includes("PRIMARY KEY (operation_id, lote_numero, grupo_acao)"),
   "lotes devem permitir o mesmo numero para grupos diferentes quando a fronteira do lote cruza grupos"
 );
+
+assert.strictEqual(
+  classificarJobReset({ status: "validando", criado_em: "2026-07-01T00:00:00.000Z" }, cutoff).acao,
+  "preservar",
+  "validando deve permanecer ativo e ser recuperado pelo Validator"
+);
 assert(
   resetRepositoryFonte.includes("DROP CONSTRAINT engine_reset_operacional_lotes_pkey"),
   "schema deve migrar PK auxiliar antiga de lotes de forma idempotente"

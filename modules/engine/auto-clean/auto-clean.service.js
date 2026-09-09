@@ -84,6 +84,7 @@ const MOTIVOS_OFERTA_RETIDA_TERMINAL_AUTO_CLEAN = new Set([
 const STATUS_JOB_ATIVO = new Set([
   "pendente",
   "diagnosticado",
+  "validando",
   "pronto",
   "pronto_para_importar",
   "processando",
@@ -236,6 +237,19 @@ const MATRIZ_STATUS_AUTO_CLEAN = Object.freeze({
     removivelAposHoras: null,
     dependenciasTecnicas: [],
     decisao: "preservar_ativo_fresco_expirar_por_lease"
+  }),
+  validando: Object.freeze({
+    vivo: true,
+    vivoAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
+    vivoAteMinutos: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS,
+    terminal: false,
+    reprocessavel: true,
+    reprocessavelAteHoras: LEASE_JOBS_ATIVOS_PADRAO_MINUTOS / 60,
+    ttlIntegralHoras: null,
+    ttlCompactoDias: null,
+    removivelAposHoras: null,
+    dependenciasTecnicas: [],
+    decisao: "preservar_ativo_recuperar_pelo_validator"
   }),
   expirada_operacional: Object.freeze({
     vivo: false,
