@@ -272,6 +272,29 @@ CREATE TABLE IF NOT EXISTS fila_claims_ativos (
 
 CREATE INDEX IF NOT EXISTS fila_claims_ativos_lease_expires_at_idx
   ON fila_claims_ativos (lease_expires_at);
+
+-- Checkpoint duravel por item/destino/alvo. Esta tabela nao e lease, nao tem
+-- TTL e ainda nao participa da decisao de envio: ela e somente a fundacao
+-- transacional para registrar tentativas de entrega futuras.
+CREATE TABLE IF NOT EXISTS fila_checkpoints_entrega (
+  cliente_id TEXT NOT NULL CHECK (btrim(cliente_id) <> ''),
+  fila_item_id TEXT NOT NULL CHECK (btrim(fila_item_id) <> ''),
+  destino_chave TEXT NOT NULL CHECK (btrim(destino_chave) <> ''),
+  alvo_chave TEXT NOT NULL CHECK (btrim(alvo_chave) <> ''),
+  attempt_id UUID NOT NULL,
+  estado TEXT NOT NULL CHECK (estado IN (
+    'preparado',
+    'envio_iniciado',
+    'enviado',
+    'falha_confirmada',
+    'resultado_ambiguo'
+  )),
+  provider_message_id TEXT,
+  credito_debitado BOOLEAN,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (cliente_id, fila_item_id, destino_chave, alvo_chave)
+);
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
