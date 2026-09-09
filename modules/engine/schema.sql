@@ -295,6 +295,14 @@ CREATE TABLE IF NOT EXISTS fila_checkpoints_entrega (
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (cliente_id, fila_item_id, destino_chave, alvo_chave)
 );
+
+-- Cursor minimo e duravel da varredura bounded do recovery. Nao e lease,
+-- TTL, heartbeat nem autoridade sobre estado da fila ou da entrega.
+CREATE TABLE IF NOT EXISTS fila_checkpoint_recovery_cursor (
+  cliente_id TEXT PRIMARY KEY CHECK (btrim(cliente_id) <> ''),
+  ultimo_fila_item_id TEXT,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;

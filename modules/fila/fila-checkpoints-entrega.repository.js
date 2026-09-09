@@ -5,6 +5,7 @@ const { getEnginePool } = require("../engine/database");
 const { normalizarClienteId } = require("../../utils/storage");
 
 const TABELA = "fila_checkpoints_entrega";
+const TABELA_CURSOR_RECOVERY = "fila_checkpoint_recovery_cursor";
 const ESTADOS = Object.freeze([
   "preparado",
   "envio_iniciado",
@@ -56,6 +57,18 @@ CREATE TABLE IF NOT EXISTS ${nome} (
 }
 
 const SQL_SCHEMA_FILA_CHECKPOINTS_ENTREGA = sqlSchemaCheckpointEntrega();
+
+function sqlSchemaCheckpointRecoveryCursor(tabela = TABELA_CURSOR_RECOVERY) {
+  const nome = normalizarTabela(tabela);
+  return `
+CREATE TABLE IF NOT EXISTS ${nome} (
+  cliente_id TEXT PRIMARY KEY CHECK (btrim(cliente_id) <> ''),
+  ultimo_fila_item_id TEXT,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);`;
+}
+
+const SQL_SCHEMA_FILA_CHECKPOINT_RECOVERY_CURSOR = sqlSchemaCheckpointRecoveryCursor();
 
 function normalizarChaveCheckpointEntrega({
   clienteId = "",
@@ -205,6 +218,76 @@ function normalizarFilaItemIds(filaItemIds = [], limite = 8) {
   return ids;
 }
 
+function ordenarFilaItemIdsEstaveis(filaItemIds = []) {
+  return [...filaItemIds].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}
+
+function selecionarFatiaCircular(filaItemIds = [], cursorAnterior = "", limite = 8) {
+  const ids = ordenarFilaItemIdsEstaveis(normalizarFilaItemIds(filaItemIds, 32));
+  if (!ids.length) return { filaItemIds: [], cursorAnterior: texto(cursorAnterior), cursorAtual: "" };
+  const quantidade = Math.max(1, Math.min(8, Number(limite) || 8, ids.length));
+  const cursor = texto(cursorAnterior);
+  const indiceExato = cursor ? ids.indexOf(cursor) : -1;
+  let inicio = 0;
+  if (indiceExato >= 0) {
+    inicio = (indiceExato + 1) % ids.length;
+  } else if (cursor) {
+    const proximo = ids.findIndex(id => id > cursor);
+    inicio = proximo >= 0 ? proximo : 0;
+  }
+  const selecionados = [];
+  for (let deslocamento = 0; deslocamento < quantidade; deslocamento += 1) {
+    selecionados.push(ids[(inicio + deslocamento) % ids.length]);
+  }
+  return {
+    filaItemIds: selecionados,
+    cursorAnterior: cursor,
+    cursorAtual: selecionados[selecionados.length - 1]
+  };
+}
+
+async function selecionarFatiaRecoveryCheckpoint({ clienteId = "", filaItemIds = [], limite = 8 } = {}, opcoes = {}) {
+  const cliente = texto(normalizarClienteId(texto(clienteId)));
+  if (!cliente) throw new Error("fila_checkpoint_cliente_id_ausente");
+  const ids = normalizarFilaItemIds(filaItemIds, 32);
+  if (!ids.length) return { filaItemIds: [], cursorAnterior: "", cursorAtual: "" };
+  const tabelaCursor = normalizarTabela(opcoes.tabelaCursor || TABELA_CURSOR_RECOVERY);
+  const pool = opcoes.pool || getEnginePool();
+  if (!pool || typeof pool.connect !== "function") throw new Error("fila_checkpoint_pool_indisponivel");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO ${tabelaCursor} (cliente_id, ultimo_fila_item_id)
+       VALUES ($1, NULL)
+       ON CONFLICT (cliente_id) DO NOTHING`,
+      [cliente]
+    );
+    const estado = await client.query(
+      `SELECT ultimo_fila_item_id
+         FROM ${tabelaCursor}
+        WHERE cliente_id = $1
+        FOR UPDATE`,
+      [cliente]
+    );
+    const fatia = selecionarFatiaCircular(ids, estado.rows?.[0]?.ultimo_fila_item_id || "", limite);
+    await client.query(
+      `UPDATE ${tabelaCursor}
+          SET ultimo_fila_item_id = $2,
+              atualizado_em = NOW()
+        WHERE cliente_id = $1`,
+      [cliente, fatia.cursorAtual]
+    );
+    await client.query("COMMIT");
+    return fatia;
+  } catch (erro) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw erro;
+  } finally {
+    if (typeof client.release === "function") client.release();
+  }
+}
+
 // A fila e a autoridade dos candidatos. Esta leitura recebe somente ids de
 // itens atualmente processando, evitando varrer o historico de checkpoints.
 async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = [], limite = 8 } = {}, opcoes = {}) {
@@ -329,10 +412,13 @@ async function registrarCreditoDebitadoCheckpointEntrega(entrada = {}, opcoes = 
 
 module.exports = {
   TABELA,
+  TABELA_CURSOR_RECOVERY,
   ESTADOS,
   TRANSICOES,
   SQL_SCHEMA_FILA_CHECKPOINTS_ENTREGA,
+  SQL_SCHEMA_FILA_CHECKPOINT_RECOVERY_CURSOR,
   sqlSchemaCheckpointEntrega,
+  sqlSchemaCheckpointRecoveryCursor,
   normalizarChaveCheckpointEntrega,
   normalizarAttemptId,
   gerarAttemptIdCheckpointEntrega,
@@ -342,6 +428,8 @@ module.exports = {
   obterCheckpointEntrega,
   listarCheckpointsEntregaPorItens,
   listarCheckpointsEntregaPorItem,
+  selecionarFatiaCircular,
+  selecionarFatiaRecoveryCheckpoint,
   transicionarCheckpointEntrega,
   prepararNovaTentativaCheckpointEntrega,
   registrarCreditoDebitadoCheckpointEntrega

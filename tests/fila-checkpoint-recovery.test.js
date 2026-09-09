@@ -28,6 +28,7 @@ function item(extra = {}) {
 
 function criarRepo(linhas = [], opcoes = {}) {
   const chamadas = [];
+  let cursor = "";
   return {
     chamadas,
     async listarCheckpointsEntregaPorItens({ filaItemIds = [], limite }) {
@@ -39,6 +40,19 @@ function criarRepo(linhas = [], opcoes = {}) {
     async listarCheckpointsEntregaPorItem({ filaItemId }) {
       chamadas.push({ tipo: "listar_item", filaItemId });
       return linhas.filter(atual => atual.filaItemId === filaItemId).map(atual => ({ ...atual }));
+    },
+    async selecionarFatiaRecoveryCheckpoint({ filaItemIds = [], limite = 8 }) {
+      chamadas.push({ tipo: "selecionar_fatia", filaItemIds: [...filaItemIds], limite, cursor });
+      if (opcoes.erroCursor) throw new Error("cursor indisponivel");
+      const ids = [...filaItemIds].sort();
+      if (!ids.length) return { filaItemIds: [], cursorAnterior: cursor, cursorAtual: "" };
+      const indice = cursor && ids.includes(cursor)
+        ? (ids.indexOf(cursor) + 1) % ids.length
+        : Math.max(0, ids.findIndex(id => id > cursor));
+      const selecionados = Array.from({ length: Math.min(limite, ids.length) }, (_, deslocamento) => ids[(indice + deslocamento) % ids.length]);
+      const anterior = cursor;
+      cursor = selecionados[selecionados.length - 1];
+      return { filaItemIds: selecionados, cursorAnterior: anterior, cursorAtual: cursor };
     },
     async transicionarCheckpointEntrega(entrada) {
       chamadas.push({ tipo: "transicionar", entrada });
@@ -211,6 +225,37 @@ async function testarDiscoveryEBatchDeRecoveryContinuamBounded() {
   assert.strictEqual(r.advisory.chamadas.filter(chamada => chamada === "adquirir").length, 8);
 }
 
+async function testarFalhaDoCursorPermaneceFailClosed() {
+  const r = await executar([checkpoint("preparado")], { repo: { erroCursor: true } });
+  assert.strictEqual(r.resultado.ok, false);
+  assert.strictEqual(r.resultado.motivo, "cursor_recovery_indisponivel");
+  assert.deepStrictEqual(r.resultado.resultados, []);
+  assert.deepStrictEqual(r.recuperaveis, []);
+  assert.deepStrictEqual(r.sincronizados, []);
+  assert.strictEqual(r.advisory.chamadas.length, 0, "falha do cursor nao inicia regiao protegida");
+}
+
+async function testarRotacaoBoundedEntreItensComCheckpoint() {
+  const itens = Array.from({ length: 9 }, (_, indice) => item({ id: `fila_${indice + 1}` }));
+  const linhas = itens.map(atual => checkpoint("falha_confirmada", { filaItemId: atual.id }));
+  const repository = criarRepo(linhas);
+  const advisory = criarAdvisory();
+  const service = criarRecoveryCheckpointEntrega({ repository, advisory, logger: { log() {} }, limite: 8 });
+  const executarCiclo = () => service.recuperarCliente({
+    clienteId: "workspace_a",
+    itens,
+    relocalizarItem: ({ filaItemId }) => itens.find(atual => atual.id === filaItemId) || null
+  });
+
+  const primeiro = await executarCiclo();
+  const segundo = await executarCiclo();
+  assert.strictEqual(primeiro.resultados.length, 8);
+  assert.strictEqual(segundo.resultados.length, 8);
+  assert(segundo.resultados.some(resultado => resultado.filaItemId === "fila_9"), "nono item recebe oportunidade no ciclo seguinte");
+  assert(linhas.every(atual => atual.estado === "falha_confirmada"), "sem_acao nao altera checkpoint");
+  assert(itens.every(atual => atual.status === "processando"), "sem_acao nao altera status");
+}
+
 (async () => {
   await testarPreparadoRecuperavel();
   await testarPreparadoComEnviadoNaoReabreItem();
@@ -222,6 +267,8 @@ async function testarDiscoveryEBatchDeRecoveryContinuamBounded() {
   await testarHistoricoSemCheckpointCongelado();
   await testarHistoricosSemCheckpointNaoConsomemSlotsUteis();
   await testarDiscoveryEBatchDeRecoveryContinuamBounded();
+  await testarFalhaDoCursorPermaneceFailClosed();
+  await testarRotacaoBoundedEntreItensComCheckpoint();
   console.log("fila-checkpoint-recovery.test.js OK");
 })().catch(erro => {
   console.error(erro.stack || erro.message || erro);

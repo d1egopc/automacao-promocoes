@@ -14,6 +14,7 @@ if (!databaseUrl) {
 const ATTEMPT_A = "33333333-3333-4333-8333-333333333333";
 const ATTEMPT_B = "44444444-4444-4444-8444-444444444444";
 const tabela = `fila_checkpoints_entrega_teste_${crypto.randomBytes(6).toString("hex")}`;
+const tabelaCursor = `fila_checkpoint_recovery_cursor_teste_${crypto.randomBytes(6).toString("hex")}`;
 
 function entrada(extra = {}) {
   return {
@@ -30,7 +31,8 @@ function entrada(extra = {}) {
   const pool = new Pool({ connectionString: databaseUrl, max: 4 });
   try {
     await pool.query(repo.sqlSchemaCheckpointEntrega(tabela));
-    const opcoes = { pool, tabela };
+    await pool.query(repo.sqlSchemaCheckpointRecoveryCursor(tabelaCursor));
+    const opcoes = { pool, tabela, tabelaCursor };
     assert.strictEqual((await repo.criarCheckpointEntrega(entrada(), opcoes)).criado, true);
     assert.strictEqual((await repo.transicionarCheckpointEntrega({ ...entrada(), deEstado: "preparado", paraEstado: "envio_iniciado" }, opcoes)).transicionado, true);
     assert.strictEqual((await repo.transicionarCheckpointEntrega({ ...entrada({ attemptId: ATTEMPT_B }), deEstado: "envio_iniciado", paraEstado: "enviado" }, opcoes)).transicionado, false, "A nao conclui com attempt B");
@@ -50,9 +52,20 @@ function entrada(extra = {}) {
     assert(independente.every(resultado => resultado.criado), "chaves independentes coexistem");
     const linhas = await pool.query(`SELECT count(*)::int AS total FROM ${tabela}`);
     assert.strictEqual(linhas.rows[0].total, 4);
+
+    const idsRecovery = Array.from({ length: 16 }, (_, indice) => `recovery_${String(indice + 1).padStart(2, "0")}`);
+    const [fatiaA, fatiaB] = await Promise.all([
+      repo.selecionarFatiaRecoveryCheckpoint({ clienteId: "workspace_cursor", filaItemIds: idsRecovery, limite: 8 }, opcoes),
+      repo.selecionarFatiaRecoveryCheckpoint({ clienteId: "workspace_cursor", filaItemIds: idsRecovery, limite: 8 }, opcoes)
+    ]);
+    assert.strictEqual(new Set([...fatiaA.filaItemIds, ...fatiaB.filaItemIds]).size, 16, "lock transacional serializa fatias concorrentes sem repeticao");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS total FROM ${tabelaCursor}`)).rows[0].total, 1);
     console.log("fila-checkpoints-entrega.postgres.test.js OK");
   } finally {
-    try { await pool.query(`DROP TABLE IF EXISTS ${tabela}`); } finally { await pool.end(); }
+    try {
+      await pool.query(`DROP TABLE IF EXISTS ${tabelaCursor}`);
+      await pool.query(`DROP TABLE IF EXISTS ${tabela}`);
+    } finally { await pool.end(); }
   }
 })().catch(erro => {
   console.error(erro.stack || erro.message || erro);

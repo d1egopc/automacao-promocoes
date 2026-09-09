@@ -106,6 +106,7 @@ function candidatosProcessandoAtuais(itens = [], limite = LIMITE_PADRAO, limiteD
 function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console, now = () => Date.now(), limite = LIMITE_PADRAO } = {}) {
   if (!repository || typeof repository.listarCheckpointsEntregaPorItens !== "function" ||
     typeof repository.listarCheckpointsEntregaPorItem !== "function" ||
+    typeof repository.selecionarFatiaRecoveryCheckpoint !== "function" ||
     typeof repository.transicionarCheckpointEntrega !== "function") {
     throw new Error("fila_checkpoint_recovery_repository_invalido");
   }
@@ -139,9 +140,23 @@ function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console
     // O lote de recovery e formado apenas por itens que possuem evidencia
     // duravel. Sem checkpoint, o historico segue congelado e nao ocupa um dos
     // slots uteis nem chega a advisory/relocalizacao.
-    const candidatos = candidatosDescoberta
-      .filter(candidato => (checkpointsPorItem.get(candidato.filaItemId) || []).length > 0)
-      .slice(0, Math.max(1, Math.min(32, Number(limite) || LIMITE_PADRAO)));
+    const elegiveis = candidatosDescoberta
+      .filter(candidato => (checkpointsPorItem.get(candidato.filaItemId) || []).length > 0);
+    let fatia;
+    try {
+      fatia = await repository.selecionarFatiaRecoveryCheckpoint({
+        clienteId: cliente,
+        filaItemIds: elegiveis.map(candidato => candidato.filaItemId),
+        limite: Math.max(1, Math.min(8, Number(limite) || LIMITE_PADRAO))
+      });
+    } catch {
+      logar({ clienteId: cliente, filaItemId: "", origemFluxo: "", alvosPorEstado: {}, decisao: "sem_acao", duracaoMs: Math.round(duracaoMs(inicio, inicioFallback)) });
+      return { ok: false, motivo: "cursor_recovery_indisponivel", resultados: [] };
+    }
+    const candidatosPorId = new Map(elegiveis.map(candidato => [candidato.filaItemId, candidato]));
+    const candidatos = (fatia?.filaItemIds || [])
+      .map(filaItemId => candidatosPorId.get(filaItemId))
+      .filter(Boolean);
     if (!candidatos.length) return { ok: true, resultados: [] };
     const resultados = [];
     for (const candidato of candidatos) {

@@ -74,6 +74,37 @@ function criarPoolMemoria() {
   };
 }
 
+function criarPoolCursorMemoria() {
+  const cursores = new Map();
+  const chamadas = [];
+  return {
+    cursores,
+    chamadas,
+    async connect() {
+      return {
+        async query(sql, params = []) {
+          const texto = String(sql).replace(/\s+/g, " ").trim();
+          chamadas.push({ sql: texto, params: [...params] });
+          if (["BEGIN", "COMMIT", "ROLLBACK"].includes(texto)) return { rows: [], rowCount: 0 };
+          if (/^INSERT INTO fila_checkpoint_recovery_cursor/i.test(texto)) {
+            if (!cursores.has(params[0])) cursores.set(params[0], null);
+            return { rows: [], rowCount: 1 };
+          }
+          if (/^SELECT ultimo_fila_item_id FROM fila_checkpoint_recovery_cursor/i.test(texto)) {
+            return { rows: [{ ultimo_fila_item_id: cursores.get(params[0]) || null }], rowCount: 1 };
+          }
+          if (/^UPDATE fila_checkpoint_recovery_cursor/i.test(texto)) {
+            cursores.set(params[0], params[1]);
+            return { rows: [], rowCount: 1 };
+          }
+          throw new Error(`sql_cursor_nao_suportado: ${texto}`);
+        },
+        release() {}
+      };
+    }
+  };
+}
+
 function entrada(extra = {}) {
   return {
     clienteId: "workspace_a",
@@ -91,11 +122,54 @@ function testarSchemaEValidacao() {
   assert.match(tabela, /PRIMARY KEY \(cliente_id, fila_item_id, destino_chave, alvo_chave\)/i);
   for (const estado of repo.ESTADOS) assert.match(tabela, new RegExp(`'${estado}'`));
   assert.doesNotMatch(tabela, /(lease|ttl|heartbeat|expires|takeover)/i);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS fila_checkpoint_recovery_cursor/i);
   assert.throws(() => repo.normalizarChaveCheckpointEntrega({}), /cliente_id_ausente/);
   assert.throws(() => repo.normalizarChaveCheckpointEntrega({ clienteId: "a", filaItemId: "indice:1", destinoChave: "d", alvoChave: "x" }), /posicional/);
   assert.throws(() => repo.normalizarAttemptId("nao-uuid"), /attempt_id_invalido/);
   assert.throws(() => repo.normalizarTransicao({ deEstado: "preparado", paraEstado: "enviado" }), /transicao_invalida/);
   assert.throws(() => repo.sqlSchemaCheckpointEntrega("tabela;drop"), /tabela_invalida/);
+}
+
+function testarFatiaCircular() {
+  const ids = Array.from({ length: 9 }, (_, indice) => `fila_${String(indice + 1).padStart(2, "0")}`);
+  const primeira = repo.selecionarFatiaCircular(ids, "", 8);
+  const segunda = repo.selecionarFatiaCircular(ids, primeira.cursorAtual, 8);
+  assert.deepStrictEqual(primeira.filaItemIds, ids.slice(0, 8));
+  assert.strictEqual(segunda.filaItemIds[0], "fila_09", "cursor avanca para o nono item");
+
+  const removido = repo.selecionarFatiaCircular(ids.filter(id => id !== primeira.cursorAtual), primeira.cursorAtual, 8);
+  assert.strictEqual(removido.filaItemIds[0], "fila_09", "cursor removido continua por identidade estavel");
+  const novo = repo.selecionarFatiaCircular([...ids, "fila_10"], segunda.cursorAtual, 8);
+  assert(novo.filaItemIds.includes("fila_10"), "item novo entra na rotacao sem reserva fixa");
+
+  for (const total of [16, 24, 32]) {
+    const universo = Array.from({ length: total }, (_, indice) => `item_${String(indice + 1).padStart(2, "0")}`);
+    const vistos = new Set();
+    let cursor = "";
+    for (let ciclo = 0; ciclo < total / 8; ciclo += 1) {
+      const fatia = repo.selecionarFatiaCircular(universo, cursor, 8);
+      fatia.filaItemIds.forEach(id => vistos.add(id));
+      cursor = fatia.cursorAtual;
+    }
+    assert.strictEqual(vistos.size, total, `${total} elegiveis recebem oportunidade bounded`);
+    assert.deepStrictEqual(repo.selecionarFatiaCircular(universo, cursor, 8).filaItemIds, universo.slice(0, 8), "wrap-around volta ao inicio");
+  }
+
+  const poucos = ["item_a", "item_b", "item_c"];
+  assert.deepStrictEqual(repo.selecionarFatiaCircular(poucos, "", 8).filaItemIds, poucos, "menos de oito processa todos");
+}
+
+async function testarCursorPersistidoTransacional() {
+  const pool = criarPoolCursorMemoria();
+  const ids = Array.from({ length: 9 }, (_, indice) => `fila_${String(indice + 1).padStart(2, "0")}`);
+  const primeira = await repo.selecionarFatiaRecoveryCheckpoint({ clienteId: "workspace_a", filaItemIds: ids, limite: 8 }, { pool });
+  const segunda = await repo.selecionarFatiaRecoveryCheckpoint({ clienteId: "workspace_a", filaItemIds: ids, limite: 8 }, { pool });
+  assert.deepStrictEqual(primeira.filaItemIds, ids.slice(0, 8));
+  assert.strictEqual(segunda.filaItemIds[0], "fila_09");
+  assert.strictEqual(pool.cursores.get("workspace_a"), segunda.cursorAtual);
+  assert.strictEqual(pool.chamadas.filter(chamada => chamada.sql === "BEGIN").length, 2);
+  assert.strictEqual(pool.chamadas.filter(chamada => chamada.sql === "COMMIT").length, 2);
+  assert(pool.chamadas.some(chamada => /FOR UPDATE$/i.test(chamada.sql)), "cursor e bloqueado antes de selecionar e avancar");
 }
 
 async function testarCriacaoTransicaoELeitura() {
@@ -167,6 +241,8 @@ async function testarIsolamentoDeChaves() {
 
 (async () => {
   testarSchemaEValidacao();
+  testarFatiaCircular();
+  await testarCursorPersistidoTransacional();
   await testarCriacaoTransicaoELeitura();
   await testarCasEFencing();
   await testarEstadosTerminaisConservadores();
