@@ -5,6 +5,8 @@ const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 const destinosMultiAlvo = require("../../utils/destinos-multialvo");
 
 const LIMITE_PADRAO = 8;
+const MULTIPLICADOR_DESCOBERTA = 4;
+const LIMITE_DESCOBERTA_MAXIMO = 32;
 
 function texto(valor = "", limite = 160) {
   return String(valor || "").trim().slice(0, limite);
@@ -75,16 +77,28 @@ function sincronizarAlvosEnviadosPorCheckpoint(oferta = {}, checkpoints = []) {
   return alterou;
 }
 
-function candidatosProcessandoAtuais(itens = [], limite = LIMITE_PADRAO) {
+function candidatosProcessandoAtuais(itens = [], limite = LIMITE_PADRAO, limiteDescoberta) {
   const quantidade = Math.max(1, Math.min(32, Number(limite) || LIMITE_PADRAO));
+  const descoberta = Math.max(
+    quantidade,
+    Math.min(
+      LIMITE_DESCOBERTA_MAXIMO,
+      Number(limiteDescoberta) || quantidade * MULTIPLICADOR_DESCOBERTA
+    )
+  );
   const vistos = new Set();
   const candidatos = [];
-  for (const item of Array.isArray(itens) ? itens : []) {
+  // Itens novos entram no final da fila. A descoberta olha uma janela local
+  // recente, mas preserva a ordem original dentro dela. Assim, historicos
+  // congelados sem checkpoint nao consomem indefinidamente a janela util.
+  const lista = Array.isArray(itens) ? itens : [];
+  for (let indice = lista.length - 1; indice >= 0; indice -= 1) {
+    const item = lista[indice];
     const filaItemId = texto(resolverFilaItemId(item));
     if (!filaItemId || vistos.has(filaItemId) || texto(item?.status, 40).toLowerCase() !== "processando") continue;
     vistos.add(filaItemId);
-    candidatos.push({ filaItemId, item });
-    if (candidatos.length >= quantidade) break;
+    candidatos.unshift({ filaItemId, item });
+    if (candidatos.length >= descoberta) break;
   }
   return candidatos;
 }
@@ -107,14 +121,14 @@ function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console
     const cliente = texto(clienteId || "admin");
     const inicio = inicioMonotono();
     const inicioFallback = now();
-    const candidatos = candidatosProcessandoAtuais(itens, limite);
-    if (!candidatos.length) return { ok: true, resultados: [] };
+    const candidatosDescoberta = candidatosProcessandoAtuais(itens, limite);
+    if (!candidatosDescoberta.length) return { ok: true, resultados: [] };
     let checkpointsCandidatos;
     try {
       checkpointsCandidatos = await repository.listarCheckpointsEntregaPorItens({
         clienteId: cliente,
-        filaItemIds: candidatos.map(candidato => candidato.filaItemId),
-        limite
+        filaItemIds: candidatosDescoberta.map(candidato => candidato.filaItemId),
+        limite: candidatosDescoberta.length
       });
     } catch {
       logar({ clienteId: cliente, filaItemId: "", origemFluxo: "", alvosPorEstado: {}, decisao: "sem_acao", duracaoMs: Math.round(duracaoMs(inicio, inicioFallback)) });
@@ -122,25 +136,17 @@ function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console
     }
 
     const checkpointsPorItem = agruparPorItem(checkpointsCandidatos);
+    // O lote de recovery e formado apenas por itens que possuem evidencia
+    // duravel. Sem checkpoint, o historico segue congelado e nao ocupa um dos
+    // slots uteis nem chega a advisory/relocalizacao.
+    const candidatos = candidatosDescoberta
+      .filter(candidato => (checkpointsPorItem.get(candidato.filaItemId) || []).length > 0)
+      .slice(0, Math.max(1, Math.min(32, Number(limite) || LIMITE_PADRAO)));
+    if (!candidatos.length) return { ok: true, resultados: [] };
     const resultados = [];
     for (const candidato of candidatos) {
       const { filaItemId } = candidato;
       const checkpointsIniciais = checkpointsPorItem.get(filaItemId) || [];
-      // Sem checkpoint duravel, o item historico permanece congelado: nenhuma
-      // inferencia por idade, JSON ou ausencia de provider e feita.
-      if (!checkpointsIniciais.length) {
-        const resultado = { filaItemId, decisao: "sem_checkpoint", checkpoints: [] };
-        resultados.push(resultado);
-        logar({
-          clienteId: cliente,
-          filaItemId,
-          origemFluxo: texto(resolverOrigemFluxo(candidato.item), 40),
-          alvosPorEstado: {},
-          decisao: resultado.decisao,
-          duracaoMs: 0
-        });
-        continue;
-      }
 
       const itemInicio = inicioMonotono();
       const itemInicioFallback = now();
@@ -224,6 +230,8 @@ function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console
 
 module.exports = {
   LIMITE_PADRAO,
+  MULTIPLICADOR_DESCOBERTA,
+  LIMITE_DESCOBERTA_MAXIMO,
   criarRecoveryCheckpointEntrega,
   resumoEstados,
   candidatosProcessandoAtuais,

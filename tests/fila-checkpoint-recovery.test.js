@@ -176,9 +176,39 @@ async function testarRelocalizacaoEAuditoriaFailClosed() {
 
 async function testarHistoricoSemCheckpointCongelado() {
   const r = await executar([], { itens: [item()] });
-  assert.strictEqual(r.resultado.resultados[0].decisao, "sem_checkpoint");
+  assert.deepStrictEqual(r.resultado.resultados, []);
   assert.deepStrictEqual(r.recuperaveis, []);
   assert.deepStrictEqual(r.sincronizados, []);
+  assert.strictEqual(r.advisory.chamadas.length, 0, "historico sem checkpoint nao chega ao advisory");
+}
+
+async function testarHistoricosSemCheckpointNaoConsomemSlotsUteis() {
+  const historicos = Array.from({ length: 20 }, (_, indice) => item({ id: `historico_${indice + 1}` }));
+  const recuperavel = item({ id: "fila_com_checkpoint" });
+  const r = await executar([
+    checkpoint("preparado", { filaItemId: recuperavel.id })
+  ], { itens: [...historicos, recuperavel] });
+
+  const lote = r.repository.chamadas.find(chamada => chamada.tipo === "listar_lote");
+  assert(lote.filaItemIds.includes(recuperavel.id), "item posterior com checkpoint entra na descoberta");
+  assert.strictEqual(r.resultado.resultados.length, 1, "historicos sem checkpoint nao entram no lote util");
+  assert.strictEqual(r.resultado.resultados[0].filaItemId, recuperavel.id);
+  assert.deepStrictEqual(r.recuperaveis, [recuperavel.id]);
+  assert.deepStrictEqual(r.advisory.chamadas, ["adquirir", "finalizar"]);
+}
+
+async function testarDiscoveryEBatchDeRecoveryContinuamBounded() {
+  const historicos = Array.from({ length: 100 }, (_, indice) => item({ id: `historico_${indice + 1}` }));
+  const comCheckpoint = Array.from({ length: 12 }, (_, indice) => item({ id: `checkpoint_${indice + 1}` }));
+  const linhas = comCheckpoint.map(atual => checkpoint("preparado", { filaItemId: atual.id }));
+  const r = await executar(linhas, { itens: [...historicos, ...comCheckpoint], limite: 8 });
+  const lote = r.repository.chamadas.find(chamada => chamada.tipo === "listar_lote");
+
+  assert.strictEqual(lote.filaItemIds.length, 32, "descoberta consulta no maximo 4x o lote util");
+  assert(!lote.filaItemIds.includes("historico_1"), "nao volta a prender a descoberta nos primeiros historicos");
+  assert.strictEqual(r.resultado.resultados.length, 8, "no maximo oito itens com checkpoint entram no recovery");
+  assert.strictEqual(r.recuperaveis.length, 8);
+  assert.strictEqual(r.advisory.chamadas.filter(chamada => chamada === "adquirir").length, 8);
 }
 
 (async () => {
@@ -190,6 +220,8 @@ async function testarHistoricoSemCheckpointCongelado() {
   await testarCandidatosAtuaisBoundedPorItem();
   await testarRelocalizacaoEAuditoriaFailClosed();
   await testarHistoricoSemCheckpointCongelado();
+  await testarHistoricosSemCheckpointNaoConsomemSlotsUteis();
+  await testarDiscoveryEBatchDeRecoveryContinuamBounded();
   console.log("fila-checkpoint-recovery.test.js OK");
 })().catch(erro => {
   console.error(erro.stack || erro.message || erro);
