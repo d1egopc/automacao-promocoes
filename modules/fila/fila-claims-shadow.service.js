@@ -53,8 +53,20 @@ function dadosSeguro(estado = {}, extras = {}) {
   };
 }
 
+function dadosAdvisorySeguro(estado = {}, extras = {}) {
+  return {
+    clienteId: texto(estado.clienteId),
+    filaItemId: texto(estado.filaItemId),
+    resultado: texto(estado.resultadoAdvisory),
+    origemFluxo: texto(estado.origemFluxo),
+    ...extras
+  };
+}
+
 function criarObservadorClaimShadowFila({ repository, logger = console, now = () => Date.now() } = {}) {
-  if (!repository || typeof repository.adquirirClaimFila !== "function") {
+  if (!repository || typeof repository.adquirirClaimFila !== "function" ||
+    typeof repository.adquirirAdvisoryLockFila !== "function" ||
+    typeof repository.liberarAdvisoryLockFila !== "function") {
     throw new Error("fila_claim_shadow_repository_invalido");
   }
 
@@ -74,14 +86,30 @@ function criarObservadorClaimShadowFila({ repository, logger = console, now = ()
       inicioMonotono: agoraMonotono(),
       inicioFallback: now(),
       resultadoClaim: "",
-      claimToken: ""
+      claimToken: "",
+      resultadoAdvisory: "",
+      advisoryHandle: null
     };
 
     if (!estado.filaItemId) {
       estado.resultadoClaim = "identidade_ausente";
+      estado.resultadoAdvisory = "identidade_ausente";
       logar("[FILA-CLAIM-SHADOW]", dadosSeguro(estado));
+      logar("[FILA-ADVISORY-SHADOW]", dadosAdvisorySeguro(estado));
       return estado;
     }
+
+    try {
+      const advisory = await repository.adquirirAdvisoryLockFila({
+        clienteId: estado.clienteId,
+        filaItemId: estado.filaItemId
+      });
+      estado.resultadoAdvisory = advisory?.adquirido === true ? "adquirido" : "ocupado";
+      estado.advisoryHandle = advisory?.handle || null;
+    } catch {
+      estado.resultadoAdvisory = "erro";
+    }
+    logar("[FILA-ADVISORY-SHADOW]", dadosAdvisorySeguro(estado));
 
     try {
       const resultado = await repository.adquirirClaimFila({
@@ -124,6 +152,19 @@ function criarObservadorClaimShadowFila({ repository, logger = console, now = ()
       liberacao
     });
     logar("[FILA-CLAIM-SHADOW-FIM]", dados);
+    let liberacaoAdvisory = "nao_aplicavel";
+    if (estado.resultadoAdvisory === "adquirido" && estado.advisoryHandle) {
+      try {
+        const resultado = await repository.liberarAdvisoryLockFila(estado.advisoryHandle);
+        liberacaoAdvisory = resultado?.liberado === true ? "liberado" : "nao_liberado";
+      } catch {
+        liberacaoAdvisory = "erro";
+      }
+    }
+    logar("[FILA-ADVISORY-SHADOW-FIM]", dadosAdvisorySeguro(estado, {
+      duracaoMs: Math.round(duracaoMs(estado.inicioMonotono, estado.inicioFallback, now())),
+      liberacao: liberacaoAdvisory
+    }));
     return dados;
   }
 

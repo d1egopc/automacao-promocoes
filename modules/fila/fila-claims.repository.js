@@ -74,6 +74,24 @@ function normalizarClaim(linha = {}, chave = {}, { incluirToken = false } = {}) 
   return claim;
 }
 
+function normalizarHandleAdvisory(handle = {}) {
+  if (!handle || typeof handle !== "object" || !handle.client || typeof handle.client.query !== "function") {
+    throw new Error("fila_advisory_handle_invalido");
+  }
+  const chave = normalizarChaveClaimFila(handle);
+  handle.clienteId = chave.clienteId;
+  handle.filaItemId = chave.filaItemId;
+  handle.clientProprio = handle.clientProprio === true;
+  handle.liberado = handle.liberado === true;
+  return handle;
+}
+
+function liberarClientAdvisory(client, erro = null) {
+  if (!client || typeof client.release !== "function") return;
+  if (erro) client.release(erro);
+  else client.release();
+}
+
 async function comExecutorClaim(opcoes = {}, callback) {
   const clientExterno = opcoes.client;
   if (clientExterno && typeof clientExterno.query === "function") return callback(clientExterno);
@@ -163,6 +181,72 @@ async function liberarClaimFila(entrada = {}, opcoes = {}) {
   };
 }
 
+// Advisory locks usam dois hashes PostgreSQL deterministas, um por dimensão
+// da identidade estável. Colisão só pode causar bloqueio conservador; nunca
+// concede duas autoridades para a mesma chave.
+async function adquirirAdvisoryLockFila(entrada = {}, opcoes = {}) {
+  const chave = normalizarChaveClaimFila(entrada);
+  const clientExterno = opcoes.client;
+  const pool = opcoes.pool || getEnginePool();
+  if (!clientExterno && (!pool || typeof pool.connect !== "function")) {
+    throw new Error("fila_advisory_pool_indisponivel");
+  }
+
+  const client = clientExterno || await pool.connect();
+  const clientProprio = !clientExterno;
+  try {
+    const resultado = await client.query(
+      "SELECT pg_try_advisory_lock(hashtext($1), hashtext($2)) AS adquirido",
+      [chave.clienteId, chave.filaItemId]
+    );
+    const adquirido = resultado?.rows?.[0]?.adquirido === true;
+    if (!adquirido) {
+      if (clientProprio) liberarClientAdvisory(client);
+      return { ok: true, adquirido: false, handle: null, motivo: "advisory_ocupado" };
+    }
+    return {
+      ok: true,
+      adquirido: true,
+      handle: {
+        ...chave,
+        client,
+        clientProprio,
+        liberado: false
+      }
+    };
+  } catch (erro) {
+    if (clientProprio) liberarClientAdvisory(client, erro);
+    throw erro;
+  }
+}
+
+async function liberarAdvisoryLockFila(handle = {}, opcoes = {}) {
+  const estado = normalizarHandleAdvisory(handle);
+  if (estado.liberado) return { ok: true, liberado: false, idempotente: true };
+  if (opcoes.client && opcoes.client !== estado.client) {
+    throw new Error("fila_advisory_unlock_client_divergente");
+  }
+
+  let erroUnlock = null;
+  try {
+    const resultado = await estado.client.query(
+      "SELECT pg_advisory_unlock(hashtext($1), hashtext($2)) AS liberado",
+      [estado.clienteId, estado.filaItemId]
+    );
+    estado.liberado = true;
+    return {
+      ok: true,
+      liberado: resultado?.rows?.[0]?.liberado === true,
+      idempotente: resultado?.rows?.[0]?.liberado !== true
+    };
+  } catch (erro) {
+    erroUnlock = erro;
+    throw erro;
+  } finally {
+    if (estado.clientProprio) liberarClientAdvisory(estado.client, erroUnlock);
+  }
+}
+
 module.exports = {
   TABELA,
   SQL_SCHEMA_FILA_CLAIMS,
@@ -170,6 +254,8 @@ module.exports = {
   normalizarLeaseExpiresAt,
   normalizarTokenClaim,
   gerarTokenClaimFila,
+  adquirirAdvisoryLockFila,
+  liberarAdvisoryLockFila,
   adquirirClaimFila,
   obterClaimFila,
   renovarClaimFila,

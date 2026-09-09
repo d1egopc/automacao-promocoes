@@ -20,14 +20,20 @@ function criarLogger() {
   };
 }
 
-function criarRepository({ adquirir, liberar } = {}) {
+function criarRepository({ adquirir, liberar, adquirirAdvisory, liberarAdvisory } = {}) {
   return {
     adquirirClaimFila: adquirir || (async () => ({
       ok: true,
       adquirido: true,
       claim: { claimToken: "11111111-1111-4111-8111-111111111111" }
     })),
-    liberarClaimFila: liberar || (async () => ({ ok: true, liberado: true }))
+    liberarClaimFila: liberar || (async () => ({ ok: true, liberado: true })),
+    adquirirAdvisoryLockFila: adquirirAdvisory || (async () => ({
+      ok: true,
+      adquirido: true,
+      handle: { client: { query() {} }, clienteId: "cliente_1", filaItemId: "fila_1" }
+    })),
+    liberarAdvisoryLockFila: liberarAdvisory || (async () => ({ ok: true, liberado: true }))
   };
 }
 
@@ -56,6 +62,7 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
       }
     }));
     assert.strictEqual(resultado.estado.resultadoClaim, "adquirido");
+    assert.strictEqual(resultado.estado.resultadoAdvisory, "adquirido");
     assert.strictEqual(liberacoes, 1, "claim adquirido deve ser liberado sem alterar baseline");
     assert.strictEqual(resultado.final.liberacao, "liberado");
     assert.strictEqual(resultado.final.statusFinal, "pendente");
@@ -85,8 +92,31 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
   }
 
   {
+    let executouBaseline = false;
+    const resultado = await observar(criarRepository({
+      adquirirAdvisory: async () => ({ ok: true, adquirido: false, handle: null, motivo: "advisory_ocupado" })
+    }));
+    executouBaseline = true;
+    assert.strictEqual(resultado.estado.resultadoAdvisory, "ocupado");
+    assert.strictEqual(resultado.estado.resultadoClaim, "adquirido");
+    assert.strictEqual(executouBaseline, true, "advisory ocupado nao pode bloquear baseline");
+  }
+
+  {
+    let executouBaseline = false;
+    const resultado = await observar(criarRepository({
+      adquirirAdvisory: async () => { throw new Error("advisory indisponivel"); }
+    }));
+    executouBaseline = true;
+    assert.strictEqual(resultado.estado.resultadoAdvisory, "erro");
+    assert.strictEqual(resultado.estado.resultadoClaim, "adquirido");
+    assert.strictEqual(executouBaseline, true, "erro advisory nao pode bloquear baseline");
+  }
+
+  {
     const resultado = await observar(criarRepository(), { marketplace: "amazon" });
     assert.strictEqual(resultado.estado.resultadoClaim, "identidade_ausente");
+    assert.strictEqual(resultado.estado.resultadoAdvisory, "identidade_ausente");
     assert.strictEqual(resultado.final.liberacao, "nao_aplicavel");
   }
 
@@ -101,10 +131,12 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
   {
     const resultado = await observar(criarRepository());
     const serializado = JSON.stringify(resultado.logger.eventos);
-    assert.strictEqual(resultado.logger.eventos.length, 2);
+    assert.strictEqual(resultado.logger.eventos.length, 4);
     assert(!serializado.includes("11111111-1111-4111-8111-111111111111"), "telemetria nao pode expor token");
     assert(!serializado.includes("titulo"), "telemetria nao deve receber dados comerciais");
-    assert.strictEqual(resultado.logger.eventos[1].evento, "[FILA-CLAIM-SHADOW-FIM]");
+    assert.ok(resultado.logger.eventos.some(evento => evento.evento === "[FILA-CLAIM-SHADOW-FIM]"));
+    assert.ok(resultado.logger.eventos.some(evento => evento.evento === "[FILA-ADVISORY-SHADOW]"));
+    assert.ok(resultado.logger.eventos.some(evento => evento.evento === "[FILA-ADVISORY-SHADOW-FIM]"));
   }
 
   {
@@ -128,6 +160,10 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
     assert(processarFila.indexOf("reservarOfertaProcessandoFila") < processarFila.indexOf("claimShadowFila = await observadorClaimShadowFila.iniciar"));
     assert(!processarFila.includes("candidatePool"), "candidatePool segue sem decidir o vencedor operacional");
     assert(!processarFila.includes("engine_fairness_origem_fluxo"), "fairness continua desligada na fila");
+
+    const inicioEnviarAgora = fonteIndex.indexOf("async function enviarOfertaAgoraDireto");
+    const enviarAgora = fonteIndex.slice(inicioEnviarAgora, fonteIndex.indexOf("\nasync function ", inicioEnviarAgora + 1));
+    assert(!enviarAgora.includes("observadorClaimShadowFila"), "Enviar Agora permanece fora do shadow advisory");
   }
 
   console.log("fila-claims-shadow.test.js OK");
