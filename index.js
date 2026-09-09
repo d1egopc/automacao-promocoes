@@ -313,6 +313,12 @@ const {
   criarControladorCheckpointLegadoV2
 } = require("./modules/fila/fila-operacional-v2");
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
+const filaClaimsRepository = require("./modules/fila/fila-claims.repository");
+const { criarObservadorClaimShadowFila } = require("./modules/fila/fila-claims-shadow.service");
+const observadorClaimShadowFila = criarObservadorClaimShadowFila({
+  repository: filaClaimsRepository,
+  logger: console
+});
 const destinosUtils = require("./utils/destinos");
 const destinosMultiAlvo = require("./utils/destinos-multialvo");
 const destinosCanonicos = require("./utils/destinos-canonicos");
@@ -8842,6 +8848,7 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteFila = clienteIdAlvo || "admin";
   const inicioProcessarFila = process.hrtime.bigint();
   const cpuInicioProcessarFila = process.cpuUsage();
+  let claimShadowFila = null;
   const resumoFila = {
     clienteId: clienteFila,
     fase: "inicio",
@@ -9673,6 +9680,13 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
 }));
 await salvarFilaSeAlterada(clienteId);
 
+try {
+  claimShadowFila = await observadorClaimShadowFila.iniciar({
+    clienteId,
+    oferta
+  });
+} catch {}
+
 let ofertaComercialConfirmadaVitrine = null;
 const destinosEnviadosTelemetria = [];
 
@@ -10302,6 +10316,11 @@ console.log("[ENVIO] Enviado com controle de tempo");
   }
 
 } finally {
+  if (claimShadowFila) {
+    try {
+      await observadorClaimShadowFila.finalizar(claimShadowFila, { oferta, statusFinal: oferta?.status || "" });
+    } catch {}
+  }
   enviandoAgoraPorCliente[clienteFila] = false;
   const cpu = process.cpuUsage(cpuInicioProcessarFila);
   logProcessarFilaResumo({
