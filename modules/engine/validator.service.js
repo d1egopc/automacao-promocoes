@@ -130,10 +130,8 @@ function marketplaceAtivoClienteEngine(clienteId = "", marketplace = "", marketp
   return true;
 }
 
-async function buscarJobsDiagnosticados(limite = 20) {
-  const cotas = calcularCotasFrescorPreImporter(limite);
-  const resultado = await queryEngine(
-    `WITH base AS (
+function sqlBuscarJobsDiagnosticados() {
+  return `WITH base AS (
        SELECT j.id, j.uuid, j.evento_id, j.oferta_id, j.cliente_id, j.marketplace_detectado,
               j.marketplace, j.status, j.motivo_final, j.metadata, j.prioridade,
               j.criado_em, j.atualizado_em,
@@ -142,6 +140,26 @@ async function buscarJobsDiagnosticados(limite = 20) {
               e.origem AS evento_origem,
               e.origem_tipo AS evento_origem_tipo,
               e.metadata AS evento_metadata,
+              COALESCE(NULLIF(TRIM(j.cliente_id), ''), 'workspace_desconhecido') AS workspace_chave_pre_importer,
+              CASE
+                WHEN LOWER(COALESCE(
+                  NULLIF(j.metadata->>'origemFluxo', ''),
+                  NULLIF(j.metadata->>'origem_fluxo', ''),
+                  NULLIF(j.metadata #>> '{metadataEvento,origemFluxo}', ''),
+                  NULLIF(j.metadata #>> '{metadataEvento,origem_fluxo}', ''),
+                  NULLIF(e.metadata->>'origemFluxo', ''),
+                  NULLIF(e.metadata->>'origem_fluxo', '')
+                )) IN ('optimus', 'clonador_grupos')
+                  THEN LOWER(COALESCE(
+                    NULLIF(j.metadata->>'origemFluxo', ''),
+                    NULLIF(j.metadata->>'origem_fluxo', ''),
+                    NULLIF(j.metadata #>> '{metadataEvento,origemFluxo}', ''),
+                    NULLIF(j.metadata #>> '{metadataEvento,origem_fluxo}', ''),
+                    NULLIF(e.metadata->>'origemFluxo', ''),
+                    NULLIF(e.metadata->>'origem_fluxo', '')
+                  ))
+                ELSE ''
+              END AS origem_fluxo_explicita_pre_importer,
               COALESCE(e.capturado_em, j.criado_em) AS origem_comercial_pre_importer,
               CASE
                 WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 1
@@ -162,7 +180,11 @@ async function buscarJobsDiagnosticados(limite = 20) {
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
-              ) AS workspace_rank_pre_importer
+              ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, origem_fluxo_explicita_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS origem_head_rank_pre_importer
          FROM base
         WHERE lane_vazao_pre_importer = 'agua_nova'
      ),
@@ -177,7 +199,11 @@ async function buscarJobsDiagnosticados(limite = 20) {
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
-              ) AS workspace_rank_pre_importer
+              ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, origem_fluxo_explicita_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS origem_head_rank_pre_importer
          FROM base
         WHERE lane_vazao_pre_importer = 'fresca_em_risco'
      ),
@@ -192,7 +218,11 @@ async function buscarJobsDiagnosticados(limite = 20) {
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
-              ) AS workspace_rank_pre_importer
+              ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, origem_fluxo_explicita_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS origem_head_rank_pre_importer
          FROM base
         WHERE lane_vazao_pre_importer = 'fresca_circulavel'
      ),
@@ -207,7 +237,11 @@ async function buscarJobsDiagnosticados(limite = 20) {
               ROW_NUMBER() OVER (
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
-              ) AS workspace_rank_pre_importer
+              ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, origem_fluxo_explicita_pre_importer
+                ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS origem_head_rank_pre_importer
          FROM base
         WHERE lane_vazao_pre_importer = 'expirada'
      ),
@@ -216,30 +250,150 @@ async function buscarJobsDiagnosticados(limite = 20) {
          FROM limpeza_ranked
         ORDER BY workspace_rank_pre_importer ASC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $4
+     ),
+     baseline_bruto AS (
+       SELECT * FROM agua_nova
+       UNION ALL
+       SELECT * FROM fresca_em_risco
+       UNION ALL
+       SELECT * FROM fresca_circulavel
+       UNION ALL
+       SELECT * FROM limpeza
+     ),
+     baseline AS (
+       SELECT *,
+              ROW_NUMBER() OVER (
+                ORDER BY bucket_selecao_pre_importer ASC,
+                         workspace_rank_pre_importer ASC,
+                         COALESCE(prioridade, 0) DESC,
+                         CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
+                         CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
+                         atualizado_em DESC NULLS LAST,
+                         id ASC
+              ) AS baseline_ordem_pre_importer
+         FROM baseline_bruto
+        ORDER BY bucket_selecao_pre_importer ASC,
+                 workspace_rank_pre_importer ASC,
+                 COALESCE(prioridade, 0) DESC,
+                 CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
+                 CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
+                 atualizado_em DESC NULLS LAST,
+                 id ASC
+        LIMIT $5
+     ),
+     grupos_representados_baseline AS (
+       SELECT DISTINCT workspace_chave_pre_importer, lane_vazao_pre_importer
+         FROM baseline
+     ),
+     heads_protegidas_brutas AS (
+       SELECT ranked.*, 0 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
+         FROM agua_nova_ranked ranked
+         JOIN grupos_representados_baseline grupos
+           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
+          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
+        WHERE ranked.origem_head_rank_pre_importer = 1
+          AND ranked.origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')
+       UNION ALL
+       SELECT ranked.*, 1 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
+         FROM fresca_em_risco_ranked ranked
+         JOIN grupos_representados_baseline grupos
+           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
+          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
+        WHERE ranked.origem_head_rank_pre_importer = 1
+          AND ranked.origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')
+       UNION ALL
+       SELECT ranked.*, 2 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
+         FROM fresca_circulavel_ranked ranked
+         JOIN grupos_representados_baseline grupos
+           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
+          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
+        WHERE ranked.origem_head_rank_pre_importer = 1
+          AND ranked.origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')
+       UNION ALL
+       SELECT ranked.*, 3 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
+         FROM limpeza_ranked ranked
+         JOIN grupos_representados_baseline grupos
+           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
+          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
+        WHERE ranked.origem_head_rank_pre_importer = 1
+          AND ranked.origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')
+     ),
+     candidate_pool_bruto AS (
+       SELECT *, 'baseline'::text AS candidate_pool_origem_pre_importer FROM baseline
+       UNION ALL
+       SELECT *, 'head_protegida'::text AS candidate_pool_origem_pre_importer FROM heads_protegidas_brutas
+     ),
+     candidate_pool_ranqueado AS (
+       SELECT *, ROW_NUMBER() OVER (
+         PARTITION BY id
+         ORDER BY CASE WHEN candidate_pool_origem_pre_importer = 'baseline' THEN 0 ELSE 1 END,
+                  baseline_ordem_pre_importer ASC NULLS LAST,
+                  origem_head_rank_pre_importer ASC,
+                  id ASC
+       ) AS candidate_pool_dedup_rank_pre_importer
+       FROM candidate_pool_bruto
+     ),
+     candidate_pool AS (
+       SELECT * FROM candidate_pool_ranqueado
+        WHERE candidate_pool_dedup_rank_pre_importer = 1
+     ),
+     saida_pre_importer AS (
+       SELECT 'baseline'::text AS tipo_saida_pre_importer, baseline.*,
+              NULL::text AS candidate_pool_origem_pre_importer,
+              NULL::bigint AS candidate_pool_dedup_rank_pre_importer
+         FROM baseline
+       UNION ALL
+       SELECT 'candidate_pool'::text AS tipo_saida_pre_importer, * FROM candidate_pool
      )
-     SELECT *
-       FROM (
-         SELECT * FROM agua_nova
-         UNION ALL
-         SELECT * FROM fresca_em_risco
-         UNION ALL
-         SELECT * FROM fresca_circulavel
-         UNION ALL
-         SELECT * FROM limpeza
-       ) selecionados
-      ORDER BY bucket_selecao_pre_importer ASC,
+     SELECT * FROM saida_pre_importer
+      ORDER BY CASE WHEN tipo_saida_pre_importer = 'baseline' THEN 0 ELSE 1 END,
+               baseline_ordem_pre_importer ASC NULLS LAST,
+               bucket_selecao_pre_importer ASC,
                workspace_rank_pre_importer ASC,
-               COALESCE(prioridade, 0) DESC,
-               CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
-               CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
-               atualizado_em DESC NULLS LAST,
-               id ASC
-      LIMIT $5`,
+               id ASC`;
+}
+
+function removerCamposInternosPreImporter(linha = {}) {
+  const {
+    tipo_saida_pre_importer,
+    workspace_chave_pre_importer,
+    origem_fluxo_explicita_pre_importer,
+    origem_head_rank_pre_importer,
+    baseline_ordem_pre_importer,
+    candidate_pool_origem_pre_importer,
+    candidate_pool_dedup_rank_pre_importer,
+    ...job
+  } = linha;
+  return job;
+}
+
+function separarResultadoJobsDiagnosticados(linhas = []) {
+  const resultado = Array.isArray(linhas) ? linhas : [];
+  return {
+    jobs: resultado
+      .filter(linha => linha.tipo_saida_pre_importer === "baseline")
+      .map(removerCamposInternosPreImporter),
+    candidatePool: resultado
+      .filter(linha => linha.tipo_saida_pre_importer === "candidate_pool")
+      .map(linha => {
+        const job = removerCamposInternosPreImporter(linha);
+        const origemFluxo = String(linha.origem_fluxo_explicita_pre_importer || "").trim();
+        return origemFluxo
+          ? { ...job, origemFluxo, origemFluxoHead: Number(linha.origem_head_rank_pre_importer) === 1 }
+          : job;
+      })
+  };
+}
+
+async function buscarJobsDiagnosticados(limite = 20) {
+  const cotas = calcularCotasFrescorPreImporter(limite);
+  const resultado = await queryEngine(
+    sqlBuscarJobsDiagnosticados(),
     [cotas.aguaNova, cotas.frescaEmRisco, cotas.frescaCirculavel, cotas.limpeza, cotas.totalSelecao]
   );
 
   if (!resultado.ok) return { ok: false, jobs: [], motivo: resultado.motivo, erro: resultado.erro };
-  return { ok: true, jobs: resultado.resultado.rows };
+  return { ok: true, ...separarResultadoJobsDiagnosticados(resultado.resultado?.rows) };
 }
 
 async function tentarMarcarValidando(jobId) {
@@ -383,6 +537,8 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
 }
 
 module.exports = {
+  sqlBuscarJobsDiagnosticados,
+  separarResultadoJobsDiagnosticados,
   buscarJobsDiagnosticados,
   tentarMarcarValidando,
   recuperarJobsValidandoStale,
