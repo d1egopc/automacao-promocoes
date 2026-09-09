@@ -10,9 +10,16 @@ const {
   registrarProcessamento
 } = require("./processor.service");
 const {
+  avaliarFrescorPreImporter,
   expirarJobPreImporterSeNecessario,
   resumirSelecaoFrescorPreImporter
 } = require("./frescor-pre-importer.service");
+const {
+  chaveGrupo,
+  montarGruposFairness,
+  headsProtegidas,
+  reivindicarGrupoFairness
+} = require("./validator-fairness.service");
 const {
   logEngineProcessadorInicio,
   logEngineProcessadorJob,
@@ -68,8 +75,25 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
   resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
   resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
 
-  for (const job of diagnosticados.jobs) {
+  const baselineComIndice = diagnosticados.jobs.map((job, indiceBaseline) => ({ ...job, indiceBaseline }));
+  const indiceBaselinePorId = new Map(baselineComIndice.map(job => [Number(job.id), job.indiceBaseline]));
+  const candidatosElegiveis = (diagnosticados.candidatePool || [])
+    .filter(job => !avaliarFrescorPreImporter(job).expirada)
+    .map(job => ({ ...job, indiceBaseline: indiceBaselinePorId.get(Number(job.id)) }));
+  const gruposFairness = new Map(
+    montarGruposFairness(
+      baselineComIndice.filter(job => job.lane_vazao_pre_importer !== "expirada"),
+      candidatosElegiveis
+    )
+      .filter(grupo => headsProtegidas(grupo).size === 2)
+      .map(grupo => [grupo.chave, grupo])
+  );
+  const gruposReivindicados = new Map();
+  const confirmadosPorPosicao = new Map();
+
+  for (const job of baselineComIndice) {
     logEngineProcessadorJob({ modo: "validacao", jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id });
+    let jobConfirmado = job;
 
     try {
       const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
@@ -82,14 +106,37 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
         continue;
       }
 
-      const claim = await tentarMarcarValidando(job.id);
-      if (!claim.ok || !claim.claimed) {
-        resumo.claimsPerdidos += 1;
-        continue;
+      const grupo = gruposFairness.get(chaveGrupo(job));
+      if (grupo) {
+        if (!gruposReivindicados.has(grupo.chave)) {
+          const resultadoFairness = await reivindicarGrupoFairness(grupo);
+          gruposReivindicados.set(grupo.chave, resultadoFairness);
+          if (resultadoFairness.ok) {
+            for (const confirmado of resultadoFairness.confirmados) {
+              confirmadosPorPosicao.set(Number(confirmado.posicao), confirmado.job);
+            }
+          }
+        }
+        const resultadoFairness = gruposReivindicados.get(grupo.chave);
+        if (resultadoFairness?.ok) {
+          jobConfirmado = confirmadosPorPosicao.get(Number(job.indiceBaseline));
+          if (!jobConfirmado) {
+            resumo.claimsPerdidos += 1;
+            continue;
+          }
+        }
+      }
+
+      if (!grupo || !gruposReivindicados.get(grupo.chave)?.ok) {
+        const claim = await tentarMarcarValidando(job.id);
+        if (!claim.ok || !claim.claimed) {
+          resumo.claimsPerdidos += 1;
+          continue;
+        }
       }
 
       resumo.processados += 1;
-      const resultado = await validarJobDiagnosticadoEngine(job, {
+      const resultado = await validarJobDiagnosticadoEngine(jobConfirmado, {
         clientesValidos,
         integracoesPorCliente,
         marketplacesAtivosPorCliente
@@ -101,13 +148,13 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
         resumo.erro_validacao += 1;
       }
     } catch (e) {
-      logEngineProcessadorErro({ modo: "validacao", jobId: job.id, etapa: "validar_job", motivo: "erro_validacao", erro: e.message });
-      const transicao = await marcarJobStatus(job.id, "erro_validacao", "erro_validacao", {
+      logEngineProcessadorErro({ modo: "validacao", jobId: jobConfirmado.id, etapa: "validar_job", motivo: "erro_validacao", erro: e.message });
+      const transicao = await marcarJobStatus(jobConfirmado.id, "erro_validacao", "erro_validacao", {
         statusEsperado: "validando"
       });
       if (transicao.ok) {
         resumo.erro_validacao += 1;
-        await registrarProcessamento(job.id, "validacao_final", "erro", "erro_validacao", {
+        await registrarProcessamento(jobConfirmado.id, "validacao_final", "erro", "erro_validacao", {
           fase: "validacao",
           erro: e.message
         });

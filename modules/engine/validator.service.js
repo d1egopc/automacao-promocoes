@@ -396,18 +396,38 @@ async function buscarJobsDiagnosticados(limite = 20) {
   return { ok: true, ...separarResultadoJobsDiagnosticados(resultado.resultado?.rows) };
 }
 
-async function tentarMarcarValidando(jobId) {
-  const resultado = await queryEngine(
-    `UPDATE engine_jobs_cliente
-        SET status = 'validando', atualizado_em = NOW()
-      WHERE id = $1
-        AND status = 'diagnosticado'
-      RETURNING id, status, atualizado_em`,
-    [jobId]
-  );
+async function reivindicarJobsValidandoComExecutor(executor, jobIds = []) {
+  const ids = [...new Set((Array.isArray(jobIds) ? jobIds : [jobIds])
+    .map(id => Number(id))
+    .filter(id => Number.isSafeInteger(id) && id > 0))];
+  if (!ids.length) return { ok: true, jobs: [], ignorado: true };
 
-  if (!resultado.ok) return { ...resultado, claimed: false };
-  const job = resultado.resultado?.rows?.[0] || null;
+  const sql = `UPDATE engine_jobs_cliente
+                SET status = 'validando', atualizado_em = NOW()
+              WHERE id = ANY($1::bigint[])
+                AND status = 'diagnosticado'
+              RETURNING id, status, atualizado_em`;
+  let resultado;
+  try {
+    if (executor && typeof executor.query === "function") {
+      const resposta = await executor.query(sql, [ids]);
+      resultado = { ok: true, resultado: resposta };
+    } else {
+      resultado = await queryEngine(sql, [ids]);
+    }
+  } catch (erro) {
+    return { ok: false, motivo: "claim_falhou", erro: erro.message || String(erro), jobs: [] };
+  }
+
+  if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro, jobs: [] };
+  const jobs = Array.isArray(resultado.resultado?.rows) ? resultado.resultado.rows : [];
+  return { ok: true, jobs, ignorado: jobs.length === 0 };
+}
+
+async function tentarMarcarValidando(jobId) {
+  const resultado = await reivindicarJobsValidandoComExecutor(null, [jobId]);
+  if (!resultado.ok) return { ...resultado, claimed: false, job: null };
+  const job = resultado.jobs[0] || null;
   return { ...resultado, claimed: Boolean(job), job };
 }
 
@@ -540,6 +560,7 @@ module.exports = {
   sqlBuscarJobsDiagnosticados,
   separarResultadoJobsDiagnosticados,
   buscarJobsDiagnosticados,
+  reivindicarJobsValidandoComExecutor,
   tentarMarcarValidando,
   recuperarJobsValidandoStale,
   validarJobDiagnosticadoEngine,
