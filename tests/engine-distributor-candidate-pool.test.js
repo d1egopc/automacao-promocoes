@@ -112,8 +112,8 @@ function testarSqlESemAtivacao() {
   assert(codigo.includes("PARTITION BY id"));
   assert(codigo.includes('tipo_saida_distribuidor !== "candidate_pool"'));
   assert(!codigo.includes("origem-fairness.repository"), "candidate pool nao consulta memoria de fairness");
-  assert(codigoRunner.includes("busca.ofertas || []"), "runner continua consumindo exclusivamente baseline");
-  assert(!codigoRunner.includes("candidatePool"), "runner nao ativa fairness nesta fase");
+  assert(codigoRunner.includes("busca.ofertas || []"), "baseline continua sendo a fonte do orcamento do runner");
+  assert(codigoRunner.includes("busca.candidatePool || []"), "2B.3c consome somente o pool bounded ja preparado");
 }
 
 testarBaselinePermaneceIdentico();

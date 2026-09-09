@@ -63,9 +63,9 @@ function logQueryErroDistribuidor({ etapa = "", ofertaId = null, jobId = null, c
   });
 }
 
-async function queryDistribuidor({ etapa = "", ofertaId = null, jobId = null, clienteId = "", queryResumo = "", sql = "", params = [] } = {}) {
-  const pool = getEnginePool();
-  if (!pool) {
+async function queryDistribuidor({ etapa = "", ofertaId = null, jobId = null, clienteId = "", queryResumo = "", sql = "", params = [], client = null } = {}) {
+  const executor = client || getEnginePool();
+  if (!executor) {
     const resultado = {
       ok: false,
       motivo: engineDbHabilitado() ? "pool_indisponivel" : "database_url_ausente",
@@ -76,7 +76,7 @@ async function queryDistribuidor({ etapa = "", ofertaId = null, jobId = null, cl
   }
 
   try {
-    const resultado = await pool.query(sql, params);
+    const resultado = await executor.query(sql, params);
     return { ok: true, resultado };
   } catch (err) {
     logQueryErroDistribuidor({ etapa, ofertaId, jobId, clienteId, err, queryResumo });
@@ -946,7 +946,7 @@ function separarResultadoOfertasDistribuiveis(linhas = []) {
   };
 }
 
-async function tentarMarcarDistribuindo(ofertaId, contextoLog = {}) {
+async function tentarMarcarDistribuindo(ofertaId, contextoLog = {}, client = null) {
   const resultado = await queryDistribuidor({
     etapa: "marcar_distribuindo",
     ofertaId,
@@ -955,7 +955,8 @@ async function tentarMarcarDistribuindo(ofertaId, contextoLog = {}) {
         SET status = 'distribuindo', motivo_status = NULL, atualizada_em = NOW()
       WHERE id = $1 AND status IN ('importada', 'oferta_criada')
       RETURNING id, status`,
-    params: [ofertaId]
+    params: [ofertaId],
+    client
   });
 
   if (!resultado.ok) {

@@ -37,6 +37,12 @@ const {
   avaliarFrescorComercialOferta,
   flowManagerAtivoWorkspace
 } = require("../flow-manager/flow-manager.service");
+const {
+  chaveGrupo,
+  montarGruposFairness,
+  headsProtegidas,
+  reivindicarSlotFairness
+} = require("./distributor-fairness.service");
 
 const motivoDistribuicaoDefinitivo = typeof motivoDistribuicaoDefinitivoService === "function"
   ? motivoDistribuicaoDefinitivoService
@@ -722,9 +728,9 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     decisao: "iniciado"
   });
 
-  const statusComercialAnterior = String(oferta.status || "").trim();
-  oferta.__statusComercialAnterior = statusComercialAnterior;
-  const lock = await tentarMarcarDistribuindo(oferta.id, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
+  const lock = typeof contexto.reivindicarDistribuicao === "function"
+    ? await contexto.reivindicarDistribuicao(oferta)
+    : await tentarMarcarDistribuindo(oferta.id, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
   if (!lock.ok) {
     if (lock.ignorado) {
       coberturaRadar.registrar("engine_distributor_nao_distribuivel", {
@@ -744,6 +750,9 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     });
     return erroOferta(oferta, lock.motivo || "erro_distribuicao", { erro: lock.erro || "" }, resumo);
   }
+
+  if (lock.oferta) oferta = lock.oferta;
+  oferta.__statusComercialAnterior = String(oferta.status || "").trim();
 
   await registrarEtapaDistribuicao(oferta.job_id, "inicio_distribuicao", "ok", "distribuicao_iniciada", {
     ofertaId: oferta.id,
@@ -1083,28 +1092,64 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
       break;
     }
 
-    for (const oferta of ofertasNovas) {
+    const baselineComIndice = ofertasNovas.map((oferta, indiceBaseline) => ({ ...oferta, indiceBaseline }));
+    const indiceBaselinePorId = new Map(baselineComIndice.map(oferta => [Number(oferta.id), oferta.indiceBaseline]));
+    const candidatosFairness = (busca.candidatePool || []).map(oferta => ({
+      ...oferta,
+      indiceBaseline: indiceBaselinePorId.get(Number(oferta.id))
+    }));
+    const gruposFairness = new Map(
+      montarGruposFairness(baselineComIndice, candidatosFairness)
+        .filter(grupo => headsProtegidas(grupo).size === 2)
+        .map(grupo => [grupo.chave, grupo])
+    );
+    const planosFairness = new Map();
+    const idsReservadosFairness = new Map();
+
+    for (const oferta of baselineComIndice) {
       const ofertaId = String(oferta.id || "");
       if (ofertaId) idsProcessados.add(ofertaId);
       resumo.processadas += 1;
+      let ofertaEfetiva = oferta;
 
       try {
-        const resultado = await distribuirOfertaEngine(oferta, contextoFinal, resumo);
+        const grupo = gruposFairness.get(chaveGrupo(oferta));
+        const contextoOferta = grupo
+          ? {
+            ...contextoFinal,
+            reivindicarDistribuicao: async () => {
+              const idsReservados = idsReservadosFairness.get(grupo.chave) || new Set();
+              const claim = await reivindicarSlotFairness(grupo, oferta.indiceBaseline, {
+                plano: planosFairness.get(grupo.chave),
+                idsReservados
+              });
+              if (claim.plano) planosFairness.set(grupo.chave, claim.plano);
+              if (claim.ok && claim.oferta) {
+                ofertaEfetiva = claim.oferta;
+                idsReservados.add(Number(claim.oferta.id));
+                idsProcessados.add(String(claim.oferta.id));
+              }
+              idsReservadosFairness.set(grupo.chave, idsReservados);
+              return claim;
+            }
+          }
+          : contextoFinal;
+        const resultado = await distribuirOfertaEngine(oferta, contextoOferta, resumo);
         if (resultado.ignorado) resumo.processadas -= 1;
-        registrarResultadoDistributorVivo(resumo, oferta, resultado);
+        registrarResultadoDistributorVivo(resumo, ofertaEfetiva, resultado);
       } catch (e) {
         resumo.erros += 1;
         motivoAdicionar(resumo, "erro_distribuicao");
-        logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, etapa: "distribuir_oferta", motivo: "erro_distribuicao", erro: e.message });
+        logEngineDistribuidorErro({ ofertaId: ofertaEfetiva.id, jobId: ofertaEfetiva.job_id, etapa: "distribuir_oferta", motivo: "erro_distribuicao", erro: e.message });
         coberturaRadar.registrar("engine_distributor_erro", {
-          ...contextoCoberturaDistributor(oferta),
+          ...contextoCoberturaDistributor(ofertaEfetiva),
           decisao: "erro",
           motivo: "erro_distribuicao",
           erro: e.message,
           filaRecebeu: false
         });
-        await erroOferta(oferta, "erro_distribuicao", { erro: e.message });
-        registrarResultadoDistributorVivo(resumo, oferta, { ok: false, motivo: "erro_distribuicao" });
+        await erroOferta(ofertaEfetiva, "erro_distribuicao", { erro: e.message });
+        registrarResultadoDistributorVivo(resumo, ofertaEfetiva, { ok: false, motivo: "erro_distribuicao" });
       }
 
       if (resumo.adicionadasFila >= limiteFinal || idsProcessados.size >= maxCandidatos) break;
