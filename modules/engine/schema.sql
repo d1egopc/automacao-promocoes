@@ -153,11 +153,13 @@ ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS detalhes JSONB DEFAUL
 -- Nao contem jobs, ofertas ou regra comercial; e atualizado pelo claim da etapa.
 CREATE TABLE IF NOT EXISTS engine_fairness_origem_fluxo (
   cliente_id TEXT NOT NULL,
-  etapa TEXT NOT NULL CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final')),
+  etapa TEXT NOT NULL CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final', 'distribuicao_final')),
   lane TEXT NOT NULL CHECK (
     (etapa IN ('diagnostico_final', 'validacao_final') AND lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'))
     OR
     (etapa = 'importacao_final' AND lane ~ '^(mercadolivre|amazon|shopee|aliexpress|awin|kabum|magalu):(agua_nova|fresca_em_risco|fresca_circulavel)$')
+    OR
+    (etapa = 'distribuicao_final' AND lane IN ('mercadolivre', 'amazon', 'shopee', 'aliexpress', 'awin', 'kabum', 'magalu'))
   ),
   ultima_origem_atendida TEXT CHECK (ultima_origem_atendida IS NULL OR ultima_origem_atendida IN ('optimus', 'clonador_grupos')),
   ultimo_atendimento_em TIMESTAMPTZ,
@@ -178,13 +180,15 @@ BEGIN
 
   ALTER TABLE engine_fairness_origem_fluxo
     ADD CONSTRAINT engine_fairness_origem_fluxo_etapa_check
-    CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final'));
+    CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final', 'distribuicao_final'));
   ALTER TABLE engine_fairness_origem_fluxo
     ADD CONSTRAINT engine_fairness_origem_fluxo_lane_check
     CHECK (
       (etapa IN ('diagnostico_final', 'validacao_final') AND lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'))
       OR
       (etapa = 'importacao_final' AND lane ~ '^(mercadolivre|amazon|shopee|aliexpress|awin|kabum|magalu):(agua_nova|fresca_em_risco|fresca_circulavel)$')
+      OR
+      (etapa = 'distribuicao_final' AND lane IN ('mercadolivre', 'amazon', 'shopee', 'aliexpress', 'awin', 'kabum', 'magalu'))
     );
 END;
 $$;

@@ -101,9 +101,10 @@ async function testarSchema() {
   assert(/CREATE TABLE IF NOT EXISTS engine_fairness_origem_fluxo/i.test(schema));
   assert(/PRIMARY KEY \(cliente_id, etapa, lane\)/i.test(schema));
   assert(/ultima_origem_atendida IN \('optimus', 'clonador_grupos'\)/i.test(schema));
-  assert(/etapa IN \('diagnostico_final', 'validacao_final', 'importacao_final'\)/i.test(schema));
+  assert(/etapa IN \('diagnostico_final', 'validacao_final', 'importacao_final', 'distribuicao_final'\)/i.test(schema));
   assert(/lane IN \('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'\)/i.test(schema));
   assert(/etapa = 'importacao_final'.*mercadolivre\|amazon\|shopee\|aliexpress\|awin\|kabum\|magalu/is.test(schema));
+  assert(/etapa = 'distribuicao_final'.*lane IN \('mercadolivre', 'amazon', 'shopee', 'aliexpress', 'awin', 'kabum', 'magalu'\)/is.test(schema));
 }
 
 function testarValidacao() {
