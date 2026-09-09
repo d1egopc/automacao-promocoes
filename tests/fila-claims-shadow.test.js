@@ -156,14 +156,13 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
     const processarFila = fonteIndex.slice(inicio, fim);
     assert(processarFila.includes("oferta = await selecionarProximaOfertaFila(clienteFila"));
     assert(processarFila.includes("reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta"));
-    assert(processarFila.includes("claimShadowFila = await observadorClaimShadowFila.iniciar"));
-    assert(processarFila.indexOf("reservarOfertaProcessandoFila") < processarFila.indexOf("claimShadowFila = await observadorClaimShadowFila.iniciar"));
+    assert(!processarFila.includes("observadorClaimShadowFila"), "shadow antigo sai do hot path funcional");
     assert(!processarFila.includes("candidatePool"), "candidatePool segue sem decidir o vencedor operacional");
     assert(!processarFila.includes("engine_fairness_origem_fluxo"), "fairness continua desligada na fila");
 
     const inicioEnviarAgora = fonteIndex.indexOf("async function enviarOfertaAgoraDireto");
     const enviarAgora = fonteIndex.slice(inicioEnviarAgora, fonteIndex.indexOf("\nasync function ", inicioEnviarAgora + 1));
-    assert(!enviarAgora.includes("observadorClaimShadowFila"), "Enviar Agora permanece fora do shadow advisory");
+    assert(!enviarAgora.includes("observadorClaimShadowFila"), "Enviar Agora nao usa shadow advisory redundante");
   }
 
   console.log("fila-claims-shadow.test.js OK");

@@ -314,8 +314,8 @@ const {
 } = require("./modules/fila/fila-operacional-v2");
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const filaClaimsRepository = require("./modules/fila/fila-claims.repository");
-const { criarObservadorClaimShadowFila } = require("./modules/fila/fila-claims-shadow.service");
-const observadorClaimShadowFila = criarObservadorClaimShadowFila({
+const { criarCatracaAdvisoryFuncionalFila } = require("./modules/fila/fila-advisory-functional.service");
+const catracaAdvisoryFuncionalFila = criarCatracaAdvisoryFuncionalFila({
   repository: filaClaimsRepository,
   logger: console
 });
@@ -8848,7 +8848,7 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteFila = clienteIdAlvo || "admin";
   const inicioProcessarFila = process.hrtime.bigint();
   const cpuInicioProcessarFila = process.cpuUsage();
-  let claimShadowFila = null;
+  let advisoryFuncionalFila = null;
   const resumoFila = {
     clienteId: clienteFila,
     fase: "inicio",
@@ -9104,6 +9104,21 @@ if (!usuarioAtivoOperacional(clienteId)) {
     decisao: "bloqueado",
     motivo: "usuario_inativo",
     filaRecebeu: true
+  });
+  return;
+}
+
+advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
+  clienteId,
+  oferta
+});
+if (advisoryFuncionalFila.resultado !== "adquirido") {
+  resumoFila.motivoPulo = `advisory_${advisoryFuncionalFila.resultado || "erro"}`;
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: resumoFila.motivoPulo,
+    filaRecebeu: true,
+    statusFilaAntes: oferta.status || ""
   });
   return;
 }
@@ -9679,13 +9694,6 @@ console.log("[FILA-PROCESSANDO-RESERVADA]", JSON.stringify({
   processandoEm: reservaProcessamento.processandoEm
 }));
 await salvarFilaSeAlterada(clienteId);
-
-try {
-  claimShadowFila = await observadorClaimShadowFila.iniciar({
-    clienteId,
-    oferta
-  });
-} catch {}
 
 let ofertaComercialConfirmadaVitrine = null;
 const destinosEnviadosTelemetria = [];
@@ -10316,9 +10324,9 @@ console.log("[ENVIO] Enviado com controle de tempo");
   }
 
 } finally {
-  if (claimShadowFila) {
+  if (advisoryFuncionalFila?.resultado === "adquirido") {
     try {
-      await observadorClaimShadowFila.finalizar(claimShadowFila, { oferta, statusFinal: oferta?.status || "" });
+      await catracaAdvisoryFuncionalFila.finalizar(advisoryFuncionalFila, { statusFinal: oferta?.status || "" });
     } catch {}
   }
   enviandoAgoraPorCliente[clienteFila] = false;
@@ -11758,8 +11766,6 @@ if (!resolucaoIndice.ok || !resolucaoIndice.item) {
 }
 
 let oferta = resolucaoIndice.item;
-const indexReal = resolucaoIndice.indexReal;
-
   if ((oferta.clienteId || "admin") !== clienteIdReq) {
     return res.status(403).json({
       ok: false,
@@ -11775,21 +11781,6 @@ const indexReal = resolucaoIndice.indexReal;
     marketplace: oferta.marketplace,
     categoria: oferta.categoria
   });
-
-if (indexReal >= 0) {
-  filaStore.removerItem(oferta);
-  fila.splice(indexReal, 1);
-  filaOfertas.adicionarOfertaInicioFila(fila, oferta, {
-    clienteId: clienteIdReq,
-    origem: oferta.origem || "enviar_agora",
-    logger: console
-  });
-  reconstruirFilaStoreCliente(clienteIdReq, "enviar_agora_reordenar");
-  await sincronizarItemFilaVivaAposMutacao(clienteIdReq, oferta, "rota_enviar_agora_reordenar", {
-    permitirRegressaoStatus: true,
-    posicaoLegada: 0
-  });
-}
 
   const resultado = await enviarOfertaAgoraDireto(oferta, clienteIdReq);
   return res.status(resultado.statusHttp || 200).json(resultado);
@@ -13850,6 +13841,48 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     };
   }
 
+  const advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
+    clienteId,
+    oferta
+  });
+  if (advisoryFuncionalFila.resultado === "ocupado") {
+    return {
+      ok: false,
+      statusHttp: 409,
+      codigo: "fila_item_em_execucao",
+      erro: "Oferta jÃ¡ estÃ¡ em execuÃ§Ã£o"
+    };
+  }
+  if (advisoryFuncionalFila.resultado !== "adquirido") {
+    return {
+      ok: false,
+      statusHttp: advisoryFuncionalFila.resultado === "identidade_ausente" ? 409 : 503,
+      codigo: advisoryFuncionalFila.resultado === "identidade_ausente"
+        ? "fila_item_sem_identidade"
+        : "fila_exclusao_indisponivel",
+      erro: "ExclusÃ£o de envio indisponÃ­vel"
+    };
+  }
+
+  try {
+  const localizacaoAtual = filaOfertas.relocalizarOfertaFila(fila, oferta, { clienteId });
+  if (!localizacaoAtual.ok || !localizacaoAtual.oferta) {
+    return {
+      ok: false,
+      statusHttp: 404,
+      erro: "Oferta nÃ£o encontrada"
+    };
+  }
+  oferta = localizacaoAtual.oferta;
+  if (String(oferta.status || "").toLowerCase() === "processando") {
+    return {
+      ok: false,
+      statusHttp: 409,
+      codigo: "fila_item_processando",
+      erro: "Oferta jÃ¡ estÃ¡ processando"
+    };
+  }
+
   const estavaExpirada = ofertaExpiradaParaEnvio(oferta);
 
   if (estavaExpirada) {
@@ -14039,6 +14072,11 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
     destinosEnviados: destinosEnviadosCount,
     oferta
   };
+  } finally {
+    await catracaAdvisoryFuncionalFila.finalizar(advisoryFuncionalFila, {
+      statusFinal: oferta?.status || ""
+    });
+  }
 }
 
 function lerPreviewRadar(clienteId = "admin") {
