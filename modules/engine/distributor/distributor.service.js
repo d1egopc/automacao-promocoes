@@ -753,7 +753,11 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
   }
 
   params.push(limitarDistribuicao(limite));
-  const campoMetadata = await engineOfertasTemMetadataDistribuidor()
+  const temMetadataOferta = await engineOfertasTemMetadataDistribuidor();
+  const metadataOfertaExpr = temMetadataOferta
+    ? "COALESCE(o.metadata, '{}'::jsonb)"
+    : "'{}'::jsonb";
+  const campoMetadata = temMetadataOferta
     ? "o.metadata"
     : "'{}'::jsonb AS metadata";
 
@@ -767,7 +771,30 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
              o.link_afiliado, o.categoria, o.score, o.prioridade, o.status, o.motivo_status,
              ${campoMetadata},
              o.criada_em, o.atualizada_em, e.capturado_em AS evento_capturado_em, j.id AS job_id, j.cliente_id,
-             j.metadata AS job_metadata, e.metadata AS evento_metadata,
+              j.metadata AS job_metadata, e.metadata AS evento_metadata,
+              CASE
+                WHEN LOWER(COALESCE(
+                  NULLIF(${metadataOfertaExpr}->>'origemFluxo', ''),
+                  NULLIF(${metadataOfertaExpr}->>'origem_fluxo', ''),
+                  NULLIF(j.metadata->>'origemFluxo', ''),
+                  NULLIF(j.metadata->>'origem_fluxo', ''),
+                  NULLIF(j.metadata #>> '{metadataEvento,origemFluxo}', ''),
+                  NULLIF(j.metadata #>> '{metadataEvento,origem_fluxo}', ''),
+                  NULLIF(e.metadata->>'origemFluxo', ''),
+                  NULLIF(e.metadata->>'origem_fluxo', '')
+                )) IN ('optimus', 'clonador_grupos')
+                  THEN LOWER(COALESCE(
+                    NULLIF(${metadataOfertaExpr}->>'origemFluxo', ''),
+                    NULLIF(${metadataOfertaExpr}->>'origem_fluxo', ''),
+                    NULLIF(j.metadata->>'origemFluxo', ''),
+                    NULLIF(j.metadata->>'origem_fluxo', ''),
+                    NULLIF(j.metadata #>> '{metadataEvento,origemFluxo}', ''),
+                    NULLIF(j.metadata #>> '{metadataEvento,origem_fluxo}', ''),
+                    NULLIF(e.metadata->>'origemFluxo', ''),
+                    NULLIF(e.metadata->>'origem_fluxo', '')
+                  ))
+                ELSE ''
+              END AS origem_fluxo_explicita_distribuidor,
              ROW_NUMBER() OVER (
                PARTITION BY LOWER(COALESCE(o.marketplace, '')), j.cliente_id
                ORDER BY COALESCE(e.capturado_em, o.criada_em, o.atualizada_em, NOW()) DESC,
@@ -784,28 +811,139 @@ async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clien
         JOIN engine_jobs_cliente j ON j.oferta_id = o.id
         LEFT JOIN engine_eventos_brutos e ON e.id = o.evento_id
        WHERE ${filtros.join(" AND ")}
+    ),
+    baseline AS (
+      SELECT *,
+             NULL::bigint AS origem_head_rank_distribuidor,
+             ROW_NUMBER() OVER (
+               ORDER BY ordem_workspace_marketplace ASC,
+                        ordem_marketplace ASC,
+                        COALESCE(evento_capturado_em, criada_em, atualizada_em, NOW()) DESC,
+                        COALESCE(prioridade, score, 0) DESC,
+                        id ASC
+             ) AS baseline_ordem_distribuidor
+        FROM candidatos_distribuiveis
+       ORDER BY ordem_workspace_marketplace ASC,
+                ordem_marketplace ASC,
+                COALESCE(evento_capturado_em, criada_em, atualizada_em, NOW()) DESC,
+                COALESCE(prioridade, score, 0) DESC,
+                id ASC
+       LIMIT $${params.length}
+    ),
+    grupos_representados_baseline AS (
+      SELECT DISTINCT cliente_id, LOWER(COALESCE(marketplace, '')) AS marketplace_chave_distribuidor
+        FROM baseline
+    ),
+    heads_origem_ranked AS (
+      SELECT candidatos.*,
+             ROW_NUMBER() OVER (
+               PARTITION BY cliente_id,
+                            LOWER(COALESCE(marketplace, '')),
+                            origem_fluxo_explicita_distribuidor
+               ORDER BY COALESCE(evento_capturado_em, criada_em, atualizada_em, NOW()) DESC,
+                        COALESCE(prioridade, score, 0) DESC,
+                        id ASC
+             ) AS origem_head_rank_distribuidor
+        FROM candidatos_distribuiveis candidatos
+       WHERE origem_fluxo_explicita_distribuidor IN ('optimus', 'clonador_grupos')
+    ),
+    heads_protegidas AS (
+      SELECT heads.*, NULL::bigint AS baseline_ordem_distribuidor
+        FROM heads_origem_ranked heads
+        JOIN grupos_representados_baseline grupos
+          ON grupos.cliente_id = heads.cliente_id
+         AND grupos.marketplace_chave_distribuidor = LOWER(COALESCE(heads.marketplace, ''))
+       WHERE heads.origem_head_rank_distribuidor = 1
+    ),
+    candidate_pool_bruto AS (
+      SELECT baseline.*, 'baseline'::text AS candidate_pool_origem_distribuidor
+        FROM baseline
+      UNION ALL
+      SELECT heads.*, 'head_protegida'::text AS candidate_pool_origem_distribuidor
+        FROM heads_protegidas heads
+    ),
+    candidate_pool_ranqueado AS (
+      SELECT *,
+             ROW_NUMBER() OVER (
+               PARTITION BY id
+               ORDER BY CASE WHEN candidate_pool_origem_distribuidor = 'baseline' THEN 0 ELSE 1 END,
+                        baseline_ordem_distribuidor ASC NULLS LAST,
+                        origem_head_rank_distribuidor ASC NULLS LAST,
+                        id ASC
+             ) AS candidate_pool_dedup_rank_distribuidor
+        FROM candidate_pool_bruto
+    ),
+    candidate_pool AS (
+      SELECT *
+        FROM candidate_pool_ranqueado
+       WHERE candidate_pool_dedup_rank_distribuidor = 1
+    ),
+    saida_distribuidor AS (
+      SELECT 'baseline'::text AS tipo_saida_distribuidor, baseline.*,
+             NULL::text AS candidate_pool_origem_distribuidor,
+             NULL::bigint AS candidate_pool_dedup_rank_distribuidor
+        FROM baseline
+      UNION ALL
+      SELECT 'candidate_pool'::text AS tipo_saida_distribuidor, *
+        FROM candidate_pool
     )
-    SELECT id, uuid, evento_id, origem, link_id, marketplace, titulo,
+    SELECT tipo_saida_distribuidor, id, uuid, evento_id, origem, link_id, marketplace, titulo,
            preco, preco_original, cupom, tipo_cupom, beneficio_extra,
            imagem, link_original, link_expandido,
            link_afiliado, categoria, score, prioridade, status, motivo_status,
            metadata,
            criada_em, atualizada_em, evento_capturado_em, job_id, cliente_id,
-           job_metadata, evento_metadata
-      FROM candidatos_distribuiveis
-     ORDER BY ordem_workspace_marketplace ASC,
+           job_metadata, evento_metadata, origem_fluxo_explicita_distribuidor,
+           baseline_ordem_distribuidor, origem_head_rank_distribuidor,
+           candidate_pool_origem_distribuidor, candidate_pool_dedup_rank_distribuidor
+      FROM saida_distribuidor
+     ORDER BY CASE WHEN tipo_saida_distribuidor = 'baseline' THEN 0 ELSE 1 END,
+              baseline_ordem_distribuidor ASC NULLS LAST,
+              ordem_workspace_marketplace ASC,
               ordem_marketplace ASC,
-              COALESCE(evento_capturado_em, criada_em, atualizada_em, NOW()) DESC,
-              COALESCE(prioridade, score, 0) DESC,
-              id ASC
-     LIMIT $${params.length}`,
+              id ASC`,
     params
   });
 
   if (!resultado.ok) {
-    return { ok: false, ofertas: [], motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || "" };
+    return { ok: false, ofertas: [], candidatePool: [], motivo: resultado.motivo, erro: resultado.erro, erroCode: resultado.erroCode || "" };
   }
-  return { ok: true, ofertas: resultado.resultado.rows };
+  return { ok: true, ...separarResultadoOfertasDistribuiveis(resultado.resultado.rows) };
+}
+
+function removerCamposInternosCandidatePoolDistribuidor(linha = {}) {
+  const {
+    tipo_saida_distribuidor,
+    origem_fluxo_explicita_distribuidor,
+    baseline_ordem_distribuidor,
+    origem_head_rank_distribuidor,
+    candidate_pool_origem_distribuidor,
+    candidate_pool_dedup_rank_distribuidor,
+    ...oferta
+  } = linha;
+  return oferta;
+}
+
+function separarResultadoOfertasDistribuiveis(linhas = []) {
+  const resultado = Array.isArray(linhas) ? linhas : [];
+  return {
+    ofertas: resultado
+      .filter(linha => linha.tipo_saida_distribuidor !== "candidate_pool")
+      .map(removerCamposInternosCandidatePoolDistribuidor),
+    candidatePool: resultado
+      .filter(linha => linha.tipo_saida_distribuidor === "candidate_pool")
+      .map(linha => {
+        const oferta = removerCamposInternosCandidatePoolDistribuidor(linha);
+        const origemFluxo = String(linha.origem_fluxo_explicita_distribuidor || "").trim();
+        return origemFluxo
+          ? {
+            ...oferta,
+            origemFluxo,
+            origemFluxoHead: Number(linha.origem_head_rank_distribuidor) === 1
+          }
+          : oferta;
+      })
+  };
 }
 
 async function tentarMarcarDistribuindo(ofertaId, contextoLog = {}) {
@@ -1272,6 +1410,7 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
 module.exports = {
   limitarDistribuicao,
   buscarOfertasDistribuiveis,
+  separarResultadoOfertasDistribuiveis,
   tentarMarcarDistribuindo,
   marcarOfertaStatus,
   restaurarOfertaStatusSeDistribuindo,
