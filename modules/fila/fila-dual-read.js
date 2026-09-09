@@ -1,5 +1,11 @@
 "use strict";
 
+const {
+  ORIGEM_FLUXO_OPTIMUS,
+  ORIGEM_FLUXO_CLONADOR_GRUPOS,
+  resolverOrigemFluxo
+} = require("../../utils/origem-fluxo");
+
 const FLAG_DUAL_READ_ATIVA = "FILA_V2_DUAL_READ_ATIVA";
 const TAG_TELEMETRIA = "[FILA-V2-DUAL-READ]";
 const INTERVALO_LOG_PADRAO_MS = 5 * 60 * 1000;
@@ -51,6 +57,50 @@ function flagAtiva(nome, env = process.env) {
 
 function modoDualRead(env = process.env) {
   return flagAtiva(FLAG_DUAL_READ_ATIVA, env);
+}
+
+function chaveCandidatoPool(candidato = {}) {
+  const oferta = candidato?.oferta || candidato || {};
+  const chave = idOferta(oferta);
+  if (chave) return `oferta:${chave}`;
+
+  const uuid = texto(oferta.uuid || oferta.fingerprint || oferta.chaveOferta || "");
+  return uuid ? `identidade:${uuid}` : "";
+}
+
+function adicionarCandidatoPool(pool = [], chaves = new Set(), candidato = null) {
+  if (!candidato) return;
+  const chave = chaveCandidatoPool(candidato);
+  if (chave && chaves.has(chave)) return;
+  if (chave) chaves.add(chave);
+  pool.push(candidato);
+}
+
+function construirCandidatePoolShadow(candidatosOrdenados = []) {
+  const ordenados = Array.isArray(candidatosOrdenados) ? candidatosOrdenados : [];
+  const baseline = ordenados[0] || null;
+  const headsPorOrigem = new Map();
+
+  for (const candidato of ordenados) {
+    const origemFluxo = resolverOrigemFluxo(candidato?.oferta || candidato);
+    if (
+      origemFluxo !== ORIGEM_FLUXO_OPTIMUS &&
+      origemFluxo !== ORIGEM_FLUXO_CLONADOR_GRUPOS
+    ) {
+      continue;
+    }
+    if (!headsPorOrigem.has(origemFluxo)) {
+      headsPorOrigem.set(origemFluxo, candidato);
+    }
+  }
+
+  const candidatePool = [];
+  const chaves = new Set();
+  adicionarCandidatoPool(candidatePool, chaves, baseline);
+  adicionarCandidatoPool(candidatePool, chaves, headsPorOrigem.get(ORIGEM_FLUXO_OPTIMUS));
+  adicionarCandidatoPool(candidatePool, chaves, headsPorOrigem.get(ORIGEM_FLUXO_CLONADOR_GRUPOS));
+
+  return candidatePool;
 }
 
 function selecionarFilaReadOnly({
@@ -129,6 +179,7 @@ function selecionarFilaReadOnly({
 
   const candidatosOrdenados = ordenarOfertasFilaViva(candidatosVivos, { agora });
   const selecionada = candidatosOrdenados[0] || null;
+  const candidatePool = construirCandidatePoolShadow(candidatosOrdenados);
 
   return {
     ok: true,
@@ -138,6 +189,7 @@ function selecionarFilaReadOnly({
     totalElegiveis: candidatosVivos.length,
     candidatosVivos,
     candidatosOrdenados,
+    candidatePool,
     contadores,
     selecionada
   };
@@ -390,6 +442,7 @@ module.exports = {
   TAG_TELEMETRIA,
   INTERVALO_LOG_PADRAO_MS,
   modoDualRead,
+  construirCandidatePoolShadow,
   selecionarFilaReadOnly,
   compararSelecaoDualRead,
   compararAntidupDualRead,
