@@ -44,11 +44,11 @@ assert.ok(
   "Credito deve ser verificado antes da tentativa Discord"
 );
 assert.ok(
-  blocoDiscord.indexOf("if (!resultadoDiscord?.ok)") < blocoDiscord.indexOf("debitarCreditos(clienteId, 1)"),
-  "Credito Discord so pode ser debitado apos sucesso real do sender"
+  blocoDiscord.indexOf("if (!checkpointDiscord.ok)") < blocoDiscord.indexOf("registrarCreditoCheckpoint(checkpointDiscord)"),
+  "Credito Discord so pode ser debitado apos sucesso real e checkpoint confirmado"
 );
 assert.ok(
-  blocoDiscord.indexOf("debitarCreditos(clienteId, 1)") < blocoDiscord.indexOf("oferta.destinosEnviados.push"),
+  blocoDiscord.indexOf("registrarCreditoCheckpoint(checkpointDiscord)") < blocoDiscord.indexOf("oferta.destinosEnviados.push"),
   "Historico de sucesso Discord deve ocorrer no caminho de sucesso comprovado"
 );
 assert.ok(

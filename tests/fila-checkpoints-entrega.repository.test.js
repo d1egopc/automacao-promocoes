@@ -40,6 +40,13 @@ function criarPoolMemoria() {
             const linha = linhas.get(id);
             return { rows: linha ? [copiar(linha)] : [], rowCount: linha ? 1 : 0 };
           }
+          if (/^UPDATE fila_checkpoints_entrega/i.test(texto) && /SET credito_debitado = TRUE/i.test(texto)) {
+            const linha = linhas.get(id);
+            if (!linha || linha.attempt_id !== params[4] || linha.estado !== "enviado") return { rows: [], rowCount: 0 };
+            linha.credito_debitado = true;
+            linha.atualizado_em = "2026-09-09T12:01:30.000Z";
+            return { rows: [copiar(linha)], rowCount: 1 };
+          }
           if (/^UPDATE fila_checkpoints_entrega/i.test(texto) && /SET estado = \$7/i.test(texto)) {
             const linha = linhas.get(id);
             if (!linha || linha.attempt_id !== params[4] || linha.estado !== params[5]) return { rows: [], rowCount: 0 };
@@ -108,6 +115,8 @@ async function testarCriacaoTransicaoELeitura() {
   assert.strictEqual(enviado.transicionado, true);
   assert.strictEqual(enviado.checkpoint.providerMessageId, "provider-123");
   assert.strictEqual(enviado.checkpoint.creditoDebitado, true);
+  const evidencia = await repo.registrarCreditoDebitadoCheckpointEntrega(entrada(), { pool });
+  assert.strictEqual(evidencia.registrado, true, "credito so registra evidencia apos envio confirmado");
   await assert.rejects(
     repo.transicionarCheckpointEntrega({ ...entrada(), deEstado: "enviado", paraEstado: "resultado_ambiguo" }, { pool }),
     /transicao_invalida/

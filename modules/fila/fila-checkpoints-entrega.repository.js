@@ -250,6 +250,31 @@ async function prepararNovaTentativaCheckpointEntrega(entrada = {}, opcoes = {})
   };
 }
 
+// O saldo continua fora desta tabela. Esta escrita so registra evidencia de
+// que o debito existente ja concluiu e nunca tenta debitar, compensar ou
+// reconstruir creditos.
+async function registrarCreditoDebitadoCheckpointEntrega(entrada = {}, opcoes = {}) {
+  const chave = normalizarChaveCheckpointEntrega(entrada);
+  const attemptId = normalizarAttemptId(entrada.attemptId);
+  const tabela = tabelaDas(opcoes);
+  const resultado = await comExecutor(opcoes, client => client.query(
+    `UPDATE ${tabela}
+        SET credito_debitado = TRUE,
+            atualizado_em = NOW()
+      WHERE cliente_id = $1 AND fila_item_id = $2
+        AND destino_chave = $3 AND alvo_chave = $4
+        AND attempt_id = $5 AND estado = 'enviado'
+      RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
+                estado, provider_message_id, credito_debitado, criado_em, atualizado_em`,
+    [...paramsChave(chave), attemptId]
+  ));
+  return {
+    registrado: resultado.rowCount > 0,
+    checkpoint: resultado.rows?.[0] ? normalizarLinha(resultado.rows[0], chave) : null,
+    motivo: resultado.rowCount > 0 ? "" : "checkpoint_nao_enviado_ou_attempt_divergente"
+  };
+}
+
 module.exports = {
   TABELA,
   ESTADOS,
@@ -264,5 +289,6 @@ module.exports = {
   criarCheckpointEntrega,
   obterCheckpointEntrega,
   transicionarCheckpointEntrega,
-  prepararNovaTentativaCheckpointEntrega
+  prepararNovaTentativaCheckpointEntrega,
+  registrarCreditoDebitadoCheckpointEntrega
 };

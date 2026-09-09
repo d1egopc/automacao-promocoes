@@ -315,8 +315,18 @@ const {
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const filaClaimsRepository = require("./modules/fila/fila-claims.repository");
 const { criarCatracaAdvisoryFuncionalFila } = require("./modules/fila/fila-advisory-functional.service");
+const filaCheckpointsEntregaRepository = require("./modules/fila/fila-checkpoints-entrega.repository");
+const {
+  criarCheckpointEntregaFuncional,
+  chaveDestinoEntrega,
+  chaveAlvoEntrega
+} = require("./modules/fila/fila-checkpoint-entrega.service");
 const catracaAdvisoryFuncionalFila = criarCatracaAdvisoryFuncionalFila({
   repository: filaClaimsRepository,
+  logger: console
+});
+const checkpointEntregaFuncionalFila = criarCheckpointEntregaFuncional({
+  repository: filaCheckpointsEntregaRepository,
   logger: console
 });
 const destinosUtils = require("./utils/destinos");
@@ -7797,6 +7807,36 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
     contextoFidelidadeExecutor = fidelidadeTraceIdExecutor
       ? { fidelidadeTraceId: fidelidadeTraceIdExecutor }
       : {};
+    const executarAlvoComCheckpoint = async ({
+      canal = "",
+      alvo = {},
+      enviar,
+      falhaConfirmada,
+      permitirNovaTentativaAposFalhaConfirmada = false
+    } = {}) => checkpointEntregaFuncionalFila.executar({
+      clienteId,
+      oferta,
+      destinoChave: chaveDestinoEntrega(destino),
+      alvoChave: chaveAlvoEntrega(canal, alvo),
+      canal,
+      advisoryHandle: opcoes.advisoryHandle || null,
+      enviar,
+      falhaConfirmada,
+      permitirNovaTentativaAposFalhaConfirmada
+    });
+    const registrarCreditoCheckpoint = async (checkpoint) => {
+      const debitou = debitarCreditos(clienteId, 1);
+      if (debitou === true && checkpoint?.contexto) {
+        await checkpointEntregaFuncionalFila.registrarCreditoDebitado(checkpoint.contexto);
+      }
+      return debitou === true;
+    };
+    const erroCheckpoint = (checkpoint) => {
+      if (checkpoint?.erro instanceof Error) return checkpoint.erro;
+      const erro = new Error(checkpoint?.resultado || "checkpoint_entrega_nao_confirmado");
+      erro.checkpointResultado = checkpoint?.resultado || "";
+      return erro;
+    };
 
     if (
       normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "mercadolivre" &&
@@ -7992,25 +8032,35 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       });
     };
     const enviarTextoWhatsapp = async () => {
-      const payload = await montarPayloadTextoWhatsappPorTipoMidia({
-        mensagem,
-        destino,
-        linkFinal: opcoes.linkFinal || "",
-        oferta,
-        upload: sock.waUploadToServer,
-        telemetria: telemetriaMidiaV2
+      const checkpoint = await executarAlvoComCheckpoint({
+        canal: "whatsapp",
+        alvo: { grupoId: grupo },
+        enviar: async () => {
+          const payload = await montarPayloadTextoWhatsappPorTipoMidia({
+            mensagem,
+            destino,
+            linkFinal: opcoes.linkFinal || "",
+            oferta,
+            upload: sock.waUploadToServer,
+            telemetria: telemetriaMidiaV2
+          });
+          try {
+            const resposta = await sock.sendMessage(grupo, payload);
+            registrarTelemetriaMidiaV2({ sucesso: true });
+            return { valor: resposta, providerMessageId: resposta?.key?.id || "" };
+          } catch (erroTexto) {
+            registrarTelemetriaMidiaV2({
+              sucesso: false,
+              erroFinal: "send_message_erro"
+            });
+            throw erroTexto;
+          }
+        }
       });
-      try {
-        await sock.sendMessage(grupo, payload);
-        registrarTelemetriaMidiaV2({ sucesso: true });
-      } catch (erroTexto) {
-        registrarTelemetriaMidiaV2({
-          sucesso: false,
-          erroFinal: "send_message_erro"
-        });
-        throw erroTexto;
-      }
+      if (!checkpoint.ok) throw erroCheckpoint(checkpoint);
+      return checkpoint;
     };
+    let checkpointEnvioWhatsapp;
     if (!imagemEnvioExecutor.ok) {
       if (imagemEnvioExecutor.tinhaImagem) {
         console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
@@ -8024,34 +8074,31 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagemOrigem: oferta.imagemOrigem || ""
         }));
       }
-      await enviarTextoWhatsapp();
+      checkpointEnvioWhatsapp = await enviarTextoWhatsapp();
     } else {
-      try {
-        await sock.sendMessage(grupo, {
-          image: {
-            url: imagemEnvioExecutor.url
-          },
-          caption: mensagem
-        });
+      checkpointEnvioWhatsapp = await executarAlvoComCheckpoint({
+        canal: "whatsapp",
+        alvo: { grupoId: grupo },
+        enviar: async () => {
+          const resposta = await sock.sendMessage(grupo, {
+            image: {
+              url: imagemEnvioExecutor.url
+            },
+            caption: mensagem
+          });
+          registrarTelemetriaMidiaV2({
+            sucesso: true,
+            envioPayloadTipo: "imagem_completa"
+          });
+          return { valor: resposta, providerMessageId: resposta?.key?.id || "" };
+        }
+      });
+      if (!checkpointEnvioWhatsapp.ok) {
         registrarTelemetriaMidiaV2({
-          sucesso: true,
-          envioPayloadTipo: "imagem_completa"
+          sucesso: false,
+          erroFinal: checkpointEnvioWhatsapp.resultado || "send_message_erro"
         });
-      } catch (erroImagem) {
-        fallbackTextoPorImagem = true;
-        erroImagemEnvio = erroImagem.message || "falha_envio_imagem";
-        console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
-          clienteId,
-          destino: destino.nome || destino.id || "",
-          ofertaId: oferta.id || "",
-          engineOfertaId: oferta.engineOfertaId || "",
-          marketplace: oferta.marketplace || "",
-          motivo: "falha_sendMessage_imagem",
-          erro: erroImagemEnvio,
-          imagemStatus: oferta.imagemStatus || "",
-          imagemOrigem: oferta.imagemOrigem || ""
-        }));
-        await enviarTextoWhatsapp();
+        throw erroCheckpoint(checkpointEnvioWhatsapp);
       }
     }
 
@@ -8078,7 +8125,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       erro: erroImagemEnvio,
       resultado: fallbackTextoPorImagem ? "texto_enviado_imagem_nao_enviavel" : "enviado"
     });
-    debitarCreditos(clienteId, 1);
+    await registrarCreditoCheckpoint(checkpointEnvioWhatsapp);
 
     logOptimus("WHATSAPP", "Mensagem enviada", {
       clienteId,
@@ -8096,6 +8143,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       tipo: "whatsapp",
       alvoId: destinosMultiAlvo.chaveAlvo(alvoFanout),
       grupo,
+      messageId: checkpointEnvioWhatsapp?.resposta?.key?.id || "",
       creditos: 1,
       dataEnvio: new Date().toLocaleString("pt-BR", {
         timeZone: "America/Sao_Paulo"
@@ -8105,7 +8153,8 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     registrarResultadoAlvoFanout(oferta, destino, alvoFanout, {
       ok: true,
       estado: "enviado",
-      enviadoEm: new Date().toISOString()
+      enviadoEm: new Date().toISOString(),
+      providerMessageId: checkpointEnvioWhatsapp?.resposta?.key?.id || ""
     });
     alvoAtualFanout = null;
 
@@ -8207,18 +8256,33 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
         });
 
-        const resultadoDiscord = await enviarDiscord({
-          channelId: destinoDiscordValidado.channelId,
-          mensagem,
-          imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
-          suprimirEmbeds: tipoMidiaDestinoExecutor(destinoDiscordValidado) === "texto_link",
-          env: process.env,
-          httpClient: axios
+        const checkpointDiscord = await executarAlvoComCheckpoint({
+          canal: "discord",
+          alvo: { channelId: destinoDiscordValidado.channelId },
+          enviar: async () => {
+            const resultadoDiscord = await enviarDiscord({
+              channelId: destinoDiscordValidado.channelId,
+              mensagem,
+              imagemUrl: imagemEnvioExecutor.ok ? imagemEnvioExecutor.url : "",
+              suprimirEmbeds: tipoMidiaDestinoExecutor(destinoDiscordValidado) === "texto_link",
+              env: process.env,
+              httpClient: axios
+            });
+            if (!resultadoDiscord?.ok) {
+              const erro = new Error(resultadoDiscord?.erro || "discord_nao_enviado");
+              const statusHttpDiscord = Number(resultadoDiscord?.statusHttp || 0);
+              erro.checkpointFalhaConfirmada = statusHttpDiscord >= 400 && statusHttpDiscord < 600;
+              throw erro;
+            }
+            return { valor: resultadoDiscord, providerMessageId: resultadoDiscord.messageId || "" };
+          },
+          falhaConfirmada: erro => erro?.checkpointFalhaConfirmada === true
         });
+        const resultadoDiscord = checkpointDiscord.resposta || null;
         ultimoResultadoDiscord = resultadoDiscord;
 
-        if (!resultadoDiscord?.ok) {
-          const motivoDiscord = resultadoDiscord?.erro || "discord_nao_enviado";
+        if (!checkpointDiscord.ok) {
+          const motivoDiscord = checkpointDiscord.resultado || checkpointDiscord.erro?.message || "discord_nao_enviado";
           registrarResultadoAlvoFanout(oferta, destino, alvoDiscord, {
             ok: false,
             estado: "falha",
@@ -8248,7 +8312,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           continue;
         }
 
-        debitarCreditos(clienteId, 1);
+        await registrarCreditoCheckpoint(checkpointDiscord);
         confirmouEnvio = true;
         discordEnviado = true;
         registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destinoDiscordValidado, {
@@ -8540,6 +8604,31 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         });
         let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
         let erroImagemEnvio = "";
+        const falhaTelegramConfirmada = (erro) => {
+          const statusHttp = Number(erro?.response?.status || 0);
+          return statusHttp >= 400 && statusHttp < 600;
+        };
+        const enviarTextoTelegramComCheckpoint = async ({ permitirNovaTentativaAposFalhaConfirmada = false } = {}) => executarAlvoComCheckpoint({
+          canal: "telegram",
+          alvo: tel,
+          permitirNovaTentativaAposFalhaConfirmada,
+          falhaConfirmada: falhaTelegramConfirmada,
+          enviar: async () => {
+            const resposta = await axios.post(
+              `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
+              montarPayloadTextoTelegramPorTipoMidia({
+                chatId: tel.chatId,
+                mensagem,
+                destino
+              })
+            );
+            return {
+              valor: resposta,
+              providerMessageId: resposta?.data?.result?.message_id || ""
+            };
+          }
+        });
+        let checkpointEnvioTelegram;
         if (!imagemEnvioExecutor.ok) {
           if (imagemEnvioExecutor.tinhaImagem) {
             console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
@@ -8553,27 +8642,31 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               imagemOrigem: oferta.imagemOrigem || ""
             }));
           }
-          await axios.post(
-            `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
-            montarPayloadTextoTelegramPorTipoMidia({
-              chatId: tel.chatId,
-              mensagem,
-              destino
-            })
-          );
+          checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint();
         } else {
-          try {
-            await axios.post(
-              `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
-              {
-                chat_id: tel.chatId,
-                photo: imagemEnvioExecutor.url,
-                caption: mensagem
-              }
-            );
-          } catch (erroImagem) {
+          checkpointEnvioTelegram = await executarAlvoComCheckpoint({
+            canal: "telegram",
+            alvo: tel,
+            falhaConfirmada: falhaTelegramConfirmada,
+            enviar: async () => {
+              const resposta = await axios.post(
+                `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
+                {
+                  chat_id: tel.chatId,
+                  photo: imagemEnvioExecutor.url,
+                  caption: mensagem
+                }
+              );
+              return {
+                valor: resposta,
+                providerMessageId: resposta?.data?.result?.message_id || ""
+              };
+            }
+          });
+          if (!checkpointEnvioTelegram.ok && checkpointEnvioTelegram.resultado === "falha_confirmada") {
+            const erroImagem = checkpointEnvioTelegram.erro;
             fallbackTextoPorImagem = true;
-            erroImagemEnvio = erroImagem.message || "falha_envio_imagem";
+            erroImagemEnvio = erroImagem?.message || "falha_envio_imagem";
             console.log("[EXECUTOR-IMAGEM-NAO-ENVIAVEL]", JSON.stringify({
               clienteId,
               destino: destino.nome || destino.id || "",
@@ -8585,18 +8678,14 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               imagemStatus: oferta.imagemStatus || "",
               imagemOrigem: oferta.imagemOrigem || ""
             }));
-            await axios.post(
-              `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
-              montarPayloadTextoTelegramPorTipoMidia({
-                chatId: tel.chatId,
-                mensagem,
-                destino
-              })
-            );
+            checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint({
+              permitirNovaTentativaAposFalhaConfirmada: true
+            });
           }
         }
 
-        debitarCreditos(clienteId, 1);
+        if (!checkpointEnvioTelegram?.ok) throw erroCheckpoint(checkpointEnvioTelegram);
+        await registrarCreditoCheckpoint(checkpointEnvioTelegram);
         telegramEnviado = true;
         confirmouEnvio = true;
         registrarCoberturaExecutor("executor_enviado", oferta, clienteId, destino, {
@@ -8652,6 +8741,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           nome: destino.nome || "Destino",
           tipo: "telegram",
           chatId: tel.chatId,
+          messageId: checkpointEnvioTelegram?.resposta?.data?.result?.message_id || "",
           creditos: 1,
           dataEnvio: new Date().toLocaleString("pt-BR", {
             timeZone: "America/Sao_Paulo"
@@ -9986,7 +10076,10 @@ for (const item of destinosOrdenados) {
     mensagem,
     clienteId,
     configCliente,
-    { linkFinal: linkOfertaDestino.linkFinal || "" }
+    {
+      linkFinal: linkOfertaDestino.linkFinal || "",
+      advisoryHandle: advisoryFuncionalFila.handle
+    }
   );
   const resultadoEnvio =
     typeof enviado === "object" && enviado !== null
@@ -13994,7 +14087,8 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
       {
         ignorarHorario: true,
         envioManual: true,
-        linkFinal: linkOfertaDestino.linkFinal || ""
+        linkFinal: linkOfertaDestino.linkFinal || "",
+        advisoryHandle: advisoryFuncionalFila.handle
       }
     );
     const resultado =
