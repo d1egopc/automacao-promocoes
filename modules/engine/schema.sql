@@ -257,6 +257,21 @@ CREATE TABLE IF NOT EXISTS queue_manifest_state (
     )
   )
 );
+
+-- Claim operacional efemero da fila. O payload continua exclusivamente nos
+-- arquivos da fila; esta tabela so coordena quem pode executar um item agora.
+CREATE TABLE IF NOT EXISTS fila_claims_ativos (
+  cliente_id TEXT NOT NULL,
+  fila_item_id TEXT NOT NULL CHECK (btrim(fila_item_id) <> ''),
+  claim_token UUID NOT NULL,
+  claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  lease_expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (cliente_id, fila_item_id),
+  CHECK (lease_expires_at > claimed_at)
+);
+
+CREATE INDEX IF NOT EXISTS fila_claims_ativos_lease_expires_at_idx
+  ON fila_claims_ativos (lease_expires_at);
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_generation BIGINT;
 ALTER TABLE queue_manifest_state ADD COLUMN IF NOT EXISTS authority_ready_revision BIGINT;
