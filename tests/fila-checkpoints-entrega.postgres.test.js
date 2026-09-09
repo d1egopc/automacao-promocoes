@@ -39,6 +39,9 @@ function entrada(extra = {}) {
     assert.strictEqual((await repo.transicionarCheckpointEntrega({ ...entrada(), deEstado: "preparado", paraEstado: "envio_iniciado" }, opcoes)).transicionado, false, "A velha nao sobrescreve B");
     assert.strictEqual((await repo.transicionarCheckpointEntrega({ ...entrada({ attemptId: ATTEMPT_B }), deEstado: "preparado", paraEstado: "envio_iniciado" }, opcoes)).transicionado, true);
     assert.strictEqual((await repo.transicionarCheckpointEntrega({ ...entrada({ attemptId: ATTEMPT_B }), deEstado: "envio_iniciado", paraEstado: "enviado", providerMessageId: "discord-123", creditoDebitado: false }, opcoes)).transicionado, true);
+    const preparado = entrada({ filaItemId: "checkpoint_test_item_preparado", destinoChave: "whatsapp:destino_preparado" });
+    assert.strictEqual((await repo.criarCheckpointEntrega(preparado, opcoes)).criado, true);
+    assert.strictEqual((await repo.listarCheckpointsEntregaPorItens({ clienteId: preparado.clienteId, filaItemIds: [preparado.filaItemId], limite: 8 }, opcoes)).some(item => item.filaItemId === preparado.filaItemId), true);
     const independente = await Promise.all([
       repo.criarCheckpointEntrega(entrada({ destinoChave: "discord:destino_b" }), opcoes),
       repo.criarCheckpointEntrega(entrada({ alvoChave: "canal:teste_b" }), opcoes),

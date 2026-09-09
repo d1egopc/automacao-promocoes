@@ -191,6 +191,58 @@ async function obterCheckpointEntrega(entrada = {}, opcoes = {}) {
   return resultado.rows?.[0] ? normalizarLinha(resultado.rows[0], chave) : null;
 }
 
+function normalizarFilaItemIds(filaItemIds = [], limite = 8) {
+  const quantidade = Math.max(1, Math.min(32, Number(limite) || 8));
+  const vistos = new Set();
+  const ids = [];
+  for (const candidato of Array.isArray(filaItemIds) ? filaItemIds : []) {
+    const item = texto(candidato);
+    if (!item || /^indice:/i.test(item) || vistos.has(item)) continue;
+    vistos.add(item);
+    ids.push(item);
+    if (ids.length >= quantidade) break;
+  }
+  return ids;
+}
+
+// A fila e a autoridade dos candidatos. Esta leitura recebe somente ids de
+// itens atualmente processando, evitando varrer o historico de checkpoints.
+async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = [], limite = 8 } = {}, opcoes = {}) {
+  const cliente = texto(normalizarClienteId(texto(clienteId)));
+  if (!cliente) throw new Error("fila_checkpoint_cliente_id_ausente");
+  const ids = normalizarFilaItemIds(filaItemIds, limite);
+  if (!ids.length) return [];
+  const tabela = tabelaDas(opcoes);
+  const resultado = await comExecutor(opcoes, client => client.query(
+    `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
+            estado, provider_message_id, credito_debitado, criado_em, atualizado_em
+       FROM ${tabela}
+      WHERE cliente_id = $1 AND fila_item_id = ANY($2::text[])
+      ORDER BY fila_item_id ASC, criado_em ASC, destino_chave ASC, alvo_chave ASC`,
+    [cliente, ids]
+  ));
+  return (resultado.rows || []).map(linha => normalizarLinha(linha, { clienteId: cliente }));
+}
+
+async function listarCheckpointsEntregaPorItem({ clienteId = "", filaItemId = "" } = {}, opcoes = {}) {
+  const cliente = texto(normalizarClienteId(texto(clienteId)));
+  const item = texto(filaItemId);
+  if (!cliente) throw new Error("fila_checkpoint_cliente_id_ausente");
+  if (!item || /^indice:/i.test(item)) throw new Error("fila_checkpoint_item_id_invalido");
+  const tabela = tabelaDas(opcoes);
+  const resultado = await comExecutor(opcoes, client => client.query(
+    `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
+            estado, provider_message_id, credito_debitado, criado_em, atualizado_em
+       FROM ${tabela}
+      WHERE cliente_id = $1 AND fila_item_id = $2`,
+    [cliente, item]
+  ));
+  return (resultado.rows || []).map(linha => normalizarLinha(linha, {
+    clienteId: cliente,
+    filaItemId: item
+  }));
+}
+
 async function transicionarCheckpointEntrega(entrada = {}, opcoes = {}) {
   const chave = normalizarChaveCheckpointEntrega(entrada);
   const attemptId = normalizarAttemptId(entrada.attemptId);
@@ -288,6 +340,8 @@ module.exports = {
   normalizarTransicao,
   criarCheckpointEntrega,
   obterCheckpointEntrega,
+  listarCheckpointsEntregaPorItens,
+  listarCheckpointsEntregaPorItem,
   transicionarCheckpointEntrega,
   prepararNovaTentativaCheckpointEntrega,
   registrarCreditoDebitadoCheckpointEntrega

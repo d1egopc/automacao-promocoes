@@ -144,7 +144,12 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
         const existente = typeof repository.obterCheckpointEntrega === "function"
           ? await repository.obterCheckpointEntrega(contexto, opcoesRepository)
           : null;
-        if (
+        if (existente?.estado === "preparado" && existente?.attemptId) {
+          // Preparado e a unica prova de que a tentativa anterior ainda nao
+          // atravessou a fronteira externa. Sob a mesma catraca advisory,
+          // retomamos o attempt duravel em vez de criar outro ou reenviar algo.
+          contexto.attemptId = existente.attemptId;
+        } else if (
           permitirNovaTentativaAposFalhaConfirmada === true &&
           existente?.estado === "falha_confirmada" &&
           typeof repository.prepararNovaTentativaCheckpointEntrega === "function"

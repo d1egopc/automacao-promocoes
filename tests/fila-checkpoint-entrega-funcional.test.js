@@ -9,13 +9,16 @@ const {
 
 const ATTEMPT_A = "55555555-5555-4555-8555-555555555555";
 
-function criarRepository({ criar = true, iniciar = true, concluir = true, falhar = true } = {}) {
+function criarRepository({ criar = true, iniciar = true, concluir = true, falhar = true, existente = null } = {}) {
   const chamadas = [];
   return {
     chamadas,
     async criarCheckpointEntrega(entrada) {
       chamadas.push({ tipo: "criar", entrada });
       return { criado: criar };
+    },
+    async obterCheckpointEntrega() {
+      return existente;
     },
     async transicionarCheckpointEntrega(entrada) {
       chamadas.push({ tipo: "transicionar", entrada });
@@ -67,6 +70,21 @@ async function testarCheckpointTerminalImpedeNovoEnvio() {
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.resultado, "checkpoint_existente");
   assert.strictEqual(externas, 0, "checkpoint existente bloqueia qualquer novo provedor");
+}
+
+async function testarPreparadoRetomaMesmoAttemptSobAdvisory() {
+  const repository = criarRepository({
+    criar: false,
+    existente: { estado: "preparado", attemptId: "66666666-6666-4666-8666-666666666666" }
+  });
+  const executor = criarCheckpointEntregaFuncional({ repository, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
+  const resultado = await executor.executar({
+    ...entrada(),
+    enviar: async () => ({ valor: {}, providerMessageId: "wa_retomada" })
+  });
+  assert.strictEqual(resultado.ok, true);
+  const inicio = repository.chamadas.find(item => item.tipo === "transicionar" && item.entrada.paraEstado === "envio_iniciado");
+  assert.strictEqual(inicio.entrada.attemptId, "66666666-6666-4666-8666-666666666666", "preparado retoma somente o attempt duravel que ainda nao cruzou o provedor");
 }
 
 async function testarOrdemESucessoComProviderId() {
@@ -165,6 +183,7 @@ function testarIdentidadesEstaveis() {
 (async () => {
   await testarFailClosedAntesDoProvedor();
   await testarCheckpointTerminalImpedeNovoEnvio();
+  await testarPreparadoRetomaMesmoAttemptSobAdvisory();
   await testarOrdemESucessoComProviderId();
   await testarIdsTelegramEDiscord();
   await testarFalhaAmbiguaEConfirmada();

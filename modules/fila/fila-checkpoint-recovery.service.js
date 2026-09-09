@@ -1,0 +1,231 @@
+"use strict";
+
+const { resolverFilaItemId } = require("./fila-claims-shadow.service");
+const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
+const destinosMultiAlvo = require("../../utils/destinos-multialvo");
+
+const LIMITE_PADRAO = 8;
+
+function texto(valor = "", limite = 160) {
+  return String(valor || "").trim().slice(0, limite);
+}
+
+function inicioMonotono() {
+  return typeof process.hrtime?.bigint === "function" ? process.hrtime.bigint() : null;
+}
+
+function duracaoMs(inicio, fallback) {
+  if (typeof inicio === "bigint") return Number(process.hrtime.bigint() - inicio) / 1e6;
+  return Math.max(0, Date.now() - Number(fallback || Date.now()));
+}
+
+function resumoEstados(checkpoints = []) {
+  return checkpoints.reduce((out, checkpoint) => {
+    const estado = texto(checkpoint?.estado, 40) || "desconhecido";
+    out[estado] = (out[estado] || 0) + 1;
+    return out;
+  }, {});
+}
+
+function agruparPorItem(checkpoints = []) {
+  const grupos = new Map();
+  for (const checkpoint of checkpoints) {
+    const id = texto(checkpoint?.filaItemId);
+    if (!id) continue;
+    const grupo = grupos.get(id) || [];
+    grupo.push(checkpoint);
+    grupos.set(id, grupo);
+  }
+  return grupos;
+}
+
+function alvoIdCheckpointEntrega(alvoChave = "") {
+  const valor = texto(alvoChave);
+  const separador = valor.indexOf(":");
+  return separador >= 0 ? valor.slice(separador + 1) : valor;
+}
+
+// Checkpoint confirmado e evidencia por alvo. Sem um snapshot completo e uma
+// correspondencia exata, nao e seguro promover o destino inteiro no JSON.
+function sincronizarAlvosEnviadosPorCheckpoint(oferta = {}, checkpoints = []) {
+  if (!Array.isArray(oferta?.destinosEstado)) return false;
+  let alterou = false;
+  for (const checkpoint of Array.isArray(checkpoints) ? checkpoints : []) {
+    if (texto(checkpoint?.estado, 40) !== "enviado") continue;
+    const destinoChave = texto(checkpoint?.destinoChave);
+    const alvoId = alvoIdCheckpointEntrega(checkpoint?.alvoChave);
+    if (!destinoChave || !alvoId) continue;
+    const estadoDestino = oferta.destinosEstado.find(item => texto(item?.chave) === destinoChave);
+    if (!estadoDestino || !Array.isArray(estadoDestino.snapshotAlvos) || !Array.isArray(estadoDestino.alvosEstado)) continue;
+    const alvoSnapshot = estadoDestino.snapshotAlvos.find(alvo => destinosMultiAlvo.chaveAlvo(alvo) === alvoId);
+    const estadoAlvo = estadoDestino.alvosEstado.find(alvo => texto(alvo?.alvoId) === alvoId);
+    if (!alvoSnapshot || !estadoAlvo) continue;
+    if (estadoAlvo.estado !== "enviado") {
+      estadoAlvo.estado = "enviado";
+      estadoAlvo.enviadoEm = checkpoint?.atualizadoEm || new Date().toISOString();
+      estadoAlvo.erro = "";
+      alterou = true;
+    }
+    const consolidado = destinosMultiAlvo.estadoLogicoPorAlvos(estadoDestino);
+    if (estadoDestino.estado !== consolidado) {
+      estadoDestino.estado = consolidado;
+      alterou = true;
+    }
+  }
+  return alterou;
+}
+
+function candidatosProcessandoAtuais(itens = [], limite = LIMITE_PADRAO) {
+  const quantidade = Math.max(1, Math.min(32, Number(limite) || LIMITE_PADRAO));
+  const vistos = new Set();
+  const candidatos = [];
+  for (const item of Array.isArray(itens) ? itens : []) {
+    const filaItemId = texto(resolverFilaItemId(item));
+    if (!filaItemId || vistos.has(filaItemId) || texto(item?.status, 40).toLowerCase() !== "processando") continue;
+    vistos.add(filaItemId);
+    candidatos.push({ filaItemId, item });
+    if (candidatos.length >= quantidade) break;
+  }
+  return candidatos;
+}
+
+function criarRecoveryCheckpointEntrega({ repository, advisory, logger = console, now = () => Date.now(), limite = LIMITE_PADRAO } = {}) {
+  if (!repository || typeof repository.listarCheckpointsEntregaPorItens !== "function" ||
+    typeof repository.listarCheckpointsEntregaPorItem !== "function" ||
+    typeof repository.transicionarCheckpointEntrega !== "function") {
+    throw new Error("fila_checkpoint_recovery_repository_invalido");
+  }
+  if (!advisory || typeof advisory.adquirir !== "function" || typeof advisory.finalizar !== "function") {
+    throw new Error("fila_checkpoint_recovery_advisory_invalido");
+  }
+
+  const logar = dados => {
+    try { (typeof logger?.log === "function" ? logger : console).log("[FILA-RECOVERY-CHECKPOINT]", JSON.stringify(dados)); } catch {}
+  };
+
+  async function recuperarCliente({ clienteId = "", itens = [], relocalizarItem, onRecuperavel, onSincronizarEnviado } = {}) {
+    const cliente = texto(clienteId || "admin");
+    const inicio = inicioMonotono();
+    const inicioFallback = now();
+    const candidatos = candidatosProcessandoAtuais(itens, limite);
+    if (!candidatos.length) return { ok: true, resultados: [] };
+    let checkpointsCandidatos;
+    try {
+      checkpointsCandidatos = await repository.listarCheckpointsEntregaPorItens({
+        clienteId: cliente,
+        filaItemIds: candidatos.map(candidato => candidato.filaItemId),
+        limite
+      });
+    } catch {
+      logar({ clienteId: cliente, filaItemId: "", origemFluxo: "", alvosPorEstado: {}, decisao: "sem_acao", duracaoMs: Math.round(duracaoMs(inicio, inicioFallback)) });
+      return { ok: false, motivo: "checkpoint_indisponivel", resultados: [] };
+    }
+
+    const checkpointsPorItem = agruparPorItem(checkpointsCandidatos);
+    const resultados = [];
+    for (const candidato of candidatos) {
+      const { filaItemId } = candidato;
+      const checkpointsIniciais = checkpointsPorItem.get(filaItemId) || [];
+      // Sem checkpoint duravel, o item historico permanece congelado: nenhuma
+      // inferencia por idade, JSON ou ausencia de provider e feita.
+      if (!checkpointsIniciais.length) {
+        const resultado = { filaItemId, decisao: "sem_checkpoint", checkpoints: [] };
+        resultados.push(resultado);
+        logar({
+          clienteId: cliente,
+          filaItemId,
+          origemFluxo: texto(resolverOrigemFluxo(candidato.item), 40),
+          alvosPorEstado: {},
+          decisao: resultado.decisao,
+          duracaoMs: 0
+        });
+        continue;
+      }
+
+      const itemInicio = inicioMonotono();
+      const itemInicioFallback = now();
+      let decisao = "sem_acao";
+      let checkpoints = [];
+      let advisoryHandle = null;
+      try {
+        advisoryHandle = await advisory.adquirir({ clienteId: cliente, oferta: candidato.item });
+        if (advisoryHandle?.resultado !== "adquirido") {
+          const resultado = { filaItemId, decisao: "sem_acao", motivo: `advisory_${advisoryHandle?.resultado || "erro"}` };
+          resultados.push(resultado);
+          logar({
+            clienteId: cliente,
+            filaItemId,
+            origemFluxo: texto(resolverOrigemFluxo(candidato.item), 40),
+            alvosPorEstado: resumoEstados(checkpointsIniciais),
+            decisao: resultado.decisao,
+            duracaoMs: Math.round(duracaoMs(itemInicio, itemInicioFallback))
+          });
+          continue;
+        }
+        const item = typeof relocalizarItem === "function"
+          ? await relocalizarItem({ clienteId: cliente, filaItemId, item: candidato.item })
+          : null;
+        if (!item || resolverFilaItemId(item) !== filaItemId || texto(item?.status, 40).toLowerCase() !== "processando") {
+          decisao = "sem_acao";
+        } else {
+          checkpoints = await repository.listarCheckpointsEntregaPorItem({ clienteId: cliente, filaItemId }, { client: advisoryHandle.handle.client });
+        if (!checkpoints.length) {
+          decisao = "sem_checkpoint";
+        } else {
+          const estados = new Set(checkpoints.map(itemCheckpoint => itemCheckpoint.estado));
+          const possuiAmbiguidade = estados.has("resultado_ambiguo");
+          const iniciados = checkpoints.filter(itemCheckpoint => itemCheckpoint.estado === "envio_iniciado");
+
+          if (iniciados.length) {
+            // O inicio prova que a fronteira externa pode ter sido cruzada,
+            // mas nao prova o resultado. Nesta fase ele permanece bloqueado
+            // sem reclassificar historicos nem fabricar uma tentativa nova.
+            decisao = "bloqueado_ambiguo";
+          } else if (possuiAmbiguidade) {
+            decisao = "bloqueado_ambiguo";
+          } else if (checkpoints.every(itemCheckpoint => itemCheckpoint.estado === "preparado")) {
+            // Nenhum efeito externo comecou. O checkpoint e preservado; a
+            // proxima execucao retoma o mesmo attempt sob advisory em vez de
+            // apagar evidencia ou fabricar uma tentativa nova.
+            await onRecuperavel?.({ item, checkpoints });
+            decisao = "recuperavel";
+          } else {
+            const enviados = checkpoints.filter(itemCheckpoint => itemCheckpoint.estado === "enviado");
+            if (enviados.length) {
+              const sincronizado = await onSincronizarEnviado?.({ item, checkpoints: enviados });
+              decisao = sincronizado === true ? "sincronizado" : "sem_acao";
+            }
+          }
+        }
+        }
+      } catch {
+        decisao = "sem_acao";
+      } finally {
+        if (advisoryHandle?.resultado === "adquirido") {
+          await advisory.finalizar(advisoryHandle, { statusFinal: `recovery_${decisao}` });
+        }
+      }
+      const resultado = { filaItemId, decisao, checkpoints };
+      resultados.push(resultado);
+      logar({
+        clienteId: cliente,
+        filaItemId,
+        origemFluxo: texto(resolverOrigemFluxo(candidato.item), 40),
+        alvosPorEstado: resumoEstados(checkpoints),
+        decisao,
+        duracaoMs: Math.round(duracaoMs(itemInicio, itemInicioFallback))
+      });
+    }
+    return { ok: true, resultados };
+  }
+
+  return { recuperarCliente, resumoEstados, candidatosProcessandoAtuais, sincronizarAlvosEnviadosPorCheckpoint };
+}
+
+module.exports = {
+  LIMITE_PADRAO,
+  criarRecoveryCheckpointEntrega,
+  resumoEstados,
+  candidatosProcessandoAtuais,
+  sincronizarAlvosEnviadosPorCheckpoint
+};

@@ -321,12 +321,21 @@ const {
   chaveDestinoEntrega,
   chaveAlvoEntrega
 } = require("./modules/fila/fila-checkpoint-entrega.service");
+const {
+  criarRecoveryCheckpointEntrega,
+  sincronizarAlvosEnviadosPorCheckpoint
+} = require("./modules/fila/fila-checkpoint-recovery.service");
 const catracaAdvisoryFuncionalFila = criarCatracaAdvisoryFuncionalFila({
   repository: filaClaimsRepository,
   logger: console
 });
 const checkpointEntregaFuncionalFila = criarCheckpointEntregaFuncional({
   repository: filaCheckpointsEntregaRepository,
+  logger: console
+});
+const recoveryCheckpointEntregaFila = criarRecoveryCheckpointEntrega({
+  repository: filaCheckpointsEntregaRepository,
+  advisory: catracaAdvisoryFuncionalFila,
   logger: console
 });
 const destinosUtils = require("./utils/destinos");
@@ -9147,6 +9156,39 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
       fonteClienteHotStateSelecao?.conclusiva === true &&
       Array.isArray(fonteClienteHotStateSelecao.itens)
     ) ? fonteClienteHotStateSelecao.itens : fila;
+    const recoveryCheckpoint = await recoveryCheckpointEntregaFila.recuperarCliente({
+      clienteId: clienteFila,
+      itens: colecaoPosEnvioProcessamento,
+      relocalizarItem: ({ filaItemId, item }) => {
+        const localizacao = filaOfertas.relocalizarOfertaFila(colecaoPosEnvioProcessamento, item, {
+          clienteId: clienteFila,
+          id: filaItemId
+        });
+        return localizacao.ok ? localizacao.oferta : null;
+      },
+      onRecuperavel: async ({ item }) => {
+        item.status = "pendente";
+        item.processandoEm = "";
+        item.statusDetalhe = "Aguardando envio";
+        item.erro = "";
+        item.erroEm = "";
+        marcarFilaAlterada();
+        await salvarFilaSeAlterada(clienteFila);
+      },
+      onSincronizarEnviado: async ({ item, checkpoints }) => {
+        if (sincronizarAlvosEnviadosPorCheckpoint(item, checkpoints)) {
+          item.status = "pendente";
+          item.processandoEm = "";
+          item.statusDetalhe = "Aguardando envio";
+          item.erro = "";
+          item.erroEm = "";
+          marcarFilaAlterada();
+          await salvarFilaSeAlterada(clienteFila);
+          return true;
+        }
+        return false;
+      }
+    });
     sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila", {
       fonteClienteHotState: fonteClienteHotStateSelecao
     });

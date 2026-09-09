@@ -19,6 +19,14 @@ assert.match(fonte, /criarCheckpointEntregaFuncional/);
 assert.match(fonte, /checkpointEntregaFuncionalFila\.executar/);
 assert.match(fonte, /advisoryHandle:\s*opcoes\.advisoryHandle/);
 assert.match(fonte, /advisoryHandle:\s*advisoryFuncionalFila\.handle/);
+assert.match(fonte, /fila-checkpoint-recovery\.service/);
+assert.match(fonte, /recoveryCheckpointEntregaFila\.recuperarCliente/);
+assert.match(fonte, /sincronizarAlvosEnviadosPorCheckpoint/);
+assert.match(fonte, /relocalizarItem:/);
+assert.match(fonte, /filaOfertas\.relocalizarOfertaFila/);
+const posRecovery = fonte.indexOf("recoveryCheckpointEntregaFila.recuperarCliente");
+const posSelecao = fonte.indexOf("selecionarProximaOfertaFila", posRecovery);
+assert(posRecovery >= 0 && posSelecao > posRecovery, "recovery bounded termina antes da selecao normal da fila");
 
 const whatsapp = trecho('const enviarTextoWhatsapp', '// ================= ENVIO DISCORD');
 assert.match(whatsapp, /canal:\s*"whatsapp"/);
