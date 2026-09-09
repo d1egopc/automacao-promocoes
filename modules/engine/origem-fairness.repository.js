@@ -5,7 +5,8 @@ const ORIGENS_PROTEGIDAS = Object.freeze([
 
 const ETAPAS_FAIRNESS = Object.freeze([
   "diagnostico_final",
-  "validacao_final"
+  "validacao_final",
+  "importacao_final"
 ]);
 
 const LANES_FAIRNESS = Object.freeze([
@@ -13,6 +14,26 @@ const LANES_FAIRNESS = Object.freeze([
   "fresca_em_risco",
   "fresca_circulavel",
   "expirada"
+]);
+
+// O mapa ADAPTERS do Importer nao e exportado e depende do runner operacional.
+// Esta lista declara os mesmos identificadores canonicos aceitos por aquele mapa
+// para validar somente a chave operacional persistida, sem criar dependencia
+// circular entre repository e runner.
+const MARKETPLACES_IMPORTER_FAIRNESS = Object.freeze([
+  "mercadolivre",
+  "amazon",
+  "shopee",
+  "aliexpress",
+  "awin",
+  "kabum",
+  "magalu"
+]);
+
+const LANES_IMPORTER_FAIRNESS = Object.freeze([
+  "agua_nova",
+  "fresca_em_risco",
+  "fresca_circulavel"
 ]);
 
 function texto(valor = "") {
@@ -28,7 +49,18 @@ function normalizarChaveFairness({ clienteId = "", etapa = "", lane = "" } = {})
 
   if (!chave.clienteId) throw new Error("fairness_cliente_id_ausente");
   if (!ETAPAS_FAIRNESS.includes(chave.etapa)) throw new Error("fairness_etapa_invalida");
-  if (!LANES_FAIRNESS.includes(chave.lane)) throw new Error("fairness_lane_invalida");
+  if (chave.etapa === "importacao_final") {
+    const [marketplace, laneImportacao, ...restante] = chave.lane.split(":");
+    if (
+      restante.length ||
+      !MARKETPLACES_IMPORTER_FAIRNESS.includes(marketplace) ||
+      !LANES_IMPORTER_FAIRNESS.includes(laneImportacao)
+    ) {
+      throw new Error("fairness_lane_importacao_invalida");
+    }
+  } else if (!LANES_FAIRNESS.includes(chave.lane)) {
+    throw new Error("fairness_lane_invalida");
+  }
   return chave;
 }
 
@@ -132,6 +164,8 @@ module.exports = {
   ORIGENS_PROTEGIDAS,
   ETAPAS_FAIRNESS,
   LANES_FAIRNESS,
+  MARKETPLACES_IMPORTER_FAIRNESS,
+  LANES_IMPORTER_FAIRNESS,
   normalizarChaveFairness,
   normalizarOrigemProtegida,
   garantirEstadoFairness,

@@ -153,14 +153,41 @@ ALTER TABLE engine_processamentos ADD COLUMN IF NOT EXISTS detalhes JSONB DEFAUL
 -- Nao contem jobs, ofertas ou regra comercial; e atualizado pelo claim da etapa.
 CREATE TABLE IF NOT EXISTS engine_fairness_origem_fluxo (
   cliente_id TEXT NOT NULL,
-  etapa TEXT NOT NULL CHECK (etapa IN ('diagnostico_final', 'validacao_final')),
-  lane TEXT NOT NULL CHECK (lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada')),
+  etapa TEXT NOT NULL CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final')),
+  lane TEXT NOT NULL CHECK (
+    (etapa IN ('diagnostico_final', 'validacao_final') AND lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'))
+    OR
+    (etapa = 'importacao_final' AND lane ~ '^(mercadolivre|amazon|shopee|aliexpress|awin|kabum|magalu):(agua_nova|fresca_em_risco|fresca_circulavel)$')
+  ),
   ultima_origem_atendida TEXT CHECK (ultima_origem_atendida IS NULL OR ultima_origem_atendida IN ('optimus', 'clonador_grupos')),
   ultimo_atendimento_em TIMESTAMPTZ,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (cliente_id, etapa, lane)
 );
+
+-- Instalacoes existentes foram criadas antes de importacao_final. Mantemos a
+-- mesma tabela e PK, evoluindo os CHECKs de forma idempotente e sem tocar nas
+-- linhas ja persistidas por Processor/Validator.
+DO $$
+BEGIN
+  ALTER TABLE engine_fairness_origem_fluxo
+    DROP CONSTRAINT IF EXISTS engine_fairness_origem_fluxo_etapa_check;
+  ALTER TABLE engine_fairness_origem_fluxo
+    DROP CONSTRAINT IF EXISTS engine_fairness_origem_fluxo_lane_check;
+
+  ALTER TABLE engine_fairness_origem_fluxo
+    ADD CONSTRAINT engine_fairness_origem_fluxo_etapa_check
+    CHECK (etapa IN ('diagnostico_final', 'validacao_final', 'importacao_final'));
+  ALTER TABLE engine_fairness_origem_fluxo
+    ADD CONSTRAINT engine_fairness_origem_fluxo_lane_check
+    CHECK (
+      (etapa IN ('diagnostico_final', 'validacao_final') AND lane IN ('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'))
+      OR
+      (etapa = 'importacao_final' AND lane ~ '^(mercadolivre|amazon|shopee|aliexpress|awin|kabum|magalu):(agua_nova|fresca_em_risco|fresca_circulavel)$')
+    );
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS engine_eventos_comerciais (
   id BIGSERIAL PRIMARY KEY,
