@@ -801,14 +801,25 @@ function separarResultadoJobsProntos(linhas = []) {
   };
 }
 
-async function tentarMarcarImportando(jobId) {
-  const resultado = await queryEngine(
-    `UPDATE engine_jobs_cliente
+async function tentarMarcarImportando(jobId, client = null) {
+  const sql = `UPDATE engine_jobs_cliente
         SET status = 'importando', atualizado_em = NOW()
       WHERE id = $1 AND status = 'pronto_para_importar'
-      RETURNING id, status`,
-    [jobId]
-  );
+      RETURNING id, status`;
+  if (client && typeof client.query === "function") {
+    try {
+      const resultado = await client.query(sql, [jobId]);
+      return {
+        ok: resultado.rowCount > 0,
+        ignorado: resultado.rowCount === 0,
+        resultado
+      };
+    } catch (erro) {
+      return { ok: false, motivo: "query_falhou", erro: erro.message || String(erro) };
+    }
+  }
+
+  const resultado = await queryEngine(sql, [jobId]);
 
   if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro };
   return { ok: resultado.resultado.rowCount > 0, ignorado: resultado.resultado.rowCount === 0 };

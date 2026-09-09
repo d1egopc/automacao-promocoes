@@ -16,8 +16,15 @@ const {
 } = require("../processor.service");
 const {
   expirarJobPreImporterSeNecessario,
-  resumirSelecaoFrescorPreImporter
+  resumirSelecaoFrescorPreImporter,
+  avaliarFrescorPreImporter
 } = require("../frescor-pre-importer.service");
+const {
+  chaveGrupo,
+  montarGruposFairness,
+  headsProtegidas,
+  reivindicarSlotFairness
+} = require("./importer-fairness.service");
 const {
   logEngineImporterInicio,
   logEngineImporterJob,
@@ -112,7 +119,7 @@ async function finalizarErro(job, motivo, detalhes = {}, resumo) {
 }
 
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
-  const marketplace = marketplaceJob(job);
+  let marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
   coberturaRadar.registrar("engine_importer_inicio", {
     ...contextoCoberturaImporter(job),
@@ -129,8 +136,10 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     return finalizarErro(job, "usuario_inativo", { clienteId: job.cliente_id }, resumo);
   }
 
-  const lock = await tentarMarcarImportando(job.id);
-  if (!lock.ok) {
+  const lock = typeof contexto.reivindicarImportacao === "function"
+    ? await contexto.reivindicarImportacao(job)
+    : await tentarMarcarImportando(job.id);
+  if (!lock.ok || lock.ignorado) {
     if (lock.ignorado) {
       coberturaRadar.registrar("engine_job_nao_pronto", {
         ...contextoCoberturaImporter(job),
@@ -147,6 +156,11 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       erro: lock.erro || ""
     });
     return finalizarErro(job, lock.motivo || "lock_falhou", { erro: lock.erro || "" }, resumo);
+  }
+
+  if (lock.job) {
+    job = lock.job;
+    marketplace = marketplaceJob(job);
   }
 
   await registrarEtapaImportacao(job.id, "inicio_importacao", "ok", "importacao_iniciada", {
@@ -349,7 +363,24 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
   resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
   resumo.idadeMediaJobsSelecionadosMs = metricasSelecao.idadeMediaJobsSelecionadosMs;
 
-  for (const job of jobs.jobs) {
+  const baselineComIndice = jobs.jobs.map((job, indiceBaseline) => ({ ...job, indiceBaseline }));
+  const indiceBaselinePorId = new Map(baselineComIndice.map(job => [Number(job.id), job.indiceBaseline]));
+  const candidatosElegiveis = (jobs.candidatePool || [])
+    .filter(job => !avaliarFrescorPreImporter(job).expirada)
+    .map(job => ({ ...job, indiceBaseline: indiceBaselinePorId.get(Number(job.id)) }));
+  const gruposFairness = new Map(
+    montarGruposFairness(
+      baselineComIndice.filter(job => job.lane_vazao_pre_importer !== "expirada"),
+      candidatosElegiveis
+    )
+      .filter(grupo => headsProtegidas(grupo).size === 2)
+      .map(grupo => [grupo.chave, grupo])
+  );
+  const planosFairness = new Map();
+  const idsReservadosFairness = new Map();
+
+  for (const job of baselineComIndice) {
+    let jobEfetivo = job;
     const medidorJob = criarMedidorEngineMemoryStage("engine_v2_job_final", {
       jobId: job.id || null,
       eventoId: job.evento_id || null,
@@ -372,7 +403,26 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
       }
 
       resumo.processados += 1;
-      const resultado = await importarJobPronto(job, { deps }, resumo);
+      const grupo = gruposFairness.get(chaveGrupo(job));
+      const resultado = await importarJobPronto(job, {
+        deps,
+        reivindicarImportacao: grupo
+          ? async () => {
+            const idsReservados = idsReservadosFairness.get(grupo.chave) || new Set();
+            const claim = await reivindicarSlotFairness(grupo, job.indiceBaseline, {
+              plano: planosFairness.get(grupo.chave),
+              idsReservados
+            });
+            if (claim.plano) planosFairness.set(grupo.chave, claim.plano);
+            if (claim.ok && claim.job) {
+              jobEfetivo = claim.job;
+              idsReservados.add(Number(claim.job.id));
+            }
+            idsReservadosFairness.set(grupo.chave, idsReservados);
+            return claim;
+          }
+          : null
+      }, resumo);
       if (resultado.ignorado) resumo.processados -= 1;
       medidorJob.fim({
         ok: resultado.ok !== false,
@@ -382,8 +432,8 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
     } catch (e) {
       resumo.erros += 1;
       motivoAdicionar(resumo, "erro_importacao");
-      logEngineImporterErro({ jobId: job.id, etapa: "importar_job", motivo: "erro_importacao", erro: e.message });
-      await marcarJobErroImportacao(job.id, "erro_importacao", { erro: e.message });
+      logEngineImporterErro({ jobId: jobEfetivo.id, etapa: "importar_job", motivo: "erro_importacao", erro: e.message });
+      await marcarJobErroImportacao(jobEfetivo.id, "erro_importacao", { erro: e.message });
       medidorJob.fim({
         ok: false,
         motivo: "erro_importacao",
