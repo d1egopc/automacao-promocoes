@@ -224,14 +224,18 @@ function sqlBuscarJobsPendentes() {
        SELECT *
          FROM candidate_pool_ranqueado
         WHERE candidate_pool_dedup_rank_pre_importer = 1
+     ),
+     saida_pre_importer AS (
+       SELECT 'baseline'::text AS tipo_saida_pre_importer, baseline.*,
+              NULL::text AS candidate_pool_origem_pre_importer,
+              NULL::bigint AS candidate_pool_dedup_rank_pre_importer
+         FROM baseline
+       UNION ALL
+       SELECT 'candidate_pool'::text AS tipo_saida_pre_importer, *
+         FROM candidate_pool
      )
-     SELECT 'baseline'::text AS tipo_saida_pre_importer, baseline.*,
-            NULL::text AS candidate_pool_origem_pre_importer,
-            NULL::bigint AS candidate_pool_dedup_rank_pre_importer
-       FROM baseline
-     UNION ALL
-     SELECT 'candidate_pool'::text AS tipo_saida_pre_importer, *
-       FROM candidate_pool
+     SELECT *
+       FROM saida_pre_importer
       ORDER BY CASE WHEN tipo_saida_pre_importer = 'baseline' THEN 0 ELSE 1 END,
                baseline_ordem_pre_importer ASC NULLS LAST,
                bucket_selecao_pre_importer ASC,
@@ -264,7 +268,13 @@ function separarResultadoJobsPendentes(linhas = []) {
       .map(linha => {
         const job = removerCamposInternosPreImporter(linha);
         const origemFluxo = String(linha.origem_fluxo_explicita_pre_importer || "").trim();
-        return origemFluxo ? { ...job, origemFluxo } : job;
+        return origemFluxo
+          ? {
+            ...job,
+            origemFluxo,
+            origemFluxoHead: Number(linha.origem_head_rank_pre_importer) === 1
+          }
+          : job;
       })
   };
 }
@@ -352,17 +362,37 @@ async function renovarHeartbeatJobAtivo(jobId) {
   return resultado;
 }
 
-async function tentarMarcarProcessando(jobId) {
-  const resultado = await queryEngine(
-    `UPDATE engine_jobs_cliente
-        SET status = 'processando', atualizado_em = NOW()
-      WHERE id = $1 AND status = 'pendente'
-      RETURNING id, status`,
-    [jobId]
-  );
+async function reivindicarJobsProcessandoComExecutor(executor, jobIds = []) {
+  const ids = [...new Set((Array.isArray(jobIds) ? jobIds : [jobIds])
+    .map(id => Number(id))
+    .filter(id => Number.isSafeInteger(id) && id > 0))];
+  if (!ids.length) return { ok: true, jobs: [], ignorado: true };
 
-  if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro };
-  return { ok: resultado.resultado.rowCount > 0, ignorado: resultado.resultado.rowCount === 0 };
+  const sql = `UPDATE engine_jobs_cliente
+                 SET status = 'processando', atualizado_em = NOW()
+               WHERE id = ANY($1::bigint[]) AND status = 'pendente'
+               RETURNING id, status`;
+  let resultado;
+  try {
+    if (executor && typeof executor.query === "function") {
+      const resposta = await executor.query(sql, [ids]);
+      resultado = { ok: true, resultado: resposta };
+    } else {
+      resultado = await queryEngine(sql, [ids]);
+    }
+  } catch (erro) {
+    return { ok: false, motivo: "claim_falhou", erro: erro.message || String(erro), jobs: [] };
+  }
+
+  if (!resultado.ok) return { ok: false, motivo: resultado.motivo, erro: resultado.erro, jobs: [] };
+  const jobs = Array.isArray(resultado.resultado?.rows) ? resultado.resultado.rows : [];
+  return { ok: true, jobs, ignorado: jobs.length === 0 };
+}
+
+async function tentarMarcarProcessando(jobId) {
+  const resultado = await reivindicarJobsProcessandoComExecutor(null, [jobId]);
+  if (!resultado.ok) return resultado;
+  return { ok: resultado.jobs.length > 0, ignorado: resultado.jobs.length === 0 };
 }
 
 async function registrarProcessamento(jobId, etapa, status, motivo = "", detalhes = {}) {
@@ -422,6 +452,7 @@ module.exports = {
   buscarJobsPendentes,
   marcarJobStatus,
   renovarHeartbeatJobAtivo,
+  reivindicarJobsProcessandoComExecutor,
   tentarMarcarProcessando,
   registrarProcessamento,
   carregarEventoBruto,

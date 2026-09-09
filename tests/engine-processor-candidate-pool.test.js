@@ -76,6 +76,7 @@ function testarSqlProtegeSomenteOrigemExplicitaEGruposRepresentados() {
   assert(sql.includes("grupos_representados_baseline AS"));
   assert(sql.includes("heads_protegidas_brutas AS"));
   assert(sql.includes("candidate_pool_ranqueado AS"));
+  assert(sql.includes("saida_pre_importer AS"), "UNION deve ser encapsulado antes do ORDER BY final");
   assert(sql.includes("PARTITION BY id"), "deduplicacao SQL deve ser por job.id");
   assert(sql.includes("origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')"));
   assert(sql.includes("JOIN grupos_representados_baseline"), "heads devem existir apenas para workspace/lane ja contemplados no baseline");
