@@ -38,7 +38,7 @@ function criarCatracaAdvisoryFuncionalFila({ repository, logger = console, now =
     } catch {}
   };
 
-  async function adquirir({ clienteId = "", oferta = {} } = {}) {
+  async function adquirir({ clienteId = "", oferta = {}, client = null } = {}) {
     const estado = {
       clienteId: texto(clienteId || oferta?.clienteId || "admin"),
       filaItemId: resolverFilaItemId(oferta),
@@ -59,7 +59,7 @@ function criarCatracaAdvisoryFuncionalFila({ repository, logger = console, now =
       const resultado = await repository.adquirirAdvisoryLockFila({
         clienteId: estado.clienteId,
         filaItemId: estado.filaItemId
-      });
+      }, client ? { client } : {});
       estado.resultado = resultado?.adquirido === true ? "adquirido" : "ocupado";
       estado.handle = resultado?.handle || null;
     } catch {

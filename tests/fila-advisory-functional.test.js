@@ -75,6 +75,27 @@ function criarRepository({ adquirir, liberar } = {}) {
   await catraca.finalizar(porEngine);
 
   {
+    const clientTransacional = { query() {} };
+    let clientRecebido = null;
+    const catracaMesmoClient = criarCatracaAdvisoryFuncionalFila({
+      repository: criarRepository({
+        adquirir: async (_entrada, opcoes) => {
+          clientRecebido = opcoes?.client || null;
+          return { ok: true, adquirido: true, handle: { id: "mesmo_client" } };
+        }
+      }),
+      logger: criarLogger()
+    });
+    const estado = await catracaMesmoClient.adquirir({
+      clienteId: "cliente_1",
+      oferta: { id: "mesmo_client" },
+      client: clientTransacional
+    });
+    assert.strictEqual(estado.resultado, "adquirido");
+    assert.strictEqual(clientRecebido, clientTransacional, "catraca encaminha o client transacional ao repository advisory");
+  }
+
+  {
     let liberou = 0;
     const catracaComFinally = criarCatracaAdvisoryFuncionalFila({
       repository: criarRepository({ liberar: async () => { liberou += 1; return { ok: true, liberado: true }; } }),
@@ -104,8 +125,20 @@ function criarRepository({ adquirir, liberar } = {}) {
   assert(processar.indexOf("catracaAdvisoryFuncionalFila.adquirir") < processar.indexOf("reservarOfertaProcessandoFila"));
   assert(processar.indexOf("catracaAdvisoryFuncionalFila.adquirir") < processar.indexOf("const repeticaoExecutor"), "ocupado nao alcanca anti-repeat mutante");
   assert(!processar.includes("observadorClaimShadowFila"));
-  assert(!processar.includes("candidatePool"));
-  assert(!processar.includes("engine_fairness_origem_fluxo"));
+  assert(processar.includes("fairnessOrigemFila.selecionar"), "fairness final deve ocorrer antes da reserva");
+  assert(processar.indexOf("fairnessOrigemFila.selecionar") < processar.indexOf("reservarOfertaProcessandoFila"));
+  assert(
+    processar.indexOf("fairnessOrigemFila.selecionar") < processar.indexOf("const enviado = await enviarParaDestinoInteligente"),
+    "provider/fanout permanece depois da selecao transacional de fairness"
+  );
+  const posseImediata = processar.indexOf("advisoryFuncionalFila = resultadoFairnessFila.advisory");
+  const processamentoSkips = processar.indexOf("for (const skip of resultadoFairnessFila?.skipped || [])");
+  const persistenciaSkips = processar.indexOf("await salvarFilaSeAlterada(clienteFila)", processamentoSkips);
+  assert(posseImediata >= 0 && posseImediata < processamentoSkips, "caller assume advisory antes de qualquer processamento posterior");
+  assert(posseImediata < persistenciaSkips, "falha ao salvar skips continua coberta pelo finally do caller");
+  assert(processar.includes('motivo: "anti_repeat_indisponivel"'), "indisponibilidade anti-repeat possui motivo tecnico proprio");
+  assert(processar.includes('motivo: "duplicidade_indisponivel"'), "indisponibilidade de duplicidade possui motivo tecnico proprio");
+  assert(processar.includes('skip?.motivo !== "anti_repeat" && skip?.motivo !== "duplicidade"'), "somente bloqueios comprovados entram em retencao");
 
   const inicioEnviarAgora = fonte.indexOf("async function enviarOfertaAgoraDireto");
   const enviarAgora = fonte.slice(inicioEnviarAgora, fonte.indexOf("\nasync function ", inicioEnviarAgora + 1));

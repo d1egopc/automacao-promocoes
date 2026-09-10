@@ -315,6 +315,7 @@ const {
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const filaClaimsRepository = require("./modules/fila/fila-claims.repository");
 const { criarCatracaAdvisoryFuncionalFila } = require("./modules/fila/fila-advisory-functional.service");
+const { criarFairnessOrigemFila } = require("./modules/fila/fila-origem-fairness.service");
 const filaCheckpointsEntregaRepository = require("./modules/fila/fila-checkpoints-entrega.repository");
 const {
   criarCheckpointEntregaFuncional,
@@ -327,6 +328,10 @@ const {
 } = require("./modules/fila/fila-checkpoint-recovery.service");
 const catracaAdvisoryFuncionalFila = criarCatracaAdvisoryFuncionalFila({
   repository: filaClaimsRepository,
+  logger: console
+});
+const fairnessOrigemFila = criarFairnessOrigemFila({
+  catracaAdvisory: catracaAdvisoryFuncionalFila,
   logger: console
 });
 const checkpointEntregaFuncionalFila = criarCheckpointEntregaFuncional({
@@ -2481,7 +2486,9 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
       }));
     }
 
-    return selecionada.oferta;
+    return opcoes?.retornarResultado === true
+      ? { oferta: selecionada.oferta, resultadoSelecao, contadoresFilaViva }
+      : selecionada.oferta;
   }
 
   const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog, {
@@ -9194,9 +9201,11 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
     });
 
     resumoFila.fase = "selecionar_oferta";
-    oferta = await selecionarProximaOfertaFila(clienteFila, {
-      fonteClienteHotState: fonteClienteHotStateSelecao
+    const selecaoFilaComPool = await selecionarProximaOfertaFila(clienteFila, {
+      fonteClienteHotState: fonteClienteHotStateSelecao,
+      retornarResultado: true
     });
+    oferta = selecaoFilaComPool?.oferta || null;
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";
@@ -9222,6 +9231,97 @@ if (!oferta) {
   });
   return;
 }
+
+    // A fila escolhe apenas entre o baseline e as duas heads ja elegiveis. A
+    // memoria e consumida somente depois do advisory e da revalidacao curta.
+    const colecaoFairnessFila = (
+      fonteClienteHotStateSelecao?.conclusiva === true &&
+      Array.isArray(fonteClienteHotStateSelecao.itens)
+    ) ? fonteClienteHotStateSelecao.itens : fila;
+    const resultadoFairnessFila = await fairnessOrigemFila.selecionar({
+      clienteId: clienteFila,
+      candidatePool: selecaoFilaComPool?.resultadoSelecao?.candidatePool || [],
+      revalidar: async candidato => {
+        const referencia = candidato?.oferta || candidato || {};
+        const localizacao = filaOfertas.relocalizarOfertaFila(colecaoFairnessFila, referencia, {
+          clienteId: clienteFila
+        });
+        if (!localizacao.ok || !localizacao.oferta) {
+          return { ok: false, motivo: "candidato_stale" };
+        }
+        const atual = localizacao.oferta;
+        if (atual.status !== "pendente") {
+          return { ok: false, motivo: "candidato_stale" };
+        }
+        if (!usuarioAtivoOperacional(clienteFila)) {
+          return { ok: false, motivo: "gate_reprovado", dados: { motivo: "usuario_inativo" } };
+        }
+        const configRevalidada = configsPorCliente?.[clienteFila] || config;
+        const gates = avaliarOfertaParaSelecaoFilaViva(atual, clienteFila, configRevalidada, { agora: Date.now() });
+        if (!gates.elegivel) return { ok: false, motivo: "gate_reprovado", dados: { motivo: gates.motivo || "" } };
+
+        const recentes = filaStore.candidatosEnvioRecente2h(atual, { clienteId: clienteFila });
+        const repeticao = filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFairnessFila, atual, {
+          obterItens: () => recentes.ok ? recentes.itens : colecaoFairnessFila
+        });
+        if (!repeticao.ok) {
+          return { ok: false, motivo: "anti_repeat_indisponivel", dados: repeticao };
+        }
+        if (repeticao.bloqueada) {
+          return { ok: false, motivo: "anti_repeat", dados: repeticao };
+        }
+        const duplicidade = filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoFairnessFila, atual, {
+          clienteId: clienteFila
+        });
+        if (!duplicidade.ok) {
+          return { ok: false, motivo: "duplicidade_indisponivel", dados: duplicidade };
+        }
+        if (duplicidade.bloquear) {
+          return { ok: false, motivo: "duplicidade", dados: duplicidade };
+        }
+        return { ok: true, oferta: atual };
+      }
+    });
+
+    // O service devolve uma sessao advisory ja adquirida apos COMMIT. O caller
+    // assume ownership antes de qualquer persistencia ou processamento que possa
+    // lancar, para que o finally externo sempre consiga unlock/release.
+    if (resultadoFairnessFila?.ok && !resultadoFairnessFila?.ignorado &&
+      resultadoFairnessFila?.advisory?.resultado === "adquirido") {
+      advisoryFuncionalFila = resultadoFairnessFila.advisory;
+    }
+
+    if (!resultadoFairnessFila?.ok) {
+      resumoFila.motivoPulo = resultadoFairnessFila?.motivo || "pg_fail_closed";
+      return;
+    }
+
+    // Somente bloqueios comprovados de anti-repeat/duplicidade recebem a
+    // retencao funcional atual; indisponibilidade tecnica encerra o ciclo sem
+    // alterar o item e sem consumir fairness.
+    for (const skip of resultadoFairnessFila?.skipped || []) {
+      if (skip?.motivo !== "anti_repeat" && skip?.motivo !== "duplicidade") continue;
+      const localizacao = filaOfertas.relocalizarOfertaFila(colecaoFairnessFila, skip.candidato?.oferta || skip.candidato || {}, {
+        clienteId: clienteFila
+      });
+      if (!localizacao.ok || localizacao.oferta?.status !== "pendente") continue;
+      const dadosBloqueio = skip?.dados || {};
+      const motivo = dadosBloqueio.motivo || "repetida_no_executor_2h";
+      filaOfertas.marcarOfertaRetidaDuplicidadeFila(localizacao.oferta, motivo, {
+        identidade: dadosBloqueio.identidade || "",
+        ofertaAnteriorId: dadosBloqueio.ofertaAnterior?.id || dadosBloqueio.ofertaAnterior?.engineOfertaId || "",
+        statusDetalhe: "Retida: duplicata ativa na janela de 2 horas"
+      });
+      marcarFilaAlterada();
+    }
+    await salvarFilaSeAlterada(clienteFila);
+
+    if (resultadoFairnessFila?.ignorado) {
+      resumoFila.motivoPulo = resultadoFairnessFila.motivo || "sem_candidato_elegivel";
+      return;
+    }
+    oferta = resultadoFairnessFila?.candidato?.oferta || resultadoFairnessFila?.candidato || oferta;
+    advisoryFuncionalFila = advisoryFuncionalFila || resultadoFairnessFila?.advisory || null;
 
 const clienteId = oferta.clienteId || "admin";
 const diagnosticoOfertaSelecionada = diagnosticosFilaPorCliente.get(String(clienteFila));
@@ -9251,7 +9351,7 @@ if (!usuarioAtivoOperacional(clienteId)) {
   return;
 }
 
-advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
+if (!advisoryFuncionalFila) advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
   clienteId,
   oferta
 });

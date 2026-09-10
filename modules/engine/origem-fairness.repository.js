@@ -7,7 +7,8 @@ const ETAPAS_FAIRNESS = Object.freeze([
   "diagnostico_final",
   "validacao_final",
   "importacao_final",
-  "distribuicao_final"
+  "distribuicao_final",
+  "fila_final"
 ]);
 
 const LANES_FAIRNESS = Object.freeze([
@@ -66,6 +67,8 @@ function normalizarChaveFairness({ clienteId = "", etapa = "", lane = "" } = {})
     if (!MARKETPLACES_FAIRNESS.includes(chave.lane)) {
       throw new Error("fairness_lane_distribuicao_invalida");
     }
+  } else if (chave.etapa === "fila_final") {
+    if (chave.lane !== "selecao") throw new Error("fairness_lane_fila_invalida");
   } else if (!LANES_FAIRNESS.includes(chave.lane)) {
     throw new Error("fairness_lane_invalida");
   }

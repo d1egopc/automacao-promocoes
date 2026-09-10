@@ -101,10 +101,11 @@ async function testarSchema() {
   assert(/CREATE TABLE IF NOT EXISTS engine_fairness_origem_fluxo/i.test(schema));
   assert(/PRIMARY KEY \(cliente_id, etapa, lane\)/i.test(schema));
   assert(/ultima_origem_atendida IN \('optimus', 'clonador_grupos'\)/i.test(schema));
-  assert(/etapa IN \('diagnostico_final', 'validacao_final', 'importacao_final', 'distribuicao_final'\)/i.test(schema));
+  assert(/etapa IN \('diagnostico_final', 'validacao_final', 'importacao_final', 'distribuicao_final', 'fila_final'\)/i.test(schema));
   assert(/lane IN \('agua_nova', 'fresca_em_risco', 'fresca_circulavel', 'expirada'\)/i.test(schema));
   assert(/etapa = 'importacao_final'.*mercadolivre\|amazon\|shopee\|aliexpress\|awin\|kabum\|magalu/is.test(schema));
   assert(/etapa = 'distribuicao_final'.*lane IN \('mercadolivre', 'amazon', 'shopee', 'aliexpress', 'awin', 'kabum', 'magalu'\)/is.test(schema));
+  assert(/etapa = 'fila_final' AND lane = 'selecao'/i.test(schema));
 }
 
 function testarValidacao() {
@@ -112,6 +113,11 @@ function testarValidacao() {
   assert.throws(() => normalizarChaveFairness(chave("", "diagnostico_final", "agua_nova")), /cliente_id_ausente/);
   assert.throws(() => normalizarChaveFairness(chave("workspace_a", "importacao_final", "agua_nova")), /lane_importacao_invalida/);
   assert.throws(() => normalizarChaveFairness(chave("workspace_a", "diagnostico_final", "manual_v2")), /lane_invalida/);
+  assert.deepStrictEqual(
+    normalizarChaveFairness(chave("workspace_a", "fila_final", "selecao")),
+    chave("workspace_a", "fila_final", "selecao")
+  );
+  assert.throws(() => normalizarChaveFairness(chave("workspace_a", "fila_final", "agua_nova")), /lane_fila_invalida/);
   assert.strictEqual(normalizarOrigemProtegida("OPTIMUS"), "optimus");
   assert.throws(() => normalizarOrigemProtegida("legada"), /origem_invalida/);
 }

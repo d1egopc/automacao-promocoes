@@ -117,7 +117,7 @@ assert(
 );
 assert(
   pos(processarFila, "diagnosticarDisponibilidadeEnvioWorkspace(clienteFila") <
-    pos(processarFila, "selecionarProximaOfertaFila(clienteFila)"),
+    pos(processarFila, "selecionarProximaOfertaFila(clienteFila,"),
   "sessao indisponivel deve retornar antes da selecao pesada da oferta"
 );
 
