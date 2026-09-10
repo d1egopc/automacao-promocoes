@@ -8050,10 +8050,65 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         hqAnexado: Boolean(telemetriaMidiaV2.hqAnexado),
         motivoFallback: String(telemetriaMidiaV2.motivoFallback || ""),
         matchedTextPresente: Boolean(telemetriaMidiaV2.matchedTextPresente),
-        envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "imagem_completa",
+        envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "desconhecido",
         sucesso: Boolean(sucesso),
         falhaFinal: erroFinal || ""
       });
+    };
+    const resumoHostExecutor = (valor = "") => {
+      try {
+        return new URL(String(valor || "")).hostname.toLowerCase();
+      } catch {
+        return "";
+      }
+    };
+    const imagemExecutorAuditavel = corrigirImagemUrl(oferta.imagem) || oferta.imagem || "";
+    const resumirErroAuditoriaWhatsapp = (erro = "") => String(erro || "")
+      .replace(/https?:\/\/[^\s"']+/gi, "[url_redigida]")
+      .replace(/\b(token|api[_-]?key|secret|authorization|cookie|password|access[_-]?token|signature|sig)\b\s*[:=]\s*[^\s,;]+/gi, (_valor, nome) => `${nome}=[redigido]`)
+      .replace(/[?&][a-z0-9_.-]+=[^\s&#,;]+/gi, "[param_redigido]")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 180);
+    const registrarAuditoriaPayloadWhatsapp = ({ etapa = "", ramoExecutor = "desconhecido", payload = null, providerMessageId = "", erro = "" } = {}) => {
+      try {
+        const resumoPayload = tipoMidiaV2.resumirPayloadWhatsapp(payload || {});
+        const auditoria = {
+          tipo: "auditoria_payload_whatsapp",
+          etapa,
+          data: new Date().toISOString(),
+          clienteId: String(clienteId || ""),
+          destinoId: String(destino.id || destino.destinoId || ""),
+          grupoJid: String(grupo || ""),
+          filaId: String(oferta.id || oferta.filaItemId || ""),
+          ofertaId: String(oferta.engineOfertaId || oferta.ofertaId || ""),
+          marketplace: String(oferta.marketplace || oferta.mercado || ""),
+          tipoMidiaResolvido: tipoMidiaDestinoExecutor(destino) || "desconhecido",
+          ramoExecutor,
+          ...resumoPayload,
+          previewTentado: Boolean(telemetriaMidiaV2.previewTentado),
+          imagemExecutorPresente: Boolean(imagemExecutorAuditavel),
+          imagemExecutorHost: resumoHostExecutor(imagemExecutorAuditavel),
+          linkFinalPresente: Boolean(opcoes.linkFinal),
+          linkFinalHost: resumoHostExecutor(opcoes.linkFinal),
+          executorRevision: String(process.env.BUILD_REVISION || process.env.GIT_COMMIT || process.env.COMMIT_SHA || ""),
+          sendMessageInicio: etapa === "inicio" ? true : undefined,
+          sendMessageSucesso: etapa === "sucesso" ? true : (etapa === "erro" ? false : undefined),
+          providerMessageId: String(providerMessageId || ""),
+          erro: resumirErroAuditoriaWhatsapp(erro)
+        };
+        Object.keys(auditoria).forEach(chave => auditoria[chave] === undefined && delete auditoria[chave]);
+        oferta.logsEnvio = Array.isArray(oferta.logsEnvio) ? oferta.logsEnvio : [];
+        oferta.logsEnvio.push(auditoria);
+        console.log("[EXECUTOR-WHATSAPP-PAYLOAD-AUDITORIA]", auditoria);
+      } catch (erroAuditoria) {
+        try {
+          console.log("[EXECUTOR-WHATSAPP-PAYLOAD-AUDITORIA-ERRO]", {
+            etapa,
+            motivo: resumirErroAuditoriaWhatsapp(erroAuditoria?.message || "auditoria_indisponivel")
+          });
+        } catch {}
+      }
     };
     const enviarTextoWhatsapp = async () => {
       const checkpoint = await executarAlvoComCheckpoint({
@@ -8068,11 +8123,27 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             upload: sock.waUploadToServer,
             telemetria: telemetriaMidiaV2
           });
+          const ramoExecutor = tipoMidiaDestinoExecutor(destino) === "imagem_link"
+            ? "imagem_link"
+            : (tipoMidiaDestinoExecutor(destino) === "texto_link" ? "texto_link" : "fallback");
+          registrarAuditoriaPayloadWhatsapp({ etapa: "inicio", ramoExecutor, payload });
           try {
             const resposta = await sock.sendMessage(grupo, payload);
+            registrarAuditoriaPayloadWhatsapp({
+              etapa: "sucesso",
+              ramoExecutor,
+              payload,
+              providerMessageId: resposta?.key?.id || ""
+            });
             registrarTelemetriaMidiaV2({ sucesso: true });
             return { valor: resposta, providerMessageId: resposta?.key?.id || "" };
           } catch (erroTexto) {
+            registrarAuditoriaPayloadWhatsapp({
+              etapa: "erro",
+              ramoExecutor,
+              payload,
+              erro: erroTexto?.message || "send_message_erro"
+            });
             registrarTelemetriaMidiaV2({
               sucesso: false,
               erroFinal: "send_message_erro"
@@ -8104,17 +8175,35 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         canal: "whatsapp",
         alvo: { grupoId: grupo },
         enviar: async () => {
-          const resposta = await sock.sendMessage(grupo, {
+          const payload = {
             image: {
               url: imagemEnvioExecutor.url
             },
             caption: mensagem
-          });
-          registrarTelemetriaMidiaV2({
-            sucesso: true,
-            envioPayloadTipo: "imagem_completa"
-          });
-          return { valor: resposta, providerMessageId: resposta?.key?.id || "" };
+          };
+          registrarAuditoriaPayloadWhatsapp({ etapa: "inicio", ramoExecutor: "imagem_completa", payload });
+          try {
+            const resposta = await sock.sendMessage(grupo, payload);
+            registrarAuditoriaPayloadWhatsapp({
+              etapa: "sucesso",
+              ramoExecutor: "imagem_completa",
+              payload,
+              providerMessageId: resposta?.key?.id || ""
+            });
+            registrarTelemetriaMidiaV2({
+              sucesso: true,
+              envioPayloadTipo: "imagem_completa"
+            });
+            return { valor: resposta, providerMessageId: resposta?.key?.id || "" };
+          } catch (erroImagem) {
+            registrarAuditoriaPayloadWhatsapp({
+              etapa: "erro",
+              ramoExecutor: "imagem_completa",
+              payload,
+              erro: erroImagem?.message || "send_message_erro"
+            });
+            throw erroImagem;
+          }
         }
       });
       if (!checkpointEnvioWhatsapp.ok) {

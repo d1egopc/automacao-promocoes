@@ -5,6 +5,34 @@ const sharp = require("sharp");
 const { enviarDiscord } = require("../modules/discord/discord-sender");
 const tipoMidiaV2 = require("../modules/destinos/tipo-midia-v2");
 
+assert.deepEqual(
+  tipoMidiaV2.resumirPayloadWhatsapp({ image: { url: "https://imagem.test/a.png" }, caption: "Legenda" }),
+  {
+    payloadTemImage: true,
+    payloadTemText: false,
+    payloadTemCaption: true,
+    payloadTemLinkPreview: false,
+    jpegThumbnailPresente: false,
+    highQualityThumbnailPresente: false
+  },
+  "resumo deve identificar imagem completa pelo payload real"
+);
+assert.deepEqual(
+  tipoMidiaV2.resumirPayloadWhatsapp({
+    text: "Oferta",
+    linkPreview: { jpegThumbnail: Buffer.from("jpeg"), highQualityThumbnail: { width: 800 } }
+  }),
+  {
+    payloadTemImage: false,
+    payloadTemText: true,
+    payloadTemCaption: false,
+    payloadTemLinkPreview: true,
+    jpegThumbnailPresente: true,
+    highQualityThumbnailPresente: true
+  },
+  "resumo deve identificar preview rico pelo payload real"
+);
+
 const raiz = path.resolve(__dirname, "..");
 const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
 const helperFonte = fs.readFileSync(path.join(raiz, "modules", "destinos", "tipo-midia-v2.js"), "utf8");
@@ -14,6 +42,8 @@ assert.ok(helperFonte.includes('"imagem_link"'), "imagem_link deve ter caminho e
 assert.ok(helperFonte.includes('"texto_link"'), "texto_link deve ter caminho explicito");
 assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "Executor deve encaminhar o linkFinal oficial");
 assert.ok(indexFonte.includes('tipo: "telemetria_tipo_midia_v2"'), "Executor deve persistir telemetria de mídia no item da fila");
+assert.ok(indexFonte.includes('tipo: "auditoria_payload_whatsapp"'), "Executor deve registrar resumo do payload WhatsApp");
+assert.ok(indexFonte.includes('envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "desconhecido"'), "Telemetria não pode inventar imagem_completa por default");
 assert.ok(helperFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
 assert.ok(helperFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
 assert.ok(helperFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");

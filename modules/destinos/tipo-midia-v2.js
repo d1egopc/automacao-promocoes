@@ -6,6 +6,20 @@ function tipoMidiaDestino(destino = {}) {
   return String(destino.tipoMidia || "").trim().toLowerCase();
 }
 
+function resumirPayloadWhatsapp(payload = {}) {
+  const linkPreview = payload?.linkPreview && typeof payload.linkPreview === "object"
+    ? payload.linkPreview
+    : null;
+  return {
+    payloadTemImage: Boolean(payload?.image),
+    payloadTemText: typeof payload?.text === "string" && Boolean(payload.text),
+    payloadTemCaption: typeof payload?.caption === "string" && Boolean(payload.caption),
+    payloadTemLinkPreview: Boolean(linkPreview),
+    jpegThumbnailPresente: Boolean(linkPreview?.jpegThumbnail),
+    highQualityThumbnailPresente: Boolean(linkPreview?.highQualityThumbnail)
+  };
+}
+
 function destinoUsaImagem(destino = {}) {
   const tipoMidia = tipoMidiaDestino(destino);
   if (tipoMidia === "imagem_completa") return true;
@@ -183,6 +197,7 @@ function opcoesDiscordPorTipoMidia(destino = {}, imagemUrl = "") {
 
 module.exports = {
   tipoMidiaDestino,
+  resumirPayloadWhatsapp,
   destinoUsaImagem,
   montarPreviewWhatsapp,
   montarPayloadTextoWhatsappPorTipoMidia,
