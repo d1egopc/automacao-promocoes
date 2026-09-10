@@ -498,7 +498,7 @@ function logFlowAtivo(tag = "", payload = {}) {
   } catch (_) {}
 }
 
-async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, origem = "flow_manager") {
+async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, origem = "flow_manager", contexto = {}) {
   const motivo = decisao.motivo || "flow_sem_capacidade";
   const classificacao = motivoDistribuicaoDefinitivo(motivo, {
     origem,
@@ -517,7 +517,7 @@ async function finalizarFlowNaoAceita(oferta = {}, decisao = {}, resumo = null, 
       statusOperacional: classificacao.statusOperacional,
       filaRecebeu: false,
       escopo: "workspace"
-    }, resumo);
+    }, resumo, contexto);
   }
 
   return reprogramarFlowTemporario(oferta, decisao, resumo, origem, classificacao);
@@ -677,7 +677,38 @@ function contextoCoberturaDistributor(oferta = {}, extras = {}) {
   };
 }
 
-async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
+async function registrarSnapshotTerminalClonador(oferta = {}, motivo = "", resultado = "", contexto = {}) {
+  const registrar = contexto?.deps?.atualizarResumoHistoricoClonador;
+  if (typeof registrar !== "function") return;
+  const fontes = [oferta.metadata, oferta.job_metadata?.metadataEvento, oferta.evento_metadata];
+  const clonador = fontes.map(fonte => metadataObjeto(fonte).clonadorGrupos).find(valor => metadataObjeto(valor).bufferId);
+  if (!clonador?.bufferId) return;
+
+  const codigo = String(motivo || "").trim();
+  const status = ["sem_destino", "sem_destino_apto", "sem_destino_compativel", "sem_clientes_operacionais", "nenhum_destino_compativel", "retida_sem_destino_compativel", "automacao_sem_destino_ativo"].includes(codigo) ? "sem_destino"
+    : codigo.includes("categoria_incompativel") || codigo === "origem_nao_permitida" ? "incompativel"
+    : codigo.includes("expirada_frescor") ? "expirada"
+    : ["evento_duplicado", "duplicidade_fila", "sem_melhoria_financeira_janela_2h", "repetida_no_executor_2h", "destino_ja_enviado", "fanout_destino_ja_enviado", "replay_buffer", "mesma_mensagem", "mensagem_duplicada", "mesma_condicao_comercial_janela_2h"].includes(codigo) ? "repetida"
+    : resultado === "erro" ? "erro" : "pendente";
+  try {
+    await registrar({ clienteId: oferta.cliente_id, bufferId: clonador.bufferId, resumo: {
+      jobIds: oferta.job_id ? [String(oferta.job_id)] : [],
+      ofertaIds: oferta.id ? [String(oferta.id)] : [],
+      statusCodigo: status,
+      resultadoAgregado: status,
+      motivoCodigo: codigo,
+      ultimoAtualizadoEm: new Date().toISOString()
+    } });
+  } catch (erro) {
+    console.log("[CLONADOR-HISTORICO-TERMINAL-OBSERVADOR]", {
+      clienteId: oferta.cliente_id || "",
+      bufferId: clonador.bufferId,
+      motivo: erro?.codigo || erro?.message || "falha_snapshot"
+    });
+  }
+}
+
+async function reterOferta(oferta, motivo, detalhes = {}, resumo = null, contexto = {}) {
   const classificacao = motivoDistribuicaoDefinitivo(motivo, {
     ...detalhes,
     clienteId: oferta.cliente_id || "",
@@ -692,7 +723,10 @@ async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
   };
 
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "retida", motivo, detalhesFinais);
-  await marcarOfertaStatus(oferta.id, "retida", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
+  const transicao = await marcarOfertaStatus(oferta.id, "retida", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
+  if (transicao?.ok === true && Number(transicao?.resultado?.rowCount || 0) > 0) {
+    await registrarSnapshotTerminalClonador(oferta, motivo, "retida", contexto);
+  }
   logEngineDistribuidorRetida({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, categoriaOferta: detalhesFinais.categoriaOferta || oferta.categoria || "", categoriasDestino: detalhesFinais.categoriasDestino || [], motivo });
 
   if (resumo) {
@@ -703,9 +737,12 @@ async function reterOferta(oferta, motivo, detalhes = {}, resumo = null) {
   return { ok: false, retida: true, motivo, definitivoOperacional: detalhesFinais.definitivoOperacional };
 }
 
-async function erroOferta(oferta, motivo, detalhes = {}, resumo = null) {
+async function erroOferta(oferta, motivo, detalhes = {}, resumo = null, contexto = {}) {
   await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "erro", motivo, detalhes);
-  await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
+  const transicao = await marcarOfertaStatus(oferta.id, "erro_distribuicao", motivo, { jobId: oferta.job_id, clienteId: oferta.cliente_id });
+  if (transicao?.ok === true && Number(transicao?.resultado?.rowCount || 0) > 0) {
+    await registrarSnapshotTerminalClonador(oferta, motivo, "erro", contexto);
+  }
   logEngineDistribuidorErro({ ofertaId: oferta.id, jobId: oferta.job_id, clienteId: oferta.cliente_id, motivo, erro: detalhes.erro || "" });
 
   if (resumo) {
@@ -748,7 +785,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       erro: lock.erro || "",
       filaRecebeu: false
     });
-    return erroOferta(oferta, lock.motivo || "erro_distribuicao", { erro: lock.erro || "" }, resumo);
+    return erroOferta(oferta, lock.motivo || "erro_distribuicao", { erro: lock.erro || "" }, resumo, contexto);
   }
 
   if (lock.oferta) oferta = lock.oferta;
@@ -778,7 +815,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       decisao: "retido",
       motivo: validacao.motivo || "validacao_distribuicao_rejeitada"
     });
-    return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo);
+    return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo, contexto);
   }
 
   const flowOriginal = await registrarFlowManagerShadow(oferta, validacao, contexto);
@@ -792,7 +829,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return finalizarFlowNaoAceita(oferta, {
       ...flow,
       destinosCompativeis: validacao.destinosCompativeis
-    }, resumo);
+    }, resumo, "flow_manager", contexto);
   }
 
   if (flowAtivo && flow?.aceitarAgora === true) {
@@ -813,7 +850,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
         idadeComercialMs: frescor.idadeComercialMs ?? null,
         origemComercialCampo: frescor.origemComercialCampo || "",
         expiraEmComercial: frescor.expiraEmComercial || flow.expiraEm || ""
-      }, resumo);
+      }, resumo, contexto);
     }
   }
 
@@ -875,7 +912,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
           definitivoOperacional: true,
           classificacaoOperacional: classificacaoGate.tipo,
           statusOperacional: classificacaoGate.statusOperacional
-        }, resumo);
+        }, resumo, contexto);
       }
 
       if (flowAtivo) {
@@ -890,7 +927,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
           tipoFluxo: flow?.tipoFluxo || tipoOperacionalOferta(oferta),
           ttlMs: flow?.ttlMs,
           destinosCompativeis: validacao.destinosCompativeis
-        }, resumo, "gate");
+        }, resumo, "gate", contexto);
       }
       await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {
         ofertaId: oferta.id,
@@ -953,7 +990,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
         decisao: "retido",
         motivo: "duplicidade_fila"
       });
-      return reterOferta(oferta, "duplicidade_fila", {}, resumo);
+      return reterOferta(oferta, "duplicidade_fila", {}, resumo, contexto);
     }
 
     coberturaRadar.registrar("engine_distributor_erro", {
@@ -964,7 +1001,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       decisao: "erro",
       motivo: fila.motivo || "erro_fila"
     });
-    return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo);
+    return erroOferta(oferta, fila.motivo || "erro_fila", {}, resumo, contexto);
   }
 
   void registrarFilaClienteAdicionada({
@@ -1148,7 +1185,7 @@ async function distribuirOfertasEngine({ limite = 10, marketplace = "", clienteI
           erro: e.message,
           filaRecebeu: false
         });
-        await erroOferta(ofertaEfetiva, "erro_distribuicao", { erro: e.message });
+        await erroOferta(ofertaEfetiva, "erro_distribuicao", { erro: e.message }, null, contextoFinal);
         registrarResultadoDistributorVivo(resumo, ofertaEfetiva, { ok: false, motivo: "erro_distribuicao" });
       }
 

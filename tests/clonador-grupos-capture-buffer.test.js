@@ -8,6 +8,7 @@ const path = require("path");
 
 const criarRotasClonadorGrupos = require("../modules/clonador-grupos/routes");
 const { criarServicoClonadorGrupos, MAX_FONTES_ATIVAS } = require("../modules/clonador-grupos");
+const { criarRepositorioClonadorGrupos } = require("../modules/clonador-grupos/repository");
 
 const raiz = path.resolve(__dirname, "..");
 
@@ -344,10 +345,133 @@ function testarEscopoEstrutural() {
   );
 }
 
+function simularExpressaoMotivosRepeticao(motivosAtuais = [], motivoAtual = "") {
+  const atual = Array.isArray(motivosAtuais) ? motivosAtuais.map(String) : [];
+  const motivo = String(motivoAtual || "").trim();
+  const entradas = atual.map((valor, indice) => ({ valor, pos: indice + 1 }));
+  if (!atual.includes(motivo)) entradas.push({ valor: motivo, pos: atual.length + 1 });
+
+  const ultimaPosicaoPorMotivo = new Map();
+  for (const entrada of entradas) {
+    if (entrada.valor) ultimaPosicaoPorMotivo.set(entrada.valor, entrada.pos);
+  }
+
+  return [...ultimaPosicaoPorMotivo.entries()]
+    .map(([valor, pos]) => ({ valor, pos }))
+    .sort((a, b) => b.pos - a.pos)
+    .slice(0, 8)
+    .sort((a, b) => a.pos - b.pos)
+    .map(item => item.valor);
+}
+
+function aplicarResultadoRepeticao(metadata = {}, motivo = "", ultimaEm = "") {
+  const resumoAtual = metadata.historicoResumo && typeof metadata.historicoResumo === "object"
+    ? metadata.historicoResumo
+    : {};
+  const repeticoesAtuais = resumoAtual.repeticoes && typeof resumoAtual.repeticoes === "object"
+    ? resumoAtual.repeticoes
+    : {};
+  const totalAtual = /^\d+$/.test(String(repeticoesAtuais.total || "")) ? Number(repeticoesAtuais.total) : 0;
+  return {
+    ...metadata,
+    historicoResumo: {
+      ...resumoAtual,
+      repeticoes: {
+        total: totalAtual + 1,
+        ultimaEm,
+        motivos: simularExpressaoMotivosRepeticao(repeticoesAtuais.motivos, motivo)
+      }
+    }
+  };
+}
+
+async function testarContratoRepeticaoRepository() {
+  const queries = [];
+  let metadataPersistida = {
+    campoPreservado: "fora_do_resumo",
+    historicoResumo: {
+      marketplace: "amazon",
+      titulo: "Produto preservado",
+      destinos: { total: 2 },
+      repeticoes: { total: 0, ultimaEm: "", motivos: [] }
+    }
+  };
+  const repository = criarRepositorioClonadorGrupos({
+    queryEngine: async (sql, parametros = []) => {
+      queries.push({ sql, parametros });
+      if (/UPDATE clonador_grupos_buffer/.test(sql) && /'repeticoes'/.test(sql)) {
+        metadataPersistida = aplicarResultadoRepeticao(metadataPersistida, parametros[5], parametros[4]);
+        return { ok: true, resultado: { rows: [{ id: "1", cliente_id: "workspace_a", sessao_id: "sessao_a", grupo_jid: "grupo_a@g.us", mensagem_id: "m1", status: "capturada", metadata: clone(metadataPersistida) }] } };
+      }
+      return { ok: true, resultado: { rows: [] } };
+    }
+  });
+
+  const registrar = async (motivo) => repository.registrarRepeticaoCaptura({
+    clienteId: "workspace_a", sessaoId: "sessao_a", grupoJid: "grupo_a@g.us", mensagemId: "m1",
+    metadata: { historicoResumo: { repeticoes: { motivo } } }
+  });
+  const definirLegado = (motivos, total = 0) => {
+    metadataPersistida = {
+      campoPreservado: "fora_do_resumo",
+      historicoResumo: {
+        marketplace: "amazon",
+        titulo: "Produto preservado",
+        destinos: { total: 2 },
+        repeticoes: { total, ultimaEm: "antes", motivos }
+      }
+    };
+  };
+
+  // A–F: a expressao PostgreSQL deve sempre devolver motivos distintos e no maximo oito.
+  definirLegado(["m1", "m2", "m3", "m4", "m5", "m6", "m7"], 10);
+  assert.deepStrictEqual((await registrar("m8")).metadata.historicoResumo.repeticoes.motivos, ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"]);
+
+  definirLegado(["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"]);
+  assert.deepStrictEqual((await registrar("m9")).metadata.historicoResumo.repeticoes.motivos, ["m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"]);
+
+  definirLegado(["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"]);
+  assert.deepStrictEqual((await registrar("m5")).metadata.historicoResumo.repeticoes.motivos, ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"]);
+
+  definirLegado(["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+  assert.deepStrictEqual((await registrar("m5")).metadata.historicoResumo.repeticoes.motivos, ["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+
+  definirLegado(["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+  assert.deepStrictEqual((await registrar("m11")).metadata.historicoResumo.repeticoes.motivos, ["m4", "m5", "m6", "m7", "m8", "m9", "m10", "m11"]);
+
+  definirLegado(["m1", "m2", "m1", "m3", "m4", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+  const semDuplicatas = (await registrar("m4")).metadata.historicoResumo.repeticoes.motivos;
+  assert.deepStrictEqual(semDuplicatas, ["m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"]);
+  assert.strictEqual(new Set(semDuplicatas).size, semDuplicatas.length);
+
+  // G–I: o mesmo UPDATE mantem contador, horario e os demais campos do resumo.
+  definirLegado(["m1"], 41);
+  const preservado = await registrar("m2");
+  assert.strictEqual(preservado.metadata.historicoResumo.repeticoes.total, 42);
+  assert.ok(preservado.metadata.historicoResumo.repeticoes.ultimaEm);
+  assert.strictEqual(preservado.metadata.historicoResumo.marketplace, "amazon");
+  assert.strictEqual(preservado.metadata.historicoResumo.titulo, "Produto preservado");
+  assert.deepStrictEqual(preservado.metadata.historicoResumo.destinos, { total: 2 });
+  assert.strictEqual(preservado.metadata.campoPreservado, "fora_do_resumo");
+
+  // J: as chamadas concorrentes permanecem em UPDATE unico; o contador nao faz read-modify-write no Node.
+  definirLegado([], 0);
+  await Promise.all([registrar("concorrente_a"), registrar("concorrente_b")]);
+  assert.strictEqual(metadataPersistida.historicoResumo.repeticoes.total, 2);
+  const atualizacoes = queries.filter(item => /UPDATE clonador_grupos_buffer/.test(item.sql) && /'repeticoes'/.test(item.sql));
+  assert.strictEqual(atualizacoes.length, 9, "cada repeticao usa o UPDATE atomico do repository real");
+  assert(atualizacoes.every(item => /::int \+ 1/.test(item.sql)), "contador e incrementado no PostgreSQL, sem read-modify-write no Node");
+  assert(atualizacoes.every(item => /WITH ORDINALITY/.test(item.sql) && /GROUP BY valor/.test(item.sql) && /LIMIT 8/.test(item.sql)), "a expressao deduplica e limita sempre a oito");
+  assert(atualizacoes.every(item => /WHERE NOT COALESCE\(metadata #> '\{historicoResumo,repeticoes,motivos\}'/.test(item.sql)), "motivo existente segue pela normalizacao, sem retorno antecipado do array legado");
+  assert(atualizacoes.every(item => !/CASE WHEN COALESCE\(metadata #> '\{historicoResumo,repeticoes,motivos\}'.*\? \$6::text[\s\S]*THEN COALESCE/.test(item.sql)), "nao existe mais ramo que devolve o array antigo sem limitar");
+  console.log("clonador-grupos-repeticoes-postgres.test.js SKIP (CLONADOR_GRUPOS_TEST_DATABASE_URL ausente; simulador funcional da expressao PG executado)");
+}
+
 async function main() {
   await testarCapturaGuardsBuffer();
   await testarLimiteQuatroEMultiworkspace();
   await testarEndpointBufferIsolado();
+  await testarContratoRepeticaoRepository();
   testarEscopoEstrutural();
   console.log("clonador-grupos-capture-buffer.test.js OK");
 }

@@ -109,8 +109,19 @@ function escolherLinkPrincipalOferta(links = [], evento = {}, marketplace = "") 
     null;
 }
 
-async function finalizarErro(job, motivo, detalhes = {}, resumo) {
-  await marcarJobErroImportacao(job.id, motivo, detalhes);
+async function observarTerminalClonador(contexto = {}, job = {}, motivo = "") {
+  if (typeof contexto?.deps?.observarHistoricoClonadorTerminal !== "function") return;
+  try { await contexto.deps.observarHistoricoClonadorTerminal({ job, motivo, etapa: "importacao_final" }); } catch (_) {}
+}
+
+async function observarOfertaClonador(contexto = {}, job = {}, oferta = {}, ofertaId = "") {
+  if (typeof contexto?.deps?.observarHistoricoClonadorOferta !== "function") return;
+  try { await contexto.deps.observarHistoricoClonadorOferta({ job, oferta, ofertaId }); } catch (_) {}
+}
+
+async function finalizarErro(job, motivo, detalhes = {}, resumo, contexto = {}) {
+  const transicao = await marcarJobErroImportacao(job.id, motivo, detalhes);
+  if (transicao?.ok === true) await observarTerminalClonador(contexto, job, motivo);
   if (resumo) {
     resumo.erros += 1;
     motivoAdicionar(resumo, motivo);
@@ -133,7 +144,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "rejeitado",
       motivo: "usuario_inativo"
     });
-    return finalizarErro(job, "usuario_inativo", { clienteId: job.cliente_id }, resumo);
+    return finalizarErro(job, "usuario_inativo", { clienteId: job.cliente_id }, resumo, contexto);
   }
 
   const lock = typeof contexto.reivindicarImportacao === "function"
@@ -155,7 +166,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       motivo: lock.motivo || "lock_falhou",
       erro: lock.erro || ""
     });
-    return finalizarErro(job, lock.motivo || "lock_falhou", { erro: lock.erro || "" }, resumo);
+    return finalizarErro(job, lock.motivo || "lock_falhou", { erro: lock.erro || "" }, resumo, contexto);
   }
 
   if (lock.job) {
@@ -180,7 +191,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "erro",
       motivo: "evento_nao_encontrado"
     });
-    return finalizarErro(job, "evento_nao_encontrado", { eventoId: job.evento_id }, resumo);
+    return finalizarErro(job, "evento_nao_encontrado", { eventoId: job.evento_id }, resumo, contexto);
   }
 
   const linksResultado = await carregarLinksEvento(job.evento_id);
@@ -195,7 +206,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "erro",
       motivo: "links_nao_carregados"
     });
-    return finalizarErro(job, "links_nao_carregados", { eventoId: job.evento_id }, resumo);
+    return finalizarErro(job, "links_nao_carregados", { eventoId: job.evento_id }, resumo, contexto);
   }
 
   const adapter = ADAPTERS[marketplace];
@@ -208,7 +219,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "rejeitado",
       motivo: "adapter_nao_implementado"
     });
-    return finalizarErro(job, "adapter_nao_implementado", { marketplace }, resumo);
+    return finalizarErro(job, "adapter_nao_implementado", { marketplace }, resumo, contexto);
   }
 
   let resultadoAdapter;
@@ -228,7 +239,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       motivo: "erro_importador",
       erro: e.message
     });
-    return finalizarErro(job, "erro_importador", { erro: e.message }, resumo);
+    return finalizarErro(job, "erro_importador", { erro: e.message }, resumo, contexto);
   }
 
   await registrarEtapaImportacao(job.id, "importador_executado", resultadoAdapter?.ok ? "ok" : "erro", resultadoAdapter?.ok ? "importador_ok" : (resultadoAdapter?.motivo || "erro_importacao"), {
@@ -242,7 +253,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "rejeitado",
       motivo: resultadoAdapter?.motivo || "erro_importacao"
     });
-    return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", { marketplace }, resumo);
+    return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", { marketplace }, resumo, contexto);
   }
 
   console.log("[ENGINE-V2-IMPORTACAO-CONCLUIDA]", JSON.stringify({
@@ -278,7 +289,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       motivo: gravacao.motivo || "oferta_gravacao_falhou",
       erro: gravacao.erro || ""
     });
-    return finalizarErro(job, gravacao.motivo || "oferta_gravacao_falhou", { erro: gravacao.erro || "" }, resumo);
+    return finalizarErro(job, gravacao.motivo || "oferta_gravacao_falhou", { erro: gravacao.erro || "" }, resumo, contexto);
   }
 
   if (gravacao.retidaV2) {
@@ -289,7 +300,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
         ofertaId: gravacao.ofertaId,
         motivoV2,
         erro: jobRetido.erro || ""
-      }, resumo);
+      }, resumo, contexto);
     }
     await registrarEtapaImportacao(job.id, "importacao_finalizada", "retida", motivoV2, {
       ofertaId: gravacao.ofertaId,
@@ -303,6 +314,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       motivo: motivoV2,
       ofertaId: gravacao.ofertaId
     });
+    await observarTerminalClonador(contexto, job, motivoV2);
     if (resumo) resumo.retidasV2 = (resumo.retidasV2 || 0) + 1;
     return { ok: true, retidaV2: true, ofertaId: gravacao.ofertaId, motivo: motivoV2 };
   }
@@ -313,12 +325,13 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       ofertaId: gravacao.ofertaId,
       erro: jobOfertaCriada.erro || "",
       motivo: jobOfertaCriada.motivo || "job_nao_importando"
-    }, resumo);
+    }, resumo, contexto);
   }
   await registrarEtapaImportacao(job.id, "importacao_finalizada", "ok", "oferta_criada", {
     ofertaId: gravacao.ofertaId,
     marketplace
   });
+  await observarOfertaClonador(contexto, job, gravacao.oferta || {}, gravacao.ofertaId);
 
   coberturaRadar.registrar("engine_importer_ok", {
     ...contextoCoberturaImporter(job, { links: linksResultado.links, ofertaId: gravacao.ofertaId }),
@@ -433,7 +446,8 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
       resumo.erros += 1;
       motivoAdicionar(resumo, "erro_importacao");
       logEngineImporterErro({ jobId: jobEfetivo.id, etapa: "importar_job", motivo: "erro_importacao", erro: e.message });
-      await marcarJobErroImportacao(jobEfetivo.id, "erro_importacao", { erro: e.message });
+      const transicao = await marcarJobErroImportacao(jobEfetivo.id, "erro_importacao", { erro: e.message });
+      if (transicao?.ok === true) await observarTerminalClonador({ deps }, jobEfetivo, "erro_importacao");
       medidorJob.fim({
         ok: false,
         motivo: "erro_importacao",

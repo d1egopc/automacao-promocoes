@@ -291,6 +291,17 @@ function criarBridgeClonadorGrupos(deps = {}) {
 
     if (!resultado?.ok) {
       await repo.atualizarBufferStatus(item.id, "erro", {
+        historicoResumo: {
+          statusCodigo: "erro",
+          motivoCodigo: texto(resultado?.motivo || "registrar_evento_falhou").toLowerCase().replace(/[^a-z0-9_:.-]/g, "_"),
+          ultimoAtualizadoEm: new Date().toISOString()
+        },
+        clonadorHistorico: {
+          versao: 1,
+          tipo: "erro",
+          motivoCodigo: texto(resultado?.motivo || "registrar_evento_falhou").toLowerCase().replace(/[^a-z0-9_:.-]/g, "_"),
+          atualizadoEm: new Date().toISOString()
+        },
         clonadorGruposBridge: {
           status: "erro",
           motivo: resultado?.motivo || "registrar_evento_falhou",
@@ -303,6 +314,26 @@ function criarBridgeClonadorGrupos(deps = {}) {
     }
 
     const atualizado = await repo.atualizarBufferStatus(item.id, "pronta", {
+      historicoResumo: {
+        eventoId: resultado.id || null,
+        marketplace: texto(marketplaceDetectado) || null,
+        titulo: texto(comercialCapturado?.tituloCapturado, 180) || null,
+        preco: comercialCapturado?.precoAtual ?? null,
+        precoAnterior: comercialCapturado?.precoAnterior ?? null,
+        cupomPresente: Boolean(texto(comercialCapturado?.cupom)),
+        beneficioPresente: Boolean(texto(comercialCapturado?.beneficioTexto)),
+        statusCodigo: resultado.duplicado === true ? "repetida" : "processando",
+        motivoCodigo: resultado.duplicado === true ? "evento_duplicado" : "",
+        ultimoAtualizadoEm: new Date().toISOString()
+      },
+      clonadorHistorico: {
+        versao: 1,
+        tipo: resultado.duplicado === true ? "repeticao" : "captura",
+        marketplace: texto(marketplaceDetectado),
+        motivoCodigo: resultado.duplicado === true ? "evento_duplicado" : "",
+        repeticao: resultado.duplicado === true ? { quantidade: 1, motivoCodigo: "evento_duplicado", ultimoEm: new Date().toISOString() } : undefined,
+        atualizadoEm: new Date().toISOString()
+      },
       clonadorGruposBridge: {
         status: "pronta",
         eventoId: resultado.id || null,
@@ -347,6 +378,13 @@ function criarBridgeClonadorGrupos(deps = {}) {
       } catch (erro) {
         resumo.erros += 1;
         await repo.atualizarBufferStatus(item.id, "erro", {
+          historicoResumo: { statusCodigo: "erro", motivoCodigo: "bridge_exception", ultimoAtualizadoEm: new Date().toISOString() },
+          clonadorHistorico: {
+            versao: 1,
+            tipo: "erro",
+            motivoCodigo: "bridge_exception",
+            atualizadoEm: new Date().toISOString()
+          },
           clonadorGruposBridge: {
             status: "erro",
             motivo: erro.message || "bridge_exception",

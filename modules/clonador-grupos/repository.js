@@ -3,7 +3,9 @@
 const { getEnginePool, queryEngine } = require("../engine/database");
 
 const MAX_FONTES_ATIVAS = 4;
-const STATUS_BUFFER_VALIDOS = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
+// `ignorada` e' um registro de auditoria: nunca entra no bridge porque ele
+// reivindica somente `capturada`/`processando`.
+const STATUS_BUFFER_VALIDOS = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "ignorada", "erro"]);
 
 let schemaPromise = null;
 
@@ -151,8 +153,14 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           UNIQUE (cliente_id, sessao_id, grupo_jid, mensagem_id),
-          CHECK (status IN ('capturada', 'processando', 'pronta', 'encaminhada', 'repetida', 'erro'))
+          CHECK (status IN ('capturada', 'processando', 'pronta', 'encaminhada', 'repetida', 'ignorada', 'erro'))
         );
+
+        -- Bancos ja' existentes foram criados antes da auditoria de historico.
+        -- O CHECK e' expandido de forma aditiva, sem reclassificar linhas.
+        ALTER TABLE clonador_grupos_buffer DROP CONSTRAINT IF EXISTS clonador_grupos_buffer_status_check;
+        ALTER TABLE clonador_grupos_buffer ADD CONSTRAINT clonador_grupos_buffer_status_check
+          CHECK (status IN ('capturada', 'processando', 'pronta', 'encaminhada', 'repetida', 'ignorada', 'erro'));
 
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_fontes_cliente
           ON clonador_grupos_fontes (cliente_id);
@@ -164,6 +172,8 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
           ON clonador_grupos_buffer (cliente_id, status, capturado_em DESC);
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_buffer_fonte
           ON clonador_grupos_buffer (cliente_id, sessao_id, grupo_jid, capturado_em DESC);
+        CREATE INDEX IF NOT EXISTS idx_clonador_grupos_buffer_historico
+          ON clonador_grupos_buffer (cliente_id, capturado_em DESC, id DESC);
       `, [], query).catch((erro) => {
         schemaPromise = null;
         throw erro;
@@ -345,6 +355,81 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     return row ? { inserido: true, item: normalizarBuffer(row) } : { inserido: false, item: null };
   }
 
+  // Guarda somente o motivo e a identidade tecnica da captura descartada. O
+  // texto, links e payload da mensagem nao sao replicados neste caminho.
+  async function registrarCapturaIgnorada(item = {}) {
+    await pronto();
+    const metadata = item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata)
+      ? item.metadata
+      : {};
+    const resultado = await executar(`
+      INSERT INTO clonador_grupos_buffer (
+        cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        texto_original, links, capturado_em, status, metadata
+      ) VALUES ($1, $2, $3, $4, $5, '', '[]'::jsonb, COALESCE($6::timestamptz, NOW()), 'ignorada', $7::jsonb)
+      ON CONFLICT (cliente_id, sessao_id, grupo_jid, mensagem_id)
+      DO UPDATE SET
+        updated_at = NOW(),
+        metadata = (COALESCE(clonador_grupos_buffer.metadata, '{}'::jsonb) || ($7::jsonb - 'historicoResumo')) ||
+          CASE WHEN ($7::jsonb ? 'historicoResumo') THEN jsonb_build_object(
+            'historicoResumo', COALESCE(clonador_grupos_buffer.metadata -> 'historicoResumo', '{}'::jsonb) || ($7::jsonb -> 'historicoResumo')
+          ) ELSE '{}'::jsonb END
+      RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        texto_original, links, capturado_em, status, metadata, created_at, updated_at
+    `, [
+      texto(item.clienteId || item.cliente_id), texto(item.sessaoId || item.sessao_id),
+      texto(item.grupoJid || item.grupo_jid), texto(item.grupoNome || item.grupo_nome),
+      texto(item.mensagemId || item.mensagem_id), item.capturadoEm || item.capturado_em || null,
+      jsonObjeto(metadata)
+    ], query);
+    return normalizarBuffer(resultado.rows[0] || {});
+  }
+
+  async function registrarRepeticaoCaptura(item = {}) {
+    await pronto();
+    const metadata = item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata)
+      ? item.metadata
+      : {};
+    const resultado = await executar(`
+      UPDATE clonador_grupos_buffer
+         SET updated_at = NOW(),
+              metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb), '{historicoResumo}',
+                COALESCE(metadata -> 'historicoResumo', '{}'::jsonb) || jsonb_build_object(
+                  'repeticoes', jsonb_build_object(
+                    'total', CASE WHEN COALESCE(metadata #>> '{historicoResumo,repeticoes,total}', '') ~ '^[0-9]+$'
+                      THEN (metadata #>> '{historicoResumo,repeticoes,total}')::int + 1 ELSE 1 END,
+                    'ultimaEm', $5::text,
+                    'motivos', (
+                      SELECT jsonb_agg(valor ORDER BY pos)
+                        FROM (
+                          SELECT valor, MAX(pos) AS pos
+                            FROM (
+                              SELECT valor, pos
+                                FROM jsonb_array_elements_text(COALESCE(metadata #> '{historicoResumo,repeticoes,motivos}', '[]'::jsonb)) WITH ORDINALITY AS motivos(valor, pos)
+                              UNION ALL
+                              SELECT $6::text, jsonb_array_length(COALESCE(metadata #> '{historicoResumo,repeticoes,motivos}', '[]'::jsonb)) + 1
+                               WHERE NOT COALESCE(metadata #> '{historicoResumo,repeticoes,motivos}', '[]'::jsonb) ? $6::text
+                            ) todos
+                           GROUP BY valor
+                           ORDER BY MAX(pos) DESC
+                           LIMIT 8
+                        ) recentes
+                    )
+                  )
+                ), true
+              )
+       WHERE cliente_id = $1 AND sessao_id = $2 AND grupo_jid = $3 AND mensagem_id = $4
+       RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+         texto_original, links, capturado_em, status, metadata, created_at, updated_at
+    `, [
+      texto(item.clienteId || item.cliente_id), texto(item.sessaoId || item.sessao_id),
+      texto(item.grupoJid || item.grupo_jid), texto(item.mensagemId || item.mensagem_id),
+      new Date().toISOString(), texto(metadata?.historicoResumo?.repeticoes?.motivo || metadata?.motivoCodigo || "mesma_mensagem")
+    ], query);
+    return normalizarBuffer(resultado.rows[0] || {});
+  }
+
   async function reivindicarProximaCaptura(opcoes = {}) {
     await pronto();
     const clienteId = texto(opcoes.clienteId || opcoes.cliente_id);
@@ -418,7 +503,10 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
       UPDATE clonador_grupos_buffer
          SET status = $2,
              updated_at = NOW(),
-             metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+              metadata = (COALESCE(metadata, '{}'::jsonb) || ($3::jsonb - 'historicoResumo')) ||
+                CASE WHEN ($3::jsonb ? 'historicoResumo') THEN jsonb_build_object(
+                  'historicoResumo', COALESCE(metadata -> 'historicoResumo', '{}'::jsonb) || ($3::jsonb -> 'historicoResumo')
+                ) ELSE '{}'::jsonb END
        WHERE id = $1
        RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
          texto_original, links, capturado_em, status, metadata, created_at, updated_at
@@ -443,6 +531,117 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     return resultado.rows.map(normalizarBuffer);
   }
 
+  async function listarHistoricoBase(clienteId = "", filtros = {}) {
+    await pronto();
+    const limit = limitarBuffer(filtros.limit);
+    const cursorCapturadoEm = texto(filtros.cursorCapturadoEm);
+    const cursorId = Number(filtros.cursorId || 0);
+    const grupoFonte = texto(filtros.grupoFonte);
+    const dataInicio = texto(filtros.dataInicio);
+    const dataFim = texto(filtros.dataFim);
+    const tipo = texto(filtros.tipo).toLowerCase();
+    const marketplace = texto(filtros.marketplace).toLowerCase();
+    const status = texto(filtros.status).toLowerCase();
+    const resultado = await executar(`
+      SELECT id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        capturado_em, status, metadata, created_at, updated_at
+        FROM clonador_grupos_buffer b
+       WHERE b.cliente_id = $1
+         AND ($2::text = '' OR b.grupo_jid = $2)
+         AND ($3::timestamptz IS NULL OR b.capturado_em >= $3::timestamptz)
+         AND ($4::timestamptz IS NULL OR b.capturado_em <= $4::timestamptz)
+           AND ($5::text = '' OR
+                ($5 = 'erro' AND (
+                  b.status = 'erro' OR
+                  lower(COALESCE(b.metadata #>> '{historicoResumo,statusCodigo}', '')) = 'erro' OR
+                  lower(COALESCE(b.metadata #>> '{historicoResumo,resultadoAgregado}', '')) = 'erro'
+                )) OR
+                ($5 = 'repeticao' AND (
+                  b.status = 'repetida' OR
+                  COALESCE(b.metadata #>> '{historicoResumo,repeticoes,total}', '') ~ '^[1-9][0-9]*$' OR
+                  lower(COALESCE(b.metadata #>> '{historicoResumo,motivoCodigo}', '')) IN (
+                    'evento_duplicado', 'duplicidade_fila',
+                    'sem_melhoria_financeira_janela_2h', 'repetida_no_executor_2h',
+                    'destino_ja_enviado', 'fanout_destino_ja_enviado',
+                    'replay_buffer', 'mesma_mensagem', 'mensagem_duplicada',
+                    'mesma_condicao_comercial_janela_2h'
+                  )
+                )))
+          AND ($6::text = '' OR lower(COALESCE(b.metadata #>> '{historicoResumo,marketplace}', '')) = $6)
+          AND ($7::text = '' OR lower(COALESCE(
+            NULLIF(b.metadata #>> '{historicoResumo,resultadoAgregado}', ''),
+            NULLIF(b.metadata #>> '{historicoResumo,statusCodigo}', ''),
+            b.status
+          )) = $7)
+          AND ($8::timestamptz IS NULL OR (b.capturado_em, b.id) < ($8::timestamptz, $9::bigint))
+        ORDER BY b.capturado_em DESC, b.id DESC
+        LIMIT $10
+    `, [texto(clienteId), grupoFonte, dataInicio || null, dataFim || null, tipo, marketplace, status, cursorCapturadoEm || null, cursorId || 0, limit], query);
+    return resultado.rows.map(normalizarBuffer);
+  }
+
+  async function atualizarResumoHistorico(bufferId = "", clienteId = "", resumo = {}) {
+    await pronto();
+    const resultado = await executar(`
+      UPDATE clonador_grupos_buffer
+         SET updated_at = NOW(),
+             metadata = jsonb_set(
+               COALESCE(metadata, '{}'::jsonb), '{historicoResumo}',
+               COALESCE(metadata -> 'historicoResumo', '{}'::jsonb) ||
+                 CASE WHEN COALESCE(metadata #>> '{historicoResumo,statusCodigo}', '') IN ('enviada', 'parcial', 'falhou')
+                            AND COALESCE($3::jsonb ->> 'statusCodigo', '') IN ('capturada', 'processando', 'na_fila', 'repetida', 'pendente')
+                      THEN ($3::jsonb - 'statusCodigo' - 'resultadoAgregado')
+                      ELSE $3::jsonb END, true)
+       WHERE id = $1 AND cliente_id = $2
+       RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+         texto_original, links, capturado_em, status, metadata, created_at, updated_at
+    `, [Number(bufferId), texto(clienteId), jsonObjeto(resumo)], query);
+    const row = resultado.rows[0] || null;
+    return row ? normalizarBuffer(row) : null;
+  }
+
+  async function obterHistoricoBasePorId(clienteId = "", bufferId = "") {
+    await pronto();
+    const resultado = await executar(`
+      SELECT id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
+        capturado_em, status, metadata, created_at, updated_at
+        FROM clonador_grupos_buffer
+       WHERE id = $1 AND cliente_id = $2
+       LIMIT 1
+    `, [Number(bufferId), texto(clienteId)], query);
+    const row = resultado.rows[0] || null;
+    return row ? normalizarBuffer(row) : null;
+  }
+
+  async function buscarContextoHistorico(clienteId = "", bufferIds = []) {
+    await pronto();
+    const ids = [...new Set((Array.isArray(bufferIds) ? bufferIds : []).map(Number).filter(Number.isFinite))];
+    if (!ids.length) return { eventos: [], jobs: [], ofertas: [], fila: [], checkpoints: [] };
+    const buffers = await executar(`SELECT id, metadata FROM clonador_grupos_buffer WHERE cliente_id = $1 AND id = ANY($2::bigint[])`, [texto(clienteId), ids], query);
+    const eventoIds = buffers.rows.map(row => row.metadata?.clonadorGruposBridge?.eventoId || row.metadata?.historicoResumo?.eventoId).map(Number).filter(Number.isFinite);
+    const [eventos, jobs, ofertas, fila, checkpoints] = await Promise.all([
+      executar(`SELECT e.id, e.origem, e.status, e.criado_em, e.metadata
+                  FROM engine_eventos_brutos e
+                 WHERE e.cliente_id = $1 AND (
+                   (e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[])
+                    OR (e.metadata #>> '{clonadorGruposBridge,bufferId}')::text = ANY($2::text[])
+                    OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
+      executar(`SELECT j.id, j.evento_id, j.oferta_id, j.status, j.criado_em, j.atualizado_em, j.metadata
+                  FROM engine_jobs_cliente j
+                  JOIN engine_eventos_brutos e ON e.id = j.evento_id
+                  WHERE e.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
+      executar(`SELECT o.id, o.status, o.marketplace, o.titulo, o.preco, o.preco_original, o.cupom, o.beneficio_extra, o.imagem, o.criada_em, o.metadata,
+                       j.id AS job_id
+                  FROM engine_ofertas o
+                  JOIN engine_jobs_cliente j ON j.oferta_id = o.id
+                  JOIN engine_eventos_brutos e ON e.id = j.evento_id
+                  WHERE e.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
+      Promise.resolve({ rows: [] }),
+      Promise.resolve({ rows: [] })
+    ]);
+    return { eventos: eventos.rows, jobs: jobs.rows, ofertas: ofertas.rows, fila: fila.rows, checkpoints: checkpoints.rows };
+  }
+
   return {
     prepararSchema,
     lerConfig,
@@ -452,9 +651,15 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     listarDestinos,
     substituirDestinos,
     inserirBufferCaptura,
+    registrarCapturaIgnorada,
+    registrarRepeticaoCaptura,
     reivindicarProximaCaptura,
     atualizarBufferStatus,
-    listarBuffer
+    listarBuffer,
+    listarHistoricoBase,
+    atualizarResumoHistorico,
+    obterHistoricoBasePorId,
+    buscarContextoHistorico
   };
 }
 

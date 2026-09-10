@@ -25,6 +25,7 @@ function criarRepository({ criar = true, iniciar = true, concluir = true, falhar
       if (entrada.paraEstado === "envio_iniciado") return { transicionado: iniciar };
       if (entrada.paraEstado === "enviado") return { transicionado: concluir };
       if (entrada.paraEstado === "falha_confirmada") return { transicionado: falhar };
+      if (entrada.paraEstado === "resultado_ambiguo") return { transicionado: true };
       return { transicionado: false };
     },
     async registrarCreditoDebitadoCheckpointEntrega(entrada) {
@@ -120,6 +121,54 @@ async function testarIdsTelegramEDiscord() {
   }
 }
 
+async function testarTelegramExigeEvidenciaMinima() {
+  const confirmadoRepo = criarRepository();
+  const confirmado = criarCheckpointEntregaFuncional({ repository: confirmadoRepo, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
+  const enviado = await confirmado.executar({
+    ...entrada({ canal: "telegram", destinoChave: "telegram:destino", alvoChave: "telegram:alvo", exigirProviderMessageId: true }),
+    enviar: async () => ({ valor: { ok: true }, providerMessageId: "12345" })
+  });
+  assert.strictEqual(enviado.resultado, "enviado", "2xx Telegram com message_id confirma envio");
+
+  const semIdRepo = criarRepository();
+  const semId = criarCheckpointEntregaFuncional({ repository: semIdRepo, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
+  const ambiguo = await semId.executar({
+    ...entrada({ canal: "telegram", destinoChave: "telegram:destino", alvoChave: "telegram:alvo", exigirProviderMessageId: true }),
+    enviar: async () => ({ valor: { ok: true }, providerMessageId: "" })
+  });
+  assert.strictEqual(ambiguo.ok, false);
+  assert.strictEqual(ambiguo.resultado, "resposta_sem_evidencia_minima", "2xx sem message_id nao vira enviado");
+  assert(semIdRepo.chamadas.some(item => item.entrada?.paraEstado === "resultado_ambiguo" && item.entrada?.motivoCodigo === "provider_message_id_ausente"));
+  assert(!semIdRepo.chamadas.some(item => item.entrada?.paraEstado === "enviado"), "sem evidencia minima nao persiste enviado");
+}
+
+async function testarClassificacaoTelegramConservadora() {
+  const executarFalha = async (erro, postIniciado) => {
+    const repository = criarRepository();
+    const executor = criarCheckpointEntregaFuncional({ repository, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
+    const resultado = await executor.executar({
+      ...entrada({ canal: "telegram", destinoChave: "telegram:destino", alvoChave: "telegram:alvo" }),
+      falhaConfirmada: falha => Number(falha?.response?.status || 0) >= 400 && Number(falha?.response?.status || 0) < 500,
+      classificarFalha: falha => {
+        const statusHttp = Number(falha?.response?.status || 0) || undefined;
+        return !postIniciado
+          ? { confirmada: true, motivoCodigo: "telegram_falha_local_pre_post", classificacao: "local_pre_post" }
+          : { confirmada: Boolean(statusHttp && statusHttp >= 400 && statusHttp < 500), motivoCodigo: statusHttp ? `telegram_http_${statusHttp}` : "telegram_resultado_ambiguo", classificacao: statusHttp && statusHttp < 500 ? "http_4xx" : "pos_efeito_ou_desconhecido", statusHttp };
+      },
+      enviar: async () => { throw erro; }
+    });
+    return { resultado, chamadas: repository.chamadas };
+  };
+  const quatroxx = await executarFalha(Object.assign(new Error("400"), { response: { status: 400 } }), true);
+  assert.strictEqual(quatroxx.resultado.resultado, "falha_confirmada");
+  const cincocc = await executarFalha(Object.assign(new Error("500"), { response: { status: 500 } }), true);
+  assert.strictEqual(cincocc.resultado.resultado, "envio_iniciado_ambiguo");
+  const timeout = await executarFalha(new Error("timeout"), true);
+  assert.strictEqual(timeout.resultado.resultado, "envio_iniciado_ambiguo");
+  const local = await executarFalha(new Error("falha local"), false);
+  assert.strictEqual(local.resultado.resultado, "falha_confirmada");
+}
+
 async function testarFalhaAmbiguaEConfirmada() {
   const ambiguaRepo = criarRepository();
   const ambigua = criarCheckpointEntregaFuncional({ repository: ambiguaRepo, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
@@ -130,6 +179,9 @@ async function testarFalhaAmbiguaEConfirmada() {
   });
   assert.strictEqual(resultadoAmbiguo.resultado, "envio_iniciado_ambiguo");
   assert(!ambiguaRepo.chamadas.some(item => item.entrada?.paraEstado === "falha_confirmada"), "timeout nao vira falha confirmada");
+  const ambiguaPersistida = ambiguaRepo.chamadas.find(item => item.entrada?.paraEstado === "resultado_ambiguo");
+  assert(ambiguaPersistida, "ambiguidade e' persistida sem texto externo");
+  assert.strictEqual(ambiguaPersistida.entrada.classificacao, "pos_efeito_ou_desconhecido");
 
   const confirmadaRepo = criarRepository();
   const confirmada = criarCheckpointEntregaFuncional({ repository: confirmadaRepo, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
@@ -140,7 +192,9 @@ async function testarFalhaAmbiguaEConfirmada() {
     falhaConfirmada: erro => erro?.checkpointFalhaConfirmada === true
   });
   assert.strictEqual(resultadoConfirmado.resultado, "falha_confirmada");
-  assert(confirmadaRepo.chamadas.some(item => item.entrada?.paraEstado === "falha_confirmada"));
+  const falha = confirmadaRepo.chamadas.find(item => item.entrada?.paraEstado === "falha_confirmada");
+  assert(falha);
+  assert.strictEqual(falha.entrada.classificacao, "pre_efeito");
 }
 
 async function testarCreditoSomenteComoEvidencia() {
@@ -186,6 +240,8 @@ function testarIdentidadesEstaveis() {
   await testarPreparadoRetomaMesmoAttemptSobAdvisory();
   await testarOrdemESucessoComProviderId();
   await testarIdsTelegramEDiscord();
+  await testarTelegramExigeEvidenciaMinima();
+  await testarClassificacaoTelegramConservadora();
   await testarFalhaAmbiguaEConfirmada();
   await testarCreditoSomenteComoEvidencia();
   await testarTelemetriaNaoVazaAlvo();

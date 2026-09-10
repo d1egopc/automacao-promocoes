@@ -80,9 +80,12 @@ function detectarMarketplaceJob(job = {}, evento = {}, links = []) {
   return "";
 }
 
-async function finalizarErro(job, motivo, detalhes = {}, etapa = "diagnostico_final") {
+async function finalizarErro(job, motivo, detalhes = {}, etapa = "diagnostico_final", observarHistoricoClonadorTerminal = null) {
   await registrarProcessamento(job.id, "diagnostico_final", "erro", motivo, detalhes);
-  await marcarJobStatus(job.id, "erro", motivo, { statusEsperado: "processando" });
+  const transicao = await marcarJobStatus(job.id, "erro", motivo, { statusEsperado: "processando" });
+  if (transicao?.ok === true && typeof observarHistoricoClonadorTerminal === "function") {
+    try { await observarHistoricoClonadorTerminal({ job, motivo, etapa }); } catch (_) {}
+  }
   return {
     ok: false,
     status: "erro",
@@ -112,7 +115,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
       clientesValidosTotal: Array.isArray(contexto.clientesValidos) ? contexto.clientesValidos.length : 0,
       motivos: avaliacaoClienteCedo.motivos || [],
       skipCedo: true
-    }, "validar_cliente");
+    }, "validar_cliente", contexto.observarHistoricoClonadorTerminal);
   }
 
   const eventoResultado = await carregarEventoBruto(job.evento_id);
@@ -125,7 +128,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
     return finalizarErro(job, "evento_nao_encontrado", {
       eventoId: job.evento_id,
       erro: eventoResultado.erro || ""
-    }, "carregar_evento");
+    }, "carregar_evento", contexto.observarHistoricoClonadorTerminal);
   }
 
   const linksResultado = await carregarLinksEvento(job.evento_id);
@@ -138,7 +141,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
     return finalizarErro(job, "links_nao_carregados", {
       eventoId: job.evento_id,
       erro: linksResultado.erro || ""
-    }, "carregar_links");
+    }, "carregar_links", contexto.observarHistoricoClonadorTerminal);
   }
 
   const marketplace = detectarMarketplaceJob(job, eventoResultado.evento, linksResultado.links);
@@ -148,7 +151,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
   });
 
   if (!marketplace) {
-    return finalizarErro(job, "marketplace_nao_detectado", { eventoId: job.evento_id }, "detectar_marketplace");
+    return finalizarErro(job, "marketplace_nao_detectado", { eventoId: job.evento_id }, "detectar_marketplace", contexto.observarHistoricoClonadorTerminal);
   }
 
   const avaliacaoCliente = avaliarClienteEngine(job, contexto);
@@ -163,7 +166,7 @@ async function processarJobEngine(job = {}, contexto = {}) {
       clienteId: job.cliente_id,
       clientesValidosTotal: Array.isArray(contexto.clientesValidos) ? contexto.clientesValidos.length : 0,
       motivos: avaliacaoCliente.motivos || []
-    }, "validar_cliente");
+    }, "validar_cliente", contexto.observarHistoricoClonadorTerminal);
   }
 
   await registrarProcessamento(job.id, "diagnostico_final", "ok", "job_diagnosticado", {

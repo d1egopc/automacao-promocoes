@@ -1,5 +1,7 @@
 "use strict";
 
+const { criarHistoricoClonador } = require("./historico.service");
+
 const MAX_FONTES_ATIVAS = 4;
 const STATUS_BUFFER = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
 
@@ -133,6 +135,12 @@ function deduplicarDestinos(destinoIds = []) {
 
 function criarServicoClonadorGrupos(deps = {}) {
   const repo = deps.repository;
+  const historico = deps.historico || criarHistoricoClonador({
+    repository: repo,
+    resolverFilaPorIds: deps.resolverFilaPorIds,
+    listarFila: deps.listarFila,
+    listarCheckpoints: deps.listarCheckpoints
+  });
   if (!repo) throw new Error("repository_obrigatorio");
 
   function clienteAtual(req) {
@@ -331,6 +339,36 @@ function criarServicoClonadorGrupos(deps = {}) {
     };
   }
 
+  async function listarHistorico(req, query = {}) {
+    exigirFeature(req);
+    const clienteId = exigirCliente(req);
+    return { ok: true, ...(await historico.listar(clienteId, query)) };
+  }
+
+  async function obterHistorico(req, bufferId = "") {
+    exigirFeature(req);
+    const clienteId = exigirCliente(req);
+    const item = await historico.detalhe(clienteId, bufferId);
+    if (!item) throw erro("historico_nao_encontrado", 404);
+    return { ok: true, item };
+  }
+
+  const MOTIVOS_IGNORADOS_AUDITAVEIS = new Set(["mensagem_propria"]);
+
+  async function registrarIgnoradaSePossivel({ clienteId, sessaoId, grupoJid, grupoNome = "", mensagemId, motivo, capturadoEm }) {
+    if (!MOTIVOS_IGNORADOS_AUDITAVEIS.has(texto(motivo).toLowerCase())) return null;
+    if (!clienteId || !sessaoId || !grupoJid || !mensagemId || typeof repo.registrarCapturaIgnorada !== "function") return null;
+    return repo.registrarCapturaIgnorada({
+      clienteId, sessaoId, grupoJid, grupoNome, mensagemId, capturadoEm,
+      metadata: { historicoResumo: {
+        ignorado: { motivoCodigo: texto(motivo).toLowerCase(), registradoEm: new Date().toISOString() },
+        statusCodigo: "nao_elegivel",
+        resultadoAgregado: "nao_elegivel",
+        motivoCodigo: texto(motivo).toLowerCase()
+      } }
+    });
+  }
+
   async function capturarMensagemWhatsapp(entrada = {}) {
     const logger = deps.logger || console;
     const clienteId = texto(entrada.clienteId);
@@ -342,7 +380,6 @@ function criarServicoClonadorGrupos(deps = {}) {
     try {
       if (!clienteId || !sessaoId) return { ok: true, capturada: false, motivo: "workspace_ou_sessao_ausente" };
       if (!grupoJid.endsWith("@g.us")) return { ok: true, capturada: false, motivo: "nao_grupo" };
-      if (mensagem?.key?.fromMe === true) return { ok: true, capturada: false, motivo: "mensagem_propria" };
       if (!mensagemId) return { ok: true, capturada: false, motivo: "mensagem_id_ausente" };
       if (!clienteTemFeatureRuntime(clienteId)) return { ok: true, capturada: false, motivo: "recurso_indisponivel" };
 
@@ -356,6 +393,10 @@ function criarServicoClonadorGrupos(deps = {}) {
         texto(item.grupoJid) === grupoJid
       );
       if (!fonte) return { ok: true, capturada: false, motivo: "fonte_nao_selecionada" };
+      if (mensagem?.key?.fromMe === true) {
+        await registrarIgnoradaSePossivel({ clienteId, sessaoId, grupoJid, grupoNome: fonte.grupoNome, mensagemId, motivo: "mensagem_propria", capturadoEm: entrada.capturadoEm });
+        return { ok: true, capturada: false, motivo: "mensagem_propria" };
+      }
 
       const textoExtraido = typeof deps.extrairTextoMensagem === "function"
         ? deps.extrairTextoMensagem(mensagem)
@@ -391,6 +432,15 @@ function criarServicoClonadorGrupos(deps = {}) {
         }));
       }
 
+      if (!resultado.inserido) {
+        if (typeof repo.registrarRepeticaoCaptura === "function") {
+          await repo.registrarRepeticaoCaptura({
+            clienteId, sessaoId, grupoJid, mensagemId,
+            metadata: { historicoResumo: { repeticoes: { motivoCodigo: "mesma_mensagem" } } }
+          });
+        }
+      }
+
       return {
         ok: true,
         capturada: resultado.inserido === true,
@@ -421,6 +471,8 @@ function criarServicoClonadorGrupos(deps = {}) {
     listarDestinosSelecionados,
     salvarDestinos,
     listarBuffer,
+    listarHistorico,
+    obterHistorico,
     capturarMensagemWhatsapp
   };
 }

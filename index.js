@@ -7828,18 +7828,26 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       alvo = {},
       enviar,
       falhaConfirmada,
-      permitirNovaTentativaAposFalhaConfirmada = false
-    } = {}) => checkpointEntregaFuncionalFila.executar({
-      clienteId,
-      oferta,
-      destinoChave: chaveDestinoEntrega(destino),
-      alvoChave: chaveAlvoEntrega(canal, alvo),
-      canal,
-      advisoryHandle: opcoes.advisoryHandle || null,
-      enviar,
-      falhaConfirmada,
-      permitirNovaTentativaAposFalhaConfirmada
-    });
+      classificarFalha,
+      permitirNovaTentativaAposFalhaConfirmada = false,
+      exigirProviderMessageId = false
+    } = {}) => {
+      const checkpoint = await checkpointEntregaFuncionalFila.executar({
+        clienteId,
+        oferta,
+        destinoChave: chaveDestinoEntrega(destino),
+        alvoChave: chaveAlvoEntrega(canal, alvo),
+        canal,
+        advisoryHandle: opcoes.advisoryHandle || null,
+        enviar,
+        falhaConfirmada,
+        classificarFalha,
+        permitirNovaTentativaAposFalhaConfirmada,
+        exigirProviderMessageId
+      });
+      await atualizarResumoCheckpointClonador({ clienteId, oferta, contexto: checkpoint?.contexto });
+      return checkpoint;
+    };
     const registrarCreditoCheckpoint = async (checkpoint) => {
       const debitou = debitarCreditos(clienteId, 1);
       if (debitou === true && checkpoint?.contexto) {
@@ -8299,11 +8307,19 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               });
               erro.checkpointFalhaConfirmada = classificacaoCheckpointDiscord === "falha_confirmada";
               erro.checkpointMotivoTecnico = motivoCheckpointDiscord;
+              erro.checkpointStatusHttp = Number(resultadoDiscord?.statusHttp || 0) || undefined;
+              erro.checkpointClassificacao = classificacaoCheckpointDiscord === "falha_confirmada" ? "pre_efeito" : "pos_efeito_ou_desconhecido";
               throw erro;
             }
             return { valor: resultadoDiscord, providerMessageId: resultadoDiscord.messageId || "" };
           },
-          falhaConfirmada: erro => erro?.checkpointFalhaConfirmada === true
+          falhaConfirmada: erro => erro?.checkpointFalhaConfirmada === true,
+          classificarFalha: erro => ({
+            confirmada: erro?.checkpointFalhaConfirmada === true,
+            motivoCodigo: erro?.checkpointMotivoTecnico || "discord_resultado_desconhecido",
+            classificacao: erro?.checkpointClassificacao || "pos_efeito_ou_desconhecido",
+            statusHttp: erro?.checkpointStatusHttp
+          })
         });
         const resultadoDiscord = checkpointDiscord.resposta || null;
         ultimoResultadoDiscord = resultadoDiscord;
@@ -8631,16 +8647,37 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         });
         let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
         let erroImagemEnvio = "";
+        let postTelegramIniciado = false;
         const falhaTelegramConfirmada = (erro) => {
           const statusHttp = Number(erro?.response?.status || 0);
-          return statusHttp >= 400 && statusHttp < 600;
+          // 5xx deixa a fronteira externa ambigua: nao confirma ausencia de
+          // efeito e portanto nao pode habilitar uma nova tentativa.
+          return statusHttp >= 400 && statusHttp < 500;
+        };
+        const classificarFalhaTelegram = (erro) => {
+          const statusHttp = Number(erro?.response?.status || 0) || undefined;
+          if (!postTelegramIniciado) return {
+            confirmada: true,
+            motivoCodigo: "telegram_falha_local_pre_post",
+            classificacao: "local_pre_post",
+            statusHttp: undefined
+          };
+          return {
+            confirmada: Boolean(statusHttp && statusHttp >= 400 && statusHttp < 500),
+            motivoCodigo: statusHttp ? `telegram_http_${statusHttp}` : "telegram_resultado_ambiguo",
+            classificacao: statusHttp && statusHttp >= 400 && statusHttp < 500 ? "http_4xx" : "pos_efeito_ou_desconhecido",
+            statusHttp
+          };
         };
         const enviarTextoTelegramComCheckpoint = async ({ permitirNovaTentativaAposFalhaConfirmada = false } = {}) => executarAlvoComCheckpoint({
           canal: "telegram",
           alvo: tel,
           permitirNovaTentativaAposFalhaConfirmada,
           falhaConfirmada: falhaTelegramConfirmada,
+          classificarFalha: classificarFalhaTelegram,
+          exigirProviderMessageId: true,
           enviar: async () => {
+            postTelegramIniciado = true;
             const resposta = await axios.post(
               `https://api.telegram.org/bot${tel.botToken}/sendMessage`,
               montarPayloadTextoTelegramPorTipoMidia({
@@ -8669,13 +8706,17 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               imagemOrigem: oferta.imagemOrigem || ""
             }));
           }
+          postTelegramIniciado = false;
           checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint();
         } else {
           checkpointEnvioTelegram = await executarAlvoComCheckpoint({
             canal: "telegram",
             alvo: tel,
-            falhaConfirmada: falhaTelegramConfirmada,
-            enviar: async () => {
+          falhaConfirmada: falhaTelegramConfirmada,
+          classificarFalha: classificarFalhaTelegram,
+          exigirProviderMessageId: true,
+          enviar: async () => {
+              postTelegramIniciado = true;
               const resposta = await axios.post(
                 `https://api.telegram.org/bot${tel.botToken}/sendPhoto`,
                 {
@@ -8705,6 +8746,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               imagemStatus: oferta.imagemStatus || "",
               imagemOrigem: oferta.imagemOrigem || ""
             }));
+            postTelegramIniciado = false;
             checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint({
               permitirNovaTentativaAposFalhaConfirmada: true
             });
@@ -13707,7 +13749,8 @@ app.post("/engine/processar-pendentes", async (req, res) => {
     const resultado = await processarJobsPendentesEngine({
       limite: req.body?.limite || 20,
       clientesValidos: listarClientesValidosEngineProcessor(),
-      avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional
+      avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
+      observarHistoricoClonadorTerminal
     });
 
     return res.status(resultado.ok ? 200 : 503).json(resultado);
@@ -13752,7 +13795,8 @@ app.post("/engine/validar-jobs", async (req, res) => {
       limite: req.body?.limite || 20,
       clientesValidos: listarClientesValidosEngineProcessor(),
       integracoesPorCliente,
-      marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor()
+      marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor(),
+      observarHistoricoClonadorTerminal
     });
 
     return res.status(resultado.ok ? 200 : 503).json(resultado);
@@ -13840,7 +13884,9 @@ app.post("/engine/importar-prontos", async (req, res) => {
         gerarLinkAfiliadoMercadoLivre,
         resolverLinkOriginalRadar,
         importarProdutoKabumViaAwin,
-        gerarDeepLinkAwin
+        gerarDeepLinkAwin,
+        observarHistoricoClonadorTerminal,
+        observarHistoricoClonadorOferta
       }
     });
 
@@ -13880,6 +13926,7 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
         writeClienteJson,
         getClientePath,
         adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        atualizarResumoHistoricoClonador,
         aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
         getPlanoCliente: resolverPlanoManualV2Scheduler,
         gateAtivo: {
@@ -22422,6 +22469,10 @@ const clonadorGruposService = criarServicoClonadorGrupos({
   listarDestinosOficiais: (clienteId) => normalizarDestinosContrato(
     obterDestinosInteligentesCliente(clienteId, configsPorCliente?.[clienteId] || config)
   ),
+  // Leitura observadora e limitada aos IDs ja correlacionados no resumo do
+  // buffer; nunca percorre o backlog da fila para montar o historico.
+  resolverFilaPorIds: (clienteId, filaItemIds = []) => [...new Set(filaItemIds.map(String).filter(Boolean))]
+    .map(id => filaStore.resolverPorId(clienteId, id)).filter(Boolean),
   extrairTextoMensagem: extrairTextoMensagemRadar,
   extrairLinksMensagem: extrairLinksRadar,
   logger: console
@@ -22432,6 +22483,94 @@ const clonadorGruposBridge = criarBridgeClonadorGrupos({
   registrarEventoBruto,
   logger: console
 });
+async function atualizarResumoHistoricoClonador({ clienteId, bufferId, resumo } = {}) {
+  if (!clienteId || !bufferId || typeof clonadorGruposRepository.atualizarResumoHistorico !== "function") return null;
+  return clonadorGruposRepository.atualizarResumoHistorico(bufferId, clienteId, resumo || {});
+}
+function bufferIdClonadorDaOferta(oferta = {}) {
+  const fontes = [oferta.metadata, oferta.job_metadata?.metadataEvento, oferta.evento_metadata];
+  for (const fonte of fontes) {
+    const bufferId = fonte?.clonadorGrupos?.bufferId;
+    if (bufferId) return String(bufferId);
+  }
+  return "";
+}
+function fontesHistoricoClonador(item = {}) {
+  const metadata = item?.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  return [metadata, metadata.metadataEvento, item?.evento_metadata, item?.job_metadata?.metadataEvento]
+    .filter(fonte => fonte && typeof fonte === "object");
+}
+function bufferIdClonadorDoJob(job = {}) {
+  for (const fonte of fontesHistoricoClonador(job)) {
+    if (fonte?.clonadorGrupos?.bufferId) return String(fonte.clonadorGrupos.bufferId);
+  }
+  return "";
+}
+function comercialCapturadoClonador(item = {}) {
+  for (const fonte of fontesHistoricoClonador(item)) {
+    if (fonte?.comercialCapturado && typeof fonte.comercialCapturado === "object") return fonte.comercialCapturado;
+  }
+  return {};
+}
+async function observarHistoricoClonadorTerminal({ job = {}, motivo = "", etapa = "" } = {}) {
+  const bufferId = bufferIdClonadorDoJob(job);
+  if (!bufferId) return;
+  try {
+    await atualizarResumoHistoricoClonador({ clienteId: job.cliente_id || job.clienteId, bufferId, resumo: {
+      eventoId: job.evento_id ? String(job.evento_id) : "", jobIds: job.id ? [String(job.id)] : [],
+      statusCodigo: "erro", resultadoAgregado: "erro",
+      motivoCodigo: String(motivo || "erro").trim().slice(0, 120),
+      etapa: String(etapa || "").trim().slice(0, 80), ultimoAtualizadoEm: new Date().toISOString()
+    } });
+  } catch (erro) {
+    console.log("[CLONADOR-HISTORICO-TERMINAL-OBSERVADOR]", { clienteId: job.cliente_id || "", bufferId, motivo: erro?.codigo || erro?.message || "falha_snapshot" });
+  }
+}
+async function observarHistoricoClonadorOferta({ job = {}, oferta = {}, ofertaId = "" } = {}) {
+  const bufferId = bufferIdClonadorDoJob(job) || bufferIdClonadorDaOferta(oferta);
+  if (!bufferId) return;
+  const capturado = comercialCapturadoClonador(job);
+  const resumo = {
+    eventoId: job.evento_id ? String(job.evento_id) : "", jobIds: job.id ? [String(job.id)] : [],
+    ofertaIds: (ofertaId || oferta.id) ? [String(ofertaId || oferta.id)] : [],
+    marketplace: String(oferta.marketplace || job.marketplace || job.marketplace_detectado || "").trim().slice(0, 40),
+    titulo: String(oferta.titulo || capturado.tituloCapturado || "").trim().slice(0, 180),
+    imagem: String(oferta.imagem || oferta.imagemUrl || "").trim().slice(0, 500),
+    statusCodigo: "oferta_criada", resultadoAgregado: "oferta_criada", ultimoAtualizadoEm: new Date().toISOString()
+  };
+  if (capturado.precoAtual !== undefined && capturado.precoAtual !== null) resumo.preco = capturado.precoAtual;
+  if (capturado.precoAnterior !== undefined && capturado.precoAnterior !== null) resumo.precoAnterior = capturado.precoAnterior;
+  if (capturado.cupom !== undefined) resumo.cupomPresente = Boolean(String(capturado.cupom || "").trim());
+  if (capturado.beneficioTexto !== undefined) resumo.beneficioPresente = Boolean(String(capturado.beneficioTexto || "").trim());
+  try {
+    await atualizarResumoHistoricoClonador({ clienteId: job.cliente_id || job.clienteId || oferta.cliente_id, bufferId, resumo });
+  } catch (erro) {
+    console.log("[CLONADOR-HISTORICO-OFERTA-OBSERVADOR]", { clienteId: job.cliente_id || oferta.cliente_id || "", bufferId, motivo: erro?.codigo || erro?.message || "falha_snapshot" });
+  }
+}
+async function atualizarResumoCheckpointClonador({ clienteId, oferta, contexto } = {}) {
+  const bufferId = bufferIdClonadorDaOferta(oferta);
+  const filaItemId = contexto?.filaItemId;
+  if (!bufferId || !filaItemId) return;
+  try {
+    const checkpoints = await filaCheckpointsEntregaRepository.listarCheckpointsEntregaPorItem({ clienteId, filaItemId });
+    if (!checkpoints.length) return;
+    const estados = checkpoints.map(item => item.estado);
+    const enviados = estados.filter(estado => estado === "enviado").length;
+    const falharam = estados.filter(estado => estado === "falha_confirmada").length;
+    const pendentes = estados.length - enviados - falharam;
+    const resultadoAgregado = enviados === estados.length ? "enviada"
+      : enviados > 0 ? "parcial"
+      : falharam === estados.length ? "falhou" : "pendente";
+    await atualizarResumoHistoricoClonador({ clienteId, bufferId, resumo: {
+      filaItemIds: [String(filaItemId)], statusCodigo: resultadoAgregado,
+      resultadoAgregado, destinos: { total: estados.length, enviados, pendentes, falharam },
+      ultimoAtualizadoEm: new Date().toISOString()
+    } });
+  } catch (erro) {
+    console.log("[CLONADOR-HISTORICO-CHECKPOINT-OBSERVADOR]", { clienteId, bufferId, motivo: erro?.codigo || erro?.message || "falha_snapshot" });
+  }
+}
 
 app.use("/clonador-grupos", criarRotasClonadorGrupos({
   service: clonadorGruposService,
@@ -29899,9 +30038,13 @@ initEngineDatabase()
       intervaloMs: 120000,
       processarJobsPendentesEngine: (opcoes = {}) => processarJobsPendentesEngine({
         ...opcoes,
-        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional
+        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
+        observarHistoricoClonadorTerminal
       }),
-      validarJobsDiagnosticadosEngine,
+      validarJobsDiagnosticadosEngine: (opcoes = {}) => validarJobsDiagnosticadosEngine({
+        ...opcoes,
+        observarHistoricoClonadorTerminal
+      }),
       importarJobsProntosEngine,
       distribuirOfertasEngine,
       getClientesValidos: listarClientesValidosEngineProcessor,
@@ -29917,7 +30060,9 @@ initEngineDatabase()
         importarProdutoKabumViaAwin,
         gerarDeepLinkAwin,
         consultarProdutoMagalu,
-        gerarLinkAfiliadoMagaluSeguro
+        gerarLinkAfiliadoMagaluSeguro,
+        observarHistoricoClonadorTerminal,
+        observarHistoricoClonadorOferta
       }),
       getContextoDistribuidor: () => ({
         clientesValidos: listarClientesValidosEngineProcessor(),
@@ -29931,6 +30076,7 @@ initEngineDatabase()
         writeClienteJson,
         getClientePath,
         adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        atualizarResumoHistoricoClonador,
         aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
         getPlanoCliente: resolverPlanoManualV2Scheduler,
         gateAtivo: {

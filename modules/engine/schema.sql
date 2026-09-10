@@ -295,10 +295,16 @@ CREATE TABLE IF NOT EXISTS fila_checkpoints_entrega (
   )),
   provider_message_id TEXT,
   credito_debitado BOOLEAN,
+  motivo_codigo TEXT,
+  classificacao TEXT,
+  status_http INTEGER,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (cliente_id, fila_item_id, destino_chave, alvo_chave)
 );
+ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS motivo_codigo TEXT;
+ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS classificacao TEXT;
+ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS status_http INTEGER;
 
 -- Cursor minimo e duravel da varredura bounded do recovery. Nao e lease,
 -- TTL, heartbeat nem autoridade sobre estado da fila ou da entrega.

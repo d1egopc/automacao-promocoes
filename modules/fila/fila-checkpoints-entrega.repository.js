@@ -50,10 +50,16 @@ CREATE TABLE IF NOT EXISTS ${nome} (
   )),
   provider_message_id TEXT,
   credito_debitado BOOLEAN,
+  motivo_codigo TEXT,
+  classificacao TEXT,
+  status_http INTEGER,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (cliente_id, fila_item_id, destino_chave, alvo_chave)
-);`;
+);
+ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS motivo_codigo TEXT;
+ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS classificacao TEXT;
+ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS status_http INTEGER;`;
 }
 
 const SQL_SCHEMA_FILA_CHECKPOINTS_ENTREGA = sqlSchemaCheckpointEntrega();
@@ -127,6 +133,29 @@ function normalizarCreditoDebitado(valor) {
   return valor;
 }
 
+function normalizarMotivoCodigo(valor) {
+  if (valor === undefined) return undefined;
+  const codigo = texto(valor).toLowerCase();
+  if (!codigo) return null;
+  if (!/^[a-z0-9_:.\-]+$/.test(codigo)) throw new Error("fila_checkpoint_motivo_codigo_invalido");
+  return codigo.slice(0, 120);
+}
+
+function normalizarClassificacao(valor) {
+  if (valor === undefined) return undefined;
+  const classificacao = texto(valor).toLowerCase();
+  if (!classificacao) return null;
+  if (!/^[a-z0-9_:.\-]+$/.test(classificacao)) throw new Error("fila_checkpoint_classificacao_invalida");
+  return classificacao.slice(0, 80);
+}
+
+function normalizarStatusHttp(valor) {
+  if (valor === undefined || valor === null || valor === "") return valor === undefined ? undefined : null;
+  const numero = Number(valor);
+  if (!Number.isInteger(numero) || numero < 100 || numero > 599) throw new Error("fila_checkpoint_status_http_invalido");
+  return numero;
+}
+
 function normalizarTransicao({ deEstado = "", paraEstado = "" } = {}) {
   const de = normalizarEstado(deEstado);
   const para = normalizarEstado(paraEstado);
@@ -148,6 +177,9 @@ function normalizarLinha(linha = {}, chave = {}) {
     estado: linha.estado || "",
     providerMessageId: linha.provider_message_id || null,
     creditoDebitado: typeof linha.credito_debitado === "boolean" ? linha.credito_debitado : null,
+    motivoCodigo: linha.motivo_codigo || null,
+    classificacao: linha.classificacao || null,
+    statusHttp: Number.isInteger(linha.status_http) ? linha.status_http : null,
     criadoEm: linha.criado_em || null,
     atualizadoEm: linha.atualizado_em || null
   };
@@ -180,7 +212,7 @@ async function criarCheckpointEntrega(entrada = {}, opcoes = {}) {
      ) VALUES ($1, $2, $3, $4, $5, 'preparado')
      ON CONFLICT (cliente_id, fila_item_id, destino_chave, alvo_chave) DO NOTHING
      RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-               estado, provider_message_id, credito_debitado, criado_em, atualizado_em`,
+               estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
     [...paramsChave(chave), attemptId]
   ));
   return {
@@ -194,7 +226,7 @@ async function obterCheckpointEntrega(entrada = {}, opcoes = {}) {
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = $2
         AND destino_chave = $3 AND alvo_chave = $4
@@ -204,8 +236,8 @@ async function obterCheckpointEntrega(entrada = {}, opcoes = {}) {
   return resultado.rows?.[0] ? normalizarLinha(resultado.rows[0], chave) : null;
 }
 
-function normalizarFilaItemIds(filaItemIds = [], limite = 8) {
-  const quantidade = Math.max(1, Math.min(32, Number(limite) || 8));
+function normalizarFilaItemIds(filaItemIds = [], limite = 100) {
+  const quantidade = Math.max(1, Math.min(100, Number(limite) || 100));
   const vistos = new Set();
   const ids = [];
   for (const candidato of Array.isArray(filaItemIds) ? filaItemIds : []) {
@@ -290,7 +322,7 @@ async function selecionarFatiaRecoveryCheckpoint({ clienteId = "", filaItemIds =
 
 // A fila e a autoridade dos candidatos. Esta leitura recebe somente ids de
 // itens atualmente processando, evitando varrer o historico de checkpoints.
-async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = [], limite = 8 } = {}, opcoes = {}) {
+async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = [], limite = 100 } = {}, opcoes = {}) {
   const cliente = texto(normalizarClienteId(texto(clienteId)));
   if (!cliente) throw new Error("fila_checkpoint_cliente_id_ausente");
   const ids = normalizarFilaItemIds(filaItemIds, limite);
@@ -298,7 +330,7 @@ async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = 
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = ANY($2::text[])
       ORDER BY fila_item_id ASC, criado_em ASC, destino_chave ASC, alvo_chave ASC`,
@@ -315,7 +347,7 @@ async function listarCheckpointsEntregaPorItem({ clienteId = "", filaItemId = ""
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = $2`,
     [cliente, item]
@@ -332,6 +364,9 @@ async function transicionarCheckpointEntrega(entrada = {}, opcoes = {}) {
   const { deEstado, paraEstado } = normalizarTransicao(entrada);
   const providerMessageId = normalizarProviderMessageId(entrada.providerMessageId);
   const creditoDebitado = normalizarCreditoDebitado(entrada.creditoDebitado);
+  const motivoCodigo = normalizarMotivoCodigo(entrada.motivoCodigo);
+  const classificacao = normalizarClassificacao(entrada.classificacao);
+  const statusHttp = normalizarStatusHttp(entrada.statusHttp);
   if (paraEstado !== "enviado" && (providerMessageId !== null || creditoDebitado !== undefined)) {
     throw new Error("fila_checkpoint_evidencia_apenas_envio_confirmado");
   }
@@ -341,13 +376,16 @@ async function transicionarCheckpointEntrega(entrada = {}, opcoes = {}) {
         SET estado = $7,
             provider_message_id = CASE WHEN $8::text IS NULL THEN provider_message_id ELSE $8 END,
             credito_debitado = CASE WHEN $9::boolean IS NULL THEN credito_debitado ELSE $9 END,
+            motivo_codigo = CASE WHEN $10::text IS NULL THEN motivo_codigo ELSE $10 END,
+            classificacao = CASE WHEN $11::text IS NULL THEN classificacao ELSE $11 END,
+            status_http = CASE WHEN $12::integer IS NULL THEN status_http ELSE $12 END,
             atualizado_em = NOW()
       WHERE cliente_id = $1 AND fila_item_id = $2
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = $6
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, criado_em, atualizado_em`,
-    [...paramsChave(chave), attemptId, deEstado, paraEstado, providerMessageId, creditoDebitado ?? null]
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
+    [...paramsChave(chave), attemptId, deEstado, paraEstado, providerMessageId, creditoDebitado ?? null, motivoCodigo ?? null, classificacao ?? null, statusHttp ?? null]
   ));
   return {
     transicionado: resultado.rowCount > 0,
@@ -370,12 +408,15 @@ async function prepararNovaTentativaCheckpointEntrega(entrada = {}, opcoes = {})
             estado = 'preparado',
             provider_message_id = NULL,
             credito_debitado = NULL,
+            motivo_codigo = NULL,
+            classificacao = NULL,
+            status_http = NULL,
             atualizado_em = NOW()
       WHERE cliente_id = $1 AND fila_item_id = $2
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = 'falha_confirmada'
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, criado_em, atualizado_em`,
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
     [...paramsChave(chave), attemptIdAnterior, attemptId]
   ));
   return {
@@ -400,7 +441,7 @@ async function registrarCreditoDebitadoCheckpointEntrega(entrada = {}, opcoes = 
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = 'enviado'
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, criado_em, atualizado_em`,
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
     [...paramsChave(chave), attemptId]
   ));
   return {
@@ -423,6 +464,9 @@ module.exports = {
   normalizarAttemptId,
   gerarAttemptIdCheckpointEntrega,
   normalizarEstado,
+  normalizarMotivoCodigo,
+  normalizarClassificacao,
+  normalizarStatusHttp,
   normalizarTransicao,
   criarCheckpointEntrega,
   obterCheckpointEntrega,

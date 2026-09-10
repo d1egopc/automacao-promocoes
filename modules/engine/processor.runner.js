@@ -41,7 +41,7 @@ function logEngineProcessadorJobErro(job = {}, erroJob = {}) {
 // Destino oficial: Processor receber Workspaces avaliados pelo WorkspaceRegistry.
 // Consumidor atual: orquestrador Engine V2 e rota /engine/processar-pendentes.
 // Remover na Fase: 3, mantendo cliente_id apenas na persistencia fisica do banco.
-async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [], avaliarWorkspaceParaEngine = null } = {}) {
+async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [], avaliarWorkspaceParaEngine = null, observarHistoricoClonadorTerminal = null } = {}) {
   const limiteFinal = limitarJobs(limite);
   const resumo = {
     ok: true,
@@ -166,7 +166,7 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
     resumo.processados += 1;
 
     try {
-      const resultado = await processarJobEngine(jobConfirmado, { clientesValidos, avaliarWorkspaceParaEngine });
+      const resultado = await processarJobEngine(jobConfirmado, { clientesValidos, avaliarWorkspaceParaEngine, observarHistoricoClonadorTerminal });
       if (resultado.ok && resultado.status === "diagnosticado") {
         resumo.diagnosticados += 1;
       } else {
@@ -189,7 +189,10 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
       });
       logEngineProcessadorErro({ jobId: jobConfirmado.id, etapa: "processar_job", motivo: "erro_inesperado", erro: e.message });
       await registrarProcessamento(jobConfirmado.id, "diagnostico_final", "erro", "erro_inesperado", { erro: e.message });
-      await marcarJobStatus(jobConfirmado.id, "erro", "erro_inesperado", { statusEsperado: "processando" });
+      const transicao = await marcarJobStatus(jobConfirmado.id, "erro", "erro_inesperado", { statusEsperado: "processando" });
+      if (transicao?.ok === true && typeof observarHistoricoClonadorTerminal === "function") {
+        try { await observarHistoricoClonadorTerminal({ job: jobConfirmado, motivo: "erro_inesperado", etapa: "diagnostico_final" }); } catch (_) {}
+      }
     }
   }
 

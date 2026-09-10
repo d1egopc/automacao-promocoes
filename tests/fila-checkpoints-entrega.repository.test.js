@@ -8,6 +8,12 @@ const repo = require("../modules/fila/fila-checkpoints-entrega.repository");
 const ATTEMPT_A = "11111111-1111-4111-8111-111111111111";
 const ATTEMPT_B = "22222222-2222-4222-8222-222222222222";
 
+assert.strictEqual(repo.normalizarMotivoCodigo("HTTP_4XX"), "http_4xx");
+assert.strictEqual(repo.normalizarClassificacao("PRE_EFEITO"), "pre_efeito");
+assert.strictEqual(repo.normalizarStatusHttp(429), 429);
+assert.throws(() => repo.normalizarMotivoCodigo("nao pode conter texto livre"));
+assert.throws(() => repo.normalizarStatusHttp(99));
+
 function chave(params = []) {
   return params.slice(0, 4).join("|");
 }

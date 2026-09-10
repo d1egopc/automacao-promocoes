@@ -489,7 +489,7 @@ async function registrarEtapaValidacao(jobId, etapa, status, motivo = "", detalh
   });
 }
 
-async function finalizarValidacaoJob(job = {}, status = "erro_validacao", motivo = "", detalhes = {}) {
+async function finalizarValidacaoJob(job = {}, status = "erro_validacao", motivo = "", detalhes = {}, observarHistoricoClonadorTerminal = null) {
   const transicao = await marcarJobStatus(job.id, status, motivo || status, {
     statusEsperado: "validando"
   });
@@ -501,6 +501,9 @@ async function finalizarValidacaoJob(job = {}, status = "erro_validacao", motivo
     };
   }
   await registrarEtapaValidacao(job.id, "validacao_final", status === "pronto_para_importar" ? "ok" : "erro", motivo || status, detalhes);
+  if (status !== "pronto_para_importar" && typeof observarHistoricoClonadorTerminal === "function") {
+    try { await observarHistoricoClonadorTerminal({ job, motivo: motivo || status, etapa: "validacao_final" }); } catch (_) {}
+  }
   return { status, motivo: motivo || status };
 }
 
@@ -519,7 +522,7 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
   });
 
   if (!clienteOk) {
-    return finalizarValidacaoJob(job, "cliente_invalido", "cliente_invalido", { clienteId });
+    return finalizarValidacaoJob(job, "cliente_invalido", "cliente_invalido", { clienteId }, contexto.observarHistoricoClonadorTerminal);
   }
 
   await registrarEtapaValidacao(job.id, "validar_marketplace", marketplace ? "ok" : "erro", marketplace ? "marketplace_validado" : "marketplace_nao_detectado", {
@@ -527,7 +530,7 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
   });
 
   if (!marketplace) {
-    return finalizarValidacaoJob(job, "erro_validacao", "marketplace_nao_detectado", { clienteId });
+    return finalizarValidacaoJob(job, "erro_validacao", "marketplace_nao_detectado", { clienteId }, contexto.observarHistoricoClonadorTerminal);
   }
 
   const marketplaceAtivo = marketplaceAtivoClienteEngine(clienteId, marketplace, contexto.marketplacesAtivosPorCliente || {});
@@ -537,7 +540,7 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
   });
 
   if (!marketplaceAtivo) {
-    return finalizarValidacaoJob(job, "marketplace_bloqueado", "marketplace_bloqueado", { clienteId, marketplace });
+    return finalizarValidacaoJob(job, "marketplace_bloqueado", "marketplace_bloqueado", { clienteId, marketplace }, contexto.observarHistoricoClonadorTerminal);
   }
 
   const integracao = obterIntegracaoClienteEngine(contexto.integracoesPorCliente || {}, clienteId, marketplace);
@@ -550,7 +553,7 @@ async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
   });
 
   if (!integracaoOk) {
-    return finalizarValidacaoJob(job, "integracao_ausente", "integracao_ausente", { clienteId, marketplace });
+    return finalizarValidacaoJob(job, "integracao_ausente", "integracao_ausente", { clienteId, marketplace }, contexto.observarHistoricoClonadorTerminal);
   }
 
   return finalizarValidacaoJob(job, "pronto_para_importar", "validacao_ok", { clienteId, marketplace });

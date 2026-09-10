@@ -74,6 +74,22 @@ function clientDoAdvisory(advisoryHandle = null) {
   return client && typeof client.query === "function" ? client : null;
 }
 
+function classificacaoFalhaSegura(erro, confirmar = () => false, classificar = null) {
+  let resultado = null;
+  try { resultado = typeof classificar === "function" ? classificar(erro) : null; } catch {}
+  const objeto = resultado && typeof resultado === "object" ? resultado : {};
+  const confirmada = objeto.confirmada === true || (resultado === true) || (objeto.confirmada === undefined && confirmar(erro) === true);
+  const statusHttpBruto = objeto.statusHttp ?? erro?.statusHttp ?? erro?.status;
+  const statusHttp = Number.isInteger(Number(statusHttpBruto)) && Number(statusHttpBruto) >= 100 && Number(statusHttpBruto) <= 599
+    ? Number(statusHttpBruto)
+    : undefined;
+  const motivoCodigo = texto(objeto.motivoCodigo || erro?.codigo || erro?.code || (confirmada ? "falha_confirmada" : "resultado_ambiguo"), 120)
+    .toLowerCase().replace(/[^a-z0-9_:.-]/g, "_");
+  const classificacao = texto(objeto.classificacao || (confirmada ? "pre_efeito" : "pos_efeito_ou_desconhecido"), 80)
+    .toLowerCase().replace(/[^a-z0-9_:.-]/g, "_");
+  return { confirmada, motivoCodigo, classificacao, statusHttp };
+}
+
 function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAttemptIdImpl = gerarAttemptId, now = () => Date.now() } = {}) {
   if (!repository || typeof repository.criarCheckpointEntrega !== "function" ||
     typeof repository.transicionarCheckpointEntrega !== "function" ||
@@ -96,7 +112,9 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
     advisoryHandle = null,
     enviar,
     falhaConfirmada = () => false,
-    permitirNovaTentativaAposFalhaConfirmada = false
+    classificarFalha = null,
+    permitirNovaTentativaAposFalhaConfirmada = false,
+    exigirProviderMessageId = false
   } = {}) {
     const contexto = {
       clienteId: texto(clienteId || oferta?.clienteId || "admin"),
@@ -191,12 +209,26 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
 
     try {
       const resposta = await enviar();
+      const providerMessageId = resposta?.providerMessageId || null;
+      if (exigirProviderMessageId === true && !providerMessageId) {
+        const ambiguo = await repository.transicionarCheckpointEntrega({
+          ...contexto,
+          attemptId: contexto.attemptId,
+          deEstado: "envio_iniciado",
+          paraEstado: "resultado_ambiguo",
+          motivoCodigo: "provider_message_id_ausente",
+          classificacao: "resposta_sem_evidencia_minima"
+        }, opcoesRepository);
+        if (ambiguo?.transicionado === true) contexto.estado = "resultado_ambiguo";
+        finalizar("resposta_sem_evidencia_minima", { respostaExternaConfirmada: false });
+        return { ok: false, resultado: "resposta_sem_evidencia_minima", resposta: resposta?.valor, contexto };
+      }
       const enviado = await repository.transicionarCheckpointEntrega({
         ...contexto,
         attemptId: contexto.attemptId,
         deEstado: "envio_iniciado",
         paraEstado: "enviado",
-        providerMessageId: resposta?.providerMessageId || null
+        providerMessageId
       }, opcoesRepository);
       if (enviado?.transicionado !== true) {
         finalizar("enviado_nao_persistido", { respostaExternaConfirmada: true });
@@ -206,13 +238,17 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
       finalizar("enviado");
       return { ok: true, resultado: "enviado", resposta: resposta?.valor, contexto };
     } catch (erro) {
-      if (falhaConfirmada(erro) === true) {
+      const classificacaoFalha = classificacaoFalhaSegura(erro, falhaConfirmada, classificarFalha);
+      if (classificacaoFalha.confirmada) {
         try {
           const falha = await repository.transicionarCheckpointEntrega({
             ...contexto,
             attemptId: contexto.attemptId,
             deEstado: "envio_iniciado",
-            paraEstado: "falha_confirmada"
+            paraEstado: "falha_confirmada",
+            motivoCodigo: classificacaoFalha.motivoCodigo,
+            classificacao: classificacaoFalha.classificacao,
+            statusHttp: classificacaoFalha.statusHttp
           }, opcoesRepository);
           if (falha?.transicionado === true) {
             contexto.estado = "falha_confirmada";
@@ -221,6 +257,17 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
           }
         } catch {}
       }
+      try {
+        await repository.transicionarCheckpointEntrega({
+          ...contexto,
+          attemptId: contexto.attemptId,
+          deEstado: "envio_iniciado",
+          paraEstado: "resultado_ambiguo",
+          motivoCodigo: classificacaoFalha.motivoCodigo,
+          classificacao: classificacaoFalha.classificacao,
+          statusHttp: classificacaoFalha.statusHttp
+        }, opcoesRepository);
+      } catch {}
       finalizar("envio_iniciado_ambiguo");
       return { ok: false, resultado: "envio_iniciado_ambiguo", erro, contexto };
     }
@@ -250,5 +297,6 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
 module.exports = {
   criarCheckpointEntregaFuncional,
   chaveDestinoEntrega,
-  chaveAlvoEntrega
+  chaveAlvoEntrega,
+  classificacaoFalhaSegura
 };

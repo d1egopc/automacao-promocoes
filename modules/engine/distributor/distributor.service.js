@@ -1179,6 +1179,35 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
+  const registrarSnapshotFila = async (item = {}) => {
+    if (typeof deps.atualizarResumoHistoricoClonador !== "function") return;
+    const fontes = [item.metadata, oferta.metadata, oferta.job_metadata?.metadataEvento, oferta.evento_metadata];
+    const clonador = fontes.map(fonte => objetoSeguro(fonte).clonadorGrupos).find(valor => objetoSeguro(valor).bufferId);
+    if (!clonador?.bufferId) return;
+    try {
+      await deps.atualizarResumoHistoricoClonador({
+        clienteId,
+        bufferId: clonador.bufferId,
+        resumo: {
+          jobIds: oferta.job_id ? [String(oferta.job_id)] : [],
+          ofertaIds: oferta.id ? [String(oferta.id)] : [],
+          filaItemIds: item.id ? [String(item.id)] : [],
+          marketplace: normalizarMarketplace(oferta.marketplace) || null,
+          titulo: normalizarTexto(oferta.titulo || "").slice(0, 180) || null,
+          imagem: normalizarTexto(oferta.imagem || "").slice(0, 500) || null,
+          preco: oferta.preco ?? null,
+          precoAnterior: oferta.preco_original ?? null,
+          cupomPresente: Boolean(normalizarTexto(oferta.cupom || "")),
+          beneficioPresente: Boolean(normalizarTexto(oferta.beneficio_extra || "")),
+          statusCodigo: "na_fila",
+          resultadoAgregado: "na_fila",
+          ultimoAtualizadoEm: new Date().toISOString()
+        }
+      });
+    } catch (erro) {
+      console.log("[CLONADOR-HISTORICO-SNAPSHOT-OBSERVADOR]", { clienteId, bufferId: clonador.bufferId, motivo: erro?.codigo || erro?.message || "falha_snapshot" });
+    }
+  };
 
   if (!usuarioAtivo(clienteId)) {
     logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_adicionar_fila" });
@@ -1378,7 +1407,9 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
       statusFilaDepois: resultadoMemoria.itemFila?.status || itemFila.status || "pendente"
     });
 
-    return { ok: true, itemFila: resultadoMemoria.itemFila || itemFila };
+    const itemFilaFinal = resultadoMemoria.itemFila || itemFila;
+    await registrarSnapshotFila(itemFilaFinal);
+    return { ok: true, itemFila: itemFilaFinal };
   }
 
   const filaCliente = carregarFilaCliente(clienteId, deps);
@@ -1405,6 +1436,7 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
     statusFilaDepois: itemFila.status || "pendente"
   });
 
+  await registrarSnapshotFila(itemFila);
   return { ok: true, itemFila };
 }
 

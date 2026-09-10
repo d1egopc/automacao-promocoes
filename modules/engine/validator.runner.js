@@ -27,7 +27,7 @@ const {
   logEngineProcessadorFim
 } = require("./logger");
 
-async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = [], integracoesPorCliente = {}, marketplacesAtivosPorCliente = {} } = {}) {
+async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = [], integracoesPorCliente = {}, marketplacesAtivosPorCliente = {}, observarHistoricoClonadorTerminal = null } = {}) {
   const limiteFinal = limitarJobs(limite);
   const resumo = {
     ok: true,
@@ -139,7 +139,8 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
       const resultado = await validarJobDiagnosticadoEngine(jobConfirmado, {
         clientesValidos,
         integracoesPorCliente,
-        marketplacesAtivosPorCliente
+        marketplacesAtivosPorCliente,
+        observarHistoricoClonadorTerminal
       });
 
       if (Object.prototype.hasOwnProperty.call(resumo, resultado.status)) {
@@ -158,6 +159,9 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
           fase: "validacao",
           erro: e.message
         });
+        if (typeof observarHistoricoClonadorTerminal === "function") {
+          try { await observarHistoricoClonadorTerminal({ job: jobConfirmado, motivo: "erro_validacao", etapa: "validacao_final" }); } catch (_) {}
+        }
       } else {
         resumo.claimsPerdidos += 1;
       }
