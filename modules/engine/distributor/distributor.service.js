@@ -582,6 +582,90 @@ function logImagemFilaEngine(oferta = {}, resolucao = {}) {
   console.log("[ENGINE-IMAGEM-AUSENTE]", JSON.stringify(base));
 }
 
+function textoComercialFila(valor = "") {
+  return normalizarTexto(valor || "").toLowerCase();
+}
+
+function urlRenderizavelComercialFila(item = {}) {
+  if (!item || typeof item !== "object") return "";
+  return normalizarTexto(
+    item.urlOptimus ||
+    item.urlAfiliadaWorkspace ||
+    item.urlAfiliada ||
+    item.afiliado ||
+    item.linkAfiliado ||
+    ""
+  );
+}
+
+function papelComercialFila(item = {}) {
+  return textoComercialFila(item?.papel || item?.tipo || "").replace(/^link_/, "");
+}
+
+function linksComerciaisCompletosParaFila({ oferta = {}, links = [] } = {}) {
+  const lista = Array.isArray(links)
+    ? links.map(item => item && typeof item === "object" ? { ...item } : item)
+    : [];
+  const temResgateRenderizavel = lista.some(item => (
+    papelComercialFila(item) === "resgate" &&
+    item?.renderizavel === true &&
+    Boolean(urlRenderizavelComercialFila(item))
+  ));
+  const temProdutoRenderizavel = lista.some(item => (
+    papelComercialFila(item) === "produto" &&
+    item?.renderizavel === true &&
+    Boolean(urlRenderizavelComercialFila(item))
+  ));
+  if (!temResgateRenderizavel || temProdutoRenderizavel) return lista;
+
+  const metadata = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const integridade = metadata.integridadeComercial && typeof metadata.integridadeComercial === "object"
+    ? metadata.integridadeComercial
+    : (metadata.ofcV24?.integridadeComercial && typeof metadata.ofcV24.integridadeComercial === "object"
+      ? metadata.ofcV24.integridadeComercial
+      : {});
+  const documento = metadata.ofcV24?.documentoComercialCanonico && typeof metadata.ofcV24.documentoComercialCanonico === "object"
+    ? metadata.ofcV24.documentoComercialCanonico
+    : {};
+  const linkOriginal = normalizarTexto(oferta.link_original || oferta.linkOriginal || "");
+  const linkAfiliado = normalizarTexto(oferta.link_afiliado || oferta.linkAfiliado || "");
+  if (!linkOriginal || !linkAfiliado) return lista;
+
+  const mesmaUrl = (a, b) => {
+    const esquerda = textoComercialFila(a);
+    const direita = textoComercialFila(b);
+    return Boolean(esquerda && direita && esquerda === direita);
+  };
+  const provaIntegridade = (Array.isArray(integridade.linksDescartadosRadar) ? integridade.linksDescartadosRadar : [])
+    .some(item => (
+      papelComercialFila(item) === "produto" &&
+      mesmaUrl(item?.urlOriginal || item?.url, linkOriginal) &&
+      mesmaUrl(item?.destinoFuncionalFinal?.url, linkAfiliado)
+    ));
+  const provaDocumento = mesmaUrl(documento.linkAfiliado, linkAfiliado) &&
+    (Array.isArray(documento.linksComerciais) ? documento.linksComerciais : []).some(item => (
+      papelComercialFila(item) === "produto" &&
+      mesmaUrl(urlRenderizavelComercialFila(item) || item?.url, linkAfiliado)
+    ));
+  if (!provaIntegridade && !provaDocumento) return lista;
+
+  const ordemCaptura = Math.max(0, ...lista.map(item => Number(item?.ordemCaptura || item?.ordem || 0) || 0)) + 1;
+  return [...lista, {
+    tipo: "produto",
+    papel: "link_produto",
+    urlOriginal: linkOriginal,
+    urlAfiliada: linkAfiliado,
+    urlAfiliadaWorkspace: linkAfiliado,
+    urlOptimus: linkAfiliado,
+    renderizavel: true,
+    seguro: true,
+    ordemCaptura,
+    origem: "distribuidor.produto_afiliado_canonico",
+    conversaoStatus: "convertida",
+    motivoConversao: "produto_afiliado_canonico_preservado_fila"
+  }];
+}
+
 function copiarCamposComerciaisRadarFila(oferta = {}) {
   const contrato = oferta.metadata?.radarEspelhoComercial?.contratoComercial &&
     typeof oferta.metadata.radarEspelhoComercial.contratoComercial === "object"
@@ -648,6 +732,18 @@ function copiarCamposComerciaisRadarFila(oferta = {}) {
 
     if (!campos.precoValidado && integridadeComercial.precoValidado) {
       campos.precoValidado = { ...integridadeComercial.precoValidado };
+    }
+  }
+
+  const linksComerciaisCompletos = linksComerciaisCompletosParaFila({
+    oferta,
+    links: campos.linksComerciais
+  });
+  if (linksComerciaisCompletos.length !== (campos.linksComerciais || []).length) {
+    campos.linksComerciais = linksComerciaisCompletos;
+    if (campos.integridadeComercial) {
+      campos.integridadeComercial.linksComerciais = linksComerciaisCompletos
+        .map(item => item && typeof item === "object" ? { ...item } : item);
     }
   }
 
