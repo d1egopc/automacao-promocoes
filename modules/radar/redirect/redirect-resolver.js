@@ -34,7 +34,8 @@ function detectarMarketplaceRedirect(url = "") {
     host === "amzn.to" || host.endsWith(".amzn.to") ||
     host === "amzlink.to" || host.endsWith(".amzlink.to") ||
     host === "link.amazon" || host.endsWith(".link.amazon") ||
-    host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link")) return "amazon";
+    host === "amzn.divulgador.link" || host.endsWith(".amzn.divulgador.link") ||
+    host === "amzn.divulguei.app" || host.endsWith(".amzn.divulguei.app")) return "amazon";
   if (reconhecerLinkAliExpressRedirect(url)) return "aliexpress";
   if (host.includes("aliexpress.")) return "aliexpress";
   if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "awin";
@@ -456,6 +457,52 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   }
 }
 
+function urlMercadoLivreComMlbExplicito(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = hostname(parsed.toString());
+    const caminho = parsed.pathname || "";
+    if (!host.endsWith("mercadolivre.com.br") || caminho.toLowerCase().startsWith("/social/")) return false;
+    return /\/(?:p|permalink)\/MLB-?\d+/i.test(caminho) || /\/MLB-?\d+/i.test(caminho);
+  } catch {
+    return false;
+  }
+}
+
+function urlAmazonComAsinExplicito(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = hostname(parsed.toString());
+    if (!(host === "amazon.com.br" || host.endsWith(".amazon.com.br"))) return false;
+    return /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i.test(parsed.pathname || "");
+  } catch {
+    return false;
+  }
+}
+
+function resultadoIdentidadeNaoComprovada(urlOriginal = "", resultado = {}, motivo = "identidade_nao_comprovada") {
+  return {
+    ok: false,
+    urlOriginal,
+    urlFinal: "",
+    urlExpandida: "",
+    marketplaceDetectado: "",
+    status: "ignorado",
+    statusHttp: resultado.statusHttp || "",
+    metodo: resultado.metodo || "validacao_identidade",
+    motivo
+  };
+}
+
+async function resolverAmazonDivulguei(urlOriginal = "", contexto = {}) {
+  const resultado = await resolverHttpGenerico(urlOriginal, contexto);
+  const urlFinal = resultado.urlExpandida || resultado.urlFinal || "";
+  if (!resultado.ok || !urlAmazonComAsinExplicito(urlFinal)) {
+    return resultadoIdentidadeNaoComprovada(urlOriginal, resultado, "amazon_shortlink_sem_asin_resolvido");
+  }
+  return resultado;
+}
+
 function codigoPromozone(url = "") {
   try {
     const partes = new URL(url).pathname.split("/").filter(Boolean);
@@ -657,6 +704,40 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
   return final;
 }
 
+async function resolverRedirectClonador(url = "", opcoes = {}) {
+  const urlOriginal = texto(url);
+  if (!(hostname(urlOriginal) === "meli.la" || hostname(urlOriginal).endsWith(".meli.la"))) {
+    return resolverRedirectUniversal(urlOriginal, opcoes);
+  }
+
+  const inicio = Date.now();
+  let resultado;
+  try {
+    resultado = await resolverHttpGenerico(urlOriginal, opcoes);
+  } catch (erro) {
+    resultado = resultadoFalha(urlOriginal, {
+      metodo: "erro_resolver",
+      motivo: erro.message || "resolver_falhou",
+      erro: erro.message || ""
+    });
+  }
+
+  const urlFinal = resultado.urlExpandida || resultado.urlFinal || "";
+  if (!resultado.ok || !urlMercadoLivreComMlbExplicito(urlFinal)) {
+    const rejeitado = resultadoIdentidadeNaoComprovada(urlOriginal, resultado, "identidade_ml_nao_comprovada");
+    logAuditoriaRedirect({ ...rejeitado, resolver: "meli_la_clonador" }, Date.now() - inicio);
+    return rejeitado;
+  }
+
+  const final = aplicarIdentidadeCanonicaRedirect({
+    ...resultado,
+    urlOriginal,
+    resolver: "meli_la_clonador"
+  });
+  logAuditoriaRedirect(final, Date.now() - inicio);
+  return final;
+}
+
 registrarResolverRedirect({
   nome: "promozone",
   dominios: ["go.promozone.ai", "promozone.ai"],
@@ -675,6 +756,12 @@ registrarResolverRedirect({
   resolver: resolverHttpGenerico
 });
 
+registrarResolverRedirect({
+  nome: "amazon_divulguei",
+  dominios: ["amzn.divulguei.app"],
+  resolver: resolverAmazonDivulguei
+});
+
 module.exports = {
   diagnosticarAwinKabum,
   detectarMarketplaceRedirect,
@@ -689,6 +776,8 @@ module.exports = {
   registrarResolverRedirect,
   reconhecerLinkAliExpressRedirect,
   resolverAOferta,
+  resolverAmazonDivulguei,
+  resolverRedirectClonador,
   resolverHttpGenerico,
   resolverPromozone,
   resolverRedirectUniversal

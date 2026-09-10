@@ -1,7 +1,7 @@
 "use strict";
 
 const { detectarMarketplaceLink } = require("../engine/normalizers");
-const { resolverRedirectUniversal } = require("../radar/redirect/redirect-resolver");
+const { resolverRedirectClonador } = require("../radar/redirect/redirect-resolver");
 const { extrairComercialUniversal } = require("../radar/extrator-comercial-universal");
 const { registrarEventoBruto } = require("../engine/inbox.service");
 
@@ -176,7 +176,7 @@ function montarComercialCapturado({ textoOriginal = "", links = [], marketplaceD
   return Object.keys(contrato.campos).length ? contrato : null;
 }
 
-async function resolverLinksClonador(links = [], resolver = resolverRedirectUniversal) {
+async function resolverLinksClonador(links = [], resolver = resolverRedirectClonador) {
   const linksOriginais = listaLinks(links);
   const preparados = [];
   const redirects = [];
@@ -229,7 +229,7 @@ function marketplacePrincipal(links = [], redirects = []) {
 function criarBridgeClonadorGrupos(deps = {}) {
   const repo = deps.repository;
   if (!repo) throw new Error("repository_obrigatorio");
-  const resolver = deps.resolverRedirectUniversal || resolverRedirectUniversal;
+  const resolver = deps.resolverRedirectUniversal || resolverRedirectClonador;
   const registrar = deps.registrarEventoBruto || registrarEventoBruto;
   const extrairComercial = deps.extrairComercialUniversal || extrairComercialUniversal;
   const logger = deps.logger || console;
