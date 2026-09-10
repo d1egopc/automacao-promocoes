@@ -44,6 +44,7 @@ assert.ok(indexFonte.includes('linkFinal: linkOfertaDestino.linkFinal || ""'), "
 assert.ok(indexFonte.includes('tipo: "telemetria_tipo_midia_v2"'), "Executor deve persistir telemetria de mídia no item da fila");
 assert.ok(indexFonte.includes('tipo: "auditoria_payload_whatsapp"'), "Executor deve registrar resumo do payload WhatsApp");
 assert.ok(indexFonte.includes('envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "desconhecido"'), "Telemetria não pode inventar imagem_completa por default");
+assert.ok(indexFonte.includes('statusHq: String(telemetriaMidiaV2.statusHq || "")'), "Executor deve persistir o status compacto do retorno HQ");
 assert.ok(helperFonte.includes('"matched-text": url'), "imagem_link deve vincular o card ao linkFinal oficial");
 assert.ok(helperFonte.includes('jpegThumbnail'), "imagem_link deve montar thumbnail JPEG manual");
 assert.ok(helperFonte.includes('width: 800, height: 800'), "imagem_link deve limitar thumbnail HQ a 800px");
@@ -133,6 +134,7 @@ async function main() {
     hqTentado: true,
     hqAnexado: true,
     motivoFallback: "",
+    statusHq: "hq_completo",
     matchedTextPresente: true,
     larguraJpegThumbnail: 4,
     alturaJpegThumbnail: 4,
@@ -229,6 +231,36 @@ async function main() {
     assert.equal(logsRetornoIncompleto.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]" && contexto.motivoFallback === "hq_retorno_incompleto"), true);
     assert.equal(logsRetornoIncompleto.some(([tag, contexto]) => tag === "[EXECUTOR-LINK-PREVIEW-HQ]" && contexto.hqTentado && !contexto.hqAnexado && contexto.motivoFallback === "hq_retorno_incompleto" && contexto.camposHq[campoAusente] === false), true);
   }
+
+  const imagem800x800 = await sharp({
+    create: { width: 800, height: 800, channels: 3, background: { r: 12, g: 34, b: 56 } }
+  }).png().toBuffer();
+  const telemetriaDimensoesLocais = {};
+  const helpersComDimensoesAusentes = carregarHelpersTipoMidia({
+    baixarImagemComoBuffer: async () => imagem800x800,
+    sharp,
+    prepareWAMessageMedia: async () => ({
+      imageMessage: {
+        directPath: "/mms/thumbnail-link",
+        mediaKey: Buffer.alloc(32, 1),
+        mediaKeyTimestamp: 123,
+        fileSha256: Buffer.alloc(32, 2),
+        fileEncSha256: Buffer.alloc(32, 3)
+      }
+    })
+  });
+  const payloadDimensoesLocais = await helpersComDimensoesAusentes.montarPayloadTextoWhatsappPorTipoMidia({
+    mensagem: template,
+    destino: { tipoMidia: "imagem_link" },
+    linkFinal: "https://oficial.example/produto",
+    oferta: { titulo: "Produto oficial", marketplace: "Shopee", preco: 99.9, imagem: "https://images.example/produto.jpg" },
+    upload,
+    telemetria: telemetriaDimensoesLocais
+  });
+  assert.equal(payloadDimensoesLocais.linkPreview.highQualityThumbnail.width, 800, "dimensao HQ ausente deve usar largura local confiavel");
+  assert.equal(payloadDimensoesLocais.linkPreview.highQualityThumbnail.height, 800, "dimensao HQ ausente deve usar altura local confiavel");
+  assert.equal(telemetriaDimensoesLocais.hqAnexado, true);
+  assert.equal(telemetriaDimensoesLocais.statusHq, "hq_dimensoes_recuperadas_localmente");
 
   const payloadTextoLink = await helpers.montarPayloadTextoWhatsappPorTipoMidia({
     mensagem: template,

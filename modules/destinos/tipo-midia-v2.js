@@ -79,11 +79,12 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
     alturaJpegThumbnail: dimensoesJpeg.altura,
     matchedTextPresente: Boolean(preview["matched-text"])
   });
-  const registrarHq = ({ hqTentado = false, hqAnexado = false, motivoFallback = "", imagemHq = null, dimensoesHq = null, highQualityThumbnail = null } = {}) => {
+  const registrarHq = ({ hqTentado = false, hqAnexado = false, motivoFallback = "", statusHq = "", imagemHq = null, dimensoesHq = null, highQualityThumbnail = null } = {}) => {
     registrarTelemetria(telemetria, {
       hqTentado,
       hqAnexado,
       motivoFallback: motivoFallback || "",
+      statusHq: statusHq || (hqAnexado ? "hq_completo" : (motivoFallback || "")),
       larguraHq: dimensoesHq?.largura || null,
       alturaHq: dimensoesHq?.altura || null,
       bytesHq: Buffer.isBuffer(imagemHq) ? imagemHq.length : null
@@ -94,6 +95,7 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
       hqTentado,
       hqAnexado,
       motivoFallback: motivoFallback || null,
+      statusHq: statusHq || (hqAnexado ? "hq_completo" : (motivoFallback || null)),
       larguraHq: dimensoesHq?.largura || null,
       alturaHq: dimensoesHq?.altura || null,
       bytesHq: Buffer.isBuffer(imagemHq) ? imagemHq.length : null,
@@ -128,17 +130,30 @@ async function montarPreviewWhatsapp({ oferta = {}, linkFinal = "", upload, prep
       { image: imagemHq },
       { upload, mediaTypeOverride: "thumbnail-link" }
     );
-    const obrigatorios = ["directPath", "mediaKey", "fileEncSha256", "fileSha256", "mediaKeyTimestamp", "width", "height"];
-    if (obrigatorios.every((campo) => Boolean(imageMessage?.[campo]))) {
+    const camposCriptograficosObrigatorios = ["directPath", "mediaKey", "fileEncSha256", "fileSha256", "mediaKeyTimestamp"];
+    const dimensaoValida = (valor) => Number.isFinite(Number(valor)) && Number(valor) > 0;
+    const retornoTemDimensoesValidas = dimensaoValida(imageMessage?.width) && dimensaoValida(imageMessage?.height);
+    const dimensoesLocaisValidas = dimensaoValida(dimensoesHq?.largura) && dimensaoValida(dimensoesHq?.altura);
+    if (camposCriptograficosObrigatorios.every((campo) => Boolean(imageMessage?.[campo])) && (retornoTemDimensoesValidas || dimensoesLocaisValidas)) {
+      const dimensoesRecuperadasLocalmente = !retornoTemDimensoesValidas;
       const highQualityThumbnail = {};
-      for (const campo of [...obrigatorios, "mimetype", "fileLength", "previewType"]) {
+      for (const campo of [...camposCriptograficosObrigatorios, "mimetype", "fileLength", "previewType"]) {
         if (imageMessage[campo] !== undefined) highQualityThumbnail[campo] = imageMessage[campo];
       }
+      highQualityThumbnail.width = retornoTemDimensoesValidas ? Number(imageMessage.width) : dimensoesHq.largura;
+      highQualityThumbnail.height = retornoTemDimensoesValidas ? Number(imageMessage.height) : dimensoesHq.altura;
       preview.highQualityThumbnail = highQualityThumbnail;
-      registrarHq({ hqTentado: true, hqAnexado: true, imagemHq, dimensoesHq, highQualityThumbnail });
+      registrarHq({
+        hqTentado: true,
+        hqAnexado: true,
+        statusHq: dimensoesRecuperadasLocalmente ? "hq_dimensoes_recuperadas_localmente" : "hq_completo",
+        imagemHq,
+        dimensoesHq,
+        highQualityThumbnail
+      });
     } else {
       logger.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", { motivoFallback: "hq_retorno_incompleto" });
-      registrarHq({ hqTentado: true, motivoFallback: "hq_retorno_incompleto", imagemHq, dimensoesHq, highQualityThumbnail: imageMessage });
+      registrarHq({ hqTentado: true, motivoFallback: "hq_retorno_incompleto", statusHq: "hq_retorno_incompleto", imagemHq, dimensoesHq, highQualityThumbnail: imageMessage });
     }
   } catch (_erro) {
     logger.log("[EXECUTOR-LINK-PREVIEW-HQ-FALLBACK]", { motivoFallback: "hq_upload_erro" });

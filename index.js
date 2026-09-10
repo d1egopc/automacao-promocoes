@@ -8048,6 +8048,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         jpegThumbnailBytes: Number(telemetriaMidiaV2.jpegThumbnailBytes || 0),
         hqTentado: Boolean(telemetriaMidiaV2.hqTentado),
         hqAnexado: Boolean(telemetriaMidiaV2.hqAnexado),
+        statusHq: String(telemetriaMidiaV2.statusHq || ""),
         motivoFallback: String(telemetriaMidiaV2.motivoFallback || ""),
         matchedTextPresente: Boolean(telemetriaMidiaV2.matchedTextPresente),
         envioPayloadTipo: envioPayloadTipo || telemetriaMidiaV2.envioPayloadTipo || "desconhecido",
