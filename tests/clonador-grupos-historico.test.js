@@ -115,6 +115,20 @@ async function main() {
   assert.equal(detalhe.bufferId, "4");
   assert.equal(await historico.detalhe("workspace-b", "4"), null);
 
+  const historicoComAuxiliarFalho = criarHistoricoClonador({
+    repository: {
+      async listarHistoricoBase() { return [buffer(5)]; },
+      async obterHistoricoBasePorId(clienteId, id) {
+        return clienteId === "workspace-a" && String(id) === "5" ? buffer(5) : null;
+      },
+      async buscarContextoHistorico() { throw new Error("coluna_auxiliar_invalida"); }
+    }
+  });
+  const paginaComAuxiliarFalho = await historicoComAuxiliarFalho.listar("workspace-a", { limit: 25 });
+  assert.equal(paginaComAuxiliarFalho.itens.length, 1, "falha auxiliar nao derruba a listagem");
+  const detalheComAuxiliarFalho = await historicoComAuxiliarFalho.detalhe("workspace-a", "5");
+  assert.equal(detalheComAuxiliarFalho.bufferId, "5", "falha auxiliar nao derruba o detalhe");
+
   const consultasFiltro = [];
   const repoFiltro = criarRepositorioClonadorGrupos({
     queryEngine: async (sql) => {
@@ -129,6 +143,21 @@ async function main() {
     "repetida_no_executor_2h", "destino_ja_enviado", "fanout_destino_ja_enviado",
     "replay_buffer", "mesma_mensagem", "mensagem_duplicada", "mesma_condicao_comercial_janela_2h"
   ]) assert(sqlRepeticao.includes(`'${motivo}'`), `tipo=repeticao inclui ${motivo}`);
+
+  const consultasContexto = [];
+  const repoContexto = criarRepositorioClonadorGrupos({
+    queryEngine: async (sql) => {
+      consultasContexto.push(sql);
+      return { ok: true, resultado: { rows: [] } };
+    }
+  });
+  await repoContexto.buscarContextoHistorico("workspace-a", [1]);
+  const sqlEventos = consultasContexto.find(sql => sql.includes("FROM engine_eventos_brutos e"));
+  const sqlJobs = consultasContexto.find(sql => sql.includes("FROM engine_jobs_cliente j"));
+  const sqlOfertas = consultasContexto.find(sql => sql.includes("FROM engine_ofertas o"));
+  assert.ok(sqlEventos && !sqlEventos.includes("e.status") && !sqlEventos.includes("e.cliente_id"));
+  assert.ok(sqlJobs?.includes("WHERE j.cliente_id = $1") && !sqlJobs.includes("WHERE e.cliente_id = $1"));
+  assert.ok(sqlOfertas?.includes("WHERE j.cliente_id = $1") && !sqlOfertas.includes("WHERE e.cliente_id = $1"));
 
   let resolucoes = 0;
   const cem = Array.from({ length: 100 }, (_, indice) => buffer(indice + 100, {

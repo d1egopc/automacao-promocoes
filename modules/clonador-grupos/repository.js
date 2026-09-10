@@ -620,22 +620,22 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     const buffers = await executar(`SELECT id, metadata FROM clonador_grupos_buffer WHERE cliente_id = $1 AND id = ANY($2::bigint[])`, [texto(clienteId), ids], query);
     const eventoIds = buffers.rows.map(row => row.metadata?.clonadorGruposBridge?.eventoId || row.metadata?.historicoResumo?.eventoId).map(Number).filter(Number.isFinite);
     const [eventos, jobs, ofertas, fila, checkpoints] = await Promise.all([
-      executar(`SELECT e.id, e.origem, e.status, e.criado_em, e.metadata
+      executar(`SELECT e.id, e.origem, e.criado_em, e.metadata
                   FROM engine_eventos_brutos e
-                 WHERE e.cliente_id = $1 AND (
+                 WHERE (
                    (e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[])
                     OR (e.metadata #>> '{clonadorGruposBridge,bufferId}')::text = ANY($2::text[])
                     OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
       executar(`SELECT j.id, j.evento_id, j.oferta_id, j.status, j.criado_em, j.atualizado_em, j.metadata
                   FROM engine_jobs_cliente j
                   JOIN engine_eventos_brutos e ON e.id = j.evento_id
-                  WHERE e.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
+                  WHERE j.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
       executar(`SELECT o.id, o.status, o.marketplace, o.titulo, o.preco, o.preco_original, o.cupom, o.beneficio_extra, o.imagem, o.criada_em, o.metadata,
                        j.id AS job_id
                   FROM engine_ofertas o
                   JOIN engine_jobs_cliente j ON j.oferta_id = o.id
                   JOIN engine_eventos_brutos e ON e.id = j.evento_id
-                  WHERE e.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
+                  WHERE j.cliente_id = $1 AND ((e.metadata #>> '{clonadorGrupos,bufferId}')::text = ANY($2::text[]) OR e.id = ANY($3::bigint[]))`, [texto(clienteId), ids.map(String), eventoIds], query),
       Promise.resolve({ rows: [] }),
       Promise.resolve({ rows: [] })
     ]);

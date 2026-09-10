@@ -246,6 +246,18 @@ function criarHistoricoClonador({ repository, resolverFilaPorIds, listarFila, li
     return contexto;
   }
 
+  async function buscarContextoSeguro(clienteId, bufferIds, operacao) {
+    try {
+      return await repository.buscarContextoHistorico(clienteId, bufferIds);
+    } catch (erro) {
+      console.warn("[CLONADOR_HISTORICO] enriquecimento_auxiliar_falhou", {
+        operacao,
+        erro: texto(erro?.message || erro, 160)
+      });
+      return { eventos: [], jobs: [], ofertas: [], fila: [], checkpoints: [] };
+    }
+  }
+
   async function listar(clienteId, filtros = {}) {
     const cursor = lerCursor(filtros.cursor);
     const inicio = dataObrigatoria(filtros.dataInicio, "data_inicio_invalida");
@@ -256,7 +268,11 @@ function criarHistoricoClonador({ repository, resolverFilaPorIds, listarFila, li
     if (status && !STATUS_PUBLICOS.has(status)) { const erro = new Error("status_historico_invalido"); erro.codigo = "status_historico_invalido"; erro.statusCode = 400; throw erro; }
     if (tipo && !["erro", "repeticao"].includes(tipo)) { const erro = new Error("tipo_historico_invalido"); erro.codigo = "tipo_historico_invalido"; erro.statusCode = 400; throw erro; }
     const base = await repository.listarHistoricoBase(clienteId, { ...filtros, ...cursor, dataInicio: inicio, dataFim: fim, status, tipo, limit: limite(filtros.limit) });
-    const contexto = await complementarFila(clienteId, base, await repository.buscarContextoHistorico(clienteId, base.map(item => item.id)));
+    const contexto = await complementarFila(
+      clienteId,
+      base,
+      await buscarContextoSeguro(clienteId, base.map(item => item.id), "listar")
+    );
     const porBuffer = agruparPorBuffer(contexto, base);
     let itens = base.map(buffer => itemPublico(buffer, porBuffer.get(String(buffer.id)) || {}));
     return { itens, proximoCursor: base.length === limite(filtros.limit) ? cursorDe(base[base.length - 1]) : null };
@@ -266,7 +282,11 @@ function criarHistoricoClonador({ repository, resolverFilaPorIds, listarFila, li
     if (typeof repository.obterHistoricoBasePorId === "function") {
       const buffer = await repository.obterHistoricoBasePorId(clienteId, bufferId);
       if (!buffer) return null;
-      const contexto = await complementarFila(clienteId, [buffer], await repository.buscarContextoHistorico(clienteId, [buffer.id]));
+      const contexto = await complementarFila(
+        clienteId,
+        [buffer],
+        await buscarContextoSeguro(clienteId, [buffer.id], "detalhe")
+      );
       const detalhes = agruparPorBuffer(contexto, [buffer]).get(String(buffer.id)) || {};
       const item = itemPublico(buffer, detalhes);
       return { ...item, origem: { adapter: "clonador_grupos", eventoId: item.eventoId || null }, timeline: [
