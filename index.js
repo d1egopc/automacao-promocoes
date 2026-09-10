@@ -18367,6 +18367,7 @@ async function resolverLinkOriginalRadar(url = "") {
         marketplaceReal: "mercadolivre",
         linkOriginalLimpo,
         tipoLinkRadar: tipoLinkRadarMeli,
+        metodoResolucaoMeli: metodoSocialMeli,
         statusHttp: resposta.status || ""
       };
     } catch (e) {

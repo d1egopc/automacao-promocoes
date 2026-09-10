@@ -1167,6 +1167,18 @@ async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps
   };
 }
 
+function motivoIdentidadeMeliClonadorNaoComprovada({ evento = {}, job = {}, urlOriginalEngine = "", resolucaoProduto = {} } = {}) {
+  if (!origemClonadorGruposMercadoLivre(evento, job) || !isMeliLa(urlOriginalEngine)) return "";
+
+  const resolucaoRadar = resolucaoProduto.resolucaoRadar || {};
+  const urlSocial = textoMercadoLivre(resolucaoRadar.urlResolvida || "");
+  const metodo = textoMercadoLivre(resolucaoRadar.metodoResolucaoMeli || "").toLowerCase();
+
+  if (!isSocialMercadoLivre(urlSocial)) return "";
+  if (metodo === "parametro") return "";
+  return "identidade_ml_nao_comprovada";
+}
+
 async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = String(job.cliente_id || "").trim();
   const linkEscolhido = escolherLinkMercadoLivreDetalhado(links, evento);
@@ -1214,6 +1226,39 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
         expandiuMeliLa: false,
         resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
         detalheResolucao: resolucaoProduto.detalhe || ""
+      }
+    };
+  }
+
+  const motivoIdentidadeNaoComprovada = motivoIdentidadeMeliClonadorNaoComprovada({
+    evento,
+    job,
+    urlOriginalEngine,
+    resolucaoProduto
+  });
+  if (motivoIdentidadeNaoComprovada) {
+    console.log("[ENGINE-ML-IDENTIDADE-NAO-COMPROVADA]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      clienteId,
+      linkOriginalEngine: urlOriginalEngine,
+      urlResolvidaRadar: resolucaoProduto.resolucaoRadar?.urlResolvida || "",
+      metodoResolucaoMeli: resolucaoProduto.resolucaoRadar?.metodoResolucaoMeli || ""
+    }));
+    return {
+      ok: false,
+      motivo: motivoIdentidadeNaoComprovada,
+      marketplace: "mercadolivre",
+      linkOriginal: urlOriginalEngine,
+      reprocessavel: true,
+      metadata: {
+        origemComercial: "clonador_grupos",
+        linkOriginalEngine: urlOriginalEngine,
+        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+        identidadeMl: {
+          status: "nao_comprovada",
+          motivo: motivoIdentidadeNaoComprovada
+        }
       }
     };
   }
@@ -1504,6 +1549,7 @@ module.exports = {
     avaliarIdentidadeCanonicaMercadoLivre,
     escolherLinkMercadoLivreDetalhado,
     extrairMlbMercadoLivre,
+    motivoIdentidadeMeliClonadorNaoComprovada,
     similaridadeTituloMercadoLivre
   }
 };

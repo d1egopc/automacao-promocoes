@@ -374,6 +374,52 @@ async function testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem() 
   assert.ok(!resultado.metadata.radarMirror);
 }
 
+async function testarClonadorSocialAmbiguoNaoGeraAfiliadoNemAtualizaIdentidade() {
+  const contexto = depsBase({ wall: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: "https://www.mercadolivre.com.br/social/perfil?ref=ambigua",
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
+    linkResolvido: URL_PRODUTO_BERMUDA,
+    metodoResolucaoMeli: "html"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador(),
+    links: links("https://meli.la/shortlink-ambigua"),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_ml_nao_comprovada");
+  assert.strictEqual(resultado.reprocessavel, true);
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+}
+
+async function testarClonadorSocialComParametroExplicitoMantemFluxo() {
+  const contexto = depsBase({ wall: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: "https://www.mercadolivre.com.br/social/perfil?url=https%3A%2F%2Fproduto.mercadolivre.com.br%2FMLB-3382028526",
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
+    linkResolvido: URL_PRODUTO_BERMUDA,
+    metodoResolucaoMeli: "parametro"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador(),
+    links: links("https://meli.la/shortlink-parametro"),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(contexto.chamadas.importar[0].url, URL_PRODUTO_BERMUDA);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BERMUDA);
+}
+
 async function testarOrigemDiferenteNaoUsaComercialCapturadoClonador() {
   const contexto = depsBase({ wall: true });
   const resultado = await importarMercadoLivreEngine({
@@ -438,6 +484,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallSemPrecoFalhaSeguro();
   await testarWallComFalhaAfiliadoFalhaSeguro();
   await testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem();
+  await testarClonadorSocialAmbiguoNaoGeraAfiliadoNemAtualizaIdentidade();
+  await testarClonadorSocialComParametroExplicitoMantemFluxo();
   await testarOrigemDiferenteNaoUsaComercialCapturadoClonador();
   await testarWallClonadorSemTituloOuPrecoFalhaSeguro();
   await testarErroGenericoNaoAtivaFallback();
