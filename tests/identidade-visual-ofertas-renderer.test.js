@@ -105,7 +105,7 @@ async function main() {
       logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
       config: { frase: "AS MELHORES OFERTAS, EM UM SÓ LUGAR", corIdentidade: "azul" }
     });
-    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2.2");
+    assert.strictEqual(renderPadrao.metadata.rendererVersion, "identidade-visual-ofertas-v2.4");
     assert.strictEqual(renderPadrao.metadata.width, 1080, "renderer V2 deve manter largura 1080");
     assert.strictEqual(renderPadrao.metadata.height, 1080, "renderer V2 deve manter altura 1080");
     assert.deepStrictEqual(
@@ -127,10 +127,56 @@ async function main() {
     assert.strictEqual(renderPadrao.metadata.productRenderedX, 40, "produto deve manter centralizacao horizontal");
     assert.strictEqual(renderPadrao.metadata.productRenderedY, 8, "produto deve manter centralizacao vertical na area ampliada");
     assert.strictEqual(renderPadrao.metadata.productBehindBannerHeight, 96, "imagem deve manter zona sacrificavel de 96px atras da faixa");
+    assert.strictEqual(renderPadrao.metadata.composicao, "composicao_normal", "imagem quadrada deve manter composicao normal");
+    assert.strictEqual(renderPadrao.metadata.cropMargemBranca, false, "imagem sem margem branca relevante nao deve sofrer crop");
     assert.deepStrictEqual(
       renderPadrao.metadata.logoSlot,
       { width: 248, height: 147, left: 56, top: 902 },
       "logo oficial deve usar o slot V2.2 aprovado"
+    );
+
+    const produtoComMargemBranca = await sharp({
+      create: { width: 800, height: 780, channels: 3, background: "#ffffff" }
+    })
+      .composite([{ input: await bufferPng({ width: 680, height: 660, fill: "#2563eb", label: "SEM MARGEM" }), left: 60, top: 60 }])
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    const renderMargemBranca = await identidadeVisual.renderizarIdentidadeVisualBuffer({
+      imagemBuffer: produtoComMargemBranca,
+      logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
+      config: { frase: "AS MELHORES OFERTAS, EM UM SO LUGAR", corIdentidade: "azul" }
+    });
+    assert.strictEqual(renderMargemBranca.metadata.composicao, "crop_margem_branca");
+    assert.strictEqual(renderMargemBranca.metadata.cropMargemBranca, true);
+    assert.ok(renderMargemBranca.metadata.margemBranca.reducao >= 0.08, "crop deve ser material e conservador");
+
+    const produtoPaisagem = await bufferJpeg({ width: 904, height: 503, fill: "#0f766e", label: "PAISAGEM" });
+    const renderPaisagem = await identidadeVisual.renderizarIdentidadeVisualBuffer({
+      imagemBuffer: produtoPaisagem,
+      logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
+      config: { frase: "AS MELHORES OFERTAS, EM UM SO LUGAR", corIdentidade: "azul" }
+    });
+    assert.strictEqual(renderPaisagem.metadata.composicao, "composicao_paisagem");
+    assert.deepStrictEqual(renderPaisagem.metadata.productContainBox, { width: 1040, height: 960 });
+    assert.ok(renderPaisagem.metadata.productContentWidth > 1000, "paisagem deve ganhar area sem cover");
+    assert.ok(renderPaisagem.metadata.productContentHeight > 556, "paisagem deve ganhar altura sem corte");
+    assert.ok(
+      Math.abs((renderPaisagem.metadata.productContentWidth / renderPaisagem.metadata.productContentHeight) - (904 / 503)) < 0.02,
+      "paisagem deve preservar proporcao"
+    );
+
+    const produtoPaisagemExtrema = await bufferJpeg({ width: 1491, height: 678, fill: "#1f2937", label: "PAISAGEM EXTREMA" });
+    const renderPaisagemExtrema = await identidadeVisual.renderizarIdentidadeVisualBuffer({
+      imagemBuffer: produtoPaisagemExtrema,
+      logoBuffer: storage.lerLogoBuffer("workspace_amostras", "optimus_oficial"),
+      config: { frase: "AS MELHORES OFERTAS, EM UM SO LUGAR", corIdentidade: "azul" }
+    });
+    assert.strictEqual(renderPaisagemExtrema.metadata.composicao, "composicao_paisagem_extrema");
+    assert.strictEqual(renderPaisagemExtrema.metadata.fundoDerivado, true, "paisagem extrema deve preencher o fundo sem cortar o primeiro plano");
+    assert.strictEqual(renderPaisagemExtrema.metadata.cropMargemBranca, false);
+    assert.ok(
+      Math.abs((renderPaisagemExtrema.metadata.productContentWidth / renderPaisagemExtrema.metadata.productContentHeight) - (1491 / 678)) < 0.02,
+      "paisagem extrema deve preservar a imagem principal inteira"
     );
 
     const renderFraseLonga = await identidadeVisual.renderizarIdentidadeVisualBuffer({

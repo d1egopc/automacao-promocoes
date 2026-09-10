@@ -7,7 +7,7 @@ const {
   contrasteTextoAutomatico
 } = require("./paleta");
 
-const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2.2";
+const RENDERER_VERSION_IDENTIDADE_VISUAL = "identidade-visual-ofertas-v2.4";
 const CANVAS = 1080;
 const FAIXA_ALTURA = 208;
 const FILETE_ALTURA = 10;
@@ -16,6 +16,12 @@ const BASE_Y = AREA_PRODUTO_ALTURA + FILETE_ALTURA;
 const AREA_COMPOSICAO_IMAGEM_ALTURA = 976;
 const IMAGEM_PRODUTO_MAX_WIDTH = 1000;
 const IMAGEM_PRODUTO_MAX_HEIGHT = 960;
+const IMAGEM_PAISAGEM_MAX_WIDTH = 1040;
+const ASPECT_RATIO_PAISAGEM = 1.55;
+const ASPECT_RATIO_PAISAGEM_EXTREMA = 1.9;
+const PIXEL_QUASE_BRANCO = 245;
+const COBERTURA_MARGEM_BRANCA_MINIMA = 0.985;
+const REDUCAO_MARGEM_BRANCA_MINIMA = 0.08;
 const LOGO_SLOT = Object.freeze({ width: 248, height: 147, left: 56, top: BASE_Y + 30 });
 const FRASE_SAFE_AREA = Object.freeze({
   left: 350,
@@ -293,16 +299,117 @@ async function normalizarLogoParaSlot(buffer) {
     .toBuffer();
 }
 
-async function normalizarProdutoParaCanvas(buffer) {
-  return sharp(buffer, { limitInputPixels: 40_000_000 })
+function pixelQuaseBranco(data, indice, canais) {
+  const alpha = canais >= 4 ? data[indice + 3] : 255;
+  if (alpha < 16) return false;
+  return data[indice] >= PIXEL_QUASE_BRANCO &&
+    data[indice + 1] >= PIXEL_QUASE_BRANCO &&
+    data[indice + 2] >= PIXEL_QUASE_BRANCO;
+}
+
+function faixaPredominantementeBranca(data, { largura, altura, canais }, eixo, posicao) {
+  const total = eixo === "linha" ? largura : altura;
+  let claros = 0;
+  for (let indice = 0; indice < total; indice += 1) {
+    const x = eixo === "linha" ? indice : posicao;
+    const y = eixo === "linha" ? posicao : indice;
+    if (pixelQuaseBranco(data, (y * largura + x) * canais, canais)) claros += 1;
+  }
+  return claros / total >= COBERTURA_MARGEM_BRANCA_MINIMA;
+}
+
+async function prepararProdutoParaComposicao(buffer) {
+  const { data, info } = await sharp(buffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const imagem = { largura: info.width, altura: info.height, canais: info.channels };
+  const margem = { top: 0, right: 0, bottom: 0, left: 0 };
+  while (margem.top < Math.floor(imagem.altura / 2) && faixaPredominantementeBranca(data, imagem, "linha", margem.top)) margem.top += 1;
+  while (margem.bottom < Math.floor(imagem.altura / 2) && faixaPredominantementeBranca(data, imagem, "linha", imagem.altura - 1 - margem.bottom)) margem.bottom += 1;
+  while (margem.left < Math.floor(imagem.largura / 2) && faixaPredominantementeBranca(data, imagem, "coluna", margem.left)) margem.left += 1;
+  while (margem.right < Math.floor(imagem.largura / 2) && faixaPredominantementeBranca(data, imagem, "coluna", imagem.largura - 1 - margem.right)) margem.right += 1;
+
+  const seguranca = Math.max(8, Math.round(Math.min(imagem.largura, imagem.altura) * 0.015));
+  const corte = {
+    top: Math.max(0, margem.top - seguranca),
+    right: Math.max(0, margem.right - seguranca),
+    bottom: Math.max(0, margem.bottom - seguranca),
+    left: Math.max(0, margem.left - seguranca)
+  };
+  const larguraCorte = imagem.largura - corte.left - corte.right;
+  const alturaCorte = imagem.altura - corte.top - corte.bottom;
+  const reducao = 1 - ((larguraCorte * alturaCorte) / (imagem.largura * imagem.altura));
+  const aplicar = larguraCorte > 0 && alturaCorte > 0 && reducao >= REDUCAO_MARGEM_BRANCA_MINIMA;
+  if (!aplicar) {
+    return {
+      buffer,
+      largura: imagem.largura,
+      altura: imagem.altura,
+      cropMargemBranca: false,
+      margemBranca: { ...margem, seguranca, reducao: 0 }
+    };
+  }
+
+  return {
+    buffer: await sharp(buffer, { limitInputPixels: 40_000_000 })
+      .rotate()
+      .extract({ left: corte.left, top: corte.top, width: larguraCorte, height: alturaCorte })
+      .toBuffer(),
+    largura: larguraCorte,
+    altura: alturaCorte,
+    cropMargemBranca: true,
+    margemBranca: { ...margem, ...corte, seguranca, reducao }
+  };
+}
+
+function calcularConteudoRenderizado(largura, altura, box) {
+  const escala = Math.min(box.width / largura, box.height / altura);
+  return {
+    width: Math.round(largura * escala),
+    height: Math.round(altura * escala)
+  };
+}
+
+async function normalizarProdutoParaCanvas(buffer, { largura, altura } = {}) {
+  const aspectRatio = largura && altura ? largura / altura : 1;
+  const paisagem = aspectRatio >= ASPECT_RATIO_PAISAGEM;
+  const paisagemExtrema = aspectRatio >= ASPECT_RATIO_PAISAGEM_EXTREMA;
+  const box = {
+    width: paisagem ? IMAGEM_PAISAGEM_MAX_WIDTH : IMAGEM_PRODUTO_MAX_WIDTH,
+    height: IMAGEM_PRODUTO_MAX_HEIGHT
+  };
+  const normalizado = await sharp(buffer, { limitInputPixels: 40_000_000 })
     .rotate()
     .resize({
-      width: IMAGEM_PRODUTO_MAX_WIDTH,
-      height: IMAGEM_PRODUTO_MAX_HEIGHT,
+      width: box.width,
+      height: box.height,
       fit: "contain",
       withoutEnlargement: false,
       background: { r: 255, g: 255, b: 255, alpha: 0 }
     })
+    .png()
+    .toBuffer();
+  return {
+    buffer: normalizado,
+    box,
+    paisagem,
+    paisagemExtrema,
+    conteudo: calcularConteudoRenderizado(largura, altura, box)
+  };
+}
+
+async function criarFundoPaisagemExtrema(buffer) {
+  return sharp(buffer, { limitInputPixels: 40_000_000 })
+    .rotate()
+    .resize({
+      width: CANVAS,
+      height: AREA_COMPOSICAO_IMAGEM_ALTURA,
+      fit: "cover"
+    })
+    .blur(28)
+    .modulate({ brightness: 0.62, saturation: 0.78 })
     .png()
     .toBuffer();
 }
@@ -356,7 +463,12 @@ async function normalizarLogoUpload(buffer, mimeType = "") {
 
 async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, config = {} } = {}) {
   const metaProduto = await validarImagemBuffer(imagemBuffer, { campo: "imagem" });
-  const produto = await normalizarProdutoParaCanvas(imagemBuffer);
+  const produtoPreparado = await prepararProdutoParaComposicao(imagemBuffer);
+  const produtoNormalizado = await normalizarProdutoParaCanvas(produtoPreparado.buffer, produtoPreparado);
+  const produto = produtoNormalizado.buffer;
+  const fundoPaisagemExtrema = produtoNormalizado.paisagemExtrema
+    ? await criarFundoPaisagemExtrema(produtoPreparado.buffer)
+    : null;
   const metaProdutoNormalizado = await sharp(produto).metadata();
   const logo = await normalizarLogoParaSlot(logoBuffer);
   const overlay = await svgOverlay(config);
@@ -376,6 +488,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
     }
   })
     .composite([
+      ...(fundoPaisagemExtrema ? [{ input: fundoPaisagemExtrema, left: 0, top: 0 }] : []),
       { input: produto, left: Math.max(0, produtoX), top: Math.max(0, produtoY) },
       { input: overlay.buffer, left: 0, top: 0 },
       { input: logo, left: LOGO_SLOT.left, top: LOGO_SLOT.top }
@@ -395,11 +508,20 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
       productRenderedHeight: metaProdutoNormalizado.height || 0,
       productRenderedX: Math.max(0, produtoX),
       productRenderedY: Math.max(0, produtoY),
+      productContentWidth: produtoNormalizado.conteudo.width,
+      productContentHeight: produtoNormalizado.conteudo.height,
+      composicao: produtoNormalizado.paisagemExtrema
+        ? "composicao_paisagem_extrema"
+        : produtoNormalizado.paisagem
+          ? "composicao_paisagem"
+        : produtoPreparado.cropMargemBranca
+          ? "crop_margem_branca"
+          : "composicao_normal",
+      cropMargemBranca: produtoPreparado.cropMargemBranca,
+      fundoDerivado: Boolean(fundoPaisagemExtrema),
+      margemBranca: produtoPreparado.margemBranca,
       productCompositionHeight: AREA_COMPOSICAO_IMAGEM_ALTURA,
-      productContainBox: {
-        width: IMAGEM_PRODUTO_MAX_WIDTH,
-        height: IMAGEM_PRODUTO_MAX_HEIGHT
-      },
+      productContainBox: produtoNormalizado.box,
       productBehindBannerHeight: Math.max(0, produtoY + (metaProdutoNormalizado.height || 0) - BASE_Y),
       corIdentidade,
       corHex,
