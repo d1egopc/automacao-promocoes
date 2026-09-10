@@ -1549,6 +1549,46 @@ function linksComerciaisIntegridade({ oferta = {}, ofertaEntrada = {}, metadata 
   ];
 }
 
+function produtoShopeeAfiliadoRecuperavel({ links = [], oferta = {}, metadata = {}, marketplace = "" } = {}) {
+  if (!marketplaceShopee(marketplace)) return null;
+
+  const linkAfiliado = texto(oferta.linkAfiliado || "");
+  const linkOriginal = texto(oferta.linkOriginal || "");
+  if (!linkAfiliado || !linkOriginal) return null;
+
+  const temResgateRenderizavel = links.some(item => (
+    classificarTipoLinkBloco(item, "", marketplace) === "link_resgate" && item.renderizavel === true
+  ));
+  const temProdutoRenderizavel = links.some(item => (
+    classificarTipoLinkBloco(item, "", marketplace) === "link_produto_original" && item.renderizavel === true
+  ));
+  if (!temResgateRenderizavel || temProdutoRenderizavel) return null;
+
+  const descartados = lista(objeto(metadata.integridadeComercial).linksDescartadosRadar);
+  const produtoDescartado = descartados.find(item => (
+    tipoLinkNormalizado(item?.tipo || item?.papel || "") === "produto" &&
+    textoComercialEquivalente(item?.urlOriginal || item?.url || "", linkOriginal) &&
+    textoComercialEquivalente(item?.destinoFuncionalFinal?.url || "", linkAfiliado)
+  ));
+  if (!produtoDescartado) return null;
+
+  return {
+    urlOriginal: linkOriginal,
+    urlAfiliada: linkAfiliado,
+    urlAfiliadaWorkspace: linkAfiliado,
+    papel: "link_produto",
+    tipo: "produto",
+    renderizavel: true,
+    seguro: true,
+    convertidoWorkspace: true,
+    ordemCaptura: Number(produtoDescartado.ordemCaptura || 0) || 0,
+    ocorrenciaId: texto(produtoDescartado.ocorrenciaId || "") || "shopee:produto:afiliado-recuperado",
+    origem: "espelho.shopee.produto_afiliado_recuperado",
+    conversaoStatus: "convertida",
+    motivoConversao: "produto_shopee_afiliado_recuperado_apos_guarda"
+  };
+}
+
 function linkAlternativoAliExpressRenderizavel(item = {}) {
   const tipo = texto(item.tipo);
   const status = normalizarComparacao(item.conversaoStatus);
@@ -1573,6 +1613,8 @@ function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada
   for (const item of lista(ofertaEntrada.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
   for (const item of lista(oferta.linksProduto)) adicionarLinkComercialEstruturado(links, item, "produto");
   for (const item of lista(oferta.linksResgate)) adicionarLinkComercialEstruturado(links, item, "resgate");
+  const produtoShopeeRecuperado = produtoShopeeAfiliadoRecuperavel({ links, oferta, metadata, marketplace });
+  if (produtoShopeeRecuperado) adicionarLinkComercialEstruturado(links, produtoShopeeRecuperado, "produto");
   normalizarPapeisLinksAliExpress(links, marketplace);
   if (!marketplaceAliExpressValor(marketplace) || !links.some(linkItem => linkAlternativoAliExpressRenderizavel(linkItem))) {
     adicionarLinkUnico(links, oferta.linkOriginal || link.url_original || ofertaEntrada.linkOriginal, "produto");

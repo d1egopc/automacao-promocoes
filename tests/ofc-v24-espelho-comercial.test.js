@@ -680,6 +680,59 @@ const templateSomenteResgateV26 = montarTemplateEspelhoPorBlocosV26(
 assert.ok(templateSomenteResgateV26.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/resgate-solo-af"), "Resgate sozinho renderiza Resgate");
 assert.ok(!templateSomenteResgateV26.mensagem.includes("Confira aqui:"), "Resgate sozinho nao inventa Produto");
 
+const shopeeProdutoRecuperadoAposGuardaV26 = criarEspelho({
+  textoOriginal: "Intel Xeon E5-2680 v4\nResgate o cupom antes de comprar",
+  oferta: {
+    marketplace: "shopee",
+    linkOriginal: "https://s.shopee.com.br/BThVUIrus",
+    linkAfiliado: "https://s.shopee.com.br/7Kws2znZWZ",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/9AOWE1tGgv", urlAfiliada: "https://s.shopee.com.br/3g3ZgG5iti", renderizavel: true }
+    ]
+  },
+  metadata: {
+    integridadeComercial: {
+      linksDescartadosRadar: [{
+        tipo: "produto",
+        urlOriginal: "https://s.shopee.com.br/BThVUIrus",
+        ordemCaptura: 3,
+        ocorrenciaId: "shopee:produto:principal:3",
+        destinoFuncionalFinal: { url: "https://s.shopee.com.br/7Kws2znZWZ" }
+      }]
+    }
+  },
+  comercialNormalizado: { marketplace: "shopee", precoAtual: 132.91, precoConfiavel: true }
+});
+const templateProdutoRecuperadoAposGuardaV26 = montarTemplateEspelhoPorBlocosV26(
+  shopeeProdutoRecuperadoAposGuardaV26.espelhoComercial,
+  shopeeProdutoRecuperadoAposGuardaV26.documentoComercialCanonico
+);
+assert.ok(templateProdutoRecuperadoAposGuardaV26.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/3g3ZgG5iti"), "Resgate Shopee permanece separado");
+assert.ok(templateProdutoRecuperadoAposGuardaV26.mensagem.includes("Confira aqui:\nhttps://s.shopee.com.br/7Kws2znZWZ"), "Afiliado validado do produto volta como CTA separado");
+assert.strictEqual(contarOcorrenciasTexto(templateProdutoRecuperadoAposGuardaV26.mensagem, "Confira aqui:"), 1, "Produto recuperado gera um unico CTA");
+
+const mercadoLivreNaoRecuperaProdutoShopee = criarEspelho({
+  textoOriginal: "Oferta ML com resgate",
+  oferta: {
+    marketplace: "mercadolivre",
+    linkOriginal: "https://meli.la/produto",
+    linkAfiliado: "https://meli.la/afiliado",
+    linksComerciais: [
+      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://meli.la/resgate", urlAfiliada: "https://meli.la/resgate-af", renderizavel: true }
+    ]
+  },
+  metadata: {
+    integridadeComercial: {
+      linksDescartadosRadar: [{
+        tipo: "produto",
+        urlOriginal: "https://meli.la/produto",
+        destinoFuncionalFinal: { url: "https://meli.la/afiliado" }
+      }]
+    }
+  }
+});
+assert.ok(!mercadoLivreNaoRecuperaProdutoShopee.documentoComercialCanonico.linksComerciais.some(item => item.urlAfiliada === "https://meli.la/afiliado"), "Recuperacao e exclusiva da Shopee");
+
 const shopeeSomenteProdutoV26 = criarEspelho({
   textoOriginal: "Produto Shopee simples Por R$ 49,90",
   oferta: {
