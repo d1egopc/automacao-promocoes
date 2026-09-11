@@ -104,9 +104,101 @@ small {
 }
 
 .empty-state {
+  position: relative;
   min-height: 360px;
   justify-content: center;
   padding: 20px 10px;
+}
+
+.botao-oportunidades {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #d0d5dd;
+  border-radius: 50%;
+  color: #344054;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+
+.botao-oportunidades[data-tem-oportunidades="true"] {
+  border-color: #165dff;
+  transform-origin: 50% 12%;
+  animation: sino-oportunidades 0.8s ease-in-out;
+}
+
+.badge-oportunidades {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  color: #fff;
+  background: #e63b3b;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.popover-oportunidades {
+  position: absolute;
+  z-index: 2;
+  top: 54px;
+  right: 12px;
+  width: min(280px, calc(100% - 24px));
+  padding: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(16, 24, 40, 0.18);
+  text-align: left;
+}
+
+.lista-oportunidades {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.item-oportunidade {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  color: #182033;
+  background: #fff;
+  text-align: left;
+}
+
+.item-oportunidade span,
+.estado-oportunidades {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.item-oportunidade em {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: #165dff;
+  font-size: 11px;
+  font-style: normal;
+}
+
+@keyframes sino-oportunidades {
+  0%, 100% { transform: rotate(0deg); }
+  16% { transform: rotate(-12deg); }
+  32% { transform: rotate(10deg); }
+  48% { transform: rotate(-8deg); }
+  64% { transform: rotate(5deg); }
+  80% { transform: rotate(-3deg); }
 }
 
 .logo-vazio {
@@ -166,8 +258,12 @@ small {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .scanner-lupa {
+  .scanner-lupa,
+  .botao-oportunidades[data-tem-oportunidades="true"] {
     animation: none;
+  }
+
+  .scanner-lupa {
     left: calc(50% - 10px);
   }
 }

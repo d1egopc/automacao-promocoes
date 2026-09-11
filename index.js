@@ -414,6 +414,9 @@ const {
   resolverIdentidadeCanonicaOferta
 } = require("./modules/radar/produto-canonico");
 const alertasIntegracoes = require("./utils/alertas-integracoes");
+const {
+  listarOportunidadesAtivas
+} = require("./modules/extension/oportunidades-resumo.service");
 const storageUtils = require("./utils/storage");
 const linksPuros = require("./modules/links");
 const {
@@ -13692,6 +13695,15 @@ app.use("/auth/capture/handoff", criarRotasCaptureHandoff({
   emitirJwtOptimusUsuario
 }));
 app.use(auth);
+app.get("/extension/oportunidades/resumo", async (req, res) => {
+  const clienteId = getClienteId(req);
+  const oportunidades = await listarOportunidadesAtivas(clienteId);
+  return res.json({
+    ok: true,
+    geradoEm: new Date().toISOString(),
+    oportunidades
+  });
+});
 app.use("/financeiro", criarRotasCheckoutFinanceiro({
   getPlanos: () => planos,
   renovarFinanceiroUsuario: renovarCreditosSeNecessario,

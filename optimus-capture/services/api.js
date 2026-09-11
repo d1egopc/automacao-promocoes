@@ -75,6 +75,10 @@
     return requestJson("/me", { token });
   }
 
+  function listarResumoOportunidades(token) {
+    return requestJson("/extension/oportunidades/resumo", { token, timeoutMs: 8000 });
+  }
+
   function gerarPreviewCapture(token, produto) {
     return requestJson("/manual-v2/capture/ofertas", {
       method: "POST",
@@ -126,6 +130,7 @@
     requestJson,
     login,
     me,
+    listarResumoOportunidades,
     gerarPreviewCapture,
     salvarOfertaManualV2,
     listarDestinosManualV2,

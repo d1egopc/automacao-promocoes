@@ -3,6 +3,7 @@
   const api = global.OptimusCaptureApi;
   const contrato = global.OptimusCaptureContract;
   const detector = global.OptimusCaptureDetector;
+  const oportunidades = global.OptimusCaptureOportunidades;
 
   const el = (id) => document.getElementById(id);
   const state = {
@@ -32,7 +33,9 @@
     destinosSelecionados: new Set(),
     carregandoDestinos: false,
     enviandoAgora: false,
-    previewEnviadoKey: ""
+    previewEnviadoKey: "",
+    oportunidadesCliente: null,
+    oportunidades: []
   };
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
@@ -45,6 +48,82 @@
   function setHidden(id, hidden) {
     const node = el(id);
     if (node) node.hidden = hidden;
+  }
+
+  function urlOportunidadeSegura(valor = "") {
+    try {
+      const url = new URL(String(valor || ""));
+      return url.protocol === "https:" && !url.username && !url.password ? url.toString() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function renderOportunidades(lista = []) {
+    state.oportunidades = Array.isArray(lista) ? lista.filter((item) => Number(item?.quantidade || 0) > 0) : [];
+    const total = state.oportunidades.reduce((soma, item) => soma + Number(item.quantidade || 0), 0);
+    const botao = el("botaoOportunidades");
+    const badge = el("badgeOportunidades");
+    const container = el("listaOportunidades");
+    if (botao?.dataset) botao.dataset.temOportunidades = total > 0 ? "true" : "false";
+    if (badge) {
+      badge.hidden = total <= 0;
+      badge.textContent = total > 99 ? "99+" : String(total || "");
+    }
+    if (!container) return;
+    container.innerHTML = "";
+    if (!state.oportunidades.length) {
+      const vazio = document.createElement("p");
+      vazio.className = "estado-oportunidades";
+      vazio.textContent = "Nenhuma oportunidade disponível agora.";
+      container.append(vazio);
+      return;
+    }
+
+    for (const oportunidade of state.oportunidades) {
+      const urlDestino = urlOportunidadeSegura(oportunidade.urlDestino);
+      if (!urlDestino) continue;
+      const item = document.createElement("button");
+      const titulo = document.createElement("strong");
+      const mensagem = document.createElement("span");
+      const abrir = document.createElement("em");
+      item.type = "button";
+      item.className = "item-oportunidade";
+      titulo.textContent = `${String(oportunidade.titulo || oportunidade.marketplace || "Oportunidades")} · ${Number(oportunidade.quantidade)}`;
+      mensagem.textContent = String(oportunidade.mensagem || "Oportunidades disponíveis agora");
+      abrir.textContent = "Abrir";
+      item.append(titulo, mensagem, abrir);
+      item.addEventListener("click", () => void abrirOportunidade(urlDestino));
+      container.append(item);
+    }
+  }
+
+  async function abrirOportunidade(urlDestino) {
+    if (typeof oportunidades?.abrirUrlOportunidade === "function") {
+      await oportunidades.abrirUrlOportunidade(global.chrome?.tabs, urlDestino);
+      return;
+    }
+    const url = urlOportunidadeSegura(urlDestino);
+    if (!url || !global.chrome?.tabs?.create) return;
+    await global.chrome.tabs.create({ url, active: true });
+  }
+
+  function alternarPopoverOportunidades() {
+    const popover = el("popoverOportunidades");
+    const botao = el("botaoOportunidades");
+    if (!popover) return;
+    popover.hidden = !popover.hidden;
+    if (botao) botao.setAttribute("aria-expanded", popover.hidden ? "false" : "true");
+  }
+
+  async function carregarOportunidades() {
+    if (!state.auth?.token || !state.oportunidadesCliente) return;
+    try {
+      const resposta = await state.oportunidadesCliente.carregar(state.auth.token);
+      renderOportunidades(resposta?.sessaoExpirada ? [] : resposta?.oportunidades);
+    } catch {
+      renderOportunidades([]);
+    }
   }
 
   function setBodyState(valor) {
@@ -918,12 +997,14 @@
         state.capturaInicialExecutada = true;
         void capturar();
       }
+      void carregarOportunidades();
     } else {
       state.capturaInicialExecutada = false;
       setTexto("statusConexao", "Desconectado");
       setHidden("emptyView", true);
       setHidden("produtoView", true);
       setHidden("previewView", true);
+      setHidden("popoverOportunidades", true);
     }
   }
 
@@ -991,6 +1072,7 @@
   }
 
   async function init() {
+    state.oportunidadesCliente = oportunidades?.criarClienteOportunidades?.({ api }) || null;
     registrarEventosAbas();
     el("botaoConectar").addEventListener("click", conectarComOptimus);
     el("botaoLogin").addEventListener("click", entrar);
@@ -999,11 +1081,15 @@
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
     el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
+    el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
     el("campoTitulo").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoPrecoAtual").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoPrecoAnterior").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoCupom").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoObservacoes").addEventListener("input", invalidarPreviewPorObservacaoManual);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) void carregarOportunidades();
+    });
     try {
       state.auth = await auth.restaurarSessao();
     } catch {
