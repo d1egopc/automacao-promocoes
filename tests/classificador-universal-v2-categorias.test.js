@@ -63,6 +63,7 @@ assertCategoria("short masculino", "Roupas e Moda Masculina");
 assertCategoria("short Adidas masculino", "Roupas e Moda Masculina");
 assertCategoria("camisa Adidas masculina", "Roupas e Moda Masculina");
 assertCategoria("camiseta Nike masculina", "Roupas e Moda Masculina");
+assertCategoria("Camiseta Ess Puma Logo Poly Puma", "Roupas e Moda Masculina");
 for (const marca of ["Nike", "Adidas", "Puma"]) {
   assertCategoria(`camiseta masculina ${marca}`, "Roupas e Moda Masculina", {
     categoria: "Tênis e Chinelos"
@@ -80,6 +81,7 @@ assertCategoria("chuteira Puma masculina", "Tênis e Chinelos");
 assertCategoria("chinelo Nike masculino", "Tênis e Chinelos");
 assertCategoria("kit tênis + camiseta", "Tênis e Chinelos");
 assertCategoria("Kit 2 Camisetas Masculinas Dry Wolf Alpha", "Roupas e Moda Masculina");
+assertCategoria("Kit 3 Shorts De Corrida Dry Alpha", "Roupas e Moda Masculina");
 
 assertCategoriaEm("Teclado AULA HERO 68HE magnetico", ["Periféricos", "Gamer e Hardware"]);
 assertCategoriaEm("Mouse ATK A9 Air Ultimate", ["Periféricos", "Games e Console"]);
@@ -90,6 +92,7 @@ assertCategoriaEm("Controle Sem Fio Machenike G1 Hall Effect", ["Games e Console
 
 assertCategoriaEm("TV Stick Android 13 Pro 4K", ["Audio TV", "Eletrônicos"]);
 assertCategoria("Limpador Facial Antioleosidade 300ml CREAMY", "Perfumaria, Farmácia e Beleza");
+assertCategoria("Gel de Limpeza Facial Darrow Actine", "Perfumaria, Farmácia e Beleza");
 assertCategoria("creme renovador para os pés", "Perfumaria, Farmácia e Beleza");
 assertCategoria("reconstrutor capilar", "Perfumaria, Farmácia e Beleza");
 assertCategoria("gloss", "Perfumaria, Farmácia e Beleza");
@@ -100,6 +103,7 @@ assertCategoria("Caixa térmica Coleman para camping", "Pesca e Camping");
 assertCategoria("Barraca camping com saco de dormir", "Pesca e Camping");
 assertNuncaPesca("Lanterna led USB para escritorio");
 assertCategoria("whey protein", "Esporte e Suplementos");
+assertCategoria("Vitamina D3 + K2", "Esporte e Suplementos");
 assertCategoria("Eletrólitos Ocean Drop Sódio Potássio Magnésio 180g", "Esporte e Suplementos");
 assertCategoria("suplemento de eletrólitos", "Esporte e Suplementos");
 assertCategoria("eletrólitos para hidratação", "Esporte e Suplementos");
@@ -113,6 +117,7 @@ assertNaoCategoria("solução eletrolítica industrial", "Esporte e Suplementos"
 assertNaoCategoria("eletrólitos para bateria", "Esporte e Suplementos");
 assertCategoria("pneus aro 14", "Automotivo");
 assertCategoria("cama box queen", "Casa, Móveis e Decoração");
+assertCategoria("Kit com 30 Cabides Madeira", "Casa, Móveis e Decoração");
 assertCategoria("colchão casal", "Casa, Móveis e Decoração");
 assertCategoria("conjunto bistrô varanda sacada área gourmet", "Casa, Móveis e Decoração");
 assertCategoria("arara para roupas", "Casa, Móveis e Decoração");
@@ -124,7 +129,8 @@ assertCategoria("Conjunto Sala de Jantar Mesa 4 Cadeiras", "Casa, Móveis e Deco
 assertCategoria("Maquina Assentar Pisos Porcelanatos Ceramicas", "Ferramentas");
 
 assertCategoria("Cupom IFPC5HAQ ou BRGM1 moedas no APP abra o produto no link", "Diversos");
-assertCategoria("Kit 2 Camisetas Dry Wolf Alpha", "Diversos");
+assertCategoria("Kit 2 Camisetas Dry Wolf Alpha", "Roupas e Moda Masculina");
+assertCategoria("Oferta especial imperdível", "Diversos");
 
 {
   const resultado = classificarCategoriaUniversal({

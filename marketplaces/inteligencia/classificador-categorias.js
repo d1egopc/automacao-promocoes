@@ -134,7 +134,8 @@ const REGRAS = [
       "irrigador oral", "nebulizador", "inalador", "seringa insulina", "escova progressiva", "renovador facial",
       "creme renovador para os pes", "creme para os pes", "reconstrutor capilar",
       "limpador facial", "antioleosidade", "creamy", "corretivo", "base maquiagem", "base corretivo",
-      "base liquida", "base facial", "maquiagem", "luva nitrilica"
+      "base liquida", "base facial", "maquiagem", "luva nitrilica",
+      "limpeza facial", "gel de limpeza facial", "actine"
     ],
     palavras: [
       "chapinha", "secador cabelo", "secador de cabelo", "mascara capilar", "pomada", "arnica",
@@ -383,9 +384,9 @@ const REGRAS = [
   regra(CATEGORIA.modaMasculina, {
     prioridade: 66,
     fortes: [
-      "camisa polo", "camiseta masculina", "camisa masculina",
+      "camisa polo", "camiseta", "camisetas", "camiseta masculina", "camisa masculina",
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
-      "calca jeans masculina", "bermuda masculina", "short masculino",
+      "calca jeans masculina", "bermuda masculina", "short", "shorts", "short masculino",
       "short virgulado",
       "calca jogger masculina", "calca moletom masculina",
       "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
@@ -416,7 +417,7 @@ const REGRAS = [
       "suplemento", "hipercalorico", "bcaa", "glutamina", "protein crush",
       "colageno", "colageno hidrolisado", "colagentek", "vitafor", "bike", "bicicleta",
       "esteira", "eliptico", "yoga", "pilates", "balanca bioimpedancia",
-      "sodio potassio magnesio", "bebida isotonica"
+      "sodio potassio magnesio", "bebida isotonica", "vitamina d3", "vitamina k2"
     ],
     palavras: [
       "faixa elastica", "short academia", "camiseta academia", "dry fit",
@@ -473,7 +474,7 @@ const REGRAS = [
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
       "guarda roupa", "mesa", "cadeira", "penteadeira", "armario",
       "kit toalete", "toalete casamento", "jogo americano", "copo termico", "travesseiro", "lencol", "edredom", "fronha", "cuba", "louca", "pote", "fechadura inteligente",
-      "cabide", "marmita", "tapete banheiro", "porta escova",
+      "cabide", "cabides", "marmita", "tapete banheiro", "porta escova",
       "garrafa termica", "panos de copa", "pano de copa", "gabinete banheiro",
       "jogo de toalhas", "espremedor de alho", "molde para bolo",
       "mala de viagem", "cama box", "colchao", "colchao casal"
