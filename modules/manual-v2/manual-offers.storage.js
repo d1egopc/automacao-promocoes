@@ -8,6 +8,11 @@ const {
   STATUS_INICIAL_MANUAL_V2,
   normalizarStatusManualV2
 } = require("./manual-offers.contract");
+const {
+  normalizarDespachoAutomatico,
+  validarDespachoAutomaticoEntrada,
+  ORIGEM_AGENDAMENTO_AUTOMATICO
+} = require("./manual-auto-dispatch");
 
 const ARQUIVO_OFERTAS_MANUAL_V2 = "manual_ofertas_v2.json";
 const ARQUIVO_CONFIG_MANUAL_V2 = "manual_config_v2.json";
@@ -43,7 +48,8 @@ function listaTexto(valor) {
 }
 
 function normalizarConfigManualV2(config = {}) {
-  const automacoes = config && typeof config === "object" ? config.automacoesNovasOfertas || {} : {};
+  const origem = config && typeof config === "object" ? config : {};
+  const automacoes = origem.automacoesNovasOfertas || {};
   const vitrine = automacoes && typeof automacoes === "object" ? automacoes.vitrine || {} : {};
 
   return {
@@ -51,7 +57,8 @@ function normalizarConfigManualV2(config = {}) {
       vitrine: {
         ativa: vitrine.ativa === true
       }
-    }
+    },
+    despachoAutomatico: normalizarDespachoAutomatico(origem.despachoAutomatico)
   };
 }
 
@@ -194,7 +201,20 @@ function lerConfigManualV2(clienteId = "admin", deps = {}) {
 function salvarConfigManualV2(clienteId = "admin", entrada = {}, deps = {}) {
   const storage = resolverDepsStorage(deps);
   const id = storage.normalizarClienteId(clienteId || "admin");
-  const config = normalizarConfigManualV2(entrada?.config || entrada || {});
+  const recebida = entrada?.config || entrada || {};
+  const atual = storage.readClienteJson(id, ARQUIVO_CONFIG_MANUAL_V2, {});
+  const proxima = {
+    ...(atual && typeof atual === "object" ? atual : {}),
+    ...(recebida && typeof recebida === "object" ? recebida : {}),
+    automacoesNovasOfertas: {
+      ...((atual && atual.automacoesNovasOfertas) || {}),
+      ...((recebida && recebida.automacoesNovasOfertas) || {})
+    }
+  };
+  if (recebida && Object.prototype.hasOwnProperty.call(recebida, "despachoAutomatico")) {
+    validarDespachoAutomaticoEntrada(recebida.despachoAutomatico);
+  }
+  const config = normalizarConfigManualV2(proxima);
   storage.writeClienteJson(id, ARQUIVO_CONFIG_MANUAL_V2, config);
   return config;
 }
@@ -346,7 +366,8 @@ function atualizarMetadadosAgendamentoManualV2(clienteId = "admin", ofertaId = "
       "agendamentoCanceladoEm",
       "agendamentoLockId",
       "agendamentoLockEm",
-      "agendamentoErroResumo"
+      "agendamentoErroResumo",
+      "origemAgendamento"
     ]) {
       if (Object.prototype.hasOwnProperty.call(metadados, campo)) {
         const valor = texto(metadados[campo]);
@@ -429,6 +450,9 @@ function dadosAgendamentoManualV2(dados = {}, agora = "") {
     agendamentoAtualizadoEm: agora,
     destinosIds: listaTexto(dados.destinosIds),
     destinosAgendados: sanitizarDestinosAgendados(dados.destinosAgendados),
+    origemAgendamento: texto(dados.origemAgendamento) === ORIGEM_AGENDAMENTO_AUTOMATICO
+      ? ORIGEM_AGENDAMENTO_AUTOMATICO
+      : "",
     agendamentoErroResumo: ""
   };
 }
@@ -442,6 +466,24 @@ function marcarOfertaManualV2Agendada(clienteId = "admin", ofertaId = "", dados 
       ...agendamento,
       status: "agendada",
       agendamentoCriadoEm: texto(existente.agendamentoCriadoEm) || agora,
+      agendamentoCanceladoEm: "",
+      agendamentoTentativas: inteiro(existente.agendamentoTentativas)
+    };
+  }, deps);
+}
+
+function agendarOfertaManualV2Automaticamente(clienteId = "admin", ofertaId = "", dados = {}, deps = {}) {
+  return alterarOfertaManualV2(clienteId, ofertaId, (existente, agora) => {
+    if (normalizarStatusManualV2(existente.status) !== STATUS_INICIAL_MANUAL_V2) return null;
+    const agendamento = dadosAgendamentoManualV2({
+      ...dados,
+      origemAgendamento: ORIGEM_AGENDAMENTO_AUTOMATICO
+    }, agora);
+    return {
+      ...limparLockAgendamento(existente),
+      ...agendamento,
+      status: "agendada",
+      agendamentoCriadoEm: agora,
       agendamentoCanceladoEm: "",
       agendamentoTentativas: inteiro(existente.agendamentoTentativas)
     };
@@ -477,6 +519,7 @@ function cancelarAgendamentoOfertaManualV2(clienteId = "admin", ofertaId = "", d
       agendamentoCanceladoEm: agora,
       destinosIds: [],
       destinosAgendados: [],
+      origemAgendamento: "",
       agendamentoErroResumo: ""
     };
   }, deps);
@@ -496,6 +539,7 @@ module.exports = {
   atualizarMetadadosEnvioManualV2,
   atualizarMetadadosAgendamentoManualV2,
   marcarOfertaManualV2Agendada,
+  agendarOfertaManualV2Automaticamente,
   reprogramarOfertaManualV2Agendada,
   cancelarAgendamentoOfertaManualV2,
   sanitizarDestinoAgendado

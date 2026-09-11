@@ -299,8 +299,24 @@ try {
           vitrine: {
             ativa: false
           }
+        },
+        despachoAutomatico: {
+          ativo: false,
+          destinosIds: [],
+          intervaloMs: 150000,
+          ultimoDespachoEm: ""
         }
       });
+
+      const configAutoInvalida = await request(serverVitrine, "PUT", "/manual-v2/config", "cliente_vitrine", {
+        despachoAutomatico: {
+          ativo: true,
+          destinosIds: ["destino_wa"],
+          intervaloMs: 149999
+        }
+      });
+      assert.strictEqual(configAutoInvalida.status, 400);
+      assert.strictEqual(configAutoInvalida.body.motivo, "manual_v2_despacho_automatico_intervalo_invalido");
 
       const ofertaFlagOff = await request(serverVitrine, "POST", "/manual-v2/ofertas", "cliente_vitrine", {
         marketplace: "mercadolivre",
@@ -324,6 +340,22 @@ try {
         false,
         "Social fica fora desta fase"
       );
+
+      const configAutoSalva = await request(serverVitrine, "PUT", "/manual-v2/config", "cliente_vitrine", {
+        despachoAutomatico: {
+          ativo: true,
+          destinosIds: ["destino_wa"],
+          intervaloMs: 150000
+        }
+      });
+      assert.strictEqual(configAutoSalva.status, 200);
+      assert.strictEqual(configAutoSalva.body.config.automacoesNovasOfertas.vitrine.ativa, true);
+      assert.deepStrictEqual(configAutoSalva.body.config.despachoAutomatico, {
+        ativo: true,
+        destinosIds: ["destino_wa"],
+        intervaloMs: 150000,
+        ultimoDespachoEm: ""
+      });
 
       const criadaComVitrine = await request(serverVitrine, "POST", "/manual-v2/ofertas", "cliente_vitrine", {
         clienteId: "cliente_forjado",

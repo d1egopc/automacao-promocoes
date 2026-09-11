@@ -5,6 +5,10 @@ const storagePadrao = require("./manual-offers.storage");
 const {
   processarAgendamentosManuaisV2Cliente
 } = require("./manual-scheduler");
+const {
+  autorizarProximoDespachoAutomaticoCliente,
+  registrarTentativaDespachoAutomatico
+} = require("./manual-auto-dispatch");
 
 const INTERVALO_PADRAO_MS = 60 * 1000;
 const INTERVALO_MINIMO_MS = 30 * 1000;
@@ -85,14 +89,37 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
 
   estado.rodando = true;
   try {
-    const clientes = listarClientesComAgendadas(deps);
+    const listarClientes = deps.listClientes || listClientes;
+    const clientesBase = Array.isArray(deps.clientes) ? deps.clientes : listarClientes();
+    const autorizarAutomatico = deps.autorizarProximoDespachoAutomaticoCliente || autorizarProximoDespachoAutomaticoCliente;
+    const dependenciasAuto = {
+      ...deps,
+      lerConfigManualV2: deps.lerConfigManualV2 || storagePadrao.lerConfigManualV2,
+      listarOfertasManuaisV2: deps.listarOfertasManuaisV2 || storagePadrao.listarOfertasManuaisV2,
+      agendarOfertaManualV2Automaticamente: deps.agendarOfertaManualV2Automaticamente || storagePadrao.agendarOfertaManualV2Automaticamente
+    };
+    const autorizacoesAutomaticas = [];
+
+    for (const clienteId of clientesBase.map(texto).filter(Boolean)) {
+      try {
+        autorizacoesAutomaticas.push(await autorizarAutomatico(clienteId, dependenciasAuto));
+      } catch (e) {
+        logar(deps, "despacho_automatico_erro_fail_open", {
+          clienteId,
+          erro: e.message || "despacho_automatico_falhou"
+        });
+      }
+    }
+
+    const clientes = listarClientesComAgendadas({ ...deps, clientes: clientesBase });
     const totalAgendadas = clientes.reduce((total, item) => total + item.totalAgendadas, 0);
     if (!totalAgendadas) {
       return {
         ok: true,
         semTrabalho: true,
         clientes: 0,
-        totalAgendadas: 0
+        totalAgendadas: 0,
+        autorizacoesAutomaticas
       };
     }
 
@@ -103,6 +130,7 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
 
     const resultados = [];
     const processarCliente = deps.processarAgendamentosManuaisV2Cliente || processarAgendamentosManuaisV2Cliente;
+    const registrarTentativaAuto = deps.registrarTentativaDespachoAutomatico || registrarTentativaDespachoAutomatico;
     for (const item of clientes) {
       const resultadoCliente = await processarCliente({
         clienteId: item.clienteId
@@ -110,6 +138,19 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
       resultados.push(resultadoCliente);
 
       for (const resultadoOferta of resultadoCliente.resultados || []) {
+        try {
+          registrarTentativaAuto(item.clienteId, resultadoOferta, {
+            ...deps,
+            lerConfigManualV2: deps.lerConfigManualV2 || storagePadrao.lerConfigManualV2,
+            salvarConfigManualV2: deps.salvarConfigManualV2 || storagePadrao.salvarConfigManualV2
+          });
+        } catch (e) {
+          logar(deps, "despacho_automatico_checkpoint_erro_fail_open", {
+            clienteId: item.clienteId,
+            ofertaId: texto(resultadoOferta.ofertaId || resultadoOferta.oferta?.id),
+            erro: e.message || "despacho_automatico_checkpoint_falhou"
+          });
+        }
         const resumo = resumoResultadoOferta(resultadoOferta);
         if (resumo.processado || resumo.motivo) {
           logar(deps, "oferta_agendada_processada", {
@@ -131,6 +172,7 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
       semTrabalho: false,
       clientes: clientes.length,
       totalAgendadas,
+      autorizacoesAutomaticas,
       resultados
     };
   } catch (e) {

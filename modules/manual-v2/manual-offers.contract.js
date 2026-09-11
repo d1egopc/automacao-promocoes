@@ -207,6 +207,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     destinosAgendados: normalizarDestinosAgendadosManualV2(entrada.destinosAgendados),
     agendamentoLockId: primeiroTexto(entrada.agendamentoLockId),
     agendamentoLockEm: primeiroTexto(entrada.agendamentoLockEm),
+    origemAgendamento: primeiroTexto(entrada.origemAgendamento),
     agendamentoTentativas: inteiroNaoNegativo(entrada.agendamentoTentativas),
     agendamentoErroResumo: primeiroTexto(entrada.agendamentoErroResumo).slice(0, 1000)
   };
