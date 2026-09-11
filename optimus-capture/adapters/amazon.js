@@ -1,5 +1,6 @@
 (function publicarAdapterAmazon(global) {
   const contrato = global.OptimusCaptureContract || require("../core/product-contract");
+  const detector = global.OptimusCaptureDetector || require("../core/marketplace-detector");
 
   function texto(valor) {
     return contrato.texto(valor);
@@ -41,6 +42,23 @@
     const src = contrato.urlHttp(img?.src || img?.currentSrc || img?.getAttribute?.("src") || "");
     if (src) return src;
     return contrato.urlHttp(meta(html, "og:image"));
+  }
+
+  function urlAmazonCanonica(valor = "") {
+    const original = contrato.urlHttp(valor);
+    if (!original) return "";
+    try {
+      const url = new URL(original);
+      if (!detector.hostAmazon?.(url.hostname)) return original;
+      const asin = detector.asinProdutoAmazon?.(url);
+      if (!asin) return original;
+      const tag = url.searchParams.get("tag");
+      const limpa = new URL(`https://www.amazon.com.br/dp/${asin}`);
+      if (tag) limpa.searchParams.set("tag", tag);
+      return limpa.toString();
+    } catch {
+      return original;
+    }
   }
 
   function blocoPrecoPrincipal(documento) {
@@ -109,7 +127,7 @@
 
     const produto = contrato.normalizarProdutoCapturado({
       marketplace: "amazon",
-      urlOriginal: url,
+      urlOriginal: urlAmazonCanonica(url),
       titulo: tituloAmazon(documento, html),
       precoAtual,
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
@@ -130,7 +148,8 @@
     capturarAmazonDeHtml,
     precoAtualAmazon,
     precoAnteriorAmazon,
-    descontoAmazon
+    descontoAmazon,
+    urlAmazonCanonica
   };
   global.OptimusCaptureAmazon = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

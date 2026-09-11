@@ -559,6 +559,49 @@ function documentoKabumFixture({
   };
 }
 
+function documentoKabumLayoutAtualFixture({
+  url,
+  titulo,
+  precoAtual,
+  precoAnterior,
+  imagem
+}) {
+  const h1 = criarNoKabum({ texto: titulo, tagName: "H1" });
+  const anterior = criarNoKabum({
+    texto: precoAnterior,
+    tagName: "SPAN",
+    style: { textDecorationLine: "line-through" },
+    attrs: { style: "text-decoration: line-through;" }
+  });
+  const preco = criarNoKabum({ texto: precoAtual, tagName: "SPAN" });
+  const pix = criarNoKabum({ texto: "à vista no PIX", tagName: "SPAN" });
+  const blocoAtual = criarNoKabum({
+    texto: `${precoAtual} à vista no PIX`,
+    tagName: "P",
+    filhos: [preco, pix]
+  });
+  const blocoPreco = criarNoKabum({
+    texto: `${precoAnterior} ${precoAtual} à vista no PIX`,
+    filhos: [anterior, blocoAtual]
+  });
+  const root = criarNoKabum({
+    texto: `${titulo} ${blocoPreco.textContent}`,
+    filhos: [h1, blocoPreco]
+  });
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `<html><head><meta property="og:image" content="${imagem}"></head><body><main>${root.textContent}</main></body></html>`
+    },
+    images: [],
+    body: root,
+    querySelector(seletor) {
+      if (seletor === "main, [role='main']") return root;
+      return root.querySelector(seletor);
+    }
+  };
+}
+
 function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   const url = "https://shopee.com.br/product/555/999";
   const imagem = "https://down-br.img.susercontent.com/file/baby-tee.webp";
@@ -908,6 +951,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAnterior, 1099.00);
     assert.strictEqual(produto.descontoPercentual, 27);
     assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg");
+    assert.strictEqual(produto.urlOriginal, "https://www.amazon.com.br/dp/B0G2T13LT6");
     assert.strictEqual(produto.cupom, "");
     assert.strictEqual(produto.fonte, "dom_amazon_v1");
     assert.strictEqual(produto.completo, true);
@@ -937,6 +981,18 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const longa = "https://www.amazon.com.br/Whisky-Daniels-Blackberry-Tennessee-Whiskey/dp/B0GWRPB2J9?ref=dlx_deals&pf_rd_r=DF7YY1A87JHADKDXDC0T&tag=d1egopcoff-20";
+    assert.strictEqual(
+      amazon.urlAmazonCanonica(longa),
+      "https://www.amazon.com.br/dp/B0GWRPB2J9?tag=d1egopcoff-20"
+    );
+    assert.strictEqual(
+      amazon.urlAmazonCanonica("https://www.amazon.com.br/dp/B0GWRPB2J9?tag=d1egopcoff-20"),
+      "https://www.amazon.com.br/dp/B0GWRPB2J9?tag=d1egopcoff-20"
+    );
+  }
+
+  {
     const documento = documentoKabumFixture();
     const produto = kabum.capturarKabumDaPagina(documento, documento.location);
     assert.strictEqual(produto.marketplace, "kabum");
@@ -953,6 +1009,56 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
+  }
+
+  for (const caso of [
+    {
+      url: "https://www.kabum.com.br/produto/115216/placa-mae-asus-tuf-gaming-b550m-plus",
+      titulo: "Placa-Mãe ASUS TUF Gaming B550M-Plus, AMD AM4, mATX, DDR4, Preto - 90MB14A0-C1BAY0",
+      precoAtual: "R$ 789,99",
+      precoAnterior: "R$ 1.168,00",
+      imagem: "https://images.kabum.com.br/produtos/fotos/115216/placa-mae-asus-tuf-gaming-b550m-plus_m.jpg",
+      esperado: [789.99, 1168]
+    },
+    {
+      url: "https://www.kabum.com.br/produto/536953/ssd-sandisk-sn350-1tb",
+      titulo: "SSD Sandisk SN350, 1TB, M.2 2280, PCIe, NVMe, Leitura: 2400MB/s e Gravação:1850MB/s, Verde - WDS100T2G0C",
+      precoAtual: "R$ 1.599,99",
+      precoAnterior: "R$ 1.999,99",
+      imagem: "https://images.kabum.com.br/produtos/fotos/536953/ssd-wd-green-1tb-sn350_m.jpg",
+      esperado: [1599.99, 1999.99]
+    }
+  ]) {
+    const produto = kabum.capturarKabumDaPagina(documentoKabumLayoutAtualFixture(caso));
+    assert.ok(produto.produtoId, "produtoId KaBuM continua extraido da URL");
+    assert.strictEqual(produto.precoAtual, caso.esperado[0]);
+    assert.strictEqual(produto.precoAnterior, caso.esperado[1]);
+    assert.strictEqual(produto.imagem, caso.imagem);
+    assert.strictEqual(produto.urlOriginal, caso.url);
+  }
+
+  {
+    const documento = documentoKabumLayoutAtualFixture({
+      url: "https://www.kabum.com.br/produto/115216/placa-mae",
+      titulo: "Placa-Mãe ASUS TUF Gaming B550M-Plus",
+      precoAtual: "R$ 789,99 R$ 699,99",
+      precoAnterior: "R$ 1.168,00",
+      imagem: "https://images.kabum.com.br/produtos/fotos/115216/placa-mae_m.jpg"
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null, "bloco PIX com dois valores continua ambiguo");
+  }
+
+  {
+    const documento = documentoKabumLayoutAtualFixture({
+      url: "https://www.kabum.com.br/produto/115216/placa-mae",
+      titulo: "Placa-Mãe ASUS TUF Gaming B550M-Plus",
+      precoAtual: "10x R$ 78,99",
+      precoAnterior: "R$ 1.168,00",
+      imagem: "https://images.kabum.com.br/produtos/fotos/115216/placa-mae_m.jpg"
+    });
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, null, "parcelamento nao pode virar preco PIX");
   }
 
   {

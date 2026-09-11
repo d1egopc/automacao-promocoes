@@ -91,6 +91,23 @@
     return blocos;
   }
 
+  function candidatoPSpanPix(raiz) {
+    const nos = Array.from(raiz?.querySelectorAll?.("p, span") || []);
+    for (const no of nos) {
+      if (temLineThrough(no)) continue;
+      const preco = valorMonetarioUnico(textoVisivel(no));
+      if (!preco) continue;
+      let atual = no;
+      for (let nivel = 0; atual && nivel < 4; nivel += 1) {
+        if (temPix(atual)) {
+          return { no, bloco: atual.parentElement || atual, preco };
+        }
+        atual = atual.parentElement || null;
+      }
+    }
+    return null;
+  }
+
   function blocoPrecoPix(documento) {
     const raiz = mainProduto(documento);
     const [porH4] = candidatosH4Pix(raiz);
@@ -103,7 +120,7 @@
       if (h4 && preco) return { h4, bloco, preco };
     }
 
-    return null;
+    return candidatoPSpanPix(raiz);
   }
 
   function temLineThrough(no) {
