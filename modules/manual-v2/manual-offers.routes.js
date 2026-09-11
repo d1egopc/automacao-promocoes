@@ -190,6 +190,8 @@ function criarRotasManualV2(deps = {}) {
     criarOfertaManualV2: deps.criarOfertaManualV2 || storagePadrao.criarOfertaManualV2,
     atualizarOfertaManualV2: deps.atualizarOfertaManualV2 || storagePadrao.atualizarOfertaManualV2,
     excluirOfertaManualV2: deps.excluirOfertaManualV2 || storagePadrao.excluirOfertaManualV2,
+    excluirOfertasManuaisSalvasV2: deps.excluirOfertasManuaisSalvasV2 || storagePadrao.excluirOfertasManuaisSalvasV2,
+    limparHistoricoManualV2: deps.limparHistoricoManualV2 || storagePadrao.limparHistoricoManualV2,
     atualizarMetadadosEnvioManualV2: deps.atualizarMetadadosEnvioManualV2 || storagePadrao.atualizarMetadadosEnvioManualV2,
     marcarOfertaManualV2Agendada: deps.marcarOfertaManualV2Agendada || storagePadrao.marcarOfertaManualV2Agendada,
     reprogramarOfertaManualV2Agendada: deps.reprogramarOfertaManualV2Agendada || storagePadrao.reprogramarOfertaManualV2Agendada,
@@ -787,6 +789,30 @@ function criarRotasManualV2(deps = {}) {
       });
     } catch (e) {
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_cancelamento_agendamento_falhou"));
+    }
+  });
+
+  router.delete("/ofertas/salvas", (req, res) => {
+    try {
+      const clienteId = clienteAutenticado(req, res);
+      if (!clienteId) return undefined;
+
+      const resultado = storage.excluirOfertasManuaisSalvasV2(clienteId, deps.storageOptions || {});
+      return res.json({ ok: true, removidas: Number(resultado && resultado.removidas) || 0 });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_exclusao_salvas_falhou"));
+    }
+  });
+
+  router.delete("/historico", (req, res) => {
+    try {
+      const clienteId = clienteAutenticado(req, res);
+      if (!clienteId) return undefined;
+
+      const resultado = storage.limparHistoricoManualV2(clienteId, deps.storageOptions || {});
+      return res.json({ ok: true, removidas: Number(resultado && resultado.removidas) || 0 });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_limpeza_historico_falhou"));
     }
   });
 

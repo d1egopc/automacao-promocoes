@@ -265,6 +265,58 @@ try {
   }
 
   {
+    const criadas = [];
+    for (const status of ["salva", "agendada", "enviando", "enviada", "erro"]) {
+      const criada = await request(server, "POST", "/manual-v2/ofertas", "cliente_limpeza", {
+        marketplace: "amazon",
+        urlOriginal: `https://www.amazon.com.br/dp/B0LIMPEZA${criadas.length}`,
+        titulo: `Oferta limpeza ${status}`,
+        precoAtual: "99,90"
+      });
+      assert.strictEqual(criada.status, 201);
+      criadas.push(criada.body.oferta);
+    }
+
+    const statusPorId = new Map(criadas.map((oferta, index) => [oferta.id, ["salva", "agendada", "enviando", "enviada", "erro"][index]]));
+    writeClienteJson("cliente_limpeza", "manual_ofertas_v2.json", readClienteJson("cliente_limpeza", "manual_ofertas_v2.json", []).map((oferta) => ({
+      ...oferta,
+      status: statusPorId.get(oferta.id) || oferta.status
+    })));
+
+    const outraWorkspace = await request(server, "POST", "/manual-v2/ofertas", "cliente_limpeza_outro", {
+      marketplace: "amazon",
+      urlOriginal: "https://www.amazon.com.br/dp/B0OUTROWORK",
+      titulo: "Oferta outro workspace",
+      precoAtual: "88,80"
+    });
+    assert.strictEqual(outraWorkspace.status, 201);
+
+    const limparSalvas = await request(server, "DELETE", "/manual-v2/ofertas/salvas", "cliente_limpeza");
+    assert.strictEqual(limparSalvas.status, 200);
+    assert.deepStrictEqual(limparSalvas.body, { ok: true, removidas: 1 });
+
+    const aposSalvas = await request(server, "GET", "/manual-v2/ofertas", "cliente_limpeza");
+    assert.deepStrictEqual(new Set(aposSalvas.body.ofertas.map(oferta => oferta.status)), new Set(["agendada", "enviando", "enviada", "erro"]));
+
+    const semSalvas = await request(server, "DELETE", "/manual-v2/ofertas/salvas", "cliente_limpeza");
+    assert.deepStrictEqual(semSalvas.body, { ok: true, removidas: 0 });
+
+    const limparHistorico = await request(server, "DELETE", "/manual-v2/historico", "cliente_limpeza");
+    assert.strictEqual(limparHistorico.status, 200);
+    assert.deepStrictEqual(limparHistorico.body, { ok: true, removidas: 1 });
+
+    const aposHistorico = await request(server, "GET", "/manual-v2/ofertas", "cliente_limpeza");
+    assert.deepStrictEqual(new Set(aposHistorico.body.ofertas.map(oferta => oferta.status)), new Set(["agendada", "enviando", "erro"]));
+
+    const semHistorico = await request(server, "DELETE", "/manual-v2/historico", "cliente_limpeza");
+    assert.deepStrictEqual(semHistorico.body, { ok: true, removidas: 0 });
+
+    const listaOutroWorkspace = await request(server, "GET", "/manual-v2/ofertas", "cliente_limpeza_outro");
+    assert.strictEqual(listaOutroWorkspace.body.ofertas.length, 1, "limpeza deve respeitar o workspace autenticado");
+    assert.strictEqual(listaOutroWorkspace.body.ofertas[0].status, "salva");
+  }
+
+  {
     assert.strictEqual(fs.existsSync(arquivoCliente("cliente_a", "fila.json")), false, "rotas Manual V2 nao escrevem fila do cliente A");
     assert.strictEqual(fs.existsSync(arquivoCliente("cliente_b", "fila.json")), false, "rotas Manual V2 nao escrevem fila do cliente B");
   }

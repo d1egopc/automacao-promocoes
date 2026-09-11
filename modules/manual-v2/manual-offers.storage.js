@@ -305,6 +305,27 @@ function excluirOfertaManualV2(clienteId = "admin", ofertaId = "", deps = {}) {
   return true;
 }
 
+function removerOfertasManuaisPorStatusV2(clienteId = "admin", status = "", deps = {}) {
+  const id = resolverDepsStorage(deps).normalizarClienteId(clienteId || "admin");
+  const statusAlvo = String(status || "").trim();
+  if (!statusAlvo) return { removidas: 0 };
+
+  const lista = lerListaCliente(id, deps);
+  const proxima = lista.filter((oferta) => oferta.status !== statusAlvo);
+  const removidas = lista.length - proxima.length;
+  if (removidas > 0) salvarListaCliente(id, proxima, deps);
+
+  return { removidas };
+}
+
+function excluirOfertasManuaisSalvasV2(clienteId = "admin", deps = {}) {
+  return removerOfertasManuaisPorStatusV2(clienteId, "salva", deps);
+}
+
+function limparHistoricoManualV2(clienteId = "admin", deps = {}) {
+  return removerOfertasManuaisPorStatusV2(clienteId, "enviada", deps);
+}
+
 function atualizarMetadadosEnvioManualV2(clienteId = "admin", ofertaId = "", metadados = {}, deps = {}) {
   const storage = resolverDepsStorage(deps);
   const id = storage.normalizarClienteId(clienteId || "admin");
@@ -536,6 +557,8 @@ module.exports = {
   criarOfertaManualV2,
   atualizarOfertaManualV2,
   excluirOfertaManualV2,
+  excluirOfertasManuaisSalvasV2,
+  limparHistoricoManualV2,
   atualizarMetadadosEnvioManualV2,
   atualizarMetadadosAgendamentoManualV2,
   marcarOfertaManualV2Agendada,
