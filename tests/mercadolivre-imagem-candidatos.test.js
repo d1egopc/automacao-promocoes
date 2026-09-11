@@ -13,6 +13,40 @@ function mlstatic(nome) {
   return `https://http2.mlstatic.com/D_NQ_NP_${nome}.jpg`;
 }
 
+function htmlProdutoMl({ imagemJsonLd = "", imagemOg = "", imagemTwitter = "", estado = "" } = {}) {
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: "Produto Mercado Livre Teste",
+    ...(imagemJsonLd ? { image: imagemJsonLd } : {}),
+    offers: { price: "199.90" }
+  });
+  return `
+    <html><head>
+      ${imagemOg ? `<meta property="og:image" content="${imagemOg}" />` : ""}
+      ${imagemTwitter ? `<meta name="twitter:image" content="${imagemTwitter}" />` : ""}
+      <script type="application/ld+json">${jsonLd}</script>
+    </head><body>
+      <h1>Produto Mercado Livre Teste</h1>
+      <span class="andes-money-amount__fraction">199</span>
+      <script>window.__STATE__ = ${estado || "{}"};</script>
+    </body></html>
+  `;
+}
+
+async function importarHtmlImagem(html, jobId) {
+  global.fetch = async () => ({
+    status: 200,
+    url: "https://www.mercadolivre.com.br/produto/p/MLB123456",
+    text: async () => html
+  });
+  return importarMercadoLivre("https://meli.la/teste", "cliente_ml", {
+    getIntegracaoCliente: () => ({ credenciais: {} }),
+    gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/afiliado",
+    contextoEngine: { clienteId: "cliente_ml", jobId }
+  });
+}
+
 async function testarPreservacaoCandidatosImagem() {
   const imagemPrincipal = mlstatic("principal");
   const html = `
@@ -77,6 +111,71 @@ async function testarPreservacaoCandidatosImagem() {
   assert(produto.imagemCandidatos.length <= 12);
   assert.deepStrictEqual(produto.metadata.produto.images, produto.images);
   assert.deepStrictEqual(produto.metadata.produto.pictures, produto.pictures);
+}
+
+async function testarPrecedenciaECandidatoPrincipalSeguro() {
+  const pictureSecure = mlstatic("picture-secure-principal");
+  const pictureUrl = mlstatic("picture-url-principal");
+  const estadoComPictures = JSON.stringify({
+    pictures: [{ secure_url: pictureSecure }],
+    picture_url: pictureUrl,
+    secure_thumbnail: mlstatic("secure-thumb-nao-promover"),
+    thumbnail: mlstatic("thumb-nao-promover")
+  });
+
+  const jsonLd = await importarHtmlImagem(htmlProdutoMl({
+    imagemJsonLd: mlstatic("jsonld-principal"),
+    estado: estadoComPictures
+  }), "job_jsonld");
+  assert.strictEqual(jsonLd.imagem, mlstatic("jsonld-principal"), "JSON-LD continua prioritario");
+  assert.strictEqual(jsonLd.imagemOrigem, "jsonLd.image");
+
+  const og = await importarHtmlImagem(htmlProdutoMl({
+    imagemOg: mlstatic("og-principal"),
+    estado: estadoComPictures
+  }), "job_og");
+  assert.strictEqual(og.imagem, mlstatic("og-principal"), "OG continua prioritario");
+  assert.strictEqual(og.imagemOrigem, "og:image");
+
+  const twitter = await importarHtmlImagem(htmlProdutoMl({
+    imagemTwitter: mlstatic("twitter-principal"),
+    estado: estadoComPictures
+  }), "job_twitter");
+  assert.strictEqual(twitter.imagem, mlstatic("twitter-principal"), "Twitter continua prioritario");
+  assert.strictEqual(twitter.imagemOrigem, "twitter:image");
+
+  const pictures = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ pictures: [{ secure_url: pictureSecure }] })
+  }), "job_pictures");
+  assert.strictEqual(pictures.imagem, pictureSecure, "pictures[].secure_url vira principal apenas sem meta principal");
+  assert.strictEqual(pictures.imagemOrigem, "pictures[0].secure_url");
+
+  const picture = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ picture_url: pictureUrl })
+  }), "job_picture_url");
+  assert.strictEqual(picture.imagem, pictureUrl, "picture_url vira principal apenas sem meta principal");
+  assert.strictEqual(picture.imagemOrigem, "picture_url");
+
+  const somenteSecureThumbnail = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ secure_thumbnail: mlstatic("secure-thumb-somente") })
+  }), "job_secure_thumbnail");
+  assert.strictEqual(somenteSecureThumbnail.imagem, "", "secure_thumbnail nao pode ser promovido");
+
+  const somenteThumbnail = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ thumbnail: mlstatic("thumb-somente") })
+  }), "job_thumbnail");
+  assert.strictEqual(somenteThumbnail.imagem, "", "thumbnail nao pode ser promovido");
+
+  const externo = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ picture_url: "https://cdn.externo.test/produto.jpg" })
+  }), "job_host_externo");
+  assert.strictEqual(externo.imagem, "", "host externo continua rejeitado pelo normalizador ML");
+
+  const protocolRelative = await importarHtmlImagem(htmlProdutoMl({
+    estado: JSON.stringify({ picture_url: "//http2.mlstatic.com/D_NQ_NP_PROTOCOL_RELATIVE.jpg" })
+  }), "job_protocol_relative");
+  assert.strictEqual(protocolRelative.imagem, "https://http2.mlstatic.com/D_NQ_NP_PROTOCOL_RELATIVE.jpg");
+  assert.strictEqual(protocolRelative.imagemOrigem, "picture_url");
 }
 
 async function testarCaptchaHttp200FailClosed() {
@@ -164,6 +263,7 @@ async function testarWindowsNaoViraTituloProduto() {
 (async () => {
   try {
     await testarPreservacaoCandidatosImagem();
+    await testarPrecedenciaECandidatoPrincipalSeguro();
     await testarCaptchaHttp200FailClosed();
     await testarTituloTecnicoSemBloqueioFailClosed();
     await testarWindowsNaoViraTituloProduto();

@@ -179,6 +179,21 @@ function extrairCandidatosImagemMercadoLivre({ html = "", jsonLd = null, imagemO
   return montarMetadadosImagemMercadoLivre(candidatos);
 }
 
+function candidatoImagemPrincipalSeguroMercadoLivre(candidatos = []) {
+  const fontesPermitidas = new Set([
+    "original_picture",
+    "picture_url",
+    "pictures.secure_url",
+    "pictures.url"
+  ]);
+
+  return (Array.isArray(candidatos) ? candidatos : []).find((candidato) => {
+    const tipo = String(candidato?.tipo || "").trim();
+    const origem = String(candidato?.origem || "").trim();
+    return Boolean(candidato?.url) && (fontesPermitidas.has(tipo) || fontesPermitidas.has(origem));
+  }) || null;
+}
+
 function logImagemMercadoLivre(evento, dados = {}) {
   try {
     console.log(evento, JSON.stringify(dados));
@@ -687,6 +702,9 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
     const imagemOg = extrairMeta(html, "og:image");
     const imagemTwitter = extrairMeta(html, "twitter:image");
     const imagensMercadoLivre = extrairCandidatosImagemMercadoLivre({ html, jsonLd, imagemOg, imagemTwitter });
+    const imagemCandidataPrincipalSegura = candidatoImagemPrincipalSeguroMercadoLivre(
+      imagensMercadoLivre.imagemCandidatos
+    );
     const imagemAuditoria = imagemJsonLd || imagemOg || imagemTwitter || "";
     const origemImagemAuditoria =
       imagemJsonLd ? "jsonLd.image" :
@@ -779,11 +797,13 @@ async function importarMercadoLivre(url, clienteIdAlvo = "admin", deps = {}) {
       imagemJsonLd ||
       imagemOg ||
       imagemTwitter ||
+      imagemCandidataPrincipalSegura?.url ||
       "";
     const origemImagem =
       imagemJsonLd ? "jsonLd.image" :
       imagemOg ? "og:image" :
       imagemTwitter ? "twitter:image" :
+      imagemCandidataPrincipalSegura?.origem ||
       "nenhuma";
 
     preco = normalizarPrecoMl(preco) || limparPreco(preco);
