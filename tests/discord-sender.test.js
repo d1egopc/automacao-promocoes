@@ -9,7 +9,7 @@ const {
 
 const ENV = {
   DISCORD_BOT_TOKEN: "bot_token_nao_vaza",
-  DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com,images-na.ssl-images-amazon.com,http2.mlstatic.com,cf.shopee.com.br,ae01.alicdn.com,images.kabum.com.br,a-static.mlcdn.com.br"
+  DISCORD_IMAGE_ALLOWED_HOSTS: "m.media-amazon.com,images-na.ssl-images-amazon.com,http2.mlstatic.com,cf.shopee.com.br,ae01.alicdn.com,images.kabum.com.br,a-static.mlcdn.com.br,go.optimuspromo.com.br"
 };
 
 function criarHttp({ postStatus = 200, postData = {}, getData, getHeaders, postError, getError, getResponses = [] } = {}) {
@@ -194,7 +194,8 @@ function criarResolverPlatformVariables(valores = {}) {
       "https://cf.shopee.com.br/produto.jpg",
       "https://ae01.alicdn.com/produto.jpg",
       "https://images.kabum.com.br/produto.jpg",
-      "https://a-static.mlcdn.com.br/produto.jpg"
+      "https://a-static.mlcdn.com.br/produto.jpg",
+      "https://go.optimuspromo.com.br/social/midia/publica/engine/oferta.jpg"
     ];
     for (const imagemUrl of hosts) {
       const http = criarHttp({ getHeaders: { "content-type": "image/jpeg", "content-length": "6" } });
@@ -202,6 +203,54 @@ function criarResolverPlatformVariables(valores = {}) {
       assert.strictEqual(imagem.ok, true, `Host comprovado deve ser permitido: ${imagemUrl}`);
       assert.strictEqual(http.chamadas.length, 1);
     }
+  }
+
+  {
+    const mensagem = "Oferta completa\nhttps://afiliado.example/produto";
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem,
+      imagemUrl: "https://go.optimuspromo.com.br/social/midia/publica/engine/completa.jpg",
+      env: ENV,
+      httpClient: http.client
+    });
+    const post = http.chamadas.find((chamada) => chamada.metodo === "POST");
+    assert.strictEqual(resultado.ok, true, "imagem_completa deve aceitar attachment hospedado no host IV aprovado");
+    assert.strictEqual(resultado.imagemEnviada, true);
+    assert.strictEqual(post.body.get("payload_json"), JSON.stringify({ content: mensagem }), "imagem_completa preserva integralmente a legenda e o link");
+  }
+
+  {
+    const mensagem = "Oferta com link\nhttps://afiliado.example/produto";
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem,
+      imagemUrl: "https://go.optimuspromo.com.br/social/midia/publica/engine/link.jpg",
+      env: ENV,
+      httpClient: http.client
+    });
+    const post = http.chamadas.find((chamada) => chamada.metodo === "POST");
+    assert.strictEqual(resultado.ok, true, "imagem_link deve aceitar attachment hospedado no host IV aprovado");
+    assert.strictEqual(resultado.imagemEnviada, true);
+    assert.strictEqual(post.body.get("payload_json"), JSON.stringify({ content: mensagem }), "imagem_link preserva o link comercial no mesmo conteúdo");
+  }
+
+  {
+    const mensagem = "Oferta somente texto\nhttps://afiliado.example/produto";
+    const http = criarHttp();
+    const resultado = await enviarDiscord({
+      channelId: "canal_1",
+      mensagem,
+      suprimirEmbeds: true,
+      env: ENV,
+      httpClient: http.client
+    });
+    assert.strictEqual(resultado.ok, true, "texto_link deve continuar enviando normalmente");
+    assert.strictEqual(resultado.imagemEnviada, false, "texto_link nao pode ganhar attachment");
+    assert.deepStrictEqual(http.chamadas.map((chamada) => chamada.metodo), ["POST"]);
+    assert.deepStrictEqual(http.chamadas[0].body, { content: mensagem, flags: 4 }, "texto_link preserva texto, link e supressao de embed atuais");
   }
 
   {

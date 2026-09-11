@@ -10,7 +10,8 @@ const DISCORD_IMAGE_HOSTS_COMPROVADOS = new Set([
   "cf.shopee.com.br",
   "ae01.alicdn.com",
   "images.kabum.com.br",
-  "a-static.mlcdn.com.br"
+  "a-static.mlcdn.com.br",
+  "go.optimuspromo.com.br"
 ]);
 const IMAGE_TYPES = new Map([
   ["image/jpeg", "jpg"],
