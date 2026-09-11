@@ -52,7 +52,7 @@ async function listarOportunidadesAtivas(clienteId, deps = {}) {
   const agora = deps.agora instanceof Date ? deps.agora : new Date();
   const fonte = typeof deps.listarSinais === "function"
     ? deps.listarSinais
-    : () => agregadorFontesOficiais.listarSinais();
+    : () => agregadorFontesOficiais.listarSinais(clienteId, deps);
   const sinais = await fonte(clienteId, deps);
   const porMarketplace = new Map();
 

@@ -13697,7 +13697,10 @@ app.use("/auth/capture/handoff", criarRotasCaptureHandoff({
 app.use(auth);
 app.get("/extension/oportunidades/resumo", async (req, res) => {
   const clienteId = getClienteId(req);
-  const oportunidades = await listarOportunidadesAtivas(clienteId);
+  const oportunidades = await listarOportunidadesAtivas(clienteId, {
+    config,
+    getIntegracaoCliente
+  });
   return res.json({
     ok: true,
     geradoEm: new Date().toISOString(),

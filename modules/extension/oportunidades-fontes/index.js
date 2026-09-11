@@ -9,14 +9,16 @@ const FONTES_PADRAO = Object.freeze([mercadolivre, shopee, amazon, kabum, aliexp
 function criarAgregadorFontes({ fontes = FONTES_PADRAO, agora = () => new Date() } = {}) {
   const cachePorFonte = new Map();
 
-  async function consultarFonte(fonte) {
-    const chave = fonte.marketplace;
+  async function consultarFonte(fonte, contexto) {
+    const chave = typeof fonte.cacheKey === "function"
+      ? fonte.cacheKey(contexto) || fonte.marketplace
+      : fonte.marketplace;
     const instante = agora();
     const existente = cachePorFonte.get(chave);
     if (existente?.expiraEm > instante.getTime()) return existente.sinais;
     if (existente?.emAndamento) return existente.emAndamento;
 
-    const emAndamento = Promise.resolve(fonte.detectarOportunidade({ agora: instante }))
+    const emAndamento = Promise.resolve(fonte.detectarOportunidade({ ...contexto, agora: instante }))
       .then((sinal) => sinal?.ativo ? [sinal] : [])
       .catch(() => [])
       .then((sinais) => {
@@ -31,8 +33,9 @@ function criarAgregadorFontes({ fontes = FONTES_PADRAO, agora = () => new Date()
   }
 
   return {
-    async listarSinais() {
-      const resultados = await Promise.all(fontes.map((fonte) => consultarFonte(fonte)));
+    async listarSinais(clienteId, deps = {}) {
+      const contexto = { ...deps, clienteId };
+      const resultados = await Promise.all(fontes.map((fonte) => consultarFonte(fonte, contexto)));
       return resultados.flat();
     }
   };
