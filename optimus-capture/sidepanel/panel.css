@@ -124,7 +124,7 @@ small {
   box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
 }
 
-.botao-oportunidades[data-tem-oportunidades="true"] {
+.botao-oportunidades[data-tem-novidades="true"] {
   border-color: #165dff;
   transform-origin: 50% 12%;
   animation: sino-oportunidades 0.8s ease-in-out;
@@ -155,6 +155,31 @@ small {
   background: #fff;
   box-shadow: 0 12px 26px rgba(16, 24, 40, 0.18);
   text-align: left;
+}
+
+.cabecalho-oportunidades {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fechar-oportunidades {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #667085;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.fechar-oportunidades:hover,
+.fechar-oportunidades:focus-visible {
+  color: #344054;
+  background: #f2f4f7;
 }
 
 .lista-oportunidades {
@@ -259,7 +284,7 @@ small {
 
 @media (prefers-reduced-motion: reduce) {
   .scanner-lupa,
-  .botao-oportunidades[data-tem-oportunidades="true"] {
+  .botao-oportunidades[data-tem-novidades="true"] {
     animation: none;
   }
 

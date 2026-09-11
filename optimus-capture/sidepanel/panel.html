@@ -51,7 +51,10 @@
             <span id="badgeOportunidades" class="badge-oportunidades" hidden></span>
           </button>
           <section id="popoverOportunidades" class="popover-oportunidades" hidden>
-            <strong>Oportunidades agora</strong>
+            <div class="cabecalho-oportunidades">
+              <strong>Oportunidades agora</strong>
+              <button id="fecharOportunidades" class="fechar-oportunidades" type="button" aria-label="Fechar oportunidades">×</button>
+            </div>
             <div id="listaOportunidades" class="lista-oportunidades"></div>
           </section>
           <img src="../assets/logo-optimus.png" alt="Optimus" class="logo-vazio">
@@ -127,6 +130,7 @@
     <script src="../services/storage.js"></script>
     <script src="../services/api.js"></script>
     <script src="../services/oportunidades.js"></script>
+    <script src="../services/oportunidades-vistas.js"></script>
     <script src="../services/handoff.js"></script>
     <script src="../services/auth.js"></script>
     <script src="../core/product-contract.js"></script>

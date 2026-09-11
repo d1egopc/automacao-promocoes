@@ -4,6 +4,7 @@
   const contrato = global.OptimusCaptureContract;
   const detector = global.OptimusCaptureDetector;
   const oportunidades = global.OptimusCaptureOportunidades;
+  const oportunidadesVistas = global.OptimusCaptureOportunidadesVistas;
 
   const el = (id) => document.getElementById(id);
   const state = {
@@ -35,7 +36,9 @@
     enviandoAgora: false,
     previewEnviadoKey: "",
     oportunidadesCliente: null,
-    oportunidades: []
+    oportunidadesVistas: null,
+    oportunidades: [],
+    assinaturasOportunidadesNovas: []
   };
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
@@ -59,17 +62,32 @@
     }
   }
 
-  function renderOportunidades(lista = []) {
-    state.oportunidades = Array.isArray(lista) ? lista.filter((item) => Number(item?.quantidade || 0) > 0) : [];
-    const total = state.oportunidades.reduce((soma, item) => soma + Number(item.quantidade || 0), 0);
+  function escopoOportunidades() {
+    const usuario = state.auth?.usuario || {};
+    return usuario.id || usuario.email || "anon";
+  }
+
+  function assinaturaOportunidade(oportunidade) {
+    if (typeof oportunidadesVistas?.assinaturaOportunidade === "function") return oportunidadesVistas.assinaturaOportunidade(oportunidade);
+    return JSON.stringify([oportunidade?.marketplace, oportunidade?.quantidade, oportunidade?.titulo, oportunidade?.mensagem, oportunidade?.urlDestino]);
+  }
+
+  function atualizarEstadoNovidades() {
+    const novas = new Set(state.assinaturasOportunidadesNovas);
+    const total = state.oportunidades.reduce((soma, item) => novas.has(assinaturaOportunidade(item)) ? soma + Number(item.quantidade || 0) : soma, 0);
     const botao = el("botaoOportunidades");
     const badge = el("badgeOportunidades");
-    const container = el("listaOportunidades");
-    if (botao?.dataset) botao.dataset.temOportunidades = total > 0 ? "true" : "false";
+    if (botao?.dataset) botao.dataset.temNovidades = total > 0 ? "true" : "false";
     if (badge) {
       badge.hidden = total <= 0;
       badge.textContent = total > 99 ? "99+" : String(total || "");
     }
+  }
+
+  function renderOportunidades(lista = []) {
+    state.oportunidades = Array.isArray(lista) ? lista.filter((item) => Number(item?.quantidade || 0) > 0) : [];
+    const container = el("listaOportunidades");
+    atualizarEstadoNovidades();
     if (!container) return;
     container.innerHTML = "";
     if (!state.oportunidades.length) {
@@ -108,20 +126,41 @@
     await global.chrome.tabs.create({ url, active: true });
   }
 
-  function alternarPopoverOportunidades() {
+  function fecharPopoverOportunidades() {
     const popover = el("popoverOportunidades");
     const botao = el("botaoOportunidades");
     if (!popover) return;
-    popover.hidden = !popover.hidden;
-    if (botao) botao.setAttribute("aria-expanded", popover.hidden ? "false" : "true");
+    popover.hidden = true;
+    botao?.setAttribute?.("aria-expanded", "false");
+  }
+
+  async function abrirPopoverOportunidades() {
+    const popover = el("popoverOportunidades");
+    const botao = el("botaoOportunidades");
+    if (!popover) return;
+    popover.hidden = false;
+    botao?.setAttribute?.("aria-expanded", "true");
+    if (state.oportunidadesVistas) await state.oportunidadesVistas.marcarComoVistas(escopoOportunidades(), state.oportunidades);
+    state.assinaturasOportunidadesNovas = [];
+    atualizarEstadoNovidades();
+  }
+
+  function alternarPopoverOportunidades() {
+    if (el("popoverOportunidades")?.hidden) return void abrirPopoverOportunidades();
+    fecharPopoverOportunidades();
   }
 
   async function carregarOportunidades() {
     if (!state.auth?.token || !state.oportunidadesCliente) return;
     try {
       const resposta = await state.oportunidadesCliente.carregar(state.auth.token);
-      renderOportunidades(resposta?.sessaoExpirada ? [] : resposta?.oportunidades);
+      const lista = resposta?.sessaoExpirada ? [] : resposta?.oportunidades;
+      state.assinaturasOportunidadesNovas = state.oportunidadesVistas
+        ? await state.oportunidadesVistas.calcularNovas(escopoOportunidades(), lista)
+        : [];
+      renderOportunidades(lista);
     } catch {
+      state.assinaturasOportunidadesNovas = [];
       renderOportunidades([]);
     }
   }
@@ -1004,7 +1043,7 @@
       setHidden("emptyView", true);
       setHidden("produtoView", true);
       setHidden("previewView", true);
-      setHidden("popoverOportunidades", true);
+      fecharPopoverOportunidades();
     }
   }
 
@@ -1073,6 +1112,7 @@
 
   async function init() {
     state.oportunidadesCliente = oportunidades?.criarClienteOportunidades?.({ api }) || null;
+    state.oportunidadesVistas = oportunidadesVistas?.criarRegistroVistas?.() || null;
     registrarEventosAbas();
     el("botaoConectar").addEventListener("click", conectarComOptimus);
     el("botaoLogin").addEventListener("click", entrar);
@@ -1082,6 +1122,7 @@
     el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
+    el("fecharOportunidades")?.addEventListener("click", fecharPopoverOportunidades);
     el("campoTitulo").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoPrecoAtual").addEventListener("input", invalidarPreviewPorEdicao);
     el("campoPrecoAnterior").addEventListener("input", invalidarPreviewPorEdicao);
@@ -1089,6 +1130,14 @@
     el("campoObservacoes").addEventListener("input", invalidarPreviewPorObservacaoManual);
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void carregarOportunidades();
+    });
+    document.addEventListener("click", (evento) => {
+      const popover = el("popoverOportunidades");
+      const botao = el("botaoOportunidades");
+      if (!popover?.hidden && !popover.contains?.(evento.target) && !botao?.contains?.(evento.target)) fecharPopoverOportunidades();
+    });
+    document.addEventListener("keydown", (evento) => {
+      if (evento.key === "Escape") fecharPopoverOportunidades();
     });
     try {
       state.auth = await auth.restaurarSessao();
