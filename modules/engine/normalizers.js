@@ -1,3 +1,5 @@
+const { hostAmazonReconhecido } = require("./preparacao-links.helpers");
+
 function normalizarTexto(valor = "") {
   return String(valor || "").trim();
 }
@@ -16,21 +18,6 @@ function normalizarLinksExtraidos(links = []) {
       .map(link => normalizarTexto(link))
       .filter(Boolean)
   )];
-}
-
-function hostAmazonReconhecido(host = "") {
-  const normalizado = normalizarTexto(host).toLowerCase().replace(/^www\./, "");
-  return normalizado === "amzn.divulgador.link" ||
-    normalizado.endsWith(".amzn.divulgador.link") ||
-    normalizado === "amazon.com.br" ||
-    normalizado.endsWith(".amazon.com.br") ||
-    normalizado === "amzn.to" ||
-    normalizado.endsWith(".amzn.to") ||
-    normalizado === "amzlink.to" ||
-    normalizado.endsWith(".amzlink.to") ||
-    normalizado === "link.amazon" ||
-    normalizado.endsWith(".link.amazon") ||
-    normalizado.includes("amazon.");
 }
 
 function detectarMarketplaceLink(url = "") {

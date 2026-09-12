@@ -72,10 +72,6 @@ function decodificarParametroAwin(valor = "") {
   return resultado;
 }
 
-function extrairProdutoIdKabum(url = "") {
-  return extrairProdutoIdKabumUrl(url);
-}
-
 function diagnosticarAwinKabum(url = "") {
   const host = hostname(url);
   if (!(host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com"))) {
@@ -86,7 +82,7 @@ function diagnosticarAwinKabum(url = "") {
     const parsed = new URL(texto(url));
     const uedBruto = parsed.searchParams.get("ued") || "";
     const urlDestino = decodificarParametroAwin(uedBruto);
-    const produtoId = extrairProdutoIdKabum(urlDestino);
+    const produtoId = extrairProdutoIdKabumUrl(urlDestino);
     const diagnostico = {
       awinmid: parsed.searchParams.get("awinmid") || "",
       awinaffidPresente: Boolean(parsed.searchParams.get("awinaffid")),
@@ -767,7 +763,7 @@ module.exports = {
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
   extrairDestinoHtml,
-  extrairProdutoIdKabum,
+  extrairProdutoIdKabum: extrairProdutoIdKabumUrl,
   extrairMetaRefresh,
   extrairUrlsMarketplaceHtml,
   extrairWindowLocation,
