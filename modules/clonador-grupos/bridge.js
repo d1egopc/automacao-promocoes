@@ -260,6 +260,9 @@ function criarBridgeClonadorGrupos(deps = {}) {
         grupoJid: texto(item.grupoJid),
         grupoNome: texto(item.grupoNome),
         linksOriginais: resolvidos.linksOriginais,
+        linksOcorrencias: Array.isArray(item.metadata?.clonadorGrupos?.linksOcorrencias)
+          ? item.metadata.clonadorGrupos.linksOcorrencias
+          : [],
         redirects: resolvidos.redirects,
         destinoIds
       },

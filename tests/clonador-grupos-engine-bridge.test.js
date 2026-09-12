@@ -102,7 +102,7 @@ function itemBuffer(extra = {}) {
     links: extra.links || ["https://meli.la/abc"],
     capturadoEm: extra.capturadoEm || "2026-09-06T12:00:00.000Z",
     status: "capturada",
-    metadata: {}
+    metadata: extra.metadata || {}
   };
 }
 
@@ -123,7 +123,16 @@ function destino(extra = {}) {
 async function testarBridgeRegistraUmaVez() {
   const repo = criarRepoMemoria();
   repo.estado.destinos.set("workspace_a", [{ destinoId: "destino_ok" }]);
-  repo.adicionarBuffer(itemBuffer());
+  repo.adicionarBuffer(itemBuffer({
+    metadata: {
+      clonadorGrupos: {
+        linksOcorrencias: [
+          { urlOriginal: "https://meli.la/abc", ordemCaptura: 1, ocorrenciaId: "clonador:msg_101:1" },
+          { urlOriginal: "https://meli.la/abc", ordemCaptura: 2, ocorrenciaId: "clonador:msg_101:2" }
+        ]
+      }
+    }
+  }));
   const eventos = [];
   const bridge = criarBridgeClonadorGrupos({
     repository: repo,
@@ -152,9 +161,14 @@ async function testarBridgeRegistraUmaVez() {
   assert.strictEqual(eventos[0].evento.origemTipo, "whatsapp");
   assert.deepStrictEqual(eventos[0].opcoes.clientes, ["workspace_a"]);
   assert.deepStrictEqual(eventos[0].evento.linksExtraidos, ["https://www.mercadolivre.com.br/p/MLB123"]);
+  assert.strictEqual(eventos[0].evento.hashEvento, "clonador_grupos:101");
   assert.strictEqual(eventos[0].evento.metadata.clonadorGrupos.bufferId, "101");
   assert.strictEqual(eventos[0].evento.metadata.origemFluxo, "clonador_grupos");
   assert.deepStrictEqual(eventos[0].evento.metadata.clonadorGrupos.destinoIds, ["destino_ok"]);
+  assert.deepStrictEqual(eventos[0].evento.metadata.clonadorGrupos.linksOcorrencias, [
+    { urlOriginal: "https://meli.la/abc", ordemCaptura: 1, ocorrenciaId: "clonador:msg_101:1" },
+    { urlOriginal: "https://meli.la/abc", ordemCaptura: 2, ocorrenciaId: "clonador:msg_101:2" }
+  ]);
   assert.ok(!eventos[0].evento.metadata.radarMirror);
   assert.strictEqual(repo.estado.buffer[0].status, "pronta");
 }
@@ -586,6 +600,20 @@ function testarEscopoEstrutural() {
   assert.ok(!bridgeFonte.includes("debitarCreditos"));
   assert.ok(!bridgeFonte.includes("usuarioTemCreditos"));
   assert.ok(!bridgeFonte.includes("radarMirror"));
+
+  const importadores = [
+    ["modules", "engine", "importer", "adapters", "shopee.adapter.js"],
+    ["modules", "engine", "importer", "adapters", "aliexpress.adapter.js"],
+    ["modules", "engine", "importer", "adapters", "amazon.adapter.js"],
+    ["modules", "engine", "importer", "adapters", "mercadolivre.adapter.js"],
+    ["modules", "engine", "importer", "adapters", "awin.adapter.js"],
+    ["modules", "engine", "importer", "adapters", "magalu.adapter.js"],
+    ["marketplaces", "shopee", "importar.js"]
+  ];
+  for (const partes of importadores) {
+    const fonte = fs.readFileSync(path.join(__dirname, "..", ...partes), "utf8");
+    assert.ok(!fonte.includes("linksOcorrencias"), `${partes.at(-1)} nao pode consumir metadata passiva`);
+  }
 }
 
 async function main() {

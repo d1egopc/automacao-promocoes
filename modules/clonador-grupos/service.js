@@ -52,6 +52,22 @@ function normalizarLinksEntrada(links = []) {
   return saida.slice(0, 20);
 }
 
+function linksOcorrenciasCapturadas(links = [], mensagemId = "") {
+  const identificadorMensagem = texto(mensagemId);
+  const ocorrencias = [];
+  for (const link of Array.isArray(links) ? links : []) {
+    const urlOriginal = texto(link);
+    if (!urlOriginal) continue;
+    const ordemCaptura = ocorrencias.length + 1;
+    ocorrencias.push({
+      urlOriginal,
+      ordemCaptura,
+      ocorrenciaId: `clonador:${identificadorMensagem}:${ordemCaptura}`
+    });
+  }
+  return ocorrencias;
+}
+
 function extrairMensagemInterna(mensagem = {}) {
   let atual = mensagem?.message || mensagem || {};
   for (let i = 0; i < 8; i += 1) {
@@ -402,10 +418,19 @@ function criarServicoClonadorGrupos(deps = {}) {
         ? deps.extrairTextoMensagem(mensagem)
         : extrairTextoMensagemBasico(mensagem);
       const textoOriginal = String(textoExtraido ?? "");
-      const links = typeof deps.extrairLinksMensagem === "function"
-        ? normalizarLinksEntrada(deps.extrairLinksMensagem(textoOriginal))
-        : normalizarLinksEntrada(String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || []);
-      const metadata = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
+      const linksCapturados = typeof deps.extrairLinksMensagem === "function"
+        ? deps.extrairLinksMensagem(textoOriginal)
+        : String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || [];
+      const links = normalizarLinksEntrada(linksCapturados);
+      const linksOcorrencias = linksOcorrenciasCapturadas(linksCapturados, mensagemId);
+      const metadataBase = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
+      const metadata = {
+        ...metadataBase,
+        clonadorGrupos: {
+          ...(metadataBase.clonadorGrupos && typeof metadataBase.clonadorGrupos === "object" ? metadataBase.clonadorGrupos : {}),
+          linksOcorrencias
+        }
+      };
       const grupoNome = texto(entrada.grupoNome || fonte.grupoNome);
 
       const resultado = await repo.inserirBufferCaptura({
@@ -481,5 +506,6 @@ module.exports = {
   MAX_FONTES_ATIVAS,
   criarServicoClonadorGrupos,
   destinoIdOficial,
-  grupoIdOficial
+  grupoIdOficial,
+  linksOcorrenciasCapturadas
 };

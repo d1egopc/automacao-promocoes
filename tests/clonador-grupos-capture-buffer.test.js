@@ -243,6 +243,38 @@ async function testarCapturaGuardsBuffer() {
   assert.strictEqual(semRecurso.motivo, "recurso_indisponivel");
 }
 
+async function testarOcorrenciasPassivasPreservamRepeticao() {
+  const { repo, service } = criarAmbiente();
+  await prepararFonteAtiva(service);
+  const urlA = "https://s.shopee.com.br/urlA";
+  const urlB = "https://s.shopee.com.br/urlB";
+
+  await service.capturarMensagemWhatsapp({
+    clienteId: "workspace_a",
+    sessaoId: "sessao_a",
+    mensagem: mensagem({ id: "msg_ocorrencias_aa", texto: `${urlA}\n${urlA}` })
+  });
+  const aa = repo.estado.buffer[0];
+  assert.deepStrictEqual(aa.links, [urlA], "campo legado continua deduplicado");
+  assert.deepStrictEqual(aa.metadata.clonadorGrupos.linksOcorrencias, [
+    { urlOriginal: urlA, ordemCaptura: 1, ocorrenciaId: "clonador:msg_ocorrencias_aa:1" },
+    { urlOriginal: urlA, ordemCaptura: 2, ocorrenciaId: "clonador:msg_ocorrencias_aa:2" }
+  ]);
+
+  await service.capturarMensagemWhatsapp({
+    clienteId: "workspace_a",
+    sessaoId: "sessao_a",
+    mensagem: mensagem({ id: "msg_ocorrencias_aba", texto: `${urlA}\n${urlB}\n${urlA}` })
+  });
+  const aba = repo.estado.buffer[1];
+  assert.deepStrictEqual(aba.links, [urlA, urlB], "ordem legada deduplicada permanece inalterada");
+  assert.deepStrictEqual(aba.metadata.clonadorGrupos.linksOcorrencias, [
+    { urlOriginal: urlA, ordemCaptura: 1, ocorrenciaId: "clonador:msg_ocorrencias_aba:1" },
+    { urlOriginal: urlB, ordemCaptura: 2, ocorrenciaId: "clonador:msg_ocorrencias_aba:2" },
+    { urlOriginal: urlA, ordemCaptura: 3, ocorrenciaId: "clonador:msg_ocorrencias_aba:3" }
+  ]);
+}
+
 async function testarLimiteQuatroEMultiworkspace() {
   const { repo, service } = criarAmbiente();
   await service.salvarConfig(req("workspace_a"), { ativo: true });
@@ -469,6 +501,7 @@ async function testarContratoRepeticaoRepository() {
 
 async function main() {
   await testarCapturaGuardsBuffer();
+  await testarOcorrenciasPassivasPreservamRepeticao();
   await testarLimiteQuatroEMultiworkspace();
   await testarEndpointBufferIsolado();
   await testarContratoRepeticaoRepository();
