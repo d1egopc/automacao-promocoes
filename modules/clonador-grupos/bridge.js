@@ -1,6 +1,7 @@
 "use strict";
 
 const { detectarMarketplaceLink } = require("../engine/normalizers");
+const { criarContratoPreparacaoLinks } = require("../engine/preparacao-links.service");
 const { resolverRedirectClonador } = require("../radar/redirect/redirect-resolver");
 const { extrairComercialUniversal } = require("../radar/extrator-comercial-universal");
 const { registrarEventoBruto } = require("../engine/inbox.service");
@@ -213,11 +214,12 @@ async function resolverLinksClonador(links = [], resolver = resolverRedirectClon
     });
   }
 
-  return {
+  return criarContratoPreparacaoLinks({
     linksOriginais,
     linksPreparados: listaLinks(preparados),
-    redirects
-  };
+    redirects,
+    identidadesCanonicas: []
+  });
 }
 
 function marketplacePrincipal(links = [], redirects = []) {

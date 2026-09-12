@@ -406,6 +406,9 @@ const {
   detectarMarketplaceLink: detectarMarketplaceEngineLink
 } = require("./modules/engine/normalizers");
 const {
+  criarContratoPreparacaoLinks
+} = require("./modules/engine/preparacao-links.service");
+const {
   consultarProdutoMagalu
 } = require("./modules/marketplaces/magalu/magalu-parser");
 const {
@@ -19582,20 +19585,28 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
     .map(link => dominioMarketplaceConhecidoRadar(link))
     .find(Boolean) || dados.marketplaceDetectado || "";
 
+  const preparacaoLinks = criarContratoPreparacaoLinks({
+    linksOriginais: linksCapturados,
+    linksPreparados: linksEngine,
+    redirects: redirectsRadar,
+    identidadesCanonicas
+  });
+
   return {
     dados: {
       ...dados,
-      linksExtraidos: linksEngine,
+      linksExtraidos: preparacaoLinks.linksPreparados,
       marketplaceDetectado,
-      chaveCanonica: identidadesCanonicas.length === 1 ? identidadesCanonicas[0].chaveCanonica : dados.chaveCanonica || "",
+      chaveCanonica: preparacaoLinks.identidadesCanonicas.length === 1 ? preparacaoLinks.identidadesCanonicas[0].chaveCanonica : dados.chaveCanonica || "",
       metadata: {
         ...(dados.metadata || {}),
-        linksOriginaisCapturados: linksCapturados,
-        redirectsRadar,
-        identidadesCanonicas
+        linksOriginaisCapturados: preparacaoLinks.linksOriginais,
+        redirectsRadar: preparacaoLinks.redirects,
+        identidadesCanonicas: preparacaoLinks.identidadesCanonicas
       }
     },
-    redirectsRadar
+    redirectsRadar: preparacaoLinks.redirects,
+    preparacaoLinks
   };
 }
 
