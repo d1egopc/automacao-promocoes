@@ -10,14 +10,22 @@ function contem(trecho, mensagem) {
   assert.ok(fonte.includes(trecho), mensagem);
 }
 
-contem('app.get("/fila", auth, (req, res) => {', "GET /fila deve permanecer protegido por auth");
+contem('app.get("/fila", auth, async (req, res) => {', "GET /fila deve permanecer protegido por auth");
 contem('app.get("/fila/status", (req, res) => {', "GET /fila/status deve continuar existindo");
 contem("filtrarItensHistoricoFila(itensCliente, req.query)", "GET /fila deve aplicar o recorte filtrado central");
 contem("filtrarItensHistoricoFila(itensCliente, req.query)", "GET /fila/status deve reaproveitar o mesmo recorte");
 contem("calcularMetricasHistoricoFila(itensFiltrados)", "metricas devem ser calculadas sobre o recorte, nao sobre a pagina");
 contem("processadas,", "metricas devem expor processadas");
+contem("enviadas,", "metricas devem expor enviadas");
+contem("erros,", "metricas devem expor erros");
+contem("expiradas,", "metricas devem expor expiradas");
 contem("taxaEnvio", "metricas devem expor taxaEnvio");
 contem("enviadas / processadas * 100", "formula da taxa deve estar documentada no payload");
+contem('criarPerfTimer("PERF FILA", contextoPerfHttp(req))', "GET /fila deve registrar etapas de latencia quando PERF estiver ativo");
+contem('"filtrar_workspace"', "medicao deve separar a leitura do workspace");
+contem('"filtrar_recorte"', "medicao deve separar filtros do recorte");
+contem('"paginar_decorar"', "medicao deve separar pagina e decoracao");
+contem('"montar_payload"', "medicao deve separar montagem da resposta");
 contem("itemDentroPeriodoFila(item, periodoFiltro)", "periodo hoje/7d deve participar do filtro");
 contem('filtro === "hoje"', "periodo hoje deve ser suportado");
 contem('filtro === "7d"', "periodo 7d deve ser suportado");

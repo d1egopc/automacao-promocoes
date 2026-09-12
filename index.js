@@ -11417,25 +11417,35 @@ function filtrarItensHistoricoFila(itensCliente = [], query = {}) {
 }
 
 app.get("/fila", auth, async (req, res) => {
-  const clienteId = getClienteId(req);
-  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila"))) return;
+  const perf = criarPerfTimer("PERF FILA", contextoPerfHttp(req));
+  let clienteId = "";
+  res.once("finish", () => {
+    perf.fim({ clienteId, statusCode: res.statusCode });
+  });
+  clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  const inicializada = await perf.etapa("garantir_inicializacao", () =>
+    garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila")
+  );
+  if (!inicializada) return;
 
-  sanearExpiradosFila(clienteId).catch((erro) => {
-    console.warn("[FILA-EXPIRACAO-ROTA-ERRO]", {
-      clienteId,
-      erro: erro && erro.message ? erro.message : String(erro)
+  perf.etapaSync("disparar_saneamento", () => {
+    sanearExpiradosFila(clienteId).catch((erro) => {
+      console.warn("[FILA-EXPIRACAO-ROTA-ERRO]", {
+        clienteId,
+        erro: erro && erro.message ? erro.message : String(erro)
+      });
     });
   });
 
-  const itensCliente = fila.filter((o) =>
+  const itensCliente = perf.etapaSync("filtrar_workspace", () => fila.filter((o) =>
     (o.clienteId || "admin") === clienteId
-  );
-  const resumo = {
+  ));
+  const resumo = perf.etapaSync("resumo", () => ({
     pendentesTotal: itensCliente.filter((o) => o.status === "pendente").length,
     enviadasTotal: itensCliente.filter((o) => o.status === "enviado").length,
     retidasTotal: itensCliente.filter((o) => o.status === "retida").length,
     errosTotal: itensCliente.filter((o) => o.status === "erro").length
-  };
+  }));
   const statusFiltro = textoFiltroFila(req.query.status);
   const marketplaceFiltro = textoFiltroFila(req.query.marketplace);
   const categoriaFiltro = textoFiltroFila(req.query.categoria);
@@ -11443,8 +11453,10 @@ app.get("/fila", auth, async (req, res) => {
   const destinoFiltro = textoFiltroFila(req.query.destino);
   const periodoFiltro = textoFiltroFila(req.query.periodo);
   const qFiltro = String(req.query.q || "").trim();
-  const itensFiltrados = filtrarItensHistoricoFila(itensCliente, req.query);
-  const metricas = calcularMetricasHistoricoFila(itensFiltrados);
+  const itensFiltrados = perf.etapaSync("filtrar_recorte", () =>
+    filtrarItensHistoricoFila(itensCliente, req.query)
+  );
+  const metricas = perf.etapaSync("metricas", () => calcularMetricasHistoricoFila(itensFiltrados));
 
   const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 100)));
   const pageQuery = Math.floor(Number(req.query.page) || 0);
@@ -11453,11 +11465,11 @@ app.get("/fila", auth, async (req, res) => {
   const offset = (page - 1) * limit;
   const totalFiltrado = itensFiltrados.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltrado / limit));
-  const itensResposta = itensFiltrados
+  const itensResposta = perf.etapaSync("paginar_decorar", () => itensFiltrados
     .slice(offset, offset + limit)
-    .map(decorarItemFilaParaResposta);
+    .map(decorarItemFilaParaResposta));
 
-  res.json({
+  const payload = perf.etapaSync("montar_payload", () => ({
     ok: true,
     clienteId,
     total: itensCliente.length,
@@ -11484,7 +11496,8 @@ app.get("/fila", auth, async (req, res) => {
     erros: resumo.errosTotal,
     itens: itensResposta,
     fila: itensResposta
-  });
+  }));
+  return res.json(payload);
 });
 
 // =========== REDIRECIONADOR OPTIMUS ===========
