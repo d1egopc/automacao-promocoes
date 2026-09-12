@@ -6,6 +6,7 @@ const {
 } = require("./processor.service");
 const { detectarMarketplaceLink } = require("./normalizers");
 const { avaliarWorkspaceParaEngine } = require("../workspace");
+const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 
 // DEPRECATED — compatibilidade temporaria.
 // Origem legada: engine_jobs_cliente expõe cliente_id como coluna fisica.
@@ -21,6 +22,19 @@ function avaliarClienteEngine(job = {}, contexto = {}) {
   const clientesValidos = Array.isArray(contexto.clientesValidos)
     ? contexto.clientesValidos.map(id => String(id || "").trim()).filter(Boolean)
     : [];
+
+  const origemFluxo = resolverOrigemFluxo(job);
+  if (origemFluxo === "clonador_grupos" && typeof contexto.avaliarWorkspaceParaEngine === "function") {
+    const avaliacaoOrigem = contexto.avaliarWorkspaceParaEngine(clienteId, { origemFluxo });
+    if (avaliacaoOrigem.elegivelEngine) {
+      return { ok: true, motivo: "elegivel", motivos: [] };
+    }
+    return {
+      ok: false,
+      motivo: avaliacaoOrigem.motivo || "workspace_nao_operacional",
+      motivos: avaliacaoOrigem.motivos || []
+    };
+  }
 
   if (clientesValidos.includes(clienteId)) {
     return { ok: true, motivo: "elegivel", motivos: [] };

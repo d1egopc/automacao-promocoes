@@ -42,6 +42,15 @@ function listarPermissoesPlano(plano = null) {
     .sort();
 }
 
+function origemFluxoNormalizada(opcoes = {}) {
+  return texto(opcoes.origemFluxo || opcoes.origem_fluxo).toLowerCase();
+}
+
+function workspaceTemPermissao(workspace = {}, permissao = "") {
+  const alvo = texto(permissao);
+  return alvo !== "" && Array.isArray(workspace.permissoes) && workspace.permissoes.includes(alvo);
+}
+
 function planoTemPermissaoEngine(plano = null) {
   const recursos = plano && typeof plano === "object" && plano.recursos && typeof plano.recursos === "object"
     ? plano.recursos
@@ -155,10 +164,24 @@ function montarWorkspace({
   };
 }
 
-function workspaceElegivelEngine(workspace = {}) {
+function listarMotivosInelegibilidadeEngine(workspace = {}, opcoes = {}) {
   const motivos = Array.isArray(workspace.motivosInelegibilidade)
-    ? workspace.motivosInelegibilidade
+    ? [...workspace.motivosInelegibilidade]
     : [];
+  const origemFluxo = origemFluxoNormalizada(opcoes);
+
+  if (origemFluxo === "clonador_grupos") {
+    if (workspaceTemPermissao(workspace, "clonador_grupos")) {
+      return motivos.filter(motivo => motivo !== "plano_sem_permissao");
+    }
+    if (!motivos.includes("plano_sem_permissao_origem")) motivos.push("plano_sem_permissao_origem");
+  }
+
+  return motivos;
+}
+
+function workspaceElegivelEngine(workspace = {}, opcoes = {}) {
+  const motivos = listarMotivosInelegibilidadeEngine(workspace, opcoes);
   const bloqueantes = new Set([
     "workspace_inexistente",
     "workspace_admin",
@@ -167,6 +190,7 @@ function workspaceElegivelEngine(workspace = {}) {
     "plano_inexistente",
     "plano_inativo",
     "plano_sem_permissao",
+    "plano_sem_permissao_origem",
     "workspace_nao_operacional"
   ]);
 
@@ -175,6 +199,7 @@ function workspaceElegivelEngine(workspace = {}) {
 
 module.exports = {
   criarWorkspaceAusente,
+  listarMotivosInelegibilidadeEngine,
   montarWorkspace,
   normalizarId,
   normalizarListaMarketplaces,

@@ -14,7 +14,7 @@ writeGlobalJson("planos.json", {
     nome: "pro",
     ativo: true,
     marketplaces: ["mercadolivre"],
-    recursos: { automacao: true }
+    recursos: { automacao: true, clonador_grupos: true }
   }
 });
 

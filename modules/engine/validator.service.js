@@ -9,6 +9,7 @@ const {
 } = require("./frescor-pre-importer.service");
 const { minutosLeaseJobsAtivos } = require("./jobs.service");
 const { normalizarTexto } = require("./normalizers");
+const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 
 function normalizarMarketplaceEngine(marketplace = "") {
   return normalizarTexto(marketplace).toLowerCase();
@@ -94,9 +95,15 @@ function credenciaisValidasEngine(integracao = {}, marketplace = "") {
   return Object.values(cred).some(valor => String(valor || "").trim());
 }
 
-function clienteValidoEngine(clienteId = "", clientesValidos = []) {
+function clienteValidoEngine(clienteId = "", clientesValidos = [], opcoes = {}) {
   const cid = normalizarTexto(clienteId);
   if (!cid) return false;
+  if (opcoes.origemFluxo === "clonador_grupos" && typeof opcoes.avaliarWorkspaceParaEngine === "function") {
+    return opcoes.avaliarWorkspaceParaEngine(cid, {
+      log: false,
+      origemFluxo: "clonador_grupos"
+    }).elegivelEngine === true;
+  }
   const lista = Array.isArray(clientesValidos) ? clientesValidos.map(id => normalizarTexto(id)).filter(Boolean) : [];
   if (!lista.length) return false;
   return lista.includes(cid);
@@ -510,13 +517,17 @@ async function finalizarValidacaoJob(job = {}, status = "erro_validacao", motivo
 async function validarJobDiagnosticadoEngine(job = {}, contexto = {}) {
   const clienteId = normalizarTexto(job.cliente_id);
   const marketplace = normalizarMarketplaceEngine(job.marketplace || job.marketplace_detectado);
+  const origemFluxo = resolverOrigemFluxo(job);
 
   await registrarEtapaValidacao(job.id, "validacao_inicio", "ok", "validacao_iniciada", {
     clienteId,
     marketplace
   });
 
-  const clienteOk = clienteValidoEngine(clienteId, contexto.clientesValidos || []);
+  const clienteOk = clienteValidoEngine(clienteId, contexto.clientesValidos || [], {
+    origemFluxo,
+    avaliarWorkspaceParaEngine: contexto.avaliarWorkspaceParaEngine
+  });
   await registrarEtapaValidacao(job.id, "validar_cliente", clienteOk ? "ok" : "erro", clienteOk ? "cliente_validado" : "cliente_invalido", {
     clienteId
   });

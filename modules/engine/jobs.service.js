@@ -92,13 +92,13 @@ function normalizarClientes(clientes = []) {
   return [...new Set(ids)];
 }
 
-function avaliarClientesParaJobs(clientes = []) {
+function avaliarClientesParaJobs(clientes = [], opcoes = {}) {
   const ids = normalizarClientes(clientes);
   const clientesIds = [];
   const ignorados = [];
 
   for (const clienteId of ids) {
-    const avaliacao = avaliarWorkspaceParaEngine(clienteId);
+    const avaliacao = avaliarWorkspaceParaEngine(clienteId, opcoes);
     if (avaliacao.elegivelEngine) {
       clientesIds.push(clienteId);
     } else {
@@ -240,7 +240,8 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
 
   await ignorarJobsAdminNaoOperacional();
 
-  const avaliacaoClientes = avaliarClientesParaJobs(clientes);
+  const origemFluxoEntrada = resolverOrigemFluxo({ metadata: metadataEvento });
+  const avaliacaoClientes = avaliarClientesParaJobs(clientes, { origemFluxo: origemFluxoEntrada });
   const clientesIds = avaliacaoClientes.clientesIds;
   const marketplace = normalizarTexto(marketplaceDetectado || marketplacePrincipal(linksExtraidos));
   const imagemCanonicaEvento = await resolverImagemCanonicaEventoSeguro({
@@ -252,7 +253,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     deps
   });
   const metadataEventoCanonico = aplicarImagemCanonicaMetadata(metadataEvento, imagemCanonicaEvento);
-  const origemFluxo = resolverOrigemFluxo({ metadata: metadataEventoCanonico });
+  const origemFluxo = resolverOrigemFluxo({ metadata: metadataEventoCanonico }) || origemFluxoEntrada;
   const metadataJob = {
     fase: "1.1",
     ...(origemFluxo ? { origemFluxo } : {}),

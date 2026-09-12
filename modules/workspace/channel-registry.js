@@ -47,6 +47,87 @@ function inferirWorkspacePorPrefixo(canalId = "", usuarios = []) {
   return { workspaceId: "", origem: "indefinida" };
 }
 
+function listarWorkspacesExplicitosCanal(meta = {}) {
+  return [...new Set([
+    meta.workspaceId,
+    meta.clienteId,
+    meta.clienteIdMensageiro,
+    meta.donoClienteId
+  ].map(texto).filter(Boolean))];
+}
+
+function workspaceExplicitoCanal(meta = {}) {
+  return listarWorkspacesExplicitosCanal(meta)[0] || "";
+}
+
+function sessaoCanalDesativada(meta = {}) {
+  if (!meta || typeof meta !== "object") return false;
+  if (meta.ativo === false || meta.desativada === true || meta.desativado === true || meta.disabled === true) return true;
+  const status = texto(meta.status).toLowerCase();
+  return new Set([
+    "desativado",
+    "desativada",
+    "inativo",
+    "inativa",
+    "apagada",
+    "deleted",
+    "workspace_excluido",
+    "connecting",
+    "reconnecting",
+    "backoff",
+    "precisa_qr",
+    "qr",
+    "erro_auth",
+    "offline",
+    "logged_out",
+    "loggedout"
+  ]).has(status);
+}
+
+function resolverCanalWorkspaceEstrito(canalEntrada = {}, deps = {}) {
+  const meta = canalEntrada && typeof canalEntrada === "object"
+    ? canalEntrada
+    : { id: canalEntrada };
+  const canalId = texto(meta.id || meta.sessaoId || meta.identificadorTecnico);
+  const workspacesExplicitos = listarWorkspacesExplicitosCanal(meta);
+  const workspaceExplicito = workspacesExplicitos[0] || "";
+  const inferido = inferirWorkspacePorPrefixo(canalId, deps.usuarios);
+  const workspacePrefixo = texto(inferido.workspaceId);
+  const base = resolverCanal(meta, deps);
+
+  if (workspacesExplicitos.length > 1 || (workspaceExplicito && workspacePrefixo && workspaceExplicito !== workspacePrefixo)) {
+    return { ...base, workspaceId: "", valido: false, motivo: "sessao_workspace_inconsistente" };
+  }
+
+  const workspaceId = workspaceExplicito || workspacePrefixo;
+  if (!workspaceId) {
+    return { ...base, workspaceId: "", valido: false, motivo: "sessao_sem_workspace" };
+  }
+  if (workspaceId.toLowerCase() === "admin") {
+    return { ...base, workspaceId: "", valido: false, motivo: "workspace_admin" };
+  }
+
+  const usuario = (Array.isArray(deps.usuarios) ? deps.usuarios : [])
+    .find(item => texto(item?.id) === workspaceId);
+  if (!usuario) {
+    return { ...base, workspaceId: "", valido: false, motivo: "workspace_inexistente" };
+  }
+  if (usuario.ativo === false) {
+    return { ...base, workspaceId: "", valido: false, motivo: "workspace_inativo" };
+  }
+  if (sessaoCanalDesativada(meta)) {
+    return { ...base, workspaceId: "", valido: false, motivo: "sessao_desativada" };
+  }
+
+  return {
+    ...base,
+    workspaceId,
+    origemWorkspace: workspaceExplicito ? "mapa_sessao" : "prefixo_sessao",
+    valido: true,
+    motivo: "workspace_resolvido"
+  };
+}
+
 function resolverCanal(canalEntrada = {}, deps = {}) {
   const meta = canalEntrada && typeof canalEntrada === "object"
     ? canalEntrada
@@ -102,7 +183,10 @@ function canalPertenceAoWorkspace(canalEntrada = {}, workspaceId = "", deps = {}
 
 module.exports = {
   resolverCanal,
+  resolverCanalWorkspaceEstrito,
   obterCanalPorId,
   canalPertenceAoWorkspace,
-  inferirWorkspacePorPrefixo
+  inferirWorkspacePorPrefixo,
+  sessaoCanalDesativada,
+  workspaceExplicitoCanal
 };

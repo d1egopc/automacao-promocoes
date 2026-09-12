@@ -1223,7 +1223,10 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
     return rejeitar("usuario_inativo");
   }
 
-  if (!clienteValidoEngine(clienteId, contexto.clientesValidos || [])) {
+  if (!clienteValidoEngine(clienteId, contexto.clientesValidos || [], {
+    origemFluxo: resolverOrigemFluxo(oferta),
+    avaliarWorkspaceParaEngine: contexto.avaliarWorkspaceParaEngine
+  })) {
     return rejeitar("cliente_invalido");
   }
 

@@ -5,6 +5,7 @@ const {
 } = require("../../utils/storage");
 const {
   criarWorkspaceAusente,
+  listarMotivosInelegibilidadeEngine,
   montarWorkspace,
   normalizarId,
   workspaceElegivelEngine
@@ -200,10 +201,8 @@ function avaliarWorkspaceParaEngine(workspaceId = "", opcoes = {}) {
   const id = normalizarId(workspaceId);
   const workspace = listarWorkspaces({ ...opcoes, log: false })
     .find(item => item.workspaceId === id) || criarWorkspaceAusente(id);
-  const elegivelEngine = workspaceElegivelEngine(workspace);
-  const motivos = Array.isArray(workspace.motivosInelegibilidade)
-    ? workspace.motivosInelegibilidade
-    : [];
+  const elegivelEngine = workspaceElegivelEngine(workspace, opcoes);
+  const motivos = listarMotivosInelegibilidadeEngine(workspace, opcoes);
 
   if (opcoes.log !== false) logAvaliacao(workspace, elegivelEngine, motivos);
   return {

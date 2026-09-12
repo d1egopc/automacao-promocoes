@@ -286,6 +286,7 @@ const {
 } = require("./modules/workspace/identity");
 const {
   resolverCanal,
+  resolverCanalWorkspaceEstrito,
   canalPertenceAoWorkspace
 } = require("./modules/workspace/channel-registry");
 const {
@@ -10758,6 +10759,9 @@ const {
   registrarListenerUnicoSocket,
   socketEhAtual
 } = require("./modules/whatsapp/socket-listener-lifecycle.service");
+const {
+  executarConsumidorMensagemIsolado
+} = require("./modules/whatsapp/message-consumer-isolation.service");
 
 registrarMiddlewaresOperacionais(app, {
   express,
@@ -13908,6 +13912,7 @@ app.post("/engine/validar-jobs", async (req, res) => {
       clientesValidos: listarClientesValidosEngineProcessor(),
       integracoesPorCliente,
       marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor(),
+      avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
       observarHistoricoClonadorTerminal
     });
 
@@ -14028,6 +14033,7 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
       clienteId: req.body?.clienteId || "",
       contexto: {
         clientesValidos: listarClientesValidosEngineProcessor(),
+        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
         configsPorCliente,
         destinosPorCliente,
         configGlobal: config,
@@ -27234,6 +27240,18 @@ function resolverClienteMensageiroPorSessao(sessao = "") {
     origemResolucao: "fallback"
   };
 }
+
+function resolverClienteClonePorSessao(sessao = "") {
+  const idSessao = String(sessao || "").trim();
+  const metaPersistida = sessoesMeta?.[idSessao] && typeof sessoesMeta[idSessao] === "object"
+    ? sessoesMeta[idSessao]
+    : { id: idSessao };
+  return resolverCanalWorkspaceEstrito({
+    ...metaPersistida,
+    id: idSessao,
+    status: statusSessao?.[idSessao] || metaPersistida.status || ""
+  }, { usuarios });
+}
 // ============== HELPERS DISTRIBUIDOR OFERTAS ==================================
 
 function usuarioPodeReceberMarketplace(usuario, marketplace) {
@@ -29762,8 +29780,8 @@ registrarListenerUnicoSocket({
     sessaoId: id,
     totalMensagensLote: messages.length
   });
-  try {
-    for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
+  for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
+    try {
       const mensagem = messages[indiceMensagem];
       indiceMensagemCobertura = indiceMensagem;
       mensagemAtualCobertura = mensagem;
@@ -29799,77 +29817,109 @@ registrarListenerUnicoSocket({
         continue;
       }
 
-      await processarMensagemRadarAutomatica({
-        mensagem,
-        sessaoId: id,
-        sock,
-        coberturaTraceId
+      await executarConsumidorMensagemIsolado({
+        consumidor: "radar",
+        contexto: contextoListenerCobertura,
+        executar: () => processarMensagemRadarAutomatica({
+          mensagem,
+          sessaoId: id,
+          sock,
+          coberturaTraceId
+        })
       });
 
-      const resultadoGerente = await mensageiro.tratarMensagemGrupoGerente({
-        clienteId: clienteIdMensageiro,
-        sessaoId: id,
-        sock,
-        mensagem,
-        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
-      });
-
-      if (resultadoGerente?.bloqueada !== true) {
-        await mensageiro.tratarMensagemGrupoComando({
+      const execucaoGerente = await executarConsumidorMensagemIsolado({
+        consumidor: "mensageiro_gerente",
+        contexto: contextoListenerCobertura,
+        executar: () => mensageiro.tratarMensagemGrupoGerente({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
           sock,
           mensagem,
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+        })
+      });
+      const resultadoGerente = execucaoGerente.resultado;
+
+      if (resultadoGerente?.bloqueada !== true) {
+        await executarConsumidorMensagemIsolado({
+          consumidor: "mensageiro_comando",
+          contexto: contextoListenerCobertura,
+          executar: () => mensageiro.tratarMensagemGrupoComando({
+            clienteId: clienteIdMensageiro,
+            sessaoId: id,
+            sock,
+            mensagem,
+            planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+          })
         });
       }
 
-      await mensageiro.tratarMensagemPrivadaAtendimento({
-        clienteId: clienteIdMensageiro,
-        sessaoId: id,
-        sock,
-        mensagem,
-        planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+      await executarConsumidorMensagemIsolado({
+        consumidor: "mensageiro_atendimento",
+        contexto: contextoListenerCobertura,
+        executar: () => mensageiro.tratarMensagemPrivadaAtendimento({
+          clienteId: clienteIdMensageiro,
+          sessaoId: id,
+          sock,
+          mensagem,
+          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+        })
       });
 
-      await clonadorGruposService.capturarMensagemWhatsapp({
+      await executarConsumidorMensagemIsolado({
+        consumidor: "clonador_grupos",
+        contexto: contextoListenerCobertura,
+        executar: async () => {
+          const resolucaoClone = resolverClienteClonePorSessao(id);
+          if (resolucaoClone.valido !== true) {
+            console.log("[CLONADOR-CAPTURA-IGNORADA]", JSON.stringify({
+              sessaoId: id,
+              mensagemId: contextoListenerCobertura.mensagemId,
+              motivo: resolucaoClone.motivo || "sessao_sem_workspace"
+            }));
+            return { ok: true, capturada: false, motivo: resolucaoClone.motivo || "sessao_sem_workspace" };
+          }
+          return clonadorGruposService.capturarMensagemWhatsapp({
+            clienteId: resolucaoClone.workspaceId,
+            sessaoId: id,
+            grupoJid: mensagem?.key?.remoteJid || "",
+            grupoNome: obterNomeGrupoRadar(id, mensagem?.key?.remoteJid || ""),
+            mensagem
+          });
+        }
+      });
+    } catch (e) {
+      coberturaRadar.registrar("listener_erro_mensagem", {
+        coberturaTraceId: coberturaRadar.criarCoberturaTraceId(mensagemAtualCobertura, {
+          sessaoId: id,
+          remoteJid: mensagemAtualCobertura?.key?.remoteJid || "",
+          loteTraceId: loteTraceIdCobertura,
+          indiceLote: indiceMensagemCobertura
+        }),
+        fidelidadeTraceId: coberturaRadar.extrairFidelidadeTraceId(mensagemAtualCobertura),
+        mensagemId: coberturaRadar.extrairMensagemId(mensagemAtualCobertura),
         clienteId: clienteIdMensageiro,
         sessaoId: id,
-        grupoJid: mensagem?.key?.remoteJid || "",
-        grupoNome: obterNomeGrupoRadar(id, mensagem?.key?.remoteJid || ""),
-        mensagem
-      });
-    }
-    coberturaRadar.registrar("listener_lote_fim", {
-      coberturaTraceId: loteTraceIdCobertura,
-      decisao: "concluido",
-      clienteId: clienteIdMensageiro,
-      sessaoId: id,
-      totalMensagensLote: messages.length
-    });
-  } catch (e) {
-    coberturaRadar.registrar("listener_erro_mensagem", {
-      coberturaTraceId: coberturaRadar.criarCoberturaTraceId(mensagemAtualCobertura, {
-        sessaoId: id,
         remoteJid: mensagemAtualCobertura?.key?.remoteJid || "",
-        loteTraceId: loteTraceIdCobertura,
-        indiceLote: indiceMensagemCobertura
-      }),
-      fidelidadeTraceId: coberturaRadar.extrairFidelidadeTraceId(mensagemAtualCobertura),
-      mensagemId: coberturaRadar.extrairMensagemId(mensagemAtualCobertura),
-      clienteId: clienteIdMensageiro,
-      sessaoId: id,
-      remoteJid: mensagemAtualCobertura?.key?.remoteJid || "",
-      grupoId: mensagemAtualCobertura?.key?.remoteJid || "",
-      grupoNome: obterNomeGrupoRadar(id, mensagemAtualCobertura?.key?.remoteJid || ""),
-      decisao: "erro",
-      motivo: e.message || "messages_upsert_erro",
-      indiceMensagem: indiceMensagemCobertura,
-      totalMensagensLote: messages.length,
-      posterioresNaoPercorridas: Math.max(0, messages.length - indiceMensagemCobertura - 1)
-    });
-    console.log("[MENSAGEIRO-ERRO]âš ï¸ messages.upsert:", e.message);
+        grupoId: mensagemAtualCobertura?.key?.remoteJid || "",
+        grupoNome: obterNomeGrupoRadar(id, mensagemAtualCobertura?.key?.remoteJid || ""),
+        decisao: "erro",
+        motivo: e.message || "messages_upsert_erro",
+        indiceMensagem: indiceMensagemCobertura,
+        totalMensagensLote: messages.length,
+        posterioresNaoPercorridas: 0
+      });
+      console.log("[MENSAGEIRO-ERRO] messages.upsert:", e.message);
+    }
   }
+  coberturaRadar.registrar("listener_lote_fim", {
+    coberturaTraceId: loteTraceIdCobertura,
+    decisao: "concluido",
+    clienteId: clienteIdMensageiro,
+    sessaoId: id,
+    totalMensagensLote: messages.length
+  });
   }
 });
 
@@ -30170,6 +30220,7 @@ initEngineDatabase()
       }),
       validarJobsDiagnosticadosEngine: (opcoes = {}) => validarJobsDiagnosticadosEngine({
         ...opcoes,
+        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
         observarHistoricoClonadorTerminal
       }),
       importarJobsProntosEngine,
@@ -30193,6 +30244,7 @@ initEngineDatabase()
       }),
       getContextoDistribuidor: () => ({
         clientesValidos: listarClientesValidosEngineProcessor(),
+        avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
         configsPorCliente,
         destinosPorCliente,
         configGlobal: config,

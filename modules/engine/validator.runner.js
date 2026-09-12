@@ -27,7 +27,7 @@ const {
   logEngineProcessadorFim
 } = require("./logger");
 
-async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = [], integracoesPorCliente = {}, marketplacesAtivosPorCliente = {}, observarHistoricoClonadorTerminal = null } = {}) {
+async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = [], integracoesPorCliente = {}, marketplacesAtivosPorCliente = {}, avaliarWorkspaceParaEngine = null, observarHistoricoClonadorTerminal = null } = {}) {
   const limiteFinal = limitarJobs(limite);
   const resumo = {
     ok: true,
@@ -140,6 +140,7 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
         clientesValidos,
         integracoesPorCliente,
         marketplacesAtivosPorCliente,
+        avaliarWorkspaceParaEngine,
         observarHistoricoClonadorTerminal
       });
 

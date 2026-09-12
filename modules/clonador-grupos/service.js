@@ -586,6 +586,7 @@ function criarServicoClonadorGrupos(deps = {}) {
 
     try {
       if (!clienteId || !sessaoId) return { ok: true, capturada: false, motivo: "workspace_ou_sessao_ausente" };
+      if (clienteId.toLowerCase() === "admin") return { ok: true, capturada: false, motivo: "workspace_admin" };
       if (!grupoJid.endsWith("@g.us")) return { ok: true, capturada: false, motivo: "nao_grupo" };
       if (!mensagemId) return { ok: true, capturada: false, motivo: "mensagem_id_ausente" };
       if (!clienteTemFeatureRuntime(clienteId)) return { ok: true, capturada: false, motivo: "recurso_indisponivel" };
