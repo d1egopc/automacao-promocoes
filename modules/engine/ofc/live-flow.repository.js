@@ -1,9 +1,10 @@
-const { queryEngine } = require("../database");
+const { queryEngineShadow } = require("../database");
 const { minutosLeaseJobsAtivos } = require("../jobs.service");
 const {
   criarMedidorEngineMemoryStage,
   medirBytesJsonSeguro
 } = require("../../telemetria/engine-memory-stage");
+const { monitorEventLoopDelay } = require("node:perf_hooks");
 
 const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "validando", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
@@ -19,9 +20,76 @@ function linhaUnica(resultado, fallback = {}) {
   return resultado?.ok ? resultado.resultado?.rows?.[0] || fallback : fallback;
 }
 
-async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 } = {}) {
+const CONCORRENCIA_MAXIMA_OFC_SHADOW = 2;
+
+async function executarConsultasOfcLimitadas(consultas, limite = CONCORRENCIA_MAXIMA_OFC_SHADOW) {
+  const resultados = new Array(consultas.length);
+  const limiteSeguro = limitarInteiro(limite, CONCORRENCIA_MAXIMA_OFC_SHADOW, 1, CONCORRENCIA_MAXIMA_OFC_SHADOW);
+  let proxima = 0;
+  let ativas = 0;
+  let pico = 0;
+  let motivoAbandono = "";
+
+  async function worker() {
+    while (proxima < consultas.length && !motivoAbandono) {
+      const indice = proxima++;
+      ativas += 1;
+      pico = Math.max(pico, ativas);
+      try {
+        resultados[indice] = await consultas[indice]();
+        if (!resultados[indice]?.ok && ["timeout_sql_shadow", "timeout_aquisicao_shadow"].includes(resultados[indice]?.motivo)) {
+          motivoAbandono = resultados[indice].motivo;
+        }
+      } catch (erro) {
+        resultados[indice] = { ok: false, motivo: "erro_consulta_ofc", erro: String(erro?.message || "erro_desconhecido").slice(0, 180) };
+      } finally {
+        ativas -= 1;
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limiteSeguro, consultas.length) }, worker));
+  if (motivoAbandono) {
+    for (let indice = 0; indice < resultados.length; indice += 1) {
+      if (!resultados[indice]) {
+        resultados[indice] = {
+          ok: false,
+          motivo: "observabilidade_abandonada",
+          erro: `consulta nao iniciada apos ${motivoAbandono}`,
+          metricas: { abandonada: true }
+        };
+      }
+    }
+  }
+  return { resultados, pico };
+}
+
+function resumoObservabilidadeConsultas(resultados, inicio, atrasoLoop, pico) {
+  const metricas = resultados.map(item => item?.metricas || {});
+  const numero = chave => metricas.reduce((total, item) => total + (Number(item[chave]) || 0), 0);
+  atrasoLoop.disable();
+  return {
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+    eventLoopLagMaxMs: Math.round(Number(atrasoLoop.max || 0) / 1e6),
+    tempoPoolMsTotal: numero("tempoPoolMs"),
+    tempoSqlMsTotal: numero("tempoSqlMs"),
+    picoConsultasSimultaneas: pico,
+    consultasTotal: resultados.length,
+    consultasComTimeout: metricas.filter(item => item.timeout).length,
+    consultasPoolSaturado: metricas.filter(item => item.poolSaturado).length
+  };
+}
+
+async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000, limiteConcorrencia, timeoutMs } = {}) {
   const janela = limitarInteiro(janelaMinutos, 15, 1, 120);
   const limite = limitarInteiro(limiteAmostra, 2000, 1, 5000);
+  const timeoutObservabilidadeMs = limitarInteiro(timeoutMs || process.env.OFC_SHADOW_DB_TIMEOUT_MS, 2500, 100, 10000);
+  const inicio = process.hrtime.bigint();
+  const atrasoLoop = monitorEventLoopDelay({ resolution: 20 });
+  atrasoLoop.enable();
+  const consultarShadow = (texto, parametros) => queryEngineShadow(texto, parametros, {
+    timeoutSqlMs: timeoutObservabilidadeMs
+  });
   const medidorOfc = criarMedidorEngineMemoryStage("ofc_amostra_circulavel", {
     limite
   });
@@ -35,8 +103,8 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
              )
            )`;
 
-  const [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra, primeiraTentativaReset] = await Promise.all([
-    queryEngine(
+  const consultasExecutadas = await executarConsultasOfcLimitadas([
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS mais_antigo_em,
               MAX(criado_em) AS mais_novo_em,
@@ -45,7 +113,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         WHERE ${condicaoVivoSql}`,
       [STATUS_VIVOS_FLUXO, STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS mais_antigo_em,
               MAX(criado_em) AS mais_novo_em,
@@ -54,7 +122,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         WHERE status = ANY($1::text[])`,
       [STATUS_CIRCULAVEIS_FLUXO]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS mais_antigo_em,
               MAX(criado_em) AS mais_novo_em,
@@ -64,7 +132,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
           AND COALESCE(atualizado_em, criado_em) >= NOW() - ($2::int * INTERVAL '1 minute')`,
       [STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT status,
               COUNT(*)::int AS total,
               COALESCE(MAX(EXTRACT(EPOCH FROM (NOW() - criado_em)) * 1000), 0)::bigint AS idade_maxima_ms,
@@ -76,7 +144,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
          GROUP BY status`,
       [STATUS_EM_CURSO_PROTEGIDOS_FLUXO, leaseMinutos]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS primeiro_em,
               MAX(criado_em) AS ultimo_em
@@ -84,7 +152,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')`,
       [janela]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(criado_em) AS primeiro_em,
               MAX(criado_em) AS ultimo_em
@@ -92,7 +160,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')`,
       [janela]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               MIN(atualizado_em) AS primeiro_em,
               MAX(atualizado_em) AS ultimo_em
@@ -101,7 +169,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
           AND atualizado_em >= NOW() - ($1::int * INTERVAL '1 minute')`,
       [janela]
     ),
-    queryEngine(
+    () => consultarShadow(
       `WITH primeira AS (
          SELECT job_id, MIN(criado_em) AS primeira_tentativa_em
            FROM engine_processamentos
@@ -121,7 +189,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         WHERE p.primeira_tentativa_em >= j.criado_em`,
       [janela]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT COUNT(*)::int AS total,
               COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(o.criada_em, j.atualizado_em) - e.capturado_em)) * 1000), 0)::bigint AS media_ms
          FROM engine_jobs_cliente j
@@ -150,7 +218,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
           )`,
       [Math.max(janela, 30)]
     ),
-    queryEngine(
+    () => consultarShadow(
       `SELECT id,
               cliente_id,
               status,
@@ -164,7 +232,7 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
         LIMIT $2`,
       [STATUS_CIRCULAVEIS_FLUXO, limite]
     ),
-    queryEngine(
+    () => consultarShadow(
       `WITH reset AS (
          SELECT MAX(cutoff_congelado) AS cutoff_congelado
            FROM engine_reset_operacional_operacoes
@@ -186,7 +254,14 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
           AND r.cutoff_congelado IS NOT NULL`,
       [janela]
     )
-  ]);
+  ], limiteConcorrencia);
+  const [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra, primeiraTentativaReset] = consultasExecutadas.resultados;
+  const observabilidade = resumoObservabilidadeConsultas(
+    consultasExecutadas.resultados,
+    inicio,
+    atrasoLoop,
+    consultasExecutadas.pico
+  );
 
   const consultas = [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra];
   const falha = consultas.find(item => !item.ok);
@@ -232,7 +307,8 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000 
     radarOferta: linhaUnica(radarOferta, { total: 0, media_ms: 0 }),
     amostraCirculavel: amostraRows,
     erro: falha?.erro || "",
-    motivo: falha?.motivo || ""
+    motivo: falha?.motivo || "",
+    observabilidade
   };
 }
 
@@ -240,5 +316,7 @@ module.exports = {
   STATUS_VIVOS_FLUXO,
   STATUS_CIRCULAVEIS_FLUXO,
   STATUS_EM_CURSO_PROTEGIDOS_FLUXO,
-  consultarFluxoVivoOfc
+  consultarFluxoVivoOfc,
+  executarConsultasOfcLimitadas,
+  CONCORRENCIA_MAXIMA_OFC_SHADOW
 };

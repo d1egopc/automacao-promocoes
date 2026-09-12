@@ -1,6 +1,7 @@
 ﻿
 const fs = require("fs");
 const path = require("path");
+const { AsyncLocalStorage } = require("async_hooks");
 const axios = require("axios");
 const csv = require("csv-parser");
 const zlib = require("zlib");
@@ -75,6 +76,9 @@ const {
   calcularScoreFilaViva,
   ordenarOfertasFilaViva
 } = require("./modules/executor/fila-viva.service");
+const {
+  criarThrottleLogIntervalo
+} = require("./modules/executor/fila-intervalo-log-throttle");
 
 const {
   farejarMercadoLivre: farejarMercadoLivreModulo,
@@ -4800,8 +4804,14 @@ function timestampIntervalo(valor = "") {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+const throttleLogFilaIntervalo = criarThrottleLogIntervalo({
+  janelaMs: Number(process.env.FILA_INTERVALO_LOG_THROTTLE_MS) || 15000
+});
+const contextoLogFilaIntervalo = new AsyncLocalStorage();
+let proximaRodadaLogFilaIntervalo = 1;
+
 function logFilaIntervalo(tag, payload = {}) {
-  console.log(tag, JSON.stringify(payload));
+  return throttleLogFilaIntervalo.registrar(tag, payload, contextoLogFilaIntervalo.getStore() || null);
 }
 
 function controleIntervaloCliente(clienteId = "admin") {
@@ -9128,7 +9138,7 @@ function motivoCoberturaDestino(motivo = "") {
   return mapa[chave] || chave || "outro motivo existente";
 }
 
-async function processarFila(clienteIdAlvo = null, opcoes = {}) {
+async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
   const clienteFila = clienteIdAlvo || "admin";
   const inicioProcessarFila = process.hrtime.bigint();
   const cpuInicioProcessarFila = process.cpuUsage();
@@ -10834,6 +10844,22 @@ console.log("[ENVIO] Enviado com controle de tempo");
     ofertaId: oferta?.id || ""
   });
 }
+}
+
+async function processarFila(clienteIdAlvo = null, opcoes = {}) {
+  const clienteFila = clienteIdAlvo || "admin";
+  const rodadaLogIntervalo = throttleLogFilaIntervalo.iniciarRodada({
+    rodadaId: `processar_fila_${Date.now()}_${proximaRodadaLogFilaIntervalo++}`,
+    clienteId: clienteFila,
+    origem: "processar_fila"
+  });
+  return contextoLogFilaIntervalo.run(rodadaLogIntervalo, async () => {
+    try {
+      return await processarFilaInterna(clienteIdAlvo, opcoes);
+    } finally {
+      throttleLogFilaIntervalo.finalizarRodada(rodadaLogIntervalo);
+    }
+  });
 }
 
 const {

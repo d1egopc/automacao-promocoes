@@ -292,7 +292,8 @@ async function criarFluxoVivoShadowOfc({ metricas = {}, plano = {}, filaAtiva = 
         failSafe: true,
         motivo: dados.motivo || "consulta_fluxo_vivo_falhou",
         erro: String(dados.erro || "erro_desconhecido").slice(0, 180),
-        duracaoMs: Date.now() - inicio
+        duracaoMs: Date.now() - inicio,
+        observabilidade: dados.observabilidade || {}
       };
     }
 
@@ -305,7 +306,8 @@ async function criarFluxoVivoShadowOfc({ metricas = {}, plano = {}, filaAtiva = 
         agoraMs: opcoes.agoraMs,
         opcoes
       }),
-      duracaoMs: Date.now() - inicio
+      duracaoMs: Date.now() - inicio,
+      observabilidade: dados.observabilidade || {}
     };
   } catch (e) {
     return {

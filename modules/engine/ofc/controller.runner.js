@@ -68,7 +68,8 @@ function logarFluxoVivoShadow(rodadaId, fluxoVivo = {}) {
       ttl: fluxoVivo.ttl,
       amostra: fluxoVivo.amostra,
       filaAtivaShadowAtual: fluxoVivo.filaAtivaShadowAtual,
-      duracaoMs: fluxoVivo.duracaoMs
+      duracaoMs: fluxoVivo.duracaoMs,
+      observabilidade: fluxoVivo.observabilidade || {}
     });
     return;
   }
@@ -80,7 +81,8 @@ function logarFluxoVivoShadow(rodadaId, fluxoVivo = {}) {
     failSafe: true,
     motivo: fluxoVivo.motivo || "erro_fluxo_vivo_shadow",
     erro: String(fluxoVivo.erro || "erro_desconhecido").slice(0, 180),
-    duracaoMs: fluxoVivo.duracaoMs
+    duracaoMs: fluxoVivo.duracaoMs,
+    observabilidade: fluxoVivo.observabilidade || {}
   });
 }
 
@@ -312,11 +314,20 @@ async function executarObservabilidadeOfc(opcoes = {}) {
     });
     logarAuditoriaV24Shadow(rodadaId, auditoriaV24);
 
+    const duracaoMs = Date.now() - inicio;
+    logOfc("[OFC-RESPONSIVIDADE-SHADOW]", {
+      rodadaId,
+      modo: "shadow",
+      aplicouMudancas: false,
+      duracaoMs,
+      fluxoVivo: fluxoVivo.observabilidade || {}
+    });
+
     return {
       ok: true,
       modo: "shadow",
       aplicouMudancas: false,
-      duracaoMs: Date.now() - inicio,
+      duracaoMs,
       metricas,
       plano,
       filaAtiva,

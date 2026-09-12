@@ -7,8 +7,10 @@ const {
 } = require("./logger");
 
 let pool = null;
+let poolShadow = null;
 let pgDisponivel = null;
 let poolVersao = 0;
+let poolShadowVersao = 0;
 let ultimaRecriacaoPoolEm = 0;
 const metadadosPools = new WeakMap();
 const metadadosConexoesPool = new WeakMap();
@@ -164,6 +166,16 @@ function criarConfigPoolEngine() {
     idleTimeoutMillis: limitarInteiroDb(process.env.ENGINE_DB_IDLE_TIMEOUT_MS, 30000, 5000, 300000),
     keepAlive: process.env.ENGINE_DB_KEEP_ALIVE === "0" ? false : true,
     keepAliveInitialDelayMillis: limitarInteiroDb(process.env.ENGINE_DB_KEEP_ALIVE_INITIAL_DELAY_MS, 10000, 1000, 60000)
+  };
+}
+
+function criarConfigPoolShadow() {
+  const configOperacional = criarConfigPoolEngine();
+  return {
+    ...configOperacional,
+    max: 2,
+    connectionTimeoutMillis: limitarInteiroDb(process.env.OFC_SHADOW_POOL_ACQUIRE_TIMEOUT_MS, 750, 100, 5000),
+    idleTimeoutMillis: limitarInteiroDb(process.env.OFC_SHADOW_POOL_IDLE_TIMEOUT_MS, 30000, 5000, 300000)
   };
 }
 
@@ -392,6 +404,36 @@ function getEnginePool() {
   return poolNovo;
 }
 
+function getEngineShadowPool() {
+  if (!engineDbHabilitado()) return null;
+  if (poolShadow) return poolShadow;
+
+  const pg = carregarPg();
+  if (!pg) return null;
+
+  const configPool = criarConfigPoolShadow();
+  const versao = poolShadowVersao + 1;
+  const poolNovo = new pg.Pool(configPool);
+  poolShadowVersao = versao;
+  poolShadow = poolNovo;
+
+  logDbPool("shadow_criado", {
+    poolShadowVersao: versao,
+    max: configPool.max,
+    connectionTimeoutMillis: configPool.connectionTimeoutMillis,
+    idleTimeoutMillis: configPool.idleTimeoutMillis
+  });
+  poolNovo.on("error", erro => {
+    const erroDb = erroSanitizadoDb(erro);
+    logDbPool("shadow_error", {
+      poolShadowVersao: versao,
+      ...erroDb,
+      ...estadoPoolEngine(poolNovo, "")
+    });
+  });
+  return poolNovo;
+}
+
 async function queryEngine(texto, params = []) {
   const inicio = process.hrtime.bigint();
   const tipoQuery = tipoQueryEngine(texto);
@@ -457,10 +499,15 @@ async function queryEngine(texto, params = []) {
       duranteConnect: !client,
       origem: "queryEngine"
     });
-    logEngineDbErro({ motivo: "query_falhou", erro: erroDb.erroMensagem, codigo: erroDb.erroCodigo || undefined, poolRecriado });
+    logEngineDbErro({
+      motivo: "query_falhou",
+      erro: erroDb.erroMensagem,
+      codigo: erroDb.erroCodigo || undefined,
+      poolRecriado
+    });
     return {
       ok: false,
-      motivo: "query_falhou",
+      motivo: timeoutObservabilidade ? "timeout_observabilidade" : "query_falhou",
       erro: e.message,
       erroCodigo: erroDb.erroCodigo,
       erroPosicao: erroDb.erroPosicao,
@@ -470,6 +517,62 @@ async function queryEngine(texto, params = []) {
     };
   } finally {
     if (client) client.release();
+  }
+}
+
+async function queryEngineShadow(texto, params = [], opcoes = {}) {
+  const inicio = process.hrtime.bigint();
+  const clientPool = opcoes.pool || getEngineShadowPool();
+  const timeoutSqlMs = limitarInteiroDb(opcoes.timeoutSqlMs || process.env.OFC_SHADOW_SQL_TIMEOUT_MS, 2000, 100, 10000);
+  if (!clientPool) {
+    return { ok: false, motivo: engineDbHabilitado() ? "pool_shadow_indisponivel" : "database_url_ausente", metricas: { tempoPoolMs: null, tempoSqlMs: null, timeout: false } };
+  }
+
+  const poolAntes = estadoPoolEngine(clientPool, "Antes");
+  const inicioPool = process.hrtime.bigint();
+  let client = null;
+  let tempoPoolMs = null;
+  let tempoSqlMs = null;
+  let deveRemoverClient = false;
+  let timeout = false;
+  let ok = false;
+  try {
+    client = await clientPool.connect();
+    tempoPoolMs = Math.round(perfDbMs(inicioPool));
+    await client.query("SELECT set_config('statement_timeout', $1, false)", [String(timeoutSqlMs)]);
+    const inicioSql = process.hrtime.bigint();
+    const resultado = await client.query(texto, params);
+    tempoSqlMs = Math.round(perfDbMs(inicioSql));
+    await client.query("SELECT set_config('statement_timeout', '0', false)");
+    ok = true;
+    return { ok: true, resultado, metricas: { tempoPoolMs, tempoSqlMs, timeout: false } };
+  } catch (erro) {
+    if (tempoPoolMs === null) tempoPoolMs = Math.round(perfDbMs(inicioPool));
+    const timeoutAquisicao = /timeout exceeded when trying to connect/i.test(String(erro?.message || ""));
+    timeout = String(erro?.code || "") === "57014";
+    if (client) {
+      try {
+        await client.query("SELECT set_config('statement_timeout', '0', false)");
+      } catch {
+        deveRemoverClient = true;
+      }
+    }
+    return {
+      ok: false,
+      motivo: timeout ? "timeout_sql_shadow" : (timeoutAquisicao ? "timeout_aquisicao_shadow" : "query_shadow_falhou"),
+      erro: String(erro?.message || "erro_desconhecido").slice(0, 180),
+      metricas: { tempoPoolMs, tempoSqlMs, timeout, faseTimeout: timeout ? "sql" : "" }
+    };
+  } finally {
+    if (client) client.release(deveRemoverClient ? new Error("shadow_reset_timeout_falhou") : undefined);
+    logDbPerf("queryEngineShadow", inicio, {
+      ok,
+      timeout,
+      tempoPoolMs,
+      tempoSqlMs,
+      ...poolAntes,
+      ...estadoPoolEngine(clientPool, "Depois")
+    });
   }
 }
 
@@ -499,5 +602,7 @@ module.exports = {
   initEngineDatabase,
   queryEngine,
   getEnginePool,
+  queryEngineShadow,
+  getEngineShadowPool,
   engineDbHabilitado
 };
