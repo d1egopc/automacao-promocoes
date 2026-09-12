@@ -9,7 +9,10 @@ const path = require("path");
 const criarRotasClonadorGrupos = require("../modules/clonador-grupos/routes");
 const { criarServicoClonadorGrupos, MAX_FONTES_ATIVAS } = require("../modules/clonador-grupos");
 const { criarRepositorioClonadorGrupos } = require("../modules/clonador-grupos/repository");
-const { extrairOcorrenciasLinksPosicionais } = require("../modules/clonador-grupos/service");
+const {
+  extrairOcorrenciasLinksPosicionais,
+  classificarOcorrenciaContextualClonador
+} = require("../modules/clonador-grupos/service");
 
 const raiz = path.resolve(__dirname, "..");
 
@@ -100,6 +103,19 @@ function mensagem({ grupoJid = "grupo_a@g.us", id = "msg_1", texto = "Oferta boa
       conversation: texto
     }
   };
+}
+
+function ocorrenciasClassificadas(textoOriginal, mensagemId) {
+  return extrairOcorrenciasLinksPosicionais(textoOriginal, mensagemId).map(ocorrencia => {
+    const classificacao = classificarOcorrenciaContextualClonador({ ...ocorrencia, textoOriginal });
+    return {
+      ...ocorrencia,
+      papelContextual: classificacao.papelContextual,
+      motivoContextual: classificacao.motivo,
+      confiancaContextual: classificacao.confianca,
+      evidenciasContextuais: classificacao.evidencias
+    };
+  });
 }
 
 function req(clienteId) {
@@ -257,7 +273,7 @@ async function testarOcorrenciasPassivasPreservamRepeticao() {
   });
   const aa = repo.estado.buffer[0];
   assert.deepStrictEqual(aa.links, [urlA], "campo legado continua deduplicado");
-  assert.deepStrictEqual(aa.metadata.clonadorGrupos.linksOcorrencias, extrairOcorrenciasLinksPosicionais(`${urlA}\n${urlA}`, "msg_ocorrencias_aa"));
+  assert.deepStrictEqual(aa.metadata.clonadorGrupos.linksOcorrencias, ocorrenciasClassificadas(`${urlA}\n${urlA}`, "msg_ocorrencias_aa"));
 
   await service.capturarMensagemWhatsapp({
     clienteId: "workspace_a",
@@ -266,7 +282,7 @@ async function testarOcorrenciasPassivasPreservamRepeticao() {
   });
   const aba = repo.estado.buffer[1];
   assert.deepStrictEqual(aba.links, [urlA, urlB], "ordem legada deduplicada permanece inalterada");
-  assert.deepStrictEqual(aba.metadata.clonadorGrupos.linksOcorrencias, extrairOcorrenciasLinksPosicionais(`${urlA}\n${urlB}\n${urlA}`, "msg_ocorrencias_aba"));
+  assert.deepStrictEqual(aba.metadata.clonadorGrupos.linksOcorrencias, ocorrenciasClassificadas(`${urlA}\n${urlB}\n${urlA}`, "msg_ocorrencias_aba"));
 }
 
 function possuiSurrogateIsolado(valor = "") {
@@ -321,6 +337,64 @@ function testarExtracaoPosicionalPassiva() {
   assert.ok(ocorrenciasGrandes.filter(item => item.contextoDisponivel === false).every(item =>
     item.contextoAntes === "" && item.contextoDepois === "" && item.inicioTexto >= 0 && item.fimTexto > item.inicioTexto
   ));
+}
+
+function classificarOcorrenciaDoTexto(textoOriginal, indice = 0) {
+  const ocorrencia = extrairOcorrenciasLinksPosicionais(textoOriginal, "msg_contexto")[indice];
+  return classificarOcorrenciaContextualClonador({ ...ocorrencia, textoOriginal });
+}
+
+function testarClassificacaoContextualPassiva() {
+  const urlShopee = "https://s.shopee.com.br/realProduto";
+  const urlAliExpress = "https://a.aliexpress.com/_realApp";
+  const repetida = `Produto: ${urlShopee}\nResgatar cupom: ${urlShopee}`;
+  assert.deepStrictEqual(
+    [classificarOcorrenciaDoTexto(repetida, 0).papelContextual, classificarOcorrenciaDoTexto(repetida, 1).papelContextual],
+    ["produto", "resgate"],
+    "mesma URL recebe papel por ocorrencia, nao por valor"
+  );
+
+  const mesmaLinha = `Produto: ${urlShopee} | Resgatar cupom: ${urlShopee}`;
+  assert.deepStrictEqual(
+    [classificarOcorrenciaDoTexto(mesmaLinha, 0).papelContextual, classificarOcorrenciaDoTexto(mesmaLinha, 1).papelContextual],
+    ["produto", "resgate"]
+  );
+
+  const casos = [
+    [`Produto: ${urlShopee}\nCupom: ${urlAliExpress}`, 0, "produto"],
+    [`Produto: ${urlShopee}\nCupom: ${urlAliExpress}`, 1, "cupom"],
+    [`Produto: ${urlShopee}\nAtive o cupom: ${urlAliExpress}`, 1, "resgate"],
+    [`App: ${urlAliExpress}\n🪙 Moedas: ${urlAliExpress}`, 0, "app"],
+    [`App: ${urlAliExpress}\n🪙 Moedas: ${urlAliExpress}`, 1, "moedas"],
+    [`PC: ${urlAliExpress}\n🛒 Produto: ${urlShopee}`, 0, "pc"],
+    [`PC: ${urlAliExpress}\n🛒 Produto: ${urlShopee}`, 1, "produto"],
+    [`Confira: ${urlShopee}).`, 0, "produto"],
+    [`Sem rotulo ${urlShopee}`, 0, "desconhecido"],
+    [`Produto com cupom ${urlShopee}`, 0, "desconhecido"],
+    [`Cupom no produto ${urlShopee}`, 0, "desconhecido"],
+    [`Abra o produto no app ${urlAliExpress}`, 0, "desconhecido"],
+    [`Produto: | Cupom: ${urlShopee}`, 0, "desconhecido"]
+  ];
+  for (const [textoOriginal, indice, esperado] of casos) {
+    assert.strictEqual(classificarOcorrenciaDoTexto(textoOriginal, indice).papelContextual, esperado, textoOriginal);
+  }
+
+  const truncada = classificarOcorrenciaContextualClonador({
+    urlOriginal: urlShopee,
+    contextoAntes: "Produto:",
+    contextoDepois: "",
+    inicioTexto: 0,
+    fimTexto: urlShopee.length,
+    linha: 1,
+    textoOriginal: urlShopee,
+    contextoDisponivel: false
+  });
+  assert.deepStrictEqual(truncada, {
+    papelContextual: "desconhecido",
+    motivo: "contexto_indisponivel",
+    confianca: "baixa",
+    evidencias: []
+  });
 }
 
 async function testarCaptionsEWrappersPreservamOcorrenciasPosicionais() {
@@ -578,6 +652,7 @@ async function main() {
   await testarCapturaGuardsBuffer();
   await testarOcorrenciasPassivasPreservamRepeticao();
   testarExtracaoPosicionalPassiva();
+  testarClassificacaoContextualPassiva();
   await testarCaptionsEWrappersPreservamOcorrenciasPosicionais();
   await testarLimiteQuatroEMultiworkspace();
   await testarEndpointBufferIsolado();

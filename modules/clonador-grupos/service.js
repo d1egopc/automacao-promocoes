@@ -122,6 +122,143 @@ function extrairOcorrenciasLinksPosicionais(textoOriginal = "", mensagemId = "")
   return ocorrencias;
 }
 
+function normalizarContextoOcorrencia(valor = "") {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function fragmentoAntesOcorrencia(contextoAntes = "") {
+  const fonte = String(contextoAntes || "");
+  const quebra = Math.max(fonte.lastIndexOf("\n"), fonte.lastIndexOf("\r"));
+  const links = [...fonte.matchAll(/https?:\/\/[^\s]+/g)];
+  const fimUltimoLink = links.length ? links.at(-1).index + links.at(-1)[0].length : -1;
+  return fonte.slice(Math.max(quebra + 1, fimUltimoLink)).trim();
+}
+
+function fragmentoDepoisOcorrencia(contextoDepois = "") {
+  const fonte = String(contextoDepois || "");
+  const quebra = fonte.search(/[\r\n]/);
+  const link = fonte.search(/https?:\/\/[^\s]+/);
+  const fim = [quebra, link].filter(indice => indice >= 0).reduce((menor, indice) => Math.min(menor, indice), fonte.length);
+  return fonte.slice(0, fim).trim();
+}
+
+function linhaAtualSomenteUrl(textoOriginal = "", inicioTexto = 0, fimTexto = 0) {
+  const fonte = String(textoOriginal || "");
+  const inicioLinha = Math.max(0, fonte.lastIndexOf("\n", Math.max(0, inicioTexto - 1)) + 1);
+  const proximaQuebra = fonte.indexOf("\n", fimTexto);
+  const fimLinha = proximaQuebra < 0 ? fonte.length : proximaQuebra;
+  const restante = normalizarContextoOcorrencia(fonte.slice(inicioLinha, fimLinha).replace(/https?:\/\/[^\s]+/g, " "));
+  return !/[a-z0-9]/.test(restante);
+}
+
+function linhaAnteriorCurta(textoOriginal = "", inicioTexto = 0) {
+  const fonte = String(textoOriginal || "");
+  const inicioLinhaAtual = Math.max(0, fonte.lastIndexOf("\n", Math.max(0, inicioTexto - 1)) + 1);
+  if (inicioLinhaAtual <= 0) return "";
+  const fimAnterior = Math.max(0, inicioLinhaAtual - 1);
+  const inicioAnterior = Math.max(0, fonte.lastIndexOf("\n", Math.max(0, fimAnterior - 1)) + 1);
+  return Array.from(fonte.slice(inicioAnterior, fimAnterior)).slice(-96).join("").trim();
+}
+
+function papeisRotuloContextual(fragmento = "") {
+  const partes = String(fragmento || "").split(/[|]/).map(parte =>
+    normalizarContextoOcorrencia(parte).replace(/^[^a-z0-9]+/, "").trim()
+  ).filter(Boolean);
+  const papeis = [];
+
+  for (const parte of partes) {
+    if (/^(?:resgatar|resgate|ative|ativar|pegue|pegar)\s+(?:o\s+)?cupom\s*:?$/.test(parte) || /^resgate\s*:?$/.test(parte)) {
+      papeis.push({ papel: "resgate", motivo: "rotulo_resgate_cupom_local" });
+      continue;
+    }
+    if (/^(?:aplique|aplicar)\s+(?:o\s+)?cupom\s*:?$/.test(parte) || /^(?:cupom|codigo)\s*:?$/.test(parte)) {
+      papeis.push({ papel: "cupom", motivo: "rotulo_cupom_local" });
+      continue;
+    }
+    if (/^(?:app|aplicativo|abra\s+(?:no\s+)?app)\s*:?$/.test(parte)) {
+      papeis.push({ papel: "app", motivo: "rotulo_app_local" });
+      continue;
+    }
+    if (/^(?:moedas?|coins?|use\s+(?:moedas?|coins?)|ganhe\s+(?:moedas?|coins?))\s*:?$/.test(parte)) {
+      papeis.push({ papel: "moedas", motivo: "rotulo_moedas_local" });
+      continue;
+    }
+    if (/^(?:link\s+)?(?:pc|computador|desktop)\s*:?$/.test(parte)) {
+      papeis.push({ papel: "pc", motivo: "rotulo_pc_local" });
+      continue;
+    }
+    if (/^(?:produto|comprar|confira|oferta|link\s+do\s+produto)\s*:?$/.test(parte)) {
+      papeis.push({ papel: "produto", motivo: "rotulo_produto_local" });
+    }
+  }
+
+  return papeis;
+}
+
+function evidenciasEmojiContextual(contexto = "", papel = "") {
+  const fonte = String(contexto || "");
+  const emojis = {
+    produto: /🛒|🛍️/,
+    resgate: /🎟️|🏷️/,
+    cupom: /🎟️|🏷️/,
+    moedas: /🪙|💰/,
+    app: /📱/,
+    pc: /💻|🖥️/
+  };
+  return emojis[papel]?.test(fonte) ? [`emoji_${papel}`] : [];
+}
+
+function classificarOcorrenciaContextualClonador({
+  urlOriginal = "",
+  contextoAntes = "",
+  contextoDepois = "",
+  inicioTexto = 0,
+  fimTexto = 0,
+  linha = 0,
+  textoOriginal = "",
+  contextoDisponivel = false
+} = {}) {
+  if (contextoDisponivel !== true) {
+    return { papelContextual: "desconhecido", motivo: "contexto_indisponivel", confianca: "baixa", evidencias: [] };
+  }
+
+  const antes = fragmentoAntesOcorrencia(contextoAntes);
+  const depois = /https?:\/\/[^\s]+/.test(String(contextoDepois || "")) ? "" : fragmentoDepoisOcorrencia(contextoDepois);
+  const fontes = [
+    { valor: antes, origem: "rotulo_local_antes", confianca: "alta" },
+    { valor: depois, origem: "rotulo_local_depois", confianca: "alta" }
+  ];
+  if (!antes && !depois && linhaAtualSomenteUrl(textoOriginal, inicioTexto, fimTexto)) {
+    fontes.push({ valor: linhaAnteriorCurta(textoOriginal, inicioTexto), origem: "rotulo_linha_anterior", confianca: "media" });
+  }
+
+  const sinais = fontes.flatMap(fonte => papeisRotuloContextual(fonte.valor).map(sinal => ({ ...sinal, ...fonte })));
+  const papeis = new Set(sinais.map(sinal => sinal.papel));
+  if (papeis.size !== 1) {
+    return {
+      papelContextual: "desconhecido",
+      motivo: papeis.size > 1 ? "rotulos_contextuais_conflitantes" : "rotulo_contextual_ausente",
+      confianca: "baixa",
+      evidencias: sinais.map(sinal => `${sinal.origem}:${sinal.papel}`)
+    };
+  }
+
+  const sinal = sinais[0];
+  return {
+    papelContextual: sinal.papel,
+    motivo: sinal.motivo,
+    confianca: sinal.confianca,
+    evidencias: [
+      `${sinal.origem}:${sinal.papel}`,
+      ...evidenciasEmojiContextual(`${antes} ${depois}`, sinal.papel)
+    ]
+  };
+}
+
 function extrairMensagemInterna(mensagem = {}) {
   let atual = mensagem?.message || mensagem || {};
   for (let i = 0; i < 8; i += 1) {
@@ -476,7 +613,16 @@ function criarServicoClonadorGrupos(deps = {}) {
         ? deps.extrairLinksMensagem(textoOriginal)
         : String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || [];
       const links = normalizarLinksEntrada(linksCapturados);
-      const linksOcorrencias = extrairOcorrenciasLinksPosicionais(textoOriginal, mensagemId);
+      const linksOcorrencias = extrairOcorrenciasLinksPosicionais(textoOriginal, mensagemId).map(ocorrencia => {
+        const classificacao = classificarOcorrenciaContextualClonador({ ...ocorrencia, textoOriginal });
+        return {
+          ...ocorrencia,
+          papelContextual: classificacao.papelContextual,
+          motivoContextual: classificacao.motivo,
+          confiancaContextual: classificacao.confianca,
+          evidenciasContextuais: classificacao.evidencias
+        };
+      });
       const metadataBase = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
       const metadata = {
         ...metadataBase,
@@ -562,5 +708,6 @@ module.exports = {
   destinoIdOficial,
   grupoIdOficial,
   linksOcorrenciasCapturadas,
-  extrairOcorrenciasLinksPosicionais
+  extrairOcorrenciasLinksPosicionais,
+  classificarOcorrenciaContextualClonador
 };

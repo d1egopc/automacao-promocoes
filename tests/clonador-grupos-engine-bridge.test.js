@@ -622,6 +622,14 @@ function testarEscopoEstrutural() {
     const corpo = shopeeFonte.slice(inicio, proximo < 0 ? undefined : proximo);
     assert.ok(!corpo.includes("ocorrenciasShopeeClonador"), `${funcao} nao pode receber a visao passiva do Clone`);
   }
+
+  const camposContextuais = ["papelContextual", "motivoContextual", "confiancaContextual", "evidenciasContextuais"];
+  for (const partes of [...importadores, ["modules", "engine", "importer", "adapters", "shopee.adapter.js"], ["marketplaces", "shopee", "importar.js"]]) {
+    const fonte = fs.readFileSync(path.join(__dirname, "..", ...partes), "utf8");
+    for (const campo of camposContextuais) {
+      assert.ok(!fonte.includes(campo), `${partes.at(-1)} nao pode consumir classificacao contextual passiva`);
+    }
+  }
 }
 
 async function main() {
