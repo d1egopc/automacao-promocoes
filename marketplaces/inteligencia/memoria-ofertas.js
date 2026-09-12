@@ -309,6 +309,17 @@ function identidadeAntiRepeticaoAutomatica(oferta = {}) {
   };
 }
 
+// A identidade base continua sem destino para localizar candidatos equivalentes.
+// A decisao operacional de envio, porem, precisa ser isolada por destino.
+function identidadeAntiRepeticaoPorDestino(oferta = {}, destinoId = "") {
+  const base = identidadeAntiRepeticaoAutomatica(oferta);
+  const destino = String(destinoId || oferta.destinoId || "").trim();
+  const identidade = destino
+    ? `${base.clienteId}|${destino}|${base.marketplace}|${base.identidadeBase.split("|").slice(2).join("|")}`
+    : base.identidadeBase;
+  return { ...base, destinoId: destino, identidade };
+}
+
 function ofertasEquivalentesAntiRepeticao(ofertaA = {}, ofertaB = {}) {
   const a = identidadeAntiRepeticaoAutomatica(ofertaA);
   const b = identidadeAntiRepeticaoAutomatica(ofertaB);
@@ -646,6 +657,9 @@ function quedaPrecoRelevante(precoAtual = 0, precoAnterior = 0) {
 }
 
 function deveIgnorarOfertaRepetida(oferta = {}) {
+  // Fluxos automaticos passam pela memoria por destino no Executor, apos
+  // confirmacao. Esta porta sem destino fica apenas para compatibilidade.
+  if (oferta.memoriaDestinoExecutor === true) return false;
   const agora = Date.now();
   const vistas = carregarOfertasVistas();
   const chave = chaveOferta(oferta);
@@ -746,6 +760,7 @@ module.exports = {
   registrarOfertaVista,
   reservarOfertaAutomatica2h,
   identidadeAntiRepeticaoAutomatica,
+  identidadeAntiRepeticaoPorDestino,
   ofertasEquivalentesAntiRepeticao,
   ofertaManualPreservadaAntiRepeticao,
   melhoriaFinanceiraComprovada

@@ -329,14 +329,16 @@ assert(
 );
 
 assert(
-  processarFila.includes("const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });") &&
+  processarFila.includes("const destinoIdMemoria = String(destino?.id || destino?.destinoId || \"\").trim()") &&
+    processarFila.includes("const candidatosDestinoMemoria = filaStore.candidatosEnvioRecente2h(oferta, {") &&
+    processarFila.includes("destinoId: destinoIdMemoria") &&
     processarFila.includes("const colecaoFallbackEnvioRecenteExecutor = (") &&
     processarFila.includes("fonteClienteHotStateSelecao?.conclusiva === true") &&
     processarFila.includes("Array.isArray(fonteClienteHotStateSelecao.itens)") &&
     processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
-    processarFila.includes("consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {") &&
-    processarFila.includes("obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor"),
-  "anti-repeat deve manter FilaStore como primeira fonte e usar hot state do cliente como fallback no V2 conclusivo"
+    processarFila.includes("consultarEnvioRecenteExecutor2h(") &&
+    processarFila.includes("? candidatosDestinoMemoria.itens"),
+  "anti-repeat deve consultar FilaStore somente no destino candidato e preservar hot state como fallback"
 );
 
 assert(

@@ -6981,7 +6981,13 @@ function destinoJaEnviadoFanout(oferta = {}, destino = {}) {
         String(item?.chave || "") === chave
       )
     : false;
-  if (estadoEnviado) return true;
+  const estadoBloqueadoRepeticao = Array.isArray(oferta.destinosEstado)
+    ? oferta.destinosEstado.some(item =>
+        item?.estado === "bloqueado_repeticao_2h" &&
+        String(item?.chave || "") === chave
+      )
+    : false;
+  if (estadoEnviado || estadoBloqueadoRepeticao) return true;
 
   return Array.isArray(oferta.destinosEnviados) && oferta.destinosEnviados.some(item => {
     const tipoEnviado = String(item?.tipo || item?.canal || "").trim().toLowerCase();
@@ -7085,13 +7091,15 @@ function resumoDestinosEstadoFanout(oferta = {}) {
   const enviados = estados.filter(item => item?.estado === "enviado").length;
   const aguardando = estados.filter(item => item?.estado === "aguardando").length;
   const errosDefinitivos = estados.filter(item => item?.estado === "erro_definitivo").length;
-  const elegiveis = estados.filter(item => item?.estado !== "nao_compativel");
+  const bloqueadosRepeticao = estados.filter(item => item?.estado === "bloqueado_repeticao_2h").length;
+  const elegiveis = estados.filter(item => !["nao_compativel", "bloqueado_repeticao_2h"].includes(item?.estado));
 
   return {
     estados,
     enviados,
     aguardando,
     errosDefinitivos,
+    bloqueadosRepeticao,
     elegiveis: elegiveis.length,
     todosElegiveisErroDefinitivo: elegiveis.length > 0 && elegiveis.every(item => item?.estado === "erro_definitivo")
   };
@@ -9419,8 +9427,9 @@ if (!oferta) {
         const gates = avaliarOfertaParaSelecaoFilaViva(atual, clienteFila, configRevalidada, { agora: Date.now() });
         if (!gates.elegivel) return { ok: false, motivo: "gate_reprovado", dados: { motivo: gates.motivo || "" } };
 
-        const recentes = filaStore.candidatosEnvioRecente2h(atual, { clienteId: clienteFila });
+        const recentes = { ok: true, itens: [] };
         const repeticao = filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFairnessFila, atual, {
+          modoPorDestino: true,
           obterItens: () => recentes.ok ? recentes.itens : colecaoFairnessFila
         });
         if (!repeticao.ok) {
@@ -9430,7 +9439,8 @@ if (!oferta) {
           return { ok: false, motivo: "anti_repeat", dados: repeticao };
         }
         const duplicidade = filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoFairnessFila, atual, {
-          clienteId: clienteFila
+          clienteId: clienteFila,
+          modoPorDestino: true
         });
         if (!duplicidade.ok) {
           return { ok: false, motivo: "duplicidade_indisponivel", dados: duplicidade };
@@ -9861,26 +9871,11 @@ const destinosOrdenados = destinosCompativeis
   })
   .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
 
-const leituraDualReadViva = modoDualRead(process.env)
-  ? filaDualRead.lerFilaVivaComCooldown(
-      clienteId,
-      {
-        filaLegada: fila,
-        agora: Date.now(),
-        logger: console
-      },
-      (clienteLeitura, depsLeitura) => filaOperacionalV2.lerFilaVivaReadOnly(clienteLeitura, {
-        ...depsLeitura,
-        filaLegada: fila,
-        logger: console
-      })
-    )
-  : null;
-if (leituraDualReadViva?.sideEffectBlocked) {
-  registrarMetricasFilaV22C(clienteId, { dualReadSideEffectBlockedCount: 1 });
-}
+// A decisao 2h agora ocorre no destino candidato; nao fazemos dual-read da
+// fila inteira antes de conhecer esse destino.
+const leituraDualReadViva = null;
 
-const candidatosEnvioRecente = filaStore.candidatosEnvioRecente2h(oferta, { clienteId });
+const candidatosEnvioRecente = { ok: true, itens: [] };
 const colecaoFallbackEnvioRecenteExecutor = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
@@ -9888,12 +9883,14 @@ const colecaoFallbackEnvioRecenteExecutor = (
 const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {
   logger: console,
   logarLegado: true,
+  modoPorDestino: true,
   obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor
 });
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
   const repeticaoExecutorDual = filaOfertas.consultarEnvioRecenteExecutor2h(leituraDualReadViva.itens, oferta, {
     logger: console,
     logarLegado: true,
+    modoPorDestino: true,
     obterItens: () => leituraDualReadViva.itens
   });
   filaDualRead.compararAntidup({
@@ -9988,11 +9985,13 @@ const colecaoDuplicidadeProcessamento = (
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
 const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {
-  clienteId
+  clienteId,
+  modoPorDestino: true
 });
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
   const duplicidadeShadow = filaOfertas.avaliarDuplicidadeAntesProcessarFila(leituraDualReadViva.itens, oferta, {
-    clienteId
+    clienteId,
+    modoPorDestino: true
   });
   filaDualRead.compararAntidup({
     clienteId,
@@ -10121,9 +10120,12 @@ for (const item of destinosOrdenados) {
   const intervalo = item.intervalo;
 
   if (destinoJaEnviadoFanout(oferta, destino)) {
-    registrarDestinoEstadoFanout(oferta, destino, "enviado", {
-      motivo: "ja_enviado"
-    });
+    const estadoAnteriorDestino = obterDestinoEstadoFanout(oferta, destino);
+    if (estadoAnteriorDestino?.estado !== "bloqueado_repeticao_2h") {
+      registrarDestinoEstadoFanout(oferta, destino, "enviado", {
+        motivo: "ja_enviado"
+      });
+    }
     marcarFilaAlterada();
     continue;
   }
@@ -10347,6 +10349,63 @@ for (const item of destinosOrdenados) {
     selecionadoEm: destinoSelecionadoEm
   });
 
+  // O mesmo destino ja analisado acima e a unica dimensao adicional da
+  // memoria. Nao ha segundo loop nem leitura de ofertas_vistas.json aqui.
+  const destinoIdMemoria = String(destino?.id || destino?.destinoId || "").trim();
+  const candidatosDestinoMemoria = filaStore.candidatosEnvioRecente2h(oferta, {
+    clienteId,
+    destinoId: destinoIdMemoria
+  });
+  const repeticaoDestino = filaOfertas.consultarEnvioRecenteExecutor2h(
+    colecaoFallbackEnvioRecenteExecutor,
+    oferta,
+    {
+      destinoId: destinoIdMemoria,
+      logger: console,
+      logarLegado: true,
+      obterItens: () => candidatosDestinoMemoria.ok
+        ? candidatosDestinoMemoria.itens
+        : colecaoFallbackEnvioRecenteExecutor
+    }
+  );
+  if (!repeticaoDestino.ok) {
+    motivosSemEnvio.push(repeticaoDestino.motivo || "erro_repeticao_executor");
+    registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+      motivo: repeticaoDestino.motivo || "erro_repeticao_executor"
+    });
+    marcarFilaAlterada();
+    continue;
+  }
+  if (repeticaoDestino.bloqueada) {
+    registrarDestinoEstadoFanout(oferta, destino, "bloqueado_repeticao_2h", {
+      motivo: repeticaoDestino.motivo || "repetida_no_executor_2h"
+    });
+    marcarFilaAlterada();
+    console.log("[ANTI-REPETICAO-DESTINO-2H]", JSON.stringify({
+      clienteId,
+      destinoId: destinoIdMemoria,
+      ofertaId: oferta.id || oferta.engineOfertaId || "",
+      ofertaAnteriorId: repeticaoDestino.ofertaAnterior?.id || repeticaoDestino.ofertaAnterior?.engineOfertaId || "",
+      identidade: repeticaoDestino.identidade || "",
+      decisao: "bloquear_repetida"
+    }));
+    continue;
+  }
+  const duplicidadeDestino = filaOfertas.avaliarDuplicidadeAntesProcessarFila(
+    colecaoDuplicidadeProcessamento,
+    oferta,
+    { clienteId, destinoId: destinoIdMemoria }
+  );
+  if (!duplicidadeDestino.ok || duplicidadeDestino.bloquear) {
+    const motivoDuplicidadeDestino = duplicidadeDestino.motivo || "duplicidade_destino";
+    motivosSemEnvio.push(motivoDuplicidadeDestino);
+    registrarDestinoEstadoFanout(oferta, destino, "aguardando", {
+      motivo: motivoDuplicidadeDestino
+    });
+    marcarFilaAlterada();
+    continue;
+  }
+
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
     logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado" : "Cupom usando intervalo normal", {
       clienteId,
@@ -10462,6 +10521,7 @@ for (const item of destinosOrdenados) {
     registrarDestinoEstadoFanout(oferta, destino, "enviado", {
       motivo: "envio_confirmado"
     });
+    filaStore.atualizarItem(oferta);
     marcarFilaAlterada();
     const registroIntervaloDestino = atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
     destinosEnviadosTelemetria.push(telemetriaCadenciaExecutorEnviado(
@@ -10575,6 +10635,19 @@ if (resumoFanout.aguardando > 0 || (!enviouParaAlgumDestino && decisaoSemEnvio.s
     motivo: motivoAguardandoFanout
   });
 
+  return;
+}
+
+if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0 &&
+  resumoFanout.bloqueadosRepeticao > 0 && resumoFanout.elegiveis === 0) {
+  oferta.status = "retida";
+  oferta.statusDetalhe = "Retida: oferta repetida nos destinos aplicaveis nas ultimas 2 horas";
+  oferta.motivo = "repetida_no_executor_2h";
+  oferta.motivoRetencao = "repetida_no_executor_2h";
+  oferta.retidaEm = new Date().toISOString();
+  oferta.processandoEm = "";
+  marcarFilaAlterada();
+  await salvarFilaSeAlterada(clienteId);
   return;
 }
 
@@ -21368,7 +21441,7 @@ console.log("âœ… RADAR ORIGEM VALIDADA", {
     return { ok: false, motivo: "oferta_duplicada" };
   }
 
-  if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+  if (deveIgnorarOfertaRepetida({ ...ofertaCliente, memoriaDestinoExecutor: true })) {
     logOptimus("RADAR", "Reprovado", {
       clienteId,
       aprovado: false,
@@ -21563,7 +21636,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
       mlbFinal: extrairMlbRadarValor(oferta.linkAfiliado, oferta.linkFinal, oferta.linkOriginal, oferta.linkResolvido)
     }));
   }
-  registrarOfertaVista(oferta);
+  // A memoria automatica e gravada somente pelo Executor, por destino confirmado.
   registrarTratamentoRadar(clienteId, oferta, "fila");
   salvarFila(clienteId, { origem: "radar" });
   coberturaRadar.registrar("fila_ok", {
@@ -27509,7 +27582,7 @@ if (linkAfiliadoIgualOriginal) {
 
  if (jaExisteCliente) continue;
 
-if (deveIgnorarOfertaRepetida(ofertaCliente)) {
+if (deveIgnorarOfertaRepetida({ ...ofertaCliente, memoriaDestinoExecutor: true })) {
   console.log("[INFO] Oferta automtica ignorada pela memria:", {
     clienteId,
     marketplace: ofertaCliente.marketplace,
@@ -27545,7 +27618,7 @@ try {
 }
 
 if (reterShopeePrecoSuspeitoSeNecessario(ofertaCliente)) {
-  registrarOfertaVista(ofertaCliente);
+  // A memoria automatica e gravada somente pelo Executor, por destino confirmado.
   filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {
     clienteId,
     origem: ofertaCliente.origem || "distribuidor",
@@ -27560,7 +27633,7 @@ if (bloquearAwinKabumAutoNaFila(ofertaCliente, origemEntradaFila, clienteId)) {
   continue;
 }
 
-registrarOfertaVista(ofertaCliente);
+// A memoria automatica e gravada somente pelo Executor, por destino confirmado.
 
 logPrioridadeFila(ofertaCliente);
 filaOfertas.adicionarOfertaFila(fila, ofertaCliente, {

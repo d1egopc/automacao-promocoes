@@ -307,11 +307,14 @@ function criarFilaStore(filaInicial = []) {
       itens: candidatos.itens.filter(item => {
         if (item === oferta) return false;
         if (clienteItem(item) !== clienteId) return false;
-        if (statusItem(item) !== "enviado") return false;
         if (!ofertasEquivalentesAntiRepeticao(oferta, item)) return false;
-        if (melhoriaFinanceiraComprovada(oferta, item).ok) return false;
-        const enviadoEmMs = timestampFila(item.enviadoEm || item.dataEnvio);
-        return Number.isFinite(enviadoEmMs) && enviadoEmMs <= agora && agora - enviadoEmMs < JANELA_EXECUTOR_MS;
+        if (!opcoes.destinoId) {
+          if (statusItem(item) !== "enviado") return false;
+          if (melhoriaFinanceiraComprovada(oferta, item).ok) return false;
+          const enviadoEmMs = timestampFila(item.enviadoEm || item.dataEnvio);
+          return Number.isFinite(enviadoEmMs) && enviadoEmMs <= agora && agora - enviadoEmMs < JANELA_EXECUTOR_MS;
+        }
+        return true;
       })
     };
   }

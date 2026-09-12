@@ -2,8 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
 const {
-  reservarOfertaAutomatica2h,
   identidadeAntiRepeticaoAutomatica,
+  identidadeAntiRepeticaoPorDestino,
   ofertasEquivalentesAntiRepeticao,
   ofertaManualPreservadaAntiRepeticao,
   melhoriaFinanceiraComprovada
@@ -207,8 +207,48 @@ function timestampReferenciaOfertaFila(oferta = {}) {
   );
 }
 
+function destinoInternoMemoria(destinoId = "") {
+  return String(destinoId || "").trim();
+}
+
+function idDestinoRegistro(registro = {}) {
+  return destinoInternoMemoria(registro?.destinoId || registro?.id);
+}
+
+function envioConfirmadoNoDestino(item = {}, destinoId = "") {
+  const destino = destinoInternoMemoria(destinoId);
+  if (!destino) return null;
+  const estados = Array.isArray(item?.destinosEstado) ? item.destinosEstado : [];
+  const enviados = estados
+    .filter(estado => String(estado?.estado || "").toLowerCase() === "enviado" && idDestinoRegistro(estado) === destino)
+    .map(estado => estado?.enviadoEm || estado?.atualizadoEm || "")
+    .filter(Boolean);
+  const legados = (Array.isArray(item?.destinosEnviados) ? item.destinosEnviados : [])
+    .filter(registro => idDestinoRegistro(registro) === destino)
+    .map(registro => registro?.enviadoEm || registro?.dataEnvio || registro?.data || "")
+    .filter(Boolean);
+  const data = [...enviados, ...legados]
+    .map(timestampFila)
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  return Number.isFinite(data) ? data : null;
+}
+
+function itemCobreDestinoOperacional(item = {}, destinoId = "") {
+  const destino = destinoInternoMemoria(destinoId);
+  if (!destino) return true; // compatibilidade dos chamadores legados sem destino.
+  if (envioConfirmadoNoDestino(item, destino) !== null) return true;
+  const autorizados = Array.isArray(item?.destinosAutorizadosIds) ? item.destinosAutorizadosIds : null;
+  if (autorizados) return autorizados.map(destinoInternoMemoria).includes(destino);
+  return (Array.isArray(item?.destinosEstado) ? item.destinosEstado : [])
+    .some(estado => idDestinoRegistro(estado) === destino && String(estado?.estado || "").toLowerCase() !== "nao_compativel");
+}
+
 function consultarEnvioRecenteExecutor2h(fila = [], oferta = {}, opcoes = {}) {
   try {
+    if (opcoes.modoPorDestino === true && !destinoInternoMemoria(opcoes.destinoId)) {
+      return { ok: true, bloqueada: false, motivo: "anti_repeat_adiado_para_destino" };
+    }
     const itens = typeof opcoes.obterItens === "function"
       ? opcoes.obterItens()
       : fila;
@@ -218,19 +258,26 @@ function consultarEnvioRecenteExecutor2h(fila = [], oferta = {}, opcoes = {}) {
     }
 
     const agora = Number(opcoes.agora || Date.now());
-    const identidade = identidadeAntiRepeticaoAutomatica(oferta);
+    const destinoId = destinoInternoMemoria(opcoes.destinoId);
+    const identidade = destinoId
+      ? identidadeAntiRepeticaoPorDestino(oferta, destinoId)
+      : identidadeAntiRepeticaoAutomatica(oferta);
     const anteriores = itens
       .filter(item =>
         item !== oferta &&
-        String(item?.status || "").toLowerCase() === "enviado" &&
-        ofertasEquivalentesAntiRepeticao(oferta, item)
+        ofertasEquivalentesAntiRepeticao(oferta, item) &&
+        (destinoId
+          ? envioConfirmadoNoDestino(item, destinoId) !== null
+          : String(item?.status || "").toLowerCase() === "enviado")
       )
       .map(item => ({
         item,
-        enviadaEmMs: timestampFila(item.enviadoEm || item.dataEnvio, {
+        enviadaEmMs: destinoId
+          ? envioConfirmadoNoDestino(item, destinoId)
+          : timestampFila(item.enviadoEm || item.dataEnvio, {
           logger: opcoes.logger,
           logarLegado: opcoes.logarLegado === true
-        })
+          })
       }))
       .filter(registro =>
         Number.isFinite(registro.enviadaEmMs) &&
@@ -317,12 +364,16 @@ function relocalizarOfertaFila(fila = [], oferta = {}, opcoes = {}) {
 
 function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {}) {
   try {
+    if (opcoes.modoPorDestino === true && !destinoInternoMemoria(opcoes.destinoId)) {
+      return { ok: true, bloquear: false, motivo: "duplicidade_adiada_para_destino" };
+    }
     if (!Array.isArray(fila)) throw new Error("fila_invalida");
     if (ofertaManualPreservadaAntiRepeticao(oferta, opcoes)) {
       return { ok: true, bloquear: false, motivo: "oferta_manual_preservada" };
     }
 
     const agora = Number(opcoes.agora || Date.now());
+    const destinoId = destinoInternoMemoria(opcoes.destinoId);
     const localizacao = relocalizarOfertaFila(fila, oferta, opcoes);
     const indiceAtual = localizacao.index;
     const criadoAtual = timestampReferenciaOfertaFila(oferta);
@@ -331,6 +382,7 @@ function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {
       const item = fila[indice];
       if (!item || item === oferta || indice === indiceAtual) continue;
       if (!ofertasEquivalentesAntiRepeticao(oferta, item)) continue;
+      if (destinoId && !itemCobreDestinoOperacional(item, destinoId)) continue;
       if (melhoriaFinanceiraComprovada(oferta, item).ok) continue;
 
       const status = statusFilaNormalizado(item.status);
@@ -358,7 +410,7 @@ function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {
             motivo: "repetida_no_executor_2h",
             statusAnterior: status,
             ofertaAnterior: item,
-            identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+            identidade: destinoId ? identidadeAntiRepeticaoPorDestino(oferta, destinoId).identidade : identidadeAntiRepeticaoAutomatica(oferta).identidade
           };
         }
       }
@@ -384,7 +436,7 @@ function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {
             motivo: "duplicata_pendente_com_precedencia",
             statusAnterior: status,
             ofertaAnterior: item,
-            identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+            identidade: destinoId ? identidadeAntiRepeticaoPorDestino(oferta, destinoId).identidade : identidadeAntiRepeticaoAutomatica(oferta).identidade
           };
         }
       }
@@ -394,7 +446,7 @@ function avaliarDuplicidadeAntesProcessarFila(fila = [], oferta = {}, opcoes = {
       ok: true,
       bloquear: false,
       motivo: "sem_duplicidade_ativa",
-      identidade: identidadeAntiRepeticaoAutomatica(oferta).identidade
+            identidade: destinoId ? identidadeAntiRepeticaoPorDestino(oferta, destinoId).identidade : identidadeAntiRepeticaoAutomatica(oferta).identidade
     };
   } catch (erro) {
     return {
@@ -1217,20 +1269,7 @@ function adicionarOfertaFila(fila = [], oferta, contexto = {}) {
     origem: contexto.origem || oferta.origem || "fila_push"
   });
 
-  const reserva = reservarOfertaAutomatica2h(ofertaFinal, {
-    ...contexto,
-    origem: contexto.origem || ofertaFinal.origem || oferta.origem || "fila_push"
-  });
-
-  if (reserva?.bloqueada) {
-    ofertaFinal.antiRepeticao2h = {
-      bloqueada: true,
-      motivo: reserva.motivo,
-      identidade: reserva.identidade
-    };
-    return false;
-  }
-
+  // Repeticao automatica e decidida por destino, no Executor, apos confirmacao.
   fila.push(ofertaFinal);
 
   const logger = contexto.logger || console;
@@ -1253,20 +1292,7 @@ function adicionarOfertaInicioFila(fila = [], oferta, contexto = {}) {
     origem: contexto.origem || oferta.origem || "fila_unshift"
   });
 
-  const reserva = reservarOfertaAutomatica2h(ofertaFinal, {
-    ...contexto,
-    origem: contexto.origem || ofertaFinal.origem || oferta.origem || "fila_unshift"
-  });
-
-  if (reserva?.bloqueada) {
-    ofertaFinal.antiRepeticao2h = {
-      bloqueada: true,
-      motivo: reserva.motivo,
-      identidade: reserva.identidade
-    };
-    return false;
-  }
-
+  // Repeticao automatica e decidida por destino, no Executor, apos confirmacao.
   fila.unshift(ofertaFinal);
 
   const logger = contexto.logger || console;
