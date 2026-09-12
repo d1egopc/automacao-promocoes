@@ -4,6 +4,9 @@ const { criarHistoricoClonador } = require("./historico.service");
 
 const MAX_FONTES_ATIVAS = 4;
 const STATUS_BUFFER = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
+const LIMITE_CONTEXTO_ANTES_OCORRENCIA = 96;
+const LIMITE_CONTEXTO_DEPOIS_OCORRENCIA = 64;
+const ORCAMENTO_CONTEXTO_OCORRENCIAS_BYTES = 12 * 1024;
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -65,6 +68,57 @@ function linksOcorrenciasCapturadas(links = [], mensagemId = "") {
       ocorrenciaId: `clonador:${identificadorMensagem}:${ordemCaptura}`
     });
   }
+  return ocorrencias;
+}
+
+function contextoAntesSeguro(textoOriginal = "", inicioTexto = 0, limite = LIMITE_CONTEXTO_ANTES_OCORRENCIA) {
+  return Array.from(String(textoOriginal || "").slice(0, inicioTexto)).slice(-limite).join("");
+}
+
+function contextoDepoisSeguro(textoOriginal = "", fimTexto = 0, limite = LIMITE_CONTEXTO_DEPOIS_OCORRENCIA) {
+  return Array.from(String(textoOriginal || "").slice(fimTexto)).slice(0, limite).join("");
+}
+
+function extrairOcorrenciasLinksPosicionais(textoOriginal = "", mensagemId = "") {
+  const fonte = String(textoOriginal || "");
+  const identificadorMensagem = texto(mensagemId);
+  const regex = /https?:\/\/[^\s]+/g;
+  const ocorrencias = [];
+  let match;
+  let linha = 1;
+  let ultimoIndiceLinha = 0;
+  let bytesContextoUsados = 0;
+
+  while ((match = regex.exec(fonte))) {
+    const urlOriginal = texto(match[0]);
+    if (!urlOriginal) continue;
+
+    const inicioTexto = match.index;
+    const fimTexto = inicioTexto + match[0].length;
+    const trechoAntes = fonte.slice(ultimoIndiceLinha, inicioTexto);
+    linha += (trechoAntes.match(/\n/g) || []).length;
+    ultimoIndiceLinha = inicioTexto;
+
+    const contextoAntes = contextoAntesSeguro(fonte, inicioTexto);
+    const contextoDepois = contextoDepoisSeguro(fonte, fimTexto);
+    const bytesContexto = Buffer.byteLength(contextoAntes, "utf8") + Buffer.byteLength(contextoDepois, "utf8");
+    const contextoDisponivel = bytesContextoUsados + bytesContexto <= ORCAMENTO_CONTEXTO_OCORRENCIAS_BYTES;
+    if (contextoDisponivel) bytesContextoUsados += bytesContexto;
+
+    const ordemCaptura = ocorrencias.length + 1;
+    ocorrencias.push({
+      urlOriginal,
+      ordemCaptura,
+      ocorrenciaId: `clonador:${identificadorMensagem}:${ordemCaptura}`,
+      inicioTexto,
+      fimTexto,
+      linha,
+      contextoAntes: contextoDisponivel ? contextoAntes : "",
+      contextoDepois: contextoDisponivel ? contextoDepois : "",
+      contextoDisponivel
+    });
+  }
+
   return ocorrencias;
 }
 
@@ -422,7 +476,7 @@ function criarServicoClonadorGrupos(deps = {}) {
         ? deps.extrairLinksMensagem(textoOriginal)
         : String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || [];
       const links = normalizarLinksEntrada(linksCapturados);
-      const linksOcorrencias = linksOcorrenciasCapturadas(linksCapturados, mensagemId);
+      const linksOcorrencias = extrairOcorrenciasLinksPosicionais(textoOriginal, mensagemId);
       const metadataBase = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
       const metadata = {
         ...metadataBase,
@@ -507,5 +561,6 @@ module.exports = {
   criarServicoClonadorGrupos,
   destinoIdOficial,
   grupoIdOficial,
-  linksOcorrenciasCapturadas
+  linksOcorrenciasCapturadas,
+  extrairOcorrenciasLinksPosicionais
 };

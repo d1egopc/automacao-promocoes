@@ -9,6 +9,7 @@ const path = require("path");
 const criarRotasClonadorGrupos = require("../modules/clonador-grupos/routes");
 const { criarServicoClonadorGrupos, MAX_FONTES_ATIVAS } = require("../modules/clonador-grupos");
 const { criarRepositorioClonadorGrupos } = require("../modules/clonador-grupos/repository");
+const { extrairOcorrenciasLinksPosicionais } = require("../modules/clonador-grupos/service");
 
 const raiz = path.resolve(__dirname, "..");
 
@@ -256,10 +257,7 @@ async function testarOcorrenciasPassivasPreservamRepeticao() {
   });
   const aa = repo.estado.buffer[0];
   assert.deepStrictEqual(aa.links, [urlA], "campo legado continua deduplicado");
-  assert.deepStrictEqual(aa.metadata.clonadorGrupos.linksOcorrencias, [
-    { urlOriginal: urlA, ordemCaptura: 1, ocorrenciaId: "clonador:msg_ocorrencias_aa:1" },
-    { urlOriginal: urlA, ordemCaptura: 2, ocorrenciaId: "clonador:msg_ocorrencias_aa:2" }
-  ]);
+  assert.deepStrictEqual(aa.metadata.clonadorGrupos.linksOcorrencias, extrairOcorrenciasLinksPosicionais(`${urlA}\n${urlA}`, "msg_ocorrencias_aa"));
 
   await service.capturarMensagemWhatsapp({
     clienteId: "workspace_a",
@@ -268,11 +266,88 @@ async function testarOcorrenciasPassivasPreservamRepeticao() {
   });
   const aba = repo.estado.buffer[1];
   assert.deepStrictEqual(aba.links, [urlA, urlB], "ordem legada deduplicada permanece inalterada");
-  assert.deepStrictEqual(aba.metadata.clonadorGrupos.linksOcorrencias, [
-    { urlOriginal: urlA, ordemCaptura: 1, ocorrenciaId: "clonador:msg_ocorrencias_aba:1" },
-    { urlOriginal: urlB, ordemCaptura: 2, ocorrenciaId: "clonador:msg_ocorrencias_aba:2" },
-    { urlOriginal: urlA, ordemCaptura: 3, ocorrenciaId: "clonador:msg_ocorrencias_aba:3" }
+  assert.deepStrictEqual(aba.metadata.clonadorGrupos.linksOcorrencias, extrairOcorrenciasLinksPosicionais(`${urlA}\n${urlB}\n${urlA}`, "msg_ocorrencias_aba"));
+}
+
+function possuiSurrogateIsolado(valor = "") {
+  for (let indice = 0; indice < valor.length; indice += 1) {
+    const codigo = valor.charCodeAt(indice);
+    if (codigo >= 0xD800 && codigo <= 0xDBFF) {
+      if (indice + 1 >= valor.length || valor.charCodeAt(indice + 1) < 0xDC00 || valor.charCodeAt(indice + 1) > 0xDFFF) return true;
+      indice += 1;
+    } else if (codigo >= 0xDC00 && codigo <= 0xDFFF) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function testarExtracaoPosicionalPassiva() {
+  const urlA = "https://s.shopee.com.br/urlA";
+  const urlB = "https://s.shopee.com.br/urlB";
+  const texto = [
+    `🛒 Produto: ${urlA}`,
+    `🎟️ Resgatar cupom: ${urlA}`,
+    `Cupom: ${urlB} Moedas: ${urlA}`,
+    "App: https://a.test/app PC: https://a.test/pc Confira: https://a.test/confira Link: https://a.test/link)."
+  ].join("\n");
+  const ocorrencias = extrairOcorrenciasLinksPosicionais(texto, "msg_posicional");
+
+  assert.strictEqual(ocorrencias.length, 8);
+  assert.deepStrictEqual(ocorrencias.slice(0, 3).map(item => [item.urlOriginal, item.ordemCaptura, item.linha]), [
+    [urlA, 1, 1],
+    [urlA, 2, 2],
+    [urlB, 3, 3]
   ]);
+  assert.strictEqual(ocorrencias[3].urlOriginal, urlA, "A+B+A preserva a terceira ocorrencia literal");
+  assert.strictEqual(ocorrencias[7].urlOriginal, "https://a.test/link).", "pontuacao continua literal, como no extrator legado");
+  assert.strictEqual(ocorrencias[0].inicioTexto, texto.indexOf(urlA));
+  assert.strictEqual(ocorrencias[0].fimTexto, ocorrencias[0].inicioTexto + urlA.length);
+  assert.ok(ocorrencias[1].contextoAntes.includes("Produto") || ocorrencias[1].contextoAntes.includes("Resgatar cupom"));
+  assert.ok(ocorrencias.every(item => item.contextoAntes.length <= 192 && item.contextoDepois.length <= 128));
+  assert.ok(ocorrencias.every(item => item.contextoDisponivel === true));
+
+  const emojiAntes = `${"😀".repeat(100)} ${urlA} ${"🚀".repeat(70)}`;
+  const emojiOcorrencia = extrairOcorrenciasLinksPosicionais(emojiAntes, "msg_emoji")[0];
+  assert.strictEqual(Array.from(emojiOcorrencia.contextoAntes).length, 96);
+  assert.strictEqual(Array.from(emojiOcorrencia.contextoDepois).length, 64);
+  assert.strictEqual(possuiSurrogateIsolado(emojiOcorrencia.contextoAntes), false);
+  assert.strictEqual(possuiSurrogateIsolado(emojiOcorrencia.contextoDepois), false);
+
+  const textoGrande = Array.from({ length: 100 }, (_, indice) => `${"a".repeat(96)} https://x.test/${indice} ${"b".repeat(64)}`).join("\n");
+  const ocorrenciasGrandes = extrairOcorrenciasLinksPosicionais(textoGrande, "msg_orcamento");
+  assert.strictEqual(ocorrenciasGrandes.length, 100);
+  assert.ok(ocorrenciasGrandes.some(item => item.contextoDisponivel === false), "orcamento de 12 KiB deve desabilitar somente contexto excedente");
+  assert.ok(ocorrenciasGrandes.filter(item => item.contextoDisponivel === false).every(item =>
+    item.contextoAntes === "" && item.contextoDepois === "" && item.inicioTexto >= 0 && item.fimTexto > item.inicioTexto
+  ));
+}
+
+async function testarCaptionsEWrappersPreservamOcorrenciasPosicionais() {
+  const { repo, service } = criarAmbiente();
+  await prepararFonteAtiva(service);
+  const casos = [
+    { id: "msg_caption_image", conteudo: { imageMessage: { caption: "Produto https://s.shopee.com.br/image" } } },
+    { id: "msg_caption_video", conteudo: { videoMessage: { caption: "Cupom https://s.shopee.com.br/video" } } },
+    { id: "msg_caption_document", conteudo: { documentMessage: { caption: "Link https://s.shopee.com.br/document" } } },
+    { id: "msg_ephemeral", conteudo: { ephemeralMessage: { message: { conversation: "Produto https://s.shopee.com.br/ephemeral" } } } },
+    { id: "msg_view_once", conteudo: { viewOnceMessage: { message: { conversation: "Confira https://s.shopee.com.br/view-once" } } } }
+  ];
+
+  for (const item of casos) {
+    const mensagemWhatsapp = mensagem({ id: item.id, texto: "" });
+    mensagemWhatsapp.message = item.conteudo;
+    const resultado = await service.capturarMensagemWhatsapp({ clienteId: "workspace_a", sessaoId: "sessao_a", mensagem: mensagemWhatsapp });
+    assert.strictEqual(resultado.capturada, true);
+  }
+
+  for (const item of repo.estado.buffer) {
+    const ocorrencia = item.metadata.clonadorGrupos.linksOcorrencias[0];
+    assert.strictEqual(item.links.length, 1, "caption/wrapper preserva o campo legado");
+    assert.strictEqual(ocorrencia.inicioTexto, item.textoOriginal.indexOf(ocorrencia.urlOriginal));
+    assert.strictEqual(ocorrencia.fimTexto, ocorrencia.inicioTexto + ocorrencia.urlOriginal.length);
+    assert.strictEqual(ocorrencia.linha, 1);
+  }
 }
 
 async function testarLimiteQuatroEMultiworkspace() {
@@ -502,6 +577,8 @@ async function testarContratoRepeticaoRepository() {
 async function main() {
   await testarCapturaGuardsBuffer();
   await testarOcorrenciasPassivasPreservamRepeticao();
+  testarExtracaoPosicionalPassiva();
+  await testarCaptionsEWrappersPreservamOcorrenciasPosicionais();
   await testarLimiteQuatroEMultiworkspace();
   await testarEndpointBufferIsolado();
   await testarContratoRepeticaoRepository();
