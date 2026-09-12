@@ -313,6 +313,9 @@ const {
   criarControladorFilaOperacionalV2,
   criarControladorCheckpointLegadoV2
 } = require("./modules/fila/fila-operacional-v2");
+const {
+  filtrarDestinosAutorizadosClonador
+} = require("./modules/clonador-grupos/destinos-restricao.contract");
 const { criarControladorFilaDualRead, modoDualRead } = require("./modules/fila/fila-dual-read");
 const filaClaimsRepository = require("./modules/fila/fila-claims.repository");
 const { criarCatracaAdvisoryFuncionalFila } = require("./modules/fila/fila-advisory-functional.service");
@@ -7201,7 +7204,13 @@ function reterShopeePrecoSuspeitoSeNecessario(oferta = {}) {
 }
 
 function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, configCliente = {}) {
-  const destinosInteligentes = obterDestinosInteligentesCliente(clienteId, configCliente);
+  const destinosWorkspace = obterDestinosInteligentesCliente(clienteId, configCliente);
+  const restricaoClone = filtrarDestinosAutorizadosClonador(
+    destinosWorkspace,
+    oferta,
+    destino => destino?.id || destino?.destinoId || destino?.destino_id || ""
+  );
+  const destinosInteligentes = restricaoClone.destinos;
   const compativeis = [];
   const rejeitados = [];
 
@@ -7219,7 +7228,14 @@ function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, confi
     destinosInteligentes,
     compativeis,
     rejeitados,
-    motivoRetencao: motivoRetencaoSemDestino(rejeitados)
+    restricaoDestinosClone: restricaoClone.restricao,
+    destinosWorkspaceTotal: destinosWorkspace.length,
+    rejeitadosForaSnapshot: restricaoClone.rejeitadosForaSnapshot,
+    motivoRetencao: restricaoClone.restricao.aplica && !restricaoClone.restricao.destinosAutorizadosIds.length
+      ? restricaoClone.restricao.motivo
+      : (restricaoClone.restricao.aplica && !destinosInteligentes.length
+        ? "clonador_destinos_autorizados_indisponiveis"
+        : motivoRetencaoSemDestino(rejeitados))
   };
 }
 
@@ -9624,6 +9640,21 @@ const motivosSemEnvio = [];
 const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || classificarCategoriaOferta(oferta, oferta.termo || "");
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
+const restricaoDestinosClone = analiseDestinosFila.restricaoDestinosClone || {};
+if (restricaoDestinosClone.aplica === true) {
+  console.log("[CLONADOR-DESTINOS-RESTRICAO]", JSON.stringify({
+    clienteId,
+    ofertaId: oferta.engineOfertaId || oferta.id || "",
+    filaItemId: oferta.id || "",
+    autorizados: restricaoDestinosClone.destinosAutorizadosIds || [],
+    existentesWorkspace: analiseDestinosFila.destinosWorkspaceTotal || 0,
+    consideradosExecutor: analiseDestinosFila.destinosInteligentes
+      .map(destino => String(destino?.id || destino?.destinoId || destino?.destino_id || "").trim())
+      .filter(Boolean),
+    rejeitadosForaSnapshot: analiseDestinosFila.rejeitadosForaSnapshot || [],
+    motivo: restricaoDestinosClone.motivo || ""
+  }));
+}
 const destinosAtivosTotalDebug = analiseDestinosFila.destinosInteligentes.filter(destinosUtils.destinoPowerAtivo).length;
 let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);

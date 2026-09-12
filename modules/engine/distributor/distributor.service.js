@@ -23,6 +23,9 @@ const {
   motivoDistribuicaoDefinitivo
 } = require("./motivos-definitivos");
 const { resolverOrigemFluxo } = require("../../../utils/origem-fluxo");
+const {
+  resolverRestricaoDestinosClonador
+} = require("../../clonador-grupos/destinos-restricao.contract");
 
 let engineOfertasMetadataDisponivel = null;
 
@@ -767,6 +770,7 @@ function montarItemFilaEngine(oferta = {}) {
   const imagemFinal = imagemPiloto.usarImagemEspelho ? imagemPiloto.imagem : imagemResolvida.imagem;
   const camposComerciaisRadar = copiarCamposComerciaisRadarFila(oferta);
   const origemFluxo = resolverOrigemFluxo(oferta);
+  const restricaoDestinosClone = resolverRestricaoDestinosClonador(oferta);
 
   return {
     id: `engine_${oferta.id}_${Date.now()}`,
@@ -813,6 +817,9 @@ function montarItemFilaEngine(oferta = {}) {
     beneficioTexto: beneficioExtra,
     origem: "engine",
     ...(origemFluxo ? { origemFluxo } : {}),
+    ...(restricaoDestinosClone.aplica ? {
+      destinosAutorizadosIds: restricaoDestinosClone.destinosAutorizadosIds
+    } : {}),
     origemDetalhe: "Engine V2",
     metadata: oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {},
     status: "pendente",
