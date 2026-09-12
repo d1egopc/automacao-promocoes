@@ -396,6 +396,7 @@ const {
 } = require("./modules/engine/ofc/commercial-events.service");
 const {
   dominioRedirectPermitido,
+  resolverRedirectClonador,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
 const {
@@ -22585,7 +22586,7 @@ const clonadorGruposService = criarServicoClonadorGrupos({
 });
 const clonadorGruposBridge = criarBridgeClonadorGrupos({
   repository: clonadorGruposRepository,
-  resolverRedirectUniversal,
+  resolverRedirectUniversal: resolverRedirectClonador,
   registrarEventoBruto,
   logger: console
 });

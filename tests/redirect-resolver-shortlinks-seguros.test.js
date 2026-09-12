@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const {
   resolverRedirectClonador,
   resolverRedirectUniversal
@@ -17,6 +19,13 @@ function httpRedirecionando(urlFinal = "") {
 }
 
 (async function main() {
+  const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  assert.match(
+    fonteIndex,
+    /const clonadorGruposBridge = criarBridgeClonadorGrupos\(\{[\s\S]*?resolverRedirectUniversal:\s*resolverRedirectClonador,[\s\S]*?\}\);/,
+    "Bridge do Clonador deve receber o resolver compativel com meli.la"
+  );
+
   const meliOriginal = "https://meli.la/shortlink-valido";
   const meliProduto = "https://produto.mercadolivre.com.br/MLB-123456789-produto-_JM";
   const meliValido = await resolverRedirectClonador(meliOriginal, {
@@ -33,9 +42,13 @@ function httpRedirecionando(urlFinal = "") {
   assert.strictEqual(meliSocial.motivo, "identidade_ml_nao_comprovada");
   assert.strictEqual(meliSocial.urlExpandida, "");
 
+  const dominioNaoPermitido = await resolverRedirectClonador("https://redirect-nao-permitido.example/oferta");
+  assert.strictEqual(dominioNaoPermitido.ok, false);
+  assert.strictEqual(dominioNaoPermitido.motivo, "dominio_redirect_nao_permitido");
+
   const amazonOriginal = "https://amzn.divulguei.app/QWGHs9";
   const amazonProduto = "https://www.amazon.com.br/dp/B0C3T4MFMM?tag=origem-20";
-  const amazonValido = await resolverRedirectUniversal(amazonOriginal, {
+  const amazonValido = await resolverRedirectClonador(amazonOriginal, {
     httpClient: httpRedirecionando(amazonProduto)
   });
   assert.strictEqual(amazonValido.ok, true);
