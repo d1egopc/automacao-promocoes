@@ -602,7 +602,6 @@ function testarEscopoEstrutural() {
   assert.ok(!bridgeFonte.includes("radarMirror"));
 
   const importadores = [
-    ["modules", "engine", "importer", "adapters", "shopee.adapter.js"],
     ["modules", "engine", "importer", "adapters", "aliexpress.adapter.js"],
     ["modules", "engine", "importer", "adapters", "amazon.adapter.js"],
     ["modules", "engine", "importer", "adapters", "mercadolivre.adapter.js"],
@@ -613,6 +612,15 @@ function testarEscopoEstrutural() {
   for (const partes of importadores) {
     const fonte = fs.readFileSync(path.join(__dirname, "..", ...partes), "utf8");
     assert.ok(!fonte.includes("linksOcorrencias"), `${partes.at(-1)} nao pode consumir metadata passiva`);
+  }
+
+  const shopeeFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "importer", "adapters", "shopee.adapter.js"), "utf8");
+  assert.ok(shopeeFonte.includes("montarVisaoOcorrenciasShopeeClonador"), "Shopee deve limitar o consumo a visao passiva");
+  for (const funcao of ["candidatosProcessaveisShopee", "converterOcorrenciasShopee", "montarLinksComerciaisShopee"]) {
+    const inicio = shopeeFonte.indexOf(`function ${funcao}`);
+    const proximo = shopeeFonte.indexOf("\nfunction ", inicio + 1);
+    const corpo = shopeeFonte.slice(inicio, proximo < 0 ? undefined : proximo);
+    assert.ok(!corpo.includes("ocorrenciasShopeeClonador"), `${funcao} nao pode receber a visao passiva do Clone`);
   }
 }
 

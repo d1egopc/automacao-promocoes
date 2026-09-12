@@ -192,6 +192,95 @@ function montarCandidatosLinksShopee(links = [], evento = {}) {
   return candidatos;
 }
 
+function chaveUrlOcorrenciaShopee(valor = "") {
+  const url = texto(valor).replace(/[),.;\]\s]+$/g, "");
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/g, "").toLowerCase();
+  } catch (_) {
+    return url.replace(/\/+$/g, "").toLowerCase();
+  }
+}
+
+function urlsTecnicasOcorrenciaShopee(link = {}) {
+  const metadata = link && typeof link.metadata === "object" && !Array.isArray(link.metadata) ? link.metadata : {};
+  return [
+    link.url_original,
+    link.url_normalizada,
+    link.url_expandida,
+    link.url,
+    metadata.linkOriginalCapturado,
+    metadata.linkResolvido
+  ].map(texto).filter(Boolean);
+}
+
+function montarVisaoOcorrenciasShopeeClonador({ ocorrenciasCapturadas = [], linksTecnicos = [], classificados = [], evento = {} } = {}) {
+  const ocorrencias = Array.isArray(ocorrenciasCapturadas) ? ocorrenciasCapturadas : [];
+  if (!ocorrencias.length) return [];
+
+  const tecnicos = Array.isArray(linksTecnicos) ? linksTecnicos : [];
+  const classificadosSeguros = Array.isArray(classificados) ? classificados : [];
+
+  return ocorrencias.map((ocorrencia, indice) => {
+    const urlOriginal = texto(ocorrencia?.urlOriginal);
+    const ordemCaptura = Number(ocorrencia?.ordemCaptura || indice + 1) || (indice + 1);
+    const ocorrenciaId = texto(ocorrencia?.ocorrenciaId || `clonador:shopee:${ordemCaptura}`);
+    const chave = chaveUrlOcorrenciaShopee(urlOriginal);
+    const indicesTecnicos = tecnicos
+      .map((link, indiceTecnico) => ({ link, indiceTecnico }))
+      .filter(({ link }) => urlsTecnicasOcorrenciaShopee(link).some(url => chaveUrlOcorrenciaShopee(url) === chave));
+
+    if (!chave || !indicesTecnicos.length) {
+      return {
+        urlOriginal,
+        ordemCaptura,
+        ocorrenciaId,
+        papelTecnico: PAPEL_LINK.DESCONHECIDO,
+        motivoPapel: "ocorrencia_clone_sem_link_tecnico_correlato",
+        correlacionadaComLinkTecnico: false,
+        urlTecnicaCorrelacionada: ""
+      };
+    }
+
+    const linksCorrelatos = new Set(indicesTecnicos.map(item => item.link));
+    const papeis = new Set(
+      classificadosSeguros
+        .filter(classificado => linksCorrelatos.has(classificado?.link))
+        .map(classificado => texto(classificado?.papelLink))
+        .filter(papel => papel && papel !== PAPEL_LINK.DESCONHECIDO)
+    );
+    const urlsTecnicas = Array.from(new Set(indicesTecnicos
+      .map(({ link }) => urlsTecnicasOcorrenciaShopee(link)[0] || "")
+      .filter(Boolean)));
+
+    if (papeis.size !== 1) {
+      return {
+        urlOriginal,
+        ordemCaptura,
+        ocorrenciaId,
+        papelTecnico: PAPEL_LINK.DESCONHECIDO,
+        motivoPapel: papeis.size > 1
+          ? "ocorrencia_clone_papeis_tecnicos_ambiguos"
+          : "ocorrencia_clone_sem_papel_tecnico_confirmado",
+        correlacionadaComLinkTecnico: true,
+        urlTecnicaCorrelacionada: urlsTecnicas.length === 1 ? urlsTecnicas[0] : ""
+      };
+    }
+
+    return {
+      urlOriginal,
+      ordemCaptura,
+      ocorrenciaId,
+      papelTecnico: Array.from(papeis)[0],
+      motivoPapel: "papel_tecnico_correlacionado",
+      correlacionadaComLinkTecnico: true,
+      urlTecnicaCorrelacionada: urlsTecnicas.length === 1 ? urlsTecnicas[0] : ""
+    };
+  });
+}
+
 function linkShopeeAuxiliarBloqueado(candidato = {}) {
   return [
     PAPEL_LINK.CUPOM,
@@ -994,6 +1083,15 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
   const analiseLinksShopee = candidatosProcessaveisShopee(links, evento);
   const candidatosShopee = analiseLinksShopee.processaveis;
   const linksAuxiliaresShopee = analiseLinksShopee.auxiliares;
+  const ocorrenciasCapturadasClone = Array.isArray(evento?.metadata?.clonadorGrupos?.linksOcorrencias)
+    ? evento.metadata.clonadorGrupos.linksOcorrencias
+    : [];
+  const ocorrenciasShopeeClonador = montarVisaoOcorrenciasShopeeClonador({
+    ocorrenciasCapturadas: ocorrenciasCapturadasClone,
+    linksTecnicos: links,
+    classificados: analiseLinksShopee.classificados,
+    evento
+  });
 
   console.log("[SHOPEE-CANDIDATOS]", JSON.stringify({
     jobId: job.id,
@@ -1375,6 +1473,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
       candidatosShopee: resumoCandidatosShopee(analiseLinksShopee.classificados),
       linksAuxiliaresShopee: resumoCandidatosShopee(linksAuxiliaresShopee),
       linksComerciais: linksComerciaisShopee,
+      ...(ocorrenciasCapturadasClone.length ? { ocorrenciasShopeeClonador } : {}),
       precoRadarUsado: precoEscolhido.usouRadar === true,
       precoRadarTexto: precoEscolhido.precoRadarTexto || "",
       textoRadarTemCupom: Boolean(extrairCupomTextoRadarShopee(textoOriginalRadar).cupom),
@@ -1396,5 +1495,6 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 }
 
 module.exports = {
-  importarShopeeEngine
+  importarShopeeEngine,
+  montarVisaoOcorrenciasShopeeClonador
 };
