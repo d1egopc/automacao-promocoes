@@ -400,6 +400,9 @@ const {
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
 const {
+  extrairProvaIdentidadeMercadoLivreHtml
+} = require("./modules/radar/mercadolivre-social-identidade");
+const {
   detectarMarketplaceLink: detectarMarketplaceEngineLink
 } = require("./modules/engine/normalizers");
 const {
@@ -18373,6 +18376,7 @@ async function resolverLinkOriginalRadar(url = "") {
       let linkOriginalLimpo = limparUrlProdutoRadar(resolvida, "mercadolivre") || resolvida;
       let metodoSocialMeli = "";
       let motivoSocialMeli = "";
+      let provaIdentidadeMeli = null;
 
       if (tipoLinkRadarMeli === "shortlink_meli_social") {
         const produtoParametro =
@@ -18387,17 +18391,21 @@ async function resolverLinkOriginalRadar(url = "") {
         } else if (isUrlIntermediariaMercadoLivreRadar(resolvida)) {
           try {
             const paginaIntermediaria = await baixarHtmlRadar(resolvida);
-            const produtoHtml = extrairProdutoMarketplaceDeHtmlRadar(
-              paginaIntermediaria.html || "",
-              "mercadolivre",
-              paginaIntermediaria.urlFinal || resolvida
-            );
+            const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(paginaIntermediaria.html || "");
+            const produtoHtml = provaProdutoHtml.ok
+              ? provaProdutoHtml.urlProduto
+              : extrairProdutoMarketplaceDeHtmlRadar(
+                paginaIntermediaria.html || "",
+                "mercadolivre",
+                paginaIntermediaria.urlFinal || resolvida
+              );
             const produtoResolvido = produtoHtml || await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
             if (produtoResolvido) {
               linkOriginalLimpo = produtoResolvido;
               tipoLinkRadarMeli = "shortlink_meli";
               metodoSocialMeli = produtoHtml ? "html" : "fallback_intermediario";
               motivoSocialMeli = "produto_extraido_html_social";
+              provaIdentidadeMeli = provaProdutoHtml.ok ? provaProdutoHtml : null;
             } else {
               motivoSocialMeli = paginaIntermediaria.ok === false
                 ? (paginaIntermediaria.erro || `http_${paginaIntermediaria.status || "sem_status"}`)
@@ -18474,6 +18482,7 @@ async function resolverLinkOriginalRadar(url = "") {
         linkOriginalLimpo,
         tipoLinkRadar: tipoLinkRadarMeli,
         metodoResolucaoMeli: metodoSocialMeli,
+        ...(provaIdentidadeMeli ? { provaIdentidadeMeli } : {}),
         statusHttp: resposta.status || ""
       };
     } catch (e) {

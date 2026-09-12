@@ -3,6 +3,7 @@ const { classificarCategoriaOferta } = require("../../../../marketplaces/intelig
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { resolverImagemUniversal } = require("../../../../modules/imagens/resolver-imagem-universal");
 const { resumoLinksClassificados } = require("../../link-role.service");
+const { validarProvaIdentidadeMercadoLivre } = require("../../../radar/mercadolivre-social-identidade");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -1176,6 +1177,13 @@ function motivoIdentidadeMeliClonadorNaoComprovada({ evento = {}, job = {}, urlO
 
   if (!isSocialMercadoLivre(urlSocial)) return "";
   if (metodo === "parametro") return "";
+  if (metodo === "html") {
+    const validacao = validarProvaIdentidadeMercadoLivre(
+      resolucaoRadar.provaIdentidadeMeli,
+      { urlProdutoResolvido: resolucaoRadar.linkOriginalLimpo || resolucaoRadar.linkResolvido || "" }
+    );
+    if (validacao.ok) return "";
+  }
   return "identidade_ml_nao_comprovada";
 }
 
