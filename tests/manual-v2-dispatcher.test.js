@@ -363,6 +363,46 @@ function assertSemSegredos(retorno) {
   }
 
   {
+    const imagemPreview = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: { r: 20, g: 40, b: 60 } }
+    }).jpeg().toBuffer();
+    const destinosComTexto = {
+      cliente_a: destinosPorCliente.cliente_a.map((destino) => ({ ...destino }))
+    };
+    const destinoWa = destinosComTexto.cliente_a.find((destino) => destino.id === "wa_ok");
+    let chamadasIdentidade = 0;
+    const { deps, chamadas } = baseDeps({
+      destinosPorCliente: destinosComTexto,
+      baixarImagemComoBuffer: async () => imagemPreview,
+      prepareWAMessageMedia: async () => ({ imageMessage: {} }),
+      aplicarIdentidadeVisualOferta: async () => {
+        chamadasIdentidade += 1;
+        return {
+          aplicada: false,
+          padraoGlobalImagem: true,
+          imagemFinal: "https://img.example/manual-neutra.png"
+        };
+      }
+    });
+
+    destinoWa.tipoMidia = "texto";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.strictEqual(chamadasIdentidade, 0, "Manual V2 texto nao deve processar imagem");
+    assert.strictEqual(chamadas.wa.at(-1).midia, null);
+
+    destinoWa.tipoMidia = "texto_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.strictEqual(chamadasIdentidade, 0, "Manual V2 texto_link nao deve processar imagem");
+    assert.strictEqual(chamadas.wa.at(-1).payload.linkPreview, null);
+
+    destinoWa.tipoMidia = "imagem_link";
+    await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"] }, deps);
+    assert.strictEqual(chamadasIdentidade, 1, "Manual V2 imagem_link processa imagem uma vez antes do destino");
+    assert.strictEqual(chamadas.wa.at(-1).midia, null);
+    assert.strictEqual(chamadas.wa.at(-1).payload.linkPreview["matched-text"], ofertaA.urlAfiliada);
+  }
+
+  {
     const { deps, chamadas } = baseDeps();
     const retorno = await enviarOfertaManualV2({
       clienteId: "cliente_a",
@@ -1000,7 +1040,7 @@ function assertSemSegredos(retorno) {
       template: templateComBeneficio,
       canal: "whatsapp"
     });
-    assert.ok(cupomNoBlocoProprio.mensagem.includes("🎟️ Cupom: MANUAL10"), "cupom continua no bloco proprio");
+    assert.ok(cupomNoBlocoProprio.mensagem.includes("🎟️ Cupom: *MANUAL10*"), "cupom continua no bloco proprio");
     assert.ok(!cupomNoBlocoProprio.mensagem.includes("⚡ MANUAL10"), "observacao duplicada de cupom nao gera beneficio paralelo");
     assert.ok(cupomNoBlocoProprio.mensagem.includes("✅ Por:"), "preco continua renderizado");
     assert.ok(cupomNoBlocoProprio.mensagem.includes(ofertaA.urlAfiliada), "link continua renderizado");

@@ -325,6 +325,116 @@ async function main() {
     assert.strictEqual(chamadasEngine[0].contexto.fluxo, "engine_distributor");
     assert.strictEqual(enfileirados[0].itemFila.imagem, "https://img.example/engine.jpg", "hook Engine nao altera imagem na foundation");
 
+    const enfileiradosTexto = [];
+    const chamadasEngineTexto = [];
+    const filaTexto = await adicionarOfertaNaFilaCliente({
+      id: "oferta_engine_texto",
+      uuid: "uuid_engine_texto",
+      job_id: 2,
+      cliente_id: "workspace_engine",
+      marketplace: "amazon",
+      titulo: "Oferta Engine Texto",
+      preco: 99,
+      link_afiliado: "https://amazon.com.br/dp/TEXTO?tag=workspace",
+      imagem: "https://img.example/engine-texto.jpg",
+      categoria: "Diversos",
+      metadata: { origem: "inteligencia_universal" }
+    }, {
+      destinosCompativeisImagem: [{ id: "destino_texto", tipoMidia: "texto" }],
+      deps: {
+        aplicarIdentidadeVisualOferta: async (entrada) => {
+          chamadasEngineTexto.push(entrada);
+          throw new Error("nao_deveria_processar_imagem_texto");
+        },
+        adicionarOfertaNaFilaGlobal: (clienteId, itemFila) => {
+          enfileiradosTexto.push({ clienteId, itemFila });
+          return { ok: true, itemFila };
+        }
+      }
+    });
+    assert.strictEqual(filaTexto.ok, true);
+    assert.strictEqual(chamadasEngineTexto.length, 0, "Engine destino texto nao deve chamar padronizacao visual");
+    assert.strictEqual(enfileiradosTexto[0].itemFila.imagem, "https://img.example/engine-texto.jpg");
+
+    const enfileiradosTextoLink = [];
+    const chamadasEngineTextoLink = [];
+    const filaTextoLink = await adicionarOfertaNaFilaCliente({
+      id: "oferta_engine_texto_link",
+      uuid: "uuid_engine_texto_link",
+      job_id: 3,
+      cliente_id: "workspace_engine",
+      marketplace: "amazon",
+      titulo: "Oferta Engine Texto Link",
+      preco: 99,
+      link_afiliado: "https://amazon.com.br/dp/TEXTOLINK?tag=workspace",
+      imagem: "https://img.example/engine-texto-link.jpg",
+      categoria: "Diversos",
+      metadata: { origem: "inteligencia_universal" }
+    }, {
+      destinosCompativeisImagem: [{ id: "destino_texto_link", tipoMidia: "texto_link" }],
+      deps: {
+        aplicarIdentidadeVisualOferta: async (entrada) => {
+          chamadasEngineTextoLink.push(entrada);
+          throw new Error("nao_deveria_processar_imagem_texto_link");
+        },
+        adicionarOfertaNaFilaGlobal: (clienteId, itemFila) => {
+          enfileiradosTextoLink.push({ clienteId, itemFila });
+          return { ok: true, itemFila };
+        }
+      }
+    });
+    assert.strictEqual(filaTextoLink.ok, true);
+    assert.strictEqual(chamadasEngineTextoLink.length, 0, "Engine destino texto_link nao deve chamar padronizacao visual");
+
+    for (const origem of ["radar", "clonador_grupos", "automatico"]) {
+      const chamadasFluxo = [];
+      const enfileiradosFluxo = [];
+      const filaFluxo = await adicionarOfertaNaFilaCliente({
+        id: `oferta_engine_${origem}`,
+        uuid: `uuid_engine_${origem}`,
+        job_id: 10,
+        cliente_id: "workspace_engine",
+        marketplace: "amazon",
+        titulo: `Oferta Engine ${origem}`,
+        preco: 99,
+        link_afiliado: `https://amazon.com.br/dp/${origem}?tag=workspace`,
+        imagem: `https://img.example/${origem}.jpg`,
+        categoria: "Diversos",
+        metadata: { origem }
+      }, {
+        destinosCompativeisImagem: [
+          { id: "destino_imagem", tipoMidia: "imagem_completa" },
+          { id: "destino_preview", tipoMidia: "imagem_link" }
+        ],
+        deps: {
+          aplicarIdentidadeVisualOferta: async (entrada) => {
+            chamadasFluxo.push(entrada);
+            return {
+              aplicada: false,
+              padraoGlobalImagem: true,
+              imagemOriginal: entrada.imagemAtual,
+              imagemFinal: `https://img.example/${origem}-neutra.png`,
+              metadata: {
+                padraoGlobalImagem: true,
+                brandingAplicado: false,
+                original: entrada.imagemAtual,
+                final: `https://img.example/${origem}-neutra.png`
+              }
+            };
+          },
+          adicionarOfertaNaFilaGlobal: (clienteId, itemFila) => {
+            enfileiradosFluxo.push({ clienteId, itemFila });
+            return { ok: true, itemFila };
+          }
+        }
+      });
+      assert.strictEqual(filaFluxo.ok, true, `${origem} entra na fila`);
+      assert.strictEqual(chamadasFluxo.length, 1, `${origem} renderiza no maximo uma vez antes do fan-out`);
+      assert.strictEqual(chamadasFluxo[0].contexto.fluxo, "engine_distributor");
+      assert.strictEqual(enfileiradosFluxo[0].itemFila.imagem, `https://img.example/${origem}-neutra.png`);
+      assert.strictEqual(enfileiradosFluxo[0].itemFila.metadata.identidadeVisual.padraoGlobalImagem, true);
+    }
+
     const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
     const chamadasManual = [];
     const retornoManual = await enviarOfertaManualV2({

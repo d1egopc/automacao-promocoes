@@ -64,6 +64,14 @@ async function salvarAmostra(nome, produtoBuffer, config) {
   return destino;
 }
 
+async function validarPng1080(buffer, contexto = "") {
+  const meta = await sharp(buffer).metadata();
+  assert.strictEqual(meta.format, "png", `${contexto} deve sair em PNG`);
+  assert.strictEqual(meta.width, 1080, `${contexto} deve ter largura 1080`);
+  assert.strictEqual(meta.height, 1080, `${contexto} deve ter altura 1080`);
+  return meta;
+}
+
 async function pixel(pathImagem, x, y) {
   const { data } = await sharp(pathImagem)
     .extract({ left: x, top: y, width: 1, height: 1 })
@@ -134,6 +142,44 @@ async function main() {
       { width: 248, height: 147, left: 56, top: 902 },
       "logo oficial deve usar o slot V2.2 aprovado"
     );
+
+    const renderNeutroQuadrado = await identidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer: produto });
+    await validarPng1080(renderNeutroQuadrado.buffer, "imagem neutra quadrada");
+    assert.strictEqual(renderNeutroQuadrado.metadata.padraoGlobalImagem, true, "neutro marca padrao global");
+    assert.strictEqual(renderNeutroQuadrado.metadata.brandingAplicado, false, "neutro nao aplica branding");
+    assert.strictEqual(renderNeutroQuadrado.metadata.faixaAplicada, false, "neutro nao aplica faixa");
+    assert.strictEqual(renderNeutroQuadrado.metadata.logoAplicado, false, "neutro nao aplica logo");
+    assert.strictEqual(renderNeutroQuadrado.metadata.width, 1080);
+    assert.strictEqual(renderNeutroQuadrado.metadata.height, 1080);
+    assert.deepStrictEqual(
+      renderNeutroQuadrado.metadata.productContainBox,
+      renderPadrao.metadata.productContainBox,
+      "neutro reutiliza o mesmo contain/enquadramento do render identidade"
+    );
+    const caminhoNeutroQuadrado = path.join(AMOSTRAS_DIR, "global-neutro-quadrado.png");
+    fs.mkdirSync(AMOSTRAS_DIR, { recursive: true });
+    fs.writeFileSync(caminhoNeutroQuadrado, renderNeutroQuadrado.buffer);
+    const pixelInferiorNeutro = await pixel(caminhoNeutroQuadrado, 900, 1000);
+    assert.ok(
+      pixelInferiorNeutro[0] >= 248 && pixelInferiorNeutro[1] >= 248 && pixelInferiorNeutro[2] >= 248,
+      "neutro preserva fundo branco/sem faixa inferior"
+    );
+
+    for (const casoNeutro of [
+      { nome: "vertical", buffer: await bufferPng({ width: 420, height: 900, fill: "#16a34a", label: "VERT" }) },
+      { nome: "horizontal", buffer: await bufferJpeg({ width: 1100, height: 420, fill: "#db2777", label: "WIDE" }) },
+      { nome: "pequena", buffer: await bufferPng({ width: 80, height: 80, fill: "#334155", label: "P" }) },
+      { nome: "grande", buffer: await bufferJpeg({ width: 1800, height: 1600, fill: "#0f766e", label: "BIG" }) },
+      { nome: "oficial_limpa", buffer: await bufferPng({ width: 720, height: 720, fill: "#2563eb", label: "OK" }) },
+      { nome: "radar_fallback", buffer: await bufferJpeg({ width: 904, height: 503, fill: "#1f2937", label: "RADAR" }) }
+    ]) {
+      const renderNeutro = await identidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer: casoNeutro.buffer });
+      await validarPng1080(renderNeutro.buffer, `imagem neutra ${casoNeutro.nome}`);
+      assert.strictEqual(renderNeutro.metadata.padraoGlobalImagem, true, `${casoNeutro.nome} passa pelo padrao global`);
+      assert.strictEqual(renderNeutro.metadata.brandingAplicado, false, `${casoNeutro.nome} nao recebe branding`);
+      assert.ok(renderNeutro.metadata.productRenderedWidth > 0, `${casoNeutro.nome} tem produto renderizado`);
+      assert.ok(renderNeutro.metadata.productRenderedHeight > 0, `${casoNeutro.nome} tem produto renderizado`);
+    }
 
     const produtoComMargemBranca = await sharp({
       create: { width: 800, height: 780, channels: 3, background: "#ffffff" }
@@ -249,6 +295,50 @@ async function main() {
     assert.strictEqual(segunda.aplicada, true);
     assert.strictEqual(segunda.motivo, "cache_hit");
     assert.strictEqual(downloads, 1, "cache deve evitar novo download/render");
+
+    let downloadsNeutro = 0;
+    const serviceNeutro = identidadeVisual.criarServicoIdentidadeVisualOfertas({
+      repository: criarRepoMemoria({ workspace_neutro: { ativo: false } }),
+      baixarImagemBuffer: async () => {
+        downloadsNeutro += 1;
+        return produto;
+      }
+    });
+    const inicioMissNeutro = process.hrtime.bigint();
+    const neutroMiss = await serviceNeutro.aplicarIdentidadeVisualOferta({
+      clienteId: "workspace_neutro",
+      oferta: { id: "oferta_neutra", origem: "manual_v2" },
+      imagemAtual: "https://img.test/neutra.png",
+      contexto: { origem: "manual_v2" }
+    }, { plano: { recursos: { identidade_visual_ofertas: "opcional_editavel" } } });
+    const duracaoMissNeutroMs = Number(process.hrtime.bigint() - inicioMissNeutro) / 1e6;
+    assert.strictEqual(neutroMiss.aplicada, false, "OFF nao marca identidade aplicada");
+    assert.strictEqual(neutroMiss.padraoGlobalImagem, true, "OFF aplica padrao global neutro");
+    assert.strictEqual(neutroMiss.metadata.brandingAplicado, false, "OFF nao aplica branding");
+    assert.ok(neutroMiss.imagemFinal.includes("/identidade-visual-ofertas/public/clientes/workspace_neutro/renderizados/"));
+    assert.ok(fs.existsSync(storage.caminhoRenderizado("workspace_neutro", neutroMiss.metadata.cacheKey).path));
+    const metaNeutroArquivo = await sharp(storage.caminhoRenderizado("workspace_neutro", neutroMiss.metadata.cacheKey).path).metadata();
+    assert.strictEqual(metaNeutroArquivo.width, 1080, "OFF persistido tem 1080 de largura");
+    assert.strictEqual(metaNeutroArquivo.height, 1080, "OFF persistido tem 1080 de altura");
+
+    const inicioHitNeutro = process.hrtime.bigint();
+    const neutroHit = await serviceNeutro.aplicarIdentidadeVisualOferta({
+      clienteId: "workspace_neutro",
+      oferta: { id: "oferta_neutra_clone", origem: "clonador_grupos" },
+      imagemAtual: "https://img.test/neutra.png",
+      contexto: { origem: "clonador_grupos" }
+    }, { plano: { recursos: { identidade_visual_ofertas: "opcional_editavel" } } });
+    const duracaoHitNeutroMs = Number(process.hrtime.bigint() - inicioHitNeutro) / 1e6;
+    assert.strictEqual(neutroHit.padraoGlobalImagem, true, "cache hit preserva padrao global neutro");
+    assert.strictEqual(neutroHit.metadata.cacheHit, true);
+    assert.strictEqual(neutroHit.imagemFinal, neutroMiss.imagemFinal, "cache hit retorna a mesma imagem neutra");
+    assert.strictEqual(downloadsNeutro, 1, "cache neutro evita novo download/render");
+    console.log("[TESTE-IMAGEM-GLOBAL-NEUTRA-TEMPOS]", {
+      cacheMissMs: Math.round(duracaoMissNeutroMs),
+      cacheHitMs: Math.round(duracaoHitNeutroMs),
+      downloads: downloadsNeutro,
+      renders: 1
+    });
 
     const fallback = await identidadeVisual.criarServicoIdentidadeVisualOfertas({
       repository: criarRepoMemoria({ workspace_fallback: { ativo: true } }),

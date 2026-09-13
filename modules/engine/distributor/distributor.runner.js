@@ -960,8 +960,8 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   }
 
   const contextoFila = flowAtivo && flow?.aceitarAgora === true
-    ? { ...contexto, flowManagerDecisao: flow }
-    : contexto;
+    ? { ...contexto, flowManagerDecisao: flow, destinosCompativeisImagem: validacao.__destinosCompativeisRaw || [] }
+    : { ...contexto, destinosCompativeisImagem: validacao.__destinosCompativeisRaw || [] };
   const medidorFila = criarMedidorEngineMemoryStage("engine_v2_fila", {
     ofertaId: oferta.id || null,
     jobId: oferta.job_id || null,

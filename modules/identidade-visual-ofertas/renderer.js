@@ -44,6 +44,7 @@ const CSS_FONTE_RENDERER_IDENTIDADE_VISUAL = `
 const LIMITE_IMAGEM_ORIGINAL_BYTES = 8 * 1024 * 1024;
 const LIMITE_UPLOAD_LOGO_BYTES = 2 * 1024 * 1024;
 const MIMES_IMAGEM_PERMITIDOS = new Set(["image/png", "image/jpeg", "image/webp"]);
+const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v1";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -101,6 +102,14 @@ function cacheKeyIdentidadeVisual({ clienteId = "admin", imagemOriginal = "", co
     .createHash("sha256")
     .update(`${RENDERER_VERSION_IDENTIDADE_VISUAL}|${clienteId}|${imagemOriginal}|${configHash}`)
     .digest("hex");
+}
+
+function cacheKeyImagemGlobalNeutra({ clienteId = "admin", imagemOriginal = "" } = {}) {
+  return cacheKeyIdentidadeVisual({
+    clienteId,
+    imagemOriginal,
+    configHash: CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA
+  });
 }
 
 function svgTextoMedicao(conteudo = "", fontSize = 48) {
@@ -414,6 +423,98 @@ async function criarFundoPaisagemExtrema(buffer) {
     .toBuffer();
 }
 
+async function prepararBaseVisualComumImagem(imagemBuffer) {
+  const metaProduto = await validarImagemBuffer(imagemBuffer, { campo: "imagem" });
+  const produtoPreparado = await prepararProdutoParaComposicao(imagemBuffer);
+  const produtoNormalizado = await normalizarProdutoParaCanvas(produtoPreparado.buffer, produtoPreparado);
+  const produto = produtoNormalizado.buffer;
+  const fundoPaisagemExtrema = produtoNormalizado.paisagemExtrema
+    ? await criarFundoPaisagemExtrema(produtoPreparado.buffer)
+    : null;
+  const metaProdutoNormalizado = await sharp(produto).metadata();
+  const produtoX = Math.round((CANVAS - (metaProdutoNormalizado.width || 0)) / 2);
+  const produtoY = Math.round((AREA_COMPOSICAO_IMAGEM_ALTURA - (metaProdutoNormalizado.height || 0)) / 2);
+
+  return {
+    metaProduto,
+    produtoPreparado,
+    produtoNormalizado,
+    produto,
+    fundoPaisagemExtrema,
+    metaProdutoNormalizado,
+    produtoX,
+    produtoY
+  };
+}
+
+function metadataBaseVisualComum(base = {}) {
+  const produtoNormalizado = base.produtoNormalizado || {};
+  const produtoPreparado = base.produtoPreparado || {};
+  const metaProduto = base.metaProduto || {};
+  const metaProdutoNormalizado = base.metaProdutoNormalizado || {};
+  const produtoX = base.produtoX || 0;
+  const produtoY = base.produtoY || 0;
+  return {
+    rendererVersion: RENDERER_VERSION_IDENTIDADE_VISUAL,
+    width: CANVAS,
+    height: CANVAS,
+    productOriginalWidth: metaProduto.width,
+    productOriginalHeight: metaProduto.height,
+    productRenderedWidth: metaProdutoNormalizado.width || 0,
+    productRenderedHeight: metaProdutoNormalizado.height || 0,
+    productRenderedX: Math.max(0, produtoX),
+    productRenderedY: Math.max(0, produtoY),
+    productContentWidth: produtoNormalizado.conteudo?.width || 0,
+    productContentHeight: produtoNormalizado.conteudo?.height || 0,
+    composicao: produtoNormalizado.paisagemExtrema
+      ? "composicao_paisagem_extrema"
+      : produtoNormalizado.paisagem
+        ? "composicao_paisagem"
+        : produtoPreparado.cropMargemBranca
+          ? "crop_margem_branca"
+          : "composicao_normal",
+    cropMargemBranca: produtoPreparado.cropMargemBranca === true,
+    fundoDerivado: Boolean(base.fundoPaisagemExtrema),
+    margemBranca: produtoPreparado.margemBranca,
+    productCompositionHeight: AREA_COMPOSICAO_IMAGEM_ALTURA,
+    productContainBox: produtoNormalizado.box,
+    productBehindBannerHeight: Math.max(0, produtoY + (metaProdutoNormalizado.height || 0) - BASE_Y)
+  };
+}
+
+async function comporBaseVisualComum(base = {}, camadasExtras = []) {
+  return sharp({
+    create: {
+      width: CANVAS,
+      height: CANVAS,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 }
+    }
+  })
+    .composite([
+      ...(base.fundoPaisagemExtrema ? [{ input: base.fundoPaisagemExtrema, left: 0, top: 0 }] : []),
+      { input: base.produto, left: Math.max(0, base.produtoX), top: Math.max(0, base.produtoY) },
+      ...camadasExtras
+    ])
+    .png({ compressionLevel: 8, adaptiveFiltering: true })
+    .toBuffer();
+}
+
+async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
+  const base = await prepararBaseVisualComumImagem(imagemBuffer);
+  const output = await comporBaseVisualComum(base);
+  return {
+    buffer: output,
+    metadata: {
+      ...metadataBaseVisualComum(base),
+      padraoGlobalImagem: true,
+      brandingAplicado: false,
+      faixaAplicada: false,
+      logoAplicado: false
+    }
+  };
+}
+
 async function validarImagemBuffer(buffer, { maxBytes = LIMITE_IMAGEM_ORIGINAL_BYTES, campo = "imagem" } = {}) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error(`${campo}_obrigatoria`);
   if (buffer.length > maxBytes) throw new Error(`${campo}_arquivo_muito_grande`);
@@ -462,67 +563,26 @@ async function normalizarLogoUpload(buffer, mimeType = "") {
 }
 
 async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, config = {} } = {}) {
-  const metaProduto = await validarImagemBuffer(imagemBuffer, { campo: "imagem" });
-  const produtoPreparado = await prepararProdutoParaComposicao(imagemBuffer);
-  const produtoNormalizado = await normalizarProdutoParaCanvas(produtoPreparado.buffer, produtoPreparado);
-  const produto = produtoNormalizado.buffer;
-  const fundoPaisagemExtrema = produtoNormalizado.paisagemExtrema
-    ? await criarFundoPaisagemExtrema(produtoPreparado.buffer)
-    : null;
-  const metaProdutoNormalizado = await sharp(produto).metadata();
+  const base = await prepararBaseVisualComumImagem(imagemBuffer);
   const logo = await normalizarLogoParaSlot(logoBuffer);
   const overlay = await svgOverlay(config);
-
-  const produtoX = Math.round((CANVAS - (metaProdutoNormalizado.width || 0)) / 2);
-  const produtoY = Math.round((AREA_COMPOSICAO_IMAGEM_ALTURA - (metaProdutoNormalizado.height || 0)) / 2);
   const corIdentidade = texto(config.corIdentidade || "azul");
   const corHex = corHexIdentidade(corIdentidade);
   const corTexto = contrasteTextoAutomatico(corHex);
 
-  const output = await sharp({
-    create: {
-      width: CANVAS,
-      height: CANVAS,
-      channels: 4,
-      background: { r: 255, g: 255, b: 255, alpha: 1 }
-    }
-  })
-    .composite([
-      ...(fundoPaisagemExtrema ? [{ input: fundoPaisagemExtrema, left: 0, top: 0 }] : []),
-      { input: produto, left: Math.max(0, produtoX), top: Math.max(0, produtoY) },
+  const output = await comporBaseVisualComum(base, [
       { input: overlay.buffer, left: 0, top: 0 },
       { input: logo, left: LOGO_SLOT.left, top: LOGO_SLOT.top }
-    ])
-    .png({ compressionLevel: 8, adaptiveFiltering: true })
-    .toBuffer();
+    ]);
 
   return {
     buffer: output,
     metadata: {
-      rendererVersion: RENDERER_VERSION_IDENTIDADE_VISUAL,
-      width: CANVAS,
-      height: CANVAS,
-      productOriginalWidth: metaProduto.width,
-      productOriginalHeight: metaProduto.height,
-      productRenderedWidth: metaProdutoNormalizado.width || 0,
-      productRenderedHeight: metaProdutoNormalizado.height || 0,
-      productRenderedX: Math.max(0, produtoX),
-      productRenderedY: Math.max(0, produtoY),
-      productContentWidth: produtoNormalizado.conteudo.width,
-      productContentHeight: produtoNormalizado.conteudo.height,
-      composicao: produtoNormalizado.paisagemExtrema
-        ? "composicao_paisagem_extrema"
-        : produtoNormalizado.paisagem
-          ? "composicao_paisagem"
-        : produtoPreparado.cropMargemBranca
-          ? "crop_margem_branca"
-          : "composicao_normal",
-      cropMargemBranca: produtoPreparado.cropMargemBranca,
-      fundoDerivado: Boolean(fundoPaisagemExtrema),
-      margemBranca: produtoPreparado.margemBranca,
-      productCompositionHeight: AREA_COMPOSICAO_IMAGEM_ALTURA,
-      productContainBox: produtoNormalizado.box,
-      productBehindBannerHeight: Math.max(0, produtoY + (metaProdutoNormalizado.height || 0) - BASE_Y),
+      ...metadataBaseVisualComum(base),
+      padraoGlobalImagem: true,
+      brandingAplicado: true,
+      faixaAplicada: true,
+      logoAplicado: true,
       corIdentidade,
       corHex,
       corTexto,
@@ -549,7 +609,9 @@ module.exports = {
   MIMES_IMAGEM_PERMITIDOS,
   configHashIdentidadeVisual,
   cacheKeyIdentidadeVisual,
+  cacheKeyImagemGlobalNeutra,
   baixarImagemComoBuffer,
   normalizarLogoUpload,
+  renderizarImagemGlobalNeutraBuffer,
   renderizarIdentidadeVisualBuffer
 };

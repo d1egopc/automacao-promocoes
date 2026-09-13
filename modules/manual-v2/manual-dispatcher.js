@@ -36,6 +36,11 @@ function tipoDestino(destino = {}) {
   return "whatsapp";
 }
 
+function destinoUsaImagemOuPreview(destino = {}) {
+  return tipoMidiaV2.destinoUsaImagem(destino) ||
+    tipoMidiaV2.tipoMidiaDestino(destino) === "imagem_link";
+}
+
 function nomeDestino(destino = {}) {
   return texto(destino.nome || destino.titulo || destino.label || destino.destino || destinoId(destino));
 }
@@ -420,7 +425,12 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
     ? deps.debitarCreditos
     : () => true;
   let ofertaBaseMensagem = oferta;
-  if (typeof deps.aplicarIdentidadeVisualOferta === "function") {
+  const destinosSelecionadosUsamImagem = idsSolicitados
+    .map((id) => mapaOriginal.get(id))
+    .filter((destino) => destino && mapaSanitizado.has(destinoId(destino)))
+    .some(destinoUsaImagemOuPreview);
+
+  if (destinosSelecionadosUsamImagem && typeof deps.aplicarIdentidadeVisualOferta === "function") {
     try {
       const identidadeVisual = await deps.aplicarIdentidadeVisualOferta({
         clienteId: cliente,

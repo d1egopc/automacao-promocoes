@@ -8,6 +8,7 @@ const {
 } = require("../validator.service");
 const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
+const tipoMidiaV2 = require("../../destinos/tipo-midia-v2");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
 const { selecionarImagemEspelhoPiloto } = require("../../ofc-v2/espelho-piloto");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
@@ -559,6 +560,11 @@ function resolverImagemFilaEngine(oferta = {}) {
     imagemResolvidaEm: resolvida.imagemResolvidaEm,
     imagemTentativas: resolvida.imagemTentativas || [],
   };
+}
+
+function destinoUsaImagemOuPreview(destino = {}) {
+  return tipoMidiaV2.destinoUsaImagem(destino) ||
+    tipoMidiaV2.tipoMidiaDestino(destino) === "imagem_link";
 }
 
 function logImagemFilaEngine(oferta = {}, resolucao = {}) {
@@ -1321,7 +1327,14 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   }
 
   let itemFila = montarItemFilaEngine(oferta);
-  if (typeof deps.aplicarIdentidadeVisualOferta === "function") {
+  const destinosImagemOuPreview = Array.isArray(contexto.destinosCompativeisImagem)
+    ? contexto.destinosCompativeisImagem
+    : [];
+  const devePrepararImagemGlobal = destinosImagemOuPreview.length
+    ? destinosImagemOuPreview.some(destinoUsaImagemOuPreview)
+    : true;
+
+  if (devePrepararImagemGlobal && typeof deps.aplicarIdentidadeVisualOferta === "function") {
     try {
       const identidadeVisual = await deps.aplicarIdentidadeVisualOferta({
         clienteId,

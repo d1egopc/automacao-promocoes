@@ -207,6 +207,121 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
     });
   }
 
+  async function aplicarPadraoGlobalNeutro({ clienteId = "admin", imagemOriginal = "", motivoIdentidade = "", resolucao = {}, contexto = {}, ofertaId = "" } = {}, opcoes = {}) {
+    if (opcoes.padronizarImagemGlobal === false) {
+      return {
+        aplicada: false,
+        padraoGlobalImagem: false,
+        imagemOriginal,
+        imagemFinal: imagemOriginal,
+        motivo: motivoIdentidade || "padrao_global_ignorado",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: imagemOriginal,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          padraoGlobalImagem: false,
+          motivoIdentidade: motivoIdentidade || "",
+          motivoPadraoGlobal: "ignorado_por_destino_sem_imagem"
+        },
+        contexto
+      };
+    }
+
+    const cacheKey = rendererIdentidadeVisual.cacheKeyImagemGlobalNeutra({
+      clienteId,
+      imagemOriginal
+    });
+    const destino = storageIdentidadeVisual.caminhoRenderizado(clienteId, cacheKey);
+
+    if (storageIdentidadeVisual.existeArquivo(destino.path)) {
+      logIdentidadeVisual("[IMAGEM-GLOBAL-NEUTRA-CACHE]", { clienteId, ofertaId, cacheKey, motivo: "cache_hit" });
+      return {
+        aplicada: false,
+        padraoGlobalImagem: true,
+        imagemOriginal,
+        imagemFinal: destino.url,
+        motivo: motivoIdentidade || "padrao_global_cache_hit",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: destino.url,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          cacheKey,
+          cacheHit: true,
+          padraoGlobalImagem: true,
+          brandingAplicado: false,
+          motivoIdentidade: motivoIdentidade || "",
+          motivoPadraoGlobal: "cache_hit"
+        },
+        contexto
+      };
+    }
+
+    try {
+      const imagemBuffer = typeof deps.baixarImagemBuffer === "function"
+        ? await deps.baixarImagemBuffer(imagemOriginal, opcoes)
+        : await rendererIdentidadeVisual.baixarImagemComoBuffer(imagemOriginal, {
+            httpClient: opcoes.httpClient || deps.httpClient,
+            timeoutMs: opcoes.timeoutMs
+          });
+      const render = await rendererIdentidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer });
+      storageIdentidadeVisual.salvarBufferPublico(destino, render.buffer);
+      logIdentidadeVisual("[IMAGEM-GLOBAL-NEUTRA-APLICADA]", { clienteId, ofertaId, cacheKey, motivo: "render_ok" });
+      return {
+        aplicada: false,
+        padraoGlobalImagem: true,
+        imagemOriginal,
+        imagemFinal: destino.url,
+        motivo: motivoIdentidade || "padrao_global_render_ok",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: destino.url,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          cacheKey,
+          cacheHit: false,
+          padraoGlobalImagem: true,
+          brandingAplicado: false,
+          aplicadoEm: new Date().toISOString(),
+          motivoIdentidade: motivoIdentidade || "",
+          motivoPadraoGlobal: "render_ok",
+          ...render.metadata
+        },
+        contexto
+      };
+    } catch (erro) {
+      logIdentidadeVisual("[IMAGEM-GLOBAL-NEUTRA-FALLBACK]", {
+        clienteId,
+        ofertaId,
+        cacheKey,
+        motivo: erro?.message || "render_fallback"
+      });
+      return {
+        aplicada: false,
+        padraoGlobalImagem: false,
+        imagemOriginal,
+        imagemFinal: imagemOriginal,
+        motivo: motivoIdentidade || "padrao_global_render_fallback",
+        politica: resolucao.politica,
+        configEfetiva: resolucao.configEfetiva,
+        metadata: {
+          original: imagemOriginal,
+          final: imagemOriginal,
+          rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
+          fallback: true,
+          padraoGlobalImagem: false,
+          motivoIdentidade: motivoIdentidade || "",
+          motivoPadraoGlobal: erro?.message || "render_fallback"
+        },
+        contexto
+      };
+    }
+  }
+
   function atualizarConfig(clienteId = "admin", patch = {}, opcoes = {}) {
     const politica = resolverPolitica(clienteId, opcoes);
     const alteracoes = normalizarConfigIdentidadeVisual(patch);
@@ -336,30 +451,6 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
     const imagemOriginal = texto(imagemAtual || oferta.imagem || oferta.imagemUrl || "");
     const resolucao = resolverConfig(clienteId, opcoes);
 
-    if (!resolucao.habilitada) {
-      return {
-        aplicada: false,
-        imagemOriginal,
-        imagemFinal: imagemOriginal,
-        motivo: "politica_desabilitada",
-        politica: resolucao.politica,
-        configEfetiva: resolucao.configEfetiva,
-        contexto
-      };
-    }
-
-    if (!resolucao.configEfetiva.ativo) {
-      return {
-        aplicada: false,
-        imagemOriginal,
-        imagemFinal: imagemOriginal,
-        motivo: "config_inativa",
-        politica: resolucao.politica,
-        configEfetiva: resolucao.configEfetiva,
-        contexto
-      };
-    }
-
     if (!imagemOriginal) {
       return {
         aplicada: false,
@@ -370,6 +461,28 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
         configEfetiva: resolucao.configEfetiva,
         contexto
       };
+    }
+
+    if (!resolucao.habilitada) {
+      return aplicarPadraoGlobalNeutro({
+        clienteId,
+        imagemOriginal,
+        motivoIdentidade: "politica_desabilitada",
+        resolucao,
+        contexto,
+        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || ""
+      }, opcoes);
+    }
+
+    if (!resolucao.configEfetiva.ativo) {
+      return aplicarPadraoGlobalNeutro({
+        clienteId,
+        imagemOriginal,
+        motivoIdentidade: "config_inativa",
+        resolucao,
+        contexto,
+        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || ""
+      }, opcoes);
     }
 
     const ofertaId = oferta.id || oferta.oferta_id || oferta.uuid || "";
