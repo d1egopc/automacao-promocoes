@@ -244,9 +244,10 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
         getIntegracaoCliente: () => ({ credenciais: { cookies: "cookie=1", tag: "tag" } }),
         resolverLinkOriginalRadar: async () => ({
           ok: true,
-          urlResolvida: "https://www.mercadolivre.com.br/social/iskandarsouza",
+          urlResolvida: `https://www.mercadolivre.com.br/social/iskandarsouza?url=${encodeURIComponent(urlRica)}`,
           linkOriginalLimpo: "https://produto.mercadolivre.com.br/MLB6469871444",
-          linkResolvido: urlRica
+          linkResolvido: urlRica,
+          metodoResolucaoMeli: "parametro"
         }),
         importarMercadoLivre: async (url) => {
           chamadas.push(url);
@@ -263,6 +264,8 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
       }
     });
 
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(chamadas.length, 1);
     assert.strictEqual(chamadas[0], urlRica);
     assert.strictEqual(resultado.linkExpandido, urlRica);
     assert.strictEqual(resultado.linkAfiliado, linkAfiliado);
@@ -270,12 +273,13 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
     assert.strictEqual(resultado.cupom, comerciais.cupom);
     assert.strictEqual(resultado.beneficioTexto, comerciais.beneficioTexto);
     assert.strictEqual(resultado.categoria, comerciais.categoria);
+    assert.strictEqual(resultado.metadata.identidadeCanonicaMl.status, "consistente");
   }
 
   {
     const generica = "https://produto.mercadolivre.com.br/MLB6801238036";
     const chamadas = [];
-    await importarMercadoLivreEngine({
+    const resultado = await importarMercadoLivreEngine({
       job: { id: "job-generico", evento_id: "evento-generico", cliente_id: "cliente-a" },
       evento: {},
       links: [{ url_original: "https://meli.la/2g2bryn" }],
@@ -298,7 +302,9 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
       }
     });
 
-    assert.strictEqual(chamadas[0], generica);
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "mercadolivre_identidade_nao_confirmada");
+    assert.strictEqual(chamadas.length, 0);
   }
 
   console.log("mercadolivre-social-url-rica.test.js ok");

@@ -2851,14 +2851,22 @@ function avaliarGateIdentidadeMercadoLivre(oferta = {}, metadata = {}) {
   }
 
   const identidade = objetoSeguro(metadata.identidadeCanonicaMl || metadata.revalidacaoMeliLa);
-  if (identidade.status !== "inconsistente" && identidade.motivo !== "mercadolivre_identidade_inconsistente") {
+  const motivoIdentidade = identidade.motivo === "mercadolivre_identidade_nao_confirmada"
+    ? "mercadolivre_identidade_nao_confirmada"
+    : "mercadolivre_identidade_inconsistente";
+  if (
+    identidade.status !== "inconsistente" &&
+    identidade.status !== "nao_confirmada" &&
+    identidade.motivo !== "mercadolivre_identidade_inconsistente" &&
+    identidade.motivo !== "mercadolivre_identidade_nao_confirmada"
+  ) {
     return { retida: false, motivo: "" };
   }
 
   return {
     retida: true,
     status: "retida_v2",
-    motivo: "mercadolivre_identidade_inconsistente",
+    motivo: motivoIdentidade,
     reprocessavel: true,
     sinais: Array.isArray(identidade.sinais) ? identidade.sinais : [],
     mlbExpandidaPrevia: identidade.mlbExpandidaPrevia || "",

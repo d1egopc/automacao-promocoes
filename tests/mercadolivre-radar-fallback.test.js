@@ -392,13 +392,13 @@ async function testarClonadorSocialAmbiguoNaoGeraAfiliadoNemAtualizaIdentidade()
   });
 
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "identidade_ml_nao_comprovada");
+  assert.strictEqual(resultado.motivo, "mercadolivre_identidade_nao_confirmada");
   assert.strictEqual(resultado.reprocessavel, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 0);
 }
 
-async function testarClonadorSocialComParametroExplicitoMantemFluxo() {
+async function testarClonadorSocialComParametroExplicitoEstruturadoPassa() {
   const contexto = depsBase({ wall: true });
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: true,
@@ -416,8 +416,32 @@ async function testarClonadorSocialComParametroExplicitoMantemFluxo() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(contexto.chamadas.importar[0].url, URL_PRODUTO_BERMUDA);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BERMUDA);
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, true);
+  assert.strictEqual(contexto.chamadas.importar.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+}
+
+async function testarClonadorParametroSocialSemVinculoBloqueia() {
+  const contexto = depsBase({ wall: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: "https://www.mercadolivre.com.br/social/perfil?reco_backend=item_decorator",
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
+    linkResolvido: URL_PRODUTO_BERMUDA,
+    metodoResolucaoMeli: "parametro"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador(),
+    links: links("https://meli.la/shortlink-parametro-social"),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "mercadolivre_identidade_nao_confirmada");
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
 }
 
 async function testarOrigemDiferenteNaoUsaComercialCapturadoClonador() {
@@ -485,7 +509,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallComFalhaAfiliadoFalhaSeguro();
   await testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem();
   await testarClonadorSocialAmbiguoNaoGeraAfiliadoNemAtualizaIdentidade();
-  await testarClonadorSocialComParametroExplicitoMantemFluxo();
+  await testarClonadorSocialComParametroExplicitoEstruturadoPassa();
+  await testarClonadorParametroSocialSemVinculoBloqueia();
   await testarOrigemDiferenteNaoUsaComercialCapturadoClonador();
   await testarWallClonadorSemTituloOuPrecoFalhaSeguro();
   await testarErroGenericoNaoAtivaFallback();

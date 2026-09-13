@@ -121,6 +121,6 @@ assert.strictEqual(
   motivoEngine(provaValida, "html", provaValida.urlProduto.replace(casosReais[0].mlbItem, "MLB333333333")),
   "identidade_ml_nao_comprovada"
 );
-assert.strictEqual(motivoEngine(null, "parametro", ""), "");
+assert.strictEqual(motivoEngine(null, "parametro", ""), "identidade_ml_nao_comprovada");
 
 console.log("mercadolivre-social-identidade-segura.test.js ok");
