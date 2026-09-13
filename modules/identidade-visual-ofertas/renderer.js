@@ -44,7 +44,7 @@ const CSS_FONTE_RENDERER_IDENTIDADE_VISUAL = `
 const LIMITE_IMAGEM_ORIGINAL_BYTES = 8 * 1024 * 1024;
 const LIMITE_UPLOAD_LOGO_BYTES = 2 * 1024 * 1024;
 const MIMES_IMAGEM_PERMITIDOS = new Set(["image/png", "image/jpeg", "image/webp"]);
-const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v1";
+const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v2";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -482,6 +482,38 @@ function metadataBaseVisualComum(base = {}) {
   };
 }
 
+function calcularMascaraNeutraRodape(base = {}) {
+  const metaProdutoNormalizado = base.metaProdutoNormalizado || {};
+  const produtoNormalizado = base.produtoNormalizado || {};
+  const produtoY = base.produtoY || 0;
+  const alturaBuffer = metaProdutoNormalizado.height || 0;
+  const alturaConteudo = produtoNormalizado.conteudo?.height || alturaBuffer;
+  const paddingVerticalTransparente = Math.max(0, alturaBuffer - alturaConteudo);
+  const conteudoY = produtoY + Math.round(paddingVerticalTransparente / 2);
+  const productBehindBannerHeight = Math.max(0, conteudoY + alturaConteudo - BASE_Y);
+  const teto = Math.round(FAIXA_ALTURA * 0.5);
+  const altura = clamp(Math.round(Math.min(productBehindBannerHeight, teto)), 0, teto);
+  return {
+    aplicada: altura > 0,
+    referencia: "faixa_render_on",
+    top: BASE_Y,
+    height: altura,
+    maxHeight: teto,
+    contentTop: conteudoY,
+    contentHeight: alturaConteudo,
+    productBehindBannerHeight
+  };
+}
+
+function svgMascaraNeutraRodape({ width = CANVAS, height = 0 } = {}) {
+  const h = clamp(Math.round(height || 0), 0, CANVAS);
+  return Buffer.from(`
+    <svg width="${width}" height="${h}" viewBox="0 0 ${width} ${h}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#ffffff"/>
+    </svg>
+  `);
+}
+
 async function comporBaseVisualComum(base = {}, camadasExtras = []) {
   return sharp({
     create: {
@@ -502,7 +534,15 @@ async function comporBaseVisualComum(base = {}, camadasExtras = []) {
 
 async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
   const base = await prepararBaseVisualComumImagem(imagemBuffer);
-  const output = await comporBaseVisualComum(base);
+  const mascaraNeutraRodape = calcularMascaraNeutraRodape(base);
+  const camadasNeutras = mascaraNeutraRodape.aplicada
+    ? [{
+        input: svgMascaraNeutraRodape({ height: mascaraNeutraRodape.height }),
+        left: 0,
+        top: mascaraNeutraRodape.top
+      }]
+    : [];
+  const output = await comporBaseVisualComum(base, camadasNeutras);
   return {
     buffer: output,
     metadata: {
@@ -510,7 +550,8 @@ async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
       padraoGlobalImagem: true,
       brandingAplicado: false,
       faixaAplicada: false,
-      logoAplicado: false
+      logoAplicado: false,
+      mascaraNeutraRodape
     }
   };
 }

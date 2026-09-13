@@ -40,8 +40,24 @@ function svgProduto({ width, height, fill, label }) {
   `);
 }
 
+function svgProdutoComRodape({ width, height, fill, label }) {
+  return Buffer.from(`
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="transparent"/>
+      <rect x="${Math.round(width * 0.08)}" y="${Math.round(height * 0.08)}" width="${Math.round(width * 0.84)}" height="${Math.round(height * 0.84)}" rx="28" fill="${fill}"/>
+      <rect x="${Math.round(width * 0.12)}" y="${Math.round(height * 0.91)}" width="${Math.round(width * 0.76)}" height="${Math.round(height * 0.07)}" rx="12" fill="#dc2626"/>
+      <text x="50%" y="94.5%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="${Math.max(24, Math.round(width / 16))}" font-weight="700" fill="#fff">LOGO GRUPO</text>
+      <text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="${Math.max(30, Math.round(width / 10))}" font-weight="700" fill="#fff">${label}</text>
+    </svg>
+  `);
+}
+
 async function bufferPng({ width, height, fill, label }) {
   return sharp(svgProduto({ width, height, fill, label })).png().toBuffer();
+}
+
+async function bufferPngComRodape({ width, height, fill, label }) {
+  return sharp(svgProdutoComRodape({ width, height, fill, label })).png().toBuffer();
 }
 
 async function bufferJpeg({ width, height, fill, label }) {
@@ -142,6 +158,7 @@ async function main() {
       { width: 248, height: 147, left: 56, top: 902 },
       "logo oficial deve usar o slot V2.2 aprovado"
     );
+    assert.strictEqual(renderPadrao.metadata.mascaraNeutraRodape, undefined, "Render ON nao deve receber mascara neutra OFF");
 
     const renderNeutroQuadrado = await identidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer: produto });
     await validarPng1080(renderNeutroQuadrado.buffer, "imagem neutra quadrada");
@@ -156,9 +173,28 @@ async function main() {
       renderPadrao.metadata.productContainBox,
       "neutro reutiliza o mesmo contain/enquadramento do render identidade"
     );
+    const baseYEsperado = identidadeVisual.AREA_PRODUTO_ALTURA + identidadeVisual.FILETE_ALTURA;
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.aplicada, true, "neutro aplica mascara apenas quando ha zona sacrificavel");
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.referencia, "faixa_render_on");
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.top, baseYEsperado, "mascara usa o mesmo inicio da faixa do Render ON");
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.height, 96, "caso normal mascara a mesma zona sacrificavel do Render ON");
+    assert.ok(
+      renderNeutroQuadrado.metadata.mascaraNeutraRodape.maxHeight <= Math.round(identidadeVisual.FAIXA_ALTURA * 0.5),
+      "mascara nao pode usar a faixa inteira"
+    );
     const caminhoNeutroQuadrado = path.join(AMOSTRAS_DIR, "global-neutro-quadrado.png");
     fs.mkdirSync(AMOSTRAS_DIR, { recursive: true });
     fs.writeFileSync(caminhoNeutroQuadrado, renderNeutroQuadrado.buffer);
+    const pixelAntesMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, baseYEsperado - 22);
+    assert.ok(
+      pixelAntesMascaraNeutro[0] < 248 || pixelAntesMascaraNeutro[1] < 248 || pixelAntesMascaraNeutro[2] < 248,
+      "neutro preserva produto acima da zona sacrificavel"
+    );
+    const pixelInicioMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, baseYEsperado + 8);
+    assert.ok(
+      pixelInicioMascaraNeutro[0] >= 248 && pixelInicioMascaraNeutro[1] >= 248 && pixelInicioMascaraNeutro[2] >= 248,
+      "neutro mascara em branco apenas a zona inferior permitida"
+    );
     const pixelInferiorNeutro = await pixel(caminhoNeutroQuadrado, 900, 1000);
     assert.ok(
       pixelInferiorNeutro[0] >= 248 && pixelInferiorNeutro[1] >= 248 && pixelInferiorNeutro[2] >= 248,
@@ -179,7 +215,30 @@ async function main() {
       assert.strictEqual(renderNeutro.metadata.brandingAplicado, false, `${casoNeutro.nome} nao recebe branding`);
       assert.ok(renderNeutro.metadata.productRenderedWidth > 0, `${casoNeutro.nome} tem produto renderizado`);
       assert.ok(renderNeutro.metadata.productRenderedHeight > 0, `${casoNeutro.nome} tem produto renderizado`);
+      assert.ok(renderNeutro.metadata.mascaraNeutraRodape.height <= Math.round(identidadeVisual.FAIXA_ALTURA * 0.5), `${casoNeutro.nome} respeita teto conservador da mascara`);
+      if (casoNeutro.nome === "horizontal") {
+        assert.strictEqual(renderNeutro.metadata.mascaraNeutraRodape.aplicada, false, "horizontal sem invasao da faixa nao deve receber mascara");
+        assert.strictEqual(renderNeutro.metadata.mascaraNeutraRodape.height, 0, "horizontal sem zona sacrificavel nao mascara rodape");
+      }
     }
+
+    const renderRodape = await identidadeVisual.renderizarImagemGlobalNeutraBuffer({
+      imagemBuffer: await bufferPngComRodape({ width: 720, height: 720, fill: "#2563eb", label: "RADAR/CLONE" })
+    });
+    const caminhoRodape = path.join(AMOSTRAS_DIR, "global-neutro-rodape-logo.png");
+    fs.writeFileSync(caminhoRodape, renderRodape.buffer);
+    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.aplicada, true, "rodape de fallback passa pela mascara conservadora");
+    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.height, 96, "rodape usa apenas a zona sacrificavel normal");
+    const pixelRodapeMascarado = await pixel(caminhoRodape, 540, baseYEsperado + 50);
+    assert.ok(
+      pixelRodapeMascarado[0] >= 248 && pixelRodapeMascarado[1] >= 248 && pixelRodapeMascarado[2] >= 248,
+      "logo/faixa de rodape dentro da zona sacrificavel fica escondida por fundo neutro"
+    );
+    const pixelRodapeProduto = await pixel(caminhoRodape, 540, baseYEsperado - 40);
+    assert.ok(
+      pixelRodapeProduto[0] < 248 || pixelRodapeProduto[1] < 248 || pixelRodapeProduto[2] < 248,
+      "conteudo acima da zona sacrificavel continua visivel"
+    );
 
     const produtoComMargemBranca = await sharp({
       create: { width: 800, height: 780, channels: 3, background: "#ffffff" }
