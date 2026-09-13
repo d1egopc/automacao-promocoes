@@ -326,9 +326,18 @@ async function testarMeliLaSocialSemProvaNaoUsaPrimeiroMlb() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "mercadolivre_identidade_nao_confirmada");
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.metadata.fallbackMercadoLivreRadar, true);
+  assert.strictEqual(resultado.metadata.motivoFallback, "mercadolivre_identidade_nao_confirmada");
+  assert.strictEqual(resultado.titulo, "Relógio Casio W-59-1VQ");
+  assert.strictEqual(resultado.preco, 97);
+  assert.strictEqual(resultado.linkOriginal, "https://meli.la/1zF4xyb");
+  assert.strictEqual(resultado.linkExpandido, "https://meli.la/1zF4xyb");
   assert.strictEqual(contexto.chamadas.importador.length, 0);
+  const serializado = JSON.stringify(resultado);
+  assert.ok(!serializado.includes("Relogio Digital Multifuncional Retro"));
+  assert.ok(!serializado.includes("MLB4849476701"));
+  assert.ok(!serializado.includes("relogio-generico"));
 }
 
 async function testarMeliLaSocialComProvaEstruturadaContinuaPublicando() {

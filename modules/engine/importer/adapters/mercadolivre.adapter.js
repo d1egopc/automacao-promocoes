@@ -357,9 +357,13 @@ function tituloTecnicoBloqueadoMercadoLivre(titulo = "") {
 
 function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
   const metadataEvento = objetoSeguro(evento.metadata);
+  const metadataJob = objetoSeguro(job.metadata);
+  const metadataJobEvento = objetoSeguro(metadataJob.metadataEvento);
   const radarMirror = objetoSeguro(metadataEvento.radarMirror);
+  const comercialCapturado = objetoSeguro(metadataEvento.comercialCapturado || metadataJobEvento.comercialCapturado);
   const resolvida = resolverImagemUniversal({
-    metadata: { radarMirror }
+    imagem: comercialCapturado.imagem || comercialCapturado.imagemOriginal || comercialCapturado.imagemUrl || "",
+    metadata: { radarMirror, comercialCapturado }
   }, {
     evento,
     job
@@ -379,6 +383,28 @@ function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
     imagemOrigem: resolvida.imagemOrigem || "radar_mirror/mensagem",
     imagemStatus: resolvida.imagemStatus || "radar_mirror_preservada",
     imagemTentativas: resolvida.imagemTentativas || []
+  };
+}
+
+function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motivo = "") {
+  const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const urlSocial = [
+    resolucaoRadar.urlResolvida,
+    resolucaoRadar.linkResolvido,
+    resolucaoRadar.linkOriginalLimpo,
+    resolucaoProduto.urlProduto
+  ].map(url => textoMercadoLivre(url)).find(isSocialMercadoLivre) || "";
+
+  return {
+    ok: false,
+    motivo: motivo || resolucaoProduto.motivo || "enriquecimento_ml_recusado",
+    detalhe: resolucaoProduto.detalhe || "",
+    resolucaoRadar: {
+      motivo: resolucaoRadar.motivo || motivo || resolucaoProduto.motivo || "",
+      tipoLinkRadar: resolucaoRadar.tipoLinkRadar || "",
+      metodoResolucaoMeli: resolucaoRadar.metodoResolucaoMeli || "",
+      ...(urlSocial ? { urlResolvida: urlSocial } : {})
+    }
   };
 }
 
@@ -460,6 +486,7 @@ async function montarFallbackClonadorMercadoLivre({
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
   const produtoIdDetectado = extrairMlbMercadoLivre(linkExpandidoEngine || urlImportador || urlOriginalEngine);
+  const imagemClonador = resolverImagemRadarFallbackMercadoLivre(evento, job);
   let linkAfiliado = "";
 
   if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
@@ -478,6 +505,8 @@ async function montarFallbackClonadorMercadoLivre({
     temTitulo,
     temPreco,
     temCupom: Boolean(cupom),
+    temImagem: Boolean(imagemClonador.imagem),
+    imagemOrigem: imagemClonador.imagemOrigem || "nenhuma",
     temLinkAfiliado: Boolean(linkAfiliado)
   };
 
@@ -525,8 +554,8 @@ async function montarFallbackClonadorMercadoLivre({
     precoAtual: preco,
     preco,
     precoOriginal: precoOriginalValido,
-    imagem: "",
-    imagemOrigem: "nenhuma",
+    imagem: imagemClonador.imagem,
+    imagemOrigem: imagemClonador.imagemOrigem,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     urlFinal: linkExpandidoEngine || urlImportador,
@@ -550,10 +579,10 @@ async function montarFallbackClonadorMercadoLivre({
     precoOriginal: precoOriginalValido,
     descontoPercentual: "",
     economia: "",
-    imagem: "",
-    imagemOrigem: "nenhuma",
-    imagemStatus: "nao_resolvida",
-    imagemTentativas: [],
+    imagem: imagemClonador.imagem,
+    imagemOrigem: imagemClonador.imagemOrigem,
+    imagemStatus: imagemClonador.imagemStatus,
+    imagemTentativas: imagemClonador.imagemTentativas,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     linkAfiliado,
@@ -578,7 +607,7 @@ async function montarFallbackClonadorMercadoLivre({
       origemComercial: "clonador_grupos",
       origemPreco: "clonador_grupos",
       origemTitulo: "clonador_grupos",
-      origemImagem: "nenhuma",
+      origemImagem: imagemClonador.imagemOrigem || "nenhuma",
       motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
       jobId: job.id,
       eventoId: job.evento_id,
@@ -768,6 +797,44 @@ async function montarFallbackRadarMercadoLivre({
   }));
 
   return ofertaAdapter;
+}
+
+async function montarFallbackPuroCapturaMercadoLivre({
+  job = {},
+  evento = {},
+  links = [],
+  clienteId = "",
+  integracao = {},
+  deps = {},
+  urlOriginalEngine = "",
+  resolucaoProduto = {},
+  motivo = ""
+} = {}) {
+  const falhaImportador = {
+    motivo: motivo || "enriquecimento_ml_recusado"
+  };
+  const resolucaoProdutoSanitizada = sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto, falhaImportador.motivo);
+
+  const argumentosFallback = {
+    job,
+    evento,
+    links,
+    clienteId,
+    integracao,
+    deps,
+    urlOriginalEngine,
+    urlImportador: urlOriginalEngine,
+    linkExpandidoEngine: "",
+    expandiuMeliLa: false,
+    resolucaoProduto: resolucaoProdutoSanitizada,
+    falhaImportador
+  };
+
+  if (origemClonadorGruposMercadoLivre(evento, job)) {
+    return montarFallbackClonadorMercadoLivre(argumentosFallback);
+  }
+
+  return montarFallbackRadarMercadoLivre(argumentosFallback);
 }
 
 function avaliarDivergenciaPrecoMercadoLivre(precoRadar, precoImportador) {
@@ -1442,19 +1509,17 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   });
 
   if (!resolucaoProduto.ok) {
-    return {
-      ok: false,
-      motivo: "ml_url_produto_nao_resolvida",
-      marketplace: "mercadolivre",
-      linkOriginal: urlOriginalEngine,
-      metadata: {
-        linkOriginalEngine: urlOriginalEngine,
-        linkExpandidoEngine: resolucaoProduto.linkExpandidoEngine || "",
-        expandiuMeliLa: false,
-        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
-        detalheResolucao: resolucaoProduto.detalhe || ""
-      }
-    };
+    return montarFallbackPuroCapturaMercadoLivre({
+      job,
+      evento,
+      links,
+      clienteId,
+      integracao,
+      deps,
+      urlOriginalEngine,
+      resolucaoProduto,
+      motivo: "ml_url_produto_nao_resolvida"
+    });
   }
 
   const identidadeNaoConfirmadaMl = avaliarIdentidadeNaoConfirmadaMercadoLivre({
@@ -1474,21 +1539,17 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       tipoLinkRadar: identidadeNaoConfirmadaMl.tipoLinkRadar || "",
       sinais: identidadeNaoConfirmadaMl.sinais
     }));
-    return {
-      ok: false,
-      motivo: identidadeNaoConfirmadaMl.motivo,
-      marketplace: "mercadolivre",
-      linkOriginal: urlOriginalEngine,
-      reprocessavel: true,
-      metadata: {
-        linkOriginalEngine: urlOriginalEngine,
-        linkExpandidoEngine: resolucaoProduto.linkExpandidoEngine || "",
-        expandiuMeliLa: resolucaoProduto.expandiuMeliLa === true,
-        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
-        identidadeCanonicaMl: identidadeNaoConfirmadaMl,
-        revalidacaoMeliLa: identidadeNaoConfirmadaMl
-      }
-    };
+    return montarFallbackPuroCapturaMercadoLivre({
+      job,
+      evento,
+      links,
+      clienteId,
+      integracao,
+      deps,
+      urlOriginalEngine,
+      resolucaoProduto,
+      motivo: identidadeNaoConfirmadaMl.motivo
+    });
   }
 
   const motivoIdentidadeNaoComprovada = motivoIdentidadeMeliClonadorNaoComprovada({
@@ -1506,22 +1567,17 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       urlResolvidaRadar: resolucaoProduto.resolucaoRadar?.urlResolvida || "",
       metodoResolucaoMeli: resolucaoProduto.resolucaoRadar?.metodoResolucaoMeli || ""
     }));
-    return {
-      ok: false,
-      motivo: motivoIdentidadeNaoComprovada,
-      marketplace: "mercadolivre",
-      linkOriginal: urlOriginalEngine,
-      reprocessavel: true,
-      metadata: {
-        origemComercial: "clonador_grupos",
-        linkOriginalEngine: urlOriginalEngine,
-        resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
-        identidadeMl: {
-          status: "nao_comprovada",
-          motivo: motivoIdentidadeNaoComprovada
-        }
-      }
-    };
+    return montarFallbackPuroCapturaMercadoLivre({
+      job,
+      evento,
+      links,
+      clienteId,
+      integracao,
+      deps,
+      urlOriginalEngine,
+      resolucaoProduto,
+      motivo: motivoIdentidadeNaoComprovada
+    });
   }
 
   const urlImportador = resolucaoProduto.urlProduto;

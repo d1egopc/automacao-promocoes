@@ -303,7 +303,10 @@ function htmlSocialPolycard({ id, productId = "", url, urlParams = "", extra = "
     });
 
     assert.strictEqual(resultado.ok, false);
-    assert.strictEqual(resultado.motivo, "mercadolivre_identidade_nao_confirmada");
+    assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+    assert.strictEqual(resultado.metadata.motivoFallback, "mercadolivre_identidade_nao_confirmada");
+    assert.strictEqual(resultado.metadata.insuficiente.titulo, true);
+    assert.strictEqual(resultado.metadata.insuficiente.preco, true);
     assert.strictEqual(chamadas.length, 0);
   }
 
