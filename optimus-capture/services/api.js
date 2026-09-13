@@ -14,7 +14,8 @@
     const opts = opcoes || {};
     const headers = {
       "content-type": "application/json",
-      ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {})
+      ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),
+      ...(opts.headers && typeof opts.headers === "object" ? opts.headers : {})
     };
     const timeoutMs = Number(opts.timeoutMs || 0);
     const usarTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 && typeof AbortController !== "undefined";
@@ -88,11 +89,12 @@
     });
   }
 
-  function salvarOfertaManualV2(token, oferta) {
+  function salvarOfertaManualV2(token, oferta, idempotencyKey) {
     return requestJson("/manual-v2/ofertas", {
       method: "POST",
       token,
-      body: { oferta: oferta || {} }
+      body: { oferta: oferta || {} },
+      headers: idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : undefined
     });
   }
 
@@ -100,11 +102,12 @@
     return requestJson(`/manual-v2/destinos?_=${Date.now()}`, { token });
   }
 
-  function enviarAgoraManualV2(token, ofertaId, destinosIds) {
+  function enviarAgoraManualV2(token, ofertaId, destinosIds, idempotencyKey) {
     return requestJson(`/manual-v2/ofertas/${encodeURIComponent(texto(ofertaId))}/enviar-agora`, {
       method: "POST",
       token,
-      body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }
+      body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] },
+      headers: idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : undefined
     });
   }
 

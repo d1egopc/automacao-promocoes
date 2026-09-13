@@ -30,11 +30,14 @@
     salvandoOferta: false,
     ofertaSalvaId: "",
     previewSalvoKey: "",
+    saveIdempotencyKey: "",
     destinos: [],
     destinosSelecionados: new Set(),
     carregandoDestinos: false,
     enviandoAgora: false,
     previewEnviadoKey: "",
+    envioIdempotencyKey: "",
+    envioIdempotencyDestinosKey: "",
     oportunidadesCliente: null,
     oportunidadesVistas: null,
     oportunidades: [],
@@ -315,10 +318,13 @@
     state.previewDesatualizado = false;
     state.salvandoOferta = false;
     state.ofertaSalvaId = "";
+    state.saveIdempotencyKey = "";
     state.enviandoAgora = false;
     state.carregandoDestinos = false;
     state.destinos = [];
     state.previewEnviadoKey = "";
+    state.envioIdempotencyKey = "";
+    state.envioIdempotencyDestinosKey = "";
     ocultarDestinos();
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
@@ -355,6 +361,17 @@
       ...campos
     } = oferta && typeof oferta === "object" ? oferta : {};
     return campos;
+  }
+
+  function novaChaveIdempotencia(prefixo = "capture") {
+    const uuid = global.crypto?.randomUUID?.();
+    if (uuid) return `${prefixo}-${uuid}`;
+    return `${prefixo}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+  }
+
+  function erroRedeAmbiguo(erro) {
+    const status = Number(erro?.status || 0);
+    return !status || status === 408;
   }
 
   function destinoSeguro(destino = {}) {
@@ -831,6 +848,11 @@
       setHidden("previewView", false);
       state.ultimoPreviewKey = previewKey;
       state.previewOferta = ofertaPreviewParaSalvar(oferta);
+      if (state.previewKey !== previewKey) {
+        state.saveIdempotencyKey = novaChaveIdempotencia("save");
+        state.envioIdempotencyKey = "";
+        state.envioIdempotencyDestinosKey = "";
+      }
       state.previewKey = previewKey;
       state.previewDesatualizado = false;
       setHidden("botaoPreview", true);
@@ -878,12 +900,21 @@
     if (state.salvandoOferta) throw new Error("salvamento_em_andamento");
     const previewKey = state.previewKey;
     const oferta = ofertaPreviewParaSalvar(state.previewOferta);
+    const chaveIdempotencia = state.saveIdempotencyKey || novaChaveIdempotencia("save");
+    state.saveIdempotencyKey = chaveIdempotencia;
     state.salvandoOferta = true;
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
 
     try {
-      const resposta = await api.salvarOfertaManualV2(state.auth.token, oferta);
+      let resposta;
+      try {
+        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia);
+      } catch (erro) {
+        if (!erroRedeAmbiguo(erro)) throw erro;
+        setTexto("statusLink", "Nao foi possivel confirmar o salvamento. Verificando...");
+        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia);
+      }
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
       const ofertaId = String(resposta?.oferta?.id || "");
       if (!ofertaId) throw new Error("oferta_salva_sem_id");
@@ -916,7 +947,11 @@
         renderAuth();
         return;
       }
-      setTexto("statusLink", "Nao foi possivel salvar. Tente novamente.");
+      if (erro?.body?.erro === "idempotency_conflict") {
+        setTexto("statusLink", "Os dados da oferta mudaram durante o salvamento. Atualize a captura e tente novamente.");
+      } else {
+        setTexto("statusLink", "Nao foi possivel salvar. Tente novamente.");
+      }
     } finally {
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
@@ -971,6 +1006,12 @@
     }
 
     const previewKey = state.previewKey;
+    const destinosAssinatura = destinosIds.slice().sort().join(",");
+    if (!state.envioIdempotencyKey || state.envioIdempotencyDestinosKey !== destinosAssinatura) {
+      state.envioIdempotencyKey = novaChaveIdempotencia("send");
+      state.envioIdempotencyDestinosKey = destinosAssinatura;
+    }
+    const chaveEnvio = state.envioIdempotencyKey;
     state.enviandoAgora = true;
     setTexto("statusLink", "Enviando...");
     atualizarBotaoEnviar();
@@ -980,11 +1021,24 @@
       const ofertaId = await salvarPreviewAtual();
       if (!ofertaId) throw new Error("oferta_nao_salva");
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
-      const resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds);
+      let resposta;
+      try {
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio);
+      } catch (erro) {
+        if (!erroRedeAmbiguo(erro)) throw erro;
+        setTexto("statusLink", "Nao foi possivel confirmar o envio. Verificando...");
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio);
+      }
       if (state.previewKey !== previewKey) return;
       const envio = resposta?.envio || {};
       const enviados = Number(envio.enviados || 0);
       const erros = Number(envio.erros || 0);
+      if (resposta?.envioSolicitado === true) {
+        state.previewEnviadoKey = previewKey;
+        ocultarDestinos();
+        setTexto("statusLink", "Envio ja solicitado. Acompanhe no Historico.");
+        return;
+      }
       if (enviados > 0) {
         state.previewEnviadoKey = previewKey;
         ocultarDestinos();
@@ -999,7 +1053,11 @@
         renderAuth();
         return;
       }
-      setTexto("statusLink", `Nao foi possivel enviar: ${String(erro?.message || "envio_falhou").slice(0, 80)}`);
+      if (erro?.body?.erro === "manual_v2_envio_resultado_indeterminado") {
+        setTexto("statusLink", "Envio pendente de confirmacao. Verifique o Historico antes de tentar novamente.");
+      } else {
+        setTexto("statusLink", `Nao foi possivel enviar: ${String(erro?.message || "envio_falhou").slice(0, 80)}`);
+      }
     } finally {
       state.enviandoAgora = false;
       atualizarBotaoEnviar();

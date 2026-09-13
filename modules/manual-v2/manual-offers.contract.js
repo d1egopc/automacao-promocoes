@@ -185,6 +185,28 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     cupom: primeiroTexto(entrada.cupom, entrada.codigoCupom),
     parcelamento: primeiroTexto(entrada.parcelamento, entrada.parcelas),
     observacoes: primeiroTexto(entrada.observacoes, entrada.observacao, entrada.aviso),
+    // Campos comerciais condicionais: permanecem na oferta para que o renderer atual
+    // possa consumi-los sem que o Manual V2 apague informacao capturada.
+    precoPix: primeiroTexto(entrada.precoPix, entrada.precoAVista, entrada.valorPix, entrada.pixPrice),
+    condicaoPix: primeiroTexto(entrada.condicaoPix),
+    frete: primeiroTexto(entrada.frete, entrada.freteTexto),
+    freteValor: primeiroTexto(entrada.freteValor, entrada.valorFrete),
+    taxa: primeiroTexto(entrada.taxa, entrada.imposto, entrada.tributo, entrada.valorAdicional),
+    imposto: primeiroTexto(entrada.imposto),
+    moedas: primeiroTexto(entrada.moedas, entrada.coins),
+    linkApp: primeiroTexto(entrada.linkApp, entrada.urlApp),
+    linkPC: primeiroTexto(entrada.linkPC, entrada.urlPC),
+    linkMoedas: primeiroTexto(entrada.linkMoedas, entrada.urlMoedas),
+    linkResgate: primeiroTexto(entrada.linkResgate, entrada.linkResgateCupom, entrada.urlResgate),
+    produtoId: primeiroTexto(entrada.produtoId, entrada.productId, entrada.itemId),
+    ean: primeiroTexto(entrada.ean, entrada.EAN, entrada.codigoEan),
+    sku: primeiroTexto(entrada.sku, entrada.SKU),
+    avaliacao: primeiroTexto(entrada.avaliacao, entrada.rating),
+    quantidadeAvaliacoes: primeiroTexto(entrada.quantidadeAvaliacoes, entrada.avaliacoes, entrada.reviewCount),
+    vendidos: primeiroTexto(entrada.vendidos, entrada.quantidadeVendida, entrada.soldCount),
+    descontoPercentual: primeiroTexto(entrada.descontoPercentual, entrada.desconto),
+    instrucaoCupom: primeiroTexto(entrada.instrucaoCupom, entrada.cupomInstrucao, entrada.avisoCupom),
+    beneficioTexto: primeiroTexto(entrada.beneficioTexto, entrada.beneficio),
 
     status: normalizarStatusManualV2(entrada.status),
 

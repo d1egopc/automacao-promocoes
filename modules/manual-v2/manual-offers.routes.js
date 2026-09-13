@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const {
   importarUrlManualV2
 } = require("./manual-import.adapters");
@@ -46,6 +47,38 @@ function listaTexto(valor) {
   return valor
     .map((item) => texto(item))
     .filter(Boolean);
+}
+
+function idempotencyHash(req) {
+  const chave = texto(req?.get?.("Idempotency-Key") || req?.headers?.["idempotency-key"] || "");
+  if (!chave) return "";
+  if (chave.length < 16 || chave.length > 256) {
+    const erro = new Error("idempotency_key_invalida");
+    erro.codigo = "idempotency_key_invalida";
+    erro.statusCode = 400;
+    throw erro;
+  }
+  return crypto.createHash("sha256").update(chave).digest("hex");
+}
+
+function contextoIdempotencia(req, clienteId, etapa, inicio) {
+  const chaveHash = idempotencyHash(req);
+  return {
+    chaveHash,
+    log(resultado, extra = {}) {
+      const logger = req?.app?.locals?.logger || console;
+      if (!logger || typeof logger.log !== "function") return;
+      logger.log("[MANUAL-V2-IDEMPOTENCY]", {
+        requestId: texto(req?.perfRequestId || req?.get?.("x-request-id") || ""),
+        clienteId: texto(clienteId),
+        etapa,
+        resultado,
+        chaveHashParcial: chaveHash ? chaveHash.slice(0, 12) : "",
+        duracaoMs: Math.max(0, Date.now() - inicio),
+        ...extra
+      });
+    }
+  };
 }
 
 function timezoneValido(timezone = "") {
@@ -188,6 +221,10 @@ function criarRotasManualV2(deps = {}) {
     salvarConfigManualV2: deps.salvarConfigManualV2 || storagePadrao.salvarConfigManualV2,
     buscarOfertaManualV2: deps.buscarOfertaManualV2 || storagePadrao.buscarOfertaManualV2,
     criarOfertaManualV2: deps.criarOfertaManualV2 || storagePadrao.criarOfertaManualV2,
+    criarOfertaManualV2Idempotente: deps.criarOfertaManualV2Idempotente || storagePadrao.criarOfertaManualV2Idempotente,
+    reservarEnvioManualV2Idempotente: deps.reservarEnvioManualV2Idempotente || storagePadrao.reservarEnvioManualV2Idempotente,
+    iniciarProcessamentoEnvioManualV2Idempotente: deps.iniciarProcessamentoEnvioManualV2Idempotente || storagePadrao.iniciarProcessamentoEnvioManualV2Idempotente,
+    marcarFalhaConfirmadaEnvioManualV2Idempotente: deps.marcarFalhaConfirmadaEnvioManualV2Idempotente || storagePadrao.marcarFalhaConfirmadaEnvioManualV2Idempotente,
     atualizarOfertaManualV2: deps.atualizarOfertaManualV2 || storagePadrao.atualizarOfertaManualV2,
     excluirOfertaManualV2: deps.excluirOfertaManualV2 || storagePadrao.excluirOfertaManualV2,
     excluirOfertasManuaisSalvasV2: deps.excluirOfertasManuaisSalvasV2 || storagePadrao.excluirOfertasManuaisSalvasV2,
@@ -487,19 +524,36 @@ function criarRotasManualV2(deps = {}) {
   });
 
   router.post("/ofertas", (req, res) => {
+    const inicio = Date.now();
+    let observabilidade = null;
     try {
       const clienteId = cliente(req);
-      const oferta = storage.criarOfertaManualV2(clienteId, req.body?.oferta || req.body || {}, deps.storageOptions || {});
-      const vitrinePublicacao = derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta);
+      observabilidade = contextoIdempotencia(req, clienteId, "salvar", inicio);
+      const resultadoCriacao = observabilidade.chaveHash
+        ? storage.criarOfertaManualV2Idempotente(clienteId, req.body?.oferta || req.body || {}, observabilidade.chaveHash, deps.storageOptions || {})
+        : { oferta: storage.criarOfertaManualV2(clienteId, req.body?.oferta || req.body || {}, deps.storageOptions || {}), idempotencyReplayed: false };
+      if (resultadoCriacao.idempotencyConflict === true) {
+        observabilidade.log("idempotency_conflict", { ofertaId: texto(resultadoCriacao.oferta?.id) });
+        return res.status(409).json({
+          ok: false,
+          erro: "idempotency_conflict",
+          motivo: "idempotency_conflict"
+        });
+      }
+      const oferta = resultadoCriacao.oferta;
+      const vitrinePublicacao = resultadoCriacao.idempotencyReplayed ? { acionada: false } : derivarNovaOfertaManualV2ParaVitrine(clienteId, oferta);
       const resposta = {
         ok: true,
-        oferta
+        oferta,
+        idempotencyReplayed: resultadoCriacao.idempotencyReplayed === true
       };
       if (vitrinePublicacao.acionada === true) {
         resposta.vitrinePublicacao = diagnosticoVitrinePublicacao(vitrinePublicacao);
       }
-      return res.status(201).json(resposta);
+      observabilidade.log(resultadoCriacao.idempotencyReplayed ? "retry_recuperado" : "oferta_criada", { ofertaId: texto(oferta?.id) });
+      return res.status(resultadoCriacao.idempotencyReplayed ? 200 : 201).json(resposta);
     } catch (e) {
+      if (observabilidade) observabilidade.log("falha_antes_persistencia", { motivo: texto(e?.codigo || e?.message).slice(0, 120) });
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_criacao_falhou"));
     }
   });
@@ -525,10 +579,14 @@ function criarRotasManualV2(deps = {}) {
   });
 
   router.post("/ofertas/:id/enviar-agora", async (req, res) => {
+    const inicio = Date.now();
     const clienteId = cliente(req);
     const ofertaId = texto(req.params.id);
     const destinosIds = listaTexto(req.body?.destinosIds);
     const storageOptions = deps.storageOptions || {};
+    let observabilidade = null;
+    let attemptId = "";
+    let dispatcherIniciado = false;
 
     if (!destinosIds.length) {
       return res.status(400).json({
@@ -539,20 +597,13 @@ function criarRotasManualV2(deps = {}) {
     }
 
     try {
+      observabilidade = contextoIdempotencia(req, clienteId, "enviar_agora", inicio);
       const ofertaAtual = storage.buscarOfertaManualV2(clienteId, ofertaId, storageOptions);
       if (!ofertaAtual) {
         return res.status(404).json({
           ok: false,
           erro: "oferta_manual_v2_nao_encontrada",
           motivo: "oferta_manual_v2_nao_encontrada"
-        });
-      }
-
-      if (ofertaAtual.status === "enviando") {
-        return res.status(409).json({
-          ok: false,
-          erro: "oferta_manual_v2_ja_enviando",
-          motivo: "oferta_manual_v2_ja_enviando"
         });
       }
 
@@ -577,10 +628,68 @@ function criarRotasManualV2(deps = {}) {
         });
       }
 
-      storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
-        status: "enviando"
-      }, storageOptions);
+      const reserva = storage.reservarEnvioManualV2Idempotente(
+        clienteId,
+        ofertaId,
+        observabilidade.chaveHash,
+        storageOptions
+      );
+      if (!reserva.oferta) {
+        return res.status(404).json({ ok: false, erro: "oferta_manual_v2_nao_encontrada", motivo: "oferta_manual_v2_nao_encontrada" });
+      }
+      if (reserva.motivo === "manual_v2_envio_resultado_indeterminado") {
+        observabilidade.log("envio_resultado_indeterminado", { ofertaId, estado: reserva.estado });
+        return res.status(409).json({
+          ok: false,
+          erro: "manual_v2_envio_resultado_indeterminado",
+          motivo: "manual_v2_envio_resultado_indeterminado",
+          oferta: reserva.oferta,
+          reconciliacaoNecessaria: true
+        });
+      }
+      if (reserva.motivo === "oferta_manual_v2_ja_enviando") {
+        observabilidade.log("envio_ja_solicitado", { ofertaId });
+        return res.status(409).json({ ok: false, erro: reserva.motivo, motivo: reserva.motivo });
+      }
+      if (reserva.idempotencyReplayed) {
+        const envioExistente = reserva.oferta.envioManual || {};
+        observabilidade.log("envio_ja_solicitado", { ofertaId, emAndamento: reserva.envioEmAndamento === true });
+        return res.status(reserva.envioEmAndamento ? 202 : 200).json({
+          ok: reserva.envioEmAndamento ? true : Number(envioExistente.enviados || 0) > 0,
+          oferta: reserva.oferta,
+          idempotencyReplayed: true,
+          envioSolicitado: reserva.envioEmAndamento === true,
+          envio: {
+            ok: Number(envioExistente.enviados || 0) > 0,
+            ofertaId,
+            enviados: Number(envioExistente.enviados || 0),
+            erros: Number(envioExistente.erros || 0),
+            creditosDebitados: Number(envioExistente.creditosDebitados || 0),
+            resultados: envioExistente.resultados || [],
+            erroResumo: texto(envioExistente.erroResumo)
+          }
+        });
+      }
 
+      if (observabilidade.chaveHash) {
+        attemptId = texto(reserva.oferta?.idempotencia?.enviar?.attemptId);
+        const emProcessamento = storage.iniciarProcessamentoEnvioManualV2Idempotente(
+          clienteId,
+          ofertaId,
+          attemptId,
+          storageOptions
+        );
+        if (!emProcessamento) {
+          return res.status(409).json({
+            ok: false,
+            erro: "manual_v2_envio_resultado_indeterminado",
+            motivo: "manual_v2_envio_resultado_indeterminado",
+            reconciliacaoNecessaria: true
+          });
+        }
+      }
+
+      dispatcherIniciado = true;
       const resultado = await dispatcherManual({
         clienteId,
         ofertaId,
@@ -630,12 +739,24 @@ function criarRotasManualV2(deps = {}) {
       const ofertaFinal = storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
         status: algumSucesso ? "enviada" : "erro",
         enviadoEm: algumSucesso ? concluidoEm : "",
-        envioManual
+        envioManual,
+        idempotenciaEnvio: observabilidade.chaveHash ? {
+          estado: algumSucesso ? "concluido" : "resultado_indeterminado",
+          concluidoEm,
+          atualizadoEm: concluidoEm,
+          motivoSeguro: algumSucesso ? "" : "dispatcher_sem_confirmacao_externa"
+        } : undefined
       }, storageOptions);
       const envioPersistido = ofertaFinal?.envioManual || envioManual;
 
+      observabilidade.log("envio_concluido", { ofertaId, enviados: envioPersistido.enviados, erros: envioPersistido.erros });
       return res.status(algumSucesso ? 200 : 409).json({
         ok: algumSucesso,
+        ...(!algumSucesso ? {
+          erro: "manual_v2_envio_resultado_indeterminado",
+          motivo: "manual_v2_envio_resultado_indeterminado",
+          reconciliacaoNecessaria: true
+        } : {}),
         oferta: ofertaFinal,
         envio: {
           ok: algumSucesso,
@@ -649,6 +770,7 @@ function criarRotasManualV2(deps = {}) {
       });
     } catch (e) {
       const concluidoEm = agoraIso(deps);
+      const falhaAntesDoDispatcher = Boolean(observabilidade?.chaveHash && attemptId && !dispatcherIniciado);
       const envioManual = {
         solicitadoEm: concluidoEm,
         concluidoEm,
@@ -666,11 +788,36 @@ function criarRotasManualV2(deps = {}) {
         creditosDebitados: 0,
         erroResumo: e.message || "manual_v2_envio_falhou"
       };
-      storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
-        status: "erro",
-        enviadoEm: "",
-        envioManual
-      }, storageOptions);
+      if (falhaAntesDoDispatcher) {
+        storage.marcarFalhaConfirmadaEnvioManualV2Idempotente(
+          clienteId,
+          ofertaId,
+          attemptId,
+          "falha_antes_do_dispatcher",
+          storageOptions
+        );
+      } else {
+        storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
+          status: "erro",
+          enviadoEm: "",
+          envioManual,
+          idempotenciaEnvio: observabilidade?.chaveHash && dispatcherIniciado ? {
+            estado: "resultado_indeterminado",
+            concluidoEm,
+            atualizadoEm: concluidoEm,
+            motivoSeguro: "erro_apos_inicio_do_dispatcher"
+          } : undefined
+        }, storageOptions);
+      }
+      if (observabilidade) observabilidade.log("falha_envio", { ofertaId, motivo: texto(e?.codigo || e?.message).slice(0, 120) });
+      if (dispatcherIniciado) {
+        return res.status(409).json({
+          ok: false,
+          erro: "manual_v2_envio_resultado_indeterminado",
+          motivo: "manual_v2_envio_resultado_indeterminado",
+          reconciliacaoNecessaria: true
+        });
+      }
       return res.status(statusErro(e)).json(payloadErro(e, "manual_v2_envio_falhou"));
     }
   });

@@ -1982,6 +1982,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     let destinosRequests = 0;
     let envios = 0;
     let falharSave = false;
+    let conflitoSave = false;
     let falharEnvio = false;
     let resolverSavePendente = null;
     let envioPendente = false;
@@ -2050,9 +2051,10 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             }
           };
         },
-        async salvarOfertaManualV2(_token, oferta) {
+        async salvarOfertaManualV2(_token, oferta, chaveIdempotencia) {
           saves += 1;
           ofertasSalvas.push(oferta);
+          assert.ok(chaveIdempotencia, "save deve receber Idempotency-Key");
           if (resolverSavePendente) {
             await new Promise((resolve) => {
               resolverSavePendente = resolve;
@@ -2062,6 +2064,12 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
           if (falharSave) {
             const erro = new Error("falha_temporaria");
             erro.status = 503;
+            throw erro;
+          }
+          if (conflitoSave) {
+            const erro = new Error("idempotency_conflict");
+            erro.status = 409;
+            erro.body = { erro: "idempotency_conflict" };
             throw erro;
           }
           return {
@@ -2257,6 +2265,17 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(ofertasSalvas[3].precoAtual, 89.9);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
 
+    urlAtual = "https://produto.mercadolivre.com.br/MLB-333-conflito-_JM";
+    produtoAtual = { ...produtoAtual, urlOriginal: urlAtual, titulo: "Produto C conflito" };
+    onUpdated(1, { url: urlAtual });
+    await new Promise(resolve => setTimeout(resolve, 760));
+    conflitoSave = true;
+    const savesAntesConflito = saves;
+    await elemento("botaoSalvar").listeners.click();
+    assert.strictEqual(saves, savesAntesConflito + 1, "409 de conflito nao faz retry");
+    assert.strictEqual(elemento("statusLink").textContent, "Os dados da oferta mudaram durante o salvamento. Atualize a captura e tente novamente.");
+    conflitoSave = false;
+
     urlAtual = "https://produto.mercadolivre.com.br/MLB-444-produto-d-_JM";
     produtoAtual = {
       marketplace: "mercadolivre",
@@ -2272,15 +2291,15 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("destinosLista").children[0].children[0].checked = true;
     elemento("destinosLista").children[0].children[0].listeners.change();
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 5);
+    assert.strictEqual(saves, 6);
     assert.strictEqual(envios, 3);
-    assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_5");
+    assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_6");
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel enviar: envio_temporario");
     falharEnvio = false;
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 5, "falha no envio preserva ID salvo para retry seguro");
+    assert.strictEqual(saves, 6, "falha no envio preserva ID salvo para retry seguro");
     assert.strictEqual(envios, 4);
-    assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_5");
+    assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_6");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
   }
 

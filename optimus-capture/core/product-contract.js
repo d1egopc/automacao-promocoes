@@ -61,6 +61,18 @@
       precoMax: faixa?.precoMax || null,
       temVariacaoPreco,
       condicaoPrecoPor,
+      precoPix: bruto.precoPix ?? bruto.precoAVista ?? bruto.valorPix ?? "",
+      taxa: bruto.taxa ?? bruto.imposto ?? bruto.tributo ?? bruto.valorAdicional ?? "",
+      frete: texto(bruto.frete || bruto.freteTexto),
+      freteValor: bruto.freteValor ?? bruto.valorFrete ?? "",
+      linkApp: urlHttp(bruto.linkApp || bruto.urlApp),
+      linkPC: urlHttp(bruto.linkPC || bruto.urlPC),
+      linkMoedas: urlHttp(bruto.linkMoedas || bruto.urlMoedas),
+      linkResgate: urlHttp(bruto.linkResgate || bruto.linkResgateCupom || bruto.urlResgate),
+      produtoId: texto(bruto.produtoId || bruto.productId || bruto.itemId),
+      ean: texto(bruto.ean || bruto.EAN || bruto.codigoEan),
+      sku: texto(bruto.sku || bruto.SKU),
+      parcelamento: texto(bruto.parcelamento || bruto.parcelas),
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
       observacoes: texto(bruto.observacoes),
@@ -69,6 +81,10 @@
       precoAmbiguo: bruto.precoAmbiguo === true,
       warnings
     };
+
+    for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
+      if (produto[campo] === "" || produto[campo] === null || produto[campo] === undefined) delete produto[campo];
+    }
 
     if (!produto.urlOriginal) warnings.push("url_original_invalida");
     if (!produto.titulo) warnings.push("titulo_ausente");
@@ -83,7 +99,7 @@
 
   function payloadPreview(produto) {
     const normalizado = normalizarProdutoCapturado(produto);
-    return {
+    const payload = {
       marketplace: normalizado.marketplace,
       urlOriginal: normalizado.urlOriginal,
       titulo: normalizado.titulo,
@@ -98,6 +114,10 @@
       observacoes: normalizado.observacoes,
       origem: normalizado.origem
     };
+    for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
+      if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
+    }
+    return payload;
   }
 
   const api = {

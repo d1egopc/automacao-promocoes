@@ -120,9 +120,10 @@ function ouvir(app) {
   });
 }
 
-async function request(server, metodo, caminho, clienteId, body) {
+async function request(server, metodo, caminho, clienteId, body, headersExtras = {}) {
   const headers = {
-    "x-cliente-id": clienteId
+    "x-cliente-id": clienteId,
+    ...headersExtras
   };
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await fetch(`http://127.0.0.1:${server.address().port}${caminho}`, {
@@ -160,6 +161,8 @@ function criarOferta(clienteId, id, extra = {}) {
 
 (async function main() {
   let tick = 0;
+  let liberarDispatcher = null;
+  let sinalizarDispatcherIniciado = null;
   const storageOptions = {
     now: () => {
       tick += 1;
@@ -300,6 +303,26 @@ function criarOferta(clienteId, id, extra = {}) {
           statusHttp: 200
         }]
       };
+    }
+    if (modo === "bloqueado") {
+      return new Promise((resolve) => {
+        if (sinalizarDispatcherIniciado) sinalizarDispatcherIniciado();
+        liberarDispatcher = () => resolve({
+          ok: true,
+          ofertaId: entrada.ofertaId,
+          enviados: 1,
+          erros: 0,
+          creditosDebitados: 1,
+          resultados: [{
+            destinoId: entrada.destinosIds[0],
+            nome: "WA Ofertas",
+            tipo: "whatsapp",
+            status: "enviado",
+            enviadoEm: "2026-08-15T12:20:00.000Z",
+            erro: ""
+          }]
+        });
+      });
     }
     return {
       ok: true,
@@ -453,6 +476,49 @@ function criarOferta(clienteId, id, extra = {}) {
       assert.strictEqual(resposta.status, 409);
       assert.strictEqual(resposta.body.motivo, "oferta_manual_v2_ja_enviando");
       assert.strictEqual(chamadas.length, chamadasAntes);
+    }
+
+    {
+      const oferta = criarOferta("cliente_a", "oferta_envio_concorrente");
+      const chave = "f".repeat(64);
+      const chamadasAntes = chamadas.length;
+      modo = "bloqueado";
+      const dispatcherIniciado = new Promise((resolve) => {
+        sinalizarDispatcherIniciado = resolve;
+      });
+      const primeira = request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": chave });
+      await dispatcherIniciado;
+      assert.strictEqual(chamadas.length, chamadasAntes + 1, "somente a primeira requisicao pode iniciar o dispatcher");
+      const segunda = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": chave });
+      assert.strictEqual(segunda.status, 202);
+      assert.strictEqual(segunda.body.idempotencyReplayed, true);
+      assert.strictEqual(chamadas.length, chamadasAntes + 1, "retry concorrente nao pode iniciar segundo dispatcher");
+      liberarDispatcher();
+      const primeiraResposta = await primeira;
+      assert.strictEqual(primeiraResposta.status, 200);
+      modo = "sucesso";
+      sinalizarDispatcherIniciado = null;
+    }
+
+    {
+      const oferta = criarOferta("cliente_a", "oferta_envio_indeterminado");
+      const chave = "g".repeat(64);
+      const reserva = storage.reservarEnvioManualV2Idempotente("cliente_a", oferta.id, chave, storageOptions);
+      storage.iniciarProcessamentoEnvioManualV2Idempotente("cliente_a", oferta.id, reserva.oferta.idempotencia.enviar.attemptId, storageOptions);
+      storage.atualizarMetadadosEnvioManualV2("cliente_a", oferta.id, {
+        idempotenciaEnvio: { leaseExpiraEm: "2020-01-01T00:00:00.000Z" }
+      }, storageOptions);
+      const chamadasAntes = chamadas.length;
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": chave });
+      assert.strictEqual(resposta.status, 409);
+      assert.strictEqual(resposta.body.motivo, "manual_v2_envio_resultado_indeterminado");
+      assert.strictEqual(chamadas.length, chamadasAntes, "resultado indeterminado nao pode iniciar dispatcher");
     }
 
     {

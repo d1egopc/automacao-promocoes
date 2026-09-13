@@ -1,3 +1,5 @@
+const crypto = require("crypto");
+const { centavosMonetarios } = require("../../utils/moeda");
 const {
   readClienteJson,
   writeClienteJson,
@@ -16,6 +18,7 @@ const {
 
 const ARQUIVO_OFERTAS_MANUAL_V2 = "manual_ofertas_v2.json";
 const ARQUIVO_CONFIG_MANUAL_V2 = "manual_config_v2.json";
+const LEASE_ENVIO_MANUAL_MS = 2 * 60 * 1000;
 
 function agoraIso() {
   return new Date().toISOString();
@@ -45,6 +48,112 @@ function listaTexto(valor) {
   return lista(valor)
     .map(texto)
     .filter(Boolean);
+}
+
+function hashIdempotencia(valor = "") {
+  return texto(valor).toLowerCase();
+}
+
+function textoComercialCanonico(valor = "") {
+  return String(valor ?? "")
+    .normalize("NFKC")
+    .replace(/[\s\u00a0]+/gu, " ")
+    .trim();
+}
+
+function textoOpcionalCanonico(valor = "") {
+  return textoComercialCanonico(valor);
+}
+
+function moedaCanonica(valor) {
+  const centavos = centavosMonetarios(valor);
+  // Valor invalido nao vira zero nem se confunde com ausencia: mantemos sua forma textual.
+  return centavos === null ? { invalido: textoComercialCanonico(valor) } : { centavos };
+}
+
+function numeroComercialCanonico(valor, { percentual = false } = {}) {
+  const textoValor = textoComercialCanonico(valor);
+  if (!textoValor) return "";
+  const limpo = percentual ? textoValor.replace(/%$/, "").trim() : textoValor;
+  if (!/^\d+(?:[.,]\d+)?$/.test(limpo)) return textoValor;
+  const numero = Number(limpo.replace(",", "."));
+  if (!Number.isFinite(numero)) return textoValor;
+  return percentual ? Number(numero.toFixed(4)) : Number.isInteger(numero) ? numero : Number(numero.toFixed(4));
+}
+
+function parcelamentoCanonico(valor) {
+  const textoValor = textoComercialCanonico(valor);
+  const match = textoValor.match(/^(\d+)\s*x(?:\s+de\s+(.+))?$/i);
+  if (!match) return textoValor;
+  const resultado = { parcelas: Number(match[1]) };
+  if (match[2]) resultado.valorParcela = moedaCanonica(match[2]);
+  return resultado;
+}
+
+function ordenarObjetoCanonico(valor) {
+  if (Array.isArray(valor)) return valor.map(ordenarObjetoCanonico);
+  if (!valor || typeof valor !== "object") return valor;
+  return Object.keys(valor).sort().reduce((resultado, chave) => {
+    resultado[chave] = ordenarObjetoCanonico(valor[chave]);
+    return resultado;
+  }, {});
+}
+
+function adicionarOpcional(dto, chave, valor, normalizar = textoOpcionalCanonico) {
+  const normalizado = normalizar(valor);
+  const ausente = normalizado === "" ||
+    (normalizado && typeof normalizado === "object" && normalizado.invalido === "");
+  if (!ausente) dto[chave] = normalizado;
+}
+
+function dtoComercialCanonicoManualV2(entrada = {}) {
+  const oferta = normalizarOfertaManualV2(entrada && typeof entrada === "object" ? entrada : {}, {
+    clienteId: "fingerprint",
+    now: "1970-01-01T00:00:00.000Z",
+    idFactory: () => "fingerprint"
+  });
+  const dto = { marketplace: oferta.marketplace };
+  for (const campo of ["titulo", "urlOriginal", "urlAfiliada", "imagem", "categoria", "seller", "cupom", "observacoes", "condicaoPrecoPor", "condicaoPix", "frete", "moedas", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "instrucaoCupom", "beneficioTexto"]) {
+    adicionarOpcional(dto, campo, oferta[campo]);
+  }
+  for (const campo of ["precoAtual", "precoAnterior", "precoMin", "precoMax", "precoPix", "freteValor", "taxa", "imposto"]) {
+    adicionarOpcional(dto, campo, oferta[campo], moedaCanonica);
+  }
+  adicionarOpcional(dto, "parcelamento", oferta.parcelamento, parcelamentoCanonico);
+  for (const campo of ["avaliacao", "quantidadeAvaliacoes", "vendidos"]) {
+    adicionarOpcional(dto, campo, oferta[campo], numeroComercialCanonico);
+  }
+  adicionarOpcional(dto, "descontoPercentual", oferta.descontoPercentual, (valor) => numeroComercialCanonico(valor, { percentual: true }));
+  if (oferta.temVariacaoPreco === true) dto.temVariacaoPreco = true;
+  return ordenarObjetoCanonico(dto);
+}
+
+function fingerprintPayloadComercialManualV2(entrada = {}) {
+  return crypto.createHash("sha256")
+    .update(JSON.stringify(dtoComercialCanonicoManualV2(entrada)))
+    .digest("hex");
+}
+
+function novoAttemptId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return crypto.createHash("sha256").update(`${Date.now()}:${Math.random()}`).digest("hex").slice(0, 32);
+}
+
+function msIso(valor = "") {
+  const ms = Date.parse(texto(valor));
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function leaseValido(envio = {}, agoraMs = Date.now()) {
+  return msIso(envio.leaseExpiraEm) > agoraMs;
+}
+
+function estadoEnvioIdempotente(valor = "") {
+  const estado = texto(valor).toLowerCase();
+  if (["solicitado", "processando", "concluido", "falha_confirmada", "resultado_indeterminado"].includes(estado)) return estado;
+  // Compatibilidade com a primeira versao do P0: esse estado era gravado no catch antes de existir lease.
+  if (estado === "erro") return "falha_confirmada";
+  return "";
 }
 
 function normalizarConfigManualV2(config = {}) {
@@ -253,6 +362,190 @@ function criarOfertaManualV2(clienteId = "admin", entrada = {}, deps = {}) {
   return oferta;
 }
 
+function criarOfertaManualV2Idempotente(clienteId = "admin", entrada = {}, idempotencyHash = "", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const chave = hashIdempotencia(idempotencyHash);
+  if (!chave) {
+    return { oferta: criarOfertaManualV2(id, entrada, deps), idempotencyReplayed: false };
+  }
+
+  // Esta leitura, decisao e escrita sao sincronos no mesmo arquivo do workspace.
+  // Assim, duas requisicoes no mesmo processo nao se intercalam entre reserva e criacao.
+  const lista = lerListaCliente(id, deps);
+  const fingerprint = fingerprintPayloadComercialManualV2(entrada);
+  const existente = lista.find((oferta) =>
+    hashIdempotencia(oferta?.idempotencia?.salvar?.hash) === chave
+  );
+  if (existente) {
+    const fingerprintExistente = texto(existente?.idempotencia?.salvar?.fingerprint);
+    if (!fingerprintExistente || fingerprintExistente !== fingerprint) {
+      return { oferta: existente, idempotencyConflict: true, idempotencyReplayed: false };
+    }
+    return { oferta: existente, idempotencyReplayed: true };
+  }
+
+  const agora = storage.now();
+  const oferta = normalizarOfertaManualV2(
+    { ...entrada, status: STATUS_INICIAL_MANUAL_V2 },
+    { clienteId: id, now: agora, idFactory: storage.idFactory }
+  );
+  oferta.status = STATUS_INICIAL_MANUAL_V2;
+  oferta.clienteId = id;
+  oferta.criadoEm = oferta.criadoEm || agora;
+  oferta.atualizadoEm = agora;
+  oferta.idempotencia = {
+    ...(oferta.idempotencia && typeof oferta.idempotencia === "object" ? oferta.idempotencia : {}),
+    salvar: { hash: chave, fingerprint, criadoEm: agora }
+  };
+  salvarListaCliente(id, [oferta, ...lista], deps);
+  return { oferta, idempotencyReplayed: false };
+}
+
+function reservarEnvioManualV2Idempotente(clienteId = "admin", ofertaId = "", idempotencyHash = "", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const alvoId = texto(ofertaId);
+  const chave = hashIdempotencia(idempotencyHash);
+  if (!alvoId) return { oferta: null, motivo: "oferta_manual_v2_nao_encontrada" };
+
+  const lista = lerListaCliente(id, deps);
+  const index = lista.findIndex((oferta) => String(oferta.id || "") === alvoId);
+  if (index < 0) return { oferta: null, motivo: "oferta_manual_v2_nao_encontrada" };
+  const existente = lista[index];
+  const envioExistente = existente.idempotencia?.enviar || {};
+  const estadoExistente = estadoEnvioIdempotente(envioExistente.estado);
+  const agora = storage.now();
+  const agoraMs = msIso(agora) || Date.now();
+  const mesmaChaveRetomavel = chave && hashIdempotencia(envioExistente.hash) === chave &&
+    ["solicitado", "falha_confirmada"].includes(estadoExistente);
+  if (chave && hashIdempotencia(envioExistente.hash) === chave) {
+    if (estadoExistente === "concluido") return { oferta: existente, idempotencyReplayed: true, estado: "concluido" };
+    if (estadoExistente === "resultado_indeterminado") {
+      return { oferta: existente, motivo: "manual_v2_envio_resultado_indeterminado", estado: estadoExistente };
+    }
+    if (["solicitado", "processando"].includes(estadoExistente) && leaseValido(envioExistente, agoraMs)) {
+      return { oferta: existente, idempotencyReplayed: true, estado: estadoExistente, envioEmAndamento: true };
+    }
+    if (estadoExistente === "processando") {
+      const indeterminada = {
+        ...existente,
+        status: "erro",
+        atualizadoEm: agora,
+        idempotencia: {
+          ...(existente.idempotencia || {}),
+          enviar: { ...envioExistente, estado: "resultado_indeterminado", atualizadoEm: agora, motivoSeguro: "lease_expirada_apos_inicio_externo" }
+        }
+      };
+      const proximaLista = [...lista];
+      proximaLista[index] = indeterminada;
+      salvarListaCliente(id, proximaLista, deps);
+      return { oferta: indeterminada, motivo: "manual_v2_envio_resultado_indeterminado", estado: "resultado_indeterminado" };
+    }
+    // "solicitado" e "falha_confirmada" sao anteriores ao dispatcher. O retry e explicito, nunca automatico.
+    if (!["solicitado", "falha_confirmada"].includes(estadoExistente)) {
+      return { oferta: existente, motivo: "manual_v2_envio_resultado_indeterminado", estado: estadoExistente || "resultado_indeterminado" };
+    }
+  }
+  // Ofertas legadas marcadas somente como "enviando" não carregam uma tentativa
+  // idempotente. Esse é um processamento conhecido em curso, não evidência de
+  // resultado externo indeterminado; preservamos o contrato histórico de bloqueio.
+  if (existente.status === "enviando" && !estadoExistente) {
+    return { oferta: existente, motivo: "oferta_manual_v2_ja_enviando" };
+  }
+  if (existente.status === "enviando" && leaseValido(envioExistente, agoraMs)) {
+    return { oferta: existente, motivo: "oferta_manual_v2_ja_enviando" };
+  }
+  if (existente.status === "enviando" && !mesmaChaveRetomavel) {
+    return { oferta: existente, motivo: "manual_v2_envio_resultado_indeterminado", estado: "resultado_indeterminado" };
+  }
+
+  const leaseExpiraEm = new Date(agoraMs + LEASE_ENVIO_MANUAL_MS).toISOString();
+  const proximaOferta = {
+    ...existente,
+    status: "enviando",
+    atualizadoEm: agora,
+    idempotencia: {
+      ...(existente.idempotencia && typeof existente.idempotencia === "object" ? existente.idempotencia : {}),
+      ...(chave ? { enviar: {
+        hash: chave,
+        attemptId: novoAttemptId(),
+        estado: "solicitado",
+        solicitadoEm: agora,
+        leaseIniciadoEm: agora,
+        leaseExpiraEm,
+        atualizadoEm: agora,
+        motivoSeguro: ""
+      } } : {})
+    }
+  };
+  const proximaLista = [...lista];
+  proximaLista[index] = proximaOferta;
+  salvarListaCliente(id, proximaLista, deps);
+  return { oferta: proximaOferta, idempotencyReplayed: false, estado: "solicitado", envioEmAndamento: false };
+}
+
+function iniciarProcessamentoEnvioManualV2Idempotente(clienteId = "admin", ofertaId = "", attemptId = "", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const alvoId = texto(ofertaId);
+  const alvoAttemptId = texto(attemptId);
+  if (!alvoId || !alvoAttemptId) return null;
+  const lista = lerListaCliente(id, deps);
+  const index = lista.findIndex((oferta) => String(oferta.id || "") === alvoId);
+  if (index < 0) return null;
+  const existente = lista[index];
+  const envio = existente?.idempotencia?.enviar || {};
+  if (texto(envio.attemptId) !== alvoAttemptId || estadoEnvioIdempotente(envio.estado) !== "solicitado") return null;
+  const agora = storage.now();
+  const proximaOferta = {
+    ...existente,
+    atualizadoEm: agora,
+    idempotencia: {
+      ...(existente.idempotencia || {}),
+      enviar: { ...envio, estado: "processando", iniciadoEm: agora, atualizadoEm: agora }
+    }
+  };
+  const proximaLista = [...lista];
+  proximaLista[index] = proximaOferta;
+  salvarListaCliente(id, proximaLista, deps);
+  return proximaOferta;
+}
+
+function marcarFalhaConfirmadaEnvioManualV2Idempotente(clienteId = "admin", ofertaId = "", attemptId = "", motivoSeguro = "", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const alvoId = texto(ofertaId);
+  const alvoAttemptId = texto(attemptId);
+  if (!alvoId || !alvoAttemptId) return null;
+  const lista = lerListaCliente(id, deps);
+  const index = lista.findIndex((oferta) => String(oferta.id || "") === alvoId);
+  if (index < 0) return null;
+  const existente = lista[index];
+  const envio = existente?.idempotencia?.enviar || {};
+  if (texto(envio.attemptId) !== alvoAttemptId || estadoEnvioIdempotente(envio.estado) !== "solicitado") return null;
+  const agora = storage.now();
+  const proximaOferta = {
+    ...existente,
+    status: "erro",
+    atualizadoEm: agora,
+    idempotencia: {
+      ...(existente.idempotencia || {}),
+      enviar: {
+        ...envio,
+        estado: "falha_confirmada",
+        concluidoEm: agora,
+        atualizadoEm: agora,
+        motivoSeguro: texto(motivoSeguro).slice(0, 120) || "falha_antes_do_dispatcher"
+      }
+    }
+  };
+  const proximaLista = [...lista];
+  proximaLista[index] = proximaOferta;
+  salvarListaCliente(id, proximaLista, deps);
+  return proximaOferta;
+}
+
 function atualizarOfertaManualV2(clienteId = "admin", ofertaId = "", alteracoes = {}, deps = {}) {
   const storage = resolverDepsStorage(deps);
   const id = storage.normalizarClienteId(clienteId || "admin");
@@ -360,6 +653,16 @@ function atualizarMetadadosEnvioManualV2(clienteId = "admin", ofertaId = "", met
       proximaOferta.status = "erro";
       delete proximaOferta.enviadoEm;
     }
+  }
+
+  if (metadados.idempotenciaEnvio && typeof metadados.idempotenciaEnvio === "object") {
+    proximaOferta.idempotencia = {
+      ...(existente.idempotencia && typeof existente.idempotencia === "object" ? existente.idempotencia : {}),
+      enviar: {
+        ...(existente.idempotencia?.enviar && typeof existente.idempotencia.enviar === "object" ? existente.idempotencia.enviar : {}),
+        ...metadados.idempotenciaEnvio
+      }
+    };
   }
 
   const proximaLista = [...listaOfertas];
@@ -555,6 +858,11 @@ module.exports = {
   salvarConfigManualV2,
   buscarOfertaManualV2,
   criarOfertaManualV2,
+  criarOfertaManualV2Idempotente,
+  fingerprintPayloadComercialManualV2,
+  reservarEnvioManualV2Idempotente,
+  iniciarProcessamentoEnvioManualV2Idempotente,
+  marcarFalhaConfirmadaEnvioManualV2Idempotente,
   atualizarOfertaManualV2,
   excluirOfertaManualV2,
   excluirOfertasManuaisSalvasV2,
