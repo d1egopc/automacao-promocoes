@@ -17463,6 +17463,270 @@ function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
   return texto;
 }
 
+const MAX_OBJETOS_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 3;
+const MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 12;
+const MAX_TAMANHO_JSON_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 24000;
+
+function normalizarMlbDiagnosticoMercadoLivreRadar(valor = "") {
+  return String(valor || "").match(/\bMLB-?\d{6,}\b/i)?.[0]?.replace("-", "").toUpperCase() || "";
+}
+
+function mlbsDiagnosticoMercadoLivreRadar(texto = "") {
+  return [...String(texto || "").matchAll(/\bMLB-?\d{6,}\b/gi)]
+    .map(match => normalizarMlbDiagnosticoMercadoLivreRadar(match[0]))
+    .filter(Boolean);
+}
+
+function sanitizarUrlDiagnosticoMercadoLivreRadar(url = "") {
+  try {
+    const parsed = new URL(normalizarUrlExtraidaMercadoLivreRadar(url));
+    const params = [];
+    for (const nome of ["pdp_filters", "item_id", "product_id"]) {
+      for (const valor of parsed.searchParams.getAll(nome)) {
+        params.push(`${nome}=${String(valor || "").slice(0, 80)}`);
+      }
+    }
+    return `${parsed.hostname}${parsed.pathname}${params.length ? `?${params.join("&")}` : ""}`;
+  } catch {
+    return String(url || "").replace(/\s+/g, " ").trim().slice(0, 140);
+  }
+}
+
+function limitarTextoDiagnosticoMercadoLivreRadar(valor = "", limite = 120) {
+  const texto = String(valor || "").replace(/\s+/g, " ").trim();
+  return texto.length > limite ? `${texto.slice(0, limite)}...` : texto;
+}
+
+function criarCandidatoFallbackMercadoLivreRadar(fonte = "", match = []) {
+  const atributo = String(match?.[0] || "").match(/^\s*(data-href|href)=/i)?.[1]?.toLowerCase() || "";
+  return {
+    fonte: fonte === "href_data_href" && atributo === "data-href" ? "data_href" : fonte,
+    valor: normalizarUrlExtraidaMercadoLivreRadar(match?.[1] || match?.[0] || "")
+  };
+}
+
+function candidatosFallbackMercadoLivreHtmlRadar(texto = "") {
+  const fonte = String(texto || "");
+  const candidatos = [
+    ...[...fonte.matchAll(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("canonical", match)),
+    ...[...fonte.matchAll(/<meta[^>]+property=["']og:url["'][^>]+content=["']([^"']+)["']/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("og_url", match)),
+    ...[...fonte.matchAll(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:url["']/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("og_url", match)),
+    ...[...fonte.matchAll(/(?:href|data-href)=["']([^"']*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/p\/MLB|permalink\/MLB)[^"']*)["']/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("href_data_href", match)),
+    ...[...fonte.matchAll(/"permalink"\s*:\s*"([^"]*MLB[^"]*)"/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("permalink", match)),
+    ...[...fonte.matchAll(/"url"\s*:\s*"([^"]*MLB[^"]*)"/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("url_json", match)),
+    ...[...fonte.matchAll(/"canonicalUrl"\s*:\s*"([^"]*MLB[^"]*)"/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("canonicalUrl", match)),
+    ...[...fonte.matchAll(/https?:\\?\/\\?\/[^"'<>\\\s]*(?:produto\.mercadolivre\.com\.br\\?\/MLB|mercadolivre\.com\.br\\?\/p\\?\/MLB|permalink\\?\/MLB)[^"'<>\\\s]*/gi)].map(match => criarCandidatoFallbackMercadoLivreRadar("raw_url", match))
+  ].filter(candidato => candidato.valor);
+
+  const itemId = normalizarMlbDiagnosticoMercadoLivreRadar(fonte);
+  if (itemId) {
+    candidatos.push({
+      fonte: "mlb_solto",
+      valor: `https://produto.mercadolivre.com.br/${itemId}`
+    });
+  }
+
+  return candidatos;
+}
+
+function chaveTotalFonteDiagnosticoMercadoLivreRadar(fonte = "") {
+  return ({
+    canonical: "canonical",
+    og_url: "ogUrl",
+    href: "href",
+    data_href: "dataHref",
+    permalink: "permalink",
+    url_json: "url",
+    canonicalUrl: "canonicalUrl",
+    raw_url: "rawUrl",
+    mlb_solto: "mlbSolto"
+  })[fonte] || fonte;
+}
+
+function extrairJsonObjetoContendoDiagnosticoMercadoLivreRadar(fonte = "", indiceAlvo = -1) {
+  if (indiceAlvo < 0) return null;
+  const texto = String(fonte || "");
+  const pilha = [];
+  let emString = false;
+  let escapado = false;
+
+  for (let indice = 0; indice <= indiceAlvo && indice < texto.length; indice += 1) {
+    const caractere = texto[indice];
+    if (emString) {
+      if (escapado) escapado = false;
+      else if (caractere === "\\") escapado = true;
+      else if (caractere === '"') emString = false;
+      continue;
+    }
+    if (caractere === '"') emString = true;
+    else if (caractere === "{") pilha.push(indice);
+    else if (caractere === "}") pilha.pop();
+  }
+
+  const inicio = pilha.at(-1);
+  if (inicio === undefined) return null;
+
+  let profundidade = 0;
+  emString = false;
+  escapado = false;
+  for (let indice = inicio; indice < texto.length && indice - inicio <= MAX_TAMANHO_JSON_DIAGNOSTICO_MERCADO_LIVRE_RADAR; indice += 1) {
+    const caractere = texto[indice];
+    if (emString) {
+      if (escapado) escapado = false;
+      else if (caractere === "\\") escapado = true;
+      else if (caractere === '"') emString = false;
+      continue;
+    }
+    if (caractere === '"') {
+      emString = true;
+      continue;
+    }
+    if (caractere === "{") profundidade += 1;
+    if (caractere === "}") profundidade -= 1;
+    if (profundidade === 0) {
+      return { json: texto.slice(inicio, indice + 1), inicio, fim: indice + 1 };
+    }
+  }
+
+  return null;
+}
+
+function urlsDiretasObjetoDiagnosticoMercadoLivreRadar(objeto = {}) {
+  return Object.entries(objeto || {})
+    .filter(([, valor]) => typeof valor === "string" && /(?:https?:|www\.|mercadolivre|MLB)/i.test(valor))
+    .map(([chave, valor]) => `${chave}:${sanitizarUrlDiagnosticoMercadoLivreRadar(valor)}`)
+    .slice(0, 5);
+}
+
+function objetoDiagnosticoMercadoLivreRadar(texto = "", mlb = "", indice = -1) {
+  const extraido = extrairJsonObjetoContendoDiagnosticoMercadoLivreRadar(texto, indice);
+  if (!extraido?.json) return null;
+
+  try {
+    const objeto = JSON.parse(extraido.json);
+    if (!objeto || typeof objeto !== "object" || Array.isArray(objeto)) return null;
+    const serializado = JSON.stringify(objeto);
+    const chavesDiretas = Object.keys(objeto).slice(0, 20);
+    const camposIrmaosDiretos = Object.entries(objeto)
+      .filter(([, valor]) => ["string", "number", "boolean"].includes(typeof valor))
+      .map(([chave, valor]) => `${chave}:${limitarTextoDiagnosticoMercadoLivreRadar(valor, 80)}`)
+      .slice(0, 20);
+    const anterior = texto.slice(Math.max(0, extraido.inicio - 120), extraido.inicio);
+    return {
+      chavesDiretas,
+      camposIrmaosDiretos,
+      urlsDiretasMesmoObjeto: urlsDiretasObjetoDiagnosticoMercadoLivreRadar(objeto),
+      itemId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.item_id || objeto.itemId || objeto.wid || ""),
+      productId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.product_id || objeto.productId || objeto.catalog_product_id || objeto.catalogProductId || ""),
+      id: limitarTextoDiagnosticoMercadoLivreRadar(objeto.id || ""),
+      type: limitarTextoDiagnosticoMercadoLivreRadar(objeto.type || ""),
+      role: limitarTextoDiagnosticoMercadoLivreRadar(objeto.role || ""),
+      component: limitarTextoDiagnosticoMercadoLivreRadar(objeto.component || objeto.component_id || objeto.componentId || ""),
+      name: limitarTextoDiagnosticoMercadoLivreRadar(objeto.name || ""),
+      contemRecommendation: /recommendation/i.test(serializado),
+      contemPolycard: /polycard/i.test(serializado),
+      contemReco: /reco_backend|reco_item_pos|\breco\b/i.test(serializado),
+      contemBanner: /banner/i.test(serializado),
+      contemAdvertising: /advertising|ads|adn/i.test(serializado),
+      contemCarousel: /carousel/i.test(serializado),
+      dentroArray: /[\[,]\s*$/.test(anterior),
+      candidatosDistintosNoObjeto: new Set(mlbsDiagnosticoMercadoLivreRadar(serializado)).size
+    };
+  } catch {
+    return null;
+  }
+}
+
+function objetosDiagnosticoMercadoLivreRadar(texto = "", mlb = "") {
+  if (!mlb) {
+    return {
+      objetos: [],
+      ocorrenciasInspecionadas: 0,
+      diagnosticoTruncado: false
+    };
+  }
+  const fonte = String(texto || "");
+  const objetos = [];
+  const vistos = new Set();
+  const regex = new RegExp(mlb.replace(/^MLB/i, "MLB-?"), "gi");
+  let ocorrenciasInspecionadas = 0;
+  let match;
+  while (
+    (match = regex.exec(fonte)) !== null &&
+    objetos.length < MAX_OBJETOS_DIAGNOSTICO_MERCADO_LIVRE_RADAR &&
+    ocorrenciasInspecionadas < MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR
+  ) {
+    ocorrenciasInspecionadas += 1;
+    const objeto = objetoDiagnosticoMercadoLivreRadar(fonte, mlb, match.index);
+    if (!objeto) continue;
+    const chave = JSON.stringify(objeto);
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    objetos.push(objeto);
+  }
+  const diagnosticoTruncado =
+    objetos.length < MAX_OBJETOS_DIAGNOSTICO_MERCADO_LIVRE_RADAR &&
+    ocorrenciasInspecionadas >= MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR &&
+    regex.exec(fonte) !== null;
+
+  return {
+    objetos,
+    ocorrenciasInspecionadas,
+    diagnosticoTruncado
+  };
+}
+
+function diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(html = "", produtoFallback = "") {
+  const texto = String(html || "");
+  const candidatos = candidatosFallbackMercadoLivreHtmlRadar(texto);
+  const produtoReferencia = limparUrlProdutoRadar(produtoFallback, "mercadolivre") || "";
+  const totaisPorFonte = {
+    canonical: 0,
+    ogUrl: 0,
+    href: 0,
+    dataHref: 0,
+    permalink: 0,
+    url: 0,
+    canonicalUrl: 0,
+    rawUrl: 0,
+    mlbSolto: 0
+  };
+
+  for (const candidato of candidatos) {
+    const chave = chaveTotalFonteDiagnosticoMercadoLivreRadar(candidato.fonte);
+    if (Object.prototype.hasOwnProperty.call(totaisPorFonte, chave)) {
+      totaisPorFonte[chave] += 1;
+    }
+  }
+
+  let escolhido = null;
+  for (const candidato of candidatos) {
+    const limpo = limparUrlProdutoRadar(candidato.valor, "mercadolivre");
+    if (limpo && produtoReferencia && limpo === produtoReferencia) {
+      escolhido = { ...candidato, urlProduto: limpo };
+      break;
+    }
+  }
+
+  const mlbsHtml = mlbsDiagnosticoMercadoLivreRadar(texto);
+  const mlbEncontrado = normalizarMlbDiagnosticoMercadoLivreRadar(produtoReferencia || escolhido?.urlProduto || escolhido?.valor || "");
+  const diagnosticoObjetos = objetosDiagnosticoMercadoLivreRadar(texto, mlbEncontrado);
+  return {
+    tamanhoHtml: Buffer.byteLength(texto, "utf8"),
+    metodoFallbackEncontrado: escolhido?.fonte || "",
+    mlbEncontrado,
+    urlProdutoEncontrada: produtoReferencia || "",
+    quantidadeOcorrenciasDoMlb: mlbEncontrado ? mlbsHtml.filter(mlb => mlb === mlbEncontrado).length : 0,
+    totalMlbsDistintos: new Set(mlbsHtml).size,
+    totaisPorFonte,
+    objetosLimitados: diagnosticoObjetos.objetos,
+    ocorrenciasInspecionadas: diagnosticoObjetos.ocorrenciasInspecionadas,
+    diagnosticoTruncado: diagnosticoObjetos.diagnosticoTruncado,
+    totalCandidatosDistintos: new Set(candidatos.map(candidato => limparUrlProdutoRadar(candidato.valor, "mercadolivre") || candidato.valor).filter(Boolean)).size,
+    urlProduto: produtoReferencia
+  };
+}
+
 function extrairProdutoMercadoLivreDeHtmlRadar(html = "") {
   const texto = String(html || "");
   const candidatos = [
@@ -17668,7 +17932,10 @@ function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "")
   const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(html || "");
   const produtoHtml = provaProdutoHtml.ok
     ? provaProdutoHtml.urlProduto
-    : extrairProdutoMarketplaceDeHtmlRadar(html || "", "mercadolivre", base);
+    : extrairProdutoMercadoLivreDeHtmlRadar(html || "");
+  const diagnosticoFallback = provaProdutoHtml.ok
+    ? null
+    : diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(html || "", produtoHtml);
 
   return {
     urlProduto: produtoHtml || "",
@@ -17679,7 +17946,8 @@ function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "")
       tamanhoHtml: Buffer.byteLength(String(html || ""), "utf8"),
       encontrouProduto: Boolean(produtoHtml),
       provaOk: provaProdutoHtml.ok === true,
-      motivoProva: provaProdutoHtml.ok ? "" : (provaProdutoHtml.motivo || "prova_identidade_ausente")
+      motivoProva: provaProdutoHtml.ok ? "" : (provaProdutoHtml.motivo || "prova_identidade_ausente"),
+      fallbackSocial: diagnosticoFallback || null
     }
   };
 }
@@ -18352,6 +18620,23 @@ function logRadarMlSocialResolvido(dados = {}) {
   });
 }
 
+function logRadarMlSocialDiagnosticoHtml(dados = {}) {
+  console.log("[RADAR-ML-SOCIAL-DIAGNOSTICO-HTML]", {
+    tamanhoHtml: dados.tamanhoHtml || 0,
+    motivoProva: dados.motivoProva || "",
+    metodoFallbackEncontrado: dados.metodoFallbackEncontrado || "",
+    mlbEncontrado: dados.mlbEncontrado || "",
+    urlProdutoEncontrada: dados.urlProdutoEncontrada ? sanitizarUrlDiagnosticoMercadoLivreRadar(dados.urlProdutoEncontrada) : "",
+    quantidadeOcorrenciasDoMlb: dados.quantidadeOcorrenciasDoMlb || 0,
+    totalMlbsDistintos: dados.totalMlbsDistintos || 0,
+    totaisPorFonte: dados.totaisPorFonte || {},
+    objetosLimitados: Array.isArray(dados.objetosLimitados) ? dados.objetosLimitados.slice(0, 3) : [],
+    ocorrenciasInspecionadas: dados.ocorrenciasInspecionadas || 0,
+    diagnosticoTruncado: dados.diagnosticoTruncado === true,
+    totalCandidatosDistintos: dados.totalCandidatosDistintos || 0
+  });
+}
+
 function logPromozoneRadar(dados = {}) {
   console.log("[RADAR-PROMOZONE]", {
     urlOriginal: dados.urlOriginal || "",
@@ -18580,6 +18865,12 @@ async function resolverLinkOriginalRadar(url = "") {
               motivoSocialMeli = provaIdentidadeMeli
                 ? "produto_extraido_html_social_com_prova"
                 : `produto_extraido_html_social_sem_prova:${diagnosticoProdutoHtml.motivoProva || "prova_ausente"}`;
+              if (!provaIdentidadeMeli && diagnosticoProdutoHtml.metodo === "fallback_intermediario") {
+                logRadarMlSocialDiagnosticoHtml({
+                  motivoProva: diagnosticoProdutoHtml.motivoProva || "prova_ausente",
+                  ...(diagnosticoProdutoHtml.diagnostico?.fallbackSocial || {})
+                });
+              }
             } else {
               motivoSocialMeli = paginaIntermediaria.ok === false
                 ? (paginaIntermediaria.erro || `http_${paginaIntermediaria.status || "sem_status"}`)
