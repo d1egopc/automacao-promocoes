@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
+  ORIGEM_PROVA_BLOCO_PRINCIPAL,
   TIPO_PROVA_ESTRUTURAL,
   TIPO_PROVA_PDP_FILTERS,
   validarProvaIdentidadeMercadoLivre
@@ -32,6 +33,17 @@ function htmlSocial({ mlbItem, mlbProduto, url, urlParams, metadataExtra = {}, o
     }
   };
   return `<html><script>${JSON.stringify({ cards: [...outrosCards, cardFeatured, ...cardsFeaturedExtras] })}</script></html>`;
+}
+
+function htmlBlocoPrincipal({ mlbItem = "MLB9988776655", mlbProduto = "MLB44556677", url, extras = {}, componentesExtras = [] } = {}) {
+  const bloco = {
+    id: "main-product",
+    item_id: mlbItem,
+    product_id: mlbProduto,
+    url: url || `https://www.mercadolivre.com.br/camera-wifi-inteligente/p/${mlbProduto}?pdp_filters=item_id%3A${mlbItem}`,
+    ...extras
+  };
+  return `<html><script>${JSON.stringify({ components: [bloco, ...componentesExtras] })}</script></html>`;
 }
 
 function casoReal(mlbItem, mlbProduto, slug) {
@@ -73,6 +85,67 @@ for (const caso of casosReais) {
   assert.strictEqual(validarProvaIdentidadeMercadoLivre(prova).ok, true);
   assert.strictEqual(motivoEngine(prova), "", `${caso.mlbItem} deve liberar HTML estruturado`);
 }
+
+const provaBlocoPrincipal = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipal());
+assert.strictEqual(provaBlocoPrincipal.ok, true);
+assert.strictEqual(provaBlocoPrincipal.origem, ORIGEM_PROVA_BLOCO_PRINCIPAL);
+assert.strictEqual(provaBlocoPrincipal.mlbItem, "MLB9988776655");
+assert.strictEqual(provaBlocoPrincipal.mlbProduto, "MLB44556677");
+assert.strictEqual(provaBlocoPrincipal.tipoProva, TIPO_PROVA_PDP_FILTERS);
+const blocoPrincipalSemOptIn = validarProvaIdentidadeMercadoLivre(provaBlocoPrincipal);
+assert.strictEqual(blocoPrincipalSemOptIn.ok, false);
+assert.strictEqual(blocoPrincipalSemOptIn.motivo, "bloco_principal_nao_homologado_contexto");
+assert.strictEqual(validarProvaIdentidadeMercadoLivre(provaBlocoPrincipal, { aceitarBlocoPrincipal: true }).ok, true);
+assert.strictEqual(motivoEngine(provaBlocoPrincipal), "identidade_ml_nao_comprovada", "bloco principal sem opt-in nao deve liberar identidade");
+
+const blocoPrincipalProdutoDivergente = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipal({
+  mlbItem: "MLB9988776655",
+  mlbProduto: "MLB44556677",
+  url: "https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB11223344?pdp_filters=item_id%3AMLB9988776655"
+}));
+assert.strictEqual(blocoPrincipalProdutoDivergente.ok, false);
+
+const blocoPrincipalItemDivergente = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipal({
+  mlbItem: "MLB9988776655",
+  mlbProduto: "MLB44556677",
+  url: "https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB44556677?pdp_filters=item_id%3AMLB1111111111"
+}));
+assert.strictEqual(blocoPrincipalItemDivergente.ok, false);
+
+const blocoPrincipalAmbiguo = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipal({
+  componentesExtras: [{
+    id: "main-product",
+    item_id: "MLB1111111111",
+    product_id: "MLB22222222",
+    url: "https://www.mercadolivre.com.br/outro-produto/p/MLB22222222?pdp_filters=item_id%3AMLB1111111111"
+  }]
+}));
+assert.strictEqual(blocoPrincipalAmbiguo.ok, false);
+
+const recommendationSemBlocoPrincipal = extrairProvaIdentidadeMercadoLivreHtml(`<html><script>${JSON.stringify({
+  recommendation_data: {
+    recommendation_info: {
+      polycards: [{
+        metadata: {
+          id: "MLB9988776655",
+          product_id: "MLB44556677",
+          url: "https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB44556677",
+          url_params: "?pdp_filters=item_id%3AMLB9988776655"
+        }
+      }]
+    }
+  }
+})}</script></html>`);
+assert.strictEqual(recommendationSemBlocoPrincipal.ok, false);
+
+const canonicalOgSemBlocoPrincipal = extrairProvaIdentidadeMercadoLivreHtml(`
+  <html>
+    <link rel="canonical" href="https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB44556677?pdp_filters=item_id%3AMLB9988776655">
+    <meta property="og:url" content="https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB44556677?pdp_filters=item_id%3AMLB9988776655">
+    <body>MLB9988776655</body>
+  </html>
+`);
+assert.strictEqual(canonicalOgSemBlocoPrincipal.ok, false);
 
 const provaEstruturalSemPdp = extrairProvaIdentidadeMercadoLivreHtml(htmlSocial({
   mlbItem: "MLB7777777777",

@@ -1,8 +1,10 @@
 "use strict";
 
 const ORIGEM_PROVA = "card-featured.polycards[0].metadata";
+const ORIGEM_PROVA_BLOCO_PRINCIPAL = "bloco-principal-social";
 const TIPO_PROVA_PDP_FILTERS = "pdp_filters_item_id";
 const TIPO_PROVA_ESTRUTURAL = "card_featured_estrutural";
+const ORIGENS_PROVA_IDENTIDADE = new Set([ORIGEM_PROVA]);
 
 function normalizarMlbExato(valor = "") {
   const match = String(valor || "").trim().match(/^MLB-?(\d{6,})$/i);
@@ -72,6 +74,10 @@ function extrairMlbsTexto(valor = "") {
     .filter(Boolean);
 }
 
+function normalizarMlbProdutoCatalogo(valor = "") {
+  return normalizarMlbExato(String(valor || "").trim().replace(/^MLBP/i, "MLB"));
+}
+
 function validarUrlProduto({ url = "", mlbProduto = "", mlbItem = "", exigirPdpFilters = true } = {}) {
   try {
     const parsed = new URL(normalizarUrlMetadata(url));
@@ -129,6 +135,14 @@ function provaEstruturalPodeDispensarPdpFilters(prova = {}) {
   const mlbProduto = normalizarMlbExato(prova.mlbProduto);
   if (!mlbItem || !mlbProduto) return false;
 
+  if (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL) {
+    const itemEstrutural = normalizarMlbExato(prova.itemEstrutural);
+    const produtoEstrutural = normalizarMlbProdutoCatalogo(prova.produtoEstrutural);
+    return prova.blocoPrincipal === true
+      && itemEstrutural === mlbItem
+      && produtoEstrutural === mlbProduto;
+  }
+
   const urlFragments = String(prova.urlFragments || "");
   if (/reco_item_pos\s*=/i.test(urlFragments) || /recommendations_home/i.test(urlFragments)) {
     return false;
@@ -151,7 +165,12 @@ function provaEstruturalPodeDispensarPdpFilters(prova = {}) {
 
 function validarProvaIdentidadeMercadoLivre(prova = {}, opcoes = {}) {
   if (!prova || typeof prova !== "object") return { ok: false, motivo: "prova_ausente" };
-  if (prova.origem !== ORIGEM_PROVA || prova.cardFeaturedUnico !== true || prova.totalPolycards !== 1) {
+  if (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal !== true) {
+    return { ok: false, motivo: "bloco_principal_nao_homologado_contexto" };
+  }
+  const origemHomologada = ORIGENS_PROVA_IDENTIDADE.has(prova.origem)
+    || (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal === true);
+  if (!origemHomologada || prova.cardFeaturedUnico !== true || prova.totalPolycards !== 1) {
     return { ok: false, motivo: "bloco_destacado_ambiguo" };
   }
 
@@ -177,14 +196,16 @@ function validarProvaIdentidadeMercadoLivre(prova = {}, opcoes = {}) {
 
   return {
     ...validacao,
-    origem: ORIGEM_PROVA,
+    origem: prova.origem,
     tipoProva: exigirPdpFilters ? TIPO_PROVA_PDP_FILTERS : (prova.tipoProva || TIPO_PROVA_ESTRUTURAL)
   };
 }
 
-function extrairProvaIdentidadeMercadoLivreHtml(html = "") {
-  const fonte = String(html || "");
+function extrairProvaCardFeaturedMercadoLivreHtml(fonte = "") {
   const marcadores = [...fonte.matchAll(/"id"\s*:\s*"card-featured"/g)];
+  if (marcadores.length === 0) {
+    return { ok: false, motivo: "card_featured_ausente" };
+  }
   if (marcadores.length !== 1) {
     return { ok: false, motivo: "card_featured_ausente_ou_ambiguo" };
   }
@@ -252,8 +273,139 @@ function extrairProvaIdentidadeMercadoLivreHtml(html = "") {
     : validacao;
 }
 
+function valoresDiretosObjeto(objeto = {}, chaves = []) {
+  if (!objeto || typeof objeto !== "object" || Array.isArray(objeto)) return [];
+  return chaves
+    .map(chave => objeto[chave])
+    .filter(valor => typeof valor === "string" || typeof valor === "number");
+}
+
+function primeiroMlbDiretoObjeto(objeto = {}, chaves = [], normalizador = normalizarMlbExato) {
+  for (const valor of valoresDiretosObjeto(objeto, chaves)) {
+    const mlb = normalizador(valor);
+    if (mlb) return mlb;
+  }
+  return "";
+}
+
+function primeiraUrlDiretaObjeto(objeto = {}, chaves = []) {
+  for (const valor of valoresDiretosObjeto(objeto, chaves)) {
+    const url = normalizarUrlMetadata(valor);
+    if (url) return url;
+  }
+  return "";
+}
+
+function objetoPlano(valor) {
+  return valor && typeof valor === "object" && !Array.isArray(valor);
+}
+
+function fontesProdutoBlocoPrincipal(objeto = {}) {
+  const fontes = [objeto];
+  for (const chave of ["metadata", "product", "produto", "item", "offer", "oferta", "main_product", "current_product", "featured_product"]) {
+    if (objetoPlano(objeto[chave])) fontes.push(objeto[chave]);
+  }
+  return [...new Set(fontes)];
+}
+
+function objetoTemMarcadorProdutoPrincipal(objeto = {}) {
+  const marcador = valoresDiretosObjeto(objeto, ["id", "type", "role", "component", "component_id", "componentId", "name"]).join(" ");
+  if (/(^|[-_\s])(main|current|featured|primary)[-_\s]?(product|item|offer|pdp)([-_\s]|$)/i.test(marcador)) return true;
+  if (/(^|[-_\s])(product|item|offer|pdp)[-_\s]?(main|current|featured|primary)([-_\s]|$)/i.test(marcador)) return true;
+  return objeto.is_main_product === true
+    || objeto.isMainProduct === true
+    || objeto.mainProduct === true
+    || objeto.currentProduct === true
+    || objeto.featuredProduct === true;
+}
+
+function objetoContemContextoNaoComprovante(objeto = {}) {
+  return /recommendation|polycard|reco_backend|reco_item_pos|item_decorator|carousel|banner|advertising|ads|adn/i.test(JSON.stringify(objeto || {}));
+}
+
+function montarProvaBlocoPrincipalObjeto(objeto = {}) {
+  if (!objetoTemMarcadorProdutoPrincipal(objeto)) return null;
+  if (objetoContemContextoNaoComprovante(objeto)) {
+    return { ok: false, motivo: "bloco_principal_contexto_nao_comprovante" };
+  }
+
+  const candidatos = [];
+  for (const fonte of fontesProdutoBlocoPrincipal(objeto)) {
+    const mlbItem = primeiroMlbDiretoObjeto(fonte, ["item_id", "itemId", "item", "mlbItem", "meliItemId", "wid", "id"]);
+    const mlbProduto = primeiroMlbDiretoObjeto(fonte, ["product_id", "productId", "catalog_product_id", "catalogProductId", "mlbProduto", "pid"], normalizarMlbProdutoCatalogo);
+    const urlProduto = primeiraUrlDiretaObjeto(fonte, ["url", "permalink", "product_url", "productUrl", "target_url", "targetUrl", "destination_url", "destinationUrl"]);
+    if (!mlbItem || !mlbProduto || !urlProduto) continue;
+
+    const prova = {
+      origem: ORIGEM_PROVA_BLOCO_PRINCIPAL,
+      cardFeaturedUnico: true,
+      totalPolycards: 1,
+      blocoPrincipal: true,
+      mlbItem,
+      mlbProduto,
+      itemEstrutural: mlbItem,
+      produtoEstrutural: mlbProduto,
+      urlProduto,
+      tipoProva: /[?&]pdp_filters=/i.test(urlProduto) ? TIPO_PROVA_PDP_FILTERS : TIPO_PROVA_ESTRUTURAL
+    };
+    const validacao = validarProvaIdentidadeMercadoLivre(prova, { aceitarBlocoPrincipal: true });
+    if (validacao.ok) {
+      candidatos.push({ ...prova, ok: true, urlProduto: validacao.urlProduto, tipoProva: validacao.tipoProva });
+    }
+  }
+
+  const chaves = new Set(candidatos.map(prova => `${prova.mlbItem}|${prova.mlbProduto}|${prova.urlProduto}`));
+  if (chaves.size === 1) return candidatos[0];
+  if (chaves.size > 1) return { ok: false, motivo: "bloco_principal_ambiguo" };
+  return { ok: false, motivo: "bloco_principal_sem_identidade_completa" };
+}
+
+function extrairProvaBlocoPrincipalMercadoLivreHtml(fonte = "") {
+  const marcadores = [
+    /"id"\s*:\s*"[^"]*(?:main|current|featured|primary)[-_]?(?:product|item|offer|pdp)[^"]*"/gi,
+    /"id"\s*:\s*"[^"]*(?:product|item|offer|pdp)[-_]?(?:main|current|featured|primary)[^"]*"/gi,
+    /"(?:type|role|component|component_id|componentId|name)"\s*:\s*"[^"]*(?:main|current|featured|primary)[-_]?(?:product|item|offer|pdp)[^"]*"/gi,
+    /"(?:is_main_product|isMainProduct|mainProduct|currentProduct|featuredProduct)"\s*:\s*true/gi
+  ];
+  const objetos = new Map();
+  for (const regex of marcadores) {
+    for (const match of fonte.matchAll(regex)) {
+      const jsonObjeto = extrairObjetoJsonContendo(fonte, match.index);
+      if (jsonObjeto) objetos.set(jsonObjeto, jsonObjeto);
+    }
+  }
+  if (!objetos.size) return { ok: false, motivo: "bloco_principal_ausente" };
+
+  const provas = [];
+  let motivo = "bloco_principal_sem_identidade_completa";
+  for (const jsonObjeto of objetos.values()) {
+    try {
+      const prova = montarProvaBlocoPrincipalObjeto(JSON.parse(jsonObjeto));
+      if (prova?.ok) provas.push(prova);
+      else if (prova?.motivo) motivo = prova.motivo;
+    } catch {
+      motivo = "bloco_principal_json_invalido";
+    }
+  }
+
+  const chaves = new Set(provas.map(prova => `${prova.mlbItem}|${prova.mlbProduto}|${prova.urlProduto}`));
+  if (chaves.size === 1) return provas[0];
+  if (chaves.size > 1) return { ok: false, motivo: "bloco_principal_ambiguo" };
+  return { ok: false, motivo };
+}
+
+function extrairProvaIdentidadeMercadoLivreHtml(html = "") {
+  const fonte = String(html || "");
+  const provaCardFeatured = extrairProvaCardFeaturedMercadoLivreHtml(fonte);
+  if (provaCardFeatured.ok || provaCardFeatured.motivo !== "card_featured_ausente") {
+    return provaCardFeatured;
+  }
+  return extrairProvaBlocoPrincipalMercadoLivreHtml(fonte);
+}
+
 module.exports = {
   ORIGEM_PROVA,
+  ORIGEM_PROVA_BLOCO_PRINCIPAL,
   TIPO_PROVA_ESTRUTURAL,
   TIPO_PROVA_PDP_FILTERS,
   extrairProvaIdentidadeMercadoLivreHtml,

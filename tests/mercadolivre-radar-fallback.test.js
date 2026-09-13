@@ -4,6 +4,10 @@ const {
   importarMercadoLivreEngine,
   _test: testesMercadoLivre
 } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
+const {
+  extrairProvaIdentidadeMercadoLivreHtml,
+  ORIGEM_PROVA_BLOCO_PRINCIPAL
+} = require("../modules/radar/mercadolivre-social-identidade");
 
 const URL_PRODUTO = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v-_JM";
 const URL_PRODUTO_BERMUDA = "https://produto.mercadolivre.com.br/MLB-3382028526-kit-3-bermuda-masculina-sarja-short-jeans-social-brim-lisa-_JM";
@@ -11,6 +15,7 @@ const URL_AFILIADA = "https://meli.la/cliente-fallback";
 const URL_SOCIAL_AMBIGUA = "https://www.mercadolivre.com.br/social/perfil?ref=ambigua";
 const URL_IMAGEM_OFICIAL = "https://http2.mlstatic.com/D_NQ_NP_2X_OFICIAL-MLB.jpg";
 const URL_PRODUTO_COM_PROVA = "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5600gt/p/MLB32444906?pdp_filters=item_id%3AMLB4876269031";
+const URL_PRODUTO_BLOCO_PRINCIPAL = "https://www.mercadolivre.com.br/camera-wifi-inteligente/p/MLB44556677?pdp_filters=item_id%3AMLB9988776655";
 
 function job(extras = {}) {
   return {
@@ -142,6 +147,17 @@ function provaMeliValida() {
     mlbProduto: "MLB32444906",
     urlProduto: URL_PRODUTO_COM_PROVA
   };
+}
+
+function htmlBlocoPrincipalSocial({ mlbItem = "MLB9988776655", mlbProduto = "MLB44556677", url = URL_PRODUTO_BLOCO_PRINCIPAL } = {}) {
+  return `<html><script>${JSON.stringify({
+    components: [{
+      id: "main-product",
+      item_id: mlbItem,
+      product_id: mlbProduto,
+      url
+    }]
+  })}</script></html>`;
 }
 
 function produtoHtmlOk() {
@@ -627,6 +643,67 @@ async function testarRadarProdutoComProvaForteViraTransporteAfiliado() {
   assert.strictEqual(transporte, URL_PRODUTO_COM_PROVA);
 }
 
+async function testarRadarProdutoComProvaBlocoPrincipalViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-produto-com-prova-bloco-principal";
+  const prova = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipalSocial());
+  assert.strictEqual(prova.ok, true);
+  assert.strictEqual(prova.origem, ORIGEM_PROVA_BLOCO_PRINCIPAL);
+
+  const transporte = testesMercadoLivre.resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(shortlink, {
+    urlProduto: prova.urlProduto,
+    linkExpandidoEngine: prova.urlProduto,
+    resolucaoRadar: {
+      ok: true,
+      urlResolvida: URL_SOCIAL_AMBIGUA,
+      linkOriginalLimpo: prova.urlProduto,
+      linkResolvido: prova.urlProduto,
+      tipoLinkRadar: "shortlink_meli",
+      metodoResolucaoMeli: "fallback_intermediario",
+      provaIdentidadeMeli: prova
+    }
+  });
+
+  assert.strictEqual(transporte, URL_PRODUTO_BLOCO_PRINCIPAL);
+}
+
+async function testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial() {
+  const shortlink = "https://meli.la/shortlink-prova-bloco-principal-fim-a-fim";
+  const imagemRadar = "https://cdn.exemplo.com/oferta-original.jpg";
+  const prova = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipalSocial());
+  assert.strictEqual(prova.ok, true);
+
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: prova.urlProduto,
+    linkResolvido: prova.urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario",
+    provaIdentidadeMeli: prova
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({ midia: { imagemOrigem: "mensagem", imagemOriginal: imagemRadar } }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
+  assert.strictEqual(resultado.preco, 149.9);
+  assert.strictEqual(resultado.precoOriginal, 229.9);
+  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BLOCO_PRINCIPAL);
+}
+
 async function testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado() {
   const shortlink = "https://meli.la/shortlink-produto-diverge-prova";
   const prova = provaMeliValida();
@@ -1005,6 +1082,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
   await testarRadarUrlResolvidaProdutoDiretoViraTransporteAfiliado();
   await testarRadarProdutoComProvaForteViraTransporteAfiliado();
+  await testarRadarProdutoComProvaBlocoPrincipalViraTransporteAfiliado();
+  await testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial();
   await testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado();
   await testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado();
   await testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente();

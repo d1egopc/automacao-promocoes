@@ -3,7 +3,10 @@ const { classificarCategoriaOferta } = require("../../../../marketplaces/intelig
 const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-universal");
 const { resolverImagemUniversal } = require("../../../../modules/imagens/resolver-imagem-universal");
 const { resumoLinksClassificados } = require("../../link-role.service");
-const { validarProvaIdentidadeMercadoLivre } = require("../../../radar/mercadolivre-social-identidade");
+const {
+  ORIGEM_PROVA_BLOCO_PRINCIPAL,
+  validarProvaIdentidadeMercadoLivre
+} = require("../../../radar/mercadolivre-social-identidade");
 const { buscarImagemOficialMercadoLivrePorMlb } = require("../importer.service");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
@@ -540,7 +543,7 @@ function urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url = "", prov
 
 function resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar = {}, resolucaoProduto = {}) {
   const provas = [
-    validarProvaSocialMercadoLivre(resolucaoRadar),
+    validarProvaSocialMercadoLivre(resolucaoRadar, { aceitarBlocoPrincipal: true }),
     validarParametroProdutoEstruturadoMercadoLivre(resolucaoRadar, resolucaoProduto)
   ].filter(Boolean);
   if (!provas.length) return "";
@@ -1114,12 +1117,17 @@ function analisarTitulosIdentidadeMercadoLivre(tituloRadar = "", tituloImportado
   };
 }
 
-function validarProvaSocialMercadoLivre(resolucaoRadar = {}) {
+function validarProvaSocialMercadoLivre(resolucaoRadar = {}, opcoes = {}) {
   const validacao = validarProvaIdentidadeMercadoLivre(
     resolucaoRadar.provaIdentidadeMeli,
-    { urlProdutoResolvido: resolucaoRadar.linkOriginalLimpo || resolucaoRadar.linkResolvido || "" }
+    {
+      urlProdutoResolvido: resolucaoRadar.linkOriginalLimpo || resolucaoRadar.linkResolvido || "",
+      aceitarBlocoPrincipal: opcoes.aceitarBlocoPrincipal === true
+    }
   );
-  return validacao.ok ? validacao : null;
+  if (!validacao.ok) return null;
+  if (validacao.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal !== true) return null;
+  return validacao;
 }
 
 function urlsParametroProdutoMercadoLivre(url = "") {
