@@ -206,8 +206,13 @@ function beneficioDuplicaOutroPapel(valor = "", oferta = {}) {
 
 function observacoesComerciaisOptimusCapture(oferta = {}) {
   if (oferta.manualV2 !== true || oferta.fonteImportacao?.adapter !== "optimus_capture_v1") return [];
-  const observacoes = Array.isArray(oferta.observacoes) ? oferta.observacoes : [oferta.observacoes];
+  const observacoes = Array.isArray(oferta.observacoes) ? oferta.observacoes : [oferta.observacoes || oferta.opcao];
   return observacoes.map(textoUtil).filter(Boolean);
+}
+
+function observacaoComercialObrigatoriaOptimusCapture(oferta = {}) {
+  return observacoesComerciaisOptimusCapture(oferta)
+    .find(item => !beneficioDuplicaOutroPapel(item, oferta)) || "";
 }
 
 function valorBeneficio(oferta = {}) {
@@ -769,7 +774,7 @@ function grupoBlocoTemplate(tipo = "") {
   if (tipo === "titulo") return "identificacao";
   if (["marketplace", "categoria", "oportunidade"].includes(tipo)) return "origem";
   if (["preco_de", "preco_por", "preco_pix", "desconto_percentual", "economia", "parcelamento"].includes(tipo)) return "precos";
-  if (["cupom", "beneficio", "cashback", "descricao_adicional"].includes(tipo)) return "beneficios";
+  if (["observacao_manual_v2", "cupom", "beneficio", "cashback", "descricao_adicional"].includes(tipo)) return "beneficios";
   if (["avaliacao", "quantidade_avaliacoes", "vendas", "frete"].includes(tipo)) return "prova";
   if (tipo === "cta") return "cta";
   if (tipo === "link_resgate") return "link_resgate";
@@ -806,6 +811,34 @@ function montarMensagemAgrupada(entradas = []) {
   }
 
   return limparLinhas(linhas);
+}
+
+function linhaContemObservacaoComercial(linha = "", observacao = "") {
+  const linhaNormalizada = normalizarComparacao(linha);
+  const observacaoNormalizada = normalizarComparacao(observacao);
+  return Boolean(linhaNormalizada && observacaoNormalizada && linhaNormalizada.includes(observacaoNormalizada));
+}
+
+function inserirObservacaoComercialObrigatoria(linhas = [], oferta = {}) {
+  const observacao = observacaoComercialObrigatoriaOptimusCapture(oferta);
+  if (!observacao) return linhas;
+  if (linhas.some(item => linhaContemObservacaoComercial(item?.linha, observacao))) return linhas;
+
+  const linhaObservacao = { tipo: "observacao_manual_v2", linha: observacao };
+  const indicePrimeiroPosterior = linhas.findIndex(item => {
+    const grupo = grupoBlocoTemplate(item?.tipo);
+    return !["identificacao", "origem", "precos"].includes(grupo);
+  });
+
+  if (indicePrimeiroPosterior >= 0) {
+    return [
+      ...linhas.slice(0, indicePrimeiroPosterior),
+      linhaObservacao,
+      ...linhas.slice(indicePrimeiroPosterior)
+    ];
+  }
+
+  return [...linhas, linhaObservacao];
 }
 
 function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "whatsapp" } = {}) {
@@ -904,17 +937,19 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     if (TIPOS_AVISO_FINAL.has(bloco.tipo)) avisoFinalRenderizado = true;
   }
 
+  const linhasComObservacaoObrigatoria = inserirObservacaoComercialObrigatoria(linhas, ofertaOficial);
+
   if (template.rodape?.ativo) {
     const rodape = String(template.rodape.texto ?? "").trim();
     if (textoUtil(rodape)) {
-      linhas.push({ tipo: "rodape", linha: rodape });
+      linhasComObservacaoObrigatoria.push({ tipo: "rodape", linha: rodape });
       blocosRenderizados.push("rodape");
     } else {
       blocosIgnorados.push({ tipo: "rodape", motivo: "sem_dados" });
     }
   }
 
-  const mensagem = montarMensagemAgrupada(linhas);
+  const mensagem = montarMensagemAgrupada(linhasComObservacaoObrigatoria);
   fidelidadeObs.registrarTemplate("template_personalizado_renderer_saida", {
     ...contextoFidelidadeTemplate,
     oferta: ofertaOficial,

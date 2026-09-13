@@ -184,7 +184,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     seller: primeiroTexto(entrada.seller, entrada.vendedor, entrada.loja, entrada.store),
     cupom: primeiroTexto(entrada.cupom, entrada.codigoCupom),
     parcelamento: primeiroTexto(entrada.parcelamento, entrada.parcelas),
-    observacoes: primeiroTexto(entrada.observacoes, entrada.observacao, entrada.aviso),
+    observacoes: primeiroTexto(entrada.observacoes, entrada.opcao, entrada.observacao, entrada.aviso),
     // Campos comerciais condicionais: permanecem na oferta para que o renderer atual
     // possa consumi-los sem que o Manual V2 apague informacao capturada.
     precoPix: primeiroTexto(entrada.precoPix, entrada.precoAVista, entrada.valorPix, entrada.pixPrice),

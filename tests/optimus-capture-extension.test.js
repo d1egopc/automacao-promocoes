@@ -3256,6 +3256,18 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const payload = contrato.payloadPreview({
+      marketplace: "aliexpress",
+      urlOriginal: "https://pt.aliexpress.com/item/100500000000.html",
+      titulo: "Produto com opcao",
+      precoAtual: "89,90",
+      imagem: "https://ae01.alicdn.com/kf/produto.jpg",
+      opcao: "Somente na cor preta"
+    });
+    assert.strictEqual(payload.observacoes, "Somente na cor preta");
+  }
+
+  {
     const fetchOriginal = global.fetch;
     let abortado = false;
     try {

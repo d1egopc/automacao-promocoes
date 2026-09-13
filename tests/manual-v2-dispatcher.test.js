@@ -984,6 +984,16 @@ function assertSemSegredos(retorno) {
       plano: {}
     });
     assert.ok(mensagemComObservacao.includes("Compra internacional · impostos estimados"));
+    const mensagemUniversalCupomSemDuplicar = montarMensagemOferta(adaptarOfertaManualParaTemplate({
+      ...ofertaA,
+      clienteId: "cliente_manual_observacoes",
+      observacoes: "MANUAL10"
+    }), {
+      clienteId: "cliente_manual_observacoes",
+      destino: { id: "destino_manual_observacoes", tipo: "whatsapp" },
+      plano: {}
+    });
+    assert.strictEqual((mensagemUniversalCupomSemDuplicar.match(/MANUAL10/g) || []).length, 2, "Universal nao renderiza observacao igual ao cupom como linha extra");
     assert.strictEqual(adaptada.manualV2, true);
   }
 
@@ -1011,6 +1021,29 @@ function assertSemSegredos(retorno) {
 
     const observacaoLivre = renderCapture("Condição comercial definida pelo cliente");
     assert.ok(observacaoLivre.mensagem.includes("Condição comercial definida pelo cliente"), "Capture renderiza observacao comercial livre no beneficio");
+
+    const templateSemBeneficio = {
+      id: "tpl_capture_observacoes_sem_beneficio",
+      canais: ["whatsapp"],
+      blocos: [
+        { tipo: "preco_por", ativo: true, ordem: 30 },
+        { tipo: "beneficio", ativo: false, ordem: 35 },
+        { tipo: "cupom", ativo: true, ordem: 40 },
+        { tipo: "link", ativo: true, ordem: 50 }
+      ]
+    };
+    const observacaoObrigatoria = renderizarTemplatePersonalizado({
+      oferta: adaptarOfertaManualParaTemplate({
+        ...ofertaA,
+        fonteImportacao: { adapter: "optimus_capture_v1" },
+        cupom: "MANUAL10",
+        observacoes: "Somente na cor preta"
+      }),
+      template: templateSemBeneficio,
+      canal: "whatsapp"
+    });
+    assert.ok(observacaoObrigatoria.mensagem.includes("\n\nSomente na cor preta\n🎟️ Cupom: *MANUAL10*"), "observacao Capture aparece mesmo com beneficio desligado e antes do cupom");
+    assert.strictEqual((observacaoObrigatoria.mensagem.match(/Somente na cor preta/g) || []).length, 1, "observacao obrigatoria nao duplica");
 
     const produtoNoBrasil = renderCapture("Produto já no Brasil");
     assert.ok(produtoNoBrasil.mensagem.includes("Produto já no Brasil"), "Capture renderiza condicao Produto já no Brasil");
@@ -1042,8 +1075,12 @@ function assertSemSegredos(retorno) {
     });
     assert.ok(cupomNoBlocoProprio.mensagem.includes("🎟️ Cupom: *MANUAL10*"), "cupom continua no bloco proprio");
     assert.ok(!cupomNoBlocoProprio.mensagem.includes("⚡ MANUAL10"), "observacao duplicada de cupom nao gera beneficio paralelo");
+    assert.strictEqual((cupomNoBlocoProprio.mensagem.match(/MANUAL10/g) || []).length, 1, "observacao igual ao cupom nao duplica informacao");
     assert.ok(cupomNoBlocoProprio.mensagem.includes("✅ Por:"), "preco continua renderizado");
     assert.ok(cupomNoBlocoProprio.mensagem.includes(ofertaA.urlAfiliada), "link continua renderizado");
+
+    const observacaoVazia = renderCapture("");
+    assert.ok(!/\n\s*\n\s*⚡\s*\n/.test(observacaoVazia.mensagem), "observacao vazia nao cria linha em branco");
   }
 
   {

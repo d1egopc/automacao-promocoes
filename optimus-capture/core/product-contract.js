@@ -75,7 +75,7 @@
       parcelamento: texto(bruto.parcelamento || bruto.parcelas),
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
-      observacoes: texto(bruto.observacoes),
+      observacoes: texto(bruto.observacoes || bruto.opcao),
       origem: "optimus_capture_v1",
       fonte: texto(bruto.fonte),
       precoAmbiguo: bruto.precoAmbiguo === true,

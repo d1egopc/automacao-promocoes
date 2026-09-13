@@ -77,6 +77,19 @@ function assertSemSegredos(valor) {
 }
 
 {
+  const criadaComOpcao = criarOfertaManualV2("cliente_alias_opcao", {
+    marketplace: "AliExpress",
+    urlOriginal: "https://pt.aliexpress.com/item/100500000000.html",
+    titulo: "Produto com opcao",
+    precoAtual: "89,90",
+    urlAfiliada: "https://s.click.aliexpress.com/e/produto",
+    opcao: "Somente na cor preta"
+  }, { now, idFactory });
+
+  assert.strictEqual(criadaComOpcao.observacoes, "Somente na cor preta");
+}
+
+{
   const ofertaA = buscarOfertaManualV2("cliente_a", "manual_v2_1");
   const ofertaB = criarOfertaManualV2("cliente_b", {
     marketplace: "Shopee",

@@ -776,7 +776,13 @@ function detalhesNaoDuplicados(campos = {}, valores = []) {
     campos.parcelamento,
     campos.frete,
     campos.freteGratis ? "Frete gratis" : "",
-    campos.beneficio
+    campos.beneficio,
+    campos.cupom,
+    campos.cupomTexto,
+    campos.codigoCupom,
+    campos.instrucaoCupom,
+    ...(Array.isArray(campos.cupons) ? campos.cupons : []),
+    ...(Array.isArray(campos.codigosCupom) ? campos.codigosCupom : [])
   ].map(normalizarTexto).filter(Boolean);
   return (Array.isArray(valores) ? valores : []).filter(valor =>
     !protegidos.some(protegido => mesmoFatoComercial(valor, protegido))

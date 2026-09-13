@@ -396,7 +396,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     sku: texto(entrada.sku || entrada.SKU),
     imagem: sanitizarUrlOpcional(entrada.imagem || entrada.image || entrada.imageUrl),
     cupom: texto(entrada.cupom || entrada.codigoCupom),
-    observacoes: texto(entrada.observacoes || entrada.observacao || entrada.aviso),
+    observacoes: texto(entrada.observacoes || entrada.opcao || entrada.observacao || entrada.aviso),
     categoria: texto(entrada.categoria || entrada.categoriaProduto),
     parcelamento: texto(entrada.parcelamento || entrada.parcelas),
     avaliacao: entrada.avaliacao ?? entrada.rating ?? "",

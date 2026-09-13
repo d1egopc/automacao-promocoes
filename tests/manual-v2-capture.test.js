@@ -187,7 +187,7 @@ function arquivoOfertas(clienteId) {
       const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_a", payloadValido({
         clienteId: "cliente_malicioso",
         cupom: "MANUAL10",
-        observacoes: "Compra internacional · impostos estimados"
+        opcao: "Compra internacional · impostos estimados"
       }));
       assert.strictEqual(resposta.status, 200);
       assert.strictEqual(resposta.body.ok, true);
