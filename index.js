@@ -18620,6 +18620,20 @@ function logRadarMlSocialResolvido(dados = {}) {
   });
 }
 
+function textoArrayLogDiagnosticoMercadoLivreRadar(valor = []) {
+  return Array.isArray(valor) ? valor.map(item => limitarTextoDiagnosticoMercadoLivreRadar(item, 120)).join(" | ") : "";
+}
+
+function objetoLogDiagnosticoMercadoLivreRadar(objeto = {}, indice = 0) {
+  return {
+    ...objeto,
+    indiceObjeto: indice,
+    chavesDiretasTexto: textoArrayLogDiagnosticoMercadoLivreRadar(objeto.chavesDiretas),
+    camposIrmaosDiretosTexto: textoArrayLogDiagnosticoMercadoLivreRadar(objeto.camposIrmaosDiretos),
+    urlsDiretasMesmoObjetoTexto: textoArrayLogDiagnosticoMercadoLivreRadar(objeto.urlsDiretasMesmoObjeto)
+  };
+}
+
 function logRadarMlSocialDiagnosticoHtml(dados = {}) {
   console.log("[RADAR-ML-SOCIAL-DIAGNOSTICO-HTML]", {
     tamanhoHtml: dados.tamanhoHtml || 0,
@@ -18630,7 +18644,9 @@ function logRadarMlSocialDiagnosticoHtml(dados = {}) {
     quantidadeOcorrenciasDoMlb: dados.quantidadeOcorrenciasDoMlb || 0,
     totalMlbsDistintos: dados.totalMlbsDistintos || 0,
     totaisPorFonte: dados.totaisPorFonte || {},
-    objetosLimitados: Array.isArray(dados.objetosLimitados) ? dados.objetosLimitados.slice(0, 3) : [],
+    objetosLimitados: Array.isArray(dados.objetosLimitados)
+      ? dados.objetosLimitados.slice(0, 3).map(objetoLogDiagnosticoMercadoLivreRadar)
+      : [],
     ocorrenciasInspecionadas: dados.ocorrenciasInspecionadas || 0,
     diagnosticoTruncado: dados.diagnosticoTruncado === true,
     totalCandidatosDistintos: dados.totalCandidatosDistintos || 0

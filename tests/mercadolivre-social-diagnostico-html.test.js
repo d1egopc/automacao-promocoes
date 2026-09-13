@@ -13,7 +13,7 @@ function carregarHelpers() {
   const codigo = fs.readFileSync(arquivo, "utf8");
   const inicio = codigo.indexOf("function limparUrlProdutoRadar");
   const fim = codigo.indexOf("function isUrlIntermediariaRadar");
-  const inicioLog = codigo.indexOf("function logRadarMlSocialDiagnosticoHtml");
+  const inicioLog = codigo.indexOf("function textoArrayLogDiagnosticoMercadoLivreRadar");
   const fimLog = codigo.indexOf("function logPromozoneRadar");
   assert.ok(inicio >= 0 && fim > inicio, "helpers de fallback ML nao encontrados");
   assert.ok(inicioLog >= 0 && fimLog > inicioLog, "helper de log diagnostico ML nao encontrado");
@@ -267,15 +267,19 @@ const helpers = carregarHelpers();
 
 {
   const antes = helpers.logs.length;
-  const diagnostico = diagnosticar(helpers, '<meta property="og:url" content="https://produto.mercadolivre.com.br/MLB-7223217402-produto-_JM">');
+  const diagnostico = diagnosticar(helpers, '<script>{"id":"objeto-log","url":"https://produto.mercadolivre.com.br/MLB-7223217402-produto-_JM","product_id":"MLB1234567890"}</script>');
   helpers.logRadarMlSocialDiagnosticoHtml({
     motivoProva: "card_featured_ausente",
     ...diagnostico
   });
   assert.strictEqual(helpers.logs.length, antes + 1);
   assert.strictEqual(helpers.logs.at(-1)[0], "[RADAR-ML-SOCIAL-DIAGNOSTICO-HTML]");
-  assert.strictEqual(helpers.logs.at(-1)[1].metodoFallbackEncontrado, "og_url");
+  assert.strictEqual(helpers.logs.at(-1)[1].metodoFallbackEncontrado, "url_json");
   assert.strictEqual(helpers.logs.at(-1)[1].urlProdutoEncontrada, "produto.mercadolivre.com.br/MLB-7223217402-produto-_JM");
+  assert.strictEqual(helpers.logs.at(-1)[1].objetosLimitados[0].indiceObjeto, 0);
+  assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].chavesDiretasTexto.includes("url"));
+  assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].camposIrmaosDiretosTexto.includes("id:objeto-log"));
+  assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].urlsDiretasMesmoObjetoTexto.includes("produto.mercadolivre.com.br/MLB-7223217402-produto-_JM"));
 }
 
 assert.strictEqual(helpers.chamadasRede.length, 0, "diagnostico estrutural nao deve fazer chamada de rede");
