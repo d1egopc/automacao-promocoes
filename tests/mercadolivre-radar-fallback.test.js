@@ -5,6 +5,7 @@ const { importarMercadoLivreEngine } = require("../modules/engine/importer/adapt
 const URL_PRODUTO = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v-_JM";
 const URL_PRODUTO_BERMUDA = "https://produto.mercadolivre.com.br/MLB-3382028526-kit-3-bermuda-masculina-sarja-short-jeans-social-brim-lisa-_JM";
 const URL_AFILIADA = "https://meli.la/cliente-fallback";
+const URL_SOCIAL_AMBIGUA = "https://www.mercadolivre.com.br/social/perfil?ref=ambigua";
 
 function job(extras = {}) {
   return {
@@ -144,7 +145,7 @@ function produtoHtmlOk() {
   };
 }
 
-function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA } = {}) {
+function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA, recusarMeliLaDireto = false } = {}) {
   const chamadas = {
     importar: [],
     afiliado: []
@@ -167,6 +168,7 @@ function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA } 
       },
       gerarLinkAfiliadoMercadoLivre: async (url, integracao, contexto) => {
         chamadas.afiliado.push({ url, temIntegracao: Boolean(integracao), clienteId: contexto?.clienteId || "" });
+        if (recusarMeliLaDireto && /^https?:\/\/(?:www\.)?meli\.la\//i.test(String(url || ""))) return "";
         return linkAfiliado;
       }
     }
@@ -380,10 +382,10 @@ async function testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem() 
 async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   const shortlink = "https://meli.la/shortlink-radar-ambigua";
   const imagemRadar = "https://cdn.exemplo.com/radar-original.jpg";
-  const contexto = depsBase({ wall: true });
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: true,
-    urlResolvida: "https://www.mercadolivre.com.br/social/perfil?ref=ambigua",
+    urlResolvida: URL_SOCIAL_AMBIGUA,
     linkOriginalLimpo: URL_PRODUTO,
     linkResolvido: URL_PRODUTO,
     metodoResolucaoMeli: "html"
@@ -412,7 +414,7 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   assert.strictEqual(resultado.imagem, imagemRadar);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO), "URL candidata insegura nao pode vazar para fallback puro Radar");
   assert.ok(!serializado.includes("MLB777777"), "MLB candidato inseguro nao pode vazar para fallback puro Radar");
@@ -420,7 +422,7 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
 
 async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
   const shortlink = "https://meli.la/shortlink-sem-produto";
-  const contexto = depsBase({ wall: true });
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: false,
     urlResolvida: "https://www.mercadolivre.com.br/social/perfil?ref=sem-produto",
@@ -443,16 +445,68 @@ async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
   assert.strictEqual(resultado.linkExpandido, shortlink);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?ref=sem-produto");
+}
+
+async function testarRadarSocialComFalhaAfiliadoContinuaInsuficiente() {
+  const shortlink = "https://meli.la/shortlink-social-sem-afiliado";
+  const contexto = depsBase({ wall: true, linkAfiliado: "", recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: URL_PRODUTO,
+    linkResolvido: URL_PRODUTO,
+    metodoResolucaoMeli: "html"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+}
+
+async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-social-nao-direta";
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: "",
+    linkResolvido: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: URL_PRODUTO,
+    metodoResolucaoMeli: "html"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
 }
 
 async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   const shortlink = "https://meli.la/shortlink-ambigua";
   const imagemClone = "https://cdn.exemplo.com/clone-original.jpg";
-  const contexto = depsBase({ wall: true });
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: true,
-    urlResolvida: "https://www.mercadolivre.com.br/social/perfil?ref=ambigua",
+    urlResolvida: URL_SOCIAL_AMBIGUA,
     linkOriginalLimpo: URL_PRODUTO_BERMUDA,
     linkResolvido: URL_PRODUTO_BERMUDA,
     metodoResolucaoMeli: "html"
@@ -477,7 +531,7 @@ async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   assert.strictEqual(resultado.imagem, imagemClone);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "URL candidata insegura nao pode vazar para fallback puro Clone");
   assert.ok(!serializado.includes("MLB3382028526"), "MLB candidato inseguro nao pode vazar para fallback puro Clone");
@@ -508,7 +562,7 @@ async function testarClonadorSocialComParametroExplicitoEstruturadoPassa() {
 
 async function testarClonadorParametroSocialSemVinculoSegueFallbackPuro() {
   const shortlink = "https://meli.la/shortlink-parametro-social";
-  const contexto = depsBase({ wall: true });
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: true,
     urlResolvida: "https://www.mercadolivre.com.br/social/perfil?reco_backend=item_decorator",
@@ -531,7 +585,7 @@ async function testarClonadorParametroSocialSemVinculoSegueFallbackPuro() {
   assert.strictEqual(resultado.linkExpandido, shortlink);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?reco_backend=item_decorator");
 }
 
 async function testarOrigemDiferenteNaoUsaComercialCapturadoClonador() {
@@ -600,6 +654,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem();
   await testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
   await testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente();
+  await testarRadarSocialComFalhaAfiliadoContinuaInsuficiente();
+  await testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado();
   await testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
   await testarClonadorSocialComParametroExplicitoEstruturadoPassa();
   await testarClonadorParametroSocialSemVinculoSegueFallbackPuro();

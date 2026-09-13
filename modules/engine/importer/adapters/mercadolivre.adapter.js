@@ -408,6 +408,19 @@ function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motiv
   };
 }
 
+function resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine = "", resolucaoProduto = {}) {
+  const urlOriginal = textoMercadoLivre(urlOriginalEngine);
+  if (!isMeliLa(urlOriginal)) return "";
+
+  const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const urlResolvidaDireta = textoMercadoLivre(resolucaoRadar.urlResolvida || "");
+  if (isUrlProdutoMercadoLivre(urlResolvidaDireta) || isSocialMercadoLivre(urlResolvidaDireta)) {
+    return urlResolvidaDireta;
+  }
+
+  return "";
+}
+
 function origemClonadorGruposMercadoLivre(evento = {}, job = {}) {
   const metadataEvento = objetoSeguro(evento.metadata);
   const metadataJob = objetoSeguro(job.metadata);
@@ -473,6 +486,7 @@ async function montarFallbackClonadorMercadoLivre({
   linkExpandidoEngine = "",
   expandiuMeliLa = false,
   resolucaoProduto = {},
+  urlTransporteAfiliado = "",
   falhaImportador = {}
 } = {}) {
   const contrato = contratoComercialClonadorMercadoLivre(evento, job);
@@ -485,13 +499,14 @@ async function montarFallbackClonadorMercadoLivre({
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
+  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || urlProduto);
   const produtoIdDetectado = extrairMlbMercadoLivre(linkExpandidoEngine || urlImportador || urlOriginalEngine);
   const imagemClonador = resolverImagemRadarFallbackMercadoLivre(evento, job);
   let linkAfiliado = "";
 
   if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
     try {
-      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlProduto, integracao, { clienteId }));
+      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlAfiliavel, integracao, { clienteId }));
     } catch {}
   }
 
@@ -649,6 +664,7 @@ async function montarFallbackRadarMercadoLivre({
   linkExpandidoEngine = "",
   expandiuMeliLa = false,
   resolucaoProduto = {},
+  urlTransporteAfiliado = "",
   falhaImportador = {}
 } = {}) {
   const titulo = extrairTituloRadarMercadoLivre(evento);
@@ -659,11 +675,13 @@ async function montarFallbackRadarMercadoLivre({
   const temTitulo = Boolean(titulo && !tituloTecnicoBloqueadoMercadoLivre(titulo));
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
+  const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
+  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || urlProduto);
   let linkAfiliado = "";
 
   if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
     try {
-      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlImportador || linkExpandidoEngine || urlOriginalEngine, integracao, { clienteId }));
+      linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlAfiliavel, integracao, { clienteId }));
     } catch {}
   }
 
@@ -813,6 +831,7 @@ async function montarFallbackPuroCapturaMercadoLivre({
   const falhaImportador = {
     motivo: motivo || "enriquecimento_ml_recusado"
   };
+  const urlTransporteAfiliado = resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine, resolucaoProduto);
   const resolucaoProdutoSanitizada = sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto, falhaImportador.motivo);
 
   const argumentosFallback = {
@@ -827,6 +846,7 @@ async function montarFallbackPuroCapturaMercadoLivre({
     linkExpandidoEngine: "",
     expandiuMeliLa: false,
     resolucaoProduto: resolucaoProdutoSanitizada,
+    urlTransporteAfiliado,
     falhaImportador
   };
 
