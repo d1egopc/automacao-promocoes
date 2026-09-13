@@ -324,6 +324,38 @@ function normalizarComparacao(valor = "") {
     .toLowerCase();
 }
 
+function marketplaceBonito(valor = "") {
+  const texto = textoUtil(valor);
+  if (!texto) return "";
+
+  const chave = texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const nomes = {
+    mercadolivre: "Mercado Livre",
+    shopee: "Shopee",
+    amazon: "Amazon",
+    aliexpress: "AliExpress",
+    kabum: "KaBuM",
+    awin: "AWIN"
+  };
+
+  if (nomes[chave]) return nomes[chave];
+
+  return texto
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .map(parte => parte.length <= 4
+      ? parte.toUpperCase()
+      : parte.charAt(0).toUpperCase() + parte.slice(1).toLowerCase())
+    .join(" ");
+}
+
 const METADADOS_TECNICOS_CRUS = new Set([
   "pix",
   "pagamento pix",
@@ -361,9 +393,14 @@ function removerPrefixoVisual(valor = "", prefixo = "") {
   return item;
 }
 
-function linhaComPrefixo(prefixo = "", valor = "") {
+function aplicarNegritoTemplate(valor = "") {
+  const item = textoUtil(valor);
+  return item ? `*${item}*` : "";
+}
+
+function linhaComPrefixo(prefixo = "", valor = "", opcoes = {}) {
   const item = textoComercialRenderizavel(removerPrefixoVisual(valor, prefixo));
-  return item ? `${prefixo} ${item}` : "";
+  return item ? `${prefixo} ${opcoes.negrito ? aplicarNegritoTemplate(item) : item}` : "";
 }
 
 function avisoCupomGenericoTemplate(valor = "") {
@@ -402,7 +439,11 @@ function textoIndicaPix(valor = "") {
 }
 
 function precoPixRenderizavel(oferta = {}) {
-  return "";
+  return textoPixValido(primeiroTexto(
+    oferta.contratoComercialFinal?.precoPixTexto,
+    oferta.precoPix,
+    oferta.condicaoPix
+  ));
 }
 
 function instrucaoCupomEssencial(oferta = {}) {
@@ -594,11 +635,11 @@ function resolverLinha(bloco, oferta = {}) {
 
   if (tipo === "titulo") {
     const titulo = primeiroTexto(oferta.titulo, oferta.nome);
-    return linhaComPrefixo("🔥", titulo);
+    return linhaComPrefixo("🔥", titulo, { negrito: true });
   }
   if (tipo === "marketplace") {
     const marketplace = primeiroTexto(oferta.marketplace, oferta.loja);
-    return marketplace ? `🛍️ ${marketplace}` : "";
+    return marketplace ? `🛍️ ${marketplaceBonito(marketplace)}` : "";
   }
   if (tipo === "categoria") {
     const categoria = textoUtil(oferta.categoria);
@@ -610,12 +651,12 @@ function resolverLinha(bloco, oferta = {}) {
     const preco = precoDe != null && precoPor != null && precoDe > precoPor
       ? formatarMoeda(precoDe)
       : "";
-    return preco ? `❌ De: ${preco}` : "";
+    return preco ? `❌ De: ${aplicarNegritoTemplate(preco)}` : "";
   }
   if (tipo === "preco_por") {
     const preco = formatarMoeda(valorPrecoPor(oferta));
     const precoComCondicao = aplicarCondicaoPixPreco(preco, oferta);
-    return precoComCondicao ? `✅ Por: ${precoComCondicao}` : "";
+    return precoComCondicao ? `✅ Por: ${aplicarNegritoTemplate(precoComCondicao)}` : "";
   }
   if (tipo === "desconto_percentual") {
     const desconto = formatarPercentual(oferta.descontoPercentual ?? oferta.desconto);
@@ -623,7 +664,7 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "preco_pix") {
     const pix = precoPixRenderizavel(oferta);
-    return pix ? `⚡ Pix: ${pix}` : "";
+    return pix ? `⚡ Pix: ${aplicarNegritoTemplate(pix)}` : "";
   }
   if (tipo === "economia") {
     const economia = formatarMoeda(valorEconomia(oferta));
@@ -631,7 +672,7 @@ function resolverLinha(bloco, oferta = {}) {
   }
   if (tipo === "cupom") {
     const cupom = valorCupomTemplate(oferta);
-    return cupom ? `🎟️ Cupom: ${cupom}` : "";
+    return cupom ? `🎟️ Cupom: ${aplicarNegritoTemplate(cupom)}` : "";
   }
   if (tipo === "frase_cupom") {
     return montarFraseCupom(oferta);

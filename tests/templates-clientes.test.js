@@ -195,19 +195,21 @@ const renderCompletoV11 = renderizarTemplatePersonalizado({
 });
 assert.strictEqual(renderCompletoV11.ok, true, "preview personalizado completo renderiza");
 for (const trecho of [
-  "🔥 Kit 4 Caixas Sabonetes Natura Tododia",
+  "🔥 *Kit 4 Caixas Sabonetes Natura Tododia*",
   "🛍️ Amazon",
   "📂 Beleza e cuidados pessoais",
-  "❌ De:",
-  "✅ Por:",
+  "❌ De: *",
+  "✅ Por: *",
   "📉 38% OFF",
-  "🎟️ Cupom: PROMO10",
+  "⚡ Pix: *R$ 47,90 no Pix*",
+  "🎟️ Cupom: *PROMO10*",
   "⚡ Aplique o cupom PROMO10 para obter o valor.",
   `✰ Avaliação\n${estrelas(5)}`,
   "💳 Ou 3x de R$ 16,63 sem juros",
   "🚚 Frete gratis",
   "🎟️ Resgate:",
   "📱 APP:",
+  "https://optimuspromo.com.br/app/preview-template-extra",
   "🪙 Moedas:",
   "🖥️ PC:",
   "🔗 Confira aqui:",
@@ -237,8 +239,38 @@ const renderCompatibilidadeAvaliacaoVendas = renderizarTemplatePersonalizado({
 });
 assert.ok(renderCompatibilidadeAvaliacaoVendas.mensagem.includes("✰ Avaliação\n⭐⭐⭐⭐⭐"), "template antigo continua renderizando avaliacao real quando houver dado");
 assert.ok(renderCompatibilidadeAvaliacaoVendas.mensagem.includes("🛒 5.200 vendidos"), "template antigo continua renderizando vendas reais quando houver dado");
-assert.ok(!renderCompletoV11.mensagem.includes("Pix:"), "preview personalizado nao renderiza linha Pix propria");
 assert.ok(!/[\u00c3\u00c5\u00a2\u00ef\u00bf\u00bd\uFFFD]/u.test(renderCompletoV11.mensagem), "preview personalizado nao contem mojibake");
+
+const pixAusenteV11 = renderizarTemplatePersonalizado({
+  oferta: {
+    ...ofertaPreviewV11,
+    precoPix: "",
+    condicaoPix: "",
+    textoOriginal: "Kit 4 Caixas Sabonetes Natura Tododia\nPor R$ 49,90\nCupom: PROMO10\nFrete gratis"
+  },
+  template: {
+    id: "tpl_pix_ausente",
+    canais: ["whatsapp"],
+    blocos: [{ tipo: "preco_pix", ativo: true, ordem: 10 }]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!pixAusenteV11.mensagem.includes("Pix:"), "sem Pix canonico nao renderiza linha Pix");
+
+const pixOcultoV11 = renderizarTemplatePersonalizado({
+  oferta: ofertaPreviewV11,
+  template: {
+    id: "tpl_pix_oculto",
+    canais: ["whatsapp"],
+    blocos: [
+      { tipo: "preco_pix", ativo: false, ordem: 10 },
+      { tipo: "preco_por", ativo: true, ordem: 20 }
+    ]
+  },
+  canal: "whatsapp"
+});
+assert.ok(!pixOcultoV11.mensagem.includes("Pix:"), "Pix presente respeita bloco ocultado pelo usuario");
+assert.ok(pixOcultoV11.mensagem.includes("✅ Por:"), "outros blocos ativos continuam renderizando");
 
 const semCupomV11 = renderizarTemplatePersonalizado({
   oferta: { ...ofertaPreviewV11, cupom: "", cupomCodigo: "" },
@@ -299,8 +331,9 @@ const precoMercadoLivreRealV11 = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assert.ok(precoMercadoLivreRealV11.mensagem.includes("❌ De: R$ 225,91"), "preco original decimal com ponto nao vira centavos");
-assert.ok(precoMercadoLivreRealV11.mensagem.includes("✅ Por: R$ 198,80"), "preco atual decimal com ponto nao vira centavos");
+assert.ok(precoMercadoLivreRealV11.mensagem.includes("🛍️ Mercado Livre"), "marketplace cru mercadolivre recebe apresentacao visual oficial");
+assert.ok(precoMercadoLivreRealV11.mensagem.includes("❌ De: *R$ 225,91*"), "preco original decimal com ponto nao vira centavos");
+assert.ok(precoMercadoLivreRealV11.mensagem.includes("✅ Por: *R$ 198,80*"), "preco atual decimal com ponto nao vira centavos");
 assert.ok(!precoMercadoLivreRealV11.mensagem.includes("22.591"), "nao multiplica preco original por 100");
 assert.ok(!precoMercadoLivreRealV11.mensagem.includes("19.880"), "nao multiplica preco atual por 100");
 assert.ok(
@@ -308,7 +341,7 @@ assert.ok(
   "CTA e link permanecem juntos"
 );
 assert.ok(
-  precoMercadoLivreRealV11.mensagem.includes("🎟️ Cupom: MODASEMPRE\n\n🔗 Confira aqui:"),
+  precoMercadoLivreRealV11.mensagem.includes("🎟️ Cupom: *MODASEMPRE*\n\n🔗 Confira aqui:"),
   "cupom e CTA ficam em grupos separados"
 );
 assert.ok(
@@ -321,21 +354,21 @@ const precoDecimalNumeroV11 = renderizarTemplatePersonalizado({
   template: { id: "tpl_preco_decimal", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
   canal: "whatsapp"
 });
-assert.strictEqual(precoDecimalNumeroV11.mensagem, "✅ Por: R$ 79,90", "preco decimal numerico continua correto");
+assert.strictEqual(precoDecimalNumeroV11.mensagem, "✅ Por: *R$ 79,90*", "preco decimal numerico continua correto");
 
 const precoStringBrasilV11 = renderizarTemplatePersonalizado({
   oferta: { precoAtual: "198,80" },
   template: { id: "tpl_preco_br", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
   canal: "whatsapp"
 });
-assert.strictEqual(precoStringBrasilV11.mensagem, "✅ Por: R$ 198,80", "preco string brasileira continua aceito");
+assert.strictEqual(precoStringBrasilV11.mensagem, "✅ Por: *R$ 198,80*", "preco string brasileira continua aceito");
 
 const precoFormatadoV11 = renderizarTemplatePersonalizado({
   oferta: { precoAtual: "R$ 198,80" },
   template: { id: "tpl_preco_formatado", canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }] },
   canal: "whatsapp"
 });
-assert.strictEqual(precoFormatadoV11.mensagem, "✅ Por: R$ 198,80", "preco ja formatado nao e formatado duas vezes");
+assert.strictEqual(precoFormatadoV11.mensagem, "✅ Por: *R$ 198,80*", "preco ja formatado nao e formatado duas vezes");
 
 function moedaLegivel(texto) {
   return String(texto || "").replace(/\u00A0/g, " ");
@@ -377,7 +410,7 @@ const shopeeIphoneParidadeV11 = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 const msgIphoneShopeeV11 = moedaLegivel(shopeeIphoneParidadeV11.mensagem);
-assert.ok(msgIphoneShopeeV11.includes("Por: R$ 8.735,00"), "Shopee iPhone usa preco atual oficial preservado");
+assert.ok(msgIphoneShopeeV11.includes("Por: *R$ 8.735,00*"), "Shopee iPhone usa preco atual oficial preservado");
 assert.ok(!msgIphoneShopeeV11.includes("R$ 84,57"), "valor de desconto nao vira preco final");
 assert.ok(msgIphoneShopeeV11.includes("Cupom:"), "cupom valido aparece");
 assert.ok(msgIphoneShopeeV11.includes("PROMO10"), "cupom oficial e preservado");
@@ -403,8 +436,8 @@ const shopeeGabineteParidadeV11 = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 const msgGabineteShopeeV11 = moedaLegivel(shopeeGabineteParidadeV11.mensagem);
-assert.ok(msgGabineteShopeeV11.includes("Por: R$ 275,99"), "Shopee gabinete usa preco atual oficial preservado");
-assert.ok(!msgGabineteShopeeV11.includes("Por: R$ 234,60"), "Shopee gabinete nao usa valor efetivo como preco principal");
+assert.ok(msgGabineteShopeeV11.includes("Por: *R$ 275,99*"), "Shopee gabinete usa preco atual oficial preservado");
+assert.ok(!msgGabineteShopeeV11.includes("Por: *R$ 234,60*"), "Shopee gabinete nao usa valor efetivo como preco principal");
 
 const shopeeClassificacaoNaoCupomV11 = renderizarTemplatePersonalizado({
   oferta: {
@@ -421,18 +454,20 @@ const shopeeClassificacaoNaoCupomV11 = renderizarTemplatePersonalizado({
 assert.ok(!shopeeClassificacaoNaoCupomV11.mensagem.includes("Cupom: EXCELENTE"), "classificacao EXCELENTE nao vira cupom");
 
 for (const ofertaMarketplace of [
-  { marketplace: "mercadolivre", precoAtual: 198.8, linkAfiliado: "https://meli.la/teste" },
-  { marketplace: "amazon", precoAtual: 79.9, linkAfiliado: "https://amzn.to/teste" },
-  { marketplace: "kabum", precoAtual: 299.9, linkAfiliado: "https://kabum.test/oferta" },
-  { marketplace: "awin", precoAtual: 299.9, linkAfiliado: "https://awin.test/oferta" },
-  { marketplace: "aliexpress", precoAtual: 59.9, linkAfiliado: "https://ali.test/oferta" }
+  { marketplace: "mercadolivre", label: "Mercado Livre", precoAtual: 198.8, linkAfiliado: "https://meli.la/teste" },
+  { marketplace: "amazon", label: "Amazon", precoAtual: 79.9, linkAfiliado: "https://amzn.to/teste" },
+  { marketplace: "shopee", label: "Shopee", precoAtual: 129.9, linkAfiliado: "https://shopee.test/oferta" },
+  { marketplace: "kabum", label: "KaBuM", precoAtual: 299.9, linkAfiliado: "https://kabum.test/oferta" },
+  { marketplace: "awin", label: "AWIN", precoAtual: 299.9, linkAfiliado: "https://awin.test/oferta" },
+  { marketplace: "aliexpress", label: "AliExpress", precoAtual: 59.9, linkAfiliado: "https://ali.test/oferta" }
 ]) {
   const renderMarketplace = renderizarTemplatePersonalizado({
     oferta: { titulo: `Oferta ${ofertaMarketplace.marketplace}`, ...ofertaMarketplace },
-    template: { id: `tpl_${ofertaMarketplace.marketplace}`, canais: ["whatsapp"], blocos: [{ tipo: "preco_por", ativo: true, ordem: 10 }, { tipo: "link", ativo: true, ordem: 20 }] },
+    template: { id: `tpl_${ofertaMarketplace.marketplace}`, canais: ["whatsapp"], blocos: [{ tipo: "marketplace", ativo: true, ordem: 10 }, { tipo: "preco_por", ativo: true, ordem: 20 }, { tipo: "link", ativo: true, ordem: 30 }] },
     canal: "whatsapp"
   });
   assert.strictEqual(renderMarketplace.ok, true, `${ofertaMarketplace.marketplace} continua renderizando`);
+  assert.ok(renderMarketplace.mensagem.includes(`🛍️ ${ofertaMarketplace.label}`), `${ofertaMarketplace.marketplace} usa apresentacao visual oficial`);
   assert.ok(renderMarketplace.mensagem.includes("Por:"), `${ofertaMarketplace.marketplace} preserva preco`);
   assert.ok(renderMarketplace.mensagem.includes(ofertaMarketplace.linkAfiliado), `${ofertaMarketplace.marketplace} preserva link`);
 }
@@ -456,7 +491,7 @@ const semBuracoV11 = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 assert.ok(!/\n{3,}/.test(semBuracoV11.mensagem), "bloco desabilitado nao deixa buraco");
-assert.ok(semBuracoV11.mensagem.includes("Produto sem buraco\n\n✅ Por:"), "grupos diferentes recebem uma linha vazia");
+assert.ok(semBuracoV11.mensagem.includes("*Produto sem buraco*\n\n✅ Por:"), "grupos diferentes recebem uma linha vazia");
 
 const economiaInvalidaV11 = renderizarTemplatePersonalizado({
   oferta: { ...ofertaPreviewV11, precoOriginal: 100, precoAtual: 50, economia: "" },
