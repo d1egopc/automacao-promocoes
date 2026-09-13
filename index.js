@@ -17664,6 +17664,26 @@ function extrairProdutoMarketplaceDeHtmlRadar(html = "", marketplace = "", base 
   return "";
 }
 
+function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "") {
+  const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(html || "");
+  const produtoHtml = provaProdutoHtml.ok
+    ? provaProdutoHtml.urlProduto
+    : extrairProdutoMarketplaceDeHtmlRadar(html || "", "mercadolivre", base);
+
+  return {
+    urlProduto: produtoHtml || "",
+    metodo: provaProdutoHtml.ok ? "html" : "fallback_intermediario",
+    provaIdentidadeMeli: provaProdutoHtml.ok ? provaProdutoHtml : null,
+    motivoProva: provaProdutoHtml.ok ? "" : (provaProdutoHtml.motivo || "prova_identidade_ausente"),
+    diagnostico: {
+      tamanhoHtml: Buffer.byteLength(String(html || ""), "utf8"),
+      encontrouProduto: Boolean(produtoHtml),
+      provaOk: provaProdutoHtml.ok === true,
+      motivoProva: provaProdutoHtml.ok ? "" : (provaProdutoHtml.motivo || "prova_identidade_ausente")
+    }
+  };
+}
+
 function isUrlIntermediariaRadar(url = "", marketplace = "") {
   const mp = normalizarMarketplaceRadar(marketplace || detectarMarketplaceRadarLink(url));
 
@@ -17747,12 +17767,15 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
-    const produto = extrairProdutoMercadoLivreDeHtmlRadar(resposta.data || "");
+    const diagnostico = diagnosticarProdutoMercadoLivreIntermediarioRadar(resposta.data || "", url);
+    const produto = diagnostico.urlProduto || "";
 
     if (produto) {
       console.log("[RADAR] ML produto extraÃ­do", {
         intermediaria: url,
-        produto
+        produto,
+        metodo: diagnostico.metodo,
+        motivoProva: diagnostico.motivoProva || ""
       });
       return produto;
     }
@@ -18543,25 +18566,24 @@ async function resolverLinkOriginalRadar(url = "") {
         } else if (isUrlIntermediariaMercadoLivreRadar(resolvida)) {
           try {
             const paginaIntermediaria = await baixarHtmlRadar(resolvida);
-            const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(paginaIntermediaria.html || "");
-            const produtoHtml = provaProdutoHtml.ok
-              ? provaProdutoHtml.urlProduto
-              : extrairProdutoMarketplaceDeHtmlRadar(
-                paginaIntermediaria.html || "",
-                "mercadolivre",
-                paginaIntermediaria.urlFinal || resolvida
-              );
-            const produtoResolvido = produtoHtml || await extrairProdutoMercadoLivreIntermediarioRadar(resolvida);
+            const diagnosticoProdutoHtml = diagnosticarProdutoMercadoLivreIntermediarioRadar(
+              paginaIntermediaria.html || "",
+              paginaIntermediaria.urlFinal || resolvida
+            );
+            const produtoResolvido = diagnosticoProdutoHtml.urlProduto || "";
             if (produtoResolvido) {
               linkOriginalLimpo = produtoResolvido;
               tipoLinkRadarMeli = "shortlink_meli";
-              metodoSocialMeli = produtoHtml ? "html" : "fallback_intermediario";
+              metodoSocialMeli = diagnosticoProdutoHtml.metodo || "fallback_intermediario";
               motivoSocialMeli = "produto_extraido_html_social";
-              provaIdentidadeMeli = provaProdutoHtml.ok ? provaProdutoHtml : null;
+              provaIdentidadeMeli = diagnosticoProdutoHtml.provaIdentidadeMeli || null;
+              motivoSocialMeli = provaIdentidadeMeli
+                ? "produto_extraido_html_social_com_prova"
+                : `produto_extraido_html_social_sem_prova:${diagnosticoProdutoHtml.motivoProva || "prova_ausente"}`;
             } else {
               motivoSocialMeli = paginaIntermediaria.ok === false
                 ? (paginaIntermediaria.erro || `http_${paginaIntermediaria.status || "sem_status"}`)
-                : "produto_nao_encontrado_html_social";
+                : `produto_nao_encontrado_html_social:${diagnosticoProdutoHtml.motivoProva || "prova_ausente"}`;
             }
           } catch (e) {
             motivoSocialMeli = e.message || "erro_baixar_html_social";

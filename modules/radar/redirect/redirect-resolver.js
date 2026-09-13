@@ -4,6 +4,9 @@ const {
   extrairProdutoIdKabumUrl,
   resolverIdentidadeCanonicaOferta
 } = require("../produto-canonico");
+const {
+  extrairProvaIdentidadeMercadoLivreHtml
+} = require("../mercadolivre-social-identidade");
 
 const resolversRegistrados = [];
 const PROMOZONE_API_BASE = "https://link-shortener-501307668672.southamerica-east1.run.app";
@@ -465,6 +468,53 @@ function urlMercadoLivreComMlbExplicito(url = "") {
   }
 }
 
+function urlSocialMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = hostname(parsed.toString());
+    return host.endsWith("mercadolivre.com.br") && parsed.pathname.toLowerCase().startsWith("/social/");
+  } catch {
+    return false;
+  }
+}
+
+async function baixarHtmlSocialMercadoLivre(urlSocial = "", contexto = {}) {
+  const httpClient = contexto.httpClient || axios;
+  const timeout = Math.max(250, Number(contexto.timeout || 4500));
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+  };
+
+  try {
+    const resposta = await httpClient.get(urlSocial, {
+      maxRedirects: Math.max(0, Number(contexto.maxRedirects || 3)),
+      timeout,
+      validateStatus: () => true,
+      responseType: "text",
+      maxContentLength: 1024 * 768,
+      maxBodyLength: 1024 * 768,
+      headers
+    });
+    const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
+    return {
+      ok: Number(resposta.status || 0) >= 200 && Number(resposta.status || 0) < 400,
+      statusHttp: resposta.status || "",
+      html,
+      urlFinal: urlRespostaHttp(resposta, urlSocial)
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      statusHttp: erro.response?.status || "",
+      html: "",
+      urlFinal: urlSocial,
+      erro: erro.message || "falha_html_social"
+    };
+  }
+}
+
 function urlAmazonComAsinExplicito(url = "") {
   try {
     const parsed = new URL(texto(url));
@@ -719,6 +769,30 @@ async function resolverRedirectClonador(url = "", opcoes = {}) {
   }
 
   const urlFinal = resultado.urlExpandida || resultado.urlFinal || "";
+  if (resultado.ok && urlSocialMercadoLivre(urlFinal)) {
+    const paginaSocial = await baixarHtmlSocialMercadoLivre(urlFinal, opcoes);
+    const prova = paginaSocial.ok
+      ? extrairProvaIdentidadeMercadoLivreHtml(paginaSocial.html || "")
+      : { ok: false, motivo: paginaSocial.erro || `http_${paginaSocial.statusHttp || "sem_status"}` };
+
+    if (prova.ok && urlMercadoLivreComMlbExplicito(prova.urlProduto)) {
+      const final = aplicarIdentidadeCanonicaRedirect({
+        ...resultado,
+        urlOriginal,
+        urlFinal: prova.urlProduto,
+        urlExpandida: prova.urlProduto,
+        marketplaceDetectado: "mercadolivre",
+        resolver: "meli_la_clonador",
+        metodo: "html",
+        motivo: "redirect_resolvido_marketplace",
+        provaIdentidadeMeli: prova,
+        htmlSocialBytes: Buffer.byteLength(String(paginaSocial.html || ""), "utf8")
+      });
+      logAuditoriaRedirect(final, Date.now() - inicio);
+      return final;
+    }
+  }
+
   if (!resultado.ok || !urlMercadoLivreComMlbExplicito(urlFinal)) {
     const rejeitado = resultadoIdentidadeNaoComprovada(urlOriginal, resultado, "identidade_ml_nao_comprovada");
     logAuditoriaRedirect({ ...rejeitado, resolver: "meli_la_clonador" }, Date.now() - inicio);

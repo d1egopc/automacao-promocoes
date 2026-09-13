@@ -1,15 +1,19 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
+  TIPO_PROVA_ESTRUTURAL,
+  TIPO_PROVA_PDP_FILTERS,
   validarProvaIdentidadeMercadoLivre
 } = require("../modules/radar/mercadolivre-social-identidade");
 const {
   _test: { motivoIdentidadeMeliClonadorNaoComprovada }
 } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
 
-function htmlSocial({ mlbItem, mlbProduto, url, urlParams, outrosCards = [], polycardsExtras = [], cardsFeaturedExtras = [] } = {}) {
+function htmlSocial({ mlbItem, mlbProduto, url, urlParams, metadataExtra = {}, outrosCards = [], polycardsExtras = [], cardsFeaturedExtras = [] } = {}) {
   const cardFeatured = {
     id: "card-featured",
     recommendation_data: {
@@ -19,7 +23,8 @@ function htmlSocial({ mlbItem, mlbProduto, url, urlParams, outrosCards = [], pol
             id: mlbItem,
             product_id: mlbProduto,
             url,
-            url_params: urlParams
+            url_params: urlParams,
+            ...metadataExtra
           },
           pictures: { pictures: [] }
         }, ...polycardsExtras]
@@ -64,9 +69,39 @@ for (const caso of casosReais) {
   assert.strictEqual(prova.ok, true, caso.mlbItem);
   assert.strictEqual(prova.mlbItem, caso.mlbItem);
   assert.strictEqual(prova.mlbProduto, caso.mlbProduto);
+  assert.strictEqual(prova.tipoProva, TIPO_PROVA_PDP_FILTERS);
   assert.strictEqual(validarProvaIdentidadeMercadoLivre(prova).ok, true);
   assert.strictEqual(motivoEngine(prova), "", `${caso.mlbItem} deve liberar HTML estruturado`);
 }
+
+const provaEstruturalSemPdp = extrairProvaIdentidadeMercadoLivreHtml(htmlSocial({
+  mlbItem: "MLB7777777777",
+  mlbProduto: "MLB33333333",
+  url: "www.mercadolivre.com.br/produto-estrutural/p/MLB33333333",
+  urlParams: "?matt_event_ts=123",
+  metadataExtra: {
+    wid: "MLB7777777777",
+    pid: "MLBP33333333",
+    pid_extended: "MLBP33333333_MLB7777777777"
+  }
+}));
+assert.strictEqual(provaEstruturalSemPdp.ok, true);
+assert.strictEqual(provaEstruturalSemPdp.tipoProva, TIPO_PROVA_ESTRUTURAL);
+assert.strictEqual(validarProvaIdentidadeMercadoLivre(provaEstruturalSemPdp).ok, true);
+assert.strictEqual(motivoEngine(provaEstruturalSemPdp), "", "prova estrutural inequívoca sem pdp_filters deve liberar");
+
+const provaRecommendationSemPdp = extrairProvaIdentidadeMercadoLivreHtml(htmlSocial({
+  mlbItem: "MLB7777777777",
+  mlbProduto: "MLB33333333",
+  url: "www.mercadolivre.com.br/produto-estrutural/p/MLB33333333",
+  urlParams: "?matt_event_ts=123",
+  metadataExtra: {
+    wid: "MLB7777777777",
+    pid_extended: "MLBP33333333_MLB7777777777",
+    url_fragments: "#polycard_client=recommendations_home_affiliate-profile&reco_item_pos=0"
+  }
+}));
+assert.strictEqual(provaRecommendationSemPdp.ok, false);
 
 const semIdentidade = extrairProvaIdentidadeMercadoLivreHtml("<html><body>MLB999999999 solto</body></html>");
 assert.strictEqual(semIdentidade.ok, false);
@@ -122,5 +157,15 @@ assert.strictEqual(
   "identidade_ml_nao_comprovada"
 );
 assert.strictEqual(motivoEngine(null, "parametro", ""), "identidade_ml_nao_comprovada");
+
+const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+assert.ok(
+  fonteIndex.includes("diagnosticarProdutoMercadoLivreIntermediarioRadar("),
+  "Radar deve centralizar prova/fallback do HTML social em helper estruturado"
+);
+assert.ok(
+  !fonteIndex.includes("produtoHtml || await extrairProdutoMercadoLivreIntermediarioRadar(resolvida)"),
+  "Radar nao deve baixar o HTML social uma segunda vez apos ja ter paginaIntermediaria"
+);
 
 console.log("mercadolivre-social-identidade-segura.test.js ok");
