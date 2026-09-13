@@ -556,11 +556,11 @@ async function comporBaseVisualComum(base = {}, camadasExtras = [], opcoes = {})
     .toBuffer();
 }
 
-async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
+async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer, desabilitarMascaraNeutraRodape = false } = {}) {
   const base = await prepararBaseVisualComumImagem(imagemBuffer);
   const composicaoNeutraOff = calcularComposicaoNeutraOff(base);
   const mascaraNeutraRodape = composicaoNeutraOff.mascara;
-  const camadasNeutras = mascaraNeutraRodape.aplicada
+  const camadasNeutras = !desabilitarMascaraNeutraRodape && mascaraNeutraRodape.aplicada
     ? [{
         input: svgMascaraNeutraRodape({ height: mascaraNeutraRodape.height }),
         left: 0,

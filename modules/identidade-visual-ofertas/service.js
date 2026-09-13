@@ -207,7 +207,7 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
     });
   }
 
-  async function aplicarPadraoGlobalNeutro({ clienteId = "admin", imagemOriginal = "", motivoIdentidade = "", resolucao = {}, contexto = {}, ofertaId = "" } = {}, opcoes = {}) {
+  async function aplicarPadraoGlobalNeutro({ clienteId = "admin", imagemOriginal = "", motivoIdentidade = "", resolucao = {}, contexto = {}, ofertaId = "", marketplace = "" } = {}, opcoes = {}) {
     if (opcoes.padronizarImagemGlobal === false) {
       return {
         aplicada: false,
@@ -267,7 +267,8 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
             httpClient: opcoes.httpClient || deps.httpClient,
             timeoutMs: opcoes.timeoutMs
           });
-      const render = await rendererIdentidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer });
+      const desabilitarMascaraNeutraRodape = texto(marketplace).toLowerCase().replace(/[\s_-]+/g, "") === "mercadolivre";
+      const render = await rendererIdentidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer, desabilitarMascaraNeutraRodape });
       storageIdentidadeVisual.salvarBufferPublico(destino, render.buffer);
       logIdentidadeVisual("[IMAGEM-GLOBAL-NEUTRA-APLICADA]", { clienteId, ofertaId, cacheKey, motivo: "render_ok" });
       return {
@@ -470,7 +471,8 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
         motivoIdentidade: "politica_desabilitada",
         resolucao,
         contexto,
-        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || ""
+        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || "",
+        marketplace: oferta.marketplace || oferta.mercado || oferta.marketplaceOriginalRadar || ""
       }, opcoes);
     }
 
@@ -481,7 +483,8 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
         motivoIdentidade: "config_inativa",
         resolucao,
         contexto,
-        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || ""
+        ofertaId: oferta.id || oferta.oferta_id || oferta.uuid || "",
+        marketplace: oferta.marketplace || oferta.mercado || oferta.marketplaceOriginalRadar || ""
       }, opcoes);
     }
 
