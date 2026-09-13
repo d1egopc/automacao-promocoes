@@ -6,6 +6,7 @@ const URL_PRODUTO = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-pa
 const URL_PRODUTO_BERMUDA = "https://produto.mercadolivre.com.br/MLB-3382028526-kit-3-bermuda-masculina-sarja-short-jeans-social-brim-lisa-_JM";
 const URL_AFILIADA = "https://meli.la/cliente-fallback";
 const URL_SOCIAL_AMBIGUA = "https://www.mercadolivre.com.br/social/perfil?ref=ambigua";
+const URL_IMAGEM_OFICIAL = "https://http2.mlstatic.com/D_NQ_NP_2X_OFICIAL-MLB.jpg";
 
 function job(extras = {}) {
   return {
@@ -145,10 +146,11 @@ function produtoHtmlOk() {
   };
 }
 
-function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA, recusarMeliLaDireto = false } = {}) {
+function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA, recusarMeliLaDireto = false, imagemOficial = null, imagemOficialErro = null } = {}) {
   const chamadas = {
     importar: [],
-    afiliado: []
+    afiliado: [],
+    imagemOficial: []
   };
   return {
     chamadas,
@@ -170,6 +172,15 @@ function depsBase({ produto = null, wall = false, linkAfiliado = URL_AFILIADA, r
         chamadas.afiliado.push({ url, temIntegracao: Boolean(integracao), clienteId: contexto?.clienteId || "" });
         if (recusarMeliLaDireto && /^https?:\/\/(?:www\.)?meli\.la\//i.test(String(url || ""))) return "";
         return linkAfiliado;
+      },
+      buscarImagemOficialMercadoLivrePorMlb: async (mlb, opcoes = {}) => {
+        chamadas.imagemOficial.push({
+          mlb,
+          clienteId: opcoes.clienteId || "",
+          temGetIntegracaoCliente: typeof opcoes.getIntegracaoCliente === "function"
+        });
+        if (imagemOficialErro) throw imagemOficialErro;
+        return imagemOficial || { imagem: "", origem: "", motivo: "api_oficial_mlb_sem_imagem" };
       }
     }
   };
@@ -246,6 +257,133 @@ async function testarWallComImagemRadarHttpValidaPreservaImagem() {
   assert.strictEqual(resultado.imagem, imagemRadar);
   assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
   assert.strictEqual(resultado.metadata.origemImagem, "radar_mirror/mensagem.midia.imagemOriginal");
+}
+
+async function testarWallRadarComImagemOficialSubstituiSomenteImagem() {
+  const imagemRadar = "https://cdn.exemplo.com/produto-radar-com-logo.jpg";
+  const contexto = depsBase({
+    wall: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url",
+      motivo: "api_oficial_mlb_imagem_recuperada",
+      title: "Titulo API ignorado",
+      price: 9999
+    }
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      midia: {
+        imagemOrigem: "mensagem",
+        imagemOriginal: imagemRadar
+      }
+    }),
+    links: links(),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
+  assert.strictEqual(resultado.preco, 149.9);
+  assert.strictEqual(resultado.precoOriginal, 229.9);
+  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(resultado.linkAfiliado, URL_AFILIADA);
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+  assert.strictEqual(resultado.imagemOrigem, "api_mercadolibre.items.pictures[0].secure_url");
+  assert.strictEqual(resultado.metadata.origemImagem, "api_mercadolibre.items.pictures[0].secure_url");
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB777777");
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(resultado, "title"), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(resultado, "price"), false);
+}
+
+async function testarWallRadarFalhaImagemOficialMantemRadarExata() {
+  const imagemRadar = "https://cdn.exemplo.com/produto-radar-preservado.jpg";
+  const contexto = depsBase({
+    wall: true,
+    imagemOficialErro: new Error("api_indisponivel")
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      midia: {
+        imagemOrigem: "mensagem",
+        imagemOriginal: imagemRadar
+      }
+    }),
+    links: links(),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(resultado.metadata.origemImagem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
+  assert.strictEqual(resultado.preco, 149.9);
+  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+}
+
+async function testarWallRadarPdpFiltersUsaItemIdSemUsarCatalogo() {
+  const imagemRadar = "https://cdn.exemplo.com/radar-pdp.jpg";
+  const urlPdp = "https://www.mercadolivre.com.br/processador-amd/p/MLB32444906?pdp_filters=item_id%3AMLB4876269031";
+  const contexto = depsBase({
+    wall: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      midia: {
+        imagemOrigem: "mensagem",
+        imagemOriginal: imagemRadar
+      }
+    }),
+    links: links(urlPdp),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB4876269031");
+}
+
+async function testarWallRadarPdpSemItemIdNaoChamaImagemOficial() {
+  const imagemRadar = "https://cdn.exemplo.com/radar-pdp-sem-item.jpg";
+  const urlPdp = "https://www.mercadolivre.com.br/processador-amd/p/MLB32444906";
+  const contexto = depsBase({
+    wall: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      midia: {
+        imagemOrigem: "mensagem",
+        imagemOriginal: imagemRadar
+      }
+    }),
+    links: links(urlPdp),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
 }
 
 async function testarWallComThumbnailEDirectPathSegueSemImagem() {
@@ -415,6 +553,7 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO), "URL candidata insegura nao pode vazar para fallback puro Radar");
   assert.ok(!serializado.includes("MLB777777"), "MLB candidato inseguro nao pode vazar para fallback puro Radar");
@@ -446,6 +585,7 @@ async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?ref=sem-produto");
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
 }
 
 async function testarRadarSocialComFalhaAfiliadoContinuaInsuficiente() {
@@ -498,6 +638,7 @@ async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
 }
 
 async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
@@ -532,9 +673,64 @@ async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "URL candidata insegura nao pode vazar para fallback puro Clone");
   assert.ok(!serializado.includes("MLB3382028526"), "MLB candidato inseguro nao pode vazar para fallback puro Clone");
+}
+
+async function testarClonadorComProvaUsaMlbItemParaImagemOficial() {
+  const shortlink = "https://meli.la/shortlink-prova-imagem-oficial";
+  const imagemClone = "https://cdn.exemplo.com/clone-com-marca.jpg";
+  const prova = {
+    ok: true,
+    origem: "card-featured.polycards[0].metadata",
+    cardFeaturedUnico: true,
+    totalPolycards: 1,
+    mlbItem: "MLB4876269031",
+    mlbProduto: "MLB32444906",
+    urlProduto: "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5600gt/p/MLB32444906?pdp_filters=item_id%3AMLB4876269031"
+  };
+  const contexto = depsBase({
+    wall: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: "https://www.mercadolivre.com.br/social/grupostecnoart",
+    linkOriginalLimpo: prova.urlProduto,
+    linkResolvido: prova.urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "html",
+    provaIdentidadeMeli: prova
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job({ evento_id: 655 }),
+    evento: eventoClonador({
+      titulo: "Processador AMD Ryzen 5 5600GT",
+      preco: 799.9,
+      precoAnterior: 999.9,
+      cupom: "AMD100",
+      beneficio: "Cupom AMD100 no Pix.",
+      imagem: imagemClone
+    }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Processador AMD Ryzen 5 5600GT");
+  assert.strictEqual(resultado.preco, 799.9);
+  assert.strictEqual(resultado.precoOriginal, 999.9);
+  assert.strictEqual(resultado.cupom, "AMD100");
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+  assert.strictEqual(resultado.imagemOrigem, "api_mercadolibre.items.pictures[0].secure_url");
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB4876269031");
 }
 
 async function testarClonadorSocialComParametroExplicitoEstruturadoPassa() {
@@ -645,6 +841,10 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarHtmlFactualPreservado();
   await testarWallComRadarSuficienteRecuperaOferta();
   await testarWallComImagemRadarHttpValidaPreservaImagem();
+  await testarWallRadarComImagemOficialSubstituiSomenteImagem();
+  await testarWallRadarFalhaImagemOficialMantemRadarExata();
+  await testarWallRadarPdpFiltersUsaItemIdSemUsarCatalogo();
+  await testarWallRadarPdpSemItemIdNaoChamaImagemOficial();
   await testarWallComThumbnailEDirectPathSegueSemImagem();
   await testarWallSemTituloFalhaSeguro();
   await testarTituloWindowsIsoladoContinuaBloqueado();
@@ -657,6 +857,7 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarSocialComFalhaAfiliadoContinuaInsuficiente();
   await testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado();
   await testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
+  await testarClonadorComProvaUsaMlbItemParaImagemOficial();
   await testarClonadorSocialComParametroExplicitoEstruturadoPassa();
   await testarClonadorParametroSocialSemVinculoSegueFallbackPuro();
   await testarOrigemDiferenteNaoUsaComercialCapturadoClonador();

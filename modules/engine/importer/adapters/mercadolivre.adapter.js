@@ -4,6 +4,7 @@ const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-uni
 const { resolverImagemUniversal } = require("../../../../modules/imagens/resolver-imagem-universal");
 const { resumoLinksClassificados } = require("../../link-role.service");
 const { validarProvaIdentidadeMercadoLivre } = require("../../../radar/mercadolivre-social-identidade");
+const { buscarImagemOficialMercadoLivrePorMlb } = require("../importer.service");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -386,6 +387,117 @@ function resolverImagemRadarFallbackMercadoLivre(evento = {}, job = {}) {
   };
 }
 
+function normalizarMlbItemApiMercadoLivre(valor = "") {
+  const match = textoMercadoLivre(valor).match(/^MLB-?(\d{6,})$/i);
+  return match ? `MLB${match[1]}` : "";
+}
+
+function extrairMlbItemPdpFiltersMercadoLivre(url = "") {
+  try {
+    const valor = textoMercadoLivre(url);
+    if (!isUrlProdutoMercadoLivre(valor)) return "";
+    const parsed = new URL(valor);
+    for (const filtro of parsed.searchParams.getAll("pdp_filters")) {
+      const match = String(filtro || "").match(/^item_id\s*:\s*(MLB-?\d{6,})$/i);
+      const mlb = normalizarMlbItemApiMercadoLivre(match?.[1] || "");
+      if (mlb) return mlb;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+function extrairMlbItemUrlDiretaMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(textoMercadoLivre(url));
+    if (parsed.hostname.toLowerCase() !== "produto.mercadolivre.com.br") return "";
+    const match = parsed.pathname.match(/^\/MLB-?(\d{6,})(?:\D|$)/i);
+    return match ? `MLB${match[1]}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolverMlbItemImagemOficialFallbackMercadoLivre({
+  resolucaoProduto = {},
+  urlOriginalEngine = "",
+  urlImportador = "",
+  linkExpandidoEngine = ""
+} = {}) {
+  const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar);
+  const mlbProva = normalizarMlbItemApiMercadoLivre(provaValida?.mlbItem || "");
+  if (mlbProva) return { mlb: mlbProva, origem: "provaIdentidadeMeli.mlbItem" };
+
+  const urlsProduto = [
+    urlImportador,
+    linkExpandidoEngine,
+    resolucaoProduto.urlProduto,
+    resolucaoProduto.linkExpandidoEngine,
+    resolucaoRadar.linkOriginalLimpo,
+    resolucaoRadar.linkResolvido,
+    resolucaoRadar.urlResolvida,
+    urlOriginalEngine
+  ].map(url => textoMercadoLivre(url)).filter(Boolean);
+
+  for (const url of urlsProduto) {
+    const mlb = extrairMlbItemPdpFiltersMercadoLivre(url);
+    if (mlb) return { mlb, origem: "pdp_filters.item_id" };
+  }
+
+  for (const url of urlsProduto) {
+    const mlb = extrairMlbItemUrlDiretaMercadoLivre(url);
+    if (mlb) return { mlb, origem: "url_direta_item" };
+  }
+
+  return { mlb: "", origem: "" };
+}
+
+function origemImagemOficialApiMercadoLivreSegura(origem = "") {
+  const valor = textoMercadoLivre(origem);
+  return /^api_mercadolibre\.items\.(?:pictures\[\d+\]\.(?:secure_url|url)|secure_thumbnail|thumbnail|thumbnailUrl|picture_url)$/i.test(valor);
+}
+
+async function resolverImagemOficialFallbackMercadoLivre(imagemCapturada = {}, contexto = {}) {
+  const imagemPreservada = { ...objetoSeguro(imagemCapturada) };
+  const identidade = resolverMlbItemImagemOficialFallbackMercadoLivre(contexto);
+  if (!identidade.mlb) return imagemPreservada;
+
+  const buscarImagemOficial = typeof contexto.deps?.buscarImagemOficialMercadoLivrePorMlb === "function"
+    ? contexto.deps.buscarImagemOficialMercadoLivrePorMlb
+    : buscarImagemOficialMercadoLivrePorMlb;
+
+  try {
+    const oficial = await buscarImagemOficial(identidade.mlb, {
+      clienteId: contexto.clienteId || "",
+      integracao: contexto.integracao || null,
+      getIntegracaoCliente: contexto.deps?.getIntegracaoCliente
+    });
+    if (!origemImagemOficialApiMercadoLivreSegura(oficial?.origem || "")) return imagemPreservada;
+    const resolvida = resolverImagemUniversal({ imagem: oficial?.imagem || "" });
+    if (!resolvida.imagem) return imagemPreservada;
+    return {
+      ...imagemPreservada,
+      imagem: resolvida.imagem,
+      imagemOrigem: oficial.origem || "api_mercadolibre.items.pictures",
+      imagemStatus: "api_oficial_mlb",
+      imagemTentativas: [
+        ...(Array.isArray(imagemPreservada.imagemTentativas) ? imagemPreservada.imagemTentativas : []),
+        {
+          origem: oficial.origem || "api_mercadolibre.items",
+          status: "selecionada",
+          motivo: oficial.motivo || "api_oficial_mlb_imagem_recuperada",
+          mlbItem: identidade.mlb,
+          identidadeOrigem: identidade.origem
+        }
+      ]
+    };
+  } catch {
+    return imagemPreservada;
+  }
+}
+
 function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motivo = "") {
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
   const urlSocial = [
@@ -563,14 +675,23 @@ async function montarFallbackClonadorMercadoLivre({
   });
   const categoria = classificarCategoriaOferta({ titulo, nome: titulo }, titulo);
   const precoOriginalValido = Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "";
+  const imagemFinal = await resolverImagemOficialFallbackMercadoLivre(imagemClonador, {
+    deps,
+    clienteId,
+    integracao,
+    resolucaoProduto,
+    urlOriginalEngine,
+    urlImportador,
+    linkExpandidoEngine
+  });
   const produtoFallback = {
     titulo,
     nome: titulo,
     precoAtual: preco,
     preco,
     precoOriginal: precoOriginalValido,
-    imagem: imagemClonador.imagem,
-    imagemOrigem: imagemClonador.imagemOrigem,
+    imagem: imagemFinal.imagem,
+    imagemOrigem: imagemFinal.imagemOrigem,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     urlFinal: linkExpandidoEngine || urlImportador,
@@ -594,10 +715,10 @@ async function montarFallbackClonadorMercadoLivre({
     precoOriginal: precoOriginalValido,
     descontoPercentual: "",
     economia: "",
-    imagem: imagemClonador.imagem,
-    imagemOrigem: imagemClonador.imagemOrigem,
-    imagemStatus: imagemClonador.imagemStatus,
-    imagemTentativas: imagemClonador.imagemTentativas,
+    imagem: imagemFinal.imagem,
+    imagemOrigem: imagemFinal.imagemOrigem,
+    imagemStatus: imagemFinal.imagemStatus,
+    imagemTentativas: imagemFinal.imagemTentativas,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     linkAfiliado,
@@ -622,7 +743,7 @@ async function montarFallbackClonadorMercadoLivre({
       origemComercial: "clonador_grupos",
       origemPreco: "clonador_grupos",
       origemTitulo: "clonador_grupos",
-      origemImagem: imagemClonador.imagemOrigem || "nenhuma",
+      origemImagem: imagemFinal.imagemOrigem || "nenhuma",
       motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
       jobId: job.id,
       eventoId: job.evento_id,
@@ -735,14 +856,23 @@ async function montarFallbackRadarMercadoLivre({
     linkExpandidoEngine,
     linkAfiliadoPrincipal: linkAfiliado
   });
+  const imagemFinal = await resolverImagemOficialFallbackMercadoLivre(imagemRadar, {
+    deps,
+    clienteId,
+    integracao,
+    resolucaoProduto,
+    urlOriginalEngine,
+    urlImportador,
+    linkExpandidoEngine
+  });
   const produtoFallback = {
     titulo,
     nome: titulo,
     precoAtual: preco,
     preco,
     precoOriginal: Number.isFinite(precoOriginal) && precoOriginal > 0 ? precoOriginal : "",
-    imagem: imagemRadar.imagem,
-    imagemOrigem: imagemRadar.imagemOrigem,
+    imagem: imagemFinal.imagem,
+    imagemOrigem: imagemFinal.imagemOrigem,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     urlFinal: linkExpandidoEngine || urlImportador,
@@ -763,10 +893,10 @@ async function montarFallbackRadarMercadoLivre({
     precoOriginal: produtoFallback.precoOriginal,
     descontoPercentual: "",
     economia: "",
-    imagem: imagemRadar.imagem,
-    imagemOrigem: imagemRadar.imagemOrigem,
-    imagemStatus: imagemRadar.imagemStatus,
-    imagemTentativas: imagemRadar.imagemTentativas,
+    imagem: imagemFinal.imagem,
+    imagemOrigem: imagemFinal.imagemOrigem,
+    imagemStatus: imagemFinal.imagemStatus,
+    imagemTentativas: imagemFinal.imagemTentativas,
     linkOriginal: urlOriginalEngine,
     linkExpandido: linkExpandidoEngine || urlImportador,
     linkAfiliado,
@@ -789,7 +919,7 @@ async function montarFallbackRadarMercadoLivre({
       origemComercial: "radar",
       origemPreco: "texto_radar",
       origemTitulo: "texto_radar",
-      origemImagem: imagemRadar.imagemOrigem || "nenhuma",
+      origemImagem: imagemFinal.imagemOrigem || "nenhuma",
       motivoFallback: falhaImportador.motivo || "ml_wall_captcha",
       jobId: job.id,
       eventoId: job.evento_id,
