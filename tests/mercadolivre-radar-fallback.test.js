@@ -1,12 +1,16 @@
 const assert = require("assert");
 
-const { importarMercadoLivreEngine } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
+const {
+  importarMercadoLivreEngine,
+  _test: testesMercadoLivre
+} = require("../modules/engine/importer/adapters/mercadolivre.adapter");
 
 const URL_PRODUTO = "https://produto.mercadolivre.com.br/MLB-777777-furadeira-parafusadeira-impacto-21v-_JM";
 const URL_PRODUTO_BERMUDA = "https://produto.mercadolivre.com.br/MLB-3382028526-kit-3-bermuda-masculina-sarja-short-jeans-social-brim-lisa-_JM";
 const URL_AFILIADA = "https://meli.la/cliente-fallback";
 const URL_SOCIAL_AMBIGUA = "https://www.mercadolivre.com.br/social/perfil?ref=ambigua";
 const URL_IMAGEM_OFICIAL = "https://http2.mlstatic.com/D_NQ_NP_2X_OFICIAL-MLB.jpg";
+const URL_PRODUTO_COM_PROVA = "https://www.mercadolivre.com.br/processador-amd-ryzen-5-5600gt/p/MLB32444906?pdp_filters=item_id%3AMLB4876269031";
 
 function job(extras = {}) {
   return {
@@ -126,6 +130,18 @@ function links(url = URL_PRODUTO) {
     url_expandida: url,
     marketplace_detectado: "mercadolivre"
   }];
+}
+
+function provaMeliValida() {
+  return {
+    ok: true,
+    origem: "card-featured.polycards[0].metadata",
+    cardFeaturedUnico: true,
+    totalPolycards: 1,
+    mlbItem: "MLB4876269031",
+    mlbProduto: "MLB32444906",
+    urlProduto: URL_PRODUTO_COM_PROVA
+  };
 }
 
 function produtoHtmlOk() {
@@ -526,7 +542,7 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
     urlResolvida: URL_SOCIAL_AMBIGUA,
     linkOriginalLimpo: URL_PRODUTO,
     linkResolvido: URL_PRODUTO,
-    metodoResolucaoMeli: "html"
+    metodoResolucaoMeli: "fallback_intermediario"
   });
 
   const resultado = await importarMercadoLivreEngine({
@@ -557,6 +573,113 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO), "URL candidata insegura nao pode vazar para fallback puro Radar");
   assert.ok(!serializado.includes("MLB777777"), "MLB candidato inseguro nao pode vazar para fallback puro Radar");
+}
+
+async function testarRadarUrlResolvidaProdutoDiretoViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-url-resolvida-produto";
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_PRODUTO,
+    linkResolvido: "",
+    linkOriginalLimpo: "",
+    tipoLinkRadar: "shortlink_meli_social",
+    metodoResolucaoMeli: "redirect"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
+  assert.strictEqual(resultado.preco, 149.9);
+  assert.strictEqual(resultado.precoOriginal, 229.9);
+  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO);
+}
+
+async function testarRadarProdutoComProvaForteViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-produto-com-prova";
+  const prova = provaMeliValida();
+
+  const transporte = testesMercadoLivre.resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(shortlink, {
+    urlProduto: prova.urlProduto,
+    linkExpandidoEngine: prova.urlProduto,
+    resolucaoRadar: {
+      ok: true,
+      urlResolvida: URL_SOCIAL_AMBIGUA,
+      linkOriginalLimpo: prova.urlProduto,
+      linkResolvido: prova.urlProduto,
+      tipoLinkRadar: "shortlink_meli",
+      metodoResolucaoMeli: "html",
+      provaIdentidadeMeli: prova
+    }
+  });
+
+  assert.strictEqual(transporte, URL_PRODUTO_COM_PROVA);
+}
+
+async function testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-produto-diverge-prova";
+  const prova = provaMeliValida();
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
+    linkResolvido: URL_PRODUTO_BERMUDA,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "html",
+    provaIdentidadeMeli: prova
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
+  assert.strictEqual(resultado.preco, 149.9);
+  assert.strictEqual(resultado.precoOriginal, 229.9);
+  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+}
+
+async function testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado() {
+  const shortlink = "https://meli.la/shortlink-produto-direto-parametro-divergente";
+  const prova = provaMeliValida();
+  const produtoAComParametroB = `${URL_PRODUTO}?pdp_filters=item_id%3A${prova.mlbItem}`;
+
+  const transporte = testesMercadoLivre.resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(shortlink, {
+    urlProduto: produtoAComParametroB,
+    linkExpandidoEngine: produtoAComParametroB,
+    resolucaoRadar: {
+      ok: true,
+      urlResolvida: URL_SOCIAL_AMBIGUA,
+      linkOriginalLimpo: produtoAComParametroB,
+      linkResolvido: produtoAComParametroB,
+      tipoLinkRadar: "shortlink_meli",
+      metodoResolucaoMeli: "html",
+      provaIdentidadeMeli: prova
+    }
+  });
+
+  assert.strictEqual(transporte, URL_SOCIAL_AMBIGUA);
 }
 
 async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
@@ -596,7 +719,7 @@ async function testarRadarSocialComFalhaAfiliadoContinuaInsuficiente() {
     urlResolvida: URL_SOCIAL_AMBIGUA,
     linkOriginalLimpo: URL_PRODUTO,
     linkResolvido: URL_PRODUTO,
-    metodoResolucaoMeli: "html"
+    metodoResolucaoMeli: "fallback_intermediario"
   });
 
   const resultado = await importarMercadoLivreEngine({
@@ -636,9 +759,33 @@ async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
   assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, shortlink);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
+}
+
+async function testarFallbackPuroSemTransporteSeguroNaoEnviaMeliLaAfiliado() {
+  const shortlink = "https://meli.la/shortlink-sem-transporte-seguro";
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: false,
+    urlResolvida: "",
+    linkResolvido: URL_SOCIAL_AMBIGUA,
+    metodoResolucaoMeli: "html"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
 }
 
 async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
@@ -650,7 +797,7 @@ async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
     urlResolvida: URL_SOCIAL_AMBIGUA,
     linkOriginalLimpo: URL_PRODUTO_BERMUDA,
     linkResolvido: URL_PRODUTO_BERMUDA,
-    metodoResolucaoMeli: "html"
+    metodoResolucaoMeli: "fallback_intermediario"
   });
 
   const resultado = await importarMercadoLivreEngine({
@@ -754,6 +901,7 @@ async function testarClonadorSocialComParametroExplicitoEstruturadoPassa() {
   assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, true);
   assert.strictEqual(contexto.chamadas.importar.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BERMUDA);
 }
 
 async function testarClonadorParametroSocialSemVinculoSegueFallbackPuro() {
@@ -782,6 +930,8 @@ async function testarClonadorParametroSocialSemVinculoSegueFallbackPuro() {
   assert.strictEqual(contexto.chamadas.importar.length, 0);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?reco_backend=item_decorator");
+  const serializado = JSON.stringify(resultado);
+  assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "produto candidato por recommendation nao pode vazar para fallback puro Clone");
 }
 
 async function testarOrigemDiferenteNaoUsaComercialCapturadoClonador() {
@@ -853,9 +1003,14 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallComFalhaAfiliadoFalhaSeguro();
   await testarWallClonadorComContratoSuficienteRecuperaOfertaSemImagem();
   await testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
+  await testarRadarUrlResolvidaProdutoDiretoViraTransporteAfiliado();
+  await testarRadarProdutoComProvaForteViraTransporteAfiliado();
+  await testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado();
+  await testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado();
   await testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente();
   await testarRadarSocialComFalhaAfiliadoContinuaInsuficiente();
   await testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado();
+  await testarFallbackPuroSemTransporteSeguroNaoEnviaMeliLaAfiliado();
   await testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato();
   await testarClonadorComProvaUsaMlbItemParaImagemOficial();
   await testarClonadorSocialComParametroExplicitoEstruturadoPassa();

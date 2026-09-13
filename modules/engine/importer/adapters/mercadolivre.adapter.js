@@ -520,15 +520,54 @@ function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motiv
   };
 }
 
+function mlbsUrlTransporteAfiliadoMercadoLivre(url = "") {
+  const mlbDireto = extrairMlbItemUrlDiretaMercadoLivre(url);
+  if (mlbDireto) return [mlbDireto];
+
+  return [
+    extrairMlbItemPdpFiltersMercadoLivre(url)
+  ].filter(Boolean);
+}
+
+function urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url = "", prova = {}) {
+  const mlbsUrl = mlbsUrlTransporteAfiliadoMercadoLivre(url);
+  const mlbsProva = [
+    prova.mlbItem,
+    prova.mlbProduto
+  ].map(normalizarMlbItemApiMercadoLivre).filter(Boolean);
+  return Boolean(mlbsUrl.length && mlbsUrl.some(mlb => mlbsProva.includes(mlb)));
+}
+
+function resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar = {}, resolucaoProduto = {}) {
+  const provas = [
+    validarProvaSocialMercadoLivre(resolucaoRadar),
+    validarParametroProdutoEstruturadoMercadoLivre(resolucaoRadar, resolucaoProduto)
+  ].filter(Boolean);
+  if (!provas.length) return "";
+
+  return [
+    resolucaoProduto.urlProduto,
+    resolucaoProduto.linkExpandidoEngine,
+    resolucaoRadar.linkResolvido,
+    resolucaoRadar.linkOriginalLimpo
+  ]
+    .map(url => textoMercadoLivre(url))
+    .filter(isUrlProdutoMercadoLivre)
+    .find(url => provas.some(prova => urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url, prova))) || "";
+}
+
 function resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine = "", resolucaoProduto = {}) {
   const urlOriginal = textoMercadoLivre(urlOriginalEngine);
   if (!isMeliLa(urlOriginal)) return "";
 
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
   const urlResolvidaDireta = textoMercadoLivre(resolucaoRadar.urlResolvida || "");
-  if (isUrlProdutoMercadoLivre(urlResolvidaDireta) || isSocialMercadoLivre(urlResolvidaDireta)) {
-    return urlResolvidaDireta;
-  }
+  if (extrairMlbItemUrlDiretaMercadoLivre(urlResolvidaDireta)) return urlResolvidaDireta;
+
+  const urlProdutoProvada = resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar, resolucaoProduto);
+  if (urlProdutoProvada) return urlProdutoProvada;
+
+  if (isSocialMercadoLivre(urlResolvidaDireta)) return urlResolvidaDireta;
 
   return "";
 }
@@ -599,6 +638,7 @@ async function montarFallbackClonadorMercadoLivre({
   expandiuMeliLa = false,
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
+  bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
   const contrato = contratoComercialClonadorMercadoLivre(evento, job);
@@ -611,12 +651,12 @@ async function montarFallbackClonadorMercadoLivre({
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
-  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || urlProduto);
+  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || (bloquearMeliLaTransporteAfiliado && isMeliLa(urlProduto) ? "" : urlProduto));
   const produtoIdDetectado = extrairMlbMercadoLivre(linkExpandidoEngine || urlImportador || urlOriginalEngine);
   const imagemClonador = resolverImagemRadarFallbackMercadoLivre(evento, job);
   let linkAfiliado = "";
 
-  if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
+  if (temUrl && urlAfiliavel && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
     try {
       linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlAfiliavel, integracao, { clienteId }));
     } catch {}
@@ -786,6 +826,7 @@ async function montarFallbackRadarMercadoLivre({
   expandiuMeliLa = false,
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
+  bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
   const titulo = extrairTituloRadarMercadoLivre(evento);
@@ -797,10 +838,10 @@ async function montarFallbackRadarMercadoLivre({
   const temPreco = Number.isFinite(preco) && preco > 0;
   const temUrl = Boolean(urlImportador || linkExpandidoEngine || urlOriginalEngine);
   const urlProduto = urlImportador || linkExpandidoEngine || urlOriginalEngine;
-  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || urlProduto);
+  const urlAfiliavel = textoMercadoLivre(urlTransporteAfiliado || (bloquearMeliLaTransporteAfiliado && isMeliLa(urlProduto) ? "" : urlProduto));
   let linkAfiliado = "";
 
-  if (temUrl && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
+  if (temUrl && urlAfiliavel && typeof deps.gerarLinkAfiliadoMercadoLivre === "function") {
     try {
       linkAfiliado = textoMercadoLivre(await deps.gerarLinkAfiliadoMercadoLivre(urlAfiliavel, integracao, { clienteId }));
     } catch {}
@@ -977,6 +1018,7 @@ async function montarFallbackPuroCapturaMercadoLivre({
     expandiuMeliLa: false,
     resolucaoProduto: resolucaoProdutoSanitizada,
     urlTransporteAfiliado,
+    bloquearMeliLaTransporteAfiliado: true,
     falhaImportador
   };
 
@@ -2037,6 +2079,7 @@ module.exports = {
     escolherLinkMercadoLivreDetalhado,
     extrairMlbMercadoLivre,
     motivoIdentidadeMeliClonadorNaoComprovada,
+    resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre,
     similaridadeTituloMercadoLivre
   }
 };
