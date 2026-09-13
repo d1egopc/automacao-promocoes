@@ -49,12 +49,15 @@ function carregarHelpers() {
       MAX_OBJETOS_DIAGNOSTICO_MERCADO_LIVRE_RADAR,
       MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR,
       MAX_TAMANHO_JSON_DIAGNOSTICO_MERCADO_LIVRE_RADAR,
+      MAX_TRECHO_ARRAY_DIAGNOSTICO_ML,
+      MAX_NIVEIS_PATH_DIAGNOSTICO_ML,
       diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar,
       diagnosticarProdutoMercadoLivreIntermediarioRadar,
       extrairProdutoMercadoLivreDeHtmlRadar,
       logRadarMlSocialDiagnosticoHtml,
       logs: __logs,
-      chamadasRede: __chamadasRede
+      chamadasRede: __chamadasRede,
+      codigoFonte: ${JSON.stringify(codigo)}
     };
   `;
 
@@ -98,6 +101,14 @@ function htmlCardFeaturedSeguro() {
 }
 
 const helpers = carregarHelpers();
+
+{
+  const inicio = helpers.codigoFonte.indexOf("function extrairJsonObjetoContendoDiagnosticoMercadoLivreRadar");
+  const fim = helpers.codigoFonte.indexOf("function chaveAntesEstruturaDiagnosticoMercadoLivreRadar");
+  const corpo = helpers.codigoFonte.slice(inicio, fim);
+  assert.ok(inicio >= 0 && fim > inicio, "corpo do extrator estrutural deve existir");
+  assert.strictEqual(corpo.includes("chaveAntesEstruturaDiagnosticoMercadoLivreRadar("), false, "chave estrutural deve ser resolvida de forma lazy");
+}
 
 {
   assertMetodo(
@@ -207,6 +218,73 @@ const helpers = carregarHelpers();
 }
 
 {
+  const html = `<script>window.__PRELOADED_STATE__ = ${JSON.stringify({
+    recommendations: {
+      items: [
+        {
+          url_fragments: "recommendations_home_affiliate-profile",
+          tracking: {
+            reco_backend: "item_decorator"
+          },
+          metadata: {
+            id: "MLB5157756068",
+            product_id: "MLB35277819",
+            user_product_id: "MLBU2705565610"
+          }
+        }
+      ]
+    }
+  })}</script>`;
+  const diagnostico = helpers.diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(
+    html,
+    "https://produto.mercadolivre.com.br/MLB5157756068-produto-_JM"
+  );
+  const objeto = diagnostico.objetosLimitados[0];
+  assert.ok(objeto.caminhoEstrutural.includes("window.__PRELOADED_STATE__.recommendations.items[0].metadata"));
+  assert.strictEqual(objeto.tipoPai, "object");
+  assert.strictEqual(objeto.chaveAvo, "items");
+  assert.strictEqual(objeto.indiceNoArray, null);
+  assert.strictEqual(objeto.caminhoContemRecommendation, true);
+  assert.strictEqual(objeto.caminhoContemPolycard, false);
+  assert.strictEqual(objeto.caminhoContemReco, true);
+  assert.strictEqual(objeto.itemIdCandidato, "MLB5157756068");
+  assert.strictEqual(objeto.catalogProductId, "MLB35277819");
+  assert.strictEqual(objeto.userProductId, "MLBU2705565610");
+  assert.strictEqual(objeto.urlsDiretasMesmoObjeto.length, 0);
+}
+
+{
+  const html = `<script>window.__PRELOADED_STATE__ = ${JSON.stringify({
+    page: {
+      product: {
+        current: {
+          items: [
+            {
+              id: "MLB5157756068",
+              product_id: "MLB35277819",
+              user_product_id: "MLBU2705565610"
+            }
+          ]
+        }
+      }
+    }
+  })}</script>`;
+  const diagnostico = helpers.diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(
+    html,
+    "https://produto.mercadolivre.com.br/MLB5157756068-produto-_JM"
+  );
+  const objeto = diagnostico.objetosLimitados[0];
+  assert.ok(objeto.caminhoEstrutural.includes("window.__PRELOADED_STATE__.page.product.current.items[0]"));
+  assert.strictEqual(objeto.chavePai, "items");
+  assert.strictEqual(objeto.tipoPai, "array");
+  assert.strictEqual(objeto.chaveAvo, "current");
+  assert.strictEqual(objeto.indiceNoArray, 0);
+  assert.strictEqual(objeto.caminhoContemRecommendation, false);
+  assert.strictEqual(objeto.caminhoContemPolycard, false);
+  assert.strictEqual(objeto.caminhoContemReco, false);
+}
+
+{
   const html = [
     '<link rel="canonical" href="https://produto.mercadolivre.com.br/MLB-4170062689-produto-_JM">',
     '<script>{"url":"https://produto.mercadolivre.com.br/MLB-7223217402-outro-_JM"}</script>'
@@ -228,6 +306,37 @@ const helpers = carregarHelpers();
   assert.ok(diagnostico.ocorrenciasInspecionadas <= helpers.MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR);
   assert.strictEqual(diagnostico.diagnosticoTruncado, true);
   assert.strictEqual(helpers.extrairProdutoMercadoLivreDeHtmlRadar(html), diagnostico.urlProduto);
+}
+
+{
+  const filler = Array.from({ length: 2600 }, (_, indice) => `{"x":${indice}}`).join(",");
+  const html = `<script>window.__PRELOADED_STATE__ = {"items":[${filler},{"id":"MLB4170062689"}]}</script>`;
+  const diagnostico = helpers.diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(
+    html,
+    "https://produto.mercadolivre.com.br/MLB4170062689-produto-_JM"
+  );
+  const objeto = diagnostico.objetosLimitados[0];
+  assert.ok(filler.length > helpers.MAX_TRECHO_ARRAY_DIAGNOSTICO_ML);
+  assert.strictEqual(objeto.indiceNoArray, null);
+  assert.strictEqual(objeto.indiceArrayTruncado, true);
+  assert.strictEqual(diagnostico.urlProduto, "https://produto.mercadolivre.com.br/MLB4170062689-produto-_JM");
+}
+
+{
+  let objeto = { id: "MLB4170062689" };
+  for (let indice = 119; indice >= 0; indice -= 1) {
+    objeto = { [`nivel_${indice}`]: objeto };
+  }
+  const html = `<script>window.__PRELOADED_STATE__ = ${JSON.stringify(objeto)}</script>`;
+  const diagnostico = helpers.diagnosticarFallbackProdutoMercadoLivreDeHtmlRadar(
+    html,
+    "https://produto.mercadolivre.com.br/MLB4170062689-produto-_JM"
+  );
+  const objetoDiagnosticado = diagnostico.objetosLimitados[0];
+  assert.strictEqual(objetoDiagnosticado.caminhoTruncado, true);
+  assert.ok(objetoDiagnosticado.caminhoEstrutural.includes("..."));
+  assert.ok(objetoDiagnosticado.caminhoEstrutural.length <= 220);
+  assert.strictEqual(helpers.extrairProdutoMercadoLivreDeHtmlRadar(html), "https://produto.mercadolivre.com.br/MLB4170062689");
 }
 
 {
@@ -280,6 +389,7 @@ const helpers = carregarHelpers();
   assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].chavesDiretasTexto.includes("url"));
   assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].camposIrmaosDiretosTexto.includes("id:objeto-log"));
   assert.ok(helpers.logs.at(-1)[1].objetosLimitados[0].urlsDiretasMesmoObjetoTexto.includes("produto.mercadolivre.com.br/MLB-7223217402-produto-_JM"));
+  assert.ok(Object.prototype.hasOwnProperty.call(helpers.logs.at(-1)[1].objetosLimitados[0], "caminhoEstrutural"));
 }
 
 assert.strictEqual(helpers.chamadasRede.length, 0, "diagnostico estrutural nao deve fazer chamada de rede");

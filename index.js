@@ -17466,6 +17466,8 @@ function normalizarUrlExtraidaMercadoLivreRadar(link = "") {
 const MAX_OBJETOS_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 3;
 const MAX_OCORRENCIAS_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 12;
 const MAX_TAMANHO_JSON_DIAGNOSTICO_MERCADO_LIVRE_RADAR = 24000;
+const MAX_TRECHO_ARRAY_DIAGNOSTICO_ML = 24000;
+const MAX_NIVEIS_PATH_DIAGNOSTICO_ML = 12;
 
 function normalizarMlbDiagnosticoMercadoLivreRadar(valor = "") {
   return String(valor || "").match(/\bMLB-?\d{6,}\b/i)?.[0]?.replace("-", "").toUpperCase() || "";
@@ -17559,11 +17561,19 @@ function extrairJsonObjetoContendoDiagnosticoMercadoLivreRadar(fonte = "", indic
       continue;
     }
     if (caractere === '"') emString = true;
-    else if (caractere === "{") pilha.push(indice);
-    else if (caractere === "}") pilha.pop();
+    else if (caractere === "{" || caractere === "[") {
+      pilha.push({
+        tipo: caractere === "{" ? "object" : "array",
+        inicio: indice
+      });
+    } else if (caractere === "}" || caractere === "]") {
+      pilha.pop();
+    }
   }
 
-  const inicio = pilha.at(-1);
+  const indiceObjeto = pilha.map(entrada => entrada.tipo).lastIndexOf("object");
+  const entradaObjeto = indiceObjeto >= 0 ? pilha[indiceObjeto] : null;
+  const inicio = entradaObjeto?.inicio;
   if (inicio === undefined) return null;
 
   let profundidade = 0;
@@ -17584,16 +17594,188 @@ function extrairJsonObjetoContendoDiagnosticoMercadoLivreRadar(fonte = "", indic
     if (caractere === "{") profundidade += 1;
     if (caractere === "}") profundidade -= 1;
     if (profundidade === 0) {
-      return { json: texto.slice(inicio, indice + 1), inicio, fim: indice + 1 };
+      return {
+        json: texto.slice(inicio, indice + 1),
+        inicio,
+        fim: indice + 1,
+        estruturas: pilha.slice(0, indiceObjeto + 1)
+      };
     }
   }
 
   return null;
 }
 
+function chaveAntesEstruturaDiagnosticoMercadoLivreRadar(texto = "", indice = 0) {
+  const trecho = String(texto || "").slice(Math.max(0, indice - 180), indice);
+  return limitarTextoDiagnosticoMercadoLivreRadar(
+    trecho.match(/["']([^"']{1,80})["']\s*:\s*$/)?.[1] ||
+    trecho.match(/([A-Za-z0-9_$-]{1,80})\s*:\s*$/)?.[1] ||
+    "",
+    80
+  );
+}
+
+function chaveEstruturaDiagnosticoMercadoLivreRadar(texto = "", estrutura = {}) {
+  if (!estrutura || typeof estrutura !== "object") return "";
+  if (!Object.prototype.hasOwnProperty.call(estrutura, "chaveLazy")) {
+    estrutura.chaveLazy = chaveAntesEstruturaDiagnosticoMercadoLivreRadar(texto, estrutura.inicio);
+  }
+  return estrutura.chaveLazy || "";
+}
+
+function labelRaizEstruturaDiagnosticoMercadoLivreRadar(texto = "", inicio = 0) {
+  const trecho = String(texto || "").slice(Math.max(0, inicio - 220), inicio);
+  return limitarTextoDiagnosticoMercadoLivreRadar(
+    trecho.match(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*=\s*$/)?.[1] ||
+    trecho.match(/id=["']([^"']{1,80})["'][^>]*>\s*$/i)?.[1] ||
+    "json",
+    80
+  );
+}
+
+function indiceNoArrayDetalhadoDiagnosticoMercadoLivreRadar(texto = "", inicioArray = -1, inicioObjeto = -1) {
+  if (inicioArray < 0 || inicioObjeto <= inicioArray) {
+    return {
+      indice: null,
+      truncado: false
+    };
+  }
+  const fonte = String(texto || "");
+  const fimPermitido = Math.min(inicioObjeto, inicioArray + 1 + MAX_TRECHO_ARRAY_DIAGNOSTICO_ML, fonte.length);
+  if (inicioObjeto > fimPermitido) {
+    return {
+      indice: null,
+      truncado: true
+    };
+  }
+  let profundidade = 0;
+  let emString = false;
+  let escapado = false;
+  let indiceItem = 0;
+  let viuItemAtual = false;
+
+  for (let indice = inicioArray + 1; indice < fimPermitido; indice += 1) {
+    const caractere = fonte[indice];
+    if (emString) {
+      if (escapado) escapado = false;
+      else if (caractere === "\\") escapado = true;
+      else if (caractere === '"') emString = false;
+      continue;
+    }
+    if (caractere === '"') {
+      emString = true;
+      continue;
+    }
+    if (caractere === "{" || caractere === "[") {
+      profundidade += 1;
+      viuItemAtual = true;
+      continue;
+    }
+    if (caractere === "}" || caractere === "]") {
+      profundidade = Math.max(0, profundidade - 1);
+      continue;
+    }
+    if (caractere === "," && profundidade === 0 && viuItemAtual) {
+      indiceItem += 1;
+      viuItemAtual = false;
+    }
+  }
+
+  return {
+    indice: indiceItem,
+    truncado: false
+  };
+}
+
+function indiceNoArrayDiagnosticoMercadoLivreRadar(texto = "", inicioArray = -1, inicioObjeto = -1) {
+  return indiceNoArrayDetalhadoDiagnosticoMercadoLivreRadar(texto, inicioArray, inicioObjeto).indice;
+}
+
+function montarCaminhoEstruturalDiagnosticoMercadoLivreRadar(texto = "", estruturas = [], metadados = {}) {
+  if (!Array.isArray(estruturas) || !estruturas.length) return "";
+  const caminhoTruncado = estruturas.length > MAX_NIVEIS_PATH_DIAGNOSTICO_ML;
+  const inicioEstruturas = caminhoTruncado
+    ? Math.max(1, estruturas.length - (MAX_NIVEIS_PATH_DIAGNOSTICO_ML - 1))
+    : 1;
+  const selecionadas = [
+    { estrutura: estruturas[0], indiceOriginal: 0 },
+    ...estruturas.slice(inicioEstruturas).map((estrutura, indice) => ({
+      estrutura,
+      indiceOriginal: inicioEstruturas + indice
+    }))
+  ];
+  const partes = [labelRaizEstruturaDiagnosticoMercadoLivreRadar(texto, estruturas[0].inicio)];
+
+  if (caminhoTruncado) {
+    partes.push("...");
+    metadados.caminhoTruncado = true;
+  }
+
+  for (let indice = 1; indice < selecionadas.length; indice += 1) {
+    const atual = selecionadas[indice].estrutura;
+    const anteriorReal = estruturas[selecionadas[indice].indiceOriginal - 1];
+    const chaveAtual = chaveEstruturaDiagnosticoMercadoLivreRadar(texto, atual);
+    if (chaveAtual) {
+      partes.push(`.${chaveAtual}`);
+    } else if (anteriorReal?.tipo === "array") {
+      const posicao = indiceNoArrayDetalhadoDiagnosticoMercadoLivreRadar(texto, anteriorReal.inicio, atual.inicio);
+      if (posicao.truncado) metadados.indiceArrayTruncado = true;
+      partes.push(`[${Number.isInteger(posicao.indice) ? posicao.indice : "?"}]`);
+    } else if (atual.tipo === "array") {
+      partes.push("[]");
+    }
+  }
+
+  return limitarTextoDiagnosticoMercadoLivreRadar(partes.join(""), 220);
+}
+
+function flagsContextoEstruturaDiagnosticoMercadoLivreRadar(texto = "", inicio = -1, fim = -1) {
+  if (inicio < 0 || fim <= inicio) {
+    return {
+      contemRecommendation: false,
+      contemPolycard: false,
+      contemReco: false
+    };
+  }
+  const trecho = String(texto || "").slice(inicio, Math.min(fim, inicio + MAX_TAMANHO_JSON_DIAGNOSTICO_MERCADO_LIVRE_RADAR));
+  return {
+    contemRecommendation: /recommendation|recommendations_home_affiliate-profile/i.test(trecho),
+    contemPolycard: /polycard/i.test(trecho),
+    contemReco: /reco_backend|reco_item_pos|item_decorator|\breco\b/i.test(trecho)
+  };
+}
+
+function contextoEstruturalObjetoDiagnosticoMercadoLivreRadar(texto = "", extraido = {}) {
+  const estruturas = Array.isArray(extraido.estruturas) ? extraido.estruturas : [];
+  const pai = estruturas.at(-2) || null;
+  const avo = estruturas.at(-3) || null;
+  const bisavo = estruturas.at(-4) || null;
+  const indiceNoArrayDetalhado = pai?.tipo === "array"
+    ? indiceNoArrayDetalhadoDiagnosticoMercadoLivreRadar(texto, pai.inicio, extraido.inicio)
+    : { indice: null, truncado: false };
+  const metadadosCaminho = {};
+  const flagsPai = flagsContextoEstruturaDiagnosticoMercadoLivreRadar(texto, pai?.inicio ?? -1, extraido.inicio);
+  const flagsAvo = flagsContextoEstruturaDiagnosticoMercadoLivreRadar(texto, avo?.inicio ?? -1, extraido.inicio);
+  const flagsBisavo = flagsContextoEstruturaDiagnosticoMercadoLivreRadar(texto, bisavo?.inicio ?? -1, extraido.inicio);
+
+  return {
+    caminhoEstrutural: montarCaminhoEstruturalDiagnosticoMercadoLivreRadar(texto, estruturas, metadadosCaminho),
+    caminhoTruncado: Boolean(metadadosCaminho.caminhoTruncado),
+    chavePai: limitarTextoDiagnosticoMercadoLivreRadar(chaveEstruturaDiagnosticoMercadoLivreRadar(texto, pai) || "", 80),
+    tipoPai: pai?.tipo || "",
+    chaveAvo: limitarTextoDiagnosticoMercadoLivreRadar(chaveEstruturaDiagnosticoMercadoLivreRadar(texto, avo) || "", 80),
+    indiceNoArray: Number.isInteger(indiceNoArrayDetalhado.indice) ? indiceNoArrayDetalhado.indice : null,
+    indiceArrayTruncado: Boolean(indiceNoArrayDetalhado.truncado || metadadosCaminho.indiceArrayTruncado),
+    caminhoContemRecommendation: flagsPai.contemRecommendation || flagsAvo.contemRecommendation || flagsBisavo.contemRecommendation,
+    caminhoContemPolycard: flagsPai.contemPolycard || flagsAvo.contemPolycard || flagsBisavo.contemPolycard,
+    caminhoContemReco: flagsPai.contemReco || flagsAvo.contemReco || flagsBisavo.contemReco
+  };
+}
+
 function urlsDiretasObjetoDiagnosticoMercadoLivreRadar(objeto = {}) {
   return Object.entries(objeto || {})
-    .filter(([, valor]) => typeof valor === "string" && /(?:https?:|www\.|mercadolivre|MLB)/i.test(valor))
+    .filter(([, valor]) => typeof valor === "string" && /(?:https?:|www\.|mercadolivre\.com)/i.test(valor))
     .map(([chave, valor]) => `${chave}:${sanitizarUrlDiagnosticoMercadoLivreRadar(valor)}`)
     .slice(0, 5);
 }
@@ -17616,6 +17798,10 @@ function objetoDiagnosticoMercadoLivreRadar(texto = "", mlb = "", indice = -1) {
       chavesDiretas,
       camposIrmaosDiretos,
       urlsDiretasMesmoObjeto: urlsDiretasObjetoDiagnosticoMercadoLivreRadar(objeto),
+      ...contextoEstruturalObjetoDiagnosticoMercadoLivreRadar(texto, extraido),
+      itemIdCandidato: limitarTextoDiagnosticoMercadoLivreRadar(objeto.id || objeto.item_id || objeto.itemId || objeto.wid || ""),
+      catalogProductId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.product_id || objeto.productId || objeto.catalog_product_id || objeto.catalogProductId || ""),
+      userProductId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.user_product_id || objeto.userProductId || ""),
       itemId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.item_id || objeto.itemId || objeto.wid || ""),
       productId: limitarTextoDiagnosticoMercadoLivreRadar(objeto.product_id || objeto.productId || objeto.catalog_product_id || objeto.catalogProductId || ""),
       id: limitarTextoDiagnosticoMercadoLivreRadar(objeto.id || ""),
