@@ -44,7 +44,7 @@ const CSS_FONTE_RENDERER_IDENTIDADE_VISUAL = `
 const LIMITE_IMAGEM_ORIGINAL_BYTES = 8 * 1024 * 1024;
 const LIMITE_UPLOAD_LOGO_BYTES = 2 * 1024 * 1024;
 const MIMES_IMAGEM_PERMITIDOS = new Set(["image/png", "image/jpeg", "image/webp"]);
-const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v2";
+const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v3";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -505,6 +505,29 @@ function calcularMascaraNeutraRodape(base = {}) {
   };
 }
 
+function calcularComposicaoNeutraOff(base = {}) {
+  const mascara = calcularMascaraNeutraRodape(base);
+  if (!mascara.aplicada) {
+    return {
+      produtoY: base.produtoY || 0,
+      deslocamentoY: 0,
+      mascara
+    };
+  }
+
+  const contentBottom = mascara.contentTop + mascara.contentHeight;
+  const deslocamentoY = Math.max(0, CANVAS - contentBottom);
+  return {
+    produtoY: (base.produtoY || 0) + deslocamentoY,
+    deslocamentoY,
+    mascara: {
+      ...mascara,
+      top: CANVAS - mascara.height,
+      contentTop: mascara.contentTop + deslocamentoY
+    }
+  };
+}
+
 function svgMascaraNeutraRodape({ width = CANVAS, height = 0 } = {}) {
   const h = clamp(Math.round(height || 0), 0, CANVAS);
   return Buffer.from(`
@@ -514,7 +537,8 @@ function svgMascaraNeutraRodape({ width = CANVAS, height = 0 } = {}) {
   `);
 }
 
-async function comporBaseVisualComum(base = {}, camadasExtras = []) {
+async function comporBaseVisualComum(base = {}, camadasExtras = [], opcoes = {}) {
+  const produtoY = Number.isFinite(opcoes.produtoY) ? opcoes.produtoY : base.produtoY;
   return sharp({
     create: {
       width: CANVAS,
@@ -525,7 +549,7 @@ async function comporBaseVisualComum(base = {}, camadasExtras = []) {
   })
     .composite([
       ...(base.fundoPaisagemExtrema ? [{ input: base.fundoPaisagemExtrema, left: 0, top: 0 }] : []),
-      { input: base.produto, left: Math.max(0, base.produtoX), top: Math.max(0, base.produtoY) },
+      { input: base.produto, left: Math.max(0, base.produtoX), top: Math.max(0, produtoY) },
       ...camadasExtras
     ])
     .png({ compressionLevel: 8, adaptiveFiltering: true })
@@ -534,7 +558,8 @@ async function comporBaseVisualComum(base = {}, camadasExtras = []) {
 
 async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
   const base = await prepararBaseVisualComumImagem(imagemBuffer);
-  const mascaraNeutraRodape = calcularMascaraNeutraRodape(base);
+  const composicaoNeutraOff = calcularComposicaoNeutraOff(base);
+  const mascaraNeutraRodape = composicaoNeutraOff.mascara;
   const camadasNeutras = mascaraNeutraRodape.aplicada
     ? [{
         input: svgMascaraNeutraRodape({ height: mascaraNeutraRodape.height }),
@@ -542,11 +567,13 @@ async function renderizarImagemGlobalNeutraBuffer({ imagemBuffer } = {}) {
         top: mascaraNeutraRodape.top
       }]
     : [];
-  const output = await comporBaseVisualComum(base, camadasNeutras);
+  const output = await comporBaseVisualComum(base, camadasNeutras, { produtoY: composicaoNeutraOff.produtoY });
   return {
     buffer: output,
     metadata: {
       ...metadataBaseVisualComum(base),
+      productRenderedYOff: Math.max(0, composicaoNeutraOff.produtoY),
+      productShiftYOff: composicaoNeutraOff.deslocamentoY,
       padraoGlobalImagem: true,
       brandingAplicado: false,
       faixaAplicada: false,

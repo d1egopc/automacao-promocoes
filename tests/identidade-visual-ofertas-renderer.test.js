@@ -174,10 +174,24 @@ async function main() {
       "neutro reutiliza o mesmo contain/enquadramento do render identidade"
     );
     const baseYEsperado = identidadeVisual.AREA_PRODUTO_ALTURA + identidadeVisual.FILETE_ALTURA;
+    const alturaMascaraNormal = 96;
+    const topMascaraOffEsperado = identidadeVisual.CANVAS - alturaMascaraNormal;
+    const deslocamentoOffEsperado = identidadeVisual.CANVAS - (baseYEsperado + alturaMascaraNormal);
     assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.aplicada, true, "neutro aplica mascara apenas quando ha zona sacrificavel");
     assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.referencia, "faixa_render_on");
-    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.top, baseYEsperado, "mascara usa o mesmo inicio da faixa do Render ON");
-    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.height, 96, "caso normal mascara a mesma zona sacrificavel do Render ON");
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.top, topMascaraOffEsperado, "mascara OFF reduz rodape morto e termina no fim do canvas");
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "caso normal mascara a mesma zona sacrificavel do Render ON");
+    assert.strictEqual(renderNeutroQuadrado.metadata.productShiftYOff, deslocamentoOffEsperado, "OFF reposiciona verticalmente sem aumentar a mascara anti-logo");
+    assert.strictEqual(
+      renderNeutroQuadrado.metadata.productRenderedYOff,
+      renderPadrao.metadata.productRenderedY + deslocamentoOffEsperado,
+      "OFF move a composicao para baixo sem alterar a geometria congelada do Render ON"
+    );
+    assert.strictEqual(
+      identidadeVisual.CANVAS - renderNeutroQuadrado.metadata.mascaraNeutraRodape.top,
+      alturaMascaraNormal,
+      "rodape branco final fica limitado a altura util da mascara"
+    );
     assert.ok(
       renderNeutroQuadrado.metadata.mascaraNeutraRodape.maxHeight <= Math.round(identidadeVisual.FAIXA_ALTURA * 0.5),
       "mascara nao pode usar a faixa inteira"
@@ -185,12 +199,12 @@ async function main() {
     const caminhoNeutroQuadrado = path.join(AMOSTRAS_DIR, "global-neutro-quadrado.png");
     fs.mkdirSync(AMOSTRAS_DIR, { recursive: true });
     fs.writeFileSync(caminhoNeutroQuadrado, renderNeutroQuadrado.buffer);
-    const pixelAntesMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, baseYEsperado - 22);
+    const pixelAntesMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, topMascaraOffEsperado - 22);
     assert.ok(
       pixelAntesMascaraNeutro[0] < 248 || pixelAntesMascaraNeutro[1] < 248 || pixelAntesMascaraNeutro[2] < 248,
       "neutro preserva produto acima da zona sacrificavel"
     );
-    const pixelInicioMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, baseYEsperado + 8);
+    const pixelInicioMascaraNeutro = await pixel(caminhoNeutroQuadrado, 540, topMascaraOffEsperado + 8);
     assert.ok(
       pixelInicioMascaraNeutro[0] >= 248 && pixelInicioMascaraNeutro[1] >= 248 && pixelInicioMascaraNeutro[2] >= 248,
       "neutro mascara em branco apenas a zona inferior permitida"
@@ -216,6 +230,16 @@ async function main() {
       assert.ok(renderNeutro.metadata.productRenderedWidth > 0, `${casoNeutro.nome} tem produto renderizado`);
       assert.ok(renderNeutro.metadata.productRenderedHeight > 0, `${casoNeutro.nome} tem produto renderizado`);
       assert.ok(renderNeutro.metadata.mascaraNeutraRodape.height <= Math.round(identidadeVisual.FAIXA_ALTURA * 0.5), `${casoNeutro.nome} respeita teto conservador da mascara`);
+      if (renderNeutro.metadata.mascaraNeutraRodape.aplicada) {
+        assert.strictEqual(
+          identidadeVisual.CANVAS - renderNeutro.metadata.mascaraNeutraRodape.top,
+          renderNeutro.metadata.mascaraNeutraRodape.height,
+          `${casoNeutro.nome} reduz rodape morto para a propria altura da mascara`
+        );
+      }
+      if (casoNeutro.nome === "vertical") {
+        assert.ok(renderNeutro.metadata.productShiftYOff > 0, "vertical alto e reposicionado no OFF sem cortar mais produto");
+      }
       if (casoNeutro.nome === "horizontal") {
         assert.strictEqual(renderNeutro.metadata.mascaraNeutraRodape.aplicada, false, "horizontal sem invasao da faixa nao deve receber mascara");
         assert.strictEqual(renderNeutro.metadata.mascaraNeutraRodape.height, 0, "horizontal sem zona sacrificavel nao mascara rodape");
@@ -228,13 +252,14 @@ async function main() {
     const caminhoRodape = path.join(AMOSTRAS_DIR, "global-neutro-rodape-logo.png");
     fs.writeFileSync(caminhoRodape, renderRodape.buffer);
     assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.aplicada, true, "rodape de fallback passa pela mascara conservadora");
-    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.height, 96, "rodape usa apenas a zona sacrificavel normal");
-    const pixelRodapeMascarado = await pixel(caminhoRodape, 540, baseYEsperado + 50);
+    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "rodape usa apenas a zona sacrificavel normal");
+    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.top, topMascaraOffEsperado, "mascara de rodape termina no fim do canvas OFF");
+    const pixelRodapeMascarado = await pixel(caminhoRodape, 540, topMascaraOffEsperado + 50);
     assert.ok(
       pixelRodapeMascarado[0] >= 248 && pixelRodapeMascarado[1] >= 248 && pixelRodapeMascarado[2] >= 248,
       "logo/faixa de rodape dentro da zona sacrificavel fica escondida por fundo neutro"
     );
-    const pixelRodapeProduto = await pixel(caminhoRodape, 540, baseYEsperado - 40);
+    const pixelRodapeProduto = await pixel(caminhoRodape, 540, topMascaraOffEsperado - 40);
     assert.ok(
       pixelRodapeProduto[0] < 248 || pixelRodapeProduto[1] < 248 || pixelRodapeProduto[2] < 248,
       "conteudo acima da zona sacrificavel continua visivel"
