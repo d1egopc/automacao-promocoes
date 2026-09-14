@@ -924,6 +924,11 @@ function normalizarMlbImagem(valor = "") {
   return id ? `MLB${id}` : "";
 }
 
+function normalizarMlbImagemEstrutural(valor = "") {
+  const id = normalizarTexto(valor).match(/\bMLB-?(\d{6,})\b/i)?.[1] || "";
+  return id ? `MLB${id}` : "";
+}
+
 function normalizarImagemMercadoLivre(valor = "") {
   const bruto = normalizarValorImagem(valor);
   if (!bruto) return "";
@@ -1500,14 +1505,17 @@ function montarCandidatosUrlImagemMercadoLivre(oferta = {}, mlb = "") {
 
 async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
   const valoresTecnicos = coletarValoresTecnicosImagemMercadoLivre(oferta);
-  const textoIdentidade = [
+  const textoIdentidadeDeclarada = [
     oferta.produtoIdDetectado,
     oferta.produtoId,
-    oferta.itemId,
+    oferta.itemId
+  ].join(" ");
+  const textoIdentidadeTecnica = [
     ...valoresTecnicos.preferenciais,
     ...valoresTecnicos.base
   ].join(" ");
-  const mlbNormalizado = normalizarMlbImagem(textoIdentidade);
+  const mlbNormalizado = normalizarMlbImagem(textoIdentidadeDeclarada)
+    || normalizarMlbImagemEstrutural(textoIdentidadeTecnica);
   const mlb = extrairMlbImagem(mlbNormalizado);
   const candidatosUrl = montarCandidatosUrlImagemMercadoLivre(oferta, mlb);
   const urlInicial = candidatosUrl[0]?.url || "";

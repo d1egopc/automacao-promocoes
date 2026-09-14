@@ -866,6 +866,70 @@ async function testarRadarUrlProdutoResolvidaSlugNikeProvaAfiliadoSemApiIdentida
   assert.strictEqual(contexto.chamadas.afiliado[0].url, urlProduto);
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB3199313997");
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+}
+
+async function testarRadarUrlProdutoProvadaUsaMlbCorretoParaImagemOficial() {
+  const casos = [
+    {
+      titulo: "Mini Localizador Rastreador Smart Tag Gps Com Cordão Chaveiro Cor Preto Compatível Com iPhone Apple Chrome Technology",
+      urlProduto: "https://produto.mercadolivre.com.br/MLB-4449623103-mini-localizador-rastreador-smart-tag-gps-formato-oval-ios-_JM",
+      mlb: "MLB4449623103",
+      urlSocial: "https://www.mercadolivre.com.br/social/prorelampago?matt_word=andradele&matt_tool=40081166&forceInApp=true"
+    },
+    {
+      titulo: "Jaqueta Iz Corta Vento Ultra Leve Feminina",
+      urlProduto: "https://produto.mercadolivre.com.br/MLB-4224095813-jaqueta-feminina-corta-vento-forrado-impermeavel-ultra-leve-_JM",
+      mlb: "MLB4224095813",
+      urlSocial: "https://www.mercadolivre.com.br/social/lcupons?matt_word=fitness&matt_tool=11368807&forceInApp=true"
+    },
+    {
+      titulo: "Conjunto De Frio Moletom Com Capuz Canguru Flanelado Preto",
+      urlProduto: "https://produto.mercadolivre.com.br/MLB-3212142250-conjunto-de-frio-moletom-com-capuz-canguru-flanelado-preto-_JM",
+      mlb: "MLB3212142250",
+      urlSocial: "https://www.mercadolivre.com.br/social/prorelampago?matt_word=andradele&matt_tool=40081166&forceInApp=true"
+    }
+  ];
+
+  for (const caso of casos) {
+    const contexto = depsBase({
+      wall: true,
+      recusarMeliLaDireto: true,
+      imagemOficial: {
+        imagem: URL_IMAGEM_OFICIAL,
+        origem: "api_mercadolibre.items.pictures[0].secure_url"
+      }
+    });
+    contexto.deps.resolverLinkOriginalRadar = async () => ({
+      ok: true,
+      urlResolvida: caso.urlSocial,
+      linkOriginalLimpo: caso.urlProduto,
+      linkResolvido: caso.urlProduto,
+      tipoLinkRadar: "shortlink_meli",
+      metodoResolucaoMeli: "fallback_intermediario"
+    });
+
+    const resultado = await importarMercadoLivreEngine({
+      job: job(),
+      evento: eventoRadar({ titulo: caso.titulo, preco: 75, precoAnterior: 167.55, cupom: "COMPRAESTOQUE" }),
+      links: links("https://meli.la/shortlink-imagem-real"),
+      deps: contexto.deps
+    });
+
+    assert.strictEqual(resultado.ok, true, caso.mlb);
+    assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL, caso.mlb);
+    assert.strictEqual(contexto.chamadas.afiliado.length, 1, caso.mlb);
+    assert.strictEqual(contexto.chamadas.afiliado[0].url, caso.urlProduto, caso.mlb);
+    assert.strictEqual(contexto.chamadas.imagemOficial.length, 1, caso.mlb);
+    assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, caso.mlb, caso.mlb);
+    assert.ok(!contexto.chamadas.imagemOficial.some(chamada => chamada.mlb === "MLB40081166" || chamada.mlb === "MLB11368807"), caso.mlb);
+    assert.strictEqual(resultado.linkOriginal, "https://meli.la/shortlink-imagem-real", caso.mlb);
+    assert.strictEqual(resultado.linkExpandido, "https://meli.la/shortlink-imagem-real", caso.mlb);
+    assert.strictEqual(resultado.titulo, caso.titulo, caso.mlb);
+    assert.strictEqual(resultado.preco, 75, caso.mlb);
+    assert.strictEqual(resultado.precoOriginal, 167.55, caso.mlb);
+    assert.strictEqual(resultado.cupom, "COMPRAESTOQUE", caso.mlb);
+  }
 }
 
 async function testarRadarUrlProdutoResolvidaSlugKitDivergenteRejeita() {
@@ -982,6 +1046,7 @@ async function testarRadarUrlProdutoSomenteMlbApiRyzenProvaAfiliado() {
   assert.strictEqual(contexto.chamadas.afiliado[0].url, urlProduto);
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB7590979684");
+  assert.strictEqual(resultado.imagem, "");
 }
 
 async function testarRadarUrlProdutoSomenteMlbApiProdutoDiferenteRejeita() {
@@ -1427,6 +1492,7 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial();
   await testarRadarCandidatoProvadoComErroImagemMantemRadar();
   await testarRadarUrlProdutoResolvidaSlugNikeProvaAfiliadoSemApiIdentidade();
+  await testarRadarUrlProdutoProvadaUsaMlbCorretoParaImagemOficial();
   await testarRadarUrlProdutoResolvidaSlugKitDivergenteRejeita();
   await testarRadarUrlProdutoSomenteMlbApiWheyProvaAfiliadoEImagem();
   await testarRadarUrlProdutoSomenteMlbApiRyzenProvaAfiliado();

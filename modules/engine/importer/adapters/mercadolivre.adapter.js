@@ -540,10 +540,19 @@ function resolverMlbItemImagemOficialFallbackMercadoLivre({
   urlOriginalEngine = "",
   urlImportador = "",
   linkExpandidoEngine = "",
-  identidadeTecnicaUrlResolvida = null
+  identidadeTecnicaUrlResolvida = null,
+  urlProdutoProvadaParaImagem = "",
+  mlbProdutoProvadoParaImagem = ""
 } = {}) {
   const mlbTecnico = normalizarMlbItemApiMercadoLivre(identidadeTecnicaUrlResolvida?.mlbItem || "");
   if (mlbTecnico) return { mlb: mlbTecnico, origem: identidadeTecnicaUrlResolvida.origem || "identidade_tecnica_url_resolvida" };
+
+  const urlProvada = textoMercadoLivre(urlProdutoProvadaParaImagem);
+  const mlbUrlProvada = extrairMlbItemUrlDiretaMercadoLivre(urlProvada);
+  const mlbProvado = normalizarMlbItemApiMercadoLivre(mlbProdutoProvadoParaImagem);
+  if (mlbUrlProvada && (!mlbProvado || mlbProvado === mlbUrlProvada)) {
+    return { mlb: mlbUrlProvada, origem: "urlProdutoProvadaParaImagem" };
+  }
 
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar, {
@@ -794,6 +803,8 @@ async function montarFallbackClonadorMercadoLivre({
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
   identidadeTecnicaUrlResolvida = null,
+  urlProdutoProvadaParaImagem = "",
+  mlbProdutoProvadoParaImagem = "",
   bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
@@ -879,7 +890,9 @@ async function montarFallbackClonadorMercadoLivre({
     urlOriginalEngine,
     urlImportador,
     linkExpandidoEngine,
-    identidadeTecnicaUrlResolvida
+    identidadeTecnicaUrlResolvida,
+    urlProdutoProvadaParaImagem,
+    mlbProdutoProvadoParaImagem
   });
   const produtoFallback = {
     titulo,
@@ -984,6 +997,8 @@ async function montarFallbackRadarMercadoLivre({
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
   identidadeTecnicaUrlResolvida = null,
+  urlProdutoProvadaParaImagem = "",
+  mlbProdutoProvadoParaImagem = "",
   bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
@@ -1063,7 +1078,9 @@ async function montarFallbackRadarMercadoLivre({
     urlOriginalEngine,
     urlImportador,
     linkExpandidoEngine,
-    identidadeTecnicaUrlResolvida
+    identidadeTecnicaUrlResolvida,
+    urlProdutoProvadaParaImagem,
+    mlbProdutoProvadoParaImagem
   });
   const produtoFallback = {
     titulo,
@@ -1172,6 +1189,8 @@ async function montarFallbackPuroCapturaMercadoLivre({
   });
   const urlTransporteAfiliado = textoMercadoLivre(identidadeTecnicaUrlResolvida?.urlProduto || "")
     || resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine, resolucaoProduto);
+  const urlProdutoProvadaParaImagem = isUrlProdutoMercadoLivre(urlTransporteAfiliado) ? urlTransporteAfiliado : "";
+  const mlbProdutoProvadoParaImagem = extrairMlbItemUrlDiretaMercadoLivre(urlProdutoProvadaParaImagem);
   const resolucaoProdutoSanitizada = sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto, falhaImportador.motivo);
 
   const argumentosFallback = {
@@ -1188,6 +1207,8 @@ async function montarFallbackPuroCapturaMercadoLivre({
     resolucaoProduto: resolucaoProdutoSanitizada,
     urlTransporteAfiliado,
     identidadeTecnicaUrlResolvida,
+    urlProdutoProvadaParaImagem,
+    mlbProdutoProvadoParaImagem,
     bloquearMeliLaTransporteAfiliado: true,
     falhaImportador
   };

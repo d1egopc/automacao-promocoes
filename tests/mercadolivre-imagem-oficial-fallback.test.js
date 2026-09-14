@@ -95,6 +95,24 @@ async function comFetchMock(respostas, fn) {
 
 (async () => {
   {
+    const { retorno, chamadas } = await comFetchMock([], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      titulo: "Mini Localizador Rastreador Smart Tag",
+      linkOriginal: "https://meli.la/2orjn6y",
+      metadata: {
+        resolucaoRadar: {
+          urlResolvida: "https://www.mercadolivre.com.br/social/prorelampago?matt_word=andradele&matt_tool=40081166&forceInApp=true"
+        }
+      }
+    }, { accessToken: "token_ml_valido" }));
+
+    assert.strictEqual(chamadas.length, 0);
+    assert.strictEqual(retorno.imagem, "");
+    assert.strictEqual(retorno.motivo, "url_canonica_mlb_ausente");
+    assert.ok(!String(retorno.linkResolvido || "").includes("MLB40081166"));
+  }
+
+  {
     const fixturesValidas = [
       ["Growth Whey + Creatina", "MLB4387463577", "", "MLBU3692673629", "766763-MLB102163177100_122025", "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"],
       ["Dr. Peanut", "MLB6711833172", "MLB50886744", "MLBU3933491095", "910611-MLA99017164196_112025", "Pasta de Amendoim Italiana Dr Peanut 600g Whey Protein"],
