@@ -555,6 +555,56 @@ function marcarErroEnvioFila(fila = [], oferta = {}, dados = {}) {
   return { ok: true, oferta: alvo, index: localizacao.index, localizacao };
 }
 
+function chavesEquivalenciaSaneamentoDuplicatas(identidade = {}) {
+  const clienteId = textoComparacaoNormalizado(identidade.clienteId || "admin");
+  const marketplace = textoComparacaoNormalizado(identidade.marketplace || "geral");
+  const prefixo = `${clienteId}|${marketplace}`;
+  const ids = Array.isArray(identidade.ids) ? identidade.ids : [];
+  const urls = Array.isArray(identidade.urls) ? identidade.urls : [];
+  const chaves = [];
+
+  for (const id of ids) {
+    const valor = textoComparacaoNormalizado(id);
+    if (valor) chaves.push(`${prefixo}|id:${valor}`);
+  }
+
+  for (const url of urls) {
+    const valor = textoComparacaoNormalizado(url);
+    if (valor) chaves.push(`${prefixo}|url:${valor}`);
+  }
+
+  if (!ids.length && !urls.length) {
+    const titulo = textoComparacaoNormalizado(identidade.titulo);
+    if (titulo) chaves.push(`${prefixo}|titulo:${titulo}`);
+  }
+
+  return [...new Set(chaves)];
+}
+
+function candidatosMantidosSaneamentoDuplicatas(mapa = new Map(), chaves = []) {
+  const candidatos = new Set();
+  for (const chave of chaves) {
+    const bucket = mapa.get(chave);
+    if (!Array.isArray(bucket)) continue;
+    for (const registro of bucket) {
+      candidatos.add(registro);
+    }
+  }
+
+  return [...candidatos].sort((a, b) =>
+    Number(a?.ordemMantida || 0) - Number(b?.ordemMantida || 0)
+  );
+}
+
+function registrarMantidaSaneamentoDuplicatas(mapa = new Map(), registro = {}) {
+  const chaves = Array.isArray(registro.chavesEquivalencia) ? registro.chavesEquivalencia : [];
+  for (const chave of chaves) {
+    const bucket = mapa.get(chave) || [];
+    bucket.push(registro);
+    mapa.set(chave, bucket);
+  }
+}
+
 function sanearDuplicatasPendentes2h(fila = [], opcoes = {}) {
   try {
     if (!Array.isArray(fila)) throw new Error("fila_invalida");
@@ -574,12 +624,18 @@ function sanearDuplicatasPendentes2h(fila = [], opcoes = {}) {
         return a.indice - b.indice;
       });
     const mantidas = [];
+    const mantidasPorChave = new Map();
     const atualizacoes = [];
     const saneadasPorCliente = {};
 
     for (const atual of pendentes) {
       const identidadeAtual = identidadeAntiRepeticaoAutomatica(atual.item);
-      const duplicada = mantidas.find(anterior => {
+      const chavesEquivalencia = chavesEquivalenciaSaneamentoDuplicatas(identidadeAtual);
+      const candidatasMantidas = candidatosMantidosSaneamentoDuplicatas(
+        mantidasPorChave,
+        chavesEquivalencia
+      );
+      const duplicada = candidatasMantidas.find(anterior => {
         if (!ofertasEquivalentesAntiRepeticao(atual.item, anterior.item)) return false;
         const ambosComData = Number.isFinite(atual.criadoEmMs) && Number.isFinite(anterior.criadoEmMs);
         if (!ambosComData) return false;
@@ -590,7 +646,14 @@ function sanearDuplicatasPendentes2h(fila = [], opcoes = {}) {
       });
 
       if (!duplicada) {
-        mantidas.push({ ...atual, identidade: identidadeAtual });
+        const mantida = {
+          ...atual,
+          identidade: identidadeAtual,
+          chavesEquivalencia,
+          ordemMantida: mantidas.length
+        };
+        mantidas.push(mantida);
+        registrarMantidaSaneamentoDuplicatas(mantidasPorChave, mantida);
         continue;
       }
 

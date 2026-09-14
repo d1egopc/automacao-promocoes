@@ -85,9 +85,12 @@ const saneamentoDuplicatasCliente = trechoEntre(
 assert(
   saneamentoDuplicatasCliente.includes("fonteClienteHotState?.conclusiva === true") &&
     saneamentoDuplicatasCliente.includes("Array.isArray(fonteClienteHotState.itens)") &&
-    saneamentoDuplicatasCliente.includes("const colecaoSaneamento = usandoHotStateCliente ? fonteClienteHotState.itens : fila") &&
+    saneamentoDuplicatasCliente.includes("const cliente = String(clienteId || \"admin\")") &&
+    saneamentoDuplicatasCliente.includes("const colecaoSaneamento = usandoHotStateCliente") &&
+    saneamentoDuplicatasCliente.includes("? fonteClienteHotState.itens") &&
+    saneamentoDuplicatasCliente.includes(": fila.filter(item => String(item?.clienteId || \"admin\") === cliente)") &&
     saneamentoDuplicatasCliente.includes("filaOfertas.sanearDuplicatasPendentes2h(colecaoSaneamento)"),
-  "saneamento de duplicatas deve usar hot state do cliente somente quando a fonte V2 for conclusiva"
+  "saneamento de duplicatas deve usar hot state conclusivo ou fallback legado filtrado pelo cliente da rodada"
 );
 
 assert(

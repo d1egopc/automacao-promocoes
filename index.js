@@ -3788,7 +3788,10 @@ function sanearDuplicatasPendentesFilaCliente(clienteId = "admin", fluxo = "proc
     fonteClienteHotState?.conclusiva === true &&
     Array.isArray(fonteClienteHotState.itens)
   );
-  const colecaoSaneamento = usandoHotStateCliente ? fonteClienteHotState.itens : fila;
+  const cliente = String(clienteId || "admin");
+  const colecaoSaneamento = usandoHotStateCliente
+    ? fonteClienteHotState.itens
+    : fila.filter(item => String(item?.clienteId || "admin") === cliente);
   const resultado = filaOfertas.sanearDuplicatasPendentes2h(colecaoSaneamento);
   if (!resultado.ok) {
     console.log("[ANTI-REPETICAO-SANEAMENTO-ERRO]", JSON.stringify({

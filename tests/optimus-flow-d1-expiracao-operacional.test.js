@@ -158,6 +158,55 @@ function testarExecutorEscolheOfertaFrescaAposSaneamento() {
   assert.deepStrictEqual(selecionavel.map(item => item.id), ["fresca"]);
 }
 
+function testarMultiplosVencidosMesmaRodada() {
+  const fila = [
+    itemFila({ id: "expirada_a", dataEntradaFila: "2026-08-05T11:00:00.000Z" }),
+    itemFila({ id: "expirada_b", dataEntradaFila: "2026-08-05T11:10:00.000Z" }),
+    itemFila({ id: "viva", dataEntradaFila: "2026-08-05T12:20:00.000Z" })
+  ];
+  sanearCliente(fila, WORKSPACE_A, Date.parse("2026-08-05T12:31:00.000Z"));
+  assert.deepStrictEqual(
+    fila.map(item => item.status),
+    ["expirada_operacional", "expirada_operacional", "pendente"]
+  );
+}
+
+function testarStatusTerminalNaoEhReprocessado() {
+  for (const status of ["enviado", "expirada_operacional", "retida", "processando"]) {
+    const item = itemFila({
+      status,
+      expiraEm: "2026-08-05T12:00:00.000Z",
+      dataEntradaFila: "2026-08-05T11:00:00.000Z"
+    });
+    const antes = JSON.stringify(item);
+    const resultado = sanearExpiracaoOperacionalFilaItem(item, {
+      agoraMs: Date.parse("2026-08-05T12:31:00.000Z")
+    });
+    assert.strictEqual(resultado.expirou, false, `${status} nao deve expirar novamente`);
+    assert.strictEqual(resultado.alterou, false, `${status} nao deve gerar mutacao repetida`);
+    assert.strictEqual(JSON.stringify(item), antes, `${status} deve permanecer byte-estavel`);
+  }
+}
+
+function testarSaneamentoIdempotenteSemExpirados() {
+  const item = itemFila({
+    id: "vivo_idempotente",
+    dataEntradaFila: "2026-08-05T12:20:00.000Z"
+  });
+  const primeiro = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-05T12:31:00.000Z")
+  });
+  const depoisPrimeiro = JSON.stringify(item);
+  const segundo = sanearExpiracaoOperacionalFilaItem(item, {
+    agoraMs: Date.parse("2026-08-05T12:31:00.000Z")
+  });
+
+  assert.strictEqual(primeiro.expirou, false);
+  assert.strictEqual(segundo.expirou, false);
+  assert.strictEqual(segundo.alterou, false, "segunda rodada viva nao deve gerar nova mutacao");
+  assert.strictEqual(JSON.stringify(item), depoisPrimeiro);
+}
+
 function testarWolffUsaDataEntradaFilaIsoAntesDeCriadoEmVisual() {
   const item = itemFila({
     id: "wolff_recente",
@@ -277,6 +326,9 @@ function testarCarimboPreservaPoliticaDoFlow() {
   testarVivoContinuaElegivelERecebeExpiraEmLegado();
   testarWorkspaceNaoAfetaOutroEHistoricoPermanece();
   testarExecutorEscolheOfertaFrescaAposSaneamento();
+  testarMultiplosVencidosMesmaRodada();
+  testarStatusTerminalNaoEhReprocessado();
+  testarSaneamentoIdempotenteSemExpirados();
   testarWolffUsaDataEntradaFilaIsoAntesDeCriadoEmVisual();
   testarTimezoneBrtVisualNaoMudaMagnitudeTemporalDaEntradaIso();
   testarExpiraEmAnteriorAEntradaEhRecalculado();

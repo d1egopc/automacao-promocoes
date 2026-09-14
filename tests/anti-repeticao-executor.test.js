@@ -309,6 +309,47 @@ for (const origem of ["manual", "manual-kabum-awin", "manual-magalu", "importaca
 
 {
   const fila = [
+    oferta({
+      id: "produto_antigo",
+      titulo: "Fone Bluetooth Pro",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-1111111111-fone-bluetooth-pro-_JM",
+      criadoEm: "24/07/2026, 19:00:00"
+    }),
+    oferta({
+      id: "produto_duplicado_url",
+      titulo: "Fone Bluetooth Pro",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-1111111111-fone-bluetooth-pro-_JM?tracking=1",
+      criadoEm: "24/07/2026, 19:20:00"
+    }),
+    oferta({
+      id: "produto_distinto",
+      titulo: "Fone Bluetooth Lite",
+      linkOriginal: "https://produto.mercadolivre.com.br/MLB-2222222222-fone-bluetooth-lite-_JM",
+      criadoEm: "24/07/2026, 19:25:00"
+    })
+  ];
+  const resultado = sanearDuplicatasPendentes2h(fila, { agora: AGORA });
+  assert.strictEqual(resultado.totalSaneado, 1, "bucket por chave oficial deve manter retencao de produto equivalente");
+  assert.strictEqual(fila[0].status, "pendente");
+  assert.strictEqual(fila[1].status, "retida");
+  assert.strictEqual(fila[2].status, "pendente", "produto diferente nao deve ser retido pelo bucket");
+}
+
+{
+  const fila = [
+    oferta({ id: "viva_unica", titulo: "Oferta unica", criadoEm: "24/07/2026, 19:00:00" }),
+    oferta({ id: "enviada", status: "enviado", titulo: "Oferta unica", criadoEm: "24/07/2026, 19:05:00" }),
+    oferta({ id: "retida", status: "retida", titulo: "Oferta unica", criadoEm: "24/07/2026, 19:10:00" }),
+    oferta({ id: "processando", status: "processando", titulo: "Oferta unica", criadoEm: "24/07/2026, 19:15:00" })
+  ];
+  const antes = JSON.stringify(fila);
+  const resultado = sanearDuplicatasPendentes2h(fila, { agora: AGORA });
+  assert.strictEqual(resultado.totalSaneado, 0, "sem duplicata pendente nao deve gerar mutacao");
+  assert.strictEqual(JSON.stringify(fila), antes, "terminais/processando nao devem ser alterados pelo saneamento");
+}
+
+{
+  const fila = [
     oferta({ id: "preco_antigo", preco: 100, precoAtual: 100, criadoEm: "24/07/2026, 19:00:00" }),
     oferta({ id: "preco_melhor", preco: 90, precoAtual: 90, criadoEm: "24/07/2026, 19:10:00" })
   ];
