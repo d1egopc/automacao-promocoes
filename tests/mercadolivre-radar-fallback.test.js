@@ -6,6 +6,7 @@ const {
 } = require("../modules/engine/importer/adapters/mercadolivre.adapter");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
+  ORIGEM_PROVA_CANDIDATO_RADAR,
   ORIGEM_PROVA_BLOCO_PRINCIPAL
 } = require("../modules/radar/mercadolivre-social-identidade");
 
@@ -157,6 +158,26 @@ function htmlBlocoPrincipalSocial({ mlbItem = "MLB9988776655", mlbProduto = "MLB
       product_id: mlbProduto,
       url
     }]
+  })}</script></html>`;
+}
+
+function htmlCandidatoRadarSocial({
+  mlbItem = "MLB7197806380",
+  mlbProduto = "MLB35277819",
+  titulo = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml",
+  url = "https://produto.mercadolivre.com.br/MLB-7197806380-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM"
+} = {}) {
+  return `<html><script>${JSON.stringify({
+    recommendations: {
+      polycards: [{
+        metadata: {
+          id: mlbItem,
+          product_id: mlbProduto,
+          title: titulo,
+          url
+        }
+      }]
+    }
   })}</script></html>`;
 }
 
@@ -573,18 +594,16 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.metadata.fallbackMercadoLivreRadar, true);
   assert.strictEqual(resultado.metadata.motivoFallback, "mercadolivre_identidade_nao_confirmada");
-  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
-  assert.strictEqual(resultado.preco, 149.9);
-  assert.strictEqual(resultado.cupom, "PROMO50");
   assert.strictEqual(resultado.linkOriginal, shortlink);
-  assert.strictEqual(resultado.linkExpandido, shortlink);
-  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+  assert.ok(contexto.chamadas.afiliado.every(chamada => !/^https?:\/\/(?:www\.)?meli\.la\//i.test(String(chamada.url || ""))));
+  assert.ok(contexto.chamadas.afiliado.every(chamada => !/^https?:\/\/(?:www\.)?mercadolivre\.com\.br\/social\//i.test(String(chamada.url || ""))));
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO), "URL candidata insegura nao pode vazar para fallback puro Radar");
@@ -704,6 +723,110 @@ async function testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial() {
   assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BLOCO_PRINCIPAL);
 }
 
+async function testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial() {
+  const shortlink = "https://meli.la/shortlink-candidato-radar-provado";
+  const titulo = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml";
+  const imagemRadar = "https://cdn.exemplo.com/radar-grupo-marca.jpg";
+  const prova = extrairProvaIdentidadeMercadoLivreHtml(htmlCandidatoRadarSocial(), { tituloRadar: titulo });
+  assert.strictEqual(prova.ok, true);
+  assert.strictEqual(prova.origem, ORIGEM_PROVA_CANDIDATO_RADAR);
+
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async (url, opcoes = {}) => {
+    assert.strictEqual(url, shortlink);
+    assert.strictEqual(opcoes.tituloRadar, titulo);
+    return {
+      ok: true,
+      urlResolvida: URL_SOCIAL_AMBIGUA,
+      linkOriginalLimpo: prova.urlProduto,
+      linkResolvido: prova.urlProduto,
+      tipoLinkRadar: "shortlink_meli",
+      metodoResolucaoMeli: "fallback_intermediario",
+      provaIdentidadeMeli: prova
+    };
+  };
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      titulo,
+      preco: 88.88,
+      precoAnterior: 129.9,
+      cupom: "VITA15",
+      midia: { imagemOrigem: "mensagem", imagemOriginal: imagemRadar }
+    }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, titulo);
+  assert.strictEqual(resultado.preco, 88.88);
+  assert.strictEqual(resultado.precoOriginal, 129.9);
+  assert.strictEqual(resultado.cupom, "VITA15");
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+  assert.strictEqual(resultado.imagemOrigem, "api_mercadolibre.items.pictures[0].secure_url");
+  assert.strictEqual(contexto.chamadas.importar.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, prova.urlProduto);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, prova.mlbItem);
+}
+
+async function testarRadarCandidatoProvadoComErroImagemMantemRadar() {
+  const shortlink = "https://meli.la/shortlink-candidato-radar-imagem-falha";
+  const titulo = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml";
+  const imagemRadar = "https://cdn.exemplo.com/radar-fallback-original.jpg";
+  const prova = extrairProvaIdentidadeMercadoLivreHtml(htmlCandidatoRadarSocial(), { tituloRadar: titulo });
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficialErro: new Error("api_imagem_indisponivel")
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: prova.urlProduto,
+    linkResolvido: prova.urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario",
+    provaIdentidadeMeli: prova
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      titulo,
+      preco: 88.88,
+      precoAnterior: 129.9,
+      cupom: "VITA15",
+      midia: { imagemOrigem: "mensagem", imagemOriginal: imagemRadar }
+    }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, titulo);
+  assert.strictEqual(resultado.preco, 88.88);
+  assert.strictEqual(resultado.precoOriginal, 129.9);
+  assert.strictEqual(resultado.cupom, "VITA15");
+  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, prova.urlProduto);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, prova.mlbItem);
+}
+
 async function testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado() {
   const shortlink = "https://meli.la/shortlink-produto-diverge-prova";
   const prova = provaMeliValida();
@@ -725,16 +848,12 @@ async function testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.linkOriginal, shortlink);
-  assert.strictEqual(resultado.linkExpandido, shortlink);
-  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
-  assert.strictEqual(resultado.preco, 149.9);
-  assert.strictEqual(resultado.precoOriginal, 229.9);
-  assert.strictEqual(resultado.cupom, "PROMO50");
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
 }
 
 async function testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado() {
@@ -756,7 +875,7 @@ async function testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransport
     }
   });
 
-  assert.strictEqual(transporte, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(transporte, "");
 }
 
 async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
@@ -775,16 +894,14 @@ async function testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.metadata.fallbackMercadoLivreRadar, true);
   assert.strictEqual(resultado.metadata.motivoFallback, "ml_url_produto_nao_resolvida");
-  assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
-  assert.strictEqual(resultado.preco, 149.9);
   assert.strictEqual(resultado.linkOriginal, shortlink);
-  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?ref=sem-produto");
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
 }
 
@@ -810,8 +927,7 @@ async function testarRadarSocialComFalhaAfiliadoContinuaInsuficiente() {
   assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
 }
 
 async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
@@ -884,19 +1000,14 @@ async function testarClonadorSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_clonador_insuficiente");
   assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, true);
   assert.strictEqual(resultado.metadata.motivoFallback, "mercadolivre_identidade_nao_confirmada");
-  assert.strictEqual(resultado.titulo, "Kit 3 Bermuda Masculina Sarja Short Jeans Social Brim Lisa");
-  assert.strictEqual(resultado.preco, 106.94);
-  assert.strictEqual(resultado.precoOriginal, 183);
-  assert.strictEqual(resultado.cupom, "OFERTASEMPRE");
   assert.strictEqual(resultado.linkOriginal, shortlink);
-  assert.strictEqual(resultado.linkExpandido, shortlink);
-  assert.strictEqual(resultado.imagem, imagemClone);
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_SOCIAL_AMBIGUA);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "URL candidata insegura nao pode vazar para fallback puro Clone");
@@ -999,14 +1110,14 @@ async function testarClonadorParametroSocialSemVinculoSegueFallbackPuro() {
     deps: contexto.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_clonador_insuficiente");
   assert.strictEqual(resultado.metadata.fallbackMercadoLivreClonador, true);
   assert.strictEqual(resultado.metadata.motivoFallback, "mercadolivre_identidade_nao_confirmada");
   assert.strictEqual(resultado.linkOriginal, shortlink);
-  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
-  assert.strictEqual(contexto.chamadas.afiliado[0].url, "https://www.mercadolivre.com.br/social/perfil?reco_backend=item_decorator");
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
   const serializado = JSON.stringify(resultado);
   assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "produto candidato por recommendation nao pode vazar para fallback puro Clone");
 }
@@ -1084,6 +1195,8 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarProdutoComProvaForteViraTransporteAfiliado();
   await testarRadarProdutoComProvaBlocoPrincipalViraTransporteAfiliado();
   await testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial();
+  await testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial();
+  await testarRadarCandidatoProvadoComErroImagemMantemRadar();
   await testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado();
   await testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado();
   await testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente();

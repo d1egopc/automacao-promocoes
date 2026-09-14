@@ -4,6 +4,7 @@ const { avaliarOfertaUniversal } = require("../../../../modules/inteligencia-uni
 const { resolverImagemUniversal } = require("../../../../modules/imagens/resolver-imagem-universal");
 const { resumoLinksClassificados } = require("../../link-role.service");
 const {
+  ORIGEM_PROVA_CANDIDATO_RADAR,
   ORIGEM_PROVA_BLOCO_PRINCIPAL,
   validarProvaIdentidadeMercadoLivre
 } = require("../../../radar/mercadolivre-social-identidade");
@@ -429,7 +430,9 @@ function resolverMlbItemImagemOficialFallbackMercadoLivre({
   linkExpandidoEngine = ""
 } = {}) {
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
-  const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar);
+  const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar, {
+    aceitarCandidatoRadar: true
+  });
   const mlbProva = normalizarMlbItemApiMercadoLivre(provaValida?.mlbItem || "");
   if (mlbProva) return { mlb: mlbProva, origem: "provaIdentidadeMeli.mlbItem" };
 
@@ -503,6 +506,10 @@ async function resolverImagemOficialFallbackMercadoLivre(imagemCapturada = {}, c
 
 function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motivo = "") {
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar, {
+    aceitarBlocoPrincipal: true,
+    aceitarCandidatoRadar: true
+  });
   const urlSocial = [
     resolucaoRadar.urlResolvida,
     resolucaoRadar.linkResolvido,
@@ -518,6 +525,7 @@ function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motiv
       motivo: resolucaoRadar.motivo || motivo || resolucaoProduto.motivo || "",
       tipoLinkRadar: resolucaoRadar.tipoLinkRadar || "",
       metodoResolucaoMeli: resolucaoRadar.metodoResolucaoMeli || "",
+      ...(provaValida ? { provaIdentidadeMeli: resolucaoRadar.provaIdentidadeMeli } : {}),
       ...(urlSocial ? { urlResolvida: urlSocial } : {})
     }
   };
@@ -533,6 +541,9 @@ function mlbsUrlTransporteAfiliadoMercadoLivre(url = "") {
 }
 
 function urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url = "", prova = {}) {
+  if (prova.origem === ORIGEM_PROVA_CANDIDATO_RADAR && textoMercadoLivre(url) === textoMercadoLivre(prova.urlProduto)) {
+    return true;
+  }
   const mlbsUrl = mlbsUrlTransporteAfiliadoMercadoLivre(url);
   const mlbsProva = [
     prova.mlbItem,
@@ -543,7 +554,10 @@ function urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url = "", prov
 
 function resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar = {}, resolucaoProduto = {}) {
   const provas = [
-    validarProvaSocialMercadoLivre(resolucaoRadar, { aceitarBlocoPrincipal: true }),
+    validarProvaSocialMercadoLivre(resolucaoRadar, {
+      aceitarBlocoPrincipal: true,
+      aceitarCandidatoRadar: true
+    }),
     validarParametroProdutoEstruturadoMercadoLivre(resolucaoRadar, resolucaoProduto)
   ].filter(Boolean);
   if (!provas.length) return "";
@@ -569,8 +583,6 @@ function resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine
 
   const urlProdutoProvada = resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar, resolucaoProduto);
   if (urlProdutoProvada) return urlProdutoProvada;
-
-  if (isSocialMercadoLivre(urlResolvidaDireta)) return urlResolvidaDireta;
 
   return "";
 }
@@ -1122,11 +1134,13 @@ function validarProvaSocialMercadoLivre(resolucaoRadar = {}, opcoes = {}) {
     resolucaoRadar.provaIdentidadeMeli,
     {
       urlProdutoResolvido: resolucaoRadar.linkOriginalLimpo || resolucaoRadar.linkResolvido || "",
-      aceitarBlocoPrincipal: opcoes.aceitarBlocoPrincipal === true
+      aceitarBlocoPrincipal: opcoes.aceitarBlocoPrincipal === true,
+      aceitarCandidatoRadar: opcoes.aceitarCandidatoRadar === true
     }
   );
   if (!validacao.ok) return null;
   if (validacao.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal !== true) return null;
+  if (validacao.origem === ORIGEM_PROVA_CANDIDATO_RADAR && opcoes.aceitarCandidatoRadar !== true) return null;
   return validacao;
 }
 
@@ -1233,7 +1247,7 @@ function avaliarIdentidadeNaoConfirmadaMercadoLivre({ urlOriginalEngine = "", re
     linkResolvidoRadar: resolucaoRadar.linkResolvido || "",
     linkOriginalLimpo: resolucaoRadar.linkOriginalLimpo || "",
     urlCanonicaRevalidada: resolucaoProduto.urlProduto || resolucaoProduto.linkExpandidoEngine || "",
-    sinais: ["meli_la_social_sem_prova_identidade"]
+    sinais: ["meli_la_social_sem_prova_identidade", "mercadolivre_identidade_tecnica_nao_comprovada"]
   };
 }
 
@@ -1589,7 +1603,9 @@ async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps
 
   let resolucao;
   try {
-    resolucao = await deps.resolverLinkOriginalRadar(urlOriginalEngine);
+    resolucao = await deps.resolverLinkOriginalRadar(urlOriginalEngine, {
+      tituloRadar: contexto.tituloRadar || ""
+    });
   } catch (e) {
     console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
       ...contexto,
@@ -1702,10 +1718,12 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const credenciais = integracao?.credenciais || {};
   const temCookies = Boolean(credenciais.cookies);
   const temTag = Boolean(credenciais.tag);
+  const tituloRadarIdentidade = extrairTituloClonadorMercadoLivre(evento, job) || extrairTituloRadarMercadoLivre(evento);
   const resolucaoProduto = await resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine, deps, {
     jobId: job.id,
     eventoId: job.evento_id,
-    clienteId
+    clienteId,
+    tituloRadar: tituloRadarIdentidade
   });
 
   if (!resolucaoProduto.ok) {

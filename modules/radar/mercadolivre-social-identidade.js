@@ -2,9 +2,12 @@
 
 const ORIGEM_PROVA = "card-featured.polycards[0].metadata";
 const ORIGEM_PROVA_BLOCO_PRINCIPAL = "bloco-principal-social";
+const ORIGEM_PROVA_CANDIDATO_RADAR = "candidato-social-radar";
 const TIPO_PROVA_PDP_FILTERS = "pdp_filters_item_id";
 const TIPO_PROVA_ESTRUTURAL = "card_featured_estrutural";
+const TIPO_PROVA_RADAR_CANDIDATO = "radar_candidato_textual";
 const ORIGENS_PROVA_IDENTIDADE = new Set([ORIGEM_PROVA]);
+const MAX_CANDIDATOS_RADAR_SOCIAL = 24;
 
 function normalizarMlbExato(valor = "") {
   const match = String(valor || "").trim().match(/^MLB-?(\d{6,})$/i);
@@ -78,6 +81,120 @@ function normalizarMlbProdutoCatalogo(valor = "") {
   return normalizarMlbExato(String(valor || "").trim().replace(/^MLBP/i, "MLB"));
 }
 
+function normalizarTextoRadarCandidatoMercadoLivre(valor = "") {
+  return String(valor || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokensRadarCandidatoMercadoLivre(valor = "") {
+  const stopwords = new Set([
+    "a", "as", "o", "os", "de", "da", "das", "do", "dos", "e", "em", "no", "na", "nos", "nas",
+    "com", "para", "por", "pra", "pro", "promocao", "promo", "cupom", "oferta", "gratis", "mercado",
+    "livre", "original", "produto", "novo", "nova", "kit", "un", "und", "unidade", "unidades"
+  ]);
+  return normalizarTextoRadarCandidatoMercadoLivre(valor)
+    .split(/\s+/)
+    .filter(token => token.length >= 2 && !stopwords.has(token));
+}
+
+function slugUrlProdutoMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(normalizarUrlMetadata(url));
+    return decodeURIComponent(parsed.pathname)
+      .split("/")
+      .filter(Boolean)
+      .filter(parte => !/^p$/i.test(parte) && !/^MLB-?\d+/i.test(parte))
+      .join(" ");
+  } catch {
+    return "";
+  }
+}
+
+function textoIdentidadeCandidatoMercadoLivre(objeto = {}, url = "") {
+  const chaves = [
+    "title", "titulo", "name", "nome", "label", "text", "description", "subtitle",
+    "heading", "alt", "aria_label", "ariaLabel"
+  ];
+  const textos = valoresDiretosObjeto(objeto, chaves).map(String).filter(Boolean);
+  textos.push(slugUrlProdutoMercadoLivre(url));
+  return textos.join(" ").trim();
+}
+
+function extrairIdentificadoresTextoMercadoLivre(valor = "") {
+  const texto = normalizarTextoRadarCandidatoMercadoLivre(valor);
+  const tokens = tokensRadarCandidatoMercadoLivre(texto);
+  const modelos = tokens.filter(token => /[a-z]/.test(token) && /\d/.test(token));
+  const voltagens = [...texto.matchAll(/\b(110|127|220)\s*v\b/g)].map(match => `${match[1]}v`);
+  const capacidades = [...texto.matchAll(/\b\d+(?:[,.]\d+)?\s*(?:ml|l|gb|tb|kg|g|w|mah|cm|mm|m)\b/g)]
+    .map(match => match[0].replace(/\s+/g, "").replace(",", "."));
+  const kits = [...texto.matchAll(/\bkit\s*(?:com\s*)?(\d+)|\b(\d+)\s*(?:un|und|unidades|pecas|peças|camisetas|bermudas)\b/g)]
+    .map(match => `kit${match[1] || match[2]}`);
+  const marcasConhecidas = [
+    "samsung", "motorola", "xiaomi", "apple", "lg", "philco", "mondial", "electrolux", "brastemp",
+    "consul", "medicube", "redragon", "amd", "intel", "lenovo", "asus", "acer", "dell"
+  ].filter(marca => tokens.includes(marca));
+  return {
+    tokens,
+    modelos: [...new Set(modelos)],
+    voltagens: [...new Set(voltagens)],
+    capacidades: [...new Set(capacidades)],
+    kits: [...new Set(kits)],
+    marcas: [...new Set(marcasConhecidas)]
+  };
+}
+
+function conjuntosConflitamMercadoLivre(a = [], b = []) {
+  if (!a.length || !b.length) return false;
+  return !a.some(valor => b.includes(valor));
+}
+
+function validarMatchRadarCandidatoMercadoLivre(tituloRadar = "", textoCandidato = "") {
+  const radar = extrairIdentificadoresTextoMercadoLivre(tituloRadar);
+  const candidato = extrairIdentificadoresTextoMercadoLivre(textoCandidato);
+  if (!radar.tokens.length || !candidato.tokens.length) {
+    return { ok: false, motivo: "identidade_textual_ausente" };
+  }
+
+  if (conjuntosConflitamMercadoLivre(radar.marcas, candidato.marcas)) return { ok: false, motivo: "marca_divergente" };
+  if (conjuntosConflitamMercadoLivre(radar.modelos, candidato.modelos)) return { ok: false, motivo: "modelo_divergente" };
+  if (conjuntosConflitamMercadoLivre(radar.voltagens, candidato.voltagens)) return { ok: false, motivo: "voltagem_divergente" };
+  if (conjuntosConflitamMercadoLivre(radar.capacidades, candidato.capacidades)) return { ok: false, motivo: "capacidade_divergente" };
+  if (conjuntosConflitamMercadoLivre(radar.kits, candidato.kits)) return { ok: false, motivo: "quantidade_kit_divergente" };
+
+  for (const grupo of [radar.modelos, radar.voltagens, radar.capacidades, radar.kits]) {
+    for (const identificador of grupo) {
+      if (!candidato.tokens.includes(identificador) && !normalizarTextoRadarCandidatoMercadoLivre(textoCandidato).includes(identificador)) {
+        return { ok: false, motivo: "identificador_radar_ausente_candidato" };
+      }
+    }
+  }
+
+  const rarosRadar = radar.tokens.filter(token => token.length >= 4 || /\d/.test(token));
+  const rarosCandidato = new Set(candidato.tokens);
+  const intersecao = rarosRadar.filter(token => rarosCandidato.has(token));
+  const minimo = Math.min(3, rarosRadar.length);
+  const razao = rarosRadar.length ? intersecao.length / rarosRadar.length : 0;
+  if (intersecao.length < minimo && razao < 0.72) {
+    return {
+      ok: false,
+      motivo: "similaridade_textual_insuficiente",
+      intersecao: intersecao.length,
+      tokensRadar: rarosRadar.length
+    };
+  }
+
+  return {
+    ok: true,
+    intersecao: intersecao.length,
+    tokensRadar: rarosRadar.length,
+    razao: Number(razao.toFixed(4))
+  };
+}
+
 function validarUrlProduto({ url = "", mlbProduto = "", mlbItem = "", exigirPdpFilters = true } = {}) {
   try {
     const parsed = new URL(normalizarUrlMetadata(url));
@@ -87,6 +204,19 @@ function validarUrlProduto({ url = "", mlbProduto = "", mlbItem = "", exigirPdpF
     }
     if (parsed.pathname.toLowerCase().startsWith("/social/")) {
       return { ok: false, motivo: "url_produto_social" };
+    }
+
+    const matchItemDireto = host === "produto.mercadolivre.com.br"
+      ? parsed.pathname.match(/^\/(MLB-?\d{6,})(?:\D|$)/i)
+      : null;
+    const itemDiretoUrl = normalizarMlbExato(matchItemDireto?.[1] || "");
+    if (itemDiretoUrl) {
+      if (itemDiretoUrl !== mlbItem) {
+        return { ok: false, motivo: "metadata_id_diverge_url_direta" };
+      }
+      parsed.hash = "";
+      parsed.search = "";
+      return { ok: true, urlProduto: parsed.toString(), mlbProduto, mlbItem };
     }
 
     const matchProduto = parsed.pathname.match(/\/p\/(MLB-?\d{6,})(?:\/|$)/i);
@@ -168,17 +298,30 @@ function validarProvaIdentidadeMercadoLivre(prova = {}, opcoes = {}) {
   if (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal !== true) {
     return { ok: false, motivo: "bloco_principal_nao_homologado_contexto" };
   }
+  if (prova.origem === ORIGEM_PROVA_CANDIDATO_RADAR && opcoes.aceitarCandidatoRadar !== true) {
+    return { ok: false, motivo: "candidato_radar_nao_homologado_contexto" };
+  }
   const origemHomologada = ORIGENS_PROVA_IDENTIDADE.has(prova.origem)
-    || (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal === true);
+    || (prova.origem === ORIGEM_PROVA_BLOCO_PRINCIPAL && opcoes.aceitarBlocoPrincipal === true)
+    || (prova.origem === ORIGEM_PROVA_CANDIDATO_RADAR && opcoes.aceitarCandidatoRadar === true);
   if (!origemHomologada || prova.cardFeaturedUnico !== true || prova.totalPolycards !== 1) {
     return { ok: false, motivo: "bloco_destacado_ambiguo" };
   }
 
   const mlbItem = normalizarMlbExato(prova.mlbItem);
   const mlbProduto = normalizarMlbExato(prova.mlbProduto);
-  if (!mlbItem || !mlbProduto) return { ok: false, motivo: "metadata_sem_identidade_explicita" };
+  const provaCandidatoRadar = prova.origem === ORIGEM_PROVA_CANDIDATO_RADAR;
+  if (!mlbItem || (!mlbProduto && !provaCandidatoRadar)) return { ok: false, motivo: "metadata_sem_identidade_explicita" };
+  if (provaCandidatoRadar && prova.candidatoUnico !== true) {
+    return { ok: false, motivo: "candidato_radar_ambiguo" };
+  }
+  if (provaCandidatoRadar && prova.matchRadar?.ok !== true) {
+    return { ok: false, motivo: prova.matchRadar?.motivo || "candidato_radar_sem_match_forte" };
+  }
 
-  const exigirPdpFilters = !(!provaUsaPdpFilters(prova) && provaEstruturalPodeDispensarPdpFilters(prova));
+  const exigirPdpFilters = provaCandidatoRadar
+    ? false
+    : !(!provaUsaPdpFilters(prova) && provaEstruturalPodeDispensarPdpFilters(prova));
   const validacao = validarUrlProduto({ url: prova.urlProduto, mlbProduto, mlbItem, exigirPdpFilters });
   if (!validacao.ok) return validacao;
 
@@ -197,7 +340,10 @@ function validarProvaIdentidadeMercadoLivre(prova = {}, opcoes = {}) {
   return {
     ...validacao,
     origem: prova.origem,
-    tipoProva: exigirPdpFilters ? TIPO_PROVA_PDP_FILTERS : (prova.tipoProva || TIPO_PROVA_ESTRUTURAL)
+    tipoProva: provaCandidatoRadar
+      ? TIPO_PROVA_RADAR_CANDIDATO
+      : (exigirPdpFilters ? TIPO_PROVA_PDP_FILTERS : (prova.tipoProva || TIPO_PROVA_ESTRUTURAL)),
+    ...(provaCandidatoRadar ? { matchRadar: prova.matchRadar, textoIdentidade: prova.textoIdentidade || "" } : {})
   };
 }
 
@@ -394,20 +540,121 @@ function extrairProvaBlocoPrincipalMercadoLivreHtml(fonte = "") {
   return { ok: false, motivo };
 }
 
-function extrairProvaIdentidadeMercadoLivreHtml(html = "") {
+function urlProdutoOficialDiretaObjeto(objeto = {}) {
+  const chavesUrl = ["url", "permalink", "product_url", "productUrl", "target_url", "targetUrl", "destination_url", "destinationUrl"];
+  for (const valor of valoresDiretosObjeto(objeto, chavesUrl)) {
+    const url = normalizarUrlMetadata(valor);
+    const validacaoDireta = validarUrlProduto({
+      url,
+      mlbItem: primeiroMlbDiretoObjeto(objeto, ["item_id", "itemId", "item", "mlbItem", "meliItemId", "wid", "id"]),
+      mlbProduto: primeiroMlbDiretoObjeto(objeto, ["product_id", "productId", "catalog_product_id", "catalogProductId", "mlbProduto", "pid"], normalizarMlbProdutoCatalogo),
+      exigirPdpFilters: false
+    });
+    if (validacaoDireta.ok) return url;
+  }
+  return "";
+}
+
+function montarCandidatoRadarSocialMercadoLivre(objeto = {}, tituloRadar = "") {
+  if (!objetoPlano(objeto)) return null;
+  const mlbItem = primeiroMlbDiretoObjeto(objeto, ["item_id", "itemId", "item", "mlbItem", "meliItemId", "wid", "id"]);
+  if (!mlbItem) return null;
+
+  const mlbProduto = primeiroMlbDiretoObjeto(
+    objeto,
+    ["product_id", "productId", "catalog_product_id", "catalogProductId", "mlbProduto", "pid"],
+    normalizarMlbProdutoCatalogo
+  );
+  const urlProduto = urlProdutoOficialDiretaObjeto(objeto);
+  if (!urlProduto) return null;
+
+  const textoIdentidade = textoIdentidadeCandidatoMercadoLivre(objeto, urlProduto);
+  const matchRadar = validarMatchRadarCandidatoMercadoLivre(tituloRadar, textoIdentidade);
+  if (!matchRadar.ok) {
+    return { ok: false, motivo: matchRadar.motivo || "candidato_radar_sem_match_forte" };
+  }
+
+  return {
+    origem: ORIGEM_PROVA_CANDIDATO_RADAR,
+    cardFeaturedUnico: true,
+    totalPolycards: 1,
+    candidatoUnico: true,
+    mlbItem,
+    mlbProduto,
+    urlProduto,
+    textoIdentidade,
+    matchRadar,
+    tipoProva: TIPO_PROVA_RADAR_CANDIDATO
+  };
+}
+
+function extrairProvasCandidatoRadarMercadoLivreHtml(fonte = "", tituloRadar = "") {
+  if (!String(tituloRadar || "").trim()) return { provas: [], motivo: "titulo_radar_ausente" };
+  const texto = String(fonte || "");
+  const regexUrl = /"[^"]*"\s*:\s*"[^"]*(?:produto\.mercadolivre\.com\.br\/MLB|mercadolivre\.com\.br\/[^"]*\/p\/MLB)[^"]*"/gi;
+  const provas = [];
+  const chaves = new Set();
+  let motivo = "candidato_radar_ausente";
+  let match;
+  let inspecionados = 0;
+
+  while ((match = regexUrl.exec(texto)) !== null && inspecionados < MAX_CANDIDATOS_RADAR_SOCIAL) {
+    inspecionados += 1;
+    const jsonObjeto = extrairObjetoJsonContendo(texto, match.index);
+    if (!jsonObjeto) continue;
+
+    try {
+      const objeto = JSON.parse(jsonObjeto);
+      const fontes = fontesProdutoBlocoPrincipal(objeto).filter(objetoPlano);
+      for (const fonteObjeto of fontes) {
+        const prova = montarCandidatoRadarSocialMercadoLivre(fonteObjeto, tituloRadar);
+        if (prova?.ok === false && prova.motivo) motivo = prova.motivo;
+        if (!prova?.origem) continue;
+        const validacao = validarProvaIdentidadeMercadoLivre(prova, { aceitarCandidatoRadar: true });
+        if (!validacao.ok) {
+          motivo = validacao.motivo || motivo;
+          continue;
+        }
+        const chave = validacao.mlbItem;
+        if (chaves.has(chave)) continue;
+        chaves.add(chave);
+        provas.push({ ...prova, ok: true, urlProduto: validacao.urlProduto, tipoProva: validacao.tipoProva });
+      }
+    } catch {
+      motivo = "candidato_radar_json_invalido";
+    }
+  }
+
+  return { provas, motivo, inspecionados };
+}
+
+function extrairProvaCandidatoRadarMercadoLivreHtml(fonte = "", opcoes = {}) {
+  const resultado = extrairProvasCandidatoRadarMercadoLivreHtml(fonte, opcoes.tituloRadar || "");
+  if (resultado.provas.length === 1) return resultado.provas[0];
+  if (resultado.provas.length > 1) return { ok: false, motivo: "candidato_radar_ambiguo" };
+  return { ok: false, motivo: resultado.motivo || "candidato_radar_ausente" };
+}
+
+function extrairProvaIdentidadeMercadoLivreHtml(html = "", opcoes = {}) {
   const fonte = String(html || "");
   const provaCardFeatured = extrairProvaCardFeaturedMercadoLivreHtml(fonte);
   if (provaCardFeatured.ok || provaCardFeatured.motivo !== "card_featured_ausente") {
     return provaCardFeatured;
   }
-  return extrairProvaBlocoPrincipalMercadoLivreHtml(fonte);
+  const provaBlocoPrincipal = extrairProvaBlocoPrincipalMercadoLivreHtml(fonte);
+  if (provaBlocoPrincipal.ok || provaBlocoPrincipal.motivo !== "bloco_principal_ausente") {
+    return provaBlocoPrincipal;
+  }
+  return extrairProvaCandidatoRadarMercadoLivreHtml(fonte, opcoes);
 }
 
 module.exports = {
   ORIGEM_PROVA,
   ORIGEM_PROVA_BLOCO_PRINCIPAL,
+  ORIGEM_PROVA_CANDIDATO_RADAR,
   TIPO_PROVA_ESTRUTURAL,
   TIPO_PROVA_PDP_FILTERS,
+  TIPO_PROVA_RADAR_CANDIDATO,
   extrairProvaIdentidadeMercadoLivreHtml,
   normalizarMlbExato,
   validarProvaIdentidadeMercadoLivre

@@ -5,8 +5,10 @@ const fs = require("fs");
 const path = require("path");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
+  ORIGEM_PROVA_CANDIDATO_RADAR,
   ORIGEM_PROVA_BLOCO_PRINCIPAL,
   TIPO_PROVA_ESTRUTURAL,
+  TIPO_PROVA_RADAR_CANDIDATO,
   TIPO_PROVA_PDP_FILTERS,
   validarProvaIdentidadeMercadoLivre
 } = require("../modules/radar/mercadolivre-social-identidade");
@@ -44,6 +46,28 @@ function htmlBlocoPrincipal({ mlbItem = "MLB9988776655", mlbProduto = "MLB445566
     ...extras
   };
   return `<html><script>${JSON.stringify({ components: [bloco, ...componentesExtras] })}</script></html>`;
+}
+
+function htmlCandidatoRadarSocial(candidatos = []) {
+  return `<html><script>${JSON.stringify({ recommendations: { polycards: candidatos } })}</script></html>`;
+}
+
+function candidatoRadar({
+  id = "MLB7197806380",
+  productId = "MLB35277819",
+  titulo = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml",
+  url = "https://produto.mercadolivre.com.br/MLB-7197806380-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM",
+  extras = {}
+} = {}) {
+  return {
+    metadata: {
+      id,
+      product_id: productId,
+      title: titulo,
+      url,
+      ...extras
+    }
+  };
 }
 
 function casoReal(mlbItem, mlbProduto, slug) {
@@ -146,6 +170,148 @@ const canonicalOgSemBlocoPrincipal = extrairProvaIdentidadeMercadoLivreHtml(`
   </html>
 `);
 assert.strictEqual(canonicalOgSemBlocoPrincipal.ok, false);
+
+const tituloRadarMedicube = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml";
+const provaCandidatoRadar = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar()]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(provaCandidatoRadar.ok, true);
+assert.strictEqual(provaCandidatoRadar.origem, ORIGEM_PROVA_CANDIDATO_RADAR);
+assert.strictEqual(provaCandidatoRadar.tipoProva, TIPO_PROVA_RADAR_CANDIDATO);
+assert.strictEqual(provaCandidatoRadar.mlbItem, "MLB7197806380");
+assert.strictEqual(
+  provaCandidatoRadar.urlProduto,
+  "https://produto.mercadolivre.com.br/MLB-7197806380-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM"
+);
+assert.strictEqual(validarProvaIdentidadeMercadoLivre(provaCandidatoRadar).ok, false);
+assert.strictEqual(
+  validarProvaIdentidadeMercadoLivre(provaCandidatoRadar, { aceitarCandidatoRadar: true }).ok,
+  true
+);
+
+const recommendationCadeira = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    id: "MLB3769160991",
+    productId: "MLB99887766",
+    titulo: "Cadeira Executiva Giratoria Escritorio",
+    url: "https://produto.mercadolivre.com.br/MLB-3769160991-cadeira-executiva-giratoria-escritorio-_JM"
+  })]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(recommendationCadeira.ok, false);
+
+const candidatoCadeiraGenerica = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    id: "MLB3769160991",
+    productId: "MLB99887766",
+    titulo: "Cadeira Executiva Eike Mesh",
+    url: "https://produto.mercadolivre.com.br/MLB-3769160991-cadeira-executiva-eike-mesh-_JM"
+  })]),
+  { tituloRadar: "Cadeira Gamer Thunder X3" }
+);
+assert.strictEqual(candidatoCadeiraGenerica.ok, false);
+
+const produtoEmOutroIndicePolycard = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([
+    candidatoRadar({
+      id: "MLB3769160991",
+      productId: "MLB99887766",
+      titulo: "Cadeira Executiva Giratoria Escritorio",
+      url: "https://produto.mercadolivre.com.br/MLB-3769160991-cadeira-executiva-giratoria-escritorio-_JM"
+    }),
+    candidatoRadar()
+  ]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(produtoEmOutroIndicePolycard.ok, true);
+assert.strictEqual(produtoEmOutroIndicePolycard.mlbItem, "MLB7197806380");
+
+const mesmoMlbEmEstruturasDiferentes = extrairProvaIdentidadeMercadoLivreHtml(
+  `<html><script>${JSON.stringify({
+    recommendation_info: {
+      polycards: [
+        candidatoRadar({
+          url: "https://produto.mercadolivre.com.br/MLB-7197806380-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM?tracking_id=abc"
+        })
+      ]
+    },
+    tracking: {
+      recommended_items: [{
+        id: "MLB7197806380",
+        title: "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml",
+        url: "https://produto.mercadolivre.com.br/MLB7197806380"
+      }]
+    }
+  })}</script></html>`,
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(mesmoMlbEmEstruturasDiferentes.ok, true);
+assert.strictEqual(mesmoMlbEmEstruturasDiferentes.mlbItem, "MLB7197806380");
+
+const candidatoSemUrlOficial = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({ url: "" })]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(candidatoSemUrlOficial.ok, false);
+
+const candidatoUrlDivergente = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    id: "MLB7197806380",
+    url: "https://produto.mercadolivre.com.br/MLB-3769160991-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM"
+  })]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(candidatoUrlDivergente.ok, false);
+
+const candidatoAmbiguoRadar = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([
+    candidatoRadar(),
+    candidatoRadar({
+      id: "MLB7197806381",
+      url: "https://produto.mercadolivre.com.br/MLB-7197806381-booster-facial-medicube-vita-a-retinal-volufiline-5-15ml-_JM"
+    })
+  ]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(candidatoAmbiguoRadar.ok, false);
+assert.strictEqual(candidatoAmbiguoRadar.motivo, "candidato_radar_ambiguo");
+
+const candidatoMarcaDivergente = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    titulo: "Serum Facial Samsung Vita A Retinal Volufiline 5 15ml",
+    url: "https://produto.mercadolivre.com.br/MLB-7197806380-serum-facial-samsung-vita-a-retinal-volufiline-5-15ml-_JM"
+  })]),
+  { tituloRadar: tituloRadarMedicube }
+);
+assert.strictEqual(candidatoMarcaDivergente.ok, false);
+
+const candidatoModeloDivergente = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    titulo: "Smartphone Motorola G55 128GB",
+    url: "https://produto.mercadolivre.com.br/MLB-7197806380-smartphone-motorola-g55-128gb-_JM"
+  })]),
+  { tituloRadar: "Smartphone Samsung A55 256GB" }
+);
+assert.strictEqual(candidatoModeloDivergente.ok, false);
+
+const candidatoKitDivergente = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    titulo: "Kit 2 Camisetas Basicas Masculinas",
+    url: "https://produto.mercadolivre.com.br/MLB-7197806380-kit-2-camisetas-basicas-masculinas-_JM"
+  })]),
+  { tituloRadar: "Kit 5 Camisetas Basicas Masculinas" }
+);
+assert.strictEqual(candidatoKitDivergente.ok, false);
+
+const candidatoVoltagemDivergente = extrairProvaIdentidadeMercadoLivreHtml(
+  htmlCandidatoRadarSocial([candidatoRadar({
+    titulo: "Furadeira Parafusadeira 127V",
+    url: "https://produto.mercadolivre.com.br/MLB-7197806380-furadeira-parafusadeira-127v-_JM"
+  })]),
+  { tituloRadar: "Furadeira Parafusadeira 220V" }
+);
+assert.strictEqual(candidatoVoltagemDivergente.ok, false);
 
 const provaEstruturalSemPdp = extrairProvaIdentidadeMercadoLivreHtml(htmlSocial({
   mlbItem: "MLB7777777777",

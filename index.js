@@ -18114,8 +18114,10 @@ function extrairProdutoMarketplaceDeHtmlRadar(html = "", marketplace = "", base 
   return "";
 }
 
-function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "") {
-  const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(html || "");
+function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "", opcoes = {}) {
+  const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(html || "", {
+    tituloRadar: opcoes.tituloRadar || ""
+  });
   const produtoHtml = provaProdutoHtml.ok
     ? provaProdutoHtml.urlProduto
     : extrairProdutoMercadoLivreDeHtmlRadar(html || "");
@@ -18848,7 +18850,7 @@ function logPromozoneRadar(dados = {}) {
   });
 }
 
-async function resolverLinkOriginalRadar(url = "") {
+async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
   const capturada = limparLinkRadar(url);
   const dominioOriginal = dominioRadar(capturada);
 
@@ -19055,7 +19057,8 @@ async function resolverLinkOriginalRadar(url = "") {
             const paginaIntermediaria = await baixarHtmlRadar(resolvida);
             const diagnosticoProdutoHtml = diagnosticarProdutoMercadoLivreIntermediarioRadar(
               paginaIntermediaria.html || "",
-              paginaIntermediaria.urlFinal || resolvida
+              paginaIntermediaria.urlFinal || resolvida,
+              { tituloRadar: opcoes.tituloRadar || "" }
             );
             const produtoResolvido = diagnosticoProdutoHtml.urlProduto || "";
             if (produtoResolvido) {
