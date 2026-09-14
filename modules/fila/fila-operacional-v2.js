@@ -15,6 +15,7 @@ const {
   FILA_PROJECAO_LEVE_ARQUIVO,
   classificarItemFilaV2,
   projetarFilaV2,
+  projetarItemFilaLeve,
   projetarFilaLeve,
   atualizarItemProjecaoLeveFila
 } = require("./fila-v2-shadow");
@@ -29,6 +30,7 @@ const FLAG_BLOCKLIST_CLIENTES = "FILA_V2_OPERACIONAL_BLOCKLIST_CLIENTES";
 const FLAG_2B1_SHADOW_ATIVA = "FILA_V2_2B1_SHADOW_ATIVA";
 const FLAG_RECOVERY_AUTORIDADE = "FILA_V2_RECOVERY_AUTORIDADE";
 const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
+const HISTORICO_LEVE_INCREMENTAL_DIR = "fila-historico-leve-incremental";
 const TAG_TELEMETRIA = "[FILA-V2-OPERACIONAL]";
 const TAG_MANIFEST = "[FILA-V2-MANIFEST]";
 const TAG_CANARY_WRITER = "[FILA-V2-CANARY-WRITE]";
@@ -51,6 +53,8 @@ const MANIFEST_STATE_THROTTLE_MS = 5 * 60 * 1000;
 const MANIFEST_STATE_THROTTLE_MAX_ENTRADAS = 2048;
 const MANIFEST_STATE_THROTTLE_TARGET_ENTRADAS = 1536;
 const cacheChavesHistorico = new Map();
+const cacheHistoricoLeve = new Map();
+const bootstrapHistoricoLeveInicializado = new Map();
 const recoveryComparacaoLogThrottle = new Map();
 const manifestStateLogThrottle = new Map();
 const pendenciasProjecaoLeve = new Map();
@@ -3083,6 +3087,303 @@ function caminhoSegmentoHistorico(clienteId = "admin", item = {}, deps = {}) {
   return path.join(dir, `${data}.jsonl`);
 }
 
+function caminhoSegmentoHistoricoLeve(clienteId = "admin", item = {}, deps = {}) {
+  const dirCliente = caminhoDirCliente(clienteId, deps);
+  if (!dirCliente) return "";
+  const dir = path.join(dirCliente, HISTORICO_LEVE_INCREMENTAL_DIR);
+  const data = dataSegmentoHistorico(item, deps.agora || Date.now());
+  return path.join(dir, `${data}.jsonl`);
+}
+
+function chaveHistoricoLeveResultado(clienteId = "admin", item = {}, posicaoLegada = -1) {
+  const identidadeExecucao = texto(
+    item.id ||
+    item.filaItemId ||
+    item.itemFilaId ||
+    item.filaId ||
+    item.idFila ||
+    item.execucaoId ||
+    item.executionId ||
+    item.distribuicaoId ||
+    item.distributionId ||
+    item.jobId ||
+    item.job_id ||
+    item.ofertaOperacionalId ||
+    item.operacionalId
+  );
+  const identidadeFallback = texto(
+    item.ofertaId ||
+    item.oferta_id ||
+    item.engineOfertaId ||
+    item.engine_oferta_id ||
+    item.idOferta ||
+    idItem(item, posicaoLegada)
+  );
+  const nascimentoExecucao = texto(
+    item.criadoEm ||
+    item.createdAt ||
+    item.created_at ||
+    item.filaCriadoEm ||
+    item.inseridoEm ||
+    item.adicionadoEm ||
+    item.recebidoEm ||
+    item.importadoEm ||
+    item.created ||
+    ""
+  );
+  const base = [
+    clienteSeguro(clienteId),
+    identidadeExecucao
+      ? `exec:${identidadeExecucao}`
+      : `fallback:${identidadeFallback}|criado:${nascimentoExecucao || `pos:${posicaoLegada}`}`
+  ].join("|");
+  return crypto.createHash("sha1").update(base).digest("hex");
+}
+
+function statusPublicoHistoricoLeve(item = {}, projetado = {}) {
+  const progresso = projetado?.progresso && typeof projetado.progresso === "object"
+    ? projetado.progresso
+    : {};
+  const total = Number(progresso.total || 0);
+  const enviados = Number(progresso.enviados || 0);
+  const status = statusItem(item);
+  if (total > 0) {
+    if (enviados >= total) return "enviado";
+    if (enviados > 0 && enviados < total) return "parcial";
+    return "nao_enviado";
+  }
+  return status === "enviado" || status === "enviada" ? "enviado" : "nao_enviado";
+}
+
+function projetarItemHistoricoLeveTerminal(clienteId = "admin", entradaOuItem = {}, deps = {}) {
+  const agora = deps.agora || Date.now();
+  const entrada = normalizarEntradaViva(entradaOuItem, entradaOuItem?.posicaoLegada || 0, agora);
+  const item = { ...(entrada.item || {}), clienteId: clienteSeguro(clienteId) };
+  const projetado = projetarItemFilaLeve(item, {
+    clienteId: clienteSeguro(clienteId),
+    indice: entrada.posicaoLegada,
+    agora
+  });
+  const statusPublico = statusPublicoHistoricoLeve(item, projetado);
+  const detalheArquivo = deps.detalheArquivo || HISTORICO_INCREMENTAL_DIR;
+
+  return {
+    ...projetado,
+    clienteId: clienteSeguro(clienteId),
+    statusPublico,
+    statusOperacional: statusItem(item),
+    finalizadoEm: projetado.finalizadoEm || agoraIso(agora),
+    updatedAt: projetado.updatedAt || agoraIso(agora),
+    detalheRef: {
+      arquivo: detalheArquivo,
+      id: projetado.id
+    }
+  };
+}
+
+function hashRegistroHistoricoLeve(registro = {}) {
+  const { registradoEm: _registradoEm, hashRegistro: _hashRegistro, ...estavel } = registro || {};
+  return crypto.createHash("sha1").update(JSON.stringify(estavel)).digest("hex");
+}
+
+function timestampHistoricoLeveRegistro(registro = {}) {
+  const item = registro?.item && typeof registro.item === "object" ? registro.item : registro;
+  const candidatos = [
+    item.finalizadoEm,
+    item.enviadoEm,
+    item.erroEm,
+    item.expiradoEm,
+    item.updatedAt,
+    item.criadoEm,
+    registro.registradoEm
+  ];
+  for (const valor of candidatos) {
+    const ms = Date.parse(valor);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return 0;
+}
+
+function normalizarInfoCacheHistoricoLeve(valor) {
+  if (valor && typeof valor === "object") {
+    return {
+      hash: texto(valor.hash || valor.hashRegistro || ""),
+      timestampMs: Number.isFinite(Number(valor.timestampMs)) ? Number(valor.timestampMs) : 0
+    };
+  }
+  return { hash: texto(valor), timestampMs: 0 };
+}
+
+function registroHistoricoLeveJaMaterializado(infoExistente, hashRegistro = "", timestampMs = 0) {
+  const existente = normalizarInfoCacheHistoricoLeve(infoExistente);
+  if (!existente.hash) return false;
+  if (existente.hash === hashRegistro) return true;
+  return Number(existente.timestampMs || 0) >= Number(timestampMs || 0);
+}
+
+function montarRegistroHistoricoLeve(clienteId = "admin", entradaOuItem = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const entrada = normalizarEntradaViva(entradaOuItem, entradaOuItem?.posicaoLegada || 0, deps.agora || Date.now());
+  const item = entrada.item || {};
+  const file = caminhoSegmentoHistoricoLeve(cliente, item, deps);
+  const chave = chaveHistoricoLeveResultado(cliente, item, entrada.posicaoLegada);
+  const itemLeve = projetarItemHistoricoLeveTerminal(cliente, entrada, {
+    ...deps,
+    detalheArquivo: deps.detalheArquivo || HISTORICO_INCREMENTAL_DIR
+  });
+  const registroBase = {
+    versao: 1,
+    tipo: "historico_leve_terminal",
+    chave,
+    clienteId: cliente,
+    id: itemLeve.id,
+    ofertaId: itemLeve.ofertaId,
+    engineOfertaId: itemLeve.engineOfertaId,
+    statusPublico: itemLeve.statusPublico,
+    statusOperacional: itemLeve.statusOperacional,
+    registradoEm: agoraIso(deps.agora || Date.now()),
+    item: itemLeve
+  };
+  const hashRegistro = hashRegistroHistoricoLeve(registroBase);
+  const timestampMs = timestampHistoricoLeveRegistro(registroBase);
+  const registro = { ...registroBase, hashRegistro, timestampMs };
+  return {
+    cliente,
+    entrada,
+    item,
+    itemLeve,
+    file,
+    chave,
+    registro,
+    hashRegistro,
+    timestampMs
+  };
+}
+
+function chaveCacheHistoricoLeve(file = "") {
+  return texto(file);
+}
+
+function limparCacheHistoricoLeve() {
+  cacheHistoricoLeve.clear();
+  bootstrapHistoricoLeveInicializado.clear();
+  return true;
+}
+
+function arquivosHistoricoTecnico(clienteId = "admin", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const dirCliente = caminhoDirCliente(clienteId, deps);
+  if (!dirCliente) return [];
+  const dir = path.join(dirCliente, HISTORICO_INCREMENTAL_DIR);
+  try {
+    if (!fsImpl.existsSync(dir)) return [];
+    return fsImpl.readdirSync(dir)
+      .filter(nome => /\.jsonl$/i.test(nome))
+      .sort()
+      .map(nome => path.join(dir, nome));
+  } catch {
+    return [];
+  }
+}
+
+function lerItensHistoricoTecnicoParaLeve(clienteId = "admin", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const itens = [];
+  let bytesLidos = 0;
+  let linhas = 0;
+  for (const file of arquivosHistoricoTecnico(clienteId, deps)) {
+    try {
+      const conteudo = fsImpl.readFileSync(file, "utf8");
+      bytesLidos += Buffer.byteLength(conteudo || "", "utf8");
+      for (const linha of (conteudo || "").split(/\r?\n/)) {
+        if (!linha.trim()) continue;
+        linhas += 1;
+        try {
+          const registro = JSON.parse(linha);
+          if (registro?.item && typeof registro.item === "object") {
+            itens.push({
+              item: registro.item,
+              posicaoLegada: Number.isInteger(Number(registro.posicaoLegada)) ? Number(registro.posicaoLegada) : itens.length,
+              bucket: "historico",
+              motivoBucket: registro.motivoBucket || "",
+              status: registro.status || statusItem(registro.item),
+              id: registro.id || idItem(registro.item, itens.length)
+            });
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  return { itens, bytesLidos, linhas };
+}
+
+function lerCacheHistoricoLeve(file = "", fsImpl = fs, logger = console, clienteId = "admin") {
+  const chaveArquivo = chaveCacheHistoricoLeve(file);
+  if (!chaveArquivo) {
+    return { chaves: new Map(), bytes: 0, linhas: 0, cacheHit: false, motivo: "caminho_indisponivel" };
+  }
+
+  let stat = null;
+  try {
+    stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
+  } catch {
+    stat = null;
+  }
+
+  const cached = cacheHistoricoLeve.get(chaveArquivo);
+  if (cached && stat && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
+    return {
+      chaves: new Map(cached.chaves),
+      bytes: cached.bytes || 0,
+      linhas: cached.linhas || 0,
+      cacheHit: true,
+      motivo: "cache_hit"
+    };
+  }
+
+  const chaves = new Map();
+  let bytes = 0;
+  let linhas = 0;
+  try {
+    if (file && fsImpl.existsSync(file)) {
+      const conteudo = fsImpl.readFileSync(file, "utf8");
+      bytes = Buffer.byteLength(conteudo || "", "utf8");
+      for (const linha of (conteudo || "").split(/\r?\n/)) {
+        if (!linha.trim()) continue;
+        try {
+          const registro = JSON.parse(linha);
+          const chave = texto(registro?.chave);
+          if (chave) {
+            chaves.set(chave, {
+              hash: texto(registro?.hashRegistro || ""),
+              timestampMs: timestampHistoricoLeveRegistro(registro)
+            });
+          }
+          linhas += 1;
+        } catch {}
+      }
+    }
+  } catch {}
+
+  const snapshot = {
+    chaves,
+    bytes,
+    linhas,
+    mtimeMs: stat ? Number(stat.mtimeMs || 0) : 0,
+    size: stat ? Number(stat.size || 0) : 0
+  };
+  cacheHistoricoLeve.set(chaveArquivo, snapshot);
+  logOperacional(logger, {
+    versao: 1,
+    evento: "historico_leve_cache",
+    clienteId: clienteSeguro(clienteId),
+    fileHash: hashCurto(file),
+    linhas: snapshot.linhas,
+    bytes: snapshot.bytes
+  });
+  return { chaves: new Map(chaves), bytes, linhas, cacheHit: false, motivo: "cache_miss" };
+}
+
 function chaveCacheHistorico(file = "") {
   return texto(file);
 }
@@ -3187,6 +3488,399 @@ function lerCacheHistorico(file = "", fsImpl = fs, logger = console, clienteId =
   };
 }
 
+function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const porArquivo = new Map();
+  let processados = 0;
+
+  for (const entrada of lista(entradas)) {
+    const preparado = montarRegistroHistoricoLeve(cliente, entrada, deps);
+    if (!preparado.file) continue;
+    processados += 1;
+    const grupo = porArquivo.get(preparado.file) || new Map();
+    const anterior = grupo.get(preparado.chave);
+    if (!anterior || Number(preparado.timestampMs || 0) >= Number(anterior.timestampMs || 0)) {
+      grupo.set(preparado.chave, preparado);
+    }
+    porArquivo.set(preparado.file, grupo);
+  }
+
+  let escritos = 0;
+  let idempotentes = 0;
+  let erros = 0;
+  let bytesAppend = 0;
+  let writes = 0;
+  let maiorTrechoSyncMs = 0;
+
+  for (const [file, grupo] of porArquivo.entries()) {
+    const inicioArquivo = process.hrtime.bigint();
+    try {
+      fsImpl.mkdirSync(path.dirname(file), { recursive: true });
+      const cache = lerCacheHistoricoLeve(file, fsImpl, deps.logger, cliente);
+      const linhas = [];
+      const chaves = new Map(cache.chaves);
+
+      for (const preparado of grupo.values()) {
+        const existente = chaves.get(preparado.chave);
+        if (registroHistoricoLeveJaMaterializado(existente, preparado.hashRegistro, preparado.timestampMs)) {
+          idempotentes += 1;
+          continue;
+        }
+        linhas.push(`${JSON.stringify(preparado.registro)}\n`);
+        chaves.set(preparado.chave, {
+          hash: preparado.hashRegistro,
+          timestampMs: preparado.timestampMs
+        });
+      }
+
+      if (linhas.length) {
+        const payload = linhas.join("");
+        fsImpl.appendFileSync(file, payload, "utf8");
+        writes += 1;
+        escritos += linhas.length;
+        bytesAppend += Buffer.byteLength(payload, "utf8");
+        try {
+          const stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
+          cacheHistoricoLeve.set(chaveCacheHistoricoLeve(file), {
+            chaves,
+            bytes: stat ? Number(stat.size || 0) : (cache.bytes || 0) + Buffer.byteLength(payload, "utf8"),
+            linhas: (cache.linhas || 0) + linhas.length,
+            mtimeMs: stat ? Number(stat.mtimeMs || 0) : 0,
+            size: stat ? Number(stat.size || 0) : 0
+          });
+        } catch {}
+      }
+    } catch {
+      erros += grupo.size;
+    } finally {
+      const trechoMs = Math.round(Number(process.hrtime.bigint() - inicioArquivo) / 1e6);
+      if (trechoMs > maiorTrechoSyncMs) maiorTrechoSyncMs = trechoMs;
+    }
+  }
+
+  return {
+    ok: erros === 0,
+    clienteId: cliente,
+    processados,
+    escritos,
+    idempotentes,
+    erros,
+    bytesAppend,
+    writes,
+    maiorTrechoSyncMs,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function executarBootstrapHistoricoLeveDeTecnico(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const leitura = lerItensHistoricoTecnicoParaLeve(cliente, deps);
+  if (!leitura.itens.length) {
+    return {
+      ok: true,
+      clienteId: cliente,
+      pulou: true,
+      motivo: "historico_tecnico_vazio",
+      bytesLidosTecnico: leitura.bytesLidos,
+      linhasTecnico: leitura.linhas
+    };
+  }
+  const resultado = bootstrapHistoricoLeveCliente(cliente, {
+    itens: leitura.itens,
+    agora: deps.agora || Date.now()
+  }, {
+    ...deps,
+    bootstrapHistoricoLeve: false,
+    _bootstrapHistoricoLeveInterno: true
+  });
+  return {
+    ...resultado,
+    fonte: HISTORICO_INCREMENTAL_DIR,
+    bytesLidosTecnico: leitura.bytesLidos,
+    linhasTecnico: leitura.linhas
+  };
+}
+
+function garantirBootstrapHistoricoLeveCliente(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  if (deps.bootstrapHistoricoLeve === false || deps._bootstrapHistoricoLeveInterno === true) {
+    return { ok: true, pulou: true, motivo: "bootstrap_desativado" };
+  }
+  if (bootstrapHistoricoLeveInicializado.get(cliente) === true) {
+    return { ok: true, pulou: true, motivo: "bootstrap_ja_inicializado_processo" };
+  }
+  bootstrapHistoricoLeveInicializado.set(cliente, true);
+
+  const executar = () => {
+    try {
+      const resultado = executarBootstrapHistoricoLeveDeTecnico(cliente, deps);
+      logOperacional(deps.logger, {
+        versao: 1,
+        evento: "historico_leve_bootstrap",
+        clienteId: cliente,
+        ok: resultado.ok === true,
+        fonte: resultado.fonte || HISTORICO_INCREMENTAL_DIR,
+        processados: resultado.processados || 0,
+        escritos: resultado.escritos || 0,
+        idempotentes: resultado.idempotentes || 0,
+        erros: resultado.erros || 0,
+        writes: resultado.writes || 0,
+        maiorTrechoSyncMs: resultado.maiorTrechoSyncMs || 0,
+        bytesLidosTecnico: resultado.bytesLidosTecnico || 0,
+        duracaoMs: resultado.duracaoMs || 0
+      });
+      return resultado;
+    } catch (erro) {
+      logOperacional(deps.logger, {
+        versao: 1,
+        evento: "historico_leve_bootstrap",
+        clienteId: cliente,
+        ok: false,
+        erro: erro?.message || "erro_bootstrap_historico_leve"
+      });
+      return { ok: false, motivo: "erro_bootstrap_historico_leve", erro: erro?.message || "erro_bootstrap_historico_leve" };
+    }
+  };
+
+  if (deps.bootstrapHistoricoLeveSincrono === true) {
+    return executar();
+  }
+
+  const timer = setTimeout(executar, 0);
+  if (typeof timer.unref === "function") timer.unref();
+  return { ok: true, agendado: true, motivo: "bootstrap_historico_leve_agendado" };
+}
+
+function appendHistoricoLeveIncremental(clienteId = "admin", entradaOuItem = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const preparado = montarRegistroHistoricoLeve(cliente, entradaOuItem, deps);
+  const { file, chave, itemLeve, hashRegistro, timestampMs } = preparado;
+
+  if (!file) {
+    return {
+      ok: false,
+      motivo: "caminho_historico_leve_indisponivel",
+      chave,
+      bytesAppend: 0
+    };
+  }
+
+  try {
+    const bootstrap = garantirBootstrapHistoricoLeveCliente(cliente, deps);
+    fsImpl.mkdirSync(path.dirname(file), { recursive: true });
+    const cache = lerCacheHistoricoLeve(file, fsImpl, deps.logger, cliente);
+    const infoAnterior = cache.chaves.get(chave);
+    if (registroHistoricoLeveJaMaterializado(infoAnterior, hashRegistro, timestampMs)) {
+      const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+      logOperacional(deps.logger, {
+        versao: 1,
+        evento: "historico_leve_append",
+        clienteId: cliente,
+        ok: true,
+        idempotente: true,
+        bytesAppend: 0,
+        duracaoMs
+      });
+      return { ok: true, idempotente: true, motivo: "historico_leve_ja_registrado", chave, file, bootstrap };
+    }
+
+    const registro = preparado.registro;
+    const linha = `${JSON.stringify(registro)}\n`;
+    fsImpl.appendFileSync(file, linha, "utf8");
+    try {
+      const stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
+      const chaves = new Map(cache.chaves);
+      chaves.set(chave, { hash: hashRegistro, timestampMs });
+      cacheHistoricoLeve.set(chaveCacheHistoricoLeve(file), {
+        chaves,
+        bytes: (stat ? stat.size : (cache.bytes || 0)) + Buffer.byteLength(linha, "utf8"),
+        linhas: (cache.linhas || 0) + 1,
+        mtimeMs: stat ? Number(stat.mtimeMs || 0) : 0,
+        size: stat ? Number(stat.size || 0) : 0
+      });
+    } catch {}
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    logOperacional(deps.logger, {
+      versao: 1,
+      evento: "historico_leve_append",
+      clienteId: cliente,
+      ok: true,
+      idempotente: false,
+      upsert: Boolean(infoAnterior),
+      statusPublico: itemLeve.statusPublico,
+      bytesAppend: Buffer.byteLength(linha, "utf8"),
+      duracaoMs
+    });
+    return {
+      ok: true,
+      idempotente: false,
+      upsert: Boolean(infoAnterior),
+      motivo: "historico_leve_append_ok",
+      chave,
+      file,
+      bytesAppend: Buffer.byteLength(linha, "utf8"),
+      item: itemLeve,
+      bootstrap
+    };
+  } catch (erro) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    logOperacional(deps.logger, {
+      versao: 1,
+      evento: "historico_leve_append",
+      clienteId: cliente,
+      ok: false,
+      erro: erro?.message || "erro_append_historico_leve",
+      duracaoMs
+    });
+    return {
+      ok: false,
+      motivo: "erro_append_historico_leve",
+      erro: erro?.message || "erro_append_historico_leve",
+      chave,
+      file,
+      bytesAppend: 0
+    };
+  }
+}
+
+function arquivosHistoricoLeve(clienteId = "admin", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const dirCliente = caminhoDirCliente(clienteId, deps);
+  if (!dirCliente) return [];
+  const dir = path.join(dirCliente, HISTORICO_LEVE_INCREMENTAL_DIR);
+  try {
+    if (!fsImpl.existsSync(dir)) return [];
+    return fsImpl.readdirSync(dir)
+      .filter(nome => /\.jsonl$/i.test(nome))
+      .sort()
+      .map(nome => path.join(dir, nome));
+  } catch {
+    return [];
+  }
+}
+
+function lerRegistrosHistoricoLeve(clienteId = "admin", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const registros = new Map();
+  let bytesLidos = 0;
+  let linhas = 0;
+  for (const file of arquivosHistoricoLeve(clienteId, deps)) {
+    try {
+      const conteudo = fsImpl.readFileSync(file, "utf8");
+      bytesLidos += Buffer.byteLength(conteudo || "", "utf8");
+      for (const linha of (conteudo || "").split(/\r?\n/)) {
+        if (!linha.trim()) continue;
+        linhas += 1;
+        try {
+          const registro = JSON.parse(linha);
+          const chave = texto(registro?.chave);
+          const item = registro?.item && typeof registro.item === "object" ? registro.item : null;
+          if (!chave || !item) continue;
+          registros.set(chave, { ...registro, item });
+        } catch {}
+      }
+    } catch {}
+  }
+  return { registros: [...registros.values()], bytesLidos, linhas };
+}
+
+function dataOrdenacaoHistoricoLeve(registro = {}) {
+  const item = registro?.item || {};
+  const candidatos = [
+    item.updatedAt,
+    item.finalizadoEm,
+    item.enviadoEm,
+    registro.registradoEm,
+    item.criadoEm
+  ];
+  for (const valor of candidatos) {
+    const ms = Date.parse(valor);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return 0;
+}
+
+function listarHistoricoLeveIncremental(clienteId = "admin", opcoes = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const limite = Math.max(0, Math.min(500, Number(opcoes.limite || opcoes.limit || 20) || 20));
+  const leitura = lerRegistrosHistoricoLeve(clienteId, deps);
+  const itens = leitura.registros
+    .map(registro => registro.item)
+    .sort((a, b) => dataOrdenacaoHistoricoLeve({ item: b }) - dataOrdenacaoHistoricoLeve({ item: a }))
+    .slice(0, limite);
+  return {
+    ok: true,
+    clienteId: clienteSeguro(clienteId),
+    total: leitura.registros.length,
+    limite,
+    itens,
+    bytesLidos: leitura.bytesLidos,
+    linhas: leitura.linhas,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function contarHistoricoLeveHoje(clienteId = "admin", opcoes = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const hoje = texto(opcoes.data || agoraIso(opcoes.agora || deps.agora || Date.now()).slice(0, 10));
+  const leitura = lerRegistrosHistoricoLeve(clienteId, deps);
+  const contadores = { enviadosHoje: 0, naoEnviadosHoje: 0, parciaisHoje: 0, totalHoje: 0 };
+  for (const registro of leitura.registros) {
+    const item = registro.item || {};
+    const data = agoraIso(Date.parse(item.finalizadoEm || item.updatedAt || registro.registradoEm || "") || (opcoes.agora || deps.agora || Date.now())).slice(0, 10);
+    if (data !== hoje) continue;
+    contadores.totalHoje += 1;
+    if (item.statusPublico === "enviado") contadores.enviadosHoje += 1;
+    else if (item.statusPublico === "parcial") contadores.parciaisHoje += 1;
+    else contadores.naoEnviadosHoje += 1;
+  }
+  return {
+    ok: true,
+    clienteId: clienteSeguro(clienteId),
+    data: hoje,
+    ...contadores,
+    bytesLidos: leitura.bytesLidos,
+    linhas: leitura.linhas,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function bootstrapHistoricoLeveCliente(clienteId = "admin", params = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || params.clienteId || "admin");
+  bootstrapHistoricoLeveInicializado.set(cliente, true);
+  const itens = Array.isArray(params.itens)
+    ? params.itens
+    : lista(params.historico);
+  const agora = params.agora || deps.agora || Date.now();
+  const entradas = [];
+
+  for (let indice = 0; indice < itens.length; indice += 1) {
+    const item = itens[indice];
+    const entrada = normalizarEntradaViva(item?.item ? item : { item, posicaoLegada: indice }, indice, agora);
+    if (classificarItemFilaV2(entrada.item, { agora }).bucket !== "historico") continue;
+    entradas.push(entrada);
+  }
+
+  const batch = appendHistoricoLeveBatch(cliente, entradas, {
+    ...deps,
+    agora,
+    bootstrapHistoricoLeve: false,
+    _bootstrapHistoricoLeveInterno: true
+  });
+
+  return {
+    ...batch,
+    ok: batch.ok === true,
+    clienteId: cliente,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
 function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, deps = {}) {
   const inicio = process.hrtime.bigint();
   const cliente = clienteSeguro(clienteId);
@@ -3263,6 +3957,11 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
     };
     const linha = `${JSON.stringify(registro)}\n`;
     fsImpl.appendFileSync(file, linha, "utf8");
+    const historicoLeve = appendHistoricoLeveIncremental(cliente, entrada, {
+      ...deps,
+      agora: deps.agora || Date.now(),
+      detalheArquivo: HISTORICO_INCREMENTAL_DIR
+    });
     try {
       const stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
       cacheChavesHistorico.set(chaveCacheHistorico(file), {
@@ -3292,7 +3991,8 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
       chave,
       chaveLegada,
       file,
-      bytesAppend: Buffer.byteLength(linha, "utf8")
+      bytesAppend: Buffer.byteLength(linha, "utf8"),
+      historicoLeve
     };
   } catch (erro) {
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
@@ -3829,6 +4529,10 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     bootstrapProjecaoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapProjecaoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
     resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
+    appendHistoricoLeveIncremental: (clienteId, entrada, deps = {}) => appendHistoricoLeveIncremental(clienteId, entrada, { ...opcoes, ...deps }),
+    listarHistoricoLeveIncremental: (clienteId, params = {}, deps = {}) => listarHistoricoLeveIncremental(clienteId, params, { ...opcoes, ...deps }),
+    contarHistoricoLeveHoje: (clienteId, params = {}, deps = {}) => contarHistoricoLeveHoje(clienteId, params, { ...opcoes, ...deps }),
+    bootstrapHistoricoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapHistoricoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
     moverTerminalParaHistorico: (clienteId, filaViva, alvo, deps = {}) => moverTerminalParaHistorico(clienteId, filaViva, alvo, { ...opcoes, ...deps }),
     compararVivaComLegado: (clienteId, entradasViva, filaLegada, deps = {}) => compararVivaComLegado(clienteId, entradasViva, filaLegada, { ...opcoes, ...deps }),
     lerManifestoFilaV2: (clienteId, deps = {}) => lerManifestoFilaV2(clienteId, { ...opcoes, ...deps }),
@@ -3854,6 +4558,7 @@ module.exports = {
   FILA_LEGADA_PROOF_ARQUIVO,
   FILA_V2_FILE_PROOF_VERSION,
   HISTORICO_INCREMENTAL_DIR,
+  HISTORICO_LEVE_INCREMENTAL_DIR,
   TAG_TELEMETRIA,
   TAG_MANIFEST,
   TAG_CANARY_WRITER,
@@ -3882,6 +4587,11 @@ module.exports = {
   flushProjecaoLeveCliente,
   bootstrapProjecaoLeveCliente,
   resetarEstadoProjecaoLeveParaTeste,
+  appendHistoricoLeveIncremental,
+  listarHistoricoLeveIncremental,
+  contarHistoricoLeveHoje,
+  bootstrapHistoricoLeveCliente,
+  limparCacheHistoricoLeve,
   publicarProofFilaViva,
   publicarProofFilaLegada,
   inserirItemFilaVivaIncremental,
