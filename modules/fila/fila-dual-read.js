@@ -112,7 +112,8 @@ function selecionarFilaReadOnly({
   ordenarPendentesPorPrioridade,
   ofertaExpiradaParaEnvio,
   avaliarOfertaParaSelecaoFilaViva,
-  ordenarOfertasFilaViva
+  ordenarOfertasFilaViva,
+  cacheLimiteDiario = null
 } = {}) {
   if (typeof ordenarPendentesPorPrioridade !== "function") {
     throw new Error("ordenarPendentesPorPrioridade_invalido");
@@ -161,7 +162,10 @@ function selecionarFilaReadOnly({
 
     const clienteIdOferta = oferta.clienteId || "admin";
     const configClienteOferta = configsPorCliente?.[clienteIdOferta] || configPadrao;
-    const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
+    const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, {
+      agora,
+      cacheLimiteDiario
+    });
 
     if (avaliacao.elegivel) {
       candidatosVivos.push(avaliacao);

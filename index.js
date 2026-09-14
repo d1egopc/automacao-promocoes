@@ -2138,6 +2138,9 @@ function diagnosticarFilaCliente(clienteIdAlvo = null, opcoes = {}) {
   const cliente = String(clienteIdAlvo || "admin");
   const agora = Date.now();
   const foraHorario = filaForaHorarioConfigurado();
+  const cacheLimiteDiario = opcoes.cacheLimiteDiario instanceof Map
+    ? opcoes.cacheLimiteDiario
+    : null;
   const fonteClienteConfiavel = Array.isArray(opcoes.filaClienteHotState);
   const itensCliente = fonteClienteConfiavel
     ? opcoes.filaClienteHotState
@@ -2164,14 +2167,18 @@ function diagnosticarFilaCliente(clienteIdAlvo = null, opcoes = {}) {
     motivoPrincipal: "sem_pendentes"
   };
 
+  let bloqueadasConhecidasTotal = 0;
+
   for (const oferta of pendentesCliente) {
     const motivos = [];
+    let bloqueadaConhecida = false;
     const clienteIdOferta = oferta.clienteId || "admin";
     const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
 
     if (configClienteOferta.automacaoAtiva !== true) {
       diagnostico.bloqueadasPorAutomacaoDesligada += 1;
       motivos.push("automacao_desligada");
+      bloqueadaConhecida = true;
     }
 
     if (oferta.proximaTentativaEnvioEm) {
@@ -2184,6 +2191,7 @@ function diagnosticarFilaCliente(clienteIdAlvo = null, opcoes = {}) {
     if (foraHorario) {
       diagnostico.bloqueadasPorHorario += 1;
       motivos.push("fora_horario");
+      bloqueadaConhecida = true;
     }
 
     try {
@@ -2191,52 +2199,36 @@ function diagnosticarFilaCliente(clienteIdAlvo = null, opcoes = {}) {
       if (!analiseDestinos.compativeis.length) {
         diagnostico.bloqueadasPorDestino += 1;
         motivos.push("sem_destino_compativel");
+        bloqueadaConhecida = true;
       } else {
-        const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
+        const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, {
+          agora,
+          cacheLimiteDiario
+        });
         if (!avaliacao.elegivel && avaliacao.motivo === "sem_destino_liberado_agora") {
           diagnostico.bloqueadasPorDestinoSemSlot += 1;
           motivos.push("sem_destino_liberado_agora");
+          bloqueadaConhecida = true;
         }
       }
     } catch (e) {
       diagnostico.bloqueadasPorOutrosMotivos += 1;
       motivos.push("outros_motivos");
+      bloqueadaConhecida = true;
     }
 
     if (!motivos.length) {
       diagnostico.elegiveisAgora += 1;
     }
-  }
 
-  const bloqueadasConhecidas = new Set();
-
-  pendentesCliente.forEach((oferta, indice) => {
-    const clienteIdOferta = oferta.clienteId || "admin";
-    const configClienteOferta = configsPorCliente?.[clienteIdOferta] || config;
-    const proxima = oferta.proximaTentativaEnvioEm
-      ? Date.parse(oferta.proximaTentativaEnvioEm)
-      : NaN;
-
-    if (configClienteOferta.automacaoAtiva !== true) bloqueadasConhecidas.add(indice);
-    if (foraHorario) bloqueadasConhecidas.add(indice);
-
-    try {
-      const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
-      if (!analiseDestinos.compativeis.length) bloqueadasConhecidas.add(indice);
-      else {
-        const avaliacao = avaliarOfertaParaSelecaoFilaViva(oferta, clienteIdOferta, configClienteOferta, { agora });
-        if (!avaliacao.elegivel && avaliacao.motivo === "sem_destino_liberado_agora") {
-          bloqueadasConhecidas.add(indice);
-        }
-      }
-    } catch {
-      bloqueadasConhecidas.add(indice);
+    if (bloqueadaConhecida) {
+      bloqueadasConhecidasTotal += 1;
     }
-  });
+  }
 
   diagnostico.bloqueadasPorOutrosMotivos += Math.max(
     0,
-    diagnostico.pendentesTotal - diagnostico.elegiveisAgora - bloqueadasConhecidas.size
+    diagnostico.pendentesTotal - diagnostico.elegiveisAgora - bloqueadasConhecidasTotal
   );
   diagnostico.motivoPrincipal = motivoPrincipalDiagnosticoFila(diagnostico);
 
@@ -2326,7 +2318,9 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       continue;
     }
 
-    const limite = destinoLimiteDiarioDisponivel(clienteIdOferta, destino);
+    const limite = destinoLimiteDiarioDisponivel(clienteIdOferta, destino, {
+      cacheLimiteDiario: opcoes.cacheLimiteDiario
+    });
     if (!limite.ok) {
       motivoBloqueio = motivoBloqueio || "limite_diario";
       continue;
@@ -2378,6 +2372,9 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
   const agora = Number(opcoes.agora || Date.now());
   const configPadrao = opcoes.configPadrao || config;
   const configsCliente = opcoes.configsPorCliente || configsPorCliente;
+  const cacheLimiteDiario = opcoes.cacheLimiteDiario instanceof Map
+    ? opcoes.cacheLimiteDiario
+    : null;
 
   return filaDualRead.selecionarFilaReadOnly({
     fila: Array.isArray(colecao) ? colecao : [],
@@ -2388,7 +2385,8 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
     ordenarPendentesPorPrioridade,
     ofertaExpiradaParaEnvio,
     avaliarOfertaParaSelecaoFilaViva,
-    ordenarOfertasFilaViva
+    ordenarOfertasFilaViva,
+    cacheLimiteDiario
   });
 }
 
@@ -2399,10 +2397,12 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
     ? fonteClienteHotState.itens
     : fila;
+  let cacheLimiteDiarioRodada = new Map();
   const diagnostico = diagnosticarFilaCliente(clienteLog, {
     filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
       ? fonteClienteHotState.itens
-      : null
+      : null,
+    cacheLimiteDiario: cacheLimiteDiarioRodada
   });
 
   diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
@@ -2434,10 +2434,12 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao", {
       filaClienteHotState: usandoFilaVivaExpiracaoSelecao ? itensExpiracaoSelecao : null
     });
+    cacheLimiteDiarioRodada = new Map();
   }
 
   const resultadoSelecao = selecionarProximaOfertaFilaCore(colecaoSelecao, clienteIdAlvo, {
-    agora
+    agora,
+    cacheLimiteDiario: cacheLimiteDiarioRodada
   });
   const selecionada = resultadoSelecao.selecionada;
   const contadoresFilaViva = resultadoSelecao.contadores;
@@ -2461,7 +2463,8 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     }
     const selecaoShadow = leituraShadow.ok && !leituraShadow.fallbackLegado
       ? selecionarProximaOfertaFilaCore(leituraShadow.itens, clienteIdAlvo, {
-          agora
+          agora,
+          cacheLimiteDiario: cacheLimiteDiarioRodada
         })
       : null;
 
@@ -2509,11 +2512,14 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
       : selecionada.oferta;
   }
 
-  const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog, {
-    filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
-      ? fonteClienteHotState.itens
-      : null
-  });
+  const diagnosticoSemElegivel = expirouAlguma
+    ? diagnosticarFilaCliente(clienteLog, {
+        filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
+          ? fonteClienteHotState.itens
+          : null,
+        cacheLimiteDiario: cacheLimiteDiarioRodada
+      })
+    : diagnostico;
   diagnosticosFilaPorCliente.set(clienteLog, diagnosticoSemElegivel);
 
   if (deveLogarThrottle(`fila-sem-elegivel:${clienteLog}`)) {
@@ -7676,11 +7682,38 @@ function contarEnviosDestinoHoje(clienteId = "admin", destino = {}) {
   return usados;
 }
 
-function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}) {
+function chaveCacheLimiteDiarioDestino(clienteId = "admin", destino = {}, limite = 0) {
+  const destinoSeguro = destinoOperacionalSeguro(destino);
+  const hoje = dataBRHoje();
+  const nomeDestino = destinoNomeLog(destinoSeguro);
+  const idDestino = String(destinoSeguro.id || destinoSeguro.conexaoId || destinoSeguro.chatId || "");
+  const tipoDestino = String(destinoSeguro.tipo || destinoSeguro.canal || destinoSeguro.tipoMidia || destinoSeguro.destinoTipo || "");
+  return [
+    String(clienteId || "admin"),
+    hoje,
+    String(limite || 0),
+    idDestino,
+    nomeDestino,
+    tipoDestino
+  ].join("|");
+}
+
+function destinoLimiteDiarioDisponivel(clienteId = "admin", destino = {}, opcoes = {}) {
   const limite = limiteDiarioDestino(destino);
   if (!limite) return { ok: true, limite: 0, usados: 0 };
 
-  const usados = contarEnviosDestinoHoje(clienteId, destino);
+  const cacheLimiteDiario = opcoes?.cacheLimiteDiario instanceof Map
+    ? opcoes.cacheLimiteDiario
+    : null;
+  const chaveCache = cacheLimiteDiario
+    ? chaveCacheLimiteDiarioDestino(clienteId, destino, limite)
+    : "";
+  const usados = cacheLimiteDiario && cacheLimiteDiario.has(chaveCache)
+    ? cacheLimiteDiario.get(chaveCache)
+    : contarEnviosDestinoHoje(clienteId, destino);
+  if (cacheLimiteDiario && !cacheLimiteDiario.has(chaveCache)) {
+    cacheLimiteDiario.set(chaveCache, usados);
+  }
   return {
     ok: usados < limite,
     limite,

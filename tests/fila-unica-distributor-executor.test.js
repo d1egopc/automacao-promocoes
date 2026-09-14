@@ -311,12 +311,14 @@ assert(
 );
 
 assert(
-  pos(selecaoExecutor, "const diagnosticoSemElegivel = diagnosticarFilaCliente(clienteLog, {") >
+  pos(selecaoExecutor, "const diagnosticoSemElegivel = expirouAlguma") >
     pos(selecaoExecutor, "if (selecionada)") &&
+    selecaoExecutor.includes(": diagnostico;") &&
+    selecaoExecutor.includes("cacheLimiteDiarioRodada = new Map();") &&
     selecaoExecutor.includes("filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)") &&
     selecaoExecutor.includes("? fonteClienteHotState.itens") &&
     selecaoExecutor.includes(": null"),
-  "diagnostico final sem elegivel deve reutilizar hot state conclusivo e preservar fallback global quando ausente"
+  "diagnostico final sem elegivel deve reutilizar diagnostico quando nao ha mutacao e recalcular com hot state quando expiracao invalidar a leitura"
 );
 
 assert(

@@ -233,6 +233,41 @@ function oferta(id, minutos, overrides = {}) {
 }
 
 {
+  const cacheLimiteDiario = new Map();
+  let recebeuCacheDaRodada = false;
+
+  const resultado = selecionarFilaReadOnly({
+    fila: [oferta("cache_limite", 2, { clienteId: "workspace_cache" })],
+    clienteIdAlvo: "workspace_cache",
+    agora,
+    configPadrao: { automacaoAtiva: true },
+    configsPorCliente: { workspace_cache: { automacaoAtiva: true } },
+    ordenarPendentesPorPrioridade: itens => itens,
+    ofertaExpiradaParaEnvio: () => false,
+    avaliarOfertaParaSelecaoFilaViva: (item, clienteIdOferta, configClienteOferta, opcoes = {}) => {
+      recebeuCacheDaRodada = opcoes.cacheLimiteDiario === cacheLimiteDiario;
+      return {
+        elegivel: true,
+        motivo: "destino_liberado",
+        oferta: item,
+        destinosCompativeis: 1,
+        destinosLiberados: [{ destino: `${clienteIdOferta}_telegram` }],
+        ranking: calcularScoreFilaViva(item, {
+          agora,
+          destinosCompativeis: 1,
+          destinosDisponiveis: 1
+        })
+      };
+    },
+    ordenarOfertasFilaViva,
+    cacheLimiteDiario
+  });
+
+  assert(recebeuCacheDaRodada, "selecao dual-read deve repassar cache de limite diario somente dentro da rodada");
+  assert.strictEqual(resultado.selecionada.oferta.id, "cache_limite", "cache por rodada nao deve alterar a selecao");
+}
+
+{
   const indexPath = path.join(__dirname, "..", "index.js");
   const fonteIndex = fs.readFileSync(indexPath, "utf8");
   const inicioCore = fonteIndex.indexOf("function selecionarProximaOfertaFilaCore");

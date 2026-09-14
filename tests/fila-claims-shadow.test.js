@@ -154,10 +154,15 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
     const inicio = fonteIndex.indexOf("async function processarFila");
     const fim = fonteIndex.indexOf("const {", inicio);
     const processarFila = fonteIndex.slice(inicio, fim);
-    assert(processarFila.includes("oferta = await selecionarProximaOfertaFila(clienteFila"));
+    assert(processarFila.includes("const selecaoFilaComPool = await selecionarProximaOfertaFila(clienteFila, {"));
+    assert(processarFila.includes("oferta = selecaoFilaComPool?.oferta || null;"));
     assert(processarFila.includes("reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta"));
     assert(!processarFila.includes("observadorClaimShadowFila"), "shadow antigo sai do hot path funcional");
-    assert(!processarFila.includes("candidatePool"), "candidatePool segue sem decidir o vencedor operacional");
+    assert(
+      processarFila.indexOf("oferta = selecaoFilaComPool?.oferta || null;") <
+        processarFila.indexOf("candidatePool: selecaoFilaComPool?.resultadoSelecao?.candidatePool || []"),
+      "candidatePool deve ser consumido apenas depois da selecao inicial da fila"
+    );
     assert(!processarFila.includes("engine_fairness_origem_fluxo"), "fairness continua desligada na fila");
 
     const inicioEnviarAgora = fonteIndex.indexOf("async function enviarOfertaAgoraDireto");
