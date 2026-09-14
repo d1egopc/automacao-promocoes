@@ -64,7 +64,8 @@ const {
 
 const {
   iniciarOrquestradorEngine,
-  iniciarCicloEntradaClonador
+  iniciarCicloEntradaClonador,
+  obterEstadoOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
 const {
   sanearExpiracaoOperacionalFilaItem
@@ -3148,6 +3149,7 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
   }
 
   const inicioSalvarFila = Date.now();
+  const perfilProcessarFila = opcoes.perfilProcessarFila;
   aplicarDiversidadeFila(clienteId);
   ultimoErroSalvarFilaPorCliente.delete(String(clienteId || "admin"));
 
@@ -3160,26 +3162,42 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
     }
   };
 
-  const salvou = filaOfertas.salvarFila({
-    fila,
-    clienteId,
-    getFilaFile,
-    writeClienteJson,
-    logger: loggerFila
-  });
+  const salvarLegacy = () => filaOfertas.salvarFila({
+      fila,
+      clienteId,
+      getFilaFile,
+      writeClienteJson,
+      logger: loggerFila
+    });
+  const salvou = perfilProcessarFila?.etapaSync
+    ? perfilProcessarFila.etapaSync("salvar", salvarLegacy)
+    : salvarLegacy();
   if (salvou) {
     const motivo = opcoes.motivo || "salvarFila";
     logWriteLegadoFila(clienteId, opcoes, {
       tempoMs: Date.now() - inicioSalvarFila
     });
-    if (opcoes.rebuildCompleto !== false) reconstruirFilaStoreCliente(clienteId, motivo);
-    if (opcoes.shadowCompleto !== false) projetarFilaV2ShadowCliente(clienteId, motivo);
+    if (opcoes.rebuildCompleto !== false) {
+      const reconstruir = () => reconstruirFilaStoreCliente(clienteId, motivo);
+      perfilProcessarFila?.etapaSync
+        ? perfilProcessarFila.etapaSync("shadowProjecao", reconstruir)
+        : reconstruir();
+    }
+    if (opcoes.shadowCompleto !== false) {
+      const projetar = () => projetarFilaV2ShadowCliente(clienteId, motivo);
+      perfilProcessarFila?.etapaSync
+        ? perfilProcessarFila.etapaSync("shadowProjecao", projetar)
+        : projetar();
+    }
     if (opcoes.prepararV2 !== false) {
-      filaOperacionalV2.prepararSeHabilitado({
-        fila,
-        clienteId,
-        motivo
-      });
+      const preparar = () => filaOperacionalV2.prepararSeHabilitado({
+          fila,
+          clienteId,
+          motivo
+        });
+      perfilProcessarFila?.etapaSync
+        ? perfilProcessarFila.etapaSync("shadowProjecao", preparar)
+        : preparar();
     }
     registrarRewriteLegadoSemProofV2(clienteId, motivo, opcoes);
   }
@@ -6421,6 +6439,136 @@ function iniciarPerfBackground(rotina = "background") {
   };
 }
 
+const FILA_PROCESSAR_PERFIL_MIN_MS = Number(process.env.FILA_PROCESSAR_PERFIL_MIN_MS || 1000);
+
+function snapshotEngineFilaProcessar() {
+  if (typeof obterEstadoOrquestradorEngine !== "function") {
+    return { ativo: false, rodadaId: "", iniciadoEmMs: 0, ofcAtivo: false };
+  }
+  try {
+    return obterEstadoOrquestradorEngine() || { ativo: false, rodadaId: "", iniciadoEmMs: 0, ofcAtivo: false };
+  } catch {
+    return { ativo: false, rodadaId: "", iniciadoEmMs: 0, ofcAtivo: false };
+  }
+}
+
+function criarPerfilProcessarFila(clienteId = "admin", rodadaId = "") {
+  const inicio = process.hrtime.bigint();
+  const inicioMs = Date.now();
+  const cpuInicio = process.cpuUsage();
+  const etapas = new Map();
+  const engineInicio = snapshotEngineFilaProcessar();
+  let engineAtivoDuranteRodada = engineInicio.ativo === true;
+  let ofcAtivoDuranteRodada = engineInicio.ofcAtivo === true;
+  let engineRodadaId = engineInicio.rodadaId || "";
+  let engineRodadasMultiplas = false;
+  let histogramaLoop = null;
+
+  if (PERF_DIAGNOSTICO_ATIVO && typeof monitorEventLoopDelay === "function") {
+    histogramaLoop = monitorEventLoopDelay({ resolution: 20 });
+    histogramaLoop.enable();
+  }
+
+  function intervaloSobrepostoComPerfil(intervalo = {}) {
+    const inicioIntervalo = Number(intervalo.inicioMs || 0);
+    if (!inicioIntervalo) return false;
+    const fimIntervalo = Number(intervalo.fimMs || 0) || Date.now();
+    return inicioIntervalo <= Date.now() && fimIntervalo >= inicioMs;
+  }
+
+  function observarEngine() {
+    const estado = snapshotEngineFilaProcessar();
+    if (estado.ativo === true || intervaloSobrepostoComPerfil(estado.ultimaRodada)) {
+      engineAtivoDuranteRodada = true;
+    }
+    if (estado.ofcAtivo === true || intervaloSobrepostoComPerfil(estado.ultimaOfc)) {
+      ofcAtivoDuranteRodada = true;
+    }
+    if (estado.rodadaId && !engineRodadaId) engineRodadaId = estado.rodadaId;
+    if (estado.rodadaId && engineRodadaId && estado.rodadaId !== engineRodadaId) {
+      engineRodadasMultiplas = true;
+    }
+    if (estado.ultimaRodada?.rodadaId && intervaloSobrepostoComPerfil(estado.ultimaRodada)) {
+      if (!engineRodadaId) engineRodadaId = estado.ultimaRodada.rodadaId;
+      if (engineRodadaId && estado.ultimaRodada.rodadaId !== engineRodadaId) {
+        engineRodadasMultiplas = true;
+      }
+    }
+    return estado;
+  }
+
+  function registrarEtapa(nome, inicioEtapa) {
+    observarEngine();
+    const nomeSeguro = String(nome || "desconhecida");
+    const duracaoMs = Math.round(perfTempoMs(inicioEtapa));
+    const atual = etapas.get(nomeSeguro) || {
+      nome: nomeSeguro,
+      chamadas: 0,
+      totalMs: 0,
+      maxMs: 0
+    };
+    atual.chamadas += 1;
+    atual.totalMs += duracaoMs;
+    atual.maxMs = Math.max(atual.maxMs, duracaoMs);
+    etapas.set(nomeSeguro, atual);
+  }
+
+  return {
+    iniciarEtapa() {
+      observarEngine();
+      return process.hrtime.bigint();
+    },
+    finalizarEtapa(nome, inicioEtapa) {
+      if (!inicioEtapa) return;
+      registrarEtapa(nome, inicioEtapa);
+    },
+    etapaSync(nome, fn) {
+      const inicioEtapa = this.iniciarEtapa();
+      try {
+        return fn();
+      } finally {
+        this.finalizarEtapa(nome, inicioEtapa);
+      }
+    },
+    async etapa(nome, fn) {
+      const inicioEtapa = this.iniciarEtapa();
+      try {
+        return await fn();
+      } finally {
+        this.finalizarEtapa(nome, inicioEtapa);
+      }
+    },
+    finalizar(extra = {}) {
+      observarEngine();
+      const duracaoTotalMs = Math.round(perfTempoMs(inicio));
+      const cpu = process.cpuUsage(cpuInicio);
+      let eventLoopLagMaxMs = null;
+      let eventLoopLagMeanMs = null;
+      if (histogramaLoop) {
+        eventLoopLagMaxMs = Math.round(Number(histogramaLoop.max || 0) / 1e6);
+        eventLoopLagMeanMs = Math.round(Number(histogramaLoop.mean || 0) / 1e6);
+        histogramaLoop.disable?.();
+      }
+      if (!PERF_DIAGNOSTICO_ATIVO || duracaoTotalMs <= FILA_PROCESSAR_PERFIL_MIN_MS) return;
+      console.log("[FILA-PROCESSAR-PERFIL]", JSON.stringify({
+        clienteId: String(clienteId || "admin"),
+        rodadaId: rodadaId || "",
+        duracaoTotalMs,
+        cpuProcessoInicioFimMs: Math.round((cpu.user + cpu.system) / 1000),
+        eventLoopLagMaxMs,
+        eventLoopLagMeanMs,
+        engineAtivoNoInicio: engineInicio.ativo === true,
+        engineAtivoDuranteRodada,
+        engineRodadaId,
+        engineRodadasMultiplas,
+        ofcAtivo: ofcAtivoDuranteRodada,
+        etapas: Array.from(etapas.values()),
+        ...extra
+      }));
+    }
+  };
+}
+
 function iniciarDiagnosticoRuntime() {
   if (!PERF_DIAGNOSTICO_ATIVO || typeof monitorEventLoopDelay !== "function") return;
   const histograma = monitorEventLoopDelay({ resolution: 20 });
@@ -9173,6 +9321,7 @@ function motivoCoberturaDestino(motivo = "") {
 
 async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
   const clienteFila = clienteIdAlvo || "admin";
+  let perfilProcessarFila = null;
   const inicioProcessarFila = process.hrtime.bigint();
   const cpuInicioProcessarFila = process.cpuUsage();
   let advisoryFuncionalFila = null;
@@ -9202,8 +9351,15 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     return;
   }
 
+  perfilProcessarFila = criarPerfilProcessarFila(
+    clienteFila,
+    opcoes?.rodadaIdProcessarFila || `processar_fila_${Date.now()}`
+  );
+
   try {
-    await garantirFilaClienteInicializada(clienteFila, "executor_processar_fila");
+    await perfilProcessarFila.etapa("inicializacao", () =>
+      garantirFilaClienteInicializada(clienteFila, "executor_processar_fila")
+    );
   } catch (erro) {
     resumoFila.motivoPulo = "fila_nao_inicializada";
     coberturaRadar.registrar("executor_bloqueado", {
@@ -9216,6 +9372,12 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       ...resumoFila,
       duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
       cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+    });
+    perfilProcessarFila.finalizar({
+      faseFinal: resumoFila.fase || "",
+      motivoPulo: resumoFila.motivoPulo || "fila_nao_inicializada",
+      ofertasExaminadas: resumoFila.ofertasExaminadas || 0,
+      ofertaSelecionada: resumoFila.ofertaSelecionada || ""
     });
     return;
   }
@@ -9233,6 +9395,12 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       ...resumoFila,
       duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
       cpuMs: Math.round((cpu.user + cpu.system) / 1000)
+    });
+    perfilProcessarFila.finalizar({
+      faseFinal: resumoFila.fase || "",
+      motivoPulo: resumoFila.motivoPulo || "envio_em_execucao",
+      ofertasExaminadas: resumoFila.ofertasExaminadas || 0,
+      ofertaSelecionada: resumoFila.ofertaSelecionada || ""
     });
     console.log("[PERFORMANCE-RUNNER-SKIP]", {
       runner: "processarFila",
@@ -9252,6 +9420,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     filaAlterada = true;
   };
   const salvarFilaSeAlterada = async (cliente = clienteFila) => {
+    return perfilProcessarFila.etapa("salvarTotal", async () => {
     if (!filaAlterada) return false;
     const clienteSeguroFila = String(cliente || "admin");
     const usarCheckpointOnlyV2 = Boolean(
@@ -9308,10 +9477,12 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
         ? "executor_salvar_alterada_fallback_legado"
         : "executor_salvar_alterada",
       origem: "executor",
-      v2LegacyProofPolicy: "caller_proof"
+      v2LegacyProofPolicy: "caller_proof",
+      perfilProcessarFila
     } : {
       motivo: "executor_salvar_alterada",
-      origem: "executor"
+      origem: "executor",
+      perfilProcessarFila
     });
     if (salvou && oferta) {
       await sincronizarItemFilaVivaAposMutacao(clienteSeguroFila, oferta, "executor_salvar_alterada", {
@@ -9320,10 +9491,13 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     }
     filaAlterada = false;
     return salvou;
+    });
   };
 
   try {
-    const cooldownSessao = workspaceEmCooldownSessaoIndisponivel(clienteFila);
+    const cooldownSessao = perfilProcessarFila.etapaSync("disponibilidade", () =>
+      workspaceEmCooldownSessaoIndisponivel(clienteFila)
+    );
     if (cooldownSessao) {
       resumoFila.motivoPulo = cooldownSessao.motivo || "sessao_whatsapp_indisponivel_cooldown";
       coberturaRadar.registrar("executor_bloqueado", {
@@ -9335,9 +9509,11 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     }
 
     const configClienteInicial = configsPorCliente?.[clienteFila] || config;
-    const disponibilidadeInicial = diagnosticarDisponibilidadeEnvioWorkspace(clienteFila, {
-      configCliente: configClienteInicial
-    });
+    const disponibilidadeInicial = perfilProcessarFila.etapaSync("disponibilidade", () =>
+      diagnosticarDisponibilidadeEnvioWorkspace(clienteFila, {
+        configCliente: configClienteInicial
+      })
+    );
     if (!disponibilidadeInicial.ok) {
       resumoFila.motivoPulo = disponibilidadeInicial.motivo;
       registrarCooldownSessaoIndisponivel(clienteFila, {
@@ -9364,16 +9540,18 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       resumoFila.reconciliacaoFilaV2Reutilizada = true;
       reconciliacaoLeituraFilaV2 = reconciliacaoPreviaFilaV2;
     } else {
-      reconciliacaoLeituraFilaV2 = await reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor");
+      reconciliacaoLeituraFilaV2 = await perfilProcessarFila.etapa("reconciliar", () =>
+        reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor")
+      );
     }
     resumoFila.fase = "sanear_fila";
-    await sanearExpiradosFila(clienteFila);
+    await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila));
     const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
     colecaoPosEnvioProcessamento = (
       fonteClienteHotStateSelecao?.conclusiva === true &&
       Array.isArray(fonteClienteHotStateSelecao.itens)
     ) ? fonteClienteHotStateSelecao.itens : fila;
-    const recoveryCheckpoint = await recoveryCheckpointEntregaFila.recuperarCliente({
+    const recoveryCheckpoint = await perfilProcessarFila.etapa("recovery", () => recoveryCheckpointEntregaFila.recuperarCliente({
       clienteId: clienteFila,
       itens: colecaoPosEnvioProcessamento,
       relocalizarItem: ({ filaItemId, item }) => {
@@ -9405,24 +9583,30 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
         }
         return false;
       }
-    });
-    sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila", {
-      fonteClienteHotState: fonteClienteHotStateSelecao
-    });
+    }));
+    perfilProcessarFila.etapaSync("sanear", () =>
+      sanearDuplicatasPendentesFilaCliente(clienteFila, "processar_fila", {
+        fonteClienteHotState: fonteClienteHotStateSelecao
+      })
+    );
 
     resumoFila.fase = "selecionar_oferta";
-    const selecaoFilaComPool = await selecionarProximaOfertaFila(clienteFila, {
-      fonteClienteHotState: fonteClienteHotStateSelecao,
-      retornarResultado: true
-    });
+    const selecaoFilaComPool = await perfilProcessarFila.etapa("selecionar", () =>
+      selecionarProximaOfertaFila(clienteFila, {
+        fonteClienteHotState: fonteClienteHotStateSelecao,
+        retornarResultado: true
+      })
+    );
     oferta = selecaoFilaComPool?.oferta || null;
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";
-  const diagnosticoFila = diagnosticosFilaPorCliente.get(String(clienteFila)) ||
-    diagnosticarFilaCliente(clienteFila, {
-      filaClienteHotState: fonteClienteHotStateSelecao?.itens || null
-    });
+  const diagnosticoFila = perfilProcessarFila.etapaSync("diagnosticoSemOferta", () =>
+    diagnosticosFilaPorCliente.get(String(clienteFila)) ||
+      diagnosticarFilaCliente(clienteFila, {
+        filaClienteHotState: fonteClienteHotStateSelecao?.itens || null
+      })
+  );
   resumoFila.ofertasExaminadas = diagnosticoFila.pendentesTotal || 0;
   resumoFila.motivoPulo = diagnosticoFila.motivoPrincipal || "sem_oferta_elegivel";
 
@@ -9448,7 +9632,7 @@ if (!oferta) {
       fonteClienteHotStateSelecao?.conclusiva === true &&
       Array.isArray(fonteClienteHotStateSelecao.itens)
     ) ? fonteClienteHotStateSelecao.itens : fila;
-    const resultadoFairnessFila = await fairnessOrigemFila.selecionar({
+    const resultadoFairnessFila = await perfilProcessarFila.etapa("fairness", () => fairnessOrigemFila.selecionar({
       clienteId: clienteFila,
       candidatePool: selecaoFilaComPool?.resultadoSelecao?.candidatePool || [],
       revalidar: async candidato => {
@@ -9493,7 +9677,7 @@ if (!oferta) {
         }
         return { ok: true, oferta: atual };
       }
-    });
+    }));
 
     // O service devolve uma sessao advisory ja adquirida apos COMMIT. O caller
     // assume ownership antes de qualquer persistencia ou processamento que possa
@@ -9675,6 +9859,7 @@ if (!sessoes[idSessao]) {
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
+const inicioResolverUsuarioPlanoPerfil = perfilProcessarFila.iniciarEtapa();
 resumoFila.fase = "resolver_usuario_plano";
 const usuarioOferta =
   buscarUsuarioPorIdSeguro(usuarios, clienteId);
@@ -9694,6 +9879,7 @@ const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || class
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
 const restricaoDestinosClone = analiseDestinosFila.restricaoDestinosClone || {};
+perfilProcessarFila.finalizarEtapa("resolverUsuarioPlano", inicioResolverUsuarioPlanoPerfil);
 if (restricaoDestinosClone.aplica === true) {
   console.log("[CLONADOR-DESTINOS-RESTRICAO]", JSON.stringify({
     clienteId,
@@ -9713,6 +9899,7 @@ let destinosTentadosDebug = 0;
 const fastLaneCupomTipo = cupomFastLaneTipo(oferta);
 oferta.destinosEstado = Array.isArray(oferta.destinosEstado) ? oferta.destinosEstado : [];
 
+const inicioDestinosPerfil = perfilProcessarFila.iniciarEtapa();
 for (const itemCompativel of destinosCompativeis) {
   void registrarDecisaoDestinoObservabilidade("candidato", oferta, clienteId, itemCompativel.destino, {
     analise: itemCompativel.analise,
@@ -9824,6 +10011,7 @@ for (const itemRejeitado of analiseDestinosFila.rejeitados) {
     });
   }
 }
+perfilProcessarFila.finalizarEtapa("destinos", inicioDestinosPerfil);
 
   logOptimus("DESTINO", "Compativeis encontrados", {
     total: destinosCompativeis.length
@@ -9879,11 +10067,13 @@ if (!destinosCompativeis.length) {
   return;
 }
 
-const disponibilidadeAntesReserva = diagnosticarDisponibilidadeEnvioWorkspace(clienteId, {
-  configCliente,
-  oferta,
-  destinosCompativeis
-});
+const disponibilidadeAntesReserva = perfilProcessarFila.etapaSync("disponibilidade", () =>
+  diagnosticarDisponibilidadeEnvioWorkspace(clienteId, {
+    configCliente,
+    oferta,
+    destinosCompativeis
+  })
+);
 if (!disponibilidadeAntesReserva.ok) {
   resumoFila.motivoPulo = disponibilidadeAntesReserva.motivo;
   registrarCooldownSessaoIndisponivel(clienteId, {
@@ -9903,16 +10093,18 @@ if (!disponibilidadeAntesReserva.ok) {
 }
 liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
 
-const destinosOrdenados = destinosCompativeis
-  .map(item => {
-    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
-    return {
-      ...item,
-      intervalo,
-      ultimoEnvio: intervalo.ultimoEnvio || 0
-    };
-  })
-  .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
+const destinosOrdenados = perfilProcessarFila.etapaSync("destinos", () =>
+  destinosCompativeis
+    .map(item => {
+      const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
+      return {
+        ...item,
+        intervalo,
+        ultimoEnvio: intervalo.ultimoEnvio || 0
+      };
+    })
+    .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio)
+);
 
 // A decisao 2h agora ocorre no destino candidato; nao fazemos dual-read da
 // fila inteira antes de conhecer esse destino.
@@ -9923,12 +10115,14 @@ const colecaoFallbackEnvioRecenteExecutor = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const repeticaoExecutor = filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {
-  logger: console,
-  logarLegado: true,
-  modoPorDestino: true,
-  obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor
-});
+const repeticaoExecutor = perfilProcessarFila.etapaSync("destinos", () =>
+  filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {
+    logger: console,
+    logarLegado: true,
+    modoPorDestino: true,
+    obterItens: () => candidatosEnvioRecente.ok ? candidatosEnvioRecente.itens : colecaoFallbackEnvioRecenteExecutor
+  })
+);
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
   const repeticaoExecutorDual = filaOfertas.consultarEnvioRecenteExecutor2h(leituraDualReadViva.itens, oferta, {
     logger: console,
@@ -10027,10 +10221,12 @@ const colecaoDuplicidadeProcessamento = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const duplicidadeProcessamento = filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {
-  clienteId,
-  modoPorDestino: true
-});
+const duplicidadeProcessamento = perfilProcessarFila.etapaSync("destinos", () =>
+  filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {
+    clienteId,
+    modoPorDestino: true
+  })
+);
 if (leituraDualReadViva && leituraDualReadViva.ok && !leituraDualReadViva.fallbackLegado) {
   const duplicidadeShadow = filaOfertas.avaliarDuplicidadeAntesProcessarFila(leituraDualReadViva.itens, oferta, {
     clienteId,
@@ -10115,9 +10311,11 @@ const colecaoReservaProcessamento = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const reservaProcessamento = filaOfertas.reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta, {
-  clienteId
-});
+const reservaProcessamento = perfilProcessarFila.etapaSync("destinos", () =>
+  filaOfertas.reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta, {
+    clienteId
+  })
+);
 if (!reservaProcessamento.ok) {
   resumoFila.motivoPulo = reservaProcessamento.motivo;
   registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
@@ -10872,6 +11070,12 @@ console.log("[ENVIO] Enviado com controle de tempo");
     duracaoMs: Math.round(perfTempoMs(inicioProcessarFila)),
     cpuMs: Math.round((cpu.user + cpu.system) / 1000)
   });
+  perfilProcessarFila.finalizar({
+    faseFinal: resumoFila.fase || "",
+    motivoPulo: resumoFila.motivoPulo || "",
+    ofertasExaminadas: resumoFila.ofertasExaminadas || 0,
+    ofertaSelecionada: resumoFila.ofertaSelecionada || ""
+  });
   finalizarPerf(okPerf, {
     clienteId: clienteFila,
     ofertaId: oferta?.id || ""
@@ -10888,7 +11092,10 @@ async function processarFila(clienteIdAlvo = null, opcoes = {}) {
   });
   return contextoLogFilaIntervalo.run(rodadaLogIntervalo, async () => {
     try {
-      return await processarFilaInterna(clienteIdAlvo, opcoes);
+      return await processarFilaInterna(clienteIdAlvo, {
+        ...opcoes,
+        rodadaIdProcessarFila: rodadaLogIntervalo.rodadaId
+      });
     } finally {
       throttleLogFilaIntervalo.finalizarRodada(rodadaLogIntervalo);
     }

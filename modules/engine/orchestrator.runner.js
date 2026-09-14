@@ -1,5 +1,10 @@
 let engineOrquestradorRodando = false;
 let engineOrquestradorIntervalo = null;
+let engineOrquestradorRodadaAtual = "";
+let engineOrquestradorInicioMs = 0;
+let engineOrquestradorOfcAtivo = false;
+let engineOrquestradorUltimaRodada = { rodadaId: "", inicioMs: 0, fimMs: 0 };
+let engineOrquestradorUltimaOfc = { rodadaId: "", inicioMs: 0, fimMs: 0 };
 let clonadorGruposEntradaRodando = false;
 let clonadorGruposEntradaIntervalo = null;
 
@@ -41,6 +46,17 @@ const perfBackgroundAtivos = new Map();
 
 function criarRodadaIdPerf() {
   return `engine_${Date.now()}_${proximoIdRodadaPerf++}`;
+}
+
+function obterEstadoOrquestradorEngine() {
+  return {
+    ativo: engineOrquestradorRodando === true,
+    rodadaId: engineOrquestradorRodadaAtual || "",
+    iniciadoEmMs: engineOrquestradorInicioMs || 0,
+    ofcAtivo: engineOrquestradorOfcAtivo === true,
+    ultimaRodada: { ...engineOrquestradorUltimaRodada },
+    ultimaOfc: { ...engineOrquestradorUltimaOfc }
+  };
 }
 
 function memoriaPerfResumo() {
@@ -266,7 +282,12 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   const finalizarPerfBackground = iniciarPerfBackground("engine_v2_orquestrador");
   let okPerfBackground = true;
   const inicio = Date.now();
+  const cpuInicioRodadaEngine = process.cpuUsage();
   const rodadaId = criarRodadaIdPerf();
+  engineOrquestradorRodadaAtual = rodadaId;
+  engineOrquestradorInicioMs = inicio;
+  engineOrquestradorOfcAtivo = false;
+  engineOrquestradorUltimaRodada = { rodadaId, inicioMs: inicio, fimMs: 0 };
   const medidorRodada = criarMedidorEngineMemoryStage("orchestrator_total", { rodadaId });
   const limitesRodada = { ...LIMITES_PADRAO, ...(limites || {}) };
   const resumo = {
@@ -292,12 +313,26 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     limites: limitesRodada,
     marketplaces: ["mercadolivre", "amazon", "shopee", "awin", "kabum", "magalu"]
   });
+  console.log("[ENGINE-RODADA-INICIO]", JSON.stringify({
+    rodadaId,
+    iniciadoEm: new Date(inicio).toISOString()
+  }));
 
   try {
-    resumo.etapas.ofc = await executarObservabilidadeOfc({
-      rodadaId,
-      janelaConsumoMinutos: 15
-    });
+    engineOrquestradorOfcAtivo = true;
+    engineOrquestradorUltimaOfc = { rodadaId, inicioMs: Date.now(), fimMs: 0 };
+    try {
+      resumo.etapas.ofc = await executarObservabilidadeOfc({
+        rodadaId,
+        janelaConsumoMinutos: 15
+      });
+    } finally {
+      engineOrquestradorUltimaOfc = {
+        ...engineOrquestradorUltimaOfc,
+        fimMs: Date.now()
+      };
+      engineOrquestradorOfcAtivo = false;
+    }
 
     if (autoCleanShadowAtivo()) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
@@ -495,7 +530,18 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     });
     return { ok: false, erro: e.message };
   } finally {
+    const cpuRodada = process.cpuUsage(cpuInicioRodadaEngine);
+    console.log("[ENGINE-RODADA-FIM]", JSON.stringify({
+      rodadaId,
+      wallMs: Date.now() - inicio,
+      cpuProcessoMs: Math.round((cpuRodada.user + cpuRodada.system) / 1000),
+      ok: okPerfBackground !== false
+    }));
+    engineOrquestradorUltimaRodada = { rodadaId, inicioMs: inicio, fimMs: Date.now() };
     engineOrquestradorRodando = false;
+    engineOrquestradorRodadaAtual = "";
+    engineOrquestradorInicioMs = 0;
+    engineOrquestradorOfcAtivo = false;
     medidorRodada.fim({
       ok: resumo.ok !== false,
       jobsPorEtapa: Object.values(resumo.etapas || {}).reduce((acc, etapa) => {
@@ -612,5 +658,6 @@ module.exports = {
   iniciarCicloEntradaClonador,
   executarRodadaEngineOrquestrador,
   executarCicloEntradaClonador,
-  dimensionarLimitePreImporter
+  dimensionarLimitePreImporter,
+  obterEstadoOrquestradorEngine
 };

@@ -154,7 +154,8 @@ async function observar(repository, oferta = { id: "fila_1", marketplace: "amazo
     const inicio = fonteIndex.indexOf("async function processarFila");
     const fim = fonteIndex.indexOf("const {", inicio);
     const processarFila = fonteIndex.slice(inicio, fim);
-    assert(processarFila.includes("const selecaoFilaComPool = await selecionarProximaOfertaFila(clienteFila, {"));
+    assert(processarFila.includes("const selecaoFilaComPool = await perfilProcessarFila.etapa(\"selecionar\", () =>"));
+    assert(processarFila.includes("selecionarProximaOfertaFila(clienteFila, {"));
     assert(processarFila.includes("oferta = selecaoFilaComPool?.oferta || null;"));
     assert(processarFila.includes("reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta"));
     assert(!processarFila.includes("observadorClaimShadowFila"), "shadow antigo sai do hot path funcional");

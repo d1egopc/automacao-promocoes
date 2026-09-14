@@ -32,14 +32,14 @@ const processarFila = trechoEntre(
 );
 
 assert(
-  pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
+  pos(processarFila, "reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")") <
     pos(processarFila, "sanearExpiradosFila(clienteFila)"),
   "executor deve reconciliar a fila oficial antes de sanear expirados"
 );
 
 assert(
-  pos(processarFila, "await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");") <
-    pos(processarFila, "await selecionarProximaOfertaFila(clienteFila, {"),
+  pos(processarFila, "reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")") <
+    pos(processarFila, "selecionarProximaOfertaFila(clienteFila, {"),
   "executor deve reconciliar a fila oficial antes de selecionar pendente"
 );
 
@@ -383,14 +383,14 @@ assert(
 
 assert(
   pos(salvarFilaCentral, "const estadoInicializacao = estadoFilaClienteInicializacao(clienteId);") <
-    pos(salvarFilaCentral, "const salvou = filaOfertas.salvarFila({") &&
+    pos(salvarFilaCentral, "const salvarLegacy = () => filaOfertas.salvarFila({") &&
     salvarFilaCentral.includes("motivo: \"salvar_fila_sem_inicializacao\"") &&
     salvarFilaCentral.includes("return false;"),
   "salvarFila deve falhar fechado antes de write legado quando o cliente estiver NAO_INICIALIZADO"
 );
 
 assert(
-  pos(salvarFilaCentral, "const salvou = filaOfertas.salvarFila({") <
+  pos(salvarFilaCentral, "const salvarLegacy = () => filaOfertas.salvarFila({") <
     pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") &&
     pos(salvarFilaCentral, "logWriteLegadoFila(clienteId, opcoes, {") <
     pos(salvarFilaCentral, "registrarRewriteLegadoSemProofV2(clienteId, motivo, opcoes);"),
@@ -475,7 +475,8 @@ assert(
 assert(
   processarFila.includes("reconciliacaoPreviaFilaV2") &&
     processarFila.includes("resumoFila.reconciliacaoFilaV2Reutilizada = true") &&
-    processarFila.includes("reconciliacaoLeituraFilaV2 = await reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\");"),
+    processarFila.includes("reconciliacaoLeituraFilaV2 = await perfilProcessarFila.etapa(\"reconciliar\", () =>") &&
+    processarFila.includes("reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")"),
   "processarFila deve reutilizar o preflight recebido do runner e evitar segunda reconciliacao"
 );
 
@@ -483,7 +484,7 @@ assert(
   processarFila.includes("const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
     processarFila.includes("sanearDuplicatasPendentesFilaCliente(clienteFila, \"processar_fila\", {") &&
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao") &&
-    processarFila.includes("await selecionarProximaOfertaFila(clienteFila, {") &&
+    processarFila.includes("selecionarProximaOfertaFila(clienteFila, {") &&
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao"),
   "processarFila deve encaminhar hot state por cliente para saneamento/diagnostico/selecao sem refiltrar a global"
 );
@@ -568,9 +569,9 @@ assert(
 );
 
 assert(
-  processarFila.includes("await garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\");") &&
+  processarFila.includes("garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\")") &&
     pos(processarFila, "if (!usuarioAtivoOperacional(clienteFila))") <
-      pos(processarFila, "await garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\");"),
+      pos(processarFila, "garantirFilaClienteInicializada(clienteFila, \"executor_processar_fila\")"),
   "executor deve manter bloqueio de inativo antes do guard e carregar lazy antes da primeira operacao real"
 );
 
