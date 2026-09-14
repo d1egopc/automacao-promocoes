@@ -1257,6 +1257,19 @@ function getFallbackFileSeguro(getFilaFile, clienteId = "admin") {
   return resolvido;
 }
 
+function salvarFilaFallbackAtomico(file, filaCliente = []) {
+  const destino = path.resolve(file);
+  const dir = path.dirname(destino);
+  const tmp = path.resolve(dir, `fila.json.tmp.${process.pid}.${Date.now()}`);
+  if (path.dirname(tmp) !== dir) {
+    throw new Error("caminho_temp_fila_inseguro");
+  }
+
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(filaCliente, null, 2), "utf8");
+  fs.renameSync(tmp, destino);
+}
+
 function salvarFila({ fila = [], clienteId = "admin", getFilaFile, writeClienteJson, logger = console } = {}) {
   try {
     const filaCliente = fila.filter(
@@ -1270,10 +1283,7 @@ function salvarFila({ fila = [], clienteId = "admin", getFilaFile, writeClienteJ
 
     const file = getFallbackFileSeguro(getFilaFile, clienteId);
 
-    fs.writeFileSync(
-      file,
-      JSON.stringify(filaCliente, null, 2)
-    );
+    salvarFilaFallbackAtomico(file, filaCliente);
 
     return true;
   } catch (e) {

@@ -17,6 +17,79 @@ function logStorageLento(operacao, file, inicio, extra = {}) {
   }));
 }
 
+function removerArquivoSeExistir(file) {
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {}
+}
+
+function substituirBackupPorTemporario(bakTmp, bak) {
+  if (!fs.existsSync(bak)) {
+    fs.renameSync(bakTmp, bak);
+    return;
+  }
+
+  const bakAnteriorTmp = `${bak}.replace.${process.pid}.${Date.now()}`;
+  removerArquivoSeExistir(bakAnteriorTmp);
+  fs.renameSync(bak, bakAnteriorTmp);
+
+  try {
+    fs.renameSync(bakTmp, bak);
+    removerArquivoSeExistir(bakAnteriorTmp);
+  } catch (erro) {
+    if (!fs.existsSync(bak) && fs.existsSync(bakAnteriorTmp)) {
+      try {
+        fs.renameSync(bakAnteriorTmp, bak);
+      } catch {}
+    }
+    throw erro;
+  }
+}
+
+function criarBackupArquivoAtomic(file, bak, opcoes = {}) {
+  const inicio = process.hrtime.bigint();
+  if (!fs.existsSync(file)) {
+    return { backupOk: false, backupMetodo: "arquivo_ausente", backupMs: 0 };
+  }
+
+  const bakTmp = `${bak}.tmp.${process.pid}.${Date.now()}`;
+  if (opcoes.preferirHardlink === true) {
+    removerArquivoSeExistir(bakTmp);
+
+    try {
+      fs.linkSync(file, bakTmp);
+      try {
+        substituirBackupPorTemporario(bakTmp, bak);
+      } catch {
+        removerArquivoSeExistir(bakTmp);
+        throw new Error("hardlink_backup_replace_failed");
+      }
+      return {
+        backupOk: true,
+        backupMetodo: "hardlink",
+        backupMs: Math.round(perfStorageMs(inicio))
+      };
+    } catch {
+      removerArquivoSeExistir(bakTmp);
+    }
+  }
+
+  try {
+    fs.copyFileSync(file, bak);
+    return {
+      backupOk: true,
+      backupMetodo: "copy",
+      backupMs: Math.round(perfStorageMs(inicio))
+    };
+  } catch {
+    return {
+      backupOk: false,
+      backupMetodo: "erro",
+      backupMs: Math.round(perfStorageMs(inicio))
+    };
+  }
+}
+
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const CLIENTES_DIR = path.join(DATA_DIR, "clientes");
 
@@ -105,17 +178,30 @@ function writeJsonFileAtomic(file, dados) {
 
   const tmp = file + ".tmp";
   const bak = file + ".bak";
+  const inicioStringify = process.hrtime.bigint();
   const conteudo = JSON.stringify(dados, null, 2);
+  const stringifyMs = Math.round(perfStorageMs(inicioStringify));
+  const bytes = Buffer.byteLength(conteudo || "", "utf8");
 
-  if (fs.existsSync(file)) {
-    try {
-      fs.copyFileSync(file, bak);
-    } catch {}
-  }
+  const backup = criarBackupArquivoAtomic(file, bak, {
+    preferirHardlink: path.basename(file) === "fila.json"
+  });
 
+  const inicioWrite = process.hrtime.bigint();
   fs.writeFileSync(tmp, conteudo);
+  const writeMs = Math.round(perfStorageMs(inicioWrite));
+  const inicioRename = process.hrtime.bigint();
   fs.renameSync(tmp, file);
-  logStorageLento("writeJsonFileAtomic", file, inicio, { bytes: Buffer.byteLength(conteudo || "", "utf8") });
+  const renameMs = Math.round(perfStorageMs(inicioRename));
+  logStorageLento("writeJsonFileAtomic", file, inicio, {
+    bytes,
+    stringifyMs,
+    backupMs: backup.backupMs,
+    backupMetodo: backup.backupMetodo,
+    backupOk: backup.backupOk,
+    writeMs,
+    renameMs
+  });
   return true;
 }
 
