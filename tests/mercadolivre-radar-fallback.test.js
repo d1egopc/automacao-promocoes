@@ -577,8 +577,8 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   contexto.deps.resolverLinkOriginalRadar = async () => ({
     ok: true,
     urlResolvida: URL_SOCIAL_AMBIGUA,
-    linkOriginalLimpo: URL_PRODUTO,
-    linkResolvido: URL_PRODUTO,
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
+    linkResolvido: URL_PRODUTO_BERMUDA,
     metodoResolucaoMeli: "fallback_intermediario"
   });
 
@@ -606,8 +606,8 @@ async function testarRadarSocialAmbiguoSegueFallbackPuroSemVazarCandidato() {
   assert.ok(contexto.chamadas.afiliado.every(chamada => !/^https?:\/\/(?:www\.)?mercadolivre\.com\.br\/social\//i.test(String(chamada.url || ""))));
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
   const serializado = JSON.stringify(resultado);
-  assert.ok(!serializado.includes(URL_PRODUTO), "URL candidata insegura nao pode vazar para fallback puro Radar");
-  assert.ok(!serializado.includes("MLB777777"), "MLB candidato inseguro nao pode vazar para fallback puro Radar");
+  assert.ok(!serializado.includes(URL_PRODUTO_BERMUDA), "URL candidata insegura nao pode vazar para fallback puro Radar");
+  assert.ok(!serializado.includes("MLB3382028526"), "MLB candidato inseguro nao pode vazar para fallback puro Radar");
 }
 
 async function testarRadarUrlResolvidaProdutoDiretoViraTransporteAfiliado() {
@@ -827,6 +827,234 @@ async function testarRadarCandidatoProvadoComErroImagemMantemRadar() {
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, prova.mlbItem);
 }
 
+async function testarRadarUrlProdutoResolvidaSlugNikeProvaAfiliadoSemApiIdentidade() {
+  const shortlink = "https://meli.la/shortlink-nike-court";
+  const titulo = "Tênis Nike Court Legacy Lift";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB-3199313997-tnis-nike-court-legacy-lift-feminino-_JM";
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({ titulo, preco: 249.9, precoAnterior: 399.9, cupom: "NIKE20" }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, titulo);
+  assert.strictEqual(resultado.preco, 249.9);
+  assert.strictEqual(resultado.precoOriginal, 399.9);
+  assert.strictEqual(resultado.cupom, "NIKE20");
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, urlProduto);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB3199313997");
+}
+
+async function testarRadarUrlProdutoResolvidaSlugKitDivergenteRejeita() {
+  const shortlink = "https://meli.la/shortlink-kit-divergente";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB-4446444245-kit-3-blusa-feminina-_JM";
+  const contexto = depsBase({ wall: true, recusarMeliLaDireto: true });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({ titulo: "Kit 4 Blusas Feminina", preco: 79.9, cupom: "KIT4" }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
+}
+
+async function testarRadarUrlProdutoSomenteMlbApiWheyProvaAfiliadoEImagem() {
+  const shortlink = "https://meli.la/shortlink-whey-mlb";
+  const titulo = "Whey Protein Growth Chocolate 1kg";
+  const imagemRadar = "https://cdn.exemplo.com/radar-whey.jpg";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB5264184186";
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficial: {
+      mlb: "MLB5264184186",
+      tituloOficial: "Whey Protein Growth Chocolate 1kg",
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      titulo,
+      preco: 119.9,
+      precoAnterior: 159.9,
+      cupom: "WHEY10",
+      midia: { imagemOrigem: "mensagem", imagemOriginal: imagemRadar }
+    }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.linkExpandido, shortlink);
+  assert.strictEqual(resultado.titulo, titulo);
+  assert.strictEqual(resultado.preco, 119.9);
+  assert.strictEqual(resultado.precoOriginal, 159.9);
+  assert.strictEqual(resultado.cupom, "WHEY10");
+  assert.strictEqual(resultado.imagem, URL_IMAGEM_OFICIAL);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, urlProduto);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB5264184186");
+}
+
+async function testarRadarUrlProdutoSomenteMlbApiRyzenProvaAfiliado() {
+  const shortlink = "https://meli.la/shortlink-ryzen-mlb";
+  const titulo = "Processador AMD Ryzen 7 5700X";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB7590979684";
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficial: {
+      mlb: "MLB7590979684",
+      tituloOficial: "Processador AMD Ryzen 7 5700X",
+      imagem: "",
+      origem: ""
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({ titulo, preco: 849.9, precoAnterior: 999.9, cupom: "RYZEN7" }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(resultado.titulo, titulo);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, urlProduto);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+  assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB7590979684");
+}
+
+async function testarRadarUrlProdutoSomenteMlbApiProdutoDiferenteRejeita() {
+  const shortlink = "https://meli.la/shortlink-api-produto-diferente";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB5264184186";
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficial: {
+      mlb: "MLB5264184186",
+      tituloOficial: "Cadeira Executiva Eike Mesh",
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({ titulo: "Whey Protein Growth Chocolate 1kg", preco: 119.9 }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+}
+
+async function testarRadarUrlProdutoSomenteMlbApiErroNaoTrocaProduto() {
+  const shortlink = "https://meli.la/shortlink-api-erro";
+  const imagemRadar = "https://cdn.exemplo.com/radar-whey-original.jpg";
+  const urlProduto = "https://produto.mercadolivre.com.br/MLB5264184186";
+  const contexto = depsBase({
+    wall: true,
+    recusarMeliLaDireto: true,
+    imagemOficialErro: new Error("timeout_api_items")
+  });
+  contexto.deps.resolverLinkOriginalRadar = async () => ({
+    ok: true,
+    urlResolvida: URL_SOCIAL_AMBIGUA,
+    linkOriginalLimpo: urlProduto,
+    linkResolvido: urlProduto,
+    tipoLinkRadar: "shortlink_meli",
+    metodoResolucaoMeli: "fallback_intermediario"
+  });
+
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar({
+      titulo: "Whey Protein Growth Chocolate 1kg",
+      preco: 119.9,
+      midia: { imagemOrigem: "mensagem", imagemOriginal: imagemRadar }
+    }),
+    links: links(shortlink),
+    deps: contexto.deps
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
+  assert.strictEqual(resultado.linkOriginal, shortlink);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
+}
+
 async function testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado() {
   const shortlink = "https://meli.la/shortlink-produto-diverge-prova";
   const prova = provaMeliValida();
@@ -927,7 +1155,8 @@ async function testarRadarSocialComFalhaAfiliadoContinuaInsuficiente() {
   assert.strictEqual(resultado.motivo, "fallback_radar_insuficiente");
   assert.strictEqual(resultado.metadata.insuficiente.linkAfiliado, true);
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.afiliado.length, 0);
+  assert.strictEqual(contexto.chamadas.afiliado.length, 1);
+  assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO);
 }
 
 async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
@@ -937,7 +1166,7 @@ async function testarSocialForaDeUrlResolvidaNaoViraTransporteAfiliado() {
     ok: true,
     urlResolvida: "",
     linkResolvido: URL_SOCIAL_AMBIGUA,
-    linkOriginalLimpo: URL_PRODUTO,
+    linkOriginalLimpo: URL_PRODUTO_BERMUDA,
     metodoResolucaoMeli: "html"
   });
 
@@ -1197,6 +1426,12 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial();
   await testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial();
   await testarRadarCandidatoProvadoComErroImagemMantemRadar();
+  await testarRadarUrlProdutoResolvidaSlugNikeProvaAfiliadoSemApiIdentidade();
+  await testarRadarUrlProdutoResolvidaSlugKitDivergenteRejeita();
+  await testarRadarUrlProdutoSomenteMlbApiWheyProvaAfiliadoEImagem();
+  await testarRadarUrlProdutoSomenteMlbApiRyzenProvaAfiliado();
+  await testarRadarUrlProdutoSomenteMlbApiProdutoDiferenteRejeita();
+  await testarRadarUrlProdutoSomenteMlbApiErroNaoTrocaProduto();
   await testarRadarProdutoDivergeProvaNaoViraTransporteAfiliado();
   await testarRadarProdutoDiretoComParametroMlbDivergenteNaoViraTransporteAfiliado();
   await testarRadarUrlNaoResolvidaSegueFallbackPuroQuandoSuficiente();

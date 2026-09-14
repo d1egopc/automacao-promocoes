@@ -1316,7 +1316,10 @@ async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
 
     const dados = await response.json();
     const imagemApi = extrairImagemOficialMercadoLivreApi(dados);
+    const mlbApi = normalizarTexto(dados?.id || "").replace(/[^0-9]/g, "");
     return {
+      mlb: mlbApi ? `MLB${mlbApi}` : `MLB${id}`,
+      tituloOficial: normalizarTexto(dados?.title || dados?.name || ""),
       imagem: imagemApi.imagem,
       origem: imagemApi.imagem ? imagemApi.origem : "",
       linkResolvido: urlApi,

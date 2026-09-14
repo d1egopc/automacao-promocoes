@@ -657,5 +657,6 @@ module.exports = {
   TIPO_PROVA_RADAR_CANDIDATO,
   extrairProvaIdentidadeMercadoLivreHtml,
   normalizarMlbExato,
+  validarMatchRadarCandidatoMercadoLivre,
   validarProvaIdentidadeMercadoLivre
 };

@@ -6,6 +6,7 @@ const { resumoLinksClassificados } = require("../../link-role.service");
 const {
   ORIGEM_PROVA_CANDIDATO_RADAR,
   ORIGEM_PROVA_BLOCO_PRINCIPAL,
+  validarMatchRadarCandidatoMercadoLivre,
   validarProvaIdentidadeMercadoLivre
 } = require("../../../radar/mercadolivre-social-identidade");
 const { buscarImagemOficialMercadoLivrePorMlb } = require("../importer.service");
@@ -423,12 +424,127 @@ function extrairMlbItemUrlDiretaMercadoLivre(url = "") {
   }
 }
 
+function slugUrlDiretaProdutoMercadoLivre(url = "") {
+  try {
+    const parsed = new URL(textoMercadoLivre(url));
+    if (parsed.hostname.toLowerCase() !== "produto.mercadolivre.com.br") return "";
+    return decodeURIComponent(parsed.pathname)
+      .replace(/^\/MLB-?\d{6,}/i, "")
+      .replace(/_JM\/?$/i, "")
+      .replace(/[-_]+/g, " ")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function slugInformativoProdutoMercadoLivre(slug = "") {
+  const tokens = normalizarTextoIdentidadeMercadoLivre(slug)
+    .split(/\s+/)
+    .filter(token => token.length >= 3 && !["mlb", "jm", "produto", "mercado", "livre"].includes(token));
+  return tokens.length >= 2;
+}
+
+function urlsDiretasProdutoResolvidoMercadoLivre(resolucaoProduto = {}) {
+  const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const mlbsResolvidos = new Set([
+    resolucaoRadar.urlResolvida,
+    resolucaoRadar.linkResolvido
+  ]
+    .map(url => extrairMlbItemUrlDiretaMercadoLivre(url))
+    .filter(Boolean));
+  if (!mlbsResolvidos.size) return [];
+
+  const urls = [
+    resolucaoRadar.urlResolvida,
+    resolucaoRadar.linkResolvido,
+    resolucaoProduto.urlProduto,
+    resolucaoProduto.linkExpandidoEngine
+  ]
+    .map(url => textoMercadoLivre(url))
+    .filter(url => {
+      const mlb = extrairMlbItemUrlDiretaMercadoLivre(url);
+      return Boolean(url && mlb && mlbsResolvidos.has(mlb));
+    });
+
+  const porMlb = new Map();
+  for (const url of urls) {
+    const mlb = extrairMlbItemUrlDiretaMercadoLivre(url);
+    if (!porMlb.has(mlb)) porMlb.set(mlb, url);
+  }
+  return [...porMlb.entries()].map(([mlb, url]) => ({ mlb, url }));
+}
+
+async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
+  urlOriginalEngine = "",
+  resolucaoProduto = {},
+  tituloRadar = "",
+  clienteId = "",
+  integracao = {},
+  deps = {}
+} = {}) {
+  if (!isMeliLa(urlOriginalEngine)) return null;
+  if (!textoMercadoLivre(tituloRadar)) return null;
+
+  const candidatos = urlsDiretasProdutoResolvidoMercadoLivre(resolucaoProduto);
+  if (candidatos.length !== 1) return null;
+
+  const candidato = candidatos[0];
+  const slug = slugUrlDiretaProdutoMercadoLivre(candidato.url);
+  if (slugInformativoProdutoMercadoLivre(slug)) {
+    const matchSlug = validarMatchRadarCandidatoMercadoLivre(tituloRadar, slug);
+    if (!matchSlug.ok) return null;
+    return {
+      ok: true,
+      origem: "url_resolvida_slug_radar",
+      urlProduto: candidato.url,
+      mlbItem: candidato.mlb,
+      matchRadar: matchSlug
+    };
+  }
+
+  const buscarImagemOficial = typeof deps.buscarImagemOficialMercadoLivrePorMlb === "function"
+    ? deps.buscarImagemOficialMercadoLivrePorMlb
+    : buscarImagemOficialMercadoLivrePorMlb;
+
+  let oficial;
+  try {
+    oficial = await buscarImagemOficial(candidato.mlb, {
+      clienteId,
+      integracao,
+      getIntegracaoCliente: deps.getIntegracaoCliente
+    });
+  } catch {
+    return null;
+  }
+
+  const mlbOficial = normalizarMlbItemApiMercadoLivre(oficial?.mlb || candidato.mlb);
+  if (mlbOficial !== candidato.mlb) return null;
+
+  const matchApi = validarMatchRadarCandidatoMercadoLivre(tituloRadar, oficial?.tituloOficial || "");
+  if (!matchApi.ok) return null;
+
+  return {
+    ok: true,
+    origem: "api_items_titulo_radar",
+    urlProduto: candidato.url,
+    mlbItem: candidato.mlb,
+    tituloOficial: oficial.tituloOficial || "",
+    imagemOficial: oficial,
+    matchRadar: matchApi
+  };
+}
+
 function resolverMlbItemImagemOficialFallbackMercadoLivre({
   resolucaoProduto = {},
   urlOriginalEngine = "",
   urlImportador = "",
-  linkExpandidoEngine = ""
+  linkExpandidoEngine = "",
+  identidadeTecnicaUrlResolvida = null
 } = {}) {
+  const mlbTecnico = normalizarMlbItemApiMercadoLivre(identidadeTecnicaUrlResolvida?.mlbItem || "");
+  if (mlbTecnico) return { mlb: mlbTecnico, origem: identidadeTecnicaUrlResolvida.origem || "identidade_tecnica_url_resolvida" };
+
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar, {
     aceitarCandidatoRadar: true
@@ -469,6 +585,30 @@ async function resolverImagemOficialFallbackMercadoLivre(imagemCapturada = {}, c
   const imagemPreservada = { ...objetoSeguro(imagemCapturada) };
   const identidade = resolverMlbItemImagemOficialFallbackMercadoLivre(contexto);
   if (!identidade.mlb) return imagemPreservada;
+
+  const oficialPrecarregada = objetoSeguro(contexto.identidadeTecnicaUrlResolvida?.imagemOficial);
+  if (normalizarMlbItemApiMercadoLivre(contexto.identidadeTecnicaUrlResolvida?.mlbItem || "") === identidade.mlb && contexto.identidadeTecnicaUrlResolvida?.origem === "api_items_titulo_radar") {
+    if (!oficialPrecarregada.imagem) return imagemPreservada;
+    if (!origemImagemOficialApiMercadoLivreSegura(oficialPrecarregada.origem || "")) return imagemPreservada;
+    const resolvida = resolverImagemUniversal({ imagem: oficialPrecarregada.imagem || "" });
+    if (!resolvida.imagem) return imagemPreservada;
+    return {
+      ...imagemPreservada,
+      imagem: resolvida.imagem,
+      imagemOrigem: oficialPrecarregada.origem || "api_mercadolibre.items.pictures",
+      imagemStatus: "api_oficial_mlb",
+      imagemTentativas: [
+        ...(Array.isArray(imagemPreservada.imagemTentativas) ? imagemPreservada.imagemTentativas : []),
+        {
+          origem: oficialPrecarregada.origem || "api_mercadolibre.items",
+          status: "selecionada",
+          motivo: oficialPrecarregada.motivo || "api_oficial_mlb_imagem_recuperada",
+          mlbItem: identidade.mlb,
+          identidadeOrigem: identidade.origem
+        }
+      ]
+    };
+  }
 
   const buscarImagemOficial = typeof contexto.deps?.buscarImagemOficialMercadoLivrePorMlb === "function"
     ? contexto.deps.buscarImagemOficialMercadoLivrePorMlb
@@ -653,6 +793,7 @@ async function montarFallbackClonadorMercadoLivre({
   expandiuMeliLa = false,
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
+  identidadeTecnicaUrlResolvida = null,
   bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
@@ -737,7 +878,8 @@ async function montarFallbackClonadorMercadoLivre({
     resolucaoProduto,
     urlOriginalEngine,
     urlImportador,
-    linkExpandidoEngine
+    linkExpandidoEngine,
+    identidadeTecnicaUrlResolvida
   });
   const produtoFallback = {
     titulo,
@@ -841,6 +983,7 @@ async function montarFallbackRadarMercadoLivre({
   expandiuMeliLa = false,
   resolucaoProduto = {},
   urlTransporteAfiliado = "",
+  identidadeTecnicaUrlResolvida = null,
   bloquearMeliLaTransporteAfiliado = false,
   falhaImportador = {}
 } = {}) {
@@ -919,7 +1062,8 @@ async function montarFallbackRadarMercadoLivre({
     resolucaoProduto,
     urlOriginalEngine,
     urlImportador,
-    linkExpandidoEngine
+    linkExpandidoEngine,
+    identidadeTecnicaUrlResolvida
   });
   const produtoFallback = {
     titulo,
@@ -1017,7 +1161,17 @@ async function montarFallbackPuroCapturaMercadoLivre({
   const falhaImportador = {
     motivo: motivo || "enriquecimento_ml_recusado"
   };
-  const urlTransporteAfiliado = resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine, resolucaoProduto);
+  const tituloRadarIdentidade = extrairTituloClonadorMercadoLivre(evento, job) || extrairTituloRadarMercadoLivre(evento);
+  const identidadeTecnicaUrlResolvida = await resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
+    urlOriginalEngine,
+    resolucaoProduto,
+    tituloRadar: tituloRadarIdentidade,
+    clienteId,
+    integracao,
+    deps
+  });
+  const urlTransporteAfiliado = textoMercadoLivre(identidadeTecnicaUrlResolvida?.urlProduto || "")
+    || resolverUrlTransporteAfiliadoFallbackPuroMercadoLivre(urlOriginalEngine, resolucaoProduto);
   const resolucaoProdutoSanitizada = sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto, falhaImportador.motivo);
 
   const argumentosFallback = {
@@ -1033,6 +1187,7 @@ async function montarFallbackPuroCapturaMercadoLivre({
     expandiuMeliLa: false,
     resolucaoProduto: resolucaoProdutoSanitizada,
     urlTransporteAfiliado,
+    identidadeTecnicaUrlResolvida,
     bloquearMeliLaTransporteAfiliado: true,
     falhaImportador
   };
