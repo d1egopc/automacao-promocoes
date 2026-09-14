@@ -31,6 +31,35 @@ const processarFila = trechoEntre(
   "const {"
 );
 
+const perfilProcessarFila = trechoEntre(
+  "function criarPerfilProcessarFila",
+  "function iniciarDiagnosticoRuntime"
+);
+
+assert(
+  perfilProcessarFila.includes("tempoExplicadoMs") &&
+    perfilProcessarFila.includes("tempoNaoExplicadoMs") &&
+    perfilProcessarFila.includes("contabilizar: metadados.contabilizar === false ? false : true") &&
+    perfilProcessarFila.includes(".filter(etapa => etapa.contabilizar !== false)"),
+  "perfil temporario deve calcular tempo explicado sem dupla contagem de fases pai"
+);
+
+assert(
+  processarFila.includes("}, { contabilizar: false });") &&
+    processarFila.includes("perfilProcessarFila.etapaSync(\"prepararOfertaDestino\"") &&
+    processarFila.includes("perfilProcessarFila.etapaSync(\"renderizarMensagem\"") &&
+    fonteIndex.includes("perfilProcessarFila.etapaSync(\"finalizarOferta\"") &&
+    fonteIndex.includes("perfilProcessarFila.etapa(\"checkpointFinal\""),
+  "P0.4 deve instrumentar trechos pos-selecao sem alterar regras funcionais"
+);
+
+assert(
+  processarFila.includes("advisoryHandle: advisoryFuncionalFila.handle,") &&
+    processarFila.includes("perfilProcessarFila") &&
+    fonteIndex.includes("const etapaEnvio = (nome, fn, metadados = {}) =>"),
+  "envio por canal deve receber profiler opcional para separar await externo e aguardarCanal"
+);
+
 assert(
   pos(processarFila, "reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")") <
     pos(processarFila, "sanearExpiradosFila(clienteFila)"),
@@ -359,9 +388,10 @@ assert(
   processarFila.includes("let colecaoPosEnvioProcessamento = fila;") &&
     processarFila.includes("colecaoPosEnvioProcessamento = (") &&
     processarFila.includes(") ? fonteClienteHotStateSelecao.itens : fila;") &&
-    processarFila.includes("relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId })") &&
-    processarFila.includes("finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {") &&
-    processarFila.includes("marcarErroEnvioFila(colecaoPosEnvioProcessamento, oferta, {"),
+    fonteIndex.includes("relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId })") &&
+    fonteIndex.includes("perfilProcessarFila.etapaSync(\"finalizarOferta\", () => filaOfertas.finalizarOfertaEnviadaFila") &&
+    fonteIndex.includes("finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {") &&
+    fonteIndex.includes("marcarErroEnvioFila(colecaoPosEnvioProcessamento, oferta, {"),
   "pos-envio V2 conclusivo deve relocalizar, finalizar e marcar erro pelo hot state, preservando fila global como fallback"
 );
 

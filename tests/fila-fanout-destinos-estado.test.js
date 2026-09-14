@@ -60,8 +60,13 @@ antesDepoisDe(
 
 antes(
   "if (resumoFanout.aguardando > 0",
-  "const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila",
+  "const finalizacaoEnvio = perfilProcessarFila.etapaSync(\"finalizarOferta\"",
   "pendencia por braco precisa ser avaliada antes de finalizar como enviado"
+);
+
+contem(
+  "finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {",
+  "finalizacao instrumentada deve continuar usando colecaoPosEnvioProcessamento"
 );
 
 const itemLegado = { destinosEnviados: [{ tipo: "whatsapp", id: "op-geral" }] };

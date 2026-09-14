@@ -6500,16 +6500,34 @@ function criarPerfilProcessarFila(clienteId = "admin", rodadaId = "") {
     return estado;
   }
 
-  function registrarEtapa(nome, inicioEtapa) {
+  function metadadosEtapaPerfil(metadados = {}, padraoTipo = "sync_local") {
+    const tipo = String(metadados.tipo || padraoTipo || "sync_local");
+    return {
+      tipo,
+      awaitExterno: metadados.awaitExterno === true,
+      syncLocal: metadados.syncLocal === false ? false : tipo === "sync_local",
+      contabilizar: metadados.contabilizar === false ? false : true
+    };
+  }
+
+  function registrarEtapa(nome, inicioEtapa, metadados = {}) {
     observarEngine();
     const nomeSeguro = String(nome || "desconhecida");
     const duracaoMs = Math.round(perfTempoMs(inicioEtapa));
+    const meta = metadadosEtapaPerfil(metadados, metadados.tipo || "sync_local");
     const atual = etapas.get(nomeSeguro) || {
       nome: nomeSeguro,
+      tipo: meta.tipo,
+      awaitExterno: false,
+      syncLocal: true,
+      contabilizar: true,
       chamadas: 0,
       totalMs: 0,
       maxMs: 0
     };
+    atual.awaitExterno = atual.awaitExterno || meta.awaitExterno;
+    atual.syncLocal = atual.syncLocal && meta.syncLocal;
+    atual.contabilizar = atual.contabilizar && meta.contabilizar;
     atual.chamadas += 1;
     atual.totalMs += duracaoMs;
     atual.maxMs = Math.max(atual.maxMs, duracaoMs);
@@ -6521,24 +6539,31 @@ function criarPerfilProcessarFila(clienteId = "admin", rodadaId = "") {
       observarEngine();
       return process.hrtime.bigint();
     },
-    finalizarEtapa(nome, inicioEtapa) {
+    finalizarEtapa(nome, inicioEtapa, metadados = {}) {
       if (!inicioEtapa) return;
-      registrarEtapa(nome, inicioEtapa);
+      registrarEtapa(nome, inicioEtapa, metadados);
     },
-    etapaSync(nome, fn) {
+    etapaSync(nome, fn, metadados = {}) {
       const inicioEtapa = this.iniciarEtapa();
       try {
         return fn();
       } finally {
-        this.finalizarEtapa(nome, inicioEtapa);
+        this.finalizarEtapa(nome, inicioEtapa, {
+          tipo: "sync_local",
+          ...metadados
+        });
       }
     },
-    async etapa(nome, fn) {
+    async etapa(nome, fn, metadados = {}) {
       const inicioEtapa = this.iniciarEtapa();
       try {
         return await fn();
       } finally {
-        this.finalizarEtapa(nome, inicioEtapa);
+        this.finalizarEtapa(nome, inicioEtapa, {
+          tipo: "await_async",
+          syncLocal: false,
+          ...metadados
+        });
       }
     },
     finalizar(extra = {}) {
@@ -6553,10 +6578,16 @@ function criarPerfilProcessarFila(clienteId = "admin", rodadaId = "") {
         histogramaLoop.disable?.();
       }
       if (!PERF_DIAGNOSTICO_ATIVO || duracaoTotalMs <= FILA_PROCESSAR_PERFIL_MIN_MS) return;
+      const etapasPerfil = Array.from(etapas.values());
+      const tempoExplicadoMs = etapasPerfil
+        .filter(etapa => etapa.contabilizar !== false)
+        .reduce((total, etapa) => total + Number(etapa.totalMs || 0), 0);
       console.log("[FILA-PROCESSAR-PERFIL]", JSON.stringify({
         clienteId: String(clienteId || "admin"),
         rodadaId: rodadaId || "",
         duracaoTotalMs,
+        tempoExplicadoMs,
+        tempoNaoExplicadoMs: Math.max(0, duracaoTotalMs - tempoExplicadoMs),
         cpuProcessoInicioFimMs: Math.round((cpu.user + cpu.system) / 1000),
         eventLoopLagMaxMs,
         eventLoopLagMeanMs,
@@ -6565,7 +6596,7 @@ function criarPerfilProcessarFila(clienteId = "admin", rodadaId = "") {
         engineRodadaId,
         engineRodadasMultiplas,
         ofcAtivo: ofcAtivoDuranteRodada,
-        etapas: Array.from(etapas.values()),
+        etapas: etapasPerfil,
         ...extra
       }));
     }
@@ -8034,6 +8065,15 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
   let confirmouEnvio = false;
   let contextoFidelidadeExecutor = {};
   let alvoAtualFanout = null;
+  const perfilProcessarFila = opcoes?.perfilProcessarFila || null;
+  const etapaEnvioSync = (nome, fn) =>
+    perfilProcessarFila?.etapaSync
+      ? perfilProcessarFila.etapaSync(nome, fn, { tipo: "sync_local" })
+      : fn();
+  const etapaEnvio = (nome, fn, metadados = {}) =>
+    perfilProcessarFila?.etapa
+      ? perfilProcessarFila.etapa(nome, fn, metadados)
+      : fn();
 
   try {
     clienteId = String(clienteId || oferta.clienteId || "").trim();
@@ -8194,7 +8234,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       return { enviado: false, tentouEnvio: false, motivo: "sem_creditos" };
     }
 
-    const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destino);
+    const imagemEnvioExecutor = etapaEnvioSync("prepararMidia", () =>
+      avaliarImagemEnviavelExecutor(oferta, destino)
+    );
 
     console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
 
@@ -8256,10 +8298,10 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     let fallbackTextoPorImagem = !imagemEnvioExecutor.ok && imagemEnvioExecutor.tinhaImagem;
     let erroImagemEnvio = "";
     const telemetriaMidiaV2 = {};
-    const imagemParaPreview = avaliarImagemEnviavelExecutor(oferta, {
+    const imagemParaPreview = etapaEnvioSync("prepararMidia", () => avaliarImagemEnviavelExecutor(oferta, {
       ...destino,
       tipoMidia: "imagem_completa"
-    });
+    }));
     const registrarTelemetriaMidiaV2 = ({ sucesso = false, erroFinal = "", envioPayloadTipo = "" } = {}) => {
       oferta.logsEnvio = Array.isArray(oferta.logsEnvio) ? oferta.logsEnvio : [];
       oferta.logsEnvio.push({
@@ -8399,9 +8441,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           imagemOrigem: oferta.imagemOrigem || ""
         }));
       }
-      checkpointEnvioWhatsapp = await enviarTextoWhatsapp();
+      checkpointEnvioWhatsapp = await etapaEnvio("enviarCanal", () =>
+        enviarTextoWhatsapp(), { tipo: "await_externo", awaitExterno: true }
+      );
     } else {
-      checkpointEnvioWhatsapp = await executarAlvoComCheckpoint({
+      checkpointEnvioWhatsapp = await etapaEnvio("enviarCanal", () => executarAlvoComCheckpoint({
         canal: "whatsapp",
         alvo: { grupoId: grupo },
         enviar: async () => {
@@ -8435,7 +8479,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             throw erroImagem;
           }
         }
-      });
+      }), { tipo: "await_externo", awaitExterno: true });
       if (!checkpointEnvioWhatsapp.ok) {
         registrarTelemetriaMidiaV2({
           sucesso: false,
@@ -8501,7 +8545,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     });
     alvoAtualFanout = null;
 
-    await new Promise(r => setTimeout(r, 3000));
+    await etapaEnvio("aguardarCanal", () =>
+      new Promise(r => setTimeout(r, 3000)), { tipo: "await_timer", syncLocal: false }
+    );
   }
 
   return { enviado: true, tentouEnvio: true };
@@ -8554,13 +8600,13 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
 
         let destinoDiscordValidado;
         try {
-          destinoDiscordValidado = await validarDestinoDiscord({
+          destinoDiscordValidado = await etapaEnvio("resolverCanal", () => validarDestinoDiscord({
             clienteId,
             destino: destinoDiscordAlvo,
             conexoes: listarConexoesDiscord(clienteId),
             env: process.env,
             httpClient: axios
-          });
+          }), { tipo: "await_externo", awaitExterno: true });
         } catch (erroValidacaoDiscord) {
           const motivoDiscord = erroValidacaoDiscord?.message || "discord_destino_indisponivel";
           registrarResultadoAlvoFanout(oferta, destino, alvoDiscord, {
@@ -8577,7 +8623,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           continue;
         }
 
-        const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destinoDiscordValidado);
+        const imagemEnvioExecutor = etapaEnvioSync("prepararMidia", () =>
+          avaliarImagemEnviavelExecutor(oferta, destinoDiscordValidado)
+        );
         tentouEnvio = true;
         registrarCoberturaExecutor("executor_inicio", oferta, clienteId, destinoDiscordValidado, {
           decisao: "iniciado",
@@ -8599,7 +8647,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           motivoTecnico: imagemEnvioExecutor.ok ? "" : imagemEnvioExecutor.motivo
         });
 
-        const checkpointDiscord = await executarAlvoComCheckpoint({
+        const checkpointDiscord = await etapaEnvio("enviarCanal", () => executarAlvoComCheckpoint({
           canal: "discord",
           alvo: { channelId: destinoDiscordValidado.channelId },
           enviar: async () => {
@@ -8639,7 +8687,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             classificacao: erro?.checkpointClassificacao || "pos_efeito_ou_desconhecido",
             statusHttp: erro?.checkpointStatusHttp
           })
-        });
+        }), { tipo: "await_externo", awaitExterno: true });
         const resultadoDiscord = checkpointDiscord.resposta || null;
         ultimoResultadoDiscord = resultadoDiscord;
 
@@ -8759,29 +8807,35 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     // ================= ENVIO TELEGRAM =================
 
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
-      const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
-      const idsSelecionados = idsTelegramDestinoFila(destino);
-      const telegramsDiretos = telegramsDiretosDestinoFila(destino);
+      const resolucaoTelegram = etapaEnvioSync("resolverCanal", () => {
+        const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
+        const idsSelecionados = idsTelegramDestinoFila(destino);
+        const telegramsDiretos = telegramsDiretosDestinoFila(destino);
 
-      let selecionados = idsSelecionados.length
-        ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
-        : telegrams.filter(t => t.ativo);
+        let selecionados = idsSelecionados.length
+          ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
+          : telegrams.filter(t => t.ativo);
 
-      if (telegramsDiretos.length) {
-        selecionados = [...telegramsDiretos, ...selecionados];
-      }
+        if (telegramsDiretos.length) {
+          selecionados = [...telegramsDiretos, ...selecionados];
+        }
 
-      if (!selecionados.length && telegrams.length === 1) {
-        selecionados = telegrams.filter(t => t.ativo);
-      }
+        if (!selecionados.length && telegrams.length === 1) {
+          selecionados = telegrams.filter(t => t.ativo);
+        }
 
-      const vistosTelegram = new Set();
-      selecionados = selecionados.filter(t => {
-        const chave = `${t.botToken || ""}:${t.chatId || ""}`;
-        if (vistosTelegram.has(chave)) return false;
-        vistosTelegram.add(chave);
-        return true;
+        const vistosTelegram = new Set();
+        selecionados = selecionados.filter(t => {
+          const chave = `${t.botToken || ""}:${t.chatId || ""}`;
+          if (vistosTelegram.has(chave)) return false;
+          vistosTelegram.add(chave);
+          return true;
+        });
+
+        return { telegrams, selecionados };
       });
+      const telegrams = resolucaoTelegram.telegrams;
+      const selecionados = resolucaoTelegram.selecionados;
 
       if (!selecionados.length) {
         logOptimus("TELEGRAM", "Nenhum destino selecionado", {
@@ -8904,7 +8958,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           resultado: "tentando"
         });
 
-        const imagemEnvioExecutor = avaliarImagemEnviavelExecutor(oferta, destino);
+        const imagemEnvioExecutor = etapaEnvioSync("prepararMidia", () =>
+          avaliarImagemEnviavelExecutor(oferta, destino)
+        );
 
         console.log("[EXECUTOR-IMAGEM-AUDITORIA]", {
 
@@ -9026,9 +9082,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
             }));
           }
           postTelegramIniciado = false;
-          checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint();
+          checkpointEnvioTelegram = await etapaEnvio("enviarCanal", () =>
+            enviarTextoTelegramComCheckpoint(), { tipo: "await_externo", awaitExterno: true }
+          );
         } else {
-          checkpointEnvioTelegram = await executarAlvoComCheckpoint({
+          checkpointEnvioTelegram = await etapaEnvio("enviarCanal", () => executarAlvoComCheckpoint({
             canal: "telegram",
             alvo: tel,
           falhaConfirmada: falhaTelegramConfirmada,
@@ -9049,7 +9107,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
                 providerMessageId: resposta?.data?.result?.message_id || ""
               };
             }
-          });
+          }), { tipo: "await_externo", awaitExterno: true });
           if (!checkpointEnvioTelegram.ok && checkpointEnvioTelegram.resultado === "falha_confirmada") {
             const erroImagem = checkpointEnvioTelegram.erro;
             fallbackTextoPorImagem = true;
@@ -9066,9 +9124,11 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
               imagemOrigem: oferta.imagemOrigem || ""
             }));
             postTelegramIniciado = false;
-            checkpointEnvioTelegram = await enviarTextoTelegramComCheckpoint({
-              permitirNovaTentativaAposFalhaConfirmada: true
-            });
+            checkpointEnvioTelegram = await etapaEnvio("enviarCanal", () =>
+              enviarTextoTelegramComCheckpoint({
+                permitirNovaTentativaAposFalhaConfirmada: true
+              }), { tipo: "await_externo", awaitExterno: true }
+            );
           }
         }
 
@@ -9136,7 +9196,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           })
         });
 
-        await new Promise(r => setTimeout(r, 2000));
+        await etapaEnvio("aguardarCanal", () =>
+          new Promise(r => setTimeout(r, 2000)), { tipo: "await_timer", syncLocal: false }
+        );
       }
 
       if (telegramEnviado) {
@@ -9494,7 +9556,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     }
     filaAlterada = false;
     return salvou;
-    });
+    }, { contabilizar: false });
   };
 
   try {
@@ -9722,6 +9784,7 @@ if (!oferta) {
     oferta = resultadoFairnessFila?.candidato?.oferta || resultadoFairnessFila?.candidato || oferta;
     advisoryFuncionalFila = advisoryFuncionalFila || resultadoFairnessFila?.advisory || null;
 
+const inicioPosSelecaoPerfil = perfilProcessarFila.iniciarEtapa();
 const clienteId = oferta.clienteId || "admin";
 const diagnosticoOfertaSelecionada = diagnosticosFilaPorCliente.get(String(clienteFila));
 resumoFila.ofertasExaminadas = diagnosticoOfertaSelecionada?.pendentesTotal || 1;
@@ -9738,6 +9801,7 @@ registrarCoberturaExecutor("fila_item_pendente", oferta, clienteId, {}, {
   filaRecebeu: true,
   statusFilaAntes: oferta.status || ""
 });
+perfilProcessarFila.finalizarEtapa("posSelecao", inicioPosSelecaoPerfil, { tipo: "sync_local" });
 
 if (!usuarioAtivoOperacional(clienteId)) {
   resumoFila.motivoPulo = "usuario_inativo";
@@ -9750,10 +9814,12 @@ if (!usuarioAtivoOperacional(clienteId)) {
   return;
 }
 
-if (!advisoryFuncionalFila) advisoryFuncionalFila = await catracaAdvisoryFuncionalFila.adquirir({
-  clienteId,
-  oferta
-});
+if (!advisoryFuncionalFila) advisoryFuncionalFila = await perfilProcessarFila.etapa("advisoryFila", () =>
+  catracaAdvisoryFuncionalFila.adquirir({
+    clienteId,
+    oferta
+  }), { tipo: "await_externo", awaitExterno: true }
+);
 if (advisoryFuncionalFila.resultado !== "adquirido") {
   resumoFila.motivoPulo = `advisory_${advisoryFuncionalFila.resultado || "erro"}`;
   registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
@@ -9790,6 +9856,7 @@ if (!clienteAtivo) {
 
   const agora = Date.now();
 
+const inicioResolverSessaoDestinoPerfil = perfilProcessarFila.iniciarEtapa();
     let idSessao =
   normalizarSessaoId(
     clienteId,
@@ -9859,6 +9926,7 @@ if (!sessoes[idSessao]) {
       total: destinos.length,
       destinos
     });
+perfilProcessarFila.finalizarEtapa("resolverSessaoDestino", inicioResolverSessaoDestinoPerfil, { tipo: "sync_local" });
 
 // ================= ENVIO DESTINOS INTELIGENTES =================
 
@@ -9882,7 +9950,7 @@ const categoriaOfertaFila = oferta.categoria || oferta.categoriaProduto || class
 const analiseDestinosFila = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);
 const destinosCompativeis = analiseDestinosFila.compativeis;
 const restricaoDestinosClone = analiseDestinosFila.restricaoDestinosClone || {};
-perfilProcessarFila.finalizarEtapa("resolverUsuarioPlano", inicioResolverUsuarioPlanoPerfil);
+perfilProcessarFila.finalizarEtapa("resolverUsuarioPlano", inicioResolverUsuarioPlanoPerfil, { tipo: "sync_local" });
 if (restricaoDestinosClone.aplica === true) {
   console.log("[CLONADOR-DESTINOS-RESTRICAO]", JSON.stringify({
     clienteId,
@@ -10096,7 +10164,7 @@ if (!disponibilidadeAntesReserva.ok) {
 }
 liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
 
-const destinosOrdenados = perfilProcessarFila.etapaSync("destinos", () =>
+const destinosOrdenados = perfilProcessarFila.etapaSync("ordenarDestinos", () =>
   destinosCompativeis
     .map(item => {
       const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
@@ -10118,7 +10186,7 @@ const colecaoFallbackEnvioRecenteExecutor = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const repeticaoExecutor = perfilProcessarFila.etapaSync("destinos", () =>
+const repeticaoExecutor = perfilProcessarFila.etapaSync("antiRepeticaoExecutor", () =>
   filaOfertas.consultarEnvioRecenteExecutor2h(colecaoFallbackEnvioRecenteExecutor, oferta, {
     logger: console,
     logarLegado: true,
@@ -10224,7 +10292,7 @@ const colecaoDuplicidadeProcessamento = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const duplicidadeProcessamento = perfilProcessarFila.etapaSync("destinos", () =>
+const duplicidadeProcessamento = perfilProcessarFila.etapaSync("duplicidadeProcessamento", () =>
   filaOfertas.avaliarDuplicidadeAntesProcessarFila(colecaoDuplicidadeProcessamento, oferta, {
     clienteId,
     modoPorDestino: true
@@ -10314,7 +10382,7 @@ const colecaoReservaProcessamento = (
   fonteClienteHotStateSelecao?.conclusiva === true &&
   Array.isArray(fonteClienteHotStateSelecao.itens)
 ) ? fonteClienteHotStateSelecao.itens : fila;
-const reservaProcessamento = perfilProcessarFila.etapaSync("destinos", () =>
+const reservaProcessamento = perfilProcessarFila.etapaSync("reservaProcessamento", () =>
   filaOfertas.reservarOfertaProcessandoFila(colecaoReservaProcessamento, oferta, {
     clienteId
   })
@@ -10682,23 +10750,23 @@ for (const item of destinosOrdenados) {
     });
   }
 
-  const linkOfertaDestino = resolverLinkOfertaPorDestino({
+  const linkOfertaDestino = perfilProcessarFila.etapaSync("prepararOfertaDestino", () => resolverLinkOfertaPorDestino({
     oferta,
     destino,
     clienteId,
     plano,
     recursos: plano?.recursos,
     configGlobal: config
-  });
+  }));
   const ofertaParaMensagem = linkOfertaDestino.oferta || oferta;
 
-  const mensagem = montarMensagemOferta(ofertaParaMensagem, {
+  const mensagem = perfilProcessarFila.etapaSync("renderizarMensagem", () => montarMensagemOferta(ofertaParaMensagem, {
     destino,
     plano,
     clienteId,
     arquiteturaComercial: configCliente?.arquiteturaComercial,
     rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
-  });
+  }));
 
   const enviado = await enviarParaDestinoInteligente(
     destino,
@@ -10708,7 +10776,8 @@ for (const item of destinosOrdenados) {
     configCliente,
     {
       linkFinal: linkOfertaDestino.linkFinal || "",
-      advisoryHandle: advisoryFuncionalFila.handle
+      advisoryHandle: advisoryFuncionalFila.handle,
+      perfilProcessarFila
     }
   );
   const resultadoEnvio =
@@ -10790,7 +10859,9 @@ for (const item of destinosOrdenados) {
   }
 }
 
-const relocalizacaoPosEnvio = filaOfertas.relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId });
+const relocalizacaoPosEnvio = perfilProcessarFila.etapaSync("posEnvio", () =>
+  filaOfertas.relocalizarOfertaFila(colecaoPosEnvioProcessamento, oferta, { clienteId })
+);
 if (!relocalizacaoPosEnvio.ok || !relocalizacaoPosEnvio.oferta) {
   resumoFila.motivoPulo = "oferta_nao_relocalizada_pos_envio";
   console.log("[FILA-REFERENCIA-OBSOLETA-EVITADA]", JSON.stringify({
@@ -10813,19 +10884,36 @@ if (relocalizacaoPosEnvio.oferta !== oferta) {
   oferta = relocalizacaoPosEnvio.oferta;
 }
 
-const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
-  destinosElegiveis: destinosCompativeis.length,
-  destinosTentados: destinosTentadosDebug,
-  houveFalhaReal,
-  motivosSemEnvio
+const estadoPosEnvio = perfilProcessarFila.etapaSync("posEnvio", () => {
+  const decisaoSemEnvio = decidirStatusExecutorSemEnvio({
+    destinosElegiveis: destinosCompativeis.length,
+    destinosTentados: destinosTentadosDebug,
+    houveFalhaReal,
+    motivosSemEnvio
+  });
+  const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorario(item.destino));
+  const resumoFanout = resumoDestinosEstadoFanout(oferta);
+  const motivoAguardandoFanout =
+    resumoFanout.estados.find(item => item?.estado === "aguardando")?.motivo ||
+    decisaoSemEnvio.motivoSemEnvio ||
+    "aguardando_destino";
+  const totalDestinosEnviadosFanout = Math.max(resumoFanout.enviados, destinosEnviadosCount);
+
+  return {
+    decisaoSemEnvio,
+    dentroJanelaExecutor,
+    resumoFanout,
+    motivoAguardandoFanout,
+    totalDestinosEnviadosFanout
+  };
 });
-const dentroJanelaExecutor = destinosCompativeis.some(item => destinoDentroHorario(item.destino));
-const resumoFanout = resumoDestinosEstadoFanout(oferta);
-const motivoAguardandoFanout =
-  resumoFanout.estados.find(item => item?.estado === "aguardando")?.motivo ||
-  decisaoSemEnvio.motivoSemEnvio ||
-  "aguardando_destino";
-const totalDestinosEnviadosFanout = Math.max(resumoFanout.enviados, destinosEnviadosCount);
+const {
+  decisaoSemEnvio,
+  dentroJanelaExecutor,
+  resumoFanout,
+  motivoAguardandoFanout,
+  totalDestinosEnviadosFanout
+} = estadoPosEnvio;
 
 if (resumoFanout.aguardando > 0 || (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente")) {
   resumoFila.motivoPulo = motivoAguardandoFanout;
@@ -10941,11 +11029,11 @@ if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0) {
 ultimoEnvioFila = Date.now();
 
 resumoFila.motivoPulo = "";
-const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {
+const finalizacaoEnvio = perfilProcessarFila.etapaSync("finalizarOferta", () => filaOfertas.finalizarOfertaEnviadaFila(colecaoPosEnvioProcessamento, oferta, {
   clienteId,
   enviadoEm: new Date().toISOString(),
   statusDetalhe: `Enviada para ${totalDestinosEnviadosFanout} destino(s)`
-});
+}));
 
 if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
   resumoFila.motivoPulo = finalizacaoEnvio.motivo || "oferta_nao_relocalizada_finalizacao";
@@ -10967,11 +11055,11 @@ if (!finalizacaoEnvio.ok || !finalizacaoEnvio.oferta) {
 
 oferta = finalizacaoEnvio.oferta;
 marcarFilaAlterada();
-const ofertaParaVitrine = montarOfertaParaVitrinePosEnvio(
+const ofertaParaVitrine = perfilProcessarFila.etapaSync("posEnvio", () => montarOfertaParaVitrinePosEnvio(
   oferta,
   ofertaComercialConfirmadaVitrine,
   { destinosEnviados: totalDestinosEnviadosFanout }
-);
+));
 void publicarOfertaConfirmadaVitrine({
   clienteId,
   oferta: ofertaParaVitrine,
@@ -11063,7 +11151,10 @@ console.log("[ENVIO] Enviado com controle de tempo");
 } finally {
   if (advisoryFuncionalFila?.resultado === "adquirido") {
     try {
-      await catracaAdvisoryFuncionalFila.finalizar(advisoryFuncionalFila, { statusFinal: oferta?.status || "" });
+      await perfilProcessarFila.etapa("checkpointFinal", () =>
+        catracaAdvisoryFuncionalFila.finalizar(advisoryFuncionalFila, { statusFinal: oferta?.status || "" }),
+        { tipo: "await_externo", awaitExterno: true }
+      );
     } catch {}
   }
   enviandoAgoraPorCliente[clienteFila] = false;
