@@ -482,8 +482,8 @@ function duplicidadeEngineLegada(fila, itemFila, clienteId = "cliente_a") {
   assert.strictEqual(legado.ok, true);
   assert.deepStrictEqual(
     escritas.map(item => `${item.cliente}/${item.arquivo}`),
-    ["cliente_legado/fila-viva.json", "cliente_legado/fila-historico.json"],
-    "workspace fora do canario deve manter shadow completo legado"
+    ["cliente_legado/fila-viva.json", "cliente_legado/fila-historico.json", "cliente_legado/fila-projecao-leve.json"],
+    "workspace fora do canario deve manter shadow completo legado e read model leve paralelo"
   );
   assert(logs.some(linha => linha.includes("shadowCompletoEvitado")), "telemetria deve registrar shadow completo evitado");
   assert(!logs.join("\n").includes("Oferta canario_vivo"), "telemetria de skip nao deve registrar payload");

@@ -11,6 +11,7 @@ const {
 const FILA_VIVA_ARQUIVO = "fila-viva.json";
 const FILA_HISTORICO_ARQUIVO = "fila-historico.json";
 const FILA_LEGADA_ARQUIVO = "fila.json";
+const FILA_PROJECAO_LEVE_ARQUIVO = "fila-projecao-leve.json";
 const INTERVALO_SHADOW_MS = 5 * 60 * 1000;
 
 const STATUS_HISTORICO_EXPLICITO = new Set([
@@ -56,6 +57,12 @@ function texto(valor = "") {
   return String(valor || "").trim();
 }
 
+function textoLimitado(valor = "", limite = 240) {
+  const bruto = texto(valor);
+  if (!bruto) return "";
+  return bruto.length > limite ? `${bruto.slice(0, Math.max(0, limite - 3))}...` : bruto;
+}
+
 function textoNormalizado(valor = "") {
   return texto(valor)
     .normalize("NFD")
@@ -78,6 +85,147 @@ function idItem(item = {}, indice = -1) {
     item.engine_oferta_id ||
     item.idOferta
   ) || `indice:${indice}`;
+}
+
+function primeiroTexto(...valores) {
+  for (const valor of valores) {
+    const normalizado = texto(valor);
+    if (normalizado) return normalizado;
+  }
+  return "";
+}
+
+function precoExibivelItemFila(item = {}) {
+  const valor = item.precoAtual ?? item.preco ?? item.valorEfetivo ?? item.precoFinal ?? "";
+  if (valor === null || valor === undefined || valor === "") return "";
+  return typeof valor === "number" ? valor : textoLimitado(valor, 80);
+}
+
+function imagemRefItemFila(item = {}) {
+  return textoLimitado(
+    primeiroTexto(
+      item.thumbnail,
+      item.imagemThumb,
+      item.imagemThumbnail,
+      item.imagemUrl,
+      item.image,
+      item.imagem
+    ),
+    500
+  );
+}
+
+function destinoCanalLeve(destino = {}) {
+  return textoLimitado(primeiroTexto(destino.canal, destino.tipo, destino.type, destino.plataforma), 80);
+}
+
+function destinoIdLeve(destino = {}) {
+  return textoLimitado(primeiroTexto(destino.destinoId, destino.id, destino.chatId, destino.grupoId, destino.canalId), 120);
+}
+
+function destinoNomeLeve(destino = {}) {
+  return textoLimitado(primeiroTexto(destino.destinoNome, destino.nome, destino.name, destino.label, destino.titulo), 160);
+}
+
+function destinoIdItemLeve(item = {}) {
+  return textoLimitado(primeiroTexto(item.destinoId, item.destino_id, item.chatId, item.grupoId, item.canalId), 120);
+}
+
+function destinoNomeItemLeve(item = {}) {
+  return textoLimitado(primeiroTexto(item.destinoNome, item.destino_nome, item.destinoLabel, item.grupoNome, item.canalNome), 160);
+}
+
+function estadoDestinoLeve(destino = {}) {
+  return textoNormalizado(destino.estado || destino.status || destino.resultado || "");
+}
+
+function destinoEnviadoLeve(destino = {}) {
+  const estado = estadoDestinoLeve(destino);
+  if (estado === "enviado" || estado === "enviada") return true;
+  if (destino.enviado === true || destino.ok === true) return true;
+  if (destino.enviadoEm || destino.dataEnvio) return true;
+  return false;
+}
+
+function destinoErroLeve(destino = {}) {
+  const estado = estadoDestinoLeve(destino);
+  return Boolean(
+    estado.includes("erro") ||
+    estado.includes("falha") ||
+    estado.includes("nao_compativel") ||
+    estado.includes("incompativel") ||
+    estado.includes("bloqueado")
+  );
+}
+
+function destinosEstadoLeves(item = {}) {
+  const estados = Array.isArray(item.destinosEstado) ? item.destinosEstado : [];
+  if (estados.length) {
+    return estados.map(destino => ({
+      destinoId: destinoIdLeve(destino),
+      destinoNome: destinoNomeLeve(destino),
+      canal: destinoCanalLeve(destino),
+      estado: textoLimitado(primeiroTexto(destino.estado, destino.status, destino.resultado), 80),
+      enviado: destinoEnviadoLeve(destino),
+      erro: destinoErroLeve(destino)
+    }));
+  }
+
+  const destinos = Array.isArray(item.destinos) ? item.destinos : [];
+  if (destinos.length) {
+    return destinos.map(destino => ({
+      destinoId: destinoIdLeve(destino),
+      destinoNome: destinoNomeLeve(destino),
+      canal: destinoCanalLeve(destino),
+      estado: "",
+      enviado: false,
+      erro: false
+    }));
+  }
+
+  const destinoId = destinoIdItemLeve(item);
+  const destinoNome = destinoNomeItemLeve(item);
+  const canal = destinoCanalLeve(item);
+  return destinoId || destinoNome || canal
+    ? [{ destinoId, destinoNome, canal, estado: "", enviado: false, erro: false }]
+    : [];
+}
+
+function progressoDestinosLeve(item = {}) {
+  const destinos = destinosEstadoLeves(item);
+  const status = statusItem(item);
+  const total = destinos.length || (status === "enviado" || status === "enviada" ? 1 : 0);
+  const enviados = destinos.length
+    ? destinos.filter(destino => destino.enviado).length
+    : (status === "enviado" || status === "enviada" ? 1 : 0);
+  const erros = destinos.filter(destino => destino.erro).length;
+  const pendentes = Math.max(0, total - enviados - erros);
+
+  return { enviados, total, pendentes, erros };
+}
+
+function statusPublicoLeve(item = {}, opcoes = {}) {
+  const status = statusItem(item);
+  const progresso = opcoes.progresso || progressoDestinosLeve(item);
+  if (progresso.total > 0) {
+    if (progresso.enviados > 0 && progresso.enviados < progresso.total) return "em_distribuicao";
+    if (progresso.enviados >= progresso.total) return "enviado";
+  }
+  if (status === "enviado" || status === "enviada") return "enviado";
+  const classificacao = classificarItemFilaV2(item, { agora: opcoes.agora || Date.now() });
+  return classificacao.bucket === "viva" ? "em_distribuicao" : "nao_enviado";
+}
+
+function finalizadoEmLeve(item = {}) {
+  return primeiroTexto(
+    item.finalizadoEm,
+    item.enviadoEm,
+    item.dataEnvio,
+    item.expiradoEm,
+    item.erroEm,
+    item.updatedAt,
+    item.atualizadoEm
+  );
 }
 
 function motivoItem(item = {}) {
@@ -189,6 +337,190 @@ function projetarFilaV2(filaLegada = [], opcoes = {}) {
     comparacao,
     statusViva,
     statusHistorico
+  };
+}
+
+function projetarItemFilaLeve(item = {}, opcoes = {}) {
+  const indice = Number.isFinite(Number(opcoes.indice)) ? Number(opcoes.indice) : -1;
+  const progresso = progressoDestinosLeve(item);
+  const destinos = destinosEstadoLeves(item);
+  const primeiroDestino = destinos[0] || {};
+  const statusOperacional = statusItem(item);
+  const statusPublico = statusPublicoLeve(item, { ...opcoes, progresso });
+
+  return {
+    versao: 1,
+    id: idItem(item, indice),
+    ofertaId: textoLimitado(primeiroTexto(item.ofertaId, item.oferta_id, item.idOferta), 120),
+    engineOfertaId: textoLimitado(primeiroTexto(item.engineOfertaId, item.engine_oferta_id), 120),
+    clienteId: clienteItem(item),
+    titulo: textoLimitado(primeiroTexto(item.titulo, item.nome, item.produto), 240),
+    marketplace: textoLimitado(primeiroTexto(item.marketplace, item.mercado), 80),
+    imagemRef: imagemRefItemFila(item),
+    precoExibivel: precoExibivelItemFila(item),
+    statusPublico,
+    statusOperacional,
+    canal: primeiroDestino.canal || textoLimitado(primeiroTexto(item.canal, item.tipoCanal), 80),
+    destinoId: primeiroDestino.destinoId || destinoIdItemLeve(item),
+    destinoNome: primeiroDestino.destinoNome || destinoNomeItemLeve(item),
+    destinos: destinos.map(destino => ({
+      destinoId: destino.destinoId,
+      destinoNome: destino.destinoNome,
+      canal: destino.canal,
+      estado: destino.estado
+    })),
+    progresso,
+    motivoPublico: textoLimitado(primeiroTexto(
+      item.statusDetalheVisual,
+      item.motivoPublico,
+      item.motivoRetencao,
+      item.motivo,
+      item.statusDetalhe,
+      item.erro
+    ), 240),
+    criadoEm: primeiroTexto(item.criadoEm, item.createdAt, item.dataEntradaFila, item.adicionadoEm),
+    enviadoEm: primeiroTexto(item.enviadoEm, item.dataEnvio),
+    finalizadoEm: finalizadoEmLeve(item),
+    updatedAt: primeiroTexto(item.updatedAt, item.atualizadoEm, item.enviadoEm, item.dataEnvio, item.criadoEm, item.createdAt),
+    detalheRef: {
+      arquivo: FILA_LEGADA_ARQUIVO,
+      id: idItem(item, indice)
+    }
+  };
+}
+
+function projetarFilaLeve(filaLegada = [], opcoes = {}) {
+  const cliente = texto(opcoes.clienteId || "");
+  const fila = Array.isArray(filaLegada) ? filaLegada : [];
+  const itens = [];
+  const vistos = new Map();
+
+  fila.forEach((item, indice) => {
+    if (cliente && clienteItem(item) !== cliente) return;
+    const projetado = projetarItemFilaLeve(item, { ...opcoes, indice });
+    const chave = projetado.id || `indice:${indice}`;
+    if (vistos.has(chave)) {
+      itens[vistos.get(chave)] = projetado;
+      return;
+    }
+    vistos.set(chave, itens.length);
+    itens.push(projetado);
+  });
+
+  const contadores = {
+    total: itens.length,
+    emDistribuicao: itens.filter(item => item.statusPublico === "em_distribuicao").length,
+    enviados: itens.filter(item => item.statusPublico === "enviado").length,
+    naoEnviados: itens.filter(item => item.statusPublico === "nao_enviado").length
+  };
+
+  return {
+    versao: 1,
+    clienteId: cliente || "",
+    geradoEm: new Date(Number(opcoes.agora || Date.now())).toISOString(),
+    total: itens.length,
+    contadores,
+    itens
+  };
+}
+
+function atualizarItemProjecaoLeveFila(projecaoAtual = {}, item = {}, opcoes = {}) {
+  const cliente = opcoes.clienteId || projecaoAtual.clienteId || clienteItem(item);
+  const atual = Array.isArray(projecaoAtual?.itens) ? [...projecaoAtual.itens] : [];
+  const projetado = projetarItemFilaLeve(item, opcoes);
+  const indice = atual.findIndex(entrada => entrada.id === projetado.id);
+  if (indice >= 0) {
+    atual[indice] = projetado;
+  } else {
+    atual.push(projetado);
+  }
+
+  const contadores = {
+    total: atual.length,
+    emDistribuicao: atual.filter(entrada => entrada.statusPublico === "em_distribuicao").length,
+    enviados: atual.filter(entrada => entrada.statusPublico === "enviado").length,
+    naoEnviados: atual.filter(entrada => entrada.statusPublico === "nao_enviado").length
+  };
+
+  return {
+    versao: 1,
+    clienteId: cliente,
+    geradoEm: new Date(Number(opcoes.agora || Date.now())).toISOString(),
+    total: atual.length,
+    contadores,
+    itens: atual
+  };
+}
+
+function compararProjecaoLeveComLegado(filaLegada = [], projecaoLeve = {}, opcoes = {}) {
+  const esperada = projetarFilaLeve(filaLegada, opcoes);
+  const atual = Array.isArray(projecaoLeve?.itens) ? projecaoLeve.itens : [];
+  const divergencias = {
+    total: esperada.itens.length === atual.length ? 0 : Math.abs(esperada.itens.length - atual.length) || 1,
+    ids: 0,
+    statusPublico: 0,
+    destinos: 0,
+    campos: 0
+  };
+  const porId = new Map(atual.map(item => [item.id, item]));
+
+  for (const itemEsperado of esperada.itens) {
+    const itemAtual = porId.get(itemEsperado.id);
+    if (!itemAtual) {
+      divergencias.ids += 1;
+      continue;
+    }
+    if (itemAtual.statusPublico !== itemEsperado.statusPublico) divergencias.statusPublico += 1;
+    if (
+      Number(itemAtual.progresso?.enviados || 0) !== Number(itemEsperado.progresso?.enviados || 0) ||
+      Number(itemAtual.progresso?.total || 0) !== Number(itemEsperado.progresso?.total || 0)
+    ) {
+      divergencias.destinos += 1;
+    }
+    for (const campo of ["clienteId", "titulo", "marketplace", "precoExibivel", "criadoEm", "enviadoEm", "updatedAt"]) {
+      if ((itemAtual[campo] || "") !== (itemEsperado[campo] || "")) divergencias.campos += 1;
+    }
+  }
+
+  const totalDivergencias = divergencias.total + divergencias.ids + divergencias.statusPublico + divergencias.destinos + divergencias.campos;
+  return {
+    ok: totalDivergencias === 0,
+    divergencias: totalDivergencias,
+    ...divergencias,
+    esperadoTotal: esperada.itens.length,
+    atualTotal: atual.length
+  };
+}
+
+function benchmarkProjecaoLeveFila(filaLegada = [], opcoes = {}) {
+  const inicio = process.hrtime.bigint();
+  const projecao = projetarFilaLeve(filaLegada, opcoes);
+  const duracaoProjecaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+  const bytesLegado = tamanhoJsonBytes(Array.isArray(filaLegada) ? filaLegada : []);
+  const bytesProjecao = tamanhoJsonBytes(projecao);
+  const inicioListagem = process.hrtime.bigint();
+  const listagem20 = projecao.itens.slice(0, 20);
+  const tempoListar20Ms = Math.round(Number(process.hrtime.bigint() - inicioListagem) / 1e6);
+  const inicioContagem = process.hrtime.bigint();
+  const contadores = {
+    emDistribuicao: projecao.itens.filter(item => item.statusPublico === "em_distribuicao").length,
+    enviados: projecao.itens.filter(item => item.statusPublico === "enviado").length,
+    naoEnviados: projecao.itens.filter(item => item.statusPublico === "nao_enviado").length
+  };
+  const tempoContarMs = Math.round(Number(process.hrtime.bigint() - inicioContagem) / 1e6);
+
+  return {
+    total: projecao.itens.length,
+    bytesLegado,
+    bytesProjecao,
+    bytesMediosLegado: projecao.itens.length ? Math.round(bytesLegado / projecao.itens.length) : 0,
+    bytesMediosProjecao: projecao.itens.length ? Math.round(bytesProjecao / projecao.itens.length) : 0,
+    reducaoPercentual: bytesLegado > 0 ? Number(((1 - (bytesProjecao / bytesLegado)) * 100).toFixed(2)) : 0,
+    duracaoProjecaoMs,
+    tempoListar20Ms,
+    tempoContarMs,
+    listagem20: listagem20.length,
+    contadores
   };
 }
 
@@ -310,15 +642,25 @@ function projetarFilaV2Shadow({
     const legadoCliente = (Array.isArray(fila) ? fila : [])
       .filter(item => clienteItem(item) === cliente);
     const projecao = projetarFilaV2(legadoCliente, { agora });
+    const projecaoLeve = projetarFilaLeve(legadoCliente, { clienteId: cliente, agora });
+    let projecaoLeveErro = "";
+    let escreveuProjecaoLeve = false;
 
     if (typeof writeClienteJson === "function") {
       writeClienteJson(cliente, FILA_VIVA_ARQUIVO, projecao.viva);
       writeClienteJson(cliente, FILA_HISTORICO_ARQUIVO, projecao.historico);
+      try {
+        writeClienteJson(cliente, FILA_PROJECAO_LEVE_ARQUIVO, projecaoLeve);
+        escreveuProjecaoLeve = true;
+      } catch (erroProjecaoLeve) {
+        projecaoLeveErro = erroProjecaoLeve?.message || "erro_projecao_leve";
+      }
     }
 
     const arquivoLegado = caminhoCliente(getClienteJsonPath, cliente, FILA_LEGADA_ARQUIVO);
     const arquivoViva = caminhoCliente(getClienteJsonPath, cliente, FILA_VIVA_ARQUIVO);
     const arquivoHistorico = caminhoCliente(getClienteJsonPath, cliente, FILA_HISTORICO_ARQUIVO);
+    const arquivoProjecaoLeve = caminhoCliente(getClienteJsonPath, cliente, FILA_PROJECAO_LEVE_ARQUIVO);
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
 
     const payload = {
@@ -335,13 +677,17 @@ function projetarFilaV2Shadow({
       bytesFilaJson: statBytes(arquivoLegado) || tamanhoJsonBytes(legadoCliente),
       bytesFilaVivaJson: statBytes(arquivoViva) || tamanhoJsonBytes(projecao.viva),
       bytesFilaHistoricoJson: statBytes(arquivoHistorico) || tamanhoJsonBytes(projecao.historico),
+      bytesFilaProjecaoLeveJson: statBytes(arquivoProjecaoLeve) || tamanhoJsonBytes(projecaoLeve),
+      projecaoLeveOk: !projecaoLeveErro,
+      projecaoLeveEscrita: escreveuProjecaoLeve,
+      projecaoLeveErro,
       tempoProjecaoMs: duracaoMs,
       statusViva: projecao.statusViva,
       statusHistorico: projecao.statusHistorico
     };
 
     logShadow(logger, payload);
-    return { ok: true, ...payload, projecao };
+    return { ok: true, ...payload, projecao, projecaoLeve };
   } catch (erro) {
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
     const payload = {
@@ -415,10 +761,16 @@ module.exports = {
   FILA_VIVA_ARQUIVO,
   FILA_HISTORICO_ARQUIVO,
   FILA_LEGADA_ARQUIVO,
+  FILA_PROJECAO_LEVE_ARQUIVO,
   INTERVALO_SHADOW_MS,
   classificarItemFilaV2,
   enviadoRecenteExecutor,
   projetarFilaV2,
+  projetarItemFilaLeve,
+  projetarFilaLeve,
+  atualizarItemProjecaoLeveFila,
+  compararProjecaoLeveComLegado,
+  benchmarkProjecaoLeveFila,
   projetarFilaV2Shadow,
   obterFilaLegadaUnificada,
   criarControladorFilaV2Shadow

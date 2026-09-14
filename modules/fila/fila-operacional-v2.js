@@ -12,8 +12,11 @@ const {
 const {
   FILA_VIVA_ARQUIVO,
   FILA_LEGADA_ARQUIVO,
+  FILA_PROJECAO_LEVE_ARQUIVO,
   classificarItemFilaV2,
-  projetarFilaV2
+  projetarFilaV2,
+  projetarFilaLeve,
+  atualizarItemProjecaoLeveFila
 } = require("./fila-v2-shadow");
 const manifestStateRepository = require("./fila-manifest-state.repository");
 
@@ -50,6 +53,7 @@ const MANIFEST_STATE_THROTTLE_TARGET_ENTRADAS = 1536;
 const cacheChavesHistorico = new Map();
 const recoveryComparacaoLogThrottle = new Map();
 const manifestStateLogThrottle = new Map();
+const pendenciasProjecaoLeve = new Map();
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -328,6 +332,323 @@ function publicarProofFilaViva(clienteId = "admin", dados = {}, deps = {}) {
   const proof = proofArquivo(cliente, FILA_VIVA_ARQUIVO, dados, stat, deps.agora || Date.now());
   if (!proof.fileRevision) return { ok: false, motivo: "file_revision_invalido", proof };
   return publicarProofArquivo(cliente, FILA_VIVA_PROOF_ARQUIVO, proof, deps);
+}
+
+function projecaoLeveVazia(clienteId = "admin", agora = Date.now()) {
+  return {
+    versao: 1,
+    clienteId: clienteSeguro(clienteId),
+    geradoEm: agoraIso(agora),
+    total: 0,
+    contadores: {
+      total: 0,
+      emDistribuicao: 0,
+      enviados: 0,
+      naoEnviados: 0
+    },
+    itens: []
+  };
+}
+
+function normalizarProjecaoLeve(valor = {}, clienteId = "admin", agora = Date.now()) {
+  if (!valor || typeof valor !== "object" || !Array.isArray(valor.itens)) {
+    return projecaoLeveVazia(clienteId, agora);
+  }
+  return {
+    ...valor,
+    versao: 1,
+    clienteId: clienteSeguro(valor.clienteId || clienteId),
+    total: valor.itens.length,
+    contadores: valor.contadores || projecaoLeveVazia(clienteId, agora).contadores,
+    itens: valor.itens
+  };
+}
+
+function lerProjecaoLeve(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const caminho = caminhoJsonCliente(cliente, FILA_PROJECAO_LEVE_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminho, null, fsImpl);
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      projecao: projecaoLeveVazia(cliente, deps.agora || Date.now()),
+      bytes: leitura.bytes || 0,
+      existe: false
+    };
+  }
+  return {
+    ok: true,
+    motivo: leitura.ok ? "projecao_lida" : "projecao_inicializada",
+    projecao: normalizarProjecaoLeve(leitura.valor, cliente, deps.agora || Date.now()),
+    bytes: leitura.bytes || 0,
+    existe: leitura.ok === true
+  };
+}
+
+function lerItensFilaVivaParaProjecaoLeve(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const caminho = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const leitura = lerJsonArquivoDireto(caminho, [], fsImpl);
+  if (!leitura.ok && !["arquivo_ausente", "arquivo_vazio"].includes(leitura.motivo)) {
+    return {
+      ok: false,
+      motivo: leitura.motivo,
+      erro: leitura.erro,
+      itens: [],
+      bytes: leitura.bytes || 0
+    };
+  }
+  const entradas = normalizarEntradasViva(leitura.valor, deps.agora || Date.now())
+    .filter(entrada => entrada.item && typeof entrada.item === "object");
+  return {
+    ok: true,
+    motivo: leitura.ok ? "fila_viva_lida" : "fila_viva_ausente",
+    itens: entradas.map(entrada => entrada.item),
+    bytes: leitura.bytes || 0
+  };
+}
+
+function bootstrapProjecaoLeveSeAusente(clienteId = "admin", leituraProjecao = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const reconciliarPrimeiroEvento = deps.reconciliarProjecaoLevePrimeiroEvento !== false;
+  if ((leituraProjecao.existe === true && !reconciliarPrimeiroEvento) || deps.bootstrapProjecaoLeve === false) {
+    return {
+      ok: true,
+      pulou: true,
+      motivo: leituraProjecao.existe === true ? "projecao_existente" : "bootstrap_desativado",
+      projecao: leituraProjecao.projecao
+    };
+  }
+  const leituraViva = lerItensFilaVivaParaProjecaoLeve(cliente, deps);
+  if (leituraViva.ok !== true) {
+    return {
+      ok: false,
+      motivo: leituraViva.motivo,
+      erro: leituraViva.erro,
+      projecao: leituraProjecao.projecao,
+      bytesLidosViva: leituraViva.bytes || 0
+    };
+  }
+  return {
+    ok: true,
+    pulou: false,
+    motivo: "bootstrap_fila_viva",
+    projecao: projetarFilaLeve(leituraViva.itens, {
+      clienteId: cliente,
+      agora: deps.agora || Date.now()
+    }),
+    fonte: "fila_viva",
+    totalBootstrap: leituraViva.itens.length,
+    bytesLidosViva: leituraViva.bytes || 0
+  };
+}
+
+function escreverProjecaoLeve(clienteId = "admin", projecao = {}, deps = {}) {
+  const escritor = deps.writeClienteJson || writeClienteJson;
+  const cliente = clienteSeguro(clienteId);
+  if (typeof escritor !== "function") {
+    return { ok: false, motivo: "writeClienteJson_indisponivel" };
+  }
+  try {
+    const normalizada = normalizarProjecaoLeve(projecao, cliente, deps.agora || Date.now());
+    const ok = escritor(cliente, FILA_PROJECAO_LEVE_ARQUIVO, normalizada);
+    return {
+      ok: ok !== false,
+      motivo: ok === false ? "write_retorno_false" : "projecao_leve_escrita",
+      bytesProjecaoLeve: tamanhoJsonBytes(normalizada),
+      total: normalizada.total
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "erro_escrita_projecao_leve",
+      erro: erro?.message || "erro_projecao_leve"
+    };
+  }
+}
+
+function estadoPendenteProjecaoLeve(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const existente = pendenciasProjecaoLeve.get(cliente);
+  if (existente) return existente;
+  const leitura = lerProjecaoLeve(cliente, deps);
+  const bootstrap = bootstrapProjecaoLeveSeAusente(cliente, leitura, deps);
+  const estado = {
+    clienteId: cliente,
+    projecao: bootstrap.projecao || leitura.projecao,
+    deps,
+    timer: null,
+    dirty: false,
+    alteracoes: 0,
+    erroLeitura: leitura.ok === true ? "" : leitura.motivo,
+    bootstrap,
+    inicializadoNestaExecucao: true
+  };
+  pendenciasProjecaoLeve.set(cliente, estado);
+  return estado;
+}
+
+function flushProjecaoLeveCliente(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const estado = pendenciasProjecaoLeve.get(cliente);
+  if (!estado || estado.dirty !== true) {
+    return { ok: true, pulou: true, motivo: "sem_dirty_projecao_leve" };
+  }
+  if (estado.timer) {
+    clearTimeout(estado.timer);
+    estado.timer = null;
+  }
+  const alteracoes = estado.alteracoes;
+  const escrita = escreverProjecaoLeve(cliente, estado.projecao, { ...estado.deps, ...deps });
+  if (escrita.ok === true) {
+    estado.dirty = false;
+    estado.alteracoes = 0;
+  }
+  return {
+    ...escrita,
+    alteracoes,
+    clienteId: cliente
+  };
+}
+
+function agendarFlushProjecaoLeve(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const estado = pendenciasProjecaoLeve.get(cliente);
+  if (!estado || estado.timer) {
+    return { ok: true, agendado: Boolean(estado?.timer), motivo: "flush_ja_agendado" };
+  }
+  estado.timer = setTimeout(() => {
+    try {
+      flushProjecaoLeveCliente(cliente, deps);
+    } catch (erro) {
+      logOperacional(deps.logger, {
+        versao: 1,
+        evento: "projecao_leve_flush_erro",
+        clienteId: cliente,
+        erro: erro?.message || "erro_flush_projecao_leve"
+      });
+    }
+  }, 0);
+  if (typeof estado.timer.unref === "function") estado.timer.unref();
+  return { ok: true, agendado: true, motivo: "flush_agendado" };
+}
+
+function atualizarProjecaoLeveIncremental(clienteId = "admin", item = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || item?.clienteId || "admin");
+  try {
+    const estado = estadoPendenteProjecaoLeve(cliente, deps);
+    const itemCliente = { ...(item || {}), clienteId: cliente };
+    estado.projecao = atualizarItemProjecaoLeveFila(estado.projecao, itemCliente, {
+      clienteId: cliente,
+      agora: deps.agora || Date.now()
+    });
+    estado.deps = { ...estado.deps, ...deps };
+    estado.dirty = true;
+    estado.alteracoes += 1;
+    const flush = deps.flushProjecaoLeveSincrono === true
+      ? flushProjecaoLeveCliente(cliente, deps)
+      : agendarFlushProjecaoLeve(cliente, deps);
+    return {
+      ok: true,
+      motivo: "projecao_leve_atualizada_incremental",
+      clienteId: cliente,
+      agendado: flush.agendado === true,
+      flush,
+      total: estado.projecao.total,
+      bytesProjecaoLeve: tamanhoJsonBytes(estado.projecao),
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "erro_projecao_leve_incremental",
+      erro: erro?.message || "erro_projecao_leve",
+      clienteId: cliente,
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  }
+}
+
+function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || params.clienteId || "admin");
+  const agora = params.agora || deps.agora || Date.now();
+  let fonte = "parametros";
+  let itens = [];
+  let leituraMs = 0;
+
+  if (Array.isArray(params.fila)) {
+    itens = params.fila.filter(item => clienteSeguro(item?.clienteId || "admin") === cliente);
+  } else if (params.usarFilaViva === true) {
+    const inicioLeitura = process.hrtime.bigint();
+    const leitura = lerItensFilaVivaParaProjecaoLeve(cliente, { ...deps, agora });
+    leituraMs = Math.round(Number(process.hrtime.bigint() - inicioLeitura) / 1e6);
+    fonte = "fila_viva";
+    itens = Array.isArray(leitura?.itens) ? leitura.itens : [];
+  } else {
+    const inicioLeitura = process.hrtime.bigint();
+    itens = lerFilaLegada(cliente, { ...deps, agora });
+    leituraMs = Math.round(Number(process.hrtime.bigint() - inicioLeitura) / 1e6);
+    fonte = "fila_json_legado";
+  }
+
+  const inicioProjecao = process.hrtime.bigint();
+  const projecao = projetarFilaLeve(itens, { clienteId: cliente, agora });
+  const projecaoMs = Math.round(Number(process.hrtime.bigint() - inicioProjecao) / 1e6);
+  const escrita = escreverProjecaoLeve(cliente, projecao, { ...deps, agora });
+  if (escrita.ok === true) {
+    const anterior = pendenciasProjecaoLeve.get(cliente);
+    if (anterior?.timer) clearTimeout(anterior.timer);
+    pendenciasProjecaoLeve.set(cliente, {
+      clienteId: cliente,
+      projecao,
+      deps,
+      timer: null,
+      dirty: false,
+      alteracoes: 0,
+      erroLeitura: "",
+      bootstrap: {
+        ok: true,
+        pulou: false,
+        motivo: "bootstrap_explicito",
+        fonte,
+        totalBootstrap: projecao.total
+      },
+      inicializadoNestaExecucao: true
+    });
+  }
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.motivo,
+    clienteId: cliente,
+    fonte,
+    total: projecao.total,
+    bytesProjecaoLeve: escrita.bytesProjecaoLeve || tamanhoJsonBytes(projecao),
+    leituraMs,
+    projecaoMs,
+    totalMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+    escrita
+  };
+}
+
+function resetarEstadoProjecaoLeveParaTeste(clienteId = "") {
+  const alvo = texto(clienteId || "");
+  if (alvo) {
+    const cliente = clienteSeguro(alvo);
+    const estado = pendenciasProjecaoLeve.get(cliente);
+    if (estado?.timer) clearTimeout(estado.timer);
+    pendenciasProjecaoLeve.delete(cliente);
+    return;
+  }
+  for (const estado of pendenciasProjecaoLeve.values()) {
+    if (estado?.timer) clearTimeout(estado.timer);
+  }
+  pendenciasProjecaoLeve.clear();
 }
 
 function publicarProofFilaLegada(clienteId = "admin", dados = {}, deps = {}) {
@@ -2138,6 +2459,14 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
     return {
       ok: transicao.ok === true,
       motivo: transicao.motivo,
+      item: itemAtualizado,
+      entrada: {
+        ...entradaAtual,
+        item: itemAtualizado,
+        status: statusItem(itemAtualizado),
+        bucket: "historico",
+        motivoBucket: classificacao.motivo || "status_terminal"
+      },
       atualizouViva: false,
       removeuDaViva: transicao.removeuDaViva === true,
       totalViva: transicao.filaViva?.length ?? entradasExistentes.length,
@@ -2343,7 +2672,7 @@ function recuperarFilaVivaDoLegado(clienteId = "admin", deps = {}) {
 }
 
 async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
-  return executarEscritaFilaV2Coordenada(
+  const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     "insert_viva",
     ({ nextGeneration, fileRevision }) => inserirItemFilaVivaIncremental(clienteId, item, {
@@ -2358,10 +2687,14 @@ async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
       motivo: deps.motivo || "insert_viva"
     }
   );
+  const projecaoLeve = resultado.ok === true
+    ? atualizarProjecaoLeveIncremental(clienteId, resultado.item || item, deps)
+    : { ok: true, pulou: true, motivo: "insert_viva_falhou" };
+  return { ...resultado, projecaoLeve };
 }
 
 async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
-  return executarEscritaFilaV2Coordenada(
+  const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update",
     ({ nextGeneration, fileRevision }) => {
@@ -2389,6 +2722,10 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
       motivo: deps.motivo || (deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update")
     }
   );
+  const projecaoLeve = resultado.ok === true
+    ? atualizarProjecaoLeveIncremental(clienteId, resultado.item || item, deps)
+    : { ok: true, pulou: true, motivo: "update_viva_falhou" };
+  return { ...resultado, projecaoLeve };
 }
 
 async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
@@ -3487,6 +3824,10 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
     lerFilaVivaReadOnly: (clienteId, deps = {}) => lerFilaVivaReadOnly(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
+    atualizarProjecaoLeveIncremental: (clienteId, item, deps = {}) => atualizarProjecaoLeveIncremental(clienteId, item, { ...opcoes, ...deps }),
+    flushProjecaoLeveCliente: (clienteId, deps = {}) => flushProjecaoLeveCliente(clienteId, { ...opcoes, ...deps }),
+    bootstrapProjecaoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapProjecaoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
+    resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     moverTerminalParaHistorico: (clienteId, filaViva, alvo, deps = {}) => moverTerminalParaHistorico(clienteId, filaViva, alvo, { ...opcoes, ...deps }),
     compararVivaComLegado: (clienteId, entradasViva, filaLegada, deps = {}) => compararVivaComLegado(clienteId, entradasViva, filaLegada, { ...opcoes, ...deps }),
@@ -3537,6 +3878,10 @@ module.exports = {
   lerFilaViva,
   lerFilaVivaReadOnly,
   escreverFilaViva,
+  atualizarProjecaoLeveIncremental,
+  flushProjecaoLeveCliente,
+  bootstrapProjecaoLeveCliente,
+  resetarEstadoProjecaoLeveParaTeste,
   publicarProofFilaViva,
   publicarProofFilaLegada,
   inserirItemFilaVivaIncremental,
