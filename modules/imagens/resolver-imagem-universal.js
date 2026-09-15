@@ -328,13 +328,6 @@ function coletarCandidatos(oferta, contexto = {}) {
     ? contexto.job.metadata
     : {};
 
-  coletarRadarMirror(oferta.radarMirror, "radar_mirror", estado);
-  coletarRadarMirror(metadataOferta.radarMirror, "radar_mirror", estado);
-  coletarRadarMirror(metadataEntrada.radarMirror, "contexto.ofertaEntrada.metadata.radarMirror", estado);
-  coletarRadarMirror(metadataEvento.radarMirror, "contexto.evento.metadata.radarMirror", estado);
-  coletarRadarMirror(metadataJob.radarMirror, "contexto.job.metadata.radarMirror", estado);
-  coletarRadarMirror(metadataJob.metadataEvento?.radarMirror, "contexto.job.metadata.metadataEvento.radarMirror", estado);
-
   if (Object.prototype.hasOwnProperty.call(oferta, "imagemUrl")) {
     coletarDeValor(oferta.imagemUrl, "imagemUrl", "oficial", 100, estado);
   }
@@ -385,6 +378,13 @@ function coletarCandidatos(oferta, contexto = {}) {
     if (limiteCandidatosAtingido(estado)) break;
     if (valor) coletarDoContextoConhecido(valor, origem, estado);
   }
+
+  coletarRadarMirror(oferta.radarMirror, "radar_mirror", estado);
+  coletarRadarMirror(metadataOferta.radarMirror, "radar_mirror", estado);
+  coletarRadarMirror(metadataEntrada.radarMirror, "contexto.ofertaEntrada.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataEvento.radarMirror, "contexto.evento.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataJob.radarMirror, "contexto.job.metadata.radarMirror", estado);
+  coletarRadarMirror(metadataJob.metadataEvento?.radarMirror, "contexto.job.metadata.metadataEvento.radarMirror", estado);
 
   return estado.candidatos;
 }

@@ -16,6 +16,22 @@ function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
+function removerRadarMirrorMetadata(valor = {}) {
+  const metadata = objetoSeguro(valor);
+  const saida = { ...metadata };
+  delete saida.radarMirror;
+  return saida;
+}
+
+function removerRadarMirrorObjeto(valor = {}) {
+  const objeto = objetoSeguro(valor);
+  if (!Object.keys(objeto).length) return objeto;
+  return {
+    ...objeto,
+    ...(objeto.metadata ? { metadata: removerRadarMirrorMetadata(objeto.metadata) } : {})
+  };
+}
+
 function listaSegura(valor) {
   return Array.isArray(valor) ? valor : [];
 }
@@ -380,16 +396,6 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
   let materializacoes = 0;
   let ultimoMotivo = "";
   let radarMirrorMaterializacao = null;
-  const radar = await resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId, metadataEvento, deps });
-  if (radar?.ok) {
-    cacheImagemCanonicaEvento.set(chave, radar);
-    return { ...radar, cacheHit: false };
-  }
-  if (radar?.falhou) {
-    materializacoes += Number(radar.materializacoes || 0);
-    ultimoMotivo = radar.motivo || "";
-    radarMirrorMaterializacao = radar.radarMirrorMaterializacao || null;
-  }
 
   const evento = resolverPorCandidatosEvento({ chave, eventoId, marketplace, produtoId, metadataEvento });
   if (evento?.ok) {
@@ -400,6 +406,17 @@ async function resolverImagemCanonicaEvento(entrada = {}, deps = {}) {
     };
     cacheImagemCanonicaEvento.set(chave, resultado);
     return { ...resultado, cacheHit: false };
+  }
+
+  const radar = await resolverPorRadarMirror({ chave, eventoId, marketplace, produtoId, metadataEvento, deps });
+  if (radar?.ok) {
+    cacheImagemCanonicaEvento.set(chave, radar);
+    return { ...radar, cacheHit: false };
+  }
+  if (radar?.falhou) {
+    materializacoes += Number(radar.materializacoes || 0);
+    ultimoMotivo = radar.motivo || "";
+    radarMirrorMaterializacao = radar.radarMirrorMaterializacao || null;
   }
 
   if (deps.preliminar === true) {
@@ -562,6 +579,17 @@ function resultadoFinalDeImagemResolvida({ chave, eventoId, marketplace, produto
 function imagemUrlNormalizada(valor = "") {
   const validacao = imagemUrlValidaUniversal(valor);
   return validacao.ok ? validacao.url : texto(valor);
+}
+
+function imagemMercadoLivreOficialUrl(valor = "") {
+  const validacao = imagemUrlValidaUniversal(valor);
+  if (!validacao.ok) return false;
+  try {
+    const host = new URL(validacao.url).hostname.toLowerCase();
+    return host === "mlstatic.com" || host.endsWith(".mlstatic.com");
+  } catch {
+    return false;
+  }
 }
 
 function extrairDimensoesImagemMl(valor = {}) {
@@ -872,7 +900,8 @@ function sanitizarCandidatosImagemMercadoLivre(valor, { produtoId = "", urlsBaix
 
   if (typeof valor === "string") {
     const normalizada = imagemUrlNormalizada(valor);
-    return urlsBaixaQualidade.has(normalizada) ? "" : valor;
+    if (urlsBaixaQualidade.has(normalizada)) return "";
+    return imagemMercadoLivreOficialUrl(valor) ? valor : "";
   }
 
   if (Array.isArray(valor)) {
@@ -1057,8 +1086,15 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
     ofertaEntrada: entrada.ofertaEntrada,
     link: entrada.link
   };
+  const metadataEventoSemRadar = removerRadarMirrorMetadata(metadataEvento);
+  const contextoImagemSemRadar = {
+    evento: { metadata: metadataEventoSemRadar },
+    job: { metadata: { metadataEvento: metadataEventoSemRadar } },
+    ofertaEntrada: removerRadarMirrorObjeto(entrada.ofertaEntrada),
+    link: removerRadarMirrorObjeto(entrada.link)
+  };
   const disputaMl = ehMercadoLivreComMlb
-    ? resolverImagemUniversalMercadoLivrePreferindoQualidade(ofertaImagem, contextoImagem, {
+    ? resolverImagemUniversalMercadoLivrePreferindoQualidade(ofertaImagem, contextoImagemSemRadar, {
         produtoId,
         urlsBaixaQualidade: urlsMlBaixaQualidade,
         fallbackBaixa: fallbackImagemMlBaixa
@@ -1228,6 +1264,36 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       return { ...resultado, cacheHit: false };
     }
     ultimoMotivo = historico.motivo || ultimoMotivo;
+  }
+
+  const radarMensagem = await resolverPorRadarMirror({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    metadataEvento,
+    deps
+  });
+  if (radarMensagem?.ok) {
+    const resultado = resultadoFinalDeImagemResolvida({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      resolvida: radarMensagem,
+      origemFallback: radarMensagem.imagemOrigem || "radar_mirror/mensagem",
+      statusFallback: radarMensagem.imagemStatus || "radar_mirror_materializada",
+      extra: {
+        materializacoes: Number(cacheAtual.materializacoes || 0) + Number(radarMensagem.materializacoes || 0),
+        ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+        linkResolvido: linkResolvidoImagem
+      }
+    });
+    cacheImagemCanonicaEvento.set(chave, resultado);
+    return { ...resultado, cacheHit: false };
+  }
+  if (radarMensagem?.falhou) {
+    ultimoMotivo = radarMensagem.motivo || ultimoMotivo;
   }
 
   const radarThumbnail = await resolverPorRadarMirror({

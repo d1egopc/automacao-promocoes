@@ -72,11 +72,9 @@ function semDatas(resultado) {
   });
   assert.strictEqual(saida.imagem, url("ml-oficial"));
   assert.strictEqual(saida.imagemOrigem, "imagem");
-  assert(saida.imagemTentativas.some((tentativa) =>
-    tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal" &&
-    tentativa.status === "rejeitada" &&
-    tentativa.motivo === "imagem_efemera_nao_materializada"
-  ));
+  assert(!saida.imagemTentativas.some((tentativa) =>
+    tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal"
+  ), "Radar nao deve ser avaliado quando a imagem oficial ja venceu");
 }
 
 {
@@ -279,9 +277,9 @@ function semDatas(resultado) {
       },
     },
   });
-  assert.strictEqual(saida.imagem, url("radar-preferida"));
-  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
-  assert(saida.imagemTentativas.some((tentativa) => tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal" && tentativa.status === "selecionada"));
+  assert.strictEqual(saida.imagem, url("api-diferente"));
+  assert.strictEqual(saida.imagemOrigem, "imagem");
+  assert(!saida.imagemTentativas.some((tentativa) => tentativa.origem === "radar_mirror/mensagem.midia.imagemOriginal"));
 }
 
 {
@@ -365,8 +363,8 @@ function semDatas(resultado) {
       },
     },
   });
-  assert.strictEqual(saida.imagem, url("ali-radar-mensagem"));
-  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(saida.imagem, url("ali-api"));
+  assert.strictEqual(saida.imagemOrigem, "imagem");
   assert.strictEqual(saida.linkApp, "https://a.aliexpress.com/_c33QRa2n");
   assert.strictEqual(saida.linkPc, "https://a.aliexpress.com/_c3OvfRej");
   assert.strictEqual(saida.linkAfiliado, "https://s.click.aliexpress.com/e/_c4N0M3JN");

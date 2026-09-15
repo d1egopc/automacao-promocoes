@@ -267,7 +267,7 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
             httpClient: opcoes.httpClient || deps.httpClient,
             timeoutMs: opcoes.timeoutMs
           });
-      const desabilitarMascaraNeutraRodape = texto(marketplace).toLowerCase().replace(/[\s_-]+/g, "") === "mercadolivre";
+      const desabilitarMascaraNeutraRodape = true;
       const render = await rendererIdentidadeVisual.renderizarImagemGlobalNeutraBuffer({ imagemBuffer, desabilitarMascaraNeutraRodape });
       storageIdentidadeVisual.salvarBufferPublico(destino, render.buffer);
       logIdentidadeVisual("[IMAGEM-GLOBAL-NEUTRA-APLICADA]", { clienteId, ofertaId, cacheKey, motivo: "render_ok" });

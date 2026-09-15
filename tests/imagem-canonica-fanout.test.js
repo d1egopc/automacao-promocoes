@@ -295,13 +295,13 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(retorno.criados, 3);
-    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(fetchCount.count, 0);
     for (const metadata of metadatas) {
       assert.strictEqual(metadata.imagemCanonicaDuravel, url("jsonld-fanout-ml"));
       assert.strictEqual(metadata.imagemOrigem, "jsonLd.image");
       assert.strictEqual(metadata.imagemEnviavel, true);
-      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 1);
-      assert.strictEqual(metadata.imagemCacheCanonico.radarMirrorMaterializacao.status, "falha");
+      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 0);
+      assert.strictEqual(metadata.imagemCacheCanonico.radarMirrorMaterializacao, undefined);
     }
   }
 
@@ -327,7 +327,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(resultado.imagemCanonicaDuravel, url("jsonld-ml"));
     assert.strictEqual(resultado.imagemOrigem, "jsonLd.image");
-    assert.strictEqual(resultado.materializacoes, 1);
+    assert.strictEqual(resultado.materializacoes, 0);
   }
 
   {
@@ -485,7 +485,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
     assert.strictEqual(resultado.imagemCanonicaFinal, true);
     assert.strictEqual(resultado.enriquecimentoPendente, false);
-    assert.strictEqual(resultado.motivo, "historico_mesmo_mlb_sem_imagem");
+    assert.strictEqual(resultado.motivo, "http_403");
   }
 
   {
@@ -583,6 +583,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       "https://meli.la/workspace-b",
       "https://meli.la/workspace-c"
     ];
+    const imagemJsonLd = "https://http2.mlstatic.com/D_NQ_NP_2X_222222-MLB2222222222_012026-V.webp";
     const resultados = [];
     for (const linkAfiliado of linksAfiliados) {
       resultados.push(await resolverImagemCanonicaFinalEvento({
@@ -597,10 +598,10 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
           linkOriginal: "https://meli.la/2hPouUu",
           linkExpandido: "https://produto.mercadolivre.com.br/MLB-2222222222-tv-para-quarto-_JM",
           linkAfiliado,
-          jsonLd: { image: url("tv-quarto-jsonld") },
+          jsonLd: { image: imagemJsonLd },
           metadata: {
             produto: {
-              imagemCandidatos: [url("tv-quarto-jsonld")],
+              imagemCandidatos: [imagemJsonLd],
               pictures: [{ secure_url: url("tv-quarto-picture") }]
             }
           }
@@ -612,9 +613,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     }
 
     assert.deepStrictEqual(resultados.map(item => item.imagemCanonicaDuravel), [
-      url("tv-quarto-jsonld"),
-      url("tv-quarto-jsonld"),
-      url("tv-quarto-jsonld")
+      imagemJsonLd,
+      imagemJsonLd,
+      imagemJsonLd
     ]);
     assert(resultados.slice(1).every(item => item.cacheHit === true));
     assert.strictEqual(resultados[0].imagemOrigem, "jsonLd.image");
@@ -684,15 +685,16 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       _limparCacheImagemCanonicaEvento
     } = require("../modules/imagens/cache-canonico-evento");
     _limparCacheImagemCanonicaEvento();
+    const mlstaticFixture = (codigo, mlb) => `https://http2.mlstatic.com/D_NQ_NP_2X_${codigo}-${mlb}_012026-V.webp`;
     const fixtures = [
-      ["CHEIROSÃO DE 212", "MLB3333333333", "https://meli.la/1y2uJcP", url("cheirosao-jsonld")],
-      ["ESSE COMPRESSOR FAZ TUDO E MAIS UM POUCO", "MLB4444444444", "https://meli.la/2WEQqho", url("compressor-og")],
-      ["MUITOS KITS JOICO", "MLB5181827144", "https://meli.la/2Z29syn", url("joico-picture")],
-      ["NOTEBOOK EM PROMO", "MLB5356528958", "https://meli.la/1Q4WTgR", url("notebook-thumbnail")],
-      ["Adidas Adizero", "MLB3999119695", "https://produto.mercadolivre.com.br/MLB-3999119695-adidas-_JM", url("adidas-jsonld")],
-      ["Shorts Esportivo", "MLB5159817994", "https://produto.mercadolivre.com.br/MLB-5159817994-shorts-_JM", url("shorts-jsonld")],
-      ["Pote Marmita", "MLB5974804996", "https://produto.mercadolivre.com.br/MLB-5974804996-pote-_JM", url("pote-jsonld")],
-      ["SENTE A PRESSÃO", "MLB5555555555", "https://meli.la/sente-a-pressao", url("pressao-jsonld")]
+      ["CHEIROSÃO DE 212", "MLB3333333333", "https://meli.la/1y2uJcP", mlstaticFixture("333333", "MLB3333333333")],
+      ["ESSE COMPRESSOR FAZ TUDO E MAIS UM POUCO", "MLB4444444444", "https://meli.la/2WEQqho", mlstaticFixture("444444", "MLB4444444444")],
+      ["MUITOS KITS JOICO", "MLB5181827144", "https://meli.la/2Z29syn", mlstaticFixture("518182", "MLB5181827144")],
+      ["NOTEBOOK EM PROMO", "MLB5356528958", "https://meli.la/1Q4WTgR", mlstaticFixture("535652", "MLB5356528958")],
+      ["Adidas Adizero", "MLB3999119695", "https://produto.mercadolivre.com.br/MLB-3999119695-adidas-_JM", mlstaticFixture("399911", "MLB3999119695")],
+      ["Shorts Esportivo", "MLB5159817994", "https://produto.mercadolivre.com.br/MLB-5159817994-shorts-_JM", mlstaticFixture("515981", "MLB5159817994")],
+      ["Pote Marmita", "MLB5974804996", "https://produto.mercadolivre.com.br/MLB-5974804996-pote-_JM", mlstaticFixture("597480", "MLB5974804996")],
+      ["SENTE A PRESSÃO", "MLB5555555555", "https://meli.la/sente-a-pressao", mlstaticFixture("555555", "MLB5555555555")]
     ];
 
     for (const [titulo, mlb, linkOriginal, imagem] of fixtures) {
@@ -976,7 +978,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(resultado.imagemCanonicaDuravel, imagemLimpaMl);
-    assert.strictEqual(resultado.imagemOrigem, "pictures.secure_url");
+    assert.strictEqual(resultado.imagemOrigem, "imagemCandidatos[0].url");
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
   }
 
@@ -1401,7 +1403,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMensagem);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
     assert.strictEqual(fetchCount.count, 0);
   }
 

@@ -44,7 +44,7 @@ const CSS_FONTE_RENDERER_IDENTIDADE_VISUAL = `
 const LIMITE_IMAGEM_ORIGINAL_BYTES = 8 * 1024 * 1024;
 const LIMITE_UPLOAD_LOGO_BYTES = 2 * 1024 * 1024;
 const MIMES_IMAGEM_PERMITIDOS = new Set(["image/png", "image/jpeg", "image/webp"]);
-const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v3";
+const CONFIG_HASH_IMAGEM_GLOBAL_NEUTRA = "imagem_global_neutra_v4";
 
 function texto(valor = "") {
   return String(valor ?? "").trim();

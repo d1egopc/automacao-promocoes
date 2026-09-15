@@ -148,7 +148,7 @@ function mlImg(nome, sufixo = "V") {
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radar);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, thumbnailImportador);
   }
 
