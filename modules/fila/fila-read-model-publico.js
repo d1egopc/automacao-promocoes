@@ -323,25 +323,95 @@ function urlPareceProdutoReal(url = "") {
   return false;
 }
 
+function urlTemDestinoUtil(url = "") {
+  const host = hostUrlSeguro(url);
+  const pathname = pathUrlSeguro(url);
+  if (!host) return false;
+  const pathLimpo = String(pathname || "").replace(/\/+$/g, "");
+  if (!pathLimpo) return false;
+  return !/^\/(?:home|homepage)?$/i.test(pathLimpo);
+}
+
+function campoLinkPrincipalOferta(campo = "") {
+  return [
+    "linkFinal",
+    "linkAfiliado",
+    "link_afiliado",
+    "link",
+    "url"
+  ].includes(texto(campo));
+}
+
+function campoLinkProdutoPreservado(campo = "") {
+  return [
+    "linkOriginal",
+    "urlOriginal",
+    "urlOriginalProjetada"
+  ].includes(texto(campo));
+}
+
 function classificarUrlOferta(campo = "", url = "") {
   const campoNormalizado = texto(campo);
+  const campoBase = campoNormalizado.split(".").pop() || campoNormalizado;
   const valor = texto(url);
   const host = hostUrlSeguro(valor);
   if (!valor || !host) return { tipo: "desconhecido", confiavel: false, campo: campoNormalizado, url: "" };
 
-  if (/afiliad|affiliate|awin|linkfinal|linkotimizado|linkoptimus/i.test(campoNormalizado)) {
-    return { tipo: "afiliado", confiavel: false, campo: campoNormalizado, url: valor };
-  }
-  if (hostEhTransporteUrl(host) || ["linkOriginalRadar", "linkCapturado"].includes(campoNormalizado)) {
+  if (["linkCapturado"].includes(campoBase)) {
     return { tipo: "shortlink/transport", confiavel: false, campo: campoNormalizado, url: valor };
   }
-  if (["urlOriginalProduto", "produtoUrl", "urlProduto", "linkProduto"].includes(campoNormalizado)) {
-    return { tipo: "produto original real", confiavel: true, campo: campoNormalizado, url: valor };
+
+  if (["urlOriginalProduto", "produtoUrl", "urlProduto", "linkProduto"].includes(campoBase)) {
+    return { tipo: "produto original real", confiavel: urlTemDestinoUtil(valor), campo: campoNormalizado, url: valor };
   }
-  if (["linkOriginal", "urlOriginal", "urlOriginalProjetada"].includes(campoNormalizado) && urlPareceProdutoReal(valor)) {
-    return { tipo: "produto original real", confiavel: true, campo: campoNormalizado, url: valor };
+
+  if (campoLinkProdutoPreservado(campoBase)) {
+    if (urlPareceProdutoReal(valor)) {
+      return { tipo: "produto original real", confiavel: true, campo: campoNormalizado, url: valor };
+    }
+    if (urlTemDestinoUtil(valor)) {
+      return {
+        tipo: hostEhTransporteUrl(host) ? "shortlink/transport do produto" : "link preservado do produto",
+        confiavel: true,
+        campo: campoNormalizado,
+        url: valor
+      };
+    }
   }
+
+  if (campoLinkPrincipalOferta(campoBase) || /afiliad|affiliate|awin|linkfinal|linkotimizado|linkoptimus/i.test(campoNormalizado)) {
+    return {
+      tipo: hostEhTransporteUrl(host) ? "shortlink/transport do produto" : "afiliado do produto",
+      confiavel: urlTemDestinoUtil(valor),
+      campo: campoNormalizado,
+      url: valor
+    };
+  }
+
+  if (hostEhTransporteUrl(host) || ["linkOriginalRadar"].includes(campoBase)) {
+    return { tipo: "shortlink/transport", confiavel: false, campo: campoNormalizado, url: valor };
+  }
+
   return { tipo: "desconhecido", confiavel: false, campo: campoNormalizado, url: valor };
+}
+
+function linksEstruturadosProduto(item = {}) {
+  const candidatos = [];
+  const adicionar = (campoBase, link) => {
+    if (!link || typeof link !== "object") return;
+    const tipo = normalizarTexto(link.tipo || link.papel || link.role || link.categoria || "");
+    if (tipo && /(resgate|cupom|coupon|voucher)/i.test(tipo)) return;
+    for (const campo of ["urlOriginal", "linkOriginal", "linkProduto", "url", "link", "linkFinal", "linkAfiliado", "resolvido", "afiliado"]) {
+      candidatos.push([`${campoBase}.${campo}`, link[campo]]);
+    }
+  };
+
+  for (const campoBase of ["linksProduto", "linksApp", "linksPc", "linksComerciais"]) {
+    const lista = Array.isArray(item[campoBase]) ? item[campoBase] : [];
+    for (const link of lista) adicionar(campoBase, link);
+  }
+
+  return candidatos;
 }
 
 function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
@@ -353,6 +423,12 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
     ["linkOriginal", item.linkOriginal],
     ["urlOriginal", item.urlOriginal],
     ["urlOriginalProjetada", projetado.urlOriginal],
+    ...linksEstruturadosProduto(item),
+    ["linkFinal", item.linkFinal],
+    ["linkAfiliado", item.linkAfiliado],
+    ["link_afiliado", item.link_afiliado],
+    ["link", item.link],
+    ["url", item.url],
     ["linkOriginalRadar", item.linkOriginalRadar],
     ["linkCapturado", item.linkCapturado]
   ];
@@ -364,6 +440,11 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
     .map(([campo, valor]) => classificarUrlOferta(campo, valor))
     .find(itemClassificado => itemClassificado.url);
   return primeiroClassificado || { tipo: "desconhecido", confiavel: false, campo: "", url: "" };
+}
+
+function statusPublicoHistorico(resultadoPublico = "", tipoVisao = "") {
+  if (tipoVisao === VISAO_PROCESSADAS) return "processada";
+  return resultadoPublico === "enviado" ? "enviada" : "erro";
 }
 
 function itemEhTerminal(item = {}) {
@@ -389,6 +470,7 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     ? processada.ms
     : (Number.isFinite(resultadoMs) ? resultadoMs : processada.ms);
   const statusResultado = dados.resultadoPublico || "";
+  const statusPublico = statusPublicoHistorico(statusResultado, dados.tipoVisao);
   const detalheRef = item.detalheRef && typeof item.detalheRef === "object"
     ? item.detalheRef
     : projetado.detalheRef;
@@ -407,8 +489,10 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     canal: projetado.canal,
     destinoResumo: primeiroTexto(projetado.destinoNome, projetado.destinoId),
     destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
-    statusPublico: dados.tipoVisao === VISAO_PROCESSADAS ? "processada" : statusResultado,
-    resultadoPublico: statusResultado,
+    statusPublico,
+    resultadoPublico: statusPublico,
+    statusVisual: statusPublico,
+    statusFinalVisual: statusPublico,
     marco: dados.tipoVisao === VISAO_PROCESSADAS ? "processada" : "resultado_distribuicao",
     tipoVisao: dados.tipoVisao,
     timestamp: isoOuVazio(timestamp),
@@ -1013,11 +1097,14 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
   const projetado = projetarItemFilaLeve(item, { clienteId, indice, agora: agoraMs });
   const processada = marcoProcessadaItem(item);
   const resultadoMs = timestampResultadoItem(item);
-  const statusPublico = resultadoPublicoTerminal({
+  const resultadoPublico = resultadoPublicoTerminal({
     ...item,
     statusPublico: itemLeve.statusPublico || item.statusPublico,
     statusOperacional: itemLeve.statusOperacional || item.statusOperacional
   });
+  const statusPublico = Number.isFinite(resultadoMs) || itemEhTerminal(item)
+    ? statusPublicoHistorico(resultadoPublico, visaoTerminalPublica(resultadoPublico))
+    : "processada";
   const timestamp = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
   const ref = normalizarDetalheRef(detalheRef.id ? detalheRef : (itemLeve.detalheRef || itemTecnico.detalheRef || detalheRef));
   const urlOriginal = escolherUrlOriginalConfiavel(item, projetado);
@@ -1045,6 +1132,8 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
     destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
     statusPublico,
     resultadoPublico: statusPublico,
+    statusVisual: statusPublico,
+    statusFinalVisual: statusPublico,
     timestamp: isoOuVazio(timestamp),
     processadaEm: isoOuVazio(processada.ms),
     finalizadoEm: projetado.finalizadoEm || isoOuVazio(resultadoMs),

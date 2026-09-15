@@ -76,6 +76,7 @@ function model(historicoLeve, visao) {
   const enviadas = model([todosAplicaveisEnviadosComNaoCompativel], VISAO_ENVIADAS);
   assert.strictEqual(enviadas.metricas.enviadas, 1, "nao_compativel nao transforma envio correto em Parcial");
   assert.strictEqual(enviadas.metricas.parciais, 0);
+  assert.strictEqual(enviadas.itens[0].statusPublico, "enviada", "status publico de sucesso deve ser Enviada");
 }
 
 {
@@ -88,6 +89,7 @@ function model(historicoLeve, visao) {
   });
   const parciais = model([parcialReal], VISAO_PARCIAIS);
   assert.strictEqual(parciais.metricas.parciais, 1, "sucesso em alguns aplicaveis e falha em outros aplicaveis vira Parcial");
+  assert.strictEqual(parciais.itens[0].statusPublico, "erro", "Parcial interno deve aparecer publicamente como Erro");
 }
 
 {
@@ -99,6 +101,7 @@ function model(historicoLeve, visao) {
   });
   const naoEnviadas = model([nenhumAplicavel], VISAO_NAO_ENVIADAS);
   assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "nenhum destino aplicavel nao pode virar Parcial");
+  assert.strictEqual(naoEnviadas.itens[0].statusPublico, "erro", "Nao enviada interna deve aparecer publicamente como Erro");
 }
 
 {
@@ -171,16 +174,36 @@ function model(historicoLeve, visao) {
     "produto original real"
   );
   assert.deepStrictEqual(
-    classificarUrlOferta("linkOriginal", "https://go.optimuspromo.com.br/r/abc").tipo,
-    "shortlink/transport"
+    classificarUrlOferta("linkOriginal", "https://go.optimuspromo.com.br/r/abc").confiavel,
+    true
   );
   assert.deepStrictEqual(
-    classificarUrlOferta("urlOriginal", "https://amzn.to/abc").tipo,
-    "shortlink/transport"
+    classificarUrlOferta("urlOriginal", "https://amzn.to/abc").confiavel,
+    true
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkAfiliado", "https://www.amazon.com.br/dp/B0AFILIADO1?tag=workspace-20").confiavel,
+    true
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkFinal", "https://s.shopee.com.br/produto-real").confiavel,
+    true
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkAfiliado", "https://www.awin1.com/cread.php?ued=https%3A%2F%2Fwww.kabum.com.br%2Fproduto%2F123%2Fteste").confiavel,
+    true
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkAfiliado", "https://www.amazon.com.br/").confiavel,
+    false
   );
   assert.deepStrictEqual(
     classificarUrlOferta("linkOriginalRadar", "https://meli.la/abc").tipo,
     "shortlink/transport"
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkOriginalRadar", "https://meli.la/abc").confiavel,
+    false
   );
   assert.deepStrictEqual(
     classificarUrlOferta("linkCapturado", "https://example.invalid/redirecionador").tipo,
@@ -347,6 +370,45 @@ function model(historicoLeve, visao) {
     assert.strictEqual(somenteLeve.fonte, "historico_leve");
     assert.strictEqual(somenteLeve.detalhe.titulo, "Produto Sem Tecnico");
     assert.strictEqual(somenteLeve.detalhe.urlOriginal, "https://www.amazon.com.br/dp/B0LEVESO1");
+
+    const detalheComAfiliado = resolverDetalhePublicoFilaPorRef({
+      clienteId: cliente,
+      clientePath: dirCliente,
+      detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_afiliado" },
+      hot: [oferta("detalhe_afiliado", {
+        linkOriginal: "",
+        urlOriginal: "",
+        urlProduto: "",
+        linkAfiliado: "https://www.magazineluiza.com.br/p/teste/abc?partner_id=optimus",
+        status: "enviado",
+        enviadoEm: iso(AGORA),
+        detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_afiliado" }
+      })],
+      fs: fsContador,
+      agoraMs: AGORA
+    });
+    assert.strictEqual(detalheComAfiliado.ok, true, "detalhe usa link afiliado preservado quando nao ha canonico");
+    assert.strictEqual(detalheComAfiliado.detalhe.urlOriginal, "https://www.magazineluiza.com.br/p/teste/abc?partner_id=optimus");
+    assert.strictEqual(detalheComAfiliado.detalhe.urlOriginalTipo, "afiliado do produto");
+
+    const detalheSemLinkConfiavel = resolverDetalhePublicoFilaPorRef({
+      clienteId: cliente,
+      clientePath: dirCliente,
+      detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_homepage" },
+      hot: [oferta("detalhe_homepage", {
+        linkOriginal: "",
+        urlOriginal: "",
+        urlProduto: "",
+        linkAfiliado: "https://www.amazon.com.br/",
+        status: "enviado",
+        enviadoEm: iso(AGORA),
+        detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_homepage" }
+      })],
+      fs: fsContador,
+      agoraMs: AGORA
+    });
+    assert.strictEqual(detalheSemLinkConfiavel.ok, true);
+    assert.strictEqual(detalheSemLinkConfiavel.detalhe.urlOriginal, "", "homepage de marketplace nao vira CTA publico");
 
     const inexistente = resolverDetalhePublicoFilaPorRef({
       clienteId: cliente,

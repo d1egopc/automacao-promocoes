@@ -390,10 +390,11 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 2,
     limit: 50
   });
-  assert.strictEqual(page1.totalFiltrado, totalComErro, "Com erro soma parciais reais e nao enviadas");
+  assert.strictEqual(page1.totalFiltrado, totalComErro, "Erro publico soma parciais reais e nao enviadas");
   assert.strictEqual(page1.metricas.comErro, totalComErro);
   assert.strictEqual(page1.totalPages, 6);
   assert.strictEqual(page1.hasMore, true);
+  assert(page1.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "visao com_erro nao expoe parcial/nao_enviado como status publico");
   assert.deepStrictEqual(ids(page1), idsPaginaEsperada(1), "page=1 traz os 50 mais recentes globais");
   assert.deepStrictEqual(ids(page2), idsPaginaEsperada(2), "page=2 traz posicoes globais 51..100");
   assert.strictEqual(page2.totalFiltrado, totalComErro);
@@ -401,7 +402,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
   assert.strictEqual(page2.limit, 50);
   assert.strictEqual(page2.hasMore, true);
   const idsCombinados = [...ids(page1), ...ids(page2)];
-  assert.strictEqual(new Set(idsCombinados).size, idsCombinados.length, "Com erro nao duplica entre paginas");
+  assert.strictEqual(new Set(idsCombinados).size, idsCombinados.length, "Erro publico nao duplica entre paginas");
   assert(!ids(page2).some(id => idsPaginaEsperada(1).includes(id)), "page=2 nao repete page=1");
 
   const filtroMarketplace = construirReadModelPublicoPorMarcos({
@@ -414,7 +415,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 1,
     limit: 50
   });
-  assert.strictEqual(filtroMarketplace.totalFiltrado, esperadoGlobal.filter(item => item.marketplace === "mercadolivre").length, "filtro marketplace aplica antes da paginacao Com erro");
+  assert.strictEqual(filtroMarketplace.totalFiltrado, esperadoGlobal.filter(item => item.marketplace === "mercadolivre").length, "filtro marketplace aplica antes da paginacao Erro");
 
   const filtroCanal = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
@@ -426,7 +427,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 1,
     limit: 50
   });
-  assert.strictEqual(filtroCanal.totalFiltrado, esperadoGlobal.filter(item => item.canal === "whatsapp").length, "filtro canal aplica antes da paginacao Com erro");
+  assert.strictEqual(filtroCanal.totalFiltrado, esperadoGlobal.filter(item => item.canal === "whatsapp").length, "filtro canal aplica antes da paginacao Erro");
 
   const filtroBusca = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
@@ -441,7 +442,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
   assert.strictEqual(
     filtroBusca.totalFiltrado,
     esperadoGlobal.filter(item => item.titulo.includes("EspecialBusca")).length,
-    "busca aplica antes da paginacao Com erro"
+    "busca aplica antes da paginacao Erro"
   );
 
   const seteDias = construirReadModelPublicoPorMarcos({
@@ -453,7 +454,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 1,
     limit: 50
   });
-  assert.strictEqual(seteDias.totalFiltrado, totalComErro, "periodo 7 dias mantem total Com erro do fixture");
+  assert.strictEqual(seteDias.totalFiltrado, totalComErro, "periodo 7 dias mantem total Erro do fixture");
 }
 
 {

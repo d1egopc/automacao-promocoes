@@ -11878,8 +11878,8 @@ function normalizarVisaoPublicaFila(query = {}) {
   if (!chave || ["todos", "todas", "processada", "processadas"].includes(chave)) return VISAO_PROCESSADAS;
   if (["enviada", "enviadas", "enviado", "enviados", "sucesso"].includes(chave)) return VISAO_ENVIADAS;
   if (["parcial", "parciais"].includes(chave)) return VISAO_PARCIAIS;
-  if (["com_erro", "com_erros", "comerro", "comerros", "atencao", "com_atencao"].includes(chave)) return VISAO_COM_ERRO;
-  if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados", "erro", "erros", "falha", "falhas", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) {
+  if (["com_erro", "com_erros", "comerro", "comerros", "erro", "erros", "falha", "falhas", "atencao", "com_atencao", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) return VISAO_COM_ERRO;
+  if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados"].includes(chave)) {
     return VISAO_NAO_ENVIADAS;
   }
   if (["pendente", "pendentes", "processando", "aguardando", "aguardando_relogio", "claim", "recovery", "checkpoint", "saneamento", "em_distribuicao"].includes(chave)) {
@@ -11896,7 +11896,7 @@ function compatibilidadeStatusPublicoFila(query = {}) {
     return "status_operacional_legado_mapeado_para_processadas_sem_lista_operacional";
   }
   if (["expirada", "expiradas", "expirado", "expirados"].includes(status)) {
-    return "expirada_operacional_legada_mapeada_para_nao_enviadas_sem_categoria_publica_expiradas";
+    return "expirada_operacional_legada_mapeada_para_erro_sem_categoria_publica_expiradas";
   }
   return "";
 }
@@ -11931,7 +11931,7 @@ function metricasPublicasComAliases(metricas = {}) {
     comErro,
     emDistribuicao,
     taxaEnvio,
-    erros: naoEnviadas,
+    erros: comErro,
     expiradas: 0,
     formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta execucoes unicas no marco publico"
   };
@@ -12068,7 +12068,7 @@ app.get("/fila", auth, async (req, res) => {
     pendentesTotal: metricas.emDistribuicao,
     enviadasTotal: metricas.enviadas,
     retidasTotal: 0,
-    errosTotal: metricas.naoEnviadas
+    errosTotal: metricas.comErro
   };
 
   const payload = perf.etapaSync("montar_payload", () => ({
@@ -30454,7 +30454,7 @@ app.get("/fila/status", async (req, res) => {
     pendentes: metricas.emDistribuicao,
     enviados: metricas.enviadas,
     retidas: 0,
-    erros: metricas.naoEnviadas,
+    erros: metricas.comErro,
     expiradas: 0,
     metricas,
     filtros: readModel.filtros,

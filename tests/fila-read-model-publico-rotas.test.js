@@ -74,6 +74,8 @@ function rotaGetBloco(fonte, rota) {
 
   assert(rotaFila.includes("consultarReadModelPublicoFila(clienteId, req.query"), "GET /fila usa helper leve");
   assert(fonte.includes("VISAO_COM_ERRO"), "GET /fila reconhece visao publica com_erro");
+  assert(fonte.includes('"erro", "erros", "falha", "falhas"') && fonte.includes("return VISAO_COM_ERRO"), "status=erro deve mapear para visao agregada com_erro");
+  assert(rotaFila.includes("errosTotal: metricas.comErro"), "GET /fila deve expor alias erros como Erro publico agregado");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
   assert(!rotaFila.includes("fila: itensResposta"), "GET /fila nao duplica payload com alias fila");
   assert(!rotaFila.includes("fila.filter"), "GET /fila nao monta resposta a partir da fila pesada");
@@ -82,6 +84,7 @@ function rotaGetBloco(fonte, rota) {
 
   assert(rotaStatus.includes("consultarReadModelPublicoFila(clienteId, { ...req.query, limit: 1 }, { somenteMetricas: true })"), "/fila/status usa caminho somente metricas");
   assert(rotaStatus.includes("garantirReadModelPublicoPronto(clienteId"), "/fila/status usa a mesma freshness");
+  assert(rotaStatus.includes("erros: metricas.comErro"), "/fila/status deve expor erros como Erro publico agregado");
   assert(!rotaStatus.includes("fila.filter"), "/fila/status nao materializa lista pesada");
   assert(!rotaStatus.includes("itens:"), "/fila/status nao retorna pagina de itens");
   assert(!rotaStatus.includes("fila:"), "/fila/status nao retorna alias fila");
@@ -155,6 +158,7 @@ function rotaGetBloco(fonte, rota) {
   });
   assert.strictEqual(enviadas.metricas.enviadas, 1, "GET /fila enviadas");
   assert.strictEqual(enviadas.itens.length, 1);
+  assert.strictEqual(enviadas.itens[0].statusPublico, "enviada", "status publico de sucesso deve ser Enviada");
 
   const naoEnviadas = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
@@ -188,6 +192,7 @@ function rotaGetBloco(fonte, rota) {
   assert.strictEqual(comErro.metricas.comErro, 2, "GET /fila com_erro soma parcial real e nao enviada");
   assert.strictEqual(comErro.totalFiltrado, 2);
   assert.strictEqual(comErro.itens.length, 2);
+  assert(comErro.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "GET /fila com_erro deve expor somente status publico Erro");
 
   const marketplace = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
