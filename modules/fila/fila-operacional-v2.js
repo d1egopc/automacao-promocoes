@@ -6,11 +6,13 @@ const path = require("path");
 const {
   getClienteJsonPath,
   getClientePath,
+  listClientes,
   readClienteJson,
   writeClienteJson
 } = require("../../utils/storage");
 const {
   FILA_VIVA_ARQUIVO,
+  FILA_HISTORICO_ARQUIVO,
   FILA_LEGADA_ARQUIVO,
   FILA_PROJECAO_LEVE_ARQUIVO,
   classificarItemFilaV2,
@@ -3592,18 +3594,219 @@ function entradasTerminaisHistoricoLeveLegado(clienteId = "admin", itens = [], d
   const entradas = [];
   let examinados = 0;
 
-  for (const item of lista(itens)) {
+  for (let indice = 0; indice < lista(itens).length; indice += 1) {
+    const item = lista(itens)[indice];
     if (!item || typeof item !== "object") continue;
-    if (clienteSeguro(item.clienteId || cliente) !== cliente) continue;
+    const entrada = item.item && typeof item.item === "object"
+      ? normalizarEntradaViva(item, indice, agora)
+      : normalizarEntradaViva({
+        item,
+        posicaoLegada: Number.isInteger(Number(item.posicaoLegada)) ? Number(item.posicaoLegada) : indice
+      }, indice, agora);
+    if (clienteSeguro(entrada.item?.clienteId || cliente) !== cliente) continue;
     examinados += 1;
-    if (!itemTerminalHistoricoLevePublico(item, agora)) continue;
-    const posicaoLegada = Number.isInteger(Number(item.posicaoLegada))
-      ? Number(item.posicaoLegada)
-      : -1;
-    entradas.push(normalizarEntradaViva({ item, posicaoLegada }, posicaoLegada, agora));
+    if (!itemTerminalHistoricoLevePublico(entrada.item, agora)) continue;
+    entradas.push(entrada);
   }
 
   return { entradas, examinados, agora };
+}
+
+function lerHistoricoLegadoCliente(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const leitor = deps.readClienteJson || readClienteJson;
+  const inicio = process.hrtime.bigint();
+  try {
+    const historico = typeof leitor === "function"
+      ? leitor(cliente, FILA_HISTORICO_ARQUIVO, [])
+      : [];
+    return {
+      ok: true,
+      clienteId: cliente,
+      fonte: FILA_HISTORICO_ARQUIVO,
+      historico: lista(historico),
+      registrosLidos: lista(historico).length,
+      duracaoLeituraMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      clienteId: cliente,
+      fonte: FILA_HISTORICO_ARQUIVO,
+      historico: [],
+      registrosLidos: 0,
+      motivo: "erro_ler_fila_historico_legado",
+      erro: erro?.message || "erro_ler_fila_historico_legado",
+      duracaoLeituraMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  }
+}
+
+function prepararBackfillHistoricoLeveLegado(clienteId = "admin", historico = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const inicio = process.hrtime.bigint();
+  const { entradas, examinados, agora } = entradasTerminaisHistoricoLeveLegado(cliente, historico, deps);
+  const finaisPorChave = new Map();
+
+  for (const entrada of entradas) {
+    const preparado = montarRegistroHistoricoLeve(cliente, entrada, {
+      ...deps,
+      agora,
+      detalheArquivo: FILA_HISTORICO_ARQUIVO,
+      bootstrapHistoricoLeve: false
+    });
+    const anterior = finaisPorChave.get(preparado.chave);
+    if (!anterior || Number(preparado.timestampMs || 0) >= Number(anterior.preparado.timestampMs || 0)) {
+      finaisPorChave.set(preparado.chave, { entrada, preparado });
+    }
+  }
+
+  return {
+    clienteId: cliente,
+    entradas: [...finaisPorChave.values()].map(item => item.entrada),
+    examinados,
+    candidatos: entradas.length,
+    colapsados: entradas.length - finaisPorChave.size,
+    prepararMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function entradasBackfillIgnorandoExistentesGlobais(clienteId = "admin", entradas = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const leitura = lerRegistrosHistoricoLeve(cliente, deps);
+  const existentes = new Map();
+  for (const registro of leitura.registros) {
+    const chave = texto(registro?.chave);
+    if (!chave) continue;
+    existentes.set(chave, {
+      hash: texto(registro?.hashRegistro || ""),
+      timestampMs: timestampHistoricoLeveRegistro(registro)
+    });
+  }
+
+  const filtradas = [];
+  let idempotentesGlobais = 0;
+  for (const entrada of lista(entradas)) {
+    const preparado = montarRegistroHistoricoLeve(cliente, entrada, {
+      ...deps,
+      detalheArquivo: FILA_HISTORICO_ARQUIVO,
+      bootstrapHistoricoLeve: false
+    });
+    const existente = existentes.get(preparado.chave);
+    if (registroHistoricoLeveJaMaterializado(existente, preparado.hashRegistro, preparado.timestampMs)) {
+      idempotentesGlobais += 1;
+      continue;
+    }
+    filtradas.push(entrada);
+    existentes.set(preparado.chave, {
+      hash: preparado.hashRegistro,
+      timestampMs: preparado.timestampMs
+    });
+  }
+
+  return {
+    entradas: filtradas,
+    idempotentesGlobais,
+    linhasHistoricoLeveExistentes: leitura.linhas,
+    bytesHistoricoLeveExistentes: leitura.bytesLidos
+  };
+}
+
+function backfillHistoricoLeveLegadoCliente(clienteId = "admin", params = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || params.clienteId || "admin");
+  const leitura = Array.isArray(params.historico)
+    ? {
+      ok: true,
+      clienteId: cliente,
+      fonte: FILA_HISTORICO_ARQUIVO,
+      historico: params.historico,
+      registrosLidos: params.historico.length,
+      duracaoLeituraMs: 0
+    }
+    : lerHistoricoLegadoCliente(cliente, deps);
+
+  if (leitura.ok !== true) {
+    return {
+      ...leitura,
+      ok: false,
+      registrosProjetados: 0,
+      duplicadosIgnorados: 0,
+      writesFisicos: 0,
+      bytesGerados: 0,
+      maiorTrechoSyncMs: 0,
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  }
+
+  const preparado = prepararBackfillHistoricoLeveLegado(cliente, leitura.historico, {
+    ...deps,
+    agora: params.agora || deps.agora || Date.now()
+  });
+  const filtro = entradasBackfillIgnorandoExistentesGlobais(cliente, preparado.entradas, {
+    ...deps,
+    agora: params.agora || deps.agora || Date.now()
+  });
+  const batch = appendHistoricoLeveBatch(cliente, filtro.entradas, {
+    ...deps,
+    agora: params.agora || deps.agora || Date.now(),
+    detalheArquivo: FILA_HISTORICO_ARQUIVO,
+    bootstrapHistoricoLeve: false,
+    _backfillHistoricoLeveLegado: true
+  });
+
+  return {
+    ...batch,
+    ok: batch.ok === true,
+    clienteId: cliente,
+    fonte: FILA_HISTORICO_ARQUIVO,
+    registrosLidos: leitura.registrosLidos,
+    examinados: preparado.examinados,
+    candidatos: preparado.candidatos,
+    registrosProjetados: preparado.entradas.length,
+    colapsados: preparado.colapsados,
+    duplicadosIgnorados: filtro.idempotentesGlobais + batch.idempotentes,
+    writesFisicos: batch.writes,
+    bytesGerados: batch.bytesAppend,
+    linhasHistoricoLeveExistentes: filtro.linhasHistoricoLeveExistentes,
+    bytesHistoricoLeveExistentes: filtro.bytesHistoricoLeveExistentes,
+    prepararMs: preparado.prepararMs + batch.prepararMs,
+    duracaoLeituraMs: leitura.duracaoLeituraMs,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function clientesBackfillHistoricoLeveLegado(params = {}, deps = {}) {
+  if (Array.isArray(params.clientes) && params.clientes.length) {
+    return [...new Set(params.clientes.map(clienteSeguro).filter(Boolean))];
+  }
+  if (params.clienteId) return [clienteSeguro(params.clienteId)];
+  const listar = deps.listClientes || listClientes;
+  if (typeof listar !== "function") return [];
+  return [...new Set(lista(listar()).map(clienteSeguro).filter(Boolean))];
+}
+
+function backfillHistoricoLeveLegado(params = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const clientes = clientesBackfillHistoricoLeveLegado(params, deps);
+  const resultados = clientes.map(cliente => backfillHistoricoLeveLegadoCliente(cliente, params, deps));
+  const soma = campo => resultados.reduce((total, item) => total + Number(item?.[campo] || 0), 0);
+  const ok = resultados.every(item => item.ok === true);
+
+  return {
+    ok,
+    fonte: FILA_HISTORICO_ARQUIVO,
+    clientes,
+    totalClientes: clientes.length,
+    registrosLidos: soma("registrosLidos"),
+    registrosProjetados: soma("registrosProjetados"),
+    duplicadosIgnorados: soma("duplicadosIgnorados"),
+    writesFisicos: soma("writesFisicos"),
+    bytesGerados: soma("bytesGerados"),
+    maiorTrechoSyncMs: Math.max(0, ...resultados.map(item => Number(item?.maiorTrechoSyncMs || 0))),
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+    resultados
+  };
 }
 
 function registrarHistoricoLeveTerminaisLegado(clienteId = "admin", itens = [], deps = {}) {
@@ -4711,6 +4914,8 @@ module.exports = {
   registrarHistoricoLeveTerminalLegado,
   registrarHistoricoLeveTerminaisLegado,
   sincronizarHistoricoLeveLegado,
+  backfillHistoricoLeveLegadoCliente,
+  backfillHistoricoLeveLegado,
   listarHistoricoLeveIncremental,
   contarHistoricoLeveHoje,
   bootstrapHistoricoLeveCliente,

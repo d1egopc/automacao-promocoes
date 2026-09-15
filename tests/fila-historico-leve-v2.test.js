@@ -67,6 +67,12 @@ function bytesHistoricoLeve(root, clienteId) {
     .reduce((total, nome) => total + fs.statSync(path.join(dir, nome)).size, 0);
 }
 
+function arquivosHistoricoLeve(root, clienteId) {
+  const dir = path.join(root, clienteId, filaOperacionalV2.HISTORICO_LEVE_INCREMENTAL_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter(nome => nome.endsWith(".jsonl")).sort();
+}
+
 function escreverHistoricoTecnico(root, clienteId, itens) {
   const dir = path.join(root, clienteId, filaOperacionalV2.HISTORICO_INCREMENTAL_DIR);
   fs.mkdirSync(dir, { recursive: true });
@@ -878,6 +884,280 @@ function escreverHistoricoTecnico(root, clienteId, itens) {
   assert.strictEqual(contagem.enviadosHoje, 188);
   assert.strictEqual(contagem.naoEnviadosHoje, 188);
   assert.strictEqual(contagem.parciaisHoje, 0);
+}
+
+{
+  const root = tmpRoot();
+  const cliente = "cliente_backfill_fonte_legada";
+  const lidos = [];
+  const escritosJson = [];
+  const historicoLegado = [
+    oferta("backfill_enviado", {
+      clienteId: cliente,
+      status: "enviado",
+      enviadoEm: "2026-08-01T10:00:00.000Z",
+      titulo: "Produto legado enviado",
+      marketplace: "amazon",
+      imagem: "https://cdn.optimus.test/legado.jpg",
+      preco: "88.90"
+    }),
+    oferta("backfill_parcial", {
+      clienteId: cliente,
+      status: "erro_final",
+      erroEm: "2026-08-02T10:00:00.000Z",
+      destinosEstado: [
+        { destinoId: "a", destinoNome: "A", estado: "enviado" },
+        { destinoId: "b", destinoNome: "B", estado: "erro_final" }
+      ]
+    }),
+    {
+      id: "backfill_incompleto",
+      clienteId: cliente,
+      status: "cancelada",
+      finalizadoEm: "2026-07-31T20:00:00.000Z"
+    }
+  ];
+  const d = deps(root, {
+    readClienteJson(clienteId, arquivo, fallback) {
+      lidos.push(arquivo);
+      if (arquivo !== "fila-historico.json") throw new Error(`fonte_proibida:${arquivo}`);
+      return clienteId === cliente ? historicoLegado : fallback;
+    },
+    writeClienteJson(clienteId, arquivo, valor) {
+      escritosJson.push(arquivo);
+      return deps(root).writeClienteJson(clienteId, arquivo, valor);
+    }
+  });
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, { agora: AGORA }, d);
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 10 }, d);
+
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.fonte, "fila-historico.json");
+  assert.deepStrictEqual(lidos, ["fila-historico.json"]);
+  assert.deepStrictEqual(escritosJson, [], "backfill nao deve escrever fila.json/fila-viva/fila-historico.json");
+  assert.strictEqual(res.registrosLidos, 3);
+  assert.strictEqual(res.registrosProjetados, 3);
+  assert.deepStrictEqual(arquivosHistoricoLeve(root, cliente), [
+    "2026-07-31.jsonl",
+    "2026-08-01.jsonl",
+    "2026-08-02.jsonl"
+  ]);
+  assert.deepStrictEqual(
+    new Set(lista.itens.map(item => item.statusPublico)),
+    new Set(["enviado", "parcial", "nao_enviado"])
+  );
+  assert(lista.itens.some(item => item.id === "backfill_incompleto" && item.statusPublico === "nao_enviado"));
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_idempotente_hook";
+  const antigo = oferta("hook_same", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-13T08:00:00.000Z",
+    updatedAt: "2026-09-13T08:00:00.000Z"
+  });
+  const novo = oferta("hook_same", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T09:00:00.000Z",
+    updatedAt: "2026-09-14T09:00:00.000Z"
+  });
+  const soLegado = oferta("legado_only", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-12T09:00:00.000Z"
+  });
+
+  filaOperacionalV2.appendHistoricoLeveIncremental(cliente, novo, { ...d, agora: AGORA, bootstrapHistoricoLeve: false });
+  filaOperacionalV2.limparCacheHistoricoLeve();
+  const primeiro = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [antigo, soLegado],
+    agora: AGORA
+  }, d);
+  const bytesAntes = bytesHistoricoLeve(root, cliente);
+  const segundo = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [antigo, soLegado],
+    agora: AGORA + 1000
+  }, d);
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 10 }, d);
+
+  assert.strictEqual(primeiro.escritos, 1, "backfill nao duplica registro ja escrito pelo hook atual");
+  assert.strictEqual(primeiro.duplicadosIgnorados, 1);
+  assert.strictEqual(segundo.writesFisicos, 0, "reexecucao nao cria duplicatas fisicas");
+  assert.strictEqual(bytesHistoricoLeve(root, cliente), bytesAntes);
+  assert.strictEqual(lista.total, 2);
+  assert.strictEqual(lista.itens.find(item => item.id === "hook_same").statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_execucoes";
+  const baseProduto = {
+    clienteId: cliente,
+    ofertaId: "oferta_mesmo_produto_backfill",
+    engineOfertaId: "engine_mesmo_produto_backfill",
+    produtoId: "produto_mesmo_produto_backfill",
+    titulo: "Produto historico reofertado",
+    marketplace: "amazon",
+    preco: "79.90"
+  };
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [
+      oferta("backfill_exec_1", {
+        ...baseProduto,
+        status: "enviado",
+        criadoEm: "2026-08-01T08:00:00.000Z",
+        enviadoEm: "2026-08-01T08:05:00.000Z"
+      }),
+      oferta("backfill_exec_2", {
+        ...baseProduto,
+        status: "enviado",
+        criadoEm: "2026-08-02T08:00:00.000Z",
+        enviadoEm: "2026-08-02T08:05:00.000Z"
+      })
+    ],
+    agora: AGORA
+  }, d);
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 10 }, d);
+
+  assert.strictEqual(res.registrosProjetados, 2);
+  assert.strictEqual(lista.total, 2, "mesmo produto em execucoes diferentes deve manter ambas");
+  assert.deepStrictEqual(arquivosHistoricoLeve(root, cliente), ["2026-08-01.jsonl", "2026-08-02.jsonl"]);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_estado_final";
+  const erroAntigo = oferta("same_exec_backfill", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-08-04T08:00:00.000Z",
+    updatedAt: "2026-08-04T08:00:00.000Z"
+  });
+  const sucessoFinal = oferta("same_exec_backfill", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-08-05T08:00:00.000Z",
+    updatedAt: "2026-08-05T08:00:00.000Z"
+  });
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [erroAntigo, sucessoFinal],
+    agora: AGORA
+  }, d);
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(res.registrosLidos, 2);
+  assert.strictEqual(res.registrosProjetados, 1);
+  assert.strictEqual(res.colapsados, 1);
+  assert.deepStrictEqual(arquivosHistoricoLeve(root, cliente), ["2026-08-05.jsonl"]);
+  assert.strictEqual(lista.total, 1);
+  assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const cliente = "cliente_backfill_retomavel";
+  let appendCount = 0;
+  const fsInterrompe = {
+    ...fs,
+    appendFileSync(file, conteudo, enc) {
+      appendCount += 1;
+      if (appendCount === 2) throw new Error("interrupcao_simulada");
+      return fs.appendFileSync(file, conteudo, enc);
+    }
+  };
+  const historico = [
+    oferta("retoma_1", { clienteId: cliente, status: "enviado", enviadoEm: "2026-08-01T08:00:00.000Z" }),
+    oferta("retoma_2", { clienteId: cliente, status: "enviado", enviadoEm: "2026-08-02T08:00:00.000Z" })
+  ];
+
+  const parcial = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: AGORA
+  }, deps(root, { fs: fsInterrompe }));
+  filaOperacionalV2.limparCacheHistoricoLeve();
+  const final = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: AGORA
+  }, deps(root));
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 10 }, deps(root));
+
+  assert.strictEqual(parcial.ok, false);
+  assert.strictEqual(parcial.escritos, 1);
+  assert.strictEqual(final.ok, true);
+  assert.strictEqual(final.escritos, 1, "reexecucao deve completar somente o faltante");
+  assert.strictEqual(lista.total, 2);
+}
+
+{
+  const root = tmpRoot();
+  const clienteA = "cliente_backfill_a";
+  const clienteB = "cliente_backfill_b";
+  const porCliente = {
+    [clienteA]: [oferta("isolado_a", { clienteId: clienteA, status: "enviado", enviadoEm: "2026-08-01T08:00:00.000Z" })],
+    [clienteB]: [oferta("isolado_b", { clienteId: clienteB, status: "erro_final", erroEm: "2026-08-01T09:00:00.000Z" })]
+  };
+  const lidos = [];
+  const d = deps(root, {
+    listClientes() {
+      return [clienteA, clienteB];
+    },
+    readClienteJson(clienteId, arquivo, fallback) {
+      lidos.push(`${clienteId}/${arquivo}`);
+      if (arquivo !== "fila-historico.json") throw new Error(`fonte_proibida:${arquivo}`);
+      return porCliente[clienteId] || fallback;
+    }
+  });
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegado({ agora: AGORA }, d);
+  const listaA = filaOperacionalV2.listarHistoricoLeveIncremental(clienteA, {}, d);
+  const listaB = filaOperacionalV2.listarHistoricoLeveIncremental(clienteB, {}, d);
+
+  assert.strictEqual(res.ok, true);
+  assert.deepStrictEqual(res.clientes, [clienteA, clienteB]);
+  assert.deepStrictEqual(lidos, [`${clienteA}/fila-historico.json`, `${clienteB}/fila-historico.json`]);
+  assert.strictEqual(listaA.total, 1);
+  assert.strictEqual(listaB.total, 1);
+  assert.strictEqual(listaA.itens[0].clienteId, clienteA);
+  assert.strictEqual(listaB.itens[0].clienteId, clienteB);
+}
+
+{
+  for (const tamanho of [376, 535, 1000]) {
+    const root = tmpRoot();
+    const d = deps(root);
+    const cliente = `cliente_backfill_benchmark_${tamanho}`;
+    const historico = Array.from({ length: tamanho }, (_, i) => oferta(`bench_${tamanho}_${i}`, {
+      clienteId: cliente,
+      status: i % 3 === 0 ? "enviado" : (i % 3 === 1 ? "erro_final" : "expirada_operacional"),
+      enviadoEm: i % 3 === 0 ? "2026-08-10T08:00:00.000Z" : "",
+      erroEm: i % 3 === 1 ? "2026-08-10T08:01:00.000Z" : "",
+      expiradaEm: i % 3 === 2 ? "2026-08-10T08:02:00.000Z" : ""
+    }));
+
+    const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+      historico,
+      agora: AGORA
+    }, d);
+
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.registrosLidos, tamanho);
+    assert.strictEqual(res.registrosProjetados, tamanho);
+    assert.strictEqual(res.escritos, tamanho);
+    assert.strictEqual(res.writesFisicos, 1, "benchmark deve manter escrita consolidada por dia");
+    assert(res.bytesGerados > 0);
+    assert(res.duracaoMs >= 0);
+    assert(res.maiorTrechoSyncMs >= 0);
+    assert.strictEqual(linhasHistoricoLeve(root, cliente).length, tamanho);
+  }
 }
 
 console.log("fila-historico-leve-v2.test.js OK");
