@@ -3223,6 +3223,17 @@ function registroHistoricoLeveJaMaterializado(infoExistente, hashRegistro = "", 
   return Number(existente.timestampMs || 0) >= Number(timestampMs || 0);
 }
 
+function identidadeDedupeHistoricoLeveRegistro(clienteId = "admin", registro = {}, posicaoFallback = -1) {
+  const chave = texto(registro?.chave);
+  if (chave) return `chave:${chave}`;
+  const item = registro?.item && typeof registro.item === "object" ? registro.item : null;
+  if (!item) return "";
+  const posicaoRaw = registro?.posicaoLegada ?? item.posicaoLegada ?? posicaoFallback;
+  const posicaoLegada = Number.isInteger(Number(posicaoRaw)) ? Number(posicaoRaw) : -1;
+  const chaveFallback = chaveHistoricoLeveResultado(clienteId, item, posicaoLegada);
+  return chaveFallback ? `chave:${chaveFallback}` : "";
+}
+
 function montarRegistroHistoricoLeve(clienteId = "admin", entradaOuItem = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const entrada = normalizarEntradaViva(entradaOuItem, entradaOuItem?.posicaoLegada || 0, deps.agora || Date.now());
@@ -3494,6 +3505,7 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
   const inicio = process.hrtime.bigint();
   const cliente = clienteSeguro(clienteId);
   const fsImpl = deps.fs || fs;
+  const dedupePorIdentidadeGlobal = deps.dedupeHistoricoLevePorIdentidadeGlobal === true;
   const porArquivo = new Map();
   let processados = 0;
   const inicioPreparar = process.hrtime.bigint();
@@ -3526,8 +3538,27 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
       const cache = lerCacheHistoricoLeve(file, fsImpl, deps.logger, cliente);
       const linhas = [];
       const chaves = new Map(cache.chaves);
+      const identidadesGlobais = dedupePorIdentidadeGlobal
+        ? lerIdentidadesHistoricoLeveGlobais(cliente, deps).identidades
+        : null;
 
       for (const preparado of grupo.values()) {
+        if (identidadesGlobais) {
+          const identidade = identidadeDedupeHistoricoLeveRegistro(cliente, preparado.registro, preparado?.entrada?.posicaoLegada);
+          if (identidade && identidadesGlobais.has(identidade)) {
+            idempotentes += 1;
+            continue;
+          }
+          if (identidade) {
+            linhas.push(`${JSON.stringify(preparado.registro)}\n`);
+            identidadesGlobais.add(identidade);
+            chaves.set(preparado.chave, {
+              hash: preparado.hashRegistro,
+              timestampMs: preparado.timestampMs
+            });
+            continue;
+          }
+        }
         const existente = chaves.get(preparado.chave);
         if (registroHistoricoLeveJaMaterializado(existente, preparado.hashRegistro, preparado.timestampMs)) {
           idempotentes += 1;
@@ -3673,16 +3704,8 @@ function prepararBackfillHistoricoLeveLegado(clienteId = "admin", historico = []
 
 function entradasBackfillIgnorandoExistentesGlobais(clienteId = "admin", entradas = [], deps = {}) {
   const cliente = clienteSeguro(clienteId);
-  const leitura = lerRegistrosHistoricoLeve(cliente, deps);
-  const existentes = new Map();
-  for (const registro of leitura.registros) {
-    const chave = texto(registro?.chave);
-    if (!chave) continue;
-    existentes.set(chave, {
-      hash: texto(registro?.hashRegistro || ""),
-      timestampMs: timestampHistoricoLeveRegistro(registro)
-    });
-  }
+  const leitura = lerIdentidadesHistoricoLeveGlobais(cliente, deps);
+  const existentes = new Set(leitura.identidades);
 
   const filtradas = [];
   let idempotentesGlobais = 0;
@@ -3692,16 +3715,13 @@ function entradasBackfillIgnorandoExistentesGlobais(clienteId = "admin", entrada
       detalheArquivo: FILA_HISTORICO_ARQUIVO,
       bootstrapHistoricoLeve: false
     });
-    const existente = existentes.get(preparado.chave);
-    if (registroHistoricoLeveJaMaterializado(existente, preparado.hashRegistro, preparado.timestampMs)) {
+    const identidade = identidadeDedupeHistoricoLeveRegistro(cliente, preparado.registro, entrada?.posicaoLegada);
+    if (identidade && existentes.has(identidade)) {
       idempotentesGlobais += 1;
       continue;
     }
     filtradas.push(entrada);
-    existentes.set(preparado.chave, {
-      hash: preparado.hashRegistro,
-      timestampMs: preparado.timestampMs
-    });
+    if (identidade) existentes.add(identidade);
   }
 
   return {
@@ -3752,6 +3772,7 @@ function backfillHistoricoLeveLegadoCliente(clienteId = "admin", params = {}, de
     agora: params.agora || deps.agora || Date.now(),
     detalheArquivo: FILA_HISTORICO_ARQUIVO,
     bootstrapHistoricoLeve: false,
+    dedupeHistoricoLevePorIdentidadeGlobal: true,
     _backfillHistoricoLeveLegado: true
   });
 
@@ -4106,6 +4127,30 @@ function lerRegistrosHistoricoLeve(clienteId = "admin", deps = {}) {
     } catch {}
   }
   return { registros: [...registros.values()], bytesLidos, linhas };
+}
+
+function lerIdentidadesHistoricoLeveGlobais(clienteId = "admin", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const cliente = clienteSeguro(clienteId);
+  const identidades = new Set();
+  let bytesLidos = 0;
+  let linhas = 0;
+  for (const file of arquivosHistoricoLeve(cliente, deps)) {
+    try {
+      const conteudo = fsImpl.readFileSync(file, "utf8");
+      bytesLidos += Buffer.byteLength(conteudo || "", "utf8");
+      for (const linha of (conteudo || "").split(/\r?\n/)) {
+        if (!linha.trim()) continue;
+        linhas += 1;
+        try {
+          const registro = JSON.parse(linha);
+          const identidade = identidadeDedupeHistoricoLeveRegistro(cliente, registro);
+          if (identidade) identidades.add(identidade);
+        } catch {}
+      }
+    } catch {}
+  }
+  return { identidades, bytesLidos, linhas };
 }
 
 function dataOrdenacaoHistoricoLeve(registro = {}) {

@@ -67,10 +67,34 @@ function bytesHistoricoLeve(root, clienteId) {
     .reduce((total, nome) => total + fs.statSync(path.join(dir, nome)).size, 0);
 }
 
+function estatisticasHistoricoLeve(root, clienteId) {
+  const linhas = linhasHistoricoLeve(root, clienteId);
+  const porChave = new Map();
+  for (const registro of linhas) {
+    if (!registro.chave) continue;
+    porChave.set(registro.chave, (porChave.get(registro.chave) || 0) + 1);
+  }
+  let duplicatas = 0;
+  for (const quantidade of porChave.values()) {
+    if (quantidade > 1) duplicatas += quantidade - 1;
+  }
+  return {
+    linhas: linhas.length,
+    chaves: porChave.size,
+    duplicatas
+  };
+}
+
 function arquivosHistoricoLeve(root, clienteId) {
   const dir = path.join(root, clienteId, filaOperacionalV2.HISTORICO_LEVE_INCREMENTAL_DIR);
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter(nome => nome.endsWith(".jsonl")).sort();
+}
+
+function escreverLinhaHistoricoLeve(root, clienteId, data, registro) {
+  const dir = path.join(root, clienteId, filaOperacionalV2.HISTORICO_LEVE_INCREMENTAL_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, `${data}.jsonl`), `${JSON.stringify(registro)}\n`, "utf8");
 }
 
 function escreverHistoricoTecnico(root, clienteId, itens) {
@@ -1128,6 +1152,170 @@ function escreverHistoricoTecnico(root, clienteId, itens) {
   assert.strictEqual(listaB.total, 1);
   assert.strictEqual(listaA.itens[0].clienteId, clienteA);
   assert.strictEqual(listaB.itens[0].clienteId, clienteB);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_178_idempotente";
+  const historico = Array.from({ length: 178 }, (_, i) => {
+    if (i < 5) {
+      return oferta(`z_stable_${i}`, {
+        clienteId: cliente,
+        status: "enviado",
+        criadoEm: `2026-09-07T00:0${i}:00.000Z`,
+        updatedAt: `2026-09-07T00:0${i}:30.000Z`,
+        enviadoEm: `2026-09-07T00:0${i}:30.000Z`
+      });
+    }
+    return oferta(`z_dynamic_${i}`, {
+      clienteId: cliente,
+      status: "expirada_operacional",
+      criadoEm: "2026-09-07T12:00:00.000Z",
+      updatedAt: "",
+      expiradoEm: "",
+      finalizadoEm: ""
+    });
+  });
+
+  const primeiro = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: Date.parse("2026-09-15T03:19:22.867Z")
+  }, d);
+  filaOperacionalV2.limparCacheHistoricoLeve();
+  const segundo = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: Date.parse("2026-09-15T03:20:50.607Z")
+  }, d);
+  const stats = estatisticasHistoricoLeve(root, cliente);
+
+  assert.strictEqual(primeiro.escritos, 178);
+  assert.strictEqual(segundo.escritos, 0, "segunda rodada nao pode recriar terminais com finalizadoEm dinamico");
+  assert.strictEqual(segundo.duplicadosIgnorados, 178);
+  assert.deepStrictEqual(stats, { linhas: 178, chaves: 178, duplicatas: 0 });
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_um_dinamico";
+  const historico = [oferta("dynamic_single", {
+    clienteId: cliente,
+    status: "expirada_operacional",
+    updatedAt: "",
+    expiradoEm: "",
+    finalizadoEm: ""
+  })];
+
+  const primeiro = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: AGORA
+  }, d);
+  const bytesAntes = bytesHistoricoLeve(root, cliente);
+  filaOperacionalV2.limparCacheHistoricoLeve();
+  const segundo = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico,
+    agora: AGORA + 60_000
+  }, d);
+
+  assert.strictEqual(primeiro.escritos, 1);
+  assert.strictEqual(segundo.escritos, 0);
+  assert.strictEqual(bytesHistoricoLeve(root, cliente), bytesAntes);
+  assert.deepStrictEqual(estatisticasHistoricoLeve(root, cliente), { linhas: 1, chaves: 1, duplicatas: 0 });
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_chave_repetida_legado";
+  const primeira = oferta("same_legacy_key", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-10T08:00:00.000Z",
+    updatedAt: "2026-09-10T08:00:00.000Z"
+  });
+  const final = oferta("same_legacy_key", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-10T08:05:00.000Z",
+    updatedAt: "2026-09-10T08:05:00.000Z"
+  });
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [primeira, final],
+    agora: AGORA
+  }, d);
+
+  assert.strictEqual(res.registrosProjetados, 1);
+  assert.strictEqual(res.colapsados, 1);
+  assert.deepStrictEqual(estatisticasHistoricoLeve(root, cliente), { linhas: 1, chaves: 1, duplicatas: 0 });
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_hook_outro_dia";
+  const hook = oferta("cross_day_key", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-15T08:00:00.000Z",
+    updatedAt: "2026-09-15T08:00:00.000Z"
+  });
+  const legado = oferta("cross_day_key", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-14T08:00:00.000Z",
+    updatedAt: "2026-09-14T08:00:00.000Z"
+  });
+
+  filaOperacionalV2.appendHistoricoLeveIncremental(cliente, hook, { ...d, agora: AGORA, bootstrapHistoricoLeve: false });
+  filaOperacionalV2.limparCacheHistoricoLeve();
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [legado],
+    agora: AGORA
+  }, d);
+
+  assert.strictEqual(res.escritos, 0, "chave existente em outro arquivo diario deve bloquear backfill");
+  assert.strictEqual(res.duplicadosIgnorados, 1);
+  assert.deepStrictEqual(arquivosHistoricoLeve(root, cliente), ["2026-09-15.jsonl"]);
+  assert.deepStrictEqual(estatisticasHistoricoLeve(root, cliente), { linhas: 1, chaves: 1, duplicatas: 0 });
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_backfill_sem_chave_fallback";
+  const item = oferta("legacy_no_key", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-11T08:00:00.000Z",
+    updatedAt: "2026-09-11T08:00:00.000Z"
+  });
+  escreverLinhaHistoricoLeve(root, cliente, "2026-09-11", {
+    versao: 1,
+    tipo: "historico_leve_terminal",
+    clienteId: cliente,
+    id: item.id,
+    ofertaId: item.ofertaId,
+    engineOfertaId: item.engineOfertaId,
+    statusPublico: "nao_enviado",
+    statusOperacional: "erro_final",
+    registradoEm: "2026-09-11T08:00:00.000Z",
+    item: {
+      ...item,
+      finalizadoEm: item.erroEm,
+      detalheRef: { arquivo: "fila.json", id: item.id }
+    }
+  });
+
+  const res = filaOperacionalV2.backfillHistoricoLeveLegadoCliente(cliente, {
+    historico: [item],
+    agora: AGORA
+  }, d);
+
+  assert.strictEqual(res.escritos, 0, "registro antigo sem chave deve usar fallback estavel e impedir duplicata");
+  assert.strictEqual(res.duplicadosIgnorados, 1);
+  assert.strictEqual(linhasHistoricoLeve(root, cliente).length, 1);
 }
 
 {
