@@ -11,6 +11,86 @@ const {
 
 const JANELA_ANTI_REPETICAO_EXECUTOR_MS = 2 * 60 * 60 * 1000;
 const TIMEZONE_FILA_BR = "America/Sao_Paulo";
+const TERMINAL_GUARD_TTL_MS = 6 * 60 * 60 * 1000;
+
+const terminalGuardPorCliente = new Map();
+
+const STATUS_TERMINAL_GUARD_EXPLICITO = new Set([
+  "enviado",
+  "enviada",
+  "historico",
+  "expirada",
+  "expirado",
+  "expirada_operacional",
+  "expirado_operacional",
+  "erro_final",
+  "erro_permanente",
+  "falha_final",
+  "cancelada",
+  "cancelado",
+  "descartada",
+  "descartado"
+]);
+
+const MOTIVOS_RETIDA_OPERACIONAL_GUARD = [
+  "intervalo",
+  "aguardando",
+  "fora_horario",
+  "fora_da_janela",
+  "limite_diario",
+  "sessao",
+  "proxima_tentativa"
+];
+
+const MOTIVOS_RETIDA_TERMINAL_GUARD = [
+  "sem_destino",
+  "sem destino",
+  "destino_compativel",
+  "categoria_nao_marcada",
+  "marketplace_nao_marcado",
+  "repetida",
+  "duplicata",
+  "preco_suspeito",
+  "retida_terminal"
+];
+
+const CAMPOS_TERMINAIS_GUARD = [
+  "id",
+  "ofertaId",
+  "engineOfertaId",
+  "clienteId",
+  "status",
+  "statusDetalhe",
+  "statusDetalheVisual",
+  "enviadoEm",
+  "dataEnvio",
+  "finalizadoEm",
+  "expiradaEm",
+  "expiradoEm",
+  "erroEm",
+  "retidaEm",
+  "updatedAt",
+  "atualizadoEm",
+  "motivo",
+  "motivoFinal",
+  "motivoRetencao",
+  "erro"
+];
+
+const CAMPOS_TERMINAIS_ARRAY_GUARD = [
+  "logsEnvio",
+  "destinosEstado",
+  "destinosEnviados"
+];
+
+const CAMPOS_TERMINAIS_OBJETO_GUARD = [
+  "progresso"
+];
+
+const CAMPOS_TRANSITORIOS_TERMINAL_GUARD = [
+  "processandoEm",
+  "proximaTentativaEnvioEm"
+];
 
 let inteligenciaUniversalCache = null;
 let templateUniversalCache = null;
@@ -100,6 +180,246 @@ function textoComparacao(valor) {
 
 function textoComparacaoNormalizado(valor) {
   return textoComparacao(valor).toLowerCase();
+}
+
+function cloneGuardLeve(valor, profundidade = 0) {
+  if (valor === null || valor === undefined) return valor;
+  if (profundidade > 4) return undefined;
+  if (Array.isArray(valor)) return valor.map(item => cloneGuardLeve(item, profundidade + 1));
+  if (typeof valor === "object") {
+    const clone = {};
+    for (const [chave, item] of Object.entries(valor)) {
+      const clonado = cloneGuardLeve(item, profundidade + 1);
+      if (clonado !== undefined) clone[chave] = clonado;
+    }
+    return clone;
+  }
+  return valor;
+}
+
+function itemErroRecuperavelGuard(item = {}) {
+  return Boolean(item.proximaTentativaEnvioEm || item.retry || item.recuperavel);
+}
+
+function motivoTerminalGuard(item = {}) {
+  return textoComparacaoNormalizado([
+    item.motivoRetencao,
+    item.motivo,
+    item.motivoFinal,
+    item.statusDetalhe,
+    item.statusDetalheVisual,
+    item.erro
+  ].filter(Boolean).join(" "));
+}
+
+function retidaOperacionalGuard(item = {}) {
+  if (item.retidaTerminal === true || item.terminal === true) return false;
+  if (item.proximaTentativaEnvioEm) return true;
+  const motivo = motivoTerminalGuard(item);
+  if (MOTIVOS_RETIDA_OPERACIONAL_GUARD.some(parte => motivo.includes(parte))) return true;
+  if (MOTIVOS_RETIDA_TERMINAL_GUARD.some(parte => motivo.includes(parte))) return false;
+  return false;
+}
+
+function itemTerminalGuard(item = {}) {
+  const status = statusFilaNormalizado(item.status || "");
+  if (STATUS_TERMINAL_GUARD_EXPLICITO.has(status)) return true;
+  if (status === "erro") return !itemErroRecuperavelGuard(item);
+  if (status === "retida" || status === "retido") return !retidaOperacionalGuard(item);
+  return false;
+}
+
+function criarSnapshotTerminalGuard(item = {}, agora = Date.now()) {
+  const id = idOfertaFila(item);
+  if (!id || !itemTerminalGuard(item)) return null;
+
+  const campos = {};
+  const camposParaLimpar = [];
+  for (const campo of CAMPOS_TERMINAIS_GUARD) {
+    if (Object.prototype.hasOwnProperty.call(item, campo)) {
+      campos[campo] = cloneGuardLeve(item[campo]);
+    }
+  }
+
+  for (const campo of CAMPOS_TRANSITORIOS_TERMINAL_GUARD) {
+    if (Object.prototype.hasOwnProperty.call(item, campo)) {
+      campos[campo] = cloneGuardLeve(item[campo]);
+    } else {
+      camposParaLimpar.push(campo);
+    }
+  }
+
+  for (const campo of CAMPOS_TERMINAIS_ARRAY_GUARD) {
+    if (Array.isArray(item[campo])) {
+      campos[campo] = cloneGuardLeve(item[campo]);
+    }
+  }
+
+  for (const campo of CAMPOS_TERMINAIS_OBJETO_GUARD) {
+    if (item[campo] && typeof item[campo] === "object" && !Array.isArray(item[campo])) {
+      campos[campo] = cloneGuardLeve(item[campo]);
+    }
+  }
+
+  campos.id = campos.id || id;
+  campos.clienteId = campos.clienteId || item.clienteId || "admin";
+
+  return Object.freeze({
+    id,
+    clienteId: String(item.clienteId || "admin"),
+    status: statusFilaNormalizado(item.status || ""),
+    confirmadoEmMs: Number(agora) || Date.now(),
+    campos: Object.freeze(campos),
+    camposParaLimpar: Object.freeze(camposParaLimpar)
+  });
+}
+
+function mapaTerminalGuardCliente(clienteId = "admin") {
+  const cliente = String(clienteId || "admin");
+  let mapa = terminalGuardPorCliente.get(cliente);
+  if (!mapa) {
+    mapa = new Map();
+    terminalGuardPorCliente.set(cliente, mapa);
+  }
+  return mapa;
+}
+
+function limparTerminalGuardCliente(clienteId = "admin", agora = Date.now()) {
+  const cliente = String(clienteId || "admin");
+  const mapa = terminalGuardPorCliente.get(cliente);
+  if (!mapa) return { removidos: 0, restantes: 0 };
+  let removidos = 0;
+  for (const [id, snapshot] of mapa.entries()) {
+    if (Number(agora) - Number(snapshot?.confirmadoEmMs || 0) > TERMINAL_GUARD_TTL_MS) {
+      mapa.delete(id);
+      removidos += 1;
+    }
+  }
+  if (!mapa.size) terminalGuardPorCliente.delete(cliente);
+  return { removidos, restantes: mapa.size };
+}
+
+function registrarTerminalConfirmadoGuardFila(clienteId = "admin", item = {}, opcoes = {}) {
+  const cliente = String(clienteId || item?.clienteId || "admin");
+  const agora = opcoes.agora || Date.now();
+  limparTerminalGuardCliente(cliente, agora);
+  const snapshot = criarSnapshotTerminalGuard({ ...item, clienteId: item?.clienteId || cliente }, agora);
+  if (!snapshot) return { ok: true, registrou: false, motivo: "item_nao_terminal_guard" };
+  mapaTerminalGuardCliente(cliente).set(snapshot.id, snapshot);
+  return { ok: true, registrou: true, clienteId: cliente, itemId: snapshot.id, guardSize: mapaTerminalGuardCliente(cliente).size };
+}
+
+function registrarTerminaisConfirmadosGuardFila(clienteId = "admin", itens = [], opcoes = {}) {
+  const lista = Array.isArray(itens) ? itens : [itens].filter(Boolean);
+  let registrados = 0;
+  for (const item of lista) {
+    const resultado = registrarTerminalConfirmadoGuardFila(clienteId, item, opcoes);
+    if (resultado.registrou) registrados += 1;
+  }
+  return { ok: true, registrados, examinados: lista.length };
+}
+
+function invalidarTerminalGuardFila(clienteId = "admin", itemOuId = "") {
+  const cliente = String(clienteId || "admin");
+  const id = typeof itemOuId === "object" ? idOfertaFila(itemOuId) : String(itemOuId || "").trim();
+  const mapa = terminalGuardPorCliente.get(cliente);
+  if (!mapa || !id) return { ok: true, invalidou: false };
+  const invalidou = mapa.delete(id);
+  if (!mapa.size) terminalGuardPorCliente.delete(cliente);
+  return { ok: true, invalidou };
+}
+
+function inicializarTerminalGuardFilaCliente(clienteId = "admin", itens = [], opcoes = {}) {
+  return registrarTerminaisConfirmadosGuardFila(clienteId, itens, opcoes);
+}
+
+function aplicarCamposTerminalGuard(candidato = {}, snapshot = {}) {
+  for (const campo of snapshot.camposParaLimpar || []) {
+    delete candidato[campo];
+  }
+  for (const [campo, valor] of Object.entries(snapshot.campos || {})) {
+    candidato[campo] = cloneGuardLeve(valor);
+  }
+  return candidato;
+}
+
+function idsRegressaoStatusPermitida(opcoes = {}) {
+  const ids = new Set();
+  const candidatos = [
+    opcoes.idRegressaoStatusPermitida,
+    opcoes.itemRegressaoStatusPermitida,
+    ...(Array.isArray(opcoes.idsRegressaoStatusPermitida) ? opcoes.idsRegressaoStatusPermitida : [])
+  ];
+  for (const valor of candidatos) {
+    if (!valor) continue;
+    const id = typeof valor === "object" ? idOfertaFila(valor) : String(valor || "").trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+function aplicarTerminalGuardFilaCliente(clienteId = "admin", filaCliente = [], opcoes = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = String(clienteId || "admin");
+  const agora = opcoes.agora || Date.now();
+  const limpeza = limparTerminalGuardCliente(cliente, agora);
+  const mapa = terminalGuardPorCliente.get(cliente);
+  const idsBypass = opcoes.permitirRegressaoStatus === true
+    ? idsRegressaoStatusPermitida(opcoes)
+    : new Set();
+  let hits = 0;
+  let misses = 0;
+  let preservados = 0;
+  let bypass = 0;
+
+  if (!mapa) {
+    const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return {
+      ok: true,
+      hits,
+      misses: Array.isArray(filaCliente) ? filaCliente.length : 0,
+      preservados,
+      bypass,
+      removidosTtl: limpeza.removidos,
+      guardSize: mapa?.size || 0,
+      duracaoMs
+    };
+  }
+
+  for (const item of Array.isArray(filaCliente) ? filaCliente : []) {
+    const id = idOfertaFila(item);
+    if (!id) {
+      misses += 1;
+      continue;
+    }
+    const snapshot = mapa.get(id);
+    if (!snapshot) {
+      misses += 1;
+      continue;
+    }
+    hits += 1;
+    if (idsBypass.has(id)) {
+      bypass += 1;
+      continue;
+    }
+    if (!itemTerminalGuard(item)) {
+      aplicarCamposTerminalGuard(item, snapshot);
+      preservados += 1;
+    }
+  }
+
+  const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+  return { ok: true, hits, misses, preservados, bypass, removidosTtl: limpeza.removidos, guardSize: mapa.size, duracaoMs };
+}
+
+function snapshotTerminalGuardFila(clienteId = "admin") {
+  const mapa = terminalGuardPorCliente.get(String(clienteId || "admin"));
+  return {
+    clienteId: String(clienteId || "admin"),
+    total: mapa?.size || 0,
+    ttlMs: TERMINAL_GUARD_TTL_MS,
+    bytesEstimados: (mapa?.size || 0) * 1200
+  };
 }
 
 function partesDataTimezone(data, timezone = TIMEZONE_FILA_BR) {
@@ -1270,20 +1590,38 @@ function salvarFilaFallbackAtomico(file, filaCliente = []) {
   fs.renameSync(tmp, destino);
 }
 
-function salvarFila({ fila = [], clienteId = "admin", getFilaFile, writeClienteJson, logger = console } = {}) {
+function salvarFila({
+  fila = [],
+  clienteId = "admin",
+  getFilaFile,
+  writeClienteJson,
+  logger = console,
+  permitirRegressaoStatus = false,
+  idRegressaoStatusPermitida = "",
+  itemRegressaoStatusPermitida = null,
+  idsRegressaoStatusPermitida = []
+} = {}) {
   try {
     const filaCliente = fila.filter(
       o => String(o.clienteId || "admin") === String(clienteId)
     );
+    aplicarTerminalGuardFilaCliente(clienteId, filaCliente, {
+      permitirRegressaoStatus,
+      idRegressaoStatusPermitida,
+      itemRegressaoStatusPermitida,
+      idsRegressaoStatusPermitida
+    });
 
     if (typeof writeClienteJson === "function") {
       writeClienteJson(clienteId, "fila.json", filaCliente);
+      registrarTerminaisConfirmadosGuardFila(clienteId, filaCliente);
       return true;
     }
 
     const file = getFallbackFileSeguro(getFilaFile, clienteId);
 
     salvarFilaFallbackAtomico(file, filaCliente);
+    registrarTerminaisConfirmadosGuardFila(clienteId, filaCliente);
 
     return true;
   } catch (e) {
@@ -1475,6 +1813,12 @@ module.exports = {
   aplicarTemplateUniversalSombra,
   atualizarStatusFila,
   salvarFila,
+  aplicarTerminalGuardFilaCliente,
+  registrarTerminalConfirmadoGuardFila,
+  registrarTerminaisConfirmadosGuardFila,
+  invalidarTerminalGuardFila,
+  inicializarTerminalGuardFilaCliente,
+  snapshotTerminalGuardFila,
   limparFilaAntiga,
   buscarOfertaFila,
   carregarFila

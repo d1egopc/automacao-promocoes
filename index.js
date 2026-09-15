@@ -3229,7 +3229,8 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
       clienteId,
       getFilaFile,
       writeClienteJson,
-      logger: loggerFila
+      logger: loggerFila,
+      permitirRegressaoStatus: opcoes.permitirRegressaoStatus === true
     });
   const salvou = perfilProcessarFila?.etapaSync
     ? perfilProcessarFila.etapaSync("salvar", salvarLegacy)
@@ -3642,6 +3643,11 @@ function carregarFilaLegadaOficial(clienteId = "admin") {
 }
 
 function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
+  const clienteBootstrapGuard = String(clienteId || "admin");
+  filaOfertas.inicializarTerminalGuardFilaCliente(
+    clienteBootstrapGuard,
+    fila.filter(item => String(item?.clienteId || "admin") === clienteBootstrapGuard)
+  );
   reconstruirFilaStoreCliente(clienteId, opcoes.motivo || "carregarFila", opcoes);
   projetarFilaV2ShadowCliente(clienteId, "carregarFila");
   filaOperacionalV2.prepararSeHabilitado({
@@ -12657,8 +12663,13 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
   const salvouLegado = salvarFila(clienteId, {
     motivo: "rota_reprocessar",
     origem: "rota_manual",
-    v2LegacyProofPolicy: "caller_proof"
+    v2LegacyProofPolicy: "caller_proof",
+    permitirRegressaoStatus: true,
+    idRegressaoStatusPermitida: id
   });
+  if (salvouLegado === true) {
+    filaOfertas.invalidarTerminalGuardFila(clienteId, oferta);
+  }
   await sincronizarItemFilaVivaAposMutacao(clienteId, oferta, "rota_reprocessar", {
     permitirRegressaoStatus: true,
     publicarLegacyProof: salvouLegado === true

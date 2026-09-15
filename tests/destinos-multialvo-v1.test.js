@@ -121,6 +121,38 @@ function cincoGrupos() {
 }
 
 {
+  const destino = multi.aplicarContratoMultiAlvoDestino(waDestino({
+    grupo: "",
+    alvos: ["grupo_a@g.us", "grupo_b@g.us", "grupo_c@g.us"].map(grupoId => ({ grupoId }))
+  }));
+  let estado = multi.criarOuAtualizarSnapshotEstado({}, destino);
+  estado = multi.registrarResultadoAlvo(estado, estado.snapshotAlvos[0], {
+    ok: true,
+    estado: "enviado",
+    enviadoEm: "2026-09-15T10:00:00.000Z"
+  });
+
+  assert.strictEqual(multi.estadoLogicoPorAlvos(estado), "aguardando", "1/3 enviado ainda nao torna o destino enviado");
+  assert.strictEqual(multi.destinoEnviadoPorAlvos(estado), false, "destino logico exige todos os chats enviados");
+  assert.deepStrictEqual(
+    multi.alvosPendentesEstado(estado).map(alvo => alvo.grupoId),
+    ["grupo_b@g.us", "grupo_c@g.us"],
+    "chats restantes continuam pendentes dentro do destino"
+  );
+
+  for (const alvo of estado.snapshotAlvos.slice(1)) {
+    estado = multi.registrarResultadoAlvo(estado, alvo, {
+      ok: true,
+      estado: "enviado",
+      enviadoEm: "2026-09-15T10:01:00.000Z"
+    });
+  }
+
+  assert.strictEqual(multi.estadoLogicoPorAlvos(estado), "enviado", "3/3 enviados conclui o destino");
+  assert.strictEqual(multi.destinoEnviadoPorAlvos(estado), true, "todos os chats enviados liberam estado enviado agregado");
+}
+
+{
   const telegram = {
     tipo: "telegram",
     chatId: "-100123",
