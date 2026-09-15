@@ -10,6 +10,15 @@ const {
 } = require("./fila-v2-shadow");
 
 const HISTORICO_LEVE_INCREMENTAL_DIR = "fila-historico-leve-incremental";
+const HISTORICO_INCREMENTAL_DIR = "fila-historico-incremental";
+const ARQUIVOS_DETALHE_REF_PERMITIDOS = new Set([
+  "",
+  HISTORICO_LEVE_INCREMENTAL_DIR,
+  HISTORICO_INCREMENTAL_DIR,
+  FILA_PROJECAO_LEVE_ARQUIVO,
+  "fila-historico.json",
+  "fila.json"
+]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 const JANELA_PUBLICA_DIAS_PADRAO = 7;
 const VISAO_PROCESSADAS = "processadas";
@@ -213,6 +222,41 @@ function registroDentroJanela(ms, opcoes = {}) {
 }
 
 function resultadoPublicoTerminal(item = {}) {
+  const destinos = Array.isArray(item.destinos) && item.destinos.length
+    ? item.destinos
+    : (Array.isArray(item.destinosEstado) ? item.destinosEstado : []);
+  if (destinos.length) {
+    const aplicaveis = destinos.filter(destino => {
+      if (destino?.aplicavel === false) return false;
+      const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
+      return ![
+        "nao compativel",
+        "nao_compativel",
+        "naocompativel",
+        "incompativel",
+        "nao aplicavel",
+        "nao_aplicavel",
+        "naoaplicavel",
+        "bloqueado repeticao 2h",
+        "bloqueado_repeticao_2h"
+      ].includes(estado);
+    });
+    if (aplicaveis.length === 0) return "nao_enviado";
+    if (aplicaveis.length > 0) {
+      const enviados = aplicaveis.filter(destino => {
+        const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
+        return estado === "enviado" || estado === "enviada" || destino?.enviado === true || destino?.ok === true || Boolean(destino?.enviadoEm || destino?.dataEnvio);
+      }).length;
+      const falhas = aplicaveis.filter(destino => {
+        const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
+        return estado.includes("erro") || estado.includes("falha") || estado.includes("bloqueado") || estado === "nao enviado" || estado === "nao_enviado";
+      }).length;
+      if (enviados >= aplicaveis.length) return "enviado";
+      if (enviados > 0 && (falhas > 0 || enviados < aplicaveis.length)) return "parcial";
+      return "nao_enviado";
+    }
+  }
+
   const statusPublico = normalizarTexto(item.statusPublico);
   if (statusPublico === "enviado") return "enviado";
   if (statusPublico === "parcial") return "parcial";
@@ -230,6 +274,95 @@ function resultadoPublicoTerminal(item = {}) {
   const status = normalizarTexto(item.statusOperacional || item.status || item.estado);
   if (["enviado", "enviada", "historico", "sucesso"].includes(status)) return "enviado";
   return "nao_enviado";
+}
+
+function hostUrlSeguro(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function pathUrlSeguro(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.pathname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function hostEhTransporteUrl(host = "") {
+  if (!host) return false;
+  if (host === "go.optimuspromo.com.br" || host.endsWith(".go.optimuspromo.com.br")) return true;
+  return [
+    "amzn.to",
+    "a.co",
+    "meli.la",
+    "s.shopee.com.br",
+    "shope.ee",
+    "bit.ly",
+    "tinyurl.com",
+    "t.co",
+    "encurtador.com.br"
+  ].some(curto => host === curto || host.endsWith(`.${curto}`));
+}
+
+function urlPareceProdutoReal(url = "") {
+  const host = hostUrlSeguro(url);
+  const pathname = pathUrlSeguro(url);
+  if (!host || hostEhTransporteUrl(host)) return false;
+  if (/\/(produto|product|produtos|dp|gp\/product|item|itm|p)(\/|$)/i.test(pathname)) return true;
+  if (/\/[A-Z0-9]{10}(\/|$)/i.test(pathname)) return true;
+  if (/\/MLB-?\d+/i.test(pathname)) return true;
+  return false;
+}
+
+function classificarUrlOferta(campo = "", url = "") {
+  const campoNormalizado = texto(campo);
+  const valor = texto(url);
+  const host = hostUrlSeguro(valor);
+  if (!valor || !host) return { tipo: "desconhecido", confiavel: false, campo: campoNormalizado, url: "" };
+
+  if (/afiliad|affiliate|awin|linkfinal|linkotimizado|linkoptimus/i.test(campoNormalizado)) {
+    return { tipo: "afiliado", confiavel: false, campo: campoNormalizado, url: valor };
+  }
+  if (hostEhTransporteUrl(host) || ["linkOriginalRadar", "linkCapturado"].includes(campoNormalizado)) {
+    return { tipo: "shortlink/transport", confiavel: false, campo: campoNormalizado, url: valor };
+  }
+  if (["urlOriginalProduto", "produtoUrl", "urlProduto", "linkProduto"].includes(campoNormalizado)) {
+    return { tipo: "produto original real", confiavel: true, campo: campoNormalizado, url: valor };
+  }
+  if (["linkOriginal", "urlOriginal", "urlOriginalProjetada"].includes(campoNormalizado) && urlPareceProdutoReal(valor)) {
+    return { tipo: "produto original real", confiavel: true, campo: campoNormalizado, url: valor };
+  }
+  return { tipo: "desconhecido", confiavel: false, campo: campoNormalizado, url: valor };
+}
+
+function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
+  const candidatos = [
+    ["urlOriginalProduto", item.urlOriginalProduto],
+    ["produtoUrl", item.produtoUrl],
+    ["urlProduto", item.urlProduto],
+    ["linkProduto", item.linkProduto],
+    ["linkOriginal", item.linkOriginal],
+    ["urlOriginal", item.urlOriginal],
+    ["urlOriginalProjetada", projetado.urlOriginal],
+    ["linkOriginalRadar", item.linkOriginalRadar],
+    ["linkCapturado", item.linkCapturado]
+  ];
+  for (const [campo, valor] of candidatos) {
+    const classificado = classificarUrlOferta(campo, valor);
+    if (classificado.confiavel) return classificado;
+  }
+  const primeiroClassificado = candidatos
+    .map(([campo, valor]) => classificarUrlOferta(campo, valor))
+    .find(itemClassificado => itemClassificado.url);
+  return primeiroClassificado || { tipo: "desconhecido", confiavel: false, campo: "", url: "" };
 }
 
 function itemEhTerminal(item = {}) {
@@ -269,6 +402,7 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     imagemRef: projetado.imagemRef,
     thumbRef: projetado.imagemRef,
     precoExibivel: projetado.precoExibivel,
+    urlOriginal: primeiroTexto(item.urlOriginalProduto, item.produtoUrl, item.urlProduto, item.linkProduto),
     canal: projetado.canal,
     destinoResumo: primeiroTexto(projetado.destinoNome, projetado.destinoId),
     destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
@@ -720,6 +854,300 @@ function lerHistoricoLeveJsonlPorJanela(params = {}) {
   };
 }
 
+function normalizarDetalheRef(valor = {}) {
+  if (typeof valor === "string") {
+    try {
+      const parsed = JSON.parse(valor);
+      return normalizarDetalheRef(parsed);
+    } catch {
+      return { arquivo: "", id: texto(valor) };
+    }
+  }
+  if (!valor || typeof valor !== "object") return { arquivo: "", id: "" };
+  return {
+    arquivo: texto(valor.arquivo || valor.file || ""),
+    id: texto(valor.id || valor.detalheId || valor.execucaoId || valor.itemId || "")
+  };
+}
+
+function validarArquivoDetalheRef(arquivo = "") {
+  const bruto = texto(arquivo);
+  if (!bruto) return { ok: true, arquivo: "" };
+  if (
+    bruto.includes("\0") ||
+    bruto.includes("..") ||
+    bruto.includes("/") ||
+    bruto.includes("\\") ||
+    path.isAbsolute(bruto) ||
+    !/^[A-Za-z0-9_.-]+$/.test(bruto)
+  ) {
+    return { ok: false, motivo: "detalhe_ref_arquivo_invalido", arquivo: "" };
+  }
+  if (!ARQUIVOS_DETALHE_REF_PERMITIDOS.has(bruto)) {
+    return { ok: false, motivo: "detalhe_ref_arquivo_nao_permitido", arquivo: "" };
+  }
+  return { ok: true, arquivo: bruto };
+}
+
+function arquivoJsonlOrdenados(dir = "", opcoes = {}) {
+  const fsImpl = opcoes.fs || fs;
+  try {
+    if (!dir || !fsImpl.existsSync(dir)) return [];
+    return fsImpl.readdirSync(dir)
+      .filter(nome => /\.jsonl$/i.test(nome))
+      .sort((a, b) => String(b).localeCompare(String(a)))
+      .map(nome => path.join(dir, nome));
+  } catch {
+    return [];
+  }
+}
+
+function itemRegistroHistorico(registro = {}) {
+  return registro?.item && typeof registro.item === "object" ? registro.item : registro;
+}
+
+function registroCombinaDetalheRef(registro = {}, detalheRef = {}) {
+  const id = texto(detalheRef.id);
+  if (!id) return false;
+  const item = itemRegistroHistorico(registro);
+  const candidatos = [
+    registro.id,
+    registro.chave,
+    registro.detalheRef?.id,
+    item.id,
+    item.filaItemId,
+    item.itemFilaId,
+    item.filaId,
+    item.idFila,
+    item.execucaoId,
+    item.executionId,
+    item.distribuicaoId,
+    item.distributionId,
+    item.jobId,
+    item.job_id,
+    item.ofertaOperacionalId,
+    item.operacionalId,
+    item.detalheRef?.id
+  ].map(texto).filter(Boolean);
+  return candidatos.includes(id);
+}
+
+function lerRegistroJsonlPorDetalheRef(dir = "", detalheRef = {}, opcoes = {}) {
+  const fsImpl = opcoes.fs || fs;
+  const inicio = process.hrtime.bigint();
+  let leiturasFisicas = 0;
+  let bytesLidos = 0;
+  let linhasLidas = 0;
+  for (const arquivo of arquivoJsonlOrdenados(dir, { fs: fsImpl })) {
+    let conteudo = "";
+    try {
+      conteudo = fsImpl.readFileSync(arquivo, "utf8");
+      leiturasFisicas += 1;
+      bytesLidos += Buffer.byteLength(conteudo || "", "utf8");
+    } catch {
+      continue;
+    }
+    for (const linha of (conteudo || "").split(/\r?\n/)) {
+      if (!linha.trim()) continue;
+      linhasLidas += 1;
+      try {
+        const registro = JSON.parse(linha);
+        if (registroCombinaDetalheRef(registro, detalheRef)) {
+          return {
+            registro,
+            arquivo,
+            encontrado: true,
+            leiturasFisicas,
+            bytesLidos,
+            linhasLidas,
+            duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+          };
+        }
+      } catch {}
+    }
+  }
+  return {
+    registro: null,
+    arquivo: "",
+    encontrado: false,
+    leiturasFisicas,
+    bytesLidos,
+    linhasLidas,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function resumoProgressoHumano(progresso = {}) {
+  const enviados = Number(progresso.enviados || 0);
+  const total = Number(progresso.total || 0);
+  if (total > 0) return `${enviados} de ${total}`;
+  return "";
+}
+
+function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, registroTecnico = null, detalheRef = {}, indice = -1, agoraMs = Date.now() } = {}) {
+  const itemLeve = registroLeve ? itemRegistroHistorico(registroLeve) : {};
+  const itemTecnico = registroTecnico ? itemRegistroHistorico(registroTecnico) : {};
+  const item = { ...itemTecnico, ...itemLeve, clienteId: clienteSeguro(clienteId) };
+  const projetado = projetarItemFilaLeve(item, { clienteId, indice, agora: agoraMs });
+  const processada = marcoProcessadaItem(item);
+  const resultadoMs = timestampResultadoItem(item);
+  const statusPublico = resultadoPublicoTerminal({
+    ...item,
+    statusPublico: itemLeve.statusPublico || item.statusPublico,
+    statusOperacional: itemLeve.statusOperacional || item.statusOperacional
+  });
+  const timestamp = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
+  const ref = normalizarDetalheRef(detalheRef.id ? detalheRef : (itemLeve.detalheRef || itemTecnico.detalheRef || detalheRef));
+  const urlOriginal = escolherUrlOriginalConfiavel(item, projetado);
+
+  return {
+    id: projetado.id,
+    chave: texto(registroLeve?.chave || registroTecnico?.chave || item.chave),
+    clienteId: clienteSeguro(clienteId),
+    titulo: projetado.titulo,
+    marketplace: projetado.marketplace,
+    categoria: textoLimitado(primeiroTexto(projetado.categoria, item.categoria, item.categoriaProduto), 120),
+    imagemRef: primeiroTexto(
+      item.imagemUsada,
+      item.imagemFinal,
+      item.imagemRef,
+      item.imagemOriginal,
+      item.imagem,
+      item.image,
+      projetado.imagemRef
+    ),
+    thumbRef: primeiroTexto(item.thumbRef, item.thumbnail, item.imagemThumb, item.imagemThumbnail, projetado.imagemRef),
+    precoExibivel: primeiroTexto(projetado.precoExibivel, item.precoExibivel, item.preco, item.precoAtual, item.valorEfetivo),
+    canal: projetado.canal,
+    destinoResumo: primeiroTexto(projetado.destinoNome, projetado.destinoId),
+    destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
+    statusPublico,
+    resultadoPublico: statusPublico,
+    timestamp: isoOuVazio(timestamp),
+    processadaEm: isoOuVazio(processada.ms),
+    finalizadoEm: projetado.finalizadoEm || isoOuVazio(resultadoMs),
+    progresso: projetado.progresso,
+    progressoHumano: resumoProgressoHumano(projetado.progresso),
+    motivoPublico: textoLimitado(primeiroTexto(projetado.motivoPublico, item.motivoPublico, item.motivoFinal, item.motivoRetencao, item.motivo, item.erro), 240),
+    urlOriginal: urlOriginal.confiavel ? urlOriginal.url : "",
+    urlOriginalTipo: urlOriginal.tipo,
+    urlOriginalCampo: urlOriginal.confiavel ? urlOriginal.campo : "",
+    detalheRef: ref,
+    fontes: {
+      leve: Boolean(registroLeve),
+      tecnico: Boolean(registroTecnico)
+    }
+  };
+}
+
+function resolverDetalhePublicoFilaPorRef(params = {}) {
+  const inicio = process.hrtime.bigint();
+  const clienteId = clienteSeguro(params.clienteId || "admin");
+  const agoraMs = Number(params.agoraMs || Date.now());
+  const detalheRef = normalizarDetalheRef(params.detalheRef || { arquivo: params.arquivo, id: params.id });
+  const fsImpl = params.fs || fs;
+  const clientePath = params.clientePath || "";
+  const historicoLeveDir = params.historicoLeveDir || (clientePath ? path.join(clientePath, HISTORICO_LEVE_INCREMENTAL_DIR) : "");
+  const historicoTecnicoDir = params.historicoTecnicoDir || (clientePath ? path.join(clientePath, HISTORICO_INCREMENTAL_DIR) : "");
+  const diagnostico = {
+    leiturasFisicas: 0,
+    bytesLidos: 0,
+    linhasLidas: 0,
+    leuFilaJson: false,
+    maiorTrechoSyncMs: 0
+  };
+  if (!detalheRef.id) {
+    return { ok: false, motivo: "detalhe_ref_invalido", clienteId, detalheRef, diagnostico };
+  }
+  const arquivoSeguro = validarArquivoDetalheRef(detalheRef.arquivo);
+  if (!arquivoSeguro.ok) {
+    diagnostico.totalMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return {
+      ok: false,
+      motivo: arquivoSeguro.motivo,
+      clienteId,
+      detalheRef: { arquivo: "", id: detalheRef.id },
+      diagnostico
+    };
+  }
+  detalheRef.arquivo = arquivoSeguro.arquivo;
+
+  let registroLeve = null;
+  let registroTecnico = null;
+  let fonte = "";
+
+  const hot = Array.isArray(params.hot) ? params.hot : [];
+  const hotItem = hot.find(item => registroCombinaDetalheRef(item, detalheRef));
+  if (hotItem) {
+    registroLeve = hotItem;
+    fonte = "fila_memoria";
+  }
+
+  if (!registroLeve) {
+    const leituraLeve = lerRegistroJsonlPorDetalheRef(historicoLeveDir, detalheRef, { fs: fsImpl });
+    diagnostico.leiturasFisicas += leituraLeve.leiturasFisicas;
+    diagnostico.bytesLidos += leituraLeve.bytesLidos;
+    diagnostico.linhasLidas += leituraLeve.linhasLidas;
+    diagnostico.maiorTrechoSyncMs = Math.max(diagnostico.maiorTrechoSyncMs, leituraLeve.duracaoMs);
+    if (leituraLeve.encontrado) {
+      registroLeve = leituraLeve.registro;
+      fonte = "historico_leve";
+    }
+  }
+
+  const arquivoRef = normalizarTexto(detalheRef.arquivo);
+  if (historicoTecnicoDir && (arquivoRef.includes("historico incremental") || arquivoRef.includes("fila historico incremental") || arquivoRef.includes("fila-historico-incremental") || registroLeve)) {
+    const leituraTecnica = lerRegistroJsonlPorDetalheRef(historicoTecnicoDir, detalheRef, { fs: fsImpl });
+    diagnostico.leiturasFisicas += leituraTecnica.leiturasFisicas;
+    diagnostico.bytesLidos += leituraTecnica.bytesLidos;
+    diagnostico.linhasLidas += leituraTecnica.linhasLidas;
+    diagnostico.maiorTrechoSyncMs = Math.max(diagnostico.maiorTrechoSyncMs, leituraTecnica.duracaoMs);
+    if (leituraTecnica.encontrado) {
+      registroTecnico = leituraTecnica.registro;
+      fonte = registroLeve ? "historico_leve+tecnico" : "historico_tecnico";
+    }
+  }
+
+  if (!registroLeve && !registroTecnico) {
+    diagnostico.totalMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    return { ok: false, motivo: "detalhe_nao_encontrado", clienteId, detalheRef, diagnostico };
+  }
+
+  const detalhe = montarDetalhePublicoFila({
+    clienteId,
+    registroLeve,
+    registroTecnico,
+    detalheRef,
+    agoraMs
+  });
+  const bytesResposta = Buffer.byteLength(JSON.stringify({ ok: true, detalhe }), "utf8");
+  diagnostico.totalMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+  diagnostico.bytesResposta = bytesResposta;
+  return {
+    ok: true,
+    clienteId,
+    detalheRef,
+    fonte,
+    detalhe,
+    diagnostico
+  };
+}
+
+function benchmarkDetalhePublicoFila(params = {}) {
+  const resultado = resolverDetalhePublicoFilaPorRef(params);
+  return {
+    ok: resultado.ok,
+    motivo: resultado.motivo,
+    fonte: resultado.fonte,
+    leiturasFisicas: resultado.diagnostico?.leiturasFisicas || 0,
+    bytesLidos: resultado.diagnostico?.bytesLidos || 0,
+    bytesResposta: resultado.diagnostico?.bytesResposta || Buffer.byteLength(JSON.stringify(resultado), "utf8"),
+    totalMs: resultado.diagnostico?.totalMs || 0,
+    maiorTrechoSyncMs: resultado.diagnostico?.maiorTrechoSyncMs || 0,
+    leuFilaJson: resultado.diagnostico?.leuFilaJson === true
+  };
+}
+
 function benchmarkReadModelPublico(params = {}) {
   const inicio = process.hrtime.bigint();
   const leitura = params.historicoDir
@@ -782,6 +1210,7 @@ module.exports = {
   identidadesRegistro,
   identidadePrincipal,
   resultadoPublicoTerminal,
+  classificarUrlOferta,
   itemEhTerminal,
   construirReadModelPublicoPorMarcos,
   atualizarProjecaoHotPorItem,
@@ -789,5 +1218,7 @@ module.exports = {
   reconciliarProjecaoHotDaFila,
   arquivosHistoricoLevePorJanela,
   lerHistoricoLeveJsonlPorJanela,
-  benchmarkReadModelPublico
+  resolverDetalhePublicoFilaPorRef,
+  benchmarkReadModelPublico,
+  benchmarkDetalhePublicoFila
 };

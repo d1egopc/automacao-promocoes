@@ -5,6 +5,7 @@ const os = require("os");
 const path = require("path");
 const {
   benchmarkReadModelPublico,
+  benchmarkDetalhePublicoFila,
   reconciliarProjecaoHotDaFila
 } = require("../modules/fila/fila-read-model-publico");
 
@@ -184,9 +185,67 @@ function benchmarkFs(nome, hotTotal, historicoTotal, overlap, visao = "processad
   }
 }
 
+function benchmarkDetalhe(nome) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-read-model-detalhe-bench-"));
+  try {
+    const cliente = "bench";
+    const clienteDir = path.join(dir, cliente);
+    const leveDir = path.join(clienteDir, "fila-historico-leve-incremental");
+    const tecnicoDir = path.join(clienteDir, "fila-historico-incremental");
+    fs.mkdirSync(leveDir, { recursive: true });
+    fs.mkdirSync(tecnicoDir, { recursive: true });
+    const registro = historico("detalhe_bench", 1, "enviado");
+    registro.item.imagemFinal = "https://cdn.optimus.test/detalhe-bench.jpg";
+    registro.item.urlProduto = "https://www.amazon.com.br/dp/B0DETALHEB";
+    registro.item.linkOriginal = "https://go.optimuspromo.com.br/r/detalhe-bench";
+    registro.item.detalheRef = { arquivo: "fila-historico-incremental", id: "detalhe_bench" };
+    const registroSomenteLeve = historico("detalhe_somente_leve", 2, "enviado");
+    registroSomenteLeve.item.urlProduto = "https://www.amazon.com.br/dp/B0SOMENTE1";
+    registroSomenteLeve.item.detalheRef = { arquivo: "fila-historico-incremental", id: "detalhe_somente_leve" };
+    fs.writeFileSync(path.join(leveDir, "2026-09-15.jsonl"), `${JSON.stringify({
+      chave: registro.chave,
+      clienteId: cliente,
+      id: "detalhe_bench",
+      statusPublico: "enviado",
+      item: {
+        ...registro.item,
+        metadata: undefined,
+        radarMirror: undefined,
+        ofertaUniversal: undefined,
+        ofcV24: undefined
+      }
+    })}\n${JSON.stringify({
+      chave: registroSomenteLeve.chave,
+      clienteId: cliente,
+      id: "detalhe_somente_leve",
+      statusPublico: "enviado",
+      item: registroSomenteLeve.item
+    })}\n`, "utf8");
+    fs.writeFileSync(path.join(tecnicoDir, "2026-09-15.jsonl"), `${JSON.stringify(registro)}\n`, "utf8");
+    for (const caso of [
+      { nome, detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_bench" } },
+      { nome: "detalhe_somente_historico_leve", detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_somente_leve" } },
+      { nome: "detalhe_inexistente", detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_inexistente" } }
+    ]) {
+      console.log(JSON.stringify({
+        nome: caso.nome,
+        ...benchmarkDetalhePublicoFila({
+          clienteId: cliente,
+          clientePath: clienteDir,
+          detalheRef: caso.detalheRef,
+          agoraMs: AGORA
+        })
+      }));
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 benchmarkMemoria("producao_like_memoria_processadas_827_753_overlap_289", 827, 753, 289, "processadas");
 benchmarkFs("producao_like_fs_processadas_827_753_overlap_289", 827, 753, 289, "processadas");
 benchmarkFs("producao_like_fs_enviadas_827_753_overlap_289", 827, 753, 289, "enviadas");
 benchmarkFs("producao_like_fs_filtro_marketplace_827_753_overlap_289", 827, 753, 289, "processadas", { marketplace: "amazon", q: "Oferta" });
 benchmarkFs("stress_fs_processadas_1500_hot_5000_historicos", 1500, 5000, 500, "processadas");
 benchmarkFs("stress_fs_enviadas_1500_hot_5000_historicos", 1500, 5000, 500, "enviadas");
+benchmarkDetalhe("detalhe_por_ref_fs_1_execucao");

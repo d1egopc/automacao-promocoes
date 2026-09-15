@@ -69,6 +69,7 @@ function rotaGetBloco(fonte, rota) {
   const fonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const rotaFila = rotaGetBloco(fonte, "/fila");
   const rotaStatus = rotaGetBloco(fonte, "/fila/status");
+  const rotaDetalhe = rotaGetBloco(fonte, "/fila/detalhe");
 
   assert(rotaFila.includes("consultarReadModelPublicoFila(clienteId, req.query"), "GET /fila usa helper leve");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
@@ -82,6 +83,12 @@ function rotaGetBloco(fonte, rota) {
   assert(!rotaStatus.includes("fila.filter"), "/fila/status nao materializa lista pesada");
   assert(!rotaStatus.includes("itens:"), "/fila/status nao retorna pagina de itens");
   assert(!rotaStatus.includes("fila:"), "/fila/status nao retorna alias fila");
+
+  assert(fonte.includes("app.get(\"/fila/detalhe\", auth"), "/fila/detalhe exige auth");
+  assert(rotaDetalhe.includes("getClienteId(req)"), "/fila/detalhe usa clienteId autenticado");
+  assert(!rotaDetalhe.includes("req.query.clienteId"), "/fila/detalhe nao aceita clienteId por query");
+  assert(rotaDetalhe.includes("resolverDetalhePublicoFilaPorRef"), "/fila/detalhe usa resolver publico leve");
+  assert(!rotaDetalhe.includes("readJsonCliente"), "/fila/detalhe nao le fila.json diretamente");
 
   const helper = fonte.slice(fonte.indexOf("function consultarReadModelPublicoFila"), fonte.indexOf("app.get(\"/fila\"", fonte.indexOf("function consultarReadModelPublicoFila")));
   assert(helper.includes("FILA_PROJECAO_LEVE_ARQUIVO"), "helper le projecao HOT leve");

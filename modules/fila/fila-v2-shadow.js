@@ -104,7 +104,12 @@ function precoExibivelItemFila(item = {}) {
 function imagemRefItemFila(item = {}) {
   return textoLimitado(
     primeiroTexto(
+      item.imagemUsada,
+      item.imagemFinal,
+      item.imagemRef,
+      item.imagemOriginal,
       item.thumbnail,
+      item.thumbRef,
       item.imagemThumb,
       item.imagemThumbnail,
       item.imagemUrl,
@@ -112,6 +117,22 @@ function imagemRefItemFila(item = {}) {
       item.imagem
     ),
     500
+  );
+}
+
+function urlOriginalItemFila(item = {}) {
+  return textoLimitado(
+    primeiroTexto(
+      item.urlOriginalProduto,
+      item.produtoUrl,
+      item.urlProduto,
+      item.linkProduto,
+      item.linkOriginal,
+      item.urlOriginal,
+      item.linkOriginalRadar,
+      item.linkCapturado
+    ),
+    800
   );
 }
 
@@ -137,6 +158,22 @@ function destinoNomeItemLeve(item = {}) {
 
 function estadoDestinoLeve(destino = {}) {
   return textoNormalizado(destino.estado || destino.status || destino.resultado || "");
+}
+
+function destinoAplicavelLeve(destino = {}) {
+  const estado = estadoDestinoLeve(destino);
+  if (!estado) return true;
+  return ![
+    "nao_compativel",
+    "não_compativel",
+    "naocompativel",
+    "incompativel",
+    "incompatível",
+    "nao_aplicavel",
+    "não_aplicavel",
+    "naoaplicavel",
+    "bloqueado_repeticao_2h"
+  ].includes(estado);
 }
 
 function destinoEnviadoLeve(destino = {}) {
@@ -166,6 +203,7 @@ function destinosEstadoLeves(item = {}) {
       destinoNome: destinoNomeLeve(destino),
       canal: destinoCanalLeve(destino),
       estado: textoLimitado(primeiroTexto(destino.estado, destino.status, destino.resultado), 80),
+      aplicavel: destinoAplicavelLeve(destino),
       enviado: destinoEnviadoLeve(destino),
       erro: destinoErroLeve(destino)
     }));
@@ -178,6 +216,7 @@ function destinosEstadoLeves(item = {}) {
       destinoNome: destinoNomeLeve(destino),
       canal: destinoCanalLeve(destino),
       estado: "",
+      aplicavel: true,
       enviado: false,
       erro: false
     }));
@@ -187,18 +226,20 @@ function destinosEstadoLeves(item = {}) {
   const destinoNome = destinoNomeItemLeve(item);
   const canal = destinoCanalLeve(item);
   return destinoId || destinoNome || canal
-    ? [{ destinoId, destinoNome, canal, estado: "", enviado: false, erro: false }]
+    ? [{ destinoId, destinoNome, canal, estado: "", aplicavel: true, enviado: false, erro: false }]
     : [];
 }
 
 function progressoDestinosLeve(item = {}) {
   const destinos = destinosEstadoLeves(item);
   const status = statusItem(item);
-  const total = destinos.length || (status === "enviado" || status === "enviada" ? 1 : 0);
-  const enviados = destinos.length
-    ? destinos.filter(destino => destino.enviado).length
+  const aplicaveis = destinos.filter(destino => destino.aplicavel !== false);
+  const base = destinos.length ? aplicaveis : destinos;
+  const total = base.length || (status === "enviado" || status === "enviada" ? 1 : 0);
+  const enviados = base.length
+    ? base.filter(destino => destino.enviado).length
     : (status === "enviado" || status === "enviada" ? 1 : 0);
-  const erros = destinos.filter(destino => destino.erro).length;
+  const erros = base.filter(destino => destino.erro).length;
   const pendentes = Math.max(0, total - enviados - erros);
 
   return { enviados, total, pendentes, erros };
@@ -207,6 +248,8 @@ function progressoDestinosLeve(item = {}) {
 function statusPublicoLeve(item = {}, opcoes = {}) {
   const status = statusItem(item);
   const progresso = opcoes.progresso || progressoDestinosLeve(item);
+  const possuiDestinosDeclarados = Array.isArray(item.destinosEstado) && item.destinosEstado.length > 0;
+  if (possuiDestinosDeclarados && progresso.total === 0) return "nao_enviado";
   if (progresso.total > 0) {
     if (progresso.enviados > 0 && progresso.enviados < progresso.total) return "em_distribuicao";
     if (progresso.enviados >= progresso.total) return "enviado";
@@ -357,6 +400,7 @@ function projetarItemFilaLeve(item = {}, opcoes = {}) {
     titulo: textoLimitado(primeiroTexto(item.titulo, item.nome, item.produto), 240),
     marketplace: textoLimitado(primeiroTexto(item.marketplace, item.mercado), 80),
     imagemRef: imagemRefItemFila(item),
+    urlOriginal: urlOriginalItemFila(item),
     precoExibivel: precoExibivelItemFila(item),
     statusPublico,
     statusOperacional,
@@ -367,7 +411,8 @@ function projetarItemFilaLeve(item = {}, opcoes = {}) {
       destinoId: destino.destinoId,
       destinoNome: destino.destinoNome,
       canal: destino.canal,
-      estado: destino.estado
+      estado: destino.estado,
+      aplicavel: destino.aplicavel !== false
     })),
     progresso,
     motivoPublico: textoLimitado(primeiroTexto(

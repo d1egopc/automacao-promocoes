@@ -328,7 +328,8 @@ const {
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
   construirReadModelPublicoPorMarcos,
-  lerHistoricoLeveJsonlPorJanela
+  lerHistoricoLeveJsonlPorJanela,
+  resolverDetalhePublicoFilaPorRef
 } = require("./modules/fila/fila-read-model-publico");
 const {
   filtrarDestinosAutorizadosClonador
@@ -12089,6 +12090,68 @@ app.get("/fila", auth, async (req, res) => {
     itens: itensResposta
   }));
   totalRespostaBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  return res.json(payload);
+});
+
+app.get("/fila/detalhe", auth, async (req, res) => {
+  const perf = criarPerfTimer("PERF FILA DETALHE", contextoPerfHttp(req));
+  const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  const inicializada = await perf.etapa("garantir_inicializacao", () =>
+    garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila_detalhe")
+  );
+  if (!inicializada) return;
+
+  let detalheRef = req.query?.detalheRef || {
+    arquivo: req.query?.arquivo,
+    id: req.query?.id
+  };
+  if (typeof detalheRef === "string") {
+    try {
+      detalheRef = JSON.parse(detalheRef);
+    } catch {
+      detalheRef = {
+        arquivo: req.query?.arquivo,
+        id: detalheRef
+      };
+    }
+  }
+
+  const resultado = perf.etapaSync("resolver_detalhe_publico", () =>
+    resolverDetalhePublicoFilaPorRef({
+      clienteId,
+      detalheRef,
+      clientePath: getClientePath(clienteId),
+      hot: fila.filter(item => String(item?.clienteId || "admin") === String(clienteId))
+    })
+  );
+
+  if (resultado.ok !== true) {
+    perf.fim({ clienteId, statusCode: 404, motivo: resultado.motivo || "detalhe_nao_encontrado" });
+    return res.status(404).json({
+      ok: false,
+      clienteId,
+      motivo: resultado.motivo || "detalhe_nao_encontrado",
+      detalheRef: resultado.detalheRef,
+      diagnostico: resultado.diagnostico
+    });
+  }
+
+  const payload = {
+    ok: true,
+    clienteId,
+    detalhe: resultado.detalhe,
+    detalheRef: resultado.detalheRef,
+    fonte: resultado.fonte,
+    diagnostico: resultado.diagnostico
+  };
+  const bytesResposta = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  perf.fim({
+    clienteId,
+    statusCode: 200,
+    bytesResposta,
+    leiturasFisicas: resultado.diagnostico?.leiturasFisicas || 0,
+    bytesLidos: resultado.diagnostico?.bytesLidos || 0
+  });
   return res.json(payload);
 });
 
