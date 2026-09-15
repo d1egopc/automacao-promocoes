@@ -238,6 +238,8 @@ function criarSnapshotTerminalGuard(item = {}, agora = Date.now()) {
   for (const campo of CAMPOS_TERMINAIS_GUARD) {
     if (Object.prototype.hasOwnProperty.call(item, campo)) {
       campos[campo] = cloneGuardLeve(item[campo]);
+    } else {
+      camposParaLimpar.push(campo);
     }
   }
 
@@ -305,7 +307,11 @@ function registrarTerminalConfirmadoGuardFila(clienteId = "admin", item = {}, op
   limparTerminalGuardCliente(cliente, agora);
   const snapshot = criarSnapshotTerminalGuard({ ...item, clienteId: item?.clienteId || cliente }, agora);
   if (!snapshot) return { ok: true, registrou: false, motivo: "item_nao_terminal_guard" };
-  mapaTerminalGuardCliente(cliente).set(snapshot.id, snapshot);
+  const mapa = mapaTerminalGuardCliente(cliente);
+  if (mapa.has(snapshot.id)) {
+    return { ok: true, registrou: false, motivo: "terminal_guard_ja_confirmado", clienteId: cliente, itemId: snapshot.id, guardSize: mapa.size };
+  }
+  mapa.set(snapshot.id, snapshot);
   return { ok: true, registrou: true, clienteId: cliente, itemId: snapshot.id, guardSize: mapaTerminalGuardCliente(cliente).size };
 }
 
@@ -402,10 +408,8 @@ function aplicarTerminalGuardFilaCliente(clienteId = "admin", filaCliente = [], 
       bypass += 1;
       continue;
     }
-    if (!itemTerminalGuard(item)) {
-      aplicarCamposTerminalGuard(item, snapshot);
-      preservados += 1;
-    }
+    aplicarCamposTerminalGuard(item, snapshot);
+    preservados += 1;
   }
 
   const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);

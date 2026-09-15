@@ -58,6 +58,13 @@ filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_falha_save");
 filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_bootstrap");
 filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_immutavel");
 filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_clear_processando");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_real_enviado_expirada");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_enviado_terminal");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_expirada_terminal");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_erro_terminal");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_mesmo_terminal");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_guard_bypass_neighbor");
+filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_reprocessa_ciclo");
 
 {
   const logsCompletos = Array.from({ length: 25 }, (_, indice) => ({
@@ -177,7 +184,7 @@ filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_clear_processand
     enviadoEm: "2026-09-15T05:00:00.000Z"
   };
   const outroEnviado = {
-    ...itemBase("oferta_guard"),
+    ...itemBase("oferta_guard_bypass_neighbor"),
     status: "enviado",
     statusDetalhe: "Outro terminal protegido",
     enviadoEm: "2026-09-15T05:01:00.000Z"
@@ -187,7 +194,7 @@ filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_clear_processand
   const reprocessado = { ...itemBase("oferta_novo_terminal"), status: "pendente", statusDetalhe: "Reprocessada manualmente" };
   const salvoReprocessado = salvarFilaMemoria([
     reprocessado,
-    { ...itemBase("oferta_guard"), status: "processando" }
+    { ...itemBase("oferta_guard_bypass_neighbor"), status: "processando" }
   ], {
     permitirRegressaoStatus: true,
     idRegressaoStatusPermitida: "oferta_novo_terminal"
@@ -207,6 +214,159 @@ filaOfertas.invalidarTerminalGuardFila("cliente_guard", "oferta_clear_processand
   const stale = salvarFilaMemoria([{ ...itemBase("oferta_novo_terminal"), status: "processando" }]);
   assert.strictEqual(stale[0].status, "enviado");
   assert.strictEqual(stale[0].statusDetalhe, "Enviada novamente");
+}
+
+{
+  const id = "oferta_real_enviado_expirada";
+  const enviadoConfirmado = {
+    ...itemBase(id),
+    status: "enviado",
+    statusDetalhe: "Enviada para 1 destino(s)",
+    enviadoEm: "2026-09-15T03:23:27.193Z",
+    dataEnvio: "2026-09-15T03:23:27.193Z",
+    finalizadoEm: "2026-09-15T03:23:27.193Z",
+    processandoEm: "",
+    progresso: { enviados: 1, total: 1, pendentes: 0, erros: 0 },
+    logsEnvio: [{ tipo: "sucesso", mensagem: "Enviada", data: "2026-09-15T03:23:27.193Z" }]
+  };
+  salvarFilaMemoria([enviadoConfirmado]);
+
+  const staleExpirada = {
+    ...itemBase(id),
+    status: "expirada_operacional",
+    statusDetalhe: "Expirada pelo TTL operacional do Flow antes do envio",
+    processandoEm: "2026-09-15T03:20:00.000Z",
+    expiradaEm: "2026-09-15T03:39:16.495Z",
+    motivoExpiracao: "ttl_operacional_flow",
+    progresso: { enviados: 0, total: 0, pendentes: 0, erros: 0 }
+  };
+  const salvo = salvarFilaMemoria([staleExpirada]);
+
+  assert.strictEqual(salvo[0].status, "enviado");
+  assert.strictEqual(salvo[0].enviadoEm, "2026-09-15T03:23:27.193Z");
+  assert.strictEqual(salvo[0].dataEnvio, "2026-09-15T03:23:27.193Z");
+  assert.deepStrictEqual(salvo[0].progresso, { enviados: 1, total: 1, pendentes: 0, erros: 0 });
+  assert.strictEqual(salvo[0].expiradaEm || "", "");
+  assert.strictEqual(salvo[0].processandoEm, "");
+  assert.strictEqual(staleExpirada.status, "enviado");
+  assert.deepStrictEqual(staleExpirada.progresso, { enviados: 1, total: 1, pendentes: 0, erros: 0 });
+}
+
+{
+  const enviado = {
+    ...itemBase("oferta_enviado_terminal"),
+    status: "enviado",
+    enviadoEm: "2026-09-15T10:00:00.000Z",
+    finalizadoEm: "2026-09-15T10:00:00.000Z",
+    progresso: { enviados: 1, total: 1, pendentes: 0, erros: 0 }
+  };
+  salvarFilaMemoria([enviado]);
+
+  const processando = salvarFilaMemoria([{ ...itemBase("oferta_enviado_terminal"), status: "processando" }]);
+  assert.strictEqual(processando[0].status, "enviado");
+  assert.strictEqual(processando[0].enviadoEm, "2026-09-15T10:00:00.000Z");
+
+  const expirada = salvarFilaMemoria([{
+    ...itemBase("oferta_enviado_terminal"),
+    status: "expirada_operacional",
+    expiradaEm: "2026-09-15T10:30:00.000Z"
+  }]);
+  assert.strictEqual(expirada[0].status, "enviado");
+  assert.strictEqual(expirada[0].enviadoEm, "2026-09-15T10:00:00.000Z");
+  assert.strictEqual(expirada[0].expiradaEm || "", "");
+}
+
+{
+  const expirada = {
+    ...itemBase("oferta_expirada_terminal"),
+    status: "expirada_operacional",
+    expiradaEm: "2026-09-15T11:00:00.000Z",
+    statusDetalhe: "Expirada confirmada"
+  };
+  salvarFilaMemoria([expirada]);
+  const salvo = salvarFilaMemoria([{
+    ...itemBase("oferta_expirada_terminal"),
+    status: "erro_final",
+    erroEm: "2026-09-15T11:10:00.000Z"
+  }]);
+  assert.strictEqual(salvo[0].status, "expirada_operacional");
+  assert.strictEqual(salvo[0].expiradaEm, "2026-09-15T11:00:00.000Z");
+  assert.strictEqual(salvo[0].erroEm || "", "");
+}
+
+{
+  const erroFinal = {
+    ...itemBase("oferta_erro_terminal"),
+    status: "erro_final",
+    erroEm: "2026-09-15T12:00:00.000Z",
+    erro: "falha terminal confirmada"
+  };
+  salvarFilaMemoria([erroFinal]);
+  const salvo = salvarFilaMemoria([{
+    ...itemBase("oferta_erro_terminal"),
+    status: "enviado",
+    enviadoEm: "2026-09-15T12:05:00.000Z",
+    progresso: { enviados: 1, total: 1, pendentes: 0, erros: 0 }
+  }]);
+  assert.strictEqual(salvo[0].status, "erro_final");
+  assert.strictEqual(salvo[0].erroEm, "2026-09-15T12:00:00.000Z");
+  assert.strictEqual(salvo[0].enviadoEm || "", "");
+}
+
+{
+  const terminalCompleto = {
+    ...itemBase("oferta_mesmo_terminal"),
+    status: "enviado",
+    statusDetalhe: "Enviada completa",
+    enviadoEm: "2026-09-15T13:00:00.000Z",
+    finalizadoEm: "2026-09-15T13:00:00.000Z",
+    logsEnvio: [{ tipo: "sucesso", mensagem: "confirmado", data: "2026-09-15T13:00:00.000Z" }],
+    destinosEstado: [{ chave: "whatsapp:a", estado: "enviado" }],
+    progresso: { enviados: 1, total: 1, pendentes: 0, erros: 0 }
+  };
+  salvarFilaMemoria([terminalCompleto]);
+  const salvo = salvarFilaMemoria([{
+    ...itemBase("oferta_mesmo_terminal"),
+    status: "enviado",
+    statusDetalhe: "Enviado degradado",
+    enviadoEm: "2026-09-15T13:05:00.000Z",
+    logsEnvio: [],
+    destinosEstado: [],
+    progresso: { enviados: 0, total: 0, pendentes: 0, erros: 0 }
+  }]);
+  assert.strictEqual(salvo[0].statusDetalhe, "Enviada completa");
+  assert.strictEqual(salvo[0].enviadoEm, "2026-09-15T13:00:00.000Z");
+  assert.deepStrictEqual(salvo[0].logsEnvio, terminalCompleto.logsEnvio);
+  assert.deepStrictEqual(salvo[0].destinosEstado, terminalCompleto.destinosEstado);
+  assert.deepStrictEqual(salvo[0].progresso, terminalCompleto.progresso);
+}
+
+{
+  const id = "oferta_reprocessa_ciclo";
+  salvarFilaMemoria([{
+    ...itemBase(id),
+    status: "enviado",
+    statusDetalhe: "Primeiro ciclo",
+    enviadoEm: "2026-09-15T14:00:00.000Z"
+  }]);
+  const reprocessado = { ...itemBase(id), status: "pendente", statusDetalhe: "Reprocessada manualmente" };
+  const salvoReprocessado = salvarFilaMemoria([reprocessado], {
+    permitirRegressaoStatus: true,
+    idRegressaoStatusPermitida: id
+  });
+  assert.strictEqual(salvoReprocessado[0].status, "pendente");
+  filaOfertas.invalidarTerminalGuardFila("cliente_guard", id);
+
+  salvarFilaMemoria([{
+    ...itemBase(id),
+    status: "enviado",
+    statusDetalhe: "Segundo ciclo",
+    enviadoEm: "2026-09-15T14:10:00.000Z"
+  }]);
+  const stale = salvarFilaMemoria([{ ...itemBase(id), status: "processando" }]);
+  assert.strictEqual(stale[0].status, "enviado");
+  assert.strictEqual(stale[0].statusDetalhe, "Segundo ciclo");
+  assert.strictEqual(stale[0].enviadoEm, "2026-09-15T14:10:00.000Z");
 }
 
 {
