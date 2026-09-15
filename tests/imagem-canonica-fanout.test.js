@@ -863,6 +863,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     _limparCacheImagemCanonicaEvento();
     const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_444444-MLB9999999992_012026-T.webp";
     const radarMaterializada = url("radar-materializada-ml-thumbnail");
+    let apiChamadas = 0;
+    let historicoChamadas = 0;
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9803,
@@ -884,12 +886,20 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         imagemOrigem: "polycard.picture_template"
       }
     }, {
-      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); },
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); }
+      buscarImagemHistorica: async () => {
+        historicoChamadas += 1;
+        return { imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      },
+      buscarImagemOficialMl: async () => {
+        apiChamadas += 1;
+        return { imagem: "", motivo: "api_oficial_mlb_sem_imagem" };
+      }
     });
 
+    assert.strictEqual(apiChamadas, 1);
+    assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
   }
 
   {
@@ -978,6 +988,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     _limparCacheImagemCanonicaEvento();
     const radarMaterializada = url("radar-tatuada-perfume");
     const imagemOutroMlb = "https://http2.mlstatic.com/D_NQ_NP_2X_888888-MLB4444555566_012026-V.webp";
+    let apiChamadas = 0;
+    let historicoChamadas = 0;
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9811,
@@ -1000,10 +1012,18 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         ]
       }
     }, {
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
-      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+      buscarImagemOficialMl: async () => {
+        apiChamadas += 1;
+        return { imagem: "", motivo: "api_oficial_mlb_sem_imagem" };
+      },
+      buscarImagemHistorica: async () => {
+        historicoChamadas += 1;
+        return { imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      }
     });
 
+    assert.strictEqual(apiChamadas, 1);
+    assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, imagemOutroMlb);
   }
@@ -1016,6 +1036,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     _limparCacheImagemCanonicaEvento();
     const radarMaterializada = url("radar-tatuada-thumbnail");
     const thumbnail = "https://http2.mlstatic.com/D_NQ_NP_2X_999999-MLB3333444455_012026-T.webp";
+    let apiChamadas = 0;
+    let historicoChamadas = 0;
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9812,
@@ -1038,10 +1060,18 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         ]
       }
     }, {
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
-      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+      buscarImagemOficialMl: async () => {
+        apiChamadas += 1;
+        return { imagem: "", motivo: "api_oficial_mlb_sem_imagem" };
+      },
+      buscarImagemHistorica: async () => {
+        historicoChamadas += 1;
+        return { imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      }
     });
 
+    assert.strictEqual(apiChamadas, 1);
+    assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, thumbnail);
   }
@@ -1053,6 +1083,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     } = require("../modules/imagens/cache-canonico-evento");
     _limparCacheImagemCanonicaEvento();
     const radarMaterializada = url("radar-sem-candidato-seguro");
+    let apiChamadas = 0;
+    let historicoChamadas = 0;
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9813,
@@ -1073,10 +1105,18 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
         imagemCandidatos: [url("sem-origem-ml")]
       }
     }, {
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
-      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+      buscarImagemOficialMl: async () => {
+        apiChamadas += 1;
+        return { imagem: "", motivo: "api_oficial_mlb_sem_imagem" };
+      },
+      buscarImagemHistorica: async () => {
+        historicoChamadas += 1;
+        return { imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      }
     });
 
+    assert.strictEqual(apiChamadas, 1);
+    assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
   }
 
@@ -1325,6 +1365,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     _limparCacheImagemCanonicaEvento();
     const fetchCount = { count: 0 };
     const radarMensagem = url("radar-mensagem-prioritaria");
+    let apiChamadas = 0;
+    let historicoChamadas = 0;
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9822,
@@ -1346,10 +1388,18 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       }
     }, {
       fetchImpl: fetchImagemOk(fetchCount),
-      buscarImagemOficialMl: async () => { throw new Error("api_nao_deveria_ser_usada"); },
-      buscarImagemHistorica: async () => { throw new Error("historico_nao_deveria_ser_usado"); }
+      buscarImagemOficialMl: async () => {
+        apiChamadas += 1;
+        return { imagem: "", motivo: "api_oficial_mlb_sem_imagem" };
+      },
+      buscarImagemHistorica: async () => {
+        historicoChamadas += 1;
+        return { imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" };
+      }
     });
 
+    assert.strictEqual(apiChamadas, 1);
+    assert.strictEqual(historicoChamadas, 1);
     assert.strictEqual(resultado.imagemCanonicaDuravel, radarMensagem);
     assert.strictEqual(resultado.imagemStatus, "radar_mirror_materializada");
     assert.strictEqual(fetchCount.count, 0);
@@ -1362,6 +1412,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     } = require("../modules/imagens/cache-canonico-evento");
     _limparCacheImagemCanonicaEvento();
     const fetchCount = { count: 0 };
+    const saveCount = { count: 0 };
     const thumbnailMl = "https://http2.mlstatic.com/D_NQ_NP_2X_202020-MLB4040404040_012026-T.webp";
 
     const resultado = await resolverImagemCanonicaFinalEvento({
@@ -1385,13 +1436,15 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       }
     }, {
       fetchImpl: fetchImagemOk(fetchCount),
+      storage: storageDuravel(saveCount, "radar-thumbnail-apos-ml-thumb-materializada"),
       buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" }),
       buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
     });
 
-    assert.strictEqual(resultado.imagemCanonicaDuravel, thumbnailMl);
-    assert.strictEqual(resultado.imagemStatus, "mercadolivre_thumbnail_fallback");
-    assert.strictEqual(fetchCount.count, 0);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-apos-ml-thumb-materializada"));
+    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
+    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(saveCount.count, 1);
   }
 
   {

@@ -478,6 +478,86 @@ function logResolucaoImagemEngine({ job = {}, oferta = {}, resolucao = {}, motiv
   console.log("[ENGINE-IMAGEM-AUSENTE]", JSON.stringify(base));
 }
 
+function adicionarCandidatoImagemMlLog(candidatos = [], vistos = new Set(), origem = "", valor = "") {
+  const imagem = normalizarValorImagem(valor);
+  if (!imagem || vistos.has(imagem)) return;
+  vistos.add(imagem);
+  const qualidade = classificarQualidadeImagemOficialMercadoLivre(imagem, { origem });
+  candidatos.push({
+    origem,
+    url: imagem,
+    baixa: qualidade.baixa,
+    motivo: qualidade.motivo || "",
+    motivos: qualidade.motivos || []
+  });
+}
+
+function adicionarListaCandidatosImagemMlLog(candidatos = [], vistos = new Set(), origem = "", valores = []) {
+  for (const item of Array.isArray(valores) ? valores : [valores].filter(Boolean)) {
+    if (typeof item === "string") {
+      adicionarCandidatoImagemMlLog(candidatos, vistos, origem, item);
+      continue;
+    }
+    const objeto = objetoSeguro(item);
+    const origemItem = normalizarTexto(objeto.origem || objeto.imagemOrigem || origem);
+    const imagem = normalizarValorImagem(objeto);
+    adicionarCandidatoImagemMlLog(candidatos, vistos, origemItem, imagem);
+  }
+}
+
+function logSelecaoImagemMercadoLivre({ job = {}, evento = {}, oferta = {}, ofertaEntrada = {}, imagemCanonicaFinal = {}, imagemCanonica = {}, imagemAnterior = {}, motivoSemImagem = "" } = {}) {
+  const candidatos = [];
+  const vistos = new Set();
+  const metadataEvento = objetoSeguro(evento.metadata);
+  const metadataOferta = objetoSeguro(oferta.metadata || ofertaEntrada.metadata);
+  const produto = objetoSeguro(metadataOferta.produto);
+  const radarMirror = objetoSeguro(metadataEvento.radarMirror || metadataOferta.radarMirror);
+  const midiaRadar = objetoSeguro(radarMirror.midia);
+
+  adicionarCandidatoImagemMlLog(candidatos, vistos, ofertaEntrada.imagemOrigem || "importador.imagem", ofertaEntrada.imagem);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, ofertaEntrada.imagemOrigem || "importador.imagemUrl", ofertaEntrada.imagemUrl);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, oferta.imagemOrigem || "engine.oferta.imagem", oferta.imagem);
+  adicionarListaCandidatosImagemMlLog(candidatos, vistos, "produto.imagemCandidatos", produto.imagemCandidatos || ofertaEntrada.imagemCandidatos || oferta.imagemCandidatos);
+  adicionarListaCandidatosImagemMlLog(candidatos, vistos, "produto.images", produto.images || ofertaEntrada.images || oferta.images);
+  adicionarListaCandidatosImagemMlLog(candidatos, vistos, "produto.pictures", produto.pictures || ofertaEntrada.pictures || oferta.pictures);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, "produto.picture_url", produto.picture_url || ofertaEntrada.picture_url || oferta.picture_url);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, "produto.secure_thumbnail", produto.secure_thumbnail || ofertaEntrada.secure_thumbnail || oferta.secure_thumbnail);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, "produto.thumbnail", produto.thumbnail || ofertaEntrada.thumbnail || oferta.thumbnail);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, "imagem_canonica_ml", imagemCanonica.imagem);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, "historico_mesmo_mlb", imagemAnterior.imagem);
+  adicionarCandidatoImagemMlLog(candidatos, vistos, midiaRadar.imagemOrigem ? `radar_mirror/${midiaRadar.imagemOrigem}` : "radar_mirror", midiaRadar.imagemMaterializada || midiaRadar.imagemDuravel || midiaRadar.imagemEnviavel || midiaRadar.imagemOriginal || radarMirror.imagemMaterializada || radarMirror.imagemOriginal);
+
+  const imagemFinal = oferta.imagem || imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || "";
+  const origemFinal = oferta.imagemOrigem || imagemCanonicaFinal.imagemOrigem || imagemCanonicaFinal.origem || "nenhuma";
+
+  console.log("[ML-IMAGEM-SELECAO]", JSON.stringify({
+    jobId: job.id || null,
+    eventoId: job.evento_id || evento.id || null,
+    clienteId: job.cliente_id || job.clienteId || "",
+    produtoId: oferta.produtoIdDetectado || oferta.itemId || imagemCanonicaFinal.produtoId || "",
+    titulo: oferta.titulo || ofertaEntrada.titulo || "",
+    candidatosEncontrados: candidatos.length,
+    candidatos: candidatos.slice(0, 12).map((candidato) => ({
+      origem: candidato.origem,
+      url: candidato.url,
+      status: candidato.url === imagemFinal ? "selecionada" : (candidato.baixa ? "rejeitada" : "candidata"),
+      motivo: candidato.url === imagemFinal ? (imagemCanonicaFinal.motivo || imagemCanonica.motivo || "selecionada") : candidato.motivo
+    })),
+    vencedor: {
+      url: imagemFinal,
+      origem: origemFinal,
+      status: imagemFinal ? "selecionada" : "sem_imagem",
+      motivo: imagemFinal ? (imagemCanonicaFinal.motivo || imagemCanonica.motivo || "imagem_resolvida") : motivoSemImagem
+    },
+    fallback: {
+      radarFinal: /^radar_mirror\//i.test(origemFinal),
+      radarDisponivel: candidatos.some((candidato) => /^radar_mirror\//i.test(candidato.origem)),
+      historicoUsado: /^engine_ofertas\.imagem:/i.test(origemFinal),
+      apiOficialUsada: /^api_mercadolibre\.items\./i.test(origemFinal)
+    }
+  }));
+}
+
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
   const filtros = ["j.status = 'pronto_para_importar'"];
@@ -1038,21 +1118,115 @@ function normalizarPictureIdPolycardMl(pictureId = "") {
   return /^[A-Z0-9_-]+-[A-Z]{3}\d+_\d{6}$/i.test(valor) ? valor : "";
 }
 
-function montarUrlImagemPolycardMl({ template = "", pictureId = "", square = "", size = "" } = {}) {
+function montarUrlImagemPolycardMl({ template = "", pictureId = "", square = "", size = "", twox = "", ext = "" } = {}) {
   const templateSeguro = normalizarTemplateImagemPolycardMl(template);
   const idSeguro = normalizarPictureIdPolycardMl(pictureId);
   if (!templateSeguro || !idSeguro) return "";
   const squareSeguro = normalizarTexto(square || "Q").replace(/[^A-Z0-9]/gi, "") || "Q";
   const sizeSeguro = normalizarTexto(size || "V").replace(/[^A-Z0-9]/gi, "") || "V";
+  const twoxSeguro = normalizarTexto(twox).toUpperCase() === "2X" || normalizarTexto(twox).toUpperCase() === "_2X" ? "_2X" : "";
   const montada = templateSeguro
     .replace(/\{square\}/g, squareSeguro)
-    .replace(/\{2x\}/g, "")
+    .replace(/\{2x\}/g, twoxSeguro)
     .replace(/\{id\}/g, idSeguro)
     .replace(/\{size\}/g, sizeSeguro)
     .replace(/\{sanitized_title\}/g, "");
-  const imagem = normalizarImagemMercadoLivre(montada);
+  const extSeguro = normalizarTexto(ext).toLowerCase();
+  const comExt = /^(?:webp|jpe?g|png)$/i.test(extSeguro)
+    ? montada.replace(/\.(?:webp|jpe?g|png)(?=($|[?#]))/i, `.${extSeguro}`)
+    : montada;
+  const imagem = normalizarImagemMercadoLivre(comExt);
   if (!imagem || !imagem.includes(idSeguro)) return "";
   return imagem;
+}
+
+function montarVariantesImagemPolycardMl({ template = "", pictureId = "", square = "", size = "" } = {}) {
+  const base = montarUrlImagemPolycardMl({ template, pictureId, square, size });
+  if (!base) return [];
+  const variantes = [];
+  const vistos = new Set();
+  const adicionar = (config = {}) => {
+    const imagem = montarUrlImagemPolycardMl({
+      template,
+      pictureId,
+      square: config.square || square || "Q",
+      size: config.size || size || "V",
+      twox: config.twox || "",
+      ext: config.ext || ""
+    });
+    if (!imagem || vistos.has(imagem)) return;
+    vistos.add(imagem);
+    variantes.push({
+      imagem,
+      origem: "polycard.picture_template",
+      variante: {
+        square: config.square || square || "Q",
+        size: config.size || size || "V",
+        twox: config.twox || "",
+        ext: config.ext || ""
+      }
+    });
+  };
+
+  [
+    { square: "Q", twox: "_2X", size: "F", ext: "jpg" },
+    { square: "Q", twox: "_2X", size: "V", ext: "webp" },
+    { square: square || "Q", twox: "", size: size || "V", ext: "" }
+  ].forEach(adicionar);
+
+  return variantes;
+}
+
+function extrairDimensoesBufferImagemMercadoLivre(buffer = Buffer.alloc(0), contentType = "") {
+  const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  if (bytes.length < 10) return null;
+  if (/webp/i.test(contentType) || (bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP")) {
+    let offset = 12;
+    while (offset + 8 <= bytes.length) {
+      const tipo = bytes.toString("ascii", offset, offset + 4);
+      const tamanho = bytes.readUInt32LE(offset + 4);
+      const dados = offset + 8;
+      if (tipo === "VP8X" && dados + 10 <= bytes.length) {
+        return { largura: 1 + bytes.readUIntLE(dados + 4, 3), altura: 1 + bytes.readUIntLE(dados + 7, 3) };
+      }
+      if (tipo === "VP8 " && dados + 10 <= bytes.length) {
+        const inicio = dados + 3;
+        if (bytes[inicio] === 0x9d && bytes[inicio + 1] === 0x01 && bytes[inicio + 2] === 0x2a) {
+          return { largura: bytes.readUInt16LE(inicio + 3) & 0x3fff, altura: bytes.readUInt16LE(inicio + 5) & 0x3fff };
+        }
+      }
+      if (tipo === "VP8L" && dados + 5 <= bytes.length) {
+        const b0 = bytes[dados + 1];
+        const b1 = bytes[dados + 2];
+        const b2 = bytes[dados + 3];
+        const b3 = bytes[dados + 4];
+        return {
+          largura: 1 + (((b1 & 0x3f) << 8) | b0),
+          altura: 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6))
+        };
+      }
+      offset += 8 + tamanho + (tamanho % 2);
+    }
+  }
+  if (/jpe?g/i.test(contentType) || (bytes[0] === 0xff && bytes[1] === 0xd8)) {
+    let offset = 2;
+    while (offset + 9 < bytes.length) {
+      if (bytes[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marcador = bytes[offset + 1];
+      const tamanho = bytes.readUInt16BE(offset + 2);
+      if (marcador >= 0xc0 && marcador <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marcador)) {
+        return { largura: bytes.readUInt16BE(offset + 7), altura: bytes.readUInt16BE(offset + 5) };
+      }
+      offset += 2 + tamanho;
+    }
+  }
+  if (/gif/i.test(contentType) || bytes.toString("ascii", 0, 3) === "GIF") {
+    return { largura: bytes.readUInt16LE(6), altura: bytes.readUInt16LE(8) };
+  }
+  return null;
 }
 
 function tokensProdutoImagemMl(valor = "") {
@@ -1158,6 +1332,12 @@ function extrairImagemPolycardMercadoLivreHtml(html = "", mlbEsperado = "", ofer
       square: pictures.objeto.square || contexto.picture_square_default,
       size: contexto.picture_size_default
     });
+    const imagemCandidatos = montarVariantesImagemPolycardMl({
+      template: contexto.picture_template,
+      pictureId,
+      square: pictures.objeto.square || contexto.picture_square_default,
+      size: contexto.picture_size_default
+    });
     if (!imagem) {
       ultimoMotivo = "polycard_template_invalido";
       continue;
@@ -1171,6 +1351,7 @@ function extrairImagemPolycardMercadoLivreHtml(html = "", mlbEsperado = "", ofer
       productId: metadata.objeto.product_id || "",
       userProductId: metadata.objeto.user_product_id || "",
       pictureId,
+      imagemCandidatos,
       linkResolvido: metadata.objeto.url || "",
       tituloPolycard: card.title
     };
@@ -1179,52 +1360,81 @@ function extrairImagemPolycardMercadoLivreHtml(html = "", mlbEsperado = "", ofer
 }
 
 async function validarImagemPolycardMercadoLivre(candidato = {}, opcoes = {}) {
-  const imagem = normalizarImagemMercadoLivre(candidato.imagem || "");
-  if (!imagem) return { ...candidato, imagem: "", motivo: candidato.motivo || "polycard_imagem_invalida" };
+  const variantes = Array.isArray(candidato.imagemCandidatos) ? candidato.imagemCandidatos : [];
+  const candidatos = [
+    ...variantes,
+    { imagem: candidato.imagem, origem: candidato.origem, variante: candidato.variante }
+  ];
+  const vistos = new Set();
   const fetchImpl = opcoes.fetchImpl || fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(opcoes.timeoutMs || 4500));
-  try {
-    const response = await fetchImpl(imagem, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-        "Accept": "image/webp,image/*,*/*",
-        "Range": "bytes=0-2047"
-      }
-    });
-    const contentType = String(response.headers?.get?.("content-type") || response.headers?.["content-type"] || "");
-    if (typeof response.arrayBuffer === "function") {
-      await response.arrayBuffer().catch(() => null);
+  let ultimaFalha = null;
+
+  for (const item of candidatos) {
+    const imagem = normalizarImagemMercadoLivre(item.imagem || "");
+    if (!imagem || vistos.has(imagem)) continue;
+    vistos.add(imagem);
+    if (candidato.pictureId && !imagem.includes(candidato.pictureId)) {
+      ultimaFalha = { ...candidato, imagem: "", motivo: "polycard_picture_id_divergente" };
+      continue;
     }
-    if (response.status >= 200 && response.status < 400 && /^image\//i.test(contentType)) {
-      return {
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Number(opcoes.timeoutMs || 2000));
+    try {
+      const response = await fetchImpl(imagem, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+          "Accept": "image/webp,image/jpeg,image/*,*/*"
+        }
+      });
+      const contentType = String(response.headers?.get?.("content-type") || response.headers?.["content-type"] || "");
+      const buffer = typeof response.arrayBuffer === "function"
+        ? Buffer.from(await response.arrayBuffer().catch(() => new ArrayBuffer(0)))
+        : Buffer.alloc(0);
+      const dimensoes = extrairDimensoesBufferImagemMercadoLivre(buffer, contentType);
+      const qualidade = classificarQualidadeImagemOficialMercadoLivre(imagem, {
         ...candidato,
-        imagem,
-        statusHttp: response.status,
-        contentType,
-        motivo: candidato.motivo || "polycard_picture_id_imagem_recuperada"
+        ...item,
+        ...(dimensoes ? { width: dimensoes.largura, height: dimensoes.altura } : {})
+      });
+      if (response.status >= 200 && response.status < 400 && /^image\//i.test(contentType) && !qualidade.baixa) {
+        return {
+          ...candidato,
+          imagem,
+          origem: item.origem || candidato.origem,
+          statusHttp: response.status,
+          contentType,
+          dimensoes,
+          variante: item.variante,
+          motivo: candidato.motivo || "polycard_picture_id_imagem_recuperada"
+        };
+      } else {
+        ultimaFalha = {
+          ...candidato,
+          imagem: "",
+          statusHttp: response.status,
+          contentType,
+          motivo: qualidade.baixa
+            ? qualidade.motivo
+            : (/^image\//i.test(contentType) ? `polycard_http_${response.status}` : "polycard_http_nao_imagem")
+        };
+      }
+    } catch (erro) {
+      ultimaFalha = {
+        ...candidato,
+        imagem: "",
+        statusHttp: null,
+        motivo: erro?.name === "AbortError" ? "timeout_polycard_picture" : `falha_polycard_picture:${erro.message}`
       };
+    } finally {
+      clearTimeout(timer);
     }
-    return {
-      ...candidato,
-      imagem: "",
-      statusHttp: response.status,
-      contentType,
-      motivo: /^image\//i.test(contentType) ? `polycard_http_${response.status}` : "polycard_http_nao_imagem"
-    };
-  } catch (erro) {
-    return {
-      ...candidato,
-      imagem: "",
-      statusHttp: null,
-      motivo: erro?.name === "AbortError" ? "timeout_polycard_picture" : `falha_polycard_picture:${erro.message}`
-    };
-  } finally {
-    clearTimeout(timer);
   }
+
+  return ultimaFalha || { ...candidato, imagem: "", motivo: candidato.motivo || "polycard_imagem_invalida" };
 }
 
 function extrairImagemHtmlMercadoLivre(html = "") {
@@ -1249,19 +1459,116 @@ function extrairImagemHtmlMercadoLivre(html = "") {
   return { imagem: "", origem: "nenhuma" };
 }
 
+function extrairDimensoesImagemOficialMercadoLivre(valor = {}) {
+  const largura = Number(valor.width ?? valor.w ?? valor.largura ?? valor.max_width);
+  const altura = Number(valor.height ?? valor.h ?? valor.altura ?? valor.max_height);
+  if (Number.isFinite(largura) && Number.isFinite(altura) && largura > 0 && altura > 0) {
+    return { largura, altura };
+  }
+  return null;
+}
+
+function classificarQualidadeImagemOficialMercadoLivre(url = "", metadados = {}) {
+  const imagem = normalizarTexto(url);
+  const contexto = [
+    imagem,
+    metadados.origem,
+    metadados.alt,
+    metadados.alt_text,
+    metadados.title,
+    metadados.titulo
+  ].filter(Boolean).join(" ");
+  const contextoVisual = [
+    imagem,
+    metadados.alt,
+    metadados.alt_text,
+    metadados.title,
+    metadados.titulo
+  ].filter(Boolean).join(" ");
+  const dimensoes = extrairDimensoesImagemOficialMercadoLivre(metadados);
+  const motivos = [];
+  if (/-T\.(?:webp|jpe?g|png)(?:$|[?#])/i.test(imagem)) motivos.push("mercadolivre_thumbnail_t");
+  if (/(?:^|[\/_.-])thumb(?:nail)?(?:[\/_.-]|$)|secure_thumbnail|thumbnail/i.test(contexto)) motivos.push("mercadolivre_url_thumbnail");
+  if (/banner|template|watermark|marca[-_ ]?d[ae]?[-_ ]?agua|tatuagem|rodape|footer|promocional|placeholder|generic|generica/i.test(contextoVisual)) {
+    motivos.push("mercadolivre_sinal_arte_promocional");
+  }
+  if (dimensoes && dimensoes.largura <= 220 && dimensoes.altura <= 220) motivos.push("mercadolivre_dimensao_ate_220");
+  if (dimensoes && Math.max(dimensoes.largura / dimensoes.altura, dimensoes.altura / dimensoes.largura) > 2.4) {
+    motivos.push("mercadolivre_dimensao_deformada");
+  }
+  return { baixa: motivos.length > 0, motivo: motivos[0] || "", motivos, dimensoes };
+}
+
+function pesoOrigemImagemOficialMercadoLivre(origem = "") {
+  const valor = normalizarTexto(origem).toLowerCase();
+  if (/pictures\[\d+\]\.secure_url$/.test(valor)) return 1000;
+  if (/pictures\[\d+\]\.url$/.test(valor)) return 980;
+  if (valor.endsWith(".picture_url")) return 760;
+  if (valor.endsWith(".secure_thumbnail")) return 420;
+  if (valor.includes("thumbnail")) return 360;
+  return 500;
+}
+
+function pontuarImagemOficialMercadoLivre(candidato = {}) {
+  const qualidade = classificarQualidadeImagemOficialMercadoLivre(candidato.imagem, candidato);
+  const dimensoes = qualidade.dimensoes || {};
+  const area = Number(dimensoes.largura || 0) * Number(dimensoes.altura || 0);
+  const bonusDimensao = area >= 1_000_000 ? 80 : area >= 409_600 ? 55 : area >= 160_000 ? 30 : 0;
+  const bonus2x = /_2X_/i.test(candidato.imagem || "") ? 20 : 0;
+  return {
+    score: pesoOrigemImagemOficialMercadoLivre(candidato.origem) + bonusDimensao + bonus2x - (qualidade.baixa ? 1000 : 0),
+    qualidade
+  };
+}
+
+function imagemMercadoLivreDeveBuscarCanonica(oferta = {}) {
+  const imagem = normalizarValorImagem(oferta.imagem || oferta.imagemUrl || oferta.image || oferta.imageUrl || "");
+  const origem = normalizarTexto(oferta.imagemOrigem || oferta.origemImagem || oferta.imagemStatus || "").toLowerCase();
+
+  if (!imagem) return { deveBuscar: true, motivo: "imagem_ausente" };
+
+  const qualidade = classificarQualidadeImagemOficialMercadoLivre(imagem, oferta);
+  if (qualidade.baixa) {
+    return { deveBuscar: true, motivo: qualidade.motivo || "imagem_ml_baixa_qualidade" };
+  }
+
+  if (
+    origem.includes("radar_mirror") ||
+    origem.includes("clonador") ||
+    origem === "mensagem" ||
+    origem === "grupo" ||
+    origem.includes("social_media_storage")
+  ) {
+    return { deveBuscar: true, motivo: "imagem_radar_fallback" };
+  }
+
+  if (origem === "og:image" || origem === "twitter:image") {
+    return { deveBuscar: true, motivo: "imagem_social_meta_precisa_revalidacao" };
+  }
+
+  return { deveBuscar: false, motivo: "imagem_ml_atual_suficiente" };
+}
+
 function extrairImagemOficialMercadoLivreApi(dados = {}) {
   const candidatos = [];
-  const adicionar = (origem, valor) => {
+  const adicionar = (origem, valor, metadados = {}) => {
     const imagem = normalizarImagemMercadoLivre(valor);
     if (!imagem || candidatos.some(item => item.imagem === imagem)) return;
-    candidatos.push({ imagem, origem });
+    const candidato = { imagem, origem, ...objetoSeguro(metadados) };
+    const pontuacao = pontuarImagemOficialMercadoLivre(candidato);
+    candidatos.push({
+      imagem,
+      origem,
+      score: pontuacao.score,
+      qualidade: pontuacao.qualidade
+    });
   };
 
   const pictures = Array.isArray(dados.pictures) ? dados.pictures : [];
   pictures.forEach((picture, indice) => {
     if (!picture || typeof picture !== "object") return;
-    adicionar(`api_mercadolibre.items.pictures[${indice}].secure_url`, picture.secure_url);
-    adicionar(`api_mercadolibre.items.pictures[${indice}].url`, picture.url);
+    adicionar(`api_mercadolibre.items.pictures[${indice}].secure_url`, picture.secure_url, picture);
+    adicionar(`api_mercadolibre.items.pictures[${indice}].url`, picture.url, picture);
   });
 
   adicionar("api_mercadolibre.items.secure_thumbnail", dados.secure_thumbnail);
@@ -1269,7 +1576,15 @@ function extrairImagemOficialMercadoLivreApi(dados = {}) {
   adicionar("api_mercadolibre.items.thumbnailUrl", dados.thumbnailUrl || dados.thumbnail_url);
   adicionar("api_mercadolibre.items.picture_url", dados.picture_url);
 
-  return candidatos[0] || { imagem: "", origem: "nenhuma" };
+  candidatos.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.imagem.localeCompare(b.imagem);
+  });
+
+  const vencedor = candidatos[0];
+  return vencedor
+    ? { imagem: vencedor.imagem, origem: vencedor.origem, score: vencedor.score, qualidade: vencedor.qualidade, candidatos }
+    : { imagem: "", origem: "nenhuma", candidatos };
 }
 
 async function buscarImagemOficialMercadoLivrePorMlb(mlb = "", opcoes = {}) {
@@ -1561,8 +1876,11 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
             origem: imagemPolycardValidada.origem,
             linkResolvido: imagemPolycardValidada.linkResolvido || linkResolvido,
             statusHttp: imagemPolycardValidada.statusHttp ?? statusHttp,
+            contentType: imagemPolycardValidada.contentType || "",
             motivo: imagemPolycardValidada.motivo,
             pictureId: imagemPolycardValidada.pictureId || "",
+            dimensoes: imagemPolycardValidada.dimensoes || null,
+            variante: imagemPolycardValidada.variante || null,
             productId: imagemPolycardValidada.productId || "",
             userProductId: imagemPolycardValidada.userProductId || ""
           };
@@ -3487,13 +3805,19 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     };
   }
 
-  if (!oferta.imagem && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+  const decisaoImagemCanonicaMl = normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
+    ? imagemMercadoLivreDeveBuscarCanonica(oferta)
+    : { deveBuscar: false, motivo: "marketplace_nao_ml" };
+
+  if (decisaoImagemCanonicaMl.deveBuscar && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
     const getIntegracaoCliente = typeof deps.getIntegracaoCliente === "function"
       ? deps.getIntegracaoCliente
       : null;
     imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta, {
       clienteId: job.cliente_id || job.clienteId || "",
       job,
+      motivoBuscaCanonica: decisaoImagemCanonicaMl.motivo,
+      ...(typeof deps.fetchImpl === "function" ? { fetchImpl: deps.fetchImpl } : {}),
       ...(getIntegracaoCliente ? { getIntegracaoCliente } : {})
     });
     if (imagemCanonica.imagem) {
@@ -3556,6 +3880,16 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   });
 
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+    logSelecaoImagemMercadoLivre({
+      job,
+      evento,
+      oferta,
+      ofertaEntrada,
+      imagemCanonicaFinal,
+      imagemCanonica,
+      imagemAnterior,
+      motivoSemImagem
+    });
     console.log("[ML-IMAGEM-FALLBACK]", JSON.stringify({
       clienteId: job.cliente_id || job.clienteId || "",
       titulo: oferta.titulo || "",
@@ -4203,6 +4537,7 @@ module.exports = {
   buscarImagemCanonicaMercadoLivre,
   buscarImagemOficialMercadoLivrePorMlb,
   extrairImagemOficialMercadoLivreApi,
+  imagemMercadoLivreDeveBuscarCanonica,
   extrairImagemPolycardMercadoLivreHtml,
   montarUrlImagemPolycardMl,
   validarImagemPolycardMercadoLivre,

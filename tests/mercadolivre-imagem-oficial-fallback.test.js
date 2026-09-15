@@ -24,14 +24,25 @@ function respostaJson(status = 200, dados = {}) {
   };
 }
 
-function respostaImagem(status = 200, contentType = "image/webp") {
+function jpegDimensao(largura = 320, altura = 320) {
+  return Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x11, 0x08,
+    (altura >> 8) & 0xff, altura & 0xff,
+    (largura >> 8) & 0xff, largura & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00
+  ]);
+}
+
+function respostaImagem(status = 200, contentType = "image/webp", dimensoes = null) {
+  const corpo = dimensoes ? jpegDimensao(dimensoes.largura, dimensoes.altura) : new Uint8Array([1, 2, 3]);
   return {
     status,
     url: "https://http2.mlstatic.com/imagem.webp",
     headers: {
       get: (nome) => String(nome || "").toLowerCase() === "content-type" ? contentType : ""
     },
-    arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer
+    arrayBuffer: async () => corpo.buffer.slice(corpo.byteOffset, corpo.byteOffset + corpo.byteLength)
   };
 }
 
@@ -192,7 +203,7 @@ async function comFetchMock(respostas, fn) {
     });
     const { retorno, chamadas } = await comFetchMock([
       respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
-      respostaImagem(200, "image/webp")
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
     ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
       produtoIdDetectado: "MLB4387463577",
@@ -206,16 +217,65 @@ async function comFetchMock(respostas, fn) {
 
     assert.strictEqual(chamadas.length, 2);
     assert.strictEqual(chamadas[0].url, "https://meli.la/2nKnMEm");
-    assert.strictEqual(chamadas[1].url, "https://http2.mlstatic.com/D_Q_NP_766763-MLB102163177100_122025-V.webp");
-    assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_Q_NP_766763-MLB102163177100_122025-V.webp");
+    assert.strictEqual(chamadas[1].url, "https://http2.mlstatic.com/D_Q_NP_2X_766763-MLB102163177100_122025-F.jpg");
+    assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_Q_NP_2X_766763-MLB102163177100_122025-F.jpg");
     assert.strictEqual(retorno.origem, "polycard.picture_template");
     assert.strictEqual(retorno.motivo, "polycard_picture_id_imagem_recuperada");
     assert.strictEqual(retorno.statusHttp, 200);
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 1200, altura: 1200 });
     assert.strictEqual(retorno.pictureId, "766763-MLB102163177100_122025");
     assert.strictEqual(retorno.productId, "");
     assert.strictEqual(retorno.userProductId, "MLBU3692673629");
     assert.strictEqual(retorno.preco, undefined);
     assert.strictEqual(retorno.cupom, undefined);
+  }
+
+  {
+    const html = htmlSocialPolycardImagem({
+      id: "MLB4387463577",
+      pictureId: "766763-MLB102163177100_122025",
+      title: "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"
+    });
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(200, "image/webp", { largura: 640, altura: 640 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      produtoIdDetectado: "MLB4387463577",
+      linkOriginal: "https://meli.la/2nKnMEm",
+      titulo: "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"
+    }));
+
+    assert.strictEqual(chamadas[1].url, "https://http2.mlstatic.com/D_Q_NP_2X_766763-MLB102163177100_122025-F.jpg");
+    assert.strictEqual(chamadas[2].url, "https://http2.mlstatic.com/D_Q_NP_2X_766763-MLB102163177100_122025-V.webp");
+    assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_Q_NP_2X_766763-MLB102163177100_122025-V.webp");
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 640, altura: 640 });
+    assert.strictEqual(new Set(chamadas.slice(1).map(item => item.url)).size, 2);
+  }
+
+  {
+    const html = htmlSocialPolycardImagem({
+      id: "MLB4387463577",
+      pictureId: "766763-MLB102163177100_122025",
+      title: "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"
+    });
+    const respostasImagem = Array.from({ length: 2 }, () => respostaImagem(404, "text/html"));
+    respostasImagem.push(respostaImagem(200, "image/webp", { largura: 320, altura: 320 }));
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      ...respostasImagem
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      produtoIdDetectado: "MLB4387463577",
+      linkOriginal: "https://meli.la/2nKnMEm",
+      titulo: "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"
+    }));
+
+    assert.strictEqual(chamadas.at(-1).url, "https://http2.mlstatic.com/D_Q_NP_766763-MLB102163177100_122025-V.webp");
+    assert.strictEqual(retorno.imagem, "https://http2.mlstatic.com/D_Q_NP_766763-MLB102163177100_122025-V.webp");
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 320, altura: 320 });
+    assert.strictEqual(new Set(chamadas.slice(1).map(item => item.url)).size, 3);
   }
 
   {
@@ -229,7 +289,7 @@ async function comFetchMock(respostas, fn) {
     const generica = "https://produto.mercadolivre.com.br/MLB6711833172";
     const { retorno, chamadas } = await comFetchMock([
       respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
-      respostaImagem(200, "text/html"),
+      ...Array.from({ length: 3 }, () => respostaImagem(200, "text/html")),
       respostaHtml(404, "<html>not found</html>", generica)
     ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
@@ -239,7 +299,8 @@ async function comFetchMock(respostas, fn) {
       titulo: "Pasta de Amendoim Italiana Dr Peanut"
     }));
 
-    assert.strictEqual(chamadas.length, 3);
+    assert.strictEqual(chamadas.at(-1).url, generica);
+    assert.strictEqual(chamadas.filter(item => /mlstatic\.com/i.test(item.url)).length, 3);
     assert.strictEqual(retorno.imagem, "");
     assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente");
   }
