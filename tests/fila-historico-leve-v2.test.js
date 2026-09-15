@@ -6,6 +6,7 @@ const os = require("os");
 const path = require("path");
 
 const filaOperacionalV2 = require("../modules/fila/fila-operacional-v2");
+const filaV2Shadow = require("../modules/fila/fila-v2-shadow");
 
 const AGORA = Date.parse("2026-09-14T12:00:00.000Z");
 
@@ -361,6 +362,161 @@ function escreverHistoricoTecnico(root, clienteId, itens) {
   assert.strictEqual(update.historico.historicoLeve.ok, true, "fast path V2 deve registrar historico leve");
   assert.strictEqual(lista.total, 1);
   assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_bridge_legado";
+  const enviadoRecente = oferta("legacy_enviado", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T11:55:00.000Z"
+  });
+  const filaLegada = [
+    oferta("legacy_pendente", { clienteId: cliente, status: "pendente" }),
+    enviadoRecente
+  ];
+  const envOff = {
+    FILA_V2_OPERACIONAL_ATIVA: "",
+    FILA_V2_OPERACIONAL_ROLLOUT: "",
+    FILA_V2_OPERACIONAL_CANARY_CLIENTES: ""
+  };
+
+  const shadow = filaV2Shadow.projetarFilaV2(filaLegada, { agora: AGORA });
+  const bridge = filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, filaLegada, { ...d, agora: AGORA });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(filaOperacionalV2.deveUsarFilaV2Operacional(cliente, envOff), false);
+  assert.strictEqual(shadow.viva.some(entrada => entrada.item.id === enviadoRecente.id), true, "enviado recente segue vivo por 2h no shadow operacional");
+  assert.strictEqual(bridge.ok, true);
+  assert.strictEqual(bridge.candidatos, 1);
+  assert.strictEqual(lista.total, 1, "bridge legado materializa historico leve sem fast path incremental");
+  assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_bridge_terminais";
+  const filaLegada = [
+    oferta("bridge_enviado", { clienteId: cliente, status: "enviado", enviadoEm: "2026-09-14T08:00:00.000Z" }),
+    oferta("bridge_expirada", { clienteId: cliente, status: "expirada_operacional", expiradoEm: "2026-09-14T08:01:00.000Z" }),
+    oferta("bridge_erro", { clienteId: cliente, status: "erro_final", erroEm: "2026-09-14T08:02:00.000Z" }),
+    oferta("bridge_falha", { clienteId: cliente, status: "falha_final", erroEm: "2026-09-14T08:03:00.000Z" }),
+    oferta("bridge_cancelada", { clienteId: cliente, status: "cancelada", finalizadoEm: "2026-09-14T08:04:00.000Z" }),
+    oferta("bridge_descartada", { clienteId: cliente, status: "descartada", finalizadoEm: "2026-09-14T08:05:00.000Z" }),
+    oferta("bridge_retida", {
+      clienteId: cliente,
+      status: "retida",
+      motivoRetencao: "sem_destino",
+      retidaEm: "2026-09-14T08:06:00.000Z"
+    }),
+    oferta("bridge_parcial", {
+      clienteId: cliente,
+      status: "erro_final",
+      erroEm: "2026-09-14T08:07:00.000Z",
+      destinosEstado: [
+        { destinoId: "a", estado: "enviado" },
+        { destinoId: "b", estado: "erro_final" }
+      ]
+    }),
+    oferta("bridge_pendente", { clienteId: cliente, status: "pendente" })
+  ];
+
+  const bridge = filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, filaLegada, { ...d, agora: AGORA });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 20 }, d);
+  const contagem = filaOperacionalV2.contarHistoricoLeveHoje(cliente, { data: "2026-09-14" }, d);
+
+  assert.strictEqual(bridge.candidatos, 8);
+  assert.strictEqual(lista.total, 8);
+  assert.strictEqual(contagem.enviadosHoje, 1);
+  assert.strictEqual(contagem.parciaisHoje, 1);
+  assert.strictEqual(contagem.naoEnviadosHoje, 6);
+  assert.strictEqual(lista.itens.some(item => item.id === "bridge_parcial" && item.statusPublico === "parcial"), true);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_bridge_idempotente";
+  const filaLegada = [
+    oferta("bridge_repeat", { clienteId: cliente, status: "enviado", enviadoEm: "2026-09-14T08:00:00.000Z" })
+  ];
+
+  const primeiro = filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, filaLegada, { ...d, agora: AGORA });
+  const bytesAntes = bytesHistoricoLeve(root, cliente);
+  const segundo = filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, filaLegada, { ...d, agora: AGORA + 1000 });
+  const bytesDepois = bytesHistoricoLeve(root, cliente);
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(primeiro.writes, 1);
+  assert.strictEqual(segundo.writes, 0, "shadow legado repetido nao cresce JSONL fisicamente");
+  assert.strictEqual(segundo.idempotentes, 1);
+  assert.strictEqual(bytesDepois, bytesAntes);
+  assert.strictEqual(lista.total, 1);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_bridge_retry";
+  const erro = oferta("bridge_retry", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-14T08:00:00.000Z",
+    updatedAt: "2026-09-14T08:00:00.000Z"
+  });
+  const sucesso = oferta("bridge_retry", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T08:10:00.000Z",
+    updatedAt: "2026-09-14T08:10:00.000Z"
+  });
+
+  filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, [erro], { ...d, agora: AGORA });
+  filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, [sucesso], { ...d, agora: AGORA + 1000 });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(linhasHistoricoLeve(root, cliente).length, 2, "retry preserva auditoria leve append-only");
+  assert.strictEqual(lista.total, 1);
+  assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_bridge_nova_execucao";
+  const baseProduto = {
+    clienteId: cliente,
+    ofertaId: "oferta_bridge_mesmo_produto",
+    engineOfertaId: "engine_bridge_mesmo_produto",
+    produtoId: "produto_bridge_mesmo_produto",
+    titulo: "Produto Bridge Reofertado",
+    marketplace: "amazon",
+    preco: "99.90"
+  };
+  const filaLegada = [
+    oferta("bridge_exec_1", {
+      ...baseProduto,
+      status: "enviado",
+      criadoEm: "2026-09-14T08:00:00.000Z",
+      enviadoEm: "2026-09-14T08:05:00.000Z"
+    }),
+    oferta("bridge_exec_2", {
+      ...baseProduto,
+      status: "enviado",
+      criadoEm: "2026-09-14T16:00:00.000Z",
+      enviadoEm: "2026-09-14T16:05:00.000Z"
+    })
+  ];
+
+  filaOperacionalV2.sincronizarHistoricoLeveLegado(cliente, filaLegada, { ...d, agora: AGORA });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+  const contagem = filaOperacionalV2.contarHistoricoLeveHoje(cliente, { data: "2026-09-14" }, d);
+
+  assert.strictEqual(lista.total, 2, "bridge nao deduplica nova execucao legitima do mesmo produto");
+  assert.strictEqual(contagem.totalHoje, 2);
 }
 
 {

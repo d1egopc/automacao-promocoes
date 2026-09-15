@@ -3494,6 +3494,7 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
   const fsImpl = deps.fs || fs;
   const porArquivo = new Map();
   let processados = 0;
+  const inicioPreparar = process.hrtime.bigint();
 
   for (const entrada of lista(entradas)) {
     const preparado = montarRegistroHistoricoLeve(cliente, entrada, deps);
@@ -3506,6 +3507,7 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
     }
     porArquivo.set(preparado.file, grupo);
   }
+  const prepararMs = Math.round(Number(process.hrtime.bigint() - inicioPreparar) / 1e6);
 
   let escritos = 0;
   let idempotentes = 0;
@@ -3513,6 +3515,7 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
   let bytesAppend = 0;
   let writes = 0;
   let maiorTrechoSyncMs = 0;
+  let totalTrechosSyncMs = 0;
 
   for (const [file, grupo] of porArquivo.entries()) {
     const inicioArquivo = process.hrtime.bigint();
@@ -3556,6 +3559,7 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
       erros += grupo.size;
     } finally {
       const trechoMs = Math.round(Number(process.hrtime.bigint() - inicioArquivo) / 1e6);
+      totalTrechosSyncMs += trechoMs;
       if (trechoMs > maiorTrechoSyncMs) maiorTrechoSyncMs = trechoMs;
     }
   }
@@ -3569,7 +3573,52 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
     erros,
     bytesAppend,
     writes,
+    prepararMs,
     maiorTrechoSyncMs,
+    totalTrechosSyncMs,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function itemTerminalHistoricoLevePublico(item = {}, agora = Date.now()) {
+  const status = statusItem(item);
+  if (status === "enviado" || status === "enviada") return true;
+  return classificarItemFilaV2(item, { agora }).bucket === "historico";
+}
+
+function sincronizarHistoricoLeveLegado(clienteId = "admin", filaCliente = [], deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const itens = lista(filaCliente);
+  const entradas = [];
+  let examinados = 0;
+  const inicioFiltro = process.hrtime.bigint();
+
+  for (let indice = 0; indice < itens.length; indice += 1) {
+    const item = itens[indice];
+    if (clienteSeguro(item?.clienteId || "admin") !== cliente) continue;
+    examinados += 1;
+    if (!itemTerminalHistoricoLevePublico(item, agora)) continue;
+    entradas.push(normalizarEntradaViva({ item, posicaoLegada: indice }, indice, agora));
+  }
+  const filtroMs = Math.round(Number(process.hrtime.bigint() - inicioFiltro) / 1e6);
+
+  const batch = appendHistoricoLeveBatch(cliente, entradas, {
+    ...deps,
+    agora,
+    detalheArquivo: FILA_LEGADA_ARQUIVO,
+    bootstrapHistoricoLeve: false,
+    _bridgeHistoricoLeveLegado: true
+  });
+
+  return {
+    ...batch,
+    ok: batch.ok === true,
+    clienteId: cliente,
+    examinados,
+    candidatos: entradas.length,
+    filtroMs,
     duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
   };
 }
@@ -4530,6 +4579,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     appendHistoricoLeveIncremental: (clienteId, entrada, deps = {}) => appendHistoricoLeveIncremental(clienteId, entrada, { ...opcoes, ...deps }),
+    sincronizarHistoricoLeveLegado: (clienteId, filaCliente, deps = {}) => sincronizarHistoricoLeveLegado(clienteId, filaCliente, { ...opcoes, ...deps }),
     listarHistoricoLeveIncremental: (clienteId, params = {}, deps = {}) => listarHistoricoLeveIncremental(clienteId, params, { ...opcoes, ...deps }),
     contarHistoricoLeveHoje: (clienteId, params = {}, deps = {}) => contarHistoricoLeveHoje(clienteId, params, { ...opcoes, ...deps }),
     bootstrapHistoricoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapHistoricoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
@@ -4588,6 +4638,7 @@ module.exports = {
   bootstrapProjecaoLeveCliente,
   resetarEstadoProjecaoLeveParaTeste,
   appendHistoricoLeveIncremental,
+  sincronizarHistoricoLeveLegado,
   listarHistoricoLeveIncremental,
   contarHistoricoLeveHoje,
   bootstrapHistoricoLeveCliente,

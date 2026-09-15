@@ -2970,12 +2970,58 @@ function registrarRewriteLegadoSemProofV2(clienteId = "admin", motivo = "salvarF
 }
 
 function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
-  return filaV2Shadow.projetarSeNecessario({
+  const resultado = filaV2Shadow.projetarSeNecessario({
     fila,
     clienteId,
     motivo,
     ...opcoes
   });
+  const motivoShadow = String(motivo || "");
+  if (resultado?.ok === true && resultado?.pulou !== true && motivoShadow !== "carregarFila") {
+    try {
+      const historicoLeve = filaOperacionalV2.sincronizarHistoricoLeveLegado(clienteId, fila, {
+        logger: console,
+        getClienteJsonPath,
+        getClientePath,
+        agora: opcoes.agora || Date.now()
+      });
+      if (historicoLeve.escritos > 0 || historicoLeve.erros > 0 || historicoLeve.writes > 0) {
+        console.log("[FILA-HISTORICO-LEVE-BRIDGE]", JSON.stringify({
+          versao: 1,
+          clienteId: String(clienteId || "admin"),
+          motivo,
+          ok: historicoLeve.ok === true,
+          examinados: historicoLeve.examinados || 0,
+          candidatos: historicoLeve.candidatos || 0,
+          escritos: historicoLeve.escritos || 0,
+          idempotentes: historicoLeve.idempotentes || 0,
+          writes: historicoLeve.writes || 0,
+          erros: historicoLeve.erros || 0,
+          filtroMs: historicoLeve.filtroMs || 0,
+          prepararMs: historicoLeve.prepararMs || 0,
+          totalTrechosSyncMs: historicoLeve.totalTrechosSyncMs || 0,
+          maiorTrechoSyncMs: historicoLeve.maiorTrechoSyncMs || 0,
+          duracaoMs: historicoLeve.duracaoMs || 0
+        }));
+      }
+      return { ...resultado, historicoLeveBridge: historicoLeve };
+    } catch (erroHistoricoLeve) {
+      console.warn("[FILA-HISTORICO-LEVE-BRIDGE-ERRO]", JSON.stringify({
+        versao: 1,
+        clienteId: String(clienteId || "admin"),
+        motivo,
+        erro: erroHistoricoLeve?.message || "erro_historico_leve_bridge"
+      }));
+      return {
+        ...resultado,
+        historicoLeveBridge: {
+          ok: false,
+          erro: erroHistoricoLeve?.message || "erro_historico_leve_bridge"
+        }
+      };
+    }
+  }
+  return resultado;
 }
 
 function aplicarMergeVivaOperacionalCliente(clienteId = "admin", motivo = "merge", opcoes = {}) {
