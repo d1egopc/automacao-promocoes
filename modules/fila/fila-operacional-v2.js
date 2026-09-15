@@ -3586,6 +3586,74 @@ function itemTerminalHistoricoLevePublico(item = {}, agora = Date.now()) {
   return classificarItemFilaV2(item, { agora }).bucket === "historico";
 }
 
+function entradasTerminaisHistoricoLeveLegado(clienteId = "admin", itens = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const entradas = [];
+  let examinados = 0;
+
+  for (const item of lista(itens)) {
+    if (!item || typeof item !== "object") continue;
+    if (clienteSeguro(item.clienteId || cliente) !== cliente) continue;
+    examinados += 1;
+    if (!itemTerminalHistoricoLevePublico(item, agora)) continue;
+    const posicaoLegada = Number.isInteger(Number(item.posicaoLegada))
+      ? Number(item.posicaoLegada)
+      : -1;
+    entradas.push(normalizarEntradaViva({ item, posicaoLegada }, posicaoLegada, agora));
+  }
+
+  return { entradas, examinados, agora };
+}
+
+function registrarHistoricoLeveTerminaisLegado(clienteId = "admin", itens = [], deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId);
+  const { entradas, examinados, agora } = entradasTerminaisHistoricoLeveLegado(cliente, itens, deps);
+
+  if (!entradas.length) {
+    return {
+      ok: true,
+      pulou: true,
+      motivo: "sem_terminal_publico_historico_leve",
+      clienteId: cliente,
+      examinados,
+      candidatos: 0,
+      processados: 0,
+      escritos: 0,
+      idempotentes: 0,
+      erros: 0,
+      bytesAppend: 0,
+      writes: 0,
+      prepararMs: 0,
+      maiorTrechoSyncMs: 0,
+      totalTrechosSyncMs: 0,
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  }
+
+  const batch = appendHistoricoLeveBatch(cliente, entradas, {
+    ...deps,
+    agora,
+    detalheArquivo: FILA_LEGADA_ARQUIVO,
+    bootstrapHistoricoLeve: false,
+    _terminalLegadoPosSave: true
+  });
+
+  return {
+    ...batch,
+    ok: batch.ok === true,
+    clienteId: cliente,
+    examinados,
+    candidatos: entradas.length,
+    duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+  };
+}
+
+function registrarHistoricoLeveTerminalLegado(clienteId = "admin", item = {}, deps = {}) {
+  return registrarHistoricoLeveTerminaisLegado(clienteId, item ? [item] : [], deps);
+}
+
 function sincronizarHistoricoLeveLegado(clienteId = "admin", filaCliente = [], deps = {}) {
   const inicio = process.hrtime.bigint();
   const cliente = clienteSeguro(clienteId);
@@ -4579,6 +4647,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     appendHistoricoLeveIncremental: (clienteId, entrada, deps = {}) => appendHistoricoLeveIncremental(clienteId, entrada, { ...opcoes, ...deps }),
+    registrarHistoricoLeveTerminalLegado: (clienteId, item, deps = {}) => registrarHistoricoLeveTerminalLegado(clienteId, item, { ...opcoes, ...deps }),
+    registrarHistoricoLeveTerminaisLegado: (clienteId, itens, deps = {}) => registrarHistoricoLeveTerminaisLegado(clienteId, itens, { ...opcoes, ...deps }),
     sincronizarHistoricoLeveLegado: (clienteId, filaCliente, deps = {}) => sincronizarHistoricoLeveLegado(clienteId, filaCliente, { ...opcoes, ...deps }),
     listarHistoricoLeveIncremental: (clienteId, params = {}, deps = {}) => listarHistoricoLeveIncremental(clienteId, params, { ...opcoes, ...deps }),
     contarHistoricoLeveHoje: (clienteId, params = {}, deps = {}) => contarHistoricoLeveHoje(clienteId, params, { ...opcoes, ...deps }),
@@ -4638,6 +4708,8 @@ module.exports = {
   bootstrapProjecaoLeveCliente,
   resetarEstadoProjecaoLeveParaTeste,
   appendHistoricoLeveIncremental,
+  registrarHistoricoLeveTerminalLegado,
+  registrarHistoricoLeveTerminaisLegado,
   sincronizarHistoricoLeveLegado,
   listarHistoricoLeveIncremental,
   contarHistoricoLeveHoje,

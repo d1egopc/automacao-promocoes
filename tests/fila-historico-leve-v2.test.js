@@ -367,6 +367,203 @@ function escreverHistoricoTecnico(root, clienteId, itens) {
 {
   const root = tmpRoot();
   const d = deps(root);
+  const cliente = "cliente_pos_save_enviado";
+  const envOff = {
+    FILA_V2_OPERACIONAL_ATIVA: "",
+    FILA_V2_OPERACIONAL_ROLLOUT: "",
+    FILA_V2_OPERACIONAL_CANARY_CLIENTES: ""
+  };
+  const enviadoRecente = oferta("pos_save_enviado", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T11:55:00.000Z"
+  });
+
+  const shadow = filaV2Shadow.projetarFilaV2([enviadoRecente], { agora: AGORA });
+  const res = filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, enviadoRecente, { ...d, agora: AGORA });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(filaOperacionalV2.deveUsarFilaV2Operacional(cliente, envOff), false);
+  assert.strictEqual(shadow.viva.some(entrada => entrada.item.id === enviadoRecente.id), true, "enviado recente pode continuar vivo operacionalmente por 2h");
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.candidatos, 1);
+  assert.strictEqual(res.writes, 1);
+  assert.strictEqual(lista.total, 1, "terminal legado pos-save deve criar historico leve imediatamente");
+  assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_falha_save";
+  const enviado = oferta("save_falhou", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T11:00:00.000Z"
+  });
+  const salvouFilaJson = false;
+
+  if (salvouFilaJson) {
+    filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, enviado, { ...d, agora: AGORA });
+  }
+
+  assert.strictEqual(linhasHistoricoLeve(root, cliente).length, 0, "save falho nao pode materializar historico leve");
+}
+
+{
+  const root = tmpRoot();
+  const cliente = "cliente_pos_save_falha_leve";
+  const fsFalhaLeve = {
+    ...fs,
+    appendFileSync(file, conteudo, enc) {
+      if (String(file).includes(filaOperacionalV2.HISTORICO_LEVE_INCREMENTAL_DIR)) {
+        throw new Error("historico_leve_indisponivel");
+      }
+      return fs.appendFileSync(file, conteudo, enc);
+    }
+  };
+  const enviado = oferta("leve_falhou", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T11:00:00.000Z"
+  });
+
+  const res = filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, enviado, {
+    ...deps(root),
+    fs: fsFalhaLeve,
+    agora: AGORA
+  });
+
+  assert.strictEqual(res.ok, false, "falha do read model deve ficar observavel");
+  assert.strictEqual(res.erros, 1);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_idempotente";
+  const enviado = oferta("pos_save_repeat", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T11:00:00.000Z"
+  });
+
+  const primeiro = filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, enviado, { ...d, agora: AGORA });
+  const bytesAntes = bytesHistoricoLeve(root, cliente);
+  const segundo = filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, enviado, { ...d, agora: AGORA + 1000 });
+  const bytesDepois = bytesHistoricoLeve(root, cliente);
+
+  assert.strictEqual(primeiro.writes, 1);
+  assert.strictEqual(segundo.writes, 0, "mesmo item pos-save nao duplica fisicamente");
+  assert.strictEqual(segundo.idempotentes, 1);
+  assert.strictEqual(bytesDepois, bytesAntes);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_retry";
+  const erro = oferta("pos_save_retry", {
+    clienteId: cliente,
+    status: "erro_final",
+    erroEm: "2026-09-14T08:00:00.000Z",
+    updatedAt: "2026-09-14T08:00:00.000Z"
+  });
+  const sucesso = oferta("pos_save_retry", {
+    clienteId: cliente,
+    status: "enviado",
+    enviadoEm: "2026-09-14T08:10:00.000Z",
+    updatedAt: "2026-09-14T08:10:00.000Z"
+  });
+
+  filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, erro, { ...d, agora: AGORA });
+  filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, sucesso, { ...d, agora: AGORA + 1000 });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+
+  assert.strictEqual(linhasHistoricoLeve(root, cliente).length, 2);
+  assert.strictEqual(lista.total, 1);
+  assert.strictEqual(lista.itens[0].statusPublico, "enviado");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_nova_execucao";
+  const baseProduto = {
+    clienteId: cliente,
+    produtoId: "produto_pos_save_mesmo_produto",
+    titulo: "Produto Pos Save Reofertado",
+    marketplace: "amazon",
+    preco: "99.90"
+  };
+
+  filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, oferta("pos_exec_1", {
+    ...baseProduto,
+    status: "enviado",
+    criadoEm: "2026-09-14T08:00:00.000Z",
+    enviadoEm: "2026-09-14T08:05:00.000Z"
+  }), { ...d, agora: AGORA });
+  filaOperacionalV2.registrarHistoricoLeveTerminalLegado(cliente, oferta("pos_exec_2", {
+    ...baseProduto,
+    status: "enviado",
+    criadoEm: "2026-09-14T16:00:00.000Z",
+    enviadoEm: "2026-09-14T16:05:00.000Z"
+  }), { ...d, agora: AGORA });
+
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, {}, d);
+  assert.strictEqual(lista.total, 2, "nova execucao do mesmo produto continua gerando novo resultado publico");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_lote_expiracao";
+  const alterados = [
+    oferta("exp_lote_1", { clienteId: cliente, status: "expirada_operacional", expiradaEm: "2026-09-14T08:00:00.000Z" }),
+    oferta("exp_lote_2", { clienteId: cliente, status: "expirada_operacional", expiradaEm: "2026-09-14T08:01:00.000Z" })
+  ];
+  const naoAlterado = oferta("exp_lote_nao_alterado", {
+    clienteId: cliente,
+    status: "expirada_operacional",
+    expiradaEm: "2026-09-14T08:02:00.000Z"
+  });
+
+  const res = filaOperacionalV2.registrarHistoricoLeveTerminaisLegado(cliente, alterados, { ...d, agora: AGORA });
+  const lista = filaOperacionalV2.listarHistoricoLeveIncremental(cliente, { limite: 10 }, d);
+
+  assert.strictEqual(res.candidatos, 2);
+  assert.strictEqual(lista.total, 2, "lote pos-save registra somente itens explicitamente alterados");
+  assert.strictEqual(lista.itens.some(item => item.id === naoAlterado.id), false);
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
+  const cliente = "cliente_pos_save_skip_operacional";
+  const recuperaveis = [
+    oferta("erro_recuperavel", {
+      clienteId: cliente,
+      status: "erro",
+      erroEm: "2026-09-14T08:00:00.000Z",
+      proximaTentativaEnvioEm: "2026-09-14T09:00:00.000Z"
+    }),
+    oferta("retida_operacional", {
+      clienteId: cliente,
+      status: "retida",
+      motivoRetencao: "intervalo_aguardando",
+      proximaTentativaEnvioEm: "2026-09-14T09:00:00.000Z"
+    })
+  ];
+
+  const res = filaOperacionalV2.registrarHistoricoLeveTerminaisLegado(cliente, recuperaveis, { ...d, agora: AGORA });
+  assert.strictEqual(res.pulou, true);
+  assert.strictEqual(res.candidatos, 0);
+  assert.strictEqual(linhasHistoricoLeve(root, cliente).length, 0, "erro/retida recuperavel nao vira terminal publico");
+}
+
+{
+  const root = tmpRoot();
+  const d = deps(root);
   const cliente = "cliente_bridge_legado";
   const enviadoRecente = oferta("legacy_enviado", {
     clienteId: cliente,

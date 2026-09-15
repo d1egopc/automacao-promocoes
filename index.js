@@ -1491,6 +1491,9 @@ async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], 
 
   if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
     const salvou = salvarFila(cliente, { origem: "expiracao", motivo });
+    if (salvou === true) {
+      registrarHistoricoLeveTerminalLegadoAposSave(cliente, itens, motivo);
+    }
     return { ok: salvou === true, alterou: true, salvouLegado: salvou === true };
   }
 
@@ -1512,6 +1515,9 @@ async function persistirExpiracaoFila(clienteId = "admin", itensAlterados = [], 
         origem: "expiracao",
         motivo: `${motivo}_fallback_legado`
       });
+      if (salvou === true) {
+        registrarHistoricoLeveTerminalLegadoAposSave(cliente, itens, `${motivo}_fallback_legado`);
+      }
       return {
         ok: salvou === true,
         alterou: true,
@@ -2970,58 +2976,68 @@ function registrarRewriteLegadoSemProofV2(clienteId = "admin", motivo = "salvarF
 }
 
 function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizacao", opcoes = {}) {
-  const resultado = filaV2Shadow.projetarSeNecessario({
+  return filaV2Shadow.projetarSeNecessario({
     fila,
     clienteId,
     motivo,
     ...opcoes
   });
-  const motivoShadow = String(motivo || "");
-  if (resultado?.ok === true && resultado?.pulou !== true && motivoShadow !== "carregarFila") {
-    try {
-      const historicoLeve = filaOperacionalV2.sincronizarHistoricoLeveLegado(clienteId, fila, {
-        logger: console,
-        getClienteJsonPath,
-        getClientePath,
-        agora: opcoes.agora || Date.now()
-      });
-      if (historicoLeve.escritos > 0 || historicoLeve.erros > 0 || historicoLeve.writes > 0) {
-        console.log("[FILA-HISTORICO-LEVE-BRIDGE]", JSON.stringify({
-          versao: 1,
-          clienteId: String(clienteId || "admin"),
-          motivo,
-          ok: historicoLeve.ok === true,
-          examinados: historicoLeve.examinados || 0,
-          candidatos: historicoLeve.candidatos || 0,
-          escritos: historicoLeve.escritos || 0,
-          idempotentes: historicoLeve.idempotentes || 0,
-          writes: historicoLeve.writes || 0,
-          erros: historicoLeve.erros || 0,
-          filtroMs: historicoLeve.filtroMs || 0,
-          prepararMs: historicoLeve.prepararMs || 0,
-          totalTrechosSyncMs: historicoLeve.totalTrechosSyncMs || 0,
-          maiorTrechoSyncMs: historicoLeve.maiorTrechoSyncMs || 0,
-          duracaoMs: historicoLeve.duracaoMs || 0
-        }));
-      }
-      return { ...resultado, historicoLeveBridge: historicoLeve };
-    } catch (erroHistoricoLeve) {
-      console.warn("[FILA-HISTORICO-LEVE-BRIDGE-ERRO]", JSON.stringify({
+}
+
+function registrarHistoricoLeveTerminalLegadoAposSave(clienteId = "admin", itens = [], motivo = "terminal_legado_pos_save", opcoes = {}) {
+  const listaItens = Array.isArray(itens)
+    ? itens.filter(item => item && typeof item === "object")
+    : (itens && typeof itens === "object" ? [itens] : []);
+
+  if (!listaItens.length) {
+    return { ok: true, pulou: true, motivo: "sem_itens_terminal_legado" };
+  }
+
+  if (filaOperacionalV2.deveUsarFilaV2Operacional(clienteId)) {
+    return { ok: true, pulou: true, motivo: "fila_v2_operacional_ativa" };
+  }
+
+  try {
+    const historicoLeve = filaOperacionalV2.registrarHistoricoLeveTerminaisLegado(clienteId, listaItens, {
+      logger: console,
+      getClienteJsonPath,
+      getClientePath,
+      agora: opcoes.agora || Date.now()
+    });
+
+    if (historicoLeve.escritos > 0 || historicoLeve.erros > 0 || historicoLeve.writes > 0) {
+      console.log("[FILA-HISTORICO-LEVE-TERMINAL-LEGADO]", JSON.stringify({
         versao: 1,
         clienteId: String(clienteId || "admin"),
         motivo,
-        erro: erroHistoricoLeve?.message || "erro_historico_leve_bridge"
+        ok: historicoLeve.ok === true,
+        examinados: historicoLeve.examinados || 0,
+        candidatos: historicoLeve.candidatos || 0,
+        escritos: historicoLeve.escritos || 0,
+        idempotentes: historicoLeve.idempotentes || 0,
+        writes: historicoLeve.writes || 0,
+        erros: historicoLeve.erros || 0,
+        prepararMs: historicoLeve.prepararMs || 0,
+        totalTrechosSyncMs: historicoLeve.totalTrechosSyncMs || 0,
+        maiorTrechoSyncMs: historicoLeve.maiorTrechoSyncMs || 0,
+        duracaoMs: historicoLeve.duracaoMs || 0
       }));
-      return {
-        ...resultado,
-        historicoLeveBridge: {
-          ok: false,
-          erro: erroHistoricoLeve?.message || "erro_historico_leve_bridge"
-        }
-      };
     }
+
+    return historicoLeve;
+  } catch (erroHistoricoLeve) {
+    console.warn("[FILA-HISTORICO-LEVE-TERMINAL-LEGADO-ERRO]", JSON.stringify({
+      versao: 1,
+      clienteId: String(clienteId || "admin"),
+      motivo,
+      erro: erroHistoricoLeve?.message || "erro_historico_leve_terminal_legado"
+    }));
+    return {
+      ok: false,
+      motivo: "erro_historico_leve_terminal_legado",
+      erro: erroHistoricoLeve?.message || "erro_historico_leve_terminal_legado"
+    };
   }
-  return resultado;
 }
 
 function aplicarMergeVivaOperacionalCliente(clienteId = "admin", motivo = "merge", opcoes = {}) {
@@ -9806,6 +9822,7 @@ if (!oferta) {
     // Somente bloqueios comprovados de anti-repeat/duplicidade recebem a
     // retencao funcional atual; indisponibilidade tecnica encerra o ciclo sem
     // alterar o item e sem consumir fairness.
+    const retidasFairnessHistoricoLeve = [];
     for (const skip of resultadoFairnessFila?.skipped || []) {
       if (skip?.motivo !== "anti_repeat" && skip?.motivo !== "duplicidade") continue;
       const localizacao = filaOfertas.relocalizarOfertaFila(colecaoFairnessFila, skip.candidato?.oferta || skip.candidato || {}, {
@@ -9819,9 +9836,13 @@ if (!oferta) {
         ofertaAnteriorId: dadosBloqueio.ofertaAnterior?.id || dadosBloqueio.ofertaAnterior?.engineOfertaId || "",
         statusDetalhe: "Retida: duplicata ativa na janela de 2 horas"
       });
+      retidasFairnessHistoricoLeve.push(localizacao.oferta);
       marcarFilaAlterada();
     }
-    await salvarFilaSeAlterada(clienteFila);
+    const salvouRetidasFairness = await salvarFilaSeAlterada(clienteFila);
+    if (salvouRetidasFairness && retidasFairnessHistoricoLeve.length) {
+      registrarHistoricoLeveTerminalLegadoAposSave(clienteFila, retidasFairnessHistoricoLeve, "executor_retidas_fairness");
+    }
 
     if (resultadoFairnessFila?.ignorado) {
       resumoFila.motivoPulo = resultadoFairnessFila.motivo || "sem_candidato_elegivel";
@@ -10149,7 +10170,10 @@ if (!destinosCompativeis.length) {
     rejeitados: analiseDestinosFila.rejeitados?.map(item => item?.analise?.motivo || "").filter(Boolean) || []
   });
   marcarFilaAlterada();
-  await salvarFilaSeAlterada(clienteId);
+  const salvouRetidaSemDestino = await salvarFilaSeAlterada(clienteId);
+  if (salvouRetidaSemDestino) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_retida_sem_destino");
+  }
   registrarCoberturaExecutor("fila_item_retido", oferta, clienteId, {}, {
     decisao: "retido",
     motivo: "item_retido",
@@ -10330,7 +10354,10 @@ if (repeticaoExecutor.bloqueada) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  await salvarFilaSeAlterada(clienteId);
+  const salvouRetidaRepeticao = await salvarFilaSeAlterada(clienteId);
+  if (salvouRetidaRepeticao) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_retida_repeticao");
+  }
   return;
 }
 
@@ -10420,7 +10447,10 @@ if (duplicidadeProcessamento.bloquear) {
     filaRecebeu: true,
     statusFilaDepois: oferta.status || "retida"
   });
-  await salvarFilaSeAlterada(clienteId);
+  const salvouRetidaDuplicidade = await salvarFilaSeAlterada(clienteId);
+  if (salvouRetidaDuplicidade) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_retida_duplicidade");
+  }
   return;
 }
 
@@ -11025,7 +11055,10 @@ if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0 &&
   oferta.retidaEm = new Date().toISOString();
   oferta.processandoEm = "";
   marcarFilaAlterada();
-  await salvarFilaSeAlterada(clienteId);
+  const salvouRetidaFanout = await salvarFilaSeAlterada(clienteId);
+  if (salvouRetidaFanout) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_retida_fanout");
+  }
   return;
 }
 
@@ -11067,7 +11100,10 @@ if (!enviouParaAlgumDestino && totalDestinosEnviadosFanout === 0) {
     dentroJanela: dentroJanelaExecutor,
     statusFinal: "erro"
   });
-  await salvarFilaSeAlterada(clienteId);
+  const salvouErroEnvio = await salvarFilaSeAlterada(clienteId);
+  if (salvouErroEnvio) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_erro_envio");
+  }
   return;
 }
 
@@ -11147,7 +11183,10 @@ logExecutorDestinoDiagnostico({
   statusFinal: "enviado"
 });
 
-await salvarFilaSeAlterada(clienteId);
+const salvouEnvioTerminal = await salvarFilaSeAlterada(clienteId);
+if (salvouEnvioTerminal) {
+  registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_enviado");
+}
 
 console.log("[ENVIO] Enviado com controle de tempo");
 
@@ -11169,7 +11208,10 @@ console.log("[ENVIO] Enviado com controle de tempo");
     if (erroFila.ok) {
       oferta = erroFila.oferta;
       marcarFilaAlterada();
-      await salvarFilaSeAlterada(clienteErro);
+      const salvouErroCatch = await salvarFilaSeAlterada(clienteErro);
+      if (salvouErroCatch) {
+        registrarHistoricoLeveTerminalLegadoAposSave(clienteErro, oferta, "executor_erro_catch");
+      }
       registrarCoberturaExecutor("executor_erro", oferta, clienteErro, {}, {
         decisao: "erro",
         motivo: "erro",
