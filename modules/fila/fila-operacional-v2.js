@@ -21,6 +21,11 @@ const {
   projetarFilaLeve,
   atualizarItemProjecaoLeveFila
 } = require("./fila-v2-shadow");
+const {
+  atualizarProjecaoHotPorItem,
+  removerProjecaoHotPorItem,
+  reconciliarProjecaoHotDaFila
+} = require("./fila-read-model-publico");
 const manifestStateRepository = require("./fila-manifest-state.repository");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
@@ -60,6 +65,7 @@ const bootstrapHistoricoLeveInicializado = new Map();
 const recoveryComparacaoLogThrottle = new Map();
 const manifestStateLogThrottle = new Map();
 const pendenciasProjecaoLeve = new Map();
+const projectionReadyProjecaoLeve = new Map();
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -420,8 +426,8 @@ function lerItensFilaVivaParaProjecaoLeve(clienteId = "admin", deps = {}) {
 
 function bootstrapProjecaoLeveSeAusente(clienteId = "admin", leituraProjecao = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
-  const reconciliarPrimeiroEvento = deps.reconciliarProjecaoLevePrimeiroEvento !== false;
-  if ((leituraProjecao.existe === true && !reconciliarPrimeiroEvento) || deps.bootstrapProjecaoLeve === false) {
+  const bootstrapFilaVivaPermitido = deps.bootstrapProjecaoLeveDeFilaViva === true;
+  if (leituraProjecao.existe === true || deps.bootstrapProjecaoLeve === false || !bootstrapFilaVivaPermitido) {
     return {
       ok: true,
       pulou: true,
@@ -549,9 +555,9 @@ function atualizarProjecaoLeveIncremental(clienteId = "admin", item = {}, deps =
   try {
     const estado = estadoPendenteProjecaoLeve(cliente, deps);
     const itemCliente = { ...(item || {}), clienteId: cliente };
-    estado.projecao = atualizarItemProjecaoLeveFila(estado.projecao, itemCliente, {
+    estado.projecao = atualizarProjecaoHotPorItem(estado.projecao, itemCliente, {
       clienteId: cliente,
-      agora: deps.agora || Date.now()
+      agoraMs: deps.agora || Date.now()
     });
     estado.deps = { ...estado.deps, ...deps };
     estado.dirty = true;
@@ -573,6 +579,43 @@ function atualizarProjecaoLeveIncremental(clienteId = "admin", item = {}, deps =
     return {
       ok: false,
       motivo: "erro_projecao_leve_incremental",
+      erro: erro?.message || "erro_projecao_leve",
+      clienteId: cliente,
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  }
+}
+
+function removerProjecaoLeveIncremental(clienteId = "admin", item = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || item?.clienteId || "admin");
+  try {
+    const estado = estadoPendenteProjecaoLeve(cliente, deps);
+    const itemCliente = { ...(item || {}), clienteId: cliente };
+    estado.projecao = removerProjecaoHotPorItem(estado.projecao, itemCliente, {
+      clienteId: cliente,
+      agoraMs: deps.agora || Date.now()
+    });
+    estado.deps = { ...estado.deps, ...deps };
+    estado.dirty = true;
+    estado.alteracoes += 1;
+    const flush = deps.flushProjecaoLeveSincrono === true
+      ? flushProjecaoLeveCliente(cliente, deps)
+      : agendarFlushProjecaoLeve(cliente, deps);
+    return {
+      ok: true,
+      motivo: "projecao_leve_removida_incremental",
+      clienteId: cliente,
+      agendado: flush.agendado === true,
+      flush,
+      total: estado.projecao.total,
+      bytesProjecaoLeve: tamanhoJsonBytes(estado.projecao),
+      duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "erro_projecao_leve_remove_incremental",
       erro: erro?.message || "erro_projecao_leve",
       clienteId: cliente,
       duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
@@ -627,6 +670,7 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
       },
       inicializadoNestaExecucao: true
     });
+    projectionReadyProjecaoLeve.set(cliente, true);
   }
   return {
     ok: escrita.ok === true,
@@ -642,6 +686,58 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
   };
 }
 
+function reconciliarProjecaoHotPublicaCliente(clienteId = "admin", params = {}, deps = {}) {
+  const inicio = process.hrtime.bigint();
+  const cliente = clienteSeguro(clienteId || params.clienteId || "admin");
+  const agora = params.agora || deps.agora || Date.now();
+  const filaMemoria = Array.isArray(params.fila) ? params.fila : [];
+  const reconciliacao = reconciliarProjecaoHotDaFila(filaMemoria, {
+    clienteId: cliente,
+    agoraMs: agora
+  });
+  const escrita = escreverProjecaoLeve(cliente, reconciliacao.projecao, { ...deps, agora });
+  if (escrita.ok === true) {
+    const anterior = pendenciasProjecaoLeve.get(cliente);
+    if (anterior?.timer) clearTimeout(anterior.timer);
+    pendenciasProjecaoLeve.set(cliente, {
+      clienteId: cliente,
+      projecao: reconciliacao.projecao,
+      deps,
+      timer: null,
+      dirty: false,
+      alteracoes: 0,
+      erroLeitura: "",
+      bootstrap: {
+        ok: true,
+        pulou: false,
+        motivo: "reconcile_fila_memoria",
+        fonte: "fila_memoria",
+        totalBootstrap: reconciliacao.projecao.total
+      },
+      inicializadoNestaExecucao: true
+    });
+    projectionReadyProjecaoLeve.set(cliente, true);
+  } else {
+    projectionReadyProjecaoLeve.set(cliente, false);
+  }
+  return {
+    ok: escrita.ok === true,
+    motivo: escrita.ok === true ? "projecao_hot_publica_reconciliada" : escrita.motivo,
+    clienteId: cliente,
+    projectionReady: escrita.ok === true,
+    fonte: reconciliacao.fonte,
+    arquivo: reconciliacao.arquivo,
+    total: reconciliacao.projecao.total,
+    bytesProjecaoLeve: escrita.bytesProjecaoLeve || tamanhoJsonBytes(reconciliacao.projecao),
+    reconcileMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+    escrita
+  };
+}
+
+function projectionReadyProjecaoHotPublica(clienteId = "admin") {
+  return projectionReadyProjecaoLeve.get(clienteSeguro(clienteId)) === true;
+}
+
 function resetarEstadoProjecaoLeveParaTeste(clienteId = "") {
   const alvo = texto(clienteId || "");
   if (alvo) {
@@ -649,12 +745,14 @@ function resetarEstadoProjecaoLeveParaTeste(clienteId = "") {
     const estado = pendenciasProjecaoLeve.get(cliente);
     if (estado?.timer) clearTimeout(estado.timer);
     pendenciasProjecaoLeve.delete(cliente);
+    projectionReadyProjecaoLeve.delete(cliente);
     return;
   }
   for (const estado of pendenciasProjecaoLeve.values()) {
     if (estado?.timer) clearTimeout(estado.timer);
   }
   pendenciasProjecaoLeve.clear();
+  projectionReadyProjecaoLeve.clear();
 }
 
 function publicarProofFilaLegada(clienteId = "admin", dados = {}, deps = {}) {
@@ -2735,7 +2833,7 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
 }
 
 async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, deps = {}) {
-  return executarEscritaFilaV2Coordenada(
+  const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_remove",
     ({ nextGeneration, fileRevision }) => {
@@ -2753,6 +2851,10 @@ async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
       motivo: deps.motivo || "legacy_sync_remove"
     }
   );
+  const projecaoLeve = resultado.ok === true
+    ? removerProjecaoLeveIncremental(clienteId, resultado.item || item, deps)
+    : { ok: true, pulou: true, motivo: "remove_viva_falhou" };
+  return { ...resultado, projecaoLeve };
 }
 
 async function recuperarFilaVivaDoLegadoCoordenado(clienteId = "admin", deps = {}) {
@@ -4890,8 +4992,11 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     lerFilaVivaReadOnly: (clienteId, deps = {}) => lerFilaVivaReadOnly(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
     atualizarProjecaoLeveIncremental: (clienteId, item, deps = {}) => atualizarProjecaoLeveIncremental(clienteId, item, { ...opcoes, ...deps }),
+    removerProjecaoLeveIncremental: (clienteId, item, deps = {}) => removerProjecaoLeveIncremental(clienteId, item, { ...opcoes, ...deps }),
     flushProjecaoLeveCliente: (clienteId, deps = {}) => flushProjecaoLeveCliente(clienteId, { ...opcoes, ...deps }),
     bootstrapProjecaoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapProjecaoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
+    reconciliarProjecaoHotPublicaCliente: (clienteId, params = {}, deps = {}) => reconciliarProjecaoHotPublicaCliente(clienteId, params, { ...opcoes, ...deps }),
+    projectionReadyProjecaoHotPublica,
     resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     appendHistoricoLeveIncremental: (clienteId, entrada, deps = {}) => appendHistoricoLeveIncremental(clienteId, entrada, { ...opcoes, ...deps }),
@@ -4952,8 +5057,11 @@ module.exports = {
   lerFilaVivaReadOnly,
   escreverFilaViva,
   atualizarProjecaoLeveIncremental,
+  removerProjecaoLeveIncremental,
   flushProjecaoLeveCliente,
   bootstrapProjecaoLeveCliente,
+  reconciliarProjecaoHotPublicaCliente,
+  projectionReadyProjecaoHotPublica,
   resetarEstadoProjecaoLeveParaTeste,
   appendHistoricoLeveIncremental,
   registrarHistoricoLeveTerminalLegado,

@@ -313,11 +313,23 @@ const {
 
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
-const { criarControladorFilaV2Shadow } = require("./modules/fila/fila-v2-shadow");
+const {
+  criarControladorFilaV2Shadow,
+  FILA_PROJECAO_LEVE_ARQUIVO
+} = require("./modules/fila/fila-v2-shadow");
 const {
   criarControladorFilaOperacionalV2,
   criarControladorCheckpointLegadoV2
 } = require("./modules/fila/fila-operacional-v2");
+const {
+  HISTORICO_LEVE_INCREMENTAL_DIR,
+  VISAO_PROCESSADAS,
+  VISAO_ENVIADAS,
+  VISAO_PARCIAIS,
+  VISAO_NAO_ENVIADAS,
+  construirReadModelPublicoPorMarcos,
+  lerHistoricoLeveJsonlPorJanela
+} = require("./modules/fila/fila-read-model-publico");
 const {
   filtrarDestinosAutorizadosClonador
 } = require("./modules/clonador-grupos/destinos-restricao.contract");
@@ -3654,6 +3666,13 @@ function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
     fila,
     clienteId,
     motivo: "carregarFila"
+  });
+  filaOperacionalV2.reconciliarProjecaoHotPublicaCliente(clienteId, {
+    fila,
+    motivo: "carregarFila"
+  }, {
+    agora: Date.now(),
+    logger: console
   });
   marcarFilaClienteInicializada(clienteId, opcoes.motivo || "carregarFila");
   return fila;
@@ -11844,17 +11863,179 @@ function filtrarItensHistoricoFila(itensCliente = [], query = {}) {
   });
 }
 
+function normalizarPeriodoPublicoFila(query = {}) {
+  const periodo = textoFiltroFila(query.periodo || "");
+  if (["hoje", "today"].includes(periodo)) return "hoje";
+  if (["7d", "7dias", "sete_dias", "ultimos_7_dias", "ultimos7dias"].includes(periodo)) return "7dias";
+  return "7dias";
+}
+
+function normalizarVisaoPublicaFila(query = {}) {
+  const bruto = textoFiltroFila(query.visao || query.status || "");
+  const chave = bruto.replace(/[\s-]+/g, "_");
+  if (!chave || ["todos", "todas", "processada", "processadas"].includes(chave)) return VISAO_PROCESSADAS;
+  if (["enviada", "enviadas", "enviado", "enviados", "sucesso"].includes(chave)) return VISAO_ENVIADAS;
+  if (["parcial", "parciais"].includes(chave)) return VISAO_PARCIAIS;
+  if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados", "erro", "erros", "falha", "falhas", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) {
+    return VISAO_NAO_ENVIADAS;
+  }
+  if (["pendente", "pendentes", "processando", "aguardando", "aguardando_relogio", "claim", "recovery", "checkpoint", "saneamento", "em_distribuicao"].includes(chave)) {
+    return VISAO_PROCESSADAS;
+  }
+  return VISAO_PROCESSADAS;
+}
+
+function compatibilidadeStatusPublicoFila(query = {}) {
+  const status = textoFiltroFila(query.status || "");
+  if (!status) return "";
+  const visao = normalizarVisaoPublicaFila({ status });
+  if (visao === VISAO_PROCESSADAS && !["processada", "processadas", "todos", "todas"].includes(status)) {
+    return "status_operacional_legado_mapeado_para_processadas_sem_lista_operacional";
+  }
+  if (["expirada", "expiradas", "expirado", "expirados"].includes(status)) {
+    return "expirada_operacional_legada_mapeada_para_nao_enviadas_sem_categoria_publica_expiradas";
+  }
+  return "";
+}
+
+function filtrosPublicosFila(query = {}) {
+  const periodo = normalizarPeriodoPublicoFila(query);
+  return {
+    periodo,
+    marketplace: textoFiltroFila(query.marketplace),
+    canal: textoFiltroFila(query.canal),
+    destino: textoFiltroFila(query.destino),
+    q: String(query.q || query.busca || "").trim(),
+    busca: String(query.busca || query.q || "").trim(),
+    visao: normalizarVisaoPublicaFila(query)
+  };
+}
+
+function metricasPublicasComAliases(metricas = {}) {
+  const processadas = Number(metricas.processadas || 0);
+  const enviadas = Number(metricas.enviadas || 0);
+  const parciais = Number(metricas.parciais || 0);
+  const naoEnviadas = Number(metricas.naoEnviadas || 0);
+  const emDistribuicao = Number(metricas.emDistribuicao || 0);
+  const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
+  return {
+    ...metricas,
+    processadas,
+    enviadas,
+    parciais,
+    naoEnviadas,
+    emDistribuicao,
+    taxaEnvio,
+    erros: naoEnviadas,
+    expiradas: 0,
+    formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta execucoes unicas no marco publico"
+  };
+}
+
+async function garantirReadModelPublicoPronto(clienteId = "admin", motivo = "read_model_publico") {
+  const cliente = String(clienteId || "admin");
+  if (filaOperacionalV2.projectionReadyProjecaoHotPublica(cliente)) {
+    return { ok: true, projectionReady: true, reconciliou: false };
+  }
+  const reconcile = filaOperacionalV2.reconciliarProjecaoHotPublicaCliente(cliente, {
+    fila,
+    motivo
+  }, {
+    agora: Date.now(),
+    logger: console
+  });
+  return {
+    ok: reconcile.ok === true,
+    projectionReady: reconcile.projectionReady === true,
+    reconciliou: reconcile.ok === true,
+    reconcile
+  };
+}
+
+function consultarReadModelPublicoFila(clienteId = "admin", query = {}, opcoes = {}) {
+  const inicioTotal = process.hrtime.bigint();
+  const cliente = String(clienteId || "admin");
+  const filtros = filtrosPublicosFila(query);
+  const periodo = filtros.periodo;
+  const visao = filtros.visao;
+  const agoraMs = Number(opcoes.agoraMs || Date.now());
+  const projectionReady = filaOperacionalV2.projectionReadyProjecaoHotPublica(cliente);
+  const projecaoHot = readClienteJson(cliente, FILA_PROJECAO_LEVE_ARQUIVO, { itens: [] }) || { itens: [] };
+  const historicoDir = path.join(getClientePath(cliente), HISTORICO_LEVE_INCREMENTAL_DIR);
+  const inicioLeitura = process.hrtime.bigint();
+  const leitura = lerHistoricoLeveJsonlPorJanela({
+    dir: historicoDir,
+    agoraMs,
+    periodo,
+    janelaDias: periodo === "hoje" ? 1 : 7
+  });
+  const leituraMs = Math.round(Number(process.hrtime.bigint() - inicioLeitura) / 1e6);
+  const inicioReader = process.hrtime.bigint();
+  const readModel = construirReadModelPublicoPorMarcos({
+    clienteId: cliente,
+    hot: Array.isArray(projecaoHot.itens) ? projecaoHot.itens : [],
+    historicoLeve: leitura.registros,
+    projectionReady,
+    exigirProjectionReady: true,
+    periodo,
+    janelaDias: periodo === "hoje" ? 1 : 7,
+    visao,
+    filtros,
+    page: query.page,
+    limit: query.limit,
+    offset: query.offset,
+    somenteMetricas: opcoes.somenteMetricas === true,
+    leiturasFisicas: leitura.leiturasFisicas,
+    bytesLidos: leitura.bytesLidos,
+    agoraMs
+  });
+  const readerMs = Math.round(Number(process.hrtime.bigint() - inicioReader) / 1e6);
+  const metricas = metricasPublicasComAliases(readModel.metricas || {});
+  return {
+    ...readModel,
+    metricas,
+    filtros,
+    periodo,
+    visao,
+    projectionReady,
+    compatibilidade: {
+    filaAliasLeve: false,
+      statusLegado: compatibilidadeStatusPublicoFila(query),
+      metricasErrosAliasNaoEnviadas: true,
+      metricasExpiradasNeutra: true
+    },
+    diagnostico: {
+      ...(readModel.diagnostico || {}),
+      arquivosHistoricoLeve: leitura.arquivos,
+      leituraMs,
+      readerMs,
+      totalMs: Math.round(Number(process.hrtime.bigint() - inicioTotal) / 1e6)
+    }
+  };
+}
+
 app.get("/fila", auth, async (req, res) => {
   const perf = criarPerfTimer("PERF FILA", contextoPerfHttp(req));
   let clienteId = "";
+  let totalRespostaBytes = 0;
   res.once("finish", () => {
-    perf.fim({ clienteId, statusCode: res.statusCode });
+    perf.fim({ clienteId, statusCode: res.statusCode, bytesResposta: totalRespostaBytes });
   });
   clienteId = perf.etapaSync("cliente", () => getClienteId(req));
   const inicializada = await perf.etapa("garantir_inicializacao", () =>
     garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila")
   );
   if (!inicializada) return;
+  const freshness = await perf.etapa("garantir_read_model_publico", () =>
+    garantirReadModelPublicoPronto(clienteId, "rota_get_fila")
+  );
+  if (freshness.ok !== true || freshness.projectionReady !== true) {
+    return res.status(503).json({
+      ok: false,
+      motivo: "projection_not_ready",
+      clienteId
+    });
+  }
 
   perf.etapaSync("disparar_saneamento", () => {
     sanearExpiradosFila(clienteId).catch((erro) => {
@@ -11865,66 +12046,49 @@ app.get("/fila", auth, async (req, res) => {
     });
   });
 
-  const itensCliente = perf.etapaSync("filtrar_workspace", () => fila.filter((o) =>
-    (o.clienteId || "admin") === clienteId
-  ));
-  const resumo = perf.etapaSync("resumo", () => ({
-    pendentesTotal: itensCliente.filter((o) => o.status === "pendente").length,
-    enviadasTotal: itensCliente.filter((o) => o.status === "enviado").length,
-    retidasTotal: itensCliente.filter((o) => o.status === "retida").length,
-    errosTotal: itensCliente.filter((o) => o.status === "erro").length
-  }));
-  const statusFiltro = textoFiltroFila(req.query.status);
-  const marketplaceFiltro = textoFiltroFila(req.query.marketplace);
-  const categoriaFiltro = textoFiltroFila(req.query.categoria);
-  const canalFiltro = textoFiltroFila(req.query.canal);
-  const destinoFiltro = textoFiltroFila(req.query.destino);
-  const periodoFiltro = textoFiltroFila(req.query.periodo);
-  const qFiltro = String(req.query.q || "").trim();
-  const itensFiltrados = perf.etapaSync("filtrar_recorte", () =>
-    filtrarItensHistoricoFila(itensCliente, req.query)
+  const readModel = perf.etapaSync("read_model_publico", () =>
+    consultarReadModelPublicoFila(clienteId, req.query)
   );
-  const metricas = perf.etapaSync("metricas", () => calcularMetricasHistoricoFila(itensFiltrados));
-
-  const limit = Math.max(1, Math.min(500, Math.floor(Number(req.query.limit) || 100)));
-  const pageQuery = Math.floor(Number(req.query.page) || 0);
-  const offsetQuery = Math.max(0, Math.floor(Number(req.query.offset) || 0));
-  const page = Math.max(1, pageQuery || Math.floor(offsetQuery / limit) + 1);
-  const offset = (page - 1) * limit;
-  const totalFiltrado = itensFiltrados.length;
-  const totalPages = Math.max(1, Math.ceil(totalFiltrado / limit));
-  const itensResposta = perf.etapaSync("paginar_decorar", () => itensFiltrados
-    .slice(offset, offset + limit)
-    .map(decorarItemFilaParaResposta));
+  if (readModel.ok !== true) {
+    return res.status(503).json({
+      ok: false,
+      motivo: readModel.motivo || "read_model_publico_indisponivel",
+      clienteId,
+      projectionReady: readModel.projectionReady === true
+    });
+  }
+  const itensResposta = readModel.itens || [];
+  const metricas = readModel.metricas || {};
+  const resumo = {
+    pendentesTotal: metricas.emDistribuicao,
+    enviadasTotal: metricas.enviadas,
+    retidasTotal: 0,
+    errosTotal: metricas.naoEnviadas
+  };
 
   const payload = perf.etapaSync("montar_payload", () => ({
     ok: true,
     clienteId,
-    total: itensCliente.length,
-    totalFiltrado,
-    page,
-    limit,
-    offset,
-    totalPages,
-    hasMore: page < totalPages,
+    total: metricas.processadas,
+    totalFiltrado: readModel.totalFiltrado,
+    page: readModel.page,
+    limit: readModel.limit,
+    offset: readModel.offset,
+    totalPages: readModel.totalPages,
+    hasMore: readModel.hasMore,
     resumo,
     metricas,
-    filtros: {
-      status: statusFiltro,
-      marketplace: marketplaceFiltro,
-      categoria: categoriaFiltro,
-      canal: canalFiltro,
-      destino: destinoFiltro,
-      periodo: periodoFiltro,
-      q: qFiltro
-    },
+    filtros: readModel.filtros,
+    visao: readModel.visao,
+    projectionReady: readModel.projectionReady,
+    compatibilidade: readModel.compatibilidade,
     pendentes: resumo.pendentesTotal,
     enviados: resumo.enviadasTotal,
     retidas: resumo.retidasTotal,
     erros: resumo.errosTotal,
-    itens: itensResposta,
-    fila: itensResposta
+    itens: itensResposta
   }));
+  totalRespostaBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
   return res.json(payload);
 });
 
@@ -30183,39 +30347,57 @@ app.get("/status/:id", (req, res) => {
   });
 });
 
-app.get("/fila/status", (req, res) => {
-  const perf = criarPerfTimer("PERF FILA STATUS");
+app.get("/fila/status", async (req, res) => {
+  const perf = criarPerfTimer("PERF FILA STATUS", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  const inicializada = await perf.etapa("garantir_inicializacao", () =>
+    garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila_status")
+  );
+  if (!inicializada) return;
+  const freshness = await perf.etapa("garantir_read_model_publico", () =>
+    garantirReadModelPublicoPronto(clienteId, "rota_get_fila_status")
+  );
+  if (freshness.ok !== true || freshness.projectionReady !== true) {
+    perf.fim({ clienteId, statusCode: 503, projectionReady: false });
+    return res.status(503).json({
+      ok: false,
+      motivo: "projection_not_ready",
+      clienteId
+    });
+  }
 
-  const itensCliente = perf.etapaSync("filtrar_fila", () => fila.filter(o =>
-    String(o.clienteId || "admin") === String(clienteId)
-  ));
+  const readModel = perf.etapaSync("read_model_publico_metricas", () =>
+    consultarReadModelPublicoFila(clienteId, { ...req.query, limit: 1 }, { somenteMetricas: true })
+  );
+  if (readModel.ok !== true) {
+    perf.fim({ clienteId, statusCode: 503, projectionReady: readModel.projectionReady === true });
+    return res.status(503).json({
+      ok: false,
+      motivo: readModel.motivo || "read_model_publico_indisponivel",
+      clienteId,
+      projectionReady: readModel.projectionReady === true
+    });
+  }
 
-  const itensFiltrados = perf.etapaSync("filtrar_recorte", () => filtrarItensHistoricoFila(itensCliente, req.query));
-  const metricas = perf.etapaSync("metricas", () => calcularMetricasHistoricoFila(itensFiltrados));
-
+  const metricas = readModel.metricas || {};
   const payload = perf.etapaSync("payload", () => ({
     ok: true,
     clienteId,
-    total: itensFiltrados.length,
-    pendentes: itensFiltrados.filter(o => statusVisualFila(o) === "aguardando").length,
+    total: metricas.processadas,
+    pendentes: metricas.emDistribuicao,
     enviados: metricas.enviadas,
-    retidas: itensFiltrados.filter(o => String(o.status || "").toLowerCase() === "retida").length,
-    erros: metricas.erros,
-    expiradas: metricas.expiradas,
+    retidas: 0,
+    erros: metricas.naoEnviadas,
+    expiradas: 0,
     metricas,
-    filtros: {
-      status: textoFiltroFila(req.query.status),
-      marketplace: textoFiltroFila(req.query.marketplace),
-      categoria: textoFiltroFila(req.query.categoria),
-      canal: textoFiltroFila(req.query.canal),
-      destino: textoFiltroFila(req.query.destino),
-      periodo: textoFiltroFila(req.query.periodo),
-      q: String(req.query.q || "").trim()
-    }
+    filtros: readModel.filtros,
+    visao: readModel.visao,
+    projectionReady: readModel.projectionReady,
+    compatibilidade: readModel.compatibilidade
   }));
 
-  perf.fim({ clienteId, statusCode: 200, total: itensFiltrados.length });
+  const bytesResposta = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  perf.fim({ clienteId, statusCode: 200, total: metricas.processadas, bytesResposta, itensMaterializados: readModel.diagnostico?.itensMaterializados || 0 });
   return res.json(payload);
 });
 

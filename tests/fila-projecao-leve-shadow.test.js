@@ -294,8 +294,7 @@ function wait(ms = 0) {
       ["pendente", 0],
       ["processando", 0],
       ["processando", 1],
-      ["processando", 2],
-      ["enviado", 3]
+      ["processando", 2]
     ]) {
       filaOperacionalV2.atualizarProjecaoLeveIncremental(cliente, oferta({
         ...base,
@@ -315,9 +314,26 @@ function wait(ms = 0) {
     }
     const projecao = store.dados.get(`${cliente}/${FILA_PROJECAO_LEVE_ARQUIVO}`);
     assert.strictEqual(projecao.itens.length, 1, "atualizacao progressiva deve ser idempotente por oferta");
-    assert.strictEqual(projecao.itens[0].statusPublico, "enviado");
-    assert.strictEqual(projecao.itens[0].progresso.enviados, 3);
+    assert.strictEqual(projecao.itens[0].statusPublico, "em_distribuicao");
+    assert.strictEqual(projecao.itens[0].progresso.enviados, 2);
     assert.strictEqual(projecao.itens[0].progresso.total, 3);
+
+    filaOperacionalV2.atualizarProjecaoLeveIncremental(cliente, oferta({
+      ...base,
+      status: "enviado",
+      statusPublico: "enviado",
+      enviadoEm: "2026-09-14T10:03:00.000Z",
+      destinosEstado: [
+        destino("a", "enviado", { enviadoEm: "2026-09-14T10:01:00.000Z" }),
+        destino("b", "enviado", { enviadoEm: "2026-09-14T10:02:00.000Z" }),
+        destino("c", "enviado", { enviadoEm: "2026-09-14T10:03:00.000Z" })
+      ]
+    }), {
+      ...store,
+      agora: AGORA,
+      flushProjecaoLeveSincrono: true
+    });
+    assert.strictEqual(store.dados.get(`${cliente}/${FILA_PROJECAO_LEVE_ARQUIVO}`).itens.length, 0, "terminal sai da projecao HOT");
   }
 
   {
@@ -356,7 +372,8 @@ function wait(ms = 0) {
       logger: { log() {} }
     });
     const aposUpdate = store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO);
-    assert.strictEqual(aposUpdate.itens.length, total, "update em projecao cheia nao altera cardinalidade");
+    const totalHotAposNormalizacao = aposUpdate.itens.length;
+    assert(totalHotAposNormalizacao <= total, "update normaliza projecao para HOT-only");
     assert.strictEqual(aposUpdate.itens.find(item => item.id === "grande_10").titulo, "Produto Grande 10 atualizado");
 
     filaOperacionalV2.atualizarProjecaoLeveIncremental(cliente, oferta({ id: "nova", clienteId: cliente }), {
@@ -365,7 +382,7 @@ function wait(ms = 0) {
       flushProjecaoLeveSincrono: true,
       logger: { log() {} }
     });
-    assert.strictEqual(store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO).itens.length, total + 1, "insert em projecao cheia adiciona uma entrada");
+    assert.strictEqual(store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO).itens.length, totalHotAposNormalizacao + 1, "insert em projecao HOT adiciona uma entrada");
     store.cleanup();
   }
 
@@ -388,7 +405,7 @@ function wait(ms = 0) {
       logger: { log() {} }
     });
     const projecao = store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO);
-    assert.strictEqual(projecao.itens.length, 20, "primeiro evento deve bootstrapar a projecao existente, nao criar arquivo com apenas uma oferta");
+    assert.strictEqual(projecao.itens.length, 1, "primeiro evento nao usa fila-viva como autoridade publica");
     assert.strictEqual(projecao.itens.find(item => item.id === "grande_3").titulo, "Produto alterado no primeiro evento");
     store.cleanup();
   }
@@ -424,8 +441,8 @@ function wait(ms = 0) {
       logger: { log() {} }
     });
     const aposRestart = store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO);
-    assert.strictEqual(aposRestart.itens.find(item => item.id === "A").titulo, "A=v2");
-    assert.strictEqual(aposRestart.itens.find(item => item.id === "B").titulo, "B=v2");
+    assert.strictEqual(aposRestart.itens.find(item => item.id === "A").titulo, "A=v1");
+    assert.strictEqual(aposRestart.itens.find(item => item.id === "B").titulo, "B=v1");
     assert.strictEqual(aposRestart.itens.find(item => item.id === "C").titulo, "C=v3");
 
     filaOperacionalV2.atualizarProjecaoLeveIncremental(cliente, oferta({ id: "A", clienteId: cliente, titulo: "A=v4" }), {
@@ -437,8 +454,8 @@ function wait(ms = 0) {
     });
     const aposIncremental = store.read(cliente, FILA_PROJECAO_LEVE_ARQUIVO);
     assert.strictEqual(aposIncremental.itens.find(item => item.id === "A").titulo, "A=v4");
-    assert.strictEqual(aposIncremental.itens.find(item => item.id === "B").titulo, "B=v2");
-    assert.strictEqual(leiturasViva, 1, "bootstrap de primeiro evento deve acontecer uma vez por cliente/processo");
+    assert.strictEqual(aposIncremental.itens.find(item => item.id === "B").titulo, "B=v1");
+    assert.strictEqual(leiturasViva, 0, "primeiro evento nao deve reler fila-viva como autoridade publica");
     store.cleanup();
   }
 
