@@ -7,6 +7,7 @@ const {
   VISAO_PROCESSADAS,
   VISAO_ENVIADAS,
   VISAO_NAO_ENVIADAS,
+  VISAO_COM_ERRO,
   construirReadModelPublicoPorMarcos
 } = require("../modules/fila/fila-read-model-publico");
 
@@ -72,6 +73,7 @@ function rotaGetBloco(fonte, rota) {
   const rotaDetalhe = rotaGetBloco(fonte, "/fila/detalhe");
 
   assert(rotaFila.includes("consultarReadModelPublicoFila(clienteId, req.query"), "GET /fila usa helper leve");
+  assert(fonte.includes("VISAO_COM_ERRO"), "GET /fila reconhece visao publica com_erro");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
   assert(!rotaFila.includes("fila: itensResposta"), "GET /fila nao duplica payload com alias fila");
   assert(!rotaFila.includes("fila.filter"), "GET /fila nao monta resposta a partir da fila pesada");
@@ -167,6 +169,25 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "GET /fila nao_enviadas");
+
+  const comErro = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_rotas",
+    hot,
+    historicoLeve: [
+      ...historico,
+      terminal("parcial_7d", "parcial", { dataEntradaFila: iso(AGORA - 5 * DIA), titulo: "Fone com atencao" })
+    ],
+    projectionReady: true,
+    periodo: "7dias",
+    visao: VISAO_COM_ERRO,
+    filtros: { periodo: "7dias" },
+    page: 1,
+    limit: 50,
+    agoraMs: AGORA
+  });
+  assert.strictEqual(comErro.metricas.comErro, 2, "GET /fila com_erro soma parcial real e nao enviada");
+  assert.strictEqual(comErro.totalFiltrado, 2);
+  assert.strictEqual(comErro.itens.length, 2);
 
   const marketplace = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",

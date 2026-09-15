@@ -25,6 +25,7 @@ const VISAO_PROCESSADAS = "processadas";
 const VISAO_ENVIADAS = "enviadas";
 const VISAO_PARCIAIS = "parciais";
 const VISAO_NAO_ENVIADAS = "nao_enviadas";
+const VISAO_COM_ERRO = "com_erro";
 const FORMATADOR_DIA_PUBLICO_SP = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",
@@ -425,6 +426,17 @@ function normalizarItemPublico(origem = {}, dados = {}) {
   };
 }
 
+function visaoTerminalPublica(resultadoPublico = "") {
+  if (resultadoPublico === "enviado") return VISAO_ENVIADAS;
+  if (resultadoPublico === "parcial") return VISAO_PARCIAIS;
+  return VISAO_NAO_ENVIADAS;
+}
+
+function visaoIncluiTerminal(visao = VISAO_PROCESSADAS, resultadoPublico = "") {
+  const tipoTerminal = visaoTerminalPublica(resultadoPublico);
+  return visao === tipoTerminal || (visao === VISAO_COM_ERRO && tipoTerminal !== VISAO_ENVIADAS);
+}
+
 function ordenarRegistrosPublicos(a, b) {
   const ta = timestampMs(a.timestamp) || 0;
   const tb = timestampMs(b.timestamp) || 0;
@@ -511,6 +523,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         enviadas: 0,
         parciais: 0,
         naoEnviadas: 0,
+        comErro: 0,
         emDistribuicao: 0,
         fechaMatematicamente: true
       },
@@ -518,7 +531,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         processadas: [],
         enviadas: [],
         parciais: [],
-        naoEnviadas: []
+        naoEnviadas: [],
+        comErro: []
       },
       pagina: paginar([], params),
       itens: [],
@@ -584,7 +598,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     terminaisResultadoPorIdentidade.set(identidade, resultadoPublico);
     const precisaProjetar = filtrosAtivos ||
       (!somenteMetricas && ((dentroProcessada && visao === VISAO_PROCESSADAS) ||
-      (dentroTerminal && visao === (resultadoPublico === "enviado" ? VISAO_ENVIADAS : resultadoPublico === "parcial" ? VISAO_PARCIAIS : VISAO_NAO_ENVIADAS))));
+      (dentroTerminal && visaoIncluiTerminal(visao, resultadoPublico))));
     const projetado = precisaProjetar
       ? projetarItemFilaLeve(item, {
           clienteId,
@@ -610,9 +624,9 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       processadasIds.add(identidade);
       if (processadaPublica) registrarListaSeSolicitada(VISAO_PROCESSADAS, processadaPublica);
     }
-    const tipoVisaoTerminal = resultadoPublico === "enviado" ? VISAO_ENVIADAS : resultadoPublico === "parcial" ? VISAO_PARCIAIS : VISAO_NAO_ENVIADAS;
+    const tipoVisaoTerminal = visaoTerminalPublica(resultadoPublico);
     let terminalPublico = null;
-    if (dentroTerminal && (filtrosAtivos || (!somenteMetricas && visao === tipoVisaoTerminal))) {
+    if (dentroTerminal && (filtrosAtivos || (!somenteMetricas && visaoIncluiTerminal(visao, resultadoPublico)))) {
       terminalPublico = normalizarItemPublico(registro, {
         clienteId,
         indice,
@@ -630,6 +644,10 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       else if (resultadoPublico === "parcial") parciaisIds.add(identidade);
       else naoEnviadasIds.add(identidade);
       if (terminalPublico) registrarListaSeSolicitada(tipoVisaoTerminal, terminalPublico);
+      if (terminalPublico && tipoVisaoTerminal !== VISAO_ENVIADAS) registrarListaSeSolicitada(VISAO_COM_ERRO, {
+        ...terminalPublico,
+        tipoVisao: VISAO_COM_ERRO
+      });
     }
   }
 
@@ -677,6 +695,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     enviadas: enviadasIds.size,
     parciais: parciaisIds.size,
     naoEnviadas: naoEnviadasIds.size,
+    comErro: parciaisIds.size + naoEnviadasIds.size,
     emDistribuicao: [...processadasIds].filter(id => !terminaisPrincipais.has(id)).length
   };
   metricas.fechaMatematicamente = metricas.enviadas + metricas.parciais + metricas.naoEnviadas + metricas.emDistribuicao === metricas.processadas;
@@ -688,13 +707,16 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       ? metricas.parciais
       : visao === VISAO_NAO_ENVIADAS
         ? metricas.naoEnviadas
-        : metricas.processadas;
+        : visao === VISAO_COM_ERRO
+          ? metricas.comErro
+          : metricas.processadas;
   const pagina = paginar(listaBase, { ...params, totalFiltradoOverride: totalVisao });
   const listas = {
     processadas: visao === VISAO_PROCESSADAS ? listaBase : [],
     enviadas: visao === VISAO_ENVIADAS ? listaBase : [],
     parciais: visao === VISAO_PARCIAIS ? listaBase : [],
-    naoEnviadas: visao === VISAO_NAO_ENVIADAS ? listaBase : []
+    naoEnviadas: visao === VISAO_NAO_ENVIADAS ? listaBase : [],
+    comErro: visao === VISAO_COM_ERRO ? listaBase : []
   };
   const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
   return {
@@ -1206,6 +1228,7 @@ module.exports = {
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
+  VISAO_COM_ERRO,
   marcoProcessadaItem,
   identidadesRegistro,
   identidadePrincipal,

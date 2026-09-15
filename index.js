@@ -327,6 +327,7 @@ const {
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
+  VISAO_COM_ERRO,
   construirReadModelPublicoPorMarcos,
   lerHistoricoLeveJsonlPorJanela,
   resolverDetalhePublicoFilaPorRef
@@ -11877,6 +11878,7 @@ function normalizarVisaoPublicaFila(query = {}) {
   if (!chave || ["todos", "todas", "processada", "processadas"].includes(chave)) return VISAO_PROCESSADAS;
   if (["enviada", "enviadas", "enviado", "enviados", "sucesso"].includes(chave)) return VISAO_ENVIADAS;
   if (["parcial", "parciais"].includes(chave)) return VISAO_PARCIAIS;
+  if (["com_erro", "com_erros", "comerro", "comerros", "atencao", "com_atencao"].includes(chave)) return VISAO_COM_ERRO;
   if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados", "erro", "erros", "falha", "falhas", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) {
     return VISAO_NAO_ENVIADAS;
   }
@@ -11917,6 +11919,7 @@ function metricasPublicasComAliases(metricas = {}) {
   const enviadas = Number(metricas.enviadas || 0);
   const parciais = Number(metricas.parciais || 0);
   const naoEnviadas = Number(metricas.naoEnviadas || 0);
+  const comErro = Number(metricas.comErro ?? (parciais + naoEnviadas)) || 0;
   const emDistribuicao = Number(metricas.emDistribuicao || 0);
   const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
   return {
@@ -11925,6 +11928,7 @@ function metricasPublicasComAliases(metricas = {}) {
     enviadas,
     parciais,
     naoEnviadas,
+    comErro,
     emDistribuicao,
     taxaEnvio,
     erros: naoEnviadas,

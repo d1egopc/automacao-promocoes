@@ -12,6 +12,7 @@ const {
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
+  VISAO_COM_ERRO,
   marcoProcessadaItem,
   construirReadModelPublicoPorMarcos,
   atualizarProjecaoHotPorItem,
@@ -26,6 +27,11 @@ const DIA = 24 * 60 * 60 * 1000;
 
 function iso(ms) {
   return new Date(ms).toISOString();
+}
+
+function timestampMsParaTeste(valor) {
+  const ms = Date.parse(String(valor || ""));
+  return Number.isFinite(ms) ? ms : 0;
 }
 
 function oferta(id, extra = {}) {
@@ -60,8 +66,12 @@ function registroTerminal(id, statusPublico, extra = {}) {
     dataEntradaFila: processadaEm,
     finalizadoEm,
     enviadoEm: statusPublico === "enviado" ? finalizadoEm : "",
+    ...(extra.marketplace ? { marketplace: extra.marketplace } : {}),
+    ...(extra.canal ? { canal: extra.canal } : {}),
+    ...(extra.destinoNome ? { destinoNome: extra.destinoNome } : {}),
+    ...(extra.titulo ? { titulo: extra.titulo } : {}),
     destinosEstado: extra.destinosEstado || [
-      { destinoId: "tg_1", destinoNome: "Canal principal", canal: "telegram", estado: statusPublico === "nao_enviado" ? "erro" : "enviado" }
+      { destinoId: "dest_1", destinoNome: extra.destinoNome || "Canal principal", canal: extra.canal || "telegram", estado: statusPublico === "nao_enviado" ? "erro" : "enviado" }
     ],
     motivo: extra.motivo
   });
@@ -314,6 +324,136 @@ function registroTerminal(id, statusPublico, extra = {}) {
   assert.strictEqual(model.limit, 10);
   assert.strictEqual(model.itens.length, 10);
   assert.strictEqual(model.hasMore, true);
+}
+
+{
+  const totalParciais = 59;
+  const totalNaoEnviadas = 231;
+  const totalComErro = totalParciais + totalNaoEnviadas;
+  const hist = [
+    ...Array.from({ length: totalParciais }, (_, i) => registroTerminal(`com_erro_parcial_${i}`, "parcial", {
+      dataEntradaFila: iso(AGORA - 2 * 60 * 60 * 1000 - i),
+      finalizadoEm: iso(AGORA - i * 1000),
+      marketplace: i % 10 === 0 ? "mercadolivre" : "amazon",
+      canal: i % 7 === 0 ? "whatsapp" : "telegram",
+      destinoNome: i % 5 === 0 ? "Destino Especial" : "Canal principal",
+      titulo: i % 11 === 0 ? `Oferta EspecialBusca Parcial ${i}` : `Oferta Parcial ${i}`,
+      destinosEstado: [
+        { destinoId: "ok", destinoNome: "Canal principal", canal: i % 7 === 0 ? "whatsapp" : "telegram", estado: "enviado" },
+        { destinoId: "erro", destinoNome: "Destino falhou", canal: "telegram", estado: "erro" }
+      ]
+    })),
+    ...Array.from({ length: totalNaoEnviadas }, (_, i) => registroTerminal(`com_erro_falha_${i}`, "nao_enviado", {
+      dataEntradaFila: iso(AGORA - 3 * 60 * 60 * 1000 - i),
+      finalizadoEm: iso(AGORA - (totalParciais + i) * 1000),
+      marketplace: i % 10 === 0 ? "mercadolivre" : "amazon",
+      canal: i % 7 === 0 ? "whatsapp" : "telegram",
+      destinoNome: i % 5 === 0 ? "Destino Especial" : "Canal principal",
+      titulo: i % 11 === 0 ? `Oferta EspecialBusca Falha ${i}` : `Oferta Falha ${i}`
+    }))
+  ];
+  const esperadoGlobal = hist
+    .map(registro => {
+      const item = registro.item;
+      return {
+        id: item.id,
+        finalizadoEm: timestampMsParaTeste(item.finalizadoEm),
+        marketplace: item.marketplace,
+        canal: item.canal,
+        destinoNome: item.destinoNome,
+        titulo: item.titulo
+      };
+    })
+    .sort((a, b) => {
+      if (b.finalizadoEm !== a.finalizadoEm) return b.finalizadoEm - a.finalizadoEm;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  const idsPaginaEsperada = (page, limit = 50) => esperadoGlobal
+    .slice((page - 1) * limit, page * limit)
+    .map(item => item.id);
+  const ids = resultado => resultado.itens.map(item => item.id);
+  const page1 = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "hoje",
+    visao: VISAO_COM_ERRO,
+    page: 1,
+    limit: 50
+  });
+  const page2 = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "hoje",
+    visao: VISAO_COM_ERRO,
+    page: 2,
+    limit: 50
+  });
+  assert.strictEqual(page1.totalFiltrado, totalComErro, "Com erro soma parciais reais e nao enviadas");
+  assert.strictEqual(page1.metricas.comErro, totalComErro);
+  assert.strictEqual(page1.totalPages, 6);
+  assert.strictEqual(page1.hasMore, true);
+  assert.deepStrictEqual(ids(page1), idsPaginaEsperada(1), "page=1 traz os 50 mais recentes globais");
+  assert.deepStrictEqual(ids(page2), idsPaginaEsperada(2), "page=2 traz posicoes globais 51..100");
+  assert.strictEqual(page2.totalFiltrado, totalComErro);
+  assert.strictEqual(page2.page, 2);
+  assert.strictEqual(page2.limit, 50);
+  assert.strictEqual(page2.hasMore, true);
+  const idsCombinados = [...ids(page1), ...ids(page2)];
+  assert.strictEqual(new Set(idsCombinados).size, idsCombinados.length, "Com erro nao duplica entre paginas");
+  assert(!ids(page2).some(id => idsPaginaEsperada(1).includes(id)), "page=2 nao repete page=1");
+
+  const filtroMarketplace = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "hoje",
+    visao: VISAO_COM_ERRO,
+    filtros: { marketplace: "mercadolivre" },
+    page: 1,
+    limit: 50
+  });
+  assert.strictEqual(filtroMarketplace.totalFiltrado, esperadoGlobal.filter(item => item.marketplace === "mercadolivre").length, "filtro marketplace aplica antes da paginacao Com erro");
+
+  const filtroCanal = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "hoje",
+    visao: VISAO_COM_ERRO,
+    filtros: { canal: "whatsapp" },
+    page: 1,
+    limit: 50
+  });
+  assert.strictEqual(filtroCanal.totalFiltrado, esperadoGlobal.filter(item => item.canal === "whatsapp").length, "filtro canal aplica antes da paginacao Com erro");
+
+  const filtroBusca = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "hoje",
+    visao: VISAO_COM_ERRO,
+    filtros: { busca: "EspecialBusca" },
+    page: 1,
+    limit: 50
+  });
+  assert.strictEqual(
+    filtroBusca.totalFiltrado,
+    esperadoGlobal.filter(item => item.titulo.includes("EspecialBusca")).length,
+    "busca aplica antes da paginacao Com erro"
+  );
+
+  const seteDias = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: hist,
+    agoraMs: AGORA,
+    periodo: "7dias",
+    visao: VISAO_COM_ERRO,
+    page: 1,
+    limit: 50
+  });
+  assert.strictEqual(seteDias.totalFiltrado, totalComErro, "periodo 7 dias mantem total Com erro do fixture");
 }
 
 {
