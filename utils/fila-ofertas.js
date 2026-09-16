@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
+const { jobAtivoDentroLease } = require("../modules/engine/jobs.service");
 const {
   identidadeAntiRepeticaoAutomatica,
   identidadeAntiRepeticaoPorDestino,
@@ -10,6 +11,7 @@ const {
 } = require("../marketplaces/inteligencia/memoria-ofertas");
 
 const JANELA_ANTI_REPETICAO_EXECUTOR_MS = 2 * 60 * 60 * 1000;
+const JANELA_LIMPEZA_BACKLOG_FILA_MS = 12 * 60 * 60 * 1000;
 const TIMEZONE_FILA_BR = "America/Sao_Paulo";
 const TERMINAL_GUARD_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -1763,6 +1765,10 @@ function atualizarStatusFila(fila = [], { id, clienteId = "admin", status, statu
 function limparFilaAntiga(fila = [], { clienteId = "admin", status = "", agora = Date.now() } = {}) {
   const antes = fila.length;
   let preservadosHistorico = 0;
+  let preservadosEnviados = 0;
+  let preservadosProcessando = 0;
+  let removidosOperacionais = 0;
+  let removidosBacklogAntigo = 0;
 
   const novaFila = fila.filter(item => {
     const dono = String(item.clienteId || "admin");
@@ -1778,25 +1784,136 @@ function limparFilaAntiga(fila = [], { clienteId = "admin", status = "", agora =
     if (!(mesmoCliente && mesmoStatus)) return true;
 
     const statusItem = statusFilaNormalizado(item.status);
-    const limpezaIncluiEnviado = !status || statusFilaNormalizado(status) === "enviado";
-    if (limpezaIncluiEnviado && statusItem === "enviado") {
-      const enviadoEmMs = timestampFila(item.enviadoEm || item.dataEnvio);
-      if (
-        Number.isFinite(enviadoEmMs) &&
-        Number(agora) - enviadoEmMs < JANELA_ANTI_REPETICAO_EXECUTOR_MS
-      ) {
-        preservadosHistorico += 1;
-        return true;
-      }
+    if (["enviado", "historico", "publicado", "sucesso"].includes(statusItem)) {
+      preservadosHistorico += 1;
+      preservadosEnviados += 1;
+      return true;
     }
 
-    return false;
+    const statusEmEnvio = [
+      "processando",
+      "enviando",
+      "em_tentativa",
+      "tentando",
+      "processando_envio",
+      "claimed"
+    ].includes(statusItem);
+    const referenciaExecutor =
+      item.processandoEm ||
+      item.envioIniciadoEm ||
+      item.enviandoEm ||
+      item.claimedEm ||
+      item.claimedAt ||
+      item.leaseEm ||
+      item.leaseAt ||
+      item.atualizadoEm ||
+      item.updatedAt;
+    const referenciaExecutorMs = timestampFila(referenciaExecutor);
+    const assumidoPeloExecutor = Boolean(
+      item.processandoEm ||
+      item.envioIniciadoEm ||
+      item.enviandoEm ||
+      item.claimedEm ||
+      item.claimedAt ||
+      item.leaseEm ||
+      item.leaseAt
+    );
+    if (statusEmEnvio || assumidoPeloExecutor) {
+      if (!Number.isFinite(referenciaExecutorMs) || jobAtivoDentroLease({
+        status: "processando",
+        atualizadoEm: new Date(referenciaExecutorMs).toISOString()
+      }, { agoraMs: Number(agora) })) {
+        preservadosProcessando += 1;
+        return true;
+      }
+      removidosOperacionais += 1;
+      return false;
+    }
+
+    const statusContexto = [
+      statusItem,
+      item.statusDetalhe,
+      item.statusPublico,
+      item.statusOperacional,
+      item.motivoRetencao,
+      item.motivo,
+      item.erro
+    ].map(statusFilaNormalizado).filter(Boolean).join(" ");
+
+    const statusOperacional = [
+      "",
+      "pendente",
+      "aguardando",
+      "pronta",
+      "pronto",
+      "tentativa_futura",
+      "erro",
+      "falha",
+      "erro_final",
+      "erro_permanente",
+      "falha_final",
+      "erro_temporario",
+      "erro_retry",
+      "erro_recuperavel",
+      "retry",
+      "retida",
+      "retido",
+      "retida_v2",
+      "travada",
+      "travado",
+      "bloqueada",
+      "bloqueado",
+      "cancelada",
+      "cancelado",
+      "expirada",
+      "expirado",
+      "expirada_operacional",
+      "expirado_operacional",
+      "flow_nao_aceita",
+      "nao_enviada",
+      "nao_enviado",
+      "parcial",
+      "erro_distribuicao",
+      "sem_destino",
+      "sem_destino_compativel",
+      "categoria_incompativel",
+      "integracao_ausente",
+      "marketplace_bloqueado",
+      "marketplace_desabilitado",
+      "automacao_desligada"
+    ].includes(statusItem) || /\b(erro|falha|retid|trav|sem_destino|nao_enviad|incompativel|bloquead|desabilitad|expirad)\b/.test(statusContexto);
+
+    if (statusOperacional) {
+      removidosOperacionais += 1;
+      return false;
+    }
+
+    const criadoEmMs = timestampFila(
+      item.dataEntradaFila ||
+      item.filaCriadoEm ||
+      item.adicionadoEm ||
+      item.criadoEm ||
+      item.createdAt ||
+      item.created_at ||
+      item.atualizadoEm ||
+      item.updatedAt
+    );
+    if (Number.isFinite(criadoEmMs) && Number(agora) - criadoEmMs >= JANELA_LIMPEZA_BACKLOG_FILA_MS) {
+      removidosBacklogAntigo += 1;
+      return false;
+    }
+
+    return true;
   });
 
   return {
     fila: novaFila,
     removidos: antes - novaFila.length,
-    preservadosHistorico
+    preservadosHistorico,
+    preservadosEnviados,
+    preservadosProcessando,
+    removidosOperacionais,
+    removidosBacklogAntigo
   };
 }
 

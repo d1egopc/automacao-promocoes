@@ -276,10 +276,104 @@ for (const origem of ["manual", "manual-kabum-awin", "manual-magalu", "importaca
     clienteId: "cliente_a",
     agora: AGORA
   });
-  assert.strictEqual(limpeza.preservadosHistorico, 1, "limpeza deve preservar enviado recente usado pela barreira");
-  assert.strictEqual(limpeza.removidos, 2, "limpeza remove ativos e historico antigo");
-  assert.strictEqual(limpeza.fila.length, 1);
-  assert.strictEqual(limpeza.fila[0].id, "historico_recente");
+  assert.strictEqual(limpeza.preservadosHistorico, 2, "limpeza manual deve preservar enviados e historico");
+  assert.strictEqual(limpeza.removidos, 1, "limpeza remove apenas itens operacionais nao concluidos");
+  assert.strictEqual(limpeza.fila.length, 2);
+  assert.deepStrictEqual(limpeza.fila.map(item => item.id), ["historico_recente", "historico_antigo"]);
+}
+
+{
+  const fila = [
+    oferta({
+      id: "legado_desconhecido_recente",
+      status: "legado_importado",
+      criadoEm: new Date(AGORA - 30 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "legado_desconhecido_antigo",
+      status: "legado_importado",
+      criadoEm: new Date(AGORA - 13 * 60 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "outro_cliente",
+      clienteId: "cliente_b",
+      status: "pendente",
+      criadoEm: new Date(AGORA - 13 * 60 * 60 * 1000).toISOString()
+    })
+  ];
+  const limpeza = limparFilaAntiga(fila, {
+    clienteId: "cliente_a",
+    agora: AGORA
+  });
+  assert.strictEqual(limpeza.removidos, 1, "limpeza remove backlog legado antigo do workspace");
+  assert.strictEqual(limpeza.removidosBacklogAntigo, 1);
+  assert.deepStrictEqual(limpeza.fila.map(item => item.id), ["legado_desconhecido_recente", "outro_cliente"]);
+}
+
+{
+  const fila = [
+    oferta({ id: "pendente_remove", status: "pendente" }),
+    oferta({
+      id: "processando_preserva",
+      status: "processando",
+      processandoEm: new Date(AGORA - 5 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "enviando_preserva",
+      status: "enviando",
+      envioIniciadoEm: new Date(AGORA - 4 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "claim_preserva",
+      status: "diagnosticado",
+      claimedEm: new Date(AGORA - 3 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "enviado_preserva",
+      status: "enviado",
+      enviadoEm: new Date(AGORA - 2 * 60 * 1000).toISOString()
+    })
+  ];
+  const limpeza = limparFilaAntiga(fila, {
+    clienteId: "cliente_a",
+    agora: AGORA
+  });
+  assert.strictEqual(limpeza.removidos, 1, "Limpar Fila nao remove item processando/in-flight");
+  assert.strictEqual(limpeza.preservadosProcessando, 3);
+  assert.strictEqual(limpeza.preservadosEnviados, 1);
+  assert.deepStrictEqual(limpeza.fila.map(item => item.id), [
+    "processando_preserva",
+    "enviando_preserva",
+    "claim_preserva",
+    "enviado_preserva"
+  ]);
+}
+
+{
+  const fila = [
+    oferta({
+      id: "processando_expirado_remove",
+      status: "processando",
+      processandoEm: new Date(AGORA - 31 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "claim_expirado_remove",
+      status: "diagnosticado",
+      claimedEm: new Date(AGORA - 31 * 60 * 1000).toISOString()
+    }),
+    oferta({
+      id: "processando_sem_timestamp_preserva",
+      status: "processando",
+      processandoEm: ""
+    })
+  ];
+  const limpeza = limparFilaAntiga(fila, {
+    clienteId: "cliente_a",
+    agora: AGORA
+  });
+  assert.strictEqual(limpeza.removidos, 2, "Limpar Fila remove claim/lease expirado pela regra oficial");
+  assert.strictEqual(limpeza.preservadosProcessando, 1, "sem timestamp valido preserva por seguranca");
+  assert.deepStrictEqual(limpeza.fila.map(item => item.id), ["processando_sem_timestamp_preserva"]);
 }
 
 {

@@ -12813,7 +12813,11 @@ app.delete("/fila/limpar", auth, async (req, res) => {
     clienteId,
     status: status || "todos",
     removidos,
-    preservadosHistorico: limpeza.preservadosHistorico || 0
+    preservadosHistorico: limpeza.preservadosHistorico || 0,
+    preservadosEnviados: limpeza.preservadosEnviados || 0,
+    preservadosProcessando: limpeza.preservadosProcessando || 0,
+    removidosOperacionais: limpeza.removidosOperacionais || 0,
+    removidosBacklogAntigo: limpeza.removidosBacklogAntigo || 0
   });
 
   return res.json({
@@ -12821,7 +12825,11 @@ app.delete("/fila/limpar", auth, async (req, res) => {
     clienteId,
     status: status || "todos",
     removidos,
-    preservadosHistorico: limpeza.preservadosHistorico || 0
+    preservadosHistorico: limpeza.preservadosHistorico || 0,
+    preservadosEnviados: limpeza.preservadosEnviados || 0,
+    preservadosProcessando: limpeza.preservadosProcessando || 0,
+    removidosOperacionais: limpeza.removidosOperacionais || 0,
+    removidosBacklogAntigo: limpeza.removidosBacklogAntigo || 0
   });
 });
 
