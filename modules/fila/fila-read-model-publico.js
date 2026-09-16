@@ -497,7 +497,17 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     clienteId: clienteSeguro(dados.clienteId || projetado.clienteId || item.clienteId),
     titulo: projetado.titulo,
     marketplace: projetado.marketplace,
-    categoria: textoLimitado(primeiroTexto(projetado.categoria, item.categoria, item.categoriaProduto), 120),
+    categoria: textoLimitado(primeiroTexto(
+      projetado.categoria,
+      item.categoriaCanonica,
+      item.categoriaCanônica,
+      item.categoriaPersistida,
+      item.categoriaProduto,
+      item.categoriaDetectada,
+      item.categoria,
+      item.departamento,
+      item.subcategoria
+    ), 120),
     imagemRef: projetado.imagemRef,
     thumbRef: projetado.imagemRef,
     precoExibivel: projetado.precoExibivel,
@@ -1131,7 +1141,17 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
     clienteId: clienteSeguro(clienteId),
     titulo: projetado.titulo,
     marketplace: projetado.marketplace,
-    categoria: textoLimitado(primeiroTexto(projetado.categoria, item.categoria, item.categoriaProduto), 120),
+    categoria: textoLimitado(primeiroTexto(
+      projetado.categoria,
+      item.categoriaCanonica,
+      item.categoriaCanônica,
+      item.categoriaPersistida,
+      item.categoriaProduto,
+      item.categoriaDetectada,
+      item.categoria,
+      item.departamento,
+      item.subcategoria
+    ), 120),
     imagemRef: primeiroTexto(
       item.imagemUsada,
       item.imagemFinal,

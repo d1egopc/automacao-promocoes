@@ -120,6 +120,19 @@ function imagemRefItemFila(item = {}) {
   );
 }
 
+function categoriaItemFila(item = {}) {
+  return textoLimitado(primeiroTexto(
+    item.categoriaCanonica,
+    item.categoriaCanônica,
+    item.categoriaPersistida,
+    item.categoriaProduto,
+    item.categoriaDetectada,
+    item.categoria,
+    item.departamento,
+    item.subcategoria
+  ), 120);
+}
+
 function urlOriginalItemFila(item = {}) {
   return textoLimitado(
     primeiroTexto(
@@ -187,14 +200,18 @@ function destinoNomeItemLeve(item = {}) {
 }
 
 function nomeDestinoPublico(...candidatos) {
+  let nomeOperacional = "";
   for (const candidato of candidatos) {
     const valor = texto(candidato).trim();
     if (!valor) continue;
     const normalizado = textoNormalizado(valor).replace(/[^a-z0-9]+/g, "");
-    if (["clonador", "clonadorgrupos", "origemclonador", "radar", "origemradar"].includes(normalizado)) continue;
+    if (["clonador", "clonadorgrupos", "origemclonador", "radar", "origemradar"].includes(normalizado)) {
+      nomeOperacional = nomeOperacional || valor;
+      continue;
+    }
     return valor;
   }
-  return "";
+  return nomeOperacional;
 }
 
 function estadoDestinoLeve(destino = {}) {
@@ -440,6 +457,7 @@ function projetarItemFilaLeve(item = {}, opcoes = {}) {
     clienteId: clienteItem(item),
     titulo: textoLimitado(primeiroTexto(item.titulo, item.nome, item.produto), 240),
     marketplace: textoLimitado(primeiroTexto(item.marketplace, item.mercado), 80),
+    categoria: categoriaItemFila(item),
     imagemRef: imagemRefItemFila(item),
     urlOriginal: urlOriginalItemFila(item),
     precoExibivel: precoExibivelItemFila(item),
