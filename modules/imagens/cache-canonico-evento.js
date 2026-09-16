@@ -702,6 +702,155 @@ function origemImagemRadar(valor = {}) {
   return origem === "radar_mirror/mensagem" || origem.startsWith("radar_mirror/");
 }
 
+function origemImagemOficialMarketplace(origem = "") {
+  const valor = texto(origem).toLowerCase();
+  if (!valor || /radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/.test(valor)) return false;
+  if (/thumbnail|preview/.test(valor)) return false;
+  return (
+    valor === "imagem" ||
+    valor === "imagemurl" ||
+    valor === "imageurl" ||
+    valor === "image" ||
+    valor === "urlimagem" ||
+    valor === "product_main_image_url" ||
+    valor === "api_productofferv2.imageurl" ||
+    valor === "jsonld.image" ||
+    valor === "og:image" ||
+    valor === "twitter:image" ||
+    valor === "landingimage" ||
+    valor === "data-old-hires" ||
+    valor === "html/gallery" ||
+    valor === "product_small_image_urls" ||
+    valor === "metadata.produto.product_main_image_url" ||
+    valor === "metadata.produto.imageurl" ||
+    valor === "metadata.produto.image" ||
+    valor === "metadata.produto.images" ||
+    valor === "metadata.produto.pictures" ||
+    valor === "metadata.produto.imagemcandidatos" ||
+    valor.startsWith("images[") ||
+    valor.startsWith("pictures[") ||
+    valor.startsWith("product_small_image_urls[") ||
+    valor.startsWith("metadata.produto.images[") ||
+    valor.startsWith("metadata.produto.pictures[") ||
+    valor.startsWith("metadata.produto.imagemcandidatos[")
+  );
+}
+
+function adicionarCandidatoImagemOficial(candidatos = [], valor, origem = "", extra = {}) {
+  const origemTexto = texto(origem);
+  if (!origemImagemOficialMarketplace(origemTexto)) return;
+  if (origemImagemRadar({ imagemOrigem: origemTexto, imagemStatus: extra.imagemStatus || extra.status })) return;
+
+  const valores = [];
+  if (typeof valor === "string") valores.push({ url: valor, metadata: extra });
+  else if (Array.isArray(valor)) {
+    valor.forEach((item, indice) => {
+      adicionarCandidatoImagemOficial(candidatos, item, `${origemTexto}[${indice}]`, extra);
+    });
+    return;
+  } else if (valor && typeof valor === "object") {
+    const item = objetoSeguro(valor);
+    const url = texto(
+      item.url ||
+      item.secure_url ||
+      item.src ||
+      item.href ||
+      item.imageUrl ||
+      item.image_url ||
+      item.image ||
+      item.imagem ||
+      item.picture_url ||
+      item.original_picture
+    );
+    valores.push({ url, metadata: { ...extra, ...item } });
+  }
+
+  for (const candidato of valores) {
+    const validacao = imagemUrlValidaUniversal(candidato.url);
+    if (!validacao.ok || imagemUrlEfemeraUniversal(validacao.url)) continue;
+    const dimensoes = extrairDimensoesImagemMl(candidato.metadata);
+    const area = dimensoes ? dimensoes.largura * dimensoes.altura : 0;
+    candidatos.push({
+      imagem: validacao.url,
+      imagemUrl: validacao.url,
+      imagemOrigem: origemTexto,
+      imagemStatus: "imagem_oficial_marketplace",
+      imagemConfianca: 130,
+      imagemDimensoes: dimensoes,
+      score: pesoOrigemImagemOficialMarketplace(origemTexto) + Math.min(area / 10000, 100)
+    });
+  }
+}
+
+function pesoOrigemImagemOficialMarketplace(origem = "") {
+  const valor = texto(origem).toLowerCase();
+  if (valor.includes("product_main_image_url")) return 1000;
+  if (valor.includes("api_productofferv2.imageurl")) return 980;
+  if (valor.includes("jsonld.image")) return 960;
+  if (valor.includes("landingimage") || valor.includes("data-old-hires") || valor.includes("html/gallery")) return 940;
+  if (valor.includes("metadata.produto.image") || valor.includes("metadata.produto.pictures")) return 920;
+  if (valor === "imagem" || valor === "imagemurl" || valor === "imageurl" || valor === "image") return 900;
+  if (valor === "og:image" || valor === "twitter:image") return 860;
+  if (valor.includes("product_small_image_urls")) return 820;
+  if (valor.includes("pictures[") || valor.includes("images[")) return 800;
+  return 700;
+}
+
+function resolverImagemOficialMarketplaceDisponivel({ ofertaImagem = {}, ofertaEnriquecida = {}, metadataEvento = {} } = {}) {
+  const metadataOferta = objetoSeguro(ofertaEnriquecida.metadata);
+  const produtoOferta = objetoSeguro(metadataOferta.produto);
+  const produtoEvento = objetoSeguro(metadataEvento.produto);
+  const produto = objetoSeguro(objetoSeguro(ofertaImagem.metadata).produto);
+  const candidatos = [];
+
+  if (!origemImagemRadar(ofertaEnriquecida)) {
+    adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.imagem, ofertaEnriquecida.imagemOrigem || "imagem", ofertaEnriquecida);
+    adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.imagemUrl, ofertaEnriquecida.imagemOrigem || "imagemUrl", ofertaEnriquecida);
+    adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.imageUrl, "imageUrl", ofertaEnriquecida);
+  }
+
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.product_main_image_url, "product_main_image_url", ofertaEnriquecida);
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.landingImage, "landingImage", ofertaEnriquecida);
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida["data-old-hires"], "data-old-hires", ofertaEnriquecida);
+  adicionarCandidatoImagemOficial(candidatos, ofertaImagem.ogImage, "og:image", ofertaImagem);
+  adicionarCandidatoImagemOficial(candidatos, ofertaImagem.twitterImage, "twitter:image", ofertaImagem);
+  adicionarCandidatoImagemOficial(candidatos, objetoSeguro(ofertaImagem.jsonLd).image, "jsonLd.image", objetoSeguro(ofertaImagem.jsonLd));
+
+  const fontesProduto = [
+    ["metadata.produto.product_main_image_url", produto.product_main_image_url || produtoOferta.product_main_image_url || produtoEvento.product_main_image_url],
+    ["metadata.produto.imageUrl", produto.imageUrl || produtoOferta.imageUrl || produtoEvento.imageUrl],
+    ["metadata.produto.image", produto.image || produtoOferta.image || produtoEvento.image],
+    ["metadata.produto.images", produto.images || produtoOferta.images || produtoEvento.images],
+    ["metadata.produto.pictures", produto.pictures || produtoOferta.pictures || produtoEvento.pictures],
+    ["metadata.produto.imagemCandidatos", produto.imagemCandidatos || produtoOferta.imagemCandidatos || produtoEvento.imagemCandidatos],
+    ["product_small_image_urls", produto.product_small_image_urls || produtoOferta.product_small_image_urls || produtoEvento.product_small_image_urls]
+  ];
+  for (const [origem, valor] of fontesProduto) adicionarCandidatoImagemOficial(candidatos, valor, origem);
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.images, "images");
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.pictures, "pictures");
+  adicionarCandidatoImagemOficial(candidatos, ofertaEnriquecida.imagemCandidatos, "metadata.produto.imagemCandidatos");
+
+  candidatos.sort((a, b) => b.score - a.score);
+  return candidatos[0] || null;
+}
+
+function montarResultadoImagemOficialMarketplace({ chave, eventoId, marketplace, produtoId, resolvida = {}, cacheAtual = {}, linkResolvido = "" } = {}) {
+  return resultadoFinalDeImagemResolvida({
+    chave,
+    eventoId,
+    marketplace,
+    produtoId,
+    resolvida,
+    statusFallback: "imagem_oficial_marketplace",
+    extra: {
+      materializacoes: Number(cacheAtual.materializacoes || 0),
+      ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+      linkResolvido,
+      prioridadeImagemGlobal: "oficial_marketplace"
+    }
+  });
+}
+
 function origemImagemMercadoLivreSegura(origem = "") {
   const valor = texto(origem).toLowerCase();
   if (!valor || valor.includes("radar_mirror")) return false;
@@ -998,9 +1147,39 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
   let fallbackCacheRadar = null;
   const urlsMlBaixaQualidade = new Set();
   const linkResolvidoImagem = ofertaEnriquecida.linkResolvidoImagem || ofertaEnriquecida.linkExpandido || ofertaEnriquecida.urlFinal || "";
+  const ofertaImagem = montarOfertaImagemFinal(metadataEvento, ofertaEnriquecida);
+  const contextoImagem = {
+    evento: { metadata: metadataEvento },
+    job: { metadata: { metadataEvento } },
+    ofertaEntrada: entrada.ofertaEntrada,
+    link: entrada.link
+  };
+  const metadataEventoSemRadar = removerRadarMirrorMetadata(metadataEvento);
+  const contextoImagemSemRadar = {
+    evento: { metadata: metadataEventoSemRadar },
+    job: { metadata: { metadataEvento: metadataEventoSemRadar } },
+    ofertaEntrada: removerRadarMirrorObjeto(entrada.ofertaEntrada),
+    link: removerRadarMirrorObjeto(entrada.link)
+  };
+  const imagemOficialMarketplace = ehMercadoLivreComMlb
+    ? null
+    : resolverImagemOficialMarketplaceDisponivel({ ofertaImagem, ofertaEnriquecida, metadataEvento });
 
   if (cacheAtual.imagemCanonicaDuravel && cacheAtual.imagemCanonicaFinal === true) {
     if (!ehMercadoLivreComMlb) {
+      if (imagemOficialMarketplace?.imagem) {
+        const resultado = montarResultadoImagemOficialMarketplace({
+          chave,
+          eventoId,
+          marketplace,
+          produtoId,
+          resolvida: imagemOficialMarketplace,
+          cacheAtual,
+          linkResolvido: linkResolvidoImagem
+        });
+        cacheImagemCanonicaEvento.set(chave, resultado);
+        return { ...resultado, cacheHit: false };
+      }
       return { ...cacheAtual, cacheHit: true };
     }
 
@@ -1079,20 +1258,20 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
     }
   }
 
-  const ofertaImagem = montarOfertaImagemFinal(metadataEvento, ofertaEnriquecida);
-  const contextoImagem = {
-    evento: { metadata: metadataEvento },
-    job: { metadata: { metadataEvento } },
-    ofertaEntrada: entrada.ofertaEntrada,
-    link: entrada.link
-  };
-  const metadataEventoSemRadar = removerRadarMirrorMetadata(metadataEvento);
-  const contextoImagemSemRadar = {
-    evento: { metadata: metadataEventoSemRadar },
-    job: { metadata: { metadataEvento: metadataEventoSemRadar } },
-    ofertaEntrada: removerRadarMirrorObjeto(entrada.ofertaEntrada),
-    link: removerRadarMirrorObjeto(entrada.link)
-  };
+  if (!ehMercadoLivreComMlb && imagemOficialMarketplace?.imagem) {
+    const resultado = montarResultadoImagemOficialMarketplace({
+      chave,
+      eventoId,
+      marketplace,
+      produtoId,
+      resolvida: imagemOficialMarketplace,
+      cacheAtual,
+      linkResolvido: linkResolvidoImagem
+    });
+    cacheImagemCanonicaEvento.set(chave, resultado);
+    return { ...resultado, cacheHit: false };
+  }
+
   const disputaMl = ehMercadoLivreComMlb
     ? resolverImagemUniversalMercadoLivrePreferindoQualidade(ofertaImagem, contextoImagemSemRadar, {
         produtoId,

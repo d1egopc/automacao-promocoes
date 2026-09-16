@@ -1227,8 +1227,10 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       }
     });
 
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarCache);
-    assert.strictEqual(resultado.cacheHit, true);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, url("amazon-limpa"));
+    assert.strictEqual(resultado.imagemOrigem, "jsonLd.image");
+    assert.strictEqual(resultado.cacheHit, false);
+    assert.notStrictEqual(resultado.imagemCanonicaDuravel, radarCache);
   }
 
   {
@@ -1554,7 +1556,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(resultado.imagemCanonicaDuravel, url("amazon-adapter-boa"));
-    assert.strictEqual(resultado.imagemOrigem, "imagem");
+    assert.strictEqual(resultado.imagemOrigem, "jsonLd.image");
     assert.strictEqual(fetchCount.count, 0);
   }
 
@@ -1597,6 +1599,167 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(resultado.imagemCanonicaDuravel, cacheBom);
     assert.strictEqual(resultado.cacheHit, true);
     assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    const casos = [
+      {
+        marketplace: "aliexpress",
+        eventoId: 9830,
+        origemEsperada: "metadata.produto.product_main_image_url",
+        metadataProduto: { product_main_image_url: url("aliexpress-oficial-produto") }
+      },
+      {
+        marketplace: "shopee",
+        eventoId: 9831,
+        origemEsperada: "metadata.produto.imageUrl",
+        metadataProduto: { imageUrl: url("shopee-api-productOfferV2") }
+      },
+      {
+        marketplace: "amazon",
+        eventoId: 9832,
+        origemEsperada: "jsonLd.image",
+        metadataEventoExtra: { jsonLd: { image: url("amazon-jsonld-oficial") } },
+        metadataProduto: {}
+      }
+    ];
+
+    for (const caso of casos) {
+      _limparCacheImagemCanonicaEvento();
+      const radarTatuado = url(`${caso.marketplace}-radar-grupo-tatuado`);
+      const oficial = caso.metadataProduto.product_main_image_url || caso.metadataProduto.imageUrl || caso.metadataEventoExtra.jsonLd.image;
+      const resultado = await resolverImagemCanonicaFinalEvento({
+        eventoId: caso.eventoId,
+        marketplace: caso.marketplace,
+        metadataEvento: {
+          ...(caso.metadataEventoExtra || {}),
+          radarMirror: {
+            midia: {
+              imagemOrigem: "mensagem",
+              imagemOriginal: radarTatuado
+            }
+          }
+        },
+        ofertaEnriquecida: {
+          marketplace: caso.marketplace,
+          imagem: radarTatuado,
+          imagemUrl: radarTatuado,
+          imagemOrigem: "radar_mirror/mensagem",
+          imagemStatus: "radar_mirror_materializada",
+          metadata: {
+            produto: caso.metadataProduto
+          }
+        }
+      });
+
+      assert.strictEqual(resultado.imagemCanonicaDuravel, oficial, caso.marketplace);
+      assert.strictEqual(resultado.imagemOrigem, caso.origemEsperada, caso.marketplace);
+      assert.strictEqual(resultado.imagemStatus, "imagem_oficial_marketplace", caso.marketplace);
+      assert.strictEqual(resultado.prioridadeImagemGlobal, "oficial_marketplace", caso.marketplace);
+    }
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radar1080 = url("radar-1080-grupo-poluidissimo");
+    const oficial320 = url("shopee-oficial-limpa-320x320");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9833,
+      marketplace: "shopee",
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemOriginal: radar1080
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "shopee",
+        metadata: {
+          produto: {
+            imageUrl: oficial320,
+            width: 320,
+            height: 320
+          }
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, oficial320);
+    assert.strictEqual(resultado.imagemOrigem, "metadata.produto.imageUrl");
+    assert.strictEqual(resultado.imagemStatus, "imagem_oficial_marketplace");
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarCache = url("aliexpress-cache-radar-ja-materializado");
+    const oficial = url("aliexpress-oficial-vence-cache-radar");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9834,
+      marketplace: "aliexpress",
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "aliexpress",
+        metadata: {
+          imagemCacheCanonico: {
+            imagemCanonicaDuravel: radarCache,
+            imagemOrigem: "radar_mirror/mensagem",
+            imagemStatus: "radar_mirror_materializada",
+            imagemCanonicaFinal: true
+          },
+          produto: {
+            product_main_image_url: oficial
+          }
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, oficial);
+    assert.strictEqual(resultado.imagemOrigem, "metadata.produto.product_main_image_url");
+    assert.strictEqual(resultado.cacheHit, false);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const radarFallback = url("radar-fallback-sem-oficial");
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9835,
+      marketplace: "aliexpress",
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemOriginal: radarFallback
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "aliexpress"
+      }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, radarFallback);
+    assert(resultado.imagemOrigem.startsWith("radar_mirror/mensagem"));
   }
 
   console.log("imagem-canonica-fanout.test.js OK");
