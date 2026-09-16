@@ -21,6 +21,7 @@ const {
   lerHistoricoLeveJsonlPorJanela,
   benchmarkReadModelPublico
 } = require("../modules/fila/fila-read-model-publico");
+const { projetarItemFilaLeve } = require("../modules/fila/fila-v2-shadow");
 
 const AGORA = Date.parse("2026-09-15T15:00:00.000Z");
 const DIA = 24 * 60 * 60 * 1000;
@@ -126,6 +127,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
   assert.strictEqual(model.metricas.processadas, 1);
   assert.strictEqual(model.metricas.enviadas, 1);
   assert.strictEqual(model.listas.processadas.length, 1, "terminal tambem reconstroi marco Processada");
+  assert.strictEqual(model.listas.processadas[0].statusPublico, "enviada", "a visao Processadas preserva o badge terminal Enviada");
   const enviadas = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
     hot: [],
@@ -134,6 +136,38 @@ function registroTerminal(id, statusPublico, extra = {}) {
     visao: VISAO_ENVIADAS
   });
   assert.strictEqual(enviadas.listas.enviadas.length, 1, "mesma execucao pode existir na visao Enviadas");
+}
+
+{
+  const somentePrecoExibivel = projetarItemFilaLeve({ id: "preco_historico", precoExibivel: "35.99" });
+  assert.strictEqual(somentePrecoExibivel.precoExibivel, "35.99", "historico preserva precoExibivel quando nao ha outro campo comercial");
+
+  const precedenciaExistente = projetarItemFilaLeve({
+    id: "preco_precedencia",
+    precoAtual: "147.00",
+    preco: "99.00",
+    precoExibivel: "28.00"
+  });
+  assert.strictEqual(precedenciaExistente.precoExibivel, "147.00", "precoAtual continua tendo precedencia sobre precoExibivel");
+}
+
+{
+  const parcial = registroTerminal("parcial_badge", "parcial", {
+    destinosEstado: [
+      { destinoId: "a", destinoNome: "A", canal: "telegram", estado: "enviado" },
+      { destinoId: "b", destinoNome: "B", canal: "telegram", estado: "erro" }
+    ]
+  });
+  const model = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    hot: [],
+    historicoLeve: [parcial],
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS
+  });
+  assert.strictEqual(model.metricas.processadas, 1, "filtro Processadas continua incluindo a execucao parcial");
+  assert.strictEqual(model.listas.processadas.length, 1, "badge terminal nao altera a lista Processadas");
+  assert.strictEqual(model.listas.processadas[0].statusPublico, "erro", "parcial terminal aparece como Erro na visao Processadas");
 }
 
 {

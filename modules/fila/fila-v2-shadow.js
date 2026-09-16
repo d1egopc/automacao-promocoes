@@ -96,7 +96,7 @@ function primeiroTexto(...valores) {
 }
 
 function precoExibivelItemFila(item = {}) {
-  const valor = item.precoAtual ?? item.preco ?? item.valorEfetivo ?? item.precoFinal ?? "";
+  const valor = item.precoAtual ?? item.preco ?? item.valorEfetivo ?? item.precoFinal ?? item.precoExibivel ?? "";
   if (valor === null || valor === undefined || valor === "") return "";
   return typeof valor === "number" ? valor : textoLimitado(valor, 80);
 }

@@ -597,9 +597,10 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
 }
 
 function statusPublicoHistorico(resultadoPublico = "", tipoVisao = "") {
-  if (tipoVisao === VISAO_PROCESSADAS) return "processada";
+  if (resultadoPublico === "enviado") return "enviada";
   if (tipoVisao === VISAO_COM_ERRO) return "erro";
-  return resultadoPublico === "enviado" ? "enviada" : "erro";
+  if (["parcial", "nao_enviado", "nao enviado"].includes(normalizarTexto(resultadoPublico))) return "erro";
+  return "processada";
 }
 
 function itemEhTerminal(item = {}) {
