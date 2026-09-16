@@ -1418,6 +1418,14 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
       cacheImagemCanonicaEvento.set(chave, resultado);
       return { ...resultado, cacheHit: false };
     }
+    console.log("[ML-IMAGEM-OFICIAL-NAO-RESOLVIDA]", JSON.stringify({
+      eventoId,
+      produtoId,
+      linkResolvido: oficialSocial.linkResolvido || linkResolvidoImagem || "",
+      pictureId: oficialSocial.pictureId || "",
+      statusHttp: oficialSocial.statusHttp ?? null,
+      motivo: oficialSocial.motivo || publicabilidadeOficial.motivo || "nenhuma_fonte_de_imagem"
+    }));
     ultimoMotivo = oficialSocial.motivo || publicabilidadeOficial.motivo || ultimoMotivo;
   }
   if (ehMercadoLivreComMlb) {

@@ -135,6 +135,54 @@ function textoNormalizadoImagem(valor = "") {
   return String(valor ?? "").trim().toLowerCase();
 }
 
+function urlMlstaticOficial(valor = "") {
+  try {
+    const hostname = new URL(String(valor || "")).hostname.toLowerCase();
+    return hostname === "mlstatic.com" || hostname.endsWith(".mlstatic.com");
+  } catch {
+    return false;
+  }
+}
+
+function temProvaImagemOficialMercadoLivre(valor = {}) {
+  const item = valor && typeof valor === "object" ? valor : {};
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const cache = metadata.imagemCacheCanonico && typeof metadata.imagemCacheCanonico === "object"
+    ? metadata.imagemCacheCanonico
+    : {};
+  const ofcImagem = metadata.ofcV24?.imagemComercial && typeof metadata.ofcV24.imagemComercial === "object"
+    ? metadata.ofcV24.imagemComercial
+    : {};
+  const origens = [
+    item.imagemOrigem,
+    item.imagemStatus,
+    item.imagemBaseOrigem,
+    metadata.imagemOrigem,
+    metadata.imagemStatus,
+    metadata.imagemBaseOrigem,
+    cache.origem,
+    cache.status,
+    cache.imagemBaseOrigem,
+    ofcImagem.origemSelecionada,
+    ofcImagem.origem,
+    ofcImagem.imagemOrigem
+  ].filter(Boolean).join(" ");
+  const urls = [
+    item.imagem,
+    item.imagemUrl,
+    item.url,
+    cache.imagemCanonicaDuravel,
+    ofcImagem.urlSelecionada
+  ].filter(Boolean);
+  const pictureId = String(item.pictureId || metadata.pictureId || cache.pictureId || "").trim();
+  const origemOficial = /og:image\.picture_id|mercadolivre_og_image/i.test(origens);
+  const semProvenienciaRadar = !/radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/i.test(origens);
+  const urlOficial = urls.some(urlMlstaticOficial);
+  const pictureIdCompativel = !pictureId || urls.some((url) => String(url).includes(pictureId));
+
+  return origemOficial && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
+}
+
 function motivoNaoPublicavelDaImagem(valor = {}) {
   const item = valor && typeof valor === "object" ? valor : {};
   const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
@@ -171,18 +219,23 @@ function motivoNaoPublicavelDaImagem(valor = {}) {
   ].filter(Boolean).join(" ");
   const texto = textoNormalizadoImagem(textos);
 
+  const provaOficialMl = temProvaImagemOficialMercadoLivre(item);
+
   if (
     item.imagemEnviavel === false ||
     metadata.imagemEnviavel === false ||
     cache.imagemEnviavel === false ||
     item.imagemStatus === "imagem_nao_enviavel"
   ) {
+    if (provaOficialMl) return "";
     return "imagem_base_nao_publicavel";
   }
 
-  if (ofcImagem.imagemOficial === false || ofcImagem.possuiMarcaFonte === true) {
+  if (ofcImagem.possuiMarcaFonte === true) {
     return "imagem_radar_nao_publicavel";
   }
+
+  if (ofcImagem.imagemOficial === false && !provaOficialMl) return "imagem_radar_nao_publicavel";
 
   if (/imagem_radar_(?:thumbnail_)?nao_publicavel|sem_imagem|radar_mirror_nao_publicavel/.test(texto)) {
     return "imagem_radar_nao_publicavel";
@@ -229,7 +282,8 @@ function avaliarPublicabilidadeImagemUniversal(valor = {}, candidato = {}) {
   const motivo = motivoBase || motivoOrigemMaterializada || motivoCandidato;
   return {
     ok: !motivo,
-    motivo
+    motivo,
+    provaOficialMl: temProvaImagemOficialMercadoLivre(valor)
   };
 }
 
@@ -571,7 +625,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
       imagemUrlPresente: true,
       imagemRecuperavel: oferta.imagemRecuperavel !== false,
       imagemDuravel: oferta.imagemDuravel !== false,
-      imagemEnviavel: oferta.imagemEnviavel !== false,
+      imagemEnviavel: oferta.imagemEnviavel !== false || publicabilidade.provaOficialMl === true,
     };
   }
 
@@ -647,6 +701,7 @@ module.exports = {
   imagemUrlValidaUniversal,
   imagemUrlEfemeraUniversal,
   avaliarPublicabilidadeImagemUniversal,
+  temProvaImagemOficialMercadoLivre,
   coletarCandidatosImagemUniversal,
   preservarCandidatosImagemUniversal,
 };

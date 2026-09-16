@@ -25,7 +25,8 @@ const {
 const {
   resolverImagemUniversal,
   imagemUrlEfemeraUniversal,
-  imagemUrlValidaUniversal
+  imagemUrlValidaUniversal,
+  temProvaImagemOficialMercadoLivre
 } = require("../../imagens/resolver-imagem-universal");
 const {
   resolverImagemCanonicaFinalEvento
@@ -2555,6 +2556,44 @@ function aplicarImagemCanonicaFinalOferta(oferta = {}, imagemCanonica = {}) {
   };
 }
 
+function promoverImagemOficialMercadoLivreConfirmada(oferta = {}, metadata = {}) {
+  const dados = objetoSeguro(metadata);
+  if (!temProvaImagemOficialMercadoLivre({ ...oferta, metadata: dados })) {
+    return { oferta, metadata: dados, promovida: false };
+  }
+
+  const origem = normalizarTexto(dados.imagemOrigem || oferta.imagemOrigem || "og:image.picture_id");
+  const ofcV24 = objetoSeguro(dados.ofcV24);
+  const imagemComercial = objetoSeguro(ofcV24.imagemComercial);
+  const metadataPromovida = {
+    ...dados,
+    imagemBaseOrigem: origem,
+    imagemEnviavel: true,
+    ofcV24: {
+      ...ofcV24,
+      imagemComercial: {
+        ...imagemComercial,
+        urlSelecionada: oferta.imagem || imagemComercial.urlSelecionada || null,
+        origemSelecionada: origem,
+        imagemOficial: true,
+        imagemLimpa: true,
+        possuiMarcaFonte: false,
+        motivoSelecao: "imagem_oficial_ml_og_image_confirmada"
+      }
+    }
+  };
+
+  return {
+    oferta: {
+      ...oferta,
+      imagemBaseOrigem: origem,
+      imagemEnviavel: true
+    },
+    metadata: metadataPromovida,
+    promovida: true
+  };
+}
+
 async function materializarImagemRadarMirrorSeNecessario(ofertaEntrada = {}, contexto = {}) {
   const oferta = ofertaEntrada && typeof ofertaEntrada === "object" ? ofertaEntrada : {};
   const imagemCanonicaEvento = encontrarImagemCanonicaEvento(oferta, contexto);
@@ -4252,6 +4291,19 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       fonte: "normalizador_comercial_shadow"
     }
   };
+  const promocaoImagemMl = promoverImagemOficialMercadoLivreConfirmada(oferta, metadataFinal);
+  oferta = promocaoImagemMl.oferta;
+  metadataFinal = promocaoImagemMl.metadata;
+  if (promocaoImagemMl.promovida) {
+    console.log("[ML-IMAGEM-OFICIAL-CONFIRMADA]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      clienteId: job.cliente_id || job.clienteId || "",
+      origem: metadataFinal.imagemBaseOrigem || "",
+      imagem: oferta.imagem || "",
+      status: metadataFinal.imagemStatus || ""
+    }));
+  }
   emitirLogsEspelhoComercialV24(resultadoEspelhoComercialV24, {
     workspaceId: job.cliente_id || job.clienteId || "",
     marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",

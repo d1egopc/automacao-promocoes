@@ -1648,7 +1648,10 @@ function classificarImagem(candidato = {}) {
   if (/(canonical|produto|product|importer|oficial|marketplace|engine_ofertas\.imagem)/.test(origem)) {
     prioridade = 10;
     imagemOficial = true;
-  } else if (/(mercadolivre|meli|shopee|amazon|aliexpress|kabum|awin)/.test(url)) {
+  } else if (
+    /(mercadolivre|meli|shopee|amazon|aliexpress|kabum|awin)/.test(url) ||
+    (/og:image\.picture_id|mercadolivre_og_image/.test(origem) && /(?:^|[./])mlstatic\.com/.test(url))
+  ) {
     prioridade = 20;
     imagemOficial = true;
     origemSelecionada = origemSelecionada || "dominio_marketplace";

@@ -27459,7 +27459,7 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
   if (!publicabilidade.ok) {
     return { ok: false, url: imagem, motivo: publicabilidade.motivo || "imagem_nao_enviavel", tinhaImagem: true };
   }
-  if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
+  if ((oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") && publicabilidade.provaOficialMl !== true) {
     return { ok: false, url: imagem, motivo: "imagem_nao_enviavel", tinhaImagem: true };
   }
   return { ok: true, url: imagem, motivo: "", tinhaImagem: true };
@@ -27475,7 +27475,7 @@ function avaliarImagemPublicavelOfertaExecutor(oferta = {}) {
   if (!publicabilidade.ok) {
     return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: publicabilidade.motivo || "imagem_nao_publicavel", tinhaImagem: Boolean(imagem) };
   }
-  if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
+  if ((oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") && publicabilidade.provaOficialMl !== true) {
     return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: "imagem_nao_publicavel", tinhaImagem: Boolean(imagem) };
   }
   if (!imagem) return { ok: false, url: "", motivo: "sem_imagem", motivoTecnico: "imagem_ausente", tinhaImagem: false };
