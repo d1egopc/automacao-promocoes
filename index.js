@@ -12,7 +12,8 @@ const tipoMidiaV2 = require("./modules/destinos/tipo-midia-v2");
 const {
   preservarCandidatosImagemUniversal,
   resolverImagemUniversal,
-  imagemUrlEfemeraUniversal
+  imagemUrlEfemeraUniversal,
+  avaliarPublicabilidadeImagemUniversal
 } = require("./modules/imagens/resolver-imagem-universal");
 const {
   normalizarCuponsSemanticos
@@ -27450,6 +27451,14 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
   if (imagemUrlEfemeraUniversal(imagem)) {
     return { ok: false, url: imagem, motivo: "imagem_nao_enviavel_url_efemera", tinhaImagem: true };
   }
+  const publicabilidade = avaliarPublicabilidadeImagemUniversal({
+    ...oferta,
+    imagem,
+    imagemUrl: imagem
+  });
+  if (!publicabilidade.ok) {
+    return { ok: false, url: imagem, motivo: publicabilidade.motivo || "imagem_nao_enviavel", tinhaImagem: true };
+  }
   if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
     return { ok: false, url: imagem, motivo: "imagem_nao_enviavel", tinhaImagem: true };
   }
@@ -27458,6 +27467,14 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
 
 function avaliarImagemPublicavelOfertaExecutor(oferta = {}) {
   const imagem = corrigirImagemUrl(oferta.imagem) || oferta.imagem || "";
+  const publicabilidade = avaliarPublicabilidadeImagemUniversal({
+    ...oferta,
+    imagem,
+    imagemUrl: imagem
+  });
+  if (!publicabilidade.ok) {
+    return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: publicabilidade.motivo || "imagem_nao_publicavel", tinhaImagem: Boolean(imagem) };
+  }
   if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
     return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: "imagem_nao_publicavel", tinhaImagem: Boolean(imagem) };
   }

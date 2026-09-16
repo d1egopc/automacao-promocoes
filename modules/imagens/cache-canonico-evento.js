@@ -2,7 +2,8 @@ const { queryEngine } = require("../engine/database");
 const {
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
-  imagemUrlEfemeraUniversal
+  imagemUrlEfemeraUniversal,
+  avaliarPublicabilidadeImagemUniversal
 } = require("./resolver-imagem-universal");
 const socialMediaStorage = require("../social/social-media-storage");
 
@@ -712,6 +713,17 @@ function origemImagemRadar(valor = {}) {
   );
 }
 
+async function buscarImagemCanonicaMercadoLivrePorLinks(oferta = {}, deps = {}) {
+  const importer = require("../engine/importer/importer.service");
+  if (typeof importer.buscarImagemCanonicaMercadoLivre !== "function") {
+    return { imagem: "", motivo: "importador_ml_indisponivel" };
+  }
+  return importer.buscarImagemCanonicaMercadoLivre(oferta, {
+    fetchImpl: deps.fetchImpl,
+    timeoutMsImagemPolycard: deps.timeoutMsImagemPolycard
+  });
+}
+
 function origemImagemOficialMarketplace(origem = "") {
   const valor = texto(origem).toLowerCase();
   if (!valor || /radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/.test(valor)) return false;
@@ -1181,6 +1193,7 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
     ...objetoSeguro(objetoSeguro(ofertaEnriquecida.metadata).imagemCacheCanonico),
     ...objetoSeguro(cacheImagemCanonicaEvento.get(chave))
   };
+  const ehMercadoLivre = marketplace === "mercadolivre";
   const ehMercadoLivreComMlb = marketplace === "mercadolivre" && /^MLB\d+$/.test(texto(produtoId).toUpperCase());
   let fallbackImagemMlBaixa = null;
   let fallbackImagemRadar = null;
@@ -1359,6 +1372,54 @@ async function resolverImagemCanonicaFinalEvento(entrada = {}, deps = {}) {
   }
 
   let ultimoMotivo = "nenhuma_fonte_de_imagem";
+  if (ehMercadoLivre && !ehMercadoLivreComMlb) {
+    const ofertaMlSemMlb = {
+      ...ofertaImagem,
+      ...ofertaEnriquecida,
+      marketplace: "mercadolivre",
+      linkOriginal: ofertaEnriquecida.linkOriginal || entrada.linkOriginal || entrada.link?.url || "",
+      linkExpandido: ofertaEnriquecida.linkExpandido || entrada.linkExpandido || "",
+      linkAfiliado: ofertaEnriquecida.linkAfiliado || entrada.linkAfiliado || "",
+      linkFinal: ofertaEnriquecida.linkFinal || entrada.linkFinal || ""
+    };
+    const oficialSocial = await buscarImagemCanonicaMercadoLivrePorLinks(ofertaMlSemMlb, deps);
+    const oficialSocialResolvida = resolverImagemUniversal({
+      imagem: oficialSocial.imagem || "",
+      imagemOrigem: oficialSocial.origem || "og:image.picture_id",
+      imagemStatus: "mercadolivre_og_image",
+      imagemBaseOrigem: oficialSocial.origem || "og:image.picture_id",
+      imagemEnviavel: Boolean(oficialSocial.imagem)
+    });
+    const publicabilidadeOficial = avaliarPublicabilidadeImagemUniversal(oficialSocialResolvida);
+    if (oficialSocialResolvida.imagem && publicabilidadeOficial.ok) {
+      const resultado = resultadoImagemCanonica({
+        chave,
+        eventoId,
+        marketplace,
+        produtoId,
+        imagem: oficialSocialResolvida.imagem,
+        origem: oficialSocial.origem || "og:image.picture_id",
+        status: "mercadolivre_og_image",
+        extra: {
+          imagemCanonicaFinal: true,
+          enriquecimentoPendente: false,
+          materializacoes: Number(cacheAtual.materializacoes || 0),
+          ...(cacheAtual.radarMirrorMaterializacao ? { radarMirrorMaterializacao: cacheAtual.radarMirrorMaterializacao } : {}),
+          linkResolvido: oficialSocial.linkResolvido || linkResolvidoImagem,
+          statusHttp: oficialSocial.statusHttp ?? null,
+          contentType: oficialSocial.contentType || "",
+          pictureId: oficialSocial.pictureId || "",
+          dimensoes: oficialSocial.dimensoes || null,
+          variante: oficialSocial.variante || null,
+          motivoSelecao: oficialSocial.motivo || "og_image_picture_id_imagem_recuperada",
+          prioridadeImagemGlobal: "oficial_marketplace"
+        }
+      });
+      cacheImagemCanonicaEvento.set(chave, resultado);
+      return { ...resultado, cacheHit: false };
+    }
+    ultimoMotivo = oficialSocial.motivo || publicabilidadeOficial.motivo || ultimoMotivo;
+  }
   if (ehMercadoLivreComMlb) {
     if (fallbackImagemRadar?.imagem) {
       const candidatoSeguroContraRadar = resolverImagemMlSeguraParaVencerRadar(ofertaImagem, produtoId, urlsMlBaixaQualidade);

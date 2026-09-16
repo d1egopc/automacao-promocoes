@@ -1915,7 +1915,12 @@ function coletarValoresTecnicosImagemMercadoLivre(oferta = {}) {
       metadata.linkExpandidoEngine,
       resolucaoRadar.linkOriginalLimpo,
       oferta.linkOriginal,
-      metadata.linkOriginalEngine
+      metadata.linkOriginalEngine,
+      produto.linkOriginal,
+      produto.linkAfiliado,
+      metadata.linkAfiliado,
+      oferta.linkAfiliado,
+      oferta.linkFinal
     ]
   };
 }

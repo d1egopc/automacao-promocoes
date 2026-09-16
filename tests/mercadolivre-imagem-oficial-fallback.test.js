@@ -120,6 +120,35 @@ async function comFetchMock(respostas, fn) {
   }
 
   {
+    const pictureId = "800867-MLB114378386969_072026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const radarTatuado = "https://go.optimuspromo.com.br/social/midia/publica/engine/radar_whatsapp_sandrini_tatuado.jpg";
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, "<html><head></head><body>social sem og nesta rota</body></html>", "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      titulo: "Tenis Sandrini Axys Onyx",
+      linkOriginal: "https://meli.la/1piEYeW",
+      linkAfiliado: "https://meli.la/1kTgdY6",
+      imagem: radarTatuado,
+      imagemUrl: radarTatuado,
+      imagemOrigem: "radar_mirror/mensagem"
+    }));
+
+    assert.strictEqual(chamadas[0].url, "https://meli.la/1piEYeW");
+    assert.strictEqual(chamadas[1].url, "https://meli.la/1kTgdY6");
+    assert.strictEqual(chamadas[2].url, esperado1200);
+    assert.strictEqual(retorno.imagem, esperado1200);
+    assert.notStrictEqual(retorno.imagem, radarTatuado);
+    assert.strictEqual(retorno.origem, "og:image.picture_id");
+    assert.strictEqual(retorno.pictureId, pictureId);
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 1200, altura: 1200 });
+  }
+
+  {
     const pictureId = "623680-MLB95967214789_102025";
     const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
     const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
@@ -568,6 +597,7 @@ async function comFetchMock(respostas, fn) {
       const generica = `https://produto.mercadolivre.com.br/MLB${id}`;
       const { retorno, chamadas } = await comFetchMock([
         respostaHtml(200, `<html><head><meta property="og:url" content="${social}"></head><body>${mlb}</body></html>`, social),
+        respostaHtml(200, "<html><head></head><body>sem imagem oficial</body></html>", social),
         respostaHtml(404, "<html>not found</html>", generica)
       ], () => buscarImagemCanonicaMercadoLivre({
         marketplace: "mercadolivre",
@@ -577,9 +607,9 @@ async function comFetchMock(respostas, fn) {
         linkAfiliado: `${meliLa}/workspace`
       }));
 
-      assert.strictEqual(chamadas.length, 2, mlb);
       assert.strictEqual(chamadas[0].url, meliLa, mlb);
-      assert.strictEqual(chamadas[1].url, generica, mlb);
+      assert.strictEqual(chamadas[1].url, `${meliLa}/workspace`, mlb);
+      assert.strictEqual(chamadas[2].url, generica, mlb);
       assert.strictEqual(chamadas.some(item => /MLB-\d+-/.test(item.url)), false, mlb);
       assert.strictEqual(retorno.imagem, "", mlb);
       assert.strictEqual(retorno.motivo, "api_oficial_mlb_token_ausente", mlb);

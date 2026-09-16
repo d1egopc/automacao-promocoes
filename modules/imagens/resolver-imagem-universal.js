@@ -131,6 +131,108 @@ function imagemUrlEfemeraUniversal(valor) {
   return false;
 }
 
+function textoNormalizadoImagem(valor = "") {
+  return String(valor ?? "").trim().toLowerCase();
+}
+
+function motivoNaoPublicavelDaImagem(valor = {}) {
+  const item = valor && typeof valor === "object" ? valor : {};
+  const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata : {};
+  const cache = metadata.imagemCacheCanonico && typeof metadata.imagemCacheCanonico === "object"
+    ? metadata.imagemCacheCanonico
+    : {};
+  const ofcImagem = metadata.ofcV24?.imagemComercial && typeof metadata.ofcV24.imagemComercial === "object"
+    ? metadata.ofcV24.imagemComercial
+    : {};
+  const textos = [
+    item.imagemOrigem,
+    item.imagemStatus,
+    item.imagemBaseOrigem,
+    item.origemImagemFinal,
+    item.motivoImagemNaoPublicavel,
+    item.imagemAusenteMotivo,
+    metadata.imagemOrigem,
+    metadata.imagemStatus,
+    metadata.imagemBaseOrigem,
+    metadata.origemImagemFinal,
+    metadata.motivoImagemNaoPublicavel,
+    metadata.imagemAusenteMotivo,
+    cache.origem,
+    cache.status,
+    cache.imagemBaseOrigem,
+    cache.motivo,
+    ofcImagem.origem,
+    ofcImagem.imagemOrigem,
+    ofcImagem.motivoSelecao,
+    ofcImagem.urlSelecionada,
+    item.imagem,
+    item.imagemUrl,
+    item.url
+  ].filter(Boolean).join(" ");
+  const texto = textoNormalizadoImagem(textos);
+
+  if (
+    item.imagemEnviavel === false ||
+    metadata.imagemEnviavel === false ||
+    cache.imagemEnviavel === false ||
+    item.imagemStatus === "imagem_nao_enviavel"
+  ) {
+    return "imagem_base_nao_publicavel";
+  }
+
+  if (ofcImagem.imagemOficial === false || ofcImagem.possuiMarcaFonte === true) {
+    return "imagem_radar_nao_publicavel";
+  }
+
+  if (/imagem_radar_(?:thumbnail_)?nao_publicavel|sem_imagem|radar_mirror_nao_publicavel/.test(texto)) {
+    return "imagem_radar_nao_publicavel";
+  }
+
+  if (/radar|mirror|mensagem|grupo|whatsapp|telegram|clonador|avatar_grupo/.test(texto)) {
+    return "imagem_radar_nao_publicavel";
+  }
+
+  if (/(radar_whatsapp|radar_telegram|\/social\/midia\/publica\/engine\/|mmg\.whatsapp\.net)/i.test(textos)) {
+    return "imagem_radar_nao_publicavel";
+  }
+
+  return "";
+}
+
+function origemCandidatoOficialImagem(origem = "", camada = "") {
+  const texto = textoNormalizadoImagem(`${origem} ${camada}`);
+  if (!texto || /radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/.test(texto)) return false;
+  return (
+    /product_main_image_url|api_productofferv2|jsonld\.image|og:image|twitter:image|landingimage|data-old-hires|gallery/.test(texto) ||
+    /metadata\.produto\.(?:imageurl|image|images|pictures|imagemcandidatos)/.test(texto) ||
+    /pictures\[\d+\]|images\[\d+\]|product_small_image_urls/.test(texto) ||
+    ["imageurl", "image", "urlimagem"].includes(texto.trim())
+  );
+}
+
+function avaliarPublicabilidadeImagemUniversal(valor = {}, candidato = {}) {
+  const origem = String(candidato?.origem || "").trim();
+  const camada = String(candidato?.camada || "").trim();
+  const url = String(candidato?.valor || candidato?.imagem || candidato?.imagemUrl || "").trim();
+  const candidatoOficial = origemCandidatoOficialImagem(origem, camada);
+  const motivoBase = candidatoOficial ? "" : motivoNaoPublicavelDaImagem(valor);
+  const motivoOrigemMaterializada = !candidatoOficial && /(?:^|\.)(?:imagemmaterializada|imagemenviavel)$/i.test(origem)
+    ? "imagem_radar_nao_publicavel"
+    : "";
+  const motivoCandidato = motivoNaoPublicavelDaImagem({
+    imagem: url,
+    imagemUrl: url,
+    imagemOrigem: origem,
+    imagemStatus: camada,
+    metadata: valor?.metadata
+  });
+  const motivo = motivoBase || motivoOrigemMaterializada || motivoCandidato;
+  return {
+    ok: !motivo,
+    motivo
+  };
+}
+
 function statusImagemEnviavel(camada) {
   if (camada === "radar_mirror_duravel") return "radar_mirror_materializada";
   return statusParaCamada(camada);
@@ -436,6 +538,28 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
 
   if (oferta.imagemStatus && imagemUrlValidaUniversal(oferta.imagemUrl).ok && !imagemUrlEfemeraUniversal(oferta.imagemUrl)) {
     const validacao = imagemUrlValidaUniversal(oferta.imagemUrl);
+    const publicabilidade = avaliarPublicabilidadeImagemUniversal(oferta, {
+      valor: validacao.url,
+      origem: oferta.imagemOrigem || "imagemUrl",
+      camada: oferta.imagemStatus
+    });
+    if (!publicabilidade.ok) {
+      return {
+        ...preservarCandidatosImagemUniversal(oferta, contexto),
+        imagem: "",
+        imagemUrl: "",
+        imagemStatus: "nao_resolvida",
+        imagemOrigem: oferta.imagemOrigem || "nenhuma",
+        imagemConfianca: 0,
+        imagemResolvidaEm: oferta.imagemResolvidaEm || new Date().toISOString(),
+        imagemTentativas: Array.isArray(oferta.imagemTentativas) ? oferta.imagemTentativas.slice(0, MAX_TENTATIVAS) : [],
+        imagemUrlPresente: true,
+        imagemRecuperavel: false,
+        imagemDuravel: false,
+        imagemEnviavel: false,
+        imagemAusenteMotivo: publicabilidade.motivo
+      };
+    }
     return {
       ...preservarCandidatosImagemUniversal(oferta, contexto),
       imagem: validacao.url,
@@ -472,6 +596,15 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
       continue;
     }
 
+    const publicabilidade = avaliarPublicabilidadeImagemUniversal(oferta, {
+      ...item,
+      valor: validacao.url
+    });
+    if (!publicabilidade.ok) {
+      registrarTentativa(tentativas, item.origem, "rejeitada", publicabilidade.motivo, item.confianca);
+      continue;
+    }
+
     registrarTentativa(tentativas, item.origem, "selecionada", "", item.confianca);
     return {
       ...ofertaComCandidatos,
@@ -489,6 +622,8 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
     };
   }
 
+  const motivoTentativaRejeitada = tentativas.map((tentativa) => tentativa.motivo).find(Boolean);
+
   return {
     ...ofertaComCandidatos,
     imagem: "",
@@ -502,6 +637,7 @@ function resolverImagemUniversal(ofertaEntrada = {}, contexto = {}) {
     imagemRecuperavel: false,
     imagemDuravel: false,
     imagemEnviavel: false,
+    imagemAusenteMotivo: motivoNaoPublicavelDaImagem(oferta) || motivoTentativaRejeitada || "nenhuma_fonte_de_imagem",
   };
 }
 
@@ -510,6 +646,7 @@ module.exports = {
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
   imagemUrlEfemeraUniversal,
+  avaliarPublicabilidadeImagemUniversal,
   coletarCandidatosImagemUniversal,
   preservarCandidatosImagemUniversal,
 };

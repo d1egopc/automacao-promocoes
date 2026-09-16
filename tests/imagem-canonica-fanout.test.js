@@ -52,6 +52,36 @@ function pngMinimo() {
   );
 }
 
+function jpegDimensao(largura = 320, altura = 320) {
+  return Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x11, 0x08,
+    (altura >> 8) & 0xff, altura & 0xff,
+    (largura >> 8) & 0xff, largura & 0xff,
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00
+  ]);
+}
+
+function respostaHtml(status = 404, html = "", urlResposta = "https://www.mercadolivre.com.br/social/diegopc2015") {
+  return {
+    status,
+    url: urlResposta,
+    text: async () => html
+  };
+}
+
+function respostaImagem(status = 200, contentType = "image/jpeg", dimensoes = null) {
+  const corpo = dimensoes ? jpegDimensao(dimensoes.largura, dimensoes.altura) : pngMinimo();
+  return {
+    status,
+    url: "https://http2.mlstatic.com/imagem.jpg",
+    headers: {
+      get: (nome) => String(nome || "").toLowerCase() === "content-type" ? contentType : ""
+    },
+    arrayBuffer: async () => corpo.buffer.slice(corpo.byteOffset, corpo.byteOffset + corpo.byteLength)
+  };
+}
+
 function fetchImagemOk(contador) {
   return async () => {
     contador.count += 1;
@@ -1840,6 +1870,63 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
     assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
     assert.strictEqual(resultado.imagemFallbackRadarDisponivel, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const pictureId = "800867-MLB114378386969_072026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const oficial1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const radarTatuado = url("radar-sandrini-tatuado");
+    const respostas = [
+      respostaHtml(200, "<html><head></head><body>social sem imagem</body></html>", "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ];
+    const chamadas = [];
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9836,
+      marketplace: "mercadolivre",
+      metadataEvento: {
+        radarMirror: {
+          midia: {
+            imagemOrigem: "mensagem",
+            imagemOriginal: radarTatuado
+          }
+        }
+      },
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        titulo: "Tenis Sandrini Axys Onyx",
+        linkOriginal: "https://meli.la/1piEYeW",
+        linkAfiliado: "https://meli.la/1kTgdY6",
+        imagem: radarTatuado,
+        imagemUrl: radarTatuado,
+        imagemOrigem: "radar_mirror/mensagem"
+      }
+    }, {
+      fetchImpl: async (urlAtual) => {
+        chamadas.push(String(urlAtual));
+        const resposta = respostas.shift();
+        if (!resposta) throw new Error("fetch inesperado: " + urlAtual);
+        return resposta;
+      }
+    });
+
+    assert.strictEqual(chamadas[0], "https://meli.la/1piEYeW");
+    assert.strictEqual(chamadas[1], "https://meli.la/1kTgdY6");
+    assert.strictEqual(chamadas[2], oficial1200);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, oficial1200);
+    assert.strictEqual(resultado.pictureId, pictureId);
+    assert.strictEqual(resultado.imagemOrigem, "og:image.picture_id");
+    assert.strictEqual(resultado.imagemStatus, "mercadolivre_og_image");
+    assert.strictEqual(resultado.imagemEnviavel, true);
+    assert.strictEqual(resultado.prioridadeImagemGlobal, "oficial_marketplace");
   }
 
   console.log("imagem-canonica-fanout.test.js OK");

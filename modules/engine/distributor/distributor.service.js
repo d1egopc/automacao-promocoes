@@ -533,7 +533,7 @@ function resolverImagemFilaEngine(oferta = {}) {
       imagem: "",
       origem: "nenhuma",
       fallbackUsado: false,
-      ausenciaMotivo: "nenhuma_fonte_de_imagem",
+      ausenciaMotivo: resolvida.imagemAusenteMotivo || "nenhuma_fonte_de_imagem",
       imagemStatus: resolvida.imagemStatus || "nao_resolvida",
       imagemConfianca: resolvida.imagemConfianca || 0,
       imagemUrlPresente: resolvida.imagemUrlPresente === true,
@@ -773,7 +773,8 @@ function montarItemFilaEngine(oferta = {}) {
     oferta,
     imagemAtual: imagemResolvida.imagem
   });
-  const imagemFinal = imagemPiloto.usarImagemEspelho ? imagemPiloto.imagem : imagemResolvida.imagem;
+  const podeUsarImagemPiloto = imagemResolvida.imagemEnviavel === true && Boolean(imagemResolvida.imagem);
+  const imagemFinal = podeUsarImagemPiloto && imagemPiloto.usarImagemEspelho ? imagemPiloto.imagem : imagemResolvida.imagem;
   const camposComerciaisRadar = copiarCamposComerciaisRadarFila(oferta);
   const origemFluxo = resolverOrigemFluxo(oferta);
   const restricaoDestinosClone = resolverRestricaoDestinosClonador(oferta);
@@ -793,11 +794,11 @@ function montarItemFilaEngine(oferta = {}) {
     ...camposComerciaisRadar,
     imagem: imagemFinal,
     imagemUrl: imagemFinal,
-    imagemOrigem: imagemPiloto.usarImagemEspelho ? (imagemPiloto.origem || "ofc_v2_4_espelho_comercial") : imagemResolvida.origem,
-    imagemFallbackUsado: imagemPiloto.usarImagemEspelho ? false : imagemResolvida.fallbackUsado,
+    imagemOrigem: podeUsarImagemPiloto && imagemPiloto.usarImagemEspelho ? (imagemPiloto.origem || "ofc_v2_4_espelho_comercial") : imagemResolvida.origem,
+    imagemFallbackUsado: podeUsarImagemPiloto && imagemPiloto.usarImagemEspelho ? false : imagemResolvida.fallbackUsado,
     imagemEspelhoPiloto: {
       ativo: imagemPiloto.motivo !== "workspace_fora_do_piloto",
-      aplicada: imagemPiloto.usarImagemEspelho === true,
+      aplicada: podeUsarImagemPiloto && imagemPiloto.usarImagemEspelho === true,
       motivo: imagemPiloto.motivo || ""
     },
     imagemAusenteMotivo: imagemResolvida.ausenciaMotivo,
@@ -1334,7 +1335,7 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
     ? destinosImagemOuPreview.some(destinoUsaImagemOuPreview)
     : true;
 
-  if (devePrepararImagemGlobal && typeof deps.aplicarIdentidadeVisualOferta === "function") {
+  if (devePrepararImagemGlobal && itemFila.imagemEnviavel === true && Boolean(itemFila.imagem) && typeof deps.aplicarIdentidadeVisualOferta === "function") {
     try {
       const identidadeVisual = await deps.aplicarIdentidadeVisualOferta({
         clienteId,

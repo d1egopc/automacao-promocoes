@@ -25,6 +25,7 @@ function trechoEntre(inicio, fim) {
     "function tipoMidiaDestinoExecutor"
   );
   assert.ok(helper.includes("oferta.imagemEnviavel === false"), "gate deve bloquear imagemEnviavel=false");
+  assert.ok(helper.includes("avaliarPublicabilidadeImagemUniversal"), "gate deve validar proveniencia/base da imagem");
   assert.ok(helper.includes("motivo: \"sem_imagem\""), "gate deve expor motivo publico sem_imagem");
   assert.ok(helper.includes("imagemUrlEfemeraUniversal"), "gate deve bloquear URL efemera antes do dispatch");
 }

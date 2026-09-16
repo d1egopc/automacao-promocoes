@@ -9,6 +9,7 @@ const {
   resolverImagemUniversal,
   imagemUrlValidaUniversal,
   imagemUrlEfemeraUniversal,
+  avaliarPublicabilidadeImagemUniversal,
   coletarCandidatosImagemUniversal
 } = require("../modules/imagens/resolver-imagem-universal");
 const {
@@ -89,11 +90,16 @@ function semDatas(resultado) {
       },
     },
   });
-  assert.strictEqual(saida.imagem, url("radar-materializada"));
-  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemMaterializada");
-  assert.strictEqual(saida.imagemStatus, "radar_mirror_materializada");
-  assert.strictEqual(saida.imagemDuravel, true);
-  assert.strictEqual(saida.imagemEnviavel, true);
+  assert.strictEqual(saida.imagem, "");
+  assert.strictEqual(saida.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saida.imagemUrlPresente, true);
+  assert.strictEqual(saida.imagemDuravel, false);
+  assert.strictEqual(saida.imagemEnviavel, false);
+  assert(saida.imagemTentativas.some((tentativa) =>
+    tentativa.origem === "radar_mirror/mensagem.midia.imagemMaterializada" &&
+    tentativa.status === "rejeitada" &&
+    tentativa.motivo === "imagem_radar_nao_publicavel"
+  ));
 }
 
 {
@@ -144,8 +150,9 @@ function semDatas(resultado) {
   });
   assert.strictEqual(resultado.status, "materializada");
   const resolvida = resolverImagemUniversal(resultado.oferta);
-  assert.strictEqual(resolvida.imagem, url("materializada-storage"));
-  assert.strictEqual(resolvida.imagemEnviavel, true);
+  assert.strictEqual(resolvida.imagem, "");
+  assert.strictEqual(resolvida.imagemEnviavel, false);
+  assert.strictEqual(resolvida.imagemAusenteMotivo, "imagem_radar_nao_publicavel");
 }
 
 {
@@ -259,10 +266,61 @@ function semDatas(resultado) {
       },
     },
   });
-  assert.strictEqual(saida.imagem, url("radar-mirror-mensagem"));
-  assert.strictEqual(saida.imagemStatus, "radar_mirror_preservada");
-  assert.strictEqual(saida.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
-  assert.strictEqual(saida.imagemConfianca, 110);
+  assert.strictEqual(saida.imagem, "");
+  assert.strictEqual(saida.imagemStatus, "nao_resolvida");
+  assert.strictEqual(saida.imagemUrlPresente, true);
+  assert.strictEqual(saida.imagemEnviavel, false);
+}
+
+{
+  const renderOficial = resolverImagemUniversal({
+    imagem: url("render-workspace-oficial"),
+    imagemUrl: url("render-workspace-oficial"),
+    imagemOrigem: "renderer_workspace",
+    imagemStatus: "render_workspace",
+    imagemBaseOrigem: "og:image.picture_id",
+    imagemEnviavel: true,
+    metadata: {
+      imagemBaseOrigem: "og:image.picture_id",
+      imagemEnviavel: true,
+      imagemCacheCanonico: {
+        imagemEnviavel: true,
+        origem: "og:image.picture_id"
+      }
+    }
+  });
+  assert.strictEqual(renderOficial.imagem, url("render-workspace-oficial"));
+  assert.strictEqual(renderOficial.imagemEnviavel, true);
+
+  const renderRadar = resolverImagemUniversal({
+    imagem: url("render-workspace-radar"),
+    imagemUrl: url("render-workspace-radar"),
+    imagemOrigem: "renderer_workspace",
+    imagemStatus: "render_workspace",
+    imagemBaseOrigem: "radar_mirror/mensagem",
+    imagemEnviavel: true,
+    metadata: {
+      imagemEnviavel: false,
+      imagemAusenteMotivo: "imagem_radar_nao_publicavel",
+      imagemCacheCanonico: {
+        imagemEnviavel: false,
+        motivo: "imagem_radar_nao_publicavel"
+      }
+    }
+  });
+  assert.strictEqual(renderRadar.imagem, "");
+  assert.strictEqual(renderRadar.imagemEnviavel, false);
+  assert.strictEqual(renderRadar.imagemAusenteMotivo, "imagem_base_nao_publicavel");
+
+  const avaliacao = avaliarPublicabilidadeImagemUniversal({
+    imagem: url("render-workspace-radar-2"),
+    imagemUrl: url("render-workspace-radar-2"),
+    metadata: {
+      imagemEnviavel: false,
+      imagemAusenteMotivo: "imagem_radar_nao_publicavel"
+    }
+  });
+  assert.strictEqual(avaliacao.ok, false);
 }
 
 {
