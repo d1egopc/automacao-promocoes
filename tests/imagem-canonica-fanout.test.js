@@ -151,15 +151,15 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(retorno.criados, 3);
-    assert.strictEqual(fetchCount.count, 1);
-    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(fetchCount.count, 0);
+    assert.strictEqual(saveCount.count, 0);
     assert.strictEqual(metadatas.length, 3);
     for (const metadata of metadatas) {
-      assert.strictEqual(metadata.imagemCanonicaDuravel, url("radar-materializada"));
-      assert.strictEqual(metadata.imagemEnviavel, true);
-      assert.strictEqual(metadata.metadataEvento.imagemCanonicaDuravel, url("radar-materializada"));
-      assert.strictEqual(metadata.metadataEvento.radarMirror.midia.imagemMaterializada, url("radar-materializada"));
-      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 1);
+      assert.strictEqual(metadata.imagemCanonicaDuravel, "");
+      assert.strictEqual(metadata.imagemEnviavel, false);
+      assert.strictEqual(metadata.metadataEvento.imagemCanonicaDuravel, "");
+      assert.strictEqual(metadata.imagemCacheCanonico.motivo, "imagem_radar_nao_publicavel");
+      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 0);
     }
   }
 
@@ -211,19 +211,16 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     });
 
     assert.strictEqual(retorno.criados, 3);
-    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(fetchCount.count, 0);
     assert.strictEqual(metadatas.length, 3);
     for (const metadata of metadatas) {
       assert.strictEqual(metadata.imagemEnviavel, false);
       assert.strictEqual(metadata.imagemCanonicaDuravel, "");
-      assert.strictEqual(metadata.imagemStatus, "radar_falhou_enriquecimento_pendente");
-      assert.strictEqual(metadata.imagemCacheCanonico.motivo, "fonte_radar_imagem_falhou");
+      assert.strictEqual(metadata.imagemStatus, "nao_resolvida_ainda");
+      assert.strictEqual(metadata.imagemCacheCanonico.motivo, "imagem_radar_nao_publicavel");
       assert.strictEqual(metadata.imagemCacheCanonico.enriquecimentoPendente, true);
       assert.strictEqual(metadata.imagemCacheCanonico.imagemCanonicaFinal, false);
-      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 1);
-      assert.strictEqual(metadata.imagemCacheCanonico.bloquearRematerializacaoRadar, true);
-      assert.strictEqual(metadata.imagemCacheCanonico.radarMirrorMaterializacao.status, "falha");
-      assert.strictEqual(metadata.imagemCacheCanonico.radarMirrorMaterializacao.motivo, "mime_nao_imagem");
+      assert.strictEqual(metadata.imagemCacheCanonico.materializacoes, 0);
     }
   }
 
@@ -382,10 +379,12 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     const primeiro = await resolverImagemCanonicaEvento({ ...entradaBase, eventoId: 9210 }, deps);
     const segundo = await resolverImagemCanonicaEvento({ ...entradaBase, eventoId: 9211 }, deps);
 
-    assert.strictEqual(fetchCount.count, 2);
+    assert.strictEqual(fetchCount.count, 0);
     assert.notStrictEqual(primeiro.chave, segundo.chave);
-    assert.strictEqual(primeiro.radarMirrorMaterializacao.status, "falha");
-    assert.strictEqual(segundo.radarMirrorMaterializacao.status, "falha");
+    assert.strictEqual(primeiro.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(segundo.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(primeiro.imagemEnviavel, false);
+    assert.strictEqual(segundo.imagemEnviavel, false);
   }
 
   {
@@ -460,8 +459,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(preliminar.ok, false);
     assert.strictEqual(preliminar.imagemCanonicaDuravel, "");
     assert.strictEqual(preliminar.imagemEnviavel, false);
-    assert.strictEqual(preliminar.imagemStatus, "radar_falhou_enriquecimento_pendente");
-    assert.strictEqual(preliminar.motivo, "fonte_radar_imagem_falhou");
+    assert.strictEqual(preliminar.imagemStatus, "nao_resolvida_ainda");
+    assert.strictEqual(preliminar.motivo, "imagem_radar_nao_publicavel");
 
     const resultado = await resolverImagemCanonicaFinalEvento({
       eventoId: 9400,
@@ -485,7 +484,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
     assert.strictEqual(resultado.imagemCanonicaFinal, true);
     assert.strictEqual(resultado.enriquecimentoPendente, false);
-    assert.strictEqual(resultado.motivo, "http_403");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
   }
 
   {
@@ -519,8 +518,11 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     }, deps);
 
     assert.notStrictEqual(primeiro.chave, segundo.chave);
-    assert.notStrictEqual(primeiro.imagemCanonicaDuravel, segundo.imagemCanonicaDuravel);
-    assert.strictEqual(fetchCount.count, 2);
+    assert.strictEqual(primeiro.imagemCanonicaDuravel, "");
+    assert.strictEqual(segundo.imagemCanonicaDuravel, "");
+    assert.strictEqual(primeiro.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(segundo.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(fetchCount.count, 0);
   }
 
   {
@@ -575,8 +577,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       fetchImpl: fetchImagemInvalida(fetchCount),
       storage: storageSemImagem()
     });
-    assert.strictEqual(preliminar.imagemStatus, "radar_falhou_enriquecimento_pendente");
-    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(preliminar.imagemStatus, "nao_resolvida_ainda");
+    assert.strictEqual(preliminar.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(fetchCount.count, 0);
 
     const linksAfiliados = [
       "https://meli.la/workspace-a",
@@ -900,8 +903,10 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(resultado.imagemFallbackRadarDisponivel, true);
   }
 
   {
@@ -1026,7 +1031,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, imagemOutroMlb);
   }
 
@@ -1074,7 +1081,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, thumbnail);
   }
 
@@ -1119,7 +1128,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMaterializada);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
   }
 
   {
@@ -1251,8 +1262,8 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(retorno.criados, 3);
     assert.strictEqual(metadatas[0].imagemEnviavel, false);
-    assert.strictEqual(metadatas[0].imagemCacheCanonico.status, "radar_falhou_enriquecimento_pendente");
-    assert.strictEqual(metadatas[0].imagemCacheCanonico.motivo, "fonte_radar_imagem_falhou");
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.status, "nao_resolvida_ainda");
+    assert.strictEqual(metadatas[0].imagemCacheCanonico.motivo, "imagem_radar_nao_publicavel");
     assert.strictEqual(metadatas[0].imagemCacheCanonico.enriquecimentoPendente, true);
   }
 
@@ -1313,11 +1324,11 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
     });
 
-    assert.strictEqual(fetchCount.count, 1);
-    assert.strictEqual(saveCount.count, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-ml-materializada"));
-    assert.strictEqual(resultado.imagemOrigem, "radar_mirror/thumbnail");
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
+    assert.strictEqual(fetchCount.count, 0);
+    assert.strictEqual(saveCount.count, 0);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_thumbnail_nao_publicavel");
     assert.strictEqual(resultado.imagemCanonicaFinal, true);
   }
 
@@ -1404,8 +1415,9 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
 
     assert.strictEqual(apiChamadas, 1);
     assert.strictEqual(historicoChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarMensagem);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
     assert.strictEqual(fetchCount.count, 0);
   }
 
@@ -1445,10 +1457,11 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
     });
 
-    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-apos-ml-thumb-materializada"));
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
-    assert.strictEqual(fetchCount.count, 1);
-    assert.strictEqual(saveCount.count, 1);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_thumbnail_nao_publicavel");
+    assert.strictEqual(fetchCount.count, 0);
+    assert.strictEqual(saveCount.count, 0);
   }
 
   {
@@ -1483,7 +1496,7 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
     });
 
-    assert.strictEqual(fetchCount.count, 1);
+    assert.strictEqual(fetchCount.count, 0);
     assert.strictEqual(resultado.ok, false);
     assert.strictEqual(resultado.imagemCanonicaDuravel, "");
     assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
@@ -1519,11 +1532,11 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       storage: storageDuravel(saveCount, "radar-thumbnail-amazon-materializada")
     });
 
-    assert.strictEqual(fetchCount.count, 1);
-    assert.strictEqual(saveCount.count, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, url("radar-thumbnail-amazon-materializada"));
-    assert.strictEqual(resultado.imagemOrigem, "radar_mirror/thumbnail");
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_thumbnail_materializada");
+    assert.strictEqual(fetchCount.count, 0);
+    assert.strictEqual(saveCount.count, 0);
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_thumbnail_nao_publicavel");
   }
 
   {
@@ -1599,6 +1612,71 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
     assert.strictEqual(resultado.imagemCanonicaDuravel, cacheBom);
     assert.strictEqual(resultado.cacheHit, true);
     assert.strictEqual(fetchCount.count, 0);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const renderOficial = "https://go.optimuspromo.com.br/identidade-visual-ofertas/public/clientes/d1/renderizados/oficial.png";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9828,
+      marketplace: "mercadolivre",
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        metadata: {
+          imagemCacheCanonico: {
+            imagemCanonicaDuravel: renderOficial,
+            imagemOrigem: "renderer_workspace",
+            imagemStatus: "render_workspace",
+            imagemBaseOrigem: "og:image.picture_id",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, renderOficial);
+    assert.strictEqual(resultado.cacheHit, true);
+  }
+
+  {
+    const {
+      resolverImagemCanonicaFinalEvento,
+      _limparCacheImagemCanonicaEvento
+    } = require("../modules/imagens/cache-canonico-evento");
+    _limparCacheImagemCanonicaEvento();
+    const renderRadar = "https://go.optimuspromo.com.br/identidade-visual-ofertas/public/clientes/d1/renderizados/radar.png";
+
+    const resultado = await resolverImagemCanonicaFinalEvento({
+      eventoId: 9829,
+      marketplace: "mercadolivre",
+      metadataEvento: {},
+      ofertaEnriquecida: {
+        marketplace: "mercadolivre",
+        metadata: {
+          imagemCacheCanonico: {
+            imagemCanonicaDuravel: renderRadar,
+            imagemOrigem: "renderer_workspace",
+            imagemStatus: "render_workspace",
+            imagemBaseOrigem: "radar_mirror/mensagem",
+            imagemCanonicaFinal: true
+          }
+        }
+      }
+    }, {
+      buscarImagemOficialMl: async () => ({ imagem: "", motivo: "api_oficial_mlb_sem_imagem" }),
+      buscarImagemHistorica: async () => ({ imagem: "", motivo: "historico_mesmo_mlb_sem_imagem" })
+    });
+
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(resultado.imagemFallbackRadarDisponivel, true);
   }
 
   {
@@ -1758,8 +1836,10 @@ async function fanoutComImagemCanonica({ metadataEvento, depsImagemCanonica, lin
       }
     });
 
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radarFallback);
-    assert(resultado.imagemOrigem.startsWith("radar_mirror/mensagem"));
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(resultado.imagemFallbackRadarDisponivel, true);
   }
 
   console.log("imagem-canonica-fanout.test.js OK");

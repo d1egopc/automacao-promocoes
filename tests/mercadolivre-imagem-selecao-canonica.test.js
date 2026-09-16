@@ -147,8 +147,10 @@ function mlImg(nome, sufixo = "V") {
     });
 
     assert.strictEqual(apiChamadas, 1);
-    assert.strictEqual(resultado.imagemCanonicaDuravel, radar);
-    assert.strictEqual(resultado.imagemStatus, "radar_mirror_preservada");
+    assert.strictEqual(resultado.imagemCanonicaDuravel, "");
+    assert.strictEqual(resultado.imagemStatus, "nao_resolvida");
+    assert.strictEqual(resultado.motivo, "imagem_radar_nao_publicavel");
+    assert.strictEqual(resultado.imagemFallbackRadarDisponivel, true);
     assert.notStrictEqual(resultado.imagemCanonicaDuravel, thumbnailImportador);
   }
 

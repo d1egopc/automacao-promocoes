@@ -5,7 +5,8 @@ const {
   buscarImagemOficialMercadoLivrePorMlb,
   extrairImagemOficialMercadoLivreApi,
   extrairImagemPolycardMercadoLivreHtml,
-  montarUrlImagemPolycardMl
+  montarUrlImagemPolycardMl,
+  imagemMercadoLivreDeveBuscarCanonica
 } = require("../modules/engine/importer/importer.service");
 
 function respostaHtml(status = 404, html = "", url = "https://produto.mercadolivre.com.br/MLB3696123026") {
@@ -105,6 +106,19 @@ async function comFetchMock(respostas, fn) {
 }
 
 (async () => {
+  {
+    const decisao = imagemMercadoLivreDeveBuscarCanonica({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/1o1uZwj",
+      imagem: "https://go.optimuspromo.com.br/social/midia/publica/engine/radar_whatsapp_tatuado.jpg",
+      imagemUrl: "https://go.optimuspromo.com.br/social/midia/publica/engine/radar_whatsapp_tatuado.jpg",
+      imagemOrigem: "engine_ofertas.imagem"
+    });
+
+    assert.strictEqual(decisao.deveBuscar, true);
+    assert.strictEqual(decisao.motivo, "imagem_radar_preservada_generica");
+  }
+
   {
     const pictureId = "623680-MLB95967214789_102025";
     const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;

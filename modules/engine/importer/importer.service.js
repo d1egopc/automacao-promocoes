@@ -1613,6 +1613,15 @@ function pontuarImagemOficialMercadoLivre(candidato = {}) {
 function imagemMercadoLivreDeveBuscarCanonica(oferta = {}) {
   const imagem = normalizarValorImagem(oferta.imagem || oferta.imagemUrl || oferta.image || oferta.imageUrl || "");
   const origem = normalizarTexto(oferta.imagemOrigem || oferta.origemImagem || oferta.imagemStatus || "").toLowerCase();
+  const contextoLinks = [
+    oferta.linkOriginal,
+    oferta.linkExpandido,
+    oferta.linkAfiliado,
+    oferta.link,
+    oferta.urlFinal,
+    oferta.permalink,
+    oferta.linkResolvidoImagem
+  ].join(" ").toLowerCase();
 
   if (!imagem) return { deveBuscar: true, motivo: "imagem_ausente" };
 
@@ -1626,9 +1635,26 @@ function imagemMercadoLivreDeveBuscarCanonica(oferta = {}) {
     origem.includes("clonador") ||
     origem === "mensagem" ||
     origem === "grupo" ||
+    origem.includes("whatsapp") ||
+    origem.includes("telegram") ||
     origem.includes("social_media_storage")
   ) {
     return { deveBuscar: true, motivo: "imagem_radar_fallback" };
+  }
+
+  if (
+    /(meli\.la|mercadolivre\.com\.br|mercadolibre\.com)/i.test(contextoLinks) &&
+    /(radar_whatsapp|radar_telegram|\/social\/midia\/publica\/engine\/|mmg\.whatsapp\.net|whatsapp|telegram|grupo|mensagem)/i.test(imagem)
+  ) {
+    return { deveBuscar: true, motivo: "imagem_radar_preservada_generica" };
+  }
+
+  if (
+    /(meli\.la|mercadolivre\.com\.br|mercadolibre\.com)/i.test(contextoLinks) &&
+    (origem === "imagem" || origem === "imagemurl" || origem === "engine_ofertas.imagem" || origem === "preservada") &&
+    !/(^|\/\/)(?:[^/]+\.)?mlstatic\.com\//i.test(imagem)
+  ) {
+    return { deveBuscar: true, motivo: "imagem_ml_generica_precisa_revalidacao" };
   }
 
   if (origem === "og:image" || origem === "twitter:image") {
@@ -2502,7 +2528,12 @@ function aplicarImagemCanonicaFinalOferta(oferta = {}, imagemCanonica = {}) {
       imagemDuravel: true,
       imagemEnviavel: true
     } : {
+      imagem: "",
+      imagemUrl: "",
+      imagemOrigem: imagemCanonica.imagemOrigem || "nenhuma",
       imagemStatus: imagemCanonica.imagemStatus || oferta.imagemStatus || "nao_resolvida",
+      imagemRecuperavel: false,
+      imagemDuravel: false,
       imagemEnviavel: false
     }),
     metadata: {

@@ -8220,6 +8220,51 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return erro;
     };
 
+    const imagemPublicavelExecutor = etapaEnvioSync("prepararMidia", () =>
+      avaliarImagemPublicavelOfertaExecutor(oferta)
+    );
+    if (!imagemPublicavelExecutor.ok) {
+      console.log("[EXECUTOR-IMAGEM-BLOQUEIO-HARD]", JSON.stringify({
+        clienteId,
+        destino: destino?.nome || destino?.id || "",
+        ofertaId: oferta.id || "",
+        engineOfertaId: oferta.engineOfertaId || "",
+        marketplace: oferta.marketplace || "",
+        motivo: imagemPublicavelExecutor.motivo,
+        motivoTecnico: imagemPublicavelExecutor.motivoTecnico || "",
+        imagemStatus: oferta.imagemStatus || "",
+        imagemOrigem: oferta.imagemOrigem || ""
+      }));
+      registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+        decisao: "bloqueado",
+        motivo: "sem_imagem",
+        motivoTecnico: imagemPublicavelExecutor.motivoTecnico || "",
+        tentativaEnvio: false,
+        destinoEncontrado: true,
+        filaRecebeu: true
+      });
+      fidelidadeObs.registrarExecutor("executor_resultado", {
+        ...contextoFidelidadeExecutor,
+        canal: String(destino?.tipo || destino?.canal || "").toLowerCase(),
+        clienteId,
+        destino: destino?.nome || destino?.id || destino?.destinoId || "",
+        tipoMidia: destino?.tipoMidia || "",
+        oferta,
+        imagem: oferta?.imagem || "",
+        tentativaImagem: false,
+        caiuParaTexto: false,
+        resultado: "bloqueado_sem_imagem",
+        motivoTecnico: imagemPublicavelExecutor.motivoTecnico || "sem_imagem"
+      });
+      return {
+        enviado: false,
+        tentouEnvio: false,
+        motivo: "sem_imagem",
+        bloqueioImagem: true,
+        motivoTecnico: imagemPublicavelExecutor.motivoTecnico || "sem_imagem"
+      };
+    }
+
     if (
       normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "mercadolivre" &&
       normalizarTexto(oferta.origem || oferta.fonte || "") === "radar"
@@ -10891,14 +10936,15 @@ for (const item of destinosOrdenados) {
   if (tentouEnvioReal) destinosTentadosDebug += 1;
   if (resultadoEnvio.enviado !== true) {
     const parcialMultiAlvo = resultadoEnvio.parcial === true || resultadoEnvio.motivo === "alvos_pendentes";
+    const bloqueioSemImagem = resultadoEnvio.bloqueioImagem === true || resultadoEnvio.motivo === "sem_imagem";
     motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
-    registrarDestinoEstadoFanout(oferta, destino, parcialMultiAlvo ? "aguardando" : (tentouEnvioReal ? "erro_definitivo" : "aguardando"), {
-      motivo: resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"
+    registrarDestinoEstadoFanout(oferta, destino, bloqueioSemImagem ? "sem_imagem" : (parcialMultiAlvo ? "aguardando" : (tentouEnvioReal ? "erro_definitivo" : "aguardando")), {
+      motivo: bloqueioSemImagem ? "sem_imagem" : (resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado")
     });
     marcarFilaAlterada();
-    registrarCoberturaExecutor(tentouEnvioReal ? "executor_erro" : "executor_ignorado", oferta, clienteId, destino, {
-      decisao: parcialMultiAlvo ? "parcial" : (tentouEnvioReal ? "erro" : "ignorado"),
-      motivo: motivoCoberturaDestino(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
+    registrarCoberturaExecutor(bloqueioSemImagem ? "executor_bloqueado" : (tentouEnvioReal ? "executor_erro" : "executor_ignorado"), oferta, clienteId, destino, {
+      decisao: bloqueioSemImagem ? "bloqueado" : (parcialMultiAlvo ? "parcial" : (tentouEnvioReal ? "erro" : "ignorado")),
+      motivo: bloqueioSemImagem ? "sem_imagem" : motivoCoberturaDestino(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
       tentativaEnvio: tentouEnvioReal,
       erroEnvio: resultadoEnvio.erro || "",
       destinoEncontrado: true,
@@ -11017,6 +11063,57 @@ const {
   motivoAguardandoFanout,
   totalDestinosEnviadosFanout
 } = estadoPosEnvio;
+
+const bloqueioHardSemImagem = !enviouParaAlgumDestino &&
+  totalDestinosEnviadosFanout === 0 &&
+  motivosSemEnvio.includes("sem_imagem");
+
+if (bloqueioHardSemImagem) {
+  const agoraSemImagem = new Date().toISOString();
+  resumoFila.motivoPulo = "sem_imagem";
+  oferta.status = "nao_enviado";
+  oferta.statusPublico = "nao_enviado";
+  oferta.statusOperacional = "sem_imagem";
+  oferta.statusDetalhe = "Nao enviada: sem imagem publicavel.";
+  oferta.motivo = "sem_imagem";
+  oferta.motivoErroPublico = "sem_imagem";
+  oferta.erro = "";
+  oferta.erroEm = "";
+  oferta.finalizadoEm = agoraSemImagem;
+  oferta.atualizadoEm = agoraSemImagem;
+  oferta.processandoEm = "";
+  oferta.progresso = {
+    ...(oferta.progresso && typeof oferta.progresso === "object" ? oferta.progresso : {}),
+    total: destinosCompativeis.length,
+    enviados: 0,
+    erros: 0,
+    motivo: "sem_imagem"
+  };
+  marcarFilaAlterada();
+  registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, {}, {
+    decisao: "bloqueado",
+    motivo: "sem_imagem",
+    tentativaEnvio: false,
+    destinoEncontrado: destinosCompativeis.length > 0,
+    filaRecebeu: true,
+    statusFilaAntes: "processando",
+    statusFilaDepois: oferta.status || "nao_enviado"
+  });
+  logExecutorDestinoDiagnostico({
+    oferta,
+    clienteId,
+    destinosElegiveis: destinosCompativeis,
+    destinosTentados: destinosTentadosDebug,
+    motivoSemEnvio: "sem_imagem",
+    dentroJanela: dentroJanelaExecutor,
+    statusFinal: "nao_enviado"
+  });
+  const salvouSemImagem = await salvarFilaSeAlterada(clienteId);
+  if (salvouSemImagem) {
+    registrarHistoricoLeveTerminalLegadoAposSave(clienteId, oferta, "executor_sem_imagem");
+  }
+  return;
+}
 
 if (resumoFanout.aguardando > 0 || (!enviouParaAlgumDestino && decisaoSemEnvio.statusFinal === "pendente")) {
   resumoFila.motivoPulo = motivoAguardandoFanout;
@@ -27359,6 +27456,18 @@ function avaliarImagemEnviavelExecutor(oferta = {}, destino = {}) {
   return { ok: true, url: imagem, motivo: "", tinhaImagem: true };
 }
 
+function avaliarImagemPublicavelOfertaExecutor(oferta = {}) {
+  const imagem = corrigirImagemUrl(oferta.imagem) || oferta.imagem || "";
+  if (oferta.imagemEnviavel === false || oferta.imagemStatus === "imagem_nao_enviavel") {
+    return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: "imagem_nao_publicavel", tinhaImagem: Boolean(imagem) };
+  }
+  if (!imagem) return { ok: false, url: "", motivo: "sem_imagem", motivoTecnico: "imagem_ausente", tinhaImagem: false };
+  if (imagemUrlEfemeraUniversal(imagem)) {
+    return { ok: false, url: imagem, motivo: "sem_imagem", motivoTecnico: "imagem_nao_enviavel_url_efemera", tinhaImagem: true };
+  }
+  return { ok: true, url: imagem, motivo: "", motivoTecnico: "", tinhaImagem: true };
+}
+
 function tipoMidiaDestinoExecutor(destino = {}) {
   return tipoMidiaV2.tipoMidiaDestino(destino);
 }
@@ -30788,6 +30897,22 @@ async function enviarTelegram(oferta, mensagem) {
 
       if (!token || !chatId) {
         console.log("[TELEGRAM] Telegram destino incompleto:", destino.nome);
+        continue;
+      }
+
+      const imagemPublicavelExecutor = avaliarImagemPublicavelOfertaExecutor(oferta);
+      if (!imagemPublicavelExecutor.ok) {
+        console.log("[EXECUTOR-IMAGEM-BLOQUEIO-HARD]", JSON.stringify({
+          canal: "telegram",
+          destino: destino.nome || destino.id || "",
+          ofertaId: oferta.id || "",
+          engineOfertaId: oferta.engineOfertaId || "",
+          marketplace: oferta.marketplace || "",
+          motivo: "sem_imagem",
+          motivoTecnico: imagemPublicavelExecutor.motivoTecnico || "",
+          imagemStatus: oferta.imagemStatus || "",
+          imagemOrigem: oferta.imagemOrigem || ""
+        }));
         continue;
       }
 
