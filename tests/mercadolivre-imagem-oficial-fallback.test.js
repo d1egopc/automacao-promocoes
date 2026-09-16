@@ -124,6 +124,42 @@ async function comFetchMock(respostas, fn) {
   }
 
   {
+    const casosOgImage = [
+      ["Creatina", "https://meli.la/2EVds4L", "https://http2.mlstatic.com/D_NQ_NP_776821-MLA99365251528_112025-O.webp", "776821-MLA99365251528_112025"],
+      ["Malbec X", "https://meli.la/1U9rqbe", "https://http2.mlstatic.com/D_NQ_NP_672452-MLA84843234017_052025-O.webp", "672452-MLA84843234017_052025"],
+      ["New Balance", "https://meli.la/2MW3aQW", "https://http2.mlstatic.com/D_NQ_NP_816072-MLB117196994531_092026-O.webp", "816072-MLB117196994531_092026"],
+      ["Iluminador", "https://meli.la/2DPdE7H", "https://http2.mlstatic.com/D_NQ_NP_853057-MLU75854196381_042024-O.webp", "853057-MLU75854196381_042024"]
+    ];
+
+    for (const [nome, linkOriginal, ogImage, pictureId] of casosOgImage) {
+      const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+      const oferta = {
+        marketplace: "mercadolivre",
+        titulo: nome,
+        linkOriginal,
+        imagem: ogImage,
+        imagemOrigem: "og:image",
+        preco: 123,
+        cupom: "RADAR"
+      };
+      const { retorno, chamadas } = await comFetchMock([
+        respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+      ], () => buscarImagemCanonicaMercadoLivre(oferta));
+
+      assert.strictEqual(chamadas.length, 1, nome);
+      assert.strictEqual(chamadas[0].url, esperado1200, nome);
+      assert.strictEqual(retorno.imagem, esperado1200, nome);
+      assert.strictEqual(retorno.origem, "og:image.picture_id", nome);
+      assert.strictEqual(retorno.pictureId, pictureId, nome);
+      assert.deepStrictEqual(retorno.dimensoes, { largura: 1200, altura: 1200 }, nome);
+      assert.strictEqual(retorno.preco, undefined, nome);
+      assert.strictEqual(retorno.cupom, undefined, nome);
+      assert.strictEqual(oferta.preco, 123, nome);
+      assert.strictEqual(oferta.cupom, "RADAR", nome);
+    }
+  }
+
+  {
     const fixturesValidas = [
       ["Growth Whey + Creatina", "MLB4387463577", "", "MLBU3692673629", "766763-MLB102163177100_122025", "Kit Growth Whey Protein Basic Chocolate 1kg Creatina"],
       ["Dr. Peanut", "MLB6711833172", "MLB50886744", "MLBU3933491095", "910611-MLA99017164196_112025", "Pasta de Amendoim Italiana Dr Peanut 600g Whey Protein"],

@@ -1177,6 +1177,69 @@ function montarVariantesImagemPolycardMl({ template = "", pictureId = "", square
   return variantes;
 }
 
+function extrairPictureIdImagemMercadoLivreUrl(url = "") {
+  const imagem = normalizarImagemMercadoLivre(url);
+  if (!imagem) return "";
+  try {
+    const parsed = new URL(imagem);
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== "https:" || !(host === "mlstatic.com" || host.endsWith(".mlstatic.com"))) return "";
+  } catch {
+    return "";
+  }
+  return normalizarPictureIdPolycardMl(
+    imagem.match(/D_[A-Z_]+(?:2X_)?(\d{6}-ML[A-Z]\d+_\d{6})(?:-[A-Z])?\.(?:webp|jpe?g|png)(?:$|[?#])/i)?.[1] || ""
+  );
+}
+
+function montarVariantesImagemMercadoLivrePorPictureId({ pictureId = "", imagemOriginal = "", origem = "og:image" } = {}) {
+  const idSeguro = normalizarPictureIdPolycardMl(pictureId);
+  if (!idSeguro) return [];
+  const variantes = [
+    `https://http2.mlstatic.com/D_Q_NP_2X_${idSeguro}-F.jpg`,
+    `https://http2.mlstatic.com/D_Q_NP_2X_${idSeguro}-V.webp`,
+    `https://http2.mlstatic.com/D_Q_NP_${idSeguro}-V.webp`,
+    normalizarImagemMercadoLivre(imagemOriginal)
+  ];
+  const vistos = new Set();
+  return variantes
+    .map((imagem, indice) => ({
+      imagem,
+      origem,
+      variante: {
+        origemPictureId: "og:image",
+        ordem: indice + 1
+      }
+    }))
+    .filter((item) => {
+      if (!item.imagem || vistos.has(item.imagem)) return false;
+      vistos.add(item.imagem);
+      return item.imagem.includes(idSeguro);
+    });
+}
+
+function candidatoImagemOgMercadoLivre(oferta = {}) {
+  const origem = normalizarTexto(oferta.imagemOrigem || oferta.origemImagem || "");
+  if (!/(^|\.|:)og:image$/i.test(origem) && !/og:image/i.test(origem)) {
+    return { imagem: "", origem: "", motivo: "og_image_ausente" };
+  }
+  const imagemOriginal = normalizarImagemMercadoLivre(oferta.imagem || oferta.imagemUrl || oferta.image || oferta.imageUrl || "");
+  const pictureId = extrairPictureIdImagemMercadoLivreUrl(imagemOriginal);
+  if (!pictureId) return { imagem: "", origem: "", motivo: "og_image_picture_id_ausente" };
+  const imagemCandidatos = montarVariantesImagemMercadoLivrePorPictureId({
+    pictureId,
+    imagemOriginal,
+    origem: "og:image.picture_id"
+  });
+  return {
+    imagem: imagemOriginal,
+    origem: "og:image.picture_id",
+    motivo: "og_image_picture_id_imagem_recuperada",
+    pictureId,
+    imagemCandidatos
+  };
+}
+
 function extrairDimensoesBufferImagemMercadoLivre(buffer = Buffer.alloc(0), contentType = "") {
   const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
   if (bytes.length < 10) return null;
@@ -1834,6 +1897,26 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
   const mlb = extrairMlbImagem(mlbNormalizado);
   const candidatosUrl = montarCandidatosUrlImagemMercadoLivre(oferta, mlb);
   const urlInicial = candidatosUrl[0]?.url || "";
+  const imagemOg = candidatoImagemOgMercadoLivre(oferta);
+  if (imagemOg.imagem) {
+    const imagemOgValidada = await validarImagemPolycardMercadoLivre(imagemOg, {
+      fetchImpl: opcoes.fetchImpl,
+      timeoutMs: opcoes.timeoutMsImagemPolycard
+    });
+    if (imagemOgValidada.imagem) {
+      return {
+        imagem: imagemOgValidada.imagem,
+        origem: imagemOgValidada.origem,
+        linkResolvido: urlInicial || oferta.linkExpandido || oferta.linkOriginal || "",
+        statusHttp: imagemOgValidada.statusHttp ?? null,
+        contentType: imagemOgValidada.contentType || "",
+        motivo: imagemOgValidada.motivo,
+        pictureId: imagemOgValidada.pictureId || "",
+        dimensoes: imagemOgValidada.dimensoes || null,
+        variante: imagemOgValidada.variante || null
+      };
+    }
+  }
 
   if (!urlInicial || !mlb) {
     return { imagem: "", origem: "", linkResolvido: urlInicial || "", statusHttp: null, motivo: "url_canonica_mlb_ausente" };
