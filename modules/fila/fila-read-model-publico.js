@@ -332,6 +332,19 @@ function urlTemDestinoUtil(url = "") {
   return !/^\/(?:home|homepage)?$/i.test(pathLimpo);
 }
 
+function urlEhOrigemOperacional(url = "") {
+  const host = hostUrlSeguro(url);
+  const pathname = pathUrlSeguro(url);
+  if (!host) return false;
+  if (host === "chat.whatsapp.com" || host.endsWith(".chat.whatsapp.com")) return true;
+  if (host === "whatsapp.com" || host.endsWith(".whatsapp.com")) {
+    return /\/(?:channel|channels|groups?|invite|c)\b/i.test(pathname);
+  }
+  if (host === "wa.me" || host.endsWith(".wa.me")) return true;
+  if (host === "t.me" || host.endsWith(".t.me") || host === "telegram.me" || host.endsWith(".telegram.me")) return true;
+  return false;
+}
+
 function campoLinkPrincipalOferta(campo = "") {
   return [
     "linkFinal",
@@ -357,8 +370,8 @@ function classificarUrlOferta(campo = "", url = "") {
   const host = hostUrlSeguro(valor);
   if (!valor || !host) return { tipo: "desconhecido", confiavel: false, campo: campoNormalizado, url: "" };
 
-  if (["linkCapturado"].includes(campoBase)) {
-    return { tipo: "shortlink/transport", confiavel: false, campo: campoNormalizado, url: valor };
+  if (urlEhOrigemOperacional(valor) || /(?:radar|clonador|capturad|origem|grupo|mensagem|canal)/i.test(campoNormalizado)) {
+    return { tipo: "origem operacional", confiavel: false, campo: campoNormalizado, url: valor };
   }
 
   if (["urlOriginalProduto", "produtoUrl", "urlProduto", "linkProduto"].includes(campoBase)) {
@@ -416,6 +429,14 @@ function linksEstruturadosProduto(item = {}) {
 
 function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
   const candidatos = [
+    ["linkFinal", item.linkFinal],
+    ["linkAfiliado", item.linkAfiliado],
+    ["link_afiliado", item.link_afiliado],
+    ["linkOtimizado", item.linkOtimizado],
+    ["linkOptimizado", item.linkOptimizado],
+    ["urlFinal", item.urlFinal],
+    ["urlExpandida", item.urlExpandida],
+    ["linkExpandido", item.linkExpandido],
     ["urlOriginalProduto", item.urlOriginalProduto],
     ["produtoUrl", item.produtoUrl],
     ["urlProduto", item.urlProduto],
@@ -424,13 +445,8 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
     ["urlOriginal", item.urlOriginal],
     ["urlOriginalProjetada", projetado.urlOriginal],
     ...linksEstruturadosProduto(item),
-    ["linkFinal", item.linkFinal],
-    ["linkAfiliado", item.linkAfiliado],
-    ["link_afiliado", item.link_afiliado],
     ["link", item.link],
-    ["url", item.url],
-    ["linkOriginalRadar", item.linkOriginalRadar],
-    ["linkCapturado", item.linkCapturado]
+    ["url", item.url]
   ];
   for (const [campo, valor] of candidatos) {
     const classificado = classificarUrlOferta(campo, valor);

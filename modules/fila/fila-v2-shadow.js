@@ -145,7 +145,23 @@ function destinoIdLeve(destino = {}) {
 }
 
 function destinoNomeLeve(destino = {}) {
-  return textoLimitado(primeiroTexto(destino.destinoNome, destino.nome, destino.name, destino.label, destino.titulo), 160);
+  return textoLimitado(nomeDestinoPublico(
+    destino.destinoNome,
+    destino.destino_nome,
+    destino.destinoLabel,
+    destino.grupoNome,
+    destino.nomeGrupo,
+    destino.channelName,
+    destino.canalNome,
+    destino.nomeCanal,
+    destino.chatName,
+    destino.chatTitle,
+    destino.tituloDestino,
+    destino.nome,
+    destino.name,
+    destino.label,
+    destino.titulo
+  ), 160);
 }
 
 function destinoIdItemLeve(item = {}) {
@@ -153,7 +169,32 @@ function destinoIdItemLeve(item = {}) {
 }
 
 function destinoNomeItemLeve(item = {}) {
-  return textoLimitado(primeiroTexto(item.destinoNome, item.destino_nome, item.destinoLabel, item.grupoNome, item.canalNome), 160);
+  return textoLimitado(nomeDestinoPublico(
+    item.destinoNome,
+    item.destino_nome,
+    item.destinoLabel,
+    item.grupoNome,
+    item.nomeGrupo,
+    item.channelName,
+    item.canalNome,
+    item.nomeCanal,
+    item.chatName,
+    item.chatTitle,
+    item.tituloDestino,
+    item.nomeDestino,
+    item.destino
+  ), 160);
+}
+
+function nomeDestinoPublico(...candidatos) {
+  for (const candidato of candidatos) {
+    const valor = texto(candidato).trim();
+    if (!valor) continue;
+    const normalizado = textoNormalizado(valor).replace(/[^a-z0-9]+/g, "");
+    if (["clonador", "clonadorgrupos", "origemclonador", "radar", "origemradar"].includes(normalizado)) continue;
+    return valor;
+  }
+  return "";
 }
 
 function estadoDestinoLeve(destino = {}) {

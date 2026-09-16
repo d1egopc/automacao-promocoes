@@ -178,6 +178,25 @@ function wait(ms = 0) {
   {
     const item = projetarItemFilaLeve(oferta({
       status: "enviado",
+      destinosEstado: [
+        {
+          destinoId: "120363000000@g.us",
+          destinoNome: "Clonador",
+          nome: "Clonador",
+          grupoNome: "Ofertas VIP WhatsApp",
+          canal: "whatsapp",
+          estado: "enviado",
+          enviadoEm: "2026-09-14T11:00:00.000Z"
+        }
+      ]
+    }), { agora: AGORA });
+    assert.strictEqual(item.destinoNome, "Ofertas VIP WhatsApp", "Clonador nao pode aparecer como destino publico");
+    assert.strictEqual(item.destinos[0].destinoNome, "Ofertas VIP WhatsApp");
+  }
+
+  {
+    const item = projetarItemFilaLeve(oferta({
+      status: "enviado",
       enviadoEm: "2026-09-14T11:00:00.000Z"
     }), { agora: AGORA });
     assert.strictEqual(item.statusPublico, "enviado");

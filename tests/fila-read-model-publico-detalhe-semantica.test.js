@@ -199,15 +199,23 @@ function model(historicoLeve, visao) {
   );
   assert.deepStrictEqual(
     classificarUrlOferta("linkOriginalRadar", "https://meli.la/abc").tipo,
-    "shortlink/transport"
+    "origem operacional"
   );
   assert.deepStrictEqual(
     classificarUrlOferta("linkOriginalRadar", "https://meli.la/abc").confiavel,
     false
   );
   assert.deepStrictEqual(
+    classificarUrlOferta("urlOriginal", "https://chat.whatsapp.com/grupo").confiavel,
+    false
+  );
+  assert.deepStrictEqual(
+    classificarUrlOferta("linkCapturado", "https://t.me/canal/123").tipo,
+    "origem operacional"
+  );
+  assert.deepStrictEqual(
     classificarUrlOferta("linkCapturado", "https://example.invalid/redirecionador").tipo,
-    "shortlink/transport"
+    "origem operacional"
   );
 }
 
@@ -390,6 +398,26 @@ function model(historicoLeve, visao) {
     assert.strictEqual(detalheComAfiliado.ok, true, "detalhe usa link afiliado preservado quando nao ha canonico");
     assert.strictEqual(detalheComAfiliado.detalhe.urlOriginal, "https://www.magazineluiza.com.br/p/teste/abc?partner_id=optimus");
     assert.strictEqual(detalheComAfiliado.detalhe.urlOriginalTipo, "afiliado do produto");
+
+    const detalheProdutoNaoOrigem = resolverDetalhePublicoFilaPorRef({
+      clienteId: cliente,
+      clientePath: dirCliente,
+      detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_origem_grupo" },
+      hot: [oferta("detalhe_origem_grupo", {
+        linkFinal: "https://go.optimuspromo.com.br/r/produto-workspace",
+        linkAfiliado: "https://www.amazon.com.br/dp/B0WORKSPACE1?tag=workspace-20",
+        urlOriginal: "https://chat.whatsapp.com/grupo-fonte",
+        linkCapturado: "https://t.me/radar/123",
+        status: "enviado",
+        enviadoEm: iso(AGORA),
+        detalheRef: { arquivo: "fila-historico-incremental", id: "detalhe_origem_grupo" }
+      })],
+      fs: fsContador,
+      agoraMs: AGORA
+    });
+    assert.strictEqual(detalheProdutoNaoOrigem.ok, true);
+    assert.strictEqual(detalheProdutoNaoOrigem.detalhe.urlOriginal, "https://go.optimuspromo.com.br/r/produto-workspace", "olhinho prioriza link final do produto/workspace");
+    assert.strictEqual(detalheProdutoNaoOrigem.detalhe.urlOriginalCampo, "linkFinal");
 
     const detalheSemLinkConfiavel = resolverDetalhePublicoFilaPorRef({
       clienteId: cliente,
