@@ -189,7 +189,7 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(comErro.metricas.comErro, 2, "GET /fila com_erro soma parcial real e nao enviada");
+  assert.strictEqual(comErro.metricas.comErro, 2, "GET /fila com_erro soma excecoes reais");
   assert.strictEqual(comErro.totalFiltrado, 2);
   assert.strictEqual(comErro.itens.length, 2);
   assert(comErro.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "GET /fila com_erro deve expor somente status publico Erro");

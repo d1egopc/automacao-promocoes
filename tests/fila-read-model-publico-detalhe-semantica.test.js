@@ -8,10 +8,12 @@ const {
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
+  VISAO_COM_ERRO,
   construirReadModelPublicoPorMarcos,
   resolverDetalhePublicoFilaPorRef,
   benchmarkDetalhePublicoFila,
-  classificarUrlOferta
+  classificarUrlOferta,
+  motivoErroPublicoTerminal
 } = require("../modules/fila/fila-read-model-publico");
 
 const AGORA = Date.parse("2026-09-15T15:00:00.000Z");
@@ -114,6 +116,122 @@ function model(historicoLeve, visao) {
   });
   const naoEnviadas = model([falhaReal], VISAO_NAO_ENVIADAS);
   assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "falha real sem aplicavel enviado vira Nao enviada");
+}
+
+{
+  const enviadoCompleto = registro("enviado_completo", "enviado", {
+    status: "enviado",
+    enviadoEm: iso(AGORA),
+    destinosEstado: [
+      { destinoId: "ok", destinoNome: "OK", canal: "telegram", estado: "enviado", enviadoEm: iso(AGORA) }
+    ]
+  });
+  const comErro = model([enviadoCompleto], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 0, "enviado completo fica fora da aba Erros");
+  assert.strictEqual(comErro.itens.length, 0);
+}
+
+{
+  const parcialTerminal = registro("parcial_terminal", "parcial", {
+    status: "expirada_operacional",
+    statusOperacional: "expirada_operacional",
+    destinosEstado: [
+      { destinoId: "ok", destinoNome: "OK", canal: "telegram", estado: "enviado", enviadoEm: iso(AGORA) },
+      { destinoId: "pendente", destinoNome: "Pendente", canal: "whatsapp", estado: "pendente" },
+      { destinoId: "fora", destinoNome: "Fora", canal: "discord", estado: "nao_compativel" }
+    ]
+  });
+  const comErro = model([parcialTerminal], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 1, "parcial terminal entra em Erros");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "envio_parcial");
+}
+
+{
+  const falhaExplicita = registro("falha_explicita", "nao_enviado", {
+    status: "finalizado",
+    motivo: "erro_envio"
+  });
+  const comErro = model([falhaExplicita], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 1, "erro persistido real entra em Erros");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "falha_envio");
+}
+
+{
+  const semImagem = registro("sem_imagem", "nao_enviado", {
+    status: "expirada_operacional",
+    imagem: "",
+    imagemRef: "",
+    imagemFinal: "",
+    image: "",
+    foto: ""
+  });
+  const comErro = model([semImagem], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 1, "terminal sem imagem real entra em Erros");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "sem_imagem");
+}
+
+{
+  const semDestinoComprovado = registro("sem_destino_comprovado", "nao_enviado", {
+    status: "expirada_operacional",
+    destinos: [],
+    destinosEstado: [],
+    destinosElegiveis: 2
+  });
+  const comErro = model([semDestinoComprovado], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 1, "sem destino so entra quando o evento prova elegibilidade");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "sem_destino");
+}
+
+{
+  const semDestinoEsperado = registro("sem_destino_esperado", "nao_enviado", {
+    status: "expirada_operacional",
+    destinos: [],
+    destinosEstado: []
+  });
+  const comErro = model([semDestinoEsperado], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 0, "sem destino sem prova historica de elegibilidade fica fora de Erros");
+}
+
+{
+  const expiradaIsolada = registro("expirada_isolada", "nao_enviado", {
+    status: "expirada_operacional",
+    destinos: [],
+    destinosEstado: []
+  });
+  const naoEnviadoIsolado = registro("nao_enviado_isolado", "nao_enviado", {
+    status: "nao_enviado",
+    destinos: [],
+    destinosEstado: []
+  });
+  const comErro = model([expiradaIsolada, naoEnviadoIsolado], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 0, "expirada_operacional/nao_enviado isolados nao entram em Erros");
+  assert.strictEqual(comErro.itens.length, 0);
+}
+
+{
+  const casos = [
+    registro("ok", "enviado", { status: "enviado", enviadoEm: iso(AGORA) }),
+    registro("parcial", "parcial", {
+      status: "expirada_operacional",
+      destinosEstado: [
+        { destinoId: "ok", destinoNome: "OK", canal: "telegram", estado: "enviado", enviadoEm: iso(AGORA) },
+        { destinoId: "pendente", destinoNome: "Pendente", canal: "whatsapp", estado: "pendente" }
+      ]
+    }),
+    registro("falha", "nao_enviado", { status: "finalizado", motivo: "erro_envio" }),
+    registro("sem_img", "nao_enviado", { status: "expirada_operacional", imagem: "" }),
+    registro("sem_dest", "nao_enviado", { status: "expirada_operacional", destinos: [], destinosEstado: [], destinosElegiveis: 1 }),
+    registro("antigo_sem_motivo", "nao_enviado", { status: "expirada_operacional", destinos: [], destinosEstado: [] })
+  ];
+  const comErro = model(casos, VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.comErro, 4, "contador Erro usa o mesmo universo da lista");
+  assert.strictEqual(comErro.totalFiltrado, comErro.metricas.comErro);
+  assert.strictEqual(comErro.itens.length, comErro.metricas.comErro);
+  assert.deepStrictEqual(
+    new Set(comErro.itens.map(item => item.motivoErroPublico)),
+    new Set(["envio_parcial", "falha_envio", "sem_imagem", "sem_destino"])
+  );
+  assert.strictEqual(motivoErroPublicoTerminal({ status: "expirada_operacional", imagem: "https://img.test/ok.jpg" }), null);
 }
 
 {

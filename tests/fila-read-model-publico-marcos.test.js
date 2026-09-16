@@ -349,7 +349,11 @@ function registroTerminal(id, statusPublico, extra = {}) {
       marketplace: i % 10 === 0 ? "mercadolivre" : "amazon",
       canal: i % 7 === 0 ? "whatsapp" : "telegram",
       destinoNome: i % 5 === 0 ? "Destino Especial" : "Canal principal",
-      titulo: i % 11 === 0 ? `Oferta EspecialBusca Falha ${i}` : `Oferta Falha ${i}`
+      titulo: i % 11 === 0 ? `Oferta EspecialBusca Falha ${i}` : `Oferta Falha ${i}`,
+      motivo: "erro_envio",
+      destinosEstado: [
+        { destinoId: "erro", destinoNome: "Destino falhou", canal: i % 7 === 0 ? "whatsapp" : "telegram", estado: "erro_final" }
+      ]
     }))
   ];
   const esperadoGlobal = hist
@@ -390,11 +394,12 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 2,
     limit: 50
   });
-  assert.strictEqual(page1.totalFiltrado, totalComErro, "Erro publico soma parciais reais e nao enviadas");
+  assert.strictEqual(page1.totalFiltrado, totalComErro, "Erro publico soma excecoes reais");
   assert.strictEqual(page1.metricas.comErro, totalComErro);
   assert.strictEqual(page1.totalPages, 6);
   assert.strictEqual(page1.hasMore, true);
   assert(page1.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "visao com_erro nao expoe parcial/nao_enviado como status publico");
+  assert(page1.itens.every(item => item.motivoErroPublico === "falha_envio"), "visao com_erro expoe motivo publico real");
   assert.deepStrictEqual(ids(page1), idsPaginaEsperada(1), "page=1 traz os 50 mais recentes globais");
   assert.deepStrictEqual(ids(page2), idsPaginaEsperada(2), "page=2 traz posicoes globais 51..100");
   assert.strictEqual(page2.totalFiltrado, totalComErro);
