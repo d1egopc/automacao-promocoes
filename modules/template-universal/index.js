@@ -441,6 +441,11 @@ function instrucaoCupomDeterministica(cupom = "") {
   return codigo ? `Aplique o cupom ${codigo} para obter o valor.` : "";
 }
 
+function instrucaoCupomPixDeterministica(cupom = "") {
+  const codigo = textoComercialRenderizavel(cupom);
+  return codigo ? `Aplique o cupom ${codigo} + Pix para obter o valor.` : "";
+}
+
 function chaveCupomInstrucao(valor = "") {
   return normalizarComparacao(valor).replace(/[^a-z0-9]+/g, "");
 }
@@ -481,6 +486,29 @@ function beneficioCupomRedundanteComInstrucaoPadrao(beneficio = "", campos = {},
   const sobra = normalizado
     .replace(new RegExp(`\\b${codigoNormalizado}\\b`, "g"), " ")
     .replace(/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|resgatem|ative|ativar|o|a|os|as|um|uma|cupom|cupons|voucher|codigo|cod|para|pra|obter|ter|chegar|neste|nesse|nesta|nessa|valor|preco|por|com|de|do|da|dos|das|e)\b/g, " ")
+    .replace(/[^a-z0-9%$]+/g, " ")
+    .trim();
+
+  return !sobra;
+}
+
+function beneficioCupomSomentePix(beneficio = "", cupom = "") {
+  const texto = textoComercialRenderizavel(beneficio);
+  const codigo = chaveCupomInstrucao(cupom);
+  if (!texto || !codigo) return false;
+  if (/https?:\/\/\S+|www\.\S+/i.test(texto)) return false;
+  if (!chaveCupomInstrucao(texto).includes(codigo)) return false;
+
+  const normalizado = normalizarComparacao(texto);
+  if (!normalizado.includes("pix")) return false;
+  if (!/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|ative|ativar|selecione|selecionar|escolha|pague|pagar)\b/.test(normalizado)) return false;
+  if (!/\b(?:cupom|voucher|codigo|cod)\b/.test(normalizado)) return false;
+  if (/\b(?:link|pagina|app|aplicativo|moeda|moedas|cashback|frete|minimo|minima|acima|compras?|carrinho|finalizar|site|pc)\b/.test(normalizado)) return false;
+
+  const codigoNormalizado = normalizarComparacao(cupom).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const sobra = normalizado
+    .replace(new RegExp(`\\b${codigoNormalizado}\\b`, "g"), " ")
+    .replace(/\b(?:aplique|aplicar|use|usar|utilize|utilizar|resgate|resgatar|ative|ativar|selecione|selecionar|escolha|escolher|pague|pagar|o|a|os|as|um|uma|cupom|cupons|voucher|codigo|cod|para|pra|obter|ter|chegar|neste|nesse|nesta|nessa|valor|preco|por|com|de|do|da|dos|das|e|mais|no|na|em|via|pagamento|pix)\b/g, " ")
     .replace(/[^a-z0-9%$]+/g, " ")
     .trim();
 
@@ -809,10 +837,16 @@ function montarTemplateUniversalOficial({
   linksPc,
   linksProduto
 }) {
-  const instrucaoCupom = campos.cupom
+  const beneficioSomentePix = campos.cupom
+    ? beneficioCupomSomentePix(beneficioComercial, campos.cupom)
+    : false;
+  const instrucaoCupomBase = campos.cupom
     ? instrucaoCupomParaTemplate(campos, beneficioComercial, precoAtualComCondicao)
     : "";
-  const beneficioComercialRenderizavel = beneficioCupomRedundanteComInstrucaoPadrao(beneficioComercial, campos, instrucaoCupom)
+  const instrucaoCupom = beneficioSomentePix
+    ? instrucaoCupomPixDeterministica(campos.cupom)
+    : instrucaoCupomBase;
+  const beneficioComercialRenderizavel = beneficioSomentePix || beneficioCupomRedundanteComInstrucaoPadrao(beneficioComercial, campos, instrucaoCupom)
     ? ""
     : beneficioComercial;
   adicionarBloco(blocos, blocoTituloApresentacao(campos));

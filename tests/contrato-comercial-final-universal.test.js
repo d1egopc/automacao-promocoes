@@ -248,7 +248,7 @@ const msgSemInstrucaoPersonalizado = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assertContem(msgSemInstrucaoPersonalizado.mensagem, "Cupom: SEMPREMODA");
+assertContem(msgSemInstrucaoPersonalizado.mensagem, "Cupom: *SEMPREMODA*");
 assertContem(msgSemInstrucaoPersonalizado.mensagem, "Aplique o cupom SEMPREMODA para obter o valor.");
 
 const msgCupomOcultoPersonalizado = renderizarTemplatePersonalizado({
@@ -271,7 +271,7 @@ const msgCupomOcultoPersonalizado = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assertContem(msgCupomOcultoPersonalizado.mensagem, "Cupom: SEMPREMODA");
+assertContem(msgCupomOcultoPersonalizado.mensagem, "Cupom: *SEMPREMODA*");
 assertNaoContem(msgCupomOcultoPersonalizado.mensagem, "Aplique o cupom SEMPREMODA");
 
 const msgSemCupomSemFrase = gerarTemplateUniversal({
@@ -358,8 +358,8 @@ const personalizadoPixTextoOriginal = renderizarTemplatePersonalizado({
   },
   canal: "whatsapp"
 });
-assertContem(personalizadoPixTextoOriginal.mensagem, "De: R$ 259,00");
-assertContem(personalizadoPixTextoOriginal.mensagem, "Por: R$ 145,00 no Pix");
+assertContem(personalizadoPixTextoOriginal.mensagem, "De: *R$ 259,00*");
+assertContem(personalizadoPixTextoOriginal.mensagem, "Por: *R$ 145,00 no Pix*");
 assertNaoContem(personalizadoPixTextoOriginal.mensagem, "Pix:", "personalizado nao cria linha Pix separada para De/Por no Pix");
 
 for (const marketplace of ["Mercado Livre", "Shopee", "Amazon", "AliExpress", "KaBuM"]) {
@@ -681,8 +681,122 @@ const msgCupomPixPreservado = gerarTemplateUniversal({
   beneficioTexto: "Use o cupom CUPOMX + Pix",
   linkAfiliado: "https://go.optimus/cupom-pix"
 });
-assertContem(msgCupomPixPreservado, "Aplique o cupom CUPOMX para obter o valor.");
-assertContem(msgCupomPixPreservado, "🎁 Use o cupom CUPOMX + Pix");
+assertContem(msgCupomPixPreservado, "Aplique o cupom CUPOMX + Pix para obter o valor.");
+assertNaoContem(msgCupomPixPreservado, "🎁 Use o cupom CUPOMX + Pix");
+
+const msgCupomPixSelecioneDeduplicado = gerarTemplateUniversal({
+  titulo: "Cupom com selecione Pix",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "PAGUEMENOSJA",
+  beneficioTexto: "Use o Cupom: PAGUEMENOSJA 🎟️ + Selecione Pix",
+  linkAfiliado: "https://go.optimus/pague-menos"
+});
+assertContem(msgCupomPixSelecioneDeduplicado, "Cupom: *PAGUEMENOSJA*");
+assertContem(msgCupomPixSelecioneDeduplicado, "Aplique o cupom PAGUEMENOSJA + Pix para obter o valor.");
+assertNaoContem(msgCupomPixSelecioneDeduplicado, "🎁 Use o Cupom: PAGUEMENOSJA");
+
+const msgCupomPixComResgate = gerarTemplateUniversal({
+  titulo: "Cupom Pix com resgate",
+  marketplace: "Shopee",
+  precoAtual: 100,
+  cupom: "PROMO10",
+  beneficioTexto: "Use o cupom PROMO10 + Pix",
+  linksComerciais: [
+    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOptimus: "https://go.optimus/resgate-pix" },
+    { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOptimus: "https://go.optimus/produto-pix" }
+  ]
+});
+assertContem(msgCupomPixComResgate, "Aplique o cupom PROMO10 + Pix para obter o valor.");
+assertNaoContem(msgCupomPixComResgate, "🎁 Use o cupom PROMO10 + Pix");
+assertContem(msgCupomPixComResgate, "🎟️ *Resgatar cupom:*\nhttps://go.optimus/resgate-pix");
+assertContem(msgCupomPixComResgate, "🛒 *Produto:*\nhttps://go.optimus/produto-pix");
+
+const msgCupomAppPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com app",
+  marketplace: "AliExpress",
+  precoAtual: 100,
+  cupom: "APP10",
+  beneficioTexto: "Use o cupom APP10 no app",
+  linksComerciais: [
+    { tipo: "app", papel: "link_app", ordemCaptura: 1, urlOptimus: "https://go.optimus/app10" }
+  ]
+});
+assertContem(msgCupomAppPreservado, "Aplique o cupom APP10 para obter o valor.");
+assertContem(msgCupomAppPreservado, "🎁 Use o cupom APP10 no app");
+assertContem(msgCupomAppPreservado, "📱 *APP:*\nhttps://go.optimus/app10");
+
+const msgCupomPcPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com PC",
+  marketplace: "AliExpress",
+  precoAtual: 100,
+  cupom: "PC10",
+  beneficioTexto: "Use o cupom PC10 + Pix no site",
+  linksComerciais: [
+    { tipo: "pc", papel: "link_pc", ordemCaptura: 1, urlOptimus: "https://go.optimus/pc10" }
+  ]
+});
+assertContem(msgCupomPcPreservado, "Aplique o cupom PC10 para obter o valor.");
+assertNaoContem(msgCupomPcPreservado, "Aplique o cupom PC10 + Pix para obter o valor.");
+assertContem(msgCupomPcPreservado, "🖥️ *PC:*\nhttps://go.optimus/pc10");
+
+const msgShopeeResgateIntacto = gerarTemplateUniversal({
+  titulo: "Shopee resgate intacto",
+  marketplace: "Shopee",
+  precoAtual: 100,
+  cupom: "SHOPEE10",
+  beneficioTexto: "Resgate o cupom no link abaixo.",
+  linksComerciais: [
+    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOptimus: "https://go.optimus/shopee-resgate" }
+  ]
+});
+assertContem(msgShopeeResgateIntacto, "Aplique o cupom SHOPEE10 para obter o valor.");
+assertContem(msgShopeeResgateIntacto, "🎁 Resgate o cupom no link abaixo.");
+assertContem(msgShopeeResgateIntacto, "🎟️ *Resgatar cupom:*\nhttps://go.optimus/shopee-resgate");
+
+const msgBeneficioComUrlPreservado = gerarTemplateUniversal({
+  titulo: "Beneficio com URL",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "URL10",
+  beneficioTexto: "Use o cupom URL10 + Pix em https://go.optimus/resgate",
+  linkAfiliado: "https://go.optimus/produto-url"
+});
+assertContem(msgBeneficioComUrlPreservado, "Aplique o cupom URL10 para obter o valor.");
+assertContem(msgBeneficioComUrlPreservado, "🎁 Use o cupom URL10 + Pix em https://go.optimus/resgate");
+
+const msgBeneficioCashbackPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com cashback",
+  marketplace: "Amazon",
+  precoAtual: 100,
+  cupom: "CASH10",
+  beneficioTexto: "Use o cupom CASH10 + Pix + cashback",
+  linkAfiliado: "https://go.optimus/cash"
+});
+assertContem(msgBeneficioCashbackPreservado, "Aplique o cupom CASH10 para obter o valor.");
+assertContem(msgBeneficioCashbackPreservado, "🎁 Use o cupom CASH10 + Pix + cashback");
+
+const msgBeneficioFreteMinimoPreservado = gerarTemplateUniversal({
+  titulo: "Cupom com frete minimo",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "FRETE10",
+  beneficioTexto: "Use o cupom FRETE10 + Pix acima de R$ 200 com frete gratis",
+  linkAfiliado: "https://go.optimus/frete"
+});
+assertContem(msgBeneficioFreteMinimoPreservado, "Aplique o cupom FRETE10 para obter o valor.");
+assertContem(msgBeneficioFreteMinimoPreservado, "🎁 Use o cupom FRETE10 + Pix acima de R$ 200 com frete gratis");
+
+const msgOutroCupomPreservado = gerarTemplateUniversal({
+  titulo: "Beneficio com outro cupom",
+  marketplace: "Mercado Livre",
+  precoAtual: 100,
+  cupom: "CUPOMX",
+  beneficioTexto: "Use o cupom OUTRO10 + Pix por R$ 90",
+  linkAfiliado: "https://go.optimus/outro"
+});
+assertContem(msgOutroCupomPreservado, "Aplique o cupom CUPOMX para obter o valor.");
+assertContem(msgOutroCupomPreservado, "🎁 Use o cupom OUTRO10 + Pix por R$ 90");
 
 const msgBeneficiosRicosPreservados = gerarTemplateUniversal({
   titulo: "Cupom com beneficio real",
@@ -930,9 +1044,9 @@ const personalizadoLupoPosDeploy = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 assert.strictEqual(personalizadoLupoPosDeploy.ok, true);
-assertContem(personalizadoLupoPosDeploy.mensagem, "De: R$ 88,00");
-assertContem(personalizadoLupoPosDeploy.mensagem, "Por: R$ 55,00");
-assertContem(personalizadoLupoPosDeploy.mensagem, "Cupom: SEMPREMODA");
+assertContem(personalizadoLupoPosDeploy.mensagem, "De: *R$ 88,00*");
+assertContem(personalizadoLupoPosDeploy.mensagem, "Por: *R$ 55,00*");
+assertContem(personalizadoLupoPosDeploy.mensagem, "Cupom: *SEMPREMODA*");
 assertContem(personalizadoLupoPosDeploy.mensagem, "Aplique o cupom SEMPREMODA para obter o valor.");
 assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Pode haver cupom");
 assertNaoContem(personalizadoLupoPosDeploy.mensagem, "Confira no carrinho/app");
