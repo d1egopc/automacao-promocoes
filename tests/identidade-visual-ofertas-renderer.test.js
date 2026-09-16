@@ -170,23 +170,20 @@ async function main() {
     assert.strictEqual(renderNeutroQuadrado.metadata.height, 1080);
     assert.deepStrictEqual(
       renderNeutroQuadrado.metadata.productContainBox,
-      renderPadrao.metadata.productContainBox,
-      "neutro reutiliza o mesmo contain/enquadramento do render identidade"
+      { width: renderPadrao.metadata.productContainBox.width, height: identidadeVisual.IMAGEM_GLOBAL_NEUTRA_MAX_HEIGHT },
+      "neutro preserva a largura do bloco e usa area vertical propria sem afetar o render identidade"
     );
-    const baseYEsperado = identidadeVisual.AREA_PRODUTO_ALTURA + identidadeVisual.FILETE_ALTURA;
-    const alturaMascaraNormal = 96;
+    assert.strictEqual(renderNeutroQuadrado.metadata.productRenderedX, 40, "neutro mantem centralizacao horizontal");
+    assert.strictEqual(renderNeutroQuadrado.metadata.productRenderedYOff, 40, "neutro posiciona a foto perto do topo util do bloco");
+    assert.strictEqual(renderNeutroQuadrado.metadata.productRenderedWidth, 1000, "neutro usa a maior largura util possivel");
+    assert.strictEqual(renderNeutroQuadrado.metadata.productRenderedHeight, 1000, "neutro usa a maior altura util possivel");
+    assert.strictEqual(renderNeutroQuadrado.metadata.productShiftYOff, 0, "neutro nao desloca a foto para baixo");
+    const alturaMascaraNormal = Math.round(identidadeVisual.FAIXA_ALTURA * 0.5);
     const topMascaraOffEsperado = identidadeVisual.CANVAS - alturaMascaraNormal;
-    const deslocamentoOffEsperado = identidadeVisual.CANVAS - (baseYEsperado + alturaMascaraNormal);
     assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.aplicada, true, "neutro aplica mascara apenas quando ha zona sacrificavel");
     assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.referencia, "faixa_render_on");
     assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.top, topMascaraOffEsperado, "mascara OFF reduz rodape morto e termina no fim do canvas");
-    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "caso normal mascara a mesma zona sacrificavel do Render ON");
-    assert.strictEqual(renderNeutroQuadrado.metadata.productShiftYOff, deslocamentoOffEsperado, "OFF reposiciona verticalmente sem aumentar a mascara anti-logo");
-    assert.strictEqual(
-      renderNeutroQuadrado.metadata.productRenderedYOff,
-      renderPadrao.metadata.productRenderedY + deslocamentoOffEsperado,
-      "OFF move a composicao para baixo sem alterar a geometria congelada do Render ON"
-    );
+    assert.strictEqual(renderNeutroQuadrado.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "caso normal mascara apenas o teto conservador permitido");
     assert.strictEqual(
       identidadeVisual.CANVAS - renderNeutroQuadrado.metadata.mascaraNeutraRodape.top,
       alturaMascaraNormal,
@@ -215,6 +212,13 @@ async function main() {
       "neutro preserva fundo branco/sem faixa inferior"
     );
 
+    const renderNeutroQuadradoSemMascara = await identidadeVisual.renderizarImagemGlobalNeutraBuffer({
+      imagemBuffer: produto,
+      desabilitarMascaraNeutraRodape: true
+    });
+    assert.strictEqual(renderNeutroQuadradoSemMascara.metadata.productShiftYOff, 0, "fluxo real neutro nao empurra a foto para baixo");
+    assert.strictEqual(renderNeutroQuadradoSemMascara.metadata.productRenderedYOff, 40, "fluxo real neutro reduz a margem superior interna");
+
     for (const casoNeutro of [
       { nome: "vertical", buffer: await bufferPng({ width: 420, height: 900, fill: "#16a34a", label: "VERT" }) },
       { nome: "horizontal", buffer: await bufferJpeg({ width: 1100, height: 420, fill: "#db2777", label: "WIDE" }) },
@@ -238,7 +242,12 @@ async function main() {
         );
       }
       if (casoNeutro.nome === "vertical") {
-        assert.ok(renderNeutro.metadata.productShiftYOff > 0, "vertical alto e reposicionado no OFF sem cortar mais produto");
+        assert.strictEqual(renderNeutro.metadata.productShiftYOff, 0, "vertical alto nao deve ser empurrado para baixo no neutro");
+        assert.ok(renderNeutro.metadata.productRenderedYOff <= 40, "vertical alto comeca perto do topo util no neutro");
+      }
+      if (casoNeutro.nome === "pequena") {
+        assert.strictEqual(renderNeutro.metadata.productRenderedWidth, 1000, "imagem pequena deve ampliar ate o maior tamanho util");
+        assert.strictEqual(renderNeutro.metadata.productRenderedHeight, 1000, "imagem pequena deve ocupar a altura util sem deformar");
       }
       if (casoNeutro.nome === "horizontal") {
         assert.strictEqual(renderNeutro.metadata.mascaraNeutraRodape.aplicada, false, "horizontal sem invasao da faixa nao deve receber mascara");
@@ -252,7 +261,7 @@ async function main() {
     const caminhoRodape = path.join(AMOSTRAS_DIR, "global-neutro-rodape-logo.png");
     fs.writeFileSync(caminhoRodape, renderRodape.buffer);
     assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.aplicada, true, "rodape de fallback passa pela mascara conservadora");
-    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "rodape usa apenas a zona sacrificavel normal");
+    assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.height, alturaMascaraNormal, "rodape usa apenas a zona sacrificavel maxima permitida");
     assert.strictEqual(renderRodape.metadata.mascaraNeutraRodape.top, topMascaraOffEsperado, "mascara de rodape termina no fim do canvas OFF");
     const pixelRodapeMascarado = await pixel(caminhoRodape, 540, topMascaraOffEsperado + 50);
     assert.ok(

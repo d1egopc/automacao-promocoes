@@ -241,6 +241,9 @@ async function main() {
       plano: { recursos: { identidade_visual_ofertas: "obrigatoria" } }
     });
     assert.strictEqual(semImagem.motivo, "imagem_ausente", "imagem inutilizavel nao deve forcar identidade visual");
+    assert.strictEqual(semImagem.aplicada, false, "sem imagem final valida nao deve aplicar render");
+    assert.notStrictEqual(semImagem.padraoGlobalImagem, true, "sem imagem final valida nao deve criar quadro global neutro");
+    assert.strictEqual(semImagem.imagemFinal, "", "sem imagem final valida nao deve enviar bloco branco vazio");
 
     const express = require("express");
     const app = express();
