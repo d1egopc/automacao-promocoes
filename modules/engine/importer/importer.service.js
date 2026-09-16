@@ -1240,6 +1240,32 @@ function candidatoImagemOgMercadoLivre(oferta = {}) {
   };
 }
 
+function candidatoImagemOgMercadoLivreHtml(html = "") {
+  const candidatos = [
+    ["og:image", extrairMeta(html, "og:image")],
+    ["twitter:image", extrairMeta(html, "twitter:image")]
+  ];
+
+  for (const [origem, valor] of candidatos) {
+    const imagemOriginal = normalizarImagemMercadoLivre(valor);
+    const pictureId = extrairPictureIdImagemMercadoLivreUrl(imagemOriginal);
+    if (!imagemOriginal || !pictureId) continue;
+    return {
+      imagem: imagemOriginal,
+      origem: "og:image.picture_id",
+      motivo: "og_image_picture_id_imagem_recuperada",
+      pictureId,
+      imagemCandidatos: montarVariantesImagemMercadoLivrePorPictureId({
+        pictureId,
+        imagemOriginal,
+        origem: "og:image.picture_id"
+      })
+    };
+  }
+
+  return { imagem: "", origem: "", motivo: "og_image_picture_id_ausente" };
+}
+
 function extrairDimensoesBufferImagemMercadoLivre(buffer = Buffer.alloc(0), contentType = "") {
   const bytes = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
   if (bytes.length < 10) return null;
@@ -1918,7 +1944,7 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
     }
   }
 
-  if (!urlInicial || !mlb) {
+  if (!urlInicial) {
     return { imagem: "", origem: "", linkResolvido: urlInicial || "", statusHttp: null, motivo: "url_canonica_mlb_ausente" };
   }
 
@@ -1947,7 +1973,33 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
       linkResolvido = response.url || candidato.url;
       statusHttp = response.status;
       let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
-      const imagemPolycard = extrairImagemPolycardMercadoLivreHtml(html, mlb, oferta);
+      if (!mlb && statusHttp < 400 && !bloqueado) {
+        const imagemOgHtml = candidatoImagemOgMercadoLivreHtml(html);
+        if (imagemOgHtml.imagem) {
+          const imagemOgValidada = await validarImagemPolycardMercadoLivre(imagemOgHtml, {
+            fetchImpl,
+            timeoutMs: opcoes.timeoutMsImagemPolycard
+          });
+          if (imagemOgValidada.imagem) {
+            return {
+              imagem: imagemOgValidada.imagem,
+              origem: imagemOgValidada.origem,
+              linkResolvido,
+              statusHttp: imagemOgValidada.statusHttp ?? statusHttp,
+              contentType: imagemOgValidada.contentType || "",
+              motivo: imagemOgValidada.motivo,
+              pictureId: imagemOgValidada.pictureId || "",
+              dimensoes: imagemOgValidada.dimensoes || null,
+              variante: imagemOgValidada.variante || null
+            };
+          }
+          motivoHtml = imagemOgValidada.motivo || motivoHtml;
+        }
+      }
+
+      const imagemPolycard = mlb
+        ? extrairImagemPolycardMercadoLivreHtml(html, mlb, oferta)
+        : { imagem: "", origem: "", motivo: "mlb_ausente_polycard_ignorado" };
       if (imagemPolycard.imagem) {
         const imagemPolycardValidada = await validarImagemPolycardMercadoLivre(imagemPolycard, {
           fetchImpl,

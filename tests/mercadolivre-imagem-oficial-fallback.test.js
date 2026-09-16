@@ -106,21 +106,166 @@ async function comFetchMock(respostas, fn) {
 
 (async () => {
   {
-    const { retorno, chamadas } = await comFetchMock([], () => buscarImagemCanonicaMercadoLivre({
+    const pictureId = "623680-MLB95967214789_102025";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const html = `
+      <html><head><meta property="og:image" content="${ogImage}"></head>
+      <body>recommendation solta MLB9999999999 nao deve virar identidade</body></html>
+    `;
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, html, "https://www.mercadolivre.com.br/social/prorelampago"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ], () => buscarImagemCanonicaMercadoLivre({
       marketplace: "mercadolivre",
-      titulo: "Mini Localizador Rastreador Smart Tag",
-      linkOriginal: "https://meli.la/2orjn6y",
-      metadata: {
-        resolucaoRadar: {
-          urlResolvida: "https://www.mercadolivre.com.br/social/prorelampago?matt_word=andradele&matt_tool=40081166&forceInApp=true"
-        }
-      }
-    }, { accessToken: "token_ml_valido" }));
+      titulo: "Camiseta Puma Essentials Small",
+      linkOriginal: "https://meli.la/18gBD4H"
+    }));
 
-    assert.strictEqual(chamadas.length, 0);
+    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(chamadas[0].url, "https://meli.la/18gBD4H");
+    assert.strictEqual(chamadas[1].url, esperado1200);
+    assert.strictEqual(retorno.imagem, esperado1200);
+    assert.strictEqual(retorno.origem, "og:image.picture_id");
+    assert.strictEqual(retorno.pictureId, pictureId);
+    assert.strictEqual(retorno.produtoId, undefined);
+    assert.strictEqual(retorno.motivo, "og_image_picture_id_imagem_recuperada");
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 1200, altura: 1200 });
+    assert.ok(!String(retorno.linkResolvido || "").includes("MLB9999999999"));
+  }
+
+  {
+    const pictureId = "993034-MLB112006389990_062026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const oficial1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const radarTatuado = "https://go.optimuspromo.com.br/social/midia/publica/engine/radar_whatsapp_tatuado.jpg";
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      titulo: "Kit Chave De Impacto 2 Baterias",
+      linkOriginal: "https://meli.la/1Rxt9jw",
+      imagem: radarTatuado,
+      imagemUrl: radarTatuado,
+      imagemOrigem: "radar_mirror/mensagem",
+      preco: 199.9,
+      cupom: "RADAR"
+    }));
+
+    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(retorno.imagem, oficial1200);
+    assert.notStrictEqual(retorno.imagem, radarTatuado);
+    assert.strictEqual(retorno.pictureId, pictureId);
+    assert.strictEqual(retorno.preco, undefined);
+    assert.strictEqual(retorno.cupom, undefined);
+  }
+
+  {
+    const pictureId = "719063-MLB114125784889_072026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const variante640 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-V.webp`;
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(200, "image/webp", { largura: 640, altura: 640 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/2MoHpPf",
+      titulo: "Penteadeira Suspensa Com Gaveta"
+    }));
+
+    assert.strictEqual(chamadas[1].url, `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`);
+    assert.strictEqual(chamadas[2].url, variante640);
+    assert.strictEqual(retorno.imagem, variante640);
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 640, altura: 640 });
+  }
+
+  {
+    const pictureId = "760577-MLB107688964948_032026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const variante320 = `https://http2.mlstatic.com/D_Q_NP_${pictureId}-V.webp`;
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(200, "image/webp", { largura: 320, altura: 320 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/1NFvwJM",
+      titulo: "Tenis Fila Rise Up Feminino"
+    }));
+
+    assert.strictEqual(chamadas.at(-1).url, variante320);
+    assert.strictEqual(retorno.imagem, variante320);
+    assert.deepStrictEqual(retorno.dimensoes, { largura: 320, altura: 320 });
+  }
+
+  {
+    const pictureId = "787896-MLB113444454464_072026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const { retorno, chamadas } = await comFetchMock([
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(404, "text/html"),
+      respostaImagem(404, "text/html")
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/2TR2zjU",
+      imagem: "https://go.optimuspromo.com.br/social/midia/publica/engine/radar_whatsapp_fallback.jpg",
+      imagemOrigem: "radar_mirror/mensagem"
+    }));
+
+    assert.strictEqual(chamadas.filter(item => /mlstatic\.com/i.test(item.url)).length, 4);
     assert.strictEqual(retorno.imagem, "");
-    assert.strictEqual(retorno.motivo, "url_canonica_mlb_ausente");
-    assert.ok(!String(retorno.linkResolvido || "").includes("MLB40081166"));
+    assert.strictEqual(retorno.motivo, "mlb_api_ausente");
+  }
+
+  {
+    const pictureId = "897788-MLB116709477309_082026";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const html = `
+      <meta property="og:image" content="${ogImage}">
+      <script>window.__PRELOADED_STATE__={"recommendations":[{"id":"MLB0000000000","pictures":{"pictures":[{"id":"999999-MLB000000000000_012025"}]}}]}</script>
+    `;
+    const { retorno } = await comFetchMock([
+      respostaHtml(200, html, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ], () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/18fCTXB",
+      titulo: "Tenis New Balance CT300 V3"
+    }));
+
+    assert.strictEqual(retorno.imagem, esperado1200);
+    assert.strictEqual(retorno.pictureId, pictureId);
+    assert.ok(!retorno.imagem.includes("999999-MLB000000000000_012025"));
+  }
+
+  {
+    const pictureId = "849075-MLB82170922584_022025";
+    const ogImage = `https://http2.mlstatic.com/D_NQ_NP_${pictureId}-O.webp`;
+    const esperado1200 = `https://http2.mlstatic.com/D_Q_NP_2X_${pictureId}-F.jpg`;
+    const respostas = [
+      respostaHtml(200, "<html><head></head><body>sem imagem oficial</body></html>", "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaHtml(200, `<meta property="og:image" content="${ogImage}">`, "https://www.mercadolivre.com.br/social/diegopc2015"),
+      respostaImagem(200, "image/jpeg", { largura: 1200, altura: 1200 })
+    ];
+
+    const primeiro = await comFetchMock(respostas.slice(0, 1), () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/2GBTFYK"
+    }));
+    assert.strictEqual(primeiro.retorno.imagem, "");
+
+    const segundo = await comFetchMock(respostas.slice(1), () => buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      linkOriginal: "https://meli.la/2GBTFYK"
+    }));
+    assert.strictEqual(segundo.retorno.imagem, esperado1200);
+    assert.strictEqual(segundo.retorno.pictureId, pictureId);
   }
 
   {
