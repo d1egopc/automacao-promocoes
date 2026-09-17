@@ -54,15 +54,19 @@ function criarProvaAfiliacaoWorkspaceShopee({ clienteId = "", credenciais = {}, 
   const appId = appIdShopee(credenciais);
   const affiliateIdEsperado = appId ? `an_${appId}` : "";
   const affiliateIdDetectado = afiliadoDetectadoShopee(urlFinalExpandida || urlAfiliadaWorkspace);
-  const divergente = Boolean(affiliateIdDetectado && affiliateIdEsperado && affiliateIdDetectado !== affiliateIdEsperado);
+  const ownershipConfirmado = Boolean(affiliateIdDetectado && affiliateIdEsperado && affiliateIdDetectado === affiliateIdEsperado);
   const urlAfiliada = texto(urlAfiliadaWorkspace);
   const prova = {
     workspaceId: texto(clienteId), appId, affiliateIdEsperado, affiliateIdDetectado,
     papel: texto(papel) || "produto", urlOriginal: texto(urlOriginal),
     urlAfiliadaWorkspace: urlAfiliada, urlFinalExpandida: texto(urlFinalExpandida),
     origemConversao: "workspace_api",
-    conversaoStatus: urlAfiliada && appId && !divergente ? "convertida" : "falhou",
-    motivoConversao: divergente ? "afiliacao_workspace_divergente" : (motivoConversao || (urlAfiliada ? "link_shopee_convertido_workspace" : "link_shopee_sem_conversao_workspace"))
+    conversaoStatus: urlAfiliada && ownershipConfirmado ? "convertida" : "falhou",
+    motivoConversao: !urlAfiliada
+      ? (motivoConversao || "link_shopee_sem_conversao_workspace")
+      : (!affiliateIdDetectado
+        ? "afiliacao_workspace_nao_confirmada"
+        : (!ownershipConfirmado ? "afiliacao_workspace_divergente" : (motivoConversao || "link_shopee_convertido_workspace")))
   };
   return { ...prova, assinatura: assinarProvaShopee(prova, credenciais) };
 }
@@ -72,7 +76,7 @@ function validarProvaAfiliacaoWorkspaceShopee(prova = {}, { clienteId = "", cred
   const esperado = appId ? `an_${appId}` : "";
   const detectado = texto(prova.affiliateIdDetectado || afiliadoDetectadoShopee(prova.urlFinalExpandida || prova.urlAfiliadaWorkspace));
   return {
-    valida: Boolean(texto(clienteId) && prova.workspaceId === texto(clienteId) && prova.appId === appId && prova.origemConversao === "workspace_api" && prova.conversaoStatus === "convertida" && texto(prova.urlAfiliadaWorkspace) && (!detectado || detectado === esperado) && (!exigirAssinatura || assinaturaProvaShopeeValida(prova, credenciais))),
+    valida: Boolean(texto(clienteId) && prova.workspaceId === texto(clienteId) && prova.appId === appId && prova.origemConversao === "workspace_api" && prova.conversaoStatus === "convertida" && texto(prova.urlAfiliadaWorkspace) && detectado && detectado === esperado && assinaturaProvaShopeeValida(prova, credenciais)),
     prova: { ...prova, affiliateIdEsperado: esperado, affiliateIdDetectado: detectado }
   };
 }

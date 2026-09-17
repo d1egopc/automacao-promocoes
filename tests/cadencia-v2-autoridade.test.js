@@ -68,12 +68,22 @@ const shopeeResgateValido = {
       tipo: "resgate",
       renderizavel: true,
       conversaoStatus: "convertida",
-      urlOptimus: "https://go.optimuspromo.com.br/r/resgate-shopee"
+      urlAfiliadaWorkspace: "https://s.shopee.com.br/resgate-workspace"
     }
   ]
 };
 
 assert.strictEqual(linkResgateShopeeValidoParaCadencia(shopeeResgateValido), true);
+assert.strictEqual(linkResgateShopeeValidoParaCadencia({
+  ...shopeeResgateValido,
+  linksComerciais: [{
+    papel: "link_resgate",
+    tipo: "resgate",
+    renderizavel: true,
+    conversaoStatus: "convertida",
+    urlOriginal: "https://s.shopee.com.br/resgate-terceiro"
+  }]
+}), false, "URL original nunca torna resgate Shopee renderizavel");
 
 const turboShopeeResgate = resolverCadenciaDestino({
   destino: { intervaloMinutos: 8, prioridadeCupomAtiva: true },

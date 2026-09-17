@@ -71,16 +71,7 @@ function linkResgateShopeeRenderizavelCadencia(item = {}) {
   const renderizavel = link.renderizavel === true || link.seguro === true || statusConversao === "convertida";
   if (!renderizavel) return false;
 
-  return [
-    link.urlAfiliadaWorkspace,
-    link.urlAfiliada,
-    link.urlOptimus,
-    link.renderizarUrl,
-    link.urlFinal,
-    link.url,
-    link.urlOriginal,
-    link.original
-  ].some(urlValidaCadencia);
+  return urlValidaCadencia(link.urlAfiliadaWorkspace);
 }
 
 function linksResgateShopeeCadencia(oferta = {}) {

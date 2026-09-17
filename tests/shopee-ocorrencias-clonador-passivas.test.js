@@ -26,7 +26,10 @@ function depsFixture(rastreio) {
       rastreio.resgates.push(url);
       return { ok: true, shortLink: `https://s.shopee.com.br/resgate${rastreio.resgates.length}` };
     },
-    expandirShortlinkShopee: async url => rastreio.resgates.includes(RESGATE) && /resgate\d+$/i.test(url) ? RESGATE : "",
+    expandirShortlinkShopee: async url => {
+      if (url === "https://s.shopee.com.br/afiliadoProduto") return `${PRODUTO}?mmp_pid=an_app&utm_source=an_app`;
+      return rastreio.resgates.includes(RESGATE) && /resgate\d+$/i.test(url) ? `${RESGATE}?mmp_pid=an_app&utm_source=an_app` : "";
+    },
     importarShopee: async url => {
       rastreio.importacoes.push(url);
       assert.strictEqual(url, PRODUTO, "somente o candidato tecnico de produto pode importar");

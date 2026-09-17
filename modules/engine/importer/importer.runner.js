@@ -7,7 +7,8 @@ const {
   gravarOfertaEngine,
   marcarJobOfertaCriada,
   marcarJobRetidaV2,
-  marcarJobErroImportacao
+  marcarJobErroImportacao,
+  agendarRetryAfiliacaoShopee
 } = require("./importer.service");
 const {
   limitarJobs,
@@ -129,6 +130,49 @@ async function finalizarErro(job, motivo, detalhes = {}, resumo, contexto = {}) 
   return { ok: false, motivo };
 }
 
+async function tratarFalhaRetriavelShopee(job, resultadoAdapter = {}, marketplace, resumo, contexto = {}) {
+  const motivoDetalhe = String(resultadoAdapter.motivoDetalhe || resultadoAdapter.motivo || "").trim();
+  const elegivel = marketplace === "shopee" &&
+    resultadoAdapter.retriavel === true &&
+    motivoDetalhe === "afiliacao_workspace_nao_confirmada";
+  if (!elegivel) return null;
+
+  const agendar = typeof contexto?.deps?.agendarRetryAfiliacaoShopee === "function"
+    ? contexto.deps.agendarRetryAfiliacaoShopee
+    : agendarRetryAfiliacaoShopee;
+  const agendamento = await agendar(job, {
+    motivo: motivoDetalhe,
+    motivoAdapter: resultadoAdapter.motivo || "afiliacao_workspace_incompleta"
+  });
+
+  if (agendamento?.ok) {
+    coberturaRadar.registrar("engine_importer_retry_agendado", {
+      ...contextoCoberturaImporter(job),
+      decisao: "retry_agendado",
+      motivo: motivoDetalhe,
+      tentativa: agendamento.tentativa,
+      proximaTentativaEm: agendamento.proximaTentativaEm || ""
+    });
+    if (resumo) {
+      resumo.retentativas = (resumo.retentativas || 0) + 1;
+      motivoAdicionar(resumo, motivoDetalhe);
+    }
+    return { ok: false, retriavel: true, reagendado: true, motivo: motivoDetalhe, tentativa: agendamento.tentativa };
+  }
+
+  if (agendamento?.esgotado) {
+    return finalizarErro(job, "afiliacao_workspace_nao_confirmada_apos_retries", {
+      marketplace,
+      tentativasRetry: agendamento.tentativa
+    }, resumo, contexto);
+  }
+  return finalizarErro(job, "falha_agendar_retry_afiliacao_workspace", {
+    marketplace,
+    motivo: agendamento?.motivo || "retry_nao_agendado",
+    erro: agendamento?.erro || ""
+  }, resumo, contexto);
+}
+
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   let marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
@@ -248,6 +292,8 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!resultadoAdapter?.ok) {
+    const retry = await tratarFalhaRetriavelShopee(job, resultadoAdapter, marketplace, resumo, contexto);
+    if (retry) return retry;
     coberturaRadar.registrar("engine_importer_rejeitado", {
       ...contextoCoberturaImporter(job, { links: linksResultado.links }),
       decisao: "rejeitado",

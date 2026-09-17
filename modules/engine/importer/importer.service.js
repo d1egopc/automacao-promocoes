@@ -561,7 +561,15 @@ function logSelecaoImagemMercadoLivre({ job = {}, evento = {}, oferta = {}, ofer
 
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
-  const filtros = ["j.status = 'pronto_para_importar'"];
+  const retryAgendadoMs = "NULLIF(j.metadata #>> '{afiliacaoWorkspaceRetry,proximaTentativaEmMs}', '')";
+  const filtros = [
+    "j.status = 'pronto_para_importar'",
+    `(CASE
+       WHEN ${retryAgendadoMs} ~ '^[0-9]+$'
+         THEN ${retryAgendadoMs}::bigint <= (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+       ELSE TRUE
+     END)`
+  ];
   const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
   const marketplaceExprJob = "LOWER(COALESCE(NULLIF(TRIM(j.marketplace), ''), NULLIF(TRIM(j.marketplace_detectado), ''), ''))";
   const marketplaceFiltro = String(marketplace || "").trim().toLowerCase();
@@ -4739,6 +4747,73 @@ async function marcarJobErroImportacao(jobId, motivo = "erro_importacao", detalh
   return marcarJobStatus(jobId, "erro_importacao", motivo, { statusEsperado: ["importando", "pronto_para_importar"] });
 }
 
+function numeroRetryAfiliacaoShopee(job = {}) {
+  const valor = Number(job?.metadata?.afiliacaoWorkspaceRetry?.tentativas || 0);
+  return Number.isInteger(valor) && valor >= 0 ? valor : 0;
+}
+
+function planoRetryAfiliacaoShopee(job = {}, agora = new Date()) {
+  const tentativasAnteriores = numeroRetryAfiliacaoShopee(job);
+  const tentativa = tentativasAnteriores + 1;
+  const atrasosMs = [30_000, 120_000, 300_000];
+  const atrasoMs = atrasosMs[tentativa - 1] || null;
+  const dataBase = agora instanceof Date ? agora : new Date(agora);
+
+  if (!Number.isFinite(dataBase.getTime()) || !atrasoMs) {
+    return { reagendar: false, tentativa, tentativasAnteriores };
+  }
+
+  const proximaTentativaEm = new Date(dataBase.getTime() + atrasoMs);
+  return {
+    reagendar: true,
+    tentativa,
+    tentativasAnteriores,
+    atrasoMs,
+    proximaTentativaEm: proximaTentativaEm.toISOString(),
+    proximaTentativaEmMs: proximaTentativaEm.getTime()
+  };
+}
+
+async function agendarRetryAfiliacaoShopee(job = {}, detalhes = {}, opcoes = {}) {
+  const plano = planoRetryAfiliacaoShopee(job, opcoes.agora || new Date());
+  if (!plano.reagendar) {
+    return { ok: false, esgotado: true, motivo: "afiliacao_workspace_nao_confirmada_apos_retries", ...plano };
+  }
+
+  const estadoRetry = {
+    tentativas: plano.tentativa,
+    motivo: "afiliacao_workspace_nao_confirmada",
+    ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),
+    proximaTentativaEm: plano.proximaTentativaEm,
+    proximaTentativaEmMs: plano.proximaTentativaEmMs
+  };
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET status = 'pronto_para_importar',
+            tentativas = COALESCE(tentativas, 0) + 1,
+            motivo_final = 'afiliacao_workspace_nao_confirmada',
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('afiliacaoWorkspaceRetry', $2::jsonb),
+            atualizado_em = NOW()
+      WHERE id = $1 AND status = 'importando'
+      RETURNING id, status, tentativas, motivo_final, metadata`,
+    [job.id, JSON.stringify(estadoRetry)]
+  );
+
+  if (!resultado.ok) return { ...resultado, ...plano };
+  if (resultado.resultado.rowCount === 0) {
+    return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando", ...plano };
+  }
+
+  await registrarEtapaImportacao(job.id, "importacao_retry_agendado", "pendente", "afiliacao_workspace_nao_confirmada", {
+    marketplace: "shopee",
+    tentativa: plano.tentativa,
+    atrasoMs: plano.atrasoMs,
+    proximaTentativaEm: plano.proximaTentativaEm,
+    ...detalhes
+  });
+  return { ok: true, ...plano, estadoRetry };
+}
+
 module.exports = {
   buscarJobsProntos,
   separarResultadoJobsProntos,
@@ -4751,6 +4826,9 @@ module.exports = {
   marcarJobOfertaCriada,
   marcarJobRetidaV2,
   marcarJobErroImportacao,
+  numeroRetryAfiliacaoShopee,
+  planoRetryAfiliacaoShopee,
+  agendarRetryAfiliacaoShopee,
   normalizarOfertaImportada,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,

@@ -604,7 +604,7 @@ function subIdsConversaoShopee({ clienteId = "", evento = {}, link = {}, papel =
   ].filter(item => item && !/^(ws|ev|ord)$/.test(item));
 }
 
-async function expandirShortlinkAfiliadoShopee(url = "", deps = {}) {
+async function expandirShortlinkAfiliadoShopeeUmaVez(url = "", deps = {}) {
   if (!texto(url)) return "";
   if (typeof deps.expandirShortlinkShopee === "function") {
     const resultado = await deps.expandirShortlinkShopee(url);
@@ -633,6 +633,15 @@ async function expandirShortlinkAfiliadoShopee(url = "", deps = {}) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+async function expandirShortlinkAfiliadoShopee(url = "", deps = {}) {
+  const maxTentativas = 2;
+  for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+    const expandida = await expandirShortlinkAfiliadoShopeeUmaVez(url, deps);
+    if (expandida) return expandida;
+  }
+  return "";
 }
 
 async function converterLandingShopeePorOcorrencia({ link = {}, urlOriginal = "", clienteId = "", evento = {}, integracao = {}, deps = {}, indice = 0 } = {}) {
@@ -728,6 +737,7 @@ async function converterOcorrenciasShopee({
   deps = {},
   produtoPrincipal = {},
   linkAfiliadoPrincipal = "",
+  afiliacaoWorkspacePrincipal = null,
   urlOriginalEngine = "",
   cacheImportacoesShopee = new Map()
 } = {}) {
@@ -754,14 +764,13 @@ async function converterOcorrenciasShopee({
         urlsOcorrenciaShopee(link).some(url => mesmoLinkShopee(url, urlOriginalEngine))
       ) && linkAfiliadoPrincipal) {
         conversao = {
-          urlAfiliada: linkAfiliadoPrincipal,
-          renderizavel: true,
-          motivo: "produto_principal_workspace_convertido",
-          status: "convertida",
-          afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceShopee({
+          urlAfiliada: afiliacaoWorkspacePrincipal?.conversaoStatus === "convertida" ? linkAfiliadoPrincipal : "",
+          renderizavel: afiliacaoWorkspacePrincipal?.conversaoStatus === "convertida",
+          motivo: afiliacaoWorkspacePrincipal?.motivoConversao || "produto_principal_workspace_sem_confirmacao",
+          status: afiliacaoWorkspacePrincipal?.conversaoStatus || "falhou",
+          afiliacaoWorkspace: afiliacaoWorkspacePrincipal || criarProvaAfiliacaoWorkspaceShopee({
             clienteId, credenciais: integracao?.credenciais || integracao || {},
-            urlOriginal, urlAfiliadaWorkspace: linkAfiliadoPrincipal,
-            papel: "produto", motivoConversao: "produto_principal_workspace_convertido"
+            urlOriginal, urlAfiliadaWorkspace: "", papel: "produto", motivoConversao: "produto_principal_workspace_sem_confirmacao"
           })
         };
       } else {
@@ -787,17 +796,18 @@ async function converterOcorrenciasShopee({
             cacheImportacoesShopee.set(urlOriginal, produtoConvertido);
           }
           const urlAfiliada = texto(produtoConvertido?.linkAfiliado || produtoConvertido?.linkFinal || produtoConvertido?.link || produtoConvertido?.offerLink || "");
-          const fidelidade = produtoConvertidoPreservaDestinoShopee(link, urlOriginal, produtoConvertido, urlAfiliada);
+          const urlFinalExpandida = await expandirShortlinkAfiliadoShopee(urlAfiliada, deps);
+          const fidelidade = produtoConvertidoPreservaDestinoShopee(link, urlOriginal, produtoConvertido, urlFinalExpandida || urlAfiliada);
           conversao = {
-            urlAfiliada: fidelidade.ok ? urlAfiliada : "",
-            renderizavel: Boolean(urlAfiliada) && fidelidade.ok,
-            motivo: !fidelidade.ok ? "produto_shopee_destino_divergente" : (urlAfiliada ? `${papel}_workspace_convertido_por_ocorrencia` : `${papel}_sem_conversao_workspace`),
-            status: Boolean(urlAfiliada) && fidelidade.ok ? "convertida" : "falhou",
+            urlAfiliada: fidelidade.ok && urlFinalExpandida ? urlAfiliada : "",
+            renderizavel: Boolean(urlAfiliada) && Boolean(urlFinalExpandida) && fidelidade.ok,
+            motivo: !fidelidade.ok ? "produto_shopee_destino_divergente" : (urlFinalExpandida ? `${papel}_workspace_convertido_por_ocorrencia` : `${papel}_sem_confirmacao_workspace`),
+            status: Boolean(urlAfiliada) && Boolean(urlFinalExpandida) && fidelidade.ok ? "convertida" : "falhou",
             destinoFuncionalOriginal: fidelidade.original,
             destinoFuncionalFinal: fidelidade.final,
             afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceShopee({
               clienteId, credenciais: integracao?.credenciais || integracao || {},
-              urlOriginal, urlAfiliadaWorkspace: fidelidade.ok ? urlAfiliada : "",
+              urlOriginal, urlAfiliadaWorkspace: fidelidade.ok && urlFinalExpandida ? urlAfiliada : "", urlFinalExpandida,
               papel, motivoConversao: fidelidade.ok ? `${papel}_workspace_convertido_por_ocorrencia` : "produto_shopee_destino_divergente"
             })
           };
@@ -1389,6 +1399,27 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
   const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
   const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || produto.avisoCupom || produto.avisoVariacaoPreco || "";
+  const urlFinalExpandida = await expandirShortlinkAfiliadoShopee(linkAfiliado, deps);
+  const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
+    clienteId,
+    credenciais: integracao?.credenciais || integracao || {},
+    urlOriginal: urlOriginalEngine,
+    urlAfiliadaWorkspace: linkAfiliado,
+    urlFinalExpandida,
+    papel: "produto",
+    motivoConversao: "produto_principal_workspace_api"
+  });
+  if (afiliacaoWorkspace.conversaoStatus !== "convertida") {
+    const motivoDetalhe = afiliacaoWorkspace.motivoConversao || "afiliacao_workspace_incompleta";
+    return {
+      ok: false,
+      marketplace: "shopee",
+      motivo: "afiliacao_workspace_incompleta",
+      motivoDetalhe,
+      retriavel: motivoDetalhe === "afiliacao_workspace_nao_confirmada",
+      linkOriginal: urlOriginalEngine
+    };
+  }
   const linksConvertidosShopee = await converterOcorrenciasShopee({
     links,
     evento,
@@ -1397,6 +1428,7 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     deps,
     produtoPrincipal: produto,
     linkAfiliadoPrincipal: linkAfiliado,
+    afiliacaoWorkspacePrincipal: afiliacaoWorkspace,
     urlOriginalEngine,
     cacheImportacoesShopee
   });
@@ -1408,17 +1440,6 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     linkAfiliado,
     urlOriginalEngine
   });
-  const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
-    clienteId,
-    credenciais: integracao?.credenciais || integracao || {},
-    urlOriginal: urlOriginalEngine,
-    urlAfiliadaWorkspace: linkAfiliado,
-    papel: "produto",
-    motivoConversao: "produto_principal_workspace_api"
-  });
-  if (afiliacaoWorkspace.conversaoStatus !== "convertida") {
-    return { ok: false, marketplace: "shopee", motivo: "afiliacao_workspace_incompleta", linkOriginal: urlOriginalEngine };
-  }
   const linksComerciaisVerificados = linksComerciaisShopee.map((link) => (
     link?.renderizavel === true && !link.afiliacaoWorkspace && texto(link.urlAfiliadaWorkspace || link.urlAfiliada) === linkAfiliado
       ? { ...link, afiliacaoWorkspace }
@@ -1541,5 +1562,6 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
 
 module.exports = {
   importarShopeeEngine,
-  montarVisaoOcorrenciasShopeeClonador
+  montarVisaoOcorrenciasShopeeClonador,
+  expandirShortlinkAfiliadoShopee
 };

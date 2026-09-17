@@ -96,8 +96,9 @@ async function testarResgateProdutoProduto() {
         return { ok: true, shortLink: afiliadoResgate };
       },
       expandirShortlinkShopee: async (url) => {
+        if (url === afiliadoProduto) return produtoExpandido + "?mmp_pid=an_app&utm_source=an_app";
         assert.strictEqual(url, afiliadoResgate);
-        return resgateExpandido + "&aff=workspace";
+        return resgateExpandido + "&aff=workspace&mmp_pid=an_app&utm_source=an_app";
       },
       importarShopee: async (url) => {
         chamadas.push(url);
@@ -170,6 +171,10 @@ async function testarCincoProdutosDiferentesPreservamCincoSaidas() {
     })),
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async (url) => {
+        const indice = afiliados.indexOf(url);
+        return indice >= 0 ? `${produtosExpandidos[indice]}?mmp_pid=an_app&utm_source=an_app` : "";
+      },
       importarShopee: async (url) => {
         chamadas.push(url);
         const indice = produtos.indexOf(url);
@@ -280,6 +285,7 @@ async function testarFalhaGenerateShortLinkMantemProduto() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       gerarShortLinkShopee: async () => ({ ok: false, motivo: "generate_shortlink_shopee_falhou" }),
+      expandirShortlinkShopee: async (url) => url === afiliadoProduto ? `${produtoExpandido}?mmp_pid=an_app&utm_source=an_app` : "",
       importarShopee: async (url) => {
         chamadas.push(url);
         assert.strictEqual(url, produto);
@@ -338,7 +344,9 @@ async function testarDestinoDivergenteRejeitaResgate() {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       gerarShortLinkShopee: async () => ({ ok: true, shortLink: afiliadoResgate }),
-      expandirShortlinkShopee: async () => "https://shopee.com.br/product/1866834175/58215641231",
+      expandirShortlinkShopee: async (url) => url === afiliadoProduto
+        ? `${produtoExpandido}?mmp_pid=an_app&utm_source=an_app`
+        : "https://shopee.com.br/product/1866834175/58215641231",
       importarShopee: async (url) => {
         assert.strictEqual(url, produto);
         return {
@@ -403,7 +411,9 @@ async function testarWorkspaceNaoReutilizaShortlinkDeOutro() {
           assert.strictEqual(workspaceSubId, `ws${clienteId}`);
           return { ok: true, shortLink: shortlinksPorWorkspace[clienteId] };
         },
-        expandirShortlinkShopee: async () => resgateExpandido,
+        expandirShortlinkShopee: async (url) => url.includes("produto")
+          ? `${produtoExpandido}?mmp_pid=an_app&utm_source=an_app`
+          : `${resgateExpandido}&mmp_pid=an_app&utm_source=an_app`,
         importarShopee: async (url) => {
           assert.strictEqual(url, produto);
           return {
@@ -451,6 +461,9 @@ async function testarPrecoBrasileiroMilharXiaomi() {
     links: [{ url_original: produto, url_expandida: produtoExpandido, ordemCaptura: 1 }],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+      expandirShortlinkShopee: async (url) => url === "https://s.shopee.com.br/xiaomiD1"
+        ? `${produtoExpandido}?mmp_pid=an_app&utm_source=an_app`
+        : "",
       importarShopee: async (url) => {
         assert.strictEqual(url, produto);
         return {
@@ -507,6 +520,9 @@ async function testarFormatosPrecoBrasileiroShopee() {
       links: [{ url_original: produto, url_expandida: "https://shopee.com.br/product/777/888", ordemCaptura: 1 }],
       deps: {
         getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
+        expandirShortlinkShopee: async (url) => url === "https://s.shopee.com.br/produtoD1"
+          ? "https://shopee.com.br/product/777/888?mmp_pid=an_app&utm_source=an_app"
+          : "",
         importarShopee: async (url) => {
           assert.strictEqual(url, produto);
           return {
