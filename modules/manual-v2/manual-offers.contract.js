@@ -170,6 +170,9 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     marketplace: normalizarMarketplaceManualV2(entrada.marketplace || contexto.marketplace || ""),
     urlOriginal: primeiroTexto(entrada.urlOriginal, entrada.linkOriginal, entrada.url, entrada.original),
     urlAfiliada: primeiroTexto(entrada.urlAfiliada, entrada.linkAfiliado, entrada.linkFinal, entrada.link),
+    // Evidencia recebida do cliente e somente diagnostica; nunca libera despacho.
+    afiliacaoWorkspace: entrada.afiliacaoWorkspace && typeof entrada.afiliacaoWorkspace === "object" ? { ...entrada.afiliacaoWorkspace } : null,
+    afiliacaoWorkspaceVerificada: entrada.afiliacaoWorkspaceVerificada && typeof entrada.afiliacaoWorkspaceVerificada === "object" ? { ...entrada.afiliacaoWorkspaceVerificada } : null,
 
     titulo: primeiroTexto(entrada.titulo, entrada.nome, entrada.title),
     precoAtual: primeiroTexto(entrada.precoAtual, entrada.preco, entrada.precoPor, entrada.valor, entrada.price),
@@ -246,7 +249,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     oferta.precoAtual = "";
   }
 
-  if (!oferta.urlAfiliada) {
+  if (!oferta.urlAfiliada && !["shopee", "aliexpress"].includes(oferta.marketplace)) {
     oferta.urlAfiliada = oferta.urlOriginal;
   }
 

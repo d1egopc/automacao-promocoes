@@ -6,6 +6,9 @@ const {
   gerarShortLinkShopee
 } = require("../../marketplaces/shopee/importar");
 const {
+  criarProvaAfiliacaoWorkspaceShopee
+} = require("../marketplaces/shopee/afiliacao-workspace");
+const {
   extrairIdsShopee,
   urlShopeeValida
 } = require("../../marketplaces/shopee/normalizacao");
@@ -424,6 +427,16 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     ...baseConversao,
     precoAtual: faixaPreco ? "" : precoAtualNumero,
     urlAfiliada,
+    afiliacaoWorkspaceVerificada: marketplace === "shopee"
+      ? criarProvaAfiliacaoWorkspaceShopee({
+        clienteId,
+        credenciais: (typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(clienteId, "shopee") : {})?.credenciais || {},
+        urlOriginal: urlValidada.url,
+        urlAfiliadaWorkspace: urlAfiliada,
+        papel: "produto",
+        motivoConversao: "capture_shopee_workspace_api"
+      })
+      : null,
     fonteImportacao: {
       marketplaceDetectado: marketplace,
       adapter: "optimus_capture_v1",

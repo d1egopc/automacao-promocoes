@@ -36,6 +36,9 @@ async function importarAliFixture({ titulo, texto, principal = "1005001111111111
         const papel = config.contextoEngine?.papelLink || "";
         const sufixo = papel === "link_pc" ? "pc" : "app";
         const id = secundaria ? secundario : principal;
+        const linkAfiliado = afiliadaUnica
+          ? `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_unico`
+          : `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_${sufixo}`;
         return {
           marketplace: "aliexpress",
           titulo,
@@ -44,14 +47,24 @@ async function importarAliFixture({ titulo, texto, principal = "1005001111111111
           precoOriginal: "199.90",
           linkOriginal: url,
           linkExpandido: `https://www.aliexpress.com/item/${id}.html`,
-          linkAfiliado: afiliadaUnica
-            ? `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_unico`
-            : `https://s.click.aliexpress.com/e/_${titulo.replace(/[^a-z0-9]+/gi, "")}_${sufixo}`,
+          linkAfiliado,
           tipoLinkAfiliado: papel,
           papelLink: papel,
           imagem: "https://ae01.alicdn.com/produto.jpg",
           categoria: "Eletronicos",
-          metadata: { papelLink: papel, productId: id }
+          metadata: {
+            papelLink: papel,
+            productId: id,
+            afiliacaoWorkspace: {
+              workspaceId: "workspace_links_v2",
+              appKey: "app",
+              trackingIdEnviado: "tracking",
+              origemConversao: "workspace_api",
+              conversaoStatus: "convertida",
+              urlAfiliadaWorkspace: linkAfiliado,
+              motivoConversao: "fixture_convertida"
+            }
+          }
         };
       }
     }

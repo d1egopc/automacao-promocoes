@@ -103,7 +103,7 @@ async function gerarLinkCurtoAliExpress(
     !secret ||
     !trackingId
   ) {
-    return linkLongo;
+    return "";
   }
 
   try {
@@ -168,10 +168,7 @@ async function gerarLinkCurtoAliExpress(
       promotion_link ||
       "";
 
-    return (
-      linkCurto ||
-      linkLongo
-    );
+    return linkCurto || "";
 
   } catch (e) {
 
@@ -180,7 +177,7 @@ async function gerarLinkCurtoAliExpress(
       e.message
     );
 
-    return linkLongo;
+    return "";
   }
 }
 

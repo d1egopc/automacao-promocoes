@@ -16,6 +16,23 @@ function integracao() {
   };
 }
 
+function metadataAfiliacao(papelLink, urlAfiliada, extras = {}) {
+  const credenciais = integracao().credenciais;
+  return {
+    ...extras,
+    papelLink,
+    afiliacaoWorkspace: {
+      workspaceId: "cliente_ali",
+      appKey: credenciais.appKey,
+      trackingIdEnviado: credenciais.trackingId,
+      origemConversao: "workspace_api",
+      conversaoStatus: "convertida",
+      urlAfiliadaWorkspace: urlAfiliada,
+      motivoConversao: "fixture_convertida"
+    }
+  };
+}
+
 async function testarPrecoRadarVenceApiELinkMoedasConverte() {
   const app = "https://a.aliexpress.com/_appMoedas";
   const pc = "https://a.aliexpress.com/_pcCanonico";
@@ -55,7 +72,7 @@ async function testarPrecoRadarVenceApiELinkMoedasConverte() {
             linkAfiliado: pcAfiliado,
             imagem: "https://ae01.alicdn.com/produto.jpg",
             categoria: "Eletronicos",
-            metadata: { papelLink: config.contextoEngine?.papelLink || "" }
+            metadata: metadataAfiliacao(config.contextoEngine?.papelLink || "", pcAfiliado)
           };
         }
         if (url === app) {
@@ -67,11 +84,10 @@ async function testarPrecoRadarVenceApiELinkMoedasConverte() {
             linkAfiliado: appAfiliado,
             tipoLinkAfiliado: "link_moedas",
             papelLink: "link_moedas",
-            metadata: {
-              papelLink: "link_moedas",
+            metadata: metadataAfiliacao("link_moedas", appAfiliado, {
               conversaoPapel: "link_moedas",
               conversaoLinkAlternativo: true
-            }
+            })
           };
         }
         throw new Error(`url inesperada: ${url}`);
@@ -202,7 +218,8 @@ async function testarProdutoDuplicadoReutilizaConversaoEPreservaOcorrencias() {
           precoAtual: "99.00",
           linkOriginal: url,
           linkAfiliado: afiliado,
-          imagem: "https://ae01.alicdn.com/produto.jpg"
+          imagem: "https://ae01.alicdn.com/produto.jpg",
+          metadata: metadataAfiliacao("produto", afiliado)
         };
       }
     }
@@ -253,7 +270,10 @@ async function testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias() {
           linkExpandido: "https://www.aliexpress.com/item/1005002222222222.html",
           linkAfiliado: url === pc ? pcAfiliado : appAfiliado,
           papelLink: config.contextoEngine?.papelLink || "",
-          metadata: { papelLink: config.contextoEngine?.papelLink || "" }
+          metadata: metadataAfiliacao(
+            config.contextoEngine?.papelLink || "",
+            url === pc ? pcAfiliado : appAfiliado
+          )
         };
       }
     }
@@ -298,7 +318,8 @@ async function testarProdutosDistintosNaoUsamAfiliadoGlobal() {
           productId: url === produtoA ? "1005003333333333" : "1005004444444444",
           precoAtual: "88.00",
           linkOriginal: url,
-          linkAfiliado: url === produtoA ? afiliadoA : afiliadoB
+          linkAfiliado: url === produtoA ? afiliadoA : afiliadoB,
+          metadata: metadataAfiliacao("produto", url === produtoA ? afiliadoA : afiliadoB)
         };
       }
     }
@@ -339,7 +360,8 @@ async function testarFalhaConversaoMantemOcorrenciaAuditavel() {
           productId: "1005005555555555",
           precoAtual: "77.00",
           linkOriginal: url,
-          linkAfiliado: afiliadoA
+          linkAfiliado: afiliadoA,
+          metadata: metadataAfiliacao("produto", afiliadoA)
         };
       }
     }
@@ -388,11 +410,10 @@ async function testarApiSemCanonicoPreservaAppPcConvertidosDoRadar() {
         aviso: "Erro ao consultar API AliExpress",
         erroTecnico: "aliexpress_manual_fallback_generico",
         papelLink: config.contextoEngine?.papelLink || "",
-        metadata: {
-          papelLink: config.contextoEngine?.papelLink || "",
+        metadata: metadataAfiliacao(config.contextoEngine?.papelLink || "", url === app ? appAfiliado : pcAfiliado, {
           conversaoPapel: config.contextoEngine?.papelLink || "",
           conversaoLinkAlternativo: true
-        }
+        })
       })
     }
   });
@@ -439,11 +460,10 @@ async function testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp() {
         imagem: "",
         aviso: "Landing AliExpress convertida sem productId direto.",
         papelLink: config.contextoEngine?.papelLink || "",
-        metadata: {
-          papelLink: config.contextoEngine?.papelLink || "",
+        metadata: metadataAfiliacao(config.contextoEngine?.papelLink || "", appAfiliado, {
           conversaoPapel: config.contextoEngine?.papelLink || "",
           conversaoLinkAlternativo: true
-        }
+        })
       })
     }
   });

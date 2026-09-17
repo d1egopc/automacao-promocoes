@@ -11,6 +11,12 @@ const {
 const {
   normalizarModoLinkDestino
 } = require("../links/link-optimus");
+const {
+  validarOfertaAfiliacaoWorkspaceShopee
+} = require("../marketplaces/shopee/afiliacao-workspace");
+const {
+  validarOfertaAfiliacaoWorkspaceAliExpress
+} = require("../marketplaces/aliexpress/afiliacao-workspace");
 const tipoMidiaV2 = require("../destinos/tipo-midia-v2");
 
 function texto(valor = "") {
@@ -181,7 +187,8 @@ function resultadoSucesso({
 }
 
 function adaptarOfertaManualParaTemplate(oferta = {}) {
-  const linkFinal = texto(oferta.urlAfiliada || oferta.urlOriginal);
+  const marketplace = texto(oferta.marketplace).toLowerCase();
+  const linkFinal = texto(oferta.urlAfiliada || (["shopee", "aliexpress"].includes(marketplace) ? "" : oferta.urlOriginal));
   const observacoes = Array.isArray(oferta.observacoes)
     ? oferta.observacoes
     : [texto(oferta.observacoes)].filter(Boolean);
@@ -391,6 +398,24 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
   const oferta = buscarOferta(cliente, idOferta, deps.storageOptions || {});
   if (!oferta) {
     return criarRetornoBase(false, idOferta, "Oferta Manual V2 nao encontrada");
+  }
+  if (texto(oferta.marketplace).toLowerCase() === "shopee") {
+    const integracao = typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(cliente, "shopee") || {} : {};
+    const afiliacao = validarOfertaAfiliacaoWorkspaceShopee(oferta, {
+      clienteId: cliente,
+      credenciais: integracao.credenciais || integracao || {},
+      exigirAssinatura: true
+    });
+    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
+  }
+  if (texto(oferta.marketplace).toLowerCase() === "aliexpress") {
+    const integracao = typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(cliente, "aliexpress") || {} : {};
+    const afiliacao = validarOfertaAfiliacaoWorkspaceAliExpress(oferta, {
+      clienteId: cliente,
+      credenciais: integracao.credenciais || integracao || {},
+      exigirAssinatura: true
+    });
+    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
   }
 
   const plano = typeof deps.resolverPlanoManualV2 === "function"

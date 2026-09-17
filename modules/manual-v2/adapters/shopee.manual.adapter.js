@@ -8,6 +8,9 @@ const {
   extrairIdsShopee,
   urlShopeeValida
 } = require("../../../marketplaces/shopee/normalizacao");
+const {
+  criarProvaAfiliacaoWorkspaceShopee
+} = require("../../marketplaces/shopee/afiliacao-workspace");
 
 const ADAPTER_SHOPEE_MANUAL_V2 = "shopee.manual.adapter";
 
@@ -358,6 +361,11 @@ async function importarShopeeManualV2(urlManual = "", opcoes = {}) {
     : resolverPrecosShopee(dados);
   const precoAnterior = bloqueadoSemItem ? "" : precoAnteriorManualShopee(dados);
   const urlAfiliada = bloqueadoSemItem ? "" : urlAfiliadaSeguraShopee(dados, urlOriginal);
+  const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
+    clienteId, credenciais: integracao?.credenciais || integracao || {},
+    urlOriginal, urlAfiliadaWorkspace: urlAfiliada, papel: "produto",
+    motivoConversao: "produto_shopee_importado_workspace_api"
+  });
   const avisos = avisosShopee(dados, {
     precoAnterior,
     bloqueadoSemItem,
@@ -370,6 +378,7 @@ async function importarShopeeManualV2(urlManual = "", opcoes = {}) {
       marketplace: "shopee",
       urlOriginal: primeiroTexto(dados.linkOriginal, dados.urlOriginal, urlOriginal),
       urlAfiliada,
+      afiliacaoWorkspaceVerificada: afiliacaoWorkspace,
       titulo: bloqueadoSemItem ? "" : primeiroTexto(dados.titulo, dados.nome, dados.productName),
       precoAtual: precos.precoAtual,
       precoAnterior,

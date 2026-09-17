@@ -807,7 +807,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
         : (link) => link;
       const sourceValuesAfiliado = urlOriginal;
       const linkAliCurto = await gerarLinkCurto(sourceValuesAfiliado, credenciais);
-      const linkFinal = aplicarLinkOptimus(linkAliCurto || sourceValuesAfiliado, "aliexpress", { clienteId });
+      const conversaoWorkspaceValida = Boolean(linkAliCurto && String(linkAliCurto).trim() !== String(sourceValuesAfiliado).trim());
+      const linkFinal = conversaoWorkspaceValida
+        ? aplicarLinkOptimus(linkAliCurto, "aliexpress", { clienteId })
+        : "";
 
       return {
         marketplace: "aliexpress",
@@ -832,6 +835,15 @@ async function importarAliExpress(urlEntrada, config = {}) {
           conversaoLinkAlternativo: true,
           productId: "",
           sourceValuesUsado: sourceValuesAfiliado,
+          afiliacaoWorkspace: {
+            workspaceId: clienteId,
+            appKey,
+            trackingIdEnviado: trackingId,
+            origemConversao: "workspace_api",
+            conversaoStatus: conversaoWorkspaceValida ? "convertida" : "falhou",
+            urlAfiliadaWorkspace: conversaoWorkspaceValida ? (linkFinal || linkAliCurto) : "",
+            motivoConversao: conversaoWorkspaceValida ? "link_api_convertido" : "link_api_sem_retorno"
+          },
           urlCanonicaProduto,
           motivo: "landing_sem_product_id_convertida",
           imagemOrigem: imagemMetadata.origem || "",
@@ -919,7 +931,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
     ? config.gerarLinkOptimus
     : (link) => link;
   const linkAliCurto = await gerarLinkCurto(sourceValuesAfiliado, credenciais);
-  const linkFinal = aplicarLinkOptimus(linkAliCurto || sourceValuesAfiliado, "aliexpress", { clienteId });
+  const conversaoWorkspaceValida = Boolean(linkAliCurto && String(linkAliCurto).trim() !== String(sourceValuesAfiliado).trim());
+  const linkFinal = conversaoWorkspaceValida
+    ? aplicarLinkOptimus(linkAliCurto, "aliexpress", { clienteId })
+    : "";
 
   console.log("[ALIEXPRESS-DEEPLINK]", {
     productId,
@@ -930,14 +945,23 @@ async function importarAliExpress(urlEntrada, config = {}) {
     linkOptimusAplicado: Boolean(linkFinal && linkFinal !== (linkAliCurto || sourceValuesAfiliado))
   });
 
-  const produtoFinal = montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, linkFinal || linkAliCurto || sourceValuesAfiliado);
+  const produtoFinal = montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, conversaoWorkspaceValida ? (linkFinal || linkAliCurto) : "");
   produtoFinal.metadata = {
     ...(produtoFinal.metadata || {}),
     papelLink: papelLinkAlternativo || produtoFinal.metadata?.papelLink || "",
     conversaoPapel: papelLinkAlternativo || produtoFinal.metadata?.conversaoPapel || "",
     conversaoLinkAlternativo: conversaoOcorrenciaRadar || produtoFinal.metadata?.conversaoLinkAlternativo === true,
     sourceValuesUsado: sourceValuesAfiliado,
-    linkAfiliadoBaseProduto: linkAfiliadoBase
+    linkAfiliadoBaseProduto: linkAfiliadoBase,
+    afiliacaoWorkspace: {
+      workspaceId: clienteId,
+      appKey,
+      trackingIdEnviado: trackingId,
+      origemConversao: "workspace_api",
+      conversaoStatus: conversaoWorkspaceValida ? "convertida" : "falhou",
+      urlAfiliadaWorkspace: conversaoWorkspaceValida ? (linkFinal || linkAliCurto) : "",
+      motivoConversao: conversaoWorkspaceValida ? "link_api_convertido" : "link_api_sem_retorno"
+    }
   };
   return produtoFinal;
 }

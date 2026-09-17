@@ -158,7 +158,7 @@ async function gerarShortLinkShopee(originUrl, integracao = {}, subIds = [], dep
       };
     }
 
-    return { ok: true, shortLink, originUrl: url, subIds: subIdsNormalizados };
+    return { ok: true, shortLink, originUrl: url, subIds: subIdsNormalizados, appId, origemConversao: "workspace_api" };
   } catch (erro) {
     return {
       ok: false,

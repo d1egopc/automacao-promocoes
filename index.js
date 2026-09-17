@@ -311,6 +311,12 @@ const {
 const {
   montarMensagemOferta
 } = require("./utils/mensagens-ofertas");
+const {
+  validarOfertaAfiliacaoWorkspaceAliExpress
+} = require("./modules/marketplaces/aliexpress/afiliacao-workspace");
+const {
+  validarOfertaAfiliacaoWorkspaceShopee
+} = require("./modules/marketplaces/shopee/afiliacao-workspace");
 
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
@@ -8178,6 +8184,61 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       return { enviado: false, tentouEnvio: false, motivo: "clienteId_ausente" };
     }
     configCliente = configCliente || configsPorCliente?.[clienteId] || {};
+    if (normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "aliexpress") {
+      const integracaoAliExpress = getIntegracaoCliente(clienteId, "aliexpress") || {};
+      const afiliacaoAliExpress = validarOfertaAfiliacaoWorkspaceAliExpress(oferta, {
+        clienteId,
+        credenciais: integracaoAliExpress.credenciais || {}
+      });
+      if (!afiliacaoAliExpress.ok) {
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: "afiliacao_workspace_incompleta",
+          papelLink: afiliacaoAliExpress.papel || "",
+          tentativaEnvio: false,
+          destinoEncontrado: true,
+          filaRecebeu: true
+        });
+        return {
+          enviado: false,
+          tentouEnvio: false,
+          motivo: "afiliacao_workspace_incompleta",
+          papelLink: afiliacaoAliExpress.papel || ""
+        };
+      }
+    }
+    if (normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "shopee") {
+      const integracaoShopee = getIntegracaoCliente(clienteId, "shopee") || {};
+      const afiliacaoShopee = validarOfertaAfiliacaoWorkspaceShopee(oferta, {
+        clienteId,
+        credenciais: integracaoShopee.credenciais || integracaoShopee || {}
+      });
+      if (!afiliacaoShopee.ok) {
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: "afiliacao_workspace_incompleta",
+          papelLink: afiliacaoShopee.papel || "",
+          appIdEsperado: afiliacaoShopee.prova?.affiliateIdEsperado || "",
+          affiliateIdDetectado: afiliacaoShopee.prova?.affiliateIdDetectado || "",
+          tentativaEnvio: false,
+          destinoEncontrado: true,
+          filaRecebeu: true
+        });
+        return { enviado: false, tentouEnvio: false, motivo: "afiliacao_workspace_incompleta", papelLink: afiliacaoShopee.papel || "" };
+      }
+      registrarCoberturaExecutor("afiliacao_workspace_verificada", oferta, clienteId, destino, {
+        decisao: "aprovado",
+        papelLink: afiliacaoShopee.prova?.papel || "produto",
+        urlOriginal: afiliacaoShopee.prova?.urlOriginal || oferta.linkOriginal || oferta.urlOriginal || "",
+        urlAfiliadaWorkspace: afiliacaoShopee.prova?.urlAfiliadaWorkspace || oferta.linkAfiliado || oferta.urlAfiliada || "",
+        appIdEsperado: afiliacaoShopee.prova?.affiliateIdEsperado || "",
+        affiliateIdDetectado: afiliacaoShopee.prova?.affiliateIdDetectado || "",
+        conversaoStatus: afiliacaoShopee.prova?.conversaoStatus || "",
+        tentativaEnvio: false,
+        destinoEncontrado: true,
+        filaRecebeu: true
+      });
+    }
     const fidelidadeTraceIdExecutor = fidelidadeObs.flagAtiva()
       ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta?.metadata, opcoes)
       : "";

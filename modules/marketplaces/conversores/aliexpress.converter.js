@@ -46,7 +46,7 @@ function criarGerarLinkAliExpress({
       const clienteId = contexto.clienteId || "";
 
       if (!appKey || !secret || !trackingId || !urlOriginal) {
-        return urlOriginal;
+        return "";
       }
 
       const params = {
@@ -101,11 +101,11 @@ function criarGerarLinkAliExpress({
         });
       }
 
-      return linkGerado || urlOriginal;
+      return linkGerado || "";
 
     } catch (e) {
       console.log("[ERRO] Erro gerar link curto AliExpress:", e.message);
-      return urlOriginal;
+      return "";
     }
   };
 }

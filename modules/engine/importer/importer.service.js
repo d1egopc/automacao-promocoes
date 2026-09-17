@@ -3145,6 +3145,7 @@ function coletarLinksIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
       origem: origem || item.origem || "integridade_comercial",
       conversaoStatus: normalizarTexto(item.conversaoStatus || (renderizavel ? "convertida" : "falhou")),
       motivoConversao: normalizarTexto(item.motivoConversao || item.conversaoWorkspace?.motivo || ""),
+      afiliacaoWorkspace: item.afiliacaoWorkspace || item.conversaoWorkspace || null,
       motivo: normalizarTexto(item.papelLinkMotivo || item.motivo || item.motivoConversao || item.conversaoWorkspace?.motivo || (renderizavel ? "cta_workspace_convertido" : "preservado_nao_renderizavel")),
       destinoFuncionalOriginal: item.destinoFuncionalOriginal || null,
       destinoFuncionalFinal: item.destinoFuncionalFinal || null,

@@ -2,6 +2,9 @@ const {
   normalizarOfertaManualV2
 } = require("../manual-offers.contract");
 const {
+  criarProvaAfiliacaoWorkspaceAliExpress
+} = require("../../marketplaces/aliexpress/afiliacao-workspace");
+const {
   importarAliExpress: importarAliExpressAtual,
   extrairProductIdAliExpressManual
 } = require("../../../marketplaces/aliexpress/importar");
@@ -410,6 +413,14 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
   const precos = usarDados ? precoManualAliExpress(dados) : precoManualAliExpress({});
   const precoAnterior = usarDados ? precos.precoAnterior : "";
   const urlAfiliada = usarDados ? urlAfiliadaGeradaAliExpress(dados, { provenienciaAfiliada }) : "";
+  const afiliacaoWorkspaceVerificada = criarProvaAfiliacaoWorkspaceAliExpress({
+    clienteId,
+    credenciais,
+    urlOriginal: primeiroTexto(dados.linkOriginal, dados.urlOriginal, urlOriginal),
+    urlAfiliadaWorkspace: urlAfiliada,
+    conversaoStatus: provenienciaAfiliada.deeplinkGerado ? "convertida" : "falhou",
+    motivoConversao: provenienciaAfiliada.deeplinkGerado ? "manual_v2_workspace_api" : "manual_v2_conversao_nao_comprovada"
+  });
   const avisos = avisosAliExpress(dados, {
     semProductId,
     generico,
@@ -422,6 +433,7 @@ async function importarAliExpressManualV2(urlManual = "", opcoes = {}) {
       marketplace: "aliexpress",
       urlOriginal: primeiroTexto(dados.linkOriginal, dados.urlOriginal, urlOriginal),
       urlAfiliada,
+      afiliacaoWorkspaceVerificada,
       titulo: usarDados && !tituloGenericoAliExpress(dados.titulo || dados.nome)
         ? primeiroTexto(dados.titulo, dados.nome)
         : "",

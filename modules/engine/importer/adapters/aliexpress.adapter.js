@@ -5,6 +5,10 @@ const {
   classificarCandidatosLinks,
   resumoLinksClassificados
 } = require("../../link-role.service");
+const {
+  papelExigeAfiliacaoWorkspaceAliExpress,
+  validarProvaAfiliacaoWorkspaceAliExpress
+} = require("../../../marketplaces/aliexpress/afiliacao-workspace");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -580,8 +584,11 @@ function urlLinkClassificado(link = {}) {
   return primeiroValor(link.urlOriginal, link.urlExpandida, link.urlNormalizada, link.url);
 }
 
-function papelAlternativoAliExpress(papel = "") {
-  return ["produto", "link_produto", "link_app", "link_pc", "link_moedas"].includes(texto(papel));
+function provenienciaAfiliacaoWorkspaceAliExpress(produto = {}, clienteId = "", credenciais = {}) {
+  return validarProvaAfiliacaoWorkspaceAliExpress(
+    produto?.metadata?.afiliacaoWorkspace || {},
+    { clienteId, credenciais }
+  );
 }
 
 async function converterLinksAlternativosAliExpress({
@@ -613,14 +620,16 @@ async function converterLinksAlternativosAliExpress({
         urlPrincipal: alvo,
         urlAfiliadaPrincipal: linkAfiliadoPrincipal
       });
+      const proveniencia = provenienciaAfiliacaoWorkspaceAliExpress(produtoPrincipal, clienteId, credenciais);
       return {
-        urlAfiliada: avaliacaoPrincipal.renderizavel ? linkAfiliadoPrincipal : "",
-        renderizavel: avaliacaoPrincipal.renderizavel,
-        motivo: avaliacaoPrincipal.motivo,
+        urlAfiliada: avaliacaoPrincipal.renderizavel && proveniencia.valida ? linkAfiliadoPrincipal : "",
+        renderizavel: avaliacaoPrincipal.renderizavel && proveniencia.valida,
+        motivo: avaliacaoPrincipal.renderizavel && !proveniencia.valida ? "afiliacao_workspace_incompleta" : avaliacaoPrincipal.motivo,
         appValidado: avaliacaoPrincipal.appValidado,
         sourceValuesUsado: primeiroValor(produtoPrincipal?.metadata?.sourceValuesUsado, alvo),
         produtoCanonico: avaliacaoPrincipal.produtoCanonico || "",
-        produtoCanonicoPrincipal: avaliacaoPrincipal.produtoCanonicoPrincipal || ""
+        produtoCanonicoPrincipal: avaliacaoPrincipal.produtoCanonicoPrincipal || "",
+        afiliacaoWorkspace: proveniencia.prova
       };
     }
 
@@ -651,14 +660,16 @@ async function converterLinksAlternativosAliExpress({
         urlPrincipal,
         urlAfiliadaPrincipal: linkAfiliadoPrincipal
       });
+      const proveniencia = provenienciaAfiliacaoWorkspaceAliExpress(produtoConvertido, clienteId, credenciais);
       const resultado = {
-        urlAfiliada: avaliacao.renderizavel ? urlAfiliada : "",
-        renderizavel: avaliacao.renderizavel,
-        motivo: avaliacao.motivo,
+        urlAfiliada: avaliacao.renderizavel && proveniencia.valida ? urlAfiliada : "",
+        renderizavel: avaliacao.renderizavel && proveniencia.valida,
+        motivo: avaliacao.renderizavel && !proveniencia.valida ? "afiliacao_workspace_incompleta" : avaliacao.motivo,
         appValidado: avaliacao.appValidado,
         sourceValuesUsado: primeiroValor(produtoConvertido?.metadata?.sourceValuesUsado, alvo),
         produtoCanonico: avaliacao.produtoCanonico || "",
-        produtoCanonicoPrincipal: avaliacao.produtoCanonicoPrincipal || ""
+        produtoCanonicoPrincipal: avaliacao.produtoCanonicoPrincipal || "",
+        afiliacaoWorkspace: proveniencia.prova
       };
       convertidos.set(chaveCache, resultado);
       return resultado;
@@ -680,7 +691,7 @@ async function converterLinksAlternativosAliExpress({
     const ordemCaptura = Number(link.ordemCaptura || link.ordem || indiceOcorrencia) || indiceOcorrencia;
     const ocorrenciaId = texto(link.ocorrenciaId || link.idOcorrencia || "")
       || `ali:${papelLink || "link"}:${ordemCaptura}`;
-    if (!papelAlternativoAliExpress(papelLink) || !urlOriginal) {
+    if (!papelExigeAfiliacaoWorkspaceAliExpress(papelLink) || !urlOriginal) {
       saida.push({
         ...link,
         ocorrenciaId,
@@ -723,6 +734,10 @@ async function converterLinksAlternativosAliExpress({
         appValidado: conversao.appValidado === true,
         produtoCanonico: conversao.produtoCanonico || "",
         produtoCanonicoPrincipal: conversao.produtoCanonicoPrincipal || "",
+        workspaceId: conversao.afiliacaoWorkspace?.workspaceId || "",
+        appKey: conversao.afiliacaoWorkspace?.appKey || "",
+        trackingIdEnviado: conversao.afiliacaoWorkspace?.trackingIdEnviado || "",
+        origemConversao: conversao.afiliacaoWorkspace?.origemConversao || "",
         aplicouMudancasOperacionais: false
       }
     });
@@ -870,7 +885,10 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   const cupomTipo = primeiroValor(produto.tipoCupom, produto.cupomTipo, cupom ? "texto_radar" : "");
   const beneficioComercial = extrairBeneficioTextoAliExpress(produto, evento);
   const moedasTexto = extrairMoedasTextoAliExpress(textoOriginalEvento(evento));
-  const linkAfiliado = primeiroValor(produto.linkAfiliado, produto.linkFinal, produto.link);
+  const afiliacaoPrincipal = provenienciaAfiliacaoWorkspaceAliExpress(produto, clienteId, credenciais);
+  const linkAfiliado = afiliacaoPrincipal.valida
+    ? primeiroValor(produto.linkAfiliado, produto.linkFinal, produto.link)
+    : "";
   const imagemOficial = imagemAliExpressOficialProduto(produto);
 
   logAliExpressAdapter("[ENGINE-ALIEXPRESS-IMPORTADOR-RETORNO]", {
@@ -916,9 +934,9 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       totalLinksEntrada: linksClassificados.length,
       papeisDetectados,
       statusEtapa: "cta_seguro_indisponivel",
-      motivo: "link_afiliado_vazio"
+      motivo: afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta"
     });
-    return { ok: false, marketplace: "aliexpress", motivo: "link_afiliado_vazio", linkOriginal: urlOriginalEngine };
+    return { ok: false, marketplace: "aliexpress", motivo: afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta", linkOriginal: urlOriginalEngine };
   }
 
   logAliExpressTravessiaV272({
@@ -945,6 +963,21 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     linkAfiliadoPrincipal: linkAfiliado,
     produtoPrincipal: produto
   });
+
+  const pendente = linksClassificadosComConversao.find(item =>
+    ["link_app", "link_pc", "link_moedas", "link_resgate", "link_cupom"].includes(texto(item.papelLink)) &&
+    item.renderizavel !== true &&
+    item.motivoConversao !== "produto_canonico_divergente"
+  );
+  if (pendente) {
+    return {
+      ok: false,
+      marketplace: "aliexpress",
+      motivo: "afiliacao_workspace_incompleta",
+      linkOriginal: urlOriginalEngine,
+      metadata: { papelLink: pendente.papelLink || "", motivoConversao: pendente.motivoConversao || "" }
+    };
+  }
 
   return {
     ok: true,
@@ -991,6 +1024,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados: linksClassificadosComConversao,
+      afiliacaoWorkspace: afiliacaoPrincipal.prova,
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,
       precoRadarUsado: precoOrigem === "texto_radar",
