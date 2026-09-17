@@ -9,7 +9,10 @@ const {
   validarMatchRadarCandidatoMercadoLivre,
   validarProvaIdentidadeMercadoLivre
 } = require("../../../radar/mercadolivre-social-identidade");
-const { buscarImagemOficialMercadoLivrePorMlb } = require("../importer.service");
+const {
+  buscarImagemCanonicaMercadoLivre,
+  buscarImagemOficialMercadoLivrePorMlb
+} = require("../importer.service");
 
 function resumoTemplateInputAuditoria(templateInput = {}) {
   return {
@@ -445,31 +448,109 @@ function slugInformativoProdutoMercadoLivre(slug = "") {
   return tokens.length >= 2;
 }
 
+function extrairMlbTecnicoUrlProdutoMercadoLivre(url = "") {
+  return extrairMlbItemPdpFiltersMercadoLivre(url) || extrairMlbItemUrlDiretaMercadoLivre(url);
+}
+
+function provaTransporteShowProductMercadoLivre(resolucaoProduto = {}) {
+  const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const prova = objetoSeguro(resolucaoRadar.provaTransporteShowProduct);
+  const urlProduto = textoMercadoLivre(prova.linkResolvidoTecnico || prova.urlProduto || "");
+  if (prova.ok !== true || !isUrlProdutoMercadoLivre(urlProduto)) return null;
+
+  return {
+    ...prova,
+    linkResolvidoTecnico: urlProduto,
+    mlbItem: extrairMlbTecnicoUrlProdutoMercadoLivre(urlProduto)
+  };
+}
+
+function imagemCandidataSocialMercadoLivre(provaTransporte = {}, urlOriginalEngine = "") {
+  const imagem = textoMercadoLivre(provaTransporte.imagemCandidataSocial || "");
+  const origem = textoMercadoLivre(provaTransporte.imagemCandidataOrigem || "");
+  const anchor = objetoSeguro(provaTransporte.imagemCandidataAnchor);
+  if (!imagem || origem !== "og:image") return null;
+  if (
+    textoMercadoLivre(anchor.linkOriginalRadar) !== textoMercadoLivre(urlOriginalEngine) ||
+    textoMercadoLivre(anchor.socialResolvido) !== textoMercadoLivre(provaTransporte.socialResolvido)
+  ) {
+    return null;
+  }
+
+  return { imagem, origem, anchor };
+}
+
+async function resolverImagemCandidataSocialMercadoLivre({ produto = {}, resolucaoProduto = {}, urlOriginalEngine = "", deps = {} } = {}) {
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  const candidata = imagemCandidataSocialMercadoLivre(provaTransporte, urlOriginalEngine);
+  if (!candidata) return produto;
+
+  const resolverCanonico = deps.buscarImagemCanonicaMercadoLivre || buscarImagemCanonicaMercadoLivre;
+  const resultado = await resolverCanonico({
+    ...produto,
+    imagem: candidata.imagem,
+    imagemOrigem: candidata.origem,
+    linkOriginal: urlOriginalEngine,
+    linkExpandido: provaTransporte.linkResolvidoTecnico,
+    metadata: {
+      ...objetoSeguro(produto.metadata),
+      imagemCandidataSocial: candidata
+    }
+  });
+  if (!textoMercadoLivre(resultado?.imagem)) return produto;
+
+  return {
+    ...produto,
+    imagem: resultado.imagem,
+    imagemOrigem: resultado.origem || candidata.origem,
+    metadata: {
+      ...objetoSeguro(produto.metadata),
+      imagemCandidataSocial: candidata,
+      imagemOriginalParaAuditoria: {
+        imagem: textoMercadoLivre(produto.imagem),
+        origem: textoMercadoLivre(produto.imagemOrigem)
+      },
+      imagemResolvidaSocialGoldenPath: {
+        imagem: resultado.imagem,
+        origem: resultado.origem || candidata.origem,
+        pictureId: resultado.pictureId || "",
+        dimensoes: resultado.dimensoes || null,
+        variante: resultado.variante || null,
+        motivo: resultado.motivo || "",
+        anchor: candidata.anchor
+      }
+    }
+  };
+}
+
 function urlsDiretasProdutoResolvidoMercadoLivre(resolucaoProduto = {}) {
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   const mlbsResolvidos = new Set([
     resolucaoRadar.urlResolvida,
-    resolucaoRadar.linkResolvido
+    resolucaoRadar.linkResolvido,
+    provaTransporte?.linkResolvidoTecnico
   ]
-    .map(url => extrairMlbItemUrlDiretaMercadoLivre(url))
+    .map(url => extrairMlbTecnicoUrlProdutoMercadoLivre(url))
     .filter(Boolean));
   if (!mlbsResolvidos.size) return [];
 
   const urls = [
     resolucaoRadar.urlResolvida,
     resolucaoRadar.linkResolvido,
+    provaTransporte?.linkResolvidoTecnico,
     resolucaoProduto.urlProduto,
     resolucaoProduto.linkExpandidoEngine
   ]
     .map(url => textoMercadoLivre(url))
     .filter(url => {
-      const mlb = extrairMlbItemUrlDiretaMercadoLivre(url);
+      const mlb = extrairMlbTecnicoUrlProdutoMercadoLivre(url);
       return Boolean(url && mlb && mlbsResolvidos.has(mlb));
     });
 
   const porMlb = new Map();
   for (const url of urls) {
-    const mlb = extrairMlbItemUrlDiretaMercadoLivre(url);
+    const mlb = extrairMlbTecnicoUrlProdutoMercadoLivre(url);
     if (!porMlb.has(mlb)) porMlb.set(mlb, url);
   }
   return [...porMlb.entries()].map(([mlb, url]) => ({ mlb, url }));
@@ -484,6 +565,17 @@ async function resolverIdentidadeTecnicaUrlResolvidaMercadoLivre({
   deps = {}
 } = {}) {
   if (!isMeliLa(urlOriginalEngine)) return null;
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  if (provaTransporte?.mlbItem) {
+    return {
+      ok: true,
+      origem: "social_action_links_show_product",
+      urlProduto: provaTransporte.linkResolvidoTecnico,
+      mlbItem: provaTransporte.mlbItem,
+      provaTransporteShowProduct: provaTransporte
+    };
+  }
+
   if (!textoMercadoLivre(tituloRadar)) return null;
 
   const candidatos = urlsDiretasProdutoResolvidoMercadoLivre(resolucaoProduto);
@@ -655,6 +747,7 @@ async function resolverImagemOficialFallbackMercadoLivre(imagemCapturada = {}, c
 
 function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motivo = "") {
   const resolucaoRadar = objetoSeguro(resolucaoProduto.resolucaoRadar);
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar, {
     aceitarBlocoPrincipal: true,
     aceitarCandidatoRadar: true
@@ -675,6 +768,7 @@ function sanitizarResolucaoFallbackPuroMercadoLivre(resolucaoProduto = {}, motiv
       tipoLinkRadar: resolucaoRadar.tipoLinkRadar || "",
       metodoResolucaoMeli: resolucaoRadar.metodoResolucaoMeli || "",
       ...(provaValida ? { provaIdentidadeMeli: resolucaoRadar.provaIdentidadeMeli } : {}),
+      ...(provaTransporte ? { provaTransporteShowProduct: provaTransporte } : {}),
       ...(urlSocial ? { urlResolvida: urlSocial } : {})
     }
   };
@@ -702,6 +796,9 @@ function urlProdutoTransporteAfiliadoCorrespondeProvaMercadoLivre(url = "", prov
 }
 
 function resolverUrlProdutoProvadaTransporteAfiliadoMercadoLivre(resolucaoRadar = {}, resolucaoProduto = {}) {
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  if (provaTransporte?.linkResolvidoTecnico) return provaTransporte.linkResolvidoTecnico;
+
   const provas = [
     validarProvaSocialMercadoLivre(resolucaoRadar, {
       aceitarBlocoPrincipal: true,
@@ -1379,6 +1476,8 @@ function validarMlbForteConfirmadoMercadoLivre({ urlOriginalEngine = "", resoluc
   }
 
   const resolucaoRadar = resolucaoProduto.resolucaoRadar || {};
+  const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
+  if (provaTransporte?.mlbItem === mlbRevalidado) return true;
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar);
   if (provaValida && [provaValida.mlbProduto, provaValida.mlbItem].filter(Boolean).includes(mlbRevalidado)) {
     return true;
@@ -1409,6 +1508,7 @@ function avaliarIdentidadeNaoConfirmadaMercadoLivre({ urlOriginalEngine = "", re
 
   const provaValida = validarProvaSocialMercadoLivre(resolucaoRadar);
   if (provaValida) return null;
+  if (provaTransporteShowProductMercadoLivre(resolucaoProduto)) return null;
   const parametroEstruturado = validarParametroProdutoEstruturadoMercadoLivre(resolucaoRadar, resolucaoProduto);
   if (parametroEstruturado) return null;
 
@@ -1670,6 +1770,11 @@ function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEsc
     mlbProduto,
     mlbRevalidado
   });
+  const transporteShowProductConfirmado = Boolean(
+    provaTransporteShowProductMercadoLivre(resolucaoProduto)?.linkResolvidoTecnico &&
+    textoMercadoLivre(resolucaoProduto.urlProduto || resolucaoProduto.linkExpandidoEngine || "") ===
+      textoMercadoLivre(provaTransporteShowProductMercadoLivre(resolucaoProduto)?.linkResolvidoTecnico || "")
+  );
 
   if (mlbProduto && mlbRevalidado && mlbProduto !== mlbRevalidado) {
     sinais.push("mlb_importador_diverge_revalidado");
@@ -1708,8 +1813,9 @@ function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEsc
 
   const inconsistente = Boolean(
     sinais.includes("mlb_importador_diverge_revalidado") ||
-    (!mlbForteConfirmado && sinais.includes("medida_distintiva_diverge_titulo_radar")) ||
+    (!transporteShowProductConfirmado && !mlbForteConfirmado && sinais.includes("medida_distintiva_diverge_titulo_radar")) ||
     (
+      !transporteShowProductConfirmado &&
       !mlbForteConfirmado &&
       isMeliLa(urlOriginalEngine) &&
       sinais.includes("preco_importador_diverge_radar") &&
@@ -1732,6 +1838,7 @@ function avaliarIdentidadeCanonicaMercadoLivre({ urlOriginalEngine = "", linkEsc
     mlbRevalidado,
     mlbProduto,
     mlbForteConfirmado,
+    transporteShowProductConfirmado,
     corrigiuUrlExpandidaPrevia: Boolean(mlbExpandidaPrevia && mlbRevalidado && mlbExpandidaPrevia !== mlbRevalidado && mlbProduto === mlbRevalidado),
     tituloRadar,
     tituloImportador,
@@ -1780,7 +1887,8 @@ async function resolverUrlProdutoMercadoLivreEngine(urlOriginalEngine = "", deps
   let resolucao;
   try {
     resolucao = await deps.resolverLinkOriginalRadar(urlOriginalEngine, {
-      tituloRadar: contexto.tituloRadar || ""
+      tituloRadar: contexto.tituloRadar || "",
+      eventoId: contexto.eventoId || ""
     });
   } catch (e) {
     console.log("[ENGINE-ML-URL-PRODUTO-RESOLVIDA]", {
@@ -1854,6 +1962,7 @@ function motivoIdentidadeMeliClonadorNaoComprovada({ evento = {}, job = {}, urlO
   const metodo = textoMercadoLivre(resolucaoRadar.metodoResolucaoMeli || "").toLowerCase();
 
   if (!isSocialMercadoLivre(urlSocial)) return "";
+  if (provaTransporteShowProductMercadoLivre(resolucaoProduto)) return "";
   if (metodo === "html") {
     const validacao = validarProvaIdentidadeMercadoLivre(
       resolucaoRadar.provaIdentidadeMeli,
@@ -2153,13 +2262,19 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     };
   }
 
-  const beneficioExtra = produto.beneficioExtra || produto.beneficioTexto || "";
-  const avisoCupom = produto.avisoCupom || "";
-  const cupomTipo = produto.tipoCupom || produto.cupomTipo || "";
-  const imagensMercadoLivre = metadadosImagemMercadoLivre(produto);
+  const produtoComImagemSocialResolvida = await resolverImagemCandidataSocialMercadoLivre({
+    produto,
+    resolucaoProduto,
+    urlOriginalEngine,
+    deps
+  });
+  const beneficioExtra = produtoComImagemSocialResolvida.beneficioExtra || produtoComImagemSocialResolvida.beneficioTexto || "";
+  const avisoCupom = produtoComImagemSocialResolvida.avisoCupom || "";
+  const cupomTipo = produtoComImagemSocialResolvida.tipoCupom || produtoComImagemSocialResolvida.cupomTipo || "";
+  const imagensMercadoLivre = metadadosImagemMercadoLivre(produtoComImagemSocialResolvida);
   const precoRadarComercial = extrairPrecoRadarMercadoLivre(evento);
   const temPrecoRadarComercial = Number.isFinite(precoRadarComercial) && precoRadarComercial > 0;
-  const precoComercial = temPrecoRadarComercial ? precoRadarComercial : (produto.precoAtual || produto.preco || "");
+  const precoComercial = temPrecoRadarComercial ? precoRadarComercial : (produtoComImagemSocialResolvida.precoAtual || produtoComImagemSocialResolvida.preco || "");
   const linksConvertidosMercadoLivre = await converterOcorrenciasMercadoLivre({
     links,
     evento,
@@ -2175,13 +2290,13 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
   const ofertaAdapter = {
     ok: true,
     marketplace: "mercadolivre",
-    titulo: produto.titulo || produto.nome || "",
+    titulo: produtoComImagemSocialResolvida.titulo || produtoComImagemSocialResolvida.nome || "",
     preco: precoComercial,
-    precoOriginal: produto.precoOriginal || produto.precoAntigo || "",
-    descontoPercentual: produto.descontoPercentual || "",
-    economia: produto.economia || "",
-    imagem: produto.imagem || "",
-    imagemOrigem: produto.imagemOrigem || "",
+    precoOriginal: produtoComImagemSocialResolvida.precoOriginal || produtoComImagemSocialResolvida.precoAntigo || "",
+    descontoPercentual: produtoComImagemSocialResolvida.descontoPercentual || "",
+    economia: produtoComImagemSocialResolvida.economia || "",
+    imagem: produtoComImagemSocialResolvida.imagem || "",
+    imagemOrigem: produtoComImagemSocialResolvida.imagemOrigem || "",
     imagemCandidatos: imagensMercadoLivre.imagemCandidatos,
     imagemCandidatosTipos: imagensMercadoLivre.imagemCandidatosTipos,
     images: imagensMercadoLivre.images,
@@ -2190,33 +2305,33 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
     thumbnail: imagensMercadoLivre.thumbnail,
     thumbnailUrl: imagensMercadoLivre.thumbnailUrl,
     picture_url: imagensMercadoLivre.picture_url,
-    statusHttp: produto.statusHttp ?? null,
-    linkOriginal: produto.linkOriginal || urlOriginalEngine,
-    linkExpandido: produto.urlFinal || linkExpandidoEngine || urlImportador,
+    statusHttp: produtoComImagemSocialResolvida.statusHttp ?? null,
+    linkOriginal: produtoComImagemSocialResolvida.linkOriginal || urlOriginalEngine,
+    linkExpandido: produtoComImagemSocialResolvida.urlFinal || linkExpandidoEngine || urlImportador,
     linkAfiliado,
-    categoria: resolverCategoriaMercadoLivre(produto),
-    cupom: produto.cupom || "",
+    categoria: resolverCategoriaMercadoLivre(produtoComImagemSocialResolvida),
+    cupom: produtoComImagemSocialResolvida.cupom || "",
     cupomTipo,
     tipoCupom: cupomTipo,
     avisoCupom,
     beneficioTexto: beneficioExtra || avisoCupom,
     beneficioExtra,
-    parcelamento: produto.parcelamento || "",
-    freteGratis: produto.freteGratis === true,
-    cashback: produto.cashback || "",
-    descontoPix: produto.descontoPix || "",
-    descontoApp: produto.descontoApp || "",
-    score: produto.score || null
+    parcelamento: produtoComImagemSocialResolvida.parcelamento || "",
+    freteGratis: produtoComImagemSocialResolvida.freteGratis === true,
+    cashback: produtoComImagemSocialResolvida.cashback || "",
+    descontoPix: produtoComImagemSocialResolvida.descontoPix || "",
+    descontoApp: produtoComImagemSocialResolvida.descontoApp || "",
+    score: produtoComImagemSocialResolvida.score || null
   };
 
   const auditoriaV2 = auditarInteligenciaUniversalMlEngine({
     job,
-    produto,
+    produto: produtoComImagemSocialResolvida,
     ofertaAdapter,
     linkAfiliado
   });
 
-  const ofertaEnriquecida = enriquecerOfertaAdapterComV2(ofertaAdapter, auditoriaV2, produto, linkAfiliado);
+  const ofertaEnriquecida = enriquecerOfertaAdapterComV2(ofertaAdapter, auditoriaV2, produtoComImagemSocialResolvida, linkAfiliado);
 
   return {
     ...ofertaEnriquecida,
@@ -2255,20 +2370,32 @@ async function importarMercadoLivreEngine({ job = {}, evento = {}, links = [], d
       eventoId: job.evento_id,
       linkOriginalEngine: urlOriginalEngine,
       linkExpandidoEngine,
-      urlFinalImportador: produto.urlFinal || "",
-      statusHttpImportador: produto.statusHttp ?? null,
-      imagemOrigemImportador: produto.imagemOrigem || "",
+      urlFinalImportador: produtoComImagemSocialResolvida.urlFinal || "",
+      statusHttpImportador: produtoComImagemSocialResolvida.statusHttp ?? null,
+      imagemOrigemImportador: produtoComImagemSocialResolvida.imagemOrigem || "",
       expandiuMeliLa,
       resolucaoRadar: resolucaoProduto.resolucaoRadar || null,
+      transporteTecnicoMl: {
+        linkOriginalRadar: urlOriginalEngine,
+        socialResolvido: resolucaoProduto.resolucaoRadar?.provaTransporteShowProduct?.socialResolvido || "",
+        origemCTA:
+          resolucaoProduto.resolucaoRadar?.provaTransporteShowProduct?.origemCTA ||
+          resolucaoProduto.resolucaoRadar?.provaTransporteShowProduct?.origem ||
+          "",
+        linkResolvidoTecnico: resolucaoProduto.resolucaoRadar?.provaTransporteShowProduct?.linkResolvidoTecnico || "",
+        linkAfiliadoWorkspace: linkAfiliado || "",
+        origemImagemOficial: produtoComImagemSocialResolvida.imagemOrigem || "",
+        anchor: objetoSeguro(produtoComImagemSocialResolvida.metadata).imagemCandidataSocial?.anchor || null
+      },
       identidadeCanonicaMl,
       revalidacaoMeliLa: identidadeCanonicaMl,
-      camposProduto: Object.keys(produto || {}),
+      camposProduto: Object.keys(produtoComImagemSocialResolvida || {}),
       linksClassificados: resumoLinksClassificados(linksConvertidosMercadoLivre, evento, "mercadolivre"),
       linksComerciais: linksConvertidosMercadoLivre,
       produto: {
-        ...produto,
+        ...produtoComImagemSocialResolvida,
         ...imagensMercadoLivre,
-        metadata: produto.metadata || {}
+        metadata: produtoComImagemSocialResolvida.metadata || {}
       }
     }
   };

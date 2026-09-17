@@ -424,7 +424,9 @@ const {
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
 const {
-  extrairProvaIdentidadeMercadoLivreHtml
+  extrairProvaIdentidadeMercadoLivreHtml,
+  extrairTransporteShowProductMercadoLivreHtml,
+  extrairOgImageOficialMercadoLivreHtml
 } = require("./modules/radar/mercadolivre-social-identidade");
 const {
   detectarMarketplaceLink: detectarMarketplaceEngineLink
@@ -18885,6 +18887,53 @@ function extrairProdutoMarketplaceDeHtmlRadar(html = "", marketplace = "", base 
 }
 
 function diagnosticarProdutoMercadoLivreIntermediarioRadar(html = "", base = "", opcoes = {}) {
+  const transporteShowProduct = extrairTransporteShowProductMercadoLivreHtml(html || "", {
+    socialResolvido: opcoes.socialResolvido || base
+  });
+  if (transporteShowProduct.ok) {
+    return {
+      urlProduto: transporteShowProduct.linkResolvidoTecnico,
+      metodo: "social_action_links_show_product",
+      provaIdentidadeMeli: null,
+      provaTransporteShowProduct: transporteShowProduct,
+      motivoProva: "",
+      diagnostico: {
+        tamanhoHtml: Buffer.byteLength(String(html || ""), "utf8"),
+        encontrouProduto: true,
+        provaOk: true,
+        motivoProva: "",
+        transporteShowProduct: {
+          ok: true,
+          actionId: transporteShowProduct.actionId,
+          ctaPrincipalUnico: transporteShowProduct.ctaPrincipalUnico,
+          linkResolvidoTecnico: transporteShowProduct.linkResolvidoTecnico
+        },
+        fallbackSocial: null
+      }
+    };
+  }
+
+  if (opcoes.exigirShowProduct === true) {
+    return {
+      urlProduto: "",
+      metodo: "social_action_links_show_product",
+      provaIdentidadeMeli: null,
+      provaTransporteShowProduct: null,
+      motivoProva: transporteShowProduct.motivo || "show_product_principal_ausente",
+      diagnostico: {
+        tamanhoHtml: Buffer.byteLength(String(html || ""), "utf8"),
+        encontrouProduto: false,
+        provaOk: false,
+        motivoProva: transporteShowProduct.motivo || "show_product_principal_ausente",
+        transporteShowProduct: {
+          ok: false,
+          motivo: transporteShowProduct.motivo || "show_product_principal_ausente"
+        },
+        fallbackSocial: null
+      }
+    };
+  }
+
   const provaProdutoHtml = extrairProvaIdentidadeMercadoLivreHtml(html || "", {
     tituloRadar: opcoes.tituloRadar || ""
   });
@@ -18993,7 +19042,10 @@ async function extrairProdutoMercadoLivreIntermediarioRadar(url = "") {
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
       }
     });
-    const diagnostico = diagnosticarProdutoMercadoLivreIntermediarioRadar(resposta.data || "", url);
+    const diagnostico = diagnosticarProdutoMercadoLivreIntermediarioRadar(resposta.data || "", url, {
+      exigirShowProduct: true,
+      socialResolvido: url
+    });
     const produto = diagnostico.urlProduto || "";
 
     if (produto) {
@@ -19573,6 +19625,7 @@ function logRadarMlSocialResolvido(dados = {}) {
     urlSocial: dados.urlSocial || "",
     encontrouProduto: dados.encontrouProduto === true,
     linkProduto: dados.linkProduto || "",
+    linkResolvidoTecnico: dados.linkResolvidoTecnico || "",
     metodo: dados.metodo || "",
     motivo: dados.motivo || ""
   });
@@ -19811,13 +19864,14 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
       let metodoSocialMeli = "";
       let motivoSocialMeli = "";
       let provaIdentidadeMeli = null;
+      let resolucaoProdutoShowProduct = null;
 
       if (tipoLinkRadarMeli === "shortlink_meli_social") {
         const produtoParametro =
           extrairProdutoDeParametrosIntermediarioRadar(resolvida, "mercadolivre") ||
           extrairProdutoDeParametrosIntermediarioRadar(capturada, "mercadolivre");
 
-        if (produtoParametro) {
+        if (!urlSocialMeli && produtoParametro) {
           linkOriginalLimpo = produtoParametro.url || produtoParametro;
           tipoLinkRadarMeli = "shortlink_meli";
           metodoSocialMeli = "parametro";
@@ -19828,7 +19882,11 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
             const diagnosticoProdutoHtml = diagnosticarProdutoMercadoLivreIntermediarioRadar(
               paginaIntermediaria.html || "",
               paginaIntermediaria.urlFinal || resolvida,
-              { tituloRadar: opcoes.tituloRadar || "" }
+              {
+                tituloRadar: opcoes.tituloRadar || "",
+                exigirShowProduct: true,
+                socialResolvido: resolvida
+              }
             );
             const produtoResolvido = diagnosticoProdutoHtml.urlProduto || "";
             if (produtoResolvido) {
@@ -19837,9 +19895,28 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
               metodoSocialMeli = diagnosticoProdutoHtml.metodo || "fallback_intermediario";
               motivoSocialMeli = "produto_extraido_html_social";
               provaIdentidadeMeli = diagnosticoProdutoHtml.provaIdentidadeMeli || null;
-              motivoSocialMeli = provaIdentidadeMeli
-                ? "produto_extraido_html_social_com_prova"
-                : `produto_extraido_html_social_sem_prova:${diagnosticoProdutoHtml.motivoProva || "prova_ausente"}`;
+              const provaTransporteShowProduct = diagnosticoProdutoHtml.provaTransporteShowProduct || null;
+              motivoSocialMeli = provaTransporteShowProduct
+                ? "produto_extraido_html_social_show_product"
+                : (provaIdentidadeMeli
+                  ? "produto_extraido_html_social_com_prova"
+                  : `produto_extraido_html_social_sem_prova:${diagnosticoProdutoHtml.motivoProva || "prova_ausente"}`);
+              if (provaTransporteShowProduct) {
+                provaIdentidadeMeli = null;
+                const imagemCandidataSocial = extrairOgImageOficialMercadoLivreHtml(paginaIntermediaria.html || "");
+                resolucaoProdutoShowProduct = {
+                  ...provaTransporteShowProduct,
+                  ...(imagemCandidataSocial ? {
+                    imagemCandidataSocial,
+                    imagemCandidataOrigem: "og:image",
+                    imagemCandidataAnchor: {
+                      linkOriginalRadar: capturada,
+                      socialResolvido: resolvida,
+                      eventoId: opcoes.eventoId || ""
+                    }
+                  } : {})
+                };
+              }
               if (!provaIdentidadeMeli && diagnosticoProdutoHtml.metodo === "fallback_intermediario") {
                 logRadarMlSocialDiagnosticoHtml({
                   motivoProva: diagnosticoProdutoHtml.motivoProva || "prova_ausente",
@@ -19868,6 +19945,7 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
           urlSocial: resolvida,
           encontrouProduto: tipoLinkRadarMeli !== "shortlink_meli_social",
           linkProduto: tipoLinkRadarMeli !== "shortlink_meli_social" ? linkOriginalLimpo : "",
+          linkResolvidoTecnico: resolucaoProdutoShowProduct?.linkResolvidoTecnico || "",
           metodo: metodoSocialMeli || "html",
           motivo: motivoSocialMeli || (tipoLinkRadarMeli === "shortlink_meli_social" ? "produto_nao_encontrado_html_social" : "produto_extraido")
         });
@@ -19923,6 +20001,7 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
         tipoLinkRadar: tipoLinkRadarMeli,
         metodoResolucaoMeli: metodoSocialMeli,
         ...(provaIdentidadeMeli ? { provaIdentidadeMeli } : {}),
+        ...(resolucaoProdutoShowProduct ? { provaTransporteShowProduct: resolucaoProdutoShowProduct } : {}),
         statusHttp: resposta.status || ""
       };
     } catch (e) {

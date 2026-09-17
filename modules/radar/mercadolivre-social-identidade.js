@@ -3,6 +3,7 @@
 const ORIGEM_PROVA = "card-featured.polycards[0].metadata";
 const ORIGEM_PROVA_BLOCO_PRINCIPAL = "bloco-principal-social";
 const ORIGEM_PROVA_CANDIDATO_RADAR = "candidato-social-radar";
+const ORIGEM_TRANSPORTE_SHOW_PRODUCT = "social.action_links.show_product";
 const TIPO_PROVA_PDP_FILTERS = "pdp_filters_item_id";
 const TIPO_PROVA_ESTRUTURAL = "card_featured_estrutural";
 const TIPO_PROVA_RADAR_CANDIDATO = "radar_candidato_textual";
@@ -648,6 +649,151 @@ function extrairProvaIdentidadeMercadoLivreHtml(html = "", opcoes = {}) {
   return extrairProvaCandidatoRadarMercadoLivreHtml(fonte, opcoes);
 }
 
+function normalizarUrlTransporteShowProductMercadoLivre(valor = "") {
+  try {
+    const parsed = new URL(normalizarUrlMetadata(valor));
+    const host = parsed.hostname.toLowerCase();
+    const pathUrl = parsed.pathname.toLowerCase();
+    const hostOficial = host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br");
+    const produtoDireto =
+      (host === "produto.mercadolivre.com.br" && /^\/mlb-?\d{6,}/i.test(pathUrl)) ||
+      /\/(?:up|p)\/(?:mlb|mlbu)\d{6,}/i.test(pathUrl);
+
+    if (!hostOficial) return { ok: false, motivo: "show_product_dominio_nao_oficial" };
+    if (pathUrl.startsWith("/social/")) return { ok: false, motivo: "show_product_aponta_social" };
+    if (!produtoDireto) return { ok: false, motivo: "show_product_rota_nao_produto" };
+
+    for (const chave of [...parsed.searchParams.keys()]) {
+      if (/^(?:matt_|reco_|tracking_)/i.test(chave)) parsed.searchParams.delete(chave);
+    }
+
+    // Fragmentos de tracking nao mudam o destino do produto e nao participam da identidade tecnica.
+    parsed.hash = "";
+    return { ok: true, urlProduto: parsed.toString() };
+  } catch {
+    return { ok: false, motivo: "show_product_url_invalida" };
+  }
+}
+
+function textoHtmlCtaMercadoLivre(valor = "") {
+  return String(valor || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function hrefPertenceCardFeaturedMercadoLivre(href = "") {
+  const normalizado = String(href || "")
+    .replace(/&amp;/g, "&")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\u002F/g, "/");
+  try {
+    const parsed = new URL(normalizarUrlMetadata(normalizado));
+    const contexto = decodeURIComponent(`${parsed.search}&${parsed.hash || ""}`);
+    return /(?:^|[?&#])c_id=\/home\/card-featured\/element(?:&|$)/i.test(contexto);
+  } catch {
+    return false;
+  }
+}
+
+function coletarUrlsCtaFeaturedHtmlMercadoLivre(html = "", candidatos = []) {
+  const anchors = /<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
+  for (const match of String(html || "").matchAll(anchors)) {
+    const href = match[2] || "";
+    const texto = textoHtmlCtaMercadoLivre(match[3]);
+    if (texto !== "ir para produto" || !hrefPertenceCardFeaturedMercadoLivre(href)) continue;
+    const validacao = normalizarUrlTransporteShowProductMercadoLivre(href);
+    if (validacao.ok) candidatos.push(validacao.urlProduto);
+  }
+  return candidatos;
+}
+
+function coletarUrlsShowProductCardFeaturedMercadoLivre(valor, candidatos = []) {
+  if (!valor || typeof valor !== "object") return candidatos;
+  if (Array.isArray(valor)) {
+    for (const item of valor) coletarUrlsShowProductCardFeaturedMercadoLivre(item, candidatos);
+    return candidatos;
+  }
+
+  for (const acao of Array.isArray(valor.action_links) ? valor.action_links : []) {
+    if (acao?.id !== "show_product" || acao?.type !== "link") continue;
+    const validacao = normalizarUrlTransporteShowProductMercadoLivre(acao.url);
+    if (validacao.ok) candidatos.push(validacao.urlProduto);
+  }
+
+  for (const item of Object.values(valor)) {
+    coletarUrlsShowProductCardFeaturedMercadoLivre(item, candidatos);
+  }
+  return candidatos;
+}
+
+function extrairTransporteShowProductMercadoLivreHtml(html = "", opcoes = {}) {
+  const fonte = String(html || "")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\"/g, '"')
+    .replace(/&amp;/g, "&");
+  const candidatos = [];
+  const marcadoresCardFeatured = [...fonte.matchAll(/"id"\s*:\s*"card-featured"/g)];
+
+  for (const marcador of marcadoresCardFeatured) {
+    const jsonCard = extrairObjetoJsonContendo(fonte, marcador.index);
+    if (!jsonCard) continue;
+    try {
+      const cardFeatured = JSON.parse(jsonCard);
+      if (cardFeatured?.id !== "card-featured") continue;
+      coletarUrlsShowProductCardFeaturedMercadoLivre(cardFeatured, candidatos);
+    } catch {
+      // A versao serializada nao e uma prova utilizavel sem JSON estrutural.
+    }
+  }
+
+  let origemCta = ORIGEM_TRANSPORTE_SHOW_PRODUCT;
+  if (!candidatos.length) {
+    coletarUrlsCtaFeaturedHtmlMercadoLivre(fonte, candidatos);
+    if (candidatos.length) origemCta = "social_featured_card";
+  }
+
+  const urlsUnicas = [...new Set(candidatos)];
+  if (urlsUnicas.length !== 1) {
+    return {
+      ok: false,
+      motivo: urlsUnicas.length ? "show_product_principal_ambiguo" : "show_product_principal_ausente"
+    };
+  }
+
+  return {
+    ok: true,
+    origem: origemCta,
+    origemCTA: origemCta,
+    socialResolvido: normalizarUrlMetadata(opcoes.socialResolvido || opcoes.base || ""),
+    linkResolvidoTecnico: urlsUnicas[0],
+    urlProduto: urlsUnicas[0],
+    actionId: "show_product",
+    ctaPrincipalUnico: true
+  };
+}
+
+function extrairOgImageOficialMercadoLivreHtml(html = "") {
+  const fonte = String(html || "")
+    .replace(/\\u002F/g, "/")
+    .replace(/\\u0026/g, "&")
+    .replace(/&amp;/g, "&");
+  const match = fonte.match(/<meta\b[^>]+(?:property|name)\s*=\s*(["'])og:image\1[^>]+content\s*=\s*(["'])(.*?)\2[^>]*>/i)
+    || fonte.match(/<meta\b[^>]+content\s*=\s*(["'])(.*?)\1[^>]+(?:property|name)\s*=\s*(["'])og:image\3[^>]*>/i);
+  const url = String(match?.[3] || match?.[2] || "").trim();
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && /(^|\.)mlstatic\.com$/i.test(parsed.hostname) ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 module.exports = {
   ORIGEM_PROVA,
   ORIGEM_PROVA_BLOCO_PRINCIPAL,
@@ -656,6 +802,9 @@ module.exports = {
   TIPO_PROVA_PDP_FILTERS,
   TIPO_PROVA_RADAR_CANDIDATO,
   extrairProvaIdentidadeMercadoLivreHtml,
+  extrairTransporteShowProductMercadoLivreHtml,
+  extrairOgImageOficialMercadoLivreHtml,
+  ORIGEM_TRANSPORTE_SHOW_PRODUCT,
   normalizarMlbExato,
   validarMatchRadarCandidatoMercadoLivre,
   validarProvaIdentidadeMercadoLivre
