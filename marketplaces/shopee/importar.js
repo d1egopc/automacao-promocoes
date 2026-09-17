@@ -15,11 +15,6 @@ function normalizarPrecoApiShopee(valor) {
   if (valor === null || valor === undefined || String(valor).trim() === "") return null;
 
   const bruto = String(valor).replace(/R\$/gi, "").replace(/\s+/g, "").trim();
-  if (/^\d+$/.test(bruto)) {
-    const centavos = Number(bruto);
-    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
-  }
-
   let normalizado = bruto.replace(/[^\d.,]/g, "");
   if (!normalizado) return null;
 
@@ -33,8 +28,25 @@ function normalizarPrecoApiShopee(valor) {
   return Number.isFinite(numero) && numero > 0 ? numero : null;
 }
 
+function normalizarPrecoPixCentavosShopee(valor) {
+  if (valor === null || valor === undefined || String(valor).trim() === "") return null;
+
+  const bruto = String(valor).replace(/R\$/gi, "").replace(/\s+/g, "").trim();
+  if (/^\d+$/.test(bruto)) {
+    const centavos = Number(bruto);
+    return Number.isFinite(centavos) && centavos > 0 ? centavos / 100 : null;
+  }
+
+  return normalizarPrecoApiShopee(bruto);
+}
+
 function formatarPrecoApiShopee(valor) {
   const numero = normalizarPrecoApiShopee(valor);
+  return numero === null ? "" : numero.toFixed(2).replace(".", ",");
+}
+
+function formatarPrecoPixCentavosShopee(valor) {
+  const numero = normalizarPrecoPixCentavosShopee(valor);
   return numero === null ? "" : numero.toFixed(2).replace(".", ",");
 }
 
@@ -70,7 +82,7 @@ function analisarFaixaPrecoShopee(precoMin = "", precoMax = "") {
 
 function resolverPrecoPixComprovadoShopee(precoNormal = "", precoPix = "") {
   const precoNormalNumero = numeroPrecoFormatadoShopee(precoNormal);
-  const precoPixFormatado = formatarPrecoApiShopee(precoPix) || "";
+  const precoPixFormatado = formatarPrecoPixCentavosShopee(precoPix) || "";
   const precoPixNumero = numeroPrecoFormatadoShopee(precoPixFormatado);
 
   if (precoNormalNumero === null || precoPixNumero === null || precoPixNumero >= precoNormalNumero) {
@@ -434,9 +446,8 @@ return async function importarShopee(url, config) {
   function motivoNormalizacaoPrecoApiShopee(valor = "") {
     const bruto = String(valor ?? "").trim();
     if (!bruto) return "api_sem_preco_usou_fallback_html";
-    if (/^\d+$/.test(bruto)) return "api_inteiro_em_centavos_dividido_por_100";
-    if (/^\d+[.,]0+$/.test(bruto)) return "api_decimal_inteiro_em_centavos_dividido_por_100";
-    if (/^\d+[.,]\d+$/.test(bruto)) return "api_decimal_preservado_como_reais";
+    if (/^\d+$/.test(bruto)) return "api_product_offer_v2_inteiro_em_reais";
+    if (/^\d+[.,]\d+$/.test(bruto)) return "api_product_offer_v2_decimal_em_reais";
     return "api_preco_invalido";
   }
 
@@ -990,9 +1001,9 @@ console.log("[SHOPEE-IMAGEM-ORIGEM]", JSON.stringify({
    };
  }
 
- const precoApiBruto = produto?.priceMin || "";
- const precoHtmlFallbackBruto = dadosHtmlApi.preco || "";
- const precoMin = formatarPrecoApiShopee(precoApiBruto) || normalizarPrecoWebShopee(precoHtmlFallbackBruto);
+  const precoApiBruto = produto?.priceMin || "";
+  const precoHtmlFallbackBruto = dadosHtmlApi.preco || "";
+  const precoMin = formatarPrecoApiShopee(precoApiBruto) || normalizarPrecoWebShopee(precoHtmlFallbackBruto);
 
 console.log("[SHOPEE] SHOPEE PRODUTO API FINAL:", JSON.stringify(produto, null, 2));
 
@@ -1007,40 +1018,27 @@ const maxNumero = Number(String(precoMax).replace(",", "."));
 const temMin = Number.isFinite(minNumero) && minNumero > 0;
 const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
 
-const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
-let precoOrigemFinal = precoApiBruto ? "api_productOfferV2.priceMin" : "html_fallback";
+  const variacaoPreco = diagnosticarVariacaoPrecoShopee(precoMin, precoMax);
+  let precoOrigemFinal = precoApiBruto ? "api_productOfferV2.priceMin" : "html_fallback";
+  const precoRadarTexto = extrairPrecoTextoRadarShopee();
+  const precoRadar = normalizarPrecoWebShopee(precoRadarTexto);
 
-if (variacaoPreco.precoAmbiguo) {
-  if (!dadosHtmlApi.preco) {
-    try {
-      dadosHtmlApi = await obterDadosHtmlFallbackShopee();
-    } catch (e) {
-      console.log("[SHOPEE] FALLBACK HTML PRECO AMBIGUO FALHOU:", e.message);
-    }
-  }
-
-  const precoHtmlEstruturado = normalizarPrecoWebShopee(dadosHtmlApi.preco || "");
-  const precoTextoRadar = normalizarPrecoWebShopee(extrairPrecoTextoRadarShopee());
-
-  if (precoHtmlEstruturado) {
-    precoAtual = precoHtmlEstruturado;
-    precoOrigemFinal = "html_jsonld_estruturado";
-  } else if (precoTextoRadar) {
-    precoAtual = precoTextoRadar;
+  if (precoRadar) {
+    precoAtual = precoRadar;
     precoOrigemFinal = "texto_radar_preco_unico_claro";
   } else {
     return {
       ok: false,
       marketplace: "shopee",
-      motivo: "shopee_preco_variacao_ambiguo",
+      motivo: "shopee_preco_indisponivel",
       linkOriginal: urlOriginalShopee,
       linkExpandido: url,
       titulo: tituloFinalApi,
       precoAtual: "",
-      precoMin: variacaoPreco.precoMin,
-      precoMax: variacaoPreco.precoMax,
-      precoOrigem: "api_productOfferV2.priceMin_priceMax",
-      precoAmbiguo: true,
+      precoMin,
+      precoMax,
+      precoOrigem: precoApiBruto ? "api_productOfferV2.priceMin_priceMax_tecnico" : "html_fallback_tecnico",
+      precoAmbiguo: variacaoPreco.precoAmbiguo,
       faixaPreco: variacaoPreco.faixaPreco,
       variacaoComprovada: variacaoPreco.variacaoComprovada,
       imagem: produto?.imageUrl || dadosHtmlApi.imagem || "",
@@ -1050,49 +1048,22 @@ if (variacaoPreco.precoAmbiguo) {
         precoApi: precoApiBruto,
         precoBruto: precoApiBruto || precoHtmlFallbackBruto,
         precoNormalizado: "",
-        origemPreco: "api_productOfferV2.priceMin_priceMax",
-        precoOrigem: "api_productOfferV2.priceMin_priceMax",
-        motivoEscolhaPreco: "priceMin_priceMax_variacao_ambigua_sem_fonte_alternativa",
-        campoPrecoUsado: "productOfferV2.priceMin/productOfferV2.priceMax",
+        origemPreco: precoApiBruto ? "api_productOfferV2.priceMin_priceMax_tecnico" : "html_fallback_tecnico",
+        precoOrigem: precoApiBruto ? "api_productOfferV2.priceMin_priceMax_tecnico" : "html_fallback_tecnico",
+        motivoEscolhaPreco: "api_sem_preco_radar_nao_publicavel",
+        campoPrecoUsado: precoApiBruto ? "productOfferV2.priceMin/productOfferV2.priceMax" : "html",
         tipoCampoPrecoUsado: tipoPrecoShopee(precoApiBruto || precoHtmlFallbackBruto),
         precoAntesNormalizacao: JSON.stringify({ priceMin: produto?.priceMin || "", priceMax: produto?.priceMax || "" }),
         precoDepoisNormalizacao: "",
-        normalizadorAplicado: "analisarFaixaPrecoShopee",
+        normalizadorAplicado: precoApiBruto ? "normalizarPrecoApiShopee" : "normalizarPrecoWebShopee",
         precoMin: variacaoPreco.precoMin,
         precoMax: variacaoPreco.precoMax,
-        precoAmbiguo: true,
+        precoAmbiguo: variacaoPreco.precoAmbiguo,
         faixaPreco: variacaoPreco.faixaPreco,
         variacaoComprovada: variacaoPreco.variacaoComprovada
       })
     };
   }
-} else if (temMin && temMax && minNumero !== maxNumero) {
-  precoAtual = precoMin;
-
-  // Produto com variação: não inventa preço antigo automático
-  precoAntigo = "";
-} else {
-  precoAtual = precoMin || precoMax || "";
-
-  // Shopee não retorna preço antigo real nesse endpoint.
-  // Não calcular "De" automaticamente para evitar desconto inflado.
-  precoAntigo = "";
-}
-
-if (!precoAtual) {
-  return {
-    ok: false,
-    marketplace: "shopee",
-    motivo: "shopee_preco_indisponivel",
-    linkOriginal: urlOriginalShopee,
-    linkExpandido: url,
-    titulo: tituloFinalApi,
-    precoAtual: "",
-    imagem: produto?.imageUrl || dadosHtmlApi.imagem || "",
-    shopId: ids.shopId || produto?.shopId || "",
-    itemId: ids.itemId || produto?.itemId || ""
-  };
-}
 
 const pixComprovado = resolverPrecoPixComprovadoShopee(
   precoAtual,
@@ -1105,11 +1076,7 @@ const precoAuditoriaApi = criarPrecoAuditoriaShopee({
   precoNormalizado: precoAtual,
   origemPreco: precoOrigemFinal,
   precoOrigem: precoOrigemFinal,
-  motivoEscolhaPreco: variacaoPreco.precoAmbiguo
-    ? `priceMin_priceMax_ambiguo_usou_${precoOrigemFinal}`
-    : precoApiBruto
-    ? motivoNormalizacaoPrecoApiShopee(precoApiBruto)
-    : "api_sem_preco_usou_fallback_html",
+  motivoEscolhaPreco: "preco_radar_explicito_confiavel",
   campoPrecoUsado: precoOrigemFinal,
   tipoCampoPrecoUsado: tipoPrecoShopee(precoApiBruto || precoHtmlFallbackBruto),
   precoAntesNormalizacao: precoApiBruto || precoHtmlFallbackBruto,
@@ -1125,7 +1092,7 @@ const precoAuditoriaApi = criarPrecoAuditoriaShopee({
 
 logPrecoOrigemShopee({
   titulo: tituloFinalApi,
-  origemPreco: produto ? "api_productOfferV2_priceMin_priceMax" : "api_sem_produto",
+  origemPreco: precoOrigemFinal,
   valorBruto: produto ? JSON.stringify({ priceMin: produto?.priceMin || "", priceMax: produto?.priceMax || "" }) : "",
   valorNormalizado: precoAtual
 });

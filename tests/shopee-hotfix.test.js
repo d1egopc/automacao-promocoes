@@ -3,8 +3,10 @@ const assert = require("assert");
 const {
   analisarFaixaPrecoShopee,
   criarImportarShopee,
+  normalizarPrecoApiShopee,
   resolverPrecoPixComprovadoShopee
 } = require("../marketplaces/shopee/importar");
+const { normalizarPrecoShopee: normalizarPrecoFarejadorShopee } = require("../marketplaces/shopee/farejador");
 
 const originalFetch = global.fetch;
 
@@ -31,7 +33,7 @@ function produtoShopee(campos = {}) {
   };
 }
 
-async function importarComProduto(produto) {
+async function importarComProduto(produto, textoOriginal = "") {
   global.fetch = async (url) => {
     if (!String(url).includes("open-api.affiliate.shopee.com.br")) {
       return {
@@ -54,31 +56,23 @@ async function importarComProduto(produto) {
   const importarShopee = criarImportarShopee(depsImportador());
   return importarShopee("https://shopee.com.br/product/123/456", {
     credenciais: { appId: "app", secret: "secret" },
-    textoOriginal: ""
+    textoOriginal
   });
 }
 
 async function assertPrecoAmbiguo(priceMin, priceMax) {
   const resultado = await importarComProduto(produtoShopee({ priceMin, priceMax }));
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "shopee_preco_variacao_ambiguo");
+  assert.strictEqual(resultado.motivo, "shopee_preco_indisponivel");
   assert.strictEqual(resultado.precoAtual, "");
   assert.strictEqual(resultado.precoAmbiguo, true);
   assert.ok(resultado.faixaPreco);
 }
 
-async function assertFaixaAceita(priceMin, priceMax, precoAtual, faixaPreco) {
-  const analise = analisarFaixaPrecoShopee(precoAtual, String(Number(priceMax) / 100).replace(".", ","));
+function assertFaixaTecnica(priceMin, priceMax, precoAtual) {
+  const analise = analisarFaixaPrecoShopee(precoAtual, String(Number(priceMax)).replace(".", ","));
   assert.strictEqual(analise.variacaoComprovada, true);
   assert.strictEqual(analise.precoAmbiguo, false);
-
-  const resultado = await importarComProduto(produtoShopee({ priceMin, priceMax }));
-  assert.notStrictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.precoAtual, precoAtual);
-  assert.strictEqual(resultado.precoAmbiguo, false);
-  assert.strictEqual(resultado.variacaoComprovada, true);
-  assert.strictEqual(resultado.faixaPreco, faixaPreco);
-  assert.strictEqual(resultado.precoOrigem, "api_productOfferV2.priceMin");
 }
 
 (async () => {
@@ -92,32 +86,60 @@ async function assertFaixaAceita(priceMin, priceMax, precoAtual, faixaPreco) {
   assert.strictEqual(analisarFaixaPrecoShopee("1099,00", "1299,00").precoAmbiguo, false);
   assert.strictEqual(analisarFaixaPrecoShopee("3999,00", "6999,00").precoAmbiguo, false);
 
-  await assertPrecoAmbiguo("950", "89900");
-  await assertPrecoAmbiguo("440", "32000");
-  await assertPrecoAmbiguo("549", "69900");
+  await assertPrecoAmbiguo("9.50", "899.00");
+  await assertPrecoAmbiguo("4.40", "320.00");
+  await assertPrecoAmbiguo("5.49", "699.00");
 
-  const barato = await importarComProduto(produtoShopee({ priceMin: "3998", priceMax: "3998" }));
-  assert.strictEqual(barato.precoAtual, "39,98");
+  assert.strictEqual(normalizarPrecoApiShopee("3338"), 3338);
+  assert.strictEqual(normalizarPrecoApiShopee("3070.96"), 3070.96);
+  assert.strictEqual(normalizarPrecoApiShopee("2978"), 2978);
+  assert.strictEqual(normalizarPrecoFarejadorShopee("3338"), "3338,00");
+
+  const barato = await importarComProduto(produtoShopee({ priceMin: "39.98", priceMax: "39.98" }));
+  assert.strictEqual(barato.ok, false);
+  assert.strictEqual(barato.precoAtual, "");
   assert.strictEqual(barato.precoAmbiguo, false);
+  assert.strictEqual(barato.precoMin, "39,98");
+  assert.strictEqual(barato.precoOrigem, "api_productOfferV2.priceMin_priceMax_tecnico");
 
-  await assertFaixaAceita("3998", "4498", "39,98", "R$ 39,98 a R$ 44,98");
-  await assertFaixaAceita("18488", "19990", "184,88", "R$ 184,88 a R$ 199,90");
-  await assertFaixaAceita("23460", "27599", "234,60", "R$ 234,60 a R$ 275,99");
-  await assertFaixaAceita("109900", "129900", "1099,00", "R$ 1099,00 a R$ 1299,00");
-  await assertFaixaAceita("399900", "699900", "3999,00", "R$ 3999,00 a R$ 6999,00");
+  assertFaixaTecnica("39.98", "44.98", "39,98");
+  assertFaixaTecnica("184.88", "199.90", "184,88");
+  assertFaixaTecnica("234.60", "275.99", "234,60");
+  assertFaixaTecnica("1099", "1299", "1099,00");
+  assertFaixaTecnica("3999", "6999", "3999,00");
+
+  const lavaESeca = await importarComProduto(produtoShopee({ priceMin: "3338", priceMax: "3338" }));
+  assert.strictEqual(lavaESeca.ok, false);
+  assert.strictEqual(lavaESeca.motivo, "shopee_preco_indisponivel");
+  assert.strictEqual(lavaESeca.precoAtual, "");
+  assert.strictEqual(lavaESeca.precoMin, "3338,00");
+  assert.strictEqual(lavaESeca.precoAuditoria.precoNormalizado, "");
+
+  const radarSoberano = await importarComProduto(
+    produtoShopee({ priceMin: "3338", priceMax: "3338" }),
+    "Oferta Radar\nPor: R$ 2.978,00"
+  );
+  assert.strictEqual(radarSoberano.precoAtual, "2978,00");
+  assert.strictEqual(radarSoberano.precoOrigem, "texto_radar_preco_unico_claro");
 
   const pix = resolverPrecoPixComprovadoShopee("184,88", "17500");
   assert.strictEqual(pix.precoPix, "175,00");
   assert.strictEqual(pix.valorEfetivo, 175);
   assert.strictEqual(pix.valorEfetivoOrigem, "pix");
 
-  const drone = await importarComProduto(produtoShopee({ priceMin: "18488", priceMax: "18488", precoPix: "17500" }));
+  const drone = await importarComProduto(
+    produtoShopee({ priceMin: "184.88", priceMax: "184.88", precoPix: "17500" }),
+    "Oferta Radar\nPor: R$ 184,88"
+  );
   assert.strictEqual(drone.precoAtual, "184,88");
   assert.strictEqual(drone.precoPix, "175,00");
   assert.strictEqual(drone.valorEfetivo, 175);
   assert.strictEqual(drone.valorEfetivoOrigem, "pix");
 
-  const semPix = await importarComProduto(produtoShopee({ priceMin: "18488", priceMax: "18488" }));
+  const semPix = await importarComProduto(
+    produtoShopee({ priceMin: "184.88", priceMax: "184.88" }),
+    "Oferta Radar\nPor: R$ 184,88"
+  );
   assert.strictEqual(semPix.precoPix, "");
   assert.strictEqual(semPix.valorEfetivo, null);
   assert.strictEqual(semPix.valorEfetivoOrigem, "");

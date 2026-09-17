@@ -5,38 +5,11 @@ const {
   detectarAvisoCupomShopee,
   escolherCupomParaOfertaShopee
 } = require("./cupons");
+const { normalizarPrecoApiShopee } = require("./importar");
 
 function normalizarPrecoShopee(valor) {
-  if (valor === null || valor === undefined || valor === "") return "";
-
-  const texto = String(valor).trim();
-
-  if (/^\d+$/.test(texto)) {
-    const centavos = Number(texto);
-    return Number.isFinite(centavos) && centavos > 0
-      ? (centavos / 100).toFixed(2).replace(".", ",")
-      : "";
-  }
-
-  let normalizado = texto
-    .replace("R$", "")
-    .replace(/\s+/g, "")
-    .replace(/[^\d.,]/g, "")
-    .trim();
-
-  if (normalizado.includes(",") && normalizado.includes(".")) {
-    normalizado = normalizado.replace(/\./g, "").replace(",", ".");
-  } else if (normalizado.includes(",")) {
-    normalizado = normalizado.replace(",", ".");
-  }
-
-  const numero = Number(normalizado);
-  return Number.isFinite(numero) && numero > 0
-    ? numero.toFixed(2).replace(".", ",")
-    : texto
-      .replace("R$", "")
-      .replace(/\s+/g, "")
-      .trim();
+  const numero = normalizarPrecoApiShopee(valor);
+  return numero === null ? "" : numero.toFixed(2).replace(".", ",");
 }
 
 function numeroPrecoShopee(valor) {
@@ -531,5 +504,6 @@ async function farejarShopee(clienteId = "admin", deps = {}) {
 }
 
 module.exports = {
-  farejarShopee
+  farejarShopee,
+  normalizarPrecoShopee
 };
