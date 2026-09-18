@@ -417,6 +417,7 @@ function criarRotasManualV2(deps = {}) {
         gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
         getIntegracaoCliente: deps.getIntegracaoCliente,
         gerarShortLinkShopee: deps.gerarShortLinkShopee,
+        expandirShortlinkShopee: deps.expandirShortlinkShopee,
         fetch: deps.fetch,
         now: typeof deps.now === "function" ? deps.now() : undefined
       });

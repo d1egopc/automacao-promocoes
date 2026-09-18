@@ -9,6 +9,9 @@ const {
   criarProvaAfiliacaoWorkspaceShopee
 } = require("../marketplaces/shopee/afiliacao-workspace");
 const {
+  criarProvaAfiliacaoWorkspaceAliExpress
+} = require("../marketplaces/aliexpress/afiliacao-workspace");
+const {
   extrairIdsShopee,
   urlShopeeValida
 } = require("../../marketplaces/shopee/normalizacao");
@@ -297,6 +300,41 @@ function respostaPreview(ofertaNormalizada = {}) {
   return oferta;
 }
 
+async function expandirShortlinkShopeeCapture(url = "", deps = {}) {
+  const shortLink = texto(url);
+  if (!shortLink) return "";
+
+  if (typeof deps.expandirShortlinkShopee === "function") {
+    const resultado = await deps.expandirShortlinkShopee(shortLink);
+    return texto(typeof resultado === "string"
+      ? resultado
+      : resultado?.urlExpandida || resultado?.urlFinal || resultado?.url);
+  }
+
+  const fetchImpl = deps.fetch || global.fetch;
+  if (typeof fetchImpl !== "function") return "";
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+  try {
+    const response = await fetchImpl(shortLink, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller?.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+      }
+    });
+    return texto(response?.url);
+  } catch (_) {
+    return "";
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function gerarLinkAfiliadoCapture(clienteId, marketplace, urlValidada, baseConversao, deps = {}) {
   if (marketplace === "shopee") {
     const getIntegracaoCliente = deps.getIntegracaoCliente;
@@ -423,20 +461,46 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
   }
 
+  let afiliacaoWorkspaceVerificada = null;
+  if (marketplace === "shopee") {
+    const integracao = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente(clienteId, "shopee") || {}
+      : {};
+    const credenciais = integracao.credenciais || integracao || {};
+    const urlFinalExpandida = await expandirShortlinkShopeeCapture(urlAfiliada, deps);
+    afiliacaoWorkspaceVerificada = criarProvaAfiliacaoWorkspaceShopee({
+      clienteId,
+      credenciais,
+      urlOriginal: urlValidada.url,
+      urlAfiliadaWorkspace: urlAfiliada,
+      urlFinalExpandida,
+      papel: "produto",
+      motivoConversao: "capture_shopee_workspace_api"
+    });
+    if (afiliacaoWorkspaceVerificada.conversaoStatus !== "convertida") {
+      throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
+    }
+  } else if (marketplace === "aliexpress") {
+    const integracao = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente(clienteId, "aliexpress") || {}
+      : {};
+    const credenciais = integracao.credenciais || integracao || {};
+    afiliacaoWorkspaceVerificada = criarProvaAfiliacaoWorkspaceAliExpress({
+      clienteId,
+      credenciais,
+      urlOriginal: urlValidada.url,
+      urlAfiliadaWorkspace: urlAfiliada,
+      papel: "produto",
+      conversaoStatus: urlAfiliada ? "convertida" : "falhou",
+      motivoConversao: "capture_aliexpress_workspace_api"
+    });
+  }
+
   const ofertaNormalizada = normalizarOfertaManualV2({
     ...baseConversao,
     precoAtual: faixaPreco ? "" : precoAtualNumero,
     urlAfiliada,
-    afiliacaoWorkspaceVerificada: marketplace === "shopee"
-      ? criarProvaAfiliacaoWorkspaceShopee({
-        clienteId,
-        credenciais: (typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(clienteId, "shopee") : {})?.credenciais || {},
-        urlOriginal: urlValidada.url,
-        urlAfiliadaWorkspace: urlAfiliada,
-        papel: "produto",
-        motivoConversao: "capture_shopee_workspace_api"
-      })
-      : null,
+    afiliacaoWorkspaceVerificada,
     fonteImportacao: {
       marketplaceDetectado: marketplace,
       adapter: "optimus_capture_v1",

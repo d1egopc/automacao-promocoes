@@ -10,6 +10,14 @@ const {
   getClienteJsonPath
 } = require("../utils/storage");
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
+const {
+  assinaturaProvaShopeeValida,
+  validarOfertaAfiliacaoWorkspaceShopee
+} = require("../modules/marketplaces/shopee/afiliacao-workspace");
+const {
+  assinaturaProvaAliExpressValida,
+  validarOfertaAfiliacaoWorkspaceAliExpress
+} = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
 
 function criarLogger() {
   const eventos = [];
@@ -50,7 +58,7 @@ function criarApp(opcoes = {}) {
     }),
     getIntegracaoCliente: opcoes.getIntegracaoCliente || ((clienteId, marketplace) => {
       chamadas.push({ tipo: "integracao", clienteId, marketplace });
-      return { credenciais: { appId: "app_teste", secret: "secret_teste" } };
+      return { credenciais: { appId: "18362140789", secret: "secret_teste" } };
     }),
     gerarShortLinkShopee: opcoes.gerarShortLinkShopee || (async (originUrl, integracao) => {
       chamadas.push({
@@ -61,6 +69,8 @@ function criarApp(opcoes = {}) {
       });
       return { ok: true, shortLink: "https://s.shopee.com.br/captureOk" };
     }),
+    expandirShortlinkShopee: opcoes.expandirShortlinkShopee || (async () =>
+      "https://shopee.com.br/product/123456/987654?mmp_pid=an_18362140789"),
     logger,
     storageOptions: {
       now: () => "2026-09-04T12:00:00.000Z",
@@ -326,6 +336,53 @@ function arquivoOfertas(clienteId) {
       assert.strictEqual(resposta.body.oferta.clienteId, "cliente_shopee");
       assert.strictEqual(resposta.body.oferta.marketplace, "shopee");
       assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://s.shopee.com.br/captureOk");
+      assert.strictEqual(resposta.body.oferta.linkApp, "");
+      assert.strictEqual(resposta.body.oferta.linkPC, "");
+      assert.strictEqual(resposta.body.oferta.linkMoedas, "");
+      assert.strictEqual(resposta.body.oferta.linkResgate, "");
+      const prova = resposta.body.oferta.afiliacaoWorkspaceVerificada;
+      assert.strictEqual(prova.workspaceId, "cliente_shopee");
+      assert.strictEqual(prova.appId, "18362140789");
+      assert.strictEqual(prova.affiliateIdEsperado, "an_18362140789");
+      assert.strictEqual(prova.affiliateIdDetectado, "an_18362140789");
+      assert.strictEqual(prova.urlAfiliadaWorkspace, resposta.body.oferta.urlAfiliada);
+      assert.strictEqual(prova.urlFinalExpandida, "https://shopee.com.br/product/123456/987654?mmp_pid=an_18362140789");
+      assert.strictEqual(prova.origemConversao, "workspace_api");
+      assert.strictEqual(prova.conversaoStatus, "convertida");
+      assert.ok(prova.assinatura);
+      const credenciaisShopee = { appId: "18362140789", secret: "secret_teste" };
+      assert.strictEqual(assinaturaProvaShopeeValida(prova, credenciaisShopee), true);
+
+      const save = await request(server, "POST", "/manual-v2/ofertas", "cliente_shopee", {
+        oferta: resposta.body.oferta
+      });
+      assert.strictEqual(save.status, 201);
+      const recarregada = JSON.parse(fs.readFileSync(arquivoOfertas("cliente_shopee"), "utf8"))
+        .find((oferta) => oferta.id === save.body.oferta.id);
+      assert.deepStrictEqual(recarregada.afiliacaoWorkspaceVerificada, prova);
+      assert.strictEqual(validarOfertaAfiliacaoWorkspaceShopee(recarregada, {
+        clienteId: "cliente_shopee",
+        credenciais: credenciaisShopee,
+        exigirAssinatura: true
+      }).ok, true);
+
+      for (const adulteracao of [
+        { assinatura: "" },
+        { urlAfiliadaWorkspace: "https://s.shopee.com.br/adulterada" },
+        { appId: "99999999999" },
+        { workspaceId: "outro_workspace" },
+        { affiliateIdDetectado: "an_99999999999" }
+      ]) {
+        const ofertaAdulterada = {
+          ...recarregada,
+          afiliacaoWorkspaceVerificada: { ...prova, ...adulteracao }
+        };
+        assert.strictEqual(validarOfertaAfiliacaoWorkspaceShopee(ofertaAdulterada, {
+          clienteId: "cliente_shopee",
+          credenciais: credenciaisShopee,
+          exigirAssinatura: true
+        }).ok, false);
+      }
       const chamadasShopee = chamadas.slice(antes);
       assert.ok(chamadasShopee.some(chamada => chamada.tipo === "integracao" && chamada.clienteId === "cliente_shopee" && chamada.marketplace === "shopee"));
       assert.ok(chamadasShopee.some(chamada => chamada.tipo === "shortlink_shopee" && chamada.originUrl === "https://shopee.com.br/product/123456/987654"));
@@ -472,9 +529,33 @@ function arquivoOfertas(clienteId) {
     }
 
     {
+      const { app: appShopeeOwnershipEstrangeiro } = criarApp({
+        expandirShortlinkShopee: async () =>
+          "https://shopee.com.br/product/123456/987654?mmp_pid=an_99999999999"
+      });
+      const serverShopeeOwnershipEstrangeiro = await ouvir(appShopeeOwnershipEstrangeiro);
+      try {
+        const resposta = await request(serverShopeeOwnershipEstrangeiro, "POST", "/manual-v2/capture/ofertas", "cliente_shopee", payloadShopeeValido());
+        assert.strictEqual(resposta.status, 502);
+        assert.strictEqual(resposta.body.motivo, "conversao_afiliada_indisponivel");
+      } finally {
+        await new Promise(resolve => serverShopeeOwnershipEstrangeiro.close(resolve));
+      }
+    }
+
+    {
       const chamadasAli = [];
+      const credenciaisAli = {
+        appKey: "app_workspace_ali",
+        trackingId: "tracking_workspace_ali",
+        secret: "secret_workspace_ali"
+      };
       const { app: appAli } = criarApp({
         chamadas: chamadasAli,
+        getIntegracaoCliente: (clienteId, marketplace) => {
+          chamadasAli.push({ tipo: "integracao", clienteId, marketplace });
+          return { credenciais: credenciaisAli };
+        },
         gerarLinkAfiliadoCliente: async (clienteId, marketplace, linkOriginal, ofertaBase) => {
           chamadasAli.push({ tipo: "generic", clienteId, marketplace, linkOriginal, ofertaBase });
           return "https://s.click.aliexpress.com/e/_captureAli";
@@ -494,13 +575,55 @@ function arquivoOfertas(clienteId) {
         assert.strictEqual(resposta.body.oferta.marketplace, "aliexpress");
         assert.strictEqual(resposta.body.oferta.urlOriginal, "https://pt.aliexpress.com/item/1005007871648778.html");
         assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://s.click.aliexpress.com/e/_captureAli");
-        assert.deepStrictEqual(chamadasAli.map(chamada => chamada.tipo), ["generic"]);
+        assert.deepStrictEqual(chamadasAli.map(chamada => chamada.tipo), ["generic", "integracao"]);
         assert.strictEqual(chamadasAli[0].clienteId, "cliente_aliexpress");
         assert.strictEqual(chamadasAli[0].marketplace, "aliexpress");
         assert.strictEqual(chamadasAli[0].linkOriginal, "https://pt.aliexpress.com/item/1005007871648778.html");
         assert.strictEqual(chamadasAli[0].ofertaBase.urlOriginal, chamadasAli[0].linkOriginal);
+        const prova = resposta.body.oferta.afiliacaoWorkspaceVerificada;
+        assert.strictEqual(prova.workspaceId, "cliente_aliexpress");
+        assert.strictEqual(prova.appKey, credenciaisAli.appKey);
+        assert.strictEqual(prova.trackingIdEnviado, credenciaisAli.trackingId);
+        assert.strictEqual(prova.origemConversao, "workspace_api");
+        assert.strictEqual(prova.conversaoStatus, "convertida");
+        assert.strictEqual(prova.urlAfiliadaWorkspace, resposta.body.oferta.urlAfiliada);
+        assert.ok(prova.assinatura);
+        assert.strictEqual(assinaturaProvaAliExpressValida(prova, credenciaisAli), true);
+
+        const save = await request(serverAli, "POST", "/manual-v2/ofertas", "cliente_aliexpress", {
+          oferta: resposta.body.oferta
+        });
+        assert.strictEqual(save.status, 201);
+        const recarregada = JSON.parse(fs.readFileSync(arquivoOfertas("cliente_aliexpress"), "utf8"))
+          .find((oferta) => oferta.id === save.body.oferta.id);
+        assert.deepStrictEqual(recarregada.afiliacaoWorkspaceVerificada, prova);
+        assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress(recarregada, {
+          clienteId: "cliente_aliexpress",
+          credenciais: credenciaisAli,
+          exigirAssinatura: true
+        }).ok, true);
+        assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress({
+          ...recarregada,
+          afiliacaoWorkspaceVerificada: null
+        }, {
+          clienteId: "cliente_aliexpress",
+          credenciais: credenciaisAli,
+          exigirAssinatura: true
+        }).ok, false);
+        assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress({
+          ...recarregada,
+          afiliacaoWorkspaceVerificada: {
+            ...prova,
+            urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_forjada"
+          }
+        }, {
+          clienteId: "cliente_aliexpress",
+          credenciais: credenciaisAli,
+          exigirAssinatura: true
+        }).ok, false);
         const serializado = JSON.stringify(resposta.body);
         assert.ok(!serializado.includes("nao_deve_ir_para_backend"));
+        assert.ok(!serializado.includes(credenciaisAli.secret));
       } finally {
         await new Promise(resolve => serverAli.close(resolve));
       }
