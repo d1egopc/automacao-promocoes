@@ -95,6 +95,61 @@ function montarUrlLojaProdutoMagalu(urlProduto, slugLoja = "") {
   return destino.toString();
 }
 
+function caminhoProdutoDeterministicoMagalu(urlProduto = "") {
+  const parsed = parseUrl(urlProduto);
+  if (!parsed) return "";
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (!HOST_MAGALU_PRODUTO.has(hostname) && !HOST_MAGAZINE_VOCE.has(hostname)) return "";
+
+  let partes = parsed.pathname.split("/").filter(Boolean);
+  if (HOST_MAGAZINE_VOCE.has(hostname)) partes = partes.slice(1);
+  if (!partes.length) return "";
+
+  const indiceDivulgador = partes.findIndex(parte => parte.toLowerCase() === "divulgador");
+  if (indiceDivulgador >= 0) {
+    if ((partes[indiceDivulgador + 1] || "").toLowerCase() !== "oferta") return "";
+    const productId = limparTexto(partes[indiceDivulgador + 2]);
+    const categoria = limparTexto(partes[indiceDivulgador + 3]);
+    const subcategoria = limparTexto(partes[indiceDivulgador + 4]);
+    const slugProduto = partes.slice(0, indiceDivulgador);
+    if (!productId || !categoria || !subcategoria || !slugProduto.length) return "";
+    partes = [...slugProduto, "p", productId, categoria, subcategoria];
+  }
+
+  const indiceProduto = partes.findIndex(parte => parte.toLowerCase() === "p");
+  if (indiceProduto < 1 || !limparTexto(partes[indiceProduto + 1])) return "";
+  try {
+    return `/${partes.map(parte => encodeURIComponent(decodeURIComponent(parte))).join("/")}/`;
+  } catch (_) {
+    return "";
+  }
+}
+
+function construirUrlsDeterministicasWorkspaceMagalu(urlProduto = "", promoterId = "") {
+  const original = parseUrl(urlProduto);
+  const aliases = slugsLojaMagalu(promoterId);
+  if (!original || !aliases.length) return [];
+  if (HOST_MAGAZINE_VOCE.has(original.hostname.toLowerCase())) {
+    const aliasOriginal = primeiroSegmento(original.pathname).toLowerCase();
+    if (!aliases.includes(aliasOriginal)) return [];
+  }
+
+  const caminho = caminhoProdutoDeterministicoMagalu(urlProduto);
+  if (!caminho) return [];
+
+  return aliases.map(aliasLoja => ({
+    aliasLoja,
+    url: new URL(`https://www.magazinevoce.com.br/${aliasLoja}${caminho}`).toString()
+  }));
+}
+
+function construirUrlDeterministicaWorkspaceMagalu(urlProduto = "", promoterId = "", aliasPreferido = "") {
+  const candidatas = construirUrlsDeterministicasWorkspaceMagalu(urlProduto, promoterId);
+  const alias = normalizarPromoterIdMagalu(aliasPreferido);
+  return candidatas.find(item => item.aliasLoja === alias) || candidatas[0] || { aliasLoja: "", url: "" };
+}
+
 function linkPertenceLojaMagalu(url = "", promoterId = "") {
   const parsed = parseUrl(url);
   const slugsEsperados = slugsLojaMagalu(promoterId);
@@ -229,5 +284,8 @@ module.exports = {
   normalizarPromoterIdMagalu,
   normalizarSlugLojaMagalu,
   slugsLojaMagalu,
-  caminhoPareceProdutoMagalu
+  caminhoPareceProdutoMagalu,
+  caminhoProdutoDeterministicoMagalu,
+  construirUrlsDeterministicasWorkspaceMagalu,
+  construirUrlDeterministicaWorkspaceMagalu
 };

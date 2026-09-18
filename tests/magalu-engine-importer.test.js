@@ -16,6 +16,8 @@ const {
   validarContratoOfertaUniversal
 } = require("../modules/engine/oferta-universal.contract");
 
+process.env.JWT_SECRET = process.env.JWT_SECRET || "magalu-engine-importer-test-secret";
+
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/";
 const urlWorkspaceFixture = "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-50/p/abc123/et/elit/";
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
@@ -157,8 +159,10 @@ async function testarUrlOriginalNaoViraAfiliada() {
     }
   });
   assert.strictEqual(semProva.ok, false);
-  assert.strictEqual(semProva.motivo, "afiliacao_workspace_incompleta");
+  assert.strictEqual(semProva.motivo, "sem_imagem");
   assert.strictEqual(semProva.linkAfiliado, undefined);
+  assert.strictEqual(semProva.metadata.afiliacaoWorkspace.proofType, "deterministic_workspace");
+  assert.strictEqual(semProva.metadata.afiliacaoWorkspace.paginaValidada, false);
 }
 
 async function testarDiagnosticoAfiliacaoFalhaSemRelaxarGate() {
@@ -194,7 +198,7 @@ async function testarDiagnosticoAfiliacaoFalhaSemRelaxarGate() {
     const diagnostico = resultado.metadata.afiliacaoWorkspaceDiagnostico;
 
     assert.strictEqual(resultado.ok, false, "falha continua fail-closed");
-    assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+    assert.strictEqual(resultado.motivo, "sem_imagem");
     assert.strictEqual(diagnostico.jobId, 501);
     assert.strictEqual(diagnostico.eventoId, 601);
     assert.strictEqual(diagnostico.productIdEsperado, "abc123");
@@ -202,7 +206,9 @@ async function testarDiagnosticoAfiliacaoFalhaSemRelaxarGate() {
     assert.strictEqual(diagnostico.statusHttp, 403);
     assert.strictEqual(diagnostico.motivoInterno, "magalu_http_403");
     assert.strictEqual(diagnostico.urlAfiliavelComprovadaExiste, false);
-    assert.strictEqual(diagnostico.provaAfiliacaoExiste, false);
+    assert.strictEqual(diagnostico.provaAfiliacaoExiste, true);
+    assert.strictEqual(diagnostico.proofType, "deterministic_workspace");
+    assert.strictEqual(diagnostico.paginaValidada, false);
     assert.strictEqual(diagnostico.candidatasTentadas[0].statusHttp, 403);
     assert.strictEqual(resultado.linkAfiliado, undefined, "URL original nao vira fallback");
     assert.strictEqual(logs.length, 1, "diagnostico estruturado deve ser logado uma vez");
@@ -314,11 +320,12 @@ async function testarPaginaIndisponivelComRadarSuficienteContinuaPipeline() {
   });
 
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+  assert.strictEqual(resultado.motivo, "sem_imagem");
   assert.strictEqual(resultado.linkOriginal, urlNightCaviar, "link original permanece somente para auditoria");
   assert.strictEqual(resultado.linkAfiliado, undefined);
   assert.strictEqual(resultado.imagem, undefined);
-  assert.strictEqual(resultado.metadata.provaAfiliado.conversaoStatus, "falhou");
+  assert.strictEqual(resultado.metadata.provaAfiliado.conversaoStatus, "convertida");
+  assert.strictEqual(resultado.metadata.provaAfiliado.proofType, "deterministic_workspace");
   assert.deepStrictEqual(resolucoes, [urlNightCaviar], "nao procura produto alternativo quando a pagina workspace falha");
   assert.strictEqual(textoRadar.includes("R$ 78,90") && textoRadar.includes("MAGALU10"), true, "verdade comercial Radar permanece no evento de auditoria");
 }
@@ -349,11 +356,12 @@ async function testarCaptchaComRadarSuficienteContinuaPipeline() {
   });
 
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+  assert.strictEqual(resultado.motivo, "sem_imagem");
   assert.strictEqual(resultado.linkOriginal, urlRealA07, "link original permanece somente para auditoria");
   assert.strictEqual(resultado.linkAfiliado, undefined);
   assert.strictEqual(resultado.imagem, undefined);
-  assert.strictEqual(resultado.metadata.provaAfiliado.conversaoStatus, "falhou");
+  assert.strictEqual(resultado.metadata.provaAfiliado.conversaoStatus, "convertida");
+  assert.strictEqual(resultado.metadata.provaAfiliado.paginaValidada, false);
   assert.deepStrictEqual(resolucoes, [urlRealA07], "CAPTCHA nao procura produto alternativo");
   assert.strictEqual(textoRadar.includes("R$ 777,00") && textoRadar.includes("MAGALU10"), true, "verdade comercial Radar permanece no evento de auditoria");
 }
@@ -419,7 +427,7 @@ async function testarRadarSemTituloNaoContinuaPipeline() {
   assert.strictEqual(resultado.linkAfiliado, undefined);
 }
 
-async function testarTituloTecnicoConfiavelProssegueAteGateAfiliacao() {
+async function testarTituloDaPaginaNaoSubstituiTituloRadarAusente() {
   const pacote = deps();
   const resultado = await importarProdutoMagaluEngine({
     job: { id: 5081, evento_id: 6081, cliente_id: "workspace_magalu", marketplace: "magalu" },
@@ -432,8 +440,7 @@ async function testarTituloTecnicoConfiavelProssegueAteGateAfiliacao() {
   });
 
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
-  assert.notStrictEqual(resultado.motivo, "titulo_indisponivel");
+  assert.strictEqual(resultado.motivo, "titulo_indisponivel");
   assert.strictEqual(resultado.linkAfiliado, undefined);
 }
 
@@ -770,8 +777,9 @@ async function testarImagemRadarNaoSubstituiImagemOficialAusente() {
     deps: pacote.deps
   });
 
-  assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(resultado.imagem, "", "pagina sem imagem oficial deve permanecer sem imagem Magalu");
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "sem_imagem");
+  assert.strictEqual(resultado.imagem, undefined, "pagina sem imagem oficial deve terminar antes do pipeline compartilhado");
   assert.strictEqual(resultado.imagemEnviavel, false);
   assert.notStrictEqual(resultado.imagem, imagemRadar, "imagem Radar nao substitui prova oficial Magalu");
 }
@@ -848,7 +856,7 @@ function testarRegistriesPipelineUnico() {
   await testarCaptchaComRadarSuficienteContinuaPipeline();
   await testarResolverFalhaComRadarSuficienteContinuaPipeline();
   await testarRadarSemTituloNaoContinuaPipeline();
-  await testarTituloTecnicoConfiavelProssegueAteGateAfiliacao();
+  await testarTituloDaPaginaNaoSubstituiTituloRadarAusente();
   await testarRadarSemPrecoNaoContinuaPipeline();
   await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();

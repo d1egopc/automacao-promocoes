@@ -8,8 +8,14 @@ const {
   resolverFatosMagalu
 } = require("../../../marketplaces/magalu/magalu-factual-resolver");
 const {
+  PROOF_TYPE_PAGE_VALIDATED,
+  PROOF_TYPE_DETERMINISTIC_WORKSPACE,
   criarProvaAfiliacaoWorkspaceMagalu
 } = require("../../../marketplaces/magalu/afiliacao-workspace");
+const {
+  construirUrlDeterministicaWorkspaceMagalu,
+  normalizarPromoterIdMagalu
+} = require("../../../marketplaces/magalu/magalu-affiliate-link");
 const {
   escolherProdutoPrincipal,
   resumoLinksClassificados
@@ -338,6 +344,9 @@ function montarDiagnosticoAfiliacaoMagalu({ job = {}, clienteId = "", promoterId
     ),
     productIdObservado: texto(produto.produtoId || produto.codigo),
     workspaceLojaValidada: produto.magaluWorkspaceValidado === true,
+    workspaceDeterministicoValidado: prova.proofType === PROOF_TYPE_DETERMINISTIC_WORKSPACE && prova.conversaoStatus === "convertida",
+    proofType: texto(prova.proofType),
+    paginaValidada: prova.paginaValidada === true,
     conversaoStatus: texto(prova.conversaoStatus),
     urlAfiliavelComprovadaExiste: Boolean(texto(produto.urlAfiliavelComprovada)),
     provaAfiliacaoExiste: Boolean(prova.conversaoStatus === "convertida" && texto(prova.assinatura)),
@@ -358,6 +367,17 @@ function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
   ];
 
   return bloqueadores.some(aviso => avisos.includes(aviso));
+}
+
+function falhaLeituraPermiteAfiliacaoDeterministicaMagalu(produto = {}) {
+  const avisos = Array.isArray(produto.avisos) ? produto.avisos : [];
+  const tentativas = Array.isArray(produto.metadata?.factualResolver?.tentativas)
+    ? produto.metadata.factualResolver.tentativas
+    : [];
+  const sinais = [produto.motivo, ...avisos, ...tentativas.flatMap(item => [item.motivo, ...(item.avisos || [])])]
+    .map(texto)
+    .filter(Boolean);
+  return sinais.some(sinal => /magalu_(?:captcha_detectado|http_403)|challenge/i.test(sinal));
 }
 
 function logMagaluAdapter(evento, payload = {}) {
@@ -471,9 +491,26 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   const produtoIdRadar = produtoIdPorUrl(urlOriginalEngine);
-  const urlWorkspaceValidada = produto.magaluWorkspaceValidado === true
+  const identidadeOrigemSegura = !avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto);
+  const paginaValidada = Boolean(
+    identidadeOrigemSegura &&
+    produto.magaluWorkspaceValidado === true &&
+    texto(produto.urlAfiliavelComprovada)
+  );
+  const fallbackDeterministicoPermitido = Boolean(
+    !paginaValidada &&
+    identidadeOrigemSegura &&
+    falhaLeituraPermiteAfiliacaoDeterministicaMagalu(produto)
+  );
+  const urlDeterministica = fallbackDeterministicoPermitido
+    ? construirUrlDeterministicaWorkspaceMagalu(urlOriginalEngine, promoterId, normalizarPromoterIdMagalu(promoterId))
+    : { aliasLoja: "", url: "" };
+  const urlWorkspaceValidada = paginaValidada
     ? texto(produto.urlAfiliavelComprovada)
-    : "";
+    : texto(urlDeterministica.url);
+  const proofType = paginaValidada
+    ? PROOF_TYPE_PAGE_VALIDATED
+    : (urlWorkspaceValidada ? PROOF_TYPE_DETERMINISTIC_WORKSPACE : "");
   const provaAfiliado = criarProvaAfiliacaoWorkspaceMagalu({
     clienteId,
     promoterId,
@@ -481,7 +518,10 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     seller: produto.sellerIdOriginal || "",
     urlOriginal: urlOriginalEngine,
     urlAfiliadaWorkspace: urlWorkspaceValidada,
-    paginaValidada: produto.magaluWorkspaceValidado === true
+    paginaValidada,
+    proofType,
+    papelLink: linkEscolhido.papelLink || "",
+    urlConstruidaPor: proofType === PROOF_TYPE_DETERMINISTIC_WORKSPACE ? "magalu_deterministic_builder_v1" : ""
   });
   const diagnosticoAfiliacao = montarDiagnosticoAfiliacaoMagalu({
     job,
@@ -495,7 +535,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const urlCanonica = primeiroValor(urlWorkspaceValidada, produto.urlOriginal, urlOriginalEngine);
   const linkAfiliado = provaAfiliado.conversaoStatus === "convertida" ? texto(provaAfiliado.urlAfiliadaWorkspace) : "";
   const tituloRadarSeguro = extrairTituloRadarSeguroMagalu(evento);
-  const tituloFinal = primeiroValor(tituloRadarSeguro, produto.titulo);
+  const tituloFinal = tituloRadarSeguro;
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
   const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
   const precoAtual = radarDefiniuPreco ? precoRadarSeguro : "";
@@ -558,10 +598,39 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         provaAfiliado: {
           slugLoja: provaAfiliado.slugLoja || "",
           productId: provaAfiliado.productId || "",
+          proofType: provaAfiliado.proofType || "",
+          paginaValidada: provaAfiliado.paginaValidada === true,
           conversaoStatus: provaAfiliado.conversaoStatus || "",
           motivoConversao: provaAfiliado.motivoConversao || ""
         },
         afiliacaoWorkspaceDiagnostico: diagnosticoAfiliacao
+      }
+    };
+  }
+
+  if (!imagemOficial) {
+    logMagaluAdapter("[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]", diagnosticoAfiliacao);
+    return {
+      ok: false,
+      marketplace: "magalu",
+      motivo: "sem_imagem",
+      linkOriginal: urlOriginalEngine,
+      imagemEnviavel: false,
+      metadata: {
+        adapter: "magalu",
+        linksClassificados,
+        papelLinkEscolhido: linkEscolhido.papelLink || "",
+        provaAfiliado: {
+          slugLoja: provaAfiliado.slugLoja || "",
+          productId: provaAfiliado.productId || "",
+          proofType: provaAfiliado.proofType || "",
+          paginaValidada: provaAfiliado.paginaValidada === true,
+          conversaoStatus: provaAfiliado.conversaoStatus || "",
+          motivoConversao: provaAfiliado.motivoConversao || ""
+        },
+        afiliacaoWorkspace: provaAfiliado,
+        afiliacaoWorkspaceDiagnostico: diagnosticoAfiliacao,
+        imagemAusenteMotivo: "magalu_sem_imagem_oficial_mlcdn"
       }
     };
   }
@@ -636,6 +705,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       provaAfiliado: {
         slugLoja: provaAfiliado.slugLoja || "",
         productId: provaAfiliado.productId || "",
+        proofType: provaAfiliado.proofType || "",
+        paginaValidada: provaAfiliado.paginaValidada === true,
         conversaoStatus: provaAfiliado.conversaoStatus || "",
         motivoConversao: provaAfiliado.motivoConversao || ""
       },

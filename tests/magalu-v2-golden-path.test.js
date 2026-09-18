@@ -5,9 +5,15 @@ const fs = require("fs");
 const path = require("path");
 const { importarProdutoMagaluEngine } = require("../modules/engine/importer/adapters/magalu.adapter");
 const {
+  PROOF_TYPE_PAGE_VALIDATED,
+  PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+  criarProvaAfiliacaoWorkspaceMagalu,
   validarProvaAfiliacaoWorkspaceMagalu,
   validarOfertaAfiliacaoWorkspaceMagalu
 } = require("../modules/marketplaces/magalu/afiliacao-workspace");
+const {
+  construirUrlDeterministicaWorkspaceMagalu
+} = require("../modules/marketplaces/magalu/magalu-affiliate-link");
 const { resolverFatosMagalu } = require("../modules/marketplaces/magalu/magalu-factual-resolver");
 const { parseMagaluProdutoHtml } = require("../modules/marketplaces/magalu/magalu-parser");
 
@@ -41,6 +47,9 @@ function fatosWorkspace(caso) {
       codigo: caso.id,
       seller: caso.seller,
       titulo: `Titulo tecnico ${caso.id}`,
+      precoAtual: "999.99",
+      precoAnterior: "1299.99",
+      cupom: "PAGINA20",
       urlOriginal: urlOriginal(caso),
       urlCanonica: urlWorkspace(caso),
       urlAfiliavelComprovada: urlWorkspace(caso),
@@ -58,7 +67,7 @@ function fatosWorkspace(caso) {
 }
 
 async function importar(caso, extras = {}) {
-  const original = urlOriginal(caso);
+  const original = extras.urlOriginal || urlOriginal(caso);
   return importarProdutoMagaluEngine({
     job: { id: `job-${caso.id}`, evento_id: `evento-${caso.id}`, cliente_id: "workspace-magalu", marketplace: "magalu" },
     evento: {
@@ -70,7 +79,7 @@ async function importar(caso, extras = {}) {
       links_extraidos: [original],
       ...extras.evento
     },
-    links: [{ url_original: original, url_normalizada: original, marketplace_detectado: "magalu" }],
+    links: extras.links || [{ url_original: original, url_normalizada: original, marketplace_detectado: "magalu" }],
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { promoterId: "d1egopc" } }),
       resolverFatosMagalu: async () => extras.resolucao || fatosWorkspace(caso)
@@ -85,6 +94,9 @@ async function testarSkusAprovados() {
     assert.strictEqual(resultado.produtoId, caso.id);
     assert.strictEqual(resultado.linkAfiliado, urlWorkspace(caso));
     assert.strictEqual(resultado.metadata.afiliacaoWorkspace.conversaoStatus, "convertida");
+    assert.strictEqual(resultado.metadata.afiliacaoWorkspace.proofType, PROOF_TYPE_PAGE_VALIDATED);
+    assert.strictEqual(resultado.metadata.afiliacaoWorkspace.paginaValidada, true);
+    assert.strictEqual(resultado.metadata.afiliacaoWorkspace.papelLink, "produto");
     assert.strictEqual(resultado.imagemEnviavel, true);
     assert.strictEqual(resultado.imagemOriginalOficial, `https://a-static.mlcdn.com.br/800x560/produto-${caso.id}.jpg`);
     assert.deepStrictEqual(resultado.dimensoesImagem, { largura: 800, altura: 560 });
@@ -101,16 +113,167 @@ async function testar404BloqueiaSemPromoverOriginal() {
   assert.strictEqual(resultado.linkAfiliado, undefined);
 }
 
-async function testar403BloqueiaAntesDeTemplateOuEnvio() {
+async function testar403SemImagemTerminaSemImagem() {
   const caso = casos[0];
   const resultado = await importar(caso, {
     resolucao: { ok: false, motivo: "magalu_http_403", fatos: {}, avisos: ["magalu_http_403"] }
   });
   assert.strictEqual(resultado.ok, false);
-  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+  assert.strictEqual(resultado.motivo, "sem_imagem");
   assert.strictEqual(resultado.linkAfiliado, undefined);
-  assert.ok(!JSON.stringify(resultado).includes("a-static.mlcdn.com.br"));
-  assert.ok(!JSON.stringify(resultado).includes("urlAfiliadaWorkspace"));
+  assert.strictEqual(resultado.imagemEnviavel, false);
+  assert.strictEqual(resultado.metadata.afiliacaoWorkspace.proofType, PROOF_TYPE_DETERMINISTIC_WORKSPACE);
+  assert.strictEqual(resultado.metadata.afiliacaoWorkspace.paginaValidada, false);
+  assert.ok(!resultado.metadata.afiliacaoWorkspace.urlAfiliadaWorkspace.includes("promoter_id="));
+}
+
+async function testarCaptchaPermiteProvaDeterministicaComImagemOficial() {
+  const caso = casos[0];
+  const imagem = `https://a-static.mlcdn.com.br/320x240/produto-${caso.id}.jpg`;
+  const resultado = await importar(caso, {
+    resolucao: {
+      ok: false,
+      motivo: "magalu_captcha_detectado",
+      fatos: {
+        produtoId: caso.id,
+        codigo: caso.id,
+        imagem,
+        metadata: { imagemOficial: { dimensoes: { largura: 320, altura: 240 } } },
+        avisos: ["magalu_captcha_detectado"]
+      },
+      avisos: ["magalu_captcha_detectado"]
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, imagem);
+  assert.strictEqual(resultado.imagemEnviavel, true);
+  assert.strictEqual(resultado.metadata.afiliacaoWorkspace.proofType, PROOF_TYPE_DETERMINISTIC_WORKSPACE);
+  assert.strictEqual(resultado.metadata.afiliacaoWorkspace.paginaValidada, false);
+  assert.strictEqual(resultado.metadata.afiliacaoWorkspace.origemConversao, "workspace_magazinevoce_deterministic");
+  assert.ok(resultado.linkAfiliado.startsWith("https://www.magazinevoce.com.br/d1egopc/"));
+  assert.ok(!resultado.linkAfiliado.includes("promoter_id="));
+  assert.strictEqual(validarOfertaAfiliacaoWorkspaceMagalu(resultado, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc"
+  }).ok, true);
+}
+
+function criarProvaDeterministicaParaAlias(caso, aliasLoja) {
+  const original = urlOriginal(caso);
+  const construida = construirUrlDeterministicaWorkspaceMagalu(original, "d1egopc", aliasLoja);
+  return criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    productId: caso.id,
+    seller: caso.seller,
+    urlOriginal: original,
+    urlAfiliadaWorkspace: construida.url,
+    paginaValidada: false,
+    proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+    papelLink: "produto",
+    urlConstruidaPor: "magalu_deterministic_builder_v1"
+  });
+}
+
+function testarAliasesDeterministicosEIsolamentoDaProva() {
+  const caso = casos[0];
+  for (const alias of ["d1egopc", "magazined1egopc"]) {
+    const prova = criarProvaDeterministicaParaAlias(caso, alias);
+    assert.strictEqual(prova.conversaoStatus, "convertida", alias);
+    assert.strictEqual(prova.aliasLoja, alias);
+    assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu(prova, {
+      clienteId: "workspace-magalu",
+      promoterId: "d1egopc",
+      papelLink: "produto"
+    }).valida, true);
+  }
+
+  const prova = criarProvaDeterministicaParaAlias(caso, "d1egopc");
+  const urlOutroAlias = prova.urlAfiliadaWorkspace.replace("/d1egopc/", "/magazined1egopc/");
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu({ ...prova, urlAfiliadaWorkspace: urlOutroAlias }, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    papelLink: "produto"
+  }).valida, false, "HMAC de uma URL nao pode validar outra");
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu({ ...prova, proofType: PROOF_TYPE_PAGE_VALIDATED }, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    papelLink: "produto"
+  }).valida, false, "proofType nao pode ser reinterpretado");
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu({ ...prova, productId: "outro-produto" }, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    papelLink: "produto"
+  }).valida, false);
+
+  const estrangeira = prova.urlAfiliadaWorkspace.replace("/d1egopc/", "/outraloja/");
+  const provaEstrangeira = criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    productId: caso.id,
+    urlOriginal: urlOriginal(caso),
+    urlAfiliadaWorkspace: estrangeira,
+    paginaValidada: false,
+    proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+    papelLink: "produto",
+    urlConstruidaPor: "magalu_deterministic_builder_v1"
+  });
+  assert.strictEqual(provaEstrangeira.conversaoStatus, "falhou");
+  assert.strictEqual(provaEstrangeira.urlAfiliadaWorkspace, "");
+
+  const comTrackingEstrangeiro = criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    productId: caso.id,
+    urlOriginal: urlOriginal(caso),
+    urlAfiliadaWorkspace: `${prova.urlAfiliadaWorkspace}?promoter_id=5438968&partner_id=3440`,
+    paginaValidada: false,
+    proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+    papelLink: "produto",
+    urlConstruidaPor: "magalu_deterministic_builder_v1"
+  });
+  assert.strictEqual(comTrackingEstrangeiro.conversaoStatus, "falhou");
+}
+
+async function testarOrigemEstrangeiraNuncaEhEnviada() {
+  const caso = casos[0];
+  const estrangeira = urlWorkspace(caso).replace(`/${loja}/`, "/outraloja/");
+  const resultado = await importar(caso, {
+    urlOriginal: estrangeira,
+    evento: { links_extraidos: [estrangeira] },
+    resolucao: {
+      ok: false,
+      motivo: "magalu_captcha_detectado",
+      fatos: { avisos: ["magalu_link_loja_divergente", "magalu_captcha_detectado"] },
+      avisos: ["magalu_link_loja_divergente", "magalu_captcha_detectado"]
+    }
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_produto_insegura");
+  assert.ok(!JSON.stringify(resultado).includes('"linkAfiliado":"' + estrangeira));
+
+  const tentativaDireta = construirUrlDeterministicaWorkspaceMagalu(estrangeira, "d1egopc", "d1egopc");
+  assert.strictEqual(tentativaDireta.url, "", "origem Magazine Voce estrangeira nao pode alimentar o builder deterministico");
+}
+
+async function testarMidiaNaoOficialNuncaPublica() {
+  const caso = casos[0];
+  for (const imagem of [
+    "https://mmg.whatsapp.net/imagem.jpg",
+    "https://api.telegram.org/file/imagem.jpg",
+    "https://cdn.terceiro.example/imagem.jpg"
+  ]) {
+    const resultado = await importar(caso, {
+      resolucao: {
+        ...fatosWorkspace(caso),
+        fatos: { ...fatosWorkspace(caso).fatos, imagem }
+      }
+    });
+    assert.strictEqual(resultado.ok, false, imagem);
+    assert.strictEqual(resultado.motivo, "sem_imagem", imagem);
+    assert.strictEqual(resultado.imagemEnviavel, false, imagem);
+  }
 }
 
 async function testarProvaAdulteradaBloqueia() {
@@ -141,6 +304,13 @@ function testarMaiorImagemRealNoHtml() {
   const produto = parseMagaluProdutoHtml({ urlOriginal: url, urlFinal: url, html });
   assert.strictEqual(produto.imagem, "https://a-static.mlcdn.com.br/800x560/galeria.jpg");
   assert.deepStrictEqual(produto.metadata.imagemOficial.dimensoes, { largura: 800, altura: 560 });
+
+  const apenas320 = parseMagaluProdutoHtml({
+    urlOriginal: url,
+    urlFinal: url,
+    html: `<link rel="canonical" href="${url}"><meta property="og:image" content="https://a-static.mlcdn.com.br/320x240/oficial.jpg">`
+  });
+  assert.strictEqual(apenas320.imagem, "https://a-static.mlcdn.com.br/320x240/oficial.jpg");
 }
 
 async function testarResolverExigePaginaWorkspaceCanonica() {
@@ -222,7 +392,11 @@ async function testarGateMagaluSemRefatoracaoGlobal() {
 (async () => {
   await testarSkusAprovados();
   await testar404BloqueiaSemPromoverOriginal();
-  await testar403BloqueiaAntesDeTemplateOuEnvio();
+  await testar403SemImagemTerminaSemImagem();
+  await testarCaptchaPermiteProvaDeterministicaComImagemOficial();
+  testarAliasesDeterministicosEIsolamentoDaProva();
+  await testarOrigemEstrangeiraNuncaEhEnviada();
+  await testarMidiaNaoOficialNuncaPublica();
   await testarProvaAdulteradaBloqueia();
   await testarRadarComercialPermaneceIntacto();
   testarMaiorImagemRealNoHtml();
@@ -233,4 +407,3 @@ async function testarGateMagaluSemRefatoracaoGlobal() {
   console.error(erro);
   process.exit(1);
 });
-
