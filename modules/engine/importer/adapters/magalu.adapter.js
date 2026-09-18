@@ -17,6 +17,11 @@ const {
   normalizarPromoterIdMagalu
 } = require("../../../marketplaces/magalu/magalu-affiliate-link");
 const {
+  resolverImagemMagazineVoce,
+  hostnameMlcdnSeguro,
+  urlImagemResumo
+} = require("../../../marketplaces/magalu/magalu-image-resolver");
+const {
   escolherProdutoPrincipal,
   resumoLinksClassificados
 } = require("../../link-role.service");
@@ -384,6 +389,33 @@ function logMagaluAdapter(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
 
+function imagemMlcdnValidaMagalu(url = "") {
+  return /^https:\/\//i.test(texto(url)) && hostnameMlcdnSeguro(url);
+}
+
+function registrarBuscaImagemMagazineVoce({ job = {}, clienteId = "", productId = "", resultado = {} } = {}) {
+  logMagaluAdapter("[ENGINE-MAGALU-IMAGEM-BUSCA]", {
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    clienteId,
+    productId,
+    fonte: "magazinevoce_busca",
+    statusHttp: Number(resultado.statusHttp || 0),
+    skuConfirmado: resultado.skuConfirmado === true,
+    hrefConfirmado: resultado.hrefConfirmado === true,
+    candidatos: Array.isArray(resultado.candidatos)
+      ? resultado.candidatos.map(item => ({
+        origem: texto(item.origem),
+        imagem: urlImagemResumo(item.imagem || ""),
+        largura: Number(item.largura || 0),
+        altura: Number(item.altura || 0)
+      }))
+      : [],
+    imagemSelecionada: urlImagemResumo(resultado.imagem || ""),
+    motivoFinal: texto(resultado.motivoFinal)
+  });
+}
+
 async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   const linkEscolhido = escolherLinkMagalu(links, evento);
@@ -544,7 +576,66 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const precoPaginaNumerico = numeroPreco(precoPagina);
   const precoOriginal = extrairPrecoAnteriorRadarSeguroMagalu(evento);
   const economiaCalculada = { economia: "", percentual: "" };
-  const imagemOficial = /^https:\/\/(?:[a-z0-9-]+\.)?mlcdn\.com\.br\//i.test(texto(produto.imagem)) ? texto(produto.imagem) : "";
+  let imagemSecundaria = null;
+  const imagemAtualValida = imagemMlcdnValidaMagalu(produto.imagem);
+  if (!imagemAtualValida && typeof deps.consultarProdutoMagalu === "function") {
+    const resolverImagem = typeof deps.resolverImagemMagazineVoce === "function"
+      ? deps.resolverImagemMagazineVoce
+      : resolverImagemMagazineVoce;
+    try {
+      imagemSecundaria = await resolverImagem({
+        productId: produtoIdRadar,
+        promoterId,
+        slugWorkspace: normalizarPromoterIdMagalu(promoterId),
+        ...(deps.magaluImageResolverOptions || {})
+      });
+    } catch (erro) {
+      imagemSecundaria = {
+        ok: false,
+        productId: produtoIdRadar,
+        statusHttp: 0,
+        candidatos: [],
+        motivoFinal: "magalu_imagem_busca_fetch_falhou",
+        erro: erro.message
+      };
+    }
+    registrarBuscaImagemMagazineVoce({ job, clienteId, productId: produtoIdRadar, resultado: imagemSecundaria });
+
+    const imagemSecundariaValida = Boolean(
+      imagemSecundaria?.ok === true &&
+      texto(imagemSecundaria.productId) === texto(produtoIdRadar) &&
+      imagemMlcdnValidaMagalu(imagemSecundaria.imagem) &&
+      imagemSecundaria.skuConfirmado === true &&
+      imagemSecundaria.hrefConfirmado === true &&
+      imagemSecundaria.validacaoHttp?.ok === true
+    );
+    if (imagemSecundariaValida) {
+      produto.imagem = texto(imagemSecundaria.imagem);
+      const imagemSelecionada = Array.isArray(imagemSecundaria.candidatos)
+        ? imagemSecundaria.candidatos.find(item => item.imagem === produto.imagem)
+        : null;
+      produto.metadata = {
+        ...(produto.metadata || {}),
+        imagemOficial: {
+          origem: "magazinevoce_busca",
+          url: produto.imagem,
+          dimensoes: imagemSelecionada
+            ? { largura: imagemSelecionada.largura || 0, altura: imagemSelecionada.altura || 0 }
+            : null,
+          variantes: Array.isArray(imagemSecundaria.candidatos) ? imagemSecundaria.candidatos : []
+        },
+        imagemSecundaria: {
+          fonte: "magazinevoce_busca",
+          statusHttp: Number(imagemSecundaria.statusHttp || 0),
+          productId: imagemSecundaria.productId,
+          skuConfirmado: true,
+          hrefConfirmado: true
+        }
+      };
+    }
+  }
+
+  const imagemOficial = imagemMlcdnValidaMagalu(produto.imagem) ? texto(produto.imagem) : "";
 
   const payloadRetornoMagalu = {
     jobId: job.id,
@@ -654,7 +745,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     descontoPercentual: economiaCalculada.percentual,
     imagem: imagemOficial,
     imagemOriginalOficial: imagemOficial,
-    origemImagemOficial: imagemOficial ? "magazinevoce_pagina_validada" : "",
+    origemImagemOficial: imagemOficial
+      ? (produto.metadata?.imagemSecundaria?.fonte || "magazinevoce_pagina_validada")
+      : "",
     dominioImagem: imagemOficial ? new URL(imagemOficial).hostname : "",
     dimensoesImagem: produto.metadata?.imagemOficial?.dimensoes || null,
     imagemEnviavel: Boolean(imagemOficial),
