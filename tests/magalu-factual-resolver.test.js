@@ -103,6 +103,28 @@ function assertSemCamposSensiveisNoCache(valor, caminho = "cache") {
 }
 
 {
+  const resultado = await resolverFatosMagalu({ urlOriginal: urlA07, promoterId: "d1egopc" }, {
+    consultarProdutoMagalu: async (fonteUrl) => {
+      const candidato = fatos({
+        url: fonteUrl,
+        produtoId: "240466000",
+        titulo: "Smartphone Samsung A07",
+        avisos: ["magalu_jsonld_produto_divergente_ignorado"]
+      });
+      candidato.metadata.jsonLd = { "@type": "Product", sku: "999999999" };
+      return candidato;
+    }
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.tentativas[0].statusFactual, "rejeitada");
+  assert.strictEqual(resultado.tentativas[0].motivo, "fonte_bloqueada_ou_divergente");
+  assert.deepStrictEqual(resultado.tentativas[0].avisosBloqueantes, ["magalu_jsonld_produto_divergente_ignorado"]);
+  assert.strictEqual(resultado.tentativas[0].evidenciasAvisosBloqueantes[0].detector, "produtoJsonLdCompativel");
+  assert.strictEqual(resultado.tentativas[0].evidenciasAvisosBloqueantes[0].origem, "JSON-LD");
+  assert.deepStrictEqual(resultado.tentativas[0].productIdsSkusJsonLd, ["999999999"]);
+}
+
+{
   const chamadas = [];
   const resultado = await resolverFatosMagalu({ urlOriginal: urlA07, promoterId: "d1egopc" }, {
     consultarProdutoMagalu: consultarPorMapa({

@@ -318,7 +318,15 @@ function montarDiagnosticoAfiliacaoMagalu({ job = {}, clienteId = "", promoterId
       statusHttp: Number(item.statusHttp || 0),
       urlFinalTipo: texto(item.urlFinalTipo) || tipoUrlMagaluObservabilidade(urlOriginal),
       canonicalValida: item.canonicalValida === true,
-      productIdObservado: texto(item.productIdObservado)
+      productIdObservado: texto(item.productIdObservado),
+      avisos: Array.isArray(item.avisos) ? item.avisos.map(texto).filter(Boolean) : [],
+      avisosBloqueantes: Array.isArray(item.avisosBloqueantes) ? item.avisosBloqueantes.map(texto).filter(Boolean) : [],
+      evidenciasAvisosBloqueantes: Array.isArray(item.evidenciasAvisosBloqueantes) ? item.evidenciasAvisosBloqueantes : [],
+      canonicalObservada: texto(item.canonicalObservada),
+      canonicalOrigem: texto(item.canonicalOrigem),
+      ogUrlObservada: texto(item.ogUrlObservada),
+      urlFinalObservada: texto(item.urlFinalObservada),
+      productIdsSkusJsonLd: Array.isArray(item.productIdsSkusJsonLd) ? item.productIdsSkusJsonLd.map(texto).filter(Boolean) : []
     })),
     statusHttp: Number(ultima.statusHttp || 0),
     urlFinalTipo: texto(ultima.urlFinalTipo) || tipoUrlMagaluObservabilidade(urlOriginal),
@@ -333,7 +341,8 @@ function montarDiagnosticoAfiliacaoMagalu({ job = {}, clienteId = "", promoterId
     conversaoStatus: texto(prova.conversaoStatus),
     urlAfiliavelComprovadaExiste: Boolean(texto(produto.urlAfiliavelComprovada)),
     provaAfiliacaoExiste: Boolean(prova.conversaoStatus === "convertida" && texto(prova.assinatura)),
-    avisos: [...new Set((Array.isArray(produto.avisos) ? produto.avisos : []).map(texto).filter(Boolean))]
+    avisos: [...new Set((Array.isArray(produto.avisos) ? produto.avisos : []).map(texto).filter(Boolean))],
+    avisosBloqueantes: [...new Set(tentativas.flatMap(item => Array.isArray(item.avisosBloqueantes) ? item.avisosBloqueantes : []))]
   };
 }
 

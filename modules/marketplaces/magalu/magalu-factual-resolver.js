@@ -314,12 +314,138 @@ function lojaOriginalDivergente(urlOriginal = "", promoterId = "") {
   return !slugsLojaMagalu(id).includes(primeiroSegmento(parsed.pathname).toLowerCase());
 }
 
+const AVISOS_BLOQUEANTES_MAGALU = Object.freeze([
+  "magalu_captcha_detectado",
+  "magalu_http_403",
+  "magalu_pagina_indisponivel",
+  "magalu_conteudo_produto_divergente_ignorado",
+  "magalu_jsonld_produto_divergente_ignorado"
+]);
+
 function temAvisoBloqueante(avisos = []) {
-  return avisos.includes("magalu_captcha_detectado") ||
-    avisos.includes("magalu_http_403") ||
-    avisos.includes("magalu_pagina_indisponivel") ||
-    avisos.includes("magalu_conteudo_produto_divergente_ignorado") ||
-    avisos.includes("magalu_jsonld_produto_divergente_ignorado");
+  return AVISOS_BLOQUEANTES_MAGALU.some(aviso => avisos.includes(aviso));
+}
+
+function urlObservavelMagalu(url = "") {
+  const parsed = parseUrlSegura(url);
+  if (!parsed) return "";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
+function primeiroCampoUrlMagalu(fatos = {}, chaves = []) {
+  const fontes = [
+    fatos,
+    fatos.metadata,
+    fatos.metadata?.camposBrutos
+  ].filter(item => item && typeof item === "object");
+  for (const fonte of fontes) {
+    for (const chave of chaves) {
+      const valor = urlObservavelMagalu(fonte[chave]);
+      if (valor) return valor;
+    }
+  }
+  return "";
+}
+
+function coletarIdsJsonLdMagalu(fatos = {}) {
+  const encontrados = [];
+  const vistos = new Set();
+  const visitar = (valor, profundidade = 0) => {
+    if (!valor || profundidade > 4) return;
+    if (Array.isArray(valor)) {
+      valor.forEach(item => visitar(item, profundidade + 1));
+      return;
+    }
+    if (typeof valor !== "object") return;
+    for (const [chave, item] of Object.entries(valor)) {
+      if (/^(?:sku|productid|product_id|productID|mpn)$/i.test(chave)) {
+        const textoItem = texto(item);
+        if (textoItem && !vistos.has(textoItem)) {
+          vistos.add(textoItem);
+          encontrados.push(textoItem);
+        }
+      }
+      if (item && typeof item === "object") visitar(item, profundidade + 1);
+    }
+  };
+  const metadados = [
+    fatos.metadata?.jsonLd,
+    fatos.metadata?.jsonld,
+    fatos.metadata?.produtoJsonLd,
+    fatos.metadata?.productJsonLd,
+    fatos.metadata?.camposBrutos?.jsonLd,
+    fatos.metadata?.camposBrutos?.jsonld,
+    fatos.metadata?.camposBrutos?.produtoJsonLd
+  ];
+  metadados.forEach(item => visitar(item));
+  return encontrados;
+}
+
+function evidenciasAvisosBloqueantesMagalu({ avisos = [], fatos = {}, produtoIdEsperado = "" } = {}) {
+  const canonicalObservada = primeiroCampoUrlMagalu(fatos, ["urlCanonica", "canonical"]);
+  const ogUrlObservada = primeiroCampoUrlMagalu(fatos, ["ogUrl", "og:url", "urlOg"]) ||
+    (fatos.metadata?.fontes?.urlCanonica === "og:url" ? canonicalObservada : "");
+  const urlFinalObservada = primeiroCampoUrlMagalu(fatos, ["urlFinal", "finalUrl", "responseUrl"]);
+  const productIdsSkusJsonLd = coletarIdsJsonLdMagalu(fatos);
+  const tentativasHttp = Array.isArray(fatos.metadata?.httpFactual?.tentativas)
+    ? fatos.metadata.httpFactual.tentativas
+    : [];
+  const ultimaHttp = tentativasHttp[tentativasHttp.length - 1] || {};
+  return AVISOS_BLOQUEANTES_MAGALU
+    .filter(aviso => avisos.includes(aviso))
+    .map(aviso => {
+      if (aviso === "magalu_http_403") {
+        return {
+          aviso,
+          detector: "status_http",
+          origem: "HTTP",
+          valorObservado: Number(ultimaHttp.status || 403),
+          productIdEsperado: texto(produtoIdEsperado)
+        };
+      }
+      if (aviso === "magalu_captcha_detectado") {
+        return {
+          aviso,
+          detector: "contemCaptchaMagalu",
+          origem: "HTML textual",
+          valorObservado: "marcador_de_captcha_detectado"
+        };
+      }
+      if (aviso === "magalu_pagina_indisponivel") {
+        return {
+          aviso,
+          detector: "contemPaginaIndisponivelMagalu",
+          origem: "HTML textual",
+          valorObservado: "marcador_de_pagina_indisponivel_detectado"
+        };
+      }
+      if (aviso === "magalu_jsonld_produto_divergente_ignorado") {
+        return {
+          aviso,
+          detector: "produtoJsonLdCompativel",
+          origem: "JSON-LD",
+          valorObservado: {
+            productIdEsperado: texto(produtoIdEsperado),
+            productIdsSkusJsonLd
+          }
+        };
+      }
+      return {
+        aviso,
+        detector: "conteudoComProdutoDivergente",
+        origem: ["canonical", "og:url", "response_url"].filter((origem, indice) =>
+          [canonicalObservada, ogUrlObservada, urlFinalObservada][indice]
+        ),
+        valorObservado: {
+          canonicalObservada,
+          ogUrlObservada,
+          urlFinalObservada,
+          productIdsSkusJsonLd
+        }
+      };
+    });
 }
 
 function temEvidenciaFactual(fatos = {}) {
@@ -350,6 +476,11 @@ function resumoTentativa(fonte = "", statusFactual = "", motivo = "", fatos = {}
   const tentativasHttp = Array.isArray(http.tentativas) ? http.tentativas : [];
   const ultimaHttp = tentativasHttp[tentativasHttp.length - 1] || {};
   const urlFinal = texto(fatos?.urlCanonica || urlCandidata);
+  const avisos = listaUnica(fatos?.avisos || []);
+  const canonicalObservada = primeiroCampoUrlMagalu(fatos, ["urlCanonica", "canonical"]);
+  const ogUrlObservada = primeiroCampoUrlMagalu(fatos, ["ogUrl", "og:url", "urlOg"]) ||
+    (fatos?.metadata?.fontes?.urlCanonica === "og:url" ? canonicalObservada : "");
+  const urlFinalObservada = primeiroCampoUrlMagalu(fatos, ["urlFinal", "finalUrl", "responseUrl"]);
   return {
     fonte,
     statusFactual,
@@ -357,7 +488,15 @@ function resumoTentativa(fonte = "", statusFactual = "", motivo = "", fatos = {}
     statusHttp: Number(ultimaHttp.status || 0),
     urlFinalTipo: tipoUrlMagalu(urlFinal),
     canonicalValida: Boolean(texto(fatos?.urlCanonica) && (!produtoIdEsperado || produtoIdPorUrl(fatos.urlCanonica) === texto(produtoIdEsperado))),
-    productIdObservado: texto(fatos?.produtoId || fatos?.codigo)
+    productIdObservado: texto(fatos?.produtoId || fatos?.codigo),
+    avisos,
+    avisosBloqueantes: avisos.filter(aviso => AVISOS_BLOQUEANTES_MAGALU.includes(aviso)),
+    evidenciasAvisosBloqueantes: evidenciasAvisosBloqueantesMagalu({ avisos, fatos, produtoIdEsperado }),
+    canonicalObservada,
+    canonicalOrigem: texto(fatos?.metadata?.fontes?.urlCanonica),
+    ogUrlObservada,
+    urlFinalObservada,
+    productIdsSkusJsonLd: coletarIdsJsonLdMagalu(fatos)
   };
 }
 
