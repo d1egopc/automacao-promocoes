@@ -5,7 +5,8 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const {
-  extrairProvaIdentidadeMercadoLivreHtml
+  extrairProvaIdentidadeMercadoLivreHtml,
+  extrairTransporteShowProductMercadoLivreHtml
 } = require("../modules/radar/mercadolivre-social-identidade");
 
 function carregarHelpers() {
@@ -33,6 +34,7 @@ function carregarHelpers() {
       }
     },
     extrairProvaIdentidadeMercadoLivreHtml,
+    extrairTransporteShowProductMercadoLivreHtml,
     module: { exports: {} },
     __logs: logs,
     __chamadasRede: chamadasRede

@@ -466,13 +466,14 @@ function provaTransporteShowProductMercadoLivre(resolucaoProduto = {}) {
 }
 
 function imagemCandidataSocialMercadoLivre(provaTransporte = {}, urlOriginalEngine = "") {
-  const imagem = textoMercadoLivre(provaTransporte.imagemCandidataSocial || "");
-  const origem = textoMercadoLivre(provaTransporte.imagemCandidataOrigem || "");
-  const anchor = objetoSeguro(provaTransporte.imagemCandidataAnchor);
+  const prova = objetoSeguro(provaTransporte);
+  const imagem = textoMercadoLivre(prova.imagemCandidataSocial || "");
+  const origem = textoMercadoLivre(prova.imagemCandidataOrigem || "");
+  const anchor = objetoSeguro(prova.imagemCandidataAnchor);
   if (!imagem || origem !== "og:image") return null;
   if (
     textoMercadoLivre(anchor.linkOriginalRadar) !== textoMercadoLivre(urlOriginalEngine) ||
-    textoMercadoLivre(anchor.socialResolvido) !== textoMercadoLivre(provaTransporte.socialResolvido)
+    textoMercadoLivre(anchor.socialResolvido) !== textoMercadoLivre(prova.socialResolvido)
   ) {
     return null;
   }

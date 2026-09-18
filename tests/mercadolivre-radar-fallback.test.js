@@ -291,7 +291,7 @@ async function testarWallComRadarSuficienteRecuperaOferta() {
   assert(logs.some(args => String(args[0]) === "[ENGINE-ML-FALLBACK-RADAR]" && String(args[1] || "").includes("oferta_recuperada")));
 }
 
-async function testarWallComImagemRadarHttpValidaPreservaImagem() {
+async function testarWallComImagemRadarRejeitaImagemPublica() {
   const imagemRadar = "https://cdn.exemplo.com/produto-radar.jpg";
   const contexto = depsBase({ wall: true });
   const resultado = await importarMercadoLivreEngine({
@@ -307,9 +307,9 @@ async function testarWallComImagemRadarHttpValidaPreservaImagem() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(resultado.imagem, imagemRadar);
-  assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
-  assert.strictEqual(resultado.metadata.origemImagem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.imagemOrigem, "nenhuma");
+  assert.strictEqual(resultado.metadata.origemImagem, "nenhuma");
 }
 
 async function testarWallRadarComImagemOficialSubstituiSomenteImagem() {
@@ -352,7 +352,7 @@ async function testarWallRadarComImagemOficialSubstituiSomenteImagem() {
   assert.strictEqual(Object.prototype.hasOwnProperty.call(resultado, "price"), false);
 }
 
-async function testarWallRadarFalhaImagemOficialMantemRadarExata() {
+async function testarWallRadarFalhaImagemOficialFicaSemImagemPublica() {
   const imagemRadar = "https://cdn.exemplo.com/produto-radar-preservado.jpg";
   const contexto = depsBase({
     wall: true,
@@ -372,9 +372,9 @@ async function testarWallRadarFalhaImagemOficialMantemRadarExata() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(resultado.imagem, imagemRadar);
-  assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
-  assert.strictEqual(resultado.metadata.origemImagem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.imagemOrigem, "nenhuma");
+  assert.strictEqual(resultado.metadata.origemImagem, "nenhuma");
   assert.strictEqual(resultado.titulo, "Furadeira Parafusadeira Impacto 21v");
   assert.strictEqual(resultado.preco, 149.9);
   assert.strictEqual(resultado.cupom, "PROMO50");
@@ -410,7 +410,7 @@ async function testarWallRadarPdpFiltersUsaItemIdSemUsarCatalogo() {
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, "MLB4876269031");
 }
 
-async function testarWallRadarPdpSemItemIdNaoChamaImagemOficial() {
+async function testarWallRadarPdpSemItemIdNaoPublicaImagemRadar() {
   const imagemRadar = "https://cdn.exemplo.com/radar-pdp-sem-item.jpg";
   const urlPdp = "https://www.mercadolivre.com.br/processador-amd/p/MLB32444906";
   const contexto = depsBase({
@@ -434,8 +434,8 @@ async function testarWallRadarPdpSemItemIdNaoChamaImagemOficial() {
   });
 
   assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(resultado.imagem, imagemRadar);
-  assert.strictEqual(resultado.imagemOrigem, "radar_mirror/mensagem.midia.imagemOriginal");
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.imagemOrigem, "nenhuma");
   assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
 }
 
@@ -685,7 +685,7 @@ async function testarRadarProdutoComProvaBlocoPrincipalViraTransporteAfiliado() 
   assert.strictEqual(transporte, URL_PRODUTO_BLOCO_PRINCIPAL);
 }
 
-async function testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial() {
+async function testarRadarComProvaBlocoPrincipalPreservaComercialSemImagemRadar() {
   const shortlink = "https://meli.la/shortlink-prova-bloco-principal-fim-a-fim";
   const imagemRadar = "https://cdn.exemplo.com/oferta-original.jpg";
   const prova = extrairProvaIdentidadeMercadoLivreHtml(htmlBlocoPrincipalSocial());
@@ -716,9 +716,10 @@ async function testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial() {
   assert.strictEqual(resultado.preco, 149.9);
   assert.strictEqual(resultado.precoOriginal, 229.9);
   assert.strictEqual(resultado.cupom, "PROMO50");
-  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.imagemOrigem, "nenhuma");
   assert.strictEqual(contexto.chamadas.importar.length, 0);
-  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado.length, 1);
   assert.strictEqual(contexto.chamadas.afiliado[0].url, URL_PRODUTO_BLOCO_PRINCIPAL);
 }
@@ -782,7 +783,7 @@ async function testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial() {
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, prova.mlbItem);
 }
 
-async function testarRadarCandidatoProvadoComErroImagemMantemRadar() {
+async function testarRadarCandidatoProvadoComErroImagemFicaSemImagemPublica() {
   const shortlink = "https://meli.la/shortlink-candidato-radar-imagem-falha";
   const titulo = "Booster Facial Medicube Vita A Retinal Volufiline 5 15ml";
   const imagemRadar = "https://cdn.exemplo.com/radar-fallback-original.jpg";
@@ -822,7 +823,8 @@ async function testarRadarCandidatoProvadoComErroImagemMantemRadar() {
   assert.strictEqual(resultado.preco, 88.88);
   assert.strictEqual(resultado.precoOriginal, 129.9);
   assert.strictEqual(resultado.cupom, "VITA15");
-  assert.strictEqual(resultado.imagem, imagemRadar);
+  assert.strictEqual(resultado.imagem, "");
+  assert.strictEqual(resultado.imagemOrigem, "nenhuma");
   assert.strictEqual(contexto.chamadas.afiliado[0].url, prova.urlProduto);
   assert.strictEqual(contexto.chamadas.imagemOficial[0].mlb, prova.mlbItem);
 }
@@ -1472,11 +1474,11 @@ async function testarErroGenericoNaoAtivaFallback() {
 (async () => {
   await testarHtmlFactualPreservado();
   await testarWallComRadarSuficienteRecuperaOferta();
-  await testarWallComImagemRadarHttpValidaPreservaImagem();
+  await testarWallComImagemRadarRejeitaImagemPublica();
   await testarWallRadarComImagemOficialSubstituiSomenteImagem();
-  await testarWallRadarFalhaImagemOficialMantemRadarExata();
+  await testarWallRadarFalhaImagemOficialFicaSemImagemPublica();
   await testarWallRadarPdpFiltersUsaItemIdSemUsarCatalogo();
-  await testarWallRadarPdpSemItemIdNaoChamaImagemOficial();
+  await testarWallRadarPdpSemItemIdNaoPublicaImagemRadar();
   await testarWallComThumbnailEDirectPathSegueSemImagem();
   await testarWallSemTituloFalhaSeguro();
   await testarTituloWindowsIsoladoContinuaBloqueado();
@@ -1488,9 +1490,9 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarRadarUrlResolvidaProdutoDiretoViraTransporteAfiliado();
   await testarRadarProdutoComProvaForteViraTransporteAfiliado();
   await testarRadarProdutoComProvaBlocoPrincipalViraTransporteAfiliado();
-  await testarRadarComProvaBlocoPrincipalPreservaPublicadosEComercial();
+  await testarRadarComProvaBlocoPrincipalPreservaComercialSemImagemRadar();
   await testarRadarCandidatoProvadoAlimentaAfiliadoEImagemOficial();
-  await testarRadarCandidatoProvadoComErroImagemMantemRadar();
+  await testarRadarCandidatoProvadoComErroImagemFicaSemImagemPublica();
   await testarRadarUrlProdutoResolvidaSlugNikeProvaAfiliadoSemApiIdentidade();
   await testarRadarUrlProdutoProvadaUsaMlbCorretoParaImagemOficial();
   await testarRadarUrlProdutoResolvidaSlugKitDivergenteRejeita();
