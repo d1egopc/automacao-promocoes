@@ -110,6 +110,30 @@ async function importarMagaluFixture({ evento = {}, depsExtras = {} } = {}) {
   });
 }
 
+async function testarTaskLocalAtivaNaoRepeteResolverFactual() {
+  const pacote = deps();
+  let chamadasResolver = 0;
+  const resultado = await importarMagaluFixture({
+    depsExtras: {
+      ...pacote.deps,
+      resolverFatosMagalu: async () => {
+        chamadasResolver += 1;
+        throw new Error("resolver_nao_deveria_ser_chamado");
+      },
+      obterImagemCacheLocalWorker: async () => null,
+      obterTaskImagemMagaluLocalWorker: async () => ({
+        ok: true,
+        task: { id: "task-ativa", status: "pending", capability: "magalu_image_v1" }
+      })
+    }
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "sem_imagem");
+  assert.strictEqual(resultado.retriavel, true);
+  assert.strictEqual(chamadasResolver, 0, "task ativa nao deve repetir resolver factual");
+}
+
 async function testarImportacaoCompletaPreservaPrecoRadar() {
   const pacote = deps();
   const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
@@ -866,6 +890,7 @@ function testarRegistriesPipelineUnico() {
   await testarEngineUsaPoliticaRapidaNoResolver();
   await testarLogRetornoNaoAnunciaOkAntesDosGuards();
   await testarImagemRadarNaoSubstituiImagemOficialAusente();
+  await testarTaskLocalAtivaNaoRepeteResolverFactual();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();
 

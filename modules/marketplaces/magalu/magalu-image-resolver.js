@@ -359,5 +359,6 @@ module.exports = {
   encontrarProdutoExato,
   normalizarImagemMlcdn,
   hostnameMlcdnSeguro,
-  urlImagemResumo
+  urlImagemResumo,
+  validarImagemOficialHttp
 };

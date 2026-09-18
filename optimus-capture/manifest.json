@@ -27,7 +27,8 @@
   "permissions": [
     "activeTab",
     "sidePanel",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://go.optimuspromo.com.br/*",
@@ -40,7 +41,9 @@
     "https://aliexpress.com/*",
     "https://*.aliexpress.com/*",
     "https://kabum.com.br/*",
-    "https://www.kabum.com.br/*"
+    "https://www.kabum.com.br/*",
+    "https://www.magazinevoce.com.br/*",
+    "https://*.mlcdn.com.br/*"
   ],
   "content_scripts": [
     {

@@ -562,11 +562,13 @@ function logSelecaoImagemMercadoLivre({ job = {}, evento = {}, oferta = {}, ofer
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const params = [];
   const retryAgendadoMs = "NULLIF(j.metadata #>> '{afiliacaoWorkspaceRetry,proximaTentativaEmMs}', '')";
+  const retryLocalWorkerMs = "NULLIF(j.metadata #>> '{localWorkerImageRetry,proximaTentativaEmMs}', '')";
+  const retryQualquerMs = `COALESCE(${retryAgendadoMs}, ${retryLocalWorkerMs})`;
   const filtros = [
     "j.status = 'pronto_para_importar'",
     `(CASE
-       WHEN ${retryAgendadoMs} ~ '^[0-9]+$'
-         THEN ${retryAgendadoMs}::bigint <= (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+       WHEN ${retryQualquerMs} ~ '^[0-9]+$'
+         THEN ${retryQualquerMs}::bigint <= (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
        ELSE TRUE
      END)`
   ];
@@ -4814,6 +4816,49 @@ async function agendarRetryAfiliacaoShopee(job = {}, detalhes = {}, opcoes = {})
   return { ok: true, ...plano, estadoRetry };
 }
 
+function planoRetryImagemMagaluLocal(job = {}, agora = new Date()) {
+  const tentativasAnteriores = Number(job?.metadata?.localWorkerImageRetry?.tentativas || 0);
+  const tentativa = Number.isInteger(tentativasAnteriores) && tentativasAnteriores >= 0 ? tentativasAnteriores + 1 : 1;
+  const atrasoMs = [30_000, 120_000, 300_000][tentativa - 1] || null;
+  const dataBase = agora instanceof Date ? agora : new Date(agora);
+  if (!Number.isFinite(dataBase.getTime()) || !atrasoMs) return { reagendar: false, tentativa, tentativasAnteriores };
+  const proximaTentativaEm = new Date(dataBase.getTime() + atrasoMs);
+  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime() };
+}
+
+async function agendarRetryImagemMagaluLocal(job = {}, detalhes = {}, opcoes = {}) {
+  const plano = planoRetryImagemMagaluLocal(job, opcoes.agora || new Date());
+  if (!plano.reagendar) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
+  const estadoRetry = {
+    tentativas: plano.tentativa,
+    motivo: "sem_imagem_local_worker_pendente",
+    ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),
+    proximaTentativaEm: plano.proximaTentativaEm,
+    proximaTentativaEmMs: plano.proximaTentativaEmMs
+  };
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET status = 'pronto_para_importar',
+            tentativas = COALESCE(tentativas, 0) + 1,
+            motivo_final = 'aguardando_enriquecimento_local',
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('localWorkerImageRetry', $2::jsonb),
+            atualizado_em = NOW()
+      WHERE id = $1 AND status = 'importando'
+      RETURNING id, status, tentativas, motivo_final, metadata`,
+    [job.id, JSON.stringify(estadoRetry)]
+  );
+  if (!resultado.ok) return { ...resultado, ...plano };
+  if (resultado.resultado.rowCount === 0) return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando", ...plano };
+  await registrarEtapaImportacao(job.id, "importacao_retry_agendado", "pendente", "aguardando_enriquecimento_local", {
+    marketplace: "magalu",
+    tentativa: plano.tentativa,
+    atrasoMs: plano.atrasoMs,
+    proximaTentativaEm: plano.proximaTentativaEm,
+    ...detalhes
+  });
+  return { ok: true, ...plano, estadoRetry };
+}
+
 module.exports = {
   buscarJobsProntos,
   separarResultadoJobsProntos,
@@ -4829,6 +4874,8 @@ module.exports = {
   numeroRetryAfiliacaoShopee,
   planoRetryAfiliacaoShopee,
   agendarRetryAfiliacaoShopee,
+  planoRetryImagemMagaluLocal,
+  agendarRetryImagemMagaluLocal,
   normalizarOfertaImportada,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,

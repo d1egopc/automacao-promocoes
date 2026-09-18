@@ -8,7 +8,8 @@ const {
   marcarJobOfertaCriada,
   marcarJobRetidaV2,
   marcarJobErroImportacao,
-  agendarRetryAfiliacaoShopee
+  agendarRetryAfiliacaoShopee,
+  agendarRetryImagemMagaluLocal
 } = require("./importer.service");
 const {
   limitarJobs,
@@ -181,6 +182,23 @@ async function tratarFalhaRetriavelShopee(job, resultadoAdapter = {}, marketplac
   }, resumo, contexto);
 }
 
+async function tratarFalhaRetriavelMagalu(job = {}, resultadoAdapter = {}, marketplace, resumo, contexto = {}) {
+  if (marketplace !== "magalu" || resultadoAdapter.retriavel !== true || resultadoAdapter.motivo !== "sem_imagem") return null;
+  const agendar = typeof contexto?.deps?.agendarRetryImagemMagaluLocal === "function"
+    ? contexto.deps.agendarRetryImagemMagaluLocal
+    : agendarRetryImagemMagaluLocal;
+  const agendamento = await agendar(job, { motivo: "imagem_oficial_local_pendente" });
+  if (agendamento?.ok) {
+    if (resumo) {
+      resumo.retentativas = (resumo.retentativas || 0) + 1;
+      motivoAdicionar(resumo, "aguardando_enriquecimento_local");
+    }
+    return { ok: false, retriavel: true, reagendado: true, motivo: "aguardando_enriquecimento_local", tentativa: agendamento.tentativa };
+  }
+  if (agendamento?.esgotado) return finalizarErro(job, "sem_imagem", { marketplace, tentativasRetry: agendamento.tentativa }, resumo, contexto);
+  return finalizarErro(job, "falha_agendar_retry_imagem_magalu", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
+}
+
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   let marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
@@ -304,6 +322,8 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   if (!resultadoAdapter?.ok) {
     const retry = await tratarFalhaRetriavelShopee(job, resultadoAdapter, marketplace, resumo, contexto);
     if (retry) return retry;
+    const retryMagalu = await tratarFalhaRetriavelMagalu(job, resultadoAdapter, marketplace, resumo, contexto);
+    if (retryMagalu) return retryMagalu;
     coberturaRadar.registrar("engine_importer_rejeitado", {
       ...contextoCoberturaImporter(job, { links: linksResultado.links }),
       decisao: "rejeitado",

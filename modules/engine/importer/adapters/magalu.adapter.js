@@ -448,6 +448,59 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
   }
 
+  const produtoIdRadar = produtoIdPorUrl(urlOriginalEngine);
+  let imagemCacheLocal = null;
+  let taskLocalWorker = null;
+  if (typeof deps.obterImagemCacheLocalWorker === "function" && texto(produtoIdRadar)) {
+    try {
+      const cache = await deps.obterImagemCacheLocalWorker({ marketplace: "magalu", productId: produtoIdRadar });
+      if (cache?.source === "local_first_party" && texto(cache.imageUrl) && imagemMlcdnValidaMagalu(cache.imageUrl)) {
+        imagemCacheLocal = texto(cache.imageUrl);
+      }
+    } catch (erro) {
+      logMagaluAdapter("[ENGINE-MAGALU-LOCAL-WORKER-CACHE-ERRO]", {
+        jobId: job.id || null,
+        eventoId: job.evento_id || null,
+        clienteId,
+        productId: produtoIdRadar,
+        motivo: "cache_consulta_falhou",
+        erro: texto(erro?.message).slice(0, 180)
+      });
+    }
+  }
+  if (!imagemCacheLocal && typeof deps.obterTaskImagemMagaluLocalWorker === "function" && texto(produtoIdRadar)) {
+    try {
+      taskLocalWorker = await deps.obterTaskImagemMagaluLocalWorker({ productId: produtoIdRadar });
+    } catch (erro) {
+      logMagaluAdapter("[ENGINE-MAGALU-LOCAL-WORKER-STATUS-ERRO]", {
+        jobId: job.id || null,
+        eventoId: job.evento_id || null,
+        clienteId,
+        productId: produtoIdRadar,
+        motivo: "task_local_worker_status_falhou",
+        erro: texto(erro?.message).slice(0, 180)
+      });
+    }
+  }
+  if (!imagemCacheLocal && ["pending", "leased"].includes(texto(taskLocalWorker?.task?.status))) {
+    return {
+      ok: false,
+      marketplace: "magalu",
+      motivo: "sem_imagem",
+      retriavel: Boolean(taskLocalWorker?.ok),
+      linkOriginal: urlOriginalEngine,
+      imagemEnviavel: false,
+      metadata: {
+        adapter: "magalu",
+        localWorker: {
+          taskId: taskLocalWorker.task.id || null,
+          status: taskLocalWorker.task.status || "",
+          capability: taskLocalWorker.task.capability || ""
+        }
+      }
+    };
+  }
+
   const resolverMagalu = typeof deps.resolverFatosMagalu === "function"
     ? deps.resolverFatosMagalu
     : resolverFatosMagalu;
@@ -522,7 +575,6 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     adicionarAvisoMagalu(avisosProduto, produto?.motivo || "parser_sem_retorno");
   }
 
-  const produtoIdRadar = produtoIdPorUrl(urlOriginalEngine);
   const identidadeOrigemSegura = !avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto);
   const paginaValidada = Boolean(
     identidadeOrigemSegura &&
@@ -577,7 +629,24 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const precoOriginal = extrairPrecoAnteriorRadarSeguroMagalu(evento);
   const economiaCalculada = { economia: "", percentual: "" };
   let imagemSecundaria = null;
-  const imagemAtualValida = imagemMlcdnValidaMagalu(produto.imagem);
+  let imagemAtualValida = imagemMlcdnValidaMagalu(produto.imagem);
+  if (!imagemAtualValida && imagemCacheLocal) {
+    produto.imagem = imagemCacheLocal;
+    imagemAtualValida = true;
+    produto.metadata = {
+      ...(produto.metadata || {}),
+      imagemOficial: {
+        origem: "local_first_party",
+        url: imagemCacheLocal,
+        dimensoes: null,
+        variantes: []
+      },
+      imagemLocalWorker: {
+        fonte: "local_first_party",
+        productId: produtoIdRadar
+      }
+    };
+  }
   if (!imagemAtualValida && typeof deps.consultarProdutoMagalu === "function") {
     const resolverImagem = typeof deps.resolverImagemMagazineVoce === "function"
       ? deps.resolverImagemMagazineVoce
@@ -700,11 +769,29 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   if (!imagemOficial) {
+    if (!taskLocalWorker?.task && typeof deps.garantirImagemMagaluLocalWorker === "function" && texto(produtoIdRadar)) {
+      try {
+        taskLocalWorker = await deps.garantirImagemMagaluLocalWorker({
+          productId: produtoIdRadar,
+          sourceUrl: urlOriginalEngine
+        });
+      } catch (erro) {
+        logMagaluAdapter("[ENGINE-MAGALU-LOCAL-WORKER-TASK-ERRO]", {
+          jobId: job.id || null,
+          eventoId: job.evento_id || null,
+          clienteId,
+          productId: produtoIdRadar,
+          motivo: "task_local_worker_falhou",
+          erro: texto(erro?.message).slice(0, 180)
+        });
+      }
+    }
     logMagaluAdapter("[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]", diagnosticoAfiliacao);
     return {
       ok: false,
       marketplace: "magalu",
       motivo: "sem_imagem",
+      retriavel: Boolean(taskLocalWorker?.ok),
       linkOriginal: urlOriginalEngine,
       imagemEnviavel: false,
       metadata: {
@@ -721,7 +808,10 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         },
         afiliacaoWorkspace: provaAfiliado,
         afiliacaoWorkspaceDiagnostico: diagnosticoAfiliacao,
-        imagemAusenteMotivo: "magalu_sem_imagem_oficial_mlcdn"
+        imagemAusenteMotivo: "magalu_sem_imagem_oficial_mlcdn",
+        localWorker: taskLocalWorker?.task
+          ? { taskId: taskLocalWorker.task.id, status: taskLocalWorker.task.status, capability: taskLocalWorker.task.capability }
+          : null
       }
     };
   }

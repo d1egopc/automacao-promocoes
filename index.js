@@ -62,6 +62,9 @@ const {
 const {
   queryEngine
 } = require("./modules/engine/database");
+const {
+  agendarRetryImagemMagaluLocal
+} = require("./modules/engine/importer/importer.service");
 
 const {
   iniciarOrquestradorEngine,
@@ -230,6 +233,8 @@ const {
 } = require("./modules/identidade-visual-ofertas");
 const criarRotasFinanceiroSimulado = require("./modules/financeiro/simulado.routes");
 const criarRotasCheckoutFinanceiro = require("./modules/financeiro/checkout.routes");
+const { criarLocalWorkerService } = require("./modules/local-worker/local-worker.service");
+const { criarRotasLocalWorker } = require("./modules/local-worker/local-worker.routes");
 const {
   criarRotasPlatformVariables
 } = require("./modules/platform-variables");
@@ -6720,6 +6725,7 @@ function iniciarDiagnosticoRuntime() {
 
 iniciarDiagnosticoRuntime();
 const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
+const localWorkerService = criarLocalWorkerService();
 
 function capturarRawBody(req, res, buf) {
   if (buf && buf.length) req.rawBody = Buffer.from(buf);
@@ -14700,6 +14706,10 @@ app.use("/auth/capture/handoff", criarRotasCaptureHandoff({
   auth,
   getUsuarioById: (clienteId) => buscarUsuarioPorIdSeguro(usuarios, clienteId),
   emitirJwtOptimusUsuario
+}));
+app.use("/local-worker", criarRotasLocalWorker({
+  service: localWorkerService,
+  auth
 }));
 app.use(auth);
 app.get("/extension/oportunidades/resumo", async (req, res) => {
@@ -31856,7 +31866,14 @@ console.log("[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO]", {
 });
 
 initEngineDatabase()
-  .then(() => {
+  .then(async () => {
+    const localWorkerSchema = await localWorkerService.ensureSchema();
+    if (!localWorkerSchema?.ok) {
+      console.log("[LOCAL-WORKER-SCHEMA]", JSON.stringify({
+        ok: false,
+        motivo: localWorkerSchema?.motivo || "schema_indisponivel"
+      }));
+    }
     iniciarCicloEntradaClonador({
       intervaloMs: 120000,
       processarEntradasClonador: () => clonadorGruposBridge.processarCapturasPendentes({
@@ -31892,6 +31909,10 @@ initEngineDatabase()
         gerarDeepLinkAwin,
         consultarProdutoMagalu,
         gerarLinkAfiliadoMagaluSeguro,
+        obterImagemCacheLocalWorker: localWorkerService.obterImagemCache,
+        obterTaskImagemMagaluLocalWorker: localWorkerService.obterTaskImagemMagalu,
+        garantirImagemMagaluLocalWorker: localWorkerService.garantirImagemMagalu,
+        agendarRetryImagemMagaluLocal,
         observarHistoricoClonadorTerminal,
         observarHistoricoClonadorOferta
       }),

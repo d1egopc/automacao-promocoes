@@ -14,6 +14,25 @@
     };
   }
 
+  async function registrarWorkerLocalSilencioso(auth) {
+    try {
+      if (global.OptimusLocalWorkerClient?.ensureRegistered && auth?.token) {
+        await global.OptimusLocalWorkerClient.ensureRegistered(auth.token);
+      }
+    } catch (_) {
+      // A captura autenticada continua disponível mesmo quando o worker local está offline.
+    }
+  }
+
+  async function revogarWorkerLocalSilencioso() {
+    try {
+      if (global.OptimusLocalWorkerClient?.revogar) await global.OptimusLocalWorkerClient.revogar();
+      else if (global.OptimusLocalWorkerClient?.limpar) await global.OptimusLocalWorkerClient.limpar();
+    } catch (_) {
+      try { await global.OptimusLocalWorkerClient?.limpar?.(); } catch (_) {}
+    }
+  }
+
   async function autenticar(user, pass) {
     const resposta = await api.login(user, pass);
     const token = String(resposta?.token || "");
@@ -24,6 +43,7 @@
       autenticadoEm: new Date().toISOString()
     };
     await storage.salvarAuth(auth);
+    void registrarWorkerLocalSilencioso(auth);
     return auth;
   }
 
@@ -38,9 +58,11 @@
         confirmadoEm: new Date().toISOString()
       };
       await storage.salvarAuth(atualizado);
+      void registrarWorkerLocalSilencioso(atualizado);
       return atualizado;
     } catch (erro) {
       if (erro?.status === 401 || erro?.message === "sessao_expirada") {
+        void revogarWorkerLocalSilencioso();
         await storage.limparAuth();
         return null;
       }
@@ -68,10 +90,12 @@
       origem: "capture_handoff"
     };
     await storage.salvarAuth(auth);
+    void registrarWorkerLocalSilencioso(auth);
     return auth;
   }
 
   async function sair() {
+    void revogarWorkerLocalSilencioso();
     await storage.limparAuth();
   }
 
@@ -79,4 +103,3 @@
   global.OptimusCaptureAuth = apiAuth;
   if (typeof module !== "undefined" && module.exports) module.exports = apiAuth;
 })(typeof globalThis !== "undefined" ? globalThis : window);
-
