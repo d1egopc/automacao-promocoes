@@ -335,11 +335,29 @@ function temEvidenciaFactual(fatos = {}) {
   );
 }
 
-function resumoTentativa(fonte = "", statusFactual = "", motivo = "") {
+function tipoUrlMagalu(url = "") {
+  const parsed = parseUrlSegura(url);
+  if (!parsed) return "desconhecida";
+  const caminho = parsed.pathname.toLowerCase();
+  if (caminho.includes("/divulgador/oferta/")) return "divulgador_oferta";
+  if (parsed.hostname.toLowerCase().includes("magazinevoce.com.br")) return "magazinevoce_produto";
+  if (caminho.includes("/p/")) return "pdp_produto";
+  return "magalu_url";
+}
+
+function resumoTentativa(fonte = "", statusFactual = "", motivo = "", fatos = {}, urlCandidata = "", produtoIdEsperado = "") {
+  const http = fatos?.metadata?.httpFactual || {};
+  const tentativasHttp = Array.isArray(http.tentativas) ? http.tentativas : [];
+  const ultimaHttp = tentativasHttp[tentativasHttp.length - 1] || {};
+  const urlFinal = texto(fatos?.urlCanonica || urlCandidata);
   return {
     fonte,
     statusFactual,
-    motivo: texto(motivo)
+    motivo: texto(motivo),
+    statusHttp: Number(ultimaHttp.status || 0),
+    urlFinalTipo: tipoUrlMagalu(urlFinal),
+    canonicalValida: Boolean(texto(fatos?.urlCanonica) && (!produtoIdEsperado || produtoIdPorUrl(fatos.urlCanonica) === texto(produtoIdEsperado))),
+    productIdObservado: texto(fatos?.produtoId || fatos?.codigo)
   };
 }
 
@@ -556,11 +574,11 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
 
     avisos.push(...(avaliacao.avisos || []));
     if (!avaliacao.aceito) {
-      tentativas.push(resumoTentativa(fonte.fonte, "rejeitada", avaliacao.motivo));
+      tentativas.push(resumoTentativa(fonte.fonte, "rejeitada", avaliacao.motivo, fatos, fonte.url, produtoIdOriginal));
       continue;
     }
 
-    tentativas.push(resumoTentativa(fonte.fonte, "aceita", avaliacao.motivo));
+    tentativas.push(resumoTentativa(fonte.fonte, "aceita", avaliacao.motivo, fatos, fonte.url, produtoIdOriginal));
     const retorno = {
       ok: true,
       produtoId: produtoIdOriginal,

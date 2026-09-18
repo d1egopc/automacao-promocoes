@@ -271,6 +271,72 @@ function adicionarAvisoMagalu(avisos = [], aviso = "") {
   if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
 }
 
+function motivoAfiliacaoMagalu({ produto = {}, prova = {}, erroResolver = null } = {}) {
+  const avisos = Array.isArray(produto.avisos) ? produto.avisos : [];
+  if (avisos.includes("magalu_http_403")) return "magalu_http_403";
+  if (avisos.includes("magalu_captcha_detectado")) return "magalu_captcha_detectado";
+  if (avisos.includes("magalu_pagina_indisponivel") || avisos.includes("magalu_http_404")) return "magalu_pagina_indisponivel";
+  if (avisos.some(aviso => /(?:canonica|canonical)/i.test(aviso))) return "magalu_canonical_invalido";
+  if (avisos.some(aviso => /produto.*divergente|divergente.*produto|seller_divergente/i.test(aviso))) return "magalu_produto_divergente";
+  if (erroResolver) return "erro_parser_magalu";
+  if (produto.magaluWorkspaceValidado !== true) return "magalu_workspace_nao_confirmado";
+  if (!texto(produto.urlAfiliavelComprovada)) return "magalu_prova_afiliacao_ausente";
+  return texto(prova.motivoConversao) || texto(produto.motivo) || "outro_motivo_magalu";
+}
+
+function tipoUrlMagaluObservabilidade(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const caminho = parsed.pathname.toLowerCase();
+    if (caminho.includes("/divulgador/oferta/")) return "divulgador_oferta";
+    if (parsed.hostname.toLowerCase().includes("magazinevoce.com.br")) return "magazinevoce_produto";
+    if (caminho.includes("/p/")) return "pdp_produto";
+    return "magalu_url";
+  } catch (_) {
+    return "desconhecida";
+  }
+}
+
+function montarDiagnosticoAfiliacaoMagalu({ job = {}, clienteId = "", promoterId = "", urlOriginal = "", produto = {}, prova = {}, erroResolver = null } = {}) {
+  const tentativas = Array.isArray(produto.metadata?.factualResolver?.tentativas)
+    ? produto.metadata.factualResolver.tentativas
+    : [];
+  const ultima = tentativas[tentativas.length - 1] || {};
+  const motivoInterno = motivoAfiliacaoMagalu({ produto, prova, erroResolver });
+  return {
+    clienteId,
+    jobId: job.id || null,
+    eventoId: job.evento_id || null,
+    productIdEsperado: produtoIdPorUrl(urlOriginal),
+    promoterIdEsperado: promoterId,
+    slugEsperado: texto(prova.slugLoja),
+    fonteTentada: texto(ultima.fonte || produto.metadata?.factualResolver?.fonteUsada),
+    candidatasTentadas: tentativas.map(item => ({
+      fonte: texto(item.fonte),
+      statusFactual: texto(item.statusFactual),
+      motivo: texto(item.motivo),
+      statusHttp: Number(item.statusHttp || 0),
+      urlFinalTipo: texto(item.urlFinalTipo) || tipoUrlMagaluObservabilidade(urlOriginal),
+      canonicalValida: item.canonicalValida === true,
+      productIdObservado: texto(item.productIdObservado)
+    })),
+    statusHttp: Number(ultima.statusHttp || 0),
+    urlFinalTipo: texto(ultima.urlFinalTipo) || tipoUrlMagaluObservabilidade(urlOriginal),
+    motivoInterno,
+    motivoResolver: texto(produto.motivo) || texto(ultima.motivo) || motivoInterno,
+    canonicalValida: Boolean(
+      texto(produto.urlCanonica) &&
+      produtoIdPorUrl(produto.urlCanonica) === produtoIdPorUrl(urlOriginal)
+    ),
+    productIdObservado: texto(produto.produtoId || produto.codigo),
+    workspaceLojaValidada: produto.magaluWorkspaceValidado === true,
+    conversaoStatus: texto(prova.conversaoStatus),
+    urlAfiliavelComprovadaExiste: Boolean(texto(produto.urlAfiliavelComprovada)),
+    provaAfiliacaoExiste: Boolean(prova.conversaoStatus === "convertida" && texto(prova.assinatura)),
+    avisos: [...new Set((Array.isArray(produto.avisos) ? produto.avisos : []).map(texto).filter(Boolean))]
+  };
+}
+
 function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
   const bloqueadores = [
     "magalu_canonica_produto_divergente_ignorada",
@@ -408,6 +474,15 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     urlAfiliadaWorkspace: urlWorkspaceValidada,
     paginaValidada: produto.magaluWorkspaceValidado === true
   });
+  const diagnosticoAfiliacao = montarDiagnosticoAfiliacaoMagalu({
+    job,
+    clienteId,
+    promoterId,
+    urlOriginal: urlOriginalEngine,
+    produto,
+    prova: provaAfiliado,
+    erroResolver
+  });
   const urlCanonica = primeiroValor(urlWorkspaceValidada, produto.urlOriginal, urlOriginalEngine);
   const linkAfiliado = provaAfiliado.conversaoStatus === "convertida" ? texto(provaAfiliado.urlAfiliadaWorkspace) : "";
   const tituloRadarSeguro = extrairTituloRadarSeguroMagalu(evento);
@@ -438,6 +513,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   };
 
   if (avisosProdutoBloqueiamFallbackRadarMagalu(avisosProduto)) {
+    logMagaluAdapter("[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]", diagnosticoAfiliacao);
     return {
       ok: false,
       marketplace: "magalu",
@@ -446,7 +522,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       metadata: {
         adapter: "magalu",
         linksClassificados,
-        avisos: avisosProduto
+        avisos: avisosProduto,
+        afiliacaoWorkspaceDiagnostico: diagnosticoAfiliacao
       }
     };
   }
@@ -460,6 +537,7 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   }
 
   if (!linkAfiliado) {
+    logMagaluAdapter("[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]", diagnosticoAfiliacao);
     return {
       ok: false,
       marketplace: "magalu",
@@ -473,7 +551,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
           productId: provaAfiliado.productId || "",
           conversaoStatus: provaAfiliado.conversaoStatus || "",
           motivoConversao: provaAfiliado.motivoConversao || ""
-        }
+        },
+        afiliacaoWorkspaceDiagnostico: diagnosticoAfiliacao
       }
     };
   }

@@ -120,6 +120,14 @@ async function observarOfertaClonador(contexto = {}, job = {}, oferta = {}, ofer
   try { await contexto.deps.observarHistoricoClonadorOferta({ job, oferta, ofertaId }); } catch (_) {}
 }
 
+function detalhesObservabilidadeMagalu(marketplace = "", resultadoAdapter = {}) {
+  if (marketplace !== "magalu") return {};
+  const diagnostico = resultadoAdapter?.metadata?.afiliacaoWorkspaceDiagnostico;
+  return diagnostico && typeof diagnostico === "object"
+    ? { afiliacaoWorkspaceDiagnostico: diagnostico }
+    : {};
+}
+
 async function finalizarErro(job, motivo, detalhes = {}, resumo, contexto = {}) {
   const transicao = await marcarJobErroImportacao(job.id, motivo, detalhes);
   if (transicao?.ok === true) await observarTerminalClonador(contexto, job, motivo);
@@ -286,10 +294,12 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
     return finalizarErro(job, "erro_importador", { erro: e.message }, resumo, contexto);
   }
 
-  await registrarEtapaImportacao(job.id, "importador_executado", resultadoAdapter?.ok ? "ok" : "erro", resultadoAdapter?.ok ? "importador_ok" : (resultadoAdapter?.motivo || "erro_importacao"), {
+  const detalhesAdapter = {
     marketplace,
-    motivo: resultadoAdapter?.motivo || ""
-  });
+    motivo: resultadoAdapter?.motivo || "",
+    ...detalhesObservabilidadeMagalu(marketplace, resultadoAdapter)
+  };
+  await registrarEtapaImportacao(job.id, "importador_executado", resultadoAdapter?.ok ? "ok" : "erro", resultadoAdapter?.ok ? "importador_ok" : (resultadoAdapter?.motivo || "erro_importacao"), detalhesAdapter);
 
   if (!resultadoAdapter?.ok) {
     const retry = await tratarFalhaRetriavelShopee(job, resultadoAdapter, marketplace, resumo, contexto);
@@ -299,7 +309,7 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       decisao: "rejeitado",
       motivo: resultadoAdapter?.motivo || "erro_importacao"
     });
-    return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", { marketplace }, resumo, contexto);
+    return finalizarErro(job, resultadoAdapter?.motivo || "erro_importacao", detalhesAdapter, resumo, contexto);
   }
 
   console.log("[ENGINE-V2-IMPORTACAO-CONCLUIDA]", JSON.stringify({

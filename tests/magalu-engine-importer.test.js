@@ -161,6 +161,57 @@ async function testarUrlOriginalNaoViraAfiliada() {
   assert.strictEqual(semProva.linkAfiliado, undefined);
 }
 
+async function testarDiagnosticoAfiliacaoFalhaSemRelaxarGate() {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (evento, payload) => {
+    if (evento === "[ENGINE-MAGALU-AFILIACAO-DIAGNOSTICO]") logs.push(JSON.parse(payload));
+  };
+
+  try {
+    const pacote = deps({
+      resolverFatosMagalu: async () => ({
+        ok: false,
+        motivo: "magalu_http_403",
+        produtoId: "",
+        fatos: {
+          avisos: ["magalu_http_403"],
+          metadata: { httpFactual: { tentativas: [{ status: 403 }] } }
+        },
+        tentativas: [{
+          fonte: "magazinevoce_magazine_promoter",
+          statusFactual: "rejeitada",
+          motivo: "magalu_http_403",
+          statusHttp: 403,
+          urlFinalTipo: "magazinevoce_produto",
+          canonicalValida: false,
+          productIdObservado: ""
+        }],
+        avisos: ["magalu_http_403"]
+      })
+    });
+    const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
+    const diagnostico = resultado.metadata.afiliacaoWorkspaceDiagnostico;
+
+    assert.strictEqual(resultado.ok, false, "falha continua fail-closed");
+    assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+    assert.strictEqual(diagnostico.jobId, 501);
+    assert.strictEqual(diagnostico.eventoId, 601);
+    assert.strictEqual(diagnostico.productIdEsperado, "abc123");
+    assert.strictEqual(diagnostico.promoterIdEsperado, "d1egopc");
+    assert.strictEqual(diagnostico.statusHttp, 403);
+    assert.strictEqual(diagnostico.motivoInterno, "magalu_http_403");
+    assert.strictEqual(diagnostico.urlAfiliavelComprovadaExiste, false);
+    assert.strictEqual(diagnostico.provaAfiliacaoExiste, false);
+    assert.strictEqual(diagnostico.candidatasTentadas[0].statusHttp, 403);
+    assert.strictEqual(resultado.linkAfiliado, undefined, "URL original nao vira fallback");
+    assert.strictEqual(logs.length, 1, "diagnostico estruturado deve ser logado uma vez");
+    assert.strictEqual(logs[0].motivoInterno, "magalu_http_403");
+  } finally {
+    console.log = originalLog;
+  }
+}
+
 async function testarDeepLinkSemPrefixoPromoter() {
   const urlWorkspaceNight = "https://www.magazinevoce.com.br/magazined1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";
   const pacote = deps({
@@ -789,6 +840,7 @@ function testarRegistriesPipelineUnico() {
   await testarImportacaoCompletaPreservaPrecoRadar();
   await testarSemPrecoRadarUsaPagina();
   await testarUrlOriginalNaoViraAfiliada();
+  await testarDiagnosticoAfiliacaoFalhaSemRelaxarGate();
   await testarDeepLinkSemPrefixoPromoter();
   await testarIntegracaoAusenteBloqueiaImportacaoAutomatica();
   await testarEngineNaoTrocaProdutoPorCanonicaDivergente();
