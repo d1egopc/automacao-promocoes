@@ -196,13 +196,13 @@ function escolherUrlCanonicaSegura({ resultado, conteudo, urlOriginal = "", urlF
   const urlOriginalLimpa = limparUrlMagalu(urlOriginal);
   const produtoIdOriginal = produtoIdPorUrl(urlOriginalLimpa);
   const candidatas = [
-    extrairLinkCanonical(conteudo, base),
-    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:url"]), base),
-    limparUrlMagalu(urlFinal || ""),
-    urlOriginalLimpa
-  ].filter(Boolean);
+    { url: extrairLinkCanonical(conteudo, base), origem: "canonical" },
+    { url: limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:url"]), base), origem: "og:url" },
+    { url: limparUrlMagalu(urlFinal || ""), origem: "response_url" },
+    { url: urlOriginalLimpa, origem: "url_original" }
+  ].filter(item => item.url);
 
-  for (const candidata of candidatas) {
+  for (const { url: candidata, origem } of candidatas) {
     if (!hostMagaluValido(candidata)) {
       adicionarAviso(resultado.avisos, "magalu_canonica_fora_do_dominio_ignorada");
       continue;
@@ -221,11 +221,13 @@ function escolherUrlCanonicaSegura({ resultado, conteudo, urlOriginal = "", urlF
     }
 
     resultado.urlCanonica = candidata;
+    resultado.metadata.fontes.urlCanonica = origem;
     return;
   }
 
   if (urlProdutoMagaluValida(urlOriginalLimpa)) {
     resultado.urlCanonica = urlOriginalLimpa;
+    resultado.metadata.fontes.urlCanonica = "url_original";
   }
 }
 
@@ -376,6 +378,37 @@ function imagemJsonLd(produto = {}) {
   if (Array.isArray(img)) return limparTextoMagalu(img[0] || "");
   if (img && typeof img === "object") return limparTextoMagalu(img.url || img.contentUrl || "");
   return limparTextoMagalu(img || "");
+}
+
+function dimensoesDeclaradasImagemMagalu(url = "") {
+  const match = String(url || "").match(/\/(\d{2,4})x(\d{2,4})\//i);
+  return match ? { largura: Number(match[1]), altura: Number(match[2]) } : { largura: 0, altura: 0 };
+}
+
+function imagemOficialMagalu(url = "", base = "") {
+  const limpa = limparUrlMagalu(String(url || "").replace(/\\\//g, "/"), base);
+  try {
+    const host = new URL(limpa).hostname.toLowerCase();
+    return host === "a-static.mlcdn.com.br" || host.endsWith(".mlcdn.com.br") ? limpa : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function variantesImagemOficialMagalu({ html = "", produtoJsonLd = null, base = "" } = {}) {
+  const candidatas = [
+    { url: imagemJsonLd(produtoJsonLd), origem: "jsonld.image" },
+    { url: extrairAtributoMeta(html, ["og:image", "twitter:image"]), origem: "meta.image" },
+    ...(String(html || "").match(/https?:\\?\/\\?\/a-static\.mlcdn\.com\.br\\?\/[^\s"'<>]+/gi) || [])
+      .map(url => ({ url, origem: "html.mlcdn" }))
+  ];
+  const porUrl = new Map();
+  for (const candidata of candidatas) {
+    const url = imagemOficialMagalu(candidata.url, base);
+    if (!url || porUrl.has(url)) continue;
+    porUrl.set(url, { url, origem: candidata.origem, ...dimensoesDeclaradasImagemMagalu(url) });
+  }
+  return [...porUrl.values()].sort((a, b) => (b.largura * b.altura) - (a.largura * a.altura));
 }
 
 function categoriaBreadcrumb(breadcrumb = {}) {
@@ -540,13 +573,22 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
     fontes.titulo = produtoJsonLdSeguro?.name ? "jsonld.name" : "meta_ou_title";
   }
 
-  const imagem = conteudoDivergente ? "" : (
-    limparUrlMagalu(imagemJsonLd(produtoJsonLdSeguro), urlFinal || urlOriginal) ||
-    limparUrlMagalu(extrairAtributoMeta(conteudo, ["og:image", "twitter:image"]), urlFinal || urlOriginal)
-  );
+  const variantesImagem = conteudoDivergente
+    ? []
+    : variantesImagemOficialMagalu({ html: conteudo, produtoJsonLd: produtoJsonLdSeguro, base: urlFinal || urlOriginal });
+  const imagem = variantesImagem[0]?.url || "";
   if (imagem) {
     resultado.imagem = imagem;
-    fontes.imagem = imagemJsonLd(produtoJsonLdSeguro) ? "jsonld.image" : "meta.image";
+    fontes.imagem = variantesImagem[0].origem;
+    resultado.metadata.imagemOficial = {
+      origem: variantesImagem[0].origem,
+      url: imagem,
+      dimensoes: {
+        largura: variantesImagem[0].largura,
+        altura: variantesImagem[0].altura
+      },
+      variantes: variantesImagem
+    };
   }
 
   const precoAtual = conteudoDivergente

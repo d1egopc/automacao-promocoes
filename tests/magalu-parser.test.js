@@ -79,6 +79,7 @@ assert.strictEqual(completo.metadata.parseOnly, true);
 assert.strictEqual(completo.metadata.marketplace, "magalu");
 assert.strictEqual(completo.metadata.fontes.titulo, "jsonld.name");
 assert.strictEqual(completo.metadata.fontes.imagem, "jsonld.image");
+assert.strictEqual(completo.metadata.imagemOficial.origem, "jsonld.image");
 assert.strictEqual(completo.metadata.fontes.precoAtual, "jsonld.offers.price");
 assert.strictEqual(completo.metadata.fontes.precoAnterior, "html.preco_de");
 assert.deepStrictEqual(Object.keys(completo).filter(k => /afiliad|promoter/i.test(k)), []);
@@ -227,6 +228,8 @@ const semPrecoAnterior = parseMagaluProdutoHtml({
 });
 assert.strictEqual(moeda(semPrecoAnterior.precoAtual), "R$ 799,90");
 assert.strictEqual(semPrecoAnterior.precoAnterior, "", "ausencia de preco anterior real deve manter vazio");
+assert.strictEqual(semPrecoAnterior.metadata.fontes.imagem, "meta.image");
+assert.strictEqual(semPrecoAnterior.metadata.imagemOficial.origem, "meta.image");
 
 const soParcela = parseMagaluProdutoHtml({
   urlOriginal: urlProduto,
@@ -266,7 +269,7 @@ const metaFallback = parseMagaluProdutoHtml({
 assert.strictEqual(metaFallback.urlCanonica, "https://www.magazineluiza.com.br/item/p/zyx987/");
 assert.strictEqual(metaFallback.produtoId, "zyx987");
 assert.strictEqual(metaFallback.titulo, "Fone Bluetooth Magalu");
-assert.strictEqual(metaFallback.imagem, "https://www.magazineluiza.com.br/fone.jpg");
+assert.strictEqual(metaFallback.imagem, "", "imagem fora do CDN oficial mlcdn nao pode ser enviada");
 assert.strictEqual(moeda(metaFallback.precoAtual), "R$ 149,90");
 assert.strictEqual(moeda(metaFallback.precoAnterior), "R$ 199,90");
 assert.strictEqual(metaFallback.seller, "Loja Parceira");

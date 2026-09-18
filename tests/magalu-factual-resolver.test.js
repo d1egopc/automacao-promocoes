@@ -41,6 +41,7 @@ function fatos({ url, produtoId, titulo = "Produto Magalu", precoAtual = "R$\u00
     seller,
     parcelamento: "",
     cupom: "",
+    metadata: { fontes: { urlCanonica: "canonical" } },
     avisos
   };
 }
@@ -55,19 +56,35 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   };
 }
 
+function assertSemCamposSensiveisNoCache(valor, caminho = "cache") {
+  if (!valor || typeof valor !== "object") return;
+  if (Array.isArray(valor)) {
+    valor.forEach((item, indice) => assertSemCamposSensiveisNoCache(item, `${caminho}[${indice}]`));
+    return;
+  }
+  const camposSensiveis = new Set([
+    "promoterid", "partnerid", "token", "secret", "credenciais",
+    "assinatura", "signature", "linkafiliado", "urlafiliada"
+  ]);
+  for (const [chave, item] of Object.entries(valor)) {
+    assert.ok(!camposSensiveis.has(chave.toLowerCase()), `${caminho}.${chave} nao deve existir no cache factual`);
+    assertSemCamposSensiveisNoCache(item, `${caminho}.${chave}`);
+  }
+}
+
 (async function main() {
 {
   const fontes = construirFontesMagalu({ urlOriginal: urlA07, promoterId: "d1egopc" });
   assert.deepStrictEqual(fontes.map(item => item.fonte), [
-    "pdp_www",
-    "pdp_m",
+    "magazinevoce_magazine_promoter",
     "magazinevoce_promoter",
-    "magazinevoce_magazine_promoter"
+    "pdp_www",
+    "pdp_m"
   ]);
-  assert.strictEqual(fontes[0].url, urlA07);
-  assert.strictEqual(fontes[1].url, urlA07M);
-  assert.strictEqual(fontes[2].url, urlA07Voce);
-  assert.strictEqual(fontes[3].url, urlA07VoceMagazine);
+  assert.strictEqual(fontes[0].url, urlA07VoceMagazine);
+  assert.strictEqual(fontes[1].url, urlA07Voce);
+  assert.strictEqual(fontes[2].url, urlA07);
+  assert.strictEqual(fontes[3].url, urlA07M);
   assert.strictEqual(sellerIdPorUrl(urlGuarda), "modernamobilia2");
 }
 
@@ -75,12 +92,12 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   const chamadas = [];
   const resultado = await resolverFatosMagalu({ urlOriginal: urlA07, promoterId: "d1egopc" }, {
     consultarProdutoMagalu: consultarPorMapa({
-      [urlA07]: fatos({ url: urlA07, produtoId: "240466000", titulo: "Smartphone Samsung A07" })
+      [urlA07VoceMagazine]: fatos({ url: urlA07VoceMagazine, produtoId: "240466000", titulo: "Smartphone Samsung A07" })
     }, chamadas)
   });
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.produtoId, "240466000");
-  assert.strictEqual(resultado.fonteUsada, "pdp_www");
+  assert.strictEqual(resultado.fonteUsada, "magazinevoce_magazine_promoter");
   assert.strictEqual(resultado.fatos.titulo, "Smartphone Samsung A07");
   assert.strictEqual(chamadas.length, 1, "primeira fonte factual suficiente nao chama seguintes");
 }
@@ -89,28 +106,25 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   const chamadas = [];
   const resultado = await resolverFatosMagalu({ urlOriginal: urlA07, promoterId: "d1egopc" }, {
     consultarProdutoMagalu: consultarPorMapa({
-      [urlA07]: fatos({ url: urlA07, produtoId: "240466000", titulo: "", precoAtual: "", imagem: "", avisos: ["magalu_http_403", "magalu_produto_nao_comprovado"] }),
-      [urlA07M]: fatos({ url: urlA07M, produtoId: "240466000", titulo: "A07 Mobile" })
+      [urlA07VoceMagazine]: fatos({ url: urlA07VoceMagazine, produtoId: "240466000", titulo: "", precoAtual: "", imagem: "", avisos: ["magalu_http_403", "magalu_produto_nao_comprovado"] })
     }, chamadas)
   });
-  assert.strictEqual(resultado.ok, true);
-  assert.strictEqual(resultado.fonteUsada, "pdp_m");
-  assert.strictEqual(resultado.fatos.titulo, "A07 Mobile");
-  assert.strictEqual(chamadas.length, 2);
+  assert.strictEqual(resultado.ok, false);
+  assert.ok(resultado.avisos.includes("magalu_http_403"));
 }
 
 {
   const fontes = construirFontesMagalu({ urlOriginal: urlDivulgadorOferta, promoterId: "d1egopc" });
   assert.deepStrictEqual(fontes.map(item => item.fonte), [
-    "pdp_www",
-    "pdp_m",
+    "magazinevoce_magazine_promoter",
     "magazinevoce_promoter",
-    "magazinevoce_magazine_promoter"
+    "pdp_www",
+    "pdp_m"
   ]);
-  assert.strictEqual(fontes[0].url, urlDivulgadorPdp);
-  assert.strictEqual(fontes[1].url, urlDivulgadorPdpM);
-  assert.strictEqual(fontes[2].url, urlDivulgadorPdpVoce);
-  assert.strictEqual(fontes[3].url, urlDivulgadorPdpVoceMagazine);
+  assert.strictEqual(fontes[0].url, urlDivulgadorPdpVoceMagazine);
+  assert.strictEqual(fontes[1].url, urlDivulgadorPdpVoce);
+  assert.strictEqual(fontes[2].url, urlDivulgadorPdp);
+  assert.strictEqual(fontes[3].url, urlDivulgadorPdpM);
   assert.ok(!fontes.some(item => item.url.includes("promoter_id=5438968")));
   assert.ok(!fontes.some(item => item.url.includes("partner_id=3440")));
 }
@@ -119,15 +133,15 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   const chamadas = [];
   const resultado = await resolverFatosMagalu({ urlOriginal: urlDivulgadorOferta, promoterId: "d1egopc" }, {
     consultarProdutoMagalu: consultarPorMapa({
-      [urlDivulgadorPdp]: fatos({ url: urlDivulgadorPdp, produtoId: "241268000", titulo: "Apple iPhone 17 256GB Preto" })
+      [urlDivulgadorPdpVoceMagazine]: fatos({ url: urlDivulgadorPdpVoceMagazine, produtoId: "241268000", titulo: "Apple iPhone 17 256GB Preto" })
     }, chamadas)
   });
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.produtoId, "241268000");
-  assert.strictEqual(resultado.fonteUsada, "pdp_www");
-  assert.strictEqual(resultado.fatos.urlCanonica, urlDivulgadorPdp);
-  assert.strictEqual(resultado.fatos.urlAfiliavelComprovada, urlDivulgadorPdp);
-  assert.strictEqual(chamadas[0], urlDivulgadorPdp);
+  assert.strictEqual(resultado.fonteUsada, "magazinevoce_magazine_promoter");
+  assert.strictEqual(resultado.fatos.urlCanonica, urlDivulgadorPdpVoceMagazine);
+  assert.strictEqual(resultado.fatos.urlAfiliavelComprovada, urlDivulgadorPdpVoceMagazine);
+  assert.strictEqual(chamadas[0], urlDivulgadorPdpVoceMagazine);
 }
 
 {
@@ -216,7 +230,7 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.fonteUsada, "magazinevoce_promoter");
   assert.strictEqual(resultado.fatos.titulo, "A07 Magazine Voce");
-  assert.strictEqual(chamadas.length, 3);
+  assert.strictEqual(chamadas.length, 2);
 }
 
 {
@@ -288,11 +302,11 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
       default: fatos({ url: urlGuarda, produtoId: "ke8kag6fce", titulo: "Guarda Roupa", precoAtual: "R$\u00a01.279,90", seller: "Outro Seller" })
     }, chamadas)
   });
-  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.sellerIdOriginal, "modernamobilia2");
   assert.ok(resultado.avisos.includes("magalu_seller_divergente"));
-  assert.strictEqual(resultado.fatos.precoAtual, "", "seller divergente nao deve manter preco como verdade factual");
-  assert.strictEqual(resultado.fatos.imagem, "https://a-static.mlcdn.com.br/produto.jpg", "imagem vinda da fonte pode ser preservada");
+  assert.strictEqual(resultado.fatos.urlAfiliavelComprovada || "", "");
+  assert.strictEqual(resultado.fatos.imagem, "");
 }
 
 {
@@ -309,14 +323,14 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   let chamadasFetch = 0;
   const primeiro = await resolverFatosMagalu({ urlOriginal: urlProdutoAd, promoterId: "d1egopc" }, {
     parserOptions: {
-      fetchFn: async () => {
+      fetchFn: async url => {
         chamadasFetch += 1;
         return {
           ok: true,
           status: 200,
-          url: urlProdutoAd,
+          url,
           text: async () => `
-            <link rel="canonical" href="${urlProdutoAd}">
+            <link rel="canonical" href="${url}">
             <meta property="og:title" content="Produto Cache Magalu">
             <meta property="product:price:amount" content="101.10">
           `
@@ -366,7 +380,11 @@ function consultarPorMapa(mapa = {}, chamadas = []) {
   });
   assert.strictEqual(bloqueado403.ok, false, "403 vivo nao pode virar sucesso por cache antigo");
   assert.ok(bloqueado403.avisos.includes("magalu_http_403"));
-  assert.ok(!JSON.stringify(segundo).includes("d1egopc"), "cache nao deve expor promoterId");
+  assert.ok(
+    String(segundo.fatos.urlCanonica || "").includes("magazinevoce.com.br/magazined1egopc/"),
+    "cache pode reter a URL publica da loja validada"
+  );
+  assertSemCamposSensiveisNoCache(segundo);
   limparCacheFactualMagalu();
 }
 

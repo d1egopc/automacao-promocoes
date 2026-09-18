@@ -8,7 +8,8 @@ const {
 const {
   normalizarPromoterIdMagalu,
   normalizarSlugLojaMagalu,
-  slugsLojaMagalu
+  slugsLojaMagalu,
+  linkPertenceLojaMagalu
 } = require("./magalu-affiliate-link");
 
 const MAGALU_FACTUAL_CACHE_TTL_MS_PADRAO = 10 * 60 * 1000;
@@ -269,6 +270,23 @@ function construirFontesMagalu({ urlOriginal = "", promoterId = "" } = {}) {
   const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
   if (!produtoIdOriginal) return candidatas;
 
+  const id = normalizarPromoterIdMagalu(promoterId);
+  const aliases = id ? slugsLojaMagalu(id) : [];
+  const ordenados = [
+    normalizarSlugLojaMagalu(id),
+    id,
+    ...aliases
+  ].filter(Boolean);
+
+  for (const slug of listaUnica(ordenados)) {
+    adicionarCandidata(
+      candidatas,
+      vistos,
+      slug === id ? "magazinevoce_promoter" : "magazinevoce_magazine_promoter",
+      urlComHost("www.magazinevoce.com.br", `/${slug}${base.pathname}`, base.search)
+    );
+  }
+
   adicionarCandidata(
     candidatas,
     vistos,
@@ -281,23 +299,6 @@ function construirFontesMagalu({ urlOriginal = "", promoterId = "" } = {}) {
     "pdp_m",
     urlComHost("m.magazineluiza.com.br", base.pathname, base.search)
   );
-
-  const id = normalizarPromoterIdMagalu(promoterId);
-  const aliases = id ? slugsLojaMagalu(id) : [];
-  const ordenados = [
-    id,
-    normalizarSlugLojaMagalu(id),
-    ...aliases
-  ].filter(Boolean);
-
-  for (const slug of listaUnica(ordenados)) {
-    adicionarCandidata(
-      candidatas,
-      vistos,
-      slug === id ? "magazinevoce_promoter" : "magazinevoce_magazine_promoter",
-      urlComHost("www.magazinevoce.com.br", `/${slug}${base.pathname}`, base.search)
-    );
-  }
 
   if (original && host(original).includes("magazinevoce.com.br")) {
     adicionarCandidata(candidatas, vistos, "magazinevoce_original", original.toString());
@@ -434,7 +435,7 @@ function avaliarIdentidadeFactual({ fatos = {}, fonte = {}, produtoIdOriginal = 
   };
 }
 
-function avaliarFatos({ fatos = {}, fonte = {}, urlOriginal = "", produtoIdOriginal = "", sellerIdOriginal = "" } = {}) {
+function avaliarFatos({ fatos = {}, fonte = {}, urlOriginal = "", produtoIdOriginal = "", sellerIdOriginal = "", promoterId = "", exigirSellerCompativel = false } = {}) {
   const avisos = listaUnica(fatos.avisos || []);
   const identidade = avaliarIdentidadeFactual({ fatos, fonte, produtoIdOriginal });
   const produtoIdFonte = texto(identidade.produtoIdFonte || "");
@@ -449,6 +450,19 @@ function avaliarFatos({ fatos = {}, fonte = {}, urlOriginal = "", produtoIdOrigi
 
   if (!temEvidenciaFactual(fatos)) {
     return { aceito: false, motivo: "sem_evidencia_factual", avisos: listaUnica([...avisos, "magalu_produto_nao_comprovado"]) };
+  }
+
+  const fonteWorkspace = /^magazinevoce_(?:promoter|magazine_promoter|original)$/.test(fonte.fonte || "");
+  if (fonteWorkspace) {
+    const origemCanonica = texto(fatos.metadata?.fontes?.urlCanonica);
+    const canonicaComprovada = ["canonical", "og:url"].includes(origemCanonica);
+    if (!canonicaComprovada || !linkPertenceLojaMagalu(fatos.urlCanonica, promoterId)) {
+      return {
+        aceito: false,
+        motivo: "pagina_workspace_sem_canonica_comprovada",
+        avisos: listaUnica([...avisos, "magalu_workspace_sem_canonica_comprovada"])
+      };
+    }
   }
 
   const sellerFonteUrl = sellerIdPorUrl(fonte.url || fatos.urlCanonica || fatos.urlOriginal || "");
@@ -468,6 +482,9 @@ function avaliarFatos({ fatos = {}, fonte = {}, urlOriginal = "", produtoIdOrigi
   }
 
   if (avisosSeller.length) {
+    if (exigirSellerCompativel) {
+      return { aceito: false, motivo: "seller_divergente", avisos: listaUnica([...avisos, ...avisosSeller]) };
+    }
     fatosSeguros = limparPrecosPorSellerDivergente(fatosSeguros, avisosSeller);
   }
 
@@ -532,7 +549,9 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
       fonte,
       urlOriginal,
       produtoIdOriginal,
-      sellerIdOriginal
+      sellerIdOriginal,
+      promoterId,
+      exigirSellerCompativel: true
     });
 
     avisos.push(...(avaliacao.avisos || []));
@@ -550,7 +569,9 @@ async function resolverFatosMagalu({ urlOriginal = "", promoterId = "" } = {}, o
       tentativas,
       fatos: {
         ...avaliacao.fatos,
-        urlAfiliavelComprovada: fonte.url,
+        urlAfiliavelComprovada: avaliacao.fatos.urlCanonica,
+        magaluWorkspaceValidado: /^magazinevoce_(?:promoter|magazine_promoter|original)$/.test(fonte.fonte),
+        fonteWorkspaceValidada: fonte.fonte,
         urlOriginal,
         avisos: listaUnica([...(avaliacao.fatos.avisos || []), ...(avaliacao.avisos || [])])
       },

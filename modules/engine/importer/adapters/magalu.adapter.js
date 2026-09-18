@@ -8,8 +8,8 @@ const {
   resolverFatosMagalu
 } = require("../../../marketplaces/magalu/magalu-factual-resolver");
 const {
-  gerarLinkAfiliadoMagaluSeguro
-} = require("../../../marketplaces/magalu/magalu-affiliate-link");
+  criarProvaAfiliacaoWorkspaceMagalu
+} = require("../../../marketplaces/magalu/afiliacao-workspace");
 const {
   escolherProdutoPrincipal,
   resumoLinksClassificados
@@ -95,6 +95,9 @@ function extrairPrecoEstruturadoRadarMagalu(evento = {}) {
 }
 
 function extrairPrecoTextoRadarMagalu(textoRadar = "") {
+  const ofertaComercial = extrairOfertaComercialTextoRadarMagalu(textoRadar);
+  if (numeroPreco(ofertaComercial.precoAtual) !== null) return ofertaComercial.precoAtual;
+
   const linhas = String(textoRadar || "")
     .split(/\r?\n/)
     .map(linha => linha.trim())
@@ -103,7 +106,9 @@ function extrairPrecoTextoRadarMagalu(textoRadar = "") {
   for (const linha of linhas) {
     const normalizada = linha.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     if (!/r\$\s*\d/i.test(linha)) continue;
-    if (/\b(cupom|off|desconto|cashback|frete|economia|voucher)\b/i.test(normalizada)) continue;
+    if (/\b(cupom|off|desconto|cashback|frete|economia|voucher|sku|codigo|quantidade|qtd|parcela|parcelamento)\b/i.test(normalizada)) continue;
+    if (/\b\d{1,2}\s*x\s+de\b/i.test(normalizada)) continue;
+    if (/^\s*de\b/i.test(normalizada) && !/\bpor\b/i.test(normalizada)) continue;
     const match = linha.match(/R\$\s*\d{1,3}(?:[\.\s]?\d{3})*(?:,\d{2})?|R\$\s*\d+(?:,\d{2})?/i);
     if (match) return match[0].replace(/\s+/g, " ").trim();
   }
@@ -111,11 +116,68 @@ function extrairPrecoTextoRadarMagalu(textoRadar = "") {
   return "";
 }
 
+function extrairOfertaComercialTextoRadarMagalu(textoRadar = "") {
+  const texto = String(textoRadar || "").replace(/\r/g, "");
+  const valorMonetario = "(\\d{1,3}(?:\\.\\d{3})*,\\d{2}|\\d+,\\d{2})";
+  const capturar = rotulo => {
+    const padrao = new RegExp(
+      `(?:^|[|;\\n])\\s*${rotulo}\\s*:?\\s*(?:R\\$\\s*)?${valorMonetario}(?=\\s*(?:$|[|;\\n]))`,
+      "i"
+    );
+    return texto.match(padrao)?.[1] || "";
+  };
+
+  return {
+    precoAtual: capturar("por"),
+    precoAnterior: capturar("de")
+  };
+}
+
 function extrairPrecoRadarSeguroMagalu(evento = {}) {
   return primeiroValor(
     extrairPrecoTextoRadarMagalu(textoOriginalEvento(evento)),
     extrairPrecoEstruturadoRadarMagalu(evento)
   );
+}
+
+function extrairPrecoAnteriorRadarSeguroMagalu(evento = {}) {
+  const precoAnteriorTexto = extrairOfertaComercialTextoRadarMagalu(textoOriginalEvento(evento)).precoAnterior;
+  if (numeroPreco(precoAnteriorTexto) !== null) return precoAnteriorTexto;
+
+  const chaves = ["precoAnterior", "precoOriginal", "precoDe", "precoAntes"];
+  for (const origem of objetosPrecoRadarEvento(evento)) {
+    for (const chave of chaves) {
+      const valor = campoValorPrecoRadar(origem[chave]);
+      if (numeroPreco(valor) !== null) return valor;
+    }
+    const preco = origem.preco && typeof origem.preco === "object" ? origem.preco : null;
+    if (preco) {
+      for (const chave of chaves) {
+        const valor = campoValorPrecoRadar(preco[chave]);
+        if (numeroPreco(valor) !== null) return valor;
+      }
+    }
+  }
+  return "";
+}
+
+function extrairCupomRadarSeguroMagalu(evento = {}) {
+  const candidatos = [
+    evento.cupom,
+    evento.codigoCupom,
+    evento.metadata?.cupom,
+    evento.metadata?.codigoCupom,
+    evento.radarMirror?.cupom,
+    evento.metadata?.radarMirror?.cupom,
+    evento.metadata?.ofcV24?.comercialNormalizado?.cupom
+  ];
+  for (const candidato of candidatos) {
+    const valor = texto(candidato && typeof candidato === "object"
+      ? primeiroValor(candidato.codigo, candidato.valor, candidato.texto)
+      : candidato);
+    if (valor) return valor;
+  }
+  return "";
 }
 
 function normalizarTextoComparacaoMagalu(valor = "") {
@@ -178,19 +240,6 @@ function extrairTituloRadarSeguroMagalu(evento = {}) {
   return extrairTituloTextoRadarMagalu(textoOriginalEvento(evento));
 }
 
-function calcularEconomia(precoAtual, precoOriginal) {
-  const atual = numeroPreco(precoAtual);
-  const original = numeroPreco(precoOriginal);
-
-  if (atual === null || original === null || original <= 0 || atual <= 0 || original <= atual) {
-    return { economia: "", percentual: "" };
-  }
-
-  const economia = Number((original - atual).toFixed(2));
-  const percentual = Math.round((economia / original) * 100);
-  return { economia, percentual };
-}
-
 function escolherLinkMagalu(links = [], evento = {}) {
   const candidatos = [];
 
@@ -236,81 +285,6 @@ function avisosProdutoBloqueiamFallbackRadarMagalu(avisos = []) {
   return bloqueadores.some(aviso => avisos.includes(aviso));
 }
 
-function urlDivulgadorOfertaMagalu(url = "") {
-  try {
-    return /\/divulgador\/oferta\/[^/?#]+/i.test(new URL(url).pathname);
-  } catch (_) {
-    return false;
-  }
-}
-
-function urlAfiliavelMesmoProdutoMagalu(produto = {}, urlOriginal = "", avisos = []) {
-  if (avisos.includes("magalu_captcha_detectado")) {
-    return "";
-  }
-  if (avisos.includes("magalu_pagina_indisponivel")) {
-    return "";
-  }
-  if (avisos.includes("magalu_link_loja_divergente")) {
-    return "";
-  }
-
-  const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
-  const candidatas = urlDivulgadorOfertaMagalu(urlOriginal)
-    ? [produto.urlAfiliavelComprovada, produto.urlCanonica, produto.urlOriginal, urlOriginal]
-    : [urlOriginal, produto.urlCanonica, produto.urlOriginal];
-
-  for (const candidata of candidatas) {
-    const url = primeiroValor(candidata);
-    if (!url) continue;
-
-    const produtoIdCandidato = produtoIdPorUrl(url);
-    if (produtoIdOriginal) {
-      if (produtoIdCandidato && produtoIdCandidato !== produtoIdOriginal) {
-        adicionarAvisoMagalu(avisos, "magalu_link_produto_divergente_ignorado");
-        continue;
-      }
-
-      if (!produtoIdCandidato) {
-        continue;
-      }
-    }
-
-    return url;
-  }
-
-  return "";
-}
-
-function gerarProvaAfiliadoMagaluEngine({ produto = {}, urlOriginal = "", avisos = [], gerarLinkSeguro, promoterId = "" } = {}) {
-  const provaVazia = (avisosExtras = []) => ({
-    urlAfiliada: "",
-    tipoLink: "produto_sem_prova",
-    proveniencia: "",
-    comprovado: false,
-    avisos: avisosExtras.length ? avisosExtras : ["magalu_link_produto_sem_prova"]
-  });
-
-  if (typeof gerarLinkSeguro !== "function") return provaVazia(["magalu_gerador_afiliado_indisponivel"]);
-  if (avisosProdutoBloqueiamFallbackRadarMagalu(avisos)) return provaVazia(["magalu_identidade_produto_insegura"]);
-
-  const urlAfiliavel = urlAfiliavelMesmoProdutoMagalu(produto, urlOriginal, avisos);
-  if (urlAfiliavel) {
-    return {
-      urlBaseUsada: urlAfiliavel,
-      ...gerarLinkSeguro(urlAfiliavel, promoterId)
-    };
-  }
-
-  const produtoIdOriginal = produtoIdPorUrl(urlOriginal);
-  if (!produtoIdOriginal) return provaVazia(["magalu_link_produto_sem_prova"]);
-
-  return {
-    urlBaseUsada: urlOriginal,
-    ...gerarLinkSeguro(urlOriginal, promoterId)
-  };
-}
-
 function logMagaluAdapter(evento, payload = {}) {
   console.log(evento, JSON.stringify(payload));
 }
@@ -350,10 +324,6 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const resolverMagalu = typeof deps.resolverFatosMagalu === "function"
     ? deps.resolverFatosMagalu
     : resolverFatosMagalu;
-  const gerarLinkSeguro = typeof deps.gerarLinkAfiliadoMagaluSeguro === "function"
-    ? deps.gerarLinkAfiliadoMagaluSeguro
-    : gerarLinkAfiliadoMagaluSeguro;
-
   logMagaluAdapter("[ENGINE-MAGALU-IMPORTADOR-CHAMADA]", {
     jobId: job.id,
     eventoId: job.evento_id,
@@ -385,6 +355,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     );
     produto = {
       ...(resolucao?.fatos || {}),
+      sellerIdOriginal: resolucao?.sellerIdOriginal || "",
+      fonteWorkspaceValidada: resolucao?.fonteUsada || "",
+      magaluWorkspaceValidado: resolucao?.fatos?.magaluWorkspaceValidado === true,
       metadata: {
         ...(resolucao?.fatos?.metadata || {}),
         factualResolver: {
@@ -422,25 +395,32 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     adicionarAvisoMagalu(avisosProduto, produto?.motivo || "parser_sem_retorno");
   }
 
-  const provaAfiliado = gerarProvaAfiliadoMagaluEngine({
-    produto,
+  const produtoIdRadar = produtoIdPorUrl(urlOriginalEngine);
+  const urlWorkspaceValidada = produto.magaluWorkspaceValidado === true
+    ? texto(produto.urlAfiliavelComprovada)
+    : "";
+  const provaAfiliado = criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId,
+    promoterId,
+    productId: produtoIdRadar,
+    seller: produto.sellerIdOriginal || "",
     urlOriginal: urlOriginalEngine,
-    avisos: avisosProduto,
-    gerarLinkSeguro,
-    promoterId
+    urlAfiliadaWorkspace: urlWorkspaceValidada,
+    paginaValidada: produto.magaluWorkspaceValidado === true
   });
-  const urlCanonica = primeiroValor(provaAfiliado?.urlBaseUsada, produto.urlOriginal, urlOriginalEngine);
-  const linkAfiliado = provaAfiliado?.comprovado === true ? texto(provaAfiliado.urlAfiliada) : "";
+  const urlCanonica = primeiroValor(urlWorkspaceValidada, produto.urlOriginal, urlOriginalEngine);
+  const linkAfiliado = provaAfiliado.conversaoStatus === "convertida" ? texto(provaAfiliado.urlAfiliadaWorkspace) : "";
   const tituloRadarSeguro = extrairTituloRadarSeguroMagalu(evento);
-  const tituloFinal = primeiroValor(produto.titulo, tituloRadarSeguro);
+  const tituloFinal = primeiroValor(tituloRadarSeguro, produto.titulo);
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
-  const precoPagina = primeiroValor(produto.precoAtual, produto.preco);
   const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
-  const precoAtual = radarDefiniuPreco ? precoRadarSeguro : precoPagina;
+  const precoAtual = radarDefiniuPreco ? precoRadarSeguro : "";
   const precoNumerico = numeroPreco(precoAtual);
+  const precoPagina = primeiroValor(produto.precoAtual, produto.preco);
   const precoPaginaNumerico = numeroPreco(precoPagina);
-  const precoOriginal = primeiroValor(produto.precoAnterior, produto.precoOriginal, produto.precoAntigo);
-  const economiaCalculada = radarDefiniuPreco ? { economia: "", percentual: "" } : calcularEconomia(precoAtual, precoOriginal);
+  const precoOriginal = extrairPrecoAnteriorRadarSeguroMagalu(evento);
+  const economiaCalculada = { economia: "", percentual: "" };
+  const imagemOficial = /^https:\/\/(?:[a-z0-9-]+\.)?mlcdn\.com\.br\//i.test(texto(produto.imagem)) ? texto(produto.imagem) : "";
 
   const payloadRetornoMagalu = {
     jobId: job.id,
@@ -450,9 +430,9 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     precoAtual,
     precoPagina,
     precoOriginal,
-    precoOrigem: radarDefiniuPreco ? "texto_radar" : "pagina_magalu",
+    precoOrigem: radarDefiniuPreco ? "texto_radar" : "radar_ausente",
     linkAfiliado,
-    imagem: produto.imagem || "",
+    imagem: imagemOficial,
     categoria: produto.categoria || "",
     camposRetorno: Object.keys(produto || {})
   };
@@ -483,16 +463,16 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     return {
       ok: false,
       marketplace: "magalu",
-      motivo: "link_afiliado_vazio",
+      motivo: "afiliacao_workspace_incompleta",
       linkOriginal: urlOriginalEngine,
       metadata: {
         adapter: "magalu",
         linksClassificados,
         provaAfiliado: {
-          tipoLink: provaAfiliado?.tipoLink || "",
-          proveniencia: provaAfiliado?.proveniencia || "",
-          comprovado: provaAfiliado?.comprovado === true,
-          avisos: Array.isArray(provaAfiliado?.avisos) ? provaAfiliado.avisos : []
+          slugLoja: provaAfiliado.slugLoja || "",
+          productId: provaAfiliado.productId || "",
+          conversaoStatus: provaAfiliado.conversaoStatus || "",
+          motivoConversao: provaAfiliado.motivoConversao || ""
         }
       }
     };
@@ -510,12 +490,17 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     preco: precoNumerico,
     precoAtual: precoNumerico,
     precoPagina: precoPaginaNumerico,
-    precoOriginal,
+    precoOriginal: numeroPreco(precoOriginal) !== null ? precoOriginal : "",
     precoAntigo: precoOriginal,
     economia: economiaCalculada.economia,
     percentual: economiaCalculada.percentual,
     descontoPercentual: economiaCalculada.percentual,
-    imagem: produto.imagem || "",
+    imagem: imagemOficial,
+    imagemOriginalOficial: imagemOficial,
+    origemImagemOficial: imagemOficial ? "magazinevoce_pagina_validada" : "",
+    dominioImagem: imagemOficial ? new URL(imagemOficial).hostname : "",
+    dimensoesImagem: produto.metadata?.imagemOficial?.dimensoes || null,
+    imagemEnviavel: Boolean(imagemOficial),
     linkOriginal: primeiroValor(produto.urlOriginal, urlOriginalEngine),
     linkExpandido: urlCanonica,
     linkAfiliado,
@@ -523,16 +508,16 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     seller: produto.seller || "",
     produtoId: produto.produtoId || produto.codigo || "",
     produtoIdDetectado: produto.produtoId || produto.codigo || "",
-    cupom: produto.cupom || "",
-    cupomTipo: produto.cupom ? "pagina_magalu" : "",
-    tipoCupom: produto.cupom ? "pagina_magalu" : "",
-    avisoCupom: produto.cupom || "",
-    beneficioTexto: produto.cupom || "",
-    beneficioExtra: produto.cupom || "",
-    parcelamento: produto.parcelamento || "",
+    cupom: extrairCupomRadarSeguroMagalu(evento),
+    cupomTipo: "",
+    tipoCupom: "",
+    avisoCupom: "",
+    beneficioTexto: "",
+    beneficioExtra: "",
+    parcelamento: "",
     valorEfetivo: "",
     valorEfetivoOrigem: "",
-    precoOrigem: radarDefiniuPreco ? "texto_radar" : "pagina_magalu",
+    precoOrigem: radarDefiniuPreco ? "texto_radar" : "radar_ausente",
     origem: "engine_importer_magalu",
     clienteId,
     metadata: {
@@ -551,17 +536,22 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         tipo: item.papelLink,
         urlAfiliada: item.urlOriginal === urlOriginalEngine ? linkAfiliado : "",
         urlAfiliadaWorkspace: item.urlOriginal === urlOriginalEngine ? linkAfiliado : "",
-        renderizavel: item.urlOriginal === urlOriginalEngine,
-        convertidoWorkspace: item.urlOriginal === urlOriginalEngine,
-        conversaoStatus: item.urlOriginal === urlOriginalEngine ? "convertida" : "nao_aplicavel",
-        motivoConversao: item.urlOriginal === urlOriginalEngine ? "magalu_workspace_convertido" : "link_nao_principal"
+        renderizavel: item.urlOriginal === urlOriginalEngine && provaAfiliado.conversaoStatus === "convertida",
+        convertidoWorkspace: item.urlOriginal === urlOriginalEngine && provaAfiliado.conversaoStatus === "convertida",
+        conversaoStatus: item.urlOriginal === urlOriginalEngine
+          ? provaAfiliado.conversaoStatus
+          : "nao_aplicavel",
+        motivoConversao: item.urlOriginal === urlOriginalEngine
+          ? provaAfiliado.motivoConversao
+          : "link_nao_principal"
       })),
       provaAfiliado: {
-        tipoLink: provaAfiliado?.tipoLink || "",
-        proveniencia: provaAfiliado?.proveniencia || "",
-        comprovado: provaAfiliado?.comprovado === true,
-        avisos: Array.isArray(provaAfiliado?.avisos) ? provaAfiliado.avisos : []
+        slugLoja: provaAfiliado.slugLoja || "",
+        productId: provaAfiliado.productId || "",
+        conversaoStatus: provaAfiliado.conversaoStatus || "",
+        motivoConversao: provaAfiliado.motivoConversao || ""
       },
+      afiliacaoWorkspace: provaAfiliado,
       fallbackRadar: {
         usado: !texto(produto.titulo) || erroResolver !== null || produto.ok === false,
         tituloRadarUsado: !texto(produto.titulo) && Boolean(tituloRadarSeguro),
@@ -570,13 +560,13 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
         avisos: avisosProduto
       },
       precoRadarUsado: radarDefiniuPreco,
-      precoOrigem: radarDefiniuPreco ? "texto_radar" : "pagina_magalu",
+        precoOrigem: radarDefiniuPreco ? "texto_radar" : "",
       precoAuditoria: {
         precoRadar: numeroPreco(precoRadarSeguro),
         precoPagina: precoPaginaNumerico,
         precoEscolhido: precoNumerico,
-        origemPreco: radarDefiniuPreco ? "texto_radar" : "pagina_magalu",
-        motivoEscolhaPreco: radarDefiniuPreco ? "preco_radar_explicito_confiavel" : "preco_pagina_sem_preco_radar"
+        origemPreco: radarDefiniuPreco ? "texto_radar" : "radar_ausente",
+        motivoEscolhaPreco: radarDefiniuPreco ? "preco_radar_explicito_confiavel" : "preco_radar_ausente_nao_publicavel"
       },
       camposProduto: Object.keys(produto || {}),
       produto

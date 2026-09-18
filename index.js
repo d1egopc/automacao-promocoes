@@ -317,6 +317,9 @@ const {
 const {
   validarOfertaAfiliacaoWorkspaceShopee
 } = require("./modules/marketplaces/shopee/afiliacao-workspace");
+const {
+  validarOfertaAfiliacaoWorkspaceMagalu
+} = require("./modules/marketplaces/magalu/afiliacao-workspace");
 
 const filaOfertas = require("./utils/fila-ofertas");
 const { criarFilaStore } = require("./modules/fila/fila-store");
@@ -8238,6 +8241,23 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
         destinoEncontrado: true,
         filaRecebeu: true
       });
+    }
+    if (normalizarMarketplaceRadar(oferta.marketplace || oferta.mercado || "") === "magalu") {
+      const integracaoMagalu = getIntegracaoCliente(clienteId, "magalu") || {};
+      const afiliacaoMagalu = validarOfertaAfiliacaoWorkspaceMagalu(oferta, {
+        clienteId,
+        promoterId: integracaoMagalu.credenciais?.promoterId || integracaoMagalu.promoterId || ""
+      });
+      if (!afiliacaoMagalu.ok) {
+        registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
+          decisao: "bloqueado",
+          motivo: "afiliacao_workspace_incompleta",
+          tentativaEnvio: false,
+          destinoEncontrado: true,
+          filaRecebeu: true
+        });
+        return { enviado: false, tentouEnvio: false, motivo: "afiliacao_workspace_incompleta" };
+      }
     }
     const fidelidadeTraceIdExecutor = fidelidadeObs.flagAtiva()
       ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta?.metadata, opcoes)
