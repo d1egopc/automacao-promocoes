@@ -19615,7 +19615,7 @@ function oportunidadeRadarBoa(oferta = {}, radar = {}, cupomRadar = {}) {
 
 function dominioMarketplaceConhecidoRadar(url = "") {
   const marketplaceEngine = detectarMarketplaceEngineLink(url);
-  if (marketplaceEngine === "awin" || marketplaceEngine === "kabum") return marketplaceEngine;
+  if (marketplaceEngine === "awin" || marketplaceEngine === "kabum" || marketplaceEngine === "magalu") return marketplaceEngine;
 
   try {
     const parsed = new URL(String(url || "").trim());

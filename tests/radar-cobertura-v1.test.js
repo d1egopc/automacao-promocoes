@@ -683,7 +683,7 @@ function mockModulo(relativo, exports) {
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkKabumDireto), "kabum");
     assert.strictEqual(normalizers.detectarMarketplaceLink(linkDesconhecido), "");
     assert(indexFonte.includes("const marketplaceEngine = detectarMarketplaceEngineLink(url);"));
-    assert(indexFonte.includes("if (marketplaceEngine === \"awin\" || marketplaceEngine === \"kabum\") return marketplaceEngine;"));
+    assert(indexFonte.includes("if (marketplaceEngine === \"awin\" || marketplaceEngine === \"kabum\" || marketplaceEngine === \"magalu\") return marketplaceEngine;"));
     assert(indexFonte.includes("function dominioAmazonDivulgadorRadar"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(urlLower))"));
     assert(indexFonte.includes("if (dominioAmazonDivulgadorRadar(host)) return \"amazon\";"));
