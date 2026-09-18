@@ -882,8 +882,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("emptyView").hidden, false);
     assert.strictEqual(elemento("produtoView").hidden, true);
     assert.strictEqual(elemento("previewView").hidden, true);
-    assert.strictEqual(elemento("estadoPagina").hidden, false);
-    assert.strictEqual(elemento("estadoPagina").textContent, "marketplace_nao_suportado");
+    assert.strictEqual(elemento("estadoPagina").hidden, true);
     assert.strictEqual(elemento("statusConexao").textContent, "Conectado - DiegoPC");
     assert.strictEqual(capturasSolicitadas, 0, "aba comum nao deve chamar content capture");
   }

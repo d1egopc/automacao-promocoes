@@ -777,8 +777,6 @@
         state.ultimaUrlCapturada = "";
         state.ultimoPreviewKey = "";
         mostrarEstadoVazio();
-        setTexto("estadoPagina", deteccao.motivo || "Página não suportada.");
-        setHidden("estadoPagina", false);
         return;
       }
 
