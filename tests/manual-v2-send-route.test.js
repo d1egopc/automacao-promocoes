@@ -7,6 +7,13 @@ const express = require("express");
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-manual-v2-send-route-"));
 
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
+const { enviarOfertaManualV2: enviarOfertaManualV2Real } = require("../modules/manual-v2/manual-dispatcher");
+const {
+  criarProvaAfiliacaoWorkspaceShopee
+} = require("../modules/marketplaces/shopee/afiliacao-workspace");
+const {
+  criarProvaAfiliacaoWorkspaceAliExpress
+} = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
 const storage = require("../modules/manual-v2/manual-offers.storage");
 const {
   getClienteJsonPath
@@ -550,6 +557,108 @@ function criarOferta(clienteId, id, extra = {}) {
     {
       assert.strictEqual(fs.existsSync(arquivoCliente("cliente_a", "fila.json")), false);
       assert.strictEqual(fs.existsSync(arquivoCliente("cliente_b", "fila.json")), false);
+    }
+
+    {
+      const credenciaisShopee = { appId: "18362140789", secret: "segredo_shopee" };
+      const credenciaisAli = { appKey: "ali_app", trackingId: "workspace_tracking", secret: "segredo_ali" };
+      let integracoesAtuais = {};
+      let enviosReais = 0;
+      const serverReal = await ouvir(criarApp(enviarOfertaManualV2Real, storageOptions, {
+        getIntegracaoCliente: (_clienteId, marketplace) => integracoesAtuais[marketplace] || null,
+        enviarWhatsApp: async () => { enviosReais += 1; },
+        montarMensagemOferta: (oferta) => `${oferta.titulo}\n${oferta.linkAfiliado || oferta.urlAfiliada}`,
+        usuarioTemCreditos: () => true,
+        debitarCreditos: () => true
+      }));
+
+      try {
+        integracoesAtuais = { shopee: { credenciais: credenciaisShopee } };
+        const ofertaShopeeOk = criarOferta("cliente_a", "oferta_shopee_workspace_ok", {
+          marketplace: "shopee",
+          urlOriginal: "https://shopee.com.br/product/111/222",
+          urlAfiliada: "https://s.shopee.com.br/workspace-ok",
+          afiliacaoWorkspaceVerificada: criarProvaAfiliacaoWorkspaceShopee({
+            clienteId: "cliente_a",
+            credenciais: credenciaisShopee,
+            urlOriginal: "https://shopee.com.br/product/111/222",
+            urlAfiliadaWorkspace: "https://s.shopee.com.br/workspace-ok",
+            urlFinalExpandida: "https://shopee.com.br/product/111/222?mmp_pid=an_18362140789",
+            papel: "produto",
+            motivoConversao: "fixture_manual_route"
+          })
+        });
+        const respostaShopeeOk = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaShopeeOk.id}/enviar-agora`, "cliente_a", {
+          destinosIds: ["wa_ok"]
+        });
+        assert.strictEqual(respostaShopeeOk.status, 200);
+        assert.strictEqual(respostaShopeeOk.body.ok, true);
+
+        integracoesAtuais = {};
+        const ofertaShopeeSemIntegracao = criarOferta("cliente_a", "oferta_shopee_sem_integracao", {
+          marketplace: "shopee",
+          urlOriginal: "https://shopee.com.br/product/111/333",
+          urlAfiliada: "https://s.shopee.com.br/workspace-sem-integracao",
+          afiliacaoWorkspaceVerificada: criarProvaAfiliacaoWorkspaceShopee({
+            clienteId: "cliente_a",
+            credenciais: credenciaisShopee,
+            urlOriginal: "https://shopee.com.br/product/111/333",
+            urlAfiliadaWorkspace: "https://s.shopee.com.br/workspace-sem-integracao",
+            papel: "produto",
+            motivoConversao: "fixture_manual_route"
+          })
+        });
+        const respostaShopeeSemIntegracao = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaShopeeSemIntegracao.id}/enviar-agora`, "cliente_a", {
+          destinosIds: ["wa_ok"]
+        });
+        assert.strictEqual(respostaShopeeSemIntegracao.status, 409);
+        assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.resultados[0].erro, "afiliacao_workspace_incompleta");
+
+        integracoesAtuais = { aliexpress: { credenciais: credenciaisAli } };
+        const ofertaAliOk = criarOferta("cliente_a", "oferta_ali_workspace_ok", {
+          marketplace: "aliexpress",
+          urlOriginal: "https://www.aliexpress.com/item/1005007871648777.html",
+          urlAfiliada: "https://s.click.aliexpress.com/e/_workspaceOk",
+          afiliacaoWorkspaceVerificada: criarProvaAfiliacaoWorkspaceAliExpress({
+            clienteId: "cliente_a",
+            credenciais: credenciaisAli,
+            urlOriginal: "https://www.aliexpress.com/item/1005007871648777.html",
+            urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_workspaceOk",
+            papel: "produto",
+            conversaoStatus: "convertida",
+            motivoConversao: "fixture_manual_route"
+          })
+        });
+        const respostaAliOk = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaAliOk.id}/enviar-agora`, "cliente_a", {
+          destinosIds: ["wa_ok"]
+        });
+        assert.strictEqual(respostaAliOk.status, 200);
+        assert.strictEqual(respostaAliOk.body.ok, true);
+
+        integracoesAtuais = {};
+        const ofertaAliSemIntegracao = criarOferta("cliente_a", "oferta_ali_sem_integracao", {
+          marketplace: "aliexpress",
+          urlOriginal: "https://www.aliexpress.com/item/1005007871648778.html",
+          urlAfiliada: "https://s.click.aliexpress.com/e/_workspaceSemIntegracao",
+          afiliacaoWorkspaceVerificada: criarProvaAfiliacaoWorkspaceAliExpress({
+            clienteId: "cliente_a",
+            credenciais: credenciaisAli,
+            urlOriginal: "https://www.aliexpress.com/item/1005007871648778.html",
+            urlAfiliadaWorkspace: "https://s.click.aliexpress.com/e/_workspaceSemIntegracao",
+            papel: "produto",
+            conversaoStatus: "convertida",
+            motivoConversao: "fixture_manual_route"
+          })
+        });
+        const respostaAliSemIntegracao = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaAliSemIntegracao.id}/enviar-agora`, "cliente_a", {
+          destinosIds: ["wa_ok"]
+        });
+        assert.strictEqual(respostaAliSemIntegracao.status, 409);
+        assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.resultados[0].erro, "afiliacao_workspace_incompleta");
+        assert.strictEqual(enviosReais, 2, "somente ofertas com integracao valida devem chegar ao sender");
+      } finally {
+        await new Promise((resolve) => serverReal.close(resolve));
+      }
     }
 
     {

@@ -708,6 +708,7 @@ function criarRotasManualV2(deps = {}) {
         debitarCreditos: deps.debitarCreditos,
         montarMensagemOferta: deps.montarMensagemOferta,
         resolverLinkOfertaPorDestino: deps.resolverLinkOfertaPorDestino,
+        getIntegracaoCliente: deps.getIntegracaoCliente,
         enviarWhatsApp: deps.enviarWhatsApp,
         enviarTelegram: deps.enviarTelegram,
         destinosPorCliente: destinosPorClienteAtual(),
