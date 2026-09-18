@@ -657,6 +657,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(deteccao.marketplace, "shopee");
     const shortlink = detector.detectarMarketplacePorUrl("https://s.shopee.com.br/abc123");
     assert.strictEqual(shortlink.suportado, false);
+    assert.strictEqual(shortlink.reconhecido, true);
+    assert.strictEqual(shortlink.requerUrlCanonica, true);
     assert.strictEqual(shortlink.motivo, "shopee_shortlink_requer_url_real");
   }
 
@@ -675,7 +677,11 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(deteccao.marketplace, "aliexpress");
     assert.strictEqual(deteccao.itemId, "1005007871648778");
     assert.strictEqual(deteccao.url, "https://pt.aliexpress.com/item/1005007871648778.html");
-    assert.strictEqual(detector.detectarMarketplacePorUrl("https://a.aliexpress.com/_mTeste").motivo, "aliexpress_shortlink_requer_url_real");
+    const aliShortlink = detector.detectarMarketplacePorUrl("https://a.aliexpress.com/_mTeste");
+    assert.strictEqual(aliShortlink.motivo, "aliexpress_shortlink_requer_url_real");
+    assert.strictEqual(aliShortlink.reconhecido, true);
+    assert.strictEqual(aliShortlink.requerUrlCanonica, true);
+    assert.strictEqual(detector.detectarMarketplacePorUrl("https://s.click.aliexpress.com/e/_mTeste").requerUrlCanonica, true);
     assert.strictEqual(detector.detectarMarketplacePorUrl("https://pt.aliexpress.com/w/wholesale-projetor.html").motivo, "pagina_aliexpress_sem_produto");
     assert.strictEqual(detector.detectarMarketplacePorUrl("https://pt.aliexpress.com/w/wholesale-projetor.html?itemId=1005007871648778").suportado, false);
     assert.strictEqual(detector.detectarMarketplacePorUrl("https://login.aliexpress.com/").motivo, "pagina_aliexpress_sem_produto");
@@ -737,6 +743,17 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(apiFonte.includes("AbortController"));
     assert.ok(apiFonte.includes("tempo_limite_esgotado"));
     assert.ok(apiFonte.includes("timeoutMs: 45000"));
+    assert.ok(apiFonte.includes('"X-Request-ID"'), "correlacao deve viajar sem substituir Idempotency-Key");
+    assert.ok(panelFonte.includes("captureFlowId"));
+    assert.ok(panelFonte.includes("shortlink_aguardando_canonica"));
+    assert.ok(panelFonte.includes("shortlink_sem_pdp_final"));
+    assert.ok(panelFonte.includes("content_script_indisponivel"));
+    assert.ok(panelFonte.includes("captura_incompleta"));
+    assert.ok(panelFonte.includes("excecao_pre_preview"));
+    assert.ok(panelFonte.includes("CAMPOS_MANUAIS"));
+    assert.ok(panelFonte.includes("manterCampoManual"));
+    assert.ok(panelFonte.includes("marcarCampoEditado"));
+    assert.ok(panelFonte.includes("preservarFormulario"));
     assert.ok(panelHtml.includes('id="destinosView"'));
     assert.ok(panelCss.includes("button:disabled"));
     assert.ok(panelCss.includes("cursor: default"));
@@ -865,7 +882,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("emptyView").hidden, false);
     assert.strictEqual(elemento("produtoView").hidden, true);
     assert.strictEqual(elemento("previewView").hidden, true);
-    assert.strictEqual(elemento("estadoPagina").hidden, true);
+    assert.strictEqual(elemento("estadoPagina").hidden, false);
+    assert.strictEqual(elemento("estadoPagina").textContent, "marketplace_nao_suportado");
     assert.strictEqual(elemento("statusConexao").textContent, "Conectado - DiegoPC");
     assert.strictEqual(capturasSolicitadas, 0, "aba comum nao deve chamar content capture");
   }
@@ -2667,6 +2685,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     let falharProximoPreview = false;
     let resolverPreviewPendente = null;
     const ofertasSalvas = [];
+    const envios = [];
     let urlAtual = "https://shopee.com.br/product/123456/987654";
     let produtoAtual = {
       marketplace: "shopee",
@@ -2757,10 +2776,21 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
           }
         };
       },
-      async salvarOfertaManualV2(_token, oferta) {
-        ofertasSalvas.push(oferta);
-        return { oferta: { ...oferta, id: `oferta_${ofertasSalvas.length}` } };
-      }
+        async salvarOfertaManualV2(_token, oferta) {
+          ofertasSalvas.push(oferta);
+          return { oferta: { ...oferta, id: `oferta_${ofertasSalvas.length}` } };
+        },
+        async listarDestinosManualV2() {
+          return {
+            destinos: [
+              { id: "destino_shopee", nome: "Destino Shopee", tipo: "whatsapp", ativo: true, utilizavel: true }
+            ]
+          };
+        },
+        async enviarAgoraManualV2(_token, ofertaId, destinosIds) {
+          envios.push({ ofertaId, destinosIds: Array.from(destinosIds || []) });
+          return { envio: { enviados: 1, erros: 0 } };
+        }
       },
       OptimusCaptureContract: contrato,
       OptimusCaptureDetector: detector
@@ -2883,6 +2913,114 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
       "Produto já no Brasil",
       "novo produto recebe sua propria sugestao automatica"
     );
+
+    async function aguardarCaptura() {
+      await new Promise(resolve => setTimeout(resolve, 850));
+    }
+
+    async function navegarPara(produto) {
+      produtoAtual = produto;
+      urlAtual = produto.urlOriginal;
+      onUpdated(2, { url: urlAtual });
+      await aguardarCaptura();
+    }
+
+    async function iniciarShortlink(urlShortlink, descricao) {
+      const previewsAntes = previews;
+      urlAtual = urlShortlink;
+      onUpdated(2, { url: urlAtual });
+      await aguardarCaptura();
+      assert.strictEqual(previews, previewsAntes, `${descricao}: shortlink bruto nao pode chegar ao preview`);
+      assert.strictEqual(elemento("estadoPagina").textContent, "Resolvendo página do produto...");
+    }
+
+    async function selecionarDestino() {
+      if (elemento("destinosView").hidden) await elemento("botaoEnviar").listeners.click();
+      const destino = elemento("destinosLista").children[0].children[0];
+      if (!destino.checked) {
+        destino.checked = true;
+        destino.listeners.change();
+      }
+      return destino;
+    }
+
+    async function salvarEEnviarCupom(cupom, descricao) {
+      await elemento("botaoSalvar").listeners.click();
+      assert.strictEqual(ofertasSalvas.at(-1).cupom, cupom, `${descricao}: salvar preserva cupom`);
+      await selecionarDestino();
+      await elemento("botaoEnviar").listeners.click();
+      assert.deepStrictEqual(envios.at(-1).destinosIds, ["destino_shopee"], `${descricao}: enviar usa destino selecionado`);
+    }
+
+    const produtoShopee = (id, cupom) => ({
+      ...produtoAtual,
+      marketplace: "shopee",
+      urlOriginal: `https://shopee.com.br/product/123456/${id}`,
+      cupom
+    });
+    const produtoAli = (id, cupom) => ({
+      ...produtoAtual,
+      marketplace: "aliexpress",
+      urlOriginal: `https://pt.aliexpress.com/item/${id}.html`,
+      cupom
+    });
+
+    await iniciarShortlink("https://s.shopee.com.br/shortAutofill", "Shopee autofill");
+    await navegarPara(produtoShopee("444441", "CUPOM-AUTO-SHOPEE"));
+    assert.strictEqual(elemento("campoCupom").value, "CUPOM-AUTO-SHOPEE", "Shopee preserva autofill quando usuario nao edita");
+
+    await navegarPara(produtoShopee("444442", ""));
+    await selecionarDestino();
+    const destinoSelecionadoAntesResolucao = elemento("destinosLista").children[0].children[0];
+    await iniciarShortlink("https://s.shopee.com.br/shortManual", "Shopee cupom manual");
+    elemento("campoCupom").value = "CUPOM-MANUAL-SHOPEE";
+    elemento("campoCupom").listeners.input();
+    await navegarPara(produtoShopee("444443", ""));
+    assert.strictEqual(elemento("campoCupom").value, "CUPOM-MANUAL-SHOPEE", "Shopee nao sobrescreve cupom manual");
+    assert.strictEqual(elemento("destinosView").hidden, false, "resolucao nao fecha destinos escolhidos");
+    assert.strictEqual(destinoSelecionadoAntesResolucao.checked, true, "resolucao preserva destino selecionado");
+    await salvarEEnviarCupom("CUPOM-MANUAL-SHOPEE", "Shopee cupom manual");
+
+    await navegarPara(produtoShopee("444444", ""));
+    await iniciarShortlink("https://s.shopee.com.br/shortVazio", "Shopee cupom vazio");
+    await navegarPara(produtoShopee("444445", ""));
+    assert.strictEqual(elemento("campoCupom").value, "", "Shopee aceita cupom vazio");
+    await salvarEEnviarCupom("", "Shopee cupom vazio");
+
+    await navegarPara(produtoAli("1005007871648771", ""));
+    await iniciarShortlink("https://a.aliexpress.com/_shortAutofill", "Ali autofill");
+    await navegarPara(produtoAli("1005007871648772", "CUPOM-AUTO-ALI"));
+    assert.strictEqual(elemento("campoCupom").value, "CUPOM-AUTO-ALI", "Ali preserva autofill quando usuario nao edita");
+
+    await navegarPara(produtoAli("1005007871648773", ""));
+    await iniciarShortlink("https://s.click.aliexpress.com/e/_shortManual", "Ali cupom manual");
+    elemento("campoCupom").value = "CUPOM-MANUAL-ALI";
+    elemento("campoCupom").listeners.input();
+    await navegarPara(produtoAli("1005007871648774", ""));
+    assert.strictEqual(elemento("campoCupom").value, "CUPOM-MANUAL-ALI", "Ali nao sobrescreve cupom manual");
+    await salvarEEnviarCupom("CUPOM-MANUAL-ALI", "Ali cupom manual");
+
+    await navegarPara(produtoAli("1005007871648775", ""));
+    await iniciarShortlink("https://a.aliexpress.com/_shortVazio", "Ali cupom vazio");
+    await navegarPara(produtoAli("1005007871648776", ""));
+    assert.strictEqual(elemento("campoCupom").value, "", "Ali aceita cupom vazio");
+    await salvarEEnviarCupom("", "Ali cupom vazio");
+
+    // O preview anterior ja foi enviado; uma PDP nova reproduz o estado real
+    // em que o usuario seleciona destinos antes de um shortlink sem PDP final.
+    await navegarPara(produtoAli("1005007871648777", ""));
+    await selecionarDestino();
+    const previewsAntesShortlinkSemPdp = previews;
+    urlAtual = "https://s.shopee.com.br/semProduto";
+    onUpdated(2, { url: urlAtual });
+    // A captura automatica e agendada apos a navegacao; espere a janela de
+    // resolucao inteira, com margem para o agendamento do painel no browser.
+    await new Promise(resolve => setTimeout(resolve, 6400));
+    assert.strictEqual(previews, previewsAntesShortlinkSemPdp, "shortlink sem PDP final bloqueia preview");
+    assert.strictEqual(elemento("statusLink").textContent, "shortlink_sem_pdp_final");
+    assert.strictEqual(elemento("campoCupom").value, "", "falha de resolucao preserva cupom vazio");
+    assert.strictEqual(elemento("destinosView").hidden, false, "falha de resolucao preserva seletor de destinos");
+    assert.strictEqual(elemento("destinosLista").children[0].children[0].checked, true, "falha de resolucao preserva destino selecionado");
   }
 
   {

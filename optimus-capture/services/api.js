@@ -80,21 +80,25 @@
     return requestJson("/extension/oportunidades/resumo", { token, timeoutMs: 8000 });
   }
 
-  function gerarPreviewCapture(token, produto) {
+  function gerarPreviewCapture(token, produto, requestId) {
     return requestJson("/manual-v2/capture/ofertas", {
       method: "POST",
       token,
       body: produto,
+      headers: requestId ? { "X-Request-ID": requestId } : undefined,
       timeoutMs: 45000
     });
   }
 
-  function salvarOfertaManualV2(token, oferta, idempotencyKey) {
+  function salvarOfertaManualV2(token, oferta, idempotencyKey, requestId) {
     return requestJson("/manual-v2/ofertas", {
       method: "POST",
       token,
       body: { oferta: oferta || {} },
-      headers: idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : undefined
+      headers: {
+        ...(idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : {}),
+        ...(texto(requestId) ? { "X-Request-ID": texto(requestId) } : {})
+      }
     });
   }
 
@@ -102,12 +106,15 @@
     return requestJson(`/manual-v2/destinos?_=${Date.now()}`, { token });
   }
 
-  function enviarAgoraManualV2(token, ofertaId, destinosIds, idempotencyKey) {
+  function enviarAgoraManualV2(token, ofertaId, destinosIds, idempotencyKey, requestId) {
     return requestJson(`/manual-v2/ofertas/${encodeURIComponent(texto(ofertaId))}/enviar-agora`, {
       method: "POST",
       token,
       body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] },
-      headers: idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : undefined
+      headers: {
+        ...(idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : {}),
+        ...(texto(requestId) ? { "X-Request-ID": texto(requestId) } : {})
+      }
     });
   }
 

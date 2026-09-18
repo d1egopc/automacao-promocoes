@@ -424,6 +424,7 @@ function criarRotasManualV2(deps = {}) {
       const logger = deps.logger || console;
       if (logger && typeof logger.log === "function") {
         logger.log("[MANUAL-CAPTURE-PREVIEW]", {
+          requestId: texto(req?.perfRequestId || req?.get?.("x-request-id") || ""),
           clienteId,
           marketplace: resultado?.oferta?.marketplace || "",
           resultado: "ok",
@@ -447,6 +448,7 @@ function criarRotasManualV2(deps = {}) {
       const logger = deps.logger || console;
       if (logger && typeof logger.log === "function") {
         logger.log("[MANUAL-CAPTURE-PREVIEW]", {
+          requestId: texto(req?.perfRequestId || req?.get?.("x-request-id") || ""),
           clienteId,
           marketplace,
           resultado: "erro",

@@ -18,6 +18,10 @@
     capturaPendente: false,
     capturaTimer: null,
     capturaExecucaoId: 0,
+    captureFlowId: "",
+    captureFlowUrl: "",
+    shortlinkPendente: null,
+    camposEditados: new Set(),
     eventosAbasRegistrados: false,
     ultimaUrlCapturada: "",
     observacaoManualUrl: "",
@@ -45,6 +49,7 @@
   };
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
+  const CAMPOS_MANUAIS = Object.freeze(["campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoCupom", "campoObservacoes"]);
 
   function setTexto(id, valor) {
     const node = el(id);
@@ -204,6 +209,9 @@
       const seguro = {
         evento: String(evento || ""),
         marketplace: dados.marketplace || "",
+        flowId: dados.flowId || state.captureFlowId || "",
+        host: dados.host || "",
+        url: dados.url || "",
         asin: dados.asin || "",
         tentativa: dados.tentativa,
         motivo: dados.motivo || "",
@@ -215,6 +223,37 @@
     } catch {
       // Telemetria local nunca interfere na captura.
     }
+  }
+
+  function urlTraceSegura(valor = "") {
+    try {
+      const url = new URL(String(valor || ""));
+      return url.protocol === "https:" ? `${url.protocol}//${url.hostname}${url.pathname}` : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function hostUrl(valor = "") {
+    try { return new URL(String(valor || "")).hostname.toLowerCase(); } catch { return ""; }
+  }
+
+  function registrarSaidaPrePreview(motivo, deteccao = {}, url = "") {
+    logTiming("pre_preview_saida", {
+      marketplace: deteccao.marketplace || "",
+      host: hostUrl(url || deteccao.url),
+      url: urlTraceSegura(url || deteccao.url),
+      motivo,
+      flowId: state.captureFlowId
+    });
+  }
+
+  function marcarCampoEditado(id) {
+    if (CAMPOS_MANUAIS.includes(id)) state.camposEditados.add(id);
+  }
+
+  function manterCampoManual(id, valorAutofill, preservar) {
+    return preservar && state.camposEditados.has(id) ? valor(id) : valorAutofill;
   }
 
   const formatadorMoedaPtBr = new Intl.NumberFormat("pt-BR", {
@@ -580,26 +619,80 @@
     return Boolean(abaAtual?.id === abaId && deteccaoAtual.suportado && urlAtual === urlCaptura);
   }
 
-  function prepararFichaVazia() {
+  function iniciarFlowCaptura(deteccao = {}, url = "") {
+    const pendente = state.shortlinkPendente;
+    if (pendente && pendente.marketplace === deteccao.marketplace) return pendente.flowId;
+    if (state.captureFlowId && state.captureFlowUrl === url) return state.captureFlowId;
+    state.captureFlowId = novaChaveIdempotencia("capture-flow");
+    state.captureFlowUrl = url;
+    return state.captureFlowId;
+  }
+
+  function aguardarUrlCanonica(abaId, deteccao, urlShortlink) {
+    const flowId = state.captureFlowId;
+    state.shortlinkPendente = { marketplace: deteccao.marketplace, flowId, url: urlShortlink };
+    setTexto("estadoPagina", "Resolvendo página do produto...");
+    setHidden("estadoPagina", false);
+    registrarSaidaPrePreview("shortlink_aguardando_canonica", deteccao, urlShortlink);
+    setTimeout(async () => {
+      if (state.shortlinkPendente?.flowId !== flowId) return;
+      const aba = await abaAtiva();
+      if (!aba || aba.id !== abaId) return;
+      const final = detector.detectarMarketplacePorUrl(aba.url || "");
+      if (final.suportado && final.marketplace === deteccao.marketplace) {
+        state.shortlinkPendente = null;
+        void capturar({ forcar: true, preservarFormulario: true });
+        return;
+      }
+      state.shortlinkPendente = null;
+      registrarSaidaPrePreview("shortlink_sem_pdp_final", {
+        marketplace: deteccao.marketplace,
+        url: aba.url || ""
+      }, aba.url || urlShortlink);
+      setTexto("estadoPagina", "Não foi possível chegar à página do produto.");
+      setTexto("statusLink", "shortlink_sem_pdp_final");
+      setHidden("estadoPagina", false);
+    }, 5000);
+  }
+
+  function prepararFichaVazia(opcoes = {}) {
+    const preservarFormulario = opcoes.preservarFormulario === true;
     state.produto = null;
-    limparPreviewAtual();
+    if (preservarFormulario) {
+      state.previewOferta = null;
+      state.previewKey = "";
+      state.previewDesatualizado = false;
+      state.ofertaSalvaId = "";
+      state.previewSalvoKey = "";
+      state.saveIdempotencyKey = "";
+      state.previewEnviadoKey = "";
+      state.envioIdempotencyKey = "";
+      state.envioIdempotencyDestinosKey = "";
+      setHidden("previewView", true);
+    } else {
+      state.camposEditados.clear();
+      limparPreviewAtual();
+    }
     setHidden("emptyView", true);
     setHidden("estadoPagina", false);
     setHidden("produtoView", false);
     el("produtoImagem").src = "";
     el("produtoImagem").hidden = true;
-    el("campoTitulo").value = "";
-    el("campoPrecoAtual").value = "";
-    el("campoPrecoAnterior").value = "";
-    el("campoCupom").value = "";
-    el("campoObservacoes").value = "";
+    if (!preservarFormulario) {
+      el("campoTitulo").value = "";
+      el("campoPrecoAtual").value = "";
+      el("campoPrecoAnterior").value = "";
+      el("campoCupom").value = "";
+      el("campoObservacoes").value = "";
+    }
     el("campoDesconto").value = "";
     setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
     setTexto("statusLink", "Aguardando captura");
   }
 
-  function preencherProduto(produto) {
+  function preencherProduto(produto, opcoes = {}) {
+    const preservarFormulario = opcoes.preservarFormulario === true;
     state.produto = contrato.normalizarProdutoCapturado(produto);
     const preservarObservacaoManual = Boolean(
       state.observacaoManualUrl &&
@@ -614,13 +707,13 @@
     setHidden("produtoView", false);
     el("produtoImagem").src = state.produto.imagem || "";
     el("produtoImagem").hidden = !state.produto.imagem;
-    el("campoTitulo").value = state.produto.titulo || "";
-    el("campoPrecoAtual").value = textoPrecoProduto(state.produto);
-    el("campoPrecoAnterior").value = formatarMoeda(state.produto.precoAnterior);
-    el("campoCupom").value = state.produto.cupom || "";
-    el("campoObservacoes").value = preservarObservacaoManual
+    el("campoTitulo").value = manterCampoManual("campoTitulo", state.produto.titulo || "", preservarFormulario);
+    el("campoPrecoAtual").value = manterCampoManual("campoPrecoAtual", textoPrecoProduto(state.produto), preservarFormulario);
+    el("campoPrecoAnterior").value = manterCampoManual("campoPrecoAnterior", formatarMoeda(state.produto.precoAnterior), preservarFormulario);
+    el("campoCupom").value = manterCampoManual("campoCupom", state.produto.cupom || "", preservarFormulario);
+    el("campoObservacoes").value = manterCampoManual("campoObservacoes", preservarObservacaoManual
       ? state.observacaoManualValor
-      : (state.produto.observacoes || "");
+      : (state.produto.observacoes || ""), preservarFormulario);
     el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
     setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
     setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
@@ -662,24 +755,38 @@
     try {
       const aba = await abaAtiva();
       if (!aba?.id || !aba.url) {
+        registrarSaidaPrePreview("marketplace_nao_detectado", {}, "");
         mostrarEstadoVazio();
         return;
       }
 
       const deteccao = detector.detectarMarketplacePorUrl(aba.url);
+      const veioDeShortlink = Boolean(state.shortlinkPendente?.marketplace === deteccao.marketplace);
+      iniciarFlowCaptura(deteccao, aba.url);
       logTiming("captura_inicio", {
         marketplace: deteccao.marketplace || "",
         asin: deteccao.asin || asinSeguro(aba.url),
         tentativa: 1
       });
       if (!deteccao.suportado) {
+        if (deteccao.reconhecido === true && deteccao.requerUrlCanonica === true) {
+          aguardarUrlCanonica(aba.id, deteccao, aba.url);
+          return;
+        }
+        registrarSaidaPrePreview(deteccao.marketplace ? "url_nao_suportada" : "marketplace_nao_detectado", deteccao, aba.url);
         state.ultimaUrlCapturada = "";
         state.ultimoPreviewKey = "";
         mostrarEstadoVazio();
+        setTexto("estadoPagina", deteccao.motivo || "Página não suportada.");
+        setHidden("estadoPagina", false);
         return;
       }
 
       const urlCaptura = deteccao.url || aba.url;
+      if (veioDeShortlink) {
+        state.shortlinkPendente = null;
+        state.captureFlowUrl = urlCaptura;
+      }
       if (automatico && !forcar && state.ultimaUrlCapturada === urlCaptura && state.produto?.urlOriginal === urlCaptura) {
         if (capturaUtilizavel(state.produto)) {
           const previewKeyAtual = chavePreview(produtoEditado());
@@ -694,7 +801,8 @@
         }
         return;
       }
-      prepararFichaVazia();
+      const preservarFormulario = opcoes.preservarFormulario === true || veioDeShortlink;
+      prepararFichaVazia({ preservarFormulario });
       const resposta = await enviarMensagemCapturaComRecuperacao(aba.id, {
         marketplace: deteccao.marketplace,
         asin: deteccao.asin || asinSeguro(urlCaptura),
@@ -703,10 +811,12 @@
         continua: async () => state.capturaExecucaoId === capturaExecucaoId && await abaPermaneceNaCaptura(aba.id, urlCaptura)
       });
       if (!await abaPermaneceNaCaptura(aba.id, urlCaptura)) {
+        registrarSaidaPrePreview("url_nao_suportada", deteccao, urlCaptura);
         state.capturaPendente = true;
         return;
       }
       if (!resposta?.produto) {
+        registrarSaidaPrePreview("content_script_indisponivel", deteccao, urlCaptura);
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         return;
       }
@@ -715,6 +825,7 @@
         ? motivoAmazonIncompleta(produtoNormalizado, deteccao)
         : "";
       if (motivoAmazon) {
+        registrarSaidaPrePreview("captura_incompleta", deteccao, urlCaptura);
         state.ultimaUrlCapturada = "";
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         setTexto("statusProduto", "Captura incompleta");
@@ -727,12 +838,14 @@
         });
         return;
       }
-      const produto = preencherProduto(resposta.produto);
+      const produto = preencherProduto(resposta.produto, { preservarFormulario });
       if (!await abaPermaneceNaCaptura(aba.id, urlCaptura)) {
+        registrarSaidaPrePreview("url_nao_suportada", deteccao, urlCaptura);
         state.capturaPendente = true;
         return;
       }
       if (!capturaUtilizavel(produto)) {
+        registrarSaidaPrePreview("captura_incompleta", deteccao, urlCaptura);
         state.ultimaUrlCapturada = "";
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         return;
@@ -744,8 +857,10 @@
         duracaoTotalMs: duracaoMs(inicioCapturaMs)
       });
       setTexto("estadoPagina", "Preparando oferta...");
-      await gerarPreview({ automatico: true, inicioCapturaMs });
-    } catch {
+      await gerarPreview({ automatico: true, inicioCapturaMs, preservarDestinos: preservarFormulario });
+    } catch (erro) {
+      registrarSaidaPrePreview("excecao_pre_preview", {}, "");
+      logTiming("excecao_pre_preview", { motivo: String(erro?.message || "erro").slice(0, 120), flowId: state.captureFlowId });
       setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
     } finally {
       state.capturando = false;
@@ -790,12 +905,21 @@
   async function gerarPreview(opcoes = {}) {
     const automatico = opcoes.automatico === true;
     if (!state.auth?.token) return;
+    if (state.shortlinkPendente) {
+      registrarSaidaPrePreview("shortlink_aguardando_canonica", {
+        marketplace: state.shortlinkPendente.marketplace,
+        url: state.shortlinkPendente.url
+      }, state.shortlinkPendente.url);
+      setTexto("statusLink", "Resolvendo página do produto...");
+      return;
+    }
     if (state.enviandoPreview) {
       if (automatico) state.previewPendente = true;
       return;
     }
     const produto = produtoEditado();
     if (!produto.precoAtual && !produto.precoMin) {
+      registrarSaidaPrePreview("captura_incompleta", { marketplace: produto.marketplace }, produto.urlOriginal);
       setTexto("statusProduto", "Captura incompleta");
       setTexto("statusLink", automatico ? "Nao foi possivel preparar a oferta" : "Preco precisa de conferencia.");
       return;
@@ -815,7 +939,7 @@
         asin: asinSeguro(produto.urlOriginal),
         duracaoTotalMs: opcoes.inicioCapturaMs ? duracaoMs(opcoes.inicioCapturaMs) : undefined
       });
-      const resposta = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto));
+      const resposta = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto), state.captureFlowId);
       logTiming("preview_post_fim", {
         marketplace: produto.marketplace,
         asin: asinSeguro(produto.urlOriginal),
@@ -862,7 +986,7 @@
       if (state.previewEnviadoKey !== previewKey) {
         state.previewEnviadoKey = "";
       }
-      ocultarDestinos();
+      if (opcoes.preservarDestinos !== true) ocultarDestinos();
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
       setTexto("estadoPagina", "Oferta pronta");
@@ -909,11 +1033,11 @@
     try {
       let resposta;
       try {
-        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia);
+        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia, state.captureFlowId);
       } catch (erro) {
         if (!erroRedeAmbiguo(erro)) throw erro;
         setTexto("statusLink", "Nao foi possivel confirmar o salvamento. Verificando...");
-        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia);
+        resposta = await api.salvarOfertaManualV2(state.auth.token, oferta, chaveIdempotencia, state.captureFlowId);
       }
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
       const ofertaId = String(resposta?.oferta?.id || "");
@@ -1023,11 +1147,11 @@
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
       let resposta;
       try {
-        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
       } catch (erro) {
         if (!erroRedeAmbiguo(erro)) throw erro;
         setTexto("statusLink", "Nao foi possivel confirmar o envio. Verificando...");
-        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
       }
       if (state.previewKey !== previewKey) return;
       const envio = resposta?.envio || {};
@@ -1181,11 +1305,11 @@
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
     el("fecharOportunidades")?.addEventListener("click", fecharPopoverOportunidades);
-    el("campoTitulo").addEventListener("input", invalidarPreviewPorEdicao);
-    el("campoPrecoAtual").addEventListener("input", invalidarPreviewPorEdicao);
-    el("campoPrecoAnterior").addEventListener("input", invalidarPreviewPorEdicao);
-    el("campoCupom").addEventListener("input", invalidarPreviewPorEdicao);
-    el("campoObservacoes").addEventListener("input", invalidarPreviewPorObservacaoManual);
+    el("campoTitulo").addEventListener("input", () => { marcarCampoEditado("campoTitulo"); invalidarPreviewPorEdicao(); });
+    el("campoPrecoAtual").addEventListener("input", () => { marcarCampoEditado("campoPrecoAtual"); invalidarPreviewPorEdicao(); });
+    el("campoPrecoAnterior").addEventListener("input", () => { marcarCampoEditado("campoPrecoAnterior"); invalidarPreviewPorEdicao(); });
+    el("campoCupom").addEventListener("input", () => { marcarCampoEditado("campoCupom"); invalidarPreviewPorEdicao(); });
+    el("campoObservacoes").addEventListener("input", () => { marcarCampoEditado("campoObservacoes"); invalidarPreviewPorObservacaoManual(); });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void carregarOportunidades();
     });

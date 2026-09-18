@@ -77,9 +77,9 @@ function ouvir(app) {
   });
 }
 
-async function request(server, metodo, caminho, clienteId, body) {
+async function request(server, metodo, caminho, clienteId, body, extras = {}) {
   const url = `http://127.0.0.1:${server.address().port}${caminho}`;
-  const headers = {};
+  const headers = { ...extras };
   if (clienteId) headers["x-cliente-id"] = clienteId;
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await fetch(url, {
@@ -758,6 +758,16 @@ function arquivoOfertas(clienteId) {
       assert.ok(!fonteCapture.includes("importarProdutoKabum"));
       assert.ok(!fonteCapture.includes("kabum-awin.manual.adapter"));
       assert.ok(!fonteRotas.includes("importarMercadoLivre"));
+    }
+
+    {
+      const requestId = "capture-flow-teste-123456";
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_correlacao", payloadValido(), {
+        "x-request-id": requestId
+      });
+      assert.strictEqual(resposta.status, 200);
+      const evento = logger.eventos.map((args) => args[1]).find((dados) => dados?.requestId === requestId);
+      assert.strictEqual(evento?.requestId, requestId, "preview deve registrar a correlacao sem depender de idempotencia");
     }
 
     const logs = JSON.stringify(logger.eventos);

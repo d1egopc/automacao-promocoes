@@ -109,6 +109,8 @@
     if (host === "a.aliexpress.com" || host === "s.click.aliexpress.com") {
       return {
         suportado: false,
+        reconhecido: true,
+        requerUrlCanonica: true,
         marketplace: "aliexpress",
         motivo: "aliexpress_shortlink_requer_url_real",
         url: url.toString()
@@ -149,6 +151,8 @@
     if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
       return {
         suportado: false,
+        reconhecido: true,
+        requerUrlCanonica: true,
         marketplace: "shopee",
         motivo: "shopee_shortlink_requer_url_real",
         url: url.toString()
