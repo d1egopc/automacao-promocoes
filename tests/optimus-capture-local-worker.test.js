@@ -47,5 +47,30 @@ const runner = require("../optimus-capture/local-worker/task-runner.js");
   assert.strictEqual(claims, 1);
   assert.strictEqual(results, 1);
   assert.strictEqual(slugRecebido, "d1egopc");
+  const logs = [];
+  const consoleInfoAnterior = console.info;
+  let failurePayload = null;
+  console.info = (...args) => logs.push(args);
+  try {
+    global.OptimusLocalWorkerClient.claim = async () => ({ task: { id: "2", marketplace: "magalu", productId: "241382400", technicalSlug: "d1egopc", capability: "magalu_image_v1", leaseToken: "lease-2" } });
+    global.OptimusLocalWorkerClient.failure = async (_task, payload) => { failurePayload = payload; return { ok: true }; };
+    global.OptimusMagaluLocalResolver.resolver = async () => { throw new Error("magalu_imagem_busca_captcha"); };
+    await runner.processar();
+  } finally {
+    console.info = consoleInfoAnterior;
+  }
+  assert.strictEqual(failurePayload.motivo, "magalu_imagem_busca_captcha");
+  assert(logs.some(args => args[0] === "[LOCAL-WORKER-TASK-INICIO]"));
+  assert(logs.some(args => args[0] === "[LOCAL-WORKER-FAILURE]"));
+  const logsFailureTransporte = [];
+  console.info = (...args) => logsFailureTransporte.push(args);
+  try {
+    global.OptimusLocalWorkerClient.claim = async () => ({ task: { id: "3", marketplace: "magalu", productId: "241382400", technicalSlug: "d1egopc", capability: "magalu_image_v1", leaseToken: "lease-3" } });
+    global.OptimusLocalWorkerClient.failure = async () => { throw new Error("failure_transport_timeout"); };
+    await runner.processar();
+  } finally {
+    console.info = consoleInfoAnterior;
+  }
+  assert(logsFailureTransporte.some(args => args[0] === "[LOCAL-WORKER-ERRO]"));
   console.log("optimus-capture-local-worker.test.js: ok");
 })().catch(erro => { console.error(erro); process.exitCode = 1; });

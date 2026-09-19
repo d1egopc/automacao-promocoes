@@ -24,14 +24,36 @@
   }
   async function request(path, opts = {}) {
     const controller = typeof AbortController === "function" ? new AbortController() : null;
-    const timeout = setTimeout(() => controller?.abort(), Number(opts.timeoutMs || 10000));
+    const timeoutMs = Math.max(1, Number(opts.timeoutMs || 10000));
+    const timeoutError = () => {
+      const erro = new Error("local_worker_request_timeout");
+      erro.name = "AbortError";
+      return erro;
+    };
+    let response = null;
+    let timer = null;
+    const limite = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller?.abort();
+        reject(timeoutError());
+      }, timeoutMs);
+    });
     try {
       const headers = { "content-type": "application/json", ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}) };
-      const response = await fetch(`${API_BASE}${path}`, { method: opts.method || "GET", headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), ...(controller ? { signal: controller.signal } : {}) });
-      const body = await response.json().catch(() => ({}));
+      response = await Promise.race([
+        fetch(`${API_BASE}${path}`, { method: opts.method || "GET", headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), ...(controller ? { signal: controller.signal } : {}) }),
+        limite
+      ]);
+      const body = await Promise.race([response.json().catch(() => ({})), limite]);
       if (!response.ok || body?.ok === false) throw new Error(String(body?.motivo || body?.erro || `http_${response.status}`));
       return body;
-    } finally { clearTimeout(timeout); }
+    } finally {
+      if (timer) clearTimeout(timer);
+      try {
+        const cancel = response?.body?.cancel?.();
+        cancel?.catch?.(() => {});
+      } catch (_) {}
+    }
   }
   async function ensureRegistered(userToken) {
     const atual = await ler();
@@ -59,8 +81,8 @@
     ensureRegistered,
     claim: () => withWorker(worker => request("/local-worker/claim", { method: "POST", token: worker.token, body: { capabilities: [CAPABILITY] } })),
     heartbeat: (taskId, leaseToken) => withWorker(worker => request("/local-worker/heartbeat", { method: "POST", token: worker.token, body: { taskId, leaseToken } })),
-    result: (task, payload) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/result`, { method: "POST", token: worker.token, body: payload })),
-    failure: (task, payload) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/failure`, { method: "POST", token: worker.token, body: payload })),
+    result: (task, payload, options = {}) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/result`, { method: "POST", token: worker.token, body: payload, timeoutMs: options.timeoutMs })),
+    failure: (task, payload, options = {}) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/failure`, { method: "POST", token: worker.token, body: payload, timeoutMs: options.timeoutMs })),
     revogar,
     limpar: async () => { const store = storage(); if (store) await store.remove(STORAGE_KEY); }
   };

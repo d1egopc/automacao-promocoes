@@ -134,6 +134,33 @@ async function testarTaskLocalAtivaNaoRepeteResolverFactual() {
   assert.strictEqual(chamadasResolver, 0, "task ativa nao deve repetir resolver factual");
 }
 
+async function testarCacheLocalValidoNaoCriaNovaTask() {
+  const pacote = deps();
+  let chamadasGarantirTask = 0;
+  const resultado = await importarMagaluFixture({
+    depsExtras: {
+      ...pacote.deps,
+      resolverFatosMagalu: async (...args) => {
+        const factual = await pacote.deps.resolverFatosMagalu(...args);
+        return { ...factual, fatos: { ...(factual.fatos || {}), imagem: "" } };
+      },
+      obterImagemCacheLocalWorker: async () => ({
+        source: "local_first_party",
+        imageUrl: "https://a-static.mlcdn.com.br/cache-afh3e1g80j.jpg",
+        proof: { taskStatus: "completed" }
+      }),
+      garantirImagemMagaluLocalWorker: async () => {
+        chamadasGarantirTask += 1;
+        throw new Error("cache_valido_nao_deve_criar_task");
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, "https://a-static.mlcdn.com.br/cache-afh3e1g80j.jpg");
+  assert.strictEqual(chamadasGarantirTask, 0, "cache completed nao deve gerar nova task");
+}
+
 async function testarImportacaoCompletaPreservaPrecoRadar() {
   const pacote = deps();
   const resultado = await importarMagaluFixture({ depsExtras: pacote.deps });
@@ -891,6 +918,7 @@ function testarRegistriesPipelineUnico() {
   await testarLogRetornoNaoAnunciaOkAntesDosGuards();
   await testarImagemRadarNaoSubstituiImagemOficialAusente();
   await testarTaskLocalAtivaNaoRepeteResolverFactual();
+  await testarCacheLocalValidoNaoCriaNovaTask();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();
 

@@ -99,8 +99,10 @@ function criarLocalWorkerRepository(opcoes = {}) {
           CREATE UNIQUE INDEX IF NOT EXISTS local_worker_tasks_active_unique
             ON local_worker_tasks (marketplace, product_id, type)
             WHERE status IN ('pending', 'leased');
-          CREATE UNIQUE INDEX IF NOT EXISTS local_worker_tasks_idempotency_unique
-            ON local_worker_tasks (idempotency_key);
+          -- Terminal rows remain immutable history; only active rows dedupe.
+          CREATE UNIQUE INDEX IF NOT EXISTS local_worker_tasks_active_idempotency_unique
+            ON local_worker_tasks (idempotency_key)
+            WHERE status IN ('pending', 'leased');
           CREATE INDEX IF NOT EXISTS local_worker_tasks_claim_idx
             ON local_worker_tasks (status, capability, lease_until, created_at);
           CREATE TABLE IF NOT EXISTS local_worker_image_cache (
