@@ -37,19 +37,39 @@
       return { response, html };
     } finally {
       if (timer) clearTimeout(timer);
-      response?.body?.cancel?.();
+      try {
+        const cancelamento = response?.body?.cancel?.();
+        cancelamento?.catch?.(() => {});
+      } catch (_) {}
     }
   }
-  async function resolver({ productId, slugWorkspace }) {
+  async function identificar({ productId, slugWorkspace }) {
     const slug = encodeURIComponent(texto(slugWorkspace).toLowerCase().replace(/[^a-z0-9-]/g, "")); const id = texto(productId); if (!slug || !id) throw new Error("identidade_magalu_incompleta");
     const url = `https://${HOST}/${slug}/busca/${encodeURIComponent(id)}/`; const leitura = await fetchTextWithTimeout(url); const response = leitura.response; const finalUrl = new URL(response.url || url); const html = leitura.html;
     if (finalUrl.hostname.toLowerCase() !== HOST || !response.ok) throw new Error(`busca_magalu_http_${response.status}`);
     if (desafio(html)) throw new Error("magalu_imagem_busca_captcha");
     const found = parse(html, id); if (!found.imagem || !found.skuConfirmado || !found.hrefConfirmado) throw new Error("magalu_imagem_produto_nao_confirmado");
-    const imageResponse = await fetchWithTimeout(found.imagem, 4000); const finalImage = new URL(imageResponse.url || found.imagem); const ct = texto(imageResponse.headers.get("content-type")).toLowerCase(); imageResponse.body?.cancel?.();
-    if (!imageResponse.ok || !hostMlcdn(finalImage.toString()) || finalImage.protocol !== "https:" || !ct.startsWith("image/")) throw new Error("magalu_imagem_http_nao_confirmada");
-    return { marketplace: "magalu", productId: id, imagemOficialUrl: finalImage.toString(), provaTecnica: { origem: "local_first_party", source: "magazinevoce_busca", productId: id, skuConfirmado: true, hrefConfirmado: true, hrefProduto: found.candidatos[0]?.href || "", hostFinal: finalImage.hostname, imagemOficialUrl: finalImage.toString() }, candidatos: found.candidatos, capability: CAPABILITY };
+    return { marketplace: "magalu", productId: id, imagemOficialUrl: found.imagem, provaTecnica: { origem: "local_first_party", source: "magazinevoce_busca", productId: id, skuConfirmado: true, hrefConfirmado: true, hrefProduto: found.candidatos[0]?.href || "", imagemOficialUrl: found.imagem }, capability: CAPABILITY };
   }
-  global.OptimusMagaluLocalResolver = { resolver, parse, hostMlcdn, imagemMlcdn, CAPABILITY };
+  async function provarImagem({ productId, imagemOficialUrl, provaTecnica }) {
+    const id = texto(productId);
+    const prova = provaTecnica || {};
+    if (!id || texto(prova.productId).toLowerCase() !== id.toLowerCase() || prova.skuConfirmado !== true || prova.hrefConfirmado !== true || !idHref(prova.hrefProduto, id) || !hostMlcdn(imagemOficialUrl)) throw new Error("magalu_imagem_produto_nao_confirmado");
+    const imageResponse = await fetchWithTimeout(imagemOficialUrl, 4000); const finalImage = new URL(imageResponse.url || imagemOficialUrl); const ct = texto(imageResponse.headers.get("content-type")).toLowerCase();
+    try {
+      const cancelamento = imageResponse.body?.cancel?.();
+      cancelamento?.catch?.(() => {});
+    } catch (_) {}
+    if (!imageResponse.ok || !hostMlcdn(finalImage.toString()) || finalImage.protocol !== "https:" || !ct.startsWith("image/")) throw new Error("magalu_imagem_http_nao_confirmada");
+    return { marketplace: "magalu", productId: id, imagemOficialUrl: finalImage.toString(), provaTecnica: { ...provaPublica(prova), hostFinal: finalImage.hostname, imagemOficialUrl: finalImage.toString() }, capability: CAPABILITY };
+  }
+  function provaPublica(prova = {}) {
+    return { origem: texto(prova.origem), source: texto(prova.source), productId: texto(prova.productId), skuConfirmado: prova.skuConfirmado === true, hrefConfirmado: prova.hrefConfirmado === true, hrefProduto: texto(prova.hrefProduto) };
+  }
+  async function resolver({ productId, slugWorkspace }) {
+    const identificado = await identificar({ productId, slugWorkspace });
+    return provarImagem({ productId, imagemOficialUrl: identificado.imagemOficialUrl, provaTecnica: identificado.provaTecnica });
+  }
+  global.OptimusMagaluLocalResolver = { resolver, identificar, provarImagem, parse, hostMlcdn, imagemMlcdn, CAPABILITY };
   if (typeof module !== "undefined" && module.exports) module.exports = global.OptimusMagaluLocalResolver;
 })(typeof globalThis !== "undefined" ? globalThis : self);

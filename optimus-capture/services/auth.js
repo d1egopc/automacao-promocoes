@@ -17,7 +17,7 @@
   async function registrarWorkerLocalSilencioso(auth) {
     try {
       if (global.OptimusLocalWorkerClient?.ensureRegistered && auth?.token) {
-        await global.OptimusLocalWorkerClient.ensureRegistered(auth.token);
+        await global.OptimusLocalWorkerClient.ensureRegistered(auth.token, auth?.usuario?.id);
       }
     } catch (_) {
       // A captura autenticada continua disponível mesmo quando o worker local está offline.
@@ -27,6 +27,15 @@
   async function revogarWorkerLocalSilencioso() {
     try {
       if (global.OptimusLocalWorkerClient?.revogar) await global.OptimusLocalWorkerClient.revogar();
+      else if (global.OptimusLocalWorkerClient?.limpar) await global.OptimusLocalWorkerClient.limpar();
+    } catch (_) {
+      try { await global.OptimusLocalWorkerClient?.limpar?.(); } catch (_) {}
+    }
+  }
+
+  async function encerrarWorkerLocalNoLogout() {
+    try {
+      if (global.OptimusLocalWorkerClient?.revogar) await global.OptimusLocalWorkerClient.revogar({ aguardarRemoto: false });
       else if (global.OptimusLocalWorkerClient?.limpar) await global.OptimusLocalWorkerClient.limpar();
     } catch (_) {
       try { await global.OptimusLocalWorkerClient?.limpar?.(); } catch (_) {}
@@ -95,7 +104,7 @@
   }
 
   async function sair() {
-    void revogarWorkerLocalSilencioso();
+    await encerrarWorkerLocalNoLogout();
     await storage.limparAuth();
   }
 

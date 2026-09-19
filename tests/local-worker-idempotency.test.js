@@ -11,7 +11,14 @@ const REPO_FILE = path.join(__dirname, "..", "modules", "local-worker", "local-w
 const PRECHECK_FILE = path.join(__dirname, "..", "modules", "local-worker", "migrations", "000-local-worker-idempotency-precheck.sql");
 const MIGRATION_FILE = path.join(__dirname, "..", "modules", "local-worker", "migrations", "001-local-worker-idempotency-active.sql");
 
-function tarefa({ id, status = "failed", idempotencyKey = "magalu:afh3e1g80j:imagem_oficial" } = {}) {
+function tarefa({
+  id,
+  status = "failed",
+  idempotencyKey = "magalu:afh3e1g80j:imagem_oficial",
+  attempts = status === "failed" ? 3 : 0,
+  leaseUntil = status === "leased" ? new Date(Date.now() - 1000).toISOString() : null,
+  expiresAt = status === "expired" ? new Date(Date.now() - 1000).toISOString() : new Date(Date.now() + 900000).toISOString()
+} = {}) {
   return {
     id,
     type: "imagem_oficial",
@@ -22,11 +29,14 @@ function tarefa({ id, status = "failed", idempotencyKey = "magalu:afh3e1g80j:ima
     status,
     capability: "magalu_image_v1",
     idempotency_key: idempotencyKey,
-    attempts: status === "failed" ? 3 : 0,
+    claimed_by: status === "leased" ? "worker-anterior" : null,
+    lease_token: status === "leased" ? "lease-anterior" : null,
+    lease_until: leaseUntil,
+    attempts,
     max_attempts: 3,
     created_at: new Date(Date.now() - id * 1000).toISOString(),
     updated_at: new Date().toISOString(),
-    expires_at: status === "expired" ? new Date(Date.now() - 1000).toISOString() : new Date(Date.now() + 900000).toISOString(),
+    expires_at: expiresAt,
     completed_at: status === "completed" ? new Date().toISOString() : null
   };
 }
@@ -48,11 +58,56 @@ class FakePool {
 
   async query(sql, params = []) {
     const normalizado = String(sql).replace(/\s+/g, " ").trim().toLowerCase();
+    if (["begin", "commit", "rollback"].includes(normalizado)) return { rows: [] };
     if (normalizado.startsWith("create table") || normalizado.includes("create unique index") || normalizado.includes("create index") || normalizado.includes("alter table")) {
       this.schemaSql.push(String(sql));
       return { rows: [] };
     }
     if (normalizado.startsWith("update local_worker_workers")) return { rows: [] };
+    if (normalizado.startsWith("update local_worker_tasks") && normalizado.includes("set status = 'expired'") && normalizado.includes("expires_at <= now()")) {
+      const agoraMs = Date.now();
+      const alteradas = [];
+      for (const row of this.rows) {
+        if (["pending", "leased"].includes(row.status) && row.expires_at && Date.parse(row.expires_at) <= agoraMs) {
+          row.status = "expired";
+          row.claimed_by = null;
+          row.lease_token = null;
+          row.lease_until = null;
+          row.updated_at = new Date().toISOString();
+          alteradas.push(row);
+        }
+      }
+      return { rows: alteradas };
+    }
+    if (normalizado.startsWith("update local_worker_tasks set status = 'failed'") && normalizado.includes("attempts >= max_attempts")) {
+      for (const row of this.rows) {
+        if (row.status === "leased" && Date.parse(row.lease_until || 0) <= Date.now() && row.attempts >= row.max_attempts) {
+          row.status = "failed";
+          row.claimed_by = null;
+          row.lease_token = null;
+          row.lease_until = null;
+        }
+      }
+      return { rows: [] };
+    }
+    if (normalizado.startsWith("with candidato as") && normalizado.includes("for update skip locked")) {
+      const [capabilities, workerId, leaseToken, leaseMs] = params;
+      const agoraMs = Date.now();
+      const row = this.rows
+        .filter(item => capabilities.includes(item.capability))
+        .filter(item => item.attempts < item.max_attempts)
+        .filter(item => item.status === "pending" || (item.status === "leased" && Date.parse(item.lease_until || 0) <= agoraMs))
+        .filter(item => !item.expires_at || Date.parse(item.expires_at) > agoraMs)
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || Number(a.id) - Number(b.id))[0];
+      if (!row) return { rows: [] };
+      row.status = "leased";
+      row.claimed_by = workerId;
+      row.lease_token = leaseToken;
+      row.lease_until = new Date(agoraMs + Number(leaseMs)).toISOString();
+      row.attempts += 1;
+      row.updated_at = new Date().toISOString();
+      return { rows: [row] };
+    }
     if (normalizado.startsWith("select * from local_worker_tasks where marketplace")) {
       const [marketplace, productId, type] = params;
       const candidatos = this.rows
@@ -95,6 +150,10 @@ class FakePool {
       return { rows: [row] };
     }
     throw new Error(`fake_pool_query_nao_mapeada: ${normalizado.slice(0, 120)}`);
+  }
+
+  async connect() {
+    return { query: this.query.bind(this), release: () => {} };
   }
 }
 
@@ -189,6 +248,42 @@ function opcoesTask() {
   const bloqueada = await concorrenteRepo.garantirTask(opcoesTask());
   assert.strictEqual(bloqueada.criada, false);
   assert.strictEqual(bloqueada.task.id, String(taskAtiva.id));
+
+  const reclaimPool = new FakePool([
+    tarefa({ id: 201, status: "leased", attempts: 1, leaseUntil: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 900000).toISOString() })
+  ]);
+  const reclaimRepo = criarLocalWorkerRepository({ pool: reclaimPool });
+  const reclaim = await reclaimRepo.claim({ workerId: "worker-novo", capabilities: ["magalu_image_v1"], leaseMs: 90000 });
+  assert.strictEqual(reclaim.ok, true);
+  assert.strictEqual(reclaim.task.id, "201", "lease vencida com TTL válido deve ser reclaim da mesma task");
+  assert.strictEqual(reclaim.task.attempts, 2);
+  assert.strictEqual(reclaimPool.rows[0].claimed_by, "worker-novo");
+
+  const reclaimConcorrentePool = new FakePool([
+    tarefa({ id: 251, status: "leased", attempts: 1, leaseUntil: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 900000).toISOString() })
+  ]);
+  const reclaimConcorrenteRepo = criarLocalWorkerRepository({ pool: reclaimConcorrentePool });
+  const reclaims = await Promise.all([
+    reclaimConcorrenteRepo.claim({ workerId: "worker-a", capabilities: ["magalu_image_v1"], leaseMs: 90000 }),
+    reclaimConcorrenteRepo.claim({ workerId: "worker-b", capabilities: ["magalu_image_v1"], leaseMs: 90000 })
+  ]);
+  assert.strictEqual(reclaims.filter(resultado => resultado.task).length, 1, "dois workers não podem reclaimar a mesma task");
+  assert.strictEqual(reclaimConcorrentePool.rows[0].attempts, 2, "reclaim concorrente deve incrementar attempt uma única vez");
+
+  const staleHistorica = tarefa({ id: 301, status: "leased", attempts: 1, leaseUntil: new Date(Date.now() - 2000).toISOString(), expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const stalePool = new FakePool([staleHistorica]);
+  const staleRepo = criarLocalWorkerRepository({ pool: stalePool });
+  const staleClaim = await staleRepo.claim({ workerId: "worker-novo", capabilities: ["magalu_image_v1"], leaseMs: 90000 });
+  assert.strictEqual(staleClaim.ok, true);
+  assert.strictEqual(staleClaim.task, null, "task com TTL vencido não pode ser reclamada");
+  assert.strictEqual(staleHistorica.status, "expired");
+  assert.strictEqual(staleHistorica.attempts, 1, "terminalização não pode reescrever histórico de attempts");
+  assert.strictEqual(staleHistorica.claimed_by, null);
+
+  const novaAposStale = await staleRepo.garantirTask(opcoesTask());
+  assert.strictEqual(novaAposStale.criada, true, "expired deve liberar o índice ativo");
+  assert.notStrictEqual(novaAposStale.task.id, "301");
+  assert.strictEqual(stalePool.rows.find(row => Number(row.id) === 301).status, "expired");
 
   console.log("local-worker-idempotency.test.js: ok");
 })().catch(erro => {

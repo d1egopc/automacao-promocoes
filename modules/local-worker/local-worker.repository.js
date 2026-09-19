@@ -224,10 +224,23 @@ function criarLocalWorkerRepository(opcoes = {}) {
     return result.rows[0] ? { ok: true, workerId: result.rows[0].worker_id } : { ok: false, motivo: "worker_nao_encontrado" };
   }
 
+  async function terminalizarTasksComTtlExpirado(queryable) {
+    return queryable.query(`
+      UPDATE local_worker_tasks
+         SET status = 'expired', claimed_by = NULL, lease_token = NULL,
+             lease_until = NULL, updated_at = NOW()
+       WHERE status IN ('pending', 'leased')
+         AND expires_at IS NOT NULL
+         AND expires_at <= NOW()
+      RETURNING id, status, attempts, max_attempts
+    `);
+  }
+
   async function garantirTask({ type, marketplace, productId, sourceUrl = "", technicalSlug = "", capability, idempotencyKey = "", maxAttempts = 3, ttlMs = 15 * 60 * 1000 } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
     await ensureSchema();
+    await terminalizarTasksComTtlExpirado(pool);
     const tipo = texto(type), mp = texto(marketplace).toLowerCase(), pid = texto(productId), cap = texto(capability);
     if (!tipo || !mp || !pid || !cap) return { ok: false, motivo: "task_invalida" };
     const idem = texto(idempotencyKey) || `${mp}:${pid}:${tipo}`;
@@ -257,7 +270,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     const leaseToken = tokenSeguro("lease");
     try {
       await client.query("BEGIN");
-      await client.query(`UPDATE local_worker_tasks SET status = 'expired', updated_at = NOW() WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= NOW()`);
+      await terminalizarTasksComTtlExpirado(client);
       await client.query(`UPDATE local_worker_tasks SET status = 'failed', claimed_by = NULL, lease_token = NULL, lease_until = NULL, updated_at = NOW() WHERE status = 'leased' AND lease_until <= NOW() AND attempts >= max_attempts`);
       const result = await client.query(`
         WITH candidato AS (
