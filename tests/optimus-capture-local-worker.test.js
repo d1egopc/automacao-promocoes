@@ -28,7 +28,55 @@ assert.strictEqual(resolver.hostMlcdn("https://a-static.mlcdn.com.br/imagem.jpg"
 assert.strictEqual(resolver.hostMlcdn("https://evilmlcdn.com.br/imagem.jpg"), false);
 assert.strictEqual(resolver.hostMlcdn("https://mlcdn.com.br.evil.com/imagem.jpg"), false);
 assert.strictEqual(resolver.parse(`<a href="https://www.magazinevoce.com.br/d1egopc/produto/p/jf4hfkkde1/"><img src="https://a-static.mlcdn.com.br/320x320/item.jpg"></a>`, "jf4hfkkde1").hrefConfirmado, true);
+assert.strictEqual(resolver.parse(`<a href="/d1egopc/produto/p/JF4HFKKDE1?seller_id=loja"><img src="https://a-static.mlcdn.com.br/320x320/item.jpg"></a>`, "jf4hfkkde1").hrefConfirmado, true, "href relativo, query, case e ausencia de trailing slash devem preservar o ID exato");
 assert.strictEqual(resolver.parse(`<a href="https://www.magazinevoce.com.br/d1egopc/produto/p/outro/"><img src="https://a-static.mlcdn.com.br/320x320/item.jpg"></a>`, "jf4hfkkde1").hrefConfirmado, false);
+
+function fixtureNextData(produtos) {
+  return `<main><a data-testid="product-card-container" href="/d1egopc/item/p/afh3e1g80j/">card sem imagem aninhada</a></main>
+    <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { data: { search: { products: produtos } } } } })}</script>`;
+}
+
+const produtoRealista = {
+  id: "afh3e1g80j",
+  variationId: "afh3e1g80j",
+  path: "/d1egopc/carrinho-de-bebe/p/afh3e1g80j/bb/crrb/",
+  url: "/d1egopc/carrinho-de-bebe/p/afh3e1g80j/bb/crrb/",
+  image: "https://a-static.mlcdn.com.br/{w}x{h}/carrinho-de-bebe/produto/item.jpeg"
+};
+const confirmadoNextData = resolver.parse(fixtureNextData([produtoRealista]), "afh3e1g80j");
+assert.strictEqual(confirmadoNextData.skuConfirmado, true, "id exato no objeto first-party deve confirmar SKU");
+assert.strictEqual(confirmadoNextData.hrefConfirmado, true, "href exato do mesmo objeto deve confirmar produto");
+assert.strictEqual(confirmadoNextData.imagem, "https://a-static.mlcdn.com.br/280x210/carrinho-de-bebe/produto/item.jpeg");
+assert.strictEqual(confirmadoNextData.candidatos[0].origem, "next_data");
+
+const htmlProdutoDiferente = fixtureNextData([{ ...produtoRealista, id: "outro", variationId: "outro", path: "/d1egopc/outro/p/outro/", url: "/d1egopc/outro/p/outro/" }]);
+const produtoDiferente = resolver.parse(htmlProdutoDiferente, "afh3e1g80j");
+assert.strictEqual(produtoDiferente.skuConfirmado, false);
+assert.strictEqual(produtoDiferente.hrefConfirmado, false);
+
+const idCorretoHrefDiferente = resolver.parse(fixtureNextData([{ ...produtoRealista, path: "/d1egopc/outro/p/outro/", url: "/d1egopc/outro/p/outro/" }]), "afh3e1g80j");
+assert.strictEqual(idCorretoHrefDiferente.skuConfirmado, false, "id correto nao compensa href de outro produto");
+assert.strictEqual(idCorretoHrefDiferente.hrefConfirmado, false);
+
+const hrefCorretoIdDiferente = resolver.parse(fixtureNextData([{ ...produtoRealista, id: "outro", variationId: "outro" }]), "afh3e1g80j");
+assert.strictEqual(hrefCorretoIdDiferente.skuConfirmado, false, "href correto nao compensa id divergente");
+assert.strictEqual(hrefCorretoIdDiferente.hrefConfirmado, false);
+
+const { id: _idOmitido, ...produtoSemId } = produtoRealista;
+assert.strictEqual(resolver.parse(fixtureNextData([produtoSemId]), "afh3e1g80j").skuConfirmado, false, "id primario e obrigatorio");
+
+const urlCorretaPathDivergente = resolver.parse(fixtureNextData([{ ...produtoRealista, path: "/d1egopc/outro/p/outro/" }]), "afh3e1g80j");
+assert.strictEqual(urlCorretaPathDivergente.hrefConfirmado, false, "url nao pode mascarar path divergente no mesmo objeto");
+
+const htmlProdutoAmbiguo = fixtureNextData([
+  produtoRealista,
+  { ...produtoRealista, path: "/d1egopc/outro-card/p/afh3e1g80j/ud/item/", url: "/d1egopc/outro-card/p/afh3e1g80j/ud/item/", image: "https://a-static.mlcdn.com.br/{w}x{h}/outro/card.jpeg" }
+]);
+const produtoAmbiguo = resolver.parse(htmlProdutoAmbiguo, "afh3e1g80j");
+assert.strictEqual(produtoAmbiguo.ambiguo, true);
+assert.strictEqual(produtoAmbiguo.skuConfirmado, false);
+assert.strictEqual(produtoAmbiguo.hrefConfirmado, false);
+assert.strictEqual(resolver.parse(`<a href="https://evil.example/item/p/afh3e1g80j/"><img src="https://a-static.mlcdn.com.br/320x320/item.jpg"></a>`, "afh3e1g80j").hrefConfirmado, false);
 
 const respostaBusca = { status: 200, ok: true, url: "https://www.magazinevoce.com.br/d1egopc/busca/241382400/", text: async () => html, body: { cancel: async () => undefined } };
 const respostaImagem = { status: 200, ok: true, url: "https://a-static.mlcdn.com.br/600x600/produto.jpg", headers: { get: () => "image/jpeg" }, body: { cancel: () => undefined } };
@@ -66,6 +114,10 @@ const runner = require("../optimus-capture/local-worker/task-runner.js");
   assert.strictEqual(identificada.provaTecnica.hrefProduto, "https://www.magazinevoce.com.br/d1egopc/produto/p/241382400/");
   const prova = await resolver.provarImagem({ productId: "241382400", imagemOficialUrl: identificada.imagemOficialUrl, provaTecnica: identificada.provaTecnica });
   assert.strictEqual(prova.provaTecnica.hostFinal, "a-static.mlcdn.com.br");
+  global.fetch = async () => ({ ...respostaBusca, url: "https://www.magazinevoce.com.br/d1egopc/busca/afh3e1g80j/", text: async () => htmlProdutoDiferente });
+  await assert.rejects(() => resolver.identificar({ productId: "afh3e1g80j", slugWorkspace: "d1egopc" }), /magalu_imagem_produto_nao_confirmado/);
+  global.fetch = async () => ({ ...respostaBusca, url: "https://www.magazinevoce.com.br/d1egopc/busca/afh3e1g80j/", text: async () => htmlProdutoAmbiguo });
+  await assert.rejects(() => resolver.identificar({ productId: "afh3e1g80j", slugWorkspace: "d1egopc" }), /magalu_imagem_produto_nao_confirmado/);
   global.fetch = fetchAnterior;
 
   await Promise.all([runner.processar(), runner.processar()]);

@@ -198,6 +198,58 @@ async function failurePendingPreservaOrigemERelinquish() {
   assert(breadcrumbs.some(item => item.stage === "LIVENESS_EXHAUSTED" && item.taskStage === runner.STAGES.FAILURE_PENDING));
 }
 
+async function erroAoReportarNaoSubstituiCausaOriginal() {
+  const env = ambiente();
+  const c = contadores();
+  const payloads = [];
+  const client = clientBase(c, task("407"));
+  client.failure = async (_task, payload) => {
+    c.failure += 1;
+    payloads.push({ ...payload });
+    if (c.failure === 1) {
+      const erro = new Error("could_not_determine_data_type_of_parameter_4");
+      erro.codigo = "could_not_determine_data_type_of_parameter_4";
+      erro.status = 422;
+      throw erro;
+    }
+    throw abortError("Failed_to_fetch");
+  };
+  global.OptimusLocalWorkerClient = client;
+  global.OptimusMagaluLocalResolver = {
+    identificar: async () => { c.identify += 1; throw new Error("magalu_imagem_produto_nao_confirmado"); },
+    provarImagem: async () => identificado()
+  };
+  const runner = recarregar();
+
+  await runner.processar();
+  let estado = env.local[runner.STORAGE_KEYS.STATE];
+  assert.strictEqual(estado.stage, runner.STAGES.FAILURE_PENDING);
+  assert.strictEqual(estado.originalFailureReason, "magalu_imagem_produto_nao_confirmado");
+  assert.strictEqual(estado.lastTechnicalError, "magalu_imagem_produto_nao_confirmado");
+  assert.strictEqual(estado.reportingError, "could_not_determine_data_type_of_parameter_4");
+  assert.strictEqual(estado.noProgressCount, 1);
+
+  await runner.processar();
+  estado = env.local[runner.STORAGE_KEYS.STATE];
+  assert.strictEqual(estado.originalFailureReason, "magalu_imagem_produto_nao_confirmado");
+  assert.strictEqual(estado.lastTechnicalError, "magalu_imagem_produto_nao_confirmado");
+  assert.strictEqual(estado.reportingError, "Failed_to_fetch");
+  assert.strictEqual(estado.noProgressCount, 2);
+  assert.deepStrictEqual(payloads.map(item => item.motivo), [
+    "magalu_imagem_produto_nao_confirmado",
+    "magalu_imagem_produto_nao_confirmado"
+  ]);
+
+  const heartbeatAntes = c.heartbeat;
+  await runner.processar();
+  assert.strictEqual(c.heartbeat, heartbeatAntes, "liveness deve parar retries de reporting sem progresso");
+  assert.strictEqual(c.failure, 2);
+  assert.strictEqual(env.local[runner.STORAGE_KEYS.STATE], undefined);
+  const breadcrumbs = env.local[runner.STORAGE_KEYS.BREADCRUMBS];
+  assert(breadcrumbs.some(item => item.stage === "FAILURE_ERROR" && item.originalFailureReason === "magalu_imagem_produto_nao_confirmado" && item.reportingError === "could_not_determine_data_type_of_parameter_4"));
+  assert(breadcrumbs.some(item => item.stage === "FAILURE_ERROR" && item.originalFailureReason === "magalu_imagem_produto_nao_confirmado" && item.reportingError === "Failed_to_fetch"));
+}
+
 async function progressoResetaBudgetEUpdatedAtNaoMascara() {
   const env = ambiente();
   const c = contadores();
@@ -244,6 +296,7 @@ async function progressoResetaBudgetEUpdatedAtNaoMascara() {
     await stageAgeRelinquishAntesDoHeartbeat();
     await imageIdentifiedRelinquish();
     await failurePendingPreservaOrigemERelinquish();
+    await erroAoReportarNaoSubstituiCausaOriginal();
     await progressoResetaBudgetEUpdatedAtNaoMascara();
   } finally {
     console.info = infoAnterior;

@@ -89,13 +89,16 @@
   }
   function estadoPublico(valor = {}) {
     const agoraIso = agora();
+    const causaOriginal = erroTexto(valor.originalFailureReason || (texto(valor.stage) === STAGES.FAILURE_PENDING ? valor.lastTechnicalError : ""), "");
     return {
-      version: 2,
+      version: 3,
       stage: texto(valor.stage),
       task: tarefaPublica(valor.task),
       imagemOficialUrl: texto(valor.imagemOficialUrl),
       provaTecnica: valor.provaTecnica ? provaPublica(valor.provaTecnica) : null,
-      lastTechnicalError: erroTexto(valor.lastTechnicalError, ""),
+      originalFailureReason: causaOriginal,
+      reportingError: erroTexto(valor.reportingError, ""),
+      lastTechnicalError: causaOriginal || erroTexto(valor.lastTechnicalError, ""),
       stageEnteredAt: texto(valor.stageEnteredAt) || agoraIso,
       lastProgressAt: texto(valor.lastProgressAt) || agoraIso,
       noProgressCount: Math.max(0, Number(valor.noProgressCount || 0)),
@@ -125,7 +128,9 @@
       hostImagem: texto(detalhes.hostImagem) || undefined,
       taskStage: texto(detalhes.taskStage) || undefined,
       noProgressCount: Number.isFinite(Number(detalhes.noProgressCount)) ? Math.max(0, Number(detalhes.noProgressCount)) : undefined,
-      stageAgeMs: Number.isFinite(Number(detalhes.stageAgeMs)) ? Math.max(0, Number(detalhes.stageAgeMs)) : undefined
+      stageAgeMs: Number.isFinite(Number(detalhes.stageAgeMs)) ? Math.max(0, Number(detalhes.stageAgeMs)) : undefined,
+      originalFailureReason: erroTexto(detalhes.originalFailureReason, "").slice(0, 120) || undefined,
+      reportingError: erroTexto(detalhes.reportingError, "").slice(0, 120) || undefined
     };
     const lista = [...(Array.isArray(existentes) ? existentes : []), seguro].slice(-MAX_BREADCRUMBS);
     await salvarChave(store, STORAGE_KEYS.BREADCRUMBS, lista);
@@ -181,6 +186,8 @@
     await registrarBreadcrumb("LIVENESS_EXHAUSTED", task, {
       motivo: "liveness_exhausted",
       taskStage: estado.stage,
+      originalFailureReason: estado.originalFailureReason,
+      reportingError: estado.reportingError,
       ...resumo
     });
     await limparEstado();
@@ -235,19 +242,22 @@
         hrefConfirmado: proximo.provaTecnica?.hrefConfirmado,
         hostImagem: proximo.provaTecnica?.hostFinal,
         taskStage: stage,
-        noProgressCount: proximo.noProgressCount
+        noProgressCount: proximo.noProgressCount,
+        originalFailureReason: proximo.originalFailureReason,
+        reportingError: proximo.reportingError
       });
     }
     return proximo;
   }
   async function enviarFailure(estado, task) {
     if (!await validarLease(task, estado)) return null;
-    emitir("LOCAL-WORKER-FAILURE", { taskId: texto(task.id), productId: texto(task.productId), motivo: texto(estado.lastTechnicalError) });
-    await registrarBreadcrumb("FAILURE_SEND", task, { motivo: estado.lastTechnicalError, taskStage: estado.stage });
+    const originalFailureReason = erroTexto(estado.originalFailureReason || estado.lastTechnicalError);
+    emitir("LOCAL-WORKER-FAILURE", { taskId: texto(task.id), productId: texto(task.productId), motivo: originalFailureReason });
+    await registrarBreadcrumb("FAILURE_SEND", task, { motivo: originalFailureReason, originalFailureReason, reportingError: estado.reportingError, taskStage: estado.stage });
     try {
-      const resposta = await global.OptimusLocalWorkerClient.failure(task, { leaseToken: task.leaseToken, motivo: texto(estado.lastTechnicalError).slice(0, 120) });
+      const resposta = await global.OptimusLocalWorkerClient.failure(task, { leaseToken: task.leaseToken, motivo: originalFailureReason.slice(0, 120) });
       if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "failure_rejeitado");
-      await registrarBreadcrumb("FAILURE_OK", task, { motivo: estado.lastTechnicalError, taskStage: estado.stage });
+      await registrarBreadcrumb("FAILURE_OK", task, { motivo: originalFailureReason, originalFailureReason, taskStage: estado.stage });
       await limparEstado();
       return resposta;
     } catch (erro) {
@@ -256,12 +266,11 @@
         await limparEstado();
         return null;
       }
-      await registrarBreadcrumb("FAILURE_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: estado.stage });
-      if (erroAmbiguo(erro)) {
-        await registrarSemProgresso(estado, task);
-        return null;
-      }
-      throw erro;
+      if (autenticacaoWorkerInvalida(erro)) throw erro;
+      const reportingError = erroTexto(erro);
+      await registrarBreadcrumb("FAILURE_ERROR", task, { motivo: reportingError, originalFailureReason, reportingError, status: erro?.status, taskStage: estado.stage });
+      await registrarSemProgresso({ ...estado, originalFailureReason, lastTechnicalError: originalFailureReason, reportingError }, task);
+      return null;
     }
   }
   async function continuar(estado, task) {
@@ -409,8 +418,15 @@
         await registrarBreadcrumb("TASK_ERROR_AMBIGUOUS", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: estado.stage });
         return;
       }
+      if (estado.stage === STAGES.FAILURE_PENDING) {
+        const originalFailureReason = erroTexto(estado.originalFailureReason || estado.lastTechnicalError);
+        const reportingError = erroTexto(erro);
+        await registrarBreadcrumb("FAILURE_ERROR", task, { motivo: reportingError, originalFailureReason, reportingError, status: erro?.status, taskStage: estado.stage });
+        await registrarSemProgresso({ ...estado, originalFailureReason, lastTechnicalError: originalFailureReason, reportingError }, task);
+        return;
+      }
       const motivo = erroTexto(erro);
-      const falha = await marcarStage(estado, STAGES.FAILURE_PENDING, { lastTechnicalError: motivo }, { motivo });
+      const falha = await marcarStage(estado, STAGES.FAILURE_PENDING, { originalFailureReason: motivo, reportingError: "", lastTechnicalError: motivo }, { motivo });
       await enviarFailure(falha, task);
     } finally {
       executando = false;

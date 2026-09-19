@@ -349,7 +349,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
   async function falhar({ taskId, workerId, leaseToken, metadata = {}, motivo = "resultado_invalido" } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
-    const result = await pool.query(`UPDATE local_worker_tasks SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END, claimed_by = NULL, lease_token = NULL, lease_until = NULL, updated_at = NOW(), result_metadata = $5::jsonb WHERE id = $1 AND status = 'leased' AND claimed_by = $2 AND lease_token = $3 AND lease_until > NOW() RETURNING *`, [String(taskId), texto(workerId), texto(leaseToken), null, JSON.stringify({ ...jsonSeguro(metadata), motivo })]);
+    const result = await pool.query(`UPDATE local_worker_tasks SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END, claimed_by = NULL, lease_token = NULL, lease_until = NULL, updated_at = NOW(), result_metadata = $4::jsonb WHERE id = $1 AND status = 'leased' AND claimed_by = $2 AND lease_token = $3 AND lease_until > NOW() RETURNING *`, [String(taskId), texto(workerId), texto(leaseToken), JSON.stringify({ ...jsonSeguro(metadata), motivo })]);
     return result.rows[0] ? { ok: true, task: payloadTask(result.rows[0]) } : { ok: false, motivo: "lease_invalido" };
   }
 

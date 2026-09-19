@@ -8,8 +8,42 @@
   function hostMlcdn(v) { const u = urlSeguro(v); if (!u) return false; return u.hostname === "mlcdn.com.br" || u.hostname.endsWith(".mlcdn.com.br"); }
   function imagemMlcdn(v) { const u = urlSeguro(v); return u && hostMlcdn(u.toString()) && u.pathname !== "/" ? u.toString() : ""; }
   function attrs(tag) { const out = {}; const re = /([\w:-]+)\s*=\s*(["'])([\s\S]*?)\2/gi; let m; while ((m = re.exec(tag))) out[m[1].toLowerCase()] = decode(m[3]); return out; }
-  function idHref(v, expected) { const u = urlSeguro(v, `https://${HOST}`); const m = u?.pathname.match(/\/p\/([^/]+)/i); return Boolean(m && texto(m[1]).toLowerCase() === texto(expected).toLowerCase()); }
+  function idHref(v, expected) { const u = urlSeguro(v, `https://${HOST}`); const m = u?.pathname.match(/\/p\/([^/]+)/i); return Boolean(u?.hostname.toLowerCase() === HOST && m && texto(m[1]).toLowerCase() === texto(expected).toLowerCase()); }
+  function chaveHref(v) { const u = urlSeguro(v, `https://${HOST}`); return u && u.hostname.toLowerCase() === HOST ? `${u.pathname.toLowerCase().replace(/\/+$/, "")}/` : ""; }
   function dims(v) { const m = texto(v).match(/\/(\d{2,4})x(\d{2,4})\//i); return { largura: m ? Number(m[1]) : 0, altura: m ? Number(m[2]) : 0 }; }
+  function imagensDoProduto(produto = {}) {
+    const valores = [];
+    const adicionar = valor => {
+      if (typeof valor === "string") valores.push(valor);
+      else if (Array.isArray(valor)) valor.forEach(adicionar);
+      else if (valor && typeof valor === "object") {
+        for (const chave of ["url", "src", "image", "imageUrl"]) adicionar(valor[chave]);
+      }
+    };
+    adicionar(produto.image);
+    adicionar(produto.images);
+    adicionar(produto.thumbnails);
+    return valores;
+  }
+  function materializarImagemOficial(valor) {
+    const concreta = decode(valor).replace(/\{w\}x\{h\}/gi, "280x210");
+    return imagemMlcdn(concreta);
+  }
+  function produtosNextData(html) {
+    const scripts = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+    const produtos = [];
+    let script;
+    while ((script = scripts.exec(html))) {
+      const propriedades = attrs(script[1]);
+      if (texto(propriedades.id).toLowerCase() !== "__next_data__") continue;
+      try {
+        const dados = JSON.parse(script[2]);
+        const lista = dados?.props?.pageProps?.data?.search?.products;
+        if (Array.isArray(lista)) produtos.push(...lista.filter(item => item && typeof item === "object"));
+      } catch (_) {}
+    }
+    return produtos;
+  }
   function parse(html, productId) {
     const expected = texto(productId).toLowerCase(); const candidates = [];
     const anchors = /<a\b([^>]*href=["'][^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi; let match;
@@ -20,8 +54,22 @@
     }
     const ld = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi; let lm;
     while ((lm = ld.exec(html))) { try { const value = JSON.parse(decode(lm[1])); const list = Array.isArray(value) ? value : (Array.isArray(value?.["@graph"]) ? value["@graph"] : [value]); for (const product of list) { if (String(product?.["@type"] || "").toLowerCase() !== "product") continue; const ids = [product.sku, product.productID, product.productId, product.mpn].map(texto).map(x => x.toLowerCase()); const href = product.offers?.url || ""; if (!ids.includes(expected) || !idHref(href, productId)) continue; const images = Array.isArray(product.image) ? product.image : [product.image]; for (const raw of images) { const image = imagemMlcdn(raw); if (image) candidates.push({ imagem: image, href, origem: "jsonld", ...dims(image) }); } } } catch (_) {} }
+    for (const produto of produtosNextData(html)) {
+      if (texto(produto.id).toLowerCase() !== expected) continue;
+      const idsAuxiliares = [produto.sku, produto.productID, produto.productId, produto.variationId].map(texto).filter(Boolean).map(id => id.toLowerCase());
+      if (idsAuxiliares.some(id => id !== expected)) continue;
+      const hrefs = [produto.url, produto.path].map(texto).filter(Boolean);
+      if (!hrefs.length || hrefs.some(href => !idHref(href, productId))) continue;
+      const href = hrefs[0];
+      for (const raw of imagensDoProduto(produto)) {
+        const image = materializarImagemOficial(raw);
+        if (image) candidates.push({ imagem: image, href, origem: "next_data", ...dims(image) });
+      }
+    }
+    const associacoes = new Set(candidates.map(item => chaveHref(item.href)).filter(Boolean));
+    if (associacoes.size !== 1) return { skuConfirmado: false, hrefConfirmado: false, ambiguo: associacoes.size > 1, candidatos: [], imagem: "" };
     const unique = [...new Map(candidates.map(item => [item.imagem, item])).values()].sort((a, b) => b.largura * b.altura - a.largura * a.altura);
-    return { skuConfirmado: candidates.length > 0, hrefConfirmado: candidates.length > 0, candidatos: unique, imagem: unique[0]?.imagem || "" };
+    return { skuConfirmado: unique.length > 0, hrefConfirmado: unique.length > 0, ambiguo: false, candidatos: unique, imagem: unique[0]?.imagem || "" };
   }
   function desafio(html) { return /az-request-verify|captcha|complete\s+o\s+captcha/i.test(html); }
   async function fetchWithTimeout(url, timeoutMs = 4000, options = {}) {
