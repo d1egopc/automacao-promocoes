@@ -4,6 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 const modulo = require.resolve("../optimus-capture/local-worker/task-runner.js");
+const resolverMagalu = require("../optimus-capture/local-worker/magalu-image.js");
 const repositorySource = fs.readFileSync(path.join(__dirname, "..", "modules", "local-worker", "local-worker.repository.js"), "utf8");
 const guardaCompleted = repositorySource.indexOf("if (row.status === STATUS.COMPLETED)");
 const guardaLease = repositorySource.indexOf("if (row.status !== STATUS.LEASED", guardaCompleted);
@@ -37,6 +38,9 @@ function task(id = "10") {
 }
 function identificado() {
   return { imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg", provaTecnica: { origem: "local_first_party", source: "magazinevoce_busca", productId: "afh3e1g80j", skuConfirmado: true, hrefConfirmado: true, hrefProduto: "https://www.magazinevoce.com.br/d1egopc/item/p/afh3e1g80j/" } };
+}
+function identificadoComHrefRelativo() {
+  return { imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg", provaTecnica: { origem: "local_first_party", source: "magazinevoce_busca", productId: "afh3e1g80j", skuConfirmado: true, hrefConfirmado: true, hrefProduto: "/d1egopc/item/p/afh3e1g80j/", imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg" } };
 }
 function ambiente(depoisDeSalvarLocal) {
   const local = {};
@@ -115,19 +119,73 @@ async function resumeDepoisDaIdentificacao() {
   const env = ambiente(); const c = contadores();
   global.OptimusLocalWorkerClient = clientBase(c, task("11"));
   global.OptimusMagaluLocalResolver = {
-    identificar: async () => { c.identify += 1; return identificado(); },
-    provarImagem: async () => { c.probe += 1; throw abortError("magalu_imagem_timeout"); }
+    identificar: async () => { c.identify += 1; return identificadoComHrefRelativo(); },
+    provarImagem: async ({ imagemOficialUrl, provaTecnica }) => {
+      c.probe += 1;
+      assert.strictEqual(provaTecnica.skuConfirmado, true);
+      assert.strictEqual(provaTecnica.hrefConfirmado, true);
+      assert.strictEqual(provaTecnica.hrefProduto, "https://www.magazinevoce.com.br/d1egopc/item/p/afh3e1g80j/");
+      assert.strictEqual(provaTecnica.imagemOficialUrl, imagemOficialUrl);
+      throw abortError("magalu_imagem_timeout");
+    }
   };
   let runner = recarregar();
   await runner.processar();
   assert.strictEqual(env.local[runner.STORAGE_KEYS.STATE].stage, runner.STAGES.IMAGE_IDENTIFIED);
-  global.OptimusMagaluLocalResolver.provarImagem = async ({ imagemOficialUrl, provaTecnica }) => { c.probe += 1; return { imagemOficialUrl, provaTecnica: { ...provaTecnica, hostFinal: "a-static.mlcdn.com.br", imagemOficialUrl } }; };
+  assert.deepStrictEqual(env.local[runner.STORAGE_KEYS.STATE].provaTecnica, {
+    origem: "local_first_party",
+    source: "magazinevoce_busca",
+    productId: "afh3e1g80j",
+    skuConfirmado: true,
+    hrefConfirmado: true,
+    hrefProduto: "https://www.magazinevoce.com.br/d1egopc/item/p/afh3e1g80j/",
+    hostFinal: "",
+    imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg"
+  });
+  const primeiroProbe = env.local[runner.STORAGE_KEYS.BREADCRUMBS].find(item => item.stage === "PROBE_START");
+  assert.strictEqual(primeiroProbe.skuConfirmado, true);
+  assert.strictEqual(primeiroProbe.hrefConfirmado, true);
+  assert.strictEqual(primeiroProbe.hostImagem, "a-static.mlcdn.com.br");
+  global.OptimusMagaluLocalResolver.provarImagem = async ({ imagemOficialUrl, provaTecnica }) => {
+    c.probe += 1;
+    assert.strictEqual(provaTecnica.skuConfirmado, true);
+    assert.strictEqual(provaTecnica.hrefConfirmado, true);
+    assert.strictEqual(provaTecnica.hrefProduto, "https://www.magazinevoce.com.br/d1egopc/item/p/afh3e1g80j/");
+    assert.strictEqual(provaTecnica.imagemOficialUrl, imagemOficialUrl);
+    return { imagemOficialUrl, provaTecnica: { ...provaTecnica, hostFinal: "a-static.mlcdn.com.br", imagemOficialUrl } };
+  };
   runner = recarregar();
   await runner.processar();
   assert.strictEqual(c.claim, 1);
   assert.strictEqual(c.identify, 1, "pagina ja identificada nao deve ser relida");
   assert.strictEqual(c.probe, 2);
   assert.strictEqual(c.result, 1);
+}
+
+async function provaEstrangeiraContinuaFailClosed() {
+  const env = ambiente(); const c = contadores();
+  global.OptimusLocalWorkerClient = clientBase(c, task("110"));
+  global.OptimusMagaluLocalResolver = {
+    identificar: async () => ({
+      imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg",
+      provaTecnica: {
+        origem: "local_first_party",
+        source: "magazinevoce_busca",
+        productId: "afh3e1g80j",
+        skuConfirmado: true,
+        hrefConfirmado: true,
+        hrefProduto: "https://evil.example/item/p/afh3e1g80j/",
+        imagemOficialUrl: "https://a-static.mlcdn.com.br/320x320/item.jpg"
+      }
+    }),
+    provarImagem: resolverMagalu.provarImagem
+  };
+  const runner = recarregar();
+  await runner.processar();
+  assert.strictEqual(c.result, 0);
+  assert.strictEqual(c.failure, 1);
+  assert.strictEqual(env.local[runner.STORAGE_KEYS.STATE], undefined);
+  assert.strictEqual(env.session[runner.STORAGE_KEYS.LEASE], undefined);
 }
 
 async function resumeDepoisDoProbe() {
@@ -314,6 +372,7 @@ async function alarmeUnico() {
     await suspensaoLogoAposClaim();
     await resumeDurantePagina();
     await resumeDepoisDaIdentificacao();
+    await provaEstrangeiraContinuaFailClosed();
     await resumeDepoisDoProbe();
     await resumeAntesDoPostResult();
     await retryResultIdempotente();

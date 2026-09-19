@@ -18,6 +18,7 @@
     COMPLETED: "COMPLETED"
   });
   const MAX_BREADCRUMBS = 20;
+  const MAGALU_HOST = "www.magazinevoce.com.br";
   const LIVENESS = Object.freeze({
     maxNoProgressCount: 2,
     maxStageAgeMs: 75_000,
@@ -47,9 +48,14 @@
   function storageSession() { return global.chrome?.storage?.session || null; }
   function hrefTecnico(valor) {
     try {
-      const url = new URL(texto(valor));
-      return url.protocol === "https:" ? `${url.protocol}//${url.hostname}${url.pathname}` : "";
+      const url = new URL(texto(valor), `https://${MAGALU_HOST}`);
+      return url.protocol === "https:" && url.hostname.toLowerCase() === MAGALU_HOST
+        ? `${url.protocol}//${url.hostname}${url.pathname}`
+        : "";
     } catch (_) { return ""; }
+  }
+  function hostTecnico(valor) {
+    try { return new URL(texto(valor)).hostname.toLowerCase(); } catch (_) { return ""; }
   }
   async function lerChave(store, chave) {
     if (!store) return null;
@@ -306,10 +312,16 @@
       }
       if (atual.stage === STAGES.IMAGE_IDENTIFIED) {
         if (!await validarLease(task, atual)) return;
-        await registrarBreadcrumb("PROBE_START", task, { taskStage: atual.stage });
+        const provaTecnica = atual.provaTecnica;
+        await registrarBreadcrumb("PROBE_START", task, {
+          taskStage: atual.stage,
+          skuConfirmado: provaTecnica?.skuConfirmado,
+          hrefConfirmado: provaTecnica?.hrefConfirmado,
+          hostImagem: hostTecnico(atual.imagemOficialUrl)
+        });
         let provado;
         try {
-          provado = await global.OptimusMagaluLocalResolver.provarImagem({ productId: task.productId, imagemOficialUrl: atual.imagemOficialUrl, provaTecnica: atual.provaTecnica });
+          provado = await global.OptimusMagaluLocalResolver.provarImagem({ productId: task.productId, imagemOficialUrl: atual.imagemOficialUrl, provaTecnica });
           if (!provado?.imagemOficialUrl || !provado?.provaTecnica) throw new Error("magalu_resultado_incompleto");
           await registrarBreadcrumb("PROBE_OK", task, {
             taskStage: atual.stage,
