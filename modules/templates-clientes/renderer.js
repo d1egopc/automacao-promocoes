@@ -1,4 +1,5 @@
 const { CANAIS_PERMITIDOS, getBlocoCatalogo } = require("./catalogo-blocos");
+const { blocosPadrao } = require("./validator");
 const {
   prepararDadosOficiaisTemplate,
   diagnosticoDadosOficiaisTemplate
@@ -547,8 +548,15 @@ function blocoComercialmenteNecessario(tipo = "", oferta = {}) {
   if (tipo === "cupom") return cupomEssencial(oferta);
   if (tipo === "frase_cupom") return instrucaoCupomEssencial(oferta);
   if (tipo === "preco_pix") return precoPixEssencial(oferta);
+  // Não existe hoje um campo contratual que marque parcelamento como
+  // condição obrigatória do preço; portanto ele permanece visual.
+  if (tipo === "parcelamento") {
+    return false;
+  }
   if (["link_resgate", "link_app", "link_moedas", "link_pc"].includes(tipo)) return Boolean(dadosBlocoTemplate(tipo, oferta));
-  return Boolean(dadosBlocoTemplate(tipo, oferta));
+  return ["titulo", "preco_por", "link"].includes(tipo)
+    ? Boolean(dadosBlocoTemplate(tipo, oferta))
+    : false;
 }
 
 function blocoProtegidoNoTemplate(tipo = "", oferta = {}) {
@@ -852,7 +860,10 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     return { ok: false, erro: "canal_incompativel", mensagem: "", templateIdUsado: template.id || "", blocosRenderizados: [], blocosIgnorados: [] };
   }
 
-  const blocos = Array.isArray(template.blocos) ? [...template.blocos] : [];
+  // Templates legados sem configuração de blocos continuam usando o
+  // catálogo padrão. Array vazio, por outro lado, é uma escolha explícita
+  // e deve renderizar somente os contratos protegidos.
+  const blocos = Array.isArray(template.blocos) ? [...template.blocos] : blocosPadrao();
   const ofertaOficial = {
     ...prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" }),
     manualV2: oferta.manualV2 === true,

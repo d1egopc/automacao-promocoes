@@ -62,8 +62,8 @@ const previewDiscordDireto = previewTemplate("cliente_a", {
   canal: "discord",
   template: { ...payloadValido, canais: ["discord"] }
 });
-assert.strictEqual(previewDiscordDireto.ok, false, "preview Discord nao deve criar renderer artificial");
-assert.strictEqual(previewDiscordDireto.erro, "canal_invalido", "renderer deve continuar recusando preview Discord");
+assert.strictEqual(previewDiscordDireto.ok, true, "preview Discord usa o renderer textual existente");
+assert.ok(previewDiscordDireto.mensagem.includes("Produto Teste") || previewDiscordDireto.mensagem.includes("PROMO10"), "preview Discord preserva o texto do template");
 
 const criado = criarTemplate("cliente_a", payloadValido).template;
 assert.ok(criado.id.startsWith("tpl_"), "cria template valido com ID backend");
@@ -221,6 +221,115 @@ for (const trecho of [
 }
 assert.ok(!renderCompletoV11.mensagem.includes("1.240 avaliacoes"), "preview demonstrativo nao usa quantidade de avaliacoes ficticia");
 assert.ok(!renderCompletoV11.mensagem.includes("5.200 vendidos"), "preview demonstrativo nao usa vendas ficticias");
+
+// Ocultacao explicita de blocos visuais permanece respeitada no caminho
+// personalizado, sem recorrer ao Template Universal para reintroduzi-los.
+const ofertaComBlocosVisuais = {
+  ...obterOfertaPreviewOficial(),
+  titulo: "Oferta com controles visuais",
+  marketplace: "magalu",
+  categoria: "Casa",
+  precoOriginal: 999,
+  precoAtual: 713.99,
+  descontoPercentual: 15,
+  economia: 285.01,
+  precoPix: 713.99,
+  condicaoPrecoPor: "pix",
+  parcelamento: "10x de R$ 84,00 sem juros",
+  avaliacao: "4,8/5",
+  frete: "Frete grátis",
+  cupom: "MADESA10",
+  cupomCodigo: "",
+  avisoFinal: "Aviso capturado",
+  linkAfiliado: "https://example.com/oferta",
+  rodape: "rodape nao e bloco comercial"
+};
+const blocosVisuaisOcultos = tiposCatalogoV11.map((tipo, indice) => ({
+  tipo,
+  ativo: ["titulo", "preco_por", "cupom", "link"].includes(tipo),
+  ordem: (indice + 1) * 10
+}));
+const renderVisuaisOcultos = renderizarTemplatePersonalizado({
+  oferta: ofertaComBlocosVisuais,
+  template: {
+    id: "tpl-visuais-ocultos",
+    canais: ["whatsapp"],
+    blocos: blocosVisuaisOcultos,
+    rodape: { ativo: false, texto: "rodape oculto" }
+  },
+  canal: "whatsapp"
+});
+assert.strictEqual(renderVisuaisOcultos.ok, true, "template valido continua no renderer personalizado");
+assert.ok(renderVisuaisOcultos.mensagem.includes("Oferta com controles visuais"), "titulo continua protegido");
+assert.ok(renderVisuaisOcultos.mensagem.includes("Por:"), "preco atual continua protegido");
+assert.ok(renderVisuaisOcultos.mensagem.includes("MADESA10"), "cupom configurado continua presente");
+assert.ok(renderVisuaisOcultos.mensagem.includes("https://optimuspromo.com.br/oferta/preview-template"), "link principal continua presente");
+for (const trecho of [
+  "15% OFF",
+  "Economia:",
+  "📂 Casa",
+  "Avaliação",
+  "Frete grátis",
+  "10x de R$ 84,00 sem juros",
+  "Aviso capturado",
+  "Oferta sujeita à alteração de preço.",
+  "rodape oculto"
+]) {
+  assert.ok(!renderVisuaisOcultos.mensagem.includes(trecho), `bloco visual oculto nao reaparece: ${trecho}`);
+}
+for (const marketplace of ["mercadolivre", "amazon", "shopee"]) {
+  const renderMarketplace = renderizarTemplatePersonalizado({
+    oferta: { ...ofertaComBlocosVisuais, marketplace },
+    template: {
+      id: `tpl-${marketplace}-visuais-ocultos`,
+      canais: ["whatsapp"],
+      blocos: blocosVisuaisOcultos
+    },
+    canal: "whatsapp"
+  });
+  assert.strictEqual(renderMarketplace.ok, true, `${marketplace} permanece no renderer personalizado`);
+  assert.ok(!renderMarketplace.mensagem.includes("15% OFF"), `${marketplace} respeita desconto oculto`);
+  assert.ok(renderMarketplace.mensagem.includes("Por:"), `${marketplace} preserva preco atual`);
+}
+
+const templateParcelamentoOculto = {
+  id: "tpl-parcelamento-oculto",
+  canais: ["whatsapp"],
+  blocos: [
+    { tipo: "titulo", ativo: true, ordem: 10 },
+    { tipo: "preco_por", ativo: true, ordem: 20 },
+    { tipo: "parcelamento", ativo: false, ordem: 30 },
+    { tipo: "cupom", ativo: true, ordem: 40 },
+    { tipo: "link", ativo: true, ordem: 50 }
+  ]
+};
+const renderParcelamentoOculto = renderizarTemplatePersonalizado({
+  oferta: ofertaComBlocosVisuais,
+  template: templateParcelamentoOculto,
+  canal: "whatsapp"
+});
+assert.ok(!renderParcelamentoOculto.mensagem.includes("10x de R$ 84,00 sem juros"), "parcelamento desligado nao e forcado pelo sentinela opcional");
+assert.ok(renderParcelamentoOculto.mensagem.includes("Por:"), "parcelamento oculto nao remove preco");
+assert.ok(renderParcelamentoOculto.mensagem.includes("MADESA10"), "parcelamento oculto nao remove cupom");
+assert.ok(renderParcelamentoOculto.mensagem.includes("https://optimuspromo.com.br/oferta/preview-template"), "parcelamento oculto nao remove link");
+
+const templateVazioExplicito = criarTemplate("cliente_a", {
+  nome: "Somente contratos",
+  canais: ["whatsapp"],
+  blocos: []
+}).template;
+assert.deepStrictEqual(templateVazioExplicito.blocos, [], "blocos vazios explicitos permanecem vazios");
+const renderVazioExplicito = renderizarTemplatePersonalizado({
+  oferta: ofertaComBlocosVisuais,
+  template: templateVazioExplicito,
+  canal: "whatsapp"
+});
+assert.ok(renderVazioExplicito.mensagem.includes("Oferta com controles visuais"), "configuracao vazia preserva titulo comercial");
+assert.ok(renderVazioExplicito.mensagem.includes("Por:"), "configuracao vazia preserva preco comercial");
+assert.ok(renderVazioExplicito.mensagem.includes("https://optimuspromo.com.br/oferta/preview-template"), "configuracao vazia preserva link comercial");
+assert.ok(!renderVazioExplicito.mensagem.includes("15% OFF"), "configuracao vazia nao reativa desconto");
+assert.ok(!renderVazioExplicito.mensagem.includes("Oferta sujeita à alteração de preço."), "configuracao vazia nao injeta disclaimer");
+
 const renderCompatibilidadeAvaliacaoVendas = renderizarTemplatePersonalizado({
   oferta: {
     ...ofertaPreviewV11,
@@ -701,6 +810,32 @@ const resolvidoValido = resolverTemplateMensagem({
 assert.strictEqual(resolvidoValido.ok, true, "template valido resolve personalizado");
 assert.strictEqual(resolvidoValido.templateIdUsado, criado.id);
 assert.ok(resolvidoValido.mensagem.includes("Linha 1\nLinha 2"));
+
+const resolvidoDiscord = resolverTemplateMensagem({
+  clienteId: "cliente_a",
+  destino: { templateId: templateDiscord.id, tipo: "discord" },
+  oferta: ofertaIntegracao,
+  canal: "discord"
+});
+assert.strictEqual(resolvidoDiscord.ok, true, "Discord recebe template personalizado");
+assert.ok(resolvidoDiscord.mensagem.includes("Produto Integracao"), "Discord recebe o texto produzido pelo renderer");
+const resolvidoTelegram = resolverTemplateMensagem({
+  clienteId: "cliente_a",
+  destino: { templateId: criado.id, tipo: "telegram" },
+  oferta: ofertaIntegracao,
+  canal: "telegram"
+});
+assert.strictEqual(resolvidoTelegram.ok, true, "Telegram recebe template personalizado");
+assert.strictEqual(resolvidoTelegram.mensagem, resolvidoValido.mensagem, "Telegram preserva exatamente o texto do renderer");
+
+const resolvidoComVisuaisOcultos = resolverTemplateMensagem({
+  clienteId: "cliente_a",
+  destino: { templateId: templateVazioExplicito.id, tipo: "whatsapp" },
+  oferta: { ...ofertaComBlocosVisuais, cupom: "", cupomCodigo: "", cupons: [], codigosCupom: [] }
+});
+assert.strictEqual(resolvidoComVisuaisOcultos.ok, true, "template valido com blocos visuais ocultos nao cai no Universal");
+assert.ok(resolvidoComVisuaisOcultos.mensagem.includes("Oferta com controles visuais"), "renderer personalizado preserva oferta com configuracao vazia");
+assert.ok(!resolvidoComVisuaisOcultos.mensagem.includes("15% OFF"), "resolver nao reintroduz desconto ocultado");
 
 const mensagemPersonalizada = montarMensagemOferta(ofertaIntegracao, {
   clienteId: "cliente_a",

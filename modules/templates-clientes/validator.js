@@ -66,8 +66,11 @@ function blocosPadrao() {
   });
 }
 
-function validarBlocos(blocos) {
-  const entrada = Array.isArray(blocos) && blocos.length ? blocos : blocosPadrao();
+function validarBlocos(blocos, opcoes = {}) {
+  const configuracaoExplicita = opcoes.configuracaoExplicita === true;
+  const entrada = Array.isArray(blocos) && (blocos.length || configuracaoExplicita)
+    ? blocos
+    : blocosPadrao();
   const vistos = new Set();
   const saida = [];
 
@@ -93,6 +96,13 @@ function normalizarTemplatePayload(payload = {}, contexto = {}) {
   const agora = contexto.agora || new Date().toISOString();
   const existente = contexto.existente || {};
   const clienteId = textoLimpo(contexto.clienteId || existente.clienteId || "admin") || "admin";
+  const payloadTemBlocos = Object.prototype.hasOwnProperty.call(payload, "blocos");
+  const existenteTemBlocos = Object.prototype.hasOwnProperty.call(existente, "blocos");
+  const blocos = payloadTemBlocos
+    ? validarBlocos(payload.blocos, { configuracaoExplicita: true })
+    : existenteTemBlocos
+      ? validarBlocos(existente.blocos, { configuracaoExplicita: true })
+      : blocosPadrao();
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -102,7 +112,7 @@ function normalizarTemplatePayload(payload = {}, contexto = {}) {
     descricao: validarDescricao(payload.descricao ?? existente.descricao ?? ""),
     ativo: typeof payload.ativo === "boolean" ? payload.ativo : (typeof existente.ativo === "boolean" ? existente.ativo : true),
     canais: validarCanais(payload.canais ?? existente.canais),
-    blocos: validarBlocos(payload.blocos ?? existente.blocos),
+    blocos,
     rodape: validarRodape(payload.rodape ?? existente.rodape),
     criadoEm: existente.criadoEm || agora,
     atualizadoEm: agora
