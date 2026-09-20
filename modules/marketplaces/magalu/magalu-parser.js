@@ -22,6 +22,10 @@ function resultadoVazio(urlOriginal = "", avisos = []) {
     titulo: "",
     precoAtual: "",
     precoAnterior: "",
+    precoPix: "",
+    precoMin: "",
+    precoMax: "",
+    temVariacaoPreco: false,
     imagem: "",
     categoria: "",
     seller: "",
@@ -372,6 +376,82 @@ function valorOfertaJsonLd(ofertas = {}, campos = []) {
   return null;
 }
 
+function especificacoesOfertaJsonLd(ofertas = {}) {
+  const lista = Array.isArray(ofertas) ? ofertas : [ofertas];
+  return lista.flatMap((oferta) => {
+    const especificacoes = Array.isArray(oferta?.priceSpecification)
+      ? oferta.priceSpecification
+      : (oferta?.priceSpecification && typeof oferta.priceSpecification === "object" ? [oferta.priceSpecification] : []);
+    return especificacoes.filter((item) => item && typeof item === "object");
+  });
+}
+
+function valorPixJsonLd(produtoJsonLd = {}) {
+  for (const especificacao of especificacoesOfertaJsonLd(produtoJsonLd?.offers)) {
+    const semantica = [
+      especificacao.name,
+      especificacao.description,
+      especificacao.paymentMethod,
+      especificacao.paymentMethodId
+    ].map(limparTextoMagalu).join(" ");
+    if (!/\bpix\b|a[ -]?vista|avista/i.test(semantica)) continue;
+    const preco = normalizarPrecoMagalu(especificacao.price ?? especificacao.value ?? especificacao.priceValue);
+    if (preco) return { preco, fonte: "jsonld.offers.priceSpecification.pix" };
+  }
+  return { preco: "", fonte: "" };
+}
+
+function blocosSemanticosMagalu(html = "", padrao) {
+  const blocos = [];
+  const re = /<([a-z][\w:-]*)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    const atributos = String(match[2] || "");
+    if (!padrao.test(atributos)) continue;
+    const bloco = limparTextoMagalu(String(match[3] || "").replace(/<script[\s\S]*?<\/script>/gi, ""));
+    if (!bloco) continue;
+    blocos.push({ texto: bloco, tamanho: bloco.length });
+  }
+  blocos.sort((a, b) => a.tamanho - b.tamanho);
+  return blocos.filter((bloco, indice, todos) =>
+    !todos.slice(0, indice).some((anterior) => anterior.texto === bloco.texto || anterior.texto.includes(bloco.texto))
+  );
+}
+
+function valoresMonetarios(texto = "") {
+  return [...String(texto || "").matchAll(/(?:R\$\s*)?([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+(?:[.,][0-9]{2})?)/g)]
+    .map((match) => normalizarPrecoMagalu(match[1]))
+    .filter(Boolean);
+}
+
+function precoPixEstruturado(html = "") {
+  const blocos = blocosSemanticosMagalu(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
+  for (const bloco of blocos) {
+    const preco = valoresMonetarios(bloco.texto)[0] || "";
+    if (preco) return { preco, fonte: "html.preco_pix" };
+  }
+  return { preco: "", fonte: "" };
+}
+
+function faixaPrecoEstruturada(produtoJsonLd = {}, html = "") {
+  const oferta = Array.isArray(produtoJsonLd?.offers)
+    ? produtoJsonLd.offers[0] || {}
+    : (produtoJsonLd?.offers || {});
+  const minimo = normalizarPrecoMagalu(oferta.lowPrice ?? oferta.minPrice ?? oferta.priceRange?.minPrice);
+  const maximo = normalizarPrecoMagalu(oferta.highPrice ?? oferta.maxPrice ?? oferta.priceRange?.maxPrice);
+  if (minimo && maximo && numeroPreco(maximo) > numeroPreco(minimo)) {
+    return { precoMin: minimo, precoMax: maximo, fonte: "jsonld.offers.range" };
+  }
+
+  const blocos = blocosSemanticosMagalu(html, /a[ -_]?partir|starting[ -_]?price|price[ -_]?min|price[ -_]?max|pre[cç]o[ -_]?min|pre[cç]o[ -_]?max/i);
+  const valores = [...new Set(blocos.flatMap((bloco) => valoresMonetarios(bloco.texto)))]
+    .sort((a, b) => numeroPreco(a) - numeroPreco(b));
+  if (valores.length >= 2 && numeroPreco(valores[1]) > numeroPreco(valores[0])) {
+    return { precoMin: valores[0], precoMax: valores[1], fonte: "html.preco_faixa" };
+  }
+  return null;
+}
+
 function imagemJsonLd(produto = {}) {
   produto = produto || {};
   const img = produto.image;
@@ -591,13 +671,26 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
     };
   }
 
-  const precoAtual = conteudoDivergente
+  const faixaPreco = conteudoDivergente
+    ? null
+    : faixaPrecoEstruturada(produtoJsonLdSeguro, conteudoSeguro);
+  const precoAtual = conteudoDivergente || faixaPreco
     ? { preco: "", fonte: "", bruto: "" }
     : extrairPrecoAtual(conteudoSeguro, produtoJsonLdSeguro);
   if (precoAtual.preco) {
     resultado.precoAtual = precoAtual.preco;
     fontes.precoAtual = precoAtual.fonte;
     brutos.precoAtual = { campo: precoAtual.fonte, valor: String(precoAtual.bruto) };
+  }
+
+  if (faixaPreco) {
+    resultado.precoMin = faixaPreco.precoMin;
+    resultado.precoMax = faixaPreco.precoMax;
+    resultado.temVariacaoPreco = true;
+    fontes.precoMin = faixaPreco.fonte;
+    fontes.precoMax = faixaPreco.fonte;
+    brutos.precoMin = { campo: faixaPreco.fonte, valor: String(faixaPreco.precoMin) };
+    brutos.precoMax = { campo: faixaPreco.fonte, valor: String(faixaPreco.precoMax) };
   }
 
   const precoAnterior = conteudoDivergente
@@ -607,6 +700,17 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
     resultado.precoAnterior = precoAnterior.preco;
     fontes.precoAnterior = precoAnterior.fonte;
     brutos.precoAnterior = { campo: precoAnterior.fonte, valor: String(precoAnterior.bruto) };
+  }
+
+  const precoPix = conteudoDivergente
+    ? { preco: "", fonte: "" }
+    : (valorPixJsonLd(produtoJsonLdSeguro).preco
+      ? valorPixJsonLd(produtoJsonLdSeguro)
+      : precoPixEstruturado(conteudoSeguro));
+  if (precoPix.preco) {
+    resultado.precoPix = precoPix.preco;
+    fontes.precoPix = precoPix.fonte;
+    brutos.precoPix = { campo: precoPix.fonte, valor: String(precoPix.preco) };
   }
 
   const categoria = conteudoDivergente ? "" : (

@@ -49,7 +49,10 @@
   };
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
-  const CAMPOS_MANUAIS = Object.freeze(["campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoCupom", "campoObservacoes"]);
+  const CAMPOS_MANUAIS = Object.freeze([
+    "campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoCupom", "campoObservacoes",
+    "campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"
+  ]);
 
   function setTexto(id, valor) {
     const node = el(id);
@@ -256,6 +259,10 @@
     return preservar && state.camposEditados.has(id) ? valor(id) : valorAutofill;
   }
 
+  function valorOpcionalEditado(id, valorAutofill = "") {
+    return state.camposEditados.has(id) ? valor(id) : (valorAutofill || "");
+  }
+
   const formatadorMoedaPtBr = new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL"
@@ -284,6 +291,8 @@
       produto.precoMin || "",
       produto.precoMax || "",
       produto.temVariacaoPreco === true ? "variacao" : "",
+      produto.precoPix || "",
+      produto.parcelamento || "",
       produto.imagem || "",
       produto.cupom || "",
       produto.observacoes || ""
@@ -443,6 +452,7 @@
     if (valor === "aliexpress") return "AliExpress";
     if (valor === "kabum") return "KaBuM";
     if (valor === "mercadolivre") return "Mercado Livre";
+    if (valor === "magalu") return "Magalu";
     return "Marketplace";
   }
 
@@ -683,8 +693,13 @@
       el("campoPrecoAtual").value = "";
       el("campoPrecoAnterior").value = "";
       el("campoCupom").value = "";
+      el("campoPrecoPix").value = "";
+      el("campoPrecoMin").value = "";
+      el("campoPrecoMax").value = "";
+      el("campoParcelamento").value = "";
       el("campoObservacoes").value = "";
     }
+    setHidden("camposMagaluOpcionais", true);
     el("campoDesconto").value = "";
     setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
@@ -711,6 +726,12 @@
     el("campoPrecoAtual").value = manterCampoManual("campoPrecoAtual", textoPrecoProduto(state.produto), preservarFormulario);
     el("campoPrecoAnterior").value = manterCampoManual("campoPrecoAnterior", formatarMoeda(state.produto.precoAnterior), preservarFormulario);
     el("campoCupom").value = manterCampoManual("campoCupom", state.produto.cupom || "", preservarFormulario);
+    el("campoPrecoPix").value = manterCampoManual("campoPrecoPix", formatarMoeda(state.produto.precoPix), preservarFormulario);
+    el("campoPrecoMin").value = manterCampoManual("campoPrecoMin", formatarMoeda(state.produto.precoMin), preservarFormulario);
+    el("campoPrecoMax").value = manterCampoManual("campoPrecoMax", formatarMoeda(state.produto.precoMax), preservarFormulario);
+    el("campoParcelamento").value = manterCampoManual("campoParcelamento", state.produto.parcelamento || "", preservarFormulario);
+    setHidden("camposMagaluOpcionais", state.produto.marketplace !== "magalu");
+    setHidden("camposFaixaPreco", state.produto.marketplace !== "magalu");
     el("campoObservacoes").value = manterCampoManual("campoObservacoes", preservarObservacaoManual
       ? state.observacaoManualValor
       : (state.produto.observacoes || ""), preservarFormulario);
@@ -874,10 +895,15 @@
       ...(state.produto || {}),
       titulo: valor("campoTitulo"),
       precoAtual: valor("campoPrecoAtual"),
-      precoMin: state.produto?.precoMin || "",
-      precoMax: state.produto?.precoMax || "",
-      temVariacaoPreco: state.produto?.temVariacaoPreco === true,
       precoAnterior: valor("campoPrecoAnterior"),
+      precoPix: valorOpcionalEditado("campoPrecoPix", state.produto?.precoPix),
+      precoMin: valorOpcionalEditado("campoPrecoMin", state.produto?.precoMin),
+      precoMax: valorOpcionalEditado("campoPrecoMax", state.produto?.precoMax),
+      temVariacaoPreco: state.produto?.temVariacaoPreco === true || Boolean(
+        valorOpcionalEditado("campoPrecoMin", state.produto?.precoMin) &&
+        valorOpcionalEditado("campoPrecoMax", state.produto?.precoMax)
+      ),
+      parcelamento: valorOpcionalEditado("campoParcelamento", state.produto?.parcelamento),
       cupom: valor("campoCupom"),
       observacoes: valor("campoObservacoes")
     });
@@ -1308,6 +1334,9 @@
     el("campoPrecoAnterior").addEventListener("input", () => { marcarCampoEditado("campoPrecoAnterior"); invalidarPreviewPorEdicao(); });
     el("campoCupom").addEventListener("input", () => { marcarCampoEditado("campoCupom"); invalidarPreviewPorEdicao(); });
     el("campoObservacoes").addEventListener("input", () => { marcarCampoEditado("campoObservacoes"); invalidarPreviewPorObservacaoManual(); });
+    ["campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"].forEach((id) => {
+      el(id).addEventListener("input", () => { marcarCampoEditado(id); invalidarPreviewPorEdicao(); });
+    });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void carregarOportunidades();
     });

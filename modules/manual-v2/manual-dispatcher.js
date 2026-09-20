@@ -17,6 +17,10 @@ const {
 const {
   validarOfertaAfiliacaoWorkspaceAliExpress
 } = require("../marketplaces/aliexpress/afiliacao-workspace");
+const {
+  validarOfertaAfiliacaoWorkspaceMagalu
+} = require("../marketplaces/magalu/afiliacao-workspace");
+const { imagemMagaluPublicaSegura } = require("./manual-offers.contract");
 const tipoMidiaV2 = require("../destinos/tipo-midia-v2");
 
 function texto(valor = "") {
@@ -414,6 +418,20 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       clienteId: cliente,
       credenciais: integracao.credenciais || integracao || {},
       exigirAssinatura: true
+    });
+    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
+  }
+  if (texto(oferta.marketplace).toLowerCase() === "magalu") {
+    if (texto(oferta.imagem) && !imagemMagaluPublicaSegura(oferta.imagem)) {
+      return criarRetornoBase(false, oferta.id || idOferta, "imagem_magalu_invalida");
+    }
+    const integracao = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente(cliente, "magalu") || {}
+      : {};
+    const credenciais = integracao.credenciais || integracao || {};
+    const afiliacao = validarOfertaAfiliacaoWorkspaceMagalu(oferta, {
+      clienteId: cliente,
+      promoterId: credenciais.promoterId || integracao.promoterId || ""
     });
     if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
   }

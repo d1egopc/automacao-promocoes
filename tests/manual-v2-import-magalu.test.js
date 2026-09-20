@@ -108,6 +108,28 @@ function deps(comPromoter = true, parserOptions = {}) {
 }
 
 {
+  const oferta = await importarProdutoMagaluManualV2(urlProduto, deps(true, {
+    html: `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product", "name": "Produto Pix", "sku": "abc123",
+      "image": "https://a-static.mlcdn.com.br/pix.jpg",
+      "offers": {
+        "price": "37.90",
+        "priceSpecification": [
+          { "name": "Pix", "price": "37.90", "paymentMethod": "Pix" },
+          { "name": "1x sem juros", "price": "38.28", "paymentMethod": "creditCard" }
+        ]
+      }
+    })}</script><div data-testid="price-pix">Pix R$ 37,90</div><div data-testid="installment-price">R$ 38,28 em 1x sem juros</div>`
+  }));
+
+  assert.strictEqual(oferta.precoAtual, "R$\u00a037,90");
+  assert.strictEqual(oferta.precoPix, "R$\u00a037,90");
+  assert.strictEqual(oferta.precoAnterior, "");
+  assert.strictEqual(oferta.precoMin, "");
+  assert.strictEqual(oferta.precoMax, "");
+}
+
+{
   const oferta = await importarProdutoMagaluManualV2(urlNightCaviar, deps(true, {
     html: `
       <link rel="canonical" href="${urlNightCaviar}">

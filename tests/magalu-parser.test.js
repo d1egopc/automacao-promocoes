@@ -84,6 +84,41 @@ assert.strictEqual(completo.metadata.fontes.precoAtual, "jsonld.offers.price");
 assert.strictEqual(completo.metadata.fontes.precoAnterior, "html.preco_de");
 assert.deepStrictEqual(Object.keys(completo).filter(k => /afiliad|promoter/i.test(k)), []);
 
+const pepsi236699800 = parseMagaluProdutoHtml({
+  urlOriginal: "https://www.magazineluiza.com.br/refrigerante-pepsi/p/236699800/",
+  html: `<script type="application/ld+json">${JSON.stringify({
+    "@type": "Product",
+    "name": "Refrigerante Pepsi Twist 350ml Lata 12 Unidades",
+    "sku": "236699800",
+    "image": ["https://a-static.mlcdn.com.br/pepsi.jpg"],
+    "offers": {
+      "price": "37.90",
+      "priceSpecification": [
+        { "name": "Pix", "price": "37.90", "paymentMethod": "Pix" },
+        { "name": "1x sem juros", "price": "38.28", "paymentMethod": "creditCard" }
+      ]
+    }
+  })}</script><div data-testid="price-pix"><span>Pix</span><strong>R$ 37,90</strong></div><div data-testid="installment-price">R$ 38,28 em 1x sem juros</div>`
+});
+assert.strictEqual(pepsi236699800.produtoId, "236699800");
+assert.strictEqual(moeda(pepsi236699800.precoAtual), "R$ 37,90");
+assert.strictEqual(moeda(pepsi236699800.precoPix), "R$ 37,90");
+assert.strictEqual(pepsi236699800.precoAnterior, "", "parcelamento nao pode virar preco anterior");
+assert.strictEqual(pepsi236699800.precoMin, "");
+assert.strictEqual(pepsi236699800.precoMax, "");
+
+const faixaComPrecoMinMax = parseMagaluProdutoHtml({
+  urlOriginal: "https://www.magazineluiza.com.br/kit/p/faixa-236699800/",
+  html: `<script type="application/ld+json">${JSON.stringify({
+    "@type": "Product", "sku": "faixa-236699800", "name": "Kit Magalu",
+    "offers": { "lowPrice": "10.00", "highPrice": "20.00" }
+  })}</script>`
+});
+assert.strictEqual(faixaComPrecoMinMax.precoAtual, "");
+assert.strictEqual(moeda(faixaComPrecoMinMax.precoMin), "R$ 10,00");
+assert.strictEqual(moeda(faixaComPrecoMinMax.precoMax), "R$ 20,00");
+assert.strictEqual(faixaComPrecoMinMax.temVariacaoPreco, true);
+
 const urlRealA07 = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a07/p/240466500/te/ga07/";
 const urlA17Divergente = "https://www.magazinevoce.com.br/magazined1egopc/smartphone-samsung-a17/p/240575800/te/ga17/";
 const urlNightCaviar = "https://www.magazinevoce.com.br/d1egopc/night-caviar-100ml-paris-elysses/p/be172949ba/pf/ppfm/";

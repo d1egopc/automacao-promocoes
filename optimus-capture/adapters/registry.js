@@ -5,6 +5,7 @@
   const shopee = global.OptimusCaptureShopee || require("./shopee");
   const aliexpress = global.OptimusCaptureAliExpress || require("./aliexpress");
   const kabum = global.OptimusCaptureKabum || require("./kabum");
+  const magalu = global.OptimusCaptureMagalu || require("./magalu");
 
   function capturarPaginaAtual(documento, locationObjeto) {
     const url = locationObjeto?.href || documento?.location?.href || "";
@@ -56,6 +57,15 @@
 
     if (deteccao.marketplace === "kabum") {
       const produto = kabum.capturarKabumDaPagina(documento, locationObjeto);
+      return {
+        ok: produto.completo === true,
+        motivo: produto.completo ? "" : "captura_incompleta",
+        produto
+      };
+    }
+
+    if (deteccao.marketplace === "magalu") {
+      const produto = magalu.capturarMagaluDaPagina(documento, locationObjeto);
       return {
         ok: produto.completo === true,
         motivo: produto.completo ? "" : "captura_incompleta",

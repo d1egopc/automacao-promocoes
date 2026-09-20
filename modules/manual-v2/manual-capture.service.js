@@ -12,6 +12,15 @@ const {
   criarProvaAfiliacaoWorkspaceAliExpress
 } = require("../marketplaces/aliexpress/afiliacao-workspace");
 const {
+  criarProvaAfiliacaoWorkspaceMagalu
+} = require("../marketplaces/magalu/afiliacao-workspace");
+const {
+  gerarLinkAfiliadoMagaluSeguro
+} = require("../marketplaces/magalu/magalu-affiliate-link");
+const {
+  produtoIdPorUrl
+} = require("../marketplaces/magalu/magalu-parser");
+const {
   extrairIdsShopee,
   urlShopeeValida
 } = require("../../marketplaces/shopee/normalizacao");
@@ -214,6 +223,35 @@ function urlKabumCaptureSegura(urlOriginal = "") {
   return { ok: true, url: url.toString(), host, produtoId };
 }
 
+function urlMagaluCaptureSegura(urlOriginal = "") {
+  const valor = texto(urlOriginal);
+  if (!valor) return { ok: false, motivo: "url_original_obrigatoria" };
+
+  let url;
+  try {
+    url = new URL(valor);
+  } catch {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    return { ok: false, motivo: "url_original_invalida" };
+  }
+
+  const host = url.hostname.toLowerCase();
+  const hostConhecido = host === "magazineluiza.com.br" ||
+    host.endsWith(".magazineluiza.com.br") ||
+    host === "magazinevoce.com.br" ||
+    host.endsWith(".magazinevoce.com.br") ||
+    host === "magalu.com" ||
+    host.endsWith(".magalu.com");
+  if (!hostConhecido) return { ok: false, motivo: "url_magalu_invalida", host };
+
+  const produtoId = produtoIdPorUrl(url.toString());
+  if (!produtoId) return { ok: false, motivo: "url_magalu_produto_invalida", host };
+  return { ok: true, url: url.toString(), host, produtoId };
+}
+
 function itemIdAliExpressUrl(url) {
   return texto(url?.pathname).match(/\/item\/(\d{10,})\.html/i)?.[1] || "";
 }
@@ -356,6 +394,21 @@ async function gerarLinkAfiliadoCapture(clienteId, marketplace, urlValidada, bas
     return texto(resultado.shortLink);
   }
 
+  if (marketplace === "magalu") {
+    const getIntegracaoCliente = deps.getIntegracaoCliente;
+    if (typeof getIntegracaoCliente !== "function") {
+      throw erroCapture("integracao_magalu_indisponivel", 503, { host: urlValidada.host });
+    }
+    const integracao = getIntegracaoCliente(clienteId, "magalu") || {};
+    const credenciais = integracao.credenciais || integracao || {};
+    const promoterId = texto(credenciais.promoterId || integracao.promoterId);
+    const resultado = gerarLinkAfiliadoMagaluSeguro(urlValidada.url, promoterId);
+    if (!resultado?.comprovado || !texto(resultado.urlAfiliada)) {
+      throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
+    }
+    return texto(resultado.urlAfiliada);
+  }
+
   const gerarLinkAfiliadoCliente = deps.gerarLinkAfiliadoCliente;
   if (typeof gerarLinkAfiliadoCliente !== "function") {
     throw erroCapture("conversao_afiliada_indisponivel", 503, { host: urlValidada.host });
@@ -376,7 +429,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   }
 
   const marketplace = normalizarMarketplaceManualV2(entrada.marketplace);
-  if (!["mercadolivre", "shopee", "amazon", "aliexpress", "kabum"].includes(marketplace)) {
+  if (!["mercadolivre", "shopee", "amazon", "aliexpress", "kabum", "magalu"].includes(marketplace)) {
     throw erroCapture("capture_marketplace_nao_suportado", 400);
   }
 
@@ -389,7 +442,9 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
         ? urlAliExpressCaptureSegura(urlEntrada)
         : (marketplace === "kabum"
           ? urlKabumCaptureSegura(urlEntrada)
-          : urlMercadoLivreSegura(urlEntrada))));
+          : (marketplace === "magalu"
+            ? urlMagaluCaptureSegura(urlEntrada)
+            : urlMercadoLivreSegura(urlEntrada)))));
   if (!urlValidada.ok) {
     throw erroCapture(urlValidada.motivo, 400, { host: urlValidada.host || "" });
   }
@@ -399,7 +454,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     throw erroCapture("capture_titulo_invalido", 400, { host: urlValidada.host });
   }
 
-  const faixaPreco = ["shopee", "aliexpress"].includes(marketplace) && entrada.temVariacaoPreco === true
+  const faixaPreco = ["shopee", "aliexpress", "magalu"].includes(marketplace) && entrada.temVariacaoPreco === true
     ? faixaPrecoValida(entrada)
     : null;
   const precoAtualNumero = faixaPreco
@@ -432,7 +487,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     linkPC: texto(entrada.linkPC || entrada.urlPC),
     linkMoedas: texto(entrada.linkMoedas || entrada.urlMoedas),
     linkResgate: texto(entrada.linkResgate || entrada.linkResgateCupom || entrada.urlResgate),
-    produtoId: texto(entrada.produtoId || entrada.productId || entrada.itemId),
+    produtoId: texto(entrada.produtoId || entrada.productId || entrada.itemId || urlValidada.produtoId),
     ean: texto(entrada.ean || entrada.EAN || entrada.codigoEan),
     sku: texto(entrada.sku || entrada.SKU),
     imagem: sanitizarUrlOpcional(entrada.imagem || entrada.image || entrada.imageUrl),
@@ -446,6 +501,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     descontoPercentual: entrada.descontoPercentual ?? entrada.desconto ?? "",
     instrucaoCupom: texto(entrada.instrucaoCupom || entrada.cupomInstrucao || entrada.avisoCupom),
     beneficioTexto: texto(entrada.beneficioTexto || entrada.beneficio),
+    seller: texto(entrada.seller || entrada.vendedor || entrada.loja || entrada.store),
     urlOriginal: urlValidada.url
   };
 
@@ -494,6 +550,27 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
       conversaoStatus: urlAfiliada ? "convertida" : "falhou",
       motivoConversao: "capture_aliexpress_workspace_api"
     });
+  } else if (marketplace === "magalu") {
+    const integracao = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente(clienteId, "magalu") || {}
+      : {};
+    const credenciais = integracao.credenciais || integracao || {};
+    const promoterId = texto(credenciais.promoterId || integracao.promoterId);
+    afiliacaoWorkspaceVerificada = criarProvaAfiliacaoWorkspaceMagalu({
+      clienteId,
+      promoterId,
+      productId: urlValidada.produtoId || produtoIdPorUrl(urlValidada.url),
+      seller: texto(baseConversao.seller),
+      urlOriginal: urlValidada.url,
+      urlAfiliadaWorkspace: urlAfiliada,
+      paginaValidada: false,
+      proofType: "deterministic_workspace",
+      papelLink: "produto",
+      urlConstruidaPor: "magalu_deterministic_builder_v1"
+    });
+    if (afiliacaoWorkspaceVerificada.conversaoStatus !== "convertida") {
+      throw erroCapture("conversao_afiliada_indisponivel", 502, { host: urlValidada.host });
+    }
   }
 
   const ofertaNormalizada = normalizarOfertaManualV2({
@@ -532,6 +609,7 @@ module.exports = {
   urlAmazonCaptureSegura,
   urlAliExpressCaptureSegura,
   urlKabumCaptureSegura,
+  urlMagaluCaptureSegura,
   validarUrlAfiliadaCapture,
   precoNumero,
   tituloTecnicoOuInutil

@@ -39,6 +39,16 @@
     return host === "kabum.com.br" || host.endsWith(".kabum.com.br");
   }
 
+  function hostMagalu(hostname) {
+    const host = texto(hostname).toLowerCase().replace(/^www\./, "");
+    return host === "magazineluiza.com.br" ||
+      host.endsWith(".magazineluiza.com.br") ||
+      host === "magazinevoce.com.br" ||
+      host.endsWith(".magazinevoce.com.br") ||
+      host === "magalu.com" ||
+      host.endsWith(".magalu.com");
+  }
+
   function asinProdutoAmazon(url) {
     const pathname = texto(url?.pathname).toUpperCase();
     const match = pathname.match(/\/(?:DP|GP\/PRODUCT)\/([A-Z0-9]{10})(?:\/|$)/);
@@ -51,6 +61,12 @@
 
   function itemIdProdutoAliExpress(url) {
     return texto(url?.pathname).match(/\/item\/(\d{10,})\.html/i)?.[1] || "";
+  }
+
+  function produtoIdMagalu(url) {
+    return texto(url?.pathname).match(/\/p\/([^/?#]+)/i)?.[1] ||
+      texto(url?.pathname).match(/\/produto\/(\d+)(?:\/|$)/i)?.[1] ||
+      texto(url?.pathname).match(/\/divulgador\/oferta\/([^/?#]+)/i)?.[1] || "";
   }
 
   function idsProdutoShopee(url) {
@@ -148,6 +164,17 @@
       };
     }
 
+    if (hostMagalu(host)) {
+      const produtoId = produtoIdMagalu(url);
+      return {
+        suportado: Boolean(produtoId),
+        marketplace: "magalu",
+        motivo: produtoId ? "" : "pagina_magalu_sem_produto",
+        produtoId,
+        url: url.toString()
+      };
+    }
+
     if (host === "s.shopee.com.br" || host.endsWith(".s.shopee.com.br")) {
       return {
         suportado: false,
@@ -172,7 +199,19 @@
     return { suportado: false, marketplace: "", motivo: "marketplace_nao_suportado", url: url.toString() };
   }
 
-  const api = { detectarMarketplacePorUrl, hostMercadoLivre, hostShopee, hostAmazon, hostAliExpress, hostKabum, asinProdutoAmazon, produtoIdKabum, itemIdProdutoAliExpress };
+  const api = {
+    detectarMarketplacePorUrl,
+    hostMercadoLivre,
+    hostShopee,
+    hostAmazon,
+    hostAliExpress,
+    hostKabum,
+    hostMagalu,
+    asinProdutoAmazon,
+    produtoIdKabum,
+    itemIdProdutoAliExpress,
+    produtoIdMagalu
+  };
   global.OptimusCaptureDetector = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

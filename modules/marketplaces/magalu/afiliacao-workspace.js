@@ -153,7 +153,8 @@ function validarProvaAfiliacaoWorkspaceMagalu(prova = {}, { clienteId = "", prom
 
 function validarOfertaAfiliacaoWorkspaceMagalu(oferta = {}, { clienteId = "", promoterId = "" } = {}) {
   if (texto(oferta.marketplace || oferta.mercado).toLowerCase() !== "magalu") return { ok: true, motivo: "nao_aplicavel" };
-  const prova = oferta.metadata?.afiliacaoWorkspace || oferta.afiliacaoWorkspace || {};
+  const prova = oferta.metadata?.afiliacaoWorkspaceVerificada || oferta.afiliacaoWorkspaceVerificada ||
+    oferta.metadata?.afiliacaoWorkspace || oferta.afiliacaoWorkspace || {};
   const papelLink = texto(oferta.metadata?.papelLinkEscolhido || oferta.papelLink || "");
   const resultado = validarProvaAfiliacaoWorkspaceMagalu(prova, { clienteId, promoterId, papelLink });
   return { ok: resultado.valida, motivo: resultado.valida ? "afiliacao_workspace_convertida" : "afiliacao_workspace_incompleta", prova: resultado.prova };

@@ -29,6 +29,7 @@ const CAMPOS_EDITAVEIS_MANUAL_V2 = Object.freeze([
   "precoMin",
   "precoMax",
   "temVariacaoPreco",
+  "precoPix",
   "imagem",
   "categoria",
   "seller",
@@ -39,6 +40,18 @@ const CAMPOS_EDITAVEIS_MANUAL_V2 = Object.freeze([
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
+}
+
+function imagemMagaluPublicaSegura(valor = "") {
+  const entrada = texto(valor);
+  if (!entrada) return true;
+  try {
+    const url = new URL(entrada);
+    const host = url.hostname.toLowerCase();
+    return url.protocol === "https:" && (host === "mlcdn.com.br" || host.endsWith(".mlcdn.com.br"));
+  } catch (_) {
+    return false;
+  }
 }
 
 function normalizarMarketplaceManualV2(valor = "") {
@@ -182,7 +195,16 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     temVariacaoPreco,
     condicaoPrecoPor: "",
 
-    imagem: primeiroTexto(entrada.imagem, entrada.image, entrada.imageUrl, entrada.foto, entrada.thumbnail),
+    imagem: (() => {
+      const imagem = primeiroTexto(entrada.imagem, entrada.image, entrada.imageUrl, entrada.foto, entrada.thumbnail);
+      if (normalizarMarketplaceManualV2(entrada.marketplace || contexto.marketplace || "") === "magalu" && !imagemMagaluPublicaSegura(imagem)) {
+        const erro = new Error("imagem_magalu_invalida");
+        erro.codigo = "imagem_magalu_invalida";
+        erro.statusCode = 422;
+        throw erro;
+      }
+      return imagem;
+    })(),
     categoria: primeiroTexto(entrada.categoria, entrada.categoriaProduto),
     seller: primeiroTexto(entrada.seller, entrada.vendedor, entrada.loja, entrada.store),
     cupom: primeiroTexto(entrada.cupom, entrada.codigoCupom),
@@ -249,7 +271,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     oferta.precoAtual = "";
   }
 
-  if (!oferta.urlAfiliada && !["shopee", "aliexpress"].includes(oferta.marketplace)) {
+  if (!oferta.urlAfiliada && !["shopee", "aliexpress", "magalu"].includes(oferta.marketplace)) {
     oferta.urlAfiliada = oferta.urlOriginal;
   }
 
@@ -268,6 +290,7 @@ module.exports = {
   CAMPOS_EDITAVEIS_MANUAL_V2,
   normalizarMarketplaceManualV2,
   normalizarStatusManualV2,
+  imagemMagaluPublicaSegura,
   normalizarOfertaManualV2,
   camposAusentesEditaveis,
   temFaixaRealPreco,

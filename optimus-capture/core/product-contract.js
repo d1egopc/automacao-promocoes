@@ -82,6 +82,19 @@
       warnings
     };
 
+    if (produto.marketplace === "magalu") {
+      if (normalizadoOpcional(bruto.categoria || bruto.categoriaProduto)) produto.categoria = texto(bruto.categoria || bruto.categoriaProduto);
+      if (normalizadoOpcional(bruto.seller || bruto.vendedor || bruto.loja || bruto.store)) produto.seller = texto(bruto.seller || bruto.vendedor || bruto.loja || bruto.store);
+      if (normalizadoOpcional(bruto.avaliacao ?? bruto.rating)) produto.avaliacao = bruto.avaliacao ?? bruto.rating;
+      if (normalizadoOpcional(bruto.quantidadeAvaliacoes ?? bruto.avaliacoes ?? bruto.reviewCount)) produto.quantidadeAvaliacoes = bruto.quantidadeAvaliacoes ?? bruto.avaliacoes ?? bruto.reviewCount;
+      if (normalizadoOpcional(bruto.vendidos ?? bruto.quantidadeVendida ?? bruto.soldCount)) produto.vendidos = bruto.vendidos ?? bruto.quantidadeVendida ?? bruto.soldCount;
+      if (normalizadoOpcional(bruto.condicaoPix)) produto.condicaoPix = texto(bruto.condicaoPix);
+      if (normalizadoOpcional(bruto.imposto)) produto.imposto = bruto.imposto;
+      if (normalizadoOpcional(bruto.moedas || bruto.coins)) produto.moedas = texto(bruto.moedas || bruto.coins);
+      if (normalizadoOpcional(bruto.instrucaoCupom || bruto.cupomInstrucao || bruto.avisoCupom)) produto.instrucaoCupom = texto(bruto.instrucaoCupom || bruto.cupomInstrucao || bruto.avisoCupom);
+      if (normalizadoOpcional(bruto.beneficioTexto || bruto.beneficio)) produto.beneficioTexto = texto(bruto.beneficioTexto || bruto.beneficio);
+    }
+
     for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
       if (produto[campo] === "" || produto[campo] === null || produto[campo] === undefined) delete produto[campo];
     }
@@ -95,6 +108,10 @@
     produto.completo = Boolean(produto.urlOriginal && produto.titulo && (produto.precoAtual || produto.precoMin));
     produto.requerConferencia = produto.precoAmbiguo === true || !produto.completo;
     return produto;
+  }
+
+  function normalizadoOpcional(valor) {
+    return valor !== "" && valor !== null && valor !== undefined;
   }
 
   function payloadPreview(produto) {
@@ -116,6 +133,11 @@
     };
     for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
       if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
+    }
+    if (normalizado.marketplace === "magalu") {
+      for (const campo of ["categoria", "seller", "avaliacao", "quantidadeAvaliacoes", "vendidos", "condicaoPix", "imposto", "moedas", "descontoPercentual", "instrucaoCupom", "beneficioTexto"]) {
+        if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
+      }
     }
     return payload;
   }
