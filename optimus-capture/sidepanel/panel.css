@@ -149,11 +149,13 @@ small {
   top: 54px;
   right: 12px;
   width: min(280px, calc(100% - 24px));
-  padding: 10px;
+  max-height: min(420px, calc(100vh - 84px));
+  padding: 8px;
   border: 1px solid #d0d5dd;
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 12px 26px rgba(16, 24, 40, 0.18);
+  overflow: hidden;
   text-align: left;
 }
 
@@ -162,6 +164,10 @@ small {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.cabecalho-oportunidades strong {
+  font-size: 13px;
 }
 
 .fechar-oportunidades {
@@ -184,16 +190,20 @@ small {
 
 .lista-oportunidades {
   display: grid;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px;
+  min-height: 0;
+  max-height: min(360px, calc(100vh - 142px));
+  margin-top: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .item-oportunidade {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 8px;
+  gap: 1px 6px;
   width: 100%;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid #eaecf0;
   border-radius: 8px;
   color: #182033;
@@ -201,10 +211,22 @@ small {
   text-align: left;
 }
 
+.item-oportunidade strong,
+.item-oportunidade span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.item-oportunidade strong {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .item-oportunidade span,
 .estado-oportunidades {
   color: #667085;
-  font-size: 11px;
+  font-size: 10.5px;
+  line-height: 1.25;
   font-weight: 500;
 }
 
@@ -213,8 +235,9 @@ small {
   grid-row: 1 / span 2;
   align-self: center;
   color: #165dff;
-  font-size: 11px;
+  font-size: 10.5px;
   font-style: normal;
+  white-space: nowrap;
 }
 
 @keyframes sino-oportunidades {
