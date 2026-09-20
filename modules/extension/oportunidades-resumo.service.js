@@ -15,6 +15,13 @@ const MARKETPLACES = Object.freeze({
     titulo: "AliExpress BR",
     hosts: [/^(?:[a-z0-9-]+\.)?aliexpress\.com$/i]
   },
+  magalu: {
+    titulo: "Magalu",
+    hosts: [
+      /^(?:[a-z0-9-]+\.)?magazineluiza\.com\.br$/i,
+      /^(?:[a-z0-9-]+\.)?magazinevoce\.com\.br$/i
+    ]
+  },
   kabum_awin: {
     titulo: "KaBuM / AWIN",
     hosts: [/^(?:[a-z0-9-]+\.)?kabum\.com\.br$/i, /^(?:[a-z0-9-]+\.)?awin1\.com$/i]

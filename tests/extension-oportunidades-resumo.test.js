@@ -43,6 +43,13 @@ const sinais = [
     quantidade: 1,
     urlDestino: "https://www.amazon.com.br/deals",
     validoAte: "2026-09-10T11:59:00.000Z"
+  },
+  {
+    marketplace: "magalu",
+    quantidade: 2,
+    mensagem: "Ofertas do dia disponíveis agora",
+    urlDestino: "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/",
+    validoAte: "2026-09-10T12:10:00.000Z"
   }
 ];
 
@@ -51,10 +58,24 @@ const sinais = [
     agora,
     listarSinais: () => sinais
   });
-  assert.deepStrictEqual(lista.map((item) => item.marketplace).sort(), ["amazon", "mercadolivre", "shopee"]);
+  assert.deepStrictEqual(lista.map((item) => item.marketplace).sort(), ["amazon", "magalu", "mercadolivre", "shopee"]);
   assert.strictEqual(lista.find((item) => item.marketplace === "mercadolivre").quantidade, 3);
+  assert.strictEqual(lista.find((item) => item.marketplace === "magalu").titulo, "Magalu");
+  assert.strictEqual(lista.find((item) => item.marketplace === "magalu").quantidade, 2);
   assert.strictEqual(resumo.urlDestinoAutorizada("https://evil.example", "mercadolivre"), "");
   assert.strictEqual(resumo.urlDestinoAutorizada("http://www.amazon.com.br/deals", "amazon"), "");
+  assert.strictEqual(resumo.urlDestinoAutorizada("https://www.magazinevoce.com.br/magazined1egopc/", "magalu"), "https://www.magazinevoce.com.br/magazined1egopc/");
+  assert.strictEqual(resumo.urlDestinoAutorizada("https://evil.example/ofertas", "magalu"), "");
+  const semMagaluAtivo = await resumo.listarOportunidadesAtivas("cliente_a", {
+    agora,
+    listarSinais: () => [{
+      marketplace: "magalu",
+      quantidade: 1,
+      urlDestino: "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/",
+      validoAte: "2026-09-10T11:59:00.000Z"
+    }]
+  });
+  assert.deepStrictEqual(semMagaluAtivo, [], "Magalu expirado deve desaparecer pela mesma regra");
 
   let agoraMs = 1_000;
   let chamadas = 0;
@@ -93,10 +114,10 @@ const sinais = [
 
   const urlsAbertas = [];
   assert.strictEqual(
-    await oportunidadesClient.abrirUrlOportunidade({ create: async (opcoes) => urlsAbertas.push(opcoes) }, lista[0].urlDestino),
+    await oportunidadesClient.abrirUrlOportunidade({ create: async (opcoes) => urlsAbertas.push(opcoes) }, lista.find((item) => item.marketplace === "magalu").urlDestino),
     true
   );
-  assert.deepStrictEqual(urlsAbertas, [{ url: lista[0].urlDestino, active: true }]);
+  assert.deepStrictEqual(urlsAbertas, [{ url: "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/", active: true }]);
   assert.strictEqual(await oportunidadesClient.abrirUrlOportunidade({ create: async () => undefined }, "http://evil.example"), false);
 
   const raiz = path.join(__dirname, "..", "optimus-capture");

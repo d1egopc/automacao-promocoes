@@ -3,8 +3,9 @@ const shopee = require("./shopee");
 const amazon = require("./amazon");
 const kabum = require("./kabum");
 const aliexpress = require("./aliexpress");
+const magalu = require("./magalu");
 
-const FONTES_PADRAO = Object.freeze([mercadolivre, shopee, amazon, kabum, aliexpress]);
+const FONTES_PADRAO = Object.freeze([mercadolivre, shopee, amazon, kabum, aliexpress, magalu]);
 
 function criarAgregadorFontes({ fontes = FONTES_PADRAO, agora = () => new Date() } = {}) {
   const cachePorFonte = new Map();

@@ -1,10 +1,11 @@
 const assert = require("assert");
-const { criarAgregadorFontes } = require("../modules/extension/oportunidades-fontes");
+const { criarAgregadorFontes, FONTES_PADRAO } = require("../modules/extension/oportunidades-fontes");
 const ml = require("../modules/extension/oportunidades-fontes/mercadolivre");
 const shopee = require("../modules/extension/oportunidades-fontes/shopee");
 const amazon = require("../modules/extension/oportunidades-fontes/amazon");
 const kabum = require("../modules/extension/oportunidades-fontes/kabum");
 const aliexpress = require("../modules/extension/oportunidades-fontes/aliexpress");
+const magalu = require("../modules/extension/oportunidades-fontes/magalu");
 const { hostPermitido } = require("../modules/extension/oportunidades-fontes/pagina-oficial");
 
 const agora = new Date("2026-09-10T12:00:00.000Z");
@@ -44,9 +45,17 @@ const buscarCom = (html) => async () => html;
   assert.strictEqual((await amazon.detectarOportunidade({ agora, buscarPagina: buscarCom("Ofertas do Dia deal") })).marketplace, "amazon");
   assert.strictEqual((await kabum.detectarOportunidade({ agora, buscarPagina: buscarCom("Promoções Ofertas Produto") })).marketplace, "kabum_awin");
   assert.strictEqual(await aliexpress.detectarOportunidade(), null);
+  const sinalMagalu = await magalu.detectarOportunidade({ agora, buscarPagina: buscarCom("Ofertas do dia · 47 produtos encontrados") });
+  assert.strictEqual(sinalMagalu.marketplace, "magalu");
+  assert.strictEqual(sinalMagalu.titulo, "Magalu");
+  assert.strictEqual(sinalMagalu.urlDestino, "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/");
+  assert.strictEqual(sinalMagalu.validoAte, "2026-09-10T12:05:00.000Z");
+  assert.strictEqual(await magalu.detectarOportunidade({ agora, buscarPagina: buscarCom("Página sem ofertas disponíveis") }), null);
+  assert.ok(FONTES_PADRAO.includes(magalu), "Magalu deve participar do agregador padrão");
 
   assert.strictEqual(hostPermitido("https://www.mercadolivre.com.br/ofertas", [/mercadolivre\.com\.br$/]), true);
   assert.strictEqual(hostPermitido("https://evil.example/ofertas", [/mercadolivre\.com\.br$/]), false);
+  assert.strictEqual(hostPermitido("https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/", [/^(?:[a-z0-9-]+\.)?magazineluiza\.com\.br$/i]), true);
 
   let agoraMs = agora.getTime();
   let chamadasBoa = 0;
