@@ -1,8 +1,95 @@
 const assert = require("assert");
 
 const {
-  montarDiagnosticoGateImagemMercadoLivreLocalWorker
+  montarDiagnosticoGateImagemMercadoLivreLocalWorker,
+  resolverIdentidadeMlWorker
 } = require("../modules/engine/importer/importer.service");
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "MLB37809946", tipoIdentidade: "mlb" },
+    mlbsMetadata: [],
+    sourceUrl: "https://www.mercadolivre.com.br/p/MLB37809946"
+  });
+  assert.deepStrictEqual(resultado, {
+    ok: true,
+    motivo: "",
+    produtoId: "MLB37809946",
+    origem: "detector_direto"
+  });
+}
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" },
+    mlbsMetadata: ["MLB37809946"],
+    sourceUrl: "https://mercadolivre.com.br/social/diegopc2015"
+  });
+  assert.deepStrictEqual(resultado, {
+    ok: true,
+    motivo: "",
+    produtoId: "MLB37809946",
+    origem: "metadata_tecnica"
+  });
+}
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" },
+    mlbsMetadata: ["MLB3746504707"],
+    sourceUrl: "https://produto.mercadolivre.com.br/MLB-3746504707-produto"
+  });
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.produtoId, "MLB3746504707");
+  assert.strictEqual(resultado.origem, "metadata_tecnica");
+}
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" },
+    mlbsMetadata: ["MLB2"],
+    sourceUrl: "https://produto.mercadolivre.com.br/MLB1-produto"
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_divergente");
+}
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" },
+    mlbsMetadata: ["MLB1", "MLB2"],
+    sourceUrl: ""
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_ambigua");
+}
+
+{
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "MLB1", tipoIdentidade: "mlb" },
+    mlbsMetadata: ["MLB2"],
+    sourceUrl: ""
+  });
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "identidade_divergente");
+}
+
+{
+  const comercial = {
+    productId: "MLB37809946",
+    preco: 99.9,
+    cupom: "PROMO10",
+    linkAfiliado: "https://meli.la/mesmo-produto"
+  };
+  const antes = JSON.stringify(comercial);
+  const resultado = resolverIdentidadeMlWorker({
+    identidade: { produtoIdDetectado: "", tipoIdentidade: "sem_identidade" },
+    mlbsMetadata: [comercial.productId],
+    sourceUrl: ""
+  });
+  assert.strictEqual(resultado.produtoId, "MLB37809946");
+  assert.strictEqual(JSON.stringify(comercial), antes);
+}
 
 {
   const diagnostico = montarDiagnosticoGateImagemMercadoLivreLocalWorker({

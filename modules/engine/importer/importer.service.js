@@ -2188,10 +2188,55 @@ function extrairMlbsGateMlWorker(...valores) {
   for (const valor of valores) {
     const textoValor = normalizarTexto(valor);
     if (!textoValor) continue;
-    const matches = textoValor.match(/\bMLB-?(\d{6,})\b/gi) || [];
+    const matches = textoValor.match(/\bMLB-?(\d+)\b/gi) || [];
     for (const match of matches) encontrados.add(`MLB${match.replace(/[^0-9]/g, "")}`);
   }
   return Array.from(encontrados);
+}
+
+function resolverIdentidadeMlWorker({ identidade = {}, mlbsMetadata = [], sourceUrl = "" } = {}) {
+  const normalizarMlb = valor => {
+    const texto = normalizarTexto(valor).toUpperCase();
+    return /^MLB\d+$/.test(texto) ? texto : "";
+  };
+  const listaUnica = valores => Array.from(new Set(
+    (Array.isArray(valores) ? valores : [valores])
+      .map(normalizarMlb)
+      .filter(Boolean)
+  ));
+
+  const identidadeDireta = normalizarMlb(identidade.produtoIdDetectado);
+  const identidadeDiretaBruta = normalizarTexto(identidade.produtoIdDetectado || "");
+  const metadata = listaUnica(extrairMlbsGateMlWorker(...(Array.isArray(mlbsMetadata) ? mlbsMetadata : [mlbsMetadata])));
+  const origem = listaUnica(extrairMlbsGateMlWorker(sourceUrl));
+
+  if (metadata.length > 1 || origem.length > 1) {
+    return { ok: false, motivo: "identidade_ambigua", produtoId: "", origem: "" };
+  }
+
+  const identidadeConhecida = identidadeDireta || "";
+  const conflitos = [metadata[0], origem[0]]
+    .filter(Boolean)
+    .some(valor => identidadeConhecida && valor !== identidadeConhecida);
+  if (conflitos || (metadata[0] && origem[0] && metadata[0] !== origem[0])) {
+    return { ok: false, motivo: "identidade_divergente", produtoId: "", origem: "" };
+  }
+
+  if (identidadeDireta) {
+    return { ok: true, motivo: "", produtoId: identidadeDireta, origem: "detector_direto" };
+  }
+
+  const tipoIdentidade = normalizarTexto(identidade.tipoIdentidade).toLowerCase();
+  if (metadata.length === 1 && (!identidadeDiretaBruta || ["", "link_normalizado", "titulo_normalizado_forte", "sem_identidade"].includes(tipoIdentidade))) {
+    return { ok: true, motivo: "", produtoId: metadata[0], origem: "metadata_tecnica" };
+  }
+
+  return {
+    ok: false,
+    motivo: metadata.length > 1 || origem.length > 1 ? "identidade_ambigua" : "mlb_nao_detectado",
+    produtoId: "",
+    origem: ""
+  };
 }
 
 function montarDiagnosticoGateImagemMercadoLivreLocalWorker({
@@ -4189,6 +4234,9 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     let cacheHitMlWorker = false;
     let gateMlWorkerRegistrado = false;
     const mlbsMetadataGateMlWorker = extrairMlbsGateMlWorker(
+      metadataGateMlWorker.mlbsMetadata,
+      metadataGateMlWorker.mlbs,
+      metadataGateMlWorker.mlb,
       oferta.produtoIdDetectado,
       oferta.produtoId,
       oferta.itemId,
@@ -4209,6 +4257,33 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       metadataGateMlWorker.urlFinalImportador,
       metadataGateMlWorker.transporteTecnicoMl?.linkResolvidoTecnico,
       inteligenciaMetadataGateMlWorker.produtoIdDetectado,
+      inteligenciaMetadataGateMlWorker.mlbsMetadata,
+      inteligenciaMetadataGateMlWorker.mlbs,
+      inteligenciaMetadataGateMlWorker.mlb,
+      imagemCacheMetadataGateMlWorker.produtoId
+    );
+    const mlbsMetadataTecnicaGateMlWorker = extrairMlbsGateMlWorker(
+      metadataGateMlWorker.mlbsMetadata,
+      metadataGateMlWorker.mlbs,
+      metadataGateMlWorker.mlb,
+      metadataGateMlWorker.produtoId,
+      metadataGateMlWorker.itemId,
+      produtoMetadataGateMlWorker.mlbsMetadata,
+      produtoMetadataGateMlWorker.mlbs,
+      produtoMetadataGateMlWorker.mlb,
+      produtoMetadataGateMlWorker.produtoId,
+      produtoMetadataGateMlWorker.productId,
+      produtoMetadataGateMlWorker.itemId,
+      metadataGateMlWorker.ofertaUniversal?.produto?.idExterno,
+      metadataGateMlWorker.ofertaUniversal?.produto?.mlb,
+      metadataGateMlWorker.ofertaUniversal?.produto?.productId,
+      metadataGateMlWorker.identidade?.produtoIdDetectado,
+      metadataGateMlWorker.identidade?.mlb,
+      inteligenciaMetadataGateMlWorker.mlbsMetadata,
+      inteligenciaMetadataGateMlWorker.mlbs,
+      inteligenciaMetadataGateMlWorker.mlb,
+      inteligenciaMetadataGateMlWorker.identidade?.produtoIdDetectado,
+      inteligenciaMetadataGateMlWorker.identidade?.mlb,
       imagemCacheMetadataGateMlWorker.produtoId
     );
     const registrarGateMlWorker = ({ decisao = "task_nao_criada", motivoTaskNaoCriada = "", taskId = null } = {}) => {
@@ -4240,9 +4315,14 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       registrarGateMlWorker({ motivoTaskNaoCriada: "imagem_ja_resolvida" });
     } else {
       identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
-      produtoIdMlWorker = normalizarTexto(identidadeMlWorker.produtoIdDetectado || "").toUpperCase();
-      if (!/^MLB\d+$/.test(produtoIdMlWorker)) {
-        registrarGateMlWorker({ motivoTaskNaoCriada: "mlb_nao_detectado" });
+      const identidadeResolvidaMlWorker = resolverIdentidadeMlWorker({
+        identidade: identidadeMlWorker,
+        mlbsMetadata: mlbsMetadataTecnicaGateMlWorker,
+        sourceUrl: sourceUrlMlWorker
+      });
+      produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
+      if (!identidadeResolvidaMlWorker.ok) {
+        registrarGateMlWorker({ motivoTaskNaoCriada: identidadeResolvidaMlWorker.motivo });
       } else if (!cacheLookupDisponivelMlWorker) {
         registrarGateMlWorker({ motivoTaskNaoCriada: "dependencia_indisponivel" });
       } else {
@@ -5170,6 +5250,7 @@ module.exports = {
   extrairImagemPolycardMercadoLivreHtml,
   montarUrlImagemPolycardMl,
   validarImagemPolycardMercadoLivre,
+  resolverIdentidadeMlWorker,
   montarDiagnosticoGateImagemMercadoLivreLocalWorker,
   materializarImagemRadarMirrorSeNecessario,
   aplicarComercialCapturadoClonador,
