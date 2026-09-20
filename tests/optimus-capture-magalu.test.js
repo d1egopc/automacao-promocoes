@@ -85,6 +85,55 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
   assert.strictEqual(pepsi.precoMax, null);
   assert.strictEqual(pepsi.temVariacaoPreco, false);
 
+  const casoRealMagalu = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: "Escova Secadora Britania",
+    sku: "226803000",
+    image: ["https://a-static.mlcdn.com.br/escova.jpg"],
+    offers: {
+      price: "99.90",
+      regularPrice: "105.16",
+      priceSpecification: [
+        { name: "Pix", price: "99.90", paymentMethod: "Pix" },
+        { name: "2x sem juros", price: "105.16", paymentMethod: "creditCard" }
+      ]
+    }
+  };
+  const casoRealHtml = `<script type="application/ld+json">${JSON.stringify(casoRealMagalu)}</script><div data-testid="price-pix">R$ 99,90 no Pix</div><div data-testid="installment-price">Ou R$ 105,16 em 2x de R$ 52,58 sem juros</div>`;
+  const casoReal = magalu.capturarMagaluDeHtml(casoRealHtml, "https://www.magazineluiza.com.br/escova/p/226803000/");
+  assert.strictEqual(casoReal.precoAtual, 99.9);
+  assert.strictEqual(casoReal.precoPix, 99.9);
+  assert.strictEqual(casoReal.condicaoPrecoPor, "pix");
+  assert.strictEqual(casoReal.condicaoPix, "no Pix");
+  assert.strictEqual(casoReal.precoAnterior, null, "total no cartao nao pode virar preco anterior");
+  assert.strictEqual(casoReal.parcelamento, "2x de R$ 52,58 sem juros");
+
+  const casoRealListPrice = magalu.capturarMagaluDeHtml(
+    `<script type="application/ld+json">${JSON.stringify({
+      ...casoRealMagalu,
+      offers: { ...casoRealMagalu.offers, regularPrice: undefined, listPrice: "105.16" }
+    })}</script><div>R$ 99,90 no Pix</div><div>Ou R$ 105,16 em 2x de R$ 52,58 sem juros</div>`,
+    "https://www.magazineluiza.com.br/escova/p/226803000/"
+  );
+  assert.strictEqual(casoRealListPrice.precoAnterior, null, "listPrice ambiguo no cartao tambem deve ficar vazio");
+
+  const deReal = magalu.capturarMagaluDeHtml(
+    `<script type="application/ld+json">${JSON.stringify({
+      ...casoRealMagalu,
+      offers: { ...casoRealMagalu.offers, listPrice: "129.90" }
+    })}</script><del>De: R$ 129,90</del><div>R$ 99,90 no Pix</div><div>Ou R$ 105,16 em 2x de R$ 52,58 sem juros</div>`,
+    "https://www.magazineluiza.com.br/escova/p/226803000/"
+  );
+  assert.strictEqual(deReal.precoAnterior, 129.9, "DE explicito continua sendo aceito");
+
+  const payloadCasoReal = contrato.payloadPreview(casoReal);
+  assert.strictEqual(payloadCasoReal.precoAnterior, "", "preview nao deve enviar DE inventado");
+  assert.strictEqual(payloadCasoReal.precoPix, 99.9);
+  assert.strictEqual(payloadCasoReal.condicaoPrecoPor, "pix");
+  assert.strictEqual(payloadCasoReal.condicaoPix, "no Pix");
+  assert.strictEqual(payloadCasoReal.parcelamento, "2x de R$ 52,58 sem juros");
+
   const faixaHtml = `<script type="application/ld+json">${JSON.stringify({
     "@type": "Product", sku: "faixa-magalu", name: "Produto com variacao", image: ["https://a-static.mlcdn.com.br/faixa.jpg"],
     offers: { lowPrice: "10.00", highPrice: "20.00", priceCurrency: "BRL" }

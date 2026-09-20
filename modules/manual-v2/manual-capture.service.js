@@ -463,7 +463,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
   if (precoAtualNumero === null && !faixaPreco) {
     throw erroCapture("capture_preco_invalido", 400, { host: urlValidada.host });
   }
-  const condicaoPrecoPor = marketplace === "kabum" && texto(entrada.condicaoPrecoPor).toLowerCase() === "pix"
+  const condicaoPrecoPor = ["kabum", "magalu"].includes(marketplace) && texto(entrada.condicaoPrecoPor).toLowerCase() === "pix"
     ? "pix"
     : "";
 

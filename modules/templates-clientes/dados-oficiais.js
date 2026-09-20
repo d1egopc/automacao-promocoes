@@ -339,19 +339,20 @@ function ofertaRadarEspelhoComercial(oferta = {}) {
     Boolean(oferta.metadata?.radarEspelhoComercial?.contratoComercial);
 }
 
-function condicaoPixKabumCapture(oferta = {}) {
+function condicaoPixCapture(oferta = {}) {
   if (ofertaRadarEspelhoComercial(oferta)) return false;
   const marketplace = normalizarComparacao(oferta.marketplace).replace(/[^a-z0-9]+/g, "");
   const condicao = normalizarComparacao(oferta.condicaoPrecoPor || oferta.condicao_preco_por);
   const adapter = normalizarComparacao(oferta.fonteImportacao?.adapter).replace(/[^a-z0-9]+/g, "_");
-  return marketplace === "kabum" && condicao === "pix" && adapter === "optimus_capture_v1";
+  return ["kabum", "magalu"].includes(marketplace) && condicao === "pix" && adapter === "optimus_capture_v1";
 }
 
-function preservarCondicaoPixKabumCapture(dados = {}, oferta = {}) {
-  if (!condicaoPixKabumCapture(oferta)) return dados;
+function preservarCondicaoPixCapture(dados = {}, oferta = {}) {
+  if (!condicaoPixCapture(oferta)) return dados;
   return {
     ...dados,
     condicaoPrecoPor: "pix",
+    condicaoPix: texto(oferta.condicaoPix || "no Pix"),
     fonteImportacao: {
       ...(dados.fonteImportacao && typeof dados.fonteImportacao === "object" ? dados.fonteImportacao : {}),
       adapter: "optimus_capture_v1"
@@ -416,7 +417,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
   };
 
   if (!radarEspelho) {
-    return preservarCondicaoPixKabumCapture(
+    return preservarCondicaoPixCapture(
       resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
       oferta
     );
@@ -531,7 +532,7 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
 
   dados.precoExibido = dados.precoAtual;
   dados.fontePrecoExibido = "preco_atual";
-  return preservarCondicaoPixKabumCapture(
+  return preservarCondicaoPixCapture(
     resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
     oferta
   );

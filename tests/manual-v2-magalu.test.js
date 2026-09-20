@@ -11,6 +11,7 @@ const storage = require("../modules/manual-v2/manual-offers.storage");
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
 const { gerarPreviewCaptureManualV2 } = require("../modules/manual-v2/manual-capture.service");
 const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
+const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const {
   validarOfertaAfiliacaoWorkspaceMagalu,
   PROOF_TYPE_DETERMINISTIC_WORKSPACE
@@ -25,6 +26,8 @@ const baseEntrada = {
   precoAtual: "999,90",
   precoAnterior: "1.299,90",
   precoPix: "899,90",
+  condicaoPrecoPor: "pix",
+  condicaoPix: "no Pix",
   cupom: "MAGALU10",
   categoria: "Eletronicos",
   seller: "Loja Oficial",
@@ -50,6 +53,8 @@ async function main() {
   assert.strictEqual(previewA.oferta.titulo, baseEntrada.titulo, "valor humano deve sobreviver ao preview");
   assert.strictEqual(previewA.oferta.precoAnterior, "1.299,90");
   assert.strictEqual(previewA.oferta.precoPix, "899,90");
+  assert.strictEqual(previewA.oferta.condicaoPrecoPor, "pix");
+  assert.strictEqual(previewA.oferta.condicaoPix, "no Pix");
   assert.strictEqual(previewA.oferta.cupom, "MAGALU10");
   assert.strictEqual(previewA.oferta.categoria, "Eletronicos");
   assert.strictEqual(previewA.oferta.seller, "Loja Oficial");
@@ -110,7 +115,35 @@ async function main() {
   const recarregada = storage.buscarOfertaManualV2("workspace_a", salva.id, storageOptions);
   assert.strictEqual(recarregada.afiliacaoWorkspaceVerificada.productId, "afh3e1g80j");
   assert.strictEqual(recarregada.precoPix, "899,90");
+  assert.strictEqual(recarregada.condicaoPrecoPor, "pix");
+  assert.strictEqual(recarregada.condicaoPix, "no Pix");
   assert.strictEqual(recarregada.cupom, "MAGALU10");
+
+  const casoRealPix = await gerarPreviewCaptureManualV2({
+    ...baseEntrada,
+    precoAnterior: "",
+    precoAtual: "99,90",
+    precoPix: "99,90",
+    condicaoPrecoPor: "pix",
+    condicaoPix: "no Pix",
+    parcelamento: "2x de R$ 52,58 sem juros"
+  }, depsPara("d1egopc"));
+  const mensagemCasoReal = montarMensagemOferta(casoRealPix.oferta, {
+    clienteId: "workspace_a",
+    destino: {}
+  });
+  assert.ok(mensagemCasoReal.includes("R$ 99,90 no Pix"));
+  assert.ok(mensagemCasoReal.includes("2x de R$ 52,58 sem juros"));
+  assert.ok(!mensagemCasoReal.includes("De:"));
+
+  const camposHumanos = await gerarPreviewCaptureManualV2({
+    ...baseEntrada,
+    precoPix: "88,80",
+    condicaoPix: "no Pix",
+    parcelamento: "3x de R$ 31,00 sem juros"
+  }, depsPara("d1egopc"));
+  assert.strictEqual(camposHumanos.oferta.precoPix, "88,80", "Pix digitado pelo usuario vence autofill");
+  assert.strictEqual(camposHumanos.oferta.parcelamento, "3x de R$ 31,00 sem juros", "parcelamento digitado pelo usuario vence autofill");
 
   const app = express();
   app.use(express.json());
@@ -171,7 +204,10 @@ async function main() {
     usuarioTemCreditos: () => true,
     debitarCreditos: () => true,
     enviarWhatsApp: async () => { envios += 1; },
-    montarMensagemOferta: (oferta) => oferta.titulo
+    montarMensagemOferta: (oferta) => montarMensagemOferta(oferta, {
+      clienteId: "workspace_a",
+      destino: {}
+    })
   });
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(envios, 1);

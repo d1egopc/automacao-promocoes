@@ -140,6 +140,27 @@
     return null;
   }
 
+  function condicaoPixEstruturada(produto = {}, html = "") {
+    const oferta = ofertaJsonLd(produto);
+    const especificacoes = Array.isArray(oferta.priceSpecification)
+      ? oferta.priceSpecification
+      : (oferta.priceSpecification && typeof oferta.priceSpecification === "object" ? [oferta.priceSpecification] : []);
+    for (const especificacao of especificacoes) {
+      const semantica = [
+        especificacao?.name,
+        especificacao?.description,
+        especificacao?.paymentMethod,
+        especificacao?.paymentMethodId
+      ].map(texto).join(" ");
+      const valor = valorMonetarioTexto(especificacao?.price ?? especificacao?.value ?? especificacao?.priceValue);
+      if (valor && /\bpix\b/i.test(semantica)) return "no Pix";
+    }
+    const blocos = blocosSemanticos(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
+    return blocos.some((bloco) => valorMonetarioTexto(bloco.texto) && /\bpix\b/i.test(bloco.texto))
+      ? "no Pix"
+      : "";
+  }
+
   function faixaPrecoEstruturada(produto = {}, html = "") {
     const oferta = ofertaJsonLd(produto);
     const especificacoes = Array.isArray(oferta.priceSpecification) ? oferta.priceSpecification : [];
@@ -196,25 +217,52 @@
     return imagemOficial(candidataJson) || imagemOficial(meta(html, "og:image"));
   }
 
-  function precoAnterior(produto, atual) {
+  function contextoPagamento(textoPagina = "") {
+    return /\b(?:ou\s+R\$|em\s+\d{1,2}x|\d{1,2}x\s+de|cart[aã]o|cr[eé]dito|d[eé]bito|sem\s+juros|paymentmethod|parcelamento|parcela)\b/i.test(textoPagina);
+  }
+
+  function evidenciaPrecoAnterior(html = "", textoPagina = "") {
+    const re = /\b(?:de|antes|pre[cç]o\s+anterior|valor\s+anterior)\s*:?\s*(?:R\$|\d)/gi;
+    let match;
+    while ((match = re.exec(textoPagina))) {
+      const antes = textoPagina.slice(Math.max(0, match.index - 32), match.index);
+      const depois = textoPagina.slice(match.index, match.index + match[0].length + 24);
+      if (/\b\d{1,2}x\s*$/i.test(antes) || /\b(?:em\s+\d{1,2}x|cart[aã]o|cr[eé]dito|d[eé]bito|sem\s+juros)\b/i.test(depois)) continue;
+      return true;
+    }
+    return
+      /<(?:s|del)\b|text-decoration\s*:\s*[^;>]*line-through|(?:data-testid|class|aria-label)=["'][^"']*(?:old|original|previous|list|anterior|antes|de-price)[^"']*["']/i.test(html);
+  }
+
+  function precoAnterior(produto, atual, html = "", textoPagina = "") {
     const oferta = ofertaJsonLd(produto);
-    return primeiroNumero(
-      oferta.listPrice,
-      oferta.originalPrice,
-      oferta.regularPrice,
-      ...(Array.isArray(oferta.priceSpecification)
-        ? oferta.priceSpecification.map((item) => item?.listPrice || item?.originalPrice)
-        : [])
-    ) > (atual || 0)
-      ? primeiroNumero(
-        oferta.listPrice,
-        oferta.originalPrice,
-        oferta.regularPrice,
-        ...(Array.isArray(oferta.priceSpecification)
-          ? oferta.priceSpecification.map((item) => item?.listPrice || item?.originalPrice)
-          : [])
-      )
-      : null;
+    const especificacoes = Array.isArray(oferta.priceSpecification) ? oferta.priceSpecification : [];
+    const candidatos = [
+      { valor: oferta.listPrice, semantica: "listPrice" },
+      { valor: oferta.originalPrice, semantica: "originalPrice" },
+      { valor: oferta.regularPrice, semantica: "regularPrice", exigeEvidencia: true },
+      ...especificacoes.flatMap((item) => [
+        { valor: item?.listPrice, semantica: [item?.name, item?.description, item?.paymentMethod].map(texto).join(" ") },
+        { valor: item?.originalPrice, semantica: [item?.name, item?.description, item?.paymentMethod].map(texto).join(" ") }
+      ])
+    ];
+    const pagamentoEstruturado = especificacoes.some((item) => /\b(?:cart[aã]o|cr[eé]dito|d[eé]bito|payment|parcel|parcela|sem\s+juros|pix|a[ -]?vista)\b/i.test([
+      item?.name,
+      item?.description,
+      item?.paymentMethod,
+      item?.paymentMethodId
+    ].map(texto).join(" ")));
+    const pagamento = contextoPagamento(textoPagina) || pagamentoEstruturado;
+    const evidenciaAnterior = evidenciaPrecoAnterior(html, textoPagina);
+    for (const candidato of candidatos) {
+      const numero = primeiroNumero(candidato.valor);
+      if (!numero || numero <= (atual || 0)) continue;
+      if (/\b(?:cart[aã]o|cr[eé]dito|d[eé]bito|payment|parcel|parcela|sem\s+juros|pix|a[ -]?vista)\b/i.test(candidato.semantica)) continue;
+      if (candidato.exigeEvidencia && !evidenciaAnterior) continue;
+      if (pagamento && !evidenciaAnterior) continue;
+      return numero;
+    }
+    return null;
   }
 
   function precoNoTexto(textoPagina, atual) {
@@ -222,6 +270,9 @@
     const re = /\b(?:de|antes|pre[cç]o\s+anterior|valor\s+anterior)\s*:?(?:\s*R\$)?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+(?:[.,][0-9]{2})?)/gi;
     let match;
     while ((match = re.exec(textoPagina))) {
+      const antes = textoPagina.slice(Math.max(0, match.index - 32), match.index);
+      const depois = textoPagina.slice(match.index, match.index + match[0].length + 24);
+      if (/\b\d{1,2}x\s*$/i.test(antes) || /\b(?:em\s+\d{1,2}x|cart[aã]o|cr[eé]dito|d[eé]bito|sem\s+juros)\b/i.test(depois)) continue;
       const numero = contrato.precoNumero(match[1]);
       if (numero && numero > (atual || 0) && !candidatos.includes(numero)) candidatos.push(numero);
     }
@@ -247,7 +298,7 @@
     const precoAtual = faixaPreco
       ? null
       : primeiroNumero(oferta.price, oferta.lowPrice, oferta.highPrice, meta(htmlTexto, "product:price:amount"));
-    const precoAntigo = precoAnterior(produto, precoAtual) || precoNoTexto(textoPagina, precoAtual);
+    const precoAntigo = precoAnterior(produto, precoAtual, htmlTexto, textoPagina) || precoNoTexto(textoPagina, precoAtual);
     let produtoIdUrl = "";
     try {
       produtoIdUrl = detector.produtoIdMagalu?.(new URL(urlOriginal)) || "";
@@ -259,6 +310,7 @@
     const imagem = imagemProduto(produto, htmlTexto);
     const categoria = texto(produto.category);
     const precoPix = valorPixEstruturado(produto, htmlTexto);
+    const condicaoPix = condicaoPixEstruturada(produto, htmlTexto);
     const parcelamento = parcelamentoEstruturado(htmlTexto);
     const warnings = [];
     if (!productId) warnings.push("produto_id_ausente");
@@ -273,7 +325,9 @@
       precoMin: faixaPreco?.precoMin || null,
       precoMax: faixaPreco?.precoMax || null,
       temVariacaoPreco: Boolean(faixaPreco),
+      condicaoPrecoPor: condicaoPix ? "pix" : "",
       precoPix: precoPix || "",
+      condicaoPix,
       parcelamento,
       imagem,
       categoria,

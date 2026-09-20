@@ -190,6 +190,13 @@ function pixExplicitamenteNoRadar(oferta = {}, textoOriginal = "") {
   return /\bradar\b/.test(origemComercial) && ["alta", "media"].includes(confiancaPix);
 }
 
+function pixExplicitamenteCapturadoMagalu(oferta = {}) {
+  return normalizarComparacao(oferta.marketplace) === "magalu" &&
+    normalizarComparacao(oferta.fonteImportacao?.adapter).replace(/[^a-z0-9]+/g, "_") === "optimus_capture_v1" &&
+    normalizarComparacao(oferta.condicaoPrecoPor || oferta.condicao_preco_por) === "pix" &&
+    /\bpix\b/i.test(String(oferta.condicaoPix || ""));
+}
+
 function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "", precoDe = null) {
   const dePorPix = extrairDePorPix(textoOriginal);
   const candidatos = [
@@ -205,7 +212,7 @@ function resolverPrecoPixFinal(oferta = {}, precoPor = null, textoOriginal = "",
     return { condicaoPrecoPor: "pix", precoPixDistinto: null, precoPixTexto: "", origem: "radar_de_por_pix" };
   }
 
-  if (!pixExplicitamenteNoRadar(oferta, textoOriginal)) {
+  if (!pixExplicitamenteNoRadar(oferta, textoOriginal) && !pixExplicitamenteCapturadoMagalu(oferta)) {
     return { condicaoPrecoPor: "", precoPixDistinto: null, precoPixTexto: "", origem: "pix_rejeitado_sem_radar" };
   }
 

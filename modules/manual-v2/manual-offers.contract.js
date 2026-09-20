@@ -175,12 +175,19 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
   const temVariacaoPreco = entrada.temVariacaoPreco === true ||
     entrada.tem_variacao_preco === true ||
     temFaixaRealPreco(precoMin, precoMax);
+  const marketplaceEntrada = normalizarMarketplaceManualV2(entrada.marketplace || contexto.marketplace || "");
+  const adapterEntrada = primeiroTexto(fonteEntrada.adapter, entrada.fonteImportacao?.adapter);
+  const condicaoPrecoPorCaptura = marketplaceEntrada === "magalu" &&
+    adapterEntrada === "optimus_capture_v1" &&
+    primeiroTexto(entrada.condicaoPrecoPor, entrada.condicao_preco_por).toLowerCase() === "pix"
+    ? "pix"
+    : "";
 
   const oferta = {
     id: primeiroTexto(entrada.id) || (typeof contexto.idFactory === "function" ? contexto.idFactory() : gerarIdManualV2()),
     clienteId: primeiroTexto(entrada.clienteId, contexto.clienteId, "admin"),
 
-    marketplace: normalizarMarketplaceManualV2(entrada.marketplace || contexto.marketplace || ""),
+    marketplace: marketplaceEntrada,
     urlOriginal: primeiroTexto(entrada.urlOriginal, entrada.linkOriginal, entrada.url, entrada.original),
     urlAfiliada: primeiroTexto(entrada.urlAfiliada, entrada.linkAfiliado, entrada.linkFinal, entrada.link),
     // Evidencia recebida do cliente e somente diagnostica; nunca libera despacho.
@@ -193,7 +200,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     precoMin,
     precoMax,
     temVariacaoPreco,
-    condicaoPrecoPor: "",
+    condicaoPrecoPor: condicaoPrecoPorCaptura,
 
     imagem: (() => {
       const imagem = primeiroTexto(entrada.imagem, entrada.image, entrada.imageUrl, entrada.foto, entrada.thumbnail);
