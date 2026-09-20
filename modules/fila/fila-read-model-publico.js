@@ -21,6 +21,7 @@ const ARQUIVOS_DETALHE_REF_PERMITIDOS = new Set([
 ]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 const JANELA_PUBLICA_DIAS_PADRAO = 7;
+const VISAO_FILA = "fila";
 const VISAO_PROCESSADAS = "processadas";
 const VISAO_ENVIADAS = "enviadas";
 const VISAO_PARCIAIS = "parciais";
@@ -315,25 +316,16 @@ function destinoEnviadoPublico(destino = {}) {
 
 function destinoFalhouPublico(destino = {}) {
   const estado = estadoDestinoPublico(destino);
-  return estado.includes("erro") ||
+  return destino?.erro === true ||
+    estado.includes("erro") ||
     estado.includes("falha") ||
     estado.includes("exception") ||
     estado.includes("excecao") ||
-    estado === "nao enviado" ||
-    estado === "nao_enviado";
-}
-
-function itemTemImagemFinalValida(item = {}) {
-  return Boolean(primeiroTexto(
-    item.imagemUsada,
-    item.imagemFinal,
-    item.imagemCanonicaFinal,
-    item.imagemRef,
-    item.imagemOriginal,
-    item.imagem,
-    item.image,
-    item.foto
-  ));
+    ((estado === "nao enviado" || estado === "nao_enviado") && (
+      destino?.tentouEnvio === true ||
+      numeroPublico(destino?.tentativas) > 0 ||
+      Boolean(destino?.erro)
+    ));
 }
 
 function numeroPublico(value) {
@@ -343,6 +335,58 @@ function numeroPublico(value) {
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
+}
+
+function precoPublicoValido(valor) {
+  if (typeof valor === "number") return Number.isFinite(valor) && valor > 0;
+  const bruto = texto(valor).replace(/[^0-9,.-]/g, "");
+  if (!bruto) return false;
+  const normalizado = bruto.includes(",")
+    ? bruto.replace(/\./g, "").replace(",", ".")
+    : bruto;
+  const numero = Number(normalizado);
+  return Number.isFinite(numero) && numero > 0;
+}
+
+function tituloPublicoValido(valor = "") {
+  const titulo = normalizarTexto(valor);
+  return titulo.length >= 3 && ![
+    "produto",
+    "oferta",
+    "sem titulo",
+    "titulo indisponivel",
+    "carregando"
+  ].includes(titulo);
+}
+
+function imagemPublicaValida(valor = "") {
+  try {
+    const url = new URL(texto(valor));
+    return (url.protocol === "https:" || url.protocol === "http:") && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function completudeCardHistorico(item = {}, projetado = {}) {
+  const titulo = primeiroTexto(projetado.titulo, item.titulo, item.nome, item.produto);
+  const preco = projetado.precoExibivel ?? item.precoAtual ?? item.preco ?? item.valorEfetivo ?? item.precoFinal ?? item.precoExibivel;
+  const imagem = primeiroTexto(
+    projetado.imagemRef,
+    item.imagemUsada,
+    item.imagemFinal,
+    item.imagemCanonicaFinal,
+    item.imagemRef,
+    item.imagem,
+    item.image,
+    item.foto
+  );
+  const link = escolherUrlOriginalConfiavel(item, projetado);
+  if (!tituloPublicoValido(titulo)) return { ok: false, motivo: "sem_titulo" };
+  if (!precoPublicoValido(preco)) return { ok: false, motivo: "sem_preco" };
+  if (!imagemPublicaValida(imagem)) return { ok: false, motivo: "sem_imagem" };
+  if (!link.confiavel) return { ok: false, motivo: "link_mal_resolvido" };
+  return { ok: true, motivo: "", titulo, preco, imagem, link: link.url };
 }
 
 function itemTerminalOuEncerrado(item = {}) {
@@ -355,41 +399,14 @@ function itemTerminalOuEncerrado(item = {}) {
     status === "historico";
 }
 
-function evidenciaDestinosElegiveisNoEvento(item = {}) {
-  const valores = [
-    item.destinosElegiveis,
-    item.destinosElegiveisTotal,
-    item.totalDestinosElegiveis,
-    item.destinosEsperados,
-    item.totalDestinosEsperados,
-    item.destinosPlanejados,
-    item.totalDestinosPlanejados,
-    item.destinosResolvidosEsperados,
-    item.totalDestinosResolvidosEsperados,
-    item?.roteamento?.destinosElegiveis,
-    item?.roteamento?.totalDestinosElegiveis,
-    item?.fanout?.destinosElegiveis,
-    item?.fanout?.totalDestinosElegiveis
-  ];
-  return valores.some(valor => {
-    if (Array.isArray(valor)) return valor.length > 0;
-    if (valor && typeof valor === "object") return Object.keys(valor).length > 0;
-    return numeroPublico(valor) > 0;
-  });
-}
-
-function motivoErroPublicoTerminal(item = {}) {
+function motivoErroPublicoTerminal(item = {}, opcoes = {}) {
   const terminal = itemTerminalOuEncerrado(item);
+  if (!terminal) return null;
   const destinos = destinosPublicosItem(item);
   const aplicaveis = destinos.filter(destino => !destinoNaoAplicavelPublico(destino));
-  const enviadosDestinos = aplicaveis.filter(destinoEnviadoPublico).length;
   const falhasDestinos = aplicaveis.filter(destinoFalhouPublico).length;
   const progresso = item.progresso && typeof item.progresso === "object" ? item.progresso : {};
-  const totalProgresso = numeroPublico(progresso.total);
-  const enviadosProgresso = numeroPublico(progresso.enviados);
   const errosProgresso = numeroPublico(progresso.erros);
-  const totalEsperado = Math.max(aplicaveis.length, totalProgresso);
-  const enviados = Math.max(enviadosDestinos, enviadosProgresso);
   const textoFalha = normalizarTexto([
     item.erro,
     item.erroEnvio,
@@ -397,21 +414,19 @@ function motivoErroPublicoTerminal(item = {}) {
     item.motivoTecnico,
     item.motivoFinal,
     item.motivo,
-    item.statusDetalhe,
-    item.statusOperacional,
-    item.status
+    item.statusDetalhe
   ].filter(Boolean).join(" "));
-  const falhaExplicita = falhasDestinos > 0 ||
-    errosProgresso > 0 ||
-    textoFalha.includes("erro") ||
-    textoFalha.includes("falha") ||
-    textoFalha.includes("exception") ||
-    textoFalha.includes("excecao");
+  const motivoOperacionalNeutro = /sem destino|destino.*incompativel|nao compativel|janela fechada|aguardando.*intervalo|aguardando.*janela|limite diario|limite operacional|ttl operacional|expirada operacional|expirado operacional/.test(textoFalha);
 
-  if (falhaExplicita) return "falha_envio";
-  if (terminal && enviados > 0 && totalEsperado > enviados) return "envio_parcial";
-  if (terminal && !itemTemImagemFinalValida(item)) return "sem_imagem";
-  if (terminal && destinos.length === 0 && totalEsperado === 0 && evidenciaDestinosElegiveisNoEvento(item)) return "sem_destino";
+  if (/sem imagem|imagem.*nao resolvida|imagem.*invalida/.test(textoFalha)) return "sem_imagem";
+  if (/sem titulo|titulo ausente|titulo invalido/.test(textoFalha)) return "sem_titulo";
+  if (/link.*ausente|link.*invalido|link.*mal resolvido|afiliacao.*incompleta|afiliacao.*invalida/.test(textoFalha)) return "link_mal_resolvido";
+  if (/contrato.*invalido|corrupcao|inconsistencia/.test(textoFalha)) return "contrato_invalido";
+  if (falhasDestinos > 0 || errosProgresso > 0 || /erro.*envio|falha.*envio|falha.*sender|falha.*transporte|exception|excecao/.test(textoFalha)) return "falha_envio";
+  if (motivoOperacionalNeutro) return null;
+
+  const completude = opcoes.completude || completudeCardHistorico(item);
+  if (!completude.ok) return completude.motivo;
   return null;
 }
 
@@ -597,10 +612,51 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
 }
 
 function statusPublicoHistorico(resultadoPublico = "", tipoVisao = "") {
-  if (resultadoPublico === "enviado") return "enviada";
+  if (tipoVisao === VISAO_FILA) return "em_distribuicao";
   if (tipoVisao === VISAO_COM_ERRO) return "erro";
-  if (["parcial", "nao_enviado", "nao enviado"].includes(normalizarTexto(resultadoPublico))) return "erro";
+  if (resultadoPublico === "enviado") return "enviada";
+  if (normalizarTexto(resultadoPublico) === "parcial") return "enviada";
+  if (["nao_enviado", "nao enviado"].includes(normalizarTexto(resultadoPublico))) return "nao_enviada";
   return "processada";
+}
+
+function erroPublicoHumano(codigo = "", ofertaId = "") {
+  const mensagens = {
+    sem_imagem: {
+      titulo: "Imagem não resolvida",
+      mensagem: "A oferta não pôde ser enviada porque nenhuma imagem oficial válida foi encontrada."
+    },
+    sem_titulo: {
+      titulo: "Título inválido",
+      mensagem: "A oferta não pôde ser concluída porque o título estava ausente ou inválido."
+    },
+    sem_preco: {
+      titulo: "Preço não resolvido",
+      mensagem: "A oferta não pôde ser concluída porque o preço obrigatório não foi resolvido."
+    },
+    link_mal_resolvido: {
+      titulo: "Link não resolvido",
+      mensagem: "A oferta não pôde ser enviada porque o link do produto ou a afiliação não foi validado."
+    },
+    contrato_invalido: {
+      titulo: "Contrato inválido",
+      mensagem: "A oferta não pôde ser concluída por uma inconsistência no contrato técnico."
+    },
+    falha_envio: {
+      titulo: "Falha no envio",
+      mensagem: "Pelo menos uma tentativa real de envio falhou no transporte."
+    }
+  };
+  const chave = texto(codigo);
+  const padrao = mensagens[chave] || {
+    titulo: "Falha técnica",
+    mensagem: "A oferta não pôde ser concluída por uma falha técnica identificada."
+  };
+  return {
+    ...padrao,
+    codigo: chave,
+    ofertaId: texto(ofertaId)
+  };
 }
 
 function itemEhTerminal(item = {}) {
@@ -627,6 +683,15 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     : (Number.isFinite(resultadoMs) ? resultadoMs : processada.ms);
   const statusResultado = dados.resultadoPublico || "";
   const statusPublico = statusPublicoHistorico(statusResultado, dados.tipoVisao);
+  const destinos = Array.isArray(projetado.destinos) ? projetado.destinos : [];
+  const progresso = projetado.progresso && typeof projetado.progresso === "object" ? projetado.progresso : {};
+  const enviados = numeroPublico(progresso.enviados);
+  const totalConsiderados = Math.max(destinos.length, numeroPublico(progresso.total));
+  const falhas = destinos.filter(destinoFalhouPublico).length || numeroPublico(progresso.erros);
+  const ignorados = destinos.filter(destinoNaoAplicavelPublico).length;
+  const resultadoResumo = enviados > 0 && totalConsiderados > 0
+    ? `Enviado para ${enviados} de ${totalConsiderados} destinos`
+    : "";
   const detalheRef = item.detalheRef && typeof item.detalheRef === "object"
     ? item.detalheRef
     : projetado.detalheRef;
@@ -649,17 +714,26 @@ function normalizarItemPublico(origem = {}, dados = {}) {
       item.subcategoria
     ), 120),
     imagemRef: projetado.imagemRef,
-    thumbRef: projetado.imagemRef,
+    thumbRef: primeiroTexto(projetado.thumbRef, item.thumbRef, item.thumbnail, item.thumbnailUrl, item.imagemThumb, item.imagemThumbnail),
     precoExibivel: projetado.precoExibivel,
     urlOriginal: primeiroTexto(item.urlOriginalProduto, item.produtoUrl, item.urlProduto, item.linkProduto),
     canal: projetado.canal,
     destinoResumo: primeiroTexto(projetado.destinoNome, projetado.destinoId),
-    destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
+    destinos,
+    destinosResumo: {
+      enviados,
+      total: totalConsiderados,
+      falhas,
+      ignorados,
+      texto: resultadoResumo
+    },
+    resultadoResumo,
     statusPublico,
     resultadoPublico: statusPublico,
     statusVisual: statusPublico,
     statusFinalVisual: statusPublico,
     motivoErroPublico: dados.motivoErroPublico || null,
+    erroPublico: dados.motivoErroPublico ? erroPublicoHumano(dados.motivoErroPublico, projetado.id) : null,
     marco: dados.tipoVisao === VISAO_PROCESSADAS ? "processada" : "resultado_distribuicao",
     tipoVisao: dados.tipoVisao,
     timestamp: isoOuVazio(timestamp),
@@ -667,8 +741,10 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     processadaCampo: processada.campo,
     enviadoEm: projetado.enviadoEm,
     finalizadoEm: projetado.finalizadoEm || isoOuVazio(resultadoMs),
-    progresso: projetado.progresso,
-    motivoPublico: textoLimitado(primeiroTexto(projetado.motivoPublico, item.motivoPublico, item.motivoFinal, item.motivoRetencao, item.motivo, item.erro), 240),
+    progresso,
+    motivoPublico: dados.motivoErroPublico
+      ? texto(dados.motivoErroPublico)
+      : textoLimitado(primeiroTexto(projetado.motivoPublico, item.motivoPublico, item.motivoFinal, item.motivoRetencao, item.motivo), 240),
     detalheRef: {
       arquivo: texto(detalheRef?.arquivo || ""),
       id: texto(detalheRef?.id || projetado.id)
@@ -685,6 +761,7 @@ function visaoTerminalPublica(resultadoPublico = "") {
 
 function visaoIncluiTerminal(visao = VISAO_PROCESSADAS, resultadoPublico = "", motivoErroPublico = null) {
   const tipoTerminal = visaoTerminalPublica(resultadoPublico);
+  if (visao === VISAO_ENVIADAS) return resultadoPublico === "enviado" || resultadoPublico === "parcial";
   return visao === tipoTerminal || (visao === VISAO_COM_ERRO && Boolean(motivoErroPublico));
 }
 
@@ -779,6 +856,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         fechaMatematicamente: true
       },
       listas: {
+        fila: [],
         processadas: [],
         enviadas: [],
         parciais: [],
@@ -809,13 +887,13 @@ function construirReadModelPublicoPorMarcos(params = {}) {
   const leiturasFisicas = Number(params.leiturasFisicas || 0);
   const bytesLidos = Number(params.bytesLidos || 0);
   const listaSolicitada = new Map();
+  const filaIds = new Set();
   const processadasIds = new Set();
   const enviadasIds = new Set();
   const parciaisIds = new Set();
   const naoEnviadasIds = new Set();
   const comErroIds = new Set();
   const terminaisIdentidades = new Set();
-  const terminaisPrincipais = new Set();
   const terminaisResultadoPorIdentidade = new Map();
   let invisiveisAntesMarco = 0;
   let hotRemovidosPorTerminal = 0;
@@ -841,21 +919,30 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     const identidades = identidadesRegistro(registro, indice, clienteId);
     identidades.forEach(id => terminaisIdentidades.add(id));
     const identidade = identidadePrincipal(registro, indice, clienteId);
-    terminaisPrincipais.add(identidade);
-    const resultadoPublico = resultadoPublicoTerminal({
+    const itemTerminal = {
       ...item,
       statusPublico: registro.statusPublico || item.statusPublico,
       statusOperacional: registro.statusOperacional || item.statusOperacional || registro.status
-    });
-    const motivoErroPublico = motivoErroPublicoTerminal({
-      ...item,
-      statusPublico: registro.statusPublico || item.statusPublico,
-      statusOperacional: registro.statusOperacional || item.statusOperacional || registro.status
-    });
+    };
+    const resultadoPublico = resultadoPublicoTerminal(itemTerminal);
+    const completude = completudeCardHistorico(itemTerminal);
+    const motivoErroPublico = motivoErroPublicoTerminal(itemTerminal, { completude });
     terminaisResultadoPorIdentidade.set(identidade, resultadoPublico);
-    const precisaProjetar = filtrosAtivos ||
-      (!somenteMetricas && ((dentroProcessada && visao === VISAO_PROCESSADAS) ||
-      (dentroTerminal && visaoIncluiTerminal(visao, resultadoPublico, motivoErroPublico))));
+    const destinos = destinosPublicosItem(itemTerminal);
+    const aplicaveis = destinos.filter(destino => !destinoNaoAplicavelPublico(destino));
+    const enviadosFatuais = Math.max(
+      aplicaveis.filter(destinoEnviadoPublico).length,
+      numeroPublico(itemTerminal?.progresso?.enviados)
+    );
+    const conclusaoVisualValida = completude.ok && (!motivoErroPublico || enviadosFatuais > 0);
+    const envioVisualValido = completude.ok && ["enviado", "parcial"].includes(resultadoPublico);
+    const visaoTerminalSolicitada = dentroTerminal && visaoIncluiTerminal(visao, resultadoPublico, motivoErroPublico) && (
+      ![VISAO_ENVIADAS, VISAO_PARCIAIS].includes(visao) || envioVisualValido
+    );
+    const precisaProjetar = filtrosAtivos || (!somenteMetricas && (
+      (dentroProcessada && visao === VISAO_PROCESSADAS && conclusaoVisualValida) ||
+      visaoTerminalSolicitada
+    ));
     const projetado = precisaProjetar
       ? projetarItemFilaLeve(item, {
           clienteId,
@@ -864,7 +951,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         })
       : null;
     let processadaPublica = null;
-    if (dentroProcessada && (filtrosAtivos || (!somenteMetricas && visao === VISAO_PROCESSADAS))) {
+    if (dentroProcessada && conclusaoVisualValida && (filtrosAtivos || (!somenteMetricas && visao === VISAO_PROCESSADAS))) {
       processadaPublica = normalizarItemPublico(registro, {
         clienteId,
         indice,
@@ -874,11 +961,11 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         resultadoMs,
         tipoVisao: VISAO_PROCESSADAS,
         resultadoPublico,
-        motivoErroPublico: null,
+        motivoErroPublico,
         identidade
       });
     }
-    if (dentroProcessada && (!filtrosAtivos || registroCombinaFiltros(processadaPublica, filtros))) {
+    if (dentroProcessada && conclusaoVisualValida && (!filtrosAtivos || registroCombinaFiltros(processadaPublica, filtros))) {
       processadasIds.add(identidade);
       if (processadaPublica) registrarListaSeSolicitada(VISAO_PROCESSADAS, processadaPublica);
     }
@@ -899,10 +986,21 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       });
     }
     if (dentroTerminal && (!filtrosAtivos || registroCombinaFiltros(terminalPublico, filtros))) {
-      if (resultadoPublico === "enviado") enviadasIds.add(identidade);
-      else if (resultadoPublico === "parcial") parciaisIds.add(identidade);
-      else naoEnviadasIds.add(identidade);
-      if (terminalPublico) registrarListaSeSolicitada(tipoVisaoTerminal, terminalPublico);
+      if (envioVisualValido && (resultadoPublico === "enviado" || resultadoPublico === "parcial")) enviadasIds.add(identidade);
+      if (envioVisualValido && resultadoPublico === "parcial") parciaisIds.add(identidade);
+      if (resultadoPublico === "nao_enviado") naoEnviadasIds.add(identidade);
+      const terminalVisivelNaVisaoPropria = tipoVisaoTerminal === VISAO_NAO_ENVIADAS || envioVisualValido;
+      if (terminalPublico && terminalVisivelNaVisaoPropria) registrarListaSeSolicitada(tipoVisaoTerminal, terminalPublico);
+      if (terminalPublico && envioVisualValido && resultadoPublico === "parcial") {
+        registrarListaSeSolicitada(VISAO_ENVIADAS, {
+          ...terminalPublico,
+          tipoVisao: VISAO_ENVIADAS,
+          statusPublico: "enviada",
+          resultadoPublico: "enviada",
+          statusVisual: "enviada",
+          statusFinalVisual: "enviada"
+        });
+      }
       if (motivoErroPublico) comErroIds.add(identidade);
       if (terminalPublico && motivoErroPublico) registrarListaSeSolicitada(VISAO_COM_ERRO, {
         ...terminalPublico,
@@ -911,7 +1009,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         resultadoPublico: "erro",
         statusVisual: "erro",
         statusFinalVisual: "erro",
-        motivoErroPublico
+        motivoErroPublico,
+        erroPublico: erroPublicoHumano(motivoErroPublico, terminalPublico.id)
       });
     }
   }
@@ -936,22 +1035,22 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       indice,
       agora: agoraMs
     });
-    let processadaPublica = null;
-    if (filtrosAtivos || (!somenteMetricas && visao === VISAO_PROCESSADAS)) {
-      processadaPublica = normalizarItemPublico(item, {
+    let filaPublica = null;
+    if (filtrosAtivos || (!somenteMetricas && visao === VISAO_FILA)) {
+      filaPublica = normalizarItemPublico(item, {
         clienteId,
         indice,
         agoraMs,
         projetado,
         processada,
-        tipoVisao: VISAO_PROCESSADAS,
+        tipoVisao: VISAO_FILA,
         resultadoPublico: "em_distribuicao",
         identidade
       });
     }
-    if (!filtrosAtivos || registroCombinaFiltros(processadaPublica, filtros)) {
-      processadasIds.add(identidade);
-      if (processadaPublica) registrarListaSeSolicitada(VISAO_PROCESSADAS, processadaPublica);
+    if (!filtrosAtivos || registroCombinaFiltros(filaPublica, filtros)) {
+      filaIds.add(identidade);
+      if (filaPublica) registrarListaSeSolicitada(VISAO_FILA, filaPublica);
     }
   }
 
@@ -961,12 +1060,14 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     parciais: parciaisIds.size,
     naoEnviadas: naoEnviadasIds.size,
     comErro: comErroIds.size,
-    emDistribuicao: [...processadasIds].filter(id => !terminaisPrincipais.has(id)).length
+    emDistribuicao: filaIds.size
   };
-  metricas.fechaMatematicamente = metricas.enviadas + metricas.parciais + metricas.naoEnviadas + metricas.emDistribuicao === metricas.processadas;
+  metricas.fechaMatematicamente = metricas.processadas >= metricas.enviadas && metricas.enviadas >= metricas.parciais;
 
   const listaBase = [...listaSolicitada.values()].sort(ordenarRegistrosPublicos);
-  const totalVisao = visao === VISAO_ENVIADAS
+  const totalVisao = visao === VISAO_FILA
+    ? metricas.emDistribuicao
+    : visao === VISAO_ENVIADAS
     ? metricas.enviadas
     : visao === VISAO_PARCIAIS
       ? metricas.parciais
@@ -977,6 +1078,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
           : metricas.processadas;
   const pagina = paginar(listaBase, { ...params, totalFiltradoOverride: totalVisao });
   const listas = {
+    fila: visao === VISAO_FILA ? listaBase : [],
     processadas: visao === VISAO_PROCESSADAS ? listaBase : [],
     enviadas: visao === VISAO_ENVIADAS ? listaBase : [],
     parciais: visao === VISAO_PARCIAIS ? listaBase : [],
@@ -1294,6 +1396,15 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
   const timestamp = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
   const ref = normalizarDetalheRef(detalheRef.id ? detalheRef : (itemLeve.detalheRef || itemTecnico.detalheRef || detalheRef));
   const urlOriginal = escolherUrlOriginalConfiavel(item, projetado);
+  const destinos = Array.isArray(projetado.destinos) ? projetado.destinos : [];
+  const progresso = projetado.progresso && typeof projetado.progresso === "object" ? projetado.progresso : {};
+  const enviados = numeroPublico(progresso.enviados);
+  const totalConsiderados = Math.max(destinos.length, numeroPublico(progresso.total));
+  const falhas = destinos.filter(destinoFalhouPublico).length || numeroPublico(progresso.erros);
+  const ignorados = destinos.filter(destinoNaoAplicavelPublico).length;
+  const resultadoResumo = enviados > 0 && totalConsiderados > 0
+    ? `Enviado para ${enviados} de ${totalConsiderados} destinos`
+    : "";
 
   return {
     id: projetado.id,
@@ -1321,22 +1432,33 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
       item.image,
       projetado.imagemRef
     ),
-    thumbRef: primeiroTexto(item.thumbRef, item.thumbnail, item.imagemThumb, item.imagemThumbnail, projetado.imagemRef),
+    thumbRef: primeiroTexto(item.thumbRef, item.thumbnail, item.thumbnailUrl, item.imagemThumb, item.imagemThumbnail, projetado.thumbRef),
     precoExibivel: primeiroTexto(projetado.precoExibivel, item.precoExibivel, item.preco, item.precoAtual, item.valorEfetivo),
     canal: projetado.canal,
     destinoResumo: primeiroTexto(projetado.destinoNome, projetado.destinoId),
-    destinos: Array.isArray(projetado.destinos) ? projetado.destinos : [],
+    destinos,
+    destinosResumo: {
+      enviados,
+      total: totalConsiderados,
+      falhas,
+      ignorados,
+      texto: resultadoResumo
+    },
+    resultadoResumo,
     statusPublico,
     resultadoPublico: statusPublico,
     statusVisual: statusPublico,
     statusFinalVisual: statusPublico,
     motivoErroPublico,
+    erroPublico: motivoErroPublico ? erroPublicoHumano(motivoErroPublico, projetado.id) : null,
     timestamp: isoOuVazio(timestamp),
     processadaEm: isoOuVazio(processada.ms),
     finalizadoEm: projetado.finalizadoEm || isoOuVazio(resultadoMs),
-    progresso: projetado.progresso,
-    progressoHumano: resumoProgressoHumano(projetado.progresso),
-    motivoPublico: textoLimitado(primeiroTexto(projetado.motivoPublico, item.motivoPublico, item.motivoFinal, item.motivoRetencao, item.motivo, item.erro), 240),
+    progresso,
+    progressoHumano: resumoProgressoHumano(progresso),
+    motivoPublico: motivoErroPublico
+      ? texto(motivoErroPublico)
+      : textoLimitado(primeiroTexto(projetado.motivoPublico, item.motivoPublico, item.motivoFinal, item.motivoRetencao, item.motivo), 240),
     urlOriginal: urlOriginal.confiavel ? urlOriginal.url : "",
     urlOriginalTipo: urlOriginal.tipo,
     urlOriginalCampo: urlOriginal.confiavel ? urlOriginal.campo : "",
@@ -1510,6 +1632,7 @@ function benchmarkReadModelPublico(params = {}) {
 module.exports = {
   HISTORICO_LEVE_INCREMENTAL_DIR,
   JANELA_PUBLICA_DIAS_PADRAO,
+  VISAO_FILA,
   VISAO_PROCESSADAS,
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,

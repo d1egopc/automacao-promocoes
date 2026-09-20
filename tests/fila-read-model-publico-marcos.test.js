@@ -8,6 +8,7 @@ const {
   adicionarOfertaFila
 } = require("../utils/fila-ofertas");
 const {
+  VISAO_FILA,
   VISAO_PROCESSADAS,
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
@@ -43,6 +44,7 @@ function oferta(id, extra = {}) {
     marketplace: extra.marketplace || "amazon",
     preco: extra.preco || "R$ 99,90",
     imagem: `https://img.example/${id}.jpg`,
+    linkOriginal: `https://loja.test/produto/${id}`,
     dataEntradaFila: extra.dataEntradaFila,
     criadoEm: extra.criadoEm,
     status: extra.status || "pendente",
@@ -71,7 +73,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     ...(extra.canal ? { canal: extra.canal } : {}),
     ...(extra.destinoNome ? { destinoNome: extra.destinoNome } : {}),
     ...(extra.titulo ? { titulo: extra.titulo } : {}),
-    destinosEstado: extra.destinosEstado || [
+    destinosEstado: Array.isArray(extra.destinosEstado) ? extra.destinosEstado : [
       { destinoId: "dest_1", destinoNome: extra.destinoNome || "Canal principal", canal: extra.canal || "telegram", estado: statusPublico === "nao_enviado" ? "erro" : "enviado" }
     ],
     motivo: extra.motivo
@@ -102,9 +104,12 @@ function registroTerminal(id, statusPublico, extra = {}) {
 {
   const hot = oferta("proc_1", { dataEntradaFila: iso(AGORA - 10 * 60 * 1000), status: "pendente" });
   const model = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", hot: [hot, { ...hot }], historicoLeve: [], agoraMs: AGORA });
-  assert.strictEqual(model.metricas.processadas, 1, "Processadas deduplica por execucao");
+  assert.strictEqual(model.metricas.processadas, 0, "trabalho vivo nao entra em Processadas");
   assert.strictEqual(model.metricas.emDistribuicao, 1, "em distribuicao e contador, nao estado final");
-  assert.strictEqual(model.listas.processadas[0].statusPublico, "processada");
+  assert.strictEqual(model.listas.processadas.length, 0);
+  const fila = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", hot: [hot, { ...hot }], historicoLeve: [], agoraMs: AGORA, visao: VISAO_FILA });
+  assert.strictEqual(fila.listas.fila.length, 1, "Fila deduplica trabalho operacional por execucao");
+  assert.strictEqual(fila.listas.fila[0].statusPublico, "em_distribuicao");
 }
 
 {
@@ -114,7 +119,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
     motivo: "aguardando_relogio_intervalo"
   });
   const model = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", hot: [hot], historicoLeve: [], agoraMs: AGORA });
-  assert.strictEqual(model.metricas.processadas, 1, "aguardando relogio continua contando como processada");
+  assert.strictEqual(model.metricas.processadas, 0, "aguardando relogio nao aparece em Processadas");
+  assert.strictEqual(model.metricas.emDistribuicao, 1, "aguardando relogio permanece apenas na Fila");
   assert.strictEqual(model.listas.enviadas.length, 0, "nao vira linha aguardando em visao de resultado");
 }
 
@@ -167,7 +173,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
   });
   assert.strictEqual(model.metricas.processadas, 1, "filtro Processadas continua incluindo a execucao parcial");
   assert.strictEqual(model.listas.processadas.length, 1, "badge terminal nao altera a lista Processadas");
-  assert.strictEqual(model.listas.processadas[0].statusPublico, "erro", "parcial terminal aparece como Erro na visao Processadas");
+  assert.strictEqual(model.listas.processadas[0].statusPublico, "enviada", "parcial terminal preserva o resultado factual na visao Processadas");
+  assert.strictEqual(model.listas.processadas[0].resultadoResumo, "Enviado para 1 de 2 destinos");
 }
 
 {
@@ -177,7 +184,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
       { destinoId: "b", destinoNome: "B", canal: "telegram", estado: "erro" }
     ]
   });
-  const falha = registroTerminal("falha_1", "nao_enviado", { motivo: "sem_destino_compativel" });
+  const falha = registroTerminal("falha_1", "nao_enviado", { motivo: "sem_destino_compativel", destinosEstado: [] });
   const model = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
     historicoLeve: [parcial, falha],
@@ -272,7 +279,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
     projectionReady: true
   });
   assert.strictEqual(pronto.ok, true);
-  assert.strictEqual(pronto.metricas.processadas, 1);
+  assert.strictEqual(pronto.metricas.processadas, 0);
+  assert.strictEqual(pronto.metricas.emDistribuicao, 1);
 }
 
 {
@@ -331,7 +339,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     registroTerminal("falha_metric", "nao_enviado")
   ];
   const model = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", hot, historicoLeve: hist, agoraMs: AGORA });
-  assert.strictEqual(model.metricas.processadas, 70);
+  assert.strictEqual(model.metricas.processadas, 66);
   assert.strictEqual(model.metricas.enviadas, 66);
   assert.strictEqual(model.metricas.naoEnviadas, 1);
   assert.strictEqual(model.metricas.emDistribuicao, 3);
@@ -531,7 +539,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
     limit: 50
   });
   assert.strictEqual(bench.ok, true);
-  assert.strictEqual(bench.metricas.processadas, 2);
+  assert.strictEqual(bench.metricas.processadas, 1);
+  assert.strictEqual(bench.metricas.emDistribuicao, 1);
   assert(bench.bytesResposta > 0);
 }
 

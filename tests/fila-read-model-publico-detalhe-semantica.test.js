@@ -5,6 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const {
+  VISAO_FILA,
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
@@ -91,7 +92,10 @@ function model(historicoLeve, visao) {
   });
   const parciais = model([parcialReal], VISAO_PARCIAIS);
   assert.strictEqual(parciais.metricas.parciais, 1, "sucesso em alguns aplicaveis e falha em outros aplicaveis vira Parcial");
-  assert.strictEqual(parciais.itens[0].statusPublico, "erro", "Parcial interno deve aparecer publicamente como Erro");
+  assert.strictEqual(parciais.itens[0].statusPublico, "enviada", "Parcial interno preserva o resultado factual enviado");
+  assert.strictEqual(parciais.itens[0].resultadoResumo, "Enviado para 1 de 3 destinos");
+  const enviadas = model([parcialReal], VISAO_ENVIADAS);
+  assert.strictEqual(enviadas.itens.length, 1, "resultado parcial factual tambem aparece em Enviadas");
 }
 
 {
@@ -103,7 +107,7 @@ function model(historicoLeve, visao) {
   });
   const naoEnviadas = model([nenhumAplicavel], VISAO_NAO_ENVIADAS);
   assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "nenhum destino aplicavel nao pode virar Parcial");
-  assert.strictEqual(naoEnviadas.itens[0].statusPublico, "erro", "Nao enviada interna deve aparecer publicamente como Erro");
+  assert.strictEqual(naoEnviadas.itens[0].statusPublico, "nao_enviada", "ausencia de destino aplicavel nao e erro de transporte");
 }
 
 {
@@ -142,8 +146,8 @@ function model(historicoLeve, visao) {
     ]
   });
   const comErro = model([parcialTerminal], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 1, "parcial terminal entra em Erros");
-  assert.strictEqual(comErro.itens[0].motivoErroPublico, "envio_parcial");
+  assert.strictEqual(comErro.metricas.comErro, 0, "parcial por expiracao operacional sem tentativa falha nao entra em Erros");
+  assert.strictEqual(comErro.itens.length, 0);
 }
 
 {
@@ -178,8 +182,8 @@ function model(historicoLeve, visao) {
     destinosElegiveis: 2
   });
   const comErro = model([semDestinoComprovado], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 1, "sem destino so entra quando o evento prova elegibilidade");
-  assert.strictEqual(comErro.itens[0].motivoErroPublico, "sem_destino");
+  assert.strictEqual(comErro.metricas.comErro, 0, "sem destino compativel nunca e erro de transporte");
+  assert.strictEqual(comErro.itens.length, 0);
 }
 
 {
@@ -224,14 +228,18 @@ function model(historicoLeve, visao) {
     registro("antigo_sem_motivo", "nao_enviado", { status: "expirada_operacional", destinos: [], destinosEstado: [] })
   ];
   const comErro = model(casos, VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 4, "contador Erro usa o mesmo universo da lista");
+  assert.strictEqual(comErro.metricas.comErro, 2, "contador Erro usa somente falhas verdadeiras");
   assert.strictEqual(comErro.totalFiltrado, comErro.metricas.comErro);
   assert.strictEqual(comErro.itens.length, comErro.metricas.comErro);
   assert.deepStrictEqual(
     new Set(comErro.itens.map(item => item.motivoErroPublico)),
-    new Set(["envio_parcial", "falha_envio", "sem_imagem", "sem_destino"])
+    new Set(["falha_envio", "sem_imagem"])
   );
-  assert.strictEqual(motivoErroPublicoTerminal({ status: "expirada_operacional", imagem: "https://img.test/ok.jpg" }), null);
+  assert.strictEqual(
+    motivoErroPublicoTerminal({ status: "expirada_operacional", imagem: "https://img.test/ok.jpg" }),
+    "sem_titulo",
+    "terminal visualmente incompleto continua diagnosticavel, mesmo sem falha de transporte"
+  );
 }
 
 {
@@ -248,8 +256,18 @@ function model(historicoLeve, visao) {
     projectionReady: true,
     agoraMs: AGORA
   });
-  assert.strictEqual(readModel.metricas.processadas, 1);
+  assert.strictEqual(readModel.metricas.processadas, 0);
   assert.strictEqual(readModel.metricas.emDistribuicao, 1, "sem terminal fica somente em distribuicao");
+  const fila = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_semantica",
+    hot: [hot],
+    historicoLeve: [],
+    projectionReady: true,
+    agoraMs: AGORA,
+    visao: VISAO_FILA
+  });
+  assert.strictEqual(fila.itens.length, 1);
+  assert.strictEqual(fila.itens[0].statusPublico, "em_distribuicao");
 }
 
 {

@@ -339,6 +339,7 @@ const {
 } = require("./modules/fila/fila-operacional-v2");
 const {
   HISTORICO_LEVE_INCREMENTAL_DIR,
+  VISAO_FILA,
   VISAO_PROCESSADAS,
   VISAO_ENVIADAS,
   VISAO_PARCIAIS,
@@ -12091,12 +12092,12 @@ function normalizarVisaoPublicaFila(query = {}) {
   if (!chave || ["todos", "todas", "processada", "processadas"].includes(chave)) return VISAO_PROCESSADAS;
   if (["enviada", "enviadas", "enviado", "enviados", "sucesso"].includes(chave)) return VISAO_ENVIADAS;
   if (["parcial", "parciais"].includes(chave)) return VISAO_PARCIAIS;
-  if (["com_erro", "com_erros", "comerro", "comerros", "erro", "erros", "falha", "falhas", "atencao", "com_atencao", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) return VISAO_COM_ERRO;
-  if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados"].includes(chave)) {
+  if (["com_erro", "com_erros", "comerro", "comerros", "erro", "erros", "falha", "falhas", "atencao", "com_atencao"].includes(chave)) return VISAO_COM_ERRO;
+  if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) {
     return VISAO_NAO_ENVIADAS;
   }
-  if (["pendente", "pendentes", "processando", "aguardando", "aguardando_relogio", "claim", "recovery", "checkpoint", "saneamento", "em_distribuicao"].includes(chave)) {
-    return VISAO_PROCESSADAS;
+  if (["fila", "pendente", "pendentes", "processando", "aguardando", "aguardando_relogio", "claim", "recovery", "checkpoint", "saneamento", "em_distribuicao"].includes(chave)) {
+    return VISAO_FILA;
   }
   return VISAO_PROCESSADAS;
 }
@@ -12105,11 +12106,11 @@ function compatibilidadeStatusPublicoFila(query = {}) {
   const status = textoFiltroFila(query.status || "");
   if (!status) return "";
   const visao = normalizarVisaoPublicaFila({ status });
-  if (visao === VISAO_PROCESSADAS && !["processada", "processadas", "todos", "todas"].includes(status)) {
-    return "status_operacional_legado_mapeado_para_processadas_sem_lista_operacional";
+  if (visao === VISAO_FILA) {
+    return "status_operacional_legado_mapeado_para_fila";
   }
   if (["expirada", "expiradas", "expirado", "expirados"].includes(status)) {
-    return "expirada_operacional_legada_mapeada_para_erro_sem_categoria_publica_expiradas";
+    return "expirada_operacional_legada_mapeada_para_nao_enviadas_sem_erro_de_transporte";
   }
   return "";
 }
@@ -12132,7 +12133,7 @@ function metricasPublicasComAliases(metricas = {}) {
   const enviadas = Number(metricas.enviadas || 0);
   const parciais = Number(metricas.parciais || 0);
   const naoEnviadas = Number(metricas.naoEnviadas || 0);
-  const comErro = Number(metricas.comErro ?? (parciais + naoEnviadas)) || 0;
+  const comErro = Number(metricas.comErro || 0);
   const emDistribuicao = Number(metricas.emDistribuicao || 0);
   const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
   return {
@@ -12146,7 +12147,7 @@ function metricasPublicasComAliases(metricas = {}) {
     taxaEnvio,
     erros: comErro,
     expiradas: 0,
-    formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta execucoes unicas no marco publico"
+    formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta somente conclusoes terminais visualmente completas"
   };
 }
 
@@ -12217,9 +12218,9 @@ function consultarReadModelPublicoFila(clienteId = "admin", query = {}, opcoes =
     visao,
     projectionReady,
     compatibilidade: {
-    filaAliasLeve: false,
+      filaAliasLeve: false,
       statusLegado: compatibilidadeStatusPublicoFila(query),
-      metricasErrosAliasNaoEnviadas: true,
+      metricasErrosAliasNaoEnviadas: false,
       metricasExpiradasNeutra: true
     },
     diagnostico: {
@@ -12287,7 +12288,7 @@ app.get("/fila", auth, async (req, res) => {
   const payload = perf.etapaSync("montar_payload", () => ({
     ok: true,
     clienteId,
-    total: metricas.processadas,
+    total: readModel.totalFiltrado,
     totalFiltrado: readModel.totalFiltrado,
     page: readModel.page,
     limit: readModel.limit,

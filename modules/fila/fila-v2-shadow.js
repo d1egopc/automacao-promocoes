@@ -120,6 +120,23 @@ function imagemRefItemFila(item = {}) {
   );
 }
 
+function thumbnailRefItemFila(item = {}) {
+  return textoLimitado(
+    primeiroTexto(
+      item.thumbRef,
+      item.thumbnail,
+      item.thumbnailUrl,
+      item.imagemThumb,
+      item.imagemThumbnail,
+      item.imagemPequena,
+      item.imageThumbnail,
+      item.metadata?.thumbnail,
+      item.metadata?.thumbnailUrl
+    ),
+    500
+  );
+}
+
 function categoriaItemFila(item = {}) {
   return textoLimitado(primeiroTexto(
     item.categoriaCanonica,
@@ -459,6 +476,7 @@ function projetarItemFilaLeve(item = {}, opcoes = {}) {
     marketplace: textoLimitado(primeiroTexto(item.marketplace, item.mercado), 80),
     categoria: categoriaItemFila(item),
     imagemRef: imagemRefItemFila(item),
+    thumbRef: thumbnailRefItemFila(item),
     urlOriginal: urlOriginalItemFila(item),
     precoExibivel: precoExibivelItemFila(item),
     statusPublico,

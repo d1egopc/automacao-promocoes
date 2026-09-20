@@ -26,6 +26,7 @@ function oferta(id, extra = {}) {
     marketplace: extra.marketplace || "amazon",
     preco: "R$ 99,90",
     imagem: `https://img.example/${id}.jpg`,
+    linkOriginal: `https://loja.test/produto/${id}`,
     dataEntradaFila: extra.dataEntradaFila || iso(AGORA - 60 * 60 * 1000),
     status: extra.status || "pendente",
     canal: extra.canal || "telegram",
@@ -50,10 +51,11 @@ function terminal(id, statusPublico, extra = {}) {
       dataEntradaFila: extra.dataEntradaFila || iso(AGORA - 2 * 60 * 60 * 1000),
       finalizadoEm,
       enviadoEm: statusPublico === "enviado" ? finalizadoEm : "",
-      motivo: statusPublico === "nao_enviado" ? "sem_destino_compativel" : "",
+      motivo: extra.motivo !== undefined ? extra.motivo : (statusPublico === "nao_enviado" ? "sem_destino_compativel" : ""),
+      destinosEstado: extra.destinosEstado,
       marketplace: extra.marketplace || "amazon",
       destinoNome: extra.destinoNome || "Canal principal",
-      titulo: extra.titulo
+      ...(extra.titulo ? { titulo: extra.titulo } : {})
     })
   };
 }
@@ -74,8 +76,10 @@ function rotaGetBloco(fonte, rota) {
 
   assert(rotaFila.includes("consultarReadModelPublicoFila(clienteId, req.query"), "GET /fila usa helper leve");
   assert(fonte.includes("VISAO_COM_ERRO"), "GET /fila reconhece visao publica com_erro");
+  assert(fonte.includes('"fila", "pendente", "pendentes", "processando"') && fonte.includes("return VISAO_FILA"), "estados operacionais devem mapear para a visao Fila");
   assert(fonte.includes('"erro", "erros", "falha", "falhas"') && fonte.includes("return VISAO_COM_ERRO"), "status=erro deve mapear para visao agregada com_erro");
   assert(rotaFila.includes("errosTotal: metricas.comErro"), "GET /fila deve expor alias erros como Erro publico agregado");
+  assert(fonte.includes("metricasErrosAliasNaoEnviadas: false"), "Erro nao pode permanecer alias de nao_enviada/parcial");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
   assert(!rotaFila.includes("fila: itensResposta"), "GET /fila nao duplica payload com alias fila");
   assert(!rotaFila.includes("fila.filter"), "GET /fila nao monta resposta a partir da fila pesada");
@@ -126,7 +130,8 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(processadasHoje.ok, true);
-  assert.strictEqual(processadasHoje.metricas.processadas, 2, "GET /fila processadas hoje");
+  assert.strictEqual(processadasHoje.metricas.processadas, 1, "GET /fila processadas hoje exclui trabalho vivo");
+  assert.strictEqual(processadasHoje.metricas.emDistribuicao, 1, "GET /fila contabiliza trabalho vivo somente na Fila");
   assert.strictEqual(processadasHoje.limit, 50, "paginacao limit=50 preservada");
   assert.strictEqual(processadasHoje.fila, undefined, "read model puro nao cria alias fila");
 
@@ -142,7 +147,8 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(processadas7d.metricas.processadas, 4, "GET /fila processadas 7 dias");
+  assert.strictEqual(processadas7d.metricas.processadas, 2, "GET /fila processadas 7 dias contem somente terminais completos");
+  assert.strictEqual(processadas7d.metricas.emDistribuicao, 2);
 
   const enviadas = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
@@ -179,7 +185,19 @@ function rotaGetBloco(fonte, rota) {
     hot,
     historicoLeve: [
       ...historico,
-      terminal("parcial_7d", "parcial", { dataEntradaFila: iso(AGORA - 5 * DIA), titulo: "Fone com atencao" })
+      terminal("parcial_7d", "parcial", {
+        dataEntradaFila: iso(AGORA - 5 * DIA),
+        titulo: "Fone com atencao",
+        destinosEstado: [
+          { destinoId: "ok", estado: "enviado" },
+          { destinoId: "falhou", estado: "erro_final" }
+        ]
+      }),
+      terminal("falha_real_7d", "nao_enviado", {
+        dataEntradaFila: iso(AGORA - 5 * DIA),
+        motivo: "erro_envio",
+        destinosEstado: [{ destinoId: "falhou", estado: "erro_final" }]
+      })
     ],
     projectionReady: true,
     periodo: "7dias",
@@ -206,7 +224,7 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(marketplace.metricas.processadas, 2, "filtro marketplace");
+  assert.strictEqual(marketplace.metricas.processadas, 1, "filtro marketplace nao mistura HOT");
 
   const destino = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
@@ -220,7 +238,7 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(destino.metricas.processadas, 2, "filtro destino");
+  assert.strictEqual(destino.metricas.processadas, 1, "filtro destino nao mistura HOT");
 
   const busca = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
