@@ -101,7 +101,13 @@ function recarregar() {
       const pathname = new URL(String(url)).pathname;
       const body = init.body ? JSON.parse(init.body) : {};
       if (pathname.endsWith("/register")) return resposta(201, { ok: true, workerId: body.workerId, token: "worker-token-result", workerType: "dedicated", capabilities: ["magalu_image_v1"], expiresAt: new Date(Date.now() + 60000).toISOString() });
-      if (pathname.endsWith("/result")) { result += 1; assert.strictEqual(body.leaseToken, ""); return resposta(200, { ok: true, idempotente: true }); }
+      if (pathname.endsWith("/result")) {
+        result += 1;
+        assert.strictEqual(body.leaseToken, "");
+        assert.strictEqual(body.productId, "afh3e1g80j", "cold resume deve preservar o productId da task");
+        assert.strictEqual(body.provaTecnica.productId, "afh3e1g80j", "cold resume deve preservar o productId da prova");
+        return resposta(200, { ok: true, idempotente: true });
+      }
       if (pathname.endsWith("/heartbeat")) { heartbeat += 1; return resposta(409, { ok: false, motivo: "lease_invalido" }); }
       throw new Error(`request_inesperado_${pathname}`);
     };

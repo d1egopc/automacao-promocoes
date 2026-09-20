@@ -312,7 +312,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return null;
     const result = await pool.query("SELECT * FROM local_worker_tasks WHERE id = $1", [String(taskId)]);
-    return result.rows[0] || null;
+    return result.rows[0] ? payloadTask(result.rows[0]) : null;
   }
 
   async function obterTaskAtiva({ marketplace, productId, type } = {}) {

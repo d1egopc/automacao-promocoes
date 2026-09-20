@@ -2,6 +2,7 @@
 
 const assert = require("assert");
 const { criarLocalWorkerService } = require("../modules/local-worker/local-worker.service");
+const { criarLocalWorkerRepository } = require("../modules/local-worker/local-worker.repository");
 const { planoRetryImagemMagaluLocal } = require("../modules/engine/importer/importer.service");
 
 function respostaImagem({ status = 200, url = "https://a-static.mlcdn.com.br/imagens/produto.jpg", contentType = "image/jpeg" } = {}) {
@@ -64,6 +65,56 @@ function criarRepoFake() {
   await assert.rejects(() => service.resultado({ worker, taskId: "1", leaseToken: "lease-1", marketplace: "magalu", productId: "outro", imagemOficialUrl: "https://a-static.mlcdn.com.br/imagens/produto.jpg", provaTecnica: { origem: "local_first_party", productId: "outro", skuConfirmado: true, hrefConfirmado: true } }), /product_id_divergente/);
   await assert.rejects(() => service.resultado({ worker, taskId: "1", leaseToken: "lease-1", marketplace: "magalu", productId: "241382400", imagemOficialUrl: "https://a-static.mlcdn.com.br/imagens/produto.jpg", provaTecnica: { origem: "local_first_party", productId: "241382400", skuConfirmado: true, hrefConfirmado: true, hrefProduto: "https://www.magazinevoce.com.br/d1egopc/produto/p/outro/" } }), /prova_href_produto_invalido/);
   await assert.rejects(() => service.resultado({ worker, taskId: "1", leaseToken: "lease-1", marketplace: "magalu", productId: "241382400", imagemOficialUrl: "https://evilmlcdn.com.br/imagens/produto.jpg", provaTecnica: { origem: "local_first_party", productId: "241382400", skuConfirmado: true, hrefConfirmado: true } }), /imagem_host_invalido/);
+
+  const rowTask8 = {
+    id: 8,
+    type: "imagem_oficial",
+    marketplace: "magalu",
+    product_id: "afh3e1g80j",
+    technical_slug: "d1egopc",
+    status: "leased",
+    capability: "magalu_image_v1",
+    attempts: 3,
+    max_attempts: 3
+  };
+  const repositoryPostgres = criarLocalWorkerRepository({
+    pool: { query: async () => ({ rows: [rowTask8] }) }
+  });
+  const repoTask8 = criarRepoFake();
+  repoTask8.obterTask = repositoryPostgres.obterTask;
+  const serviceTask8 = criarLocalWorkerService({ repository: repoTask8, dedicatedOwnerIds: ["owner-1"], fetchFn: async () => respostaImagem() });
+  const workerTask8 = await serviceTask8.autenticar("token");
+  const task8Mapeada = await repositoryPostgres.obterTask("8");
+  assert.strictEqual(task8Mapeada.productId, "afh3e1g80j", "product_id do PostgreSQL deve cruzar a fronteira como productId");
+  assert.strictEqual(task8Mapeada.technicalSlug, "d1egopc");
+  const resultadoTask8 = await serviceTask8.resultado({
+    worker: workerTask8,
+    taskId: "8",
+    leaseToken: "lease-8",
+    marketplace: "magalu",
+    productId: "afh3e1g80j",
+    imagemOficialUrl: "https://a-static.mlcdn.com.br/imagens/afh3e1g80j.jpg",
+    provaTecnica: {
+      origem: "local_first_party",
+      productId: "afh3e1g80j",
+      skuConfirmado: true,
+      hrefConfirmado: true,
+      hrefProduto: "https://www.magazinevoce.com.br/d1egopc/produto/p/afh3e1g80j/",
+      hostFinal: "a-static.mlcdn.com.br"
+    }
+  });
+  assert.strictEqual(resultadoTask8.ok, true, "task, resultado e prova com o mesmo productId devem concluir");
+  assert.strictEqual(repoTask8.state.completed.proof.productId, "afh3e1g80j");
+  await assert.rejects(() => serviceTask8.resultado({
+    worker: workerTask8,
+    taskId: "8",
+    leaseToken: "lease-8",
+    marketplace: "magalu",
+    productId: "produto-divergente",
+    imagemOficialUrl: "https://a-static.mlcdn.com.br/imagens/afh3e1g80j.jpg",
+    provaTecnica: { origem: "local_first_party", productId: "afh3e1g80j", skuConfirmado: true, hrefConfirmado: true }
+  }), /product_id_divergente/, "divergência real continua fail-closed");
+
   const task = await service.garantirImagemMagalu({ productId: "241382400", sourceUrl: "https://www.magazineluiza.com.br/p/241382400/" });
   assert.strictEqual(task.task.capability, "magalu_image_v1");
   assert.strictEqual((await service.obterTaskImagemMagalu({ productId: "241382400" })).task.status, "leased");

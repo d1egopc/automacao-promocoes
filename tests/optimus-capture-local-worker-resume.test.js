@@ -146,8 +146,10 @@ async function resumeDepoisDaIdentificacao() {
   assert.strictEqual(primeiroProbe.skuConfirmado, true);
   assert.strictEqual(primeiroProbe.hrefConfirmado, true);
   assert.strictEqual(primeiroProbe.hostImagem, "a-static.mlcdn.com.br");
-  global.OptimusMagaluLocalResolver.provarImagem = async ({ imagemOficialUrl, provaTecnica }) => {
+  global.OptimusMagaluLocalResolver.provarImagem = async ({ productId, imagemOficialUrl, provaTecnica }) => {
     c.probe += 1;
+    assert.strictEqual(productId, "afh3e1g80j", "productId da task deve sobreviver IMAGE_IDENTIFIED -> PROBE_START");
+    assert.strictEqual(provaTecnica.productId, "afh3e1g80j", "productId da prova persistida deve sobreviver ao resume");
     assert.strictEqual(provaTecnica.skuConfirmado, true);
     assert.strictEqual(provaTecnica.hrefConfirmado, true);
     assert.strictEqual(provaTecnica.hrefProduto, "https://www.magazinevoce.com.br/d1egopc/item/p/afh3e1g80j/");
