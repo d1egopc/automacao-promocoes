@@ -64,7 +64,12 @@ function criarRotasLocalWorker(deps = {}) {
         marketplace: req.body?.marketplace,
         productId: req.body?.productId,
         imagemOficialUrl: req.body?.imagemOficialUrl,
-        provaTecnica: req.body?.provaTecnica
+        provaTecnica: req.body?.provaTecnica,
+        capability: req.body?.capability,
+        accessible: req.body?.accessible,
+        indicatorFound: req.body?.indicatorFound,
+        finalUrl: req.body?.finalUrl,
+        checkedAt: req.body?.checkedAt
       });
       return res.json(resultado);
     } catch (e) { return res.status(e.statusCode || 422).json(payloadErro(e, "resultado_invalido")); }

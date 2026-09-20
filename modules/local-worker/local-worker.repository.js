@@ -47,7 +47,10 @@ function payloadTask(row = {}) {
     attempts: Number(row.attempts || 0),
     maxAttempts: Number(row.max_attempts || row.maxAttempts || 3),
     createdAt: row.created_at || row.createdAt || null,
-    expiresAt: row.expires_at || row.expiresAt || null
+    updatedAt: row.updated_at || row.updatedAt || null,
+    expiresAt: row.expires_at || row.expiresAt || null,
+    completedAt: row.completed_at || row.completedAt || null,
+    resultMetadata: jsonSeguro(row.result_metadata || row.resultMetadata)
   };
 }
 
@@ -236,7 +239,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     `);
   }
 
-  async function garantirTask({ type, marketplace, productId, sourceUrl = "", technicalSlug = "", capability, idempotencyKey = "", maxAttempts = 3, ttlMs = 15 * 60 * 1000 } = {}) {
+  async function garantirTask({ type, marketplace, productId, sourceUrl = "", technicalSlug = "", capability, idempotencyKey = "", maxAttempts = 3, ttlMs = 15 * 60 * 1000, reutilizarCompleted = true } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
     await ensureSchema();
@@ -249,7 +252,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
       WHERE marketplace = $1 AND product_id = $2 AND type = $3
       ORDER BY id DESC LIMIT 1
     `, [mp, pid, tipo]);
-    if (existente.rows[0] && [STATUS.PENDING, STATUS.LEASED, STATUS.COMPLETED].includes(existente.rows[0].status)) {
+    if (existente.rows[0] && ([STATUS.PENDING, STATUS.LEASED].includes(existente.rows[0].status) || (reutilizarCompleted && existente.rows[0].status === STATUS.COMPLETED))) {
       return { ok: true, criada: false, task: payloadTask(existente.rows[0]) };
     }
     const result = await pool.query(`
@@ -322,6 +325,16 @@ function criarLocalWorkerRepository(opcoes = {}) {
     return result.rows[0] ? payloadTask(result.rows[0]) : null;
   }
 
+  async function obterUltimaTask({ marketplace, productId, type, capability = "" } = {}) {
+    const pool = poolDisponivel(poolProvider);
+    if (!pool) return null;
+    const params = [texto(marketplace).toLowerCase(), texto(productId), texto(type)];
+    const filtroCapability = texto(capability) ? " AND capability = $4" : "";
+    if (texto(capability)) params.push(texto(capability));
+    const result = await pool.query(`SELECT * FROM local_worker_tasks WHERE marketplace = $1 AND product_id = $2 AND type = $3${filtroCapability} ORDER BY id DESC LIMIT 1`, params);
+    return result.rows[0] ? payloadTask(result.rows[0]) : null;
+  }
+
   async function completar({ taskId, workerId, leaseToken, metadata = {}, imageUrl = "", proof = {} } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
@@ -338,6 +351,28 @@ function criarLocalWorkerRepository(opcoes = {}) {
       const meta = { ...jsonSeguro(metadata), productId: row.product_id, imageUrl, source: "local_first_party", proof };
       const atualizado = await client.query(`UPDATE local_worker_tasks SET status = 'completed', completed_at = NOW(), lease_until = NULL, lease_token = NULL, updated_at = NOW(), result_metadata = $2::jsonb WHERE id = $1 RETURNING *`, [String(taskId), JSON.stringify(meta)]);
       await client.query(`INSERT INTO local_worker_image_cache (marketplace, product_id, image_url, source, proof, validated_at, expires_at) VALUES ($1, $2, $3, 'local_first_party', $4::jsonb, NOW(), NOW() + INTERVAL '24 hours') ON CONFLICT (marketplace, product_id) DO UPDATE SET image_url = EXCLUDED.image_url, source = EXCLUDED.source, proof = EXCLUDED.proof, validated_at = NOW(), expires_at = EXCLUDED.expires_at`, [row.marketplace, row.product_id, imageUrl, JSON.stringify(proof)]);
+      await client.query("COMMIT");
+      return { ok: true, idempotente: false, task: payloadTask(atualizado.rows[0]) };
+    } catch (erro) {
+      await client.query("ROLLBACK").catch(() => {});
+      return { ok: false, motivo: "resultado_falhou", erro: erro.message };
+    } finally { client.release(); }
+  }
+
+  async function completarTecnica({ taskId, workerId, leaseToken, metadata = {} } = {}) {
+    const pool = poolDisponivel(poolProvider);
+    if (!pool) return { ok: false, motivo: "database_indisponivel" };
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const atual = await client.query("SELECT * FROM local_worker_tasks WHERE id = $1 FOR UPDATE", [String(taskId)]);
+      const row = atual.rows[0];
+      if (!row) { await client.query("ROLLBACK"); return { ok: false, motivo: "task_inexistente" }; }
+      if (row.status === STATUS.COMPLETED) { await client.query("COMMIT"); return { ok: true, idempotente: true, task: payloadTask(row) }; }
+      if (row.status !== STATUS.LEASED || row.claimed_by !== texto(workerId) || row.lease_token !== texto(leaseToken) || new Date(row.lease_until).getTime() <= Date.now()) {
+        await client.query("ROLLBACK"); return { ok: false, motivo: "lease_invalido" };
+      }
+      const atualizado = await client.query(`UPDATE local_worker_tasks SET status = 'completed', completed_at = NOW(), lease_until = NULL, lease_token = NULL, updated_at = NOW(), result_metadata = $2::jsonb WHERE id = $1 RETURNING *`, [String(taskId), JSON.stringify(jsonSeguro(metadata))]);
       await client.query("COMMIT");
       return { ok: true, idempotente: false, task: payloadTask(atualizado.rows[0]) };
     } catch (erro) {
@@ -381,7 +416,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     return result.rows[0] ? { ok: true, workerId: result.rows[0].worker_id } : { ok: false, motivo: "worker_nao_encontrado" };
   }
 
-  return { ensureSchema, registrarWorkerCommunity, registrarWorkerDedicated, autenticarWorker, revogarWorker, garantirTask, claim, heartbeat, obterTask, obterTaskAtiva, completar, falhar, obterCache, status };
+  return { ensureSchema, registrarWorkerCommunity, registrarWorkerDedicated, autenticarWorker, revogarWorker, garantirTask, claim, heartbeat, obterTask, obterTaskAtiva, obterUltimaTask, completar, completarTecnica, falhar, obterCache, status };
 }
 
 module.exports = { STATUS, criarLocalWorkerRepository, hashToken };

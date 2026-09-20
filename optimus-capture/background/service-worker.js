@@ -1,4 +1,4 @@
-importScripts("../local-worker/worker-client.js", "../local-worker/magalu-image.js", "../local-worker/task-runner.js");
+importScripts("../local-worker/worker-client.js", "../local-worker/magalu-image.js", "../local-worker/magalu-opportunity.js", "../local-worker/task-runner.js");
 
 chrome.runtime.onInstalled.addListener(() => {
   if (chrome.sidePanel?.setPanelBehavior) {

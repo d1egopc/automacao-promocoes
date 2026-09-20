@@ -462,7 +462,8 @@ const {
 } = require("./modules/radar/produto-canonico");
 const alertasIntegracoes = require("./utils/alertas-integracoes");
 const {
-  listarOportunidadesAtivas
+  listarOportunidadesAtivas,
+  invalidarCacheFonteOficial
 } = require("./modules/extension/oportunidades-resumo.service");
 const storageUtils = require("./utils/storage");
 const linksPuros = require("./modules/links");
@@ -6747,7 +6748,9 @@ function iniciarDiagnosticoRuntime() {
 
 iniciarDiagnosticoRuntime();
 const app = express(); // ðŸ‘ˆ MUITO IMPORTANTE ter isso
-const localWorkerService = criarLocalWorkerService();
+const localWorkerService = criarLocalWorkerService({
+  onOpportunityResult: () => invalidarCacheFonteOficial("magalu")
+});
 
 function capturarRawBody(req, res, buf) {
   if (buf && buf.length) req.rawBody = Buffer.from(buf);
@@ -14738,7 +14741,9 @@ app.get("/extension/oportunidades/resumo", async (req, res) => {
   const clienteId = getClienteId(req);
   const oportunidades = await listarOportunidadesAtivas(clienteId, {
     config,
-    getIntegracaoCliente
+    getIntegracaoCliente,
+    garantirOportunidadeMagalu: localWorkerService.garantirOportunidadeMagalu,
+    obterOportunidadeMagaluRecente: localWorkerService.obterOportunidadeMagaluRecente
   });
   return res.json({
     ok: true,

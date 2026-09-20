@@ -231,6 +231,9 @@ function opcoesTask() {
   assert.strictEqual(completed.criada, false);
   assert.strictEqual(completed.task.id, retryAfterHistory.task.id);
   assert.strictEqual(pool.insertCount, antesCompleted, "completed não deve inserir nova task");
+  const novaAposCompletedStale = await repository.garantirTask({ ...opcoesTask(), reutilizarCompleted: false });
+  assert.strictEqual(novaAposCompletedStale.criada, true, "fonte temporal pode renovar resultado completed depois do próprio TTL");
+  assert.notStrictEqual(novaAposCompletedStale.task.id, retryAfterHistory.task.id);
 
   const concorrentePool = new FakePool();
   const concorrenteRepo = criarLocalWorkerRepository({ pool: concorrentePool });

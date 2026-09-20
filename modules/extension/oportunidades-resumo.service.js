@@ -30,6 +30,10 @@ const MARKETPLACES = Object.freeze({
 const { criarAgregadorFontes } = require("./oportunidades-fontes");
 const agregadorFontesOficiais = criarAgregadorFontes();
 
+function invalidarCacheFonteOficial(marketplace) {
+  return agregadorFontesOficiais.invalidarFonte(marketplace);
+}
+
 const HOSTS_OPTIMUS = [/^www\.optimuspromo\.com\.br$/i, /^go\.optimuspromo\.com\.br$/i];
 
 function texto(valor = "") {
@@ -94,5 +98,6 @@ async function listarOportunidadesAtivas(clienteId, deps = {}) {
 module.exports = {
   MARKETPLACES,
   urlDestinoAutorizada,
-  listarOportunidadesAtivas
+  listarOportunidadesAtivas,
+  invalidarCacheFonteOficial
 };

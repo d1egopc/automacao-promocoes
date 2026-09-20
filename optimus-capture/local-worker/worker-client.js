@@ -6,9 +6,15 @@
   const USER_AUTH_STORAGE_KEY = "optimus_capture_auth";
   const BOOTSTRAP_BLOCK_KEY = "optimus_local_worker_bootstrap_block_v1";
   const CAPABILITY = "magalu_image_v1";
+  const OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
+  const CAPABILITIES = Object.freeze([CAPABILITY, OPPORTUNITY_CAPABILITY]);
   let bootstrapEmCurso = null;
 
   function texto(valor) { return String(valor ?? "").trim(); }
+  function possuiCapabilities(capabilities) {
+    const atuais = new Set(Array.isArray(capabilities) ? capabilities.map(texto).filter(Boolean) : []);
+    return CAPABILITIES.every(capability => atuais.has(capability));
+  }
   function storageLocal() { return global.chrome?.storage?.local || null; }
   function storageSession() { return global.chrome?.storage?.session || null; }
   function erroEstruturado(codigo, status = 0) {
@@ -125,19 +131,19 @@
       await revogar({ aguardarRemoto: false });
       atual = null;
     }
-    if (atual?.token && atual?.workerId && (!atual.expiresAt || Date.parse(atual.expiresAt) > Date.now())) {
+    if (atual?.token && atual?.workerId && (!atual.expiresAt || Date.parse(atual.expiresAt) > Date.now()) && possuiCapabilities(atual.capabilities)) {
       return atual;
     }
     if (!texto(userToken)) return null;
     const workerId = atual?.workerId && (!owner || texto(atual.ownerId) === owner) ? texto(atual.workerId) : randomId();
-    const resposta = await request("/local-worker/register", { method: "POST", token: userToken, body: { workerId, capabilities: [CAPABILITY] } });
+    const resposta = await request("/local-worker/register", { method: "POST", token: userToken, body: { workerId, capabilities: CAPABILITIES } });
     return salvar({ workerId: texto(resposta.workerId), ownerId: owner, token: texto(resposta.token), workerType: texto(resposta.workerType), expiresAt: resposta.expiresAt || null, capabilities: resposta.capabilities || [], registeredAt: new Date().toISOString() });
   }
   async function bootstrap() {
     if (bootstrapEmCurso) return bootstrapEmCurso;
     bootstrapEmCurso = (async () => {
       const atual = await ler();
-      if (atual?.token && atual?.workerId && (!atual.expiresAt || Date.parse(atual.expiresAt) > Date.now())) return atual;
+      if (atual?.token && atual?.workerId && (!atual.expiresAt || Date.parse(atual.expiresAt) > Date.now()) && possuiCapabilities(atual.capabilities)) return atual;
       const local = storageLocal();
       if (!local) return null;
       const salvo = await local.get(USER_AUTH_STORAGE_KEY);
@@ -181,11 +187,13 @@
   }
   const client = {
     CAPABILITY,
+    OPPORTUNITY_CAPABILITY,
+    CAPABILITIES,
     ler,
     salvar,
     ensureRegistered,
     bootstrap,
-    claim: () => withWorker(worker => request("/local-worker/claim", { method: "POST", token: worker.token, body: { capabilities: [CAPABILITY] } })),
+    claim: () => withWorker(worker => request("/local-worker/claim", { method: "POST", token: worker.token, body: { capabilities: CAPABILITIES } })),
     heartbeat: (taskId, leaseToken) => withWorker(worker => request("/local-worker/heartbeat", { method: "POST", token: worker.token, body: { taskId, leaseToken } })),
     result: (task, payload, options = {}) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/result`, { method: "POST", token: worker.token, body: payload, timeoutMs: options.timeoutMs })),
     failure: (task, payload, options = {}) => withWorker(worker => request(`/local-worker/tasks/${encodeURIComponent(task.id)}/failure`, { method: "POST", token: worker.token, body: payload, timeoutMs: options.timeoutMs })),

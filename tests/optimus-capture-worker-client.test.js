@@ -87,11 +87,41 @@ const client = require("../optimus-capture/local-worker/worker-client.js");
   await client.ler();
   assert.strictEqual(dados.optimus_local_worker_auth.token, undefined, "proxima leitura converge e remove legado");
 
+  dados.optimus_local_worker_auth = {
+    workerId: "worker-capability-antiga",
+    ownerId: "owner-1",
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+    capabilities: [client.CAPABILITY]
+  };
+  sessao[client.TOKEN_SESSION_KEY] = "token-capability-antiga";
+  const chamadasUpgrade = [];
+  global.fetch = async (url, init = {}) => {
+    chamadasUpgrade.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    return {
+      ok: true,
+      status: 200,
+      body: { cancel: () => undefined },
+      json: async () => ({
+        ok: true,
+        workerId: "worker-capability-antiga",
+        token: "token-capability-nova",
+        workerType: "dedicated",
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+        capabilities: client.CAPABILITIES
+      })
+    };
+  };
+  const atualizado = await client.ensureRegistered("jwt-usuario", "owner-1");
+  assert.strictEqual(atualizado.workerId, "worker-capability-antiga", "upgrade deve reutilizar o workerId existente");
+  assert.deepStrictEqual(atualizado.capabilities, client.CAPABILITIES);
+  assert.deepStrictEqual(chamadasUpgrade.map(item => new URL(item.url).pathname), ["/local-worker/register"]);
+  assert.deepStrictEqual(chamadasUpgrade[0].body.capabilities, client.CAPABILITIES);
+
   dados.optimus_local_worker_auth = { workerId: "worker-antigo", ownerId: "owner-antigo", expiresAt: new Date(Date.now() + 60000).toISOString() };
   sessao[client.TOKEN_SESSION_KEY] = "token-antigo";
   const chamadas = [];
   global.fetch = async (url, init = {}) => {
-    chamadas.push({ url: String(url), authorization: init.headers.authorization });
+    chamadas.push({ url: String(url), authorization: init.headers.authorization, body: init.body ? JSON.parse(init.body) : null });
     const register = String(url).endsWith("/register");
     return {
       ok: true,
@@ -108,6 +138,7 @@ const client = require("../optimus-capture/local-worker/worker-client.js");
   assert.strictEqual(dados.optimus_local_worker_auth.token, undefined);
   assert.strictEqual(sessao[client.TOKEN_SESSION_KEY], "token-novo");
   assert.deepStrictEqual(chamadas.map(item => new URL(item.url).pathname), ["/local-worker/revoke", "/local-worker/register"]);
+  assert.deepStrictEqual(chamadas[1].body.capabilities, ["magalu_image_v1", "magalu_opportunity_v1"]);
   assert.strictEqual(limpezas, 1, "troca de owner deve apagar estado tecnico e lease");
 
   await client.limpar();

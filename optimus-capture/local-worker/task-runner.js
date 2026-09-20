@@ -19,6 +19,7 @@
   });
   const MAX_BREADCRUMBS = 20;
   const MAGALU_HOST = "www.magazinevoce.com.br";
+  const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const LIVENESS = Object.freeze({
     maxNoProgressCount: 2,
     maxStageAgeMs: 75_000,
@@ -76,6 +77,7 @@
       type: texto(task.type),
       marketplace: texto(task.marketplace),
       productId: texto(task.productId),
+      sourceUrl: texto(task.sourceUrl),
       capability: texto(task.capability),
       technicalSlug: texto(task.technicalSlug),
       attempt: Number(task.attempt ?? task.attempts ?? 0)
@@ -93,6 +95,14 @@
       imagemOficialUrl: texto(prova.imagemOficialUrl)
     };
   }
+  function resultadoOportunidadePublico(resultado = {}) {
+    return {
+      accessible: resultado.accessible === true,
+      indicatorFound: resultado.indicatorFound === true,
+      finalUrl: texto(resultado.finalUrl),
+      checkedAt: texto(resultado.checkedAt)
+    };
+  }
   function estadoPublico(valor = {}) {
     const agoraIso = agora();
     const causaOriginal = erroTexto(valor.originalFailureReason || (texto(valor.stage) === STAGES.FAILURE_PENDING ? valor.lastTechnicalError : ""), "");
@@ -102,6 +112,8 @@
       task: tarefaPublica(valor.task),
       imagemOficialUrl: texto(valor.imagemOficialUrl),
       provaTecnica: valor.provaTecnica ? provaPublica(valor.provaTecnica) : null,
+      resultadoOportunidade: valor.resultadoOportunidade ? resultadoOportunidadePublico(valor.resultadoOportunidade) : null,
+      failureMetadata: valor.failureMetadata ? resultadoOportunidadePublico(valor.failureMetadata) : null,
       originalFailureReason: causaOriginal,
       reportingError: erroTexto(valor.reportingError, ""),
       lastTechnicalError: causaOriginal || erroTexto(valor.lastTechnicalError, ""),
@@ -160,7 +172,12 @@
     return erro?.status === 401 || /worker_nao_autenticado|token_worker_invalido/.test(codigo);
   }
   function taskCompleta(task) {
-    return task && texto(task.id) && texto(task.type) && texto(task.productId) && texto(task.technicalSlug) && texto(task.marketplace) === "magalu" && texto(task.capability) === global.OptimusLocalWorkerClient?.CAPABILITY;
+    if (!task || !texto(task.id) || !texto(task.type) || !texto(task.productId) || texto(task.marketplace) !== "magalu") return false;
+    const capability = texto(task.capability);
+    if (capability === MAGALU_OPPORTUNITY_CAPABILITY) {
+      return texto(task.type) === "oportunidade_oficial" && texto(task.sourceUrl) === global.OptimusMagaluOpportunityResolver?.URL_OFICIAL;
+    }
+    return capability === global.OptimusLocalWorkerClient?.CAPABILITY && Boolean(texto(task.technicalSlug));
   }
   function taskComLease(estado, lease) {
     if (!estado?.task || !lease || texto(estado.task.id) !== texto(lease.taskId) || !texto(lease.leaseToken)) return null;
@@ -261,7 +278,11 @@
     emitir("LOCAL-WORKER-FAILURE", { taskId: texto(task.id), productId: texto(task.productId), motivo: originalFailureReason });
     await registrarBreadcrumb("FAILURE_SEND", task, { motivo: originalFailureReason, originalFailureReason, reportingError: estado.reportingError, taskStage: estado.stage });
     try {
-      const resposta = await global.OptimusLocalWorkerClient.failure(task, { leaseToken: task.leaseToken, motivo: originalFailureReason.slice(0, 120) });
+      const resposta = await global.OptimusLocalWorkerClient.failure(task, {
+        leaseToken: task.leaseToken,
+        motivo: originalFailureReason.slice(0, 120),
+        ...(estado.failureMetadata ? { metadata: resultadoOportunidadePublico(estado.failureMetadata) } : {})
+      });
       if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "failure_rejeitado");
       await registrarBreadcrumb("FAILURE_OK", task, { motivo: originalFailureReason, originalFailureReason, taskStage: estado.stage });
       await limparEstado();
@@ -279,7 +300,69 @@
       return null;
     }
   }
+  async function continuarOportunidade(estado, task) {
+    let atual = estado;
+    while (atual) {
+      if (atual.stage === STAGES.CLAIMED) {
+        atual = await marcarStage(atual, STAGES.RESOLVING_PAGE);
+        continue;
+      }
+      if (atual.stage === STAGES.RESOLVING_PAGE) {
+        if (!await validarLease(task, atual)) return;
+        await registrarBreadcrumb("OPPORTUNITY_CHECK_START", task, { taskStage: atual.stage });
+        const resultado = await global.OptimusMagaluOpportunityResolver.verificar({ sourceUrl: task.sourceUrl });
+        if (resultado?.accessible !== true) {
+          const motivo = erroTexto(resultado?.reason || "magalu_oportunidade_fonte_indisponivel");
+          await registrarBreadcrumb("OPPORTUNITY_CHECK_UNAVAILABLE", task, { motivo, taskStage: atual.stage });
+          const falha = await marcarStage(atual, STAGES.FAILURE_PENDING, {
+            originalFailureReason: motivo,
+            reportingError: "",
+            lastTechnicalError: motivo,
+            failureMetadata: resultadoOportunidadePublico(resultado)
+          }, { motivo });
+          await enviarFailure(falha, task);
+          return;
+        }
+        await registrarBreadcrumb("OPPORTUNITY_CHECK_OK", task, { taskStage: atual.stage });
+        atual = await marcarStage(atual, STAGES.RESULT_PENDING, { resultadoOportunidade: resultadoOportunidadePublico(resultado) });
+        continue;
+      }
+      if (atual.stage === STAGES.RESULT_PENDING) {
+        await registrarBreadcrumb("RESULT_SEND", task, { taskStage: atual.stage });
+        const resultado = atual.resultadoOportunidade;
+        try {
+          const resposta = await global.OptimusLocalWorkerClient.result(task, {
+            leaseToken: task.leaseToken,
+            capability: MAGALU_OPPORTUNITY_CAPABILITY,
+            accessible: resultado?.accessible === true,
+            indicatorFound: resultado?.indicatorFound === true,
+            finalUrl: texto(resultado?.finalUrl),
+            checkedAt: texto(resultado?.checkedAt)
+          });
+          if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "result_rejeitado");
+          await registrarBreadcrumb("RESULT_OK", task, { taskStage: atual.stage });
+          atual = await marcarStage(atual, STAGES.COMPLETED);
+          await limparEstado();
+          return;
+        } catch (erro) {
+          await registrarBreadcrumb("RESULT_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          if (erroAmbiguo(erro)) return;
+          throw erro;
+        }
+      }
+      if (atual.stage === STAGES.FAILURE_PENDING) {
+        await enviarFailure(atual, task);
+        return;
+      }
+      if (atual.stage === STAGES.COMPLETED) {
+        await limparEstado();
+        return;
+      }
+      throw new Error("local_worker_stage_invalido");
+    }
+  }
   async function continuar(estado, task) {
+    if (texto(task?.capability) === MAGALU_OPPORTUNITY_CAPABILITY) return continuarOportunidade(estado, task);
     let atual = estado;
     while (atual) {
       if (atual.stage === STAGES.CLAIMED) {

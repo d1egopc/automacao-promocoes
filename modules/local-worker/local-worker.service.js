@@ -11,6 +11,11 @@ const {
 
 const MAGALU_CAPABILITY = "magalu_image_v1";
 const MAGALU_TASK_TYPE = "imagem_oficial";
+const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
+const MAGALU_OPPORTUNITY_TASK_TYPE = "oportunidade_oficial";
+const MAGALU_OPPORTUNITY_PRODUCT_ID = "ofertasdodiamundo";
+const MAGALU_OPPORTUNITY_URL = "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/";
+const MAGALU_OPPORTUNITY_TTL_MS = 10 * 60 * 1000;
 
 function texto(valor = "") { return String(valor ?? "").trim(); }
 
@@ -33,6 +38,20 @@ function hostnameMlcdnValido(valor = "") {
   return host === "mlcdn.com.br" || host.endsWith(".mlcdn.com.br");
 }
 
+function urlOportunidadeMagaluValida(valor = "") {
+  try {
+    const url = new URL(texto(valor));
+    return url.protocol === "https:"
+      && !url.username
+      && !url.password
+      && !url.port
+      && url.hostname.toLowerCase() === "www.magazineluiza.com.br"
+      && url.pathname.replace(/\/+$/, "/") === "/selecao/ofertasdodiamundo/";
+  } catch {
+    return false;
+  }
+}
+
 function erro(motivo, statusCode = 400, detalhe = "") {
   const e = new Error(motivo);
   e.codigo = motivo;
@@ -48,6 +67,8 @@ function criarLocalWorkerService(opcoes = {}) {
   const dedicatedOwnerIds = listaIdsAutorizados(opcoes.dedicatedOwnerIds || process.env.LOCAL_WORKER_DEDICATED_OWNER_IDS || "");
   const tokenTtlMs = Math.max(60_000, Number(opcoes.tokenTtlMs || process.env.LOCAL_WORKER_TOKEN_TTL_MS || 30 * 24 * 60 * 60 * 1000));
   const technicalSlug = slugTecnicoMagalu(opcoes.magaluTechnicalSlug || process.env.LOCAL_WORKER_MAGALU_TECHNICAL_SLUG || "");
+  const agora = typeof opcoes.agora === "function" ? opcoes.agora : () => new Date();
+  const onOpportunityResult = typeof opcoes.onOpportunityResult === "function" ? opcoes.onOpportunityResult : null;
 
   async function ensureSchema() {
     try {
@@ -114,9 +135,35 @@ function criarLocalWorkerService(opcoes = {}) {
     return { url, prova };
   }
 
-  async function resultado({ worker, taskId, leaseToken, marketplace, productId, imagemOficialUrl, provaTecnica } = {}) {
+  function validarResultadoOportunidade({ task, capability, accessible, indicatorFound, finalUrl, checkedAt } = {}) {
+    if (!task) throw erro("task_inexistente", 404);
+    if (task.marketplace !== "magalu" || task.type !== MAGALU_OPPORTUNITY_TASK_TYPE || task.productId !== MAGALU_OPPORTUNITY_PRODUCT_ID) throw erro("task_oportunidade_invalida");
+    if (task.capability !== MAGALU_OPPORTUNITY_CAPABILITY || texto(capability) !== MAGALU_OPPORTUNITY_CAPABILITY) throw erro("capability_invalida");
+    if (accessible !== true || typeof indicatorFound !== "boolean") throw erro("resultado_oportunidade_invalido");
+    if (!urlOportunidadeMagaluValida(finalUrl) || texto(task.sourceUrl) !== MAGALU_OPPORTUNITY_URL) throw erro("url_oportunidade_invalida");
+    const instante = new Date(checkedAt);
+    const agoraMs = agora().getTime();
+    if (!Number.isFinite(instante.getTime()) || instante.getTime() > agoraMs + 30_000 || agoraMs - instante.getTime() >= MAGALU_OPPORTUNITY_TTL_MS) throw erro("resultado_oportunidade_stale");
+    return {
+      accessible: true,
+      indicatorFound,
+      finalUrl: new URL(finalUrl).toString(),
+      checkedAt: instante.toISOString(),
+      source: "local_first_party"
+    };
+  }
+
+  async function resultado({ worker, taskId, leaseToken, marketplace, productId, imagemOficialUrl, provaTecnica, capability, accessible, indicatorFound, finalUrl, checkedAt } = {}) {
     validarWorker(worker);
     const task = await repo.obterTask(taskId);
+    if (!task) throw erro("task_inexistente", 404);
+    validarWorker(worker, task.capability);
+    if (task.capability === MAGALU_OPPORTUNITY_CAPABILITY) {
+      const metadata = validarResultadoOportunidade({ task, capability, accessible, indicatorFound, finalUrl, checkedAt });
+      const conclusao = await repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata });
+      if (conclusao?.ok && onOpportunityResult) onOpportunityResult(metadata);
+      return conclusao;
+    }
     const validado = validarResultadoPublico({ task, marketplace, productId, imagemOficialUrl, provaTecnica });
     const http = await validarImagemOficialHttp(validado.url, { fetchFn, timeoutMs: imageTimeoutMs });
     if (!http.ok) {
@@ -143,7 +190,17 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function falha({ worker, taskId, leaseToken, motivo, metadata } = {}) {
     validarWorker(worker);
-    return repo.falhar({ taskId, workerId: worker.workerId, leaseToken, motivo: texto(motivo) || "worker_falhou", metadata });
+    const task = await repo.obterTask(taskId);
+    if (!task) throw erro("task_inexistente", 404);
+    validarWorker(worker, task.capability);
+    const meta = task.capability === MAGALU_OPPORTUNITY_CAPABILITY
+      ? {
+          accessible: false,
+          finalUrl: urlOportunidadeMagaluValida(metadata?.finalUrl) ? new URL(metadata.finalUrl).toString() : "",
+          checkedAt: Number.isFinite(new Date(metadata?.checkedAt).getTime()) ? new Date(metadata.checkedAt).toISOString() : agora().toISOString()
+        }
+      : metadata;
+    return repo.falhar({ taskId, workerId: worker.workerId, leaseToken, motivo: texto(motivo) || "worker_falhou", metadata: meta });
   }
 
   async function revogar({ worker } = {}) {
@@ -176,9 +233,48 @@ function criarLocalWorkerService(opcoes = {}) {
     return repo.obterCache({ marketplace, productId });
   }
 
+  async function obterOportunidadeMagaluRecente() {
+    if (typeof repo.obterUltimaTask !== "function") return { ok: true, resultado: null, task: null };
+    const task = await repo.obterUltimaTask({
+      marketplace: "magalu",
+      productId: MAGALU_OPPORTUNITY_PRODUCT_ID,
+      type: MAGALU_OPPORTUNITY_TASK_TYPE,
+      capability: MAGALU_OPPORTUNITY_CAPABILITY
+    });
+    if (!task || task.status !== "completed") return { ok: true, resultado: null, task };
+    try {
+      const metadata = validarResultadoOportunidade({ task, capability: task.capability, ...task.resultMetadata });
+      return { ok: true, resultado: metadata, task };
+    } catch (_) {
+      return { ok: true, resultado: null, task };
+    }
+  }
+
+  async function garantirOportunidadeMagalu() {
+    const ultima = typeof repo.obterUltimaTask === "function"
+      ? await repo.obterUltimaTask({ marketplace: "magalu", productId: MAGALU_OPPORTUNITY_PRODUCT_ID, type: MAGALU_OPPORTUNITY_TASK_TYPE, capability: MAGALU_OPPORTUNITY_CAPABILITY })
+      : null;
+    if (ultima && ["pending", "leased"].includes(ultima.status)) return { ok: true, criada: false, task: ultima };
+    const referenciaMs = Date.parse(ultima?.updatedAt || ultima?.completedAt || "");
+    if (ultima && ["failed", "expired"].includes(ultima.status) && Number.isFinite(referenciaMs) && agora().getTime() - referenciaMs < MAGALU_OPPORTUNITY_TTL_MS) {
+      return { ok: true, criada: false, task: ultima, backoff: true };
+    }
+    return repo.garantirTask({
+      type: MAGALU_OPPORTUNITY_TASK_TYPE,
+      marketplace: "magalu",
+      productId: MAGALU_OPPORTUNITY_PRODUCT_ID,
+      sourceUrl: MAGALU_OPPORTUNITY_URL,
+      capability: MAGALU_OPPORTUNITY_CAPABILITY,
+      idempotencyKey: `magalu:${MAGALU_OPPORTUNITY_PRODUCT_ID}:${MAGALU_OPPORTUNITY_TASK_TYPE}`,
+      maxAttempts: 1,
+      ttlMs: MAGALU_OPPORTUNITY_TTL_MS,
+      reutilizarCompleted: false
+    });
+  }
+
   async function status() { return repo.status(); }
 
-  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, obterTaskImagemMagalu, obterImagemCache, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE };
+  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, obterTaskImagemMagalu, obterImagemCache, garantirOportunidadeMagalu, obterOportunidadeMagaluRecente, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE };
 }
 
-module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE };
+module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, MAGALU_OPPORTUNITY_PRODUCT_ID, MAGALU_OPPORTUNITY_URL, MAGALU_OPPORTUNITY_TTL_MS, urlOportunidadeMagaluValida };
