@@ -130,6 +130,12 @@ function calcularScoreFilaViva(oferta = {}, contexto = {}) {
     compatibilidade * 0.10 -
     penalidadeIdade;
 
+  const urgenciaFanout = calcularUrgenciaFanoutParcial(oferta, {
+    ...contexto,
+    agora,
+    ttlMs
+  });
+
   return {
     scoreFinal,
     lane,
@@ -140,7 +146,88 @@ function calcularScoreFilaViva(oferta = {}, contexto = {}) {
     compatibilidade,
     destinosCompativeis,
     destinosDisponiveis,
-    cupomComercial: cupomComercialFilaViva(oferta)
+    cupomComercial: cupomComercialFilaViva(oferta),
+    fanoutParcial: urgenciaFanout.parcial,
+    fanoutUrgente: urgenciaFanout.urgente,
+    fanoutSlackMs: urgenciaFanout.slackMs,
+    fanoutDeadlineMs: urgenciaFanout.deadlineMs,
+    fanoutProximoSlotMs: urgenciaFanout.proximoSlotMs,
+    fanoutDestinoChave: urgenciaFanout.destinoChave,
+    destinoChaves: Array.isArray(contexto.destinoChaves)
+      ? contexto.destinoChaves.map(valor => String(valor || "")).filter(Boolean)
+      : []
+  };
+}
+
+function calcularUrgenciaFanoutParcial(oferta = {}, contexto = {}) {
+  const fanout = contexto.fanout || contexto.fanoutParcial || {};
+  const parcial = fanout.parcial === true;
+  const destinosPendentes = Array.isArray(fanout.destinosPendentes)
+    ? fanout.destinosPendentes
+    : [];
+  const agora = Number(contexto.agora || Date.now());
+  const deadlineMs = timestampFilaViva(oferta.expiraEm);
+
+  if (!parcial || !destinosPendentes.length || !Number.isFinite(deadlineMs)) {
+    return {
+      parcial,
+      urgente: false,
+      slackMs: Infinity,
+      deadlineMs: Number.isFinite(deadlineMs) ? deadlineMs : NaN,
+      proximoSlotMs: NaN,
+      destinoChave: ""
+    };
+  }
+
+  const slots = destinosPendentes.map(item => {
+    const intervalo = item?.intervalo || item || {};
+    const intervaloMs = Number(intervalo.intervaloMs);
+    const cadenciaMs = Number.isFinite(intervaloMs) && intervaloMs >= 0
+      ? intervaloMs
+      : Math.max(0, Number(intervalo.intervaloAplicadoMin || 0)) * 60 * 1000;
+    const permitidoMs = timestampFilaViva(intervalo.proximoEnvioPermitidoEm);
+    const liberado = item?.liberado === true || intervalo.liberado === true ||
+      (Number.isFinite(permitidoMs) && permitidoMs <= agora);
+
+    // Se o slot atual está aberto, perdê-lo empurra a próxima oportunidade
+    // para depois de uma cadência. Se ainda está fechado, a próxima
+    // oportunidade é o horário já calculado pelo controle do destino.
+    const proximoSlotMs = liberado
+      ? agora + cadenciaMs
+      : (Number.isFinite(permitidoMs) ? permitidoMs : agora + cadenciaMs);
+
+    return {
+      proximoSlotMs,
+      slackMs: deadlineMs - proximoSlotMs,
+      destinoChave: String(item?.chave || intervalo.chaveControle || ""),
+      cadenciaMs
+    };
+  }).filter(item => Number.isFinite(item.proximoSlotMs));
+
+  if (!slots.length) {
+    return {
+      parcial: true,
+      urgente: false,
+      slackMs: Infinity,
+      deadlineMs,
+      proximoSlotMs: NaN,
+      destinoChave: ""
+    };
+  }
+
+  slots.sort((a, b) => a.slackMs - b.slackMs || a.proximoSlotMs - b.proximoSlotMs);
+  const menor = slots[0];
+  // A margem menor que uma cadência significa que uma oferta concorrente
+  // pode consumir o slot e empurrar a entrega para depois do deadline.
+  const margemDeRiscoMs = Math.max(menor.cadenciaMs, 60 * 1000);
+
+  return {
+    parcial: true,
+    urgente: menor.slackMs <= margemDeRiscoMs,
+    slackMs: menor.slackMs,
+    deadlineMs,
+    proximoSlotMs: menor.proximoSlotMs,
+    destinoChave: menor.destinoChave
   };
 }
 
@@ -148,6 +235,26 @@ function ordenarOfertasFilaViva(candidatos = [], contexto = {}) {
   return [...candidatos].sort((a, b) => {
     const rankingA = a.ranking || calcularScoreFilaViva(a.oferta || a, contexto);
     const rankingB = b.ranking || calcularScoreFilaViva(b.oferta || b, contexto);
+    const urgenteA = rankingA.fanoutUrgente === true;
+    const urgenteB = rankingB.fanoutUrgente === true;
+    const chaveUrgenteA = String(rankingA.fanoutDestinoChave || "");
+    const chaveUrgenteB = String(rankingB.fanoutDestinoChave || "");
+    const destinosB = new Set(Array.isArray(rankingB.destinoChaves) ? rankingB.destinoChaves : []);
+    const destinosA = new Set(Array.isArray(rankingA.destinoChaves) ? rankingA.destinoChaves : []);
+    const disputaA = urgenteA && chaveUrgenteA && destinosB.has(chaveUrgenteA);
+    const disputaB = urgenteB && chaveUrgenteB && destinosA.has(chaveUrgenteB);
+
+    if (disputaA !== disputaB) {
+      return disputaA ? -1 : 1;
+    }
+    if (disputaA && disputaB) {
+      if (rankingA.fanoutSlackMs !== rankingB.fanoutSlackMs) {
+        return rankingA.fanoutSlackMs - rankingB.fanoutSlackMs;
+      }
+      if (rankingA.fanoutDeadlineMs !== rankingB.fanoutDeadlineMs) {
+        return rankingA.fanoutDeadlineMs - rankingB.fanoutDeadlineMs;
+      }
+    }
     if (rankingB.scoreFinal !== rankingA.scoreFinal) return rankingB.scoreFinal - rankingA.scoreFinal;
     if (rankingA.idadeMs !== rankingB.idadeMs) return rankingA.idadeMs - rankingB.idadeMs;
     return String((a.oferta || a).id || "").localeCompare(String((b.oferta || b).id || ""));
@@ -159,6 +266,7 @@ module.exports = {
   AGUA_NOVA_MS,
   FRESCA_EM_RISCO_MS,
   calcularScoreFilaViva,
+  calcularUrgenciaFanoutParcial,
   cupomComercialFilaViva,
   laneFrescorFilaViva,
   ordenarOfertasFilaViva,

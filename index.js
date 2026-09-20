@@ -2335,6 +2335,8 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
   }
 
   const destinosLiberados = [];
+  const destinosPendentesFanout = [];
+  let destinosEnviadosFanout = 0;
   let menorRestanteMs = Infinity;
   let motivoBloqueio = "";
 
@@ -2347,6 +2349,10 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     }
 
     if (destinoJaEnviadoFanout(oferta, destino)) {
+      const estadoDestino = obterDestinoEstadoFanout(oferta, destino);
+      if (estadoDestino?.estado !== "bloqueado_repeticao_2h") {
+        destinosEnviadosFanout += 1;
+      }
       motivoBloqueio = motivoBloqueio || "fanout_destino_ja_enviado";
       continue;
     }
@@ -2367,21 +2373,35 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     const intervalo = intervaloDestinoInfo(clienteIdOferta, destino, configClienteOferta, oferta);
     menorRestanteMs = Math.min(menorRestanteMs, Number(intervalo.restanteMs || 0));
 
+    const destinoPendenteFanout = {
+      ...item,
+      chave: destinoChaveControle(clienteIdOferta, destino),
+      intervalo,
+      liberado: intervalo.liberado === true
+    };
+    destinosPendentesFanout.push(destinoPendenteFanout);
+
     if (!intervalo.liberado) {
       motivoBloqueio = motivoBloqueio || "intervalo";
       continue;
     }
 
-    destinosLiberados.push({
-      ...item,
-      intervalo
-    });
+    destinosLiberados.push(destinoPendenteFanout);
   }
 
+  const fanout = {
+    parcial: destinosEnviadosFanout > 0 && destinosPendentesFanout.length > 0,
+    destinosEnviados: destinosEnviadosFanout,
+    destinosPendentes: destinosPendentesFanout
+  };
   const ranking = calcularScoreFilaViva(oferta, {
     agora,
     destinosCompativeis: analiseDestinos.compativeis.length,
-    destinosDisponiveis: destinosLiberados.length
+    destinosDisponiveis: destinosLiberados.length,
+    destinoChaves: destinosLiberados
+      .map(item => String(item?.chave || ""))
+      .filter(Boolean),
+    fanout
   });
 
   if (!destinosLiberados.length) {
@@ -2391,6 +2411,7 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       motivoBloqueio: motivoBloqueio || "sem_destino_liberado_agora",
       destinosCompativeis: analiseDestinos.compativeis.length,
       destinosLiberados,
+      fanout,
       menorRestanteMs: Number.isFinite(menorRestanteMs) ? menorRestanteMs : 0,
       ranking
     };
@@ -2402,6 +2423,7 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     oferta,
     destinosCompativeis: analiseDestinos.compativeis.length,
     destinosLiberados,
+    fanout,
     ranking
   };
 }
