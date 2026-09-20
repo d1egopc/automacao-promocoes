@@ -229,7 +229,7 @@
   }
 
   function cupomNoTexto(textoPagina) {
-    const match = textoPagina.match(/\b(?:cupom|c[oó]digo)\s*:?[ \t]*([A-Z0-9][A-Z0-9_-]{2,40})\b/i);
+    const match = textoPagina.match(/\b(?:cupom|c[oó]digo\s+do\s+cupom)\s*:?[ \t]*([A-Z0-9][A-Z0-9_-]{2,40})\b/i);
     return match ? texto(match[1]).toUpperCase() : "";
   }
 

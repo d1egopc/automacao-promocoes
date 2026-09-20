@@ -14,6 +14,7 @@ const {
   slugsLojaMagalu,
   caminhoPareceProdutoMagalu
 } = require("../modules/marketplaces/magalu/magalu-affiliate-link");
+const { capturarMagaluDeHtml } = require("../optimus-capture/adapters/magalu");
 
 const urlProduto = "https://www.magazineluiza.com.br/smart-tv-50/p/abc123/et/elit/?utm_source=x";
 const urlLojaCorreta = "https://www.magazinevoce.com.br/magazined1egopc/smart-tv-50/p/abc123/et/elit/";
@@ -91,6 +92,35 @@ assert.ok(semProduto.avisos.includes("magalu_url_sem_caminho_de_produto"));
 assert.strictEqual(caminhoPareceProdutoMagalu("/smart-tv/p/abc123/et/elit/"), true);
 assert.strictEqual(caminhoPareceProdutoMagalu("/produto/123456"), true);
 assert.strictEqual(caminhoPareceProdutoMagalu("/busca/tv/"), false);
+
+const capturaReal = capturarMagaluDeHtml(`
+  <script type="application/ld+json">${JSON.stringify({
+    "@type": "Product",
+    name: "Escova Secadora Britania",
+    sku: "226803000",
+    image: "https://a-static.mlcdn.com.br/produto.jpg",
+    offers: { price: "99.90" }
+  })}</script>
+  <div data-testid="price-pix">R$ 99,90 no Pix</div>
+  <div data-testid="installment-price">R$ 105,16 em 2x de R$ 52,58 sem juros</div>
+  <div>Código 226803000</div>
+`, "https://www.magazineluiza.com.br/escova-secadora/p/226803000/pf/esse/?seller_id=magazineluiza");
+assert.strictEqual(capturaReal.produtoId, "226803000");
+assert.strictEqual(capturaReal.sku, "226803000");
+assert.strictEqual(capturaReal.cupom, "", "codigo catalogal nao pode virar cupom");
+assert.strictEqual(capturaReal.precoAtual, 99.90);
+assert.strictEqual(capturaReal.precoPix, 99.90);
+assert.strictEqual(capturaReal.precoAnterior, null);
+assert.strictEqual(capturaReal.parcelamento, "2x de R$ 52,58 sem juros");
+assert.strictEqual(capturaReal.imagem, "https://a-static.mlcdn.com.br/produto.jpg");
+
+const capturaCupom = capturarMagaluDeHtml(`
+  <script type="application/ld+json">${JSON.stringify({
+    "@type": "Product", name: "Produto", sku: "abc123",
+    image: "https://a-static.mlcdn.com.br/produto.jpg", offers: { price: "10.00" }
+  })}</script><p>Código do cupom: MAGALU10</p>
+`, "https://www.magazineluiza.com.br/produto/p/abc123/te/test/");
+assert.strictEqual(capturaCupom.cupom, "MAGALU10");
 
 const fonte = fs.readFileSync(
   path.join(__dirname, "..", "modules", "marketplaces", "magalu", "magalu-affiliate-link.js"),

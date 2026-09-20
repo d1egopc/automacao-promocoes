@@ -25,6 +25,16 @@ function sellerPorUrl(url = "") {
   }
 }
 
+function normalizarSellerMagalu(valor = "") {
+  const compacto = texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  if (["magalu", "magazineluiza"].includes(compacto)) return "magalu";
+  return compacto;
+}
+
 function segredoServidor() {
   return texto(process.env.JWT_SECRET || process.env.MAGALU_AFFILIATION_PROOF_SECRET);
 }
@@ -72,8 +82,26 @@ function urlDeterministicaExata({ urlOriginal = "", urlAfiliadaWorkspace = "", p
   const originalId = produtoIdPorUrl(urlOriginal);
   const afiliadaId = produtoIdPorUrl(urlAfiliadaWorkspace);
   if (!originalId || originalId !== texto(productId) || afiliadaId !== texto(productId)) return false;
+  let afiliada;
+  try {
+    afiliada = new URL(texto(urlAfiliadaWorkspace));
+  } catch (_) {
+    return false;
+  }
+  if (afiliada.protocol !== "https:" || afiliada.hostname.toLowerCase() !== "www.magazinevoce.com.br") return false;
+  const caminhoAfiliado = afiliada.pathname.replace(/\/{2,}/g, "/").replace(/\/+$/, "/");
   return construirUrlsDeterministicasWorkspaceMagalu(urlOriginal, promoterId)
-    .some(item => item.url === texto(urlAfiliadaWorkspace));
+    .some(item => {
+      try {
+        const esperado = new URL(item.url);
+        const caminhoEsperado = esperado.pathname.replace(/\/{2,}/g, "/").replace(/\/+$/, "/");
+        return esperado.protocol === afiliada.protocol &&
+          esperado.hostname.toLowerCase() === afiliada.hostname.toLowerCase() &&
+          caminhoEsperado === caminhoAfiliado;
+      } catch (_) {
+        return false;
+      }
+    });
 }
 
 function criarProvaAfiliacaoWorkspaceMagalu({
@@ -86,7 +114,7 @@ function criarProvaAfiliacaoWorkspaceMagalu({
   const tipoProva = texto(proofType) || (paginaValidada === true ? PROOF_TYPE_PAGE_VALIDATED : "");
   const aliasLoja = aliasPorUrl(urlAfiliada);
   const sellerFinal = sellerPorUrl(urlAfiliada);
-  const sellerCompativel = !texto(seller) || !sellerFinal || sellerFinal === texto(seller);
+  const sellerCompativel = !texto(seller) || !sellerFinal || normalizarSellerMagalu(sellerFinal) === normalizarSellerMagalu(seller);
   const baseValida = Boolean(
     texto(clienteId) && slugLoja && texto(productId) && urlAfiliada &&
     produtoIdPorUrl(urlOriginal) === texto(productId) && semTrackingEstrangeiro(urlAfiliada) &&
@@ -165,5 +193,6 @@ module.exports = {
   PROOF_TYPE_DETERMINISTIC_WORKSPACE,
   criarProvaAfiliacaoWorkspaceMagalu,
   validarProvaAfiliacaoWorkspaceMagalu,
-  validarOfertaAfiliacaoWorkspaceMagalu
+  validarOfertaAfiliacaoWorkspaceMagalu,
+  normalizarSellerMagalu
 };

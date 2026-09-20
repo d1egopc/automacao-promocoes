@@ -12,7 +12,8 @@ const {
   validarOfertaAfiliacaoWorkspaceMagalu
 } = require("../modules/marketplaces/magalu/afiliacao-workspace");
 const {
-  construirUrlDeterministicaWorkspaceMagalu
+  construirUrlDeterministicaWorkspaceMagalu,
+  gerarLinkAfiliadoMagaluSeguro
 } = require("../modules/marketplaces/magalu/magalu-affiliate-link");
 const { resolverFatosMagalu } = require("../modules/marketplaces/magalu/magalu-factual-resolver");
 const { parseMagaluProdutoHtml } = require("../modules/marketplaces/magalu/magalu-parser");
@@ -236,6 +237,53 @@ function testarAliasesDeterministicosEIsolamentoDaProva() {
   assert.strictEqual(comTrackingEstrangeiro.conversaoStatus, "falhou");
 }
 
+function testarConversaoManualComQueryESellerAlias() {
+  const caso = casos[0];
+  const original = urlOriginal(caso);
+  const convertido = gerarLinkAfiliadoMagaluSeguro(original, "d1egopc");
+  assert.strictEqual(convertido.comprovado, true);
+  const prova = criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    productId: caso.id,
+    seller: "Magalu",
+    urlOriginal: original,
+    urlAfiliadaWorkspace: convertido.urlAfiliada,
+    paginaValidada: false,
+    proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+    papelLink: "produto",
+    urlConstruidaPor: "magalu_deterministic_builder_v1"
+  });
+  assert.strictEqual(prova.conversaoStatus, "convertida", "seller_id e query irrelevante nao podem quebrar a prova");
+  assert.strictEqual(prova.productId, caso.id);
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu(prova, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    papelLink: "produto"
+  }).valida, true);
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceMagalu({
+    ...prova,
+    urlAfiliadaWorkspace: `${prova.urlAfiliadaWorkspace}&redirect=https%3A%2F%2Fevil.example`
+  }, {
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    papelLink: "produto"
+  }).valida, false, "query adulterada nao pode reutilizar HMAC de outra URL");
+
+  const queryEstrangeira = criarProvaAfiliacaoWorkspaceMagalu({
+    clienteId: "workspace-magalu",
+    promoterId: "d1egopc",
+    productId: caso.id,
+    urlOriginal: original,
+    urlAfiliadaWorkspace: `${convertido.urlAfiliada}&promoter_id=5438968`,
+    paginaValidada: false,
+    proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+    papelLink: "produto",
+    urlConstruidaPor: "magalu_deterministic_builder_v1"
+  });
+  assert.strictEqual(queryEstrangeira.conversaoStatus, "falhou", "tracking estrangeiro continua bloqueado");
+}
+
 async function testarOrigemEstrangeiraNuncaEhEnviada() {
   const caso = casos[0];
   const estrangeira = urlWorkspace(caso).replace(`/${loja}/`, "/outraloja/");
@@ -395,6 +443,7 @@ async function testarGateMagaluSemRefatoracaoGlobal() {
   await testar403SemImagemTerminaSemImagem();
   await testarCaptchaPermiteProvaDeterministicaComImagemOficial();
   testarAliasesDeterministicosEIsolamentoDaProva();
+  testarConversaoManualComQueryESellerAlias();
   await testarOrigemEstrangeiraNuncaEhEnviada();
   await testarMidiaNaoOficialNuncaPublica();
   await testarProvaAdulteradaBloqueia();
