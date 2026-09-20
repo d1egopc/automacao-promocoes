@@ -135,7 +135,7 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
     sku: "gec5d601ec",
     image: ["https://a-static.mlcdn.com.br/madesa.jpg"],
     offers: { price: "713.99" }
-  })}</script><div data-testid="product-price-container"><div data-testid="product-price"><div data-testid="price-default" class="grid [grid-template-areas:original_original_discount_discount_final_method_installment_installment]"><div><p data-testid="price-value">R$ 713,99</p></div><div>R$ 713,99 no Pix 15% OFF</div><div>Ou R$ 839,99 em 10x de R$ 84,00 sem juros</div></div></div><div>R$ 10 OFF Copiar Copie o cupom e cole na revisão. Válido até 11 de out.</div></div>`;
+  })}</script><div data-testid="product-price-container"><div data-testid="product-price"><div data-testid="price-default" class="grid [grid-template-areas:original_original_discount_discount_final_method_installment_installment]"><div><p data-testid="price-value">R$ 713,99</p></div><div>R$ 713,99 no Pix 15% OFF</div><div>Ou R$ 839,99 em 10x de R$ 84,00 sem juros ou R$ 1</div></div></div><div>R$ 10 OFF Copiar Copie o cupom e cole na revisão. Válido até 11 de out.</div></div>`;
   const madesa = magalu.capturarMagaluDeHtml(madesaHtml, "https://www.magazineluiza.com.br/conjunto-sala/p/gec5d601ec/mo/ms4j/?seller_id=madesamoveis");
   assert.strictEqual(madesa.produtoId, "gec5d601ec");
   assert.strictEqual(madesa.sku, "gec5d601ec");
@@ -147,6 +147,18 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
   assert.strictEqual(madesa.parcelamento, "10x de R$ 84,00 sem juros");
   assert.strictEqual(madesa.cupom, "", "valor de desconto sem codigo nao e cupom");
   assert.strictEqual(madesa.imagem, "https://a-static.mlcdn.com.br/madesa.jpg");
+
+  const parcelamentoContaminado104 = magalu.capturarMagaluDeHtml(
+    madesaHtml.replace("10x de R$ 84,00 sem juros", "10x de R$ 104,00 sem juros"),
+    "https://www.magazineluiza.com.br/conjunto-sala/p/gec5d601ec/mo/ms4j/"
+  );
+  assert.strictEqual(parcelamentoContaminado104.parcelamento, "10x de R$ 104,00 sem juros");
+
+  const parcelamentoComJuros = magalu.capturarMagaluDeHtml(
+    madesaHtml.replace("10x de R$ 84,00 sem juros ou R$ 1", "3x de R$ 250,00 com juros ou R$ 1"),
+    "https://www.magazineluiza.com.br/conjunto-sala/p/gec5d601ec/mo/ms4j/"
+  );
+  assert.strictEqual(parcelamentoComJuros.parcelamento, "3x de R$ 250,00 com juros");
 
   const cupomExplicito = magalu.capturarMagaluDeHtml(
     `<script type="application/ld+json">${JSON.stringify({ ...casoRealMagalu, sku: "cupom-magalu" })}</script><div>Código do cupom: MAGALU10</div>`,

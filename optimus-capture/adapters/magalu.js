@@ -251,7 +251,7 @@
       ? blocosEstruturados
       : blocosSemanticos(html, /parcel|installment|payment/i);
     for (const bloco of blocos) {
-      const match = bloco.texto.match(/\b\d{1,2}x\s+(?:de\s+)?R\$\s*[0-9.]+,[0-9]{2}[^.]{0,80}/i);
+      const match = bloco.texto.match(/\b\d{1,2}x\s+(?:de\s+)?R\$\s*[0-9.]+,[0-9]{2}(?:\s+(?:sem\s+juros|com\s+juros))?/i);
       if (match) return limparTexto(match[0]);
     }
     return "";
