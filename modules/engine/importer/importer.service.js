@@ -2167,6 +2167,82 @@ function objetoSeguro(valor = {}) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
+function resumirUrlGateMlWorker(valor = "") {
+  const textoUrl = normalizarTexto(valor);
+  if (!textoUrl) return { presente: false, host: "", path: "", possuiQuery: false };
+  try {
+    const parsed = new URL(textoUrl);
+    return {
+      presente: true,
+      host: parsed.hostname.toLowerCase(),
+      path: parsed.pathname || "/",
+      possuiQuery: Boolean(parsed.search)
+    };
+  } catch (_) {
+    return { presente: true, host: "", path: "", possuiQuery: false, invalida: true };
+  }
+}
+
+function extrairMlbsGateMlWorker(...valores) {
+  const encontrados = new Set();
+  for (const valor of valores) {
+    const textoValor = normalizarTexto(valor);
+    if (!textoValor) continue;
+    const matches = textoValor.match(/\bMLB-?(\d{6,})\b/gi) || [];
+    for (const match of matches) encontrados.add(`MLB${match.replace(/[^0-9]/g, "")}`);
+  }
+  return Array.from(encontrados);
+}
+
+function montarDiagnosticoGateImagemMercadoLivreLocalWorker({
+  engineOfertaId = null,
+  jobId = null,
+  eventoId = null,
+  marketplace = "",
+  sourceUrl = "",
+  identidade = {},
+  mlbsMetadata = [],
+  imagem = "",
+  imagemEnviavel = false,
+  imagemStatus = "",
+  localWorkerDisponivel = false,
+  cacheLookupDisponivel = false,
+  taskCreatorDisponivel = false,
+  cacheLookupExecutado = false,
+  cacheHit = false,
+  decisao = "task_nao_criada",
+  motivoTaskNaoCriada = "",
+  taskId = null
+} = {}) {
+  return {
+    engineOfertaId: engineOfertaId || null,
+    jobId: jobId || null,
+    eventoId: eventoId || null,
+    marketplace: normalizarTexto(marketplace).toLowerCase(),
+    sourceUrl: resumirUrlGateMlWorker(sourceUrl),
+    identidade: {
+      produtoIdDetectado: normalizarTexto(identidade.produtoIdDetectado || "").toUpperCase(),
+      tipoIdentidade: normalizarTexto(identidade.tipoIdentidade || "")
+    },
+    mlbsMetadata: Array.isArray(mlbsMetadata) ? mlbsMetadata.slice(0, 20) : [],
+    imagemAtual: resumirUrlGateMlWorker(imagem),
+    imagemEnviavel: imagemEnviavel === true,
+    imagemStatus: normalizarTexto(imagemStatus),
+    localWorkerDisponivel: localWorkerDisponivel === true,
+    cacheLookupDisponivel: cacheLookupDisponivel === true,
+    taskCreatorDisponivel: taskCreatorDisponivel === true,
+    cacheLookupExecutado: cacheLookupExecutado === true,
+    cacheHit: cacheHit === true,
+    decisao: decisao === "task_criada" ? "task_criada" : "task_nao_criada",
+    motivoTaskNaoCriada: normalizarTexto(motivoTaskNaoCriada),
+    taskId: taskId || null
+  };
+}
+
+function registrarDiagnosticoGateImagemMercadoLivreLocalWorker(diagnostico = {}) {
+  console.log("[ML-IMAGE-WORKER-GATE]", JSON.stringify(diagnostico));
+}
+
 function eventoOrigemClonadorGrupos(evento = {}, job = {}, metadata = {}) {
   const origem = normalizarTexto(evento.origem || evento.origem_tipo || metadata.origem || "").toLowerCase();
   const metadataEvento = objetoSeguro(job.metadata?.metadataEvento);
@@ -4094,35 +4170,119 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     job,
     link
   });
-  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre" && !imagemCanonicaFinal.imagemCanonicaDuravel) {
-    const identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
-    const produtoIdMlWorker = normalizarTexto(identidadeMlWorker.produtoIdDetectado || "").toUpperCase();
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+    const metadataGateMlWorker = objetoSeguro(oferta.metadata);
+    const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
+    const produtoMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.produto || metadataEntradaGateMlWorker.produto);
+    const inteligenciaMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.inteligenciaUniversalV2 || metadataEntradaGateMlWorker.inteligenciaUniversalV2);
+    const imagemCacheMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.imagemCacheCanonico || metadataEntradaGateMlWorker.imagemCacheCanonico);
+    const cacheLookupDisponivelMlWorker = typeof deps.obterImagemCacheLocalWorker === "function";
+    const taskCreatorDisponivelMlWorker = typeof deps.garantirImagemMercadoLivreLocalWorker === "function";
+    const localWorkerDisponivelMlWorker = cacheLookupDisponivelMlWorker && taskCreatorDisponivelMlWorker;
+    let imagemAtualGateMlWorker = normalizarValorImagem(oferta.imagem || oferta.imagemUrl || oferta.image || oferta.imageUrl || imagemCanonicaFinal.imagemCanonicaDuravel || "");
+    let imagemEnviavelGateMlWorker = oferta.imagemEnviavel === true || Boolean(imagemCanonicaFinal.imagemCanonicaDuravel);
+    let imagemStatusGateMlWorker = normalizarTexto(oferta.imagemStatus || metadataGateMlWorker.imagemStatus || imagemCanonicaFinal.imagemStatus || "");
     const sourceUrlMlWorker = normalizarTexto(oferta.linkExpandido || oferta.linkOriginal || imagemCanonicaFinal.linkResolvido || "");
-    if (/^MLB\d+$/.test(produtoIdMlWorker) && typeof deps.obterImagemCacheLocalWorker === "function") {
-      const cacheMlWorker = await deps.obterImagemCacheLocalWorker({ marketplace: "mercadolivre", productId: produtoIdMlWorker });
-      if (cacheImagemMercadoLivreLocalValido(cacheMlWorker, produtoIdMlWorker)) {
-        imagemCanonicaFinal = {
-          ...imagemCanonicaFinal,
-          imagem: cacheMlWorker.imageUrl,
-          imagemCanonicaDuravel: cacheMlWorker.imageUrl,
-          imagemOrigem: "local_worker.ml_image_v1",
-          imagemStatus: "local_worker_ml_image",
-          produtoId: produtoIdMlWorker,
-          motivo: "cache_local_worker_ml_image",
-          cacheHit: true,
-          localWorkerProof: cacheMlWorker.proof
-        };
-      } else if (typeof deps.garantirImagemMercadoLivreLocalWorker === "function" && sourceUrlMlWorker) {
-        const taskMlWorker = await deps.garantirImagemMercadoLivreLocalWorker({ productId: produtoIdMlWorker, sourceUrl: sourceUrlMlWorker });
-        if (taskMlWorker?.ok === true && taskMlWorker.task) {
-          return {
-            ok: false,
-            retriavel: true,
-            motivo: "sem_imagem",
-            motivoDetalhe: "aguardando_enriquecimento_local",
-            localWorker: { capability: "ml_image_v1", productId: produtoIdMlWorker, task: taskMlWorker.task || null },
-            metadata: { localWorkerImageRetry: true, productId: produtoIdMlWorker }
+    let identidadeMlWorker = {};
+    let produtoIdMlWorker = "";
+    let cacheLookupExecutadoMlWorker = false;
+    let cacheHitMlWorker = false;
+    let gateMlWorkerRegistrado = false;
+    const mlbsMetadataGateMlWorker = extrairMlbsGateMlWorker(
+      oferta.produtoIdDetectado,
+      oferta.produtoId,
+      oferta.itemId,
+      oferta.linkExpandido,
+      oferta.linkOriginal,
+      oferta.linkAfiliado,
+      metadataGateMlWorker.produtoId,
+      metadataGateMlWorker.mlb,
+      metadataGateMlWorker.itemId,
+      produtoMetadataGateMlWorker.produtoId,
+      produtoMetadataGateMlWorker.productId,
+      produtoMetadataGateMlWorker.itemId,
+      produtoMetadataGateMlWorker.linkExpandido,
+      produtoMetadataGateMlWorker.urlFinal,
+      metadataGateMlWorker.ofertaUniversal?.produto?.idExterno,
+      metadataGateMlWorker.ofertaUniversal?.produto?.urlCanonica,
+      metadataGateMlWorker.linkExpandidoEngine,
+      metadataGateMlWorker.urlFinalImportador,
+      metadataGateMlWorker.transporteTecnicoMl?.linkResolvidoTecnico,
+      inteligenciaMetadataGateMlWorker.produtoIdDetectado,
+      imagemCacheMetadataGateMlWorker.produtoId
+    );
+    const registrarGateMlWorker = ({ decisao = "task_nao_criada", motivoTaskNaoCriada = "", taskId = null } = {}) => {
+      if (gateMlWorkerRegistrado) return;
+      gateMlWorkerRegistrado = true;
+      registrarDiagnosticoGateImagemMercadoLivreLocalWorker(montarDiagnosticoGateImagemMercadoLivreLocalWorker({
+        engineOfertaId: job.oferta_id || oferta.id || null,
+        jobId: job.id || null,
+        eventoId: job.evento_id || null,
+        marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
+        sourceUrl: sourceUrlMlWorker,
+        identidade: identidadeMlWorker,
+        mlbsMetadata: mlbsMetadataGateMlWorker,
+        imagem: imagemAtualGateMlWorker,
+        imagemEnviavel: imagemEnviavelGateMlWorker,
+        imagemStatus: imagemStatusGateMlWorker,
+        localWorkerDisponivel: localWorkerDisponivelMlWorker,
+        cacheLookupDisponivel: cacheLookupDisponivelMlWorker,
+        taskCreatorDisponivel: taskCreatorDisponivelMlWorker,
+        cacheLookupExecutado: cacheLookupExecutadoMlWorker,
+        cacheHit: cacheHitMlWorker,
+        decisao,
+        motivoTaskNaoCriada,
+        taskId
+      }));
+    };
+
+    if (imagemCanonicaFinal.imagemCanonicaDuravel) {
+      registrarGateMlWorker({ motivoTaskNaoCriada: "imagem_ja_resolvida" });
+    } else {
+      identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
+      produtoIdMlWorker = normalizarTexto(identidadeMlWorker.produtoIdDetectado || "").toUpperCase();
+      if (!/^MLB\d+$/.test(produtoIdMlWorker)) {
+        registrarGateMlWorker({ motivoTaskNaoCriada: "mlb_nao_detectado" });
+      } else if (!cacheLookupDisponivelMlWorker) {
+        registrarGateMlWorker({ motivoTaskNaoCriada: "dependencia_indisponivel" });
+      } else {
+        cacheLookupExecutadoMlWorker = true;
+        const cacheMlWorker = await deps.obterImagemCacheLocalWorker({ marketplace: "mercadolivre", productId: produtoIdMlWorker });
+        if (cacheImagemMercadoLivreLocalValido(cacheMlWorker, produtoIdMlWorker)) {
+          cacheHitMlWorker = true;
+          imagemCanonicaFinal = {
+            ...imagemCanonicaFinal,
+            imagem: cacheMlWorker.imageUrl,
+            imagemCanonicaDuravel: cacheMlWorker.imageUrl,
+            imagemOrigem: "local_worker.ml_image_v1",
+            imagemStatus: "local_worker_ml_image",
+            produtoId: produtoIdMlWorker,
+            motivo: "cache_local_worker_ml_image",
+            cacheHit: true,
+            localWorkerProof: cacheMlWorker.proof
           };
+          imagemAtualGateMlWorker = normalizarValorImagem(cacheMlWorker.imageUrl);
+          imagemEnviavelGateMlWorker = true;
+          imagemStatusGateMlWorker = "local_worker_ml_image";
+          registrarGateMlWorker({ motivoTaskNaoCriada: "cache_valido" });
+        } else if (!taskCreatorDisponivelMlWorker) {
+          registrarGateMlWorker({ motivoTaskNaoCriada: "dependencia_indisponivel" });
+        } else if (!sourceUrlMlWorker) {
+          registrarGateMlWorker({ motivoTaskNaoCriada: "gate_nao_elegivel" });
+        } else {
+          const taskMlWorker = await deps.garantirImagemMercadoLivreLocalWorker({ productId: produtoIdMlWorker, sourceUrl: sourceUrlMlWorker });
+          if (taskMlWorker?.ok === true && taskMlWorker.task) {
+            registrarGateMlWorker({ decisao: "task_criada", taskId: taskMlWorker.task.id || null });
+            return {
+              ok: false,
+              retriavel: true,
+              motivo: "sem_imagem",
+              motivoDetalhe: "aguardando_enriquecimento_local",
+              localWorker: { capability: "ml_image_v1", productId: produtoIdMlWorker, task: taskMlWorker.task || null },
+              metadata: { localWorkerImageRetry: true, productId: produtoIdMlWorker }
+            };
+          }
+          registrarGateMlWorker({ motivoTaskNaoCriada: "erro_criacao_task" });
         }
       }
     }
@@ -5010,6 +5170,7 @@ module.exports = {
   extrairImagemPolycardMercadoLivreHtml,
   montarUrlImagemPolycardMl,
   validarImagemPolycardMercadoLivre,
+  montarDiagnosticoGateImagemMercadoLivreLocalWorker,
   materializarImagemRadarMirrorSeNecessario,
   aplicarComercialCapturadoClonador,
   aplicarPonteIntegridadeComercial,
