@@ -337,6 +337,7 @@ const {
   criarControladorFilaOperacionalV2,
   criarControladorCheckpointLegadoV2
 } = require("./modules/fila/fila-operacional-v2");
+const filaThumbnailService = require("./modules/fila/fila-thumbnail.service");
 const {
   HISTORICO_LEVE_INCREMENTAL_DIR,
   VISAO_FILA,
@@ -6790,6 +6791,39 @@ function configurarRotaPublicaMidiaSocial() {
 }
 
 configurarRotaPublicaMidiaSocial();
+
+function configurarRotaPublicaFilaThumbnails() {
+  let config;
+  try {
+    config = filaThumbnailService.configuracaoStorage();
+  } catch (erro) {
+    console.log("[FILA-THUMBNAIL-PUBLICA]", {
+      storageConfigurado: false,
+      motivo: erro?.message || "configuracao_invalida"
+    });
+    return;
+  }
+
+  app.use("/fila/thumbnails/public", express.static(config.raiz, {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+    immutable: true,
+    maxAge: "30d",
+    redirect: false,
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    }
+  }));
+
+  console.log("[FILA-THUMBNAIL-PUBLICA]", {
+    rota: "/fila/thumbnails/public",
+    storageConfigurado: true
+  });
+}
+
+configurarRotaPublicaFilaThumbnails();
 
 function configurarRotaPublicaIdentidadeVisualOfertas() {
   const raiz = path.resolve(storageIdentidadeVisualOfertas.raizPublica());

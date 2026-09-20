@@ -10,6 +10,7 @@ const {
   LEASE_JOBS_ATIVOS_PADRAO_MINUTOS
 } = require("../jobs.service");
 const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
+const filaThumbnailService = require("../../fila/fila-thumbnail.service");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -550,6 +551,7 @@ function categoriaArquivoAutoClean(dataDir, caminho, stats) {
   const rel = path.relative(dataDir, caminho).replace(/\\/g, "/").toLowerCase();
   const ext = path.extname(rel);
   if (isSessaoOuConfig(rel)) return "protegido_sensivel";
+  if (rel === "fila-thumbnails" || rel.startsWith("fila-thumbnails/")) return "fila_thumbnails_gerenciadas";
   if (rel.startsWith("clientes/") && rel.endsWith("/fila.json")) return "fila_json_arquivo";
   if (rel.startsWith("reset-esteiras/") || rel.startsWith("reset-operacional/") || rel.includes("snapshot")) return "snapshots_reset";
   if (EXT_LOG.has(ext) || rel.includes("log")) return "logs_persistidos";
@@ -597,7 +599,7 @@ function inventariarArquivosPorCategoria(opcoes = {}) {
     }
     if (!stats.isFile || !stats.isFile()) continue;
     const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
-    if (categoria === "protegido_sensivel" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
     if (!registrosPorOrigem[categoria] || registrosPorOrigem[categoria].length >= limite) continue;
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const registro = avaliarRegistroAutoClean({
@@ -1609,7 +1611,7 @@ function coletarArquivosElegiveisAutoClean(opcoes = {}) {
     if (!stats.isFile || !stats.isFile()) continue;
 
     const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
-    if (categoria === "protegido_sensivel" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const decisao = avaliarRegistroAutoClean({
       origem: categoria,
@@ -1656,6 +1658,29 @@ function executarArquivosAutoClean(opcoes = {}) {
   return resumo;
 }
 
+function executarFilaThumbnailsAutoClean(opcoes = {}) {
+  try {
+    return filaThumbnailService.limparOrfas({
+      ...opcoes,
+      dataDir: opcoes.dataDir || opcoes.politica?.dataDir || DEFAULT_DATA_DIR,
+      retentionMs: opcoes.thumbnailRetentionMs || filaThumbnailService.THUMBNAIL_RETENTION_MS
+    });
+  } catch (erro) {
+    return {
+      ok: false,
+      failOpen: true,
+      origem: "fila_thumbnails",
+      tipoRegistro: "fila_thumbnails",
+      motivo: "fila_thumbnails_limpeza_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      aplicouMudancas: false,
+      removidas: 0,
+      erros: 1,
+      bytesLiberados: 0
+    };
+  }
+}
+
 async function executarAutoCleanExecute(opcoes = {}) {
   const inicio = Date.now();
   const politica = criarPoliticaRetencao(opcoes);
@@ -1669,6 +1694,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
   }
   if (opcoes.incluirArquivos !== false) {
     etapas.push(executarFilaJsonAutoClean({ ...opcoes, politica }));
+    etapas.push(executarFilaThumbnailsAutoClean({ ...opcoes, politica }));
     etapas.push(executarArquivosAutoClean({ ...opcoes, politica }));
   }
 
@@ -1797,6 +1823,7 @@ module.exports = {
   executarLinksPostgresAutoClean,
   executarEventosBrutosPostgresAutoClean,
   executarFilaJsonAutoClean,
+  executarFilaThumbnailsAutoClean,
   executarArquivosAutoClean,
   executarCompactacaoFilaWorkspace,
   auditarOrphanWorkspaces,

@@ -27,6 +27,7 @@ const {
   reconciliarProjecaoHotDaFila
 } = require("./fila-read-model-publico");
 const manifestStateRepository = require("./fila-manifest-state.repository");
+const filaThumbnailService = require("./fila-thumbnail.service");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -3375,6 +3376,133 @@ function montarRegistroHistoricoLeve(clienteId = "admin", entradaOuItem = {}, de
   };
 }
 
+function ultimoRegistroHistoricoLevePorChave(clienteId = "admin", chave = "", deps = {}, fileInicial = "") {
+  const fsImpl = deps.fs || fs;
+  let encontrado = null;
+  const arquivos = arquivosHistoricoLeve(clienteId, deps);
+  const indiceInicial = fileInicial ? arquivos.indexOf(fileInicial) : -1;
+  const arquivosRelevantes = indiceInicial >= 0 ? arquivos.slice(indiceInicial) : arquivos;
+  for (const file of arquivosRelevantes) {
+    try {
+      const linhas = fsImpl.readFileSync(file, "utf8").split(/\r?\n/);
+      for (const linha of linhas) {
+        if (!linha.trim()) continue;
+        try {
+          const registro = JSON.parse(linha);
+          if (texto(registro?.chave) === texto(chave) && registro?.item && typeof registro.item === "object") {
+            encontrado = { file, registro };
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  return encontrado;
+}
+
+function persistirThumbRefHistoricoLeve(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const fsImpl = deps.fs || fs;
+  const chave = texto(dados.chave);
+  const thumbRef = texto(dados.thumbRef);
+  const imagemRefEsperada = texto(dados.imagemRefEsperada);
+  if (!chave || !thumbRef || !imagemRefEsperada) {
+    return { ok: false, motivo: "thumbnail_atualizacao_incompleta" };
+  }
+
+  const atual = ultimoRegistroHistoricoLevePorChave(cliente, chave, deps, texto(dados.fileEsperado));
+  if (!atual) return { ok: false, motivo: "thumbnail_snapshot_ausente" };
+  const itemAtual = atual.registro.item || {};
+  if (texto(itemAtual.imagemRef) !== imagemRefEsperada) {
+    return { ok: false, motivo: "thumbnail_snapshot_fonte_alterada" };
+  }
+  if (texto(itemAtual.thumbRef)) {
+    return {
+      ok: texto(itemAtual.thumbRef) === thumbRef,
+      idempotente: texto(itemAtual.thumbRef) === thumbRef,
+      motivo: texto(itemAtual.thumbRef) === thumbRef
+        ? "thumbnail_snapshot_ja_atualizado"
+        : "thumbnail_snapshot_mais_novo_preservado"
+    };
+  }
+
+  try {
+    const registroBase = {
+      ...atual.registro,
+      registradoEm: agoraIso(deps.agora || Date.now()),
+      item: { ...itemAtual, thumbRef }
+    };
+    delete registroBase.hashRegistro;
+    delete registroBase.timestampMs;
+    const hashRegistro = hashRegistroHistoricoLeve(registroBase);
+    const timestampMs = timestampHistoricoLeveRegistro(registroBase);
+    const registro = { ...registroBase, hashRegistro, timestampMs };
+    const linha = `${JSON.stringify(registro)}\n`;
+    fsImpl.appendFileSync(atual.file, linha, "utf8");
+    cacheHistoricoLeve.delete(chaveCacheHistoricoLeve(atual.file));
+    return {
+      ok: true,
+      idempotente: false,
+      motivo: "thumbnail_snapshot_atualizado",
+      chave,
+      file: atual.file,
+      bytesAppend: Buffer.byteLength(linha, "utf8")
+    };
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: "thumbnail_snapshot_atualizacao_falhou",
+      erro: erro?.message || "thumbnail_snapshot_atualizacao_falhou"
+    };
+  }
+}
+
+function agendarThumbnailHistoricoLeve(clienteId = "admin", entradaOuItem = {}, deps = {}) {
+  if (deps.gerarThumbnailHistorico === false) {
+    return { ok: true, agendada: false, motivo: "thumbnail_desativada" };
+  }
+  const cliente = clienteSeguro(clienteId);
+  const entrada = normalizarEntradaViva(entradaOuItem, entradaOuItem?.posicaoLegada || 0, deps.agora || Date.now());
+  const item = entrada.item || {};
+  const preparado = montarRegistroHistoricoLeve(cliente, entrada, deps);
+  const imagemRef = texto(preparado.itemLeve?.imagemRef);
+  const service = deps.thumbnailService || filaThumbnailService;
+  if (!service || typeof service.agendarThumbnail !== "function" || typeof service.imagemFontePublicavel !== "function") {
+    return { ok: false, agendada: false, motivo: "thumbnail_service_indisponivel" };
+  }
+  const publicavel = service.imagemFontePublicavel(item, imagemRef, deps.thumbnailDeps || deps);
+  if (!publicavel?.ok) {
+    return { ok: true, agendada: false, motivo: publicavel?.motivo || "imagem_nao_publicavel" };
+  }
+
+  return service.agendarThumbnail({
+    clienteId: cliente,
+    marketplace: preparado.itemLeve?.marketplace || item.marketplace || "",
+    identidade: preparado.itemLeve?.id || preparado.chave,
+    imagemRef,
+    item,
+    onSuccess(resultado) {
+      const persistencia = persistirThumbRefHistoricoLeve(cliente, {
+        chave: preparado.chave,
+        fileEsperado: preparado.file,
+        imagemRefEsperada: imagemRef,
+        thumbRef: resultado.thumbRef
+      }, deps);
+      if (persistencia.ok !== true) {
+        try {
+          (deps.logger?.log || console.log).call(deps.logger || console, TAG_TELEMETRIA, JSON.stringify({
+            versao: 1,
+            evento: "historico_thumbnail_persistencia",
+            clienteId: cliente,
+            ok: false,
+            motivo: persistencia.motivo || "thumbnail_snapshot_atualizacao_falhou"
+          }));
+        } catch {}
+      }
+      return persistencia;
+    }
+  }, deps.thumbnailDeps || deps);
+}
+
 function chaveCacheHistoricoLeve(file = "") {
   return texto(file);
 }
@@ -3966,12 +4094,23 @@ function registrarHistoricoLeveTerminaisLegado(clienteId = "admin", itens = [], 
     _terminalLegadoPosSave: true
   });
 
+  let thumbnailsAgendadas = 0;
+  if (batch.ok === true) {
+    for (const entrada of entradas) {
+      try {
+        const thumbnail = agendarThumbnailHistoricoLeve(cliente, entrada, { ...deps, agora });
+        if (thumbnail?.agendada === true) thumbnailsAgendadas += 1;
+      } catch {}
+    }
+  }
+
   return {
     ...batch,
     ok: batch.ok === true,
     clienteId: cliente,
     examinados,
     candidatos: entradas.length,
+    thumbnailsAgendadas,
     duracaoMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
   };
 }
@@ -4429,6 +4568,12 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
       agora: deps.agora || Date.now(),
       detalheArquivo: HISTORICO_INCREMENTAL_DIR
     });
+    let thumbnail = { ok: true, agendada: false, motivo: "historico_leve_nao_materializado" };
+    if (historicoLeve?.ok === true) {
+      try {
+        thumbnail = agendarThumbnailHistoricoLeve(cliente, entrada, deps);
+      } catch {}
+    }
     try {
       const stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
       cacheChavesHistorico.set(chaveCacheHistorico(file), {
@@ -4459,7 +4604,8 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
       chaveLegada,
       file,
       bytesAppend: Buffer.byteLength(linha, "utf8"),
-      historicoLeve
+      historicoLeve,
+      thumbnail
     };
   } catch (erro) {
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
@@ -5000,6 +5146,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     resetarEstadoProjecaoLeveParaTeste,
     appendHistoricoIncremental: (clienteId, entrada, deps = {}) => appendHistoricoIncremental(clienteId, entrada, { ...opcoes, ...deps }),
     appendHistoricoLeveIncremental: (clienteId, entrada, deps = {}) => appendHistoricoLeveIncremental(clienteId, entrada, { ...opcoes, ...deps }),
+    persistirThumbRefHistoricoLeve: (clienteId, dados, deps = {}) => persistirThumbRefHistoricoLeve(clienteId, dados, { ...opcoes, ...deps }),
+    agendarThumbnailHistoricoLeve: (clienteId, entrada, deps = {}) => agendarThumbnailHistoricoLeve(clienteId, entrada, { ...opcoes, ...deps }),
     registrarHistoricoLeveTerminalLegado: (clienteId, item, deps = {}) => registrarHistoricoLeveTerminalLegado(clienteId, item, { ...opcoes, ...deps }),
     registrarHistoricoLeveTerminaisLegado: (clienteId, itens, deps = {}) => registrarHistoricoLeveTerminaisLegado(clienteId, itens, { ...opcoes, ...deps }),
     sincronizarHistoricoLeveLegado: (clienteId, filaCliente, deps = {}) => sincronizarHistoricoLeveLegado(clienteId, filaCliente, { ...opcoes, ...deps }),
@@ -5064,6 +5212,8 @@ module.exports = {
   projectionReadyProjecaoHotPublica,
   resetarEstadoProjecaoLeveParaTeste,
   appendHistoricoLeveIncremental,
+  persistirThumbRefHistoricoLeve,
+  agendarThumbnailHistoricoLeve,
   registrarHistoricoLeveTerminalLegado,
   registrarHistoricoLeveTerminaisLegado,
   sincronizarHistoricoLeveLegado,
