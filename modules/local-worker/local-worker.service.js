@@ -13,6 +13,9 @@ const MAGALU_CAPABILITY = "magalu_image_v1";
 const MAGALU_TASK_TYPE = "imagem_oficial";
 const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
 const MAGALU_OPPORTUNITY_TASK_TYPE = "oportunidade_oficial";
+const ML_CAPABILITY = "ml_image_v1";
+const ML_TASK_TYPE = "imagem_oficial";
+const ML_RESULT_TTL_MS = 10 * 60 * 1000;
 const MAGALU_OPPORTUNITY_PRODUCT_ID = "ofertasdodiamundo";
 const MAGALU_OPPORTUNITY_URL = "https://www.magazineluiza.com.br/selecao/ofertasdodiamundo/";
 const MAGALU_OPPORTUNITY_TTL_MS = 10 * 60 * 1000;
@@ -36,6 +39,31 @@ function slugTecnicoMagalu(valor) {
 function hostnameMlcdnValido(valor = "") {
   const host = texto(valor).toLowerCase().replace(/\.$/, "");
   return host === "mlcdn.com.br" || host.endsWith(".mlcdn.com.br");
+}
+
+function hostMercadoLivreValido(valor = "") {
+  try {
+    const host = new URL(texto(valor)).hostname.toLowerCase().replace(/\.$/, "");
+    return host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br") || host === "mercadolibre.com" || host.endsWith(".mercadolibre.com");
+  } catch (_) { return false; }
+}
+
+function urlMlstaticValida(valor = "") {
+  try {
+    const url = new URL(texto(valor));
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    return url.protocol === "https:" && (host === "mlstatic.com" || host.endsWith(".mlstatic.com")) && url.pathname !== "/";
+  } catch (_) { return false; }
+}
+
+function urlMercadoLivreProdutoValida(valor = "", productId = "") {
+  try {
+    const url = new URL(texto(valor));
+    if (url.protocol !== "https:" || !hostMercadoLivreValido(url.toString())) return false;
+    const esperado = texto(productId).toUpperCase();
+    const observado = url.pathname.match(/(?:^|[^A-Z0-9])MLB-?(\d+)(?:[^0-9]|$)/i)?.[1];
+    return Boolean(esperado && observado && `MLB${observado}`.toUpperCase() === esperado);
+  } catch (_) { return false; }
 }
 
 function urlOportunidadeMagaluValida(valor = "") {
@@ -93,7 +121,7 @@ function criarLocalWorkerService(opcoes = {}) {
   function validarWorker(worker, capability = MAGALU_CAPABILITY) {
     if (!worker?.ok || worker.workerType !== "dedicated") throw erro("worker_nao_autorizado", 403);
     if (!dedicatedOwnerIds.includes(texto(worker.ownerId))) throw erro("worker_dedicated_nao_autorizado", 403);
-    if (!capacidadesValidas(worker.capabilities).includes(capability)) throw erro("capability_nao_autorizada", 403);
+    if (texto(capability) && !capacidadesValidas(worker.capabilities).includes(capability)) throw erro("capability_nao_autorizada", 403);
   }
 
   async function claim({ worker, capabilities = [] } = {}) {
@@ -153,8 +181,44 @@ function criarLocalWorkerService(opcoes = {}) {
     };
   }
 
+  function validarResultadoMercadoLivre({ task, capability, marketplace, productId, imagemOficialUrl, provaTecnica, finalUrl, checkedAt } = {}) {
+    if (!task) throw erro("task_inexistente", 404);
+    if (task.marketplace !== "mercadolivre" || texto(marketplace).toLowerCase() !== "mercadolivre") throw erro("marketplace_invalido");
+    if (task.type !== ML_TASK_TYPE || task.capability !== ML_CAPABILITY || texto(capability) !== ML_CAPABILITY) throw erro("capability_invalida");
+    if (!/^MLB\d+$/i.test(texto(task.productId)) || texto(productId).toUpperCase() !== texto(task.productId).toUpperCase()) throw erro("product_id_divergente");
+    const prova = provaTecnica && typeof provaTecnica === "object" ? provaTecnica : {};
+    if (texto(prova.provenance) !== "local_worker.ml_image_v1" || texto(prova.source) !== "local_first_party") throw erro("prova_origem_invalida");
+    if (texto(prova.productIdObserved).toUpperCase() !== texto(task.productId).toUpperCase() || prova.sameProductObject !== true) throw erro("prova_produto_nao_confirmada");
+    let final;
+    try { final = new URL(texto(finalUrl || prova.finalUrl)); } catch (_) { throw erro("prova_final_url_invalida"); }
+    if (!urlMercadoLivreProdutoValida(final.toString(), task.productId)) throw erro("prova_final_url_invalida");
+    const instante = new Date(checkedAt || prova.checkedAt);
+    const agoraMs = agora().getTime();
+    if (!Number.isFinite(instante.getTime()) || instante.getTime() > agoraMs + 30_000 || agoraMs - instante.getTime() >= ML_RESULT_TTL_MS) throw erro("resultado_ml_stale");
+    const urlImagem = texto(imagemOficialUrl);
+    if (!urlMlstaticValida(urlImagem)) throw erro("imagem_host_invalido");
+    return { productId: texto(task.productId).toUpperCase(), imageUrl: urlImagem, finalUrl: final.toString(), checkedAt: instante.toISOString(), prova };
+  }
+
+  async function validarImagemMercadoLivreHttp(url = "") {
+    if (typeof fetchFn !== "function") throw erro("ml_imagem_fetch_indisponivel");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), imageTimeoutMs);
+    let response = null;
+    try {
+      response = await fetchFn(url, { redirect: "follow", signal: controller.signal });
+      const finalUrl = new URL(response.url || url);
+      const contentType = texto(response.headers?.get?.("content-type") || "").toLowerCase().split(";", 1)[0];
+      if (!response.ok || !urlMlstaticValida(finalUrl.toString()) || !contentType.startsWith("image/")) throw erro("ml_imagem_http_nao_confirmada");
+      return { urlFinal: finalUrl.toString(), statusHttp: response.status, contentType };
+    } finally {
+      clearTimeout(timer);
+      try { await response?.body?.cancel?.(); } catch (_) {}
+    }
+  }
+
   async function resultado({ worker, taskId, leaseToken, marketplace, productId, imagemOficialUrl, provaTecnica, capability, accessible, indicatorFound, finalUrl, checkedAt } = {}) {
-    validarWorker(worker);
+    validarWorker(worker, "");
     const task = await repo.obterTask(taskId);
     if (!task) throw erro("task_inexistente", 404);
     validarWorker(worker, task.capability);
@@ -163,6 +227,31 @@ function criarLocalWorkerService(opcoes = {}) {
       const conclusao = await repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata });
       if (conclusao?.ok && onOpportunityResult) onOpportunityResult(metadata);
       return conclusao;
+    }
+    if (task.capability === ML_CAPABILITY) {
+      const validado = validarResultadoMercadoLivre({ task, capability, marketplace, productId, imagemOficialUrl, provaTecnica, finalUrl, checkedAt });
+      const http = await validarImagemMercadoLivreHttp(validado.imageUrl);
+      return repo.completar({
+        taskId,
+        workerId: worker.workerId,
+        leaseToken,
+        imageUrl: http.urlFinal,
+        proof: {
+          ...validado.prova,
+          capability: ML_CAPABILITY,
+          provenance: "local_worker.ml_image_v1",
+          productId: validado.productId,
+          productIdObserved: validado.productId,
+          sameProductObject: true,
+          finalUrl: validado.finalUrl,
+          checkedAt: validado.checkedAt,
+          imagemOficialUrl: http.urlFinal,
+          statusHttp: http.statusHttp,
+          contentType: http.contentType,
+          hostFinal: new URL(http.urlFinal).hostname
+        },
+        metadata: { origem: "local_first_party", capability: ML_CAPABILITY, statusHttp: http.statusHttp, contentType: http.contentType, finalUrl: validado.finalUrl, checkedAt: validado.checkedAt }
+      });
     }
     const validado = validarResultadoPublico({ task, marketplace, productId, imagemOficialUrl, provaTecnica });
     const http = await validarImagemOficialHttp(validado.url, { fetchFn, timeoutMs: imageTimeoutMs });
@@ -189,7 +278,7 @@ function criarLocalWorkerService(opcoes = {}) {
   }
 
   async function falha({ worker, taskId, leaseToken, motivo, metadata } = {}) {
-    validarWorker(worker);
+    validarWorker(worker, "");
     const task = await repo.obterTask(taskId);
     if (!task) throw erro("task_inexistente", 404);
     validarWorker(worker, task.capability);
@@ -221,6 +310,22 @@ function criarLocalWorkerService(opcoes = {}) {
       idempotencyKey: `magalu:${texto(productId)}:${MAGALU_TASK_TYPE}`,
       maxAttempts: 3,
       ttlMs: 15 * 60 * 1000
+    });
+  }
+
+  async function garantirImagemMercadoLivre({ productId, sourceUrl = "" } = {}) {
+    const pid = texto(productId).toUpperCase();
+    if (!/^MLB\d+$/.test(pid) || !urlMercadoLivreProdutoValida(sourceUrl, pid)) return { ok: false, motivo: "task_ml_invalida" };
+    return repo.garantirTask({
+      type: ML_TASK_TYPE,
+      marketplace: "mercadolivre",
+      productId: pid,
+      sourceUrl,
+      capability: ML_CAPABILITY,
+      idempotencyKey: `mercadolivre:${pid}:${ML_TASK_TYPE}`,
+      maxAttempts: 3,
+      ttlMs: 15 * 60 * 1000,
+      reutilizarCompleted: false
     });
   }
 
@@ -274,7 +379,7 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function status() { return repo.status(); }
 
-  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, obterTaskImagemMagalu, obterImagemCache, garantirOportunidadeMagalu, obterOportunidadeMagaluRecente, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE };
+  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, garantirImagemMercadoLivre, obterTaskImagemMagalu, obterImagemCache, garantirOportunidadeMagalu, obterOportunidadeMagaluRecente, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, ML_CAPABILITY, ML_TASK_TYPE };
 }
 
-module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, MAGALU_OPPORTUNITY_PRODUCT_ID, MAGALU_OPPORTUNITY_URL, MAGALU_OPPORTUNITY_TTL_MS, urlOportunidadeMagaluValida };
+module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, MAGALU_OPPORTUNITY_PRODUCT_ID, MAGALU_OPPORTUNITY_URL, MAGALU_OPPORTUNITY_TTL_MS, ML_CAPABILITY, ML_TASK_TYPE, urlOportunidadeMagaluValida };

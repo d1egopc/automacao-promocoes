@@ -176,11 +176,15 @@ function temProvaImagemOficialMercadoLivre(valor = {}) {
   ].filter(Boolean);
   const pictureId = String(item.pictureId || metadata.pictureId || cache.pictureId || "").trim();
   const origemOficial = /og:image\.picture_id|mercadolivre_og_image/i.test(origens);
+  const localWorkerMl = /local_worker\.ml_image_v1/i.test(origens)
+    && metadata.localWorkerImageProof?.provenance === "local_worker.ml_image_v1"
+    && metadata.localWorkerImageProof?.sameProductObject === true
+    && String(metadata.localWorkerImageProof?.productIdObserved || "").trim() !== "";
   const semProvenienciaRadar = !/radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/i.test(origens);
   const urlOficial = urls.some(urlMlstaticOficial);
   const pictureIdCompativel = !pictureId || urls.some((url) => String(url).includes(pictureId));
 
-  return origemOficial && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
+  return (origemOficial || localWorkerMl) && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
 }
 
 function motivoNaoPublicavelDaImagem(valor = {}) {

@@ -1037,6 +1037,32 @@ function normalizarImagemMercadoLivre(valor = "") {
   }
 }
 
+function imagemMlstaticHttpsLocal(valor = "") {
+  try {
+    const url = new URL(normalizarTexto(valor));
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    return url.protocol === "https:" && (host === "mlstatic.com" || host.endsWith(".mlstatic.com")) && url.pathname !== "/";
+  } catch (_) { return false; }
+}
+
+const ML_WORKER_RESULT_TTL_MS = 10 * 60 * 1000;
+
+function cacheImagemMercadoLivreLocalValido(cache = {}, produtoId = "") {
+  const prova = cache?.proof && typeof cache.proof === "object" ? cache.proof : {};
+  const checkedAtMs = Date.parse(prova.checkedAt || cache.validatedAt || "");
+  const agoraMs = Date.now();
+  return normalizarTexto(cache?.marketplace).toLowerCase() === "mercadolivre"
+    && normalizarTexto(cache?.productId).toUpperCase() === normalizarTexto(produtoId).toUpperCase()
+    && imagemMlstaticHttpsLocal(cache?.imageUrl)
+    && normalizarTexto(prova.provenance) === "local_worker.ml_image_v1"
+    && normalizarTexto(prova.productIdObserved).toUpperCase() === normalizarTexto(produtoId).toUpperCase()
+    && prova.sameProductObject === true
+    && Number.isFinite(checkedAtMs)
+    && checkedAtMs <= agoraMs + 30_000
+    && agoraMs - checkedAtMs < ML_WORKER_RESULT_TTL_MS
+    && (!cache.expiresAt || Date.parse(cache.expiresAt) > Date.now());
+}
+
 function decodificarPayloadMercadoLivre(valor = "") {
   return htmlDecode(String(valor || ""))
     .replace(/\\u002F/gi, "/")
@@ -4055,7 +4081,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }
   }
 
-  const imagemCanonicaFinal = await resolverImagemCanonicaFinalEvento({
+  let imagemCanonicaFinal = await resolverImagemCanonicaFinalEvento({
     eventoId: job.evento_id,
     marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
     linksExtraidos: evento.links_extraidos || [],
@@ -4068,7 +4094,53 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     job,
     link
   });
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre" && !imagemCanonicaFinal.imagemCanonicaDuravel) {
+    const identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
+    const produtoIdMlWorker = normalizarTexto(identidadeMlWorker.produtoIdDetectado || "").toUpperCase();
+    const sourceUrlMlWorker = normalizarTexto(oferta.linkExpandido || oferta.linkOriginal || imagemCanonicaFinal.linkResolvido || "");
+    if (/^MLB\d+$/.test(produtoIdMlWorker) && typeof deps.obterImagemCacheLocalWorker === "function") {
+      const cacheMlWorker = await deps.obterImagemCacheLocalWorker({ marketplace: "mercadolivre", productId: produtoIdMlWorker });
+      if (cacheImagemMercadoLivreLocalValido(cacheMlWorker, produtoIdMlWorker)) {
+        imagemCanonicaFinal = {
+          ...imagemCanonicaFinal,
+          imagem: cacheMlWorker.imageUrl,
+          imagemCanonicaDuravel: cacheMlWorker.imageUrl,
+          imagemOrigem: "local_worker.ml_image_v1",
+          imagemStatus: "local_worker_ml_image",
+          produtoId: produtoIdMlWorker,
+          motivo: "cache_local_worker_ml_image",
+          cacheHit: true,
+          localWorkerProof: cacheMlWorker.proof
+        };
+      } else if (typeof deps.garantirImagemMercadoLivreLocalWorker === "function" && sourceUrlMlWorker) {
+        const taskMlWorker = await deps.garantirImagemMercadoLivreLocalWorker({ productId: produtoIdMlWorker, sourceUrl: sourceUrlMlWorker });
+        if (taskMlWorker?.ok === true && taskMlWorker.task) {
+          return {
+            ok: false,
+            retriavel: true,
+            motivo: "sem_imagem",
+            motivoDetalhe: "aguardando_enriquecimento_local",
+            localWorker: { capability: "ml_image_v1", productId: produtoIdMlWorker, task: taskMlWorker.task || null },
+            metadata: { localWorkerImageRetry: true, productId: produtoIdMlWorker }
+          };
+        }
+      }
+    }
+  }
   oferta = aplicarImagemCanonicaFinalOferta(oferta, imagemCanonicaFinal);
+  if (imagemCanonicaFinal.imagemOrigem === "local_worker.ml_image_v1") {
+    oferta = {
+      ...oferta,
+      imagemEnviavel: true,
+      imagemOrigem: "local_worker.ml_image_v1",
+      metadata: {
+        ...objetoSeguro(oferta.metadata),
+        imagemOrigem: "local_worker.ml_image_v1",
+        imagemBaseOrigem: "local_worker.ml_image_v1",
+        localWorkerImageProof: imagemCanonicaFinal.localWorkerProof || null
+      }
+    };
+  }
   if (imagemCanonicaFinal.imagemCanonicaDuravel) {
     imagemResolucaoEngine = {
       imagem: imagemCanonicaFinal.imagemCanonicaDuravel,
@@ -4859,6 +4931,52 @@ async function agendarRetryImagemMagaluLocal(job = {}, detalhes = {}, opcoes = {
   return { ok: true, ...plano, estadoRetry };
 }
 
+function planoRetryImagemMercadoLivreLocal(job = {}, agora = new Date()) {
+  const tentativasAnteriores = Number(job?.metadata?.localWorkerImageRetry?.tentativas || 0);
+  const tentativa = Number.isInteger(tentativasAnteriores) && tentativasAnteriores >= 0 ? tentativasAnteriores + 1 : 1;
+  const atrasoMs = [30_000, 120_000, 300_000][tentativa - 1] || null;
+  const dataBase = agora instanceof Date ? agora : new Date(agora);
+  if (!Number.isFinite(dataBase.getTime()) || !atrasoMs) return { reagendar: false, tentativa, tentativasAnteriores };
+  const proximaTentativaEm = new Date(dataBase.getTime() + atrasoMs);
+  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime() };
+}
+
+async function agendarRetryImagemMercadoLivreLocal(job = {}, detalhes = {}, opcoes = {}) {
+  const plano = planoRetryImagemMercadoLivreLocal(job, opcoes.agora || new Date());
+  if (!plano.reagendar) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
+  const estadoRetry = {
+    tentativas: plano.tentativa,
+    motivo: "sem_imagem_local_worker_pendente",
+    ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),
+    proximaTentativaEm: plano.proximaTentativaEm,
+    proximaTentativaEmMs: plano.proximaTentativaEmMs,
+    ...(detalhes.productId ? { productId: detalhes.productId } : {}),
+    ...(detalhes.capability ? { capability: detalhes.capability } : {})
+  };
+  const resultado = await queryEngine(
+    `UPDATE engine_jobs_cliente
+        SET status = 'pronto_para_importar',
+            tentativas = COALESCE(tentativas, 0) + 1,
+            motivo_final = 'aguardando_enriquecimento_local',
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('localWorkerImageRetry', $2::jsonb),
+            atualizado_em = NOW()
+      WHERE id = $1 AND status = 'importando'
+      RETURNING id, status, tentativas, motivo_final, metadata`,
+    [job.id, JSON.stringify(estadoRetry)]
+  );
+  if (!resultado.ok) return { ...resultado, ...plano };
+  if (resultado.resultado.rowCount === 0) return { ...resultado, ok: false, ignorado: true, motivo: "job_nao_importando", ...plano };
+  await registrarEtapaImportacao(job.id, "importacao_retry_agendado", "pendente", "aguardando_enriquecimento_local", {
+    marketplace: "mercadolivre",
+    tentativa: plano.tentativa,
+    atrasoMs: plano.atrasoMs,
+    proximaTentativaEm: plano.proximaTentativaEm,
+    productId: detalhes.productId || "",
+    capability: detalhes.capability || "ml_image_v1"
+  });
+  return { ok: true, ...plano, estadoRetry };
+}
+
 module.exports = {
   buscarJobsProntos,
   separarResultadoJobsProntos,
@@ -4876,6 +4994,8 @@ module.exports = {
   agendarRetryAfiliacaoShopee,
   planoRetryImagemMagaluLocal,
   agendarRetryImagemMagaluLocal,
+  planoRetryImagemMercadoLivreLocal,
+  agendarRetryImagemMercadoLivreLocal,
   normalizarOfertaImportada,
   avaliarGateQualidadeAliExpressImagem,
   avaliarGateIdentidadeMercadoLivre,

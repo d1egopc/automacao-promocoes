@@ -9,7 +9,8 @@ const {
   marcarJobRetidaV2,
   marcarJobErroImportacao,
   agendarRetryAfiliacaoShopee,
-  agendarRetryImagemMagaluLocal
+  agendarRetryImagemMagaluLocal,
+  agendarRetryImagemMercadoLivreLocal
 } = require("./importer.service");
 const {
   limitarJobs,
@@ -199,6 +200,23 @@ async function tratarFalhaRetriavelMagalu(job = {}, resultadoAdapter = {}, marke
   return finalizarErro(job, "falha_agendar_retry_imagem_magalu", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
 }
 
+async function tratarFalhaRetriavelMercadoLivre(job = {}, resultado = {}, marketplace, resumo, contexto = {}) {
+  if (marketplace !== "mercadolivre" || resultado?.retriavel !== true || resultado?.motivo !== "sem_imagem" || resultado?.motivoDetalhe !== "aguardando_enriquecimento_local") return null;
+  const agendar = typeof contexto?.deps?.agendarRetryImagemMercadoLivreLocal === "function"
+    ? contexto.deps.agendarRetryImagemMercadoLivreLocal
+    : agendarRetryImagemMercadoLivreLocal;
+  const agendamento = await agendar(job, resultado.localWorker || {});
+  if (agendamento?.ok) {
+    if (resumo) {
+      resumo.retentativas = (resumo.retentativas || 0) + 1;
+      motivoAdicionar(resumo, "aguardando_enriquecimento_local");
+    }
+    return { ok: false, retriavel: true, reagendado: true, motivo: "aguardando_enriquecimento_local", tentativa: agendamento.tentativa };
+  }
+  if (agendamento?.esgotado) return finalizarErro(job, "sem_imagem", { marketplace, tentativasRetry: agendamento.tentativa }, resumo, contexto);
+  return finalizarErro(job, "falha_agendar_retry_imagem_mercadolivre", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
+}
+
 async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   let marketplace = marketplaceJob(job);
   logEngineImporterJob({ jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id, marketplace });
@@ -359,6 +377,8 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
   });
 
   if (!gravacao.ok) {
+    const retryMercadoLivre = await tratarFalhaRetriavelMercadoLivre(job, gravacao, marketplace, resumo, contexto);
+    if (retryMercadoLivre) return retryMercadoLivre;
     coberturaRadar.registrar("engine_importer_erro", {
       ...contextoCoberturaImporter(job, { links: linksResultado.links }),
       decisao: "erro",

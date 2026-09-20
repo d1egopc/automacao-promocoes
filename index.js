@@ -63,7 +63,8 @@ const {
   queryEngine
 } = require("./modules/engine/database");
 const {
-  agendarRetryImagemMagaluLocal
+  agendarRetryImagemMagaluLocal,
+  agendarRetryImagemMercadoLivreLocal
 } = require("./modules/engine/importer/importer.service");
 
 const {
@@ -15035,6 +15036,9 @@ app.post("/engine/importar-prontos", async (req, res) => {
         resolverLinkOriginalRadar,
         importarProdutoKabumViaAwin,
         gerarDeepLinkAwin,
+        obterImagemCacheLocalWorker: localWorkerService.obterImagemCache,
+        garantirImagemMercadoLivreLocalWorker: localWorkerService.garantirImagemMercadoLivre,
+        agendarRetryImagemMercadoLivreLocal,
         observarHistoricoClonadorTerminal,
         observarHistoricoClonadorOferta
       }
@@ -31940,6 +31944,8 @@ initEngineDatabase()
         obterTaskImagemMagaluLocalWorker: localWorkerService.obterTaskImagemMagalu,
         garantirImagemMagaluLocalWorker: localWorkerService.garantirImagemMagalu,
         agendarRetryImagemMagaluLocal,
+        garantirImagemMercadoLivreLocalWorker: localWorkerService.garantirImagemMercadoLivre,
+        agendarRetryImagemMercadoLivreLocal,
         observarHistoricoClonadorTerminal,
         observarHistoricoClonadorOferta
       }),
