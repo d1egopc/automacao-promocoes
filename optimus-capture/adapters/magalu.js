@@ -115,6 +115,63 @@
     return unicos;
   }
 
+  function blocosPorTestId(html = "", testIds = []) {
+    const ids = new Set(testIds.map((item) => texto(item)));
+    const tokens = [];
+    const re = /<!--[\s\S]*?-->|<\/?([a-z][\w:-]*)\b([^>]*)>/gi;
+    let match;
+    while ((match = re.exec(String(html || "")))) {
+      if (!match[1]) continue;
+      const bruto = match[0];
+      tokens.push({
+        tag: match[1].toLowerCase(),
+        atributos: String(match[2] || ""),
+        inicio: match.index,
+        fim: re.lastIndex,
+        fechamento: /^<\//.test(bruto),
+        autoFechada: /\/\s*>$/.test(bruto)
+      });
+    }
+
+    const blocos = [];
+    for (let indice = 0; indice < tokens.length; indice += 1) {
+      const abertura = tokens[indice];
+      if (abertura.fechamento || abertura.autoFechada) continue;
+      const id = (abertura.atributos.match(/\bdata-testid\s*=\s*["']([^"']+)["']/i) || [])[1] || "";
+      if (!ids.has(id)) continue;
+
+      let profundidade = 1;
+      for (let proximo = indice + 1; proximo < tokens.length; proximo += 1) {
+        const token = tokens[proximo];
+        if (token.tag !== abertura.tag) continue;
+        if (!token.fechamento && !token.autoFechada) profundidade += 1;
+        if (token.fechamento) profundidade -= 1;
+        if (profundidade !== 0) continue;
+        const textoBloco = textoVisivel(String(html || "").slice(abertura.fim, token.inicio));
+        if (textoBloco) blocos.push({ id, atributos: abertura.atributos, texto: textoBloco, tamanho: textoBloco.length });
+        break;
+      }
+    }
+
+    blocos.sort((a, b) => a.tamanho - b.tamanho);
+    const unicos = [];
+    for (const bloco of blocos) {
+      if (unicos.some((item) => item.texto === bloco.texto || item.texto.includes(bloco.texto))) continue;
+      unicos.push(bloco);
+    }
+    return unicos;
+  }
+
+  function blocosPrecoEstruturados(html = "") {
+    return blocosPorTestId(html, ["product-price", "price-default"]);
+  }
+
+  function blocosPrecoPara(html = "", padrao) {
+    const estruturados = blocosPrecoEstruturados(html);
+    const relevantes = estruturados.filter((bloco) => padrao.test(bloco.texto));
+    return relevantes.length ? relevantes : blocosSemanticos(html, padrao);
+  }
+
   function valorPixEstruturado(produto = {}, html = "") {
     const oferta = ofertaJsonLd(produto);
     const especificacoes = Array.isArray(oferta.priceSpecification)
@@ -132,7 +189,7 @@
         if (valor) return valor;
       }
     }
-    const blocos = blocosSemanticos(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
+    const blocos = blocosPrecoPara(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
     for (const bloco of blocos) {
       const valor = valorMonetarioTexto(bloco.texto);
       if (valor) return valor;
@@ -155,7 +212,7 @@
       const valor = valorMonetarioTexto(especificacao?.price ?? especificacao?.value ?? especificacao?.priceValue);
       if (valor && /\bpix\b/i.test(semantica)) return "no Pix";
     }
-    const blocos = blocosSemanticos(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
+    const blocos = blocosPrecoPara(html, /pix|a[ -_]?vista|pre[cç]o[ -_]?pix|price[ -_]?pix/i);
     return blocos.some((bloco) => valorMonetarioTexto(bloco.texto) && /\bpix\b/i.test(bloco.texto))
       ? "no Pix"
       : "";
@@ -189,7 +246,10 @@
   }
 
   function parcelamentoEstruturado(html = "") {
-    const blocos = blocosSemanticos(html, /parcel|installment|payment/i);
+    const blocosEstruturados = blocosPrecoEstruturados(html);
+    const blocos = blocosEstruturados.length
+      ? blocosEstruturados
+      : blocosSemanticos(html, /parcel|installment|payment/i);
     for (const bloco of blocos) {
       const match = bloco.texto.match(/\b\d{1,2}x\s+(?:de\s+)?R\$\s*[0-9.]+,[0-9]{2}[^.]{0,80}/i);
       if (match) return limparTexto(match[0]);

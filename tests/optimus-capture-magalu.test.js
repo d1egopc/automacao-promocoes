@@ -108,6 +108,7 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
   assert.strictEqual(casoReal.condicaoPix, "no Pix");
   assert.strictEqual(casoReal.precoAnterior, null, "total no cartao nao pode virar preco anterior");
   assert.strictEqual(casoReal.parcelamento, "2x de R$ 52,58 sem juros");
+  assert.strictEqual(casoReal.cupom, "", "productId 226803000 nao e cupom");
 
   const casoRealListPrice = magalu.capturarMagaluDeHtml(
     `<script type="application/ld+json">${JSON.stringify({
@@ -126,6 +127,32 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
     "https://www.magazineluiza.com.br/escova/p/226803000/"
   );
   assert.strictEqual(deReal.precoAnterior, 129.9, "DE explicito continua sendo aceito");
+
+  const madesaHtml = `<script type="application/ld+json">${JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: "Conjunto Sala de Jantar Madesa",
+    sku: "gec5d601ec",
+    image: ["https://a-static.mlcdn.com.br/madesa.jpg"],
+    offers: { price: "713.99" }
+  })}</script><div data-testid="product-price-container"><div data-testid="product-price"><div data-testid="price-default" class="grid [grid-template-areas:original_original_discount_discount_final_method_installment_installment]"><div><p data-testid="price-value">R$ 713,99</p></div><div>R$ 713,99 no Pix 15% OFF</div><div>Ou R$ 839,99 em 10x de R$ 84,00 sem juros</div></div></div><div>R$ 10 OFF Copiar Copie o cupom e cole na revisão. Válido até 11 de out.</div></div>`;
+  const madesa = magalu.capturarMagaluDeHtml(madesaHtml, "https://www.magazineluiza.com.br/conjunto-sala/p/gec5d601ec/mo/ms4j/?seller_id=madesamoveis");
+  assert.strictEqual(madesa.produtoId, "gec5d601ec");
+  assert.strictEqual(madesa.sku, "gec5d601ec");
+  assert.strictEqual(madesa.precoAtual, 713.99);
+  assert.strictEqual(madesa.precoPix, 713.99);
+  assert.strictEqual(madesa.condicaoPrecoPor, "pix");
+  assert.strictEqual(madesa.condicaoPix, "no Pix");
+  assert.strictEqual(madesa.precoAnterior, null, "total alternativo nao e preco anterior");
+  assert.strictEqual(madesa.parcelamento, "10x de R$ 84,00 sem juros");
+  assert.strictEqual(madesa.cupom, "", "valor de desconto sem codigo nao e cupom");
+  assert.strictEqual(madesa.imagem, "https://a-static.mlcdn.com.br/madesa.jpg");
+
+  const cupomExplicito = magalu.capturarMagaluDeHtml(
+    `<script type="application/ld+json">${JSON.stringify({ ...casoRealMagalu, sku: "cupom-magalu" })}</script><div>Código do cupom: MAGALU10</div>`,
+    "https://www.magazineluiza.com.br/escova/p/cupom-magalu/"
+  );
+  assert.strictEqual(cupomExplicito.cupom, "MAGALU10");
 
   const payloadCasoReal = contrato.payloadPreview(casoReal);
   assert.strictEqual(payloadCasoReal.precoAnterior, "", "preview nao deve enviar DE inventado");
