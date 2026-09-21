@@ -70,25 +70,89 @@ async function testarConversorNuncaDevolveOriginal() {
   assert.strictEqual(await gerar(original, CREDENCIAIS, { clienteId: "workspace_a" }), "");
 }
 
-async function testarAppConvertidoPcFalhouBloqueiaOferta() {
+async function executarCenarioAppPc({ appStatus, pcStatus, jobId }) {
   const links = linksAppPc();
-  const resultado = await importarAliExpressEngine({
-    job: { id: 1, evento_id: 2, cliente_id: "workspace_a", marketplace: "aliexpress" },
+  return importarAliExpressEngine({
+    job: { id: jobId, evento_id: jobId + 1, cliente_id: "workspace_a", marketplace: "aliexpress" },
     evento: { marketplace: "aliexpress", texto_original: "Produto\nAPP\nhttps://a.aliexpress.com/_appOriginal\nPC\nhttps://a.aliexpress.com/_pcOriginal" },
     links,
     deps: {
       getIntegracaoCliente: () => ({ credenciais: CREDENCIAIS }),
       importarAliExpress: async (url, config = {}) => {
         const papel = config.contextoEngine?.papelLink || "link_pc";
-        const falhou = papel === "link_pc";
-        return produto({ url, papel, status: falhou ? "falhou" : "convertida" });
+        const status = papel === "link_pc" ? pcStatus : appStatus;
+        return produto({ url, papel, status });
       }
     }
   });
+}
+
+async function testarPcFalhaAppConverte() {
+  const resultado = await executarCenarioAppPc({ appStatus: "convertida", pcStatus: "falhou", jobId: 1 });
 
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
-  assert.strictEqual(resultado.linkAfiliado, undefined);
+  const app = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const pc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(app.renderizavel, true);
+  assert.strictEqual(app.conversaoStatus, "convertida");
+  assert.strictEqual(pc.renderizavel, false);
+  assert.strictEqual(pc.conversaoStatus, "falhou");
+  assert.strictEqual(app.papelLink, "link_app");
+  assert.strictEqual(pc.papelLink, "link_pc");
+  assert.deepStrictEqual(resultado.metadata.linksFalhosWorkspace.map(item => item.papelLink), ["link_pc"]);
+  assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress({ marketplace: "aliexpress", metadata: resultado.metadata }, {
+    clienteId: "workspace_a",
+    credenciais: CREDENCIAIS
+  }).ok, false, "APP convertido nao autoriza publicar sem o PC capturado");
+  assert.strictEqual(app.urlOriginal, "https://a.aliexpress.com/_appOriginal");
+  assert.strictEqual(pc.urlOriginal, "https://a.aliexpress.com/_pcOriginal");
+  assert.strictEqual(pc.urlAfiliadaWorkspace, "", "nunca reutilizar o PC capturado da fonte");
+}
+
+async function testarAppFalhaPcConverte() {
+  const resultado = await executarCenarioAppPc({ appStatus: "falhou", pcStatus: "convertida", jobId: 11 });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+  const app = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const pc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(app.renderizavel, false);
+  assert.strictEqual(pc.renderizavel, true);
+  assert.strictEqual(pc.conversaoStatus, "convertida");
+  assert.strictEqual(app.papelLink, "link_app");
+  assert.strictEqual(pc.papelLink, "link_pc");
+  assert.deepStrictEqual(resultado.metadata.linksFalhosWorkspace.map(item => item.papelLink), ["link_app"]);
+  assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress({ marketplace: "aliexpress", metadata: resultado.metadata }, {
+    clienteId: "workspace_a",
+    credenciais: CREDENCIAIS
+  }).ok, false, "PC convertido nao autoriza publicar sem o APP capturado");
+  assert.strictEqual(app.urlAfiliadaWorkspace, "", "nunca reutilizar o APP capturado da fonte");
+}
+
+async function testarAppEPcConvertem() {
+  const resultado = await executarCenarioAppPc({ appStatus: "convertida", pcStatus: "convertida", jobId: 21 });
+
+  assert.strictEqual(resultado.ok, true);
+  const app = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+  const pc = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+  assert.strictEqual(app.renderizavel, true);
+  assert.strictEqual(pc.renderizavel, true);
+  assert.notStrictEqual(app.urlAfiliadaWorkspace, pc.urlAfiliadaWorkspace);
+  assert.strictEqual(app.urlOriginal, "https://a.aliexpress.com/_appOriginal");
+  assert.strictEqual(pc.urlOriginal, "https://a.aliexpress.com/_pcOriginal");
+  assert.strictEqual(app.papelLink, "link_app");
+  assert.strictEqual(pc.papelLink, "link_pc");
+  assert.strictEqual(resultado.imagem, "https://ae01.alicdn.com/produto.jpg", "o PC pode enriquecer a imagem sem desaparecer da saida");
+}
+
+async function testarAppEPcFalham() {
+  const resultado = await executarCenarioAppPc({ appStatus: "falhou", pcStatus: "falhou", jobId: 31 });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "afiliacao_workspace_incompleta");
+  assert.strictEqual(resultado.metadata.linksClassificados.length, 2);
+  assert.ok(resultado.metadata.linksClassificados.every(item => item.renderizavel === false));
 }
 
 function testarGateFinalEIsolamentoPorWorkspace() {
@@ -144,7 +208,7 @@ function testarGateFinalEIsolamentoPorWorkspace() {
   assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress(ofertaAppConvertidoPcFalhou, {
     clienteId: "workspace_a",
     credenciais: CREDENCIAIS
-  }).ok, true, "o gate final aceita apenas links ja aprovados; o adapter bloqueia a oferta antes de ela chegar aqui");
+  }).ok, false, "o gate final tambem bloqueia uma ocorrencia contextual capturada que falhou");
 
   const fonteExecutor = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const inicioExecutor = fonteExecutor.indexOf("async function enviarParaDestinoInteligente");
@@ -197,7 +261,10 @@ async function testarManualRejeitaLinkForjadoEExigeTodosOsPapeis() {
 
 (async () => {
   await testarConversorNuncaDevolveOriginal();
-  await testarAppConvertidoPcFalhouBloqueiaOferta();
+  await testarPcFalhaAppConverte();
+  await testarAppFalhaPcConverte();
+  await testarAppEPcConvertem();
+  await testarAppEPcFalham();
   testarGateFinalEIsolamentoPorWorkspace();
   await testarManualRejeitaLinkForjadoEExigeTodosOsPapeis();
   console.log("aliexpress-afiliacao-workspace.test.js OK");

@@ -101,27 +101,48 @@ function validarOfertaAfiliacaoWorkspaceAliExpress(oferta = {}, {
   if (marketplace !== "aliexpress") return { ok: true, motivo: "nao_aplicavel" };
 
   const metadata = oferta.metadata || {};
+  const links = [...(Array.isArray(metadata.linksClassificados)
+    ? metadata.linksClassificados
+    : (Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []))];
   const provaVerificada = metadata.afiliacaoWorkspaceVerificada || oferta.afiliacaoWorkspaceVerificada || {};
   const principal = validarProvaAfiliacaoWorkspaceAliExpress(
     exigirAssinatura ? (provaVerificada.principal || provaVerificada) : (metadata.afiliacaoWorkspace || {}),
     { clienteId, credenciais, exigirAssinatura }
   );
-  if (!principal.valida) {
+  const possuiLinkContextualSeguro = links.some(link => {
+    if (link.renderizavel !== true) return false;
+    const papel = texto(link.papelLink || link.tipo);
+    if (!papelExigeAfiliacaoWorkspaceAliExpress(papel)) return false;
+    const prova = validarProvaAfiliacaoWorkspaceAliExpress(
+      exigirAssinatura
+        ? (Array.isArray(provaVerificada.links)
+          ? provaVerificada.links.find(item => texto(item?.papel) === papel && texto(item?.urlAfiliadaWorkspace) === texto(link.urlAfiliada || link.linkAfiliado || link.url || link.href))
+          : {})
+        : (link.conversaoWorkspace || link.afiliacaoWorkspace || {}),
+      { clienteId, credenciais, exigirAssinatura }
+    );
+    return prova.valida;
+  });
+  if (!principal.valida && !possuiLinkContextualSeguro) {
     return { ok: false, motivo: "afiliacao_workspace_incompleta", papel: "principal" };
   }
 
-  const links = [...(Array.isArray(metadata.linksClassificados)
-    ? metadata.linksClassificados
-    : (Array.isArray(oferta.linksComerciais) ? oferta.linksComerciais : []))];
   if (exigirAssinatura) {
     for (const [papelLink, urlAfiliada] of [["link_app", oferta.linkApp], ["link_pc", oferta.linkPC], ["link_moedas", oferta.linkMoedas], ["link_resgate", oferta.linkResgate]]) {
       if (texto(urlAfiliada)) links.push({ papelLink, urlAfiliada });
     }
   }
   const provasLinksVerificadas = Array.isArray(provaVerificada.links) ? provaVerificada.links : [];
+  const papeisCapturados = new Set(links.map(link => texto(link.papelLink || link.tipo)));
+  const exigeAppPcIntegral = papeisCapturados.has("link_app") && papeisCapturados.has("link_pc");
   for (const link of links) {
     const papel = texto(link.papelLink || link.tipo);
-    if (link.renderizavel === false) continue;
+    if (link.renderizavel === false) {
+      if (exigeAppPcIntegral && ["link_app", "link_pc"].includes(papel)) {
+        return { ok: false, motivo: "afiliacao_workspace_incompleta", papel };
+      }
+      continue;
+    }
     if (!papelExigeAfiliacaoWorkspaceAliExpress(papel)) continue;
     const prova = validarProvaAfiliacaoWorkspaceAliExpress(
       exigirAssinatura

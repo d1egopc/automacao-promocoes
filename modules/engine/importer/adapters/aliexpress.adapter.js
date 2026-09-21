@@ -633,6 +633,33 @@ async function converterLinksAlternativosAliExpress({
       };
     }
 
+    // A conversao principal ja foi tentada acima. Quando ela nao produziu
+    // uma afiliada valida, preservar essa ocorrencia como falha auditavel e
+    // seguir para as demais ocorrencias sem repetir a chamada da API.
+    if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && !texto(linkAfiliadoPrincipal)) {
+      const urlAfiliadaTentada = primeiroValor(produtoPrincipal?.linkAfiliado, produtoPrincipal?.linkFinal, produtoPrincipal?.link);
+      const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
+        papelLink: papel,
+        urlAfiliada: urlAfiliadaTentada,
+        urlOriginal: alvo,
+        produtoConvertido: produtoPrincipal,
+        produtoPrincipal,
+        urlPrincipal: alvo,
+        urlAfiliadaPrincipal: ""
+      });
+      const proveniencia = provenienciaAfiliacaoWorkspaceAliExpress(produtoPrincipal, clienteId, credenciais);
+      return {
+        urlAfiliada: avaliacaoPrincipal.renderizavel && proveniencia.valida ? urlAfiliadaTentada : "",
+        renderizavel: avaliacaoPrincipal.renderizavel && proveniencia.valida,
+        motivo: proveniencia.valida ? avaliacaoPrincipal.motivo : "afiliacao_workspace_incompleta",
+        appValidado: avaliacaoPrincipal.appValidado,
+        sourceValuesUsado: primeiroValor(produtoPrincipal?.metadata?.sourceValuesUsado, alvo),
+        produtoCanonico: avaliacaoPrincipal.produtoCanonico || "",
+        produtoCanonicoPrincipal: avaliacaoPrincipal.produtoCanonicoPrincipal || "",
+        afiliacaoWorkspace: proveniencia.prova
+      };
+    }
+
     const chaveCache = `${papel}:${alvo}`;
     if (convertidos.has(chaveCache)) return convertidos.get(chaveCache);
 
@@ -926,31 +953,6 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     return { ok: false, marketplace: "aliexpress", motivo: "preco_indisponivel", linkOriginal: urlOriginalEngine };
   }
 
-  if (!linkAfiliado) {
-    logAliExpressTravessiaV272({
-      jobId: job.id,
-      eventoId: job.evento_id,
-      clienteId,
-      totalLinksEntrada: linksClassificados.length,
-      papeisDetectados,
-      statusEtapa: "cta_seguro_indisponivel",
-      motivo: afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta"
-    });
-    return { ok: false, marketplace: "aliexpress", motivo: afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta", linkOriginal: urlOriginalEngine };
-  }
-
-  logAliExpressTravessiaV272({
-    jobId: job.id,
-    eventoId: job.evento_id,
-    clienteId,
-    totalLinksEntrada: linksClassificados.length,
-    papeisDetectados,
-    totalLinksSeguros: 1,
-    houveConversao: true,
-    statusEtapa: "adapter_convertido",
-    motivo: linkEscolhido.papelLink ? `link_${linkEscolhido.papelLink}_convertido` : "cta_workspace_convertido"
-  });
-
   const linksClassificadosComConversao = await converterLinksAlternativosAliExpress({
     linksClassificados,
     importarLegado,
@@ -964,20 +966,63 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     produtoPrincipal: produto
   });
 
-  const pendente = linksClassificadosComConversao.find(item =>
-    ["link_app", "link_pc", "link_moedas", "link_resgate", "link_cupom"].includes(texto(item.papelLink)) &&
-    item.renderizavel !== true &&
-    item.motivoConversao !== "produto_canonico_divergente"
+  const linksSeguros = linksClassificadosComConversao.filter(item => {
+    const prova = item.conversaoWorkspace || item.afiliacaoWorkspace || {};
+    return item.renderizavel === true &&
+      Boolean(texto(item.urlAfiliadaWorkspace || item.urlAfiliada)) &&
+      prova.origemConversao === "workspace_api" &&
+      prova.conversaoStatus === "convertida";
+  });
+  const linksFalhosWorkspace = linksClassificadosComConversao.filter(item =>
+    papelExigeAfiliacaoWorkspaceAliExpress(texto(item.papelLink)) &&
+    item.renderizavel !== true
   );
-  if (pendente) {
+  const papeisContextuaisCapturados = new Set(linksClassificadosComConversao.map(item => texto(item.papelLink)));
+  const exigeAppPcIntegral = papeisContextuaisCapturados.has("link_app") && papeisContextuaisCapturados.has("link_pc");
+  const falhaAppPcObrigatoria = exigeAppPcIntegral && linksFalhosWorkspace.some(item =>
+    ["link_app", "link_pc"].includes(texto(item.papelLink))
+  );
+  const motivoBloqueioAfiliacao = falhaAppPcObrigatoria
+    ? "afiliacao_workspace_incompleta"
+    : (afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta");
+
+  if (!linksSeguros.length || falhaAppPcObrigatoria) {
+    logAliExpressTravessiaV272({
+      jobId: job.id,
+      eventoId: job.evento_id,
+      clienteId,
+      totalLinksEntrada: linksClassificados.length,
+      papeisDetectados,
+      totalLinksSeguros: linksSeguros.length,
+      houveConversao: linksSeguros.length > 0,
+      statusEtapa: "cta_seguro_indisponivel",
+      motivo: motivoBloqueioAfiliacao
+    });
     return {
       ok: false,
       marketplace: "aliexpress",
-      motivo: "afiliacao_workspace_incompleta",
+      motivo: motivoBloqueioAfiliacao,
       linkOriginal: urlOriginalEngine,
-      metadata: { papelLink: pendente.papelLink || "", motivoConversao: pendente.motivoConversao || "" }
+      metadata: {
+        linksClassificados: linksClassificadosComConversao,
+        linksFalhosWorkspace
+      }
     };
   }
+
+  logAliExpressTravessiaV272({
+    jobId: job.id,
+    eventoId: job.evento_id,
+    clienteId,
+    totalLinksEntrada: linksClassificados.length,
+    papeisDetectados,
+    totalLinksSeguros: linksSeguros.length,
+    houveConversao: true,
+    statusEtapa: "adapter_convertido",
+    motivo: linkAfiliado
+      ? (linkEscolhido.papelLink ? `link_${linkEscolhido.papelLink}_convertido` : "cta_workspace_convertido")
+      : "cta_contextual_workspace_convertido"
+  });
 
   return {
     ok: true,
@@ -1024,6 +1069,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados: linksClassificadosComConversao,
+      linksFalhosWorkspace,
       afiliacaoWorkspace: afiliacaoPrincipal.prova,
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,

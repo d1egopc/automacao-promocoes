@@ -507,7 +507,7 @@ async function queryEngine(texto, params = []) {
     });
     return {
       ok: false,
-      motivo: timeoutObservabilidade ? "timeout_observabilidade" : "query_falhou",
+      motivo: "query_falhou",
       erro: e.message,
       erroCodigo: erroDb.erroCodigo,
       erroPosicao: erroDb.erroPosicao,
