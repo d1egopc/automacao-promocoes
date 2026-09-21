@@ -5254,6 +5254,7 @@ module.exports = {
   resolverIdentidadeMlWorker,
   montarDiagnosticoGateImagemMercadoLivreLocalWorker,
   materializarImagemRadarMirrorSeNecessario,
+  comercialCapturadoClonador,
   aplicarComercialCapturadoClonador,
   aplicarPonteIntegridadeComercial,
   ocorrenciasRadarComerciais,

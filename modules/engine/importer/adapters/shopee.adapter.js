@@ -21,6 +21,9 @@ const {
 const {
   normalizarCodigoCupomSemantico
 } = require("../../../radar/cupom-semantico");
+const {
+  comercialCapturadoClonador
+} = require("../importer.service");
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -114,6 +117,48 @@ function escolherPrecoShopeeComRadarSeguro(precoAdapter = null, textoRadar = "")
     origem: precoApi === null ? "texto_radar" : "texto_radar_soberano",
     precoRadarTexto: precoRadar.texto,
     usouRadar: true
+  };
+}
+
+function objetoSeguroShopee(valor = {}) {
+  return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
+}
+
+function comercialCapturadoShopee({ evento = {}, job = {} } = {}) {
+  const metadataEvento = objetoSeguroShopee(evento.metadata);
+  const metadataJob = objetoSeguroShopee(job.metadata);
+  const metadataJobEvento = objetoSeguroShopee(metadataJob.metadataEvento);
+  const origem = texto(
+    evento.origem ||
+    evento.origem_tipo ||
+    evento.origemFluxo ||
+    metadataEvento.origem ||
+    metadataEvento.origemFluxo ||
+    metadataJob.origem ||
+    metadataJob.origemFluxo ||
+    metadataJobEvento.origem ||
+    metadataJobEvento.origemFluxo ||
+    job.origemFluxo ||
+    ""
+  );
+  const metadata = {
+    ...metadataJob,
+    ...metadataEvento,
+    ...(origem ? { origem, origemFluxo: origem } : {})
+  };
+  const contrato = comercialCapturadoClonador(metadata, evento, job);
+  if (!contrato) return null;
+
+  const precoAtual = contrato.precoAtual;
+  if (typeof precoAtual !== "number" || !Number.isFinite(precoAtual) || precoAtual <= 0) return null;
+
+  const precoAnterior = contrato.precoAnterior;
+  return {
+    contrato,
+    precoAtual,
+    precoAnterior: typeof precoAnterior === "number" && Number.isFinite(precoAnterior) && precoAnterior > precoAtual
+      ? precoAnterior
+      : null
   };
 }
 
@@ -1290,14 +1335,30 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     itemId: produto.itemId || idsDetectados.itemId
   };
   const tituloValido = tituloShopeeValido(produto.titulo || produto.nome || "");
-  const precoEscolhido = escolherPrecoShopeeComRadarSeguro(produto.precoAtual || produto.preco || produto.precoMin || "", textoOriginalRadar);
+  const comercialClonador = comercialCapturadoShopee({ evento, job });
+  const precoEscolhido = comercialClonador
+    ? {
+      preco: comercialClonador.precoAtual,
+      origem: "clonador_grupos",
+      precoRadarTexto: "",
+      usouRadar: false,
+      usouComercialCapturado: true
+    }
+    : escolherPrecoShopeeComRadarSeguro(produto.precoAtual || produto.preco || produto.precoMin || "", textoOriginalRadar);
   const precoNumerico = precoEscolhido.preco;
-  if (precoEscolhido.usouRadar) {
+  if (comercialClonador || precoEscolhido.usouRadar) {
     produto = {
       ...produto,
       preco: precoNumerico,
       precoAtual: precoNumerico,
-      precoOrigem: precoEscolhido.origem
+      precoOrigem: precoEscolhido.origem,
+      ...(comercialClonador && comercialClonador.precoAnterior !== null
+        ? {
+          precoOriginal: comercialClonador.precoAnterior,
+          precoAnterior: comercialClonador.precoAnterior,
+          precoAntigo: comercialClonador.precoAnterior
+        }
+        : {})
     };
   }
   const precoAuditoria = produto.precoAuditoria && typeof produto.precoAuditoria === "object"
@@ -1318,7 +1379,9 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     precoAdapter: precoNumerico,
     precoTextoRadar: precoAuditoria.precoTextoRadar || precoEscolhido.precoRadarTexto,
     origemPreco: precoEscolhido.origem || precoAuditoria.origemPreco || precoAuditoria.precoOrigem || "",
-    motivoEscolhaPreco: precoEscolhido.usouRadar ? "texto_radar_explicitamente_mais_confiavel" : precoAuditoria.motivoEscolhaPreco,
+    motivoEscolhaPreco: precoEscolhido.usouRadar
+      ? "texto_radar_explicitamente_mais_confiavel"
+      : (precoEscolhido.usouComercialCapturado ? "comercial_capturado_clonador_estruturado" : precoAuditoria.motivoEscolhaPreco),
     suspeitaFator100
   });
 
