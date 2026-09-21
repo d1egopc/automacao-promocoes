@@ -308,6 +308,8 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
 
 async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const evento = normalizarEventoBruto(eventoBruto);
+  const hashEventoExplicito = Boolean(eventoBruto.hashEvento || eventoBruto.hash_evento);
+  const idempotenciaTransporteTeleRadar = hashEventoExplicito && eventoBruto.fonte === "teleradar";
   const hashEvento = eventoBruto.hashEvento || eventoBruto.hash_evento || gerarHashEvento(evento);
   const marketplaceDetectado = eventoBruto.marketplaceDetectado || eventoBruto.marketplace_detectado || marketplacePrincipal(evento.linksExtraidos);
   const metadataEvento = eventoBruto.metadata && typeof eventoBruto.metadata === "object" ? eventoBruto.metadata : {};
@@ -331,14 +333,16 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   });
 
   try {
-    const duplicado = await existeEventoDuplicado(evento, {
-      ...(opcoes.perf || {}),
-      clienteId: opcoes.perf?.clienteId || (Array.isArray(opcoes.clientes) ? opcoes.clientes[0] : ""),
-      origem: evento.origem,
-      origemTipo: evento.origemTipo,
-      sessaoId: evento.sessaoId,
-      grupoId: evento.grupoId
-    });
+    const duplicado = idempotenciaTransporteTeleRadar
+      ? null
+      : await existeEventoDuplicado(evento, {
+          ...(opcoes.perf || {}),
+          clienteId: opcoes.perf?.clienteId || (Array.isArray(opcoes.clientes) ? opcoes.clientes[0] : ""),
+          origem: evento.origem,
+          origemTipo: evento.origemTipo,
+          sessaoId: evento.sessaoId,
+          grupoId: evento.grupoId
+        });
     if (duplicado) {
       const jobs = await criarJobsParaClientes({
         eventoId: duplicado.id,

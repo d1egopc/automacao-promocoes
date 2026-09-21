@@ -44,6 +44,9 @@ const {
 const {
   criarRotasCaptureHandoff
 } = require("./modules/auth/capture-handoff.routes");
+const {
+  registerRadarIngressHandler
+} = require("./modules/teleradar/radar-ingress.adapter");
 
 const {
   initEngineDatabase,
@@ -21448,7 +21451,14 @@ async function processarMensagemRadar({
   coberturaTraceId,
   radarMidiaMaterializada,
   sock,
-  downloadMediaMessageImpl
+  downloadMediaMessageImpl,
+  linksCapturados,
+  hashEvento,
+  fonte,
+  fonteCaptura,
+  teleradarHandoff,
+  origemAutorizadaInternamente = false,
+  aguardarAckEngine = false
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
@@ -21524,7 +21534,9 @@ async function processarMensagemRadar({
     chatId: origemTipoFinal === "telegram" ? grupoIdTexto : "",
     sessaoId: sessaoIdTexto
   };
-  const origemMonitorada = origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
+  const origemMonitorada = origemAutorizadaInternamente === true
+    ? { ok: true, motivo: "teleradar_allowlist_validada" }
+    : origemOfertaEstaMonitoradaRadar(origemBase, radarConfig);
 
   if (!origemMonitorada.ok) {
   logRadarBloqueadoMonitoramento({
@@ -21564,7 +21576,10 @@ async function processarMensagemRadar({
     grupoNome: grupoNomeTexto
   });
 
-const links = extrairLinksRadar(texto);
+const linksContextuaisCapturados = Array.isArray(linksCapturados)
+  ? linksCapturados.map(link => String(link || "").trim()).filter(Boolean)
+  : [];
+const links = linksContextuaisCapturados.length ? linksContextuaisCapturados : extrairLinksRadar(texto);
 const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
@@ -21767,6 +21782,9 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
   origemFluxo: "optimus",
   origemTipo: origemTipoFinal,
+  fonte: fonte || "radar",
+  fonteCaptura: fonteCaptura || fonte || "radar",
+  ...(hashEvento ? { hashEvento } : {}),
   sessaoId: sessaoIdTexto,
   grupoId: grupoIdTexto,
   grupoNome: grupoNomeTexto,
@@ -21778,12 +21796,28 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   metadata: {
     ...mergeRadarMirrorMetadata({}, radarMirrorBase),
     origemFluxo: "optimus",
+    fonteCaptura: fonteCaptura || fonte || "radar",
+    ...(teleradarHandoff && typeof teleradarHandoff === "object"
+      ? { teleradar: teleradarHandoff }
+      : {}),
     ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {})
   }
 });
-const registroEngineRadar = temRedirectConhecidoRadar
+const registroEngineRadar = (temRedirectConhecidoRadar || aguardarAckEngine === true)
   ? await registroEngineRadarPromise
   : null;
+
+function comAckRadar(resultado = {}) {
+  if (aguardarAckEngine !== true) return resultado;
+  const radarAccepted = links.length > 0 && registroEngineRadar?.ok === true && Boolean(registroEngineRadar?.id);
+  return {
+    ...resultado,
+    radarAccepted,
+    radarAck: radarAccepted ? "RADAR_ACCEPTED" : "RADAR_NOT_ACCEPTED",
+    radarEventId: radarAccepted ? registroEngineRadar.id : null,
+    radarDuplicate: radarAccepted && registroEngineRadar.duplicado === true
+  };
+}
 
   logOptimus("RADAR", "Links detectados", {
     total: links.length,
@@ -21814,7 +21848,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       marketplace: marketplaceDetectadoLinks,
       links
     });
-    return { ok: false, motivo: "sem_links" };
+    return comAckRadar({ ok: false, motivo: "sem_links" });
   }
 
   const marketplacesLinksRadar = links
@@ -21843,7 +21877,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       motivo: "amazon_engine_v2"
     });
 
-    return {
+    return comAckRadar({
       ok: true,
       links: links.length,
       adicionadas: 0,
@@ -21853,7 +21887,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
         marketplace: "amazon",
         motivo: "amazon_engine_v2"
       }))
-    };
+    });
   }
 
   logOptimus("CUPOM", "Extracao da mensagem", {
@@ -21901,7 +21935,7 @@ const registroEngineRadar = temRedirectConhecidoRadar
       origemTipo: origemTipoFinal,
       grupo: grupoNomeTexto || grupoIdTexto
     });
-    return capturaPermitida;
+    return comAckRadar(capturaPermitida);
   }
   coberturaRadar.registrar("radar_janela_ok", {
     ...contextoCoberturaRadar,
@@ -22077,13 +22111,15 @@ const registroEngineRadar = temRedirectConhecidoRadar
     });
   }
 
-  return {
+  return comAckRadar({
     ok: true,
     links: links.length,
     adicionadas,
     resultados
-  };
+  });
 }
+
+registerRadarIngressHandler(processarMensagemRadar);
 
 async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, coberturaTraceId: coberturaTraceIdRecebido } = {}) {
   const remoteJid = mensagem?.key?.remoteJid || "";

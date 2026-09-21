@@ -50,6 +50,8 @@ function createEnvelope(message = {}) {
     messageId,
     senderId: message.senderId === null || message.senderId === undefined ? null : id(message.senderId, "sender_id"),
     receivedAt: String(message.receivedAt),
+    capturedAt: String(message.sourceTimestamp || message.receivedAt),
+    envelopeCreatedAt: String(message.envelopeCreatedAt || message.receivedAt),
     text: String(message.text || ""),
     textSource: message.textSource === "caption" ? "caption" : "text",
     hasMedia: message.hasMedia === true,

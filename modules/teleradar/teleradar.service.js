@@ -6,6 +6,8 @@ const { createDedupeRepository } = require("./dedupe.repository");
 const { createEventId, createEnvelope } = require("./envelope.contract");
 const { createSourceAllowlistService, sanitizeSource } = require("./source-allowlist.service");
 const { normalizeTelegramUpdate } = require("./update-normalizer");
+const { createHandoffService } = require("./handoff.service");
+const { createRadarIngressAdapter } = require("./radar-ingress.adapter");
 
 function createTeleRadarService({
   context,
@@ -15,9 +17,11 @@ function createTeleRadarService({
   sourceAllowlist,
   checkpoints,
   dedupe,
-  onEnvelope = async () => {},
+  handoffService,
+  radarIngress = createRadarIngressAdapter(),
   clock = () => new Date(),
-  logger = {}
+  logger = {},
+  handoffOptions = {}
 } = {}) {
   const validContext = validateTeleRadarContext(context);
   const accountScope = Object.freeze({
@@ -30,7 +34,29 @@ function createTeleRadarService({
   const allowlist = sourceAllowlist || createSourceAllowlistService({ store, context: validContext, clock });
   const checkpointRepository = checkpoints || createCheckpointRepository({ store, context: validContext });
   const dedupeRepository = dedupe || createDedupeRepository({ store, context: validContext });
-  if (typeof onEnvelope !== "function") throw new Error("TELERADAR_ON_ENVELOPE_REQUIRED");
+  const handoff = handoffService || createHandoffService({
+    ...handoffOptions,
+    context: validContext,
+    store,
+    radarIngress,
+    clock,
+    logger,
+    beforeAttempt: async (envelope, record) => {
+      await dedupeRepository.claim({
+        eventId: envelope.eventId,
+        accountId: envelope.accountId,
+        chatId: envelope.chatId,
+        messageId: envelope.messageId,
+        claimedAt: record.handoffPersistedAt
+      });
+      await checkpointRepository.acceptIfNewer({
+        chatKey: envelope.chatKey,
+        messageId: envelope.messageId,
+        activatedAt: envelope.capturedAt,
+        acceptedAt: record.handoffPersistedAt
+      });
+    }
+  });
 
   let running = false;
   let lifecycleState = "stopped";
@@ -135,6 +161,9 @@ function createTeleRadarService({
     }
 
     const eventId = createEventId(message);
+    const envelope = createEnvelope({ ...message, envelopeCreatedAt: nowIso() });
+    const persisted = await handoff.persistEnvelope(envelope);
+
     const claim = await dedupeRepository.claim({
       eventId,
       accountId: message.accountId,
@@ -142,7 +171,10 @@ function createTeleRadarService({
       messageId: message.messageId,
       claimedAt: message.receivedAt
     });
-    if (!claim.claimed) return reject("rejectedDuplicate", "TELERADAR_REJEITADO_DUPLICATE", message);
+    if (!claim.claimed) {
+      if (persisted.record?.status === "pending") await handoff.attempt(eventId);
+      return reject("rejectedDuplicate", "TELERADAR_REJEITADO_DUPLICATE", message);
+    }
 
     const checkpointResult = await checkpointRepository.acceptIfNewer({
       chatKey: message.chatKey,
@@ -154,10 +186,13 @@ function createTeleRadarService({
       return reject("rejectedCheckpoint", "TELERADAR_REJEITADO_CHECKPOINT", message);
     }
 
-    const envelope = createEnvelope(message);
-    await onEnvelope(envelope);
+    const delivery = await handoff.attempt(eventId);
     counters.accepted += 1;
-    return { accepted: true, envelope };
+    return {
+      accepted: true,
+      envelope,
+      handoffStatus: delivery.accepted ? "acked" : (delivery.record?.status || "pending")
+    };
   }
 
   async function dispatchUpdate(update) {
@@ -218,6 +253,7 @@ function createTeleRadarService({
     return serializeLifecycle(async () => {
       if (running) return getStatus();
       lifecycleState = "starting";
+      await handoff.start();
       const restored = await accountService.restore({ accountIdInterno: validContext.accountIdInterno, accountScope });
       if (restored?.authorized !== true) {
         lifecycleState = "blocked";
@@ -231,7 +267,10 @@ function createTeleRadarService({
 
   async function stop() {
     return serializeLifecycle(async () => {
-      if (!running) return getStatus();
+      if (!running) {
+        await handoff.stop();
+        return getStatus();
+      }
       running = false;
       if (unsubscribe) {
         const current = unsubscribe;
@@ -239,6 +278,7 @@ function createTeleRadarService({
         await current();
       }
       await accountService.disconnect({ accountIdInterno: validContext.accountIdInterno, accountScope });
+      await handoff.stop();
       lifecycleState = "stopped";
       return getStatus();
     });

@@ -128,7 +128,12 @@ async function testCoreFlow() {
     store,
     telegramAccountService: telegram,
     clock,
-    onEnvelope: async envelope => { envelopes.push(envelope); },
+    radarIngress: {
+      accept: async envelope => {
+        envelopes.push(envelope);
+        return { accepted: true, durable: true, code: "RADAR_ACCEPTED", radarEventId: envelopes.length };
+      }
+    },
     logger: { info: payload => logs.push(payload), warn: payload => logs.push(payload) }
   });
 
@@ -280,7 +285,12 @@ async function testCoreFlow() {
     store,
     telegramAccountService: telegramAfterRestart,
     clock,
-    onEnvelope: async envelope => afterRestart.push(envelope)
+    radarIngress: {
+      accept: async envelope => {
+        afterRestart.push(envelope);
+        return { accepted: true, durable: true, code: "RADAR_ACCEPTED", radarEventId: afterRestart.length };
+      }
+    }
   });
   await restartedService.start();
   assert.equal(telegramAfterRestart.state.subscribeCalls, 1);
@@ -355,7 +365,10 @@ async function testStaticBoundaries() {
     "checkpoint.repository.js",
     "dedupe.repository.js",
     "envelope.contract.js",
+    "handoff.repository.js",
+    "handoff.service.js",
     "index.js",
+    "radar-ingress.adapter.js",
     "source-allowlist.service.js",
     "teleradar.service.js",
     "update-normalizer.js"
