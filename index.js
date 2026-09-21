@@ -284,6 +284,9 @@ const {
   criarAdminMasterEstrito
 } = require("./utils/admin-auth-estrito");
 const {
+  createTelegramTeleRadarAdminRoutes
+} = require("./modules/teleradar-control-plane/routes");
+const {
   iniciarManualV2Scheduler
 } = require("./modules/manual-v2/manual-scheduler.runner");
 const {
@@ -13553,6 +13556,10 @@ const exigirAdminMasterEstrito = criarAdminMasterEstrito({
   getUsuarios: () => usuarios,
   usuarioEhAdminMaster
 });
+
+app.use("/admin", createTelegramTeleRadarAdminRoutes({
+  requireAdmin: exigirAdminMasterEstrito
+}));
 
 app.post("/admin/cadastro-interno", exigirAdminMasterEstrito, async (req, res) => {
   try {

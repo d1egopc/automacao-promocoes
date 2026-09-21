@@ -521,8 +521,12 @@ async function testServiceSecretLifecycleAndPublicBoundary() {
   const restored = await success.service.restore({ accountIdInterno: "account-1", accountScope: scope });
   assert.deepEqual(Object.keys(restored).sort(), ["authorized", "identity"]);
   assert.equal(Object.hasOwn(restored, "client"), false);
+  assert.deepEqual(await success.service.getConfigurationStatus({ accountIdInterno: "account-1", accountScope: scope }), { configured: true });
+  const publicStatus = await success.service.getStatus({ accountIdInterno: "account-1", accountScope: scope });
+  assert.deepEqual(Object.keys(publicStatus).sort(), ["authorized", "connected", "connectionState", "exists", "identity"]);
+  assert.equal(Object.hasOwn(publicStatus, "session"), false);
 
-  assert.deepEqual(Object.keys(publicApi), ["createTelegramAccountService"]);
+  assert.deepEqual(Object.keys(publicApi), ["AUTH_TRANSIENT_TTL_MS", "createTelegramAccountService"]);
   assert.equal(Object.hasOwn(success.service, "exportSession"), false);
   const publicSurface = JSON.stringify({ exports: Object.keys(publicApi), service: Object.keys(success.service), result: publicCodeResult, restored });
   for (const secret of ["phoneCodeHash", "apiHash", "sessionString", "exportSession", phone, code, password, "STRING_SESSION_SECRETA", "API_HASH_SECRETO"]) {

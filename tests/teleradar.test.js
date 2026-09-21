@@ -198,6 +198,12 @@ async function testCoreFlow() {
   assert.equal(first.entities[1].label, "APP");
   assert.equal(first.entities[1].url, "https://example.com/app");
   assert.equal(first.entities[0].url, first.entities[2].url);
+  const observability = await service.getObservability();
+  assert.deepEqual(observability.outbox, { pending: 0, delivering: 0, failedPermanent: 0 });
+  assert.equal(observability.activity.lastCapturedAt, first.capturedAt);
+  assert(observability.activity.lastHandoffAt);
+  assert(observability.activity.lastRadarAcceptedAt);
+  assert.equal(typeof observability.activity.lastHandoffLatencyMs, "number");
 
   const selectedAfterAccept = await service.listSelectedSources();
   assert.equal(selectedAfterAccept[0].activatedAt, activatedAtA);

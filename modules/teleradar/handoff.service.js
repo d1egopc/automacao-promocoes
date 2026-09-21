@@ -147,7 +147,8 @@ function createHandoffService({
     attempt,
     start,
     stop,
-    get: repository.get
+    get: repository.get,
+    getObservability: repository.summarize
   });
 }
 

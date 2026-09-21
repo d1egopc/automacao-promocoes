@@ -295,13 +295,33 @@ function createTeleRadarService({
     });
   }
 
+  async function getObservability() {
+    if (typeof handoff.getObservability !== "function") {
+      return Object.freeze({
+        outbox: Object.freeze({ pending: 0, delivering: 0, failedPermanent: 0 }),
+        activity: Object.freeze({
+          lastCapturedAt: null,
+          lastHandoffAt: null,
+          lastRadarAcceptedAt: null,
+          lastHandoffLatencyMs: null
+        })
+      });
+    }
+    const summary = await handoff.getObservability();
+    return Object.freeze({
+      outbox: Object.freeze({ ...(summary?.outbox || {}) }),
+      activity: Object.freeze({ ...(summary?.activity || {}) })
+    });
+  }
+
   return Object.freeze({
     listAvailableSources,
     listSelectedSources,
     replaceSelectedSources,
     start,
     stop,
-    getStatus
+    getStatus,
+    getObservability
   });
 }
 

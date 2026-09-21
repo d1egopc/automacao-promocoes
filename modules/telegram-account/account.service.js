@@ -1,7 +1,7 @@
 "use strict";
 
 const { createTelegramAccountClient } = require("./client-adapter");
-const { validarAccountScope, normalizarAccountMetadata } = require("./account.contract");
+const { parseApiId, validarAccountScope, normalizarAccountMetadata } = require("./account.contract");
 const { criarRepositorioContasTelegram, accountKey } = require("./account.repository");
 const { createTelegramSessionVault } = require("./session-vault");
 
@@ -11,6 +11,20 @@ function maskedPhone(phone) {
   const value = String(phone || "");
   if (!value) return null;
   return value.length <= 4 ? "*".repeat(value.length) : `${value.slice(0, -4).replace(/./g, "*")}${value.slice(-4)}`;
+}
+
+function publicIdentity(identity = {}) {
+  if (!identity || typeof identity !== "object") return null;
+  const accountId = String(identity.accountId || identity.id || "").trim() || null;
+  const displayName = String(identity.displayName || [identity.firstName, identity.lastName].filter(Boolean).join(" ") || "").trim() || null;
+  const username = String(identity.username || "").trim() || null;
+  const phone = String(identity.maskedPhone || identity.phone || "").trim();
+  return Object.freeze({
+    accountId,
+    displayName,
+    username,
+    maskedPhone: phone.includes("*") ? phone : maskedPhone(phone)
+  });
 }
 
 function createTelegramAccountService({
@@ -83,8 +97,11 @@ function createTelegramAccountService({
   async function credentials(record, scope) {
     if (typeof resolveApiCredentials !== "function") throw new Error("telegram_api_credentials_resolver_ausente");
     const result = await resolveApiCredentials({ accountIdInterno: record.accountIdInterno, accountScope: scope });
-    if (!result?.apiId || !result?.apiHash) throw new Error("telegram_api_credentials_invalidas");
-    return result;
+    const apiId = parseApiId(result?.apiId);
+    const apiHash = String(result?.apiHash || "").trim();
+    if (!apiHash) throw new Error("telegram_api_credentials_invalidas");
+    if (typeof vault.assertMasterKey === "function") vault.assertMasterKey();
+    return { apiId, apiHash };
   }
 
   async function buildClient(record, scope, sessionString = "") {
@@ -107,6 +124,8 @@ function createTelegramAccountService({
   async function provision({ accountIdInterno, accountScope, metadata = {} }) {
     const scope = validarAccountScope(accountScope);
     if (!String(accountIdInterno || "").trim()) throw new Error("telegram_account_id_interno_ausente");
+    const existing = await repository.getAccount(accountIdInterno, scope);
+    if (existing) return existing;
     const record = {
       accountIdInterno: String(accountIdInterno),
       accountScope: scope,
@@ -117,6 +136,42 @@ function createTelegramAccountService({
       updatedAt: new Date().toISOString()
     };
     return repository.upsertAccount(record);
+  }
+
+  async function getConfigurationStatus({ accountIdInterno, accountScope }) {
+    try {
+      const scope = validarAccountScope(accountScope);
+      const record = { accountIdInterno: String(accountIdInterno || "").trim() };
+      if (!record.accountIdInterno) throw new Error("telegram_account_id_interno_ausente");
+      await credentials(record, scope);
+      return Object.freeze({ configured: true });
+    } catch {
+      return Object.freeze({ configured: false });
+    }
+  }
+
+  async function getStatus({ accountIdInterno, accountScope }) {
+    const scope = validarAccountScope(accountScope);
+    const accountId = String(accountIdInterno || "").trim();
+    if (!accountId) throw new Error("telegram_account_id_interno_ausente");
+    const record = await repository.getAccount(accountId, scope);
+    if (!record) {
+      return Object.freeze({
+        exists: false,
+        connected: false,
+        authorized: false,
+        connectionState: "not_configured",
+        identity: null
+      });
+    }
+    const connected = clients.has(key(accountId, scope));
+    return Object.freeze({
+      exists: true,
+      connected,
+      authorized: record.authorized === true,
+      connectionState: connected ? String(record.connectionState || "connected") : "disconnected",
+      identity: publicIdentity(record.identity)
+    });
   }
 
   async function requestLoginCode({ accountIdInterno, accountScope, phone }) {
@@ -193,6 +248,7 @@ function createTelegramAccountService({
     const envelope = await repository.getEncryptedSession(record.accountIdInterno, scope);
     if (!envelope) throw new Error("telegram_session_nao_encontrada");
     const itemKey = key(accountIdInterno, scope);
+    await cleanupClient(itemKey);
     const client = await buildClient(record, scope, vault.decrypt(envelope));
     try {
       await client.connect();
@@ -208,9 +264,15 @@ function createTelegramAccountService({
   }
 
   async function disconnect({ accountIdInterno, accountScope }) {
-    const { scope } = await accountRecord(accountIdInterno, accountScope);
+    const { scope, record } = await accountRecord(accountIdInterno, accountScope);
     const itemKey = key(accountIdInterno, scope);
     await cleanupClient(itemKey);
+    await repository.upsertAccount({
+      ...record,
+      accountScope: scope,
+      connectionState: "disconnected",
+      updatedAt: new Date().toISOString()
+    });
     return { ok: true };
   }
 
@@ -244,6 +306,8 @@ function createTelegramAccountService({
 
   return Object.freeze({
     provision,
+    getConfigurationStatus,
+    getStatus,
     requestLoginCode,
     signInWithCode,
     signInWithPassword,

@@ -50,6 +50,22 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
     return scopedKey("handoff", validContext, id);
   }
 
+  function scopedRecords(state = {}) {
+    return Object.entries(state.entries || {})
+      .filter(([storageKey, record]) => {
+        try { return storageKey === key(record?.eventId); } catch { return false; }
+      })
+      .map(([, record]) => record);
+  }
+
+  function latestRecord(records, field) {
+    return records.reduce((latest, record) => {
+      const value = Date.parse(record?.[field] || "");
+      const current = Date.parse(latest?.[field] || "");
+      return Number.isFinite(value) && (!Number.isFinite(current) || value > current) ? record : latest;
+    }, null);
+  }
+
   return Object.freeze({
     async persist({ envelope, persistedAt }) {
       const eventId = validateEnvelope(envelope);
@@ -86,9 +102,30 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
     async listRecoverable(now) {
       iso(now, "now");
       const state = await store.read(validContext, HANDOFFS_FILE);
-      return Object.values(state.entries).filter(record =>
+      return scopedRecords(state).filter(record =>
         record.status === HANDOFF_STATUS.PENDING || record.status === HANDOFF_STATUS.DELIVERING
       );
+    },
+
+    async summarize() {
+      const state = await store.read(validContext, HANDOFFS_FILE);
+      const records = scopedRecords(state);
+      const latestCaptured = latestRecord(records, "capturedAt");
+      const latestAttempted = latestRecord(records, "handoffAttemptedAt");
+      const latestAccepted = latestRecord(records, "radarAcceptedAt");
+      return {
+        outbox: {
+          pending: records.filter(record => record.status === HANDOFF_STATUS.PENDING).length,
+          delivering: records.filter(record => record.status === HANDOFF_STATUS.DELIVERING).length,
+          failedPermanent: records.filter(record => record.status === HANDOFF_STATUS.FAILED_PERMANENT).length
+        },
+        activity: {
+          lastCapturedAt: latestCaptured?.capturedAt || null,
+          lastHandoffAt: latestAttempted?.handoffAttemptedAt || null,
+          lastRadarAcceptedAt: latestAccepted?.radarAcceptedAt || null,
+          lastHandoffLatencyMs: latestAccepted?.handoffLatencyMs ?? null
+        }
+      };
     },
 
     async claimAttempt({ eventId, attemptedAt, leaseMs }) {

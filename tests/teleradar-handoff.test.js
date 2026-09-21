@@ -105,10 +105,34 @@ async function testHappyPathAndObservability() {
   assert(record.radarAcceptedAt);
   assert.equal(record.handoffLatencyMs, 1250);
   assert.equal(record.radarReceipt.code, "RADAR_ACCEPTED");
+  assert.deepEqual(await handoff.getObservability(), {
+    outbox: { pending: 0, delivering: 0, failedPermanent: 0 },
+    activity: {
+      lastCapturedAt: envelope.capturedAt,
+      lastHandoffAt: record.handoffAttemptedAt,
+      lastRadarAcceptedAt: record.radarAcceptedAt,
+      lastHandoffLatencyMs: 1250
+    }
+  });
 
   assert.equal((await handoff.persistEnvelope(envelope)).created, false);
   assert.equal((await handoff.attempt(envelope.eventId)).skipped, true);
   assert.equal(ingressCalls, 1, "evento duplicado nao reingressa no Radar");
+}
+
+async function testObservabilityAndRecoveryStayScoped() {
+  const store = createMemoryTeleradarStore();
+  const otherContext = Object.freeze({ ...context, accountIdInterno: "telegram-admin-2" });
+  const firstRepository = createHandoffRepository({ store, context });
+  const secondRepository = createHandoffRepository({ store, context: otherContext });
+  const firstEnvelope = envelopeFixture({ messageId: "801" });
+  const secondEnvelope = envelopeFixture({ messageId: "802" });
+  await firstRepository.persist({ envelope: firstEnvelope, persistedAt: "2026-09-21T18:00:01.000Z" });
+  await secondRepository.persist({ envelope: secondEnvelope, persistedAt: "2026-09-21T18:00:02.000Z" });
+  assert.deepEqual((await firstRepository.listRecoverable(new Date("2026-09-21T18:00:03.000Z"))).map(item => item.eventId), [firstEnvelope.eventId]);
+  assert.deepEqual((await secondRepository.listRecoverable(new Date("2026-09-21T18:00:03.000Z"))).map(item => item.eventId), [secondEnvelope.eventId]);
+  assert.equal((await firstRepository.summarize()).outbox.pending, 1);
+  assert.equal((await secondRepository.summarize()).outbox.pending, 1);
 }
 
 async function testRetryConcurrencyAndCallbackException() {
@@ -444,6 +468,7 @@ async function testStaticBoundaries() {
 
 async function main() {
   await testHappyPathAndObservability();
+  await testObservabilityAndRecoveryStayScoped();
   await testRetryConcurrencyAndCallbackException();
   await testRestartResumesPendingAndPermanentFailureObservable();
   await testRestartReschedulesActiveLease();
