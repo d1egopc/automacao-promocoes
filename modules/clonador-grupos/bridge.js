@@ -5,6 +5,7 @@ const { criarContratoPreparacaoLinks } = require("../engine/preparacao-links.ser
 const { resolverRedirectClonador } = require("../radar/redirect/redirect-resolver");
 const { extrairComercialUniversal } = require("../radar/extrator-comercial-universal");
 const { registrarEventoBruto } = require("../engine/inbox.service");
+const { classificarOcorrenciaContextualClonador } = require("./service");
 
 const CONFIANCAS_ACEITAS = new Set(["alta", "media"]);
 
@@ -228,6 +229,29 @@ function marketplacePrincipal(links = [], redirects = []) {
     "";
 }
 
+function reclassificarOcorrenciasComMarketplace(ocorrencias = [], textoOriginal = "", marketplace = "") {
+  return (Array.isArray(ocorrencias) ? ocorrencias : []).map(ocorrencia => {
+    // Ocorrencias legadas podem não ter contexto posicional suficiente. Nelas,
+    // preservar o snapshot existente é mais seguro do que inferir um papel.
+    if (
+      ocorrencia?.contextoDisponivel !== true ||
+      (!textoOriginal && !ocorrencia.contextoAntes && !ocorrencia.contextoDepois)
+    ) return ocorrencia;
+    const classificacao = classificarOcorrenciaContextualClonador({
+      ...ocorrencia,
+      textoOriginal,
+      marketplace
+    });
+    return {
+      ...ocorrencia,
+      papelContextual: classificacao.papelContextual,
+      motivoContextual: classificacao.motivo,
+      confiancaContextual: classificacao.confianca,
+      evidenciasContextuais: classificacao.evidencias
+    };
+  });
+}
+
 function criarBridgeClonadorGrupos(deps = {}) {
   const repo = deps.repository;
   if (!repo) throw new Error("repository_obrigatorio");
@@ -260,9 +284,11 @@ function criarBridgeClonadorGrupos(deps = {}) {
         grupoJid: texto(item.grupoJid),
         grupoNome: texto(item.grupoNome),
         linksOriginais: resolvidos.linksOriginais,
-        linksOcorrencias: Array.isArray(item.metadata?.clonadorGrupos?.linksOcorrencias)
-          ? item.metadata.clonadorGrupos.linksOcorrencias
-          : [],
+        linksOcorrencias: reclassificarOcorrenciasComMarketplace(
+          item.metadata?.clonadorGrupos?.linksOcorrencias,
+          item.textoOriginal,
+          marketplaceDetectado
+        ),
         redirects: resolvidos.redirects,
         destinoIds
       },

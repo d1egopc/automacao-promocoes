@@ -118,10 +118,103 @@ function extrairUrlKabumDeAwin(url = "") {
   return "";
 }
 
+const DOMINIOS_AMAZON_OFICIAIS = new Set([
+  "amazon.com.br",
+  "amazon.com",
+  "amazon.com.mx",
+  "amazon.ca",
+  "amazon.co.uk",
+  "amazon.de",
+  "amazon.fr",
+  "amazon.it",
+  "amazon.es",
+  "amazon.co.jp",
+  "amazon.in",
+  "amazon.com.au"
+]);
+
+function hostAmazonOficial(hostname = "") {
+  const host = texto(hostname).toLowerCase().replace(/^www\./, "");
+  return [...DOMINIOS_AMAZON_OFICIAIS].some(dominio => host === dominio || host.endsWith(`.${dominio}`));
+}
+
+function classificarRotuloContextualCompartilhado(fragmento = "", marketplace = "") {
+  const rotulo = semAcentos(String(fragmento || ""))
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/^[^a-z0-9]+/i, "")
+    .replace(/[),.;:!?]+$/g, "")
+    .trim();
+  const mp = minusculo(marketplace);
+  if (!rotulo) return null;
+
+  if (/^(?:link\s+)?(?:app|aplicativo)\s*:?[!]?$/i.test(rotulo) ||
+      /^(?:abrir|abra)\s+(?:no|pelo|via)?\s*app\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "app", papelLink: PAPEL_LINK.LINK_APP, motivo: "rotulo_app_compartilhado" };
+  }
+
+  if (/^(?:link\s+(?:para\s+)?)?(?:pc|site|desktop|computador)\s*:?[!]?$/i.test(rotulo) ||
+      /^(?:abrir|abra)\s+no\s+(?:pc|site|desktop)\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "pc", papelLink: PAPEL_LINK.LINK_PC, motivo: "rotulo_pc_compartilhado" };
+  }
+
+  if (/^link\s+com\s+(?:moeda|moedas|coins?)\s*:?[!]?$/i.test(rotulo)) {
+    return mp === "aliexpress"
+      ? { papel: "app", papelLink: PAPEL_LINK.LINK_APP, motivo: "rotulo_moedas_app_compartilhado" }
+      : { papel: "moedas", papelLink: PAPEL_LINK.MOEDAS, motivo: "rotulo_moedas_compartilhado" };
+  }
+
+  if (/^(?:moeda|moedas|coins?|use\s+(?:moedas?|coins?)|ganhe\s+(?:moedas?|coins?))\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "moedas", papelLink: PAPEL_LINK.MOEDAS, motivo: "rotulo_moedas_compartilhado" };
+  }
+
+  if (/^(?:resgate|resgatar|ative|ativar|pegue|pegar)\s+(?:o\s+)?cupom\b.*$/i.test(rotulo) ||
+      /^link\s+de\s+resgate\b.*$/i.test(rotulo) ||
+      /^resgate\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "resgate", papelLink: PAPEL_LINK.CUPOM, motivo: "rotulo_resgate_compartilhado" };
+  }
+
+  if (/^(?:aplique|aplicar)\s+(?:o\s+)?cupom\b.*$/i.test(rotulo) ||
+      /^(?:cupom|codigo|c[oó]digo)\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "cupom", papelLink: PAPEL_LINK.CUPOM, motivo: "rotulo_cupom_compartilhado" };
+  }
+
+  if (/^(?:link\s+)?(?:produto|do\s+produto|comprar|confira|oferta)(?:\s+do\s+produto)?\s*:?[!]?$/i.test(rotulo)) {
+    return { papel: "produto", papelLink: PAPEL_LINK.PRODUTO, motivo: "rotulo_produto_compartilhado" };
+  }
+
+  return null;
+}
+
 function classificarPorContexto(marketplace = "", contexto = {}) {
   const antes = semAcentos(contexto.antesProximo || contexto.antes || "").replace(/[^a-z0-9\s:]+$/gi, "").trim();
   const trecho = semAcentos(contexto.trecho || "");
   const mp = minusculo(marketplace);
+
+  const rotuloCompartilhado = classificarRotuloContextualCompartilhado(antes, mp);
+  if (rotuloCompartilhado) {
+    let motivo = rotuloCompartilhado.motivo;
+    if (mp === "aliexpress") {
+      if (rotuloCompartilhado.papel === "app") {
+        motivo = rotuloCompartilhado.motivo === "rotulo_moedas_app_compartilhado"
+          ? "contexto_link_app_moedas_aliexpress"
+          : "contexto_link_app_aliexpress";
+      } else if (rotuloCompartilhado.papel === "pc") {
+        motivo = "contexto_link_pc_aliexpress";
+      } else if (rotuloCompartilhado.papel === "moedas") {
+        motivo = "contexto_moedas";
+      }
+    } else if (mp === "shopee" && rotuloCompartilhado.papel === "produto") {
+      motivo = "contexto_link_produto_shopee";
+    } else if (["cupom", "resgate"].includes(rotuloCompartilhado.papel)) {
+      motivo = "contexto_cupom";
+    } else if (rotuloCompartilhado.papel === "produto") {
+      motivo = "contexto_produto";
+    }
+    return {
+      papelLink: rotuloCompartilhado.papelLink,
+      motivo
+    };
+  }
 
   if (mp === "shopee" && /\b(link\s+(?:do\s+)?produto|produto|confira|comprar|oferta aqui)\s*:?\s*$/.test(antes)) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "contexto_link_produto_shopee" };
@@ -372,6 +465,21 @@ function classificarMagalu(candidato = {}, evento = {}) {
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "magalu_sem_produto_confirmado", confianca: "baixa" };
 }
 
+function classificarAmazon(candidato = {}) {
+  const url = urlEstrutural(candidato);
+  const urlOriginal = texto(candidato.url || candidato.link?.url_expandida || candidato.link?.url_normalizada || candidato.link?.url_original || url);
+  try {
+    const parsed = new URL(url);
+    const caminhoProduto = /(?:^|\/)dp\/([a-z0-9]{10})(?:[/?#]|$)/i.test(parsed.pathname) ||
+      /(?:^|\/)gp\/product\/([a-z0-9]{10})(?:[/?#]|$)/i.test(parsed.pathname);
+    if (hostAmazonOficial(parsed.hostname) && caminhoProduto) {
+      return { papelLink: PAPEL_LINK.PRODUTO, motivo: "amazon_asin_url", confianca: "alta", urlProduto: urlOriginal };
+    }
+  } catch {}
+
+  return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "amazon_sem_produto_confirmado", confianca: "baixa" };
+}
+
 function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url = "", campo = "" } = {}) {
   const candidato = { url, campo, link };
   const mp = minusculo(marketplace || link.marketplace_detectado || "");
@@ -399,6 +507,7 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
   if (mp === "aliexpress") return classificarAliExpress(candidato, evento);
   if (mp === "awin" || mp === "kabum") return classificarAwinKabum(candidato, evento);
   if (mp === "magalu") return classificarMagalu(candidato, evento);
+  if (mp === "amazon") return classificarAmazon(candidato);
 
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "marketplace_sem_classificador", confianca: "baixa" };
 }
@@ -507,5 +616,6 @@ module.exports = {
   classificarCandidatosLinks,
   escolherProdutoPrincipal,
   resumoLinksClassificados,
-  extrairUrlKabumDeAwin
+  extrairUrlKabumDeAwin,
+  classificarRotuloContextualCompartilhado
 };

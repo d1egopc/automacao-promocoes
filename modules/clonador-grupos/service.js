@@ -1,6 +1,7 @@
 "use strict";
 
 const { criarHistoricoClonador } = require("./historico.service");
+const { classificarRotuloContextualCompartilhado } = require("../engine/link-role.service");
 
 const MAX_FONTES_ATIVAS = 4;
 const STATUS_BUFFER = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
@@ -164,35 +165,28 @@ function linhaAnteriorCurta(textoOriginal = "", inicioTexto = 0) {
   return Array.from(fonte.slice(inicioAnterior, fimAnterior)).slice(-96).join("").trim();
 }
 
-function papeisRotuloContextual(fragmento = "") {
+function papeisRotuloContextual(fragmento = "", marketplace = "") {
   const partes = String(fragmento || "").split(/[|]/).map(parte =>
     normalizarContextoOcorrencia(parte).replace(/^[^a-z0-9]+/, "").trim()
   ).filter(Boolean);
   const papeis = [];
 
   for (const parte of partes) {
-    if (/^(?:resgatar|resgate|ative|ativar|pegue|pegar)\s+(?:o\s+)?cupom\s*:?$/.test(parte) || /^resgate\s*:?$/.test(parte)) {
-      papeis.push({ papel: "resgate", motivo: "rotulo_resgate_cupom_local" });
+    const compartilhado = classificarRotuloContextualCompartilhado(parte, marketplace);
+    if (compartilhado) {
+      const motivosLocais = {
+        app: "rotulo_app_local",
+        pc: "rotulo_pc_local",
+        moedas: "rotulo_moedas_local",
+        resgate: "rotulo_resgate_cupom_local",
+        cupom: "rotulo_cupom_local",
+        produto: "rotulo_produto_local"
+      };
+      papeis.push({
+        papel: compartilhado.papel,
+        motivo: motivosLocais[compartilhado.papel] || compartilhado.motivo
+      });
       continue;
-    }
-    if (/^(?:aplique|aplicar)\s+(?:o\s+)?cupom\s*:?$/.test(parte) || /^(?:cupom|codigo)\s*:?$/.test(parte)) {
-      papeis.push({ papel: "cupom", motivo: "rotulo_cupom_local" });
-      continue;
-    }
-    if (/^(?:app|aplicativo|abra\s+(?:no\s+)?app)\s*:?$/.test(parte)) {
-      papeis.push({ papel: "app", motivo: "rotulo_app_local" });
-      continue;
-    }
-    if (/^(?:moedas?|coins?|use\s+(?:moedas?|coins?)|ganhe\s+(?:moedas?|coins?))\s*:?$/.test(parte)) {
-      papeis.push({ papel: "moedas", motivo: "rotulo_moedas_local" });
-      continue;
-    }
-    if (/^(?:link\s+)?(?:pc|computador|desktop)\s*:?$/.test(parte)) {
-      papeis.push({ papel: "pc", motivo: "rotulo_pc_local" });
-      continue;
-    }
-    if (/^(?:produto|comprar|confira|oferta|link\s+do\s+produto)\s*:?$/.test(parte)) {
-      papeis.push({ papel: "produto", motivo: "rotulo_produto_local" });
     }
   }
 
@@ -220,7 +214,8 @@ function classificarOcorrenciaContextualClonador({
   fimTexto = 0,
   linha = 0,
   textoOriginal = "",
-  contextoDisponivel = false
+  contextoDisponivel = false,
+  marketplace = ""
 } = {}) {
   if (contextoDisponivel !== true) {
     return { papelContextual: "desconhecido", motivo: "contexto_indisponivel", confianca: "baixa", evidencias: [] };
@@ -236,7 +231,7 @@ function classificarOcorrenciaContextualClonador({
     fontes.push({ valor: linhaAnteriorCurta(textoOriginal, inicioTexto), origem: "rotulo_linha_anterior", confianca: "media" });
   }
 
-  const sinais = fontes.flatMap(fonte => papeisRotuloContextual(fonte.valor).map(sinal => ({ ...sinal, ...fonte })));
+  const sinais = fontes.flatMap(fonte => papeisRotuloContextual(fonte.valor, marketplace).map(sinal => ({ ...sinal, ...fonte })));
   const papeis = new Set(sinais.map(sinal => sinal.papel));
   if (papeis.size !== 1) {
     return {
@@ -615,7 +610,11 @@ function criarServicoClonadorGrupos(deps = {}) {
         : String(textoOriginal || "").match(/https?:\/\/[^\s]+/g) || [];
       const links = normalizarLinksEntrada(linksCapturados);
       const linksOcorrencias = extrairOcorrenciasLinksPosicionais(textoOriginal, mensagemId).map(ocorrencia => {
-        const classificacao = classificarOcorrenciaContextualClonador({ ...ocorrencia, textoOriginal });
+        const classificacao = classificarOcorrenciaContextualClonador({
+          ...ocorrencia,
+          textoOriginal,
+          marketplace: texto(entrada.marketplace || entrada.marketplaceDetectado || "")
+        });
         return {
           ...ocorrencia,
           papelContextual: classificacao.papelContextual,
