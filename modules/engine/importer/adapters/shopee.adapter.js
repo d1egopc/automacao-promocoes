@@ -93,11 +93,18 @@ function detectarSuspeitaFator100(precoTextoRadar = "", precoAdapter = null) {
 }
 
 function extrairPrecoTextoRadarShopee(textoRadar = "") {
-  const linhas = String(textoRadar || "").split(/\r?\n/);
-  for (const linha of linhas) {
+  const fonte = String(textoRadar || "");
+  const linhas = fonte.split(/\r?\n/);
+  const linhasPrecoProduto = linhas.filter(linha => !/\b(cupom|resgate|voucher|cashback|frete|moedas?|off|desconto|limite|economia)\b/i.test(linha));
+  const precosPor = linhasPrecoProduto.flatMap(linha => Array.from(linha.matchAll(/\bpor\s*:?\s*(R\$\s*\d{1,5}(?:\.\d{3})*(?:,\d{1,2})?|R\$\s*\d{1,5}(?:\.\d{1,2})?)/gi)));
+  if (precosPor.length === 1) {
+    const preco = numeroPrecoShopeeAdapter(precosPor[0][1] || "");
+    if (preco !== null) return { texto: precosPor[0][1], valor: preco };
+  }
+
+  for (const linha of linhasPrecoProduto) {
     const textoLinha = texto(linha);
     if (!textoLinha || !/R\$\s*\d/i.test(textoLinha)) continue;
-    if (/\b(cupom|resgate|voucher|cashback|frete|moedas?|off|desconto|limite|economia)\b/i.test(textoLinha)) continue;
     const match = textoLinha.match(/R\$\s*\d{1,5}(?:\.\d{3})*(?:,\d{1,2})?|R\$\s*\d{1,5}(?:\.\d{1,2})?/i);
     const preco = numeroPrecoShopeeAdapter(match?.[0] || "");
     if (preco !== null) return { texto: match[0], valor: preco };
@@ -1223,6 +1230,13 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
   }
 
   const textoOriginalRadar = textoOriginalEvento(evento);
+  const comercialClonador = comercialCapturadoShopee({ evento, job });
+  const precoTextoCapturado = extrairPrecoTextoRadarShopee(textoOriginalRadar);
+  const precoComercialSoberano = comercialClonador
+    ? { precoAtual: comercialClonador.precoAtual, origem: "clonador_grupos" }
+    : (precoTextoCapturado.valor !== null
+      ? { precoAtual: precoTextoCapturado.valor, origem: "texto_radar" }
+      : null);
   const cacheImportacoesShopee = new Map();
   let produtoBase = null;
   let linkEscolhido = null;
@@ -1258,7 +1272,8 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
         contextoEngine: {
           jobId: job.id,
           eventoId: job.evento_id,
-          clienteId
+          clienteId,
+          ...(precoComercialSoberano ? { precoComercialSoberano } : {})
         }
       });
       cacheImportacoesShopee.set(urlCandidato, resultadoImportador);
@@ -1335,7 +1350,6 @@ async function importarShopeeEngine({ job = {}, evento = {}, links = [], deps = 
     itemId: produto.itemId || idsDetectados.itemId
   };
   const tituloValido = tituloShopeeValido(produto.titulo || produto.nome || "");
-  const comercialClonador = comercialCapturadoShopee({ evento, job });
   const precoEscolhido = comercialClonador
     ? {
       preco: comercialClonador.precoAtual,

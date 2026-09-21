@@ -425,11 +425,26 @@ return async function importarShopee(url, config) {
 
   function extrairPrecoTextoRadarShopee() {
     const texto = textoOriginalRadarShopee();
-    const por = Array.from(texto.matchAll(/\bPor\s*:?\s*R\$\s*[\d.]+(?:[,.]\d{1,2})?/gi)).map(m => m[0]);
+    const linhas = texto
+      .split(/\r?\n/)
+      .filter(linha => !/\b(cupom|resgate|voucher|cashback|frete|moedas?|off|desconto|limite|economia)\b/i.test(linha));
+    const por = linhas.flatMap(linha => Array.from(linha.matchAll(/\bPor\s*:?\s*R\$\s*[\d.]+(?:[,.]\d{1,2})?/gi)).map(m => m[0]));
     if (por.length === 1) return por[0];
 
-    const precos = Array.from(texto.matchAll(/R\$\s*[\d.]+(?:[,.]\d{1,2})?/gi)).map(m => m[0]);
-    return precos.length === 1 ? precos[0] : "";
+    for (const linha of linhas) {
+      const preco = linha.match(/R\$\s*[\d.]+(?:[,.]\d{1,2})?/i)?.[0] || "";
+      if (preco) return preco;
+    }
+
+    return "";
+  }
+
+  function precoComercialSoberanoEngineShopee() {
+    const contrato = config?.contextoEngine?.precoComercialSoberano;
+    const origem = String(contrato?.origem || "").trim().toLowerCase();
+    if (!["clonador_grupos", "texto_radar"].includes(origem)) return null;
+    const precoAtual = normalizarPrecoApiShopee(contrato?.precoAtual);
+    return precoAtual === null ? null : { precoAtual, origem };
   }
 
   function logPrecoOrigemShopee({ titulo = "", origemPreco = "", valorBruto = "", valorNormalizado = "" } = {}) {
@@ -854,7 +869,7 @@ const precosHtml = [...html.matchAll(/R\$\s*[\d.]+,\d{2}/g)]
 
 const variacaoPrecoHtml = extrairFaixaPrecosHtmlShopee(precosHtml);
 const precoBrutoHtml = dadosHtml.preco || precosHtml[0] || "";
-const origemPrecoHtml = dadosHtml.preco ? "jsonLd.offers.price" : (precosHtml.length ? "html_regex_rs" : "html_sem_preco");
+let origemPrecoHtml = dadosHtml.preco ? "jsonLd.offers.price" : (precosHtml.length ? "html_regex_rs" : "html_sem_preco");
 let precoAtual = normalizarPrecoWebShopee(dadosHtml.preco);
 
 if (!precoAtual && precosHtml.length) {
@@ -862,17 +877,25 @@ if (!precoAtual && precosHtml.length) {
   precoAtual = normalizarPrecoWebShopee(unicos[0]);
 }
 
+const precoComercialSoberanoHtml = precoComercialSoberanoEngineShopee();
+if (precoComercialSoberanoHtml) {
+  precoAtual = precoComercialSoberanoHtml.precoAtual.toFixed(2).replace(".", ",");
+  origemPrecoHtml = `comercial_capturado_${precoComercialSoberanoHtml.origem}`;
+}
+
 const precoAuditoriaHtml = criarPrecoAuditoriaShopee({
   precoBruto: precoBrutoHtml,
   precoNormalizado: precoAtual,
   origemPreco: origemPrecoHtml,
   precoOrigem: origemPrecoHtml,
-  motivoEscolhaPreco: dadosHtml.preco ? "preco_jsonld_normalizado_como_valor_monetario" : "primeiro_preco_html_rs_normalizado",
+  motivoEscolhaPreco: precoComercialSoberanoHtml
+    ? "preco_comercial_capturado_soberano"
+    : (dadosHtml.preco ? "preco_jsonld_normalizado_como_valor_monetario" : "primeiro_preco_html_rs_normalizado"),
   campoPrecoUsado: origemPrecoHtml,
   tipoCampoPrecoUsado: tipoPrecoShopee(precoBrutoHtml),
   precoAntesNormalizacao: precoBrutoHtml,
   precoDepoisNormalizacao: precoAtual,
-  normalizadorAplicado: "normalizarPrecoWebShopee",
+  normalizadorAplicado: precoComercialSoberanoHtml ? "normalizarPrecoApiShopee_contexto_engine" : "normalizarPrecoWebShopee",
   precoMin: variacaoPrecoHtml.precoMin,
   precoMax: variacaoPrecoHtml.precoMax,
   precoAmbiguo: variacaoPrecoHtml.precoAmbiguo,
@@ -880,7 +903,7 @@ const precoAuditoriaHtml = criarPrecoAuditoriaShopee({
   variacaoComprovada: variacaoPrecoHtml.variacaoComprovada
 });
 
-if (variacaoPrecoHtml.precoAmbiguo && !dadosHtml.preco) {
+if (variacaoPrecoHtml.precoAmbiguo && !dadosHtml.preco && !precoComercialSoberanoHtml) {
   return {
     ok: false,
     marketplace: "shopee",
@@ -1022,8 +1045,12 @@ const temMax = Number.isFinite(maxNumero) && maxNumero > 0;
   let precoOrigemFinal = precoApiBruto ? "api_productOfferV2.priceMin" : "html_fallback";
   const precoRadarTexto = extrairPrecoTextoRadarShopee();
   const precoRadar = normalizarPrecoWebShopee(precoRadarTexto);
+  const precoComercialSoberanoApi = precoComercialSoberanoEngineShopee();
 
-  if (precoRadar) {
+  if (precoComercialSoberanoApi) {
+    precoAtual = precoComercialSoberanoApi.precoAtual.toFixed(2).replace(".", ",");
+    precoOrigemFinal = `comercial_capturado_${precoComercialSoberanoApi.origem}`;
+  } else if (precoRadar) {
     precoAtual = precoRadar;
     precoOrigemFinal = "texto_radar_preco_unico_claro";
   } else {
@@ -1076,12 +1103,16 @@ const precoAuditoriaApi = criarPrecoAuditoriaShopee({
   precoNormalizado: precoAtual,
   origemPreco: precoOrigemFinal,
   precoOrigem: precoOrigemFinal,
-  motivoEscolhaPreco: "preco_radar_explicito_confiavel",
+  motivoEscolhaPreco: precoComercialSoberanoApi
+    ? "preco_comercial_capturado_soberano"
+    : "preco_radar_explicito_confiavel",
   campoPrecoUsado: precoOrigemFinal,
   tipoCampoPrecoUsado: tipoPrecoShopee(precoApiBruto || precoHtmlFallbackBruto),
   precoAntesNormalizacao: precoApiBruto || precoHtmlFallbackBruto,
   precoDepoisNormalizacao: precoAtual,
-  normalizadorAplicado: precoOrigemFinal === "api_productOfferV2.priceMin" ? "normalizarPrecoApiShopee" : "normalizarPrecoWebShopee",
+  normalizadorAplicado: precoComercialSoberanoApi
+    ? "normalizarPrecoApiShopee_contexto_engine"
+    : (precoOrigemFinal === "api_productOfferV2.priceMin" ? "normalizarPrecoApiShopee" : "normalizarPrecoWebShopee"),
   precoMin: variacaoPreco.precoMin,
   precoMax: variacaoPreco.precoMax,
   precoPix: pixComprovado.precoPix,
