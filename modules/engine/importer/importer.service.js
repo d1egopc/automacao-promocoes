@@ -1048,19 +1048,20 @@ function imagemMlstaticHttpsLocal(valor = "") {
 const ML_WORKER_RESULT_TTL_MS = 10 * 60 * 1000;
 
 function cacheImagemMercadoLivreLocalValido(cache = {}, produtoId = "") {
-  const prova = cache?.proof && typeof cache.proof === "object" ? cache.proof : {};
-  const checkedAtMs = Date.parse(prova.checkedAt || cache.validatedAt || "");
+  const cacheSeguro = cache && typeof cache === "object" && !Array.isArray(cache) ? cache : {};
+  const prova = cacheSeguro.proof && typeof cacheSeguro.proof === "object" ? cacheSeguro.proof : {};
+  const checkedAtMs = Date.parse(prova.checkedAt || cacheSeguro.validatedAt || "");
   const agoraMs = Date.now();
-  return normalizarTexto(cache?.marketplace).toLowerCase() === "mercadolivre"
-    && normalizarTexto(cache?.productId).toUpperCase() === normalizarTexto(produtoId).toUpperCase()
-    && imagemMlstaticHttpsLocal(cache?.imageUrl)
+  return normalizarTexto(cacheSeguro.marketplace).toLowerCase() === "mercadolivre"
+    && normalizarTexto(cacheSeguro.productId).toUpperCase() === normalizarTexto(produtoId).toUpperCase()
+    && imagemMlstaticHttpsLocal(cacheSeguro.imageUrl)
     && normalizarTexto(prova.provenance) === "local_worker.ml_image_v1"
     && normalizarTexto(prova.productIdObserved).toUpperCase() === normalizarTexto(produtoId).toUpperCase()
     && prova.sameProductObject === true
     && Number.isFinite(checkedAtMs)
     && checkedAtMs <= agoraMs + 30_000
     && agoraMs - checkedAtMs < ML_WORKER_RESULT_TTL_MS
-    && (!cache.expiresAt || Date.parse(cache.expiresAt) > Date.now());
+    && (!cacheSeguro.expiresAt || Date.parse(cacheSeguro.expiresAt) > Date.now());
 }
 
 function decodificarPayloadMercadoLivre(valor = "") {
