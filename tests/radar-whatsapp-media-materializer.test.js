@@ -119,6 +119,24 @@ function criarStorage() {
   }
 
   {
+    const radarMirror = {
+      preco: { atualCapturado: 79.9 },
+      midia: { imagemOriginal: "https://mmg.whatsapp.net/imagem-original" }
+    };
+
+    for (const materializacao of [null, undefined, {}, "invalida"]) {
+      const resultado = aplicarMidiaMaterializadaRadarMirror(radarMirror, materializacao);
+      assert.strictEqual(resultado, radarMirror);
+      assert.deepStrictEqual(resultado, radarMirror);
+    }
+
+    assert.deepStrictEqual(
+      aplicarMidiaMaterializadaRadarMirror(null, null),
+      {}
+    );
+  }
+
+  {
     const logger = criarLogger();
     let downloads = 0;
     const resultado = await materializarImagemRadarWhatsApp({

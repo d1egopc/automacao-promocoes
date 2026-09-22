@@ -185,9 +185,10 @@ async function materializarImagemRadarWhatsApp({
 
 function aplicarMidiaMaterializadaRadarMirror(radarMirror = {}, materializacao = {}) {
   const mirror = objetoSeguro(radarMirror);
+  const materializacaoSegura = objetoSeguro(materializacao);
   const midiaAtual = objetoSeguro(mirror.midia);
-  const midiaMaterializada = objetoSeguro(materializacao.midia);
-  if (!materializacao.ok || !Object.keys(midiaMaterializada).length) return mirror;
+  const midiaMaterializada = objetoSeguro(materializacaoSegura.midia);
+  if (!materializacaoSegura.ok || !Object.keys(midiaMaterializada).length) return mirror;
 
   return {
     ...mirror,
