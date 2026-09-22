@@ -382,6 +382,19 @@ function criarRetornoBase(ok = false, ofertaId = "", erro = "") {
   };
 }
 
+function criarRetornoBloqueioGlobal(ofertaId = "", motivoGlobal = "") {
+  const motivo = texto(motivoGlobal);
+  return {
+    ok: false,
+    ofertaId,
+    enviados: 0,
+    erros: motivo ? 1 : 0,
+    creditosDebitados: 0,
+    motivoGlobal: motivo,
+    resultados: []
+  };
+}
+
 function destinosPorClienteAtual(deps = {}) {
   if (typeof deps.getDestinosPorCliente === "function") {
     return deps.getDestinosPorCliente() || {};
@@ -410,7 +423,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       credenciais: integracao.credenciais || integracao || {},
       exigirAssinatura: true
     });
-    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
+    if (!afiliacao.ok) return criarRetornoBloqueioGlobal(oferta.id || idOferta, "afiliacao_workspace_incompleta");
   }
   if (texto(oferta.marketplace).toLowerCase() === "aliexpress") {
     const integracao = typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(cliente, "aliexpress") || {} : {};
@@ -419,7 +432,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       credenciais: integracao.credenciais || integracao || {},
       exigirAssinatura: true
     });
-    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
+    if (!afiliacao.ok) return criarRetornoBloqueioGlobal(oferta.id || idOferta, "afiliacao_workspace_incompleta");
   }
   if (texto(oferta.marketplace).toLowerCase() === "magalu") {
     if (texto(oferta.imagem) && !imagemMagaluPublicaSegura(oferta.imagem)) {
@@ -433,7 +446,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       clienteId: cliente,
       promoterId: credenciais.promoterId || integracao.promoterId || ""
     });
-    if (!afiliacao.ok) return criarRetornoBase(false, oferta.id || idOferta, "afiliacao_workspace_incompleta");
+    if (!afiliacao.ok) return criarRetornoBloqueioGlobal(oferta.id || idOferta, "afiliacao_workspace_incompleta");
   }
 
   const plano = typeof deps.resolverPlanoManualV2 === "function"

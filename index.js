@@ -24520,6 +24520,7 @@ function resolverPlanoManualV2Scheduler(clienteId = "admin") {
 function iniciarManualV2SchedulerOperacional() {
   const resultado = iniciarManualV2Scheduler({
     getDestinosPorCliente: () => destinosPorCliente,
+    getIntegracaoCliente,
     configsPorCliente,
     sessoes,
     statusSessao,

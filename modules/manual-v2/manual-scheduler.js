@@ -60,6 +60,19 @@ function erroResumo(resultados = []) {
     .slice(0, 1000);
 }
 
+function motivoTecnicoSeguro(erro) {
+  const codigo = texto(erro?.codigo || erro?.motivo);
+  if (/^[a-z0-9_.:-]{1,120}$/i.test(codigo)) return codigo;
+  const mensagem = texto(erro?.message);
+  if (/^(manual_v2_|oferta_manual_v2_)[a-z0-9_.:-]{1,100}$/i.test(mensagem)) return mensagem;
+  return "manual_v2_agendamento_processamento_falhou";
+}
+
+function resumoResultado(resultado = {}) {
+  const motivoGlobal = texto(resultado.motivoGlobal);
+  return motivoGlobal ? `Motivo: ${motivoGlobal}` : erroResumo(resultado.resultados || []);
+}
+
 function destinoIdsAgendados(oferta = {}) {
   const ids = lista(oferta.destinosIds).map(texto).filter(Boolean);
   if (ids.length) return ids;
@@ -87,7 +100,7 @@ function retornoErro(oferta = {}, motivo = "") {
 }
 
 function envioManualDoResultado(resultado = {}, oferta = {}, solicitadoEm = "", concluidoEm = "") {
-  const resumo = erroResumo(resultado.resultados || []);
+  const resumo = resumoResultado(resultado);
   return {
     solicitadoEm,
     concluidoEm,
@@ -96,7 +109,65 @@ function envioManualDoResultado(resultado = {}, oferta = {}, solicitadoEm = "", 
     enviados: inteiro(resultado.enviados),
     erros: inteiro(resultado.erros),
     creditosDebitados: inteiro(resultado.creditosDebitados),
+    motivoGlobal: texto(resultado.motivoGlobal),
     erroResumo: resumo
+  };
+}
+
+function finalizarFalhaInesperada(clienteId = "admin", oferta = {}, deps = {}, erro = null, solicitadoEm = "") {
+  const storage = resolverDeps(deps);
+  const cliente = texto(clienteId) || "admin";
+  const ofertaId = texto(oferta.id);
+  const motivo = motivoTecnicoSeguro(erro);
+  const concluidoEm = agoraIso(deps);
+  const envioManual = envioManualDoResultado({
+    enviados: 0,
+    erros: 1,
+    creditosDebitados: 0,
+    motivoGlobal: motivo,
+    resultados: []
+  }, oferta, solicitadoEm || concluidoEm, concluidoEm);
+  const errosRecuperacao = [];
+  let ofertaFinal = null;
+
+  try {
+    storage.atualizarMetadadosEnvioManualV2(cliente, ofertaId, {
+      status: "erro",
+      enviadoEm: "",
+      envioManual
+    }, storage.storageOptions);
+  } catch (erroEnvio) {
+    errosRecuperacao.push(motivoTecnicoSeguro(erroEnvio));
+  }
+
+  try {
+    ofertaFinal = storage.atualizarMetadadosAgendamentoManualV2(cliente, ofertaId, {
+      status: "erro",
+      agendamentoErroResumo: envioManual.erroResumo,
+      agendamentoAtualizadoEm: concluidoEm,
+      limparLock: true
+    }, storage.storageOptions);
+  } catch (erroAgendamento) {
+    errosRecuperacao.push(motivoTecnicoSeguro(erroAgendamento));
+  }
+
+  if (errosRecuperacao.length && typeof deps.logger?.error === "function") {
+    deps.logger.error("[MANUAL-V2-SCHEDULER] recuperacao_item_falhou", {
+      clienteId: cliente,
+      ofertaId,
+      motivo,
+      errosRecuperacao
+    });
+  }
+
+  return {
+    ok: false,
+    processado: true,
+    ofertaId,
+    motivo,
+    oferta: ofertaFinal,
+    recuperacaoPersistenciaFalhou: errosRecuperacao.length > 0,
+    errosRecuperacao
   };
 }
 
@@ -200,7 +271,7 @@ async function processarOfertaAgendadaManualV2({ clienteId = "admin", ofertaId =
 
     const sucesso = inteiro(resultado?.enviados) > 0;
     const concluidoEm = agoraIso(deps);
-    const resumo = erroResumo(resultado?.resultados || []);
+    const resumo = resumoResultado(resultado || {});
     const envioManual = envioManualDoResultado(resultado || {}, revalidada, solicitadoEm, concluidoEm);
 
     storage.atualizarMetadadosEnvioManualV2(cliente, idOferta, {
@@ -223,6 +294,9 @@ async function processarOfertaAgendadaManualV2({ clienteId = "admin", ofertaId =
       resultado,
       oferta: ofertaFinal
     };
+  } catch (erro) {
+    const ofertaAtual = storage.buscarOfertaManualV2(cliente, idOferta, storage.storageOptions) || ofertaInicial;
+    return finalizarFalhaInesperada(cliente, ofertaAtual, deps, erro, solicitadoEm);
   } finally {
     locksMemoria.delete(chave);
   }
@@ -236,7 +310,11 @@ async function processarAgendamentosManuaisV2Cliente({ clienteId = "admin" } = {
   const resultados = [];
 
   for (const oferta of ofertas) {
-    resultados.push(await processarOfertaAgendadaManualV2({ clienteId: cliente, ofertaId: oferta.id }, deps));
+    try {
+      resultados.push(await processarOfertaAgendadaManualV2({ clienteId: cliente, ofertaId: oferta.id }, deps));
+    } catch (erro) {
+      resultados.push(finalizarFalhaInesperada(cliente, oferta, deps, erro));
+    }
   }
 
   return {

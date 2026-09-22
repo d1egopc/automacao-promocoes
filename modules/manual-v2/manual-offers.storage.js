@@ -258,6 +258,7 @@ function sanitizarEnvioManual(envioManual = {}) {
     creditosDebitados: usarContagemSanitizada
       ? Math.min(inteiro(envioManual.creditosDebitados), enviadosSanitizados)
       : inteiro(envioManual.creditosDebitados),
+    motivoGlobal: texto(envioManual.motivoGlobal).slice(0, 500),
     erroResumo: texto(envioManual.erroResumo).slice(0, 1000)
   };
 }

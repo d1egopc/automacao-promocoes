@@ -612,7 +612,9 @@ function criarOferta(clienteId, id, extra = {}) {
           destinosIds: ["wa_ok"]
         });
         assert.strictEqual(respostaShopeeSemIntegracao.status, 409);
-        assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.resultados[0].erro, "afiliacao_workspace_incompleta");
+        assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.motivoGlobal, "afiliacao_workspace_incompleta");
+        assert.deepStrictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.resultados, []);
+        assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.erroResumo, "Motivo: afiliacao_workspace_incompleta");
 
         integracoesAtuais = { aliexpress: { credenciais: credenciaisAli } };
         const ofertaAliOk = criarOferta("cliente_a", "oferta_ali_workspace_ok", {
@@ -654,7 +656,9 @@ function criarOferta(clienteId, id, extra = {}) {
           destinosIds: ["wa_ok"]
         });
         assert.strictEqual(respostaAliSemIntegracao.status, 409);
-        assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.resultados[0].erro, "afiliacao_workspace_incompleta");
+        assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.motivoGlobal, "afiliacao_workspace_incompleta");
+        assert.deepStrictEqual(respostaAliSemIntegracao.body.oferta.envioManual.resultados, []);
+        assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.erroResumo, "Motivo: afiliacao_workspace_incompleta");
         assert.strictEqual(enviosReais, 2, "somente ofertas com integracao valida devem chegar ao sender");
       } finally {
         await new Promise((resolve) => serverReal.close(resolve));

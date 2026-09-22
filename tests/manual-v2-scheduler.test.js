@@ -14,6 +14,9 @@ const {
 const {
   enviarOfertaManualV2
 } = require("../modules/manual-v2/manual-dispatcher");
+const {
+  criarProvaAfiliacaoWorkspaceShopee
+} = require("../modules/marketplaces/shopee/afiliacao-workspace");
 
 const NOW = "2026-08-15T12:00:00.000Z";
 const storageOptions = { now: () => NOW };
@@ -262,6 +265,100 @@ function assertSemSegredos(valor) {
   }
 
   {
+    const clienteId = "cliente_power_on_runtime";
+    const oferta = agendarOferta(clienteId, "oferta_power_on_runtime", "2026-08-15T11:55:00.000Z", {
+      destinosIds: ["destino_wa"],
+      destinosAgendados: [{
+        id: "destino_wa",
+        nome: "Grupo Ofertas",
+        tipo: "whatsapp",
+        ativo: false,
+        utilizavel: false,
+        motivoIndisponivel: "Destino inativo",
+        identificacaoVisual: "Grupo Ofertas"
+      }]
+    });
+    const estadoAtual = {
+      [clienteId]: [{
+        id: "destino_wa",
+        nome: "Grupo Ofertas",
+        tipo: "whatsapp",
+        ativo: true,
+        conexaoId: "sessao_a",
+        gruposWhatsapp: ["120363@g.us"]
+      }]
+    };
+    const envios = [];
+    const resposta = await processarOfertaAgendadaManualV2({ clienteId, ofertaId: oferta.id }, depsScheduler(enviarOfertaManualV2, {
+      getDestinosPorCliente: () => estadoAtual,
+      sessoes: { sessao_a: { id: "sock_a" } },
+      statusSessao: { sessao_a: "open" },
+      plano: { recursos: { whatsapp: true } },
+      usuarioTemCreditos: () => true,
+      debitarCreditos: () => true,
+      montarMensagemOferta: () => "MSG",
+      enviarWhatsApp: async (payload) => { envios.push(payload); }
+    }));
+
+    assert.strictEqual(resposta.ok, true, "snapshot OFF nao deve prevalecer sobre destino atual ON");
+    assert.strictEqual(envios.length, 1);
+    assert.strictEqual(storage.buscarOfertaManualV2(clienteId, oferta.id).status, "enviada");
+  }
+
+  {
+    const clienteId = "cliente_shopee_scheduler_workspace";
+    const credenciais = { appId: "18362140789", secret: "segredo_scheduler" };
+    const urlAfiliada = "https://s.shopee.com.br/workspace-ok";
+    const prova = criarProvaAfiliacaoWorkspaceShopee({
+      clienteId,
+      credenciais,
+      urlOriginal: "https://shopee.com.br/product/111/222",
+      urlAfiliadaWorkspace: urlAfiliada,
+      urlFinalExpandida: "https://shopee.com.br/product/111/222?mmp_pid=an_18362140789",
+      papel: "produto",
+      motivoConversao: "fixture_scheduler_workspace_api"
+    });
+    const oferta = agendarOferta(clienteId, "oferta_shopee_scheduler_workspace", "2026-08-15T11:55:00.000Z", {
+      oferta: {
+        marketplace: "shopee",
+        urlOriginal: "https://shopee.com.br/product/111/222",
+        urlAfiliada,
+        afiliacaoWorkspaceVerificada: prova
+      }
+    });
+    const integracoesConsultadas = [];
+    const envios = [];
+    const resposta = await processarOfertaAgendadaManualV2({ clienteId, ofertaId: oferta.id }, depsScheduler(enviarOfertaManualV2, {
+      getIntegracaoCliente: (workspaceId, marketplace) => {
+        integracoesConsultadas.push({ workspaceId, marketplace });
+        return { credenciais };
+      },
+      getDestinosPorCliente: () => ({
+        [clienteId]: [{
+          id: "destino_wa",
+          nome: "Grupo Ofertas",
+          tipo: "whatsapp",
+          ativo: true,
+          conexaoId: "sessao_a",
+          gruposWhatsapp: ["120363@g.us"]
+        }]
+      }),
+      sessoes: { sessao_a: { id: "sock_a" } },
+      statusSessao: { sessao_a: "open" },
+      plano: { recursos: { whatsapp: true } },
+      usuarioTemCreditos: () => true,
+      debitarCreditos: () => true,
+      montarMensagemOferta: () => "MSG SHOPEE",
+      enviarWhatsApp: async (payload) => { envios.push(payload); }
+    }));
+
+    assert.strictEqual(resposta.ok, true, "scheduler deve validar a integracao do workspace e enviar");
+    assert.deepStrictEqual(integracoesConsultadas, [{ workspaceId: clienteId, marketplace: "shopee" }]);
+    assert.strictEqual(envios.length, 1);
+    assert.strictEqual(storage.buscarOfertaManualV2(clienteId, oferta.id).envioManual.motivoGlobal, "");
+  }
+
+  {
     const oferta = agendarOferta("cliente_antigo", "oferta_antiga", "2026-08-15T11:00:00.000Z");
     const chamadas = [];
     const resposta = await processarOfertaAgendadaManualV2({ clienteId: "cliente_antigo", ofertaId: oferta.id }, depsScheduler(async (entrada) => {
@@ -292,6 +389,35 @@ function assertSemSegredos(valor) {
     assert.strictEqual(persistida.envioManual.erroResumo, "Grupo Ofertas: falha_mock");
     assert.strictEqual(persistida.agendamentoErroResumo, "Grupo Ofertas: falha_mock");
     assertSemSegredos(persistida);
+  }
+
+  {
+    const clienteId = "cliente_isolamento_por_item";
+    const ofertaA = agendarOferta(clienteId, "oferta_a_explode", "2026-08-15T11:55:00.000Z");
+    const ofertaB = agendarOferta(clienteId, "oferta_b_valida", "2026-08-15T11:56:00.000Z");
+    const ofertaC = agendarOferta(clienteId, "oferta_c_valida", "2026-08-15T11:57:00.000Z");
+    const examinadas = [];
+    const resposta = await processarAgendamentosManuaisV2Cliente({ clienteId }, depsScheduler(async (entrada) => {
+      examinadas.push(entrada.ofertaId);
+      if (entrada.ofertaId === ofertaA.id) throw new Error("segredo tecnico nao deve persistir");
+      return sucesso(entrada.destinosIds);
+    }, {
+      listarOfertasManuaisV2: () => [ofertaA, ofertaB, ofertaC]
+    }));
+
+    assert.deepStrictEqual(examinadas, [ofertaA.id, ofertaB.id, ofertaC.id]);
+    assert.strictEqual(resposta.resultados.length, 3);
+    const persistidaA = storage.buscarOfertaManualV2(clienteId, ofertaA.id);
+    const persistidaB = storage.buscarOfertaManualV2(clienteId, ofertaB.id);
+    const persistidaC = storage.buscarOfertaManualV2(clienteId, ofertaC.id);
+    assert.strictEqual(persistidaA.status, "erro");
+    assert.strictEqual(persistidaA.agendamentoLockId || "", "");
+    assert.strictEqual(persistidaA.agendamentoLockEm || "", "");
+    assert.strictEqual(persistidaA.envioManual.motivoGlobal, "manual_v2_agendamento_processamento_falhou");
+    assert.strictEqual(persistidaA.envioManual.erroResumo, "Motivo: manual_v2_agendamento_processamento_falhou");
+    assert.ok(!JSON.stringify(persistidaA).includes("segredo tecnico"));
+    assert.strictEqual(persistidaB.status, "enviada");
+    assert.strictEqual(persistidaC.status, "enviada");
   }
 
   {
@@ -432,6 +558,10 @@ function assertSemSegredos(valor) {
     assert.ok(
       bootstrapScheduler.includes("aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta"),
       "bootstrap do scheduler deve injetar o servico oficial de Identidade Visual"
+    );
+    assert.ok(
+      bootstrapScheduler.includes("getIntegracaoCliente,"),
+      "bootstrap operacional deve injetar o resolver oficial de integracao do workspace"
     );
   }
 

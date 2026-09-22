@@ -16,11 +16,17 @@ const {
   bloquearProdutoSemItemShopee,
   urlAfiliadaSeguraShopee
 } = require("../modules/manual-v2/adapters/shopee.manual.adapter");
+const {
+  validarOfertaAfiliacaoWorkspaceShopee
+} = require("../modules/marketplaces/shopee/afiliacao-workspace");
+const {
+  enviarOfertaManualV2
+} = require("../modules/manual-v2/manual-dispatcher");
 
 const agora = "2026-08-14T13:05:00.000Z";
 const idFactory = () => "manual_v2_shopee";
 
-function criarDeps(produto, chamadas = []) {
+function criarDeps(produto, chamadas = [], extras = {}) {
   return {
     clienteId: "cliente_shopee",
     now: agora,
@@ -43,7 +49,11 @@ function criarDeps(produto, chamadas = []) {
         temContextoAutomatico: Boolean(config?.contextoEngine || config?.contextoRadar || config?.textoRadar)
       });
       return produto;
-    }
+    },
+    async expandirShortlinkShopee() {
+      return "https://shopee.com.br/product/111/222?mmp_pid=an_app_shopee&utm_source=an_app_shopee";
+    },
+    ...extras
   };
 }
 
@@ -129,6 +139,14 @@ function criarDeps(produto, chamadas = []) {
   assert.strictEqual(oferta.fonteImportacao.adapter, "shopee.manual.adapter");
   assert.strictEqual(oferta.fonteImportacao.parseOnly, true);
   assert.ok(oferta.fonteImportacao.camposConfiaveis.includes("precoAtual"));
+  assert.strictEqual(oferta.afiliacaoWorkspaceVerificada.conversaoStatus, "convertida");
+  assert.strictEqual(oferta.afiliacaoWorkspaceVerificada.affiliateIdDetectado, "an_app_shopee");
+  assert.ok(oferta.afiliacaoWorkspaceVerificada.urlFinalExpandida.includes("mmp_pid=an_app_shopee"));
+  assert.strictEqual(validarOfertaAfiliacaoWorkspaceShopee(oferta, {
+    clienteId: "cliente_shopee",
+    credenciais: { appId: "app_shopee", secret: "secret_shopee" },
+    exigirAssinatura: true
+  }).ok, true, "shortlink expandido com ownership do workspace deve gerar prova valida");
   assert.deepStrictEqual(chamadas, [
     {
       tipo: "getIntegracaoCliente",
@@ -143,6 +161,46 @@ function criarDeps(produto, chamadas = []) {
       temContextoAutomatico: false
     }
   ]);
+}
+
+{
+  const urlCurta = "https://s.shopee.com.br/origem-crua";
+  const oferta = await importarShopeeManualV2("https://shopee.com.br/product/111/777", criarDeps({
+    marketplace: "shopee",
+    linkOriginal: "https://shopee.com.br/product/111/777",
+    productLink: "https://shopee.com.br/product/111/777",
+    offerLink: urlCurta,
+    titulo: "Produto sem resolucao do shortlink",
+    precoAtual: "79,90",
+    imagem: "https://cf.shopee.com.br/produto-777.jpg",
+    itemId: "777",
+    shopId: "111"
+  }, [], {
+    expandirShortlinkShopee: async () => ""
+  }));
+
+  assert.strictEqual(oferta.urlAfiliada, urlCurta, "URL curta permanece apenas como materia-prima da oferta");
+  assert.strictEqual(oferta.afiliacaoWorkspaceVerificada.urlFinalExpandida, "");
+  assert.strictEqual(oferta.afiliacaoWorkspaceVerificada.conversaoStatus, "falhou");
+  assert.strictEqual(validarOfertaAfiliacaoWorkspaceShopee(oferta, {
+    clienteId: "cliente_shopee",
+    credenciais: { appId: "app_shopee", secret: "secret_shopee" },
+    exigirAssinatura: true
+  }).ok, false, "shortlink sem ownership resolvido deve permanecer fail-closed");
+
+  let envios = 0;
+  const retorno = await enviarOfertaManualV2({
+    clienteId: "cliente_shopee",
+    ofertaId: oferta.id,
+    destinosIds: ["destino_wa"]
+  }, {
+    buscarOfertaManualV2: () => oferta,
+    getIntegracaoCliente: () => ({ credenciais: { appId: "app_shopee", secret: "secret_shopee" } }),
+    enviarWhatsApp: async () => { envios += 1; }
+  });
+  assert.strictEqual(retorno.motivoGlobal, "afiliacao_workspace_incompleta");
+  assert.deepStrictEqual(retorno.resultados, []);
+  assert.strictEqual(envios, 0, "shortlink cru sem ownership nao pode chegar ao sender");
 }
 
 {

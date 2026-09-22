@@ -124,7 +124,8 @@ async function testarManualNuncaEnviaNemDebitaSemProva() {
     debitarCreditos: () => { creditos += 1; return true; }
   });
   assert.strictEqual(retorno.ok, false);
-  assert.strictEqual(retorno.resultados[0].erro, "afiliacao_workspace_incompleta");
+  assert.strictEqual(retorno.motivoGlobal, "afiliacao_workspace_incompleta");
+  assert.deepStrictEqual(retorno.resultados, [], "bloqueio global nao pode fabricar destino");
   assert.strictEqual(envios, 0);
   assert.strictEqual(creditos, 0);
 }
@@ -146,7 +147,8 @@ async function testarManualRejeitaProvaForjadaEAceitaProvaAssinada() {
     debitarCreditos: () => { creditos += 1; return true; }
   });
   assert.strictEqual(retorno.ok, false);
-  assert.strictEqual(retorno.resultados[0].erro, "afiliacao_workspace_incompleta");
+  assert.strictEqual(retorno.motivoGlobal, "afiliacao_workspace_incompleta");
+  assert.deepStrictEqual(retorno.resultados, [], "prova forjada e bloqueio global, nao resultado de destino");
   assert.strictEqual(envios, 0);
   assert.strictEqual(creditos, 0);
 

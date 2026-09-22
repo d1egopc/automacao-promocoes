@@ -243,7 +243,8 @@ async function main() {
     montarMensagemOferta: () => "nao deveria"
   });
   assert.strictEqual(bloqueada.ok, false);
-  assert.strictEqual(bloqueada.resultados[0].erro, "afiliacao_workspace_incompleta");
+  assert.strictEqual(bloqueada.motivoGlobal, "afiliacao_workspace_incompleta");
+  assert.deepStrictEqual(bloqueada.resultados, []);
   console.log("manual-v2-magalu.test.js: ok");
 }
 

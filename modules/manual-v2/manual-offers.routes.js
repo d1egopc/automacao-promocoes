@@ -729,7 +729,8 @@ function criarRotasManualV2(deps = {}) {
 
       const concluidoEm = agoraIso(deps);
       const algumSucesso = Number(resultado?.enviados || 0) > 0;
-      const resumoErro = erroResumo(resultado?.resultados || []);
+      const motivoGlobal = texto(resultado?.motivoGlobal);
+      const resumoErro = motivoGlobal ? `Motivo: ${motivoGlobal}` : erroResumo(resultado?.resultados || []);
       const envioManual = {
         solicitadoEm,
         concluidoEm,
@@ -738,6 +739,7 @@ function criarRotasManualV2(deps = {}) {
         enviados: Number(resultado?.enviados || 0),
         erros: Number(resultado?.erros || 0),
         creditosDebitados: Number(resultado?.creditosDebitados || 0),
+        motivoGlobal,
         erroResumo: resumoErro
       };
       const ofertaFinal = storage.atualizarMetadadosEnvioManualV2(clienteId, ofertaId, {
@@ -769,6 +771,7 @@ function criarRotasManualV2(deps = {}) {
           erros: envioPersistido.erros,
           creditosDebitados: envioPersistido.creditosDebitados,
           resultados: envioPersistido.resultados,
+          motivoGlobal: envioPersistido.motivoGlobal,
           erroResumo: envioPersistido.erroResumo
         }
       });

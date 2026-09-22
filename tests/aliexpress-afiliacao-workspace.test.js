@@ -233,7 +233,8 @@ async function testarManualRejeitaLinkForjadoEExigeTodosOsPapeis() {
     debitarCreditos: () => { creditos += 1; return true; }
   });
   assert.strictEqual(retorno.ok, false);
-  assert.strictEqual(retorno.resultados[0].erro, "afiliacao_workspace_incompleta");
+  assert.strictEqual(retorno.motivoGlobal, "afiliacao_workspace_incompleta");
+  assert.deepStrictEqual(retorno.resultados, []);
   assert.strictEqual(envios, 0);
   assert.strictEqual(creditos, 0);
 

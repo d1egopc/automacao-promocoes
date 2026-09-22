@@ -11,6 +11,9 @@ const {
 const {
   criarProvaAfiliacaoWorkspaceShopee
 } = require("../../marketplaces/shopee/afiliacao-workspace");
+const {
+  expandirShortlinkShopeeManualV2
+} = require("../shopee-shortlink");
 
 const ADAPTER_SHOPEE_MANUAL_V2 = "shopee.manual.adapter";
 
@@ -361,9 +364,12 @@ async function importarShopeeManualV2(urlManual = "", opcoes = {}) {
     : resolverPrecosShopee(dados);
   const precoAnterior = bloqueadoSemItem ? "" : precoAnteriorManualShopee(dados);
   const urlAfiliada = bloqueadoSemItem ? "" : urlAfiliadaSeguraShopee(dados, urlOriginal);
+  const urlFinalExpandida = urlAfiliada
+    ? await expandirShortlinkShopeeManualV2(urlAfiliada, opcoes)
+    : "";
   const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
     clienteId, credenciais: integracao?.credenciais || integracao || {},
-    urlOriginal, urlAfiliadaWorkspace: urlAfiliada, papel: "produto",
+    urlOriginal, urlAfiliadaWorkspace: urlAfiliada, urlFinalExpandida, papel: "produto",
     motivoConversao: "produto_shopee_importado_workspace_api"
   });
   const avisos = avisosShopee(dados, {
