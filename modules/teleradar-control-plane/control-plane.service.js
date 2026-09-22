@@ -194,6 +194,29 @@ function createTelegramTeleRadarControlPlane({
     return candidate;
   }
 
+  function safeErrorMessage(error) {
+    let candidate;
+    try {
+      candidate = String(error?.message || "").trim();
+    } catch {
+      return "[UNAVAILABLE]";
+    }
+    if (!candidate) return null;
+    if (candidate.length > 1024) return "[REDACTED_MESSAGE]";
+
+    candidate = candidate.replace(/[\u0000-\u001f\u007f]+/g, " ");
+    candidate = candidate.replace(/\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+/gi, "Authorization=[REDACTED]");
+    candidate = candidate.replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+={0,2}/gi, "Bearer [REDACTED]");
+    candidate = candidate.replace(/\bhttps?:\/\/[^\s]+/gi, value => value.replace(/[?#].*$/, "?[REDACTED]"));
+    candidate = candidate.replace(/\b(?:api[_-]?hash|api[_-]?id|jwt|token|password|session(?:[_-]?string)?|string[_-]?session|2fa|phone|telefone|codigo)(?:[_:= -]+[A-Za-z0-9._~+\/-]+)+\b/gi, "[REDACTED]");
+    candidate = candidate.replace(/\+?\d(?:[\s().-]*\d){7,}/g, "[REDACTED_PHONE]");
+    candidate = candidate.replace(/\b\d{4,}\b/g, "[REDACTED_DIGITS]");
+    candidate = candidate.replace(/\b[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})+\b/g, "[REDACTED_TOKEN]");
+    candidate = candidate.replace(/[A-Za-z0-9+/_=-]{24,}/g, "[REDACTED_TOKEN]");
+    candidate = candidate.replace(/\s+/g, " ").trim();
+    return candidate ? candidate.slice(0, 160) : "[REDACTED_MESSAGE]";
+  }
+
   function authErrorStage(error, fallback = "unknown") {
     const allowed = new Set(["validation", "configuration", "provision", "runtime_stop", "connect", "send_code", "unknown"]);
     const candidate = String(error?.telegramAuthStage || fallback || "unknown");
@@ -205,6 +228,7 @@ function createTelegramTeleRadarControlPlane({
       stage: authErrorStage(error, stage),
       errorName: safeErrorName(error?.name, "Error"),
       rpcCode: safeErrorCode(error?.errorMessage) || safeErrorCode(error?.code),
+      errorMessageSafe: safeErrorMessage(error),
       publicCode: safeErrorCode(mappedError?.code, "TELEGRAM_OPERATION_FAILED"),
       phonePresent: phonePresent === true,
       phoneStructurallyValid: phoneStructurallyValid === true

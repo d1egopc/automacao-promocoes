@@ -252,8 +252,17 @@ async function testAuthStartRpcMappingAndSanitizedObservability() {
   });
   assert.equal(Object.hasOwn(immediateResponse.body, "authFlowId"), false);
 
-  const secrets = [phone, "API_HASH_SECRETO", "JWT_SECRETO", "CODIGO_12345", "2FA_SECRETA", "STRING_SESSION_SECRETA"];
-  const unknownRpcError = Object.assign(new Error(`falha ${secrets.join(" ")}`), {
+  const secrets = [
+    phone,
+    "API_HASH_SECRETO",
+    "JWT_SECRETO",
+    "CODIGO_12345",
+    "2FA_SECRETA",
+    "STRING_SESSION_SECRETA",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0ZSJ9.assinatura",
+    "segredo-query"
+  ];
+  const unknownRpcError = Object.assign(new Error(`falha ${secrets.slice(0, 6).join(" ")} Authorization: Bearer ${secrets[6]} https://example.com/path?token=${secrets[7]}`), {
     errorMessage: "SOME_INTERNAL_RPC_FAILURE"
   });
   const unknownFixture = createFixture({ requestLoginCode: async () => { throw unknownRpcError; } });
@@ -265,16 +274,24 @@ async function testAuthStartRpcMappingAndSanitizedObservability() {
   assert.equal(unknownResponse.raw.includes("SOME_INTERNAL_RPC_FAILURE"), false);
   const unknownLog = authStartErrorLog(unknownFixture.logs);
   assert(unknownLog);
-  assert.deepEqual(unknownLog.args[1], {
-    stage: "unknown",
-    errorName: "Error",
-    rpcCode: "SOME_INTERNAL_RPC_FAILURE",
-    publicCode: "TELEGRAM_OPERATION_FAILED",
-    phonePresent: true,
-    phoneStructurallyValid: true
-  });
+  assert.equal(unknownLog.args[1].stage, "unknown");
+  assert.equal(unknownLog.args[1].errorName, "Error");
+  assert.equal(unknownLog.args[1].rpcCode, "SOME_INTERNAL_RPC_FAILURE");
+  assert.match(unknownLog.args[1].errorMessageSafe, /\[REDACTED/);
+  assert.equal(unknownLog.args[1].publicCode, "TELEGRAM_OPERATION_FAILED");
+  assert.equal(unknownLog.args[1].phonePresent, true);
+  assert.equal(unknownLog.args[1].phoneStructurallyValid, true);
   const serializedUnknownLog = JSON.stringify(unknownFixture.logs);
   for (const secret of secrets) assert.equal(serializedUnknownLog.includes(secret), false);
+
+  const timeoutFixture = createFixture({ requestLoginCode: async () => { throw new Error("TIMEOUT"); } });
+  const timeoutResponse = await request(createApp(timeoutFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(timeoutResponse.status, 502);
+  assert.deepEqual(timeoutResponse.body, { ok: false, error: "TELEGRAM_OPERATION_FAILED" });
+  assert.equal(Object.hasOwn(timeoutResponse.body, "errorMessageSafe"), false);
+  assert.equal(authStartErrorLog(timeoutFixture.logs).args[1].errorMessageSafe, "TIMEOUT");
 
   const connectError = Object.assign(new Error("connection failed"), { errorMessage: "NETWORK_CONNECTION_FAILED" });
   const connectAdapter = adapterWithAuthFailure({ connectError });

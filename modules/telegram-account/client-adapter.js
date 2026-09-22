@@ -159,8 +159,7 @@ function createTelegramAccountClient(options = {}) {
 
   async function isAuthorized() {
     try {
-      await client.api.updates.getState();
-      return true;
+      return (await client.isUserAuthorized()) === true;
     } catch {
       return false;
     }

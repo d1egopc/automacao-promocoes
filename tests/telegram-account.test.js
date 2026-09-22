@@ -257,6 +257,7 @@ function fakeTransport(options = {}) {
     connectCalls: 0,
     disconnectCalls: 0,
     sendCodeCalls: 0,
+    isUserAuthorizedCalls: 0,
     getStateCalls: 0,
     getMeCalls: 0,
     passwordAttempts: 0,
@@ -272,6 +273,11 @@ function fakeTransport(options = {}) {
     } } },
     async connect() { state.connectCalls += 1; },
     async disconnect() { state.disconnectCalls += 1; },
+    async isUserAuthorized() {
+      state.isUserAuthorizedCalls += 1;
+      if (options.authorizedCheckError) throw options.authorizedCheckError;
+      return options.authorized !== false;
+    },
     async getMe() {
       state.getMeCalls += 1;
       if (options.getMeError) throw options.getMeError;
@@ -343,7 +349,8 @@ async function testAdapterImmediateAuthorization() {
   assert.equal(Object.hasOwn(immediateResult, "phoneCodeHash"), false);
   assert.deepEqual(sessionChanges, ["STRING_SESSION_INTERNA"]);
   assert.deepEqual(logs, [["[TELEGRAM-ACCOUNT-AUTH-IMMEDIATE-SUCCESS]", { stage: "send_code", authorized: true }]]);
-  assert.equal(immediateTransport.state.getStateCalls >= 2, true);
+  assert.equal(immediateTransport.state.isUserAuthorizedCalls >= 2, true);
+  assert.equal(immediateTransport.state.getStateCalls, 0);
   assert.equal(immediateTransport.state.getMeCalls, 1);
 
   const originalUnauthorized = new Error("logged in right after sending the code");
@@ -356,7 +363,7 @@ async function testAdapterImmediateAuthorization() {
   const similarTransport = fakeTransport({ sendCodeError: similarError });
   const similarAdapter = adapterFor(similarTransport);
   await assert.rejects(() => similarAdapter.requestLoginCode({ phone }), error => error === similarError);
-  assert.equal(similarTransport.state.getStateCalls, 0);
+  assert.equal(similarTransport.state.isUserAuthorizedCalls, 0);
 
   const originalGetMeError = new Error("logged in right after sending the code");
   const getMeTransport = fakeTransport({ sendCodeImmediateError: originalGetMeError, getMeError: new Error("GET_ME_FAILED") });
