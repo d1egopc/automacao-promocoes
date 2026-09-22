@@ -257,19 +257,31 @@ function fakeTransport(options = {}) {
     connectCalls: 0,
     disconnectCalls: 0,
     sendCodeCalls: 0,
+    getStateCalls: 0,
+    getMeCalls: 0,
     passwordAttempts: 0,
     addCalls: 0,
     removeCalls: 0
   };
   const client = {
     state,
-    api: { updates: { getState: async () => ({}) } },
+    api: { updates: { getState: async () => {
+      state.getStateCalls += 1;
+      if (options.authorized === false) throw new Error("AUTH_REQUIRED");
+      return {};
+    } } },
     async connect() { state.connectCalls += 1; },
     async disconnect() { state.disconnectCalls += 1; },
-    async getMe() { return new Api.User({ id: 1001, firstName: "Conta", phone: "5511999999999" }); },
+    async getMe() {
+      state.getMeCalls += 1;
+      if (options.getMeError) throw options.getMeError;
+      return new Api.User({ id: 1001, firstName: "Conta", phone: "5511999999999" });
+    },
     async sendCode() {
       state.sendCodeCalls += 1;
       if (options.sendCodeError) throw options.sendCodeError;
+      if (options.sendCodeImmediateError) throw options.sendCodeImmediateError;
+      if (options.sendCodeImmediate) throw new Error("logged in right after sending the code");
       return { phoneCodeHash: "HASH_INTERNO", type: { className: "SentCodeTypeApp", length: 5 }, timeout: 60 };
     },
     async invoke() { return new Api.auth.Authorization({ user: new Api.User({ id: 1001, firstName: "Conta" }) }); },
@@ -306,6 +318,51 @@ function adapterFor(transport, options = {}) {
     accountScope: scope,
     ...options
   });
+}
+
+async function testAdapterImmediateAuthorization() {
+  const phone = "5511999999999";
+  const normalTransport = fakeTransport();
+  const normalAdapter = adapterFor(normalTransport);
+  const normalResult = await normalAdapter.requestLoginCode({ phone });
+  assert.equal(normalResult.authorizedImmediately, undefined);
+  assert.equal(normalResult.phoneCodeHash, "HASH_INTERNO");
+
+  const sessionChanges = [];
+  const logs = [];
+  const immediateTransport = fakeTransport({ sendCodeImmediate: true });
+  const immediateAdapter = adapterFor(immediateTransport, {
+    onSessionChanged: async session => sessionChanges.push(session),
+    logger: { info: (...args) => logs.push(args) }
+  });
+  const immediateResult = await immediateAdapter.requestLoginCode({ phone });
+  assert.equal(immediateResult.authorizedImmediately, true);
+  assert.equal(immediateResult.identity.authorized, true);
+  assert.equal(immediateResult.identity.accountId, "1001");
+  assert.equal(immediateResult.phone, "*********9999");
+  assert.equal(Object.hasOwn(immediateResult, "phoneCodeHash"), false);
+  assert.deepEqual(sessionChanges, ["STRING_SESSION_INTERNA"]);
+  assert.deepEqual(logs, [["[TELEGRAM-ACCOUNT-AUTH-IMMEDIATE-SUCCESS]", { stage: "send_code", authorized: true }]]);
+  assert.equal(immediateTransport.state.getStateCalls >= 2, true);
+  assert.equal(immediateTransport.state.getMeCalls, 1);
+
+  const originalUnauthorized = new Error("logged in right after sending the code");
+  const unauthorizedTransport = fakeTransport({ sendCodeError: originalUnauthorized, authorized: false });
+  const unauthorizedAdapter = adapterFor(unauthorizedTransport);
+  await assert.rejects(() => unauthorizedAdapter.requestLoginCode({ phone }), error => error === originalUnauthorized);
+  assert.equal(unauthorizedTransport.state.getMeCalls, 0);
+
+  const similarError = new Error("logged in right after sending the code ");
+  const similarTransport = fakeTransport({ sendCodeError: similarError });
+  const similarAdapter = adapterFor(similarTransport);
+  await assert.rejects(() => similarAdapter.requestLoginCode({ phone }), error => error === similarError);
+  assert.equal(similarTransport.state.getStateCalls, 0);
+
+  const originalGetMeError = new Error("logged in right after sending the code");
+  const getMeTransport = fakeTransport({ sendCodeImmediateError: originalGetMeError, getMeError: new Error("GET_ME_FAILED") });
+  const getMeAdapter = adapterFor(getMeTransport);
+  await assert.rejects(() => getMeAdapter.requestLoginCode({ phone }), error => error === originalGetMeError);
+  assert.equal(getMeTransport.state.getMeCalls, 1);
 }
 
 function updateMessage({ chatId, senderId = 2002, outgoing = false, protectedMessage = false, protectedChat = false } = {}) {
@@ -414,7 +471,7 @@ function fakeTimers() {
   };
 }
 
-async function serviceScenario({ codeError = null, passwordError = null, requestError = null } = {}) {
+async function serviceScenario({ codeError = null, passwordError = null, requestError = null, immediate = false } = {}) {
   const repository = criarRepositorioMemoriaContasTelegram();
   const timers = fakeTimers();
   const logs = [];
@@ -423,6 +480,10 @@ async function serviceScenario({ codeError = null, passwordError = null, request
     async disconnect() { adapterState.disconnectCalls += 1; },
     async requestLoginCode({ phone }) {
       if (requestError) throw requestError;
+      if (immediate) {
+        await options.onSessionChanged("STRING_SESSION_SECRETA");
+        return { authorizedImmediately: true, identity: { accountId: "1001", maskedPhone: "*********9999", authorized: true } };
+      }
       return { phoneCodeHash: "PHONE_CODE_HASH_SECRETO", codeType: "SentCodeTypeApp", codeLength: 5, timeout: 60, phone: String(phone) };
     },
     async signInWithCode(input) {
@@ -468,6 +529,22 @@ async function testServiceSecretLifecycleAndPublicBoundary() {
   assert(!JSON.stringify(publicCodeResult).includes(phone));
   await success.service.signInWithCode({ accountIdInterno: "account-1", accountScope: scope, code });
   await assert.rejects(() => success.service.signInWithCode({ accountIdInterno: "account-1", accountScope: scope, code }), /transient_ausente/);
+
+  const immediate = await serviceScenario({ immediate: true });
+  const immediateResult = await immediate.service.requestLoginCode({ accountIdInterno: "account-1", accountScope: scope, phone });
+  assert.deepEqual(immediateResult, {
+    authorizedImmediately: true,
+    identity: { accountId: "1001", displayName: null, username: null, maskedPhone: "*********9999" }
+  });
+  assert.deepEqual(await immediate.repository.getEncryptedSession("account-1", scope), { ciphertext: "encrypted:22" });
+  assert.deepEqual(await immediate.service.getStatus({ accountIdInterno: "account-1", accountScope: scope }), {
+    exists: true,
+    connected: true,
+    authorized: true,
+    connectionState: "authorized",
+    identity: { accountId: "1001", displayName: null, username: null, maskedPhone: "*********9999" }
+  });
+  await assert.rejects(() => immediate.service.signInWithCode({ accountIdInterno: "account-1", accountScope: scope, code }), /transient_ausente/);
 
   const failed = await serviceScenario({ codeError: new Error("PHONE_CODE_INVALID") });
   await failed.service.requestLoginCode({ accountIdInterno: "account-1", accountScope: scope, phone });
@@ -559,6 +636,7 @@ async function main() {
   await testContractsAndEntities();
   await testVault();
   await testRepositoryIsolationAndConcurrency();
+  await testAdapterImmediateAuthorization();
   await testAdapterListenerLifecycleAndFlood();
   await testAdapterOnErrorPath();
   await testServiceSecretLifecycleAndPublicBoundary();

@@ -121,6 +121,20 @@ function createTelegramAccountService({
     });
   }
 
+  async function finalizeAuthorized({ itemKey, record, scope, identity }) {
+    if (!identity || identity.authorized !== true) throw new Error("telegram_authorization_unverified");
+    clearTransient(itemKey);
+    await repository.upsertAccount({
+      ...record,
+      accountScope: scope,
+      authorized: true,
+      connectionState: "authorized",
+      identity,
+      updatedAt: new Date().toISOString()
+    });
+    return identity;
+  }
+
   async function provision({ accountIdInterno, accountScope, metadata = {} }) {
     const scope = validarAccountScope(accountScope);
     if (!String(accountIdInterno || "").trim()) throw new Error("telegram_account_id_interno_ausente");
@@ -182,6 +196,10 @@ function createTelegramAccountService({
     clients.set(itemKey, client);
     try {
       const result = await client.requestLoginCode({ phone });
+      if (result?.authorizedImmediately === true) {
+        const identity = await finalizeAuthorized({ itemKey, record, scope, identity: result.identity });
+        return Object.freeze({ authorizedImmediately: true, identity: publicIdentity(identity) });
+      }
       setTransient(itemKey, {
         phase: "code",
         phone: String(phone),
@@ -208,9 +226,7 @@ function createTelegramAccountService({
     let codeValue = String(code || "");
     try {
       const identity = await client.signInWithCode({ phone: auth.phone, phoneCodeHash: auth.phoneCodeHash, code: codeValue });
-      clearTransient(itemKey);
-      await repository.upsertAccount({ ...record, accountScope: scope, authorized: true, connectionState: "authorized", identity, updatedAt: new Date().toISOString() });
-      return identity;
+      return finalizeAuthorized({ itemKey, record, scope, identity });
     } catch (error) {
       clearTransient(itemKey);
       if (error?.code === "telegram_2fa_required") setTransient(itemKey, { phase: "password" });
@@ -231,9 +247,7 @@ function createTelegramAccountService({
     let passwordValue = String(password || "");
     try {
       const identity = await client.signInWithPassword({ password: passwordValue });
-      clearTransient(itemKey);
-      await repository.upsertAccount({ ...record, accountScope: scope, authorized: true, connectionState: "authorized", identity, updatedAt: new Date().toISOString() });
-      return identity;
+      return finalizeAuthorized({ itemKey, record, scope, identity });
     } catch (error) {
       await cleanupClient(itemKey, client);
       throw error;

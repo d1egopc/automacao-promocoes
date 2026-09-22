@@ -308,6 +308,13 @@ function createTelegramTeleRadarControlPlane({
         accountScope,
         phone: phoneValue
       });
+      if (result?.authorizedImmediately === true) {
+        safeLog("info", "TELEGRAM_AUTH_IMMEDIATE_SUCCESS", { state: "authorized" });
+        return Object.freeze({
+          state: "authorized",
+          identity: sanitizeIdentity(result.identity)
+        });
+      }
       const flow = createFlow(context, "code", result?.phone || maskPhone(phoneValue));
       safeLog("info", "TELEGRAM_AUTH_CODE_REQUESTED", { state: "code_required" });
       return Object.freeze({

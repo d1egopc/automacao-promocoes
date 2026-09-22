@@ -189,6 +189,31 @@ function createTelegramAccountClient(options = {}) {
     try {
       result = await withFloodHandling(() => client.sendCode(authCredentials(), String(phone || "")));
     } catch (error) {
+      if (error instanceof Error && error.message === "logged in right after sending the code") {
+        let authorized = false;
+        try {
+          authorized = await isAuthorized();
+        } catch {
+          throw error;
+        }
+        if (!authorized) throw error;
+
+        let identity;
+        try {
+          identity = await getIdentity();
+        } catch {
+          throw error;
+        }
+        if (identity?.authorized !== true || !identity.accountId) throw error;
+
+        await onSessionChanged(session.save());
+        try { logger.info?.("[TELEGRAM-ACCOUNT-AUTH-IMMEDIATE-SUCCESS]", { stage: "send_code", authorized: true }); } catch {}
+        return {
+          authorizedImmediately: true,
+          identity,
+          phone: maskedPhone(phone)
+        };
+      }
       throw annotateAuthStage(error, "send_code");
     }
     return {

@@ -235,6 +235,23 @@ async function testAuthStartRpcMappingAndSanitizedObservability() {
   assert.equal(messagePhoneResponse.status, 400);
   assert.deepEqual(messagePhoneResponse.body, { ok: false, error: "TELEGRAM_PHONE_INVALID" });
 
+  const immediateFixture = createFixture({
+    requestLoginCode: async () => ({
+      authorizedImmediately: true,
+      identity: { accountId: "1001", maskedPhone: "*********9999", authorized: true }
+    })
+  });
+  const immediateResponse = await request(createApp(immediateFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(immediateResponse.status, 200);
+  assert.deepEqual(immediateResponse.body, {
+    ok: true,
+    state: "authorized",
+    identity: { accountId: "1001", displayName: null, username: null, maskedPhone: "*********9999" }
+  });
+  assert.equal(Object.hasOwn(immediateResponse.body, "authFlowId"), false);
+
   const secrets = [phone, "API_HASH_SECRETO", "JWT_SECRETO", "CODIGO_12345", "2FA_SECRETA", "STRING_SESSION_SECRETA"];
   const unknownRpcError = Object.assign(new Error(`falha ${secrets.join(" ")}`), {
     errorMessage: "SOME_INTERNAL_RPC_FAILURE"
