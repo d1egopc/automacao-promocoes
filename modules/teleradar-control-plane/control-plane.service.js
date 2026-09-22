@@ -16,12 +16,16 @@ function controlPlaneError(code, statusCode = 400) {
 }
 
 function errorText(error) {
-  return `${error?.code || ""} ${error?.message || ""}`.toLowerCase();
+  return [error?.errorMessage, error?.code, error?.name, error?.message]
+    .map(value => String(value || ""))
+    .join(" ")
+    .toLowerCase();
 }
 
 function mapOperationError(error) {
   if (error?.code && error?.statusCode) return error;
   const text = errorText(error);
+  if (text.includes("phone_number_invalid")) return controlPlaneError("TELEGRAM_PHONE_INVALID", 400);
   if (text.includes("flood") || text.includes("wait")) return controlPlaneError("TELEGRAM_FLOOD_WAIT", 429);
   if (text.includes("phone_code_invalid") || text.includes("phone_code_expired") || text.includes("code_invalid")) {
     return controlPlaneError("TELEGRAM_CODE_INVALID", 400);
@@ -178,6 +182,36 @@ function createTelegramTeleRadarControlPlane({
     try { logger[level]?.(allowed, code); } catch {}
   }
 
+  function safeErrorName(value, fallback = null) {
+    const candidate = String(value || "").trim();
+    if (!candidate || candidate.length > 80 || !/^[A-Za-z][A-Za-z0-9_.]*$/.test(candidate)) return fallback;
+    return candidate;
+  }
+
+  function safeErrorCode(value, fallback = null) {
+    const candidate = String(value || "").trim();
+    if (!candidate || candidate.length > 120 || !/^[A-Z][A-Z0-9_]*$/.test(candidate)) return fallback;
+    return candidate;
+  }
+
+  function authErrorStage(error, fallback = "unknown") {
+    const allowed = new Set(["validation", "configuration", "provision", "runtime_stop", "connect", "send_code", "unknown"]);
+    const candidate = String(error?.telegramAuthStage || fallback || "unknown");
+    return allowed.has(candidate) ? candidate : "unknown";
+  }
+
+  function logAuthStartError(error, mappedError, stage, phonePresent, phoneStructurallyValid) {
+    const entry = {
+      stage: authErrorStage(error, stage),
+      errorName: safeErrorName(error?.name, "Error"),
+      rpcCode: safeErrorCode(error?.errorMessage) || safeErrorCode(error?.code),
+      publicCode: safeErrorCode(mappedError?.code, "TELEGRAM_OPERATION_FAILED"),
+      phonePresent: phonePresent === true,
+      phoneStructurallyValid: phoneStructurallyValid === true
+    };
+    try { logger.error?.("[TELEGRAM-ACCOUNT-AUTH-START-ERRO]", entry); } catch {}
+  }
+
   function clearFlow(flowId) {
     const flow = authFlows.get(flowId);
     if (!flow) return false;
@@ -250,18 +284,25 @@ function createTelegramTeleRadarControlPlane({
     let phoneValue = String(phone || "").trim();
     const service = getAccountService();
     const accountScope = scopeFrom(context);
+    let stage = "validation";
+    const phonePresent = Boolean(phoneValue);
+    const phoneStructurallyValid = /^\+[1-9]\d{7,14}$/.test(phoneValue);
     try {
-      if (!/^\+[1-9]\d{7,14}$/.test(phoneValue)) throw controlPlaneError("TELEGRAM_PHONE_INVALID", 400);
+      if (!phoneStructurallyValid) throw controlPlaneError("TELEGRAM_PHONE_INVALID", 400);
+      stage = "configuration";
       const configuration = await service.getConfigurationStatus({ accountIdInterno: context.accountIdInterno, accountScope });
       if (configuration.configured !== true) throw controlPlaneError("TELEGRAM_NOT_CONFIGURED", 503);
+      stage = "provision";
       await service.provision({
         accountIdInterno: context.accountIdInterno,
         accountScope,
         metadata: { purpose: FEATURE }
       });
       const runtime = runtimes.get(contextKey(context));
+      stage = "runtime_stop";
       if (runtime?.service?.getStatus?.().running === true) await runtime.service.stop();
       clearContextFlows(context);
+      stage = "unknown";
       const result = await service.requestLoginCode({
         accountIdInterno: context.accountIdInterno,
         accountScope,
@@ -278,7 +319,9 @@ function createTelegramTeleRadarControlPlane({
         timeout: result?.timeout ?? null
       });
     } catch (error) {
-      throw mapOperationError(error);
+      const mappedError = mapOperationError(error);
+      logAuthStartError(error, mappedError, stage, phonePresent, phoneStructurallyValid);
+      throw mappedError;
     } finally {
       phoneValue = "";
       phone = undefined;

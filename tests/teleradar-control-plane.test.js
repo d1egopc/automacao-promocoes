@@ -8,6 +8,7 @@ const express = require("express");
 
 const { createTelegramTeleRadarControlPlane } = require("../modules/teleradar-control-plane/control-plane.service");
 const { createTelegramTeleRadarAdminRoutes, sanitizeResponse } = require("../modules/teleradar-control-plane/routes");
+const { createTelegramAccountClient } = require("../modules/telegram-account/client-adapter");
 
 const admin = Object.freeze({ id: "admin-1", papel: "admin_master" });
 
@@ -24,7 +25,7 @@ function fakeTimers() {
   };
 }
 
-function fakeAccountService(order) {
+function fakeAccountService(order, options = {}) {
   const state = {
     configured: true,
     exists: false,
@@ -56,6 +57,7 @@ function fakeAccountService(order) {
     async provision(input) { remember(input); state.exists = true; return { ok: true }; },
     async requestLoginCode(input) {
       remember(input);
+      if (typeof options.requestLoginCode === "function") return options.requestLoginCode(input);
       state.connected = true;
       return { phone: "+55******1234", codeType: "app", codeLength: 5, timeout: 60, phoneCodeHash: "NAO_PODE_VAZAR" };
     },
@@ -169,10 +171,11 @@ function fakeTeleRadarFactory(order) {
   return factory;
 }
 
-function createFixture() {
+function createFixture(options = {}) {
   const order = [];
+  const logs = [];
   const timers = fakeTimers();
-  const accountService = fakeAccountService(order);
+  const accountService = fakeAccountService(order, options);
   const teleRadarServiceFactory = fakeTeleRadarFactory(order);
   let id = 0;
   const service = createTelegramTeleRadarControlPlane({
@@ -182,9 +185,103 @@ function createFixture() {
     idFactory: () => `flow-${++id}`,
     setTimeoutFn: timers.setTimeoutFn,
     clearTimeoutFn: timers.clearTimeoutFn,
-    logger: { info() {}, warn() {}, error() {} }
+    logger: {
+      info: (...args) => logs.push({ level: "info", args }),
+      warn: (...args) => logs.push({ level: "warn", args }),
+      error: (...args) => logs.push({ level: "error", args })
+    }
   });
-  return { order, timers, accountService, teleRadarServiceFactory, service };
+  return { order, logs, timers, accountService, teleRadarServiceFactory, service };
+}
+
+function adapterWithAuthFailure({ connectError = null, sendCodeError = null } = {}) {
+  return createTelegramAccountClient({
+    apiId: 17349,
+    apiHash: "test-only",
+    accountScope: { clientId: "admin-1", workspaceId: "admin-1", scope: "admin_master", feature: "teleradar" },
+    transportClient: {
+      async connect() {
+        if (connectError) throw connectError;
+      },
+      async disconnect() {},
+      async sendCode() {
+        if (sendCodeError) throw sendCodeError;
+        return { phoneCodeHash: "transient-only" };
+      }
+    }
+  });
+}
+
+function authStartErrorLog(logs) {
+  return logs.find(item => item.level === "error" && item.args[0] === "[TELEGRAM-ACCOUNT-AUTH-START-ERRO]");
+}
+
+async function testAuthStartRpcMappingAndSanitizedObservability() {
+  const phone = "+551199991234";
+
+  const rpcPhoneError = Object.assign(new Error("rpc rejected"), { errorMessage: "PHONE_NUMBER_INVALID" });
+  const rpcPhoneFixture = createFixture({ requestLoginCode: async () => { throw rpcPhoneError; } });
+  const rpcPhoneResponse = await request(createApp(rpcPhoneFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(rpcPhoneResponse.status, 400);
+  assert.deepEqual(rpcPhoneResponse.body, { ok: false, error: "TELEGRAM_PHONE_INVALID" });
+
+  const messagePhoneError = new Error("PHONE_NUMBER_INVALID");
+  const messagePhoneFixture = createFixture({ requestLoginCode: async () => { throw messagePhoneError; } });
+  const messagePhoneResponse = await request(createApp(messagePhoneFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(messagePhoneResponse.status, 400);
+  assert.deepEqual(messagePhoneResponse.body, { ok: false, error: "TELEGRAM_PHONE_INVALID" });
+
+  const secrets = [phone, "API_HASH_SECRETO", "JWT_SECRETO", "CODIGO_12345", "2FA_SECRETA", "STRING_SESSION_SECRETA"];
+  const unknownRpcError = Object.assign(new Error(`falha ${secrets.join(" ")}`), {
+    errorMessage: "SOME_INTERNAL_RPC_FAILURE"
+  });
+  const unknownFixture = createFixture({ requestLoginCode: async () => { throw unknownRpcError; } });
+  const unknownResponse = await request(createApp(unknownFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(unknownResponse.status, 502);
+  assert.deepEqual(unknownResponse.body, { ok: false, error: "TELEGRAM_OPERATION_FAILED" });
+  assert.equal(unknownResponse.raw.includes("SOME_INTERNAL_RPC_FAILURE"), false);
+  const unknownLog = authStartErrorLog(unknownFixture.logs);
+  assert(unknownLog);
+  assert.deepEqual(unknownLog.args[1], {
+    stage: "unknown",
+    errorName: "Error",
+    rpcCode: "SOME_INTERNAL_RPC_FAILURE",
+    publicCode: "TELEGRAM_OPERATION_FAILED",
+    phonePresent: true,
+    phoneStructurallyValid: true
+  });
+  const serializedUnknownLog = JSON.stringify(unknownFixture.logs);
+  for (const secret of secrets) assert.equal(serializedUnknownLog.includes(secret), false);
+
+  const connectError = Object.assign(new Error("connection failed"), { errorMessage: "NETWORK_CONNECTION_FAILED" });
+  const connectAdapter = adapterWithAuthFailure({ connectError });
+  const connectFixture = createFixture({
+    requestLoginCode: ({ phone: inputPhone }) => connectAdapter.requestLoginCode({ phone: inputPhone })
+  });
+  const connectResponse = await request(createApp(connectFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(connectResponse.status, 502);
+  assert.equal(authStartErrorLog(connectFixture.logs).args[1].stage, "connect");
+  assert.equal(connectError.telegramAuthStage, "connect");
+
+  const sendCodeError = Object.assign(new Error("send failed"), { errorMessage: "SOME_SEND_CODE_FAILURE" });
+  const sendCodeAdapter = adapterWithAuthFailure({ sendCodeError });
+  const sendCodeFixture = createFixture({
+    requestLoginCode: ({ phone: inputPhone }) => sendCodeAdapter.requestLoginCode({ phone: inputPhone })
+  });
+  const sendCodeResponse = await request(createApp(sendCodeFixture.service), "POST", "/admin/telegram-account/auth/start", {
+    role: "admin_master", body: { phone }
+  });
+  assert.equal(sendCodeResponse.status, 502);
+  assert.equal(authStartErrorLog(sendCodeFixture.logs).args[1].stage, "send_code");
+  assert.equal(sendCodeError.telegramAuthStage, "send_code");
 }
 
 function createApp(service) {
@@ -242,6 +339,8 @@ async function run() {
     safe: { value: true }
   }), { maskedPhone: "***1234", safe: { value: true } });
 
+  await testAuthStartRpcMappingAndSanitizedObservability();
+
   const fixture = createFixture();
   const app = createApp(fixture.service);
 
@@ -267,6 +366,7 @@ async function run() {
   });
   assert.equal(start.status, 200);
   assert.equal(start.body.state, "code_required");
+  assert.match(start.body.authFlowId, /^flow-\d+$/);
   assert.equal(start.body.maskedPhone, "+55******1234");
   assert.equal(start.raw.includes("NAO_PODE_VAZAR"), false);
   assert.equal(start.raw.includes("NAO_USAR"), false);

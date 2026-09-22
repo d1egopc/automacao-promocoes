@@ -17,6 +17,21 @@ function safeError(error) {
   return String(error?.errorMessage || error?.code || error?.name || "telegram_error").slice(0, 120);
 }
 
+function annotateAuthStage(error, stage) {
+  if (!error || (typeof error !== "object" && typeof error !== "function")) return error;
+  try {
+    Object.defineProperty(error, "telegramAuthStage", {
+      value: stage,
+      configurable: true,
+      enumerable: false,
+      writable: true
+    });
+  } catch {
+    try { error.telegramAuthStage = stage; } catch {}
+  }
+  return error;
+}
+
 function maskedPhone(phone) {
   const value = String(phone || "");
   if (!value) return null;
@@ -165,8 +180,17 @@ function createTelegramAccountClient(options = {}) {
   }
 
   async function requestLoginCode({ phone }) {
-    await connect();
-    const result = await withFloodHandling(() => client.sendCode(authCredentials(), String(phone || "")));
+    try {
+      await connect();
+    } catch (error) {
+      throw annotateAuthStage(error, "connect");
+    }
+    let result;
+    try {
+      result = await withFloodHandling(() => client.sendCode(authCredentials(), String(phone || "")));
+    } catch (error) {
+      throw annotateAuthStage(error, "send_code");
+    }
     return {
       phoneCodeHash: result.phoneCodeHash,
       codeType: result.type?.className || null,
