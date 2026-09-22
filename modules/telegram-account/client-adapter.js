@@ -102,7 +102,7 @@ function createTelegramAccountClient(options = {}) {
   const onAuthError = typeof options.onAuthError === "function" ? options.onAuthError : async () => true;
   const client = options.transportClient || new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 5,
-    requestRetries: 1,
+    requestRetries: 5,
     autoReconnect: true,
     reconnectRetries: 5,
     floodSleepThreshold: 30

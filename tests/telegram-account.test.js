@@ -326,6 +326,47 @@ function adapterFor(transport, options = {}) {
   });
 }
 
+function testAdapterTransportConfiguration() {
+  const teleprotoExports = require("teleproto");
+  const adapterPath = require.resolve("../modules/telegram-account/client-adapter");
+  const originalTelegramClient = Object.getOwnPropertyDescriptor(teleprotoExports, "TelegramClient");
+  let capturedConfig = null;
+
+  class TelegramClientProbe {
+    constructor(_session, _apiId, _apiHash, config) {
+      capturedConfig = { ...config };
+    }
+  }
+
+  try {
+    Object.defineProperty(teleprotoExports, "TelegramClient", {
+      value: TelegramClientProbe,
+      configurable: true,
+      enumerable: true,
+      writable: true
+    });
+    delete require.cache[adapterPath];
+    const { createTelegramAccountClient: createClientProbe } = require(adapterPath);
+    createClientProbe({
+      apiId: 17349,
+      apiHash: "API_HASH_INTERNO",
+      sessionStore: { save: () => "STRING_SESSION_INTERNA" },
+      accountScope: scope
+    });
+  } finally {
+    delete require.cache[adapterPath];
+    Object.defineProperty(teleprotoExports, "TelegramClient", originalTelegramClient);
+  }
+
+  assert.deepEqual(capturedConfig, {
+    connectionRetries: 5,
+    requestRetries: 5,
+    autoReconnect: true,
+    reconnectRetries: 5,
+    floodSleepThreshold: 30
+  });
+}
+
 async function testAdapterImmediateAuthorization() {
   const phone = "5511999999999";
   const normalTransport = fakeTransport();
@@ -643,6 +684,7 @@ async function main() {
   await testContractsAndEntities();
   await testVault();
   await testRepositoryIsolationAndConcurrency();
+  testAdapterTransportConfiguration();
   await testAdapterImmediateAuthorization();
   await testAdapterListenerLifecycleAndFlood();
   await testAdapterOnErrorPath();
