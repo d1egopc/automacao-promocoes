@@ -923,6 +923,58 @@ async function testarExecuteArquivosProtegePermanentes() {
   assert.strictEqual(fs.existsSync(configAntiga), true);
 }
 
+async function testarRotacaoPersistenteEErroIsolado() {
+  const dir = tempDir();
+  const ids = Array.from({ length: 20 }, (_, index) => `user_${String(index + 1).padStart(2, "0")}`);
+  for (const id of ids) {
+    escreverJson(path.join(dir, "clientes", id, "fila.json"), [
+      { id, status: "enviado", enviadoEm: isoAtras(3 * 24 * 60 * 60 * 1000), payloadBruto: "pesado" }
+    ]);
+  }
+  fs.writeFileSync(path.join(dir, "clientes", ids[1], "fila.json"), "{invalido");
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const summary = executarFilaJsonAutoClean({ dataDir: dir, agoraMs: AGORA, workspacesFilaPorCiclo: 5 });
+    assert.strictEqual(summary.workspacesProcessados, 5);
+    assert.strictEqual(summary.erros, cycle === 0 ? 1 : 0);
+    const cursor = JSON.parse(fs.readFileSync(path.join(dir, "auto-clean-fila-cursor.json"), "utf8"));
+    assert.strictEqual(cursor.ultimoWorkspace, ids[cycle * 5 + 4]);
+  }
+  assert.strictEqual(executarFilaJsonAutoClean({ dataDir: dir, agoraMs: AGORA, workspacesFilaPorCiclo: 5 }).workspacesProcessados, 5);
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, "auto-clean-fila-cursor.json"), "utf8")).ultimoWorkspace, ids[4]);
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(dir, "clientes", ids[2], "fila.json"), "utf8"))[0].compacto, true,
+    "erro em um workspace nao bloqueia o seguinte");
+}
+
+async function testarMidiaForaDaLimpezaGenerica() {
+  const dir = tempDir();
+  const files = [
+    path.join(dir, "identidade-visual-ofertas", "clientes", "user_a", "renderizados", "a".repeat(64) + ".png"),
+    path.join(dir, "identidade-visual-ofertas", "clientes", "user_a", "logos", "b".repeat(64) + ".png"),
+    path.join(dir, "social", "midia", "user_a", "foto.jpg"),
+    path.join(dir, "cache", "imagem.webp")
+  ];
+  files.forEach(file => tocarArquivo(file, "midia", AGORA - 3 * 24 * 60 * 60 * 1000));
+  const log = path.join(dir, "logs", "app.log");
+  tocarArquivo(log, "log", AGORA - 3 * 24 * 60 * 60 * 1000);
+  const summary = executarArquivosAutoClean({ dataDir: dir, agoraMs: AGORA, loteLimite: 20 });
+  assert.strictEqual(summary.arquivosRemovidos, 1);
+  assert.strictEqual(fs.existsSync(log), false);
+  files.forEach(file => assert.ok(fs.existsSync(file), `midia nao pode ser apagada: ${path.basename(file)}`));
+}
+
+async function testarRelayFailOpenNaoInterrompeAutoClean() {
+  const result = await executarAutoCleanShadowSeguro({
+    incluirPostgres: false,
+    incluirArquivos: true,
+    dataDir: tempDir(),
+    gcRelay: async () => { throw new Error("falha do relay"); },
+    logger: capturarLogger().logger
+  });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.gcRelay.dryRun, true);
+  assert.strictEqual(result.gcRelay.errors, 1);
+}
+
 async function testarExecuteUniversalPorFlag() {
   const { pool } = criarPoolJobsAutoClean([
     { jobs: 1, processamentos: 2, eventos: 0, bytesJobs: 100, bytesProcessamentos: 100 }
@@ -1008,6 +1060,9 @@ async function testarFailOpenEFlags() {
   await testarExecutePostgresFailOpen();
   await testarExecuteFilaJsonSeguro();
   await testarExecuteArquivosProtegePermanentes();
+  await testarRotacaoPersistenteEErroIsolado();
+  await testarMidiaForaDaLimpezaGenerica();
+  await testarRelayFailOpenNaoInterrompeAutoClean();
   await testarExecuteUniversalPorFlag();
   await testarFailOpenEFlags();
   console.log("optimus-auto-clean-v1-shadow.test.js OK");
@@ -1015,4 +1070,3 @@ async function testarFailOpenEFlags() {
   console.error(erro);
   process.exit(1);
 });
-

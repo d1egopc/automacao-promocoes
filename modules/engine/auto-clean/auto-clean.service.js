@@ -11,6 +11,8 @@ const {
 } = require("../jobs.service");
 const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 const filaThumbnailService = require("../../fila/fila-thumbnail.service");
+const workspaceRotation = require("./workspace-rotation");
+const { executarGcRelaySeguro } = require("./gc-relay.service");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -547,18 +549,27 @@ function isSessaoOuConfig(rel = "") {
   return /session|sessao|auth|baileys|whatsapp|wpp|config|destino|cred|token|cookie|secret|senha|password|jwt|private/.test(texto);
 }
 
+function diretorioMidiaPendente(rel = "") {
+  const normalized = String(rel || "").replace(/\\/g, "/").toLowerCase();
+  return normalized === "identidade-visual-ofertas" || normalized.startsWith("identidade-visual-ofertas/") ||
+    normalized === "social/midia" || normalized.startsWith("social/midia/") ||
+    /(?:^|\/)(?:images?|imagens?|medias?|midias?)(?:\/|$)/.test(normalized);
+}
+
 function categoriaArquivoAutoClean(dataDir, caminho, stats) {
   const rel = path.relative(dataDir, caminho).replace(/\\/g, "/").toLowerCase();
   const ext = path.extname(rel);
   if (isSessaoOuConfig(rel)) return "protegido_sensivel";
   if (rel === "fila-thumbnails" || rel.startsWith("fila-thumbnails/")) return "fila_thumbnails_gerenciadas";
   if (rel.startsWith("clientes/") && rel.endsWith("/fila.json")) return "fila_json_arquivo";
+  if (diretorioMidiaPendente(rel)) return "midias_referencia_pendente";
+  if (EXT_MIDIA.has(ext)) return "midias_referencia_pendente";
   if (rel.startsWith("reset-esteiras/") || rel.startsWith("reset-operacional/") || rel.includes("snapshot")) return "snapshots_reset";
   if (EXT_LOG.has(ext) || rel.includes("log")) return "logs_persistidos";
   if (EXT_TEMP.has(ext)) return "temporarios";
   if (EXT_BACKUP.has(ext) || rel.includes("backup") || rel.includes("bak")) return "backups_operacionais";
   if (rel.includes("cache")) return "caches";
-  if (EXT_MIDIA.has(ext) || rel.includes("image") || rel.includes("imagem") || rel.includes("media") || rel.includes("midia")) return "midias_reconstruiveis";
+  if (EXT_MIDIA.has(ext) || rel.includes("image") || rel.includes("imagem") || rel.includes("media") || rel.includes("midia")) return "midias_referencia_pendente";
   if (stats?.isFile?.()) return "arquivos_auditoria";
   return "outros";
 }
@@ -574,7 +585,6 @@ function inventariarArquivosPorCategoria(opcoes = {}) {
     temporarios: [],
     caches: [],
     snapshots_reset: [],
-    midias_reconstruiveis: [],
     backups_operacionais: []
   };
 
@@ -591,7 +601,7 @@ function inventariarArquivosPorCategoria(opcoes = {}) {
     if (stats.isSymbolicLink && stats.isSymbolicLink()) continue;
     if (stats.isDirectory && stats.isDirectory()) {
       const rel = path.relative(dataDir, atual).replace(/\\/g, "/");
-      if (isSessaoOuConfig(rel)) continue;
+      if (isSessaoOuConfig(rel) || diretorioMidiaPendente(rel)) continue;
       let filhos = [];
       try { filhos = fsImpl.readdirSync(atual).map(nome => path.join(atual, nome)); } catch { filhos = []; }
       for (const filho of filhos) pilha.push(filho);
@@ -599,12 +609,12 @@ function inventariarArquivosPorCategoria(opcoes = {}) {
     }
     if (!stats.isFile || !stats.isFile()) continue;
     const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
-    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "midias_referencia_pendente" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
     if (!registrosPorOrigem[categoria] || registrosPorOrigem[categoria].length >= limite) continue;
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const registro = avaliarRegistroAutoClean({
       origem: categoria,
-      tipoRegistro: categoria === "midias_reconstruiveis" || categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
+      tipoRegistro: categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
       status: "arquivo",
       referenciaTemporal: new Date(stats.mtimeMs || stats.ctimeMs || agoraMs).toISOString(),
       bytesEstimados: Number(stats.size || 0),
@@ -686,7 +696,9 @@ function auditarFilaJson(opcoes = {}) {
     };
   }
 
-  const workspaces = listarWorkspacesFila(dataDir, fsImpl).slice(0, politica.workspacesFilaPorCiclo);
+  const workspaces = workspaceRotation.selecionarShadow(
+    dataDir, listarWorkspacesFila(dataDir, fsImpl), politica.workspacesFilaPorCiclo
+  );
   for (const workspaceId of workspaces) {
     resumoExtra.workspacesVistos += 1;
     const usuarioMeta = usuariosMeta?.porId?.get(workspaceId);
@@ -1549,7 +1561,9 @@ function executarFilaJsonAutoClean(opcoes = {}) {
   const workspaces = Array.isArray(opcoes.workspaces)
     ? opcoes.workspaces
     : listarWorkspacesFila(dataDir, fsImpl);
-  const selecionados = workspaces.slice(0, politica.workspacesFilaPorCiclo);
+  const { selecionados, ultimo } = workspaceRotation.selecionarRoundRobin(
+    workspaces, workspaceRotation.lerCursor(dataDir, fsImpl), politica.workspacesFilaPorCiclo
+  );
   const resumo = {
     origem: "fila_json",
     tipoRegistro: "fila_json",
@@ -1580,6 +1594,10 @@ function executarFilaJsonAutoClean(opcoes = {}) {
     }
   }
 
+  if (selecionados.length) {
+    try { workspaceRotation.salvarCursor(dataDir, ultimo, fsImpl); }
+    catch { resumo.erros += 1; }
+  }
   resumo.aplicouMudancas = resumo.filasRegravadas > 0;
   resumo.bytesLiberadosLegivel = bytesLegiveis(resumo.bytesLiberados);
   return resumo;
@@ -1602,7 +1620,7 @@ function coletarArquivosElegiveisAutoClean(opcoes = {}) {
     if (stats.isSymbolicLink && stats.isSymbolicLink()) continue;
     if (stats.isDirectory && stats.isDirectory()) {
       const relDir = path.relative(dataDir, atual).replace(/\\/g, "/");
-      if (isSessaoOuConfig(relDir)) continue;
+      if (isSessaoOuConfig(relDir) || diretorioMidiaPendente(relDir)) continue;
       let filhos = [];
       try { filhos = fsImpl.readdirSync(atual).map(nome => path.join(atual, nome)); } catch { filhos = []; }
       for (const filho of filhos) pilha.push(filho);
@@ -1611,11 +1629,11 @@ function coletarArquivosElegiveisAutoClean(opcoes = {}) {
     if (!stats.isFile || !stats.isFile()) continue;
 
     const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
-    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "midias_referencia_pendente" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const decisao = avaliarRegistroAutoClean({
       origem: categoria,
-      tipoRegistro: categoria === "midias_reconstruiveis" || categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
+      tipoRegistro: categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
       status: "arquivo",
       referenciaTemporal: new Date(stats.mtimeMs || stats.ctimeMs || agoraMs).toISOString(),
       bytesEstimados: Number(stats.size || 0),
@@ -1767,6 +1785,19 @@ async function executarAutoCleanShadow(opcoes = {}) {
     }
   }
 
+  let gcRelay = null;
+  if (executarArquivos) {
+    try {
+      gcRelay = await (opcoes.gcRelay || executarGcRelaySeguro)({
+        dataDir: politica.dataDir,
+        logger,
+        ...(opcoes.gcRelayOptions || {})
+      });
+    } catch {
+      gcRelay = { dryRun: true, inspected: 0, errors: 1, reason: "relay_failed" };
+    }
+  }
+
   const resumo = {
     origem: "auto_clean",
     tipoRegistro: "resumo",
@@ -1779,7 +1810,8 @@ async function executarAutoCleanShadow(opcoes = {}) {
     loteLimite: politica.loteLimite,
     aplicouMudancas: execute?.aplicouMudancas === true,
     origens,
-    execute
+    execute,
+    gcRelay
   };
   logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-RESUMO]", resumo, logger);
   return resumo;
