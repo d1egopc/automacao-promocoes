@@ -8,6 +8,10 @@ const {
   selecionarConteudoVivo,
   REFERENCE_REASON
 } = require("./gc-reference-index");
+const {
+  FILA_GC_REFERENCES_ARQUIVO,
+  projecaoCobreFilaViva
+} = require("../../fila/fila-gc-references");
 
 const SCHEMA_VERSION = 2;
 const INDEX_ROOT = path.join("auto-clean", "gc-references");
@@ -16,6 +20,7 @@ const BUILDING_FILE = "building.json";
 const DEFAULT_BUILD_BYTES = 16 * 1024 * 1024;
 const DEFAULT_BUILD_DURATION_MS = 750;
 const MAX_INDEX_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_QUEUE_PROJECTION_BYTES = 4 * 1024 * 1024;
 const INDEX_MAX_AGE_MS = 30 * 60 * 1000;
 const HISTORY_DAYS = 7;
 const REASON = Object.freeze({
@@ -44,6 +49,10 @@ function indexDir(dataDir, workspaceId) {
 }
 
 function safeMeta(stat, key, kind, source, file) {
+  const dev = stat.dev;
+  const ino = stat.ino;
+  const devValido = typeof dev === "bigint" ? dev >= 0n : Number.isFinite(Number(dev)) && Number(dev) >= 0;
+  const inoValido = typeof ino === "bigint" ? ino > 0n : Number.isFinite(Number(ino)) && Number(ino) > 0;
   return {
     key,
     kind,
@@ -51,15 +60,15 @@ function safeMeta(stat, key, kind, source, file) {
     file: path.basename(file),
     size: Number(stat.size || 0),
     mtimeMs: Math.trunc(Number(stat.mtimeMs || 0)),
-    identity: Number.isFinite(Number(stat.dev)) && Number.isFinite(Number(stat.ino))
-      ? `${Number(stat.dev)}:${Number(stat.ino)}`
+    identity: devValido && inoValido
+      ? `${dev}:${ino}`
       : ""
   };
 }
 
 async function statOptional(file, fsApi) {
   try {
-    const stat = await fsApi.lstat(file);
+    const stat = await fsApi.lstat(file, { bigint: true });
     if (!stat.isFile() || stat.isSymbolicLink()) return { invalid: true };
     return { stat };
   } catch (error) {
@@ -102,7 +111,7 @@ function sourceState(source = {}) {
 
 function validateSourceState(value = {}) {
   return typeof value?.key === "string" &&
-    ["jsonl", "projection", "array", "vitrine", "manual"].includes(value?.kind) &&
+    ["jsonl", "projection", "queueRefs", "array", "vitrine", "manual"].includes(value?.kind) &&
     typeof value?.source === "string" && typeof value?.file === "string" &&
     Number.isInteger(value?.targetSize) && value.targetSize >= 0 &&
     Number.isInteger(value?.cursor) && value.cursor >= 0 && value.cursor <= value.targetSize &&
@@ -153,11 +162,13 @@ function jsonlExpiredFromWindow(key = "", discovery = {}) {
   return currentDates.length > 0 && date < currentDates[0];
 }
 
-async function discoverSources({ dataDir, workspaceId, nowMs, fsApi }) {
+async function discoverSources({ dataDir, workspaceId, nowMs, fsApi, validatedQueueProjection = null }) {
   const root = path.join(dataDir, "clientes", workspaceId);
   const guards = [];
   const sources = [];
   let discoveryError = null;
+  let bytesRead = 0;
+  let validatedQueueProjectionNext = null;
 
   const guardFiles = [
     ["guard:fila", "fila.json"],
@@ -169,10 +180,19 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi }) {
     if (found.error || found.invalid) discoveryError ||= { reasonCode: REASON.SOURCE_READ_ERROR, source: "guard", file: name };
     if (found.stat) guards.push(safeMeta(found.stat, key, "guard", "guard", file));
   }
+  const legacyGuards = [...guards];
+  const filaVivaFile = path.join(root, "fila-viva.json");
+  const filaVivaFound = await statOptional(filaVivaFile, fsApi);
+  if (filaVivaFound.error || filaVivaFound.invalid) {
+    discoveryError ||= { reasonCode: REASON.SOURCE_READ_ERROR, source: "fila", file: "fila-viva.json" };
+  }
+  if (filaVivaFound.stat) {
+    guards.push(safeMeta(filaVivaFound.stat, "guard:fila-viva", "guard", "fila", filaVivaFile));
+  }
 
   const compact = [
     ["compact:projecao", "fila-projecao-leve.json", "projection", "fila"],
-    ["compact:fila-viva", "fila-viva.json", "array", "fila"],
+    ["compact:fila-gc-references", FILA_GC_REFERENCES_ARQUIVO, "queueRefs", "fila"],
     ["compact:vitrine", "vitrine.json", "vitrine", "vitrine"],
     ["compact:manual", "manual_ofertas_v2.json", "manual", "manual"],
     ["compact:social-agendamentos", "social-agendamentos.json", "array", "social"],
@@ -202,17 +222,68 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi }) {
   }
 
   const projection = sources.find(item => item.key === "compact:projecao");
-  if (guards.length && !projection) {
+  if (legacyGuards.length && !projection) {
     discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_MISSING, source: "fila", file: "fila-projecao-leve.json" };
   }
   if (projection) {
-    const newestGuard = guards.reduce((max, item) => Math.max(max, item.mtimeMs), 0);
+    const newestGuard = legacyGuards.reduce((max, item) => Math.max(max, item.mtimeMs), 0);
     if (newestGuard > projection.mtimeMs) {
       discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: projection.file };
     }
   }
+  const filaVivaGuard = guards.find(item => item.key === "guard:fila-viva");
+  const filaGcProjection = sources.find(item => item.key === "compact:fila-gc-references");
+  if (filaVivaGuard && !filaGcProjection) {
+    discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_MISSING, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+  } else if (filaGcProjection && !filaVivaGuard) {
+    discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+  } else if (filaGcProjection && filaVivaGuard && !discoveryError) {
+    if (filaGcProjection.size > MAX_QUEUE_PROJECTION_BYTES) {
+      discoveryError = { reasonCode: REASON.COMPACT_SOURCE_TOO_LARGE, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+    } else {
+      try {
+        const reusable = validatedQueueProjection &&
+          sameSourceMeta(validatedQueueProjection.projectionMeta, filaGcProjection) &&
+          sameSourceMeta(validatedQueueProjection.queueGuard, filaVivaGuard) &&
+          projecaoCobreFilaViva(validatedQueueProjection.value, workspaceId, filaVivaGuard);
+        let parsed;
+        if (reusable) {
+          parsed = validatedQueueProjection.value;
+        } else {
+          const content = await fsApi.readFile(filaGcProjection.absolutePath, "utf8");
+          bytesRead += Buffer.byteLength(content, "utf8");
+          parsed = JSON.parse(content);
+        }
+        const checked = await statOptional(filaGcProjection.absolutePath, fsApi);
+        if (!checked.stat || !sameSourceMeta(filaGcProjection,
+          safeMeta(checked.stat, filaGcProjection.key, filaGcProjection.kind, filaGcProjection.source, filaGcProjection.absolutePath))) {
+          discoveryError = { reasonCode: REASON.SOURCE_CHANGED, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+        } else if (!projecaoCobreFilaViva(parsed, workspaceId, filaVivaGuard)) {
+          discoveryError = { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+        } else {
+          const currentGuard = await statOptional(filaVivaFile, fsApi);
+          if (!currentGuard.stat || !sameSourceMeta(filaVivaGuard,
+            safeMeta(currentGuard.stat, "guard:fila-viva", "guard", "fila", filaVivaFile))) {
+            discoveryError = { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+          } else {
+            filaGcProjection.prevalidatedValue = parsed;
+            validatedQueueProjectionNext = {
+              projectionMeta: sourceMeta(filaGcProjection),
+              queueGuard: sourceMeta(filaVivaGuard),
+              value: parsed
+            };
+          }
+        }
+      } catch (error) {
+        discoveryError = { reasonCode: error instanceof SyntaxError ? REASON.SOURCE_INVALID_JSON : REASON.SOURCE_READ_ERROR,
+          source: "fila", file: FILA_GC_REFERENCES_ARQUIVO };
+      }
+    }
+  }
 
-  return { guards, sources, error: discoveryError, snapshot: snapshotComparable({ guards, sources }) };
+  return { guards, sources, error: discoveryError, bytesRead,
+    validatedQueueProjection: validatedQueueProjectionNext,
+    snapshot: snapshotComparable({ guards, sources }) };
 }
 
 function validateRefs(refs) {
@@ -310,19 +381,33 @@ function liveDocument(parsed, source, file, nowMs, workspaceId) {
   return selecionarConteudoVivo(parsed, file, source.source, nowMs);
 }
 
-async function processJsonSource({ source, workspaceId, nowMs, remainingBytes, maxBytes, fsApi }) {
-  if (source.size > remainingBytes) {
+async function processJsonSource({ source, workspaceId, nowMs, remainingBytes, maxBytes, fsApi, queueGuard, queueGuardPath }) {
+  const prevalidatedQueueProjection = source.kind === "queueRefs" && source.prevalidatedValue;
+  if (!prevalidatedQueueProjection && source.size > remainingBytes) {
     return { complete: false, bytes: 0,
       reasonCode: source.size > maxBytes ? REASON.COMPACT_SOURCE_TOO_LARGE : REASON.BUILD_BUDGET };
   }
-  let content;
-  try { content = await fsApi.readFile(source.absolutePath, "utf8"); }
-  catch { return { complete: false, bytes: 0, fatal: true, reasonCode: REASON.SOURCE_READ_ERROR }; }
   let parsed;
-  try { parsed = JSON.parse(content); }
-  catch { return { complete: false, bytes: source.size, fatal: true, reasonCode: REASON.SOURCE_INVALID_JSON }; }
+  if (prevalidatedQueueProjection) {
+    parsed = source.prevalidatedValue;
+  } else {
+    let content;
+    try { content = await fsApi.readFile(source.absolutePath, "utf8"); }
+    catch { return { complete: false, bytes: 0, fatal: true, reasonCode: REASON.SOURCE_READ_ERROR }; }
+    try { parsed = JSON.parse(content); }
+    catch { return { complete: false, bytes: source.size, fatal: true, reasonCode: REASON.SOURCE_INVALID_JSON }; }
+  }
   const refs = {};
-  try { addValueRefs(liveDocument(parsed, source, source.file, nowMs, workspaceId), workspaceId, source.source, refs); }
+  try {
+    if (source.kind === "queueRefs") {
+      if (!projecaoCobreFilaViva(parsed, workspaceId, queueGuard)) {
+        return { complete: false, bytes: source.size, fatal: true, reasonCode: REASON.COMPACT_SOURCE_STALE };
+      }
+      for (const hash of parsed.hashes) refs[hash] = [source.source];
+    } else {
+      addValueRefs(liveDocument(parsed, source, source.file, nowMs, workspaceId), workspaceId, source.source, refs);
+    }
+  }
   catch (error) {
     return { complete: false, bytes: source.size, fatal: true,
       reasonCode: error?.code || REFERENCE_REASON.FORMAT_INVALID };
@@ -336,7 +421,14 @@ async function processJsonSource({ source, workspaceId, nowMs, remainingBytes, m
   if (!sameSourceMeta(source, afterMeta)) {
     return { complete: false, bytes: source.size, changed: true, reasonCode: REASON.SOURCE_CHANGED };
   }
-  return { complete: true, bytes: source.size, refs };
+  if (prevalidatedQueueProjection && queueGuardPath) {
+    const latestGuard = await statOptional(queueGuardPath, fsApi);
+    if (!latestGuard.stat || !sameSourceMeta(queueGuard,
+      safeMeta(latestGuard.stat, "guard:fila-viva", "guard", "fila", queueGuardPath))) {
+      return { complete: false, bytes: 0, changed: true, reasonCode: REASON.COMPACT_SOURCE_STALE };
+    }
+  }
+  return { complete: true, bytes: prevalidatedQueueProjection ? 0 : source.size, refs };
 }
 
 function mergeSourceRefs(target = {}, chunk = {}) {
@@ -541,7 +633,13 @@ async function buildOrLoadReferenceIndex(options = {}) {
   const discovery = await discoverSources({ dataDir, workspaceId, nowMs, fsApi });
   if (discovery.error) {
     return { complete: false, refs: new Map(), ...discovery.error,
-      generation: persisted.ok ? persisted.value.generation : "", sourceSnapshot: discovery.snapshot };
+      generation: persisted.ok ? persisted.value.generation : "", sourceSnapshot: discovery.snapshot,
+      bytesProcessed: discovery.bytesRead || 0 };
+  }
+  if ((discovery.bytesRead || 0) > maxBytes) {
+    return { complete: false, refs: new Map(), workspaceId, reasonCode: REASON.BUILD_BUDGET,
+      bytesProcessed: discovery.bytesRead, sourcesRead: discovery.validatedQueueProjection ? 1 : 0,
+      durationMs: clock() - started, sourceSnapshot: discovery.snapshot };
   }
 
   const currentFresh = current.ok &&
@@ -552,7 +650,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
     if (currentFresh && !reusable.dangerous && !hasPendingSources(probe) &&
         sameSnapshot(current.value.sourceSnapshot, discovery.snapshot)) {
       return { complete: true, refs: refsToMap(current.value.refs), generation: current.value.generation,
-        refsCount: Object.keys(current.value.refs).length, bytesProcessed: 0, sourcesRead: 0,
+        refsCount: Object.keys(current.value.refs).length, bytesProcessed: discovery.bytesRead || 0,
+        sourcesRead: discovery.validatedQueueProjection ? 1 : 0,
         reasonCode: "", sourceSnapshot: discovery.snapshot };
     }
   }
@@ -578,8 +677,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
     try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(changed))); } catch {}
     return changed;
   }
-  let bytesProcessed = 0;
-  let sourcesRead = 0;
+  let bytesProcessed = discovery.bytesRead || 0;
+  let sourcesRead = discovery.validatedQueueProjection ? 1 : 0;
   let lastSource = "";
   let lastFile = "";
   let stopReason = REASON.BUILD_INCOMPLETE;
@@ -604,10 +703,14 @@ async function buildOrLoadReferenceIndex(options = {}) {
     if (remainingBytes <= 0) { stopReason = REASON.BUILD_BUDGET; break; }
     const result = source.kind === "jsonl"
       ? await processJsonlSource({ source, sourceProgress: progress, workspaceId, nowMs, remainingBytes, fsApi })
-      : await processJsonSource({ source, workspaceId, nowMs, remainingBytes, maxBytes, fsApi });
+      : await processJsonSource({ source, workspaceId, nowMs, remainingBytes, maxBytes, fsApi,
+        queueGuard: discovery.guards.find(item => item.key === "guard:fila-viva"),
+        queueGuardPath: path.join(dataDir, "clientes", workspaceId, "fila-viva.json") });
     bytesProcessed += result.bytes || 0;
     if (result.dangerous) {
-      const latest = await discoverSources({ dataDir, workspaceId, nowMs, fsApi });
+      const latest = await discoverSources({ dataDir, workspaceId, nowMs, fsApi,
+        validatedQueueProjection: discovery.validatedQueueProjection });
+      bytesProcessed += latest.bytesRead || 0;
       const restarted = newBuilding(workspaceId, latest.error ? discovery : latest, nowMs);
       await atomicWriteJson(buildingFile, restarted, fsApi);
       const changed = { complete: false, refs: new Map(), workspaceId, generation: restarted.generation,
@@ -659,7 +762,9 @@ async function buildOrLoadReferenceIndex(options = {}) {
     return partial;
   }
 
-  const finalDiscovery = await discoverSources({ dataDir, workspaceId, nowMs, fsApi });
+  const finalDiscovery = await discoverSources({ dataDir, workspaceId, nowMs, fsApi,
+    validatedQueueProjection: discovery.validatedQueueProjection });
+  bytesProcessed += finalDiscovery.bytesRead || 0;
   if (finalDiscovery.error) {
     await atomicWriteJson(buildingFile, state, fsApi);
     const changed = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
@@ -670,6 +775,16 @@ async function buildOrLoadReferenceIndex(options = {}) {
       durationMs: clock() - started };
     try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(changed))); } catch {}
     return changed;
+  }
+  if (bytesProcessed > maxBytes) {
+    state.updatedAtMs = nowMs;
+    await atomicWriteJson(buildingFile, state, fsApi);
+    const limited = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
+      source: "validation", reasonCode: REASON.BUILD_BUDGET, bytesProcessed, sourcesRead,
+      refsFound: Object.keys(state.refs).length, nextCursor: state.sourceCursor,
+      durationMs: clock() - started };
+    try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(limited))); } catch {}
+    return limited;
   }
   const finalReconciliation = reconcileState(state, finalDiscovery);
   if (finalReconciliation.dangerous) {

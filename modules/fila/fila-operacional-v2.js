@@ -28,6 +28,7 @@ const {
 } = require("./fila-read-model-publico");
 const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
+const { publicarReferenciasFilaViva } = require("./fila-gc-references");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -2336,6 +2337,13 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
         };
       }
       vivaFileProof = proof.proof;
+    }
+    if (ok !== false) {
+      publicarReferenciasFilaViva(cliente, normalizada, {
+        getClienteJsonPath: deps.getClienteJsonPath || getClienteJsonPath,
+        writeClienteJson: escritor,
+        fs: deps.fs || fs
+      });
     }
     return {
       ok: ok !== false,

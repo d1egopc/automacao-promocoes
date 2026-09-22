@@ -14,6 +14,7 @@ const {
   REASON
 } = require("../modules/engine/auto-clean/gc-reference-index-builder");
 const { runOnce, closeSession, CANDIDATE_AGE_MS } = require("../modules/engine/auto-clean/gc-relay.service");
+const { projetarReferenciasFilaViva, FILA_GC_REFERENCES_ARQUIVO } = require("../modules/fila/fila-gc-references");
 
 const NOW = Date.parse("2026-09-22T12:00:00.000Z");
 const H1 = "a".repeat(64);
@@ -225,6 +226,11 @@ async function testIsolatedCompactSources() {
     const f = fixture("user_gc_iso");
     try {
       writeJson(path.join(f.clientDir, file), value);
+      if (file === "fila-viva.json") {
+        writeJson(path.join(f.clientDir, FILA_GC_REFERENCES_ARQUIVO),
+          projetarReferenciasFilaViva(value, f.workspace,
+            fs.statSync(path.join(f.clientDir, file), { bigint: true })));
+      }
       const result = await build(f);
       assert.strictEqual(result.complete, true, `${file} isolado deve ser coberto`);
       assert.deepStrictEqual([...result.refs.get(H1)], [source]);

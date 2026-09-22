@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const { publicarReferenciasFilaViva } = require("./fila-gc-references");
 const {
   itemVivoOperacional,
   statusItem,
@@ -769,7 +770,14 @@ function projetarFilaV2Shadow({
     let escreveuProjecaoLeve = false;
 
     if (typeof writeClienteJson === "function") {
-      writeClienteJson(cliente, FILA_VIVA_ARQUIVO, projecao.viva);
+      const vivaEscrita = writeClienteJson(cliente, FILA_VIVA_ARQUIVO, projecao.viva);
+      if (vivaEscrita !== false) {
+        publicarReferenciasFilaViva(cliente, projecao.viva, {
+          writeClienteJson,
+          getClienteJsonPath,
+          fs
+        });
+      }
       writeClienteJson(cliente, FILA_HISTORICO_ARQUIVO, projecao.historico);
       try {
         writeClienteJson(cliente, FILA_PROJECAO_LEVE_ARQUIVO, projecaoLeve);
