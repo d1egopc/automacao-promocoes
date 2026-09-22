@@ -10,6 +10,10 @@ const {
   resolverPrecoSemantico,
   TIPOS_CANDIDATO
 } = require("../radar/preco-semantico");
+const {
+  marketplacePermiteLinkResgate,
+  filtrarLinksResgatePublicaveis
+} = require("./link-resgate-publicavel");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -585,12 +589,41 @@ function resolverContratoComercialFinal(oferta = {}) {
   const freteGratis = /frete\s+gr[aá]tis/i.test(frete);
   const condicoes = listaComercialEvidenteNoRadar(oferta.condicoes, textoOriginal);
   const observacoes = listaComercialEvidenteNoRadar(oferta.observacoes, textoOriginal);
-  const links = todosLinks(oferta);
+  const marketplace = texto(oferta.marketplace || oferta.loja || oferta.marketplaceDetectado || "");
+  const linksOriginais = todosLinks(oferta);
+  const linksResgateCandidatos = linksOriginais.filter(item =>
+    item && typeof item === "object" && papelLinkFinal(item) === "resgate"
+  );
+  const clienteIdConfiavel = texto(oferta.clienteId || oferta.cliente_id);
+  const workspaceIdInformado = texto(oferta.workspaceId);
+  const workspaceId = clienteIdConfiavel || workspaceIdInformado;
+  const workspaceDivergente = Boolean(clienteIdConfiavel && workspaceIdInformado && clienteIdConfiavel !== workspaceIdInformado);
+  const linksResgatePermitidos = workspaceDivergente
+    ? []
+    : filtrarLinksResgatePublicaveis(marketplace, linksResgateCandidatos, workspaceId);
+  const linksResgatePermitidosSet = new Set(linksResgatePermitidos);
+  const links = linksOriginais.filter(item =>
+    papelLinkFinal(item) !== "resgate" || linksResgatePermitidosSet.has(item)
+  );
   const linksProduto = linksPorPapel(links, "produto");
-  const linksResgate = linksPorPapel(links, "resgate");
+  const linksResgate = linksPorPapel(linksResgatePermitidos, "resgate");
   const linksApp = linksPorPapel(links, "app");
   const linksPc = linksPorPapel(links, "pc");
   const linksMoedas = linksPorPapel(links, "moedas");
+  const haviaResgateInformado = linksResgateCandidatos.length > 0 || Boolean(texto(oferta.linkResgate || oferta.linkResgateCupom));
+  if (haviaResgateInformado && linksResgate.length === 0) {
+    try {
+      console.warn("[CUPOM-RESGATE-BLOQUEADO]", JSON.stringify({
+        marketplace: marketplace || "desconhecido",
+        motivo: marketplacePermiteLinkResgate(marketplace)
+          ? "resgate_sem_conversao_workspace_validada"
+          : "resgate_exclusivo_shopee",
+        totalCandidatos: linksResgateCandidatos.length
+      }));
+    } catch (_) {
+      // Observabilidade nunca pode interferir na renderizacao.
+    }
+  }
   const contrato = {
     versao: "contrato_comercial_final_v1",
     resolvido: true,
@@ -645,10 +678,10 @@ function resolverContratoComercialFinal(oferta = {}) {
     condicoes,
     observacoes,
     linksProduto: contrato.linksProduto.length ? contrato.linksProduto : oferta.linksProduto,
-    linksResgate: contrato.linksResgate.length ? contrato.linksResgate : oferta.linksResgate,
-    linksComerciais: links.length ? links : oferta.linksComerciais,
+    linksResgate: contrato.linksResgate,
+    linksComerciais: links,
     linkProduto: primeiroUrl(contrato.linksProduto) || oferta.linkProduto,
-    linkResgate: primeiroUrl(contrato.linksResgate) || oferta.linkResgate,
+    linkResgate: primeiroUrl(contrato.linksResgate),
     linkApp: primeiroUrl(contrato.linksApp) || oferta.linkApp,
     linkPc: primeiroUrl(contrato.linksPc) || oferta.linkPc,
     linkMoedas: primeiroUrl(contrato.linksMoedas) || oferta.linkMoedas

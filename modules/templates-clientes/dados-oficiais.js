@@ -372,6 +372,8 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
 
   const dados = {
     titulo: oferta.titulo || oferta.nome || "",
+    workspaceId: oferta.workspaceId || "",
+    clienteId: oferta.clienteId || oferta.cliente_id || "",
     marketplace: oferta.marketplace || "",
     precoAtual: oferta.precoAtual ?? oferta.preco,
     precoOriginal,

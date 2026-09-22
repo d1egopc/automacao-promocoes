@@ -1,18 +1,40 @@
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 const { montarItemFilaEngine } = require("../modules/engine/distributor/distributor.service");
 const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes/dados-oficiais");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
+const { criarProvaAfiliacaoWorkspaceShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 
-function linkResgate(url) {
+const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-produto-resgate-"));
+process.env.DATA_DIR = dataDirProva;
+fs.mkdirSync(path.join(dataDirProva, "clientes", "cliente_teste"), { recursive: true });
+fs.writeFileSync(path.join(dataDirProva, "clientes", "cliente_teste", "integracoes.json"), JSON.stringify({
+  shopee: { credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" } }
+}));
+process.on("exit", () => fs.rmSync(dataDirProva, { recursive: true, force: true }));
+
+function linkResgate(urlOriginal, url) {
   return {
     tipo: "resgate",
     papel: "link_resgate",
+    original: urlOriginal,
+    urlOriginal,
     urlAfiliada: url,
     urlAfiliadaWorkspace: url,
     renderizavel: true,
+    convertidoWorkspace: true,
     ordemCaptura: 1,
-    conversaoStatus: "convertida"
+    conversaoStatus: "convertida",
+    afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceShopee({
+      clienteId: "cliente_teste",
+      credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" },
+      urlOriginal, urlAfiliadaWorkspace: url,
+      urlFinalExpandida: "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_123456",
+      papel: "resgate", motivoConversao: "resgate_workspace_convertido_generate_shortlink"
+    })
   };
 }
 
@@ -38,7 +60,9 @@ function ofertaShopee({
   produtoAfiliado = "https://s.shopee.com.br/produto-afiliado",
   resgateAfiliado = "https://s.shopee.com.br/resgate-afiliado"
 } = {}) {
-  const links = somenteProduto ? [linkProduto(produtoAfiliado)] : [linkResgate(resgateAfiliado)];
+  const links = somenteProduto
+    ? [linkProduto(produtoAfiliado)]
+    : [linkResgate("https://s.shopee.com.br/resgate-original", resgateAfiliado)];
   if (completa && !somenteProduto) links.push(linkProduto(produtoAfiliado));
   return {
     id: 900,

@@ -249,6 +249,17 @@ function classificarLinkComercial({
     return { url: "", tipo: "outros", confianca: "ausente", origem: "url_ausente", contexto: chaveContexto, evidencias: [] };
   }
 
+  if (!marketplaceShopee(marketplace, link) && (contextoInequivocoResgate(chaveContexto) || sugestao === "resgate")) {
+    return {
+      url: "",
+      tipo: "outros",
+      confianca: "baixa",
+      origem: "resgate_incompativel_marketplace",
+      contexto: chaveContexto,
+      evidencias: ["resgate_exclusivo_shopee"]
+    };
+  }
+
   const papelAliExpress = classificarPapelAliExpress({ link, linhaAtual, linhaAnterior, linhaPosterior, marketplace });
   const papelShopee = classificarPapelShopee({ link, linhaAtual, linhaAnterior, contexto, marketplace });
 
@@ -267,12 +278,12 @@ function classificarLinkComercial({
     confianca = "alta";
     origem = papelShopee.origem;
     evidencias.push(papelShopee.evidencia);
-  } else if (contextoInequivocoResgate(chaveContexto)) {
+  } else if (marketplaceShopee(marketplace, link) && contextoInequivocoResgate(chaveContexto)) {
     tipo = "resgate";
     confianca = "alta";
     origem = "contexto_resgate";
     evidencias.push("contexto_resgate");
-  } else if (linkParecePaginaCupons(link)) {
+  } else if (marketplaceShopee(marketplace, link) && linkParecePaginaCupons(link)) {
     tipo = "resgate";
     confianca = "media";
     origem = "padrao_pagina_cupons";
@@ -318,6 +329,10 @@ function classificarLinkComercial({
     confianca = "baixa";
     origem = "tipo_sugerido";
     evidencias.push("tipo_sugerido");
+  }
+
+  if (tipo === "resgate" && !marketplaceShopee(marketplace, link)) {
+    return { url: "", tipo: "outros", confianca: "baixa", origem: "resgate_incompativel_marketplace", contexto: chaveContexto, evidencias: ["resgate_exclusivo_shopee"] };
   }
 
   if (sugestao && sugestao !== tipo) {
@@ -417,6 +432,7 @@ function classificarLinksComerciais({
         marketplace,
         tipoSugerido: primeiraSugestao(sugestoes, url)
       });
+      if (!classificado.url) continue;
       ordemCaptura += 1;
       const item = {
         ...classificado,

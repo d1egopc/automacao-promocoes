@@ -1,6 +1,9 @@
 "use strict";
 
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const {
   construirEspelhoComercialV24,
   construirEspelhoComercialV24FailOpen,
@@ -9,6 +12,42 @@ const {
   resumoEspelhoComercialLog,
   selecionarImagemComercial
 } = require("../modules/ofc-v2/espelho-comercial");
+const {
+  criarProvaAfiliacaoWorkspaceShopee,
+  validarProvaAfiliacaoWorkspaceShopee
+} = require("../modules/marketplaces/shopee/afiliacao-workspace");
+
+const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-ofc-proof-"));
+process.env.DATA_DIR = dataDirProva;
+fs.mkdirSync(path.join(dataDirProva, "clientes", "user_teste"), { recursive: true });
+fs.writeFileSync(path.join(dataDirProva, "clientes", "user_teste", "integracoes.json"), JSON.stringify({
+  shopee: { credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" } }
+}));
+process.on("exit", () => fs.rmSync(dataDirProva, { recursive: true, force: true }));
+
+function resgateShopeeConvertido(urlOriginal, urlAfiliadaWorkspace, ordemCaptura, contexto = "") {
+  const credenciais = { appId: "123456", secret: "segredo_fixture_somente_teste" };
+  const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
+    clienteId: "user_teste",
+    credenciais,
+    urlOriginal,
+    urlAfiliadaWorkspace,
+    urlFinalExpandida: "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_123456",
+    papel: "resgate",
+    motivoConversao: "resgate_workspace_convertido_generate_shortlink"
+  });
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceShopee(afiliacaoWorkspace, {
+    clienteId: "user_teste",
+    credenciais,
+    exigirAssinatura: true
+  }).valida, true);
+  return {
+    tipo: "resgate", papel: "link_resgate", ordemCaptura, urlOriginal,
+    urlAfiliada: urlAfiliadaWorkspace, urlAfiliadaWorkspace,
+    convertidoWorkspace: true, conversaoStatus: "convertida", renderizavel: true,
+    contexto, afiliacaoWorkspace
+  };
+}
 
 function criarEspelho({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {}, metadata = {}, comercialNormalizado = {} } = {}) {
   return construirEspelhoComercialV24({
@@ -305,7 +344,7 @@ const shopeeResgateObrigatorio = montarTemplateEspelhoShadow(
     }
   }
 );
-assert.ok(shopeeResgateObrigatorio.mensagem.includes("🎟️ Resgate:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate essencial permanece mesmo com toggle desligado");
+assert.ok(!shopeeResgateObrigatorio.mensagem.includes("🎟️ Resgate:\nhttps://s.shopee.com.br/resgate-cupom"), "resgate cru nao atravessa o renderer mesmo se o bloco estiver configurado");
 assert.ok(shopeeResgateObrigatorio.mensagem.includes("🔗 Confira aqui:\nhttps://shopee.afiliado/produto"), "link afiliado segue separado do resgate");
 
 const shopeeSomenteProduto = criarEspelho({
@@ -604,7 +643,7 @@ assert.strictEqual(shopeeDoisLinks.documentoComercialCanonico.linkProdutoOrigina
 const shopeeDoisLinksTemplate = montarTemplateEspelhoShadow(shopeeDoisLinks.espelhoComercial, shopeeDoisLinks.documentoComercialCanonico, {
   template: { blocos: [{ tipo: "link_resgate", ativo: true, ordem: 10 }, { tipo: "link", ativo: true, ordem: 20 }] }
 });
-assert.ok(shopeeDoisLinksTemplate.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/cupom-real"));
+assert.ok(!shopeeDoisLinksTemplate.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/cupom-real"), "resgate Shopee cru nao pode atravessar o renderer sem conversao workspace");
 assert.ok(shopeeDoisLinksTemplate.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/produto-real"));
 
 const shopeeResgateDoisProdutos = criarEspelho({
@@ -628,8 +667,8 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(
   shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.map(item => item.renderizavel),
-  [true, false, false],
-  "produtos capturados ficam preservados, mas sem conversao workspace nao vazam URL original"
+  [false, false, false],
+  "resgate e produtos capturados ficam preservados, mas sem conversao workspace nao vazam URL original"
 );
 
 const shopeeIphoneResgateProduto = criarEspelho({
@@ -642,7 +681,7 @@ const shopeeIphoneResgateProduto = criarEspelho({
     marketplace: "shopee",
     linkAfiliado: "https://s.shopee.com.br/link-principal-nao-usar",
     linksComerciais: [
-      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-iphone", urlAfiliada: "https://s.shopee.com.br/resgate-iphone-af", renderizavel: true, contexto: "Resgate cupom" },
+      resgateShopeeConvertido("https://s.shopee.com.br/resgate-iphone", "https://s.shopee.com.br/resgate-iphone-af", 1, "Resgate cupom"),
       { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/produto-iphone", urlAfiliada: "https://s.shopee.com.br/produto-iphone-af", renderizavel: true, contexto: "Produto" }
     ]
   },
@@ -668,7 +707,7 @@ const shopeeSomenteResgateV26 = criarEspelho({
     marketplace: "shopee",
     linkAfiliado: "",
     linksComerciais: [
-      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-solo", urlAfiliada: "https://s.shopee.com.br/resgate-solo-af", renderizavel: true, contexto: "Resgate cupom" }
+      resgateShopeeConvertido("https://s.shopee.com.br/resgate-solo", "https://s.shopee.com.br/resgate-solo-af", 1, "Resgate cupom")
     ]
   },
   comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
@@ -680,6 +719,33 @@ const templateSomenteResgateV26 = montarTemplateEspelhoPorBlocosV26(
 assert.ok(templateSomenteResgateV26.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/resgate-solo-af"), "Resgate sozinho renderiza Resgate");
 assert.ok(!templateSomenteResgateV26.mensagem.includes("Confira aqui:"), "Resgate sozinho nao inventa Produto");
 
+for (const urlFinal of [
+  "https://s.shopee.com.br/resgate-sem-prova",
+  "https://s.shopee.com.br/outro-resgate-sem-prova"
+]) {
+  const original = "https://s.shopee.com.br/resgate-sem-prova";
+  const semProva = criarEspelho({
+    textoOriginal: "Resgate o cupom antes de comprar",
+    oferta: {
+      marketplace: "shopee",
+      linkAfiliado: "",
+      linksComerciais: [{
+        tipo: "resgate", papel: "link_resgate", ordemCaptura: 1,
+        urlOriginal: original, urlAfiliada: urlFinal, renderizavel: true,
+        contexto: "Resgate cupom"
+      }]
+    },
+    comercialNormalizado: { marketplace: "shopee", precoConfiavel: false }
+  });
+  const mensagem = montarTemplateEspelhoPorBlocosV26(
+    semProva.espelhoComercial,
+    semProva.documentoComercialCanonico
+  ).mensagem;
+  assert.ok(!mensagem.includes(original), "OFC nao publica URL original sem prova");
+  assert.ok(!mensagem.includes(urlFinal), "OFC nao publica URL Shopee apenas pelo dominio");
+  assert.ok(!mensagem.includes("Resgate:\n"), "OFC nao cria CTA de resgate sem prova");
+}
+
 const shopeeProdutoRecuperadoAposGuardaV26 = criarEspelho({
   textoOriginal: "Intel Xeon E5-2680 v4\nResgate o cupom antes de comprar",
   oferta: {
@@ -687,7 +753,7 @@ const shopeeProdutoRecuperadoAposGuardaV26 = criarEspelho({
     linkOriginal: "https://s.shopee.com.br/BThVUIrus",
     linkAfiliado: "https://s.shopee.com.br/7Kws2znZWZ",
     linksComerciais: [
-      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/9AOWE1tGgv", urlAfiliada: "https://s.shopee.com.br/3g3ZgG5iti", renderizavel: true }
+      resgateShopeeConvertido("https://s.shopee.com.br/9AOWE1tGgv", "https://s.shopee.com.br/3g3ZgG5iti", 2)
     ]
   },
   metadata: {
@@ -731,7 +797,8 @@ const mercadoLivreNaoRecuperaProdutoShopee = criarEspelho({
     }
   }
 });
-assert.ok(!mercadoLivreNaoRecuperaProdutoShopee.documentoComercialCanonico.linksComerciais.some(item => item.urlAfiliada === "https://meli.la/afiliado"), "Recuperacao e exclusiva da Shopee");
+assert.ok(mercadoLivreNaoRecuperaProdutoShopee.documentoComercialCanonico.linksComerciais.some(item => item.tipo === "produto" && item.urlAfiliada === "https://meli.la/afiliado"), "Mercado Livre preserva somente o CTA principal convertido");
+assert.ok(!mercadoLivreNaoRecuperaProdutoShopee.documentoComercialCanonico.linksComerciais.some(item => item.tipo === "resgate"), "Mercado Livre descarta papel de resgate incompatível");
 
 const shopeeSomenteProdutoV26 = criarEspelho({
   textoOriginal: "Produto Shopee simples Por R$ 49,90",
@@ -758,7 +825,7 @@ const shopeeResgateTresProdutosV26 = criarEspelho({
     marketplace: "shopee",
     linkAfiliado: "https://s.shopee.com.br/link-principal-nao-usar-multiplos",
     linksComerciais: [
-      { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOriginal: "https://s.shopee.com.br/resgate-n", urlAfiliada: "https://s.shopee.com.br/resgate-n-af", renderizavel: true, contexto: "Resgate cupom" },
+      resgateShopeeConvertido("https://s.shopee.com.br/resgate-n", "https://s.shopee.com.br/resgate-n-af", 1, "Resgate cupom"),
       { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOriginal: "https://s.shopee.com.br/produto-n-1", urlAfiliada: "https://s.shopee.com.br/produto-n-1-af", renderizavel: true, contexto: "Produto 1" },
       { tipo: "produto", papel: "link_produto", ordemCaptura: 3, urlOriginal: "https://s.shopee.com.br/produto-n-2", urlAfiliada: "https://s.shopee.com.br/produto-n-2-af", renderizavel: true, contexto: "Produto 2" },
       { tipo: "produto", papel: "link_produto", ordemCaptura: 4, urlOriginal: "https://s.shopee.com.br/produto-n-3", urlAfiliada: "https://s.shopee.com.br/produto-n-3-af", renderizavel: true, contexto: "Produto 3" }
@@ -976,9 +1043,8 @@ assertBloco(shopeeSomenteProduto, "link_afiliado");
 assert.ok(!tiposV26(shopeeSomenteProduto).includes("link_resgate"), "Shopee apenas produto nao cria resgate");
 assert.strictEqual(shopeeSomenteProduto.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/produto-unico?lp=aff");
 
-assertBloco(shopeeResgate, "link_resgate");
+assert.ok(!tiposV26(shopeeResgate).includes("link_resgate"), "Shopee com resgate apenas capturado nao cria CTA publicavel");
 assertBloco(shopeeResgate, "link_afiliado");
-assert.strictEqual(blocoTipo(shopeeResgate, "link_resgate").essencial, true, "resgate com contexto comercial e essencial");
 
 assert.strictEqual(blocosTipo(shopeeResgateDoisProdutos, "links_produto_alternativos").length, 0, "produtos capturados sem conversao workspace nao vazam URL original");
 assert.strictEqual(shopeeResgateDoisProdutos.documentoComercialCanonico.linksComerciais.filter(item => item.tipo === "produto").length, 2);
@@ -1265,7 +1331,7 @@ const shopeePolimentoResgateProduto = criarEspelho({
 });
 assert.strictEqual(shopeePolimentoResgateProduto.documentoComercialCanonico.linkResgateOriginal, "https://s.shopee.com.br/4LEepvkqdN");
 assert.strictEqual(shopeePolimentoResgateProduto.documentoComercialCanonico.linkProdutoOriginal, "https://s.shopee.com.br/2qPrA9vtrB?lp=aff");
-assert.ok(shopeePolimentoResgateProduto.templateEspelhoShadow.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/4LEepvkqdN"));
+assert.ok(!shopeePolimentoResgateProduto.templateEspelhoShadow.mensagem.includes("Resgate:\nhttps://s.shopee.com.br/4LEepvkqdN"), "source rescue Shopee sem conversao nao e publicavel");
 assert.ok(shopeePolimentoResgateProduto.templateEspelhoShadow.mensagem.includes("Confira aqui:\nhttps://shopee.afiliado/kit-beleza"));
 
 const aliexpressPolimentoAppPcMoedas = criarEspelho({

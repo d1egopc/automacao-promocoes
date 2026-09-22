@@ -874,6 +874,7 @@ function contextoIndicaPcAliExpress(valor = "") {
 
 function tipoLinkNormalizado(tipo = "produto", contexto = "") {
   const tipoBruto = texto(tipo).replace(/^link_/, "");
+  if (["resgate", "cupom"].includes(tipoBruto)) return "resgate";
   const n = normalizarComparacao(`${tipoBruto} ${contexto}`);
   if (/\b(?:moeda|moedas|coins?)\b/.test(n)) return "moedas";
   if (/\b(?:app|aplicativo|celular|mobile)\b/.test(n)) return "app";
@@ -891,11 +892,7 @@ function contextoIndicaResgateIndependente(contexto = "") {
 
 function linkResgateValidoPorMarketplace(url = "", contexto = "", marketplace = "") {
   if (!texto(url)) return false;
-  if (marketplaceMercadoLivre(marketplace)) {
-    if (urlPareceProdutoMercadoLivre(url)) return false;
-    return contextoIndicaResgateIndependente(contexto);
-  }
-  return true;
+  return marketplaceShopee(marketplace) && contextoIndicaResgateIndependente(contexto);
 }
 
 function categoriaDocumentoGenerica(categoria = "") {
@@ -918,7 +915,7 @@ function categoriaDocumentoFinal(contexto = {}) {
 function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "") {
   const url = texto(item.url);
   const papelContrato = texto(item.papel);
-  if (papelContrato === "link_resgate") return "link_resgate";
+  if (papelContrato === "link_resgate") return marketplaceShopee(marketplace) ? "link_resgate" : "link_fonte_ignorado";
   if (papelContrato === "link_app") return "link_app";
   if (papelContrato === "link_pc") return "link_pc";
   if (papelContrato === "link_moedas") return "link_moedas";
@@ -929,8 +926,7 @@ function classificarTipoLinkBloco(item = {}, textoOriginal = "", marketplace = "
   const mp = normalizarComparacao(marketplace);
   if (/chat\.whatsapp|whatsapp\.com|t\.me|telegram|grupo|canal/i.test(url)) return "link_fonte_ignorado";
   if (/youtube\.com|youtu\.be|instagram\.com|facebook\.com|x\.com|twitter\.com/i.test(url)) return "link_auxiliar";
-  if (mp === "amazon" && tipo === "resgate") return "link_produto_original";
-  if (tipo === "resgate") return linkResgateValidoPorMarketplace(url, contexto, marketplace) ? "link_resgate" : "link_produto_original";
+  if (tipo === "resgate") return linkResgateValidoPorMarketplace(url, contexto, marketplace) ? "link_resgate" : "link_fonte_ignorado";
   if ((tipo === "app" || tipo === "pc") && mp !== "aliexpress") return "link_produto_original";
   if (tipo === "app") return "link_app";
   if (tipo === "pc") return "link_pc";
@@ -1421,6 +1417,7 @@ function adicionarLinkUnico(saida, url, tipo = "produto", contexto = "", extras 
     urlOriginal: texto(extras.urlOriginal || ""),
     urlOriginalRadar: texto(extras.urlOriginalRadar || ""),
     convertidoWorkspace: extras.convertidoWorkspace === true,
+    afiliacaoWorkspace: extras.afiliacaoWorkspace || null,
     afiliadoConvertido: extras.afiliadoConvertido === true,
     workspaceConvertido: extras.workspaceConvertido === true,
     linkAfiliadoWorkspace: extras.linkAfiliadoWorkspace === true,
@@ -1461,6 +1458,7 @@ function adicionarLinkComercialEstruturado(saida, item = {}, tipoPadrao = "produ
     urlOriginal,
     urlOriginalRadar: item.urlOriginalRadar,
     convertidoWorkspace: item.convertidoWorkspace === true,
+    afiliacaoWorkspace: item.afiliacaoWorkspace || item.conversaoWorkspace || null,
     afiliadoConvertido: item.afiliadoConvertido === true,
     workspaceConvertido: item.workspaceConvertido === true,
     linkAfiliadoWorkspace: item.linkAfiliadoWorkspace === true,
@@ -2025,8 +2023,16 @@ function contratoPermiteLinkProdutoOriginal(doc = {}) {
 
 function resolverBlocoTemplateEspelho(tipo = "", doc = {}, espelho = {}, contexto = {}) {
   const marketplace = valorDocumentoOuEspelho(doc, espelho, "marketplace", "marketplace");
-  const linkResgateCandidato = valorDocumentoOuEspelho(doc, espelho, "linkResgateOriginal", "linkResgateOriginal");
-  const linkResgate = linkResgateEssencial(doc, espelho) ? linkResgateCandidato : "";
+  const ocorrenciaResgateSegura = lista(doc.linksComerciais).find(item =>
+    item?.renderizavel === true && texto(item.papel || item.tipo).replace(/^link_/, "") === "resgate"
+  );
+  const linkResgate = marketplaceShopee(marketplace)
+    ? primeiroTexto(
+        ocorrenciaResgateSegura?.urlOptimus,
+        ocorrenciaResgateSegura?.urlAfiliada,
+        ocorrenciaResgateSegura?.url
+      )
+    : "";
   const linkProdutoOriginalSeguro = contratoPermiteLinkProdutoOriginal(doc) ? primeiroTexto(doc.linkProdutoOriginal, espelho.linkProdutoOriginal) : "";
   const linkProduto = primeiroTexto(doc.linkAfiliado, espelho.linkAfiliado, linkProdutoOriginalSeguro);
   const precoDe = valorDocumentoOuEspelho(doc, espelho, "precoDeTexto", "precoDeTexto");
@@ -2291,7 +2297,7 @@ function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
   if (bloco.tipo === "avaliacao_quantidade") return avaliacaoQuantidadeVisualV26(valor);
   if (bloco.tipo === "vendas") return `📈 ${valor}`;
   if (bloco.tipo === "selo_mais_vendido") return `🏆 ${valor}`;
-  if (bloco.tipo === "link_resgate") return `🎟️ Resgate:\n${valor}`;
+  if (bloco.tipo === "link_resgate") return contexto.marketplaceShopee ? `🎟️ Resgate:\n${valor}` : "";
   if (bloco.tipo === "link_produto_original") return `🔗 Confira aqui:\n${valor}`;
   if (bloco.tipo === "link_app") return `${contexto.linksMoveisAliDistintos ? "📱 APP" : "📱 APP / Moedas"}:\n${valor}`;
   if (bloco.tipo === "link_pc") return `🖥️ PC:\n${valor}`;
@@ -2378,6 +2384,7 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
   const contexto = {
     marketplaceAliExpress: marketplaceAliExpress(doc.marketplace),
     marketplaceMercadoLivre: marketplaceMercadoLivre(doc.marketplace),
+    marketplaceShopee: marketplaceShopee(doc.marketplace),
     tituloOriginal: doc.tituloOriginal || "",
     tituloNormalizado: "",
     descricaoOriginal: doc.descricaoOriginal || "",

@@ -10,6 +10,9 @@ const {
 const {
   resolverContratoComercialFinal
 } = require("../templates-clientes/contrato-comercial-final");
+const {
+  marketplacePermiteLinkResgate
+} = require("../templates-clientes/link-resgate-publicavel");
 
 function normalizarTexto(valor) {
   if (valor == null) return "";
@@ -217,9 +220,15 @@ function linksComerciaisUnicos(links = []) {
       resolvido,
       afiliado,
       urlAfiliada: afiliado,
-      urlAfiliadaWorkspace: afiliado,
+      urlAfiliadaWorkspace: tipo === "resgate" && link.afiliacaoWorkspace
+        ? normalizarTexto(link.urlAfiliadaWorkspace || link.urlAfiliada || afiliado)
+        : afiliado,
       urlOptimus: normalizarTexto(link.urlOptimus || afiliado),
-      status: normalizarTexto(link.status || "")
+      status: normalizarTexto(link.status || ""),
+      renderizavel: link.renderizavel === true,
+      convertidoWorkspace: link.convertidoWorkspace === true,
+      conversaoStatus: normalizarTexto(link.conversaoStatus || ""),
+      afiliacaoWorkspace: link.afiliacaoWorkspace || link.conversaoWorkspace || null
     });
   }
 
@@ -937,7 +946,11 @@ function gerarTemplateUniversal(oferta = {}) {
     })
     .filter(Boolean)
     .slice(0, 3);
-  const linksResgate = linksComFallbackTemplate(campos, "resgate", campos.linkResgate);
+  const linksResgate = marketplacePermiteLinkResgate(campos.marketplace)
+    ? linksPorPapelTemplate({
+        linksComerciais: campos.linksResgate
+      }, "resgate")
+    : [];
   const linksApp = campos.linksApp.length
     ? linksPorPapelTemplate({ linksComerciais: campos.linksApp }, "app")
     : linksComFallbackTemplate(campos, "app", campos.linkApp);

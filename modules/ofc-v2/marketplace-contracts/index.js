@@ -1,5 +1,7 @@
 "use strict";
 
+const { linkResgateShopeePublicavel } = require("../../templates-clientes/link-resgate-publicavel");
+
 function texto(valor = "") {
   return String(valor ?? "").trim();
 }
@@ -263,14 +265,7 @@ function contratoMercadoLivre(entrada) {
   for (const link of lista(entrada.links)) {
     if (!texto(link.url)) continue;
     if (contextoExplicitoResgate(link) || texto(link.tipo) === "resgate") {
-      const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
-      adicionarLink(saida, linkBase(link, "link_resgate", {
-        urlAfiliada,
-        renderizavel: Boolean(urlAfiliada),
-        conversaoStatus: urlAfiliada ? "convertida" : "falhou",
-        motivoConversao: urlAfiliada ? "resgate_workspace_convertido" : "resgate_sem_conversao_workspace",
-        avisos: urlAfiliada ? [] : ["link_sem_conversao_workspace"]
-      }));
+      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_exclusivo_shopee" });
       continue;
     }
     if (urlFonteOuSocial(link.url)) {
@@ -317,7 +312,29 @@ function contratoShopee(entrada) {
 
   saida.linkProdutoOriginal = produtosOcorrencias[0]?.url || "";
   saida.linkResgateOriginal = resgatesOcorrencias[0]?.url || "";
-  for (const link of resgatesOcorrencias) adicionarLink(saida, linkBase(link, "link_resgate"));
+  for (const link of resgatesOcorrencias) {
+    const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
+    const normalizado = linkBase(link, "link_resgate", {
+      urlAfiliada,
+      renderizavel: Boolean(urlAfiliada),
+      conversaoStatus: urlAfiliada ? (texto(link.conversaoStatus) || "convertida") : "falhou",
+      motivoConversao: urlAfiliada ? (texto(link.motivoConversao) || "resgate_workspace_convertido") : "resgate_sem_conversao_workspace",
+      avisos: urlAfiliada ? [] : ["link_sem_conversao_workspace"]
+    });
+    normalizado.urlOriginal = texto(link.urlOriginal || link.url);
+    normalizado.convertidoWorkspace = link.convertidoWorkspace === true;
+    normalizado.afiliacaoWorkspace = link.afiliacaoWorkspace || link.conversaoWorkspace || null;
+    if (!linkResgateShopeePublicavel(normalizado, texto(entrada.workspaceId))) {
+      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_sem_conversao_workspace_validada" });
+      normalizado.urlAfiliada = "";
+      normalizado.urlAfiliadaWorkspace = "";
+      normalizado.urlOptimus = "";
+      normalizado.renderizavel = false;
+      normalizado.conversaoStatus = "falhou";
+      normalizado.motivoConversao = "resgate_sem_conversao_workspace_validada";
+    }
+    adicionarLink(saida, normalizado);
+  }
 
   for (const link of produtosOcorrencias) {
     adicionarLink(saida, linkProdutoConvertidoPorOcorrencia(link, entrada));
@@ -333,11 +350,14 @@ function contratoAliExpress(entrada) {
   for (const [indice, linkBruto] of lista(entrada.links).entries()) {
     const link = { ...linkBruto, ordemCaptura: Number(linkBruto.ordemCaptura || linkBruto.linha || indice + 1) || (indice + 1) };
     if (!texto(link.url)) continue;
+    if (["resgate", "link_resgate", "cupom", "link_cupom"].includes(texto(link.tipo))) {
+      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_exclusivo_shopee" });
+      continue;
+    }
     let papel = "link_produto";
     if (contextoMoedas(link) || ["moedas", "link_moedas"].includes(texto(link.tipo))) papel = "link_moedas";
     else if (contextoApp(link) || ["app", "link_app"].includes(texto(link.tipo))) papel = "link_app";
     else if (contextoPc(link) || ["pc", "link_pc"].includes(texto(link.tipo))) papel = "link_pc";
-    else if (texto(link.tipo) === "resgate") papel = "link_produto";
 
     if (papel === "link_produto") {
       produtos.push(link);
@@ -390,14 +410,7 @@ function contratoAmazon(entrada) {
       continue;
     }
     if (texto(link.tipo) === "resgate" || texto(link.tipo) === "link_resgate") {
-      const urlAfiliada = urlAfiliadaOcorrencia(link, entrada, { exigirCorrelacaoAfiliadoGlobal: true });
-      adicionarLink(saida, linkBase(link, "link_resgate", {
-        urlAfiliada,
-        renderizavel: Boolean(urlAfiliada),
-        conversaoStatus: urlAfiliada ? "convertida" : "falhou",
-        motivoConversao: urlAfiliada ? "resgate_workspace_convertido" : "resgate_sem_conversao_workspace",
-        avisos: urlAfiliada ? [] : ["link_sem_conversao_workspace"]
-      }));
+      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_exclusivo_shopee" });
       continue;
     }
     if (urlAmazon(link.url) || texto(link.tipo) === "produto") produtos.push(link);
@@ -416,6 +429,10 @@ function contratoKabumAwin(entrada) {
 
   for (const link of lista(entrada.links)) {
     if (!texto(link.url)) continue;
+    if (["resgate", "link_resgate", "cupom", "link_cupom"].includes(texto(link.tipo))) {
+      saida.descartes.push({ papel: "link_resgate", motivo: "resgate_exclusivo_shopee" });
+      continue;
+    }
     if (urlKabumAwin(link.url) || texto(link.tipo) === "produto") {
       produtos.push(link);
       continue;

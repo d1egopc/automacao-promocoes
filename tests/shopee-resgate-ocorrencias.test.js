@@ -1,8 +1,20 @@
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
+const { criarProvaAfiliacaoWorkspaceShopee, vincularUrlFinalPublicadaShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 const { aplicarGuardaOcorrenciasRadar } = require("../modules/engine/importer/importer.service");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
+
+const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-ocorrencias-proof-"));
+process.env.DATA_DIR = dataDirProva;
+fs.mkdirSync(path.join(dataDirProva, "clientes", "cliente_teste"), { recursive: true });
+fs.writeFileSync(path.join(dataDirProva, "clientes", "cliente_teste", "integracoes.json"), JSON.stringify({
+  shopee: { credenciais: { appId: "app", secret: "secret" } }
+}));
+process.on("exit", () => fs.rmSync(dataDirProva, { recursive: true, force: true }));
 
 function chaveRadar(url = "") {
   const parsed = new URL(url);
@@ -24,7 +36,7 @@ function ocorrenciaRadar(papel, url, ordemCaptura = 1) {
 }
 
 function linkComercialShopee({ tipo, url, afiliado, urlOptimus = "", ordemCaptura = 1, motivoConversao = "", destinoOriginal = null, destinoFinal = null }) {
-  return {
+  const link = {
     tipo,
     papel: tipo === "resgate" ? "link_resgate" : "produto",
     url,
@@ -46,12 +58,28 @@ function linkComercialShopee({ tipo, url, afiliado, urlOptimus = "", ordemCaptur
     uedOriginal: tipo === "produto" ? url : "",
     uedFinalDecodificado: tipo === "produto" ? afiliado : ""
   };
+
+  if (tipo === "resgate") {
+    link.convertidoWorkspace = true;
+    const credenciais = { appId: "app", secret: "secret" };
+    const prova = criarProvaAfiliacaoWorkspaceShopee({
+      clienteId: "cliente_teste", credenciais, urlOriginal: url, urlAfiliadaWorkspace: afiliado,
+      urlFinalExpandida: "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_app",
+      papel: "resgate", motivoConversao: link.motivoConversao
+    });
+    link.afiliacaoWorkspace = urlOptimus && urlOptimus !== afiliado
+      ? vincularUrlFinalPublicadaShopee(prova, { clienteId: "cliente_teste", credenciais, urlAtual: afiliado, urlFinal: urlOptimus })
+      : prova;
+  }
+
+  return link;
 }
 
 function assertTemplateProdutoResgate(oferta) {
   const mensagem = gerarTemplateUniversal({
     titulo: oferta.titulo || "Produto Shopee",
     marketplace: "shopee",
+    workspaceId: "cliente_teste",
     categoria: "Gamer e Hardware",
     preco: 1371,
     linksComerciais: oferta.linksComerciais
@@ -145,6 +173,11 @@ async function testarResgateProdutoProduto() {
   assert.deepStrictEqual(resultado.linksProduto.map(item => item.urlOriginal), [produto]);
   assert.deepStrictEqual(resultado.linksResgate.map(item => item.urlAfiliadaWorkspace), [afiliadoResgate]);
   assert.deepStrictEqual(resultado.metadata.linksComerciais.map(item => item.tipo), ["resgate", "produto"]);
+  const mensagemAdapter = gerarTemplateUniversal({
+    titulo: resultado.titulo, marketplace: "shopee", workspaceId: "cliente_teste",
+    precoAtual: resultado.preco, linksComerciais: resultado.linksComerciais
+  });
+  assert.ok(mensagemAdapter.includes(afiliadoResgate), "prova real gerada pelo adapter preserva resgate no template");
 }
 
 async function testarCincoProdutosDiferentesPreservamCincoSaidas() {

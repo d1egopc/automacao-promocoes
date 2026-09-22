@@ -23,6 +23,7 @@ function segredoAssinaturaShopee(credenciais = {}) {
 
 function payloadAssinaturaShopee(prova = {}) {
   return JSON.stringify({
+    marketplace: texto(prova.marketplace),
     workspaceId: texto(prova.workspaceId),
     appId: texto(prova.appId),
     affiliateIdEsperado: texto(prova.affiliateIdEsperado),
@@ -30,6 +31,7 @@ function payloadAssinaturaShopee(prova = {}) {
     papel: texto(prova.papel),
     urlOriginal: texto(prova.urlOriginal),
     urlAfiliadaWorkspace: texto(prova.urlAfiliadaWorkspace),
+    urlFinalPublicada: texto(prova.urlFinalPublicada),
     urlFinalExpandida: texto(prova.urlFinalExpandida),
     origemConversao: texto(prova.origemConversao),
     conversaoStatus: texto(prova.conversaoStatus),
@@ -46,8 +48,8 @@ function assinarProvaShopee(prova = {}, credenciais = {}) {
 function assinaturaProvaShopeeValida(prova = {}, credenciais = {}) {
   const recebida = texto(prova.assinatura);
   const esperada = assinarProvaShopee(prova, credenciais);
-  if (!recebida || !esperada || recebida.length !== esperada.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(recebida), Buffer.from(esperada));
+  if (!/^[a-f0-9]{64}$/i.test(recebida) || !esperada) return false;
+  return crypto.timingSafeEqual(Buffer.from(recebida, "hex"), Buffer.from(esperada, "hex"));
 }
 
 function criarProvaAfiliacaoWorkspaceShopee({ clienteId = "", credenciais = {}, urlOriginal = "", urlAfiliadaWorkspace = "", urlFinalExpandida = "", papel = "produto", motivoConversao = "" } = {}) {
@@ -57,9 +59,9 @@ function criarProvaAfiliacaoWorkspaceShopee({ clienteId = "", credenciais = {}, 
   const ownershipConfirmado = Boolean(affiliateIdDetectado && affiliateIdEsperado && affiliateIdDetectado === affiliateIdEsperado);
   const urlAfiliada = texto(urlAfiliadaWorkspace);
   const prova = {
-    workspaceId: texto(clienteId), appId, affiliateIdEsperado, affiliateIdDetectado,
+    marketplace: "shopee", workspaceId: texto(clienteId), appId, affiliateIdEsperado, affiliateIdDetectado,
     papel: texto(papel) || "produto", urlOriginal: texto(urlOriginal),
-    urlAfiliadaWorkspace: urlAfiliada, urlFinalExpandida: texto(urlFinalExpandida),
+    urlAfiliadaWorkspace: urlAfiliada, urlFinalPublicada: urlAfiliada, urlFinalExpandida: texto(urlFinalExpandida),
     origemConversao: "workspace_api",
     conversaoStatus: urlAfiliada && ownershipConfirmado ? "convertida" : "falhou",
     motivoConversao: !urlAfiliada
@@ -76,9 +78,16 @@ function validarProvaAfiliacaoWorkspaceShopee(prova = {}, { clienteId = "", cred
   const esperado = appId ? `an_${appId}` : "";
   const detectado = texto(prova.affiliateIdDetectado || afiliadoDetectadoShopee(prova.urlFinalExpandida || prova.urlAfiliadaWorkspace));
   return {
-    valida: Boolean(texto(clienteId) && prova.workspaceId === texto(clienteId) && prova.appId === appId && prova.origemConversao === "workspace_api" && prova.conversaoStatus === "convertida" && texto(prova.urlAfiliadaWorkspace) && detectado && detectado === esperado && assinaturaProvaShopeeValida(prova, credenciais)),
+    valida: Boolean(texto(clienteId) && prova.marketplace === "shopee" && prova.workspaceId === texto(clienteId) && prova.appId === appId && prova.origemConversao === "workspace_api" && prova.conversaoStatus === "convertida" && texto(prova.urlAfiliadaWorkspace) && texto(prova.urlFinalPublicada) && detectado && detectado === esperado && assinaturaProvaShopeeValida(prova, credenciais)),
     prova: { ...prova, affiliateIdEsperado: esperado, affiliateIdDetectado: detectado }
   };
+}
+
+function vincularUrlFinalPublicadaShopee(prova = {}, { clienteId = "", credenciais = {}, urlAtual = "", urlFinal = "" } = {}) {
+  if (!texto(urlFinal) || texto(prova.urlFinalPublicada) !== texto(urlAtual) ||
+      !validarProvaAfiliacaoWorkspaceShopee(prova, { clienteId, credenciais, exigirAssinatura: true }).valida) return null;
+  const vinculada = { ...prova, urlFinalPublicada: texto(urlFinal) };
+  return { ...vinculada, assinatura: assinarProvaShopee(vinculada, credenciais) };
 }
 
 function validarOfertaAfiliacaoWorkspaceShopee(oferta = {}, { clienteId = "", credenciais = {}, exigirAssinatura = false } = {}) {
@@ -110,4 +119,4 @@ function validarOfertaAfiliacaoWorkspaceShopee(oferta = {}, { clienteId = "", cr
   return { ok: true, motivo: "afiliacao_workspace_convertida", prova: principal.prova };
 }
 
-module.exports = { appIdShopee, afiliadoDetectadoShopee, criarProvaAfiliacaoWorkspaceShopee, validarProvaAfiliacaoWorkspaceShopee, validarOfertaAfiliacaoWorkspaceShopee, assinaturaProvaShopeeValida };
+module.exports = { appIdShopee, afiliadoDetectadoShopee, criarProvaAfiliacaoWorkspaceShopee, validarProvaAfiliacaoWorkspaceShopee, validarOfertaAfiliacaoWorkspaceShopee, assinaturaProvaShopeeValida, vincularUrlFinalPublicadaShopee };

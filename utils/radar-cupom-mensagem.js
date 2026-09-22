@@ -431,6 +431,7 @@ function analisarBeneficiosMensagemRadar(texto = "", links = []) {
       contexto: trecho
     });
     const resgate =
+      linkShopeeRadar(link) &&
       classificacaoLink.tipo === "resgate" &&
       textoIndicaPaginaResgateCupomRadar(trecho);
 

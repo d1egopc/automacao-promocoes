@@ -1,4 +1,7 @@
 const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 const {
   resolverPrecedenciaComercialRadar,
@@ -6,8 +9,17 @@ const {
 } = require("../modules/radar/comercial-precedencia");
 const { classificarLinksComerciais } = require("../modules/radar/links-comerciais");
 const { aplicarContratoMarketplace } = require("../modules/ofc-v2/marketplace-contracts");
+const { criarProvaAfiliacaoWorkspaceShopee, vincularUrlFinalPublicadaShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 const { normalizarApresentacaoComercial } = require("../modules/templates-clientes/normalizador-apresentacao-comercial");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+
+const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-papeis-"));
+process.env.DATA_DIR = dataDirProva;
+fs.mkdirSync(path.join(dataDirProva, "clientes", "cliente_teste"), { recursive: true });
+fs.writeFileSync(path.join(dataDirProva, "clientes", "cliente_teste", "integracoes.json"), JSON.stringify({
+  shopee: { credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" } }
+}));
+process.on("exit", () => fs.rmSync(dataDirProva, { recursive: true, force: true }));
 
 function campo(valor, confianca = "alta", evidencia = "") {
   return { valor, confianca, evidencia: evidencia || String(valor || "") };
@@ -292,8 +304,24 @@ testarAfiliadoGlobalNaoTrocaDestino(
 
 const contratoShopeeResgateProdutoProduto = aplicarContratoMarketplace({
   marketplace: "shopee",
+  workspaceId: "cliente_teste",
   links: [
-    { url: "https://s.shopee.com.br/resgate-a", tipo: "resgate", contexto: "Resgate o cupom", ordemCaptura: 1, urlAfiliada: "https://go.optimus/shopee/resgate-a", convertidoWorkspace: true },
+    {
+      url: "https://s.shopee.com.br/resgate-a", tipo: "resgate", contexto: "Resgate o cupom", ordemCaptura: 1,
+      urlAfiliadaWorkspace: "https://s.shopee.com.br/resgate-convertido",
+      urlOptimus: "https://go.optimus/shopee/resgate-a",
+      convertidoWorkspace: true, renderizavel: true, conversaoStatus: "convertida",
+      afiliacaoWorkspace: vincularUrlFinalPublicadaShopee(criarProvaAfiliacaoWorkspaceShopee({
+        clienteId: "cliente_teste",
+        credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" },
+        urlOriginal: "https://s.shopee.com.br/resgate-a",
+        urlAfiliadaWorkspace: "https://s.shopee.com.br/resgate-convertido",
+        urlFinalExpandida: "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_123456",
+        papel: "resgate",
+        motivoConversao: "resgate_workspace_convertido_generate_shortlink"
+      }), { clienteId: "cliente_teste", credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" },
+        urlAtual: "https://s.shopee.com.br/resgate-convertido", urlFinal: "https://go.optimus/shopee/resgate-a" })
+    },
     { url: "https://s.shopee.com.br/produto-b", tipo: "produto", contexto: "Produto", ordemCaptura: 2, urlAfiliada: "https://go.optimus/shopee/produto-b", convertidoWorkspace: true },
     { url: "https://s.shopee.com.br/produto-b", tipo: "produto", contexto: "Produto", ordemCaptura: 3, urlAfiliada: "https://go.optimus/shopee/produto-b", convertidoWorkspace: true }
   ]

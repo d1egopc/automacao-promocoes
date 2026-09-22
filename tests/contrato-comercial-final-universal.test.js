@@ -1,16 +1,37 @@
 const assert = require("assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
-const { gerarTemplateUniversal } = require("../modules/template-universal");
-const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { gerarTemplateUniversal: gerarTemplateUniversalOriginal } = require("../modules/template-universal");
+const { renderizarTemplatePersonalizado: renderizarTemplatePersonalizadoOriginal } = require("../modules/templates-clientes/renderer");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const {
-  resolverContratoComercialFinal
+  resolverContratoComercialFinal: resolverContratoComercialFinalOriginal
 } = require("../modules/templates-clientes/contrato-comercial-final");
+const { criarProvaAfiliacaoWorkspaceShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 const {
   extrairLinksRadar
 } = require("../utils/radar-cupom-mensagem");
+
+const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-universal-proof-"));
+process.env.DATA_DIR = dataDirProva;
+fs.mkdirSync(path.join(dataDirProva, "clientes", "workspace_fixture"), { recursive: true });
+fs.writeFileSync(path.join(dataDirProva, "clientes", "workspace_fixture", "integracoes.json"), JSON.stringify({
+  shopee: { credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" } }
+}));
+process.on("exit", () => fs.rmSync(dataDirProva, { recursive: true, force: true }));
+
+function workspaceShopee(oferta = {}) {
+  return String(oferta.marketplace || "").toLowerCase() === "shopee"
+    ? { ...oferta, workspaceId: oferta.workspaceId || "workspace_fixture" }
+    : oferta;
+}
+function gerarTemplateUniversal(oferta) { return gerarTemplateUniversalOriginal(workspaceShopee(oferta)); }
+function resolverContratoComercialFinal(oferta) { return resolverContratoComercialFinalOriginal(workspaceShopee(oferta)); }
+function renderizarTemplatePersonalizado(opcoes) {
+  return renderizarTemplatePersonalizadoOriginal({ ...opcoes, oferta: workspaceShopee(opcoes.oferta) });
+}
 
 function normalizar(texto) {
   return String(texto || "").replace(/\u00a0/g, " ");
@@ -26,6 +47,30 @@ function assertNaoContem(texto, trecho, msg) {
 
 function contarOcorrencias(texto, trecho) {
   return normalizar(texto).split(trecho).length - 1;
+}
+
+function linkResgateShopeeConvertido(original, final, ordemCaptura = 1) {
+  const afiliacaoWorkspace = criarProvaAfiliacaoWorkspaceShopee({
+    clienteId: "workspace_fixture",
+    credenciais: { appId: "123456", secret: "segredo_fixture_somente_teste" },
+    urlOriginal: original,
+    urlAfiliadaWorkspace: final,
+    urlFinalExpandida: "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_123456",
+    papel: "resgate",
+    motivoConversao: "resgate_workspace_convertido_generate_shortlink"
+  });
+  return {
+    tipo: "resgate",
+    papel: "link_resgate",
+    ordemCaptura,
+    original,
+    urlOptimus: final,
+    urlAfiliadaWorkspace: final,
+    convertidoWorkspace: true,
+    renderizavel: true,
+    conversaoStatus: "convertida",
+    afiliacaoWorkspace
+  };
 }
 
 function montarMensagemComTemplateUniversalFalhando() {
@@ -56,7 +101,7 @@ function linksFixture() {
   return [
     { tipo: "produto", papel: "link_produto", ordemCaptura: 1, urlOptimus: "https://go.optimus/produto-1" },
     { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOptimus: "https://go.optimus/produto-2" },
-    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 3, urlOptimus: "https://go.optimus/resgate" },
+    linkResgateShopeeConvertido("https://s.shopee.com.br/resgate", "https://go.optimus/resgate", 3),
     { tipo: "app", papel: "link_app", ordemCaptura: 4, urlOptimus: "https://go.optimus/app" },
     { tipo: "pc", papel: "link_pc", ordemCaptura: 5, urlOptimus: "https://go.optimus/pc" }
   ];
@@ -379,8 +424,8 @@ const linksRadarDuplicados = extrairLinksRadar("Resgate\nhttps://x.test/a\nResga
 assert.deepStrictEqual(linksRadarDuplicados, ["https://x.test/a", "https://x.test/a", "https://x.test/b"]);
 
 const linksOcorrenciasDuplicadas = [
-  { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlAfiliada: "https://go.optimus/resgate-a" },
-  { tipo: "resgate", papel: "link_resgate", ordemCaptura: 2, urlAfiliada: "https://go.optimus/resgate-a" },
+  linkResgateShopeeConvertido("https://s.shopee.com.br/resgate-a", "https://go.optimus/resgate-a", 1),
+  linkResgateShopeeConvertido("https://s.shopee.com.br/resgate-a", "https://go.optimus/resgate-a", 2),
   { tipo: "produto", papel: "link_produto", ordemCaptura: 3, urlAfiliada: "https://go.optimus/produto-b" },
   { tipo: "produto", papel: "link_produto", ordemCaptura: 4, urlAfiliada: "https://go.optimus/produto-b" },
   { tipo: "app", papel: "link_app", ordemCaptura: 5, urlAfiliada: "https://go.optimus/app" },
@@ -703,7 +748,7 @@ const msgCupomPixComResgate = gerarTemplateUniversal({
   cupom: "PROMO10",
   beneficioTexto: "Use o cupom PROMO10 + Pix",
   linksComerciais: [
-    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOptimus: "https://go.optimus/resgate-pix" },
+    linkResgateShopeeConvertido("https://s.shopee.com.br/resgate-pix", "https://go.optimus/resgate-pix", 1),
     { tipo: "produto", papel: "link_produto", ordemCaptura: 2, urlOptimus: "https://go.optimus/produto-pix" }
   ]
 });
@@ -747,7 +792,7 @@ const msgShopeeResgateIntacto = gerarTemplateUniversal({
   cupom: "SHOPEE10",
   beneficioTexto: "Resgate o cupom no link abaixo.",
   linksComerciais: [
-    { tipo: "resgate", papel: "link_resgate", ordemCaptura: 1, urlOptimus: "https://go.optimus/shopee-resgate" }
+    linkResgateShopeeConvertido("https://s.shopee.com.br/shopee-resgate", "https://go.optimus/shopee-resgate", 1)
   ]
 });
 assertContem(msgShopeeResgateIntacto, "Aplique o cupom SHOPEE10 para obter o valor.");

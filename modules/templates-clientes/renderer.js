@@ -15,6 +15,9 @@ const {
 const {
   classificacaoVisualOferta
 } = require("./classificacao-visual-oferta");
+const {
+  marketplacePermiteLinkResgate
+} = require("./link-resgate-publicavel");
 
 const AVISO_FINAL_PADRAO = "Oferta sujeita à alteração de preço.";
 const TIPOS_AVISO_FINAL = new Set(["aviso_final", "aviso_preco", "aviso_alteracao"]);
@@ -537,7 +540,14 @@ function dadosBlocoTemplate(tipo = "", oferta = {}) {
   if (tipo === "cupom") return valorCupomTemplate(oferta);
   if (tipo === "frase_cupom") return valorCupomTemplate(oferta) ? montarFraseCupom(oferta) : "";
   if (tipo === "link") return primeiroTexto(linkComercialPorTipo(oferta, ["produto"]), temOcorrenciasComerciais(oferta) ? "" : primeiroTexto(oferta.linkProduto, oferta.linkAfiliado, oferta.linkFinal, oferta.link));
-  if (tipo === "link_resgate") return primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
+  if (tipo === "link_resgate") {
+    if (!marketplacePermiteLinkResgate(primeiroTexto(oferta.marketplace, oferta.loja))) return "";
+    return linkComercialPorTipo({
+      ...oferta,
+      linksComerciais: Array.isArray(oferta.linksResgate) ? oferta.linksResgate : [],
+      linksResgate: []
+    }, ["resgate"]);
+  }
   if (tipo === "link_app") return primeiroTexto(linkComercialPorTipo(oferta, ["app"]), oferta.linkApp);
   if (tipo === "link_moedas") return primeiroTexto(linkComercialPorTipo(oferta, ["moedas"]), oferta.linkMoedas);
   if (tipo === "link_pc") return primeiroTexto(linkComercialPorTipo(oferta, ["pc"]), oferta.linkPc);
@@ -731,7 +741,7 @@ function resolverLinha(bloco, oferta = {}) {
     return cta ? `🔗 ${cta}` : "";
   }
   if (tipo === "link_resgate") {
-    const link = primeiroTexto(linkComercialPorTipo(oferta, ["resgate"]), oferta.linkResgate);
+    const link = dadosBlocoTemplate("link_resgate", oferta);
     return link ? `${marketplaceShopeeTemplate(oferta) ? "🎟️ Resgatar cupom" : "🎟️ Resgate"}:\n${link}` : "";
   }
   if (tipo === "link_app") {

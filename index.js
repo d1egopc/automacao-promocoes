@@ -330,7 +330,8 @@ const {
   validarOfertaAfiliacaoWorkspaceAliExpress
 } = require("./modules/marketplaces/aliexpress/afiliacao-workspace");
 const {
-  validarOfertaAfiliacaoWorkspaceShopee
+  validarOfertaAfiliacaoWorkspaceShopee,
+  vincularUrlFinalPublicadaShopee
 } = require("./modules/marketplaces/shopee/afiliacao-workspace");
 const {
   validarOfertaAfiliacaoWorkspaceMagalu
@@ -5652,13 +5653,27 @@ function aplicarLinkOptimusEmListaComercial({ oferta = {}, campo = "", marketpla
     if (!item || typeof item !== "object" || item.renderizavel === false) return item;
     const linkOriginal = urlItemLinkComercial(item);
     if (!linkOriginal) return item;
+    const resgateShopee = String(marketplace).trim().toLowerCase() === "shopee" &&
+      ["resgate", "link_resgate", "cupom", "link_cupom"].includes(String(item.papel || item.tipo || "").toLowerCase());
+    const credenciaisShopee = resgateShopee
+      ? (getIntegracaoCliente(clienteId, "shopee")?.credenciais || {})
+      : null;
+    const provaAnterior = resgateShopee ? (item.afiliacaoWorkspace || item.conversaoWorkspace || {}) : null;
+    if (resgateShopee && !vincularUrlFinalPublicadaShopee(provaAnterior, {
+      clienteId, credenciais: credenciaisShopee, urlAtual: linkOriginal, urlFinal: linkOriginal
+    })) return { ...item, renderizavel: false, urlOptimus: "", urlAfiliada: "", afiliado: "" };
     const resultado = criarLinkOptimus(linkOriginal, marketplace, { clienteId, configGlobal });
     if (!resultado.ok || !resultado.url) return item;
+    const provaFinal = resgateShopee ? vincularUrlFinalPublicadaShopee(provaAnterior, {
+      clienteId, credenciais: credenciaisShopee, urlAtual: linkOriginal, urlFinal: resultado.url
+    }) : null;
+    if (resgateShopee && !provaFinal) return { ...item, renderizavel: false, urlOptimus: "", urlAfiliada: "", afiliado: "" };
     alterou = true;
     if (resultado.codigo) codigos.push(resultado.codigo);
     const ordemCaptura = Number(item.ordemCaptura || item.ordem || indice + 1) || (indice + 1);
     return {
       ...item,
+      ...(provaFinal ? { afiliacaoWorkspace: provaFinal } : {}),
       ordemCaptura,
       urlOriginalAfiliadaAntesLinkOptimus: linkOriginal,
       urlOptimus: resultado.url,
