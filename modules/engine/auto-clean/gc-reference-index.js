@@ -7,8 +7,19 @@ const DEFAULT_MAX_REFERENCE_BYTES = 16 * 1024 * 1024;
 const VITRINE_RETENTION_MS = 72 * 60 * 60 * 1000;
 const HISTORY_DAYS = 7;
 const HISTORY_RETENTION_MS = HISTORY_DAYS * 24 * 60 * 60 * 1000;
+const REFERENCE_REASON = Object.freeze({
+  BUDGET_EXCEEDED: "REFERENCE_BUDGET_EXCEEDED",
+  FILE_TOO_LARGE: "REFERENCE_FILE_TOO_LARGE",
+  FILE_INVALID_JSON: "REFERENCE_FILE_INVALID_JSON",
+  JSONL_PARSE_ERROR: "REFERENCE_JSONL_PARSE_ERROR",
+  READ_ERROR: "REFERENCE_READ_ERROR",
+  SOURCE_CHANGED: "REFERENCE_SOURCE_CHANGED",
+  SOURCE_NOT_REGULAR: "REFERENCE_SOURCE_NOT_REGULAR",
+  FORMAT_INVALID: "REFERENCE_FILE_FORMAT_INVALID",
+  COMPLEXITY_LIMIT: "REFERENCE_INDEX_COMPLEXITY_LIMIT"
+});
 const TERMINAL_QUEUE_STATUS = new Set([
-  "enviado", "enviada", "historico", "expirada", "expirado", "expirada_operacional",
+  "enviado", "enviada", "historico", "terminal", "expirada", "expirado", "expirada_operacional",
   "expirado_operacional", "erro_final", "erro_permanente", "falha_final", "cancelada",
   "cancelado", "descartada", "descartado", "duplicada", "duplicado"
 ]);
@@ -22,7 +33,11 @@ function hashRenderEmValor(value, workspaceId) {
 }
 
 function coletarObjeto(value, workspaceId, source, refs, budget, depth = 0) {
-  if (depth > 32 || ++budget.nodes > 300000) throw new Error("GC_REFERENCE_COMPLEXITY_LIMIT");
+  if (depth > 32 || ++budget.nodes > 300000) {
+    const error = new Error(REFERENCE_REASON.COMPLEXITY_LIMIT);
+    error.code = REFERENCE_REASON.COMPLEXITY_LIMIT;
+    throw error;
+  }
   if (typeof value === "string") {
     for (const hash of hashRenderEmValor(value, workspaceId)) {
       if (!refs.has(hash)) refs.set(hash, new Set());
@@ -33,6 +48,22 @@ function coletarObjeto(value, workspaceId, source, refs, budget, depth = 0) {
   } else if (value && typeof value === "object") {
     for (const item of Object.values(value)) coletarObjeto(item, workspaceId, source, refs, budget, depth + 1);
   }
+}
+
+function erroReferencia(reasonCode, file, source, extra = {}) {
+  const error = new Error(reasonCode);
+  error.code = reasonCode;
+  error.referenceSource = String(source || "unknown");
+  error.referenceFile = path.basename(String(file || ""));
+  if (Number.isSafeInteger(extra.lineNumber) && extra.lineNumber > 0) error.lineNumber = extra.lineNumber;
+  return error;
+}
+
+function erroComContexto(error, fallbackCode, file, source, extra = {}) {
+  const reasonCode = String(error?.code || "").startsWith("REFERENCE_") ? error.code : fallbackCode;
+  const contextual = erroReferencia(reasonCode, file, source, extra);
+  if (error?.lineNumber && !contextual.lineNumber) contextual.lineNumber = error.lineNumber;
+  return contextual;
 }
 
 function ofertasVitrineVivas(documento, nowMs) {
@@ -69,37 +100,73 @@ function selecionarConteudoVivo(parsed, file, source, nowMs) {
     });
   }
   if (base === "fila-historico.json") return parsed.filter(item => dentroRetencao(item?.item || item, nowMs));
-  if (base === "fila-projecao-leve.json") return parsed.itens.filter(item => dentroRetencao(item, nowMs));
+  if (base === "fila-projecao-leve.json") {
+    return parsed.itens.filter(item => {
+      const status = String(item?.statusOperacional || item?.status || item?.estado || "pendente").toLowerCase();
+      return !TERMINAL_QUEUE_STATUS.has(status) || dentroRetencao(item, nowMs);
+    });
+  }
   return parsed;
 }
 
 async function lerFonte(file, source, workspaceId, refs, budget, fsApi, nowMs) {
   let before;
   try { before = await fsApi.lstat(file); }
-  catch (error) { if (error?.code === "ENOENT") return false; throw error; }
-  if (!before.isFile() || before.isSymbolicLink()) throw new Error("GC_REFERENCE_SOURCE_NOT_REGULAR");
-  if (before.size > budget.remaining) throw new Error("GC_REFERENCE_BYTE_BUDGET");
+  catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw erroReferencia(REFERENCE_REASON.READ_ERROR, file, source);
+  }
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw erroReferencia(REFERENCE_REASON.SOURCE_NOT_REGULAR, file, source);
+  }
+  if (before.size > budget.remaining) {
+    const reason = before.size > budget.max
+      ? REFERENCE_REASON.FILE_TOO_LARGE
+      : REFERENCE_REASON.BUDGET_EXCEEDED;
+    throw erroReferencia(reason, file, source);
+  }
   budget.remaining -= before.size;
-  const content = await fsApi.readFile(file, "utf8");
-  const after = await fsApi.lstat(file);
-  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error("GC_REFERENCE_SOURCE_CHANGED");
+  let content;
+  let after;
+  try {
+    content = await fsApi.readFile(file, "utf8");
+    after = await fsApi.lstat(file);
+  } catch {
+    throw erroReferencia(REFERENCE_REASON.READ_ERROR, file, source);
+  }
+  if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+    throw erroReferencia(REFERENCE_REASON.SOURCE_CHANGED, file, source);
+  }
   if (file.endsWith(".jsonl")) {
+    let lineNumber = 0;
     for (const line of content.split(/\r?\n/)) {
-      if (line.trim()) coletarObjeto(JSON.parse(line), workspaceId, source, refs, budget);
+      lineNumber += 1;
+      if (!line.trim()) continue;
+      try {
+        coletarObjeto(JSON.parse(line), workspaceId, source, refs, budget);
+      } catch (error) {
+        throw erroComContexto(error, REFERENCE_REASON.JSONL_PARSE_ERROR, file, source, { lineNumber });
+      }
     }
   } else {
-    const parsed = JSON.parse(content);
+    let parsed;
+    try { parsed = JSON.parse(content); }
+    catch { throw erroReferencia(REFERENCE_REASON.FILE_INVALID_JSON, file, source); }
     if (source === "vitrine" && (!parsed || !Array.isArray(parsed.ofertas))) {
-      throw new Error("GC_VITRINE_FORMAT_INVALID");
+      throw erroReferencia(REFERENCE_REASON.FORMAT_INVALID, file, source);
     }
     const projection = path.basename(file) === "fila-projecao-leve.json";
     if (projection && (!parsed || !Array.isArray(parsed.itens))) {
-      throw new Error("GC_PROJECTION_FORMAT_INVALID");
+      throw erroReferencia(REFERENCE_REASON.FORMAT_INVALID, file, source);
     }
     if (source !== "vitrine" && !projection && !Array.isArray(parsed)) {
-      throw new Error("GC_REFERENCE_FORMAT_INVALID");
+      throw erroReferencia(REFERENCE_REASON.FORMAT_INVALID, file, source);
     }
-    coletarObjeto(selecionarConteudoVivo(parsed, file, source, nowMs), workspaceId, source, refs, budget);
+    try {
+      coletarObjeto(selecionarConteudoVivo(parsed, file, source, nowMs), workspaceId, source, refs, budget);
+    } catch (error) {
+      throw erroComContexto(error, REFERENCE_REASON.READ_ERROR, file, source);
+    }
   }
   budget.sources += 1;
   budget.bytes += before.size;
@@ -129,7 +196,7 @@ async function inventariarReferenciasVivas({ dataDir, workspaceId, nowMs = Date.
   maxBytes = DEFAULT_MAX_REFERENCE_BYTES, fsApi = fs.promises } = {}) {
   if (!/^[a-zA-Z0-9_-]+$/.test(String(workspaceId || ""))) throw new Error("GC_WORKSPACE_INVALID");
   const refs = new Map();
-  const budget = { remaining: maxBytes, bytes: 0, sources: 0, nodes: 0 };
+  const budget = { max: maxBytes, remaining: maxBytes, bytes: 0, sources: 0, nodes: 0 };
   try {
     for (const { file, source } of fontesWorkspace(dataDir, workspaceId, nowMs)) {
       await lerFonte(file, source, workspaceId, refs, budget, fsApi, nowMs);
@@ -138,9 +205,14 @@ async function inventariarReferenciasVivas({ dataDir, workspaceId, nowMs = Date.
   } catch (error) {
     // Inventario incompleto jamais autoriza declarar um render orfao.
     return { complete: false, refs, bytesRead: budget.bytes, sourcesRead: budget.sources,
-      errorCode: error?.code || error?.message || "GC_REFERENCE_READ_ERROR" };
+      errorCode: error?.code || REFERENCE_REASON.READ_ERROR,
+      reasonCode: error?.code || REFERENCE_REASON.READ_ERROR,
+      referenceSource: error?.referenceSource || "unknown",
+      referenceFile: error?.referenceFile || "",
+      lineNumber: Number.isSafeInteger(error?.lineNumber) ? error.lineNumber : undefined };
   }
 }
 
 module.exports = { inventariarReferenciasVivas, hashRenderEmValor, ofertasVitrineVivas,
-  selecionarConteudoVivo, DEFAULT_MAX_REFERENCE_BYTES, VITRINE_RETENTION_MS, HISTORY_RETENTION_MS };
+  selecionarConteudoVivo, DEFAULT_MAX_REFERENCE_BYTES, VITRINE_RETENTION_MS, HISTORY_RETENTION_MS,
+  REFERENCE_REASON };

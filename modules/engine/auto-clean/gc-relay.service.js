@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { selecionarRoundRobin } = require("./workspace-rotation");
-const { inventariarReferenciasVivas } = require("./gc-reference-index");
+const { buildOrLoadReferenceIndex } = require("./gc-reference-index-builder");
 
 const STATE_FILE = "auto-clean-gc-relay-state.json";
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
@@ -103,12 +103,28 @@ async function runOnce(options = {}) {
   const key = `${dataDir}:${workspace}`;
   let references;
   try {
-    references = await inventariarReferenciasVivas({ dataDir, workspaceId: workspace,
-      nowMs, maxBytes: options.maxReferenceBytes, fsApi });
+    references = await (options.referenceIndexBuilder || buildOrLoadReferenceIndex)({
+      dataDir,
+      workspaceId: workspace,
+      nowMs,
+      maxBytesPerRun: options.maxReferenceBytes,
+      maxDurationMs: options.maxReferenceDurationMs,
+      maxIndexAgeMs: options.maxIndexAgeMs,
+      logger: options.logger,
+      fsApi
+    });
     summary.referenceComplete = references.complete;
-    summary.referenceBytesRead = references.bytesRead;
-    summary.referenceSourcesRead = references.sourcesRead;
-    if (!references.complete) summary.errors += 1;
+    summary.referenceBytesRead = references.bytesRead ?? references.bytesProcessed ?? 0;
+    summary.referenceSourcesRead = references.sourcesRead ?? 0;
+    summary.referenceGeneration = references.generation || "";
+    summary.referenceRefs = references.refsCount ?? references.refs?.size ?? 0;
+    if (!references.complete) {
+      summary.errors += 1;
+      summary.referenceReasonCode = references.reasonCode || references.errorCode || "REFERENCE_READ_ERROR";
+      summary.referenceSource = references.referenceSource || references.source || "unknown";
+      summary.referenceFile = references.referenceFile || "";
+      if (references.lineNumber) summary.referenceLineNumber = references.lineNumber;
+    }
   } catch {
     references = { complete: false, refs: new Map() };
     summary.referenceComplete = false;
@@ -169,7 +185,9 @@ async function runOnce(options = {}) {
 function sanitizeSummary(summary) {
   const fields = ["workspace", "inspected", "live", "young", "candidates", "candidateBytes",
     "errors", "vitrineConflicts", "historyConflicts", "replayed", "dryRun", "durationMs",
-    "referenceComplete", "referenceBytesRead", "referenceSourcesRead", "directoryComplete", "skipped", "reason"];
+    "referenceComplete", "referenceBytesRead", "referenceSourcesRead", "referenceReasonCode",
+    "referenceSource", "referenceFile", "referenceLineNumber", "referenceGeneration", "referenceRefs",
+    "directoryComplete", "skipped", "reason"];
   return Object.fromEntries(fields.filter(key => summary[key] !== undefined).map(key => [key, summary[key]]));
 }
 

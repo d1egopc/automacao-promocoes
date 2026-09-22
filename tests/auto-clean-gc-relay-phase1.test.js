@@ -5,7 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { selecionarRoundRobin } = require("../modules/engine/auto-clean/workspace-rotation");
-const { inventariarReferenciasVivas } = require("../modules/engine/auto-clean/gc-reference-index");
+const { inventariarReferenciasVivas, REFERENCE_REASON } = require("../modules/engine/auto-clean/gc-reference-index");
 const { executarGcRelaySeguro, runOnce, closeSession, CANDIDATE_AGE_MS, STATE_FILE, CLASSIFICACAO,
   classificarRender } = require("../modules/engine/auto-clean/gc-relay.service");
 
@@ -170,6 +170,9 @@ async function testVitrineExpiredAndHistoryWindow() {
     json(path.join(f.clientDir, "fila-historico.json"), [{
       item: { imagem: url(f, H1), status: "enviado", enviadoEm: new Date(NOW - 8 * 24 * 60 * 60 * 1000).toISOString() }
     }]);
+    json(path.join(f.clientDir, "fila-projecao-leve.json"), {
+      versao: 1, clienteId: f.workspace, geradoEm: new Date(NOW).toISOString(), itens: []
+    });
     json(path.join(f.clientDir, "manual_ofertas_v2.json"), [{
       imagem: url(f, H1), status: "enviada", enviadoEm: new Date(NOW - 8 * 24 * 60 * 60 * 1000).toISOString()
     }]);
@@ -191,10 +194,12 @@ async function testNoLogoNoSymlinkAndFailClosed() {
     fs.writeFileSync(logo, "logo");
     render(f, H2, CANDIDATE_AGE_MS + 1000);
     json(path.join(f.clientDir, "fila.json"), [{ imagem: url(f, H2) }, { large: "x".repeat(2048) }]);
-    const incomplete = await run(f, { maxReferenceBytes: 100 });
-    assert.strictEqual(incomplete.referenceComplete, false);
-    assert.strictEqual(incomplete.candidates, 0);
-    assert.ok(incomplete.errors >= 1);
+    const incomplete = await inventariarReferenciasVivas({
+      dataDir: f.dataDir, workspaceId: f.workspace, nowMs: NOW, maxBytes: 100
+    });
+    assert.strictEqual(incomplete.complete, false);
+    assert.strictEqual(incomplete.reasonCode, REFERENCE_REASON.FILE_TOO_LARGE);
+    assert.strictEqual(incomplete.referenceFile, "fila.json");
     assert.ok(fs.existsSync(logo));
     // Mesmo um dirent simbolico forjado nao pode entrar em lstat/GC.
     const g = fixture();
@@ -210,6 +215,83 @@ async function testNoLogoNoSymlinkAndFailClosed() {
       assert.strictEqual(result.errors, 1);
     } finally { await cleanup(g); }
   } finally { await cleanup(f); }
+}
+
+async function testReferenceReasonCodes() {
+  const optional = fixture();
+  try {
+    const result = await inventariarReferenciasVivas({
+      dataDir: optional.dataDir, workspaceId: optional.workspace, nowMs: NOW
+    });
+    assert.strictEqual(result.complete, true, "fontes opcionais ausentes nao tornam indice incompleto");
+  } finally { await cleanup(optional); }
+
+  const aggregate = fixture();
+  try {
+    json(path.join(aggregate.clientDir, "fila.json"), [{ value: "x".repeat(30) }]);
+    json(path.join(aggregate.clientDir, "fila-viva.json"), [{ value: "y".repeat(30) }]);
+    const result = await inventariarReferenciasVivas({
+      dataDir: aggregate.dataDir, workspaceId: aggregate.workspace, nowMs: NOW, maxBytes: 70
+    });
+    assert.strictEqual(result.reasonCode, REFERENCE_REASON.BUDGET_EXCEEDED);
+    assert.strictEqual(result.referenceFile, "fila-viva.json");
+  } finally { await cleanup(aggregate); }
+
+  const invalidJson = fixture();
+  try {
+    fs.writeFileSync(path.join(invalidJson.clientDir, "fila.json"), "{invalido");
+    const result = await inventariarReferenciasVivas({
+      dataDir: invalidJson.dataDir, workspaceId: invalidJson.workspace, nowMs: NOW
+    });
+    assert.strictEqual(result.reasonCode, REFERENCE_REASON.FILE_INVALID_JSON);
+    assert.strictEqual(result.referenceFile, "fila.json");
+  } finally { await cleanup(invalidJson); }
+
+  const invalidJsonl = fixture();
+  try {
+    const day = new Date(NOW).toISOString().slice(0, 10);
+    const file = path.join(invalidJsonl.clientDir, "fila-historico-leve-incremental", `${day}.jsonl`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "{invalido\n");
+    const result = await inventariarReferenciasVivas({
+      dataDir: invalidJsonl.dataDir, workspaceId: invalidJsonl.workspace, nowMs: NOW
+    });
+    assert.strictEqual(result.reasonCode, REFERENCE_REASON.JSONL_PARSE_ERROR);
+    assert.strictEqual(result.referenceSource, "historico");
+    assert.strictEqual(result.lineNumber, 1);
+  } finally { await cleanup(invalidJsonl); }
+
+  const unreadable = fixture();
+  try {
+    const target = path.join(unreadable.clientDir, "fila.json");
+    json(target, []);
+    const base = fs.promises;
+    const denied = Object.create(base);
+    denied.readFile = async (file, ...args) => {
+      if (path.resolve(file) === path.resolve(target)) {
+        const error = new Error("denied");
+        error.code = "EACCES";
+        throw error;
+      }
+      return base.readFile(file, ...args);
+    };
+    const result = await inventariarReferenciasVivas({
+      dataDir: unreadable.dataDir, workspaceId: unreadable.workspace, nowMs: NOW, fsApi: denied
+    });
+    assert.strictEqual(result.reasonCode, REFERENCE_REASON.READ_ERROR);
+    assert.strictEqual(result.referenceFile, "fila.json");
+  } finally { await cleanup(unreadable); }
+
+  const failClosed = fixture();
+  try {
+    const old = render(failClosed, H1, CANDIDATE_AGE_MS + 1000);
+    fs.writeFileSync(path.join(failClosed.clientDir, "fila.json"), "{invalido");
+    const result = await run(failClosed);
+    assert.strictEqual(result.referenceReasonCode, "REFERENCE_COMPACT_SOURCE_MISSING");
+    assert.strictEqual(result.candidates, 0);
+    assert.ok(result.errors >= 2);
+    assert.ok(fs.existsSync(old), "indice incompleto jamais remove nem candidata render antigo");
+  } finally { await cleanup(failClosed); }
 }
 
 async function testIntervalAndSingleFlight() {
@@ -244,6 +326,7 @@ async function main() {
   await testRelayWorkspaceRotationAndRestartCursor();
   await testVitrineExpiredAndHistoryWindow();
   await testNoLogoNoSymlinkAndFailClosed();
+  await testReferenceReasonCodes();
   await testIntervalAndSingleFlight();
   console.log("AUTO_CLEAN_GC_RELAY_PHASE1_TESTS_PASS");
 }
