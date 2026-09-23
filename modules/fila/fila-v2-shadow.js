@@ -772,11 +772,15 @@ function projetarFilaV2Shadow({
     if (typeof writeClienteJson === "function") {
       const vivaEscrita = writeClienteJson(cliente, FILA_VIVA_ARQUIVO, projecao.viva);
       if (vivaEscrita !== false) {
-        publicarReferenciasFilaViva(cliente, projecao.viva, {
+        const referencias = publicarReferenciasFilaViva(cliente, projecao.viva, {
           writeClienteJson,
           getClienteJsonPath,
           fs
         });
+        if (!referencias.ok) {
+          logShadow(logger, { evento: "fila_gc_references_error", clienteId: cliente,
+            reasonCode: referencias.motivo });
+        }
       }
       writeClienteJson(cliente, FILA_HISTORICO_ARQUIVO, projecao.historico);
       try {

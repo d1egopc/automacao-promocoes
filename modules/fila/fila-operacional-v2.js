@@ -28,7 +28,7 @@ const {
 } = require("./fila-read-model-publico");
 const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
-const { publicarReferenciasFilaViva } = require("./fila-gc-references");
+const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -721,6 +721,18 @@ function reconciliarProjecaoHotPublicaCliente(clienteId = "admin", params = {}, 
     projectionReadyProjecaoLeve.set(cliente, true);
   } else {
     projectionReadyProjecaoLeve.set(cliente, false);
+  }
+  if (params.motivo === "carregarFila") {
+    const filaV2Bootstrap = filaMemoria.length
+      ? projetarFilaV2(filaMemoria, { agora })
+      : null;
+    void bootstrapReferenciasFilaViva(cliente, {
+      getClienteJsonPath: deps.getClienteJsonPath || getClienteJsonPath,
+      writeClienteJson: deps.writeClienteJson || writeClienteJson,
+      fs: deps.fs || fs,
+      entradas: filaV2Bootstrap?.viva,
+      logger: deps.logger
+    });
   }
   return {
     ok: escrita.ok === true,
@@ -2339,11 +2351,17 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
       vivaFileProof = proof.proof;
     }
     if (ok !== false) {
-      publicarReferenciasFilaViva(cliente, normalizada, {
+      const referencias = publicarReferenciasFilaViva(cliente, normalizada, {
         getClienteJsonPath: deps.getClienteJsonPath || getClienteJsonPath,
         writeClienteJson: escritor,
         fs: deps.fs || fs
       });
+      if (!referencias.ok) {
+        logOperacional(deps.logger, {
+          evento: "fila_gc_references_error", clienteId: cliente,
+          reasonCode: referencias.motivo
+        });
+      }
     }
     return {
       ok: ok !== false,

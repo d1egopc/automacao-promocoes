@@ -38,7 +38,12 @@ function hashesFilaViva(entradas = [], workspaceId = "") {
       for (const item of Object.values(valor)) visitar(item, profundidade + 1);
     }
   }
-  visitar(entradas, 0);
+  // Cada item e uma unidade de complexidade independente; nenhum item pode
+  // ser parcialmente projetado, mas a fila inteira pode ter muitos itens.
+  for (const entrada of entradas) {
+    nodes = 0;
+    visitar(entrada, 0);
+  }
   return [...hashes].sort();
 }
 
@@ -101,6 +106,9 @@ function publicarReferenciasFilaViva(clienteId, entradas, deps = {}) {
     const before = fsImpl.lstatSync(filaPath, { bigint: true });
     if (!before.isFile() || before.isSymbolicLink()) return { ok: false, motivo: "gc_references_guard_invalid" };
     if (!identidadeArquivo(before)) return { ok: false, motivo: "gc_references_identity_unavailable" };
+    if (deps.expectedQueueGuard && !mesmaCobertura(coberturaArquivo(before), deps.expectedQueueGuard)) {
+      return { ok: false, motivo: "gc_references_guard_changed" };
+    }
     const documento = projetarReferenciasFilaViva(entradas, clienteId, before);
     if (escritor(clienteId, FILA_GC_REFERENCES_ARQUIVO, documento) === false) {
       return { ok: false, motivo: "gc_references_write_failed" };
@@ -111,9 +119,89 @@ function publicarReferenciasFilaViva(clienteId, entradas, deps = {}) {
     }
     return { ok: true, totalRefs: documento.totalRefs,
       bytes: Buffer.byteLength(JSON.stringify(documento)) };
-  } catch {
-    return { ok: false, motivo: "gc_references_projection_failed" };
+  } catch (error) {
+    return { ok: false, motivo: error?.message === "FILA_GC_REFERENCES_COMPLEXITY_LIMIT"
+      ? "gc_references_complexity_limit" : "gc_references_projection_failed" };
   }
+}
+
+function mesmaCobertura(a, b) {
+  return Boolean(a && b && a.size === b.size && a.mtimeMs === b.mtimeMs &&
+    a.identity && b.identity && a.identity === b.identity);
+}
+
+const bootstrapEmAndamento = new Map();
+
+function bootstrapReferenciasFilaViva(clienteId, deps = {}) {
+  if (bootstrapEmAndamento.has(clienteId)) return bootstrapEmAndamento.get(clienteId);
+  const tarefa = (async () => {
+    const inicio = Date.now();
+    const fsImpl = deps.fs || fs;
+    const resolver = deps.getClienteJsonPath;
+    const escritor = deps.writeClienteJson;
+    if (typeof resolver !== "function" || typeof escritor !== "function") {
+      return { ok: false, motivo: "gc_references_storage_unavailable" };
+    }
+    let filaPath;
+    let projectionPath;
+    try {
+      filaPath = resolver(clienteId, "fila-viva.json");
+      projectionPath = resolver(clienteId, FILA_GC_REFERENCES_ARQUIVO);
+    } catch {
+      return { ok: false, motivo: "gc_references_storage_unavailable" };
+    }
+    let guard;
+    try {
+      const stat = await fsImpl.promises.lstat(filaPath, { bigint: true });
+      if (!stat.isFile() || stat.isSymbolicLink()) return { ok: false, motivo: "gc_references_guard_invalid" };
+      guard = coberturaArquivo(stat);
+      if (!guard.identity) return { ok: false, motivo: "gc_references_identity_unavailable" };
+    } catch (error) {
+      return error?.code === "ENOENT" ? { ok: true, pulou: true, motivo: "fila_viva_ausente" }
+        : { ok: false, motivo: "gc_references_guard_read_failed" };
+    }
+    try {
+      const stat = await fsImpl.promises.lstat(projectionPath, { bigint: true });
+      if (stat.isFile() && !stat.isSymbolicLink() && stat.size <= 4n * 1024n * 1024n) {
+        const parsed = JSON.parse(await fsImpl.promises.readFile(projectionPath, "utf8"));
+        if (projecaoCobreFilaViva(parsed, clienteId, guard)) {
+          return { ok: true, pulou: true, motivo: "projecao_atual" };
+        }
+      }
+    } catch {
+      // Ausente/corrompida: o dominio da fila reconstrói; o GC segue fail-closed.
+    }
+    let resultado;
+    try {
+      const conteudo = Array.isArray(deps.entradas)
+        ? ""
+        : await fsImpl.promises.readFile(filaPath, "utf8");
+      const afterRead = await fsImpl.promises.lstat(filaPath, { bigint: true });
+      if (!mesmaCobertura(guard, coberturaArquivo(afterRead))) {
+        resultado = { ok: false, motivo: "gc_references_guard_changed" };
+      } else {
+        const entradas = Array.isArray(deps.entradas)
+          ? deps.entradas
+          : JSON.parse(conteudo);
+        resultado = publicarReferenciasFilaViva(clienteId, entradas, {
+          ...deps, expectedQueueGuard: guard
+        });
+      }
+    } catch (error) {
+      resultado = { ok: false, motivo: error instanceof SyntaxError
+        ? "gc_references_queue_invalid_json" : "gc_references_bootstrap_failed" };
+    }
+    try {
+      const logger = deps.logger && typeof deps.logger.log === "function" ? deps.logger : console;
+      logger.log(resultado.ok ? "[FILA-GC-REFERENCES-BOOTSTRAP]" : "[FILA-GC-REFERENCES-ERROR]", JSON.stringify({
+        workspace: clienteId, count: resultado.totalRefs || 0, bytes: resultado.bytes || 0,
+        durationMs: Date.now() - inicio, reasonCode: resultado.ok ? "PUBLISHED" : resultado.motivo
+      }));
+    } catch {}
+    return resultado;
+  })().finally(() => bootstrapEmAndamento.delete(clienteId));
+  bootstrapEmAndamento.set(clienteId, tarefa);
+  return tarefa;
 }
 
 module.exports = {
@@ -123,5 +211,6 @@ module.exports = {
   hashesFilaViva,
   projetarReferenciasFilaViva,
   projecaoCobreFilaViva,
-  publicarReferenciasFilaViva
+  publicarReferenciasFilaViva,
+  bootstrapReferenciasFilaViva
 };
