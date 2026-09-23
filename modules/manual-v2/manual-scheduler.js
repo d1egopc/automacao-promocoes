@@ -270,25 +270,29 @@ async function processarOfertaAgendadaManualV2({ clienteId = "admin", ofertaId =
     });
 
     const sucesso = inteiro(resultado?.enviados) > 0;
+    const resultadosDispatcher = lista(resultado?.resultados);
+    const ignoradoRecentemente = resultadosDispatcher.length > 0 && resultadosDispatcher.every((item) =>
+      texto(item?.status).toLowerCase() === "ignorado_enviado_recentemente");
+    const statusFinal = sucesso ? "enviada" : ignoradoRecentemente ? "salva" : "erro";
     const concluidoEm = agoraIso(deps);
     const resumo = resumoResultado(resultado || {});
     const envioManual = envioManualDoResultado(resultado || {}, revalidada, solicitadoEm, concluidoEm);
 
     storage.atualizarMetadadosEnvioManualV2(cliente, idOferta, {
-      status: sucesso ? "enviada" : "erro",
+      status: statusFinal,
       enviadoEm: sucesso ? concluidoEm : "",
       envioManual
     }, storage.storageOptions);
 
     const ofertaFinal = storage.atualizarMetadadosAgendamentoManualV2(cliente, idOferta, {
-      status: sucesso ? "enviada" : "erro",
+      status: statusFinal,
       agendamentoErroResumo: resumo,
       agendamentoAtualizadoEm: concluidoEm,
       limparLock: true
     }, storage.storageOptions);
 
     return {
-      ok: sucesso,
+      ok: sucesso || ignoradoRecentemente,
       processado: true,
       ofertaId: idOferta,
       resultado,

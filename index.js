@@ -302,6 +302,14 @@ const {
 const {
   enviarOfertaManualV2: enviarOfertaManualV2Dispatcher
 } = require("./modules/manual-v2/manual-dispatcher");
+const manualV2Storage = require("./modules/manual-v2/manual-offers.storage");
+const {
+  destinosRecentesDaOferta
+} = require("./modules/manual-v2/ofertas-v2-envios-recentes");
+const {
+  criarCoordenadorEnvioProdutoDestino
+} = require("./modules/manual-v2/ofertas-v2-envio-claim");
+const { processarEnvioAutomaticoDestino } = require("./modules/fila/processar-envio-automatico-destino");
 const {
   resolveWorkspaceId,
   isAdminMaster: usuarioEhAdminMaster
@@ -381,6 +389,9 @@ const {
 const catracaAdvisoryFuncionalFila = criarCatracaAdvisoryFuncionalFila({
   repository: filaClaimsRepository,
   logger: console
+});
+const coordenadorEnvioProdutoDestino = criarCoordenadorEnvioProdutoDestino({
+  advisory: catracaAdvisoryFuncionalFila
 });
 const fairnessOrigemFila = criarFairnessOrigemFila({
   catracaAdvisory: catracaAdvisoryFuncionalFila,
@@ -8374,6 +8385,7 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
         alvoChave: chaveAlvoEntrega(canal, alvo),
         canal,
         advisoryHandle: opcoes.advisoryHandle || null,
+        reservaParDuravel: opcoes.reservaParDuravel === true,
         enviar,
         falhaConfirmada,
         classificarFalha,
@@ -11043,6 +11055,64 @@ for (const item of destinosOrdenados) {
     continue;
   }
 
+  await processarEnvioAutomaticoDestino({
+    clienteId,
+    oferta,
+    destinoId: destinoIdMemoria,
+    coordenador: coordenadorEnvioProdutoDestino,
+    aoBloqueio: (tipo, dados) => {
+      if (tipo === "ocupado") {
+        registrarDestinoEstadoFanout(oferta, destino, "bloqueado_repeticao_2h", {
+          motivo: "claim_produto_destino_ocupado"
+        });
+      } else if (tipo === "repeticao") {
+        const motivo = dados.motivo || "repetida_no_executor_2h";
+        registrarDestinoEstadoFanout(oferta, destino,
+          dados.bloqueada ? "bloqueado_repeticao_2h" : "aguardando", { motivo });
+      } else {
+        const motivo = tipo === "coordenacao_indisponivel"
+          ? "coordenacao_produto_destino_indisponivel"
+          : tipo === "reserva_indisponivel" ? "reserva_duravel_indisponivel" : "advisory_fila_nao_liberado";
+        motivosSemEnvio.push(motivo);
+        registrarDestinoEstadoFanout(oferta, destino, "aguardando", { motivo });
+      }
+      marcarFilaAlterada();
+    },
+    revalidar: () => {
+    const candidatosRevalidacao = filaStore.candidatosEnvioRecente2h(oferta, {
+      clienteId,
+      destinoId: destinoIdMemoria
+    });
+    const repeticaoRevalidada = filaOfertas.consultarEnvioRecenteExecutor2h(
+      colecaoFallbackEnvioRecenteExecutor,
+      oferta,
+      {
+        destinoId: destinoIdMemoria,
+        logger: console,
+        logarLegado: false,
+        obterItens: () => candidatosRevalidacao.ok
+          ? candidatosRevalidacao.itens
+          : colecaoFallbackEnvioRecenteExecutor
+      }
+    );
+    return repeticaoRevalidada;
+    },
+    liberarAdvisoryFila: async () => {
+   // O lock da fila tambem nao pode acompanhar render ou rede; o checkpoint
+   // usa operacoes SQL curtas sob a reserva persistente do produto/destino.
+   if (advisoryFuncionalFila?.handle) {
+     const liberacaoFilaAntesTransporte = await catracaAdvisoryFuncionalFila.finalizar(advisoryFuncionalFila, {
+       statusFinal: "par_reservado"
+     });
+     if (liberacaoFilaAntesTransporte?.liberacao !== "liberado") {
+       return false;
+     }
+     advisoryFuncionalFila.handle = null;
+   }
+   return true;
+   },
+   prepararMensagem: () => {
+
   if (intervalo.fastLaneCupomTipo === "real_detectado") {
     logOptimus("CUPOM", intervalo.prioridadeCupomAtiva ? "Cupom Turbo aplicado" : "Cupom usando intervalo normal", {
       clienteId,
@@ -11092,8 +11162,9 @@ for (const item of destinosOrdenados) {
     arquiteturaComercial: configCliente?.arquiteturaComercial,
     rioOficialAtivo: configCliente?.arquiteturaComercial?.rioOficial !== false
   }));
-
-  const enviado = await enviarParaDestinoInteligente(
+  return { linkOfertaDestino, ofertaParaMensagem, mensagem };
+  },
+  enviar: ({ linkOfertaDestino, mensagem }) => enviarParaDestinoInteligente(
     destino,
     oferta,
     mensagem,
@@ -11101,17 +11172,17 @@ for (const item of destinosOrdenados) {
     configCliente,
     {
       linkFinal: linkOfertaDestino.linkFinal || "",
-      advisoryHandle: advisoryFuncionalFila.handle,
+      reservaParDuravel: true,
       perfilProcessarFila
     }
-  );
-  const resultadoEnvio =
-    typeof enviado === "object" && enviado !== null
-      ? enviado
-      : { enviado: enviado === true, tentouEnvio: enviado === true, motivo: enviado === false ? "nao_enviado" : "" };
+  ),
+  processarResultado: async (resultadoEnvio, { ofertaParaMensagem }, claimProdutoDestino) => {
   const tentouEnvioReal = resultadoTentouEnvio(resultadoEnvio);
   if (tentouEnvioReal) destinosTentadosDebug += 1;
-  if (resultadoEnvio.enviado !== true) {
+   if (resultadoEnvio.enviado !== true) {
+     if (!tentouEnvioReal) {
+       await coordenadorEnvioProdutoDestino.descartarSemTransporte(claimProdutoDestino);
+     }
     const parcialMultiAlvo = resultadoEnvio.parcial === true || resultadoEnvio.motivo === "alvos_pendentes";
     const bloqueioSemImagem = resultadoEnvio.bloqueioImagem === true || resultadoEnvio.motivo === "sem_imagem";
     motivosSemEnvio.push(resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado");
@@ -11160,8 +11231,15 @@ for (const item of destinosOrdenados) {
     registrarDestinoEstadoFanout(oferta, destino, "enviado", {
       motivo: "envio_confirmado"
     });
-    filaStore.atualizarItem(oferta);
-    marcarFilaAlterada();
+     filaStore.atualizarItem(oferta);
+     marcarFilaAlterada();
+     // A fila persistida precisa refletir o envio com a reserva ainda ativa.
+     // Se a escrita falhar, a reserva PostgreSQL pre-transporte bloqueia replay
+     // do par por 2h, inclusive apos restart.
+     const persistiuEnvioPar = await salvarFilaSeAlterada(clienteId);
+     if (!persistiuEnvioPar) {
+       console.log("[OFERTAS-V2-ENVIO-INDETERMINADO]", JSON.stringify({ clienteId, ofertaId: oferta.id || "", destinoId: destinoIdMemoria }));
+     }
     const registroIntervaloDestino = atualizarUltimoEnvioDestino(clienteId, destino, oferta, intervalo);
     destinosEnviadosTelemetria.push(telemetriaCadenciaExecutorEnviado(
       clienteId,
@@ -11183,6 +11261,8 @@ for (const item of destinosOrdenados) {
   } else if (tentouEnvioReal) {
     houveFalhaReal = true;
   }
+  }
+  });
 }
 
 const relocalizacaoPosEnvio = perfilProcessarFila.etapaSync("posEnvio", () =>
@@ -24612,6 +24692,13 @@ function resolverPlanoManualV2Scheduler(clienteId = "admin") {
   ) || null;
 }
 
+function verificarEnvioRecenteProdutoDestino({ clienteId = "admin", oferta = {}, destinoId = "" } = {}) {
+  return destinosRecentesDaOferta(clienteId, oferta, [destinoId], {
+    listarEnviosRecentesAutomaticos: (id, agoraMs) => filaStore.enviadosRecentesPorCliente(id, agoraMs),
+    listarOfertasManuaisV2: manualV2Storage.listarOfertasManuaisV2
+  }).length > 0;
+}
+
 function iniciarManualV2SchedulerOperacional() {
   const resultado = iniciarManualV2Scheduler({
     getDestinosPorCliente: () => destinosPorCliente,
@@ -24635,7 +24722,10 @@ function iniciarManualV2SchedulerOperacional() {
     corrigirImagemUrl,
     httpClient: axios,
     enviarOfertaManualV2: enviarOfertaManualV2Dispatcher,
+    coordenadorEnvioProdutoDestino,
+    verificarEnvioRecenteProdutoDestino,
     aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
+    listarEnviosRecentesAutomaticos: (clienteId, agoraMs) => filaStore.enviadosRecentesPorCliente(clienteId, agoraMs),
     intervalMs: process.env.MANUAL_V2_SCHEDULER_INTERVAL_MS,
     logger: console
   });
@@ -24684,6 +24774,9 @@ app.use("/manual-v2", criarRotasManualV2({
     writeClienteJson
   },
   getIntegracaoCliente,
+  listarEnviosRecentesAutomaticos: (clienteId, agoraMs) => filaStore.enviadosRecentesPorCliente(clienteId, agoraMs),
+  coordenadorEnvioProdutoDestino,
+  verificarEnvioRecenteProdutoDestino,
   enviarWhatsApp: enviarWhatsAppCampanha,
   enviarTelegram: enviarTelegramCampanha,
   listarConexoesDiscord,

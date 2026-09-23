@@ -194,7 +194,7 @@ async function main() {
   assert.strictEqual(l1.nome, "Hardware");
   listas.renomearLista(workspace, l1.id, "Hardware 2");
   assert.strictEqual(listas.listarListas(workspace)[0].nome, "Hardware 2");
-  const ofertaX = criarManual("manual_x", "X", "Título A");
+  const ofertaX = criarManual("manual_x", "B0ABCD0001", "Título A");
   await listas.adicionarItem(workspace, l1.id, { origem: "ofertas", ofertaId: ofertaX.id });
   assert.strictEqual(listas.listarListas(workspace)[0].itens.length, 1);
   const achado = achados.buscarAchado(workspace, "41");
@@ -213,12 +213,13 @@ async function main() {
   assert.strictEqual(listas.listarListas(workspace).length, 6, "reload/restart lê persistência");
 
   const l2 = listas.listarListas(workspace)[1];
-  const ofertaMesmoProduto = criarManual("manual_x2", "X", "Outro título");
+  const ofertaMesmoProduto = criarManual("manual_x2", "B0ABCD0001", "Outro título");
   await listas.adicionarItem(workspace, l2.id, { origem: "ofertas", ofertaId: ofertaMesmoProduto.id });
   const l3 = listas.listarListas(workspace)[2];
-  const ofertaOutroProduto = criarManual("manual_y", "Y", "Título A");
+  const ofertaOutroProduto = criarManual("manual_y", "B0ABCD0002", "Título A");
   await listas.adicionarItem(workspace, l3.id, { origem: "ofertas", ofertaId: ofertaOutroProduto.id });
-  assert.strictEqual(listas.identidadeCanonica(ofertaX), listas.identidadeCanonica(ofertaMesmoProduto), "ID vence título");
+  assert.strictEqual(listas.identidadeCanonica(ofertaX), listas.identidadeCanonica(ofertaMesmoProduto),
+    "URL oficial com ID valido une o mesmo produto");
   assert.notStrictEqual(listas.identidadeCanonica(ofertaX), listas.identidadeCanonica(ofertaOutroProduto), "título igual não colide");
   assert.strictEqual(listas.identidadeCanonica({ marketplace: "amazon", produtoId: "B0ABC12345",
     urlOriginal: "https://www.amazon.com.br/dp/B0ABC12345?tag=fonte" }),

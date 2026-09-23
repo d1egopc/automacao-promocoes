@@ -206,6 +206,32 @@ async function testarCreditoSomenteComoEvidencia() {
   assert.strictEqual(repository.chamadas.filter(item => item.tipo === "credito").length, 1);
 }
 
+async function testarReservaDuravelSemClientNoTransporte() {
+  const repository = criarRepository();
+  const metodos = ["criarCheckpointEntrega", "transicionarCheckpointEntrega", "registrarCreditoDebitadoCheckpointEntrega"];
+  for (const metodo of metodos) {
+    const original = repository[metodo];
+    repository[metodo] = async (dados, opcoes) => {
+      assert.strictEqual(opcoes?.client, undefined, "SQL usa conexao curta, nao client de sessao");
+      return original(dados);
+    };
+  }
+  const executor = criarCheckpointEntregaFuncional({ repository, gerarAttemptIdImpl: () => ATTEMPT_A, logger: { log() {} } });
+  let envioChamado = 0;
+  const resultado = await executor.executar({
+    ...entrada({ advisoryHandle: null, reservaParDuravel: true }),
+    enviar: async () => { envioChamado += 1; return { valor: {}, providerMessageId: "wa_1" }; }
+  });
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(envioChamado, 1);
+  assert.strictEqual((await executor.registrarCreditoDebitado(resultado.contexto)).registrado, true);
+  const semReserva = await executor.executar({
+    ...entrada({ advisoryHandle: null, reservaParDuravel: false }),
+    enviar: async () => { throw new Error("nao deve enviar"); }
+  });
+  assert.strictEqual(semReserva.resultado, "identidade_ou_advisory_ausente");
+}
+
 async function testarTelemetriaNaoVazaAlvo() {
   const logs = [];
   const executor = criarCheckpointEntregaFuncional({
@@ -244,6 +270,7 @@ function testarIdentidadesEstaveis() {
   await testarClassificacaoTelegramConservadora();
   await testarFalhaAmbiguaEConfirmada();
   await testarCreditoSomenteComoEvidencia();
+  await testarReservaDuravelSemClientNoTransporte();
   await testarTelemetriaNaoVazaAlvo();
   testarIdentidadesEstaveis();
   console.log("fila-checkpoint-entrega-funcional.test.js OK");

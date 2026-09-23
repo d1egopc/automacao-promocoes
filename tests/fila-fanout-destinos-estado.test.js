@@ -47,7 +47,7 @@ contem("oferta.destinosEnviados.push", "destinosEnviados deve continuar preserva
 
 antes(
   "if (destinoJaEnviadoFanout(oferta, destino))",
-  "const enviado = await enviarParaDestinoInteligente(",
+  "await processarEnvioAutomaticoDestino({",
   "skip de destino ja enviado precisa acontecer antes da chamada de envio"
 );
 

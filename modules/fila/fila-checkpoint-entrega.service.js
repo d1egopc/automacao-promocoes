@@ -110,6 +110,7 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
     alvoChave = "",
     canal = "",
     advisoryHandle = null,
+    reservaParDuravel = false,
     enviar,
     falhaConfirmada = () => false,
     classificarFalha = null,
@@ -124,6 +125,7 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
       canal: texto(canal, 40),
       origemFluxo: texto(resolverOrigemFluxo(oferta)),
       advisoryHandle,
+      reservaParDuravel: reservaParDuravel === true,
       attemptId: "",
       estado: "",
       resultado: "",
@@ -140,7 +142,8 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
       }));
     };
 
-    if (!contexto.filaItemId || !contexto.destinoChave || !contexto.alvoChave || !contexto.canal || !client || typeof enviar !== "function") {
+    if (!contexto.filaItemId || !contexto.destinoChave || !contexto.alvoChave || !contexto.canal ||
+        (!client && !contexto.reservaParDuravel) || typeof enviar !== "function") {
       contexto.estado = "";
       finalizar("identidade_ou_advisory_ausente");
       return { ok: false, resultado: contexto.resultado, contexto };
@@ -152,7 +155,9 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
       return { ok: false, resultado: contexto.resultado, contexto };
     }
 
-    const opcoesRepository = { client };
+    // Com reserva duravel do par, cada operacao SQL usa seu proprio client;
+    // nenhum client ou advisory acompanha a chamada externa ao provider.
+    const opcoesRepository = client ? { client } : {};
     try {
       const criado = await repository.criarCheckpointEntrega({
         ...contexto,
@@ -164,8 +169,8 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
           : null;
         if (existente?.estado === "preparado" && existente?.attemptId) {
           // Preparado e a unica prova de que a tentativa anterior ainda nao
-          // atravessou a fronteira externa. Sob a mesma catraca advisory,
-          // retomamos o attempt duravel em vez de criar outro ou reenviar algo.
+          // atravessou a fronteira externa. O advisory do item ou a reserva
+          // duravel do par serializa a retomada do mesmo attempt.
           contexto.attemptId = existente.attemptId;
         } else if (
           permitirNovaTentativaAposFalhaConfirmada === true &&
@@ -276,7 +281,7 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
   async function registrarCreditoDebitado(contexto = {}) {
     if (!contexto?.attemptId || contexto?.estado !== "enviado") return { registrado: false, motivo: "checkpoint_nao_enviado" };
     const client = clientDoAdvisory(contexto.advisoryHandle);
-    if (!client) return { registrado: false, motivo: "advisory_client_ausente" };
+    if (!client && contexto.reservaParDuravel !== true) return { registrado: false, motivo: "advisory_client_ausente" };
     try {
       const resultado = await repository.registrarCreditoDebitadoCheckpointEntrega({
         clienteId: contexto.clienteId,
@@ -284,7 +289,7 @@ function criarCheckpointEntregaFuncional({ repository, logger = console, gerarAt
         destinoChave: contexto.destinoChave,
         alvoChave: contexto.alvoChave,
         attemptId: contexto.attemptId
-      }, { client });
+      }, client ? { client } : {});
       return resultado;
     } catch {
       return { registrado: false, motivo: "evidencia_credito_indisponivel" };

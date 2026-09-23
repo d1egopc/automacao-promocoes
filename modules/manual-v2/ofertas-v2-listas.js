@@ -7,6 +7,13 @@ const { listarDestinosManuaisV2Async } = require("./manual-destinations");
 const { enviarOfertaManualV2 } = require("./manual-dispatcher");
 const { INTERVALO_AUTO_MINIMO_MS, INTERVALO_AUTO_MAXIMO_MS } = require("./manual-auto-dispatch");
 const { buscarAchado } = require("./ofertas-v2-achados");
+const { identidadeCanonica: identidadeCanonicaBase, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
+const {
+  JANELA_ENVIO_RECENTE_MS,
+  listarEnviosRecentes,
+  filtrarDestinosRecentes,
+  destinosRecentesDaOferta
+} = require("./ofertas-v2-envios-recentes");
 const {
   validarOfertaAfiliacaoWorkspaceShopee, validarProvaAfiliacaoWorkspaceShopee
 } = require("../marketplaces/shopee/afiliacao-workspace");
@@ -18,7 +25,7 @@ const { validarOfertaAfiliacaoWorkspaceMagalu } = require("../marketplaces/magal
 const ARQUIVO_LISTAS = "manual_listas_v2.json";
 const ARQUIVO_DEDUPE = "manual_listas_dedupe_v2.json";
 const MAX_LISTAS = 6;
-const DEDUPE_MS = 2 * 60 * 60 * 1000;
+const DEDUPE_MS = JANELA_ENVIO_RECENTE_MS;
 const RETENCAO_ITEM_TERMINAL_MS = 7 * 24 * 60 * 60 * 1000;
 const enviosEmMemoria = new Set();
 function texto(valor) { return String(valor ?? "").trim(); }
@@ -99,40 +106,10 @@ function removerItem(clienteId, listaId, itemId) {
     itens: item.itens.filter((entrada) => entrada.id !== texto(itemId)) }; });
 }
 
-function canonicalizarUrl(valor) {
-  try {
-    const u = new URL(texto(valor));
-    if (!["http:", "https:"].includes(u.protocol)) return "";
-    u.hash = "";
-    for (const key of [...u.searchParams.keys()]) {
-      if (/^(utm_|affiliate|aff_|ref$|tag$|tracking|mmp_|subid|clickid)/i.test(key)) u.searchParams.delete(key);
-    }
-    u.hostname = u.hostname.toLowerCase();
-    return u.toString().replace(/\/$/, "");
-  } catch { return ""; }
-}
-function idProdutoPorUrl(marketplace, valor) {
-  try {
-    const url = new URL(texto(valor));
-    const caminho = decodeURIComponent(url.pathname);
-    if (marketplace === "amazon") return (caminho.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:\/|$)/i)?.[1] || "").toLowerCase();
-    if (marketplace === "aliexpress") return caminho.match(/\/item\/(\d{10,})\.html/i)?.[1] || "";
-    if (marketplace === "shopee") {
-      const ids = caminho.match(/\/product\/(\d+)\/(\d+)/i) || caminho.match(/-i\.(\d+)\.(\d+)/i);
-      return ids ? `${ids[1]}/${ids[2]}` : "";
-    }
-    if (marketplace === "mercadolivre") return (caminho.match(/\b(MLB\d+)\b/i)?.[1] || "").toLowerCase();
-    if (marketplace === "kabum") return caminho.match(/\/produto\/(\d+)/i)?.[1] || "";
-    return "";
-  } catch { return ""; }
-}
 function identidadeCanonica(oferta) {
-  const marketplace = texto(oferta.marketplace).toLowerCase();
-  const productId = texto(oferta.produtoId).toLowerCase();
-  const url = canonicalizarUrl(oferta.urlOriginal);
-  const idUrl = idProdutoPorUrl(marketplace, oferta.urlOriginal);
-  if (!marketplace || (!idUrl && !productId && !url)) throw erro("produto_sem_identidade_canonica", 422);
-  return crypto.createHash("sha256").update(JSON.stringify([marketplace, idUrl || productId || url])).digest("hex");
+  const identidade = identidadeCanonicaBase(oferta) || identidadeIsoladaObservacao(oferta);
+  if (!identidade) throw erro("produto_sem_identidade_operacional", 422);
+  return identidade;
 }
 function provarAfiliacao(oferta, clienteId, deps = {}) {
   const marketplace = oferta.marketplace;
@@ -228,6 +205,8 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
   }
   const oferta = normalizarOfertaManualV2({
     marketplace, titulo: achado.titulo, produtoId: achado.produtoId,
+    identidadeProdutoVerificada: achado.identidadeProdutoVerificada,
+    identidadeObservacaoId: achado.id,
     precoAtual: achado.precoAtual, precoAnterior: achado.precoAnterior,
     cupom: achado.cupom, categoria: achado.categoria, imagem: achado.imagem,
     parcelamento: achado.parcelamento, frete: achado.frete,
@@ -240,7 +219,7 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
     afiliacaoWorkspaceVerificada: marketplace === "magalu"
       ? (principal.prova || {}) : { principal: principal.prova || {}, links: provas },
     fonteImportacao: { adapter: "engine_achados_v2", marketplaceDetectado: marketplace }
-  }, { clienteId });
+  }, { clienteId, identidadeImportadorConfiavel: true });
   provarAfiliacao(oferta, clienteId, deps);
   return oferta;
 }
@@ -250,7 +229,9 @@ async function adicionarItem(clienteId, listaId, { origem, ofertaId } = {}, deps
   if (origem === "ofertas") {
     const existente = storageManual.buscarOfertaManualV2(id, ofertaId);
     if (!existente) throw erro("oferta_nao_encontrada", 404);
-    oferta = normalizarOfertaManualV2(existente, { clienteId: id });
+    oferta = normalizarOfertaManualV2({ ...existente,
+      identidadeObservacaoId: existente.identidadeObservacaoId || existente.id },
+    { clienteId: id, identidadeImportadorConfiavel: true });
     provarAfiliacao(oferta, id, deps);
   } else if (origem === "achados") {
     const achado = buscarAchado(id, ofertaId, agora(deps));
@@ -265,6 +246,31 @@ async function adicionarItem(clienteId, listaId, { origem, ofertaId } = {}, deps
     return { ...item, itens: [...item.itens, { id: crypto.randomUUID(), origem, origemId: texto(ofertaId),
       canonicalKey, oferta, status: "aguardando", motivo: "" }] };
   });
+}
+
+function preflightLista(clienteId, listaId, destinosIds = [], deps = {}) {
+  const ids = [...new Set(lista(destinosIds).map(texto).filter(Boolean))];
+  const atual = lerListas(clienteId).find((item) => item.id === texto(listaId));
+  if (!atual) throw erro("lista_nao_encontrada", 404);
+  const registros = listarEnviosRecentes(clienteId, deps);
+  const paresPulados = [];
+  const retomar = atual.status === "pausada" && atual.itens.some((item) => item.status === "aguardando");
+  const itensElegiveis = retomar ? atual.itens.filter((item) => item.status === "aguardando") : atual.itens;
+  const itens = itensElegiveis.map((item) => {
+    const recentes = filtrarDestinosRecentes(item.oferta, ids, registros);
+    for (const destino of recentes) paresPulados.push({
+      itemId: item.id,
+      destinoId: destino.destinoId,
+      destinoNome: destino.nome,
+      enviadoEm: destino.enviadoEm
+    });
+    return {
+      itemId: item.id,
+      repetidos: recentes.map((destino) => destino.destinoId),
+      permitidos: ids.filter((id) => !recentes.some((destino) => destino.destinoId === id))
+    };
+  });
+  return { totalPares: itensElegiveis.length * ids.length, paresPulados: paresPulados.length, pares: paresPulados, itens };
 }
 
 function reservarDestinos(clienteId, listaId, destinosIds, intervaloMs, deps = {}) {
@@ -326,7 +332,7 @@ function reservarMemoria(clienteId, canonicalKey, destinosIds, attemptId, nowMs)
   const repetidos = [];
   for (const destinoId of destinosIds) {
     const key = chaveDedupe(canonicalKey, destinoId);
-    if (dedupe[key] && nowMs - ms(dedupe[key].em) < DEDUPE_MS) repetidos.push(destinoId);
+    if (dedupe[key]?.estado === "enviado" && nowMs - ms(dedupe[key].em) < DEDUPE_MS) repetidos.push(destinoId);
     else { permitidos.push(destinoId); dedupe[key] = { estado: "pendente", em: nowMs, attemptId }; }
   }
   salvarDedupe(clienteId, dedupe);
@@ -362,24 +368,30 @@ async function processarLista(clienteId, listaId, deps = {}) {
     return { processado: true, motivo: "concluida" };
   }
   const attemptId = crypto.randomUUID();
-  const reserva = reservarMemoria(clienteId, proximo.canonicalKey, listaAtual.destinosIds, attemptId, agora(deps));
+  const agoraProcessamento = agora(deps);
+  const recentesOficiais = destinosRecentesDaOferta(clienteId, proximo.oferta, listaAtual.destinosIds, deps);
+  const idsRecentesOficiais = new Set(recentesOficiais.map((destino) => destino.destinoId));
+  const livresOficiais = listaAtual.destinosIds.filter((destinoId) => !idsRecentesOficiais.has(destinoId));
+  const reserva = reservarMemoria(clienteId, proximo.canonicalKey, livresOficiais, attemptId, agoraProcessamento);
+  reserva.repetidos = [...new Set([...idsRecentesOficiais, ...reserva.repetidos])];
   if (!reserva.permitidos.length) {
     atualizarLista(clienteId, listaId, (item) => {
       const itens = item.itens.map((i) => i.id === proximo.id ? { ...i, status: "repetido",
-        motivo: "enviada_ha_menos_de_2h", terminalEm: agora(deps) } : i);
+        motivo: "ignorado_enviado_recentemente", repetidos: reserva.repetidos, terminalEm: agora(deps) } : i);
       const concluida = !itens.some((i) => i.status === "aguardando");
       return { ...item, status: concluida ? "concluida" : "enviando",
         destinosIds: concluida ? [] : item.destinosIds,
         proximoEm: agora(deps) + item.intervaloMs, itens };
     });
-    return { processado: true, motivo: "repetido" };
+    return { processado: true, motivo: "repetido", paresPulados: reserva.repetidos.length };
   }
   enviosEmMemoria.add(memoriaKey);
   let manualId = "";
   try {
     const manual = storageManual.criarOfertaManualV2(clienteId, {
-      ...proximo.oferta, origemAgendamento: "lista_v2"
-    });
+      ...proximo.oferta, origemAgendamento: "lista_v2",
+      identidadeObservacaoId: proximo.oferta.identidadeObservacaoId || proximo.oferta.id
+    }, { identidadeImportadorConfiavel: true });
     manualId = manual.id;
     atualizarLista(clienteId, listaId, (item) => ({ ...item, inFlight: { attemptId, itemId: proximo.id, manualId,
       destinosIds: reserva.permitidos, repetidos: reserva.repetidos, iniciadoEm: agora(deps) } }));
@@ -387,26 +399,33 @@ async function processarLista(clienteId, listaId, deps = {}) {
       { clienteId, ofertaId: manualId, destinosIds: reserva.permitidos }, deps);
     const fim = agora(deps);
     const resultados = lista(resultado?.resultados);
+    const ignoradosConcorrencia = resultados.filter((r) =>
+      texto(r?.status).toLowerCase() === "ignorado_enviado_recentemente");
     concluirMemoria(clienteId, proximo.canonicalKey, attemptId, resultados, fim);
     storageManual.atualizarMetadadosEnvioManualV2(clienteId, manualId, {
-      status: resultados.some((r) => r.status === "enviado") ? "enviada" : "erro",
+      status: resultados.some((r) => r.status === "enviado") ? "enviada" : ignoradosConcorrencia.length ? "salva" : "erro",
       enviadoEm: resultados.some((r) => r.status === "enviado") ? new Date(fim).toISOString() : "",
       envioManual: { solicitadoEm: new Date(fim).toISOString(), concluidoEm: new Date(fim).toISOString(),
         resultados, enviados: resultado?.enviados || 0, erros: resultado?.erros || 0,
         creditosDebitados: resultado?.creditosDebitados || 0 }
     });
     atualizarLista(clienteId, listaId, (item) => {
+      const houveEnvio = resultados.some((r) => r.status === "enviado");
+      const totalmenteIgnorado = !houveEnvio && ignoradosConcorrencia.length === reserva.permitidos.length;
       const itens = item.itens.map((i) => i.id === proximo.id ? { ...i,
-        status: resultados.some((r) => r.status === "enviado") ? "enviado" : "erro",
-        motivo: resultados.some((r) => r.status === "enviado") ? "" : "falha_no_dispatcher",
-        terminalEm: fim, manualOfferId: manualId, repetidos: reserva.repetidos } : i);
+        status: houveEnvio ? "enviado" : totalmenteIgnorado ? "repetido" : "erro",
+        motivo: houveEnvio ? "" : totalmenteIgnorado ? "ignorado_enviado_recentemente" : "falha_no_dispatcher",
+        terminalEm: fim, manualOfferId: manualId,
+        repetidos: [...new Set([...reserva.repetidos, ...ignoradosConcorrencia.map((r) => r.destinoId)])] } : i);
       const concluida = !itens.some((i) => i.status === "aguardando");
       const status = item.pauseRequested || (concluida ? "concluida" : "enviando");
       return { ...item, inFlight: null, status,
         destinosIds: status === "enviando" ? item.destinosIds : [],
         pauseRequested: false, proximoEm: fim + item.intervaloMs, itens };
     });
-    return { processado: true, motivo: "despachado", resultado };
+    return { processado: true, motivo: ignoradosConcorrencia.length === reserva.permitidos.length
+      ? "repetido" : "despachado", resultado,
+    paresPulados: reserva.repetidos.length + ignoradosConcorrencia.length };
   } catch (e) {
     // Depois da reserva ou do início do dispatcher, o resultado externo pode ser indeterminado.
     if (!manualId) liberarMemoriaAntesDoDispatcher(clienteId, proximo.canonicalKey, attemptId, reserva.permitidos);
@@ -426,5 +445,5 @@ module.exports = {
   ARQUIVO_LISTAS, ARQUIVO_DEDUPE, MAX_LISTAS, DEDUPE_MS,
   lerListas, listarListas, criarLista, renomearLista, excluirLista, esvaziarLista,
   adicionarItem, removerItem, reservarDestinos, interromperLista, recuperarExecucoes,
-  processarLista, processarListasCliente, identidadeCanonica, ofertaDoAchado
+  preflightLista, processarLista, processarListasCliente, identidadeCanonica, ofertaDoAchado
 };

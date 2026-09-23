@@ -128,7 +128,7 @@ function criarRepository({ adquirir, liberar } = {}) {
   assert(processar.includes("fairnessOrigemFila.selecionar"), "fairness final deve ocorrer antes da reserva");
   assert(processar.indexOf("fairnessOrigemFila.selecionar") < processar.indexOf("reservarOfertaProcessandoFila"));
   assert(
-    processar.indexOf("fairnessOrigemFila.selecionar") < processar.indexOf("const enviado = await enviarParaDestinoInteligente"),
+    processar.indexOf("fairnessOrigemFila.selecionar") < processar.indexOf("await processarEnvioAutomaticoDestino({"),
     "provider/fanout permanece depois da selecao transacional de fairness"
   );
   const posseImediata = processar.indexOf("advisoryFuncionalFila = resultadoFairnessFila.advisory");

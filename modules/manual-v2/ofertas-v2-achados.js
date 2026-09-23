@@ -1,6 +1,7 @@
 const fs = require("fs");
 const { getClienteJsonPath, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
 const { MARKETPLACES_MANUAL_V2 } = require("./manual-offers.contract");
+const { identidadeCanonica, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
 
 const ARQUIVO_ACHADOS = "manual_achados_v2.json";
 const TTL_ACHADOS_MS = 48 * 60 * 60 * 1000;
@@ -47,9 +48,31 @@ function rank(achado, agoraMs) {
   return 100 - idadeHoras + (achado.cupom ? 12 : 0);
 }
 
+function instanteAchado(achado = {}) {
+  const valor = Date.parse(texto(achado.ultimaObservacaoEm || achado.capturadoEm));
+  return Number.isFinite(valor) ? valor : -Infinity;
+}
+
+function consolidarCanonicos(achados = []) {
+  const mapa = new Map();
+  for (const item of achados) {
+    // Recalcular impede que uma chave permissiva persistida por versão antiga
+    // continue fundindo observações sem identidade oficial.
+    const canonicalKey = identidadeCanonica(item) || identidadeIsoladaObservacao(item);
+    const chave = canonicalKey ? `${texto(item?.clienteId)}:${canonicalKey}` : `oferta:${texto(item?.clienteId)}:${texto(item?.id)}`;
+    const normalizado = canonicalKey && item?.canonicalKey !== canonicalKey ? { ...item, canonicalKey } : item;
+    const atual = mapa.get(chave);
+    if (!atual || instanteAchado(normalizado) > instanteAchado(atual) ||
+        (instanteAchado(normalizado) === instanteAchado(atual) && texto(normalizado?.id).localeCompare(texto(atual?.id)) > 0)) {
+      mapa.set(chave, normalizado);
+    }
+  }
+  return [...mapa.values()];
+}
+
 function selecionarEstoque(achados, agoraMs = Date.now()) {
   const porMarketplace = new Map();
-  for (const item of achados) {
+  for (const item of consolidarCanonicos(achados)) {
     const capturadoMs = Date.parse(texto(item?.capturadoEm));
     if (!MARKETPLACES_ACHADOS.has(item?.marketplace) || !Number.isFinite(capturadoMs) ||
         capturadoMs > agoraMs || agoraMs - capturadoMs >= TTL_ACHADOS_MS) continue;
@@ -77,6 +100,9 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
   const achado = {
     id: String(ofertaId), clienteId: id, marketplace: universal.marketplace,
     titulo: texto(universal.produto.titulo), produtoId: texto(universal.produto.idExterno),
+    // O campo vem da Oferta Universal validada, dentro do importer, nao da API Manual.
+    identidadeProdutoVerificada: { origem: "engine_importer", marketplace: universal.marketplace,
+      id: texto(universal.produto.idExterno) },
     categoria: texto(universal.produto.categoriaNormalizada),
     precoAtual: Number(universal.comercial.precoAtual),
     precoAnterior: universal.comercial.precoAnterior == null ? null : Number(universal.comercial.precoAnterior),
@@ -92,12 +118,27 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
     linksComerciais: linksCompactos(metadata.linksComerciais, universal.marketplace),
     afiliacaoWorkspace: ["shopee", "aliexpress"].includes(universal.marketplace)
       ? provaCompacta(metadata.afiliacaoWorkspace) : objeto(metadata.afiliacaoWorkspace),
-    capturadoEm
+    capturadoEm,
+    ultimaObservacaoEm: capturadoEm
   };
   const atual = lerAchados(id);
-  const proximo = selecionarEstoque([achado, ...atual.filter((item) => item.id !== achado.id)]);
+  const canonicalKey = identidadeCanonica(achado) || identidadeIsoladaObservacao(achado);
+  if (!canonicalKey) return { ok: false, motivo: "produto_sem_identidade_canonica" };
+  const existente = atual
+    .filter((item) => (identidadeCanonica(item) || identidadeIsoladaObservacao(item)) === canonicalKey)
+    .sort((a, b) => instanteAchado(b) - instanteAchado(a))[0];
+  const consolidado = {
+    ...achado,
+    id: existente?.id || achado.id,
+    canonicalKey,
+    ofertaIdAtual: achado.id,
+    primeiroCapturadoEm: texto(existente?.primeiroCapturadoEm || existente?.capturadoEm) || capturadoEm
+  };
+  const proximo = selecionarEstoque([consolidado, ...atual.filter((item) =>
+    item.id !== consolidado.id &&
+    (identidadeCanonica(item) || identidadeIsoladaObservacao(item)) !== canonicalKey)]);
   writeClienteJson(id, ARQUIVO_ACHADOS, proximo);
-  return { ok: true, achado };
+  return { ok: true, achado: consolidado, atualizado: Boolean(existente) };
 }
 
 function listarAchados(clienteId, { marketplace = "", categoria = "", busca = "", nowMs = Date.now() } = {}) {
@@ -117,5 +158,5 @@ function buscarAchado(clienteId, achadoId, nowMs = Date.now()) {
 
 module.exports = {
   ARQUIVO_ACHADOS, TTL_ACHADOS_MS, LIMITE_POR_MARKETPLACE, MARKETPLACES_ACHADOS,
-  selecionarEstoque, registrarAchado, listarAchados, buscarAchado
+  consolidarCanonicos, selecionarEstoque, registrarAchado, listarAchados, buscarAchado
 };

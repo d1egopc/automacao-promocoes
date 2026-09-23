@@ -240,6 +240,14 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     linkMoedas: primeiroTexto(entrada.linkMoedas, entrada.urlMoedas),
     linkResgate: primeiroTexto(entrada.linkResgate, entrada.linkResgateCupom, entrada.urlResgate),
     produtoId: primeiroTexto(entrada.produtoId, entrada.productId, entrada.itemId),
+    ...(contexto.identidadeImportadorConfiavel === true && entrada.identidadeProdutoVerificada?.origem === "engine_importer"
+      ? { identidadeProdutoVerificada: { origem: "engine_importer",
+        marketplace: primeiroTexto(entrada.identidadeProdutoVerificada.marketplace),
+        id: primeiroTexto(entrada.identidadeProdutoVerificada.id) } }
+      : {}),
+    ...(contexto.identidadeImportadorConfiavel === true
+      ? { identidadeObservacaoId: primeiroTexto(entrada.identidadeObservacaoId, entrada.id) }
+      : {}),
     ean: primeiroTexto(entrada.ean, entrada.EAN, entrada.codigoEan),
     sku: primeiroTexto(entrada.sku, entrada.SKU),
     avaliacao: primeiroTexto(entrada.avaliacao, entrada.rating),

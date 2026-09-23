@@ -10,6 +10,7 @@ const {
 } = require("../modules/manual-v2/manual-dispatcher");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { criarCoordenadorEnvioProdutoDestino } = require("../modules/manual-v2/ofertas-v2-envio-claim");
 
 const ofertaA = {
   id: "oferta_a",
@@ -1249,6 +1250,107 @@ function assertSemSegredos(retorno) {
     assert.strictEqual(retorno.enviados, 1);
     assert.strictEqual(chamadas.templates[0].oferta.linkAfiliado, "https://amzn.to/produto");
     assert.strictEqual(chamadas.wa[0].mensagem.includes("https://amzn.to/produto"), true);
+  }
+
+  {
+    const ofertaRace = { ...ofertaA, id: "oferta_race", produtoId: "B0RACE0002",
+      urlOriginal: "https://amazon.com.br/dp/B0RACE0002" };
+    const ativos = new Set();
+    const reservas = new Set();
+    const coordenadorEnvioProdutoDestino = criarCoordenadorEnvioProdutoDestino({
+      reserva: {
+        consultar: async (_, clienteId, chave) => reservas.has(`${clienteId}:${chave}`),
+        preparar: async (_, clienteId, chave) => { reservas.add(`${clienteId}:${chave}`); return "token"; },
+        descartar: async (_, clienteId, chave) => { reservas.delete(`${clienteId}:${chave}`); }
+      },
+      advisory: {
+        adquirir: async ({ clienteId, oferta }) => {
+          const key = `${clienteId}:${oferta.id}`;
+          if (ativos.has(key)) return { resultado: "ocupado", handle: null };
+          ativos.add(key);
+          return { resultado: "adquirido", handle: { key } };
+        },
+        finalizar: async (estado) => { ativos.delete(estado.handle.key); return { liberado: true }; }
+      }
+    });
+    let liberarEnvio;
+    const envioPendente = new Promise((resolve) => { liberarEnvio = resolve; });
+    let enviosReais = 0;
+    const registrosOficiais = [];
+    const { deps } = baseDeps({
+      buscarOfertaManualV2: () => ofertaRace,
+      coordenadorEnvioProdutoDestino,
+      verificarEnvioRecenteProdutoDestino: () => false,
+      registrarEnvioRecenteConfirmado: async (registro) => { registrosOficiais.push(registro); },
+      enviarWhatsApp: async () => { enviosReais += 1; await envioPendente; }
+    });
+    const lista = enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: ofertaRace.id,
+      destinosIds: ["wa_ok"] }, deps);
+    await new Promise((resolve) => setImmediate(resolve));
+    const manualConcorrente = await enviarOfertaManualV2({ clienteId: "cliente_a", ofertaId: ofertaRace.id,
+      destinosIds: ["wa_ok"] }, deps);
+    liberarEnvio();
+    const listaConcluida = await lista;
+    assert.strictEqual(enviosReais, 1, "boundary real do dispatcher envia uma única vez sob corrida");
+    assert.strictEqual(listaConcluida.enviados, 1);
+    assert.strictEqual(manualConcorrente.ignorados, 1);
+    assert.strictEqual(manualConcorrente.resultados[0].status, "ignorado_enviado_recentemente");
+    assert.strictEqual(registrosOficiais[0].resultado.status, "enviado",
+      "sucesso é registrado antes do bookkeeping e da liberação do claim");
+  }
+
+  // A reserva duravel e feita antes do transporte. Erro no JSON, credito ou
+  // timeout ambiguo nao libera replay imediatamente apos o advisory unlock.
+  for (const falha of ["persistencia", "credito", "timeout", "sem_identidade"]) {
+    const ofertaFalha = { ...ofertaA, id: `oferta_${falha}`, produtoId: "B0SAFE0001",
+      urlOriginal: "https://amazon.com.br/dp/B0SAFE0001" };
+    if (falha === "sem_identidade") {
+      ofertaFalha.produtoId = "";
+      ofertaFalha.urlOriginal = "https://amazon.com.br/campanha";
+    }
+    const locks = new Set();
+    const reservas = new Map();
+    const coordenador = criarCoordenadorEnvioProdutoDestino({
+      advisory: {
+        adquirir: async ({ clienteId, oferta }) => {
+          const key = `${clienteId}:${oferta.id}`;
+          if (locks.has(key)) return { resultado: "ocupado" };
+          locks.add(key);
+          return { resultado: "adquirido", handle: { key } };
+        },
+        finalizar: async (estado) => { locks.delete(estado.handle.key); return { liberado: true }; }
+      },
+      reserva: {
+        consultar: async (_, clienteId, key) => reservas.has(`${clienteId}:${key}`),
+        preparar: async (_, clienteId, key) => {
+          reservas.set(`${clienteId}:${key}`, "token"); return "token";
+        },
+        descartar: async (_, clienteId, key) => { reservas.delete(`${clienteId}:${key}`); }
+      }
+    });
+    let envios = 0;
+    const { deps } = baseDeps({
+      buscarOfertaManualV2: () => ofertaFalha,
+      coordenadorEnvioProdutoDestino: coordenador,
+      verificarEnvioRecenteProdutoDestino: () => false,
+      registrarEnvioRecenteConfirmado: async () => {
+        if (falha === "persistencia") throw new Error("storage_indisponivel");
+      },
+      debitarCreditos: () => falha !== "credito",
+      enviarWhatsApp: async () => {
+        envios += 1;
+        if (falha === "timeout") throw new Error("timeout_resultado_indeterminado");
+      }
+    });
+    const entrada = { clienteId: "cliente_a", ofertaId: ofertaFalha.id, destinosIds: ["wa_ok"] };
+    const primeiro = await enviarOfertaManualV2(entrada, deps);
+    const segundo = await enviarOfertaManualV2(entrada, deps);
+    assert.strictEqual(envios, 1, `${falha}: segundo despacho nao cruza transporte`);
+    assert.strictEqual(segundo.ignorados, 1, `${falha}: reserva persistente sobrevive ao unlock`);
+    if (falha === "credito") {
+      assert.strictEqual(primeiro.enviados, 1, "debito nao desmente transporte confirmado");
+      assert.strictEqual(primeiro.creditosDebitados, 0);
+    }
   }
 
   {

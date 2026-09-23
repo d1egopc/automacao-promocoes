@@ -349,8 +349,9 @@ function criarOfertaManualV2(clienteId = "admin", entrada = {}, deps = {}) {
     },
     {
       clienteId: id,
-      now: agora,
-      idFactory: storage.idFactory
+       now: agora,
+       idFactory: storage.idFactory,
+       identidadeImportadorConfiavel: deps.identidadeImportadorConfiavel === true
     }
   );
 

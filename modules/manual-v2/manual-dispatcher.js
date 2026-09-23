@@ -1,5 +1,6 @@
 const {
-  buscarOfertaManualV2
+  buscarOfertaManualV2,
+  atualizarMetadadosEnvioManualV2
 } = require("./manual-offers.storage");
 const {
   listarDestinosManuaisV2Async,
@@ -190,6 +191,46 @@ function resultadoSucesso({
   return resultado;
 }
 
+function resultadoIgnorado({ destinoId = "", nome = "", tipo = "", motivo = "" } = {}) {
+  return {
+    destinoId,
+    nome,
+    tipo,
+    status: "ignorado_enviado_recentemente",
+    enviadoEm: "",
+    erro: "",
+    motivo: texto(motivo) || "ignorado_enviado_recentemente"
+  };
+}
+
+async function registrarSucessoOficial(clienteId, ofertaId, resultado, deps = {}) {
+  if (typeof deps.registrarEnvioRecenteConfirmado === "function") {
+    await deps.registrarEnvioRecenteConfirmado({ clienteId, ofertaId, resultado });
+    return;
+  }
+  const buscar = deps.buscarOfertaManualV2 || buscarOfertaManualV2;
+  const atualizar = deps.atualizarMetadadosEnvioManualV2 || atualizarMetadadosEnvioManualV2;
+  const atual = buscar(clienteId, ofertaId, deps.storageOptions || {});
+  if (!atual) throw new Error("oferta_manual_nao_encontrada_apos_envio");
+  const anteriores = lista(atual.envioManual?.resultados)
+    .filter((item) => texto(item?.destinoId) !== texto(resultado?.destinoId));
+  const resultados = [...anteriores, resultado];
+  const enviados = resultados.filter((item) => texto(item?.status).toLowerCase() === "enviado").length;
+  const persistida = atualizar(clienteId, ofertaId, {
+    status: enviados ? "enviada" : atual.status,
+    enviadoEm: enviados ? resultado.enviadoEm : texto(atual.enviadoEm),
+    envioManual: {
+      ...(atual.envioManual || {}),
+      concluidoEm: resultado.enviadoEm,
+      resultados,
+      enviados,
+      erros: resultados.filter((item) => texto(item?.status).toLowerCase() === "erro").length,
+       creditosDebitados: Number(atual.envioManual?.creditosDebitados || 0) + (resultado.creditoDebitado === true ? 1 : 0)
+    }
+  }, deps.storageOptions || {});
+  if (!persistida) throw new Error("envio_manual_nao_persistido");
+}
+
 function adaptarOfertaManualParaTemplate(oferta = {}) {
   const marketplace = texto(oferta.marketplace).toLowerCase();
   const linkFinal = texto(oferta.urlAfiliada || (["shopee", "aliexpress"].includes(marketplace) ? "" : oferta.urlOriginal));
@@ -272,7 +313,7 @@ function resolverOfertaLinkManualV2({ oferta = {}, destino = {}, clienteId = "ad
   return resultado?.oferta || oferta;
 }
 
-async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
+async function enviarWhatsappManual({ destino, oferta, mensagem, deps, onTransporteIniciado = () => {} }) {
   const conexaoId = conexaoWhatsapp(destino);
   const grupos = gruposWhatsappDestino(destino);
   const sock = deps.sessoes?.[conexaoId];
@@ -293,7 +334,7 @@ async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
       prepareWAMessageMedia: deps.prepareWAMessageMedia,
       logger: deps.logger || console
     });
-    await deps.enviarWhatsApp({
+    const argumentosEnvio = {
       sock,
       grupo,
       mensagem,
@@ -306,11 +347,13 @@ async function enviarWhatsappManual({ destino, oferta, mensagem, deps }) {
           }
         : null,
       corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
-    });
+    };
+    onTransporteIniciado();
+    await deps.enviarWhatsApp(argumentosEnvio);
   }
 }
 
-async function enviarTelegramManual({ destino, oferta, mensagem, deps, clienteId }) {
+async function enviarTelegramManual({ destino, oferta, mensagem, deps, clienteId, onTransporteIniciado = () => {} }) {
   const telegram = resolverTelegramDestino(destino, listarTelegramsCliente(deps.configsPorCliente || {}, clienteId));
   if (!telegram || !telegram.ativo || !telegram.botToken || !telegram.chatId) {
     throw new Error("Telegram nao configurado");
@@ -318,7 +361,7 @@ async function enviarTelegramManual({ destino, oferta, mensagem, deps, clienteId
   if (typeof deps.enviarTelegram !== "function") throw new Error("Primitiva Telegram indisponivel");
 
   const usarImagem = tipoMidiaV2.destinoUsaImagem(destino);
-  await deps.enviarTelegram({
+  const argumentosEnvio = {
     httpClient: deps.httpClient,
     tel: {
       botToken: telegram.botToken,
@@ -334,22 +377,26 @@ async function enviarTelegramManual({ destino, oferta, mensagem, deps, clienteId
       ? { origem: "imagemUrl", imagemUrl: texto(oferta.imagem) }
       : null,
     corrigirImagemUrl: deps.corrigirImagemUrl || ((url) => url)
-  });
+  };
+  onTransporteIniciado();
+  await deps.enviarTelegram(argumentosEnvio);
 }
 
-async function enviarDiscordManual({ destino, oferta, mensagem, deps }) {
+async function enviarDiscordManual({ destino, oferta, mensagem, deps, onTransporteIniciado = () => {} }) {
   const channelId = canalDiscord(destino);
   if (!channelId) throw new Error("Canal Discord nao definido");
   if (typeof deps.enviarDiscord !== "function") throw new Error("Primitiva Discord indisponivel");
 
-  const resultado = await deps.enviarDiscord({
+  const argumentosEnvio = {
     channelId,
     mensagem,
     ...tipoMidiaV2.opcoesDiscordPorTipoMidia(destino, imagemDiscordManual(oferta)),
     env: deps.env || process.env,
     httpClient: deps.httpClient,
     now: deps.now
-  });
+  };
+  onTransporteIniciado();
+  const resultado = await deps.enviarDiscord(argumentosEnvio);
 
   if (!resultado?.ok) {
     throw new Error(resultado?.erro || "discord_envio_falhou");
@@ -474,6 +521,7 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
   const mapaSanitizado = new Map(destinosSanitizados.map((destino) => [destino.id, destino]));
 
   const retorno = criarRetornoBase(true, oferta.id || idOferta);
+  retorno.ignorados = 0;
   const usuarioTemCreditos = typeof deps.usuarioTemCreditos === "function"
     ? deps.usuarioTemCreditos
     : () => true;
@@ -545,7 +593,40 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       continue;
     }
 
+    let claimPar = null;
+    let transporteIniciado = false;
     try {
+      if (deps.coordenadorEnvioProdutoDestino?.adquirir) {
+        claimPar = await deps.coordenadorEnvioProdutoDestino.adquirir({
+          clienteId: cliente,
+          oferta,
+          destinoId: destinoIdSolicitado
+        });
+        if (["ocupado", "ocupado_recente"].includes(claimPar?.resultado)) {
+          retorno.ignorados += 1;
+          retorno.resultados.push(resultadoIgnorado({
+            ...destinoBase,
+            motivo: "claim_produto_destino_ocupado"
+          }));
+          continue;
+        }
+        if (claimPar?.resultado && claimPar.resultado !== "adquirido") {
+          retorno.erros += 1;
+          retorno.resultados.push(resultadoErro({ ...destinoBase, erro: "Coordenacao de envio indisponivel" }));
+          continue;
+        }
+        if (claimPar?.resultado === "adquirido" &&
+            typeof deps.verificarEnvioRecenteProdutoDestino === "function" &&
+            await deps.verificarEnvioRecenteProdutoDestino({ clienteId: cliente, oferta, destinoId: destinoIdSolicitado })) {
+          retorno.ignorados += 1;
+          retorno.resultados.push(resultadoIgnorado({ ...destinoBase }));
+          continue;
+        }
+      }
+      if (claimPar?.resultado === "adquirido" &&
+          await deps.coordenadorEnvioProdutoDestino.prepararTransporte(claimPar) !== true) {
+        throw new Error("reserva_duravel_indisponivel");
+      }
       const ofertaParaMensagem = resolverOfertaLinkManualV2({
         oferta: ofertaBaseMensagem,
         destino,
@@ -556,43 +637,68 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       const mensagem = montarMensagemManualV2(ofertaParaMensagem, destino, { ...deps, plano });
       const tipo = tipoDestino(destino);
       let detalhesEnvio = {};
+      if (!["telegram", "whatsapp", "discord"].includes(tipo)) throw new Error("Canal indisponivel");
+      const marcarTransporteIniciado = () => { transporteIniciado = true; };
       if (tipo === "telegram") {
-        await enviarTelegramManual({ destino, oferta: ofertaParaMensagem, mensagem, deps, clienteId: cliente });
+        await enviarTelegramManual({ destino, oferta: ofertaParaMensagem, mensagem, deps, clienteId: cliente,
+          onTransporteIniciado: marcarTransporteIniciado });
       } else if (tipo === "whatsapp") {
-        await enviarWhatsappManual({ destino, oferta: ofertaParaMensagem, mensagem, deps });
+        await enviarWhatsappManual({ destino, oferta: ofertaParaMensagem, mensagem, deps,
+          onTransporteIniciado: marcarTransporteIniciado });
       } else if (tipo === "discord") {
-        detalhesEnvio = await enviarDiscordManual({ destino, oferta: ofertaParaMensagem, mensagem, deps });
+        detalhesEnvio = await enviarDiscordManual({ destino, oferta: ofertaParaMensagem, mensagem, deps,
+          onTransporteIniciado: marcarTransporteIniciado });
       } else {
         throw new Error("Canal indisponivel");
       }
 
-      const debitou = debitarCreditos(cliente, 1);
-      if (!debitou) {
-        retorno.erros += 1;
-        retorno.resultados.push(resultadoErro({
-          ...destinoBase,
-          erro: "Falha ao debitar creditos"
-        }));
-        continue;
-      }
-
-      retorno.enviados += 1;
-      retorno.creditosDebitados += 1;
-      retorno.resultados.push(resultadoSucesso({
+      const sucesso = resultadoSucesso({
         ...destinoBase,
         enviadoEm: agoraIso(deps),
         ...detalhesEnvio
-      }));
+      });
+      if (claimPar?.resultado === "adquirido") {
+        await registrarSucessoOficial(cliente, oferta.id || idOferta, sucesso, deps);
+      }
+      retorno.enviados += 1;
+      retorno.resultados.push(sucesso);
+      // O fato do transporte e duravel antes do bookkeeping. Falha no debito
+      // nao reclassifica uma entrega confirmada como tentativa nao enviada.
+      try {
+        const debitou = await debitarCreditos(cliente, 1);
+        if (debitou) {
+          retorno.creditosDebitados += 1;
+          if (claimPar?.resultado === "adquirido") {
+            await registrarSucessoOficial(cliente, oferta.id || idOferta,
+              { ...sucesso, creditoDebitado: true }, deps);
+          }
+        } else {
+          retorno.erros += 1;
+          sucesso.erroBookkeeping = "falha_ao_debitar_creditos";
+        }
+      } catch {
+        retorno.erros += 1;
+        sucesso.erroBookkeeping = "falha_ao_registrar_creditos";
+      }
     } catch (e) {
+      if (!transporteIniciado && claimPar?.reservaToken) {
+        try { await deps.coordenadorEnvioProdutoDestino.descartarSemTransporte(claimPar); } catch {}
+      }
       retorno.erros += 1;
       retorno.resultados.push(resultadoErro({
         ...destinoBase,
         erro: e.message || "Falha no envio"
       }));
+    } finally {
+      if (claimPar?.resultado === "adquirido" && deps.coordenadorEnvioProdutoDestino?.finalizar) {
+        await deps.coordenadorEnvioProdutoDestino.finalizar(claimPar, {
+          statusFinal: retorno.resultados.at(-1)?.status || ""
+        });
+      }
     }
   }
 
-  retorno.ok = retorno.enviados > 0;
+  retorno.ok = retorno.enviados > 0 || retorno.ignorados > 0;
   return retorno;
 }
 
