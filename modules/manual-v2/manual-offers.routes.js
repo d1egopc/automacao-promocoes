@@ -20,6 +20,8 @@ const {
 } = require("./manual-capture.service");
 const vitrineHookPadrao = require("../vitrine/hook");
 const vitrineStoragePadrao = require("../vitrine/storage");
+const achadosV2 = require("./ofertas-v2-achados");
+const listasV2 = require("./ofertas-v2-listas");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -335,6 +337,40 @@ function criarRotasManualV2(deps = {}) {
       httpClient: deps.httpClient
     };
   }
+
+  function responderOfertasV2(req, res, operar) {
+    const clienteId = clienteAutenticado(req, res);
+    if (!clienteId) return;
+    Promise.resolve().then(() => operar(clienteId)).then((resultado) => res.json({ ok: true, ...resultado }))
+      .catch((e) => res.status(statusErro(e)).json(payloadErro(e, "ofertas_v2_falhou")));
+  }
+
+  router.get("/achados", (req, res) => responderOfertasV2(req, res, (id) => ({
+    achados: achadosV2.listarAchados(id, { marketplace: texto(req.query.marketplace),
+      categoria: texto(req.query.categoria), busca: texto(req.query.busca) })
+  })));
+  router.get("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ listas: listasV2.listarListas(id) })));
+  router.post("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.criarLista(id, req.body?.nome) })));
+  router.put("/listas/:id", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.renomearLista(id, req.params.id, req.body?.nome) })));
+  router.delete("/listas/:id", (req, res) => responderOfertasV2(req, res, (id) => listasV2.excluirLista(id, req.params.id)));
+  router.delete("/listas/:id/itens", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.esvaziarLista(id, req.params.id) })));
+  router.delete("/listas/:id/itens/:itemId", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.removerItem(id, req.params.id, req.params.itemId) })));
+  router.post("/listas/:id/itens", (req, res) => responderOfertasV2(req, res, async (id) => ({ lista: await listasV2.adicionarItem(
+    id, req.params.id, { origem: req.body?.origem, ofertaId: req.body?.ofertaId }, {
+      getIntegracaoCliente: deps.getIntegracaoCliente,
+      gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
+      gerarShortLinkShopee: deps.gerarShortLinkShopee,
+      expandirShortlinkShopee: deps.expandirShortlinkShopee,
+      fetch: deps.fetch
+    }
+  ) })));
+  router.post("/listas/:id/play", (req, res) => responderOfertasV2(req, res, async (id) => ({ lista: await listasV2.reservarDestinos(
+    id, req.params.id, req.body?.destinosIds, req.body?.intervaloMs, {
+      ...depsDestinos(req, id), getIntegracaoCliente: deps.getIntegracaoCliente
+    }
+  ) })));
+  router.post("/listas/:id/pause", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.interromperLista(id, req.params.id, "pausada") })));
+  router.post("/listas/:id/finish", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.interromperLista(id, req.params.id, "parada") })));
 
   router.get("/destinos", async (req, res) => {
     try {

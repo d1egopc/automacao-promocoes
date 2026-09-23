@@ -195,6 +195,8 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi, validatedQu
     ["compact:fila-gc-references", FILA_GC_REFERENCES_ARQUIVO, "queueRefs", "fila"],
     ["compact:vitrine", "vitrine.json", "vitrine", "vitrine"],
     ["compact:manual", "manual_ofertas_v2.json", "manual", "manual"],
+    ["compact:achados-v2", "manual_achados_v2.json", "array", "manual"],
+    ["compact:listas-v2", "manual_listas_v2.json", "array", "manual"],
     ["compact:social-agendamentos", "social-agendamentos.json", "array", "social"],
     ["compact:social-rascunhos", "social-rascunhos.json", "array", "social"],
     ["compact:social-publicacoes", "social-publicacoes.json", "array", "social"],

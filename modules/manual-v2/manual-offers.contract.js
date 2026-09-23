@@ -193,6 +193,15 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     // Evidencia recebida do cliente e somente diagnostica; nunca libera despacho.
     afiliacaoWorkspace: entrada.afiliacaoWorkspace && typeof entrada.afiliacaoWorkspace === "object" ? { ...entrada.afiliacaoWorkspace } : null,
     afiliacaoWorkspaceVerificada: entrada.afiliacaoWorkspaceVerificada && typeof entrada.afiliacaoWorkspaceVerificada === "object" ? { ...entrada.afiliacaoWorkspaceVerificada } : null,
+    // O renderer valida novamente a prova assinada antes de publicar resgate Shopee.
+    // Sem a ocorrência, o linkResgate isolado é intencionalmente descartado.
+    linksComerciais: Array.isArray(entrada.linksComerciais) && ["shopee", "aliexpress"].includes(marketplaceEntrada)
+      ? entrada.linksComerciais.filter((item) => item && typeof item === "object" &&
+        item.afiliacaoWorkspace && typeof item.afiliacaoWorkspace === "object" &&
+        (marketplaceEntrada === "shopee"
+          ? ["produto", "link_produto", "resgate", "link_resgate"].includes(primeiroTexto(item.papel, item.papelLink, item.tipo))
+          : ["produto", "link_produto", "app", "link_app", "pc", "link_pc", "moedas", "link_moedas"].includes(primeiroTexto(item.papelLink, item.papel, item.tipo))))
+      : [],
 
     titulo: primeiroTexto(entrada.titulo, entrada.nome, entrada.title),
     precoAtual: primeiroTexto(entrada.precoAtual, entrada.preco, entrada.precoPor, entrada.valor, entrada.price),

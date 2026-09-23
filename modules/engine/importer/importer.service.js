@@ -67,6 +67,7 @@ const {
   registrarOfertaUniversalCriada
 } = require("../ofc/commercial-events.service");
 const { classificarLinkEngine } = require("../link-role.service");
+const { registrarAchado } = require("../../manual-v2/ofertas-v2-achados");
 const {
   criarMedidorEngineMemoryStage,
   registrarPontoEngineMemoryStage,
@@ -4916,6 +4917,24 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         motivo: atualizacaoMetadata.motivo || "oferta_universal_metadata_falhou",
         erro: atualizacaoMetadata.erro || ""
       };
+    }
+    // Projeção leve após a Oferta Universal validada e persistida. Nunca interfere no Engine.
+    if (validacaoOfertaUniversal.ok === true) {
+      try {
+        registrarAchado({
+          clienteId: job.cliente_id || job.clienteId,
+          ofertaId,
+          ofertaUniversal: ofertaUniversalPersistida,
+          metadata: metadataFinal,
+          capturedAt: evento?.capturado_em || ofertaUniversalPersistida.criadoEm
+        });
+      } catch (error) {
+        console.warn("[ACHADOS-V2-PROJECAO-FALHA]", {
+          workspaceId: job.cliente_id || job.clienteId || "",
+          ofertaId,
+          motivo: String(error?.codigo || "storage_indisponivel").slice(0, 80)
+        });
+      }
     }
   }
 

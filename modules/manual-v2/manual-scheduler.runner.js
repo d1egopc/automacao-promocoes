@@ -9,6 +9,7 @@ const {
   autorizarProximoDespachoAutomaticoCliente,
   registrarTentativaDespachoAutomatico
 } = require("./manual-auto-dispatch");
+const { processarListasCliente } = require("./ofertas-v2-listas");
 
 const INTERVALO_PADRAO_MS = 60 * 1000;
 const INTERVALO_MINIMO_MS = 30 * 1000;
@@ -111,6 +112,16 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
       }
     }
 
+    // Listas compartilham este mesmo ciclo do Manual V2; não há segundo timer.
+    const resultadosListas = await Promise.all(clientesBase.map(async (clienteId) => {
+      try {
+        return { clienteId, resultados: await (deps.processarListasCliente || processarListasCliente)(clienteId, deps) };
+      } catch (e) {
+        logar(deps, "listas_erro_fail_open", { clienteId, motivo: texto(e?.codigo || "listas_indisponiveis") });
+        return { clienteId, erro: texto(e?.codigo || "listas_indisponiveis") };
+      }
+    }));
+
     const clientes = listarClientesComAgendadas({ ...deps, clientes: clientesBase });
     const totalAgendadas = clientes.reduce((total, item) => total + item.totalAgendadas, 0);
     if (!totalAgendadas) {
@@ -119,7 +130,8 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
         semTrabalho: true,
         clientes: 0,
         totalAgendadas: 0,
-        autorizacoesAutomaticas
+        autorizacoesAutomaticas,
+        resultadosListas
       };
     }
 
@@ -173,6 +185,7 @@ async function rodarCicloManualV2Scheduler(deps = {}) {
       clientes: clientes.length,
       totalAgendadas,
       autorizacoesAutomaticas,
+      resultadosListas,
       resultados
     };
   } catch (e) {

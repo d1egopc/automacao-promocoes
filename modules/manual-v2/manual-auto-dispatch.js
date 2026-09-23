@@ -75,7 +75,8 @@ function ehAgendamentoAutomatico(oferta = {}) {
 
 function ordenarElegiveis(ofertas = []) {
   return (Array.isArray(ofertas) ? ofertas : [])
-    .filter((oferta) => texto(oferta.status).toLowerCase() === "salva")
+    .filter((oferta) => texto(oferta.status).toLowerCase() === "salva" &&
+      texto(oferta.origemAgendamento) !== "lista_v2")
     .sort((a, b) => {
       const aData = Date.parse(texto(a.criadoEm)) || 0;
       const bData = Date.parse(texto(b.criadoEm)) || 0;

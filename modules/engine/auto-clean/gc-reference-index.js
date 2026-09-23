@@ -93,6 +93,21 @@ function selecionarConteudoVivo(parsed, file, source, nowMs) {
   if (base === "manual_ofertas_v2.json") {
     return parsed.filter(item => !["enviada", "erro"].includes(String(item?.status || "").toLowerCase()));
   }
+  if (base === "manual_achados_v2.json") {
+    return parsed.filter(item => {
+      const capturadoMs = Date.parse(item?.capturadoEm || "");
+      return !Number.isFinite(capturadoMs) || nowMs - capturadoMs <= 48 * 60 * 60 * 1000;
+    });
+  }
+  if (base === "manual_listas_v2.json") {
+    return parsed.map(item => ({ ...item, itens: (Array.isArray(item?.itens) ? item.itens : [])
+      .filter(entrada => {
+        if (!["enviado", "repetido"].includes(String(entrada?.status || "").toLowerCase())) return true;
+        const terminalMs = typeof entrada?.terminalEm === "number"
+          ? entrada.terminalEm : Date.parse(entrada?.terminalEm || "");
+        return !Number.isFinite(terminalMs) || nowMs - terminalMs <= 7 * 24 * 60 * 60 * 1000;
+      }) }));
+  }
   if (base === "fila.json") {
     return parsed.filter(item => {
       const status = String(item?.status || item?.estado || "pendente").toLowerCase();
@@ -179,6 +194,7 @@ function fontesWorkspace(dataDir, workspaceId, nowMs) {
     ["fila.json", "fila"], ["fila-viva.json", "fila"],
     ["fila-historico.json", "historico"], ["fila-projecao-leve.json", "historico"],
     ["vitrine.json", "vitrine"], ["manual_ofertas_v2.json", "manual"],
+    ["manual_achados_v2.json", "manual"], ["manual_listas_v2.json", "manual"],
     ["social-agendamentos.json", "social"], ["social-rascunhos.json", "social"],
     ["social-publicacoes.json", "social"], ["social-oportunidades.json", "social"]
   ].map(([name, source]) => ({ file: path.join(root, name), source }));
