@@ -29,6 +29,7 @@ const CATEGORIA = {
   modaFeminina: "Roupas e Moda Feminina",
   modaMasculina: "Roupas e Moda Masculina",
   perifericos: "Perif\u00e9ricos",
+  papelariaLivros: "Papelaria e Livros",
   pesca: "Pesca e Camping",
   pet: "Pet Shop e Fazendinha",
   beleza: "Perfumaria, Farm\u00e1cia e Beleza",
@@ -638,6 +639,29 @@ const ALIASES_CATEGORIA = new Map(
   Object.values(CATEGORIA).map((categoria) => [normalizarTextoLocal(categoria), categoria])
 );
 
+// Identidades de produto inequívocas que o classificador legado ainda não cobre.
+// Aplicadas apenas quando nenhuma regra existente reconheceu a oferta.
+const IDENTIDADES_CONFIAVEIS = [
+  [CATEGORIA.beleza, /\b(?:oleo capilar|finalizador capilar)\b/],
+  [CATEGORIA.casa, /\b(?:protetores? de ralo|formas? de pastel|puff gigante|banquetas? altas?|canecas?|mala de (?:\d+ ?kg )?bordo)\b/],
+  [CATEGORIA.limpeza, /\bglade difusor de ambiente\b/],
+  [CATEGORIA.esporte, /\b(?:maca peruana|energy gel atlhetica|palatinose)\b/],
+  [CATEGORIA.papelariaLivros, /\b(?:hidrografica com \d+ cores|murdoku)\b/],
+  [CATEGORIA.alimentos, /\byopro bebida lactea\b/],
+  [CATEGORIA.tenis, /\bunder armour tribase cross\b/],
+  [CATEGORIA.iluminacao, /\bluminarias? de emergencia\b/],
+  [CATEGORIA.perifericos, /\bsuporte articulado(?: a gas)? para \d+ monitores?\b/]
+];
+
+function categoriaPorIdentidadeConfiavel(oferta = {}, termo = "") {
+  const identidade = normalizarTextoLocal(oferta.titulo || oferta.nome || termo || "");
+  if (!identidade) return "";
+  const encontradas = new Set(
+    IDENTIDADES_CONFIAVEIS.filter(([, padrao]) => padrao.test(identidade)).map(([categoria]) => categoria)
+  );
+  return encontradas.size === 1 ? [...encontradas][0] : "";
+}
+
 function categoriaDeclaradaValida(oferta = {}) {
   const categoria = normalizarTextoLocal(oferta.categoria || oferta.categoriaProduto || "");
 
@@ -706,6 +730,9 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
     .sort(desempatar);
 
   if (!resultados.length) {
+    if (categoriaManual && categoriaManual !== CATEGORIA.diversos) return categoriaManual;
+    const categoriaIdentidade = categoriaPorIdentidadeConfiavel(oferta, termo);
+    if (categoriaIdentidade) return categoriaIdentidade;
     console.log("[INFO] CATEGORIA NAO IDENTIFICADA:", texto);
     return categoriaManual || CATEGORIA.diversos;
   }

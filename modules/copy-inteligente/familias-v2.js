@@ -30,6 +30,7 @@ const CATEGORIA_PARA_FAMILIA_V2 = Object.freeze({
   "Games e Console": "games",
   "Climatização e Ventilação": "climatizacao",
   "Iluminação e Elétrica": "iluminacao",
+  "Papelaria e Livros": FAMILIA_OPORTUNIDADE_V2,
   "Diversos": FAMILIA_OPORTUNIDADE_V2
 });
 

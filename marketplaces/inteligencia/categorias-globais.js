@@ -26,6 +26,7 @@ const CATEGORIAS_OPTIMUS = [
   "Games e Console",
   "Climatização e Ventilação",
   "Iluminação e Elétrica",
+  "Papelaria e Livros",
   "Diversos"
 ];
 
