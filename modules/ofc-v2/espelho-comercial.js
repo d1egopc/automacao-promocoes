@@ -8,8 +8,10 @@ const {
   classificarBlocoComercial
 } = require("../templates-clientes/politica-blocos-comerciais");
 const {
+  extrairCodigosCupomSemanticos,
   normalizarCuponsSemanticos
 } = require("../radar/cupom-semantico");
+const { textoComercialSemRodape } = require("../radar/linhas-auxiliares");
 const {
   resolverPrecedenciaPrecoPix,
   textoPixValido
@@ -387,13 +389,7 @@ function extrairCupomTexto(textoOriginal = "", oferta = {}, ofertaEntrada = {}) 
   const candidatos = [];
   const cupomProtegidoRadar = oferta?.metadata?.precedenciaComercial?.camposProtegidos?.cupom === true;
   const linhas = linhasTexto(textoOriginal);
-  for (const linha of linhas) {
-    const marcadorPlural = linha.match(/\bcupons\b\s*:?\s*([A-Z0-9][A-Z0-9_-]*(?:\s*(?:ou|e|[,;/|])\s*[A-Z0-9][A-Z0-9_-]*)*)/i);
-    if (marcadorPlural) candidatos.push(...separarCupons(marcadorPlural[1]));
-    const marcador = linha.match(/\b(?:cupom|c[oÃƒÂ³]digo|cod\.?|use\s+o\s+cupom|utilize\s+o\s+cupom)\b\s*:?\s*([A-Z0-9][A-Z0-9_-]*(?:\s*(?:ou|e|[,;/|])\s*[A-Z0-9][A-Z0-9_-]*)*)/i);
-    if (!marcador) continue;
-    candidatos.push(...separarCupons(marcador[1]));
-  }
+  candidatos.push(...extrairCodigosCupomSemanticos(textoOriginal));
   candidatos.push(...separarCupons(oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || ""));
   if (!cupomProtegidoRadar) {
     candidatos.push(...separarCupons(ofertaEntrada.cupom || ofertaEntrada.cupomCodigo || ofertaEntrada.codigoCupom || ""));
@@ -2484,7 +2480,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   const metadata = objeto(entrada.metadata);
   const comercialNormalizado = objeto(entrada.comercialNormalizado);
   const textoOriginalCompleto = extrairTextoOriginal({ textoOriginal: entrada.textoOriginal, oferta, ofertaEntrada, evento, metadata });
-  const textoOriginal = textoLimitado(textoOriginalCompleto, 3000);
+  const textoOriginal = textoComercialSemRodape(textoLimitado(textoOriginalCompleto, 3000));
   const tituloOriginal = extrairTituloOriginal(textoOriginal, oferta, ofertaEntrada);
   const precosTexto = extrairPrecosTexto(textoOriginal);
   const cupom = extrairCupomTexto(textoOriginal, oferta, ofertaEntrada);

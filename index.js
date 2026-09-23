@@ -403,6 +403,7 @@ const cacheCopyInteligenteV1 = require("./modules/copy-inteligente/cache");
 const cacheCopyInteligenteV2 = require("./modules/copy-inteligente/cache-v2");
 const copyLocalV2Service = require("./modules/copy-inteligente/copy-local-v2.service");
 const radarCupomMensagem = require("./utils/radar-cupom-mensagem");
+const { urlAuxiliarNoTexto, textoComercialSemRodape } = require("./modules/radar/linhas-auxiliares");
 const {
   extrairEvidenciasRadarLocal,
   resumirExtratorLocalParaLog,
@@ -21655,7 +21656,8 @@ async function processarMensagemRadar({
 const linksContextuaisCapturados = Array.isArray(linksCapturados)
   ? linksCapturados.map(link => String(link || "").trim()).filter(Boolean)
   : [];
-const links = linksContextuaisCapturados.length ? linksContextuaisCapturados : extrairLinksRadar(texto);
+const links = (linksContextuaisCapturados.length ? linksContextuaisCapturados : extrairLinksRadar(texto))
+  .filter(link => !urlAuxiliarNoTexto(link, texto));
 const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
@@ -21772,7 +21774,7 @@ logDebug("ðŸ§ª RADAR LINKS EXTRAIDOS", {
   texto: String(texto || "").slice(0, 250)
 });
 
-const beneficiosMensagem = analisarBeneficiosMensagemRadar(texto, links);
+const beneficiosMensagem = analisarBeneficiosMensagemRadar(textoComercialSemRodape(texto), links);
 const radarMidiaMaterializadaFinal = radarMidiaMaterializada || (
   origemTipoFinal === "whatsapp" && links.length && typeof downloadMediaMessageImpl === "function"
     ? await materializarImagemRadarWhatsApp({

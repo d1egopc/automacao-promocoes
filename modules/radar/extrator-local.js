@@ -2,6 +2,7 @@ const {
   extrairComercialUniversal,
   resumirExtratorComercialParaLog
 } = require("./extrator-comercial-universal");
+const { textoComercialSemRodape } = require("./linhas-auxiliares");
 
 const RADAR_EXTRATOR_LOCAL_MODO = "observacao";
 const VERSAO_EXTRATOR_LOCAL = "radar_extrator_local_v1";
@@ -546,7 +547,7 @@ function extrairEvidenciasRadarLocal(entrada = {}, deps = {}) {
     metadadosMidia = null
   } = entrada;
   const textoCompleto = normalizarTexto(textoOriginal);
-  const texto = textoCompleto.slice(0, LIMITES_EXTRATOR_LOCAL.TEXTO_MAX);
+  const texto = textoComercialSemRodape(textoCompleto.slice(0, LIMITES_EXTRATOR_LOCAL.TEXTO_MAX));
   const resultado = criarBase({
     texto,
     links,

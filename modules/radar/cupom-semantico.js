@@ -2,6 +2,8 @@ function texto(valor = "") {
   return String(valor ?? "").trim();
 }
 
+const { linhaAuxiliarCanal } = require("./linhas-auxiliares");
+
 function semAcentosUpper(valor = "") {
   return texto(valor)
     .toUpperCase()
@@ -43,6 +45,7 @@ const PALAVRAS_BLOQUEADAS = new Set([
   "DESSE",
   "DESSA",
   "DISPONIVEL",
+  "DISPONIVEIS",
   "ANUNCIO",
   "OCUPOM",
   "OCUPOMAQUI",
@@ -86,6 +89,7 @@ function pareceUrlOuParametro(valor = "") {
   const original = texto(valor);
   return /https?:\/\//i.test(original) ||
     /^www\./i.test(original) ||
+    /(?:^|\s)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/|$)/i.test(original) ||
     /[/?#=&]/.test(original) ||
     /(utm_|awinaffid|linkcode|creative|camp|ref=|tag=)/i.test(original);
 }
@@ -165,13 +169,16 @@ function normalizarCodigoCupomSemantico(candidato = "") {
   if (!original) return "";
   if (/\r?\n/.test(original)) return "";
   if (pareceUrlOuParametro(original)) return "";
+  if (/^(?:no|na|nos|nas|do|da|dos|das)\s+(?:p[aá]gina|an[uú]ncio|site|app|aplicativo|produto)\b/i.test(original)) return "";
+  if (/\b(?:selecione|pagamento|pague)\s+(?:o\s+)?pix\b/i.test(original)) return "";
   if (pareceFrasePercentualSemCodigo(original)) return "";
   if (pareceBeneficioSemCodigo(original)) return "";
   if (pareceInstrucaoImperativaSemMarcador(original)) return "";
   if (pareceFraseNaturalSemCodigo(original)) return "";
   if (pareceSlugCurtoDeUrl(original)) return "";
 
-  const limpo = limparMarcadorCupom(original)
+  const semMarcador = limparMarcadorCupom(original);
+  const limpo = semMarcador
     .replace(/[^A-Z0-9_-]/g, "")
     .trim();
 
@@ -189,7 +196,7 @@ function normalizarCodigoCupomSemantico(candidato = "") {
 function separarPossiveisCodigos(trecho = "") {
   return texto(trecho)
     .split(/\s+ou\s+|\s+e\s+|[+,;/|]/i)
-    .map(item => item.split(/\s+(?:no|na|em|para|por|pelo|pela|link|site|app)\b/i)[0])
+    .map(item => item.split(/\s+(?:no|na|em|para|por|pelo|pela|antes|link|site|app)\b/i)[0])
     .map(texto)
     .filter(Boolean);
 }
@@ -223,6 +230,7 @@ function extrairCandidatosCupomSemanticos(textoFonte = "") {
 
   for (let indice = 0; indice < linhas.length; indice++) {
     const linhaOriginal = linhas[indice];
+    if (linhaAuxiliarCanal(linhaOriginal)) continue;
     const linha = removerUrls(linhaOriginal);
     if (/^\s*(?:cupom|cupons|codigo|codigos|c[o\u00f3]digo|c[o\u00f3]digos|coupon|promocode|voucher)\s*:?\s*$/i.test(linha)) {
       for (const parte of separarPossiveisCodigos(linhas[indice + 1] || "")) {

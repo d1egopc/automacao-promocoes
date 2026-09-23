@@ -1,4 +1,5 @@
 const REGEX_LINK_COMERCIAL = /https?:\/\/[^\s<>()\]"']+|www\.[^\s<>()\]"']+/gi;
+const { linhaAuxiliarCanal, urlAuxiliarCanal } = require("./linhas-auxiliares");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -62,7 +63,7 @@ function contextoTextual({ linhaAtual = "", linhaAnterior = "", linhaPosterior =
 }
 
 function contextoInequivocoResgate(chave = "") {
-  return /\b(?:voucher|resgat(?:e|em|a|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|peg(?:ue|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|colet(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|ativ(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|clique\s+para\s+obter\s+(?:o\s+)?cupom|pagina\s+de\s+cupons|cupons?\s+aqui|link\s+do\s+cupom|cupom\s+(?:disponivel|liberado|resgatavel))\b/.test(chave);
+  return /\b(?:voucher|resgat(?:e|ar|em)\s+todos\s+os\s+cupons|resgat(?:e|em|a|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|peg(?:ue|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|colet(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|ativ(?:e|ar)(?:\s+(?:o|a|os|as|seu|sua|seus|suas))?\s+cupo(?:m|ns)|clique\s+para\s+obter\s+(?:o\s+)?cupom|pagina\s+de\s+cupons|cupons?\s+aqui|link\s+do\s+cupom|cupom\s+(?:disponivel|liberado|resgatavel))\b/.test(chave);
 }
 
 function contextoInequivocoProduto(chave = "") {
@@ -247,6 +248,10 @@ function classificarLinkComercial({
 
   if (!link) {
     return { url: "", tipo: "outros", confianca: "ausente", origem: "url_ausente", contexto: chaveContexto, evidencias: [] };
+  }
+
+  if (urlAuxiliarCanal(link) || linhaAuxiliarCanal(linhaAtual) || linhaAuxiliarCanal(linhaAnterior)) {
+    return { url: "", tipo: "outros", confianca: "ausente", origem: "link_auxiliar_canal", contexto: chaveContexto, evidencias: [] };
   }
 
   if (!marketplaceShopee(marketplace, link) && (contextoInequivocoResgate(chaveContexto) || sugestao === "resgate")) {
