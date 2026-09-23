@@ -117,6 +117,13 @@ function fakeTeleRadarFactory(order) {
     let startCalls = 0;
     let stopCalls = 0;
     let availableCalls = 0;
+    let config = {
+      monitoramentoAtivo: false,
+      horarioInicio: "00:00",
+      horarioFim: "23:59",
+      monitoramentoAtivadoEm: null,
+      updatedAt: null
+    };
     const counters = { accepted: 7, rejectedProtected: 2, errors: 1 };
     const service = {
       context,
@@ -147,6 +154,22 @@ function fakeTeleRadarFactory(order) {
         running = false;
         state = "stopped";
         return service.getStatus();
+      },
+      async getOperationalConfig() { return { ...config }; },
+      async setMonitoringActive(value) {
+        config = {
+          ...config,
+          monitoramentoAtivo: value,
+          monitoramentoAtivadoEm: value && !config.monitoramentoAtivo ? new Date().toISOString() : config.monitoramentoAtivadoEm,
+          updatedAt: new Date().toISOString()
+        };
+        return { ...config };
+      },
+      async setCaptureSchedule({ horarioInicio, horarioFim }) {
+        const validTime = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+        if (!validTime(horarioInicio) || !validTime(horarioFim)) throw new Error("TELERADAR_HORARIO_INVALID");
+        config = { ...config, horarioInicio, horarioFim, updatedAt: new Date().toISOString() };
+        return { ...config };
       },
       getStatus() {
         return { running, state, selectedSourceCount: selected.length, counters, lastErrorCode: "TRANSIENT_SAMPLE" };
@@ -375,6 +398,13 @@ async function run() {
 
   await testAuthStartRpcMappingAndSanitizedObservability();
 
+  const bootFixture = createFixture();
+  bootFixture.accountService.state.exists = true;
+  bootFixture.accountService.state.authorized = true;
+  const bootResult = await bootFixture.service.bootstrap(admin);
+  assert.equal(bootResult.started, true);
+  assert.equal(bootFixture.teleRadarServiceFactory.instances[0].stats().startCalls, 1, "restart restaura runtime técnico");
+
   const fixture = createFixture();
   const app = createApp(fixture.service);
 
@@ -500,6 +530,28 @@ async function run() {
   assert.equal(directAvailable[1].protectedContent, true);
 
   assert.deepEqual(await fixture.service.listSelectedSources(admin), []);
+  const scheduleSaved = await request(app, "PUT", "/admin/teleradar/schedule", {
+    role: "admin_master", body: { horarioInicio: "08:00", horarioFim: "00:50", monitoramentoAtivo: true }
+  });
+  assert.equal(scheduleSaved.status, 200);
+  assert.equal(scheduleSaved.body.monitoramentoAtivo, false, "horário não altera toggle");
+  assert.equal(scheduleSaved.body.horarioInicio, "08:00");
+  const toggledOn = await request(app, "PUT", "/admin/teleradar/monitoring", {
+    role: "admin_master", body: { monitoramentoAtivo: true, horarioInicio: "00:00" }
+  });
+  assert.equal(toggledOn.status, 200);
+  assert.equal(toggledOn.body.monitoramentoAtivo, true);
+  assert.equal(toggledOn.body.horarioInicio, "08:00", "toggle não altera horário");
+  const invalidToggle = await request(app, "PUT", "/admin/teleradar/monitoring", {
+    role: "admin_master", body: { monitoramentoAtivo: "false" }
+  });
+  assert.equal(invalidToggle.status, 400);
+  assert.equal(invalidToggle.body.error, "TELERADAR_MONITORAMENTO_ATIVO_INVALID");
+  const invalidSchedule = await request(app, "PUT", "/admin/teleradar/schedule", {
+    role: "admin_master", body: { horarioInicio: "99:00", horarioFim: "00:50" }
+  });
+  assert.equal(invalidSchedule.status, 400);
+  assert.equal(invalidSchedule.body.error, "TELERADAR_HORARIO_INVALID");
   const waiting = await fixture.service.startTeleRadar(admin);
   assert.equal(waiting.state, "waiting_sources");
   assert.equal(waiting.running, true);
@@ -524,7 +576,8 @@ async function run() {
 
   await fixture.service.stopTeleRadar(admin);
   await fixture.service.stopTeleRadar(admin);
-  assert.equal(runtime.stats().stopCalls, 1);
+  assert.equal(runtime.stats().stopCalls, 0, "OFF operacional não desconecta o runtime técnico");
+  assert.equal(runtime.getStatus().running, true);
 
   await fixture.service.replaceSelectedSources(admin, { chatKeys: ["-1001"] });
   await fixture.service.startTeleRadar(admin);

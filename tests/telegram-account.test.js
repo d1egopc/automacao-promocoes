@@ -418,6 +418,7 @@ function updateMessage({ chatId, senderId = 2002, outgoing = false, protectedMes
     chatId,
     message: {
       id: 77,
+      date: new Date("2026-09-23T04:00:00.000Z"),
       senderId,
       out: outgoing,
       message: "Oferta https://example.com APP",
@@ -454,6 +455,7 @@ async function testAdapterListenerLifecycleAndFlood() {
   assert.equal(received.length, 1);
   assert.equal(received[0].chatId, "-1001");
   assert.equal(received[0].incomingExternal, true);
+  assert.equal(received[0].telegramTimestamp, "2026-09-23T04:00:00.000Z");
   await transport.emit(updateMessage({ chatId: "-1001", protectedMessage: true }));
   await transport.emit(updateMessage({ chatId: "-1001", protectedChat: true }));
   assert.equal(received.length, 3);

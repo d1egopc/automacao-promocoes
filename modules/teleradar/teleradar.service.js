@@ -8,6 +8,8 @@ const { createSourceAllowlistService, sanitizeSource } = require("./source-allow
 const { normalizeTelegramUpdate } = require("./update-normalizer");
 const { createHandoffService } = require("./handoff.service");
 const { createRadarIngressAdapter } = require("./radar-ingress.adapter");
+const { evaluateTeleRadarCaptureGate } = require("./capture-gate");
+const { createOperationalConfigRepository } = require("./operational-config.repository");
 
 function createTeleRadarService({
   context,
@@ -17,6 +19,7 @@ function createTeleRadarService({
   sourceAllowlist,
   checkpoints,
   dedupe,
+  operationalConfig,
   handoffService,
   radarIngress = createRadarIngressAdapter(),
   clock = () => new Date(),
@@ -34,6 +37,11 @@ function createTeleRadarService({
   const allowlist = sourceAllowlist || createSourceAllowlistService({ store, context: validContext, clock });
   const checkpointRepository = checkpoints || createCheckpointRepository({ store, context: validContext });
   const dedupeRepository = dedupe || createDedupeRepository({ store, context: validContext });
+  const operationalConfigRepository = operationalConfig || createOperationalConfigRepository({
+    store,
+    context: validContext,
+    clock
+  });
   const handoff = handoffService || createHandoffService({
     ...handoffOptions,
     context: validContext,
@@ -63,6 +71,7 @@ function createTeleRadarService({
   let unsubscribe = null;
   let selectedSourceCount = 0;
   let lifecycleQueue = Promise.resolve();
+  let operationalQueue = Promise.resolve();
   const counters = {
     accepted: 0,
     rejectedNotSelected: 0,
@@ -70,6 +79,9 @@ function createTeleRadarService({
     rejectedBeforeActivation: 0,
     rejectedCheckpoint: 0,
     rejectedDuplicate: 0,
+    rejectedMonitoringDisabled: 0,
+    rejectedOutsideSchedule: 0,
+    rejectedBeforeOperationalWindow: 0,
     errors: 0
   };
   let lastErrorCode = null;
@@ -103,6 +115,12 @@ function createTeleRadarService({
     return current;
   }
 
+  function serializeOperational(operation) {
+    const current = operationalQueue.catch(() => {}).then(operation);
+    operationalQueue = current;
+    return current;
+  }
+
   async function listSelectedSources() {
     const selected = await allowlist.listSelectedSources();
     return Promise.all(selected.map(async source => {
@@ -133,8 +151,30 @@ function createTeleRadarService({
   async function handleUpdate(update) {
     const chatKey = String(update?.chatKey || update?.chatId || "").trim();
     const messageId = update?.messageId === undefined ? null : String(update.messageId);
+    const config = await operationalConfigRepository.get();
+    const initialGate = evaluateTeleRadarCaptureGate({
+      config,
+      sourceSelected: true,
+      selectedSourceCount,
+      now: clock()
+    });
+    if (!initialGate.allowed) {
+      return reject(
+        initialGate.reason === "monitoramento_desligado" ? "rejectedMonitoringDisabled" : "rejectedOutsideSchedule",
+        `TELERADAR_REJEITADO_${initialGate.reason.toUpperCase()}`,
+        { chatKey, messageId }
+      );
+    }
     const source = chatKey ? await allowlist.getSelectedSource(chatKey) : null;
-    if (!source) return reject("rejectedNotSelected", "TELERADAR_REJEITADO_SOURCE_NOT_SELECTED", { chatKey, messageId });
+    const sourceGate = evaluateTeleRadarCaptureGate({
+      config,
+      sourceSelected: Boolean(source),
+      selectedSourceCount,
+      now: clock()
+    });
+    if (!sourceGate.allowed) {
+      return reject("rejectedNotSelected", `TELERADAR_REJEITADO_${sourceGate.reason.toUpperCase()}`, { chatKey, messageId });
+    }
 
     if (source.protectedContent === true
       || update?.protectedContent === true
@@ -148,6 +188,21 @@ function createTeleRadarService({
       return reject("rejectedProtected", normalized.reason, normalized.metadata);
     }
     const message = normalized.message;
+    const operationalGate = evaluateTeleRadarCaptureGate({
+      config,
+      sourceSelected: true,
+      selectedSourceCount,
+      now: clock(),
+      sourceTimestamp: message.sourceTimestamp,
+      requireNewMessage: true
+    });
+    if (!operationalGate.allowed) {
+      return reject(
+        "rejectedBeforeOperationalWindow",
+        `TELERADAR_REJEITADO_${operationalGate.reason.toUpperCase()}`,
+        message
+      );
+    }
     const eventAt = new Date(message.sourceTimestamp || message.receivedAt).getTime();
     const activatedAt = new Date(source.activatedAt).getTime();
     if (!Number.isFinite(eventAt) || !Number.isFinite(activatedAt) || eventAt <= activatedAt) {
@@ -196,14 +251,28 @@ function createTeleRadarService({
   }
 
   async function dispatchUpdate(update) {
-    try {
-      return await handleUpdate(update);
-    } catch (error) {
-      counters.errors += 1;
-      lastErrorCode = String(error?.code || error?.message || "TELERADAR_UPDATE_FAILED").slice(0, 120);
-      safeLog("warn", lastErrorCode, { chatKey: update?.chatKey, messageId: update?.messageId });
-      return { accepted: false, reason: lastErrorCode };
-    }
+    return serializeOperational(async () => {
+      try {
+        return await handleUpdate(update);
+      } catch (error) {
+        counters.errors += 1;
+        lastErrorCode = String(error?.code || error?.message || "TELERADAR_UPDATE_FAILED").slice(0, 120);
+        safeLog("warn", lastErrorCode, { chatKey: update?.chatKey, messageId: update?.messageId });
+        return { accepted: false, reason: lastErrorCode };
+      }
+    });
+  }
+
+  async function getOperationalConfig() {
+    return operationalConfigRepository.get();
+  }
+
+  async function setMonitoringActive(monitoramentoAtivo) {
+    return serializeOperational(() => operationalConfigRepository.setMonitoringActive(monitoramentoAtivo));
+  }
+
+  async function setCaptureSchedule(schedule) {
+    return serializeOperational(() => operationalConfigRepository.setSchedule(schedule));
   }
 
   async function bindSelectedSources() {
@@ -318,6 +387,9 @@ function createTeleRadarService({
     listAvailableSources,
     listSelectedSources,
     replaceSelectedSources,
+    getOperationalConfig,
+    setMonitoringActive,
+    setCaptureSchedule,
     start,
     stop,
     getStatus,

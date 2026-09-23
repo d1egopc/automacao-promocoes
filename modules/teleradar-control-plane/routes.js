@@ -121,6 +121,13 @@ function createTelegramTeleRadarAdminRoutes({
   router.put("/teleradar/sources", route(req => service.replaceSelectedSources(actor(req), { chatKeys: req.body?.chatKeys })));
   router.post("/teleradar/start", route(req => service.startTeleRadar(actor(req))));
   router.post("/teleradar/stop", route(req => service.stopTeleRadar(actor(req))));
+  router.put("/teleradar/monitoring", route(req => service.setTeleRadarMonitoring(actor(req), {
+    monitoramentoAtivo: req.body?.monitoramentoAtivo
+  })));
+  router.put("/teleradar/schedule", route(req => service.setTeleRadarSchedule(actor(req), {
+    horarioInicio: req.body?.horarioInicio,
+    horarioFim: req.body?.horarioFim
+  })));
   router.get("/teleradar/status", route(req => service.getTeleRadarStatus(actor(req))));
 
   return router;

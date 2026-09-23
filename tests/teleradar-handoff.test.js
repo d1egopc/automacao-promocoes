@@ -344,6 +344,7 @@ async function testOutboxBeforeCheckpointFailure() {
       clearTimeoutFn: () => {}
     }
   });
+  await service.setMonitoringActive(true);
   await service.replaceSelectedSources(["-100123"]);
   await service.start();
   time.advance(1000);

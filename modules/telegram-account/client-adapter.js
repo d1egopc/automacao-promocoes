@@ -76,6 +76,7 @@ function normalizeIncomingMessage(event, accountId, chat) {
     chatId: messageChatId(event, message),
     chatKey: messageChatId(event, message),
     messageId: message.id,
+    telegramTimestamp: message.date,
     senderId,
     outgoing,
     isOutgoing: outgoing,

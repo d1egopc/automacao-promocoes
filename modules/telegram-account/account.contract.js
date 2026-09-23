@@ -106,6 +106,14 @@ function normalizarMessage(message = {}) {
   const accountId = message.accountId === null || message.accountId === undefined ? null : idString(message.accountId, "accountId");
   const outgoing = Boolean(message.outgoing || message.isOutgoing || (senderId && accountId && senderId === accountId));
   const protectedContent = Boolean(message.protectedContent || message.messageNoForwards || message.chatNoForwards);
+  let telegramTimestamp = message.telegramTimestamp ?? message.messageDate ?? message.date ?? null;
+  if (typeof telegramTimestamp === "number" && telegramTimestamp > 0 && telegramTimestamp < 1e12) telegramTimestamp *= 1000;
+  if (telegramTimestamp !== null && telegramTimestamp !== undefined && telegramTimestamp !== "") {
+    const telegramDate = telegramTimestamp instanceof Date ? telegramTimestamp : new Date(telegramTimestamp);
+    telegramTimestamp = Number.isFinite(telegramDate.getTime()) ? telegramDate.toISOString() : null;
+  } else {
+    telegramTimestamp = null;
+  }
   const metadata = {
     accountId,
     chatId,
@@ -119,7 +127,8 @@ function normalizarMessage(message = {}) {
     mediaType: texto(message.mediaType) || null,
     protectedContent,
     messageNoForwards: Boolean(message.messageNoForwards),
-    chatNoForwards: Boolean(message.chatNoForwards)
+    chatNoForwards: Boolean(message.chatNoForwards),
+    telegramTimestamp
   };
   if (protectedContent) return Object.freeze(metadata);
   const text = String(message.text || "");

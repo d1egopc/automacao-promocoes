@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const { AUTH_TRANSIENT_TTL_MS, createTelegramAccountService } = require("../telegram-account");
 const { createTeleRadarService } = require("../teleradar");
+const { evaluateTeleRadarCaptureGate, evaluateTeleRadarWindow, TIME_ZONE } = require("../teleradar/capture-gate");
 
 const ACCOUNT_ID_INTERNO = "admin-master-teleradar";
 const ACCOUNT_SCOPE = "admin_master";
@@ -164,7 +165,7 @@ function createTelegramTeleRadarControlPlane({
         telegramAccountService: getAccountService(),
         logger
       });
-      runtime = { service, enabled: false };
+      runtime = { service };
       runtimes.set(key, runtime);
     }
     return runtime;
@@ -452,7 +453,6 @@ function createTelegramTeleRadarControlPlane({
     try {
       if (runtime) {
         await runtime.service.stop();
-        runtime.enabled = false;
       }
       clearContextFlows(context);
       const service = getAccountService();
@@ -510,10 +510,11 @@ function createTelegramTeleRadarControlPlane({
     await ensureAuthorized(context);
     const runtime = getRuntime(context);
     try {
-      const status = await runtime.service.start();
-      runtime.enabled = true;
+      await runtime.service.start();
+      const config = await runtime.service.setMonitoringActive(true);
+      const status = runtime.service.getStatus();
       safeLog("info", "TELERADAR_STARTED", { state: status.state });
-      return Object.freeze({ enabled: true, ...status });
+      return Object.freeze({ enabled: true, monitoramentoAtivo: true, ...config, ...status });
     } catch (error) {
       throw mapOperationError(error);
     }
@@ -523,11 +524,31 @@ function createTelegramTeleRadarControlPlane({
     const context = requireAdminActor(actor);
     const runtime = getRuntime(context);
     try {
-      const status = await runtime.service.stop();
-      runtime.enabled = false;
+      const config = await runtime.service.setMonitoringActive(false);
+      const status = runtime.service.getStatus();
       safeLog("info", "TELERADAR_STOPPED", { state: status.state });
-      return Object.freeze({ enabled: false, ...status });
+      return Object.freeze({ enabled: false, monitoramentoAtivo: false, ...config, ...status });
     } catch (error) {
+      throw mapOperationError(error);
+    }
+  }
+
+  async function setTeleRadarMonitoring(actor, { monitoramentoAtivo } = {}) {
+    if (typeof monitoramentoAtivo !== "boolean") {
+      throw controlPlaneError("TELERADAR_MONITORAMENTO_ATIVO_INVALID", 400);
+    }
+    return monitoramentoAtivo ? startTeleRadar(actor) : stopTeleRadar(actor);
+  }
+
+  async function setTeleRadarSchedule(actor, { horarioInicio, horarioFim } = {}) {
+    const context = requireAdminActor(actor);
+    const runtime = getRuntime(context);
+    try {
+      await runtime.service.setCaptureSchedule({ horarioInicio, horarioFim });
+      return getTeleRadarStatus(actor);
+    } catch (error) {
+      const code = String(error?.message || error?.code || "");
+      if (code.includes("HORARIO_")) throw controlPlaneError("TELERADAR_HORARIO_INVALID", 400);
       throw mapOperationError(error);
     }
   }
@@ -535,14 +556,35 @@ function createTelegramTeleRadarControlPlane({
   async function getTeleRadarStatus(actor) {
     const context = requireAdminActor(actor);
     const runtime = getRuntime(context);
-    const [account, selectedSources, observability] = await Promise.all([
+    const [account, selectedSources, observability, config] = await Promise.all([
       getTelegramStatus(actor),
       runtime.service.listSelectedSources(),
-      runtime.service.getObservability()
+      runtime.service.getObservability(),
+      runtime.service.getOperationalConfig()
     ]);
     const status = runtime.service.getStatus();
+    const scheduleWindow = evaluateTeleRadarWindow(config, clock());
+    const gate = evaluateTeleRadarCaptureGate({
+      config,
+      sourceSelected: selectedSources.length > 0,
+      selectedSourceCount: selectedSources.length,
+      now: clock()
+    });
+    const operationalState = gate.allowed
+      ? (status.state === "listening" ? "listening" : "technical_unavailable")
+      : gate.reason === "monitoramento_desligado"
+        ? "manually_disabled"
+        : gate.reason === "fora_da_janela"
+          ? "outside_schedule"
+          : "waiting_sources";
     return Object.freeze({
-      enabled: runtime.enabled,
+      enabled: config.monitoramentoAtivo === true,
+      monitoramentoAtivo: config.monitoramentoAtivo === true,
+      horarioInicio: config.horarioInicio,
+      horarioFim: config.horarioFim,
+      timezone: TIME_ZONE,
+      dentroDaJanela: scheduleWindow.withinWindow === true,
+      operationalState,
       running: status.running === true,
       state: String(status.state || "unknown"),
       listenerActive: status.state === "listening",
@@ -564,6 +606,22 @@ function createTelegramTeleRadarControlPlane({
     });
   }
 
+  async function bootstrap(actor) {
+    const context = requireAdminActor(actor);
+    const status = await getAccountService().getStatus({
+      accountIdInterno: context.accountIdInterno,
+      accountScope: scopeFrom(context)
+    });
+    if (status.authorized !== true) return Object.freeze({ started: false, reason: "account_not_authorized" });
+    try {
+      await getRuntime(context).service.start();
+      return Object.freeze({ started: true });
+    } catch (error) {
+      safeLog("warn", "TELERADAR_BOOTSTRAP_FAILED", { state: "blocked" });
+      return Object.freeze({ started: false, reason: mapOperationError(error).code });
+    }
+  }
+
   return Object.freeze({
     getTelegramStatus,
     authStart,
@@ -576,7 +634,10 @@ function createTelegramTeleRadarControlPlane({
     replaceSelectedSources,
     startTeleRadar,
     stopTeleRadar,
-    getTeleRadarStatus
+    setTeleRadarMonitoring,
+    setTeleRadarSchedule,
+    getTeleRadarStatus,
+    bootstrap
   });
 }
 

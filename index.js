@@ -13576,9 +13576,11 @@ const exigirAdminMasterEstrito = criarAdminMasterEstrito({
   usuarioEhAdminMaster
 });
 
+const telegramTeleRadarControlPlane = createTelegramTeleRadarControlPlane({ logger: console });
+
 app.use("/admin", createTelegramTeleRadarAdminRoutes({
   requireAdmin: exigirAdminMasterEstrito,
-  service: createTelegramTeleRadarControlPlane({ logger: console })
+  service: telegramTeleRadarControlPlane
 }));
 
 app.post("/admin/cadastro-interno", exigirAdminMasterEstrito, async (req, res) => {
@@ -32295,6 +32297,12 @@ function iniciarInfraMemoryTelemetryOperacional() {
 
 app.listen(PORT, () => {
   console.log("[API]ðŸŸ¢ðŸ§  API ONLINE NA PORTA " + PORT);
+  const adminMasterTeleRadar = usuarios.find(usuario => usuario && usuario.papel === "admin_master");
+  if (adminMasterTeleRadar) {
+    telegramTeleRadarControlPlane.bootstrap(adminMasterTeleRadar)
+      .then(resultado => console.log("[TELERADAR-BOOTSTRAP]", JSON.stringify({ started: resultado.started === true, reason: resultado.reason || null })))
+      .catch(() => console.warn("[TELERADAR-BOOTSTRAP]", JSON.stringify({ started: false, reason: "bootstrap_failed" })));
+  }
   iniciarManualV2SchedulerOperacional();
   iniciarManualV2RetentionOperacional();
   mensageiro.iniciarSchedulerProgramacoesMensageiro({

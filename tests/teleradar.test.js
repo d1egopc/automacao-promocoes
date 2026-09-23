@@ -137,6 +137,7 @@ async function testCoreFlow() {
     logger: { info: payload => logs.push(payload), warn: payload => logs.push(payload) }
   });
 
+  await service.setMonitoringActive(true);
   const emptyStart = await service.start();
   assert.equal(emptyStart.state, "waiting_sources");
   assert.equal(telegram.state.restoreCalls, 1);
@@ -165,7 +166,7 @@ async function testCoreFlow() {
 
   await telegram.emit(update({ chatId: "-1001", messageId: "2", receivedAt: "2026-09-21T14:59:59.000Z" }));
   assert.equal(envelopes.length, 0);
-  assert.equal(service.getStatus().counters.rejectedBeforeActivation, 1);
+  assert.equal(service.getStatus().counters.rejectedBeforeOperationalWindow, 1);
 
   advance(1000);
   const rich = update({
@@ -368,12 +369,14 @@ async function testStaticBoundaries() {
   const moduleDir = path.join(__dirname, "..", "modules", "teleradar");
   const files = fs.readdirSync(moduleDir).filter(file => file.endsWith(".js"));
   assert.deepEqual(files.sort(), [
+    "capture-gate.js",
     "checkpoint.repository.js",
     "dedupe.repository.js",
     "envelope.contract.js",
     "handoff.repository.js",
     "handoff.service.js",
     "index.js",
+    "operational-config.repository.js",
     "radar-ingress.adapter.js",
     "source-allowlist.service.js",
     "teleradar.service.js",
