@@ -20,6 +20,7 @@ const {
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
+const { avaliarGateCapturaRadarWhatsapp } = require("./modules/radar/whatsapp-capture-gate");
 const {
   criarRotasTelemetria
 } = require("./modules/telemetria/telemetria.routes");
@@ -15294,6 +15295,7 @@ function lerFilasRadarSomenteLeitura() {
 function radarConfigPadrao() {
   return {
     monitoramentoAtivo: true,
+    monitoramentoAtivadoEm: "",
     sessaoWhatsappId: "",
     gruposMonitorados: [],
     sessoesWhatsappMonitoradas: [],
@@ -16424,8 +16426,9 @@ function listarTelegramRadarCliente(clienteId = "admin") {
   }));
 }
 
-function carregarRadarConfigCliente(clienteId = "admin") {
+function carregarRadarConfigCliente(clienteId = "admin", { falharFechado = false } = {}) {
   const padrao = radarConfigPadrao();
+  if (falharFechado) padrao.monitoramentoAtivo = false;
 
   try {
     const dados = readClienteJson(clienteId, "radar-config.json", padrao);
@@ -16438,7 +16441,10 @@ function carregarRadarConfigCliente(clienteId = "admin") {
       "";
 
     return {
-      monitoramentoAtivo: dados.monitoramentoAtivo !== false,
+      monitoramentoAtivo: falharFechado
+        ? dados.monitoramentoAtivo === true
+        : dados.monitoramentoAtivo !== false,
+      monitoramentoAtivadoEm: String(dados.monitoramentoAtivadoEm || ""),
       sessaoWhatsappId: sessaoWhatsappIdLegado,
       gruposMonitorados: gruposMonitoradosLegado,
       sessoesWhatsappMonitoradas,
@@ -16649,7 +16655,7 @@ function normalizarHoraRadar(valor, fallback) {
 
 function salvarRadarConfigCliente(clienteId = "admin", dados = {}) {
   const padrao = radarConfigPadrao();
-  const atual = carregarRadarConfigCliente(clienteId);
+  const atual = carregarRadarConfigCliente(clienteId, { falharFechado: true });
   const possuiCampo = campo => Object.prototype.hasOwnProperty.call(dados, campo);
   const monitoramentoBase = atual.monitoramento && typeof atual.monitoramento === "object"
     ? atual.monitoramento
@@ -16711,8 +16717,9 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
   const payload = {
     clienteId,
     monitoramentoAtivo: possuiCampo("monitoramentoAtivo")
-      ? dados.monitoramentoAtivo !== false
-      : atual.monitoramentoAtivo !== false,
+      ? dados.monitoramentoAtivo === true
+      : atual.monitoramentoAtivo === true,
+    monitoramentoAtivadoEm: "",
     sessaoWhatsappId: sessaoWhatsappId || sessoesWhatsappMonitoradas[0]?.sessaoId || "",
     gruposMonitorados,
     sessoesWhatsappMonitoradas,
@@ -16738,6 +16745,9 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     },
     atualizadoEm: new Date().toISOString()
   };
+  payload.monitoramentoAtivadoEm = payload.monitoramentoAtivo
+    ? (atual.monitoramentoAtivo === false ? payload.atualizadoEm : atual.monitoramentoAtivadoEm || "")
+    : "";
 
 
 logDebug("ðŸ§ª RADAR PAYLOAD FINAL", {
@@ -17052,6 +17062,31 @@ function radarPodeCapturarAgora(configRadar = {}, opcoes = {}) {
   }
 
   return { ok: true };
+}
+
+const RADAR_WHATSAPP_BOOT_AT_MS = Date.now();
+
+function avaliarCapturaRadarWhatsappAtual({
+  sessaoId, grupoId, grupoNome, mensagem, upsertType, exigirMensagemNova = false
+} = {}) {
+  return avaliarGateCapturaRadarWhatsapp({
+    config: carregarRadarConfigCliente(obterClienteIdAdminMaster(), { falharFechado: true }),
+    sessaoId,
+    grupoId,
+    grupoNome,
+    mensagemTimestamp: mensagem?.messageTimestamp,
+    upsertType,
+    exigirMensagemNova,
+    bootAtMs: RADAR_WHATSAPP_BOOT_AT_MS,
+    idsSessao: id => idsSessaoWhatsappRadar("admin", id),
+    grupoMonitorado: (sessao, id, nome) => {
+      const gruposAtivos = (sessao.gruposMonitorados || []).filter(grupo => grupo?.ativo !== false);
+      const idsConfigurados = extrairIdsWhatsappMonitoradosRadar(gruposAtivos);
+      const idTecnico = chaveGrupoWhatsappTecnicaRadar(id);
+      if (idTecnico && idsConfigurados.size) return idsConfigurados.has(idTecnico);
+      return grupoWhatsappMonitoradoNaSessaoRadar({ gruposMonitorados: gruposAtivos }, id, nome).ok;
+    }
+  });
 }
 
 function motivoRadarDebug(motivo = "") {
@@ -21484,13 +21519,26 @@ async function processarMensagemRadar({
   fonteCaptura,
   teleradarHandoff,
   origemAutorizadaInternamente = false,
-  aguardarAckEngine = false
+  aguardarAckEngine = false,
+  upsertType,
+  exigirMensagemNova = false
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
   const grupoIdTexto = textoRadarId(grupoId);
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
+  if (origemTipoFinal === "whatsapp") {
+    const gateWhatsapp = avaliarCapturaRadarWhatsappAtual({
+      sessaoId: sessaoIdTexto,
+      grupoId: grupoIdTexto,
+      grupoNome: grupoNomeTexto,
+      mensagem: raw,
+      upsertType,
+      exigirMensagemNova
+    });
+    if (!gateWhatsapp.ok) return { ok: false, motivo: gateWhatsapp.motivo, ignorada: true };
+  }
   const coberturaTraceIdRadar = coberturaRadar.flagAtiva()
     ? (coberturaTraceId || coberturaRadar.criarCoberturaTraceId(raw, {
       sessaoId: sessaoIdTexto,
@@ -21804,6 +21852,17 @@ coberturaRadar.registrar("radar_mirror_criado", {
 });
 
 const temRedirectConhecidoRadar = links.some(linkEngineV2Radar);
+if (origemTipoFinal === "whatsapp") {
+  const gateWhatsapp = avaliarCapturaRadarWhatsappAtual({
+    sessaoId: sessaoIdTexto,
+    grupoId: grupoIdTexto,
+    grupoNome: grupoNomeTexto,
+    mensagem: raw,
+    upsertType,
+    exigirMensagemNova
+  });
+  if (!gateWhatsapp.ok) return { ok: false, motivo: gateWhatsapp.motivo, ignorada: true };
+}
 const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   origem: "radar",
   origemFluxo: "optimus",
@@ -22147,8 +22206,21 @@ function comAckRadar(resultado = {}) {
 
 registerRadarIngressHandler(processarMensagemRadar);
 
-async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, coberturaTraceId: coberturaTraceIdRecebido } = {}) {
+async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upsertType, coberturaTraceId: coberturaTraceIdRecebido } = {}) {
   const remoteJid = mensagem?.key?.remoteJid || "";
+  if (!remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
+    return { ok: false, motivo: "mensagem_nao_monitoravel" };
+  }
+  const grupoNome = obterNomeGrupoRadar(sessaoId, remoteJid);
+  const gateWhatsapp = avaliarCapturaRadarWhatsappAtual({
+    sessaoId,
+    grupoId: remoteJid,
+    grupoNome,
+    mensagem,
+    upsertType,
+    exigirMensagemNova: true
+  });
+  if (!gateWhatsapp.ok) return { ok: false, motivo: gateWhatsapp.motivo, ignorada: true };
   const textoExtraido = extrairTextoMensagemRadar(mensagem);
   const conteudo = extrairMensagemInternaRadar(mensagem?.message || {});
   const coberturaTraceId = coberturaTraceIdRecebido || coberturaRadar.criarCoberturaTraceId(mensagem, {
@@ -22162,7 +22234,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, cobe
     sessaoId,
     remoteJid,
     grupoId: remoteJid,
-    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid)
+    grupoNome
   };
   const debugPayloadSemLink = RADAR_DEBUG_PAYLOAD_SEM_LINK
     ? criarDiagnosticoPayloadBaileysSemLink({ mensagem, conteudo, textoExtraido })
@@ -22178,7 +22250,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, cobe
   registrarRadarListenerRecebido({
     sessaoId,
     remoteJid,
-    grupoNome: obterNomeGrupoRadar(sessaoId, remoteJid),
+    grupoNome,
     tamanhoTexto: textoExtraido.length
   });
   logOptimus("CAPTURA", "Upsert WhatsApp", {
@@ -22232,7 +22304,9 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, cobe
     debugPayloadSemLink,
     coberturaTraceId,
     sock,
-    downloadMediaMessageImpl: downloadMediaMessage
+    downloadMediaMessageImpl: downloadMediaMessage,
+    upsertType,
+    exigirMensagemNova: true
   });
 }
 
@@ -23449,7 +23523,9 @@ app.post("/radar/debug/salvar-whatsapp", (req, res) => {
     }
 
     const salvo = salvarRadarConfigCliente(clienteId, {
-      monitoramentoAtivo: body.monitoramentoAtivo !== false,
+      ...(Object.prototype.hasOwnProperty.call(body, "monitoramentoAtivo")
+        ? { monitoramentoAtivo: body.monitoramentoAtivo === true }
+        : {}),
       sessaoWhatsappId: sessaoId,
       sessoesWhatsappMonitoradas: [
         {
@@ -23617,7 +23693,7 @@ app.get("/radar/config", (req, res) => {
 
     const clienteId = obterClienteIdAdminMaster();
 
-    const radarConfig = carregarRadarConfigAdminMaster();
+    const radarConfig = carregarRadarConfigCliente(clienteId, { falharFechado: true });
     const sessoesWhatsapp = listarSessoesWhatsappCliente(clienteId);
     const telegramDisponiveis = listarTelegramRadarCliente(clienteId);
     const diagnosticoVinculo = montarDiagnosticoRadarConfig(radarConfig, sessoesWhatsapp);
@@ -23742,7 +23818,7 @@ app.post("/radar/config", (req, res) => {
     const dadosConfig = {};
 
     if (possuiCampo("monitoramentoAtivo")) {
-      dadosConfig.monitoramentoAtivo = body.monitoramentoAtivo !== false;
+      dadosConfig.monitoramentoAtivo = body.monitoramentoAtivo === true;
     }
 
     if (possuiCampo("sessaoWhatsappId")) {
@@ -31550,7 +31626,7 @@ registrarListenerUnicoSocket({
   socketGeracao,
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
-  handler: async ({ messages = [] } = {}) => {
+  handler: async ({ messages = [], type } = {}) => {
   if (!socketEhAtual(sessoes, id, sock)) {
     console.log("[WHATSAPP-LISTENER-UPSERT-IGNORADO]", JSON.stringify({
       sessaoId: id,
@@ -31616,6 +31692,7 @@ registrarListenerUnicoSocket({
           mensagem,
           sessaoId: id,
           sock,
+          upsertType: type,
           coberturaTraceId
         })
       });

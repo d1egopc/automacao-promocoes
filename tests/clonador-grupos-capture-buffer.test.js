@@ -506,7 +506,7 @@ function testarEscopoEstrutural() {
 
   const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
   const listener = indexFonte.slice(
-    indexFonte.indexOf("handler: async ({ messages = [] } = {}) =>"),
+    indexFonte.indexOf("handler: async ({ messages = [], type } = {}) =>"),
     indexFonte.indexOf("sock.ev.on(\"group-participants.update\"")
   );
   assert.ok(listener.includes("processarMensagemRadarAutomatica"));
