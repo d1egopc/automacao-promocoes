@@ -138,7 +138,8 @@ const client = require("../optimus-capture/local-worker/worker-client.js");
   assert.strictEqual(dados.optimus_local_worker_auth.token, undefined);
   assert.strictEqual(sessao[client.TOKEN_SESSION_KEY], "token-novo");
   assert.deepStrictEqual(chamadas.map(item => new URL(item.url).pathname), ["/local-worker/revoke", "/local-worker/register"]);
-  assert.deepStrictEqual(chamadas[1].body.capabilities, ["magalu_image_v1", "magalu_opportunity_v1"]);
+  assert.deepStrictEqual(chamadas[1].body.capabilities, client.CAPABILITIES);
+  assert(client.CAPABILITIES.includes("ml_identity_v1"), "worker atualizado deve anunciar a capability aditiva quando o resolver existe");
   assert.strictEqual(limpezas, 1, "troca de owner deve apagar estado tecnico e lease");
 
   await client.limpar();

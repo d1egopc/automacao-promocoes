@@ -69,6 +69,10 @@ const {
 const { classificarLinkEngine } = require("../link-role.service");
 const { registrarAchado } = require("../../manual-v2/ofertas-v2-achados");
 const {
+  consultarMlWorkIdentityBestEffort,
+  montarMlWorkEnrichmentShadow
+} = require("./ml-work-enrichment-shadow");
+const {
   criarMedidorEngineMemoryStage,
   registrarPontoEngineMemoryStage,
   medirBytesJsonSeguro
@@ -4217,6 +4221,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     job,
     link
   });
+  let mlWorkIdentityShadowConsulta = null;
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
     const metadataGateMlWorker = objetoSeguro(oferta.metadata);
     const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
@@ -4312,17 +4317,23 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         taskId
       }));
     };
+    identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
+    const identidadeResolvidaMlWorker = resolverIdentidadeMlWorker({
+      identidade: identidadeMlWorker,
+      mlbsMetadata: mlbsMetadataTecnicaGateMlWorker,
+      sourceUrl: sourceUrlMlWorker
+    });
+    produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
+    mlWorkIdentityShadowConsulta = await consultarMlWorkIdentityBestEffort({
+      marketplace: "mercadolivre",
+      expectedMlb: produtoIdMlWorker,
+      sourceUrl: sourceUrlMlWorker,
+      deps
+    });
 
     if (imagemCanonicaFinal.imagemCanonicaDuravel) {
       registrarGateMlWorker({ motivoTaskNaoCriada: "imagem_ja_resolvida" });
     } else {
-      identidadeMlWorker = detectarIdentidadeProdutoUniversal(oferta);
-      const identidadeResolvidaMlWorker = resolverIdentidadeMlWorker({
-        identidade: identidadeMlWorker,
-        mlbsMetadata: mlbsMetadataTecnicaGateMlWorker,
-        sourceUrl: sourceUrlMlWorker
-      });
-      produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
       if (!identidadeResolvidaMlWorker.ok) {
         registrarGateMlWorker({ motivoTaskNaoCriada: identidadeResolvidaMlWorker.motivo });
       } else if (!cacheLookupDisponivelMlWorker) {
@@ -4512,6 +4523,26 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
   const categoriaFinalResolvida = reclassificarCategoriaFinalEngine(oferta, metadataFinal, job);
   oferta = categoriaFinalResolvida.oferta || oferta;
   metadataFinal = categoriaFinalResolvida.metadataFinal || metadataFinal;
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre" && mlWorkIdentityShadowConsulta) {
+    const shadowMlWork = montarMlWorkEnrichmentShadow({
+      consulta: mlWorkIdentityShadowConsulta,
+      oferta,
+      metadataFinal,
+      job,
+      reclassificarCategoria: reclassificarCategoriaFinalEngine
+    });
+    metadataFinal = {
+      ...metadataFinal,
+      mlWorkEnrichmentShadow: shadowMlWork.telemetria
+    };
+    console.log("[ML_WORK_ENRICHMENT_SHADOW]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: "mercadolivre",
+      ...shadowMlWork.telemetria
+    }));
+  }
   if (radarMirrorComparado) {
     sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
     oferta = sombraV2.oferta || oferta;

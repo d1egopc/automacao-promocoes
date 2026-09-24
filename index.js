@@ -15188,6 +15188,8 @@ app.post("/engine/importar-prontos", async (req, res) => {
         gerarDeepLinkAwin,
         obterImagemCacheLocalWorker: localWorkerService.obterImagemCache,
         garantirImagemMercadoLivreLocalWorker: localWorkerService.garantirImagemMercadoLivre,
+        obterIdentidadeMercadoLivreLocalWorker: localWorkerService.obterIdentidadeMercadoLivre,
+        garantirIdentidadeMercadoLivreLocalWorker: localWorkerService.garantirIdentidadeMercadoLivre,
         agendarRetryImagemMercadoLivreLocal,
         observarHistoricoClonadorTerminal,
         observarHistoricoClonadorOferta
@@ -32240,6 +32242,8 @@ initEngineDatabase()
         garantirImagemMagaluLocalWorker: localWorkerService.garantirImagemMagalu,
         agendarRetryImagemMagaluLocal,
         garantirImagemMercadoLivreLocalWorker: localWorkerService.garantirImagemMercadoLivre,
+        obterIdentidadeMercadoLivreLocalWorker: localWorkerService.obterIdentidadeMercadoLivre,
+        garantirIdentidadeMercadoLivreLocalWorker: localWorkerService.garantirIdentidadeMercadoLivre,
         agendarRetryImagemMercadoLivreLocal,
         observarHistoricoClonadorTerminal,
         observarHistoricoClonadorOferta

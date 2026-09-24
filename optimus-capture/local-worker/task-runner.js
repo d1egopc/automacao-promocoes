@@ -11,6 +11,7 @@
   const STAGES = Object.freeze({
     CLAIMED: "CLAIMED",
     RESOLVING_PAGE: "RESOLVING_PAGE",
+    IDENTITY_IDENTIFIED: "IDENTITY_IDENTIFIED",
     IMAGE_IDENTIFIED: "IMAGE_IDENTIFIED",
     IMAGE_PROBED: "IMAGE_PROBED",
     RESULT_PENDING: "RESULT_PENDING",
@@ -21,11 +22,13 @@
   const MAGALU_HOST = "www.magazinevoce.com.br";
   const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const ML_CAPABILITY = "ml_image_v1";
+  const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
   const LIVENESS = Object.freeze({
     maxNoProgressCount: 2,
     maxStageAgeMs: 75_000,
     stages: Object.freeze([
       STAGES.RESOLVING_PAGE,
+      STAGES.IDENTITY_IDENTIFIED,
       STAGES.IMAGE_IDENTIFIED,
       STAGES.FAILURE_PENDING
     ])
@@ -105,6 +108,16 @@
     if (prova.origin !== undefined) resultado.origin = texto(prova.origin);
     if (prova.contentType !== undefined) resultado.contentType = texto(prova.contentType);
     if (prova.statusHttp !== undefined) resultado.statusHttp = Number(prova.statusHttp || 0) || undefined;
+    if (prova.capability !== undefined) resultado.capability = texto(prova.capability);
+    if (prova.contractVersion !== undefined) resultado.contractVersion = Number(prova.contractVersion || 0) || undefined;
+    if (prova.expectedMlb !== undefined) resultado.expectedMlb = texto(prova.expectedMlb);
+    if (prova.observedMlb !== undefined) resultado.observedMlb = texto(prova.observedMlb);
+    if (prova.identidadeTipo !== undefined) resultado.identidadeTipo = texto(prova.identidadeTipo);
+    if (prova.origemTitulo !== undefined) resultado.origemTitulo = texto(prova.origemTitulo);
+    if (prova.origemImagem !== undefined) resultado.origemImagem = texto(prova.origemImagem);
+    if (prova.canonicalUrl !== undefined) resultado.canonicalUrl = texto(prova.canonicalUrl);
+    if (prova.variationId !== undefined) resultado.variationId = texto(prova.variationId);
+    if (prova.collectedAt !== undefined) resultado.collectedAt = texto(prova.collectedAt);
     return resultado;
   }
   function resultadoOportunidadePublico(resultado = {}) {
@@ -123,6 +136,15 @@
       stage: texto(valor.stage),
       task: tarefaPublica(valor.task),
       imagemOficialUrl: texto(valor.imagemOficialUrl),
+      tituloOficial: texto(valor.tituloOficial),
+      identidadeValidada: valor.identidadeValidada === true,
+      expectedMlb: texto(valor.expectedMlb),
+      observedMlb: texto(valor.observedMlb),
+      origemTitulo: texto(valor.origemTitulo),
+      origemImagem: texto(valor.origemImagem),
+      canonicalUrl: texto(valor.canonicalUrl),
+      variationId: texto(valor.variationId),
+      collectedAt: texto(valor.collectedAt),
       finalUrl: texto(valor.finalUrl),
       checkedAt: texto(valor.checkedAt),
       provaTecnica: valor.provaTecnica ? provaPublica(valor.provaTecnica) : null,
@@ -190,6 +212,9 @@
     const capability = texto(task.capability);
     if (texto(task.marketplace) === "mercadolivre" && capability === ML_CAPABILITY) {
       return texto(task.type) === "imagem_oficial" && Boolean(texto(task.sourceUrl)) && /^MLB\d+$/i.test(texto(task.productId));
+    }
+    if (texto(task.marketplace) === "mercadolivre" && capability === ML_IDENTITY_CAPABILITY) {
+      return texto(task.type) === "identidade_oficial" && Boolean(texto(task.sourceUrl)) && /^MLB\d+$/i.test(texto(task.productId));
     }
     if (texto(task.marketplace) !== "magalu") return false;
     if (capability === MAGALU_OPPORTUNITY_CAPABILITY) {
@@ -445,7 +470,83 @@
       throw new Error("local_worker_stage_invalido");
     }
   }
+  async function continuarMercadoLivreIdentidade(estado, task) {
+    let atual = estado;
+    while (atual) {
+      if (atual.stage === STAGES.CLAIMED) {
+        atual = await marcarStage(atual, STAGES.RESOLVING_PAGE);
+        continue;
+      }
+      if (atual.stage === STAGES.RESOLVING_PAGE) {
+        if (!await validarLease(task, atual)) return;
+        await registrarBreadcrumb("ML_IDENTITY_START", task, { taskStage: atual.stage });
+        try {
+          const resolvido = await global.OptimusMercadoLivreIdentityResolver.resolver({ productId: task.productId, sourceUrl: task.sourceUrl });
+          if (resolvido?.identidadeValidada !== true || !resolvido?.provaTecnica) throw new Error("ml_identity_resultado_incompleto");
+          atual = await marcarStage(atual, STAGES.IDENTITY_IDENTIFIED, {
+            tituloOficial: resolvido.tituloOficial,
+            imagemOficialUrl: resolvido.imagemOficial,
+            identidadeValidada: true,
+            expectedMlb: resolvido.expectedMlb,
+            observedMlb: resolvido.observedMlb,
+            origemTitulo: resolvido.origemTitulo,
+            origemImagem: resolvido.origemImagem,
+            finalUrl: resolvido.finalUrl,
+            canonicalUrl: resolvido.canonicalUrl,
+            variationId: resolvido.variationId,
+            collectedAt: resolvido.collectedAt,
+            provaTecnica: resolvido.provaTecnica
+          });
+          continue;
+        } catch (erro) {
+          await registrarBreadcrumb("ML_IDENTITY_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          if (erroAmbiguo(erro)) { await registrarSemProgresso(atual, task); return; }
+          throw erro;
+        }
+      }
+      if (atual.stage === STAGES.IDENTITY_IDENTIFIED) {
+        atual = await marcarStage(atual, STAGES.RESULT_PENDING);
+        continue;
+      }
+      if (atual.stage === STAGES.RESULT_PENDING) {
+        emitir("LOCAL-WORKER-ML-IDENTITY-RESULT-ENVIO", { taskId: texto(task.id), productId: texto(task.productId) });
+        try {
+          const resposta = await global.OptimusLocalWorkerClient.result(task, {
+            leaseToken: task.leaseToken,
+            capability: ML_IDENTITY_CAPABILITY,
+            marketplace: "mercadolivre",
+            productId: task.productId,
+            expectedMlb: atual.expectedMlb,
+            observedMlb: atual.observedMlb,
+            identidadeValidada: atual.identidadeValidada === true,
+            tituloOficial: atual.tituloOficial,
+            imagemOficial: atual.imagemOficialUrl,
+            origemTitulo: atual.origemTitulo,
+            origemImagem: atual.origemImagem,
+            finalUrl: atual.finalUrl,
+            canonicalUrl: atual.canonicalUrl,
+            variationId: atual.variationId,
+            collectedAt: atual.collectedAt,
+            provaTecnica: atual.provaTecnica
+          });
+          if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "result_rejeitado");
+          await registrarBreadcrumb("ML_IDENTITY_RESULT_OK", task, { taskStage: atual.stage });
+          atual = await marcarStage(atual, STAGES.COMPLETED);
+          await limparEstado();
+          return;
+        } catch (erro) {
+          await registrarBreadcrumb("ML_IDENTITY_RESULT_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          if (erroAmbiguo(erro)) return;
+          throw erro;
+        }
+      }
+      if (atual.stage === STAGES.FAILURE_PENDING) { await enviarFailure(atual, task); return; }
+      if (atual.stage === STAGES.COMPLETED) { await limparEstado(); return; }
+      throw new Error("local_worker_stage_invalido");
+    }
+  }
   async function continuar(estado, task) {
+    if (texto(task?.capability) === ML_IDENTITY_CAPABILITY) return continuarMercadoLivreIdentidade(estado, task);
     if (texto(task?.capability) === ML_CAPABILITY) return continuarMercadoLivre(estado, task);
     if (texto(task?.capability) === MAGALU_OPPORTUNITY_CAPABILITY) return continuarOportunidade(estado, task);
     let atual = estado;
@@ -542,7 +643,7 @@
     }
   }
   async function processar() {
-    if (executando || !global.OptimusLocalWorkerClient || (!global.OptimusMagaluLocalResolver && !global.OptimusMercadoLivreLocalResolver && !global.OptimusMagaluOpportunityResolver)) return;
+    if (executando || !global.OptimusLocalWorkerClient || (!global.OptimusMagaluLocalResolver && !global.OptimusMercadoLivreLocalResolver && !global.OptimusMercadoLivreIdentityResolver && !global.OptimusMagaluOpportunityResolver)) return;
     executando = true;
     let estado = null;
     let task = null;
@@ -634,6 +735,6 @@
       }
     } catch (_) {}
   }
-  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, ML_CAPABILITY };
+  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
   if (typeof module !== "undefined" && module.exports) module.exports = global.OptimusLocalWorkerRunner;
 })(typeof globalThis !== "undefined" ? globalThis : self);

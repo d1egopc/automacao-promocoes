@@ -8,7 +8,8 @@
   const CAPABILITY = "magalu_image_v1";
   const OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const ML_CAPABILITY = "ml_image_v1";
-  const CAPABILITIES = Object.freeze([CAPABILITY, OPPORTUNITY_CAPABILITY, ML_CAPABILITY]);
+  const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
+  const CAPABILITIES = Object.freeze([CAPABILITY, OPPORTUNITY_CAPABILITY, ML_CAPABILITY, ML_IDENTITY_CAPABILITY]);
   let bootstrapEmCurso = null;
 
   function texto(valor) { return String(valor ?? "").trim(); }
@@ -190,6 +191,7 @@
     CAPABILITY,
     OPPORTUNITY_CAPABILITY,
     ML_CAPABILITY,
+    ML_IDENTITY_CAPABILITY,
     CAPABILITIES,
     ler,
     salvar,

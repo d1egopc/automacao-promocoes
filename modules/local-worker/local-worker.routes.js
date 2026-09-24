@@ -69,7 +69,17 @@ function criarRotasLocalWorker(deps = {}) {
         accessible: req.body?.accessible,
         indicatorFound: req.body?.indicatorFound,
         finalUrl: req.body?.finalUrl,
-        checkedAt: req.body?.checkedAt
+        checkedAt: req.body?.checkedAt,
+        expectedMlb: req.body?.expectedMlb,
+        observedMlb: req.body?.observedMlb,
+        identidadeValidada: req.body?.identidadeValidada,
+        tituloOficial: req.body?.tituloOficial,
+        imagemOficial: req.body?.imagemOficial,
+        origemTitulo: req.body?.origemTitulo,
+        origemImagem: req.body?.origemImagem,
+        canonicalUrl: req.body?.canonicalUrl,
+        variationId: req.body?.variationId,
+        collectedAt: req.body?.collectedAt
       });
       return res.json(resultado);
     } catch (e) { return res.status(e.statusCode || 422).json(payloadErro(e, "resultado_invalido")); }

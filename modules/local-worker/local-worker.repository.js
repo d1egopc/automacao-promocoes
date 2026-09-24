@@ -118,6 +118,15 @@ function criarLocalWorkerRepository(opcoes = {}) {
             expires_at TIMESTAMPTZ,
             PRIMARY KEY (marketplace, product_id)
           );
+          CREATE TABLE IF NOT EXISTS local_worker_identity_cache (
+            marketplace TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            result JSONB NOT NULL DEFAULT '{}'::jsonb,
+            validated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ,
+            PRIMARY KEY (marketplace, product_id, capability)
+          );
           ALTER TABLE local_worker_workers ADD COLUMN IF NOT EXISTS worker_type TEXT NOT NULL DEFAULT 'community';
           ALTER TABLE local_worker_workers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
           ALTER TABLE local_worker_workers ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
@@ -381,6 +390,41 @@ function criarLocalWorkerRepository(opcoes = {}) {
     } finally { client.release(); }
   }
 
+  async function completarIdentidade({ taskId, workerId, leaseToken, resultado = {}, cacheTtlMs = 24 * 60 * 60 * 1000 } = {}) {
+    const pool = poolDisponivel(poolProvider);
+    if (!pool) return { ok: false, motivo: "database_indisponivel" };
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const atual = await client.query("SELECT * FROM local_worker_tasks WHERE id = $1 FOR UPDATE", [String(taskId)]);
+      const row = atual.rows[0];
+      if (!row) { await client.query("ROLLBACK"); return { ok: false, motivo: "task_inexistente" }; }
+      if (row.status === STATUS.COMPLETED) { await client.query("COMMIT"); return { ok: true, idempotente: true, task: payloadTask(row) }; }
+      if (row.status !== STATUS.LEASED || row.claimed_by !== texto(workerId) || row.lease_token !== texto(leaseToken) || new Date(row.lease_until).getTime() <= Date.now()) {
+        await client.query("ROLLBACK"); return { ok: false, motivo: "lease_invalido" };
+      }
+      const seguro = jsonSeguro(resultado);
+      const atualizado = await client.query(
+        "UPDATE local_worker_tasks SET status = 'completed', completed_at = NOW(), lease_until = NULL, lease_token = NULL, updated_at = NOW(), result_metadata = $2::jsonb WHERE id = $1 RETURNING *",
+        [String(taskId), JSON.stringify(seguro)]
+      );
+      await client.query(`
+        INSERT INTO local_worker_identity_cache
+          (marketplace, product_id, capability, result, validated_at, expires_at)
+        VALUES ($1, $2, $3, $4::jsonb, NOW(), NOW() + ($5::bigint * INTERVAL '1 millisecond'))
+        ON CONFLICT (marketplace, product_id, capability) DO UPDATE
+          SET result = EXCLUDED.result,
+              validated_at = NOW(),
+              expires_at = EXCLUDED.expires_at
+      `, [row.marketplace, row.product_id, row.capability, JSON.stringify(seguro), Math.max(60_000, Number(cacheTtlMs) || 24 * 60 * 60 * 1000)]);
+      await client.query("COMMIT");
+      return { ok: true, idempotente: false, task: payloadTask(atualizado.rows[0]) };
+    } catch (erro) {
+      await client.query("ROLLBACK").catch(() => {});
+      return { ok: false, motivo: "resultado_falhou", erro: erro.message };
+    } finally { client.release(); }
+  }
+
   async function falhar({ taskId, workerId, leaseToken, metadata = {}, motivo = "resultado_invalido" } = {}) {
     const pool = poolDisponivel(poolProvider);
     if (!pool) return { ok: false, motivo: "database_indisponivel" };
@@ -394,6 +438,27 @@ function criarLocalWorkerRepository(opcoes = {}) {
     const result = await pool.query(`SELECT * FROM local_worker_image_cache WHERE marketplace = $1 AND product_id = $2 AND (expires_at IS NULL OR expires_at > NOW())`, [texto(marketplace).toLowerCase(), texto(productId)]);
     const row = result.rows[0];
     return row ? { marketplace: row.marketplace, productId: row.product_id, imageUrl: row.image_url, source: row.source, proof: row.proof || {}, validatedAt: row.validated_at, expiresAt: row.expires_at } : null;
+  }
+
+  async function obterCacheIdentidade({ marketplace, productId, capability } = {}) {
+    const pool = poolDisponivel(poolProvider);
+    if (!pool) return null;
+    const result = await pool.query(
+      `SELECT marketplace, product_id, capability, result, validated_at, expires_at
+         FROM local_worker_identity_cache
+        WHERE marketplace = $1 AND product_id = $2 AND capability = $3
+          AND (expires_at IS NULL OR expires_at > NOW())`,
+      [texto(marketplace).toLowerCase(), texto(productId), texto(capability)]
+    );
+    const row = result.rows[0];
+    return row ? {
+      marketplace: row.marketplace,
+      productId: row.product_id,
+      capability: row.capability,
+      result: jsonSeguro(row.result),
+      validatedAt: row.validated_at,
+      expiresAt: row.expires_at
+    } : null;
   }
 
   async function status() {
@@ -416,7 +481,7 @@ function criarLocalWorkerRepository(opcoes = {}) {
     return result.rows[0] ? { ok: true, workerId: result.rows[0].worker_id } : { ok: false, motivo: "worker_nao_encontrado" };
   }
 
-  return { ensureSchema, registrarWorkerCommunity, registrarWorkerDedicated, autenticarWorker, revogarWorker, garantirTask, claim, heartbeat, obterTask, obterTaskAtiva, obterUltimaTask, completar, completarTecnica, falhar, obterCache, status };
+  return { ensureSchema, registrarWorkerCommunity, registrarWorkerDedicated, autenticarWorker, revogarWorker, garantirTask, claim, heartbeat, obterTask, obterTaskAtiva, obterUltimaTask, completar, completarTecnica, completarIdentidade, falhar, obterCache, obterCacheIdentidade, status };
 }
 
 module.exports = { STATUS, criarLocalWorkerRepository, hashToken };
