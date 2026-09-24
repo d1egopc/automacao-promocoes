@@ -7,6 +7,7 @@ const {
 } = require("../../local-worker/ml-identity.contract");
 
 const ML_WORK_LOCAL_OPERATION_TIMEOUT_MS = 250;
+const ML_WORK_ENRICHMENT_ACTIVE_FLAG = "ML_WORK_ENRICHMENT_ACTIVE";
 
 function texto(valor = "") { return String(valor ?? "").trim(); }
 
@@ -19,10 +20,188 @@ function hostSeguro(valor = "") {
   try { return new URL(texto(valor)).hostname.toLowerCase(); } catch (_) { return ""; }
 }
 
+function redigirSegredosMotivo(valor = "") {
+  const conteudo = texto(valor);
+  if (/https?:\/\//i.test(conteudo)) return "url_redigida";
+  if (/^\??[a-z0-9_.~-]+=[^\s]*$/i.test(conteudo)
+    || /(?:^|[^a-z0-9_.~-])\?[a-z0-9_.~-]+=/i.test(conteudo)
+    || /(?:^|[^a-z0-9_.~-])[a-z0-9_.~-]+=[^&\s]+&[a-z0-9_.~-]+=/i.test(conteudo)) {
+    return "query_redigida";
+  }
+  if (/\bbearer\b(?:\s|$)/i.test(conteudo)) return "credencial_redigida";
+  if (/\b(?:access_token|refresh_token|id_token|client_secret|authorization|set-cookie|cookie|api_key|apikey|password|passwd|secret|token)\b\s*(?:=|:|\s)/i.test(conteudo)) {
+    return "credencial_redigida";
+  }
+  return conteudo;
+}
+
 function motivoSeguro(erro, fallback = "ml_identity_indisponivel") {
-  return texto(erro?.codigo || erro?.motivo || erro?.message || fallback)
+  return redigirSegredosMotivo(erro?.codigo || erro?.motivo || erro?.message || fallback)
     .replace(/[^a-zA-Z0-9_.:-]+/g, "_")
     .slice(0, 120) || fallback;
+}
+
+function valorBooleanoAtivo(valor) {
+  return ["1", "true", "yes", "on"].includes(texto(valor).toLowerCase());
+}
+
+function mlWorkEnrichmentAtivo({ deps = {}, env = process.env } = {}) {
+  if (typeof deps.mlWorkEnrichmentAtivo === "function") {
+    try { return deps.mlWorkEnrichmentAtivo() === true; } catch (_) { return false; }
+  }
+  if (typeof deps.mlWorkEnrichmentAtivo === "boolean") return deps.mlWorkEnrichmentAtivo;
+  return valorBooleanoAtivo(env?.[ML_WORK_ENRICHMENT_ACTIVE_FLAG]);
+}
+
+function provaIdentidadeSanitizada(resultado = {}) {
+  const prova = resultado?.provaTecnica && typeof resultado.provaTecnica === "object"
+    ? resultado.provaTecnica
+    : {};
+  return {
+    capability: ML_IDENTITY_CAPABILITY,
+    contractVersion: Number(resultado.contractVersion || prova.contractVersion || 0),
+    source: texto(prova.source),
+    provenance: texto(prova.provenance),
+    expectedMlb: texto(resultado.expectedMlb || prova.expectedMlb),
+    observedMlb: texto(resultado.observedMlb || prova.observedMlb),
+    sameProductObject: prova.sameProductObject === true,
+    origemTitulo: texto(resultado.origemTitulo || prova.origemTitulo),
+    origemImagem: texto(resultado.origemImagem || prova.origemImagem),
+    variationId: texto(resultado.variationId || prova.variationId),
+    collectedAt: texto(resultado.collectedAt || prova.collectedAt)
+  };
+}
+
+function prepararMlWorkEnrichmentAtivo({
+  consulta = {},
+  expectedMlb = "",
+  marketplace = "",
+  ativo = false,
+  agoraMs = Date.now(),
+  tituloValido
+} = {}) {
+  const base = {
+    ativo: ativo === true,
+    expectedMlbPresente: /^MLB\d+$/i.test(texto(expectedMlb)),
+    expectedMlbHash: hashCurto(texto(expectedMlb).toUpperCase()),
+    cacheHit: consulta?.cacheHit === true,
+    identidadeValidada: false,
+    tituloWork: "",
+    imagemWork: "",
+    tituloWorkAplicado: false,
+    imagemWorkAplicada: false,
+    fallbackTitulo: "ml_atual",
+    fallbackImagem: "ml_atual",
+    motivoFallback: "",
+    provaTecnica: null,
+    duracaoMs: Math.max(0, Number(consulta?.duracaoMs || 0))
+  };
+  if (texto(marketplace).toLowerCase().replace(/[^a-z]/g, "") !== "mercadolivre") {
+    return { ...base, motivoFallback: "marketplace_nao_ml" };
+  }
+  if (!base.ativo) return { ...base, motivoFallback: "flag_desabilitada" };
+  if (!base.expectedMlbPresente) return { ...base, motivoFallback: "expected_mlb_ausente" };
+  if (consulta?.identidadeValidada !== true || consulta?.cacheHit !== true || !consulta?.resultado) {
+    return {
+      ...base,
+      motivoFallback: motivoSeguro({ message: consulta?.motivoRejeicao }, "cache_identity_indisponivel")
+    };
+  }
+
+  let resultado;
+  try {
+    resultado = validarResultadoMlIdentity(consulta.resultado, { expectedMlb, agoraMs, ttlMs: 24 * 60 * 60 * 1000 });
+  } catch (erro) {
+    return { ...base, motivoFallback: motivoSeguro(erro, "ml_identity_invalida") };
+  }
+
+  const tituloWork = texto(resultado.tituloOficial);
+  const imagemWork = texto(resultado.imagemOficial);
+  const tituloAceito = tituloWork && (typeof tituloValido !== "function" || tituloValido(tituloWork, "mercadolivre") === true);
+  const identidadeValidada = true;
+  const motivoFallback = tituloWork && !tituloAceito
+    ? "titulo_work_rejeitado_filtro"
+    : (!tituloWork && !imagemWork ? "ml_identity_sem_identidade_factual" : "");
+
+  return {
+    ...base,
+    identidadeValidada,
+    tituloWork: tituloAceito ? tituloWork : "",
+    imagemWork,
+    fallbackTitulo: tituloAceito ? "work_validado" : "ml_atual",
+    fallbackImagem: imagemWork ? "work_validado" : "ml_atual",
+    motivoFallback,
+    provaTecnica: provaIdentidadeSanitizada(resultado)
+  };
+}
+
+function aplicarImagemMlWorkCanonica(imagemCanonicaFinal = {}, promocao = {}) {
+  if (!promocao?.imagemWork) return imagemCanonicaFinal;
+  promocao.imagemWorkAplicada = true;
+  return {
+    ...imagemCanonicaFinal,
+    imagem: promocao.imagemWork,
+    imagemCanonicaDuravel: promocao.imagemWork,
+    imagemOrigem: "local_worker.ml_identity_v1",
+    imagemStatus: "local_worker_ml_identity",
+    produtoId: promocao.provaTecnica?.expectedMlb || imagemCanonicaFinal.produtoId || "",
+    motivo: "cache_local_worker_ml_identity",
+    cacheHit: true,
+    localWorkerIdentityProof: promocao.provaTecnica
+  };
+}
+
+function aplicarTituloMlWork({ oferta = {}, metadataFinal = {}, promocao = {} } = {}) {
+  if (!promocao?.tituloWork) return { oferta, metadataFinal, aplicado: false };
+  const titulo = promocao.tituloWork;
+  promocao.tituloWorkAplicado = true;
+  return {
+    aplicado: true,
+    oferta: {
+      ...oferta,
+      titulo,
+      nome: titulo,
+      tituloFactual: titulo,
+      tituloOrigem: "local_worker.ml_identity_v1"
+    },
+    metadataFinal: {
+      ...metadataFinal,
+      produto: {
+        ...(metadataFinal?.produto && typeof metadataFinal.produto === "object" ? metadataFinal.produto : {}),
+        titulo,
+        tituloFactual: titulo,
+        tituloOrigem: "local_worker.ml_identity_v1"
+      },
+      autoridadeFactual: {
+        ...(metadataFinal?.autoridadeFactual && typeof metadataFinal.autoridadeFactual === "object" ? metadataFinal.autoridadeFactual : {}),
+        titulo,
+        tituloOrigem: "local_worker.ml_identity_v1"
+      }
+    }
+  };
+}
+
+function montarTelemetriaMlWorkAtivo({ promocao = {}, categoriaAntes = "", categoriaDepois = "" } = {}) {
+  return {
+    version: 1,
+    capability: ML_IDENTITY_CAPABILITY,
+    ativo: promocao.ativo === true,
+    expectedMlbPresente: promocao.expectedMlbPresente === true,
+    expectedMlbHash: texto(promocao.expectedMlbHash),
+    cacheHit: promocao.cacheHit === true,
+    identidadeValidada: promocao.identidadeValidada === true,
+    tituloWorkAplicado: promocao.tituloWorkAplicado === true,
+    imagemWorkAplicada: promocao.imagemWorkAplicada === true,
+    categoriaAntes: texto(categoriaAntes),
+    categoriaDepois: texto(categoriaDepois),
+    categoriaMudou: Boolean(texto(categoriaDepois) && texto(categoriaDepois) !== texto(categoriaAntes)),
+    fallbackTitulo: texto(promocao.fallbackTitulo || "ml_atual"),
+    fallbackImagem: texto(promocao.fallbackImagem || "ml_atual"),
+    motivoFallback: motivoSeguro({ motivo: promocao.motivoFallback }, ""),
+    comercialAlterado: false,
+    linksAlterados: false,
+    duracaoMs: Math.max(0, Number(promocao.duracaoMs || 0))
+  };
 }
 
 async function executarOperacaoLocalComTimeout(operacao, timeoutMs = ML_WORK_LOCAL_OPERATION_TIMEOUT_MS) {
@@ -196,8 +375,14 @@ function montarMlWorkEnrichmentShadow({ consulta = {}, oferta = {}, metadataFina
 module.exports = {
   consultarMlWorkIdentityBestEffort,
   montarMlWorkEnrichmentShadow,
+  mlWorkEnrichmentAtivo,
+  prepararMlWorkEnrichmentAtivo,
+  aplicarImagemMlWorkCanonica,
+  aplicarTituloMlWork,
+  montarTelemetriaMlWorkAtivo,
   executarOperacaoLocalComTimeout,
   ML_WORK_LOCAL_OPERATION_TIMEOUT_MS,
+  ML_WORK_ENRICHMENT_ACTIVE_FLAG,
   hashCurto,
   hostSeguro
 };

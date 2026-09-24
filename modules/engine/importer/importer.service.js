@@ -70,7 +70,12 @@ const { classificarLinkEngine } = require("../link-role.service");
 const { registrarAchado } = require("../../manual-v2/ofertas-v2-achados");
 const {
   consultarMlWorkIdentityBestEffort,
-  montarMlWorkEnrichmentShadow
+  montarMlWorkEnrichmentShadow,
+  mlWorkEnrichmentAtivo,
+  prepararMlWorkEnrichmentAtivo,
+  aplicarImagemMlWorkCanonica,
+  aplicarTituloMlWork,
+  montarTelemetriaMlWorkAtivo
 } = require("./ml-work-enrichment-shadow");
 const {
   criarMedidorEngineMemoryStage,
@@ -4222,6 +4227,8 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     link
   });
   let mlWorkIdentityShadowConsulta = null;
+  let mlWorkPromocaoAtiva = null;
+  let mlWorkImagemBaseline = null;
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
     const metadataGateMlWorker = objetoSeguro(oferta.metadata);
     const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
@@ -4330,6 +4337,22 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       sourceUrl: sourceUrlMlWorker,
       deps
     });
+    mlWorkPromocaoAtiva = prepararMlWorkEnrichmentAtivo({
+      consulta: mlWorkIdentityShadowConsulta,
+      expectedMlb: produtoIdMlWorker,
+      marketplace: "mercadolivre",
+      ativo: mlWorkEnrichmentAtivo({ deps }),
+      tituloValido: tituloFactualConfiavelEngine
+    });
+    if (mlWorkPromocaoAtiva.imagemWork) {
+      mlWorkImagemBaseline = {
+        imagem: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagem || "",
+        imagemUrl: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagemUrl || oferta.imagem || "",
+        imagemOrigem: imagemCanonicaFinal.imagemOrigem || oferta.imagemOrigem || "",
+        imagemStatus: imagemCanonicaFinal.imagemStatus || oferta.imagemStatus || ""
+      };
+      imagemCanonicaFinal = aplicarImagemMlWorkCanonica(imagemCanonicaFinal, mlWorkPromocaoAtiva);
+    }
 
     if (imagemCanonicaFinal.imagemCanonicaDuravel) {
       registrarGateMlWorker({ motivoTaskNaoCriada: "imagem_ja_resolvida" });
@@ -4393,6 +4416,26 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
         localWorkerImageProof: imagemCanonicaFinal.localWorkerProof || null
       }
     };
+  }
+  if (imagemCanonicaFinal.imagemOrigem === "local_worker.ml_identity_v1") {
+    oferta = {
+      ...oferta,
+      imagemEnviavel: true,
+      imagemOrigem: "local_worker.ml_identity_v1",
+      metadata: {
+        ...objetoSeguro(oferta.metadata),
+        imagemOrigem: "local_worker.ml_identity_v1",
+        imagemBaseOrigem: "local_worker.ml_identity_v1",
+        localWorkerIdentityProof: imagemCanonicaFinal.localWorkerIdentityProof || null
+      }
+    };
+    oferta = resolverImagemUniversal(oferta, {
+      origem: "engine_importer_ml_identity",
+      ofertaEntrada,
+      evento,
+      job,
+      link
+    });
   }
   if (imagemCanonicaFinal.imagemCanonicaDuravel) {
     imagemResolucaoEngine = {
@@ -4520,14 +4563,41 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }
     emitirLogRadarPrecoSuspeito(resultadoPrecedenciaComercial, "engine_ofertas");
   }
+  let mlWorkShadowBase = null;
+  const categoriaAntesMlWork = normalizarTexto(oferta.categoria || "");
+  if (
+    normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
+    && mlWorkIdentityShadowConsulta
+    && (mlWorkPromocaoAtiva?.tituloWork || mlWorkPromocaoAtiva?.imagemWork)
+  ) {
+    const ofertaBaselineMlWork = mlWorkImagemBaseline
+      ? {
+          ...oferta,
+          imagem: mlWorkImagemBaseline.imagem,
+          imagemUrl: mlWorkImagemBaseline.imagemUrl,
+          imagemOrigem: mlWorkImagemBaseline.imagemOrigem,
+          imagemStatus: mlWorkImagemBaseline.imagemStatus
+        }
+      : oferta;
+    const categoriaBaselineMlWork = reclassificarCategoriaFinalEngine(ofertaBaselineMlWork, metadataFinal, job);
+    mlWorkShadowBase = {
+      oferta: categoriaBaselineMlWork.oferta || ofertaBaselineMlWork,
+      metadataFinal: categoriaBaselineMlWork.metadataFinal || metadataFinal
+    };
+  }
+  if (mlWorkPromocaoAtiva) {
+    const tituloMlWork = aplicarTituloMlWork({ oferta, metadataFinal, promocao: mlWorkPromocaoAtiva });
+    oferta = tituloMlWork.oferta || oferta;
+    metadataFinal = tituloMlWork.metadataFinal || metadataFinal;
+  }
   const categoriaFinalResolvida = reclassificarCategoriaFinalEngine(oferta, metadataFinal, job);
   oferta = categoriaFinalResolvida.oferta || oferta;
   metadataFinal = categoriaFinalResolvida.metadataFinal || metadataFinal;
   if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre" && mlWorkIdentityShadowConsulta) {
     const shadowMlWork = montarMlWorkEnrichmentShadow({
       consulta: mlWorkIdentityShadowConsulta,
-      oferta,
-      metadataFinal,
+      oferta: mlWorkShadowBase?.oferta || oferta,
+      metadataFinal: mlWorkShadowBase?.metadataFinal || metadataFinal,
       job,
       reclassificarCategoria: reclassificarCategoriaFinalEngine
     });
@@ -4541,6 +4611,22 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       workspaceId: job.cliente_id || job.clienteId || "",
       marketplace: "mercadolivre",
       ...shadowMlWork.telemetria
+    }));
+    const telemetriaAtivaMlWork = montarTelemetriaMlWorkAtivo({
+      promocao: mlWorkPromocaoAtiva || {},
+      categoriaAntes: categoriaAntesMlWork,
+      categoriaDepois: oferta.categoria || ""
+    });
+    metadataFinal = {
+      ...metadataFinal,
+      mlWorkEnrichmentActive: telemetriaAtivaMlWork
+    };
+    console.log("[ML_WORK_ENRICHMENT_ACTIVE]", JSON.stringify({
+      jobId: job.id || null,
+      eventoId: job.evento_id || null,
+      workspaceId: job.cliente_id || job.clienteId || "",
+      marketplace: "mercadolivre",
+      ...telemetriaAtivaMlWork
     }));
   }
   if (radarMirrorComparado) {
