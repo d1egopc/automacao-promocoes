@@ -122,7 +122,9 @@ function umaRequisicao(url, endereco, { deadlineAt, maxBytes, headers, requestIm
     try {
       req = request(url, {
         method: "GET", headers, timeout: Math.max(1, restante), agent: false,
-        lookup: (_hostname, _options, callback) => callback(null, endereco.address, endereco.family)
+        lookup: (_hostname, options, callback) => options?.all === true
+          ? callback(null, [endereco])
+          : callback(null, endereco.address, endereco.family)
       }, resposta => {
         if (settled) {
           resposta.destroy();

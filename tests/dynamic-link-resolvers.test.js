@@ -13,12 +13,15 @@ const { obterHttpSeguro, validarUrlPublica } = require("../modules/radar/redirec
 const { dominioRedirectPermitido, resolverRedirectUniversal } = require("../modules/radar/redirect/redirect-resolver");
 const { criarRotasResolversDinamicos, diagnosticoSeguro, tipoResultado } = require("../modules/radar/redirect/dynamic-resolver-admin.routes");
 
-function transporte(respostas, chamadas, enderecosFixados = null) {
+function transporte(respostas, chamadas, enderecosFixados = null, lookupOptions = {}) {
   return (_url, _options, callback) => {
     const req = new EventEmitter();
     req.end = () => {
       chamadas.push(_url.href);
-      if (enderecosFixados) _options.lookup(_url.hostname, {}, (_erro, endereco) => enderecosFixados.push(endereco));
+      if (enderecosFixados) _options.lookup(_url.hostname, lookupOptions, (_erro, endereco, family) => {
+        assert.equal(_erro, null);
+        enderecosFixados.push({ endereco, family });
+      });
       const resposta = respostas.shift() || { status: 200, body: "" };
       process.nextTick(() => {
         const res = new EventEmitter();
@@ -100,7 +103,66 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
       lookup: lookupPublico,
       requestImpl: transporte([{ status: 200 }], [], fixados)
     });
-    assert.deepEqual(fixados, ["8.8.8.8"]);
+    assert.deepEqual(fixados, [{ endereco: "8.8.8.8", family: 4 }]);
+    const fixadosAll = [];
+    const caminhoPinned = await obterHttpSeguro("https://publico.example/r/inicio", {
+      lookup: lookupPublico,
+      requestImpl: transporte([
+        { status: 302, location: "https://destino.example/produto" },
+        { status: 200 }
+      ], [], fixadosAll, { all: true })
+    });
+    assert.equal(caminhoPinned.status, 200);
+    assert.equal(caminhoPinned.request.res.responseUrl, "https://destino.example/produto");
+    assert.deepEqual(fixadosAll, [
+      { endereco: [{ address: "8.8.8.8", family: 4 }], family: undefined },
+      { endereco: [{ address: "8.8.8.8", family: 4 }], family: undefined }
+    ], "Node 24 all:true deve receber o array de IPs fixados em cada hop");
+    const servidorRedirect = http.createServer((req, res) => {
+      if (req.url === "/r/inicio") {
+        res.writeHead(302, { location: "https://destino.example/produto" });
+        res.end();
+      } else {
+        res.writeHead(200);
+        res.end("ok");
+      }
+    });
+    await new Promise(resolve => servidorRedirect.listen(0, "127.0.0.1", resolve));
+    try {
+      const lookupsDoNode = [];
+      const respostaFixture = await obterHttpSeguro("https://publico.example/r/inicio", {
+        lookup: lookupPublico,
+        // Somente o socket do teste é encaminhado ao servidor local. As duas URLs
+        // continuam públicas e cada hop passa pela validação/pinning de produção.
+        requestImpl: (url, opcoes, callback) => http.request({
+          hostname: "fixture.publico.example", port: servidorRedirect.address().port,
+          path: url.pathname, method: opcoes.method, headers: opcoes.headers,
+          timeout: opcoes.timeout, agent: false,
+          lookup: (host, options, done) => opcoes.lookup(host, options, (erro, endereco, family) => {
+            lookupsDoNode.push({ all: options.all === true, endereco, family });
+            if (erro) return done(erro);
+            return options.all === true
+              ? done(null, [{ address: "127.0.0.1", family: 4 }])
+              : done(null, "127.0.0.1", 4);
+          })
+        }, callback)
+      });
+      assert.equal(respostaFixture.status, 200);
+      assert.equal(respostaFixture.hops.length, 2);
+      assert.equal(respostaFixture.request.res.responseUrl, "https://destino.example/produto");
+      assert.equal(lookupsDoNode.length, 2, "cada hop deve usar lookup fixado");
+      for (const lookupNode of lookupsDoNode) {
+        assert.deepEqual(lookupNode.endereco, lookupNode.all
+          ? [{ address: "8.8.8.8", family: 4 }] : "8.8.8.8");
+        assert.equal(lookupNode.family, lookupNode.all ? undefined : 4);
+      }
+      if (Number(process.versions.node.split(".")[0]) >= 24) {
+        assert.equal(lookupsDoNode.every(item => item.all), true,
+          "Node 24 deve receber o formato all:true");
+      }
+    } finally {
+      await new Promise(resolve => servidorRedirect.close(resolve));
+    }
     const resultadoMl = await resolverRedirectUniversal("https://www.seuhardware.com/r/ml", {
       dynamicRegistry: registro, safeHttpDeps: {
         lookup: lookupPublico,
@@ -182,6 +244,11 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
       requestImpl: transporte([{ status: 302, location: "https://publico.example/r/abc" }], [])
     }), /REDIRECT_LOOP/);
     await assert.rejects(() => obterHttpSeguro("https://publico.example/r/abc", {
+      maxRedirects: 0,
+      lookup: lookupPublico,
+      requestImpl: transporte([{ status: 302, location: "https://destino.example/produto" }], [])
+    }), /REDIRECT_LIMIT/);
+    await assert.rejects(() => obterHttpSeguro("https://publico.example/r/abc", {
       lookup: async () => [{ address: "10.1.2.3", family: 4 }],
       requestImpl: () => { throw new Error("network_must_not_be_reached"); }
     }), /URL_BLOQUEADA_SEGURANCA/);
@@ -256,6 +323,7 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     }
 
     const entradas = [];
+    let falhaNoReteste = false;
     const app = express();
     app.use(express.json());
     app.use("/admin/links/resolvers", (req, res, next) => {
@@ -265,7 +333,7 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
       registry: registro,
       resolve: async entrada => {
         entradas.push(entrada);
-        const destino = entrada.includes("/bad/") ? "https://example.com/not-marketplace" :
+        const destino = entrada.includes("/bad/") || falhaNoReteste ? "https://example.com/not-marketplace" :
           entrada.includes("/ml/") ? "https://www.mercadolivre.com.br/MLB-123456789-produto-_JM" :
           entrada.includes("/coupon/") ? "https://shopee.com.br/coupon/123" :
           "https://shopee.com.br/product/1/2";
@@ -295,24 +363,47 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
       const created = (await create.json()).resolver;
       assert.equal(created.ultimoTipoDetectado, "cupom");
       assert.equal(created.urlExemplo, undefined);
+      const listagemAposCreate = (await (await fetch(base, { headers })).json()).resolvers;
+      assert.equal(listagemAposCreate.some(item => item.id === created.id), true);
+      assert.equal(criarRegistroDinamico({ file }).buscar(created.id)?.host, created.host,
+        "novo GET/instância deve carregar o registro persistido");
       assert.equal((await fetch(base, { method: "POST", headers,
         body: JSON.stringify({ urlExemplo: "https://www.seuhardware.com/coupon/xyz" }) })).status, 409);
       assert.equal((await fetch(base, { method: "POST", headers,
         body: JSON.stringify({ urlExemplo: "https://www.seuhardware.com/bad/abc" }) })).status, 422);
       assert.equal((await fetch(base, { method: "POST", headers,
         body: JSON.stringify({ urlExemplo: "http://127.0.0.1/r/private" }) })).status, 400);
+      assert.equal((await (await fetch(base, { headers })).json()).resolvers.length, listagemAposCreate.length,
+        "cadastros inválidos não devem criar linha");
       const tested = await fetch(`${base}/${created.id}/test`, { method: "POST", headers, body: "{}" });
       assert.equal(tested.status, 200);
       assert.equal((await tested.json()).ok, true);
       assert.equal(entradas.at(-1), "https://www.seuhardware.com/coupon/abc");
+      assert.ok((await (await fetch(base, { headers })).json()).resolvers
+        .find(item => item.id === created.id).ultimoSucessoEm);
+      falhaNoReteste = true;
+      const testedFailure = await fetch(`${base}/${created.id}/test`, { method: "POST", headers, body: "{}" });
+      assert.equal((await testedFailure.json()).ok, false);
+      const aposFalha = (await (await fetch(base, { headers })).json()).resolvers.find(item => item.id === created.id);
+      assert.equal(aposFalha.falhasConsecutivas, 1);
+      assert.equal(aposFalha.ativo, true, "falha no reteste não deve excluir/desativar automaticamente");
+      falhaNoReteste = false;
       const debugResponse = await fetch(`${base}/${created.id}/debug`, { headers });
       const debugJson = await debugResponse.json();
       assert.equal(JSON.stringify(debugJson).includes("secret"), false);
       const disabled = await fetch(`${base}/${created.id}`, { method: "PATCH", headers, body: '{"ativo":false}' });
       assert.equal((await disabled.json()).resolver.ativo, false);
+      assert.equal((await (await fetch(base, { headers })).json()).resolvers
+        .find(item => item.id === created.id).ativo, false);
+      assert.equal(criarRegistroDinamico({ file }).buscar(created.id).ativo, false);
       assert.equal(registro.localizar("https://www.seuhardware.com/coupon/abc"), null);
+      const enabled = await fetch(`${base}/${created.id}`, { method: "PATCH", headers, body: '{"ativo":true}' });
+      assert.equal((await enabled.json()).resolver.ativo, true);
+      assert.equal(criarRegistroDinamico({ file }).buscar(created.id).ativo, true);
       assert.equal((await fetch(`${base}/${created.id}`, { method: "DELETE", headers })).status, 200);
       assert.equal(registro.buscar(created.id), null);
+      assert.equal((await (await fetch(base, { headers })).json()).resolvers.some(item => item.id === created.id), false);
+      assert.equal(criarRegistroDinamico({ file }).buscar(created.id), null);
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
