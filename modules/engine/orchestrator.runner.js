@@ -9,6 +9,8 @@ let clonadorGruposEntradaRodando = false;
 let clonadorGruposEntradaIntervalo = null;
 
 const { executarObservabilidadeOfc } = require("./ofc");
+const { createAutoGateShadow } = require("../auto-gate/auto-gate-shadow.service");
+const autoGateShadow = createAutoGateShadow();
 const {
   autoCleanShadowAtivo,
   executarAutoCleanShadowSeguro
@@ -326,6 +328,13 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
         rodadaId,
         janelaConsumoMinutos: 15
       });
+      // Observability must never delay or fail the commercial Engine cycle.
+      void autoGateShadow.observe({
+        cicloId: rodadaId,
+        ofc: resumo.etapas.ofc,
+        getRadarOperational: opcoes.getAutoGateRadarOperational,
+        getTeleRadarOperational: opcoes.getAutoGateTeleRadarOperational
+      }).catch(() => {});
     } finally {
       engineOrquestradorUltimaOfc = {
         ...engineOrquestradorUltimaOfc,

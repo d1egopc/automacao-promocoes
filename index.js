@@ -20,7 +20,7 @@ const {
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
-const { avaliarGateCapturaRadarWhatsapp } = require("./modules/radar/whatsapp-capture-gate");
+const { avaliarGateCapturaRadarWhatsapp, avaliarJanela: avaliarJanelaRadarWhatsapp } = require("./modules/radar/whatsapp-capture-gate");
 const {
   criarRotasTelemetria
 } = require("./modules/telemetria/telemetria.routes");
@@ -32188,6 +32188,27 @@ initEngineDatabase()
 
     iniciarOrquestradorEngine({
       intervaloMs: 120000,
+      getAutoGateRadarOperational: () => {
+        const radarConfig = carregarRadarConfigCliente(obterClienteIdAdminMaster(), { falharFechado: true });
+        return {
+          enabled: radarConfig.monitoramentoAtivo === true,
+          withinSchedule: avaliarJanelaRadarWhatsapp(radarConfig).dentroJanela === true,
+          sourceConfigured: (radarConfig.sessoesWhatsappMonitoradas || []).some(sessao =>
+            (sessao.gruposMonitorados || []).some(grupo => grupo?.ativo !== false))
+        };
+      },
+      getAutoGateTeleRadarOperational: async () => {
+        const admin = usuarios.find(usuario => usuario && usuario.papel === "admin_master");
+        if (!admin) return null;
+        const status = await telegramTeleRadarControlPlane.getTeleRadarStatus(admin);
+        return {
+          enabled: status.monitoramentoAtivo === true,
+          withinSchedule: status.dentroDaJanela === true,
+          listenerActive: status.listenerActive === true,
+          accountAuthorized: status.account?.authorized === true,
+          selectedSourceCount: status.selectedSourceCount
+        };
+      },
       processarJobsPendentesEngine: (opcoes = {}) => processarJobsPendentesEngine({
         ...opcoes,
         avaliarWorkspaceParaEngine: avaliarWorkspaceEngineOperacional,
