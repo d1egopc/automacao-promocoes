@@ -1,4 +1,8 @@
 const axios = require("axios");
+const { performance } = require("node:perf_hooks");
+const { registroDinamicoPadrao } = require("./dynamic-resolver-registry");
+const { obterHttpSeguro, validarUrlPublica, enderecoPublico } = require("./safe-redirect-http");
+const { classificarLinkEngine } = require("../../engine/link-role.service");
 const {
   camposIdentidadeCanonicaOferta,
   extrairProdutoIdKabumUrl,
@@ -138,14 +142,22 @@ function registrarResolverRedirect({ nome = "", dominios = [], resolver } = {}) 
   return registro;
 }
 
-function localizarResolverRedirect(url = "") {
+function localizarResolverRedirect(url = "", opcoes = {}) {
   const host = hostname(url);
   if (!host) return null;
-  return resolversRegistrados.find(item => item.dominios.some(dominio => dominioCompativel(host, dominio))) || null;
+  const fixo = resolversRegistrados.find(item => item.dominios.some(dominio => dominioCompativel(host, dominio)));
+  if (fixo) return fixo;
+  try {
+    const dinamico = (opcoes.dynamicRegistry || registroDinamicoPadrao()).localizar(url);
+    return dinamico ? { nome: `dinamico:${dinamico.id}`, dominios: [dinamico.host], pathPrefix: dinamico.pathPrefix,
+      resolver: resolverHttpGenerico, dinamico: true } : null;
+  } catch {
+    return null; // storage inválido nunca amplia a allowlist
+  }
 }
 
-function dominioRedirectPermitido(url = "") {
-  return Boolean(localizarResolverRedirect(url));
+function dominioRedirectPermitido(url = "", opcoes = {}) {
+  return Boolean(localizarResolverRedirect(url, opcoes));
 }
 
 function urlRespostaHttp(resposta = {}, fallback = "") {
@@ -310,6 +322,7 @@ function resultadoFalha(urlOriginal, dados = {}) {
     statusHttp: dados.statusHttp || "",
     metodo: dados.metodo || "erro_http",
     motivo: dados.motivo || "redirect_nao_resolvido",
+    ...(dados.hops ? { hops: dados.hops } : {}),
     ...(dados.erro ? { erro: dados.erro } : {})
   };
 }
@@ -337,6 +350,11 @@ function logHtmlAmostraPromozone({ urlOriginal = "", statusHttp = "", html = "" 
 async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   const httpClient = contexto.httpClient || axios;
   const timeoutTotal = Math.max(250, Number(contexto.timeout || 4500));
+  const prazoAbsoluto = contexto.secureDynamic === true
+    ? (Number.isFinite(Number(contexto.deadlineAt))
+      ? Number(contexto.deadlineAt)
+      : performance.now() + timeoutTotal)
+    : null;
   const maxRedirects = Math.max(0, Number(contexto.maxRedirects || 5));
   const maxHtmlHops = Math.max(1, Math.min(3, Number(contexto.maxHtmlHops || 2)));
   const inicio = Date.now();
@@ -349,13 +367,17 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   let urlFinal = urlOriginal;
   let statusHttp = "";
   let metodo = "http_sem_redirect";
+  const hops = [];
+  const dadosHops = contexto.secureDynamic === true ? { hops } : {};
 
   try {
     for (let hop = 0; hop < maxHtmlHops; hop += 1) {
-      const restante = timeoutTotal - (Date.now() - inicio);
+      const restante = prazoAbsoluto === null
+        ? timeoutTotal - (Date.now() - inicio)
+        : prazoAbsoluto - performance.now();
       if (restante <= 0) throw Object.assign(new Error("redirect_timeout"), { code: "ECONNABORTED" });
 
-      const resposta = await httpClient.get(urlAtual, {
+      const opcoesHttp = {
         maxRedirects,
         timeout: restante,
         validateStatus: () => true,
@@ -363,7 +385,14 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
         maxContentLength: 1024 * 1024,
         maxBodyLength: 1024 * 1024,
         headers
-      });
+      };
+      const resposta = contexto.secureDynamic === true
+        ? await obterHttpSeguro(urlAtual, {
+          timeout: restante, deadlineAt: prazoAbsoluto, maxRedirects, maxBytes: 1024 * 1024, headers,
+          ...(contexto.safeHttpDeps || {})
+        })
+        : await httpClient.get(urlAtual, opcoesHttp);
+      if (Array.isArray(resposta.hops)) hops.push(...resposta.hops);
 
       statusHttp = resposta.status || "";
       urlFinal = urlRespostaHttp(resposta, urlAtual);
@@ -374,7 +403,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           urlFinal,
           statusHttp,
           metodo: "erro_http",
-          motivo: `http_status_${statusHttp}`
+          motivo: `http_status_${statusHttp}`,
+          ...dadosHops
         });
       }
 
@@ -389,7 +419,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           status: "resolvido",
           statusHttp,
           metodo,
-          motivo: "redirect_resolvido_marketplace"
+          motivo: "redirect_resolvido_marketplace",
+          ...dadosHops
         };
       }
 
@@ -405,12 +436,17 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           urlFinal,
           statusHttp,
           metodo: destinoHtml.metodo,
-          motivo: "redirect_nao_resolvido"
+          motivo: "redirect_nao_resolvido",
+          ...dadosHops
         });
       }
 
       const marketplaceHtml = detectarMarketplaceRedirect(destinoHtml.url);
       if (marketplaceHtml) {
+        if (contexto.secureDynamic === true) {
+          const destinoSeguro = validarUrlPublica(destinoHtml.url);
+          await enderecoPublico(destinoSeguro, contexto.safeHttpDeps?.lookup);
+        }
         return {
           ok: true,
           urlOriginal,
@@ -420,16 +456,19 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           status: "resolvido",
           statusHttp,
           metodo: destinoHtml.metodo,
-          motivo: "redirect_resolvido_marketplace"
+          motivo: "redirect_resolvido_marketplace",
+          ...dadosHops
         };
       }
 
-      if (!dominioRedirectPermitido(destinoHtml.url) || destinoHtml.url === urlAtual) {
+      const mesmaOrigemDinamica = contexto.secureDynamic === true && hostname(destinoHtml.url) === hostname(urlOriginal);
+      if ((!dominioRedirectPermitido(destinoHtml.url, contexto) && !mesmaOrigemDinamica) || destinoHtml.url === urlAtual) {
         return resultadoFalha(urlOriginal, {
           urlFinal: destinoHtml.url,
           statusHttp,
           metodo: destinoHtml.metodo,
-          motivo: "redirect_destino_nao_permitido"
+          motivo: "redirect_destino_nao_permitido",
+          ...dadosHops
         });
       }
 
@@ -442,7 +481,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       urlFinal,
       statusHttp,
       metodo,
-      motivo: "limite_redirect_html"
+      motivo: "limite_redirect_html",
+      ...dadosHops
     });
   } catch (e) {
     const timeout = e.code === "ECONNABORTED" || /timeout/i.test(e.message || "");
@@ -450,8 +490,10 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       urlFinal,
       statusHttp: e.response?.status || statusHttp || "",
       metodo: "erro_http",
-      motivo: timeout ? "redirect_timeout" : (e.message || "redirect_bloqueado"),
-      erro: e.message || ""
+      motivo: timeout ? "redirect_timeout" : (contexto.secureDynamic === true ?
+        (["URL_BLOQUEADA_SEGURANCA", "REDIRECT_LOOP", "REDIRECT_LIMIT", "REDIRECT_BODY_LIMIT"].includes(e.message) ? e.message : "redirect_bloqueado") : (e.message || "redirect_bloqueado")),
+      erro: contexto.secureDynamic === true ? "" : (e.message || ""),
+      ...dadosHops
     });
   }
 }
@@ -677,10 +719,11 @@ async function resolverAOferta(urlOriginal = "", contexto = {}) {
 }
 
 function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
+  const dinamico = String(resultado.resolver || "").startsWith("dinamico:");
   console.log("[REDIRECT-RESOLVER-AUDITORIA]", JSON.stringify({
-    urlOriginal: resultado.urlOriginal || "",
-    urlFinal: resultado.urlFinal || "",
-    urlExpandida: resultado.urlExpandida || "",
+    urlOriginal: dinamico ? "[REDACTED]" : (resultado.urlOriginal || ""),
+    urlFinal: dinamico ? "[REDACTED]" : (resultado.urlFinal || ""),
+    urlExpandida: dinamico ? "[REDACTED]" : (resultado.urlExpandida || ""),
     marketplaceDetectado: resultado.marketplaceDetectado || "",
     resolver: resultado.resolver || "",
     metodo: resultado.metodo || "",
@@ -715,7 +758,8 @@ function aplicarIdentidadeCanonicaRedirect(resultado = {}) {
 async function resolverRedirectUniversal(url = "", opcoes = {}) {
   const inicio = Date.now();
   const urlOriginal = texto(url);
-  const registro = localizarResolverRedirect(urlOriginal);
+  const registro = localizarResolverRedirect(urlOriginal, opcoes) ||
+    (opcoes.adminValidation === true ? { nome: "dinamico:validacao", resolver: resolverHttpGenerico, dinamico: true } : null);
 
   if (!registro) {
     const ignorado = {
@@ -736,17 +780,29 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
 
   let resultado;
   try {
-    resultado = await registro.resolver(urlOriginal, opcoes);
+    resultado = await registro.resolver(urlOriginal, registro.dinamico ? { ...opcoes, secureDynamic: true } : opcoes);
   } catch (e) {
     resultado = resultadoFalha(urlOriginal, {
       metodo: "erro_resolver",
-      motivo: e.message || "resolver_falhou",
-      erro: e.message || ""
+      motivo: registro.dinamico ? "redirect_bloqueado" : (e.message || "resolver_falhou"),
+      erro: registro.dinamico ? "" : (e.message || "")
     });
   }
 
   const final = aplicarIdentidadeCanonicaRedirect({ ...resultado, urlOriginal, resolver: registro.nome });
   logAuditoriaRedirect(final, Date.now() - inicio);
+  if (registro.dinamico && opcoes.adminValidation !== true) {
+    const papel = final.ok ? classificarLinkEngine({ marketplace: final.marketplaceDetectado,
+      url: final.urlExpandida || final.urlFinal || "" }).papelLink : "";
+    console.log(final.ok ? "[LINK-RESOLVER-DINAMICO-UTILIZADO]" : "[LINK-RESOLVER-DINAMICO-FALHA]", JSON.stringify({
+      host: registro.dominios[0] || hostname(urlOriginal),
+      padrao: registro.pathPrefix || "",
+      marketplace: final.marketplaceDetectado || "",
+      tipo: papel && papel !== "desconhecido" ? papel : (final.chaveCanonica ? "produto" : "nao_determinado"),
+      duracaoMs: Date.now() - inicio,
+      motivo: final.ok ? "resolvido" : final.motivo
+    }));
+  }
   return final;
 }
 
@@ -850,5 +906,7 @@ module.exports = {
   resolverRedirectClonador,
   resolverHttpGenerico,
   resolverPromozone,
-  resolverRedirectUniversal
+  resolverRedirectUniversal,
+  urlAmazonComAsinExplicito,
+  urlMercadoLivreComMlbExplicito
 };

@@ -463,6 +463,7 @@ const {
   resolverRedirectClonador,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
+const { criarRotasResolversDinamicos } = require("./modules/radar/redirect/dynamic-resolver-admin.routes");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
   extrairTransporteShowProductMercadoLivreHtml,
@@ -14929,6 +14930,7 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
 app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
+app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos());
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
