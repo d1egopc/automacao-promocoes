@@ -7,7 +7,7 @@ function safeCode(value) {
   return /^[a-zA-Z0-9_]{1,80}$/.test(code) ? code : "indisponivel";
 }
 
-function montarTelemetria({ cicloId, metrics = {}, result = {}, previousCycleId = "", duracaoCalculoMs = 0 } = {}) {
+function montarTelemetria({ cicloId, metrics = {}, result = {}, previousCycleId = "", maquinaEstadosMs = null, duracaoCalculoMs = 0 } = {}) {
   return {
     timestamp: new Date(metrics.observedAtMs || Date.now()).toISOString(),
     cicloId: safeCode(cicloId),
@@ -52,8 +52,21 @@ function montarTelemetria({ cicloId, metrics = {}, result = {}, previousCycleId 
       selectedSourceCount: safeNumber(metrics.teleRadarOperacional.selectedSourceCount)
     } : null,
     observedWorkspaceCount: safeNumber(metrics.observedWorkspaceCount),
+    cadastralWorkspaceCount: safeNumber(metrics.cadastralWorkspaceCount),
+    excludedWorkspaceCount: safeNumber(metrics.excludedWorkspaceCount),
+    snapshotCompleto: metrics.snapshotCompleto === true,
+    fontesInvalidasCount: safeNumber(metrics.fontesInvalidasCount),
+    fontesInvalidasTotais: safeNumber(metrics.fontesInvalidasTotais),
+    fontesInvalidasRelevantes: safeNumber(metrics.fontesInvalidasRelevantes),
+    fontesInvalidasIrrelevantes: safeNumber(metrics.fontesInvalidasIrrelevantes),
     observedWorkspaceScope: metrics.observedWorkspaceScope === "global" ? "global" : "subset_calibracao",
     sinaisAusentes: Array.isArray(metrics.sinaisAusentes) ? metrics.sinaisAusentes.map(safeCode).slice(0, 20) : [],
+    latenciaOfcSnapshotMs: safeNumber(metrics.latencias?.ofcSnapshotMs),
+    latenciaConsultaSqlMs: safeNumber(metrics.latencias?.consultaSqlMs),
+    latenciaRadarOperationalMs: safeNumber(metrics.latencias?.radarOperationalMs),
+    latenciaTeleRadarOperationalMs: safeNumber(metrics.latencias?.teleRadarOperationalMs),
+    latenciaAgregacaoMs: safeNumber(metrics.latencias?.agregacaoMs),
+    latenciaMaquinaEstadosMs: safeNumber(maquinaEstadosMs),
     duracaoCalculoMs: safeNumber(duracaoCalculoMs)
   };
 }

@@ -32,17 +32,30 @@ function metrics(overrides = {}) {
     teleRadarOperacional: { enabled: false, withinSchedule: true, listenerActive: true, accountAuthorized: true, selectedSourceCount: 1 },
     observedWorkspaceCount: 2,
     observedWorkspaceScope: "global",
+    latencias: { ofcSnapshotMs: 1, consultaSqlMs: 2, radarOperationalMs: 3, teleRadarOperationalMs: 4, agregacaoMs: 5 },
     ...overrides
   };
 }
 
 function ofc(workspaces = [
-  { workspaceId: "workspace_a", pendentesVivos: 2, idadeMaximaVivaMs: 5000, faixasIdade: { itensAte5Min: 1 }, slots15Min: 2, statusDesconhecido: 0, itensSemTimestamp: 0 },
-  { workspaceId: "workspace_b", pendentesVivos: 3, idadeMaximaVivaMs: 10000, faixasIdade: { itensAte5Min: 2 }, slots15Min: 3, statusDesconhecido: 0, itensSemTimestamp: 0 }
-]) {
+  { workspaceId: "workspace_a", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 2, pendentesVivos: 2, idadeMaximaVivaMs: 5000, faixasIdade: { itensAte5Min: 1 }, slots15Min: 2, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 },
+  { workspaceId: "workspace_b", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 3, pendentesVivos: 3, idadeMaximaVivaMs: 10000, faixasIdade: { itensAte5Min: 2 }, slots15Min: 3, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 }
+], gateOverrides = {}) {
   return {
     fluxoComercial: { ok: true, janelaMinutos: 15, fontes: { eventosComerciais: true }, enviosConfirmadosPorMinuto: 2 },
-    gateAbsorcao: { ok: true, janelaMinutos: 15, workspaces }
+    gateAbsorcao: {
+      ok: true,
+      snapshotCompleto: true,
+      collectedAtMs: NOW,
+      fontesInvalidasCount: 0,
+      fontesInvalidasTotais: 0,
+      fontesInvalidasRelevantes: 0,
+      fontesInvalidasIrrelevantes: 0,
+      duracaoMs: 12,
+      janelaMinutos: 15,
+      workspaces,
+      ...gateOverrides
+    }
   };
 }
 
@@ -82,6 +95,9 @@ async function testMetrics() {
   assert.equal(result.freshReserveObservada, 3);
   assert.equal(result.availableCapacityObservada, 5);
   assert.equal(result.observedWorkspaceCount, 2);
+  assert.equal(result.cadastralWorkspaceCount, 2);
+  assert.equal(result.excludedWorkspaceCount, 0);
+  assert.equal(result.latencias.ofcSnapshotMs, 12);
   assert.equal((await coletarMetricasShadow({ ...providers, observedWorkspaceIds: ["workspace_b"] })).sinaisAusentes.includes("escopo_workspace_parcial"), true);
   const stale = await coletarMetricasShadow({ ...providers, consultarEntradas: async () => ({ ...input, collectedAtMs: NOW - 6 * 60 * 1000 }) });
   assert.equal(stale.ok, false);
@@ -101,6 +117,83 @@ async function testMetrics() {
   const missing = await coletarMetricasShadow({ ...providers, ofc: {} });
   assert.equal(missing.ok, false);
   assert.equal(avaliarShadow(missing).decisaoSugerida, "NAO_INTERVIR");
+
+  const empty = { workspaceId: "empty", fonteFilaValida: true, topologiaOperacionalPotencial: false, pressaoEsteiraViva: 0, pendentesVivos: 0, idadeMaximaVivaMs: null,
+    faixasIdade: { itensAte5Min: 0 }, slots15Min: 0, destinosAptos: 0, integracoesAptas: 0,
+    statusDesconhecido: 0, itensSemTimestamp: 0 };
+  const pressureClosed = { ...empty, workspaceId: "pressure", topologiaOperacionalPotencial: true, pressaoEsteiraViva: 2, pendentesVivos: 2,
+    idadeMaximaVivaMs: 1000, faixasIdade: { itensAte5Min: 2 } };
+  const capacity = { ...empty, workspaceId: "capacity", topologiaOperacionalPotencial: true, slots15Min: 4, destinosAptos: 1, integracoesAptas: 1 };
+  capacity.plano = "nao_deve_influenciar";
+  capacity.creditos = 0;
+  const operational = await coletarMetricasShadow({ ...providers, ofc: ofc([empty, pressureClosed, capacity]) });
+  assert.equal(operational.ok, true);
+  assert.equal(operational.cadastralWorkspaceCount, 3);
+  assert.equal(operational.observedWorkspaceCount, 2);
+  assert.equal(operational.excludedWorkspaceCount, 1);
+  assert.equal(operational.queueDepthObservado, 2, "pressao participa mesmo com destino fechado");
+  assert.equal(operational.availableCapacityObservada, 4, "capacidade operacional participa");
+
+  const invalidDead = { ...empty, workspaceId: "dead", fonteFilaValida: false };
+  const irrelevantInvalid = await coletarMetricasShadow({
+    ...providers,
+    ofc: ofc([invalidDead], {
+      snapshotCompleto: true,
+      fontesInvalidasCount: 0,
+      fontesInvalidasTotais: 1,
+      fontesInvalidasRelevantes: 0,
+      fontesInvalidasIrrelevantes: 1
+    })
+  });
+  assert.equal(irrelevantInvalid.ok, true);
+  assert.equal(irrelevantInvalid.observedWorkspaceCount, 0);
+  assert.equal(irrelevantInvalid.excludedWorkspaceCount, 1);
+  assert.equal(irrelevantInvalid.sinaisAusentes.includes("fila_observada_incompleta"), false);
+
+  const invalidPotential = { ...empty, workspaceId: "potential", fonteFilaValida: false,
+    topologiaOperacionalPotencial: true };
+  const relevantInvalid = await coletarMetricasShadow({
+    ...providers,
+    ofc: ofc([invalidPotential], {
+      snapshotCompleto: false,
+      fontesInvalidasCount: 1,
+      fontesInvalidasTotais: 1,
+      fontesInvalidasRelevantes: 1,
+      fontesInvalidasIrrelevantes: 0
+    })
+  });
+  assert.equal(relevantInvalid.ok, false);
+  assert.ok(relevantInvalid.sinaisAusentes.includes("fila_observada_incompleta"));
+  assert.equal(avaliarShadow(relevantInvalid).decisaoSugerida, "NAO_INTERVIR");
+
+  const unknown = { ...empty, workspaceId: "unknown", statusDesconhecido: 1 };
+  const incomplete = await coletarMetricasShadow({ ...providers, ofc: ofc([empty, unknown]) });
+  assert.equal(incomplete.ok, false);
+  assert.ok(incomplete.sinaisAusentes.includes("fila_observada_incompleta"));
+  assert.equal(avaliarShadow(incomplete).decisaoSugerida, "NAO_INTERVIR");
+
+  const staleSnapshot = await coletarMetricasShadow({
+    ...providers,
+    ofc: { ...ofc([capacity]), gateAbsorcao: { ...ofc([capacity]).gateAbsorcao, collectedAtMs: NOW - 6 * 60 * 1000 } }
+  });
+  assert.equal(staleSnapshot.ok, false);
+  assert.ok(staleSnapshot.sinaisAusentes.includes("fila_observada_obsoleta"));
+
+  const partialSnapshot = await coletarMetricasShadow({
+    ...providers,
+    ofc: { ...ofc([capacity]), gateAbsorcao: { ...ofc([capacity]).gateAbsorcao, snapshotCompleto: false } }
+  });
+  assert.equal(partialSnapshot.ok, false);
+  assert.ok(partialSnapshot.sinaisAusentes.includes("fila_observada_incompleta"));
+
+  const invalidWorkspace = { ...capacity, pressaoEsteiraViva: undefined };
+  const invalidOperational = await coletarMetricasShadow({ ...providers, ofc: ofc([invalidWorkspace]) });
+  assert.equal(invalidOperational.ok, false);
+  assert.ok(invalidOperational.sinaisAusentes.includes("workspace_elegibilidade_indeterminada"));
+  assert.equal(avaliarShadow(invalidOperational).decisaoSugerida, "NAO_INTERVIR");
+
+  const source = fs.readFileSync(path.join(__dirname, "..", "modules", "auto-gate", "auto-gate-metrics.service.js"), "utf8");
+  assert.doesNotMatch(source, /readClienteJson|fila\.json/, "Auto Gate deve reutilizar o snapshot OFC sem reler fila integral");
 }
 
 function testDecisions() {
@@ -211,7 +304,12 @@ async function testZeroMutation() {
     assert.equal(fs.readFileSync(radarFile, "utf8"), originalRadar);
     assert.equal(fs.readFileSync(teleFile, "utf8"), originalTele);
     assert.equal(logs[0].aplicouMudancas, false);
+    assert.equal(logs[0].autoridadeManualNaoInferida, true);
     assert.equal(logs[0].decisaoSugerida, "MANTER");
+    for (const campo of ["latenciaOfcSnapshotMs", "latenciaConsultaSqlMs", "latenciaRadarOperationalMs",
+      "latenciaTeleRadarOperationalMs", "latenciaAgregacaoMs", "latenciaMaquinaEstadosMs", "duracaoCalculoMs"]) {
+      assert.equal(typeof logs[0][campo], "number", `${campo} deve ser emitido`);
+    }
     assert.doesNotMatch(JSON.stringify(logs[0]), /api_hash|phoneCodeHash|StringSession|https?:\/\//);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

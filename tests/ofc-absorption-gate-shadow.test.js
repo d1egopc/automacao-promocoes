@@ -9,6 +9,7 @@ const {
   montarGateWorkspace,
   classificarEstadoEsteira,
   classificarStatusFila,
+  lerFilaWorkspaceSnapshot,
   classificarItemEsteiraShadow,
   itemPressionaCapacidade,
   resumoFilaWorkspace,
@@ -21,6 +22,53 @@ const {
 } = require("../modules/engine/ofc/absorption-gate.repository");
 
 const agora = Date.parse("2026-07-31T22:00:00.000Z");
+
+function testarLeituraEstritaFila() {
+  const dir = fs.mkdtempSync(path.join(require("os").tmpdir(), "ofc-fila-snapshot-"));
+  const arquivo = path.join(dir, "fila.json");
+  const opcoes = { getClienteJsonPath: () => arquivo, clock: () => agora };
+  try {
+    fs.writeFileSync(arquivo, "[]");
+    const vaziaValida = lerFilaWorkspaceSnapshot("user_teste", opcoes);
+    assert.strictEqual(vaziaValida.ok, true);
+    assert.deepStrictEqual(vaziaValida.itens, []);
+    assert.strictEqual(vaziaValida.collectedAtMs, agora);
+
+    fs.rmSync(arquivo);
+    assert.strictEqual(lerFilaWorkspaceSnapshot("user_teste", opcoes).motivo, "fila_ausente");
+
+    fs.writeFileSync(arquivo, "{json quebrado");
+    assert.strictEqual(lerFilaWorkspaceSnapshot("user_teste", opcoes).motivo, "fila_json_corrompido");
+
+    fs.writeFileSync(arquivo, "");
+    assert.strictEqual(lerFilaWorkspaceSnapshot("user_teste", opcoes).motivo, "fila_arquivo_vazio");
+
+    fs.writeFileSync(arquivo, "{}");
+    assert.strictEqual(lerFilaWorkspaceSnapshot("user_teste", opcoes).motivo, "fila_formato_invalido");
+
+    fs.writeFileSync(arquivo, "[]");
+    fs.utimesSync(arquivo, new Date("2020-01-01T00:00:00.000Z"), new Date("2020-01-01T00:00:00.000Z"));
+    assert.strictEqual(lerFilaWorkspaceSnapshot("user_teste", opcoes).ok, true, "mtime antigo nao invalida leitura atual valida");
+
+    let leituras = 0;
+    const leituraUnica = lerFilaWorkspaceSnapshot("user_teste", {
+      ...opcoes,
+      readFileSync: () => { leituras += 1; return "[]"; }
+    });
+    assert.strictEqual(leituraUnica.ok, true);
+    assert.strictEqual(leituras, 1, "validade e conteudo devem vir da mesma leitura fisica");
+
+    const erroLeitura = lerFilaWorkspaceSnapshot("user_teste", {
+      ...opcoes,
+      readFileSync: () => { const erro = new Error("negado"); erro.code = "EACCES"; throw erro; }
+    });
+    assert.strictEqual(erroLeitura.motivo, "fila_erro_leitura");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+testarLeituraEstritaFila();
 
 const destinoApto = {
   id: "destino_a",
@@ -64,6 +112,8 @@ assert.strictEqual(classificarStatusFila({ status: "enviando" }), BUCKET_STATUS.
 assert.strictEqual(classificarStatusFila({ status: "erro_temporario" }), BUCKET_STATUS.ERRO_TEMPORARIO_RECUPERAVEL);
 assert.strictEqual(classificarStatusFila({ status: "enviado" }), BUCKET_STATUS.ENVIADO_HISTORICO);
 assert.strictEqual(classificarStatusFila({ status: "erro" }), BUCKET_STATUS.ERRO_FINAL);
+assert.strictEqual(classificarStatusFila({ status: "nao_enviado" }), BUCKET_STATUS.ERRO_FINAL);
+assert.strictEqual(classificarStatusFila({ status: "nao_enviada" }), BUCKET_STATUS.ERRO_FINAL);
 assert.strictEqual(classificarStatusFila({ status: "misterioso" }), BUCKET_STATUS.STATUS_DESCONHECIDO);
 assert.strictEqual(classificarStatusFila({}), BUCKET_STATUS.STATUS_DESCONHECIDO);
 
@@ -122,6 +172,18 @@ assert.strictEqual(resumoFila.camposTimestampEncontrados.adicionado_em, 1);
 assert.strictEqual(resumoFila.aindaVivos, 6);
 assert.strictEqual(resumoFila.vencidosOperacionalmente, 2);
 assert.strictEqual(resumoFila.aguardandoAuditoria, 1);
+
+const resumoNaoEnviado = resumoFilaWorkspace("user_terminal", {
+  agoraMs: agora,
+  janelaAbertaAgora: true,
+  readClienteJson: () => [
+    { id: "terminal", status: "nao_enviado", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() },
+    { id: "desconhecido_real", status: "estado_novo_nao_mapeado", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() }
+  ]
+});
+assert.strictEqual(resumoNaoEnviado.errosFinais, 1);
+assert.strictEqual(resumoNaoEnviado.status_desconhecido, 1);
+assert.strictEqual(resumoNaoEnviado.pressaoEsteiraViva, 0);
 
 const resumoFechado = resumoFilaWorkspace("user_fechado", {
   agoraMs: agora,
@@ -286,11 +348,11 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
       user_fechado: [{ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }]
     },
     agoraMs: agora,
-    readClienteJson: (clienteId, arquivo, fallback) => {
-      if (arquivo !== "fila.json") return fallback;
-      if (clienteId === "user_saturado" || clienteId === "user_fechado") return filaComHistorico;
-      return [];
-    },
+    readFilaSnapshot: clienteId => ({
+      ok: true,
+      itens: clienteId === "user_saturado" || clienteId === "user_fechado" ? filaComHistorico : [],
+      collectedAtMs: agora
+    }),
     consultarEventosAbsorcao: async () => ({
       ok: true,
       janelaMinutos: 15,
@@ -304,11 +366,23 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
   assert.strictEqual(gate.ok, true);
   assert.strictEqual(gate.modo, "shadow");
   assert.strictEqual(gate.aplicouMudancas, false);
+  assert.strictEqual(gate.snapshotCompleto, true);
+  assert.strictEqual(gate.fontesInvalidasCount, 0);
+  assert.strictEqual(gate.fontesInvalidasTotais, 0);
+  assert.strictEqual(gate.fontesInvalidasRelevantes, 0);
+  assert.strictEqual(gate.fontesInvalidasIrrelevantes, 0);
+  assert.equal(Number.isFinite(gate.collectedAtMs), true);
   assert.strictEqual(gate.totalWorkspaces, 3);
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_livre").estado, "LIVRE");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").estado, "SATURADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").estado, "FECHADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").pressaoEsteiraViva, 4);
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").topologiaOperacionalPotencial, true);
+  assert(gate.workspaces.find(w => w.workspaceId === "user_fechado").pressaoEsteiraViva > 0,
+    "backlog valido permanece relevante mesmo com destino fechado");
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_livre").topologiaOperacionalPotencial, true);
+  assert(gate.workspaces.find(w => w.workspaceId === "user_livre").slots15Min > 0,
+    "fila vazia com capacidade real preserva topologia e slots");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").totalEnviadosHistorico, 500);
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").filaAlvo15Min, 0);
   assert.strictEqual(gate.resumo.porEstado.LIVRE, 1);
@@ -317,6 +391,124 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
   assert.strictEqual(gate.resumo.pressaoEsteiraViva, 8);
   assert.strictEqual(gate.resumo.statusDesconhecido, 2);
   assert.strictEqual(gate.resumo.itensSemTimestamp, 2);
+
+  const dirInvalido = fs.mkdtempSync(path.join(require("os").tmpdir(), "ofc-fila-invalida-"));
+  try {
+    const { coletarMetricasShadow } = require("../modules/auto-gate/auto-gate-metrics.service");
+    const { avaliarShadow } = require("../modules/auto-gate/auto-gate-state-machine");
+    const arquivoFila = path.join(dirInvalido, "fila.json");
+    const coletarDoGate = gateAbsorcao => coletarMetricasShadow({
+      ofc: {
+        fluxoComercial: { ok: true, janelaMinutos: 15, fontes: { eventosComerciais: true }, enviosConfirmadosPorMinuto: 0 },
+        gateAbsorcao
+      },
+      consultarEntradas: async () => ({ ok: true, janelaMinutos: 15, inputRadar: 0, inputTeleRadar: 0, inputTotal: 0,
+        collectedAtMs: gateAbsorcao.collectedAtMs }),
+      getRadarOperational: async () => ({ enabled: true, withinSchedule: true, sourceConfigured: true }),
+      getTeleRadarOperational: async () => ({ enabled: false, withinSchedule: true, listenerActive: false,
+        accountAuthorized: true, selectedSourceCount: 1 }),
+      now: gateAbsorcao.collectedAtMs
+    });
+    let leiturasGate = 0;
+    const gateVazioValido = await criarGateAbsorcaoShadowOfc({
+      janelaMinutos: 15,
+      usuarios: [{ id: "user_vazio" }],
+      listarClientesAtivos: () => ["user_vazio"],
+      destinosPorCliente: { user_vazio: [] },
+      getClienteJsonPath: () => arquivoFila,
+      readFileSync: () => { leiturasGate += 1; return "[]"; },
+      clock: () => agora,
+      consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
+    });
+    assert.strictEqual(gateVazioValido.snapshotCompleto, true);
+    assert.strictEqual(gateVazioValido.collectedAtMs, agora);
+    assert.strictEqual(gateVazioValido.workspaces[0].fonteFilaValida, true);
+    assert.strictEqual(gateVazioValido.workspaces[0].topologiaOperacionalPotencial, false);
+    assert.strictEqual(leiturasGate, 1, "gate completo nao pode reler fila.json para validar");
+
+    const casosIrrelevantes = [
+      { nome: "ausente_sem_topologia", preparar: () => fs.rmSync(arquivoFila, { force: true }) },
+      { nome: "corrompido_sem_topologia", preparar: () => fs.writeFileSync(arquivoFila, "{quebrado") }
+    ];
+    for (const caso of casosIrrelevantes) {
+      caso.preparar();
+      const gateIrrelevante = await criarGateAbsorcaoShadowOfc({
+        janelaMinutos: 15,
+        usuarios: [{ id: "user_sem_topologia" }],
+        listarClientesAtivos: () => ["user_sem_topologia"],
+        destinosPorCliente: { user_sem_topologia: [] },
+        getClienteJsonPath: () => arquivoFila,
+        consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
+      });
+      assert.strictEqual(gateIrrelevante.snapshotCompleto, true, caso.nome);
+      assert.strictEqual(gateIrrelevante.fontesInvalidasCount, 0, caso.nome);
+      assert.strictEqual(gateIrrelevante.fontesInvalidasTotais, 1, caso.nome);
+      assert.strictEqual(gateIrrelevante.fontesInvalidasRelevantes, 0, caso.nome);
+      assert.strictEqual(gateIrrelevante.fontesInvalidasIrrelevantes, 1, caso.nome);
+      assert.strictEqual(gateIrrelevante.workspaces[0].topologiaOperacionalPotencial, false, caso.nome);
+      const metricasIrrelevantes = await coletarDoGate(gateIrrelevante);
+      assert.strictEqual(metricasIrrelevantes.ok, true, caso.nome);
+      assert.strictEqual(metricasIrrelevantes.sinaisAusentes.includes("fila_observada_incompleta"), false, caso.nome);
+    }
+
+    const casosInvalidos = [
+      { nome: "ausente", preparar: () => fs.rmSync(arquivoFila, { force: true }), motivo: "fila_ausente" },
+      { nome: "json_corrompido", preparar: () => fs.writeFileSync(arquivoFila, "{quebrado"), motivo: "fila_json_corrompido" },
+      { nome: "arquivo_vazio", preparar: () => fs.writeFileSync(arquivoFila, ""), motivo: "fila_arquivo_vazio" },
+      { nome: "formato_invalido", preparar: () => fs.writeFileSync(arquivoFila, "{}"), motivo: "fila_formato_invalido" },
+      { nome: "erro_leitura", preparar: () => fs.writeFileSync(arquivoFila, "[]"), motivo: "fila_erro_leitura",
+        readFileSync: () => { const erro = new Error("negado"); erro.code = "EACCES"; throw erro; } }
+    ];
+
+    for (const caso of casosInvalidos) {
+      caso.preparar();
+      const gateIncompleto = await criarGateAbsorcaoShadowOfc({
+        janelaMinutos: 15,
+        usuarios: [{ id: "user_capacidade" }],
+        listarClientesAtivos: () => ["user_capacidade"],
+        destinosPorCliente: { user_capacidade: [destinoApto] },
+        getClienteJsonPath: () => arquivoFila,
+        ...(caso.readFileSync ? { readFileSync: caso.readFileSync } : {}),
+        consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
+      });
+      assert.strictEqual(gateIncompleto.ok, true, caso.nome);
+      assert.strictEqual(gateIncompleto.snapshotCompleto, false, caso.nome);
+      assert.strictEqual(gateIncompleto.fontesInvalidasCount, 1, caso.nome);
+      assert.strictEqual(gateIncompleto.fontesInvalidasTotais, 1, caso.nome);
+      assert.strictEqual(gateIncompleto.fontesInvalidasRelevantes, 1, caso.nome);
+      assert.strictEqual(gateIncompleto.fontesInvalidasIrrelevantes, 0, caso.nome);
+      assert.strictEqual(gateIncompleto.fontesInvalidasPorMotivo[caso.motivo], 1, caso.nome);
+      assert.strictEqual(gateIncompleto.workspaces[0].fonteFilaValida, false, caso.nome);
+      assert.strictEqual(gateIncompleto.workspaces[0].topologiaOperacionalPotencial, true, caso.nome);
+
+      const metricasIncompletas = await coletarDoGate(gateIncompleto);
+      assert.strictEqual(metricasIncompletas.ok, false, caso.nome);
+      assert(metricasIncompletas.sinaisAusentes.includes("fila_observada_incompleta"), caso.nome);
+      assert.strictEqual(avaliarShadow(metricasIncompletas).decisaoSugerida, "NAO_INTERVIR", caso.nome);
+    }
+
+    fs.rmSync(arquivoFila, { force: true });
+    const gateTopologiaFechada = await criarGateAbsorcaoShadowOfc({
+      janelaMinutos: 15,
+      usuarios: [{ id: "user_topologia_fechada" }],
+      listarClientesAtivos: () => ["user_topologia_fechada"],
+      destinosPorCliente: {
+        user_topologia_fechada: [{ ...destinoApto, statusIntegracao: "desconectada" }]
+      },
+      getClienteJsonPath: () => arquivoFila,
+      consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
+    });
+    assert.strictEqual(gateTopologiaFechada.workspaces[0].topologiaOperacionalPotencial, true);
+    assert.strictEqual(gateTopologiaFechada.workspaces[0].integracoesAptas, 0);
+    assert.strictEqual(gateTopologiaFechada.workspaces[0].slots15Min, 0);
+    assert.strictEqual(gateTopologiaFechada.snapshotCompleto, false);
+    assert.strictEqual(gateTopologiaFechada.fontesInvalidasRelevantes, 1);
+    const metricasTopologiaFechada = await coletarDoGate(gateTopologiaFechada);
+    assert.strictEqual(metricasTopologiaFechada.ok, false);
+    assert.strictEqual(avaliarShadow(metricasTopologiaFechada).decisaoSugerida, "NAO_INTERVIR");
+  } finally {
+    fs.rmSync(dirInvalido, { recursive: true, force: true });
+  }
 
   const falha = await criarGateAbsorcaoShadowOfc({
     consultarEventosAbsorcao: async () => ({ ok: false, motivo: "query_falhou", erro: "db" })

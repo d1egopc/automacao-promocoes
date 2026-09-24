@@ -8,6 +8,79 @@ function parseObservedWorkspaceIds(value = "") {
   return [...new Set(String(value || "").split(",").map(item => item.trim()).filter(Boolean))].slice(0, 100);
 }
 
+function duracaoMs(clock, inicio) {
+  return Math.max(0, Number(clock()) - Number(inicio));
+}
+
+async function medirProvider(provider, clock) {
+  const inicio = clock();
+  try {
+    return { status: "fulfilled", value: await provider(), duracaoMs: duracaoMs(clock, inicio) };
+  } catch (reason) {
+    return { status: "rejected", reason, duracaoMs: duracaoMs(clock, inicio) };
+  }
+}
+
+function avaliarElegibilidadeOperacional(workspace = {}) {
+  if (typeof workspace.fonteFilaValida !== "boolean") {
+    return { valido: false, elegivel: false, motivo: "validade_fonte_fila_ausente" };
+  }
+  if (typeof workspace.topologiaOperacionalPotencial !== "boolean") {
+    return { valido: false, elegivel: false, motivo: "topologia_operacional_ausente" };
+  }
+  const pressao = numeroFinito(workspace.pressaoEsteiraViva);
+  const slots = numeroFinito(workspace.slots15Min);
+  const destinosAptos = numeroFinito(workspace.destinosAptos);
+  const integracoesAptas = numeroFinito(workspace.integracoesAptas);
+  const statusDesconhecido = numeroFinito(workspace.statusDesconhecido);
+  const itensSemTimestamp = numeroFinito(workspace.itensSemTimestamp);
+  const valores = { pressao, slots, destinosAptos, integracoesAptas, statusDesconhecido, itensSemTimestamp };
+  if (Object.values(valores).some(valor => valor === null)) {
+    return { valido: false, elegivel: false, motivo: "snapshot_operacional_invalido", ...valores };
+  }
+  if (workspace.fonteFilaValida === false) {
+    if (workspace.topologiaOperacionalPotencial === false) {
+      return {
+        valido: true,
+        elegivel: false,
+        motivo: "fonte_fila_invalida_sem_topologia_operacional",
+        participaPorPressao: false,
+        participaPorCapacidade: false,
+        participaPorIncerteza: false,
+        fonteFilaValida: false,
+        ...valores
+      };
+    }
+    return {
+      valido: true,
+      elegivel: true,
+      motivo: "fonte_fila_invalida",
+      participaPorPressao: false,
+      participaPorCapacidade: false,
+      participaPorIncerteza: true,
+      fonteFilaValida: false,
+      ...valores
+    };
+  }
+  const participaPorPressao = pressao > 0;
+  const participaPorCapacidade = slots > 0 && destinosAptos > 0 && integracoesAptas > 0;
+  // An unknown/live-timestamp anomaly cannot be discarded as an inactive workspace:
+  // it remains in scope so the global decision fails closed.
+  const participaPorIncerteza = statusDesconhecido > 0 || itensSemTimestamp > 0;
+  return {
+    valido: true,
+    elegivel: participaPorPressao || participaPorCapacidade || participaPorIncerteza,
+    motivo: participaPorPressao ? "pressao_viva"
+      : participaPorCapacidade ? "capacidade_operacional"
+        : participaPorIncerteza ? "snapshot_incompleto" : "sem_pressao_ou_capacidade",
+    participaPorPressao,
+    participaPorCapacidade,
+    participaPorIncerteza,
+    fonteFilaValida: true,
+    ...valores
+  };
+}
+
 async function coletarMetricasShadow({
   ofc = {},
   getRadarOperational,
@@ -15,14 +88,16 @@ async function coletarMetricasShadow({
   consultarEntradas = consultarEntradasRadar,
   observedWorkspaceIds = [],
   now = Date.now(),
-  maxSignalAgeMs = 5 * 60 * 1000
+  maxSignalAgeMs = 5 * 60 * 1000,
+  clock = Date.now
 } = {}) {
   const missing = [];
-  const [sourceResult, radarResult, teleResult] = await Promise.allSettled([
-    consultarEntradas({ janelaMinutos: 15, now }),
-    typeof getRadarOperational === "function" ? getRadarOperational() : Promise.reject(new Error("missing")),
-    typeof getTeleRadarOperational === "function" ? getTeleRadarOperational() : Promise.reject(new Error("missing"))
+  const [sourceResult, radarResult, teleResult] = await Promise.all([
+    medirProvider(() => consultarEntradas({ janelaMinutos: 15, now }), clock),
+    medirProvider(() => typeof getRadarOperational === "function" ? getRadarOperational() : Promise.reject(new Error("missing")), clock),
+    medirProvider(() => typeof getTeleRadarOperational === "function" ? getTeleRadarOperational() : Promise.reject(new Error("missing")), clock)
   ]);
+  const aggregationStartedAt = clock();
   const source = sourceResult.status === "fulfilled" ? sourceResult.value : null;
   const radar = radarResult.status === "fulfilled" ? radarResult.value : null;
   const teleRadar = teleResult.status === "fulfilled" ? teleResult.value : null;
@@ -46,6 +121,26 @@ async function coletarMetricasShadow({
   const outputRate = numeroFinito(commercial?.enviosConfirmadosPorMinuto);
   if (outputRate === null) missing.push("saida_comercial_invalida");
   if (absorption?.ok !== true || !Array.isArray(absorption.workspaces)) missing.push("fila_observada_indisponivel");
+  if (absorption?.ok === true && absorption.snapshotCompleto !== true) missing.push("fila_observada_incompleta");
+  const fontesInvalidasCount = numeroFinito(absorption?.fontesInvalidasCount);
+  const fontesInvalidasTotais = numeroFinito(absorption?.fontesInvalidasTotais);
+  const fontesInvalidasRelevantes = numeroFinito(absorption?.fontesInvalidasRelevantes);
+  const fontesInvalidasIrrelevantes = numeroFinito(absorption?.fontesInvalidasIrrelevantes);
+  if (absorption?.ok === true && fontesInvalidasCount === null) missing.push("validade_fontes_fila_indisponivel");
+  if (absorption?.ok === true && fontesInvalidasRelevantes === null) missing.push("validade_fontes_relevantes_indisponivel");
+  if (absorption?.ok === true && fontesInvalidasRelevantes > 0) missing.push("fila_observada_incompleta");
+  if (absorption?.ok === true && absorption.snapshotCompleto === true && fontesInvalidasRelevantes !== 0) {
+    missing.push("fila_observada_inconsistente");
+  }
+  if (absorption?.ok === true && fontesInvalidasTotais !== null && fontesInvalidasRelevantes !== null
+    && fontesInvalidasIrrelevantes !== null
+    && fontesInvalidasTotais !== fontesInvalidasRelevantes + fontesInvalidasIrrelevantes) {
+    missing.push("contagem_fontes_invalidas_inconsistente");
+  }
+  if (absorption?.ok === true && (!Number.isFinite(absorption.collectedAtMs)
+    || absorption.collectedAtMs > now + 1000 || now - absorption.collectedAtMs > maxSignalAgeMs)) {
+    missing.push("fila_observada_obsoleta");
+  }
   if (source?.janelaMinutos !== 15 || commercial?.janelaMinutos !== 15 || absorption?.janelaMinutos !== 15) {
     missing.push("janelas_observacao_inconsistentes");
   }
@@ -56,19 +151,29 @@ async function coletarMetricasShadow({
     || numeroFinito(teleRadar.selectedSourceCount) === null) missing.push("teleradar_operacional_indisponivel");
 
   const observedIds = new Set(observedWorkspaceIds);
-  const allWorkspaces = absorption?.ok === true ? absorption.workspaces : [];
-  const workspaces = observedIds.size
+  const allWorkspaces = absorption?.ok === true && Array.isArray(absorption.workspaces) ? absorption.workspaces : [];
+  const cadastralWorkspaces = observedIds.size
     ? allWorkspaces.filter(item => observedIds.has(String(item.workspaceId || "")))
     : allWorkspaces;
-  if (workspaces.length === 0) missing.push("workspaces_observados_ausentes");
-  if (observedIds.size && workspaces.length !== observedIds.size) missing.push("workspace_observado_nao_encontrado");
+  if (observedIds.size && cadastralWorkspaces.length !== observedIds.size) missing.push("workspace_observado_nao_encontrado");
+
+  const workspaces = [];
+  for (const workspace of cadastralWorkspaces) {
+    const elegibilidade = avaliarElegibilidadeOperacional(workspace);
+    if (!elegibilidade.valido) {
+      missing.push("workspace_elegibilidade_indeterminada");
+      continue;
+    }
+    if (elegibilidade.elegivel) workspaces.push({ workspace, elegibilidade });
+  }
 
   let queueDepth = 0;
   let oldestAgeMs = 0;
   let freshReserveProxy = 0;
   let availableCapacity = 0;
-  for (const workspace of workspaces) {
-    const depth = numeroFinito(workspace.pendentesVivos);
+  for (const item of workspaces) {
+    const { workspace, elegibilidade } = item;
+    const depth = elegibilidade.pressao;
     const age = numeroFinito(workspace.idadeMaximaVivaMs);
     const fresh = numeroFinito(workspace.faixasIdade?.itensAte5Min);
     const slots = numeroFinito(workspace.slots15Min);
@@ -78,6 +183,7 @@ async function coletarMetricasShadow({
       continue;
     }
     if (workspace.statusDesconhecido > 0 || workspace.itensSemTimestamp > 0) missing.push("fila_observada_incompleta");
+    if (workspace.fonteFilaValida !== true) missing.push("fila_observada_incompleta");
     queueDepth += depth;
     oldestAgeMs = Math.max(oldestAgeMs, age || 0);
     freshReserveProxy += fresh;
@@ -87,7 +193,7 @@ async function coletarMetricasShadow({
   // never a basis for a source-global intervention suggestion.
   if (observedIds.size) missing.push("escopo_workspace_parcial");
 
-  return {
+  const result = {
     ok: missing.length === 0,
     sinaisAusentes: [...new Set(missing)].sort(),
     confiancaDosSinais: missing.length ? "insuficiente" : "provisoria_shadow",
@@ -115,10 +221,26 @@ async function coletarMetricasShadow({
       selectedSourceCount: numeroFinito(teleRadar.selectedSourceCount)
     } : null,
     observedWorkspaceCount: workspaces.length,
+    cadastralWorkspaceCount: cadastralWorkspaces.length,
+    excludedWorkspaceCount: cadastralWorkspaces.length - workspaces.length,
+    snapshotCompleto: absorption?.snapshotCompleto === true,
+    fontesInvalidasCount,
+    fontesInvalidasTotais,
+    fontesInvalidasRelevantes,
+    fontesInvalidasIrrelevantes,
     observedWorkspaceScope: observedIds.size ? "subset_calibracao" : "global",
     windowMinutes: source?.janelaMinutos ?? 15,
-    observedAtMs: now
+    observedAtMs: now,
+    latencias: {
+      ofcSnapshotMs: numeroFinito(absorption?.duracaoMs),
+      consultaSqlMs: numeroFinito(sourceResult.duracaoMs),
+      radarOperationalMs: numeroFinito(radarResult.duracaoMs),
+      teleRadarOperationalMs: numeroFinito(teleResult.duracaoMs),
+      agregacaoMs: null
+    }
   };
+  result.latencias.agregacaoMs = duracaoMs(clock, aggregationStartedAt);
+  return result;
 }
 
-module.exports = { coletarMetricasShadow, parseObservedWorkspaceIds };
+module.exports = { coletarMetricasShadow, parseObservedWorkspaceIds, avaliarElegibilidadeOperacional };

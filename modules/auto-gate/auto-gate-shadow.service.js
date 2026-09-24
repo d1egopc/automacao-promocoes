@@ -36,9 +36,12 @@ function createAutoGateShadow({
           getRadarOperational,
           getTeleRadarOperational,
           observedWorkspaceIds,
-          now: startedAt
+          now: startedAt,
+          clock
         });
+        const machineStartedAt = clock();
         const result = evaluate(metrics, history, policy);
+        const maquinaEstadosMs = Math.max(0, clock() - machineStartedAt);
         history = result.history;
         lastCycleId = cicloId;
         const telemetry = montarTelemetria({
@@ -46,6 +49,7 @@ function createAutoGateShadow({
           metrics,
           result,
           previousCycleId,
+          maquinaEstadosMs,
           duracaoCalculoMs: Math.max(0, clock() - startedAt)
         });
         log(telemetry);
@@ -56,6 +60,7 @@ function createAutoGateShadow({
           metrics: { observedAtMs: startedAt, sinaisAusentes: ["coleta_shadow_falhou"], confiancaDosSinais: "insuficiente" },
           result: { estadoSugerido: "NORMAL", decisaoSugerida: "NAO_INTERVIR", motivo: "sinais_insuficientes" },
           previousCycleId,
+          maquinaEstadosMs: null,
           duracaoCalculoMs: Math.max(0, clock() - startedAt)
         });
         lastCycleId = cicloId;

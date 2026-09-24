@@ -1,4 +1,5 @@
-const { readGlobalJson, readClienteJson } = require("../../../utils/storage");
+const fs = require("fs");
+const { readGlobalJson, readClienteJson, getClienteJsonPath } = require("../../../utils/storage");
 const { listarClientesAtivos } = require("../../../utils/usuarios-atividade");
 const destinosUtils = require("../../../utils/destinos");
 const {
@@ -69,6 +70,8 @@ const STATUS_ERROS_FINAIS = new Set([
   "erro_final",
   "falha_final",
   "executor_erro_final",
+  "nao_enviado",
+  "nao_enviada",
   "sem_destino",
   "sem_creditos"
 ]);
@@ -127,6 +130,67 @@ const TTL_ESTEIRA_MS = {
 
 function lista(valor) {
   return Array.isArray(valor) ? valor : [];
+}
+
+function resultadoLeituraFila({ ok = false, itens = [], motivo = "", collectedAtMs = Date.now() } = {}) {
+  return {
+    ok: ok === true && Array.isArray(itens),
+    itens: Array.isArray(itens) ? itens : [],
+    motivo: ok === true && Array.isArray(itens) ? "" : String(motivo || "fila_fonte_invalida"),
+    collectedAtMs: Number.isFinite(Number(collectedAtMs)) ? Number(collectedAtMs) : Date.now()
+  };
+}
+
+function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
+  const clock = typeof opcoes.clock === "function" ? opcoes.clock : Date.now;
+  const coletadoEm = () => Number(clock());
+
+  // A injeção de teste usa o mesmo contrato metadatado da leitura produtiva.
+  // O leitor genérico readClienteJson não é aceito aqui porque seu fallback []
+  // não distingue fila realmente vazia de arquivo ausente/corrompido.
+  if (typeof opcoes.readFilaSnapshot === "function") {
+    try {
+      const leitura = opcoes.readFilaSnapshot(clienteId);
+      return resultadoLeituraFila({
+        ok: leitura?.ok === true,
+        itens: leitura?.itens,
+        motivo: leitura?.motivo || "fila_fonte_invalida",
+        collectedAtMs: Number.isFinite(Number(leitura?.collectedAtMs))
+          ? Number(leitura.collectedAtMs) : coletadoEm()
+      });
+    } catch {
+      return resultadoLeituraFila({ motivo: "fila_erro_leitura", collectedAtMs: coletadoEm() });
+    }
+  }
+
+  const resolverPath = typeof opcoes.getClienteJsonPath === "function" ? opcoes.getClienteJsonPath : getClienteJsonPath;
+  const lerArquivo = typeof opcoes.readFileSync === "function" ? opcoes.readFileSync : fs.readFileSync;
+  let texto;
+  try {
+    texto = lerArquivo(resolverPath(clienteId, "fila.json"), "utf8");
+  } catch (erro) {
+    return resultadoLeituraFila({
+      motivo: erro?.code === "ENOENT" ? "fila_ausente" : "fila_erro_leitura",
+      collectedAtMs: coletadoEm()
+    });
+  }
+
+  if (typeof texto !== "string" || texto.trim() === "") {
+    return resultadoLeituraFila({ motivo: "fila_arquivo_vazio", collectedAtMs: coletadoEm() });
+  }
+
+  let itens;
+  try {
+    itens = JSON.parse(texto);
+  } catch {
+    return resultadoLeituraFila({ motivo: "fila_json_corrompido", collectedAtMs: coletadoEm() });
+  }
+  return resultadoLeituraFila({
+    ok: Array.isArray(itens),
+    itens,
+    motivo: "fila_formato_invalido",
+    collectedAtMs: coletadoEm()
+  });
 }
 
 function objeto(valor) {
@@ -438,7 +502,8 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   const lerFila = opcoes.readClienteJson || readClienteJson;
   const agora = Number(opcoes.agoraMs || Date.now());
   const janelaAbertaAgora = opcoes.janelaAbertaAgora === true;
-  const fila = lista(lerFila(clienteId, "fila.json", []));
+  const filaFoiFornecida = Object.prototype.hasOwnProperty.call(opcoes, "filaItens");
+  const fila = filaFoiFornecida ? lista(opcoes.filaItens) : lista(lerFila(clienteId, "fila.json", []));
   const contagem = {
     pendente_vivo: 0,
     em_tentativa: 0,
@@ -519,6 +584,10 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
 
   return {
     itens: fila,
+    fonteFilaValida: opcoes.fonteFilaValida !== false,
+    fonteFilaMotivo: opcoes.fonteFilaValida === false ? String(opcoes.fonteFilaMotivo || "fila_fonte_invalida") : "",
+    fonteFilaColetadaEmMs: Number.isFinite(Number(opcoes.fonteFilaColetadaEmMs))
+      ? Number(opcoes.fonteFilaColetadaEmMs) : null,
     quantidadeFilaAtual: pressaoEsteiraViva,
     pressaoEsteiraViva,
     pressaoVivaConfirmada: pressaoEsteiraViva,
@@ -617,7 +686,8 @@ function slotsCobertura(coberturaMinutos = 0, intervaloMinutos = 1) {
 function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
   const id = destinoId(destino, indice);
   const ativo = destino?.ativo !== false;
-  const integracaoApta = ativo && integracaoAptaDestino(destino);
+  const integracaoConfigurada = ativo && destinoPossuiIntegracaoBasica(destino);
+  const integracaoApta = integracaoConfigurada && integracaoAptaDestino(destino);
   const janelaAbertaAgora = ativo && integracaoApta && destinosUtils.destinoDentroHorario(destino);
   const limiteDiario = limiteDiarioDestino(destino);
   const limiteOk = limiteDiario.restante === null || limiteDiario.restante > 0;
@@ -640,6 +710,7 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
     destinoId: id,
     tipo: String(destino.tipo || destino.canal || "").toLowerCase(),
     destinoHabilitado: ativo,
+    integracaoConfigurada,
     janelaAbertaAgora,
     integracaoApta,
     limiteDiarioConfigurado: limiteDiario.limite,
@@ -680,6 +751,8 @@ function metricasEventosWorkspace(linhas = []) {
 function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens = []) {
   const capacidadePorDestino = lista(destinos).map((destino, indice) => capacidadeDestinoShadow(destino, indice, filaItens));
   const destinosAtivos = capacidadePorDestino.filter(item => item.destinoHabilitado).length;
+  const destinosTopologiaPotencial = capacidadePorDestino
+    .filter(item => item.destinoHabilitado && item.integracaoConfigurada).length;
   const integracoesAptas = capacidadePorDestino.filter(item => item.integracaoApta).length;
   const destinosAptos = capacidadePorDestino.filter(item => item.aptoAgora).length;
   const destinosFechados = capacidadePorDestino.length - destinosAptos;
@@ -689,6 +762,8 @@ function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens =
 
   return {
     destinosAtivos,
+    destinosTopologiaPotencial,
+    topologiaOperacionalPotencial: destinosTopologiaPotencial > 0,
     integracoesAptas,
     destinosAptos,
     destinosFechados,
@@ -826,6 +901,12 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     pressaoVivaConfirmada: numero(fila.pressaoVivaConfirmada, pressaoEsteiraViva),
     statusDesconhecido: numero(fila.status_desconhecido),
     itensSemTimestamp: numero(fila.itensSemTimestamp),
+    fonteFilaValida: fila.fonteFilaValida === true,
+    fonteFilaMotivo: fila.fonteFilaValida === true ? "" : String(fila.fonteFilaMotivo || "fila_fonte_invalida"),
+    fonteFilaColetadaEmMs: Number.isFinite(Number(fila.fonteFilaColetadaEmMs))
+      ? Number(fila.fonteFilaColetadaEmMs) : null,
+    topologiaOperacionalPotencial: destinosResumo.topologiaOperacionalPotencial === true,
+    destinosTopologiaPotencial: numero(destinosResumo.destinosTopologiaPotencial),
     pendente_vivo: numero(fila.pendente_vivo),
     em_tentativa: numero(fila.em_tentativa),
     erro_temporario_recuperavel: numero(fila.erro_temporario_recuperavel),
@@ -941,7 +1022,8 @@ function resumirGate(workspaces = []) {
 }
 
 async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
-  const inicio = Date.now();
+  const clock = typeof opcoes.clock === "function" ? opcoes.clock : Date.now;
+  const inicio = clock();
   const janelaMinutos = Math.max(1, Math.min(120, Math.floor(Number(opcoes.janelaMinutos) || 15)));
 
   try {
@@ -955,7 +1037,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
         failSafe: true,
         motivo: eventos.motivo || "eventos_absorcao_indisponiveis",
         erro: eventos.erro || "",
-        duracaoMs: Date.now() - inicio
+        duracaoMs: Math.max(0, clock() - inicio)
       };
     }
 
@@ -966,18 +1048,34 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
     const destinosPorCliente = carregarDestinosPorCliente(opcoes);
     const eventosPorWorkspace = metricasEventosWorkspace(eventos.porWorkspace);
     const workspaces = [];
+    const fontesInvalidasPorMotivo = {};
+    const fontesInvalidasRelevantesPorMotivo = {};
+    let fontesInvalidasIrrelevantes = 0;
 
     for (const clienteId of lista(clientesAtivos)) {
       const id = String(clienteId || "").trim();
       if (!id) continue;
       const destinos = destinosDoCliente(destinosPorCliente, id);
       const destinosPreview = avaliarDestinosWorkspace(destinos, janelaMinutos, []);
+      const leituraFila = lerFilaWorkspaceSnapshot(id, opcoes);
+      if (!leituraFila.ok) {
+        incrementar(fontesInvalidasPorMotivo, leituraFila.motivo);
+        if (destinosPreview.topologiaOperacionalPotencial) {
+          incrementar(fontesInvalidasRelevantesPorMotivo, leituraFila.motivo);
+        } else {
+          fontesInvalidasIrrelevantes += 1;
+        }
+      }
       workspaces.push(montarGateWorkspace({
         clienteId: id,
         usuario: usuarioPorId(usuarios, id) || {},
         destinos,
         fila: resumoFilaWorkspace(id, {
           ...opcoes,
+          filaItens: leituraFila.itens,
+          fonteFilaValida: leituraFila.ok,
+          fonteFilaMotivo: leituraFila.motivo,
+          fonteFilaColetadaEmMs: leituraFila.collectedAtMs,
           janelaAbertaAgora: destinosPreview.janelaAbertaAgora
         }),
         eventos: eventosPorWorkspace.get(id) || {},
@@ -986,15 +1084,30 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
     }
 
     const resumo = resumirGate(workspaces);
+    const fontesInvalidasTotais = Object.values(fontesInvalidasPorMotivo)
+      .reduce((total, quantidade) => total + numero(quantidade), 0);
+    const fontesInvalidasRelevantes = Object.values(fontesInvalidasRelevantesPorMotivo)
+      .reduce((total, quantidade) => total + numero(quantidade), 0);
     return {
       ok: true,
       modo: "shadow",
       aplicouMudancas: false,
+      snapshotCompleto: fontesInvalidasRelevantes === 0,
+      collectedAtMs: clock(),
+      fontesInvalidasCount: fontesInvalidasRelevantes,
+      fontesInvalidasTotais,
+      fontesInvalidasRelevantes,
+      fontesInvalidasIrrelevantes,
+      fontesInvalidasPorMotivo,
+      fontesInvalidasRelevantesPorMotivo,
       janelaMinutos,
       totalWorkspaces: workspaces.length,
+      totalWorkspacesCadastrais: workspaces.length,
+      totalWorkspacesTopologiaOperacional: workspaces
+        .filter(item => item.topologiaOperacionalPotencial === true).length,
       resumo,
       workspaces,
-      duracaoMs: Date.now() - inicio
+      duracaoMs: Math.max(0, clock() - inicio)
     };
   } catch (e) {
     return {
@@ -1004,7 +1117,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       failSafe: true,
       motivo: "gate_absorcao_exception",
       erro: e?.message || "",
-      duracaoMs: Date.now() - inicio
+      duracaoMs: Math.max(0, clock() - inicio)
     };
   }
 }
@@ -1014,6 +1127,7 @@ module.exports = {
   CAMPOS_TIMESTAMP_FILA,
   TTL_ESTEIRA_MS,
   classificarStatusFila,
+  lerFilaWorkspaceSnapshot,
   itemVivoFila,
   itemPressionaCapacidade,
   timestampFila,
