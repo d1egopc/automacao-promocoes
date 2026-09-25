@@ -22,7 +22,7 @@ const CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS = Object.freeze({
   corIdentidade: "azul"
 });
 
-const CAMPOS_CONFIG_EDITAVEIS = ["logo", "frase", "corIdentidade"];
+const CAMPOS_CONFIG_EDITAVEIS = ["logo", "frase", "corIdentidade", "logoMode", "logoPlacement", "logoScale"];
 
 const LAYOUT_IDENTIDADE_VISUAL_OFERTAS = Object.freeze({
   rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
@@ -95,6 +95,12 @@ function erroIdentidadeVisual(codigo, statusCode = 400) {
   return erro;
 }
 
+function motivoSeguroRender(erro) {
+  if (erro?.code === "ENOENT") return "logo_asset_ausente";
+  const mensagem = String(erro?.message || "");
+  return /^[a-z0-9_]{1,80}$/i.test(mensagem) ? mensagem : "render_fallback";
+}
+
 function logIdentidadeVisual(evento, dados = {}) {
   console.log(evento, {
     clienteId: dados.clienteId || "",
@@ -118,6 +124,10 @@ function montarConfigEfetiva(configWorkspace = {}, politicaResolvida = {}) {
     ...CONFIG_PADRAO_IDENTIDADE_VISUAL_OFERTAS,
     ...normalizarConfigIdentidadeVisual(configWorkspace)
   };
+  if (config.logoMode === "personalizada") {
+    config.logoPlacement ||= "top-right";
+    config.logoScale ||= "medium";
+  }
 
   if (!politicaResolvida.habilitada) {
     return {
@@ -150,10 +160,15 @@ function normalizarPatchPreview(patch = {}) {
   const fonte = patch && typeof patch === "object" ? patch : {};
   const normalizada = normalizarConfigIdentidadeVisual(fonte);
   const saida = {};
-  for (const campo of ["logo", "frase", "corIdentidade"]) {
+  for (const campo of CAMPOS_CONFIG_EDITAVEIS) {
     if (Object.prototype.hasOwnProperty.call(fonte, campo) && normalizada[campo] !== undefined) {
       saida[campo] = normalizada[campo];
     }
+  }
+  if (normalizada.logoMode === "padrao" &&
+      ["logoMode", "logoPlacement", "logoScale"].some(campo => Object.prototype.hasOwnProperty.call(fonte, campo)) &&
+      ["logoMode", "logoPlacement", "logoScale"].some(campo => Object.prototype.hasOwnProperty.call(fonte, campo) && normalizada[campo] === undefined)) {
+    saida.logoMode = "padrao";
   }
   if (Object.prototype.hasOwnProperty.call(fonte, "ativo")) {
     saida.ativo = normalizada.ativo;
@@ -389,6 +404,10 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
         ...configPreview,
         ...normalizarPatchPreview(patch)
       };
+      if (configPreview.logoMode === "personalizada") {
+        configPreview.logoPlacement ||= "top-right";
+        configPreview.logoScale ||= "medium";
+      }
     }
 
     if (resolucao.obrigatoria) {
@@ -553,11 +572,12 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
         contexto
       };
     } catch (erro) {
+      const motivoFallback = motivoSeguroRender(erro);
       logIdentidadeVisual("[IDENTIDADE-VISUAL-FALLBACK]", {
         clienteId,
         ofertaId,
         cacheKey,
-        motivo: erro?.message || "render_fallback"
+        motivo: motivoFallback
       });
       return {
         aplicada: false,
@@ -572,7 +592,7 @@ function criarServicoIdentidadeVisualOfertas(deps = {}) {
           configHash,
           rendererVersion: rendererIdentidadeVisual.RENDERER_VERSION_IDENTIDADE_VISUAL,
           fallback: true,
-          motivoFallback: erro?.message || "render_fallback"
+          motivoFallback
         },
         contexto
       };

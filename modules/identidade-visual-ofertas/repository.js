@@ -47,6 +47,23 @@ function normalizarConfigIdentidadeVisual(config = {}) {
     normalizarCorLegadaParaIdentidade(fonte.corFaixa);
   if (corIdentidade) saida.corIdentidade = corIdentidade;
 
+  const modoInformado = Object.prototype.hasOwnProperty.call(fonte, "logoMode");
+  const posicaoInformada = Object.prototype.hasOwnProperty.call(fonte, "logoPlacement");
+  const escalaInformada = Object.prototype.hasOwnProperty.call(fonte, "logoScale");
+  const modoValido = ["padrao", "personalizada"].includes(fonte.logoMode);
+  const posicaoValida = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(fonte.logoPlacement);
+  const escalaValida = ["small", "medium", "large"].includes(fonte.logoScale);
+  if ((modoInformado && !modoValido) || (posicaoInformada && !posicaoValida) || (escalaInformada && !escalaValida)) {
+    console.warn("[IDENTIDADE-VISUAL-LOGO-CONFIG-FALLBACK]", { motivo: "configuracao_personalizada_invalida" });
+    saida.logoMode = "padrao";
+    return saida;
+  }
+  if (modoValido) saida.logoMode = fonte.logoMode;
+  if (posicaoValida) {
+    saida.logoPlacement = fonte.logoPlacement;
+  }
+  if (escalaValida) saida.logoScale = fonte.logoScale;
+
   return saida;
 }
 

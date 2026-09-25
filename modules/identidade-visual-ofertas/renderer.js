@@ -24,6 +24,13 @@ const PIXEL_QUASE_BRANCO = 245;
 const COBERTURA_MARGEM_BRANCA_MINIMA = 0.985;
 const REDUCAO_MARGEM_BRANCA_MINIMA = 0.08;
 const LOGO_SLOT = Object.freeze({ width: 248, height: 147, left: 56, top: BASE_Y + 30 });
+const LOGO_PERSONALIZADA_TAMANHOS = Object.freeze({
+  small: Object.freeze({ width: 128, height: 96 }),
+  medium: Object.freeze({ width: 180, height: 135 }),
+  large: Object.freeze({ width: 232, height: 174 })
+});
+const LOGO_PERSONALIZADA_POSICOES = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
+const LOGO_PERSONALIZADA_MARGEM = 48;
 const FRASE_SAFE_AREA = Object.freeze({
   left: 350,
   top: BASE_Y + 28,
@@ -95,7 +102,26 @@ function configHashIdentidadeVisual(config = {}) {
     frase: texto(config.frase).slice(0, 80),
     corIdentidade: texto(config.corIdentidade || "azul")
   };
+  const slot = logoSlotPersonalizado(config);
+  if (slot) {
+    payload.logoMode = "personalizada";
+    payload.logoPlacement = config.logoPlacement;
+    payload.logoScale = config.logoScale;
+  }
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+function logoSlotPersonalizado(config = {}) {
+  if (config.logoMode !== "personalizada" ||
+      !LOGO_PERSONALIZADA_POSICOES.has(config.logoPlacement) ||
+      !Object.prototype.hasOwnProperty.call(LOGO_PERSONALIZADA_TAMANHOS, config.logoScale)) return null;
+  const { width, height } = LOGO_PERSONALIZADA_TAMANHOS[config.logoScale];
+  return {
+    width,
+    height,
+    left: config.logoPlacement.endsWith("left") ? LOGO_PERSONALIZADA_MARGEM : CANVAS - LOGO_PERSONALIZADA_MARGEM - width,
+    top: config.logoPlacement.startsWith("top") ? LOGO_PERSONALIZADA_MARGEM : AREA_PRODUTO_ALTURA - LOGO_PERSONALIZADA_MARGEM - height
+  };
 }
 
 function cacheKeyIdentidadeVisual({ clienteId = "admin", imagemOriginal = "", configHash = "" } = {}) {
@@ -295,12 +321,12 @@ async function svgOverlay(config = {}) {
   };
 }
 
-async function normalizarLogoParaSlot(buffer) {
+async function normalizarLogoParaSlot(buffer, slot = LOGO_SLOT) {
   return sharp(buffer, { limitInputPixels: 24_000_000 })
     .rotate()
     .resize({
-      width: LOGO_SLOT.width,
-      height: LOGO_SLOT.height,
+      width: slot.width,
+      height: slot.height,
       fit: "contain",
       withoutEnlargement: true,
       background: { r: 0, g: 0, b: 0, alpha: 0 }
@@ -647,7 +673,8 @@ async function normalizarLogoUpload(buffer, mimeType = "") {
 
 async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, config = {} } = {}) {
   const base = await prepararBaseVisualComumImagem(imagemBuffer);
-  const logo = await normalizarLogoParaSlot(logoBuffer);
+  const logoSlot = logoSlotPersonalizado(config) || LOGO_SLOT;
+  const logo = await normalizarLogoParaSlot(logoBuffer, logoSlot);
   const overlay = await svgOverlay(config);
   const corIdentidade = texto(config.corIdentidade || "azul");
   const corHex = corHexIdentidade(corIdentidade);
@@ -655,7 +682,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
 
   const output = await comporBaseVisualComum(base, [
       { input: overlay.buffer, left: 0, top: 0 },
-      { input: logo, left: LOGO_SLOT.left, top: LOGO_SLOT.top }
+      { input: logo, left: logoSlot.left, top: logoSlot.top }
     ]);
 
   return {
@@ -669,7 +696,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
       corIdentidade,
       corHex,
       corTexto,
-      logoSlot: { ...LOGO_SLOT },
+      logoSlot: { ...logoSlot },
       fraseLayout: overlay.fraseLayout
     }
   };
