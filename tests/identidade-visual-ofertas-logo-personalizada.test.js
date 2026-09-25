@@ -45,22 +45,50 @@ async function main() {
       const slot = personalizada.metadata.logoSlot;
       assert.ok(slot.left >= 48 && slot.top >= 48);
       assert.ok(slot.left + slot.width <= 1080 - 48);
-      assert.ok(slot.top + slot.height <= renderer.AREA_PRODUTO_ALTURA - 48);
+      assert.ok(slot.top + slot.height <= 1080 - 48);
       assert.strictEqual(slot.left < 540, logoPlacement.endsWith("left"));
       assert.strictEqual(slot.top < 400, logoPlacement.startsWith("top"));
       assert.notDeepStrictEqual(personalizada.buffer, legado.buffer);
-      assert.deepStrictEqual(personalizada.metadata.fraseLayout, legado.metadata.fraseLayout);
-      assert.strictEqual(personalizada.metadata.corHex, legado.metadata.corHex);
+      assert.strictEqual(personalizada.metadata.fraseLayout, undefined);
+      assert.strictEqual(personalizada.metadata.corHex, undefined);
       const meta = await sharp(personalizada.buffer).metadata();
       assert.strictEqual(meta.width, 1080);
       assert.strictEqual(meta.height, 1080);
       assert.strictEqual(meta.format, "png");
+      assert.strictEqual(personalizada.metadata.faixaAplicada, false);
+      assert.strictEqual(personalizada.metadata.fraseAplicada, false);
+      assert.strictEqual(personalizada.metadata.logoMode, "personalizada");
+      if (logoPlacement.startsWith("bottom")) {
+        assert.ok(slot.top + slot.height > renderer.AREA_PRODUTO_ALTURA, "canto inferior usa a arte inteira, não a faixa");
+      }
       const pixel = await sharp(personalizada.buffer).extract({ left: slot.left + Math.floor(slot.width / 2), top: slot.top + Math.floor(slot.height / 2), width: 1, height: 1 }).raw().toBuffer();
       assert.ok(pixel[0] > pixel[1], "logo colorida deve aparecer no canto selecionado");
-      const pixelRodape = await sharp(personalizada.buffer).extract({
-        left: renderer.LOGO_SLOT.left + 80, top: renderer.LOGO_SLOT.top + 40, width: 1, height: 1
-      }).raw().toBuffer();
-      assert.ok(pixelRodape[2] > pixelRodape[0], "modo personalizado não deve duplicar a logo no rodapé");
+      const { data: rodape, info: rodapeInfo } = await sharp(personalizada.buffer)
+        .extract({
+          left: renderer.LOGO_SLOT.left,
+          top: renderer.LOGO_SLOT.top,
+          width: renderer.LOGO_SLOT.width,
+          height: renderer.LOGO_SLOT.height
+        })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      let vermelhoForaDoSlot = 0;
+      for (let y = 0; y < rodapeInfo.height; y += 1) {
+        for (let x = 0; x < rodapeInfo.width; x += 1) {
+          const globalX = renderer.LOGO_SLOT.left + x;
+          const globalY = renderer.LOGO_SLOT.top + y;
+          const dentroDoSlotPersonalizado = globalX >= slot.left &&
+            globalX < slot.left + slot.width &&
+            globalY >= slot.top &&
+            globalY < slot.top + slot.height;
+          const indice = (y * rodapeInfo.width + x) * rodapeInfo.channels;
+          const alpha = rodapeInfo.channels >= 4 ? rodape[indice + 3] : 255;
+          if (!dentroDoSlotPersonalizado && alpha > 20 && rodape[indice] > rodape[indice + 1] + 50 && rodape[indice] > rodape[indice + 2] + 50) {
+            vermelhoForaDoSlot += 1;
+          }
+        }
+      }
+      assert.strictEqual(vermelhoForaDoSlot, 0, "modo personalizado não deve duplicar a logo no rodapé");
     }
   }
   for (const [width, height] of [[320, 48], [48, 320], [180, 180]]) {
@@ -80,7 +108,7 @@ async function main() {
       ...config, logoMode: "personalizada", logoPlacement: "bottom-right", logoScale: "large"
     } });
     assert.strictEqual((await sharp(render.buffer).metadata()).width, 1080, "proporção do produto não muda canvas");
-    assert.ok(render.metadata.logoSlot.top + render.metadata.logoSlot.height < 862, "logo não cruza o rodapé");
+    assert.ok(render.metadata.logoSlot.top + render.metadata.logoSlot.height <= 1080 - 48, "logo respeita margem da arte inteira");
   }
 
   const configs = {};

@@ -120,7 +120,9 @@ function logoSlotPersonalizado(config = {}) {
     width,
     height,
     left: config.logoPlacement.endsWith("left") ? LOGO_PERSONALIZADA_MARGEM : CANVAS - LOGO_PERSONALIZADA_MARGEM - width,
-    top: config.logoPlacement.startsWith("top") ? LOGO_PERSONALIZADA_MARGEM : AREA_PRODUTO_ALTURA - LOGO_PERSONALIZADA_MARGEM - height
+    top: config.logoPlacement.startsWith("top")
+      ? LOGO_PERSONALIZADA_MARGEM
+      : CANVAS - LOGO_PERSONALIZADA_MARGEM - height
   };
 }
 
@@ -673,8 +675,30 @@ async function normalizarLogoUpload(buffer, mimeType = "") {
 
 async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, config = {} } = {}) {
   const base = await prepararBaseVisualComumImagem(imagemBuffer);
-  const logoSlot = logoSlotPersonalizado(config) || LOGO_SLOT;
-  const logo = await normalizarLogoParaSlot(logoBuffer, logoSlot);
+  const logoSlot = logoSlotPersonalizado(config);
+  if (logoSlot) {
+    const logo = await normalizarLogoParaSlot(logoBuffer, logoSlot);
+    const output = await comporBaseVisualComum(base, [
+      { input: logo, left: logoSlot.left, top: logoSlot.top }
+    ]);
+    return {
+      buffer: output,
+      metadata: {
+        ...metadataBaseVisualComum(base),
+        padraoGlobalImagem: true,
+        brandingAplicado: true,
+        faixaAplicada: false,
+        logoAplicado: true,
+        logoMode: "personalizada",
+        logoPlacement: config.logoPlacement,
+        logoScale: config.logoScale,
+        logoSlot: { ...logoSlot },
+        fraseAplicada: false
+      }
+    };
+  }
+
+  const logo = await normalizarLogoParaSlot(logoBuffer, LOGO_SLOT);
   const overlay = await svgOverlay(config);
   const corIdentidade = texto(config.corIdentidade || "azul");
   const corHex = corHexIdentidade(corIdentidade);
@@ -682,7 +706,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
 
   const output = await comporBaseVisualComum(base, [
       { input: overlay.buffer, left: 0, top: 0 },
-      { input: logo, left: logoSlot.left, top: logoSlot.top }
+      { input: logo, left: LOGO_SLOT.left, top: LOGO_SLOT.top }
     ]);
 
   return {
@@ -696,7 +720,7 @@ async function renderizarIdentidadeVisualBuffer({ imagemBuffer, logoBuffer, conf
       corIdentidade,
       corHex,
       corTexto,
-      logoSlot: { ...logoSlot },
+      logoSlot: { ...LOGO_SLOT },
       fraseLayout: overlay.fraseLayout
     }
   };
