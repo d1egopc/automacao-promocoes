@@ -104,6 +104,33 @@ function identidadeCanonica(oferta = {}) {
     .digest("hex");
 }
 
+function normalizarTituloConservador(valor) {
+  const titulo = texto(valor)
+    .toLowerCase()
+    .replace(/\bc\s*\/\s*/g, " com ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (!titulo) return "";
+  const tokens = titulo.split(/\s+/).map((token) => {
+    if (token.length >= 5 && token.endsWith("s") && !/(?:is|us|ss)$/.test(token)) return token.slice(0, -1);
+    return token;
+  });
+  const relevantes = tokens.filter((token) => token.length >= 3 || /^\d+$/.test(token));
+  const normalizado = tokens.join(" ");
+  return relevantes.length >= 3 && normalizado.length >= 12 ? normalizado : "";
+}
+
+function identidadeTituloConservadora(oferta = {}) {
+  const marketplace = mercado(oferta.marketplace);
+  const titulo = normalizarTituloConservador(oferta.titulo || oferta.produto?.titulo);
+  if (!marketplace || !titulo) return "";
+  return `titulo:${crypto.createHash("sha256")
+    .update(JSON.stringify([marketplace, titulo]))
+    .digest("hex")}`;
+}
+
 function identidadeIsoladaObservacao(oferta = {}) {
   const marketplace = texto(oferta.marketplace).toLowerCase() || "desconhecido";
   const observacaoId = texto(oferta.identidadeObservacaoId || oferta.ofertaIdAtual || oferta.ofertaId || oferta.id || oferta.engineOfertaId);
@@ -119,5 +146,7 @@ module.exports = {
   idProdutoPorUrl,
   componentesIdentidadeCanonica,
   identidadeCanonica,
+  normalizarTituloConservador,
+  identidadeTituloConservadora,
   identidadeIsoladaObservacao
 };

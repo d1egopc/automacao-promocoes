@@ -1,7 +1,12 @@
 const fs = require("fs");
 const { getClienteJsonPath, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
 const { MARKETPLACES_MANUAL_V2 } = require("./manual-offers.contract");
-const { identidadeCanonica, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
+const { categoriaGenerica } = require("../inteligencia-universal/categoria.service");
+const {
+  identidadeCanonica,
+  identidadeTituloConservadora,
+  identidadeIsoladaObservacao
+} = require("./ofertas-v2-identidade");
 
 const ARQUIVO_ACHADOS = "manual_achados_v2.json";
 const TTL_ACHADOS_MS = 48 * 60 * 60 * 1000;
@@ -53,18 +58,133 @@ function instanteAchado(achado = {}) {
   return Number.isFinite(valor) ? valor : -Infinity;
 }
 
+function origemTituloAchado(metadata = {}) {
+  const mlWork = objeto(metadata.mlWorkEnrichmentActive);
+  if (mlWork.identidadeValidada === true && mlWork.tituloWorkAplicado === true) {
+    return "local_worker.ml_identity_v1";
+  }
+  const produto = objeto(metadata.produto);
+  const autoridade = objeto(metadata.autoridadeFactual);
+  return texto(produto.tituloOrigem || autoridade.tituloOrigem);
+}
+
+function qualidadeOrigem(valor = "") {
+  const origem = texto(valor).toLowerCase();
+  if (!origem) return 1;
+  if (/local_worker\.ml_identity_v1|work_validado/.test(origem)) return 4;
+  if (/oficial|official|marketplace_api|product_api|adapter_oficial|canonic/.test(origem)) return 3;
+  return 2;
+}
+
+function tituloGenerico(valor = "") {
+  const normalizado = texto(valor).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return !normalizado || ["produto", "oferta", "promocao", "item"].includes(normalizado);
+}
+
+function qualidadeApresentacaoTitulo(valor = "") {
+  const titulo = texto(valor);
+  const acentos = (titulo.match(/[\u00c0-\u017f]/g) || []).length;
+  const ruido = (titulo.match(/\*/g) || []).length + (/[*|\-–—:,;]+\s*$/.test(titulo) ? 1 : 0);
+  return acentos - (ruido * 10);
+}
+
+function escolherTitulo(existente = {}, novo = {}) {
+  const atual = texto(existente.titulo);
+  const recebido = texto(novo.titulo);
+  if (!recebido || (tituloGenerico(recebido) && !tituloGenerico(atual))) {
+    return { titulo: atual, tituloOrigem: texto(existente.tituloOrigem) };
+  }
+  if (!atual || (tituloGenerico(atual) && !tituloGenerico(recebido))) {
+    return { titulo: recebido, tituloOrigem: texto(novo.tituloOrigem) };
+  }
+  const qualidadeAtual = qualidadeOrigem(existente.tituloOrigem);
+  const qualidadeNova = qualidadeOrigem(novo.tituloOrigem);
+  if (qualidadeAtual !== qualidadeNova) {
+    return qualidadeNova > qualidadeAtual
+      ? { titulo: recebido, tituloOrigem: texto(novo.tituloOrigem) }
+      : { titulo: atual, tituloOrigem: texto(existente.tituloOrigem) };
+  }
+  if (identidadeTituloConservadora(existente) === identidadeTituloConservadora(novo) &&
+      qualidadeApresentacaoTitulo(atual) !== qualidadeApresentacaoTitulo(recebido)) {
+    return qualidadeApresentacaoTitulo(recebido) > qualidadeApresentacaoTitulo(atual)
+      ? { titulo: recebido, tituloOrigem: texto(novo.tituloOrigem) }
+      : { titulo: atual, tituloOrigem: texto(existente.tituloOrigem) };
+  }
+  return { titulo: recebido, tituloOrigem: texto(novo.tituloOrigem) };
+}
+
+function imagemValida(valor = "") {
+  try {
+    return ["http:", "https:"].includes(new URL(texto(valor)).protocol);
+  } catch { return false; }
+}
+
+function qualidadeOrigemImagem(valor = "") {
+  const origem = texto(valor).toLowerCase();
+  if (/radar|whatsapp|telegram/.test(origem)) return 0;
+  return qualidadeOrigem(origem);
+}
+
+function escolherImagem(existente = {}, novo = {}) {
+  const atual = texto(existente.imagem);
+  const recebida = texto(novo.imagem);
+  const atualValida = imagemValida(atual);
+  const novaValida = imagemValida(recebida);
+  if (!novaValida || qualidadeOrigemImagem(novo.imagemOrigem) === 0) {
+    return { imagem: atualValida ? atual : "", imagemOrigem: atualValida ? texto(existente.imagemOrigem) : "" };
+  }
+  if (!atualValida || qualidadeOrigemImagem(novo.imagemOrigem) >= qualidadeOrigemImagem(existente.imagemOrigem)) {
+    return { imagem: recebida, imagemOrigem: texto(novo.imagemOrigem) };
+  }
+  return { imagem: atual, imagemOrigem: texto(existente.imagemOrigem) };
+}
+
+function escolherCategoria(existente = {}, novo = {}) {
+  const atual = texto(existente.categoria);
+  const recebida = texto(novo.categoria);
+  if (categoriaGenerica(recebida) && !categoriaGenerica(atual)) return atual;
+  if (!categoriaGenerica(recebida) && categoriaGenerica(atual)) return recebida;
+  return recebida || atual;
+}
+
+function primeiroInstante(existente = {}, novo = {}) {
+  return [existente.primeiroCapturadoEm, existente.capturadoEm, novo.primeiroCapturadoEm, novo.capturadoEm]
+    .map(texto).filter((valor) => Number.isFinite(Date.parse(valor)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] || "";
+}
+
+function mesclarIdentidadeVisual(existente = {}, novo = {}) {
+  const titulo = escolherTitulo(existente, novo);
+  const imagem = escolherImagem(existente, novo);
+  return {
+    ...novo,
+    ...titulo,
+    ...imagem,
+    categoria: escolherCategoria(existente, novo),
+    primeiroCapturadoEm: primeiroInstante(existente, novo) || texto(novo.primeiroCapturadoEm)
+  };
+}
+
+function identidadeAchado(achado = {}) {
+  return identidadeCanonica(achado) || identidadeTituloConservadora(achado) || identidadeIsoladaObservacao(achado);
+}
+
 function consolidarCanonicos(achados = []) {
   const mapa = new Map();
   for (const item of achados) {
     // Recalcular impede que uma chave permissiva persistida por versão antiga
     // continue fundindo observações sem identidade oficial.
-    const canonicalKey = identidadeCanonica(item) || identidadeIsoladaObservacao(item);
+    const canonicalKey = identidadeAchado(item);
     const chave = canonicalKey ? `${texto(item?.clienteId)}:${canonicalKey}` : `oferta:${texto(item?.clienteId)}:${texto(item?.id)}`;
     const normalizado = canonicalKey && item?.canonicalKey !== canonicalKey ? { ...item, canonicalKey } : item;
     const atual = mapa.get(chave);
-    if (!atual || instanteAchado(normalizado) > instanteAchado(atual) ||
-        (instanteAchado(normalizado) === instanteAchado(atual) && texto(normalizado?.id).localeCompare(texto(atual?.id)) > 0)) {
-      mapa.set(chave, normalizado);
+    if (!atual) mapa.set(chave, normalizado);
+    else {
+      const normalizadoMaisNovo = instanteAchado(normalizado) > instanteAchado(atual) ||
+        (instanteAchado(normalizado) === instanteAchado(atual) && texto(normalizado?.id).localeCompare(texto(atual?.id)) > 0);
+      mapa.set(chave, normalizadoMaisNovo
+        ? mesclarIdentidadeVisual(atual, normalizado)
+        : mesclarIdentidadeVisual(normalizado, atual));
     }
   }
   return [...mapa.values()];
@@ -104,6 +224,7 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
     identidadeProdutoVerificada: { origem: "engine_importer", marketplace: universal.marketplace,
       id: texto(universal.produto.idExterno) },
     categoria: texto(universal.produto.categoriaNormalizada),
+    tituloOrigem: origemTituloAchado(metadata),
     precoAtual: Number(universal.comercial.precoAtual),
     precoAnterior: universal.comercial.precoAnterior == null ? null : Number(universal.comercial.precoAnterior),
     cupom: texto(universal.comercial.cupom),
@@ -112,6 +233,7 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
     beneficios: Array.isArray(universal.comercial.beneficios)
       ? universal.comercial.beneficios.map(texto).filter(Boolean) : [],
     imagem: texto(universal.midia?.imagemPrincipal),
+    imagemOrigem: texto(universal.midia?.origemImagem || metadata.imagemOrigem),
     urlOriginal: texto(universal.produto.urlCanonica || universal.produto.urlOriginal),
     urlAfiliada: texto(universal.afiliacao.urlAfiliada),
     // Somente a evidência de saída do importer; nunca aceitar esses campos da API pública.
@@ -122,13 +244,13 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
     ultimaObservacaoEm: capturadoEm
   };
   const atual = lerAchados(id);
-  const canonicalKey = identidadeCanonica(achado) || identidadeIsoladaObservacao(achado);
+  const canonicalKey = identidadeAchado(achado);
   if (!canonicalKey) return { ok: false, motivo: "produto_sem_identidade_canonica" };
   const existente = atual
-    .filter((item) => (identidadeCanonica(item) || identidadeIsoladaObservacao(item)) === canonicalKey)
+    .filter((item) => identidadeAchado(item) === canonicalKey)
     .sort((a, b) => instanteAchado(b) - instanteAchado(a))[0];
   const consolidado = {
-    ...achado,
+    ...mesclarIdentidadeVisual(existente, achado),
     id: existente?.id || achado.id,
     canonicalKey,
     ofertaIdAtual: achado.id,
@@ -136,7 +258,7 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
   };
   const proximo = selecionarEstoque([consolidado, ...atual.filter((item) =>
     item.id !== consolidado.id &&
-    (identidadeCanonica(item) || identidadeIsoladaObservacao(item)) !== canonicalKey)]);
+    identidadeAchado(item) !== canonicalKey)]);
   writeClienteJson(id, ARQUIVO_ACHADOS, proximo);
   return { ok: true, achado: consolidado, atualizado: Boolean(existente) };
 }
@@ -158,5 +280,6 @@ function buscarAchado(clienteId, achadoId, nowMs = Date.now()) {
 
 module.exports = {
   ARQUIVO_ACHADOS, TTL_ACHADOS_MS, LIMITE_POR_MARKETPLACE, MARKETPLACES_ACHADOS,
-  consolidarCanonicos, selecionarEstoque, registrarAchado, listarAchados, buscarAchado
+  identidadeAchado, mesclarIdentidadeVisual, consolidarCanonicos, selecionarEstoque,
+  registrarAchado, listarAchados, buscarAchado
 };

@@ -82,6 +82,40 @@ function criarLista(clienteId, nome, deps = {}) {
   salvarListas(id, [...listas, nova]);
   return publicoLista(nova);
 }
+function nomeCopiaSeguro(nomeOriginal, listas) {
+  const nomes = new Set(lista(listas).map((item) => texto(item?.nome).toLocaleLowerCase("pt-BR")));
+  const base = texto(nomeOriginal) || "Lista";
+  for (let numero = 1; numero <= MAX_LISTAS + 1; numero += 1) {
+    const sufixo = numero === 1 ? " — cópia" : ` — cópia ${numero}`;
+    const candidato = `${base.slice(0, Math.max(1, 80 - sufixo.length)).trimEnd()}${sufixo}`;
+    if (!nomes.has(candidato.toLocaleLowerCase("pt-BR"))) return candidato;
+  }
+  throw erro("lista_nome_copia_indisponivel", 409);
+}
+function duplicarLista(clienteId, listaId, deps = {}) {
+  const id = normalizarClienteId(clienteId);
+  const listas = lerListas(id);
+  if (listas.length >= MAX_LISTAS) throw erro("limite_de_6_listas", 409);
+  const original = listas.find((item) => item.id === texto(listaId));
+  if (!original) throw erro("lista_nao_encontrada", 404);
+  const instante = new Date(agora(deps)).toISOString();
+  const itens = original.itens.map((item) => ({
+    id: crypto.randomUUID(),
+    origem: texto(item.origem),
+    origemId: texto(item.origemId),
+    canonicalKey: texto(item.canonicalKey),
+    oferta: JSON.parse(JSON.stringify(item.oferta || {})),
+    status: "aguardando",
+    motivo: ""
+  }));
+  const copia = {
+    id: crypto.randomUUID(), clienteId: id, nome: nomeCopiaSeguro(original.nome, listas), itens,
+    status: "parada", destinosIds: [], intervaloMs: 0, proximoEm: 0,
+    criadoEm: instante, atualizadoEm: instante
+  };
+  salvarListas(id, [...listas, copia]);
+  return publicoLista(copia);
+}
 function renomearLista(clienteId, listaId, nome) {
   const nomeLimpo = texto(nome).slice(0, 80);
   if (!nomeLimpo) throw erro("lista_nome_obrigatorio");
@@ -443,7 +477,7 @@ async function processarListasCliente(clienteId, deps = {}) {
 
 module.exports = {
   ARQUIVO_LISTAS, ARQUIVO_DEDUPE, MAX_LISTAS, DEDUPE_MS,
-  lerListas, listarListas, criarLista, renomearLista, excluirLista, esvaziarLista,
+  lerListas, listarListas, criarLista, duplicarLista, renomearLista, excluirLista, esvaziarLista,
   adicionarItem, removerItem, reservarDestinos, interromperLista, recuperarExecucoes,
   preflightLista, processarLista, processarListasCliente, identidadeCanonica, ofertaDoAchado
 };

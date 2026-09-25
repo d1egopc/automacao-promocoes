@@ -358,6 +358,8 @@ function criarRotasManualV2(deps = {}) {
   }));
   router.get("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ listas: listasV2.listarListas(id) })));
   router.post("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.criarLista(id, req.body?.nome) })));
+  router.post("/listas/:id/duplicar", (req, res) => responderOfertasV2(req, res,
+    (id) => ({ lista: listasV2.duplicarLista(id, req.params.id) })));
   router.put("/listas/:id", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.renomearLista(id, req.params.id, req.body?.nome) })));
   router.delete("/listas/:id", (req, res) => responderOfertasV2(req, res, (id) => listasV2.excluirLista(id, req.params.id)));
   router.delete("/listas/:id/itens", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.esvaziarLista(id, req.params.id) })));
