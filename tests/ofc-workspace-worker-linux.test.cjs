@@ -51,16 +51,29 @@ for(const mode of ["temp-write-rename","rename-original","unlink","unlink-recrea
   });
 }
 for(const mode of ["crash","terminate","timeout","invalid","exit"])test("actual Linux Worker failsafe: "+mode,async()=>{
-  const file=path.join(temp,"fail-"+mode+".json");fs.writeFileSync(file,original);let instance,termination;
+  const file=path.join(temp,"fail-"+mode+".json");fs.writeFileSync(file,original);let instance,termination,errorListenersWhileAlive=0;
   const client=criarClienteWorker({timeoutMs:500,workerFactory:()=>{
     instance=new Worker(path.join(__dirname,"fixtures/ofc-worker-linux-failure.cjs"),{workerData:{mode}});
+    instance.once("online",()=>{errorListenersWhileAlive=instance.listenerCount("error");});
     if(mode==="terminate")termination=(async()=>{await pause(100);await instance.terminate();})();
     return instance;
   }});
   try {const result=await fallback(file,client);await termination;
-    assert.ok(instance.listenerCount("error")>=1);assert.doesNotThrow(()=>instance.emit("error",new Error("intentional late error")));
-    console.log("LINUX_FAILSAFE_EVIDENCE",JSON.stringify({mode,...result,mainAlive:true}));
+    assert.ok(errorListenersWhileAlive>=1,"Client installs error listener before Worker can emit actual lifecycle errors");
+    // Node's internal Worker exit cleanup calls removeAllListeners itself. Do not
+    // inject an impossible lifecycle error into the already-destroyed object.
+    console.log("LINUX_FAILSAFE_EVIDENCE",JSON.stringify({mode,...result,mainAlive:true,errorListenersWhileAlive}));
   } finally {await client.fechar();await termination;}
+});
+test("late error after settle while actual Worker is still alive",async()=>{
+  const file=path.join(temp,"late-error.json");fs.writeFileSync(file,original);let instance;
+  const client=criarClienteWorker({workerFactory:()=>{instance=new Worker(path.join(__dirname,"../modules/engine/ofc/workspace-worker.js"));return instance;}});
+  try {
+    const evaluate=()=>ofc.criarGateAbsorcaoShadowOfc({...options(file,true),clienteWorker:{executar:input=>client.executar({...input,coletaTesteMs:now})}});
+    const first=await evaluate();assert.ok(instance.listenerCount("error")>=1);
+    assert.doesNotThrow(()=>instance.emit("error",new Error("intentional late error after settled job")));
+    assert.deepEqual(await evaluate(),first);assert.deepEqual(first,await ofc.criarGateAbsorcaoShadowOfc(options(file,false)));
+  } finally {await client.fechar();}
 });
 test("revision changed at consumer after client validates",async()=>{
   const file=path.join(temp,"consumer.json");fs.writeFileSync(file,original);const client=criarClienteWorker();let reads=0;const read=fs.readFileSync,events=[];
