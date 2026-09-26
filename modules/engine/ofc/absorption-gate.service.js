@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { criarContadorFinalizacoes } = require("./drainage-metrics.service");
 const { readGlobalJson, readClienteJson, getClienteJsonPath } = require("../../../utils/storage");
 const { listarClientesAtivos } = require("../../../utils/usuarios-atividade");
 const destinosUtils = require("../../../utils/destinos");
@@ -145,6 +146,8 @@ function resultadoLeituraFila({ ok = false, itens = [], motivo = "", collectedAt
 function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   const clock = typeof opcoes.clock === "function" ? opcoes.clock : Date.now;
   const coletadoEm = () => Number(clock());
+  const medidor = opcoes.medidorCiclo;
+  const clockPerf = medidor?.clock || (() => 0);
 
   // A injeção de teste usa o mesmo contrato metadatado da leitura produtiva.
   // O leitor genérico readClienteJson não é aceito aqui porque seu fallback []
@@ -152,6 +155,7 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   if (typeof opcoes.readFilaSnapshot === "function") {
     try {
       const leitura = opcoes.readFilaSnapshot(clienteId);
+      medidor?.registrarLeitura({ lido: leitura?.ok === true, itens: Array.isArray(leitura?.itens) ? leitura.itens.length : 0 });
       return resultadoLeituraFila({
         ok: leitura?.ok === true,
         itens: leitura?.itens,
@@ -160,6 +164,7 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
           ? Number(leitura.collectedAtMs) : coletadoEm()
       });
     } catch {
+      medidor?.registrarLeitura({ lido: false });
       return resultadoLeituraFila({ motivo: "fila_erro_leitura", collectedAtMs: coletadoEm() });
     }
   }
@@ -167,9 +172,19 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   const resolverPath = typeof opcoes.getClienteJsonPath === "function" ? opcoes.getClienteJsonPath : getClienteJsonPath;
   const lerArquivo = typeof opcoes.readFileSync === "function" ? opcoes.readFileSync : fs.readFileSync;
   let texto;
+  let bytesArquivoObservados = null;
+  let leituraMs = 0;
+  let parseMs = 0;
+  const inicioLeitura = clockPerf();
   try {
-    texto = lerArquivo(resolverPath(clienteId, "fila.json"), "utf8");
+    const arquivo = resolverPath(clienteId, "fila.json");
+    if (medidor && !opcoes.readFileSync) {
+      try { bytesArquivoObservados = fs.statSync(arquivo).size; } catch {}
+    }
+    texto = lerArquivo(arquivo, "utf8");
+    leituraMs = Math.max(0, clockPerf() - inicioLeitura);
   } catch (erro) {
+    medidor?.registrarLeitura({ lido: false, leituraMs: Math.max(0, clockPerf() - inicioLeitura) });
     return resultadoLeituraFila({
       motivo: erro?.code === "ENOENT" ? "fila_ausente" : "fila_erro_leitura",
       collectedAtMs: coletadoEm()
@@ -177,15 +192,22 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   }
 
   if (typeof texto !== "string" || texto.trim() === "") {
+    medidor?.registrarLeitura({ lido: true, leituraMs, bytesArquivoObservados, caracteresLidos: texto?.length || 0 });
     return resultadoLeituraFila({ motivo: "fila_arquivo_vazio", collectedAtMs: coletadoEm() });
   }
 
   let itens;
+  const inicioParse = clockPerf();
   try {
     itens = JSON.parse(texto);
+    parseMs = Math.max(0, clockPerf() - inicioParse);
   } catch {
+    medidor?.registrarLeitura({ lido: true, leituraMs, parseMs: Math.max(0, clockPerf() - inicioParse),
+      bytesArquivoObservados, caracteresLidos: texto.length });
     return resultadoLeituraFila({ motivo: "fila_json_corrompido", collectedAtMs: coletadoEm() });
   }
+  medidor?.registrarLeitura({ lido: true, leituraMs, parseMs, bytesArquivoObservados, caracteresLidos: texto.length,
+    itens: Array.isArray(itens) ? itens.length : 0 });
   return resultadoLeituraFila({
     ok: Array.isArray(itens),
     itens,
@@ -525,6 +547,7 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   const janelaAbertaAgora = opcoes.janelaAbertaAgora === true;
   const filaFoiFornecida = Object.prototype.hasOwnProperty.call(opcoes, "filaItens");
   const fila = filaFoiFornecida ? lista(opcoes.filaItens) : lista(lerFila(clienteId, "fila.json", []));
+  const finalizacoes = criarContadorFinalizacoes({ clienteId, agoraMs: opcoes.finalizacoesAgoraMs ?? agora, janelaMinutos: opcoes.janelaMinutos || 15 });
   const contagem = {
     pendente_vivo: 0,
     em_tentativa: 0,
@@ -565,6 +588,7 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
     const bucket = classificarStatusFila(item);
     contagem[bucket] = (contagem[bucket] || 0) + 1;
     incrementar(porStatus, statusReal);
+    finalizacoes.observar(item);
 
     if (!itemVivoFila(item)) continue;
 
@@ -619,6 +643,7 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
 
   return {
     itens: fila,
+    finalizacoesComerciaisObservadas: finalizacoes.resumo(),
     fonteFilaValida: opcoes.fonteFilaValida !== false,
     fonteFilaMotivo: opcoes.fonteFilaValida === false ? String(opcoes.fonteFilaMotivo || "fila_fonte_invalida") : "",
     fonteFilaColetadaEmMs: Number.isFinite(Number(opcoes.fonteFilaColetadaEmMs))
@@ -966,6 +991,7 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}
     estadoDaEsteira: classificacao.estado,
     motivo: classificacao.motivo,
     totalEnviadosHistorico: numero(fila.totalEnviadosHistorico),
+    finalizacoesComerciaisObservadas: fila.finalizacoesComerciaisObservadas || null,
     pressaoEsteiraViva,
     pressaoVivaConfirmada: numero(fila.pressaoVivaConfirmada, pressaoEsteiraViva),
     queueDepthRaw: numero(fila.queueDepthRaw),
@@ -1209,6 +1235,8 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
           fonteFilaValida: leituraFila.ok,
           fonteFilaMotivo: leituraFila.motivo,
           fonteFilaColetadaEmMs: leituraFila.collectedAtMs,
+          janelaMinutos,
+          finalizacoesAgoraMs: inicio,
           janelaAbertaAgora: destinosPreview.janelaAbertaAgora
         }),
         eventos: eventosPorWorkspace.get(id) || {},
@@ -1235,6 +1263,15 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       fontesInvalidasRelevantesPorMotivo,
       janelaMinutos,
       totalWorkspaces: workspaces.length,
+      finalizacoesComerciaisObservadas: {
+        disponivel: workspaces.some(w => w.fonteFilaValida),
+        total: workspaces.reduce((n, w) => n + (w.fonteFilaValida ? w.finalizacoesComerciaisObservadas?.total || 0 : 0), 0),
+        semIdentidadeOuHorario: workspaces.reduce((n, w) => n + (w.finalizacoesComerciaisObservadas?.semIdentidadeOuHorario || 0), 0),
+        completo: fontesInvalidasTotais === 0 && workspaces.every(w => w.finalizacoesComerciaisObservadas?.semIdentidadeOuHorario === 0),
+        fontesInvalidas: fontesInvalidasTotais,
+        observadoEmMs: inicio,
+        motivo: fontesInvalidasTotais > 0 ? "filas_ausentes_ou_invalidas" : ""
+      },
       totalWorkspacesCadastrais: workspaces.length,
       totalWorkspacesTopologiaOperacional: workspaces
         .filter(item => item.topologiaOperacionalPotencial === true).length,

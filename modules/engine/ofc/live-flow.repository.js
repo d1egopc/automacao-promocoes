@@ -5,6 +5,8 @@ const {
   medirBytesJsonSeguro
 } = require("../../telemetria/engine-memory-stage");
 const { monitorEventLoopDelay } = require("node:perf_hooks");
+const { criarDisponibilidadeRelacao } = require("./optional-relation-source");
+const fonteReset = criarDisponibilidadeRelacao({ relacao: "engine_reset_operacional_operacoes" });
 
 const STATUS_VIVOS_FLUXO = ["pendente", "pronto_para_importar", "validando", "processando", "importando"];
 const STATUS_CIRCULAVEIS_FLUXO = ["pendente", "pronto_para_importar"];
@@ -80,14 +82,15 @@ function resumoObservabilidadeConsultas(resultados, inicio, atrasoLoop, pico) {
   };
 }
 
-async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000, limiteConcorrencia, timeoutMs } = {}) {
+async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000, limiteConcorrencia, timeoutMs,
+  consultar = queryEngineShadow, disponibilidadeReset = fonteReset } = {}) {
   const janela = limitarInteiro(janelaMinutos, 15, 1, 120);
   const limite = limitarInteiro(limiteAmostra, 2000, 1, 5000);
   const timeoutObservabilidadeMs = limitarInteiro(timeoutMs || process.env.OFC_SHADOW_DB_TIMEOUT_MS, 2500, 100, 10000);
   const inicio = process.hrtime.bigint();
   const atrasoLoop = monitorEventLoopDelay({ resolution: 20 });
   atrasoLoop.enable();
-  const consultarShadow = (texto, parametros) => queryEngineShadow(texto, parametros, {
+  const consultarShadow = (texto, parametros) => consultar(texto, parametros, {
     timeoutSqlMs: timeoutObservabilidadeMs
   });
   const medidorOfc = criarMedidorEngineMemoryStage("ofc_amostra_circulavel", {
@@ -232,28 +235,40 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000,
         LIMIT $2`,
       [STATUS_CIRCULAVEIS_FLUXO, limite]
     ),
-    () => consultarShadow(
-      `WITH reset AS (
-         SELECT MAX(cutoff_congelado) AS cutoff_congelado
-           FROM engine_reset_operacional_operacoes
-          WHERE status = 'execute_concluido'
-       ),
-       primeira AS (
-         SELECT job_id, MIN(criado_em) AS primeira_tentativa_em
-           FROM engine_processamentos
-          WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
-          GROUP BY job_id
-       )
-       SELECT COUNT(*) FILTER (WHERE j.criado_em < r.cutoff_congelado)::int AS total_antes_reset,
-              COUNT(*) FILTER (WHERE j.criado_em >= r.cutoff_congelado)::int AS total_depois_reset,
-              MAX(r.cutoff_congelado) AS cutoff_reset_referencia
-         FROM primeira p
-         JOIN engine_jobs_cliente j ON j.id = p.job_id
-         CROSS JOIN reset r
-        WHERE p.primeira_tentativa_em >= j.criado_em
-          AND r.cutoff_congelado IS NOT NULL`,
-      [janela]
-    )
+    async () => {
+      const disponibilidade = await disponibilidadeReset.observar(consultarShadow);
+      if (disponibilidade.estado !== "DISPONIVEL") {
+        return { ok: false, motivo: disponibilidade.motivo, disponibilidade, metricas: { consultaNegocioPulada: true } };
+      }
+      try {
+        const resultado = await consultarShadow(
+        `WITH reset AS (
+           SELECT MAX(cutoff_congelado) AS cutoff_congelado
+             FROM engine_reset_operacional_operacoes
+            WHERE status = 'execute_concluido'
+         ),
+         primeira AS (
+           SELECT job_id, MIN(criado_em) AS primeira_tentativa_em
+             FROM engine_processamentos
+            WHERE criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
+            GROUP BY job_id
+         )
+         SELECT COUNT(*) FILTER (WHERE j.criado_em < r.cutoff_congelado)::int AS total_antes_reset,
+                COUNT(*) FILTER (WHERE j.criado_em >= r.cutoff_congelado)::int AS total_depois_reset,
+                MAX(r.cutoff_congelado) AS cutoff_reset_referencia
+           FROM primeira p
+           JOIN engine_jobs_cliente j ON j.id = p.job_id
+           CROSS JOIN reset r
+          WHERE p.primeira_tentativa_em >= j.criado_em
+            AND r.cutoff_congelado IS NOT NULL`,
+        [janela]
+        );
+        return { ...resultado, disponibilidade: resultado.ok ? disponibilidade
+          : disponibilidadeReset.desconhecido(resultado.motivo || "erro_diagnostico_reset") };
+      } catch {
+        return { ok: false, motivo: "erro_diagnostico_reset", disponibilidade: disponibilidadeReset.desconhecido("erro_diagnostico_reset") };
+      }
+    }
   ], limiteConcorrencia);
   const [vivos, circulaveis, emCursoProtegidos, saudeEmCurso, chegada, consumo, expiracao, primeiraTentativa, radarOferta, amostra, primeiraTentativaReset] = consultasExecutadas.resultados;
   const observabilidade = resumoObservabilidadeConsultas(
@@ -293,16 +308,20 @@ async function consultarFluxoVivoOfc({ janelaMinutos = 15, limiteAmostra = 2000,
     primeiraTentativa: {
       ...linhaUnica(primeiraTentativa, { total: 0, media_ms: 0, mediana_ms: 0, p95_ms: 0 }),
       ...(
-        primeiraTentativaReset.ok
-          ? linhaUnica(primeiraTentativaReset, {})
+        primeiraTentativaReset.ok && linhaUnica(primeiraTentativaReset, {}).cutoff_reset_referencia
+          ? { ...linhaUnica(primeiraTentativaReset, {}), reset_disponivel: true }
           : {
               total_antes_reset: null,
               total_depois_reset: null,
               cutoff_reset_referencia: null,
               reset_disponivel: false,
-              motivo_reset_indisponivel: "tabela_reset_indisponivel"
+              motivo_reset_indisponivel: primeiraTentativaReset.ok ? "sem_reset_concluido"
+                : primeiraTentativaReset.disponibilidade?.motivo || primeiraTentativaReset.motivo || "reset_indisponivel"
             }
-      )
+      ),
+      reset_disponibilidade: primeiraTentativaReset.disponibilidade?.estado || "DESCONHECIDO",
+      reset_observado_em_ms: primeiraTentativaReset.disponibilidade?.observadoEmMs ?? null,
+      reset_revalidar_em_ms: primeiraTentativaReset.disponibilidade?.revalidarEmMs ?? null
     },
     radarOferta: linhaUnica(radarOferta, { total: 0, media_ms: 0 }),
     amostraCirculavel: amostraRows,

@@ -7,6 +7,10 @@ const repo = require("../modules/fila/fila-checkpoints-entrega.repository");
 
 const databaseUrl = String(process.env.FILA_CHECKPOINT_TEST_DATABASE_URL || "").trim();
 if (!databaseUrl) {
+  if (process.env.FILA_CHECKPOINT_POSTGRES_REQUIRED === "1") {
+    console.error("fila-checkpoints-entrega.postgres.test.js FAIL (PostgreSQL requerido; SKIP proibido)");
+    process.exit(1);
+  }
   console.log("fila-checkpoints-entrega.postgres.test.js SKIP (FILA_CHECKPOINT_TEST_DATABASE_URL ausente)");
   process.exit(0);
 }
@@ -51,7 +55,7 @@ function entrada(extra = {}) {
     ]);
     assert(independente.every(resultado => resultado.criado), "chaves independentes coexistem");
     const linhas = await pool.query(`SELECT count(*)::int AS total FROM ${tabela}`);
-    assert.strictEqual(linhas.rows[0].total, 4);
+    assert.strictEqual(linhas.rows[0].total, 5, "checkpoint original + preparado + tres identidades independentes");
 
     const idsRecovery = Array.from({ length: 16 }, (_, indice) => `recovery_${String(indice + 1).padStart(2, "0")}`);
     const [fatiaA, fatiaB] = await Promise.all([

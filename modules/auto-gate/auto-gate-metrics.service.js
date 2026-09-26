@@ -256,6 +256,8 @@ async function coletarMetricasShadow({
     inputTeleRadar: numeroFinito(source?.inputTeleRadar),
     inputTotal: numeroFinito(source?.inputTotal),
     outputRate,
+    // Observacoes paralelas nao entram em missing, policy ou maquina de estados.
+    drenagemObservacional: ofc.drenagem || null,
     outputUnit: "envios_confirmados_por_destino_por_minuto",
     queueDepthObservado: absorption?.ok === true ? queueDepth : null,
     oldestAgeObservada: absorption?.ok === true ? oldestAgeMs : null,

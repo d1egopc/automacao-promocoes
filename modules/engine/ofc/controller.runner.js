@@ -5,10 +5,12 @@ const { criarFluxoVivoShadowOfc } = require("./live-flow.service");
 const { criarFluxoComercialShadowOfc } = require("./commercial-flow.service");
 const { criarGateAbsorcaoShadowOfc } = require("./absorption-gate.service");
 const { criarAuditoriaOfcV24Shadow } = require("../../ofc-v2/auditoria-ofc");
+const { criarMetricasDrenagemShadow } = require("./drainage-metrics.service");
+const { criarMedidorCiclo, comMedidorCiclo, medirSerializacaoExistente } = require("../../telemetria/ciclo-observabilidade");
 
 function logOfc(tag, payload = {}) {
   try {
-    console.log(tag, JSON.stringify(payload || {}));
+    console.log(tag, medirSerializacaoExistente(payload || {}));
   } catch {
     console.log(tag, payload);
   }
@@ -207,12 +209,17 @@ function logarAuditoriaV24Shadow(rodadaId, auditoriaV24 = {}) {
 }
 
 async function executarObservabilidadeOfc(opcoes = {}) {
+  const medidor = criarMedidorCiclo();
+  return comMedidorCiclo(medidor, () => executarObservabilidadeOfcMedida(opcoes, medidor));
+}
+
+async function executarObservabilidadeOfcMedida(opcoes, medidor) {
   const inicio = Date.now();
   const rodadaId = opcoes.rodadaId || "";
   try {
-    const metricas = await coletarMetricasOfc({
+    const metricas = await medidor.medir("coletaInicial", () => coletarMetricasOfc({
       janelaConsumoMinutos: opcoes.janelaConsumoMinutos || 15
-    });
+    }));
 
     logOfc("[OFC-METRICAS]", {
       rodadaId,
@@ -239,12 +246,12 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       ...plano
     });
 
-    const filaAtiva = await criarFilaAtivaShadowOfc({
+    const filaAtiva = await medidor.medir("filaAtiva", () => criarFilaAtivaShadowOfc({
       plano
     }, {
       ...(opcoes.filaAtiva || {}),
       metricas
-    });
+    }));
 
     if (filaAtiva.ok) {
       logOfc("[OFC-FILA-ATIVA-SHADOW]", {
@@ -290,24 +297,32 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       });
     }
 
-    const fluxoVivo = await criarFluxoVivoShadowOfc({
+    const fluxoVivo = await medidor.medir("fluxoVivo", () => criarFluxoVivoShadowOfc({
       metricas,
       plano,
       filaAtiva
-    }, opcoes.fluxoVivo || {});
+    }, opcoes.fluxoVivo || {}));
     logarFluxoVivoShadow(rodadaId, fluxoVivo);
 
-    const fluxoComercial = await criarFluxoComercialShadowOfc({
+    const fluxoComercial = await medidor.medir("fluxoComercial", () => criarFluxoComercialShadowOfc({
       janelaMinutos: opcoes.janelaConsumoMinutos || 15,
       ...(opcoes.fluxoComercial || {})
-    });
+    }));
+    fluxoComercial.observadoEmMs = Date.now();
     logarFluxoComercialShadow(rodadaId, fluxoComercial);
 
-    const gateAbsorcao = await criarGateAbsorcaoShadowOfc({
+    const gateAbsorcao = await medidor.medir("absorptionGate", () => criarGateAbsorcaoShadowOfc({
       janelaMinutos: opcoes.janelaConsumoMinutos || 15,
-      ...(opcoes.gateAbsorcao || {})
-    });
+      ...(opcoes.gateAbsorcao || {}),
+      medidorCiclo: medidor
+    }));
     logarGateAbsorcaoShadow(rodadaId, gateAbsorcao);
+
+    const drenagem = await medidor.medir("metricasDrenagem", () => criarMetricasDrenagemShadow({
+      fluxoComercial, gateAbsorcao, janelaMinutos: opcoes.janelaConsumoMinutos || 15,
+      ...(opcoes.drenagem || {})
+    }));
+    logOfc("[OFC-DRENAGEM-SHADOW]", { rodadaId, ...drenagem });
 
     const auditoriaV24 = criarAuditoriaOfcV24Shadow({
       gateAbsorcao
@@ -334,6 +349,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       fluxoVivo,
       fluxoComercial,
       gateAbsorcao,
+      drenagem,
+      observabilidadeCiclo: medidor.finalizar(),
       auditoriaV24
     };
   } catch (e) {
@@ -352,6 +369,8 @@ async function executarObservabilidadeOfc(opcoes = {}) {
       duracaoMs: Date.now() - inicio,
       erro: e.message
     };
+  } finally {
+    logOfc("[OFC-CICLO-PERF-SHADOW]", { rodadaId, modo: "shadow", aplicouMudancas: false, ...medidor.finalizar() });
   }
 }
 
