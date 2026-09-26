@@ -351,9 +351,9 @@ function analisarDestinoOferta(destino, oferta, opcoes = {}) {
   };
 }
 
-function destinoDentroHorario(destino = {}) {
+function destinoDentroHorario(destino = {}, agoraMs) {
   const agoraBR = new Date(
-    new Date().toLocaleString("en-US", {
+    (agoraMs === undefined ? new Date() : new Date(agoraMs)).toLocaleString("en-US", {
       timeZone: "America/Sao_Paulo"
     })
   );

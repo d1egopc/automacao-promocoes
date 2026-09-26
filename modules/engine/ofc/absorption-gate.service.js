@@ -751,12 +751,12 @@ function slotsCobertura(coberturaMinutos = 0, intervaloMinutos = 1) {
   return Math.max(0, Math.floor(cobertura / intervalo));
 }
 
-function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
+function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = [], agoraMs) {
   const id = destinoId(destino, indice);
   const ativo = destino?.ativo !== false;
   const integracaoConfigurada = ativo && destinoPossuiIntegracaoBasica(destino);
   const integracaoApta = integracaoConfigurada && integracaoAptaDestino(destino);
-  const janelaAbertaAgora = ativo && integracaoApta && destinosUtils.destinoDentroHorario(destino);
+  const janelaAbertaAgora = ativo && integracaoApta && destinosUtils.destinoDentroHorario(destino, agoraMs);
   const limiteDiario = limiteDiarioDestino(destino);
   const limiteOk = limiteDiario.restante === null || limiteDiario.restante > 0;
   const destinoApto = janelaAbertaAgora && limiteOk;
@@ -764,7 +764,8 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = []) {
   const turboAplicavel = destinoApto && turboAplicavelDestino(destino);
   const cadencia = resolverCadenciaDestino({
     destino,
-    considerarTurboSemOferta: turboAplicavel
+    considerarTurboSemOferta: turboAplicavel,
+    ...(agoraMs === undefined ? {} : { agoraMs })
   });
   const intervaloTurbo = cadencia.intervaloTurboMin || cadencia.intervaloEfetivoMin;
   const intervaloEfetivo = turboAplicavel ? cadencia.intervaloEfetivoMin : intervaloNormal;
@@ -816,8 +817,8 @@ function metricasEventosWorkspace(linhas = []) {
   return mapa;
 }
 
-function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens = []) {
-  const capacidadePorDestino = lista(destinos).map((destino, indice) => capacidadeDestinoShadow(destino, indice, filaItens));
+function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens = [], agoraMs) {
+  const capacidadePorDestino = lista(destinos).map((destino, indice) => capacidadeDestinoShadow(destino, indice, filaItens, agoraMs));
   const destinosAtivos = capacidadePorDestino.filter(item => item.destinoHabilitado).length;
   const destinosTopologiaPotencial = capacidadePorDestino
     .filter(item => item.destinoHabilitado && item.integracaoConfigurada).length;
@@ -915,8 +916,8 @@ function logBufferVivoGateShadow(bufferVivo = {}, divergencia = {}) {
   } catch (_) {}
 }
 
-function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15 } = {}) {
-  const destinosResumo = avaliarDestinosWorkspace(destinos, janelaMinutos, fila.itens || []);
+function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15, agoraMs } = {}) {
+  const destinosResumo = avaliarDestinosWorkspace(destinos, janelaMinutos, fila.itens || [], agoraMs);
   const automacaoExecutorAtiva = configExecutor.automacaoAtiva === true;
   const saldoTexto = typeof usuario.creditos === "string" ? usuario.creditos.trim() : "";
   const saldoInformado = typeof usuario.creditos === "number"
@@ -965,6 +966,7 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}
   const quantidadeQueRecusariaAgora = quantidadeQueAceitariaAgora > 0 ? 0 : 1;
   const bufferVivoShadow = calcularBufferVivoWorkspace({
     workspaceId: clienteId,
+    agoraMs,
     destinosResumo,
     filaItens: fila.itens || [],
     saudeAgregada: {
@@ -1213,8 +1215,11 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
     for (const clienteId of lista(clientesAtivos)) {
       const id = String(clienteId || "").trim();
       if (!id) continue;
+      // One classification instant per workspace; collection/performance clocks stay independent.
+      // Preserve the existing explicit reference used by isolated callers/tests.
+      const agoraMs = Number(opcoes.agoraMs || Date.now());
       const destinos = destinosDoCliente(destinosPorCliente, id);
-      const destinosPreview = avaliarDestinosWorkspace(destinos, janelaMinutos, []);
+      const destinosPreview = avaliarDestinosWorkspace(destinos, janelaMinutos, [], agoraMs);
       const leituraFila = lerFilaWorkspaceSnapshot(id, opcoes);
       if (!leituraFila.ok) {
         incrementar(fontesInvalidasPorMotivo, leituraFila.motivo);
@@ -1231,6 +1236,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
         destinos,
         fila: resumoFilaWorkspace(id, {
           ...opcoes,
+          agoraMs,
           filaItens: leituraFila.itens,
           fonteFilaValida: leituraFila.ok,
           fonteFilaMotivo: leituraFila.motivo,
@@ -1240,7 +1246,8 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
           janelaAbertaAgora: destinosPreview.janelaAbertaAgora
         }),
         eventos: eventosPorWorkspace.get(id) || {},
-        janelaMinutos
+        janelaMinutos,
+        agoraMs
       }));
     }
 

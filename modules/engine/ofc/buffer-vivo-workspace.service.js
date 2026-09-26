@@ -325,7 +325,8 @@ function motivoEstado({ destinosAptos = [], slotsFuturosUtilizaveis = 0, deficit
 }
 
 function calcularBufferVivoWorkspace(entrada = {}) {
-  const agoraMs = numero(entrada.agoraMs, Date.now());
+  const agoraInformado = Number(entrada.agoraMs);
+  const agoraMs = Number.isFinite(agoraInformado) ? agoraInformado : Date.now();
   const oferta = objeto(entrada.oferta);
   const tipoFluxo = tipoFluxoOferta(entrada);
   const coberturaMinutos = numero(entrada.coberturaMinutos, coberturaFluxoMinutos(tipoFluxo));
