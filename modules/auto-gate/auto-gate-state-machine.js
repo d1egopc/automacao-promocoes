@@ -21,10 +21,12 @@ function normalizarPolitica(policy = {}) {
 }
 
 function metricasCompletas(metrics) {
-  const numbers = ["inputRadar", "inputTeleRadar", "inputTotal", "outputRate", "queueDepthObservado",
-    "oldestAgeObservada", "freshReserveObservada", "availableCapacityObservada"];
+  const numbers = ["inputRadar", "inputTeleRadar", "inputTotal", "outputRate", "queueDepthActionable",
+    "oldestActionableAge", "freshReserveObservada", "capacityEffectiveKnown", "capacityUnknownWorkspaces", "capacityUnknownSlots"];
   return metrics.ok === true && Array.isArray(metrics.sinaisAusentes) && metrics.sinaisAusentes.length === 0
     && numbers.every(key => typeof metrics[key] === "number" && Number.isFinite(metrics[key]) && metrics[key] >= 0)
+    && typeof metrics.capacityEffectiveComplete === "boolean"
+    && metrics.capacityEffectiveComplete === (metrics.capacityUnknownWorkspaces === 0)
     && typeof metrics.radarOperacional?.enabled === "boolean"
     && typeof metrics.radarOperacional?.withinSchedule === "boolean"
     && typeof metrics.radarOperacional?.sourceConfigured === "boolean"
@@ -71,9 +73,10 @@ function enriquecerProposta(proposta, alvo, status = {}) {
 function propostaBruta(metrics, previous, policy) {
   const radar = metrics.radarOperacional;
   const tele = metrics.teleRadarOperacional;
-  const depth = metrics.queueDepthObservado;
-  const age = metrics.oldestAgeObservada;
-  const capacity = metrics.availableCapacityObservada;
+  const depth = metrics.queueDepthActionable;
+  const age = metrics.oldestActionableAge;
+  const capacity = metrics.capacityEffectiveKnown;
+  const capacityComplete = metrics.capacityEffectiveComplete;
   const status = {
     radar: statusFonte({ tipo: "radar", withinSchedule: radar.withinSchedule, sourceConfigured: radar.sourceConfigured }),
     teleradar: statusFonte({
@@ -90,15 +93,18 @@ function propostaBruta(metrics, previous, policy) {
   const hold = radarCapturando && (!teleCapturando || metrics.inputRadar >= metrics.inputTeleRadar)
     ? "HOLD_RADAR" : teleCapturando ? "HOLD_TELERADAR" : null;
 
-  if (capacity === 0 && depth > 0) {
+  if (capacityComplete && capacity === 0 && depth > 0) {
     return enriquecerProposta({ estado: "SATURADO", decisao: hold || "MANTER", motivo: "sem_slots_com_fila_viva" }, null, status);
   }
-  if (previous && depth > previous.queueDepthObservado && age > previous.oldestAgeObservada
+  if (previous && depth > previous.queueDepthActionable && age > previous.oldestActionableAge
     && metrics.inputTotal > 0) {
     return enriquecerProposta({ estado: "PRESSAO_ALTA", decisao: hold || "MANTER", motivo: "fila_e_idade_crescentes" }, null, status);
   }
+  if (!capacityComplete) {
+    return enriquecerProposta({ estado: "CAPACIDADE_INCONCLUSIVA", decisao: "MANTER", motivo: "capacidade_inconclusiva" }, null, status);
+  }
   if (previous && ["PRESSAO_ALTA", "SATURADO"].includes(previous.estado)
-    && depth <= previous.queueDepthObservado && age <= previous.oldestAgeObservada) {
+    && depth <= previous.queueDepthActionable && age <= previous.oldestActionableAge) {
     return enriquecerProposta({ estado: "RECUPERACAO", decisao: "MANTER", motivo: "pressao_recuando" }, null, status);
   }
   // Zero queue is an unambiguous low-reserve case. For nonzero queue the
@@ -166,8 +172,8 @@ function avaliarShadow(metrics = {}, previousHistory = {}, policyInput = {}) {
     candidate: proposal.decisao,
     evidenceCycles,
     metrics: {
-      queueDepthObservado: metrics.queueDepthObservado,
-      oldestAgeObservada: metrics.oldestAgeObservada,
+      queueDepthActionable: metrics.queueDepthActionable,
+      oldestActionableAge: metrics.oldestActionableAge,
       estado: proposal.estado
     },
     lastDecision: previousHistory.lastDecision || "MANTER",

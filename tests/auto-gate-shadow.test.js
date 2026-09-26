@@ -9,6 +9,7 @@ const { coletarMetricasShadow } = require("../modules/auto-gate/auto-gate-metric
 const { avaliarShadow } = require("../modules/auto-gate/auto-gate-state-machine");
 const { createAutoGateShadow, shadowPolicyFromEnv } = require("../modules/auto-gate/auto-gate-shadow.service");
 const { montarTelemetria } = require("../modules/auto-gate/auto-gate-telemetry");
+const { criarGateAbsorcaoShadowOfc } = require("../modules/engine/ofc/absorption-gate.service");
 const { avaliarJanela, avaliarGateCapturaRadarWhatsapp } = require("../modules/radar/whatsapp-capture-gate");
 const { evaluateTeleRadarCaptureGate } = require("../modules/teleradar/capture-gate");
 
@@ -26,6 +27,18 @@ function metrics(overrides = {}) {
     outputRate: 2,
     queueDepthObservado: 0,
     oldestAgeObservada: 0,
+    queueDepthRaw: 0,
+    queueDepthActionable: 0,
+    oldestAgeRaw: 0,
+    oldestActionableAge: 0,
+    oldestHistoricalAge: 0,
+    capacityTheoretical: 3,
+    capacityEffective: 3,
+    capacityEffectiveKnown: 3,
+    capacityEffectiveComplete: true,
+    capacityUnknownWorkspaces: 0,
+    capacityUnknownSlots: 0,
+    expiredAliveCount: 0,
     freshReserveObservada: 0,
     availableCapacityObservada: 3,
     radarOperacional: { enabled: true, withinSchedule: true, sourceConfigured: true },
@@ -38,8 +51,8 @@ function metrics(overrides = {}) {
 }
 
 function ofc(workspaces = [
-  { workspaceId: "workspace_a", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 2, pendentesVivos: 2, idadeMaximaVivaMs: 5000, faixasIdade: { itensAte5Min: 1 }, slots15Min: 2, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 },
-  { workspaceId: "workspace_b", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 3, pendentesVivos: 3, idadeMaximaVivaMs: 10000, faixasIdade: { itensAte5Min: 2 }, slots15Min: 3, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 }
+  { workspaceId: "workspace_a", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 2, pendentesVivos: 2, idadeMaximaVivaMs: 5000, queueDepthRaw: 2, queueDepthActionable: 2, oldestAgeRaw: 5000, oldestActionableAge: 5000, oldestHistoricalAge: 0, expiredAliveCount: 0, expiredProcessingCount: 0, expiredPendingCount: 0, capacityTheoretical: 2, capacityEffective: 0, faixasIdade: { itensAte5Min: 1 }, slots15Min: 2, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 },
+  { workspaceId: "workspace_b", fonteFilaValida: true, topologiaOperacionalPotencial: true, pressaoEsteiraViva: 3, pendentesVivos: 3, idadeMaximaVivaMs: 10000, queueDepthRaw: 3, queueDepthActionable: 3, oldestAgeRaw: 10000, oldestActionableAge: 10000, oldestHistoricalAge: 0, expiredAliveCount: 0, expiredProcessingCount: 0, expiredPendingCount: 0, capacityTheoretical: 3, capacityEffective: 0, faixasIdade: { itensAte5Min: 2 }, slots15Min: 3, destinosAptos: 1, integracoesAptas: 1, statusDesconhecido: 0, itensSemTimestamp: 0 }
 ], gateOverrides = {}) {
   return {
     fluxoComercial: { ok: true, janelaMinutos: 15, fontes: { eventosComerciais: true }, enviosConfirmadosPorMinuto: 2 },
@@ -53,7 +66,13 @@ function ofc(workspaces = [
       fontesInvalidasIrrelevantes: 0,
       duracaoMs: 12,
       janelaMinutos: 15,
-      workspaces,
+      workspaces: workspaces.map(workspace => ({
+        capacityEffectiveKnown: workspace.capacityEffective,
+        capacityEffectiveComplete: true,
+        capacityUnknownWorkspaces: 0,
+        capacityUnknownSlots: 0,
+        ...workspace
+      })),
       ...gateOverrides
     }
   };
@@ -89,11 +108,17 @@ async function testMetrics() {
     now: NOW
   };
   const result = await coletarMetricasShadow(providers);
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.sinaisAusentes.join(","));
   assert.equal(result.queueDepthObservado, 5);
   assert.equal(result.oldestAgeObservada, 10000);
   assert.equal(result.freshReserveObservada, 3);
   assert.equal(result.availableCapacityObservada, 5);
+  assert.equal(result.queueDepthActionable, 5);
+  assert.equal(result.oldestActionableAge, 10000);
+  assert.equal(result.capacityTheoretical, 5);
+  assert.equal(result.capacityEffective, 0);
+  assert.equal(result.capacityEffectiveKnown, 0);
+  assert.equal(result.capacityEffectiveComplete, true);
   assert.equal(result.observedWorkspaceCount, 2);
   assert.equal(result.cadastralWorkspaceCount, 2);
   assert.equal(result.excludedWorkspaceCount, 0);
@@ -119,11 +144,13 @@ async function testMetrics() {
   assert.equal(avaliarShadow(missing).decisaoSugerida, "NAO_INTERVIR");
 
   const empty = { workspaceId: "empty", fonteFilaValida: true, topologiaOperacionalPotencial: false, pressaoEsteiraViva: 0, pendentesVivos: 0, idadeMaximaVivaMs: null,
+    queueDepthRaw: 0, queueDepthActionable: 0, oldestAgeRaw: 0, oldestActionableAge: 0, oldestHistoricalAge: 0,
+    expiredAliveCount: 0, expiredProcessingCount: 0, expiredPendingCount: 0, capacityTheoretical: 0, capacityEffective: 0,
     faixasIdade: { itensAte5Min: 0 }, slots15Min: 0, destinosAptos: 0, integracoesAptas: 0,
     statusDesconhecido: 0, itensSemTimestamp: 0 };
   const pressureClosed = { ...empty, workspaceId: "pressure", topologiaOperacionalPotencial: true, pressaoEsteiraViva: 2, pendentesVivos: 2,
-    idadeMaximaVivaMs: 1000, faixasIdade: { itensAte5Min: 2 } };
-  const capacity = { ...empty, workspaceId: "capacity", topologiaOperacionalPotencial: true, slots15Min: 4, destinosAptos: 1, integracoesAptas: 1 };
+    queueDepthRaw: 2, oldestAgeRaw: 1000, idadeMaximaVivaMs: 1000, faixasIdade: { itensAte5Min: 2 } };
+  const capacity = { ...empty, workspaceId: "capacity", topologiaOperacionalPotencial: true, slots15Min: 4, capacityTheoretical: 4, capacityEffective: 4, destinosAptos: 1, integracoesAptas: 1 };
   capacity.plano = "nao_deve_influenciar";
   capacity.creditos = 0;
   const operational = await coletarMetricasShadow({ ...providers, ofc: ofc([empty, pressureClosed, capacity]) });
@@ -133,6 +160,34 @@ async function testMetrics() {
   assert.equal(operational.excludedWorkspaceCount, 1);
   assert.equal(operational.queueDepthObservado, 2, "pressao participa mesmo com destino fechado");
   assert.equal(operational.availableCapacityObservada, 4, "capacidade operacional participa");
+  assert.equal(operational.queueDepthActionable, 0, "fila sem destino aberto nao pressiona Auto Gate");
+  assert.equal(operational.capacityEffective, 4);
+
+  const known20 = { ...capacity, workspaceId: "known20", slots15Min: 20,
+    capacityTheoretical: 20, capacityEffective: 20 };
+  const unknown10 = { ...capacity, workspaceId: "unknown10", slots15Min: 10,
+    capacityTheoretical: 10, capacityEffective: 0, capacityEffectiveKnown: 0,
+    capacityEffectiveComplete: false, capacityUnknownWorkspaces: 1, capacityUnknownSlots: 10 };
+  const mixedCapacity = await coletarMetricasShadow({ ...providers, ofc: ofc([known20, unknown10]) });
+  assert.equal(mixedCapacity.ok, true);
+  assert.equal(mixedCapacity.capacityEffectiveKnown, 20);
+  assert.equal(mixedCapacity.capacityUnknownSlots, 10);
+  assert.equal(mixedCapacity.capacityUnknownWorkspaces, 1);
+  assert.equal(mixedCapacity.capacityEffectiveComplete, false);
+  assert.equal(avaliarShadow(mixedCapacity, {}).estadoSugerido, "CAPACIDADE_INCONCLUSIVA");
+  const unknownPressure = { ...unknown10, workspaceId: "unknown_pressure", pressaoEsteiraViva: 1,
+    queueDepthRaw: 1, queueDepthActionable: 1, idadeMaximaVivaMs: 1000,
+    oldestActionableAge: 1000, oldestAgeRaw: 1000, faixasIdade: { itensAte5Min: 1 } };
+  const onlyUnknown = await coletarMetricasShadow({ ...providers, ofc: ofc([unknownPressure]) });
+  assert.equal(onlyUnknown.ok, true);
+  assert.equal(onlyUnknown.capacityEffectiveKnown, 0);
+  assert.equal(onlyUnknown.capacityEffectiveComplete, false);
+  assert.equal(avaliarShadow(onlyUnknown, {}).estadoSugerido, "CAPACIDADE_INCONCLUSIVA");
+  const noCompleteness = await coletarMetricasShadow({ ...providers,
+    ofc: ofc([{ ...capacity, capacityEffectiveComplete: undefined }]) });
+  assert.equal(noCompleteness.ok, false);
+  assert.ok(noCompleteness.sinaisAusentes.includes("fila_observada_invalida"));
+  assert.equal(avaliarShadow(noCompleteness, {}).decisaoSugerida, "NAO_INTERVIR");
 
   const invalidDead = { ...empty, workspaceId: "dead", fonteFilaValida: false };
   const irrelevantInvalid = await coletarMetricasShadow({
@@ -249,7 +304,8 @@ function testDecisions() {
   assert.equal(avaliarShadow(teleQuiet, result.history).decisaoSugerida, "ABRIR_RADAR");
 
   const pressure = step => metrics({ inputRadar: 3, inputTeleRadar: 1, inputTotal: 4,
-    queueDepthObservado: step, oldestAgeObservada: step * 10000, freshReserveObservada: 1,
+    queueDepthObservado: step, oldestAgeObservada: 80 * 60 * 60 * 1000,
+    queueDepthActionable: step, oldestActionableAge: step * 10000, freshReserveObservada: 1,
     teleRadarOperacional: { enabled: true, withinSchedule: true, listenerActive: true, accountAuthorized: true, selectedSourceCount: 1 }
   });
   result = avaliarShadow(pressure(1), {});
@@ -257,6 +313,40 @@ function testDecisions() {
   assert.equal(result.estadoSugerido, "PRESSAO_ALTA");
   result = avaliarShadow(pressure(3), result.history);
   assert.equal(result.decisaoSugerida, "HOLD_RADAR");
+
+  const historical = step => metrics({ inputRadar: 3, inputTeleRadar: 1, inputTotal: 4,
+    queueDepthRaw: 500 + step, queueDepthObservado: step, oldestAgeRaw: (80 + step) * 60 * 60 * 1000,
+    oldestAgeObservada: (80 + step) * 60 * 60 * 1000,
+    queueDepthActionable: 5, oldestActionableAge: 12 * 60 * 1000, oldestHistoricalAge: (80 + step) * 60 * 60 * 1000,
+    freshReserveObservada: 1, capacityEffective: 3,
+    teleRadarOperacional: { enabled: true, withinSchedule: true, listenerActive: true, accountAuthorized: true, selectedSourceCount: 1 }
+  });
+  let historicalResult = avaliarShadow(historical(1), {});
+  historicalResult = avaliarShadow(historical(2), historicalResult.history);
+  historicalResult = avaliarShadow(historical(3), historicalResult.history);
+  assert.notEqual(historicalResult.decisaoSugerida, "HOLD_RADAR", "idade historica crescente nao causa HOLD");
+  assert.equal(historicalResult.history.metrics.oldestActionableAge, 12 * 60 * 1000);
+  assert.equal(avaliarShadow(metrics({ queueDepthRaw: 500, oldestAgeRaw: 80 * 60 * 60 * 1000,
+    oldestAgeObservada: 80 * 60 * 60 * 1000, oldestHistoricalAge: 80 * 60 * 60 * 1000 }), {}).history.metrics.oldestActionableAge, 0);
+
+  const inconclusive = metrics({ inputRadar: 3, inputTotal: 3, queueDepthActionable: 5,
+    oldestActionableAge: 12 * 60 * 1000, capacityEffective: 0, capacityEffectiveKnown: 0,
+    capacityEffectiveComplete: false, capacityUnknownWorkspaces: 1, capacityUnknownSlots: 10 });
+  const inconclusiveResult = avaliarShadow(inconclusive, {});
+  assert.equal(inconclusiveResult.estadoSugerido, "CAPACIDADE_INCONCLUSIVA");
+  assert.equal(inconclusiveResult.decisaoSugerida, "MANTER");
+  assert.notEqual(inconclusiveResult.estadoSugerido, "SATURADO");
+  const inconclusiveTelemetry = montarTelemetria({ cicloId: "credito_inconclusivo", metrics: inconclusive,
+    result: inconclusiveResult });
+  assert.equal(inconclusiveTelemetry.capacityEffectiveKnown, 0);
+  assert.equal(inconclusiveTelemetry.capacityEffectiveComplete, false);
+  assert.equal(inconclusiveTelemetry.capacityUnknownSlots, 10);
+  assert.equal(inconclusiveTelemetry.autorizadoParaExecucao, false);
+  let independentPressure = avaliarShadow({ ...inconclusive, queueDepthActionable: 1, oldestActionableAge: 1000 }, {});
+  independentPressure = avaliarShadow({ ...inconclusive, queueDepthActionable: 2, oldestActionableAge: 2000 }, independentPressure.history);
+  assert.equal(independentPressure.estadoSugerido, "PRESSAO_ALTA");
+  independentPressure = avaliarShadow({ ...inconclusive, queueDepthActionable: 3, oldestActionableAge: 3000 }, independentPressure.history);
+  assert.equal(independentPressure.decisaoSugerida, "HOLD_RADAR");
 
   const boost = metrics({
     teleRadarOperacional: { enabled: true, withinSchedule: true, listenerActive: true, accountAuthorized: true, selectedSourceCount: 1 }
@@ -278,6 +368,61 @@ function testDecisions() {
   assert.equal(avaliarShadow(teleQuiet, openTele.history).decisaoSugerida, "MANTER", "no immediate reverse suggestion");
   assert.equal(avaliarShadow({ ...metrics(), ok: false, sinaisAusentes: ["entrada_engine_obsoleta"] }).decisaoSugerida, "NAO_INTERVIR");
   assert.equal(avaliarShadow(metrics({ outputRate: null })).decisaoSugerida, "NAO_INTERVIR");
+}
+
+async function testIntegratedHistoricalQueue() {
+  const destino = { id: "destino_integrado", ativo: true, tipo: "telegram", botToken: "token",
+    chatId: "123", horarioInicio: "00:00", horarioFim: "23:59", intervaloMinutos: 2 };
+  const coletarCiclo = async (horasHistoricas, creditos = 20) => {
+    const itens = [
+      ...Array.from({ length: 500 }, (_, i) => ({ id: `historico_${i}`, status: "processando",
+        criadoEm: new Date(NOW - horasHistoricas * 60 * 60 * 1000).toISOString() })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `acionavel_${i}`, status: "pendente",
+        criadoEm: new Date(NOW - (12 - i) * 60 * 1000).toISOString() }))
+    ];
+    const gateAbsorcao = await criarGateAbsorcaoShadowOfc({
+      janelaMinutos: 15, agoraMs: NOW, clock: () => NOW,
+      usuarios: [{ id: "integrado", creditos }],
+      listarClientesAtivos: () => ["integrado"],
+      configsPorCliente: { integrado: { automacaoAtiva: true } },
+      destinosPorCliente: { integrado: [destino] },
+      readFilaSnapshot: () => ({ ok: true, itens, collectedAtMs: NOW }),
+      consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
+    });
+    assert.equal(gateAbsorcao.ok, true);
+    return coletarMetricasShadow({
+      ofc: { fluxoComercial: ofc().fluxoComercial, gateAbsorcao },
+      consultarEntradas: async () => ({ ok: true, janelaMinutos: 15, inputRadar: 3,
+        inputTeleRadar: 0, inputTotal: 3, collectedAtMs: NOW }),
+      getRadarOperational: async () => ({ enabled: true, withinSchedule: true, sourceConfigured: true }),
+      getTeleRadarOperational: async () => ({ enabled: false, withinSchedule: true,
+        listenerActive: true, accountAuthorized: true, selectedSourceCount: 1 }),
+      now: NOW, clock: () => NOW
+    });
+  };
+  const first = await coletarCiclo(80);
+  assert.equal(first.ok, true, first.sinaisAusentes.join(","));
+  assert.equal(first.queueDepthRaw, 505);
+  assert.equal(first.queueDepthActionable, 5);
+  assert.equal(first.oldestAgeRaw, 80 * 60 * 60 * 1000);
+  assert.equal(first.oldestActionableAge, 12 * 60 * 1000);
+  assert.equal(first.capacityEffectiveComplete, true);
+  const semSaldo = await coletarCiclo(80, null);
+  assert.equal(semSaldo.ok, true);
+  assert.equal(semSaldo.queueDepthActionable, 5);
+  assert.equal(semSaldo.capacityEffectiveKnown, 0);
+  assert.equal(semSaldo.capacityEffectiveComplete, false);
+  assert.equal(semSaldo.capacityUnknownWorkspaces, 1);
+  assert.equal(avaliarShadow(semSaldo, {}).estadoSugerido, "CAPACIDADE_INCONCLUSIVA");
+  let result = avaliarShadow(first, {});
+  for (const horas of [81, 82]) {
+    const next = await coletarCiclo(horas);
+    assert.equal(next.queueDepthActionable, 5);
+    assert.equal(next.oldestActionableAge, 12 * 60 * 1000);
+    assert.equal(next.oldestAgeRaw, horas * 60 * 60 * 1000);
+    result = avaliarShadow(next, result.history);
+    assert.notEqual(result.decisaoSugerida, "HOLD_RADAR");
+  }
 }
 
 async function testZeroMutation() {
@@ -304,6 +449,11 @@ async function testZeroMutation() {
     assert.equal(fs.readFileSync(radarFile, "utf8"), originalRadar);
     assert.equal(fs.readFileSync(teleFile, "utf8"), originalTele);
     assert.equal(logs[0].aplicouMudancas, false);
+    assert.equal(logs[0].queueDepthActionable, 0);
+    assert.equal(logs[0].oldestActionableAge, 0);
+    assert.equal(logs[0].capacityEffective, 3);
+    assert.equal(logs[0].capacityEffectiveKnown, 3);
+    assert.equal(logs[0].capacityEffectiveComplete, true);
     assert.equal(logs[0].autoridadeManualNaoInferida, true);
     assert.equal(logs[0].decisaoSugerida, "MANTER");
     for (const campo of ["latenciaOfcSnapshotMs", "latenciaConsultaSqlMs", "latenciaRadarOperationalMs",
@@ -342,6 +492,7 @@ function testExistingGatesUnaffected() {
   await testSourceQuery();
   await testMetrics();
   testDecisions();
+  await testIntegratedHistoricalQueue();
   await testZeroMutation();
   testExistingGatesUnaffected();
   console.log("auto-gate-shadow: PASS");

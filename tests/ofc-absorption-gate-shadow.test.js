@@ -5,6 +5,7 @@ const path = require("path");
 const {
   BUCKET_STATUS,
   CAMPOS_TIMESTAMP_FILA,
+  TTL_ESTEIRA_MS,
   criarGateAbsorcaoShadowOfc,
   montarGateWorkspace,
   classificarEstadoEsteira,
@@ -133,6 +134,17 @@ assert.strictEqual(itemPressionaCapacidade(filaComHistorico[5], agora).motivo, "
 assert.strictEqual(itemPressionaCapacidade(filaComHistorico[6], agora).motivo, "cooldown_ultrapassa_ttl_operacional");
 assert.strictEqual(itemPressionaCapacidade(filaComHistorico[7], agora).motivo, "categoria_incompativel");
 
+// Contrato existente: idade >= TTL ja esta vencida; o relogio e injetado.
+for (const [deslocamentoMs, acionavel] of [[-1, true], [0, false], [1, false]]) {
+  const item = { status: "pendente", marketplace: "amazon",
+    criadoEm: new Date(agora - TTL_ESTEIRA_MS.comum - deslocamentoMs).toISOString() };
+  const leitura = resumoFilaWorkspace("user_fronteira_ttl", { filaItens: [item], agoraMs: agora });
+  assert.strictEqual(itemPressionaCapacidade(item, agora).pressiona, acionavel);
+  assert.strictEqual(leitura.queueDepthActionable, acionavel ? 1 : 0);
+  assert.strictEqual(leitura.expiredAliveCount, acionavel ? 0 : 1);
+  assert.strictEqual(leitura.oldestActionableAge, acionavel ? TTL_ESTEIRA_MS.comum - 1 : 0);
+}
+
 const resumoFila = resumoFilaWorkspace("user_pressao", {
   agoraMs: agora,
   janelaAbertaAgora: true,
@@ -142,6 +154,13 @@ assert.strictEqual(resumoFila.pendentesVivos, 7);
 assert.strictEqual(resumoFila.emTentativaEnvio, 1);
 assert.strictEqual(resumoFila.errosTemporariosRecuperaveis, 1);
 assert.strictEqual(resumoFila.pressaoEsteiraViva, 4);
+assert.strictEqual(resumoFila.queueDepthRaw, 9);
+assert.strictEqual(resumoFila.queueDepthActionable, 4);
+assert.strictEqual(resumoFila.oldestAgeRaw, 35 * 60 * 1000);
+assert.strictEqual(resumoFila.oldestActionableAge, 20 * 60 * 1000);
+assert.strictEqual(resumoFila.oldestHistoricalAge, 35 * 60 * 1000);
+assert.strictEqual(resumoFila.expiredAliveCount, 2);
+assert.strictEqual(resumoFila.expiredPendingCount, 2);
 assert.strictEqual(resumoFila.pressaoPendenteVivo, 2);
 assert.strictEqual(resumoFila.pressaoEmTentativa, 1);
 assert.strictEqual(resumoFila.pressaoErroTemporarioRecuperavel, 1);
@@ -193,6 +212,24 @@ const resumoFechado = resumoFilaWorkspace("user_fechado", {
 assert.strictEqual(resumoFechado.candidatosExpiracao, 2);
 assert.strictEqual(resumoFechado.vencidosOperacionalmente, 2);
 assert.strictEqual(resumoFechado.aguardandoAuditoria, 1);
+
+const filaHistorica = [
+  ...Array.from({ length: 500 }, (_, i) => ({ id: `vencido_${i}`, status: "processando",
+    criadoEm: new Date(agora - 3 * 24 * 60 * 60 * 1000).toISOString() })),
+  ...Array.from({ length: 5 }, (_, i) => ({ id: `novo_${i}`, status: "pendente",
+    criadoEm: new Date(agora - 12 * 60 * 1000).toISOString() }))
+];
+const resumoHistorico = resumoFilaWorkspace("user_historico", { filaItens: filaHistorica, agoraMs: agora });
+assert.strictEqual(resumoHistorico.queueDepthRaw, 505);
+assert.strictEqual(resumoHistorico.queueDepthActionable, 5);
+assert.strictEqual(resumoHistorico.oldestAgeRaw, 3 * 24 * 60 * 60 * 1000);
+assert.strictEqual(resumoHistorico.oldestActionableAge, 12 * 60 * 1000);
+assert.strictEqual(resumoHistorico.oldestHistoricalAge, 3 * 24 * 60 * 60 * 1000);
+assert.strictEqual(resumoHistorico.expiredAliveCount, 500);
+assert.strictEqual(resumoHistorico.expiredProcessingCount, 500);
+const somenteHistorico = resumoFilaWorkspace("user_sem_acao", { filaItens: filaHistorica.slice(0, 500), agoraMs: agora });
+assert.strictEqual(somenteHistorico.queueDepthActionable, 0);
+assert.strictEqual(somenteHistorico.oldestActionableAge, 0);
 
 assert.strictEqual(slotsCobertura(5, 3.5), 1);
 assert.strictEqual(slotsCobertura(10, 3.5), 2);
@@ -247,6 +284,61 @@ assert.strictEqual(gateLivre.capacidadeAbsorcaoAgora, 13);
 assert.strictEqual(gateLivre.quantidadeQueAceitariaAgora, 13);
 assert.strictEqual(gateLivre.turboAplicavel, true);
 assert.strictEqual(gateLivre.aplicouMudancas, undefined);
+
+const gateComAutomacaoDesligada = montarGateWorkspace({
+  clienteId: "user_sem_automacao", usuario: { id: "user_sem_automacao", creditos: 10 },
+  configExecutor: { automacaoAtiva: false }, destinos: [destinoApto], fila: resumoHistorico, eventos: {}
+});
+assert(gateComAutomacaoDesligada.capacityTheoretical > 0);
+assert.strictEqual(gateComAutomacaoDesligada.capacityEffective, 0);
+assert.strictEqual(gateComAutomacaoDesligada.queueDepthActionable, 0);
+assert.strictEqual(gateComAutomacaoDesligada.oldestActionableAge, 0);
+assert.strictEqual(gateComAutomacaoDesligada.queueDepthRaw, 505);
+assert.strictEqual(gateComAutomacaoDesligada.capacityEffectiveKnown, 0);
+assert.strictEqual(gateComAutomacaoDesligada.capacityEffectiveComplete, true);
+assert.strictEqual(gateComAutomacaoDesligada.capacityUnknownWorkspaces, 0);
+const gateComAutomacaoLigada = montarGateWorkspace({
+  clienteId: "user_com_automacao", usuario: { id: "user_com_automacao", creditos: 10 },
+  configExecutor: { automacaoAtiva: true }, destinos: [destinoApto], fila: resumoHistorico, eventos: {}
+});
+assert.strictEqual(gateComAutomacaoLigada.queueDepthActionable, 5);
+assert.strictEqual(gateComAutomacaoLigada.oldestActionableAge, 12 * 60 * 1000);
+assert.strictEqual(gateComAutomacaoLigada.capacityEffective, 0);
+assert.strictEqual(gateComAutomacaoLigada.creditosEstado, "SUFICIENTE");
+const gateComUmCredito = montarGateWorkspace({ usuario: { creditos: 1 }, configExecutor: { automacaoAtiva: true },
+  destinos: [destinoApto], fila: resumoFilaWorkspace("user_um_credito", { filaItens: [], agoraMs: agora }) });
+assert.strictEqual(gateComUmCredito.capacityTheoretical, 3);
+assert.strictEqual(gateComUmCredito.capacityEffective, 1);
+assert.strictEqual(gateComUmCredito.capacityEffectiveKnown, 1);
+assert.strictEqual(gateComUmCredito.creditosEstado, "SUFICIENTE");
+const gateSemCreditos = montarGateWorkspace({ usuario: { creditos: 0 }, configExecutor: { automacaoAtiva: true },
+  destinos: [destinoApto], fila: resumoFilaWorkspace("user_zero_credito", { filaItens: [], agoraMs: agora }) });
+assert.strictEqual(gateSemCreditos.creditosEstado, "INSUFICIENTE");
+assert.strictEqual(gateSemCreditos.capacityEffectiveKnown, 0);
+assert.strictEqual(gateSemCreditos.capacityEffectiveComplete, true);
+for (const saldo of [undefined, null, "", "invalido", "0x10", -1]) {
+  const gateCreditoDesconhecido = montarGateWorkspace({ usuario: { creditos: saldo },
+    configExecutor: { automacaoAtiva: true }, destinos: [destinoApto],
+    fila: resumoFilaWorkspace("user_credito_desconhecido", { filaItens: [], agoraMs: agora }) });
+  assert.strictEqual(gateCreditoDesconhecido.creditosEstado, "DESCONHECIDO");
+  assert.strictEqual(gateCreditoDesconhecido.capacityEffectiveKnown, 0);
+  assert.strictEqual(gateCreditoDesconhecido.capacityEffectiveComplete, false);
+  assert.strictEqual(gateCreditoDesconhecido.capacityUnknownSlots, 3);
+  assert.strictEqual(gateCreditoDesconhecido.capacityUnknownWorkspaces, 1);
+}
+const gateDesligadoSemSaldo = montarGateWorkspace({ usuario: {}, configExecutor: { automacaoAtiva: false },
+  destinos: [destinoApto], fila: resumoFilaWorkspace("user_desligado_sem_saldo", { filaItens: [], agoraMs: agora }) });
+assert.strictEqual(gateDesligadoSemSaldo.capacityEffectiveKnown, 0);
+assert.strictEqual(gateDesligadoSemSaldo.capacityEffectiveComplete, true);
+assert.strictEqual(gateDesligadoSemSaldo.capacityUnknownWorkspaces, 0);
+const filaDestinoFechado = resumoFilaWorkspace("user_destino", { agoraMs: agora, filaItens: [
+  { status: "pendente", destinoId: "destino_desligado", criadoEm: new Date(agora - 10 * 60 * 1000).toISOString() },
+  { status: "pendente", destinoId: "destino_a", criadoEm: new Date(agora - 5 * 60 * 1000).toISOString() }
+] });
+const gateDestinoFechado = montarGateWorkspace({ usuario: { creditos: 10 }, configExecutor: { automacaoAtiva: true },
+  destinos: [destinoApto, { ...destinoApto, id: "destino_desligado", ativo: false }], fila: filaDestinoFechado });
+assert.strictEqual(gateDestinoFechado.queueDepthActionable, 1);
+assert.strictEqual(gateDestinoFechado.oldestActionableAge, 5 * 60 * 1000);
 
 const gateSaturado = montarGateWorkspace({
   clienteId: "user_saturado",
@@ -347,6 +439,11 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
       user_saturado: [destinoApto],
       user_fechado: [{ ...destinoApto, horarioInicio: "00:00", horarioFim: "00:01" }]
     },
+    configsPorCliente: {
+      user_livre: { automacaoAtiva: true },
+      user_saturado: { automacaoAtiva: true },
+      user_fechado: { automacaoAtiva: true }
+    },
     agoraMs: agora,
     readFilaSnapshot: clienteId => ({
       ok: true,
@@ -377,6 +474,8 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").estado, "SATURADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").estado, "FECHADA");
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").pressaoEsteiraViva, 4);
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_saturado").queueDepthActionable, 3);
+  assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").queueDepthActionable, 0);
   assert.strictEqual(gate.workspaces.find(w => w.workspaceId === "user_fechado").topologiaOperacionalPotencial, true);
   assert(gate.workspaces.find(w => w.workspaceId === "user_fechado").pressaoEsteiraViva > 0,
     "backlog valido permanece relevante mesmo com destino fechado");
@@ -420,7 +519,7 @@ assert.strictEqual(classificadoFechado.estado, "FECHADA");
       clock: () => agora,
       consultarEventosAbsorcao: async () => ({ ok: true, janelaMinutos: 15, porWorkspace: [] })
     });
-    assert.strictEqual(gateVazioValido.snapshotCompleto, true);
+    assert.strictEqual(gateVazioValido.snapshotCompleto, true, JSON.stringify(gateVazioValido));
     assert.strictEqual(gateVazioValido.collectedAtMs, agora);
     assert.strictEqual(gateVazioValido.workspaces[0].fonteFilaValida, true);
     assert.strictEqual(gateVazioValido.workspaces[0].topologiaOperacionalPotencial, false);

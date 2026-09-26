@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const { readGlobalJson, readClienteJson, getClienteJsonPath } = require("../../../utils/storage");
 const { listarClientesAtivos } = require("../../../utils/usuarios-atividade");
 const destinosUtils = require("../../../utils/destinos");
@@ -258,6 +259,26 @@ function carregarUsuarios(opcoes = {}) {
   if (Array.isArray(opcoes.usuarios)) return opcoes.usuarios;
   const usuarios = readGlobalJson("usuarios.json", []);
   return Array.isArray(usuarios) ? usuarios : [];
+}
+
+function carregarConfiguracaoExecutor(clienteId = "", opcoes = {}, configsGlobais = {}, configPadrao = {}) {
+  if (opcoes.configsPorCliente && Object.prototype.hasOwnProperty.call(opcoes.configsPorCliente, clienteId)) {
+    return objeto(opcoes.configsPorCliente[clienteId]);
+  }
+  if (typeof opcoes.readConfigCliente === "function") {
+    return objeto(opcoes.readConfigCliente(clienteId, "config.json", null) || configsGlobais[clienteId] || configPadrao);
+  }
+  // readClienteJson cria diretorios ausentes; a observacao Shadow nao deve escrever nada.
+  if (/^[a-zA-Z0-9_.-]+$/.test(clienteId) && !clienteId.includes("..")) {
+    const arquivo = path.join(process.env.DATA_DIR || "/data", "clientes", clienteId, "config.json");
+    try {
+      const configCliente = JSON.parse(fs.readFileSync(arquivo, "utf8"));
+      if (configCliente && typeof configCliente === "object" && !Array.isArray(configCliente)) return configCliente;
+    } catch (erro) {
+      if (erro.code !== "ENOENT") return {};
+    }
+  }
+  return objeto(configsGlobais[clienteId] || configPadrao);
 }
 
 function usuarioPorId(usuarios = [], clienteId = "") {
@@ -520,6 +541,8 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   const porTipoOperacional = {};
   const camposTimestampEncontrados = {};
   const idades = [];
+  const idadesAcionaveis = [];
+  const idadesHistoricas = [];
   const faixas = criarFaixasVazias();
   const pressaoContagem = {
     pendente_vivo: 0,
@@ -533,6 +556,9 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
   let candidatosExpiracao = 0;
   let vencidosOperacionalmente = 0;
   let aguardandoAuditoria = 0;
+  let expiredAliveCount = 0;
+  let expiredProcessingCount = 0;
+  let expiredPendingCount = 0;
 
   for (const item of fila) {
     const statusReal = statusFila(item) || "sem_status";
@@ -554,6 +580,11 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
       const idadeMs = Math.max(0, agora - timestamp.ms);
       idades.push(idadeMs);
       faixas[faixaIdade(idadeMs)] += 1;
+      if (idadeMs >= ttlEsteiraMs(item)) {
+        expiredAliveCount += 1;
+        if (bucket === BUCKET_STATUS.EM_TENTATIVA) expiredProcessingCount += 1;
+        if (bucket === BUCKET_STATUS.PENDENTE_VIVO) expiredPendingCount += 1;
+      }
     }
 
     const classificacao = classificarItemEsteiraShadow(item, { agoraMs: agora, janelaAbertaAgora });
@@ -564,6 +595,7 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
 
     const pressao = itemPressionaCapacidade(item, agora, { janelaAbertaAgora });
     if (pressao.pressiona) {
+      idadesAcionaveis.push(pressao.idadeMs);
       pressaoContagem[bucket] = (pressaoContagem[bucket] || 0) + 1;
       itensPressaoViva.push({
         id: item.id || item.filaItemId || item.ofertaId || item.engineOfertaId || null,
@@ -572,10 +604,13 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
         idadeMs: pressao.idadeMs,
         ttlMs: pressao.ttlMs,
         motivo: pressao.motivo,
-        proximaTentativaMs: pressao.proximaTentativaMs ?? null
+        proximaTentativaMs: pressao.proximaTentativaMs ?? null,
+        destinoRefs: [item.destinoId, item.destino_id, item.destino, item.chatId, item.grupoId, item.jid, item.canalId]
+          .map(valor => String(valor || "").trim()).filter(Boolean)
       });
     } else {
       incrementar(motivosForaPressaoViva, pressao.motivo || "fora_pressao_viva");
+      if (timestamp.ms !== null) idadesHistoricas.push(Math.max(0, agora - timestamp.ms));
     }
   }
 
@@ -591,6 +626,14 @@ function resumoFilaWorkspace(clienteId = "", opcoes = {}) {
     quantidadeFilaAtual: pressaoEsteiraViva,
     pressaoEsteiraViva,
     pressaoVivaConfirmada: pressaoEsteiraViva,
+    queueDepthRaw: contagem.pendente_vivo + contagem.em_tentativa + contagem.erro_temporario_recuperavel,
+    queueDepthActionable: itensPressaoViva.length,
+    oldestAgeRaw: idades.length ? Math.max(...idades) : 0,
+    oldestActionableAge: idadesAcionaveis.length ? Math.max(...idadesAcionaveis) : 0,
+    oldestHistoricalAge: idadesHistoricas.length ? Math.max(...idadesHistoricas) : 0,
+    expiredAliveCount,
+    expiredProcessingCount,
+    expiredPendingCount,
     pressaoPendenteVivo: pressaoContagem.pendente_vivo,
     pressaoEmTentativa: pressaoContagem.em_tentativa,
     pressaoErroTemporarioRecuperavel: pressaoContagem.erro_temporario_recuperavel,
@@ -847,8 +890,34 @@ function logBufferVivoGateShadow(bufferVivo = {}, divergencia = {}) {
   } catch (_) {}
 }
 
-function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15 } = {}) {
+function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15 } = {}) {
   const destinosResumo = avaliarDestinosWorkspace(destinos, janelaMinutos, fila.itens || []);
+  const automacaoExecutorAtiva = configExecutor.automacaoAtiva === true;
+  const saldoTexto = typeof usuario.creditos === "string" ? usuario.creditos.trim() : "";
+  const saldoInformado = typeof usuario.creditos === "number"
+    || /^\d+(?:\.\d+)?$/.test(saldoTexto);
+  const creditos = saldoInformado ? Number(usuario.creditos) : NaN;
+  const creditosEstado = !Number.isFinite(creditos) || creditos < 0 ? "DESCONHECIDO"
+    : creditos >= 1 ? "SUFICIENTE" : "INSUFICIENTE";
+  const creditosExecutorAptos = creditosEstado === "DESCONHECIDO" ? null : creditosEstado === "SUFICIENTE";
+  const workspaceAptoAgora = automacaoExecutorAtiva && creditosExecutorAptos !== false
+    && destinosResumo.destinosAptos > 0;
+  const destinosAptosIds = new Set(destinosResumo.capacidadePorDestino
+    .filter(destino => destino.aptoAgora).map(destino => destino.destinoId));
+  const itensAcionaveis = workspaceAptoAgora ? lista(fila.itensPressaoViva)
+    .filter(item => !lista(item.destinoRefs).length || item.destinoRefs.some(id => destinosAptosIds.has(id))) : [];
+  const queueDepthActionable = itensAcionaveis.length;
+  const oldestActionableAge = itensAcionaveis.length
+    ? Math.max(...itensAcionaveis.map(item => numero(item.idadeMs))) : 0;
+  const slotsComCreditos = creditosEstado !== "DESCONHECIDO"
+    ? Math.min(destinosResumo.slots15Min, Math.max(0, Math.floor(creditos))) : destinosResumo.slots15Min;
+  const capacityUnknownSlots = automacaoExecutorAtiva && creditosEstado === "DESCONHECIDO"
+    ? destinosResumo.slots15Min : 0;
+  const capacityUnknownWorkspaces = capacityUnknownSlots > 0 ? 1 : 0;
+  const capacityEffectiveComplete = capacityUnknownWorkspaces === 0;
+  const capacityEffectiveKnown = workspaceAptoAgora && capacityEffectiveComplete
+    ? Math.max(0, slotsComCreditos - queueDepthActionable) : 0;
+  const capacityEffective = capacityEffectiveKnown;
   const enviosUltimos15Min = numero(eventos.enviosConfirmados);
   const consumoComercialUltimos15Min = enviosUltimos15Min;
   const entradaComercialUltimos15Min = numero(eventos.ofertasCriadas);
@@ -899,6 +968,23 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, destinos = [], fila
     totalEnviadosHistorico: numero(fila.totalEnviadosHistorico),
     pressaoEsteiraViva,
     pressaoVivaConfirmada: numero(fila.pressaoVivaConfirmada, pressaoEsteiraViva),
+    queueDepthRaw: numero(fila.queueDepthRaw),
+    queueDepthActionable,
+    oldestAgeRaw: numero(fila.oldestAgeRaw),
+    oldestActionableAge,
+    oldestHistoricalAge: numero(fila.oldestHistoricalAge),
+    expiredAliveCount: numero(fila.expiredAliveCount),
+    expiredProcessingCount: numero(fila.expiredProcessingCount),
+    expiredPendingCount: numero(fila.expiredPendingCount),
+    capacityTheoretical: destinosResumo.slots15Min,
+    capacityEffective,
+    capacityEffectiveKnown,
+    capacityEffectiveComplete,
+    capacityUnknownWorkspaces,
+    capacityUnknownSlots,
+    automacaoExecutorAtiva,
+    creditosExecutorAptos,
+    creditosEstado,
     statusDesconhecido: numero(fila.status_desconhecido),
     itensSemTimestamp: numero(fila.itensSemTimestamp),
     fonteFilaValida: fila.fonteFilaValida === true,
@@ -992,6 +1078,19 @@ function resumirGate(workspaces = []) {
   let aceitariamAgora = 0;
   let recusariamAgora = 0;
   let pressaoEsteiraViva = 0;
+  let queueDepthRaw = 0;
+  let queueDepthActionable = 0;
+  let oldestAgeRaw = 0;
+  let oldestActionableAge = 0;
+  let oldestHistoricalAge = 0;
+  let capacityTheoretical = 0;
+  let capacityEffective = 0;
+  let capacityEffectiveKnown = 0;
+  let capacityUnknownWorkspaces = 0;
+  let capacityUnknownSlots = 0;
+  let expiredAliveCount = 0;
+  let expiredProcessingCount = 0;
+  let expiredPendingCount = 0;
   let statusDesconhecido = 0;
   let itensSemTimestamp = 0;
   let candidatosExpiracao = 0;
@@ -1002,6 +1101,19 @@ function resumirGate(workspaces = []) {
     aceitariamAgora += numero(item.quantidadeQueAceitariaAgora);
     recusariamAgora += numero(item.quantidadeQueRecusariaAgora);
     pressaoEsteiraViva += numero(item.pressaoEsteiraViva);
+    queueDepthRaw += numero(item.queueDepthRaw);
+    queueDepthActionable += numero(item.queueDepthActionable);
+    oldestAgeRaw = Math.max(oldestAgeRaw, numero(item.oldestAgeRaw));
+    oldestActionableAge = Math.max(oldestActionableAge, numero(item.oldestActionableAge));
+    oldestHistoricalAge = Math.max(oldestHistoricalAge, numero(item.oldestHistoricalAge));
+    capacityTheoretical += numero(item.capacityTheoretical);
+    capacityEffective += numero(item.capacityEffective);
+    capacityEffectiveKnown += numero(item.capacityEffectiveKnown);
+    capacityUnknownWorkspaces += numero(item.capacityUnknownWorkspaces);
+    capacityUnknownSlots += numero(item.capacityUnknownSlots);
+    expiredAliveCount += numero(item.expiredAliveCount);
+    expiredProcessingCount += numero(item.expiredProcessingCount);
+    expiredPendingCount += numero(item.expiredPendingCount);
     statusDesconhecido += numero(item.statusDesconhecido);
     itensSemTimestamp += numero(item.itensSemTimestamp);
     candidatosExpiracao += numero(item.candidatosExpiracao);
@@ -1013,6 +1125,20 @@ function resumirGate(workspaces = []) {
     aceitariamAgora,
     recusariamAgora,
     pressaoEsteiraViva,
+    queueDepthRaw,
+    queueDepthActionable,
+    oldestAgeRaw,
+    oldestActionableAge,
+    oldestHistoricalAge,
+    capacityTheoretical,
+    capacityEffective,
+    capacityEffectiveKnown,
+    capacityEffectiveComplete: capacityUnknownWorkspaces === 0,
+    capacityUnknownWorkspaces,
+    capacityUnknownSlots,
+    expiredAliveCount,
+    expiredProcessingCount,
+    expiredPendingCount,
     statusDesconhecido,
     itensSemTimestamp,
     candidatosExpiracao,
@@ -1046,6 +1172,12 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       ? opcoes.listarClientesAtivos()
       : listarClientesAtivos({ usuarios });
     const destinosPorCliente = carregarDestinosPorCliente(opcoes);
+    const lerConfigGlobalShadow = arquivo => {
+      try { return objeto(JSON.parse(fs.readFileSync(path.join(process.env.DATA_DIR || "/data", arquivo), "utf8"))); }
+      catch (_) { return {}; }
+    };
+    const configsGlobais = objeto(opcoes.configsPorCliente || lerConfigGlobalShadow("configs_clientes.json"));
+    const configPadrao = objeto(opcoes.configPadrao || lerConfigGlobalShadow("config.json"));
     const eventosPorWorkspace = metricasEventosWorkspace(eventos.porWorkspace);
     const workspaces = [];
     const fontesInvalidasPorMotivo = {};
@@ -1069,6 +1201,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       workspaces.push(montarGateWorkspace({
         clienteId: id,
         usuario: usuarioPorId(usuarios, id) || {},
+        configExecutor: carregarConfiguracaoExecutor(id, opcoes, configsGlobais, configPadrao),
         destinos,
         fila: resumoFilaWorkspace(id, {
           ...opcoes,
