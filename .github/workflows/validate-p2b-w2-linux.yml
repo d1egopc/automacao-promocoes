@@ -18,10 +18,6 @@ jobs:
       DATABASE_URL: ""
       FILA_CHECKPOINT_TEST_DATABASE_URL: ""
       OFC_READONLY_WORKER: "false"
-      OFC_LINUX_EVIDENCE_DIR: ${{ runner.temp }}/ofc-linux-evidence
-      OFC_LINUX_FIXTURES_DIR: ${{ runner.temp }}/ofc-linux-fixtures
-      OFC_WORKER_BASELINE_ROOT: ${{ runner.temp }}/ofc-worker-baseline
-      OFC_CLOCK_BASELINE_ROOT: ${{ runner.temp }}/ofc-clock-baseline
     steps:
       - name: Checkout validation only
         uses: actions/checkout@v4
@@ -36,10 +32,16 @@ jobs:
           test "$GITHUB_EVENT_NAME" = push
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$(uname -s)" = Linux
-          test "$(git rev-parse HEAD^)" = 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5
-          test "$(git rev-parse HEAD^^)" = 0d80258eb740f92563180fc015dc77e37742a430
+          test "$(git rev-parse 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5^)" = 0d80258eb740f92563180fc015dc77e37742a430
+          git merge-base --is-ancestor 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 HEAD
+          test -z "$(git diff --name-only 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 HEAD -- modules utils index.js package.json package-lock.json)"
           test -z "$DATABASE_URL"
           test -z "$FILA_CHECKPOINT_TEST_DATABASE_URL"
+          export OFC_LINUX_EVIDENCE_DIR="$RUNNER_TEMP/ofc-linux-evidence"
+          export OFC_LINUX_FIXTURES_DIR="$RUNNER_TEMP/ofc-linux-fixtures"
+          export OFC_WORKER_BASELINE_ROOT="$RUNNER_TEMP/ofc-worker-baseline"
+          export OFC_CLOCK_BASELINE_ROOT="$RUNNER_TEMP/ofc-clock-baseline"
+          printf '%s\n' "OFC_LINUX_EVIDENCE_DIR=$OFC_LINUX_EVIDENCE_DIR" "OFC_LINUX_FIXTURES_DIR=$OFC_LINUX_FIXTURES_DIR" "OFC_WORKER_BASELINE_ROOT=$OFC_WORKER_BASELINE_ROOT" "OFC_CLOCK_BASELINE_ROOT=$OFC_CLOCK_BASELINE_ROOT" >> "$GITHUB_ENV"
           mkdir -p "$OFC_LINUX_EVIDENCE_DIR" "$OFC_WORKER_BASELINE_ROOT" "$OFC_CLOCK_BASELINE_ROOT"
           git archive 0d80258eb740f92563180fc015dc77e37742a430 | tar -x -C "$OFC_WORKER_BASELINE_ROOT"
           git archive 7456b506abb5a9f118d397afd01b06aab0e11728 | tar -x -C "$OFC_CLOCK_BASELINE_ROOT"
@@ -65,9 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check index.js
-          git diff --name-only HEAD^^ HEAD -- '*.js' '*.cjs' | while IFS= read -r file; do node --check "$file"; done
+          git diff --name-only 0d80258eb740f92563180fc015dc77e37742a430 HEAD -- '*.js' '*.cjs' | while IFS= read -r file; do node --check "$file"; done
           npm run audit:encoding
-          git diff --check HEAD^^ HEAD
+          git diff --check 0d80258eb740f92563180fc015dc77e37742a430 HEAD
           test -z "$(git status --porcelain)"
       - name: Generate isolated synthetic fixtures (never versioned)
         run: node scripts/validate-ofc-worker-linux.cjs fixtures
