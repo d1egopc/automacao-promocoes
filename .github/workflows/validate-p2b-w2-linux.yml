@@ -1,0 +1,89 @@
+name: Validate P2B W2 Linux Only
+
+on:
+  push:
+    branches:
+      - validation/p2b-w2-linux
+
+permissions:
+  contents: read
+
+jobs:
+  linux-proof:
+    name: POSIX, equivalence, failsafe and stress (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2b-w2-linux'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: ""
+      OFC_READONLY_WORKER: "false"
+      OFC_LINUX_EVIDENCE_DIR: ${{ runner.temp }}/ofc-linux-evidence
+      OFC_LINUX_FIXTURES_DIR: ${{ runner.temp }}/ofc-linux-fixtures
+      OFC_WORKER_BASELINE_ROOT: ${{ runner.temp }}/ofc-worker-baseline
+      OFC_CLOCK_BASELINE_ROOT: ${{ runner.temp }}/ofc-clock-baseline
+    steps:
+      - name: Checkout validation only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard isolated runner and exact commit ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/p2b-w2-linux
+          test "$GITHUB_EVENT_NAME" = push
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          test "$(git rev-parse HEAD^)" = 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5
+          test "$(git rev-parse HEAD^^)" = 0d80258eb740f92563180fc015dc77e37742a430
+          test -z "$DATABASE_URL"
+          test -z "$FILA_CHECKPOINT_TEST_DATABASE_URL"
+          mkdir -p "$OFC_LINUX_EVIDENCE_DIR" "$OFC_WORKER_BASELINE_ROOT" "$OFC_CLOCK_BASELINE_ROOT"
+          git archive 0d80258eb740f92563180fc015dc77e37742a430 | tar -x -C "$OFC_WORKER_BASELINE_ROOT"
+          git archive 7456b506abb5a9f118d397afd01b06aab0e11728 | tar -x -C "$OFC_CLOCK_BASELINE_ROOT"
+          uname -a
+          df -T "$RUNNER_TEMP"
+          free -h
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: POSIX revision and actual Worker failsafe (stale is fatal)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/ofc-workspace-worker-linux.test.cjs | tee "$OFC_LINUX_EVIDENCE_DIR/posix-failsafe.log"
+      - name: Regression suites and exact baseline comparison
+        run: node scripts/validate-ofc-worker-linux.cjs regressions
+      - name: Syntax, encoding and full diff checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          git diff --name-only HEAD^^ HEAD -- '*.js' '*.cjs' | while IFS= read -r file; do node --check "$file"; done
+          npm run audit:encoding
+          git diff --check HEAD^^ HEAD
+          test -z "$(git status --porcelain)"
+      - name: Generate isolated synthetic fixtures (never versioned)
+        run: node scripts/validate-ofc-worker-linux.cjs fixtures
+      - name: Full OFF vs ON deepEqual and benchmark all three classes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --expose-gc scripts/benchmark-ofc-workspace-worker.cjs "$OFC_LINUX_FIXTURES_DIR" > "$OFC_LINUX_EVIDENCE_DIR/ab-benchmark.json"
+          node -e 'const r=require(process.env.OFC_LINUX_EVIDENCE_DIR+"/ab-benchmark.json"); console.log(JSON.stringify(r.comparisons.map(p=>({size:p.size,deepEqual:p.deepEqual,off:p.off.rows.map(r=>({wall:r.wallMs,lag:r.lagMaxMs,rss:r.processHighWaterRssBytes})),on:p.on.rows.map(r=>({wall:r.wallMs,lag:r.lagMaxMs,rss:r.processHighWaterRssBytes,phases:r.phaseSamples,perf:r.perf}))}))))'
+      - name: 100 sequential largest jobs on SAME Worker
+        run: node --expose-gc scripts/validate-ofc-worker-linux.cjs stress
+      - name: Upload proof only (never synthetic queues)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2b-w2-linux-evidence
+          path: ${{ runner.temp }}/ofc-linux-evidence
+          if-no-files-found: error
+          retention-days: 7
