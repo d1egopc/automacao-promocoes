@@ -1,0 +1,158 @@
+name: Validate P2B W1T Temporal (CI only)
+
+on:
+  push:
+    branches:
+      - validation/p2b-w1t-temporal-ci
+
+permissions:
+  contents: read
+
+jobs:
+  temporal-ci:
+    name: Temporal and regression proof (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2b-w1t-temporal-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: candidate
+        shell: bash
+    env:
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: ""
+      PATCH_SHA: 0d80258eb740f92563180fc015dc77e37742a430
+      BASE_SHA: 7456b506abb5a9f118d397afd01b06aab0e11728
+    steps:
+      - name: Checkout CI-only branch
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact approved baseline read-only
+        uses: actions/checkout@v4
+        with:
+          ref: 7456b506abb5a9f118d397afd01b06aab0e11728
+          path: baseline
+          persist-credentials: false
+      - name: Verify ref, parent and four-file allowlist
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/p2b-w1t-temporal-ci
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(git rev-parse "$PATCH_SHA^1")" = "$BASE_SHA"
+          test "$(git rev-parse HEAD^1)" = "$PATCH_SHA"
+          test "$(git -C ../baseline rev-parse HEAD)" = "$BASE_SHA"
+          test "$(git diff --name-only "$PATCH_SHA" HEAD)" = .github/workflows/validate-p2b-w1t-temporal.yml
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const assert = require('node:assert/strict');
+          const actual = execFileSync('git', ['diff', '--name-only', process.env.BASE_SHA, process.env.PATCH_SHA], { encoding: 'utf8' }).trim().split('\n').sort();
+          assert.deepEqual(actual, ['modules/engine/ofc/absorption-gate.service.js', 'modules/engine/ofc/buffer-vivo-workspace.service.js', 'tests/ofc-workspace-temporal.test.js', 'utils/destinos.js'].sort());
+          console.log('ALLOWLIST 4/4; baseline and patch parents verified; no deploy job');
+          NODE
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: candidate/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Syntax and diff checks
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/engine/ofc/absorption-gate.service.js
+          node --check modules/engine/ofc/buffer-vivo-workspace.service.js
+          node --check utils/destinos.js
+          node --check tests/ofc-workspace-temporal.test.js
+          git diff --check "$BASE_SHA" "$PATCH_SHA"
+          git diff --check "$PATCH_SHA" HEAD
+      - name: Encoding audit
+        run: npm run audit:encoding
+      - name: Temporal 41 of 41 including real baseline comparison
+        run: |
+          set -euo pipefail
+          export OFC_TEMPORAL_BASELINE_ROOT="$GITHUB_WORKSPACE/baseline"
+          node --test --test-reporter=tap tests/ofc-workspace-temporal.test.js | tee /tmp/p2b-temporal.tap
+          grep -qx '# tests 41' /tmp/p2b-temporal.tap
+          grep -qx '# pass 41' /tmp/p2b-temporal.tap
+          grep -qx '# fail 0' /tmp/p2b-temporal.tap
+          grep -qx '# skipped 0' /tmp/p2b-temporal.tap
+      - name: Phase 1D 21 of 21
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/ofc-fase-1d-observabilidade.test.js | tee /tmp/p2b-phase1d.tap
+          grep -qx '# tests 21' /tmp/p2b-phase1d.tap
+          grep -qx '# pass 21' /tmp/p2b-phase1d.tap
+          grep -qx '# fail 0' /tmp/p2b-phase1d.tap
+          grep -qx '# skipped 0' /tmp/p2b-phase1d.tap
+      - name: ECONNRESET lifecycle 12 of 12
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/safe-redirect-http-lifecycle.test.js | tee /tmp/p2b-lifecycle.tap
+          grep -qx '# tests 12' /tmp/p2b-lifecycle.tap
+          grep -qx '# pass 12' /tmp/p2b-lifecycle.tap
+          grep -qx '# fail 0' /tmp/p2b-lifecycle.tap
+          grep -qx '# skipped 0' /tmp/p2b-lifecycle.tap
+      - name: Dynamic link resolvers
+        run: node tests/dynamic-link-resolvers.test.js
+      - name: Official critical suite 9 of 9
+        run: |
+          set -euo pipefail
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+      - name: OFC and Auto Gate regressions
+        run: |
+          set -euo pipefail
+          node tests/ofc-absorption-gate-shadow.test.js
+          node tests/ofc-buffer-vivo-workspace-shadow.test.js
+          node tests/auto-gate-shadow.test.js
+          node tests/ofc-active-queue-shadow.test.js
+          node tests/ofc-commercial-flow-shadow.test.js
+          node tests/ofc-live-flow-shadow.test.js
+          node tests/ofc-operacional-v2-shadow.test.js
+          node tests/ofc-gate-ativo-piloto.test.js
+          node tests/ofc-v24-fundacao.test.js
+          node tests/ofc-v24-normalizador-comercial.test.js
+          node tests/ofc-v24-espelho-comercial.test.js
+      - name: Compare three known assertions against exact baseline (not skipped)
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const assert = require('node:assert/strict');
+          const { spawnSync } = require('node:child_process');
+          const candidate = process.cwd(), baseline = path.resolve('../baseline');
+          const env = { ...process.env, NODE_PATH: path.join(candidate, 'node_modules') };
+          const known = [
+            ['ofc-shadow-planner.test.js', 'Fase 0 nao pode alterar a busca atual do Worker'],
+            ['ofc-renderer-oficial-isolamento.test.js', 'Universal vazio reutiliza mensagem existente'],
+            ['ofc-v24-espelho-piloto.test.js', 'assert(mensagem.includes("Resgate:"))']
+          ];
+          for (const [file, marker] of known) {
+            assert.equal(fs.readFileSync(path.join(candidate, 'tests', file), 'utf8'), fs.readFileSync(path.join(baseline, 'tests', file), 'utf8'));
+            const signatures = [];
+            for (const root of [baseline, candidate]) {
+              const r = spawnSync(process.execPath, [path.join(root, 'tests', file)], { cwd: root, env, encoding: 'utf8', timeout: 60000 });
+              assert.equal(r.error, undefined); assert.equal(r.signal, null);
+              assert.equal(r.status, 1, file + ': expected known assertion, not success/other error');
+              const start = r.stderr.indexOf('AssertionError');
+              assert.ok(start >= 0 && r.stderr.includes(marker), file + ': wrong failure');
+              signatures.push(r.stderr.slice(start).split(root).join('<ROOT>').replaceAll('\r\n', '\n'));
+            }
+            assert.equal(signatures[0], signatures[1], file + ': regression differs from baseline');
+            console.log('BASELINE_IDENTICAL_ASSERTION ' + file + ': ' + marker);
+          }
+          console.log('Known assertions compared 3/3; no generic continue-on-error');
+          NODE
