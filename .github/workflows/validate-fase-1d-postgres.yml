@@ -1,0 +1,83 @@
+name: Phase 1D PostgreSQL 17 disposable validation
+
+on:
+  push:
+    branches:
+      - validation/fase-1d-postgres-17
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase1d-postgres-disposable-validation
+  cancel-in-progress: false
+
+jobs:
+  postgres-17-proof:
+    name: PostgreSQL 17 disposable proof (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/fase-1d-postgres-17'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: ofc_fase1d_disposable
+          POSTGRES_USER: fase1d_ci
+          POSTGRES_PASSWORD: fase1d_ci_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fase1d_ci -d ofc_fase1d_disposable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: postgresql://fase1d_ci:fase1d_ci_disposable_only@127.0.0.1:5432/ofc_fase1d_disposable
+      FILA_CHECKPOINT_TEST_ISOLATED: github-actions-service-17
+      FILA_CHECKPOINT_POSTGRES_REQUIRED: "1"
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node (same major as backend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify non-production runner and ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/fase-1d-postgres-17
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Syntax check validation files
+        run: |
+          node --check modules/fila/fila-checkpoints-entrega.repository.js
+          node --check tests/fila-checkpoints-entrega.postgres.test.js
+          node --check tests/fila-confirmacao-migration.postgres.test.js
+      - name: Prove PostgreSQL 17 and seed historical pre-extension checkpoint
+        run: node tests/fila-confirmacao-migration.postgres.test.js prepare
+      - name: Apply EXACT prepared migration (psql autocommit; CONCURRENTLY)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum modules/fila/observabilidade-confirmacao.sql
+          psql "$FILA_CHECKPOINT_TEST_DATABASE_URL" -X --set=ON_ERROR_STOP=1 --file=modules/fila/observabilidade-confirmacao.sql
+      - name: Prove column, valid partial index, A-H, debit, concurrent CAS and rollback
+        run: node tests/fila-confirmacao-migration.postgres.test.js verify
+      - name: Reapply EXACT migration with IF NOT EXISTS (no transaction wrapper)
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$FILA_CHECKPOINT_TEST_DATABASE_URL" -X --set=ON_ERROR_STOP=1 --file=modules/fila/observabilidade-confirmacao.sql
+      - name: Prove migration replay preserves index, historical NULL and timestamps
+        run: node tests/fila-confirmacao-migration.postgres.test.js verify-reapply
+      - name: Run REQUIRED existing PostgreSQL repository suite (SKIP forbidden)
+        run: node tests/fila-checkpoints-entrega.postgres.test.js

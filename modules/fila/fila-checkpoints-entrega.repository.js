@@ -53,13 +53,15 @@ CREATE TABLE IF NOT EXISTS ${nome} (
   motivo_codigo TEXT,
   classificacao TEXT,
   status_http INTEGER,
+  confirmado_em TIMESTAMPTZ,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (cliente_id, fila_item_id, destino_chave, alvo_chave)
 );
 ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS motivo_codigo TEXT;
 ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS classificacao TEXT;
-ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS status_http INTEGER;`;
+ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS status_http INTEGER;
+ALTER TABLE ${nome} ADD COLUMN IF NOT EXISTS confirmado_em TIMESTAMPTZ;`;
 }
 
 const SQL_SCHEMA_FILA_CHECKPOINTS_ENTREGA = sqlSchemaCheckpointEntrega();
@@ -181,6 +183,7 @@ function normalizarLinha(linha = {}, chave = {}) {
     classificacao: linha.classificacao || null,
     statusHttp: Number.isInteger(linha.status_http) ? linha.status_http : null,
     criadoEm: linha.criado_em || null,
+    confirmadoEm: linha.confirmado_em || null,
     atualizadoEm: linha.atualizado_em || null
   };
 }
@@ -212,7 +215,7 @@ async function criarCheckpointEntrega(entrada = {}, opcoes = {}) {
      ) VALUES ($1, $2, $3, $4, $5, 'preparado')
      ON CONFLICT (cliente_id, fila_item_id, destino_chave, alvo_chave) DO NOTHING
      RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-               estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
+               estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em`,
     [...paramsChave(chave), attemptId]
   ));
   return {
@@ -226,7 +229,7 @@ async function obterCheckpointEntrega(entrada = {}, opcoes = {}) {
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = $2
         AND destino_chave = $3 AND alvo_chave = $4
@@ -330,7 +333,7 @@ async function listarCheckpointsEntregaPorItens({ clienteId = "", filaItemIds = 
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = ANY($2::text[])
       ORDER BY fila_item_id ASC, criado_em ASC, destino_chave ASC, alvo_chave ASC`,
@@ -347,7 +350,7 @@ async function listarCheckpointsEntregaPorItem({ clienteId = "", filaItemId = ""
   const tabela = tabelaDas(opcoes);
   const resultado = await comExecutor(opcoes, client => client.query(
     `SELECT cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em
+            estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em
        FROM ${tabela}
       WHERE cliente_id = $1 AND fila_item_id = $2`,
     [cliente, item]
@@ -379,12 +382,13 @@ async function transicionarCheckpointEntrega(entrada = {}, opcoes = {}) {
             motivo_codigo = CASE WHEN $10::text IS NULL THEN motivo_codigo ELSE $10 END,
             classificacao = CASE WHEN $11::text IS NULL THEN classificacao ELSE $11 END,
             status_http = CASE WHEN $12::integer IS NULL THEN status_http ELSE $12 END,
+            confirmado_em = CASE WHEN $7 = 'enviado' THEN COALESCE(confirmado_em, clock_timestamp()) ELSE confirmado_em END,
             atualizado_em = NOW()
       WHERE cliente_id = $1 AND fila_item_id = $2
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = $6
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em`,
     [...paramsChave(chave), attemptId, deEstado, paraEstado, providerMessageId, creditoDebitado ?? null, motivoCodigo ?? null, classificacao ?? null, statusHttp ?? null]
   ));
   return {
@@ -416,7 +420,7 @@ async function prepararNovaTentativaCheckpointEntrega(entrada = {}, opcoes = {})
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = 'falha_confirmada'
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em`,
     [...paramsChave(chave), attemptIdAnterior, attemptId]
   ));
   return {
@@ -441,7 +445,7 @@ async function registrarCreditoDebitadoCheckpointEntrega(entrada = {}, opcoes = 
         AND destino_chave = $3 AND alvo_chave = $4
         AND attempt_id = $5 AND estado = 'enviado'
       RETURNING cliente_id, fila_item_id, destino_chave, alvo_chave, attempt_id,
-                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em`,
+                estado, provider_message_id, credito_debitado, motivo_codigo, classificacao, status_http, criado_em, atualizado_em, confirmado_em`,
     [...paramsChave(chave), attemptId]
   ));
   return {
