@@ -12,7 +12,6 @@ const {
   destinoAceitaTurboCupom,
   resolverCadenciaDestino
 } = require("../cadencia.service");
-const { consultarEventosAbsorcaoPorWorkspace } = require("./absorption-gate.repository");
 const {
   calcularBufferVivoWorkspace,
   resumirDivergenciaBufferVivo
@@ -916,7 +915,7 @@ function logBufferVivoGateShadow(bufferVivo = {}, divergencia = {}) {
   } catch (_) {}
 }
 
-function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15, agoraMs } = {}) {
+function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}, destinos = [], fila = {}, eventos = {}, janelaMinutos = 15, agoraMs, emitirLogs = true } = {}) {
   const destinosResumo = avaliarDestinosWorkspace(destinos, janelaMinutos, fila.itens || [], agoraMs);
   const automacaoExecutorAtiva = configExecutor.automacaoAtiva === true;
   const saldoTexto = typeof usuario.creditos === "string" ? usuario.creditos.trim() : "";
@@ -978,7 +977,7 @@ function montarGateWorkspace({ clienteId = "", usuario = {}, configExecutor = {}
     }
   });
   const bufferVivoDivergencia = resumirDivergenciaBufferVivo(bufferVivoShadow);
-  logBufferVivoGateShadow(bufferVivoShadow, bufferVivoDivergencia);
+  if (emitirLogs) logBufferVivoGateShadow(bufferVivoShadow, bufferVivoDivergencia);
   const classificacao = classificarEstadoEsteira({
     ...destinosResumo,
     filaAlvo15Min: destinosResumo.filaAlvo15Min,
@@ -1181,7 +1180,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
   const janelaMinutos = Math.max(1, Math.min(120, Math.floor(Number(opcoes.janelaMinutos) || 15)));
 
   try {
-    const consultarEventos = opcoes.consultarEventosAbsorcao || consultarEventosAbsorcaoPorWorkspace;
+    const consultarEventos = opcoes.consultarEventosAbsorcao || require("./absorption-gate.repository").consultarEventosAbsorcaoPorWorkspace;
     const eventos = await consultarEventos({ janelaMinutos });
     if (!eventos.ok) {
       return {
@@ -1219,8 +1218,41 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       // Preserve the existing explicit reference used by isolated callers/tests.
       const agoraMs = Number(opcoes.agoraMs || Date.now());
       const destinos = destinosDoCliente(destinosPorCliente, id);
-      const destinosPreview = avaliarDestinosWorkspace(destinos, janelaMinutos, [], agoraMs);
-      const leituraFila = lerFilaWorkspaceSnapshot(id, opcoes);
+      let resultadoWorker = null;
+      let workerDescartadoNoConsumo = false;
+      if (opcoes.workerOfc === true || (opcoes.workerOfc !== false && process.env.OFC_READONLY_WORKER === "true")) {
+        try {
+          const { avaliarComWorker, projetarDestinoWorker } = require("./workspace-worker-client");
+          const usuario = usuarioPorId(usuarios, id) || {};
+          const configExecutor = carregarConfiguracaoExecutor(id, opcoes, configsGlobais, configPadrao);
+          const automacaoWorker = configExecutor.automacaoAtiva;
+          const arquivoWorker = (opcoes.getClienteJsonPath || getClienteJsonPath)(id, "fila.json");
+          resultadoWorker = await avaliarComWorker({
+            workspaceId: id,
+            arquivo: arquivoWorker,
+            agoraMs, janelaMinutos, finalizacoesAgoraMs: inicio,
+            usuario: Object.fromEntries(["creditos", "limiteDiarioRestante", "limite_diario_restante", "creditosRestantesDia", "creditosDiaRestantes"].map(k => [k, usuario[k]])),
+            configExecutor: { automacaoAtiva: automacaoWorker },
+            destinos: destinos.map(projetarDestinoWorker), eventos: eventosPorWorkspace.get(id) || {}
+          }, opcoes);
+          // Last consumer-side check after every async hop; no await until the
+          // workspace summary is consumed below. A rejected result is not reused.
+          if (resultadoWorker) {
+            const { revisao, iguais } = require("./workspace-worker-revision");
+            // Legacy reads executor configuration after queue parsing. If its only
+            // classification field changed while the Worker ran, use that path.
+            const configuracaoAtual = carregarConfiguracaoExecutor(id, opcoes, configsGlobais, configPadrao);
+            if (configuracaoAtual.automacaoAtiva !== automacaoWorker ||
+                !iguais(resultadoWorker.after, revisao(arquivoWorker))) {
+              resultadoWorker = null;
+              workerDescartadoNoConsumo = true;
+            }
+          }
+        } catch (_) { resultadoWorker = null; }
+      }
+      const destinosPreview = resultadoWorker?.destinosPreview || avaliarDestinosWorkspace(destinos, janelaMinutos, [], agoraMs);
+      // A rejected Worker result is never reused: exactly one fresh legacy read.
+      const leituraFila = resultadoWorker?.leitura || lerFilaWorkspaceSnapshot(id, opcoes);
       if (!leituraFila.ok) {
         incrementar(fontesInvalidasPorMotivo, leituraFila.motivo);
         if (destinosPreview.topologiaOperacionalPotencial) {
@@ -1229,7 +1261,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
           fontesInvalidasIrrelevantes += 1;
         }
       }
-      workspaces.push(montarGateWorkspace({
+      workspaces.push(resultadoWorker?.workspace || montarGateWorkspace({
         clienteId: id,
         usuario: usuarioPorId(usuarios, id) || {},
         configExecutor: carregarConfiguracaoExecutor(id, opcoes, configsGlobais, configPadrao),
@@ -1249,6 +1281,8 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
         janelaMinutos,
         agoraMs
       }));
+      if (resultadoWorker) await require("./workspace-worker-client").registrarResultadoWorker(resultadoWorker, opcoes, id);
+      else if (workerDescartadoNoConsumo) await require("./workspace-worker-client").registrarFallbackWorker(opcoes, id);
     }
 
     const resumo = resumirGate(workspaces);
@@ -1316,6 +1350,7 @@ module.exports = {
   avaliarDestinosWorkspace,
   classificarEstadoEsteira,
   montarGateWorkspace,
+  logBufferVivoGateShadow,
   resumirGate,
   criarGateAbsorcaoShadowOfc
 };

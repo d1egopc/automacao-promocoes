@@ -1,6 +1,5 @@
 "use strict";
 
-const { consultarEntregasConfirmadas } = require("./drainage-metrics.repository");
 
 function criarContadorFinalizacoes({ clienteId, agoraMs = Date.now(), janelaMinutos = 15 } = {}) {
   const vistos = new Set();
@@ -34,7 +33,7 @@ function observacao({ valor = null, total = null, unidade, janelaMinutos, qualid
 }
 
 async function criarMetricasDrenagemShadow({ fluxoComercial = {}, gateAbsorcao = {}, janelaMinutos = 15,
-  agoraMs, clock = Date.now, consultarConfirmacoes = consultarEntregasConfirmadas } = {}) {
+  agoraMs, clock = Date.now, consultarConfirmacoes = require("./drainage-metrics.repository").consultarEntregasConfirmadas } = {}) {
   janelaMinutos = Math.max(1, Math.min(120, Math.floor(Number(janelaMinutos) || 15)));
   let entregas;
   try { entregas = await consultarConfirmacoes({ janelaMinutos }); }
