@@ -73,21 +73,21 @@ function umaRequisicao(url, endereco, { deadlineAt, maxBytes, headers, requestIm
       clearTimeout(timer);
       if (req) {
         req.off("timeout", aoInativo);
-        req.off("error", aoErroRequisicao);
       }
       if (res) {
         res.off("data", aoDado);
         res.off("end", aoFim);
         res.off("aborted", aoAbortado);
         res.off("close", aoFechar);
-        res.off("error", aoErroResposta);
       }
+      // Erros de transporte podem chegar depois do settle/close. Manter os
+      // handlers locais evita um evento "error" sem listener; settled preserva o resultado.
     };
     const concluirErro = (erro, abortar = true) => {
       if (settled) return;
       settled = true;
       if (abortar) {
-        // Destruir sem repassar o erro evita um segundo evento "error" depois do cleanup.
+        // Não gerar outro erro ao destruir; erros tardios mantêm seus handlers.
         if (res && !res.destroyed && typeof res.destroy === "function") res.destroy();
         if (req && !req.destroyed && typeof req.destroy === "function") req.destroy();
       }
@@ -126,6 +126,7 @@ function umaRequisicao(url, endereco, { deadlineAt, maxBytes, headers, requestIm
           ? callback(null, [endereco])
           : callback(null, endereco.address, endereco.family)
       }, resposta => {
+        resposta.on("error", aoErroResposta);
         if (settled) {
           resposta.destroy();
           return;
@@ -135,7 +136,6 @@ function umaRequisicao(url, endereco, { deadlineAt, maxBytes, headers, requestIm
         res.on("end", aoFim);
         res.on("aborted", aoAbortado);
         res.on("close", aoFechar);
-        res.on("error", aoErroResposta);
       });
       req.on("timeout", aoInativo);
       req.on("error", aoErroRequisicao);
