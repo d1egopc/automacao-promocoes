@@ -11,6 +11,7 @@ let clonadorGruposEntradaIntervalo = null;
 const { executarObservabilidadeOfc } = require("./ofc");
 const { createAutoGateShadow } = require("../auto-gate/auto-gate-shadow.service");
 const autoGateShadow = createAutoGateShadow();
+const { criarMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
 const {
   autoCleanShadowAtivo,
   executarAutoCleanShadowSeguro
@@ -230,6 +231,8 @@ async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
 
 async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
   const inicioMs = Date.now();
+  const medidorCiclo = contextoPerf.medidorCiclo;
+  const inicioPerf = medidorCiclo?.clock();
   const medidorMemoria = criarMedidorEngineMemoryStage("orchestrator_etapa", {
     rodadaId: contextoPerf.rodadaId || "",
     etapaOrquestrador: nome,
@@ -244,6 +247,7 @@ async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
     inicioMs
   });
   const resultado = await executarEtapa(nome, fn, args, contextoPerf);
+  if (medidorCiclo) medidorCiclo.registrarEtapa(nome, medidorCiclo.clock() - inicioPerf);
   logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-ETAPA-FIM]", {
     rodadaId: contextoPerf.rodadaId || "",
     etapa: nome,
@@ -275,7 +279,9 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
 
   if (engineOrquestradorRodando) {
     console.log("[ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO]", {
-      motivo: "rodada_em_execucao"
+      motivo: "rodada_em_execucao",
+      rodadaAnteriorId: engineOrquestradorRodadaAtual,
+      idadeRodadaAnteriorMs: Math.max(0, Date.now() - engineOrquestradorInicioMs)
     });
     return { ok: true, pulado: true, motivo: "rodada_em_execucao" };
   }
@@ -286,6 +292,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   const inicio = Date.now();
   const cpuInicioRodadaEngine = process.cpuUsage();
   const rodadaId = criarRodadaIdPerf();
+  const medidorCiclo = criarMedidorCiclo();
   engineOrquestradorRodadaAtual = rodadaId;
   engineOrquestradorInicioMs = inicio;
   engineOrquestradorOfcAtivo = false;
@@ -324,10 +331,10 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     engineOrquestradorOfcAtivo = true;
     engineOrquestradorUltimaOfc = { rodadaId, inicioMs: Date.now(), fimMs: 0 };
     try {
-      resumo.etapas.ofc = await executarObservabilidadeOfc({
+      resumo.etapas.ofc = await medidorCiclo.medir("ofc", () => executarObservabilidadeOfc({
         rodadaId,
         janelaConsumoMinutos: 15
-      });
+      }));
       // Observability must never delay or fail the commercial Engine cycle.
       void autoGateShadow.observe({
         cicloId: rodadaId,
@@ -346,7 +353,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     if (autoCleanShadowAtivo()) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
-      }, { rodadaId });
+      }, { rodadaId, medidorCiclo });
     }
 
     let inicioFornecedorMs = Date.now();
@@ -367,7 +374,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     resumo.etapas.processar = await executarEtapaRastreada("processar", processarJobsPendentesEngine, {
       limite: limiteProcessar,
       clientesValidos: clientesValidosProcessar
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     inicioFornecedorMs = Date.now();
     const clientesValidosValidar = chamarFornecedor(getClientesValidos, []);
@@ -392,7 +399,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       clientesValidos: clientesValidosValidar,
       integracoesPorCliente,
       marketplacesAtivosPorCliente
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     inicioFornecedorMs = Date.now();
     const depsImportador = chamarFornecedor(getDepsImportador, {});
@@ -407,44 +414,44 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       limite: limitesRodada.importarMercadoLivre || limitesRodada.importarMl || limiteImportarPadrao,
       marketplace: "mercadolivre",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.importarAmazon = await executarEtapaRastreada("importar_amazon", importarJobsProntosEngine, {
       limite: limitesRodada.importarAmazon || limiteImportarPadrao,
       marketplace: "amazon",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
 
     resumo.etapas.importarShopee = await executarEtapaRastreada("importar_shopee", importarJobsProntosEngine, {
       limite: limitesRodada.importarShopee || limiteImportarPadrao,
       marketplace: "shopee",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.importarAliExpress = await executarEtapaRastreada("importar_aliexpress", importarJobsProntosEngine, {
       limite: limitesRodada.importarAliExpress || limiteImportarPadrao,
       marketplace: "aliexpress",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.importarAwin = await executarEtapaRastreada("importar_awin", importarJobsProntosEngine, {
       limite: limitesRodada.importarAwin || limiteImportarPadrao,
       marketplace: "awin",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.importarKabum = await executarEtapaRastreada("importar_kabum", importarJobsProntosEngine, {
       limite: limitesRodada.importarKabum || limiteImportarPadrao,
       marketplace: "kabum",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.importarMagalu = await executarEtapaRastreada("importar_magalu", importarJobsProntosEngine, {
       limite: limitesRodada.importarMagalu || limiteImportarPadrao,
       marketplace: "magalu",
       deps: depsImportador
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     inicioFornecedorMs = Date.now();
     const contextoDistribuidor = chamarFornecedor(getContextoDistribuidor, {});
@@ -465,14 +472,14 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       marketplace: "mercadolivre",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.distribuirAmazon = await executarEtapaRastreada("distribuir_amazon", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAmazon || limitesRodada.distribuir,
       marketplace: "amazon",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
 
     resumo.etapas.distribuirShopee = await executarEtapaRastreada("distribuir_shopee", distribuirOfertasEngine, {
@@ -480,35 +487,35 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       marketplace: "shopee",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.distribuirAliExpress = await executarEtapaRastreada("distribuir_aliexpress", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAliExpress || limitesRodada.distribuir,
       marketplace: "aliexpress",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.distribuirAwin = await executarEtapaRastreada("distribuir_awin", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirAwin || limitesRodada.distribuir,
       marketplace: "awin",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.distribuirKabum = await executarEtapaRastreada("distribuir_kabum", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirKabum || limitesRodada.distribuir,
       marketplace: "kabum",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.etapas.distribuirMagalu = await executarEtapaRastreada("distribuir_magalu", distribuirOfertasEngine, {
       limite: limitesRodada.distribuirMagalu || limitesRodada.distribuir,
       marketplace: "magalu",
       contexto: contextoDistribuidor,
       deps: depsDistribuidor
-    }, { rodadaId });
+    }, { rodadaId, medidorCiclo });
 
     resumo.ok = Object.values(resumo.etapas).every(etapa => etapa.ok !== false);
     resumo.duracaoMs = Date.now() - inicio;
@@ -546,6 +553,10 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       cpuProcessoMs: Math.round((cpuRodada.user + cpuRodada.system) / 1000),
       ok: okPerfBackground !== false
     }));
+    try {
+      console.log("[ENGINE-CICLO-PERF-SHADOW]", JSON.stringify({ rodadaId, modo: "shadow", aplicouMudancas: false,
+        ...medidorCiclo.finalizar() }));
+    } catch {}
     engineOrquestradorUltimaRodada = { rodadaId, inicioMs: inicio, fimMs: Date.now() };
     engineOrquestradorRodando = false;
     engineOrquestradorRodadaAtual = "";

@@ -1,3 +1,5 @@
+const { medirSerializacaoExistente } = require("../telemetria/ciclo-observabilidade");
+
 function safeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
@@ -32,6 +34,7 @@ function montarTelemetria({ cicloId, metrics = {}, result = {}, previousCycleId 
     inputTotal: safeNumber(metrics.inputTotal),
     inputUnit: "eventos_engine_aceitos_por_minuto",
     outputRate: safeNumber(metrics.outputRate),
+    drenagemObservacional: metrics.drenagemObservacional || null,
     outputUnit: "envios_confirmados_por_destino_por_minuto",
     queueDepthObservado: safeNumber(metrics.queueDepthObservado),
     oldestAgeObservada: safeNumber(metrics.oldestAgeObservada),
@@ -87,7 +90,7 @@ function montarTelemetria({ cicloId, metrics = {}, result = {}, previousCycleId 
 }
 
 function logarTelemetria(payload, logger = console) {
-  logger.log("[AUTO_GATE_SHADOW]", JSON.stringify(payload));
+  logger.log("[AUTO_GATE_SHADOW]", medirSerializacaoExistente(payload));
 }
 
 module.exports = { montarTelemetria, logarTelemetria };

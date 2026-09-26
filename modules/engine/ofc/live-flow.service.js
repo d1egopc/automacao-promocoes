@@ -10,6 +10,12 @@ function paraNumero(valor) {
   return Number.isFinite(numero) ? numero : 0;
 }
 
+function numeroOuNull(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const n = Number(valor);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function arredondar(valor, casas = 2) {
   const numero = Number(valor || 0);
   if (!Number.isFinite(numero)) return 0;
@@ -191,8 +197,14 @@ function calcularFluxoVivoShadow({ dados = {}, metricas = {}, plano = {}, filaAt
       p95Ms: primeiraTentativaTotal > 0 ? paraNumero(dados.primeiraTentativa?.p95_ms) : null,
       populacao: "jobs_com_primeiro_engine_processamentos_na_janela",
       janelaMinutos,
-      totalAntesReset: paraNumero(dados.primeiraTentativa?.total_antes_reset),
-      totalDepoisReset: paraNumero(dados.primeiraTentativa?.total_depois_reset)
+      totalAntesReset: dados.primeiraTentativa?.reset_disponivel === false ? null : numeroOuNull(dados.primeiraTentativa?.total_antes_reset),
+      totalDepoisReset: dados.primeiraTentativa?.reset_disponivel === false ? null : numeroOuNull(dados.primeiraTentativa?.total_depois_reset),
+      resetDisponibilidade: dados.primeiraTentativa?.reset_disponibilidade || "DESCONHECIDO",
+      resetDisponivel: dados.primeiraTentativa?.reset_disponivel === true,
+      motivoResetIndisponivel: dados.primeiraTentativa?.motivo_reset_indisponivel || "",
+      cutoffResetReferencia: dados.primeiraTentativa?.cutoff_reset_referencia || null,
+      resetObservadoEmMs: dados.primeiraTentativa?.reset_observado_em_ms ?? null,
+      resetRevalidarEmMs: dados.primeiraTentativa?.reset_revalidar_em_ms ?? null
     },
     entradaPorMinuto,
     throughputTecnicoPorMinuto: arredondar(throughputTecnicoPorMinuto, 2),

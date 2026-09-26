@@ -1,6 +1,7 @@
 const { coletarMetricasShadow, parseObservedWorkspaceIds } = require("./auto-gate-metrics.service");
 const { avaliarShadow, DEFAULT_SHADOW_POLICY } = require("./auto-gate-state-machine");
 const { montarTelemetria, logarTelemetria } = require("./auto-gate-telemetry");
+const { criarMedidorCiclo, comMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
 
 function shadowPolicyFromEnv(env = process.env) {
   return {
@@ -29,18 +30,21 @@ function createAutoGateShadow({
       }
       running = true;
       const startedAt = clock();
+      const medidor = criarMedidorCiclo();
       const previousCycleId = lastCycleId;
       try {
-        const metrics = await collectMetrics({
+        const metrics = await medidor.medir("coletaMetricas", () => collectMetrics({
           ofc,
           getRadarOperational,
           getTeleRadarOperational,
           observedWorkspaceIds,
           now: startedAt,
           clock
-        });
+        }));
         const machineStartedAt = clock();
+        const machinePerfStartedAt = medidor.clock();
         const result = evaluate(metrics, history, policy);
+        medidor.registrarEtapa("maquinaEstados", medidor.clock() - machinePerfStartedAt);
         const maquinaEstadosMs = Math.max(0, clock() - machineStartedAt);
         history = result.history;
         lastCycleId = cicloId;
@@ -52,7 +56,7 @@ function createAutoGateShadow({
           maquinaEstadosMs,
           duracaoCalculoMs: Math.max(0, clock() - startedAt)
         });
-        log(telemetry);
+        comMedidorCiclo(medidor, () => log(telemetry));
         return { ok: true, mode: "shadow", appliedChanges: false, telemetry };
       } catch {
         const telemetry = montarTelemetria({
@@ -64,9 +68,12 @@ function createAutoGateShadow({
           duracaoCalculoMs: Math.max(0, clock() - startedAt)
         });
         lastCycleId = cicloId;
-        log(telemetry);
+        comMedidorCiclo(medidor, () => log(telemetry));
         return { ok: false, mode: "shadow", appliedChanges: false, telemetry };
       } finally {
+        // Independente do ciclo comercial; nao passa a aguardar observe().
+        try { console.log("[AUTO-GATE-CICLO-PERF-SHADOW]", JSON.stringify({ cicloId, modo: "shadow",
+          aplicouMudancas: false, ...medidor.finalizar() })); } catch {}
         running = false;
       }
     }
