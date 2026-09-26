@@ -1,0 +1,55 @@
+name: Validate ECONNRESET Hotfix CI
+
+on:
+  push:
+    branches:
+      - validation/hotfix-econnreset-ci
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI ECONNRESET Hotfix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: |
+          node --check index.js
+          node --check modules/radar/redirect/safe-redirect-http.js
+          node --check tests/safe-redirect-http-lifecycle.test.js
+
+      - name: Encoding audit
+        run: npm run audit:encoding
+
+      - name: Socket lifecycle regression
+        run: node tests/safe-redirect-http-lifecycle.test.js
+
+      - name: Dynamic link resolvers
+        run: node tests/dynamic-link-resolvers.test.js
+
+      - name: Critical tests
+        run: |
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
