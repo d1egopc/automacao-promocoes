@@ -106,28 +106,100 @@ jobs:
           path: synthetic-proof
           run-id: 36284469055
           github-token: ${{ github.token }}
-      - name: Publish synthetic metrics, never credentials or production data
+      - name: Publish bounded synthetic overview
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('node:fs');
             const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
             if (p.synthetic !== true) throw new Error('Only synthetic evidence permitted');
-            core.notice(JSON.stringify({status:p.status, failure:p.failure, environment:p.environment, fixture:p.fixture, equivalence:p.equivalence, identity:p.identity, builds:p.builds, limitations:p.limitations}), {title:'P2C proof overview'});
-            function planNode(n) {
-              const keys = ['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops',
-                'Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck',
-                'Shared Hit Blocks','Shared Read Blocks','Temp Read Blocks','Temp Written Blocks','Sort Method'];
-              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),
-                ...(n.Plans ? {Plans:n.Plans.map(planNode)} : {})};
+            const eq = Object.fromEntries(Object.entries(p.equivalence).map(([k,v])=>[k,{...v,...(v.mismatches ? {mismatches:v.mismatches.map(x=>x.variant+':'+x.case)} : {})}]));
+            const overview = {status:p.status, failure:p.failure, startedAt:p.startedAt, finishedAt:p.finishedAt, environment:p.environment, fixture:p.fixture,
+              equivalence:eq, builds:p.builds.map(({definition,...x})=>x), poolError:p.poolError};
+            const msg = JSON.stringify(overview);
+            if (msg.length > 3900) throw new Error('Overview too large');
+            core.notice(msg, {title:'P2C bounded overview'});
+            core.notice(JSON.stringify(p.identity), {title:'P2C whole corpus identity'});
+            core.notice(JSON.stringify(p.writes.map(({plans,...x})=>x)), {title:'P2C write probes'});
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '# Existing P2C synthetic proof\n\nSource run 36284469055; status: '+p.status+'\n\nNo database connection and no deploy.\n');
+            if (p.status !== 'passed') throw new Error('Original isolated proof did not pass');
+      - name: Publish bounded baseline plans and timings
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
+            function node(n) {
+              const keys=['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops','Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck','Shared Hit Blocks','Shared Read Blocks','Sort Method'];
+              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),...(n.Plans?{Plans:n.Plans.map(node)}:{})};
             }
-            for (const strategy of ['baseline','btree','gin','structured']) {
-              for (const variant of ['canonical','importer','importer_no_metadata']) {
-                const cases = p.benchmarks.filter(x => x.strategy === strategy && x.variant === variant)
-                  .map(({plans,...x})=>({...x,representativePlan:planNode(plans[0].Plan)}));
-                core.notice(JSON.stringify(cases), {title:`P2C ${strategy} ${variant}`});
+            for(const variant of ['canonical','importer','importer_no_metadata']) {
+              const rows=p.benchmarks.filter(x=>x.strategy==='baseline' && x.variant===variant);
+              const times=rows.map(x=>({case:x.case,setCount:x.setCount,exec:[x.executionMs.min,x.executionMs.median,x.executionMs.max],plan:[x.planningMs.min,x.planningMs.median,x.planningMs.max],buffers:x.metrics[0].buffers,scans:x.metrics[0].scans.map(s=>[s.type,s.index||null,s.rows,s.loops,s.removed,s.removedRecheck,s.approximateVisited]),sorts:x.metrics[0].sorts}));
+              const plans=rows.filter(x=>['recent','old','miss'].includes(x.case)).map(x=>({case:x.case,plan:node(x.plans[0].Plan)}));
+              for(const [suffix,value] of [['timings',times],['plans',plans]]) {
+                const msg=JSON.stringify(value);
+                if(msg.length>3900) throw new Error('Evidence annotation too large: baseline '+variant+' '+suffix);
+                core.notice(msg,{title:'P2C baseline '+variant+' '+suffix});
               }
             }
-            core.notice(JSON.stringify(p.writes.map(({plans,...x})=>x)), {title:'P2C isolated write probes'});
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '# Existing P2C synthetic proof\n\nSource: https://github.com/d1egopc/automacao-promocoes/actions/runs/36284469055\n\nStatus: ' + p.status + '\n\nNo database connection and no deploy in this reporting job.\n');
-            if (p.status !== 'passed') throw new Error('Original isolated proof did not pass');
+      - name: Publish bounded btree plans and timings
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
+            function node(n) {
+              const keys=['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops','Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck','Shared Hit Blocks','Shared Read Blocks','Sort Method'];
+              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),...(n.Plans?{Plans:n.Plans.map(node)}:{})};
+            }
+            for(const variant of ['canonical','importer','importer_no_metadata']) {
+              const rows=p.benchmarks.filter(x=>x.strategy==='btree' && x.variant===variant);
+              const times=rows.map(x=>({case:x.case,setCount:x.setCount,exec:[x.executionMs.min,x.executionMs.median,x.executionMs.max],plan:[x.planningMs.min,x.planningMs.median,x.planningMs.max],buffers:x.metrics[0].buffers,scans:x.metrics[0].scans.map(s=>[s.type,s.index||null,s.rows,s.loops,s.removed,s.removedRecheck,s.approximateVisited]),sorts:x.metrics[0].sorts}));
+              const plans=rows.filter(x=>['recent','old','miss'].includes(x.case)).map(x=>({case:x.case,plan:node(x.plans[0].Plan)}));
+              for(const [suffix,value] of [['timings',times],['plans',plans]]) {
+                const msg=JSON.stringify(value);
+                if(msg.length>3900) throw new Error('Evidence annotation too large: btree '+variant+' '+suffix);
+                core.notice(msg,{title:'P2C btree '+variant+' '+suffix});
+              }
+            }
+      - name: Publish bounded gin plans and timings
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
+            function node(n) {
+              const keys=['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops','Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck','Shared Hit Blocks','Shared Read Blocks','Sort Method'];
+              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),...(n.Plans?{Plans:n.Plans.map(node)}:{})};
+            }
+            for(const variant of ['canonical','importer','importer_no_metadata']) {
+              const rows=p.benchmarks.filter(x=>x.strategy==='gin' && x.variant===variant);
+              const times=rows.map(x=>({case:x.case,setCount:x.setCount,exec:[x.executionMs.min,x.executionMs.median,x.executionMs.max],plan:[x.planningMs.min,x.planningMs.median,x.planningMs.max],buffers:x.metrics[0].buffers,scans:x.metrics[0].scans.map(s=>[s.type,s.index||null,s.rows,s.loops,s.removed,s.removedRecheck,s.approximateVisited]),sorts:x.metrics[0].sorts}));
+              const plans=rows.filter(x=>['recent','old','miss'].includes(x.case)).map(x=>({case:x.case,plan:node(x.plans[0].Plan)}));
+              for(const [suffix,value] of [['timings',times],['plans',plans]]) {
+                const msg=JSON.stringify(value);
+                if(msg.length>3900) throw new Error('Evidence annotation too large: gin '+variant+' '+suffix);
+                core.notice(msg,{title:'P2C gin '+variant+' '+suffix});
+              }
+            }
+      - name: Publish bounded structured plans and timings
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
+            function node(n) {
+              const keys=['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops','Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck','Shared Hit Blocks','Shared Read Blocks','Sort Method'];
+              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),...(n.Plans?{Plans:n.Plans.map(node)}:{})};
+            }
+            for(const variant of ['canonical','importer','importer_no_metadata']) {
+              const rows=p.benchmarks.filter(x=>x.strategy==='structured' && x.variant===variant);
+              const times=rows.map(x=>({case:x.case,setCount:x.setCount,exec:[x.executionMs.min,x.executionMs.median,x.executionMs.max],plan:[x.planningMs.min,x.planningMs.median,x.planningMs.max],buffers:x.metrics[0].buffers,scans:x.metrics[0].scans.map(s=>[s.type,s.index||null,s.rows,s.loops,s.removed,s.removedRecheck,s.approximateVisited]),sorts:x.metrics[0].sorts}));
+              const plans=rows.filter(x=>['recent','old','miss'].includes(x.case)).map(x=>({case:x.case,plan:node(x.plans[0].Plan)}));
+              for(const [suffix,value] of [['timings',times],['plans',plans]]) {
+                const msg=JSON.stringify(value);
+                if(msg.length>3900) throw new Error('Evidence annotation too large: structured '+variant+' '+suffix);
+                core.notice(msg,{title:'P2C structured '+variant+' '+suffix});
+              }
+            }
