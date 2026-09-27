@@ -82,7 +82,7 @@ async function runTimeout(root, fixtureData) {
 }
 
 async function runTempWriteFailure(root, fixtureData) {
-  const tempPath = path.join(fixtureData.dir, "fila.json.tmp-temp-matrix-0001");
+  const tempPath = path.join(fixtureData.dir, "fila.json.tmp.temp-matrix-0001");
   let file = null;
   if (process.platform === "win32") {
     file = workerFile(root, [
