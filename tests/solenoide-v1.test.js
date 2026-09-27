@@ -236,7 +236,7 @@ teste("18 sanity 25 workspaces e centenas de rodadas", () => {
 
 teste("19 modo ativo aplica somente normal/reducao/pulo", () => {
   assert.deepStrictEqual(planoColetor({ estado: ESTADOS.ABERTO, aplicouMudancas: true }, { limite: 20 }), {
-    marketplace: "", executar: true, limite: 20, alterou: false, motivo: "solenoide_aberto"
+    marketplace: "", limiteOriginal: 20, executar: true, limite: 20, alterou: false, motivo: "solenoide_aberto"
   });
   assert.strictEqual(planoColetor({ estado: ESTADOS.MODERADO, aplicouMudancas: true }, { limite: 20 }).limite, 10);
   assert.strictEqual(planoColetor({ estado: ESTADOS.FECHADO, aplicouMudancas: true }, { limite: 20 }).executar, false);

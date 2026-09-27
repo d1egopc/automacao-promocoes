@@ -288,6 +288,23 @@ async function executarImportacaoComSolenoide({
   medidorCiclo
 } = {}) {
   const plano = solenoide.planoColetor(decisaoSolenoide, { marketplace, limite });
+  const limiteAplicado = plano.executar ? plano.limite : 0;
+  const acao = !plano.executar
+    ? "pular_importacao"
+    : decisaoSolenoide?.estado === "MODERADO" && decisaoSolenoide?.aplicouMudancas === true
+      ? "reduzir_lote"
+      : "coleta_normal";
+  console.log("[SOLENOID IMPORTADOR]", JSON.stringify({
+    rodadaId: String(rodadaId || "").slice(0, 100),
+    marketplace: String(marketplace || "").slice(0, 40),
+    modo: decisaoSolenoide?.modo || "off",
+    estado: decisaoSolenoide?.estado || "ABERTO",
+    acao,
+    limiteOriginal: plano.limiteOriginal,
+    limiteAplicado,
+    aplicouMudancas: decisaoSolenoide?.aplicouMudancas === true,
+    motivo: String(plano.motivo || "").slice(0, 40)
+  }));
   if (!plano.executar) {
     return {
       ok: true,

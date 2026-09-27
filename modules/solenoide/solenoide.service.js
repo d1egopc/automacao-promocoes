@@ -254,6 +254,7 @@ function planoColetor(decisao = {}, { marketplace = "", limite = 1 } = {}) {
   if (decisao.aplicouMudancas !== true || decisao.failOpen === true) {
     return {
       marketplace: String(marketplace || ""),
+      limiteOriginal: limiteLegado,
       executar: true,
       limite: limiteLegado,
       alterou: false,
@@ -263,6 +264,7 @@ function planoColetor(decisao = {}, { marketplace = "", limite = 1 } = {}) {
   if (decisao.estado === ESTADOS.FECHADO) {
     return {
       marketplace: String(marketplace || ""),
+      limiteOriginal: limiteLegado,
       executar: false,
       limite: limiteLegado,
       alterou: true,
@@ -272,6 +274,7 @@ function planoColetor(decisao = {}, { marketplace = "", limite = 1 } = {}) {
   if (decisao.estado === ESTADOS.MODERADO) {
     return {
       marketplace: String(marketplace || ""),
+      limiteOriginal: limiteLegado,
       executar: true,
       limite: Math.max(1, Math.ceil(limiteLegado * 0.5)),
       alterou: true,
@@ -280,6 +283,7 @@ function planoColetor(decisao = {}, { marketplace = "", limite = 1 } = {}) {
   }
   return {
     marketplace: String(marketplace || ""),
+    limiteOriginal: limiteLegado,
     executar: true,
     limite: limiteLegado,
     alterou: false,
