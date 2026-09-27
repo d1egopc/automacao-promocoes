@@ -1,0 +1,165 @@
+name: Validate Panel Latency Instrumentation (CI-only)
+
+on:
+  push:
+    branches:
+      - validation/painel-latencia
+
+permissions:
+  contents: read
+
+env:
+  BASE_SHA: 16e8469919af5156162527c46ac752a974d431d4
+  FUNCTIONAL_SHA: 2b8e08f41b687969b2bd552707cd7a96d137ba84
+  NODE_OPTIONS: --unhandled-rejections=strict
+
+jobs:
+  validate:
+    name: Functional and regression validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard branch and commit boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/validation/painel-latencia"
+          test "$(git rev-parse HEAD^)" = "$FUNCTIONAL_SHA"
+          test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
+          expected_functional=$(printf '%s\n' \
+            bootstrap/middlewares.js \
+            index.js \
+            modules/discord/discord.routes.js \
+            modules/engine/database.js \
+            modules/engine/orchestrator.runner.js \
+            modules/manual-v2/manual-offers.routes.js \
+            modules/manual-v2/ofertas-v2-achados.js \
+            modules/manual-v2/ofertas-v2-listas.js \
+            tests/painel-latencia.test.js \
+            utils/painel-latencia.js \
+            utils/storage.js | sort)
+          actual_functional=$(git diff --name-only "$BASE_SHA" "$FUNCTIONAL_SHA" | sort)
+          diff --strip-trailing-cr <(printf '%s\n' "$expected_functional") <(printf '%s\n' "$actual_functional")
+          test "$(git diff --name-only "$FUNCTIONAL_SHA" HEAD)" = ".github/workflows/validate-painel-latencia.yml"
+          git diff --check "$BASE_SHA" "$FUNCTIONAL_SHA"
+          git diff --check "$FUNCTIONAL_SHA" HEAD
+          test -z "$(git status --porcelain)"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install complete dependencies
+        run: npm ci
+
+      - name: Verify flag OFF disables instrumentation
+        env:
+          PERF_PAINEL_LATENCIA: "0"
+        run: |
+          node <<'NODE'
+          const painel = require('./utils/painel-latencia');
+          const req = { path: '/destinos', method: 'GET' };
+          painel.iniciar(req);
+          painel.iniciarAmostragem();
+          if (req.painelLatencia !== undefined) process.exit(1);
+          console.log('PERF_PAINEL_LATENCIA_OFF_OK');
+          NODE
+
+      - name: Panel latency tests and low-overhead sanity check
+        run: node tests/painel-latencia.test.js
+
+      - name: Storage, destinations and manual/ofertas tests
+        run: |
+          set -euo pipefail
+          node tests/storage-write-atomic.test.js
+          node tests/storage-manager.test.js
+          node tests/storage-manager-incremental.test.js
+          node tests/destinos-multialvo-v1.test.js
+          node tests/manual-v2-storage.test.js
+          node tests/manual-v2-routes.test.js
+          node tests/manual-v2-destinations.test.js
+          node tests/manual-v2-contract.test.js
+
+      - name: Database and Engine tests
+        run: |
+          set -euo pipefail
+          node tests/engine-database-json-safety.test.js
+          node tests/engine-memory-stage.test.js
+          node tests/engine-v2-pipeline-unico.test.js
+          node tests/p0-2-destinos-clonador-executor.test.js
+          node tests/discord-oauth-storage-routes.test.js
+          node tests/discord-channels-destinos.test.js
+
+      - name: Critical official suite 9 of 9
+        run: |
+          set -euo pipefail
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+
+      - name: Temporal, Phase 1D, Worker, lifecycle and dynamic-link suites
+        run: |
+          set -euo pipefail
+          node tests/ofc-workspace-temporal.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/safe-redirect-http-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+
+      - name: Syntax check functional diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA" "$FUNCTIONAL_SHA" -- '*.js' | xargs -r -n1 node --check
+
+      - name: Encoding audit
+        run: npm run audit:encoding
+
+      - name: Compare known historical failures with baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_dir="$RUNNER_TEMP/painel-latencia-baseline"
+          mkdir -p "$baseline_dir"
+          git archive "$BASE_SHA" | tar -x -C "$baseline_dir"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          failed=0
+          for test_file in \
+            tests/engine-imagem-fallback.test.js \
+            tests/engine-v2-oferta-universal-ml.test.js \
+            tests/imagem-candidatos-universal.test.js; do
+            current_log="$RUNNER_TEMP/current-$(basename "$test_file").log"
+            baseline_log="$RUNNER_TEMP/baseline-$(basename "$test_file").log"
+            set +e
+            node "$test_file" >"$current_log" 2>&1
+            current_status=$?
+            (cd "$baseline_dir" && node "$test_file") >"$baseline_log" 2>&1
+            baseline_status=$?
+            set -e
+            echo "$test_file baseline=$baseline_status current=$current_status"
+            if [ "$baseline_status" -ne "$current_status" ]; then
+              echo "Historical test status changed: $test_file"
+              tail -n 80 "$baseline_log"
+              tail -n 80 "$current_log"
+              failed=1
+            fi
+          done
+          test "$failed" -eq 0
+
+      - name: Final clean diff check
+        run: git diff --check "$BASE_SHA" HEAD
