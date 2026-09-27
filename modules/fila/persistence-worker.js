@@ -15,11 +15,30 @@ const {
   erroSanitizado,
   sameIdentity
 } = require("./persistence-protocol");
+const {
+  lerArrayJsonIncremental,
+  escreverArrayJsonIncremental
+} = require("./json-array-incremental");
 
 let filaOperacionalV2 = null;
 
 function agoraMs() {
   return Date.now();
+}
+
+function diagnosticoMemoriaAtivo() {
+  const valor = String(process.env.FILA_PERSISTENCIA_DIAGNOSTICO_MEMORIA || "").toLowerCase();
+  return ["1", "true", "on", "yes"].includes(valor);
+}
+
+function memoriaAtual() {
+  const valor = process.memoryUsage();
+  return {
+    rssBytes: valor.rss,
+    heapUsedBytes: valor.heapUsed,
+    heapTotalBytes: valor.heapTotal,
+    externalBytes: valor.external
+  };
 }
 
 function obterFilaOperacionalV2(dataDir) {
@@ -46,8 +65,7 @@ function caminhoWorkspace(dataDir, workspace) {
   return { raiz, cliente, diretorio, arquivo, viva, proof };
 }
 
-function statIdentity(file) {
-  const stat = fs.statSync(file);
+function identityFromStat(file, stat) {
   return {
     pathKind: path.basename(file),
     dev: Number.isFinite(Number(stat.dev)) ? Number(stat.dev) : null,
@@ -58,6 +76,10 @@ function statIdentity(file) {
     mtimeNs: stat.mtimeNs == null ? null : String(stat.mtimeNs),
     ctimeNs: stat.ctimeNs == null ? null : String(stat.ctimeNs)
   };
+}
+
+function statIdentity(file) {
+  return identityFromStat(file, fs.statSync(file));
 }
 
 function statOptional(file) {
@@ -74,29 +96,44 @@ function sameOptionalIdentity(esperada, atual) {
 }
 
 function readArray(file, { absentOk = false } = {}) {
-  const readStarted = process.hrtime.bigint();
-  let texto;
+  let fd;
   try {
-    texto = fs.readFileSync(file, "utf8");
+    fd = fs.openSync(file, "r");
   } catch (erro) {
     if (erro?.code === "ENOENT" && absentOk) {
-      return { value: [], identity: null, bytes: 0, parseMs: 0, readMs: Number(process.hrtime.bigint() - readStarted) / 1e6 };
+      return { value: [], identity: null, bytes: 0, parseMs: 0, readMs: 0 };
     }
     throw erro;
   }
-  const readMs = Number(process.hrtime.bigint() - readStarted) / 1e6;
-  const bytes = Buffer.byteLength(texto, "utf8");
-  const parseStarted = process.hrtime.bigint();
-  const value = JSON.parse(texto);
-  const parseMs = Number(process.hrtime.bigint() - parseStarted) / 1e6;
-  if (!Array.isArray(value)) throw new Error(`${path.basename(file)}_nao_array`);
-  return {
-    value,
-    identity: statIdentity(file),
-    bytes,
-    parseMs,
-    readMs
-  };
+  try {
+    const inicial = identityFromStat(file, fs.fstatSync(fd));
+    const value = [];
+    const leitura = lerArrayJsonIncremental(fd, {
+      onItem: item => value.push(item)
+    });
+    const finalDescriptor = identityFromStat(file, fs.fstatSync(fd));
+    fs.closeSync(fd);
+    fd = null;
+    const finalPathname = statOptional(file);
+    if (!finalPathname ||
+        !sameIdentity(inicial, finalDescriptor) ||
+        !sameIdentity(inicial, finalPathname)) {
+      const erro = new Error("checkpoint_source_changed_during_read");
+      erro.code = "STALE_REVISION";
+      throw erro;
+    }
+    return {
+      value,
+      identity: finalPathname,
+      bytes: leitura.bytes,
+      parseMs: leitura.parseMs,
+      readMs: leitura.readMs
+    };
+  } finally {
+    if (fd !== null && fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
 }
 
 function backupFileAtomic(file) {
@@ -106,16 +143,22 @@ function backupFileAtomic(file) {
 
 function writeTempAtomic(tempPath, value) {
   const started = process.hrtime.bigint();
-  const stringifyStarted = process.hrtime.bigint();
-  const content = JSON.stringify(value, null, 2);
-  const stringifyMs = Number(process.hrtime.bigint() - stringifyStarted) / 1e6;
-  const bytes = Buffer.byteLength(content, "utf8");
-  fs.writeFileSync(tempPath, content, "utf8");
-  return {
-    bytes,
-    stringifyMs,
-    writeMs: Number(process.hrtime.bigint() - started) / 1e6
-  };
+  const partialPath = `${tempPath}.partial`;
+  try {
+    try { fs.unlinkSync(partialPath); } catch (erro) {
+      if (erro?.code !== "ENOENT") throw erro;
+    }
+    const escrita = escreverArrayJsonIncremental(partialPath, value);
+    fs.renameSync(partialPath, tempPath);
+    return {
+      bytes: escrita.bytes,
+      stringifyMs: escrita.stringifyMs,
+      writeMs: Number(process.hrtime.bigint() - started) / 1e6
+    };
+  } catch (erro) {
+    try { fs.unlinkSync(partialPath); } catch {}
+    throw erro;
+  }
 }
 
 function ensureRevisionTemp(paths, revision) {
@@ -154,11 +197,13 @@ function sourceRead(paths, nowMs, dataDir) {
 
 function prepare(job) {
   const started = process.hrtime.bigint();
+  const memoryStages = diagnosticoMemoriaAtivo() ? { beforeRead: memoriaAtual() } : null;
   const dataDir = normalizarDataDir(job.dataDir);
   const paths = caminhoWorkspace(dataDir, job.clienteId);
   const revision = revisionSegura(job.checkpointRevision);
   fs.mkdirSync(paths.diretorio, { recursive: true });
   const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir);
+  if (memoryStages) memoryStages.afterMerge = memoriaAtual();
   const currentLegacy = statOptional(paths.arquivo);
   const currentViva = statOptional(paths.viva);
   if (!sameOptionalIdentity(source.sourceRevisions.legacy, currentLegacy) ||
@@ -176,7 +221,9 @@ function prepare(job) {
     throw erro;
   }
   const tempPath = ensureRevisionTemp(paths, revision);
+  if (memoryStages) memoryStages.beforeWriter = memoriaAtual();
   const escrita = writeTempAtomic(tempPath, source.filaCliente);
+  if (memoryStages) memoryStages.afterWriter = memoriaAtual();
   const tempIdentity = statIdentity(tempPath);
   return {
     ok: true,
@@ -209,7 +256,8 @@ function prepare(job) {
       backupMs: backup.backupMs,
       backupMetodo: backup.backupMetodo,
       totalWorkerMs: Number(process.hrtime.bigint() - started) / 1e6,
-      bytes: escrita.bytes
+      bytes: escrita.bytes,
+      ...(memoryStages ? { memoryStages } : {})
     }
   };
 }
@@ -272,13 +320,21 @@ function cleanup(job) {
   const paths = caminhoWorkspace(dataDir, job.clienteId);
   const revision = revisionSegura(job.checkpointRevision);
   const tempPath = ensureRevisionTemp(paths, revision);
+  const partialPath = `${tempPath}.partial`;
+  let removed = false;
   try {
     fs.unlinkSync(tempPath);
-    return { ok: true, operation: OP_CLEANUP, removed: true };
+    removed = true;
   } catch (erro) {
-    if (erro?.code === "ENOENT") return { ok: true, operation: OP_CLEANUP, removed: false };
-    throw erro;
+    if (erro?.code !== "ENOENT") throw erro;
   }
+  try {
+    fs.unlinkSync(partialPath);
+    removed = true;
+  } catch (erro) {
+    if (erro?.code !== "ENOENT") throw erro;
+  }
+  return { ok: true, operation: OP_CLEANUP, removed };
 }
 
 async function executar(job) {
