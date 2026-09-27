@@ -15,7 +15,7 @@ concurrency:
 jobs:
   postgres17-proof:
     name: P2C synthetic PostgreSQL 17 (no deploy)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2c-postgres17'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2c-postgres17' && !contains(github.event.head_commit.message, '[p2c-report]')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -82,3 +82,44 @@ jobs:
           path: p2c-evidence/proof.json
           if-no-files-found: warn
           retention-days: 14
+
+  evidence-report-only:
+    name: Publish existing synthetic proof metrics (no database, no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2c-postgres17' && contains(github.event.head_commit.message, '[p2c-report]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Verify exact isolated source run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const r = await github.rest.actions.getWorkflowRun({owner: context.repo.owner, repo: context.repo.repo, run_id: 36284469055});
+            if (r.data.head_branch !== 'validation/p2c-postgres17' || r.data.head_sha !== '1ad1ebad8351d59fa5034b70ce7ea1d76b59bb83' || r.data.status !== 'completed') throw new Error('Unexpected proof source');
+            core.notice(JSON.stringify({sourceRun:r.data.id, sourceSha:r.data.head_sha, conclusion:r.data.conclusion}), {title:'P2C source run'});
+      - name: Download only synthetic proof artifact from exact source run
+        uses: actions/download-artifact@v4
+        with:
+          name: p2c-postgres17-synthetic-evidence
+          path: synthetic-proof
+          run-id: 36284469055
+          github-token: ${{ github.token }}
+      - name: Publish synthetic metrics, never credentials or production data
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
+            if (p.synthetic !== true) throw new Error('Only synthetic evidence permitted');
+            core.notice(JSON.stringify({status:p.status, failure:p.failure, environment:p.environment, fixture:p.fixture, equivalence:p.equivalence, identity:p.identity, builds:p.builds, limitations:p.limitations}), {title:'P2C proof overview'});
+            for (const strategy of ['baseline','btree','gin','structured']) {
+              for (const variant of ['canonical','importer','importer_no_metadata']) {
+                const cases = p.benchmarks.filter(x => x.strategy === strategy && x.variant === variant).map(({plans,...x})=>x);
+                core.notice(JSON.stringify(cases), {title:`P2C ${strategy} ${variant}`});
+              }
+            }
+            core.notice(JSON.stringify(p.writes.map(({plans,...x})=>x)), {title:'P2C isolated write probes'});
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '# Existing P2C synthetic proof\n\nSource: https://github.com/d1egopc/automacao-promocoes/actions/runs/36284469055\n\nStatus: ' + p.status + '\n\nNo database connection and no deploy in this reporting job.\n');
+            if (p.status !== 'passed') throw new Error('Original isolated proof did not pass');
