@@ -26,7 +26,15 @@ const evidence = { status: 'running', synthetic: true, rowsRequested: ROWS, repe
     'GIN indexes the metadata route; the no-metadata compatibility route is measured separately and may scan.',
     'Whole-dataset identity audit covers every row and extracted token; not every possible arbitrary LIKE parameter.',
     'Results do not authorize production DDL, code, backfill or feature changes.'] };
-function save() { fs.writeFileSync(path.join(outDir, 'proof.json'), JSON.stringify(evidence, null, 2)); }
+function save() {
+  fs.writeFileSync(path.join(outDir, 'proof.json'), JSON.stringify(evidence, null, 2));
+  if (process.env.GITHUB_STEP_SUMMARY && evidence.status !== 'running') {
+    const compact = { ...evidence,
+      benchmarks: evidence.benchmarks.map(({ plans, ...rest }) => rest),
+      writes: evidence.writes.map(({ plans, ...rest }) => rest) };
+    fs.writeFileSync(process.env.GITHUB_STEP_SUMMARY, '# P2C disposable PostgreSQL evidence\n\n```json\n' + JSON.stringify(compact, null, 2) + '\n```\n');
+  }
+}
 function emit(phase, extra = {}) { console.log(JSON.stringify({ phase, at: new Date().toISOString(), ...extra })); save(); }
 const pool = new pg.Pool({ connectionString: url.toString(), ssl: false, max: 2,
   connectionTimeoutMillis: 5000, statement_timeout: 600000, query_timeout: 610000 });
@@ -320,5 +328,7 @@ async function main() {
     emit('proof_complete');
   } finally { client.release(); await pool.end(); }
 }
-main().catch(async e => { evidence.status = 'failed'; evidence.failure = { name: e.name, message: e.message, code: e.code || '' }; save(); console.error(e.stack); process.exitCode = 1;
+main().catch(async e => { evidence.status = 'failed'; evidence.failure = { name: e.name, message: e.message, code: e.code || '' }; save(); console.error(e.stack);
+  if (process.env.GITHUB_ACTIONS) console.error('::error title=P2C isolated proof failure::' + String(e.message).replace(/%/g,'%25').replace(/\r/g,'%0D').replace(/\n/g,'%0A'));
+  process.exitCode = 1;
   if (!client) await pool.end(); });
