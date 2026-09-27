@@ -34,8 +34,10 @@ jobs:
           test "$GITHUB_EVENT_NAME" = push
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$(git rev-parse 418efabd29c73a4452595d7c0890f873d75d8317^)" = 2b8e08f41b687969b2bd552707cd7a96d137ba84
-          test "$(git rev-parse HEAD^)" = 418efabd29c73a4452595d7c0890f873d75d8317
+          test "$(git rev-parse HEAD~2)" = 418efabd29c73a4452595d7c0890f873d75d8317
+          test "$(git rev-parse HEAD^)" = 7a8479bf172f868e03eae080ea8deea080bb5fb6
           test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/validate-demand-scheduler-v1.yml
+          test "$(git diff --name-only 418efabd29c73a4452595d7c0890f873d75d8317 HEAD)" = .github/workflows/validate-demand-scheduler-v1.yml
           test "$(git diff --name-only 2b8e08f41b687969b2bd552707cd7a96d137ba84 418efabd29c73a4452595d7c0890f873d75d8317)" = "$(printf '%s\n' index.js modules/demand-scheduler/demand-scheduler.service.js tests/demand-scheduler-v1.test.js)"
           mkdir -p "$RUNNER_TEMP/demand-scheduler-baseline"
           git archive 2b8e08f41b687969b2bd552707cd7a96d137ba84 | tar -x -C "$RUNNER_TEMP/demand-scheduler-baseline"
@@ -78,7 +80,6 @@ jobs:
           set -euo pipefail
           for suite in \
             anti-repeticao-executor \
-            anti-repeticao-automatica \
             ofertas-v2-dedupe-duplicar \
             ofertas-v2-achados-dedupe-memoria; do
             node "tests/$suite.test.js"
@@ -135,7 +136,8 @@ jobs:
           const suites = [
             ['engine-imagem-fallback', 'https://radar.test/original.jpg'],
             ['engine-v2-oferta-universal-ml', '3 !== 2'],
-            ['imagem-candidatos-universal', 'https://cdn.exemplo.com/radar.jpg']
+            ['imagem-candidatos-universal', 'https://cdn.exemplo.com/radar.jpg'],
+            ['anti-repeticao-automatica', 'mesma oferta radar deve bloquear por 2h']
           ];
           function run(root, suite) {
             const result = spawnSync(process.execPath, [path.join(root, 'tests', suite + '.test.js')], {
