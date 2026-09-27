@@ -3,6 +3,7 @@ FROM node:24-bookworm-slim
 WORKDIR /app
 
 COPY package*.json ./
+COPY scripts/apply-baileys-retry-hotfix.cjs ./scripts/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \

@@ -5,6 +5,8 @@
     "scripts":  {
                     "start":  "node index.js",
                     "test:radar-cupom":  "node tests/radar-cupom-mensagem.test.js",
+                    "test:baileys-retry-hotfix":  "node tests/baileys-retry-hotfix.test.js",
+                    "postinstall":  "node scripts/apply-baileys-retry-hotfix.cjs",
                     "audit:encoding":  "node scripts/audit-encoding.cjs"
                 },
     "dependencies":  {
