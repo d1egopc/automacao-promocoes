@@ -1,0 +1,147 @@
+name: Baileys retry hotfix validation
+
+on:
+  push:
+    branches:
+      - hotfix/baileys-retry-unhandled
+
+permissions:
+  contents: read
+
+concurrency:
+  group: baileys-retry-hotfix-validation
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: a28fcfb9f6a015a39aa60783d5e391e1a17b1af4
+  FUNCTIONAL_SHA: a2238b0a
+
+jobs:
+  functional-validation:
+    name: Functional validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify functional commit scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${FUNCTIONAL_SHA}^{commit}"
+          expected=$'Dockerfile\npackage.json\nscripts/apply-baileys-retry-hotfix.cjs\ntests/baileys-retry-hotfix.test.js'
+          actual="$(git diff --name-only "${BASE_SHA}...${FUNCTIONAL_SHA}")"
+          test "${actual}" = "${expected}"
+          git diff --exit-code "${BASE_SHA}...${FUNCTIONAL_SHA}" -- package-lock.json
+          git diff --check "${BASE_SHA}...${FUNCTIONAL_SHA}"
+
+      - name: Clean install with lifecycle scripts
+        run: npm ci
+
+      - name: Hotfix adversarial and persistence tests
+        run: npm run test:baileys-retry-hotfix
+
+      - name: Existing socket and reconnect suites
+        run: |
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/whatsapp-reconnect-seguro.test.js
+
+      - name: Existing OFC, Scheduler and Solenoide suites
+        run: |
+          node tests/ofc-workspace-worker.test.js
+          node tests/demand-scheduler-v1.test.js
+          node tests/solenoide-v1.test.js
+          node tests/solenoide-radar-config.test.js
+
+      - name: Existing Radar and Engine suites
+        run: |
+          node tests/radar-whatsapp-capture-gate.test.js
+          node tests/radar-whatsapp-media-materializer.test.js
+          node tests/engine-fanout-universal-v2.test.js
+          node tests/engine-v2-pipeline-unico.test.js
+          node tests/engine-reset-operacional.test.js
+
+      - name: Critical official suites
+        run: |
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+
+      - name: Syntax, encoding and whitespace checks
+        run: |
+          node --check index.js
+          node --check scripts/apply-baileys-retry-hotfix.cjs
+          node --check tests/baileys-retry-hotfix.test.js
+          npm run audit:encoding
+          git diff --check "${BASE_SHA}...${FUNCTIONAL_SHA}"
+
+  clean-production-install:
+    name: Production dependency install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: npm ci --omit=dev
+        run: npm ci --omit=dev
+
+      - name: Verify installed production patch
+        run: npm run test:baileys-retry-hotfix
+
+  docker-build:
+    name: Docker production image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build production Docker image
+        env:
+          IMAGE: baileys-retry-hotfix:${{ github.sha }}
+        run: docker build --progress=plain --tag "${IMAGE}" .
+
+      - name: Verify patched runtime inside built image
+        env:
+          IMAGE: baileys-retry-hotfix:${{ github.sha }}
+        run: |
+          docker run --rm --entrypoint node "${IMAGE}" -e '
+            const fs = require("node:fs");
+            const pkg = require("./node_modules/@whiskeysockets/baileys/package.json");
+            const source = fs.readFileSync("./node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js", "utf8");
+            if (pkg.version !== "6.7.22") throw new Error(`Unexpected Baileys ${pkg.version}`);
+            if (!source.includes("await retryMutex.mutex(async () => {")) throw new Error("awaited mutex missing");
+            if (!source.includes("if (!ws.isOpen) {")) throw new Error("socket-open guard missing");
+            if (!source.includes("Connection Closed") || !source.includes("statusCode === 428")) throw new Error("428 containment missing");
+            console.log(`runtime patch verified baileys=${pkg.version}`);
+          '
