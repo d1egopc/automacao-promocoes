@@ -454,6 +454,9 @@ const {
   resolverIntervaloConfiguradoCadencia
 } = require("./modules/engine/cadencia.service");
 const {
+  criarDemandScheduler
+} = require("./modules/demand-scheduler/demand-scheduler.service");
+const {
   registrarDecisaoDestinoComercial,
   registrarExecutorEnviado,
   registrarExecutorErroFinal
@@ -2473,7 +2476,9 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
     ordenarPendentesPorPrioridade,
     ofertaExpiradaParaEnvio,
     avaliarOfertaParaSelecaoFilaViva,
-    ordenarOfertasFilaViva,
+    ordenarOfertasFilaViva: demandScheduler.ativo()
+      ? (candidatos, contexto) => demandScheduler.ordenarCandidatos(candidatos, contexto, ordenarOfertasFilaViva)
+      : ordenarOfertasFilaViva,
     cacheLimiteDiario
   });
 }
@@ -10517,18 +10522,32 @@ if (!disponibilidadeAntesReserva.ok) {
 }
 liberarCooldownSessaoIndisponivel(clienteId, "sessao_disponivel");
 
-const destinosOrdenados = perfilProcessarFila.etapaSync("ordenarDestinos", () =>
-  destinosCompativeis
-    .map(item => {
-      const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
-      return {
-        ...item,
-        intervalo,
-        ultimoEnvio: intervalo.ultimoEnvio || 0
-      };
-    })
-    .sort((a, b) => a.ultimoEnvio - b.ultimoEnvio)
-);
+const destinosOrdenados = perfilProcessarFila.etapaSync("ordenarDestinos", () => {
+  const destinosComIntervalo = destinosCompativeis.map(item => {
+    const intervalo = intervaloDestinoInfo(clienteId, item.destino, configCliente, oferta);
+    return {
+      ...item,
+      intervalo,
+      ultimoEnvio: intervalo.ultimoEnvio || 0
+    };
+  });
+  return demandScheduler.ativo()
+    ? demandScheduler.ordenarDestinos(destinosComIntervalo, Date.now())
+    : destinosComIntervalo.sort((a, b) => a.ultimoEnvio - b.ultimoEnvio);
+});
+
+if (demandScheduler.ativo() && destinosOrdenados.length) {
+  const primeiroDestinoScheduler = destinosOrdenados[0];
+  demandScheduler.registrar("destino_priorizado", {
+    workspace: clienteId,
+    destino: primeiroDestinoScheduler.destino,
+    demanda: primeiroDestinoScheduler.demandScheduler,
+    elegivel: primeiroDestinoScheduler.intervalo?.liberado === true,
+    bloqueio: primeiroDestinoScheduler.intervalo?.liberado === true ? "" : "intervalo",
+    oferta,
+    resultado: "priorizado"
+  });
+}
 
 // A decisao 2h agora ocorre no destino candidato; nao fazemos dual-read da
 // fila inteira antes de conhecer esse destino.
@@ -11233,6 +11252,16 @@ for (const item of destinosOrdenados) {
     destinosTentados: destinosTentadosDebug,
     enviado: resultadoEnvio.enviado === true,
     erro: resultadoEnvio.enviado === true ? "" : (resultadoEnvio.erro || resultadoEnvio.motivo || "nao_enviado")
+  });
+
+  demandScheduler.registrar("resultado_destino", {
+    workspace: clienteId,
+    destino,
+    demanda: item.demandScheduler,
+    elegivel: intervalo.liberado === true,
+    bloqueio: resultadoEnvio.enviado === true ? "" : (resultadoEnvio.motivo || resultadoEnvio.erro || "nao_enviado"),
+    oferta,
+    resultado: resultadoEnvio.enviado === true ? "despachado" : "nao_despachado"
   });
 
   if (resultadoEnvio.enviado === true) {
@@ -32956,6 +32985,7 @@ clientesProcessadosPerf = clientesProcessadosRodada;
 // ================= PROCESSADOR DA FILA =================
 
 let ultimoLogPausaFila = 0;
+const demandScheduler = criarDemandScheduler({ env: process.env, logger: console });
 
 function cederEventLoopFila() {
   return new Promise(resolve => setImmediate(resolve));
@@ -33082,7 +33112,10 @@ async function rodarProcessadorFilaGlobal() {
   let usuariosAvaliados = 0;
   let usuariosPulados = 0;
   try {
-  for (const usuario of usuarios) {
+  const usuariosDaRodada = demandScheduler.ativo()
+    ? demandScheduler.ordenarWorkspaces(usuarios)
+    : usuarios;
+  for (const usuario of usuariosDaRodada) {
     if (!usuario) continue;
     const clienteId = String(usuario?.id || "").trim();
     const puloRapido = avaliarPuloRapidoClienteFila(usuario);
