@@ -106,20 +106,22 @@ function localResources() {
 async function fixture() {
   await q(`CREATE FUNCTION fixture_metadata(seed integer, entropy_bytes integer) RETURNS jsonb LANGUAGE SQL AS $$
    SELECT jsonb_build_object('produto',jsonb_build_object('id','MLB'||(100000000+seed)),
-    'padding',substring(s from 1 for entropy_bytes)||repeat(substring(s from 1 for 512),72))
+    'padding',substring(s from 1 for entropy_bytes)||repeat(substring(s from 1 for 512),72)) ||
+    CASE WHEN seed%10=0 THEN jsonb_build_object('common_mlb','MLB900000006')
+     WHEN seed%10=1 THEN jsonb_build_object('trigrams','MLB900000 900000007') ELSE '{}'::jsonb END
    FROM (SELECT string_agg(md5(seed::text||':'||j::text),'') s FROM generate_series(1,1600) j) x $$`);
   await q('CREATE TABLE calibration(m jsonb)');
   // Actual stored-column compression, NOT pg_column_size of a transient expression.
   const calibrations=[];
-  for (const desired of [14500,19832,23199,26636,28926,46522]) {
+  for (const mode of [0,1,2]) for (const desired of [14500,19832,23199,26636,28926,46522]) {
     let entropy=Math.round(desired*.88), actual;
     for(let i=0;i<3;i++) {
       await q('TRUNCATE calibration');
-      await q('INSERT INTO calibration SELECT fixture_metadata(j,$1) FROM generate_series(1,8) j',[entropy]);
+      await q('INSERT INTO calibration SELECT fixture_metadata(j*10+$2,$1) FROM generate_series(1,8) j',[entropy,mode]);
       actual=Number((await q('SELECT avg(pg_column_size(m)) bytes FROM calibration'))[0].bytes);
       if(i<2) entropy=Math.max(1000,Math.min(50000,Math.round(entropy*desired/actual)));
     }
-    calibrations.push({desired,entropy,actual});
+    calibrations.push({mode,desired,entropy,actual});
   }
   evidence.calibrations=calibrations; emit('compression_calibrated',{calibrations});
   await q(`CREATE TABLE baseline_ofertas(id bigint PRIMARY KEY,uuid uuid UNIQUE,evento_id bigint,link_id bigint,
@@ -128,8 +130,12 @@ async function fixture() {
    prioridade integer,origem text,status text,motivo_status text,metadata jsonb,capturada_em timestamptz,criada_em timestamptz,atualizada_em timestamptz)`);
   await q('ALTER TABLE baseline_ofertas ALTER COLUMN metadata SET COMPRESSION pglz');
   const breaks=[1109,Math.round(target.rows*.5)+20,Math.round(target.rows*.9)+20,Math.round(target.rows*.95)+20,Math.round(target.rows*.99)+20,target.rows];
-  const pick=`round(CASE ${breaks.map((b,i)=>i===0?`WHEN i<=${b} THEN ${calibrations[i].entropy}`:
-    `WHEN i<=${b} THEN ${calibrations[i-1].entropy} + (i-${breaks[i-1]})::numeric/(${b-breaks[i-1]}) * ${calibrations[i].entropy-calibrations[i-1].entropy}`).join(' ')} END)::integer`;
+  const picks=[0,1,2].map(mode=>{
+    const cs=calibrations.filter(x=>x.mode===mode);
+    return `round(CASE ${breaks.map((b,i)=>i===0?`WHEN i<=${b} THEN ${cs[i].entropy}`:
+      `WHEN i<=${b} THEN ${cs[i-1].entropy} + (i-${breaks[i-1]})::numeric/(${b-breaks[i-1]}) * ${cs[i].entropy-cs[i-1].entropy}`).join(' ')} END)::integer`;
+  });
+  const pick=`CASE WHEN i%10=0 THEN ${picks[0]} WHEN i%10=1 THEN ${picks[1]} ELSE ${picks[2]} END`;
   const t=performance.now();
   await q(`INSERT INTO baseline_ofertas SELECT i,md5('uuid:'||i)::uuid,(i+2)/3,(i+2)/3,
    CASE WHEN (i*7919)%${target.rows}<${target.mlRows} THEN 'mercadolivre' ELSE 'amazon' END,
@@ -140,9 +146,8 @@ async function fixture() {
    'https://fixture.invalid/aff/'||i,'categoria sintetica',i%40,i%40,'engine_importer','fila',NULL,
    fixture_metadata(i,${pick}),'2026-01-01'::timestamptz,'2026-01-01'::timestamptz,
    CASE WHEN i%97=0 THEN NULL ELSE '2026-01-01'::timestamptz+i*interval '1 second' END FROM generate_series(1,$1::int) i`,[target.rows]);
-  // Low fraction of adversarial IDs inserted into existing rows, not different-volume tables.
-  await q("UPDATE baseline_ofertas SET metadata=metadata||jsonb_build_object('common_mlb','MLB900000006') WHERE id%10=0");
-  await q("UPDATE baseline_ofertas SET metadata=metadata||jsonb_build_object('trigrams', 'MLB900000 900000007') WHERE id%10=1");
+  // Adversarial fields are included BEFORE compression and calibrated separately.
+  // No post-generation rewrite distorts stored-size quantiles or creates dead TOAST.
   const special=[
    [1000001,'MLB900000001',{},'2050-01-01','recent'],[1000002,'MLB900000002',{},'2000-01-01','old'],
    [1000003,'MLB900000003',{},'2050-02-01','tieA'],[1000004,'MLB900000003',{},'2050-02-01','tieB'],
