@@ -293,6 +293,7 @@ function mascararSecrets(valor) {
 
 module.exports = {
   storage,
+  criarBackupArquivoAtomic,
   getClientePath,
   getClienteJsonPath,
   readClienteJson,
