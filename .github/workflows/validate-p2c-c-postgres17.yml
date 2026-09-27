@@ -99,10 +99,12 @@ jobs:
             if(!fs.existsSync('p2c-c-evidence/proof.json')) throw new Error('No PostgreSQL evidence');
             const p=JSON.parse(fs.readFileSync('p2c-c-evidence/proof.json','utf8'));
             const message=JSON.stringify({status:p.status,failure:p.failure,environment:p.environment,
-              profiles:p.profiles,representativeness:p.representativeness,equivalence:p.equivalence,
-              build:p.build?{wallMs:p.build.wallMs,index:p.build.index}:null,calibrations:p.calibrations});
+              representativeness:p.representativeness,equivalence:p.equivalence,
+              build:p.build?{wallMs:p.build.wallMs,index:p.build.index}:null});
             if(message.length>3900) throw new Error('Overview exceeds annotation budget; artifact retained');
             core.notice(message,{title:'P2C-C overview'});
+            for(const [name,profile] of Object.entries(p.profiles))
+              core.notice(JSON.stringify(profile),{title:'P2C-C profile '+name});
             await core.summary.addHeading('P2C-C isolated proof').addRaw('Status: '+p.status+'; synthetic only. No production credentials or deploy.').write();
             if(p.status!=='passed') throw new Error('Proof did not pass');
       - name: Bounded baseline SELECT metrics
