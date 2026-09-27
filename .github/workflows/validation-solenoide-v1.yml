@@ -25,6 +25,7 @@ jobs:
       - name: Checkout validation branch
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node 24
@@ -99,6 +100,9 @@ jobs:
           node tests/financeiro-checkout-pix-publico-v1.test.js
           node tests/link-optimus-repository.test.js
           node tests/link-optimus-admin-config.test.js
+
+      - name: Verify productive base is available
+        run: git cat-file -e 418efabd29c73a4452595d7c0890f873d75d8317^{commit}
 
       - name: Diff check against productive base
         run: git diff --check 418efabd29c73a4452595d7c0890f873d75d8317 HEAD
