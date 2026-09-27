@@ -1,0 +1,84 @@
+name: P2C PostgreSQL 17 isolated proof
+
+on:
+  push:
+    branches:
+      - validation/p2c-postgres17
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2c-postgres17-disposable-proof
+  cancel-in-progress: false
+
+jobs:
+  postgres17-proof:
+    name: P2C synthetic PostgreSQL 17 (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/p2c-postgres17'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: p2c_disposable_synthetic
+          POSTGRES_USER: p2c_ci
+          POSTGRES_PASSWORD: disposable_p2c_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U p2c_ci -d p2c_disposable_synthetic"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: ""
+      P2C_TEST_DATABASE_URL: postgresql://p2c_ci:disposable_p2c_ci_only@127.0.0.1:5432/p2c_disposable_synthetic
+      P2C_ISOLATED_ACK: disposable-synthetic-only
+      P2C_ROWS: "61000"
+      P2C_REPETITIONS: "3"
+      P2C_EVIDENCE_DIR: p2c-evidence
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Safety guards (hosted, non-main, no external credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/p2c-postgres17
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+          git merge-base --is-ancestor 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 HEAD
+          git diff --name-only 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 HEAD | while IFS= read -r file; do
+            case "$file" in
+              tests/p2c-postgres17-proof.cjs|.github/workflows/validate-p2c-postgres17.yml) ;;
+              *) echo "Unapproved file in validation branch"; exit 1 ;;
+            esac
+          done
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Syntax and encoding
+        run: |
+          node --check tests/p2c-postgres17-proof.cjs
+          npm run audit:encoding
+          git diff --check
+      - name: Real PostgreSQL 17 - synthetic fixtures, equivalence and EXPLAIN ANALYZE
+        run: node tests/p2c-postgres17-proof.cjs
+      - name: Publish isolated evidence (even on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2c-postgres17-synthetic-evidence
+          path: p2c-evidence/proof.json
+          if-no-files-found: warn
+          retention-days: 14
