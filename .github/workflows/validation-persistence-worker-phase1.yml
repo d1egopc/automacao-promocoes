@@ -20,7 +20,7 @@ jobs:
   linux-node24:
     name: Linux Node 24 persistence worker gate
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
 
     steps:
       - name: Checkout complete validation history
@@ -58,8 +58,10 @@ jobs:
           node --check index.js
           node --check modules/fila/persistence-protocol.js
           node --check modules/fila/persistence-worker.js
+          node --check modules/fila/json-array-incremental.js
           node --check modules/fila/persistence-coordinator.js
           node --check tests/persistence-worker-phase1.test.js
+          node --check tests/json-array-incremental.test.js
           node --check tests/persistence-worker-benchmark.js
           node --check tests/persistence-worker-500m-gate.test.js
           node --check tests/persistence-worker-crash-matrix.test.js
@@ -69,6 +71,9 @@ jobs:
 
       - name: Persistence worker functional proof
         run: node tests/persistence-worker-phase1.test.js
+
+      - name: Incremental JSON array proof
+        run: node tests/json-array-incremental.test.js
 
       - name: Linux crash and recovery matrix
         run: node tests/persistence-worker-crash-matrix.test.js
@@ -81,9 +86,19 @@ jobs:
 
       - name: Linux approximately 500 MiB gate
         shell: bash
+        env:
+          PERSISTENCE_WORKER_GATE_MIB: 500
         run: |
           set -euo pipefail
           node --expose-gc tests/persistence-worker-500m-gate.test.js | tee "$RUNNER_TEMP/persistence-worker-500m.json"
+
+      - name: Linux approximately 600 MiB gate
+        shell: bash
+        env:
+          PERSISTENCE_WORKER_GATE_MIB: 600
+        run: |
+          set -euo pipefail
+          node --expose-gc tests/persistence-worker-500m-gate.test.js | tee "$RUNNER_TEMP/persistence-worker-600m.json"
 
       - name: Relevant checkpoint and queue suites
         shell: bash
@@ -162,4 +177,5 @@ jobs:
           path: |
             ${{ runner.temp }}/persistence-worker-benchmark.json
             ${{ runner.temp }}/persistence-worker-500m.json
+            ${{ runner.temp }}/persistence-worker-600m.json
           if-no-files-found: ignore
