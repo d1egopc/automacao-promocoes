@@ -106,7 +106,7 @@ function localResources() {
 async function fixture() {
   await q(`CREATE FUNCTION fixture_metadata(seed integer, entropy_bytes integer) RETURNS jsonb LANGUAGE SQL AS $$
    SELECT jsonb_build_object('produto',jsonb_build_object('id','MLB'||(100000000+seed)),
-    'padding',substring(s from 1 for entropy_bytes)||repeat(substring(s from 1 for 512),72)) ||
+    'padding',repeat(substring(s from 1 for 512),72)||substring(s from 1 for entropy_bytes)) ||
     CASE WHEN seed%10=0 THEN jsonb_build_object('common_mlb','MLB900000006')
      WHEN seed%10=1 THEN jsonb_build_object('trigrams','MLB900000 900000007') ELSE '{}'::jsonb END
    FROM (SELECT string_agg(md5(seed::text||':'||j::text),'') s FROM generate_series(1,1600) j) x $$`);
