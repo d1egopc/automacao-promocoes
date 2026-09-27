@@ -114,9 +114,17 @@ jobs:
             const p = JSON.parse(fs.readFileSync('synthetic-proof/proof.json','utf8'));
             if (p.synthetic !== true) throw new Error('Only synthetic evidence permitted');
             core.notice(JSON.stringify({status:p.status, failure:p.failure, environment:p.environment, fixture:p.fixture, equivalence:p.equivalence, identity:p.identity, builds:p.builds, limitations:p.limitations}), {title:'P2C proof overview'});
+            function planNode(n) {
+              const keys = ['Node Type','Index Name','Startup Cost','Total Cost','Plan Rows','Actual Rows','Actual Loops',
+                'Workers Planned','Workers Launched','Rows Removed by Filter','Rows Removed by Index Recheck',
+                'Shared Hit Blocks','Shared Read Blocks','Temp Read Blocks','Temp Written Blocks','Sort Method'];
+              return {...Object.fromEntries(keys.filter(k=>k in n).map(k=>[k,n[k]])),
+                ...(n.Plans ? {Plans:n.Plans.map(planNode)} : {})};
+            }
             for (const strategy of ['baseline','btree','gin','structured']) {
               for (const variant of ['canonical','importer','importer_no_metadata']) {
-                const cases = p.benchmarks.filter(x => x.strategy === strategy && x.variant === variant).map(({plans,...x})=>x);
+                const cases = p.benchmarks.filter(x => x.strategy === strategy && x.variant === variant)
+                  .map(({plans,...x})=>({...x,representativePlan:planNode(plans[0].Plan)}));
                 core.notice(JSON.stringify(cases), {title:`P2C ${strategy} ${variant}`});
               }
             }
