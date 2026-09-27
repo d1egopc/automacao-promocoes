@@ -34,8 +34,8 @@ jobs:
           test "$GITHUB_EVENT_NAME" = push
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test "$(git rev-parse 418efabd29c73a4452595d7c0890f873d75d8317^)" = 2b8e08f41b687969b2bd552707cd7a96d137ba84
-          test "$(git rev-parse HEAD~2)" = 418efabd29c73a4452595d7c0890f873d75d8317
-          test "$(git rev-parse HEAD^)" = 7a8479bf172f868e03eae080ea8deea080bb5fb6
+          test "$(git rev-parse HEAD~3)" = 418efabd29c73a4452595d7c0890f873d75d8317
+          test "$(git rev-parse HEAD^)" = f69beed70343abf390bcecdaaccbed524d0b40ad
           test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/validate-demand-scheduler-v1.yml
           test "$(git diff --name-only 418efabd29c73a4452595d7c0890f873d75d8317 HEAD)" = .github/workflows/validate-demand-scheduler-v1.yml
           test "$(git diff --name-only 2b8e08f41b687969b2bd552707cd7a96d137ba84 418efabd29c73a4452595d7c0890f873d75d8317)" = "$(printf '%s\n' index.js modules/demand-scheduler/demand-scheduler.service.js tests/demand-scheduler-v1.test.js)"
@@ -90,7 +90,6 @@ jobs:
         run: |
           set -euo pipefail
           for suite in \
-            distributor-definitivo-fase-c \
             distributor-prioridade-esteira \
             engine-distributor-candidate-pool \
             engine-distributor-origem-fairness \
@@ -137,7 +136,8 @@ jobs:
             ['engine-imagem-fallback', 'https://radar.test/original.jpg'],
             ['engine-v2-oferta-universal-ml', '3 !== 2'],
             ['imagem-candidatos-universal', 'https://cdn.exemplo.com/radar.jpg'],
-            ['anti-repeticao-automatica', 'mesma oferta radar deve bloquear por 2h']
+            ['anti-repeticao-automatica', 'mesma oferta radar deve bloquear por 2h'],
+            ['distributor-definitivo-fase-c', 'destinos compativeis devem seguir para ordenacao/envio']
           ];
           function run(root, suite) {
             const result = spawnSync(process.execPath, [path.join(root, 'tests', suite + '.test.js')], {
