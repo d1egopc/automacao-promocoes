@@ -4382,8 +4382,12 @@ function carregarSessoesMeta() {
 // ================= FUNCAO SALVA INTEGRACOES =======================
 
 function salvarIntegracoesPersistidas() {
+  const inicioGlobal = process.hrtime.bigint();
   writeGlobalJson("integracoes.json", integracoesPorCliente);
+  painelLatencia.registrarEtapa("integracoes_escrita_global", perfTempoMs(inicioGlobal));
+  const inicioWorkspaces = process.hrtime.bigint();
   salvarMapaClientesJson("integracoes.json", integracoesPorCliente);
+  painelLatencia.registrarEtapa("integracoes_escrita_workspaces", perfTempoMs(inicioWorkspaces));
 }
 
 // ================= FUNCAO SALVA USUARIO =================
@@ -4533,8 +4537,12 @@ function aplicarArquiteturaComercialRioOficial(configCliente = {}) {
 }
 
 function salvarDestinosClientes() {
+  const inicioGlobal = process.hrtime.bigint();
   writeGlobalJson("destinos_clientes.json", destinosPorCliente);
+  painelLatencia.registrarEtapa("destinos_escrita_global", perfTempoMs(inicioGlobal));
+  const inicioWorkspaces = process.hrtime.bigint();
   salvarMapaClientesJson("destinos.json", destinosPorCliente);
+  painelLatencia.registrarEtapa("destinos_escrita_workspaces", perfTempoMs(inicioWorkspaces));
 }
 
 function aplicarNoStoreDestinos(req, res) {
@@ -4883,6 +4891,14 @@ async function normalizarDestinosContratoComDiscord(clienteId = "admin", destino
   }
 
   const conexoes = listarConexoesDiscord(clienteId);
+  async function validarDiscordMedido(opcoes) {
+    const inicio = process.hrtime.bigint();
+    try {
+      return await validarDestinoDiscord(opcoes);
+    } finally {
+      painelLatencia.registrarEtapa("discord_validar_destino", perfTempoMs(inicio));
+    }
+  }
   const normalizados = [];
   for (const destino of lista) {
     if (!destinoEhDiscord(destino)) {
@@ -4893,7 +4909,7 @@ async function normalizarDestinosContratoComDiscord(clienteId = "admin", destino
     const alvosDiscord = destinosMultiAlvo.normalizarAlvosDestino(destino);
     const alvosValidados = [];
     for (const alvo of alvosDiscord) {
-      const validadoAlvo = await validarDestinoDiscord({
+      const validadoAlvo = await validarDiscordMedido({
         clienteId,
         destino: {
           ...destino,
@@ -4934,7 +4950,7 @@ async function normalizarDestinosContratoComDiscord(clienteId = "admin", destino
           grupoNome: primeiro.nome,
           alvos: alvosValidados
         }
-      : await validarDestinoDiscord({
+      : await validarDiscordMedido({
           clienteId,
           destino,
           conexoes,
@@ -6457,6 +6473,7 @@ const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { monitorEventLoopDelay } = require("perf_hooks");
+const painelLatencia = require("./utils/painel-latencia");
 const PERF_DIAGNOSTICO_ATIVO = process.env.PERF_DIAGNOSTICO !== "0";
 
 function perfTempoMs(inicio) {
@@ -6473,16 +6490,18 @@ function criarRequestIdPerf(req) {
   const recebidoEmMs = Date.now();
   const id = `http_${recebidoEmMs}_${proximoRequestIdPerf++}`;
   req.perfRequestId = id;
+  if (req.painelLatencia) req.painelLatencia.requestId = id;
   req.perfRecebidoHr = process.hrtime.bigint();
   req.perfRecebidoEmMs = recebidoEmMs;
   return id;
 }
 
 function contextoPerfHttp(req) {
+  painelLatencia.marcarEntradaHandler(req);
   return {
     requestId: req?.perfRequestId || "",
     metodo: req?.method || "",
-    path: req?.originalUrl || req?.path || ""
+    path: req?.path || ""
   };
 }
 
@@ -6510,7 +6529,9 @@ function criarPerfTimer(tag, contexto = {}) {
   }
 
   function registrarEtapa(nome, inicioEtapa) {
-    etapas.push({ etapa: nome, ms: arredondarMs(perfTempoMs(inicioEtapa)) });
+    const duracaoMs = arredondarMs(perfTempoMs(inicioEtapa));
+    etapas.push({ etapa: nome, ms: duracaoMs });
+    painelLatencia.registrarEtapa(nome, duracaoMs);
   }
 
   return {
@@ -12448,7 +12469,7 @@ app.get("/fila", auth, async (req, res) => {
     erros: resumo.errosTotal,
     itens: itensResposta
   }));
-  totalRespostaBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  totalRespostaBytes = perf.etapaSync("payload_stringify_bytes", () => Buffer.byteLength(JSON.stringify(payload), "utf8"));
   return res.json(payload);
 });
 
@@ -12542,6 +12563,7 @@ app.get("/r/:codigo", (req, res) => {
 // ================= TELEGRAM =================
 
 app.get("/telegram", (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
 
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
@@ -12875,17 +12897,21 @@ app.get("/destinos", (req, res) => {
 });
 
 app.post("/destinos", async (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
   aplicarNoStoreDestinos(req, res);
   const clienteId = exigirClienteAutenticado(req, res);
   if (!clienteId) return;
 
   let destinos;
+  const inicioNormalizacao = process.hrtime.bigint();
   try {
     destinos = await normalizarDestinosContratoComDiscord(clienteId, req.body, req);
   } catch (erro) {
     return res.status(erro.statusCode || 400).json({
       ...payloadErroPlano(erro, "Destino Discord invalido")
     });
+  } finally {
+    painelLatencia.registrarEtapa("destinos_normalizar_discord", perfTempoMs(inicioNormalizacao));
   }
 
   if (!Array.isArray(destinos)) {
@@ -12896,11 +12922,14 @@ app.post("/destinos", async (req, res) => {
   }
 
   const destinosAtuais = normalizarDestinosContrato(destinosPorCliente?.[clienteId] || []);
+  const inicioValidacao = process.hrtime.bigint();
   try {
     validarRecursosDestinosPlano(req, destinos, destinosAtuais);
     validarLimiteDestinosPlano(req, destinos, destinosAtuais);
   } catch (erro) {
     return res.status(erro.statusCode || 403).json(payloadErroPlano(erro));
+  } finally {
+    painelLatencia.registrarEtapa("destinos_validacao", perfTempoMs(inicioValidacao));
   }
 
   destinosPorCliente[clienteId] = destinos;
@@ -12933,6 +12962,7 @@ app.delete("/destinos/:id", (req, res) => {
 // ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
 
 app.get("/automacao/status", async (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
@@ -12952,9 +12982,11 @@ app.get("/automacao/status", async (req, res) => {
 
   const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
 
+  const inicioFiltroStatus = process.hrtime.bigint();
   const itensCliente = fila.filter(o =>
     String(o.clienteId || "admin") === String(clienteId)
   );
+  painelLatencia.registrarEtapa("automacao_filtrar_fila_memoria", perfTempoMs(inicioFiltroStatus));
 
   const hojeBR = new Date().toLocaleDateString("pt-BR", {
     timeZone: "America/Sao_Paulo"
@@ -13002,6 +13034,7 @@ app.get("/automacao/status", async (req, res) => {
   const enviadas = itensCliente
     .filter(o => o.status === "enviado" && (o.enviadoEm || o.dataEnvio));
 
+  const inicioResumoStatus = process.hrtime.bigint();
   const ultimaOfertaEnviada = enviadas
     .map(oferta => ({
       oferta,
@@ -13012,6 +13045,7 @@ app.get("/automacao/status", async (req, res) => {
       const dataB = b.data ? b.data.getTime() : 0;
       return dataB - dataA;
     })[0]?.oferta || null;
+  painelLatencia.registrarEtapa("automacao_ordenar_enviadas", perfTempoMs(inicioResumoStatus));
 
   const destinosCliente = destinosPorCliente?.[clienteId];
   const listasDestinos = Array.isArray(destinosCliente)
@@ -13062,6 +13096,7 @@ app.get("/automacao/status", async (req, res) => {
 });
 
 app.get("/automacao", (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
   const clienteId = getClienteId(req);
 
   if (!clienteId) {
@@ -26988,6 +27023,7 @@ app.get("/integracoes", (req, res) => {
 //============= ROTA POST INTEGRACOES MARTPLACES ====================
 
 app.post("/integracoes/:marketplace", (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
   const clienteId = getClienteId(req);
   const marketplace = req.params.marketplace.toLowerCase();
 
@@ -26999,7 +27035,9 @@ app.post("/integracoes/:marketplace", (req, res) => {
 
   const payload = req.body?.credenciais || req.body;
 
+  const inicioValidacaoIntegracao = process.hrtime.bigint();
   const validacao = validarIntegracao(marketplace, payload);
+  painelLatencia.registrarEtapa("integracoes_validacao", perfTempoMs(inicioValidacaoIntegracao));
 
   if (!validacao.ok) {
     if (marketplace === "mercadolivre") {
@@ -30362,6 +30400,7 @@ app.post("/importar-produto", async (req, res) => {
 // ================= WHATSAPP SESSOES =================
 
 app.get("/sessoes", (req, res) => {
+  painelLatencia.marcarEntradaHandler(req);
   const perf = criarPerfTimer("PERF SESSOES");
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
   const lista = perf.etapaSync("listar_sessoes_whatsapp", () => listarSessoesWhatsappCliente(clienteId));
@@ -30825,7 +30864,13 @@ async function carregarGruposSessao(id, opcoes = {}) {
   }
 
   try {
-    const grupos = await sock.groupFetchAllParticipating();
+    const inicioBuscaGrupos = process.hrtime.bigint();
+    let grupos;
+    try {
+      grupos = await sock.groupFetchAllParticipating();
+    } finally {
+      painelLatencia.registrarEtapa("whatsapp_group_fetch", perfTempoMs(inicioBuscaGrupos));
+    }
 
     console.log(
       "ðŸ‘¥ Grupos carregados:",

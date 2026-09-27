@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const { registrarEtapa, marcarEntradaHandler } = require("../../utils/painel-latencia");
 const {
   importarUrlManualV2
 } = require("./manual-import.adapters");
@@ -546,8 +547,11 @@ function criarRotasManualV2(deps = {}) {
   });
 
   router.get("/ofertas", (req, res) => {
+    marcarEntradaHandler(req);
     try {
+      const inicioLista = process.hrtime.bigint();
       const ofertas = storage.listarOfertasManuaisV2(cliente(req), deps.storageOptions || {});
+      registrarEtapa("ofertas_ler_filtrar", Number(process.hrtime.bigint() - inicioLista) / 1e6);
       return res.json({
         ok: true,
         ofertas
@@ -558,8 +562,11 @@ function criarRotasManualV2(deps = {}) {
   });
 
   router.get("/config", (req, res) => {
+    marcarEntradaHandler(req);
     try {
+      const inicioConfig = process.hrtime.bigint();
       const config = storage.lerConfigManualV2(cliente(req), deps.storageOptions || {});
+      registrarEtapa("manual_config_ler", Number(process.hrtime.bigint() - inicioConfig) / 1e6);
       return res.json({
         ok: true,
         config
@@ -570,8 +577,11 @@ function criarRotasManualV2(deps = {}) {
   });
 
   router.put("/config", (req, res) => {
+    marcarEntradaHandler(req);
     try {
+      const inicioConfig = process.hrtime.bigint();
       const config = storage.salvarConfigManualV2(cliente(req), req.body?.config || req.body || {}, deps.storageOptions || {});
+      registrarEtapa("manual_config_salvar", Number(process.hrtime.bigint() - inicioConfig) / 1e6);
       return res.json({
         ok: true,
         config

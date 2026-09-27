@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { registrarArquivo } = require("../../utils/painel-latencia");
 const { getClienteJsonPath, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
 const { MARKETPLACES_MANUAL_V2 } = require("./manual-offers.contract");
 const { categoriaGenerica } = require("../inteligencia-universal/categoria.service");
@@ -42,7 +43,16 @@ function lerAchados(clienteId) {
   const file = getClienteJsonPath(normalizarClienteId(clienteId), ARQUIVO_ACHADOS);
   if (!fs.existsSync(file)) return [];
   let dados;
-  try { dados = JSON.parse(fs.readFileSync(file, "utf8")); }
+  try {
+    const inicioRead = process.hrtime.bigint();
+    const texto = fs.readFileSync(file, "utf8");
+    const readMs = Number(process.hrtime.bigint() - inicioRead) / 1e6;
+    const bytes = Buffer.byteLength(texto, "utf8");
+    registrarArquivo("readFileSync", file, readMs, bytes);
+    const inicioParse = process.hrtime.bigint();
+    try { dados = JSON.parse(texto); }
+    finally { registrarArquivo("JSON.parse", file, Number(process.hrtime.bigint() - inicioParse) / 1e6, bytes); }
+  }
   catch { throw erro("achados_storage_corrompido"); }
   if (!Array.isArray(dados)) throw erro("achados_storage_corrompido");
   return dados.filter((item) => item && item.clienteId === clienteId);

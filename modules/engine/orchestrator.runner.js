@@ -9,6 +9,7 @@ let clonadorGruposEntradaRodando = false;
 let clonadorGruposEntradaIntervalo = null;
 
 const { executarObservabilidadeOfc } = require("./ofc");
+const { alterarEtapaEngine } = require("../../utils/painel-latencia");
 const { createAutoGateShadow } = require("../auto-gate/auto-gate-shadow.service");
 const autoGateShadow = createAutoGateShadow();
 const { criarMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
@@ -230,6 +231,7 @@ async function executarEtapa(nome, fn, args = {}, contextoPerf = {}) {
 }
 
 async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
+  if (String(contextoPerf.rodadaId || "").startsWith("engine_")) alterarEtapaEngine(contextoPerf.rodadaId, nome);
   const inicioMs = Date.now();
   const medidorCiclo = contextoPerf.medidorCiclo;
   const inicioPerf = medidorCiclo?.clock();
@@ -247,6 +249,7 @@ async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
     inicioMs
   });
   const resultado = await executarEtapa(nome, fn, args, contextoPerf);
+  if (String(contextoPerf.rodadaId || "").startsWith("engine_")) alterarEtapaEngine(contextoPerf.rodadaId, "entre_etapas");
   if (medidorCiclo) medidorCiclo.registrarEtapa(nome, medidorCiclo.clock() - inicioPerf);
   logDiagnosticoOrquestrador("[ENGINE-ORQUESTRADOR-ETAPA-FIM]", {
     rodadaId: contextoPerf.rodadaId || "",
@@ -328,6 +331,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   }));
 
   try {
+    alterarEtapaEngine(rodadaId, "ofc");
     engineOrquestradorOfcAtivo = true;
     engineOrquestradorUltimaOfc = { rodadaId, inicioMs: Date.now(), fimMs: 0 };
     try {
@@ -348,6 +352,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
         fimMs: Date.now()
       };
       engineOrquestradorOfcAtivo = false;
+      alterarEtapaEngine(rodadaId, "entre_etapas");
     }
 
     if (autoCleanShadowAtivo()) {
@@ -562,6 +567,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     engineOrquestradorRodadaAtual = "";
     engineOrquestradorInicioMs = 0;
     engineOrquestradorOfcAtivo = false;
+    alterarEtapaEngine("", "inativo");
     medidorRodada.fim({
       ok: resumo.ok !== false,
       jobsPorEtapa: Object.values(resumo.etapas || {}).reduce((acc, etapa) => {

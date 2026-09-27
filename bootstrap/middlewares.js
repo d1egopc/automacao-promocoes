@@ -1,3 +1,5 @@
+const painelLatencia = require("../utils/painel-latencia");
+
 function registrarMiddlewaresBase(app, deps = {}) {
   const {
     express,
@@ -7,6 +9,10 @@ function registrarMiddlewaresBase(app, deps = {}) {
   } = deps;
 
   app.set("trust proxy", 1);
+  app.use((req, res, next) => {
+    painelLatencia.iniciar(req);
+    next();
+  });
   app.use(helmet());
   app.use(cors({ origin: true, credentials: true }));
   app.use(express.json({ limit: "10mb", verify: capturarRawBody }));
@@ -57,6 +63,8 @@ function registrarMiddlewaresOperacionais(app, deps = {}) {
       req.path.startsWith("/destinos") ||
       req.path.startsWith("/grupos")
   }));
+  painelLatencia.iniciarAmostragem();
+  app.use((req, res, next) => painelLatencia.anexar(req, res, next, getClienteId));
   const ROTAS_PERF_DIAGNOSTICO = [
     "/login",
     "/me",
@@ -90,7 +98,7 @@ function registrarMiddlewaresOperacionais(app, deps = {}) {
     console.log("[PERF HTTP RECEBIDO]", {
       requestId,
       metodo: req.method,
-      path: req.originalUrl || req.path,
+      path: req.path,
       recebidoEm
     });
 
@@ -110,7 +118,7 @@ function registrarMiddlewaresOperacionais(app, deps = {}) {
       console.log("[PERF]", {
         requestId,
         metodo: req.method,
-        path: req.originalUrl || req.path,
+        path: req.path,
         clienteId,
         duracaoMs: Math.round(duracaoMs),
         totalDesdeRecebidoMs: Math.round(totalDesdeRecebidoMs),

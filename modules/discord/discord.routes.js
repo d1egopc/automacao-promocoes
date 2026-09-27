@@ -1,4 +1,5 @@
 const express = require("express");
+const { marcarEntradaHandler } = require("../../utils/painel-latencia");
 const {
   criarUrlConexaoDiscordAsync,
   processarCallbackDiscord
@@ -105,6 +106,7 @@ function criarRotasDiscord(deps = {}) {
   });
 
   router.get("/conexoes", (req, res) => {
+    marcarEntradaHandler(req);
     const clienteId = getClienteId(req);
     const conexoes = listarConexoesDiscord(clienteId, storageDeps);
     return res.json({ ok: true, conexoes });

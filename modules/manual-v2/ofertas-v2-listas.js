@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const fs = require("fs");
+const { registrarArquivo } = require("../../utils/painel-latencia");
 const { getClienteJsonPath, writeClienteJson, normalizarClienteId } = require("../../utils/storage");
 const storageManual = require("./manual-offers.storage");
 const { normalizarOfertaManualV2 } = require("./manual-offers.contract");
@@ -38,7 +39,16 @@ function lerJsonEstrito(clienteId, arquivo, fallback, validar) {
   const file = getClienteJsonPath(normalizarClienteId(clienteId), arquivo);
   if (!fs.existsSync(file)) return fallback;
   let dado;
-  try { dado = JSON.parse(fs.readFileSync(file, "utf8")); }
+  try {
+    const inicioRead = process.hrtime.bigint();
+    const texto = fs.readFileSync(file, "utf8");
+    const readMs = Number(process.hrtime.bigint() - inicioRead) / 1e6;
+    const bytes = Buffer.byteLength(texto, "utf8");
+    registrarArquivo("readFileSync", file, readMs, bytes);
+    const inicioParse = process.hrtime.bigint();
+    try { dado = JSON.parse(texto); }
+    finally { registrarArquivo("JSON.parse", file, Number(process.hrtime.bigint() - inicioParse) / 1e6, bytes); }
+  }
   catch { throw erro("listas_storage_corrompido", 500); }
   if (!validar(dado)) throw erro("listas_storage_corrompido", 500);
   return dado;

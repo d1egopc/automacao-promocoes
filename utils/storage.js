@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { registrarArquivo } = require("./painel-latencia");
 const PERF_STORAGE_MIN_MS = Number(process.env.PERF_STORAGE_MIN_MS || 100);
 
 function perfStorageMs(inicio) {
@@ -163,9 +164,17 @@ function readJsonFile(file, fallback) {
       return clonarFallback(fallback);
     }
     const texto = fs.readFileSync(file, "utf8");
-    logStorageLento("readJsonFile", file, inicio, { existe: true, bytes: Buffer.byteLength(texto || "", "utf8") });
+    const readMs = perfStorageMs(inicio);
+    const bytes = Buffer.byteLength(texto || "", "utf8");
+    registrarArquivo("readFileSync", file, readMs, bytes);
+    logStorageLento("readJsonFile", file, inicio, { existe: true, bytes });
     if (!texto) return clonarFallback(fallback);
-    return JSON.parse(texto);
+    const inicioParse = process.hrtime.bigint();
+    try {
+      return JSON.parse(texto);
+    } finally {
+      registrarArquivo("JSON.parse", file, perfStorageMs(inicioParse), bytes);
+    }
   } catch {
     logStorageLento("readJsonFile", file, inicio, { erro: true });
     return clonarFallback(fallback);
@@ -182,17 +191,21 @@ function writeJsonFileAtomic(file, dados) {
   const conteudo = JSON.stringify(dados, null, 2);
   const stringifyMs = Math.round(perfStorageMs(inicioStringify));
   const bytes = Buffer.byteLength(conteudo || "", "utf8");
+  registrarArquivo("JSON.stringify", file, stringifyMs, bytes);
 
   const backup = criarBackupArquivoAtomic(file, bak, {
     preferirHardlink: path.basename(file) === "fila.json"
   });
+  registrarArquivo(`backup_${backup.backupMetodo}`, file, backup.backupMs, backup.backupMetodo === "copy" ? bytes : 0);
 
   const inicioWrite = process.hrtime.bigint();
   fs.writeFileSync(tmp, conteudo);
   const writeMs = Math.round(perfStorageMs(inicioWrite));
+  registrarArquivo("writeFileSync", file, writeMs, bytes);
   const inicioRename = process.hrtime.bigint();
   fs.renameSync(tmp, file);
   const renameMs = Math.round(perfStorageMs(inicioRename));
+  registrarArquivo("renameSync", file, renameMs);
   logStorageLento("writeJsonFileAtomic", file, inicio, {
     bytes,
     stringifyMs,

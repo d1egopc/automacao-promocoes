@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { registrarDb } = require("../../utils/painel-latencia");
 
 const {
   logEngineDbOk,
@@ -466,6 +467,7 @@ async function queryEngine(texto, params = []) {
     const inicioSql = process.hrtime.bigint();
     const resultado = await client.query(texto, params);
     tempoSqlMs = Math.round(perfDbMs(inicioSql));
+    registrarDb(tempoPoolMs, tempoSqlMs);
 
     logDbPerf("queryEngine", inicio, {
       ok: true,
@@ -480,6 +482,7 @@ async function queryEngine(texto, params = []) {
     return { ok: true, resultado, metricas: { tempoPoolMs, tempoSqlMs } };
   } catch (e) {
     if (tempoPoolMs === null) tempoPoolMs = Math.round(perfDbMs(inicioPool));
+    registrarDb(tempoPoolMs, tempoSqlMs);
     const erroDb = erroSanitizadoDb(e);
     logDbPerf("queryEngine", inicio, {
       ok: false,
@@ -565,6 +568,7 @@ async function queryEngineShadow(texto, params = [], opcoes = {}) {
     };
   } finally {
     if (client) client.release(deveRemoverClient ? new Error("shadow_reset_timeout_falhou") : undefined);
+    registrarDb(tempoPoolMs, tempoSqlMs);
     logDbPerf("queryEngineShadow", inicio, {
       ok,
       timeout,
