@@ -1,0 +1,76 @@
+name: Solenoide importer observability validation
+
+on:
+  push:
+    branches:
+      - validation/solenoide-importer-observability
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solenoide-importer-observability-validation
+  cancel-in-progress: false
+
+jobs:
+  validation:
+    name: Functional and regression validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify functional patch scope
+        shell: bash
+        env:
+          BASE_SHA: a2238b0a6ef1d7c73186634a6b3d5f617119c59e
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git diff --check "${BASE_SHA}...HEAD"
+          git diff --name-only "${BASE_SHA}...HEAD" | sort
+
+      - name: Solenoide and importer observability
+        run: |
+          node tests/solenoide-v1.test.js
+          node tests/solenoide-importer-observability.test.js
+          node tests/solenoide-radar-config.test.js
+
+      - name: Scheduler, cadence and fanout contracts
+        run: |
+          node tests/demand-scheduler-v1.test.js
+          node tests/cadencia-v2-autoridade.test.js
+          node tests/fila-fanout-destinos-estado.test.js
+          node tests/destinos-multialvo-v1.test.js
+
+      - name: OFC, Worker, lifecycle and dynamic links
+        run: |
+          node tests/ofc-workspace-worker.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+
+      - name: Critical, syntax and encoding checks
+        run: |
+          node tests/clean-install-bootstrap.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+          node --check index.js
+          node --check modules/engine/orchestrator.runner.js
+          node --check modules/solenoide/solenoide.service.js
+          npm run audit:encoding
+          git diff --check
