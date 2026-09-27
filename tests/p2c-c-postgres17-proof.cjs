@@ -204,11 +204,13 @@ async function writes(strategy) {
       const c=await pool.connect();
       try { while(true) {
         const rep=next++;if(rep>=100)break;
-        const from=1+rep*batch;const newId=2000000+operation.length*100000+batch*10000+concurrency*1000+rep*batch;
+        // Spread writes through the ENTIRE distribution, not just smallest first 1,000 rows.
+        const from=1+Math.floor(rep*(target.rows-batch)/100);
+        const newId=2000000+operation.length*100000+batch*10000+concurrency*1000+rep*batch;
         const begin=performance.now();await c.query('BEGIN');
         try {
           if(operation==='insert') await c.query(`INSERT INTO ${table} SELECT
-            $3::bigint+id,md5('write:'||$3::text||':'||id)::uuid,evento_id,link_id,marketplace,titulo,titulo_normalizado,
+            $3::bigint+(id-$1::bigint),md5('write:'||$3::text||':'||id)::uuid,evento_id,link_id,marketplace,titulo,titulo_normalizado,
             preco,preco_original,moeda,cupom,tipo_cupom,beneficio_extra,imagem,link_original,link_expandido,link_afiliado,
             categoria,score,prioridade,origem,status,motivo_status,metadata,capturada_em,criada_em,atualizada_em
             FROM ${table} WHERE id BETWEEN $1 AND $2`,[from,from+batch-1,newId]);
