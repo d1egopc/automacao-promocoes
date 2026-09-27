@@ -117,7 +117,7 @@ async function main() {
         dataDir: root,
         nowMs: Date.now()
       });
-      assert.strictEqual(preparado.ok, true);
+      assert.strictEqual(preparado.ok, true, JSON.stringify(preparado));
       assert.strictEqual(Array.isArray(preparado.fila), false);
       publicado = await coordenador.publish({
         clienteId: fixture.clienteId,
@@ -129,7 +129,7 @@ async function main() {
       });
       return publicado;
     });
-    assert.strictEqual(publicado.ok, true);
+    assert.strictEqual(publicado.ok, true, JSON.stringify(publicado));
     const finalStat = fs.statSync(fixture.arquivo);
     const proof = JSON.parse(fs.readFileSync(path.join(fixture.dir, "fila.proof.json"), "utf8"));
     assert.strictEqual(Number(proof.size), finalStat.size);
