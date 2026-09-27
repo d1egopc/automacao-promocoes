@@ -152,7 +152,7 @@ async function fixture() {
    [1000011,'MLB900000001',{},'2060-01-01',' ']
   ];
   for(const [id,link,meta,date,img]of special) await q(`INSERT INTO baseline_ofertas(id,uuid,marketplace,link_original,metadata,atualizada_em,imagem)
-   VALUES($1,md5('special:'||$1::text)::uuid,'ml',$2,fixture_metadata(50,$3)||$4::jsonb,$5::timestamptz,$6)`,
+   VALUES($1::bigint,md5('special:'||($1::bigint)::text)::uuid,'ml',$2,fixture_metadata(50,$3)||$4::jsonb,$5::timestamptz,$6)`,
    [id,link,calibrations[1].entropy,JSON.stringify(meta),date,img==='large'?'data:image/fixture,'+'x'.repeat(180000):img]);
   // Same 14 B-tree definitions (including duplicate uuid index), no ordering candidate.
   await q('CREATE UNIQUE INDEX baseline_uuid_duplicate ON baseline_ofertas(uuid)');
@@ -210,7 +210,7 @@ async function writes(strategy) {
         const begin=performance.now();await c.query('BEGIN');
         try {
           if(operation==='insert') await c.query(`INSERT INTO ${table} SELECT
-            $3::bigint+(id-$1::bigint),md5('write:'||$3::text||':'||id)::uuid,evento_id,link_id,marketplace,titulo,titulo_normalizado,
+            $3::bigint+(id-$1::bigint),md5('write:'||($3::bigint)::text||':'||id)::uuid,evento_id,link_id,marketplace,titulo,titulo_normalizado,
             preco,preco_original,moeda,cupom,tipo_cupom,beneficio_extra,imagem,link_original,link_expandido,link_afiliado,
             categoria,score,prioridade,origem,status,motivo_status,metadata,capturada_em,criada_em,atualizada_em
             FROM ${table} WHERE id BETWEEN $1 AND $2`,[from,from+batch-1,newId]);
