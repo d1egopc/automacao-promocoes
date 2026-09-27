@@ -37,7 +37,6 @@ jobs:
       P2C_TEST_DATABASE_URL: postgresql://p2c_ci:disposable_p2c_c_only@127.0.0.1:5432/p2c_disposable_representative
       P2C_ISOLATED_ACK: disposable-synthetic-only
       P2C_EVIDENCE_DIR: p2c-c-evidence
-      P2C_SERVICE_CONTAINER: ${{ job.services.postgres.id }}
     steps:
       - name: Checkout isolated validation branch
         uses: actions/checkout@v4
@@ -73,6 +72,8 @@ jobs:
           npm run audit:encoding
           git diff --check
       - name: Baseline versus GIN - representative profile, exact equivalence and COMMIT
+        env:
+          P2C_SERVICE_CONTAINER: ${{ job.services.postgres.id }}
         shell: bash
         run: |
           set -euo pipefail
