@@ -553,6 +553,42 @@ function createTelegramTeleRadarControlPlane({
     }
   }
 
+  async function saveTeleRadarConfig(actor, {
+    monitoramentoAtivo,
+    horarioInicio,
+    horarioFim,
+    solenoideAuto
+  } = {}) {
+    if (typeof monitoramentoAtivo !== "boolean") {
+      throw controlPlaneError("TELERADAR_MONITORAMENTO_ATIVO_INVALID", 400);
+    }
+    if (typeof solenoideAuto !== "boolean") {
+      throw controlPlaneError("TELERADAR_SOLENOIDE_AUTO_INVALID", 400);
+    }
+    const context = requireAdminActor(actor);
+    const runtime = getRuntime(context);
+    try {
+      if (monitoramentoAtivo) {
+        await ensureAuthorized(context);
+        await runtime.service.start();
+      }
+      await runtime.service.setOperationalConfig({
+        monitoramentoAtivo,
+        horarioInicio,
+        horarioFim,
+        solenoideAuto
+      });
+      return getTeleRadarStatus(actor);
+    } catch (error) {
+      const code = String(error?.message || error?.code || "");
+      if (code.includes("HORARIO_")) throw controlPlaneError("TELERADAR_HORARIO_INVALID", 400);
+      if (code.includes("MONITORAMENTO_ATIVO") || code.includes("SOLENOIDE_AUTO")) {
+        throw controlPlaneError(code, 400);
+      }
+      throw mapOperationError(error);
+    }
+  }
+
   async function getTeleRadarStatus(actor) {
     const context = requireAdminActor(actor);
     const runtime = getRuntime(context);
@@ -580,6 +616,7 @@ function createTelegramTeleRadarControlPlane({
     return Object.freeze({
       enabled: config.monitoramentoAtivo === true,
       monitoramentoAtivo: config.monitoramentoAtivo === true,
+      solenoideAuto: config.solenoideAuto === true,
       horarioInicio: config.horarioInicio,
       horarioFim: config.horarioFim,
       timezone: TIME_ZONE,
@@ -636,6 +673,7 @@ function createTelegramTeleRadarControlPlane({
     stopTeleRadar,
     setTeleRadarMonitoring,
     setTeleRadarSchedule,
+    saveTeleRadarConfig,
     getTeleRadarStatus,
     bootstrap
   });

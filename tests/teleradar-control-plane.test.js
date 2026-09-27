@@ -119,6 +119,7 @@ function fakeTeleRadarFactory(order) {
     let availableCalls = 0;
     let config = {
       monitoramentoAtivo: false,
+      solenoideAuto: false,
       horarioInicio: "00:00",
       horarioFim: "23:59",
       monitoramentoAtivadoEm: null,
@@ -169,6 +170,20 @@ function fakeTeleRadarFactory(order) {
         const validTime = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
         if (!validTime(horarioInicio) || !validTime(horarioFim)) throw new Error("TELERADAR_HORARIO_INVALID");
         config = { ...config, horarioInicio, horarioFim, updatedAt: new Date().toISOString() };
+        return { ...config };
+      },
+      async setOperationalConfig({ monitoramentoAtivo, horarioInicio, horarioFim, solenoideAuto }) {
+        const validTime = value => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+        if (!validTime(horarioInicio) || !validTime(horarioFim)) throw new Error("TELERADAR_HORARIO_INVALID");
+        config = {
+          ...config,
+          monitoramentoAtivo,
+          solenoideAuto,
+          horarioInicio,
+          horarioFim,
+          monitoramentoAtivadoEm: monitoramentoAtivo ? new Date().toISOString() : config.monitoramentoAtivadoEm,
+          updatedAt: new Date().toISOString()
+        };
         return { ...config };
       },
       getStatus() {
@@ -542,6 +557,26 @@ async function run() {
   assert.equal(toggledOn.status, 200);
   assert.equal(toggledOn.body.monitoramentoAtivo, true);
   assert.equal(toggledOn.body.horarioInicio, "08:00", "toggle não altera horário");
+  const configSaved = await request(app, "PUT", "/admin/teleradar/config", {
+    role: "admin_master",
+    body: {
+      monitoramentoAtivo: true,
+      horarioInicio: "07:30",
+      horarioFim: "01:15",
+      solenoideAuto: true
+    }
+  });
+  assert.equal(configSaved.status, 200);
+  assert.deepEqual(
+    {
+      ativo: configSaved.body.monitoramentoAtivo,
+      auto: configSaved.body.solenoideAuto,
+      inicio: configSaved.body.horarioInicio,
+      fim: configSaved.body.horarioFim
+    },
+    { ativo: true, auto: true, inicio: "07:30", fim: "01:15" },
+    "endpoint combinado persiste os tres controles apenas no save"
+  );
   const invalidToggle = await request(app, "PUT", "/admin/teleradar/monitoring", {
     role: "admin_master", body: { monitoramentoAtivo: "false" }
   });

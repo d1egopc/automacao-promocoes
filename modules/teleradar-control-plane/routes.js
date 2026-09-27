@@ -128,6 +128,12 @@ function createTelegramTeleRadarAdminRoutes({
     horarioInicio: req.body?.horarioInicio,
     horarioFim: req.body?.horarioFim
   })));
+  router.put("/teleradar/config", route(req => service.saveTeleRadarConfig(actor(req), {
+    monitoramentoAtivo: req.body?.monitoramentoAtivo,
+    horarioInicio: req.body?.horarioInicio,
+    horarioFim: req.body?.horarioFim,
+    solenoideAuto: req.body?.solenoideAuto
+  })));
   router.get("/teleradar/status", route(req => service.getTeleRadarStatus(actor(req))));
 
   return router;

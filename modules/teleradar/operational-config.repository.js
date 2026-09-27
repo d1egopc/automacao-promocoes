@@ -10,6 +10,7 @@ const { parseTime } = require("./capture-gate");
 const OPERATIONAL_CONFIG_FILE = "teleradar-operational-config.json";
 const LEGACY_DEFAULT_CONFIG = Object.freeze({
   monitoramentoAtivo: false,
+  solenoideAuto: false,
   horarioInicio: "00:00",
   horarioFim: "23:59",
   monitoramentoAtivadoEm: null,
@@ -42,6 +43,7 @@ function normalizeConfig(value, { allowMissing = false } = {}) {
   const updatedAt = value.updatedAt === null || value.updatedAt === undefined ? null : iso(value.updatedAt);
   return {
     monitoramentoAtivo: value.monitoramentoAtivo,
+    solenoideAuto: value.solenoideAuto === true,
     horarioInicio: validateTime(value.horarioInicio, "horario_inicio"),
     horarioFim: validateTime(value.horarioFim, "horario_fim"),
     monitoramentoAtivadoEm: activatedAt,
@@ -94,7 +96,29 @@ function createOperationalConfigRepository({ store = createTeleradarJsonStore(),
     });
   }
 
-  return Object.freeze({ get, setMonitoringActive, setSchedule });
+  async function setConfig({ monitoramentoAtivo, horarioInicio, horarioFim, solenoideAuto } = {}) {
+    if (typeof monitoramentoAtivo !== "boolean") throw new Error("TELERADAR_MONITORAMENTO_ATIVO_INVALID");
+    if (typeof solenoideAuto !== "boolean") throw new Error("TELERADAR_SOLENOIDE_AUTO_INVALID");
+    const start = validateTime(horarioInicio, "horario_inicio");
+    const end = validateTime(horarioFim, "horario_fim");
+    const now = iso(clock());
+    return store.mutate(validContext, OPERATIONAL_CONFIG_FILE, entries => {
+      const current = normalizeConfig(entries[key], { allowMissing: true });
+      const next = {
+        ...current,
+        monitoramentoAtivo,
+        solenoideAuto,
+        horarioInicio: start,
+        horarioFim: end,
+        monitoramentoAtivadoEm: monitoramentoAtivo ? now : current.monitoramentoAtivadoEm,
+        updatedAt: now
+      };
+      entries[key] = { ...next, context: validContext };
+      return next;
+    });
+  }
+
+  return Object.freeze({ get, setMonitoringActive, setSchedule, setConfig });
 }
 
 module.exports = {

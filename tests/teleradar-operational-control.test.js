@@ -154,6 +154,7 @@ async function run() {
   const configA = createOperationalConfigRepository({ store, context, clock });
   assert.deepEqual(await configA.get(), {
     monitoramentoAtivo: false,
+    solenoideAuto: false,
     horarioInicio: "00:00",
     horarioFim: "23:59",
     monitoramentoAtivadoEm: null,
@@ -169,10 +170,27 @@ async function run() {
   );
   const configB = createOperationalConfigRepository({ store, context, clock });
   assert.equal((await configB.get()).monitoramentoAtivo, true, "restart preserva ON");
+  await configB.setConfig({
+    monitoramentoAtivo: true,
+    horarioInicio: "08:30",
+    horarioFim: "01:30",
+    solenoideAuto: true
+  });
+  assert.deepEqual(
+    {
+      ativo: (await configB.get()).monitoramentoAtivo,
+      auto: (await configB.get()).solenoideAuto,
+      inicio: (await configB.get()).horarioInicio,
+      fim: (await configB.get()).horarioFim
+    },
+    { ativo: true, auto: true, inicio: "08:30", fim: "01:30" },
+    "um unico save persiste manual, horario e Solenoide Auto"
+  );
   await configB.setMonitoringActive(false);
   const configC = createOperationalConfigRepository({ store, context, clock });
   assert.equal((await configC.get()).monitoramentoAtivo, false, "false persistido sobrevive ao restart");
-  assert.equal((await configC.get()).horarioFim, "00:50");
+  assert.equal((await configC.get()).horarioFim, "01:30");
+  assert.equal((await configC.get()).solenoideAuto, true, "toggle manual legado nao altera Solenoide Auto");
   await configC.setSchedule({ horarioInicio: "07:00", horarioFim: "02:00" });
   const configD = createOperationalConfigRepository({ store, context, clock });
   assert.deepEqual(
@@ -275,6 +293,60 @@ async function run() {
   assert.equal(records[0].status, "acked", "outbox aceita antes do OFF não é corrompida");
   assert.ok(timers.length >= 1);
   await pending.stop();
+
+  const solenoidStore = createMemoryTeleradarStore();
+  const telegramSolenoid = fakeTelegram();
+  const acceptedSolenoid = [];
+  let solenoidCalls = 0;
+  const controlled = createTeleRadarService({
+    context,
+    store: solenoidStore,
+    clock,
+    telegramAccountService: telegramSolenoid,
+    solenoide: {
+      avaliarOrigem(input) {
+        solenoidCalls += 1;
+        return { permitido: input.solenoideAuto !== true, aplicouMudancas: input.solenoideAuto === true };
+      }
+    },
+    radarIngress: {
+      async accept(envelope) {
+        acceptedSolenoid.push(envelope.messageId);
+        return { accepted: true, durable: true, code: "RADAR_ACCEPTED", radarEventId: envelope.messageId };
+      }
+    }
+  });
+  await controlled.start();
+  assert.equal(controlled.getStatus().state, "waiting_sources", "zero fontes continua Aguardando fontes");
+  assert.equal(solenoidCalls, 0, "zero fontes nunca vira monitoramento global");
+  await controlled.replaceSelectedSources(["-1001"]);
+  await controlled.setOperationalConfig({
+    monitoramentoAtivo: true,
+    horarioInicio: "00:00",
+    horarioFim: "23:59",
+    solenoideAuto: true
+  });
+  nowMs += 1000;
+  await telegramSolenoid.emit(message("20", new Date(nowMs).toISOString()));
+  assert.deepEqual(acceptedSolenoid, [], "autoridade ativa pode fechar TeleRadar sem alterar payload");
+  assert.equal(controlled.getStatus().counters.rejectedSolenoid, 1);
+  await controlled.setOperationalConfig({
+    monitoramentoAtivo: true,
+    horarioInicio: "00:00",
+    horarioFim: "23:59",
+    solenoideAuto: false
+  });
+  nowMs += 1000;
+  await telegramSolenoid.emit(message("21", new Date(nowMs).toISOString()));
+  assert.deepEqual(acceptedSolenoid, ["21"], "Auto OFF restaura fluxo legado");
+  await controlled.setOperationalConfig({
+    monitoramentoAtivo: false,
+    horarioInicio: "00:00",
+    horarioFim: "23:59",
+    solenoideAuto: true
+  });
+  assert.equal(telegramSolenoid.state.disconnectCalls, 0, "desligar monitoramento nao desconecta Telegram Conta");
+  await controlled.stop();
 
   console.log("PASS tests/teleradar-operational-control.test.js");
 }

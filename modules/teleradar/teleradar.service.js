@@ -10,6 +10,7 @@ const { createHandoffService } = require("./handoff.service");
 const { createRadarIngressAdapter } = require("./radar-ingress.adapter");
 const { evaluateTeleRadarCaptureGate } = require("./capture-gate");
 const { createOperationalConfigRepository } = require("./operational-config.repository");
+const { solenoideGlobal } = require("../solenoide/solenoide.service");
 
 function createTeleRadarService({
   context,
@@ -20,6 +21,7 @@ function createTeleRadarService({
   checkpoints,
   dedupe,
   operationalConfig,
+  solenoide = solenoideGlobal,
   handoffService,
   radarIngress = createRadarIngressAdapter(),
   clock = () => new Date(),
@@ -81,6 +83,7 @@ function createTeleRadarService({
     rejectedDuplicate: 0,
     rejectedMonitoringDisabled: 0,
     rejectedOutsideSchedule: 0,
+    rejectedSolenoid: 0,
     rejectedBeforeOperationalWindow: 0,
     errors: 0
   };
@@ -159,6 +162,14 @@ function createTeleRadarService({
       now: clock()
     });
     if (!initialGate.allowed) {
+      if (["monitoramento_desligado", "fora_da_janela"].includes(initialGate.reason)) {
+        solenoide.avaliarOrigem({
+          origem: "teleradar",
+          manualAtivo: config.monitoramentoAtivo === true,
+          dentroHorario: initialGate.reason !== "fora_da_janela",
+          solenoideAuto: config.solenoideAuto === true
+        });
+      }
       return reject(
         initialGate.reason === "monitoramento_desligado" ? "rejectedMonitoringDisabled" : "rejectedOutsideSchedule",
         `TELERADAR_REJEITADO_${initialGate.reason.toUpperCase()}`,
@@ -174,6 +185,17 @@ function createTeleRadarService({
     });
     if (!sourceGate.allowed) {
       return reject("rejectedNotSelected", `TELERADAR_REJEITADO_${sourceGate.reason.toUpperCase()}`, { chatKey, messageId });
+    }
+
+    const decisaoSolenoide = solenoide.avaliarOrigem({
+      origem: "teleradar",
+      manualAtivo: config.monitoramentoAtivo === true,
+      dentroHorario: initialGate.withinWindow === true,
+      solenoideAuto: config.solenoideAuto === true
+    });
+    if (!decisaoSolenoide.permitido) {
+      counters.rejectedSolenoid += 1;
+      return { accepted: false, reason: "TELERADAR_REJEITADO_SOLENOIDE" };
     }
 
     if (source.protectedContent === true
@@ -273,6 +295,10 @@ function createTeleRadarService({
 
   async function setCaptureSchedule(schedule) {
     return serializeOperational(() => operationalConfigRepository.setSchedule(schedule));
+  }
+
+  async function setOperationalConfig(config) {
+    return serializeOperational(() => operationalConfigRepository.setConfig(config));
   }
 
   async function bindSelectedSources() {
@@ -390,6 +416,7 @@ function createTeleRadarService({
     getOperationalConfig,
     setMonitoringActive,
     setCaptureSchedule,
+    setOperationalConfig,
     start,
     stop,
     getStatus,

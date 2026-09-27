@@ -22,6 +22,17 @@ const {
   registrarPontoEngineMemoryStage,
   resumirJobsPorEtapaEngineMemory
 } = require("../telemetria/engine-memory-stage");
+const { solenoideGlobal } = require("../solenoide/solenoide.service");
+
+const COLETORES_AUTOMATICOS = Object.freeze([
+  "mercadolivre",
+  "amazon",
+  "shopee",
+  "aliexpress",
+  "awin",
+  "kabum",
+  "magalu"
+]);
 
 function limiteOperacionalSeguro(nomeEnv, padrao, maximo) {
   const configurado = Number(process.env[nomeEnv] || padrao);
@@ -265,6 +276,38 @@ async function executarEtapaRastreada(nome, fn, args = {}, contextoPerf = {}) {
   return resultado;
 }
 
+async function executarImportacaoComSolenoide({
+  nome,
+  marketplace,
+  limite,
+  importarJobsProntosEngine,
+  depsImportador,
+  decisaoSolenoide,
+  solenoide,
+  rodadaId,
+  medidorCiclo
+} = {}) {
+  const plano = solenoide.planoColetor(decisaoSolenoide, { marketplace, limite });
+  if (!plano.executar) {
+    return {
+      ok: true,
+      nome,
+      resultado: {
+        ok: true,
+        pulado: true,
+        motivo: plano.motivo,
+        marketplace,
+        processados: 0
+      }
+    };
+  }
+  return executarEtapaRastreada(nome, importarJobsProntosEngine, {
+    limite: plano.limite,
+    marketplace,
+    deps: depsImportador
+  }, { rodadaId, medidorCiclo });
+}
+
 async function executarRodadaEngineOrquestrador(opcoes = {}) {
   const {
     processarJobsPendentesEngine,
@@ -277,6 +320,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     getContextoDistribuidor,
     getDepsImportador,
     getDepsDistribuidor,
+    solenoide = solenoideGlobal,
     limites = {}
   } = opcoes;
 
@@ -355,6 +399,13 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       alterarEtapaEngine(rodadaId, "entre_etapas");
     }
 
+    const decisaoSolenoide = solenoide.avaliar({
+      ofc: resumo.etapas.ofc,
+      rodadaId,
+      coletores: COLETORES_AUTOMATICOS
+    });
+    if (decisaoSolenoide.modo !== "off") resumo.solenoide = decisaoSolenoide;
+
     if (autoCleanShadowAtivo()) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
@@ -415,48 +466,41 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       itensProcessados: { deps: depsImportador && typeof depsImportador === "object" ? Object.keys(depsImportador).length : 0 }
     });
 
-    resumo.etapas.importar = await executarEtapaRastreada("importar_ml", importarJobsProntosEngine, {
-      limite: limitesRodada.importarMercadoLivre || limitesRodada.importarMl || limiteImportarPadrao,
-      marketplace: "mercadolivre",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
+    const executarImportacao = (nome, marketplace, limite) => executarImportacaoComSolenoide({
+      nome,
+      marketplace,
+      limite,
+      importarJobsProntosEngine,
+      depsImportador,
+      decisaoSolenoide,
+      solenoide,
+      rodadaId,
+      medidorCiclo
+    });
 
-    resumo.etapas.importarAmazon = await executarEtapaRastreada("importar_amazon", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAmazon || limiteImportarPadrao,
-      marketplace: "amazon",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
-
-
-    resumo.etapas.importarShopee = await executarEtapaRastreada("importar_shopee", importarJobsProntosEngine, {
-      limite: limitesRodada.importarShopee || limiteImportarPadrao,
-      marketplace: "shopee",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
-
-    resumo.etapas.importarAliExpress = await executarEtapaRastreada("importar_aliexpress", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAliExpress || limiteImportarPadrao,
-      marketplace: "aliexpress",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
-
-    resumo.etapas.importarAwin = await executarEtapaRastreada("importar_awin", importarJobsProntosEngine, {
-      limite: limitesRodada.importarAwin || limiteImportarPadrao,
-      marketplace: "awin",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
-
-    resumo.etapas.importarKabum = await executarEtapaRastreada("importar_kabum", importarJobsProntosEngine, {
-      limite: limitesRodada.importarKabum || limiteImportarPadrao,
-      marketplace: "kabum",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
-
-    resumo.etapas.importarMagalu = await executarEtapaRastreada("importar_magalu", importarJobsProntosEngine, {
-      limite: limitesRodada.importarMagalu || limiteImportarPadrao,
-      marketplace: "magalu",
-      deps: depsImportador
-    }, { rodadaId, medidorCiclo });
+    resumo.etapas.importar = await executarImportacao(
+      "importar_ml",
+      "mercadolivre",
+      limitesRodada.importarMercadoLivre || limitesRodada.importarMl || limiteImportarPadrao
+    );
+    resumo.etapas.importarAmazon = await executarImportacao(
+      "importar_amazon", "amazon", limitesRodada.importarAmazon || limiteImportarPadrao
+    );
+    resumo.etapas.importarShopee = await executarImportacao(
+      "importar_shopee", "shopee", limitesRodada.importarShopee || limiteImportarPadrao
+    );
+    resumo.etapas.importarAliExpress = await executarImportacao(
+      "importar_aliexpress", "aliexpress", limitesRodada.importarAliExpress || limiteImportarPadrao
+    );
+    resumo.etapas.importarAwin = await executarImportacao(
+      "importar_awin", "awin", limitesRodada.importarAwin || limiteImportarPadrao
+    );
+    resumo.etapas.importarKabum = await executarImportacao(
+      "importar_kabum", "kabum", limitesRodada.importarKabum || limiteImportarPadrao
+    );
+    resumo.etapas.importarMagalu = await executarImportacao(
+      "importar_magalu", "magalu", limitesRodada.importarMagalu || limiteImportarPadrao
+    );
 
     inicioFornecedorMs = Date.now();
     const contextoDistribuidor = chamarFornecedor(getContextoDistribuidor, {});
@@ -685,5 +729,6 @@ module.exports = {
   executarRodadaEngineOrquestrador,
   executarCicloEntradaClonador,
   dimensionarLimitePreImporter,
+  executarImportacaoComSolenoide,
   obterEstadoOrquestradorEngine
 };

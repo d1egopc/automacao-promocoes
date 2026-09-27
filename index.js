@@ -76,6 +76,7 @@ const {
   iniciarCicloEntradaClonador,
   obterEstadoOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
+const { solenoideGlobal } = require("./modules/solenoide/solenoide.service");
 const {
   sanearExpiracaoOperacionalFilaItem
 } = require("./modules/engine/flow-manager/flow-manager.service");
@@ -15446,6 +15447,7 @@ function lerFilasRadarSomenteLeitura() {
 function radarConfigPadrao() {
   return {
     monitoramentoAtivo: true,
+    solenoideAuto: false,
     monitoramentoAtivadoEm: "",
     sessaoWhatsappId: "",
     gruposMonitorados: [],
@@ -16595,6 +16597,7 @@ function carregarRadarConfigCliente(clienteId = "admin", { falharFechado = false
       monitoramentoAtivo: falharFechado
         ? dados.monitoramentoAtivo === true
         : dados.monitoramentoAtivo !== false,
+      solenoideAuto: dados.solenoideAuto === true,
       monitoramentoAtivadoEm: String(dados.monitoramentoAtivadoEm || ""),
       sessaoWhatsappId: sessaoWhatsappIdLegado,
       gruposMonitorados: gruposMonitoradosLegado,
@@ -16870,6 +16873,9 @@ if (Array.isArray(dados.sessoesWhatsappMonitoradas)) {
     monitoramentoAtivo: possuiCampo("monitoramentoAtivo")
       ? dados.monitoramentoAtivo === true
       : atual.monitoramentoAtivo === true,
+    solenoideAuto: possuiCampo("solenoideAuto")
+      ? dados.solenoideAuto === true
+      : atual.solenoideAuto === true,
     monitoramentoAtivadoEm: "",
     sessaoWhatsappId: sessaoWhatsappId || sessoesWhatsappMonitoradas[0]?.sessaoId || "",
     gruposMonitorados,
@@ -22153,6 +22159,17 @@ function comAckRadar(resultado = {}) {
   });
 
   if (!capturaPermitida.ok) {
+    if (origemAutorizadaInternamente !== true && [
+      "radar_monitoramento_inativo",
+      "fora_do_horario_monitoramento"
+    ].includes(capturaPermitida.motivo)) {
+      solenoideGlobal.avaliarOrigem({
+        origem: "radar",
+        manualAtivo: radarConfig.monitoramentoAtivo !== false,
+        dentroHorario: capturaPermitida.motivo !== "fora_do_horario_monitoramento",
+        solenoideAuto: radarConfig.solenoideAuto === true
+      });
+    }
     const etapaCoberturaCaptura = capturaPermitida.motivo === "fora_do_horario_monitoramento"
       ? "radar_janela_rejeitada"
       : (capturaPermitida.motivo === "limite_diario_radar_atingido" ? "radar_limite_rejeitado" : "radar_janela_rejeitada");
@@ -22173,6 +22190,21 @@ function comAckRadar(resultado = {}) {
       grupo: grupoNomeTexto || grupoIdTexto
     });
     return comAckRadar(capturaPermitida);
+  }
+  if (origemAutorizadaInternamente !== true) {
+    const decisaoSolenoideOrigem = solenoideGlobal.avaliarOrigem({
+      origem: "radar",
+      manualAtivo: radarConfig.monitoramentoAtivo !== false,
+      dentroHorario: true,
+      solenoideAuto: radarConfig.solenoideAuto === true
+    });
+    if (!decisaoSolenoideOrigem.permitido) {
+      return comAckRadar({
+        ok: false,
+        motivo: "solenoide_coleta_reduzida",
+        ignorada: true
+      });
+    }
   }
   coberturaRadar.registrar("radar_janela_ok", {
     ...contextoCoberturaRadar,
@@ -23857,6 +23889,7 @@ app.get("/radar/config", (req, res) => {
 
     return res.json({
       monitoramentoAtivo: radarConfig.monitoramentoAtivo,
+      solenoideAuto: radarConfig.solenoideAuto === true,
       sessaoWhatsappId: radarConfig.sessaoWhatsappId,
       gruposMonitorados: radarConfig.gruposMonitorados,
       sessoesWhatsappMonitoradas: radarConfig.sessoesWhatsappMonitoradas,
@@ -23953,6 +23986,13 @@ app.post("/radar/config", (req, res) => {
       });
     }
 
+    if (possuiCampo("solenoideAuto") && typeof body.solenoideAuto !== "boolean") {
+      return res.status(400).json({
+        ok: false,
+        erro: "solenoideAuto deve ser boolean"
+      });
+    }
+
     if (possuiCampo("categoriasPermitidas") && !Array.isArray(body.categoriasPermitidas)) {
       return res.status(400).json({
         ok: false,
@@ -23972,6 +24012,7 @@ app.post("/radar/config", (req, res) => {
     if (possuiCampo("monitoramentoAtivo")) {
       dadosConfig.monitoramentoAtivo = body.monitoramentoAtivo === true;
     }
+    if (possuiCampo("solenoideAuto")) dadosConfig.solenoideAuto = body.solenoideAuto;
 
     if (possuiCampo("sessaoWhatsappId")) {
       const sessaoValidada = validarSessaoRadarCliente(
@@ -24006,6 +24047,7 @@ app.post("/radar/config", (req, res) => {
     return res.json({
       ok: true,
       monitoramentoAtivo: radarConfig.monitoramentoAtivo,
+      solenoideAuto: radarConfig.solenoideAuto === true,
       sessaoWhatsappId: radarConfig.sessaoWhatsappId,
       gruposMonitorados: radarConfig.gruposMonitorados,
       sessoesWhatsappMonitoradas: radarConfig.sessoesWhatsappMonitoradas,
