@@ -1,0 +1,114 @@
+name: Validate P2C E SQL GIN Only
+
+on:
+  push:
+    branches:
+      - validation/p2c-e-sql-gin
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: P2C E regressions and baseline (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: ""
+      OFC_READONLY_WORKER: "false"
+      FORCE_COLOR: "0"
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard exact ancestry and allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/p2c-e-sql-gin
+          test "$GITHUB_EVENT_NAME" = push
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(git rev-parse 16e8469919af5156162527c46ac752a974d431d4^)" = 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5
+          test "$(git rev-parse HEAD^)" = 16e8469919af5156162527c46ac752a974d431d4
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/validate-p2c-e-sql-gin.yml
+          test "$(git diff --name-only 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 16e8469919af5156162527c46ac752a974d431d4)" = "$(printf '%s\n' modules/engine/importer/importer.service.js modules/imagens/cache-canonico-evento.js tests/ml-historico-sql-gin.test.js)"
+          mkdir -p "$RUNNER_TEMP/p2ce-baseline" "$RUNNER_TEMP/p2ce-clock-baseline"
+          git archive 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 | tar -x -C "$RUNNER_TEMP/p2ce-baseline"
+          git archive 7456b506abb5a9f118d397afd01b06aab0e11728 | tar -x -C "$RUNNER_TEMP/p2ce-clock-baseline"
+          printf '%s\n' "NODE_PATH=$GITHUB_WORKSPACE/node_modules" "OFC_TEMPORAL_BASELINE_ROOT=$RUNNER_TEMP/p2ce-clock-baseline" "P2CE_BASELINE_ROOT=$RUNNER_TEMP/p2ce-baseline" "DATA_DIR=$RUNNER_TEMP/p2ce-test-data" >> "$GITHUB_ENV"
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: P2C E SQL contracts (no database)
+        run: node tests/ml-historico-sql-gin.test.js
+      - name: Importer and image regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in mercadolivre-imagem-selecao-canonica mercadolivre-imagem-oficial-fallback mercadolivre-imagem-candidatos imagem-canonica-fanout imagem-link-contrato-universal resolver-imagem-universal engine-importer-candidate-pool ml-work-enrichment-shadow ml-work-enrichment-active-integration magalu-engine-importer shopee-importer-retry engine-importer-origem-fairness engine-importer-origem-fairness-state mercadolivre-social-diagnostico-html ml-work-enrichment-active; do
+            node "tests/$suite.test.js"
+          done
+      - name: Critical official suites (9)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in clean-install-bootstrap financeiro-bootstrap-schema platform-variables-v1 google-platform-config mercadopago-platform-variables financeiro-mercadopago-pix-v1 financeiro-checkout-pix-publico-v1 link-optimus-repository link-optimus-admin-config; do
+            node "tests/$suite.test.js"
+          done
+      - name: Temporal, Phase 1D, Worker, lifecycle and dynamic
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/ofc-workspace-temporal.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/safe-redirect-http-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+      - name: Require exact historical failure equivalence (not ignored)
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const { spawnSync } = require('node:child_process');
+          const suites = [
+            ['engine-imagem-fallback', "https://radar.test/original.jpg"],
+            ['engine-v2-oferta-universal-ml', '3 !== 2'],
+            ['imagem-candidatos-universal', "https://cdn.exemplo.com/radar.jpg"]
+          ];
+          function run(root, suite) {
+            const r = spawnSync(process.execPath, [path.join(root, 'tests', suite + '.test.js')],
+              { cwd: root, encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+            assert(!r.error, `${suite}: subprocess failure`);
+            assert.equal(r.signal, null, `${suite}: signal`);
+            assert.equal(r.status, 1, `${suite}: expected assertion exit 1`);
+            const match = r.stderr.match(/AssertionError \[ERR_ASSERTION\]: ([\s\S]*?)\n\s+at /);
+            assert(match, `${suite}: expected assertion, not other failure`);
+            return match[1].replace(/\r/g, '').trim();
+          }
+          for (const [suite, marker] of suites) {
+            const baseline = run(process.env.P2CE_BASELINE_ROOT, suite);
+            const patched = run(process.cwd(), suite);
+            assert(baseline.includes(marker), `${suite}: unexpected baseline assertion`);
+            assert.equal(patched, baseline, `${suite}: changed failure signature`);
+            console.log(JSON.stringify({ suite, baselineExit: 1, patchExit: 1, sameAssertion: true, assertion: patched }));
+          }
+          NODE
+      - name: Syntax, encoding, complete diff and clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/engine/importer/importer.service.js
+          node --check modules/imagens/cache-canonico-evento.js
+          node --check tests/ml-historico-sql-gin.test.js
+          npm run audit:encoding
+          git diff --check 1e02b8f9f9465bf9dc37b83216d64ad85c4fbbd5 HEAD
+          test -z "$(git status --porcelain)"
