@@ -990,14 +990,21 @@ async function buscarImagemAnteriorEngine(oferta = {}, job = {}) {
 
   const ofertaAtualId = Number(job.oferta_id) || 0;
   const usarMetadata = await engineOfertasTemMetadata();
-  const campoMetadata = usarMetadata ? "COALESCE(metadata::text, '')" : "''";
+  const expressaoBusca = usarMetadata
+    ? `UPPER(
+          (CASE WHEN link_original IS NULL THEN '' ELSE link_original || ' ' END) ||
+          (CASE WHEN link_expandido IS NULL THEN '' ELSE link_expandido || ' ' END) ||
+          (CASE WHEN link_afiliado IS NULL THEN '' ELSE link_afiliado || ' ' END) ||
+          COALESCE(metadata::text, '')
+        )`
+    : "UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado, ''))";
   const resultado = await queryEngine(
     `SELECT id, imagem
        FROM engine_ofertas
       WHERE id <> $2
         AND NULLIF(TRIM(COALESCE(imagem, '')), '') IS NOT NULL
         AND LOWER(REGEXP_REPLACE(COALESCE(marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre')
-        AND UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado, ${campoMetadata})) LIKE '%' || $1 || '%'
+        AND ${expressaoBusca} LIKE '%' || $1 || '%'
       ORDER BY atualizada_em DESC NULLS LAST, id DESC
       LIMIT 1`,
     [produtoId, ofertaAtualId]

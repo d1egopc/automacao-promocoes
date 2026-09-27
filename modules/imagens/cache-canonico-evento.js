@@ -359,7 +359,12 @@ async function buscarHistoricoMesmoMlb(produtoId = "", deps = {}) {
        FROM engine_ofertas
       WHERE NULLIF(TRIM(COALESCE(imagem, '')), '') IS NOT NULL
         AND LOWER(REGEXP_REPLACE(COALESCE(marketplace, ''), '[[:space:]_-]+', '', 'g')) IN ('ml', 'mercadolivre')
-        AND UPPER(CONCAT_WS(' ', link_original, link_expandido, link_afiliado, COALESCE(metadata::text, ''))) LIKE '%' || $1 || '%'
+        AND UPPER(
+          (CASE WHEN link_original IS NULL THEN '' ELSE link_original || ' ' END) ||
+          (CASE WHEN link_expandido IS NULL THEN '' ELSE link_expandido || ' ' END) ||
+          (CASE WHEN link_afiliado IS NULL THEN '' ELSE link_afiliado || ' ' END) ||
+          COALESCE(metadata::text, '')
+        ) LIKE '%' || $1 || '%'
       ORDER BY atualizada_em DESC NULLS LAST, id DESC
       LIMIT 1`,
     [mlb]
