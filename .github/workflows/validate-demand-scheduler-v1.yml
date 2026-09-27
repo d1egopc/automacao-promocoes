@@ -1,0 +1,172 @@
+name: Validate Demand Scheduler V1 Only
+
+on:
+  push:
+    branches:
+      - feature/demand-scheduler-v1
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Demand Scheduler regressions (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEMAND_SCHEDULER_ENABLED: "0"
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: ""
+      OFC_READONLY_WORKER: "false"
+      FORCE_COLOR: "0"
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard ancestry and exact functional allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/feature/demand-scheduler-v1
+          test "$GITHUB_EVENT_NAME" = push
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(git rev-parse 418efabd29c73a4452595d7c0890f873d75d8317^)" = 2b8e08f41b687969b2bd552707cd7a96d137ba84
+          test "$(git rev-parse HEAD^)" = 418efabd29c73a4452595d7c0890f873d75d8317
+          test "$(git diff --name-only HEAD^ HEAD)" = .github/workflows/validate-demand-scheduler-v1.yml
+          test "$(git diff --name-only 2b8e08f41b687969b2bd552707cd7a96d137ba84 418efabd29c73a4452595d7c0890f873d75d8317)" = "$(printf '%s\n' index.js modules/demand-scheduler/demand-scheduler.service.js tests/demand-scheduler-v1.test.js)"
+          mkdir -p "$RUNNER_TEMP/demand-scheduler-baseline"
+          git archive 2b8e08f41b687969b2bd552707cd7a96d137ba84 | tar -x -C "$RUNNER_TEMP/demand-scheduler-baseline"
+          printf '%s\n' \
+            "NODE_PATH=$GITHUB_WORKSPACE/node_modules" \
+            "DEMAND_SCHEDULER_BASELINE_ROOT=$RUNNER_TEMP/demand-scheduler-baseline" \
+            "DATA_DIR=$RUNNER_TEMP/demand-scheduler-test-data" >> "$GITHUB_ENV"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Demand Scheduler V1 contracts and sanity
+        run: node --expose-gc tests/demand-scheduler-v1.test.js
+
+      - name: Cadence, live queue, fairness, fanout and destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in \
+            cadencia-v2-autoridade \
+            fila-viva-selecao \
+            fila-viva-anti-starvation \
+            distributor-vivo-sem-starvation \
+            fila-fanout-destinos-estado \
+            destinos-multialvo-v1 \
+            destino-geral-distributor \
+            executor-destino-diagnostico; do
+            node "tests/$suite.test.js"
+          done
+
+      - name: Dedupe and anti-repetition
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in \
+            anti-repeticao-executor \
+            anti-repeticao-automatica \
+            ofertas-v2-dedupe-duplicar \
+            ofertas-v2-achados-dedupe-memoria; do
+            node "tests/$suite.test.js"
+          done
+
+      - name: Distributor and Engine fanout
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in \
+            distributor-definitivo-fase-c \
+            distributor-prioridade-esteira \
+            engine-distributor-candidate-pool \
+            engine-distributor-origem-fairness \
+            engine-distributor-origem-fairness-state \
+            engine-fanout-universal-v2; do
+            node "tests/$suite.test.js"
+          done
+
+      - name: Critical official suites (9)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in \
+            clean-install-bootstrap \
+            financeiro-bootstrap-schema \
+            platform-variables-v1 \
+            google-platform-config \
+            mercadopago-platform-variables \
+            financeiro-mercadopago-pix-v1 \
+            financeiro-checkout-pix-publico-v1 \
+            link-optimus-repository \
+            link-optimus-admin-config; do
+            node "tests/$suite.test.js"
+          done
+
+      - name: Temporal, Phase 1D, Worker, lifecycle and dynamic links
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/ofc-workspace-temporal.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/safe-redirect-http-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+
+      - name: Require exact historical failure equivalence
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const { spawnSync } = require('node:child_process');
+          const suites = [
+            ['engine-imagem-fallback', 'https://radar.test/original.jpg'],
+            ['engine-v2-oferta-universal-ml', '3 !== 2'],
+            ['imagem-candidatos-universal', 'https://cdn.exemplo.com/radar.jpg']
+          ];
+          function run(root, suite) {
+            const result = spawnSync(process.execPath, [path.join(root, 'tests', suite + '.test.js')], {
+              cwd: root,
+              encoding: 'utf8',
+              timeout: 120000,
+              maxBuffer: 16 * 1024 * 1024
+            });
+            assert(!result.error, `${suite}: subprocess failure`);
+            assert.equal(result.signal, null, `${suite}: signal`);
+            assert.equal(result.status, 1, `${suite}: expected assertion exit 1`);
+            const match = result.stderr.match(/AssertionError \[ERR_ASSERTION\]: ([\s\S]*?)\n\s+at /);
+            assert(match, `${suite}: expected assertion, not another failure`);
+            return match[1].replace(/\r/g, '').trim();
+          }
+          for (const [suite, marker] of suites) {
+            const baseline = run(process.env.DEMAND_SCHEDULER_BASELINE_ROOT, suite);
+            const patched = run(process.cwd(), suite);
+            assert(baseline.includes(marker), `${suite}: unexpected baseline assertion`);
+            assert.equal(patched, baseline, `${suite}: changed failure signature`);
+            console.log(JSON.stringify({ suite, baselineExit: 1, patchExit: 1, sameAssertion: true }));
+          }
+          NODE
+
+      - name: Syntax, encoding, diff and clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/demand-scheduler/demand-scheduler.service.js
+          node --check tests/demand-scheduler-v1.test.js
+          npm run audit:encoding
+          git diff --check 2b8e08f41b687969b2bd552707cd7a96d137ba84 HEAD
+          test -z "$(git status --porcelain)"
