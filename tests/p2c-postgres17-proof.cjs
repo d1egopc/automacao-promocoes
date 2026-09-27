@@ -303,7 +303,9 @@ async function main() {
   client = await pool.connect();
   try {
     const env = (await client.query(`SELECT current_database() AS database,current_setting('server_version') AS version,
-      current_setting('server_version_num')::int AS version_num,current_setting('lc_collate') AS collation,
+      current_setting('server_version_num')::int AS version_num,
+      (SELECT datcollate FROM pg_database WHERE datname=current_database()) AS collation,
+      (SELECT datctype FROM pg_database WHERE datname=current_database()) AS ctype,
       current_setting('shared_buffers') AS shared_buffers,current_setting('work_mem') AS work_mem,
       current_setting('max_parallel_workers_per_gather') AS parallel_workers`)).rows[0];
     assert.equal(Math.floor(env.version_num / 10000), 17); assert(/^p2c_disposable_/.test(env.database));
