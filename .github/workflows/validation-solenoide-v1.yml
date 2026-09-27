@@ -1,0 +1,118 @@
+name: Solenoide V1 validation (CI only)
+
+on:
+  push:
+    branches:
+      - validation/solenoide-v1-backend
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solenoide-v1-backend-validation
+  cancel-in-progress: false
+
+jobs:
+  backend-validation:
+    name: Backend suites (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DEMAND_SCHEDULER_ENABLED: "0"
+      SOLENOID_ENABLED: "0"
+      SOLENOID_SHADOW: "0"
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax checks
+        run: |
+          set -Eeuo pipefail
+          node --check index.js
+          node --check modules/engine/orchestrator.runner.js
+          node --check modules/solenoide/solenoide.service.js
+          node --check modules/teleradar-control-plane/control-plane.service.js
+          node --check modules/teleradar-control-plane/routes.js
+          node --check modules/teleradar/operational-config.repository.js
+          node --check modules/teleradar/teleradar.service.js
+          node --check tests/solenoide-radar-config.test.js
+          node --check tests/solenoide-v1.test.js
+
+      - name: Solenoide, Radar and TeleRadar
+        run: |
+          set -Eeuo pipefail
+          node tests/solenoide-v1.test.js
+          node tests/solenoide-radar-config.test.js
+          node tests/radar-whatsapp-capture-gate.test.js
+          node tests/teleradar.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/teleradar-semantica-comercial.test.js
+          node tests/teleradar-operational-control.test.js
+          node tests/teleradar-control-plane.test.js
+
+      - name: Scheduler, Turbo, fanout and destination contracts
+        run: |
+          set -Eeuo pipefail
+          node tests/demand-scheduler-v1.test.js
+          node tests/cadencia-v2-autoridade.test.js
+          node tests/destino-geral-distributor.test.js
+          node tests/destinos-multialvo-v1.test.js
+          node tests/destinos-compatibilidade-kabum-awin.test.js
+          node tests/fila-fanout-destinos-estado.test.js
+          node tests/engine-fanout-universal-v2.test.js
+          node tests/engine-distributor-origem-fairness.test.js
+
+      - name: OFC, temporal and Worker contracts
+        run: |
+          set -Eeuo pipefail
+          node tests/ofc-absorption-gate-shadow.test.js
+          node tests/ofc-buffer-vivo-workspace-shadow.test.js
+          node tests/ofc-active-queue-shadow.test.js
+          node tests/ofc-live-flow-shadow.test.js
+          node tests/ofc-operacional-v2-shadow.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/ofc-workspace-temporal.test.js
+          node tests/ofc-workspace-worker.test.js
+
+      - name: Lifecycle, links and official critical suite
+        run: |
+          set -Eeuo pipefail
+          node tests/safe-redirect-http-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+          node tests/clean-install-bootstrap.test.js
+          node tests/financeiro-bootstrap-schema.test.js
+          node tests/platform-variables-v1.test.js
+          node tests/google-platform-config.test.js
+          node tests/mercadopago-platform-variables.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/link-optimus-repository.test.js
+          node tests/link-optimus-admin-config.test.js
+
+      - name: Diff check against productive base
+        run: git diff --check 418efabd29c73a4452595d7c0890f873d75d8317 HEAD
+
+      - name: Full encoding audit (known historical findings are non-blocking)
+        continue-on-error: true
+        run: npm run audit:encoding
+
+      - name: Encoding check for this validation diff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if git diff --unified=0 418efabd29c73a4452595d7c0890f873d75d8317 HEAD \
+            | rg --pcre2 '^\+.*(?:\x{C3}[\x{80}-\x{BF}]|\x{E2}[\x{80}-\x{BF}\x{2010}-\x{206F}]|\x{FFFD})'; then
+            echo 'Encoding corruption found in added lines.'
+            exit 1
+          fi
