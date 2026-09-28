@@ -100,6 +100,7 @@ jobs:
           const fs = require("fs");
           const path = require("path");
           const { construirTerminalIndex } = require("./modules/fila/terminal-index-worker");
+          const operacional = require("./modules/fila/fila-operacional-v2");
           const root = process.env.AUDIT_ROOT;
           const cliente = "audit_fixture";
           const dir = path.join(root, "clientes", cliente);
@@ -115,7 +116,7 @@ jobs:
             checkpointRevision: "audit-revision-1",
             targetGeneration: 1,
             dataDir: root
-          });
+          }, { operacional });
           if (!result.ok) throw new Error("bootstrap da fixture do auditor falhou");
           NODE
           output=$(node scripts/auditar-terminal-index.js --data-dir "$audit_root" --workspace audit_fixture)
