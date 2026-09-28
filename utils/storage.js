@@ -1,7 +1,27 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const { isMainThread, threadId } = require("worker_threads");
 const { registrarArquivo } = require("./painel-latencia");
 const PERF_STORAGE_MIN_MS = Number(process.env.PERF_STORAGE_MIN_MS || 100);
+const PERF_STORAGE_DIAGNOSTICO_ENABLED = /^(1|true)$/i.test(
+  String(process.env.PERF_STORAGE_DIAGNOSTICO || "")
+);
+
+function numeroEnvSeguro(nome, fallback) {
+  const valor = Number(process.env[nome]);
+  return Number.isFinite(valor) && valor >= 0 ? valor : fallback;
+}
+
+const PERF_STORAGE_DIAGNOSTICO_MIN_MS = numeroEnvSeguro(
+  "PERF_STORAGE_DIAGNOSTICO_MIN_MS",
+  100
+);
+const PERF_STORAGE_DIAGNOSTICO_MIN_BYTES = numeroEnvSeguro(
+  "PERF_STORAGE_DIAGNOSTICO_MIN_BYTES",
+  16 * 1024 * 1024
+);
+let workspaceHashSalt;
 
 function perfStorageMs(inicio) {
   return Number(process.hrtime.bigint() - inicio) / 1e6;
@@ -16,6 +36,87 @@ function logStorageLento(operacao, file, inicio, extra = {}) {
     tempoMs,
     ...extra
   }));
+}
+
+function workspaceHashDoArquivo(file) {
+  try {
+    const raizClientes = path.resolve(CLIENTES_DIR) + path.sep;
+    const arquivoResolvido = path.resolve(String(file || ""));
+    if (!arquivoResolvido.startsWith(raizClientes)) return null;
+
+    const relativo = path.relative(path.resolve(CLIENTES_DIR), arquivoResolvido);
+    const [workspace] = relativo.split(path.sep);
+    if (!workspace || workspace === ".") return null;
+
+    if (!workspaceHashSalt) workspaceHashSalt = crypto.randomBytes(16);
+    return crypto.createHash("sha256")
+      .update(workspaceHashSalt)
+      .update(workspace, "utf8")
+      .digest("hex")
+      .slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+function callerTagDiagnostico() {
+  try {
+    const raizProjeto = path.resolve(__dirname, "..");
+    const arquivoStorage = path.resolve(__filename);
+    const stack = new Error().stack || "";
+
+    for (const linha of stack.split("\n").slice(1)) {
+      const correspondencia = linha.match(/at (?:.+ \()?(.+):\d+:\d+\)?$/);
+      if (!correspondencia) continue;
+
+      const arquivo = correspondencia[1];
+      if (!path.isAbsolute(arquivo)) continue;
+
+      const arquivoResolvido = path.resolve(arquivo);
+      if (arquivoResolvido === arquivoStorage) continue;
+
+      const relativo = path.relative(raizProjeto, arquivoResolvido);
+      if (!relativo || relativo.startsWith("..") || path.isAbsolute(relativo)) continue;
+
+      return relativo.split(path.sep).join("/");
+    }
+  } catch {}
+
+  return "desconhecido";
+}
+
+function logStorageDiagnostico({
+  operacao,
+  file,
+  bytes = 0,
+  duracaoMs = 0,
+  ...extra
+} = {}) {
+  if (!PERF_STORAGE_DIAGNOSTICO_ENABLED) return;
+
+  try {
+    const bytesSeguro = Number.isFinite(Number(bytes)) ? Math.max(0, Number(bytes)) : 0;
+    const duracaoSegura = Number.isFinite(Number(duracaoMs)) ? Math.max(0, Number(duracaoMs)) : 0;
+    if (
+      duracaoSegura < PERF_STORAGE_DIAGNOSTICO_MIN_MS &&
+      bytesSeguro < PERF_STORAGE_DIAGNOSTICO_MIN_BYTES
+    ) {
+      return;
+    }
+
+    console.log("[PERF STORAGE DIAGNOSTICO]", JSON.stringify({
+      timestamp: new Date().toISOString(),
+      operacao: String(operacao || "desconhecida"),
+      arquivo: path.basename(String(file || "")),
+      bytes: bytesSeguro,
+      duracaoMs: Math.round(duracaoSegura),
+      isMainThread,
+      threadId,
+      workspaceHash: workspaceHashDoArquivo(file),
+      callerTag: callerTagDiagnostico(),
+      ...extra
+    }));
+  } catch {}
 }
 
 function removerArquivoSeExistir(file) {
@@ -65,11 +166,21 @@ function criarBackupArquivoAtomic(file, bak, opcoes = {}) {
         removerArquivoSeExistir(bakTmp);
         throw new Error("hardlink_backup_replace_failed");
       }
-      return {
+      const resultado = {
         backupOk: true,
         backupMetodo: "hardlink",
         backupMs: Math.round(perfStorageMs(inicio))
       };
+      logStorageDiagnostico({
+        operacao: "backup",
+        fase: resultado.backupMetodo,
+        file,
+        bytes: opcoes.bytes,
+        duracaoMs: resultado.backupMs,
+        backupMetodo: resultado.backupMetodo,
+        backupOk: resultado.backupOk
+      });
+      return resultado;
     } catch {
       removerArquivoSeExistir(bakTmp);
     }
@@ -77,17 +188,37 @@ function criarBackupArquivoAtomic(file, bak, opcoes = {}) {
 
   try {
     fs.copyFileSync(file, bak);
-    return {
+    const resultado = {
       backupOk: true,
       backupMetodo: "copy",
       backupMs: Math.round(perfStorageMs(inicio))
     };
+    logStorageDiagnostico({
+      operacao: "backup",
+      fase: resultado.backupMetodo,
+      file,
+      bytes: opcoes.bytes,
+      duracaoMs: resultado.backupMs,
+      backupMetodo: resultado.backupMetodo,
+      backupOk: resultado.backupOk
+    });
+    return resultado;
   } catch {
-    return {
+    const resultado = {
       backupOk: false,
       backupMetodo: "erro",
       backupMs: Math.round(perfStorageMs(inicio))
     };
+    logStorageDiagnostico({
+      operacao: "backup",
+      fase: resultado.backupMetodo,
+      file,
+      bytes: opcoes.bytes,
+      duracaoMs: resultado.backupMs,
+      backupMetodo: resultado.backupMetodo,
+      backupOk: resultado.backupOk
+    });
+    return resultado;
   }
 }
 
@@ -160,20 +291,61 @@ function readJsonFile(file, fallback) {
   const inicio = process.hrtime.bigint();
   try {
     if (!fs.existsSync(file)) {
+      const totalMs = perfStorageMs(inicio);
       logStorageLento("readJsonFile", file, inicio, { existe: false });
+      logStorageDiagnostico({
+        operacao: "readJsonFile",
+        fase: "aggregate",
+        file,
+        bytes: 0,
+        duracaoMs: totalMs,
+        totalMs,
+        readMs: 0,
+        parseMs: null,
+        existe: false
+      });
       return clonarFallback(fallback);
     }
+    const inicioRead = process.hrtime.bigint();
     const texto = fs.readFileSync(file, "utf8");
     const readMs = perfStorageMs(inicio);
+    const readPhaseMs = perfStorageMs(inicioRead);
     const bytes = Buffer.byteLength(texto || "", "utf8");
     registrarArquivo("readFileSync", file, readMs, bytes);
     logStorageLento("readJsonFile", file, inicio, { existe: true, bytes });
-    if (!texto) return clonarFallback(fallback);
+    if (!texto) {
+      const totalMs = perfStorageMs(inicio);
+      logStorageDiagnostico({
+        operacao: "readJsonFile",
+        fase: "aggregate",
+        file,
+        bytes,
+        duracaoMs: totalMs,
+        totalMs,
+        readMs: readPhaseMs,
+        parseMs: null,
+        existe: true
+      });
+      return clonarFallback(fallback);
+    }
     const inicioParse = process.hrtime.bigint();
+    let parseMs = null;
     try {
       return JSON.parse(texto);
     } finally {
-      registrarArquivo("JSON.parse", file, perfStorageMs(inicioParse), bytes);
+      parseMs = perfStorageMs(inicioParse);
+      registrarArquivo("JSON.parse", file, parseMs, bytes);
+      logStorageDiagnostico({
+        operacao: "readJsonFile",
+        fase: "aggregate",
+        file,
+        bytes,
+        duracaoMs: perfStorageMs(inicio),
+        totalMs: perfStorageMs(inicio),
+        readMs: readPhaseMs,
+        parseMs,
+        existe: true
+      });
     }
   } catch {
     logStorageLento("readJsonFile", file, inicio, { erro: true });
@@ -194,7 +366,8 @@ function writeJsonFileAtomic(file, dados) {
   registrarArquivo("JSON.stringify", file, stringifyMs, bytes);
 
   const backup = criarBackupArquivoAtomic(file, bak, {
-    preferirHardlink: path.basename(file) === "fila.json"
+    preferirHardlink: path.basename(file) === "fila.json",
+    bytes
   });
   registrarArquivo(`backup_${backup.backupMetodo}`, file, backup.backupMs, backup.backupMetodo === "copy" ? bytes : 0);
 
@@ -206,8 +379,23 @@ function writeJsonFileAtomic(file, dados) {
   fs.renameSync(tmp, file);
   const renameMs = Math.round(perfStorageMs(inicioRename));
   registrarArquivo("renameSync", file, renameMs);
+  const totalMs = perfStorageMs(inicio);
   logStorageLento("writeJsonFileAtomic", file, inicio, {
     bytes,
+    stringifyMs,
+    backupMs: backup.backupMs,
+    backupMetodo: backup.backupMetodo,
+    backupOk: backup.backupOk,
+    writeMs,
+    renameMs
+  });
+  logStorageDiagnostico({
+    operacao: "writeJsonFileAtomic",
+    fase: "aggregate",
+    file,
+    bytes,
+    duracaoMs: totalMs,
+    totalMs,
     stringifyMs,
     backupMs: backup.backupMs,
     backupMetodo: backup.backupMetodo,
