@@ -43,8 +43,9 @@ jobs:
           test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-shadow
           test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
           git cat-file -e "${BASE_SHA}^{commit}"
-          test "$(git rev-parse HEAD)" = "$FUNCTIONAL_SHA"
-          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          git cat-file -e "${FUNCTIONAL_SHA}^{commit}"
+          test "$(git rev-parse HEAD^)" = "$FUNCTIONAL_SHA"
+          test "$(git rev-parse "${FUNCTIONAL_SHA}^")" = "$BASE_SHA"
           test "$(git rev-list --count "${BASE_SHA}..${FUNCTIONAL_SHA}")" = 1
           test -z "${DATABASE_URL:-}"
 
