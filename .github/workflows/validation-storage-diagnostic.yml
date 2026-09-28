@@ -40,11 +40,17 @@ jobs:
         run: |
           set -euo pipefail
           BASE=8002753f7bf7dfdc76051459d380815116165d50
+          FUNCTIONAL=9dc574ceb8de217128bc124be791d6fd78d33168
           git cat-file -e "${BASE}^{commit}"
+          git cat-file -e "${FUNCTIONAL}^{commit}"
+          git merge-base --is-ancestor "${BASE}" "${FUNCTIONAL}"
+          git merge-base --is-ancestor "${FUNCTIONAL}" HEAD
           expected=$'tests/storage-diagnostico.test.js\nutils/storage.js'
-          actual="$(git diff --name-only "${BASE}...HEAD" | sort)"
+          actual="$(git diff --name-only "${BASE}...${FUNCTIONAL}" | sort)"
           test "${actual}" = "${expected}"
-          git diff --check "${BASE}...HEAD"
+          ci_only="$(git diff --name-only "${FUNCTIONAL}...HEAD")"
+          test "${ci_only}" = ".github/workflows/validation-storage-diagnostic.yml"
+          git diff --check "${BASE}...${FUNCTIONAL}"
 
       - name: Syntax and encoding
         run: |
