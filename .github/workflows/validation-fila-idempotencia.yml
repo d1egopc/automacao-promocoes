@@ -1,0 +1,136 @@
+name: Fila stale/idempotency Linux validation
+
+on:
+  push:
+    branches:
+      - fix/fila-idempotencia-viva-b09
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fila-stale-idempotencia-validation
+  cancel-in-progress: false
+
+jobs:
+  linux-node24:
+    name: Linux Node 24 stale/idempotency regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout validation branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated ref and production parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          FUNCTIONAL=8002753f7bf7dfdc76051459d380815116165d50
+          BASE=b09d62f874ceaaf89f8e57e0cce7d532e6745ec8
+          test "$GITHUB_REF" = refs/heads/fix/fila-idempotencia-viva-b09
+          test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          git cat-file -e "$FUNCTIONAL^{commit}"
+          test "$(git rev-parse "$FUNCTIONAL^")" = "$BASE"
+          git merge-base --is-ancestor "$FUNCTIONAL" HEAD
+          git cat-file -e "$BASE^{commit}"
+          git diff --check "$BASE...HEAD"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Stale/idempotency and DB classification gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/fila-viva-idempotencia-stale.test.js
+          node tests/fila-manifest-state-repository.test.js
+          node tests/persistence-worker-observability.test.js
+
+      - name: Persistence Worker Phase 1 and multiworkspace gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/persistence-worker-phase1.test.js
+          node tests/persistence-worker-multiworkspace.test.js
+          node tests/persistence-worker-multiworkspace-representative.test.js
+          node tests/persistence-worker-crash-matrix.test.js
+
+      - name: Fila manifest checkpoint recovery and proof gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/fila-checkpoint-recovery.test.js
+          node tests/fila-checkpoint-entrega-integracao.test.js
+          node tests/fila-checkpoint-entrega-funcional.test.js
+          node tests/fila-checkpoints-entrega.repository.test.js
+          node tests/fila-historico-v2-leitura.test.js
+          node tests/fila-viva-selecao.test.js
+          node tests/fila-terminal-guard-legado.test.js
+
+      - name: Scheduler, Solenoide, OFC, Radar and TeleRadar regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/demand-scheduler-v1.test.js
+          node tests/manual-v2-scheduler.test.js
+          node tests/manual-v2-scheduler-runner.test.js
+          node tests/solenoide-v1.test.js
+          node tests/solenoide-radar-config.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/radar-cobertura-v1.test.js
+          node tests/teleradar.test.js
+          node tests/teleradar-operational-control.test.js
+          node tests/teleradar-control-plane.test.js
+
+      - name: Existing baseline failures must remain unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE="$RUNNER_TEMP/baseline"
+          git worktree add --detach "$BASELINE" b09d62f874ceaaf89f8e57e0cce7d532e6745ec8
+
+          run_expected_failure() {
+            local cwd="$1"
+            local test_file="$2"
+            local marker="$3"
+            local label="$4"
+            set +e
+            (cd "$cwd" && node "$test_file") > "$RUNNER_TEMP/${label}.log" 2>&1
+            local status=$?
+            set -e
+            test "$status" -ne 0
+            grep -F "$marker" "$RUNNER_TEMP/${label}.log"
+          }
+
+          run_expected_failure "$BASELINE" tests/fila-store-v2.test.js '4 !== 2' baseline-fila-store
+          run_expected_failure "$PWD" tests/fila-store-v2.test.js '4 !== 2' head-fila-store
+          run_expected_failure "$BASELINE" tests/fila-unica-distributor-executor.test.js 'profiler' baseline-distributor
+          run_expected_failure "$PWD" tests/fila-unica-distributor-executor.test.js 'profiler' head-distributor
+
+          git worktree remove --force "$BASELINE"
+
+      - name: Syntax and encoding gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/fila/fila-manifest-state.repository.js
+          node --check modules/fila/fila-operacional-v2.js
+          node --check tests/fila-viva-idempotencia-stale.test.js
+          npm run audit:encoding
+
+      - name: Final diff check
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check b09d62f874ceaaf89f8e57e0cce7d532e6745ec8...HEAD
