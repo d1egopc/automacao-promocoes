@@ -1,0 +1,71 @@
+name: Storage diagnostic Linux validation
+
+on:
+  push:
+    branches:
+      - validation/storage-diagnostic
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-diagnostic-validation
+  cancel-in-progress: false
+
+jobs:
+  storage-diagnostic:
+    name: Storage diagnostic Node 24
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify base and functional diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=8002753f7bf7dfdc76051459d380815116165d50
+          git cat-file -e "${BASE}^{commit}"
+          expected=$'tests/storage-diagnostico.test.js\nutils/storage.js'
+          actual="$(git diff --name-only "${BASE}...HEAD" | sort)"
+          test "${actual}" = "${expected}"
+          git diff --check "${BASE}...HEAD"
+
+      - name: Syntax and encoding
+        run: |
+          node --check utils/storage.js
+          node --check tests/storage-diagnostico.test.js
+          npm run audit:encoding
+
+      - name: Storage diagnostic gate
+        run: node tests/storage-diagnostico.test.js
+
+      - name: Storage regression gates
+        run: |
+          node tests/storage-write-atomic.test.js
+          node tests/storage-manager.test.js
+          node tests/storage-manager-incremental.test.js
+
+      - name: Queue and checkpoint regression gates
+        run: |
+          node tests/fila-viva-idempotencia-stale.test.js
+          node tests/fila-manifest-state-repository.test.js
+          node tests/fila-checkpoint-recovery.test.js
+
+      - name: Persistence Worker regression gate
+        run: node tests/persistence-worker-observability.test.js
