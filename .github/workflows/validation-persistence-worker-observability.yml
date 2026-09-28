@@ -1,0 +1,91 @@
+name: Persistence Worker observability validation
+
+on:
+  push:
+    branches:
+      - validation/persistence-worker-observability
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persistence-worker-observability-validation
+  cancel-in-progress: false
+
+jobs:
+  linux-node24:
+    name: Linux Node 24 regression and telemetry validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies without lifecycle mutation
+        run: npm ci --ignore-scripts
+
+      - name: Syntax and encoding
+        run: |
+          node --check modules/fila/persistence-coordinator.js
+          node --check modules/fila/fila-manifest-state.repository.js
+          node --check modules/fila/fila-operacional-v2.js
+          node --check tests/persistence-worker-observability.test.js
+          npm run audit:encoding
+
+      - name: Persistence Worker and manifest suites
+        run: |
+          node tests/persistence-worker-observability.test.js
+          node tests/persistence-worker-phase1.test.js
+          node tests/persistence-worker-multiworkspace.test.js
+          node tests/persistence-worker-multiworkspace-representative.test.js
+          node tests/persistence-worker-crash-matrix.test.js
+          node tests/fila-manifest-state-repository.test.js
+          node tests/fila-checkpoint-recovery.test.js
+          node tests/fila-checkpoint-entrega-funcional.test.js
+          node tests/fila-terminal-guard-legado.test.js
+
+      - name: Existing integration suites
+        run: |
+          node tests/demand-scheduler-v1.test.js
+          node tests/solenoide-v1.test.js
+          node tests/solenoide-importer-observability.test.js
+          node tests/solenoide-radar-config.test.js
+          node tests/teleradar-operational-control.test.js
+          node tests/teleradar-control-plane.test.js
+          node tests/engine-fanout-universal-v2.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/ofc-workspace-temporal.test.js
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/dynamic-link-resolvers.test.js
+
+      - name: Confirm historical failures remain unchanged
+        shell: bash
+        run: |
+          set +e
+          node tests/fila-store-v2.test.js > /tmp/fila-store-v2.out 2>&1
+          fila_status=$?
+          node tests/fila-unica-distributor-executor.test.js > /tmp/fila-unica.out 2>&1
+          distributor_status=$?
+          set -e
+          test "$fila_status" -ne 0
+          grep -Fq "4 !== 2" /tmp/fila-store-v2.out
+          test "$distributor_status" -ne 0
+          grep -Fq "profiler" /tmp/fila-unica.out
+
+      - name: Diff check against production base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e e706c2a0e6c757cc36c54d664258e190745a0bdf^{commit}
+          git diff --check e706c2a0e6c757cc36c54d664258e190745a0bdf...HEAD
