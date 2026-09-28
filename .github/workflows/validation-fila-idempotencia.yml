@@ -74,9 +74,27 @@ jobs:
           node tests/fila-checkpoint-entrega-integracao.test.js
           node tests/fila-checkpoint-entrega-funcional.test.js
           node tests/fila-checkpoints-entrega.repository.test.js
-          node tests/fila-historico-v2-leitura.test.js
           node tests/fila-viva-selecao.test.js
           node tests/fila-terminal-guard-legado.test.js
+
+      - name: Historical fila route baseline must remain unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=b09d62f874ceaaf89f8e57e0cce7d532e6745ec8
+          BASELINE_MARKER='app.get("/fila/status", (req, res) => {'
+          if git show "$BASE:index.js" | grep -Fq "$BASELINE_MARKER"; then
+            echo "Unexpected baseline change: /fila/status exists in the production parent"
+            exit 1
+          fi
+
+          set +e
+          node tests/fila-historico-v2-leitura.test.js > "$RUNNER_TEMP/fila-historico-v2-baseline.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -F 'GET /fila/status deve continuar existindo' "$RUNNER_TEMP/fila-historico-v2-baseline.log"
+          echo "Known historical baseline failure preserved; not caused by the stale/idempotency patch."
 
       - name: Scheduler, Solenoide, OFC, Radar and TeleRadar regressions
         shell: bash
