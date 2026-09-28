@@ -3412,8 +3412,9 @@ function prepararCheckpointLegadoTempV2Legado(clienteId = "admin", checkpointRev
   }
 }
 
-function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision = "") {
-  if (!persistenciaCheckpointV2.enabled()) {
+function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision = "", opcoes = {}) {
+  const persistenceMode = opcoes.persistenceMode || persistenciaCheckpointV2.modeFor(clienteId);
+  if (persistenceMode !== "worker") {
     return prepararCheckpointLegadoTempV2Legado(clienteId, checkpointRevision);
   }
 
@@ -3422,7 +3423,8 @@ function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision 
       clienteId,
       checkpointRevision,
       dataDir: process.env.DATA_DIR || "/data",
-      nowMs: Date.now()
+      nowMs: Date.now(),
+      persistenceMode
     });
     if (resultado?.ok !== true) return resultado;
 
@@ -3435,7 +3437,8 @@ function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision 
       await persistenciaCheckpointV2.cleanup({
         clienteId,
         checkpointRevision,
-        dataDir: process.env.DATA_DIR || "/data"
+        dataDir: process.env.DATA_DIR || "/data",
+        persistenceMode
       });
       return {
         ok: false,
@@ -3443,7 +3446,7 @@ function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision 
         motivoDetalhado: revisao.motivo
       };
     }
-    return resultado;
+    return { ...resultado, persistenceMode: "worker" };
   })();
 }
 
@@ -3595,7 +3598,8 @@ function publicarCheckpointLegadoTempV2Legado(clienteId = "admin", dados = {}) {
 }
 
 function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
-  if (!persistenciaCheckpointV2.enabled()) {
+  const persistenceMode = dados.persistenceMode || persistenciaCheckpointV2.modeFor(clienteId);
+  if (persistenceMode !== "worker") {
     return publicarCheckpointLegadoTempV2Legado(clienteId, dados);
   }
 
@@ -3606,7 +3610,8 @@ function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
       targetGeneration: dados.targetGeneration,
       tempIdentity: dados.tempIdentity,
       expectedSourceRevisions: dados.expectedSourceRevisions,
-      dataDir: process.env.DATA_DIR || "/data"
+      dataDir: process.env.DATA_DIR || "/data",
+      persistenceMode
     });
     if (resultado?.ok !== true) return resultado;
 
@@ -3622,12 +3627,14 @@ function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
         motivoDetalhado: revisao.motivo
       };
     }
-    return resultado;
+    return { ...resultado, persistenceMode: "worker" };
   })();
 }
 
 async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
   const cliente = String(clienteId || "admin");
+  const persistenceMode = persistenciaCheckpointV2.modeFor(cliente);
+  const workerAtivo = persistenceMode === "worker";
   const agora = Date.now();
   const decisao = checkpointFilaV2.iniciarCheckpoint(cliente, {
     agora,
@@ -3650,7 +3657,7 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
   }
 
   const inicio = Date.now();
-  const mergeAntesCheckpoint = persistenciaCheckpointV2.enabled()
+  const mergeAntesCheckpoint = workerAtivo
     ? { ok: true, pulou: true, motivo: "worker_authoritative_file_merge" }
     : aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
         recovery: false
@@ -3671,16 +3678,14 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
     ? targetDb.targetGeneration || 0
     : manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
   const checkpointTemp = targetDb.ok === true
-    ? (persistenciaCheckpointV2.enabled()
-      ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision)
-      : prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision))
+    ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision, { persistenceMode })
     : { ok: false, motivo: "checkpoint_db_indisponivel" };
   const salvou = checkpointTemp.ok === true
     ? true
     : (
         targetDb.ok === true
           ? false
-          : persistenciaCheckpointV2.enabled()
+          : workerAtivo
             ? false
             : salvarFila(cliente, {
               motivo: `fila_v2_2c_${decisao.motivo || motivo}`,
@@ -3704,7 +3709,8 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
               tempIdentity: checkpointTemp.tempIdentity,
               expectedSourceRevisions: checkpointTemp.sourceRevisions,
               targetGeneration,
-              checkpointRevision
+              checkpointRevision,
+              persistenceMode
             })
           }, {
             agora: Date.now(),
@@ -3718,7 +3724,7 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
             logger: console
           });
     } catch (erroCheckpoint) {
-      if (persistenciaCheckpointV2.enabled()) {
+      if (workerAtivo) {
         checkpointDuravel = {
           ok: false,
           motivo: "checkpoint_worker_confirm_error",
@@ -3727,17 +3733,19 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
         await persistenciaCheckpointV2.cleanup({
           clienteId: cliente,
           checkpointRevision: targetDb.checkpointRevision,
-          dataDir: process.env.DATA_DIR || "/data"
+          dataDir: process.env.DATA_DIR || "/data",
+          persistenceMode
         });
       } else {
         throw erroCheckpoint;
       }
     }
-    if (persistenciaCheckpointV2.enabled() && checkpointTemp.ok === true && checkpointDuravel?.ok === false) {
+    if (workerAtivo && checkpointTemp.ok === true && checkpointDuravel?.ok === false) {
       await persistenciaCheckpointV2.cleanup({
         clienteId: cliente,
         checkpointRevision: targetDb.checkpointRevision,
-        dataDir: process.env.DATA_DIR || "/data"
+        dataDir: process.env.DATA_DIR || "/data",
+        persistenceMode
       });
     }
     const estado = checkpointFilaV2.concluirCheckpoint(cliente, {
@@ -3789,7 +3797,7 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
 
   const motivoFalhaCheckpoint = checkpointTemp.ok === false && targetDb.ok === true
     ? checkpointTemp.motivo
-    : persistenciaCheckpointV2.enabled()
+    : workerAtivo
       ? targetDb.motivo || "checkpoint_worker_indisponivel"
       : erroSalvarFilaCliente(cliente).motivo;
   const estadoFalha = checkpointFilaV2.concluirCheckpoint(cliente, {

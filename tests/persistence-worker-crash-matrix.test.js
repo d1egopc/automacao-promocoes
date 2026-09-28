@@ -24,6 +24,7 @@ function env(root, timeout = 2000) {
     ...process.env,
     DATA_DIR: root,
     FILA_PERSISTENCE_WORKER: "1",
+    FILA_PERSISTENCIA_CANARY_CLIENTES: "workspace-crash-matrix",
     FILA_PERSISTENCE_WORKER_TIMEOUT_MS: String(timeout)
   };
 }
@@ -100,7 +101,8 @@ async function runTempWriteFailure(root, fixtureData) {
       dataDir: root
     });
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(coordinator.getState().circuitOpen, true);
+    assert.strictEqual(coordinator.getState().circuitOpen, false);
+    assert.strictEqual(Object.values(coordinator.getState().circuitByWorkspace).some(Boolean), true);
     assert.strictEqual(fs.existsSync(fixtureData.fila), true);
   } finally {
     await coordinator.shutdown();

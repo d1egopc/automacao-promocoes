@@ -37,6 +37,7 @@ async function main() {
     ...process.env,
     DATA_DIR: root,
     FILA_PERSISTENCE_WORKER: "1",
+    FILA_PERSISTENCIA_CANARY_CLIENTES: "workspace-a,workspace-b",
     FILA_PERSISTENCE_WORKER_TIMEOUT_MS: "30000"
   };
   const coordenador = criarCoordenadorPersistencia({ env, logger: { log() {} } });
@@ -181,7 +182,8 @@ async function main() {
       dataDir: invalidRoot
     });
     assert.strictEqual(falha.ok, false);
-    assert.strictEqual(invalid.getState().circuitOpen, true);
+    assert.strictEqual(invalid.getState().circuitOpen, false);
+    assert.strictEqual(Object.values(invalid.getState().circuitByWorkspace).some(Boolean), true);
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(invalidRoot, "clientes", clienteId, "fila.json"), "utf8")), fixture.legado);
   } finally {
     await invalid.shutdown();

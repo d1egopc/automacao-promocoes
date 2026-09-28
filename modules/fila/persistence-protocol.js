@@ -38,6 +38,62 @@ function flagWorkerAtiva(env = process.env) {
   return ["1", "true", "on", "yes"].includes(valor);
 }
 
+function parseCanaryClientes(env = process.env) {
+  const bruto = texto(env?.FILA_PERSISTENCIA_CANARY_CLIENTES || "");
+  if (!bruto) {
+    return {
+      valido: false,
+      clientes: [],
+      motivo: "worker_global_enabled_but_no_canary"
+    };
+  }
+
+  let valores;
+  try {
+    valores = bruto.startsWith("[") ? JSON.parse(bruto) : bruto.split(",");
+  } catch {
+    return { valido: false, clientes: [], motivo: "worker_canary_invalid" };
+  }
+  if (!Array.isArray(valores) || !valores.length) {
+    return { valido: false, clientes: [], motivo: "worker_canary_invalid" };
+  }
+
+  const clientes = [];
+  for (const valor of valores) {
+    const cliente = texto(valor);
+    if (!cliente || cliente === "*" || cliente.includes("*") || cliente.includes("..")) {
+      return { valido: false, clientes: [], motivo: "worker_canary_invalid" };
+    }
+    try {
+      const seguro = workspaceSeguro(cliente);
+      if (!clientes.includes(seguro)) clientes.push(seguro);
+    } catch {
+      return { valido: false, clientes: [], motivo: "worker_canary_invalid" };
+    }
+  }
+  if (!clientes.length) return { valido: false, clientes: [], motivo: "worker_canary_invalid" };
+  return { valido: true, clientes, motivo: "worker_canary_configured" };
+}
+
+function decisaoPersistenciaWorkspace(env = process.env, clienteId = "admin") {
+  const cliente = workspaceSeguro(clienteId);
+  if (!flagWorkerAtiva(env)) {
+    return { mode: "legacy", clienteId: cliente, motivo: "worker_global_disabled" };
+  }
+  const canary = parseCanaryClientes(env);
+  if (!canary.valido) {
+    return { mode: "legacy", clienteId: cliente, motivo: canary.motivo, canary };
+  }
+  if (!canary.clientes.includes(cliente)) {
+    return { mode: "legacy", clienteId: cliente, motivo: "worker_canary_not_listed", canary };
+  }
+  return { mode: "worker", clienteId: cliente, motivo: "worker_canary_match", canary };
+}
+
+function modoPersistenciaWorkspace(env = process.env, clienteId = "admin") {
+  return decisaoPersistenciaWorkspace(env, clienteId).mode;
+}
+
 function timeoutWorkerMs(env = process.env) {
   const valor = Number(env?.FILA_PERSISTENCE_WORKER_TIMEOUT_MS || 120000);
   return Number.isFinite(valor) && valor >= 1000 ? Math.floor(valor) : 120000;
@@ -76,6 +132,9 @@ module.exports = {
   revisionSegura,
   normalizarDataDir,
   flagWorkerAtiva,
+  parseCanaryClientes,
+  decisaoPersistenciaWorkspace,
+  modoPersistenciaWorkspace,
   timeoutWorkerMs,
   jobId,
   erroSanitizado,

@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { Worker } = require("worker_threads");
@@ -8,8 +9,8 @@ const {
   OP_PUBLISH,
   OP_CLEANUP,
   RESPONSE_OK,
-  RESPONSE_ERROR,
   flagWorkerAtiva,
+  decisaoPersistenciaWorkspace,
   timeoutWorkerMs,
   normalizarDataDir,
   workspaceSeguro,
@@ -23,8 +24,31 @@ function agoraMs() {
   return Date.now();
 }
 
-function rejeicao(motivo, detalhe = "") {
-  return { ok: false, motivo, motivoDetalhado: detalhe || motivo };
+function rejeicao(motivo, detalhe = "", extras = {}) {
+  return { ok: false, motivo, motivoDetalhado: detalhe || motivo, ...extras };
+}
+
+function numeroLimite(env, chave, padrao) {
+  const valor = Number(env?.[chave]);
+  return Number.isFinite(valor) && valor > 0 ? Math.floor(valor) : padrao;
+}
+
+function hashWorkspace(workspace) {
+  return crypto.createHash("sha256").update(String(workspace)).digest("hex").slice(0, 12);
+}
+
+function erroGlobalWorker(motivo = "") {
+  return new Set([
+    "worker_error",
+    "worker_exit",
+    "worker_timeout",
+    "worker_post_message_error",
+    "worker_terminated_for_test",
+    "WORKER_BUSY",
+    "persistence_job_invalido",
+    "persistence_operation_invalida",
+    "persistence_worker_parent_port_indisponivel"
+  ]).has(String(motivo));
 }
 
 function criarCoordenadorPersistencia(opcoes = {}) {
@@ -33,18 +57,34 @@ function criarCoordenadorPersistencia(opcoes = {}) {
   const workerPath = opcoes.workerPath || path.join(__dirname, "persistence-worker.js");
   const estado = {
     worker: null,
-    fila: [],
+    workerEnding: null,
+    lanes: new Map(),
+    readyWorkspaces: [],
+    readySet: new Set(),
     ativo: null,
     seq: 0,
     aberto: false,
     falhas: 0,
     ultimaFalha: null,
     encerrando: false,
-    signalHandlers: []
+    signalHandlers: [],
+    backpressureRejections: 0,
+    loggedRoutingReasons: new Set(),
+    completedByWorkspace: new Map(),
+    maxQueueWaitByWorkspace: new Map(),
+    errorsByWorkspace: new Map()
   };
 
-  function ativo() {
+  function globalAtivo() {
     return flagWorkerAtiva(env);
+  }
+
+  function decisao(clienteId = "admin") {
+    return decisaoPersistenciaWorkspace(env, clienteId);
+  }
+
+  function modoFor(clienteId = "admin") {
+    return decisao(clienteId).mode;
   }
 
   function log(payload = {}) {
@@ -53,24 +93,85 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     } catch {}
   }
 
-  function estadoPublico() {
-    return {
-      enabled: ativo(),
-      workerCreated: Boolean(estado.worker),
-      busy: Boolean(estado.ativo),
-      queued: estado.fila.length,
-      circuitOpen: estado.aberto,
-      failures: estado.falhas,
-      lastFailure: estado.ultimaFalha
-    };
+  function logRoteamento(decisaoAtual) {
+    if (decisaoAtual.motivo === "worker_canary_match") return;
+    if (estado.loggedRoutingReasons.has(decisaoAtual.motivo)) return;
+    estado.loggedRoutingReasons.add(decisaoAtual.motivo);
+    log({ evento: decisaoAtual.motivo });
   }
 
-  function rejeitarFila(motivo) {
-    const pendentes = estado.fila.splice(0);
-    for (const item of pendentes) item.reject(rejeicao(motivo));
+  function obterLane(clienteId, criar = true) {
+    const cliente = workspaceSeguro(clienteId);
+    let lane = estado.lanes.get(cliente);
+    if (!lane && criar) {
+      lane = {
+        clienteId: cliente,
+        workspaceKey: hashWorkspace(cliente),
+        fila: [],
+        circuitoAberto: false,
+        falhas: 0,
+        ultimaFalha: null,
+        bytesPendentes: 0
+      };
+      estado.lanes.set(cliente, lane);
+    }
+    return lane;
   }
 
-  function abrirCircuito(motivo, erro = null) {
+  function profundidadeLane(lane) {
+    return lane.fila.length + (estado.ativo?.lane === lane ? 1 : 0);
+  }
+
+  function profundidadeGlobal() {
+    let total = estado.ativo ? 1 : 0;
+    for (const lane of estado.lanes.values()) total += lane.fila.length;
+    return total;
+  }
+
+  function bytesPendentesGlobal() {
+    let total = Number(estado.ativo?.bytesEstimados || 0);
+    for (const lane of estado.lanes.values()) total += lane.bytesPendentes;
+    return total;
+  }
+
+  function estimarBytes(job) {
+    return Buffer.byteLength(JSON.stringify({
+      operation: job.operation,
+      clienteId: job.clienteId,
+      checkpointRevision: job.checkpointRevision,
+      targetGeneration: job.targetGeneration,
+      expectedSourceRevisions: job.expectedSourceRevisions,
+      tempIdentity: job.tempIdentity,
+      dataDir: job.dataDir,
+      nowMs: job.nowMs
+    }), "utf8");
+  }
+
+  function marcarPronto(lane) {
+    if (!lane || !lane.fila.length || lane.circuitoAberto) return;
+    if (estado.readySet.has(lane.clienteId)) return;
+    estado.readySet.add(lane.clienteId);
+    estado.readyWorkspaces.push(lane.clienteId);
+  }
+
+  function rejeitarFilaLane(lane, motivo) {
+    if (!lane) return;
+    const pendentes = lane.fila.splice(0);
+    lane.bytesPendentes = 0;
+    estado.readySet.delete(lane.clienteId);
+    for (const item of pendentes) {
+      item.resolve(rejeicao(motivo, motivo, {
+        persistenceMode: "worker",
+        workspaceKey: lane.workspaceKey
+      }));
+    }
+  }
+
+  function rejeitarFilas(motivo) {
+    for (const lane of estado.lanes.values()) rejeitarFilaLane(lane, motivo);
+  }
+
+  function registrarFalhaGlobal(motivo, erro = null) {
     estado.aberto = true;
     estado.falhas += 1;
     estado.ultimaFalha = {
@@ -78,8 +179,69 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       erro: erroSanitizado(erro || {}),
       em: new Date().toISOString()
     };
-    log({ estado: "circuit_open", motivo, falhas: estado.falhas });
-    rejeitarFila(motivo);
+    log({ estado: "circuit_open", escopo: "global", motivo, falhas: estado.falhas });
+    rejeitarFilas(motivo);
+  }
+
+  function registrarFalhaLocal(lane, motivo, erro = null) {
+    if (!lane) return;
+    lane.circuitoAberto = true;
+    lane.falhas += 1;
+    lane.ultimaFalha = {
+      motivo,
+      erro: erroSanitizado(erro || {}),
+      em: new Date().toISOString()
+    };
+    estado.errorsByWorkspace.set(lane.workspaceKey, (estado.errorsByWorkspace.get(lane.workspaceKey) || 0) + 1);
+    log({
+      estado: "circuit_open",
+      escopo: "workspace",
+      workspaceKey: lane.workspaceKey,
+      motivo,
+      falhas: lane.falhas
+    });
+    rejeitarFilaLane(lane, motivo);
+  }
+
+  function estadoPublico() {
+    const queueDepthByWorkspace = {};
+    const circuitByWorkspace = {};
+    const lanes = [];
+    for (const lane of estado.lanes.values()) {
+      queueDepthByWorkspace[lane.workspaceKey] = profundidadeLane(lane);
+      circuitByWorkspace[lane.workspaceKey] = lane.circuitoAberto;
+      lanes.push({
+        workspaceKey: lane.workspaceKey,
+        queued: lane.fila.length,
+        queueDepth: profundidadeLane(lane),
+        circuitOpen: lane.circuitoAberto,
+        failures: lane.falhas,
+        lastFailure: lane.ultimaFalha
+      });
+    }
+    const completedByWorkspace = Object.fromEntries(estado.completedByWorkspace);
+    const maxQueueWaitByWorkspace = Object.fromEntries(estado.maxQueueWaitByWorkspace);
+    const errorsByWorkspace = Object.fromEntries(estado.errorsByWorkspace);
+    return {
+      enabled: globalAtivo(),
+      workerCreated: Boolean(estado.worker),
+      busy: Boolean(estado.ativo),
+      queued: estado.lanes.size ? [...estado.lanes.values()].reduce((total, lane) => total + lane.fila.length, 0) : 0,
+      queueDepthGlobal: profundidadeGlobal(),
+      queueDepthByWorkspace,
+      pendingBytes: bytesPendentesGlobal(),
+      circuitOpen: estado.aberto,
+      globalCircuitOpen: estado.aberto,
+      circuitByWorkspace,
+      failures: estado.falhas,
+      lastFailure: estado.ultimaFalha,
+      backpressureRejections: estado.backpressureRejections,
+      completedByWorkspace,
+      maxQueueWaitByWorkspace,
+      errorsByWorkspace,
+      retries: 0,
+      lanes
+    };
   }
 
   function instalarSinais() {
@@ -111,11 +273,39 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       clearTimeout(atual.timer);
       estado.ativo = null;
       if (mensagem.type === RESPONSE_OK) {
-        log({ evento: "job_ok", operacao: atual.job.operation, jobId: atual.job.jobId, ...(mensagem.result?.metrics || {}) });
-        atual.resolve(mensagem.result);
+        const queueWaitMs = Math.max(0, agoraMs() - Number(atual.job.queuedAt || agoraMs()));
+        const previousMaxWait = estado.maxQueueWaitByWorkspace.get(atual.lane.workspaceKey) || 0;
+        estado.maxQueueWaitByWorkspace.set(atual.lane.workspaceKey, Math.max(previousMaxWait, queueWaitMs));
+        estado.completedByWorkspace.set(
+          atual.lane.workspaceKey,
+          (estado.completedByWorkspace.get(atual.lane.workspaceKey) || 0) + 1
+        );
+        log({
+          evento: "job_ok",
+          operacao: atual.job.operation,
+          jobKey: hashWorkspace(atual.job.jobId),
+          workspaceKey: atual.lane.workspaceKey,
+          queueWaitMs,
+          ...(mensagem.result?.metrics || {})
+        });
+        atual.resolve({
+          ...(mensagem.result || {}),
+          persistenceMode: "worker",
+          workspaceKey: atual.lane.workspaceKey,
+          coordinatorMetrics: { queueWaitMs }
+        });
       } else {
-        abrirCircuito(mensagem.error?.code || "worker_job_failed", mensagem.error);
-        atual.resolve(rejeicao(mensagem.error?.code || "worker_job_failed", mensagem.error?.message));
+        const motivo = mensagem.error?.code || "worker_job_failed";
+        if (erroGlobalWorker(motivo)) {
+          estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
+          registrarFalhaGlobal(motivo, mensagem.error);
+        } else {
+          registrarFalhaLocal(atual.lane, motivo, mensagem.error);
+        }
+        atual.resolve(rejeicao(motivo, mensagem.error?.message, {
+          persistenceMode: "worker",
+          workspaceKey: atual.lane.workspaceKey
+        }));
       }
       bombear();
     });
@@ -124,69 +314,102 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       if (atual) {
         clearTimeout(atual.timer);
         estado.ativo = null;
-        atual.resolve(rejeicao("worker_error", erro?.message));
+        atual.resolve(rejeicao("worker_error", erro?.message, {
+          persistenceMode: "worker",
+          workspaceKey: atual.lane.workspaceKey
+        }));
       }
-      abrirCircuito("worker_error", erro);
-      void encerrarWorker();
+      registrarFalhaGlobal("worker_error", erro);
+      void encerrarWorker(worker);
     });
     worker.on("exit", code => {
-      const inesperado = !estado.encerrando;
+      const esperado = estado.encerrando || estado.workerEnding === worker;
+      if (estado.worker === worker) estado.worker = null;
+      if (estado.workerEnding === worker) estado.workerEnding = null;
       const atual = estado.ativo;
-      estado.worker = null;
-      if (atual) {
+      if (atual && atual.worker === worker) {
         clearTimeout(atual.timer);
         estado.ativo = null;
-        atual.resolve(rejeicao(inesperado ? "worker_exit" : "worker_terminated"));
+        atual.resolve(rejeicao(esperado ? "worker_terminated" : "worker_exit", "", {
+          persistenceMode: "worker",
+          workspaceKey: atual.lane.workspaceKey
+        }));
       }
-      if (inesperado) abrirCircuito("worker_exit", { code });
-      if (!estado.encerrando) rejeitarFila("worker_exit");
+      if (!esperado) {
+        registrarFalhaGlobal("worker_exit", { code });
+        rejeitarFilas("worker_exit");
+      }
+      bombear();
     });
     return worker;
   }
 
-  async function encerrarWorker() {
-    const worker = estado.worker;
-    estado.worker = null;
+  async function encerrarWorker(workerAtual = estado.worker) {
+    const worker = workerAtual;
     if (!worker) return;
+    if (estado.worker === worker) estado.worker = null;
+    estado.workerEnding = worker;
     try { await worker.terminate(); } catch {}
+    if (estado.workerEnding === worker) estado.workerEnding = null;
+  }
+
+  function proximoItem() {
+    while (estado.readyWorkspaces.length) {
+      const cliente = estado.readyWorkspaces.shift();
+      estado.readySet.delete(cliente);
+      const lane = estado.lanes.get(cliente);
+      if (!lane || lane.circuitoAberto || !lane.fila.length) continue;
+      const item = lane.fila.shift();
+      lane.bytesPendentes = Math.max(0, lane.bytesPendentes - item.bytesEstimados);
+      if (lane.fila.length) marcarPronto(lane);
+      return item;
+    }
+    return null;
   }
 
   function bombear() {
-    if (estado.ativo || estado.encerrando || !estado.fila.length) return;
-    if (estado.aberto) {
-      rejeitarFila("persistence_worker_circuit_open");
-      return;
-    }
-    const atual = estado.fila.shift();
+    if (estado.ativo || estado.encerrando || estado.aberto) return;
+    const atual = proximoItem();
+    if (!atual) return;
     const worker = criarWorker();
     if (!worker) {
-      atual.resolve(rejeicao("worker_encerrando"));
+      atual.resolve(rejeicao("worker_encerrando", "", {
+        persistenceMode: "worker",
+        workspaceKey: atual.lane.workspaceKey
+      }));
       return;
     }
     const timeout = timeoutWorkerMs(env);
     const timer = setTimeout(() => {
       if (!estado.ativo || estado.ativo.job.jobId !== atual.job.jobId) return;
       estado.ativo = null;
-      abrirCircuito("worker_timeout");
-      atual.resolve(rejeicao("worker_timeout"));
-      void encerrarWorker();
+      registrarFalhaGlobal("worker_timeout");
+      atual.resolve(rejeicao("worker_timeout", "", {
+        persistenceMode: "worker",
+        workspaceKey: atual.lane.workspaceKey
+      }));
+      void encerrarWorker(worker);
+      bombear();
     }, timeout);
-    estado.ativo = { ...atual, timer };
+    atual.job.queuedAt = Number(atual.job.queuedAt || agoraMs());
+    atual.job.startedAt = agoraMs();
+    estado.ativo = { ...atual, worker, timer };
     try {
       worker.postMessage(atual.job);
     } catch (erro) {
       clearTimeout(timer);
       estado.ativo = null;
-      abrirCircuito("worker_post_message_error", erro);
-      atual.resolve(rejeicao("worker_post_message_error", erro?.message));
-      void encerrarWorker();
+      registrarFalhaGlobal("worker_post_message_error", erro);
+      atual.resolve(rejeicao("worker_post_message_error", erro?.message, {
+        persistenceMode: "worker",
+        workspaceKey: atual.lane.workspaceKey
+      }));
+      void encerrarWorker(worker);
+      bombear();
     }
   }
 
   function enfileirar(operation, payload = {}) {
-    if (!ativo()) return Promise.resolve(rejeicao("persistence_worker_disabled"));
-    if (estado.encerrando) return Promise.resolve(rejeicao("persistence_worker_shutting_down"));
-    if (estado.aberto) return Promise.resolve(rejeicao("persistence_worker_circuit_open"));
     let workspace;
     let revision;
     try {
@@ -194,6 +417,25 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       revision = revisionSegura(payload.checkpointRevision);
     } catch (erro) {
       return Promise.resolve(rejeicao(erro.message || "payload_invalido"));
+    }
+    const persistenceMode = payload.persistenceMode || modoFor(workspace);
+    const route = payload.persistenceMode ? { mode: persistenceMode, motivo: "checkpoint_mode_pinned" } : decisao(workspace);
+    if (persistenceMode !== "worker") {
+      logRoteamento(route);
+      return Promise.resolve(rejeicao(
+        globalAtivo() ? "persistence_worker_canary_not_selected" : "persistence_worker_disabled",
+        route.motivo,
+        { persistenceMode: "legacy", workspaceKey: hashWorkspace(workspace) }
+      ));
+    }
+    if (estado.encerrando) return Promise.resolve(rejeicao("persistence_worker_shutting_down"));
+    if (estado.aberto) return Promise.resolve(rejeicao("persistence_worker_circuit_open"));
+    const lane = obterLane(workspace);
+    if (lane.circuitoAberto) {
+      return Promise.resolve(rejeicao("persistence_worker_workspace_circuit_open", "", {
+        persistenceMode: "worker",
+        workspaceKey: lane.workspaceKey
+      }));
     }
     const seq = ++estado.seq;
     const job = {
@@ -205,10 +447,35 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       expectedSourceRevisions: payload.expectedSourceRevisions || undefined,
       tempIdentity: payload.tempIdentity || undefined,
       dataDir: normalizarDataDir(payload.dataDir || env.DATA_DIR || "/data"),
-      nowMs: Number(payload.nowMs) || agoraMs()
+      nowMs: Number(payload.nowMs) || agoraMs(),
+      persistenceMode: "worker",
+      queuedAt: agoraMs()
     };
+    const bytesEstimados = estimarBytes(job);
+    const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);
+    const maxWorkspace = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS_WORKSPACE", 25);
+    const maxBytes = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_BYTES", 8 * 1024 * 1024);
+    const maxWorkspaceBytes = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_BYTES_WORKSPACE", 1024 * 1024);
+    if (
+      profundidadeGlobal() >= maxGlobal ||
+      profundidadeLane(lane) >= maxWorkspace ||
+      bytesPendentesGlobal() + bytesEstimados > maxBytes ||
+      lane.bytesPendentes + bytesEstimados > maxWorkspaceBytes
+    ) {
+      estado.backpressureRejections += 1;
+      return Promise.resolve(rejeicao("persistence_worker_backpressure_retryable", "fila_persistencia_backpressure", {
+        retryable: true,
+        persistenceMode: "worker",
+        workspaceKey: lane.workspaceKey,
+        queueDepthGlobal: profundidadeGlobal(),
+        queueDepthWorkspace: profundidadeLane(lane)
+      }));
+    }
     return new Promise(resolve => {
-      estado.fila.push({ job, resolve, reject: resolve });
+      const item = { job, resolve, reject: resolve, lane, bytesEstimados };
+      lane.fila.push(item);
+      lane.bytesPendentes += bytesEstimados;
+      marcarPronto(lane);
       bombear();
     });
   }
@@ -259,7 +526,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
 
   async function shutdown({ timeoutMs = timeoutWorkerMs(env) } = {}) {
     estado.encerrando = true;
-    rejeitarFila("persistence_worker_shutdown");
+    rejeitarFilas("persistence_worker_shutdown");
     const started = agoraMs();
     while (estado.ativo && agoraMs() - started < timeoutMs) {
       await new Promise(resolve => setTimeout(resolve, 25));
@@ -275,18 +542,28 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     return { ok: true };
   }
 
-  function recover() {
-    if (estado.ativo || estado.fila.length || estado.worker) {
-      return rejeicao("persistence_worker_recovery_busy");
+  function recover(clienteId = null) {
+    if (estado.ativo) return rejeicao("persistence_worker_recovery_busy");
+    if (clienteId) {
+      let lane;
+      try { lane = obterLane(clienteId, false); } catch { return rejeicao("workspace_invalido"); }
+      if (!lane || lane.fila.length || estado.worker) return rejeicao("persistence_worker_recovery_busy");
+      lane.circuitoAberto = false;
+      lane.ultimaFalha = null;
+      log({ estado: "circuit_recovery_manual", escopo: "workspace", workspaceKey: lane.workspaceKey });
+      return { ok: true, motivo: "persistence_worker_recovery_manual", persistenceMode: "worker" };
     }
+    if (estado.readyWorkspaces.length || estado.worker) return rejeicao("persistence_worker_recovery_busy");
     estado.aberto = false;
     estado.ultimaFalha = null;
-    log({ estado: "circuit_recovery_manual" });
+    log({ estado: "circuit_recovery_manual", escopo: "global" });
     return { ok: true, motivo: "persistence_worker_recovery_manual" };
   }
 
   return {
-    enabled: ativo,
+    enabled: globalAtivo,
+    enabledFor: clienteId => modoFor(clienteId) === "worker",
+    modeFor: modoFor,
     getState: estadoPublico,
     prepare: payload => enfileirar(OP_PREPARE, payload),
     publish: payload => enfileirar(OP_PUBLISH, payload),
@@ -294,10 +571,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     revalidarSources,
     shutdown,
     recover,
-    // Exclusivo para testes/diagnóstico local; não é usado pelo fluxo produtivo.
     terminateForTest: async () => {
       if (estado.worker) await encerrarWorker();
-      abrirCircuito("worker_terminated_for_test");
+      registrarFalhaGlobal("worker_terminated_for_test");
     }
   };
 }

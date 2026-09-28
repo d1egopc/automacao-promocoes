@@ -99,6 +99,7 @@ async function workerMeasure(fixture, root, sequence) {
     ...process.env,
     DATA_DIR: root,
     FILA_PERSISTENCE_WORKER: "1",
+    FILA_PERSISTENCIA_CANARY_CLIENTES: fixture.clienteId,
     FILA_PERSISTENCIA_DIAGNOSTICO_MEMORIA: "1",
     FILA_PERSISTENCE_WORKER_TIMEOUT_MS: "300000"
   };
