@@ -8,6 +8,7 @@ const {
   OP_PUBLISH,
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
+  OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
   RESPONSE_ERROR,
   workspaceSeguro,
@@ -20,7 +21,7 @@ const {
   lerArrayJsonIncremental,
   escreverArrayJsonIncremental
 } = require("./json-array-incremental");
-const { construirTerminalIndex } = require("./terminal-index-worker");
+const { construirTerminalIndex, construirTerminalIndexDelta } = require("./terminal-index-worker");
 
 let filaOperacionalV2 = null;
 
@@ -353,6 +354,19 @@ async function executar(job) {
         ok: false,
         operation: OP_TERMINAL_INDEX_BOOTSTRAP,
         motivo: erro?.code || "terminal_index_bootstrap_failed",
+        erro: erroSanitizado(erro)
+      };
+    }
+  }
+  if (job.operation === OP_TERMINAL_INDEX_DELTA) {
+    const dataDir = normalizarDataDir(job.dataDir);
+    try {
+      return construirTerminalIndexDelta(job, { operacional: obterFilaOperacionalV2(dataDir) });
+    } catch (erro) {
+      return {
+        ok: false,
+        operation: OP_TERMINAL_INDEX_DELTA,
+        motivo: erro?.code || "terminal_index_delta_failed",
         erro: erroSanitizado(erro)
       };
     }

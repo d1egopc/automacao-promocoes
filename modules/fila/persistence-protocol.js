@@ -4,6 +4,7 @@ const OP_PREPARE = "checkpoint_prepare";
 const OP_PUBLISH = "checkpoint_publish";
 const OP_CLEANUP = "checkpoint_cleanup";
 const OP_TERMINAL_INDEX_BOOTSTRAP = "terminal_index_bootstrap";
+const OP_TERMINAL_INDEX_DELTA = "terminal_index_delta";
 
 const RESPONSE_OK = "persistence_result";
 const RESPONSE_ERROR = "persistence_error";
@@ -128,6 +129,7 @@ module.exports = {
   OP_PUBLISH,
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
+  OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
   RESPONSE_ERROR,
   workspaceSeguro,

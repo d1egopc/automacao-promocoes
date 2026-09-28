@@ -1026,6 +1026,10 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
     ...payload,
     dataDir: process.env.DATA_DIR || "/data"
   }),
+  agendarTerminalIndexDelta: payload => persistenciaCheckpointV2.deltaTerminalIndex({
+    ...payload,
+    dataDir: process.env.DATA_DIR || "/data"
+  }),
   logger: console
 });
 const filaV2Shadow = criarControladorFilaV2Shadow({

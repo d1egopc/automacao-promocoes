@@ -9,6 +9,7 @@ const {
   OP_PUBLISH,
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
+  OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
   flagWorkerAtiva,
   decisaoPersistenciaWorkspace,
@@ -20,6 +21,7 @@ const {
   erroSanitizado,
   sameIdentity
 } = require("./persistence-protocol");
+const { registrarManutencaoTerminalIndex } = require("./terminal-index-shadow");
 
 function agoraMs() {
   return Date.now();
@@ -129,7 +131,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         circuitoAberto: false,
         falhas: 0,
         ultimaFalha: null,
-        bytesPendentes: 0
+        bytesPendentes: 0,
+        deltaPending: false,
+        deltaPayload: null
       };
       estado.lanes.set(cliente, lane);
     }
@@ -150,6 +154,24 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     let total = Number(estado.ativo?.bytesEstimados || 0);
     for (const lane of estado.lanes.values()) total += lane.bytesPendentes;
     return total;
+  }
+
+  function ehManutencaoTerminalIndex(operation) {
+    return operation === OP_TERMINAL_INDEX_BOOTSTRAP || operation === OP_TERMINAL_INDEX_DELTA;
+  }
+
+  function existeDeltaAberto(lane) {
+    return estado.ativo?.lane === lane && estado.ativo.job.operation === OP_TERMINAL_INDEX_DELTA ||
+      Boolean(lane?.fila.some(item => item.job.operation === OP_TERMINAL_INDEX_DELTA));
+  }
+
+  function agendarDeltaPendente(lane) {
+    if (!lane?.deltaPending || estado.encerrando || lane.circuitoAberto) return;
+    const payload = lane.deltaPayload;
+    lane.deltaPending = false;
+    lane.deltaPayload = null;
+    if (!payload) return;
+    void enfileirar(OP_TERMINAL_INDEX_DELTA, payload);
   }
 
   function estimarBytes(job) {
@@ -292,13 +314,13 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       estado.ativo = null;
       if (mensagem.type === RESPONSE_OK) {
         const metricas = metricasJob(atual.job);
-        if (atual.job.operation === OP_TERMINAL_INDEX_BOOTSTRAP && mensagem.result?.ok !== true) {
+        if (ehManutencaoTerminalIndex(atual.job.operation) && mensagem.result?.ok !== true) {
           log({
             evento: "job_rejected",
             operacao: atual.job.operation,
             jobKey: hashWorkspace(atual.job.jobId),
             workspaceKey: atual.lane.workspaceKey,
-            motivo: mensagem.result?.motivo || "terminal_index_bootstrap_failed",
+            motivo: mensagem.result?.motivo || "terminal_index_maintenance_failed",
             ...metricas
           });
           atual.resolve({
@@ -307,6 +329,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
             workspaceKey: atual.lane.workspaceKey,
             coordinatorMetrics: metricas
           });
+          agendarDeltaPendente(atual.lane);
           bombear();
           return;
         }
@@ -327,6 +350,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
           ...(mensagem.result?.metrics || {}),
           ...metricas
         });
+        if (atual.job.operation === OP_TERMINAL_INDEX_DELTA && mensagem.result?.ok === true) {
+          registrarManutencaoTerminalIndex(atual.lane.clienteId, "delta_applied");
+        }
         atual.resolve({
           ...(mensagem.result || {}),
           persistenceMode: "worker",
@@ -343,17 +369,26 @@ function criarCoordenadorPersistencia(opcoes = {}) {
           motivo,
           ...metricasJob(atual.job)
         });
-        if (erroGlobalWorker(motivo)) {
-          estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
-          registrarFalhaGlobal(motivo, mensagem.error);
+        if (ehManutencaoTerminalIndex(atual.job.operation)) {
+          // Falha esperada do shadow/delta não abre o circuito da persistência.
+          atual.resolve(rejeicao(motivo, mensagem.error?.message, {
+            persistenceMode: "worker",
+            workspaceKey: atual.lane.workspaceKey
+          }));
         } else {
-          registrarFalhaLocal(atual.lane, motivo, mensagem.error);
+          if (erroGlobalWorker(motivo)) {
+            estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
+            registrarFalhaGlobal(motivo, mensagem.error);
+          } else {
+            registrarFalhaLocal(atual.lane, motivo, mensagem.error);
+          }
+          atual.resolve(rejeicao(motivo, mensagem.error?.message, {
+            persistenceMode: "worker",
+            workspaceKey: atual.lane.workspaceKey
+          }));
         }
-        atual.resolve(rejeicao(motivo, mensagem.error?.message, {
-          persistenceMode: "worker",
-          workspaceKey: atual.lane.workspaceKey
-        }));
       }
+      agendarDeltaPendente(atual.lane);
       bombear();
     });
     worker.on("error", erro => {
@@ -430,7 +465,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     const timer = setTimeout(() => {
       if (!estado.ativo || estado.ativo.job.jobId !== atual.job.jobId) return;
       estado.ativo = null;
-      const terminalIndexShadow = atual.job.operation === OP_TERMINAL_INDEX_BOOTSTRAP;
+      const terminalIndexShadow = ehManutencaoTerminalIndex(atual.job.operation);
       if (terminalIndexShadow) {
         log({
           evento: "job_timeout",
@@ -448,6 +483,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         workspaceKey: atual.lane.workspaceKey
       }));
       void encerrarWorker(worker);
+      agendarDeltaPendente(atual.lane);
       bombear();
     }, timeout);
     atual.job.queuedAt = Number(atual.job.queuedAt || agoraMs());
@@ -510,6 +546,17 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       persistenceMode: "worker",
       queuedAt: agoraMs()
     };
+    if (operation === OP_TERMINAL_INDEX_DELTA && existeDeltaAberto(lane)) {
+      lane.deltaPending = true;
+      lane.deltaPayload = { ...payload, clienteId: workspace, checkpointRevision: revision };
+      return Promise.resolve({
+        ok: true,
+        coalesced: true,
+        operation,
+        persistenceMode: "worker",
+        workspaceKey: lane.workspaceKey
+      });
+    }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);
     const maxWorkspace = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS_WORKSPACE", 25);
@@ -628,6 +675,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     publish: payload => enfileirar(OP_PUBLISH, payload),
     cleanup: payload => enfileirar(OP_CLEANUP, payload),
     bootstrapTerminalIndex: payload => enfileirar(OP_TERMINAL_INDEX_BOOTSTRAP, payload),
+    deltaTerminalIndex: payload => enfileirar(OP_TERMINAL_INDEX_DELTA, payload),
     revalidarSources,
     shutdown,
     recover,

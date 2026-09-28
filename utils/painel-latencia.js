@@ -13,6 +13,7 @@ let cpuAnterior = process.cpuUsage();
 let amostragemIniciada = false;
 let requestSeq = 0;
 let engine = { rodadaId: "", etapa: "inativo" };
+let terminalIndexBootstrapAtivo = false;
 let lagJanelaMaxMs = 0;
 const saltWorkspace = crypto.randomBytes(16);
 
@@ -97,6 +98,10 @@ function alterarEtapaEngine(rodadaId, etapa) {
   engine = { rodadaId: String(rodadaId || "").slice(0, 48), etapa: String(etapa || "inativo").slice(0, 48) };
 }
 
+function definirTerminalIndexBootstrapAtivo(ativo) {
+  terminalIndexBootstrapAtivo = ativo === true;
+}
+
 function anexar(req, res, next, obterClienteId) {
   const marca = req.painelLatencia;
   if (!marca) return next();
@@ -160,8 +165,9 @@ function iniciarAmostragem() {
         cpuMs: Math.round((cpu.user + cpu.system) / 1000),
         rssMb: Math.round(process.memoryUsage().rss / 1048576),
         workerOfcOn: process.env.OFC_READONLY_WORKER === "true",
-        engine: { ...engine }
-      }));
+         engine: { ...engine },
+         terminalIndex: { bootstrapActive: terminalIndexBootstrapAtivo }
+       }));
       histograma.reset();
     } catch {
       // Amostragem best-effort; não afeta o ciclo comercial.
@@ -170,4 +176,4 @@ function iniciarAmostragem() {
   timer.unref();
 }
 
-module.exports = { iniciar, marcarEntradaHandler, anexar, registrarArquivo, registrarDb, registrarEtapa, alterarEtapaEngine, iniciarAmostragem };
+module.exports = { iniciar, marcarEntradaHandler, anexar, registrarArquivo, registrarDb, registrarEtapa, alterarEtapaEngine, definirTerminalIndexBootstrapAtivo, iniciarAmostragem };

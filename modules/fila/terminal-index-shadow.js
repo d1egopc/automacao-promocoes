@@ -4,10 +4,12 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { getClientePath } = require("../../utils/storage");
+const { definirTerminalIndexBootstrapAtivo } = require("../../utils/painel-latencia");
 const { sameIdentity } = require("./persistence-protocol");
 
 const TERMINAL_INDEX_VERSION = 1;
 const TERMINAL_INDEX_PROOF_VERSION = 1;
+const TERMINAL_INDEX_MAINTENANCE_VERSION = 1;
 const TERMINAL_INDEX_FILE = "fila-terminal-index.json";
 const TERMINAL_INDEX_PROOF_FILE = "fila-terminal-index.proof.json";
 const TERMINAL_INDEX_INCREMENTAL_DIR = "fila-historico-incremental";
@@ -21,6 +23,8 @@ const DEFAULT_MAX_INDEX_BYTES = 32 * 1024 * 1024;
 const bootstrapEmAndamento = new Map();
 const ultimoBootstrap = new Map();
 const ultimoLog = new Map();
+const metricasComparacao = new Map();
+const ultimaMetricaEmitida = new Map();
 
 function texto(valor = "") {
   return String(valor == null ? "" : valor).trim();
@@ -133,6 +137,16 @@ function sourceProofIgual(esperado = {}, atual = {}) {
   return true;
 }
 
+function cursorsSourceProof(sourceProof = {}) {
+  return Array.isArray(sourceProof.incremental)
+    ? sourceProof.incremental.map(item => ({
+        name: item.name,
+        identity: item.identity,
+        cursorBytes: Number(item.identity?.size || 0)
+      }))
+    : [];
+}
+
 function lerJsonCompacto(file, fsImpl = fs, maxBytes = DEFAULT_MAX_INDEX_BYTES) {
   const identity = statOptional(file, fsImpl);
   if (!identity) return { ok: false, motivo: "arquivo_ausente" };
@@ -145,6 +159,29 @@ function lerJsonCompacto(file, fsImpl = fs, maxBytes = DEFAULT_MAX_INDEX_BYTES) 
   } catch (erro) {
     return { ok: false, motivo: "arquivo_invalido", erro, identity };
   }
+}
+
+function baselineDeltaPronto(clienteId = "admin", deps = {}) {
+  let caminhos;
+  try {
+    caminhos = caminhosTerminalIndex(clienteId, deps);
+  } catch {
+    return false;
+  }
+  const indexRead = lerJsonCompacto(caminhos.index, deps.fs || fs);
+  const proofRead = lerJsonCompacto(caminhos.proof, deps.fs || fs, 1024 * 1024);
+  if (!indexRead.ok || !proofRead.ok) return false;
+  const index = indexRead.valor;
+  const proof = proofRead.valor;
+  return index?.complete === true && proof?.complete === true &&
+    index?.maintenanceVersion === TERMINAL_INDEX_MAINTENANCE_VERSION &&
+    proof?.maintenanceVersion === TERMINAL_INDEX_MAINTENANCE_VERSION &&
+    index?.mode === "shadow" && proof?.mode === "shadow" &&
+    index?.authorityEligible === false && proof?.authorityEligible === false &&
+    index.revision === proof.revision && Number(index.generation) === Number(proof.generation) &&
+    sameIdentity(indexRead.identity, proof.indexIdentity) &&
+    hashConteudo(indexRead.raw) === proof.indexSha256 &&
+    Array.isArray(proof.sourceCursors);
 }
 
 function validarTerminalIndex(clienteId = "admin", deps = {}) {
@@ -170,6 +207,24 @@ function validarTerminalIndex(clienteId = "admin", deps = {}) {
   }
   if (index?.complete !== true || proof?.complete !== true) {
     return { valido: false, motivo: "terminal_index_incompleto" };
+  }
+  if (proof?.maintenanceVersion != null && proof.maintenanceVersion !== TERMINAL_INDEX_MAINTENANCE_VERSION) {
+    return { valido: false, motivo: "terminal_index_maintenance_version_invalida" };
+  }
+  if (index?.maintenanceVersion != null && index.maintenanceVersion !== TERMINAL_INDEX_MAINTENANCE_VERSION) {
+    return { valido: false, motivo: "terminal_index_maintenance_version_invalida" };
+  }
+  if (proof?.maintenanceVersion === TERMINAL_INDEX_MAINTENANCE_VERSION) {
+    if (index?.maintenanceVersion !== TERMINAL_INDEX_MAINTENANCE_VERSION || !Array.isArray(proof.sourceCursors)) {
+      return { valido: false, motivo: "terminal_index_source_cursor_invalido" };
+    }
+    const fontes = Array.isArray(proof.sources?.incremental) ? proof.sources.incremental : [];
+    if (fontes.length !== proof.sourceCursors.length || proof.sourceCursors.some((cursor, indice) =>
+      cursor?.name !== fontes[indice]?.name ||
+      Number(cursor?.cursorBytes) !== Number(fontes[indice]?.identity?.size || 0) ||
+      !sameIdentity(cursor?.identity, fontes[indice]?.identity))) {
+      return { valido: false, motivo: "terminal_index_source_cursor_invalido" };
+    }
   }
   if (index?.mode !== "shadow" || proof?.mode !== "shadow" || index?.authorityEligible !== false || proof?.authorityEligible !== false) {
     return { valido: false, motivo: "terminal_index_shadow_contract_invalido" };
@@ -215,6 +270,58 @@ function deveLogar(chave, agora, intervaloMs) {
   return true;
 }
 
+function obterMetricaComparacao(cliente) {
+  if (!metricasComparacao.has(cliente)) {
+    metricasComparacao.set(cliente, {
+      comparisons: 0,
+      indexValid: 0,
+      indexInvalid: 0,
+      indexHits: 0,
+      authorityHits: 0,
+      agreements: 0,
+      disagreements: 0,
+      statusDisagreements: 0,
+      stale: 0,
+      deltasApplied: 0,
+      rebuildsRequested: 0
+    });
+  }
+  return metricasComparacao.get(cliente);
+}
+
+function registrarManutencaoTerminalIndex(clienteId, tipo = "") {
+  const cliente = texto(clienteId || "admin");
+  const metrica = obterMetricaComparacao(cliente);
+  if (tipo === "delta_applied") metrica.deltasApplied += 1;
+  if (tipo === "rebuild_requested") metrica.rebuildsRequested += 1;
+}
+
+function registrarResumoComparacao(cliente, validacao, hit, provadoAtual, concorda, statusConcorda, logger, env, agora) {
+  const metrica = obterMetricaComparacao(cliente);
+  metrica.comparisons += 1;
+  if (validacao.valido) metrica.indexValid += 1;
+  else metrica.indexInvalid += 1;
+  if (hit) metrica.indexHits += 1;
+  if (provadoAtual) metrica.authorityHits += 1;
+  if (concorda === true) metrica.agreements += 1;
+  if (concorda === false) metrica.disagreements += 1;
+  if (statusConcorda === false) metrica.statusDisagreements += 1;
+  if (String(validacao.motivo || "").includes("stale")) metrica.stale += 1;
+
+  const configurado = Number(env?.FILA_TERMINAL_INDEX_SHADOW_AGGREGATE_INTERVAL_MS);
+  const intervalo = Number.isFinite(configurado) && configurado >= 0 ? configurado : 60 * 1000;
+  const ultima = ultimaMetricaEmitida.get(cliente) || 0;
+  if (agora - ultima < intervalo) return;
+  ultimaMetricaEmitida.set(cliente, agora);
+  logShadow(logger || console, {
+    versao: 1,
+    resumo: true,
+    workspaceKey: workspaceHash(cliente),
+    ...metrica
+  });
+  for (const chave of Object.keys(metrica)) metrica[chave] = 0;
+}
+
 function revisionBootstrap() {
   return `terminal-${Date.now().toString(36)}-${crypto.randomBytes(4).toString("hex")}`;
 }
@@ -234,12 +341,17 @@ function agendarBootstrap(clienteId, deps = {}) {
     return { agendado: false, motivo: "bootstrap_throttle" };
   }
   ultimoBootstrap.set(cliente, agora);
+  registrarManutencaoTerminalIndex(cliente, "rebuild_requested");
+  definirTerminalIndexBootstrapAtivo(true);
   const promise = Promise.resolve().then(() => agendar({
     clienteId: cliente,
     checkpointRevision: revisionBootstrap(),
     targetGeneration: Number(deps.targetGeneration || 0)
   })).catch(erro => ({ ok: false, motivo: erro?.message || "terminal_index_bootstrap_error" }))
-    .finally(() => bootstrapEmAndamento.delete(cliente));
+    .finally(() => {
+      bootstrapEmAndamento.delete(cliente);
+      definirTerminalIndexBootstrapAtivo(bootstrapEmAndamento.size > 0);
+    });
   bootstrapEmAndamento.set(cliente, promise);
   return { agendado: true, motivo: "bootstrap_agendado" };
 }
@@ -262,6 +374,7 @@ function avaliarTerminalIndexShadow(clienteId = "admin", itemId = "", autoridade
     ? status === texto(autoridade.status).toLowerCase()
     : null;
   const agora = Date.now();
+  registrarResumoComparacao(cliente, validacao, hit, provadoAtual, concorda, statusConcorda, deps.logger || console, env, agora);
   const logIntervaloConfigurado = Number(env.FILA_TERMINAL_INDEX_SHADOW_LOG_INTERVAL_MS);
   const logIntervalo = Number.isFinite(logIntervaloConfigurado) && logIntervaloConfigurado >= 0
     ? logIntervaloConfigurado
@@ -291,11 +404,14 @@ function resetarTerminalIndexShadowParaTeste() {
   bootstrapEmAndamento.clear();
   ultimoBootstrap.clear();
   ultimoLog.clear();
+  metricasComparacao.clear();
+  ultimaMetricaEmitida.clear();
 }
 
 module.exports = {
   TERMINAL_INDEX_VERSION,
   TERMINAL_INDEX_PROOF_VERSION,
+  TERMINAL_INDEX_MAINTENANCE_VERSION,
   TERMINAL_INDEX_FILE,
   TERMINAL_INDEX_PROOF_FILE,
   TERMINAL_INDEX_INCREMENTAL_DIR,
@@ -310,7 +426,10 @@ module.exports = {
   caminhosTerminalIndex,
   capturarSourceProof,
   sourceProofIgual,
+  cursorsSourceProof,
+  baselineDeltaPronto,
   validarTerminalIndex,
   avaliarTerminalIndexShadow,
+  registrarManutencaoTerminalIndex,
   resetarTerminalIndexShadowParaTeste
 };

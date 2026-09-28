@@ -4746,6 +4746,29 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
         size: stat ? Number(stat.size || 0) : 0
       });
     } catch {}
+    if (terminalIndexShadow.flagAtiva(deps.env || process.env)) {
+      try {
+        const deltaPronto = terminalIndexShadow.baselineDeltaPronto(cliente, {
+          env: deps.env || process.env,
+          fs: fsImpl,
+          getClientePath: deps.getClientePath
+        });
+        const agendar = deltaPronto
+          ? deps.agendarTerminalIndexDelta
+          : deps.agendarTerminalIndexBootstrap;
+        if (typeof agendar === "function") {
+          const agendamento = agendar({
+            clienteId: cliente,
+            checkpointRevision: `terminal-delta-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+            targetGeneration: 0,
+            dataDir: deps.dataDir
+          });
+          if (agendamento && typeof agendamento.catch === "function") agendamento.catch(() => {});
+        }
+      } catch {
+        // A shadow maintenance hint must never affect the factual append.
+      }
+    }
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
     logOperacional(deps.logger, {
       versao: 1,
