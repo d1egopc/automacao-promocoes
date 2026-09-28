@@ -37,6 +37,23 @@ function hashWorkspace(workspace) {
   return crypto.createHash("sha256").update(String(workspace)).digest("hex").slice(0, 12);
 }
 
+// The existing wall-clock timestamps are retained for log correlation with the
+// process panel. They are not used for scheduling, timeout, ACK, or retry logic.
+function metricasJob(job = {}, finishedAt = agoraMs()) {
+  const terminou = Number(finishedAt) || agoraMs();
+  const queuedAt = Number(job.queuedAt) || terminou;
+  const startedAt = Number(job.startedAt) || queuedAt;
+  return {
+    checkpointKey: hashWorkspace(job.checkpointRevision),
+    queuedAt,
+    startedAt,
+    finishedAt: terminou,
+    queueWaitMs: Math.max(0, startedAt - queuedAt),
+    workerServiceMs: Math.max(0, terminou - startedAt),
+    jobTotalMs: Math.max(0, terminou - queuedAt)
+  };
+}
+
 function erroGlobalWorker(motivo = "") {
   return new Set([
     "worker_error",
@@ -273,9 +290,12 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       clearTimeout(atual.timer);
       estado.ativo = null;
       if (mensagem.type === RESPONSE_OK) {
-        const queueWaitMs = Math.max(0, agoraMs() - Number(atual.job.queuedAt || agoraMs()));
+        const metricas = metricasJob(atual.job);
         const previousMaxWait = estado.maxQueueWaitByWorkspace.get(atual.lane.workspaceKey) || 0;
-        estado.maxQueueWaitByWorkspace.set(atual.lane.workspaceKey, Math.max(previousMaxWait, queueWaitMs));
+        estado.maxQueueWaitByWorkspace.set(
+          atual.lane.workspaceKey,
+          Math.max(previousMaxWait, metricas.queueWaitMs)
+        );
         estado.completedByWorkspace.set(
           atual.lane.workspaceKey,
           (estado.completedByWorkspace.get(atual.lane.workspaceKey) || 0) + 1
@@ -285,17 +305,25 @@ function criarCoordenadorPersistencia(opcoes = {}) {
           operacao: atual.job.operation,
           jobKey: hashWorkspace(atual.job.jobId),
           workspaceKey: atual.lane.workspaceKey,
-          queueWaitMs,
-          ...(mensagem.result?.metrics || {})
+          ...(mensagem.result?.metrics || {}),
+          ...metricas
         });
         atual.resolve({
           ...(mensagem.result || {}),
           persistenceMode: "worker",
           workspaceKey: atual.lane.workspaceKey,
-          coordinatorMetrics: { queueWaitMs }
+          coordinatorMetrics: metricas
         });
       } else {
         const motivo = mensagem.error?.code || "worker_job_failed";
+        log({
+          evento: "job_error",
+          operacao: atual.job.operation,
+          jobKey: hashWorkspace(atual.job.jobId),
+          workspaceKey: atual.lane.workspaceKey,
+          motivo,
+          ...metricasJob(atual.job)
+        });
         if (erroGlobalWorker(motivo)) {
           estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
           registrarFalhaGlobal(motivo, mensagem.error);

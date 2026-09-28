@@ -119,13 +119,29 @@ function logCheckpointB2C(deps = {}, payload = {}) {
 function logFalhaArquivoViva(deps = {}, payload = {}) {
   try {
     const logger = deps?.logger && typeof deps.logger.log === "function" ? deps.logger : console;
+    const workspaceKey = hashWorkspaceLog(payload.clienteId);
+    const pathPartes = String(payload.path || "").replace(/\\/g, "/").split("/").filter(Boolean);
+    const nomeArquivo = pathPartes[pathPartes.length - 1] || "fila-viva.json";
+    const publico = {
+      ...payload,
+      workspaceKey,
+      path: `clientes/${workspaceKey}/${nomeArquivo}`,
+      motivoDetalhado: payload.causaInterna || payload.codigoErro || "arquivo_viva_falhou",
+      code: payload.codigoErro || payload.causaInterna || "arquivo_viva_falhou"
+    };
+    delete publico.clienteId;
+    delete publico.itemId;
     logger.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
       versao: 1,
       evento: "arquivo_viva_falhou",
       timestamp: new Date().toISOString(),
-      ...payload
+      ...publico
     }));
   } catch (_) {}
+}
+
+function hashWorkspaceLog(clienteId = "") {
+  return crypto.createHash("sha256").update(String(clienteId || "")).digest("hex").slice(0, 12);
 }
 
 function valorDetalheArquivo(escrita = {}, chave = "", fallback = "") {

@@ -991,7 +991,11 @@ function logRecoveryComparacao(logger = console, payload = {}) {
 function logManifestState(logger = console, payload = {}) {
   try {
     const destino = logger && typeof logger.log === "function" ? logger : console;
-    destino.log(TAG_MANIFEST_STATE, JSON.stringify(payload));
+    const publico = { ...payload };
+    const cliente = publico.clienteId;
+    delete publico.clienteId;
+    if (cliente) publico.workspaceKey = hashWorkspaceLog(cliente);
+    destino.log(TAG_MANIFEST_STATE, JSON.stringify(publico));
   } catch {}
 }
 
@@ -1004,6 +1008,29 @@ function logRecoveryAuthority(logger = console, payload = {}, agora = Date.now()
 
 function hashCurto(valor = "") {
   return crypto.createHash("sha1").update(String(valor || "")).digest("hex").slice(0, 12);
+}
+
+function hashWorkspaceLog(valor = "") {
+  return crypto.createHash("sha256").update(String(valor || "")).digest("hex").slice(0, 12);
+}
+
+function classificarDbIndisponibilidade(resultado = {}, comparacao = {}, erro = null) {
+  const motivo = String(
+    resultado?.motivo ||
+    resultado?.codigo ||
+    erro?.code ||
+    erro?.name ||
+    erro?.message ||
+    ""
+  ).toLowerCase();
+  if (motivo === "pool_indisponivel" || motivo.includes("pool")) return "pool_ausente";
+  if (motivo === "state_ausente" || motivo.includes("linha_ausente")) return "linha_ausente_bootstrap";
+  if (/(timeout|etimedout|57014)/i.test(motivo)) return "timeout";
+  if (/(econn|connection|socket|enotfound|refused)/i.test(motivo)) return "conexao";
+  if (comparacao?.resultado === "db_indisponivel" && resultado?.ok !== false) {
+    return "comparacao_sem_estado";
+  }
+  return "query_falhou";
 }
 
 function lerJsonArquivoDireto(file = "", fallback = null, fsImpl = fs) {
@@ -1345,7 +1372,13 @@ function compararDbJsonManifestState(clienteId = "admin", dbResultado = {}, json
       dbAuthorityReadyRevision: dbState?.authorityReadyRevision ?? null,
       jsonVivaGeneration: jsonManifest?.vivaGeneration ?? null,
       jsonDurableCheckpointGeneration: jsonManifest?.durableCheckpointGeneration ?? null,
-      jsonDirtyGeneration: jsonManifest?.dirtyGeneration ?? null
+      jsonDirtyGeneration: jsonManifest?.dirtyGeneration ?? null,
+      ...(resultado === "db_indisponivel"
+        ? {
+            dbDisponibilidade: classificarDbIndisponibilidade(dbResultado, comparacao),
+            dbMotivo: textoCurto(dbResultado?.motivo || "db_indisponivel", 120)
+          }
+        : {})
     });
   }
 
@@ -1428,7 +1461,9 @@ function executarManifestStateAsync(clienteId = "admin", operacao = "", payload 
           evento: payload.evento || `db_${operacao}`,
           clienteId: cliente,
           resultado: "db_indisponivel",
-          motivo: erro?.message || "manifest_state_async_error"
+          motivo: "manifest_state_async_error",
+          dbDisponibilidade: classificarDbIndisponibilidade({}, {}, erro),
+          dbErrorCode: textoCurto(erro?.code || erro?.name || "DB_ERROR", 80)
         });
       }
     });
