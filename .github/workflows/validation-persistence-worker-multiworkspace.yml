@@ -1,0 +1,175 @@
+name: Persistence Worker Multiworkspace Linux gate
+
+on:
+  push:
+    branches:
+      - validation/persistence-worker-multiworkspace-clean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: persistence-worker-multiworkspace-clean
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: 295407aa307314985e2ab80285a27e93bddb9f48
+  FUNCTIONAL_HEAD: 6078229ce0599af15179f3b43bfa3177230ed576
+
+jobs:
+  linux-node24:
+    name: Linux Node 24 persistence worker multiworkspace gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout complete validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify isolated ref and clean functional lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/persistence-worker-multiworkspace-clean
+          test -z "$(printenv DATABASE_URL || true)"
+          git cat-file -e "$BASE_SHA^{}"
+          git cat-file -e "$FUNCTIONAL_HEAD^{}"
+          git merge-base --is-ancestor "$BASE_SHA" "$FUNCTIONAL_HEAD"
+          test -z "$(git diff --name-only "$BASE_SHA" "$FUNCTIONAL_HEAD" | grep -E '^\.github/workflows/' || true)"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax, encoding and diff checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/fila/persistence-protocol.js
+          node --check modules/fila/persistence-worker.js
+          node --check modules/fila/persistence-coordinator.js
+          node --check modules/fila/json-array-incremental.js
+          node --check tests/persistence-worker-phase1.test.js
+          node --check tests/persistence-worker-500m-gate.test.js
+          node --check tests/persistence-worker-crash-matrix.test.js
+          node --check tests/persistence-worker-multiworkspace.test.js
+          node --check tests/persistence-worker-multiworkspace-stress.test.js
+          node --check tests/json-array-incremental.test.js
+          node --check tests/persistence-worker-benchmark.js
+          git diff --check "$BASE_SHA" "$FUNCTIONAL_HEAD"
+          git diff --check "$BASE_SHA" HEAD
+          npm run audit:encoding
+
+      - name: Persistence worker functional proof
+        run: node tests/persistence-worker-phase1.test.js
+
+      - name: Incremental JSON array proof
+        run: node tests/json-array-incremental.test.js
+
+      - name: Linux crash and recovery matrix
+        run: node tests/persistence-worker-crash-matrix.test.js
+
+      - name: Linux multiworkspace canary, fairness and backpressure
+        run: node tests/persistence-worker-multiworkspace.test.js
+
+      - name: Linux multiworkspace stress 1/3/5/10/20/25
+        run: node tests/persistence-worker-multiworkspace-stress.test.js
+
+      - name: Linux 50/170/250 MiB benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --expose-gc tests/persistence-worker-benchmark.js
+
+      - name: Linux approximately 500 MiB gate
+        shell: bash
+        env:
+          PERSISTENCE_WORKER_GATE_MIB: 500
+        run: |
+          set -euo pipefail
+          node --expose-gc tests/persistence-worker-500m-gate.test.js
+
+      - name: Linux approximately 600 MiB gate
+        shell: bash
+        env:
+          PERSISTENCE_WORKER_GATE_MIB: 600
+        run: |
+          set -euo pipefail
+          node --expose-gc tests/persistence-worker-500m-gate.test.js
+
+      - name: Relevant checkpoint, queue and contract suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_file in \
+            tests/fila-manifest-state-repository.test.js \
+            tests/fila-checkpoint-entrega-funcional.test.js \
+            tests/fila-checkpoint-recovery.test.js \
+            tests/fila-terminal-guard-legado.test.js \
+            tests/fila-viva-anti-starvation.test.js \
+            tests/fila-fanout-destinos-estado.test.js \
+            tests/fila-claims-repository.test.js \
+            tests/fila-claims-shadow.test.js \
+            tests/ofertas-v2-achados-dedupe-memoria.test.js \
+            tests/ofertas-v2-dedupe-duplicar.test.js \
+            tests/anti-repeticao-executor.test.js \
+            tests/destino-geral-distributor.test.js \
+            tests/distributor-vivo-sem-starvation.test.js \
+            tests/engine-fanout-universal-v2.test.js \
+            tests/demand-scheduler-v1.test.js \
+            tests/cadencia-v2-autoridade.test.js \
+            tests/solenoide-v1.test.js \
+            tests/solenoide-importer-observability.test.js \
+            tests/solenoide-radar-config.test.js \
+            tests/teleradar-control-plane.test.js \
+            tests/teleradar-operational-control.test.js \
+            tests/teleradar-semantica-comercial.test.js \
+            tests/ofc-buffer-vivo-workspace-shadow.test.js \
+            tests/ofc-operacional-v2-shadow.test.js \
+            tests/ofc-workspace-temporal.test.js \
+            tests/ofc-workspace-worker.test.js \
+            tests/whatsapp-socket-listener-lifecycle.test.js \
+            tests/dynamic-link-resolvers.test.js; do
+            echo "==> $test_file"
+            node "$test_file"
+          done
+
+      - name: Compare the two known historical failures with the base
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/persistence-worker-baseline"
+          trap 'git worktree remove --force "$baseline" >/dev/null 2>&1 || true' EXIT
+          git worktree add --detach "$baseline" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
+
+          compare_case() {
+            local test_file="$1"
+            local signature="$2"
+            local current_log="$RUNNER_TEMP/current.log"
+            local base_log="$RUNNER_TEMP/base.log"
+            set +e
+            node "$test_file" >"$current_log" 2>&1
+            local current_status=$?
+            (cd "$baseline" && NODE_PATH="$GITHUB_WORKSPACE/node_modules" node "$test_file") >"$base_log" 2>&1
+            local base_status=$?
+            set -e
+            test "$current_status" = "$base_status"
+            test "$current_status" -ne 0
+            grep -F "$signature" "$current_log"
+            grep -F "$signature" "$base_log"
+            echo "historical failure preserved: $test_file"
+          }
+
+          compare_case tests/fila-store-v2.test.js "somente projecoes reais devem logar"
+          compare_case tests/fila-unica-distributor-executor.test.js "profiler opcional"
