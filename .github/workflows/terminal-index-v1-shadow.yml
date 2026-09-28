@@ -1,0 +1,171 @@
+name: Terminal Index V1 Shadow Linux validation
+
+on:
+  push:
+    branches:
+      - feature/terminal-index-v1-shadow
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-index-v1-shadow-validation
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: 9dc574ceb8de217128bc124be791d6fd78d33168
+  FUNCTIONAL_SHA: 238df943893a898aeb6dd01ecaf782748026293a
+
+jobs:
+  linux-node24:
+    name: Terminal Index V1 Shadow (Linux / Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout validation branch with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated validation ref and base
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-shadow
+          test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          git cat-file -e "${BASE_SHA}^{commit}"
+          test "$(git rev-parse HEAD)" = "$FUNCTIONAL_SHA"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git rev-list --count "${BASE_SHA}..${FUNCTIONAL_SHA}")" = 1
+          test -z "${DATABASE_URL:-}"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Functional diff and syntax checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git diff --check "$BASE_SHA" "$FUNCTIONAL_SHA"
+          changed="$(git diff --name-only "$BASE_SHA" "$FUNCTIONAL_SHA")"
+          expected=$'index.js\nmodules/fila/fila-operacional-v2.js\nmodules/fila/persistence-coordinator.js\nmodules/fila/persistence-protocol.js\nmodules/fila/persistence-worker.js\nmodules/fila/terminal-index-shadow.js\nmodules/fila/terminal-index-worker.js\ntests/terminal-index-v1-large-gate.test.js\ntests/terminal-index-v1-shadow.test.js'
+          test "$changed" = "$expected"
+          node --check index.js
+          node --check modules/fila/fila-operacional-v2.js
+          node --check modules/fila/persistence-coordinator.js
+          node --check modules/fila/persistence-protocol.js
+          node --check modules/fila/persistence-worker.js
+          node --check modules/fila/terminal-index-shadow.js
+          node --check modules/fila/terminal-index-worker.js
+          node --check tests/terminal-index-v1-shadow.test.js
+          node --check tests/terminal-index-v1-large-gate.test.js
+
+      - name: Compare known baseline failures on parent and patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base_dir="$RUNNER_TEMP/terminal-index-baseline"
+          git worktree add --detach "$base_dir" "$BASE_SHA"
+          trap 'git worktree remove --force "$base_dir"' EXIT
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$base_dir/node_modules"
+
+          expect_signature() {
+            local label="$1"
+            local cwd="$2"
+            local test_file="$3"
+            local signature="$4"
+            local output_file="$RUNNER_TEMP/${label}.log"
+            set +e
+            (cd "$cwd" && NODE_PATH="$GITHUB_WORKSPACE/node_modules" node "$test_file") >"$output_file" 2>&1
+            local status=$?
+            set -e
+            test "$status" -ne 0
+            grep -F "$signature" "$output_file"
+            echo "$label: baseline failure signature unchanged"
+          }
+
+          expect_signature baseline-fila-store "$base_dir" tests/fila-store-v2.test.js '4 !== 2'
+          expect_signature patch-fila-store "$GITHUB_WORKSPACE" tests/fila-store-v2.test.js '4 !== 2'
+          expect_signature baseline-fila-historico "$base_dir" tests/fila-historico-v2-leitura.test.js 'GET /fila/status deve continuar existindo'
+          expect_signature patch-fila-historico "$GITHUB_WORKSPACE" tests/fila-historico-v2-leitura.test.js 'GET /fila/status deve continuar existindo'
+          expect_signature baseline-read-model "$base_dir" tests/fila-read-model-publico-integracao.test.js 'terminal real remove da projecao HOT'
+          expect_signature patch-read-model "$GITHUB_WORKSPACE" tests/fila-read-model-publico-integracao.test.js 'terminal real remove da projecao HOT'
+
+      - name: Terminal Index Shadow functional gates
+        run: node tests/terminal-index-v1-shadow.test.js
+
+      - name: Terminal Index 500 MiB gate
+        env:
+          TERMINAL_INDEX_LARGE_GATE: "1"
+          TERMINAL_INDEX_LARGE_MIB: "500"
+        run: node tests/terminal-index-v1-large-gate.test.js
+
+      - name: Terminal Index 600 MiB gate
+        env:
+          TERMINAL_INDEX_LARGE_GATE: "1"
+          TERMINAL_INDEX_LARGE_MIB: "600"
+        run: node tests/terminal-index-v1-large-gate.test.js
+
+      - name: Critical persistence and fila regression gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tests=(
+            tests/fila-viva-idempotencia-stale.test.js
+            tests/fila-manifest-state-repository.test.js
+            tests/fila-checkpoint-recovery.test.js
+            tests/fila-terminal-guard-legado.test.js
+            tests/fila-historico-leve-v2.test.js
+            tests/fila-historico-leve-jsonl-reparo.test.js
+            tests/persistence-worker-phase1.test.js
+            tests/persistence-worker-observability.test.js
+            tests/persistence-worker-multiworkspace.test.js
+            tests/persistence-worker-multiworkspace-representative.test.js
+            tests/persistence-worker-crash-matrix.test.js
+            tests/fila-projecao-leve-shadow.test.js
+            tests/storage-write-atomic.test.js
+            tests/storage-manager.test.js
+            tests/storage-manager-incremental.test.js
+          )
+          for test_file in "${tests[@]}"; do
+            echo "=== $test_file ==="
+            node "$test_file"
+          done
+
+      - name: Coordinator, fairness, fanout, scheduler, solenoid and OFC gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          tests=(
+            tests/engine-distributor-origem-fairness.test.js
+            tests/engine-distributor-origem-fairness-state.test.js
+            tests/distributor-vivo-sem-starvation.test.js
+            tests/engine-fanout-universal-v2.test.js
+            tests/fila-fanout-destinos-estado.test.js
+            tests/demand-scheduler-v1.test.js
+            tests/solenoide-v1.test.js
+            tests/ofc-workspace-worker.test.js
+            tests/ofc-fase-1d-observabilidade.test.js
+            tests/whatsapp-socket-listener-lifecycle.test.js
+            tests/safe-redirect-http-lifecycle.test.js
+            tests/dynamic-link-resolvers.test.js
+          )
+          for test_file in "${tests[@]}"; do
+            echo "=== $test_file ==="
+            node "$test_file"
+          done
+
+      - name: Encoding audit
+        run: npm run audit:encoding
+
+      - name: Final diff check
+        run: git diff --check "$BASE_SHA" "$FUNCTIONAL_SHA"
