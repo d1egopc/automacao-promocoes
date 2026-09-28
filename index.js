@@ -1022,6 +1022,10 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   getClienteJsonPath,
   getClientePath,
   workspaceAtivoOperacional: clienteId => usuarioAtivoOperacional(clienteId),
+  agendarTerminalIndexBootstrap: payload => persistenciaCheckpointV2.bootstrapTerminalIndex({
+    ...payload,
+    dataDir: process.env.DATA_DIR || "/data"
+  }),
   logger: console
 });
 const filaV2Shadow = criarControladorFilaV2Shadow({

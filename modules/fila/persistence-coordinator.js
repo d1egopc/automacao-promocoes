@@ -8,6 +8,7 @@ const {
   OP_PREPARE,
   OP_PUBLISH,
   OP_CLEANUP,
+  OP_TERMINAL_INDEX_BOOTSTRAP,
   RESPONSE_OK,
   flagWorkerAtiva,
   decisaoPersistenciaWorkspace,
@@ -291,6 +292,24 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       estado.ativo = null;
       if (mensagem.type === RESPONSE_OK) {
         const metricas = metricasJob(atual.job);
+        if (atual.job.operation === OP_TERMINAL_INDEX_BOOTSTRAP && mensagem.result?.ok !== true) {
+          log({
+            evento: "job_rejected",
+            operacao: atual.job.operation,
+            jobKey: hashWorkspace(atual.job.jobId),
+            workspaceKey: atual.lane.workspaceKey,
+            motivo: mensagem.result?.motivo || "terminal_index_bootstrap_failed",
+            ...metricas
+          });
+          atual.resolve({
+            ...(mensagem.result || {}),
+            persistenceMode: "worker",
+            workspaceKey: atual.lane.workspaceKey,
+            coordinatorMetrics: metricas
+          });
+          bombear();
+          return;
+        }
         const previousMaxWait = estado.maxQueueWaitByWorkspace.get(atual.lane.workspaceKey) || 0;
         estado.maxQueueWaitByWorkspace.set(
           atual.lane.workspaceKey,
@@ -411,7 +430,19 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     const timer = setTimeout(() => {
       if (!estado.ativo || estado.ativo.job.jobId !== atual.job.jobId) return;
       estado.ativo = null;
-      registrarFalhaGlobal("worker_timeout");
+      const terminalIndexShadow = atual.job.operation === OP_TERMINAL_INDEX_BOOTSTRAP;
+      if (terminalIndexShadow) {
+        log({
+          evento: "job_timeout",
+          operacao: atual.job.operation,
+          jobKey: hashWorkspace(atual.job.jobId),
+          workspaceKey: atual.lane.workspaceKey,
+          motivo: "terminal_index_worker_timeout",
+          ...metricasJob(atual.job)
+        });
+      } else {
+        registrarFalhaGlobal("worker_timeout");
+      }
       atual.resolve(rejeicao("worker_timeout", "", {
         persistenceMode: "worker",
         workspaceKey: atual.lane.workspaceKey
@@ -596,6 +627,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     prepare: payload => enfileirar(OP_PREPARE, payload),
     publish: payload => enfileirar(OP_PUBLISH, payload),
     cleanup: payload => enfileirar(OP_CLEANUP, payload),
+    bootstrapTerminalIndex: payload => enfileirar(OP_TERMINAL_INDEX_BOOTSTRAP, payload),
     revalidarSources,
     shutdown,
     recover,

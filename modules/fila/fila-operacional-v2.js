@@ -29,6 +29,7 @@ const {
 const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
 const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
+const terminalIndexShadow = require("./terminal-index-shadow");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -99,6 +100,11 @@ function idItem(item = {}, indice = -1) {
     item.engine_oferta_id ||
     item.idOferta
   ) || `indice:${indice}`;
+}
+
+function identidadePrimariaExataFilaV2(item = {}) {
+  const identidade = idItem(item, -1);
+  return identidade && !identidade.startsWith("indice:") ? identidade : "";
 }
 
 function normalizarEntradaViva(valor = {}, indice = 0, agora = Date.now()) {
@@ -2019,9 +2025,9 @@ function entradasReferemMesmoItemFilaV2(entrada = {}, item = {}) {
 
 function mesmaIdentidadePrimariaFilaV2(entrada = {}, item = {}) {
   const entradaItem = entrada?.item && typeof entrada.item === "object" ? entrada.item : entrada;
-  const idEntrada = idItem(entradaItem, entrada?.posicaoLegada || -1);
-  const idAlvo = idItem(item, item?.posicaoLegada || -1);
-  if (!idEntrada || !idAlvo || idEntrada.startsWith("indice:") || idAlvo.startsWith("indice:")) return false;
+  const idEntrada = identidadePrimariaExataFilaV2(entradaItem);
+  const idAlvo = identidadePrimariaExataFilaV2(item);
+  if (!idEntrada || !idAlvo) return false;
   return idEntrada === idAlvo;
 }
 
@@ -2048,19 +2054,30 @@ function provarItemTerminalizadoNoHistorico(clienteId = "admin", item = {}, deps
     })));
   } catch (_) {}
 
+  let resultado = { provado: false, motivo: "item_terminal_nao_comprovado" };
   for (const candidato of candidatos) {
     const entrada = candidato.entrada || {};
     if (!mesmaIdentidadePrimariaFilaV2(entrada, item)) continue;
     if (!itemTerminal(entrada.item || entrada, agora)) continue;
-    return {
+    resultado = {
       provado: true,
       fonte: candidato.fonte,
       status: statusItem(entrada.item || entrada),
       itemId: idItem(entrada.item || entrada, entrada.posicaoLegada || -1)
     };
+    break;
   }
 
-  return { provado: false, motivo: "item_terminal_nao_comprovado" };
+  try {
+    terminalIndexShadow.avaliarTerminalIndexShadow(
+      cliente,
+      identidadePrimariaExataFilaV2(item),
+      resultado,
+      deps
+    );
+  } catch (_) {}
+
+  return resultado;
 }
 
 function itemTerminal(item = {}, agora = Date.now()) {
@@ -5337,6 +5354,7 @@ module.exports = {
   DEFAULT_CHECKPOINT_INTERVALO_MS,
   DEFAULT_CHECKPOINT_MAX_DIRTY_MS,
   normalizarEntradasViva,
+  identidadePrimariaExataFilaV2,
   identidadesItemFilaV2,
   identidadePrincipalItemFilaV2,
   rankStatusFilaV2,

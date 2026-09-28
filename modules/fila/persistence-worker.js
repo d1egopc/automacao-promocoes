@@ -7,6 +7,7 @@ const {
   OP_PREPARE,
   OP_PUBLISH,
   OP_CLEANUP,
+  OP_TERMINAL_INDEX_BOOTSTRAP,
   RESPONSE_OK,
   RESPONSE_ERROR,
   workspaceSeguro,
@@ -19,6 +20,7 @@ const {
   lerArrayJsonIncremental,
   escreverArrayJsonIncremental
 } = require("./json-array-incremental");
+const { construirTerminalIndex } = require("./terminal-index-worker");
 
 let filaOperacionalV2 = null;
 
@@ -342,6 +344,19 @@ async function executar(job) {
   if (job.operation === OP_PREPARE) return prepare(job);
   if (job.operation === OP_PUBLISH) return publish(job);
   if (job.operation === OP_CLEANUP) return cleanup(job);
+  if (job.operation === OP_TERMINAL_INDEX_BOOTSTRAP) {
+    const dataDir = normalizarDataDir(job.dataDir);
+    try {
+      return construirTerminalIndex(job, { operacional: obterFilaOperacionalV2(dataDir) });
+    } catch (erro) {
+      return {
+        ok: false,
+        operation: OP_TERMINAL_INDEX_BOOTSTRAP,
+        motivo: erro?.code || "terminal_index_bootstrap_failed",
+        erro: erroSanitizado(erro)
+      };
+    }
+  }
   throw new Error("persistence_operation_invalida");
 }
 
