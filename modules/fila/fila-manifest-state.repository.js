@@ -125,6 +125,7 @@ function logFalhaArquivoViva(deps = {}, payload = {}) {
     const publico = {
       ...payload,
       workspaceKey,
+      itemKey: payload.itemId ? hashWorkspaceLog(payload.itemId) : "",
       path: `clientes/${workspaceKey}/${nomeArquivo}`,
       motivoDetalhado: payload.causaInterna || payload.codigoErro || "arquivo_viva_falhou",
       code: payload.codigoErro || payload.causaInterna || "arquivo_viva_falhou"
@@ -134,6 +135,25 @@ function logFalhaArquivoViva(deps = {}, payload = {}) {
     logger.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
       versao: 1,
       evento: "arquivo_viva_falhou",
+      timestamp: new Date().toISOString(),
+      ...publico
+    }));
+  } catch (_) {}
+}
+
+function logMutacaoVivaNaoConfirmada(deps = {}, payload = {}, evento = "mutacao_viva_nao_confirmada") {
+  try {
+    const logger = deps?.logger && typeof deps.logger.log === "function" ? deps.logger : console;
+    const publico = {
+      ...payload,
+      workspaceKey: hashWorkspaceLog(payload.clienteId),
+      itemKey: payload.itemId ? hashWorkspaceLog(payload.itemId) : ""
+    };
+    delete publico.clienteId;
+    delete publico.itemId;
+    logger.log("[FILA-V2-MANIFEST-STATE]", JSON.stringify({
+      versao: 1,
+      evento,
       timestamp: new Date().toISOString(),
       ...publico
     }));
@@ -182,6 +202,10 @@ function detalheFalhaArquivoViva(escrita, contexto = {}) {
     vivaGeneration: contexto.state?.vivaGeneration ?? null,
     durableCheckpointGeneration: contexto.state?.durableCheckpointGeneration ?? null,
     dirtyGeneration: contexto.state?.dirtyGeneration ?? null,
+    rodadaId: textoCurto(valorDetalheArquivo(objeto, "rodadaId", ""), 100),
+    tipoFalha: textoCurto(valorDetalheArquivo(objeto, "tipoFalha", ""), 100),
+    idempotente: objeto.idempotente === true,
+    terminalHistorico: objeto.terminalHistorico === true,
     tentativa: Number.isInteger(Number(valorDetalheArquivo(objeto, "tentativa", 1)))
       ? Number(valorDetalheArquivo(objeto, "tentativa", 1))
       : 1,
@@ -364,10 +388,20 @@ function poolPadrao(deps = {}) {
 async function comTransacao(callback, deps = {}) {
   const pool = poolPadrao(deps);
   if (!pool || typeof pool.connect !== "function") {
-    return { ok: false, motivo: "pool_indisponivel" };
+    return { ok: false, motivo: "pool_indisponivel", dbIndisponivel: true };
   }
 
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (erro) {
+    return {
+      ok: false,
+      motivo: erro?.codigo || erro?.code || erro?.message || "pool_connect_falhou",
+      erro: erro?.message || "erro_conexao_pool",
+      dbIndisponivel: true
+    };
+  }
   try {
     await client.query("BEGIN");
     const resultado = await callback(client);
@@ -377,10 +411,13 @@ async function comTransacao(callback, deps = {}) {
     try {
       await client.query("ROLLBACK");
     } catch (_) {}
+    const motivo = erro?.codigo || erro?.message || "transacao_manifest_state_falhou";
+    const dbIndisponivel = !["arquivo_viva_falhou", "mutacao_viva_nao_confirmada"].includes(String(motivo));
     return {
       ok: false,
-      motivo: erro?.codigo || erro?.message || "transacao_manifest_state_falhou",
+      motivo,
       erro: erro?.message || "erro_manifest_state",
+      dbIndisponivel,
       motivoDetalhado: erro?.motivoDetalhado || "",
       erroDetalhado: erro?.erroDetalhado || "",
       detalheArquivoViva: erro?.detalheArquivoViva || null
@@ -633,6 +670,24 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
       const inicioArquivo = process.hrtime.bigint();
       escrita = await dados.escreverArquivo({ clienteId: cliente, state: atual, nextGeneration, fileRevision });
       if (escrita === false || escrita?.ok === false) {
+        if (escrita?.tipoFalha === "mutacao_viva_nao_confirmada") {
+          logMutacaoVivaNaoConfirmada(deps, {
+            ...escrita,
+            clienteId: cliente,
+            operacao: dados.motivo || "manifest_state_mutacao",
+            vivaGeneration: atual.vivaGeneration,
+            durableCheckpointGeneration: atual.durableCheckpointGeneration,
+            dirtyGeneration: atual.dirtyGeneration
+          });
+          return {
+            ok: false,
+            motivo: "mutacao_viva_nao_confirmada",
+            erro: escrita.codigoErro || escrita.motivo || "mutacao_viva_nao_confirmada",
+            dbIndisponivel: false,
+            state: atual,
+            resultadoArquivo: escrita
+          };
+        }
         const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicioArquivo) / 1e6);
         const detalhe = detalheFalhaArquivoViva(escrita, {
           clienteId: cliente,
@@ -648,6 +703,25 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
         erro.erroDetalhado = detalhe.codigoErro || "";
         erro.detalheArquivoViva = detalhe;
         throw erro;
+      }
+
+      if (escrita?.idempotente === true && escrita?.terminalHistorico === true) {
+        logMutacaoVivaNaoConfirmada(deps, {
+          ...escrita,
+          clienteId: cliente,
+          operacao: dados.motivo || "manifest_state_mutacao",
+          vivaGeneration: atual.vivaGeneration,
+          durableCheckpointGeneration: atual.durableCheckpointGeneration,
+          dirtyGeneration: atual.dirtyGeneration
+        }, "item_ja_terminal_idempotente");
+        return {
+          ok: true,
+          idempotente: true,
+          terminalHistorico: true,
+          motivo: escrita.motivo || "item_ja_terminal_idempotente",
+          state: atual,
+          resultadoArquivo: escrita
+        };
       }
     }
 

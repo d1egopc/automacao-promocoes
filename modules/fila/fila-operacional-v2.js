@@ -1033,6 +1033,10 @@ function classificarDbIndisponibilidade(resultado = {}, comparacao = {}, erro = 
   return "query_falhou";
 }
 
+function resultadoDbIndisponivel(resultado = {}) {
+  return resultado?.dbIndisponivel === true || String(resultado?.motivo || "") === "db_indisponivel";
+}
+
 function lerJsonArquivoDireto(file = "", fallback = null, fsImpl = fs) {
   if (!file) {
     return {
@@ -1350,9 +1354,16 @@ function compararDbJsonManifestState(clienteId = "admin", dbResultado = {}, json
   const comparacao = typeof repo.compararDbJson === "function"
     ? repo.compararDbJson(dbState, jsonManifest)
     : { resultado: dbState ? "db_json_indisponivel" : "db_indisponivel" };
-  const resultado = dbResultado?.ok === false
+  const motivoDb = texto(dbResultado?.motivo || "");
+  const resultado = resultadoDbIndisponivel(dbResultado)
     ? "db_indisponivel"
-    : comparacao.resultado;
+    : dbResultado?.ok === false
+      ? (motivoDb === "arquivo_viva_falhou"
+        ? "arquivo_viva_falhou"
+        : motivoDb === "mutacao_viva_nao_confirmada"
+          ? "mutacao_viva_nao_confirmada"
+          : motivoDb || "mutacao_nao_confirmada")
+      : comparacao.resultado;
   const agora = contexto.agora || deps.agora || Date.now();
 
   if (deveLogarManifestState(cliente, resultado, agora)) {
@@ -1526,7 +1537,7 @@ function anexarProofLegadoSeSolicitado(clienteId = "admin", resultado = {}, gene
 async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "mutacao", escritor = null, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   if (!deveUsarManifestStatePostgres(cliente, deps)) {
-    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: false };
   }
   if (typeof escritor !== "function") {
     return { ok: false, motivo: "writer_indisponivel" };
@@ -1577,7 +1588,7 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
       ok: false,
       motivo: resultadoDb.motivo || "db_lock_falhou",
       erro: resultadoDb.erro || "",
-      dbIndisponivel: true,
+      dbIndisponivel: resultadoDbIndisponivel(resultadoDb),
       resultadoDb,
       resultadoArquivo,
       resultadoManifesto
@@ -1819,7 +1830,7 @@ function registrarManifestoCheckpointObservacional(clienteId = "admin", dados = 
 async function capturarTargetCheckpointCoordenado(clienteId = "admin", dados = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   if (!deveUsarManifestStatePostgres(cliente, deps)) {
-    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: false };
   }
   const repo = repositoryManifestState(deps);
   const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
@@ -1832,7 +1843,7 @@ async function capturarTargetCheckpointCoordenado(clienteId = "admin", dados = {
 async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   if (!deveUsarManifestStatePostgres(cliente, deps)) {
-    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: true };
+    return { ok: false, motivo: "manifest_state_desabilitado", dbIndisponivel: false };
   }
   const repo = repositoryManifestState(deps);
   const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
@@ -1851,7 +1862,7 @@ async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, de
       ok: false,
       motivo: resultadoDb.motivo || "checkpoint_db_falhou",
       erro: resultadoDb.erro || "",
-      dbIndisponivel: true,
+      dbIndisponivel: resultadoDbIndisponivel(resultadoDb),
       resultadoDb
     };
   }
@@ -2004,6 +2015,52 @@ function entradasReferemMesmoItemFilaV2(entrada = {}, item = {}) {
     ...identidadesItemFilaV2(item)
   ].filter(Boolean);
   return identidadesAlvo.some(chave => identidadesEntrada.has(chave));
+}
+
+function mesmaIdentidadePrimariaFilaV2(entrada = {}, item = {}) {
+  const entradaItem = entrada?.item && typeof entrada.item === "object" ? entrada.item : entrada;
+  const idEntrada = idItem(entradaItem, entrada?.posicaoLegada || -1);
+  const idAlvo = idItem(item, item?.posicaoLegada || -1);
+  if (!idEntrada || !idAlvo || idEntrada.startsWith("indice:") || idAlvo.startsWith("indice:")) return false;
+  return idEntrada === idAlvo;
+}
+
+function provarItemTerminalizadoNoHistorico(clienteId = "admin", item = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const agora = deps.agora || Date.now();
+  const candidatos = [];
+
+  try {
+    const legado = lerHistoricoLegadoCliente(cliente, deps);
+    if (legado.ok === true) {
+      candidatos.push(...normalizarEntradasViva(legado.historico, agora).map(entrada => ({
+        fonte: FILA_HISTORICO_ARQUIVO,
+        entrada
+      })));
+    }
+  } catch (_) {}
+
+  try {
+    const tecnico = lerItensHistoricoTecnicoParaLeve(cliente, { ...deps, agora });
+    candidatos.push(...lista(tecnico?.itens).map(entrada => ({
+      fonte: HISTORICO_INCREMENTAL_DIR,
+      entrada
+    })));
+  } catch (_) {}
+
+  for (const candidato of candidatos) {
+    const entrada = candidato.entrada || {};
+    if (!mesmaIdentidadePrimariaFilaV2(entrada, item)) continue;
+    if (!itemTerminal(entrada.item || entrada, agora)) continue;
+    return {
+      provado: true,
+      fonte: candidato.fonte,
+      status: statusItem(entrada.item || entrada),
+      itemId: idItem(entrada.item || entrada, entrada.posicaoLegada || -1)
+    };
+  }
+
+  return { provado: false, motivo: "item_terminal_nao_comprovado" };
 }
 
 function itemTerminal(item = {}, agora = Date.now()) {
@@ -2580,11 +2637,36 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
     .filter(entrada => entrada.bucket === "viva");
   const indice = entradasExistentes.findIndex(entrada => entradasReferemMesmoItemFilaV2(entrada, item));
   if (indice < 0) {
+    const provaTerminal = provarItemTerminalizadoNoHistorico(cliente, item, { ...deps, agora });
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    if (provaTerminal.provado === true) {
+      return {
+        ok: true,
+        idempotente: true,
+        terminalHistorico: true,
+        motivo: "item_ja_terminal_idempotente",
+        atualizouViva: false,
+        removeuDaViva: false,
+        etapa: "validacao_item",
+        codigoErro: "item_ja_terminal_idempotente",
+        errno: null,
+        path: caminhoSeguroArquivo(caminhoViva, cliente),
+        itemId: idItem(item),
+        statusAntes: provaTerminal.status || "",
+        statusDepois: statusItem(item),
+        causaInterna: "item_ja_terminal_idempotente",
+        terminalHistoricoFonte: provaTerminal.fonte,
+        totalViva: entradasExistentes.length,
+        bytesLidosViva: leitura.bytes || 0,
+        updateVivaMs: duracaoMs,
+        rodadaId: texto(deps.rodadaId || deps.cicloId || "")
+      };
+    }
     return {
-      ok: true,
-      idempotente: true,
-      motivo: "item_nao_encontrado_na_viva",
+      ok: false,
+      idempotente: false,
+      tipoFalha: "mutacao_viva_nao_confirmada",
+      motivo: "mutacao_viva_nao_confirmada",
       atualizouViva: false,
       removeuDaViva: false,
       etapa: "validacao_item",
@@ -2597,7 +2679,8 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
       causaInterna: "item_nao_encontrado_na_viva",
       totalViva: entradasExistentes.length,
       bytesLidosViva: leitura.bytes || 0,
-      updateVivaMs: duracaoMs
+      updateVivaMs: duracaoMs,
+      rodadaId: texto(deps.rodadaId || deps.cicloId || "")
     };
   }
 
@@ -2877,7 +2960,8 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
         return {
           ...resultado,
           ok: false,
-          motivo: resultado?.motivo || "mutacao_viva_nao_confirmada"
+          tipoFalha: "mutacao_viva_nao_confirmada",
+          motivo: "mutacao_viva_nao_confirmada"
         };
       }
       return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
@@ -2888,9 +2972,9 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
       motivo: deps.motivo || (deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update")
     }
   );
-  const projecaoLeve = resultado.ok === true
+  const projecaoLeve = resultado.ok === true && resultado.idempotente !== true
     ? atualizarProjecaoLeveIncremental(clienteId, resultado.item || item, deps)
-    : { ok: true, pulou: true, motivo: "update_viva_falhou" };
+    : { ok: true, pulou: true, motivo: resultado.idempotente === true ? "update_viva_idempotente" : "update_viva_falhou" };
   return { ...resultado, projecaoLeve };
 }
 
