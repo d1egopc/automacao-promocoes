@@ -4748,25 +4748,75 @@ function appendHistoricoIncremental(clienteId = "admin", entradaOuItem = {}, dep
     } catch {}
     if (terminalIndexShadow.flagAtiva(deps.env || process.env)) {
       try {
-        const deltaPronto = terminalIndexShadow.baselineDeltaPronto(cliente, {
+        const terminalDeps = {
           env: deps.env || process.env,
           fs: fsImpl,
           getClientePath: deps.getClientePath
+        };
+        const validacao = terminalIndexShadow.validarTerminalIndex(cliente, terminalDeps);
+        const classificacao = terminalIndexShadow.classificarRecuperacaoTerminalIndex(cliente, terminalDeps, validacao);
+        const usarDelta = classificacao.tipo === "delta_safe";
+        const tipo = usarDelta ? "delta" : "bootstrap";
+        const agendar = usarDelta ? deps.agendarTerminalIndexDelta : deps.agendarTerminalIndexBootstrap;
+        const sourceRevisionHash = classificacao.currentSourceRevision
+          ? terminalIndexShadow.hashConteudo(classificacao.currentSourceRevision).slice(0, 12)
+          : "";
+        const logSignal = (evento, motivo, extras = {}) => logOperacional(deps.logger, {
+          versao: 1,
+          evento,
+          workspaceKey: hashWorkspaceLog(cliente),
+          motivo: String(motivo || "").slice(0, 80),
+          attempt: 0,
+          circuitClass: "terminal_index",
+          queueDepth: null,
+          sourceRevision: sourceRevisionHash,
+          ...extras
         });
-        const agendar = deltaPronto
-          ? deps.agendarTerminalIndexDelta
-          : deps.agendarTerminalIndexBootstrap;
+        logSignal(usarDelta ? "delta_signal_primary" : "bootstrap_signal_primary", classificacao.motivo);
         if (typeof agendar === "function") {
-          const agendamento = agendar({
-            clienteId: cliente,
-            checkpointRevision: `terminal-delta-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
-            targetGeneration: 0,
-            dataDir: deps.dataDir
-          });
-          if (agendamento && typeof agendamento.catch === "function") agendamento.catch(() => {});
+          let agendamento;
+          try {
+            agendamento = agendar({
+              clienteId: cliente,
+              checkpointRevision: `terminal-delta-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+              targetGeneration: 0,
+              dataDir: deps.dataDir,
+              sourceRevision: classificacao.currentSourceRevision || ""
+            });
+          } catch (erroAgendamento) {
+            logSignal(`${tipo}_signal_rejected`, erroAgendamento?.code || "callback_exception");
+          }
+          if (agendamento !== undefined) {
+            const aceitoImediato = agendamento?.accepted === true;
+            Promise.resolve(agendamento).then(resultado => {
+              const aceito = aceitoImediato || resultado?.accepted === true || resultado?.ok === true || resultado?.coalesced === true;
+              const coalesced = resultado?.coalesced === true;
+              logSignal(aceito ? (coalesced ? `${tipo}_signal_coalesced` : `${tipo}_signal_accepted`) : `${tipo}_signal_rejected`, resultado?.motivo || (aceito ? "accepted" : "rejected"), {
+                attempt: Number(resultado?.attempt || 0),
+                queueDepth: Number.isFinite(Number(resultado?.queueDepthGlobal)) ? Number(resultado.queueDepthGlobal) : null,
+                sourceRevision: String(resultado?.sourceRevisionHash || sourceRevisionHash).slice(0, 12)
+              });
+            }, erroAgendamento => {
+              logSignal(`${tipo}_signal_rejected`, erroAgendamento?.code || "promise_rejected");
+            });
+          } else {
+            logSignal(`${tipo}_signal_rejected`, "callback_sem_resultado");
+          }
+        } else {
+          logSignal(`${tipo}_signal_rejected`, `${tipo}_callback_ausente`);
         }
-      } catch {
+      } catch (erroShadow) {
         // A shadow maintenance hint must never affect the factual append.
+        logOperacional(deps.logger, {
+          versao: 1,
+          evento: "delta_signal_rejected",
+          workspaceKey: hashWorkspaceLog(cliente),
+          motivo: String(erroShadow?.code || erroShadow?.message || "shadow_signal_exception").slice(0, 80),
+          attempt: 0,
+          circuitClass: "terminal_index",
+          queueDepth: null,
+          sourceRevision: ""
+        });
       }
     }
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);

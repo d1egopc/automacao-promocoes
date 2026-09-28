@@ -21,7 +21,12 @@ const {
   erroSanitizado,
   sameIdentity
 } = require("./persistence-protocol");
-const { registrarManutencaoTerminalIndex } = require("./terminal-index-shadow");
+const {
+  flagAtiva: terminalIndexShadowAtivo,
+  registrarManutencaoTerminalIndex,
+  validarTerminalIndex,
+  classificarRecuperacaoTerminalIndex
+} = require("./terminal-index-shadow");
 
 function agoraMs() {
   return Date.now();
@@ -92,7 +97,10 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     loggedRoutingReasons: new Set(),
     completedByWorkspace: new Map(),
     maxQueueWaitByWorkspace: new Map(),
-    errorsByWorkspace: new Map()
+    errorsByWorkspace: new Map(),
+    terminalIndexIntents: new Map(),
+    terminalIndexRetryTimer: null,
+    terminalIndexRetryCount: 0
   };
 
   function globalAtivo() {
@@ -128,12 +136,15 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         clienteId: cliente,
         workspaceKey: hashWorkspace(cliente),
         fila: [],
+        // Compatibility aliases: circuitoAberto/falhas/ultimaFalha remain
+        // the operational checkpoint circuit consumed by existing callers.
         circuitoAberto: false,
         falhas: 0,
         ultimaFalha: null,
+        terminalIndexCircuitOpen: false,
+        terminalIndexFailures: 0,
+        terminalIndexLastFailure: null,
         bytesPendentes: 0,
-        deltaPending: false,
-        deltaPayload: null
       };
       estado.lanes.set(cliente, lane);
     }
@@ -160,18 +171,20 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     return operation === OP_TERMINAL_INDEX_BOOTSTRAP || operation === OP_TERMINAL_INDEX_DELTA;
   }
 
-  function existeDeltaAberto(lane) {
-    return estado.ativo?.lane === lane && estado.ativo.job.operation === OP_TERMINAL_INDEX_DELTA ||
-      Boolean(lane?.fila.some(item => item.job.operation === OP_TERMINAL_INDEX_DELTA));
+  function itemPermitidoPeloCircuito(lane, item) {
+    if (!lane || !item) return false;
+    const terminalIndex = ehManutencaoTerminalIndex(item.job.operation);
+    if (terminalIndex) return !lane.terminalIndexCircuitOpen || item.probeTerminalIndexCircuit === true;
+    return !lane.circuitoAberto;
   }
 
-  function agendarDeltaPendente(lane) {
-    if (!lane?.deltaPending || estado.encerrando || lane.circuitoAberto) return;
-    const payload = lane.deltaPayload;
-    lane.deltaPending = false;
-    lane.deltaPayload = null;
-    if (!payload) return;
-    void enfileirar(OP_TERMINAL_INDEX_DELTA, payload);
+  function laneTemItemElegivel(lane) {
+    return Boolean(lane?.fila.some(item => itemPermitidoPeloCircuito(lane, item)));
+  }
+
+  function hashSourceRevision(payload = {}) {
+    const revision = String(payload.sourceRevision || payload.expectedSourceRevisions?.sourceRevision || "");
+    return revision ? crypto.createHash("sha256").update(revision).digest("hex").slice(0, 12) : "";
   }
 
   function estimarBytes(job) {
@@ -188,16 +201,20 @@ function criarCoordenadorPersistencia(opcoes = {}) {
   }
 
   function marcarPronto(lane) {
-    if (!lane || !lane.fila.length || lane.circuitoAberto) return;
+    if (!laneTemItemElegivel(lane)) return;
     if (estado.readySet.has(lane.clienteId)) return;
     estado.readySet.add(lane.clienteId);
     estado.readyWorkspaces.push(lane.clienteId);
   }
 
-  function rejeitarFilaLane(lane, motivo) {
+  function rejeitarFilaLane(lane, motivo, predicate = () => true) {
     if (!lane) return;
-    const pendentes = lane.fila.splice(0);
-    lane.bytesPendentes = 0;
+    const pendentes = [];
+    const retidos = [];
+    for (const item of lane.fila) (predicate(item) ? pendentes : retidos).push(item);
+    lane.fila = retidos;
+    lane.bytesPendentes = retidos.reduce((total, item) => total + item.bytesEstimados, 0);
+    estado.readyWorkspaces = estado.readyWorkspaces.filter(cliente => cliente !== lane.clienteId);
     estado.readySet.delete(lane.clienteId);
     for (const item of pendentes) {
       item.resolve(rejeicao(motivo, motivo, {
@@ -205,6 +222,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         workspaceKey: lane.workspaceKey
       }));
     }
+    marcarPronto(lane);
   }
 
   function rejeitarFilas(motivo) {
@@ -220,6 +238,14 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       em: new Date().toISOString()
     };
     log({ estado: "circuit_open", escopo: "global", motivo, falhas: estado.falhas });
+    if (estado.terminalIndexRetryTimer) {
+      clearTimeout(estado.terminalIndexRetryTimer);
+      estado.terminalIndexRetryTimer = null;
+    }
+    for (const intent of estado.terminalIndexIntents.values()) {
+      intent.blockedGlobal = true;
+      intent.retryAt = null;
+    }
     rejeitarFilas(motivo);
   }
 
@@ -240,7 +266,26 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       motivo,
       falhas: lane.falhas
     });
-    rejeitarFilaLane(lane, motivo);
+    rejeitarFilaLane(lane, motivo, item => !ehManutencaoTerminalIndex(item.job.operation));
+  }
+
+  function registrarFalhaTerminalIndex(lane, motivo, erro = null) {
+    if (!lane) return;
+    lane.terminalIndexCircuitOpen = true;
+    lane.terminalIndexFailures += 1;
+    lane.terminalIndexLastFailure = {
+      motivo,
+      erro: erroSanitizado(erro || {}),
+      em: new Date().toISOString()
+    };
+    log({
+      estado: "circuit_open",
+      escopo: "workspace_terminal_index",
+      workspaceKey: lane.workspaceKey,
+      motivo,
+      falhas: lane.terminalIndexFailures
+    });
+    rejeitarFilaLane(lane, motivo, item => ehManutencaoTerminalIndex(item.job.operation));
   }
 
   function estadoPublico() {
@@ -255,8 +300,15 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         queued: lane.fila.length,
         queueDepth: profundidadeLane(lane),
         circuitOpen: lane.circuitoAberto,
+        checkpointCircuitOpen: lane.circuitoAberto,
+        terminalIndexCircuitOpen: lane.terminalIndexCircuitOpen,
         failures: lane.falhas,
-        lastFailure: lane.ultimaFalha
+        lastFailure: lane.ultimaFalha,
+        checkpointFailures: lane.falhas,
+        checkpointLastFailure: lane.ultimaFalha,
+        terminalIndexFailures: lane.terminalIndexFailures,
+        terminalIndexLastFailure: lane.terminalIndexLastFailure,
+        maintenancePending: estado.terminalIndexIntents.has(lane.clienteId)
       });
     }
     const completedByWorkspace = Object.fromEntries(estado.completedByWorkspace);
@@ -273,13 +325,26 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       circuitOpen: estado.aberto,
       globalCircuitOpen: estado.aberto,
       circuitByWorkspace,
+      checkpointCircuitByWorkspace: circuitByWorkspace,
+      terminalIndexCircuitByWorkspace: Object.fromEntries([...estado.lanes.values()].map(lane => [lane.workspaceKey, lane.terminalIndexCircuitOpen])),
       failures: estado.falhas,
       lastFailure: estado.ultimaFalha,
       backpressureRejections: estado.backpressureRejections,
       completedByWorkspace,
       maxQueueWaitByWorkspace,
       errorsByWorkspace,
-      retries: 0,
+      retries: estado.terminalIndexRetryCount,
+      terminalIndexPending: estado.terminalIndexIntents.size,
+      terminalIndexIntents: [...estado.terminalIndexIntents.values()].map(intent => ({
+        workspaceKey: intent.lane.workspaceKey,
+        operation: intent.operation,
+        attempt: intent.attempt,
+        inFlight: intent.inFlight,
+        queued: intent.queued,
+        blockedGlobal: intent.blockedGlobal,
+        queueDepth: profundidadeLane(intent.lane),
+        retryInMs: intent.retryAt ? Math.max(0, intent.retryAt - agoraMs()) : null
+      })),
       lanes
     };
   }
@@ -315,6 +380,11 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       if (mensagem.type === RESPONSE_OK) {
         const metricas = metricasJob(atual.job);
         if (ehManutencaoTerminalIndex(atual.job.operation) && mensagem.result?.ok !== true) {
+          registrarFalhaTerminalIndex(
+            atual.lane,
+            mensagem.result?.motivo || "terminal_index_maintenance_failed",
+            { code: mensagem.result?.motivo || "terminal_index_maintenance_failed" }
+          );
           log({
             evento: "job_rejected",
             operacao: atual.job.operation,
@@ -329,9 +399,12 @@ function criarCoordenadorPersistencia(opcoes = {}) {
             workspaceKey: atual.lane.workspaceKey,
             coordinatorMetrics: metricas
           });
-          agendarDeltaPendente(atual.lane);
           bombear();
           return;
+        }
+        if (ehManutencaoTerminalIndex(atual.job.operation)) {
+          atual.lane.terminalIndexCircuitOpen = false;
+          atual.lane.terminalIndexLastFailure = null;
         }
         const previousMaxWait = estado.maxQueueWaitByWorkspace.get(atual.lane.workspaceKey) || 0;
         estado.maxQueueWaitByWorkspace.set(
@@ -353,6 +426,14 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         if (atual.job.operation === OP_TERMINAL_INDEX_DELTA && mensagem.result?.ok === true) {
           registrarManutencaoTerminalIndex(atual.lane.clienteId, "delta_applied");
         }
+        if (atual.job.operation === OP_TERMINAL_INDEX_BOOTSTRAP && mensagem.result?.ok === true) {
+          logTerminalIndex("bootstrap_executed", {
+            lane: atual.lane,
+            operation: atual.job.operation,
+            attempt: 0,
+            payload: { sourceRevision: mensagem.result?.sourceRevision || "" }
+          }, { generation: Number(mensagem.result?.generation || 0) });
+        }
         atual.resolve({
           ...(mensagem.result || {}),
           persistenceMode: "worker",
@@ -369,8 +450,15 @@ function criarCoordenadorPersistencia(opcoes = {}) {
           motivo,
           ...metricasJob(atual.job)
         });
-        if (ehManutencaoTerminalIndex(atual.job.operation)) {
-          // Falha esperada do shadow/delta não abre o circuito da persistência.
+        if (erroGlobalWorker(motivo)) {
+          estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
+          registrarFalhaGlobal(motivo, mensagem.error);
+          atual.resolve(rejeicao(motivo, mensagem.error?.message, {
+            persistenceMode: "worker",
+            workspaceKey: atual.lane.workspaceKey
+          }));
+        } else if (ehManutencaoTerminalIndex(atual.job.operation)) {
+          registrarFalhaTerminalIndex(atual.lane, motivo, mensagem.error);
           atual.resolve(rejeicao(motivo, mensagem.error?.message, {
             persistenceMode: "worker",
             workspaceKey: atual.lane.workspaceKey
@@ -388,7 +476,6 @@ function criarCoordenadorPersistencia(opcoes = {}) {
           }));
         }
       }
-      agendarDeltaPendente(atual.lane);
       bombear();
     });
     worker.on("error", erro => {
@@ -440,10 +527,12 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       const cliente = estado.readyWorkspaces.shift();
       estado.readySet.delete(cliente);
       const lane = estado.lanes.get(cliente);
-      if (!lane || lane.circuitoAberto || !lane.fila.length) continue;
-      const item = lane.fila.shift();
+      if (!lane || !lane.fila.length) continue;
+      const indiceElegivel = lane.fila.findIndex(item => itemPermitidoPeloCircuito(lane, item));
+      if (indiceElegivel < 0) continue;
+      const [item] = lane.fila.splice(indiceElegivel, 1);
       lane.bytesPendentes = Math.max(0, lane.bytesPendentes - item.bytesEstimados);
-      if (lane.fila.length) marcarPronto(lane);
+      if (laneTemItemElegivel(lane)) marcarPronto(lane);
       return item;
     }
     return null;
@@ -467,6 +556,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       estado.ativo = null;
       const terminalIndexShadow = ehManutencaoTerminalIndex(atual.job.operation);
       if (terminalIndexShadow) {
+        // The timeout kills the shared Worker thread; this is a global health
+        // failure, not merely a Terminal Index maintenance rejection.
+        registrarFalhaGlobal("worker_timeout");
         log({
           evento: "job_timeout",
           operacao: atual.job.operation,
@@ -483,7 +575,6 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         workspaceKey: atual.lane.workspaceKey
       }));
       void encerrarWorker(worker);
-      agendarDeltaPendente(atual.lane);
       bombear();
     }, timeout);
     atual.job.queuedAt = Number(atual.job.queuedAt || agoraMs());
@@ -504,7 +595,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     }
   }
 
-  function enfileirar(operation, payload = {}) {
+  function enfileirarInterno(operation, payload = {}, { probeTerminalIndexCircuit = false } = {}) {
     let workspace;
     let revision;
     try {
@@ -526,10 +617,19 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     if (estado.encerrando) return Promise.resolve(rejeicao("persistence_worker_shutting_down"));
     if (estado.aberto) return Promise.resolve(rejeicao("persistence_worker_circuit_open"));
     const lane = obterLane(workspace);
-    if (lane.circuitoAberto) {
-      return Promise.resolve(rejeicao("persistence_worker_workspace_circuit_open", "", {
+    if (ehManutencaoTerminalIndex(operation) && lane.terminalIndexCircuitOpen && !probeTerminalIndexCircuit) {
+      return Promise.resolve(rejeicao("persistence_worker_terminal_index_circuit_open", "", {
+        retryable: true,
+        circuitClass: "terminal_index",
         persistenceMode: "worker",
         workspaceKey: lane.workspaceKey
+      }));
+    }
+    if (!ehManutencaoTerminalIndex(operation) && lane.circuitoAberto) {
+      return Promise.resolve(rejeicao("persistence_worker_workspace_circuit_open", "", {
+        persistenceMode: "worker",
+        workspaceKey: lane.workspaceKey,
+        circuitClass: "checkpoint"
       }));
     }
     const seq = ++estado.seq;
@@ -546,17 +646,6 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       persistenceMode: "worker",
       queuedAt: agoraMs()
     };
-    if (operation === OP_TERMINAL_INDEX_DELTA && existeDeltaAberto(lane)) {
-      lane.deltaPending = true;
-      lane.deltaPayload = { ...payload, clienteId: workspace, checkpointRevision: revision };
-      return Promise.resolve({
-        ok: true,
-        coalesced: true,
-        operation,
-        persistenceMode: "worker",
-        workspaceKey: lane.workspaceKey
-      });
-    }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);
     const maxWorkspace = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS_WORKSPACE", 25);
@@ -577,13 +666,241 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         queueDepthWorkspace: profundidadeLane(lane)
       }));
     }
-    return new Promise(resolve => {
-      const item = { job, resolve, reject: resolve, lane, bytesEstimados };
+    const promise = new Promise(resolve => {
+      const item = { job, resolve, reject: resolve, lane, bytesEstimados, probeTerminalIndexCircuit };
       lane.fila.push(item);
       lane.bytesPendentes += bytesEstimados;
       marcarPronto(lane);
       bombear();
     });
+    promise.accepted = true;
+    return promise;
+  }
+
+  const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000, 15000];
+
+  function logTerminalIndex(evento, intent, extras = {}) {
+    log({
+      evento,
+      operacao: intent?.operation || "",
+      workspaceKey: intent?.lane?.workspaceKey || "",
+      attempt: Number(intent?.attempt || 0),
+      circuitClass: "terminal_index",
+      queueDepth: intent?.lane ? profundidadeLane(intent.lane) : 0,
+      sourceRevision: hashSourceRevision(intent?.payload || {}),
+      ...extras
+    });
+  }
+
+  function terminalIndexDeps(intent) {
+    const dataDir = normalizarDataDir(intent.payload.dataDir || env.DATA_DIR || "/data");
+    return {
+      env,
+      getClientePath: clienteId => path.resolve(dataDir, "clientes", workspaceSeguro(clienteId))
+    };
+  }
+
+  function classificarIntent(intent) {
+    try {
+      const deps = terminalIndexDeps(intent);
+      const validacao = validarTerminalIndex(intent.lane.clienteId, deps);
+      if (validacao.valido) return { valido: true, validacao, recuperacao: { tipo: "valid" } };
+      return {
+        valido: false,
+        validacao,
+        recuperacao: classificarRecuperacaoTerminalIndex(intent.lane.clienteId, deps, validacao)
+      };
+    } catch (erro) {
+      return { valido: false, recuperacao: { tipo: "bootstrap_required", motivo: erro?.code || "validation_error" } };
+    }
+  }
+
+  function agendarRetryTerminalIndex() {
+    if (estado.encerrando || estado.aberto) return;
+    let proximo = Infinity;
+    for (const intent of estado.terminalIndexIntents.values()) {
+      if (intent.inFlight || intent.blockedGlobal || !Number.isFinite(intent.retryAt)) continue;
+      proximo = Math.min(proximo, intent.retryAt);
+    }
+    if (!Number.isFinite(proximo)) return;
+    const restante = Math.max(0, proximo - agoraMs());
+    if (estado.terminalIndexRetryTimer) {
+      clearTimeout(estado.terminalIndexRetryTimer);
+      estado.terminalIndexRetryTimer = null;
+    }
+    estado.terminalIndexRetryTimer = setTimeout(() => {
+      estado.terminalIndexRetryTimer = null;
+      if (estado.encerrando || estado.aberto) return;
+      const due = [...estado.terminalIndexIntents.values()]
+        .filter(intent => !intent.inFlight && !intent.blockedGlobal && intent.retryAt <= agoraMs())
+        .sort((a, b) => a.retryAt - b.retryAt || a.createdAt - b.createdAt);
+      const intent = due[0];
+      if (intent) tentarIntentTerminalIndex(intent, true);
+      else agendarRetryTerminalIndex();
+    }, restante);
+    estado.terminalIndexRetryTimer.unref?.();
+  }
+
+  function programarRetry(intent, motivo) {
+    if (estado.aberto) {
+      intent.blockedGlobal = true;
+      intent.retryAt = null;
+      logTerminalIndex("delta_signal_rejected", intent, { motivo: "global_circuit_open" });
+      return;
+    }
+    intent.attempt += 1;
+    estado.terminalIndexRetryCount += 1;
+    const delay = RETRY_DELAYS_MS[Math.min(intent.attempt - 1, RETRY_DELAYS_MS.length - 1)];
+    intent.retryAt = agoraMs() + delay;
+    logTerminalIndex(intent.operation === OP_TERMINAL_INDEX_DELTA ? "delta_retry_scheduled" : "bootstrap_retry_scheduled", intent, {
+      motivo: String(motivo || "maintenance_retry").slice(0, 80),
+      delayMs: delay,
+      queueDepth: profundidadeGlobal()
+    });
+    agendarRetryTerminalIndex();
+  }
+
+  function concluirIntentTerminalIndex(intent, versaoEnviada, resultado) {
+    if (estado.terminalIndexIntents.get(intent.lane.clienteId) !== intent) return;
+    intent.inFlight = false;
+    intent.queued = false;
+    intent.blockedGlobal = false;
+    if (estado.aberto || resultado?.motivo === "persistence_worker_circuit_open") {
+      intent.blockedGlobal = true;
+      intent.retryAt = null;
+      logTerminalIndex("delta_signal_rejected", intent, { motivo: "global_circuit_open" });
+      return;
+    }
+    const outcome = classificarIntent(intent);
+    if (outcome.valido || (resultado?.ok === true && !terminalIndexShadowAtivo(env))) {
+      intent.lane.terminalIndexCircuitOpen = false;
+      intent.lane.terminalIndexLastFailure = null;
+      estado.terminalIndexIntents.delete(intent.lane.clienteId);
+      if (outcome.valido) logTerminalIndex("delta_catchup_complete", intent, {
+        motivo: resultado?.ok === true ? "source_revision_converged" : "already_converged_after_job_result",
+        sourceRevision: hashSourceRevision({ sourceRevision: outcome.validacao.index.sourceRevision }),
+        generation: Number(outcome.validacao.index.generation)
+      });
+      agendarRetryTerminalIndex();
+      return;
+    }
+
+    if (!terminalIndexShadowAtivo(env)) {
+      estado.terminalIndexIntents.delete(intent.lane.clienteId);
+      agendarRetryTerminalIndex();
+      return;
+    }
+
+    if (outcome.recuperacao?.tipo === "delta_safe") {
+      intent.operation = OP_TERMINAL_INDEX_DELTA;
+    } else if (outcome.recuperacao?.tipo === "bootstrap_required") {
+      intent.operation = OP_TERMINAL_INDEX_BOOTSTRAP;
+    }
+    if (resultado?.ok === true && versaoEnviada !== intent.version) {
+      intent.retryAt = agoraMs();
+      logTerminalIndex(intent.operation === OP_TERMINAL_INDEX_DELTA ? "delta_retry_scheduled" : "bootstrap_retry_scheduled", intent, {
+        motivo: "source_advanced_during_maintenance",
+        delayMs: 0
+      });
+      agendarRetryTerminalIndex();
+      return;
+    }
+
+    const motivo = String(resultado?.motivo || (resultado?.ok ? "source_still_stale" : "maintenance_rejected"));
+    if (["persistence_worker_disabled", "persistence_worker_canary_not_selected", "persistence_worker_shutting_down", "workspace_invalido", "checkpoint_revision_invalido", "payload_invalido"].includes(motivo)) {
+      estado.terminalIndexIntents.delete(intent.lane.clienteId);
+      logTerminalIndex("delta_signal_rejected", intent, { motivo: motivo.slice(0, 80) });
+      agendarRetryTerminalIndex();
+      return;
+    }
+    logTerminalIndex("delta_signal_rejected", intent, { motivo: motivo.slice(0, 80), retryable: true });
+    programarRetry(intent, motivo);
+  }
+
+  function tentarIntentTerminalIndex(intent, retry = false) {
+    if (estado.terminalIndexIntents.get(intent.lane.clienteId) !== intent || intent.inFlight || estado.encerrando) {
+      return Promise.resolve({ ok: true, accepted: true, coalesced: true, motivo: "intent_in_flight" });
+    }
+    if (estado.aberto) {
+      intent.blockedGlobal = true;
+      intent.retryAt = null;
+      return Promise.resolve(rejeicao("persistence_worker_circuit_open", "", { circuitClass: "global" }));
+    }
+    const versaoEnviada = intent.version;
+    const operation = intent.operation;
+    const payload = { ...intent.payload, clienteId: intent.lane.clienteId };
+    intent.inFlight = true;
+    intent.queued = false;
+    intent.blockedGlobal = false;
+    intent.retryAt = null;
+    const promise = enfileirarInterno(operation, payload, { probeTerminalIndexCircuit: true });
+    intent.queued = promise.accepted === true;
+    if (promise.accepted === true) {
+      logTerminalIndex(retry ? "delta_retry_applied" : "delta_signal_accepted", intent, {
+        motivo: promise.accepted === true && intent.lane.terminalIndexCircuitOpen ? "terminal_index_circuit_probe" : "queued",
+        queueDepth: profundidadeGlobal()
+      });
+    }
+    promise.then(
+      resultado => concluirIntentTerminalIndex(intent, versaoEnviada, resultado),
+      erro => concluirIntentTerminalIndex(intent, versaoEnviada, rejeicao(erro?.code || "maintenance_promise_rejected"))
+    );
+    return promise;
+  }
+
+  function solicitarManutencaoTerminalIndex(operation, payload = {}) {
+    let workspace;
+    let revision;
+    try {
+      workspace = workspaceSeguro(payload.clienteId);
+      revision = revisionSegura(payload.checkpointRevision);
+    } catch (erro) {
+      return Promise.resolve(rejeicao(erro.message || "payload_invalido"));
+    }
+    const lane = obterLane(workspace);
+    let intent = estado.terminalIndexIntents.get(workspace);
+    if (intent) {
+      intent.version += 1;
+      intent.payload = { ...intent.payload, ...payload, clienteId: workspace, checkpointRevision: revision };
+      // Do not replace an in-flight Delta with a Bootstrap request: a reader
+      // can observe the brief index/proof publication boundary and classify
+      // that transient mismatch as bootstrap-required. The post-job source
+      // validation is authoritative and upgrades to Bootstrap if it persists.
+      if (operation === OP_TERMINAL_INDEX_BOOTSTRAP && !intent.inFlight && !intent.queued) {
+        intent.operation = operation;
+      }
+      if (intent.inFlight || intent.queued) {
+        logTerminalIndex(operation === OP_TERMINAL_INDEX_DELTA ? "delta_signal_coalesced" : "bootstrap_signal_coalesced", intent, {
+          motivo: "workspace_intent_pending"
+        });
+        return Promise.resolve({ ok: true, accepted: true, coalesced: true, operation, workspaceKey: lane.workspaceKey });
+      }
+      if (intent.blockedGlobal && !estado.aberto) {
+        intent.blockedGlobal = false;
+        intent.retryAt = agoraMs();
+      }
+      if (intent.retryAt && intent.retryAt > agoraMs()) {
+        logTerminalIndex(operation === OP_TERMINAL_INDEX_DELTA ? "delta_signal_coalesced" : "bootstrap_signal_coalesced", intent, {
+          motivo: "retry_already_scheduled"
+        });
+        return Promise.resolve({ ok: true, accepted: true, coalesced: true, operation, workspaceKey: lane.workspaceKey });
+      }
+    } else {
+      intent = {
+        lane,
+        operation,
+        payload: { ...payload, clienteId: workspace, checkpointRevision: revision },
+        version: 1,
+        attempt: 0,
+        createdAt: agoraMs(),
+        retryAt: null,
+        inFlight: false,
+        queued: false,
+        blockedGlobal: false
+      };
+      estado.terminalIndexIntents.set(workspace, intent);
+    }
+    return tentarIntentTerminalIndex(intent, false);
   }
 
   function identidadeArquivo(file) {
@@ -632,6 +949,8 @@ function criarCoordenadorPersistencia(opcoes = {}) {
 
   async function shutdown({ timeoutMs = timeoutWorkerMs(env) } = {}) {
     estado.encerrando = true;
+    if (estado.terminalIndexRetryTimer) clearTimeout(estado.terminalIndexRetryTimer);
+    estado.terminalIndexRetryTimer = null;
     rejeitarFilas("persistence_worker_shutdown");
     const started = agoraMs();
     while (estado.ativo && agoraMs() - started < timeoutMs) {
@@ -657,12 +976,19 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       lane.circuitoAberto = false;
       lane.ultimaFalha = null;
       log({ estado: "circuit_recovery_manual", escopo: "workspace", workspaceKey: lane.workspaceKey });
+      marcarPronto(lane);
+      bombear();
       return { ok: true, motivo: "persistence_worker_recovery_manual", persistenceMode: "worker" };
     }
     if (estado.readyWorkspaces.length || estado.worker) return rejeicao("persistence_worker_recovery_busy");
     estado.aberto = false;
     estado.ultimaFalha = null;
     log({ estado: "circuit_recovery_manual", escopo: "global" });
+    for (const intent of estado.terminalIndexIntents.values()) {
+      intent.blockedGlobal = false;
+      if (!intent.inFlight) intent.retryAt = agoraMs();
+    }
+    agendarRetryTerminalIndex();
     return { ok: true, motivo: "persistence_worker_recovery_manual" };
   }
 
@@ -671,11 +997,11 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     enabledFor: clienteId => modoFor(clienteId) === "worker",
     modeFor: modoFor,
     getState: estadoPublico,
-    prepare: payload => enfileirar(OP_PREPARE, payload),
-    publish: payload => enfileirar(OP_PUBLISH, payload),
-    cleanup: payload => enfileirar(OP_CLEANUP, payload),
-    bootstrapTerminalIndex: payload => enfileirar(OP_TERMINAL_INDEX_BOOTSTRAP, payload),
-    deltaTerminalIndex: payload => enfileirar(OP_TERMINAL_INDEX_DELTA, payload),
+    prepare: payload => enfileirarInterno(OP_PREPARE, payload),
+    publish: payload => enfileirarInterno(OP_PUBLISH, payload),
+    cleanup: payload => enfileirarInterno(OP_CLEANUP, payload),
+    bootstrapTerminalIndex: payload => solicitarManutencaoTerminalIndex(OP_TERMINAL_INDEX_BOOTSTRAP, payload),
+    deltaTerminalIndex: payload => solicitarManutencaoTerminalIndex(OP_TERMINAL_INDEX_DELTA, payload),
     revalidarSources,
     shutdown,
     recover,

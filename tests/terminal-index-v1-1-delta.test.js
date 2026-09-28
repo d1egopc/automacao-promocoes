@@ -75,7 +75,7 @@ async function testDeltaBatches() {
     assert.strictEqual(proofInicial.maintenanceVersion, 1);
     assert.strictEqual(proofInicial.sourceCursors[0].cursorBytes, fs.statSync(f.jsonl).size);
 
-    for (const quantidade of [1, 10, 100]) {
+    for (const quantidade of [1, 3, 10, 100]) {
       const itens = Array.from({ length: quantidade }, (_, indice) => ({ id: `delta-${quantidade}-${indice}`, status: indice % 2 ? "enviado" : "retida" }));
       append(f, itens);
       const antes = fs.statSync(f.jsonl).size;

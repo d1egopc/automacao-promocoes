@@ -21,6 +21,8 @@ const DEFAULT_LOG_INTERVAL_MS = 30 * 1000;
 const DEFAULT_MAX_INDEX_BYTES = 32 * 1024 * 1024;
 
 const bootstrapEmAndamento = new Map();
+const bootstrapAceitoEmAndamento = new Set();
+const deltaSignalEmAndamento = new Map();
 const ultimoBootstrap = new Map();
 const ultimoLog = new Map();
 const metricasComparacao = new Map();
@@ -184,6 +186,77 @@ function baselineDeltaPronto(clienteId = "admin", deps = {}) {
     Array.isArray(proof.sourceCursors);
 }
 
+function classificarRecuperacaoTerminalIndex(clienteId = "admin", deps = {}, validacao = null) {
+  const atual = validacao || validarTerminalIndex(clienteId, deps);
+  const bootstrap = motivo => ({ tipo: "bootstrap_required", motivo });
+  if (atual?.motivo !== "terminal_index_source_stale") return bootstrap(atual?.motivo || "validacao_indisponivel");
+
+  const index = atual.index;
+  const proof = atual.proof;
+  if (!index || !proof || index.complete !== true || proof.complete !== true ||
+      index.version !== TERMINAL_INDEX_VERSION || proof.proofVersion !== TERMINAL_INDEX_PROOF_VERSION ||
+      index.maintenanceVersion !== TERMINAL_INDEX_MAINTENANCE_VERSION ||
+      proof.maintenanceVersion !== TERMINAL_INDEX_MAINTENANCE_VERSION ||
+      index.mode !== "shadow" || proof.mode !== "shadow" ||
+      index.authorityEligible !== false || proof.authorityEligible !== false ||
+      !texto(index.revision) || index.revision !== proof.revision ||
+      Number(index.generation) !== Number(proof.generation) ||
+      index.sourceRevision !== proof.sourceRevision ||
+      !Array.isArray(proof.sourceCursors)) {
+    return bootstrap("baseline_index_proof_or_cursor_invalid");
+  }
+
+  const sources = capturarSourceProof(clienteId, deps);
+  if (!sources.ok) return bootstrap(sources.motivo || "source_unavailable");
+  if (!sameIdentity(proof.sources?.legacy, sources.proof.legacy)) return bootstrap("legacy_source_changed");
+
+  const oldDir = proof.sources?.incrementalDir;
+  const currentDir = sources.proof.incrementalDir;
+  if (!oldDir || !currentDir || oldDir.dev == null || oldDir.ino == null ||
+      Number(oldDir.dev) !== Number(currentDir.dev) || Number(oldDir.ino) !== Number(currentDir.ino)) {
+    return bootstrap("incremental_directory_replaced");
+  }
+
+  const cursors = proof.sourceCursors;
+  const oldSources = Array.isArray(proof.sources?.incremental) ? proof.sources.incremental : [];
+  if (cursors.length !== oldSources.length || cursors.some((cursor, indexCursor) =>
+    cursor?.name !== oldSources[indexCursor]?.name ||
+    Number(cursor?.cursorBytes) !== Number(oldSources[indexCursor]?.identity?.size) ||
+    !sameIdentity(cursor?.identity, oldSources[indexCursor]?.identity))) {
+    return bootstrap("source_cursor_baseline_mismatch");
+  }
+
+  const currentByName = new Map(sources.proof.incremental.map(source => [source.name, source.identity]));
+  // The existing writer uses appendFileSync for these JSONL segments. Here
+  // dev/ino stability plus monotonic byte size is the inexpensive append-only
+  // eligibility check; the Worker revalidates source identity before publish.
+  for (const cursor of cursors) {
+    const identity = cursor?.identity;
+    const current = currentByName.get(cursor?.name);
+    if (!identity || !current) return bootstrap("incremental_source_removed");
+    if (identity.dev == null || identity.ino == null ||
+        Number(identity.dev) !== Number(current.dev) || Number(identity.ino) !== Number(current.ino)) {
+      return bootstrap("incremental_source_replaced");
+    }
+    const offset = Number(cursor.cursorBytes);
+    const size = Number(current.size);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(size) || size < offset) {
+      return bootstrap("incremental_source_truncated");
+    }
+    // Same-size metadata changes cannot be proven append-only from stat data.
+    if (size === offset && !sameIdentity(identity, current)) return bootstrap("incremental_source_rewritten");
+  }
+
+  return {
+    tipo: "delta_safe",
+    motivo: "append_only_sources",
+    baselineSourceRevision: texto(proof.sourceRevision),
+    currentSourceRevision: texto(sources.sourceRevision),
+    generation: Number(index.generation),
+    sourceProof: sources.proof
+  };
+}
+
 function validarTerminalIndex(clienteId = "admin", deps = {}) {
   const fsImpl = deps.fs || fs;
   const env = deps.env || process.env;
@@ -245,7 +318,7 @@ function validarTerminalIndex(clienteId = "admin", deps = {}) {
   const sources = capturarSourceProof(clienteId, deps);
   if (!sources.ok) return { valido: false, motivo: sources.motivo };
   if (!sourceProofIgual(proof.sources, sources.proof) || proof.sourceRevision !== sources.sourceRevision || index.sourceRevision !== sources.sourceRevision) {
-    return { valido: false, motivo: "terminal_index_source_stale" };
+    return { valido: false, motivo: "terminal_index_source_stale", index, proof, sources: sources.proof, currentSourceRevision: sources.sourceRevision };
   }
 
   return {
@@ -326,11 +399,84 @@ function revisionBootstrap() {
   return `terminal-${Date.now().toString(36)}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+function logSignal(deps, evento, cliente, extras = {}) {
+  if ((evento === "delta_signal_recovery" || evento === "delta_signal_coalesced") &&
+      !deveLogar(`${workspaceHash(cliente)}|${evento}`, Date.now(), 5000)) return;
+  logShadow(deps.logger || console, {
+    versao: 1,
+    evento,
+    workspaceKey: workspaceHash(cliente),
+    ...extras
+  });
+}
+
+function prometerSinal(callback, payload, deps, cliente, tipo) {
+  if (typeof callback !== "function") {
+    logSignal(deps, `${tipo}_signal_rejected`, cliente, { motivo: "callback_ausente", attempt: 0 });
+    return { promise: Promise.resolve({ ok: false, motivo: "callback_ausente" }), accepted: false };
+  }
+  let retorno;
+  try {
+    retorno = callback(payload);
+  } catch (erro) {
+    logSignal(deps, `${tipo}_signal_rejected`, cliente, {
+      motivo: texto(erro?.code || "callback_exception").slice(0, 80),
+      attempt: 0
+    });
+    return { promise: Promise.resolve({ ok: false, motivo: "callback_exception" }), accepted: false };
+  }
+  const aceitoImediato = retorno?.accepted === true;
+  const promise = Promise.resolve(retorno).then(resultado => {
+    const aceito = aceitoImediato || resultado?.accepted === true || resultado?.ok === true || resultado?.coalesced === true;
+    logSignal(deps, aceito ? (resultado?.coalesced ? `${tipo}_signal_coalesced` : `${tipo}_signal_accepted`) : `${tipo}_signal_rejected`, cliente, {
+      motivo: texto(resultado?.motivo || (aceito ? "accepted" : "rejected")).slice(0, 80),
+      attempt: Number(resultado?.attempt || 0),
+      circuitClass: texto(resultado?.circuitClass || "terminal_index"),
+      queueDepth: Number.isFinite(Number(resultado?.queueDepthGlobal)) ? Number(resultado.queueDepthGlobal) : null,
+      sourceRevision: texto(resultado?.sourceRevisionHash || "").slice(0, 12)
+    });
+    return resultado;
+  }, erro => {
+    logSignal(deps, `${tipo}_signal_rejected`, cliente, {
+      motivo: texto(erro?.code || "callback_rejected").slice(0, 80),
+      attempt: 0,
+      circuitClass: "terminal_index"
+    });
+    return { ok: false, motivo: "callback_rejected" };
+  });
+  return { promise, accepted: aceitoImediato };
+}
+
+function solicitarDelta(cliente, deps = {}, extras = {}) {
+  if (deltaSignalEmAndamento.has(cliente)) {
+    logSignal(deps, "delta_signal_coalesced", cliente, { motivo: "signal_in_flight", circuitClass: "terminal_index", ...extras });
+    return { agendado: true, coalesced: true, motivo: "delta_sinal_coalescido" };
+  }
+  const sinal = prometerSinal(deps.agendarTerminalIndexDelta, {
+    clienteId: cliente,
+    checkpointRevision: revisionBootstrap(),
+    targetGeneration: Number(deps.targetGeneration || 0),
+    sourceRevision: texto(extras.sourceRevision || "")
+  }, deps, cliente, "delta");
+  deltaSignalEmAndamento.set(cliente, sinal.promise);
+  sinal.promise.finally(() => {
+    if (deltaSignalEmAndamento.get(cliente) === sinal.promise) deltaSignalEmAndamento.delete(cliente);
+  });
+  return { agendado: sinal.accepted, motivo: sinal.accepted ? "delta_aceito" : "delta_solicitado", promise: sinal.promise };
+}
+
 function agendarBootstrap(clienteId, deps = {}) {
   const agendar = deps.agendarTerminalIndexBootstrap;
-  if (typeof agendar !== "function") return { agendado: false, motivo: "bootstrap_callback_ausente" };
   const cliente = texto(clienteId || "admin");
-  if (bootstrapEmAndamento.has(cliente)) return { agendado: false, motivo: "bootstrap_em_andamento" };
+  if (typeof agendar !== "function") {
+    logSignal(deps, "bootstrap_signal_requested", cliente, { motivo: "bootstrap_required", circuitClass: "terminal_index", attempt: 0 });
+    logSignal(deps, "bootstrap_signal_rejected", cliente, { motivo: "callback_ausente", circuitClass: "terminal_index", attempt: 0 });
+    return { agendado: false, motivo: "bootstrap_callback_ausente" };
+  }
+  if (bootstrapEmAndamento.has(cliente)) {
+    logSignal(deps, "bootstrap_signal_coalesced", cliente, { motivo: "bootstrap_em_andamento", circuitClass: "terminal_index", attempt: 0 });
+    return { agendado: false, motivo: "bootstrap_em_andamento" };
+  }
   const env = deps.env || process.env;
   const intervaloConfigurado = Number(env.FILA_TERMINAL_INDEX_BOOTSTRAP_INTERVAL_MS);
   const intervalo = Number.isFinite(intervaloConfigurado) && intervaloConfigurado >= 0
@@ -338,22 +484,38 @@ function agendarBootstrap(clienteId, deps = {}) {
     : DEFAULT_BOOTSTRAP_INTERVAL_MS;
   const agora = Date.now();
   if (agora - (ultimoBootstrap.get(cliente) || 0) < intervalo) {
+    logSignal(deps, "bootstrap_signal_coalesced", cliente, { motivo: "bootstrap_throttle_accepted_attempt", circuitClass: "terminal_index", attempt: 0 });
     return { agendado: false, motivo: "bootstrap_throttle" };
   }
-  ultimoBootstrap.set(cliente, agora);
-  registrarManutencaoTerminalIndex(cliente, "rebuild_requested");
+  logSignal(deps, "bootstrap_signal_requested", cliente, { motivo: "bootstrap_required", circuitClass: "terminal_index", attempt: 0 });
   definirTerminalIndexBootstrapAtivo(true);
-  const promise = Promise.resolve().then(() => agendar({
+  const sinal = prometerSinal(agendar, {
     clienteId: cliente,
     checkpointRevision: revisionBootstrap(),
     targetGeneration: Number(deps.targetGeneration || 0)
-  })).catch(erro => ({ ok: false, motivo: erro?.message || "terminal_index_bootstrap_error" }))
-    .finally(() => {
+  }, deps, cliente, "bootstrap");
+  const promessaExecucao = sinal.promise.then(resultado => {
+    const aceito = sinal.accepted || resultado?.accepted === true || resultado?.ok === true || resultado?.coalesced === true;
+    if (aceito && !sinal.accepted) {
+      ultimoBootstrap.set(cliente, agora);
+      registrarManutencaoTerminalIndex(cliente, "rebuild_requested");
+      bootstrapAceitoEmAndamento.add(cliente);
+      definirTerminalIndexBootstrapAtivo(true);
+    }
+    return resultado;
+  }).finally(() => {
       bootstrapEmAndamento.delete(cliente);
-      definirTerminalIndexBootstrapAtivo(bootstrapEmAndamento.size > 0);
+      bootstrapAceitoEmAndamento.delete(cliente);
+      definirTerminalIndexBootstrapAtivo(bootstrapAceitoEmAndamento.size > 0);
     });
-  bootstrapEmAndamento.set(cliente, promise);
-  return { agendado: true, motivo: "bootstrap_agendado" };
+  bootstrapEmAndamento.set(cliente, promessaExecucao);
+  if (sinal.accepted) {
+    ultimoBootstrap.set(cliente, agora);
+    registrarManutencaoTerminalIndex(cliente, "rebuild_requested");
+    bootstrapAceitoEmAndamento.add(cliente);
+    definirTerminalIndexBootstrapAtivo(true);
+  }
+  return { agendado: sinal.accepted, solicitado: true, motivo: sinal.accepted ? "bootstrap_aceito" : "bootstrap_solicitado", promise: promessaExecucao };
 }
 
 function avaliarTerminalIndexShadow(clienteId = "admin", itemId = "", autoridade = {}, deps = {}) {
@@ -362,7 +524,21 @@ function avaliarTerminalIndexShadow(clienteId = "admin", itemId = "", autoridade
   const cliente = texto(clienteId || "admin");
   const identidade = texto(itemId);
   const validacao = validarTerminalIndex(cliente, deps);
-  const bootstrap = validacao.valido ? { agendado: false, motivo: "indice_valido" } : agendarBootstrap(cliente, deps);
+  let manutencao = { agendado: false, motivo: "indice_valido", tipo: "none" };
+  if (!validacao.valido) {
+    const recuperacao = classificarRecuperacaoTerminalIndex(cliente, deps, validacao);
+    if (recuperacao.tipo === "delta_safe") {
+      manutencao = { ...solicitarDelta(cliente, deps, { motivo: "source_stale", sourceRevision: recuperacao.currentSourceRevision }), tipo: "delta", recuperacao };
+      logSignal(deps, "delta_signal_recovery", cliente, {
+        motivo: recuperacao.motivo,
+        sourceRevision: recuperacao.currentSourceRevision.slice(0, 12),
+        generation: recuperacao.generation,
+        circuitClass: "terminal_index"
+      });
+    } else {
+      manutencao = { ...agendarBootstrap(cliente, deps), tipo: "bootstrap", recuperacao };
+    }
+  }
   const entrada = validacao.valido && identidade && !identidade.startsWith("indice:")
     ? validacao.index.entries?.[identidade]
     : undefined;
@@ -394,14 +570,18 @@ function avaliarTerminalIndexShadow(clienteId = "admin", itemId = "", autoridade
       concorda,
       statusConcorda,
       motivo: validacao.motivo,
-      bootstrap: bootstrap.motivo
+      bootstrap: manutencao.tipo === "bootstrap" ? manutencao.motivo : "not_selected",
+      maintenance: manutencao.tipo,
+      maintenanceReason: manutencao.motivo
     });
   }
-  return { ativo: true, ...validacao, hit, status, concorda, statusConcorda, bootstrap };
+  return { ativo: true, ...validacao, hit, status, concorda, statusConcorda, bootstrap: manutencao, maintenance: manutencao };
 }
 
 function resetarTerminalIndexShadowParaTeste() {
   bootstrapEmAndamento.clear();
+  bootstrapAceitoEmAndamento.clear();
+  deltaSignalEmAndamento.clear();
   ultimoBootstrap.clear();
   ultimoLog.clear();
   metricasComparacao.clear();
@@ -428,6 +608,7 @@ module.exports = {
   sourceProofIgual,
   cursorsSourceProof,
   baselineDeltaPronto,
+  classificarRecuperacaoTerminalIndex,
   validarTerminalIndex,
   avaliarTerminalIndexShadow,
   registrarManutencaoTerminalIndex,
