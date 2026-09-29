@@ -81,7 +81,13 @@ jobs:
           python3 tests/p2c-c-ci-observer.py &
           observer_pid=$!
           trap 'touch "$P2C_EVIDENCE_DIR/observer-stop"; wait "$observer_pid" || true' EXIT
-          node tests/p2c-c-postgres17-proof.cjs
+          if node tests/p2c-c-postgres17-proof.cjs; then
+            proof_exit_code=0
+          else
+            proof_exit_code=$?
+          fi
+          echo "P2C proof exit code: $proof_exit_code"
+          exit "$proof_exit_code"
       - name: Publish evidence including failures
         if: always()
         uses: actions/upload-artifact@v4
