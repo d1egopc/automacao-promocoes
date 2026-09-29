@@ -1,0 +1,213 @@
+name: Terminal Index V1.1.1 Linux validation
+
+on:
+  push:
+    branches:
+      - feature/terminal-index-v1-1-1-delta-self-healing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-index-v1-1-1-validation
+  cancel-in-progress: false
+
+jobs:
+  linux-node24:
+    name: Linux / Node 24 / npm ci / self-healing gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove branch, functional ancestry, scope, and base diff
+        shell: bash
+        env:
+          BASE_SHA: e2e71311ec635d7f2897e7303efd2c0bf8a2d388
+          FUNCTIONAL_SHA: 358a20ae7a1cb6bcd53ce2e9f163c00ca6287b1a
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-1-1-delta-self-healing
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$FUNCTIONAL_SHA^{commit}"
+          test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
+          git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
+          expected=$(printf '%s\n' \
+            modules/fila/fila-operacional-v2.js \
+            modules/fila/persistence-coordinator.js \
+            modules/fila/terminal-index-shadow.js \
+            tests/terminal-index-v1-1-1-self-healing.test.js \
+            tests/terminal-index-v1-1-delta.test.js | sort)
+          actual=$(git diff --name-only "$BASE_SHA...$FUNCTIONAL_SHA" | sort)
+          test "$actual" = "$expected"
+          ci_only=$(git diff --name-only "$FUNCTIONAL_SHA..HEAD")
+          test "$ci_only" = ".github/workflows/terminal-index-v1-1-1-validation.yml"
+          git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
+          git diff --check "$FUNCTIONAL_SHA..HEAD"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA CI_HEAD=$(git rev-parse HEAD)"
+          echo "Functional paths:"; printf '%s\n' "$actual"
+          echo "CI-only paths:"; printf '%s\n' "$ci_only"
+
+      - name: Clean Linux dependency installation
+        run: npm ci
+
+      - name: Syntax and encoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/fila/fila-operacional-v2.js
+          node --check modules/fila/persistence-coordinator.js
+          node --check modules/fila/terminal-index-shadow.js
+          node --check tests/terminal-index-v1-1-1-self-healing.test.js
+          node --check tests/terminal-index-v1-1-delta.test.js
+          npm run audit:encoding
+
+      - name: Run current and nearby regression suites, comparing failures with base
+        shell: bash
+        env:
+          BASE_SHA: e2e71311ec635d7f2897e7303efd2c0bf8a2d388
+        run: |
+          set -uo pipefail
+          suites=(
+            tests/terminal-index-v1-1-1-self-healing.test.js
+            tests/terminal-index-v1-1-delta.test.js
+            tests/terminal-index-v1-shadow.test.js
+            tests/fila-viva-idempotencia-stale.test.js
+            tests/fila-manifest-state-repository.test.js
+            tests/fila-checkpoint-recovery.test.js
+            tests/fila-checkpoint-entrega-integracao.test.js
+            tests/fila-checkpoint-entrega-funcional.test.js
+            tests/fila-checkpoints-entrega.repository.test.js
+            tests/fila-viva-anti-starvation.test.js
+            tests/fila-viva-selecao.test.js
+            tests/fila-store-v2.test.js
+            tests/fila-unica-distributor-executor.test.js
+            tests/fila-read-model-publico-integracao.test.js
+            tests/fila-historico-v2-leitura.test.js
+            tests/fila-historico-leve-v2.test.js
+            tests/fila-historico-leve-jsonl-reparo.test.js
+            tests/fila-historico-compactacao.test.js
+            tests/persistence-worker-phase1.test.js
+            tests/persistence-worker-observability.test.js
+            tests/persistence-worker-multiworkspace.test.js
+            tests/persistence-worker-multiworkspace-representative.test.js
+            tests/persistence-worker-multiworkspace-stress.test.js
+            tests/persistence-worker-crash-matrix.test.js
+            tests/demand-scheduler-v1.test.js
+            tests/solenoide-v1.test.js
+            tests/solenoide-radar-config.test.js
+            tests/solenoide-importer-observability.test.js
+            tests/engine-fanout-universal-v2.test.js
+            tests/engine-distributor-origem-fairness.test.js
+            tests/distributor-vivo-sem-starvation.test.js
+            tests/ofc-workspace-worker.test.js
+            tests/ofc-workspace-temporal.test.js
+            tests/ofc-fase-1d-observabilidade.test.js
+            tests/ofc-buffer-vivo-workspace-shadow.test.js
+            tests/teleradar.test.js
+            tests/teleradar-semantica-comercial.test.js
+            tests/teleradar-operational-control.test.js
+            tests/teleradar-control-plane.test.js
+            tests/radar-whatsapp-capture-gate.test.js
+          )
+          mkdir -p "$RUNNER_TEMP/ti111-current"
+          failures=()
+          index=0
+          for suite in "${suites[@]}"; do
+            index=$((index + 1))
+            log="$RUNNER_TEMP/ti111-current/$index.log"
+            echo "=== CURRENT: $suite ==="
+            node "$suite" >"$log" 2>&1
+            status=$?
+            tail -n 12 "$log"
+            if [ "$status" -eq 0 ]; then
+              echo "PASS $suite"
+            else
+              echo "FAIL $suite (exit $status)"
+              failures+=("$index|$suite|$status")
+            fi
+          done
+
+          if [ "${#failures[@]}" -eq 0 ]; then
+            echo "All current suites passed."
+            exit 0
+          fi
+
+          baseline="$RUNNER_TEMP/ti111-baseline"
+          git worktree add --detach "$baseline" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
+          new_failures=0
+          for failure in "${failures[@]}"; do
+            IFS='|' read -r index suite current_status <<< "$failure"
+            current_log="$RUNNER_TEMP/ti111-current/$index.log"
+            baseline_log="$RUNNER_TEMP/ti111-current/$index-baseline.log"
+            echo "=== BASELINE: $suite ==="
+            (cd "$baseline" && node "$suite") >"$baseline_log" 2>&1
+            baseline_status=$?
+            tail -n 12 "$baseline_log"
+            if [ "$baseline_status" -ne 0 ]; then
+              current_signature=$(python3 - "$current_log" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+          out = []
+          for i, line in enumerate(lines):
+              if re.search(r"AssertionError|TypeError|ReferenceError|SyntaxError|Error \[|^Error:", line):
+                  out.append(line.strip())
+                  for following in lines[i + 1:i + 9]:
+                      if re.match(r"\s*at\s", following):
+                          break
+                      if following.strip():
+                          out.append(following.strip())
+                  break
+          print(" | ".join(out))
+          PY
+          )
+              baseline_signature=$(python3 - "$baseline_log" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+          out = []
+          for i, line in enumerate(lines):
+              if re.search(r"AssertionError|TypeError|ReferenceError|SyntaxError|Error \[|^Error:", line):
+                  out.append(line.strip())
+                  for following in lines[i + 1:i + 9]:
+                      if re.match(r"\s*at\s", following):
+                          break
+                      if following.strip():
+                          out.append(following.strip())
+                  break
+          print(" | ".join(out))
+          PY
+          )
+              if [ -n "$current_signature" ] && [ "$current_signature" = "$baseline_signature" ]; then
+                echo "BASELINE FAILURE (same signature): $suite"
+                echo "$current_signature"
+              else
+                echo "NEW/DIFFERENT FAILURE: $suite"
+                echo "current:  $current_signature"
+                echo "baseline: $baseline_signature"
+                new_failures=$((new_failures + 1))
+              fi
+            else
+              echo "REGRESSION: current fails but base passes: $suite"
+              new_failures=$((new_failures + 1))
+            fi
+          done
+          git worktree remove --force "$baseline"
+          if [ "$new_failures" -ne 0 ]; then
+            echo "$new_failures new or different failure(s)."
+            exit 1
+          fi
+          echo "Only failures reproduced with the same assertion signature on base."
