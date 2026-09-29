@@ -37,6 +37,8 @@ jobs:
           FUNCTIONAL_SHA: 358a20ae7a1cb6bcd53ce2e9f163c00ca6287b1a
           PRE_FENCE_SHA: 65ae94181cc444a9e0bb9fa5a99666edf85c0248
           FENCE_SHA: b24c14e2255805532a8d3fdf960af84ff5431f3f
+          PRE_AUTHORITY_SHA: a75fdb7e0b8647e4ec33e5bf69f2a97f22bd8e0b
+          AUTHORITY_SHA: a575eae893f421b7dd4da67f27a9547739b2ccdf
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -47,11 +49,16 @@ jobs:
           git cat-file -e "$FUNCTIONAL_SHA^{commit}"
           git cat-file -e "$PRE_FENCE_SHA^{commit}"
           git cat-file -e "$FENCE_SHA^{commit}"
+          git cat-file -e "$PRE_AUTHORITY_SHA^{commit}"
+          git cat-file -e "$AUTHORITY_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
+          test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_AUTHORITY_SHA" HEAD
+          git merge-base --is-ancestor "$AUTHORITY_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -66,14 +73,22 @@ jobs:
             tests/terminal-index-authority-fence-v2.test.js | sort)
           fence_actual=$(git diff --name-only "$PRE_FENCE_SHA..$FENCE_SHA" | sort)
           test "$fence_actual" = "$fence_expected"
-          ci_only=$(git diff --name-only "$FENCE_SHA..HEAD")
+          authority_expected=$(printf '%s\n' \
+            modules/fila/fila-operacional-v2.js \
+            modules/fila/terminal-index-authority.js \
+            tests/terminal-index-authority-v1.test.js | sort)
+          authority_actual=$(git diff --name-only "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA" | sort)
+          test "$authority_actual" = "$authority_expected"
+          ci_only=$(git diff --name-only "$AUTHORITY_SHA..HEAD")
           test "$ci_only" = ".github/workflows/terminal-index-v1-1-1-validation.yml"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
-          git diff --check "$FENCE_SHA..HEAD"
-          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA CI_HEAD=$(git rev-parse HEAD)"
+          git diff --check "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA"
+          git diff --check "$AUTHORITY_SHA..HEAD"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
+          echo "Authority paths:"; printf '%s\n' "$authority_actual"
           echo "CI-only paths:"; printf '%s\n' "$ci_only"
 
       - name: Clean Linux dependency installation
@@ -86,8 +101,10 @@ jobs:
           node --check modules/fila/fila-operacional-v2.js
           node --check modules/fila/persistence-coordinator.js
           node --check modules/fila/terminal-index-shadow.js
+          node --check modules/fila/terminal-index-authority.js
           node --check tests/terminal-index-v1-1-1-self-healing.test.js
           node --check tests/terminal-index-v1-1-delta.test.js
+          node --check tests/terminal-index-authority-v1.test.js
           npm run audit:encoding
 
       - name: Fence V2 syntax and dedicated gate
@@ -98,6 +115,16 @@ jobs:
           node --check modules/fila/terminal-index-authority-fence.js
           node --check tests/terminal-index-authority-fence-v2.test.js
           node tests/terminal-index-authority-fence-v2.test.js
+
+      - name: Terminal Index Authority V1 Linux / Node 24 dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/fila/fila-operacional-v2.js
+          node --check modules/fila/terminal-index-authority.js
+          node --check tests/terminal-index-authority-v1.test.js
+          TERMINAL_INDEX_AUTHORITY_REQUIRE_INTEGRATION=1 \
+            node tests/terminal-index-authority-v1.test.js
 
       - name: Run current and nearby regression suites, comparing failures with base
         shell: bash
