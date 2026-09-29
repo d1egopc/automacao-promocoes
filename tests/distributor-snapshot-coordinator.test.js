@@ -210,6 +210,101 @@ test("flag OFF e workspace fora do canário preservam fallback sem Worker", asyn
   assert.equal(fora.motivo, "distributor_workspace_not_canary");
 });
 
+test("telemetria Compact é detalhada somente no canário e não carrega payload comercial", async () => {
+  const f = fixture();
+  const eventos = [];
+  const telemetry = { logger: (_tag, texto) => eventos.push(JSON.parse(texto)) };
+  const off = await obterDistributorSnapshot(entrada(), {
+    env: { ...compactEnv(), OFC_DISTRIBUTOR_VIVA_COMPACT: "0" },
+    telemetry,
+    getClienteJsonPath: resolver(f.paths)
+  });
+  assert.equal(off.ok, false);
+  assert.deepEqual(eventos.map(evento => evento.stage), ["fallback"]);
+  assert.equal(eventos[0].fallbackReason, "feature_disabled");
+
+  eventos.length = 0;
+  const fora = await obterDistributorSnapshot(entrada({ workspaceId: "user_fora_canary" }), {
+    env: compactEnv(),
+    telemetry,
+    getClienteJsonPath: resolver(f.paths)
+  });
+  assert.equal(fora.ok, false);
+  assert.deepEqual(eventos, []);
+
+  eventos.length = 0;
+  const accepted = await obterDistributorSnapshot(entrada(), {
+    env: compactEnv(),
+    telemetry,
+    getClienteJsonPath: resolver(f.paths)
+  });
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(eventos.map(evento => evento.stage), ["attempt", "worker_started", "worker_completed", "accepted"]);
+  const serializado = JSON.stringify(eventos);
+  assert.doesNotMatch(serializado, /"itens"\s*:|cupom|linkAfiliado|preco/);
+  assert.equal(eventos.find(evento => evento.stage === "accepted").contentReads, 1);
+  assert.equal(eventos.find(evento => evento.stage === "accepted").legacyContentReads, 0);
+
+  eventos.length = 0;
+  const agora = Date.now() / 1000;
+  fs.utimesSync(f.paths["fila-viva.json"], agora, agora + 1);
+  assert.equal(validarDistributorSnapshot(accepted, {
+    getClienteJsonPath: resolver(f.paths),
+    telemetry,
+    telemetryStage: "revision_changed_before_mutation"
+  }), false);
+  assert.equal(eventos.at(-2).stage, "ineligible");
+  assert.equal(eventos.at(-2).fallbackReason, "stat_mismatch");
+  assert.equal(eventos.at(-1).stage, "fallback");
+});
+
+test("telemetria Compact registra fallback explícito para proof inválido", async () => {
+  const f = fixture();
+  fs.rmSync(f.paths["fila-viva.proof.json"]);
+  const eventos = [];
+  const resultado = await obterDistributorSnapshot(entrada(), {
+    env: compactEnv(),
+    telemetry: evento => eventos.push(evento),
+    getClienteJsonPath: resolver(f.paths)
+  });
+  assert.equal(resultado.ok, false);
+  assert.equal(eventos.at(-2).stage, "ineligible");
+  assert.equal(eventos.at(-2).fallbackReason, "proof_invalid");
+  assert.equal(eventos.at(-1).stage, "fallback");
+  assert.equal(eventos.at(-1).fallbackReason, "proof_invalid");
+});
+
+test("falha do logger é fail-open e não altera a decisão Compact", async () => {
+  const f = fixture();
+  const base = await obterDistributorSnapshot(entrada(), {
+    env: compactEnv(),
+    getClienteJsonPath: resolver(f.paths)
+  });
+  const comLoggerFalho = await obterDistributorSnapshot(entrada(), {
+    env: compactEnv(),
+    telemetry: { logger: () => { throw new Error("telemetry_logger_failed"); } },
+    getClienteJsonPath: resolver(f.paths)
+  });
+  assert.equal(comLoggerFalho.ok, base.ok);
+  assert.equal(comLoggerFalho.source, base.source);
+  const semTempoDeColeta = fila => {
+    const { fonteFilaColetadaEmMs, ...decisao } = fila;
+    return decisao;
+  };
+  assert.deepEqual(semTempoDeColeta(comLoggerFalho.facts.flow.fila), semTempoDeColeta(base.facts.flow.fila));
+  assert.deepEqual(semTempoDeColeta(comLoggerFalho.facts.gate.fila), semTempoDeColeta(base.facts.gate.fila));
+
+  const fFallback = fixture();
+  fs.rmSync(fFallback.paths["fila-viva.proof.json"]);
+  const fallback = await obterDistributorSnapshot(entrada(), {
+    env: compactEnv(),
+    telemetry: { logger: () => { throw new Error("telemetry_logger_failed"); } },
+    getClienteJsonPath: resolver(fFallback.paths)
+  });
+  assert.equal(fallback.ok, false);
+  assert.equal(fallback.motivo, "fila_viva_proof_ausente");
+});
+
 test("snapshot compacto tem uma leitura Viva, zero array integral na resposta e paridade Flow/Gate", async () => {
   const f = fixture();
   const snapshot = await obterDistributorSnapshot(entrada(), {
@@ -369,24 +464,28 @@ function workerFalso(configurar) {
 
 test("Worker crash e timeout são fallback sem retry", async () => {
   const f = fixture();
+  const crashEvents = [];
   const crashClient = criarClienteDistributorSnapshot({
     workerFactory: () => workerFalso(worker => setImmediate(() => worker.emit("error", new Error("synthetic_worker_crash")))),
     timeoutMs: 50
   });
   await assert.rejects(
-    crashClient.executar({ arquivo: f.paths["fila-viva.json"] }),
+    crashClient.executar({ arquivo: f.paths["fila-viva.json"] }, { onEvent: evento => crashEvents.push(evento) }),
     /synthetic_worker_crash/
   );
+  assert.equal(crashEvents[0].fallbackReason, "worker_error");
   await crashClient.fechar();
 
+  const timeoutEvents = [];
   const timeoutClient = criarClienteDistributorSnapshot({
     workerFactory: () => workerFalso(() => {}),
     timeoutMs: 10
   });
   await assert.rejects(
-    timeoutClient.executar({ arquivo: f.paths["fila-viva.json"] }),
+    timeoutClient.executar({ arquivo: f.paths["fila-viva.json"] }, { onEvent: evento => timeoutEvents.push(evento) }),
     /distributor_worker_timeout/
   );
+  assert.equal(timeoutEvents[0].fallbackReason, "worker_timeout");
   await timeoutClient.fechar();
 });
 

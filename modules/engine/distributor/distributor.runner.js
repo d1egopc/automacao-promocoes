@@ -828,11 +828,15 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
 
   const snapshotOptions = {
     ...(contexto?.deps?.distributorSnapshot || {}),
-    env: contexto?.deps?.distributorSnapshot?.env || process.env
+    env: contexto?.deps?.distributorSnapshot?.env || process.env,
+    telemetry: contexto?.deps?.distributorSnapshot?.telemetry || { logger: console }
   };
   const coordenarSnapshot = contexto?.deps?.obterDistributorSnapshot || obterDistributorSnapshot;
-  const validarSnapshot = contexto?.deps?.validarDistributorSnapshot || ((snapshot) =>
-    validarDistributorSnapshot(snapshot, snapshotOptions));
+  const validarSnapshot = contexto?.deps?.validarDistributorSnapshot || ((snapshot, telemetryStage) =>
+    validarDistributorSnapshot(snapshot, {
+      ...snapshotOptions,
+      telemetryStage: telemetryStage || "revision_changed_post"
+    }));
   let distributorSnapshot = null;
   if (ativoParaWorkspace(oferta.cliente_id || "", snapshotOptions.env)) {
     try {

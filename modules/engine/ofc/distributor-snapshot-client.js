@@ -44,7 +44,7 @@ function criarClienteDistributorSnapshot({
     if (instance) await instance.terminate();
   }
 
-  function executar(input = {}) {
+  function executar(input = {}, execOpcoes = {}) {
     const job = tail.then(async () => {
       if (closed) throw new Error("distributor_worker_closed");
       const expected = revisao(input.arquivo);
@@ -53,11 +53,12 @@ function criarClienteDistributorSnapshot({
       const instance = obterWorker();
       instance.ref();
       let timer;
+      let resposta = null;
       try {
         const inicio = performance.now();
         const inputCloneBytes = Buffer.byteLength(JSON.stringify(input), "utf8");
         const enviadoPerfMs = performance.now();
-        const resposta = await new Promise((resolve, reject) => {
+        resposta = await new Promise((resolve, reject) => {
           pending = { resolve, reject };
           timer = setTimeout(() => reject(new Error("distributor_worker_timeout")), timeoutMs);
           instance.postMessage({ id, input: { ...input, type: JOB_TYPE } });
@@ -83,6 +84,26 @@ function criarClienteDistributorSnapshot({
         resposta.result.perf.roundTripMs = recebidoPerfMs - inicio;
         return resposta.result;
       } catch (erro) {
+        try {
+          if (typeof execOpcoes.onEvent === "function") {
+            const mensagem = String(erro?.message || erro?.code || "");
+            const fallbackReason = mensagem.includes("timeout")
+              ? "worker_timeout"
+              : mensagem.includes("revision_changed")
+                ? "revision_changed_worker"
+                : mensagem.includes("response")
+                  ? "worker_response_invalid"
+                  : mensagem.includes("closed") || mensagem.includes("exit") || mensagem.includes("crash")
+                    ? "worker_error"
+                    : "worker_unavailable";
+            execOpcoes.onEvent({
+              stage: "worker_invalid",
+              fallbackReason,
+              revisionBefore: expected,
+              revisionAfter: resposta?.result?.after
+            });
+          }
+        } catch (_) {}
         await aposentar();
         throw erro;
       } finally {
@@ -109,7 +130,9 @@ let singleton;
 async function executarDistributorSnapshot(input, opcoes = {}) {
   try {
     singleton ||= criarClienteDistributorSnapshot(opcoes);
-    return await (opcoes.clienteDistributorSnapshot || singleton).executar(input);
+    return await (opcoes.clienteDistributorSnapshot || singleton).executar(input, {
+      onEvent: opcoes.onEvent
+    });
   } catch {
     return null;
   }
