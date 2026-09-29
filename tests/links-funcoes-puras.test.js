@@ -29,12 +29,12 @@ assert.strictEqual(normalizarFormatoLinkOptimus("/r/"), "/r");
 assert.strictEqual(normalizarFormatoLinkOptimus(""), "/r");
 
 assert.strictEqual(
-  resolverDominioBaseLinkOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://railway.test/"),
+  resolverDominioBaseLinkOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://fallback.test/"),
   "https://go.optimuspromo.com.br"
 );
 assert.strictEqual(
-  resolverDominioBaseLinkOptimus({ linksOptimus: { dominio: "" } }, "railway.test/"),
-  "https://railway.test"
+  resolverDominioBaseLinkOptimus({ linksOptimus: { dominio: "" } }, "https://go.optimuspromo.com.br/"),
+  "https://go.optimuspromo.com.br"
 );
 assert.strictEqual(
   resolverDominioBaseLinkOptimus({ linksOptimus: { dominio: "" } }, ""),
@@ -48,12 +48,12 @@ assert.strictEqual(
 assert.strictEqual(montarUrlLinkOptimus("", { linksOptimus: { dominio: "https://go.optimuspromo.com.br" } }, ""), "");
 
 assert.deepStrictEqual(
-  origemDominioLinkOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://railway.test"),
+  origemDominioLinkOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://fallback.test"),
   { dominio: "https://go.optimuspromo.com.br", origem: "config" }
 );
 assert.deepStrictEqual(
-  origemDominioLinkOptimus({ linksOptimus: { dominio: "" } }, "https://railway.test/"),
-  { dominio: "https://railway.test", origem: "railway" }
+  origemDominioLinkOptimus({ linksOptimus: { dominio: "" } }, "https://go.optimuspromo.com.br/"),
+  { dominio: "https://go.optimuspromo.com.br", origem: "env" }
 );
 assert.deepStrictEqual(
   origemDominioLinkOptimus({ linksOptimus: { dominio: "" } }, "https://vps.test/", "env"),
@@ -65,17 +65,16 @@ assert.deepStrictEqual(
 );
 assert.deepStrictEqual(
   resolverDominioPublicoOptimusEnv({
-    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br/",
-    RAILWAY_PUBLIC_DOMAIN: "railway.test"
+    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br/"
   }),
   { dominio: "https://go.optimuspromo.com.br", origem: "env" }
 );
 assert.deepStrictEqual(
-  resolverDominioPublicoOptimusEnv({ RAILWAY_PUBLIC_DOMAIN: "railway.test" }),
-  { dominio: "https://railway.test", origem: "railway" }
+  resolverDominioPublicoOptimusEnv({}),
+  { dominio: "", origem: "indisponivel" }
 );
 assert.deepStrictEqual(
-  montarRespostaConfigLinksOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://railway.test/"),
+  montarRespostaConfigLinksOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } }, "https://fallback.test/"),
   {
     dominio: "https://go.optimuspromo.com.br",
     dominioEfetivo: "https://go.optimuspromo.com.br",

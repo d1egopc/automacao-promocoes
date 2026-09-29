@@ -120,19 +120,16 @@ function hashSyncFake(senha) {
 
 assert.deepStrictEqual(
   links.resolverDominioPublicoOptimusEnv({
-    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br/",
-    RAILWAY_PUBLIC_DOMAIN: "railway.example"
+    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br/"
   }),
   { dominio: "https://go.optimuspromo.com.br", origem: "env" },
-  "env generica deve substituir semanticamente Railway"
+  "OPTIMUS_PUBLIC_BASE_URL deve ser a autoridade de env"
 );
 
 assert.deepStrictEqual(
-  links.resolverDominioPublicoOptimusEnv({
-    RAILWAY_PUBLIC_DOMAIN: "railway.example"
-  }),
-  { dominio: "https://railway.example", origem: "railway" },
-  "Railway continua fallback de transicao"
+  links.resolverDominioPublicoOptimusEnv({}),
+  { dominio: "", origem: "indisponivel" },
+  "ausencia de dominio deve permanecer fail-safe"
 );
 
 console.log("clean-install-bootstrap.test.js OK");

@@ -78,31 +78,39 @@ assert.strictEqual(clicado.dados.ultimoClique, "2026-07-22T12:00:00.000Z");
 assert.strictEqual(salvamentos, 2);
 
 assert.strictEqual(
-  montarUrlLinkOptimus("xyz789", { linksOptimus: { dominio: "" } }, "backend-railway.optimus.test/"),
-  "https://backend-railway.optimus.test/r/xyz789"
+  montarUrlLinkOptimus("xyz789", { linksOptimus: { dominio: "" } }, "https://go.optimuspromo.com.br/"),
+  "https://go.optimuspromo.com.br/r/xyz789"
 );
 
 config.linksOptimus.dominio = "";
-const railway = criarLinkOptimus("https://afiliado.test/outro", "amazon", {
+const publico = criarLinkOptimus("https://afiliado.test/outro", "amazon", {
   clienteId: "cliente_a",
   configGlobal: config,
   repository,
-  dominioFallback: "backend-railway.optimus.test/"
+  dominioFallback: "https://go.optimuspromo.com.br/"
 });
-assert.strictEqual(railway.ok, true);
-assert.ok(railway.url.startsWith("https://backend-railway.optimus.test/r/"));
+assert.strictEqual(publico.ok, true);
+assert.ok(publico.url.startsWith("https://go.optimuspromo.com.br/r/"));
 
 config.linksOptimus.dominio = "";
-const vps = criarLinkOptimus("https://afiliado.test/vps", "mercadolivre", {
+const semDominio = criarLinkOptimus("https://afiliado.test/sem-dominio", "amazon", {
+  clienteId: "cliente_a",
+  configGlobal: config,
+  repository,
+  dominioFallback: ""
+});
+assert.strictEqual(semDominio.ok, false);
+assert.strictEqual(semDominio.motivo, "dominio_ausente");
+
+const publicoEnv = criarLinkOptimus("https://afiliado.test/vps", "mercadolivre", {
   clienteId: "cliente_a",
   configGlobal: config,
   repository,
   dominioFallback: resolverDominioPublicoOptimusEnv({
-    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br",
-    RAILWAY_PUBLIC_DOMAIN: "automacao-promocoes-production.up.railway.app"
+    OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br"
   }).dominio
 });
-assert.strictEqual(vps.ok, true);
-assert.ok(vps.url.startsWith("https://go.optimuspromo.com.br/r/"));
+assert.strictEqual(publicoEnv.ok, true);
+assert.ok(publicoEnv.url.startsWith("https://go.optimuspromo.com.br/r/"));
 
 console.log("link-optimus-repository: ok");

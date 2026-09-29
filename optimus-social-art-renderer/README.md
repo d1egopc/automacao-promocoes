@@ -64,13 +64,10 @@ No backend principal:
 - `SOCIAL_ART_RENDERER_TOKEN`
 - `SOCIAL_ART_RENDERER_TIMEOUT_MS`
 
-## Deploy Railway
+## Deploy
 
-1. Criar novo servico no mesmo projeto Railway apontando para `optimus-social-art-renderer`.
-2. Usar o `Dockerfile` deste diretorio.
-3. Configurar as variaveis acima.
-4. Expor porta `8080` pelo `PORT` do Railway.
-5. Configurar `SOCIAL_ART_RENDERER_URL` no backend principal com a URL interna/privada do servico, se disponivel.
+O deploy deve seguir a infraestrutura operacional atualmente documentada para o Optimus Promo.
+Este repositorio nao define um provedor ou procedimento de deploy para o renderer.
 
 ## Consumo estimado
 

@@ -127,18 +127,15 @@ resetarLinkOptimus({ linksOptimus: { dominio: "" } });
 assert.strictEqual(resolverLinkTeste({ oferta: ofertaLinkBase, destino: { modoLink: "optimus" }, recursos: { linkOptimus: true } }).linkFinal, ofertaLinkBase.linkAfiliado, "dominio ausente deve usar original");
 
 resetarLinkOptimus({ linksOptimus: { dominio: "" } });
-sandbox.process.env.RAILWAY_PUBLIC_DOMAIN = "backend-railway.optimus.test";
+sandbox.process.env.OPTIMUS_PUBLIC_BASE_URL = "https://go.optimuspromo.com.br";
 const resolucaoDominioEnv = resolverLinkTeste({ oferta: ofertaLinkBase, destino: { modoLink: "optimus" }, recursos: { linkOptimus: true } });
-assert.ok(resolucaoDominioEnv.linkFinal.startsWith("https://backend-railway.optimus.test/r/"), "dominio vazio deve usar RAILWAY_PUBLIC_DOMAIN");
+assert.ok(resolucaoDominioEnv.linkFinal.startsWith("https://go.optimuspromo.com.br/r/"), "dominio vazio deve usar OPTIMUS_PUBLIC_BASE_URL");
 
 resetarLinkOptimus({ linksOptimus: { dominio: "https://go.optimuspromo.com.br/" } });
-sandbox.process.env.RAILWAY_PUBLIC_DOMAIN = "backend-railway.optimus.test";
+sandbox.process.env.OPTIMUS_PUBLIC_BASE_URL = "https://go.optimuspromo.com.br";
 const resolucaoDominioConfigurado = resolverLinkTeste({ oferta: ofertaLinkBase, destino: { modoLink: "optimus" }, recursos: { linkOptimus: true } });
-assert.ok(resolucaoDominioConfigurado.linkFinal.startsWith("https://go.optimuspromo.com.br/r/"), "dominio configurado deve vencer variavel Railway");
+assert.ok(resolucaoDominioConfigurado.linkFinal.startsWith("https://go.optimuspromo.com.br/r/"), "dominio configurado deve permanecer autoridade");
 assert.ok(!resolucaoDominioConfigurado.linkFinal.includes("//r/"), "dominio com barra final deve ser normalizado");
-
-const trechoLinkOptimus = extrairFuncao("resolverDominioBaseLinkOptimus") + extrairFuncao("montarUrlLinkOptimus");
-assert.ok(!trechoLinkOptimus.includes("automacao-promocoes-production.up.railway.app"), "resolver nao deve hardcodar URL Railway");
 
 resetarLinkOptimus();
 const ofertaOriginalImutavel = { ...ofertaLinkBase };

@@ -21,13 +21,12 @@ function resolverDominioPublicoOptimusEnv(env = {}) {
     ["OPTIMUS_PUBLIC_BASE_URL", env.OPTIMUS_PUBLIC_BASE_URL],
     ["OPTIMUS_PUBLIC_URL", env.OPTIMUS_PUBLIC_URL],
     ["PUBLIC_BASE_URL", env.PUBLIC_BASE_URL],
-    ["APP_PUBLIC_URL", env.APP_PUBLIC_URL],
-    ["RAILWAY_PUBLIC_DOMAIN", env.RAILWAY_PUBLIC_DOMAIN]
+    ["APP_PUBLIC_URL", env.APP_PUBLIC_URL]
   ];
 
   for (const [origem, valor] of fontes) {
     const dominio = normalizarDominioLinkOptimus(valor || "");
-    if (dominio) return { dominio, origem: origem === "RAILWAY_PUBLIC_DOMAIN" ? "railway" : "env" };
+    if (dominio) return { dominio, origem: "env" };
   }
 
   return { dominio: "", origem: "indisponivel" };
@@ -39,7 +38,7 @@ function montarUrlLinkOptimus(codigo = "", configBase = {}, dominioFallback = ""
   return dominio + "/r/" + codigo;
 }
 
-function origemDominioLinkOptimus(configBase = {}, dominioFallback = "", origemFallback = "railway") {
+function origemDominioLinkOptimus(configBase = {}, dominioFallback = "", origemFallback = "env") {
   const dominioConfig = normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio);
   if (dominioConfig) {
     return {
@@ -48,10 +47,10 @@ function origemDominioLinkOptimus(configBase = {}, dominioFallback = "", origemF
     };
   }
 
-  const dominioRailway = normalizarDominioLinkOptimus(dominioFallback || "");
-  if (dominioRailway) {
+  const dominioEnv = normalizarDominioLinkOptimus(dominioFallback || "");
+  if (dominioEnv) {
     return {
-      dominio: dominioRailway,
+      dominio: dominioEnv,
       origem: origemFallback || "env"
     };
   }
@@ -62,7 +61,7 @@ function origemDominioLinkOptimus(configBase = {}, dominioFallback = "", origemF
   };
 }
 
-function montarRespostaConfigLinksOptimus(configBase = {}, dominioFallback = "", origemFallback = "railway") {
+function montarRespostaConfigLinksOptimus(configBase = {}, dominioFallback = "", origemFallback = "env") {
   const efetivo = origemDominioLinkOptimus(configBase, dominioFallback, origemFallback);
   return {
     dominio: normalizarDominioLinkOptimus(configBase?.linksOptimus?.dominio),

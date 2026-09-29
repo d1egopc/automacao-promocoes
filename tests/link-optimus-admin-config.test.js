@@ -83,7 +83,7 @@ function serializar(valor) {
   return JSON.parse(JSON.stringify(valor));
 }
 
-sandbox.process.env = { RAILWAY_PUBLIC_DOMAIN: "automacao-promocoes-production.up.railway.app" };
+sandbox.process.env = { OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br" };
 let res = criarRes();
 sandbox.responderAdminConfigLinksOptimus(reqAdmin(), res);
 assert.strictEqual(res.statusCode, 200);
@@ -91,21 +91,20 @@ assert.deepStrictEqual(serializar(res.body), {
   ok: true,
   linksOptimus: {
     dominio: "",
-    dominioEfetivo: "https://automacao-promocoes-production.up.railway.app",
-    origem: "railway"
+    dominioEfetivo: "https://go.optimuspromo.com.br",
+    origem: "env"
   }
 });
 
 res = criarRes();
 sandbox.process.env = {
-  OPTIMUS_PUBLIC_BASE_URL: "https://go-vps.optimuspromo.com.br",
-  RAILWAY_PUBLIC_DOMAIN: "automacao-promocoes-production.up.railway.app"
+  OPTIMUS_PUBLIC_BASE_URL: "https://go.optimuspromo.com.br"
 };
 sandbox.responderAdminConfigLinksOptimus(reqAdmin(), res);
 assert.strictEqual(res.statusCode, 200);
 assert.deepStrictEqual(serializar(res.body.linksOptimus), {
   dominio: "",
-  dominioEfetivo: "https://go-vps.optimuspromo.com.br",
+  dominioEfetivo: "https://go.optimuspromo.com.br",
   origem: "env"
 });
 
@@ -131,7 +130,7 @@ res = criarRes();
 sandbox.salvarAdminConfigLinksOptimus(reqAdmin({ dominio: "" }), res);
 assert.strictEqual(res.statusCode, 200);
 assert.strictEqual(res.body.linksOptimus.dominio, "");
-assert.strictEqual(res.body.linksOptimus.dominioEfetivo, "https://go-vps.optimuspromo.com.br");
+assert.strictEqual(res.body.linksOptimus.dominioEfetivo, "https://go.optimuspromo.com.br");
 assert.strictEqual(res.body.linksOptimus.origem, "env");
 assert.strictEqual(sandbox.config.linksOptimus.dominio, "");
 
