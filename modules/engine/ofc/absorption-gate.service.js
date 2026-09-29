@@ -16,6 +16,15 @@ const {
   calcularBufferVivoWorkspace,
   resumirDivergenciaBufferVivo
 } = require("./buffer-vivo-workspace.service");
+const {
+  validarElegibilidadeViva,
+  identidadeFisica,
+  mesmaIdentidadeFisica,
+  normalizarItensViva
+} = require("./viva-snapshot");
+
+const OFC_SNAPSHOT_VIVA = "OFC_SNAPSHOT_VIVA";
+const OFC_SNAPSHOT_VIVA_CANARY_CLIENTES = "OFC_SNAPSHOT_VIVA_CANARY_CLIENTES";
 
 const BUCKET_STATUS = {
   PENDENTE_VIVO: "pendente_vivo",
@@ -133,12 +142,64 @@ function lista(valor) {
   return Array.isArray(valor) ? valor : [];
 }
 
-function resultadoLeituraFila({ ok = false, itens = [], motivo = "", collectedAtMs = Date.now() } = {}) {
+function resultadoLeituraFila({ ok = false, itens = [], motivo = "", collectedAtMs = Date.now(), meta = {} } = {}) {
   return {
     ok: ok === true && Array.isArray(itens),
     itens: Array.isArray(itens) ? itens : [],
     motivo: ok === true && Array.isArray(itens) ? "" : String(motivo || "fila_fonte_invalida"),
-    collectedAtMs: Number.isFinite(Number(collectedAtMs)) ? Number(collectedAtMs) : Date.now()
+    collectedAtMs: Number.isFinite(Number(collectedAtMs)) ? Number(collectedAtMs) : Date.now(),
+    ...meta
+  };
+}
+
+function listaCanarySnapshotViva(valor = "") {
+  return new Set(String(valor || "")
+    .split(/[;,\s]+/)
+    .map(item => item.trim())
+    .filter(Boolean));
+}
+
+function snapshotVivaAtivo(clienteId = "", env = process.env) {
+  if (String(env?.[OFC_SNAPSHOT_VIVA] || "") !== "1") return false;
+  return listaCanarySnapshotViva(env?.[OFC_SNAPSHOT_VIVA_CANARY_CLIENTES]).has(String(clienteId || "").trim());
+}
+
+function selecionarFonteSnapshotOFC(clienteId = "", opcoes = {}) {
+  const env = opcoes.env || process.env;
+  const legacyPathResolver = typeof opcoes.getClienteJsonPath === "function" ? opcoes.getClienteJsonPath : getClienteJsonPath;
+  const legado = (() => {
+    try { return legacyPathResolver(clienteId, "fila.json"); } catch { return ""; }
+  })();
+  if (!snapshotVivaAtivo(clienteId, env)) {
+    return { eligible: false, source: "fila_legacy", arquivo: legado, motivo: "snapshot_viva_disabled", sourceBytes: null,
+      legacyBytes: null, bytesAvoidedEstimate: 0, proofValidationMs: 0 };
+  }
+  const elegibilidade = validarElegibilidadeViva(clienteId, opcoes);
+  if (elegibilidade.eligible !== true) {
+    return { ...elegibilidade, source: "fila_legacy", arquivo: legado, legacyBytes: null, bytesAvoidedEstimate: 0 };
+  }
+  return elegibilidade;
+}
+
+function metadadosLeitura({ source = "fila_legacy", sourceMeta = {}, bytesArquivoObservados = null,
+  fallbackReason = "", revisionChanged = false, leituraMs = 0, parseMs = 0, wallMs = null, lido = false,
+  itensCount = 0 } = {}) {
+  const sourceBytes = Number.isFinite(Number(bytesArquivoObservados)) ? Number(bytesArquivoObservados)
+    : Number.isFinite(Number(sourceMeta.sourceBytes)) ? Number(sourceMeta.sourceBytes) : null;
+  return {
+    source,
+    sourceBytes,
+    proofValidationMs: Number(sourceMeta.proofValidationMs || 0),
+    fallbackReason: String(fallbackReason || ""),
+    legacyReadAvoided: source === "fila_viva" && lido === true,
+    bytesAvoidedEstimate: source === "fila_viva" && lido === true
+      ? Number(sourceMeta.bytesAvoidedEstimate || 0) : 0,
+    revisionChanged: revisionChanged === true,
+    leituraMs,
+    parseMs,
+    wallMs,
+    lido,
+    itensCount
   };
 }
 
@@ -147,6 +208,27 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   const coletadoEm = () => Number(clock());
   const medidor = opcoes.medidorCiclo;
   const clockPerf = medidor?.clock || (() => 0);
+  const source = opcoes.source === "fila_viva" ? "fila_viva" : "fila_legacy";
+  const sourceMeta = opcoes.sourceMeta || {};
+  const fallbackReason = opcoes.fallbackReason || sourceMeta.fallbackReason || "";
+  const registrar = dados => medidor?.registrarLeitura({
+    ...metadadosLeitura({
+      source,
+      sourceMeta,
+      fallbackReason,
+      ...dados
+    }),
+    ...dados
+  });
+
+  if (source === "fila_viva" && opcoes.sourceValidated !== true && sourceMeta.eligible !== true) {
+    registrar({ lido: false });
+    return resultadoLeituraFila({
+      motivo: "fila_viva_proof_required",
+      collectedAtMs: coletadoEm(),
+      meta: metadadosLeitura({ source, sourceMeta, fallbackReason, lido: false })
+    });
+  }
 
   // A injeção de teste usa o mesmo contrato metadatado da leitura produtiva.
   // O leitor genérico readClienteJson não é aceito aqui porque seu fallback []
@@ -154,45 +236,70 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   if (typeof opcoes.readFilaSnapshot === "function") {
     try {
       const leitura = opcoes.readFilaSnapshot(clienteId);
-      medidor?.registrarLeitura({ lido: leitura?.ok === true, itens: Array.isArray(leitura?.itens) ? leitura.itens.length : 0 });
+      const meta = metadadosLeitura({ source, sourceMeta, fallbackReason,
+        lido: leitura?.ok === true, itensCount: Array.isArray(leitura?.itens) ? leitura.itens.length : 0 });
+      registrar({ lido: leitura?.ok === true, itens: Array.isArray(leitura?.itens) ? leitura.itens.length : 0 });
       return resultadoLeituraFila({
         ok: leitura?.ok === true,
         itens: leitura?.itens,
         motivo: leitura?.motivo || "fila_fonte_invalida",
         collectedAtMs: Number.isFinite(Number(leitura?.collectedAtMs))
-          ? Number(leitura.collectedAtMs) : coletadoEm()
+          ? Number(leitura.collectedAtMs) : coletadoEm(),
+        meta: { ...meta, ...leitura?.meta }
       });
     } catch {
-      medidor?.registrarLeitura({ lido: false });
-      return resultadoLeituraFila({ motivo: "fila_erro_leitura", collectedAtMs: coletadoEm() });
+      registrar({ lido: false });
+      return resultadoLeituraFila({ motivo: "fila_erro_leitura", collectedAtMs: coletadoEm(),
+        meta: metadadosLeitura({ source, sourceMeta, fallbackReason, lido: false }) });
     }
   }
 
   const resolverPath = typeof opcoes.getClienteJsonPath === "function" ? opcoes.getClienteJsonPath : getClienteJsonPath;
   const lerArquivo = typeof opcoes.readFileSync === "function" ? opcoes.readFileSync : fs.readFileSync;
+  const nomeArquivo = source === "fila_viva" ? "fila-viva.json" : "fila.json";
+  const arquivo = opcoes.arquivo || resolverPath(clienteId, nomeArquivo);
+  const revisionGuardHandled = opcoes.revisionGuardHandled === true;
+  const beforeIdentity = source === "fila_viva" && !revisionGuardHandled
+    ? (sourceMeta.beforeIdentity || identidadeFisica(statArquivoParaOFC(arquivo))) : null;
   let texto;
   let bytesArquivoObservados = null;
   let leituraMs = 0;
+  const inicioTotal = clockPerf();
   let parseMs = 0;
   const inicioLeitura = clockPerf();
   try {
-    const arquivo = resolverPath(clienteId, "fila.json");
-    if (medidor && !opcoes.readFileSync) {
-      try { bytesArquivoObservados = fs.statSync(arquivo).size; } catch {}
-    }
+    if (medidor && !opcoes.readFileSync) bytesArquivoObservados = fs.statSync(arquivo).size;
     texto = lerArquivo(arquivo, "utf8");
     leituraMs = Math.max(0, clockPerf() - inicioLeitura);
   } catch (erro) {
-    medidor?.registrarLeitura({ lido: false, leituraMs: Math.max(0, clockPerf() - inicioLeitura) });
+    const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+      lido: false, leituraMs: Math.max(0, clockPerf() - inicioLeitura), wallMs: Math.max(0, clockPerf() - inicioTotal) });
+    registrar({ lido: false, leituraMs: meta.leituraMs, wallMs: meta.wallMs, bytesArquivoObservados });
     return resultadoLeituraFila({
-      motivo: erro?.code === "ENOENT" ? "fila_ausente" : "fila_erro_leitura",
-      collectedAtMs: coletadoEm()
+      motivo: source === "fila_viva"
+        ? (erro?.code === "ENOENT" ? "fila_viva_ausente" : "fila_viva_erro_leitura")
+        : (erro?.code === "ENOENT" ? "fila_ausente" : "fila_erro_leitura"),
+      collectedAtMs: coletadoEm(),
+      meta
     });
   }
 
+  if (source === "fila_viva" && !revisionGuardHandled) {
+    const afterRead = identidadeFisica(statArquivoParaOFC(arquivo));
+    if (!mesmaIdentidadeFisica(beforeIdentity, afterRead)) {
+      const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+        revisionChanged: true, lido: false, leituraMs, wallMs: Math.max(0, clockPerf() - inicioTotal) });
+      registrar({ lido: false, leituraMs, wallMs: meta.wallMs, bytesArquivoObservados, revisionChanged: true });
+      return resultadoLeituraFila({ motivo: "ofc_revision_changed", collectedAtMs: coletadoEm(), meta });
+    }
+  }
+
   if (typeof texto !== "string" || texto.trim() === "") {
-    medidor?.registrarLeitura({ lido: true, leituraMs, bytesArquivoObservados, caracteresLidos: texto?.length || 0 });
-    return resultadoLeituraFila({ motivo: "fila_arquivo_vazio", collectedAtMs: coletadoEm() });
+    const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+      lido: false, leituraMs, wallMs: Math.max(0, clockPerf() - inicioTotal) });
+    registrar({ lido: false, leituraMs, wallMs: meta.wallMs, bytesArquivoObservados, caracteresLidos: texto?.length || 0 });
+    return resultadoLeituraFila({ motivo: source === "fila_viva" ? "fila_viva_arquivo_vazio" : "fila_arquivo_vazio",
+      collectedAtMs: coletadoEm(), meta });
   }
 
   let itens;
@@ -201,18 +308,56 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
     itens = JSON.parse(texto);
     parseMs = Math.max(0, clockPerf() - inicioParse);
   } catch {
-    medidor?.registrarLeitura({ lido: true, leituraMs, parseMs: Math.max(0, clockPerf() - inicioParse),
-      bytesArquivoObservados, caracteresLidos: texto.length });
-    return resultadoLeituraFila({ motivo: "fila_json_corrompido", collectedAtMs: coletadoEm() });
+    const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+      lido: false, leituraMs, parseMs: Math.max(0, clockPerf() - inicioParse), wallMs: Math.max(0, clockPerf() - inicioTotal) });
+    registrar({ lido: false, leituraMs, parseMs: meta.parseMs, wallMs: meta.wallMs, bytesArquivoObservados, caracteresLidos: texto.length });
+    return resultadoLeituraFila({ motivo: source === "fila_viva" ? "fila_viva_json_corrompido" : "fila_json_corrompido",
+      collectedAtMs: coletadoEm(), meta });
   }
-  medidor?.registrarLeitura({ lido: true, leituraMs, parseMs, bytesArquivoObservados, caracteresLidos: texto.length,
-    itens: Array.isArray(itens) ? itens.length : 0 });
+
+  if (source === "fila_viva") {
+    const normalizado = normalizarItensViva(itens);
+    if (!normalizado.ok) {
+      const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+        lido: false, leituraMs, parseMs, wallMs: Math.max(0, clockPerf() - inicioTotal) });
+      registrar({ lido: false, leituraMs, parseMs, wallMs: meta.wallMs, bytesArquivoObservados,
+        caracteresLidos: texto.length });
+      return resultadoLeituraFila({ motivo: normalizado.motivo, collectedAtMs: coletadoEm(), meta });
+    }
+    itens = normalizado.itens;
+  }
+
+  if (source === "fila_viva" && !revisionGuardHandled) {
+    const afterParse = identidadeFisica(statArquivoParaOFC(arquivo));
+    if (!mesmaIdentidadeFisica(beforeIdentity, afterParse)) {
+      const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+        revisionChanged: true, lido: false, leituraMs, parseMs, wallMs: Math.max(0, clockPerf() - inicioTotal) });
+      registrar({ lido: false, leituraMs, parseMs, wallMs: meta.wallMs, bytesArquivoObservados, revisionChanged: true });
+      return resultadoLeituraFila({ motivo: "ofc_revision_changed", collectedAtMs: coletadoEm(), meta });
+    }
+  }
+
+  const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
+    lido: true, leituraMs, parseMs, wallMs: Math.max(0, clockPerf() - inicioTotal),
+    itensCount: Array.isArray(itens) ? itens.length : 0 });
+  registrar({ lido: true, leituraMs, parseMs, wallMs: meta.wallMs, bytesArquivoObservados,
+    caracteresLidos: texto.length, itens: Array.isArray(itens) ? itens.length : 0 });
   return resultadoLeituraFila({
     ok: Array.isArray(itens),
     itens,
-    motivo: "fila_formato_invalido",
-    collectedAtMs: coletadoEm()
+    motivo: source === "fila_viva" ? "fila_viva_formato_invalido" : "fila_formato_invalido",
+    collectedAtMs: coletadoEm(),
+    meta
   });
+}
+
+function statArquivoParaOFC(arquivo) {
+  try {
+    const stat = fs.statSync(arquivo);
+    return stat;
+  } catch {
+    return { size: 0, mtimeMs: 0, ctimeMs: null, ino: null, dev: null };
+  }
 }
 
 function objeto(valor) {
@@ -1218,18 +1363,36 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       // Preserve the existing explicit reference used by isolated callers/tests.
       const agoraMs = Number(opcoes.agoraMs || Date.now());
       const destinos = destinosDoCliente(destinosPorCliente, id);
+      const fonteSnapshot = selecionarFonteSnapshotOFC(id, opcoes);
+      const workerSolicitado = opcoes.workerOfc === true ||
+        (opcoes.workerOfc !== false && process.env.OFC_READONLY_WORKER === "true");
+      const fonteMetaWorker = fonteSnapshot.eligible === true
+        ? {
+            eligible: true,
+            sourceBytes: fonteSnapshot.sourceBytes,
+            bytesAvoidedEstimate: fonteSnapshot.bytesAvoidedEstimate,
+            proofValidationMs: fonteSnapshot.proofValidationMs,
+            beforeIdentity: fonteSnapshot.beforeIdentity
+          }
+        : {};
       let resultadoWorker = null;
       let workerDescartadoNoConsumo = false;
-      if (opcoes.workerOfc === true || (opcoes.workerOfc !== false && process.env.OFC_READONLY_WORKER === "true")) {
+      let motivoFallback = fonteSnapshot.eligible === true ? "" : fonteSnapshot.motivo || "";
+      if (workerSolicitado) {
         try {
           const { avaliarComWorker, projetarDestinoWorker } = require("./workspace-worker-client");
           const usuario = usuarioPorId(usuarios, id) || {};
           const configExecutor = carregarConfiguracaoExecutor(id, opcoes, configsGlobais, configPadrao);
           const automacaoWorker = configExecutor.automacaoAtiva;
-          const arquivoWorker = (opcoes.getClienteJsonPath || getClienteJsonPath)(id, "fila.json");
+          const arquivoWorker = (opcoes.getClienteJsonPath || getClienteJsonPath)(
+            id, fonteSnapshot.source === "fila_viva" ? "fila-viva.json" : "fila.json"
+          );
           resultadoWorker = await avaliarComWorker({
             workspaceId: id,
             arquivo: arquivoWorker,
+            source: fonteSnapshot.source || "fila_legacy",
+            sourceValidated: fonteSnapshot.eligible === true,
+            sourceMeta: fonteMetaWorker,
             agoraMs, janelaMinutos, finalizacoesAgoraMs: inicio,
             usuario: Object.fromEntries(["creditos", "limiteDiarioRestante", "limite_diario_restante", "creditosRestantesDia", "creditosDiaRestantes"].map(k => [k, usuario[k]])),
             configExecutor: { automacaoAtiva: automacaoWorker },
@@ -1246,13 +1409,57 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
                 !iguais(resultadoWorker.after, revisao(arquivoWorker))) {
               resultadoWorker = null;
               workerDescartadoNoConsumo = true;
+              motivoFallback = "ofc_revision_changed_at_consumer";
             }
           }
-        } catch (_) { resultadoWorker = null; }
+          if (resultadoWorker && fonteSnapshot.eligible === true &&
+              (resultadoWorker.leitura?.ok !== true || resultadoWorker.leitura?.source !== "fila_viva")) {
+            motivoFallback = resultadoWorker.leitura?.motivo || "fila_viva_resultado_invalido";
+            resultadoWorker = null;
+            workerDescartadoNoConsumo = true;
+          }
+        } catch (erro) {
+          motivoFallback = erro?.message || (fonteSnapshot.eligible === true ? "fila_viva_worker_indisponivel" : "ofc_worker_failed");
+          resultadoWorker = null;
+        }
       }
       const destinosPreview = resultadoWorker?.destinosPreview || avaliarDestinosWorkspace(destinos, janelaMinutos, [], agoraMs);
-      // A rejected Worker result is never reused: exactly one fresh legacy read.
-      const leituraFila = resultadoWorker?.leitura || lerFilaWorkspaceSnapshot(id, opcoes);
+      let leituraFila = resultadoWorker?.leitura || null;
+      if (!leituraFila) {
+        const leituraOpcoes = {
+          ...opcoes,
+          source: fonteSnapshot.source || "fila_legacy",
+          arquivo: fonteSnapshot.arquivo,
+          sourceValidated: fonteSnapshot.eligible === true,
+          sourceMeta: fonteSnapshot,
+          fallbackReason: motivoFallback
+        };
+        if (fonteSnapshot.eligible === true && workerSolicitado) {
+          // A Worker failure must not trigger a second Viva read; use the safe legacy path.
+          leituraFila = lerFilaWorkspaceSnapshot(id, {
+            ...leituraOpcoes,
+            source: "fila_legacy",
+            arquivo: fonteSnapshot.paths?.legacy,
+            sourceValidated: false,
+            sourceMeta: {},
+            fallbackReason: motivoFallback || "ofc_worker_failed"
+          });
+        } else {
+          const tentativa = lerFilaWorkspaceSnapshot(id, leituraOpcoes);
+          if (fonteSnapshot.eligible === true && tentativa.ok !== true) {
+            leituraFila = lerFilaWorkspaceSnapshot(id, {
+              ...leituraOpcoes,
+              source: "fila_legacy",
+              arquivo: fonteSnapshot.paths?.legacy,
+              sourceValidated: false,
+              sourceMeta: {},
+              fallbackReason: tentativa.motivo || "fila_viva_fallback_legado"
+            });
+          } else {
+            leituraFila = tentativa;
+          }
+        }
+      }
       if (!leituraFila.ok) {
         incrementar(fontesInvalidasPorMotivo, leituraFila.motivo);
         if (destinosPreview.topologiaOperacionalPotencial) {
@@ -1339,6 +1546,8 @@ module.exports = {
   TTL_ESTEIRA_MS,
   classificarStatusFila,
   lerFilaWorkspaceSnapshot,
+  selecionarFonteSnapshotOFC,
+  snapshotVivaAtivo,
   itemVivoFila,
   itemPressionaCapacidade,
   timestampFila,

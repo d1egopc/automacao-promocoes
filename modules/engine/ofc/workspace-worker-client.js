@@ -103,6 +103,13 @@ async function observar(opcoes, input, event) {
     if (opcoes.observarWorker) await opcoes.observarWorker(event);
     else console.log("[OFC-WORKSPACE-WORKER]", JSON.stringify({ workspaceId: input.workspaceId,
       aceito: event.aceito, fallback: !event.aceito,
+      source: event.perf?.leitura?.source || input.source || "fila_legacy",
+      sourceBytes: event.perf?.leitura?.sourceBytes,
+      proofValidationMs: event.perf?.leitura?.proofValidationMs,
+      legacyReadAvoided: event.perf?.leitura?.legacyReadAvoided === true,
+      bytesAvoidedEstimate: event.perf?.leitura?.bytesAvoidedEstimate || 0,
+      fallbackReason: event.perf?.leitura?.fallbackReason || event.motivo || "",
+      revisionChanged: event.perf?.leitura?.revisionChanged === true,
       wallMs: event.perf?.wallMs, leituraMs: event.perf?.leitura?.leituraMs,
       parseMs: event.perf?.leitura?.parseMs, calculoMs: event.perf?.calcMs,
       inputCloneMs: event.perf?.inputCloneMs, returnCloneAndDispatchMs: event.perf?.returnCloneAndDispatchMs }));
@@ -126,7 +133,8 @@ async function registrarResultadoWorker(result, opcoes, workspaceId) {
   await observar(opcoes, { workspaceId }, { aceito: true, perf: result.perf });
 }
 async function registrarFallbackWorker(opcoes, workspaceId) {
-  await observar(opcoes, { workspaceId }, { aceito: false, motivo: "ofc_revision_changed_at_consumer" });
+  await observar(opcoes, { workspaceId }, { aceito: false, motivo: "ofc_revision_changed_at_consumer",
+    perf: { leitura: { source: "fila_legacy", fallbackReason: "ofc_revision_changed_at_consumer", revisionChanged: true } } });
 }
 async function fecharWorkerOfc() { if (singleton) { await singleton.fechar(); singleton = null; } }
 module.exports = { TIMEOUT_MS, RESOURCE_LIMITS, criarClienteWorker, avaliarComWorker, fecharWorkerOfc, valido, projetarDestinoWorker, registrarResultadoWorker, registrarFallbackWorker };

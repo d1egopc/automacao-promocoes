@@ -20,6 +20,10 @@ function calcular(input) {
     const preview = ofc.avaliarDestinosWorkspace(input.destinos, input.janelaMinutos, [], input.agoraMs);
     const leitura = ofc.lerFilaWorkspaceSnapshot(input.workspaceId, {
       getClienteJsonPath: () => input.arquivo,
+      source: input.source,
+      sourceValidated: input.sourceValidated === true,
+      sourceMeta: input.sourceMeta || {},
+      revisionGuardHandled: true,
       ...(input.coletaTesteMs === undefined ? {} : { clock: () => input.coletaTesteMs }),
       readFileSync: () => {
         // Missing at entry is handled by the same legacy reader error contract.
@@ -38,6 +42,12 @@ function calcular(input) {
     // uncertainty is different: reject it, never accept it as a source error.
     if (revisionFailure) throw revisionFailure;
     leituraPerf.bytesArquivoObservados = before ? Number(before.size) : null;
+    leituraPerf.source = input.source === "fila_viva" ? "fila_viva" : "fila_legacy";
+    leituraPerf.sourceBytes = before ? Number(before.size) : null;
+    leituraPerf.legacyReadAvoided = input.source === "fila_viva" && leitura.ok === true;
+    leituraPerf.bytesAvoidedEstimate = input.source === "fila_viva"
+      ? Number(input.sourceMeta?.bytesAvoidedEstimate || 0) : 0;
+    leituraPerf.proofValidationMs = Number(input.sourceMeta?.proofValidationMs || 0);
     memory.push({ etapa: "apos_parse", ...process.memoryUsage() });
     const calcInicio = performance.now();
     const fila = ofc.resumoFilaWorkspace(input.workspaceId, {
@@ -58,7 +68,18 @@ function calcular(input) {
     const cpuUsed = process.cpuUsage(cpu);
     // Neither text, parsed items nor full fila crosses the message boundary.
     return { agoraMs: input.agoraMs, workspace, destinosPreview: { topologiaOperacionalPotencial: preview.topologiaOperacionalPotencial },
-      leitura: { ok: leitura.ok, motivo: leitura.motivo, collectedAtMs: leitura.collectedAtMs },
+      leitura: {
+        ok: leitura.ok,
+        motivo: leitura.motivo,
+        collectedAtMs: leitura.collectedAtMs,
+        source: leitura.source || (input.source === "fila_viva" ? "fila_viva" : "fila_legacy"),
+        sourceBytes: leitura.sourceBytes ?? (before ? Number(before.size) : null),
+        proofValidationMs: leitura.proofValidationMs ?? Number(input.sourceMeta?.proofValidationMs || 0),
+        legacyReadAvoided: leitura.legacyReadAvoided === true,
+        bytesAvoidedEstimate: leitura.bytesAvoidedEstimate ?? Number(input.sourceMeta?.bytesAvoidedEstimate || 0),
+        fallbackReason: leitura.fallbackReason || "",
+        revisionChanged: leitura.revisionChanged === true
+      },
       before, after, perf: { leitura: leituraPerf, calcMs: performance.now() - calcInicio,
         wallMs: performance.now() - inicio, cpuMs: (cpuUsed.user + cpuUsed.system) / 1000,
         memory, heapFinal: process.memoryUsage().heapUsed } };
