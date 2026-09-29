@@ -30,6 +30,7 @@ const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
 const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
 const terminalIndexShadow = require("./terminal-index-shadow");
+const terminalIndexAuthority = require("./terminal-index-authority");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -2034,10 +2035,35 @@ function mesmaIdentidadePrimariaFilaV2(entrada = {}, item = {}) {
 function provarItemTerminalizadoNoHistorico(clienteId = "admin", item = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const agora = deps.agora || Date.now();
+  const authority = terminalIndexAuthority.decidirAuthority(cliente, item, {
+    ...deps,
+    agora,
+    identidadePrimariaExataFilaV2
+  });
+  if (authority.decision === "authority") {
+    return {
+      provado: authority.proved === true,
+      fonte: "fila-terminal-index.json",
+      status: authority.status,
+      itemId: identidadePrimariaExataFilaV2(item),
+      motivo: authority.hit === true
+        ? "terminal_index_authority_hit"
+        : "terminal_index_authority_miss",
+      terminalIndexAuthority: true,
+      authority
+    };
+  }
+
   const candidatos = [];
+  const leitorLegado = typeof deps.lerHistoricoLegadoCliente === "function"
+    ? deps.lerHistoricoLegadoCliente
+    : lerHistoricoLegadoCliente;
+  const leitorTecnico = typeof deps.lerItensHistoricoTecnicoParaLeve === "function"
+    ? deps.lerItensHistoricoTecnicoParaLeve
+    : lerItensHistoricoTecnicoParaLeve;
 
   try {
-    const legado = lerHistoricoLegadoCliente(cliente, deps);
+    const legado = leitorLegado(cliente, deps);
     if (legado.ok === true) {
       candidatos.push(...normalizarEntradasViva(legado.historico, agora).map(entrada => ({
         fonte: FILA_HISTORICO_ARQUIVO,
@@ -2047,7 +2073,7 @@ function provarItemTerminalizadoNoHistorico(clienteId = "admin", item = {}, deps
   } catch (_) {}
 
   try {
-    const tecnico = lerItensHistoricoTecnicoParaLeve(cliente, { ...deps, agora });
+    const tecnico = leitorTecnico(cliente, { ...deps, agora });
     candidatos.push(...lista(tecnico?.itens).map(entrada => ({
       fonte: HISTORICO_INCREMENTAL_DIR,
       entrada
@@ -2965,7 +2991,7 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
     deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update",
     ({ nextGeneration, fileRevision }) => {
       const resultado = atualizarItemFilaVivaIncremental(clienteId, item, {
-        ...deps,
+        ...terminalIndexAuthority.marcarCoordenada({ ...deps }),
         generation: nextGeneration,
         fileRevision,
         publicarFileProof: true
@@ -5464,6 +5490,7 @@ module.exports = {
   inserirItemFilaVivaIncremental,
   atualizarItemFilaVivaIncremental,
   removerItemFilaVivaIncremental,
+  provarItemTerminalizadoNoHistorico,
   recuperarFilaVivaDoLegado,
   inserirItemFilaVivaCoordenado,
   atualizarItemFilaVivaCoordenado,
