@@ -357,6 +357,7 @@ const {
   criarControladorFilaOperacionalV2,
   criarControladorCheckpointLegadoV2
 } = require("./modules/fila/fila-operacional-v2");
+const terminalAuthorityFence = require("./modules/fila/terminal-index-authority-fence");
 const { criarCoordenadorPersistencia } = require("./modules/fila/persistence-coordinator");
 const filaThumbnailService = require("./modules/fila/fila-thumbnail.service");
 const {
@@ -3084,6 +3085,28 @@ function projetarFilaV2ShadowCliente(clienteId = "admin", motivo = "sincronizaca
   });
 }
 
+function depsFenceRewriteLegado(opcoes = {}) {
+  return {
+    fs,
+    getClientePath,
+    getClienteJsonPath,
+    logger: console,
+    env: opcoes.env || process.env,
+    motivo: opcoes.motivo || "legacy_rewrite",
+    agora: opcoes.agora || Date.now(),
+    randomUUID: opcoes.randomUUID
+  };
+}
+
+function executarRewriteLegadoComFence(clienteId = "admin", motivo = "legacy_rewrite", opcoes = {}, rewrite = () => null) {
+  const cliente = String(clienteId || "admin");
+  const deps = {
+    ...depsFenceRewriteLegado(opcoes),
+    motivo
+  };
+  return terminalAuthorityFence.executarRewriteComFence(cliente, deps, rewrite);
+}
+
 function registrarHistoricoLeveTerminalLegadoAposSave(clienteId = "admin", itens = [], motivo = "terminal_legado_pos_save", opcoes = {}) {
   const listaItens = Array.isArray(itens)
     ? itens.filter(item => item && typeof item === "object")
@@ -3347,7 +3370,12 @@ function salvarFila(clienteId = "admin", opcoes = {}) {
         : reconstruir();
     }
     if (opcoes.shadowCompleto !== false) {
-      const projetar = () => projetarFilaV2ShadowCliente(clienteId, motivo);
+      const projetar = () => executarRewriteLegadoComFence(
+        clienteId,
+        motivo,
+        opcoes,
+        () => projetarFilaV2ShadowCliente(clienteId, motivo)
+      );
       perfilProcessarFila?.etapaSync
         ? perfilProcessarFila.etapaSync("shadowProjecao", projetar)
         : projetar();
@@ -3859,7 +3887,12 @@ function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
     fila.filter(item => String(item?.clienteId || "admin") === clienteBootstrapGuard)
   );
   reconstruirFilaStoreCliente(clienteId, opcoes.motivo || "carregarFila", opcoes);
-  projetarFilaV2ShadowCliente(clienteId, "carregarFila");
+  executarRewriteLegadoComFence(
+    clienteId,
+    "carregarFila",
+    opcoes,
+    () => projetarFilaV2ShadowCliente(clienteId, "carregarFila")
+  );
   filaOperacionalV2.prepararSeHabilitado({
     fila,
     clienteId,
