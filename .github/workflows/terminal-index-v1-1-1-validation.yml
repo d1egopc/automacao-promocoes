@@ -43,6 +43,8 @@ jobs:
           OFC_VIVA_SHA: 48a157a639dd475f3ce6b438609dcf768f1fc632
           PRE_INFRA_CLEANUP_SHA: ae81d450885bc36c1801fd15bc324086a6edf6d6
           INFRA_CLEANUP_SHA: f00e2aba83793976373cefb4e3b73614c43017f8
+          PRE_WORKER_OBS_SHA: 4411bb6b39f071e322962e54219d991dde9d8e1e
+          WORKER_OBS_SHA: 0d936783b7f57c11e3d67a3a0dbc845350a9d40d
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -59,6 +61,8 @@ jobs:
           git cat-file -e "$OFC_VIVA_SHA^{commit}"
           git cat-file -e "$PRE_INFRA_CLEANUP_SHA^{commit}"
           git cat-file -e "$INFRA_CLEANUP_SHA^{commit}"
+          git cat-file -e "$PRE_WORKER_OBS_SHA^{commit}"
+          git cat-file -e "$WORKER_OBS_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
@@ -66,6 +70,7 @@ jobs:
           test "$(git rev-parse "$OFC_VIVA_SHA^")" = "$PRE_OFC_VIVA_SHA"
           test "$(git rev-parse "$PRE_INFRA_CLEANUP_SHA^")" = "$OFC_VIVA_SHA"
           test "$(git rev-parse "$INFRA_CLEANUP_SHA^")" = "$PRE_INFRA_CLEANUP_SHA"
+          test "$(git rev-parse "$WORKER_OBS_SHA^")" = "$PRE_WORKER_OBS_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
@@ -75,6 +80,8 @@ jobs:
           git merge-base --is-ancestor "$OFC_VIVA_SHA" HEAD
           git merge-base --is-ancestor "$PRE_INFRA_CLEANUP_SHA" HEAD
           git merge-base --is-ancestor "$INFRA_CLEANUP_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_WORKER_OBS_SHA" HEAD
+          git merge-base --is-ancestor "$WORKER_OBS_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -116,11 +123,19 @@ jobs:
             tests/sincronismo-destinos.test.js | sort)
           infra_cleanup_actual=$(git diff --name-only "$PRE_INFRA_CLEANUP_SHA..$INFRA_CLEANUP_SHA" | sort)
           test "$infra_cleanup_actual" = "$infra_cleanup_expected"
+          worker_obs_expected=$(printf '%s\n' \
+            modules/engine/ofc/workspace-worker-client.js \
+            tests/fixtures/ofc-worker-before-barrier.js \
+            tests/ofc-workspace-worker.test.js | sort)
+          worker_obs_actual=$(git diff --name-only "$PRE_WORKER_OBS_SHA..$WORKER_OBS_SHA" | sort)
+          test "$worker_obs_actual" = "$worker_obs_expected"
           ofc_viva_ci_expected=".github/workflows/terminal-index-v1-1-1-validation.yml"
           ofc_viva_ci_actual=$(git diff --name-only "$OFC_VIVA_SHA..$PRE_INFRA_CLEANUP_SHA" | sort)
           test "$ofc_viva_ci_actual" = "$ofc_viva_ci_expected"
           ci_only_expected=".github/workflows/terminal-index-v1-1-1-validation.yml"
-          ci_only=$(git diff --name-only "$INFRA_CLEANUP_SHA..HEAD" | sort)
+          worker_obs_ci_actual=$(git diff --name-only "$INFRA_CLEANUP_SHA..$PRE_WORKER_OBS_SHA" | sort)
+          test "$worker_obs_ci_actual" = "$ci_only_expected"
+          ci_only=$(git diff --name-only "$WORKER_OBS_SHA..HEAD" | sort)
           test "$ci_only" = "$ci_only_expected"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
@@ -129,16 +144,19 @@ jobs:
           git diff --check "$PRE_OFC_VIVA_SHA..$OFC_VIVA_SHA"
           git diff --check "$OFC_VIVA_SHA..$PRE_INFRA_CLEANUP_SHA"
           git diff --check "$PRE_INFRA_CLEANUP_SHA..$INFRA_CLEANUP_SHA"
-          git diff --check "$INFRA_CLEANUP_SHA..HEAD"
+          git diff --check "$PRE_WORKER_OBS_SHA..$WORKER_OBS_SHA"
+          git diff --check "$WORKER_OBS_SHA..HEAD"
           git diff --check "$OFC_VIVA_SHA..HEAD"
-          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA CI_HEAD=$(git rev-parse HEAD)"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
           echo "Authority paths:"; printf '%s\n' "$authority_actual"
           echo "Authority CI-only paths:"; printf '%s\n' "$authority_ci_actual"
           echo "OFC Viva paths:"; printf '%s\n' "$ofc_viva_actual"
           echo "Infrastructure cleanup paths:"; printf '%s\n' "$infra_cleanup_actual"
+          echo "Worker observability paths:"; printf '%s\n' "$worker_obs_actual"
           echo "CI-only before infrastructure cleanup paths:"; printf '%s\n' "$ofc_viva_ci_actual"
+          echo "CI-only before worker observability paths:"; printf '%s\n' "$worker_obs_ci_actual"
           echo "CI-only paths:"; printf '%s\n' "$ci_only"
 
       - name: Clean Linux dependency installation
@@ -154,6 +172,16 @@ jobs:
           node --check modules/engine/ofc/workspace-worker-client.js
           node --check tests/ofc-snapshot-viva-v1.test.js
           OFC_SNAPSHOT_VIVA_BENCHMARK=1 node tests/ofc-snapshot-viva-v1.test.js
+
+      - name: OFC Worker fallback observability Linux / Node 24 dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/engine/ofc/workspace-worker-client.js
+          node --check tests/fixtures/ofc-worker-before-barrier.js
+          node --check tests/ofc-workspace-worker.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/ofc-snapshot-viva-v1.test.js
 
       - name: Syntax and encoding
         shell: bash
