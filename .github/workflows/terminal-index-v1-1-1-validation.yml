@@ -217,3 +217,241 @@ jobs:
             exit 1
           fi
           echo "Only failures reproduced with the same assertion signature on base."
+
+  terminal-index-auditor-synthetic:
+    name: Synthetic independent auditor
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Safety guard - branch and hosted Node 24
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-1-1-delta-self-healing
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+
+      - name: Clean Linux dependency installation
+        run: npm ci
+
+      - name: Build and audit synthetic legacy plus incremental fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          "use strict";
+
+          const assert = require("node:assert/strict");
+          const fs = require("node:fs");
+          const os = require("node:os");
+          const path = require("node:path");
+          const { spawnSync } = require("node:child_process");
+          const operacional = require("./modules/fila/fila-operacional-v2");
+          const terminalIndex = require("./modules/fila/terminal-index-shadow");
+          const { construirTerminalIndex } = require("./modules/fila/terminal-index-worker");
+
+          const root = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-index-auditor-"));
+          const workspace = "workspace_synthetic_auditor";
+          const dir = path.join(root, "clientes", workspace);
+          const incrementalDir = path.join(dir, terminalIndex.TERMINAL_INDEX_INCREMENTAL_DIR);
+          const legacyFile = path.join(dir, terminalIndex.TERMINAL_INDEX_LEGACY_FILE);
+          const incrementalFile = path.join(incrementalDir, "2026-09-29.jsonl");
+          const nowMs = Date.parse("2026-09-29T12:00:00.000Z");
+
+          const legacy = [
+            { id: "legacy-enviado", status: "enviado" },
+            { id: "legacy-retida", status: "retida", motivoRetencao: "sem_destino" },
+            { id: "legacy-expirado", status: "expirado" },
+            { id: "duplicate-precedence", status: "retida", motivoRetencao: "sem_destino" },
+            { id: "overlap-expirada", status: "retida", motivoRetencao: "sem_destino" },
+            { id: "legacy-only", status: "enviado" },
+            { id: "processado-excluded", status: "processado" }
+          ];
+          const incremental = [
+            { id: "incremental-enviado", status: "enviado" },
+            { id: "incremental-retida", status: "retida", motivoRetencao: "sem_destino" },
+            { id: "duplicate-precedence", status: "enviado" },
+            { id: "overlap-expirada", status: "expirada" },
+            { id: "incremental-only", status: "expirado" },
+            { id: "incremental-processado-excluded", status: "processado" }
+          ];
+
+          try {
+            fs.mkdirSync(incrementalDir, { recursive: true });
+            fs.writeFileSync(legacyFile, JSON.stringify(legacy), "utf8");
+            fs.writeFileSync(
+              incrementalFile,
+              `${incremental.map(item => JSON.stringify({ item })).join("\n")}\n`,
+              "utf8"
+            );
+
+            const processado = operacional.normalizarEntradasViva(
+              [{ id: "processado-excluded", status: "processado" }],
+              nowMs
+            )[0];
+            assert.equal(processado.bucket, "viva", "processado deve seguir a classificação atual e ficar fora do Terminal Index");
+
+            const build = construirTerminalIndex({
+              operation: "terminal_index_bootstrap",
+              clienteId: workspace,
+              checkpointRevision: "auditor-synthetic-bootstrap-0001",
+              targetGeneration: 1,
+              dataDir: root,
+              nowMs
+            }, {
+              operacional: {
+                normalizarEntradasViva: operacional.normalizarEntradasViva,
+                identidadePrimariaExataFilaV2: operacional.identidadePrimariaExataFilaV2,
+                rankStatusFilaV2: operacional.rankStatusFilaV2
+              }
+            });
+            assert.equal(build.ok, true);
+
+            const index = JSON.parse(fs.readFileSync(path.join(dir, terminalIndex.TERMINAL_INDEX_FILE), "utf8"));
+            const proof = JSON.parse(fs.readFileSync(path.join(dir, terminalIndex.TERMINAL_INDEX_PROOF_FILE), "utf8"));
+            assert.equal(index.authorityEligible, false);
+            assert.equal(proof.authorityEligible, false);
+            assert.equal(index.complete, true);
+            assert.equal(proof.complete, true);
+            assert.equal(index.sourceRevision, proof.sourceRevision);
+            assert.equal(index.generation, proof.generation);
+
+            const audit = spawnSync(process.execPath, [
+              "scripts/auditar-terminal-index.js",
+              "--workspace", workspace,
+              "--data-dir", root
+            ], { encoding: "utf8" });
+            process.stdout.write(audit.stdout || "");
+            process.stderr.write(audit.stderr || "");
+            assert.equal(audit.status, 0, `auditor exit code inesperado: ${audit.status}`);
+
+            const lines = (audit.stdout || "").trim().split(/\r?\n/).filter(Boolean);
+            const report = JSON.parse(lines.at(-1));
+            assert.equal(report.ok, true);
+            assert.equal(report.missing, 0);
+            assert.equal(report.extra, 0);
+            assert.equal(report.statusMismatch, 0);
+            assert.equal(report.concordancePercent, 100);
+            assert.equal(report.unionIdentities, report.indexed);
+            assert.equal(report.proofComplete, true);
+            assert.equal(report.sourceRevision, proof.sourceRevision);
+            assert.equal(report.generation, proof.generation);
+
+            const expected = [
+              "duplicate-precedence",
+              "incremental-enviado",
+              "incremental-only",
+              "incremental-retida",
+              "legacy-enviado",
+              "legacy-expirado",
+              "legacy-only",
+              "legacy-retida",
+              "overlap-expirada"
+            ];
+            assert.deepEqual(Object.keys(index.entries).sort(), expected);
+            assert.deepEqual(index.entries["duplicate-precedence"], ["enviado", 3]);
+            assert.deepEqual(index.entries["overlap-expirada"], ["expirada", 3]);
+            assert.equal(index.entries["processado-excluded"], undefined);
+            assert.equal(index.entries["incremental-processado-excluded"], undefined);
+
+            console.log("terminal-index-auditor-synthetic:", JSON.stringify({
+              ...report,
+              sourceRevisionCoherent: index.sourceRevision === proof.sourceRevision && proof.sourceRevision === report.sourceRevision,
+              generationCoherent: index.generation === proof.generation && proof.generation === report.generation,
+              duplicatePrecedence: index.entries["duplicate-precedence"],
+              overlapPrecedence: index.entries["overlap-expirada"],
+              processadoExcludedByCurrentModel: true
+            }));
+          } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+          }
+          NODE
+
+  terminal-index-large-500:
+    name: Large gate 500 MiB
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Safety guard - branch and hosted Node 24
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-1-1-delta-self-healing
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+
+      - name: Clean Linux dependency installation
+        run: npm ci
+
+      - name: Run Terminal Index large gate at 500 MiB
+        shell: bash
+        env:
+          TERMINAL_INDEX_LARGE_GATE: "1"
+          TERMINAL_INDEX_LARGE_MIB: "500"
+        run: |
+          set -euo pipefail
+          node tests/terminal-index-v1-large-gate.test.js | tee "$RUNNER_TEMP/terminal-index-large-500.log"
+
+  terminal-index-large-600:
+    name: Large gate 600 MiB
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Safety guard - branch and hosted Node 24
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/feature/terminal-index-v1-1-1-delta-self-healing
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+
+      - name: Clean Linux dependency installation
+        run: npm ci
+
+      - name: Run Terminal Index large gate at 600 MiB
+        shell: bash
+        env:
+          TERMINAL_INDEX_LARGE_GATE: "1"
+          TERMINAL_INDEX_LARGE_MIB: "600"
+        run: |
+          set -euo pipefail
+          node tests/terminal-index-v1-large-gate.test.js | tee "$RUNNER_TEMP/terminal-index-large-600.log"
