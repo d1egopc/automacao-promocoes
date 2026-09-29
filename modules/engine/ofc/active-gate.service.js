@@ -19,6 +19,13 @@ function objeto(valor) {
   return valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {};
 }
 
+function fatoSnapshot(snapshot = {}, campo = "") {
+  const valor = snapshot?.facts?.gate?.[campo];
+  if (valor?.sameAs === "flow.fila" && campo === "fila") return snapshot?.facts?.flow?.fila || {};
+  if (valor?.sameAs === "flow.destinosResumo" && campo === "destinosResumo") return snapshot?.facts?.flow?.destinosResumo || {};
+  return valor;
+}
+
 function texto(valor = "") {
   return String(valor || "").trim();
 }
@@ -282,12 +289,21 @@ async function decidirAbsorcaoWorkspace(entrada = {}, opcoes = {}) {
     const turbo = cupomTurboAtivo(entrada);
     const destinos = destinosParaCupomTurbo(entrada.destinosCompativeis, turbo);
     const destinosPreview = avaliarDestinosWorkspace(destinos, 15, []);
-    const fila = resumoFilaWorkspace(workspaceId, {
-      ...opcoes,
-      readClienteJson: opcoes.readClienteJson || readClienteJson,
-      janelaAbertaAgora: destinosPreview.janelaAbertaAgora
-    });
-    const destinosResumo = avaliarDestinosWorkspace(destinos, 15, fila.itens || []);
+    const snapshot = opcoes.distributorSnapshot;
+    const snapshotValido = snapshot?.ok === true &&
+      snapshot.workspaceId === workspaceId &&
+      (snapshot.facts?.gate?.fila || snapshot.facts?.fila) &&
+      snapshot.facts?.gate?.destinosResumo;
+    const fila = snapshotValido
+      ? (fatoSnapshot(snapshot, "fila") || snapshot.facts.fila)
+      : resumoFilaWorkspace(workspaceId, {
+          ...opcoes,
+          readClienteJson: opcoes.readClienteJson || readClienteJson,
+          janelaAbertaAgora: destinosPreview.janelaAbertaAgora
+        });
+    const destinosResumo = snapshotValido
+      ? fatoSnapshot(snapshot, "destinosResumo")
+      : avaliarDestinosWorkspace(destinos, 15, fila.itens || []);
     const filaAlvo = calcularFilaAlvo(destinosResumo, turbo);
     const pressaoEsteiraViva = numero(fila.pressaoEsteiraViva);
     const indisponibilidadeRuntime = diagnosticarIndisponibilidadeRuntime(entrada, opcoes);

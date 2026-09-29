@@ -694,19 +694,40 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
   try {
     const destinos = lista(entrada.destinosCompativeis);
     const destinosPreview = avaliarDestinosWorkspace(destinos, coberturaMinutos, []);
-    const fila = resumoFilaWorkspace(workspaceId, {
-      ...opcoes,
-      readClienteJson: opcoes.readClienteJson || readClienteJson,
-      janelaAbertaAgora: destinosPreview.janelaAbertaAgora
-    });
-    const destinosResumo = avaliarDestinosWorkspace(destinos, coberturaMinutos, fila.itens || []);
+    const snapshot = opcoes.distributorSnapshot;
+    const snapshotValido = snapshot?.ok === true &&
+      snapshot.workspaceId === workspaceId &&
+      (snapshot.facts?.flow?.fila || snapshot.facts?.fila) &&
+      snapshot.facts?.flow?.destinosResumo &&
+      snapshot.facts?.flow?.bufferShadow &&
+      snapshot.facts?.flow?.bufferVivoShadow;
+    const fila = snapshotValido
+      ? (snapshot.facts.flow.fila || snapshot.facts.fila)
+      : resumoFilaWorkspace(workspaceId, {
+          ...opcoes,
+          readClienteJson: opcoes.readClienteJson || readClienteJson,
+          janelaAbertaAgora: destinosPreview.janelaAbertaAgora
+        });
+    const destinosResumo = snapshotValido
+      ? snapshot.facts.flow.destinosResumo
+      : avaliarDestinosWorkspace(destinos, coberturaMinutos, fila.itens || []);
     const credito = await verificarCreditos(workspaceId, oferta, opcoes);
     const runtime = diagnosticarRuntime({ ...entrada, workspaceId, oferta }, opcoes);
+    if (snapshotValido) {
+      const validarSnapshot = opcoes.validarDistributorSnapshot;
+      const snapshotAindaValido = typeof validarSnapshot === "function" && await validarSnapshot(snapshot);
+      if (!snapshotAindaValido) {
+        const { distributorSnapshot: _snapshot, validarDistributorSnapshot: _validar, ...opcoesLegado } = opcoes;
+        return avaliarFluxoWorkspaceShadow(entrada, opcoesLegado);
+      }
+    }
     const nivelCalculado = nivelAlvoPorCobertura(destinosResumo, tipoFluxo);
     const nivelAlvo = destinosResumo.janelaAbertaAgora === true && !runtime && credito.ok
       ? nivelCalculado
       : 0;
-    const bufferShadow = calcularBufferAtualShadow(fila.itens || [], destinosResumo, { agoraMs });
+    const bufferShadow = snapshotValido
+      ? snapshot.facts.flow.bufferShadow
+      : calcularBufferAtualShadow(fila.itens || [], destinosResumo, { agoraMs });
     const bufferAtual = limitarNaoNegativo(bufferShadow.bufferAtual);
     const vagasDisponiveis = Math.max(0, nivelAlvo - bufferAtual);
     const aceitarAgora = nivelAlvo > 0 && vagasDisponiveis > 0;
@@ -741,32 +762,32 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
       motivosItensIgnorados: contarItensIgnoradosBuffer(bufferShadow.itensIgnorados),
       aplicouMudancas: false
     };
-    const bufferVivo = calcularBufferVivoWorkspace({
-      workspaceId,
-      ofertaId,
-      marketplace,
-      oferta,
-      tipoFluxo,
-      destinosCompativeis: destinos,
-      destinosResumo,
-      filaItens: fila.itens || [],
-      flowAtual: {
-        aceitarAgora,
-        motivo,
-        nivelAlvo,
-        bufferAtual,
-        vagasDisponiveis
-      },
-      saudeAgregada: {
-        filaAlvo5Min: destinosResumo.filaAlvo5Min,
-        filaAlvo10Min: destinosResumo.filaAlvo10Min,
-        filaAlvo15Min: destinosResumo.filaAlvo15Min,
-        pressaoEsteiraViva: fila.pressaoEsteiraViva,
-        capacidade: Math.max(0, limitarNaoNegativo(destinosResumo.filaAlvo15Min) - limitarNaoNegativo(fila.pressaoEsteiraViva))
-      },
-      agoraMs
+    const saudeAgregada = {
+      filaAlvo5Min: destinosResumo.filaAlvo5Min,
+      filaAlvo10Min: destinosResumo.filaAlvo10Min,
+      filaAlvo15Min: destinosResumo.filaAlvo15Min,
+      pressaoEsteiraViva: fila.pressaoEsteiraViva,
+      capacidade: Math.max(0, limitarNaoNegativo(destinosResumo.filaAlvo15Min) - limitarNaoNegativo(fila.pressaoEsteiraViva))
+    };
+    const bufferVivo = snapshotValido
+      ? snapshot.facts.flow.bufferVivoShadow
+      : calcularBufferVivoWorkspace({
+          workspaceId,
+          ofertaId,
+          marketplace,
+          oferta,
+          tipoFluxo,
+          destinosCompativeis: destinos,
+          destinosResumo,
+          filaItens: fila.itens || [],
+          flowAtual: { aceitarAgora, motivo, nivelAlvo, bufferAtual, vagasDisponiveis },
+          saudeAgregada,
+          agoraMs
+        });
+    const divergenciaBufferVivo = resumirDivergenciaBufferVivo(bufferVivo, {
+      flowAtual: { aceitarAgora, motivo, nivelAlvo, bufferAtual, vagasDisponiveis },
+      saudeAgregada
     });
-    const divergenciaBufferVivo = resumirDivergenciaBufferVivo(bufferVivo);
     decisao.bufferVivoShadow = bufferVivo;
     decisao.bufferVivoDivergencia = divergenciaBufferVivo;
     logBufferVivoFlowShadow(bufferVivo, divergenciaBufferVivo);

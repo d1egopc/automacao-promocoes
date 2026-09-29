@@ -43,6 +43,12 @@ const {
   headsProtegidas,
   reivindicarSlotFairness
 } = require("./distributor-fairness.service");
+const {
+  obterDistributorSnapshot,
+  validarDistributorSnapshot,
+  ativoParaWorkspace,
+  decidirGateComSnapshotSeguro
+} = require("../ofc/distributor-snapshot-coordinator");
 
 const motivoDistribuicaoDefinitivo = typeof motivoDistribuicaoDefinitivoService === "function"
   ? motivoDistribuicaoDefinitivoService
@@ -232,7 +238,9 @@ async function registrarFlowManagerShadow(oferta = {}, validacao = {}, contexto 
     }, {
       ...(contexto?.deps?.flowManager || {}),
       validarCreditos: contexto.validarCreditos,
-      diagnosticarDisponibilidadeEnvioWorkspace: contexto?.deps?.diagnosticarDisponibilidadeEnvioWorkspace
+      diagnosticarDisponibilidadeEnvioWorkspace: contexto?.deps?.diagnosticarDisponibilidadeEnvioWorkspace,
+      distributorSnapshot: contexto.distributorSnapshot,
+      validarDistributorSnapshot: contexto.validarDistributorSnapshot
     });
   } catch (erro) {
     logFlowAtivo("[OPTIMUS-FLOW-V1-ERRO]", {
@@ -818,7 +826,44 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo, contexto);
   }
 
-  const flowOriginal = await registrarFlowManagerShadow(oferta, validacao, contexto);
+  const snapshotOptions = {
+    ...(contexto?.deps?.distributorSnapshot || {}),
+    env: contexto?.deps?.distributorSnapshot?.env || process.env
+  };
+  const coordenarSnapshot = contexto?.deps?.obterDistributorSnapshot || obterDistributorSnapshot;
+  const validarSnapshot = contexto?.deps?.validarDistributorSnapshot || ((snapshot) =>
+    validarDistributorSnapshot(snapshot, snapshotOptions));
+  let distributorSnapshot = null;
+  if (ativoParaWorkspace(oferta.cliente_id || "", snapshotOptions.env)) {
+    try {
+      const candidato = await coordenarSnapshot({
+        workspaceId: oferta.cliente_id || "",
+        ofertaId: oferta.id,
+        marketplace: oferta.marketplace || "",
+        tipoOperacional: tipoOperacionalOferta(oferta),
+        cupomTurbo: cupomTurboOferta(oferta),
+        tipoFluxo: cupomTurboOferta(oferta) ? "cupom_turbo" : "oferta_comum",
+        oferta: {
+          id: oferta.id,
+          cliente_id: oferta.cliente_id,
+          marketplace: oferta.marketplace,
+          categoria: oferta.categoria,
+          tipoMidia: oferta.tipoMidia || oferta.tipo_midia
+        },
+        destinosCompativeis: validacao.__destinosCompativeisRaw || [],
+        agoraMs: Date.now()
+      }, snapshotOptions);
+      if (candidato?.ok === true) distributorSnapshot = candidato;
+    } catch (_) {
+      distributorSnapshot = null;
+    }
+  }
+  const contextoCoordenado = {
+    ...contexto,
+    distributorSnapshot,
+    validarDistributorSnapshot: validarSnapshot
+  };
+  const flowOriginal = await registrarFlowManagerShadow(oferta, validacao, contextoCoordenado);
   const flowAtivo = flowManagerAtivoParaOferta(oferta, contexto);
   const flowAplicado = flowAtivo
     ? aplicarAutoridadeBufferVivo(flowOriginal || {}, resumo).decisao
@@ -855,7 +900,7 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
   }
 
   const decidirGate = contexto?.deps?.decidirAbsorcaoWorkspace || decidirAbsorcaoWorkspace;
-  const gate = await decidirGate({
+  const entradaGate = {
     workspaceId: oferta.cliente_id || "",
     ofertaId: oferta.id,
     marketplace: oferta.marketplace || "",
@@ -863,7 +908,100 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     destinosCompativeis: validacao.__destinosCompativeisRaw || [],
     cupomTurbo: cupomTurboOferta(oferta),
     quantidadeSolicitada: 1
-  }, contexto?.deps?.gateAtivo || {});
+  };
+  const opcoesGate = {
+    ...(contexto?.deps?.gateAtivo || {}),
+  };
+  const tratarGateBloqueado = async gateAtual => {
+    const classificacaoGate = motivoDistribuicaoDefinitivo(gateAtual.motivo || "gate_absorcao_bloqueado", {
+      origem: "gate",
+      clienteId: oferta.cliente_id || "",
+      marketplace: oferta.marketplace || "",
+      destinosCompativeis: validacao.destinosCompativeis,
+      estadoDaEsteira: gateAtual.estadoDaEsteira,
+      capacidadeAtual: gateAtual.capacidadeAtual,
+      pressaoEsteiraViva: gateAtual.pressaoEsteiraViva,
+      filaAlvo: gateAtual.filaAlvo
+    });
+
+    if (classificacaoGate.definitivo) {
+      liberarReservaBufferVivo(flow, resumo, gateAtual.motivo || "gate_absorcao_bloqueado");
+      coberturaRadar.registrar("engine_distributor_retida", {
+        ...contextoCoberturaDistributor(oferta, {
+          destinoEncontrado: true,
+          filaRecebeu: false
+        }),
+        decisao: "retido",
+        motivo: gateAtual.motivo || "gate_absorcao_bloqueado"
+      });
+      return reterOferta(oferta, gateAtual.motivo || "gate_absorcao_bloqueado", {
+        ofertaId: oferta.id,
+        clienteId: oferta.cliente_id,
+        resultadoDistribuicao: "gate_definitivo_terminal",
+        motivo: gateAtual.motivo || "gate_absorcao_bloqueado",
+        estadoDaEsteira: gateAtual.estadoDaEsteira,
+        filaRecebeu: false,
+        escopo: "workspace",
+        definitivoOperacional: true,
+        classificacaoOperacional: classificacaoGate.tipo,
+        statusOperacional: classificacaoGate.statusOperacional
+      }, resumo, contexto);
+    }
+
+    if (flowAtivo) {
+      liberarReservaBufferVivo(flow, resumo, gateAtual.motivo || "gate_absorcao_bloqueado");
+      return finalizarFlowNaoAceita(oferta, {
+        ...(flow || {}),
+        aceitarAgora: false,
+        motivo: gateAtual.motivo || "gate_absorcao_bloqueado",
+        nivelAlvo: gateAtual.filaAlvo ?? flow?.nivelAlvo,
+        bufferAtual: gateAtual.pressaoEsteiraViva ?? flow?.bufferAtual,
+        vagasDisponiveis: gateAtual.capacidadeAtual ?? flow?.vagasDisponiveis,
+        tipoFluxo: flow?.tipoFluxo || tipoOperacionalOferta(oferta),
+        ttlMs: flow?.ttlMs,
+        destinosCompativeis: validacao.destinosCompativeis
+      }, resumo, "gate", contexto);
+    }
+
+    await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {
+      ofertaId: oferta.id,
+      clienteId: oferta.cliente_id,
+      resultadoDistribuicao: "gate_bloqueado_piloto",
+      motivo: gateAtual.motivo || "gate_absorcao_bloqueado",
+      estadoDaEsteira: gateAtual.estadoDaEsteira,
+      filaRecebeu: false,
+      escopo: "workspace"
+    });
+    await restaurarStatusComercialAposGate(oferta, gateAtual.motivo || "gate_absorcao_bloqueado");
+    liberarReservaBufferVivo(flow, resumo, gateAtual.motivo || "gate_absorcao_bloqueado");
+    if (resumo) motivoAdicionar(resumo, gateAtual.motivo || "gate_absorcao_bloqueado");
+    coberturaRadar.registrar("engine_distributor_gate_bloqueado", {
+      ...contextoCoberturaDistributor(oferta, {
+        destinoEncontrado: true,
+        filaRecebeu: false
+      }),
+      decisao: "bloqueado",
+      motivo: gateAtual.motivo || "gate_absorcao_bloqueado",
+      filaRecebeu: false
+    });
+    return {
+      ok: false,
+      gateBloqueado: true,
+      motivo: gateAtual.motivo || "gate_absorcao_bloqueado",
+      estadoDaEsteira: gateAtual.estadoDaEsteira
+    };
+  };
+  let snapshotParaGate = distributorSnapshot;
+  if (snapshotParaGate && !(await validarSnapshot(snapshotParaGate))) snapshotParaGate = null;
+  const gateCoordenado = await decidirGateComSnapshotSeguro({
+    entrada: entradaGate,
+    opcoes: opcoesGate,
+    snapshot: snapshotParaGate,
+    validarSnapshot,
+    decidirGate
+  });
+  let gate = gateCoordenado.gate;
+  let gateUsouSnapshot = gateCoordenado.usouSnapshot;
   registrarGateResumo(resumo, gate);
 
   if (gate?.ativo) {
@@ -880,83 +1018,15 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       fallbackAplicado: gate.fallbackAplicado === true
     });
 
-    if (!gate.permitir) {
-      const classificacaoGate = motivoDistribuicaoDefinitivo(gate.motivo || "gate_absorcao_bloqueado", {
-        origem: "gate",
-        clienteId: oferta.cliente_id || "",
-        marketplace: oferta.marketplace || "",
-        destinosCompativeis: validacao.destinosCompativeis,
-        estadoDaEsteira: gate.estadoDaEsteira,
-        capacidadeAtual: gate.capacidadeAtual,
-        pressaoEsteiraViva: gate.pressaoEsteiraViva,
-        filaAlvo: gate.filaAlvo
-      });
-      if (classificacaoGate.definitivo) {
-        liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
-        coberturaRadar.registrar("engine_distributor_retida", {
-          ...contextoCoberturaDistributor(oferta, {
-            destinoEncontrado: true,
-            filaRecebeu: false
-          }),
-          decisao: "retido",
-          motivo: gate.motivo || "gate_absorcao_bloqueado"
-        });
-        return reterOferta(oferta, gate.motivo || "gate_absorcao_bloqueado", {
-          ofertaId: oferta.id,
-          clienteId: oferta.cliente_id,
-          resultadoDistribuicao: "gate_definitivo_terminal",
-          motivo: gate.motivo || "gate_absorcao_bloqueado",
-          estadoDaEsteira: gate.estadoDaEsteira,
-          filaRecebeu: false,
-          escopo: "workspace",
-          definitivoOperacional: true,
-          classificacaoOperacional: classificacaoGate.tipo,
-          statusOperacional: classificacaoGate.statusOperacional
-        }, resumo, contexto);
-      }
+    if (!gate.permitir) return tratarGateBloqueado(gate);
+  }
 
-      if (flowAtivo) {
-        liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
-        return finalizarFlowNaoAceita(oferta, {
-          ...(flow || {}),
-          aceitarAgora: false,
-          motivo: gate.motivo || "gate_absorcao_bloqueado",
-          nivelAlvo: gate.filaAlvo ?? flow?.nivelAlvo,
-          bufferAtual: gate.pressaoEsteiraViva ?? flow?.bufferAtual,
-          vagasDisponiveis: gate.capacidadeAtual ?? flow?.vagasDisponiveis,
-          tipoFluxo: flow?.tipoFluxo || tipoOperacionalOferta(oferta),
-          ttlMs: flow?.ttlMs,
-          destinosCompativeis: validacao.destinosCompativeis
-        }, resumo, "gate", contexto);
-      }
-      await registrarEtapaDistribuicao(oferta.job_id, "distribuicao_final", "bloqueada", "gate_bloqueado_piloto", {
-        ofertaId: oferta.id,
-        clienteId: oferta.cliente_id,
-        resultadoDistribuicao: "gate_bloqueado_piloto",
-        motivo: gate.motivo || "gate_absorcao_bloqueado",
-        estadoDaEsteira: gate.estadoDaEsteira,
-        filaRecebeu: false,
-        escopo: "workspace"
-      });
-      await restaurarStatusComercialAposGate(oferta, gate.motivo || "gate_absorcao_bloqueado");
-      liberarReservaBufferVivo(flow, resumo, gate.motivo || "gate_absorcao_bloqueado");
-      if (resumo) motivoAdicionar(resumo, gate.motivo || "gate_absorcao_bloqueado");
-      coberturaRadar.registrar("engine_distributor_gate_bloqueado", {
-        ...contextoCoberturaDistributor(oferta, {
-          destinoEncontrado: true,
-          filaRecebeu: false
-        }),
-        decisao: "bloqueado",
-        motivo: gate.motivo || "gate_absorcao_bloqueado",
-        filaRecebeu: false
-      });
-      return {
-        ok: false,
-        gateBloqueado: true,
-        motivo: gate.motivo || "gate_absorcao_bloqueado",
-        estadoDaEsteira: gate.estadoDaEsteira
-      };
-    }
+  const gateFinal = await gateCoordenado.revalidarAntesDaMutacao();
+  if (gateFinal.alterado) {
+    gate = gateFinal.gate;
+    gateUsouSnapshot = gateFinal.usouSnapshot;
+    registrarGateResumo(resumo, gate);
+    if (gate?.ativo && !gate.permitir) return tratarGateBloqueado(gate);
   }
 
   const contextoFila = flowAtivo && flow?.aceitarAgora === true
