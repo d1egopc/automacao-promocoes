@@ -80,7 +80,7 @@ jobs:
         env:
           BASE_SHA: e2e71311ec635d7f2897e7303efd2c0bf8a2d388
         run: |
-          set -uo pipefail
+          set -euo pipefail
           suites=(
             tests/terminal-index-v1-1-1-self-healing.test.js
             tests/terminal-index-v1-1-delta.test.js
@@ -130,8 +130,11 @@ jobs:
             index=$((index + 1))
             log="$RUNNER_TEMP/ti111-current/$index.log"
             echo "=== CURRENT: $suite ==="
-            node "$suite" >"$log" 2>&1
-            status=$?
+            if node "$suite" >"$log" 2>&1; then
+              status=0
+            else
+              status=$?
+            fi
             tail -n 12 "$log"
             if [ "$status" -eq 0 ]; then
               echo "PASS $suite"
@@ -155,8 +158,11 @@ jobs:
             current_log="$RUNNER_TEMP/ti111-current/$index.log"
             baseline_log="$RUNNER_TEMP/ti111-current/$index-baseline.log"
             echo "=== BASELINE: $suite ==="
-            (cd "$baseline" && node "$suite") >"$baseline_log" 2>&1
-            baseline_status=$?
+            if (cd "$baseline" && node "$suite") >"$baseline_log" 2>&1; then
+              baseline_status=0
+            else
+              baseline_status=$?
+            fi
             tail -n 12 "$baseline_log"
             if [ "$baseline_status" -ne 0 ]; then
               current_signature=$(python3 - "$current_log" <<'PY'
