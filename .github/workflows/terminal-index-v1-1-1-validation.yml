@@ -35,6 +35,8 @@ jobs:
         env:
           BASE_SHA: e2e71311ec635d7f2897e7303efd2c0bf8a2d388
           FUNCTIONAL_SHA: 358a20ae7a1cb6bcd53ce2e9f163c00ca6287b1a
+          PRE_FENCE_SHA: 65ae94181cc444a9e0bb9fa5a99666edf85c0248
+          FENCE_SHA: b24c14e2255805532a8d3fdf960af84ff5431f3f
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -43,8 +45,13 @@ jobs:
           test "$(node --version | cut -c1-3)" = "v24"
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$FUNCTIONAL_SHA^{commit}"
+          git cat-file -e "$PRE_FENCE_SHA^{commit}"
+          git cat-file -e "$FENCE_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
+          test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
+          git merge-base --is-ancestor "$FENCE_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -53,12 +60,20 @@ jobs:
             tests/terminal-index-v1-1-delta.test.js | sort)
           actual=$(git diff --name-only "$BASE_SHA...$FUNCTIONAL_SHA" | sort)
           test "$actual" = "$expected"
-          ci_only=$(git diff --name-only "$FUNCTIONAL_SHA..HEAD")
+          fence_expected=$(printf '%s\n' \
+            index.js \
+            modules/fila/terminal-index-authority-fence.js \
+            tests/terminal-index-authority-fence-v2.test.js | sort)
+          fence_actual=$(git diff --name-only "$PRE_FENCE_SHA..$FENCE_SHA" | sort)
+          test "$fence_actual" = "$fence_expected"
+          ci_only=$(git diff --name-only "$FENCE_SHA..HEAD")
           test "$ci_only" = ".github/workflows/terminal-index-v1-1-1-validation.yml"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
-          git diff --check "$FUNCTIONAL_SHA..HEAD"
-          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA CI_HEAD=$(git rev-parse HEAD)"
+          git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
+          git diff --check "$FENCE_SHA..HEAD"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
+          echo "Fence paths:"; printf '%s\n' "$fence_actual"
           echo "CI-only paths:"; printf '%s\n' "$ci_only"
 
       - name: Clean Linux dependency installation
@@ -74,6 +89,15 @@ jobs:
           node --check tests/terminal-index-v1-1-1-self-healing.test.js
           node --check tests/terminal-index-v1-1-delta.test.js
           npm run audit:encoding
+
+      - name: Fence V2 syntax and dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/fila/terminal-index-authority-fence.js
+          node --check tests/terminal-index-authority-fence-v2.test.js
+          node tests/terminal-index-authority-fence-v2.test.js
 
       - name: Run current and nearby regression suites, comparing failures with base
         shell: bash
