@@ -18,20 +18,35 @@ function projetarDestinoWorker(destino) {
   return projected;
 }
 
+function classificarRespostaWorker(message, id, input) {
+  if (!message || typeof message !== "object" || message.id !== id || message.ok !== true ||
+      !Number.isFinite(message.enviadoPerfMs) || !Number.isFinite(message.enviadoTimeOrigin)) {
+    return "ofc_worker_message_invalid";
+  }
+  const r = message.result;
+  const w = r?.workspace;
+  if (!w || typeof w !== "object" || w.workspaceId !== input.workspaceId) {
+    return "ofc_worker_workspace_mismatch";
+  }
+  if (!r || r.agoraMs !== input.agoraMs) return "ofc_worker_payload_invalid";
+  if (typeof r.leitura?.ok !== "boolean" || typeof r.leitura.motivo !== "string" ||
+      !Number.isFinite(r.leitura.collectedAtMs) ||
+      w.fonteFilaValida !== r.leitura.ok || w.fonteFilaMotivo !== r.leitura.motivo ||
+      w.fonteFilaColetadaEmMs !== r.leitura.collectedAtMs ||
+      typeof r.destinosPreview?.topologiaOperacionalPotencial !== "boolean" ||
+      !w.bufferVivoShadow || !w.bufferVivoDivergencia || !Array.isArray(w.capacidadePorDestino) ||
+      !["queueDepthActionable", "queueDepthRaw", "oldestActionableAge", "capacityEffective"]
+        .every(k => Number.isFinite(w[k]) && w[k] >= 0) ||
+      Object.hasOwn(r, "itens") || Object.hasOwn(r, "fila") ||
+      Object.hasOwn(w, "itens") || !r.perf || typeof r.perf.leitura !== "object") {
+    return "ofc_worker_payload_invalid";
+  }
+  if (!iguais(r.before, r.after)) return "ofc_worker_before_after_changed";
+  return "";
+}
+
 function valido(message, id, input) {
-  const r = message?.result, w = r?.workspace;
-  return message?.id === id && message.ok === true && w?.workspaceId === input.workspaceId
-    && r.agoraMs === input.agoraMs && Number.isFinite(message.enviadoPerfMs) && Number.isFinite(message.enviadoTimeOrigin)
-    && typeof r.leitura?.ok === "boolean" && typeof r.leitura.motivo === "string"
-    && Number.isFinite(r.leitura.collectedAtMs)
-    && w.fonteFilaValida === r.leitura.ok && w.fonteFilaMotivo === r.leitura.motivo
-    && w.fonteFilaColetadaEmMs === r.leitura.collectedAtMs
-    && typeof r.destinosPreview?.topologiaOperacionalPotencial === "boolean"
-    && !!w.bufferVivoShadow && !!w.bufferVivoDivergencia && Array.isArray(w.capacidadePorDestino)
-    && ["queueDepthActionable", "queueDepthRaw", "oldestActionableAge", "capacityEffective"].every(k => Number.isFinite(w[k]) && w[k] >= 0)
-    && !Object.hasOwn(r, "itens") && !Object.hasOwn(r, "fila")
-    && !Object.hasOwn(w, "itens") && r.perf && typeof r.perf.leitura === "object"
-    && iguais(r.before, r.after);
+  return classificarRespostaWorker(message, id, input) === "";
 }
 
 function criarClienteWorker({ workerFactory = () => new Worker(path.join(__dirname, "workspace-worker.js"), { resourceLimits: RESOURCE_LIMITS }), timeoutMs = TIMEOUT_MS } = {}) {
@@ -72,7 +87,9 @@ function criarClienteWorker({ workerFactory = () => new Worker(path.join(__dirna
           instance.postMessage({ id, input });
           inputCloneMs = performance.now() - cloneInicio;
         });
-        if (!valido(message, id, input) || !iguais(expected, message.result.before)) throw new Error("ofc_worker_invalid_response");
+        const motivoResposta = classificarRespostaWorker(message, id, input);
+        if (motivoResposta) throw new Error(motivoResposta);
+        if (!iguais(expected, message.result.before)) throw new Error("ofc_revision_changed_before_worker");
         // Test barrier only; no hook is installed in the production singleton.
         if (beforeAccept) await beforeAccept(message);
         if (!iguais(message.result.after, revisao(input.arquivo))) throw new Error("ofc_revision_changed");
@@ -137,4 +154,5 @@ async function registrarFallbackWorker(opcoes, workspaceId) {
     perf: { leitura: { source: "fila_legacy", fallbackReason: "ofc_revision_changed_at_consumer", revisionChanged: true } } });
 }
 async function fecharWorkerOfc() { if (singleton) { await singleton.fechar(); singleton = null; } }
-module.exports = { TIMEOUT_MS, RESOURCE_LIMITS, criarClienteWorker, avaliarComWorker, fecharWorkerOfc, valido, projetarDestinoWorker, registrarResultadoWorker, registrarFallbackWorker };
+module.exports = { TIMEOUT_MS, RESOURCE_LIMITS, criarClienteWorker, avaliarComWorker, fecharWorkerOfc,
+  valido, classificarRespostaWorker, projetarDestinoWorker, registrarResultadoWorker, registrarFallbackWorker };

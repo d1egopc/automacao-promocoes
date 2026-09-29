@@ -7,7 +7,7 @@ const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { Worker } = require("node:worker_threads");
 const ofc = require("../modules/engine/ofc/absorption-gate.service");
-const { criarClienteWorker, fecharWorkerOfc } = require("../modules/engine/ofc/workspace-worker-client");
+const { criarClienteWorker, fecharWorkerOfc, classificarRespostaWorker, valido } = require("../modules/engine/ofc/workspace-worker-client");
 const { revisao } = require("../modules/engine/ofc/workspace-worker-revision");
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "ofc-worker-"));
 const now = Date.parse("2026-09-26T15:00:00Z");
@@ -61,10 +61,116 @@ for (const timezone of ["UTC", "America/Sao_Paulo"]) for (const iso of ["2026-09
 class FakeWorker extends EventEmitter {
   ref() {} unref() {} async terminate() { this.emit("exit", 1); }
 }
+
+function validWorkerMessage(id, input, before, after = before) {
+  const leitura = { ok: true, motivo: "", collectedAtMs: input.agoraMs };
+  const workspace = {
+    workspaceId: input.workspaceId,
+    fonteFilaValida: true,
+    fonteFilaMotivo: "",
+    fonteFilaColetadaEmMs: input.agoraMs,
+    bufferVivoShadow: {},
+    bufferVivoDivergencia: {},
+    capacidadePorDestino: [],
+    queueDepthActionable: 0,
+    queueDepthRaw: 0,
+    oldestActionableAge: 0,
+    capacityEffective: 0
+  };
+  return {
+    id, ok: true, enviadoPerfMs: 1, enviadoTimeOrigin: 1,
+    result: {
+      agoraMs: input.agoraMs, leitura, workspace,
+      destinosPreview: { topologiaOperacionalPotencial: false },
+      perf: { leitura: {} }, before, after
+    }
+  };
+}
+
+test("classificador preserva valido e separa falhas estruturais", () => {
+  const input = { workspaceId: "w", agoraMs: now };
+  const revision = { dev: "1", ino: "2", size: "3", mtimeNs: "4", ctimeNs: "5" };
+  const message = validWorkerMessage(1, input, revision);
+  assert.equal(classificarRespostaWorker(message, 1, input), "");
+  assert.equal(valido(message, 1, input), true);
+  assert.equal(classificarRespostaWorker({ ...message, id: 2 }, 1, input), "ofc_worker_message_invalid");
+  assert.equal(classificarRespostaWorker({ ...message, result: { ...message.result,
+    workspace: { ...message.result.workspace, workspaceId: "other" } } }, 1, input), "ofc_worker_workspace_mismatch");
+  assert.equal(classificarRespostaWorker({ ...message, result: { ...message.result,
+    leitura: { ...message.result.leitura, ok: "true" } } }, 1, input), "ofc_worker_payload_invalid");
+  assert.equal(classificarRespostaWorker(validWorkerMessage(1, input, revision,
+    { ...revision, size: "4" }), 1, input), "ofc_worker_before_after_changed");
+});
+
+test("before/after diferente é rejeitado com motivo estrutural específico", async () => {
+  const file = path.join(temp, "before-after-reason.json"); fs.writeFileSync(file, "[]");
+  const input = { workspaceId: "w", agoraMs: now, arquivo: file };
+  const before = revisao(file);
+  await assert.rejects(async () => {
+    const client = criarClienteWorker({ workerFactory: () => {
+      const instance = new FakeWorker();
+      instance.postMessage = ({ id, input: postedInput }) => queueMicrotask(() => instance.emit("message",
+        validWorkerMessage(id, postedInput, before, { ...before, size: "1" })));
+      return instance;
+    }});
+    try { await client.executar(input); } finally { await client.fechar(); }
+  }, /ofc_worker_before_after_changed/);
+});
+
+test("expected diferente de result.before é uma race diagnosticada", async () => {
+  const file = path.join(temp, "expected-before-reason.json"); fs.writeFileSync(file, "[]");
+  const input = { workspaceId: "w", agoraMs: now, arquivo: file };
+  const expected = revisao(file);
+  const observed = { ...expected, size: "1" };
+  await assert.rejects(async () => {
+    const client = criarClienteWorker({ workerFactory: () => {
+      const instance = new FakeWorker();
+      instance.postMessage = ({ id, input: postedInput }) => queueMicrotask(() => instance.emit("message",
+        validWorkerMessage(id, postedInput, observed)));
+      return instance;
+    }});
+    try { await client.executar(input); } finally { await client.fechar(); }
+  }, /ofc_revision_changed_before_worker/);
+});
+
+test("race entre expected e before cai no legado e recebe motivo específico", async () => {
+  const file = path.join(temp, "expected-before-race.json"); fs.writeFileSync(file, JSON.stringify([item(60000)]));
+  const barrier = new SharedArrayBuffer(4), flag = new Int32Array(barrier);
+  const client = criarClienteWorker({ workerFactory: () => new Worker(
+    path.join(__dirname, "fixtures/ofc-worker-before-barrier.js"), { workerData: { barrier } }) });
+  const events = [];
+  let changed = false, fixtureError;
+  const poll = setInterval(() => {
+    if (changed || fixtureError || Atomics.load(flag, 0) !== 1) return;
+    try { fs.writeFileSync(file, "[]"); changed = true; }
+    catch (error) { fixtureError = error; }
+    finally { Atomics.store(flag, 0, 2); Atomics.notify(flag, 0); }
+  }, 1);
+  const originalRead = fs.readFileSync;
+  let reads = 0;
+  fs.readFileSync = function (...args) {
+    if (args[0] === file) reads++;
+    return originalRead.apply(this, args);
+  };
+  try {
+    const on = await ofc.criarGateAbsorcaoShadowOfc({ ...options(file, true),
+      clienteWorker: { executar: input => client.executar(input) }, observarWorker: event => events.push(event) });
+    const readsOn = reads;
+    const off = await ofc.criarGateAbsorcaoShadowOfc(options(file, false));
+    assert.equal(fixtureError, undefined);
+    assert.equal(changed, true);
+    assert.deepEqual(on, off);
+    assert.equal(readsOn, 1);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].motivo, "ofc_revision_changed_before_worker");
+  } finally {
+    clearInterval(poll); fs.readFileSync = originalRead; await client.fechar();
+  }
+});
 for (const mode of ["crash", "exit", "timeout", "invalid", "post-fails", "messageerror"]) {
   test("one fresh legacy fallback: " + mode, async () => {
     const file = path.join(temp, mode + ".json"); fs.writeFileSync(file, JSON.stringify([item(60000)]));
-    let jobs = 0, reads = 0, instance;
+    let jobs = 0, reads = 0, instance, workerEvents = [];
     const client = criarClienteWorker({ timeoutMs: 30, workerFactory: () => {
       instance = new FakeWorker(); instance.postMessage = () => {
         jobs++; if (mode === "post-fails") throw new Error("clone_error");
@@ -76,8 +182,10 @@ for (const mode of ["crash", "exit", "timeout", "invalid", "post-fails", "messag
     try {
       const expected = await ofc.criarGateAbsorcaoShadowOfc(options(file, false));
       fs.readFileSync = function(...args) { if (args[0] === file) reads++; return originalRead.apply(this,args); };
-      const result = await ofc.criarGateAbsorcaoShadowOfc({ ...options(file, true), clienteWorker: fixedClient(client, now) });
+      const result = await ofc.criarGateAbsorcaoShadowOfc({ ...options(file, true),
+        clienteWorker: fixedClient(client, now), observarWorker: event => workerEvents.push(event) });
       assert.deepEqual(result, expected); assert.equal(jobs, 1); assert.equal(reads, 1);
+      if (mode === "invalid") assert.equal(workerEvents[0].motivo, "ofc_worker_message_invalid");
       assert.doesNotThrow(() => instance.emit("error", new Error("late error after cleanup")));
     } finally { fs.readFileSync = originalRead; await client.fechar(); }
   });
