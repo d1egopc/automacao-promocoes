@@ -49,6 +49,8 @@ jobs:
           DISTRIBUTOR_COMPACT_SHA: 428af3cabdb3d250eac3f74d795d61b6a4050a3f
           PRE_DISTRIBUTOR_COMPACT_OBS_SHA: bd8e5f348e83bf17de225ca17b7077a204cfa9b1
           DISTRIBUTOR_COMPACT_OBS_SHA: b9e3b3af64e12421b596da4c711a4290dbdd459b
+          PRE_PERSISTENCE_STALE_LIVENESS_SHA: ad90f68bed015f6de0123cd255a9f2591edc2cb9
+          PERSISTENCE_STALE_LIVENESS_SHA: 160ab6a17481ddfc5a638783adb32d8c8a94622c
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -71,6 +73,8 @@ jobs:
           git cat-file -e "$DISTRIBUTOR_COMPACT_SHA^{commit}"
           git cat-file -e "$PRE_DISTRIBUTOR_COMPACT_OBS_SHA^{commit}"
           git cat-file -e "$DISTRIBUTOR_COMPACT_OBS_SHA^{commit}"
+          git cat-file -e "$PRE_PERSISTENCE_STALE_LIVENESS_SHA^{commit}"
+          git cat-file -e "$PERSISTENCE_STALE_LIVENESS_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
@@ -81,6 +85,7 @@ jobs:
           test "$(git rev-parse "$WORKER_OBS_SHA^")" = "$PRE_WORKER_OBS_SHA"
           test "$(git rev-parse "$DISTRIBUTOR_COMPACT_SHA^")" = "$PRE_DISTRIBUTOR_COMPACT_SHA"
           test "$(git rev-parse "$DISTRIBUTOR_COMPACT_OBS_SHA^")" = "$PRE_DISTRIBUTOR_COMPACT_OBS_SHA"
+          test "$(git rev-parse "$PERSISTENCE_STALE_LIVENESS_SHA^")" = "$PRE_PERSISTENCE_STALE_LIVENESS_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
@@ -96,6 +101,8 @@ jobs:
           git merge-base --is-ancestor "$DISTRIBUTOR_COMPACT_SHA" HEAD
           git merge-base --is-ancestor "$PRE_DISTRIBUTOR_COMPACT_OBS_SHA" HEAD
           git merge-base --is-ancestor "$DISTRIBUTOR_COMPACT_OBS_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_PERSISTENCE_STALE_LIVENESS_SHA" HEAD
+          git merge-base --is-ancestor "$PERSISTENCE_STALE_LIVENESS_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -172,8 +179,16 @@ jobs:
           test "$distributor_compact_ci_actual" = "$ci_only_expected"
           distributor_compact_obs_ci_previous=$(git diff --name-only "$DISTRIBUTOR_COMPACT_SHA..$PRE_DISTRIBUTOR_COMPACT_OBS_SHA" | sort)
           test "$distributor_compact_obs_ci_previous" = "$ci_only_expected"
-          distributor_compact_obs_ci_actual=$(git diff --name-only "$DISTRIBUTOR_COMPACT_OBS_SHA..HEAD" | sort)
+          distributor_compact_obs_ci_actual=$(git diff --name-only "$DISTRIBUTOR_COMPACT_OBS_SHA..$PRE_PERSISTENCE_STALE_LIVENESS_SHA" | sort)
           test "$distributor_compact_obs_ci_actual" = "$ci_only_expected"
+          persistence_stale_expected=$(printf '%s\n' \
+            modules/fila/persistence-coordinator.js \
+            tests/fixtures/persistence-worker-stale-revision.js \
+            tests/persistence-worker-multiworkspace.test.js | sort)
+          persistence_stale_actual=$(git diff --name-only "$PRE_PERSISTENCE_STALE_LIVENESS_SHA..$PERSISTENCE_STALE_LIVENESS_SHA" | sort)
+          test "$persistence_stale_actual" = "$persistence_stale_expected"
+          persistence_stale_ci_actual=$(git diff --name-only "$PERSISTENCE_STALE_LIVENESS_SHA..HEAD" | sort)
+          test "$persistence_stale_ci_actual" = "$ci_only_expected"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
           git diff --check "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA"
@@ -186,9 +201,11 @@ jobs:
           git diff --check "$PRE_DISTRIBUTOR_COMPACT_SHA..$DISTRIBUTOR_COMPACT_SHA"
           git diff --check "$PRE_DISTRIBUTOR_COMPACT_OBS_SHA..$DISTRIBUTOR_COMPACT_OBS_SHA"
           git diff --check "$DISTRIBUTOR_COMPACT_SHA..$PRE_DISTRIBUTOR_COMPACT_OBS_SHA"
-          git diff --check "$DISTRIBUTOR_COMPACT_OBS_SHA..HEAD"
-          git diff --check "$DISTRIBUTOR_COMPACT_SHA..HEAD"
-          git diff --check "$OFC_VIVA_SHA..HEAD"
+          git diff --check "$DISTRIBUTOR_COMPACT_OBS_SHA..$PRE_PERSISTENCE_STALE_LIVENESS_SHA"
+          git diff --check "$DISTRIBUTOR_COMPACT_SHA..$PRE_PERSISTENCE_STALE_LIVENESS_SHA"
+          git diff --check "$OFC_VIVA_SHA..$PRE_PERSISTENCE_STALE_LIVENESS_SHA"
+          git diff --check "$PRE_PERSISTENCE_STALE_LIVENESS_SHA..$PERSISTENCE_STALE_LIVENESS_SHA"
+          git diff --check "$PERSISTENCE_STALE_LIVENESS_SHA..HEAD"
           echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
@@ -205,9 +222,24 @@ jobs:
           echo "Distributor compact observability paths:"; printf '%s\n' "$distributor_compact_obs_actual"
           echo "CI-only paths before distributor compact observability:"; printf '%s\n' "$distributor_compact_obs_ci_previous"
           echo "CI-only paths after distributor compact observability:"; printf '%s\n' "$distributor_compact_obs_ci_actual"
+          echo "Persistence stale liveness paths:"; printf '%s\n' "$persistence_stale_actual"
+          echo "CI-only paths after persistence stale liveness:"; printf '%s\n' "$persistence_stale_ci_actual"
 
       - name: Clean Linux dependency installation
         run: npm ci
+
+      - name: Persistence stale revision liveness Linux / Node 24 dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/fila/persistence-coordinator.js
+          node --check tests/persistence-worker-multiworkspace.test.js
+          node --check tests/fixtures/persistence-worker-stale-revision.js
+          node tests/persistence-worker-multiworkspace.test.js
+          node tests/persistence-worker-phase1.test.js
+          node tests/persistence-worker-observability.test.js
+          node tests/persistence-worker-multiworkspace-stress.test.js
+          node tests/persistence-worker-crash-matrix.test.js
 
       - name: Distributor Compact Viva Coordinator Linux / Node 24 dedicated gate
         shell: bash
