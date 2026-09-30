@@ -79,13 +79,13 @@ const reconciliarExecutor = trechoEntre(
 
 assert(
   pos(reconciliarExecutor, "contextoTexto === \"executor\"") <
-    pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+    pos(reconciliarExecutor, "carregarFilaLegadaOficial("),
   "executor deve avaliar o preflight V2 antes de ler a fila legada"
 );
 
 assert(
   pos(reconciliarExecutor, "await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {") <
-    pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+    pos(reconciliarExecutor, "carregarFilaLegadaOficial("),
   "preflight generation do executor deve acontecer antes do parse de fila.json"
 );
 
@@ -96,7 +96,7 @@ assert(
 
 assert(
   reconciliarExecutor.includes("decisaoPreflightExecutor ||") &&
-    pos(reconciliarExecutor, "decisaoPreflightExecutor ||") > pos(reconciliarExecutor, "carregarFilaLegadaOficial(clienteId)"),
+    pos(reconciliarExecutor, "decisaoPreflightExecutor ||") > pos(reconciliarExecutor, "carregarFilaLegadaOficial("),
   "fallback legado deve reutilizar o preflight e nao reconciliar duas vezes no mesmo ciclo"
 );
 
@@ -544,7 +544,7 @@ assert(
 
 assert(
   lazyWorkspaceState.includes("estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO)") &&
-    lazyWorkspaceState.includes("carregarFila(cliente)") &&
+    lazyWorkspaceState.includes("carregarFila(cliente, callerTagInicializacaoFila(motivo))") &&
     lazyWorkspaceState.includes("estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_NAO_INICIALIZADO)") &&
     lazyWorkspaceState.includes("throw erro"),
   "guard lazy deve usar o loader oficial, marcar inicializando e falhar fechado sem produzir falso vazio"
@@ -571,7 +571,7 @@ const bootLazyInativo = (() => {
 assert(
   bootLazyInativo.includes("if (usuario.ativo === false)") &&
     pos(bootLazyInativo, "marcarFilaClienteNaoInicializada(usuario.id, \"boot_usuario_inativo\");") <
-      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+      pos(bootLazyInativo, "carregarFila(usuario.id, \"fila_boot\");"),
   "boot deve preservar lazy homologado para usuario.ativo === false"
 );
 
@@ -580,7 +580,7 @@ assert(
     bootLazyInativo.includes("if (configClienteBoot.automacaoAtiva !== true)") &&
     bootLazyInativo.includes("marcarFilaClienteNaoInicializada(usuario.id, \"boot_automacao_desligada\");") &&
     pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") <
-      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+      pos(bootLazyInativo, "carregarFila(usuario.id, \"fila_boot\");"),
   "boot deve deixar ativo com automacaoAtiva diferente de true em lazy sem carregar fila"
 );
 
@@ -588,7 +588,7 @@ assert(
   pos(bootLazyInativo, "if (usuario.ativo === false)") <
     pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") &&
     pos(bootLazyInativo, "if (configClienteBoot.automacaoAtiva !== true)") <
-      pos(bootLazyInativo, "carregarFila(usuario.id);"),
+      pos(bootLazyInativo, "carregarFila(usuario.id, \"fila_boot\");"),
   "boot deve carregar normalmente somente ativo com automacaoAtiva true"
 );
 

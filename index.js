@@ -3869,13 +3869,14 @@ process.once("beforeExit", () => {
   void executarCheckpointsFilaV22CVencidos("shutdown");
 });
 
-function carregarFilaLegadaOficial(clienteId = "admin") {
+function carregarFilaLegadaOficial(clienteId = "admin", callerTag = "desconhecido") {
   fila = filaOfertas.carregarFila({
     fila,
     clienteId,
     getFilaFile,
     readClienteJson,
-    logger: console
+    logger: console,
+    callerTag
   });
   return fila;
 }
@@ -3909,9 +3910,9 @@ function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
   return fila;
 }
 
-function carregarFila(clienteId = "admin") {
+function carregarFila(clienteId = "admin", callerTag = "fila_legacy_load") {
   return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
-  carregarFilaLegadaOficial(clienteId);
+  carregarFilaLegadaOficial(clienteId, callerTag);
   const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
   const estadoArquivosV2 = dirty
     ? { maisNova: true }
@@ -3962,6 +3963,14 @@ function marcarFilaClienteInicializada(clienteId = "admin", motivo = "carregarFi
   }));
 }
 
+function callerTagInicializacaoFila(motivo = "uso_fila") {
+  const origem = String(motivo || "uso_fila");
+  if (origem === "executor_processar_fila") return "executor_lazy_init";
+  if (origem === "engine_distributor_fila") return "engine_distributor_lazy_init";
+  if (origem === "fila_inteligente_abastecer") return "fila_inteligente_lazy_init";
+  return `${origem}_lazy_init`;
+}
+
 async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "uso_fila") {
   const cliente = normalizarClienteInicializacaoFila(clienteId);
   const estadoAtual = estadoFilaClienteInicializacao(cliente);
@@ -3975,7 +3984,7 @@ async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "us
   const inicializacao = Promise.resolve()
     .then(() => {
       estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO);
-      carregarFila(cliente);
+      carregarFila(cliente, callerTagInicializacaoFila(motivo));
       return {
         ok: true,
         clienteId: cliente,
@@ -4069,7 +4078,10 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
       }
     }
 
-    carregarFilaLegadaOficial(clienteId);
+    carregarFilaLegadaOficial(
+      clienteId,
+      contextoTexto === "executor" ? "executor_fallback" : "fila_recovery_legacy"
+    );
     const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
     const estadoArquivosV2 = dirty
       ? {
@@ -4240,7 +4252,7 @@ async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila =
 
     const usarFilaV2HotPath = filaOperacionalV2.deveUsarFilaV2Operacional(cliente);
     if (!usarFilaV2HotPath) {
-      carregarFila(cliente);
+      carregarFila(cliente, "engine_distributor_legacy");
     }
 
     const itemFinal = {
@@ -32560,7 +32572,7 @@ for (const usuario of usuarios) {
     marcarFilaClienteNaoInicializada(usuario.id, "boot_automacao_desligada");
     continue;
   }
-  carregarFila(usuario.id);
+  carregarFila(usuario.id, "fila_boot");
 }
 
 

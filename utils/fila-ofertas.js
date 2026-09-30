@@ -1,5 +1,7 @@
 const fs = require("fs");
 const path = require("path");
+const { performance } = require("node:perf_hooks");
+const { isMainThread } = require("node:worker_threads");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
 const { jobAtivoDentroLease } = require("../modules/engine/jobs.service");
 const {
@@ -1636,27 +1638,89 @@ function salvarFila({
   }
 }
 
-function carregarFila({ fila = [], clienteId = "admin", getFilaFile, readClienteJson, logger = console } = {}) {
+function normalizarCallerTagFila(callerTag = "desconhecido") {
+  const tag = String(callerTag || "desconhecido").trim().toLowerCase();
+  return (tag || "desconhecido").replace(/[^a-z0-9_.:-]/g, "_").slice(0, 80);
+}
+
+function observarLeituraFisicaFilaLegacy(logger, dados = {}) {
+  try {
+    logger.log("[FILA-LEGACY-PHYSICAL-READ]", JSON.stringify({
+      callerTag: normalizarCallerTagFila(dados.callerTag),
+      workspace: String(dados.workspace || "admin"),
+      bytes: Number.isFinite(Number(dados.bytes)) ? Math.max(0, Number(dados.bytes)) : 0,
+      readMs: dados.readMs === null || dados.readMs === undefined
+        ? null
+        : (Number.isFinite(Number(dados.readMs)) ? Math.max(0, Number(dados.readMs)) : null),
+      parseMs: dados.parseMs === null || dados.parseMs === undefined
+        ? null
+        : (Number.isFinite(Number(dados.parseMs)) ? Math.max(0, Number(dados.parseMs)) : null),
+      wallMs: Number.isFinite(Number(dados.wallMs)) ? Math.max(0, Number(dados.wallMs)) : 0,
+      isMainThread,
+      timestamp: new Date().toISOString()
+    }));
+  } catch {}
+}
+
+function carregarFila({
+  fila = [],
+  clienteId = "admin",
+  getFilaFile,
+  readClienteJson,
+  logger = console,
+  callerTag = "desconhecido"
+} = {}) {
   try {
     let filaCliente;
+    const inicio = performance.now();
+    const file = typeof getFilaFile === "function"
+      ? getFallbackFileSeguro(getFilaFile, clienteId)
+      : null;
+    let bytes = 0;
+    let readMs = null;
+    let parseMs = null;
 
     if (typeof readClienteJson === "function") {
       filaCliente = readClienteJson(clienteId, "fila.json", []);
+      try {
+        if (file) bytes = fs.statSync(file).size;
+      } catch {}
     } else {
-      const file = getFallbackFileSeguro(getFilaFile, clienteId);
-
+      if (!file) throw new Error("storage_fila_nao_injetado");
       if (!fs.existsSync(file)) {
         return fila;
       }
 
+      const inicioRead = performance.now();
       const data = fs.readFileSync(file, "utf8");
+      readMs = performance.now() - inicioRead;
+      bytes = Buffer.byteLength(data || "", "utf8");
 
       if (!data) {
+        observarLeituraFisicaFilaLegacy(logger, {
+          callerTag,
+          workspace: clienteId,
+          bytes,
+          readMs,
+          parseMs,
+          wallMs: performance.now() - inicio
+        });
         return fila;
       }
 
+      const inicioParse = performance.now();
       filaCliente = JSON.parse(data);
+      parseMs = performance.now() - inicioParse;
     }
+
+    observarLeituraFisicaFilaLegacy(logger, {
+      callerTag,
+      workspace: clienteId,
+      bytes,
+      readMs,
+      parseMs,
+      wallMs: performance.now() - inicio
+    });
 
     const filaLimpa = filaCliente.filter(
       o => o?.clienteId

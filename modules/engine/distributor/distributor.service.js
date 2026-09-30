@@ -231,7 +231,8 @@ function carregarFilaCliente(clienteId = "admin", deps = {}) {
     clienteId,
     getFilaFile: id => getFilaFileSeguro(deps, id),
     readClienteJson: deps.readClienteJson,
-    logger: console
+    logger: console,
+    callerTag: "distributor_dedupe_legacy"
   }).filter(item => String(item?.clienteId || "") === String(clienteId));
 }
 

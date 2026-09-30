@@ -703,12 +703,13 @@ function salvarFila(clienteId = "admin") {
   });
 }
 
-function carregarFila(clienteId = "admin") {
+function carregarFila(clienteId = "admin", callerTag = "desconhecido") {
   fila = filaOfertas.carregarFila({
     fila,
     clienteId,
     getFilaFile,
-    logger: console
+    logger: console,
+    callerTag
   });
 
   return fila;
@@ -7030,7 +7031,7 @@ async function adicionarRadarNaFilaCliente(ofertaBase = {}, clienteId = "admin",
   }
 
   const oferta = preparado.oferta;
-  carregarFila(clienteId);
+  carregarFila(clienteId, "radar_pre_dedupe");
 
   const duplicidadeRadar = duplicidadeRadarNaFilaCliente(oferta, clienteId);
 
@@ -12013,7 +12014,7 @@ function podeRodarAgora() {
 carregarConfig();
 
 for (const usuario of usuarios) {
-  carregarFila(usuario.id);
+  carregarFila(usuario.id, "inteligencia_boot");
 }
 
 function garantirIdsFila() {
