@@ -53,6 +53,8 @@ jobs:
           PERSISTENCE_STALE_LIVENESS_SHA: 160ab6a17481ddfc5a638783adb32d8c8a94622c
           PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA: a9a624bff2137ccf039c829bf82d32eacaffc7f7
           PERSISTENCE_STALE_TEST_ALIGNMENT_SHA: 3d56dba11ea7f46f28cb8ec5c2bb70a3882084e5
+          PRE_PERSISTENCE_PROGRESS_SHA: 3e7ce9884bb49fd4e2e0727f5f09a52629eb35a8
+          PERSISTENCE_PROGRESS_SHA: cbe2c3cc6a960b7ba30953a3e0d58d2230d78123
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -79,6 +81,8 @@ jobs:
           git cat-file -e "$PERSISTENCE_STALE_LIVENESS_SHA^{commit}"
           git cat-file -e "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA^{commit}"
           git cat-file -e "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA^{commit}"
+          git cat-file -e "$PRE_PERSISTENCE_PROGRESS_SHA^{commit}"
+          git cat-file -e "$PERSISTENCE_PROGRESS_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
@@ -91,6 +95,7 @@ jobs:
           test "$(git rev-parse "$DISTRIBUTOR_COMPACT_OBS_SHA^")" = "$PRE_DISTRIBUTOR_COMPACT_OBS_SHA"
           test "$(git rev-parse "$PERSISTENCE_STALE_LIVENESS_SHA^")" = "$PRE_PERSISTENCE_STALE_LIVENESS_SHA"
           test "$(git rev-parse "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA^")" = "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA"
+          test "$(git rev-parse "$PERSISTENCE_PROGRESS_SHA^")" = "$PRE_PERSISTENCE_PROGRESS_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
@@ -110,6 +115,8 @@ jobs:
           git merge-base --is-ancestor "$PERSISTENCE_STALE_LIVENESS_SHA" HEAD
           git merge-base --is-ancestor "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA" HEAD
           git merge-base --is-ancestor "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_PERSISTENCE_PROGRESS_SHA" HEAD
+          git merge-base --is-ancestor "$PERSISTENCE_PROGRESS_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -199,8 +206,20 @@ jobs:
           persistence_stale_test_expected="tests/terminal-index-v1-1-1-self-healing.test.js"
           persistence_stale_test_actual=$(git diff --name-only "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA" | sort)
           test "$persistence_stale_test_actual" = "$persistence_stale_test_expected"
-          persistence_stale_test_ci_actual=$(git diff --name-only "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..HEAD" | sort)
+          persistence_stale_test_ci_actual=$(git diff --name-only "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..$PRE_PERSISTENCE_PROGRESS_SHA" | sort)
           test "$persistence_stale_test_ci_actual" = "$ci_only_expected"
+          persistence_progress_expected=$(printf '%s\n' \
+            modules/fila/json-array-incremental.js \
+            modules/fila/persistence-coordinator.js \
+            modules/fila/persistence-protocol.js \
+            modules/fila/persistence-worker.js \
+            tests/fixtures/persistence-worker-progress.js \
+            tests/persistence-worker-progress-benchmark.js \
+            tests/persistence-worker-progress.test.js | sort)
+          persistence_progress_actual=$(git diff --name-only "$PRE_PERSISTENCE_PROGRESS_SHA..$PERSISTENCE_PROGRESS_SHA" | sort)
+          test "$persistence_progress_actual" = "$persistence_progress_expected"
+          persistence_progress_ci_actual=$(git diff --name-only "$PERSISTENCE_PROGRESS_SHA..HEAD" | sort)
+          test "$persistence_progress_ci_actual" = "$ci_only_expected"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
           git diff --check "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA"
@@ -219,7 +238,9 @@ jobs:
           git diff --check "$PRE_PERSISTENCE_STALE_LIVENESS_SHA..$PERSISTENCE_STALE_LIVENESS_SHA"
           git diff --check "$PERSISTENCE_STALE_LIVENESS_SHA..$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA"
           git diff --check "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA"
-          git diff --check "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..HEAD"
+          git diff --check "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA..$PRE_PERSISTENCE_PROGRESS_SHA"
+          git diff --check "$PRE_PERSISTENCE_PROGRESS_SHA..$PERSISTENCE_PROGRESS_SHA"
+          git diff --check "$PERSISTENCE_PROGRESS_SHA..HEAD"
           echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA PRE_PERSISTENCE_STALE_LIVENESS=$PRE_PERSISTENCE_STALE_LIVENESS_SHA PERSISTENCE_STALE_LIVENESS=$PERSISTENCE_STALE_LIVENESS_SHA PRE_PERSISTENCE_STALE_TEST_ALIGNMENT=$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PERSISTENCE_STALE_TEST_ALIGNMENT=$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
@@ -240,9 +261,25 @@ jobs:
           echo "CI-only paths after persistence stale liveness:"; printf '%s\n' "$persistence_stale_ci_actual"
           echo "Persistence stale test alignment paths:"; printf '%s\n' "$persistence_stale_test_actual"
           echo "CI-only paths after persistence stale test alignment:"; printf '%s\n' "$persistence_stale_test_ci_actual"
+          echo "PRE_PERSISTENCE_PROGRESS_SHA=$PRE_PERSISTENCE_PROGRESS_SHA PERSISTENCE_PROGRESS_SHA=$PERSISTENCE_PROGRESS_SHA"
+          echo "Persistence progress paths:"; printf '%s\n' "$persistence_progress_actual"
+          echo "CI-only paths after persistence progress:"; printf '%s\n' "$persistence_progress_ci_actual"
 
       - name: Clean Linux dependency installation
         run: npm ci
+
+      - name: Persistence Worker progress telemetry Linux / Node 24 dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/fila/persistence-protocol.js
+          node --check modules/fila/persistence-worker.js
+          node --check modules/fila/persistence-coordinator.js
+          node --check modules/fila/json-array-incremental.js
+          node --check tests/fixtures/persistence-worker-progress.js
+          node --check tests/persistence-worker-progress.test.js
+          node --check tests/persistence-worker-progress-benchmark.js
+          node tests/persistence-worker-progress.test.js
 
       - name: Persistence stale revision liveness Linux / Node 24 dedicated gate
         shell: bash
