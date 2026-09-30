@@ -63,6 +63,8 @@ jobs:
           TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA: 32d7a96392d3bdc32d33e2ee21e21f75b1bf6795
           PRE_FILA_LEGACY_CALLER_OBS_SHA: ec20d244b6b6a27098ad497e6e3b1e729427e6df
           FILA_LEGACY_CALLER_OBS_SHA: 18cc1e934700463827623657d4feb0b94d5e4025
+          PRE_EXECUTOR_GENERATION_AUTHORITY_SHA: 0e040dc729d85d58f5bc1f79b144033f3d945f59
+          EXECUTOR_GENERATION_AUTHORITY_SHA: d700d8069b42ac0bcc853ab3ea4f5f5cc5497932
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -99,6 +101,8 @@ jobs:
           git cat-file -e "$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA^{commit}"
           git cat-file -e "$PRE_FILA_LEGACY_CALLER_OBS_SHA^{commit}"
           git cat-file -e "$FILA_LEGACY_CALLER_OBS_SHA^{commit}"
+          git cat-file -e "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA^{commit}"
+          git cat-file -e "$EXECUTOR_GENERATION_AUTHORITY_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
@@ -116,6 +120,7 @@ jobs:
           test "$(git rev-parse "$OFC_SUBCALLER_OBS_SHA^")" = "$PRE_OFC_SUBCALLER_OBS_SHA"
           test "$(git rev-parse "$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA^")" = "$PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA"
           test "$(git rev-parse "$FILA_LEGACY_CALLER_OBS_SHA^")" = "$PRE_FILA_LEGACY_CALLER_OBS_SHA"
+          test "$(git rev-parse "$EXECUTOR_GENERATION_AUTHORITY_SHA^")" = "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
@@ -145,6 +150,8 @@ jobs:
           git merge-base --is-ancestor "$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FILA_LEGACY_CALLER_OBS_SHA" HEAD
           git merge-base --is-ancestor "$FILA_LEGACY_CALLER_OBS_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA" HEAD
+          git merge-base --is-ancestor "$EXECUTOR_GENERATION_AUTHORITY_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -281,8 +288,19 @@ jobs:
             utils/fila-ofertas.js | sort)
           fila_legacy_caller_obs_actual=$(git diff --name-only "$PRE_FILA_LEGACY_CALLER_OBS_SHA..$FILA_LEGACY_CALLER_OBS_SHA" | sort)
           test "$fila_legacy_caller_obs_actual" = "$fila_legacy_caller_obs_expected"
-          fila_legacy_caller_obs_ci_actual=$(git diff --name-only "$FILA_LEGACY_CALLER_OBS_SHA..HEAD" | sort)
+          fila_legacy_caller_obs_ci_actual=$(git diff --name-only "$FILA_LEGACY_CALLER_OBS_SHA..$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA" | sort)
           test "$fila_legacy_caller_obs_ci_actual" = "$ci_only_expected"
+          executor_generation_authority_expected=$(printf '%s\n' \
+            index.js \
+            modules/fila/executor-generation-authority.js \
+            tests/executor-generation-authority.test.js | sort)
+          executor_generation_authority_actual=$(git diff --name-only "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA..$EXECUTOR_GENERATION_AUTHORITY_SHA" | sort)
+          test "$executor_generation_authority_actual" = "$executor_generation_authority_expected"
+          executor_generation_authority_ci_actual=$(git diff --name-only "$EXECUTOR_GENERATION_AUTHORITY_SHA..HEAD" | sort)
+          test "$executor_generation_authority_ci_actual" = "$ci_only_expected"
+          git diff --quiet "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA..$EXECUTOR_GENERATION_AUTHORITY_SHA" -- \
+            modules/fila/fila-operacional-v2.js \
+            modules/fila/fila-manifest-state.repository.js
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
           git diff --check "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA"
@@ -311,8 +329,10 @@ jobs:
           git diff --check "$PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA..$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA"
           git diff --check "$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA..$PRE_FILA_LEGACY_CALLER_OBS_SHA"
           git diff --check "$PRE_FILA_LEGACY_CALLER_OBS_SHA..$FILA_LEGACY_CALLER_OBS_SHA"
-          git diff --check "$FILA_LEGACY_CALLER_OBS_SHA..HEAD"
-          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA PRE_PERSISTENCE_STALE_LIVENESS=$PRE_PERSISTENCE_STALE_LIVENESS_SHA PERSISTENCE_STALE_LIVENESS=$PERSISTENCE_STALE_LIVENESS_SHA PRE_PERSISTENCE_STALE_TEST_ALIGNMENT=$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PERSISTENCE_STALE_TEST_ALIGNMENT=$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PRE_PERSISTENCE_PROGRESS_TEST_FIX=$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA PERSISTENCE_PROGRESS_TEST_FIX=$PERSISTENCE_PROGRESS_TEST_FIX_SHA PRE_OFC_SUBCALLER_OBS=$PRE_OFC_SUBCALLER_OBS_SHA OFC_SUBCALLER_OBS=$OFC_SUBCALLER_OBS_SHA PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX=$PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA TERMINAL_INDEX_CATCHUP_TEST_FIX=$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA PRE_FILA_LEGACY_CALLER_OBS=$PRE_FILA_LEGACY_CALLER_OBS_SHA FILA_LEGACY_CALLER_OBS=$FILA_LEGACY_CALLER_OBS_SHA CI_HEAD=$(git rev-parse HEAD)"
+          git diff --check "$FILA_LEGACY_CALLER_OBS_SHA..$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA"
+          git diff --check "$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA..$EXECUTOR_GENERATION_AUTHORITY_SHA"
+          git diff --check "$EXECUTOR_GENERATION_AUTHORITY_SHA..HEAD"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA PRE_PERSISTENCE_STALE_LIVENESS=$PRE_PERSISTENCE_STALE_LIVENESS_SHA PERSISTENCE_STALE_LIVENESS=$PERSISTENCE_STALE_LIVENESS_SHA PRE_PERSISTENCE_STALE_TEST_ALIGNMENT=$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PERSISTENCE_STALE_TEST_ALIGNMENT=$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PRE_PERSISTENCE_PROGRESS_TEST_FIX=$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA PERSISTENCE_PROGRESS_TEST_FIX=$PERSISTENCE_PROGRESS_TEST_FIX_SHA PRE_OFC_SUBCALLER_OBS=$PRE_OFC_SUBCALLER_OBS_SHA OFC_SUBCALLER_OBS=$OFC_SUBCALLER_OBS_SHA PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX=$PRE_TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA TERMINAL_INDEX_CATCHUP_TEST_FIX=$TERMINAL_INDEX_CATCHUP_TEST_FIX_SHA PRE_FILA_LEGACY_CALLER_OBS=$PRE_FILA_LEGACY_CALLER_OBS_SHA FILA_LEGACY_CALLER_OBS=$FILA_LEGACY_CALLER_OBS_SHA PRE_EXECUTOR_GENERATION_AUTHORITY=$PRE_EXECUTOR_GENERATION_AUTHORITY_SHA EXECUTOR_GENERATION_AUTHORITY=$EXECUTOR_GENERATION_AUTHORITY_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
           echo "Authority paths:"; printf '%s\n' "$authority_actual"
@@ -344,9 +364,21 @@ jobs:
           echo "CI-only paths after Terminal Index catchup test-fix:"; printf '%s\n' "$terminal_index_catchup_test_fix_ci_actual"
           echo "Fila legacy caller observability paths:"; printf '%s\n' "$fila_legacy_caller_obs_actual"
           echo "CI-only paths after fila legacy caller observability:"; printf '%s\n' "$fila_legacy_caller_obs_ci_actual"
+          echo "Executor generation authority paths:"; printf '%s\n' "$executor_generation_authority_actual"
+          echo "CI-only paths after Executor generation authority:"; printf '%s\n' "$executor_generation_authority_ci_actual"
+          echo "Protected V2/repository files are byte-identical to PRE."
 
       - name: Clean Linux dependency installation
         run: npm ci
+
+      - name: Executor generation authority canary Linux / Node 24
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check modules/fila/executor-generation-authority.js
+          node --check tests/executor-generation-authority.test.js
+          node tests/executor-generation-authority.test.js
 
       - name: Persistence Worker progress telemetry Linux / Node 24 dedicated gate
         shell: bash
@@ -567,7 +599,7 @@ jobs:
       - name: Run current and nearby regression suites, comparing failures with base
         shell: bash
         env:
-          REGRESSION_BASE_SHA: b852a072f518a204a5aeb359e52ecc8e769a40a5
+          REGRESSION_BASE_SHA: 0e040dc729d85d58f5bc1f79b144033f3d945f59
         run: |
           set -euo pipefail
           suites=(
