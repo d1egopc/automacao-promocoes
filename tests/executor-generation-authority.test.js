@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const { criarControladorFilaOperacionalV2 } = require("../modules/fila/fila-operacional-v2");
 const {
   FLAG_EXECUTOR,
   FLAG_CANARY,
@@ -88,6 +89,85 @@ async function runBoundary({
   return { calls, env, reconcileEnv, observed, result };
 }
 
+function criarControladorReadinessTeste(env = envExecutor()) {
+  const workspace = workspaceDiego;
+  const manifestoPath = path.posix.join("/virtual", workspace, "fila-v2-manifest.json");
+  const manifesto = JSON.stringify({
+    manifestVersion: 2,
+    vivaGeneration: 1,
+    durableCheckpointGeneration: 1,
+    dirtyGeneration: null
+  });
+  const calls = { prepare: 0, path: 0, read: 0 };
+  const controlador = criarControladorFilaOperacionalV2({
+    env,
+    getClienteJsonPath: (clienteId, arquivo) => {
+      calls.path += 1;
+      assert.strictEqual(clienteId, workspace);
+      assert.strictEqual(arquivo, "fila-v2-manifest.json");
+      return manifestoPath;
+    },
+    fs: {
+      existsSync: file => file === manifestoPath,
+      readFileSync: file => {
+        calls.read += 1;
+        assert.strictEqual(file, manifestoPath);
+        return manifesto;
+      },
+      statSync: () => ({ size: Buffer.byteLength(manifesto), mtimeMs: 1 })
+    },
+    manifestStateRepository: {
+      async prepararReadinessAutoridade(clienteId, dados) {
+        calls.prepare += 1;
+        assert.strictEqual(clienteId, workspace);
+        const leitura = dados.lerManifesto();
+        assert.strictEqual(leitura.ok, true);
+        assert.strictEqual(leitura.bytes, Buffer.byteLength(manifesto));
+        assert.strictEqual(leitura.manifesto.vivaGeneration, 1);
+        return { ok: true, ready: true, motivo: "authority_readiness_ready" };
+      }
+    }
+  });
+  return { controlador, calls };
+}
+
+async function runControllerBoundary({
+  env = envExecutor(),
+  workspace = workspaceDiego,
+  dirtyLocal = false,
+  cicloNormalExecutor = true,
+  generationConclusiva = true
+} = {}) {
+  const { controlador, calls } = criarControladorReadinessTeste(env);
+  const seam = { reconcile: 0, fast: 0, legacy: 0 };
+  const result = await executarPreflightExecutor({
+    clienteId: workspace,
+    env,
+    cicloNormalExecutor,
+    dirtyLocal,
+    deveUsarFilaV2: clienteId => controlador.deveUsarFilaV2Operacional(clienteId),
+    prepararReadiness: ({ clienteId }) => controlador.prepararReadinessAutoridadeRecovery(clienteId),
+    reconciliar: async ({ env: selectedEnv }) => {
+      seam.reconcile += 1;
+      assert.strictEqual(selectedEnv[FLAG_GLOBAL],
+        env[FLAG_EXECUTOR] === "1" && workspace === workspaceDiego && cicloNormalExecutor
+          ? "generation" : "mtime");
+      return {
+        autoridadeUsada: generationConclusiva ? "generation" : "mtime",
+        generationConclusiva,
+        fallbackMtime: !generationConclusiva,
+        motivo: generationConclusiva ? "generation_viva_mais_nova" : "authority_not_ready"
+      };
+    },
+    aplicarFastPath: async () => {
+      seam.fast += 1;
+      return { ok: true, filaClienteHotState: [], pendentes: 0 };
+    },
+    carregarLegado: async () => { seam.legacy += 1; }
+  });
+  return { calls, seam, result };
+}
+
 function assertObservation(observation, expected = {}) {
   assert(observation, "evento de observabilidade deve existir");
   for (const [key, value] of Object.entries(expected)) {
@@ -119,6 +199,49 @@ function assertObservation(observation, expected = {}) {
 }
 
 async function main() {
+  {
+    const { controlador, calls } = criarControladorReadinessTeste();
+    assert.strictEqual(typeof controlador.prepararReadinessAutoridadeRecovery, "function");
+    const readiness = await controlador.prepararReadinessAutoridadeRecovery(workspaceDiego);
+    assert.strictEqual(readiness.ready, true);
+    assert.deepStrictEqual(calls, { prepare: 1, path: 1, read: 1 });
+  }
+
+  {
+    const run = await runControllerBoundary();
+    assert.deepStrictEqual({
+      prepare: run.calls.prepare,
+      reconcile: run.seam.reconcile,
+      fast: run.seam.fast,
+      legacy: run.seam.legacy
+    }, { prepare: 1, reconcile: 1, fast: 1, legacy: 0 });
+    assert.strictEqual(run.result.fastPathExecutor, true);
+  }
+
+  {
+    const run = await runControllerBoundary({ generationConclusiva: false });
+    assert.deepStrictEqual({
+      prepare: run.calls.prepare,
+      reconcile: run.seam.reconcile,
+      fast: run.seam.fast,
+      legacy: run.seam.legacy
+    }, { prepare: 1, reconcile: 1, fast: 0, legacy: 1 });
+  }
+
+  for (const opcoes of [
+    { env: envExecutor({ enabled: "0" }), generationConclusiva: false },
+    { workspace: workspaceForaCanary, generationConclusiva: false },
+    { dirtyLocal: true }
+  ]) {
+    const run = await runControllerBoundary(opcoes);
+    assert.strictEqual(run.calls.prepare, 0, "readiness só executa no Executor canário limpo");
+  }
+
+  for (const contexto of ["Radar", "expiração", "pulo rápido"]) {
+    const run = await runControllerBoundary({ cicloNormalExecutor: false, generationConclusiva: false });
+    assert.strictEqual(run.calls.prepare, 0, `${contexto}: sem sync readiness`);
+  }
+
   {
     const currentEnv = envExecutor({ enabled: "0" });
     const run = await runBoundary({ env: currentEnv, decision: {

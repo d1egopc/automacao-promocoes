@@ -5393,6 +5393,7 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     invalidarAuthorityReadyPorRewriteLegado: (clienteId, dados = {}, deps = {}) => invalidarAuthorityReadyPorRewriteLegado(clienteId, dados, { ...opcoes, ...deps }),
     lerFilaVivaParaMerge: (clienteId, deps = {}) => lerFilaVivaParaMerge(clienteId, { ...opcoes, ...deps }),
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
+    prepararReadinessAutoridadeRecovery: (clienteId, deps = {}) => prepararReadinessAutoridadeRecovery(clienteId, { ...opcoes, ...deps }),
     reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
