@@ -57,6 +57,8 @@ jobs:
           PERSISTENCE_PROGRESS_SHA: cbe2c3cc6a960b7ba30953a3e0d58d2230d78123
           PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA: 6149fb5e26325ea5f03f4b17ff9c290cb0f5dc90
           PERSISTENCE_PROGRESS_TEST_FIX_SHA: e0e75263267786eb0b53e5be6aaa2e1765411ab2
+          PRE_OFC_SUBCALLER_OBS_SHA: b852a072f518a204a5aeb359e52ecc8e769a40a5
+          OFC_SUBCALLER_OBS_SHA: a452cfd1dc156be5dd50ff435d6d0c13eac0a399
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
@@ -87,6 +89,8 @@ jobs:
           git cat-file -e "$PERSISTENCE_PROGRESS_SHA^{commit}"
           git cat-file -e "$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA^{commit}"
           git cat-file -e "$PERSISTENCE_PROGRESS_TEST_FIX_SHA^{commit}"
+          git cat-file -e "$PRE_OFC_SUBCALLER_OBS_SHA^{commit}"
+          git cat-file -e "$OFC_SUBCALLER_OBS_SHA^{commit}"
           test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_SHA"
           test "$(git rev-parse "$FENCE_SHA^")" = "$PRE_FENCE_SHA"
           test "$(git rev-parse "$AUTHORITY_SHA^")" = "$PRE_AUTHORITY_SHA"
@@ -101,6 +105,7 @@ jobs:
           test "$(git rev-parse "$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA^")" = "$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA"
           test "$(git rev-parse "$PERSISTENCE_PROGRESS_SHA^")" = "$PRE_PERSISTENCE_PROGRESS_SHA"
           test "$(git rev-parse "$PERSISTENCE_PROGRESS_TEST_FIX_SHA^")" = "$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA"
+          test "$(git rev-parse "$OFC_SUBCALLER_OBS_SHA^")" = "$PRE_OFC_SUBCALLER_OBS_SHA"
           git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
           git merge-base --is-ancestor "$PRE_FENCE_SHA" HEAD
           git merge-base --is-ancestor "$FENCE_SHA" HEAD
@@ -124,6 +129,8 @@ jobs:
           git merge-base --is-ancestor "$PERSISTENCE_PROGRESS_SHA" HEAD
           git merge-base --is-ancestor "$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA" HEAD
           git merge-base --is-ancestor "$PERSISTENCE_PROGRESS_TEST_FIX_SHA" HEAD
+          git merge-base --is-ancestor "$PRE_OFC_SUBCALLER_OBS_SHA" HEAD
+          git merge-base --is-ancestor "$OFC_SUBCALLER_OBS_SHA" HEAD
           expected=$(printf '%s\n' \
             modules/fila/fila-operacional-v2.js \
             modules/fila/persistence-coordinator.js \
@@ -230,8 +237,22 @@ jobs:
           persistence_progress_test_fix_expected="tests/persistence-worker-progress.test.js"
           persistence_progress_test_fix_actual=$(git diff --name-only "$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA..$PERSISTENCE_PROGRESS_TEST_FIX_SHA" | sort)
           test "$persistence_progress_test_fix_actual" = "$persistence_progress_test_fix_expected"
-          persistence_progress_test_fix_ci_actual=$(git diff --name-only "$PERSISTENCE_PROGRESS_TEST_FIX_SHA..HEAD" | sort)
+          persistence_progress_test_fix_ci_actual=$(git diff --name-only "$PERSISTENCE_PROGRESS_TEST_FIX_SHA..$PRE_OFC_SUBCALLER_OBS_SHA" | sort)
           test "$persistence_progress_test_fix_ci_actual" = "$ci_only_expected"
+          ofc_subcaller_expected=$(printf '%s\n' \
+            modules/engine/ofc/absorption-gate.service.js \
+            modules/engine/ofc/controller.runner.js \
+            modules/engine/ofc/workspace-worker-client.js \
+            modules/engine/ofc/workspace-worker.js \
+            modules/telemetria/telemetria.service.js \
+            tests/ofc-fase-1d-observabilidade.test.js \
+            tests/ofc-snapshot-viva-v1.test.js \
+            tests/ofc-workspace-worker.test.js \
+            tests/telemetria-v1-backend.test.js | sort)
+          ofc_subcaller_actual=$(git diff --name-only "$PRE_OFC_SUBCALLER_OBS_SHA..$OFC_SUBCALLER_OBS_SHA" | sort)
+          test "$ofc_subcaller_actual" = "$ofc_subcaller_expected"
+          ofc_subcaller_ci_actual=$(git diff --name-only "$OFC_SUBCALLER_OBS_SHA..HEAD" | sort)
+          test "$ofc_subcaller_ci_actual" = "$ci_only_expected"
           git diff --check "$BASE_SHA...$FUNCTIONAL_SHA"
           git diff --check "$PRE_FENCE_SHA..$FENCE_SHA"
           git diff --check "$PRE_AUTHORITY_SHA..$AUTHORITY_SHA"
@@ -254,8 +275,10 @@ jobs:
           git diff --check "$PRE_PERSISTENCE_PROGRESS_SHA..$PERSISTENCE_PROGRESS_SHA"
           git diff --check "$PERSISTENCE_PROGRESS_SHA..$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA"
           git diff --check "$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA..$PERSISTENCE_PROGRESS_TEST_FIX_SHA"
-          git diff --check "$PERSISTENCE_PROGRESS_TEST_FIX_SHA..HEAD"
-          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA PRE_PERSISTENCE_STALE_LIVENESS=$PRE_PERSISTENCE_STALE_LIVENESS_SHA PERSISTENCE_STALE_LIVENESS=$PERSISTENCE_STALE_LIVENESS_SHA PRE_PERSISTENCE_STALE_TEST_ALIGNMENT=$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PERSISTENCE_STALE_TEST_ALIGNMENT=$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA CI_HEAD=$(git rev-parse HEAD)"
+          git diff --check "$PERSISTENCE_PROGRESS_TEST_FIX_SHA..$PRE_OFC_SUBCALLER_OBS_SHA"
+          git diff --check "$PRE_OFC_SUBCALLER_OBS_SHA..$OFC_SUBCALLER_OBS_SHA"
+          git diff --check "$OFC_SUBCALLER_OBS_SHA..HEAD"
+          echo "BASE=$BASE_SHA FUNCTIONAL=$FUNCTIONAL_SHA PRE_FENCE=$PRE_FENCE_SHA FENCE=$FENCE_SHA PRE_AUTHORITY=$PRE_AUTHORITY_SHA AUTHORITY=$AUTHORITY_SHA PRE_OFC_VIVA=$PRE_OFC_VIVA_SHA OFC_VIVA=$OFC_VIVA_SHA PRE_INFRA_CLEANUP=$PRE_INFRA_CLEANUP_SHA INFRA_CLEANUP=$INFRA_CLEANUP_SHA PRE_WORKER_OBS=$PRE_WORKER_OBS_SHA WORKER_OBS=$WORKER_OBS_SHA PRE_DISTRIBUTOR_COMPACT=$PRE_DISTRIBUTOR_COMPACT_SHA DISTRIBUTOR_COMPACT=$DISTRIBUTOR_COMPACT_SHA PRE_DISTRIBUTOR_COMPACT_OBS=$PRE_DISTRIBUTOR_COMPACT_OBS_SHA DISTRIBUTOR_COMPACT_OBS=$DISTRIBUTOR_COMPACT_OBS_SHA PRE_PERSISTENCE_STALE_LIVENESS=$PRE_PERSISTENCE_STALE_LIVENESS_SHA PERSISTENCE_STALE_LIVENESS=$PERSISTENCE_STALE_LIVENESS_SHA PRE_PERSISTENCE_STALE_TEST_ALIGNMENT=$PRE_PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PERSISTENCE_STALE_TEST_ALIGNMENT=$PERSISTENCE_STALE_TEST_ALIGNMENT_SHA PRE_PERSISTENCE_PROGRESS_TEST_FIX=$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA PERSISTENCE_PROGRESS_TEST_FIX=$PERSISTENCE_PROGRESS_TEST_FIX_SHA PRE_OFC_SUBCALLER_OBS=$PRE_OFC_SUBCALLER_OBS_SHA OFC_SUBCALLER_OBS=$OFC_SUBCALLER_OBS_SHA CI_HEAD=$(git rev-parse HEAD)"
           echo "Functional paths:"; printf '%s\n' "$actual"
           echo "Fence paths:"; printf '%s\n' "$fence_actual"
           echo "Authority paths:"; printf '%s\n' "$authority_actual"
@@ -281,6 +304,8 @@ jobs:
           echo "PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA=$PRE_PERSISTENCE_PROGRESS_TEST_FIX_SHA PERSISTENCE_PROGRESS_TEST_FIX_SHA=$PERSISTENCE_PROGRESS_TEST_FIX_SHA"
           echo "Persistence progress test-fix paths:"; printf '%s\n' "$persistence_progress_test_fix_actual"
           echo "CI-only paths after persistence progress test-fix:"; printf '%s\n' "$persistence_progress_test_fix_ci_actual"
+          echo "OFC subcaller observability paths:"; printf '%s\n' "$ofc_subcaller_actual"
+          echo "CI-only paths after OFC subcaller observability:"; printf '%s\n' "$ofc_subcaller_ci_actual"
 
       - name: Clean Linux dependency installation
         run: npm ci
@@ -436,6 +461,24 @@ jobs:
           node --check tests/ofc-workspace-worker.test.js
           node tests/ofc-workspace-worker.test.js
           node tests/ofc-snapshot-viva-v1.test.js
+
+      - name: OFC physical read subcaller observability Linux / Node 24 dedicated gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check modules/engine/ofc/absorption-gate.service.js
+          node --check modules/engine/ofc/controller.runner.js
+          node --check modules/engine/ofc/workspace-worker-client.js
+          node --check modules/engine/ofc/workspace-worker.js
+          node --check modules/telemetria/telemetria.service.js
+          node --check tests/ofc-fase-1d-observabilidade.test.js
+          node --check tests/ofc-snapshot-viva-v1.test.js
+          node --check tests/ofc-workspace-worker.test.js
+          node --check tests/telemetria-v1-backend.test.js
+          node tests/ofc-fase-1d-observabilidade.test.js
+          node tests/ofc-snapshot-viva-v1.test.js
+          node tests/ofc-workspace-worker.test.js
+          node tests/telemetria-v1-backend.test.js
 
       - name: Syntax and encoding
         shell: bash
