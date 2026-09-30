@@ -41,9 +41,12 @@ async function runBoundary({
     motivo: "generation_viva_mais_nova"
   },
   fastResult = { ok: true, filaClienteHotState: [], pendentes: 0 },
+  readiness = { ok: true, ready: true, motivo: "authority_readiness_ready" },
+  prepareError = null,
+  afterPrepare = null,
   throwLogger = false
 } = {}) {
-  const calls = { reconcile: 0, fastPath: 0, legacy: 0 };
+  const calls = { prepare: 0, reconcile: 0, fastPath: 0, legacy: 0 };
   const observed = [];
   let reconcileEnv;
   const result = await executarPreflightExecutor({
@@ -52,6 +55,12 @@ async function runBoundary({
     cicloNormalExecutor: normalExecutorCycle,
     dirtyLocal,
     deveUsarFilaV2: () => operational,
+    prepararReadiness: async () => {
+      calls.prepare += 1;
+      if (prepareError) throw prepareError;
+      if (typeof afterPrepare === "function") await afterPrepare();
+      return { ...readiness };
+    },
     reconciliar: async ({ env: receivedEnv }) => {
       calls.reconcile += 1;
       reconcileEnv = receivedEnv;
@@ -93,12 +102,20 @@ function assertObservation(observation, expected = {}) {
       "generationConclusiva",
       "globalAuthority",
       "motivo",
+      "readinessAttempted",
+      "readinessMotivo",
+      "readinessMs",
+      "readinessReady",
       "selected",
       "timestamp",
       "workspace"
     ].sort(),
     "evento compacto não deve conter dados de oferta/comerciais"
   );
+  assert.strictEqual(typeof observation.readinessAttempted, "boolean");
+  assert.strictEqual(typeof observation.readinessReady, "boolean");
+  assert.strictEqual(typeof observation.readinessMotivo, "string");
+  assert.strictEqual(typeof observation.readinessMs, "number");
 }
 
 async function main() {
@@ -114,7 +131,7 @@ async function main() {
     } });
     assert.strictEqual(run.reconcileEnv, currentEnv, "flag OFF mantém exatamente o env global");
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "mtime");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 });
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 1, fastPath: 0, legacy: 1 });
     assert.strictEqual(run.observed.length, 0, "flag OFF não deve adicionar ruído de log");
   }
 
@@ -140,7 +157,7 @@ async function main() {
       motivo: "authority_mtime"
     } });
     assert.strictEqual(run.reconcileEnv, currentEnv, "flag ausente deve permanecer OFF e preservar env global");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 });
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 1, fastPath: 0, legacy: 1 });
     assert.strictEqual(run.observed.length, 0);
   }
 
@@ -157,7 +174,7 @@ async function main() {
       }
     });
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "mtime", "workspace fora do canário não recebe override");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 });
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 1, fastPath: 0, legacy: 1 });
     assert.strictEqual(run.observed.length, 0, "workspace fora do canário dedicado não gera evento do canário");
   }
 
@@ -174,8 +191,14 @@ async function main() {
       }
     });
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "mtime", "V2 operacional inelegível não recebe override");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 });
-    assertObservation(run.observed[0], { selected: false, motivo: "off_canary_fallback_mtime" });
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 1, fastPath: 0, legacy: 1 });
+    assertObservation(run.observed[0], {
+      selected: false,
+      motivo: "off_canary_fallback_mtime",
+      readinessAttempted: false,
+      readinessReady: false,
+      readinessMotivo: "nao_solicitada"
+    });
   }
 
   for (const [workspace, maisNova, motivo] of [
@@ -193,7 +216,7 @@ async function main() {
     assert.notStrictEqual(run.reconcileEnv, run.env, "override deve ser uma cópia de env, sem mutar o global");
     assert.strictEqual(run.env[FLAG_GLOBAL], "mtime", "env global não pode ser modificado");
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "generation");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 1, legacy: 0 });
+    assert.deepStrictEqual(run.calls, { prepare: 1, reconcile: 1, fastPath: 1, legacy: 0 });
     assert.strictEqual(run.result.fastPathExecutor, true);
     assertObservation(run.observed[0], {
       workspace,
@@ -202,19 +225,24 @@ async function main() {
       globalAuthority: "mtime",
       executorAuthority: "generation",
       generationConclusiva: true,
-      fallbackMtime: false
+      fallbackMtime: false,
+      readinessAttempted: true,
+      readinessReady: true,
+      readinessMotivo: "authority_readiness_ready"
     });
   }
 
   {
     const run = await runBoundary({ dirtyLocal: true });
-    assert.deepStrictEqual(run.calls, { reconcile: 0, fastPath: 0, legacy: 1 }, "dirty local não consulta generation nem Viva");
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 0, fastPath: 0, legacy: 1 }, "dirty local não prepara readiness nem consulta generation/Viva");
     assert.strictEqual(run.result.motivo, "dirty_local");
     assertObservation(run.observed[0], {
       selected: true,
       motivo: "dirty_local",
       executorAuthority: "not_requested",
-      generationConclusiva: false
+      generationConclusiva: false,
+      readinessAttempted: false,
+      readinessReady: false
     });
   }
 
@@ -239,14 +267,84 @@ async function main() {
       }
     });
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "generation", `${motivo}: autoridade dedicada solicitada`);
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 }, `${motivo}: um único fallback legado`);
+    assert.deepStrictEqual(run.calls, { prepare: 1, reconcile: 1, fastPath: 0, legacy: 1 }, `${motivo}: um único fallback legado`);
     assert.strictEqual(run.result.decision.motivo, motivo);
     assertObservation(run.observed[0], {
       selected: true,
       motivo,
       executorAuthority: "generation",
       generationConclusiva: false,
+      fallbackMtime: true,
+      readinessAttempted: true,
+      readinessReady: true
+    });
+  }
+
+  for (const motivo of [
+    "revision_stale",
+    "manifest_indisponivel",
+    "manifest_invalido",
+    "manifest_write_falhou",
+    "repository_readiness_indisponivel"
+  ]) {
+    const run = await runBoundary({
+      readiness: { ok: motivo !== "repository_readiness_indisponivel", ready: false, motivo }
+    });
+    assert.deepStrictEqual(
+      run.calls,
+      { prepare: 1, reconcile: 0, fastPath: 0, legacy: 1 },
+      `${motivo}: prepare inconclusivo não avalia generation e faz um legado`
+    );
+    assert.strictEqual(run.result.motivo, motivo);
+    assertObservation(run.observed[0], {
+      selected: true,
+      motivo,
+      readinessAttempted: true,
+      readinessReady: false,
+      readinessMotivo: motivo,
+      generationConclusiva: false,
       fallbackMtime: true
+    });
+  }
+
+  {
+    const run = await runBoundary({ prepareError: new Error("db_unavailable") });
+    assert.deepStrictEqual(run.calls, { prepare: 1, reconcile: 0, fastPath: 0, legacy: 1 });
+    assert.strictEqual(run.result.motivo, "readiness_exception");
+    assertObservation(run.observed[0], {
+      selected: true,
+      readinessAttempted: true,
+      readinessReady: false,
+      readinessMotivo: "readiness_exception"
+    });
+  }
+
+  {
+    const raceDecision = {
+      autoridadeSolicitada: "generation",
+      autoridadeUsada: "generation",
+      generationConclusiva: true,
+      maisNova: true,
+      fallbackMtime: false,
+      motivo: "generation_viva_mais_nova"
+    };
+    const run = await runBoundary({
+      decision: raceDecision,
+      afterPrepare: () => {
+        raceDecision.autoridadeUsada = "mtime";
+        raceDecision.generationConclusiva = false;
+        raceDecision.fallbackMtime = true;
+        raceDecision.motivo = "authority_not_ready";
+      }
+    });
+    assert.deepStrictEqual(run.calls, { prepare: 1, reconcile: 1, fastPath: 0, legacy: 1 });
+    assert.strictEqual(run.result.decision.motivo, "authority_not_ready");
+    assertObservation(run.observed[0], {
+      selected: true,
+      motivo: "authority_not_ready",
+      readinessAttempted: true,
+      readinessReady: true,
+      generationConclusiva: false
     });
   }
 
@@ -264,14 +362,19 @@ async function main() {
     });
     assert.strictEqual(run.reconcileEnv, run.env, `${contexto}: env global permanece intacto`);
     assert.strictEqual(run.reconcileEnv[FLAG_GLOBAL], "mtime", `${contexto}: autoridade continua mtime`);
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 0, legacy: 1 }, `${contexto}: fallback legado preservado`);
-    assertObservation(run.observed[0], { selected: false, motivo: "authority_mtime", executorAuthority: "mtime" });
+    assert.deepStrictEqual(run.calls, { prepare: 0, reconcile: 1, fastPath: 0, legacy: 1 }, `${contexto}: fallback legado preservado`);
+    assertObservation(run.observed[0], {
+      selected: false,
+      motivo: "authority_mtime",
+      executorAuthority: "mtime",
+      readinessAttempted: false
+    });
   }
 
   {
     const run = await runBoundary({ throwLogger: true });
     assert.strictEqual(run.result.fastPathExecutor, true, "falha de observabilidade não pode afetar fast path");
-    assert.deepStrictEqual(run.calls, { reconcile: 1, fastPath: 1, legacy: 0 });
+    assert.deepStrictEqual(run.calls, { prepare: 1, reconcile: 1, fastPath: 1, legacy: 0 });
   }
 
   const indexSource = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
@@ -280,6 +383,7 @@ async function main() {
     1,
     "marcador dedicado deve existir somente no ciclo normal do Executor"
   );
+  assert(indexSource.includes("prepararReadinessAutoridadeRecovery(workspace)"), "ciclo Executor deve injetar readiness síncrona");
   const radarStart = indexSource.indexOf("reconciliarFilaV2ParaLeituraCliente(clienteId, \"radar\")");
   assert(radarStart >= 0, "chamada Radar deve continuar presente");
   const expiryStart = indexSource.indexOf("async function candidatosExpiracaoSelecaoFilaV2");

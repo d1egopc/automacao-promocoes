@@ -79,6 +79,7 @@ async function executarPreflightExecutor({
   cicloNormalExecutor = false,
   dirtyLocal = false,
   deveUsarFilaV2,
+  prepararReadiness,
   reconciliar,
   aplicarFastPath,
   carregarLegado,
@@ -111,6 +112,10 @@ async function executarPreflightExecutor({
     executorAuthority: dirtyLocal === true ? "not_requested" : escopo.executorAuthority,
     generationConclusiva: false,
     fallbackMtime: false,
+    readinessAttempted: false,
+    readinessReady: false,
+    readinessMotivo: "nao_solicitada",
+    readinessMs: 0,
     timestamp: new Date().toISOString()
   };
 
@@ -118,6 +123,52 @@ async function executarPreflightExecutor({
     await carregarLegado();
     observar(observado);
     return { decision: null, fastPathExecutor: false, legacyLoaded: true, motivo: "dirty_local" };
+  }
+
+  if (escopo.selected) {
+    observado.readinessAttempted = true;
+    const inicioReadiness = process.hrtime.bigint();
+    let readiness;
+    try {
+      readiness = typeof prepararReadiness === "function"
+        ? await prepararReadiness({ clienteId: escopo.clienteId })
+        : { ok: false, ready: false, motivo: "repository_readiness_indisponivel" };
+    } catch {
+      readiness = { ok: false, ready: false, motivo: "readiness_exception" };
+    }
+    observado.readinessMs = Number((Number(process.hrtime.bigint() - inicioReadiness) / 1e6).toFixed(3));
+    observado.readinessReady = readiness?.ok === true && readiness?.ready === true;
+    observado.readinessMotivo = String(readiness?.motivo || (
+      observado.readinessReady ? "authority_readiness_ready" : "readiness_inconclusiva"
+    ));
+
+    if (!observado.readinessReady) {
+      let decision = {
+        autoridadeSolicitada: "generation",
+        autoridadeUsada: "mtime",
+        generationConclusiva: false,
+        maisNova: false,
+        fallbackMtime: true,
+        motivo: observado.readinessMotivo
+      };
+      if (typeof avaliarFallbackMtime === "function") {
+        try {
+          decision = await avaliarFallbackMtime({ motivo: observado.readinessMotivo }, decision);
+        } catch {
+          decision.motivo = observado.readinessMotivo;
+        }
+      }
+      observado.motivo = observado.readinessMotivo;
+      observado.fallbackMtime = decision?.fallbackMtime === true;
+      await carregarLegado();
+      observar(observado);
+      return {
+        decision,
+        fastPathExecutor: false,
+        legacyLoaded: true,
+        motivo: observado.readinessMotivo
+      };
+    }
   }
 
   let decision = await reconciliar({

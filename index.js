@@ -4041,6 +4041,8 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
         cicloNormalExecutor: true,
         dirtyLocal: dirtyAntesPreflight === true,
         deveUsarFilaV2: workspace => filaOperacionalV2.deveUsarFilaV2Operacional(workspace),
+        prepararReadiness: ({ clienteId: workspace }) =>
+          filaOperacionalV2.prepararReadinessAutoridadeRecovery(workspace),
         reconciliar: ({ env }) => filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
           contexto: contextoTexto,
           preflight: true
