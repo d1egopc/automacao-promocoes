@@ -76,6 +76,10 @@ function erroGlobalWorker(motivo = "") {
   ]).has(String(motivo));
 }
 
+function erroRevisionStale(motivo = "") {
+  return String(motivo) === "STALE_REVISION";
+}
+
 function criarCoordenadorPersistencia(opcoes = {}) {
   const env = opcoes.env || process.env;
   const logger = opcoes.logger || console;
@@ -442,15 +446,34 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         });
       } else {
         const motivo = mensagem.error?.code || "worker_job_failed";
+        const metricas = metricasJob(atual.job);
         log({
           evento: "job_error",
           operacao: atual.job.operation,
           jobKey: hashWorkspace(atual.job.jobId),
           workspaceKey: atual.lane.workspaceKey,
           motivo,
-          ...metricasJob(atual.job)
+          ...metricas
         });
-        if (erroGlobalWorker(motivo)) {
+        if (erroRevisionStale(motivo) && !ehManutencaoTerminalIndex(atual.job.operation)) {
+          log({
+            evento: "job_stale_revision",
+            operacao: atual.job.operation,
+            jobKey: hashWorkspace(atual.job.jobId),
+            workspaceKey: atual.lane.workspaceKey,
+            checkpointGeneration: Number(atual.job.checkpointGeneration || 0),
+            checkpointMutations: Number(atual.job.checkpointMutations || 0),
+            retryable: true,
+            circuitOpened: false,
+            ...metricas
+          });
+          atual.resolve(rejeicao(motivo, mensagem.error?.message, {
+            retryable: true,
+            circuitOpened: false,
+            persistenceMode: "worker",
+            workspaceKey: atual.lane.workspaceKey
+          }));
+        } else if (erroGlobalWorker(motivo)) {
           estado.errorsByWorkspace.set(atual.lane.workspaceKey, (estado.errorsByWorkspace.get(atual.lane.workspaceKey) || 0) + 1);
           registrarFalhaGlobal(motivo, mensagem.error);
           atual.resolve(rejeicao(motivo, mensagem.error?.message, {
@@ -639,6 +662,8 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       clienteId: workspace,
       checkpointRevision: revision,
       targetGeneration: Number(payload.targetGeneration || 0),
+      checkpointGeneration: Number(payload.checkpointGeneration ?? payload.targetGeneration ?? 0),
+      checkpointMutations: Number(payload.checkpointMutations || 0),
       expectedSourceRevisions: payload.expectedSourceRevisions || undefined,
       tempIdentity: payload.tempIdentity || undefined,
       dataDir: normalizarDataDir(payload.dataDir || env.DATA_DIR || "/data"),

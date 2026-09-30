@@ -36,11 +36,11 @@ function env(root, clients, extra = {}) {
   };
 }
 
-function jobPayload(clienteId, n) {
+function jobPayload(clienteId, n, dataDir = "/tmp/persistence-multiworkspace") {
   return {
     clienteId,
     checkpointRevision: "multi-revision-" + clienteId + "-" + n,
-    dataDir: "/tmp/persistence-multiworkspace"
+    dataDir
   };
 }
 
@@ -57,6 +57,10 @@ const localFailureWorker = [
   "parentPort.on('message', job => {",
   "  if (job.clienteId === 'workspace-fail') {",
   "    parentPort.postMessage({ type: 'persistence_error', jobId: job.jobId, error: { code: 'STALE_REVISION', message: 'revision_changed_for_workspace' } });",
+  "    return;",
+  "  }",
+  "  if (job.clienteId === 'workspace-fail-structural') {",
+  "    parentPort.postMessage({ type: 'persistence_error', jobId: job.jobId, error: { code: 'CHECKPOINT_WRITE_FAILED', message: 'backup_write_failed' } });",
   "    return;",
   "  }",
   "  parentPort.postMessage({ type: 'persistence_result', jobId: job.jobId, result: { ok: true, metrics: { testWorkspace: job.clienteId } } });",
@@ -140,12 +144,13 @@ async function testFairnessAndFifo() {
 
 async function testLocalCircuitAndGlobalCrash() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fila-persistence-multi-failure-"));
+  const logs = [];
   try {
     const clients = ["workspace-fail", "workspace-healthy"];
     const local = criarCoordenadorPersistencia({
       env: env(root, clients),
       workerPath: makeWorker(root, localFailureWorker),
-      logger: { log() {} }
+      logger: { log: (_prefix, payload) => logs.push(JSON.parse(payload)) }
     });
     try {
       const [failed, failedQueued, healthy] = await Promise.all([
@@ -157,11 +162,34 @@ async function testLocalCircuitAndGlobalCrash() {
       assert.strictEqual(failed.motivo, "STALE_REVISION");
       assert.strictEqual(failedQueued.ok, false);
       assert.strictEqual(failedQueued.motivo, "STALE_REVISION");
+      assert.strictEqual(failed.retryable, true);
+      assert.strictEqual(failed.circuitOpened, false);
+      assert.strictEqual(failedQueued.retryable, true);
+      assert.strictEqual(failedQueued.circuitOpened, false);
       assert.strictEqual(healthy.ok, true);
       assert.strictEqual(local.getState().globalCircuitOpen, false);
-      assert.strictEqual(Object.values(local.getState().circuitByWorkspace).some(Boolean), true);
+      assert.strictEqual(Object.values(local.getState().circuitByWorkspace).some(Boolean), false);
+      assert.ok(logs.filter(log => log.evento === "job_stale_revision").length >= 2);
     } finally {
       await local.shutdown();
+    }
+
+    const structural = criarCoordenadorPersistencia({
+      env: env(root, ["workspace-fail-structural", "workspace-healthy"]),
+      workerPath: makeWorker(root, localFailureWorker),
+      logger: { log() {} }
+    });
+    try {
+      const failed = await structural.prepare(jobPayload("workspace-fail-structural", 1));
+      assert.strictEqual(failed.ok, false);
+      assert.strictEqual(failed.motivo, "CHECKPOINT_WRITE_FAILED");
+      assert.strictEqual(structural.getState().circuitByWorkspace[workspaceKey("workspace-fail-structural")], true);
+      const blocked = await structural.prepare(jobPayload("workspace-fail-structural", 2));
+      assert.strictEqual(blocked.ok, false);
+      assert.strictEqual(blocked.motivo, "persistence_worker_workspace_circuit_open");
+      assert.strictEqual((await structural.prepare(jobPayload("workspace-healthy", 1))).ok, true);
+    } finally {
+      await structural.shutdown();
     }
 
     const global = criarCoordenadorPersistencia({
@@ -181,6 +209,41 @@ async function testLocalCircuitAndGlobalCrash() {
       await global.shutdown();
     }
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testStaleRevisionNaturalRecovery() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fila-persistence-stale-revision-"));
+  const logs = [];
+  const sourceDir = path.join(root, "clientes", "workspace-race");
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, "fila-viva.json"), "[]", "utf8");
+  const coordinator = criarCoordenadorPersistencia({
+    env: env(root, ["workspace-race"]),
+    workerPath: path.join(__dirname, "fixtures", "persistence-worker-stale-revision.js"),
+    logger: { log: (_prefix, payload) => logs.push(JSON.parse(payload)) }
+  });
+  try {
+    const stale1 = await coordinator.prepare({ ...jobPayload("workspace-race", 1, root), targetGeneration: 41, checkpointMutations: 7 });
+    const stale2 = await coordinator.prepare({ ...jobPayload("workspace-race", 2, root), targetGeneration: 42, checkpointMutations: 8 });
+    const valid = await coordinator.prepare({ ...jobPayload("workspace-race", 3, root), targetGeneration: 43, checkpointMutations: 9 });
+    assert.strictEqual(stale1.ok, false);
+    assert.strictEqual(stale2.ok, false);
+    assert.strictEqual(valid.ok, true);
+    assert.strictEqual(stale1.motivo, "STALE_REVISION");
+    assert.strictEqual(stale2.motivo, "STALE_REVISION");
+    assert.strictEqual(stale1.retryable, true);
+    assert.strictEqual(stale2.retryable, true);
+    assert.strictEqual(coordinator.getState().circuitByWorkspace[workspaceKey("workspace-race")], false);
+    const staleLogs = logs.filter(log => log.evento === "job_stale_revision");
+    assert.strictEqual(staleLogs.length, 2);
+    assert.deepStrictEqual(staleLogs.map(log => log.checkpointGeneration), [41, 42]);
+    assert.deepStrictEqual(staleLogs.map(log => log.checkpointMutations), [7, 8]);
+    assert.ok(staleLogs.every(log => log.retryable === true && log.circuitOpened === false));
+    assert.strictEqual(logs.filter(log => log.evento === "circuit_open").length, 0);
+  } finally {
+    await coordinator.shutdown();
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -239,6 +302,7 @@ async function main() {
   await testCanaryRouting();
   await testFairnessAndFifo();
   await testLocalCircuitAndGlobalCrash();
+  await testStaleRevisionNaturalRecovery();
   await testBackpressure();
   await testPinnedModeDuringCheckpoint();
   console.log("persistence-worker-multiworkspace: OK (canary/fairness/fifo/local-global-circuit/backpressure)");
