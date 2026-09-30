@@ -119,6 +119,7 @@ async function observar(opcoes, input, event) {
   try {
     if (opcoes.observarWorker) await opcoes.observarWorker(event);
     else console.log("[OFC-WORKSPACE-WORKER]", JSON.stringify({ workspaceId: input.workspaceId,
+      ...(opcoes.subcallerTag ? { subcallerTag: opcoes.subcallerTag, observationId: opcoes.observationId || "" } : {}),
       aceito: event.aceito, fallback: !event.aceito,
       source: event.perf?.leitura?.source || input.source || "fila_legacy",
       sourceBytes: event.perf?.leitura?.sourceBytes,

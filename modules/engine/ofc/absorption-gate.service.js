@@ -1,5 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const { randomUUID } = require("node:crypto");
+const { performance } = require("node:perf_hooks");
+const { isMainThread } = require("node:worker_threads");
 const { criarContadorFinalizacoes } = require("./drainage-metrics.service");
 const { readGlobalJson, readClienteJson, getClienteJsonPath } = require("../../../utils/storage");
 const { listarClientesAtivos } = require("../../../utils/usuarios-atividade");
@@ -25,6 +28,16 @@ const {
 
 const OFC_SNAPSHOT_VIVA = "OFC_SNAPSHOT_VIVA";
 const OFC_SNAPSHOT_VIVA_CANARY_CLIENTES = "OFC_SNAPSHOT_VIVA_CANARY_CLIENTES";
+const SUBCALLERS_OBSERVADOS = new Set(["ofc_controller", "telemetria_saude"]);
+
+function tagSubcallerOfc(valor) {
+  return SUBCALLERS_OBSERVADOS.has(valor) ? valor : "";
+}
+
+function observarLeituraFisicaOfc(dados) {
+  try { console.log("[OFC-GATE-PHYSICAL-READ]", JSON.stringify(dados)); }
+  catch (_) { /* Observabilidade nunca altera a decisão. */ }
+}
 
 const BUCKET_STATUS = {
   PENDENTE_VIVO: "pendente_vivo",
@@ -207,19 +220,27 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   const clock = typeof opcoes.clock === "function" ? opcoes.clock : Date.now;
   const coletadoEm = () => Number(clock());
   const medidor = opcoes.medidorCiclo;
-  const clockPerf = medidor?.clock || (() => 0);
+  const subcallerTag = tagSubcallerOfc(opcoes.subcallerTag);
+  const clockPerf = medidor?.clock || (subcallerTag ? () => performance.now() : () => 0);
   const source = opcoes.source === "fila_viva" ? "fila_viva" : "fila_legacy";
   const sourceMeta = opcoes.sourceMeta || {};
   const fallbackReason = opcoes.fallbackReason || sourceMeta.fallbackReason || "";
-  const registrar = dados => medidor?.registrarLeitura({
-    ...metadadosLeitura({
-      source,
-      sourceMeta,
-      fallbackReason,
+  let contentRead = false;
+  let bytesConteudo = null;
+  const registrar = dados => {
+    medidor?.registrarLeitura({
+      ...metadadosLeitura({ source, sourceMeta, fallbackReason, ...dados }),
       ...dados
-    }),
-    ...dados
-  });
+    });
+    if (subcallerTag && contentRead && opcoes.physicalReadLoggedExternally !== true) {
+      observarLeituraFisicaOfc({ event: "content_read", subcallerTag, observationId: opcoes.observationId || "",
+        workspaceId: clienteId, source, sourceBytes: bytesConteudo,
+        fallbackReason, readMs: dados.leituraMs ?? 0, parseMs: dados.parseMs ?? 0,
+        wallMs: dados.wallMs ?? 0, legacyReadAvoided: null,
+        revisionChanged: dados.revisionChanged === true, mainThread: isMainThread,
+        contentReads: 1 });
+    }
+  };
 
   if (source === "fila_viva" && opcoes.sourceValidated !== true && sourceMeta.eligible !== true) {
     registrar({ lido: false });
@@ -269,7 +290,13 @@ function lerFilaWorkspaceSnapshot(clienteId = "", opcoes = {}) {
   const inicioLeitura = clockPerf();
   try {
     if (medidor && !opcoes.readFileSync) bytesArquivoObservados = fs.statSync(arquivo).size;
+    else if (subcallerTag && !opcoes.readFileSync) {
+      try { bytesArquivoObservados = fs.statSync(arquivo).size; }
+      catch (_) { /* O stat observacional não pode bloquear a leitura legada. */ }
+    }
     texto = lerArquivo(arquivo, "utf8");
+    contentRead = true;
+    bytesConteudo = bytesArquivoObservados ?? opcoes.observedSourceBytes ?? sourceMeta.sourceBytes ?? null;
     leituraMs = Math.max(0, clockPerf() - inicioLeitura);
   } catch (erro) {
     const meta = metadadosLeitura({ source, sourceMeta, fallbackReason, bytesArquivoObservados,
@@ -1322,6 +1349,10 @@ function resumirGate(workspaces = []) {
 async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
   const clock = typeof opcoes.clock === "function" ? opcoes.clock : Date.now;
   const inicio = clock();
+  const subcallerTag = tagSubcallerOfc(opcoes.subcallerTag);
+  const observationId = subcallerTag ? randomUUID() : "";
+  const observacao = subcallerTag ? { subcallerTag, observationId } : {};
+  const inicioObservacao = subcallerTag ? performance.now() : 0;
   const janelaMinutos = Math.max(1, Math.min(120, Math.floor(Number(opcoes.janelaMinutos) || 15)));
 
   try {
@@ -1388,6 +1419,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
             id, fonteSnapshot.source === "fila_viva" ? "fila-viva.json" : "fila.json"
           );
           resultadoWorker = await avaliarComWorker({
+            ...observacao,
             workspaceId: id,
             arquivo: arquivoWorker,
             source: fonteSnapshot.source || "fila_legacy",
@@ -1397,7 +1429,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
             usuario: Object.fromEntries(["creditos", "limiteDiarioRestante", "limite_diario_restante", "creditosRestantesDia", "creditosDiaRestantes"].map(k => [k, usuario[k]])),
             configExecutor: { automacaoAtiva: automacaoWorker },
             destinos: destinos.map(projetarDestinoWorker), eventos: eventosPorWorkspace.get(id) || {}
-          }, opcoes);
+          }, { ...opcoes, ...observacao });
           // Last consumer-side check after every async hop; no await until the
           // workspace summary is consumed below. A rejected result is not reused.
           if (resultadoWorker) {
@@ -1428,6 +1460,7 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       if (!leituraFila) {
         const leituraOpcoes = {
           ...opcoes,
+          ...observacao,
           source: fonteSnapshot.source || "fila_legacy",
           arquivo: fonteSnapshot.arquivo,
           sourceValidated: fonteSnapshot.eligible === true,
@@ -1488,8 +1521,19 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
         janelaMinutos,
         agoraMs
       }));
-      if (resultadoWorker) await require("./workspace-worker-client").registrarResultadoWorker(resultadoWorker, opcoes, id);
-      else if (workerDescartadoNoConsumo) await require("./workspace-worker-client").registrarFallbackWorker(opcoes, id);
+      if (subcallerTag) {
+        observarLeituraFisicaOfc({ event: "gate_workspace", subcallerTag, observationId,
+          workspaceId: id, source: leituraFila.source || "fila_legacy",
+          sourceBytes: leituraFila.sourceBytes ?? null,
+          fallbackReason: leituraFila.fallbackReason || motivoFallback || "",
+          readMs: leituraFila.leituraMs ?? resultadoWorker?.perf?.leitura?.leituraMs ?? null,
+          parseMs: leituraFila.parseMs ?? resultadoWorker?.perf?.leitura?.parseMs ?? null,
+          wallMs: leituraFila.wallMs ?? resultadoWorker?.perf?.wallMs ?? null,
+          legacyReadAvoided: leituraFila.legacyReadAvoided === true && resultadoWorker?.leitura?.ok !== false,
+          revisionChanged: leituraFila.revisionChanged === true || workerDescartadoNoConsumo });
+      }
+      if (resultadoWorker) await require("./workspace-worker-client").registrarResultadoWorker(resultadoWorker, { ...opcoes, ...observacao }, id);
+      else if (workerDescartadoNoConsumo) await require("./workspace-worker-client").registrarFallbackWorker({ ...opcoes, ...observacao }, id);
     }
 
     const resumo = resumirGate(workspaces);
@@ -1497,6 +1541,11 @@ async function criarGateAbsorcaoShadowOfc(opcoes = {}) {
       .reduce((total, quantidade) => total + numero(quantidade), 0);
     const fontesInvalidasRelevantes = Object.values(fontesInvalidasRelevantesPorMotivo)
       .reduce((total, quantidade) => total + numero(quantidade), 0);
+    if (subcallerTag) {
+      observarLeituraFisicaOfc({ event: "gate_request", subcallerTag, observationId,
+        requestedWorkspaceId: opcoes.subcallerRequestWorkspaceId || "",
+        workspacesProcessed: workspaces.length, wallMs: Math.max(0, performance.now() - inicioObservacao) });
+    }
     return {
       ok: true,
       modo: "shadow",

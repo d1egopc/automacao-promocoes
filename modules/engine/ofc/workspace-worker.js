@@ -19,6 +19,10 @@ function calcular(input) {
     }
     const preview = ofc.avaliarDestinosWorkspace(input.destinos, input.janelaMinutos, [], input.agoraMs);
     const leitura = ofc.lerFilaWorkspaceSnapshot(input.workspaceId, {
+      subcallerTag: input.subcallerTag,
+      observationId: input.observationId,
+      observedSourceBytes: before ? Number(before.size) : null,
+      physicalReadLoggedExternally: input.subcallerTag === "ofc_controller" || input.subcallerTag === "telemetria_saude",
       getClienteJsonPath: () => input.arquivo,
       source: input.source,
       sourceValidated: input.sourceValidated === true,
@@ -28,7 +32,20 @@ function calcular(input) {
       readFileSync: () => {
         // Missing at entry is handled by the same legacy reader error contract.
         if (fd === undefined) { const e = new Error("missing"); e.code = "ENOENT"; throw e; }
+        const readStarted = performance.now();
         const text = fs.readFileSync(fd, "utf8");
+        if (input.subcallerTag === "ofc_controller" || input.subcallerTag === "telemetria_saude") {
+          try {
+            console.log("[OFC-GATE-PHYSICAL-READ]", JSON.stringify({
+              event: "content_read", subcallerTag: input.subcallerTag,
+              observationId: input.observationId || "", workspaceId: input.workspaceId,
+              source: input.source, sourceBytes: before ? Number(before.size) : null,
+              fallbackReason: "", readMs: Math.max(0, performance.now() - readStarted),
+              parseMs: null, wallMs: null, legacyReadAvoided: null,
+              revisionChanged: null, mainThread: false, contentReads: 1
+            }));
+          } catch (_) { /* Observabilidade não pode alterar a revisão ou a decisão. */ }
+        }
         memory.push({ etapa: "apos_read", ...process.memoryUsage() });
         try {
           if (!iguais(before, identidade(fs.fstatSync(fd, { bigint: true })))) throw new Error("ofc_revision_changed");

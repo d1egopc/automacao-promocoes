@@ -335,6 +335,7 @@ function carregarIsolado(arquivo, stubs, logs) {
 
 test("Controller publica 3 metricas, preserva ambos logs completos e mede etapas", async () => {
   const logs = [];
+  let gateOptionsReceived;
   const metrics = { consumoReal: {}, reservatorio: { porMarketplace: [], porCliente: [] } };
   const controller = carregarIsolado("modules/engine/ofc/controller.runner.js", {
     "./metrics.service": { coletarMetricasOfc: async () => metrics },
@@ -342,11 +343,12 @@ test("Controller publica 3 metricas, preserva ambos logs completos e mede etapas
     "./active-queue.service": { criarFilaAtivaShadowOfc: async () => ({ ok: true }) },
     "./live-flow.service": { criarFluxoVivoShadowOfc: async () => ({ ok: true }) },
     "./commercial-flow.service": { criarFluxoComercialShadowOfc: async () => ({ ok: true, enviosConfirmadosPorMinuto: 0 }) },
-    "./absorption-gate.service": { criarGateAbsorcaoShadowOfc: async () => ({ ok: true, workspaces: [], resumo: {}, finalizacoesComerciaisObservadas: { disponivel: true, total: 0, completo: true } }) },
+    "./absorption-gate.service": { criarGateAbsorcaoShadowOfc: async opcoes => { gateOptionsReceived = opcoes; return { ok: true, workspaces: [], resumo: {}, finalizacoesComerciaisObservadas: { disponivel: true, total: 0, completo: true } }; } },
     "../../ofc-v2/auditoria-ofc": { criarAuditoriaOfcV24Shadow: () => ({ ok: false }) }
   }, logs);
   const r = await controller.executarObservabilidadeOfc({ drenagem: { consultarConfirmacoes: async () => ({ ok: false }) } });
   assert.equal(r.ok, true); assert.equal(r.drenagem.outputRate.valor, 0);
+  assert.equal(gateOptionsReceived.subcallerTag, "ofc_controller");
   assert.equal(r.drenagem.throughputEntregasConfirmadasPorDestino.valor, null);
   assert.equal(r.drenagem.finalizacoesComerciaisPorOferta.total, 0);
   for (const e of ["coletaInicial", "filaAtiva", "fluxoVivo", "fluxoComercial", "absorptionGate", "metricasDrenagem"]) assert(e in r.observabilidadeCiclo.etapasMs);

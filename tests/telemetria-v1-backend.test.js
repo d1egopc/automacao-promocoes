@@ -153,12 +153,13 @@ require.cache[commercialFlowPath] = {
 };
 
 const gatePath = path.join(__dirname, "..", "modules", "engine", "ofc", "absorption-gate.service.js");
+const gateCalls = [];
 require.cache[gatePath] = {
   id: gatePath,
   filename: gatePath,
   loaded: true,
   exports: {
-    criarGateAbsorcaoShadowOfc: async () => ({
+    criarGateAbsorcaoShadowOfc: async opcoes => { gateCalls.push(opcoes); return ({
       ok: true,
       workspaces: [
         {
@@ -192,7 +193,7 @@ require.cache[gatePath] = {
           porMarketplace: { marketplace_b: 3 }
         }
       ]
-    })
+    }); }
   }
 };
 
@@ -358,6 +359,8 @@ async function request(app, method, url, { token = "", body } = {}) {
   assert.strictEqual(saudeWorkspace.radar.eventosRecentes, 2);
   assert.notStrictEqual(saudeWorkspace.radar.eventosRecentes, 99);
   assert.deepStrictEqual(saudeWorkspace.workspaces.map(item => item.clienteId), ["user_a"]);
+  assert.strictEqual(gateCalls[0].subcallerTag, "telemetria_saude");
+  assert.strictEqual(gateCalls[0].subcallerRequestWorkspaceId, "user_a");
   assert.strictEqual(saudeWorkspace.pipeline.jobsVivos, 4);
   assert.strictEqual(saudeWorkspace.pipeline.jobsVivosFrescos, 4);
   assert.strictEqual(saudeWorkspace.pipeline.backlogOperacional, 1177);
@@ -378,6 +381,8 @@ async function request(app, method, url, { token = "", body } = {}) {
     escopo: { tipo: "plataforma" }
   });
   assert.strictEqual(saudePlataforma.radar.eventosRecentes, 99);
+  assert.strictEqual(gateCalls[1].subcallerTag, "telemetria_saude");
+  assert.strictEqual(gateCalls[1].subcallerRequestWorkspaceId, "");
   assert.strictEqual(saudePlataforma.pipeline.jobsVivos, 4);
   assert.deepStrictEqual(saudePlataforma.marketplaces, [{ marketplace: "marketplace_global", eventos: 14, ofertas: 6, envios: 4, bloqueios: 2 }]);
   assert.strictEqual(saudePlataforma.marketplaces.filter(item => item.marketplace === "marketplace_global").length, 1);

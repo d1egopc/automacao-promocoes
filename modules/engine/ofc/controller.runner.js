@@ -314,6 +314,7 @@ async function executarObservabilidadeOfcMedida(opcoes, medidor) {
     const gateAbsorcao = await medidor.medir("absorptionGate", () => criarGateAbsorcaoShadowOfc({
       janelaMinutos: opcoes.janelaConsumoMinutos || 15,
       ...(opcoes.gateAbsorcao || {}),
+      subcallerTag: "ofc_controller",
       medidorCiclo: medidor
     }));
     logarGateAbsorcaoShadow(rodadaId, gateAbsorcao);

@@ -36,6 +36,25 @@ async function equivalent(file, time = now, destinations = [destination]) {
 }
 test.after(async () => { await fecharWorkerOfc(); fs.rmSync(temp, { recursive: true, force: true }); });
 
+test("subcaller é propagado ao Worker sem alterar decisão nem transportar fila", async () => {
+  const file = path.join(temp, "subcaller.json");
+  fs.writeFileSync(file, JSON.stringify([item(60_000)]));
+  const client = criarClienteWorker();
+  const inputs = [];
+  try {
+    const tagged = await ofc.criarGateAbsorcaoShadowOfc({ ...options(file, true),
+      subcallerTag: "ofc_controller",
+      clienteWorker: { executar: input => { inputs.push(input); return client.executar({ ...input, coletaTesteMs: now }); } },
+      observarWorker: () => {} });
+    const legacy = await ofc.criarGateAbsorcaoShadowOfc(options(file, false));
+    assert.deepEqual(tagged, legacy);
+    assert.equal(inputs.length, 1);
+    assert.equal(inputs[0].subcallerTag, "ofc_controller");
+    assert.match(inputs[0].observationId, /^[0-9a-f-]{36}$/);
+    assert.equal("filaItens" in inputs[0], false);
+  } finally { await client.fechar(); }
+});
+
 for (const [name, content] of [["empty", "[]"], ["invalid-json", "{"], ["invalid-format", "{}"], ["blank", ""], ["missing", null]]) {
   test("full OFF/ON deepEqual " + name, async () => {
     const file = path.join(temp, name + ".json"); if (content !== null) fs.writeFileSync(file, content);

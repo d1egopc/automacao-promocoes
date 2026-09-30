@@ -113,6 +113,74 @@ function gateOptions(paths, overrides = {}) {
   };
 }
 
+test("subcaller observacional identifica leituras sem alterar Gate ou fonte", async () => {
+  const f = fixture();
+  const logs = [];
+  const originalLog = console.log;
+  const reads = [];
+  const readFileSync = (arquivo, encoding) => {
+    reads.push(arquivo);
+    return fs.readFileSync(arquivo, encoding);
+  };
+  let semTag, comTag;
+  try {
+    console.log = (tag, payload) => {
+      if (tag === "[OFC-GATE-PHYSICAL-READ]") logs.push(JSON.parse(payload));
+    };
+    semTag = await ofc.criarGateAbsorcaoShadowOfc(gateOptions(f.paths, {
+      env: envViva(), readFileSync
+    }));
+    assert.equal(logs.length, 0);
+    assert.deepEqual(reads, [f.paths["fila-viva.json"]]);
+    reads.length = 0;
+    comTag = await ofc.criarGateAbsorcaoShadowOfc(gateOptions(f.paths, {
+      env: envViva(), readFileSync, subcallerTag: "ofc_controller"
+    }));
+  } finally { console.log = originalLog; }
+  assert.deepEqual(comTag, semTag);
+  assert.deepEqual(reads, [f.paths["fila-viva.json"]]);
+  const content = logs.filter(log => log.event === "content_read");
+  const workspace = logs.find(log => log.event === "gate_workspace");
+  const request = logs.find(log => log.event === "gate_request");
+  assert.equal(content.length, 1);
+  assert.equal(content[0].subcallerTag, "ofc_controller");
+  assert.equal(content[0].source, "fila_viva");
+  assert.equal(content[0].contentReads, 1);
+  assert.equal(content[0].mainThread, true);
+  assert.equal(content[0].observationId, request.observationId);
+  assert.equal(workspace.legacyReadAvoided, true);
+  assert.equal(request.workspacesProcessed, 1);
+  for (const log of logs) {
+    assert.ok(JSON.stringify(log).length < 1024);
+    assert.ok(!("itens" in log) && !("links" in log) && !("fila" in log));
+  }
+});
+
+test("subcaller de telemetria preserva fallback legado de leitura unica", async () => {
+  const f = fixture();
+  fs.rmSync(f.paths["fila-viva.proof.json"]);
+  const logs = [];
+  const reads = [];
+  const originalLog = console.log;
+  try {
+    console.log = (tag, payload) => {
+      if (tag === "[OFC-GATE-PHYSICAL-READ]") logs.push(JSON.parse(payload));
+    };
+    await ofc.criarGateAbsorcaoShadowOfc(gateOptions(f.paths, {
+      env: envViva(), subcallerTag: "telemetria_saude",
+      subcallerRequestWorkspaceId: workspaceId,
+      readFileSync: (arquivo, encoding) => {
+        reads.push(arquivo);
+        return fs.readFileSync(arquivo, encoding);
+      }
+    }));
+  } finally { console.log = originalLog; }
+  assert.deepEqual(reads, [f.paths["fila.json"]]);
+  assert.equal(logs.filter(log => log.event === "content_read").length, 1);
+  assert.equal(logs.find(log => log.event === "gate_workspace").legacyReadAvoided, false);
+  assert.equal(logs.find(log => log.event === "gate_request").requestedWorkspaceId, workspaceId);
+});
+
 function decision(workspace) {
   return {
     estado: workspace.estado,

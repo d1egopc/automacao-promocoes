@@ -605,7 +605,8 @@ async function consultarSaudeTelemetria(opcoes = {}) {
     escopo.tipo === "workspace"
       ? consultarResumoRadarWorkspace(escopo.clienteId, janelaMinutos)
       : consultarResumoRadar(janelaMinutos),
-    criarGateAbsorcaoShadowOfc({ janelaMinutos }),
+    criarGateAbsorcaoShadowOfc({ janelaMinutos, subcallerTag: "telemetria_saude",
+      subcallerRequestWorkspaceId: clienteEscopo }),
     consultarPipelineFrescoTelemetria({ clienteId: clienteEscopo, janelaMinutos }),
     consultarMarketplacesTelemetria({ clienteId: clienteEscopo, janelaMinutos })
   ]);
