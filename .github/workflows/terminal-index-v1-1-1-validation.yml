@@ -168,7 +168,7 @@ jobs:
           test "$worker_obs_ci_actual" = "$ci_only_expected"
           distributor_compact_ci_previous=$(git diff --name-only "$WORKER_OBS_SHA..$PRE_DISTRIBUTOR_COMPACT_SHA" | sort)
           test "$distributor_compact_ci_previous" = "$ci_only_expected"
-          distributor_compact_ci_actual=$(git diff --name-only "$DISTRIBUTOR_COMPACT_SHA..HEAD" | sort)
+          distributor_compact_ci_actual=$(git diff --name-only "$DISTRIBUTOR_COMPACT_SHA..$PRE_DISTRIBUTOR_COMPACT_OBS_SHA" | sort)
           test "$distributor_compact_ci_actual" = "$ci_only_expected"
           distributor_compact_obs_ci_previous=$(git diff --name-only "$DISTRIBUTOR_COMPACT_SHA..$PRE_DISTRIBUTOR_COMPACT_OBS_SHA" | sort)
           test "$distributor_compact_obs_ci_previous" = "$ci_only_expected"
