@@ -472,16 +472,27 @@ parentPort.on("message",job=>{try{
 
     const deadline = Date.now() + 7000;
     let validation;
+    let parsed = [];
+    let catchupComplete = false;
     while (Date.now() < deadline) {
       validation = terminalIndex.validarTerminalIndex(f.cliente, { env, getClientePath: () => f.dir });
-      if (validation.valido && validation.index.entries["id:catchup-first"] && validation.index.entries["id:catchup-second"]) break;
+      const state = coordinator.getState();
+      parsed = logs.map(line => { try { return JSON.parse(line); } catch { return {}; } });
+      catchupComplete = parsed.some(entry => entry.evento === "delta_catchup_complete");
+      if (
+        validation.valido
+        && validation.index.entries["id:catchup-first"]
+        && validation.index.entries["id:catchup-second"]
+        && state.terminalIndexPending === 0
+        && catchupComplete
+      ) break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     assert.strictEqual(validation?.valido, true);
     assert(validation.index.entries["id:catchup-first"]);
     assert(validation.index.entries["id:catchup-second"]);
     assert.strictEqual(coordinator.getState().terminalIndexPending, 0);
-    const parsed = logs.map(line => { try { return JSON.parse(line); } catch { return {}; } });
+    assert.strictEqual(catchupComplete, true);
     assert(parsed.some(entry => entry.evento === "job_error" && entry.operacao === "terminal_index_delta" && entry.motivo === "STALE_REVISION"),
       "mudança durante publish deve ser detectada, sem promover índice stale");
     assert(parsed.some(entry => entry.evento === "delta_retry_scheduled" && entry.motivo === "STALE_REVISION"));
