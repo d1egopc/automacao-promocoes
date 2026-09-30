@@ -594,7 +594,7 @@ parentPort.on("message", job => {
 
     const checkpoint = await coordinator.prepare({ clienteId: f.cliente, checkpointRevision: "wolf-prepare-0001", dataDir: f.root, persistenceMode: "worker" });
     assert.strictEqual(checkpoint.motivo, "STALE_REVISION");
-    assert.strictEqual(coordinator.getState().lanes[0].checkpointCircuitOpen, true);
+    assert.strictEqual(coordinator.getState().lanes[0].checkpointCircuitOpen, false);
     fs.writeFileSync(pauseNextDelta, "1");
     const items = [
       { id: "wolf-terminal-a", enviadoEm: "2026-09-28T12:00:01.000Z" },
@@ -628,7 +628,7 @@ parentPort.on("message", job => {
       if (validation.valido && ["wolf-terminal-a", "wolf-terminal-b", "wolf-terminal-c"].every(id => validation.index.entries[`id:${id}`])) break;
       await new Promise(resolve => setTimeout(resolve, 25));
     }
-    assert.strictEqual(validation?.valido, true, "tail do Wolf deve convergir depois do checkpoint circuit");
+    assert.strictEqual(validation?.valido, true, "tail do Wolf deve convergir depois do STALE_REVISION");
     const identities = Object.keys(validation.index.entries).sort();
     assert.deepStrictEqual(identities, [
       "id:legacy-retida",
@@ -645,7 +645,7 @@ parentPort.on("message", job => {
     assert.strictEqual(validation.index.authorityEligible, false, "Terminal Index segue sem autoridade");
     const state = coordinator.getState();
     assert.strictEqual(state.globalCircuitOpen, false);
-    assert.strictEqual(state.lanes[0].checkpointCircuitOpen, true, "falha checkpoint mantém seu circuito local");
+    assert.strictEqual(state.lanes[0].checkpointCircuitOpen, false, "STALE_REVISION de checkpoint não deve abrir circuito local");
     assert.strictEqual(state.lanes[0].terminalIndexCircuitOpen, false, "Delta bem-sucedido recupera somente seu circuito");
     const events = logs.join("\n");
     assert(events.includes('"operacao":"terminal_index_bootstrap"'));
