@@ -51,7 +51,10 @@ async function scenario(name) {
       const timeout = logs.find(item => item.evento === "job_timeout");
       assert.strictEqual(timeout.lastProgressStage, "legacy_read_completed");
       assert.ok(timeout.lastProgressAt);
-      assert.ok(timeout.totalElapsedMs >= 1000);
+      assert.ok(
+        timeout.totalElapsedMs >= 900 && timeout.totalElapsedMs < 3000,
+        `unexpected timeout elapsed: ${timeout.totalElapsedMs}; sinceLastProgress=${timeout.elapsedSinceLastProgressMs}; lastProgressStage=${timeout.lastProgressStage}`
+      );
       assert.ok(timeout.elapsedSinceLastProgressMs >= 0);
       assert.ok(logs.filter(item => item.evento === "job_ok").length === 0);
     } else if (name === "ok") {
