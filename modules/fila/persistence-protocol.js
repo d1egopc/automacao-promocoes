@@ -8,6 +8,7 @@ const OP_TERMINAL_INDEX_DELTA = "terminal_index_delta";
 
 const RESPONSE_OK = "persistence_result";
 const RESPONSE_ERROR = "persistence_error";
+const RESPONSE_PROGRESS = "persistence_progress";
 
 function texto(valor = "") {
   return String(valor == null ? "" : valor).trim();
@@ -132,6 +133,7 @@ module.exports = {
   OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
   RESPONSE_ERROR,
+  RESPONSE_PROGRESS,
   workspaceSeguro,
   revisionSegura,
   normalizarDataDir,

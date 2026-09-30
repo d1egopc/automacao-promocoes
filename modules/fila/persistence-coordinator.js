@@ -11,6 +11,7 @@ const {
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
+  RESPONSE_PROGRESS,
   flagWorkerAtiva,
   decisaoPersistenciaWorkspace,
   timeoutWorkerMs,
@@ -379,6 +380,28 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         log({ evento: "resposta_ignorada", motivo: "job_id_desconhecido" });
         return;
       }
+      if (mensagem.type === RESPONSE_PROGRESS) {
+        const progress = mensagem;
+        atual.lastProgressStage = String(progress.stage || "").slice(0, 80);
+        atual.lastProgressAt = agoraMs();
+        log({
+          evento: "job_progress",
+          operacao: atual.job.operation,
+          jobKey: hashWorkspace(atual.job.jobId),
+          workspaceKey: atual.lane.workspaceKey,
+          stage: atual.lastProgressStage,
+          elapsedMs: Number(progress.elapsedMs || 0),
+          stageMs: Number(progress.stageMs || 0),
+          legacyBytes: Number(progress.legacyBytes || 0),
+          vivaBytes: Number(progress.vivaBytes || 0),
+          outputBytes: Number(progress.outputBytes || 0),
+          stringifyMs: Number(progress.stringifyMs || 0),
+          writeMs: Number(progress.writeMs || 0),
+          targetGeneration: Number(progress.targetGeneration || 0),
+          ...(progress.staleStage ? { staleStage: String(progress.staleStage).slice(0, 40) } : {})
+        });
+        return;
+      }
       clearTimeout(atual.timer);
       estado.ativo = null;
       if (mensagem.type === RESPONSE_OK) {
@@ -576,20 +599,28 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     const timeout = timeoutWorkerMs(env);
     const timer = setTimeout(() => {
       if (!estado.ativo || estado.ativo.job.jobId !== atual.job.jobId) return;
+      const lastProgressStage = estado.ativo.lastProgressStage || "";
+      const lastProgressAt = estado.ativo.lastProgressAt || null;
+      const totalElapsedMs = Math.max(0, agoraMs() - Number(atual.job.startedAt || agoraMs()));
+      const elapsedSinceLastProgressMs = lastProgressAt === null ? null : Math.max(0, agoraMs() - lastProgressAt);
       estado.ativo = null;
       const terminalIndexShadow = ehManutencaoTerminalIndex(atual.job.operation);
+      log({
+        evento: "job_timeout",
+        operacao: atual.job.operation,
+        jobKey: hashWorkspace(atual.job.jobId),
+        workspaceKey: atual.lane.workspaceKey,
+        motivo: terminalIndexShadow ? "terminal_index_worker_timeout" : "worker_timeout",
+        lastProgressStage,
+        lastProgressAt,
+        elapsedSinceLastProgressMs,
+        totalElapsedMs,
+        ...metricasJob(atual.job)
+      });
       if (terminalIndexShadow) {
         // The timeout kills the shared Worker thread; this is a global health
         // failure, not merely a Terminal Index maintenance rejection.
         registrarFalhaGlobal("worker_timeout");
-        log({
-          evento: "job_timeout",
-          operacao: atual.job.operation,
-          jobKey: hashWorkspace(atual.job.jobId),
-          workspaceKey: atual.lane.workspaceKey,
-          motivo: "terminal_index_worker_timeout",
-          ...metricasJob(atual.job)
-        });
       } else {
         registrarFalhaGlobal("worker_timeout");
       }

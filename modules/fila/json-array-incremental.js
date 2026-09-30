@@ -234,6 +234,7 @@ function escreverArrayJsonIncremental(file, valores, opcoes = {}) {
       }
       adicionar("\n]");
     }
+    opcoes.onStringifyCompleted?.({ stringifyMs, writeMs });
     descarregar();
     fs.closeSync(fd);
     const stat = fs.statSync(file);

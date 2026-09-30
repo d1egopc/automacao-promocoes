@@ -11,6 +11,7 @@ const {
   OP_TERMINAL_INDEX_DELTA,
   RESPONSE_OK,
   RESPONSE_ERROR,
+  RESPONSE_PROGRESS,
   workspaceSeguro,
   revisionSegura,
   normalizarDataDir,
@@ -144,18 +145,21 @@ function backupFileAtomic(file) {
   return storage.criarBackupArquivoAtomic(file, `${file}.bak`, { preferirHardlink: true });
 }
 
-function writeTempAtomic(tempPath, value) {
+function writeTempAtomic(tempPath, value, onStringifyCompleted) {
   const started = process.hrtime.bigint();
   const partialPath = `${tempPath}.partial`;
   try {
     try { fs.unlinkSync(partialPath); } catch (erro) {
       if (erro?.code !== "ENOENT") throw erro;
     }
-    const escrita = escreverArrayJsonIncremental(partialPath, value);
+    const escrita = escreverArrayJsonIncremental(partialPath, value, {
+      onStringifyCompleted
+    });
     fs.renameSync(partialPath, tempPath);
     return {
       bytes: escrita.bytes,
       stringifyMs: escrita.stringifyMs,
+      physicalWriteMs: escrita.writeMs,
       writeMs: Number(process.hrtime.bigint() - started) / 1e6
     };
   } catch (erro) {
@@ -172,9 +176,11 @@ function ensureRevisionTemp(paths, revision) {
   return tempPath;
 }
 
-function sourceRead(paths, nowMs, dataDir) {
+function sourceRead(paths, nowMs, dataDir, progress = () => {}) {
   const legacy = readArray(paths.arquivo, { absentOk: true });
+  progress("legacy_read_completed", { legacyBytes: legacy.bytes });
   const viva = readArray(paths.viva, { absentOk: true });
+  progress("viva_read_completed", { legacyBytes: legacy.bytes, vivaBytes: viva.bytes });
   const legacyAfter = statOptional(paths.arquivo);
   const vivaAfter = statOptional(paths.viva);
   const legacyChanged = !sameOptionalIdentity(legacy.identity, legacyAfter);
@@ -187,6 +193,7 @@ function sourceRead(paths, nowMs, dataDir) {
   const operacional = obterFilaOperacionalV2(dataDir);
   const mergeStarted = process.hrtime.bigint();
   const merge = operacional.mesclarFilaLegadaComViva(paths.cliente, legacy.value, viva.value, { agora: nowMs });
+  progress("merge_completed", { legacyBytes: legacy.bytes, vivaBytes: viva.bytes });
   return {
     filaCliente: merge.filaCliente,
     sourceRevisions: { legacy: legacyAfter, viva: vivaAfter },
@@ -200,69 +207,106 @@ function sourceRead(paths, nowMs, dataDir) {
 
 function prepare(job) {
   const started = process.hrtime.bigint();
+  let lastStageAt = started;
+  let staleStage = "during_read";
+  const progress = (stage, values = {}) => {
+    const now = process.hrtime.bigint();
+    try {
+      parentPort.postMessage({
+        type: RESPONSE_PROGRESS,
+        jobId: job.jobId,
+        operation: OP_PREPARE,
+        stage,
+        elapsedMs: Number(now - started) / 1e6,
+        stageMs: Number(now - lastStageAt) / 1e6,
+        targetGeneration: Number(job.targetGeneration || 0),
+        ...values
+      });
+    } catch (_) {
+      // Diagnostics must never change the checkpoint result.
+    }
+    lastStageAt = now;
+  };
   const memoryStages = diagnosticoMemoriaAtivo() ? { beforeRead: memoriaAtual() } : null;
   const dataDir = normalizarDataDir(job.dataDir);
   const paths = caminhoWorkspace(dataDir, job.clienteId);
   const revision = revisionSegura(job.checkpointRevision);
-  fs.mkdirSync(paths.diretorio, { recursive: true });
-  const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir);
-  if (memoryStages) memoryStages.afterMerge = memoriaAtual();
-  const currentLegacy = statOptional(paths.arquivo);
-  const currentViva = statOptional(paths.viva);
-  if (!sameOptionalIdentity(source.sourceRevisions.legacy, currentLegacy) ||
-      !sameOptionalIdentity(source.sourceRevisions.viva, currentViva)) {
-    const erro = new Error("checkpoint_source_changed_before_backup");
-    erro.code = "STALE_REVISION";
-    throw erro;
-  }
-  const backup = currentLegacy
-    ? backupFileAtomic(paths.arquivo)
-    : { backupOk: true, backupMetodo: "arquivo_ausente", backupMs: 0 };
-  if (currentLegacy && backup.backupOk !== true) {
-    const erro = new Error("checkpoint_backup_failed");
-    erro.code = "BACKUP_FAILED";
-    throw erro;
-  }
-  const tempPath = ensureRevisionTemp(paths, revision);
-  if (memoryStages) memoryStages.beforeWriter = memoriaAtual();
-  const escrita = writeTempAtomic(tempPath, source.filaCliente);
-  if (memoryStages) memoryStages.afterWriter = memoriaAtual();
-  const tempIdentity = statIdentity(tempPath);
-  return {
-    ok: true,
-    operation: OP_PREPARE,
-    clienteId: paths.cliente,
-    checkpointRevision: revision,
-    tempPath,
-    tempIdentity,
-    sourceRevisions: source.sourceRevisions,
-    itens: source.filaCliente.length,
-    bytes: escrita.bytes,
-    merge: {
-      itensInseridos: source.merge.itensInseridos || 0,
-      itensAtualizados: source.merge.itensAtualizados || 0,
-      duplicatasEvitadas: source.merge.duplicatasEvitadas || 0,
-      statusPreservados: source.merge.statusPreservados || 0,
-      totalLegado: source.merge.totalLegado || 0,
-      totalViva: source.merge.totalViva || 0,
-      totalFinal: source.merge.totalFinal || 0
-    },
-    metrics: {
-      workerThreadId: threadId,
-      processRssBytesAtJob: process.memoryUsage().rss,
-      workerHeapUsedBytes: process.memoryUsage().heapUsed,
-      readMs: source.sourceReadMs,
-      parseMs: source.sourceParseMs,
-      calculateMs: source.calculateMs,
-      stringifyMs: escrita.stringifyMs,
-      writeMs: escrita.writeMs,
-      backupMs: backup.backupMs,
-      backupMetodo: backup.backupMetodo,
-      totalWorkerMs: Number(process.hrtime.bigint() - started) / 1e6,
-      bytes: escrita.bytes,
-      ...(memoryStages ? { memoryStages } : {})
+  progress("prepare_started");
+  try {
+    fs.mkdirSync(paths.diretorio, { recursive: true });
+    const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir, progress);
+    staleStage = "before_backup";
+    if (memoryStages) memoryStages.afterMerge = memoriaAtual();
+    const currentLegacy = statOptional(paths.arquivo);
+    const currentViva = statOptional(paths.viva);
+    if (!sameOptionalIdentity(source.sourceRevisions.legacy, currentLegacy) ||
+        !sameOptionalIdentity(source.sourceRevisions.viva, currentViva)) {
+      const erro = new Error("checkpoint_source_changed_before_backup");
+      erro.code = "STALE_REVISION";
+      throw erro;
     }
-  };
+    progress("source_revalidated", { legacyBytes: source.sourceBytes.legacy, vivaBytes: source.sourceBytes.viva });
+    const backup = currentLegacy
+      ? backupFileAtomic(paths.arquivo)
+      : { backupOk: true, backupMetodo: "arquivo_ausente", backupMs: 0 };
+    if (currentLegacy && backup.backupOk !== true) {
+      const erro = new Error("checkpoint_backup_failed");
+      erro.code = "BACKUP_FAILED";
+      throw erro;
+    }
+    progress("backup_completed", { legacyBytes: source.sourceBytes.legacy, vivaBytes: source.sourceBytes.viva });
+    const tempPath = ensureRevisionTemp(paths, revision);
+    if (memoryStages) memoryStages.beforeWriter = memoriaAtual();
+    const escrita = writeTempAtomic(tempPath, source.filaCliente, ({ stringifyMs, writeMs }) => {
+      progress("stringify_completed", { legacyBytes: source.sourceBytes.legacy,
+        vivaBytes: source.sourceBytes.viva, stringifyMs, writeMs });
+    });
+    progress("temp_write_completed", { legacyBytes: source.sourceBytes.legacy,
+      vivaBytes: source.sourceBytes.viva, outputBytes: escrita.bytes,
+      stringifyMs: escrita.stringifyMs, writeMs: escrita.physicalWriteMs });
+    if (memoryStages) memoryStages.afterWriter = memoriaAtual();
+    const tempIdentity = statIdentity(tempPath);
+    progress("prepare_completed", { legacyBytes: source.sourceBytes.legacy,
+      vivaBytes: source.sourceBytes.viva, outputBytes: escrita.bytes });
+    return {
+      ok: true,
+      operation: OP_PREPARE,
+      clienteId: paths.cliente,
+      checkpointRevision: revision,
+      tempPath,
+      tempIdentity,
+      sourceRevisions: source.sourceRevisions,
+      itens: source.filaCliente.length,
+      bytes: escrita.bytes,
+      merge: {
+        itensInseridos: source.merge.itensInseridos || 0,
+        itensAtualizados: source.merge.itensAtualizados || 0,
+        duplicatasEvitadas: source.merge.duplicatasEvitadas || 0,
+        statusPreservados: source.merge.statusPreservados || 0,
+        totalLegado: source.merge.totalLegado || 0,
+        totalViva: source.merge.totalViva || 0,
+        totalFinal: source.merge.totalFinal || 0
+      },
+      metrics: {
+        workerThreadId: threadId,
+        processRssBytesAtJob: process.memoryUsage().rss,
+        workerHeapUsedBytes: process.memoryUsage().heapUsed,
+        readMs: source.sourceReadMs,
+        parseMs: source.sourceParseMs,
+        calculateMs: source.calculateMs,
+        stringifyMs: escrita.stringifyMs,
+        writeMs: escrita.writeMs,
+        backupMs: backup.backupMs,
+        backupMetodo: backup.backupMetodo,
+        totalWorkerMs: Number(process.hrtime.bigint() - started) / 1e6,
+        bytes: escrita.bytes,
+        ...(memoryStages ? { memoryStages } : {})
+      }
+    };
+  } catch (erro) {
+    if (erro?.code === "STALE_REVISION") progress("prepare_stale", { staleStage });
+    throw erro;
+  }
 }
 
 function publish(job) {
