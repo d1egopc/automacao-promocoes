@@ -1042,6 +1042,7 @@ const filaV2Shadow = criarControladorFilaV2Shadow({
 const checkpointFilaV2 = criarControladorCheckpointLegadoV2({
   env: process.env
 });
+const executorGenerationAuthority = require("./modules/fila/executor-generation-authority");
 const persistenciaCheckpointV2 = criarCoordenadorPersistencia({
   env: process.env,
   logger: console
@@ -4025,14 +4026,70 @@ async function garantirFilaClienteInicializadaHttp(res, clienteId = "admin", mot
   }
 }
 
-async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto = "leitura") {
+async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto = "leitura", opcoes = {}) {
   return executarMutacaoFilaClienteAsync(clienteId, `reconciliar_fila_v2_${contexto}`, async () => {
     const cliente = String(clienteId || "admin");
     const contextoTexto = String(contexto || "leitura");
     let decisaoPreflightExecutor = null;
     const dirtyAntesPreflight = checkpointFilaV2.snapshot(cliente).dirty;
+    let legadoCarregadoPeloPreflightExecutor = false;
 
-    if (contextoTexto === "executor" && dirtyAntesPreflight !== true) {
+    if (contextoTexto === "executor" && opcoes.executorGenerationAuthority === true) {
+      const preflight = await executorGenerationAuthority.executarPreflightExecutor({
+        clienteId: cliente,
+        env: process.env,
+        cicloNormalExecutor: true,
+        dirtyLocal: dirtyAntesPreflight === true,
+        deveUsarFilaV2: workspace => filaOperacionalV2.deveUsarFilaV2Operacional(workspace),
+        reconciliar: ({ env }) => filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
+          contexto: contextoTexto,
+          preflight: true
+        }, { env }),
+        aplicarFastPath: decisao => aplicarFastPathExecutorFilaViva(cliente, decisao),
+        carregarLegado: () => carregarFilaLegadaOficial(cliente, "executor_fallback"),
+        avaliarFallbackMtime: fastPath => {
+          const decisaoMtime = filaOperacionalV2.filaVivaMaisNovaQueLegado(cliente);
+          return {
+            ok: decisaoMtime.ok !== false,
+            clienteId: cliente,
+            autoridadeSolicitada: "generation",
+            autoridadeUsada: "mtime",
+            generationConclusiva: false,
+            maisNova: decisaoMtime.maisNova === true,
+            recoveryAplicado: false,
+            fallbackMtime: true,
+            motivo: fastPath?.motivo || "fast_path_viva_indisponivel",
+            decisaoMtime
+          };
+        },
+        aoInconclusivo: decisao => logFilaV22C({
+          evento: "executor_v2_legacy_fallback",
+          clienteId: cliente,
+          ok: true,
+          motivo: decisao?.motivo || "generation_inconclusiva",
+          autoridadeUsada: decisao?.autoridadeUsada || "",
+          fallbackMtime: decisao?.fallbackMtime === true,
+          bytesFilaJsonLidos: 0
+        }),
+        logger: dados => console.log("[EXECUTOR-GENERATION-AUTHORITY]", JSON.stringify(dados))
+      });
+
+      decisaoPreflightExecutor = preflight.decision;
+      legadoCarregadoPeloPreflightExecutor = preflight.legacyLoaded === true;
+      if (preflight.fastPathExecutor === true) {
+        return {
+          ...preflight.decision,
+          recoveryAplicado: false,
+          fastPathExecutor: true,
+          leituraFastPath: {
+            totalExecutor: preflight.fastPath.filaClienteHotState.length,
+            pendentes: preflight.fastPath.pendentes,
+            bytesFilaJsonLidos: 0,
+            bytesFilaViva: preflight.fastPath.leitura.bytes || 0
+          }
+        };
+      }
+    } else if (contextoTexto === "executor" && dirtyAntesPreflight !== true) {
       decisaoPreflightExecutor = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
         contexto: contextoTexto,
         preflight: true
@@ -4078,10 +4135,12 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
       }
     }
 
-    carregarFilaLegadaOficial(
-      clienteId,
-      contextoTexto === "executor" ? "executor_fallback" : "fila_recovery_legacy"
-    );
+    if (!legadoCarregadoPeloPreflightExecutor) {
+      carregarFilaLegadaOficial(
+        clienteId,
+        contextoTexto === "executor" ? "executor_fallback" : "fila_recovery_legacy"
+      );
+    }
     const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
     const estadoArquivosV2 = dirty
       ? {
@@ -10125,7 +10184,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       reconciliacaoLeituraFilaV2 = reconciliacaoPreviaFilaV2;
     } else {
       reconciliacaoLeituraFilaV2 = await perfilProcessarFila.etapa("reconciliar", () =>
-        reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor")
+        reconciliarFilaV2ParaLeituraCliente(clienteFila, "executor", { executorGenerationAuthority: true })
       );
     }
     resumoFila.fase = "sanear_fila";
