@@ -512,10 +512,92 @@ jobs:
           TERMINAL_INDEX_AUTHORITY_REQUIRE_INTEGRATION=1 \
             node tests/terminal-index-authority-v1.test.js
 
+      - name: Probe self-healing catchup race against regression baseline
+        shell: bash
+        env:
+          REGRESSION_BASE_SHA: b852a072f518a204a5aeb359e52ecc8e769a40a5
+        run: |
+          set -euo pipefail
+          probe_suite=tests/terminal-index-v1-1-1-self-healing.test.js
+          probe_root="$RUNNER_TEMP/ti111-catchup-probe"
+          baseline="$RUNNER_TEMP/ti111-catchup-probe-baseline"
+          mkdir -p "$probe_root"
+          cleanup() {
+            git worktree remove --force "$baseline" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          git worktree add --detach "$baseline" "$REGRESSION_BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
+
+          signature_for() {
+            python3 - "$1" <<'PY'
+          import sys
+          lines = open(sys.argv[1], encoding="utf-8", errors="replace").read().splitlines()
+          markers = (
+              "testSourceAdvanceDuringDeltaSchedulesOneCatchup",
+              "terminalIndexPending",
+              "1 !== 0",
+          )
+          selected = []
+          for line in lines:
+              if any(marker in line for marker in markers):
+                  selected.append(line.strip())
+          print(" | ".join(dict.fromkeys(selected)))
+          PY
+          }
+
+          current_pending_race=0
+          baseline_pending_race=0
+          current_failures=0
+          baseline_failures=0
+          for iteration in $(seq 1 100); do
+            current_log="$probe_root/current-$iteration.log"
+            baseline_log="$probe_root/baseline-$iteration.log"
+
+            if node "$probe_suite" >"$current_log" 2>&1; then
+              current_status=0
+            else
+              current_status=$?
+              current_failures=$((current_failures + 1))
+            fi
+            current_signature=$(signature_for "$current_log")
+            printf 'CURRENT %03d exit=%d signature=%s\n' "$iteration" "$current_status" "${current_signature:-<none>}"
+            if [ "$current_status" -ne 0 ] && grep -Fq 'testSourceAdvanceDuringDeltaSchedulesOneCatchup' "$current_log" && grep -Fq 'terminalIndexPending' "$current_log" && grep -Fq '1 !== 0' "$current_log"; then
+              current_pending_race=$((current_pending_race + 1))
+            fi
+
+            if (cd "$baseline" && node "$probe_suite") >"$baseline_log" 2>&1; then
+              baseline_status=0
+            else
+              baseline_status=$?
+              baseline_failures=$((baseline_failures + 1))
+            fi
+            baseline_signature=$(signature_for "$baseline_log")
+            printf 'BASE %03d exit=%d signature=%s\n' "$iteration" "$baseline_status" "${baseline_signature:-<none>}"
+            if [ "$baseline_status" -ne 0 ] && grep -Fq 'testSourceAdvanceDuringDeltaSchedulesOneCatchup' "$baseline_log" && grep -Fq 'terminalIndexPending' "$baseline_log" && grep -Fq '1 !== 0' "$baseline_log"; then
+              baseline_pending_race=$((baseline_pending_race + 1))
+            fi
+          done
+
+          echo "PROBE_SUMMARY current_pass=$((100 - current_failures)) current_fail=$current_failures current_pendingRace=$current_pending_race base_pass=$((100 - baseline_failures)) base_fail=$baseline_failures base_pendingRace=$baseline_pending_race"
+          if [ "$baseline_pending_race" -gt 0 ]; then
+            echo "RACE HERDADO CONFIRMADO"
+            exit 1
+          fi
+          if [ "$current_pending_race" -gt 0 ]; then
+            echo "POSSÍVEL REGRESSÃO"
+            exit 1
+          fi
+          if [ "$current_failures" -gt 0 ] || [ "$baseline_failures" -gt 0 ]; then
+            echo "OUTRA FALHA OBSERVADA; inspeção necessária antes de prosseguir"
+            exit 1
+          fi
+          echo "TRANSIENTE NÃO REPRODUZIDO"
+
       - name: Run current and nearby regression suites, comparing failures with base
         shell: bash
         env:
-          BASE_SHA: e2e71311ec635d7f2897e7303efd2c0bf8a2d388
+          REGRESSION_BASE_SHA: b852a072f518a204a5aeb359e52ecc8e769a40a5
         run: |
           set -euo pipefail
           suites=(
@@ -589,7 +671,7 @@ jobs:
           fi
 
           baseline="$RUNNER_TEMP/ti111-baseline"
-          git worktree add --detach "$baseline" "$BASE_SHA"
+          git worktree add --detach "$baseline" "$REGRESSION_BASE_SHA"
           ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline/node_modules"
           new_failures=0
           for failure in "${failures[@]}"; do
