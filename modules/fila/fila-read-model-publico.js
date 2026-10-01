@@ -21,6 +21,7 @@ const ARQUIVOS_DETALHE_REF_PERMITIDOS = new Set([
 ]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 const JANELA_PUBLICA_DIAS_PADRAO = 7;
+const TIMEZONE_PUBLICO_OFICIAL = "America/Sao_Paulo";
 const VISAO_FILA = "fila";
 const VISAO_PROCESSADAS = "processadas";
 const VISAO_ENVIADAS = "enviadas";
@@ -33,6 +34,10 @@ const FORMATADOR_DIA_PUBLICO_SP = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit"
 });
+const FORMATADORES_DIA_PUBLICO = new Map([
+  [TIMEZONE_PUBLICO_OFICIAL, FORMATADOR_DIA_PUBLICO_SP]
+]);
+const FORMATADORES_DATA_HORA_PUBLICA = new Map();
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -93,24 +98,122 @@ function dataArquivoIso(ms) {
   return isoOuVazio(ms).slice(0, 10);
 }
 
-function dataDiaPublica(ms, timeZone = "America/Sao_Paulo") {
-  if (!Number.isFinite(ms)) return "";
-  if (!timeZone || timeZone === "America/Sao_Paulo") {
-    return FORMATADOR_DIA_PUBLICO_SP.format(new Date(ms));
+function obterFormatadorDiaPublico(timeZone = TIMEZONE_PUBLICO_OFICIAL) {
+  const zona = texto(timeZone) || TIMEZONE_PUBLICO_OFICIAL;
+  let formatador = FORMATADORES_DIA_PUBLICO.get(zona);
+  if (!formatador) {
+    formatador = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zona,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    FORMATADORES_DIA_PUBLICO.set(zona, formatador);
   }
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(new Date(ms));
+  return formatador;
 }
 
-function parseDiaArquivo(nome = "") {
-  const match = String(nome || "").match(/^(\d{4})-(\d{2})-(\d{2})\.jsonl$/);
+function obterFormatadorDataHoraPublica(timeZone = TIMEZONE_PUBLICO_OFICIAL) {
+  const zona = texto(timeZone) || TIMEZONE_PUBLICO_OFICIAL;
+  let formatador = FORMATADORES_DATA_HORA_PUBLICA.get(zona);
+  if (!formatador) {
+    formatador = new Intl.DateTimeFormat("en-US", {
+      timeZone: zona,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    });
+    FORMATADORES_DATA_HORA_PUBLICA.set(zona, formatador);
+  }
+  return formatador;
+}
+
+function partesDataHoraPublica(ms, timeZone = TIMEZONE_PUBLICO_OFICIAL) {
+  const partes = obterFormatadorDataHoraPublica(timeZone)
+    .formatToParts(new Date(ms))
+    .reduce((resultado, parte) => {
+      if (parte.type !== "literal") resultado[parte.type] = parte.value;
+      return resultado;
+    }, {});
+  return {
+    ano: Number(partes.year),
+    mes: Number(partes.month),
+    dia: Number(partes.day),
+    hora: Number(partes.hour),
+    minuto: Number(partes.minute),
+    segundo: Number(partes.second)
+  };
+}
+
+function dataDiaPublicaIso(ms, timeZone = TIMEZONE_PUBLICO_OFICIAL) {
+  const partes = partesDataHoraPublica(ms, timeZone);
+  if (![partes.ano, partes.mes, partes.dia].every(Number.isFinite)) return "";
+  return [
+    String(partes.ano).padStart(4, "0"),
+    String(partes.mes).padStart(2, "0"),
+    String(partes.dia).padStart(2, "0")
+  ].join("-");
+}
+
+function dataDiaPublica(ms, timeZone = "America/Sao_Paulo") {
+  if (!Number.isFinite(ms)) return "";
+  return obterFormatadorDiaPublico(timeZone).format(new Date(ms));
+}
+
+function utcMsParaDataHoraLocal(dataIso = "", timeZone = TIMEZONE_PUBLICO_OFICIAL) {
+  const match = String(dataIso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
-  const ms = Date.parse(`${match[1]}-${match[2]}-${match[3]}T00:00:00.000Z`);
-  return Number.isFinite(ms) ? ms : null;
+  const alvoComoUtc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (!Number.isFinite(alvoComoUtc)) return null;
+
+  let estimativa = alvoComoUtc;
+  for (let tentativa = 0; tentativa < 6; tentativa += 1) {
+    const partes = partesDataHoraPublica(estimativa, timeZone);
+    const localObservadoComoUtc = Date.UTC(
+      partes.ano,
+      partes.mes - 1,
+      partes.dia,
+      partes.hora,
+      partes.minuto,
+      partes.segundo
+    );
+    const proximaEstimativa = alvoComoUtc - (localObservadoComoUtc - estimativa);
+    if (proximaEstimativa === estimativa) return estimativa;
+    estimativa = proximaEstimativa;
+  }
+  return estimativa;
+}
+
+function adicionarDiasIso(dataIso = "", dias = 0) {
+  const base = Date.parse(`${dataIso}T00:00:00.000Z`);
+  if (!Number.isFinite(base)) return "";
+  return dataArquivoIso(base + Number(dias || 0) * DIA_MS);
+}
+
+function janelaPublicaUtc(agoraMs, opcoes = {}) {
+  const agora = Number(agoraMs || Date.now());
+  const periodo = normalizarTexto(opcoes.periodo || "");
+  const timeZone = texto(opcoes.timeZone) || TIMEZONE_PUBLICO_OFICIAL;
+  if (periodo === "hoje") {
+    const inicioLocal = dataDiaPublicaIso(agora, timeZone);
+    const fimLocal = adicionarDiasIso(inicioLocal, 1);
+    return {
+      inicioMs: utcMsParaDataHoraLocal(inicioLocal, timeZone),
+      fimMs: utcMsParaDataHoraLocal(fimLocal, timeZone),
+      timeZone
+    };
+  }
+
+  const janelaDias = Number(opcoes.janelaDias || JANELA_PUBLICA_DIAS_PADRAO);
+  return {
+    inicioMs: agora - Math.max(0, janelaDias) * DIA_MS,
+    fimMs: agora + 1,
+    timeZone
+  };
 }
 
 function marcoProcessadaItem(item = {}) {
@@ -216,7 +319,8 @@ function registroDentroJanela(ms, opcoes = {}) {
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const periodo = normalizarTexto(opcoes.periodo || "");
   if (periodo === "hoje") {
-    return dataDiaPublica(ms, opcoes.timeZone) === dataDiaPublica(agoraMs, opcoes.timeZone);
+    const timeZone = texto(opcoes.timeZone) || TIMEZONE_PUBLICO_OFICIAL;
+    return dataDiaPublica(ms, timeZone) === dataDiaPublica(agoraMs, timeZone);
   }
   const janelaDias = Number(opcoes.janelaDias || JANELA_PUBLICA_DIAS_PADRAO);
   if (!Number.isFinite(janelaDias) || janelaDias <= 0) return true;
@@ -877,6 +981,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
   const visao = texto(params.visao || filtros.visao || VISAO_PROCESSADAS) || VISAO_PROCESSADAS;
   const somenteMetricas = params.somenteMetricas === true;
   const periodo = normalizarTexto(params.periodo || filtros.periodo || "");
+  const timeZone = texto(params.timeZone) || TIMEZONE_PUBLICO_OFICIAL;
   const janelaDiasPublica = periodo === "hoje" ? 1 : Number(params.janelaDias || JANELA_PUBLICA_DIAS_PADRAO);
   const filtrosAtivos = Boolean(
     normalizarTexto(filtros.marketplace) ||
@@ -912,8 +1017,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     if (!processada.ok) continue;
     const resultadoMs = timestampResultadoItem(item);
     const resultadoReferenciaMs = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
-    const dentroProcessada = registroDentroJanela(processada.ms, { agoraMs, janelaDias: janelaDiasPublica, periodo });
-    const dentroTerminal = registroDentroJanela(resultadoReferenciaMs, { agoraMs, janelaDias: janelaDiasPublica, periodo });
+    const dentroProcessada = registroDentroJanela(processada.ms, { agoraMs, janelaDias: janelaDiasPublica, periodo, timeZone });
+    const dentroTerminal = registroDentroJanela(resultadoReferenciaMs, { agoraMs, janelaDias: janelaDiasPublica, periodo, timeZone });
     if (!dentroProcessada && !dentroTerminal) continue;
     historicoLeveConsiderado += 1;
     const identidades = identidadesRegistro(registro, indice, clienteId);
@@ -1022,7 +1127,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       invisiveisAntesMarco += 1;
       continue;
     }
-    if (!registroDentroJanela(processada.ms, { agoraMs, janelaDias: janelaDiasPublica, periodo })) continue;
+    if (!registroDentroJanela(processada.ms, { agoraMs, janelaDias: janelaDiasPublica, periodo, timeZone })) continue;
     const identidades = identidadesRegistro(item, indice, clienteId);
     const jaTerminal = identidades.some(id => terminaisIdentidades.has(id));
     if (jaTerminal || itemEhTerminal(item)) {
@@ -1192,16 +1297,23 @@ function arquivosHistoricoLevePorJanela(dir, opcoes = {}) {
   const fsImpl = opcoes.fs || fs;
   const agoraMs = Number(opcoes.agoraMs || Date.now());
   const periodo = normalizarTexto(opcoes.periodo || "");
-  const janelaDias = periodo === "hoje" ? 1 : Number(opcoes.janelaDias || JANELA_PUBLICA_DIAS_PADRAO);
-  const minDiaMs = Date.parse(dataArquivoIso(agoraMs - Math.max(0, janelaDias - 1) * DIA_MS) + "T00:00:00.000Z");
-  const maxDiaMs = Date.parse(dataArquivoIso(agoraMs) + "T00:00:00.000Z");
+  const janela = janelaPublicaUtc(agoraMs, {
+    periodo,
+    janelaDias: periodo === "hoje" ? 1 : opcoes.janelaDias,
+    timeZone: opcoes.timeZone
+  });
+  const primeiroDiaMs = Date.parse(dataArquivoIso(janela.inicioMs) + "T00:00:00.000Z");
+  const ultimoInstanteMs = Math.max(janela.inicioMs, janela.fimMs - 1);
+  const ultimoDiaMs = Date.parse(dataArquivoIso(ultimoInstanteMs) + "T00:00:00.000Z");
   try {
     if (!fsImpl.existsSync(dir)) return [];
-    return fsImpl.readdirSync(dir)
-      .filter(nome => {
-        const diaMs = parseDiaArquivo(nome);
-        return Number.isFinite(diaMs) && diaMs >= minDiaMs && diaMs <= maxDiaMs;
-      })
+    if (!Number.isFinite(primeiroDiaMs) || !Number.isFinite(ultimoDiaMs) || primeiroDiaMs > ultimoDiaMs) return [];
+    const nomes = [];
+    for (let diaMs = primeiroDiaMs; diaMs <= ultimoDiaMs; diaMs += DIA_MS) {
+      const nome = `${dataArquivoIso(diaMs)}.jsonl`;
+      if (fsImpl.existsSync(path.join(dir, nome))) nomes.push(nome);
+    }
+    return nomes
       .sort((a, b) => String(b).localeCompare(String(a)))
       .map(nome => path.join(dir, nome));
   } catch {

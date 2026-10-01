@@ -531,6 +531,220 @@ function registroTerminal(id, statusPublico, extra = {}) {
 }
 
 {
+  const agoraFronteira = Date.parse("2026-10-01T01:09:00.000Z");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-read-model-utc-local-"));
+  try {
+    const dentroParticaoAnterior = registroTerminal("utc_local_30", "enviado", {
+      dataEntradaFila: "2026-09-30T03:30:00.000Z",
+      finalizadoEm: "2026-09-30T03:40:00.000Z"
+    });
+    const dentroParticaoAtual = registroTerminal("utc_local_01", "enviado", {
+      dataEntradaFila: "2026-10-01T01:30:00.000Z",
+      finalizadoEm: "2026-10-01T01:40:00.000Z"
+    });
+    const antesDoDiaLocal = registroTerminal("utc_local_antes", "enviado", {
+      dataEntradaFila: "2026-09-30T02:59:59.000Z",
+      finalizadoEm: "2026-09-30T02:59:59.500Z"
+    });
+    const depoisDoDiaLocal = registroTerminal("utc_local_depois", "enviado", {
+      dataEntradaFila: "2026-10-01T03:00:01.000Z",
+      finalizadoEm: "2026-10-01T03:00:01.500Z"
+    });
+    const erroNoDiaLocal = registroTerminal("utc_local_erro", "nao_enviado", {
+      dataEntradaFila: "2026-09-30T04:00:00.000Z",
+      finalizadoEm: "2026-09-30T04:10:00.000Z",
+      motivo: "sem_imagem"
+    });
+    const porParticao = new Map([
+      ["2026-09-30.jsonl", [dentroParticaoAnterior, antesDoDiaLocal, erroNoDiaLocal]],
+      ["2026-10-01.jsonl", [dentroParticaoAtual, depoisDoDiaLocal]]
+    ]);
+    for (const [nome, registros] of porParticao) {
+      fs.writeFileSync(
+        path.join(dir, nome),
+        `${registros.map(registro => JSON.stringify(registro)).join("\n")}\n`,
+        "utf8"
+      );
+    }
+
+    const arquivosHoje = arquivosHistoricoLevePorJanela(dir, {
+      agoraMs: agoraFronteira,
+      periodo: "hoje"
+    });
+    assert.deepStrictEqual(
+      arquivosHoje.map(arquivo => path.basename(arquivo)),
+      ["2026-10-01.jsonl", "2026-09-30.jsonl"],
+      "Hoje considera as duas particoes UTC que intersectam o dia local"
+    );
+    const leituraHoje = lerHistoricoLeveJsonlPorJanela({
+      dir,
+      agoraMs: agoraFronteira,
+      periodo: "hoje"
+    });
+    assert.deepStrictEqual(
+      leituraHoje.registros.map(registro => registro.id).sort(),
+      ["utc_local_01", "utc_local_30", "utc_local_antes", "utc_local_depois", "utc_local_erro"].sort(),
+      "a leitura fisica conserva somente os registros das particoes candidatas"
+    );
+
+    const processadasHoje = construirReadModelPublicoPorMarcos({
+      clienteId: "cliente_marcos",
+      historicoLeve: leituraHoje.registros,
+      agoraMs: agoraFronteira,
+      periodo: "hoje",
+      visao: VISAO_PROCESSADAS,
+      page: 1,
+      limit: 1
+    });
+    assert.strictEqual(processadasHoje.totalFiltrado, 2, "Processadas usa o marco local e une as particoes");
+    assert.strictEqual(processadasHoje.totalPages, 2, "paginacao global preservada apos a uniao");
+    assert.strictEqual(processadasHoje.itens.length, 1);
+    const processadasHojePagina2 = construirReadModelPublicoPorMarcos({
+      clienteId: "cliente_marcos",
+      historicoLeve: leituraHoje.registros,
+      agoraMs: agoraFronteira,
+      periodo: "hoje",
+      visao: VISAO_PROCESSADAS,
+      page: 2,
+      limit: 1
+    });
+    assert.notStrictEqual(processadasHoje.itens[0].id, processadasHojePagina2.itens[0].id, "paginas nao duplicam itens");
+
+    const enviadasHoje = construirReadModelPublicoPorMarcos({
+      clienteId: "cliente_marcos",
+      historicoLeve: leituraHoje.registros,
+      agoraMs: agoraFronteira,
+      periodo: "hoje",
+      visao: VISAO_ENVIADAS
+    });
+    assert.strictEqual(enviadasHoje.totalFiltrado, 2, "Enviadas filtra o marco terminal local");
+    const errosHoje = construirReadModelPublicoPorMarcos({
+      clienteId: "cliente_marcos",
+      historicoLeve: leituraHoje.registros,
+      agoraMs: agoraFronteira,
+      periodo: "hoje",
+      visao: VISAO_COM_ERRO
+    });
+    assert.strictEqual(errosHoje.totalFiltrado, 1, "com_erro preserva a classificacao no dia local");
+
+    const dirSeteDias = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-read-model-utc-local-7d-"));
+    try {
+      for (const dia of [
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-25",
+        "2026-09-26",
+        "2026-09-27",
+        "2026-09-28",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02"
+      ]) {
+        fs.writeFileSync(path.join(dirSeteDias, `${dia}.jsonl`), "", "utf8");
+      }
+      const inicioSeteDias = registroTerminal("utc_7d_inicio", "enviado", {
+        dataEntradaFila: "2026-09-24T01:10:00.000Z",
+        finalizadoEm: "2026-09-24T01:20:00.000Z"
+      });
+      const fimSeteDias = registroTerminal("utc_7d_fim", "enviado", {
+        dataEntradaFila: "2026-10-01T00:30:00.000Z",
+        finalizadoEm: "2026-10-01T00:40:00.000Z"
+      });
+      const erroSeteDias = registroTerminal("utc_7d_erro", "nao_enviado", {
+        dataEntradaFila: "2026-09-24T02:00:00.000Z",
+        finalizadoEm: "2026-09-24T02:10:00.000Z",
+        motivo: "sem_imagem"
+      });
+      const foraSeteDias = registroTerminal("utc_7d_fora", "enviado", {
+        dataEntradaFila: "2026-09-24T01:08:59.000Z",
+        finalizadoEm: "2026-09-24T01:08:59.500Z"
+      });
+      for (const [nome, registros] of new Map([
+        ["2026-09-24.jsonl", [inicioSeteDias, erroSeteDias, foraSeteDias]],
+        ["2026-09-25.jsonl", []],
+        ["2026-10-01.jsonl", [fimSeteDias]]
+      ])) {
+        fs.writeFileSync(
+          path.join(dirSeteDias, nome),
+          `${registros.map(registro => JSON.stringify(registro)).join("\n")}\n`,
+          "utf8"
+        );
+      }
+
+      const arquivosSeteDias = arquivosHistoricoLevePorJanela(dirSeteDias, {
+        agoraMs: agoraFronteira,
+        periodo: "7dias"
+      });
+      assert.deepStrictEqual(
+        arquivosSeteDias.map(arquivo => path.basename(arquivo)),
+        [
+          "2026-10-01.jsonl",
+          "2026-09-30.jsonl",
+          "2026-09-29.jsonl",
+          "2026-09-28.jsonl",
+          "2026-09-27.jsonl",
+          "2026-09-26.jsonl",
+          "2026-09-25.jsonl",
+          "2026-09-24.jsonl"
+        ],
+        "7 dias considera somente as particoes UTC que intersectam a janela"
+      );
+      const leituraSeteDias = lerHistoricoLeveJsonlPorJanela({
+        dir: dirSeteDias,
+        agoraMs: agoraFronteira,
+        periodo: "7dias"
+      });
+      const enviadasSeteDias = construirReadModelPublicoPorMarcos({
+        clienteId: "cliente_marcos",
+        historicoLeve: leituraSeteDias.registros,
+        agoraMs: agoraFronteira,
+        periodo: "7dias",
+        visao: VISAO_ENVIADAS,
+        page: 1,
+        limit: 1
+      });
+      assert.strictEqual(enviadasSeteDias.totalFiltrado, 2, "7 dias preserva as Enviadas sem duplicar particoes");
+      assert.strictEqual(enviadasSeteDias.totalPages, 2);
+      const enviadasSeteDiasPagina2 = construirReadModelPublicoPorMarcos({
+        clienteId: "cliente_marcos",
+        historicoLeve: leituraSeteDias.registros,
+        agoraMs: agoraFronteira,
+        periodo: "7dias",
+        visao: VISAO_ENVIADAS,
+        page: 2,
+        limit: 1
+      });
+      assert.notStrictEqual(
+        enviadasSeteDias.itens[0].id,
+        enviadasSeteDiasPagina2.itens[0].id,
+        "7 dias preserva a ordenacao global sem repetir itens entre paginas"
+      );
+      const processadasSeteDias = construirReadModelPublicoPorMarcos({
+        clienteId: "cliente_marcos",
+        historicoLeve: leituraSeteDias.registros,
+        agoraMs: agoraFronteira,
+        periodo: "7dias",
+        visao: VISAO_PROCESSADAS
+      });
+      assert.strictEqual(processadasSeteDias.totalFiltrado, 2, "7 dias preserva Processadas na fronteira UTC");
+      const errosSeteDias = construirReadModelPublicoPorMarcos({
+        clienteId: "cliente_marcos",
+        historicoLeve: leituraSeteDias.registros,
+        agoraMs: agoraFronteira,
+        periodo: "7dias",
+        visao: VISAO_COM_ERRO
+      });
+      assert.strictEqual(errosSeteDias.totalFiltrado, 1, "7 dias preserva com_erro na fronteira UTC");
+    } finally {
+      fs.rmSync(dirSeteDias, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
   const bench = benchmarkReadModelPublico({
     clienteId: "cliente_marcos",
     hot: [oferta("bench_hot", { dataEntradaFila: iso(AGORA - 1000), status: "pendente" })],
