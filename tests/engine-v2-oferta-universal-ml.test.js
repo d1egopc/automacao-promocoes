@@ -60,6 +60,7 @@ async function comFetchMock(respostas, fn) {
   const chamadas = [];
   global.fetch = async (url, opcoes) => {
     chamadas.push({ url: String(url), opcoes });
+    if (typeof respostas === "function") return respostas(String(url), opcoes);
     const resposta = respostas.shift();
     if (!resposta) throw new Error("fetch inesperado: " + url);
     if (typeof resposta === "function") return resposta(url, opcoes);
@@ -765,13 +766,17 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
 
   {
     const imagemFallback = "https://http2.mlstatic.com/D_NQ_NP_API-MLB.jpg";
-    const { retorno: gravacaoSemImagem, chamadas } = await comFetchMock([
-      respostaHtml(404, "<html>not found</html>"),
-      respostaHtml(404, "<html>not found</html>"),
-      respostaJson(200, {
-        pictures: [{ secure_url: imagemFallback }]
-      })
-    ], () => importerService.gravarOfertaEngine(
+    const { retorno: gravacaoSemImagem, chamadas } = await comFetchMock((url) => {
+      if (url === "https://meli.la/afiliado123") {
+        return respostaHtml(404, "<html>not found</html>");
+      }
+      if (url === "https://api.mercadolibre.com/items/MLB123456") {
+        return respostaJson(200, {
+          pictures: [{ secure_url: imagemFallback }]
+        });
+      }
+      throw new Error("fetch inesperado: " + url);
+    }, () => importerService.gravarOfertaEngine(
       { id: 312, evento_id: 212, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
       {
         id: 212,
@@ -807,17 +812,20 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
     ));
 
     assert.strictEqual(gravacaoSemImagem.ok, true);
-    assert.strictEqual(chamadas.length, 3);
-    assert.strictEqual(chamadas[2].url, "https://api.mercadolibre.com/items/MLB123456");
-    assert.strictEqual(chamadas[2].opcoes.headers.Authorization, "Bearer token_ml_valido");
+    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(chamadas[0].url, "https://meli.la/afiliado123");
+    assert.strictEqual(chamadas[1].url, "https://api.mercadolibre.com/items/MLB123456");
+    assert.strictEqual(chamadas[1].opcoes.headers.Authorization, "Bearer token_ml_valido");
     assert.strictEqual(metadataPersistida.ofertaUniversal.midia.imagemPrincipal, imagemFallback);
   }
 
   {
-    const { retorno: gravacaoFallbackSemDeps, chamadas } = await comFetchMock([
-      respostaHtml(404, "<html>not found</html>"),
-      respostaHtml(404, "<html>not found</html>")
-    ], () => importerService.gravarOfertaEngine(
+    const { retorno: gravacaoFallbackSemDeps, chamadas } = await comFetchMock((url) => {
+      if (url === "https://meli.la/afiliado123") {
+        return respostaHtml(404, "<html>not found</html>");
+      }
+      throw new Error("fetch inesperado: " + url);
+    }, () => importerService.gravarOfertaEngine(
       { id: 313, evento_id: 213, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
       {
         id: 213,
@@ -846,7 +854,8 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
     ));
 
     assert.strictEqual(gravacaoFallbackSemDeps.ok, true);
-    assert.strictEqual(chamadas.length, 2);
+    assert.strictEqual(chamadas.length, 1);
+    assert.strictEqual(chamadas[0].url, "https://meli.la/afiliado123");
   }
 
   {
