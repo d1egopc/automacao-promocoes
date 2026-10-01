@@ -97,9 +97,9 @@ function deps({ html = htmlProduto, promoterId = "d1egopc", gerarLinkAfiliadoMag
   };
 }
 
-async function importarMagaluFixture({ evento = {}, depsExtras = {} } = {}) {
+async function importarMagaluFixture({ evento = {}, depsExtras = {}, job = {} } = {}) {
   return importarProdutoMagaluEngine({
-    job: { id: 501, evento_id: 601, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    job: { id: 501, evento_id: 601, cliente_id: "workspace_magalu", marketplace: "magalu", ...job },
     evento: {
       texto_original: "Smart TV Magalu 50\nPor R$ 1.777,00\nLink do produto:\n" + urlProduto,
       links_extraidos: [urlProduto],
@@ -159,6 +159,162 @@ async function testarCacheLocalValidoNaoCriaNovaTask() {
   assert.strictEqual(resultado.ok, true);
   assert.strictEqual(resultado.imagem, "https://a-static.mlcdn.com.br/cache-afh3e1g80j.jpg");
   assert.strictEqual(chamadasGarantirTask, 0, "cache completed nao deve gerar nova task");
+}
+
+async function testarLinkAfiliadoPreservadoEmCacheEWorkRenovado() {
+  const esperado = urlWorkspaceFixture;
+  const criarDepsSemImagemDaPagina = ({ obterImagemCacheLocalWorker, garantirImagemMagaluLocalWorker }) => {
+    const pacote = deps();
+    return {
+      ...pacote.deps,
+      resolverFatosMagalu: async (...args) => {
+        const factual = await pacote.deps.resolverFatosMagalu(...args);
+        return { ...factual, fatos: { ...(factual.fatos || {}), imagem: "" } };
+      },
+      obterImagemCacheLocalWorker,
+      garantirImagemMagaluLocalWorker
+    };
+  };
+
+  let chamadasGarantirCacheValido = 0;
+  const cacheValido = await importarMagaluFixture({
+    depsExtras: criarDepsSemImagemDaPagina({
+      obterImagemCacheLocalWorker: async () => ({
+        source: "local_first_party",
+        imageUrl: "https://a-static.mlcdn.com.br/cache-afh3e1g80j.jpg",
+        proof: { taskStatus: "completed" }
+      }),
+      garantirImagemMagaluLocalWorker: async () => {
+        chamadasGarantirCacheValido += 1;
+        throw new Error("cache_valido_nao_deve_criar_task");
+      }
+    })
+  });
+
+  assert.strictEqual(cacheValido.ok, true);
+  assert.strictEqual(cacheValido.linkAfiliado, esperado);
+  assert.strictEqual(chamadasGarantirCacheValido, 0);
+
+  let consultasCacheRenovado = 0;
+  let chamadasGarantirWorkRenovado = 0;
+  const workRenovado = await importarMagaluFixture({
+    job: { metadata: { localWorkerImageRetry: { tentativas: 3 } } },
+    depsExtras: criarDepsSemImagemDaPagina({
+      obterImagemCacheLocalWorker: async () => {
+        consultasCacheRenovado += 1;
+        return consultasCacheRenovado === 2
+          ? { source: "local_first_party", imageUrl: "https://a-static.mlcdn.com.br/imagens/abc123-renovada.jpg" }
+          : null;
+      },
+      obterTaskImagemMagaluLocalWorker: async () => ({ ok: true, task: null }),
+      garantirImagemMagaluLocalWorker: async () => {
+        chamadasGarantirWorkRenovado += 1;
+        return { ok: true, criada: true, task: { id: "task-renovada", status: "pending", capability: "magalu_image_v1" } };
+      }
+    })
+  });
+
+  assert.strictEqual(workRenovado.ok, true);
+  assert.strictEqual(workRenovado.linkAfiliado, esperado);
+  assert.strictEqual(chamadasGarantirWorkRenovado, 1);
+  assert.strictEqual(consultasCacheRenovado, 2);
+}
+
+async function testarCacheExpiradoCriaNovaTask() {
+  const pacote = deps();
+  let consultasCache = 0;
+  let chamadasGarantirTask = 0;
+  const resultado = await importarMagaluFixture({
+    depsExtras: {
+      ...pacote.deps,
+      resolverFatosMagalu: async (...args) => {
+        const factual = await pacote.deps.resolverFatosMagalu(...args);
+        return { ...factual, fatos: { ...(factual.fatos || {}), imagem: "" } };
+      },
+      obterImagemCacheLocalWorker: async () => {
+        consultasCache += 1;
+        return null;
+      },
+      obterTaskImagemMagaluLocalWorker: async () => ({ ok: true, task: null }),
+      garantirImagemMagaluLocalWorker: async () => {
+        chamadasGarantirTask += 1;
+        return { ok: true, criada: true, task: { id: "task-renovada", status: "pending", capability: "magalu_image_v1" } };
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "sem_imagem");
+  assert.strictEqual(resultado.retriavel, true);
+  assert.strictEqual(consultasCache, 1, "passagem comum faz somente a leitura de cache existente");
+  assert.strictEqual(chamadasGarantirTask, 1, "cache expirado deve liberar uma nova task Work");
+}
+
+async function testarLeituraFinalRecuperaImagemRecemChegada() {
+  const pacote = deps();
+  let consultasCache = 0;
+  let chamadasGarantirTask = 0;
+  const resultado = await importarMagaluFixture({
+    job: { metadata: { localWorkerImageRetry: { tentativas: 3 } } },
+    depsExtras: {
+      ...pacote.deps,
+      resolverFatosMagalu: async (...args) => {
+        const factual = await pacote.deps.resolverFatosMagalu(...args);
+        return { ...factual, fatos: { ...(factual.fatos || {}), imagem: "" } };
+      },
+      obterImagemCacheLocalWorker: async () => {
+        consultasCache += 1;
+        return consultasCache === 2
+          ? { source: "local_first_party", imageUrl: "https://a-static.mlcdn.com.br/imagens/abc123-final.jpg" }
+          : null;
+      },
+      obterTaskImagemMagaluLocalWorker: async () => ({
+        ok: true,
+        task: { id: "task-final", status: "leased", capability: "magalu_image_v1" }
+      }),
+      garantirImagemMagaluLocalWorker: async () => {
+        chamadasGarantirTask += 1;
+        throw new Error("task_ativa_nao_deve_ser_duplicada");
+      }
+    }
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.imagem, "https://a-static.mlcdn.com.br/imagens/abc123-final.jpg");
+  assert.strictEqual(resultado.origemImagemOficial, "local_first_party");
+  assert.strictEqual(resultado.metadata.produto.metadata.imagemLocalWorker.productId, "abc123");
+  assert.strictEqual(consultasCache, 2, "quarta passagem faz uma unica releitura final");
+  assert.strictEqual(chamadasGarantirTask, 0);
+}
+
+async function testarRespostaAposEncerramentoNaoAlteraResultado() {
+  const pacote = deps();
+  let consultasCache = 0;
+  let imagemDisponivel = false;
+  const resultado = await importarMagaluFixture({
+    job: { metadata: { localWorkerImageRetry: { tentativas: 3 } } },
+    depsExtras: {
+      ...pacote.deps,
+      resolverFatosMagalu: async (...args) => {
+        const factual = await pacote.deps.resolverFatosMagalu(...args);
+        return { ...factual, fatos: { ...(factual.fatos || {}), imagem: "" } };
+      },
+      obterImagemCacheLocalWorker: async () => {
+        consultasCache += 1;
+        return imagemDisponivel
+          ? { source: "local_first_party", imageUrl: "https://a-static.mlcdn.com.br/imagens/abc123-tardia.jpg" }
+          : null;
+      },
+      obterTaskImagemMagaluLocalWorker: async () => ({ ok: true, task: null }),
+      garantirImagemMagaluLocalWorker: async () => ({ ok: true, criada: true, task: { id: "task-tardia", status: "pending", capability: "magalu_image_v1" } })
+    }
+  });
+
+  imagemDisponivel = true;
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.motivo, "sem_imagem");
+  assert.strictEqual(resultado.imagemEnviavel, false);
+  assert.strictEqual(consultasCache, 2, "nao ha polling depois da releitura final");
 }
 
 async function testarImportacaoCompletaPreservaPrecoRadar() {
@@ -919,6 +1075,10 @@ function testarRegistriesPipelineUnico() {
   await testarImagemRadarNaoSubstituiImagemOficialAusente();
   await testarTaskLocalAtivaNaoRepeteResolverFactual();
   await testarCacheLocalValidoNaoCriaNovaTask();
+  await testarLinkAfiliadoPreservadoEmCacheEWorkRenovado();
+  await testarCacheExpiradoCriaNovaTask();
+  await testarLeituraFinalRecuperaImagemRecemChegada();
+  await testarRespostaAposEncerramentoNaoAlteraResultado();
   testarClassificadorDeLinksMagalu();
   testarRegistriesPipelineUnico();
 

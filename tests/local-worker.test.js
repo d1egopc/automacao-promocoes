@@ -16,7 +16,7 @@ function respostaImagem({ status = 200, url = "https://a-static.mlcdn.com.br/ima
 }
 
 function criarRepoFake() {
-  const state = { task: { id: "1", type: "imagem_oficial", marketplace: "magalu", productId: "241382400", capability: "magalu_image_v1", status: "leased", claimed_by: "worker-1", lease_token: "lease-1", lease_until: new Date(Date.now() + 60000).toISOString() }, completed: null, failed: null };
+  const state = { task: { id: "1", type: "imagem_oficial", marketplace: "magalu", productId: "241382400", capability: "magalu_image_v1", status: "leased", claimed_by: "worker-1", lease_token: "lease-1", lease_until: new Date(Date.now() + 60000).toISOString() }, completed: null, failed: null, guaranteePayload: null };
   return {
     state,
     ensureSchema: async () => ({ ok: true }),
@@ -32,7 +32,7 @@ function criarRepoFake() {
     obterTaskAtiva: async () => state.task,
     completar: async payload => { state.completed = payload; return { ok: true, idempotente: false }; },
     falhar: async payload => { state.failed = payload; return { ok: true }; },
-    garantirTask: async payload => ({ ok: true, criada: true, task: { id: "2", status: "pending", capability: payload.capability } }),
+    garantirTask: async payload => { state.guaranteePayload = payload; return { ok: true, criada: true, task: { id: "2", status: "pending", capability: payload.capability } }; },
     obterCache: async () => ({ source: "local_first_party", imageUrl: "https://a-static.mlcdn.com.br/imagens/produto.jpg" }),
     status: async () => ({ ok: true, counts: { pending: 1 } })
   };
@@ -117,6 +117,13 @@ function criarRepoFake() {
 
   const task = await service.garantirImagemMagalu({ productId: "241382400", sourceUrl: "https://www.magazineluiza.com.br/p/241382400/" });
   assert.strictEqual(task.task.capability, "magalu_image_v1");
+  assert.strictEqual(task.task.status, "pending");
+  assert.strictEqual(repo.state.guaranteePayload.reutilizarCompleted, true, "completed com cache util deve ser reutilizada");
+  const repoCacheExpirado = criarRepoFake();
+  repoCacheExpirado.obterCache = async () => null;
+  const serviceCacheExpirado = criarLocalWorkerService({ repository: repoCacheExpirado, dedicatedOwnerIds: ["owner-1"], magaluTechnicalSlug: "d1egopc", fetchFn: async () => respostaImagem() });
+  await serviceCacheExpirado.garantirImagemMagalu({ productId: "241382400", sourceUrl: "https://www.magazineluiza.com.br/p/241382400/" });
+  assert.strictEqual(repoCacheExpirado.state.guaranteePayload.reutilizarCompleted, false, "completed com cache expirado deve permitir nova task Magalu");
   assert.strictEqual((await service.obterTaskImagemMagalu({ productId: "241382400" })).task.status, "leased");
   assert.strictEqual((await service.obterImagemCache({ marketplace: "magalu", productId: "241382400" })).source, "local_first_party");
   const repoHttp = criarRepoFake();

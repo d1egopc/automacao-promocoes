@@ -116,6 +116,19 @@ class FakePool {
         .sort((a, b) => Number(b.id) - Number(a.id));
       return { rows: candidatos.slice(0, 1) };
     }
+    if (normalizado.startsWith("select * from local_worker_tasks where id = $1 for update")) {
+      const row = this.rows.find(item => String(item.id) === String(params[0]));
+      return { rows: row ? [row] : [] };
+    }
+    if (normalizado.startsWith("update local_worker_tasks set status = 'completed'")) {
+      const row = this.rows.find(item => String(item.id) === String(params[0]));
+      if (!row) return { rows: [] };
+      row.status = "completed";
+      row.completed_at = new Date().toISOString();
+      row.updated_at = row.completed_at;
+      row.result_metadata = JSON.parse(params[1]);
+      return { rows: [row] };
+    }
     if (normalizado.startsWith("insert into local_worker_tasks")) {
       if (this.insertGate) {
         this.insertGate.chegadas += 1;
@@ -234,6 +247,32 @@ function opcoesTask() {
   const novaAposCompletedStale = await repository.garantirTask({ ...opcoesTask(), reutilizarCompleted: false });
   assert.strictEqual(novaAposCompletedStale.criada, true, "fonte temporal pode renovar resultado completed depois do próprio TTL");
   assert.notStrictEqual(novaAposCompletedStale.task.id, retryAfterHistory.task.id);
+
+  const completedConcorrente = tarefa({ id: 150, status: "completed" });
+  const completedConcorrentePool = new FakePool([completedConcorrente]);
+  const completedConcorrenteRepo = criarLocalWorkerRepository({ pool: completedConcorrentePool });
+  completedConcorrentePool.prepararBarreiraInsercao(2);
+  const renovacoesCompleted = await Promise.all([
+    completedConcorrenteRepo.garantirTask({ ...opcoesTask(), reutilizarCompleted: false }),
+    completedConcorrenteRepo.garantirTask({ ...opcoesTask(), reutilizarCompleted: false })
+  ]);
+  assert.strictEqual(completedConcorrentePool.rows.filter(row => row.status === "pending").length, 1, "cache expirado concorrente cria uma unica task ativa");
+  assert.strictEqual(renovacoesCompleted.filter(resultado => resultado.criada).length, 1);
+  assert.strictEqual(renovacoesCompleted[0].task.id, renovacoesCompleted[1].task.id);
+
+  const terminalExpirada = tarefa({ id: 175, status: "expired" });
+  const terminalRepo = criarLocalWorkerRepository({ pool: new FakePool([terminalExpirada]) });
+  const respostaTardia = await terminalRepo.completar({
+    taskId: "175",
+    workerId: "worker-antigo",
+    leaseToken: "lease-antigo",
+    imageUrl: "https://a-static.mlcdn.com.br/imagens/tardia.jpg",
+    proof: { productId: "afh3e1g80j" }
+  });
+  assert.strictEqual(respostaTardia.ok, false);
+  assert.strictEqual(respostaTardia.motivo, "lease_invalido");
+  assert.strictEqual(terminalExpirada.status, "expired", "resposta tardia nao reabre task terminal");
+  assert.strictEqual(terminalExpirada.result_metadata, undefined, "resposta tardia nao grava resultado fora da lease");
 
   const concorrentePool = new FakePool();
   const concorrenteRepo = criarLocalWorkerRepository({ pool: concorrentePool });

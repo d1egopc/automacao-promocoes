@@ -376,6 +376,11 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function garantirImagemMagalu({ productId, sourceUrl = "" } = {}) {
     if (!technicalSlug) return { ok: false, motivo: "slug_tecnico_magalu_ausente" };
+    const cache = typeof repo.obterCache === "function"
+      ? await repo.obterCache({ marketplace: "magalu", productId })
+      : null;
+    const reutilizarCompleted = cache?.source === "local_first_party"
+      && hostnameMlcdnSeguro(normalizarImagemMlcdn(cache.imageUrl));
     return repo.garantirTask({
       type: MAGALU_TASK_TYPE,
       marketplace: "magalu",
@@ -385,7 +390,8 @@ function criarLocalWorkerService(opcoes = {}) {
       capability: MAGALU_CAPABILITY,
       idempotencyKey: `magalu:${texto(productId)}:${MAGALU_TASK_TYPE}`,
       maxAttempts: 3,
-      ttlMs: 15 * 60 * 1000
+      ttlMs: 15 * 60 * 1000,
+      reutilizarCompleted
     });
   }
 
