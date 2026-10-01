@@ -485,6 +485,12 @@ async function resolverImagemCandidataSocialMercadoLivre({ produto = {}, resoluc
   const provaTransporte = provaTransporteShowProductMercadoLivre(resolucaoProduto);
   const candidata = imagemCandidataSocialMercadoLivre(provaTransporte, urlOriginalEngine);
   if (!candidata) return produto;
+  if (deps.adiarFallbackImagemMercadoLivre === true) {
+    return {
+      ...produto,
+      metadata: { ...objetoSeguro(produto.metadata), imagemCandidataSocial: candidata }
+    };
+  }
 
   const resolverCanonico = deps.buscarImagemCanonicaMercadoLivre || buscarImagemCanonicaMercadoLivre;
   const resultado = await resolverCanonico({
@@ -711,6 +717,8 @@ async function resolverImagemOficialFallbackMercadoLivre(imagemCapturada = {}, c
       ]
     };
   }
+
+  if (contexto.deps?.adiarFallbackImagemMercadoLivre === true) return imagemPreservada;
 
   const buscarImagemOficial = typeof contexto.deps?.buscarImagemOficialMercadoLivrePorMlb === "function"
     ? contexto.deps.buscarImagemOficialMercadoLivrePorMlb

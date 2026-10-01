@@ -352,6 +352,26 @@ async function testarWallRadarComImagemOficialSubstituiSomenteImagem() {
   assert.strictEqual(Object.prototype.hasOwnProperty.call(resultado, "price"), false);
 }
 
+async function testarWallRadarAdiaBuscaOficialDaImagem() {
+  const contexto = depsBase({
+    wall: true,
+    imagemOficial: {
+      imagem: URL_IMAGEM_OFICIAL,
+      origem: "api_mercadolibre.items.pictures[0].secure_url"
+    }
+  });
+  const resultado = await importarMercadoLivreEngine({
+    job: job(),
+    evento: eventoRadar(),
+    links: links(),
+    deps: { ...contexto.deps, adiarFallbackImagemMercadoLivre: true }
+  });
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(contexto.chamadas.imagemOficial.length, 0);
+  assert.strictEqual(resultado.linkAfiliado, URL_AFILIADA);
+  assert.strictEqual(resultado.preco, 149.9);
+}
+
 async function testarWallRadarFalhaImagemOficialFicaSemImagemPublica() {
   const imagemRadar = "https://cdn.exemplo.com/produto-radar-preservado.jpg";
   const contexto = depsBase({
@@ -1476,6 +1496,7 @@ async function testarErroGenericoNaoAtivaFallback() {
   await testarWallComRadarSuficienteRecuperaOferta();
   await testarWallComImagemRadarRejeitaImagemPublica();
   await testarWallRadarComImagemOficialSubstituiSomenteImagem();
+  await testarWallRadarAdiaBuscaOficialDaImagem();
   await testarWallRadarFalhaImagemOficialFicaSemImagemPublica();
   await testarWallRadarPdpFiltersUsaItemIdSemUsarCatalogo();
   await testarWallRadarPdpSemItemIdNaoPublicaImagemRadar();

@@ -316,7 +316,9 @@ async function importarJobPronto(job = {}, contexto = {}, resumo = null) {
       job,
       evento: eventoResultado.evento,
       links: linksResultado.links,
-      deps: contexto.deps || {}
+      deps: marketplace === "mercadolivre"
+        ? { ...contexto.deps, adiarFallbackImagemMercadoLivre: true }
+        : (contexto.deps || {})
     });
   } catch (e) {
     logEngineImporterErro({ jobId: job.id, etapa: "importador_executado", motivo: "erro_importador", erro: e.message });

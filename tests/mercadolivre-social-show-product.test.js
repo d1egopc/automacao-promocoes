@@ -126,7 +126,7 @@ function testarCtaDeRecommendationSecundariaBloqueia() {
   });
 }
 
-async function testarAdapterTransportaSomenteUrlDoCta() {
+async function testarAdapterTransportaSomenteUrlDoCta(adiarImagem = false) {
   const original = "https://meli.la/2V35P7z";
   const chamadas = [];
   const produtoRadar = {
@@ -159,6 +159,7 @@ async function testarAdapterTransportaSomenteUrlDoCta() {
     },
     links: [{ url_original: original }],
     deps: {
+      adiarFallbackImagemMercadoLivre: adiarImagem,
       getIntegracaoCliente: () => ({ credenciais: { cookies: "cookie", tag: "tag" } }),
       resolverLinkOriginalRadar: async () => ({
         ok: true,
@@ -188,6 +189,7 @@ async function testarAdapterTransportaSomenteUrlDoCta() {
         return produtoRadar;
       },
       buscarImagemCanonicaMercadoLivre: async entrada => {
+        assert.strictEqual(adiarImagem, false);
         assert.strictEqual(entrada.imagem, OG_GABINETE);
         assert.strictEqual(entrada.imagemOrigem, "og:image");
         assert.strictEqual(entrada.linkExpandido, CTA_GABINETE);
@@ -208,6 +210,14 @@ async function testarAdapterTransportaSomenteUrlDoCta() {
       gerarLinkAfiliadoMercadoLivre: async () => "https://meli.la/workspace-link"
     }
   });
+
+  if (adiarImagem) {
+    assert.deepStrictEqual(chamadas, [CTA_GABINETE]);
+    assert.strictEqual(resultado.linkAfiliado, "https://meli.la/workspace-link");
+    assert.strictEqual(resultado.preco, 99.9);
+    assert.strictEqual(resultado.metadata.produto.metadata.imagemCandidataSocial.imagem, OG_GABINETE);
+    return;
+  }
 
   assert.deepStrictEqual(chamadas, [CTA_GABINETE]);
   assert.strictEqual(resultado.metadata.transporteTecnicoMl.linkOriginalRadar, original);
@@ -242,6 +252,7 @@ async function testarAdapterTransportaSomenteUrlDoCta() {
   testarCtaNaoProdutoBloqueia();
   testarCtaDeRecommendationSecundariaBloqueia();
   await testarAdapterTransportaSomenteUrlDoCta();
+  await testarAdapterTransportaSomenteUrlDoCta(true);
   console.log("mercadolivre-social-show-product.test.js OK");
 })().catch(erro => {
   console.error(erro);

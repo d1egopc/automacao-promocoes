@@ -767,6 +767,7 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
     const imagemFallback = "https://http2.mlstatic.com/D_NQ_NP_API-MLB.jpg";
     const { retorno: gravacaoSemImagem, chamadas } = await comFetchMock([
       respostaHtml(404, "<html>not found</html>"),
+      respostaHtml(404, "<html>not found</html>"),
       respostaJson(200, {
         pictures: [{ secure_url: imagemFallback }]
       })
@@ -806,14 +807,15 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
     ));
 
     assert.strictEqual(gravacaoSemImagem.ok, true);
-    assert.strictEqual(chamadas.length, 2);
-    assert.strictEqual(chamadas[1].url, "https://api.mercadolibre.com/items/MLB123456");
-    assert.strictEqual(chamadas[1].opcoes.headers.Authorization, "Bearer token_ml_valido");
+    assert.strictEqual(chamadas.length, 3);
+    assert.strictEqual(chamadas[2].url, "https://api.mercadolibre.com/items/MLB123456");
+    assert.strictEqual(chamadas[2].opcoes.headers.Authorization, "Bearer token_ml_valido");
     assert.strictEqual(metadataPersistida.ofertaUniversal.midia.imagemPrincipal, imagemFallback);
   }
 
   {
     const { retorno: gravacaoFallbackSemDeps, chamadas } = await comFetchMock([
+      respostaHtml(404, "<html>not found</html>"),
       respostaHtml(404, "<html>not found</html>")
     ], () => importerService.gravarOfertaEngine(
       { id: 313, evento_id: 213, cliente_id: "workspace_ml", marketplace: "mercadolivre" },
@@ -844,7 +846,7 @@ function radarMirrorMlFactual({ tituloCapturado, textoOriginal, preco = 149, pre
     ));
 
     assert.strictEqual(gravacaoFallbackSemDeps.ok, true);
-    assert.strictEqual(chamadas.length, 1);
+    assert.strictEqual(chamadas.length, 2);
   }
 
   {

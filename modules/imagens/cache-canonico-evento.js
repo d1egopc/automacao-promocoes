@@ -719,6 +719,9 @@ function origemImagemRadar(valor = {}) {
 }
 
 async function buscarImagemCanonicaMercadoLivrePorLinks(oferta = {}, deps = {}) {
+  if (Object.prototype.hasOwnProperty.call(deps, "imagemCanonicaMlConsultada")) {
+    return deps.imagemCanonicaMlConsultada;
+  }
   const importer = require("../engine/importer/importer.service");
   if (typeof importer.buscarImagemCanonicaMercadoLivre !== "function") {
     return { imagem: "", motivo: "importador_ml_indisponivel" };

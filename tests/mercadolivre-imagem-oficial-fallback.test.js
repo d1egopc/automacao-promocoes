@@ -635,6 +635,53 @@ async function comFetchMock(respostas, fn) {
   }
 
   {
+    const mlb = "MLB6797156948";
+    const imagem = "https://http2.mlstatic.com/D_NQ_NP_IDENTIDADE-MLB.webp";
+    const html = `<meta property="og:image" content="${imagem}">`;
+    const urlEsperada = "https://produto.mercadolivre.com.br/MLB-6797156948-produto-_JM";
+    const urlDivergente = "https://produto.mercadolivre.com.br/MLB-9999999999-outro-_JM";
+    const oferta = { marketplace: "mercadolivre", produtoIdDetectado: mlb, linkOriginal: "https://meli.la/identidade" };
+    const fetchUnico = (urlFinal, documento = html) => async url => String(url) === oferta.linkOriginal
+      ? respostaHtml(200, documento, urlFinal)
+      : respostaHtml(404, "<html>sem imagem</html>", String(url));
+
+    const aceita = await buscarImagemCanonicaMercadoLivre(oferta, { fetchImpl: fetchUnico(urlEsperada) });
+    assert.strictEqual(aceita.imagem, imagem, "redirect final confirma MLB");
+    const rejeita = await buscarImagemCanonicaMercadoLivre(oferta, { fetchImpl: fetchUnico(urlDivergente) });
+    assert.strictEqual(rejeita.imagem, "", "redirect final diverge MLB");
+    const canonicalContraditorio = await buscarImagemCanonicaMercadoLivre(oferta, {
+      fetchImpl: fetchUnico(urlDivergente, `<link rel="canonical" href="${urlEsperada}">${html}`)
+    });
+    assert.strictEqual(canonicalContraditorio.imagem, "", "canonical nao supera redirect divergente");
+    const ambiguo = await buscarImagemCanonicaMercadoLivre(oferta, { fetchImpl: fetchUnico("https://www.mercadolivre.com.br/oferta") });
+    assert.strictEqual(ambiguo.imagem, "", "URL ambigua sem prova");
+    const canonico = await buscarImagemCanonicaMercadoLivre(oferta, {
+      fetchImpl: async () => respostaHtml(200, `<link rel="canonical" href="${urlEsperada}">${html}`, "https://www.mercadolivre.com.br/oferta")
+    });
+    assert.strictEqual(canonico.imagem, imagem, "canonical homologado confirma MLB");
+  }
+
+  {
+    const canonical = "https://produto.mercadolivre.com.br/MLB7777777777";
+    const chamadas = [];
+    const retorno = await buscarImagemCanonicaMercadoLivre({
+      marketplace: "mercadolivre",
+      produtoIdDetectado: "MLB7777777777",
+      linkOriginal: "https://meli.la/canonical-repetido",
+      linkExpandido: canonical
+    }, {
+      fetchImpl: async url => {
+        chamadas.push(String(url));
+        return String(url).includes("meli.la")
+          ? respostaHtml(200, `<link rel="canonical" href="${canonical}">`, "https://www.mercadolivre.com.br/oferta")
+          : respostaHtml(200, "<html>sem imagem</html>", canonical);
+      }
+    });
+    assert.strictEqual(retorno.imagem, "");
+    assert.deepStrictEqual(chamadas, ["https://meli.la/canonical-repetido", canonical]);
+  }
+
+  {
     const imagem = extrairImagemOficialMercadoLivreApi({
       price: 9999,
       title: "Titulo vindo da API nao deve importar",
@@ -720,7 +767,7 @@ async function comFetchMock(respostas, fn) {
     const urlRica = "https://produto.mercadolivre.com.br/MLB-7777777777-sente-a-presso-_JM";
     const imagemRica = "https://http2.mlstatic.com/D_NQ_NP_SENTE-PRESSAO-MLB.webp";
     const { retorno, chamadas } = await comFetchMock([
-      respostaHtml(200, `<html><head><link rel="canonical" href="${urlRica}"></head><body></body></html>`),
+      respostaHtml(200, `<html><head><link rel="canonical" href="${urlRica}"></head><body></body></html>`, "https://produto.mercadolivre.com.br/MLB7777777777"),
       {
         status: 200,
         url: urlRica,

@@ -2051,14 +2051,37 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
     let linkResolvido = urlInicial;
     let statusHttp = null;
     let motivoHtml = "";
+    const urlsHtmlVisitadas = new Set();
+    const urlHtmlNormalizada = url => {
+      try { return new URL(normalizarTexto(url)).toString(); } catch { return ""; }
+    };
+    const identidadeHtmlConfirmada = (urlFinal, htmlDocumento) => {
+      if (!mlb) return true;
+      const mlbFinal = extrairMlbImagem(urlFinal);
+      if (mlbFinal && mlbFinal !== mlb) return false;
+      if (urlCanonicaImagemMercadoLivreSegura(urlFinal, mlb)) return true;
+      try {
+        const host = new URL(urlFinal).hostname.toLowerCase();
+        return host.endsWith("mercadolivre.com.br") &&
+          urlCanonicaImagemMercadoLivreSegura(extrairCanonicalImagemMercadoLivre(htmlDocumento), mlb);
+      } catch { return false; }
+    };
 
     for (let indice = 0; indice < candidatosUrl.length; indice += 1) {
       const candidato = candidatosUrl[indice];
+      const urlCandidato = urlHtmlNormalizada(candidato.url);
+      if (urlsHtmlVisitadas.has(urlCandidato)) continue;
+      urlsHtmlVisitadas.add(urlCandidato);
       let response = await fetchImpl(candidato.url, options);
       let html = await response.text();
       linkResolvido = response.url || candidato.url;
+      urlsHtmlVisitadas.add(urlHtmlNormalizada(linkResolvido));
       statusHttp = response.status;
       let bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
+      if (mlb && extrairMlbImagem(linkResolvido) && extrairMlbImagem(linkResolvido) !== mlb) {
+        motivoHtml = "html_mlb_divergente";
+        continue;
+      }
       if (!mlb && statusHttp < 400 && !bloqueado) {
         const imagemOgHtml = candidatoImagemOgMercadoLivreHtml(html);
         if (imagemOgHtml.imagem) {
@@ -2110,19 +2133,20 @@ async function buscarImagemCanonicaMercadoLivre(oferta = {}, opcoes = {}) {
       } else if (imagemPolycard.conflitoIdentidade) {
         motivoHtml = imagemPolycard.motivo || "polycard_conflito_identidade";
       }
-      let linkResolvidoSeguro = urlCanonicaImagemMercadoLivreSegura(linkResolvido, mlb);
-      let podeUsarHtmlAtual = !candidato.meliLa || linkResolvidoSeguro;
+      let podeUsarHtmlAtual = mlb ? identidadeHtmlConfirmada(linkResolvido, html) : !candidato.meliLa;
       let imagemExtraida = statusHttp < 400 && !bloqueado && podeUsarHtmlAtual ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
       const canonical = extrairUrlProdutoImagemMercadoLivre(html, mlb);
 
-      if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && canonical !== linkResolvido) {
+      const urlCanonical = urlHtmlNormalizada(canonical);
+      if (!imagemExtraida.imagem && urlCanonicaImagemMercadoLivreSegura(canonical, mlb) && !urlsHtmlVisitadas.has(urlCanonical)) {
+        urlsHtmlVisitadas.add(urlCanonical);
         response = await fetchImpl(canonical, options);
         html = await response.text();
         linkResolvido = response.url || canonical;
+        urlsHtmlVisitadas.add(urlHtmlNormalizada(linkResolvido));
         statusHttp = response.status;
         bloqueado = /captcha|account-verification|access denied|robot check|verifique[^<]{0,80}rob/i.test(html);
-        linkResolvidoSeguro = urlCanonicaImagemMercadoLivreSegura(linkResolvido, mlb);
-        podeUsarHtmlAtual = linkResolvidoSeguro || urlCanonicaImagemMercadoLivreSegura(canonical, mlb);
+        podeUsarHtmlAtual = identidadeHtmlConfirmada(linkResolvido, html);
         imagemExtraida = statusHttp < 400 && !bloqueado && podeUsarHtmlAtual ? extrairImagemHtmlMercadoLivre(html) : { imagem: "", origem: "nenhuma" };
       }
 
@@ -4195,32 +4219,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ? imagemMercadoLivreDeveBuscarCanonica(oferta)
     : { deveBuscar: false, motivo: "marketplace_nao_ml" };
 
-  if (decisaoImagemCanonicaMl.deveBuscar && normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
-    const getIntegracaoCliente = typeof deps.getIntegracaoCliente === "function"
-      ? deps.getIntegracaoCliente
-      : null;
-    imagemCanonica = await buscarImagemCanonicaMercadoLivre(oferta, {
-      clienteId: job.cliente_id || job.clienteId || "",
-      job,
-      motivoBuscaCanonica: decisaoImagemCanonicaMl.motivo,
-      ...(typeof deps.fetchImpl === "function" ? { fetchImpl: deps.fetchImpl } : {}),
-      ...(getIntegracaoCliente ? { getIntegracaoCliente } : {})
-    });
-    if (imagemCanonica.imagem) {
-      oferta.imagem = imagemCanonica.imagem;
-      oferta.imagemOrigem = imagemCanonica.origem;
-      oferta.linkResolvidoImagem = imagemCanonica.linkResolvido || "";
-      imagemResolucaoEngine = {
-        imagem: imagemCanonica.imagem,
-        origem: imagemCanonica.origem,
-        tipo: "fallback_canonico_ml",
-        fallbackUsado: true,
-        motivo: imagemCanonica.motivo || ""
-      };
-    }
-  }
-
-  let imagemCanonicaFinal = await resolverImagemCanonicaFinalEvento({
+  const entradaImagemCanonicaFinal = {
     eventoId: job.evento_id,
     marketplace: oferta.marketplace || job.marketplace || job.marketplace_detectado || "",
     linksExtraidos: evento.links_extraidos || [],
@@ -4232,11 +4231,18 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ofertaEnriquecida: oferta,
     job,
     link
-  });
+  };
+  const mercadoLivrePrecisaImagem = normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
+    && decisaoImagemCanonicaMl.deveBuscar;
+  let imagemCanonicaFinal = mercadoLivrePrecisaImagem
+    ? { imagem: "", imagemCanonicaDuravel: "", imagemOrigem: "", imagemStatus: "nao_resolvida" }
+    : await resolverImagemCanonicaFinalEvento(entradaImagemCanonicaFinal);
+  let taskMlWorkerPendente = null;
   let mlWorkIdentityShadowConsulta = null;
   let mlWorkPromocaoAtiva = null;
   let mlWorkImagemBaseline = null;
-  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre") {
+  if (normalizarMarketplaceMemoria(oferta.marketplace) === "mercadolivre"
+    && (mercadoLivrePrecisaImagem || mlWorkEnrichmentAtivo({ deps }))) {
     const metadataGateMlWorker = objetoSeguro(oferta.metadata);
     const metadataEntradaGateMlWorker = objetoSeguro(ofertaEntrada.metadata);
     const produtoMetadataGateMlWorker = objetoSeguro(metadataGateMlWorker.produto || metadataEntradaGateMlWorker.produto);
@@ -4338,27 +4344,34 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       sourceUrl: sourceUrlMlWorker
     });
     produtoIdMlWorker = identidadeResolvidaMlWorker.produtoId || "";
-    mlWorkIdentityShadowConsulta = await consultarMlWorkIdentityBestEffort({
-      marketplace: "mercadolivre",
-      expectedMlb: produtoIdMlWorker,
-      sourceUrl: sourceUrlMlWorker,
-      deps
-    });
-    mlWorkPromocaoAtiva = prepararMlWorkEnrichmentAtivo({
-      consulta: mlWorkIdentityShadowConsulta,
-      expectedMlb: produtoIdMlWorker,
-      marketplace: "mercadolivre",
-      ativo: mlWorkEnrichmentAtivo({ deps }),
-      tituloValido: tituloFactualConfiavelEngine
-    });
-    if (mlWorkPromocaoAtiva.imagemWork) {
-      mlWorkImagemBaseline = {
-        imagem: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagem || "",
-        imagemUrl: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagemUrl || oferta.imagem || "",
-        imagemOrigem: imagemCanonicaFinal.imagemOrigem || oferta.imagemOrigem || "",
-        imagemStatus: imagemCanonicaFinal.imagemStatus || oferta.imagemStatus || ""
-      };
-      imagemCanonicaFinal = aplicarImagemMlWorkCanonica(imagemCanonicaFinal, mlWorkPromocaoAtiva);
+    if (!imagemCanonicaFinal.imagemCanonicaDuravel || mlWorkEnrichmentAtivo({ deps })) {
+      const depsIdentity = mercadoLivrePrecisaImagem
+        ? deps
+        : { ...deps, garantirIdentidadeMercadoLivreLocalWorker: null };
+      mlWorkIdentityShadowConsulta = await consultarMlWorkIdentityBestEffort({
+        marketplace: "mercadolivre",
+        expectedMlb: produtoIdMlWorker,
+        sourceUrl: sourceUrlMlWorker,
+        deps: depsIdentity
+      });
+      mlWorkPromocaoAtiva = prepararMlWorkEnrichmentAtivo({
+        consulta: mlWorkIdentityShadowConsulta,
+        expectedMlb: produtoIdMlWorker,
+        marketplace: "mercadolivre",
+        ativo: mlWorkEnrichmentAtivo({ deps }),
+        tituloValido: tituloFactualConfiavelEngine
+      });
+      if (imagemCanonicaFinal.imagemCanonicaDuravel) {
+        mlWorkPromocaoAtiva = { ...mlWorkPromocaoAtiva, imagemWork: "" };
+      } else if (mlWorkPromocaoAtiva.imagemWork) {
+        mlWorkImagemBaseline = {
+          imagem: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagem || "",
+          imagemUrl: imagemCanonicaFinal.imagemCanonicaDuravel || imagemCanonicaFinal.imagem || oferta.imagemUrl || oferta.imagem || "",
+          imagemOrigem: imagemCanonicaFinal.imagemOrigem || oferta.imagemOrigem || "",
+          imagemStatus: imagemCanonicaFinal.imagemStatus || oferta.imagemStatus || ""
+        };
+        imagemCanonicaFinal = aplicarImagemMlWorkCanonica(imagemCanonicaFinal, mlWorkPromocaoAtiva);
+      }
     }
 
     if (imagemCanonicaFinal.imagemCanonicaDuravel) {
@@ -4396,18 +4409,57 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
           const taskMlWorker = await deps.garantirImagemMercadoLivreLocalWorker({ productId: produtoIdMlWorker, sourceUrl: sourceUrlMlWorker });
           if (taskMlWorker?.ok === true && taskMlWorker.task) {
             registrarGateMlWorker({ decisao: "task_criada", taskId: taskMlWorker.task.id || null });
-            return {
-              ok: false,
-              retriavel: true,
-              motivo: "sem_imagem",
-              motivoDetalhe: "aguardando_enriquecimento_local",
-              localWorker: { capability: "ml_image_v1", productId: produtoIdMlWorker, task: taskMlWorker.task || null },
-              metadata: { localWorkerImageRetry: true, productId: produtoIdMlWorker }
-            };
+            taskMlWorkerPendente = { capability: "ml_image_v1", productId: produtoIdMlWorker, task: taskMlWorker.task };
+          } else {
+            registrarGateMlWorker({ motivoTaskNaoCriada: "erro_criacao_task" });
           }
-          registrarGateMlWorker({ motivoTaskNaoCriada: "erro_criacao_task" });
         }
       }
+    }
+  }
+  if (mercadoLivrePrecisaImagem && !imagemCanonicaFinal.imagemCanonicaDuravel) {
+    const getIntegracaoCliente = typeof deps.getIntegracaoCliente === "function"
+      ? deps.getIntegracaoCliente
+      : null;
+    const candidataSocialMl = objetoSeguro(objetoSeguro(oferta.metadata).imagemCandidataSocial);
+    const ofertaBuscaCanonicaMl = candidataSocialMl.imagem
+      ? { ...oferta, imagem: candidataSocialMl.imagem, imagemOrigem: candidataSocialMl.origem }
+      : oferta;
+    imagemCanonica = await buscarImagemCanonicaMercadoLivre(ofertaBuscaCanonicaMl, {
+      clienteId: job.cliente_id || job.clienteId || "",
+      job,
+      motivoBuscaCanonica: decisaoImagemCanonicaMl.motivo,
+      ...(typeof deps.fetchImpl === "function" ? { fetchImpl: deps.fetchImpl } : {}),
+      ...(getIntegracaoCliente ? { getIntegracaoCliente } : {})
+    });
+    if (imagemCanonica.imagem) {
+      oferta.imagem = imagemCanonica.imagem;
+      oferta.imagemOrigem = imagemCanonica.origem;
+      oferta.linkResolvidoImagem = imagemCanonica.linkResolvido || "";
+      imagemResolucaoEngine = {
+        imagem: imagemCanonica.imagem,
+        origem: imagemCanonica.origem,
+        tipo: "fallback_canonico_ml",
+        fallbackUsado: true,
+        motivo: imagemCanonica.motivo || ""
+      };
+    }
+    imagemCanonicaFinal = await resolverImagemCanonicaFinalEvento({
+      ...entradaImagemCanonicaFinal,
+      ofertaEnriquecida: oferta
+    }, {
+      imagemCanonicaMlConsultada: imagemCanonica,
+      buscarImagemOficialMl: async () => imagemCanonica
+    });
+    if (!imagemCanonicaFinal.imagemCanonicaDuravel && taskMlWorkerPendente) {
+      return {
+        ok: false,
+        retriavel: true,
+        motivo: "sem_imagem",
+        motivoDetalhe: "aguardando_enriquecimento_local",
+        localWorker: taskMlWorkerPendente,
+        metadata: { localWorkerImageRetry: true, productId: taskMlWorkerPendente.productId }
+      };
     }
   }
   oferta = aplicarImagemCanonicaFinalOferta(oferta, imagemCanonicaFinal);

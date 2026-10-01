@@ -173,13 +173,13 @@ function radarMirror() {
   assert(metadataInserida && metadataPersistida);
   const universal = metadataPersistida.ofertaUniversal;
   assert.strictEqual(universal.produto.titulo, "Tênis Nike Air Max Excee Masculino");
-  assert.strictEqual(universal.midia.imagemPrincipal, "https://http2.mlstatic.com/D_NQ_NP_2X_123-MLB123456.jpg");
+  assert.strictEqual(universal.midia.imagemPrincipal, "https://http2.mlstatic.com/D_NQ_NP_ATUAL-MLB123456.jpg");
   assert.strictEqual(universal.comercial.precoAtual, 1379);
   assert.strictEqual(universal.comercial.precoAnterior, 2199);
   assert.strictEqual(universal.comercial.cupom, "RADAR100");
   assert.strictEqual(universal.afiliacao.urlAfiliada, "https://meli.la/workspace-final");
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.tituloWorkAplicado, true);
-  assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.imagemWorkAplicada, true);
+  assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.imagemWorkAplicada, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.comercialAlterado, false);
   assert.strictEqual(metadataPersistida.mlWorkEnrichmentActive.linksAlterados, false);
   assert.strictEqual(universal.produto.categoriaNormalizada, "Tênis e Chinelos");
