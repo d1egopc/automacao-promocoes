@@ -2,9 +2,11 @@
 
 const crypto = require("crypto");
 const { AsyncLocalStorage } = require("async_hooks");
+const { jidDecode } = require("@whiskeysockets/baileys");
 
 const contextoSignal = new AsyncLocalStorage();
 const NIVEIS_LOG = ["trace", "debug", "info", "warn", "error"];
+const NOMES_ERRO_SIGNAL = new Set(["Error", "SessionError", "PreKeyError", "MessageCounterError", "TypeError"]);
 
 function texto(value, limite = 160) {
   return String(value ?? "").trim().slice(0, limite);
@@ -134,14 +136,45 @@ function obterContextoSignalAtual() {
   return contextoSignal.getStore()?.contexto;
 }
 
-function observarErroSignal(erro, logger) {
+function metadadosDecrypt(nome, entrada) {
+  const direto = nome === "decryptMessage";
+  const jid = direto ? entrada?.jid : entrada?.authorJid;
+  const endereco = typeof jid === "string" ? jidDecode(jid) : null;
+  const grupo = !direto && typeof entrada?.group === "string"
+    && jidDecode(entrada.group)?.server === "g.us" ? entrada.group : "";
+  const tipo = endereco?.server;
+  const deviceId = endereco?.device || 0;
+  const deviceValido = Number.isSafeInteger(deviceId) && deviceId >= 0;
+  const metadados = {
+    decryptKind: direto ? "direct" : "group",
+    messageType: direto
+      ? (["msg", "pkmsg"].includes(entrada?.type) ? entrada.type : undefined)
+      : "skmsg"
+  };
+
+  if (endereco?.user) {
+    metadados.peerHash = hashIdentificador(jid);
+    metadados.peerType = ["lid", "s.whatsapp.net", "g.us", "newsletter"].includes(tipo)
+      ? tipo : "other";
+    if (deviceValido) metadados.deviceId = deviceId;
+    if (direto && deviceValido) {
+      metadados.signalAddressHash = hashIdentificador(`${endereco.user}.${deviceId}`);
+    }
+  }
+  if (grupo) metadados.groupHash = hashIdentificador(grupo);
+  return metadados;
+}
+
+function observarErroSignal(erro, logger, nome, entrada) {
   const erroTipo = classificarErroSignal(erro);
   if (!erroTipo) return false;
+  const erroNome = NOMES_ERRO_SIGNAL.has(erro?.name) ? erro.name : "Error";
 
   logger?.error?.({
     evento: "baileys_signal_error",
     erroTipo,
-    erroNome: texto(erro?.name || "Error", 80)
+    erroNome,
+    ...(nome ? metadadosDecrypt(nome, entrada) : {})
   }, "baileys signal error");
   return true;
 }
@@ -162,7 +195,7 @@ function criarFabricaRepositorioSignalContextual({ criarRepositorio, contexto, l
           return await repositorio[nome](...args);
         } catch (erro) {
           try {
-            observarErroSignal(erro, logger);
+            observarErroSignal(erro, logger, nome, args[0]);
           } catch (_) {
             // Falha de telemetria nao pode substituir a excecao Signal original.
           }
