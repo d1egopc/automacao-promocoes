@@ -12004,7 +12004,8 @@ const {
   fetchLatestBaileysVersion,
   DisconnectReason,
   downloadMediaMessage,
-  prepareWAMessageMedia
+  prepareWAMessageMedia,
+  DEFAULT_CONNECTION_CONFIG
 } = require("@whiskeysockets/baileys");
 const {
   materializarImagemRadarWhatsApp,
@@ -12028,6 +12029,12 @@ const {
 const {
   executarConsumidorMensagemIsolado
 } = require("./modules/whatsapp/message-consumer-isolation.service");
+const {
+  criarContextoSocketBaileys,
+  criarFabricaRepositorioSignalContextual,
+  criarLoggerBaileysContextual,
+  registrarTelemetriaCredsUpdate
+} = require("./modules/whatsapp/baileys-session-observability.service");
 
 registrarMiddlewaresOperacionais(app, {
   express,
@@ -32053,10 +32060,28 @@ async function iniciarWhatsApp(id, force = false) {
   try {
     const { state, saveCreds } = await useMultiFileAuthState("/data/auth_" + id);
     const { version } = await fetchLatestBaileysVersion();
+    const socketGeracaoPrevista = Number(geracoesSocketWhatsapp[id] || 0) + 1;
+    const contextoSocketBaileys = criarContextoSocketBaileys({
+      clienteId: clienteIdMensageiro,
+      workspaceId: clienteIdMensageiro,
+      sessaoId: id,
+      sessaoIdNormalizado: normalizarSessaoId(clienteIdMensageiro, id),
+      socketGeracao: socketGeracaoPrevista
+    });
+    const loggerBaileys = criarLoggerBaileysContextual({
+      loggerBase: DEFAULT_CONNECTION_CONFIG.logger,
+      contexto: contextoSocketBaileys
+    });
 
     sock = makeWASocket({
       version,
       auth: state,
+      logger: loggerBaileys,
+      makeSignalRepository: criarFabricaRepositorioSignalContextual({
+        criarRepositorio: DEFAULT_CONNECTION_CONFIG.makeSignalRepository,
+        contexto: contextoSocketBaileys,
+        logger: loggerBaileys
+      }),
       printQRInTerminal: false,
       syncFullHistory: false,
       markOnlineOnConnect: false,
@@ -32073,6 +32098,11 @@ async function iniciarWhatsApp(id, force = false) {
     });
     socketGeracao = registroSocket.socketGeracao || sock.__optimusSocketGeracao || "";
     sock.ev.on("creds.update", async () => {
+      registrarTelemetriaCredsUpdate({
+        contexto: contextoSocketBaileys,
+        socketAtual: socketEhAtual(sessoes, id, sock),
+        logger: console
+      });
       try {
         await saveCreds();
         const backup = salvarBackupCredsValido({
