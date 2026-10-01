@@ -1,5 +1,16 @@
 const { resolverOrigemFluxoExplicita } = require("./origem-fluxo");
 
+const FORMATADOR_HORARIO_SAO_PAULO = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Sao_Paulo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23"
+});
+
 const ALIASES_CATEGORIA_DESTINO = {
   bebes: "bebeseacessorios",
   bebe: "bebeseacessorios",
@@ -393,6 +404,57 @@ function destinoDentroHorario(destino = {}, agoraMs) {
   return horaAtual >= inicio || horaAtual <= fim;
 }
 
+function partesHorarioSaoPaulo(agoraMs = Date.now()) {
+  const partes = Object.fromEntries(
+    FORMATADOR_HORARIO_SAO_PAULO.formatToParts(new Date(agoraMs))
+      .filter(item => item.type !== "literal")
+      .map(item => [item.type, Number(item.value)])
+  );
+  return partes;
+}
+
+function offsetSaoPauloMs(agoraMs) {
+  const partes = partesHorarioSaoPaulo(agoraMs);
+  const paredeMs = Date.UTC(
+    partes.year,
+    partes.month - 1,
+    partes.day,
+    partes.hour,
+    partes.minute,
+    partes.second
+  ) + ((Number(agoraMs) % 1000) + 1000) % 1000;
+  return paredeMs - agoraMs;
+}
+
+function construirInstanteSaoPaulo(partesBase, minutosDia, diasAdiante = 0, referenciaMs = Date.now()) {
+  const dataBaseMs = Date.UTC(partesBase.year, partesBase.month - 1, partesBase.day);
+  const dataAlvo = new Date(dataBaseMs + diasAdiante * 24 * 60 * 60 * 1000);
+  const hora = Math.floor(minutosDia / 60);
+  const minuto = minutosDia % 60;
+  const paredeMs = Date.UTC(
+    dataAlvo.getUTCFullYear(),
+    dataAlvo.getUTCMonth(),
+    dataAlvo.getUTCDate(),
+    hora,
+    minuto,
+    0
+  );
+  const primeiraEstimativa = paredeMs - offsetSaoPauloMs(referenciaMs);
+  return paredeMs - offsetSaoPauloMs(primeiraEstimativa);
+}
+
+function proximoInstanteDentroHorario(destino = {}, agoraMs = Date.now()) {
+  if (destinoDentroHorario(destino, agoraMs)) return agoraMs;
+
+  const partes = partesHorarioSaoPaulo(agoraMs);
+  const horaInicio = destino.horarioInicio || destino.horaInicio || destino.horaInicial || destino.inicio || destino.horarioInicial || "00:00";
+  const [inicioH, inicioM] = String(horaInicio).split(":").map(Number);
+  const inicio = (Number.isFinite(inicioH) ? inicioH : 0) * 60 + (Number.isFinite(inicioM) ? inicioM : 0);
+  const minutoAtual = partes.hour * 60 + partes.minute;
+  const diasAdiante = minutoAtual < inicio ? 0 : 1;
+  return construirInstanteSaoPaulo(partes, inicio, diasAdiante, agoraMs);
+}
+
 function categoriaBase(txt = "") {
   return normalizarCategoriaDestino(txt || "geral");
 }
@@ -433,6 +495,7 @@ module.exports = {
   analisarDestinoOferta,
   destinoAceitaOferta,
   destinoDentroHorario,
+  proximoInstanteDentroHorario,
   categoriaBase,
   ALIASES_CATEGORIA_DESTINO
 };

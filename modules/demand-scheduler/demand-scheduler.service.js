@@ -108,6 +108,13 @@ function ordenarCandidatosPorDemanda(candidatos = [], contexto = {}, ordenarLega
       const fanoutUrgenteB = b.candidato?.ranking?.fanoutUrgente === true;
       if (fanoutUrgenteA !== fanoutUrgenteB) return fanoutUrgenteA ? -1 : 1;
       if (a.demanda.turbo !== b.demanda.turbo) return a.demanda.turbo ? -1 : 1;
+      const prioridadeA = numero(a.candidato?.ranking?.prioridade, 0);
+      const prioridadeB = numero(b.candidato?.ranking?.prioridade, 0);
+      if (prioridadeB !== prioridadeA) return prioridadeB - prioridadeA;
+      const slackA = numero(a.candidato?.ranking?.deadlineSlackMs, NaN);
+      const slackB = numero(b.candidato?.ranking?.deadlineSlackMs, NaN);
+      if (Number.isFinite(slackA) && Number.isFinite(slackB) && slackA !== slackB) return slackA - slackB;
+      if (Number.isFinite(slackA) !== Number.isFinite(slackB)) return Number.isFinite(slackA) ? -1 : 1;
       if (b.demanda.valor !== a.demanda.valor) return b.demanda.valor - a.demanda.valor;
       return a.indiceLegado - b.indiceLegado;
     })

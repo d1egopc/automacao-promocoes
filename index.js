@@ -85,6 +85,7 @@ const {
 } = require("./modules/engine/distributor/motivos-definitivos");
 const {
   calcularScoreFilaViva,
+  proximoSlotElegivel,
   ordenarOfertasFilaViva
 } = require("./modules/executor/fila-viva.service");
 const {
@@ -2404,8 +2405,28 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       continue;
     }
 
-    if (!destinoDentroHorario(destino)) {
+    const dentroHorario = destinoDentroHorario(destino, agora);
+    if (!dentroHorario) {
       motivoBloqueio = motivoBloqueio || "fora_horario";
+      const intervalo = intervaloDestinoInfo(clienteIdOferta, destino, configClienteOferta, oferta, agora);
+      const slot = proximoSlotElegivel(destino, oferta, agora, {
+        intervalo,
+        dentroHorario: false,
+        proximoHorarioEm: destinosUtils.proximoInstanteDentroHorario(destinoOperacionalSeguro(destino), agora)
+      });
+      destinosPendentesFanout.push({
+        ...item,
+        chave: destinoChaveControle(clienteIdOferta, destino),
+        intervalo,
+        liberado: false,
+        proximoElegivelEm: slot.proximoElegivelEm,
+        deadlineSlackMs: slot.slackMs,
+        motivoBloqueio: slot.motivoBloqueio
+      });
+      menorRestanteMs = Math.min(
+        menorRestanteMs,
+        Number.isFinite(slot.proximoElegivelEm) ? Math.max(0, slot.proximoElegivelEm - agora) : Infinity
+      );
       continue;
     }
 
@@ -2417,19 +2438,30 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       continue;
     }
 
-    const intervalo = intervaloDestinoInfo(clienteIdOferta, destino, configClienteOferta, oferta);
-    menorRestanteMs = Math.min(menorRestanteMs, Number(intervalo.restanteMs || 0));
+    const intervalo = intervaloDestinoInfo(clienteIdOferta, destino, configClienteOferta, oferta, agora);
+    const slot = proximoSlotElegivel(destino, oferta, agora, {
+      intervalo,
+      dentroHorario: true,
+      limiteDiarioOk: limite.ok
+    });
+    menorRestanteMs = Math.min(
+      menorRestanteMs,
+      Number.isFinite(slot.proximoElegivelEm) ? Math.max(0, slot.proximoElegivelEm - agora) : Infinity
+    );
 
     const destinoPendenteFanout = {
       ...item,
       chave: destinoChaveControle(clienteIdOferta, destino),
       intervalo,
-      liberado: intervalo.liberado === true
+      liberado: slot.liberadoAgora === true,
+      proximoElegivelEm: slot.proximoElegivelEm,
+      deadlineSlackMs: slot.slackMs,
+      motivoBloqueio: slot.motivoBloqueio
     };
     destinosPendentesFanout.push(destinoPendenteFanout);
 
-    if (!intervalo.liberado) {
-      motivoBloqueio = motivoBloqueio || "intervalo";
+    if (!slot.liberadoAgora) {
+      motivoBloqueio = motivoBloqueio || slot.motivoBloqueio || "intervalo";
       continue;
     }
 
@@ -2441,6 +2473,24 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     destinosEnviados: destinosEnviadosFanout,
     destinosPendentes: destinosPendentesFanout
   };
+  const proximoSlotMs = destinosPendentesFanout
+    .map(item => Number(item?.proximoElegivelEm))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)[0];
+  const deadlineMs = Date.parse(String(oferta.expiraEm || ""));
+  const deadlineSlackMs = Number.isFinite(proximoSlotMs) && Number.isFinite(deadlineMs)
+    ? deadlineMs - proximoSlotMs
+    : undefined;
+  const existeSlotAntesDoDeadline = destinosPendentesFanout.some(item =>
+    Number.isFinite(Number(item?.proximoElegivelEm)) &&
+    (!Number.isFinite(deadlineMs) || Number(item.proximoElegivelEm) <= deadlineMs)
+  );
+  const motivoBloqueioFinal = !destinosLiberados.length &&
+    Number.isFinite(deadlineMs) &&
+    destinosPendentesFanout.length > 0 &&
+    !existeSlotAntesDoDeadline
+    ? "sem_slot_antes_ttl"
+    : motivoBloqueio;
   const ranking = calcularScoreFilaViva(oferta, {
     agora,
     destinosCompativeis: analiseDestinos.compativeis.length,
@@ -2448,6 +2498,8 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     destinoChaves: destinosLiberados
       .map(item => String(item?.chave || ""))
       .filter(Boolean),
+    proximoSlotMs,
+    deadlineSlackMs,
     fanout
   });
 
@@ -2455,7 +2507,7 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     return {
       elegivel: false,
       motivo: "sem_destino_liberado_agora",
-      motivoBloqueio: motivoBloqueio || "sem_destino_liberado_agora",
+      motivoBloqueio: motivoBloqueioFinal || "sem_destino_liberado_agora",
       destinosCompativeis: analiseDestinos.compativeis.length,
       destinosLiberados,
       fanout,
@@ -7910,8 +7962,8 @@ function analisarDestinosCompativeisFila(clienteId = "admin", oferta = {}, confi
 
 // ========== FUNCAO DESTINO DENTRO HORARIO ==================
 
-function destinoDentroHorario(destino = {}) {
-  return destinosUtils.destinoDentroHorario(destinoOperacionalSeguro(destino));
+function destinoDentroHorario(destino = {}, agoraMs) {
+  return destinosUtils.destinoDentroHorario(destinoOperacionalSeguro(destino), agoraMs);
 }
 
 function destinoNomeLog(destino = {}) {
@@ -8398,9 +8450,9 @@ function payloadIntervaloDestino(clienteId = "admin", destino = {}, oferta = {},
   };
 }
 
-function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}) {
+function intervaloDestinoInfo(clienteId = "admin", destino = {}, configCliente = {}, oferta = {}, agoraMs = Date.now()) {
   const chaveControle = destinoChaveControle(clienteId, destino);
-  const agora = Date.now();
+  const agora = Number.isFinite(Number(agoraMs)) ? Number(agoraMs) : Date.now();
   const cadencia = resolverCadenciaDestino({
     destino,
     configCliente,
