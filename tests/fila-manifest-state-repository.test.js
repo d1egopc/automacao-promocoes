@@ -303,6 +303,38 @@ function aguardarFilaAsync() {
 
   {
     const pool = criarPoolFake();
+    const env = {
+      FILA_V2_EXECUTOR_GENERATION_AUTHORITY: "1",
+      FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES: "user_b2oogwwl"
+    };
+    await repo.registrarMutacaoDuravel("user_b2oogwwl", {}, { pool });
+    const target = await repo.capturarTargetCheckpoint("user_b2oogwwl", {
+      checkpointRevision: "checkpoint_telemetry"
+    }, { pool });
+    const checkpoint = await repo.confirmarCheckpointDuravel("user_b2oogwwl", {
+      targetGeneration: target.targetGeneration,
+      checkpointRevision: target.checkpointRevision,
+      legacyFileProof: {
+        proofVersion: 1,
+        clienteId: "user_b2oogwwl",
+        arquivo: "fila.json",
+        generation: 1,
+        targetGeneration: 1,
+        fileRevision: "checkpoint_telemetry",
+        size: 100,
+        mtimeMs: 200
+      }
+    }, { pool, env });
+    const observado = repo.obterUltimoCheckpointConfirmado("user_b2oogwwl");
+
+    assert.strictEqual(checkpoint.ok, true);
+    assert.strictEqual(observado.checkpointRevision, "checkpoint_telemetry");
+    assert.strictEqual(observado.targetGeneration, 1);
+    assert.strictEqual(typeof observado.confirmedAtMs, "number");
+  }
+
+  {
+    const pool = criarPoolFake();
     await repo.registrarMutacaoDuravel("cliente_dois_checkpoints", {}, { pool });
     await repo.registrarMutacaoDuravel("cliente_dois_checkpoints", {}, { pool });
     const recente = await repo.confirmarCheckpointDuravel("cliente_dois_checkpoints", {

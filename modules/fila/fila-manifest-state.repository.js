@@ -5,6 +5,9 @@ const { getEnginePool } = require("../engine/database");
 const { normalizarClienteId } = require("../../utils/storage");
 
 const TABELA = "queue_manifest_state";
+const FLAG_EXECUTOR_GENERATION_AUTHORITY = "FILA_V2_EXECUTOR_GENERATION_AUTHORITY";
+const FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES = "FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES";
+const ultimoCheckpointConfirmadoPorCliente = new Map();
 
 const SQL_SCHEMA_QUEUE_MANIFEST_STATE = `
 CREATE TABLE IF NOT EXISTS queue_manifest_state (
@@ -77,6 +80,22 @@ END $$;
 
 function clienteSeguro(clienteId = "admin") {
   return normalizarClienteId(clienteId || "admin") || "admin";
+}
+
+function deveObservarCheckpointCanario(clienteId = "admin", deps = {}) {
+  const env = deps?.env || process.env;
+  if (String(env?.[FLAG_EXECUTOR_GENERATION_AUTHORITY] || "0").trim() !== "1") return false;
+  const cliente = clienteSeguro(clienteId);
+  return String(env?.[FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES] || "")
+    .split(/[\s,;|]+/)
+    .map(valor => valor.trim())
+    .filter(Boolean)
+    .includes(cliente);
+}
+
+function obterUltimoCheckpointConfirmado(clienteId = "admin") {
+  const valor = ultimoCheckpointConfirmadoPorCliente.get(clienteSeguro(clienteId));
+  return valor ? { ...valor } : null;
 }
 
 function numeroInteiroNaoNegativo(valor) {
@@ -930,6 +949,15 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
       durableCheckpointGeneration: confirmado.state?.durableCheckpointGeneration || 0,
       dirtyGeneration: confirmado.state?.dirtyGeneration ?? null
     });
+    if (deveObservarCheckpointCanario(cliente, deps) &&
+        legacyFileProofConfirmado &&
+        Number(confirmado.state?.durableCheckpointGeneration) === target) {
+      ultimoCheckpointConfirmadoPorCliente.set(cliente, {
+        confirmedAtMs: Date.now(),
+        checkpointRevision: checkpointRevision || legacyFileProofConfirmado?.fileRevision || null,
+        targetGeneration: target
+      });
+    }
     return {
       ...confirmado,
       checkpointRevision,
@@ -1129,5 +1157,6 @@ module.exports = {
   registrarLegacySyncDuravel,
   registrarMutacaoDuravel,
   reconciliarEstadosMonotonico,
+  obterUltimoCheckpointConfirmado,
   validarState
 };

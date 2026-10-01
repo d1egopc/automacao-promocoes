@@ -51,6 +51,8 @@ const TAG_MANIFEST_STATE = "[FILA-V2-MANIFEST-STATE]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
 const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
 const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
+const FLAG_EXECUTOR_GENERATION_AUTHORITY = "FILA_V2_EXECUTOR_GENERATION_AUTHORITY";
+const FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES = "FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES";
 const FILA_VIVA_PROOF_ARQUIVO = "fila-viva.proof.json";
 const FILA_LEGADA_PROOF_ARQUIVO = "fila.proof.json";
 const FILA_V2_FILE_PROOF_VERSION = 1;
@@ -821,6 +823,118 @@ function normalizarProofAutoridade(valor = null) {
   };
 }
 
+function numeroOpcional(valor) {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : null;
+}
+
+function textoOpcional(valor) {
+  const resultado = texto(valor);
+  return resultado || null;
+}
+
+function deveTelemetriaProofMismatch(clienteId = "admin", deps = {}) {
+  const env = deps?.env || process.env;
+  if (String(env?.[FLAG_EXECUTOR_GENERATION_AUTHORITY] || "0").trim() !== "1") return false;
+  const cliente = clienteSeguro(clienteId);
+  return String(env?.[FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES] || "")
+    .split(/[\s,;|]+/)
+    .map(valor => valor.trim())
+    .filter(Boolean)
+    .includes(cliente);
+}
+
+function motivoDivergenciaProof(cliente, config, proofDb, proofArquivo) {
+  const comparacoes = [
+    ["proof_db_cliente_mismatch", proofDb.clienteId === cliente],
+    ["proof_arquivo_cliente_mismatch", proofArquivo.clienteId === cliente],
+    ["proof_db_arquivo_mismatch", proofDb.arquivo === config.arquivoDados],
+    ["proof_arquivo_nome_mismatch", proofArquivo.arquivo === config.arquivoDados],
+    ["proof_db_generation_mismatch", proofDb.generation === Number(config.generation)],
+    ["proof_arquivo_generation_mismatch", proofArquivo.generation === Number(config.generation)],
+    ["proof_file_revision_mismatch", proofDb.fileRevision === proofArquivo.fileRevision],
+    ["proof_size_mismatch", proofDb.size === proofArquivo.size],
+    ["proof_mtime_mismatch", mtimeCompatível(proofDb.mtimeMs, proofArquivo.mtimeMs)]
+  ];
+  return comparacoes.find(([, ok]) => !ok)?.[0] || `${config.prefixo}_proof_mismatch`;
+}
+
+function diagnosticoProofMismatch(cliente, config, leituraProof, proofArquivo, deps, rejectionReason) {
+  if (config.prefixo !== "viva" || !deveTelemetriaProofMismatch(cliente, deps)) return null;
+  const bruto = leituraProof?.valor && typeof leituraProof.valor === "object"
+    ? leituraProof.valor
+    : {};
+  const stat = statArquivoSeguro(caminhoJsonCliente(cliente, config.arquivoDados, deps), deps.fs || fs);
+  return {
+    proofPresent: leituraProof?.ok === true,
+    proofGeneration: proofArquivo?.generation ?? numeroOpcional(bruto.generation ?? bruto.targetGeneration),
+    proofFileRevision: proofArquivo?.fileRevision || textoOpcional(bruto.fileRevision),
+    proofSize: proofArquivo?.size ?? numeroOpcional(bruto.size),
+    proofMtimeMs: proofArquivo?.mtimeMs ?? numeroOpcional(bruto.mtimeMs),
+    proofPublishedAt: textoOpcional(bruto.publishedAt),
+    proofFileMtimeMs: leituraProof?.ok === true ? numeroOpcional(leituraProof.mtimeMs) : null,
+    statSize: stat.existe ? Number(stat.size ?? stat.bytes) : null,
+    statMtimeMs: stat.existe ? numeroOpcional(stat.mtimeMs) : null,
+    rejectionReason
+  };
+}
+
+function idadeMs(timestampMs, agoraMs) {
+  const timestamp = numeroOpcional(timestampMs);
+  if (timestamp === null) return null;
+  return Math.max(0, agoraMs - timestamp);
+}
+
+function montarTelemetriaProofMismatch(cliente, state, validacao, deps = {}) {
+  if (!deveTelemetriaProofMismatch(cliente, deps)) return null;
+  const agoraMs = numeroOpcional(deps.agora) ?? Date.now();
+  const repo = repositoryManifestState(deps);
+  let checkpoint = null;
+  try {
+    if (typeof repo?.obterUltimoCheckpointConfirmado === "function") {
+      checkpoint = repo.obterUltimoCheckpointConfirmado(cliente);
+    }
+  } catch {}
+  const durableGeneration = numeroOpcional(state?.durableCheckpointGeneration);
+  if (checkpoint && numeroOpcional(checkpoint.targetGeneration) !== durableGeneration) checkpoint = null;
+  const checkpointId = textoOpcional(checkpoint?.checkpointRevision) || textoOpcional(state?.legacyFileProof?.fileRevision);
+  const checkpointConfirmedAtMs = numeroOpcional(checkpoint?.confirmedAtMs);
+  const proofMtimeMs = numeroOpcional(validacao?.proofMtimeMs);
+  const proofPublishedAtMs = validacao?.proofPublishedAt ? Date.parse(validacao.proofPublishedAt) : NaN;
+  const proofObservedAtMs = Number.isFinite(proofPublishedAtMs)
+    ? proofPublishedAtMs
+    : (numeroOpcional(validacao?.proofFileMtimeMs) ?? proofMtimeMs);
+  let monotonicNs = null;
+  try {
+    monotonicNs = typeof process.hrtime?.bigint === "function"
+      ? process.hrtime.bigint().toString()
+      : null;
+  } catch {}
+  return {
+    workspaceKey: hashWorkspaceLog(cliente),
+    observedAtUtc: new Date(agoraMs).toISOString(),
+    observedMonotonicNs: monotonicNs,
+    dbVivaGeneration: state?.vivaGeneration ?? null,
+    dbDurableCheckpointGeneration: state?.durableCheckpointGeneration ?? null,
+    dbDirtyGeneration: state?.dirtyGeneration ?? null,
+    fileRevision: state?.vivaFileProof?.fileRevision || null,
+    proofPresent: validacao?.proofPresent === true,
+    proofGeneration: validacao?.proofGeneration ?? null,
+    proofFileRevision: validacao?.proofFileRevision || null,
+    proofSize: validacao?.proofSize ?? null,
+    proofMtimeMs: validacao?.proofMtimeMs ?? null,
+    proofPublishedAt: validacao?.proofPublishedAt || null,
+    proofFileMtimeMs: validacao?.proofFileMtimeMs ?? null,
+    statSize: validacao?.statSize ?? null,
+    statMtimeMs: validacao?.statMtimeMs ?? null,
+    lastCheckpointConfirmedAgeMs: idadeMs(checkpointConfirmedAtMs, agoraMs),
+    lastCheckpointConfirmedId: checkpointId,
+    proofAgeMs: idadeMs(proofObservedAtMs, agoraMs),
+    rejectionReason: validacao?.rejectionReason || validacao?.motivo || "viva_proof_mismatch"
+  };
+}
+
 function mtimeCompatível(a, b) {
   return Math.abs(Number(a || 0) - Number(b || 0)) <= 1;
 }
@@ -880,9 +994,23 @@ function validarProofPublicado(clienteId = "admin", config = {}, deps = {}) {
 
   const proofPath = caminhoJsonCliente(cliente, config.arquivoProof, deps);
   const leituraProof = lerJsonArquivoDireto(proofPath, null, fsImpl);
-  if (leituraProof.ok !== true) return { ok: false, motivo: `${config.prefixo}_proof_ausente` };
+  if (leituraProof.ok !== true) {
+    const motivo = `${config.prefixo}_proof_ausente`;
+    return {
+      ok: false,
+      motivo,
+      ...(diagnosticoProofMismatch(cliente, config, leituraProof, null, deps, "proof_ausente") || {})
+    };
+  }
   const proofArquivo = normalizarProofAutoridade(leituraProof.valor);
-  if (!proofArquivo) return { ok: false, motivo: `${config.prefixo}_proof_mismatch` };
+  if (!proofArquivo) {
+    const motivo = `${config.prefixo}_proof_mismatch`;
+    return {
+      ok: false,
+      motivo,
+      ...(diagnosticoProofMismatch(cliente, config, leituraProof, null, deps, "proof_payload_invalido") || {})
+    };
+  }
 
   const generationEsperada = Number(config.generation);
   if (proofDb.clienteId !== cliente ||
@@ -894,7 +1022,19 @@ function validarProofPublicado(clienteId = "admin", config = {}, deps = {}) {
       proofDb.fileRevision !== proofArquivo.fileRevision ||
       proofDb.size !== proofArquivo.size ||
       !mtimeCompatível(proofDb.mtimeMs, proofArquivo.mtimeMs)) {
-    return { ok: false, motivo: `${config.prefixo}_proof_mismatch` };
+    const motivo = `${config.prefixo}_proof_mismatch`;
+    return {
+      ok: false,
+      motivo,
+      ...(diagnosticoProofMismatch(
+        cliente,
+        config,
+        leituraProof,
+        proofArquivo,
+        deps,
+        motivoDivergenciaProof(cliente, config, proofDb, proofArquivo)
+      ) || {})
+    };
   }
 
   const stat = statArquivoSeguro(caminhoJsonCliente(cliente, config.arquivoDados, deps), fsImpl);
@@ -929,7 +1069,15 @@ function validarEstadoFisicoRecoveryGeneration(clienteId = "admin", state = {}, 
     generation: state.vivaGeneration,
     proofDb: state.vivaFileProof
   }, deps);
-  if (!vivaProof.ok) return vivaProof;
+  if (!vivaProof.ok) {
+    const proofMismatchTelemetry = ["viva_proof_mismatch", "viva_proof_ausente"].includes(vivaProof.motivo)
+      ? montarTelemetriaProofMismatch(clienteId, state, vivaProof, deps)
+      : null;
+    return {
+      ...vivaProof,
+      ...(proofMismatchTelemetry ? { proofMismatchTelemetry } : {})
+    };
+  }
 
   if (Number(state.vivaGeneration) === Number(state.durableCheckpointGeneration)) {
     const legacyProof = validarProofPublicado(clienteId, {
@@ -2439,7 +2587,10 @@ async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, 
     proofSize: decisaoGeneration?.validacao?.proofSize ?? null,
     statSize: decisaoGeneration?.validacao?.statSize ?? null,
     proofMtimeMs: decisaoGeneration?.validacao?.proofMtimeMs ?? null,
-    statMtimeMs: decisaoGeneration?.validacao?.statMtimeMs ?? null
+    statMtimeMs: decisaoGeneration?.validacao?.statMtimeMs ?? null,
+    ...(decisaoGeneration?.validacao?.proofMismatchTelemetry
+      ? { proofMismatchTelemetry: decisaoGeneration.validacao.proofMismatchTelemetry }
+      : {})
   }, deps.agora || Date.now());
   return resultado;
 }
