@@ -9,6 +9,7 @@ const {
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
+  OP_VIVA_MUTATION,
   RESPONSE_OK,
   RESPONSE_ERROR,
   RESPONSE_PROGRESS,
@@ -384,11 +385,69 @@ function cleanup(job) {
   return { ok: true, operation: OP_CLEANUP, removed };
 }
 
+function mutateViva(job) {
+  const started = process.hrtime.bigint();
+  const dataDir = normalizarDataDir(job.dataDir);
+  const operacional = obterFilaOperacionalV2(dataDir);
+  const mutationType = String(job.mutationType || "");
+  const deps = {
+    agora: Number(job.nowMs) || agoraMs(),
+    generation: Number(job.targetGeneration || 0),
+    fileRevision: revisionSegura(job.checkpointRevision),
+    publicarFileProof: false,
+    posicaoLegada: job.posicaoLegada,
+    permitirRegressaoStatus: job.permitirRegressaoStatus === true,
+    caller: job.caller,
+    motivo: job.motivo,
+    rodadaId: job.rodadaId,
+    cicloId: job.cicloId,
+    mutationId: job.mutationId,
+    transactionId: job.transactionId,
+    correlationId: job.correlationId
+  };
+
+  let resultado;
+  if (mutationType === "insert") {
+    resultado = operacional.inserirItemFilaVivaIncremental(job.clienteId, job.item, deps);
+  } else if (mutationType === "update") {
+    resultado = operacional.atualizarItemFilaVivaIncremental(job.clienteId, job.item, deps);
+  } else if (mutationType === "remove") {
+    resultado = operacional.removerItemFilaVivaIncremental(job.clienteId, job.item, deps);
+  } else {
+    return { ok: false, operation: OP_VIVA_MUTATION, motivo: "viva_mutation_type_invalid" };
+  }
+
+  if (job.exigirMutacao === true &&
+      resultado?.atualizouViva !== true &&
+      resultado?.removeuDaViva !== true &&
+      resultado?.terminalHistorico !== true) {
+    resultado = {
+      ...resultado,
+      ok: false,
+      tipoFalha: "mutacao_viva_nao_confirmada",
+      motivo: "mutacao_viva_nao_confirmada"
+    };
+  }
+
+  return {
+    ...resultado,
+    operation: OP_VIVA_MUTATION,
+    metrics: {
+      workerThreadId: threadId,
+      workerHeapUsedBytes: process.memoryUsage().heapUsed,
+      totalWorkerMs: Number(process.hrtime.bigint() - started) / 1e6,
+      bytes: Number(resultado?.bytesFilaViva || 0),
+      writes: resultado?.ok === true && resultado?.idempotente !== true ? 1 : 0
+    }
+  };
+}
+
 async function executar(job) {
   if (!job || typeof job !== "object") throw new Error("persistence_job_invalido");
   if (job.operation === OP_PREPARE) return prepare(job);
   if (job.operation === OP_PUBLISH) return publish(job);
   if (job.operation === OP_CLEANUP) return cleanup(job);
+  if (job.operation === OP_VIVA_MUTATION) return mutateViva(job);
   if (job.operation === OP_TERMINAL_INDEX_BOOTSTRAP) {
     const dataDir = normalizarDataDir(job.dataDir);
     try {

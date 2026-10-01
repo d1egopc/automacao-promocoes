@@ -5,6 +5,7 @@ const OP_PUBLISH = "checkpoint_publish";
 const OP_CLEANUP = "checkpoint_cleanup";
 const OP_TERMINAL_INDEX_BOOTSTRAP = "terminal_index_bootstrap";
 const OP_TERMINAL_INDEX_DELTA = "terminal_index_delta";
+const OP_VIVA_MUTATION = "viva_mutation";
 
 const RESPONSE_OK = "persistence_result";
 const RESPONSE_ERROR = "persistence_error";
@@ -97,6 +98,16 @@ function modoPersistenciaWorkspace(env = process.env, clienteId = "admin") {
   return decisaoPersistenciaWorkspace(env, clienteId).mode;
 }
 
+function decisaoPersistenciaVivaWorkspace(env = process.env, clienteId = "admin") {
+  const cliente = workspaceSeguro(clienteId);
+  if (!flagWorkerAtiva(env)) {
+    return { mode: "legacy", clienteId: cliente, motivo: "worker_global_disabled" };
+  }
+  const rollout = texto(env?.FILA_VIVA_MUTATION_WORKER_ROLLOUT || "global").toLowerCase();
+  if (rollout === "canary") return decisaoPersistenciaWorkspace(env, cliente);
+  return { mode: "worker", clienteId: cliente, motivo: "viva_worker_global_default" };
+}
+
 function timeoutWorkerMs(env = process.env) {
   const valor = Number(env?.FILA_PERSISTENCE_WORKER_TIMEOUT_MS || 120000);
   return Number.isFinite(valor) && valor >= 1000 ? Math.floor(valor) : 120000;
@@ -131,6 +142,7 @@ module.exports = {
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
+  OP_VIVA_MUTATION,
   RESPONSE_OK,
   RESPONSE_ERROR,
   RESPONSE_PROGRESS,
@@ -140,6 +152,7 @@ module.exports = {
   flagWorkerAtiva,
   parseCanaryClientes,
   decisaoPersistenciaWorkspace,
+  decisaoPersistenciaVivaWorkspace,
   modoPersistenciaWorkspace,
   timeoutWorkerMs,
   jobId,
