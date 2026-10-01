@@ -58,6 +58,27 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Production target preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_dir=/opt/optimus/backend
+          infra_dir=/opt/optimus/infra
+          compose_file=${infra_dir}/compose.yml
+
+          if [[ ! -d "${backend_dir}" || ! -d "${infra_dir}" || ! -f "${compose_file}" ]]; then
+            echo "alvo de producao nao reconhecido"
+            exit 1
+          fi
+
+          services="$(docker compose -f "${compose_file}" config --services)"
+          if ! grep -Fxq "backend" <<<"${services}"; then
+            echo "alvo de producao nao reconhecido"
+            exit 1
+          fi
+
+          echo "alvo de producao reconhecido: Hostinger VPS / backend"
+
       - name: Deploy backend
         shell: bash
         run: |
