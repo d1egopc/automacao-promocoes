@@ -1730,6 +1730,53 @@ function anexarProofLegadoSeSolicitado(clienteId = "admin", resultado = {}, gene
   };
 }
 
+async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, item, contexto, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const modo = typeof deps.modoPersistenciaViva === "function"
+    ? deps.modoPersistenciaViva(cliente)
+    : "legacy";
+  if (modo !== "worker") return contexto.escritor();
+  if (typeof deps.agendarMutacaoViva !== "function") {
+    return { ok: false, motivo: "viva_mutation_worker_indisponivel", persistenceMode: "worker" };
+  }
+
+  const resultado = await deps.agendarMutacaoViva({
+    clienteId: cliente,
+    checkpointRevision: contexto.fileRevision,
+    targetGeneration: contexto.nextGeneration,
+    mutationType,
+    item,
+    posicaoLegada: deps.posicaoLegada,
+    permitirRegressaoStatus: deps.permitirRegressaoStatus === true,
+    exigirMutacao: deps.exigirMutacao === true,
+    caller: deps.caller || deps.origem || deps.motivo,
+    motivo: deps.motivo,
+    rodadaId: deps.rodadaId,
+    cicloId: deps.cicloId,
+    mutationId: contexto.vivaProofTelemetry?.mutationId,
+    transactionId: contexto.vivaProofTelemetry?.transactionId,
+    correlationId: contexto.vivaProofTelemetry?.correlationId,
+    nowMs: deps.agora || Date.now(),
+    persistenceMode: "worker"
+  });
+  if (resultado?.ok !== true) return resultado;
+
+  const proof = publicarProofFilaViva(cliente, {
+    generation: contexto.nextGeneration,
+    fileRevision: contexto.fileRevision
+  }, deps);
+  if (proof.ok !== true) {
+    return {
+      ...resultado,
+      ok: false,
+      motivo: proof.motivo || "proof_viva_falhou",
+      vivaFileProof: proof.proof || null,
+      etapa: "proof"
+    };
+  }
+  return { ...resultado, vivaFileProof: proof.proof, persistenceMode: "worker" };
+}
+
 async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "mutacao", escritor = null, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   if (!deveUsarManifestStatePostgres(cliente, deps)) {
@@ -1750,8 +1797,8 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
     checkpointSincronizado: deps.checkpointSincronizado === true,
     fileRevision: deps.fileRevision || gerarFileRevision(),
     motivo: deps.motivo || operacao,
-    escreverArquivo: async ({ state, nextGeneration, fileRevision }) => {
-      resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration, fileRevision });
+    escreverArquivo: async ({ state, nextGeneration, fileRevision, vivaProofTelemetry }) => {
+      resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration, fileRevision, vivaProofTelemetry });
       if (resultadoArquivo === false || resultadoArquivo?.ok === false) {
         return resultadoArquivo || { ok: false, motivo: "writer_retorno_false" };
       }
@@ -3200,12 +3247,23 @@ async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
   const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     "insert_viva",
-    ({ nextGeneration, fileRevision }) => inserirItemFilaVivaIncremental(clienteId, item, {
-      ...deps,
-      generation: nextGeneration,
-      fileRevision,
-      publicarFileProof: true
-    }),
+    ({ nextGeneration, fileRevision, vivaProofTelemetry }) => executarMutacaoVivaNoModoConfigurado(
+      clienteId,
+      "insert",
+      item,
+      {
+        nextGeneration,
+        fileRevision,
+        vivaProofTelemetry,
+        escritor: () => inserirItemFilaVivaIncremental(clienteId, item, {
+          ...deps,
+          generation: nextGeneration,
+          fileRevision,
+          publicarFileProof: true
+        })
+      },
+      deps
+    ),
     {
       ...deps,
       checkpointSincronizado: false,
@@ -3222,13 +3280,25 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
   const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update",
-    ({ nextGeneration, fileRevision }) => {
-      const resultado = atualizarItemFilaVivaIncremental(clienteId, item, {
-        ...terminalIndexAuthority.marcarCoordenada({ ...deps }),
-        generation: nextGeneration,
-        fileRevision,
-        publicarFileProof: true
-      });
+    async ({ nextGeneration, fileRevision, vivaProofTelemetry }) => {
+      const depsCoordenadas = terminalIndexAuthority.marcarCoordenada({ ...deps });
+      let resultado = await executarMutacaoVivaNoModoConfigurado(
+        clienteId,
+        "update",
+        item,
+        {
+          nextGeneration,
+          fileRevision,
+          vivaProofTelemetry,
+          escritor: () => atualizarItemFilaVivaIncremental(clienteId, item, {
+            ...depsCoordenadas,
+            generation: nextGeneration,
+            fileRevision,
+            publicarFileProof: true
+          })
+        },
+        depsCoordenadas
+      );
       if (deps.exigirMutacao === true &&
           resultado?.atualizouViva !== true &&
           resultado?.removeuDaViva !== true &&
@@ -3258,13 +3328,24 @@ async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
   const resultado = await executarEscritaFilaV2Coordenada(
     clienteId,
     "legacy_sync_remove",
-    ({ nextGeneration, fileRevision }) => {
-      const resultado = removerItemFilaVivaIncremental(clienteId, item, {
-        ...deps,
-        generation: nextGeneration,
-        fileRevision,
-        publicarFileProof: true
-      });
+    async ({ nextGeneration, fileRevision, vivaProofTelemetry }) => {
+      const resultado = await executarMutacaoVivaNoModoConfigurado(
+        clienteId,
+        "remove",
+        item,
+        {
+          nextGeneration,
+          fileRevision,
+          vivaProofTelemetry,
+          escritor: () => removerItemFilaVivaIncremental(clienteId, item, {
+            ...deps,
+            generation: nextGeneration,
+            fileRevision,
+            publicarFileProof: true
+          })
+        },
+        deps
+      );
       return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
     },
     {

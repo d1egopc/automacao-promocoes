@@ -1024,6 +1024,11 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
   getClienteJsonPath,
   getClientePath,
   workspaceAtivoOperacional: clienteId => usuarioAtivoOperacional(clienteId),
+  modoPersistenciaViva: clienteId => persistenciaCheckpointV2.modeForViva(clienteId),
+  agendarMutacaoViva: payload => persistenciaCheckpointV2.mutateViva({
+    ...payload,
+    dataDir: process.env.DATA_DIR || "/data"
+  }),
   agendarTerminalIndexBootstrap: payload => persistenciaCheckpointV2.bootstrapTerminalIndex({
     ...payload,
     dataDir: process.env.DATA_DIR || "/data"

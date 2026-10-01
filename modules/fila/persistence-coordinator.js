@@ -10,10 +10,12 @@ const {
   OP_CLEANUP,
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
+  OP_VIVA_MUTATION,
   RESPONSE_OK,
   RESPONSE_PROGRESS,
   flagWorkerAtiva,
   decisaoPersistenciaWorkspace,
+  decisaoPersistenciaVivaWorkspace,
   timeoutWorkerMs,
   normalizarDataDir,
   workspaceSeguro,
@@ -120,6 +122,10 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     return decisao(clienteId).mode;
   }
 
+  function modoForViva(clienteId = "admin") {
+    return decisaoPersistenciaVivaWorkspace(env, clienteId).mode;
+  }
+
   function log(payload = {}) {
     try {
       if (typeof logger.log === "function") logger.log("[FILA-PERSISTENCIA-WORKER]", JSON.stringify(payload));
@@ -201,7 +207,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       expectedSourceRevisions: job.expectedSourceRevisions,
       tempIdentity: job.tempIdentity,
       dataDir: job.dataDir,
-      nowMs: job.nowMs
+      nowMs: job.nowMs,
+      mutationType: job.mutationType,
+      item: job.item
     }), "utf8");
   }
 
@@ -702,6 +710,22 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       persistenceMode: "worker",
       queuedAt: agoraMs()
     };
+    if (operation === OP_VIVA_MUTATION) {
+      job.mutationType = String(payload.mutationType || "");
+      job.item = payload.item && typeof payload.item === "object" ? payload.item : {};
+      job.posicaoLegada = Number.isInteger(Number(payload.posicaoLegada))
+        ? Number(payload.posicaoLegada)
+        : null;
+      job.permitirRegressaoStatus = payload.permitirRegressaoStatus === true;
+      job.exigirMutacao = payload.exigirMutacao === true;
+      job.caller = String(payload.caller || payload.origem || payload.motivo || "").slice(0, 120);
+      job.motivo = String(payload.motivo || "viva_mutation").slice(0, 120);
+      job.rodadaId = String(payload.rodadaId || "").slice(0, 160);
+      job.cicloId = String(payload.cicloId || "").slice(0, 160);
+      job.mutationId = String(payload.mutationId || "").slice(0, 200);
+      job.transactionId = String(payload.transactionId || payload.mutationId || "").slice(0, 200);
+      job.correlationId = String(payload.correlationId || payload.mutationId || "").slice(0, 200);
+    }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);
     const maxWorkspace = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS_WORKSPACE", 25);
@@ -1052,10 +1076,15 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     enabled: globalAtivo,
     enabledFor: clienteId => modoFor(clienteId) === "worker",
     modeFor: modoFor,
+    modeForViva: modoForViva,
     getState: estadoPublico,
     prepare: payload => enfileirarInterno(OP_PREPARE, payload),
     publish: payload => enfileirarInterno(OP_PUBLISH, payload),
     cleanup: payload => enfileirarInterno(OP_CLEANUP, payload),
+    mutateViva: payload => enfileirarInterno(OP_VIVA_MUTATION, {
+      ...payload,
+      persistenceMode: payload?.persistenceMode || modoForViva(payload?.clienteId)
+    }),
     bootstrapTerminalIndex: payload => solicitarManutencaoTerminalIndex(OP_TERMINAL_INDEX_BOOTSTRAP, payload),
     deltaTerminalIndex: payload => solicitarManutencaoTerminalIndex(OP_TERMINAL_INDEX_DELTA, payload),
     revalidarSources,
