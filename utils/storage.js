@@ -353,7 +353,7 @@ function readJsonFile(file, fallback) {
   }
 }
 
-function writeJsonFileAtomic(file, dados) {
+function writeJsonFileAtomic(file, dados, opcoes = {}) {
   const inicio = process.hrtime.bigint();
   garantirDir(path.dirname(file));
 
@@ -376,9 +376,15 @@ function writeJsonFileAtomic(file, dados) {
   const writeMs = Math.round(perfStorageMs(inicioWrite));
   registrarArquivo("writeFileSync", file, writeMs, bytes);
   const inicioRename = process.hrtime.bigint();
+  try {
+    if (typeof opcoes.beforeRename === "function") opcoes.beforeRename({ file, bytes });
+  } catch {}
   fs.renameSync(tmp, file);
   const renameMs = Math.round(perfStorageMs(inicioRename));
   registrarArquivo("renameSync", file, renameMs);
+  try {
+    if (typeof opcoes.afterRename === "function") opcoes.afterRename({ file, bytes, renameMs });
+  } catch {}
   const totalMs = perfStorageMs(inicio);
   logStorageLento("writeJsonFileAtomic", file, inicio, {
     bytes,
@@ -427,9 +433,9 @@ function readClienteJson(clienteId = "admin", arquivo = "", fallback = {}) {
   return readJsonFile(getClienteJsonPath(id, arquivo), fallback);
 }
 
-function writeClienteJson(clienteId = "admin", arquivo = "", dados = {}) {
+function writeClienteJson(clienteId = "admin", arquivo = "", dados = {}, opcoes = {}) {
   const id = normalizarClienteId(clienteId);
-  return writeJsonFileAtomic(getClienteJsonPath(id, arquivo), withClienteId(id, dados));
+  return writeJsonFileAtomic(getClienteJsonPath(id, arquivo), withClienteId(id, dados), opcoes);
 }
 
 function readGlobalJson(arquivo = "", fallback = {}) {

@@ -28,6 +28,7 @@ const {
 } = require("./fila-read-model-publico");
 const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
+const vivaProofTelemetry = require("./viva-proof-telemetry");
 const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
 const terminalIndexShadow = require("./terminal-index-shadow");
 const terminalIndexAuthority = require("./terminal-index-authority");
@@ -51,8 +52,6 @@ const TAG_MANIFEST_STATE = "[FILA-V2-MANIFEST-STATE]";
 const FLAG_CHECKPOINT_MUTACOES = "FILA_V2_CHECKPOINT_MUTACOES";
 const FLAG_CHECKPOINT_INTERVALO_MS = "FILA_V2_CHECKPOINT_INTERVALO_MS";
 const FLAG_CHECKPOINT_MAX_DIRTY_MS = "FILA_V2_CHECKPOINT_MAX_DIRTY_MS";
-const FLAG_EXECUTOR_GENERATION_AUTHORITY = "FILA_V2_EXECUTOR_GENERATION_AUTHORITY";
-const FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES = "FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES";
 const FILA_VIVA_PROOF_ARQUIVO = "fila-viva.proof.json";
 const FILA_LEGADA_PROOF_ARQUIVO = "fila.proof.json";
 const FILA_V2_FILE_PROOF_VERSION = 1;
@@ -329,14 +328,49 @@ function proofArquivo(clienteId = "admin", arquivo = "", dados = {}, stat = {}, 
 function publicarProofArquivo(clienteId = "admin", arquivoProof = "", proof = {}, deps = {}) {
   const escritor = deps.writeClienteJson || writeClienteJson;
   if (typeof escritor !== "function") return { ok: false, motivo: "writeClienteJson_indisponivel" };
+  const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.obterOuCriarContexto(clienteId, deps, {
+    caller: deps.caller || deps.origem
+  });
+  let renameStartedMonotonicNs = null;
+  const hooksRenameProof = telemetry && arquivoProof === FILA_VIVA_PROOF_ARQUIVO
+    ? {
+        beforeRename: () => {
+          renameStartedMonotonicNs = vivaProofTelemetry.monotonicNs();
+        },
+        afterRename: ({ renameMs } = {}) => vivaProofTelemetry.emit(telemetry, "proof_rename", {
+          generation: proof?.generation ?? proof?.targetGeneration,
+          fileRevision: proof?.fileRevision,
+          proof,
+          sucesso: true,
+          detalhes: {
+            renameStartedMonotonicNs,
+            renameDoneMonotonicNs: vivaProofTelemetry.monotonicNs(),
+            renameMs: Number.isFinite(Number(renameMs)) ? Number(renameMs) : null
+          }
+        }, deps)
+      }
+    : undefined;
   try {
-    const ok = escritor(clienteSeguro(clienteId), arquivoProof, proof);
+    const ok = escritor(clienteSeguro(clienteId), arquivoProof, proof, hooksRenameProof);
+    vivaProofTelemetry.emit(telemetry, "proof_publish_done", {
+      generation: proof?.generation ?? proof?.targetGeneration,
+      fileRevision: proof?.fileRevision,
+      proof,
+      sucesso: ok !== false
+    }, deps);
     return {
       ok: ok !== false,
       motivo: ok === false ? "proof_write_false" : "proof_escrito",
       proof
     };
   } catch (erro) {
+    vivaProofTelemetry.emit(telemetry, "proof_publish_done", {
+      generation: proof?.generation ?? proof?.targetGeneration,
+      fileRevision: proof?.fileRevision,
+      proof,
+      sucesso: false,
+      error: erro
+    }, deps);
     return {
       ok: false,
       motivo: "proof_write_error",
@@ -354,7 +388,21 @@ function publicarProofFilaViva(clienteId = "admin", dados = {}, deps = {}) {
   if (!stat.existe) return { ok: false, motivo: "fila_viva_inexistente_para_proof" };
   const proof = proofArquivo(cliente, FILA_VIVA_ARQUIVO, dados, stat, deps.agora || Date.now());
   if (!proof.fileRevision) return { ok: false, motivo: "file_revision_invalido", proof };
-  return publicarProofArquivo(cliente, FILA_VIVA_PROOF_ARQUIVO, proof, deps);
+  const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.obterOuCriarContexto(cliente, deps, {
+    caller: deps.caller || deps.origem || deps.motivo
+  });
+  vivaProofTelemetry.emit(telemetry, "proof_publish_begin", {
+    generation: proof.generation,
+    fileRevision: proof.fileRevision,
+    proof,
+    sucesso: true
+  }, deps);
+  const resultado = publicarProofArquivo(cliente, FILA_VIVA_PROOF_ARQUIVO, proof, {
+    ...deps,
+    vivaProofTelemetry: telemetry
+  });
+  if (resultado.ok === true) vivaProofTelemetry.registrarPublicacao(telemetry, proof, deps);
+  return resultado;
 }
 
 function projecaoLeveVazia(clienteId = "admin", agora = Date.now()) {
@@ -835,14 +883,7 @@ function textoOpcional(valor) {
 }
 
 function deveTelemetriaProofMismatch(clienteId = "admin", deps = {}) {
-  const env = deps?.env || process.env;
-  if (String(env?.[FLAG_EXECUTOR_GENERATION_AUTHORITY] || "0").trim() !== "1") return false;
-  const cliente = clienteSeguro(clienteId);
-  return String(env?.[FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES] || "")
-    .split(/[\s,;|]+/)
-    .map(valor => valor.trim())
-    .filter(Boolean)
-    .includes(cliente);
+  return vivaProofTelemetry.canarioAtivo(clienteId, deps?.env || process.env);
 }
 
 function motivoDivergenciaProof(cliente, config, proofDb, proofArquivo) {
@@ -2611,8 +2652,32 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
     .filter(entrada => entrada.bucket === "viva");
   const cliente = clienteSeguro(clienteId);
   const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.obterOuCriarContexto(cliente, deps, {
+    caller: deps.caller || deps.origem || deps.motivo
+  });
   try {
-    const ok = escritor(cliente, FILA_VIVA_ARQUIVO, normalizada);
+    vivaProofTelemetry.emit(telemetry, "viva_write_begin", {
+      generation: deps.generation,
+      fileRevision: deps.fileRevision,
+      sucesso: true
+    }, deps);
+    let ok;
+    try {
+      ok = escritor(cliente, FILA_VIVA_ARQUIVO, normalizada);
+    } catch (erro) {
+      vivaProofTelemetry.emit(telemetry, "viva_write_done", {
+        generation: deps.generation,
+        fileRevision: deps.fileRevision,
+        sucesso: false,
+        error: erro
+      }, deps);
+      throw erro;
+    }
+    vivaProofTelemetry.emit(telemetry, "viva_write_done", {
+      generation: deps.generation,
+      fileRevision: deps.fileRevision,
+      sucesso: ok !== false
+    }, deps);
     let vivaFileProof = null;
     if (ok !== false && deps.publicarFileProof === true) {
       const proof = publicarProofFilaViva(cliente, {
@@ -2899,6 +2964,23 @@ function atualizarItemFilaVivaIncremental(clienteId = "admin", item = {}, deps =
       motivoBucket: classificacao.motivo || "status_terminal"
     }, { ...deps, agora });
     const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
+    const terminalProof = transicao.escrita?.vivaFileProof || null;
+    const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.obterOuCriarContexto(cliente, deps, {
+      caller: "terminal_transition"
+    });
+    vivaProofTelemetry.emit(telemetry, "terminal_transition", {
+      generation: terminalProof?.generation ?? deps.generation,
+      fileRevision: terminalProof?.fileRevision || deps.fileRevision,
+      proof: terminalProof,
+      caller: "terminal_transition",
+      sucesso: transicao.ok === true,
+      detalhes: {
+        vivaFileProofProduzido: Boolean(terminalProof),
+        vivaFileProofRetornadoNoResultado: false,
+        transicaoEscritaOk: transicao.escrita?.ok === true,
+        transicaoMotivo: transicao.motivo || ""
+      }
+    }, deps);
     return {
       ok: transicao.ok === true,
       motivo: transicao.motivo,

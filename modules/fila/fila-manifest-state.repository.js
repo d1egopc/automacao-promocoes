@@ -3,10 +3,9 @@
 const crypto = require("crypto");
 const { getEnginePool } = require("../engine/database");
 const { normalizarClienteId } = require("../../utils/storage");
+const vivaProofTelemetry = require("./viva-proof-telemetry");
 
 const TABELA = "queue_manifest_state";
-const FLAG_EXECUTOR_GENERATION_AUTHORITY = "FILA_V2_EXECUTOR_GENERATION_AUTHORITY";
-const FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES = "FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES";
 const ultimoCheckpointConfirmadoPorCliente = new Map();
 
 const SQL_SCHEMA_QUEUE_MANIFEST_STATE = `
@@ -83,14 +82,7 @@ function clienteSeguro(clienteId = "admin") {
 }
 
 function deveObservarCheckpointCanario(clienteId = "admin", deps = {}) {
-  const env = deps?.env || process.env;
-  if (String(env?.[FLAG_EXECUTOR_GENERATION_AUTHORITY] || "0").trim() !== "1") return false;
-  const cliente = clienteSeguro(clienteId);
-  return String(env?.[FLAG_EXECUTOR_GENERATION_CANARY_CLIENTES] || "")
-    .split(/[\s,;|]+/)
-    .map(valor => valor.trim())
-    .filter(Boolean)
-    .includes(cliente);
+  return vivaProofTelemetry.canarioAtivo(clienteId, deps?.env || process.env);
 }
 
 function obterUltimoCheckpointConfirmado(clienteId = "admin") {
@@ -425,11 +417,24 @@ async function comTransacao(callback, deps = {}) {
     await client.query("BEGIN");
     const resultado = await callback(client);
     await client.query("COMMIT");
+    vivaProofTelemetry.emit(deps.vivaProofTelemetry, "db_commit", {
+      generation: resultado?.state?.vivaGeneration,
+      fileRevision: resultado?.state?.vivaFileProof?.fileRevision || resultado?.state?.legacyFileProof?.fileRevision,
+      vivaFileProofGeneration: resultado?.state?.vivaFileProof?.generation,
+      vivaFileProofRevision: resultado?.state?.vivaFileProof?.fileRevision,
+      sucesso: true
+    }, deps);
     return resultado;
   } catch (erro) {
     try {
       await client.query("ROLLBACK");
     } catch (_) {}
+    vivaProofTelemetry.emit(deps.vivaProofTelemetry, "db_rollback", {
+      generation: deps.vivaProofTelemetry?.generation,
+      fileRevision: deps.vivaProofTelemetry?.fileRevision,
+      sucesso: false,
+      error: erro
+    }, deps);
     const motivo = erro?.codigo || erro?.message || "transacao_manifest_state_falhou";
     const dbIndisponivel = !["arquivo_viva_falhou", "mutacao_viva_nao_confirmada"].includes(String(motivo));
     return {
@@ -482,7 +487,7 @@ async function garantirLinhaCliente(client, clienteId = "admin", manifestoBootst
   return normalizarStateDb(resultado.rows?.[0] || {}, cliente);
 }
 
-async function atualizarState(client, state = {}, motivo = "manifest_state") {
+async function atualizarState(client, state = {}, motivo = "manifest_state", telemetry = null) {
   const dirtyGeneration = state.vivaGeneration > state.durableCheckpointGeneration
     ? state.dirtyGeneration || state.durableCheckpointGeneration + 1
     : null;
@@ -524,10 +529,18 @@ async function atualizarState(client, state = {}, motivo = "manifest_state") {
       state.pendingCheckpointStartedAt || null
     ]
   );
+  const stateNormalizado = normalizarStateDb(resultado.rows?.[0] || state, state.clienteId);
+  vivaProofTelemetry.emit(telemetry, "db_update", {
+    generation: stateNormalizado.vivaGeneration,
+    fileRevision: stateNormalizado.vivaFileProof?.fileRevision || stateNormalizado.legacyFileProof?.fileRevision,
+    vivaFileProofGeneration: stateNormalizado.vivaFileProof?.generation,
+    vivaFileProofRevision: stateNormalizado.vivaFileProof?.fileRevision,
+    sucesso: true
+  });
   return {
     ok: true,
     motivo,
-    state: normalizarStateDb(resultado.rows?.[0] || state, state.clienteId)
+    state: stateNormalizado
   };
 }
 
@@ -678,16 +691,43 @@ async function prepararReadinessAutoridade(clienteId = "admin", dados = {}, deps
 
 async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
-  return comTransacao(async (client) => {
+  const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.criarContexto(cliente, deps, {
+    caller: deps.caller || deps.origem || dados.caller || dados.origem || dados.motivo,
+    motivo: dados.motivo
+  });
+  const depsInstrumentados = telemetry
+    ? { ...deps, vivaProofTelemetry: telemetry }
+    : deps;
+  vivaProofTelemetry.emit(telemetry, "mutation_begin", {
+    generation: null,
+    fileRevision: dados.fileRevision,
+    sucesso: true
+  }, depsInstrumentados);
+  return await vivaProofTelemetry.executarComContexto(telemetry, () => comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
     const nextGeneration = atual.vivaGeneration + 1;
     const fileRevision = textoSeguro(dados.fileRevision);
+    if (telemetry) {
+      telemetry.generation = nextGeneration;
+      telemetry.fileRevision = fileRevision;
+    }
+    vivaProofTelemetry.emit(telemetry, "generation_calculated", {
+      generation: nextGeneration,
+      fileRevision,
+      sucesso: true
+    }, depsInstrumentados);
     let escrita = null;
 
     if (typeof dados.escreverArquivo === "function") {
       const inicioArquivo = process.hrtime.bigint();
-      escrita = await dados.escreverArquivo({ clienteId: cliente, state: atual, nextGeneration, fileRevision });
+      escrita = await dados.escreverArquivo({
+        clienteId: cliente,
+        state: atual,
+        nextGeneration,
+        fileRevision,
+        vivaProofTelemetry: telemetry
+      });
       if (escrita === false || escrita?.ok === false) {
         if (escrita?.tipoFalha === "mutacao_viva_nao_confirmada") {
           logMutacaoVivaNaoConfirmada(deps, {
@@ -764,8 +804,8 @@ async function registrarMutacaoDuravel(clienteId = "admin", dados = {}, deps = {
       pendingCheckpointTargetGeneration: atual.pendingCheckpointTargetGeneration ?? null,
       pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
       authorityReady: false
-    }, dados.motivo || "manifest_state_mutacao");
-  }, deps);
+    }, dados.motivo || "manifest_state_mutacao", telemetry);
+    }, depsInstrumentados));
 }
 
 async function capturarTargetCheckpoint(clienteId = "admin", dados = {}, deps = {}) {
@@ -799,10 +839,25 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
   const target = numeroInteiroNaoNegativo(dados.targetGeneration);
   if (target === null) return { ok: false, motivo: "target_generation_invalido" };
 
-  return comTransacao(async (client) => {
+  const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.criarContexto(cliente, deps, {
+    caller: "checkpoint"
+  });
+  const depsInstrumentados = telemetry
+    ? { ...deps, vivaProofTelemetry: telemetry }
+    : deps;
+  if (telemetry) telemetry.generation = target;
+  vivaProofTelemetry.emit(telemetry, "mutation_begin", {
+    generation: target,
+    fileRevision: dados.checkpointRevision,
+    caller: "checkpoint",
+    sucesso: true
+  }, depsInstrumentados);
+
+  return await vivaProofTelemetry.executarComContexto(telemetry, () => comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
     const checkpointRevision = textoSeguro(dados.checkpointRevision);
+    if (telemetry) telemetry.fileRevision = checkpointRevision;
     if (checkpointRevision) {
       if (atual.pendingCheckpointRevision !== checkpointRevision ||
           atual.pendingCheckpointTargetGeneration !== target) {
@@ -919,7 +974,7 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
         pendingCheckpointTargetGeneration: null,
         pendingCheckpointStartedAt: null,
         authorityReady: false
-      }, dados.motivo || "manifest_state_checkpoint");
+      }, dados.motivo || "manifest_state_checkpoint", telemetry);
     } catch (erroDb) {
       logCheckpointB2C(deps, {
         clienteId: cliente,
@@ -963,7 +1018,7 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
       checkpointRevision,
       legacyFileProof
     };
-  }, deps);
+    }, depsInstrumentados));
 }
 
 async function registrarLegacySyncDuravel(clienteId = "admin", dados = {}, deps = {}) {
