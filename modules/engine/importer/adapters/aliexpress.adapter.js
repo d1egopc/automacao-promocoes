@@ -7,7 +7,8 @@ const {
 } = require("../../link-role.service");
 const {
   papelExigeAfiliacaoWorkspaceAliExpress,
-  validarProvaAfiliacaoWorkspaceAliExpress
+  validarProvaAfiliacaoWorkspaceAliExpress,
+  criarProvaAfiliacaoWorkspaceAliExpress
 } = require("../../../marketplaces/aliexpress/afiliacao-workspace");
 
 function texto(valor = "") {
@@ -591,6 +592,16 @@ function provenienciaAfiliacaoWorkspaceAliExpress(produto = {}, clienteId = "", 
   );
 }
 
+function provaAssinadaDaConversaoAliExpress(prova = {}, { clienteId = "", credenciais = {}, urlOriginal = "", urlAfiliada = "", papel = "" } = {}) {
+  if (!validarProvaAfiliacaoWorkspaceAliExpress(prova, { clienteId, credenciais }).valida ||
+      !texto(urlOriginal) || !texto(urlAfiliada) ||
+      texto(prova.urlAfiliadaWorkspace) !== texto(urlAfiliada)) return prova;
+  return criarProvaAfiliacaoWorkspaceAliExpress({
+    clienteId, credenciais, urlOriginal, urlAfiliadaWorkspace: urlAfiliada,
+    papel: papel || "produto", conversaoStatus: "convertida", motivoConversao: prova.motivoConversao
+  });
+}
+
 async function converterLinksAlternativosAliExpress({
   linksClassificados = [],
   importarLegado,
@@ -953,7 +964,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     return { ok: false, marketplace: "aliexpress", motivo: "preco_indisponivel", linkOriginal: urlOriginalEngine };
   }
 
-  const linksClassificadosComConversao = await converterLinksAlternativosAliExpress({
+  const linksConvertidos = await converterLinksAlternativosAliExpress({
     linksClassificados,
     importarLegado,
     integracao,
@@ -964,6 +975,18 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     urlPrincipal: urlOriginalEngine,
     linkAfiliadoPrincipal: linkAfiliado,
     produtoPrincipal: produto
+  });
+  const linksClassificadosComConversao = linksConvertidos.map(item => {
+    if (item.renderizavel !== true) return item;
+    const prova = provaAssinadaDaConversaoAliExpress(item.afiliacaoWorkspace || item.conversaoWorkspace || {}, {
+      clienteId, credenciais, urlOriginal: item.urlOriginal,
+      urlAfiliada: item.urlAfiliadaWorkspace || item.urlAfiliada, papel: item.papelLink
+    });
+    return { ...item, afiliacaoWorkspace: prova };
+  });
+  const provaPrincipalAssinada = provaAssinadaDaConversaoAliExpress(afiliacaoPrincipal.prova, {
+    clienteId, credenciais, urlOriginal: urlOriginalEngine,
+    urlAfiliada: linkAfiliado, papel: linkEscolhido.papelLink || "produto"
   });
 
   const linksSeguros = linksClassificadosComConversao.filter(item => {
@@ -1070,7 +1093,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados: linksClassificadosComConversao,
       linksFalhosWorkspace,
-      afiliacaoWorkspace: afiliacaoPrincipal.prova,
+      afiliacaoWorkspace: provaPrincipalAssinada,
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,
       precoRadarUsado: precoOrigem === "texto_radar",

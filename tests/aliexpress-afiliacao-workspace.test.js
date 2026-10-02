@@ -6,6 +6,7 @@ const { criarGerarLinkAliExpress } = require("../modules/marketplaces/conversore
 const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
 const {
   criarProvaAfiliacaoWorkspaceAliExpress,
+  validarProvaAfiliacaoWorkspaceAliExpress,
   validarOfertaAfiliacaoWorkspaceAliExpress
 } = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
 const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
@@ -143,6 +144,14 @@ async function testarAppEPcConvertem() {
   assert.strictEqual(pc.urlOriginal, "https://a.aliexpress.com/_pcOriginal");
   assert.strictEqual(app.papelLink, "link_app");
   assert.strictEqual(pc.papelLink, "link_pc");
+  for (const link of [app, pc]) {
+    assert.strictEqual(validarProvaAfiliacaoWorkspaceAliExpress(link.afiliacaoWorkspace, {
+      clienteId: "workspace_a", credenciais: CREDENCIAIS, exigirAssinatura: true
+    }).valida, true, "RIO persiste prova assinada da conversao API");
+  }
+  assert.strictEqual(validarProvaAfiliacaoWorkspaceAliExpress(resultado.metadata.afiliacaoWorkspace, {
+    clienteId: "workspace_a", credenciais: CREDENCIAIS, exigirAssinatura: true
+  }).valida, true, "RIO entrega prova principal assinada para Achados");
   assert.strictEqual(resultado.imagem, "https://ae01.alicdn.com/produto.jpg", "o PC pode enriquecer a imagem sem desaparecer da saida");
 }
 

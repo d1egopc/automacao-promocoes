@@ -244,7 +244,9 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
       ? universal.comercial.beneficios.map(texto).filter(Boolean) : [],
     imagem: texto(universal.midia?.imagemPrincipal),
     imagemOrigem: texto(universal.midia?.origemImagem || metadata.imagemOrigem),
-    urlOriginal: texto(universal.produto.urlCanonica || universal.produto.urlOriginal),
+    urlOriginal: texto(universal.marketplace === "magalu"
+      ? (universal.produto.urlOriginal || universal.produto.urlCanonica)
+      : (universal.produto.urlCanonica || universal.produto.urlOriginal)),
     urlAfiliada: texto(universal.afiliacao.urlAfiliada),
     // Somente a evidência de saída do importer; nunca aceitar esses campos da API pública.
     linksComerciais: linksCompactos(metadata.linksComerciais, universal.marketplace),

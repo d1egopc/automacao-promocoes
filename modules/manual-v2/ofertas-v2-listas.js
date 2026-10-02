@@ -8,6 +8,7 @@ const { listarDestinosManuaisV2Async } = require("./manual-destinations");
 const { enviarOfertaManualV2 } = require("./manual-dispatcher");
 const { INTERVALO_AUTO_MINIMO_MS, INTERVALO_AUTO_MAXIMO_MS } = require("./manual-auto-dispatch");
 const { buscarAchado } = require("./ofertas-v2-achados");
+const { gerarPreviewCaptureManualV2, urlAliExpressCaptureSegura } = require("./manual-capture.service");
 const { identidadeCanonica: identidadeCanonicaBase, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
 const {
   JANELA_ENVIO_RECENTE_MS,
@@ -187,25 +188,85 @@ function papelContextual(marketplace, link) {
   }
   return "";
 }
+
+async function revalidarAchadoAliExpress(achado, clienteId, deps, credenciais) {
+  const provaLegada = achado.afiliacaoWorkspace || {};
+  const urlProduto = urlAliExpressCaptureSegura(achado.urlOriginal);
+  if (texto(provaLegada.assinatura) ||
+      !validarProvaAfiliacaoWorkspaceAliExpress(provaLegada, { clienteId, credenciais }).valida ||
+      texto(provaLegada.urlAfiliadaWorkspace) !== texto(achado.urlAfiliada) ||
+      !urlProduto.ok || urlProduto.itemId !== texto(achado.produtoId) ||
+      typeof deps.gerarLinkAfiliadoCliente !== "function")
+    throw erro("afiliacao_workspace_incompleta", 422);
+
+  for (const link of lista(achado.linksComerciais)) {
+    const prova = link?.afiliacaoWorkspace || {};
+    const urlLink = urlAliExpressCaptureSegura(link?.urlOriginal);
+    if (papelContextual("aliexpress", link) !== "produto" ||
+        !urlLink.ok || urlLink.itemId !== texto(achado.produtoId) ||
+        texto(link.urlAfiliadaWorkspace || link.urlAfiliada) !== texto(achado.urlAfiliada) ||
+        !validarProvaAfiliacaoWorkspaceAliExpress(prova, { clienteId, credenciais }).valida)
+      throw erro("afiliacao_workspace_incompleta", 422);
+  }
+
+  let resultado;
+  try {
+    resultado = await gerarPreviewCaptureManualV2({
+      marketplace: "aliexpress", urlOriginal: urlProduto.url,
+      titulo: achado.titulo, produtoId: achado.produtoId, precoAtual: achado.precoAtual
+    }, {
+      clienteId, getIntegracaoCliente: deps.getIntegracaoCliente,
+      gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente, fetch: deps.fetch
+    });
+  } catch (_) {
+    throw erro("afiliacao_workspace_incompleta", 422);
+  }
+  const oferta = resultado?.oferta || {};
+  const prova = oferta.afiliacaoWorkspaceVerificada || {};
+  if (texto(oferta.produtoId) !== texto(achado.produtoId) ||
+      texto(oferta.urlOriginal) !== urlProduto.url ||
+      texto(prova.urlOriginal) !== urlProduto.url ||
+      texto(prova.urlAfiliadaWorkspace) !== texto(oferta.urlAfiliada) ||
+      texto(prova.papel) !== "produto" ||
+      !validarProvaAfiliacaoWorkspaceAliExpress(prova, { clienteId, credenciais, exigirAssinatura: true }).valida)
+    throw erro("afiliacao_workspace_incompleta", 422);
+  return { urlOriginal: oferta.urlOriginal, urlAfiliada: oferta.urlAfiliada, prova };
+}
+
 async function ofertaDoAchado(achado, clienteId, deps = {}) {
   const marketplace = achado.marketplace;
   const integracao = typeof deps.getIntegracaoCliente === "function" ? deps.getIntegracaoCliente(clienteId, marketplace) || {} : {};
   const credenciais = integracao.credenciais || integracao || {};
   // Achados só é alimentada depois do importer. Reusar sua conversão comprovada,
   // inclusive para shortlinks APP/PC/resgate que o capture manual rejeita.
-  const urlPrincipal = texto(achado.urlAfiliada);
+  let urlPrincipal = texto(achado.urlAfiliada);
   let provaPrincipal = achado.afiliacaoWorkspace || {};
+  let linksAchado = lista(achado.linksComerciais);
+  let urlOriginalAchado = achado.urlOriginal;
   if (marketplace === "aliexpress" &&
       (!validarProvaAfiliacaoWorkspaceAliExpress(provaPrincipal, { clienteId, credenciais, exigirAssinatura: true }).valida ||
        texto(provaPrincipal.urlAfiliadaWorkspace) !== urlPrincipal)) {
     // O importer pode escolher o PC já convertido como CTA principal técnico.
     // A prova continua com papel PC (ou APP), sem reinterpretá-lo como Produto.
-    provaPrincipal = lista(achado.linksComerciais).map((link) => link?.afiliacaoWorkspace || {})
+    provaPrincipal = linksAchado.map((link) => link?.afiliacaoWorkspace || {})
       .find((prova) => ["link_pc", "link_app"].includes(texto(prova.papel)) &&
         texto(prova.urlAfiliadaWorkspace) === urlPrincipal &&
         validarProvaAfiliacaoWorkspaceAliExpress(prova, { clienteId, credenciais, exigirAssinatura: true }).valida) || {};
+    if (!Object.keys(provaPrincipal).length) {
+      const revalidada = await revalidarAchadoAliExpress(achado, clienteId, deps, credenciais);
+      urlPrincipal = revalidada.urlAfiliada;
+      urlOriginalAchado = revalidada.urlOriginal;
+      provaPrincipal = revalidada.prova;
+      linksAchado = [];
+    }
   }
   const principal = { url: urlPrincipal, prova: provaPrincipal };
+  const urlOriginalMagalu = marketplace === "magalu" &&
+    texto(achado.urlOriginal) === urlPrincipal &&
+    texto(provaPrincipal.workspaceId) === texto(clienteId) &&
+    texto(provaPrincipal.productId) === texto(achado.produtoId) &&
+    texto(provaPrincipal.urlAfiliadaWorkspace) === urlPrincipal
+    ? texto(provaPrincipal.urlOriginal) : "";
   const contextuais = new Map();
   const provas = principal.prova ? [principal.prova] : [];
   const linksVerificados = ["produto", "link_produto"].includes(texto(principal.prova?.papel)) ? [{
@@ -214,7 +275,7 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
     renderizavel: true, conversaoStatus: "convertida", afiliacaoWorkspace: principal.prova
   }] : [];
   const ocorrencias = new Set();
-  for (const link of lista(achado.linksComerciais)) {
+  for (const link of linksAchado) {
     const papel = papelContextual(marketplace, link);
     if (!papel) continue; // Papéis incompatíveis são descartados, nunca reinterpretados.
     const original = texto(link.urlOriginal || link.url);
@@ -255,7 +316,7 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
     cupom: achado.cupom, categoria: achado.categoria, imagem: achado.imagem,
     parcelamento: achado.parcelamento, frete: achado.frete,
     beneficioTexto: lista(achado.beneficios).map(texto).filter(Boolean).join("\n"),
-    urlOriginal: achado.urlOriginal, urlAfiliada: principal.url,
+    urlOriginal: urlOriginalMagalu || urlOriginalAchado, urlAfiliada: principal.url,
     linkApp: contextuais.get("link_app") || "", linkPC: contextuais.get("link_pc") || "",
     linkMoedas: contextuais.get("link_moedas") || "",
     linkResgate: contextuais.get("resgate") || "",
