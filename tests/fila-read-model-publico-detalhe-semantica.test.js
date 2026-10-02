@@ -170,8 +170,8 @@ function model(historicoLeve, visao) {
     foto: ""
   });
   const comErro = model([semImagem], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 1, "terminal sem imagem real entra em Erros");
-  assert.strictEqual(comErro.itens[0].motivoErroPublico, "sem_imagem");
+  assert.strictEqual(comErro.metricas.comErro, 1, "terminal sem envio entra em Erros");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "expirada_operacional", "ausencia visual nao inventa sem_imagem sem causa persistida");
 }
 
 {
@@ -182,8 +182,8 @@ function model(historicoLeve, visao) {
     destinosElegiveis: 2
   });
   const comErro = model([semDestinoComprovado], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 0, "sem destino compativel nunca e erro de transporte");
-  assert.strictEqual(comErro.itens.length, 0);
+  assert.strictEqual(comErro.metricas.comErro, 1, "terminal sem envio entra no KPI Erro sem fingir falha de transporte");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "expirada_operacional");
 }
 
 {
@@ -193,7 +193,8 @@ function model(historicoLeve, visao) {
     destinosEstado: []
   });
   const comErro = model([semDestinoEsperado], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 0, "sem destino sem prova historica de elegibilidade fica fora de Erros");
+  assert.strictEqual(comErro.metricas.comErro, 1, "terminal sem destino permanece na particao Erro");
+  assert.strictEqual(comErro.itens[0].motivoErroPublico, "expirada_operacional");
 }
 
 {
@@ -208,8 +209,8 @@ function model(historicoLeve, visao) {
     destinosEstado: []
   });
   const comErro = model([expiradaIsolada, naoEnviadoIsolado], VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 0, "expirada_operacional/nao_enviado isolados nao entram em Erros");
-  assert.strictEqual(comErro.itens.length, 0);
+  assert.strictEqual(comErro.metricas.comErro, 2, "todo terminal sem envio entra em Erros");
+  assert.strictEqual(comErro.itens.length, 2);
 }
 
 {
@@ -228,17 +229,17 @@ function model(historicoLeve, visao) {
     registro("antigo_sem_motivo", "nao_enviado", { status: "expirada_operacional", destinos: [], destinosEstado: [] })
   ];
   const comErro = model(casos, VISAO_COM_ERRO);
-  assert.strictEqual(comErro.metricas.comErro, 2, "contador Erro usa somente falhas verdadeiras");
+  assert.strictEqual(comErro.metricas.comErro, 4, "contador Erro fecha a particao de terminais sem envio");
   assert.strictEqual(comErro.totalFiltrado, comErro.metricas.comErro);
   assert.strictEqual(comErro.itens.length, comErro.metricas.comErro);
   assert.deepStrictEqual(
     new Set(comErro.itens.map(item => item.motivoErroPublico)),
-    new Set(["falha_envio", "sem_imagem"])
+    new Set(["falha_envio", "expirada_operacional"])
   );
   assert.strictEqual(
     motivoErroPublicoTerminal({ status: "expirada_operacional", imagem: "https://img.test/ok.jpg" }),
-    "sem_titulo",
-    "terminal visualmente incompleto continua diagnosticavel, mesmo sem falha de transporte"
+    "expirada_operacional",
+    "causa persistida prevalece e a incompletude visual nao inventa sem_titulo"
   );
 }
 

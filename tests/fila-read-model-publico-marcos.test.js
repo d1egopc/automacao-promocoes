@@ -216,6 +216,28 @@ function registroTerminal(id, statusPublico, extra = {}) {
 }
 
 {
+  const falhaAntiga = registroTerminal("dup_resultado", "nao_enviado", {
+    chave: "chave_dup_resultado",
+    finalizadoEm: iso(AGORA - 10 * 60 * 1000),
+    motivo: "erro_envio"
+  });
+  const sucessoMaisRecente = registroTerminal("dup_resultado", "enviado", {
+    chave: "chave_dup_resultado",
+    finalizadoEm: iso(AGORA - 5 * 60 * 1000)
+  });
+  const model = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: [sucessoMaisRecente, falhaAntiga],
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS
+  });
+  assert.strictEqual(model.metricas.processadas, 1, "identidade terminal e contada uma unica vez");
+  assert.strictEqual(model.metricas.enviadas, 1, "resultado terminal mais recente vence");
+  assert.strictEqual(model.metricas.comErro, 0, "resultado antigo nao contamina a particao Erro");
+  assert.strictEqual(model.metricas.fechaMatematicamente, true);
+}
+
+{
   const inicial = {
     clienteId: "cliente_marcos",
     itens: [
@@ -303,10 +325,10 @@ function registroTerminal(id, statusPublico, extra = {}) {
     periodo: "hoje",
     visao: VISAO_PROCESSADAS
   });
-  assert.strictEqual(hojeProcessadas.metricas.processadas, 0, "Processadas hoje usa dataEntradaFila e exclui entrada de 14/09 23:59");
+  assert.strictEqual(hojeProcessadas.metricas.processadas, 1, "Processadas hoje usa a terminalizacao de 15/09 00:02");
   assert.strictEqual(hojeProcessadas.metricas.enviadas, 1, "Enviadas hoje usa timestamp terminal de 15/09 00:02");
   assert.strictEqual(hojeProcessadas.metricas.emDistribuicao, 0, "terminal existente nao vira emDistribuicao artificial");
-  assert.strictEqual(hojeProcessadas.metricas.fechaMatematicamente, false, "na virada, metricas por marco proprio podem nao fechar");
+  assert.strictEqual(hojeProcessadas.metricas.fechaMatematicamente, true, "todos os KPIs usam a mesma coorte terminal");
 
   const hojeEnviadas = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
@@ -324,7 +346,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     periodo: "7dias",
     visao: VISAO_PROCESSADAS
   });
-  assert.strictEqual(seteDiasProcessadas.metricas.processadas, 1, "7 dias inclui Processada pelo marco de entrada");
+  assert.strictEqual(seteDiasProcessadas.metricas.processadas, 1, "7 dias inclui Processada pelo marco terminal");
   assert.strictEqual(seteDiasProcessadas.metricas.enviadas, 1, "7 dias inclui Enviada pelo marco terminal");
   assert.strictEqual(seteDiasProcessadas.metricas.fechaMatematicamente, true);
 }
@@ -339,9 +361,10 @@ function registroTerminal(id, statusPublico, extra = {}) {
     registroTerminal("falha_metric", "nao_enviado")
   ];
   const model = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", hot, historicoLeve: hist, agoraMs: AGORA });
-  assert.strictEqual(model.metricas.processadas, 66);
+  assert.strictEqual(model.metricas.processadas, 67);
   assert.strictEqual(model.metricas.enviadas, 66);
   assert.strictEqual(model.metricas.naoEnviadas, 1);
+  assert.strictEqual(model.metricas.comErro, 1);
   assert.strictEqual(model.metricas.emDistribuicao, 3);
   assert.strictEqual(model.metricas.fechaMatematicamente, true);
 }
@@ -371,7 +394,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
 {
   const totalParciais = 59;
   const totalNaoEnviadas = 231;
-  const totalComErro = totalParciais + totalNaoEnviadas;
+  const totalComErro = totalNaoEnviadas;
   const hist = [
     ...Array.from({ length: totalParciais }, (_, i) => registroTerminal(`com_erro_parcial_${i}`, "parcial", {
       dataEntradaFila: iso(AGORA - 2 * 60 * 60 * 1000 - i),
@@ -399,6 +422,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     }))
   ];
   const esperadoGlobal = hist
+    .filter(registro => registro.statusPublico === "nao_enviado")
     .map(registro => {
       const item = registro.item;
       return {
@@ -436,9 +460,9 @@ function registroTerminal(id, statusPublico, extra = {}) {
     page: 2,
     limit: 50
   });
-  assert.strictEqual(page1.totalFiltrado, totalComErro, "Erro publico soma excecoes reais");
+  assert.strictEqual(page1.totalFiltrado, totalComErro, "Erro publico contem todos os terminais sem envio");
   assert.strictEqual(page1.metricas.comErro, totalComErro);
-  assert.strictEqual(page1.totalPages, 6);
+  assert.strictEqual(page1.totalPages, 5);
   assert.strictEqual(page1.hasMore, true);
   assert(page1.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "visao com_erro nao expoe parcial/nao_enviado como status publico");
   assert(page1.itens.every(item => item.motivoErroPublico === "falha_envio"), "visao com_erro expoe motivo publico real");
@@ -463,6 +487,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     limit: 50
   });
   assert.strictEqual(filtroMarketplace.totalFiltrado, esperadoGlobal.filter(item => item.marketplace === "mercadolivre").length, "filtro marketplace aplica antes da paginacao Erro");
+  assert.strictEqual(filtroMarketplace.metricas.processadas, filtroMarketplace.metricas.enviadas + filtroMarketplace.metricas.comErro, "marketplace preserva a coorte unica");
 
   const filtroCanal = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
@@ -475,6 +500,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     limit: 50
   });
   assert.strictEqual(filtroCanal.totalFiltrado, esperadoGlobal.filter(item => item.canal === "whatsapp").length, "filtro canal aplica antes da paginacao Erro");
+  assert.strictEqual(filtroCanal.metricas.processadas, filtroCanal.metricas.enviadas + filtroCanal.metricas.comErro, "canal preserva a coorte unica");
 
   const filtroBusca = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_marcos",
@@ -505,8 +531,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
 }
 
 {
-  const antigo = registroTerminal("old_1", "enviado", { dataEntradaFila: iso(AGORA - 8 * DIA) });
-  const recente = registroTerminal("new_1", "enviado", { dataEntradaFila: iso(AGORA - 6 * DIA) });
+  const antigo = registroTerminal("old_1", "enviado", { dataEntradaFila: iso(AGORA - 8 * DIA), finalizadoEm: iso(AGORA - 8 * DIA) });
+  const recente = registroTerminal("new_1", "enviado", { dataEntradaFila: iso(AGORA - 6 * DIA), finalizadoEm: iso(AGORA - 6 * DIA) });
   const model = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", historicoLeve: [antigo, recente], agoraMs: AGORA, janelaDias: 7 });
   assert.strictEqual(model.metricas.processadas, 1, "janela de retencao publica e respeitada");
 }
@@ -596,8 +622,8 @@ function registroTerminal(id, statusPublico, extra = {}) {
       page: 1,
       limit: 1
     });
-    assert.strictEqual(processadasHoje.totalFiltrado, 2, "Processadas usa o marco local e une as particoes");
-    assert.strictEqual(processadasHoje.totalPages, 2, "paginacao global preservada apos a uniao");
+    assert.strictEqual(processadasHoje.totalFiltrado, 3, "Processadas usa o marco terminal local e une sucesso e erro");
+    assert.strictEqual(processadasHoje.totalPages, 3, "paginacao global preservada apos a uniao");
     assert.strictEqual(processadasHoje.itens.length, 1);
     const processadasHojePagina2 = construirReadModelPublicoPorMarcos({
       clienteId: "cliente_marcos",
@@ -727,7 +753,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
         periodo: "7dias",
         visao: VISAO_PROCESSADAS
       });
-      assert.strictEqual(processadasSeteDias.totalFiltrado, 2, "7 dias preserva Processadas na fronteira UTC");
+      assert.strictEqual(processadasSeteDias.totalFiltrado, 3, "7 dias preserva todos os terminais na fronteira UTC");
       const errosSeteDias = construirReadModelPublicoPorMarcos({
         clienteId: "cliente_marcos",
         historicoLeve: leituraSeteDias.registros,

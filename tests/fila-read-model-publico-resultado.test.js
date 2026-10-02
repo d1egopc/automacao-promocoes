@@ -78,7 +78,7 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
   });
   const processadas = readModel({ historicoLeve: [semImagem] });
   const erros = readModel({ historicoLeve: [semImagem], visao: VISAO_COM_ERRO });
-  assert.strictEqual(processadas.itens.length, 0, "card sem imagem nao entra em Processadas");
+  assert.strictEqual(processadas.itens.length, 1, "todo terminal finalizado entra em Processadas mesmo com card incompleto");
   assert.strictEqual(erros.itens.length, 1);
   assert.strictEqual(erros.itens[0].motivoErroPublico, "sem_imagem");
   assert.strictEqual(erros.itens[0].erroPublico.titulo, "Imagem não resolvida");
@@ -94,6 +94,17 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
 }
 
 {
+  const semPreco = terminal("sem_preco", "nao_enviado", { precoAtual: "", preco: "", motivo: "sem_preco" });
+  const semLink = terminal("sem_link", "nao_enviado", { linkFinal: "", linkOriginal: "", motivo: "sem_link_afiliado" });
+  const erros = readModel({ historicoLeve: [semPreco, semLink], visao: VISAO_COM_ERRO });
+  assert.deepStrictEqual(
+    new Set(erros.itens.map(itemErro => itemErro.motivoErroPublico)),
+    new Set(["sem_preco", "link_mal_resolvido"]),
+    "causas especificas somente aparecem quando persistidas"
+  );
+}
+
+{
   const semDestino = terminal("sem_destino", "nao_enviado", {
     status: "expirada_operacional",
     motivo: "sem_destino_compativel",
@@ -101,7 +112,8 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
   });
   const erros = readModel({ historicoLeve: [semDestino], visao: VISAO_COM_ERRO });
   const processadas = readModel({ historicoLeve: [semDestino] });
-  assert.strictEqual(erros.itens.length, 0, "sem destino compativel nao e erro");
+  assert.strictEqual(erros.itens.length, 1, "terminal sem envio pertence ao subconjunto Erro");
+  assert.strictEqual(erros.itens[0].motivoErroPublico, "sem_destino_compativel");
   assert.strictEqual(processadas.itens.length, 1, "conclusao operacional completa permanece no historico coerente");
   assert.strictEqual(processadas.itens[0].statusPublico, "nao_enviada");
 }

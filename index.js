@@ -12744,7 +12744,7 @@ function metricasPublicasComAliases(metricas = {}) {
     taxaEnvio,
     erros: comErro,
     expiradas: 0,
-    formulaTaxaEnvio: "enviadas / processadas * 100; processadas conta somente conclusoes terminais visualmente completas"
+    formulaTaxaEnvio: "enviadas / processadas * 100; todos os KPIs usam conclusoes terminais no periodo"
   };
 }
 
