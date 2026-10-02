@@ -303,6 +303,21 @@ function aguardarFilaAsync() {
 
   {
     const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_checkpoint_expected", { motivo: "insert_1" }, { pool });
+    const divergente = await repo.capturarTargetCheckpoint("cliente_checkpoint_expected", {
+      expectedTargetGeneration: 0
+    }, { pool });
+    const state = await repo.lerStateObservacional("cliente_checkpoint_expected", { pool });
+
+    assert.strictEqual(divergente.ok, false);
+    assert.strictEqual(divergente.motivo, "checkpoint_expected_target_mismatch");
+    assert.strictEqual(state.state.vivaGeneration, 1);
+    assert.strictEqual(state.state.pendingCheckpointRevision, "");
+    assert.strictEqual(state.state.pendingCheckpointTargetGeneration, null);
+  }
+
+  {
+    const pool = criarPoolFake();
     const env = {
       FILA_V2_EXECUTOR_GENERATION_AUTHORITY: "1",
       FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES: "user_b2oogwwl"

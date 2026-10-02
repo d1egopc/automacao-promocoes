@@ -13,6 +13,7 @@ const metodosIndex = [
   "lerIntentMutacaoViva",
   "lerRemovalFences",
   "reconciliarIntentMutacaoViva",
+  "provarRecoveryRemovalFencesPendentes",
   "capturarTargetCheckpointCoordenado",
   "confirmarCheckpointCoordenado"
 ];

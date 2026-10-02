@@ -718,6 +718,9 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       persistenceMode: "worker",
       queuedAt: agoraMs()
     };
+    if (operation === OP_PREPARE) {
+      job.expectedVivaHash = payload.expectedVivaHash || null;
+    }
     if (operation === OP_VIVA_MUTATION) {
       job.mutationType = String(payload.mutationType || "");
       job.item = payload.item && typeof payload.item === "object" ? payload.item : {};
@@ -741,6 +744,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       job.previousHash = payload.previousHash || null;
       job.targetHash = payload.targetHash || null;
       job.legacyFenceHashes = Array.isArray(payload.legacyFenceHashes) ? payload.legacyFenceHashes : [];
+      job.vivaFenceHashes = Array.isArray(payload.vivaFenceHashes) ? payload.vivaFenceHashes : [];
     }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);

@@ -181,7 +181,7 @@ function ensureRevisionTemp(paths, revision) {
   return tempPath;
 }
 
-function sourceRead(paths, nowMs, dataDir, targetGeneration, progress = () => {}) {
+function sourceRead(paths, nowMs, dataDir, targetGeneration, progress = () => {}, expectedVivaHash = null) {
   const intent = mutationIntent.ler(dataDir, paths.cliente);
   if (!intent.ok || intent.exists) throw new Error(intent.motivo || "checkpoint_viva_intent_pending");
   const legacy = readArray(paths.arquivo, { absentOk: true });
@@ -196,6 +196,20 @@ function sourceRead(paths, nowMs, dataDir, targetGeneration, progress = () => {}
     const erro = new Error("checkpoint_source_changed_during_read");
     erro.code = "STALE_REVISION";
     throw erro;
+  }
+  if (expectedVivaHash) {
+    const vivaHash = mutationIntent.hashArquivo(paths.viva);
+    const vivaAfterHash = statOptional(paths.viva);
+    if (!sameOptionalIdentity(vivaAfter, vivaAfterHash)) {
+      const erro = new Error("checkpoint_source_changed_during_hash");
+      erro.code = "STALE_REVISION";
+      throw erro;
+    }
+    if (vivaHash !== expectedVivaHash) {
+      const erro = new Error("checkpoint_viva_hash_mismatch");
+      erro.code = "VIVA_HASH_MISMATCH";
+      throw erro;
+    }
   }
   const operacional = obterFilaOperacionalV2(dataDir);
   const mergeStarted = process.hrtime.bigint();
@@ -247,7 +261,7 @@ function prepare(job) {
   try {
     fs.mkdirSync(paths.diretorio, { recursive: true });
     const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir,
-      Number(job.targetGeneration || 0), progress);
+      Number(job.targetGeneration || 0), progress, job.expectedVivaHash || null);
     staleStage = "before_backup";
     if (memoryStages) memoryStages.afterMerge = memoriaAtual();
     const currentLegacy = statOptional(paths.arquivo);
@@ -548,8 +562,26 @@ function mutateViva(job) {
 function probeVivaSnapshot(job) {
   const dataDir = normalizarDataDir(job.dataDir);
   const paths = caminhoWorkspace(dataDir, job.clienteId);
+  const vivaBefore = statOptional(paths.viva);
   const currentHash = job.probeViva === false ? null : mutationIntent.hashArquivo(paths.viva);
+  const vivaAfterHash = statOptional(paths.viva);
+  if (!sameOptionalIdentity(vivaBefore, vivaAfterHash)) {
+    return { ok: false, operation: OP_VIVA_SNAPSHOT_PROBE, motivo: "viva_snapshot_changed_during_probe" };
+  }
   let legacyFenceCovered = null;
+  const probeVivaFence = Array.isArray(job.vivaFenceHashes) && job.vivaFenceHashes.length > 0;
+  let vivaFenceCovered = null;
+  if (probeVivaFence) {
+    const hashes = new Set(job.vivaFenceHashes);
+    const viva = readArray(paths.viva, { absentOk: true });
+    if (!sameOptionalIdentity(vivaAfterHash, viva.identity)) {
+      return { ok: false, operation: OP_VIVA_SNAPSHOT_PROBE, motivo: "viva_snapshot_changed_during_probe" };
+    }
+    const operacional = obterFilaOperacionalV2(dataDir);
+    vivaFenceCovered = !viva.value.some(entrada =>
+      operacional.identidadesItemFilaV2(entrada?.item || entrada)
+        .some(id => hashes.has(mutationIntent.digest(id))));
+  }
   if (Array.isArray(job.legacyFenceHashes) && job.legacyFenceHashes.length) {
     const hashes = new Set(job.legacyFenceHashes);
     const legacy = readArray(paths.arquivo, { absentOk: true });
@@ -564,7 +596,14 @@ function probeVivaSnapshot(job) {
     currentHash,
     matchPrevious: currentHash === job.previousHash,
     matchTarget: currentHash === job.targetHash,
-    legacyFenceCovered
+    legacyFenceCovered,
+    ...(probeVivaFence ? {
+      currentIdentity: vivaAfterHash ? {
+        size: Number(vivaAfterHash.size || 0),
+        mtimeMs: Number(vivaAfterHash.mtimeMs || 0)
+      } : null,
+      vivaFenceCovered
+    } : {})
   };
 }
 

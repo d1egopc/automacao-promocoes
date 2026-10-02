@@ -813,6 +813,20 @@ async function capturarTargetCheckpoint(clienteId = "admin", dados = {}, deps = 
   return comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const state = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    const expectedTargetGeneration = dados.expectedTargetGeneration === undefined
+      ? null
+      : numeroInteiroNaoNegativo(dados.expectedTargetGeneration);
+    if (dados.expectedTargetGeneration !== undefined &&
+        (expectedTargetGeneration === null || expectedTargetGeneration !== state.vivaGeneration)) {
+      return {
+        ok: false,
+        motivo: "checkpoint_expected_target_mismatch",
+        clienteId: cliente,
+        expectedTargetGeneration,
+        targetGeneration: state.vivaGeneration,
+        state
+      };
+    }
     const checkpointRevision = textoSeguro(dados.checkpointRevision) || gerarRevisionArquivo();
     const startedAt = new Date().toISOString();
     const pendente = await atualizarState(client, {

@@ -3526,6 +3526,7 @@ function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision 
       clienteId,
       checkpointRevision,
       targetGeneration: opcoes.targetGeneration,
+      expectedVivaHash: opcoes.expectedVivaHash || null,
       dataDir: process.env.DATA_DIR || "/data",
       nowMs: Date.now(),
       persistenceMode
@@ -3770,7 +3771,8 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
   const decisao = checkpointFilaV2.iniciarCheckpoint(cliente, {
     agora,
     forcar: opcoes.forcar === true,
-    motivo
+    motivo,
+    removalFenceRecovery: opcoes.removalFenceRecovery === true
   });
   if (!decisao.deve) {
     if (decisao.checkpointConcurrentSkip) {
@@ -3802,7 +3804,10 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
     return { ok: false, motivo: "removal_fence_merge_failed", estado: estadoFalha };
   }
   const targetDb = await filaOperacionalV2.capturarTargetCheckpointCoordenado(cliente, {
-    motivo: decisao.motivo || motivo
+    motivo: decisao.motivo || motivo,
+    ...(opcoes.expectedTargetGeneration !== undefined
+      ? { expectedTargetGeneration: opcoes.expectedTargetGeneration }
+      : {})
   }, {
     agora,
     logger: console
@@ -3817,8 +3822,10 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
     ? targetDb.targetGeneration || 0
     : manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
   const checkpointTemp = targetDb.ok === true
-    ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision, {
-        persistenceMode, targetGeneration: vivaGenerationAlvoCheckpoint
+      ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision, {
+        persistenceMode,
+        targetGeneration: vivaGenerationAlvoCheckpoint,
+        expectedVivaHash: opcoes.expectedVivaHash || null
       })
     : { ok: false, motivo: "checkpoint_db_indisponivel" };
   const salvou = checkpointTemp.ok === true
@@ -4088,6 +4095,25 @@ function callerTagInicializacaoFila(motivo = "uso_fila") {
   return `${origem}_lazy_init`;
 }
 
+async function concluirRecoveryRemovalFencePendente(clienteId, recovered) {
+  if (recovered?.checkpointRequired !== true) return recovered;
+  const checkpoint = await checkpointLegadoFilaV22C(clienteId, "recovery_removal_fence_restart", {
+    forcar: true,
+    removalFenceRecovery: true,
+    expectedTargetGeneration: recovered.targetGeneration,
+    expectedVivaHash: recovered.expectedVivaHash
+  });
+  if (checkpoint?.ok !== true || checkpoint?.pulou === true) {
+    throw new Error(`removal_fence_checkpoint_recovery_${checkpoint?.motivo || "failed"}`);
+  }
+  const confirmado = await filaOperacionalV2.reconciliarIntentMutacaoViva(clienteId);
+  if (confirmado.ok !== true || confirmado.checkpointRequired === true ||
+      filaOperacionalV2.lerRemovalFences(clienteId).length) {
+    throw new Error(`removal_fence_checkpoint_unverified_${confirmado?.motivo || "pending"}`);
+  }
+  return { ...confirmado, removalFenceRecovered: true };
+}
+
 async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "uso_fila") {
   const cliente = normalizarClienteInicializacaoFila(clienteId);
   const estadoAtual = estadoFilaClienteInicializacao(cliente);
@@ -4101,8 +4127,11 @@ async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "us
   const inicializacao = Promise.resolve()
     .then(async () => {
       estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO);
-      const recovered = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente);
+      let recovered = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente, {
+        recoveryRemovalFenceCheckpoint: true
+      });
       if (recovered.ok !== true) throw new Error(`viva_intent_recovery_${recovered.motivo}`);
+      recovered = await concluirRecoveryRemovalFencePendente(cliente, recovered);
       carregarFila(cliente, callerTagInicializacaoFila(motivo), {
         intentRecovered: recovered.publicado === true,
         removedIdentityHashes: recovered.intent?.removedIdentityHashes || []
@@ -4151,8 +4180,11 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
   return executarMutacaoFilaClienteAsync(clienteId, `reconciliar_fila_v2_${contexto}`, async () => {
     const cliente = String(clienteId || "admin");
     const contextoTexto = String(contexto || "leitura");
-    const intentRecovery = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente);
+    let intentRecovery = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente, {
+      recoveryRemovalFenceCheckpoint: true
+    });
     if (intentRecovery.ok !== true) throw new Error(`viva_intent_recovery_${intentRecovery.motivo}`);
+    intentRecovery = await concluirRecoveryRemovalFencePendente(cliente, intentRecovery);
     const fences = filaOperacionalV2.lerRemovalFences(cliente);
     const intentDecision = intentRecovery.publicado === true
       ? { ok: true, autoridadeUsada: "intent", generationConclusiva: true, maisNova: true,

@@ -2665,8 +2665,84 @@ async function consultarSnapshotNoWorker(clienteId, deps, opcoes = {}) {
     previousHash: opcoes.previousHash || null,
     targetHash: opcoes.targetHash || null,
     legacyFenceHashes: opcoes.legacyFenceHashes || [],
+    vivaFenceHashes: opcoes.vivaFenceHashes || [],
     persistenceMode: "worker"
   });
+}
+
+async function provarRecoveryRemovalFencesPendentes(clienteId = "admin", fences = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.lerStateObservacional !== "function") {
+    return { ok: false, motivo: "removal_fence_db_reader_indisponivel", failClosed: true };
+  }
+  const db = await repo.lerStateObservacional(cliente, deps);
+  if (db?.ok !== true || !db.state) {
+    return { ok: false, motivo: "removal_fence_db_indisponivel", failClosed: true };
+  }
+  const state = db.state;
+  if (fences.some(fence => fence.generation > Number(state.vivaGeneration))) {
+    return { ok: false, motivo: "removal_fence_generation_incoerente", failClosed: true };
+  }
+  const pendentes = fences.filter(fence => fence.generation > Number(state.durableCheckpointGeneration));
+  if (!pendentes.length) return { ok: true, checkpointRequired: false, state };
+
+  const pendingRevision = texto(state.pendingCheckpointRevision || "");
+  const pendingTarget = state.pendingCheckpointTargetGeneration;
+  const pendingParcial = Boolean(pendingRevision) !== (pendingTarget !== null && pendingTarget !== undefined);
+  if (pendingParcial || (pendingRevision && Number(pendingTarget) > Number(state.vivaGeneration))) {
+    return { ok: false, motivo: "pending_ambiguo", failClosed: true };
+  }
+  const stateParaValidacao = pendingRevision
+    ? {
+        ...state,
+        pendingCheckpointRevision: null,
+        pendingCheckpointTargetGeneration: null,
+        pendingCheckpointStartedAt: null,
+        authorityReady: true,
+        authorityReadyGeneration: state.vivaGeneration,
+        authorityReadyRevision: state.revision
+      }
+    : state;
+  const stateValido = validarStateRecoveryGeneration(stateParaValidacao);
+  if (!stateValido.ok) return { ...stateValido, failClosed: true };
+  const manifesto = validarManifestoRecoveryGeneration(cliente, state, deps);
+  if (!manifesto.ok) return { ...manifesto, failClosed: true };
+  const vivaProof = validarProofPublicado(cliente, {
+    prefixo: "viva",
+    arquivoDados: FILA_VIVA_ARQUIVO,
+    arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+    generation: state.vivaGeneration,
+    proofDb: state.vivaFileProof
+  }, deps);
+  if (!vivaProof.ok) return { ...vivaProof, failClosed: true };
+
+  const probe = await consultarSnapshotNoWorker(cliente, deps, {
+    vivaFenceHashes: pendentes.flatMap(fence => fence.identityHashes)
+  });
+  if (probe.ok !== true || !probe.currentHash || probe.vivaFenceCovered !== true) {
+    return {
+      ok: false,
+      motivo: probe.ok !== true ? "removal_fence_snapshot_probe_failed" :
+        probe.vivaFenceCovered !== true ? "removal_fence_viva_not_covered" : "removal_fence_snapshot_hash_ausente",
+      failClosed: true
+    };
+  }
+  const identity = probe.currentIdentity || {};
+  if (Number(identity.size) !== Number(vivaProof.proof.size) ||
+      !mtimeCompatível(identity.mtimeMs, vivaProof.proof.mtimeMs)) {
+    return { ok: false, motivo: "removal_fence_snapshot_proof_mismatch", failClosed: true };
+  }
+  return {
+    ok: true,
+    pendente: false,
+    checkpointRequired: true,
+    motivo: "removal_fence_checkpoint_required",
+    targetGeneration: Number(state.vivaGeneration),
+    expectedVivaHash: probe.currentHash,
+    fenceGenerations: pendentes.map(fence => fence.generation),
+    state
+  };
 }
 
 async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
@@ -2708,7 +2784,11 @@ async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
         catch { return { ok: false, motivo: "removal_fence_cleanup_failed", failClosed: true }; }
       }
     }
-    return { ok: true, pendente: false };
+    const restantes = removalFence.listar(dataDir, cliente);
+    if (restantes.length && deps.recoveryRemovalFenceCheckpoint === true) {
+      return provarRecoveryRemovalFencesPendentes(cliente, restantes, deps);
+    }
+    return { ok: true, pendente: false, checkpointRequired: false };
   }
 
   const intent = leitura.intent;
@@ -5851,7 +5931,9 @@ function criarControladorCheckpointLegadoV2(opcoes = {}) {
   function deveCheckpoint(clienteId = "admin", opcoesCheckpoint = {}) {
     const agora = opcoesCheckpoint.agora || Date.now();
     const estado = obterEstado(clienteId);
-    if (!estado.dirty) return { deve: false, motivo: "limpo", estado: snapshot(clienteId, agora), politica };
+    if (!estado.dirty && opcoesCheckpoint.removalFenceRecovery !== true) {
+      return { deve: false, motivo: "limpo", estado: snapshot(clienteId, agora), politica };
+    }
     if (opcoesCheckpoint.forcar) return { deve: true, motivo: opcoesCheckpoint.motivo || "forcado", estado: snapshot(clienteId, agora), politica };
     const dirtyAgeMs = estado.dirtyDesde ? Math.max(0, agora - estado.dirtyDesde) : 0;
     const desdeCheckpointMs = estado.ultimoCheckpoint ? Math.max(0, agora - estado.ultimoCheckpoint) : dirtyAgeMs;
@@ -6024,6 +6106,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     prepararReadinessAutoridadeRecovery: (clienteId, deps = {}) => prepararReadinessAutoridadeRecovery(clienteId, { ...opcoes, ...deps }),
     reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
     reconciliarIntentMutacaoViva: (clienteId, deps = {}) => reconciliarIntentMutacaoViva(clienteId, { ...opcoes, ...deps }),
+    provarRecoveryRemovalFencesPendentes: (clienteId, fences = [], deps = {}) =>
+      provarRecoveryRemovalFencesPendentes(clienteId, fences, { ...opcoes, ...deps }),
     lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
       deps.env?.DATA_DIR || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
     lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(
@@ -6101,6 +6185,7 @@ module.exports = {
   filaVivaMaisNovaQueLegado,
   reconciliarFilaV2ParaLeitura,
   reconciliarIntentMutacaoViva,
+  provarRecoveryRemovalFencesPendentes,
   lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
     deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
   lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(
