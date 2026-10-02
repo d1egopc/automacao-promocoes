@@ -6026,6 +6026,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     reconciliarIntentMutacaoViva: (clienteId, deps = {}) => reconciliarIntentMutacaoViva(clienteId, { ...opcoes, ...deps }),
     lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
       deps.env?.DATA_DIR || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
+    lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(
+      deps.env?.DATA_DIR || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
     filtrarItensCercadosCheckpoint: (clienteId, itens, generation, deps = {}) => filtrarItensCercadosCheckpoint(clienteId, itens, generation, { ...opcoes, ...deps }),
     contemIdentidadeCercadaCheckpoint: (clienteId, itens, generation, deps = {}) => contemIdentidadeCercadaCheckpoint(clienteId, itens, generation, { ...opcoes, ...deps }),
