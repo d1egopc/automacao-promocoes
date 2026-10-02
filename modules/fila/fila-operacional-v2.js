@@ -32,6 +32,8 @@ const vivaProofTelemetry = require("./viva-proof-telemetry");
 const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
 const terminalIndexShadow = require("./terminal-index-shadow");
 const terminalIndexAuthority = require("./terminal-index-authority");
+const mutationIntent = require("./viva-mutation-intent");
+const removalFence = require("./viva-removal-fence");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -1749,6 +1751,7 @@ async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, ite
     posicaoLegada: deps.posicaoLegada,
     permitirRegressaoStatus: deps.permitirRegressaoStatus === true,
     exigirMutacao: deps.exigirMutacao === true,
+    checkpointSincronizado: deps.checkpointSincronizado === true,
     caller: deps.caller || deps.origem || deps.motivo,
     motivo: deps.motivo,
     rodadaId: deps.rodadaId,
@@ -1757,9 +1760,13 @@ async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, ite
     transactionId: contexto.vivaProofTelemetry?.transactionId,
     correlationId: contexto.vivaProofTelemetry?.correlationId,
     nowMs: deps.agora || Date.now(),
-    persistenceMode: "worker"
+    persistenceMode: "worker",
+    requiresCommit: true
   });
   if (resultado?.ok !== true) return resultado;
+  if (resultado.idempotente === true && resultado.terminalHistorico === true) {
+    return { ...resultado, persistenceMode: "worker" };
+  }
 
   const proof = publicarProofFilaViva(cliente, {
     generation: contexto.nextGeneration,
@@ -1774,7 +1781,12 @@ async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, ite
       etapa: "proof"
     };
   }
-  return { ...resultado, vivaFileProof: proof.proof, persistenceMode: "worker" };
+  const itemConfirmado = mutationType === "remove" ? {} : {
+    item: Number.isSafeInteger(resultado.itemPosition)
+      ? { ...item, posicaoLegada: resultado.itemPosition }
+      : item
+  };
+  return { ...resultado, ...itemConfirmado, vivaFileProof: proof.proof, persistenceMode: "worker" };
 }
 
 async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "mutacao", escritor = null, deps = {}) {
@@ -1784,6 +1796,17 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
   }
   if (typeof escritor !== "function") {
     return { ok: false, motivo: "writer_indisponivel" };
+  }
+
+  if (deps.skipIntentRecovery !== true) {
+    const recuperado = await reconciliarIntentMutacaoViva(cliente, deps);
+    if (recuperado.ok !== true) return { ok: false, motivo: recuperado.motivo, failClosed: true };
+    if (recuperado.publicado && deps.mutationType === recuperado.intent.mutationType &&
+        deps.mutationItem && mutationIntent.digest(JSON.stringify(deps.mutationItem)) === recuperado.intent.inputHash) {
+      return { ok: true, idempotente: true, motivo: "intent_retry_confirmado",
+        item: deps.mutationItem, generation: recuperado.intent.targetGeneration,
+        totalViva: recuperado.intent.itemCount };
+    }
   }
 
   const repo = repositoryManifestState(deps);
@@ -1802,12 +1825,21 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
       if (resultadoArquivo === false || resultadoArquivo?.ok === false) {
         return resultadoArquivo || { ok: false, motivo: "writer_retorno_false" };
       }
+      if (resultadoArquivo?.idempotente === true && resultadoArquivo?.terminalHistorico === true) {
+        return { ok: true, idempotente: true, terminalHistorico: true };
+      }
+      const fencePendente = removalFence.listar(
+        deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", cliente
+      ).length > 0;
+      const resultadoDuravel = fencePendente
+        ? { ...resultadoArquivo, legacyFileProof: null }
+        : resultadoArquivo;
       resultadoManifesto = escreverManifestoFilaV2(
         cliente,
         patchManifestoMutacaoCoordenada(state, nextGeneration, {
           ...deps,
           motivo: deps.motivo || operacao
-        }, resultadoArquivo, agora),
+        }, resultadoDuravel, agora),
         deps,
         "manifest_write"
       );
@@ -1815,7 +1847,7 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
       return {
         ok: true,
         vivaFileProof: resultadoArquivo?.vivaFileProof || null,
-        legacyFileProof: resultadoArquivo?.legacyFileProof || null
+        legacyFileProof: resultadoDuravel?.legacyFileProof || null
       };
     }
   }, deps);
@@ -1836,6 +1868,16 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
       resultadoArquivo,
       resultadoManifesto
     };
+  }
+
+  if (resultadoArquivo?.persistenceMode === "worker") {
+    const dataDir = deps.env?.DATA_DIR || process.env.DATA_DIR || "/data";
+    const pendente = mutationIntent.ler(dataDir, cliente);
+    if (pendente.ok === true && pendente.exists &&
+        pendente.intent.targetGeneration === resultadoDb.state?.vivaGeneration &&
+        pendente.intent.fileRevision === resultadoArquivo?.vivaFileProof?.fileRevision) {
+      try { mutationIntent.limpar(dataDir, cliente, pendente.intent.jobId); } catch (_) {}
+    }
   }
 
   return {
@@ -2090,8 +2132,22 @@ async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, de
   }
   const repo = repositoryManifestState(deps);
   const bootstrap = lerManifestoFilaV2(cliente, deps).manifesto;
+  const fencesAlvo = removalFence.listar(
+    deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", cliente
+  ).filter(fence => fence.generation <= Number(dados.targetGeneration || 0));
+  if (fencesAlvo.length && typeof dados.publicarCheckpoint !== "function") {
+    return { ok: false, motivo: "checkpoint_removal_fence_publish_required" };
+  }
   const resultadoDb = await repo.confirmarCheckpointDuravel(cliente, {
     ...dados,
+    ...(fencesAlvo.length ? {
+      publicarCheckpoint: async contexto => {
+        const publicado = await dados.publicarCheckpoint(contexto);
+        return publicado?.ok === true && publicado.fenceCoverageVerified === true
+          ? publicado
+          : { ok: false, motivo: "checkpoint_removal_fence_not_covered" };
+      }
+    } : {}),
     bootstrapManifest: dados.bootstrapManifest || bootstrap
   }, deps);
 
@@ -2130,6 +2186,24 @@ async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, de
     motivo: resultadoDb.motivo || dados.motivo || "checkpoint",
     agora: deps.agora || Date.now()
   }, deps);
+
+  if (manifesto.ok === true && Number(state.durableCheckpointGeneration) > 0 &&
+      Number(state.legacyFileProof?.generation) === Number(state.durableCheckpointGeneration)) {
+    const proofLegado = validarProofPublicado(cliente, {
+      prefixo: "legacy", arquivoDados: FILA_LEGADA_ARQUIVO,
+      arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+      generation: state.durableCheckpointGeneration, proofDb: state.legacyFileProof
+    }, deps);
+    if (proofLegado.ok === true) {
+      try {
+        removalFence.limparAte(deps.env?.DATA_DIR || process.env.DATA_DIR || "/data",
+          cliente, state.durableCheckpointGeneration);
+      } catch (error) {
+        deps.logger?.warn?.("[FILA-V2-REMOVAL-FENCE]", { clienteId: cliente,
+          motivo: "cleanup_failed", erro: error.message });
+      }
+    }
+  }
 
   return {
     ok: manifesto.ok === true,
@@ -2382,17 +2456,39 @@ function mesclarFilaLegadaComViva(clienteId = "admin", filaLegadaCliente = [], e
   let itensAtualizados = 0;
   let duplicatasEvitadas = 0;
   let statusPreservados = 0;
+  let itensRemovidos = 0;
+  const fences = removalFence.listar(
+    opcoes.removalFenceDataDir || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", cliente
+  );
+  const removidos = new Set([
+    ...(opcoes.removedIdentityHashes || []),
+    ...fences.flatMap(fence => fence.identityHashes)
+  ]);
+  const entradasNormalizadas = normalizarEntradasViva(entradasViva, agora);
+  const identidadesViva = new Set();
+  if (removidos.size) {
+    for (const entrada of entradasNormalizadas) {
+      if (entrada.bucket !== "viva") continue;
+      for (const id of identidadesItemFilaV2(entrada.item || {})) identidadesViva.add(id);
+    }
+  }
 
   for (const item of lista(filaLegadaCliente)) {
     if (clienteSeguro(item?.clienteId || "admin") !== cliente) continue;
+    const identidades = identidadesItemFilaV2(item);
+    if (removidos.size && identidades.some(id => removidos.has(mutationIntent.digest(id))) &&
+        !identidades.some(id => identidadesViva.has(id))) {
+      itensRemovidos += 1;
+      continue;
+    }
     const indice = filaFinal.length;
     filaFinal.push(item);
-    for (const identidade of identidadesItemFilaV2(item)) {
+    for (const identidade of identidades) {
       if (!indicePorIdentidade.has(identidade)) indicePorIdentidade.set(identidade, indice);
     }
   }
 
-  for (const entrada of normalizarEntradasViva(entradasViva, agora)) {
+  for (const entrada of entradasNormalizadas) {
     if (entrada.bucket !== "viva") continue;
     const itemViva = entrada.item || {};
     if (clienteSeguro(itemViva?.clienteId || cliente) !== cliente) continue;
@@ -2446,9 +2542,30 @@ function mesclarFilaLegadaComViva(clienteId = "admin", filaLegadaCliente = [], e
     totalFinal: filaFinal.length,
     itensInseridos,
     itensAtualizados,
+    itensRemovidos,
     duplicatasEvitadas,
     statusPreservados
   };
+}
+
+function hashesFenceCheckpoint(clienteId, generation, deps = {}) {
+  const fences = removalFence.listar(
+    deps.removalFenceDataDir || deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteSeguro(clienteId)
+  ).filter(fence => fence.generation <= generation);
+  return new Set(fences.flatMap(fence => fence.identityHashes));
+}
+
+function contemIdentidadeCercadaCheckpoint(clienteId, itens, generation, deps = {}) {
+  const hashes = hashesFenceCheckpoint(clienteId, generation, deps);
+  return hashes.size > 0 && lista(itens).some(item =>
+    identidadesItemFilaV2(item).some(id => hashes.has(mutationIntent.digest(id))));
+}
+
+function filtrarItensCercadosCheckpoint(clienteId, itens, generation, deps = {}) {
+  const hashes = hashesFenceCheckpoint(clienteId, generation, deps);
+  if (!hashes.size) return itens;
+  return lista(itens).filter(item =>
+    !identidadesItemFilaV2(item).some(id => hashes.has(mutationIntent.digest(id))));
 }
 
 function lerFilaVivaParaMerge(clienteId = "admin", deps = {}) {
@@ -2539,8 +2656,197 @@ function filaVivaMaisNovaQueLegado(clienteId = "admin", deps = {}) {
   };
 }
 
+async function consultarSnapshotNoWorker(clienteId, deps, opcoes = {}) {
+  if (typeof deps.agendarProbeViva !== "function") return { ok: false, motivo: "viva_snapshot_probe_indisponivel" };
+  return deps.agendarProbeViva({
+    clienteId,
+    checkpointRevision: "viva-recovery-probe-01",
+    probeViva: opcoes.probeViva !== false,
+    previousHash: opcoes.previousHash || null,
+    targetHash: opcoes.targetHash || null,
+    legacyFenceHashes: opcoes.legacyFenceHashes || [],
+    persistenceMode: "worker"
+  });
+}
+
+async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const dataDir = deps.env?.DATA_DIR || process.env.DATA_DIR || "/data";
+  let fences;
+  try { fences = removalFence.listar(dataDir, cliente); }
+  catch { return { ok: false, motivo: "removal_fence_invalid", failClosed: true }; }
+  const leitura = mutationIntent.ler(dataDir, cliente);
+  if (!leitura.ok) return { ok: false, motivo: leitura.motivo, failClosed: true };
+  if (!leitura.exists) {
+    if (fences.length) {
+      const repo = repositoryManifestState(deps);
+      if (!repo || typeof repo.lerStateObservacional !== "function") {
+        return { ok: false, motivo: "removal_fence_db_reader_indisponivel", failClosed: true };
+      }
+      const db = await repo.lerStateObservacional(cliente, deps);
+      if (db?.ok !== true || !db.state ||
+          fences.some(fence => fence.generation > Number(db.state.vivaGeneration))) {
+        return { ok: false, motivo: "removal_fence_generation_incoerente", failClosed: true };
+      }
+      const durable = Number(db.state.durableCheckpointGeneration);
+      if (fences.some(fence => fence.generation <= durable) &&
+          validarManifestoRecoveryGeneration(cliente, db.state, deps).ok === true &&
+          validarProofPublicado(cliente, {
+            prefixo: "legacy", arquivoDados: FILA_LEGADA_ARQUIVO,
+            arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+            generation: durable, proofDb: db.state.legacyFileProof
+          }, deps).ok === true) {
+        const cobertos = fences.filter(fence => fence.generation <= durable);
+        const probe = await consultarSnapshotNoWorker(cliente, deps, {
+          probeViva: false,
+          legacyFenceHashes: cobertos.flatMap(fence => fence.identityHashes)
+        });
+        if (probe.ok !== true || probe.legacyFenceCovered !== true) {
+          return { ok: false, motivo: "removal_fence_checkpoint_unverified", failClosed: true };
+        }
+        try { removalFence.limparAte(dataDir, cliente, durable); }
+        catch { return { ok: false, motivo: "removal_fence_cleanup_failed", failClosed: true }; }
+      }
+    }
+    return { ok: true, pendente: false };
+  }
+
+  const intent = leitura.intent;
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.lerStateObservacional !== "function") {
+    return { ok: false, motivo: "intent_db_reader_indisponivel", failClosed: true };
+  }
+  const db = await repo.lerStateObservacional(cliente, deps);
+  if (db?.ok !== true || !db.state) return { ok: false, motivo: "intent_db_indisponivel", failClosed: true };
+  const state = db.state;
+  const probe = await consultarSnapshotNoWorker(cliente, deps, {
+    previousHash: intent.previousHash,
+    targetHash: intent.targetHash
+  });
+  if (probe.ok !== true) return { ok: false, motivo: "intent_snapshot_probe_failed", failClosed: true };
+  const anterior = probe.matchPrevious === true;
+  const target = probe.matchTarget === true;
+  if (!anterior && !target) return { ok: false, motivo: "intent_snapshot_unknown", failClosed: true };
+  if (fences.some(fence => fence.generation > Number(state.vivaGeneration) &&
+      !(target && fence.jobId === intent.jobId && fence.generation === intent.targetGeneration))) {
+    return { ok: false, motivo: "removal_fence_generation_incoerente", failClosed: true };
+  }
+
+  if (Number(state.vivaGeneration) === intent.expectedGeneration && anterior) {
+    if (fences.some(fence => fence.jobId === intent.jobId)) {
+      return { ok: false, motivo: "removal_fence_without_snapshot", failClosed: true };
+    }
+    const previousVerified = intent.previousHash === null && intent.expectedGeneration === 0 &&
+      !state.vivaFileProof
+      ? true
+      : validarProofPublicado(cliente, {
+          prefixo: "viva", arquivoDados: FILA_VIVA_ARQUIVO,
+          arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+          generation: intent.expectedGeneration, proofDb: state.vivaFileProof
+        }, deps).ok === true;
+    if (!previousVerified || !validarManifestoRecoveryGeneration(cliente, state, deps).ok) {
+      return { ok: false, motivo: "intent_previous_unverified", failClosed: true };
+    }
+    if (!mutationIntent.limpar(dataDir, cliente, intent.jobId)) {
+      return { ok: false, motivo: "intent_cleanup_failed", failClosed: true };
+    }
+    return { ok: true, pendente: true, publicado: false, intent };
+  }
+
+  if (Number(state.vivaGeneration) === intent.expectedGeneration && target) {
+    try { removalFence.garantirDoIntent(dataDir, cliente, intent); }
+    catch { return { ok: false, motivo: "removal_fence_write_failed", failClosed: true }; }
+    let legacyProof = null;
+    if (intent.checkpointSincronizado) {
+      const leituraLegacy = lerJsonArquivoDireto(
+        caminhoJsonCliente(cliente, FILA_LEGADA_PROOF_ARQUIVO, deps), null, deps.fs || fs
+      );
+      if (leituraLegacy.ok === true) {
+        const validacaoLegacy = validarProofPublicado(cliente, {
+          prefixo: "legacy", arquivoDados: FILA_LEGADA_ARQUIVO,
+          arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+          generation: intent.targetGeneration, proofDb: leituraLegacy.valor
+        }, deps);
+        if (validacaoLegacy.ok === true && validacaoLegacy.proof.fileRevision === intent.fileRevision) {
+          legacyProof = validacaoLegacy.proof;
+        }
+      }
+    }
+    const concluido = await executarEscritaFilaV2Coordenada(cliente, "recovery_intent", async ({
+      state: bloqueado, nextGeneration, fileRevision
+    }) => {
+      const revalidado = await consultarSnapshotNoWorker(cliente, deps, {
+        targetHash: intent.targetHash
+      });
+      if (Number(bloqueado.vivaGeneration) !== intent.expectedGeneration ||
+          nextGeneration !== intent.targetGeneration || fileRevision !== intent.fileRevision ||
+          revalidado.ok !== true || revalidado.matchTarget !== true) {
+        return { ok: false, motivo: "intent_state_changed" };
+      }
+      const proof = publicarProofFilaViva(cliente, {
+        generation: intent.targetGeneration, fileRevision: intent.fileRevision
+      }, deps);
+      return proof.ok === true
+        ? { ok: true, vivaFileProof: proof.proof, legacyFileProof: legacyProof,
+            totalViva: intent.itemCount }
+        : { ok: false, motivo: proof.motivo || "intent_proof_failed" };
+    }, { ...deps, skipIntentRecovery: true, fileRevision: intent.fileRevision,
+      checkpointSincronizado: Boolean(legacyProof),
+      motivo: intent.motivo || "recovery_intent" });
+    if (concluido.ok !== true) {
+      if (deps.intentRetry !== true) {
+        return reconciliarIntentMutacaoViva(cliente, { ...deps, intentRetry: true });
+      }
+      return { ok: false, motivo: concluido.motivo || "intent_commit_failed", failClosed: true };
+    }
+    const readiness = await prepararReadinessAutoridadeRecovery(cliente, deps);
+    if (readiness.ok !== true || readiness.ready !== true) {
+      return { ok: false, motivo: "intent_readiness_failed", failClosed: true };
+    }
+    if (!mutationIntent.limpar(dataDir, cliente, intent.jobId)) {
+      return { ok: false, motivo: "intent_cleanup_failed", failClosed: true };
+    }
+    return { ok: true, pendente: true, publicado: true, intent };
+  }
+
+  if (Number(state.vivaGeneration) === intent.targetGeneration && target) {
+    try { removalFence.garantirDoIntent(dataDir, cliente, intent); }
+    catch { return { ok: false, motivo: "removal_fence_write_failed", failClosed: true }; }
+    const manifesto = validarManifestoRecoveryGeneration(cliente, state, deps);
+    const proof = validarProofPublicado(cliente, {
+      prefixo: "viva", arquivoDados: FILA_VIVA_ARQUIVO,
+      arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+      generation: intent.targetGeneration, proofDb: state.vivaFileProof
+    }, deps);
+    if (!manifesto.ok || !proof.ok || proof.proof.fileRevision !== intent.fileRevision) {
+      return { ok: false, motivo: "intent_committed_unverified", failClosed: true };
+    }
+    if (state.authorityReady !== true) {
+      const readiness = await prepararReadinessAutoridadeRecovery(cliente, deps);
+      if (readiness.ok !== true || readiness.ready !== true) {
+        return { ok: false, motivo: "intent_readiness_failed", failClosed: true };
+      }
+    }
+    if (!mutationIntent.limpar(dataDir, cliente, intent.jobId)) {
+      return { ok: false, motivo: "intent_cleanup_failed", failClosed: true };
+    }
+    return { ok: true, pendente: true, publicado: true, intent };
+  }
+  return { ok: false, motivo: "intent_generation_unknown", failClosed: true };
+}
+
 async function reconciliarFilaV2ParaLeitura(clienteId = "admin", contexto = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
+  const intentRecovery = await reconciliarIntentMutacaoViva(cliente, deps);
+  if (intentRecovery.ok !== true) {
+    return { ok: false, clienteId: cliente, autoridadeUsada: "intent", maisNova: false,
+      motivo: intentRecovery.motivo, failClosed: true };
+  }
+  if (intentRecovery.publicado === true) {
+    return { ok: true, clienteId: cliente, autoridadeUsada: "intent", generationConclusiva: true,
+      maisNova: true, recoveryAplicado: false, fallbackMtime: false,
+      motivo: "intent_target_committed", recoveryIntent: intentRecovery.intent };
+  }
   const ctx = contexto && typeof contexto === "object" ? contexto : { contexto };
   const autoridadeSolicitada = autoridadeRecovery(deps.env || process.env);
   const resultadoMtime = () => {
@@ -3266,6 +3572,8 @@ async function inserirItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
     ),
     {
       ...deps,
+      mutationType: "insert",
+      mutationItem: item,
       checkpointSincronizado: false,
       motivo: deps.motivo || "insert_viva"
     }
@@ -3281,7 +3589,9 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
     clienteId,
     deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update",
     async ({ nextGeneration, fileRevision, vivaProofTelemetry }) => {
-      const depsCoordenadas = terminalIndexAuthority.marcarCoordenada({ ...deps });
+      const depsCoordenadas = terminalIndexAuthority.marcarCoordenada({
+        ...deps, checkpointSincronizado: deps.checkpointSincronizado !== false
+      });
       let resultado = await executarMutacaoVivaNoModoConfigurado(
         clienteId,
         "update",
@@ -3314,6 +3624,8 @@ async function atualizarItemFilaVivaCoordenado(clienteId = "admin", item = {}, d
     },
     {
       ...deps,
+      mutationType: "update",
+      mutationItem: item,
       checkpointSincronizado: deps.checkpointSincronizado === false ? false : true,
       motivo: deps.motivo || (deps.checkpointSincronizado === false ? "update_viva" : "legacy_sync_update")
     }
@@ -3344,12 +3656,14 @@ async function removerItemFilaVivaCoordenado(clienteId = "admin", item = {}, dep
             publicarFileProof: true
           })
         },
-        deps
+        { ...deps, checkpointSincronizado: true }
       );
       return anexarProofLegadoSeSolicitado(clienteId, resultado, nextGeneration, fileRevision, deps);
     },
     {
       ...deps,
+      mutationType: "remove",
+      mutationItem: item,
       checkpointSincronizado: true,
       motivo: deps.motivo || "legacy_sync_remove"
     }
@@ -5709,7 +6023,12 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     filaVivaMaisNovaQueLegado: (clienteId, deps = {}) => filaVivaMaisNovaQueLegado(clienteId, { ...opcoes, ...deps }),
     prepararReadinessAutoridadeRecovery: (clienteId, deps = {}) => prepararReadinessAutoridadeRecovery(clienteId, { ...opcoes, ...deps }),
     reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
+    reconciliarIntentMutacaoViva: (clienteId, deps = {}) => reconciliarIntentMutacaoViva(clienteId, { ...opcoes, ...deps }),
+    lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
+      deps.env?.DATA_DIR || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
     mesclarFilaLegadaComViva: (clienteId, filaLegadaCliente, entradasViva, deps = {}) => mesclarFilaLegadaComViva(clienteId, filaLegadaCliente, entradasViva, { ...opcoes, ...deps }),
+    filtrarItensCercadosCheckpoint: (clienteId, itens, generation, deps = {}) => filtrarItensCercadosCheckpoint(clienteId, itens, generation, { ...opcoes, ...deps }),
+    contemIdentidadeCercadaCheckpoint: (clienteId, itens, generation, deps = {}) => contemIdentidadeCercadaCheckpoint(clienteId, itens, generation, { ...opcoes, ...deps }),
     lerFilaViva: (clienteId, deps = {}) => lerFilaViva(clienteId, { ...opcoes, ...deps }),
     lerFilaVivaReadOnly: (clienteId, deps = {}) => lerFilaVivaReadOnly(clienteId, { ...opcoes, ...deps }),
     escreverFilaViva: (clienteId, entradas, deps = {}) => escreverFilaViva(clienteId, entradas, { ...opcoes, ...deps }),
@@ -5774,9 +6093,16 @@ module.exports = {
   rankStatusFilaV2,
   escolherItemMaisAvancadoFilaV2,
   mesclarFilaLegadaComViva,
+  filtrarItensCercadosCheckpoint,
+  contemIdentidadeCercadaCheckpoint,
   lerFilaVivaParaMerge,
   filaVivaMaisNovaQueLegado,
   reconciliarFilaV2ParaLeitura,
+  reconciliarIntentMutacaoViva,
+  lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
+    deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
+  lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(
+    deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
   autoridadeRecovery,
   lerFilaViva,
   lerFilaVivaReadOnly,

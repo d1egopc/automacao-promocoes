@@ -6,6 +6,7 @@ const OP_CLEANUP = "checkpoint_cleanup";
 const OP_TERMINAL_INDEX_BOOTSTRAP = "terminal_index_bootstrap";
 const OP_TERMINAL_INDEX_DELTA = "terminal_index_delta";
 const OP_VIVA_MUTATION = "viva_mutation";
+const OP_VIVA_SNAPSHOT_PROBE = "viva_snapshot_probe";
 
 const RESPONSE_OK = "persistence_result";
 const RESPONSE_ERROR = "persistence_error";
@@ -143,6 +144,7 @@ module.exports = {
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
   OP_VIVA_MUTATION,
+  OP_VIVA_SNAPSHOT_PROBE,
   RESPONSE_OK,
   RESPONSE_ERROR,
   RESPONSE_PROGRESS,

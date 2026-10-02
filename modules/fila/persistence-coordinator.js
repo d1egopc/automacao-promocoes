@@ -11,6 +11,7 @@ const {
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
   OP_VIVA_MUTATION,
+  OP_VIVA_SNAPSHOT_PROBE,
   RESPONSE_OK,
   RESPONSE_PROGRESS,
   flagWorkerAtiva,
@@ -481,9 +482,16 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         log({
           evento: "job_error",
           operacao: atual.job.operation,
+          jobId: atual.job.jobId,
           jobKey: hashWorkspace(atual.job.jobId),
           workspaceKey: atual.lane.workspaceKey,
           motivo,
+          errorName: String(mensagem.error?.name || "").slice(0, 80),
+          errorCode: String(mensagem.error?.code ?? "").slice(0, 80),
+          errorMessage: mensagem.error?.name === "DataCloneError"
+            ? "response_not_cloneable"
+            : String(mensagem.error?.message || "").replace(/[\r\n]+/g, " ").slice(0, 120),
+          targetGeneration: Number(atual.job.targetGeneration || 0),
           ...metricas
         });
         if (erroRevisionStale(motivo) && !ehManutencaoTerminalIndex(atual.job.operation)) {
@@ -718,6 +726,8 @@ function criarCoordenadorPersistencia(opcoes = {}) {
         : null;
       job.permitirRegressaoStatus = payload.permitirRegressaoStatus === true;
       job.exigirMutacao = payload.exigirMutacao === true;
+      job.checkpointSincronizado = payload.checkpointSincronizado === true;
+      job.requiresCommit = payload.requiresCommit === true;
       job.caller = String(payload.caller || payload.origem || payload.motivo || "").slice(0, 120);
       job.motivo = String(payload.motivo || "viva_mutation").slice(0, 120);
       job.rodadaId = String(payload.rodadaId || "").slice(0, 160);
@@ -725,6 +735,12 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       job.mutationId = String(payload.mutationId || "").slice(0, 200);
       job.transactionId = String(payload.transactionId || payload.mutationId || "").slice(0, 200);
       job.correlationId = String(payload.correlationId || payload.mutationId || "").slice(0, 200);
+    }
+    if (operation === OP_VIVA_SNAPSHOT_PROBE) {
+      job.probeViva = payload.probeViva !== false;
+      job.previousHash = payload.previousHash || null;
+      job.targetHash = payload.targetHash || null;
+      job.legacyFenceHashes = Array.isArray(payload.legacyFenceHashes) ? payload.legacyFenceHashes : [];
     }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);
@@ -1082,6 +1098,10 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     publish: payload => enfileirarInterno(OP_PUBLISH, payload),
     cleanup: payload => enfileirarInterno(OP_CLEANUP, payload),
     mutateViva: payload => enfileirarInterno(OP_VIVA_MUTATION, {
+      ...payload,
+      persistenceMode: payload?.persistenceMode || modoForViva(payload?.clienteId)
+    }),
+    probeVivaSnapshot: payload => enfileirarInterno(OP_VIVA_SNAPSHOT_PROBE, {
       ...payload,
       persistenceMode: payload?.persistenceMode || modoForViva(payload?.clienteId)
     }),
