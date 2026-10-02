@@ -1029,6 +1029,10 @@ const filaOperacionalV2 = criarControladorFilaOperacionalV2({
     ...payload,
     dataDir: process.env.DATA_DIR || "/data"
   }),
+  agendarProbeViva: payload => persistenciaCheckpointV2.probeVivaSnapshot({
+    ...payload,
+    dataDir: process.env.DATA_DIR || "/data"
+  }),
   agendarTerminalIndexBootstrap: payload => persistenciaCheckpointV2.bootstrapTerminalIndex({
     ...payload,
     dataDir: process.env.DATA_DIR || "/data"
@@ -3249,9 +3253,11 @@ function aplicarMergeVivaOperacionalCliente(clienteId = "admin", motivo = "merge
 
   const filaClienteLegada = fila.filter(item => String(item?.clienteId || "admin") === cliente);
   const merge = filaOperacionalV2.mesclarFilaLegadaComViva(cliente, filaClienteLegada, leitura.entradas, {
-    agora: opcoes.agora || Date.now()
+    agora: opcoes.agora || Date.now(),
+    removedIdentityHashes: opcoes.removedIdentityHashes || []
   });
-  const itensAlterados = Number(merge.itensInseridos || 0) + Number(merge.itensAtualizados || 0);
+  const itensAlterados = Number(merge.itensInseridos || 0) + Number(merge.itensAtualizados || 0) +
+    Number(merge.itensRemovidos || 0);
 
   if (itensAlterados > 0) {
     const filaSemCliente = fila.filter(item => String(item?.clienteId || "admin") !== cliente);
@@ -3475,7 +3481,7 @@ function logCheckpointB2C(clienteId = "admin", payload = {}) {
   });
 }
 
-function prepararCheckpointLegadoTempV2Legado(clienteId = "admin", checkpointRevision = "") {
+function prepararCheckpointLegadoTempV2Legado(clienteId = "admin", checkpointRevision = "", opcoes = {}) {
   const cliente = String(clienteId || "admin");
   const revision = checkpointRevisionSeguro(checkpointRevision);
   if (!revision) return { ok: false, motivo: "checkpoint_revision_invalido" };
@@ -3485,7 +3491,10 @@ function prepararCheckpointLegadoTempV2Legado(clienteId = "admin", checkpointRev
     fs.mkdirSync(dir, { recursive: true });
     const tempPath = path.resolve(dir, `fila.json.tmp.${revision}`);
     if (path.dirname(tempPath) !== dir) return { ok: false, motivo: "checkpoint_temp_inseguro" };
-    const filaCliente = fila.filter(o => String(o?.clienteId || "admin") === String(cliente));
+    const filaCliente = filaOperacionalV2.filtrarItensCercadosCheckpoint(
+      cliente, fila.filter(o => String(o?.clienteId || "admin") === String(cliente)),
+      Number(opcoes.targetGeneration || 0)
+    );
     fs.writeFileSync(tempPath, JSON.stringify(filaCliente, null, 2), "utf8");
     const stat = fs.statSync(tempPath);
     return {
@@ -3509,13 +3518,14 @@ function prepararCheckpointLegadoTempV2Legado(clienteId = "admin", checkpointRev
 function prepararCheckpointLegadoTempV2(clienteId = "admin", checkpointRevision = "", opcoes = {}) {
   const persistenceMode = opcoes.persistenceMode || persistenciaCheckpointV2.modeFor(clienteId);
   if (persistenceMode !== "worker") {
-    return prepararCheckpointLegadoTempV2Legado(clienteId, checkpointRevision);
+    return prepararCheckpointLegadoTempV2Legado(clienteId, checkpointRevision, opcoes);
   }
 
   return (async () => {
     const resultado = await persistenciaCheckpointV2.prepare({
       clienteId,
       checkpointRevision,
+      targetGeneration: opcoes.targetGeneration,
       dataDir: process.env.DATA_DIR || "/data",
       nowMs: Date.now(),
       persistenceMode
@@ -3576,6 +3586,14 @@ function publicarCheckpointLegadoTempV2Legado(clienteId = "admin", dados = {}) {
       tempPresente
     });
     if (!tempPresente) return { ok: false, motivo: "checkpoint_temp_ausente", motivoDetalhado: "checkpoint_temp_ausente" };
+    if (filaOperacionalV2.lerRemovalFences(cliente).some(fence =>
+      fence.generation <= Number(dados.targetGeneration || 0))) {
+      const candidato = JSON.parse(fs.readFileSync(tempPath, "utf8"));
+      if (filaOperacionalV2.contemIdentidadeCercadaCheckpoint(
+        cliente, candidato, Number(dados.targetGeneration || 0))) {
+        return { ok: false, motivo: "checkpoint_removal_fence_not_covered" };
+      }
+    }
     logCheckpointB2C(cliente, {
       subfase: "checkpoint_antes_rename",
       checkpointRevision: revision,
@@ -3604,6 +3622,14 @@ function publicarCheckpointLegadoTempV2Legado(clienteId = "admin", dados = {}) {
       checkpointRevision: revision,
       targetGeneration: dados.targetGeneration || 0
     });
+    if (filaOperacionalV2.lerRemovalFences(cliente).some(fence =>
+      fence.generation <= Number(dados.targetGeneration || 0))) {
+      const publicado = JSON.parse(fs.readFileSync(finalPath, "utf8"));
+      if (filaOperacionalV2.contemIdentidadeCercadaCheckpoint(
+        cliente, publicado, Number(dados.targetGeneration || 0))) {
+        return { ok: false, motivo: "checkpoint_removal_fence_not_covered" };
+      }
+    }
     let statFinal;
     try {
       statFinal = fs.statSync(finalPath);
@@ -3671,7 +3697,8 @@ function publicarCheckpointLegadoTempV2Legado(clienteId = "admin", dados = {}) {
       checkpointRevision: revision,
       targetGeneration: dados.targetGeneration || 0
     });
-    return { ok: true, legacyFileProof: proof.proof, proof: proof.proof };
+    return { ok: true, legacyFileProof: proof.proof, proof: proof.proof,
+      fenceCoverageVerified: true };
   } catch (erro) {
     const erroSeguro = erroCheckpointSanitizado(erro);
     logCheckpointB2C(cliente, {
@@ -3727,6 +3754,16 @@ function publicarCheckpointLegadoTempV2(clienteId = "admin", dados = {}) {
 
 async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoint", opcoes = {}) {
   const cliente = String(clienteId || "admin");
+  let fences;
+  try { fences = filaOperacionalV2.lerRemovalFences(cliente); }
+  catch { return { ok: false, motivo: "removal_fence_invalid" }; }
+  const intent = filaOperacionalV2.lerIntentMutacaoViva(cliente);
+  if (intent.ok !== true) return { ok: false, motivo: intent.motivo || "viva_intent_invalid" };
+  if (intent.exists || fences.length) {
+    const recovered = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente);
+    if (recovered.ok !== true) return { ok: false, motivo: recovered.motivo || "viva_intent_recovery_failed" };
+    fences = filaOperacionalV2.lerRemovalFences(cliente);
+  }
   const persistenceMode = persistenciaCheckpointV2.modeFor(cliente);
   const workerAtivo = persistenceMode === "worker";
   const agora = Date.now();
@@ -3753,9 +3790,17 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
   const inicio = Date.now();
   const mergeAntesCheckpoint = workerAtivo
     ? { ok: true, pulou: true, motivo: "worker_authoritative_file_merge" }
-    : aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
-        recovery: false
-      });
+      : aplicarMergeVivaOperacionalCliente(cliente, "checkpoint_pre_write", {
+          recovery: false
+        });
+  if (fences.length && !workerAtivo && mergeAntesCheckpoint.ok !== true) {
+    const estadoFalha = checkpointFilaV2.concluirCheckpoint(cliente, {
+      ok: false, generationInicial: decisao.generationInicial,
+      mutacoesCapturadas: decisao.mutacoesCapturadas,
+      agora: Date.now(), motivo: "removal_fence_merge_failed"
+    });
+    return { ok: false, motivo: "removal_fence_merge_failed", estado: estadoFalha };
+  }
   const targetDb = await filaOperacionalV2.capturarTargetCheckpointCoordenado(cliente, {
     motivo: decisao.motivo || motivo
   }, {
@@ -3772,7 +3817,9 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
     ? targetDb.targetGeneration || 0
     : manifestoAntesCheckpoint?.manifesto?.vivaGeneration || 0;
   const checkpointTemp = targetDb.ok === true
-    ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision, { persistenceMode })
+    ? await prepararCheckpointLegadoTempV2(cliente, targetDb.checkpointRevision, {
+        persistenceMode, targetGeneration: vivaGenerationAlvoCheckpoint
+      })
     : { ok: false, motivo: "checkpoint_db_indisponivel" };
   const salvou = checkpointTemp.ok === true
     ? true
@@ -3968,17 +4015,29 @@ function finalizarCarregamentoFilaCliente(clienteId = "admin", opcoes = {}) {
   return fila;
 }
 
-function carregarFila(clienteId = "admin", callerTag = "fila_legacy_load") {
+function carregarFila(clienteId = "admin", callerTag = "fila_legacy_load", opcoes = {}) {
   return executarMutacaoFilaCliente(clienteId, "carregarFila", () => {
-  carregarFilaLegadaOficial(clienteId, callerTag);
+  const intent = filaOperacionalV2.lerIntentMutacaoViva(clienteId);
+  if (intent.ok !== true || intent.exists) throw new Error("viva_intent_recovery_required");
+  const fences = filaOperacionalV2.lerRemovalFences(clienteId);
   const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
-  const estadoArquivosV2 = dirty
+  const estadoArquivosV2 = opcoes.intentRecovered === true
+    ? { maisNova: true }
+    : dirty
     ? { maisNova: true }
     : filaOperacionalV2.filaVivaMaisNovaQueLegado(clienteId);
+  if (fences.length && !dirty && !estadoArquivosV2.maisNova) {
+    throw new Error("removal_fence_generation_unverified");
+  }
+  carregarFilaLegadaOficial(clienteId, callerTag);
   if (dirty || estadoArquivosV2.maisNova) {
-    aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : "carregarFila_recovery", {
-      recovery: !dirty
+    const merge = aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : "carregarFila_recovery", {
+      recovery: !dirty,
+      removedIdentityHashes: opcoes.removedIdentityHashes || []
     });
+    if ((opcoes.intentRecovered === true || fences.length) && merge.ok !== true) {
+      throw new Error("viva_removal_fence_merge_failed");
+    }
   }
   return finalizarCarregamentoFilaCliente(clienteId);
   });
@@ -4040,9 +4099,14 @@ async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "us
   if (emAndamento) return emAndamento;
 
   const inicializacao = Promise.resolve()
-    .then(() => {
+    .then(async () => {
       estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO);
-      carregarFila(cliente, callerTagInicializacaoFila(motivo));
+      const recovered = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente);
+      if (recovered.ok !== true) throw new Error(`viva_intent_recovery_${recovered.motivo}`);
+      carregarFila(cliente, callerTagInicializacaoFila(motivo), {
+        intentRecovered: recovered.publicado === true,
+        removedIdentityHashes: recovered.intent?.removedIdentityHashes || []
+      });
       return {
         ok: true,
         clienteId: cliente,
@@ -4087,11 +4151,18 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
   return executarMutacaoFilaClienteAsync(clienteId, `reconciliar_fila_v2_${contexto}`, async () => {
     const cliente = String(clienteId || "admin");
     const contextoTexto = String(contexto || "leitura");
+    const intentRecovery = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente);
+    if (intentRecovery.ok !== true) throw new Error(`viva_intent_recovery_${intentRecovery.motivo}`);
+    const fences = filaOperacionalV2.lerRemovalFences(cliente);
+    const intentDecision = intentRecovery.publicado === true
+      ? { ok: true, autoridadeUsada: "intent", generationConclusiva: true, maisNova: true,
+          motivo: "intent_target_committed", recoveryIntent: intentRecovery.intent }
+      : null;
     let decisaoPreflightExecutor = null;
     const dirtyAntesPreflight = checkpointFilaV2.snapshot(cliente).dirty;
     let legadoCarregadoPeloPreflightExecutor = false;
 
-    if (contextoTexto === "executor" && opcoes.executorGenerationAuthority === true) {
+    if (!intentDecision && contextoTexto === "executor" && opcoes.executorGenerationAuthority === true) {
       const preflight = await executorGenerationAuthority.executarPreflightExecutor({
         clienteId: cliente,
         env: process.env,
@@ -4148,7 +4219,7 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
           }
         };
       }
-    } else if (contextoTexto === "executor" && dirtyAntesPreflight !== true) {
+    } else if (!intentDecision && contextoTexto === "executor" && dirtyAntesPreflight !== true) {
       decisaoPreflightExecutor = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
         contexto: contextoTexto,
         preflight: true
@@ -4200,7 +4271,7 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
         contextoTexto === "executor" ? "executor_fallback" : "fila_recovery_legacy"
       );
     }
-    const dirty = checkpointFilaV2.snapshot(clienteId).dirty;
+    const dirty = intentDecision ? false : checkpointFilaV2.snapshot(clienteId).dirty;
     const estadoArquivosV2 = dirty
       ? {
           ok: true,
@@ -4212,14 +4283,23 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
           motivo: "dirty_local"
         }
       : (
-          decisaoPreflightExecutor ||
+          intentDecision || decisaoPreflightExecutor ||
           await filaOperacionalV2.reconciliarFilaV2ParaLeitura(clienteId, { contexto })
         );
+    if (estadoArquivosV2?.ok === false || estadoArquivosV2?.failClosed === true) {
+      throw new Error(`viva_recovery_fail_closed_${estadoArquivosV2?.motivo || "unknown"}`);
+    }
     let recoveryAplicado = false;
+    if (fences.length && !dirty && !estadoArquivosV2.maisNova) {
+      throw new Error("removal_fence_generation_unverified");
+    }
     if (dirty || estadoArquivosV2.maisNova) {
-      aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : `carregarFila_recovery_${contexto}`, {
-        recovery: !dirty
+      const merge = aplicarMergeVivaOperacionalCliente(clienteId, dirty ? "carregarFila_dirty" : `carregarFila_recovery_${contexto}`, {
+        recovery: !dirty,
+        removedIdentityHashes: intentDecision?.recoveryIntent?.removedIdentityHashes ||
+          estadoArquivosV2?.recoveryIntent?.removedIdentityHashes || []
       });
+      if ((intentDecision || fences.length) && merge.ok !== true) throw new Error("viva_removal_fence_merge_failed");
       recoveryAplicado = true;
     }
     finalizarCarregamentoFilaCliente(clienteId);
@@ -32718,6 +32798,16 @@ for (const usuario of usuarios) {
   const configClienteBoot = configsPorCliente?.[usuario.id] || config;
   if (configClienteBoot.automacaoAtiva !== true) {
     marcarFilaClienteNaoInicializada(usuario.id, "boot_automacao_desligada");
+    continue;
+  }
+  const intentBoot = filaOperacionalV2.lerIntentMutacaoViva(usuario.id);
+  let fenceBoot;
+  try { fenceBoot = filaOperacionalV2.lerRemovalFences(usuario.id); }
+  catch { fenceBoot = null; }
+  if (intentBoot.ok !== true || intentBoot.exists || fenceBoot === null || fenceBoot.length) {
+    marcarFilaClienteNaoInicializada(usuario.id, "boot_viva_intent_recovery");
+    // The initializer logs and keeps the workspace unavailable on recovery failure.
+    void garantirFilaClienteInicializada(usuario.id, "fila_boot_recovery").catch(() => {});
     continue;
   }
   carregarFila(usuario.id, "fila_boot");

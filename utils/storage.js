@@ -365,6 +365,11 @@ function writeJsonFileAtomic(file, dados, opcoes = {}) {
   const bytes = Buffer.byteLength(conteudo || "", "utf8");
   registrarArquivo("JSON.stringify", file, stringifyMs, bytes);
 
+  // Unlike telemetry hooks, a publication guard must abort the write on failure.
+  if (typeof opcoes.preparePublication === "function") {
+    opcoes.preparePublication({ file, conteudo, bytes });
+  }
+
   const backup = criarBackupArquivoAtomic(file, bak, {
     preferirHardlink: path.basename(file) === "fila.json",
     bytes

@@ -4,6 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { MessageChannel } = require("worker_threads");
 const filaOperacionalV2 = require("../modules/fila/fila-operacional-v2");
 const { criarCoordenadorPersistencia } = require("../modules/fila/persistence-coordinator");
 
@@ -38,6 +39,9 @@ function repositorySerializado(eventos) {
   const lanes = new Map();
   return {
     states,
+    async lerStateObservacional(clienteId) {
+      return { ok: true, state: states.get(clienteId) };
+    },
     registrarMutacaoDuravel(clienteId, dados) {
       const anterior = lanes.get(clienteId) || Promise.resolve();
       const atual = anterior.then(async () => {
@@ -86,6 +90,125 @@ function workerTemporario(root, source) {
   const file = path.join(root, `viva-worker-fault-${Date.now()}-${Math.random().toString(16).slice(2)}.js`);
   fs.writeFileSync(file, source, "utf8");
   return file;
+}
+
+function provarCloneMessagePort(valor) {
+  const { port1, port2 } = new MessageChannel();
+  return new Promise((resolve, reject) => {
+    port2.once("message", recebido => {
+      port1.close();
+      port2.close();
+      resolve(recebido);
+    });
+    try {
+      port1.postMessage(valor);
+    } catch (erro) {
+      port1.close();
+      port2.close();
+      reject(erro);
+    }
+  });
+}
+
+async function testarThumbnailTerminal(root, env, arquivos, repo, eventos) {
+  const clienteId = "workspace-viva-thumbnail";
+  const marcador = path.join(root, "thumbnail-agendada.marker");
+  const gravacoes = path.join(root, "viva-writes.marker");
+  const storagePath = require.resolve("../utils/storage");
+  const thumbnailPath = require.resolve("../modules/fila/fila-thumbnail.service");
+  const filaPath = require.resolve("../modules/fila/fila-operacional-v2");
+  const workerPath = require.resolve("../modules/fila/persistence-worker");
+  const bootstrap = workerTemporario(root, `
+    const fs = require("fs");
+    const storage = require(${JSON.stringify(storagePath)});
+    const original = storage.writeClienteJson;
+    storage.writeClienteJson = (...args) => {
+      if (args[1] === "fila-viva.json") fs.appendFileSync(${JSON.stringify(gravacoes)}, "1");
+      return original(...args);
+    };
+    const thumbnail = require(${JSON.stringify(thumbnailPath)});
+    thumbnail.imagemFontePublicavel = () => ({ ok: true });
+    thumbnail.agendarThumbnail = () => {
+      fs.writeFileSync(${JSON.stringify(marcador)}, "scheduled");
+      return { ok: true, agendada: true, tarefa: Promise.resolve({ ok: true }) };
+    };
+    const fila = require(${JSON.stringify(filaPath)});
+    const updateOriginal = fila.atualizarItemFilaVivaIncremental;
+    fila.atualizarItemFilaVivaIncremental = (...args) => {
+      const result = updateOriginal(...args);
+      if (result.item) result.item = { ...result.item,
+        propriedadeDesconhecida: { tarefa: Promise.resolve("nao_transportar") } };
+      return result;
+    };
+    require(${JSON.stringify(workerPath)});
+  `);
+  const coordinator = criarCoordenadorPersistencia({ env, workerPath: bootstrap, logger: { log() {} } });
+  let respostaWorker;
+  const controller = filaOperacionalV2.criarControladorFilaOperacionalV2({
+    env,
+    ...arquivos,
+    manifestStateRepository: repo,
+    logger: { log() {} },
+    modoPersistenciaViva: () => "worker",
+    agendarMutacaoViva: async payload => {
+      const resposta = await coordinator.mutateViva({ ...payload, dataDir: root });
+      respostaWorker = resposta;
+      eventos.push(`ack:${clienteId}:${payload.targetGeneration}`);
+      const manifestoPath = arquivos.getClienteJsonPath(clienteId, "fila-v2-manifest.json");
+      assert.notStrictEqual(
+        fs.existsSync(manifestoPath) ? JSON.parse(fs.readFileSync(manifestoPath, "utf8")).vivaGeneration : null,
+        payload.targetGeneration,
+        "manifesto nao pode antecipar ACK"
+      );
+      const proofPath = arquivos.getClienteJsonPath(clienteId, filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO);
+      assert.notStrictEqual(
+        fs.existsSync(proofPath) ? JSON.parse(fs.readFileSync(proofPath, "utf8")).generation : null,
+        payload.targetGeneration,
+        "proof nao pode antecipar ACK"
+      );
+      return resposta;
+    }
+  });
+  try {
+    const base = {
+      ...item("thumb", clienteId),
+      imagemRef: "https://example.invalid/produto.jpg",
+      linkOriginal: "https://example.invalid/produto",
+      linkAfiliado: "https://example.invalid/afiliado",
+      publisher: "publisher-teste"
+    };
+    assert.strictEqual((await controller.inserirItemFilaVivaCoordenado(clienteId, base, { agora: 1100 })).ok, true);
+    const resposta = await controller.atualizarItemFilaVivaCoordenado(clienteId, {
+      ...base, status: "expirado", expiradoEm: new Date(1101).toISOString()
+    }, { agora: 1101 });
+    assert.strictEqual(resposta.ok, true);
+    assert.strictEqual(resposta.removeuDaViva, true);
+    assert.strictEqual(resposta.historico, undefined);
+    assert.strictEqual(resposta.resultadoArquivo?.historico, undefined);
+    assert.strictEqual(resposta.item.preco, base.preco);
+    assert.strictEqual(resposta.item.linkOriginal, base.linkOriginal);
+    assert.strictEqual(resposta.item.linkAfiliado, base.linkAfiliado);
+    assert.strictEqual(resposta.item.publisher, base.publisher);
+    assert.strictEqual(resposta.item.propriedadeDesconhecida, undefined);
+    assert.strictEqual(fs.readFileSync(marcador, "utf8"), "scheduled");
+    assert.strictEqual(fs.readFileSync(gravacoes, "utf8"), "11", "uma escrita VIVA por mutacao");
+    assert.strictEqual(repo.states.get(clienteId).vivaGeneration, 2);
+    assert(eventos.indexOf(`ack:${clienteId}:2`) < eventos.indexOf(`db_update:${clienteId}:2`));
+    assert.strictEqual(
+      JSON.parse(fs.readFileSync(arquivos.getClienteJsonPath(clienteId, filaOperacionalV2.FILA_VIVA_PROOF_ARQUIVO), "utf8")).generation,
+      2
+    );
+    assert.strictEqual(JSON.parse(fs.readFileSync(arquivos.getClienteJsonPath(clienteId, "fila-viva.json"), "utf8")).length, 0);
+    const transportado = await provarCloneMessagePort(respostaWorker);
+    assert.strictEqual(transportado.ok, true);
+    assert.strictEqual(transportado.historico, undefined);
+    assert.strictEqual(transportado.item, undefined);
+    assert.strictEqual(transportado.propriedadeDesconhecida, undefined);
+    assert.strictEqual(typeof transportado.itemPosition, "number");
+  } finally {
+    await coordinator.shutdown();
+    fs.rmSync(bootstrap, { force: true });
+  }
 }
 
 async function medirResponsividade(executar) {
@@ -185,9 +308,46 @@ async function testarCrashTimeout(root) {
     await timeout.shutdown();
     fs.rmSync(timeoutFile, { force: true });
   }
+
+  const logs = [];
+  const cloneFile = workerTemporario(root, `
+    require("worker_threads").parentPort.on("message", message => {
+      const port = require("worker_threads").parentPort;
+      try {
+        port.postMessage({ type: "persistence_ok", jobId: message.jobId, result: { tarefa: Promise.resolve() } });
+      } catch (erro) {
+        port.postMessage({ type: "persistence_error", jobId: message.jobId,
+          error: { name: erro.name, code: erro.code, message: erro.message } });
+      }
+    });
+  `);
+  const cloneError = criarCoordenadorPersistencia({
+    env: baseEnv,
+    workerPath: cloneFile,
+    logger: { log(_tag, value) { logs.push(JSON.parse(value)); } }
+  });
+  try {
+    const resultado = await cloneError.mutateViva({ ...payload, checkpointRevision: "viva-clone-revision-01" });
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, 25);
+    const diagnostico = logs.find(evento => evento.evento === "job_error");
+    assert.strictEqual(diagnostico.errorName, "DataCloneError");
+    assert.strictEqual(diagnostico.errorCode, "25");
+    assert.strictEqual(diagnostico.errorMessage, "response_not_cloneable");
+    assert.strictEqual(diagnostico.targetGeneration, 1);
+    assert(diagnostico.jobId.includes(clienteId));
+    assert(!JSON.stringify(diagnostico).includes("tarefa"));
+  } finally {
+    await cloneError.shutdown();
+    fs.rmSync(cloneFile, { force: true });
+  }
 }
 
 async function main() {
+  await assert.rejects(
+    provarCloneMessagePort({ historico: { thumbnail: { agendada: true, tarefa: Promise.resolve() } } }),
+    erro => erro.name === "DataCloneError" && erro.code === 25
+  );
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fila-viva-worker-"));
   const clientes = ["workspace-viva-a", "workspace-viva-b", "workspace-viva-direct", "workspace-viva-benchmark"];
   const env = ambiente(root, clientes);
@@ -331,6 +491,8 @@ async function main() {
       JSON.parse(fs.readFileSync(arquivos.getClienteJsonPath(cliente, "fila-viva.json"), "utf8")).some(entrada => entrada.id === "terminal"),
       false
     );
+
+    await testarThumbnailTerminal(root, env, arquivos, repo, eventos);
 
     const stateAntes = repo.states.get(cliente);
     const falha = await controller.inserirItemFilaVivaCoordenado(cliente, item("erro", cliente), {

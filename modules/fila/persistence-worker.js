@@ -10,6 +10,7 @@ const {
   OP_TERMINAL_INDEX_BOOTSTRAP,
   OP_TERMINAL_INDEX_DELTA,
   OP_VIVA_MUTATION,
+  OP_VIVA_SNAPSHOT_PROBE,
   RESPONSE_OK,
   RESPONSE_ERROR,
   RESPONSE_PROGRESS,
@@ -24,6 +25,9 @@ const {
   escreverArrayJsonIncremental
 } = require("./json-array-incremental");
 const { construirTerminalIndex, construirTerminalIndexDelta } = require("./terminal-index-worker");
+const mutationIntent = require("./viva-mutation-intent");
+const removalFence = require("./viva-removal-fence");
+const { classificarItemFilaV2 } = require("./fila-v2-shadow");
 
 let filaOperacionalV2 = null;
 
@@ -177,7 +181,9 @@ function ensureRevisionTemp(paths, revision) {
   return tempPath;
 }
 
-function sourceRead(paths, nowMs, dataDir, progress = () => {}) {
+function sourceRead(paths, nowMs, dataDir, targetGeneration, progress = () => {}) {
+  const intent = mutationIntent.ler(dataDir, paths.cliente);
+  if (!intent.ok || intent.exists) throw new Error(intent.motivo || "checkpoint_viva_intent_pending");
   const legacy = readArray(paths.arquivo, { absentOk: true });
   progress("legacy_read_completed", { legacyBytes: legacy.bytes });
   const viva = readArray(paths.viva, { absentOk: true });
@@ -193,10 +199,15 @@ function sourceRead(paths, nowMs, dataDir, progress = () => {}) {
   }
   const operacional = obterFilaOperacionalV2(dataDir);
   const mergeStarted = process.hrtime.bigint();
-  const merge = operacional.mesclarFilaLegadaComViva(paths.cliente, legacy.value, viva.value, { agora: nowMs });
+  const merge = operacional.mesclarFilaLegadaComViva(paths.cliente, legacy.value, viva.value, {
+    agora: nowMs, removalFenceDataDir: dataDir
+  });
+  const filaCliente = operacional.filtrarItensCercadosCheckpoint(
+    paths.cliente, merge.filaCliente, targetGeneration, { removalFenceDataDir: dataDir }
+  );
   progress("merge_completed", { legacyBytes: legacy.bytes, vivaBytes: viva.bytes });
   return {
-    filaCliente: merge.filaCliente,
+    filaCliente,
     sourceRevisions: { legacy: legacyAfter, viva: vivaAfter },
     sourceBytes: { legacy: legacy.bytes, viva: viva.bytes },
     sourceReadMs: legacy.readMs + viva.readMs,
@@ -235,7 +246,8 @@ function prepare(job) {
   progress("prepare_started");
   try {
     fs.mkdirSync(paths.diretorio, { recursive: true });
-    const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir, progress);
+    const source = sourceRead(paths, Number(job.nowMs) || agoraMs(), dataDir,
+      Number(job.targetGeneration || 0), progress);
     staleStage = "before_backup";
     if (memoryStages) memoryStages.afterMerge = memoriaAtual();
     const currentLegacy = statOptional(paths.arquivo);
@@ -325,11 +337,27 @@ function publish(job) {
       !sameOptionalIdentity(job.expectedSourceRevisions.viva, vivaCurrent)) {
     return { ok: false, operation: OP_PUBLISH, motivo: "checkpoint_source_revision_changed" };
   }
+  const operacional = obterFilaOperacionalV2(dataDir);
+  if (removalFence.listar(dataDir, paths.cliente).some(fence =>
+    fence.generation <= Number(job.targetGeneration || 0))) {
+    const candidato = readArray(tempPath);
+    if (operacional.contemIdentidadeCercadaCheckpoint(paths.cliente, candidato.value,
+      Number(job.targetGeneration || 0), { removalFenceDataDir: dataDir })) {
+      return { ok: false, operation: OP_PUBLISH, motivo: "checkpoint_removal_fence_not_covered" };
+    }
+  }
   const renameStarted = process.hrtime.bigint();
   fs.renameSync(tempPath, paths.arquivo);
   const renameMs = Number(process.hrtime.bigint() - renameStarted) / 1e6;
   const finalStat = statIdentity(paths.arquivo);
-  const operacional = obterFilaOperacionalV2(dataDir);
+  if (removalFence.listar(dataDir, paths.cliente).some(fence =>
+    fence.generation <= Number(job.targetGeneration || 0))) {
+    const publicado = readArray(paths.arquivo);
+    if (operacional.contemIdentidadeCercadaCheckpoint(paths.cliente, publicado.value,
+      Number(job.targetGeneration || 0), { removalFenceDataDir: dataDir })) {
+      return { ok: false, operation: OP_PUBLISH, motivo: "checkpoint_removal_fence_not_covered" };
+    }
+  }
   const proof = operacional.publicarProofFilaLegada(paths.cliente, {
     targetGeneration: job.targetGeneration,
     fileRevision: revision
@@ -349,6 +377,7 @@ function publish(job) {
     checkpointRevision: revision,
     legacyFileProof: proof.proof,
     proof: proof.proof,
+    fenceCoverageVerified: true,
     sourceRevisions: { viva: statOptional(paths.viva) },
     finalIdentity: finalStat,
     bytes: Number(finalStat.size || 0),
@@ -389,7 +418,22 @@ function mutateViva(job) {
   const started = process.hrtime.bigint();
   const dataDir = normalizarDataDir(job.dataDir);
   const operacional = obterFilaOperacionalV2(dataDir);
+  const paths = caminhoWorkspace(dataDir, job.clienteId);
+  const pendente = mutationIntent.ler(dataDir, job.clienteId);
+  if (!pendente.ok || pendente.exists) {
+    const erro = new Error(pendente.motivo || "viva_mutation_intent_pending");
+    erro.code = "VIVA_MUTATION_INTENT_PENDING";
+    throw erro;
+  }
+  const previousHash = job.requiresCommit === true ? mutationIntent.hashArquivo(paths.viva) : null;
   const mutationType = String(job.mutationType || "");
+  const inputHash = job.requiresCommit === true ? mutationIntent.digest(JSON.stringify(job.item || {})) : "";
+  const terminal = job.requiresCommit === true && mutationType === "update" &&
+    classificarItemFilaV2(job.item || {}, { agora: Number(job.nowMs) || agoraMs() }).bucket === "historico";
+  const removedIdentityHashes = job.requiresCommit === true && (mutationType === "remove" || terminal)
+    ? operacional.identidadesItemFilaV2(job.item || {}).map(value => mutationIntent.digest(value))
+    : [];
+  const { writeClienteJson } = require("../../utils/storage");
   const deps = {
     agora: Number(job.nowMs) || agoraMs(),
     generation: Number(job.targetGeneration || 0),
@@ -404,6 +448,36 @@ function mutateViva(job) {
     mutationId: job.mutationId,
     transactionId: job.transactionId,
     correlationId: job.correlationId
+  };
+  if (job.requiresCommit === true) deps.writeClienteJson = (cliente, nome, valor) => {
+    if (nome !== "fila-viva.json") return writeClienteJson(cliente, nome, valor);
+    let intentPublicado;
+    const escrito = writeClienteJson(cliente, nome, valor, {
+      preparePublication: ({ conteudo }) => {
+        intentPublicado = {
+          schema: 1,
+          clienteId: cliente,
+          jobId: job.jobId,
+          expectedGeneration: Number(job.targetGeneration) - 1,
+          targetGeneration: Number(job.targetGeneration),
+          mutationType,
+          fileRevision: deps.fileRevision,
+          previousHash,
+          targetHash: mutationIntent.digest(conteudo),
+          inputHash,
+          itemCount: Array.isArray(valor) ? valor.length : 0,
+          checkpointSincronizado: job.checkpointSincronizado === true,
+          removalOperation: mutationType === "remove" ? "remove" : terminal ? "terminal" : null,
+          removedIdentityHashes,
+          motivo: String(job.motivo || "viva_mutation").slice(0, 120)
+        };
+        mutationIntent.escrever(dataDir, cliente, intentPublicado);
+      }
+    });
+    if (escrito === true && removedIdentityHashes.length) {
+      removalFence.garantirDoIntent(dataDir, cliente, intentPublicado);
+    }
+    return escrito;
   };
 
   let resultado;
@@ -429,9 +503,38 @@ function mutateViva(job) {
     };
   }
 
+  // The VIVA snapshot is published before this ACK; GC refs remain best-effort.
+  // Keep scheduled thumbnails inside this worker, outside the response DTO.
   return {
-    ...resultado,
+    ok: resultado?.ok === true,
     operation: OP_VIVA_MUTATION,
+    motivo: String(resultado?.motivo || ""),
+    itemPosition: Number.isSafeInteger(resultado?.item?.posicaoLegada)
+      ? resultado.item.posicaoLegada : null,
+    atualizouViva: resultado?.atualizouViva === true,
+    removeuDaViva: resultado?.removeuDaViva === true,
+    ...(resultado?.terminalHistorico === true ? { terminalHistorico: true } : {}),
+    idempotente: resultado?.idempotente === true,
+    fallbackLegado: resultado?.fallbackLegado === true,
+    tipoFalha: String(resultado?.tipoFalha || ""),
+    etapa: String(resultado?.etapa || ""),
+    codigoErro: String(resultado?.codigoErro || ""),
+    errno: typeof resultado?.errno === "number" || typeof resultado?.errno === "string"
+      ? resultado.errno : null,
+    path: String(resultado?.path || ""),
+    itemId: String(resultado?.itemId || ""),
+    statusAntes: String(resultado?.statusAntes || ""),
+    statusDepois: String(resultado?.statusDepois || ""),
+    causaInterna: String(resultado?.causaInterna || ""),
+    totalViva: Number(resultado?.totalViva || 0),
+    bytesLidosViva: Number(resultado?.bytesLidosViva || 0),
+    bytesFilaViva: Number(resultado?.bytesFilaViva || 0),
+    bytesHistorico: Number(resultado?.bytesHistorico || 0),
+    insertVivaMs: Number(resultado?.insertVivaMs || 0),
+    updateVivaMs: Number(resultado?.updateVivaMs || 0),
+    removalVivaMs: Number(resultado?.removalVivaMs || 0),
+    ...(resultado?.terminalHistoricoFonte ? { terminalHistoricoFonte: String(resultado.terminalHistoricoFonte) } : {}),
+    ...(resultado?.rodadaId ? { rodadaId: String(resultado.rodadaId) } : {}),
     metrics: {
       workerThreadId: threadId,
       workerHeapUsedBytes: process.memoryUsage().heapUsed,
@@ -442,12 +545,36 @@ function mutateViva(job) {
   };
 }
 
+function probeVivaSnapshot(job) {
+  const dataDir = normalizarDataDir(job.dataDir);
+  const paths = caminhoWorkspace(dataDir, job.clienteId);
+  const currentHash = job.probeViva === false ? null : mutationIntent.hashArquivo(paths.viva);
+  let legacyFenceCovered = null;
+  if (Array.isArray(job.legacyFenceHashes) && job.legacyFenceHashes.length) {
+    const hashes = new Set(job.legacyFenceHashes);
+    const legacy = readArray(paths.arquivo, { absentOk: true });
+    const operacional = obterFilaOperacionalV2(dataDir);
+    legacyFenceCovered = !legacy.value.some(item =>
+      operacional.identidadesItemFilaV2(item).some(id => hashes.has(mutationIntent.digest(id))));
+  }
+  return {
+    ok: true,
+    operation: OP_VIVA_SNAPSHOT_PROBE,
+    workerThreadId: threadId,
+    currentHash,
+    matchPrevious: currentHash === job.previousHash,
+    matchTarget: currentHash === job.targetHash,
+    legacyFenceCovered
+  };
+}
+
 async function executar(job) {
   if (!job || typeof job !== "object") throw new Error("persistence_job_invalido");
   if (job.operation === OP_PREPARE) return prepare(job);
   if (job.operation === OP_PUBLISH) return publish(job);
   if (job.operation === OP_CLEANUP) return cleanup(job);
   if (job.operation === OP_VIVA_MUTATION) return mutateViva(job);
+  if (job.operation === OP_VIVA_SNAPSHOT_PROBE) return probeVivaSnapshot(job);
   if (job.operation === OP_TERMINAL_INDEX_BOOTSTRAP) {
     const dataDir = normalizarDataDir(job.dataDir);
     try {
