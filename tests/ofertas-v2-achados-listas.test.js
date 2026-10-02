@@ -12,6 +12,8 @@ const { ordenarElegiveis } = require("../modules/manual-v2/manual-auto-dispatch"
 const { selecionarConteudoVivo } = require("../modules/engine/auto-clean/gc-reference-index");
 const { criarProvaAfiliacaoWorkspaceShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 const { criarProvaAfiliacaoWorkspaceAliExpress } = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
+const { criarProvaAfiliacaoWorkspaceMagalu, PROOF_TYPE_DETERMINISTIC_WORKSPACE } =
+  require("../modules/marketplaces/magalu/afiliacao-workspace");
 const { resolverContratoComercialFinal } = require("../modules/templates-clientes/contrato-comercial-final");
 const { montarMensagemOferta } = require("../utils/mensagens-ofertas");
 
@@ -189,6 +191,125 @@ async function main() {
   const contratoAliPersistido = resolverContratoComercialFinal(manual.buscarOfertaManualV2(workspace, aliPersistida.id));
   assert.strictEqual(contratoAliPersistido.contratoComercialFinal.linksApp.length, 1);
   assert.strictEqual(contratoAliPersistido.contratoComercialFinal.linksPc.length, 1);
+
+  const workspaceAliLegado = "user_ali_legado_lista";
+  const produtoAliLegado = "1005007522758897";
+  const originalAliLegado = `https://www.aliexpress.com/item/${produtoAliLegado}.html`;
+  const afiliadoAliAntigo = "https://s.click.aliexpress.com/e/_ali_antigo";
+  const afiliadoAliNovo = "https://s.click.aliexpress.com/e/_ali_revalidado";
+  const provaAliLegada = {
+    workspaceId: workspaceAliLegado, appKey: aliCred.appKey,
+    trackingIdEnviado: aliCred.trackingId, urlAfiliadaWorkspace: afiliadoAliAntigo,
+    origemConversao: "workspace_api", conversaoStatus: "convertida",
+    motivoConversao: "link_api_convertido"
+  };
+  const achadoAliLegado = {
+    id: "ali_73705", clienteId: workspaceAliLegado, marketplace: "aliexpress",
+    titulo: "3 fans Jumpeak Mx120, normais e reversas", produtoId: produtoAliLegado,
+    precoAtual: 117, cupom: "BRCD1", urlOriginal: originalAliLegado,
+    urlAfiliada: afiliadoAliAntigo, afiliacaoWorkspace: provaAliLegada,
+    capturadoEm: new Date(agora).toISOString(),
+    linksComerciais: [{ papel: "produto", urlOriginal: originalAliLegado,
+      urlAfiliadaWorkspace: afiliadoAliAntigo, renderizavel: true,
+      conversaoStatus: "convertida",
+      afiliacaoWorkspace: { ...provaAliLegada, papel: "produto", urlOriginal: originalAliLegado } }]
+  };
+  let conversoesAliLegado = 0;
+  const depsAliLegado = {
+    getIntegracaoCliente: () => ({ credenciais: aliCred }),
+    gerarLinkAfiliadoCliente: async (clienteId, marketplace, url) => {
+      assert.strictEqual(clienteId, workspaceAliLegado);
+      assert.strictEqual(marketplace, "aliexpress");
+      assert.strictEqual(url, originalAliLegado);
+      conversoesAliLegado += 1;
+      return afiliadoAliNovo;
+    }
+  };
+  writeClienteJson(workspaceAliLegado, achados.ARQUIVO_ACHADOS, [achadoAliLegado]);
+  const listaAliLegado = listas.criarLista(workspaceAliLegado, "AliExpress");
+  const aliRevalidado = await listas.adicionarItem(workspaceAliLegado, listaAliLegado.id,
+    { origem: "achados", ofertaId: achadoAliLegado.id }, depsAliLegado);
+  assert.strictEqual(aliRevalidado.itens.length, 1);
+  assert.strictEqual(conversoesAliLegado, 1, "revalidacao faz uma conversao oficial");
+  const ofertaAliRevalidada = readClienteJson(workspaceAliLegado, listas.ARQUIVO_LISTAS, [])[0].itens[0].oferta;
+  assert.strictEqual(ofertaAliRevalidada.urlAfiliada, afiliadoAliNovo);
+  assert.strictEqual(ofertaAliRevalidada.produtoId, produtoAliLegado);
+  assert.strictEqual(ofertaAliRevalidada.afiliacaoWorkspaceVerificada.principal.papel, "produto");
+  assert.ok(ofertaAliRevalidada.afiliacaoWorkspaceVerificada.principal.assinatura);
+  await assert.rejects(() => listas.ofertaDoAchado({ ...achadoAliLegado,
+    afiliacaoWorkspace: { ...provaAliLegada, assinatura: "adulterada" } }, workspaceAliLegado, depsAliLegado),
+  /afiliacao_workspace_incompleta/);
+  await assert.rejects(() => listas.ofertaDoAchado(achadoAliLegado, outro, depsAliLegado),
+    /afiliacao_workspace_incompleta/);
+  await assert.rejects(() => listas.ofertaDoAchado({ ...achadoAliLegado, produtoId: "1005000000000000" },
+    workspaceAliLegado, depsAliLegado), /afiliacao_workspace_incompleta/);
+  await assert.rejects(() => listas.ofertaDoAchado({ ...achadoAliLegado,
+    linksComerciais: [{ ...achadoAliLegado.linksComerciais[0], urlAfiliadaWorkspace: "https://a.aliexpress.com/_outro" }] },
+  workspaceAliLegado, depsAliLegado), /afiliacao_workspace_incompleta/);
+  await assert.rejects(() => listas.ofertaDoAchado(achadoAliLegado, workspaceAliLegado,
+    { ...depsAliLegado, getIntegracaoCliente: () => null }), /afiliacao_workspace_incompleta/);
+  await assert.rejects(() => listas.ofertaDoAchado(achadoAliLegado, workspaceAliLegado,
+    { ...depsAliLegado, gerarLinkAfiliadoCliente: async () => "" }), /afiliacao_workspace_incompleta/);
+  assert.strictEqual(conversoesAliLegado, 1, "rejeicoes nao repetem conversao");
+
+  const segredoAnterior = process.env.JWT_SECRET;
+  process.env.JWT_SECRET = "segredo_teste_magalu_lista";
+  try {
+    const workspaceMagalu = "user_magalu_lista";
+    const urlMagalu = "https://www.magazinevoce.com.br/d1egopc/shampoo-liso-perfeito-salon-opus-350ml-salon-opus-tratment/p/ja0j4j69f1/pf/copr/";
+    const originalMagalu = "https://www.magazineluiza.com.br/shampoo-liso-perfeito-salon-opus-350ml-salon-opus-tratment/divulgador/oferta/ja0j4j69f1/pf/copr/?promoter_id=5438968&partner_id=3440";
+    const provaMagalu = criarProvaAfiliacaoWorkspaceMagalu({
+      clienteId: workspaceMagalu, promoterId: "d1egopc", productId: "ja0j4j69f1",
+      urlOriginal: originalMagalu, urlAfiliadaWorkspace: urlMagalu,
+      proofType: PROOF_TYPE_DETERMINISTIC_WORKSPACE,
+      urlConstruidaPor: "magalu_deterministic_builder_v1"
+    });
+    const magaluAchado = { id: "magalu_ja0j4j69f1", marketplace: "magalu", titulo: "Shampoo Salon Opus",
+      produtoId: "ja0j4j69f1", precoAtual: 15.9, urlOriginal: urlMagalu,
+      urlAfiliada: urlMagalu, afiliacaoWorkspace: provaMagalu };
+    const depsMagalu = { getIntegracaoCliente: () => ({ credenciais: { promoterId: "d1egopc" } }) };
+    const magaluLista = await listas.ofertaDoAchado(magaluAchado, workspaceMagalu, depsMagalu);
+    assert.strictEqual(magaluLista.urlAfiliada, urlMagalu,
+      "URL Magazine Voce ja afiliada deve preservar a prova assinada do workspace");
+    assert.strictEqual(magaluLista.urlOriginal, originalMagalu,
+      "Achado antigo recupera original somente da prova do mesmo produto e workspace");
+    const universalMagalu = universal("magalu_ja0j4j69f1", "magalu");
+    universalMagalu.workspaceId = workspaceMagalu;
+    universalMagalu.produto.idExterno = "ja0j4j69f1";
+    universalMagalu.produto.urlOriginal = originalMagalu;
+    universalMagalu.produto.urlCanonica = urlMagalu;
+    universalMagalu.afiliacao.urlAfiliada = urlMagalu;
+    universalMagalu.midia.imagemPrincipal = "https://a-static.mlcdn.com.br/800x560/shampoo-ja0j4j69f1.jpg";
+    assert.strictEqual(achados.registrarAchado({ clienteId: workspaceMagalu, ofertaId: universalMagalu.ofertaId,
+      ofertaUniversal: universalMagalu, metadata: { ofertaUniversalValidacao: { ok: true },
+        afiliacaoWorkspace: provaMagalu } }).ok, true);
+    const magaluProjetado = achados.buscarAchado(workspaceMagalu, universalMagalu.ofertaId);
+    assert.strictEqual(magaluProjetado.urlOriginal, originalMagalu,
+      "projecao nova preserva original distinto da URL afiliada");
+    assert.strictEqual((await listas.ofertaDoAchado(magaluProjetado, workspaceMagalu, depsMagalu)).urlAfiliada, urlMagalu);
+    writeClienteJson(workspaceMagalu, achados.ARQUIVO_ACHADOS, [{ ...magaluProjetado, urlOriginal: urlMagalu }]);
+    const listaMagalu = listas.criarLista(workspaceMagalu, "Magalu");
+    const listaComMagalu = await listas.adicionarItem(workspaceMagalu, listaMagalu.id,
+      { origem: "achados", ofertaId: magaluProjetado.id }, depsMagalu);
+    assert.strictEqual(listaComMagalu.itens.length, 1);
+    const ofertaMagaluNaLista = readClienteJson(workspaceMagalu, listas.ARQUIVO_LISTAS, [])[0].itens[0].oferta;
+    assert.strictEqual(ofertaMagaluNaLista.urlOriginal, originalMagalu,
+      "Achado legado com URL canonica afiliada entra na Lista usando o original da prova");
+    assert.strictEqual(ofertaMagaluNaLista.urlAfiliada, urlMagalu);
+    await assert.rejects(() => listas.ofertaDoAchado({ ...magaluAchado, afiliacaoWorkspace: {} }, workspaceMagalu, depsMagalu),
+      /afiliacao_workspace_incompleta/, "URL identica sem prova nao libera a Lista");
+    await assert.rejects(() => listas.ofertaDoAchado({ ...magaluAchado,
+      afiliacaoWorkspace: { ...provaMagalu, assinatura: "adulterada" } }, workspaceMagalu, depsMagalu),
+    /afiliacao_workspace_incompleta/, "URL identica com assinatura invalida continua rejeitada");
+    await assert.rejects(() => listas.ofertaDoAchado(magaluAchado, outro, depsMagalu),
+      /afiliacao_workspace_incompleta/, "prova de outro workspace continua rejeitada");
+    await assert.rejects(() => listas.ofertaDoAchado({ ...magaluAchado,
+      urlAfiliada: urlMagalu.replace("/d1egopc/", "/outra-loja/") }, workspaceMagalu, depsMagalu),
+    /afiliacao_workspace_incompleta/, "URL diferente da prova continua rejeitada");
+  } finally {
+    if (segredoAnterior === undefined) delete process.env.JWT_SECRET;
+    else process.env.JWT_SECRET = segredoAnterior;
+  }
 
   const l1 = listas.criarLista(workspace, "Hardware");
   assert.strictEqual(l1.nome, "Hardware");
