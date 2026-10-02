@@ -80,6 +80,8 @@ function rotaGetBloco(fonte, rota) {
   assert(fonte.includes('"erro", "erros", "falha", "falhas"') && fonte.includes("return VISAO_COM_ERRO"), "status=erro deve mapear para visao agregada com_erro");
   assert(rotaFila.includes("errosTotal: metricas.comErro"), "GET /fila deve expor alias erros como Erro publico agregado");
   assert(fonte.includes("metricasErrosAliasNaoEnviadas: false"), "Erro nao pode permanecer alias de nao_enviada/parcial");
+  assert(fonte.includes("Math.round((enviadas / processadas) * 1000) / 10"), "Taxa usa Enviadas / Processadas com uma casa decimal");
+  assert(fonte.includes("todos os KPIs usam conclusoes terminais no periodo"), "payload documenta a coorte terminal unica");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
   assert(!rotaFila.includes("fila: itensResposta"), "GET /fila nao duplica payload com alias fila");
   assert(!rotaFila.includes("fila.filter"), "GET /fila nao monta resposta a partir da fila pesada");
@@ -112,8 +114,8 @@ function rotaGetBloco(fonte, rota) {
     oferta("hot_ontem", { dataEntradaFila: iso(AGORA - 2 * DIA), marketplace: "mercadolivre", destinoNome: "Destino B" })
   ];
   const historico = [
-    terminal("env_hoje", "enviado", { dataEntradaFila: iso(AGORA - 60 * 60 * 1000), titulo: "Notebook Gamer", destinoNome: "Destino A" }),
-    terminal("falha_7d", "nao_enviado", { dataEntradaFila: iso(AGORA - 6 * DIA), marketplace: "mercadolivre", destinoNome: "Destino B" })
+    terminal("env_hoje", "enviado", { dataEntradaFila: iso(AGORA - DIA), titulo: "Notebook Gamer", destinoNome: "Destino A" }),
+    terminal("falha_7d", "nao_enviado", { dataEntradaFila: iso(AGORA - 6 * DIA), finalizadoEm: iso(AGORA - 6 * DIA), marketplace: "mercadolivre", destinoNome: "Destino B" })
   ];
 
   const processadasHoje = construirReadModelPublicoPorMarcos({
@@ -130,7 +132,8 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(processadasHoje.ok, true);
-  assert.strictEqual(processadasHoje.metricas.processadas, 1, "GET /fila processadas hoje exclui trabalho vivo");
+  assert.strictEqual(processadasHoje.metricas.processadas, 1, "GET /fila processadas hoje usa terminalizacao e exclui trabalho vivo");
+  assert.strictEqual(processadasHoje.metricas.processadas, processadasHoje.metricas.enviadas + processadasHoje.metricas.comErro);
   assert.strictEqual(processadasHoje.metricas.emDistribuicao, 1, "GET /fila contabiliza trabalho vivo somente na Fila");
   assert.strictEqual(processadasHoje.limit, 50, "paginacao limit=50 preservada");
   assert.strictEqual(processadasHoje.fila, undefined, "read model puro nao cria alias fila");
@@ -147,7 +150,8 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(processadas7d.metricas.processadas, 2, "GET /fila processadas 7 dias contem somente terminais completos");
+  assert.strictEqual(processadas7d.metricas.processadas, 2, "GET /fila processadas 7 dias contem todos os terminais do periodo");
+  assert.strictEqual(processadas7d.metricas.processadas, processadas7d.metricas.enviadas + processadas7d.metricas.comErro);
   assert.strictEqual(processadas7d.metricas.emDistribuicao, 2);
 
   const enviadas = construirReadModelPublicoPorMarcos({
@@ -239,6 +243,7 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(destino.metricas.processadas, 1, "filtro destino nao mistura HOT");
+  assert.strictEqual(destino.metricas.processadas, destino.metricas.enviadas + destino.metricas.comErro, "destino preserva a coorte terminal unica");
 
   const busca = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
