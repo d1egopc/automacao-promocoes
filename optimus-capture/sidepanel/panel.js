@@ -68,6 +68,12 @@
     if (node) node.hidden = hidden;
   }
 
+  function atualizarResumoParcelamento() {
+    const texto = String(el("campoParcelamento")?.value || "").trim();
+    setTexto("resumoParcelamento", texto);
+    setHidden("resumoParcelamento", !texto);
+  }
+
   function urlOportunidadeSegura(valor = "") {
     try {
       const url = new URL(String(valor || ""));
@@ -714,6 +720,7 @@
       el("campoObservacoes").value = "";
     }
     setHidden("camposMagaluOpcionais", true);
+    atualizarResumoParcelamento();
     el("campoDesconto").value = "";
     setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
@@ -744,6 +751,7 @@
     el("campoPrecoMin").value = manterCampoManual("campoPrecoMin", formatarMoeda(state.produto.precoMin), preservarFormulario);
     el("campoPrecoMax").value = manterCampoManual("campoPrecoMax", formatarMoeda(state.produto.precoMax), preservarFormulario);
     el("campoParcelamento").value = manterCampoManual("campoParcelamento", state.produto.parcelamento || "", preservarFormulario);
+    atualizarResumoParcelamento();
     setHidden("camposMagaluOpcionais", state.produto.marketplace !== "magalu");
     setHidden("camposFaixaPreco", state.produto.marketplace !== "magalu");
     el("campoObservacoes").value = manterCampoManual("campoObservacoes", preservarObservacaoManual
@@ -1517,7 +1525,11 @@
     el("campoCupom").addEventListener("input", () => { marcarCampoEditado("campoCupom"); invalidarPreviewPorEdicao(); });
     el("campoObservacoes").addEventListener("input", () => { marcarCampoEditado("campoObservacoes"); invalidarPreviewPorObservacaoManual(); });
     ["campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"].forEach((id) => {
-      el(id).addEventListener("input", () => { marcarCampoEditado(id); invalidarPreviewPorEdicao(); });
+      el(id).addEventListener("input", () => {
+        marcarCampoEditado(id);
+        if (id === "campoParcelamento") atualizarResumoParcelamento();
+        invalidarPreviewPorEdicao();
+      });
     });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void carregarOportunidades();
