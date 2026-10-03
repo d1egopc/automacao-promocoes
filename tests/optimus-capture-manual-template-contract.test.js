@@ -21,6 +21,8 @@ function criarOfertaCapture(id, extra = {}) {
     titulo: "Produto capturado pelo Optimus Capture",
     precoAtual: "99,90",
     precoAnterior: "149,90",
+    descontoPercentual: 17,
+    descontoPercentualOrigem: "manual",
     urlOriginal: "https://www.amazon.com.br/dp/B0CTTVR415",
     urlAfiliada: "https://www.amazon.com.br/dp/B0CTTVR415?tag=workspace-20",
     imagem: "https://images.example/produto.jpg",
@@ -69,7 +71,8 @@ function depsEnvio(destino, mensagens) {
     blocos: [
       { tipo: "titulo", ativo: true, ordem: 10 },
       { tipo: "preco_por", ativo: true, ordem: 20 },
-      { tipo: "link", ativo: true, ordem: 30 }
+      { tipo: "desconto_percentual", ativo: true, ordem: 30 },
+      { tipo: "link", ativo: true, ordem: 40 }
     ],
     rodape: { ativo: true, texto: "MARCADOR TEMPLATE CAPTURE" }
   }).template;
@@ -87,6 +90,7 @@ function depsEnvio(destino, mensagens) {
   assert.strictEqual(retornoImediato.ok, true);
   assert.strictEqual(mensagensPersonalizadas.length, 1);
   assert.ok(mensagensPersonalizadas[0].includes("MARCADOR TEMPLATE CAPTURE"), "Capture deve usar o Template Personalizado oficial quando o destino o seleciona");
+  assert.ok(mensagensPersonalizadas[0].includes("17% OFF"), "Enviar agora preserva desconto manual comprovado");
 
   const mensagensUniversais = [];
   const retornoUniversal = await enviarOfertaManualV2({
@@ -98,6 +102,7 @@ function depsEnvio(destino, mensagens) {
   assert.strictEqual(retornoUniversal.ok, true);
   assert.strictEqual(mensagensUniversais.length, 1);
   assert.ok(mensagensUniversais[0].includes("Produto capturado pelo Optimus Capture"));
+  assert.ok(mensagensUniversais[0].includes("17% OFF"), "Template Universal preserva desconto manual comprovado");
   assert.ok(!mensagensUniversais[0].includes("MARCADOR TEMPLATE CAPTURE"), "Template padrao deve manter o fallback Universal oficial");
 
   const ofertaAgendada = criarOfertaCapture("capture_agendada");
@@ -123,6 +128,7 @@ function depsEnvio(destino, mensagens) {
   assert.strictEqual(retornoAgendado.ok, true);
   assert.strictEqual(mensagensAgendadas.length, 1);
   assert.ok(mensagensAgendadas[0].includes("MARCADOR TEMPLATE CAPTURE"), "Scheduler deve usar o mesmo enviarOfertaManualV2 e o mesmo Template oficial");
+  assert.ok(mensagensAgendadas[0].includes("17% OFF"), "Dispatcher agendado preserva desconto manual comprovado");
 
   const fonteDispatcher = fs.readFileSync(path.join(__dirname, "..", "modules", "manual-v2", "manual-dispatcher.js"), "utf8");
   assert.ok(fonteDispatcher.includes("deps.montarMensagemOferta(entradaTemplate"));

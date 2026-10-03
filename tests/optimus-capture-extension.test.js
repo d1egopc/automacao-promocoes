@@ -1058,6 +1058,28 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const semProveniencia = contrato.normalizarProdutoCapturado({
+      marketplace: "mercadolivre",
+      urlOriginal: "https://produto.mercadolivre.com.br/MLB-123-produto-_JM",
+      titulo: "Produto com de por",
+      precoAtual: 120,
+      precoAnterior: 150,
+      descontoPercentual: 20
+    });
+    assert.strictEqual(semProveniencia.descontoPercentual, null, "de/por e percentual legado sem origem ficam fail-closed");
+    assert.strictEqual(semProveniencia.descontoPercentualOrigem, "");
+
+    const explicito = contrato.normalizarProdutoCapturado({
+      ...semProveniencia,
+      descontoPercentual: 20,
+      descontoPercentualOrigem: "marketplace"
+    });
+    assert.strictEqual(explicito.descontoPercentual, 20);
+    assert.strictEqual(explicito.descontoPercentualOrigem, "marketplace");
+    assert.strictEqual(contrato.payloadPreview(explicito).descontoPercentualOrigem, "marketplace");
+  }
+
+  {
     const produto = amazon.capturarAmazonDaPagina(
       documentoAmazonSoundbarFixture(),
       { href: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1" }
@@ -1067,6 +1089,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAtual, 798.99);
     assert.strictEqual(produto.precoAnterior, 1099.00);
     assert.strictEqual(produto.descontoPercentual, 27);
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
     assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg");
     assert.strictEqual(produto.urlOriginal, "https://www.amazon.com.br/dp/B0G2T13LT6");
     assert.strictEqual(produto.cupom, "");
@@ -1093,7 +1116,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     );
     assert.strictEqual(produto.precoAnterior, 129.90);
     assert.strictEqual(produto.precoAtual, 86.38);
-    assert.strictEqual(produto.descontoPercentual, 34);
+    assert.strictEqual(produto.descontoPercentual, 5, "desconto total de 34% nao pode ser calculado pelos precos");
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
     assert.strictEqual(produto.observacoes, "Preço à vista no Pix ou NuPay");
 
     const payload = contrato.payloadPreview(produto);
@@ -1948,7 +1972,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
     assert.strictEqual(produto.precoAtual, 59.90);
     assert.strictEqual(produto.precoAnterior, 130.90);
-    assert.strictEqual(produto.descontoPercentual, 54);
+    assert.strictEqual(produto.descontoPercentual, null, "precos de/por isolados nao inventam desconto");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
   }
 
   {
@@ -2935,6 +2960,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             return new Promise((resolve) => {
               resolverPreviewPendente = () => resolve({
                 oferta: {
+                  ...payload,
                   titulo: payload.titulo,
                   precoAtual: payload.precoAtual,
                   precoAnterior: payload.precoAnterior,
@@ -2948,6 +2974,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
           }
           return {
           oferta: {
+            ...payload,
             titulo: payload.titulo,
             precoAtual: payload.precoAtual,
             precoAnterior: payload.precoAnterior,
@@ -3022,10 +3049,19 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("campoPrecoAnterior").value = "R$ 99,90";
     elemento("campoPrecoAnterior").listeners.input();
     assert.strictEqual(elemento("previewPrecoAnterior").textContent, "De R$ 99,90");
-    assert.strictEqual(elemento("previewDesconto").textContent, "25% OFF");
+    assert.strictEqual(elemento("previewDesconto").hidden, true, "preco anterior nao deriva percentual");
     assert.strictEqual(elemento("botaoEnviar").disabled, true, "preco anterior deixa preview desatualizado");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 4, "preco anterior participa da chave do preview");
+
+    elemento("campoDesconto").value = "17%";
+    elemento("campoDesconto").listeners.input();
+    assert.strictEqual(elemento("previewDesconto").textContent, "17% OFF", "desconto manual aparece imediatamente");
+    elemento("campoDesconto").value = "";
+    elemento("campoDesconto").listeners.input();
+    assert.strictEqual(elemento("previewDesconto").hidden, true, "limpar desconto manual remove OFF");
+    elemento("campoDesconto").value = "17%";
+    elemento("campoDesconto").listeners.input();
 
     elemento("campoCupom").value = "MANUAL10";
     elemento("campoCupom").listeners.input();
@@ -3050,6 +3086,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(ofertasSalvas.length, 1);
     assert.strictEqual(ofertasSalvas[0].cupom, "MANUAL10");
     assert.strictEqual(ofertasSalvas[0].observacoes, "Compra internacional · impostos estimados");
+    assert.strictEqual(ofertasSalvas[0].descontoPercentual, 17);
+    assert.strictEqual(ofertasSalvas[0].descontoPercentualOrigem, "manual");
 
     elemento("campoObservacoes").value = "Compra internacional · impostos atualizados";
     elemento("campoObservacoes").listeners.input();
@@ -3559,7 +3597,31 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAnterior, 129.9);
     assert.notStrictEqual(produto.precoAnterior, 7.11);
     assert.strictEqual(produto.descontoPercentual, 44);
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
     assert.strictEqual(produto.imagem, "https://http2.mlstatic.com/D_NQ_NP_DOM.webp");
+  }
+
+  {
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlPrecoAnteriorDomMercadoLivre().replace("44% OFF", "Oferta especial"),
+      "https://produto.mercadolivre.com.br/MLB-999-produto-sem-off-_JM"
+    );
+    assert.strictEqual(produto.precoAtual, 72.16);
+    assert.strictEqual(produto.precoAnterior, 129.9);
+    assert.strictEqual(produto.descontoPercentual, null, "ML com de/por sem OFF explicito nao inventa percentual");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
+  }
+
+  {
+    const htmlComOffRelacionado = htmlPrecoAnteriorDomMercadoLivre()
+      .replace("44% OFF", "Oferta especial")
+      .replace("</body>", '<div class="related-card-discount">55% OFF</div></body>');
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlComOffRelacionado,
+      "https://produto.mercadolivre.com.br/MLB-999-produto-sem-off-principal-_JM"
+    );
+    assert.strictEqual(produto.descontoPercentual, null, "OFF de produto relacionado nao contamina a oferta principal");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
   }
 
   {

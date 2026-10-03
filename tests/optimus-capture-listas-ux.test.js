@@ -188,11 +188,13 @@ async function executar() {
 
   elemento("campoTitulo").value = "Titulo editado";
   elemento("campoPrecoAtual").value = "R$ 118,00";
+  elemento("campoDesconto").value = "17%";
   elemento("campoCupom").value = "BRCD1";
   elemento("campoObservacoes").value = "Brasil sem imposto adicional";
   elemento("campoParcelamento").value = "10x sem juros";
   elemento("campoTitulo").listeners.input();
   elemento("campoPrecoAtual").listeners.input();
+  elemento("campoDesconto").listeners.input();
   elemento("campoCupom").listeners.input();
   elemento("campoObservacoes").listeners.input();
   elemento("campoParcelamento").listeners.input();
@@ -206,7 +208,7 @@ async function executar() {
   assert.strictEqual(previews, 1, "preview visual nao antecipa o request existente");
   await new Promise((resolve) => setTimeout(resolve, 500));
   assert.strictEqual(elemento("previewLinkLinha").hidden, false, "link volta apos o preview existente ser validado");
-  const camposEditados = ["campoTitulo", "campoPrecoAtual", "campoCupom", "campoObservacoes", "campoParcelamento"];
+  const camposEditados = ["campoTitulo", "campoPrecoAtual", "campoDesconto", "campoCupom", "campoObservacoes", "campoParcelamento"];
   const formularioAntes = camposEditados.map((id) => elemento(id).value);
 
   await elemento("botaoLista").listeners.click();
@@ -221,6 +223,8 @@ async function executar() {
   assert.strictEqual(payloadsAdicao[0].listaId, "lista_2");
   assert.strictEqual(payloadsAdicao[0].oferta.titulo, "Titulo editado");
   assert.strictEqual(payloadsAdicao[0].oferta.precoAtual, 118);
+  assert.strictEqual(payloadsAdicao[0].oferta.descontoPercentual, 17);
+  assert.strictEqual(payloadsAdicao[0].oferta.descontoPercentualOrigem, "manual");
   assert.strictEqual(payloadsAdicao[0].oferta.cupom, "BRCD1");
   assert.strictEqual(payloadsAdicao[0].oferta.observacoes, "Brasil sem imposto adicional");
   assert.strictEqual(payloadsAdicao[0].oferta.parcelamento, "10x sem juros");

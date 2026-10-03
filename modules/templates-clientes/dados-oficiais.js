@@ -379,6 +379,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     precoOriginal,
     economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
     descontoPercentual: oferta.descontoPercentual ?? oferta.desconto,
+    descontoPercentualOrigem: texto(oferta.descontoPercentualOrigem),
     categoria: v2.categoria || oferta.categoria || "",
     cupom,
     cupomTipo: oferta.cupomTipo || oferta.tipoCupom || "",

@@ -55,7 +55,7 @@
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
   const CAMPOS_MANUAIS = Object.freeze([
-    "campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoCupom", "campoObservacoes",
+    "campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoDesconto", "campoCupom", "campoObservacoes",
     "campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"
   ]);
 
@@ -351,6 +351,8 @@
       produto.titulo || "",
       produto.precoAtual || "",
       produto.precoAnterior || "",
+      produto.descontoPercentual || "",
+      produto.descontoPercentualOrigem || "",
       produto.precoMin || "",
       produto.precoMax || "",
       produto.temVariacaoPreco === true ? "variacao" : "",
@@ -449,13 +451,6 @@
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
     atualizarBotaoLista();
-  }
-
-  function atualizarDescontoDerivado() {
-    const campo = el("campoDesconto");
-    if (!campo) return;
-    const desconto = produtoEditado().descontoPercentual;
-    campo.value = desconto ? `${desconto}%` : "";
   }
 
   function agendarAtualizacaoPreview() {
@@ -810,7 +805,7 @@
     el("campoObservacoes").value = manterCampoManual("campoObservacoes", preservarObservacaoManual
       ? state.observacaoManualValor
       : (state.produto.observacoes || ""), preservarFormulario);
-    el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
+    el("campoDesconto").value = manterCampoManual("campoDesconto", state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "", preservarFormulario);
     setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
     setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
     setTexto("statusLink", capturaUtilizavel(state.produto) ? "Preparando oferta..." : "Nao foi possivel preparar a oferta");
@@ -973,11 +968,14 @@
   }
 
   function produtoEditado() {
+    const descontoEditado = state.camposEditados.has("campoDesconto");
     return contrato.normalizarProdutoCapturado({
       ...(state.produto || {}),
       titulo: valor("campoTitulo"),
       precoAtual: valor("campoPrecoAtual"),
       precoAnterior: valor("campoPrecoAnterior"),
+      descontoPercentual: valor("campoDesconto"),
+      descontoPercentualOrigem: descontoEditado ? "manual" : state.produto?.descontoPercentualOrigem,
       precoPix: valorOpcionalEditado("campoPrecoPix", state.produto?.precoPix),
       precoMin: valorOpcionalEditado("campoPrecoMin", state.produto?.precoMin),
       precoMax: valorOpcionalEditado("campoPrecoMax", state.produto?.precoMax),
@@ -992,7 +990,6 @@
   }
 
   function invalidarPreviewPorEdicao() {
-    atualizarDescontoDerivado();
     state.previewDesatualizado = true;
     renderizarPreviewVisual();
     setTexto("estadoPagina", "Preview desatualizado");
@@ -1567,6 +1564,7 @@
     el("campoTitulo").addEventListener("input", () => { marcarCampoEditado("campoTitulo"); invalidarPreviewPorEdicao(); });
     el("campoPrecoAtual").addEventListener("input", () => { marcarCampoEditado("campoPrecoAtual"); invalidarPreviewPorEdicao(); });
     el("campoPrecoAnterior").addEventListener("input", () => { marcarCampoEditado("campoPrecoAnterior"); invalidarPreviewPorEdicao(); });
+    el("campoDesconto").addEventListener("input", () => { marcarCampoEditado("campoDesconto"); invalidarPreviewPorEdicao(); });
     el("campoCupom").addEventListener("input", () => { marcarCampoEditado("campoCupom"); invalidarPreviewPorEdicao(); });
     el("campoObservacoes").addEventListener("input", () => { marcarCampoEditado("campoObservacoes"); invalidarPreviewPorObservacaoManual(); });
     ["campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"].forEach((id) => {

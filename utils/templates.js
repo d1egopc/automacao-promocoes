@@ -173,30 +173,17 @@ function montarLinhaParcelamento(oferta = {}) {
 }
 
 function montarLinhaDesconto(oferta = {}) {
-  const descontoManual =
-    oferta.desconto ||
-    oferta.percentualDesconto ||
-    oferta.descontoPercentual ||
-    "";
+  const origem = String(oferta.descontoPercentualOrigem || "").trim().toLowerCase();
+  const descontoManual = ["marketplace", "manual"].includes(origem)
+    ? (oferta.desconto || oferta.percentualDesconto || oferta.descontoPercentual || "")
+    : "";
 
   if (descontoManual) {
     const texto = String(descontoManual).trim();
     return texto.includes("%") ? `${texto} OFF` : `${texto}% OFF`;
   }
 
-  const precoAtual = normalizarPreco(oferta.precoAtual || oferta.preco);
-  const precoAntigo = normalizarPreco(oferta.precoAntigo);
-
-  if (precoAtual > 0 && precoAntigo > precoAtual) {
-    const percentual = Math.round(((precoAntigo - precoAtual) / precoAntigo) * 100);
-    const economia = precoAntigo - precoAtual;
-
-    return `${percentual}% OFF | Economia de ${formatarPreco(economia)}`;
-  }
-
-  if (oferta.economia) {
-    return `Economia de ${formatarPreco(oferta.economia)}`;
-  }
+  if (oferta.economia) return `Economia de ${formatarPreco(oferta.economia)}`;
 
   return "";
 }

@@ -101,15 +101,7 @@
     return null;
   }
 
-  function descontoAmazon(documento) {
-    const bloco = blocoPrecoPrincipal(documento);
-    const textoDesconto = limparTexto(bloco?.querySelector?.(".savingsPercentage")?.textContent || "");
-    const match = textoDesconto.match(/-?\s*(\d{1,2})\s*%/);
-    const numero = Number(match?.[1] || 0);
-    return Number.isFinite(numero) && numero > 0 ? numero : null;
-  }
-
-  function observacaoPrecoAmazon(documento) {
+  function contextoPagamentoAVistaAmazon(documento) {
     const bloco = blocoPrecoPrincipal(documento);
     const pagamento = documento?.querySelector?.("#oneTimePaymentPrice_feature_div");
     if (!bloco?.querySelector || !pagamento) return "";
@@ -120,8 +112,20 @@
     const asinBloco = limparTexto(bloco.getAttribute?.("data-csa-c-asin") || "");
     const asinPagamento = limparTexto(pagamento.getAttribute?.("data-csa-c-asin") || "");
     if (asinBloco && asinPagamento && asinBloco !== asinPagamento) return "";
+    return textoPagamento;
+  }
 
-    return "Preço à vista no Pix ou NuPay";
+  function descontoAmazon(documento) {
+    const bloco = blocoPrecoPrincipal(documento);
+    const textoDesconto = limparTexto(bloco?.querySelector?.(".savingsPercentage")?.textContent || "");
+    const textoPagamento = contextoPagamentoAVistaAmazon(documento);
+    const match = textoDesconto.match(/-?\s*(\d{1,2})\s*%/) || textoPagamento.match(/\b(\d{1,2})\s*%\s*off\b/i);
+    const numero = Number(match?.[1] || 0);
+    return Number.isFinite(numero) && numero > 0 ? numero : null;
+  }
+
+  function observacaoPrecoAmazon(documento) {
+    return contextoPagamentoAVistaAmazon(documento) ? "Preço à vista no Pix ou NuPay" : "";
   }
 
   function capturarAmazonDeHtml(html, urlOriginal) {
@@ -147,6 +151,8 @@
       titulo: tituloAmazon(documento, html),
       precoAtual,
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
+      descontoPercentual: desconto,
+      descontoPercentualOrigem: desconto ? "marketplace" : "",
       imagem: imagemAmazon(documento, html),
       cupom: "",
       observacoes,
@@ -154,9 +160,6 @@
       warnings
     });
 
-    if (!produto.descontoPercentual && desconto) {
-      produto.descontoPercentual = desconto;
-    }
     return produto;
   }
 
@@ -166,6 +169,7 @@
     precoAtualAmazon,
     precoAnteriorAmazon,
     descontoAmazon,
+    contextoPagamentoAVistaAmazon,
     observacaoPrecoAmazon,
     urlAmazonCanonica
   };

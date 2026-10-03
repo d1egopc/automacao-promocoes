@@ -179,6 +179,21 @@
     return match ? texto(match[1]).toUpperCase() : "";
   }
 
+  function extrairDescontoExplicito(html) {
+    const textoEntrada = String(html || "");
+    const candidatos = [];
+    let match;
+    const reBlocoPreco = /<([a-z0-9]+)\b(?=[^>]*class=["'][^"']*\bui-pdp-price\b[^"']*["'])[^>]*>([\s\S]{0,12000}?)<\/\1>/gi;
+    while ((match = reBlocoPreco.exec(textoEntrada))) candidatos.push(textoVisivelDeHtml(match[2]));
+
+    for (const candidato of candidatos) {
+      const percentual = candidato.match(/\b(\d{1,3}(?:[.,]\d+)?)\s*%\s*OFF\b/i);
+      const numero = Number(String(percentual?.[1] || "").replace(",", "."));
+      if (Number.isFinite(numero) && numero > 0 && numero <= 100) return numero;
+    }
+    return null;
+  }
+
   function idsEncontrados(valor) {
     const textoEntrada = String(valor || "");
     return {
@@ -205,6 +220,7 @@
     const precoAnterior = precoAnteriorDomMercadoLivre(htmlTexto, precoAtual) ||
       precoAnteriorJsonLd(produtoJson, precoAtual) ||
       precoAnteriorNoTexto(textoPagina, precoAtual);
+    const descontoPercentual = extrairDescontoExplicito(htmlTexto);
     const imagem = contrato.urlHttp(imagemJsonLd(produtoJson) || ogImage);
     const fonte = produtoJson ? "json_ld" : (ogTitle || ogImage ? "og_meta" : "dom_visivel");
     const warnings = [];
@@ -217,6 +233,8 @@
       titulo,
       precoAtual,
       precoAnterior,
+      descontoPercentual,
+      descontoPercentualOrigem: descontoPercentual ? "marketplace" : "",
       imagem,
       cupom: extrairCupomExplicito(textoPagina),
       fonte,
@@ -237,6 +255,7 @@
     capturarMercadoLivreDeHtml,
     detectarWall,
     extrairScriptsJsonLd,
+    extrairDescontoExplicito,
     idsEncontrados
   };
   global.OptimusCaptureMercadoLivre = api;

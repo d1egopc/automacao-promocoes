@@ -22,6 +22,7 @@ const ofertaBase = {
   precoAtual: 140,
   precoPix: "R$ 137,00 no Pix",
   descontoPercentual: 33,
+  descontoPercentualOrigem: "marketplace",
   parcelamento: "10x de R$ 14,00",
   cupom: "RADAR10",
   instrucaoCupom: "Aplique o cupom no carrinho.",
@@ -65,6 +66,24 @@ assert.ok(padrao.includes("🔗 *Confira aqui:*\nhttps://go.optimus/produto"));
 assert.strictEqual((padrao.match(/Oferta sujeita/g) || []).length, 0, "aviso custom substitui padrao");
 assert.strictEqual((padrao.match(/Aviso customizado final/g) || []).length, 1, "apenas um aviso final");
 assert.ok(!padrao.includes("APP / Moedas"), "APP e Moedas nao compartilham papel visual");
+
+const semDescontoComDePor = gerarTemplateUniversal({
+  ...ofertaBase,
+  titulo: "De por sem OFF explicito",
+  precoOriginal: 150,
+  precoAtual: 120,
+  descontoPercentual: "",
+  descontoPercentualOrigem: ""
+});
+assert.ok(!semDescontoComDePor.includes("% OFF"), "de/por nao inventa percentual no template universal");
+
+const legadoSemOrigem = gerarTemplateUniversal({
+  ...ofertaBase,
+  titulo: "Legado sem origem",
+  descontoPercentual: 33,
+  descontoPercentualOrigem: ""
+});
+assert.ok(!legadoSemOrigem.includes("% OFF"), "registro antigo sem proveniencia fica fail-closed");
 
 assert.ok(indice(padrao, "🛍️ AliExpress") < indice(padrao, "❌ De:"), "origem vem antes de preco");
 assert.ok(indice(padrao, "❌ De:") < indice(padrao, "🎟️ Cupom:"), "precos ficam antes de cupom");
@@ -262,6 +281,25 @@ assert.ok(personalizado.mensagem.includes("🎟️ Resgate:\nhttps://go.optimus/
 assert.ok(personalizado.mensagem.includes("🔗 Confira aqui:\nhttps://go.optimus/produto"));
 assert.strictEqual((personalizado.mensagem.match(/Aviso customizado final/g) || []).length, 1, "personalizado tambem tem aviso unico");
 assert.ok(personalizado.mensagem.endsWith("Rodape livre"), "rodape permanece texto livre separado");
+
+const templateSomenteDesconto = {
+  id: "tpl_desconto_explicito",
+  canais: ["whatsapp"],
+  blocos: [{ tipo: "desconto_percentual", ativo: true, ordem: 10 }]
+};
+const descontoManualPersonalizado = renderizarTemplatePersonalizado({
+  oferta: { ...ofertaBase, descontoPercentual: 17, descontoPercentualOrigem: "manual" },
+  template: templateSomenteDesconto,
+  canal: "whatsapp"
+});
+assert.ok(descontoManualPersonalizado.mensagem.includes("17% OFF"), "template personalizado aceita desconto manual comprovado");
+
+const descontoLegadoPersonalizado = renderizarTemplatePersonalizado({
+  oferta: { ...ofertaBase, descontoPercentual: 33, descontoPercentualOrigem: "" },
+  template: templateSomenteDesconto,
+  canal: "whatsapp"
+});
+assert.ok(!descontoLegadoPersonalizado.mensagem.includes("% OFF"), "template personalizado rejeita percentual sem proveniencia");
 
 const personalizadoSemClassificacao = renderizarTemplatePersonalizado({
   oferta: ofertaBase,

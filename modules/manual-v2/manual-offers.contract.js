@@ -34,6 +34,7 @@ const CAMPOS_EDITAVEIS_MANUAL_V2 = Object.freeze([
   "categoria",
   "seller",
   "cupom",
+  "descontoPercentual",
   "parcelamento",
   "observacoes"
 ]);
@@ -84,6 +85,21 @@ function primeiroTexto(...valores) {
     if (atual) return atual;
   }
   return "";
+}
+
+function normalizarDescontoPercentualExplicito(entrada = {}) {
+  const origem = texto(entrada.descontoPercentualOrigem).toLowerCase();
+  if (!["marketplace", "manual"].includes(origem)) {
+    return { descontoPercentual: "", descontoPercentualOrigem: "" };
+  }
+  const bruto = primeiroTexto(entrada.descontoPercentual, entrada.desconto)
+    .replace("%", "")
+    .replace(",", ".");
+  const numero = Number(bruto);
+  if (!Number.isFinite(numero) || numero <= 0 || numero > 100) {
+    return { descontoPercentual: "", descontoPercentualOrigem: "" };
+  }
+  return { descontoPercentual: String(numero), descontoPercentualOrigem: origem };
 }
 
 function normalizarListaTexto(valor) {
@@ -182,6 +198,7 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     primeiroTexto(entrada.condicaoPrecoPor, entrada.condicao_preco_por).toLowerCase() === "pix"
     ? "pix"
     : "";
+  const descontoExplicito = normalizarDescontoPercentualExplicito(entrada);
 
   const oferta = {
     id: primeiroTexto(entrada.id) || (typeof contexto.idFactory === "function" ? contexto.idFactory() : gerarIdManualV2()),
@@ -253,7 +270,8 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     avaliacao: primeiroTexto(entrada.avaliacao, entrada.rating),
     quantidadeAvaliacoes: primeiroTexto(entrada.quantidadeAvaliacoes, entrada.avaliacoes, entrada.reviewCount),
     vendidos: primeiroTexto(entrada.vendidos, entrada.quantidadeVendida, entrada.soldCount),
-    descontoPercentual: primeiroTexto(entrada.descontoPercentual, entrada.desconto),
+    descontoPercentual: descontoExplicito.descontoPercentual,
+    descontoPercentualOrigem: descontoExplicito.descontoPercentualOrigem,
     instrucaoCupom: primeiroTexto(entrada.instrucaoCupom, entrada.cupomInstrucao, entrada.avisoCupom),
     beneficioTexto: primeiroTexto(entrada.beneficioTexto, entrada.beneficio),
 
@@ -316,6 +334,7 @@ module.exports = {
   normalizarStatusManualV2,
   imagemMagaluPublicaSegura,
   normalizarOfertaManualV2,
+  normalizarDescontoPercentualExplicito,
   camposAusentesEditaveis,
   temFaixaRealPreco,
   normalizarDestinoAgendadoManualV2,

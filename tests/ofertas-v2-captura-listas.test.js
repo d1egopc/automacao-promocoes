@@ -62,6 +62,8 @@ async function main() {
     urlAfiliada,
     titulo: "Produto editado na extensao",
     precoAtual: "117,00",
+    descontoPercentual: 17,
+    descontoPercentualOrigem: "manual",
     cupom: "BRCD1",
     observacoes: "Brasil sem imposto adicional",
     taxa: "Impostos incluidos",
@@ -94,6 +96,8 @@ async function main() {
     assert.strictEqual(itemPersistido.origem, "captura_extensao");
     assert.strictEqual(itemPersistido.oferta.clienteId, workspace, "workspace vem da autenticacao");
     assert.strictEqual(itemPersistido.oferta.titulo, oferta.titulo);
+    assert.strictEqual(itemPersistido.oferta.descontoPercentual, "17");
+    assert.strictEqual(itemPersistido.oferta.descontoPercentualOrigem, "manual");
     assert.strictEqual(itemPersistido.oferta.cupom, oferta.cupom);
     assert.strictEqual(itemPersistido.oferta.observacoes, oferta.observacoes);
     assert.strictEqual(itemPersistido.oferta.taxa, oferta.taxa);

@@ -30,11 +30,15 @@
     }
   }
 
-  function descontoPercentual(precoAtual, precoAnterior) {
-    const atual = precoNumero(precoAtual);
-    const anterior = precoNumero(precoAnterior);
-    if (!atual || !anterior || anterior <= atual) return null;
-    return Math.round(((anterior - atual) / anterior) * 100);
+  function descontoPercentual(valor) {
+    const bruto = texto(valor).replace("%", "").replace(",", ".");
+    const numero = Number(bruto);
+    return Number.isFinite(numero) && numero > 0 && numero <= 100 ? numero : null;
+  }
+
+  function descontoPercentualOrigem(valor) {
+    const origem = texto(valor).toLowerCase();
+    return ["marketplace", "manual"].includes(origem) ? origem : "";
   }
 
   function temFaixaRealPreco(precoMin, precoMax) {
@@ -51,6 +55,8 @@
     const precoAnterior = precoNumero(bruto.precoAnterior);
     const warnings = Array.isArray(bruto.warnings) ? bruto.warnings.map(texto).filter(Boolean) : [];
     const condicaoPrecoPor = texto(bruto.condicaoPrecoPor).toLowerCase() === "pix" ? "pix" : "";
+    const origemDesconto = descontoPercentualOrigem(bruto.descontoPercentualOrigem);
+    const desconto = origemDesconto ? descontoPercentual(bruto.descontoPercentual) : null;
     const produto = {
       marketplace: texto(bruto.marketplace || "mercadolivre").toLowerCase(),
       urlOriginal: urlHttp(bruto.urlOriginal || bruto.url),
@@ -76,6 +82,8 @@
       imagem: urlHttp(bruto.imagem),
       cupom: texto(bruto.cupom).toUpperCase(),
       observacoes: texto(bruto.observacoes || bruto.opcao),
+      descontoPercentual: desconto,
+      descontoPercentualOrigem: desconto ? origemDesconto : "",
       origem: "optimus_capture_v1",
       fonte: texto(bruto.fonte),
       precoAmbiguo: bruto.precoAmbiguo === true,
@@ -104,7 +112,6 @@
     if (!produto.precoAtual && !produto.precoMin) warnings.push(produto.precoAmbiguo ? "preco_ambiguo" : "preco_atual_ausente");
     if (!produto.imagem) warnings.push("imagem_ausente");
 
-    produto.descontoPercentual = descontoPercentual(produto.precoAtual, produto.precoAnterior);
     produto.completo = Boolean(produto.urlOriginal && produto.titulo && (produto.precoAtual || produto.precoMin));
     produto.requerConferencia = produto.precoAmbiguo === true || !produto.completo;
     return produto;
@@ -131,11 +138,11 @@
       observacoes: normalizado.observacoes,
       origem: normalizado.origem
     };
-    for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
+    for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento", "descontoPercentual", "descontoPercentualOrigem"]) {
       if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
     }
     if (normalizado.marketplace === "magalu") {
-      for (const campo of ["categoria", "seller", "avaliacao", "quantidadeAvaliacoes", "vendidos", "condicaoPix", "imposto", "moedas", "descontoPercentual", "instrucaoCupom", "beneficioTexto"]) {
+      for (const campo of ["categoria", "seller", "avaliacao", "quantidadeAvaliacoes", "vendidos", "condicaoPix", "imposto", "moedas", "instrucaoCupom", "beneficioTexto"]) {
         if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
       }
     }
@@ -147,6 +154,7 @@
     precoNumero,
     urlHttp,
     descontoPercentual,
+    descontoPercentualOrigem,
     temFaixaRealPreco,
     normalizarProdutoCapturado,
     payloadPreview

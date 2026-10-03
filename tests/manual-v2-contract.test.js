@@ -145,6 +145,34 @@ const idFactory = () => "manual_v2_teste";
 }
 
 {
+  const marketplace = normalizarOfertaManualV2({
+    marketplace: "mercadolivre",
+    titulo: "Produto com OFF explicito",
+    descontoPercentual: "20%",
+    descontoPercentualOrigem: "marketplace"
+  }, { now: agora, idFactory });
+  assert.strictEqual(marketplace.descontoPercentual, "20");
+  assert.strictEqual(marketplace.descontoPercentualOrigem, "marketplace");
+
+  const manual = normalizarOfertaManualV2({
+    marketplace: "amazon",
+    titulo: "Produto com OFF manual",
+    descontoPercentual: 17,
+    descontoPercentualOrigem: "manual"
+  }, { now: agora, idFactory });
+  assert.strictEqual(manual.descontoPercentual, "17");
+  assert.strictEqual(manual.descontoPercentualOrigem, "manual");
+
+  const legado = normalizarOfertaManualV2({
+    marketplace: "amazon",
+    titulo: "Produto legado",
+    descontoPercentual: 34
+  }, { now: agora, idFactory });
+  assert.strictEqual(legado.descontoPercentual, "", "percentual antigo sem origem nao pode vazar");
+  assert.strictEqual(legado.descontoPercentualOrigem, "");
+}
+
+{
   assert.strictEqual(temFaixaRealPreco("10,00", "20,00"), true);
   assert.strictEqual(temFaixaRealPreco("10,00", "10,00"), false);
   assert.strictEqual(temFaixaRealPreco("", "20,00"), false);
