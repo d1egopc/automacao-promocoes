@@ -42,6 +42,10 @@
     previewEnviadoKey: "",
     envioIdempotencyKey: "",
     envioIdempotencyDestinosKey: "",
+    listas: [],
+    listaSelecionadaId: "",
+    carregandoListas: false,
+    adicionandoLista: false,
     oportunidadesCliente: null,
     oportunidadesVistas: null,
     oportunidades: [],
@@ -350,6 +354,14 @@
     botao.title = enviado ? "Oferta ja enviada para o preview atual" : "";
   }
 
+  function atualizarBotaoLista() {
+    const botao = el("botaoLista");
+    if (!botao) return;
+    const temPreview = previewCorrespondeAoFormulario();
+    botao.hidden = !temPreview;
+    botao.disabled = !temPreview || state.carregandoListas || state.adicionandoLista;
+  }
+
   function ocultarDestinos() {
     setHidden("destinosView", true);
     const lista = el("destinosLista");
@@ -360,6 +372,7 @@
 
   function limparPreviewAtual() {
     if (state.previewTimer) clearTimeout(state.previewTimer);
+    fecharListaModal();
     state.previewTimer = null;
     state.previewOferta = null;
     state.previewKey = "";
@@ -376,6 +389,7 @@
     ocultarDestinos();
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
+    atualizarBotaoLista();
   }
 
   function atualizarDescontoDerivado() {
@@ -917,7 +931,168 @@
     setHidden("botaoPreview", false);
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
+    atualizarBotaoLista();
     agendarAtualizacaoPreview();
+  }
+
+  function mostrarFeedbackLista(mensagem = "", tipo = "") {
+    const feedback = el("listaModalFeedback");
+    if (!feedback) return;
+    feedback.hidden = !mensagem;
+    feedback.textContent = mensagem;
+    feedback.dataset.tipo = tipo;
+  }
+
+  function renderizarListas() {
+    const container = el("listasDisponiveis");
+    if (!container) return;
+    container.innerHTML = "";
+    if (state.carregandoListas) {
+      const carregando = document.createElement("p");
+      carregando.textContent = "Carregando listas...";
+      container.append(carregando);
+      return;
+    }
+    if (!state.listas.length) {
+      const vazio = document.createElement("p");
+      vazio.textContent = "Nenhuma lista criada.";
+      container.append(vazio);
+      return;
+    }
+    for (const lista of state.listas) {
+      const opcao = document.createElement("label");
+      const radio = document.createElement("input");
+      const nome = document.createElement("span");
+      opcao.className = "lista-opcao";
+      radio.type = "radio";
+      radio.name = "listaDestino";
+      radio.value = String(lista.id || "");
+      radio.checked = radio.value === state.listaSelecionadaId;
+      radio.addEventListener("change", () => {
+        state.listaSelecionadaId = radio.value;
+        el("adicionarListaExistente").disabled = !state.listaSelecionadaId || state.adicionandoLista;
+      });
+      nome.textContent = String(lista.nome || "Lista");
+      opcao.append(radio, nome);
+      container.append(opcao);
+    }
+    el("adicionarListaExistente").disabled = !state.listaSelecionadaId || state.adicionandoLista;
+  }
+
+  function fecharListaModal() {
+    setHidden("listaModal", true);
+    state.listaSelecionadaId = "";
+    state.carregandoListas = false;
+    mostrarFeedbackLista();
+    atualizarBotaoLista();
+  }
+
+  function mostrarCriacaoLista(criar = true) {
+    setHidden("listaExistenteView", criar);
+    setHidden("criarListaView", !criar);
+    mostrarFeedbackLista();
+    if (criar) el("nomeNovaLista")?.focus?.();
+  }
+
+  async function abrirListaModal() {
+    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.carregandoListas) return;
+    setHidden("listaModal", false);
+    mostrarCriacaoLista(false);
+    state.listas = [];
+    state.listaSelecionadaId = "";
+    state.carregandoListas = true;
+    mostrarFeedbackLista();
+    renderizarListas();
+    atualizarBotaoLista();
+    try {
+      const resposta = await api.listarListasManualV2(state.auth.token);
+      state.listas = Array.isArray(resposta?.listas) ? resposta.listas : [];
+    } catch (erro) {
+      if (erro?.status === 401) {
+        fecharListaModal();
+        await auth.sair();
+        state.auth = null;
+        renderAuth();
+        return;
+      }
+      mostrarFeedbackLista("Nao foi possivel carregar suas listas.", "erro");
+    } finally {
+      state.carregandoListas = false;
+      renderizarListas();
+      atualizarBotaoLista();
+    }
+  }
+
+  async function adicionarOfertaNaLista(listaId, nomeLista) {
+    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.adicionandoLista) return false;
+    const previewKey = state.previewKey;
+    state.adicionandoLista = true;
+    el("adicionarListaExistente").disabled = true;
+    el("criarEAdicionarLista").disabled = true;
+    atualizarBotaoLista();
+    mostrarFeedbackLista("Adicionando...", "");
+    try {
+      const oferta = ofertaPreviewParaSalvar(state.previewOferta);
+      if (state.previewKey !== previewKey) throw new Error("preview_alterado");
+      await api.adicionarCapturaListaManualV2(state.auth.token, listaId, oferta);
+      if (state.previewKey !== previewKey) throw new Error("preview_alterado");
+      mostrarFeedbackLista(`Adicionado à ${String(nomeLista || "lista")}`, "sucesso");
+      return true;
+    } catch (erro) {
+      if (erro?.status === 401) {
+        fecharListaModal();
+        await auth.sair();
+        state.auth = null;
+        renderAuth();
+        return false;
+      }
+      const jaExiste = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
+      mostrarFeedbackLista(jaExiste ? "Esta oferta ja esta nesta lista" : "Nao foi possivel adicionar a oferta.", jaExiste ? "" : "erro");
+      return false;
+    } finally {
+      state.adicionandoLista = false;
+      el("criarEAdicionarLista").disabled = false;
+      el("adicionarListaExistente").disabled = !state.listaSelecionadaId;
+      atualizarBotaoLista();
+    }
+  }
+
+  async function adicionarListaExistente() {
+    const lista = state.listas.find((item) => String(item?.id || "") === state.listaSelecionadaId);
+    if (!lista) return;
+    await adicionarOfertaNaLista(lista.id, lista.nome);
+  }
+
+  async function criarEAdicionarLista() {
+    const nome = valor("nomeNovaLista").trim();
+    if (!nome || state.adicionandoLista) {
+      mostrarFeedbackLista("Informe o nome da lista.", "erro");
+      return;
+    }
+    state.adicionandoLista = true;
+    el("criarEAdicionarLista").disabled = true;
+    atualizarBotaoLista();
+    mostrarFeedbackLista("Criando lista...", "");
+    let lista;
+    try {
+      const resposta = await api.criarListaManualV2(state.auth.token, nome);
+      lista = resposta?.lista;
+      if (!lista?.id) throw new Error("lista_criada_sem_id");
+    } catch (erro) {
+      state.adicionandoLista = false;
+      el("criarEAdicionarLista").disabled = false;
+      atualizarBotaoLista();
+      mostrarFeedbackLista("Nao foi possivel criar a lista.", "erro");
+      return;
+    }
+    state.adicionandoLista = false;
+    const adicionou = await adicionarOfertaNaLista(lista.id, lista.nome || nome);
+    if (adicionou) {
+      state.listas = [...state.listas, lista];
+      mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada e oferta adicionada`, "sucesso");
+    } else {
+      mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada, mas a oferta nao foi adicionada.`, "erro");
+    }
   }
 
   function invalidarPreviewPorObservacaoManual() {
@@ -1013,6 +1188,7 @@
       if (opcoes.preservarDestinos !== true) ocultarDestinos();
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
+      atualizarBotaoLista();
       setTexto("estadoPagina", "Oferta pronta");
       setTexto("statusLink", "Oferta pronta");
       logTiming("preview_pronto", {
@@ -1326,6 +1502,12 @@
     el("botaoPreview").addEventListener("click", gerarPreview);
     el("botaoSalvar").addEventListener("click", salvarNoOptimus);
     el("botaoEnviar").addEventListener("click", acionarEnviarAgora);
+    el("botaoLista").addEventListener("click", abrirListaModal);
+    el("fecharListaModal").addEventListener("click", fecharListaModal);
+    el("adicionarListaExistente").addEventListener("click", adicionarListaExistente);
+    el("abrirCriarLista").addEventListener("click", () => mostrarCriacaoLista(true));
+    el("voltarListas").addEventListener("click", () => mostrarCriacaoLista(false));
+    el("criarEAdicionarLista").addEventListener("click", criarEAdicionarLista);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
     el("fecharOportunidades")?.addEventListener("click", fecharPopoverOportunidades);
@@ -1346,7 +1528,10 @@
       if (!popover?.hidden && !popover.contains?.(evento.target) && !botao?.contains?.(evento.target)) fecharPopoverOportunidades();
     });
     document.addEventListener("keydown", (evento) => {
-      if (evento.key === "Escape") fecharPopoverOportunidades();
+      if (evento.key === "Escape") {
+        fecharPopoverOportunidades();
+        fecharListaModal();
+      }
     });
     try {
       state.auth = await auth.restaurarSessao();

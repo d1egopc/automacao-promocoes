@@ -155,6 +155,19 @@ function identidadeCanonica(oferta) {
   if (!identidade) throw erro("produto_sem_identidade_operacional", 422);
   return identidade;
 }
+function identidadeCanonicaCaptura(oferta) {
+  const identidade = identidadeCanonicaBase(oferta);
+  if (identidade) return identidade;
+  const prova = oferta.afiliacaoWorkspaceVerificada?.principal || oferta.afiliacaoWorkspaceVerificada || {};
+  if (oferta.marketplace === "magalu" && texto(prova.productId) &&
+      texto(prova.productId) === texto(oferta.produtoId) &&
+      texto(prova.workspaceId) === texto(oferta.clienteId)) {
+    return crypto.createHash("sha256")
+      .update(JSON.stringify(["magalu", texto(prova.productId)]))
+      .digest("hex");
+  }
+  throw erro("produto_sem_identidade_operacional", 422);
+}
 function provarAfiliacao(oferta, clienteId, deps = {}) {
   const marketplace = oferta.marketplace;
   if (!["shopee", "aliexpress", "magalu"].includes(marketplace)) return;
@@ -267,7 +280,7 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
   provarAfiliacao(oferta, clienteId, deps);
   return oferta;
 }
-async function adicionarItem(clienteId, listaId, { origem, ofertaId } = {}, deps = {}) {
+async function adicionarItem(clienteId, listaId, { origem, ofertaId, oferta: ofertaCapturada } = {}, deps = {}) {
   const id = normalizarClienteId(clienteId);
   let oferta;
   if (origem === "ofertas") {
@@ -281,9 +294,17 @@ async function adicionarItem(clienteId, listaId, { origem, ofertaId } = {}, deps
     const achado = buscarAchado(id, ofertaId, agora(deps));
     if (!achado) throw erro("achado_expirado_ou_nao_encontrado", 404);
     oferta = await ofertaDoAchado(achado, id, deps);
+  } else if (origem === "captura_extensao") {
+    if (!ofertaCapturada || typeof ofertaCapturada !== "object" || Array.isArray(ofertaCapturada)) {
+      throw erro("oferta_captura_obrigatoria");
+    }
+    oferta = normalizarOfertaManualV2({ ...ofertaCapturada, id: "", clienteId: id }, { clienteId: id });
+    provarAfiliacao(oferta, id, deps);
   } else throw erro("origem_lista_invalida");
   if (!texto(oferta.urlAfiliada)) throw erro("oferta_sem_link_afiliado", 422);
-  const canonicalKey = identidadeCanonica(oferta);
+  const canonicalKey = origem === "captura_extensao"
+    ? identidadeCanonicaCaptura(oferta)
+    : identidadeCanonica(oferta);
   return atualizarLista(id, listaId, (item) => {
     exigirParada(item);
     if (item.itens.some((i) => i.canonicalKey === canonicalKey)) throw erro("item_ja_na_lista", 409);

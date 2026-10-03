@@ -406,6 +406,99 @@ button[data-estado="salvo"]:disabled {
   color: #7a4b00;
 }
 
+.estado-topo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.botao-lista {
+  align-self: stretch;
+  color: #165dff;
+  background: #e9efff;
+  white-space: nowrap;
+}
+
+.lista-modal {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
+}
+
+.lista-modal-cabecalho,
+.criar-lista-acoes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fechar-lista {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #475467;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.lista-modal-rotulo,
+.lista-modal-feedback {
+  margin: 10px 0 8px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.listas-disponiveis {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.lista-opcao {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #eaecf0;
+  border-radius: 6px;
+  padding: 8px;
+  color: #101828;
+  font-size: 13px;
+}
+
+.lista-opcao input {
+  width: auto;
+  margin: 0;
+}
+
+.lista-modal-acao,
+.criar-lista-link {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.criar-lista-acoes {
+  margin-top: 10px;
+}
+
+.criar-lista-acoes button {
+  flex: 1;
+}
+
+.lista-modal-feedback[data-tipo="sucesso"] {
+  color: #027a48;
+}
+
+.lista-modal-feedback[data-tipo="erro"] {
+  color: #b42318;
+}
+
 .erro {
   background: #fff1f3;
   color: #b42318;
@@ -543,4 +636,3 @@ button[data-estado="salvo"]:disabled {
   height: 1px;
   background: #d0d5dd;
 }
-
