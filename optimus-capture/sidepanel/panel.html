@@ -96,23 +96,28 @@
         </section>
 
         <section id="produtoView" class="produto" hidden>
-          <div class="produto-media">
-            <img id="produtoImagem" alt="" class="produto-imagem">
-          </div>
-          <div id="produtoMarketplace" class="marketplace">Marketplace</div>
-          <label>
-            Titulo
-            <textarea id="campoTitulo" rows="3"></textarea>
-          </label>
-          <div class="grid">
-            <label>
-              Preco atual
-              <input id="campoPrecoAtual" inputmode="decimal" type="text">
-            </label>
-            <label>
-              Preco anterior
-              <input id="campoPrecoAnterior" inputmode="decimal" type="text">
-            </label>
+          <div class="produto-resumo">
+            <div class="produto-media">
+              <img id="produtoImagem" alt="" class="produto-imagem">
+            </div>
+            <div class="produto-resumo-corpo">
+              <div id="produtoMarketplace" class="marketplace">Marketplace</div>
+              <label class="produto-titulo">
+                Titulo
+                <textarea id="campoTitulo" rows="2"></textarea>
+              </label>
+              <div class="produto-resumo-precos">
+                <label class="produto-preco-atual">
+                  Preco atual
+                  <input id="campoPrecoAtual" inputmode="decimal" type="text">
+                </label>
+                <label class="produto-preco-anterior">
+                  Preco anterior
+                  <input id="campoPrecoAnterior" inputmode="decimal" type="text">
+                </label>
+              </div>
+              <p id="resumoParcelamento" class="resumo-parcelamento" hidden></p>
+            </div>
           </div>
           <div class="grid">
             <label>
