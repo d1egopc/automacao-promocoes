@@ -2264,7 +2264,25 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("campoPrecoAnterior").value, "R$ 124,45");
     assert.strictEqual(payloadsPreview[0].precoAtual, 60.31);
     assert.strictEqual(payloadsPreview[0].precoAnterior, 124.45);
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A - R$ 60,31");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 60,31");
+    assert.strictEqual(elemento("previewPrecoAnterior").textContent, "De R$ 124,45");
+    assert.strictEqual(elemento("previewMarketplace").textContent, "Mercado Livre");
+    assert.strictEqual(elemento("previewCupom").hidden, true);
+    assert.strictEqual(elemento("previewParcelamento").hidden, true);
+    const desenhosPreview = [];
+    elemento("previewImagem").width = 160;
+    elemento("previewImagem").height = 140;
+    elemento("previewImagem").getContext = () => ({
+      clearRect() {},
+      drawImage(...args) { desenhosPreview.push(args); }
+    });
+    elemento("produtoImagem").complete = true;
+    elemento("produtoImagem").naturalWidth = 400;
+    elemento("produtoImagem").naturalHeight = 200;
+    elemento("produtoImagem").listeners.load();
+    assert.strictEqual(desenhosPreview.length, 1, "imagem carregada e reutilizada sem outro download");
+    assert.deepStrictEqual(desenhosPreview[0].slice(1), [0, 30, 160, 80]);
     assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta");
     assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
@@ -2281,6 +2299,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(previews, 1, "salvar nao deve chamar preview/capture novamente");
     assert.strictEqual(saves, 1);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
+    assert.strictEqual(elemento("previewView").hidden, false, "salvar preserva a previa da oferta");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A");
     assert.strictEqual(elemento("botaoSalvar").disabled, true);
     assert.strictEqual(elemento("botaoSalvar").textContent, "Salvo no Optimus");
     assert.strictEqual(elemento("botaoSalvar").dataset.estado, "salvo");
@@ -2740,7 +2760,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.strictEqual(previews, 1);
     assert.strictEqual(elemento("campoPrecoAtual").value, "A partir de R$ 67,99");
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Triturador De Alimentos - A partir de R$ 67,99");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Triturador De Alimentos");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "A partir de R$ 67,99");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
   }
@@ -2920,6 +2941,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("campoTitulo").value = "Produto A atualizado";
     elemento("campoTitulo").listeners.input();
     assert.strictEqual(elemento("previewView").hidden, false, "edicao mantem o ultimo preview visivel");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A atualizado", "titulo visual reage antes do backend");
     assert.strictEqual(elemento("statusLink").textContent, "Preview desatualizado");
     assert.strictEqual(elemento("botaoPreview").hidden, false, "edicao expoe atualizacao manual");
     assert.strictEqual(elemento("botaoSalvar").disabled, true, "edicao manual invalida o preview anterior");
@@ -2931,20 +2953,39 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     elemento("campoPrecoAtual").value = "R$ 75,00";
     elemento("campoPrecoAtual").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 75,00", "preco visual reage antes do backend");
     assert.strictEqual(elemento("botaoSalvar").disabled, true, "preco atual deixa preview desatualizado");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 3, "preco atual gera preview novo");
 
+    elemento("campoPrecoAnterior").value = "";
+    elemento("campoPrecoAnterior").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAnterior").hidden, true, "preco anterior vazio nao ocupa espaco");
     elemento("campoPrecoAnterior").value = "R$ 99,90";
     elemento("campoPrecoAnterior").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAnterior").textContent, "De R$ 99,90");
+    assert.strictEqual(elemento("previewDesconto").textContent, "25% OFF");
     assert.strictEqual(elemento("botaoEnviar").disabled, true, "preco anterior deixa preview desatualizado");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 4, "preco anterior participa da chave do preview");
 
     elemento("campoCupom").value = "MANUAL10";
     elemento("campoCupom").listeners.input();
+    assert.strictEqual(elemento("previewCupom").textContent, "Cupom: MANUAL10");
+    elemento("campoCupom").value = "";
+    elemento("campoCupom").listeners.input();
+    assert.strictEqual(elemento("previewCupom").hidden, true);
+    elemento("campoCupom").value = "MANUAL10";
+    elemento("campoCupom").listeners.input();
+    elemento("campoParcelamento").value = "10x R$ 7,50";
+    elemento("campoParcelamento").listeners.input();
+    assert.strictEqual(elemento("previewParcelamento").textContent, "10x R$ 7,50");
+    elemento("campoParcelamento").value = "";
+    elemento("campoParcelamento").listeners.input();
+    assert.strictEqual(elemento("previewParcelamento").hidden, true);
     elemento("campoObservacoes").value = "Compra internacional · impostos estimados";
     elemento("campoObservacoes").listeners.input();
+    assert.strictEqual(elemento("previewObservacoes").textContent, "Compra internacional · impostos estimados");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 5, "edicoes consecutivas geram somente o preview final");
     await elemento("botaoSalvar").listeners.click();
@@ -2983,7 +3024,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("campoTitulo").listeners.input();
     resolverPreviewPendente();
     await new Promise(resolve => setTimeout(resolve, 40));
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A final - R$ 75,00", "resposta antiga nao sobrescreve o formulario novo");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A final", "resposta antiga nao sobrescreve o formulario novo");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 75,00");
 
     produtoAtual = {
       marketplace: "shopee",

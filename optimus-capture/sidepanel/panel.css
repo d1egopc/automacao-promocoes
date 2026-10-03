@@ -607,8 +607,105 @@ button[data-estado="salvo"]:disabled {
 .preview {
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  padding: 8px 10px;
+  gap: 0;
+  max-height: min(390px, 55vh);
+  overflow-y: auto;
   background: #fff;
+}
+
+.preview-media {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 112px;
+  padding: 4px;
+  background: #f8fafc;
+}
+
+.preview-imagem {
+  display: block;
+  max-width: 100%;
+  max-height: 104px;
+  object-fit: contain;
+}
+
+.preview-conteudo {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.preview-marketplace {
+  color: #475467;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.preview .preview-secao {
+  color: #175cd3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.preview h2 {
+  margin: 0;
+  color: #101828;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.preview-preco-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.preview-preco-atual {
+  color: #101828;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.preview-desconto {
+  color: #027a48;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.preview .preview-preco-anterior {
+  color: #667085;
+  font-size: 12px;
+  text-decoration: line-through;
+}
+
+.preview .preview-detalhe,
+.preview .preview-observacoes {
+  color: #344054;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.preview .preview-link {
+  padding-top: 5px;
+  border-top: 1px solid #eaecf0;
+  color: #175cd3;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.preview-link a {
+  color: inherit;
+}
+
+.preview .preview-aviso {
+  padding-top: 4px;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.25;
 }
 
 .acoes-futuras {
@@ -674,15 +771,8 @@ button[data-estado="salvo"]:disabled {
   font-size: 12px;
 }
 
-.preview h2 {
-  margin: 0;
-  font-size: 14px;
-}
-
 .preview p {
   margin: 0;
-  color: #475467;
-  font-size: 13px;
 }
 
 .divisor {
