@@ -106,6 +106,34 @@
     return requestJson(`/manual-v2/destinos?_=${Date.now()}`, { token });
   }
 
+  function listarListasManualV2(token) {
+    return requestJson(`/manual-v2/listas?_=${Date.now()}`, { token });
+  }
+
+  function criarListaManualV2(token, nome) {
+    return requestJson("/manual-v2/listas", {
+      method: "POST",
+      token,
+      body: { nome: texto(nome) }
+    });
+  }
+
+  function adicionarOfertaListaManualV2(token, listaId, ofertaId) {
+    return requestJson(`/manual-v2/listas/${encodeURIComponent(texto(listaId))}/itens`, {
+      method: "POST",
+      token,
+      body: { origem: "ofertas", ofertaId: texto(ofertaId) }
+    });
+  }
+
+  function adicionarCapturaListaManualV2(token, listaId, oferta) {
+    return requestJson(`/manual-v2/listas/${encodeURIComponent(texto(listaId))}/itens`, {
+      method: "POST",
+      token,
+      body: { origem: "captura_extensao", oferta }
+    });
+  }
+
   function enviarAgoraManualV2(token, ofertaId, destinosIds, idempotencyKey, requestId) {
     return requestJson(`/manual-v2/ofertas/${encodeURIComponent(texto(ofertaId))}/enviar-agora`, {
       method: "POST",
@@ -144,6 +172,10 @@
     gerarPreviewCapture,
     salvarOfertaManualV2,
     listarDestinosManualV2,
+    listarListasManualV2,
+    criarListaManualV2,
+    adicionarOfertaListaManualV2,
+    adicionarCapturaListaManualV2,
     enviarAgoraManualV2,
     iniciarCaptureHandoff,
     trocarCaptureHandoff

@@ -66,7 +66,34 @@
           </div>
         </section>
 
-        <section id="estadoPagina" class="estado"></section>
+        <div class="estado-topo">
+          <section id="estadoPagina" class="estado"></section>
+          <button id="botaoLista" class="botao-lista" type="button" hidden>+ Lista</button>
+        </div>
+
+        <section id="listaModal" class="lista-modal" role="dialog" aria-modal="true" aria-labelledby="listaModalTitulo" hidden>
+          <div class="lista-modal-cabecalho">
+            <strong id="listaModalTitulo">Adicionar à lista</strong>
+            <button id="fecharListaModal" class="fechar-lista" type="button" aria-label="Fechar">×</button>
+          </div>
+          <div id="listaExistenteView">
+            <p class="lista-modal-rotulo">Minhas listas</p>
+            <div id="listasDisponiveis" class="listas-disponiveis"></div>
+            <button id="adicionarListaExistente" class="primary lista-modal-acao" type="button" disabled>Adicionar</button>
+            <button id="abrirCriarLista" class="link-button criar-lista-link" type="button">+ Criar nova lista</button>
+          </div>
+          <div id="criarListaView" hidden>
+            <label>
+              Nome
+              <input id="nomeNovaLista" type="text" maxlength="80" autocomplete="off">
+            </label>
+            <div class="criar-lista-acoes">
+              <button id="voltarListas" class="secondary" type="button">Voltar</button>
+              <button id="criarEAdicionarLista" class="primary" type="button">Criar e adicionar</button>
+            </div>
+          </div>
+          <p id="listaModalFeedback" class="lista-modal-feedback" hidden></p>
+        </section>
 
         <section id="produtoView" class="produto" hidden>
           <div class="produto-media">

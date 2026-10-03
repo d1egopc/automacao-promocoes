@@ -366,7 +366,7 @@ function criarRotasManualV2(deps = {}) {
   router.delete("/listas/:id/itens", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.esvaziarLista(id, req.params.id) })));
   router.delete("/listas/:id/itens/:itemId", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.removerItem(id, req.params.id, req.params.itemId) })));
   router.post("/listas/:id/itens", (req, res) => responderOfertasV2(req, res, async (id) => ({ lista: await listasV2.adicionarItem(
-    id, req.params.id, { origem: req.body?.origem, ofertaId: req.body?.ofertaId }, {
+    id, req.params.id, { origem: req.body?.origem, ofertaId: req.body?.ofertaId, oferta: req.body?.oferta }, {
       getIntegracaoCliente: deps.getIntegracaoCliente,
       gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
       gerarShortLinkShopee: deps.gerarShortLinkShopee,
