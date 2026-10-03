@@ -11,6 +11,7 @@ const amazon = require(path.join(raiz, "adapters", "amazon.js"));
 const shopee = require(path.join(raiz, "adapters", "shopee.js"));
 const aliexpress = require(path.join(raiz, "adapters", "aliexpress.js"));
 const kabum = require(path.join(raiz, "adapters", "kabum.js"));
+const registry = require(path.join(raiz, "adapters", "registry.js"));
 const apiFonte = fs.readFileSync(path.join(raiz, "services", "api.js"), "utf8");
 const panelFonte = fs.readFileSync(path.join(raiz, "sidepanel", "panel.js"), "utf8");
 const panelHtml = fs.readFileSync(path.join(raiz, "sidepanel", "panel.html"), "utf8");
@@ -430,6 +431,9 @@ function criarNoKabum({ texto = "", tagName = "DIV", filhos = [], style = {}, at
         const tag = String(alvo.tagName || "").toLowerCase();
         return seletores.some((item) => {
           if (item === tag) return true;
+          if (item === "number-flow-react[data]") {
+            return tag === "number-flow-react" && Boolean(alvo.getAttribute?.("data"));
+          }
           if (item === "s" || item === "del" || item === "span" || item === "p" || item === "h1" || item === "h4" || item === "img") {
             return tag === item;
           }
@@ -587,6 +591,79 @@ function documentoKabumLayoutAtualFixture({
   const root = criarNoKabum({
     texto: `${titulo} ${blocoPreco.textContent}`,
     filhos: [h1, blocoPreco]
+  });
+  return {
+    location: { href: url },
+    documentElement: {
+      outerHTML: `<html><head><meta property="og:image" content="${imagem}"></head><body><main>${root.textContent}</main></body></html>`
+    },
+    images: [],
+    body: root,
+    querySelector(seletor) {
+      if (seletor === "main, [role='main']") return root;
+      return root.querySelector(seletor);
+    }
+  };
+}
+
+function documentoKabumNumberFlowFixture({
+  url = "https://www.kabum.com.br/produto/619753/monitor-gamer-lg-27-full-hd-100hz-5ms-ips-27ms500-bivolt",
+  titulo = 'Monitor Gamer Lg 27" Full Hd 100hz 5ms Ips 27ms500 Bivolt',
+  integer = [{ value: "867" }],
+  fraction = [{ value: ",51" }],
+  parcela = "10x R$ 96,39 s/ juros",
+  imagem = "https://images.kabum.com.br/produtos/fotos/619753/monitor-lg.jpg"
+} = {}) {
+  const h1 = criarNoKabum({ texto: titulo, tagName: "H1" });
+  const numberFlow = criarNoKabum({
+    tagName: "NUMBER-FLOW-REACT",
+    attrs: {
+      data: JSON.stringify({
+        pre: [{ value: "R$\u00a0" }],
+        integer,
+        fraction,
+        post: []
+      })
+    }
+  });
+  const blocoPrincipal = criarNoKabum({
+    texto: `R$ 867,51 -10% à vista no PIX ${parcela}`,
+    tagName: "SECTION",
+    filhos: [
+      numberFlow,
+      criarNoKabum({ texto: "-10% à vista no PIX", tagName: "SPAN" }),
+      criarNoKabum({ texto: parcela, tagName: "P" })
+    ]
+  });
+  const numberFlowOutroSeller = criarNoKabum({
+    tagName: "NUMBER-FLOW-REACT",
+    attrs: {
+      data: JSON.stringify({
+        pre: [{ value: "R$ " }],
+        integer: [{ value: "894" }],
+        fraction: [{ value: ",51" }],
+        post: []
+      })
+    }
+  });
+  const outrosSellers = criarNoKabum({
+    texto: "Outras opções de compra à vista no PIX R$ 894,51 R$ 899,69 R$ 925,37",
+    tagName: "SECTION",
+    filhos: [
+      numberFlowOutroSeller,
+      criarNoKabum({ texto: "R$ 894,51", tagName: "H4" }),
+      criarNoKabum({ texto: "R$ 899,69", tagName: "H4" }),
+      criarNoKabum({ texto: "R$ 925,37", tagName: "H4" })
+    ]
+  });
+  const relacionados = criarNoKabum({
+    texto: "Produtos relacionados e patrocinados R$ 1.025,90",
+    tagName: "SECTION",
+    filhos: [criarNoKabum({ texto: "R$ 1.025,90", tagName: "H4" })]
+  });
+  const root = criarNoKabum({
+    texto: `${titulo} ${blocoPrincipal.textContent} ${outrosSellers.textContent} ${relacionados.textContent}`,
+    filhos: [h1, outrosSellers, blocoPrincipal, relacionados]
   });
   return {
     location: { href: url },
@@ -1026,6 +1103,33 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.notStrictEqual(produto.precoAtual, 581.99, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 19.90, "frete nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 50.00, "economia PRIME nao vira preco atual");
+  }
+
+  {
+    const documento = documentoKabumNumberFlowFixture();
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    const numberFlowPrincipal = documento.body.querySelectorAll("number-flow-react[data]")[1];
+    assert.strictEqual(kabum.textoNumberFlow(numberFlowPrincipal), "R$ 867,51");
+    assert.strictEqual(produto.precoAtual, 867.51);
+    assert.strictEqual(produto.parcelamento, "10x R$ 96,39 s/ juros");
+    assert.strictEqual(produto.titulo, 'Monitor Gamer Lg 27" Full Hd 100hz 5ms Ips 27ms500 Bivolt');
+    assert.strictEqual(produto.condicaoPrecoPor, "pix");
+    assert.strictEqual(produto.completo, true);
+    assert.notStrictEqual(produto.precoAtual, 96.39, "parcela nao vira preco principal");
+    assert.notStrictEqual(produto.precoAtual, 894.51, "outro seller nao substitui preco principal");
+    assert.notStrictEqual(produto.precoAtual, 1025.90, "produto relacionado nao substitui preco principal");
+    const captura = registry.capturarPaginaAtual(documento, documento.location);
+    assert.strictEqual(captura.ok, true, "oferta KaBuM number-flow deve voltar ao estado preparada");
+    assert.strictEqual(captura.motivo, "");
+  }
+
+  for (const caso of [
+    { integer: [{ value: "999" }], fraction: [{ value: ",00" }], esperado: 999 },
+    { integer: [{ value: "1" }, { value: "." }, { value: "332" }], fraction: [{ value: ",00" }], esperado: 1332 }
+  ]) {
+    const documento = documentoKabumNumberFlowFixture(caso);
+    const produto = kabum.capturarKabumDaPagina(documento, documento.location);
+    assert.strictEqual(produto.precoAtual, caso.esperado);
   }
 
   for (const caso of [
