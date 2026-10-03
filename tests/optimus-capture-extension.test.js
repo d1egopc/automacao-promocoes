@@ -242,7 +242,18 @@ function documentoShopeePercentualFixture({ incluirPreco = true } = {}) {
   };
 }
 
-function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg" } = {}) {
+function documentoAmazonSoundbarFixture({
+  semPrecoPrincipal = false,
+  oldHires = "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg",
+  precoAtualInteiro = "798",
+  precoAtualFracao = "99",
+  precoAtualTexto = "R$ 798,99",
+  precoAnteriorTexto = "R$1.099,00",
+  descontoTexto = "-27%",
+  condicaoPagamento = "",
+  asin = "B0G2T13LT6",
+  asinPagamento = asin
+} = {}) {
   const url = "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1";
   const titulo = "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H";
   const imagemSrc = "https://m.media-amazon.com/images/I/soundbar-SX522.jpg";
@@ -257,27 +268,37 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
     }
   };
   const precoAtualNo = {
-    textContent: "R$ 798,99",
-    innerText: "R$ 798,99",
+    textContent: precoAtualTexto,
+    innerText: precoAtualTexto,
     querySelector(seletor) {
-      if (seletor === ".a-price-whole") return { textContent: "798", innerText: "798" };
-      if (seletor === ".a-price-fraction") return { textContent: "99", innerText: "99" };
-      if (seletor === ".a-offscreen") return { textContent: "R$798,99", innerText: "R$798,99" };
+      if (seletor === ".a-price-whole") return { textContent: precoAtualInteiro, innerText: precoAtualInteiro };
+      if (seletor === ".a-price-fraction") return { textContent: precoAtualFracao, innerText: precoAtualFracao };
+      if (seletor === ".a-offscreen") return { textContent: precoAtualTexto, innerText: precoAtualTexto };
       return null;
     }
   };
   const precoAnteriorNo = {
-    textContent: "R$1.099,00",
-    innerText: "R$1.099,00",
+    textContent: precoAnteriorTexto,
+    innerText: precoAnteriorTexto,
     querySelector(seletor) {
-      if (seletor === ".a-offscreen") return { textContent: "R$1.099,00", innerText: "R$1.099,00" };
+      if (seletor === ".a-offscreen") return { textContent: precoAnteriorTexto, innerText: precoAnteriorTexto };
       return null;
     }
   };
-  const descontoNo = { textContent: "-27%", innerText: "-27%" };
+  const descontoNo = { textContent: descontoTexto, innerText: descontoTexto };
+  const pagamentoNo = {
+    textContent: condicaoPagamento,
+    innerText: condicaoPagamento,
+    getAttribute(nome) {
+      return nome === "data-csa-c-asin" ? asinPagamento : "";
+    }
+  };
   const blocoPreco = {
-    textContent: "R$ 798,99 R$1.099,00 -27% 12x de R$66,61 25% off na 1a compra com cartao Amazon Insira o codigo CARTAO90 Exclusivo Prime Salve o cupom R$20 : VEMPRIME99.",
-    innerText: "R$ 798,99\nR$1.099,00\n-27%\n12x de R$66,61\n25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90.\nExclusivo Prime: Salve o cupom R$20 : VEMPRIME99.",
+    textContent: `${precoAtualTexto} ${precoAnteriorTexto} ${descontoTexto} 12x de R$66,61 25% off na 1a compra com cartao Amazon Insira o codigo CARTAO90 Exclusivo Prime Salve o cupom R$20 : VEMPRIME99.`,
+    innerText: `${precoAtualTexto}\n${precoAnteriorTexto}\n${descontoTexto}\n12x de R$66,61\n25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90.\nExclusivo Prime: Salve o cupom R$20 : VEMPRIME99.`,
+    getAttribute(nome) {
+      return nome === "data-csa-c-asin" ? asin : "";
+    },
     querySelector(seletor) {
       if (seletor === ".priceToPay") return semPrecoPrincipal ? null : precoAtualNo;
       if (seletor === ".savingsPercentage") return descontoNo;
@@ -299,12 +320,13 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
             <span id="productTitle">${titulo}</span>
             <img id="landingImage" data-old-hires="${oldHires || ""}" src="${imagemSrc}">
             <div id="corePriceDisplay_desktop_feature_div">
-              <span class="priceToPay"><span class="a-price-whole">798</span><span class="a-price-fraction">99</span></span>
-              <span class="apex-basisprice-value a-text-price"><span class="a-offscreen">R$1.099,00</span></span>
-              <span class="savingsPercentage">-27%</span>
+              <span class="priceToPay"><span class="a-price-whole">${precoAtualInteiro}</span><span class="a-price-fraction">${precoAtualFracao}</span></span>
+              <span class="apex-basisprice-value a-text-price"><span class="a-offscreen">${precoAnteriorTexto}</span></span>
+              <span class="savingsPercentage">${descontoTexto}</span>
               <span>12x de R$66,61</span>
               <div id="promoPriceBlockMessage_feature_div">25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90. Exclusivo Prime: Salve o cupom R$20 : VEMPRIME99.</div>
             </div>
+            <div id="oneTimePaymentPrice_feature_div">${condicaoPagamento}</div>
           </body>
         </html>
       `
@@ -313,6 +335,7 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
       if (seletor === "#productTitle") return tituloNo;
       if (seletor === "#landingImage") return imagemNo;
       if (seletor === "#corePriceDisplay_desktop_feature_div") return blocoPreco;
+      if (seletor === "#oneTimePaymentPrice_feature_div") return pagamentoNo;
       return null;
     }
   };
@@ -1047,11 +1070,46 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg");
     assert.strictEqual(produto.urlOriginal, "https://www.amazon.com.br/dp/B0G2T13LT6");
     assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.observacoes, "");
     assert.strictEqual(produto.fonte, "dom_amazon_v1");
     assert.strictEqual(produto.completo, true);
     assert.notStrictEqual(produto.precoAtual, 66.61, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 20, "beneficio R$20 nao vira preco");
     assert.notStrictEqual(produto.descontoPercentual, 25, "beneficio de cartao nao vira desconto principal");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({
+        precoAtualInteiro: "86",
+        precoAtualFracao: "38",
+        precoAtualTexto: "R$ 86,38",
+        precoAnteriorTexto: "R$129,90",
+        descontoTexto: "",
+        condicaoPagamento: "à vista no Pix ou NuPay (5% off)",
+        asin: "B0CZ4BTRYR"
+      }),
+      { href: "https://www.amazon.com.br/dp/B0CZ4BTRYR" }
+    );
+    assert.strictEqual(produto.precoAnterior, 129.90);
+    assert.strictEqual(produto.precoAtual, 86.38);
+    assert.strictEqual(produto.descontoPercentual, 34);
+    assert.strictEqual(produto.observacoes, "Preço à vista no Pix ou NuPay");
+
+    const payload = contrato.payloadPreview(produto);
+    assert.strictEqual(payload.observacoes, "Preço à vista no Pix ou NuPay");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({
+        condicaoPagamento: "à vista no Pix ou NuPay (5% off)",
+        asin: "B0CZ4BTRYR",
+        asinPagamento: "B0OUTROPRODUTO"
+      }),
+      { href: "https://www.amazon.com.br/dp/B0CZ4BTRYR" }
+    );
+    assert.strictEqual(produto.observacoes, "", "condicao de outro ASIN nao pode contaminar o preco principal");
   }
 
   {
@@ -3457,6 +3515,39 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.imagem, "https://http2.mlstatic.com/D_NQ_NP_456.webp");
     assert.strictEqual(produto.cupom, "SEMDEMORA");
     assert.strictEqual(produto.completo, true);
+  }
+
+  {
+    const htmlTecnicoSemCupom = `
+      <html>
+        <head>
+          <title>Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger | Mercado Livre</title>
+          <meta property="og:image" content="https://http2.mlstatic.com/fonte-atx.webp">
+          <script type="application/ld+json">
+            {"@type":"Product","name":"Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger","offers":{"price":"199.90"}}
+          </script>
+        </head>
+        <body>
+          <h1>Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger</h1>
+          <ul><li>Código: 80MM</li><li>Ventoinha: 80MM</li><li>Potencia: 650W</li><li>Entrada: 220V</li><li>Memoria: DDR5</li></ul>
+        </body>
+      </html>
+    `;
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlTecnicoSemCupom,
+      "https://produto.mercadolivre.com.br/MLB-65080-fonte-atx-_JM"
+    );
+    assert.strictEqual(produto.cupom, "", "especificacao tecnica nao pode virar cupom");
+  }
+
+  {
+    const htmlCupomParecidoComTecnico = htmlProdutoJsonLd()
+      .replace("Use o cupom SEMDEMORA", "Codigo do cupom: 80MM");
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlCupomParecidoComTecnico,
+      "https://produto.mercadolivre.com.br/MLB-65080-fonte-atx-_JM"
+    );
+    assert.strictEqual(produto.cupom, "80MM", "codigo parecido com especificacao passa somente com contexto de cupom");
   }
 
   {

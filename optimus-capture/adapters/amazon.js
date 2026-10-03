@@ -109,6 +109,21 @@
     return Number.isFinite(numero) && numero > 0 ? numero : null;
   }
 
+  function observacaoPrecoAmazon(documento) {
+    const bloco = blocoPrecoPrincipal(documento);
+    const pagamento = documento?.querySelector?.("#oneTimePaymentPrice_feature_div");
+    if (!bloco?.querySelector || !pagamento) return "";
+
+    const textoPagamento = limparTexto(pagamento.textContent || pagamento.innerText || "");
+    if (!/(?:^|\s)à\s+vista\s+no\s+Pix\s+ou\s+NuPay(?=\s|$|\()/i.test(textoPagamento)) return "";
+
+    const asinBloco = limparTexto(bloco.getAttribute?.("data-csa-c-asin") || "");
+    const asinPagamento = limparTexto(pagamento.getAttribute?.("data-csa-c-asin") || "");
+    if (asinBloco && asinPagamento && asinBloco !== asinPagamento) return "";
+
+    return "Preço à vista no Pix ou NuPay";
+  }
+
   function capturarAmazonDeHtml(html, urlOriginal) {
     const documento = typeof DOMParser !== "undefined"
       ? new DOMParser().parseFromString(String(html || ""), "text/html")
@@ -122,6 +137,7 @@
     const precoAtual = precoAtualAmazon(documento);
     const precoAnterior = precoAnteriorAmazon(documento, precoAtual);
     const desconto = descontoAmazon(documento);
+    const observacoes = observacaoPrecoAmazon(documento);
     const warnings = [];
     if (!blocoPrecoPrincipal(documento)) warnings.push("preco_amazon_sem_bloco_principal");
 
@@ -133,6 +149,7 @@
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
       imagem: imagemAmazon(documento, html),
       cupom: "",
+      observacoes,
       fonte: "dom_amazon_v1",
       warnings
     });
@@ -149,6 +166,7 @@
     precoAtualAmazon,
     precoAnteriorAmazon,
     descontoAmazon,
+    observacaoPrecoAmazon,
     urlAmazonCanonica
   };
   global.OptimusCaptureAmazon = api;

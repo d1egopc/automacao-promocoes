@@ -174,7 +174,7 @@
   }
 
   function extrairCupomExplicito(textoPagina) {
-    const re = /\b(?:cupom|codigo|c[o\u00f3]digo|use\s+o\s+cupom|aplique\s+o\s+cupom|resgate\s+o\s+cupom|ative\s+o\s+cupom)\s*:?\s*([A-Z0-9][A-Z0-9_-]{2,40})\b/i;
+    const re = /(?:\b(?:cupom|voucher)\b|\b(?:c[o\u00f3]digo)\s+(?:do|de)\s+cupom\b)\s*:?\s*([A-Z0-9][A-Z0-9_-]{2,40})\b/i;
     const match = textoPagina.match(re);
     return match ? texto(match[1]).toUpperCase() : "";
   }
