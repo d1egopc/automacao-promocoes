@@ -19,7 +19,10 @@ function dominioDa(url) {
 function formatoId(marketplace, valor) {
   const id = texto(valor);
   if (marketplace === "amazon") return /^[a-z0-9]{10}$/i.test(id) ? id.toLowerCase() : "";
-  if (marketplace === "mercadolivre") return /^MLB\d{6,}$/i.test(id) ? id.toLowerCase() : "";
+  if (marketplace === "mercadolivre") {
+    const match = id.match(/^MLB-?(\d{6,})$/i);
+    return match ? `mlb${match[1]}` : "";
+  }
   if (marketplace === "shopee") return /^\d+\/\d+$/.test(id) ? id : "";
   if (marketplace === "aliexpress") return /^\d{10,}$/.test(id) ? id : "";
   if (marketplace === "kabum") return /^\d+$/.test(id) ? id : "";
@@ -50,7 +53,10 @@ function idProdutoPorUrl(marketplace, valor) {
       const ids = caminho.match(/\/product\/(\d+)\/(\d+)/i) || caminho.match(/-i\.(\d+)\.(\d+)/i);
       return ids ? `${ids[1]}/${ids[2]}` : "";
     }
-    if (marketplace === "mercadolivre") return (caminho.match(/\b(MLB\d+)\b/i)?.[1] || "").toLowerCase();
+    if (marketplace === "mercadolivre") {
+      const match = caminho.match(/\bMLB-?(\d{6,})\b/i);
+      return match ? formatoId(marketplace, `MLB${match[1]}`) : "";
+    }
     if (marketplace === "kabum") return caminho.match(/\/produto\/(\d+)/i)?.[1] || "";
     return "";
   } catch { return ""; }
@@ -59,7 +65,10 @@ function idProdutoPorUrl(marketplace, valor) {
 function componentesIdentidadeCanonica(oferta = {}) {
   const marketplace = mercado(oferta.marketplace);
   if (!marketplace || !["amazon", "mercadolivre", "shopee", "aliexpress", "kabum"].includes(marketplace)) return null;
-  const urls = [oferta.urlOriginal, oferta.linkOriginal, oferta.urlCanonica, oferta.url, oferta.link, oferta.urlAfiliada]
+  const fontesOriginais = [oferta.urlOriginal, oferta.linkOriginal, oferta.urlCanonica, oferta.url];
+  const urls = (marketplace === "mercadolivre"
+    ? fontesOriginais
+    : [...fontesOriginais, oferta.link, oferta.urlAfiliada])
     .map(texto).filter(Boolean);
   const idsUrl = new Set();
   for (const valor of urls) {
@@ -87,6 +96,12 @@ function componentesIdentidadeCanonica(oferta = {}) {
   const ids = new Set([...idsUrl, ...(comprovado ? [idOficial] : []),
     ...(universalValidada ? [idUniversal] : [])]);
   if (ids.size !== 1 || (candidatos.length && candidatos.some((id) => !ids.has(formatoId(marketplace, id))))) return null;
+  if (marketplace === "mercadolivre") {
+    for (const link of [oferta.link, oferta.urlAfiliada].map(texto).filter(Boolean)) {
+      const idAfiliado = idProdutoPorUrl(marketplace, link);
+      if (idAfiliado && !ids.has(idAfiliado)) return null;
+    }
+  }
   if (marketplace === "shopee" && texto(oferta.itemId) &&
       texto(oferta.itemId) !== [...ids][0].split("/")[1]) return null;
   return {

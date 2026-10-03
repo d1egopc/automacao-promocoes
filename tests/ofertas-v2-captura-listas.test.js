@@ -9,6 +9,9 @@ process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-captura-li
 const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
 const listas = require("../modules/manual-v2/ofertas-v2-listas");
 const manual = require("../modules/manual-v2/manual-offers.storage");
+const { componentesIdentidadeCanonica, identidadeCanonica, idProdutoPorUrl } =
+  require("../modules/manual-v2/ofertas-v2-identidade");
+const { urlMercadoLivreSegura } = require("../modules/manual-v2/manual-capture.service");
 const { ordenarElegiveis } = require("../modules/manual-v2/manual-auto-dispatch");
 const { criarProvaAfiliacaoWorkspaceAliExpress } =
   require("../modules/marketplaces/aliexpress/afiliacao-workspace");
@@ -184,6 +187,55 @@ async function main() {
     await listas.adicionarItem(workspace, listaLegada.id, { origem: "ofertas", ofertaId: ofertaLegada.id });
     assert.strictEqual(listas.lerListas(workspace)[3].itens[0].origem, "ofertas",
       "contrato Ofertas para Lista permanece intacto");
+
+    const urlMlbCatalogo = "https://www.mercadolivre.com.br/produto/p/MLB24000050";
+    const urlMlbDireta = "https://produto.mercadolivre.com.br/MLB-5287366788-produto-_JM";
+    const urlMlbSemHifen = "https://produto.mercadolivre.com.br/MLB5287366788-produto-_JM";
+    assert.strictEqual(idProdutoPorUrl("mercadolivre", urlMlbCatalogo), "mlb24000050");
+    assert.strictEqual(idProdutoPorUrl("mercadolivre", urlMlbDireta), "mlb5287366788");
+    assert.strictEqual(urlMercadoLivreSegura(urlMlbDireta).ok, true);
+    const mlBase = { marketplace: "mercadolivre", urlOriginal: urlMlbDireta,
+      urlAfiliada: "https://meli.la/captura-ml", titulo: "Produto ML", precoAtual: "59,90" };
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, produtoId: "MLB-5287366788" }).identidadeProduto,
+      "mlb5287366788");
+    assert.strictEqual(identidadeCanonica({ ...mlBase, produtoId: "MLB-5287366788" }),
+      identidadeCanonica({ ...mlBase, urlOriginal: urlMlbSemHifen, produtoId: "MLB5287366788" }));
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, produtoId: "MLB24000050" }), null);
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, identidadeProdutoVerificada:
+      { origem: "engine_importer", marketplace: "mercadolivre", id: "MLB-5287366788" } }).identidadeProduto,
+      "mlb5287366788");
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, identidadeProdutoVerificada:
+      { origem: "engine_importer", marketplace: "mercadolivre", id: "MLB24000050" } }), null);
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, urlAfiliada:
+      "https://produto.mercadolivre.com.br/MLB-24000050-outro-_JM" }), null);
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, urlOriginal:
+      "https://www.mercadolivre.com.br/produto-sem-id", produtoId: "MLB5287366788" }), null);
+    assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, urlOriginal:
+      "https://www.mercadolivre.com.br/produto-sem-id", produtoId: "",
+      urlAfiliada: "https://produto.mercadolivre.com.br/MLB-5287366788-produto-_JM" }), null);
+    assert.strictEqual(idProdutoPorUrl("mercadolivre",
+      "https://www.mercadolivre.com.br/social?item=MLB5287366788"), "");
+
+    const listaMl = listas.criarLista(workspace, "Mercado Livre direto");
+    const capturaMl = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+      origem: "captura_extensao", oferta: { ...mlBase, produtoId: "MLB-5287366788" }
+    });
+    assert.strictEqual(capturaMl.status, 200);
+    assert.strictEqual(capturaMl.body.lista.itens.length, 1);
+    const mlDuplicada = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+      origem: "captura_extensao", oferta: { ...mlBase, urlOriginal: urlMlbSemHifen,
+        produtoId: "MLB5287366788" }
+    });
+    assert.strictEqual(mlDuplicada.status, 409);
+    assert.strictEqual(mlDuplicada.body.motivo, "item_ja_na_lista");
+    const mlDivergente = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+      origem: "captura_extensao", oferta: { ...mlBase, produtoId: "MLB24000050" }
+    });
+    assert.strictEqual(mlDivergente.status, 422);
+    assert.strictEqual(mlDivergente.body.motivo, "produto_sem_identidade_operacional");
+    assert.strictEqual(listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens.length, 1);
+    assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 1,
+      "+ Lista ML nao cria Oferta alem da Oferta legada salva explicitamente");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (segredoAnterior === undefined) delete process.env.JWT_SECRET;
