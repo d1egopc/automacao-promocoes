@@ -682,7 +682,10 @@ function resolverLinha(bloco, oferta = {}) {
     return precoComCondicao ? `✅ Por: ${aplicarNegritoTemplate(precoComCondicao)}` : "";
   }
   if (tipo === "desconto_percentual") {
-    const desconto = formatarPercentual(oferta.descontoPercentual ?? oferta.desconto);
+    const origem = textoUtil(oferta.descontoPercentualOrigem).toLowerCase();
+    const desconto = ["marketplace", "manual"].includes(origem)
+      ? formatarPercentual(oferta.descontoPercentual ?? oferta.desconto)
+      : "";
     return desconto ? `📉 ${desconto} OFF` : "";
   }
   if (tipo === "preco_pix") {

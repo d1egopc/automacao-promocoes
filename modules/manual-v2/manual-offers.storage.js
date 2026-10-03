@@ -113,7 +113,7 @@ function dtoComercialCanonicoManualV2(entrada = {}) {
     idFactory: () => "fingerprint"
   });
   const dto = { marketplace: oferta.marketplace };
-  for (const campo of ["titulo", "urlOriginal", "urlAfiliada", "imagem", "categoria", "seller", "cupom", "observacoes", "condicaoPrecoPor", "condicaoPix", "frete", "moedas", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "instrucaoCupom", "beneficioTexto"]) {
+  for (const campo of ["titulo", "urlOriginal", "urlAfiliada", "imagem", "categoria", "seller", "cupom", "observacoes", "condicaoPrecoPor", "condicaoPix", "frete", "moedas", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "instrucaoCupom", "beneficioTexto", "descontoPercentualOrigem"]) {
     adicionarOpcional(dto, campo, oferta[campo]);
   }
   for (const campo of ["precoAtual", "precoAnterior", "precoMin", "precoMax", "precoPix", "freteValor", "taxa", "imposto"]) {

@@ -467,6 +467,7 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     quantidadeAvaliacoes: entrada.quantidadeAvaliacoes ?? entrada.avaliacoes ?? entrada.reviewCount ?? "",
     vendidos: entrada.vendidos ?? entrada.quantidadeVendida ?? entrada.soldCount ?? "",
     descontoPercentual: entrada.descontoPercentual ?? entrada.desconto ?? "",
+    descontoPercentualOrigem: texto(entrada.descontoPercentualOrigem),
     instrucaoCupom: texto(entrada.instrucaoCupom || entrada.cupomInstrucao || entrada.avisoCupom),
     beneficioTexto: texto(entrada.beneficioTexto || entrada.beneficio),
     seller: texto(entrada.seller || entrada.vendedor || entrada.loja || entrada.store),

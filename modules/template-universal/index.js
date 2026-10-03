@@ -385,6 +385,7 @@ function selecionarCamposUniversais(oferta = {}) {
     valorEfetivoDetalhes: ofertaApresentacao.valorEfetivoDetalhes || {},
     economia: ofertaApresentacao.economia,
     descontoPercentual: ofertaApresentacao.descontoPercentual,
+    descontoPercentualOrigem: normalizarTexto(ofertaApresentacao.descontoPercentualOrigem || oferta.descontoPercentualOrigem),
     categoria: normalizarTexto(ofertaApresentacao.categoria),
     categoriaConfianca: ofertaApresentacao.categoriaConfianca,
     confiancaCategoria: ofertaApresentacao.confiancaCategoria,
@@ -592,18 +593,11 @@ function economiaReal(precoOriginal, precoAtual, economia) {
   return null;
 }
 
-function descontoReal(precoOriginal, precoAtual, descontoPercentual) {
-  const descontoInformado = normalizarNumero(descontoPercentual);
-  if (descontoInformado != null && descontoInformado > 0) return descontoInformado;
-
-  const original = normalizarNumero(precoOriginal);
-  const atual = normalizarNumero(precoAtual);
-
-  if (original != null && atual != null && original > atual) {
-    return ((original - atual) / original) * 100;
-  }
-
-  return null;
+function descontoExplicito(descontoPercentual, origem) {
+  const origemNormalizada = normalizarTexto(origem).toLowerCase();
+  if (!["marketplace", "manual"].includes(origemNormalizada)) return null;
+  const desconto = normalizarNumero(descontoPercentual);
+  return desconto != null && desconto > 0 && desconto <= 100 ? desconto : null;
 }
 
 function beneficioDiferenteDoCupom(beneficio = "", cupom = "") {
@@ -904,10 +898,8 @@ function gerarTemplateUniversal(oferta = {}) {
       ? formatarMoeda(campos.precoOriginal)
       : "";
   const economiaNumero = normalizarNumero(campos.economia);
-  const descontoPercentual = normalizarNumero(campos.descontoPercentual);
-  const descontoCalculado = precoFaixaAtual
-    ? descontoPercentual
-    : descontoReal(campos.precoOriginal, campos.precoAtual, campos.descontoPercentual);
+  const descontoPercentual = descontoExplicito(campos.descontoPercentual, campos.descontoPercentualOrigem);
+  const descontoCalculado = descontoPercentual;
   const economia = economiaNumero != null && economiaNumero > 0
     ? formatarMoeda(economiaNumero)
     : "";
