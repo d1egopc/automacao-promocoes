@@ -236,6 +236,7 @@ function marcoProcessadaItem(item = {}) {
 
 function timestampResultadoItem(item = {}) {
   for (const valor of [
+    item.terminalOcorridoEm,
     item.finalizadoEm,
     item.terminalizadoEm,
     item.concluidoEm,
@@ -499,6 +500,17 @@ function classificarTerminalPublico(item = {}) {
       ? null
       : (motivoErroPublicoTerminal(item) || "nao_enviado")
   };
+}
+
+function motivoErroTecnicoPublico(motivo = "") {
+  return [
+    "sem_imagem",
+    "sem_titulo",
+    "sem_preco",
+    "link_mal_resolvido",
+    "contrato_invalido",
+    "falha_envio"
+  ].includes(texto(motivo));
 }
 
 function hostUrlSeguro(url = "") {
@@ -1044,7 +1056,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         if (terminalPublico) registrarListaSeSolicitada(visaoTerminalPublica(resultadoPublico), terminalPublico);
       } else {
         naoEnviadasIds.add(identidade);
-        comErroIds.add(identidade);
+        if (motivoErroTecnicoPublico(motivoErroPublico)) comErroIds.add(identidade);
         if (terminalPublico) registrarListaSeSolicitada(VISAO_NAO_ENVIADAS, terminalPublico);
       }
 
@@ -1058,7 +1070,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
           statusFinalVisual: "enviada"
         });
       }
-      if (terminalPublico && !houveEnvio) registrarListaSeSolicitada(VISAO_COM_ERRO, {
+      if (terminalPublico && !houveEnvio && motivoErroTecnicoPublico(motivoErroPublico)) registrarListaSeSolicitada(VISAO_COM_ERRO, {
         ...terminalPublico,
         tipoVisao: VISAO_COM_ERRO,
         statusPublico: "erro",
@@ -1118,7 +1130,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     comErro: comErroIds.size,
     emDistribuicao: filaIds.size
   };
-  metricas.fechaMatematicamente = metricas.processadas === metricas.enviadas + metricas.comErro && metricas.enviadas >= metricas.parciais;
+  metricas.fechaMatematicamente = metricas.processadas === metricas.enviadas + metricas.naoEnviadas && metricas.enviadas >= metricas.parciais;
 
   const listaBase = [...listaSolicitada.values()].sort(ordenarRegistrosPublicos);
   const totalVisao = visao === VISAO_FILA
@@ -1702,6 +1714,7 @@ module.exports = {
   identidadePrincipal,
   resultadoPublicoTerminal,
   motivoErroPublicoTerminal,
+  motivoErroTecnicoPublico,
   classificarUrlOferta,
   itemEhTerminal,
   construirReadModelPublicoPorMarcos,

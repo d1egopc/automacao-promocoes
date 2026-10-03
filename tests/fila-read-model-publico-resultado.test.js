@@ -112,8 +112,7 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
   });
   const erros = readModel({ historicoLeve: [semDestino], visao: VISAO_COM_ERRO });
   const processadas = readModel({ historicoLeve: [semDestino] });
-  assert.strictEqual(erros.itens.length, 1, "terminal sem envio pertence ao subconjunto Erro");
-  assert.strictEqual(erros.itens[0].motivoErroPublico, "sem_destino_compativel");
+  assert.strictEqual(erros.itens.length, 0, "terminal sem destino nao pertence ao subconjunto tecnico Erro");
   assert.strictEqual(processadas.itens.length, 1, "conclusao operacional completa permanece no historico coerente");
   assert.strictEqual(processadas.itens[0].statusPublico, "nao_enviada");
 }

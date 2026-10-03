@@ -4053,6 +4053,8 @@ function lerFilaVivaReadOnly(clienteId = "admin", deps = {}) {
 }
 
 function dataSegmentoHistorico(item = {}, agora = Date.now()) {
+  const terminalOriginal = timestampTerminalOriginalItem(item);
+  if (Number.isFinite(terminalOriginal)) return new Date(terminalOriginal).toISOString().slice(0, 10);
   const candidatos = [
     item.enviadoEm,
     item.dataEnvio,
@@ -4068,6 +4070,25 @@ function dataSegmentoHistorico(item = {}, agora = Date.now()) {
     if (Number.isFinite(ms)) return new Date(ms).toISOString().slice(0, 10);
   }
   return agoraIso(agora).slice(0, 10);
+}
+
+function timestampTerminalOriginalItem(item = {}) {
+  const primeiroValido = valores => {
+    for (const valor of valores) {
+      const ms = Date.parse(valor);
+      if (Number.isFinite(ms)) return ms;
+    }
+    return null;
+  };
+  const explicito = primeiroValido([item.terminalOcorridoEm, item.terminalizadoEm, item.concluidoEm]);
+  if (Number.isFinite(explicito)) return explicito;
+  const envio = primeiroValido([item.enviadoEm, item.dataEnvio]);
+  if (Number.isFinite(envio)) return envio;
+  const falha = primeiroValido([item.erroEm]);
+  if (Number.isFinite(falha)) return falha;
+  const encerramentoOperacional = primeiroValido([item.retidaEm, item.expiradaEm, item.expiradoEm]);
+  if (Number.isFinite(encerramentoOperacional)) return encerramentoOperacional;
+  return primeiroValido([item.finalizadoEm]);
 }
 
 function chaveHistorico(clienteId = "admin", item = {}, posicaoLegada = -1) {
@@ -4156,6 +4177,110 @@ function statusPublicoHistoricoLeve(item = {}, projetado = {}) {
   return status === "enviado" || status === "enviada" ? "enviado" : "nao_enviado";
 }
 
+function rankEstadoTerminalLeve(valor = "") {
+  const estado = texto(valor).trim().toLowerCase();
+  if (["enviado", "enviada"].includes(estado)) return 50;
+  if (["parcial", "parcialmente_enviado"].includes(estado)) return 45;
+  if (/erro|falha/.test(estado)) return 40;
+  if (/expir|bloqueado|retid|nao_enviado|não_enviado/.test(estado)) return 30;
+  if (/aguard|pendent|process/.test(estado)) return 20;
+  return estado ? 10 : 0;
+}
+
+function chaveDestinoHistoricoLeve(destino = {}, indice = -1) {
+  const canal = texto(destino.canal).trim().toLowerCase();
+  const id = texto(destino.destinoId).trim().toLowerCase();
+  const nome = texto(destino.destinoNome).trim().toLowerCase();
+  if (id) return `${canal}|id:${id}`;
+  if (nome) return `${canal}|nome:${nome}`;
+  return `pos:${indice}`;
+}
+
+function mesclarDestinosHistoricoLeve(anteriores = [], atuais = []) {
+  const porChave = new Map();
+  const adicionar = (destino, indice) => {
+    if (!destino || typeof destino !== "object") return;
+    const chave = chaveDestinoHistoricoLeve(destino, indice);
+    const anterior = porChave.get(chave);
+    if (!anterior) {
+      porChave.set(chave, { ...destino });
+      return;
+    }
+    const forte = rankEstadoTerminalLeve(destino.estado) >= rankEstadoTerminalLeve(anterior.estado)
+      ? destino
+      : anterior;
+    const fraco = forte === destino ? anterior : destino;
+    porChave.set(chave, { ...fraco, ...forte });
+  };
+  lista(anteriores).forEach(adicionar);
+  lista(atuais).forEach(adicionar);
+  return [...porChave.values()];
+}
+
+function mesclarItemHistoricoLeveMonotonico(anterior = {}, atual = {}) {
+  if (!anterior || typeof anterior !== "object" || !Object.keys(anterior).length) return atual;
+  const rankAnterior = Math.max(
+    rankEstadoTerminalLeve(anterior.statusPublico),
+    rankEstadoTerminalLeve(anterior.statusOperacional)
+  );
+  const rankAtual = Math.max(
+    rankEstadoTerminalLeve(atual.statusPublico),
+    rankEstadoTerminalLeve(atual.statusOperacional)
+  );
+  const terminalAnteriorMs = timestampTerminalOriginalItem(anterior);
+  const terminalAtualMs = timestampTerminalOriginalItem(atual);
+  if (Number.isFinite(terminalAnteriorMs) && Number.isFinite(terminalAtualMs) &&
+      terminalAtualMs < terminalAnteriorMs && rankAtual <= rankAnterior) {
+    return anterior;
+  }
+  const destinos = mesclarDestinosHistoricoLeve(anterior.destinos, atual.destinos);
+  const aplicaveis = destinos.filter(destino => destino.aplicavel !== false);
+  const enviados = Math.max(
+    aplicaveis.filter(destino => rankEstadoTerminalLeve(destino.estado) === 50).length,
+    Number(anterior?.progresso?.enviados || 0),
+    Number(atual?.progresso?.enviados || 0)
+  );
+  const total = Math.max(
+    aplicaveis.length,
+    Number(anterior?.progresso?.total || 0),
+    Number(atual?.progresso?.total || 0),
+    enviados
+  );
+  const erros = Math.min(total - enviados, Math.max(
+    aplicaveis.filter(destino => /erro|falha/.test(texto(destino.estado).toLowerCase())).length,
+    Number(anterior?.progresso?.erros || 0),
+    Number(atual?.progresso?.erros || 0)
+  ));
+  const pendentes = Math.max(0, total - enviados - erros);
+  const statusAnterior = anterior.statusPublico || anterior.statusOperacional;
+  const statusAtual = atual.statusPublico || atual.statusOperacional;
+  const atualMaisForte = rankAtual > rankAnterior;
+  const statusPublico = enviados > 0
+    ? (total > enviados ? "parcial" : "enviado")
+    : (atualMaisForte ? atual.statusPublico : anterior.statusPublico) || "nao_enviado";
+  const statusOperacional = atualMaisForte
+    ? (atual.statusOperacional || anterior.statusOperacional)
+    : (anterior.statusOperacional || atual.statusOperacional);
+  const terminalEscolhidoMs = atualMaisForte && Number.isFinite(terminalAtualMs)
+    ? terminalAtualMs
+    : (Number.isFinite(terminalAnteriorMs) ? terminalAnteriorMs : terminalAtualMs);
+  const terminalOcorridoEm = Number.isFinite(terminalEscolhidoMs) ? new Date(terminalEscolhidoMs).toISOString() : "";
+
+  return {
+    ...atual,
+    ...anterior,
+    statusPublico,
+    statusOperacional,
+    destinos,
+    progresso: { enviados, total, pendentes, erros },
+    motivoPublico: atualMaisForte ? (atual.motivoPublico || anterior.motivoPublico) : (anterior.motivoPublico || atual.motivoPublico),
+    terminalOcorridoEm,
+    finalizadoEm: terminalOcorridoEm || anterior.finalizadoEm || atual.finalizadoEm,
+    enviadoEm: anterior.enviadoEm || atual.enviadoEm,
+    updatedAt: anterior.updatedAt || atual.updatedAt
+  };
+}
+
 function projetarItemHistoricoLeveTerminal(clienteId = "admin", entradaOuItem = {}, deps = {}) {
   const agora = deps.agora || Date.now();
   const entrada = normalizarEntradaViva(entradaOuItem, entradaOuItem?.posicaoLegada || 0, agora);
@@ -4167,13 +4292,16 @@ function projetarItemHistoricoLeveTerminal(clienteId = "admin", entradaOuItem = 
   });
   const statusPublico = statusPublicoHistoricoLeve(item, projetado);
   const detalheArquivo = deps.detalheArquivo || HISTORICO_INCREMENTAL_DIR;
+  const terminalMs = timestampTerminalOriginalItem(item);
+  const terminalOcorridoEm = Number.isFinite(terminalMs) ? new Date(terminalMs).toISOString() : agoraIso(agora);
 
   return {
     ...projetado,
     clienteId: clienteSeguro(clienteId),
     statusPublico,
     statusOperacional: statusItem(item),
-    finalizadoEm: projetado.finalizadoEm || agoraIso(agora),
+    terminalOcorridoEm,
+    finalizadoEm: terminalOcorridoEm,
     updatedAt: projetado.updatedAt || agoraIso(agora),
     detalheRef: {
       arquivo: detalheArquivo,
@@ -4190,6 +4318,7 @@ function hashRegistroHistoricoLeve(registro = {}) {
 function timestampHistoricoLeveRegistro(registro = {}) {
   const item = registro?.item && typeof registro.item === "object" ? registro.item : registro;
   const candidatos = [
+    item.terminalOcorridoEm,
     item.finalizadoEm,
     item.enviadoEm,
     item.erroEm,
@@ -4209,17 +4338,46 @@ function normalizarInfoCacheHistoricoLeve(valor) {
   if (valor && typeof valor === "object") {
     return {
       hash: texto(valor.hash || valor.hashRegistro || ""),
-      timestampMs: Number.isFinite(Number(valor.timestampMs)) ? Number(valor.timestampMs) : 0
+      timestampMs: Number.isFinite(Number(valor.timestampMs)) ? Number(valor.timestampMs) : 0,
+      registro: valor.registro && typeof valor.registro === "object" ? valor.registro : null
     };
   }
-  return { hash: texto(valor), timestampMs: 0 };
+  return { hash: texto(valor), timestampMs: 0, registro: null };
 }
 
 function registroHistoricoLeveJaMaterializado(infoExistente, hashRegistro = "", timestampMs = 0) {
   const existente = normalizarInfoCacheHistoricoLeve(infoExistente);
   if (!existente.hash) return false;
   if (existente.hash === hashRegistro) return true;
+  if (existente.registro) return false;
   return Number(existente.timestampMs || 0) >= Number(timestampMs || 0);
+}
+
+function mesclarPreparadoHistoricoLeve(preparado = {}, infoExistente = null) {
+  const existente = normalizarInfoCacheHistoricoLeve(infoExistente);
+  const itemAnterior = existente.registro?.item;
+  if (!itemAnterior || typeof itemAnterior !== "object") return preparado;
+  const itemLeve = mesclarItemHistoricoLeveMonotonico(itemAnterior, preparado.itemLeve);
+  const {
+    hashRegistro: _hashRegistroAnterior,
+    timestampMs: _timestampAnterior,
+    ...registroPreparado
+  } = preparado.registro || {};
+  const registroBase = {
+    ...registroPreparado,
+    statusPublico: itemLeve.statusPublico,
+    statusOperacional: itemLeve.statusOperacional,
+    item: itemLeve
+  };
+  const hashRegistro = hashRegistroHistoricoLeve(registroBase);
+  const timestampMs = timestampHistoricoLeveRegistro(registroBase);
+  return {
+    ...preparado,
+    itemLeve,
+    registro: { ...registroBase, hashRegistro, timestampMs },
+    hashRegistro,
+    timestampMs
+  };
 }
 
 function identidadeDedupeHistoricoLeveRegistro(clienteId = "admin", registro = {}, posicaoFallback = -1) {
@@ -4495,7 +4653,8 @@ function lerCacheHistoricoLeve(file = "", fsImpl = fs, logger = console, cliente
           if (chave) {
             chaves.set(chave, {
               hash: texto(registro?.hashRegistro || ""),
-              timestampMs: timestampHistoricoLeveRegistro(registro)
+              timestampMs: timestampHistoricoLeveRegistro(registro),
+              registro
             });
           }
           linhas += 1;
@@ -4642,9 +4801,13 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
     processados += 1;
     const grupo = porArquivo.get(preparado.file) || new Map();
     const anterior = grupo.get(preparado.chave);
-    if (!anterior || Number(preparado.timestampMs || 0) >= Number(anterior.timestampMs || 0)) {
-      grupo.set(preparado.chave, preparado);
-    }
+    grupo.set(preparado.chave, anterior
+      ? mesclarPreparadoHistoricoLeve(preparado, {
+          hash: anterior.hashRegistro,
+          timestampMs: anterior.timestampMs,
+          registro: anterior.registro
+        })
+      : preparado);
     porArquivo.set(preparado.file, grupo);
   }
   const prepararMs = Math.round(Number(process.hrtime.bigint() - inicioPreparar) / 1e6);
@@ -4668,7 +4831,8 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
         ? lerIdentidadesHistoricoLeveGlobais(cliente, deps).identidades
         : null;
 
-      for (const preparado of grupo.values()) {
+      for (const preparadoBruto of grupo.values()) {
+        const preparado = mesclarPreparadoHistoricoLeve(preparadoBruto, chaves.get(preparadoBruto.chave));
         if (identidadesGlobais) {
           const identidade = identidadeDedupeHistoricoLeveRegistro(cliente, preparado.registro, preparado?.entrada?.posicaoLegada);
           if (identidade && identidadesGlobais.has(identidade)) {
@@ -4680,7 +4844,8 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
             identidadesGlobais.add(identidade);
             chaves.set(preparado.chave, {
               hash: preparado.hashRegistro,
-              timestampMs: preparado.timestampMs
+              timestampMs: preparado.timestampMs,
+              registro: preparado.registro
             });
             continue;
           }
@@ -4693,7 +4858,8 @@ function appendHistoricoLeveBatch(clienteId = "admin", entradas = [], deps = {})
         linhas.push(`${JSON.stringify(preparado.registro)}\n`);
         chaves.set(preparado.chave, {
           hash: preparado.hashRegistro,
-          timestampMs: preparado.timestampMs
+          timestampMs: preparado.timestampMs,
+          registro: preparado.registro
         });
       }
 
@@ -5152,7 +5318,10 @@ function appendHistoricoLeveIncremental(clienteId = "admin", entradaOuItem = {},
     fsImpl.mkdirSync(path.dirname(file), { recursive: true });
     const cache = lerCacheHistoricoLeve(file, fsImpl, deps.logger, cliente);
     const infoAnterior = cache.chaves.get(chave);
-    if (registroHistoricoLeveJaMaterializado(infoAnterior, hashRegistro, timestampMs)) {
+    const preparadoMesclado = mesclarPreparadoHistoricoLeve(preparado, infoAnterior);
+    const hashMesclado = preparadoMesclado.hashRegistro;
+    const timestampMesclado = preparadoMesclado.timestampMs;
+    if (registroHistoricoLeveJaMaterializado(infoAnterior, hashMesclado, timestampMesclado)) {
       const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
       logOperacional(deps.logger, {
         versao: 1,
@@ -5166,13 +5335,13 @@ function appendHistoricoLeveIncremental(clienteId = "admin", entradaOuItem = {},
       return { ok: true, idempotente: true, motivo: "historico_leve_ja_registrado", chave, file, bootstrap };
     }
 
-    const registro = preparado.registro;
+    const registro = preparadoMesclado.registro;
     const linha = `${JSON.stringify(registro)}\n`;
     fsImpl.appendFileSync(file, linha, "utf8");
     try {
       const stat = fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
       const chaves = new Map(cache.chaves);
-      chaves.set(chave, { hash: hashRegistro, timestampMs });
+      chaves.set(chave, { hash: hashMesclado, timestampMs: timestampMesclado, registro });
       cacheHistoricoLeve.set(chaveCacheHistoricoLeve(file), {
         chaves,
         bytes: (stat ? stat.size : (cache.bytes || 0)) + Buffer.byteLength(linha, "utf8"),
@@ -5189,7 +5358,7 @@ function appendHistoricoLeveIncremental(clienteId = "admin", entradaOuItem = {},
       ok: true,
       idempotente: false,
       upsert: Boolean(infoAnterior),
-      statusPublico: itemLeve.statusPublico,
+      statusPublico: preparadoMesclado.itemLeve.statusPublico,
       bytesAppend: Buffer.byteLength(linha, "utf8"),
       duracaoMs
     });
@@ -5201,7 +5370,7 @@ function appendHistoricoLeveIncremental(clienteId = "admin", entradaOuItem = {},
       chave,
       file,
       bytesAppend: Buffer.byteLength(linha, "utf8"),
-      item: itemLeve,
+      item: preparadoMesclado.itemLeve,
       bootstrap
     };
   } catch (erro) {

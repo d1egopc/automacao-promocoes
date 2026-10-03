@@ -151,7 +151,9 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(processadas7d.metricas.processadas, 2, "GET /fila processadas 7 dias contem todos os terminais do periodo");
-  assert.strictEqual(processadas7d.metricas.processadas, processadas7d.metricas.enviadas + processadas7d.metricas.comErro);
+  assert.strictEqual(processadas7d.metricas.enviadas, 1);
+  assert.strictEqual(processadas7d.metricas.comErro, 0, "sem destino operacional nao vira erro tecnico");
+  assert.strictEqual(processadas7d.metricas.naoEnviadas, 1);
   assert.strictEqual(processadas7d.metricas.emDistribuicao, 2);
 
   const enviadas = construirReadModelPublicoPorMarcos({
@@ -211,9 +213,9 @@ function rotaGetBloco(fonte, rota) {
     limit: 50,
     agoraMs: AGORA
   });
-  assert.strictEqual(comErro.metricas.comErro, 2, "GET /fila com_erro soma excecoes reais");
-  assert.strictEqual(comErro.totalFiltrado, 2);
-  assert.strictEqual(comErro.itens.length, 2);
+  assert.strictEqual(comErro.metricas.comErro, 1, "GET /fila com_erro soma somente excecoes tecnicas reais");
+  assert.strictEqual(comErro.totalFiltrado, 1);
+  assert.strictEqual(comErro.itens.length, 1);
   assert(comErro.itens.every(item => item.statusPublico === "erro" && item.resultadoPublico === "erro"), "GET /fila com_erro deve expor somente status publico Erro");
 
   const marketplace = construirReadModelPublicoPorMarcos({
@@ -243,7 +245,8 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(destino.metricas.processadas, 1, "filtro destino nao mistura HOT");
-  assert.strictEqual(destino.metricas.processadas, destino.metricas.enviadas + destino.metricas.comErro, "destino preserva a coorte terminal unica");
+  assert.strictEqual(destino.metricas.comErro, 0, "destino sem envio tecnico comprovado nao entra em Erro");
+  assert.strictEqual(destino.metricas.naoEnviadas, 1);
 
   const busca = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",
