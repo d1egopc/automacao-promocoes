@@ -95,6 +95,7 @@ async function executar() {
     urlOriginal: "https://pt.aliexpress.com/item/1005000000000001.html",
     titulo: "Produto editavel",
     precoAtual: 117,
+    taxa: 23.83,
     imagem: "https://ae01.alicdn.com/kf/produto.jpg",
     observacoes: "Produto ja no Brasil",
     completo: true
@@ -102,6 +103,7 @@ async function executar() {
 
   const contexto = {
     console,
+    URL,
     setTimeout,
     clearTimeout,
     document: {
@@ -176,6 +178,11 @@ async function executar() {
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.strictEqual(previews, 1);
   assert.strictEqual(capturas, 1);
+  assert.strictEqual(elemento("previewMarketplace").textContent, "AliExpress");
+  assert.strictEqual(elemento("previewLinkLinha").hidden, false);
+  assert.strictEqual(elemento("previewLink").href, "https://s.click.aliexpress.com/e/teste");
+  assert.strictEqual(elemento("previewObservacoes").textContent, "Produto ja no Brasil");
+  assert.strictEqual(elemento("previewTaxa").textContent, "Imposto/taxas: R$ 23,83");
   assert.strictEqual(listagens, 0, "listas nao carregam na abertura da extensao");
   assert.strictEqual(elemento("botaoLista").hidden, false);
 
@@ -189,7 +196,16 @@ async function executar() {
   elemento("campoCupom").listeners.input();
   elemento("campoObservacoes").listeners.input();
   elemento("campoParcelamento").listeners.input();
+  assert.strictEqual(elemento("previewTitulo").textContent, "Titulo editado");
+  assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 118,00");
+  assert.strictEqual(elemento("previewCupom").textContent, "Cupom: BRCD1");
+  assert.strictEqual(elemento("previewObservacoes").textContent, "Brasil sem imposto adicional");
+  assert.strictEqual(elemento("previewParcelamento").textContent, "10x sem juros");
+  assert.strictEqual(elemento("previewLinkLinha").hidden, true, "link aprovado nao aparece enquanto o formulario mudou");
+  assert.strictEqual(capturas, 1, "preview visual nao recaptura o marketplace");
+  assert.strictEqual(previews, 1, "preview visual nao antecipa o request existente");
   await new Promise((resolve) => setTimeout(resolve, 500));
+  assert.strictEqual(elemento("previewLinkLinha").hidden, false, "link volta apos o preview existente ser validado");
   const camposEditados = ["campoTitulo", "campoPrecoAtual", "campoCupom", "campoObservacoes", "campoParcelamento"];
   const formularioAntes = camposEditados.map((id) => elemento(id).value);
 

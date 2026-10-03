@@ -177,7 +177,28 @@
           <button id="botaoPreview" class="primary" hidden>Atualizar preview</button>
         </section>
 
-        <section id="previewView" class="preview" hidden></section>
+        <section id="previewView" class="preview" aria-label="Prévia da oferta" hidden>
+          <div id="previewMedia" class="preview-media" hidden>
+            <canvas id="previewImagem" width="160" height="140" role="img" aria-label="Imagem do produto" class="preview-imagem"></canvas>
+          </div>
+          <div class="preview-conteudo">
+            <p class="preview-secao">Prévia da oferta</p>
+            <h2 id="previewTitulo"></h2>
+            <p id="previewMarketplace" class="preview-marketplace"></p>
+            <p id="previewAvaliacao" class="preview-detalhe" hidden></p>
+            <p id="previewPrecoAnterior" class="preview-preco-anterior" hidden></p>
+            <div id="previewPrecoLinha" class="preview-preco-linha">
+              <strong id="previewPrecoAtual" class="preview-preco-atual"></strong>
+              <span id="previewDesconto" class="preview-desconto" hidden></span>
+            </div>
+            <p id="previewCupom" class="preview-detalhe" hidden></p>
+            <p id="previewParcelamento" class="preview-detalhe" hidden></p>
+            <p id="previewTaxa" class="preview-detalhe" hidden></p>
+            <p id="previewObservacoes" class="preview-observacoes" hidden></p>
+            <p id="previewLinkLinha" class="preview-link" hidden>Produto: <a id="previewLink" target="_blank" rel="noopener noreferrer">Link da oferta</a></p>
+            <p class="preview-aviso">Prévia padrão. O envio final segue o template do destino.</p>
+          </div>
+        </section>
       </section>
     </main>
 

@@ -30,6 +30,7 @@
     previewOferta: null,
     previewKey: "",
     previewDesatualizado: false,
+    previewImagemFonte: "",
     previewTimer: null,
     salvandoOferta: false,
     ofertaSalvaId: "",
@@ -290,6 +291,58 @@
       return minimo ? `A partir de ${minimo}` : "";
     }
     return formatarMoeda(produto.precoAtual);
+  }
+
+  function renderizarPreviewVisual() {
+    if (!state.produto) return;
+    const produto = produtoEditado();
+    setHidden("previewMedia", !state.produto.imagem);
+    atualizarImagemPreview();
+    setTexto("previewMarketplace", marketplaceLabel(produto.marketplace));
+    setTexto("previewTitulo", produto.titulo);
+    const avaliacao = String(produto.avaliacao ?? "").trim();
+    setTexto("previewAvaliacao", avaliacao ? `Avaliação: ${avaliacao}` : "");
+    setHidden("previewAvaliacao", !avaliacao);
+    const precoAnterior = formatarMoeda(produto.precoAnterior);
+    setTexto("previewPrecoAnterior", precoAnterior ? `De ${precoAnterior}` : "");
+    setHidden("previewPrecoAnterior", !precoAnterior);
+    const precoAtual = textoPrecoProduto(produto);
+    setTexto("previewPrecoAtual", precoAtual);
+    setHidden("previewPrecoLinha", !precoAtual);
+    const desconto = produto.descontoPercentual ? `${produto.descontoPercentual}% OFF` : "";
+    setTexto("previewDesconto", desconto);
+    setHidden("previewDesconto", !desconto);
+    setTexto("previewCupom", produto.cupom ? `Cupom: ${produto.cupom}` : "");
+    setHidden("previewCupom", !produto.cupom);
+    setTexto("previewParcelamento", produto.parcelamento);
+    setHidden("previewParcelamento", !produto.parcelamento);
+    const taxa = produto.marketplace === "aliexpress" && produto.taxa
+      ? (formatarMoeda(produto.taxa) || String(produto.taxa).trim()) : "";
+    setTexto("previewTaxa", taxa ? `Imposto/taxas: ${taxa}` : "");
+    setHidden("previewTaxa", !taxa);
+    setTexto("previewObservacoes", produto.observacoes);
+    setHidden("previewObservacoes", !produto.observacoes);
+    const link = el("previewLink");
+    const url = !state.previewDesatualizado && state.previewKey === chavePreview(produto)
+      ? urlOportunidadeSegura(state.previewOferta?.urlAfiliada) : "";
+    if (link) link.href = url;
+    setHidden("previewLinkLinha", !url);
+  }
+
+  function atualizarImagemPreview() {
+    if (!state.produto || (state.previewImagemFonte && state.previewImagemFonte === state.produto.imagem)) return;
+    const origem = el("produtoImagem");
+    const canvas = el("previewImagem");
+    const contexto = canvas?.getContext?.("2d");
+    if (!contexto) return;
+    contexto.clearRect(0, 0, canvas.width, canvas.height);
+    state.previewImagemFonte = "";
+    if (!state.produto.imagem || !origem?.complete || !origem.naturalWidth || !origem.naturalHeight) return;
+    const escala = Math.min(canvas.width / origem.naturalWidth, canvas.height / origem.naturalHeight);
+    const largura = origem.naturalWidth * escala;
+    const altura = origem.naturalHeight * escala;
+    contexto.drawImage(origem, (canvas.width - largura) / 2, (canvas.height - altura) / 2, largura, altura);
+    state.previewImagemFonte = state.produto.imagem;
   }
 
   function chavePreview(produto = {}) {
@@ -830,6 +883,8 @@
       }
       if (automatico && !forcar && state.ultimaUrlCapturada === urlCaptura && state.produto?.urlOriginal === urlCaptura) {
         if (capturaUtilizavel(state.produto)) {
+          renderizarPreviewVisual();
+          setHidden("previewView", false);
           const previewKeyAtual = chavePreview(produtoEditado());
           if (!previewCorrespondeAoFormulario() || state.ultimoPreviewKey !== previewKeyAtual) {
             setTexto("estadoPagina", "Preparando oferta...");
@@ -891,6 +946,11 @@
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         return;
       }
+      renderizarPreviewVisual();
+      setHidden("previewView", false);
+      atualizarBotaoSalvar();
+      atualizarBotaoEnviar();
+      atualizarBotaoLista();
       state.ultimaUrlCapturada = produto.urlOriginal || urlCaptura;
       logTiming("captura_local_valida", {
         marketplace: produto.marketplace,
@@ -934,6 +994,7 @@
   function invalidarPreviewPorEdicao() {
     atualizarDescontoDerivado();
     state.previewDesatualizado = true;
+    renderizarPreviewVisual();
     setTexto("estadoPagina", "Preview desatualizado");
     setTexto("statusLink", "Preview desatualizado");
     setHidden("botaoPreview", false);
@@ -1158,25 +1219,6 @@
         return;
       }
       const oferta = resposta?.oferta || {};
-      const preview = el("previewView");
-      preview.innerHTML = "";
-      const titulo = document.createElement("h2");
-      titulo.textContent = "Preview aprovado";
-      const resumo = document.createElement("p");
-      const tituloResumo = oferta.titulo || produto.titulo;
-      const precoResumo = textoPrecoProduto({
-        ...produto,
-        ...oferta,
-        precoAtual: oferta.precoAtual || produto.precoAtual,
-        precoMin: oferta.precoMin || produto.precoMin,
-        precoMax: oferta.precoMax || produto.precoMax,
-        temVariacaoPreco: oferta.temVariacaoPreco === true || produto.temVariacaoPreco === true
-      });
-      resumo.textContent = precoResumo ? `${tituloResumo} - ${precoResumo}` : tituloResumo;
-      const link = document.createElement("p");
-      link.textContent = oferta.urlAfiliada ? "Link afiliado gerado pelo Optimus." : "Link afiliado nao retornado.";
-      preview.append(titulo, resumo, link);
-      setHidden("previewView", false);
       state.ultimoPreviewKey = previewKey;
       state.previewOferta = ofertaPreviewParaSalvar(oferta);
       if (state.previewKey !== previewKey) {
@@ -1186,6 +1228,8 @@
       }
       state.previewKey = previewKey;
       state.previewDesatualizado = false;
+      renderizarPreviewVisual();
+      setHidden("previewView", false);
       setHidden("botaoPreview", true);
       if (state.previewSalvoKey !== previewKey) {
         state.ofertaSalvaId = "";
@@ -1518,6 +1562,7 @@
     el("criarEAdicionarLista").addEventListener("click", criarEAdicionarLista);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
+    el("produtoImagem").addEventListener("load", atualizarImagemPreview);
     el("fecharOportunidades")?.addEventListener("click", fecharPopoverOportunidades);
     el("campoTitulo").addEventListener("input", () => { marcarCampoEditado("campoTitulo"); invalidarPreviewPorEdicao(); });
     el("campoPrecoAtual").addEventListener("input", () => { marcarCampoEditado("campoPrecoAtual"); invalidarPreviewPorEdicao(); });
