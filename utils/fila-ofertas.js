@@ -1189,6 +1189,42 @@ function statusOperacionalV2(metadata = {}) {
   return metadata.ok === true ? "pendente" : "retida";
 }
 
+const TIPOS_CUPOM_PRIORIDADE_CONFIAVEL = new Set([
+  "texto_radar",
+  "texto_clonador"
+]);
+const CUPONS_INVALIDOS_PRIORIDADE_V2 = new Set([
+  "COPIADO",
+  "APPLIED",
+  "APPEARANCE",
+  "APPLINK",
+  "SEM CUPOM"
+]);
+
+function prioridadeMinimaCupomConfiavel(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return 0;
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return 0;
+
+  const cupom = String(oferta.cupom || "").trim().toUpperCase();
+  if (CUPONS_INVALIDOS_PRIORIDADE_V2.has(cupom)) return 0;
+
+  const tipos = [oferta.cupomTipo, oferta.tipoCupom]
+    .map(tipo => String(tipo || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    tipos.includes("real") ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true
+  ) {
+    return 110;
+  }
+
+  const evidenciaTextoConfiavel = Boolean(cupom) && tipos.some(tipo =>
+    tipo === "detectado" || TIPOS_CUPOM_PRIORIDADE_CONFIAVEL.has(tipo)
+  );
+  return evidenciaTextoConfiavel ? 95 : 0;
+}
+
 function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
   const logger = contexto.logger || console;
   const clienteId = contexto.clienteId || oferta.clienteId || "admin";
@@ -1220,6 +1256,10 @@ function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
 
   const statusAnterior = oferta.status || "";
   const prioridadeAnterior = oferta.prioridadeEnvio ?? oferta.prioridadeFila ?? oferta.prioridade ?? "";
+  const prioridadesAnteriores = [oferta.prioridadeEnvio, oferta.prioridadeFila, oferta.prioridade]
+    .map(Number)
+    .filter(Number.isFinite);
+  const motivoPrioridadeAnterior = oferta.motivoPrioridade || "";
   const statusAplicado = statusOperacionalV2(v2);
 
   oferta.status = statusAplicado;
@@ -1231,6 +1271,35 @@ function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
     oferta.prioridadeFila = v2.prioridade;
     oferta.prioridade = v2.prioridade;
     oferta.motivoPrioridade = v2.motivo || "Inteligencia Universal V2";
+  }
+
+  const prioridadeMinimaCupom = prioridadeMinimaCupomConfiavel(oferta);
+  if (prioridadeMinimaCupom > 0) {
+    const prioridadeV2 = Number(v2.prioridade);
+    const prioridadeAnteriorNumero = prioridadesAnteriores.length
+      ? Math.max(...prioridadesAnteriores)
+      : 0;
+    const prioridadeFinal = Math.max(
+      Number.isFinite(prioridadeV2) ? prioridadeV2 : 0,
+      Number.isFinite(prioridadeAnteriorNumero) ? prioridadeAnteriorNumero : 0,
+      prioridadeMinimaCupom
+    );
+
+    oferta.prioridadeEnvio = prioridadeFinal;
+    oferta.prioridadeFila = prioridadeFinal;
+    oferta.prioridade = prioridadeFinal;
+
+    if (prioridadeFinal > (Number.isFinite(prioridadeV2) ? prioridadeV2 : 0)) {
+      const preservouPrioridadeAnterior =
+        Number.isFinite(prioridadeAnteriorNumero) &&
+        prioridadeAnteriorNumero === prioridadeFinal &&
+        prioridadeAnteriorNumero >= prioridadeMinimaCupom;
+      oferta.motivoPrioridade = preservouPrioridadeAnterior && motivoPrioridadeAnterior
+        ? motivoPrioridadeAnterior
+        : prioridadeMinimaCupom === 110
+          ? "Cupom real normalizado por evidencia confiavel"
+          : "Cupom detectado normalizado por evidencia confiavel";
+    }
   }
 
   oferta.engineV2Decisao = {

@@ -5,18 +5,19 @@ const vm = require("vm");
 
 const raiz = path.join(__dirname, "..");
 const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
+const filaOfertasFonte = fs.readFileSync(path.join(raiz, "utils", "fila-ofertas.js"), "utf8");
 
-function extrairDeclaracao(nome, prefixo = "function") {
-  const inicio = indexFonte.indexOf(`${prefixo} ${nome}`);
+function extrairDeclaracao(nome, prefixo = "function", fonte = indexFonte) {
+  const inicio = fonte.indexOf(`${prefixo} ${nome}`);
   assert(inicio >= 0, `declaracao ${nome} deve existir`);
-  const fimAssinatura = indexFonte.indexOf(") {", inicio);
+  const fimAssinatura = fonte.indexOf(") {", inicio);
   assert(fimAssinatura >= 0, `assinatura ${nome} deve estar completa`);
   const abre = fimAssinatura + 2;
   let profundidade = 0;
-  for (let i = abre; i < indexFonte.length; i += 1) {
-    if (indexFonte[i] === "{") profundidade += 1;
-    if (indexFonte[i] === "}") profundidade -= 1;
-    if (profundidade === 0) return indexFonte.slice(inicio, i + 1);
+  for (let i = abre; i < fonte.length; i += 1) {
+    if (fonte[i] === "{") profundidade += 1;
+    if (fonte[i] === "}") profundidade -= 1;
+    if (profundidade === 0) return fonte.slice(inicio, i + 1);
   }
   throw new Error(`declaracao ${nome} incompleta`);
 }
@@ -46,6 +47,37 @@ const {
   cupomFastLaneTipo,
   ordenarPendentesPorPrioridade
 } = contexto.resultado;
+
+const inicioTiposFila = filaOfertasFonte.indexOf("const TIPOS_CUPOM_PRIORIDADE_CONFIAVEL");
+const fimTiposFila = filaOfertasFonte.indexOf("function prioridadeMinimaCupomConfiavel", inicioTiposFila);
+assert(inicioTiposFila >= 0 && fimTiposFila > inicioTiposFila, "piso confiavel deve existir junto da decisao V2");
+
+const fonteDecisaoV2 = [
+  filaOfertasFonte.slice(inicioTiposFila, fimTiposFila),
+  extrairDeclaracao("prioridadeMinimaCupomConfiavel", "function", filaOfertasFonte),
+  extrairDeclaracao("aplicarDecisaoEngineV2Oficial", "function", filaOfertasFonte),
+  "resultadoV2 = { prioridadeMinimaCupomConfiavel, aplicarDecisaoEngineV2Oficial };"
+].join("\n");
+const contextoV2 = {
+  resultadoV2: null,
+  Number,
+  String,
+  Boolean,
+  Set,
+  Date,
+  obterConfigEngineV2: () => ({ modo: "oficial" }),
+  textoComparacaoNormalizado: valor => String(valor || "").trim().toLowerCase(),
+  statusOperacionalV2: () => "pendente",
+  tituloCurto: valor => String(valor || "")
+};
+vm.runInNewContext(fonteDecisaoV2, contextoV2, { filename: "cupom-turbo-engine-v2-contract.js" });
+const { aplicarDecisaoEngineV2Oficial } = contextoV2.resultadoV2;
+
+function aplicarV2(oferta, prioridade, motivo = "inteligencia_universal_aprovada") {
+  oferta.inteligenciaUniversalV2 = { status: "avaliada", prioridade, motivo };
+  aplicarDecisaoEngineV2Oficial(oferta, { logger: { log() {} } });
+  return oferta;
+}
 
 {
   const oferta = { prioridadeEnvio: 70, motivoPrioridade: "Oferta comum" };
@@ -167,6 +199,73 @@ const {
   const ordenadas = ordenarPendentesPorPrioridade([comum, cupom]);
   assert.strictEqual(ordenadas[0].id, "cupom");
   assert.strictEqual(cupom.prioridadeEnvio, 95);
+}
+
+{
+  const oferta = aplicarV2({ cupom: "RADAR10", cupomTipo: "texto_radar" }, 70);
+  assert.strictEqual(oferta.prioridadeEnvio, 95);
+  assert.strictEqual(oferta.prioridadeFila, 95);
+  assert.strictEqual(oferta.prioridade, 95);
+}
+
+{
+  const oferta = aplicarV2({ cupom: "CLONE15", tipoCupom: "texto_clonador" }, 80);
+  assert.strictEqual(oferta.prioridadeEnvio, 95);
+}
+
+{
+  const oferta = aplicarV2({ cupom: "REAL20", cupomTipo: "real" }, 70);
+  assert.strictEqual(oferta.prioridadeEnvio, 110);
+}
+
+{
+  const oferta = aplicarV2({ cupom: "REAL20", cupomTipo: "real" }, 120);
+  assert.strictEqual(oferta.prioridadeEnvio, 120);
+}
+
+{
+  const confirmada = aplicarV2({ cupom: "CONFIRMADO20", cupomConfirmado: true }, 70);
+  const validada = aplicarV2({ cupom: "VALIDADO20", cupomValidado: true }, 80);
+  assert.strictEqual(confirmada.prioridadeEnvio, 110);
+  assert.strictEqual(validada.prioridadeEnvio, 110);
+}
+
+{
+  const oferta = aplicarV2({ cupom: "TALVEZ10", cupomTipo: "provavel", possivelCupom: true }, 80);
+  assert.strictEqual(oferta.prioridadeEnvio, 80);
+}
+
+for (const cupom of ["COPIADO", "APPLIED", "SEM CUPOM"]) {
+  const oferta = aplicarV2({ cupom, cupomTipo: "real" }, 70);
+  assert.strictEqual(oferta.prioridadeEnvio, 70, `${cupom} nao deve ser promovido`);
+}
+
+{
+  const suspeita = aplicarV2({ cupom: "SUSPEITO10", cupomTipo: "texto_radar", cupomSuspeito: true }, 70);
+  const incompativel = aplicarV2({
+    cupom: "INCOMPATIVEL10",
+    cupomTipo: "texto_clonador",
+    cupomMonetarioIncompativel: true
+  }, 80);
+  assert.strictEqual(suspeita.prioridadeEnvio, 70);
+  assert.strictEqual(incompativel.prioridadeEnvio, 80);
+}
+
+{
+  const oferta = aplicarV2({
+    prioridadeEnvio: 100,
+    prioridadeFila: 130,
+    motivoPrioridade: "Regra legitima mais forte",
+    cupom: "FORTE20",
+    cupomTipo: "real"
+  }, 120);
+  assert.strictEqual(oferta.prioridadeEnvio, 130);
+  assert.strictEqual(oferta.motivoPrioridade, "Regra legitima mais forte");
+}
+
+{
+  const oferta = aplicarV2({ cupom: "RADAR10", cupomTipo: "texto_radar" }, 70);
+  assert.strictEqual(cupomFastLaneTipo(oferta), "real_detectado");
 }
 
 console.log("cupom-turbo-normalizacao: PASS");
