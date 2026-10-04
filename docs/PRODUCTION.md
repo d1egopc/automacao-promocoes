@@ -11,7 +11,10 @@ A única produção atual é a Hostinger VPS. Railway está **RETIRED** e não d
 | Compose file | `/opt/optimus/infra/compose.yml` |
 | Compose service | `backend` |
 | Dados persistentes | `/opt/optimus/data` |
-| Endpoint publico canonico | `https://www.optimuspromo.com.br` |
+| Frontend publico | `https://www.optimuspromo.com.br` (Vercel) |
+| API/backend publico | `https://go.optimuspromo.com.br` (Hostinger/Caddy -> `127.0.0.1:3000`) |
+
+Os contratos canonicos atuais de topologia e deploy sao [docs/contracts/PLATFORM-TOPOLOGY.md](contracts/PLATFORM-TOPOLOGY.md) e [docs/contracts/PRODUCTION-DEPLOYMENT.md](contracts/PRODUCTION-DEPLOYMENT.md).
 
 ## Regras de operacao
 
