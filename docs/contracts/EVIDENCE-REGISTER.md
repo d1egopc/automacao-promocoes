@@ -63,6 +63,56 @@ Canary/allowlists observadas devem ser relidas no runtime; nao sao contrato perm
 - Backend minimo registrado: `985d526ebac8db835b301e6c5ca80c43418be7ff`.
 - Na prova, Chrome Default e Profile 9 apontavam uma extensao unpacked para `C:\Users\Liva D1EGOPC\Documents\BACKEND-OFICIAL-2026\optimus-capture`. Isso comprova o checkout local observado, nao uma distribuicao oficial aos usuarios.
 
+## Incidente John Frank / VIVA removal fence - 2026-10-04
+
+Workspace afetada: `user_g3qkc18m`.
+
+### Sintoma e causa comprovada
+
+- A workspace nao conseguia ativar a automacao porque um removal fence terminal legado permanecia sem cobertura completa no VIVA.
+- A terminalizacao removia apenas a entrada com `item.id === entrada.id`.
+- Aliases que representavam a mesma identidade canonica permaneciam no VIVA e impediam a conclusao segura de proof/checkpoint.
+- O fail-closed atuou corretamente: a fila nao foi liberada enquanto a divergencia permaneceu.
+
+### Correcao estrutural
+
+- Patch: `92d2e33ef093bc8640ef49e47529055c5f16d8b3` (`fix(viva): remove terminal aliases before fence proof`).
+- Contrato corrigido: antes da publicacao valida de proof/checkpoint, a terminalizacao remove todos os representantes que `entradasReferemMesmoItemFilaV2()` reconhece como o mesmo item.
+- A correcao vale para novas terminalizacoes em todas as workspaces.
+- O patch nao relaxa o fail-closed e nao transforma automaticamente estados legados anteriores ao patch.
+
+### Recovery legado controlado
+
+- O recovery da workspace foi executado de forma isolada e controlada.
+- Foram removidos somente tres aliases comprovados; `unrelatedRemoved=[]`.
+- Ressurreicao: zero.
+- Duplicacao terminal: zero; o terminal afetado permaneceu exatamente uma vez no historico.
+- Os fences antigos foram resolvidos pelo fluxo oficial depois da reconciliacao de authority, checkpoint e proof.
+- O runtime global permaneceu em `mtime`; o uso de `generation` ficou restrito ao controlador one-shot e nao alterou env ou flags.
+- Outras workspaces permaneceram isoladas e operacionais.
+
+### Retomada operacional comprovada
+
+- A automacao foi ativada posteriormente pelo fluxo normal `POST /automacao/toggle`, sem edicao manual de persistencia.
+- Estado final observado: `automacaoAtiva=true`, sessao WhatsApp `open` e destino `OFERTAS SMART` ativo.
+- Primeiro envio real apos o recovery:
+  - oferta `84815` / `engine_84815_1791149902582`;
+  - marketplace Mercado Livre;
+  - destino `OFERTAS SMART`;
+  - canal WhatsApp;
+  - confirmacao real do provedor;
+  - duracao do envio `617 ms`.
+- Veredito: `JOHN RECUPERADO E AUTOMACAO OPERACIONAL`.
+
+### Aprendizado permanente
+
+- Estados legados criados antes do patch podem exigir recovery controlado se ainda contiverem aliases cobertos por removal fence.
+- Nunca apagar fence, fabricar proof ou liberar authority sem cobertura comprovada.
+- Uma workspace degradada nao pode contaminar nem bloquear outras workspaces.
+- Este incidente e caso de referencia para uma futura frente `Workspace Health Guard / Self-Healing`.
+- Objetivo futuro do Health Guard: detectar workspace degradada, reconhecer estados de recovery conhecidos, tentar somente recovery deterministico seguro, preservar fail-closed e escalar para humano quando a prova falhar.
+- Esta secao registra evidencia do incidente; os contratos normativos de fila permanecem em [DESTINATIONS-QUEUE.md](DESTINATIONS-QUEUE.md) e de isolamento em [MULTITENANCY.md](MULTITENANCY.md).
+
 ## Protecoes administrativas
 
 Na prova, `main` dos dois repositorios retornou `protected=false`. Ativar bloqueio de force-push, exclusao e checks obrigatorios exige decisao humana e permissao administrativa.
