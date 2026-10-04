@@ -5836,7 +5836,7 @@ function moverTerminalParaHistorico(clienteId = "admin", filaViva = [], alvo = {
     };
   }
 
-  const restante = entradas.filter(item => item.id !== entrada.id);
+  const restante = entradas.filter(item => !entradasReferemMesmoItemFilaV2(item, entrada.item));
   const escrita = escreverFilaViva(cliente, restante, deps);
   const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
   if (!escrita.ok) {
