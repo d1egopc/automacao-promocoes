@@ -1464,6 +1464,70 @@ function prioridadeEnvioOferta(oferta = {}) {
   return Number.isFinite(prioridade) ? prioridade : 40;
 }
 
+const TIPOS_CUPOM_EVIDENCIA_CONFIAVEL = new Set([
+  "texto_radar",
+  "texto_clonador"
+]);
+const CUPONS_INVALIDOS_PRIORIDADE = new Set([
+  "COPIADO",
+  "APPLIED",
+  "APPEARANCE",
+  "APPLINK",
+  "SEM CUPOM"
+]);
+
+function evidenciaCupomRealConfiavel(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return "";
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return "";
+
+  const tipos = [oferta.cupomTipo, oferta.tipoCupom]
+    .map(tipo => String(tipo || "").trim().toLowerCase())
+    .filter(Boolean);
+  const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
+  const temCupomValido = Boolean(cupomTexto) && !CUPONS_INVALIDOS_PRIORIDADE.has(cupomTexto);
+  if (
+    tipos.includes("real") ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true
+  ) {
+    return "real";
+  }
+
+  if (
+    tipos.includes("detectado") ||
+    (temCupomValido && tipos.some(tipo => TIPOS_CUPOM_EVIDENCIA_CONFIAVEL.has(tipo)))
+  ) {
+    return "detectado";
+  }
+
+  return "";
+}
+
+function normalizarEvidenciaCupomReal(oferta = {}) {
+  const evidencia = evidenciaCupomRealConfiavel(oferta);
+  if (!evidencia) return oferta;
+
+  const prioridadeAtual = prioridadeEnvioOferta(oferta);
+  const prioridadeMinima = evidencia === "real" ? 110 : 95;
+  const elevouPrioridade = prioridadeAtual < prioridadeMinima;
+  oferta.prioridadeEnvio = Math.max(prioridadeAtual, prioridadeMinima);
+
+  const classificacaoRealExistente =
+    [oferta.cupomTipo, oferta.tipoCupom].some(tipo => String(tipo || "").trim().toLowerCase() === "real") ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true;
+  oferta.cupomTipo = evidencia === "real" || classificacaoRealExistente ? "real" : "detectado";
+  oferta.cupomDetectado = true;
+
+  if (elevouPrioridade) {
+    oferta.motivoPrioridade = evidencia === "real"
+      ? "Cupom real normalizado por evidencia confiavel"
+      : "Cupom detectado normalizado por evidencia confiavel";
+  }
+
+  return oferta;
+}
+
 function cupomFastLaneTipo(oferta = {}, agora = Date.now()) {
   if (!oferta || typeof oferta !== "object") return "";
   if (oferta.status === "retida") return "";
@@ -1476,13 +1540,7 @@ function cupomFastLaneTipo(oferta = {}, agora = Date.now()) {
     oferta.cupomDetectado === true ||
     oferta.cupomDetectadoTexto === true;
 
-  if (
-    tipo === "real" ||
-    tipo === "detectado" ||
-    oferta.cupomConfirmado === true ||
-    oferta.cupomValidado === true ||
-    (temCupom && prioridadeEnvioOferta(oferta) >= 95)
-  ) {
+  if (evidenciaCupomRealConfiavel(oferta) || (temCupom && prioridadeEnvioOferta(oferta) >= 95)) {
     return "real_detectado";
   }
 
@@ -7516,6 +7574,8 @@ function validarCupomMonetarioOferta(oferta = {}) {
 function aplicarPrioridadeEnvioOferta(oferta = {}) {
   if (!oferta || typeof oferta !== "object") return oferta;
 
+  normalizarEvidenciaCupomReal(oferta);
+
   if (oferta.prioridadeEnvio !== undefined && oferta.motivoPrioridade) {
     return oferta;
   }
@@ -7525,7 +7585,7 @@ function aplicarPrioridadeEnvioOferta(oferta = {}) {
   const cupomSuspeito = oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true;
 
   const cupomTexto = String(oferta.cupom || "").trim().toUpperCase();
-  const cupomFake = ["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"].includes(cupomTexto);
+  const cupomFake = CUPONS_INVALIDOS_PRIORIDADE.has(cupomTexto);
 
   if (cupomFake) {
   oferta.cupom = "";
