@@ -10,6 +10,7 @@ const {
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
   VISAO_COM_ERRO,
+  VISAO_NAO_ELEGIVEIS,
   construirReadModelPublicoPorMarcos,
   resolverDetalhePublicoFilaPorRef,
   benchmarkDetalhePublicoFila,
@@ -92,10 +93,11 @@ function model(historicoLeve, visao) {
   });
   const parciais = model([parcialReal], VISAO_PARCIAIS);
   assert.strictEqual(parciais.metricas.parciais, 1, "sucesso em alguns aplicaveis e falha em outros aplicaveis vira Parcial");
-  assert.strictEqual(parciais.itens[0].statusPublico, "enviada", "Parcial interno preserva o resultado factual enviado");
+  assert.strictEqual(parciais.itens[0].resultadoFinalPublico, "parcial", "Parcial preserva seu resultado final canonico");
+  assert.strictEqual(parciais.itens[0].statusPublico, "enviada", "alias legado de parcial permanece compativel");
   assert.strictEqual(parciais.itens[0].resultadoResumo, "Enviado para 1 de 3 destinos");
   const enviadas = model([parcialReal], VISAO_ENVIADAS);
-  assert.strictEqual(enviadas.itens.length, 1, "resultado parcial factual tambem aparece em Enviadas");
+  assert.strictEqual(enviadas.itens.length, 0, "filtro Enviada contem somente envios completos");
 }
 
 {
@@ -105,9 +107,10 @@ function model(historicoLeve, visao) {
       { destinoId: "fora_2", destinoNome: "Fora 2", canal: "discord", estado: "nao_compativel" }
     ]
   });
-  const naoEnviadas = model([nenhumAplicavel], VISAO_NAO_ENVIADAS);
-  assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "nenhum destino aplicavel nao pode virar Parcial");
-  assert.strictEqual(naoEnviadas.itens[0].statusPublico, "nao_enviada", "ausencia de destino aplicavel nao e erro de transporte");
+  const semOportunidade = model([nenhumAplicavel], VISAO_NAO_ELEGIVEIS);
+  assert.strictEqual(semOportunidade.metricas.naoElegiveis, 1, "nenhum destino aplicavel vira Sem oportunidade");
+  assert.strictEqual(semOportunidade.itens[0].resultadoFinalPublico, "nao_elegivel", "ausencia de destino aplicavel nao e erro de transporte");
+  assert.strictEqual(semOportunidade.itens[0].statusPublico, "nao_enviada", "alias legado de sem oportunidade permanece compativel");
 }
 
 {
@@ -118,8 +121,9 @@ function model(historicoLeve, visao) {
       { destinoId: "fora", destinoNome: "Fora", canal: "discord", estado: "nao_compativel" }
     ]
   });
-  const naoEnviadas = model([falhaReal], VISAO_NAO_ENVIADAS);
-  assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "falha real sem aplicavel enviado vira Nao enviada");
+  const comErro = model([falhaReal], VISAO_COM_ERRO);
+  assert.strictEqual(comErro.metricas.erros, 1, "falha real sem confirmacao vira Erro");
+  assert.strictEqual(comErro.itens[0].resultadoFinalPublico, "erro");
 }
 
 {
@@ -278,7 +282,8 @@ function model(historicoLeve, visao) {
   });
   const terminal = registro("stale_terminal", "enviado", {
     status: "enviado",
-    enviadoEm: iso(AGORA - 1000)
+    enviadoEm: iso(AGORA - 1000),
+    destinosEstado: [{ destinoId: "dest_stale", destinoNome: "Destino stale", estado: "enviado", enviadoEm: iso(AGORA - 1000) }]
   });
   const readModel = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_semantica",

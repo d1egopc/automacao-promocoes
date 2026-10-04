@@ -5,6 +5,7 @@ const {
   VISAO_FILA,
   VISAO_PROCESSADAS,
   VISAO_ENVIADAS,
+  VISAO_PARCIAIS,
   VISAO_COM_ERRO,
   construirReadModelPublicoPorMarcos
 } = require("../modules/fila/fila-read-model-publico");
@@ -114,7 +115,8 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
   const processadas = readModel({ historicoLeve: [semDestino] });
   assert.strictEqual(erros.itens.length, 0, "terminal sem destino nao pertence ao subconjunto tecnico Erro");
   assert.strictEqual(processadas.itens.length, 1, "conclusao operacional completa permanece no historico coerente");
-  assert.strictEqual(processadas.itens[0].statusPublico, "nao_enviada");
+  assert.strictEqual(processadas.itens[0].statusPublico, "nao_enviada", "alias legado permanece compativel");
+  assert.strictEqual(processadas.itens[0].resultadoFinalPublico, "nao_elegivel");
 }
 
 {
@@ -143,11 +145,11 @@ function readModel({ hot = [], historicoLeve = [], visao = VISAO_PROCESSADAS } =
     ]
   });
   const processadas = readModel({ historicoLeve: [parcialOperacional] });
-  const enviadas = readModel({ historicoLeve: [parcialOperacional], visao: VISAO_ENVIADAS });
+  const parciais = readModel({ historicoLeve: [parcialOperacional], visao: VISAO_PARCIAIS });
   const erros = readModel({ historicoLeve: [parcialOperacional], visao: VISAO_COM_ERRO });
   assert.strictEqual(processadas.itens.length, 1);
-  assert.strictEqual(enviadas.itens.length, 1);
-  assert.strictEqual(enviadas.itens[0].resultadoResumo, "Enviado para 1 de 3 destinos");
+  assert.strictEqual(parciais.itens.length, 1);
+  assert.strictEqual(parciais.itens[0].resultadoResumo, "Enviado para 1 de 3 destinos");
   assert.strictEqual(erros.itens.length, 0, "parcial operacional nao vira erro automatico");
 }
 

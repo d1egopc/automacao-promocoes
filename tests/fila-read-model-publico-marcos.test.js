@@ -14,6 +14,7 @@ const {
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
   VISAO_COM_ERRO,
+  VISAO_NAO_ELEGIVEIS,
   marcoProcessadaItem,
   construirReadModelPublicoPorMarcos,
   atualizarProjecaoHotPorItem,
@@ -74,7 +75,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
     ...(extra.destinoNome ? { destinoNome: extra.destinoNome } : {}),
     ...(extra.titulo ? { titulo: extra.titulo } : {}),
     destinosEstado: Array.isArray(extra.destinosEstado) ? extra.destinosEstado : [
-      { destinoId: "dest_1", destinoNome: extra.destinoNome || "Canal principal", canal: extra.canal || "telegram", estado: statusPublico === "nao_enviado" ? "erro" : "enviado" }
+      { destinoId: "dest_1", destinoNome: extra.destinoNome || "Canal principal", canal: extra.canal || "telegram", estado: statusPublico === "nao_enviado" ? "nao_enviado" : "enviado" }
     ],
     motivo: extra.motivo
   });
@@ -173,8 +174,119 @@ function registroTerminal(id, statusPublico, extra = {}) {
   });
   assert.strictEqual(model.metricas.processadas, 1, "filtro Processadas continua incluindo a execucao parcial");
   assert.strictEqual(model.listas.processadas.length, 1, "badge terminal nao altera a lista Processadas");
-  assert.strictEqual(model.listas.processadas[0].statusPublico, "enviada", "parcial terminal preserva o resultado factual na visao Processadas");
+  assert.strictEqual(model.listas.processadas[0].statusPublico, "enviada", "alias legado continua tratando envio parcial como enviado");
+  assert.strictEqual(model.listas.processadas[0].resultadoFinalPublico, "parcial", "tipoVisao Processadas nao sobrescreve o resultado final");
   assert.strictEqual(model.listas.processadas[0].resultadoResumo, "Enviado para 1 de 2 destinos");
+}
+
+{
+  const completas = Array.from({ length: 7 }, (_, i) => registroTerminal(`verdade_completa_${i}`, "enviado"));
+  const parciais = Array.from({ length: 10 }, (_, i) => registroTerminal(`verdade_parcial_${i}`, "parcial", {
+    destinosEstado: [
+      { destinoId: `parcial_ok_${i}`, destinoNome: "Destino A", estado: "enviado" },
+      { destinoId: `parcial_pendente_${i}`, destinoNome: "Destino B", estado: "nao_enviado" }
+    ]
+  }));
+  const naoEnviadas = Array.from({ length: 3 }, (_, i) => registroTerminal(`verdade_nao_enviada_${i}`, "nao_enviado", {
+    destinosEstado: [{ destinoId: `nao_enviada_${i}`, destinoNome: "Destino C", estado: "nao_enviado" }]
+  }));
+  const naoElegiveis = Array.from({ length: 51 }, (_, i) => registroTerminal(`verdade_nao_elegivel_${i}`, "nao_enviado", {
+    motivo: i === 0 ? "sem_destino_compativel" : "",
+    destinosEstado: [{ destinoId: `ignorado_${i}`, destinoNome: "Destino incompatível", estado: "nao_compativel", aplicavel: false }]
+  }));
+  const historicoLeve = [...completas, ...parciais, ...naoEnviadas, ...naoElegiveis];
+  const model = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve,
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS
+  });
+  assert.deepStrictEqual(
+    {
+      finalizadas: model.metricas.finalizadas,
+      elegiveis: model.metricas.elegiveis,
+      enviadasCompletas: model.metricas.enviadasCompletas,
+      parciais: model.metricas.parciais,
+      naoEnviadas: model.metricas.naoEnviadas,
+      erros: model.metricas.erros,
+      naoElegiveis: model.metricas.naoElegiveis,
+      taxaEnvio: model.metricas.taxaEnvio
+    },
+    { finalizadas: 71, elegiveis: 20, enviadasCompletas: 7, parciais: 10, naoEnviadas: 3, erros: 0, naoElegiveis: 51, taxaEnvio: 85 }
+  );
+  assert.strictEqual(model.metricas.fechaMatematicamente, true, "coorte canonica fecha exatamente");
+
+  const somenteCompletas = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", historicoLeve, agoraMs: AGORA, visao: VISAO_ENVIADAS });
+  const somenteParciais = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", historicoLeve, agoraMs: AGORA, visao: VISAO_PARCIAIS });
+  const somenteNaoEnviadas = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", historicoLeve, agoraMs: AGORA, visao: VISAO_NAO_ENVIADAS });
+  const somenteNaoElegiveis = construirReadModelPublicoPorMarcos({ clienteId: "cliente_marcos", historicoLeve, agoraMs: AGORA, visao: VISAO_NAO_ELEGIVEIS });
+  assert.strictEqual(somenteCompletas.totalFiltrado, 7, "Enviada nao retorna parcial");
+  assert(somenteCompletas.itens.every(item => item.resultadoFinalPublico === "enviada"));
+  assert.strictEqual(somenteParciais.totalFiltrado, 10);
+  assert(somenteParciais.itens.every(item => item.resultadoFinalPublico === "parcial"));
+  assert.strictEqual(somenteNaoEnviadas.totalFiltrado, 3);
+  assert(somenteNaoEnviadas.itens.every(item => item.resultadoFinalPublico === "nao_enviada"));
+  assert.strictEqual(somenteNaoElegiveis.totalFiltrado, 51);
+  assert(somenteNaoElegiveis.itens.every(item => item.resultadoFinalPublico === "nao_elegivel"));
+}
+
+{
+  const erroTecnico = registroTerminal("verdade_erro", "nao_enviado", {
+    motivo: "erro_envio",
+    destinosEstado: [{ destinoId: "dest_erro", destinoNome: "Destino com falha", estado: "erro_final", tentouEnvio: true }]
+  });
+  const model = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve: [erroTecnico],
+    agoraMs: AGORA,
+    visao: VISAO_COM_ERRO
+  });
+  assert.strictEqual(model.metricas.erros, 1, "falha tecnica persistida com zero confirmacoes vira erro");
+  assert.strictEqual(model.metricas.elegiveis, 1, "erro apos oportunidade pertence a coorte elegivel");
+  assert.strictEqual(model.itens[0].resultadoFinalPublico, "erro");
+}
+
+{
+  const porId = registroTerminal("destino_id_exato", "enviado", {
+    destinosEstado: [{ destinoId: "dest_1", destinoNome: "Canal Norte", estado: "enviado" }]
+  });
+  const idSemelhante = registroTerminal("destino_id_semelhante", "enviado", {
+    destinosEstado: [{ destinoId: "dest_10", destinoNome: "Canal Norte VIP", estado: "enviado" }]
+  });
+  const legadoExato = registroTerminal("destino_legado_exato", "enviado", {
+    destinosEstado: [{ destinoNome: "Canal Histórico", estado: "enviado" }]
+  });
+  const legadoSemelhante = registroTerminal("destino_legado_semelhante", "enviado", {
+    destinosEstado: [{ destinoNome: "Canal Histórico VIP", estado: "enviado" }]
+  });
+  const historicoLeve = [porId, idSemelhante, legadoExato, legadoSemelhante];
+
+  const filtroId = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve,
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS,
+    filtros: { destinoId: "dest_1", destinoNome: "Canal Norte" }
+  });
+  assert.deepStrictEqual(filtroId.itens.map(item => item.id), ["destino_id_exato"], "destinoId usa igualdade exata");
+
+  const filtroLegado = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve,
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS,
+    filtros: { destinoId: "dest_removido", destinoNome: "Canal Histórico" }
+  });
+  assert.deepStrictEqual(filtroLegado.itens.map(item => item.id), ["destino_legado_exato"], "registro legado sem ID usa nome historico exato");
+
+  const semSubstring = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_marcos",
+    historicoLeve,
+    agoraMs: AGORA,
+    visao: VISAO_PROCESSADAS,
+    filtros: { destino: "Canal Histórico" }
+  });
+  assert.deepStrictEqual(semSubstring.itens.map(item => item.id), ["destino_legado_exato"], "nome semelhante nao casa por substring");
 }
 
 {
@@ -364,7 +476,7 @@ function registroTerminal(id, statusPublico, extra = {}) {
   assert.strictEqual(model.metricas.processadas, 67);
   assert.strictEqual(model.metricas.enviadas, 66);
   assert.strictEqual(model.metricas.naoEnviadas, 1);
-  assert.strictEqual(model.metricas.comErro, 1);
+  assert.strictEqual(model.metricas.comErro, 0);
   assert.strictEqual(model.metricas.emDistribuicao, 3);
   assert.strictEqual(model.metricas.fechaMatematicamente, true);
 }

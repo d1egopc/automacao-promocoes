@@ -8,6 +8,7 @@ const {
   VISAO_ENVIADAS,
   VISAO_NAO_ENVIADAS,
   VISAO_COM_ERRO,
+  VISAO_NAO_ELEGIVEIS,
   construirReadModelPublicoPorMarcos
 } = require("../modules/fila/fila-read-model-publico");
 
@@ -76,12 +77,13 @@ function rotaGetBloco(fonte, rota) {
 
   assert(rotaFila.includes("consultarReadModelPublicoFila(clienteId, req.query"), "GET /fila usa helper leve");
   assert(fonte.includes("VISAO_COM_ERRO"), "GET /fila reconhece visao publica com_erro");
+  assert(fonte.includes("VISAO_NAO_ELEGIVEIS"), "GET /fila reconhece visao publica sem oportunidade");
   assert(fonte.includes('"fila", "pendente", "pendentes", "processando"') && fonte.includes("return VISAO_FILA"), "estados operacionais devem mapear para a visao Fila");
   assert(fonte.includes('"erro", "erros", "falha", "falhas"') && fonte.includes("return VISAO_COM_ERRO"), "status=erro deve mapear para visao agregada com_erro");
   assert(rotaFila.includes("errosTotal: metricas.comErro"), "GET /fila deve expor alias erros como Erro publico agregado");
   assert(fonte.includes("metricasErrosAliasNaoEnviadas: false"), "Erro nao pode permanecer alias de nao_enviada/parcial");
-  assert(fonte.includes("Math.round((enviadas / processadas) * 1000) / 10"), "Taxa usa Enviadas / Processadas com uma casa decimal");
-  assert(fonte.includes("todos os KPIs usam conclusoes terminais no periodo"), "payload documenta a coorte terminal unica");
+  assert(fonte.includes("(enviadasCompletas + parciais) / elegiveis"), "Taxa usa envios com confirmacao / elegiveis");
+  assert(fonte.includes("todos os resultados sao terminais e mutuamente exclusivos"), "payload documenta a coorte terminal unica");
   assert(rotaFila.includes("garantirReadModelPublicoPronto(clienteId"), "GET /fila respeita freshness/projectionReady");
   assert(!rotaFila.includes("fila: itensResposta"), "GET /fila nao duplica payload com alias fila");
   assert(!rotaFila.includes("fila.filter"), "GET /fila nao monta resposta a partir da fila pesada");
@@ -133,7 +135,7 @@ function rotaGetBloco(fonte, rota) {
   });
   assert.strictEqual(processadasHoje.ok, true);
   assert.strictEqual(processadasHoje.metricas.processadas, 1, "GET /fila processadas hoje usa terminalizacao e exclui trabalho vivo");
-  assert.strictEqual(processadasHoje.metricas.processadas, processadasHoje.metricas.enviadas + processadasHoje.metricas.comErro);
+  assert.strictEqual(processadasHoje.metricas.finalizadas, processadasHoje.metricas.enviadasCompletas + processadasHoje.metricas.parciais + processadasHoje.metricas.naoEnviadas + processadasHoje.metricas.erros + processadasHoje.metricas.naoElegiveis);
   assert.strictEqual(processadasHoje.metricas.emDistribuicao, 1, "GET /fila contabiliza trabalho vivo somente na Fila");
   assert.strictEqual(processadasHoje.limit, 50, "paginacao limit=50 preservada");
   assert.strictEqual(processadasHoje.fila, undefined, "read model puro nao cria alias fila");
@@ -152,6 +154,7 @@ function rotaGetBloco(fonte, rota) {
   });
   assert.strictEqual(processadas7d.metricas.processadas, 2, "GET /fila processadas 7 dias contem todos os terminais do periodo");
   assert.strictEqual(processadas7d.metricas.enviadas, 1);
+  assert.strictEqual(processadas7d.metricas.enviadasCompletas, 1);
   assert.strictEqual(processadas7d.metricas.comErro, 0, "sem destino operacional nao vira erro tecnico");
   assert.strictEqual(processadas7d.metricas.naoEnviadas, 1);
   assert.strictEqual(processadas7d.metricas.emDistribuicao, 2);
@@ -185,6 +188,21 @@ function rotaGetBloco(fonte, rota) {
     agoraMs: AGORA
   });
   assert.strictEqual(naoEnviadas.metricas.naoEnviadas, 1, "GET /fila nao_enviadas");
+
+  const semOportunidade = construirReadModelPublicoPorMarcos({
+    clienteId: "cliente_rotas",
+    hot,
+    historicoLeve: [terminal("sem_oportunidade", "nao_enviado", {
+      destinosEstado: [{ destinoId: "ignorado", destinoNome: "Ignorado", estado: "nao_compativel", aplicavel: false }]
+    })],
+    projectionReady: true,
+    periodo: "7dias",
+    visao: VISAO_NAO_ELEGIVEIS,
+    filtros: { periodo: "7dias" },
+    agoraMs: AGORA
+  });
+  assert.strictEqual(semOportunidade.totalFiltrado, 1);
+  assert.strictEqual(semOportunidade.itens[0].resultadoFinalPublico, "nao_elegivel");
 
   const comErro = construirReadModelPublicoPorMarcos({
     clienteId: "cliente_rotas",

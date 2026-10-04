@@ -28,6 +28,7 @@ const VISAO_ENVIADAS = "enviadas";
 const VISAO_PARCIAIS = "parciais";
 const VISAO_NAO_ENVIADAS = "nao_enviadas";
 const VISAO_COM_ERRO = "com_erro";
+const VISAO_NAO_ELEGIVEIS = "nao_elegiveis";
 const FORMATADOR_DIA_PUBLICO_SP = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
   year: "numeric",
@@ -333,64 +334,42 @@ function registroDentroJanela(ms, opcoes = {}) {
 }
 
 function resultadoPublicoTerminal(item = {}) {
-  const destinos = Array.isArray(item.destinos) && item.destinos.length
-    ? item.destinos
-    : (Array.isArray(item.destinosEstado) ? item.destinosEstado : []);
-  if (destinos.length) {
-    const aplicaveis = destinos.filter(destino => {
-      if (destino?.aplicavel === false) return false;
-      const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
-      return ![
-        "nao compativel",
-        "nao_compativel",
-        "naocompativel",
-        "incompativel",
-        "nao aplicavel",
-        "nao_aplicavel",
-        "naoaplicavel",
-        "bloqueado repeticao 2h",
-        "bloqueado_repeticao_2h"
-      ].includes(estado);
-    });
-    if (aplicaveis.length === 0) return "nao_enviado";
-    if (aplicaveis.length > 0) {
-      const enviados = aplicaveis.filter(destino => {
-        const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
-        return estado === "enviado" || estado === "enviada" || destino?.enviado === true || destino?.ok === true || Boolean(destino?.enviadoEm || destino?.dataEnvio);
-      }).length;
-      const falhas = aplicaveis.filter(destino => {
-        const estado = normalizarTexto(destino?.estado || destino?.status || destino?.resultado || "");
-        return estado.includes("erro") || estado.includes("falha") || estado.includes("bloqueado") || estado === "nao enviado" || estado === "nao_enviado";
-      }).length;
-      if (enviados >= aplicaveis.length) return "enviado";
-      if (enviados > 0 && (falhas > 0 || enviados < aplicaveis.length)) return "parcial";
-      return "nao_enviado";
-    }
-  }
-
-  const statusPublico = normalizarTexto(item.statusPublico);
-  if (statusPublico === "enviado") return "enviado";
-  if (statusPublico === "parcial") return "parcial";
-  if (statusPublico === "nao enviado" || statusPublico === "nao_enviado") return "nao_enviado";
-
+  const destinos = destinosPublicosItem(item);
+  const aplicaveis = destinos.filter(destino => !destinoNaoAplicavelPublico(destino));
   const progresso = item.progresso && typeof item.progresso === "object" ? item.progresso : {};
-  const total = Number(progresso.total || 0);
-  const enviados = Number(progresso.enviados || 0);
-  if (total > 0) {
-    if (enviados >= total) return "enviado";
-    if (enviados > 0) return "parcial";
-    return "nao_enviado";
-  }
+  const totalAplicaveis = destinos.length
+    ? aplicaveis.length
+    : Math.max(0, numeroPublico(progresso.total));
+  const enviados = destinos.length
+    ? aplicaveis.filter(destinoEnviadoPublico).length
+    : Math.min(totalAplicaveis, Math.max(0, numeroPublico(progresso.enviados)));
 
-  const status = normalizarTexto(item.statusOperacional || item.status || item.estado);
-  if (["enviado", "enviada", "historico", "sucesso"].includes(status)) return "enviado";
-  return "nao_enviado";
+  if (totalAplicaveis > 0 && enviados >= totalAplicaveis) return "enviada";
+  if (enviados > 0) return "parcial";
+
+  const motivoPersistido = motivoErroPublicoTerminal(item);
+  if (motivoErroTecnicoPublico(motivoPersistido)) return "erro";
+  if (totalAplicaveis > 0) return "nao_enviada";
+  return "nao_elegivel";
 }
 
 function destinosPublicosItem(item = {}) {
   if (Array.isArray(item.destinos) && item.destinos.length) return item.destinos;
   if (Array.isArray(item.destinosEstado) && item.destinosEstado.length) return item.destinosEstado;
   if (Array.isArray(item.destinosEnviados) && item.destinosEnviados.length) return item.destinosEnviados;
+  const destinoId = primeiroTexto(item.destinoId, item.destino_id, item.chatId, item.grupoId, item.canalId);
+  const destinoNome = primeiroTexto(item.destinoNome, item.destino_nome, item.grupoNome, item.channelName);
+  const canal = primeiroTexto(item.canal, item.tipoCanal, item.plataforma);
+  if (destinoId || destinoNome || canal) {
+    const status = normalizarTexto(item.statusPublico || item.statusOperacional || item.status || item.estado);
+    return [{
+      destinoId,
+      destinoNome,
+      canal,
+      aplicavel: true,
+      enviado: ["enviado", "enviada", "sucesso"].includes(status) || Boolean(item.enviadoEm || item.dataEnvio)
+    }];
+  }
   return [];
 }
 
@@ -491,14 +470,15 @@ function motivoErroPublicoTerminal(item = {}) {
 }
 
 function classificarTerminalPublico(item = {}) {
-  const resultadoPublico = resultadoPublicoTerminal(item);
-  const houveEnvio = resultadoPublico === "enviado" || resultadoPublico === "parcial";
+  const resultadoFinalPublico = resultadoPublicoTerminal(item);
+  const houveEnvio = resultadoFinalPublico === "enviada" || resultadoFinalPublico === "parcial";
+  const motivoErroPublico = houveEnvio ? null : motivoErroPublicoTerminal(item);
   return {
-    resultadoPublico,
+    resultadoFinalPublico,
+    resultadoPublico: resultadoFinalPublico,
     houveEnvio,
-    motivoErroPublico: houveEnvio
-      ? null
-      : (motivoErroPublicoTerminal(item) || "nao_enviado")
+    elegivel: resultadoFinalPublico !== "nao_elegivel",
+    motivoErroPublico
   };
 }
 
@@ -696,11 +676,13 @@ function escolherUrlOriginalConfiavel(item = {}, projetado = {}) {
 
 function statusPublicoHistorico(resultadoPublico = "", tipoVisao = "") {
   if (tipoVisao === VISAO_FILA) return "em_distribuicao";
-  if (tipoVisao === VISAO_COM_ERRO) return "erro";
-  if (resultadoPublico === "enviado") return "enviada";
-  if (normalizarTexto(resultadoPublico) === "parcial") return "enviada";
-  if (["nao_enviado", "nao enviado"].includes(normalizarTexto(resultadoPublico))) return "nao_enviada";
-  return "processada";
+  const resultado = normalizarTexto(resultadoPublico).replace(/\s+/g, "_");
+  if (["enviado", "enviada"].includes(resultado)) return "enviada";
+  if (resultado === "parcial") return "enviada";
+  if (["nao_enviado", "nao_enviada"].includes(resultado)) return "nao_enviada";
+  if (resultado === "erro") return "erro";
+  if (["nao_elegivel", "sem_oportunidade"].includes(resultado)) return "nao_enviada";
+  return "nao_enviada";
 }
 
 function erroPublicoHumano(codigo = "", ofertaId = "") {
@@ -774,7 +756,7 @@ function normalizarItemPublico(origem = {}, dados = {}) {
   const processada = dados.processada || marcoProcessadaItem(item);
   const resultadoMs = Number.isFinite(dados.resultadoMs) ? dados.resultadoMs : timestampResultadoItem(item);
   const timestamp = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
-  const statusResultado = dados.resultadoPublico || "";
+  const statusResultado = dados.resultadoFinalPublico || dados.resultadoPublico || "";
   const statusPublico = statusPublicoHistorico(statusResultado, dados.tipoVisao);
   const destinos = Array.isArray(projetado.destinos) ? projetado.destinos : [];
   const progresso = projetado.progresso && typeof projetado.progresso === "object" ? projetado.progresso : {};
@@ -822,6 +804,7 @@ function normalizarItemPublico(origem = {}, dados = {}) {
     },
     resultadoResumo,
     statusPublico,
+    resultadoFinalPublico: dados.tipoVisao === VISAO_FILA ? null : statusResultado,
     resultadoPublico: statusPublico,
     statusVisual: statusPublico,
     statusFinalVisual: statusPublico,
@@ -846,9 +829,11 @@ function normalizarItemPublico(origem = {}, dados = {}) {
   };
 }
 
-function visaoTerminalPublica(resultadoPublico = "") {
-  if (resultadoPublico === "enviado") return VISAO_ENVIADAS;
-  if (resultadoPublico === "parcial") return VISAO_PARCIAIS;
+function visaoTerminalPublica(resultadoFinalPublico = "") {
+  if (resultadoFinalPublico === "enviada") return VISAO_ENVIADAS;
+  if (resultadoFinalPublico === "parcial") return VISAO_PARCIAIS;
+  if (resultadoFinalPublico === "erro") return VISAO_COM_ERRO;
+  if (resultadoFinalPublico === "nao_elegivel") return VISAO_NAO_ELEGIVEIS;
   return VISAO_NAO_ENVIADAS;
 }
 
@@ -877,16 +862,29 @@ function removerPorIdentidades(projecaoAtual = {}, identidades = new Set(), clie
 function registroCombinaFiltros(registro = {}, filtros = {}) {
   const marketplace = normalizarTexto(filtros.marketplace);
   const canal = normalizarTexto(filtros.canal);
-  const destino = normalizarTexto(filtros.destino);
+  const destinoId = normalizarTexto(filtros.destinoId);
+  const destinoNome = normalizarTexto(filtros.destinoNome);
+  const destinoLegado = normalizarTexto(filtros.destino);
   const q = normalizarTexto(filtros.q || filtros.busca);
   if (marketplace && !normalizarTexto(registro.marketplace).includes(marketplace)) return false;
   if (canal && !normalizarTexto(registro.canal).includes(canal)) return false;
-  if (destino) {
-    const alvoDestino = normalizarTexto([
-      registro.destinoResumo,
-      ...(Array.isArray(registro.destinos) ? registro.destinos.map(d => `${d.destinoNome || ""} ${d.destinoId || ""} ${d.canal || ""}`) : [])
-    ].join(" "));
-    if (!alvoDestino.includes(destino)) return false;
+  if (destinoId || destinoNome || destinoLegado) {
+    const destinos = Array.isArray(registro.destinos) ? registro.destinos : [];
+    const ids = destinos.map(destino => normalizarTexto(destino?.destinoId)).filter(Boolean);
+    const nomes = [
+      ...destinos.map(destino => normalizarTexto(destino?.destinoNome)).filter(Boolean),
+      normalizarTexto(registro.destinoResumo)
+    ].filter(Boolean);
+    if (destinoId) {
+      if (ids.length > 0) {
+        if (!ids.includes(destinoId)) return false;
+      } else if (!destinoNome || !nomes.includes(destinoNome)) {
+        return false;
+      }
+    } else {
+      const nomeEsperado = destinoNome || destinoLegado;
+      if (!nomes.includes(nomeEsperado)) return false;
+    }
   }
   if (q) {
     const alvo = normalizarTexto([
@@ -934,6 +932,12 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       projectionReady: false,
       visao: texto(params.visao || params.filtros?.visao || VISAO_PROCESSADAS) || VISAO_PROCESSADAS,
       metricas: {
+        finalizadas: 0,
+        elegiveis: 0,
+        enviadasCompletas: 0,
+        erros: 0,
+        naoElegiveis: 0,
+        taxaEnvio: 0,
         processadas: 0,
         enviadas: 0,
         parciais: 0,
@@ -948,7 +952,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
         enviadas: [],
         parciais: [],
         naoEnviadas: [],
-        comErro: []
+        comErro: [],
+        naoElegiveis: []
       },
       pagina: paginar([], params),
       itens: [],
@@ -969,6 +974,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
   const filtrosAtivos = Boolean(
     normalizarTexto(filtros.marketplace) ||
     normalizarTexto(filtros.canal) ||
+    normalizarTexto(filtros.destinoId) ||
+    normalizarTexto(filtros.destinoNome) ||
     normalizarTexto(filtros.destino) ||
     normalizarTexto(filtros.q || filtros.busca)
   );
@@ -978,9 +985,11 @@ function construirReadModelPublicoPorMarcos(params = {}) {
   const filaIds = new Set();
   const processadasIds = new Set();
   const enviadasIds = new Set();
+  const enviadasCompletasIds = new Set();
   const parciaisIds = new Set();
   const naoEnviadasIds = new Set();
   const comErroIds = new Set();
+  const naoElegiveisIds = new Set();
   const terminaisIdentidades = new Set();
   const terminaisResultadoPorIdentidade = new Map();
   const terminalTimestampPorIdentidade = new Map();
@@ -1011,9 +1020,11 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     if (Number.isFinite(timestampAnterior)) {
       processadasIds.delete(identidade);
       enviadasIds.delete(identidade);
+      enviadasCompletasIds.delete(identidade);
       parciaisIds.delete(identidade);
       naoEnviadasIds.delete(identidade);
       comErroIds.delete(identidade);
+      naoElegiveisIds.delete(identidade);
       listaSolicitada.delete(identidade);
     }
     terminalTimestampPorIdentidade.set(identidade, resultadoMs);
@@ -1022,8 +1033,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       statusPublico: registro.statusPublico || item.statusPublico,
       statusOperacional: registro.statusOperacional || item.statusOperacional || registro.status
     };
-    const { resultadoPublico, houveEnvio, motivoErroPublico } = classificarTerminalPublico(itemTerminal);
-    terminaisResultadoPorIdentidade.set(identidade, resultadoPublico);
+    const { resultadoFinalPublico, motivoErroPublico } = classificarTerminalPublico(itemTerminal);
+    terminaisResultadoPorIdentidade.set(identidade, resultadoFinalPublico);
     const precisaProjetar = filtrosAtivos || !somenteMetricas;
     const projetado = precisaProjetar
       ? projetarItemFilaLeve(item, {
@@ -1041,7 +1052,7 @@ function construirReadModelPublicoPorMarcos(params = {}) {
           processada,
           resultadoMs,
           tipoVisao: VISAO_PROCESSADAS,
-          resultadoPublico,
+          resultadoFinalPublico,
           motivoErroPublico,
           identidade
         })
@@ -1050,36 +1061,20 @@ function construirReadModelPublicoPorMarcos(params = {}) {
       processadasIds.add(identidade);
       if (terminalPublico) registrarListaSeSolicitada(VISAO_PROCESSADAS, terminalPublico);
 
-      if (houveEnvio) {
+      if (resultadoFinalPublico === "enviada") {
         enviadasIds.add(identidade);
-        if (resultadoPublico === "parcial") parciaisIds.add(identidade);
-        if (terminalPublico) registrarListaSeSolicitada(visaoTerminalPublica(resultadoPublico), terminalPublico);
+        enviadasCompletasIds.add(identidade);
+      } else if (resultadoFinalPublico === "parcial") {
+        enviadasIds.add(identidade);
+        parciaisIds.add(identidade);
+      } else if (resultadoFinalPublico === "erro") {
+        comErroIds.add(identidade);
+      } else if (resultadoFinalPublico === "nao_elegivel") {
+        naoElegiveisIds.add(identidade);
       } else {
         naoEnviadasIds.add(identidade);
-        if (motivoErroTecnicoPublico(motivoErroPublico)) comErroIds.add(identidade);
-        if (terminalPublico) registrarListaSeSolicitada(VISAO_NAO_ENVIADAS, terminalPublico);
       }
-
-      if (terminalPublico && resultadoPublico === "parcial") {
-        registrarListaSeSolicitada(VISAO_ENVIADAS, {
-          ...terminalPublico,
-          tipoVisao: VISAO_ENVIADAS,
-          statusPublico: "enviada",
-          resultadoPublico: "enviada",
-          statusVisual: "enviada",
-          statusFinalVisual: "enviada"
-        });
-      }
-      if (terminalPublico && !houveEnvio && motivoErroTecnicoPublico(motivoErroPublico)) registrarListaSeSolicitada(VISAO_COM_ERRO, {
-        ...terminalPublico,
-        tipoVisao: VISAO_COM_ERRO,
-        statusPublico: "erro",
-        resultadoPublico: "erro",
-        statusVisual: "erro",
-        statusFinalVisual: "erro",
-        motivoErroPublico,
-        erroPublico: erroPublicoHumano(motivoErroPublico, terminalPublico.id)
-      });
+      if (terminalPublico) registrarListaSeSolicitada(visaoTerminalPublica(resultadoFinalPublico), terminalPublico);
     }
   }
 
@@ -1123,6 +1118,11 @@ function construirReadModelPublicoPorMarcos(params = {}) {
   }
 
   const metricas = {
+    finalizadas: processadasIds.size,
+    elegiveis: enviadasCompletasIds.size + parciaisIds.size + naoEnviadasIds.size + comErroIds.size,
+    enviadasCompletas: enviadasCompletasIds.size,
+    erros: comErroIds.size,
+    naoElegiveis: naoElegiveisIds.size,
     processadas: processadasIds.size,
     enviadas: enviadasIds.size,
     parciais: parciaisIds.size,
@@ -1130,19 +1130,26 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     comErro: comErroIds.size,
     emDistribuicao: filaIds.size
   };
-  metricas.fechaMatematicamente = metricas.processadas === metricas.enviadas + metricas.naoEnviadas && metricas.enviadas >= metricas.parciais;
+  metricas.taxaEnvio = metricas.elegiveis > 0
+    ? Math.round(((metricas.enviadasCompletas + metricas.parciais) / metricas.elegiveis) * 1000) / 10
+    : 0;
+  metricas.fechaMatematicamente = metricas.finalizadas === (
+    metricas.enviadasCompletas + metricas.parciais + metricas.naoEnviadas + metricas.erros + metricas.naoElegiveis
+  );
 
   const listaBase = [...listaSolicitada.values()].sort(ordenarRegistrosPublicos);
   const totalVisao = visao === VISAO_FILA
     ? metricas.emDistribuicao
     : visao === VISAO_ENVIADAS
-    ? metricas.enviadas
+    ? metricas.enviadasCompletas
     : visao === VISAO_PARCIAIS
       ? metricas.parciais
       : visao === VISAO_NAO_ENVIADAS
         ? metricas.naoEnviadas
         : visao === VISAO_COM_ERRO
           ? metricas.comErro
+          : visao === VISAO_NAO_ELEGIVEIS
+            ? metricas.naoElegiveis
           : metricas.processadas;
   const pagina = paginar(listaBase, { ...params, totalFiltradoOverride: totalVisao });
   const listas = {
@@ -1151,7 +1158,8 @@ function construirReadModelPublicoPorMarcos(params = {}) {
     enviadas: visao === VISAO_ENVIADAS ? listaBase : [],
     parciais: visao === VISAO_PARCIAIS ? listaBase : [],
     naoEnviadas: visao === VISAO_NAO_ENVIADAS ? listaBase : [],
-    comErro: visao === VISAO_COM_ERRO ? listaBase : []
+    comErro: visao === VISAO_COM_ERRO ? listaBase : [],
+    naoElegiveis: visao === VISAO_NAO_ELEGIVEIS ? listaBase : []
   };
   const duracaoMs = Math.round(Number(process.hrtime.bigint() - inicio) / 1e6);
   return {
@@ -1460,10 +1468,10 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
     statusPublico: itemLeve.statusPublico || item.statusPublico,
     statusOperacional: itemLeve.statusOperacional || item.statusOperacional
   });
-  const { resultadoPublico, motivoErroPublico } = classificacaoTerminal;
+  const { resultadoFinalPublico, motivoErroPublico } = classificacaoTerminal;
   const statusPublico = Number.isFinite(resultadoMs) || itemEhTerminal(item)
-    ? statusPublicoHistorico(resultadoPublico, visaoTerminalPublica(resultadoPublico))
-    : "processada";
+    ? statusPublicoHistorico(resultadoFinalPublico, visaoTerminalPublica(resultadoFinalPublico))
+    : "em_distribuicao";
   const timestamp = Number.isFinite(resultadoMs) ? resultadoMs : processada.ms;
   const ref = normalizarDetalheRef(detalheRef.id ? detalheRef : (itemLeve.detalheRef || itemTecnico.detalheRef || detalheRef));
   const urlOriginal = escolherUrlOriginalConfiavel(item, projetado);
@@ -1517,6 +1525,7 @@ function montarDetalhePublicoFila({ clienteId = "admin", registroLeve = null, re
     },
     resultadoResumo,
     statusPublico,
+    resultadoFinalPublico: Number.isFinite(resultadoMs) || itemEhTerminal(item) ? resultadoFinalPublico : null,
     resultadoPublico: statusPublico,
     statusVisual: statusPublico,
     statusFinalVisual: statusPublico,
@@ -1709,6 +1718,7 @@ module.exports = {
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
   VISAO_COM_ERRO,
+  VISAO_NAO_ELEGIVEIS,
   marcoProcessadaItem,
   identidadesRegistro,
   identidadePrincipal,

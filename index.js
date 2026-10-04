@@ -369,6 +369,7 @@ const {
   VISAO_PARCIAIS,
   VISAO_NAO_ENVIADAS,
   VISAO_COM_ERRO,
+  VISAO_NAO_ELEGIVEIS,
   construirReadModelPublicoPorMarcos,
   lerHistoricoLeveJsonlPorJanela,
   resolverDetalhePublicoFilaPorRef
@@ -12750,6 +12751,7 @@ function normalizarVisaoPublicaFila(query = {}) {
   if (["enviada", "enviadas", "enviado", "enviados", "sucesso"].includes(chave)) return VISAO_ENVIADAS;
   if (["parcial", "parciais"].includes(chave)) return VISAO_PARCIAIS;
   if (["com_erro", "com_erros", "comerro", "comerros", "erro", "erros", "falha", "falhas", "atencao", "com_atencao"].includes(chave)) return VISAO_COM_ERRO;
+  if (["nao_elegivel", "nao_elegiveis", "sem_oportunidade", "sem_oportunidades"].includes(chave)) return VISAO_NAO_ELEGIVEIS;
   if (["nao_enviada", "nao_enviadas", "nao_enviado", "nao_enviados", "expirada", "expiradas", "expirado", "expirados"].includes(chave)) {
     return VISAO_NAO_ENVIADAS;
   }
@@ -12778,6 +12780,8 @@ function filtrosPublicosFila(query = {}) {
     periodo,
     marketplace: textoFiltroFila(query.marketplace),
     canal: textoFiltroFila(query.canal),
+    destinoId: String(query.destinoId || query.destino_id || "").trim(),
+    destinoNome: String(query.destinoNome || query.destino_nome || "").trim(),
     destino: textoFiltroFila(query.destino),
     q: String(query.q || query.busca || "").trim(),
     busca: String(query.busca || query.q || "").trim(),
@@ -12786,15 +12790,25 @@ function filtrosPublicosFila(query = {}) {
 }
 
 function metricasPublicasComAliases(metricas = {}) {
-  const processadas = Number(metricas.processadas || 0);
-  const enviadas = Number(metricas.enviadas || 0);
+  const finalizadas = Number(metricas.finalizadas ?? metricas.processadas ?? 0);
+  const enviadasCompletas = Number(metricas.enviadasCompletas ?? 0);
   const parciais = Number(metricas.parciais || 0);
   const naoEnviadas = Number(metricas.naoEnviadas || 0);
-  const comErro = Number(metricas.comErro || 0);
+  const erros = Number(metricas.erros ?? metricas.comErro ?? 0);
+  const naoElegiveis = Number(metricas.naoElegiveis || 0);
+  const elegiveis = Number(metricas.elegiveis ?? (enviadasCompletas + parciais + naoEnviadas + erros));
+  const processadas = finalizadas;
+  const enviadas = Number(metricas.enviadas ?? (enviadasCompletas + parciais));
+  const comErro = erros;
   const emDistribuicao = Number(metricas.emDistribuicao || 0);
-  const taxaEnvio = processadas > 0 ? Math.round((enviadas / processadas) * 1000) / 10 : 0;
+  const taxaEnvio = elegiveis > 0 ? Math.round(((enviadasCompletas + parciais) / elegiveis) * 1000) / 10 : 0;
   return {
     ...metricas,
+    finalizadas,
+    elegiveis,
+    enviadasCompletas,
+    erros,
+    naoElegiveis,
     processadas,
     enviadas,
     parciais,
@@ -12802,9 +12816,8 @@ function metricasPublicasComAliases(metricas = {}) {
     comErro,
     emDistribuicao,
     taxaEnvio,
-    erros: comErro,
     expiradas: 0,
-    formulaTaxaEnvio: "enviadas / processadas * 100; todos os KPIs usam conclusoes terminais no periodo"
+    formulaTaxaEnvio: "(enviadasCompletas + parciais) / elegiveis * 100; todos os resultados sao terminais e mutuamente exclusivos"
   };
 }
 
