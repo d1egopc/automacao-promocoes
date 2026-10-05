@@ -657,6 +657,21 @@ function criarServicoClonadorGrupos(deps = {}) {
         }));
       }
 
+      if (resultado.inserido && typeof deps.solicitarProcessamentoBridge === "function") {
+        try {
+          deps.solicitarProcessamentoBridge({ motivo: "captura_persistida" });
+        } catch (erroWake) {
+          if (typeof logger.log === "function") {
+            logger.log("[CLONADOR-CAPTURA-WAKE-ERRO]", JSON.stringify({
+              clienteId,
+              sessaoId,
+              mensagemId,
+              motivo: erroWake.message || "wake_clonador_falhou"
+            }));
+          }
+        }
+      }
+
       if (!resultado.inserido) {
         if (typeof repo.registrarRepeticaoCaptura === "function") {
           await repo.registrarRepeticaoCaptura({
