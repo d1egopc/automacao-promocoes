@@ -128,7 +128,7 @@ function req(clienteId) {
   };
 }
 
-function criarAmbiente() {
+function criarAmbiente(overrides = {}) {
   const repo = criarRepoMemoria();
   const recursos = {
     workspace_a: true,
@@ -171,7 +171,8 @@ function criarAmbiente() {
     listarSessoesWorkspace: (clienteId) => sessoes[clienteId] || [],
     listarGruposSessao: (clienteId, sessaoId) => grupos[clienteId]?.[sessaoId] || [],
     extrairLinksMensagem: (texto) => String(texto || "").match(/https?:\/\/[^\s]+/g) || [],
-    logger: { log: (...args) => logs.push(args.join(" ")) }
+    logger: { log: (...args) => logs.push(args.join(" ")) },
+    ...overrides
   });
   return { repo, service, logs };
 }
@@ -258,6 +259,50 @@ async function testarCapturaGuardsBuffer() {
   });
   assert.strictEqual(semRecurso.capturada, false);
   assert.strictEqual(semRecurso.motivo, "recurso_indisponivel");
+}
+
+async function testarWakeSomenteAposPersistenciaNova() {
+  const wakes = [];
+  let repo = null;
+  const ambiente = criarAmbiente({
+    solicitarProcessamentoBridge: (sinal) => {
+      wakes.push({ sinal, buffersPersistidos: repo.estado.buffer.length });
+    }
+  });
+  repo = ambiente.repo;
+  await prepararFonteAtiva(ambiente.service);
+
+  const primeira = await ambiente.service.capturarMensagemWhatsapp({
+    clienteId: "workspace_a",
+    sessaoId: "sessao_a",
+    mensagem: mensagem({ id: "wake_1" })
+  });
+  assert.strictEqual(primeira.capturada, true);
+  assert.deepStrictEqual(wakes, [{
+    sinal: { motivo: "captura_persistida" },
+    buffersPersistidos: 1
+  }], "wake deve ocorrer somente depois do INSERT confirmado");
+
+  const duplicada = await ambiente.service.capturarMensagemWhatsapp({
+    clienteId: "workspace_a",
+    sessaoId: "sessao_a",
+    mensagem: mensagem({ id: "wake_1" })
+  });
+  assert.strictEqual(duplicada.motivo, "duplicada");
+  assert.strictEqual(wakes.length, 1, "captura duplicada nao agenda novo bridge");
+
+  const ambienteComFalha = criarAmbiente({
+    solicitarProcessamentoBridge: () => { throw new Error("wake_teste_falhou"); }
+  });
+  await prepararFonteAtiva(ambienteComFalha.service);
+  const persistidaApesarDoWake = await ambienteComFalha.service.capturarMensagemWhatsapp({
+    clienteId: "workspace_a",
+    sessaoId: "sessao_a",
+    mensagem: mensagem({ id: "wake_erro" })
+  });
+  assert.strictEqual(persistidaApesarDoWake.capturada, true, "falha do sinal nao desfaz captura persistida");
+  assert.strictEqual(ambienteComFalha.repo.estado.buffer.length, 1);
+  assert.ok(ambienteComFalha.logs.some(log => log.includes("[CLONADOR-CAPTURA-WAKE-ERRO]") && log.includes("wake_teste_falhou")));
 }
 
 async function testarOcorrenciasPassivasPreservamRepeticao() {
@@ -650,6 +695,7 @@ async function testarContratoRepeticaoRepository() {
 
 async function main() {
   await testarCapturaGuardsBuffer();
+  await testarWakeSomenteAposPersistenciaNova();
   await testarOcorrenciasPassivasPreservamRepeticao();
   testarExtracaoPosicionalPassiva();
   testarClassificacaoContextualPassiva();

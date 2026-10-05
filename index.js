@@ -74,6 +74,7 @@ const {
 const {
   iniciarOrquestradorEngine,
   iniciarCicloEntradaClonador,
+  solicitarCicloEntradaClonador,
   obterEstadoOrquestradorEngine
 } = require("./modules/engine/orchestrator.runner");
 const { solenoideGlobal } = require("./modules/solenoide/solenoide.service");
@@ -25092,6 +25093,7 @@ const clonadorGruposService = criarServicoClonadorGrupos({
     .map(id => filaStore.resolverPorId(clienteId, id)).filter(Boolean),
   extrairTextoMensagem: extrairTextoMensagemRadar,
   extrairLinksMensagem: extrairLinksRadar,
+  solicitarProcessamentoBridge: solicitarCicloEntradaClonador,
   logger: console
 });
 const clonadorGruposBridge = criarBridgeClonadorGrupos({

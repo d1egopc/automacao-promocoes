@@ -22,6 +22,30 @@ function criarDeferred() {
   return { promise, resolve, reject };
 }
 
+async function aguardar(condicao, mensagem, tentativas = 100) {
+  for (let tentativa = 0; tentativa < tentativas; tentativa += 1) {
+    if (condicao()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.fail(mensagem);
+}
+
+function criarAgendadorImediatoControlado() {
+  const fila = [];
+  return {
+    fila,
+    setImmediateFn(callback) {
+      fila.push(callback);
+      return fila.length;
+    },
+    executarProximo() {
+      const callback = fila.shift();
+      assert.strictEqual(typeof callback, "function", "deve existir wake agendado");
+      callback();
+    }
+  };
+}
+
 function depsEngineBase(overrides = {}) {
   const noop = async () => ({ ok: true });
   return {
@@ -219,6 +243,139 @@ async function testarExcecaoLiberaLockViaFinally() {
   assert.strictEqual(clonadorChamadas, 2, "finally deve liberar lock para a rodada seguinte");
 }
 
+async function testarWakeCoalesceBurstAntesDaExecucao() {
+  const runner = carregarRunnerLimpo();
+  const agendador = criarAgendadorImediatoControlado();
+  let callbackPoll = null;
+  let chamadas = 0;
+
+  runner.iniciarCicloEntradaClonador({
+    intervaloMs: 120000,
+    processarEntradasClonador: async () => {
+      chamadas += 1;
+      return { processadas: 0 };
+    },
+    setImmediateFn: agendador.setImmediateFn,
+    setIntervalFn: (callback) => {
+      callbackPoll = callback;
+      return { unref() {} };
+    }
+  });
+
+  const primeira = runner.solicitarCicloEntradaClonador();
+  const segunda = runner.solicitarCicloEntradaClonador();
+  const terceira = runner.solicitarCicloEntradaClonador();
+  assert.strictEqual(primeira.agendado, true);
+  assert.strictEqual(segunda.coalescido, true);
+  assert.strictEqual(terceira.coalescido, true);
+  assert.strictEqual(agendador.fila.length, 1, "burst deve gerar somente um callback imediato");
+
+  agendador.executarProximo();
+  await aguardar(() => chamadas === 1, "wake coalescido deve executar bridge uma vez");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(agendador.fila.length, 0);
+
+  callbackPoll();
+  await aguardar(() => chamadas === 2, "poll de 120s deve permanecer como fallback");
+}
+
+async function testarWakeDuranteRodadaGeraUmRerun() {
+  const runner = carregarRunnerLimpo();
+  const agendador = criarAgendadorImediatoControlado();
+  const liberarPrimeira = criarDeferred();
+  let primeiraEntrou = false;
+  let chamadas = 0;
+
+  runner.iniciarCicloEntradaClonador({
+    processarEntradasClonador: async () => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        primeiraEntrou = true;
+        await liberarPrimeira.promise;
+        return { processadas: 1 };
+      }
+      return { processadas: 0 };
+    },
+    setImmediateFn: agendador.setImmediateFn,
+    setIntervalFn: () => ({ unref() {} })
+  });
+
+  runner.solicitarCicloEntradaClonador();
+  agendador.executarProximo();
+  await aguardar(() => primeiraEntrou, "primeira rodada wake deve iniciar");
+
+  const duranteA = runner.solicitarCicloEntradaClonador({ motivo: "burst_a" });
+  const duranteB = runner.solicitarCicloEntradaClonador({ motivo: "burst_b" });
+  assert.strictEqual(duranteA.rerunPendente, true);
+  assert.strictEqual(duranteB.rerunPendente, true);
+  assert.strictEqual(agendador.fila.length, 0, "rodada ocupada registra estado, nao dispara overlap");
+
+  liberarPrimeira.resolve();
+  await aguardar(() => agendador.fila.length === 1, "encerramento deve publicar exatamente um rerun");
+  agendador.executarProximo();
+  await aguardar(() => chamadas === 2, "rerun pendente deve executar");
+  assert.strictEqual(agendador.fila.length, 0, "rerun vazio encerra drenagem");
+}
+
+async function testarBurstMultiworkspaceDrenaSemDuplicar() {
+  const runner = carregarRunnerLimpo();
+  const agendador = criarAgendadorImediatoControlado();
+  const pendentes = Array.from({ length: 12 }, (_, indice) => ({
+    id: `oferta_${indice + 1}`,
+    workspace: indice % 2 === 0 ? "workspace_a" : "workspace_b"
+  }));
+  const processados = [];
+  let rodadas = 0;
+
+  runner.iniciarCicloEntradaClonador({
+    processarEntradasClonador: async () => {
+      rodadas += 1;
+      const lote = pendentes.splice(0, 5);
+      processados.push(...lote);
+      return { processadas: lote.length };
+    },
+    setImmediateFn: agendador.setImmediateFn,
+    setIntervalFn: () => ({ unref() {} })
+  });
+
+  for (let i = 0; i < 12; i += 1) runner.solicitarCicloEntradaClonador({ motivo: "burst_multiworkspace" });
+  while (processados.length < 12 || agendador.fila.length > 0) {
+    if (agendador.fila.length) agendador.executarProximo();
+    await new Promise(resolve => setImmediate(resolve));
+  }
+
+  assert.strictEqual(rodadas, 4, "lotes 5+5+2 devem terminar com uma sondagem vazia");
+  assert.strictEqual(new Set(processados.map(item => item.id)).size, 12, "nenhuma oferta pode duplicar");
+  assert.deepStrictEqual(new Set(processados.map(item => item.workspace)), new Set(["workspace_a", "workspace_b"]));
+}
+
+async function testarExcecaoNoWakeMantemFallbackDisponivel() {
+  const runner = carregarRunnerLimpo();
+  const agendador = criarAgendadorImediatoControlado();
+  let callbackPoll = null;
+  let chamadas = 0;
+
+  runner.iniciarCicloEntradaClonador({
+    processarEntradasClonador: async () => {
+      chamadas += 1;
+      if (chamadas === 1) throw new Error("falha_fast_path");
+      return { processadas: 0 };
+    },
+    setImmediateFn: agendador.setImmediateFn,
+    setIntervalFn: callback => {
+      callbackPoll = callback;
+      return { unref() {} };
+    }
+  });
+
+  runner.solicitarCicloEntradaClonador();
+  agendador.executarProximo();
+  await aguardar(() => chamadas === 1, "wake com excecao deve concluir sem prender lock");
+  await new Promise(resolve => setImmediate(resolve));
+  callbackPoll();
+  await aguardar(() => chamadas === 2, "poll deve recuperar depois da excecao do fast path");
+}
+
 function testarSemDuplaExecucaoNoBootstrap() {
   const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
   assert.ok(indexFonte.includes("iniciarCicloEntradaClonador({"), "bootstrap deve iniciar ciclo proprio do Clonador");
@@ -232,6 +389,10 @@ async function main() {
   await testarTimerDoClonadorNaoDependeDaRodadaPesada();
   await testarLockProprioImpedeOverlap();
   await testarExcecaoLiberaLockViaFinally();
+  await testarWakeCoalesceBurstAntesDaExecucao();
+  await testarWakeDuranteRodadaGeraUmRerun();
+  await testarBurstMultiworkspaceDrenaSemDuplicar();
+  await testarExcecaoNoWakeMantemFallbackDisponivel();
   testarSemDuplaExecucaoNoBootstrap();
   console.log("clonador-grupos-entrada-runner.test.js OK");
 }
