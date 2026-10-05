@@ -10297,6 +10297,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
   let oferta = null;
   let colecaoPosEnvioProcessamento = fila;
   let filaAlterada = false;
+  let fonteClienteHotStateSelecao = null;
   const marcarFilaAlterada = () => {
     filaAlterada = true;
   };
@@ -10427,7 +10428,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     }
     resumoFila.fase = "sanear_fila";
     await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila));
-    const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
+    fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
     colecaoPosEnvioProcessamento = (
       fonteClienteHotStateSelecao?.conclusiva === true &&
       Array.isArray(fonteClienteHotStateSelecao.itens)
