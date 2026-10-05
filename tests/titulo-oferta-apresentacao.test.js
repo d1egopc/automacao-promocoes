@@ -273,8 +273,8 @@ const logsC3Padrao = capturarLogs(() => renderizar({
   categoria: "Eletrodomésticos"
 }, { tituloOferta: "ia" }, { tituloIa: true })).logs;
 const obsC3Padrao = extrairLog(logsC3Padrao, TAG_TITULO);
-assert.strictEqual(obsC3Padrao.fonteTitulo, "copy_c3", "Copy ON com tituloIa usa C3 como motor padrao");
-assert.ok(obsC3Padrao.fraseIdC3, "C3 registra fraseId quando vence");
+assert.strictEqual(obsC3Padrao.fonteTitulo, "local_v2", "Copy ON usa Local V2 para categoria/preco generico");
+assert.ok(obsC3Padrao.fraseIdLocalV2, "Local V2 registra fraseId quando vence");
 
 const renderNotebook = renderizarComObsSemantica({
   id: "semantica_notebook",

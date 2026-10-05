@@ -14,8 +14,9 @@ const {
 
 const TTL_COPY_LOCAL_V2_MS = 45 * 60 * 1000;
 const MAX_CACHE_COPY_LOCAL_V2 = 1000;
-const LIMITE_HISTORICO_COPY_LOCAL_V2 = 20;
+const LIMITE_HISTORICO_COPY_LOCAL_V2 = 24;
 const FONTE_COPY_LOCAL_V2 = "banco_associativo_local_v2";
+const PADRAO_COPY_LOCAL_V2_INELEGIVEL = /\b(?:pare|pense|calma|avalie|avaliar|compare antes|comparar com calma|antes de decidir|ponta do lapis|sem pressa|radar|contexto|analise|comparacao|valor efetivo|conta final|calculadora|simulacao|algoritmo|motor|classificacao|ganhou possibilidade|aba imaginaria|entrou sem pedir licenca|prateleira.*abra espaco|curiosidade bem vestida|possibilidade nova|combina com sala mais completa|bancada digital|ambiente ganhou)\b/i;
 const INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2 = Object.freeze([
   "cupom",
   "resgate",
@@ -27,6 +28,16 @@ const INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2 = Object.freeze([
 
 const cacheLocalV2 = new Map();
 const historicoLocalV2 = new Map();
+const historicoMetaLocalV2 = new Map();
+const EMOJIS_FAMILIA_COPY_LOCAL_V2 = Object.freeze({
+  mercado: ["🛒", "👀"], bebidas: ["🥤", "👀"], audio_tv: ["📺", "🎧"],
+  celulares: ["📱", "👀"], computadores: ["💻", "👀"], casa: ["🏠", "✨"],
+  casa_eletro: ["🏠", "✨"], cozinha_pratica: ["🍳", "✨"], ferramentas: ["🛠️", "😂"],
+  limpeza: ["🧹", "✨"], eletronicos: ["🔌", "👀"], perifericos: ["🎧", "🎮"],
+  moda: ["😎", "🤩"], calcados: ["👟", "🤩"], gamer: ["🎮", "👀"],
+  beleza: ["😍", "✨"], esporte: ["💪", "👀"], pesca_camping: ["🎣", "👀"],
+  oportunidade: ["👀", "✨"]
+});
 const ALIASES_CATEGORIA_OFICIAL_COPY_LOCAL_V2 = {
   "alimentos": "Alimentos e Mercearia",
   "mercado": "Alimentos e Mercearia",
@@ -137,6 +148,220 @@ function salvarCacheCopyLocalV2(chave = "", valor = {}, ttlMs = TTL_COPY_LOCAL_V
 function limparCacheCopyLocalV2() {
   cacheLocalV2.clear();
   historicoLocalV2.clear();
+  historicoMetaLocalV2.clear();
+}
+
+function formatarPrecoContextualCopyLocalV2(valor) {
+  if (valor === null || valor === undefined || valor === "") return "";
+  const bruto = typeof valor === "number"
+    ? valor
+    : Number(String(valor).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(?:\D|$))/g, "").replace(",", "."));
+  if (!Number.isFinite(bruto) || bruto <= 0) return "";
+  return bruto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+const ACENTOS_APRESENTACAO_COPY_LOCAL_V2 = Object.freeze({
+  nao: "não", voce: "você", voces: "vocês", ja: "já", so: "só", tambem: "também",
+  atencao: "atenção", opcao: "opção", opcoes: "opções", calcado: "calçado", calcados: "calçados",
+  pratica: "prática", praticas: "práticas", pratico: "prático", praticos: "práticos",
+  proxima: "próxima", proximas: "próximas", proximo: "próximo", proximos: "próximos",
+  combinacao: "combinação", combinacoes: "combinações", cabeca: "cabeça", licenca: "licença",
+  espaco: "espaço", espacos: "espaços", organizacao: "organização", transformacao: "transformação",
+  especificacao: "especificação", especificacoes: "especificações", comparacao: "comparação",
+  comparacoes: "comparações", tecnico: "técnico", tecnicos: "técnicos", tecnica: "técnica",
+  tecnicas: "técnicas", possivel: "possível", facil: "fácil", dificil: "difícil", serie: "série",
+  musica: "música", audio: "áudio", saida: "saída", pes: "pés", mao: "mão", maos: "mãos",
+  proprias: "próprias", armario: "armário", refeicao: "refeição", fogao: "fogão", almoco: "almoço",
+  rapida: "rápida", rapidas: "rápidas", rapido: "rápido", rapidos: "rápidos", ai: "aí", ne: "né",
+  promocao: "promoção", promocoes: "promoções", eletronico: "eletrônico", eletronicos: "eletrônicos",
+  acessorio: "acessório", acessorios: "acessórios", otima: "ótima", otimo: "ótimo", ate: "até"
+});
+const PADRAO_ACENTOS_APRESENTACAO_COPY_LOCAL_V2 = new RegExp(`\\b(${Object.keys(ACENTOS_APRESENTACAO_COPY_LOCAL_V2).join("|")})\\b`, "gi");
+
+function acentuarApresentacaoCopyLocalV2(valor = "") {
+  return texto(valor).replace(PADRAO_ACENTOS_APRESENTACAO_COPY_LOCAL_V2, encontrado => {
+    const acentuado = ACENTOS_APRESENTACAO_COPY_LOCAL_V2[encontrado.toLowerCase()] || encontrado;
+    return encontrado[0] === encontrado[0].toUpperCase()
+      ? acentuado.charAt(0).toUpperCase() + acentuado.slice(1)
+      : acentuado;
+  });
+}
+
+function extrairAtributosTituloCopyLocalV2(titulo = "") {
+  const original = texto(titulo);
+  if (!original) return [];
+  const encontrados = [];
+  const vistos = new Set();
+  const adicionar = (tipo, valor) => {
+    const item = texto(valor).replace(/\s+/g, " ");
+    const chave = normalizar(item).replace(/\s+/g, "");
+    if (!item || vistos.has(chave)) return;
+    vistos.add(chave);
+    encontrados.push({ tipo, texto: item });
+  };
+
+  const unidades = /\b\d+(?:[.,]\d+)?\s*(?:kg|g|mg|ml|l|w|kw|tb|gb|mb|cm|mm|metros?|unidades?|unid\.?|pcs?)\b/gi;
+  for (const match of original.matchAll(unidades)) adicionar("atributo", match[0]);
+  const polegadas = /\b\d+(?:[.,]\d+)?\s*(?:polegadas?|["”])/gi;
+  for (const match of original.matchAll(polegadas)) adicionar("atributo", match[0]);
+
+  const modelos = /\b[A-Z]{1,8}(?:[- ]?[A-Z]{0,4}\d{2,6}[A-Z0-9-]*)\b/g;
+  for (const match of original.matchAll(modelos)) {
+    if (/^(?:kg|g|mg|ml|l|w|kw|tb|gb|mb|cm|mm|unid|pcs?)[- ]?\d/i.test(match[0])) continue;
+    if (!vistos.has(normalizar(match[0]).replace(/\s+/g, ""))) adicionar("modelo", match[0]);
+  }
+  return encontrados.slice(0, 3);
+}
+
+function emojiContextualCopyLocalV2(familia = "", assinatura = "", titulo = "") {
+  const contexto = normalizar(titulo);
+  const opcoes = familia === "audio_tv" && /\b(?:caixa de som|audio|som|fone|headset)\b/.test(contexto)
+    ? ["🎧", "👀"]
+    : familia === "audio_tv" && /\b(?:smart tv|televisao|tv)\b/.test(contexto)
+      ? ["📺", "👀"]
+      : EMOJIS_FAMILIA_COPY_LOCAL_V2[familia] || EMOJIS_FAMILIA_COPY_LOCAL_V2.oportunidade;
+  const indice = parseInt(hashLocalV2(`${familia}:${assinatura}`).slice(0, 8), 16) % opcoes.length;
+  return opcoes[indice] || "👀";
+}
+
+function rotuloFamiliaCopyLocalV2(familia = "") {
+  return ({
+    mercado: "Esse item", bebidas: "Essa bebida", audio_tv: "Esse achado",
+    celulares: "Esse celular", computadores: "Esse computador", casa: "Esse item para casa",
+    casa_eletro: "Esse item para casa", cozinha_pratica: "Esse item de cozinha",
+    ferramentas: "Essa ferramenta", limpeza: "Esse item de limpeza", eletronicos: "Esse eletrônico",
+    perifericos: "Esse acessório", moda: "Essa peça", calcados: "Esse calçado",
+    gamer: "Esse item para o setup", beleza: "Esse item de beleza", esporte: "Esse item para o treino",
+    pesca_camping: "Esse item para a próxima aventura"
+  })[familia] || "Essa oferta";
+}
+
+function produtoContextualCopyLocalV2(titulo = "") {
+  const original = texto(titulo);
+  const base = normalizar(original);
+  const marcaNike = /\bnike\b/.test(base) ? " Nike" : "";
+  const modelo = original.match(/\b[A-Z]{1,6}\d{2,6}[A-Z0-9-]*\b/)?.[0] || "";
+  const produtos = [
+    [/\bcaixa de som\b/, "Caixa de som"], [/\bsmart tv\b|\btelevisao\b|\btv\b/, "TV"],
+    [/\brobo aspirador\b|\baspirador\b/, "Aspirador"], [/\bvara de pesca\b|\bvara\b/, "Vara de pesca"],
+    [/\bsmartphone\b|\bcelular\b/, `Smartphone${modelo ? ` ${modelo}` : ""}`],
+    [/\bmonitor\b/, "Monitor"], [/\bnotebook\b/, "Notebook"], [/\bssd\b/, "SSD"],
+    [/\bferramenta\b|\bfuradeira\b/, /\bfuradeira\b/.test(base) ? "Furadeira" : "Ferramenta"],
+    [/\bpanela\b/, "Panela"], [/\bbone\b/, `Boné${marcaNike}`], [/\bblusa\b/, "Blusa"],
+    [/\btenis\b/, `Tênis${marcaNike}`], [/\bperfume\b/, "Perfume"], [/\bcreme\b/, "Creme"],
+    [/\bsuco\b/, "Suco"], [/\bwhey\b/, "Whey"], [/\bcabo\b/, "Cabo"], [/\bbarril\b/, "Barril"]
+  ];
+  for (const [padrao, produto] of produtos) {
+    if (padrao.test(base)) return produto;
+  }
+  return modelo ? `Modelo ${modelo}` : "";
+}
+
+function humorContextualCopyLocalV2({ titulo = "", produto = "", atributo = "", preco = "" } = {}) {
+  const base = normalizar(titulo);
+  const fato = atributo || produto;
+  const precoContextual = preco ? "nesse preço" : "na oferta";
+  if (/\bbone\b/.test(base)) return [`Cabelo não colaborou? ${produto || "O boné"} resolve no estilo 😂`, `${produto || fato} ${precoContextual}? O look já abriu espaço 😂`, `${produto || fato} nesse valor? O cabelo aceitou o plano 😂`, `${produto || fato} na oferta? O espelho já aprovou 😂`];
+  if (/\bcaixa de som\b/.test(base)) return [`${fato} nesse preço? A vizinhança que lute 😂`, `${fato} na oferta? A playlist já aumentou o volume 😂`, `${fato} nesse valor? A resenha ganhou trilha 😂`, `${fato} na oferta? O silêncio perdeu espaço 😂`];
+  if (/\bsmart tv\b|\btv\b/.test(base)) return [`${fato} nesse preço? A sala já ficou interessada 😂`, `${fato} na oferta? A maratona de série agradece 😂`, `${fato} nesse valor? O sofá pediu para conferir 😂`, `${fato} na oferta? A pipoca já ficou pronta 😂`];
+  if (/\bferramenta\b|\bfuradeira\b/.test(base)) return [`${fato} nesse preço? A gambiarra agora vem equipada 😂`, `${fato} na oferta? O projeto parado perdeu a desculpa 😂`, `${fato} nesse valor? O reparo já apareceu 😂`, `${fato} na oferta? A bancada aprovou 😂`];
+  if (/\bsuco\b|\bbebida\b|\bbarril\b/.test(base)) return [`${fato} nesse preço? A geladeira agradece 😂`, `${fato} na oferta? A resenha percebeu 😂`, `${fato} nesse valor? O copo já se apresentou 😂`, `${fato} na oferta? A geladeira abriu espaço 😂`];
+  if (/\brobo aspirador\b|\baspirador\b/.test(base)) return [`${fato} nesse preço? A poeira não gostou dessa oferta 😂`, `${fato} nesse valor? A vassoura sentiu a concorrência 😂`, `${fato} na oferta? A poeira pediu revisão 😂`, `${fato} na oferta? A casa já escalou o reforço 😂`];
+  if (/\bpanela\b/.test(base)) return [`${fato} nesse preço? A cozinha já separou lugar 😂`, `${fato} nesse valor? A receita apareceu sozinha 😂`, `${fato} na oferta? O almoço já fez planos 😂`, `${fato} na oferta? O fogão percebeu 😂`];
+  if (/\bssd\b/.test(base)) return [`${fato} nesse preço? Os arquivos já fizeram fila 😂`, `${fato} na oferta? O armazenamento chamou 😂`, `${fato} nesse valor? A pasta de arquivos comemorou 😂`, `${fato} na oferta? O espaço ficou interessante 😂`];
+  if (/\bcabo\b/.test(base)) return [`${fato} nesse preço? A gaveta de cabos sentiu concorrência 😂`, `${fato} nesse valor? Até o carregador olhou 😂`, `${fato} na oferta? A tomada prestou atenção 😂`, `${fato} na oferta? A gaveta abriu vaga 😂`];
+  if (/\btenis\b/.test(base)) return [`${fato} nesse preço? O carrinho já quis calçar 😂`, `${fato} nesse valor? O look saiu andando 😂`, `${fato} na oferta? O pé pediu para conferir 😂`, `${fato} na oferta? O armário abriu espaço 😂`];
+  if (/\bblusa\b/.test(base)) return [`${fato} nesse preço? O look já se montou sozinho 😂`, `${fato} nesse valor? O guarda-roupa fez contato visual 😂`, `${fato} na oferta? O espelho pediu uma olhada 😂`, `${fato} na oferta? O look mudou os planos 😂`];
+  if (/\bmonitor\b/.test(base)) return [`${fato} nesse preço? O setup já abriu espaço 😂`, `${fato} nesse valor? O setup piscou primeiro 😂`, `${fato} na oferta? O mouse quase clicou sozinho 😂`, `${fato} na oferta? O setup percebeu 😂`];
+  return [];
+}
+
+function construcoesContextuaisCopyLocalV2({ oferta = {}, sinais = {}, familia = "oportunidade", intencao = "oportunidade", subcontexto = "", assinatura = "" } = {}) {
+  const preco = formatarPrecoContextualCopyLocalV2(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+  const atributos = extrairAtributosTituloCopyLocalV2(sinais.tituloOriginal || oferta.titulo || oferta.nome);
+  const atributo = atributos[0]?.texto || "";
+  const emoji = emojiContextualCopyLocalV2(familia, assinatura || sinais.tituloOriginal, sinais.tituloOriginal);
+  const rotulo = rotuloFamiliaCopyLocalV2(familia);
+  const produto = produtoContextualCopyLocalV2(sinais.tituloOriginal || oferta.titulo || oferta.nome);
+  const nome = produto || rotulo;
+  const atributoJaNoNome = Boolean(atributo && normalizar(nome).includes(normalizar(atributo)));
+  const nomeParaAtributo = atributoJaNoNome ? rotulo : nome;
+  const desconto = Number(oferta.descontoPercentual ?? oferta.desconto);
+  let construcoes = [];
+  const diretas = textos => textos.map(fraseTexto => ({ texto: fraseTexto, tom: "direta" }));
+
+  if (intencao === "cupom" && sinais.cupom === true) {
+    construcoes = diretas([
+      `${nome} com cupom? Merece carrinho ${emoji}🎟️`, `Tem cupom em ${nome}? Aí ficou bonito 🎟️`,
+      `${nome} já chamou atenção; com cupom então... 👀`, `Cupom em ${nome}. Vale abrir 🎟️`,
+      `${nome} com cupom no meio? Difícil passar reto ${emoji}`, `Tem cupom nessa oferta. Veja: ${nome} 🎟️`,
+      `Cupom deixou ${nome} com um bom motivo para o clique 🎟️`, `Cupom + ${nome}? Vale conferir 👀`
+    ]);
+  } else if (intencao === "economia" && sinais.desconto === true) {
+    const percentual = Number.isFinite(desconto) && desconto > 0 ? `${Math.round(desconto)}% OFF` : "Tem desconto";
+    construcoes = diretas([
+      `${percentual} em ${nome}? Olha isso ${emoji}`, `${nome} com desconto? Vale o clique 👀`,
+      `${nome} por ${preco}? O desconto chamou atenção ${emoji}`, `${percentual} e preço de ${preco}. Vale conferir 👀`,
+      `Tem desconto em ${nome}. Difícil passar reto ${emoji}`, `${nome} nesse preço? Abre essa oferta 👀`,
+      `${percentual} nessa oferta. ${nome} merece uma olhada`, `${nome} nesse preço chamou atenção ${emoji}`
+    ]);
+  } else if (intencao === "resgate" && sinais.resgate === true) {
+    construcoes = diretas([`Tem resgate em ${nome} 🎟️`, `${nome} com resgate disponível? Vale abrir 🎟️`, `Resgate nessa oferta. Veja: ${nome} 👀`]);
+  } else if (intencao === "beneficio" && sinais.beneficio === true) {
+    construcoes = diretas([`${nome} com benefício extra? Vale olhar ✨`, `Tem benefício nessa oferta de ${nome} 👀`, `Benefício em ${nome}. Abre para conferir ✨`]);
+  } else if (intencao === "frete_gratis" && sinais.freteGratis === true) {
+    construcoes = diretas([`${nome} com frete grátis? Vale conferir 🚚`, `Tem frete grátis em ${nome} 🚚`, `${nome} sem frete no caminho? Merece clique 👀`]);
+  } else if (intencao === "parcelamento" && sinais.parcelamento === true) {
+    construcoes = diretas([`${nome} com parcelamento? Vale conferir 💳`, `Parcelamento disponível em ${nome} 💳`, `${nome} por ${preco} com parcelas disponíveis 👀`]);
+  } else if (atributo && preco) {
+    construcoes = diretas([
+      `${atributo} por esse valor? Olha essa oferta ${emoji}`, `${atributo} nesse preço? Difícil passar reto ${emoji}`,
+      `${nomeParaAtributo} com ${atributo} nesse preço? Vale conferir ${emoji}`, `${nomeParaAtributo}, ${atributo}, por esse valor. Abre a oferta 👀`,
+      `Olha: ${nomeParaAtributo} com ${atributo}, nesse preço ${emoji}`, `${atributo} por esse preço? Merece clique 👀`,
+      `${nomeParaAtributo} nesse valor com ${atributo}? Chamou atenção ${emoji}`, `${atributo} por esse valor? Dá uma olhada ${emoji}`,
+      `${nomeParaAtributo} com ${atributo} nesse preço? Olha isso 👀`, `Com ${atributo} nesse preço, vale conferir ${emoji}`,
+      `${atributo} nesse preço? Essa oferta pediu um clique 👀`, `${atributo} nesse valor? Difícil passar reto ${emoji}`
+    ]);
+    construcoes.push(...humorContextualCopyLocalV2({ titulo: sinais.tituloOriginal, produto: nome, atributo, preco }).map(fraseTexto => ({ texto: fraseTexto, tom: "humor" })));
+  } else if (preco) {
+    construcoes = diretas([
+      `${nome} por esse valor? Difícil passar reto ${emoji}`, `Por esse preço, ${nome} merece uma olhada 👀`,
+      `Olha: ${nome} nesse preço ${emoji}`, `Com esse valor, ${nome} chamou atenção 👀`,
+      `Esse preço combina com ${nome}? Vale o clique ${emoji}`, `Vale abrir: ${nome} por esse valor 👀`,
+      `Nesse preço, ${nome} chamou atenção ${emoji}`, `Dá uma conferida em ${nome} nesse valor 👀`,
+      `Oferta de ${nome} nesse preço? Merece atenção ${emoji}`, `Se estava de olho em ${nome}, vale conferir 👀`
+    ]);
+    construcoes.push(...humorContextualCopyLocalV2({ titulo: sinais.tituloOriginal, produto: nome, preco }).map(fraseTexto => ({ texto: fraseTexto, tom: "humor" })));
+  } else if (atributo) {
+    construcoes = diretas([`${nome} com ${atributo}? Vale conferir ${emoji}`, `${atributo} explícito no ${nome}. Olha isso 👀`, `${nome}, ${atributo}. Merece uma olhada ${emoji}`]);
+  } else if (subcontexto === "cabelo") {
+    construcoes = diretas(["Cuidado para os fios que chamou atenção 😍", "Rotina do cabelo com novidade por aqui ✨"]);
+  } else if (subcontexto === "cozinha") {
+    construcoes = diretas(["Item de cozinha que merece uma olhada 🍳", "Olha essa opção para a rotina da cozinha 🍳"]);
+  } else if (subcontexto === "setup") {
+    construcoes = diretas(["O setup merece ver essa oferta 🎮", "Tem item para o setup chamando por aqui 🎮"]);
+  } else if (subcontexto === "limpeza_pratica") {
+    construcoes = diretas(["Item de limpeza que merece uma olhada 🧹", "Olha essa opção para a rotina de limpeza 🧹"]);
+  } else if (subcontexto === "pesca") {
+    construcoes = diretas(["Item para a próxima pescaria? Vale olhar 🎣", "Quem gosta de pesca vai querer conferir 🎣"]);
+  } else {
+    construcoes = diretas([`${rotulo} chamou atenção por aqui ${emoji}`, `Essa oferta merece uma olhada ${emoji}`, `Vale abrir para conferir os detalhes 👀`]);
+  }
+
+  return construcoes.map((construcao, indice) => ({
+    id: `contextual_${intencao}_${familia}_${indice + 1}`,
+    texto: construcao.texto,
+    familia,
+    intencoes: [intencao],
+    exige: intencao === "cupom" ? ["cupom"] : intencao === "economia" ? ["desconto"] : [],
+    proibe: [],
+    palavrasContexto: subcontexto ? [subcontexto] : [],
+    tom: construcao.tom || "direta",
+    peso: construcao.tom === "humor" ? 44 : 52,
+    ativo: true,
+    contextual: true,
+    atributos
+  }));
 }
 
 function tamanhoCacheCopyLocalV2() {
@@ -269,6 +494,7 @@ function fraseElegivelCopyLocalV2(frase = {}, contexto = {}) {
   const requisitos = Array.isArray(frase.exige) ? frase.exige : [];
   const proibe = Array.isArray(frase.proibe) ? frase.proibe : [];
   if (!familiaOk || !intencaoOk) return false;
+  if (PADRAO_COPY_LOCAL_V2_INELEGIVEL.test(normalizar(frase.texto))) return false;
   if (!fraseContextoCompativel(frase, contexto.subcontexto)) return false;
   if (!requisitos.every(req => requisitoAtendidoLocalV2(req, contexto.sinais))) return false;
   if (!proibe.every(item => proibicaoAtendidaLocalV2(item, contexto.sinais))) return false;
@@ -321,12 +547,22 @@ function estruturaFraseCopyLocalV2(fraseTexto = "") {
   return palavras[0];
 }
 
-function registrarFraseCopyLocalV2(chave = "", fraseTexto = "") {
+function registrarFraseCopyLocalV2(chave = "", fraseEntrada = "") {
   const id = String(chave || "");
-  const valor = texto(fraseTexto);
+  const frase = fraseEntrada && typeof fraseEntrada === "object" ? fraseEntrada : { texto: fraseEntrada };
+  const valor = texto(frase.texto);
   if (!id || !valor) return;
   const lista = [valor, ...ultimasFrasesCopyLocalV2(id).filter(item => item !== valor)].slice(0, LIMITE_HISTORICO_COPY_LOCAL_V2);
   historicoLocalV2.set(id, lista);
+  const emoji = (valor.match(/^[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u) || valor.match(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]$/u) || [""])[0];
+  const meta = {
+    id: texto(frase.id),
+    estrutura: estruturaFraseCopyLocalV2(valor),
+    emoji,
+    texto: valor
+  };
+  const anteriores = historicoMetaLocalV2.get(id) || [];
+  historicoMetaLocalV2.set(id, [meta, ...anteriores.filter(item => item.texto !== valor)].slice(0, LIMITE_HISTORICO_COPY_LOCAL_V2));
 }
 
 function escolherPorPesoLocalV2(frases = [], chaveOferta = "") {
@@ -346,12 +582,14 @@ function escolherFrasePonderadaCopyLocalV2({ frases = [], chaveOferta = "", hist
   if (!candidatas.length) return null;
 
   const historico = ultimasFrasesCopyLocalV2(historicoKey);
+  const historicoMeta = historicoMetaLocalV2.get(String(historicoKey || "")) || [];
   const ultima = historico[0] || "";
   const elegiveis = candidatas.length > 1
     ? candidatas.filter(item => texto(item.texto) !== ultima)
     : candidatas;
   const recentes = new Set(historico);
-  const foraDoHistorico = elegiveis.filter(item => !recentes.has(texto(item.texto)));
+  const idsRecentes = new Set(historicoMeta.map(item => item.id).filter(Boolean));
+  const foraDoHistorico = elegiveis.filter(item => !recentes.has(texto(item.texto)) && !idsRecentes.has(texto(item.id)));
   const estruturasRecentes = new Set(historico.slice(0, 6).map(estruturaFraseCopyLocalV2).filter(Boolean));
   const semEstruturaRecente = foraDoHistorico.filter(item => {
     const estrutura = estruturaFraseCopyLocalV2(item.texto);
@@ -369,7 +607,7 @@ function escolherFrasePonderadaCopyLocalV2({ frases = [], chaveOferta = "", hist
       return String(a.id).localeCompare(String(b.id));
     })[0];
   if (!escolhida) return null;
-  registrarFraseCopyLocalV2(historicoKey, escolhida.texto);
+  registrarFraseCopyLocalV2(historicoKey, escolhida);
   return escolhida;
 }
 
@@ -386,7 +624,7 @@ function chaveCacheCopyLocalV2({ clienteId = "admin", oferta = {}, sinais = {}, 
   const chaveOferta = chaveSinais(clienteId, oferta, sinais);
   if (!chaveOferta) return "";
   return hashLocalV2(JSON.stringify({
-    versao: "copy-local-v2-1",
+    versao: "copy-local-v2-2-contextual",
     clienteId: texto(clienteId) || "admin",
     chaveOferta,
     categoriaOficial,
@@ -426,7 +664,8 @@ function resolverCopyLocalV2({ oferta = {}, destino = {}, clienteId = "admin", p
       categoriaOficial,
       familia,
       intencao: resolucaoIntencao.intencao,
-      subcontexto
+      subcontexto,
+      atributos: extrairAtributosTituloCopyLocalV2(sinais.tituloOriginal)
     };
     const cacheKey = chaveCacheCopyLocalV2({ clienteId, oferta, sinais, categoriaOficial, familia, intencao: contexto.intencao, subcontexto });
 
@@ -435,7 +674,22 @@ function resolverCopyLocalV2({ oferta = {}, destino = {}, clienteId = "admin", p
       if (cached?.tituloIa) return { ...cached, cacheHit: true };
     }
 
-    const frases = filtrarFrasesCopyLocalV2(banco, contexto);
+    const frasesContextuais = construcoesContextuaisCopyLocalV2({
+      oferta,
+      sinais,
+      familia,
+      intencao: contexto.intencao,
+      subcontexto,
+      assinatura: cacheKey || chaveSinais(clienteId, oferta, sinais)
+    }).filter(frase => fraseElegivelCopyLocalV2(frase, contexto));
+    const precoContextual = formatarPrecoContextualCopyLocalV2(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
+    const produtoContextual = produtoContextualCopyLocalV2(sinais.tituloOriginal);
+    const sinalComercialForte = INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2.includes(contexto.intencao);
+    const contextoFactualForte = sinalComercialForte || contexto.atributos.length > 0 || Boolean(precoContextual && produtoContextual);
+    const frasesBanco = filtrarFrasesCopyLocalV2(banco, contexto);
+    const frases = contextoFactualForte && frasesContextuais.length
+      ? frasesContextuais
+      : [...frasesContextuais, ...frasesBanco];
     if (!frases.length) {
       return fallbackLocalV2("frase_segura_indisponivel", contexto);
     }
@@ -450,12 +704,15 @@ function resolverCopyLocalV2({ oferta = {}, destino = {}, clienteId = "admin", p
 
     const resultado = {
       ok: true,
-      tituloIa: frase.texto,
+      tituloIa: acentuarApresentacaoCopyLocalV2(frase.texto),
       intencao: contexto.intencao,
       familia,
       categoriaOficial,
       subcontexto,
+      atributos: contexto.atributos,
       fraseId: frase.id,
+      tom: frase.tom || "",
+      contextual: frase.contextual === true,
       fonte: FONTE_COPY_LOCAL_V2,
       motivo: resolucaoIntencao.motivo,
       cacheHit: false
@@ -502,11 +759,18 @@ module.exports = {
   LIMITE_HISTORICO_COPY_LOCAL_V2,
   INTENCOES_COMERCIAIS_GLOBAIS_COPY_LOCAL_V2,
   FONTE_COPY_LOCAL_V2,
+  PADRAO_COPY_LOCAL_V2_INELEGIVEL,
+  EMOJIS_FAMILIA_COPY_LOCAL_V2,
   hashLocalV2,
   categoriaOficialCopyLocalV2,
   categoriaAliasOficialCopyLocalV2,
   resolverFamiliaOfertaCopyLocalV2,
   resolverSubcontextoCopyLocalV2,
+  extrairAtributosTituloCopyLocalV2,
+  acentuarApresentacaoCopyLocalV2,
+  produtoContextualCopyLocalV2,
+  humorContextualCopyLocalV2,
+  construcoesContextuaisCopyLocalV2,
   resolverIntencaoCopyLocalV2,
   fatosValidatorCopyLocalV2,
   fraseElegivelCopyLocalV2,

@@ -188,7 +188,11 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       motivoFallback: "copy_c3_erro"
     };
   }
-  if (copyC3Resolvida?.ok && tituloApresentacaoValido(copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa)) {
+  const intencoesFortesC3 = new Set(["resgate", "beneficio", "cupom", "desconto_real", "valor_efetivo"]);
+  const copyC3Forte = copyC3Resolvida?.ok &&
+    copyC3Resolvida.confianca === "alta" &&
+    intencoesFortesC3.has(copyC3Resolvida.intencao);
+  if (copyC3Forte && tituloApresentacaoValido(copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa)) {
     const resultado = {
       titulo: copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa,
       modo: "ia",
@@ -245,6 +249,32 @@ function resolverTituloApresentacaoOferta(oferta = {}, destino = {}, opcoes = {}
       oferta,
       destino,
       resultado,
+      copyLocalV2Resolvida,
+      tituloIaPreExistente
+    });
+    return resultado;
+  }
+
+  if (copyC3Resolvida?.ok && tituloApresentacaoValido(copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa)) {
+    const resultado = {
+      titulo: copyC3Resolvida.ganchoComercialC3 || copyC3Resolvida.tituloIa,
+      modo: "ia",
+      usouTituloIa: true,
+      fallbackOriginal: false,
+      intencao: copyC3Resolvida.intencao || "",
+      fraseId: copyC3Resolvida.fraseId || "",
+      familia: copyC3Resolvida.familia || "",
+      categoriaOficial: copyC3Resolvida.categoriaOficial || "",
+      fatoUsado: copyC3Resolvida.fatoUsado || "",
+      confianca: copyC3Resolvida.confianca || "",
+      fonte: copyC3Resolvida.fonte || copyInteligente.FONTE_COPY_C3,
+      cacheHit: false
+    };
+    registrarObservabilidadeTituloOferta({
+      oferta,
+      destino,
+      resultado,
+      copyC3Resolvida,
       copyLocalV2Resolvida,
       tituloIaPreExistente
     });
@@ -647,6 +677,12 @@ function resolverEmojiSemanticoTitulo(oferta = {}, contexto = {}) {
   }
   if (familia === "pesca_camping" && (subcontexto === "pesca" || /\b(?:pesca|vara de pesca|molinete|carretilha)\b/.test(base))) {
     return escolher("🎣", "subcontexto_pesca");
+  }
+  if (familia === "audio_tv" && /\b(?:smart tv|televisao|tv)\b/.test(base)) {
+    return escolher("📺", "subcontexto_tv");
+  }
+  if (familia === "audio_tv" && /\b(?:caixa de som|audio|som|fone|headset)\b/.test(base)) {
+    return escolher("🎧", "subcontexto_audio");
   }
 
   const porFamilia = {

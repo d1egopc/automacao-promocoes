@@ -50,7 +50,7 @@ assert.ok(possuiLinha(padrao, estrelas(5)));
 assert.ok(!padrao.includes("Oportunidade Optimus"));
 assert.ok(padrao.includes("❌ De: *R$ 210,00*"));
 assert.ok(padrao.includes("✅ Por: *R$ 140,00*"));
-assert.ok(padrao.includes("📉 33% OFF"));
+assert.ok(!padrao.includes("33% OFF"), "percentual sem proveniencia nao e publicado");
 assert.ok(!padrao.includes("Pix:"), "Template Universal nao renderiza linha Pix separada");
 assert.ok(padrao.includes("💳 10x de R$ 14,00"));
 assert.ok(padrao.includes("🎟️ Cupom: *RADAR10*"));

@@ -13,7 +13,7 @@ function plano(recursos = {}) {
 }
 
 function ofertaBase(extra = {}) {
-  return {
+  const oferta = {
     id: "oferta_copy_v2",
     engineOfertaId: "engine_copy_v2",
     clienteId: "cliente_copy_v2",
@@ -26,6 +26,11 @@ function ofertaBase(extra = {}) {
     linkAfiliado: "https://go.example/produto-v2",
     ...extra
   };
+  if (oferta.cupom && oferta.cupomTipo === undefined && oferta.cupomConfirmado === undefined) {
+    oferta.cupomTipo = "real";
+    oferta.cupomConfirmado = true;
+  }
+  return oferta;
 }
 
 function contexto(extraOferta = {}, extraResultado = {}, extraOpcoes = {}) {
@@ -489,7 +494,12 @@ function contexto(extraOferta = {}, extraResultado = {}, extraOpcoes = {}) {
   assert.ok(backendIndex.includes('plano.recursos.copyIaGenerativa = false'), "backend default copyIaGenerativa false");
   assert.ok(!/copyIaGenerativa[\s\S]{0,160}\b(free|gratis|grátis|pro|ultimate)\b|\b(free|gratis|grátis|pro|ultimate)\b[\s\S]{0,160}copyIaGenerativa/i.test(backendIndex), "backend nao hardcoda plano para copyIaGenerativa");
 
-  const frontendRoot = path.resolve(__dirname, "../../optimuspromo-frontend/src");
+  const frontendRoot = [
+    process.env.OPTIMUS_FRONTEND_ROOT && path.resolve(process.env.OPTIMUS_FRONTEND_ROOT, "src"),
+    path.resolve(__dirname, "../../frontend-main-canonical/src"),
+    path.resolve(__dirname, "../../optimuspromo-frontend/src")
+  ].filter(Boolean).find(candidato => fs.existsSync(candidato));
+  assert.ok(frontendRoot, "checkout frontend canonico precisa estar disponivel para o teste documental");
   const adminSource = fs.readFileSync(path.join(frontendRoot, "routes/admin.tsx"), "utf8");
   const planosStoreSource = fs.readFileSync(path.join(frontendRoot, "lib/planos-store.ts"), "utf8");
   const featureAccessSource = fs.readFileSync(path.join(frontendRoot, "lib/feature-access.ts"), "utf8");

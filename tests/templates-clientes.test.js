@@ -200,7 +200,6 @@ for (const trecho of [
   "📂 Beleza e cuidados pessoais",
   "❌ De: *",
   "✅ Por: *",
-  "📉 38% OFF",
   "⚡ Pix: *R$ 47,90 no Pix*",
   "🎟️ Cupom: *PROMO10*",
   "⚡ Aplique o cupom PROMO10 para obter o valor.",
@@ -219,6 +218,7 @@ for (const trecho of [
 ]) {
   assert.ok(renderCompletoV11.mensagem.includes(trecho), `preview inclui: ${trecho}`);
 }
+assert.ok(!renderCompletoV11.mensagem.includes("38% OFF"), "preview demonstrativo sem proveniencia nao publica OFF");
 assert.ok(!renderCompletoV11.mensagem.includes("1.240 avaliacoes"), "preview demonstrativo nao usa quantidade de avaliacoes ficticia");
 assert.ok(!renderCompletoV11.mensagem.includes("5.200 vendidos"), "preview demonstrativo nao usa vendas ficticias");
 

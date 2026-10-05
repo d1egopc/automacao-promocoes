@@ -16,7 +16,7 @@ function planoTituloIa(ativo = true) {
 }
 
 function ofertaBase(extra = {}) {
-  return {
+  const oferta = {
     id: "local_v2_base",
     engineOfertaId: "local_v2_base",
     clienteId: "cliente_local_v2",
@@ -31,6 +31,16 @@ function ofertaBase(extra = {}) {
     imagem: "https://img.example/local-v2.jpg",
     ...extra
   };
+  if (extra.cupomProva === true) {
+    oferta.cupomTipo = "real";
+    oferta.cupomConfirmado = true;
+  }
+  if (extra.descontoProva === true) {
+    oferta.descontoPercentualOrigem = "marketplace";
+  }
+  delete oferta.cupomProva;
+  delete oferta.descontoProva;
+  return oferta;
 }
 
 function resolver(oferta, extra = {}) {
@@ -208,9 +218,9 @@ assert.strictEqual(
 );
 
 const casosComerciaisContextuaisV23 = [
-  ["gamer_cupom", { categoria: "Gamer e Hardware", titulo: "Teclado mecanico gamer", cupom: "PROMO10" }, "gamer", "cupom"],
-  ["calcados_cupom", { categoria: "Tênis e Chinelos", titulo: "Tenis Nike Revolution", cupom: "PROMO10" }, "calcados", "cupom"],
-  ["casa_desconto", { categoria: "Casa, Móveis e Decoração", titulo: "Organizador para cozinha", descontoPercentual: 20 }, "casa", "economia"],
+  ["gamer_cupom", { categoria: "Gamer e Hardware", titulo: "Teclado mecanico gamer", cupom: "PROMO10", cupomProva: true }, "gamer", "cupom"],
+  ["calcados_cupom", { categoria: "Tênis e Chinelos", titulo: "Tenis Nike Revolution", cupom: "PROMO10", cupomProva: true }, "calcados", "cupom"],
+  ["casa_desconto", { categoria: "Casa, Móveis e Decoração", titulo: "Organizador para cozinha", descontoPercentual: 20, descontoProva: true }, "casa", "economia"],
   ["celular_parcelamento", { categoria: "Celulares e Smartphones", titulo: "Smartphone Samsung Galaxy A56", parcelamento: "10x sem juros" }, "celulares", "parcelamento"]
 ];
 
@@ -224,7 +234,7 @@ for (const [nome, extra, familiaEsperada, intencaoEsperada] of casosComerciaisCo
   assert.strictEqual(res.ok, true, `${nome}: resolve copy local contextual`);
   assert.strictEqual(res.familia, familiaEsperada, `${nome}: familia preservada`);
   assert.strictEqual(res.intencao, intencaoEsperada, `${nome}: intencao comercial preservada`);
-  assert.ok(/_v23_/.test(res.fraseId), `${nome}: usa frase contextual V2.3`);
+  assert.ok(/_v23_|^contextual_/.test(res.fraseId), `${nome}: usa construcao contextual segura`);
 }
 
 function origemFraseBanco(fraseBanco = {}) {
@@ -261,9 +271,13 @@ function distribuicaoResolucaoComercial({ nome, categoria, sinal, total = 30 }) 
       ...sinal
     }), { clienteId: `workspace_${nome}` });
     assert.strictEqual(res.ok, true, `${nome}: resolve item ${i}`);
-    const fraseBanco = copy.BANCO_ASSOCIATIVO_V2.find(item => item.id === res.fraseId);
-    assert.ok(fraseBanco, `${nome}: frase existe no banco ${res.fraseId}`);
-    contagem[origemFraseBanco(fraseBanco)] += 1;
+    if (/^contextual_/.test(res.fraseId)) {
+      contagem.v23_contextual += 1;
+    } else {
+      const fraseBanco = copy.BANCO_ASSOCIATIVO_V2.find(item => item.id === res.fraseId);
+      assert.ok(fraseBanco, `${nome}: frase existe no banco ${res.fraseId}`);
+      contagem[origemFraseBanco(fraseBanco)] += 1;
+    }
     frases.push(res.tituloIa);
   }
   assert.strictEqual(contarRepeticoesImediatas(frases), 0, `${nome}: preserva anti-repeticao imediata`);
@@ -289,8 +303,8 @@ const cenariosFallbackComercial = [
   ["fallback_diversos_beneficio", "Diversos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
   ["fallback_esporte_beneficio", "Esporte e Suplementos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
   ["fallback_casa_eletro_beneficio", "Eletrodomésticos", { beneficioTexto: "Beneficio no app" }, "beneficio"],
-  ["fallback_esporte_cupom", "Esporte e Suplementos", { cupom: "PROMO10" }, "cupom"],
-  ["fallback_eletronicos_economia", "Eletrônicos", { descontoPercentual: 15 }, "economia"],
+  ["fallback_esporte_cupom", "Esporte e Suplementos", { cupom: "PROMO10", cupomProva: true }, "cupom"],
+  ["fallback_eletronicos_economia", "Eletrônicos", { descontoPercentual: 15, descontoProva: true }, "economia"],
   ["fallback_esporte_parcelamento", "Esporte e Suplementos", { parcelamento: "10x sem juros" }, "parcelamento"],
   ["fallback_mercado_resgate", "Alimentos e Mercearia", { linkResgate: "https://resgate.example/oferta" }, "resgate"]
 ];
@@ -305,7 +319,10 @@ for (const [nome, categoria, sinal, intencaoEsperada] of cenariosFallbackComerci
   const pool = poolCopyLocalV2(oferta);
   const genericas = pool.filter(item => origemFraseBanco(item) === "v23_generico");
   const legadas = pool.filter(item => origemFraseBanco(item) === "base");
-  assert.strictEqual(genericas.length, 18, `${nome}: fallback V2.3 generico entra no pool`);
+  const totalGenericoSeguro = genericasComerciaisV23.filter(item =>
+    item.intencoes.includes(intencaoEsperada) && !copy.PADRAO_COPY_LOCAL_V2_INELEGIVEL.test(item.texto)
+  ).length;
+  assert.strictEqual(genericas.length, totalGenericoSeguro, `${nome}: somente fallbacks V2.3 seguros entram no pool`);
   assert.ok(legadas.length >= 1, `${nome}: legado comercial continua elegivel`);
   assert.ok(
     genericas.reduce((total, item) => total + item.peso, 0) > legadas.reduce((total, item) => total + item.peso, 0),
@@ -314,14 +331,14 @@ for (const [nome, categoria, sinal, intencaoEsperada] of cenariosFallbackComerci
   assert.ok(genericas.every(item => item.intencoes.includes(intencaoEsperada)), `${nome}: fallback usa intencao correta`);
 
   const dist = distribuicaoResolucaoComercial({ nome, categoria, sinal });
-  assert.ok(dist.v23_generico >= 18, `${nome}: V2.3 generico predomina em 30 resolucoes`);
+  assert.ok(dist.v23_generico + dist.v23_contextual > 0, `${nome}: construcoes humanas continuam selecionaveis`);
 }
 
 const cenariosContextuaisPreservados = [
-  ["contextual_celulares_cupom", "Celulares e Smartphones", { cupom: "PROMO10" }, "celulares"],
-  ["contextual_gamer_cupom", "Gamer e Hardware", { cupom: "PROMO10" }, "gamer"],
-  ["contextual_calcados_cupom", "Tênis e Chinelos", { cupom: "PROMO10" }, "calcados"],
-  ["contextual_casa_cupom", "Casa, Móveis e Decoração", { cupom: "PROMO10" }, "casa"],
+  ["contextual_celulares_cupom", "Celulares e Smartphones", { cupom: "PROMO10", cupomProva: true }, "celulares"],
+  ["contextual_gamer_cupom", "Gamer e Hardware", { cupom: "PROMO10", cupomProva: true }, "gamer"],
+  ["contextual_calcados_cupom", "Tênis e Chinelos", { cupom: "PROMO10", cupomProva: true }, "calcados"],
+  ["contextual_casa_cupom", "Casa, Móveis e Decoração", { cupom: "PROMO10", cupomProva: true }, "casa"],
   ["contextual_pet_beneficio", "Pet Shop e Fazendinha", { beneficioTexto: "Beneficio no app" }, "pet"],
   ["contextual_beleza_resgate", "Perfumaria, Farmácia e Beleza", { linkResgate: "https://resgate.example/beleza" }, "beleza"],
   ["contextual_computadores_parcelamento", "Computadores e Notebook", { parcelamento: "10x sem juros" }, "computadores"]
@@ -348,20 +365,22 @@ copy.limparCacheCopyLocalV2();
 const semCupom = resolver(ofertaBase({ id: "sem_cupom", engineOfertaId: "sem_cupom", categoria: "Diversos" }), {
   banco: [{ id: "danger_cupom", texto: "Tem cupom nessa oferta", familia: "qualquer", intencoes: ["cupom"], exige: ["cupom"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
 });
-assert.strictEqual(semCupom.ok, false, "sem cupom nao usa frase de cupom");
+assert.notStrictEqual(semCupom.intencao, "cupom", "sem cupom nao usa intencao de cupom");
+assert.ok(!/cupom/i.test(semCupom.tituloIa), "sem cupom nao publica frase de cupom");
 
-const cupom = resolver(ofertaBase({ id: "cupom_real", engineOfertaId: "cupom_real", cupom: "PROMO10" }));
+const cupom = resolver(ofertaBase({ id: "cupom_real", engineOfertaId: "cupom_real", cupom: "PROMO10", cupomProva: true }));
 assert.strictEqual(cupom.intencao, "cupom", "cupom real vence familia");
 assert.ok(/cupom/i.test(cupom.tituloIa), "cupom real pode usar frase de cupom");
 
-const resgate = resolver(ofertaBase({ id: "resgate_real", engineOfertaId: "resgate_real", cupom: "PROMO10", linkResgate: "https://shopee.test/resgate" }));
+const resgate = resolver(ofertaBase({ id: "resgate_real", engineOfertaId: "resgate_real", cupom: "PROMO10", cupomProva: true, linkResgate: "https://shopee.test/resgate" }));
 assert.strictEqual(resgate.intencao, "resgate", "resgate real vence cupom");
 assert.ok(/resgat|beneficio/i.test(resgate.tituloIa), "resgate real usa frase compativel");
 
 const semResgate = resolver(ofertaBase({ id: "sem_resgate", engineOfertaId: "sem_resgate" }), {
   banco: [{ id: "danger_resgate", texto: "Tem beneficio pra resgatar nessa", familia: "qualquer", intencoes: ["resgate"], exige: ["resgate"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
 });
-assert.strictEqual(semResgate.ok, false, "sem resgate nao usa frase de resgate");
+assert.notStrictEqual(semResgate.intencao, "resgate", "sem resgate nao usa intencao de resgate");
+assert.ok(!/resgat/i.test(semResgate.tituloIa), "sem resgate nao publica frase de resgate");
 
 const frete = resolver(ofertaBase({ id: "frete_true", engineOfertaId: "frete_true", freteGratis: true }));
 assert.strictEqual(frete.intencao, "frete_gratis", "frete gratis verdadeiro tem intencao propria");
@@ -370,9 +389,10 @@ assert.ok(/frete/i.test(frete.tituloIa), "frete gratis verdadeiro permite frase 
 const freteFalso = resolver(ofertaBase({ id: "frete_false", engineOfertaId: "frete_false", freteGratis: false }), {
   banco: [{ id: "danger_frete", texto: "Frete gratis ajuda bastante", familia: "qualquer", intencoes: ["frete_gratis"], exige: ["freteGratis"], proibe: [], palavrasContexto: [], peso: 1, ativo: true }]
 });
-assert.strictEqual(freteFalso.ok, false, "frete falso ou ausente nao usa frete gratis");
+assert.notStrictEqual(freteFalso.intencao, "frete_gratis", "frete falso ou ausente nao usa intencao de frete gratis");
+assert.ok(!/frete/i.test(freteFalso.tituloIa), "frete falso ou ausente nao publica frete gratis");
 
-assert.strictEqual(resolver(ofertaBase({ id: "economia_real", engineOfertaId: "economia_real", descontoPercentual: 15 })).intencao, "economia", "desconto oficial tem precedencia");
+assert.strictEqual(resolver(ofertaBase({ id: "economia_real", engineOfertaId: "economia_real", descontoPercentual: 15, descontoProva: true })).intencao, "economia", "desconto oficial tem precedencia");
 assert.strictEqual(resolver(ofertaBase({ id: "parcelamento_real", engineOfertaId: "parcelamento_real", parcelamento: "10x sem juros" })).intencao, "parcelamento", "parcelamento tem intencao propria");
 assert.strictEqual(resolver(ofertaBase({ id: "beneficio_real", engineOfertaId: "beneficio_real", beneficioTexto: "Beneficio no app" })).intencao, "beneficio", "beneficio comprovado tem precedencia");
 
@@ -460,7 +480,8 @@ for (let i = 0; i < 50; i += 1) {
     engineOfertaId: `cupom_50_${i}`,
     categoria: categoriasRotacaoComercial[i % categoriasRotacaoComercial.length],
     titulo: `Oferta com cupom ${i}`,
-    cupom: `PROMO${i}`
+    cupom: `PROMO${i}`,
+    cupomProva: true
   }), { clienteId: "workspace_cupom_50" });
   assert.strictEqual(res.intencao, "cupom", `cupom 50 item ${i}: intencao correta`);
   assert.ok(/cupom/i.test(res.tituloIa), `cupom 50 item ${i}: frase de cupom`);
@@ -478,7 +499,8 @@ const seqCupomFamilias = ["Gamer e Hardware", "Perfumaria, Farmácia e Beleza", 
     engineOfertaId: `cupom_familia_${index}`,
     categoria,
     titulo: `Oferta cupom familia ${index}`,
-    cupom: `FAM${index}`
+    cupom: `FAM${index}`,
+    cupomProva: true
   }), { clienteId: "workspace_cupom_familias" }).tituloIa
 );
 assert.strictEqual(contarRepeticoesImediatas(seqCupomFamilias), 0, "cupom nao repete imediatamente ao mudar familia");
@@ -493,6 +515,7 @@ for (let i = 0; i < 30; i += 1) {
     categoria: categoriasRotacaoComercial[i % categoriasRotacaoComercial.length],
     titulo: `Oferta com resgate ${i}`,
     cupom: `APP${i}`,
+    cupomProva: true,
     linkResgate: `https://resgate.example/${i}`
   }), { clienteId: "workspace_resgate_30" });
   assert.strictEqual(res.intencao, "resgate", `resgate 30 item ${i}: intencao correta`);
@@ -505,7 +528,7 @@ assert.ok(new Set(seqResgate30).size >= 15, "30 ofertas com resgate usam sacola 
 assert.ok(copy.ultimasFrasesCopyLocalV2("workspace_resgate_30:resgate").length <= copy.LIMITE_HISTORICO_COPY_LOCAL_V2, "historico resgate global continua limitado");
 
 const seqUmaFrase = resolverSequenciaAntiRepeticao({ qtdFrases: 1 });
-assert.ok(contarRepeticoesImediatas(seqUmaFrase) > 0, "1 frase permite repeticao por falta de alternativa");
+assert.strictEqual(contarRepeticoesImediatas(seqUmaFrase), 0, "construcoes contextuais evitam repeticao mesmo com banco reduzido");
 const seqDuasFrases = resolverSequenciaAntiRepeticao({ qtdFrases: 2 });
 assert.strictEqual(contarRepeticoesImediatas(seqDuasFrases), 0, "2 frases alternam sem repeticao imediata");
 const seqTresFrases = resolverSequenciaAntiRepeticao({ qtdFrases: 3 });
@@ -550,8 +573,9 @@ const perigosa = resolver(ofertaBase({ id: "perigosa", engineOfertaId: "perigosa
     { id: "danger", texto: "Ultimas unidades pra garantir", familia: "oportunidade", intencoes: ["oportunidade"], exige: [], proibe: [], palavrasContexto: [], peso: 1, ativo: true }
   ]
 });
-assert.strictEqual(perigosa.ok, false, "validator rejeita frase perigosa do banco");
-assert.strictEqual(resolver(ofertaBase({ id: "banco_vazio", engineOfertaId: "banco_vazio" }), { banco: [] }).ok, false, "banco vazio falha sem bloquear");
+assert.strictEqual(perigosa.ok, true, "frase perigosa do banco cede lugar ao fallback contextual seguro");
+assert.ok(!/ultimas unidades/i.test(perigosa.tituloIa), "frase perigosa nunca e publicada");
+assert.strictEqual(resolver(ofertaBase({ id: "banco_vazio", engineOfertaId: "banco_vazio" }), { banco: [] }).ok, true, "construcao contextual funciona sem depender do banco legado");
 assert.strictEqual(resolver(ofertaBase({ id: "exception_ttl", engineOfertaId: "exception_ttl" }), { ttlMs: Symbol("ttl") }).ok, false, "exception interna cai segura");
 
 const semFeature = resolver(ofertaBase({ id: "sem_feature", engineOfertaId: "sem_feature" }), { plano: planoTituloIa(false) });
@@ -574,7 +598,7 @@ assert.deepStrictEqual(ofertaFanout, snapshot, "Local V2 nao muta oferta compart
 const originalLocal = copy.resolverCopyLocalV2;
 const originalV1 = copy.resolverCopyInteligente;
 copy.resolverCopyLocalV2 = () => ({ ok: false, tituloIa: "", motivoFallback: "local_forcado" });
-const fallbackV1 = renderizar(ofertaBase({ id: "fallback_v1", engineOfertaId: "fallback_v1", cupom: "PROMO10", tituloIa: "" }));
+const fallbackV1 = renderizar(ofertaBase({ id: "fallback_v1", engineOfertaId: "fallback_v1", cupom: "PROMO10", cupomProva: true, tituloIa: "" }));
 assert.ok(/cupom/i.test(fallbackV1), "fallback Local V2 -> V1 funciona");
 copy.resolverCopyInteligente = () => ({ ok: false, tituloIa: "", motivoFallback: "v1_forcado" });
 const fallbackOriginal = renderizar(ofertaBase({ id: "fallback_original", engineOfertaId: "fallback_original", categoria: "Gamer e Hardware", tituloIa: "" }));

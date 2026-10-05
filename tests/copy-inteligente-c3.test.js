@@ -13,7 +13,7 @@ const destinoIa = { id: "destino_c3", tipo: "whatsapp", tituloOferta: "ia" };
 const planoC3 = { recursos: { tituloIa: true, templatePersonalizado: true } };
 
 function ofertaBase(extra = {}) {
-  return {
+  const oferta = {
     id: "oferta_c3_base",
     engineOfertaId: "engine_c3_base",
     clienteId: "cliente_c3",
@@ -30,6 +30,16 @@ function ofertaBase(extra = {}) {
     imagem: "https://img.example/produto.jpg",
     ...extra
   };
+  if (extra.cupomProva === true) {
+    oferta.cupomTipo = "real";
+    oferta.cupomConfirmado = true;
+  }
+  if (extra.descontoProva === true) {
+    oferta.descontoPercentualOrigem = "marketplace";
+  }
+  delete oferta.cupomProva;
+  delete oferta.descontoProva;
+  return oferta;
 }
 
 function resolver(oferta) {
@@ -96,10 +106,10 @@ function distribuicaoFrases(intencao, montarOferta) {
   return histograma;
 }
 
-function assertDistribuicaoRazoavel(histograma, mensagem) {
+function assertDistribuicaoRazoavel(histograma, mensagem, maximoPorFrase = 5) {
   const contagens = Object.values(histograma);
   assert.ok(contagens.length >= 4, `${mensagem}: deve usar pelo menos 4 frases em 10 ofertas`);
-  assert.ok(Math.max(...contagens) <= 5, `${mensagem}: nenhuma frase deve concentrar mais de 5/10`);
+  assert.ok(Math.max(...contagens) <= maximoPorFrase, `${mensagem}: nenhuma frase deve concentrar mais de ${maximoPorFrase}/10`);
 }
 
 function assertNaoUsaIntencao(oferta, intencao, mensagem) {
@@ -110,7 +120,7 @@ function assertNaoUsaIntencao(oferta, intencao, mensagem) {
   return resultado;
 }
 
-const cupom = resolver(ofertaBase({ id: "c3_cupom", engineOfertaId: "c3_cupom", cupom: "PROMO10", precoOriginal: "" }));
+const cupom = resolver(ofertaBase({ id: "c3_cupom", engineOfertaId: "c3_cupom", cupom: "PROMO10", cupomProva: true, precoOriginal: "" }));
 assert.strictEqual(cupom.ok, true, "cupom confirmado gera gancho C3");
 assert.strictEqual(cupom.intencao, "cupom");
 assert.strictEqual(cupom.fatoUsado, "cupom_confirmado");
@@ -118,9 +128,28 @@ assert.ok(/cupom|compra|olhada|oferta/i.test(cupom.ganchoComercialC3), "gancho i
 assert.ok(!/confirmad|identificad|codigo|c[oó]digo/i.test(cupom.ganchoComercialC3), "cupom nao soa como log tecnico");
 assertNaoRepeteDadoTemplate(cupom.ganchoComercialC3, ["PROMO10"]);
 assert.ok(!/%|R\$/i.test(cupom.ganchoComercialC3), "cupom sem desconto numerico nao inventa percentual/valor");
+
+const fatosDescontoContrato = copy.extrairFatosCopyC3(ofertaBase({
+  id: "c3_contrato_candidatos",
+  precoOriginal: 150,
+  precoAtual: 100,
+  descontoPercentual: 33,
+  descontoProva: true
+}));
+const candidatosDescontoContrato = copy.candidatosValidosCopyC3(copy.FRASES_COPY_C3.desconto_real, fatosDescontoContrato);
+assert.strictEqual(candidatosDescontoContrato.aprovados.length, 4, "C3 preserva quatro construcoes semanticas validas de desconto");
+assert.strictEqual(candidatosDescontoContrato.barrados.length, 4, "C3 barra as quatro construcoes numericas depois da interpolacao");
+assert.ok(
+  candidatosDescontoContrato.barrados.some(candidato => candidato.validacao.motivoCodigo === "preco_detectado"),
+  "C3 reutiliza o validador oficial para barrar preco literal"
+);
+assert.ok(
+  candidatosDescontoContrato.barrados.some(candidato => candidato.validacao.motivoCodigo === "percentual_detectado"),
+  "C3 reutiliza o validador oficial para barrar percentual literal"
+);
 assertSemTermosProibidos(cupom.ganchoComercialC3);
 
-const desconto = resolver(ofertaBase({ id: "c3_desconto", engineOfertaId: "c3_desconto", precoOriginal: 200, precoAtual: 150, preco: 150, cupom: "" }));
+const desconto = resolver(ofertaBase({ id: "c3_desconto", engineOfertaId: "c3_desconto", precoOriginal: 200, precoAtual: 150, preco: 150, descontoPercentual: 25, descontoProva: true, cupom: "" }));
 assert.strictEqual(desconto.ok, true, "desconto real gera gancho C3");
 assert.strictEqual(desconto.intencao, "desconto_real");
 assert.strictEqual(desconto.fatoUsado, "desconto_real_comprovado");
@@ -160,7 +189,7 @@ const valorEfetivo = resolver(ofertaBase({
 assert.strictEqual(valorEfetivo.ok, true, "valor efetivo comprovado gera gancho C3");
 assert.strictEqual(valorEfetivo.intencao, "valor_efetivo");
 assertNaoRepeteDadoTemplate(valorEfetivo.ganchoComercialC3, ["R$ 120,00", "R$ 150,00"]);
-assert.ok(/conta|condicao|valor|vitrine|avaliar/i.test(valorEfetivo.ganchoComercialC3), "valor efetivo deve ser interpretado sem repetir numero");
+assert.ok(/conta|condicao|valor|vitrine|avaliar/i.test(copy.normalizar(valorEfetivo.ganchoComercialC3)), "valor efetivo deve ser interpretado sem repetir numero");
 
 const categoriaHumana = resolver(ofertaBase({
   id: "c3_categoria_humana",
@@ -216,7 +245,8 @@ assertDistribuicaoRazoavel(distribuicaoFrases("cupom", i => ofertaBase({
   id: `c3_dist_cupom_${i}`,
   engineOfertaId: `c3_dist_cupom_${i}`,
   precoOriginal: "",
-  cupom: `CUPOM${i}`
+  cupom: `CUPOM${i}`,
+  cupomProva: true
 })), "cupom");
 
 assertDistribuicaoRazoavel(distribuicaoFrases("desconto_real", i => ofertaBase({
@@ -225,8 +255,10 @@ assertDistribuicaoRazoavel(distribuicaoFrases("desconto_real", i => ofertaBase({
   precoOriginal: 150 + i,
   precoAtual: 100 + i,
   preco: 100 + i,
+  descontoPercentual: 33,
+  descontoProva: true,
   cupom: ""
-})), "desconto real");
+})), "desconto real", 6);
 
 for (const [nome, extra] of [
   ["resgate_texto_incerto", { resgate: "consulte condicoes de resgate" }],
@@ -291,7 +323,8 @@ const slogan = ofertaBase({
   preco: 149,
   precoAtual: 149,
   precoOriginal: 199,
-  cupom: "PROMO50"
+  cupom: "PROMO50",
+  cupomProva: true
 });
 const snapshotSlogan = snapshotCamposProtegidos(slogan);
 const c3Slogan = resolver(slogan);
@@ -307,6 +340,7 @@ const protegida = ofertaBase({
   id: "c3_protecao",
   engineOfertaId: "c3_protecao",
   cupom: "CUPOM10",
+  cupomProva: true,
   precoOriginal: 180,
   precoAtual: 120,
   linkResgate: "https://resgate.example/promo"
@@ -316,10 +350,10 @@ const resultadoProtegida = resolver(protegida);
 assert.strictEqual(resultadoProtegida.ok, true);
 assert.deepStrictEqual(snapshotCamposProtegidos(protegida), snapshotProtegida, "Copy C3 preserva campos comerciais/factuais");
 
-const deterministica = ofertaBase({ id: "c3_determinismo", engineOfertaId: "c3_determinismo", cupom: "PROMO10", precoOriginal: "" });
+const deterministica = ofertaBase({ id: "c3_determinismo", engineOfertaId: "c3_determinismo", cupom: "PROMO10", cupomProva: true, precoOriginal: "" });
 const frases = Array.from({ length: 5 }, () => resolver(deterministica).ganchoComercialC3);
 assert.strictEqual(new Set(frases).size, 1, "mesma oferta renderiza mesmo gancho C3");
-const outraOferta = resolver(ofertaBase({ id: "c3_determinismo_outra", engineOfertaId: "c3_determinismo_outra", cupom: "PROMO10", precoOriginal: "" }));
+const outraOferta = resolver(ofertaBase({ id: "c3_determinismo_outra", engineOfertaId: "c3_determinismo_outra", cupom: "PROMO10", cupomProva: true, precoOriginal: "" }));
 assert.ok(outraOferta.ganchoComercialC3, "outra oferta tambem seleciona frase valida");
 
 const semFatos = resolver({
@@ -338,7 +372,7 @@ const semFatos = resolver({
 });
 assert.strictEqual(semFatos.ok, false, "sem fatos fortes preserva fallback legado");
 
-const ofertaRender = ofertaBase({ id: "c3_render", engineOfertaId: "c3_render", cupom: "PROMO10", precoOriginal: "" });
+const ofertaRender = ofertaBase({ id: "c3_render", engineOfertaId: "c3_render", cupom: "PROMO10", cupomProva: true, precoOriginal: "" });
 const snapshotRender = JSON.parse(JSON.stringify(ofertaRender));
 const mensagem = renderizar(ofertaRender);
 assert.ok(mensagem.includes("*Lava e Seca Philco 10kg*"), "Template recebe titulo factual separado");

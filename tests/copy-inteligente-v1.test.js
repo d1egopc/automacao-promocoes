@@ -15,7 +15,7 @@ function planoTituloIa(ativo = true) {
 }
 
 function ofertaBase(extra = {}) {
-  return {
+  const oferta = {
     id: "oferta_copy_base",
     engineOfertaId: "engine_copy_base",
     clienteId: "cliente_copy",
@@ -30,6 +30,14 @@ function ofertaBase(extra = {}) {
     imagem: "https://img.example/oferta.jpg",
     ...extra
   };
+  if (oferta.cupom && oferta.cupomTipo === undefined && oferta.cupomConfirmado === undefined) {
+    oferta.cupomTipo = "real";
+    oferta.cupomConfirmado = true;
+  }
+  if (oferta.descontoPercentual && oferta.descontoPercentualOrigem === undefined) {
+    oferta.descontoPercentualOrigem = "marketplace";
+  }
+  return oferta;
 }
 
 function renderizar(oferta, destino = {}, plano = planoTituloIa(true)) {

@@ -1,4 +1,11 @@
 const { familiaDaCategoriaCopyV2 } = require("./familias-v2");
+const { normalizarSinaisCopy } = require("./resolver-intencao");
+const {
+  categoriaOficialCopyLocalV2,
+  fatosValidatorCopyLocalV2,
+  produtoContextualCopyLocalV2
+} = require("./copy-local-v2.service");
+const { validarCopyV2 } = require("./validator-v2");
 
 const FONTE_COPY_C3 = "copy_c3_factual";
 
@@ -15,46 +22,48 @@ const TERMOS_PROIBIDOS_COPY_C3 = [
   "vai acabar"
 ];
 
+const PADRAO_COPY_C3_INELEGIVEL = /\b(?:calma|avalie|avaliar|compare|comparar|antes de decidir|ponta do lapis|sem pressa|radar|contexto|analise|comparacao|valor efetivo|conta final|preco de vitrine|algoritmo|motor|classificacao)\b/i;
+
 const FRASES_COPY_C3 = Object.freeze({
   beneficio: [
-    { id: "c3_beneficio_001", texto: "Tem um detalhe extra confirmado nessa oferta." },
-    { id: "c3_beneficio_002", texto: "Essa veio com um adicional que vale olhar com calma." },
-    { id: "c3_beneficio_003", texto: "Nao era so o produto; tem um extra no meio." }
+    { id: "c3_beneficio_001", texto: "{produto} com benefício extra? Vale olhar ✨" },
+    { id: "c3_beneficio_002", texto: "Tem benefício extra em {produto}. Abre para conferir 👀" },
+    { id: "c3_beneficio_003", texto: "Tem benefício nessa oferta de {produto} ✨" }
   ],
   resgate: [
-    { id: "c3_resgate_001", texto: "Tem resgate confirmado nessa oferta." },
-    { id: "c3_resgate_002", texto: "Antes de passar reto, vale ver o resgate dessa oferta." },
-    { id: "c3_resgate_003", texto: "Essa trouxe um resgate para colocar na conta." }
+    { id: "c3_resgate_001", texto: "Tem resgate em {produto} 🎟️" },
+    { id: "c3_resgate_002", texto: "{produto} com resgate disponível? Vale abrir 🎟️" },
+    { id: "c3_resgate_003", texto: "Resgate válido nessa oferta. Olha: {produto} 👀" }
   ],
   cupom: [
-    { id: "c3_cupom_001", texto: "Quando tem cupom no meio, vale olhar duas vezes." },
-    { id: "c3_cupom_002", texto: "Esse aqui ganhou um empurrao por causa do cupom." },
-    { id: "c3_cupom_003", texto: "Eu nao passaria reto sem olhar o cupom primeiro." },
-    { id: "c3_cupom_004", texto: "Cupom muda a leitura dessa oferta." },
-    { id: "c3_cupom_005", texto: "Essa ficou mais interessante com cupom na jogada." },
-    { id: "c3_cupom_006", texto: "Olha esse aqui com calma antes de fechar a compra." },
-    { id: "c3_cupom_007", texto: "O produto ja chamou; o cupom ajuda na decisao." },
-    { id: "c3_cupom_008", texto: "Essa e daquelas em que o cupom pede uma segunda olhada." }
+    { id: "c3_cupom_001", texto: "{produto} com cupom? Merece carrinho 🎟️" },
+    { id: "c3_cupom_002", texto: "Tem cupom em {produto}? Aí ficou bonito 👀" },
+    { id: "c3_cupom_003", texto: "{produto} já chamou atenção; com cupom então... 🎟️" },
+    { id: "c3_cupom_004", texto: "Cupom em {produto}. Vale abrir 🎟️" },
+    { id: "c3_cupom_005", texto: "{produto} com cupom no meio? Difícil passar reto 👀" },
+    { id: "c3_cupom_006", texto: "Tem cupom nessa oferta. Olha: {produto} 🎟️" },
+    { id: "c3_cupom_007", texto: "Cupom em {produto}: um bom motivo para o clique 🎟️" },
+    { id: "c3_cupom_008", texto: "Cupom + {produto}? Vale conferir 👀" }
   ],
   desconto_real: [
-    { id: "c3_desconto_real_001", texto: "Aqui a diferenca no valor chama atencao." },
-    { id: "c3_desconto_real_002", texto: "Esse caiu bem em relacao ao preco anterior." },
-    { id: "c3_desconto_real_003", texto: "Aqui a comparacao com o valor anterior ficou interessante." },
-    { id: "c3_desconto_real_004", texto: "A conta ficou melhor do que parecia de primeira." },
-    { id: "c3_desconto_real_005", texto: "Quando o valor muda assim, eu paro para olhar." },
-    { id: "c3_desconto_real_006", texto: "A diferenca vem de uma referencia real de preco." },
-    { id: "c3_desconto_real_007", texto: "A diferenca aqui nao passou batida." },
-    { id: "c3_desconto_real_008", texto: "Esse merece a olhada justamente pela mudanca no valor." }
+    { id: "c3_desconto_real_001", texto: "{percentual}% OFF em {produto}? Olha isso 👀" },
+    { id: "c3_desconto_real_002", texto: "{produto} com desconto? Vale o clique." },
+    { id: "c3_desconto_real_003", texto: "{produto} por {preco} com desconto. Vale conferir 👀" },
+    { id: "c3_desconto_real_004", texto: "{percentual}% OFF e preço de {preco}. Difícil passar reto." },
+    { id: "c3_desconto_real_005", texto: "Tem desconto em {produto}. Abre essa oferta 👀" },
+    { id: "c3_desconto_real_006", texto: "{produto} nesse preço? Olha isso." },
+    { id: "c3_desconto_real_007", texto: "{percentual}% OFF nessa oferta de {produto}." },
+    { id: "c3_desconto_real_008", texto: "{produto} nesse preço chamou atenção 👀" }
   ],
   valor_efetivo: [
-    { id: "c3_valor_efetivo_001", texto: "A conta final aqui fica mais interessante que a vitrine." },
-    { id: "c3_valor_efetivo_002", texto: "Tem uma condicao na conta que vale olhar com calma." },
-    { id: "c3_valor_efetivo_003", texto: "O numero final mudou a historia dessa oferta." },
-    { id: "c3_valor_efetivo_004", texto: "Antes de comparar, vale olhar a conta completa." },
-    { id: "c3_valor_efetivo_005", texto: "Essa fica melhor quando voce considera o valor efetivo." },
-    { id: "c3_valor_efetivo_006", texto: "Aqui nao e so preco de vitrine; tem conta final envolvida." },
-    { id: "c3_valor_efetivo_007", texto: "A parte boa aparece quando fecha a conta." },
-    { id: "c3_valor_efetivo_008", texto: "Esse detalhe na conta muda o jeito de avaliar." }
+    { id: "c3_valor_efetivo_001", texto: "{produto} com condição final? Olha isso 👀" },
+    { id: "c3_valor_efetivo_002", texto: "O valor final de {produto} merece uma olhada." },
+    { id: "c3_valor_efetivo_003", texto: "A condição final em {produto} merece uma olhada 👀" },
+    { id: "c3_valor_efetivo_004", texto: "Tem condição final em {produto}. Abre a oferta." },
+    { id: "c3_valor_efetivo_005", texto: "O valor de {produto} chamou atenção." },
+    { id: "c3_valor_efetivo_006", texto: "{produto} ganhou um valor final que merece clique 👀" },
+    { id: "c3_valor_efetivo_007", texto: "Condição real em {produto}. Vale uma olhada." },
+    { id: "c3_valor_efetivo_008", texto: "{produto} com valor final? Confira aqui 👀" }
   ],
   marca_preco: [
     { id: "c3_marca_preco_001", texto: "Para quem acompanha {marca}, esse aqui merece uma olhada." },
@@ -209,18 +218,8 @@ function tituloFactualCopyC3(oferta = {}) {
     texto(produto.titulo);
 }
 
-function cupomConfirmadoCopyC3(oferta = {}) {
-  const cupom = texto(oferta.cupom) || texto(oferta.codigoCupom) || texto(oferta.cupomCodigo);
-  if (!cupom) return "";
-
-  const normalizado = textoMinusculo(cupom);
-  if (/\b(?:tem|ha)\s+cupom\b/.test(normalizado)) return "";
-  if (/\bcupom\s+disponivel\b/.test(normalizado)) return "";
-  if (/\bconsulte\s+(?:o\s+)?cupom\b/.test(normalizado)) return "";
-  if (/\bsem\s+cupom\b/.test(normalizado)) return "";
-  if (/\bate\s+\d+(?:[,.]\d+)?\s*%/.test(normalizado)) return "";
-
-  return cupom;
+function cupomConfirmadoCopyC3(oferta = {}, sinais = normalizarSinaisCopy(oferta)) {
+  return sinais.cupom === true ? texto(sinais.cupomCodigo) : "";
 }
 
 function beneficioConfirmadoCopyC3(oferta = {}) {
@@ -245,22 +244,25 @@ function valorEfetivoComprovadoCopyC3(oferta = {}) {
   return valorEfetivo;
 }
 
-function descontoRealCopyC3(oferta = {}) {
+function descontoRealCopyC3(oferta = {}, sinais = normalizarSinaisCopy(oferta)) {
+  if (sinais.desconto !== true) return null;
   const precoAtual = numero(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
   const precoOriginal = numero(oferta.precoOriginal ?? oferta.precoAnterior ?? oferta.precoDe);
   if (precoAtual === null || precoOriginal === null || precoOriginal <= precoAtual || precoAtual <= 0) return null;
-  const economia = precoOriginal - precoAtual;
-  const percentual = Math.round((economia / precoOriginal) * 100);
+  const percentual = numero(oferta.descontoPercentual ?? oferta.desconto);
   if (!Number.isFinite(percentual) || percentual <= 0) return null;
-  return { precoAtual, precoOriginal, economia, percentual };
+  return { precoAtual, precoOriginal, percentual };
 }
 
 function extrairFatosCopyC3(oferta = {}) {
-  const categoria = categoriaFinalCopyC3(oferta);
+  const sinais = normalizarSinaisCopy(oferta);
+  const categoria = categoriaOficialCopyLocalV2(oferta, sinais) || categoriaFinalCopyC3(oferta);
   const precoAtual = numero(oferta.precoAtual ?? oferta.precoPor ?? oferta.preco);
   const tituloFactual = tituloFactualCopyC3(oferta);
   return {
+    sinais,
     tituloFactual,
+    produto: produtoContextualCopyLocalV2(tituloFactual) || "produto",
     categoria,
     categoriaApresentacao: categoriaApresentacaoCopyC3(categoria),
     familia: familiaDaCategoriaCopyV2(categoria),
@@ -268,11 +270,11 @@ function extrairFatosCopyC3(oferta = {}) {
     precoAtual,
     precoFormatado: formatarMoedaCopyC3(precoAtual),
     precoOriginal: numero(oferta.precoOriginal ?? oferta.precoAnterior ?? oferta.precoDe),
-    cupom: cupomConfirmadoCopyC3(oferta),
+    cupom: cupomConfirmadoCopyC3(oferta, sinais),
     beneficio: beneficioConfirmadoCopyC3(oferta),
     resgate: resgateConfirmadoCopyC3(oferta),
     valorEfetivo: valorEfetivoComprovadoCopyC3(oferta),
-    descontoReal: descontoRealCopyC3(oferta),
+    descontoReal: descontoRealCopyC3(oferta, sinais),
     marca: marcaConfiavelCopyC3(oferta)
   };
 }
@@ -295,14 +297,53 @@ function aplicarVariaveisCopyC3(textoFrase = "", fatos = {}) {
     .replace(/\{percentual\}/g, String(desconto.percentual || ""))
     .replace(/\{economia\}/g, formatarMoedaCopyC3(desconto.economia) || "")
     .replace(/\{preco\}/g, fatos.precoFormatado || "")
+    .replace(/\{valorEfetivo\}/g, formatarMoedaCopyC3(fatos.valorEfetivo) || "")
+    .replace(/\{produto\}/g, fatos.produto || "produto")
     .replace(/\{marca\}/g, fatos.marca || "")
     .replace(/\{categoria\}/g, fatos.categoriaApresentacao || "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
+function avaliarCandidatoCopyC3(item = {}, fatos = {}) {
+  const textoFinal = aplicarVariaveisCopyC3(item.texto, fatos);
+  const validacao = validarCopyV2({
+    textoGerado: textoFinal,
+    contexto: { fatosPermitidos: fatosValidatorCopyLocalV2(fatos.sinais) }
+  });
+  return {
+    item,
+    textoFinal,
+    validacao
+  };
+}
+
+function candidatosValidosCopyC3(pool = [], fatos = {}) {
+  const avaliados = pool
+    .filter(item => !PADRAO_COPY_C3_INELEGIVEL.test(textoMinusculo(item.texto)))
+    .map(item => avaliarCandidatoCopyC3(item, fatos));
+  return {
+    aprovados: avaliados.filter(candidato => candidato.validacao.valida === true),
+    barrados: avaliados.filter(candidato => candidato.validacao.valida !== true)
+  };
+}
+
 function escolherFraseCopyC3({ fatos = {}, decisao = {}, oferta = {}, clienteId = "admin" } = {}) {
-  const pool = FRASES_COPY_C3[decisao.intencao] || FRASES_COPY_C3.fallback;
+  const poolOriginal = FRASES_COPY_C3[decisao.intencao] || FRASES_COPY_C3.fallback;
+  const candidatosIntencao = candidatosValidosCopyC3(poolOriginal, fatos);
+  const candidatosFallback = candidatosIntencao.aprovados.length
+    ? { aprovados: [], barrados: [] }
+    : candidatosValidosCopyC3(FRASES_COPY_C3.fallback, fatos);
+  const pool = candidatosIntencao.aprovados.length ? candidatosIntencao.aprovados : candidatosFallback.aprovados;
+  const barrados = [...candidatosIntencao.barrados, ...candidatosFallback.barrados];
+  if (!pool.length) {
+    return {
+      fraseId: "",
+      texto: "",
+      candidatosBarradosContrato: barrados.length,
+      motivosBarradosContrato: [...new Set(barrados.map(candidato => candidato.validacao.motivoCodigo).filter(Boolean))]
+    };
+  }
   const assinatura = [
     clienteId,
     oferta.id,
@@ -318,8 +359,10 @@ function escolherFraseCopyC3({ fatos = {}, decisao = {}, oferta = {}, clienteId 
   const indice = indiceDeterministicoCopyC3(assinatura, pool.length);
   const escolhida = pool[indice];
   return {
-    fraseId: escolhida.id,
-    texto: aplicarVariaveisCopyC3(escolhida.texto, fatos)
+    fraseId: escolhida.item.id,
+    texto: escolhida.textoFinal,
+    candidatosBarradosContrato: barrados.length,
+    motivosBarradosContrato: [...new Set(barrados.map(candidato => candidato.validacao.motivoCodigo).filter(Boolean))]
   };
 }
 
@@ -329,7 +372,8 @@ function resolverCopyC3({ oferta = {}, destino = {}, clienteId = "admin", plano 
 
   const fatos = extrairFatosCopyC3(oferta);
   const decisao = escolherFatoCopyC3(fatos);
-  if (decisao.intencao === "fallback" && !fatos.tituloFactual && !fatos.categoria && !fatos.precoFormatado) {
+  const categoriaUtil = fatos.categoria && fatos.categoria !== "Diversos" && fatos.categoriaApresentacao;
+  if (decisao.intencao === "fallback" && !fatos.tituloFactual && !categoriaUtil && !fatos.precoFormatado) {
     return { ok: false, motivoFallback: "sem_fatos_c3" };
   }
 
@@ -349,6 +393,8 @@ function resolverCopyC3({ oferta = {}, destino = {}, clienteId = "admin", plano 
     categoriaOficial: fatos.categoria,
     confianca: decisao.confianca,
     fonte: FONTE_COPY_C3,
+    candidatosBarradosContrato: frase.candidatosBarradosContrato || 0,
+    motivosBarradosContrato: frase.motivosBarradosContrato || [],
     cacheHit: false
   };
 }
@@ -357,9 +403,14 @@ module.exports = {
   FONTE_COPY_C3,
   FRASES_COPY_C3,
   TERMOS_PROIBIDOS_COPY_C3,
+  PADRAO_COPY_C3_INELEGIVEL,
   contemTermoProibidoCopyC3,
   extrairFatosCopyC3,
   escolherFatoCopyC3,
+  aplicarVariaveisCopyC3,
+  avaliarCandidatoCopyC3,
+  candidatosValidosCopyC3,
+  escolherFraseCopyC3,
   resolverCopyC3,
   formatarMoedaCopyC3
 };

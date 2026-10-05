@@ -407,6 +407,10 @@ function aplicarNegritoTemplate(valor = "") {
   return item ? `*${item}*` : "";
 }
 
+function textoComecaComEmoji(valor = "") {
+  return /^[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/u.test(textoUtil(valor));
+}
+
 function linhaComPrefixo(prefixo = "", valor = "", opcoes = {}) {
   const item = textoComercialRenderizavel(removerPrefixoVisual(valor, prefixo));
   return item ? `${prefixo} ${opcoes.negrito ? aplicarNegritoTemplate(item) : item}` : "";
@@ -657,6 +661,20 @@ function resolverLinha(bloco, oferta = {}) {
   const tipo = bloco.tipo;
 
   if (tipo === "titulo") {
+    if (oferta.tituloProdutoApresentacaoAtivo === true && textoUtil(oferta.tituloProdutoApresentacao)) {
+      const tituloProduto = linhaComPrefixo(
+        textoUtil(oferta.emojiTituloProduto) || "🔥",
+        oferta.tituloProdutoApresentacao,
+        { negrito: true }
+      );
+      const gancho = textoUtil(oferta.ganchoCopyLocal);
+      const linhaGancho = !gancho
+        ? ""
+        : textoComecaComEmoji(gancho)
+          ? gancho
+          : linhaComPrefixo(textoUtil(oferta.emojiGanchoCopyLocal) || "✨", gancho);
+      return [tituloProduto, linhaGancho].filter(Boolean).join("\n");
+    }
     const titulo = primeiroTexto(oferta.titulo, oferta.nome);
     return linhaComPrefixo("🔥", titulo, { negrito: true });
   }
@@ -880,7 +898,12 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   const ofertaOficial = {
     ...prepararDadosOficiaisTemplate(oferta, { modo: "personalizado" }),
     manualV2: oferta.manualV2 === true,
-    fonteImportacao: oferta.fonteImportacao
+    fonteImportacao: oferta.fonteImportacao,
+    tituloProdutoApresentacaoAtivo: oferta.tituloProdutoApresentacaoAtivo === true,
+    tituloProdutoApresentacao: oferta.tituloProdutoApresentacao || "",
+    ganchoCopyLocal: oferta.ganchoCopyLocal || "",
+    emojiTituloProduto: oferta.emojiTituloProduto || "",
+    emojiGanchoCopyLocal: oferta.emojiGanchoCopyLocal || ""
   };
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(oferta, oferta.metadata, ofertaOficial, ofertaOficial.metadata)

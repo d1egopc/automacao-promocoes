@@ -1,3 +1,17 @@
+const { normalizarCuponsSemanticos } = require("../radar/cupom-semantico");
+const { resolverContratoComercialFinal } = require("../templates-clientes/contrato-comercial-final");
+
+const ORIGENS_DESCONTO_PUBLICAVEIS = new Set(["marketplace", "manual"]);
+const EVIDENCIAS_CUPOM_PUBLICAVEIS = new Set([
+  "real",
+  "confirmado",
+  "validado",
+  "detectado",
+  "texto_radar",
+  "texto_clonador"
+]);
+const CUPONS_SENTINELA = new Set(["COPIADO", "APPLIED", "APPEARANCE", "APPLINK", "SEM CUPOM"]);
+
 function texto(valor = "") {
   if (valor === null || valor === undefined) return "";
   if (typeof valor === "object" || typeof valor === "function") return "";
@@ -23,8 +37,32 @@ function temUrl(valor = "") {
   return /^https?:\/\//i.test(texto(valor));
 }
 
-function cupomReal(oferta = {}) {
-  return Boolean(texto(oferta.cupom || oferta.cupomCodigo || oferta.codigoCupom || oferta.cupomTexto));
+function cupomPublicavel(oferta = {}) {
+  if (!oferta || typeof oferta !== "object") return "";
+  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return "";
+
+  const contrato = resolverContratoComercialFinal(oferta);
+  const cupomContrato = normalizarCuponsSemanticos(contrato?.cupomCodigo || "")[0] || "";
+  if (cupomContrato && !CUPONS_SENTINELA.has(cupomContrato)) return cupomContrato;
+
+  const evidencia = normalizar([
+    oferta.cupomTipo,
+    oferta.tipoCupom,
+    oferta.cupomEvidencia,
+    oferta.evidenciaCupom
+  ].filter(Boolean).join(" "));
+  const evidenciaPublicavel = Array.from(EVIDENCIAS_CUPOM_PUBLICAVEIS).some(tipo => evidencia.includes(tipo)) ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomValidado === true;
+  if (!evidenciaPublicavel) return "";
+
+  const cupom = normalizarCuponsSemanticos([
+    oferta.cupom,
+    oferta.cupomCodigo,
+    oferta.codigoCupom,
+    oferta.cupomTexto
+  ])[0] || "";
+  return cupom && !CUPONS_SENTINELA.has(cupom) ? cupom : "";
 }
 
 function linkResgateValido(oferta = {}) {
@@ -45,11 +83,9 @@ function numeroPositivo(valor) {
 }
 
 function descontoOficial(oferta = {}) {
-  return numeroPositivo(oferta.descontoPercentual) ||
-    numeroPositivo(oferta.desconto) ||
-    numeroPositivo(oferta.economia) ||
-    numeroPositivo(oferta.economiaValor) ||
-    numeroPositivo(oferta.valorEconomia);
+  const origem = normalizar(oferta.descontoPercentualOrigem);
+  if (!ORIGENS_DESCONTO_PUBLICAVEIS.has(origem)) return false;
+  return numeroPositivo(oferta.descontoPercentual ?? oferta.desconto);
 }
 
 function beneficioSeguro(oferta = {}) {
@@ -89,11 +125,13 @@ function categoriaParaIntencao(categoria = "", tituloOriginal = "") {
 function normalizarSinaisCopy(oferta = {}) {
   const tituloOriginal = texto(oferta.titulo || oferta.nome);
   const categoria = texto(oferta.categoria || oferta.categoriaProduto);
+  const cupomCodigo = cupomPublicavel(oferta);
   const sinais = {
     tituloOriginal,
     categoria,
     marketplace: texto(oferta.marketplace || oferta.loja),
-    cupom: cupomReal(oferta),
+    cupom: Boolean(cupomCodigo),
+    cupomCodigo,
     resgate: linkResgateValido(oferta),
     desconto: descontoOficial(oferta),
     beneficio: beneficioSeguro(oferta),
@@ -123,5 +161,7 @@ module.exports = {
   normalizar,
   normalizarSinaisCopy,
   resolverIntencaoCopy,
-  categoriaParaIntencao
+  categoriaParaIntencao,
+  cupomPublicavel,
+  descontoOficial
 };
