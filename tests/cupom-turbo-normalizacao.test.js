@@ -6,6 +6,10 @@ const vm = require("vm");
 const raiz = path.join(__dirname, "..");
 const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
 const filaOfertasFonte = fs.readFileSync(path.join(raiz, "utils", "fila-ofertas.js"), "utf8");
+const {
+  prioridadeMinimaCupomConfiavel,
+  resolverPrioridadeFinalCupom
+} = require("../modules/cupom/prioridade-cupom");
 
 function extrairDeclaracao(nome, prefixo = "function", fonte = indexFonte) {
   const inicio = fonte.indexOf(`${prefixo} ${nome}`);
@@ -48,15 +52,9 @@ const {
   ordenarPendentesPorPrioridade
 } = contexto.resultado;
 
-const inicioTiposFila = filaOfertasFonte.indexOf("const TIPOS_CUPOM_PRIORIDADE_CONFIAVEL");
-const fimTiposFila = filaOfertasFonte.indexOf("function prioridadeMinimaCupomConfiavel", inicioTiposFila);
-assert(inicioTiposFila >= 0 && fimTiposFila > inicioTiposFila, "piso confiavel deve existir junto da decisao V2");
-
 const fonteDecisaoV2 = [
-  filaOfertasFonte.slice(inicioTiposFila, fimTiposFila),
-  extrairDeclaracao("prioridadeMinimaCupomConfiavel", "function", filaOfertasFonte),
   extrairDeclaracao("aplicarDecisaoEngineV2Oficial", "function", filaOfertasFonte),
-  "resultadoV2 = { prioridadeMinimaCupomConfiavel, aplicarDecisaoEngineV2Oficial };"
+  "resultadoV2 = { aplicarDecisaoEngineV2Oficial };"
 ].join("\n");
 const contextoV2 = {
   resultadoV2: null,
@@ -68,7 +66,9 @@ const contextoV2 = {
   obterConfigEngineV2: () => ({ modo: "oficial" }),
   textoComparacaoNormalizado: valor => String(valor || "").trim().toLowerCase(),
   statusOperacionalV2: () => "pendente",
-  tituloCurto: valor => String(valor || "")
+  tituloCurto: valor => String(valor || ""),
+  prioridadeMinimaCupomConfiavel,
+  resolverPrioridadeFinalCupom
 };
 vm.runInNewContext(fonteDecisaoV2, contextoV2, { filename: "cupom-turbo-engine-v2-contract.js" });
 const { aplicarDecisaoEngineV2Oficial } = contextoV2.resultadoV2;

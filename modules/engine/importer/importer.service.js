@@ -1,6 +1,9 @@
 const { queryEngine } = require("../database");
 const { normalizarNumeroMoeda } = require("../../../utils/moeda");
 const {
+  resolverPrioridadeFinalCupom
+} = require("../../cupom/prioridade-cupom");
+const {
   marcarJobStatus,
   registrarProcessamento,
   carregarEventoBruto,
@@ -3787,6 +3790,14 @@ async function buscarMemoriaAnterioresEngine(oferta = {}, job = {}) {
   };
 }
 
+function resolverPrioridadeCupomImporter(oferta = {}, prioridadeV2 = 0) {
+  return resolverPrioridadeFinalCupom(
+    oferta,
+    prioridadeV2,
+    [oferta.prioridade, oferta.prioridadeEnvio, oferta.prioridadeFila]
+  );
+}
+
 async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
   try {
     const consultaMemoria = await buscarMemoriaAnterioresEngine(oferta, job);
@@ -3843,6 +3854,8 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
     const prioridadeCalculadaV2 = normalizarNumero(resultadoV2.prioridade);
     const scoreV2 = scoreCalculadoV2 ?? prioridadeCalculadaV2 ?? 0;
     const prioridadeV2 = prioridadeCalculadaV2 ?? scoreV2;
+    const resultadoPrioridadeCupom = resolverPrioridadeCupomImporter(oferta, prioridadeV2);
+    const prioridadeFinal = resultadoPrioridadeCupom.prioridadeFinal;
     const ofertaUniversal = resultadoV2.ofertaUniversal || {};
     const memoriaV2 = resultadoV2.memoria || {};
     const valorEfetivoDetalhes = objetoSeguro(resultadoV2.valorEfetivoDetalhes);
@@ -3912,7 +3925,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       oferta: {
         ...oferta,
         score: scoreV2 !== null ? scoreV2 : oferta.score,
-        prioridade: prioridadeV2 !== null ? prioridadeV2 : 0
+        prioridade: prioridadeFinal
       },
       metadata: {
         inteligenciaUniversalV2: {
@@ -3922,7 +3935,12 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
           motivo: motivoFinalV2,
           motivoDecisao: motivoFinalV2,
           score: scoreV2,
-          prioridade: prioridadeV2,
+          prioridade: prioridadeFinal,
+          prioridadeDecisaoV2: prioridadeV2,
+          prioridadeFinal,
+          prioridadeMinimaCupom: resultadoPrioridadeCupom.prioridadeMinimaCupom,
+          prioridadeAnterior: resultadoPrioridadeCupom.prioridadeAnterior,
+          pisoPrioridadeCupomAplicado: resultadoPrioridadeCupom.pisoAplicado,
           categoria: resultadoV2.categoria || "",
           valorEfetivo: resultadoV2.valorEfetivo ?? null,
           valorEfetivoCentavos: resultadoV2.valorEfetivoCentavos ?? null,
@@ -5453,5 +5471,7 @@ module.exports = {
   aplicarComercialCapturadoClonador,
   aplicarPonteIntegridadeComercial,
   ocorrenciasRadarComerciais,
-  aplicarGuardaOcorrenciasRadar
+  aplicarGuardaOcorrenciasRadar,
+  aplicarSombraInteligenciaUniversalV2,
+  resolverPrioridadeCupomImporter
 };

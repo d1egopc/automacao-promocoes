@@ -5,6 +5,10 @@ const { isMainThread } = require("node:worker_threads");
 const { resolverImagemUniversal } = require("../modules/imagens/resolver-imagem-universal");
 const { jobAtivoDentroLease } = require("../modules/engine/jobs.service");
 const {
+  prioridadeMinimaCupomConfiavel,
+  resolverPrioridadeFinalCupom
+} = require("../modules/cupom/prioridade-cupom");
+const {
   identidadeAntiRepeticaoAutomatica,
   identidadeAntiRepeticaoPorDestino,
   ofertasEquivalentesAntiRepeticao,
@@ -1189,42 +1193,6 @@ function statusOperacionalV2(metadata = {}) {
   return metadata.ok === true ? "pendente" : "retida";
 }
 
-const TIPOS_CUPOM_PRIORIDADE_CONFIAVEL = new Set([
-  "texto_radar",
-  "texto_clonador"
-]);
-const CUPONS_INVALIDOS_PRIORIDADE_V2 = new Set([
-  "COPIADO",
-  "APPLIED",
-  "APPEARANCE",
-  "APPLINK",
-  "SEM CUPOM"
-]);
-
-function prioridadeMinimaCupomConfiavel(oferta = {}) {
-  if (!oferta || typeof oferta !== "object") return 0;
-  if (oferta.cupomSuspeito === true || oferta.cupomMonetarioIncompativel === true) return 0;
-
-  const cupom = String(oferta.cupom || "").trim().toUpperCase();
-  if (CUPONS_INVALIDOS_PRIORIDADE_V2.has(cupom)) return 0;
-
-  const tipos = [oferta.cupomTipo, oferta.tipoCupom]
-    .map(tipo => String(tipo || "").trim().toLowerCase())
-    .filter(Boolean);
-  if (
-    tipos.includes("real") ||
-    oferta.cupomConfirmado === true ||
-    oferta.cupomValidado === true
-  ) {
-    return 110;
-  }
-
-  const evidenciaTextoConfiavel = Boolean(cupom) && tipos.some(tipo =>
-    tipo === "detectado" || TIPOS_CUPOM_PRIORIDADE_CONFIAVEL.has(tipo)
-  );
-  return evidenciaTextoConfiavel ? 95 : 0;
-}
-
 function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
   const logger = contexto.logger || console;
   const clienteId = contexto.clienteId || oferta.clienteId || "admin";
@@ -1275,15 +1243,14 @@ function aplicarDecisaoEngineV2Oficial(oferta = {}, contexto = {}) {
 
   const prioridadeMinimaCupom = prioridadeMinimaCupomConfiavel(oferta);
   if (prioridadeMinimaCupom > 0) {
-    const prioridadeV2 = Number(v2.prioridade);
-    const prioridadeAnteriorNumero = prioridadesAnteriores.length
-      ? Math.max(...prioridadesAnteriores)
-      : 0;
-    const prioridadeFinal = Math.max(
-      Number.isFinite(prioridadeV2) ? prioridadeV2 : 0,
-      Number.isFinite(prioridadeAnteriorNumero) ? prioridadeAnteriorNumero : 0,
-      prioridadeMinimaCupom
+    const resultadoPrioridade = resolverPrioridadeFinalCupom(
+      oferta,
+      v2.prioridade,
+      prioridadesAnteriores
     );
+    const prioridadeV2 = Number(v2.prioridade);
+    const prioridadeAnteriorNumero = resultadoPrioridade.prioridadeAnterior;
+    const prioridadeFinal = resultadoPrioridade.prioridadeFinal;
 
     oferta.prioridadeEnvio = prioridadeFinal;
     oferta.prioridadeFila = prioridadeFinal;
