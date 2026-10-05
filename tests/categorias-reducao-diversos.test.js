@@ -42,6 +42,61 @@ const casos = [
   ["Suporte Articulado a Gás para 2 Monitores", "shopee", "Periféricos"]
 ];
 
+const casosOnda1 = [
+  // Beleza: apenas identidades capilares específicas.
+  ["Widi Care Creme de Pentear Juba 500ml", "amazon", "Perfumaria, Farmácia e Beleza"],
+  ["Tonalizante Capilar Profissional 60g", "mercadolivre", "Perfumaria, Farmácia e Beleza"],
+  ["Truss Night Spa Sérum Capilar", "amazon", "Perfumaria, Farmácia e Beleza"],
+  ["Máscara Blond Expert 250g", "magalu", "Perfumaria, Farmácia e Beleza"],
+
+  // Esporte: hidratação e identidades esportivas auditadas.
+  ["Z2 Saltz Repositor Eletrolítico Sachê", "mercadolivre", "Esporte e Suplementos"],
+  ["Eletrólitos para Hidratação com Sódio e Potássio", "amazon", "Esporte e Suplementos"],
+  ["Eletrólitos Ocean Drop com Sódio Fósforo Potássio e Magnésio", "amazon", "Esporte e Suplementos"],
+  ["Energy Gel Limão 30g", "amazon", "Esporte e Suplementos"],
+  ["Taurina Essencial Lab 120 cápsulas", "mercadolivre", "Esporte e Suplementos"],
+
+  // Alimentos e bebidas: nomes factuais inequívocos.
+  ["Ketchup Tradicional 400g", "amazon", "Alimentos e Mercearia"],
+  ["Maionese Tradicional 500g", "mercadolivre", "Alimentos e Mercearia"],
+  ["Molho de Tomate Tradicional 300g", "magalu", "Alimentos e Mercearia"],
+  ["Bourbon Whiskey Jim Beam 1L", "amazon", "Bebidas"],
+  ["Gin Bombay Sapphire 750ml", "amazon", "Bebidas"],
+  ["Vinho Casillero del Diablo 750ml", "mercadolivre", "Bebidas"],
+  ["Energético Red Bull 250ml", "amazon", "Bebidas"],
+
+  // Casa e cozinha: expressões completas, sem termos genéricos isolados.
+  ["Kit 3 Cestos Organizadores de Bambu com Forro", "mercadolivre", "Casa, Móveis e Decoração"],
+  ["Kit 2 Travesseiros Antialérgicos", "mercadolivre", "Casa, Móveis e Decoração"],
+  ["Cadeira Escritório Ergonômica", "mercadolivre", "Casa, Móveis e Decoração"],
+  ["Tela Mosquiteiro para Janela", "shopee", "Casa, Móveis e Decoração"],
+  ["Jogo de Panelas 5 Peças", "amazon", "Casa, Móveis e Decoração"],
+  ["Caçarola Tefal 24cm", "mercadolivre", "Casa, Móveis e Decoração"],
+  ["Cortador Mandoline Ajustável", "amazon", "Casa, Móveis e Decoração"],
+  ["Jogo de Facas Tramontina 6 Peças", "magalu", "Casa, Móveis e Decoração"],
+
+  // Eletrônicos: somente subtipos inequívocos.
+  ["Kit 4 Câmeras de Segurança Wi-Fi", "mercadolivre", "Eletrônicos"],
+  ["Câmera de Ação DJI Osmo Action", "amazon", "Eletrônicos"],
+  ["Internet via Satélite Starlink Mini", "mercadolivre", "Eletrônicos"]
+];
+
+const negativosOnda1 = [
+  ["Máscara de Solda Automática", "Diversos"],
+  ["Creme Culinário Tradicional 200g", "Diversos"],
+  ["Cabo USB para Celular 2m", "Celulares e Smartphones"],
+  ["Kit Promocional Exclusivo", "Diversos"],
+  ["Soundbar para TV com Bluetooth", "Audio TV"],
+  ["Cadeira Gamer Reclinável", "Gamer e Hardware"],
+  ["Câmera de Celular com Lente Macro", "Celulares e Smartphones"],
+  ["Molho de desconto para sua compra", "Diversos"],
+  ["Eletrólito para Bateria Automotiva", "Automotivo"],
+  ["Eletrólitos em Análise Industrial", "Diversos"],
+  ["Ração Canina com Taurina", "Pet Shop e Fazendinha"],
+  ["Faca Avulsa Multiuso", "Limpeza"],
+  ["Câmera de Celular 4K", "Celulares e Smartphones"]
+];
+
 const logOriginal = console.log;
 try {
   console.log = () => {};
@@ -56,6 +111,18 @@ try {
     assert.deepStrictEqual(oferta, antes, "classificação não pode alterar a oferta ou verdade comercial");
   }
 
+  for (const [titulo, marketplace, esperada] of casosOnda1) {
+    assert.strictEqual(
+      classificarCategoriaOferta({ titulo, marketplace, categoria: "Diversos" }, titulo),
+      esperada,
+      titulo
+    );
+  }
+
+  for (const [titulo, esperada] of negativosOnda1) {
+    assert.strictEqual(classificarCategoriaOferta({ titulo }, titulo), esperada, titulo);
+  }
+
   for (const titulo of [
     "THERMO FLAME POR 28 REAIS",
     "Loja Oficial Polo Wear no ML",
@@ -66,6 +133,18 @@ try {
   }
   assert.strictEqual(classificarCategoriaOferta({ titulo: "Murdoku e conjunto de canecas" }), "Diversos",
     "identidades conflitantes não devem escolher categoria por prioridade arbitrária");
+  assert.strictEqual(classificarCategoriaOferta({ titulo: "Creme de pentear com ketchup" }), "Diversos",
+    "identidades novas conflitantes também devem permanecer em Diversos");
+  assert.strictEqual(
+    classificarCategoriaOferta({ titulo: "Cadeira gamer com tela mosquiteiro" }, "Cadeira gamer com tela mosquiteiro"),
+    "Gamer e Hardware",
+    "regra existente deve vencer identidade confiável de fallback"
+  );
+  assert.strictEqual(
+    classificarCategoriaOferta({ titulo: "Ketchup Tradicional", categoria: "Limpeza" }),
+    "Limpeza",
+    "categoria declarada válida deve vencer identidade quando não há termo explícito"
+  );
 
   assert.strictEqual(
     classificarCategoriaUniversal({
@@ -116,4 +195,4 @@ try {
 }
 
 assert.strictEqual(casos.filter(([, , categoria]) => categoria === "Diversos").length, 3);
-console.log("categorias-reducao-diversos: ok (30 casos, 3 ambiguos em Diversos)");
+console.log(`categorias-reducao-diversos: ok (${casos.length + casosOnda1.length + negativosOnda1.length} casos)`);

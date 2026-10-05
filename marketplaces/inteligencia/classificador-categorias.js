@@ -642,15 +642,17 @@ const ALIASES_CATEGORIA = new Map(
 // Identidades de produto inequívocas que o classificador legado ainda não cobre.
 // Aplicadas apenas quando nenhuma regra existente reconheceu a oferta.
 const IDENTIDADES_CONFIAVEIS = [
-  [CATEGORIA.beleza, /\b(?:oleo capilar|finalizador capilar)\b/],
-  [CATEGORIA.casa, /\b(?:protetores? de ralo|formas? de pastel|puff gigante|banquetas? altas?|canecas?|mala de (?:\d+ ?kg )?bordo)\b/],
+  [CATEGORIA.beleza, /\b(?:oleo capilar|finalizador capilar|creme de pentear|tonalizante capilar|cronograma capilar|hair care|knut ultra silver|oleo 10 em 1 absolut repair|truss (?:night spa|uso obrigatorio)|fitagem para cabelos|gel fixador charming|mousse desembaracante|mascara blond expert)\b/],
+  [CATEGORIA.casa, /\b(?:protetores? de ralo|formas? de pastel|puff gigante|banquetas? altas?|canecas?|mala de (?:\d+ ?kg )?bordo|cestos? organizadores?|travesseiros?|cadeiras? escritorio|tela mosquiteiro|jogo (?:de )?panelas|conjunto panelas|cacarola tefal|conj de 0?6 pratos|kit silicone para panelas|jogo de facas tramontina|cortador mandoline?)\b/],
   [CATEGORIA.limpeza, /\bglade difusor de ambiente\b/],
-  [CATEGORIA.esporte, /\b(?:maca peruana|energy gel atlhetica|palatinose)\b/],
+  [CATEGORIA.esporte, /\b(?:maca peruana|energy gel(?: atlhetica)?|palatinose|z2 saltz|taurina essencial lab)\b|(?=.*\beletrolitos?\b)(?=.*\b(?:hidratacao|sodio|potassio|magnesio|saltz|endurance|ocean drop)\b)/],
   [CATEGORIA.papelariaLivros, /\b(?:hidrografica com \d+ cores|murdoku)\b/],
-  [CATEGORIA.alimentos, /\byopro bebida lactea\b/],
+  [CATEGORIA.alimentos, /\b(?:yopro bebida lactea|ketchup|maionese|molho de tomate)\b/],
+  [CATEGORIA.bebidas, /\b(?:bourbon whiskey|jim beam|gin (?:bombay|ingles)|beefeater|casillero del diablo|rum bacardi|red bull)\b/],
   [CATEGORIA.tenis, /\bunder armour tribase cross\b/],
   [CATEGORIA.iluminacao, /\bluminarias? de emergencia\b/],
-  [CATEGORIA.perifericos, /\bsuporte articulado(?: a gas)? para \d+ monitores?\b/]
+  [CATEGORIA.perifericos, /\bsuporte articulado(?: a gas)? para \d+ monitores?\b/],
+  [CATEGORIA.eletronicos, /\b(?:cameras? (?:de )?seguranca|camera de acao dji|starlink mini)\b/]
 ];
 
 function categoriaPorIdentidadeConfiavel(oferta = {}, termo = "") {
