@@ -4170,7 +4170,11 @@ async function concluirRecoveryRemovalFencePendente(clienteId, recovered) {
       filaOperacionalV2.lerRemovalFences(clienteId).length) {
     throw new Error(`removal_fence_checkpoint_unverified_${confirmado?.motivo || "pending"}`);
   }
-  return { ...confirmado, removalFenceRecovered: true };
+  filaOperacionalV2.registrarWorkspaceHealthGuardConcluido(clienteId, recovered, confirmado, {
+    logger: console
+  });
+  return { ...confirmado, removalFenceRecovered: true,
+    ...(recovered.workspaceHealthGuard ? { workspaceHealthGuard: recovered.workspaceHealthGuard } : {}) };
 }
 
 async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "uso_fila") {
@@ -4187,7 +4191,8 @@ async function garantirFilaClienteInicializada(clienteId = "admin", motivo = "us
     .then(async () => {
       estadoInicializacaoFilaCliente.set(cliente, ESTADO_FILA_CLIENTE_INICIALIZANDO);
       let recovered = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente, {
-        recoveryRemovalFenceCheckpoint: true
+        recoveryRemovalFenceCheckpoint: true,
+        workspaceHealthGuard: true
       });
       if (recovered.ok !== true) throw new Error(`viva_intent_recovery_${recovered.motivo}`);
       recovered = await concluirRecoveryRemovalFencePendente(cliente, recovered);
@@ -4240,7 +4245,8 @@ async function reconciliarFilaV2ParaLeituraCliente(clienteId = "admin", contexto
     const cliente = String(clienteId || "admin");
     const contextoTexto = String(contexto || "leitura");
     let intentRecovery = await filaOperacionalV2.reconciliarIntentMutacaoViva(cliente, {
-      recoveryRemovalFenceCheckpoint: true
+      recoveryRemovalFenceCheckpoint: true,
+      workspaceHealthGuard: true
     });
     if (intentRecovery.ok !== true) throw new Error(`viva_intent_recovery_${intentRecovery.motivo}`);
     intentRecovery = await concluirRecoveryRemovalFencePendente(cliente, intentRecovery);

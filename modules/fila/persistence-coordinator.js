@@ -731,6 +731,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       job.exigirMutacao = payload.exigirMutacao === true;
       job.checkpointSincronizado = payload.checkpointSincronizado === true;
       job.requiresCommit = payload.requiresCommit === true;
+      job.expectedCurrentVivaHash = String(payload.expectedCurrentVivaHash || "");
       job.caller = String(payload.caller || payload.origem || payload.motivo || "").slice(0, 120);
       job.motivo = String(payload.motivo || "viva_mutation").slice(0, 120);
       job.rodadaId = String(payload.rodadaId || "").slice(0, 160);
@@ -745,6 +746,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
       job.targetHash = payload.targetHash || null;
       job.legacyFenceHashes = Array.isArray(payload.legacyFenceHashes) ? payload.legacyFenceHashes : [];
       job.vivaFenceHashes = Array.isArray(payload.vivaFenceHashes) ? payload.vivaFenceHashes : [];
+      job.includeFenceCandidates = payload.includeFenceCandidates === true;
     }
     const bytesEstimados = estimarBytes(job);
     const maxGlobal = numeroLimite(env, "FILA_PERSISTENCIA_MAX_PENDING_JOBS", 100);

@@ -440,6 +440,10 @@ function mutateViva(job) {
     throw erro;
   }
   const previousHash = job.requiresCommit === true ? mutationIntent.hashArquivo(paths.viva) : null;
+  if (job.requiresCommit === true && job.expectedCurrentVivaHash &&
+      previousHash !== job.expectedCurrentVivaHash) {
+    return { ok: false, operation: OP_VIVA_MUTATION, motivo: "viva_precondition_hash_mismatch" };
+  }
   const mutationType = String(job.mutationType || "");
   const inputHash = job.requiresCommit === true ? mutationIntent.digest(JSON.stringify(job.item || {})) : "";
   const terminal = job.requiresCommit === true && mutationType === "update" &&
@@ -571,6 +575,9 @@ function probeVivaSnapshot(job) {
   let legacyFenceCovered = null;
   const probeVivaFence = Array.isArray(job.vivaFenceHashes) && job.vivaFenceHashes.length > 0;
   let vivaFenceCovered = null;
+  let vivaFenceCandidates = [];
+  let vivaFenceRelatedCandidates = [];
+  let vivaItemCount = null;
   if (probeVivaFence) {
     const hashes = new Set(job.vivaFenceHashes);
     const viva = readArray(paths.viva, { absentOk: true });
@@ -578,9 +585,24 @@ function probeVivaSnapshot(job) {
       return { ok: false, operation: OP_VIVA_SNAPSHOT_PROBE, motivo: "viva_snapshot_changed_during_probe" };
     }
     const operacional = obterFilaOperacionalV2(dataDir);
-    vivaFenceCovered = !viva.value.some(entrada =>
-      operacional.identidadesItemFilaV2(entrada?.item || entrada)
-        .some(id => hashes.has(mutationIntent.digest(id))));
+    vivaItemCount = viva.value.length;
+    if (job.includeFenceCandidates === true) {
+      vivaFenceCandidates = viva.value.filter(entrada =>
+        operacional.identidadesItemFilaV2(entrada?.item || entrada)
+          .some(id => hashes.has(mutationIntent.digest(id))));
+      vivaFenceCovered = vivaFenceCandidates.length === 0;
+    } else {
+      vivaFenceCovered = !viva.value.some(entrada =>
+        operacional.identidadesItemFilaV2(entrada?.item || entrada)
+          .some(id => hashes.has(mutationIntent.digest(id))));
+    }
+    if (vivaFenceCovered === false && job.includeFenceCandidates === true) {
+      const identidadesCandidatas = new Set(vivaFenceCandidates.flatMap(entrada =>
+        operacional.identidadesEntradaFilaV2(entrada)));
+      vivaFenceRelatedCandidates = viva.value.filter(entrada =>
+        operacional.identidadesEntradaFilaV2(entrada)
+          .some(identidade => identidadesCandidatas.has(identidade)));
+    }
   }
   if (Array.isArray(job.legacyFenceHashes) && job.legacyFenceHashes.length) {
     const hashes = new Set(job.legacyFenceHashes);
@@ -602,7 +624,12 @@ function probeVivaSnapshot(job) {
         size: Number(vivaAfterHash.size || 0),
         mtimeMs: Number(vivaAfterHash.mtimeMs || 0)
       } : null,
-      vivaFenceCovered
+      vivaFenceCovered,
+      vivaItemCount,
+      ...(job.includeFenceCandidates === true ? {
+        vivaFenceCandidates,
+        vivaFenceRelatedCandidates
+      } : {})
     } : {})
   };
 }

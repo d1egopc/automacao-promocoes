@@ -73,6 +73,7 @@ const recoveryComparacaoLogThrottle = new Map();
 const manifestStateLogThrottle = new Map();
 const pendenciasProjecaoLeve = new Map();
 const projectionReadyProjecaoLeve = new Map();
+const workspaceHealthGuardTentativas = new Map();
 
 function texto(valor = "") {
   return String(valor || "").trim();
@@ -1759,6 +1760,7 @@ async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, ite
     mutationId: contexto.vivaProofTelemetry?.mutationId,
     transactionId: contexto.vivaProofTelemetry?.transactionId,
     correlationId: contexto.vivaProofTelemetry?.correlationId,
+    expectedCurrentVivaHash: deps.expectedCurrentVivaHash || "",
     nowMs: deps.agora || Date.now(),
     persistenceMode: "worker",
     requiresCommit: true
@@ -1821,6 +1823,10 @@ async function executarEscritaFilaV2Coordenada(clienteId = "admin", operacao = "
     fileRevision: deps.fileRevision || gerarFileRevision(),
     motivo: deps.motivo || operacao,
     escreverArquivo: async ({ state, nextGeneration, fileRevision, vivaProofTelemetry }) => {
+      if (deps.expectedCurrentVivaGeneration !== undefined &&
+          Number(state?.vivaGeneration) !== Number(deps.expectedCurrentVivaGeneration)) {
+        return { ok: false, motivo: "workspace_health_guard_generation_changed" };
+      }
       resultadoArquivo = await escritor({ clienteId: cliente, state, nextGeneration, fileRevision, vivaProofTelemetry });
       if (resultadoArquivo === false || resultadoArquivo?.ok === false) {
         return resultadoArquivo || { ok: false, motivo: "writer_retorno_false" };
@@ -2666,6 +2672,7 @@ async function consultarSnapshotNoWorker(clienteId, deps, opcoes = {}) {
     targetHash: opcoes.targetHash || null,
     legacyFenceHashes: opcoes.legacyFenceHashes || [],
     vivaFenceHashes: opcoes.vivaFenceHashes || [],
+    includeFenceCandidates: opcoes.includeFenceCandidates === true,
     persistenceMode: "worker"
   });
 }
@@ -2718,14 +2725,26 @@ async function provarRecoveryRemovalFencesPendentes(clienteId = "admin", fences 
   if (!vivaProof.ok) return { ...vivaProof, failClosed: true };
 
   const probe = await consultarSnapshotNoWorker(cliente, deps, {
-    vivaFenceHashes: pendentes.flatMap(fence => fence.identityHashes)
+    vivaFenceHashes: pendentes.flatMap(fence => fence.identityHashes),
+    includeFenceCandidates: deps.workspaceHealthGuard === true
   });
   if (probe.ok !== true || !probe.currentHash || probe.vivaFenceCovered !== true) {
+    const motivo = probe.ok !== true ? "removal_fence_snapshot_probe_failed" :
+      probe.vivaFenceCovered !== true ? "removal_fence_viva_not_covered" : "removal_fence_snapshot_hash_ausente";
     return {
       ok: false,
-      motivo: probe.ok !== true ? "removal_fence_snapshot_probe_failed" :
-        probe.vivaFenceCovered !== true ? "removal_fence_viva_not_covered" : "removal_fence_snapshot_hash_ausente",
-      failClosed: true
+      motivo,
+      failClosed: true,
+      ...(motivo === "removal_fence_viva_not_covered" && deps.workspaceHealthGuard === true ? {
+        workspaceHealthGuardContext: {
+          clienteId: cliente,
+          state,
+          pendentes,
+          probe,
+          vivaProof: vivaProof.proof,
+          intentAbsent: true
+        }
+      } : {})
     };
   }
   const identity = probe.currentIdentity || {};
@@ -2743,6 +2762,275 @@ async function provarRecoveryRemovalFencesPendentes(clienteId = "admin", fences 
     fenceGenerations: pendentes.map(fence => fence.generation),
     state
   };
+}
+
+function chaveEntradaWorkspaceHealthGuard(entrada = {}) {
+  const item = entrada?.item && typeof entrada.item === "object" ? entrada.item : entrada;
+  return mutationIntent.digest(JSON.stringify({
+    id: texto(entrada?.id || idItem(item, entrada?.posicaoLegada || -1)),
+    identidades: identidadesItemFilaV2(item).sort()
+  }));
+}
+
+function identidadeEstadoWorkspaceHealthGuard(clienteId, contexto = {}) {
+  const fences = lista(contexto.pendentes).map(fence => ({
+    jobId: texto(fence.jobId),
+    generation: Number(fence.generation || 0),
+    operation: texto(fence.operation),
+    identityHashes: lista(fence.identityHashes).slice().sort()
+  })).sort((a, b) => `${a.generation}:${a.jobId}`.localeCompare(`${b.generation}:${b.jobId}`));
+  return mutationIntent.digest(JSON.stringify({
+    clienteId: clienteSeguro(clienteId),
+    revision: Number(contexto.state?.revision || 0),
+    vivaGeneration: Number(contexto.state?.vivaGeneration || 0),
+    durableCheckpointGeneration: Number(contexto.state?.durableCheckpointGeneration || 0),
+    currentHash: texto(contexto.probe?.currentHash),
+    fences
+  }));
+}
+
+function logWorkspaceHealthGuard(logger, evento, dados = {}) {
+  logOperacional(logger, {
+    versao: 1,
+    evento,
+    clienteId: clienteSeguro(dados.clienteId),
+    generation: Number(dados.generation || 0),
+    fenceIdentity: texto(dados.fenceIdentity).slice(0, 12),
+    motivo: texto(dados.motivo),
+    candidatos: Number(dados.candidatos || 0),
+    removidos: Number(dados.removidos || 0),
+    unrelatedRemoved: Number(dados.unrelatedRemoved || 0),
+    checkpointBefore: Number(dados.checkpointBefore || 0),
+    checkpointAfter: Number(dados.checkpointAfter || 0),
+    durationMs: Number(dados.durationMs || 0)
+  });
+}
+
+function avaliarWorkspaceHealthGuardRemovalFence(clienteId, falha = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const contexto = falha.workspaceHealthGuardContext || {};
+  const state = contexto.state || {};
+  const probe = contexto.probe || {};
+  const pendentes = lista(contexto.pendentes);
+  const candidatos = lista(probe.vivaFenceCandidates);
+  const relacionados = lista(probe.vivaFenceRelatedCandidates);
+  const stateIdentity = identidadeEstadoWorkspaceHealthGuard(cliente, contexto);
+  const recusar = motivo => ({ ok: false, motivo, stateIdentity, contexto, candidatos, relacionados });
+
+  if (falha.motivo !== "removal_fence_viva_not_covered") return recusar("classe_nao_recuperavel");
+  if (contexto.intentAbsent !== true) return recusar("mutation_intent_ambiguo");
+  if (!texto(probe.currentHash) || probe.vivaFenceCovered !== false || !candidatos.length) {
+    return recusar("snapshot_candidatos_ausentes");
+  }
+  if (!Number.isSafeInteger(Number(probe.vivaItemCount)) || Number(probe.vivaItemCount) < candidatos.length) {
+    return recusar("snapshot_cardinalidade_invalida");
+  }
+  if (!contexto.vivaProof || Number(contexto.vivaProof.generation) !== Number(state.vivaGeneration)) {
+    return recusar("proof_generation_incoerente");
+  }
+  if (Number(probe.currentIdentity?.size) !== Number(contexto.vivaProof.size) ||
+      !mtimeCompatível(probe.currentIdentity?.mtimeMs, contexto.vivaProof.mtimeMs)) {
+    return recusar("snapshot_proof_mismatch");
+  }
+
+  const chavesCandidatos = new Set(candidatos.map(chaveEntradaWorkspaceHealthGuard));
+  const chavesRelacionados = new Set(relacionados.map(chaveEntradaWorkspaceHealthGuard));
+  if (chavesCandidatos.size !== candidatos.length || chavesRelacionados.size !== relacionados.length ||
+      chavesCandidatos.size !== chavesRelacionados.size ||
+      [...chavesRelacionados].some(chave => !chavesCandidatos.has(chave))) {
+    return recusar("remocao_simulada_nao_exata");
+  }
+
+  const fencesPorCandidato = candidatos.map(entrada => {
+    const item = entrada?.item && typeof entrada.item === "object" ? entrada.item : entrada;
+    const hashes = new Set(identidadesItemFilaV2(item).map(mutationIntent.digest));
+    return pendentes.filter(fence => lista(fence.identityHashes).some(hash => hashes.has(hash)));
+  });
+  if (fencesPorCandidato.some(fences => fences.length !== 1)) return recusar("fence_terminal_ambiguo");
+  const fencesTerminais = new Map();
+  for (const fences of fencesPorCandidato) {
+    const fence = fences[0];
+    fencesTerminais.set(`${fence.jobId}:${fence.generation}`, fence);
+  }
+  if (fencesTerminais.size !== 1) return recusar("terminal_multiplo");
+  const fence = [...fencesTerminais.values()][0];
+  if (fence.operation !== "terminal") return recusar("fence_nao_terminal");
+  if (Number(fence.generation) > Number(state.vivaGeneration) ||
+      Number(fence.generation) <= Number(state.durableCheckpointGeneration)) {
+    return recusar("fence_generation_incoerente");
+  }
+
+  const alvo = candidatos[0];
+  const alvoItem = alvo?.item && typeof alvo.item === "object" ? alvo.item : alvo;
+  if (candidatos.some(entrada => {
+    const item = entrada?.item && typeof entrada.item === "object" ? entrada.item : entrada;
+    const workspaceExplicita = texto(item.clienteId);
+    return (workspaceExplicita && clienteSeguro(workspaceExplicita) !== cliente) ||
+      !entradasReferemMesmoItemFilaV2(entrada, alvoItem) ||
+      !entradasReferemMesmoItemFilaV2(alvo, item);
+  })) {
+    return recusar("identidade_ou_workspace_conflitante");
+  }
+
+  return {
+    ok: true,
+    motivo: "removal_fence_aliases_recuperaveis",
+    stateIdentity,
+    contexto,
+    candidatos,
+    relacionados,
+    alvo,
+    alvoItem,
+    fence,
+    expectedRemoved: candidatos.length,
+    expectedTotalAfter: Number(probe.vivaItemCount) - candidatos.length
+  };
+}
+
+async function tentarWorkspaceHealthGuardRemovalFence(clienteId, falha = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const inicio = Date.now();
+  const avaliacao = avaliarWorkspaceHealthGuardRemovalFence(cliente, falha);
+  const generation = Number(avaliacao.contexto?.state?.vivaGeneration || 0);
+  const checkpointBefore = Number(avaliacao.contexto?.state?.durableCheckpointGeneration || 0);
+  const fenceIdentity = avaliacao.stateIdentity;
+
+  if (workspaceHealthGuardTentativas.get(cliente)?.stateIdentity === avaliacao.stateIdentity) {
+    return { ...falha, workspaceHealthGuard: { tentou: false, repetida: true,
+      motivo: "workspace_health_guard_state_already_attempted", stateIdentity: avaliacao.stateIdentity } };
+  }
+  workspaceHealthGuardTentativas.set(cliente, {
+    stateIdentity: avaliacao.stateIdentity,
+    startedAt: inicio,
+    motivo: avaliacao.motivo
+  });
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_detected", {
+    clienteId: cliente, generation, fenceIdentity, motivo: falha.motivo,
+    candidatos: avaliacao.candidatos.length, checkpointBefore
+  });
+
+  if (avaliacao.ok !== true) {
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_refused", {
+      clienteId: cliente, generation, fenceIdentity, motivo: avaliacao.motivo,
+      candidatos: avaliacao.candidatos.length, checkpointBefore, durationMs: Date.now() - inicio
+    });
+    return { ...falha, workspaceHealthGuard: { tentou: true, recusada: true,
+      motivo: avaliacao.motivo, stateIdentity: avaliacao.stateIdentity } };
+  }
+
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_started", {
+    clienteId: cliente, generation, fenceIdentity, motivo: avaliacao.motivo,
+    candidatos: avaliacao.candidatos.length, checkpointBefore
+  });
+  const remover = typeof deps.removerAliasesWorkspaceHealthGuard === "function"
+    ? deps.removerAliasesWorkspaceHealthGuard
+    : removerItemFilaVivaCoordenado;
+  const modoPersistencia = typeof deps.modoPersistenciaViva === "function"
+    ? deps.modoPersistenciaViva(cliente)
+    : "legacy";
+  if (modoPersistencia !== "worker" || typeof deps.agendarMutacaoViva !== "function") {
+    const motivo = "workspace_health_guard_worker_required";
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_refused", {
+      clienteId: cliente, generation, fenceIdentity, motivo,
+      candidatos: avaliacao.candidatos.length, checkpointBefore, durationMs: Date.now() - inicio
+    });
+    return { ...falha, workspaceHealthGuard: { tentou: true, recusada: true,
+      motivo, stateIdentity: avaliacao.stateIdentity } };
+  }
+  const mutacao = await remover(cliente, avaliacao.alvoItem, {
+    ...deps,
+    skipIntentRecovery: true,
+    exigirMutacao: true,
+    checkpointSincronizado: false,
+    expectedCurrentVivaGeneration: generation,
+    expectedCurrentVivaHash: avaliacao.contexto.probe.currentHash,
+    motivo: "workspace_health_guard_removal_fence"
+  });
+  const totalDepois = Number(mutacao?.totalViva);
+  if (mutacao?.ok !== true || mutacao?.removeuDaViva !== true ||
+      !Number.isSafeInteger(totalDepois) || totalDepois !== avaliacao.expectedTotalAfter) {
+    const motivo = mutacao?.motivo || "workspace_health_guard_mutation_unverified";
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_refused", {
+      clienteId: cliente, generation, fenceIdentity, motivo,
+      candidatos: avaliacao.candidatos.length, removidos: 0,
+      unrelatedRemoved: Math.max(0, avaliacao.expectedTotalAfter - totalDepois),
+      checkpointBefore, durationMs: Date.now() - inicio
+    });
+    return { ok: false, motivo, failClosed: true,
+      workspaceHealthGuard: { tentou: true, recusada: true, motivo,
+        stateIdentity: avaliacao.stateIdentity } };
+  }
+
+  const postProbe = await consultarSnapshotNoWorker(cliente, deps, {
+    vivaFenceHashes: lista(avaliacao.contexto.pendentes).flatMap(fence => fence.identityHashes),
+    includeFenceCandidates: true
+  });
+  const proof = mutacao.vivaFileProof || mutacao.resultadoArquivo?.vivaFileProof;
+  const dbState = mutacao.dbState || mutacao.resultadoDb?.state;
+  const manifest = mutacao.manifest || mutacao.resultadoManifesto?.manifesto;
+  const generationDepois = Number(mutacao.generation || dbState?.vivaGeneration || 0);
+  const provaPosMutacao = postProbe?.ok === true && postProbe.vivaFenceCovered === true &&
+    lista(postProbe.vivaFenceCandidates).length === 0 &&
+    Number(postProbe.vivaItemCount) === avaliacao.expectedTotalAfter &&
+    proof && Number(proof.generation) === generationDepois &&
+    Number(postProbe.currentIdentity?.size) === Number(proof.size) &&
+    mtimeCompatível(postProbe.currentIdentity?.mtimeMs, proof.mtimeMs) &&
+    Number(dbState?.vivaGeneration) === generationDepois &&
+    Number(manifest?.vivaGeneration) === generationDepois;
+  if (!provaPosMutacao) {
+    const motivo = "workspace_health_guard_postcondition_failed";
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_refused", {
+      clienteId: cliente, generation: generationDepois, fenceIdentity, motivo,
+      candidatos: avaliacao.candidatos.length, removidos: avaliacao.candidatos.length,
+      checkpointBefore, durationMs: Date.now() - inicio
+    });
+    return { ok: false, motivo, failClosed: true,
+      workspaceHealthGuard: { tentou: true, recusada: true, motivo,
+        stateIdentity: avaliacao.stateIdentity } };
+  }
+
+  return {
+    ok: true,
+    pendente: false,
+    checkpointRequired: true,
+    motivo: "workspace_health_guard_checkpoint_required",
+    targetGeneration: generationDepois,
+    expectedVivaHash: postProbe.currentHash,
+    fenceGenerations: lista(avaliacao.contexto.pendentes).map(fence => fence.generation),
+    state: dbState,
+    workspaceHealthGuard: {
+      tentou: true,
+      iniciou: true,
+      stateIdentity: avaliacao.stateIdentity,
+      fenceIdentity,
+      candidatos: avaliacao.candidatos.length,
+      removidos: avaliacao.candidatos.length,
+      unrelatedRemoved: 0,
+      checkpointBefore,
+      startedAt: inicio
+    }
+  };
+}
+
+function registrarWorkspaceHealthGuardConcluido(clienteId, recovered = {}, confirmado = {}, deps = {}) {
+  const guard = recovered.workspaceHealthGuard;
+  if (!guard?.iniciou) return;
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_success", {
+    clienteId,
+    generation: recovered.targetGeneration,
+    fenceIdentity: guard.fenceIdentity,
+    motivo: confirmado.motivo || "workspace_health_guard_recovery_success",
+    candidatos: guard.candidatos,
+    removidos: guard.removidos,
+    unrelatedRemoved: guard.unrelatedRemoved,
+    checkpointBefore: guard.checkpointBefore,
+    checkpointAfter: confirmado.state?.durableCheckpointGeneration || recovered.targetGeneration,
+    durationMs: Date.now() - Number(guard.startedAt || Date.now())
+  });
+}
+
+function resetarWorkspaceHealthGuardParaTeste() {
+  workspaceHealthGuardTentativas.clear();
 }
 
 async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
@@ -2786,7 +3074,12 @@ async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
     }
     const restantes = removalFence.listar(dataDir, cliente);
     if (restantes.length && deps.recoveryRemovalFenceCheckpoint === true) {
-      return provarRecoveryRemovalFencesPendentes(cliente, restantes, deps);
+      const prova = await provarRecoveryRemovalFencesPendentes(cliente, restantes, deps);
+      if (prova.ok !== true && prova.motivo === "removal_fence_viva_not_covered" &&
+          deps.workspaceHealthGuard === true) {
+        return tentarWorkspaceHealthGuardRemovalFence(cliente, prova, deps);
+      }
+      return prova;
     }
     return { ok: true, pendente: false, checkpointRequired: false };
   }
@@ -6275,6 +6568,10 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     prepararReadinessAutoridadeRecovery: (clienteId, deps = {}) => prepararReadinessAutoridadeRecovery(clienteId, { ...opcoes, ...deps }),
     reconciliarFilaV2ParaLeitura: (clienteId, contexto = {}, deps = {}) => reconciliarFilaV2ParaLeitura(clienteId, contexto, { ...opcoes, ...deps }),
     reconciliarIntentMutacaoViva: (clienteId, deps = {}) => reconciliarIntentMutacaoViva(clienteId, { ...opcoes, ...deps }),
+    tentarWorkspaceHealthGuardRemovalFence: (clienteId, falha = {}, deps = {}) =>
+      tentarWorkspaceHealthGuardRemovalFence(clienteId, falha, { ...opcoes, ...deps }),
+    registrarWorkspaceHealthGuardConcluido: (clienteId, recovered = {}, confirmado = {}, deps = {}) =>
+      registrarWorkspaceHealthGuardConcluido(clienteId, recovered, confirmado, { ...opcoes, ...deps }),
     provarRecoveryRemovalFencesPendentes: (clienteId, fences = [], deps = {}) =>
       provarRecoveryRemovalFencesPendentes(clienteId, fences, { ...opcoes, ...deps }),
     lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
@@ -6344,6 +6641,8 @@ module.exports = {
   normalizarEntradasViva,
   identidadePrimariaExataFilaV2,
   identidadesItemFilaV2,
+  identidadesEntradaFilaV2,
+  entradasReferemMesmoItemFilaV2,
   identidadePrincipalItemFilaV2,
   rankStatusFilaV2,
   escolherItemMaisAvancadoFilaV2,
@@ -6354,6 +6653,10 @@ module.exports = {
   filaVivaMaisNovaQueLegado,
   reconciliarFilaV2ParaLeitura,
   reconciliarIntentMutacaoViva,
+  avaliarWorkspaceHealthGuardRemovalFence,
+  tentarWorkspaceHealthGuardRemovalFence,
+  registrarWorkspaceHealthGuardConcluido,
+  resetarWorkspaceHealthGuardParaTeste,
   provarRecoveryRemovalFencesPendentes,
   lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
     deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
