@@ -196,6 +196,22 @@ assert.deepStrictEqual(
   "emoji semantico segue familia reconhecida"
 );
 
+for (const [titulo, emoji, origem] of [
+  ["Caixa de Som Bluetooth 35 W", "🎧", "subcontexto_audio"],
+  ["Headset Gamer", "🎧", "subcontexto_audio"],
+  ["Fone Bluetooth", "🎧", "subcontexto_audio"],
+  ["Soundbar para TV", "🎧", "subcontexto_audio"],
+  ["Smart TV 50 polegadas", "📺", "subcontexto_tv"],
+  ["TV LG 43 4K", "📺", "subcontexto_tv"],
+  ["Televisão 55 polegadas", "📺", "subcontexto_tv"]
+]) {
+  assert.deepStrictEqual(
+    resolverEmojiSemanticoTitulo({ categoria: "Audio TV", titulo }),
+    { emoji, origem },
+    `audio_tv resolve subtipo pelo titulo factual: ${titulo}`
+  );
+}
+
 const TAG_TITULO = "[TITULO-APRESENTACAO-OBS]";
 const TAG_RENDE_FINAL = "[OFC-V2.5-RENDERER-FINAL]";
 
@@ -312,6 +328,33 @@ const renderSmartphone = renderizarComObsSemantica({
 });
 assert.ok(renderSmartphone.mensagem.startsWith("📱 *Smartphone Samsung Galaxy A56 5G 256GB*"), "smartphone usa emoji celulares");
 assert.strictEqual(renderSmartphone.final.familiaGancho, "celulares", "smartphone usa gancho celulares");
+
+const ofertaCaixaSom = {
+  ...ofertaBase(),
+  id: "semantica_caixa_som",
+  engineOfertaId: "semantica_caixa_som",
+  tituloIa: "",
+  cupom: "",
+  precoOriginal: "",
+  descontoPercentual: "",
+  categoria: "Audio TV",
+  titulo: "Caixa de Som Bluetooth 35 W",
+  nome: "Caixa de Som Bluetooth 35 W"
+};
+const renderCaixaSomUniversal = comC3SemResultado(() =>
+  renderizar(ofertaCaixaSom, { tituloOferta: "ia" }, { tituloIa: true })
+);
+assert.ok(renderCaixaSomUniversal.startsWith("🎧 *Caixa de Som Bluetooth 35 W*"), "renderer universal usa emoji de audio para caixa de som");
+assert.ok(!renderCaixaSomUniversal.startsWith("📺"), "renderer universal nao classifica caixa de som como TV");
+
+const renderCaixaSomPersonalizado = comC3SemResultado(() =>
+  renderizar(ofertaCaixaSom, { templateId: template.id, tituloOferta: "ia" }, { tituloIa: true })
+);
+assert.ok(renderCaixaSomPersonalizado.startsWith("🎧 *Caixa de Som Bluetooth 35 W*"), "renderer personalizado usa emoji de audio para caixa de som");
+assert.ok(!renderCaixaSomPersonalizado.startsWith("📺"), "renderer personalizado nao classifica caixa de som como TV");
+
+const renderCaixaSomOriginal = renderizar(ofertaCaixaSom, { tituloOferta: "original" });
+assert.ok(renderCaixaSomOriginal.includes("Caixa de Som Bluetooth 35 W"), "modo original preserva titulo factual de audio");
 
 const renderGamer = renderizarComObsSemantica({
   id: "semantica_gamer",

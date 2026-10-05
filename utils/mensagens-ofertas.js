@@ -678,11 +678,14 @@ function resolverEmojiSemanticoTitulo(oferta = {}, contexto = {}) {
   if (familia === "pesca_camping" && (subcontexto === "pesca" || /\b(?:pesca|vara de pesca|molinete|carretilha)\b/.test(base))) {
     return escolher("🎣", "subcontexto_pesca");
   }
-  if (familia === "audio_tv" && /\b(?:smart tv|televisao|tv)\b/.test(base)) {
-    return escolher("📺", "subcontexto_tv");
-  }
-  if (familia === "audio_tv" && /\b(?:caixa de som|audio|som|fone|headset)\b/.test(base)) {
-    return escolher("🎧", "subcontexto_audio");
+  if (familia === "audio_tv") {
+    const subtipoAudioTv = `${subcontexto} ${titulo}`;
+    if (/\b(?:caixa de som|soundbar|audio|som|fone|headset|headphone)\b/.test(subtipoAudioTv)) {
+      return escolher("🎧", "subcontexto_audio");
+    }
+    if (/\b(?:smart tv|televisao|tv)\b/.test(subtipoAudioTv)) {
+      return escolher("📺", "subcontexto_tv");
+    }
   }
 
   const porFamilia = {
