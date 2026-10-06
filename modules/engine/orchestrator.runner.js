@@ -3,6 +3,10 @@ let engineOrquestradorIntervalo = null;
 let engineOrquestradorRodadaAtual = "";
 let engineOrquestradorInicioMs = 0;
 let engineOrquestradorOfcAtivo = false;
+let engineOrquestradorRerunPendente = false;
+let engineOrquestradorWakeAgendado = false;
+let engineOrquestradorRerunImediatoAtivo = false;
+let engineOrquestradorRerunImediatoConsumido = false;
 let engineOrquestradorUltimaRodada = { rodadaId: "", inicioMs: 0, fimMs: 0 };
 let engineOrquestradorUltimaOfc = { rodadaId: "", inicioMs: 0, fimMs: 0 };
 let clonadorGruposEntradaRodando = false;
@@ -11,6 +15,7 @@ let clonadorGruposEntradaOpcoes = null;
 let clonadorGruposEntradaWakeAgendado = false;
 let clonadorGruposEntradaRerunPendente = false;
 
+const { setImmediate: setImmediateNode } = require("node:timers");
 const { executarObservabilidadeOfc } = require("./ofc");
 const { alterarEtapaEngine } = require("../../utils/painel-latencia");
 const { createAutoGateShadow } = require("../auto-gate/auto-gate-shadow.service");
@@ -72,9 +77,48 @@ function obterEstadoOrquestradorEngine() {
     rodadaId: engineOrquestradorRodadaAtual || "",
     iniciadoEmMs: engineOrquestradorInicioMs || 0,
     ofcAtivo: engineOrquestradorOfcAtivo === true,
+    rerunPendente: engineOrquestradorRerunPendente === true,
+    wakeAgendado: engineOrquestradorWakeAgendado === true,
+    rerunImediatoAtivo: engineOrquestradorRerunImediatoAtivo === true,
+    rerunImediatoConsumido: engineOrquestradorRerunImediatoConsumido === true,
     ultimaRodada: { ...engineOrquestradorUltimaRodada },
     ultimaOfc: { ...engineOrquestradorUltimaOfc }
   };
+}
+
+function agendarRerunImediatoEngine(opcoes = {}) {
+  if (engineOrquestradorWakeAgendado) return false;
+
+  const setImmediateFn = typeof opcoes.setImmediateFn === "function" ? opcoes.setImmediateFn : setImmediateNode;
+  engineOrquestradorWakeAgendado = true;
+
+  try {
+    setImmediateFn(() => {
+      engineOrquestradorWakeAgendado = false;
+      executarRodadaEngineOrquestrador({
+        ...opcoes,
+        origemRodadaEngine: "rerun_imediato"
+      }).catch((erro) => {
+        console.log("[ENGINE-ORQUESTRADOR-RERUN-ERRO]", {
+          etapa: "rerun_imediato",
+          erro: erro.message || "rerun_imediato_falhou"
+        });
+      });
+    });
+  } catch (erro) {
+    engineOrquestradorWakeAgendado = false;
+    console.log("[ENGINE-ORQUESTRADOR-RERUN-ERRO]", {
+      etapa: "agendamento",
+      erro: erro.message || "agendamento_rerun_falhou"
+    });
+    return false;
+  }
+
+  console.log("[ENGINE-ORQUESTRADOR-RERUN-AGENDADO]", {
+    origem: "trigger_durante_rodada_normal",
+    orcamentoConsumido: true
+  });
+  return true;
 }
 
 function memoriaPerfResumo() {
@@ -344,16 +388,57 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     limites = {}
   } = opcoes;
 
+  const origemRodadaEngine = opcoes.origemRodadaEngine === "rerun_imediato"
+    ? "rerun_imediato"
+    : opcoes.origemRodadaEngine === "timer"
+      ? "timer"
+      : "normal";
+  const ehRerunImediato = origemRodadaEngine === "rerun_imediato";
+  const ehCicloTimer = origemRodadaEngine === "timer";
+
+  if (!ehRerunImediato && !engineOrquestradorRodando && engineOrquestradorWakeAgendado) {
+    console.log("[ENGINE-ORQUESTRADOR-TRIGGER-COALESCIDO]", {
+      motivo: "rerun_imediato_agendado",
+      wakeAgendado: true
+    });
+    return { ok: true, pulado: true, coalescido: true, motivo: "rerun_imediato_agendado" };
+  }
+
   if (engineOrquestradorRodando) {
+    const podeRegistrarRerun = engineOrquestradorRerunImediatoAtivo !== true &&
+      engineOrquestradorRerunImediatoConsumido !== true;
+    const jaPendente = engineOrquestradorRerunPendente;
+    if (podeRegistrarRerun) engineOrquestradorRerunPendente = true;
+    if (podeRegistrarRerun && !jaPendente) {
+      console.log("[ENGINE-ORQUESTRADOR-RERUN-PENDENTE]", {
+        rodadaAnteriorId: engineOrquestradorRodadaAtual,
+        rerunPendente: true
+      });
+    }
     console.log("[ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO]", {
       motivo: "rodada_em_execucao",
       rodadaAnteriorId: engineOrquestradorRodadaAtual,
-      idadeRodadaAnteriorMs: Math.max(0, Date.now() - engineOrquestradorInicioMs)
+      idadeRodadaAnteriorMs: Math.max(0, Date.now() - engineOrquestradorInicioMs),
+      rerunPendente: engineOrquestradorRerunPendente === true,
+      rerunImediatoAtivo: engineOrquestradorRerunImediatoAtivo === true,
+      orcamentoConsumido: engineOrquestradorRerunImediatoConsumido === true
     });
-    return { ok: true, pulado: true, motivo: "rodada_em_execucao" };
+    return {
+      ok: true,
+      pulado: true,
+      motivo: "rodada_em_execucao",
+      rerunPendente: engineOrquestradorRerunPendente === true,
+      orcamentoConsumido: engineOrquestradorRerunImediatoConsumido === true
+    };
+  }
+
+  if (!ehRerunImediato) {
+    engineOrquestradorRerunPendente = false;
+    if (ehCicloTimer) engineOrquestradorRerunImediatoConsumido = false;
   }
 
   engineOrquestradorRodando = true;
+  engineOrquestradorRerunImediatoAtivo = ehRerunImediato;
   const finalizarPerfBackground = iniciarPerfBackground("engine_v2_orquestrador");
   let okPerfBackground = true;
   const inicio = Date.now();
@@ -391,6 +476,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
   });
   console.log("[ENGINE-RODADA-INICIO]", JSON.stringify({
     rodadaId,
+    origem: origemRodadaEngine,
     iniciadoEm: new Date(inicio).toISOString()
   }));
 
@@ -615,6 +701,11 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     });
     return { ok: false, erro: e.message };
   } finally {
+    const deveAgendarRerun = !ehRerunImediato &&
+      engineOrquestradorRerunPendente === true &&
+      engineOrquestradorRerunImediatoConsumido !== true;
+    engineOrquestradorRerunPendente = false;
+    if (deveAgendarRerun) engineOrquestradorRerunImediatoConsumido = true;
     const cpuRodada = process.cpuUsage(cpuInicioRodadaEngine);
     console.log("[ENGINE-RODADA-FIM]", JSON.stringify({
       rodadaId,
@@ -631,6 +722,8 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     engineOrquestradorRodadaAtual = "";
     engineOrquestradorInicioMs = 0;
     engineOrquestradorOfcAtivo = false;
+    engineOrquestradorRerunImediatoAtivo = false;
+    if (deveAgendarRerun) agendarRerunImediatoEngine(opcoes);
     alterarEtapaEngine("", "inativo");
     medidorRodada.fim({
       ok: resumo.ok !== false,
@@ -776,16 +869,17 @@ function iniciarOrquestradorEngine(opcoes = {}) {
 
   const intervaloMs = Number(opcoes.intervaloMs || 120000);
   const intervaloFinal = Number.isFinite(intervaloMs) && intervaloMs > 0 ? intervaloMs : 120000;
+  const setIntervalFn = typeof opcoes.setIntervalFn === "function" ? opcoes.setIntervalFn : setInterval;
 
   console.log("[ENGINE-WORKER-INICIALIZADO]", {
     intervaloMs: intervaloFinal
   });
 
-  engineOrquestradorIntervalo = setInterval(() => {
+  engineOrquestradorIntervalo = setIntervalFn(() => {
     console.log("[ENGINE-WORKER-CICLO-INICIO]", {
       intervaloMs: intervaloFinal
     });
-    executarRodadaEngineOrquestrador(opcoes).catch((e) => {
+    executarRodadaEngineOrquestrador({ ...opcoes, origemRodadaEngine: "timer" }).catch((e) => {
       console.log("[ENGINE-WORKER-ERRO]", {
         etapa: "intervalo",
         erro: e.message
