@@ -34,6 +34,7 @@ const terminalIndexShadow = require("./terminal-index-shadow");
 const terminalIndexAuthority = require("./terminal-index-authority");
 const mutationIntent = require("./viva-mutation-intent");
 const removalFence = require("./viva-removal-fence");
+const filaClaimsRepository = require("./fila-claims.repository");
 
 const FILA_V2_MANIFEST_ARQUIVO = "fila-v2-manifest.json";
 const FILA_V2_MANIFEST_VERSION_ATUAL = 2;
@@ -990,7 +991,7 @@ function dirtyGenerationCoerente(vivaGeneration, durableCheckpointGeneration, di
     dirtyGeneration <= vivaGeneration;
 }
 
-function validarStateRecoveryGeneration(state = {}) {
+function validarStateRecoveryGenerationBase(state = {}) {
   const vivaGeneration = numeroProofEstrito(state.vivaGeneration);
   const durableCheckpointGeneration = numeroProofEstrito(state.durableCheckpointGeneration);
   const revision = numeroProofEstrito(state.revision);
@@ -1006,6 +1007,13 @@ function validarStateRecoveryGeneration(state = {}) {
   if (!dirtyGenerationCoerente(vivaGeneration, durableCheckpointGeneration, dirtyGeneration)) {
     return { ok: false, motivo: "generation_invalida" };
   }
+  return { ok: true, vivaGeneration, durableCheckpointGeneration, revision, dirtyGeneration };
+}
+
+function validarStateRecoveryGeneration(state = {}) {
+  const base = validarStateRecoveryGenerationBase(state);
+  if (!base.ok) return base;
+  const { vivaGeneration, revision } = base;
   if (state.authorityReady !== true ||
       Number(state.authorityReadyGeneration) !== vivaGeneration ||
       !Number.isInteger(Number(state.authorityReadyRevision)) ||
@@ -1015,7 +1023,7 @@ function validarStateRecoveryGeneration(state = {}) {
   if (state.pendingCheckpointRevision || state.pendingCheckpointTargetGeneration !== null) {
     return { ok: false, motivo: "pending_ambiguo" };
   }
-  return { ok: true };
+  return base;
 }
 
 function validarManifestoRecoveryGeneration(clienteId = "admin", state = {}, deps = {}) {
@@ -1607,6 +1615,7 @@ async function prepararReadinessAutoridadeRecovery(clienteId = "admin", deps = {
   const fsImpl = deps.fs || fs;
   const manifestoPath = caminhoJsonCliente(cliente, FILA_V2_MANIFEST_ARQUIVO, deps);
   const resultado = await repo.prepararReadinessAutoridade(cliente, {
+    expectedRevision: deps.expectedRevision,
     lerManifesto: () => {
       const leitura = lerJsonArquivoDireto(manifestoPath, null, fsImpl);
       if (!leitura.ok) {
@@ -1633,6 +1642,24 @@ async function prepararReadinessAutoridadeRecovery(clienteId = "admin", deps = {
     }, deps, "manifest_authority_bootstrap")
   }, deps);
   return resultado;
+}
+
+async function invalidarReadinessAutoridadeRecovery(clienteId = "admin", deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.invalidarAuthorityReady !== "function") {
+    return { ok: false, invalidado: false, motivo: "repository_sem_invalidacao_authority" };
+  }
+  const expectedRevision = numeroProofEstrito(deps.expectedRevision);
+  const expectedVivaGeneration = numeroProofEstrito(deps.expectedVivaGeneration);
+  if (expectedRevision === null || expectedVivaGeneration === null) {
+    return { ok: false, invalidado: false, motivo: "authority_invalidation_precondition_invalida" };
+  }
+  return repo.invalidarAuthorityReady(cliente, {
+    expectedRevision,
+    expectedVivaGeneration,
+    motivo: deps.motivo || "workspace_health_guard_revalidation_failed"
+  }, deps);
 }
 
 function executarManifestStateAsync(clienteId = "admin", operacao = "", payload = {}, deps = {}) {
@@ -2677,6 +2704,25 @@ async function consultarSnapshotNoWorker(clienteId, deps, opcoes = {}) {
   });
 }
 
+async function provarAusenciaClaimAtivoWorkspace(clienteId, deps = {}) {
+  const consultarClaims = typeof deps.existeClaimAtivoWorkspace === "function"
+    ? deps.existeClaimAtivoWorkspace
+    : filaClaimsRepository.existeClaimAtivoWorkspace;
+  if (typeof consultarClaims !== "function") {
+    return { ok: false, motivo: "authority_readiness_claim_reader_indisponivel", failClosed: true };
+  }
+  let claims;
+  try { claims = await consultarClaims(clienteSeguro(clienteId), deps); }
+  catch { return { ok: false, motivo: "authority_readiness_claim_query_failed", failClosed: true }; }
+  if (claims?.ok !== true) {
+    return { ok: false, motivo: claims?.motivo || "authority_readiness_claim_query_failed", failClosed: true };
+  }
+  if (claims.existe === true) {
+    return { ok: false, motivo: "authority_readiness_claim_ativo", failClosed: true };
+  }
+  return { ok: true, existe: false };
+}
+
 async function provarRecoveryRemovalFencesPendentes(clienteId = "admin", fences = [], deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const repo = repositoryManifestState(deps);
@@ -2762,6 +2808,263 @@ async function provarRecoveryRemovalFencesPendentes(clienteId = "admin", fences 
     fenceGenerations: pendentes.map(fence => fence.generation),
     state
   };
+}
+
+function normalizarFencesAuthorityReadiness(fences = []) {
+  return lista(fences).map(fence => ({
+    jobId: texto(fence?.jobId),
+    generation: Number(fence?.generation || 0),
+    operation: texto(fence?.operation),
+    identityHashes: [...new Set(lista(fence?.identityHashes).map(texto).filter(Boolean))].sort()
+  })).sort((a, b) => `${a.generation}:${a.jobId}`.localeCompare(`${b.generation}:${b.jobId}`));
+}
+
+function identidadeAuthorityReadiness(clienteId, state = {}, fences = [], probe = {}) {
+  return mutationIntent.digest(JSON.stringify({
+    clienteId: clienteSeguro(clienteId),
+    revision: Number(state.revision || 0),
+    vivaGeneration: Number(state.vivaGeneration || 0),
+    durableCheckpointGeneration: Number(state.durableCheckpointGeneration || 0),
+    dirtyGeneration: state.dirtyGeneration ?? null,
+    currentHash: texto(probe.currentHash),
+    fences: normalizarFencesAuthorityReadiness(fences)
+  }));
+}
+
+function mesmoStateAuthorityReadiness(a = {}, b = {}) {
+  return [
+    "revision",
+    "vivaGeneration",
+    "durableCheckpointGeneration",
+    "dirtyGeneration",
+    "pendingCheckpointRevision",
+    "pendingCheckpointTargetGeneration",
+    "authorityReady",
+    "authorityReadyGeneration",
+    "authorityReadyRevision"
+  ].every(chave => (a?.[chave] ?? null) === (b?.[chave] ?? null));
+}
+
+async function provarAuthorityReadinessRemovalFences(clienteId = "admin", fences = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const recusar = (motivo, extras = {}) => ({ ok: false, motivo, failClosed: true, ...extras });
+  const repo = repositoryManifestState(deps);
+  if (!repo || typeof repo.lerStateObservacional !== "function") {
+    return recusar("authority_readiness_db_reader_indisponivel");
+  }
+
+  const db = await repo.lerStateObservacional(cliente, deps);
+  if (db?.ok !== true || !db.state) return recusar("authority_readiness_db_indisponivel");
+  const state = db.state;
+  const base = validarStateRecoveryGenerationBase(state);
+  if (!base.ok) return recusar(base.motivo);
+  if (state.authorityReady !== false) return recusar("authority_readiness_estado_divergente");
+  if (state.authorityReadyGeneration !== null || state.authorityReadyRevision !== null) {
+    return recusar("authority_readiness_metadata_divergente");
+  }
+  if (state.pendingCheckpointRevision || state.pendingCheckpointTargetGeneration !== null) {
+    return recusar("pending_ambiguo");
+  }
+
+  const pendentes = normalizarFencesAuthorityReadiness(fences)
+    .filter(fence => fence.generation > base.durableCheckpointGeneration);
+  if (!pendentes.length) return recusar("authority_readiness_fence_ausente");
+  if (pendentes.length !== lista(fences).length) return recusar("authority_readiness_fence_set_ambiguo");
+  if (pendentes.some(fence => !fence.jobId || fence.operation !== "terminal" || !fence.identityHashes.length)) {
+    return recusar("authority_readiness_fence_nao_terminal");
+  }
+  if (pendentes.some(fence => fence.generation > base.vivaGeneration)) {
+    return recusar("removal_fence_generation_incoerente");
+  }
+
+  const manifesto = validarManifestoRecoveryGeneration(cliente, state, deps);
+  if (!manifesto.ok) return recusar(manifesto.motivo, { validacao: manifesto });
+  const vivaProof = validarProofPublicado(cliente, {
+    prefixo: "viva",
+    arquivoDados: FILA_VIVA_ARQUIVO,
+    arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+    generation: base.vivaGeneration,
+    proofDb: state.vivaFileProof
+  }, deps);
+  if (!vivaProof.ok) return recusar(vivaProof.motivo, { validacao: vivaProof });
+
+  const probe = await consultarSnapshotNoWorker(cliente, deps, {
+    vivaFenceHashes: pendentes.flatMap(fence => fence.identityHashes),
+    includeFenceCandidates: true
+  });
+  if (probe?.ok !== true) return recusar(probe?.motivo || "authority_readiness_snapshot_probe_failed");
+  if (!texto(probe.currentHash)) return recusar("authority_readiness_snapshot_hash_ausente");
+  if (probe.vivaFenceCovered !== true || lista(probe.vivaFenceCandidates).length ||
+      lista(probe.vivaFenceRelatedCandidates).length) {
+    return recusar("authority_readiness_representante_protegido_presente");
+  }
+  if (!Number.isSafeInteger(Number(probe.vivaItemCount)) || Number(probe.vivaItemCount) < 0) {
+    return recusar("authority_readiness_snapshot_cardinalidade_invalida");
+  }
+  if (Number(probe.currentIdentity?.size) !== Number(vivaProof.proof.size) ||
+      !mtimeCompatível(probe.currentIdentity?.mtimeMs, vivaProof.proof.mtimeMs)) {
+    return recusar("authority_readiness_snapshot_proof_mismatch");
+  }
+
+  const dataDir = deps.env?.DATA_DIR || process.env.DATA_DIR || "/data";
+  const intent = mutationIntent.ler(dataDir, cliente);
+  if (!intent.ok) return recusar(intent.motivo || "authority_readiness_intent_invalido");
+  if (intent.exists) return recusar("authority_readiness_mutation_intent_ativo");
+
+  const claims = await provarAusenciaClaimAtivoWorkspace(cliente, deps);
+  if (!claims.ok) return recusar(claims.motivo);
+
+  let fencesAtuais;
+  try { fencesAtuais = normalizarFencesAuthorityReadiness(removalFence.listar(dataDir, cliente)); }
+  catch { return recusar("authority_readiness_fence_invalido"); }
+  if (JSON.stringify(fencesAtuais) !== JSON.stringify(pendentes)) {
+    return recusar("authority_readiness_fence_changed");
+  }
+
+  const dbRevalidado = await repo.lerStateObservacional(cliente, deps);
+  if (dbRevalidado?.ok !== true || !dbRevalidado.state) {
+    return recusar("authority_readiness_db_revalidation_failed");
+  }
+  if (!mesmoStateAuthorityReadiness(state, dbRevalidado.state)) {
+    return recusar("authority_readiness_state_changed");
+  }
+
+  return {
+    ok: true,
+    motivo: "authority_readiness_safe_class_proven",
+    clienteId: cliente,
+    state,
+    pendentes,
+    probe,
+    vivaProof: vivaProof.proof,
+    attemptId: identidadeAuthorityReadiness(cliente, state, pendentes, probe)
+  };
+}
+
+async function provarReadinessPreparadaAindaSegura(clienteId, prova = {}, readiness = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const recusar = motivo => ({ ok: false, motivo, failClosed: true });
+  const repo = repositoryManifestState(deps);
+  const db = await repo.lerStateObservacional(cliente, deps);
+  if (db?.ok !== true || !db.state) return recusar("authority_readiness_db_revalidation_failed");
+  const state = db.state;
+  const esperado = readiness.state || {};
+  if (!mesmoStateAuthorityReadiness(state, esperado) ||
+      state.authorityReady !== true ||
+      Number(state.authorityReadyGeneration) !== Number(state.vivaGeneration) ||
+      Number(state.authorityReadyRevision) !== Number(state.revision)) {
+    return recusar("authority_readiness_state_changed");
+  }
+
+  const dataDir = deps.env?.DATA_DIR || process.env.DATA_DIR || "/data";
+  const intent = mutationIntent.ler(dataDir, cliente);
+  if (!intent.ok) return recusar(intent.motivo || "authority_readiness_intent_invalido");
+  if (intent.exists) return recusar("authority_readiness_mutation_intent_ativo");
+
+  const claims = await provarAusenciaClaimAtivoWorkspace(cliente, deps);
+  if (!claims.ok) return claims;
+
+  let fencesAtuais;
+  try { fencesAtuais = normalizarFencesAuthorityReadiness(removalFence.listar(dataDir, cliente)); }
+  catch { return recusar("authority_readiness_fence_invalido"); }
+  if (JSON.stringify(fencesAtuais) !== JSON.stringify(prova.pendentes || [])) {
+    return recusar("authority_readiness_fence_changed");
+  }
+  return { ok: true, state };
+}
+
+async function tentarWorkspaceHealthGuardAuthorityReadiness(clienteId = "admin", fences = [], deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const inicio = Date.now();
+  const generation = Number(fences.reduce((maior, fence) => Math.max(maior, Number(fence?.generation || 0)), 0));
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_not_ready_detected", {
+    clienteId: cliente,
+    generation,
+    motivo: "authority_not_ready"
+  });
+
+  const prova = await provarAuthorityReadinessRemovalFences(cliente, fences, deps);
+  if (prova.ok !== true) {
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_readiness_refused", {
+      clienteId: cliente,
+      generation,
+      motivo: prova.motivo,
+      durationMs: Date.now() - inicio
+    });
+    return prova;
+  }
+
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_safe_class_proven", {
+    clienteId: cliente,
+    generation: prova.state.vivaGeneration,
+    fenceIdentity: prova.attemptId,
+    motivo: prova.motivo
+  });
+  const readiness = await prepararReadinessAutoridadeRecovery(cliente, {
+    ...deps,
+    expectedRevision: Number(prova.state.revision)
+  });
+  if (readiness?.ok !== true || readiness.ready !== true) {
+    const motivo = readiness?.motivo || "authority_readiness_prepare_failed";
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_readiness_refused", {
+      clienteId: cliente,
+      generation: prova.state.vivaGeneration,
+      fenceIdentity: prova.attemptId,
+      motivo,
+      durationMs: Date.now() - inicio
+    });
+    return { ok: false, motivo, failClosed: true,
+      workspaceHealthGuardReadiness: { tentou: true, preparada: false, attemptId: prova.attemptId } };
+  }
+
+  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_readiness_prepared", {
+    clienteId: cliente,
+    generation: readiness.state?.vivaGeneration || prova.state.vivaGeneration,
+    fenceIdentity: prova.attemptId,
+    motivo: readiness.motivo || "authority_readiness_ready"
+  });
+  const preRevalidacao = await provarReadinessPreparadaAindaSegura(cliente, prova, readiness, deps);
+  const revalidado = preRevalidacao.ok === true
+    ? await reconciliarIntentMutacaoViva(cliente, {
+        ...deps,
+        workspaceHealthGuardReadinessAttempted: true,
+        workspaceHealthGuardReadinessRevalidation: true
+      })
+    : preRevalidacao;
+  const readinessContext = {
+    tentou: true,
+    iniciou: true,
+    preparada: true,
+    attemptId: prova.attemptId,
+    startedAt: inicio,
+    generationBefore: Number(prova.state.vivaGeneration),
+    revisionBefore: Number(prova.state.revision),
+    checkpointBefore: Number(prova.state.durableCheckpointGeneration)
+  };
+  if (revalidado?.ok !== true) {
+    const invalidacao = await invalidarReadinessAutoridadeRecovery(cliente, {
+      ...deps,
+      expectedRevision: readiness.state?.revision,
+      expectedVivaGeneration: readiness.state?.vivaGeneration,
+      motivo: "workspace_health_guard_revalidation_failed"
+    });
+    readinessContext.invalidacao = {
+      ok: invalidacao?.ok === true,
+      invalidado: invalidacao?.invalidado === true,
+      motivo: invalidacao?.motivo || "authority_invalidation_failed"
+    };
+  }
+  logWorkspaceHealthGuard(deps.logger,
+    revalidado?.ok === true
+      ? "workspace_health_guard_authority_revalidation_success"
+      : "workspace_health_guard_authority_revalidation_failed", {
+      clienteId: cliente,
+      generation: revalidado?.state?.vivaGeneration || prova.state.vivaGeneration,
+      fenceIdentity: prova.attemptId,
+      motivo: revalidado?.motivo || "authority_readiness_revalidation_failed",
+      durationMs: Date.now() - inicio
+    });
+  return { ...revalidado, workspaceHealthGuardReadiness: readinessContext };
 }
 
 function chaveEntradaWorkspaceHealthGuard(entrada = {}) {
@@ -3014,19 +3317,32 @@ async function tentarWorkspaceHealthGuardRemovalFence(clienteId, falha = {}, dep
 
 function registrarWorkspaceHealthGuardConcluido(clienteId, recovered = {}, confirmado = {}, deps = {}) {
   const guard = recovered.workspaceHealthGuard;
-  if (!guard?.iniciou) return;
-  logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_success", {
-    clienteId,
-    generation: recovered.targetGeneration,
-    fenceIdentity: guard.fenceIdentity,
-    motivo: confirmado.motivo || "workspace_health_guard_recovery_success",
-    candidatos: guard.candidatos,
-    removidos: guard.removidos,
-    unrelatedRemoved: guard.unrelatedRemoved,
-    checkpointBefore: guard.checkpointBefore,
-    checkpointAfter: confirmado.state?.durableCheckpointGeneration || recovered.targetGeneration,
-    durationMs: Date.now() - Number(guard.startedAt || Date.now())
-  });
+  if (guard?.iniciou) {
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_recovery_success", {
+      clienteId,
+      generation: recovered.targetGeneration,
+      fenceIdentity: guard.fenceIdentity,
+      motivo: confirmado.motivo || "workspace_health_guard_recovery_success",
+      candidatos: guard.candidatos,
+      removidos: guard.removidos,
+      unrelatedRemoved: guard.unrelatedRemoved,
+      checkpointBefore: guard.checkpointBefore,
+      checkpointAfter: confirmado.state?.durableCheckpointGeneration || recovered.targetGeneration,
+      durationMs: Date.now() - Number(guard.startedAt || Date.now())
+    });
+  }
+  const readiness = recovered.workspaceHealthGuardReadiness;
+  if (readiness?.iniciou) {
+    logWorkspaceHealthGuard(deps.logger, "workspace_health_guard_authority_recovery_success", {
+      clienteId,
+      generation: recovered.targetGeneration || readiness.generationBefore,
+      fenceIdentity: readiness.attemptId,
+      motivo: confirmado.motivo || "authority_readiness_recovery_success",
+      checkpointBefore: readiness.checkpointBefore,
+      checkpointAfter: confirmado.state?.durableCheckpointGeneration || recovered.targetGeneration,
+      durationMs: Date.now() - Number(readiness.startedAt || Date.now())
+    });
+  }
 }
 
 function resetarWorkspaceHealthGuardParaTeste() {
@@ -3075,8 +3391,12 @@ async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
     const restantes = removalFence.listar(dataDir, cliente);
     if (restantes.length && deps.recoveryRemovalFenceCheckpoint === true) {
       const prova = await provarRecoveryRemovalFencesPendentes(cliente, restantes, deps);
+      if (prova.ok !== true && prova.motivo === "authority_not_ready" &&
+          deps.workspaceHealthGuard === true && deps.workspaceHealthGuardReadinessAttempted !== true) {
+        return tentarWorkspaceHealthGuardAuthorityReadiness(cliente, restantes, deps);
+      }
       if (prova.ok !== true && prova.motivo === "removal_fence_viva_not_covered" &&
-          deps.workspaceHealthGuard === true) {
+          deps.workspaceHealthGuard === true && deps.workspaceHealthGuardReadinessRevalidation !== true) {
         return tentarWorkspaceHealthGuardRemovalFence(cliente, prova, deps);
       }
       return prova;
@@ -6574,6 +6894,8 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
       registrarWorkspaceHealthGuardConcluido(clienteId, recovered, confirmado, { ...opcoes, ...deps }),
     provarRecoveryRemovalFencesPendentes: (clienteId, fences = [], deps = {}) =>
       provarRecoveryRemovalFencesPendentes(clienteId, fences, { ...opcoes, ...deps }),
+    provarAuthorityReadinessRemovalFences: (clienteId, fences = [], deps = {}) =>
+      provarAuthorityReadinessRemovalFences(clienteId, fences, { ...opcoes, ...deps }),
     lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
       deps.env?.DATA_DIR || opcoes.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
     lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(
@@ -6658,6 +6980,7 @@ module.exports = {
   registrarWorkspaceHealthGuardConcluido,
   resetarWorkspaceHealthGuardParaTeste,
   provarRecoveryRemovalFencesPendentes,
+  provarAuthorityReadinessRemovalFences,
   lerIntentMutacaoViva: (clienteId, deps = {}) => mutationIntent.ler(
     deps.env?.DATA_DIR || process.env.DATA_DIR || "/data", clienteId),
   lerRemovalFences: (clienteId, deps = {}) => removalFence.listar(

@@ -592,9 +592,6 @@ async function prepararReadinessAutoridade(clienteId = "admin", dados = {}, deps
     const atual = await garantirLinhaCliente(client, cliente, {});
     const expectedRevision = numeroInteiroNaoNegativo(dados.expectedRevision);
     if (expectedRevision !== null && expectedRevision !== atual.revision) {
-      if (atual.authorityReady) {
-        await atualizarState(client, { ...atual, authorityReady: false }, "authority_readiness_revision_stale");
-      }
       return {
         ok: true,
         ready: false,
@@ -1048,7 +1045,37 @@ async function invalidarAuthorityReady(clienteId = "admin", dados = {}, deps = {
   return comTransacao(async (client) => {
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
-    return atualizarState(client, {
+    const expectedRevision = numeroInteiroNaoNegativo(dados.expectedRevision);
+    if (expectedRevision !== null && expectedRevision !== atual.revision) {
+      return {
+        ok: true,
+        invalidado: false,
+        motivo: "revision_stale",
+        clienteId: cliente,
+        state: atual
+      };
+    }
+    const expectedVivaGeneration = numeroInteiroNaoNegativo(dados.expectedVivaGeneration);
+    if (expectedVivaGeneration !== null && expectedVivaGeneration !== atual.vivaGeneration) {
+      return {
+        ok: true,
+        invalidado: false,
+        motivo: "generation_stale",
+        clienteId: cliente,
+        state: atual
+      };
+    }
+    if (atual.authorityReady !== true) {
+      return {
+        ok: true,
+        invalidado: false,
+        idempotente: true,
+        motivo: "authority_ready_ja_invalidada",
+        clienteId: cliente,
+        state: atual
+      };
+    }
+    const resultado = await atualizarState(client, {
       clienteId: cliente,
       vivaGeneration: atual.vivaGeneration,
       durableCheckpointGeneration: atual.durableCheckpointGeneration,
@@ -1060,6 +1087,7 @@ async function invalidarAuthorityReady(clienteId = "admin", dados = {}, deps = {
       pendingCheckpointStartedAt: atual.pendingCheckpointStartedAt || null,
       authorityReady: false
     }, dados.motivo || "authority_ready_invalidada");
+    return { ...resultado, invalidado: resultado.ok === true };
   }, deps);
 }
 

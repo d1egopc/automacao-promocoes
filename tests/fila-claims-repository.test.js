@@ -66,6 +66,12 @@ function criarPoolMemoria() {
               return { rows: [clone(row)], rowCount: 1 };
             } finally { liberar(); }
           }
+          if (/^SELECT EXISTS \(/i.test(texto) && /FROM fila_claims_ativos/i.test(texto)) {
+            const clienteId = String(params[0] || "");
+            const existe = [...state.values()].some(row =>
+              row.cliente_id === clienteId && Date.parse(row.lease_expires_at) > Date.now());
+            return { rows: [{ existe }], rowCount: 1 };
+          }
           if (/^SELECT .* FROM fila_claims_ativos/i.test(texto)) {
             const row = state.get(id);
             if (!row) return { rows: [], rowCount: 0 };
@@ -167,6 +173,31 @@ async function testarConcorrenciaEIsolamento() {
   assert.strictEqual(workspaceDiferente.adquirido, true);
 }
 
+async function testarConsultaClaimAtivoPorWorkspace() {
+  const pool = criarPoolMemoria();
+  assert.deepStrictEqual(await repo.existeClaimAtivoWorkspace("workspace_a", { pool }), {
+    ok: true,
+    existe: false
+  });
+
+  const ativo = await repo.adquirirClaimFila(entrada("workspace_a", "engine_ativo"), { pool });
+  assert.strictEqual(ativo.adquirido, true);
+  assert.deepStrictEqual(await repo.existeClaimAtivoWorkspace("workspace_a", { pool }), {
+    ok: true,
+    existe: true
+  });
+  assert.deepStrictEqual(await repo.existeClaimAtivoWorkspace("workspace_b", { pool }), {
+    ok: true,
+    existe: false
+  });
+
+  pool.persistido.get("workspace_a|engine_ativo").lease_expires_at = "2020-01-01T00:00:00.000Z";
+  assert.deepStrictEqual(await repo.existeClaimAtivoWorkspace("workspace_a", { pool }), {
+    ok: true,
+    existe: false
+  });
+}
+
 async function testarClientExternoERollback() {
   const pool = criarPoolMemoria();
   const client = await pool.connect();
@@ -182,6 +213,7 @@ async function testarClientExternoERollback() {
   await testarSchemaEContrato();
   await testarOperacoesBasicas();
   await testarConcorrenciaEIsolamento();
+  await testarConsultaClaimAtivoPorWorkspace();
   await testarClientExternoERollback();
   console.log("fila-claims-repository.test.js OK");
 })().catch(erro => {

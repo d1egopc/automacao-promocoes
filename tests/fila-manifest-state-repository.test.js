@@ -538,6 +538,27 @@ function aguardarFilaAsync() {
     assert.strictEqual(invalidado.state.durableCheckpointGeneration, 1, "invalidacao nao altera durable");
     assert.strictEqual(invalidado.state.dirtyGeneration, null, "invalidacao nao inventa dirty quando generation ja estava duravel");
     assert.strictEqual(invalidado.state.authorityReady, false, "rewrite sem proof invalida readiness");
+    assert.strictEqual(invalidado.invalidado, true);
+
+    const prontoNovamente = await repo.prepararReadinessAutoridade(cliente, {
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 1,
+          durableCheckpointGeneration: 1,
+          dirtyGeneration: null
+        }
+      })
+    }, { pool });
+    const stale = await repo.invalidarAuthorityReady(cliente, {
+      expectedRevision: prontoNovamente.state.revision - 1,
+      expectedVivaGeneration: prontoNovamente.state.vivaGeneration,
+      motivo: "health_guard_revalidation_stale"
+    }, { pool });
+    assert.strictEqual(stale.invalidado, false);
+    assert.strictEqual(stale.motivo, "revision_stale");
+    assert.strictEqual(stale.state.authorityReady, true, "CAS stale nao invalida autoridade mais nova");
   }
 
   {
@@ -949,6 +970,32 @@ function aguardarFilaAsync() {
 
     assert.strictEqual(resultado.ready, false, "revision stale nao pode marcar readiness");
     assert.strictEqual(resultado.motivo, "revision_stale");
+  }
+
+  {
+    const pool = criarPoolFake();
+    const dados = {
+      expectedRevision: 0,
+      lerManifesto: () => ({
+        ok: true,
+        manifesto: {
+          manifestVersion: 2,
+          vivaGeneration: 0,
+          durableCheckpointGeneration: 0,
+          dirtyGeneration: null
+        }
+      })
+    };
+    const [a, b] = await Promise.all([
+      repo.prepararReadinessAutoridade("cliente_ready_cas", dados, { pool }),
+      repo.prepararReadinessAutoridade("cliente_ready_cas", dados, { pool })
+    ]);
+    const resultados = [a, b];
+    assert.strictEqual(resultados.filter(item => item.ready === true).length, 1);
+    assert.strictEqual(resultados.filter(item => item.motivo === "revision_stale").length, 1);
+    const final = await repo.lerStateObservacional("cliente_ready_cas", { pool });
+    assert.strictEqual(final.state.revision, 1, "perdedor CAS nao pode gravar nova revisao");
+    assert.strictEqual(final.state.authorityReady, true, "perdedor CAS nao invalida readiness do vencedor");
   }
 
   {

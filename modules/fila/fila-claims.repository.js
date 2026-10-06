@@ -142,6 +142,20 @@ async function obterClaimFila(entrada = {}, opcoes = {}) {
   return resultado.rows?.[0] ? normalizarClaim(resultado.rows[0], chave) : null;
 }
 
+async function existeClaimAtivoWorkspace(clienteId = "", opcoes = {}) {
+  const cliente = normalizarChaveClaimFila({ clienteId, filaItemId: "workspace-health-guard" }).clienteId;
+  const resultado = await comExecutorClaim(opcoes, client => client.query(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM ${TABELA}
+        WHERE cliente_id = $1
+          AND lease_expires_at > NOW()
+     ) AS existe`,
+    [cliente]
+  ));
+  return { ok: true, existe: resultado.rows?.[0]?.existe === true };
+}
+
 async function renovarClaimFila(entrada = {}, opcoes = {}) {
   const chave = normalizarChaveClaimFila(entrada);
   const claimToken = normalizarTokenClaim(entrada.claimToken);
@@ -258,6 +272,7 @@ module.exports = {
   liberarAdvisoryLockFila,
   adquirirClaimFila,
   obterClaimFila,
+  existeClaimAtivoWorkspace,
   renovarClaimFila,
   liberarClaimFila
 };

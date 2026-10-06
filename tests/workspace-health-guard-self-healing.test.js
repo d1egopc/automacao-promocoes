@@ -39,10 +39,75 @@ function criarStorage(root) {
   };
 }
 
-function criarRepositorio(states) {
+function criarRepositorio(states, opcoes = {}) {
+  const readinessCalls = [];
+  const readinessWrites = [];
   return {
     states,
+    readinessCalls,
+    readinessWrites,
     async lerStateObservacional(cliente) { return { ok: true, state: states.get(cliente) }; },
+    async prepararReadinessAutoridade(cliente, dados = {}) {
+      const antes = states.get(cliente);
+      readinessCalls.push({ cliente, expectedRevision: dados.expectedRevision, revision: antes.revision });
+      if (opcoes.readinessFalha === true) {
+        return { ok: false, ready: false, motivo: "readiness_fixture_falhou", state: antes };
+      }
+      if (dados.expectedRevision !== undefined && Number(dados.expectedRevision) !== Number(antes.revision)) {
+        return { ok: true, ready: false, motivo: "revision_stale", state: antes };
+      }
+      const leitura = await dados.lerManifesto({ clienteId: cliente, state: antes });
+      if (leitura?.ok !== true) return { ok: true, ready: false, motivo: leitura?.motivo || "manifest_indisponivel", state: antes };
+      const atual = states.get(cliente);
+      if (dados.expectedRevision !== undefined && Number(dados.expectedRevision) !== Number(atual.revision)) {
+        return { ok: true, ready: false, motivo: "revision_stale", state: atual };
+      }
+      const depois = {
+        ...atual,
+        revision: Number(atual.revision) + 1,
+        authorityReady: true,
+        authorityReadyGeneration: Number(atual.vivaGeneration),
+        authorityReadyRevision: Number(atual.revision) + 1
+      };
+      states.set(cliente, depois);
+      readinessWrites.push({ cliente, revision: depois.revision, generation: depois.vivaGeneration });
+      if (opcoes.corromperProofDepoisReadiness === true) {
+        opcoes.storage.writeClienteJson(cliente, fila.FILA_VIVA_PROOF_ARQUIVO, { generation: 999 });
+      }
+      if (typeof opcoes.depoisReadiness === "function") {
+        await opcoes.depoisReadiness({
+          cliente,
+          state: depois,
+          states,
+          root: opcoes.root,
+          storage: opcoes.storage
+        });
+      }
+      return { ok: true, ready: true, motivo: "authority_readiness_ready", state: depois };
+    },
+    async invalidarAuthorityReady(cliente, dados = {}) {
+      const atual = states.get(cliente);
+      if (dados.expectedRevision !== undefined && Number(dados.expectedRevision) !== Number(atual.revision)) {
+        return { ok: true, invalidado: false, motivo: "revision_stale", state: atual };
+      }
+      if (dados.expectedVivaGeneration !== undefined &&
+          Number(dados.expectedVivaGeneration) !== Number(atual.vivaGeneration)) {
+        return { ok: true, invalidado: false, motivo: "generation_stale", state: atual };
+      }
+      if (atual.authorityReady !== true) {
+        return { ok: true, invalidado: false, idempotente: true,
+          motivo: "authority_ready_ja_invalidada", state: atual };
+      }
+      const depois = {
+        ...atual,
+        revision: Number(atual.revision) + 1,
+        authorityReady: false,
+        authorityReadyGeneration: null,
+        authorityReadyRevision: null
+      };
+      states.set(cliente, depois);
+      return { ok: true, invalidado: true, motivo: dados.motivo || "authority_ready_invalidada", state: depois };
+    },
     async registrarMutacaoDuravel(cliente, dados) {
       const antes = states.get(cliente);
       const nextGeneration = Number(antes.vivaGeneration) + 1;
@@ -58,7 +123,9 @@ function criarRepositorio(states) {
         vivaGeneration: nextGeneration,
         dirtyGeneration: antes.dirtyGeneration || Number(antes.durableCheckpointGeneration) + 1,
         vivaFileProof: escrita.vivaFileProof,
-        authorityReady: false
+        authorityReady: false,
+        authorityReadyGeneration: null,
+        authorityReadyRevision: null
       };
       states.set(cliente, depois);
       return { ok: true, state: depois };
@@ -100,6 +167,8 @@ function criarRepositorio(states) {
         dirtyGeneration: null,
         legacyFileProof: publicado.legacyFileProof,
         authorityReady: false,
+        authorityReadyGeneration: null,
+        authorityReadyRevision: null,
         pendingCheckpointRevision: null,
         pendingCheckpointTargetGeneration: null,
         pendingCheckpointStartedAt: null
@@ -198,14 +267,14 @@ async function criarCenario(nome, opcoes = {}) {
     vivaFileProof: proof.proof,
     legacyFileProof: null,
     authorityReady: opcoes.authorityReady !== false,
-    authorityReadyGeneration: 5,
-    authorityReadyRevision: 5,
+    authorityReadyGeneration: opcoes.authorityReady === false ? null : 5,
+    authorityReadyRevision: opcoes.authorityReady === false ? null : 5,
     pendingCheckpointRevision: null,
     pendingCheckpointTargetGeneration: null,
     pendingCheckpointStartedAt: null
   };
   const states = new Map([[cliente, state]]);
-  const repo = criarRepositorio(states);
+  const repo = criarRepositorio(states, { ...opcoes, root, cliente, storage });
   storage.writeClienteJson(cliente, "fila-v2-manifest.json", {
     version: 2,
     manifestVersion: 2,
@@ -242,21 +311,38 @@ async function criarCenario(nome, opcoes = {}) {
   }
   const coordinator = criarCoordenadorPersistencia({ env, logger });
   const mutationTypes = [];
+  let claimChecks = 0;
   const controller = fila.criarControladorFilaOperacionalV2({
     ...storage,
     env,
     manifestStateRepository: repo,
+    existeClaimAtivoWorkspace: async () => {
+      claimChecks += 1;
+      if (opcoes.claimQueryFalha === true) throw new Error("claim_query_fixture_falhou");
+      return {
+        ok: true,
+        existe: opcoes.claimAtivo === true ||
+          (opcoes.claimAtivoAposPrimeiraConsulta === true && claimChecks > 1)
+      };
+    },
     logger,
     modoPersistenciaViva: () => "worker",
     agendarMutacaoViva: payload => {
       mutationTypes.push(payload.mutationType);
       return coordinator.mutateViva({ ...payload, dataDir: root });
     },
-    agendarProbeViva: payload => coordinator.probeVivaSnapshot({ ...payload, dataDir: root })
+    agendarProbeViva: async payload => {
+      const resultado = await coordinator.probeVivaSnapshot({ ...payload, dataDir: root });
+      if (typeof opcoes.depoisProbe === "function") {
+        await opcoes.depoisProbe({ payload, resultado, root, cliente, states });
+      }
+      return resultado;
+    }
   });
   storage.writeClienteJson(cliente, "automacao.json", { automacaoAtiva: false });
   return { root, cliente, outroCliente, terminal, aliases, representanteVivo, seguro, outro, storage,
-    logger, env, states, repo, coordinator, controller, mutationTypes };
+    logger, env, states, repo, coordinator, controller, mutationTypes,
+    getClaimChecks: () => claimChecks };
 }
 
 async function destruirCenario(cenario) {
@@ -433,15 +519,46 @@ async function testarFenceTransitoriaNaoAcionaGuard() {
   } finally { await destruirCenario(cenario); }
 }
 
-async function testarAuthorityNotReadyNaoAcionaGuard() {
+async function testarAuthorityNotReadyComRepresentantesPermaneceFailClosed() {
   const cenario = await criarCenario("authority_not_ready", { authorityReady: false });
   try {
     const antes = idsViva(cenario, cenario.cliente);
     const resultado = await executarGuard(cenario);
     assert.strictEqual(resultado.ok, false);
-    assert.strictEqual(resultado.motivo, "authority_not_ready");
+    assert.strictEqual(resultado.motivo, "authority_readiness_representante_protegido_presente");
     assert.strictEqual(resultado.workspaceHealthGuard, undefined);
     assert.deepStrictEqual(idsViva(cenario, cenario.cliente), antes);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarAuthorityNotReadySeguroAutoRecupera() {
+  const cenario = await criarCenario("authority_not_ready_seguro", { authorityReady: false, aliases: 0 });
+  try {
+    const historicoAntes = historico(cenario, cenario.cliente);
+    const recovery = await executarGuard(cenario);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    assert.strictEqual(recovery.checkpointRequired, true);
+    assert.strictEqual(recovery.motivo, "removal_fence_checkpoint_required");
+    assert.strictEqual(recovery.workspaceHealthGuard, undefined);
+    assert.strictEqual(recovery.workspaceHealthGuardReadiness.preparada, true);
+    assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, true);
+    assert.strictEqual(cenario.getClaimChecks(), 2, "classe excepcional faz duas consultas bounded de lease");
+    assert.deepStrictEqual(idsViva(cenario, cenario.cliente), [cenario.seguro.id]);
+    assert.deepStrictEqual(lerJson(cenario, cenario.cliente, "automacao.json"), {
+      automacaoAtiva: false
+    });
+    assert.deepStrictEqual(historico(cenario, cenario.cliente), historicoAntes);
+    assert.deepStrictEqual(cenario.mutationTypes, []);
+    await concluirCheckpoint(cenario, recovery);
+    assert.strictEqual(removalFence.listar(cenario.root, cenario.cliente).length, 0);
+    assert.deepStrictEqual(idsViva(cenario, cenario.cliente), [cenario.seguro.id]);
+    assert.deepStrictEqual(historico(cenario, cenario.cliente), historicoAntes);
+    const eventos = cenario.logger.eventos.map(evento => evento.evento);
+    assert(eventos.includes("workspace_health_guard_authority_not_ready_detected"));
+    assert(eventos.includes("workspace_health_guard_authority_safe_class_proven"));
+    assert(eventos.includes("workspace_health_guard_authority_readiness_prepared"));
+    assert(eventos.includes("workspace_health_guard_authority_revalidation_success"));
+    assert(eventos.includes("workspace_health_guard_authority_recovery_success"));
   } finally { await destruirCenario(cenario); }
 }
 
@@ -452,6 +569,7 @@ async function testarWorkspaceSaudavelOciosa() {
     assert.strictEqual(resultado.ok, true);
     assert.strictEqual(resultado.checkpointRequired, false);
     assert.strictEqual(resultado.workspaceHealthGuard, undefined);
+    assert.strictEqual(cenario.getClaimChecks(), 0, "hot path saudavel nao consulta claims");
     assert.deepStrictEqual(lerJson(cenario, cenario.cliente, "automacao.json"), {
       automacaoAtiva: false
     });
@@ -488,7 +606,7 @@ async function testarDuplaChamadaPosRemocao() {
     const generation = cenario.states.get(cenario.cliente).vivaGeneration;
     const segunda = await executarGuard(cenario);
     assert.strictEqual(segunda.ok, false);
-    assert.strictEqual(segunda.motivo, "authority_not_ready");
+    assert.strictEqual(segunda.motivo, "authority_readiness_fence_nao_terminal");
     assert.strictEqual(cenario.states.get(cenario.cliente).vivaGeneration, generation);
     assert.deepStrictEqual(idsViva(cenario, cenario.cliente), [cenario.seguro.id]);
     assert.strictEqual(historico(cenario, cenario.cliente).length, 1);
@@ -655,6 +773,540 @@ async function testarMatrizPuraFailClosed() {
   } finally { await destruirCenario(cenario); }
 }
 
+function atualizarSnapshotVivaCenario(cenario, entradas, fileRevision = "authority-readiness-test") {
+  cenario.storage.writeClienteJson(cenario.cliente, "fila-viva.json", entradas);
+  const proof = fila.publicarProofFilaViva(cenario.cliente, {
+    generation: cenario.states.get(cenario.cliente).vivaGeneration,
+    fileRevision
+  }, { ...cenario.storage, logger: cenario.logger });
+  assert.strictEqual(proof.ok, true, JSON.stringify(proof));
+  cenario.states.set(cenario.cliente, {
+    ...cenario.states.get(cenario.cliente),
+    vivaFileProof: proof.proof
+  });
+  const manifest = lerJson(cenario, cenario.cliente, "fila-v2-manifest.json");
+  cenario.storage.writeClienteJson(cenario.cliente, "fila-v2-manifest.json", {
+    ...manifest,
+    vivaFileProof: proof.proof
+  });
+}
+
+async function testarAuthorityReadinessIntentAtivoFailClosed() {
+  const cenario = await criarCenario("authority_intent_ativo", { authorityReady: false, aliases: 0 });
+  try {
+    const vivaPath = path.join(cenario.root, "clientes", cenario.cliente, "fila-viva.json");
+    const currentHash = mutationIntent.hashArquivo(vivaPath);
+    mutationIntent.escrever(cenario.root, cenario.cliente, {
+      schema: 1,
+      clienteId: cenario.cliente,
+      jobId: "authority-intent-ativo",
+      expectedGeneration: 5,
+      targetGeneration: 6,
+      mutationType: "insert",
+      previousHash: currentHash,
+      targetHash: currentHash,
+      fileRevision: "authority-intent-ativo",
+      itemCount: 1,
+      checkpointSincronizado: false,
+      inputHash: mutationIntent.digest("authority-intent-ativo"),
+      removalOperation: null,
+      removedIdentityHashes: []
+    });
+    const fences = removalFence.listar(cenario.root, cenario.cliente);
+    const resultado = await cenario.controller.provarAuthorityReadinessRemovalFences(
+      cenario.cliente,
+      fences
+    );
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "authority_readiness_mutation_intent_ativo");
+    assert.strictEqual(cenario.repo.readinessWrites.length, 0);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarMatrizAuthorityReadinessFailClosed() {
+  const casos = [
+    {
+      nome: "hash_divergente",
+      preparar(cenario) {
+        const vivaPath = path.join(cenario.root, "clientes", cenario.cliente, "fila-viva.json");
+        fs.appendFileSync(vivaPath, " ");
+      },
+      motivos: ["stat_mismatch"]
+    },
+    {
+      nome: "proof_divergente",
+      preparar(cenario) {
+        cenario.storage.writeClienteJson(cenario.cliente, fila.FILA_VIVA_PROOF_ARQUIVO, { generation: 999 });
+      },
+      motivos: ["viva_proof_mismatch"]
+    },
+    {
+      nome: "manifest_divergente",
+      preparar(cenario) {
+        const manifest = lerJson(cenario, cenario.cliente, "fila-v2-manifest.json");
+        cenario.storage.writeClienteJson(cenario.cliente, "fila-v2-manifest.json", {
+          ...manifest,
+          vivaGeneration: 999
+        });
+      },
+      motivos: ["manifest_mismatch"]
+    },
+    {
+      nome: "db_divergente",
+      preparar(cenario) {
+        const state = cenario.states.get(cenario.cliente);
+        cenario.states.set(cenario.cliente, { ...state, vivaGeneration: 6 });
+      },
+      motivos: ["manifest_mismatch"]
+    },
+    {
+      nome: "fence_nao_terminal",
+      opcoes: { fenceOperation: "remove" },
+      motivos: ["authority_readiness_fence_nao_terminal"]
+    },
+    {
+      nome: "generation_incompativel",
+      preparar(cenario) {
+        removalFence.limparAte(cenario.root, cenario.cliente, 99);
+        removalFence.escrever(cenario.root, cenario.cliente, {
+          schema: 1,
+          clienteId: cenario.cliente,
+          jobId: "fence-futura",
+          generation: 6,
+          operation: "terminal",
+          identityHashes: [mutationIntent.digest("fence-futura")],
+          createdAt: new Date().toISOString()
+        });
+      },
+      motivos: ["removal_fence_generation_incoerente"]
+    },
+    {
+      nome: "checkpoint_ambiguo",
+      preparar(cenario) {
+        const state = cenario.states.get(cenario.cliente);
+        cenario.states.set(cenario.cliente, {
+          ...state,
+          pendingCheckpointRevision: "pending-parcial",
+          pendingCheckpointTargetGeneration: null
+        });
+      },
+      motivos: ["pending_ambiguo"]
+    },
+    {
+      nome: "authority_metadata_divergente",
+      preparar(cenario) {
+        const state = cenario.states.get(cenario.cliente);
+        cenario.states.set(cenario.cliente, {
+          ...state,
+          authorityReadyGeneration: state.vivaGeneration,
+          authorityReadyRevision: state.revision
+        });
+      },
+      motivos: ["authority_readiness_metadata_divergente"]
+    },
+    {
+      nome: "claim_ativo",
+      opcoes: { claimAtivo: true },
+      motivos: ["authority_readiness_claim_ativo"]
+    },
+    {
+      nome: "claim_query_falhou",
+      opcoes: { claimQueryFalha: true },
+      motivos: ["authority_readiness_claim_query_failed"]
+    },
+    {
+      nome: "claim_apareceu_apos_prova",
+      opcoes: { claimAtivoAposPrimeiraConsulta: true },
+      motivos: ["authority_readiness_claim_ativo"],
+      authorityDevePermanecerFalse: true
+    },
+    {
+      nome: "prepare_falhou",
+      opcoes: { readinessFalha: true },
+      motivos: ["readiness_fixture_falhou"]
+    },
+    {
+      nome: "revalidacao_falhou",
+      opcoes: { corromperProofDepoisReadiness: true },
+      motivos: ["viva_proof_mismatch"],
+      authorityDevePermanecerFalse: true
+    }
+  ];
+
+  for (const caso of casos) {
+    const cenario = await criarCenario(`authority_${caso.nome}`, {
+      authorityReady: false,
+      aliases: 0,
+      ...(caso.opcoes || {})
+    });
+    try {
+      if (caso.preparar) await caso.preparar(cenario);
+      const antes = idsViva(cenario, cenario.cliente);
+      const resultado = await executarGuard(cenario);
+      assert.strictEqual(resultado.ok, false, `${caso.nome}: ${JSON.stringify(resultado)}`);
+      assert(caso.motivos.includes(resultado.motivo), `${caso.nome}: ${resultado.motivo}`);
+      assert.deepStrictEqual(idsViva(cenario, cenario.cliente), antes, caso.nome);
+      assert.deepStrictEqual(cenario.mutationTypes, [], caso.nome);
+      if (caso.authorityDevePermanecerFalse) {
+        assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, false, caso.nome);
+        assert.strictEqual(resultado.workspaceHealthGuardReadiness?.invalidacao?.invalidado, true, caso.nome);
+      }
+    } finally { await destruirCenario(cenario); }
+  }
+}
+
+async function testarCorridasAuthorityReadinessFailClosed() {
+  let stateMudou = false;
+  const stateRace = await criarCenario("authority_state_race", {
+    authorityReady: false,
+    aliases: 0,
+    depoisProbe({ states, cliente }) {
+      if (stateMudou) return;
+      stateMudou = true;
+      const state = states.get(cliente);
+      states.set(cliente, { ...state, revision: state.revision + 1 });
+    }
+  });
+  try {
+    const resultado = await executarGuard(stateRace);
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "authority_readiness_state_changed");
+    assert.strictEqual(stateRace.repo.readinessWrites.length, 0);
+  } finally { await destruirCenario(stateRace); }
+
+  let fenceMudou = false;
+  const fenceRace = await criarCenario("authority_fence_race", {
+    authorityReady: false,
+    aliases: 0,
+    depoisProbe({ root, cliente }) {
+      if (fenceMudou) return;
+      fenceMudou = true;
+      removalFence.escrever(root, cliente, {
+        schema: 1,
+        clienteId: cliente,
+        jobId: "fence-concorrente",
+        generation: 5,
+        operation: "terminal",
+        identityHashes: [mutationIntent.digest("fence-concorrente")],
+        createdAt: new Date().toISOString()
+      });
+    }
+  });
+  try {
+    const resultado = await executarGuard(fenceRace);
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "authority_readiness_fence_changed");
+    assert.strictEqual(fenceRace.repo.readinessWrites.length, 0);
+  } finally { await destruirCenario(fenceRace); }
+}
+
+async function testarCorridasDepoisDoPrepareAuthorityReadiness() {
+  const casos = [
+    {
+      nome: "intent_apareceu",
+      esperado: "intent_invalid",
+      depoisReadiness({ root, cliente }) {
+        fs.writeFileSync(mutationIntent.caminho(root, cliente), "{}");
+      }
+    },
+    {
+      nome: "fence_mudou",
+      esperado: "authority_readiness_fence_changed",
+      depoisReadiness({ root, cliente }) {
+        removalFence.escrever(root, cliente, {
+          schema: 1,
+          clienteId: cliente,
+          jobId: "fence-pos-readiness",
+          generation: 5,
+          operation: "terminal",
+          identityHashes: [mutationIntent.digest("fence-pos-readiness")],
+          createdAt: new Date().toISOString()
+        });
+      }
+    },
+    {
+      nome: "representante_reapareceu",
+      esperado: "removal_fence_viva_not_covered",
+      depoisReadiness({ root, cliente, states, storage }) {
+        const atual = JSON.parse(fs.readFileSync(path.join(root, "clientes", cliente, "fila-viva.json"), "utf8"));
+        const terminal = {
+          clienteId: cliente,
+          id: "representante-pos-readiness",
+          ofertaId: 100,
+          produtoId: "MLB-HEALTH-100",
+          linkOriginal: "https://produto.exemplo/health-100",
+          titulo: "Produto Health Guard",
+          preco: 99.9,
+          status: "pendente"
+        };
+        atualizarSnapshotVivaCenario({
+          root,
+          cliente,
+          states,
+          storage,
+          logger: criarLogger()
+        }, [...atual, entrada(terminal, atual.length)], "representante-pos-readiness");
+      }
+    },
+    {
+      nome: "generation_mudou",
+      esperado: "authority_readiness_state_changed",
+      depoisReadiness({ cliente, states }) {
+        const atual = states.get(cliente);
+        states.set(cliente, {
+          ...atual,
+          revision: atual.revision + 1,
+          vivaGeneration: atual.vivaGeneration + 1,
+          dirtyGeneration: atual.dirtyGeneration || atual.durableCheckpointGeneration + 1,
+          authorityReady: false,
+          authorityReadyGeneration: null,
+          authorityReadyRevision: null
+        });
+      }
+    },
+    {
+      nome: "checkpoint_apareceu",
+      esperado: "authority_readiness_state_changed",
+      depoisReadiness({ cliente, states }) {
+        const atual = states.get(cliente);
+        states.set(cliente, {
+          ...atual,
+          revision: atual.revision + 1,
+          pendingCheckpointRevision: "checkpoint-concorrente",
+          pendingCheckpointTargetGeneration: atual.vivaGeneration,
+          authorityReady: false,
+          authorityReadyGeneration: null,
+          authorityReadyRevision: null
+        });
+      }
+    }
+  ];
+
+  for (const caso of casos) {
+    const cenario = await criarCenario(`authority_pos_prepare_${caso.nome}`, {
+      authorityReady: false,
+      aliases: 0,
+      depoisReadiness: caso.depoisReadiness
+    });
+    try {
+      const resultado = await executarGuard(cenario);
+      assert.strictEqual(resultado.ok, false, `${caso.nome}: ${JSON.stringify(resultado)}`);
+      assert.strictEqual(resultado.motivo, caso.esperado, caso.nome);
+      assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, false, caso.nome);
+      assert.deepStrictEqual(cenario.mutationTypes, [], caso.nome);
+    } finally { await destruirCenario(cenario); }
+  }
+}
+
+async function testarMultiplosFencesAuthorityReadiness() {
+  const cenario = await criarCenario("authority_multiplos_fences", { authorityReady: false, aliases: 0 });
+  try {
+    removalFence.escrever(cenario.root, cenario.cliente, {
+      schema: 1,
+      clienteId: cenario.cliente,
+      jobId: "terminal-adicional",
+      generation: 5,
+      operation: "terminal",
+      identityHashes: [mutationIntent.digest("terminal-adicional")],
+      createdAt: new Date().toISOString()
+    });
+    const recovery = await executarGuard(cenario);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    assert.strictEqual(recovery.checkpointRequired, true);
+    assert.strictEqual(cenario.repo.readinessWrites.length, 1);
+    await concluirCheckpoint(cenario, recovery);
+    assert.strictEqual(removalFence.listar(cenario.root, cenario.cliente).length, 0);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarAusenciaFenceNaoPreparaReadiness() {
+  const cenario = await criarCenario("authority_sem_fence", {
+    authorityReady: false,
+    aliases: 0,
+    semFence: true
+  });
+  try {
+    const resultado = await executarGuard(cenario);
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(resultado.checkpointRequired, false);
+    assert.strictEqual(cenario.repo.readinessCalls.length, 0);
+    assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, false);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarConcorrenciaAuthorityReadiness() {
+  const cenario = await criarCenario("authority_concorrente", { authorityReady: false, aliases: 0 });
+  try {
+    const resultados = await Promise.all([executarGuard(cenario), executarGuard(cenario)]);
+    const sucessos = resultados.filter(resultado => resultado.ok === true);
+    const recusados = resultados.filter(resultado => resultado.ok !== true);
+    assert.strictEqual(sucessos.length, 1, JSON.stringify(resultados));
+    assert.strictEqual(recusados.length, 1, JSON.stringify(resultados));
+    assert.strictEqual(sucessos[0].checkpointRequired, true);
+    assert.notStrictEqual(recusados[0].checkpointRequired, true,
+      "somente o vencedor pode seguir para checkpoint");
+    assert(["authority_readiness_state_changed", "revision_stale"].includes(recusados[0].motivo),
+      JSON.stringify(recusados[0]));
+    assert.strictEqual(cenario.repo.readinessWrites.length, 1);
+    await concluirCheckpoint(cenario, sucessos[0]);
+    const observador = await executarGuard(cenario);
+    assert.strictEqual(observador.ok, true, JSON.stringify(observador));
+    assert.strictEqual(observador.checkpointRequired, false);
+    assert.strictEqual(removalFence.listar(cenario.root, cenario.cliente).length, 0);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function confirmarCheckpointSemReconciliar(cenario, recovery) {
+  const target = await cenario.controller.capturarTargetCheckpointCoordenado(cenario.cliente, {
+    expectedTargetGeneration: recovery.targetGeneration,
+    motivo: "authority_restart_test"
+  });
+  assert.strictEqual(target.ok, true, JSON.stringify(target));
+  const prepared = await cenario.coordinator.prepare({
+    clienteId: cenario.cliente,
+    checkpointRevision: target.checkpointRevision,
+    targetGeneration: target.targetGeneration,
+    expectedVivaHash: recovery.expectedVivaHash,
+    dataDir: cenario.root,
+    persistenceMode: "worker"
+  });
+  assert.strictEqual(prepared.ok, true, JSON.stringify(prepared));
+  const confirmado = await cenario.controller.confirmarCheckpointCoordenado(cenario.cliente, {
+    targetGeneration: target.targetGeneration,
+    checkpointRevision: target.checkpointRevision,
+    motivo: "authority_restart_test",
+    publicarCheckpoint: ({ targetGeneration, checkpointRevision }) => cenario.coordinator.publish({
+      clienteId: cenario.cliente,
+      checkpointRevision,
+      targetGeneration,
+      dataDir: cenario.root,
+      tempIdentity: prepared.tempIdentity,
+      expectedSourceRevisions: prepared.sourceRevisions,
+      persistenceMode: "worker"
+    })
+  });
+  assert.strictEqual(confirmado.ok, true, JSON.stringify(confirmado));
+  return confirmado;
+}
+
+async function testarRestartIdempotenteAuthorityReadiness() {
+  const aposPrepare = await criarCenario("authority_restart_prepare", { authorityReady: false, aliases: 0 });
+  try {
+    const state = aposPrepare.states.get(aposPrepare.cliente);
+    const readiness = await aposPrepare.controller.prepararReadinessAutoridadeRecovery(aposPrepare.cliente, {
+      expectedRevision: state.revision
+    });
+    assert.strictEqual(readiness.ready, true);
+    fila.resetarWorkspaceHealthGuardParaTeste();
+    const recovery = await executarGuard(aposPrepare);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    assert.strictEqual(recovery.checkpointRequired, true);
+    await concluirCheckpoint(aposPrepare, recovery);
+  } finally { await destruirCenario(aposPrepare); }
+
+  const aposCheckpoint = await criarCenario("authority_restart_checkpoint", { authorityReady: false, aliases: 0 });
+  try {
+    const recovery = await executarGuard(aposCheckpoint);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    await confirmarCheckpointSemReconciliar(aposCheckpoint, recovery);
+    fila.resetarWorkspaceHealthGuardParaTeste();
+    const reconciliado = await executarGuard(aposCheckpoint);
+    assert.strictEqual(reconciliado.ok, true, JSON.stringify(reconciliado));
+    assert.strictEqual(reconciliado.checkpointRequired, false);
+    assert.strictEqual(removalFence.listar(aposCheckpoint.root, aposCheckpoint.cliente).length, 0);
+    const repetido = await executarGuard(aposCheckpoint);
+    assert.strictEqual(repetido.ok, true);
+    assert.strictEqual(repetido.checkpointRequired, false);
+  } finally { await destruirCenario(aposCheckpoint); }
+
+  const aposFence = await criarCenario("authority_restart_fence", { authorityReady: false, aliases: 0 });
+  try {
+    const recovery = await executarGuard(aposFence);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    await concluirCheckpoint(aposFence, recovery);
+    assert.strictEqual(removalFence.listar(aposFence.root, aposFence.cliente).length, 0);
+    fila.resetarWorkspaceHealthGuardParaTeste();
+    const antesDeMarcarFilaInicializada = await executarGuard(aposFence);
+    assert.strictEqual(antesDeMarcarFilaInicializada.ok, true, JSON.stringify(antesDeMarcarFilaInicializada));
+    assert.strictEqual(antesDeMarcarFilaInicializada.checkpointRequired, false);
+    assert.strictEqual(aposFence.repo.readinessWrites.length, 1,
+      "restart apos reconcile nao repete readiness");
+  } finally { await destruirCenario(aposFence); }
+}
+
+async function testarDuplicidadePreexistentePreservada() {
+  const cenario = await criarCenario("authority_duplicidade", { authorityReady: false, aliases: 0 });
+  try {
+    const duplicado = entrada({ ...cenario.seguro }, 1);
+    atualizarSnapshotVivaCenario(cenario, [entrada(cenario.seguro, 0), duplicado], "authority-duplicate");
+    const antes = idsViva(cenario, cenario.cliente);
+    assert.strictEqual(antes.length, 2);
+    const recovery = await executarGuard(cenario);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    assert.deepStrictEqual(idsViva(cenario, cenario.cliente), antes);
+    assert.deepStrictEqual(cenario.mutationTypes, []);
+    await concluirCheckpoint(cenario, recovery);
+    assert.deepStrictEqual(idsViva(cenario, cenario.cliente), antes);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarMatrizMultiworkspaceAuthorityReadiness() {
+  const seguraA = await criarCenario("authority_workspace_a", { cliente: "user_diego_fixture", authorityReady: false, aliases: 0 });
+  const saudavelB = await criarCenario("authority_workspace_b", { cliente: "user_saudavel_b", aliases: 0, semFence: true });
+  const divergenteC = await criarCenario("authority_workspace_c", { cliente: "user_hash_c", authorityReady: false, aliases: 0 });
+  const intentD = await criarCenario("authority_workspace_d", { cliente: "user_intent_d", authorityReady: false, aliases: 0 });
+  try {
+    fs.appendFileSync(path.join(divergenteC.root, "clientes", divergenteC.cliente, "fila-viva.json"), " ");
+    fs.writeFileSync(mutationIntent.caminho(intentD.root, intentD.cliente), "{invalido");
+    const [a, b, c, d] = await Promise.all([
+      executarGuard(seguraA),
+      executarGuard(saudavelB),
+      executarGuard(divergenteC),
+      executarGuard(intentD)
+    ]);
+    assert.strictEqual(a.ok, true, JSON.stringify(a));
+    assert.strictEqual(a.checkpointRequired, true);
+    assert.strictEqual(b.ok, true, JSON.stringify(b));
+    assert.strictEqual(b.workspaceHealthGuardReadiness, undefined);
+    assert.strictEqual(c.ok, false);
+    assert.strictEqual(c.motivo, "stat_mismatch");
+    assert.strictEqual(d.ok, false);
+    assert.strictEqual(d.motivo, "intent_corrupt");
+    assert.strictEqual(seguraA.repo.readinessWrites.length, 1);
+    assert.strictEqual(saudavelB.repo.readinessWrites.length, 0);
+    assert.strictEqual(divergenteC.repo.readinessWrites.length, 0);
+    assert.strictEqual(intentD.repo.readinessWrites.length, 0);
+  } finally {
+    await Promise.all([seguraA, saudavelB, divergenteC, intentD].map(destruirCenario));
+  }
+}
+
+async function testarDuasWorkspacesSegurasAuthorityReadiness() {
+  const a = await criarCenario("authority_dupla_segura_a", {
+    cliente: "user_authority_segura_a",
+    authorityReady: false,
+    aliases: 0
+  });
+  const b = await criarCenario("authority_dupla_segura_b", {
+    cliente: "user_authority_segura_b",
+    authorityReady: false,
+    aliases: 0
+  });
+  try {
+    const [ra, rb] = await Promise.all([executarGuard(a), executarGuard(b)]);
+    assert.strictEqual(ra.ok, true, JSON.stringify(ra));
+    assert.strictEqual(rb.ok, true, JSON.stringify(rb));
+    assert.strictEqual(ra.checkpointRequired, true);
+    assert.strictEqual(rb.checkpointRequired, true);
+    assert.strictEqual(a.repo.readinessWrites.length, 1);
+    assert.strictEqual(b.repo.readinessWrites.length, 1);
+    assert.strictEqual(a.states.has(b.cliente), false);
+    assert.strictEqual(b.states.has(a.cliente), false);
+  } finally {
+    await Promise.all([a, b].map(destruirCenario));
+  }
+}
+
 function percentil(valores, fracao) {
   const ordenados = valores.slice().sort((a, b) => a - b);
   return ordenados[Math.min(ordenados.length - 1, Math.ceil(ordenados.length * fracao) - 1)];
@@ -722,14 +1374,55 @@ async function benchmarkGuard(totalItens) {
   } finally { await destruirCenario(cenario); }
 }
 
+async function benchmarkAuthorityReadiness(totalItens) {
+  const tempos = [];
+  for (let rodada = 0; rodada < 7; rodada += 1) {
+    const cenario = await criarCenario(`authority_bench_${totalItens}_${rodada}`, {
+      authorityReady: false,
+      aliases: 0
+    });
+    try {
+      const extras = Array.from({ length: Math.max(0, totalItens - 1) }, (_, indice) => entrada({
+        clienteId: cenario.cliente,
+        id: `authority-bench-${totalItens}-${rodada}-${indice}`,
+        ofertaId: 50_000 + indice,
+        produtoId: `AUTH-BENCH-${totalItens}-${rodada}-${indice}`,
+        titulo: `Produto authority benchmark ${indice}`,
+        preco: 30 + indice,
+        status: "pendente"
+      }, indice + 1));
+      atualizarSnapshotVivaCenario(cenario, [entrada(cenario.seguro, 0), ...extras],
+        `authority-bench-${totalItens}-${rodada}`);
+      const inicio = process.hrtime.bigint();
+      const resultado = await executarGuard(cenario);
+      tempos.push(Number(process.hrtime.bigint() - inicio) / 1e6);
+      assert.strictEqual(resultado.ok, true, JSON.stringify(resultado));
+      assert.strictEqual(resultado.checkpointRequired, true);
+      assert.strictEqual(cenario.repo.readinessWrites.length, 1);
+    } finally { await destruirCenario(cenario); }
+  }
+  return {
+    totalItens,
+    authorityP50Ms: percentil(tempos, 0.5),
+    authorityP95Ms: percentil(tempos, 0.95)
+  };
+}
+
 function testarWiringUniversal() {
   const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   assert(source.includes("workspaceHealthGuard: true"));
   assert(source.includes("registrarWorkspaceHealthGuardConcluido"));
   assert(!source.includes("user_g3qkc18m"));
+  const inicio = source.indexOf("async function garantirFilaClienteInicializada");
+  const reconciliar = source.indexOf("reconciliarIntentMutacaoViva(cliente", inicio);
+  const checkpoint = source.indexOf("concluirRecoveryRemovalFencePendente(cliente", reconciliar);
+  const carregar = source.indexOf("carregarFila(cliente", checkpoint);
+  assert(inicio >= 0 && reconciliar > inicio && checkpoint > reconciliar && carregar > checkpoint,
+    "inicializacao preserva reconcile -> checkpoint oficial -> carregar fila");
 }
 
 async function main() {
+  const rssAntes = process.memoryUsage().rss;
   await testarRecoveryUniversal("user_john_fixture");
   await testarRecoveryUniversal("user_workspace_diferente");
   await testarRecoveryUniversal("user_future_001");
@@ -740,7 +1433,8 @@ async function main() {
   await testarWorkspaceConflitanteFailClosed();
   await testarFenceNaoTerminalFailClosed();
   await testarFenceTransitoriaNaoAcionaGuard();
-  await testarAuthorityNotReadyNaoAcionaGuard();
+  await testarAuthorityNotReadyComRepresentantesPermaneceFailClosed();
+  await testarAuthorityNotReadySeguroAutoRecupera();
   await testarWorkspaceSaudavelOciosa();
   await testarRestartEntreRemocaoECheckpoint();
   await testarDuplaChamadaPosRemocao();
@@ -749,9 +1443,30 @@ async function main() {
   await testarCorridaGenerationFailClosed();
   await testarCorridaHashFailClosed();
   await testarMatrizPuraFailClosed();
+  await testarAuthorityReadinessIntentAtivoFailClosed();
+  await testarMatrizAuthorityReadinessFailClosed();
+  await testarCorridasAuthorityReadinessFailClosed();
+  await testarCorridasDepoisDoPrepareAuthorityReadiness();
+  await testarMultiplosFencesAuthorityReadiness();
+  await testarAusenciaFenceNaoPreparaReadiness();
+  await testarConcorrenciaAuthorityReadiness();
+  await testarRestartIdempotenteAuthorityReadiness();
+  await testarDuplicidadePreexistentePreservada();
+  await testarMatrizMultiworkspaceAuthorityReadiness();
+  await testarDuasWorkspacesSegurasAuthorityReadiness();
   testarWiringUniversal();
   const benchmarks = [await benchmarkGuard(440), await benchmarkGuard(4400)];
+  const authorityBenchmarks = [
+    await benchmarkAuthorityReadiness(440),
+    await benchmarkAuthorityReadiness(4400)
+  ];
   console.log(`workspace-health-guard-benchmark: ${JSON.stringify(benchmarks)}`);
+  console.log(`workspace-health-guard-authority-benchmark: ${JSON.stringify(authorityBenchmarks)}`);
+  console.log(`workspace-health-guard-memory: ${JSON.stringify({
+    rssAntes,
+    rssDepois: process.memoryUsage().rss,
+    heapUsedDepois: process.memoryUsage().heapUsed
+  })}`);
   console.log("workspace-health-guard-self-healing: OK");
 }
 
