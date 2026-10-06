@@ -3798,9 +3798,16 @@ function resolverPrioridadeCupomImporter(oferta = {}, prioridadeV2 = 0) {
   );
 }
 
-async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}) {
+async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada = {}, job = {}, contextoExecucao = null) {
   try {
-    const consultaMemoria = await buscarMemoriaAnterioresEngine(oferta, job);
+    let consultaMemoriaPromise = contextoExecucao?.consultaMemoriaHistoricaPromise;
+    if (!consultaMemoriaPromise) {
+      consultaMemoriaPromise = buscarMemoriaAnterioresEngine(oferta, job);
+      if (contextoExecucao && typeof contextoExecucao === "object") {
+        contextoExecucao.consultaMemoriaHistoricaPromise = consultaMemoriaPromise;
+      }
+    }
+    const consultaMemoria = await consultaMemoriaPromise;
     const memoriaCandidatos = Array.isArray(consultaMemoria.memoria) ? consultaMemoria.memoria : [];
     const produtoMetadata = objetoSeguro(ofertaEntrada?.metadata?.produto);
     const resultadoV2 = avaliarOfertaUniversal({
@@ -4036,6 +4043,7 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
 }
 
 async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrada = {}, deps = {}) {
+  const contextoMemoriaHistoricaJob = {};
   const origemFluxo = resolverOrigemFluxo(ofertaEntrada, job, evento);
   const fidelidadeTraceIdPrincipal = fidelidadeObs.flagAtiva()
     ? fidelidadeObs.resolverFidelidadeTraceId(ofertaEntrada, ofertaEntrada.metadata, evento, evento.metadata, job, link)
@@ -4203,7 +4211,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     cupom: oferta.cupom,
     produzidoPor: "normalizarOfertaImportada"
   });
-  let sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
+  let sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job, contextoMemoriaHistoricaJob);
   oferta = sombraV2.oferta || oferta;
   let imagemResolucaoEngine = resolverImagemEngineFallback({ oferta, ofertaEntrada, evento, job, link });
 
@@ -4707,7 +4715,7 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     }));
   }
   if (radarMirrorComparado) {
-    sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job);
+    sombraV2 = await aplicarSombraInteligenciaUniversalV2(oferta, ofertaEntrada, job, contextoMemoriaHistoricaJob);
     oferta = sombraV2.oferta || oferta;
     metadataFinal = {
       ...metadataFinal,
