@@ -230,6 +230,20 @@ function oferta(id, minutos, overrides = {}) {
     !selecaoHotState.candidatosVivos.some(item => item.oferta.id === "alvo_intervalo"),
     "intervalo/proxima tentativa deve permanecer bloqueando candidato no hot state"
   );
+  assert.strictEqual(
+    selecaoHotState.candidatosInspecao.length,
+    2,
+    "first evaluation lane deve limitar o lote a dois itens por workspace"
+  );
+  assert(
+    selecaoHotState.candidatosInspecao.every(item => item.oferta.clienteId === cliente),
+    "first evaluation lane nao pode misturar workspaces"
+  );
+  assert.strictEqual(
+    selecaoHotState.selecionada.oferta.id,
+    selecaoGlobal.selecionada.oferta.id,
+    "candidatos de inspecao nao podem alterar a selecao enviavel"
+  );
 }
 
 {
