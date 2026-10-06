@@ -5,6 +5,11 @@ const { getEnginePool } = require("../engine/database");
 const { normalizarClienteId } = require("../../utils/storage");
 
 const TABELA = "fila_claims_ativos";
+const CLAIM_COMMERCIAL_RECOVERY_COMPATIBLE = "COMMERCIAL_RECOVERY_COMPATIBLE";
+const CLAIM_STRUCTURAL_BLOCKER = "STRUCTURAL_BLOCKER";
+const CLAIM_UNKNOWN_BLOCKER = "UNKNOWN_BLOCKER";
+const PREFIXO_CLAIM_COMERCIAL_OFERTAS_V2_DURAVEL = "ofertas-v2-duravel:";
+const CLAIM_COMERCIAL_OFERTAS_V2_DURAVEL_CANONICO = /^ofertas-v2-duravel:[0-9a-f]{64}$/;
 
 const SQL_SCHEMA_FILA_CLAIMS = `
 CREATE TABLE IF NOT EXISTS fila_claims_ativos (
@@ -72,6 +77,69 @@ function normalizarClaim(linha = {}, chave = {}, { incluirToken = false } = {}) 
   };
   if (incluirToken && linha.claim_token) claim.claimToken = linha.claim_token;
   return claim;
+}
+
+function classificarClaimAtivoReadiness(claim = {}) {
+  const filaItemId = String(claim.filaItemId ?? claim.fila_item_id ?? "");
+  if (CLAIM_COMERCIAL_OFERTAS_V2_DURAVEL_CANONICO.test(filaItemId)) {
+    return {
+      categoria: CLAIM_COMMERCIAL_RECOVERY_COMPATIBLE,
+      bloqueiaReadiness: false,
+      motivo: "claim_comercial_ofertas_v2_duravel"
+    };
+  }
+  return {
+    categoria: CLAIM_UNKNOWN_BLOCKER,
+    bloqueiaReadiness: true,
+    motivo: filaItemId ? "claim_prefixo_desconhecido" : "claim_id_ausente"
+  };
+}
+
+function resumoClaimReadiness(claim = {}, classificacao = {}) {
+  return {
+    categoria: classificacao.categoria,
+    motivo: classificacao.motivo,
+    prefixo: texto(claim.filaItemId || claim.fila_item_id || "").split(":")[0] || "sem_prefixo"
+  };
+}
+
+function resumirTaxonomiaClaimsAtivos(claims = []) {
+  const linhas = Array.isArray(claims) ? claims : [];
+  const resumo = {
+    ok: true,
+    total: linhas.length,
+    activeClaimsTotal: linhas.length,
+    commercialClaimsIgnored: 0,
+    structuralBlockingClaims: 0,
+    unknownClaims: 0,
+    blockingClaims: 0,
+    commercialRecoveryCompatibleClaims: [],
+    blockers: [],
+    readinessDecision: "claims_absent"
+  };
+
+  for (const claim of linhas) {
+    const classificacao = classificarClaimAtivoReadiness(claim);
+    const claimResumo = resumoClaimReadiness(claim, classificacao);
+    if (classificacao.categoria === CLAIM_COMMERCIAL_RECOVERY_COMPATIBLE) {
+      resumo.commercialClaimsIgnored += 1;
+      resumo.commercialRecoveryCompatibleClaims.push(claimResumo);
+      continue;
+    }
+    if (classificacao.categoria === CLAIM_STRUCTURAL_BLOCKER) {
+      resumo.structuralBlockingClaims += 1;
+    } else {
+      resumo.unknownClaims += 1;
+    }
+    resumo.blockingClaims += 1;
+    resumo.blockers.push(claimResumo);
+  }
+
+  if (resumo.blockingClaims > 0) resumo.readinessDecision = resumo.unknownClaims > 0
+    ? "blocked_unknown_claim"
+    : "blocked_structural_claim";
+  else if (resumo.commercialClaimsIgnored > 0) resumo.readinessDecision = "allowed_commercial_claims_ignored";
+  return resumo;
 }
 
 function normalizarHandleAdvisory(handle = {}) {
@@ -154,6 +222,28 @@ async function existeClaimAtivoWorkspace(clienteId = "", opcoes = {}) {
     [cliente]
   ));
   return { ok: true, existe: resultado.rows?.[0]?.existe === true };
+}
+
+async function listarClaimsAtivosWorkspace(clienteId = "", opcoes = {}) {
+  const cliente = normalizarChaveClaimFila({ clienteId, filaItemId: "workspace-health-guard" }).clienteId;
+  const resultado = await comExecutorClaim(opcoes, client => client.query(
+    `SELECT cliente_id, fila_item_id, claimed_at, lease_expires_at
+       FROM ${TABELA}
+      WHERE cliente_id = $1
+        AND lease_expires_at > NOW()
+      ORDER BY lease_expires_at ASC, fila_item_id ASC`,
+    [cliente]
+  ));
+  return {
+    ok: true,
+    claims: (resultado.rows || []).map(row => normalizarClaim(row, { clienteId: cliente }))
+  };
+}
+
+async function consultarTaxonomiaClaimsAtivosWorkspace(clienteId = "", opcoes = {}) {
+  const leitura = await listarClaimsAtivosWorkspace(clienteId, opcoes);
+  if (leitura?.ok !== true) return leitura;
+  return resumirTaxonomiaClaimsAtivos(leitura.claims || []);
 }
 
 async function renovarClaimFila(entrada = {}, opcoes = {}) {
@@ -268,11 +358,19 @@ module.exports = {
   normalizarLeaseExpiresAt,
   normalizarTokenClaim,
   gerarTokenClaimFila,
+  CLAIM_COMMERCIAL_RECOVERY_COMPATIBLE,
+  CLAIM_STRUCTURAL_BLOCKER,
+  CLAIM_UNKNOWN_BLOCKER,
+  PREFIXO_CLAIM_COMERCIAL_OFERTAS_V2_DURAVEL,
+  classificarClaimAtivoReadiness,
+  resumirTaxonomiaClaimsAtivos,
   adquirirAdvisoryLockFila,
   liberarAdvisoryLockFila,
   adquirirClaimFila,
   obterClaimFila,
   existeClaimAtivoWorkspace,
+  listarClaimsAtivosWorkspace,
+  consultarTaxonomiaClaimsAtivosWorkspace,
   renovarClaimFila,
   liberarClaimFila
 };

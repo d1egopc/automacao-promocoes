@@ -5,9 +5,14 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const fila = require("../modules/fila/fila-operacional-v2");
+const filaClaimsRepository = require("../modules/fila/fila-claims.repository");
 const mutationIntent = require("../modules/fila/viva-mutation-intent");
 const removalFence = require("../modules/fila/viva-removal-fence");
 const { criarCoordenadorPersistencia } = require("../modules/fila/persistence-coordinator");
+const {
+  chaveClaimProdutoDestino,
+  criarCoordenadorEnvioProdutoDestino
+} = require("../modules/manual-v2/ofertas-v2-envio-claim");
 
 function criarLogger() {
   const eventos = [];
@@ -37,6 +42,35 @@ function criarStorage(root) {
       return true;
     }
   };
+}
+
+function ofertaClaimOficial(clienteId, indice = 1) {
+  const produtoId = `B${String(indice).padStart(9, "0")}`;
+  return {
+    clienteId,
+    marketplace: "amazon",
+    produtoId,
+    urlOriginal: `https://www.amazon.com.br/dp/${produtoId}`
+  };
+}
+
+function claimDuravelOficial(clienteId, indice = 1, destinoId = `destino-${indice}`) {
+  const claimPar = chaveClaimProdutoDestino({
+    clienteId,
+    oferta: ofertaClaimOficial(clienteId, indice),
+    destinoId
+  });
+  assert.match(claimPar, /^ofertas-v2-par:[0-9a-f]{64}$/);
+  return claimPar.replace("ofertas-v2-par:", "ofertas-v2-duravel:");
+}
+
+function claimsComerciaisCanonicos(clienteId, quantidade = 1) {
+  return Array.from({ length: quantidade }, (_, indice) => ({
+    clienteId,
+    filaItemId: claimDuravelOficial(clienteId, indice + 1),
+    claimedAt: "2026-10-06T12:00:00.000Z",
+    leaseExpiresAt: "2030-01-01T00:00:00.000Z"
+  }));
 }
 
 function criarRepositorio(states, opcoes = {}) {
@@ -316,6 +350,13 @@ async function criarCenario(nome, opcoes = {}) {
     ...storage,
     env,
     manifestStateRepository: repo,
+    ...(Array.isArray(opcoes.claimsAtivos) ? {
+      consultarTaxonomiaClaimsAtivosWorkspace: async () => {
+        claimChecks += 1;
+        if (opcoes.claimQueryFalha === true) throw new Error("claim_query_fixture_falhou");
+        return filaClaimsRepository.resumirTaxonomiaClaimsAtivos(opcoes.claimsAtivos);
+      }
+    } : {}),
     existeClaimAtivoWorkspace: async () => {
       claimChecks += 1;
       if (opcoes.claimQueryFalha === true) throw new Error("claim_query_fixture_falhou");
@@ -562,6 +603,139 @@ async function testarAuthorityNotReadySeguroAutoRecupera() {
   } finally { await destruirCenario(cenario); }
 }
 
+async function testarAuthorityReadinessIgnoraClaimComercialEPreservaDedupe() {
+  const cliente = "user_authority_claim_comercial";
+  const ofertaComercial = ofertaClaimOficial(cliente, 1);
+  const destinoId = "destino-smart";
+  const claimComercial = claimDuravelOficial(cliente, 1, destinoId);
+  const claimsAtivos = claimsComerciaisCanonicos(cliente, 13);
+  claimsAtivos[0] = {
+    clienteId: cliente,
+    filaItemId: claimComercial,
+    claimedAt: "2026-10-06T12:00:00.000Z",
+    leaseExpiresAt: "2030-01-01T00:00:00.000Z"
+  };
+  const reservasAtivas = new Set(claimsAtivos.map(claim => `${claim.clienteId}:${claim.filaItemId}`));
+  const cenario = await criarCenario("authority_claim_comercial", {
+    cliente,
+    authorityReady: false,
+    aliases: 0,
+    claimsAtivos
+  });
+  let providerCalls = 0;
+  const coordenador = criarCoordenadorEnvioProdutoDestino({
+    advisory: {
+      adquirir: async () => ({
+        resultado: "adquirido",
+        handle: { client: {} }
+      }),
+      finalizar: async () => ({ liberacao: "liberado" })
+    },
+    reserva: {
+      consultar: async (_client, clienteId, filaItemId) => reservasAtivas.has(`${clienteId}:${filaItemId}`),
+      preparar: async (_client, clienteId, filaItemId) => {
+        reservasAtivas.add(`${clienteId}:${filaItemId}`);
+        return "token-comercial";
+      },
+      descartar: async (_client, clienteId, filaItemId) => {
+        reservasAtivas.delete(`${clienteId}:${filaItemId}`);
+      }
+    }
+  });
+  try {
+    const recovery = await executarGuard(cenario);
+    assert.strictEqual(recovery.ok, true, JSON.stringify(recovery));
+    assert.strictEqual(recovery.checkpointRequired, true);
+    assert.strictEqual(cenario.getClaimChecks(), 2, "claim comercial e revalidado sem bloquear readiness");
+    assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, true);
+    assert.deepStrictEqual(idsViva(cenario, cenario.cliente), [cenario.seguro.id]);
+    const eventoSeguro = cenario.logger.eventos.find(evento =>
+      evento.evento === "workspace_health_guard_authority_safe_class_proven");
+    assert.strictEqual(eventoSeguro.activeClaimsTotal, 13);
+    assert.strictEqual(eventoSeguro.commercialClaimsIgnored, 13);
+    assert.strictEqual(eventoSeguro.blockingClaims, 0);
+    assert.strictEqual(eventoSeguro.readinessDecision, "allowed_commercial_claims_ignored");
+    assert.strictEqual(claimsAtivos[0].filaItemId, claimComercial, "recovery preserva o mesmo claim canonico");
+    assert.strictEqual(reservasAtivas.has(`${cliente}:${claimComercial}`), true,
+      "claim comercial permanece presente depois do recovery estrutural");
+    const claimDuplicado = await coordenador.adquirir({
+      clienteId: cliente,
+      oferta: ofertaComercial,
+      destinoId
+    });
+    if (claimDuplicado.resultado === "adquirido") providerCalls += 1;
+    assert.strictEqual(claimDuplicado.resultado, "ocupado_recente");
+    assert.strictEqual(providerCalls, 0, "recovery nao remove reserva comercial nem libera segundo provider call");
+    assert.strictEqual(reservasAtivas.has(`${cliente}:${claimComercial}`), true,
+      "dedupe continua protegido pelo claim canonico original");
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarAuthorityReadinessClaimDesconhecidoFailClosed() {
+  const cliente = "user_authority_claim_unknown";
+  const cenario = await criarCenario("authority_claim_unknown", {
+    cliente,
+    authorityReady: false,
+    aliases: 0,
+    claimsAtivos: [
+      ...claimsComerciaisCanonicos(cliente, 13),
+      { clienteId: cliente, filaItemId: "claim-totalmente-novo:xyz" }
+    ]
+  });
+  try {
+    const resultado = await executarGuard(cenario);
+    assert.strictEqual(resultado.ok, false);
+    assert.strictEqual(resultado.motivo, "authority_readiness_claim_desconhecido");
+    assert.strictEqual(resultado.activeClaimsTotal, 14);
+    assert.strictEqual(resultado.commercialClaimsIgnored, 13);
+    assert.strictEqual(resultado.blockingClaims, 1);
+    assert.strictEqual(resultado.unknownClaims, 1);
+    assert.strictEqual(cenario.repo.readinessWrites.length, 0);
+    assert.strictEqual(cenario.states.get(cenario.cliente).authorityReady, false);
+  } finally { await destruirCenario(cenario); }
+}
+
+async function testarMultiworkspaceTaxonomiaClaim() {
+  const clienteA = "user_authority_taxonomia_workspace_a";
+  const clienteB = "user_authority_taxonomia_workspace_b";
+  const segura = await criarCenario("authority_taxonomia_workspace_a", {
+    cliente: clienteA,
+    authorityReady: false,
+    aliases: 0,
+    claimsAtivos: claimsComerciaisCanonicos(clienteA, 2)
+  });
+  const bloqueada = await criarCenario("authority_taxonomia_workspace_b", {
+    cliente: clienteB,
+    authorityReady: false,
+    aliases: 0,
+    claimsAtivos: [{ clienteId: clienteB, filaItemId: "claim-totalmente-novo:xyz" }]
+  });
+  const saudavel = await criarCenario("authority_taxonomia_workspace_c", {
+    aliases: 0,
+    semFence: true
+  });
+  try {
+    const resultadoA = await executarGuard(segura);
+    assert.strictEqual(resultadoA.ok, true, JSON.stringify(resultadoA));
+    assert.strictEqual(resultadoA.checkpointRequired, true);
+    assert.strictEqual(segura.repo.readinessWrites.length, 1);
+
+    const resultadoB = await executarGuard(bloqueada);
+    assert.strictEqual(resultadoB.ok, false);
+    assert.strictEqual(resultadoB.motivo, "authority_readiness_claim_desconhecido");
+    assert.strictEqual(bloqueada.repo.readinessWrites.length, 0);
+
+    const resultadoC = await executarGuard(saudavel);
+    assert.strictEqual(resultadoC.ok, true);
+    assert.strictEqual(resultadoC.checkpointRequired, false);
+    assert.strictEqual(saudavel.repo.readinessWrites.length, 0);
+  } finally {
+    await destruirCenario(segura);
+    await destruirCenario(bloqueada);
+    await destruirCenario(saudavel);
+  }
+}
+
 async function testarWorkspaceSaudavelOciosa() {
   const cenario = await criarCenario("ociosa", { aliases: 0, semFence: true });
   try {
@@ -792,7 +966,13 @@ function atualizarSnapshotVivaCenario(cenario, entradas, fileRevision = "authori
 }
 
 async function testarAuthorityReadinessIntentAtivoFailClosed() {
-  const cenario = await criarCenario("authority_intent_ativo", { authorityReady: false, aliases: 0 });
+  const cliente = "user_authority_intent_ativo";
+  const cenario = await criarCenario("authority_intent_ativo", {
+    cliente,
+    authorityReady: false,
+    aliases: 0,
+    claimsAtivos: claimsComerciaisCanonicos(cliente, 3)
+  });
   try {
     const vivaPath = path.join(cenario.root, "clientes", cenario.cliente, "fila-viva.json");
     const currentHash = mutationIntent.hashArquivo(vivaPath);
@@ -1435,6 +1615,8 @@ async function main() {
   await testarFenceTransitoriaNaoAcionaGuard();
   await testarAuthorityNotReadyComRepresentantesPermaneceFailClosed();
   await testarAuthorityNotReadySeguroAutoRecupera();
+  await testarAuthorityReadinessIgnoraClaimComercialEPreservaDedupe();
+  await testarAuthorityReadinessClaimDesconhecidoFailClosed();
   await testarWorkspaceSaudavelOciosa();
   await testarRestartEntreRemocaoECheckpoint();
   await testarDuplaChamadaPosRemocao();
@@ -1453,6 +1635,7 @@ async function main() {
   await testarRestartIdempotenteAuthorityReadiness();
   await testarDuplicidadePreexistentePreservada();
   await testarMatrizMultiworkspaceAuthorityReadiness();
+  await testarMultiworkspaceTaxonomiaClaim();
   await testarDuasWorkspacesSegurasAuthorityReadiness();
   testarWiringUniversal();
   const benchmarks = [await benchmarkGuard(440), await benchmarkGuard(4400)];

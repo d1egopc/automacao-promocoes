@@ -2705,9 +2705,11 @@ async function consultarSnapshotNoWorker(clienteId, deps, opcoes = {}) {
 }
 
 async function provarAusenciaClaimAtivoWorkspace(clienteId, deps = {}) {
-  const consultarClaims = typeof deps.existeClaimAtivoWorkspace === "function"
-    ? deps.existeClaimAtivoWorkspace
-    : filaClaimsRepository.existeClaimAtivoWorkspace;
+  const consultarClaims = typeof deps.consultarTaxonomiaClaimsAtivosWorkspace === "function"
+    ? deps.consultarTaxonomiaClaimsAtivosWorkspace
+    : (typeof deps.existeClaimAtivoWorkspace === "function"
+        ? deps.existeClaimAtivoWorkspace
+        : filaClaimsRepository.consultarTaxonomiaClaimsAtivosWorkspace);
   if (typeof consultarClaims !== "function") {
     return { ok: false, motivo: "authority_readiness_claim_reader_indisponivel", failClosed: true };
   }
@@ -2716,6 +2718,37 @@ async function provarAusenciaClaimAtivoWorkspace(clienteId, deps = {}) {
   catch { return { ok: false, motivo: "authority_readiness_claim_query_failed", failClosed: true }; }
   if (claims?.ok !== true) {
     return { ok: false, motivo: claims?.motivo || "authority_readiness_claim_query_failed", failClosed: true };
+  }
+  if (typeof claims.blockingClaims === "number" || typeof claims.unknownClaims === "number") {
+    const activeClaimsTotal = Number(claims.activeClaimsTotal ?? claims.total ?? 0);
+    const commercialClaimsIgnored = Number(claims.commercialClaimsIgnored || 0);
+    const blockingClaims = Number(claims.blockingClaims || 0);
+    const unknownClaims = Number(claims.unknownClaims || 0);
+    const structuralBlockingClaims = Number(claims.structuralBlockingClaims || 0);
+    const readinessDecision = texto(claims.readinessDecision || "");
+    if (blockingClaims > 0) {
+      return {
+        ok: false,
+        motivo: unknownClaims > 0 ? "authority_readiness_claim_desconhecido" : "authority_readiness_claim_bloqueador",
+        failClosed: true,
+        activeClaimsTotal,
+        commercialClaimsIgnored,
+        blockingClaims,
+        unknownClaims,
+        structuralBlockingClaims,
+        readinessDecision: readinessDecision || "blocked_claim"
+      };
+    }
+    return {
+      ok: true,
+      existe: false,
+      activeClaimsTotal,
+      commercialClaimsIgnored,
+      blockingClaims: 0,
+      unknownClaims: 0,
+      structuralBlockingClaims: 0,
+      readinessDecision: readinessDecision || (commercialClaimsIgnored > 0 ? "allowed_commercial_claims_ignored" : "claims_absent")
+    };
   }
   if (claims.existe === true) {
     return { ok: false, motivo: "authority_readiness_claim_ativo", failClosed: true };
@@ -2912,7 +2945,13 @@ async function provarAuthorityReadinessRemovalFences(clienteId = "admin", fences
   if (intent.exists) return recusar("authority_readiness_mutation_intent_ativo");
 
   const claims = await provarAusenciaClaimAtivoWorkspace(cliente, deps);
-  if (!claims.ok) return recusar(claims.motivo);
+  if (!claims.ok) return recusar(claims.motivo, {
+    activeClaimsTotal: claims.activeClaimsTotal,
+    commercialClaimsIgnored: claims.commercialClaimsIgnored,
+    blockingClaims: claims.blockingClaims,
+    unknownClaims: claims.unknownClaims,
+    readinessDecision: claims.readinessDecision
+  });
 
   let fencesAtuais;
   try { fencesAtuais = normalizarFencesAuthorityReadiness(removalFence.listar(dataDir, cliente)); }
@@ -2937,6 +2976,13 @@ async function provarAuthorityReadinessRemovalFences(clienteId = "admin", fences
     pendentes,
     probe,
     vivaProof: vivaProof.proof,
+    claimTaxonomy: {
+      activeClaimsTotal: claims.activeClaimsTotal || 0,
+      commercialClaimsIgnored: claims.commercialClaimsIgnored || 0,
+      blockingClaims: claims.blockingClaims || 0,
+      unknownClaims: claims.unknownClaims || 0,
+      readinessDecision: claims.readinessDecision || "claims_absent"
+    },
     attemptId: identidadeAuthorityReadiness(cliente, state, pendentes, probe)
   };
 }
@@ -2989,6 +3035,11 @@ async function tentarWorkspaceHealthGuardAuthorityReadiness(clienteId = "admin",
       clienteId: cliente,
       generation,
       motivo: prova.motivo,
+      activeClaimsTotal: prova.activeClaimsTotal,
+      commercialClaimsIgnored: prova.commercialClaimsIgnored,
+      blockingClaims: prova.blockingClaims,
+      unknownClaims: prova.unknownClaims,
+      readinessDecision: prova.readinessDecision,
       durationMs: Date.now() - inicio
     });
     return prova;
@@ -2998,7 +3049,12 @@ async function tentarWorkspaceHealthGuardAuthorityReadiness(clienteId = "admin",
     clienteId: cliente,
     generation: prova.state.vivaGeneration,
     fenceIdentity: prova.attemptId,
-    motivo: prova.motivo
+    motivo: prova.motivo,
+    activeClaimsTotal: prova.claimTaxonomy?.activeClaimsTotal || 0,
+    commercialClaimsIgnored: prova.claimTaxonomy?.commercialClaimsIgnored || 0,
+    blockingClaims: prova.claimTaxonomy?.blockingClaims || 0,
+    unknownClaims: prova.claimTaxonomy?.unknownClaims || 0,
+    readinessDecision: prova.claimTaxonomy?.readinessDecision || "claims_absent"
   });
   const readiness = await prepararReadinessAutoridadeRecovery(cliente, {
     ...deps,
@@ -3105,6 +3161,11 @@ function logWorkspaceHealthGuard(logger, evento, dados = {}) {
     unrelatedRemoved: Number(dados.unrelatedRemoved || 0),
     checkpointBefore: Number(dados.checkpointBefore || 0),
     checkpointAfter: Number(dados.checkpointAfter || 0),
+    activeClaimsTotal: Number(dados.activeClaimsTotal || 0),
+    commercialClaimsIgnored: Number(dados.commercialClaimsIgnored || 0),
+    blockingClaims: Number(dados.blockingClaims || 0),
+    unknownClaims: Number(dados.unknownClaims || 0),
+    readinessDecision: texto(dados.readinessDecision || ""),
     durationMs: Number(dados.durationMs || 0)
   });
 }

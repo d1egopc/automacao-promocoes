@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 
 const repo = require("../modules/fila/fila-claims.repository");
+const { chaveClaimProdutoDestino } = require("../modules/manual-v2/ofertas-v2-envio-claim");
 
 function clone(valor) {
   return JSON.parse(JSON.stringify(valor));
@@ -12,6 +13,22 @@ function clone(valor) {
 
 function chave(params = []) {
   return `${params[0]}|${params[1]}`;
+}
+
+function claimDuravelOficial(clienteId, indice = 1) {
+  const produtoId = `B${String(indice).padStart(9, "0")}`;
+  const claimPar = chaveClaimProdutoDestino({
+    clienteId,
+    oferta: {
+      clienteId,
+      marketplace: "amazon",
+      produtoId,
+      urlOriginal: `https://www.amazon.com.br/dp/${produtoId}`
+    },
+    destinoId: `destino-${indice}`
+  });
+  assert.match(claimPar, /^ofertas-v2-par:[0-9a-f]{64}$/);
+  return claimPar.replace("ofertas-v2-par:", "ofertas-v2-duravel:");
 }
 
 function criarPoolMemoria() {
@@ -71,6 +88,20 @@ function criarPoolMemoria() {
             const existe = [...state.values()].some(row =>
               row.cliente_id === clienteId && Date.parse(row.lease_expires_at) > Date.now());
             return { rows: [{ existe }], rowCount: 1 };
+          }
+          if (/^SELECT cliente_id, fila_item_id, claimed_at, lease_expires_at FROM fila_claims_ativos/i.test(texto) &&
+              /WHERE cliente_id = \$1 AND lease_expires_at > NOW\(\)/i.test(texto)) {
+            const clienteId = String(params[0] || "");
+            const rows = [...state.values()]
+              .filter(row => row.cliente_id === clienteId && Date.parse(row.lease_expires_at) > Date.now())
+              .sort((a, b) => `${a.lease_expires_at}:${a.fila_item_id}`.localeCompare(`${b.lease_expires_at}:${b.fila_item_id}`))
+              .map(row => ({
+                cliente_id: row.cliente_id,
+                fila_item_id: row.fila_item_id,
+                claimed_at: row.claimed_at,
+                lease_expires_at: row.lease_expires_at
+              }));
+            return { rows, rowCount: rows.length };
           }
           if (/^SELECT .* FROM fila_claims_ativos/i.test(texto)) {
             const row = state.get(id);
@@ -198,6 +229,75 @@ async function testarConsultaClaimAtivoPorWorkspace() {
   });
 }
 
+async function testarTaxonomiaClaimsAtivosPorWorkspace() {
+  const pool = criarPoolMemoria();
+  const claimCanonico = claimDuravelOficial("workspace_a", 1);
+  assert.deepStrictEqual(repo.classificarClaimAtivoReadiness({
+    filaItemId: claimCanonico
+  }), {
+    categoria: repo.CLAIM_COMMERCIAL_RECOVERY_COMPATIBLE,
+    bloqueiaReadiness: false,
+    motivo: "claim_comercial_ofertas_v2_duravel"
+  });
+  const negativos = [
+    "x-ofertas-v2-duravel:",
+    "ofertas-v2-duravel-falso:",
+    "OFERTAS-V2-DURAVEL:",
+    "ofertas-v2-duravel",
+    "ofertas-v2-duravelXYZ:",
+    "ofertas-v2-duravel:",
+    "ofertas-v2-duravel:garbage",
+    "ofertas-v2-duravel::",
+    "ofertas-v2-duravel:abc",
+    "ofertas-v2-duravel:0",
+    `ofertas-v2-duravel:${"a".repeat(63)}`,
+    `ofertas-v2-duravel:${"a".repeat(65)}`,
+    `ofertas-v2-duravel:${"a".repeat(63)}g`,
+    `ofertas-v2-duravel:${"A".repeat(64)}`,
+    `${claimCanonico}lixo`,
+    ` ${claimCanonico}`,
+    `${claimCanonico} `,
+    "claim-totalmente-novo:xyz"
+  ];
+  for (const filaItemId of negativos) {
+    assert.deepStrictEqual(repo.classificarClaimAtivoReadiness({ filaItemId }), {
+      categoria: repo.CLAIM_UNKNOWN_BLOCKER,
+      bloqueiaReadiness: true,
+      motivo: "claim_prefixo_desconhecido"
+    }, filaItemId);
+  }
+  for (let i = 0; i < 13; i++) {
+    await repo.adquirirClaimFila(entrada("workspace_a", claimDuravelOficial("workspace_a", i + 1)), { pool });
+  }
+  let taxonomia = await repo.consultarTaxonomiaClaimsAtivosWorkspace("workspace_a", { pool });
+  assert.strictEqual(taxonomia.activeClaimsTotal, 13);
+  assert.strictEqual(taxonomia.commercialClaimsIgnored, 13);
+  assert.strictEqual(taxonomia.blockingClaims, 0);
+  assert.strictEqual(taxonomia.unknownClaims, 0);
+  assert.strictEqual(taxonomia.readinessDecision, "allowed_commercial_claims_ignored");
+
+  await repo.adquirirClaimFila(entrada("workspace_a", "claim-totalmente-novo:xyz"), { pool });
+  taxonomia = await repo.consultarTaxonomiaClaimsAtivosWorkspace("workspace_a", { pool });
+  assert.strictEqual(taxonomia.activeClaimsTotal, 14);
+  assert.strictEqual(taxonomia.commercialClaimsIgnored, 13);
+  assert.strictEqual(taxonomia.blockingClaims, 1);
+  assert.strictEqual(taxonomia.unknownClaims, 1);
+  assert.strictEqual(taxonomia.readinessDecision, "blocked_unknown_claim");
+
+  assert.deepStrictEqual(await repo.consultarTaxonomiaClaimsAtivosWorkspace("workspace_b", { pool }), {
+    ok: true,
+    total: 0,
+    activeClaimsTotal: 0,
+    commercialClaimsIgnored: 0,
+    structuralBlockingClaims: 0,
+    unknownClaims: 0,
+    blockingClaims: 0,
+    commercialRecoveryCompatibleClaims: [],
+    blockers: [],
+    readinessDecision: "claims_absent"
+  });
+}
+
 async function testarClientExternoERollback() {
   const pool = criarPoolMemoria();
   const client = await pool.connect();
@@ -214,6 +314,7 @@ async function testarClientExternoERollback() {
   await testarOperacoesBasicas();
   await testarConcorrenciaEIsolamento();
   await testarConsultaClaimAtivoPorWorkspace();
+  await testarTaxonomiaClaimsAtivosPorWorkspace();
   await testarClientExternoERollback();
   console.log("fila-claims-repository.test.js OK");
 })().catch(erro => {
