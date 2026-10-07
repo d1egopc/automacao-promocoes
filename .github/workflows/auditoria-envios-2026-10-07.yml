@@ -19,28 +19,57 @@ jobs:
           echo "runner_name=${RUNNER_NAME:-unknown}"
           echo "hostname=$(hostname)"
           echo "runner_os=${RUNNER_OS:-unknown}"
+          echo "today_local=$(TZ=America/Sao_Paulo date -Iseconds)"
           for p in /opt/optimus/backend /opt/optimus/infra /data /opt/optimus/data; do
             if [ -d "${p}" ]; then echo "path_ok=${p}"; else echo "path_missing=${p}"; fi
           done
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
           if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then echo "production_target_verified=true"; else echo "production_target_verified=false"; fi
-      - name: Read-only workspace file map
+      - name: Read-only factual schema inspection
         shell: bash
         run: |
           set -Eeuo pipefail
-          node <<'NODE'
+          for spec in \
+            user_b2oogwwl/fila-terminal-index.json \
+            user_b2oogwwl/fila-terminal-index.proof.json \
+            user_b2oogwwl/controle-envio-destinos.json \
+            user_b2oogwwl/fila-historico.json \
+            user_g3qkc18m/fila-terminal-index.json \
+            user_g3qkc18m/controle-envio-destinos.json \
+            user_g3qkc18m/fila-historico.json \
+            user_pss60lus/fila-terminal-index.json \
+            user_pss60lus/controle-envio-destinos.json \
+            user_pss60lus/fila-historico.json \
+            user_zbbk3fdr/controle-envio-destinos.json \
+            user_zbbk3fdr/fila-historico.json; do
+            node --max-old-space-size=2048 - "${spec}" <<'NODE'
           const fs = require('fs');
           const path = require('path');
-          const root = '/opt/optimus/data/clientes';
-          const sensitive = /(auth|key|token|session|credential|secret|cookie|private|oauth)/i;
-          const focus = /(fila|histor|envio|send|delivery|destin|executor|provider|outbox|sent|message|mensag|terminal|claim|reserva|confirm|dispatch|queue)/i;
-          const dirs = fs.readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>e.name).sort();
-          console.log('WORKSPACE_COUNT', dirs.length);
-          for (const workspace of dirs) {
-            const dir = path.join(root, workspace);
-            let names=[];
-            try { names = fs.readdirSync(dir,{withFileTypes:true}).filter(e=>e.isFile() && !sensitive.test(e.name) && focus.test(e.name)).map(e=>{let s=0;try{s=fs.statSync(path.join(dir,e.name)).size}catch{};return {name:e.name,size:s};}).sort((a,b)=>a.name.localeCompare(b.name)); } catch {}
-            console.log('WORKSPACE', JSON.stringify({workspace, files:names}));
+          const rel = process.argv[2];
+          const file = path.join('/opt/optimus/data/clientes', rel);
+          const st = fs.statSync(file);
+          function extractFirst(buf) {
+            const s = buf.toString('utf8');
+            let start = -1, depth = 0, quote = false, esc = false;
+            for (let i=0;i<s.length;i++) {
+              const c=s[i];
+              if (start<0) { if (c==='{' || c==='[') { start=i; depth=1; } continue; }
+              if (quote) { if (esc) esc=false; else if (c==='\\') esc=true; else if (c==='"') quote=false; continue; }
+              if (c==='"') { quote=true; continue; }
+              if (c==='{' || c==='[') depth++;
+              else if (c==='}' || c===']') { depth--; if(depth===0) return s.slice(start,i+1); }
+            }
+            return null;
           }
+          function describe(v, d=0) {
+            if (v===null) return 'null';
+            if (Array.isArray(v)) return {type:'array',length:v.length,first:d<3&&v.length?describe(v[0],d+1):undefined};
+            if (typeof v==='object') { const o={type:'object',keys:Object.keys(v).sort()}; if(d<3) for(const k of Object.keys(v).sort()) { if(/(dest|envio|send|status|state|time|date|claim|reserv|confirm|provider|channel|canal|workspace|offer|oferta|message|mensag|executor|event|id)/i.test(k)) o[k]=describe(v[k],d+1); } return o; }
+            return typeof v;
+          }
+          const fd=fs.openSync(file,'r'); const n=Math.min(st.size,2*1024*1024); const buf=Buffer.alloc(n); fs.readSync(fd,buf,0,n,0); fs.closeSync(fd);
+          const raw=extractFirst(buf); let parsed=null; let parseError=''; try { if(raw) parsed=JSON.parse(raw); else parseError='no_complete_value'; } catch(e) { parseError=String(e.message); }
+          console.log('SCHEMA',JSON.stringify({file:rel,size:st.size,first:parsed?describe(parsed):null,parseError}));
           NODE
+          done
