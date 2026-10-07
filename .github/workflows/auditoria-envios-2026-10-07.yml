@@ -33,27 +33,28 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const root = '/opt/optimus/data';
-          const maxDepth = 8;
           const files = [];
-          const dirCounts = new Map();
           function walk(dir, depth) {
             let entries = [];
             try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
             for (const entry of entries) {
               const full = path.join(dir, entry.name);
               const rel = path.relative(root, full).replace(/\\/g, '/');
-              if (entry.isDirectory()) { const top = rel.split('/')[0]; dirCounts.set(top, (dirCounts.get(top)||0)+1); if (depth < maxDepth) walk(full, depth + 1); }
+              if (entry.isDirectory() && depth < 8) walk(full, depth + 1);
               else if (entry.isFile()) { let size = 0; try { size = fs.statSync(full).size; } catch {} files.push({ path: rel, size }); }
             }
           }
           walk(root, 0);
           const sensitive = /(auth|key|token|session|credential|secret|cookie|private|oauth)/i;
-          const terms = /(fila|histor|envio|send|delivery|destin|executor|provider|event|outbox|sent|message|mensag|terminal|claim|reserva|confirm|dispatch|queue)/i;
-          const candidates = files.filter(x => terms.test(x.path) && !sensitive.test(x.path)).sort((a,b)=>a.path.localeCompare(b.path));
+          const focus = /(fila|histor|envio|send|delivery|destin|executor|provider|outbox|sent|message|mensag|terminal|claim|reserva|confirm|dispatch|queue)/i;
+          const clientFiles = files.filter(x => x.path.startsWith('clientes/') && !sensitive.test(x.path));
+          const baseCounts = new Map();
+          for (const x of clientFiles) { const b = path.basename(x.path); if (focus.test(b)) baseCounts.set(b, (baseCounts.get(b)||0)+1); }
+          const focusFiles = clientFiles.filter(x => focus.test(path.basename(x.path))).sort((a,b)=>a.path.localeCompare(b.path));
           console.log('DATA_ROOT', root);
-          console.log('COUNTS', JSON.stringify({ files: files.length, directories: dirCounts.size, candidates: candidates.length }));
-          console.log('TOP_DIRECTORIES', JSON.stringify([...dirCounts.entries()].sort((a,b)=>a[0].localeCompare(b[0])).slice(0,200)));
-          console.log('CANDIDATES_BEGIN');
-          for (const c of candidates.slice(0,500)) console.log('CANDIDATE', JSON.stringify(c));
-          console.log('CANDIDATES_END');
+          console.log('COUNTS', JSON.stringify({ totalFiles: files.length, clientFiles: clientFiles.length, focusFiles: focusFiles.length }));
+          console.log('FOCUS_BASENAMES', JSON.stringify([...baseCounts.entries()].sort((a,b)=>a[0].localeCompare(b[0]))));
+          console.log('FOCUS_FILES_BEGIN');
+          for (const x of focusFiles.slice(0,400)) console.log('FOCUS_FILE', JSON.stringify(x));
+          console.log('FOCUS_FILES_END');
           NODE
