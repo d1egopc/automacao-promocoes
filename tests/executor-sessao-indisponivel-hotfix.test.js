@@ -42,12 +42,12 @@ const processarFila = trechoEntre(
 );
 assert(
   pos(processarFila, "workspaceEmCooldownSessaoIndisponivel(clienteFila)") <
-    pos(processarFila, "sanearExpiradosFila(clienteFila)"),
+    pos(processarFila, "sanearExpiradosFila(clienteFila, {"),
   "processarFila deve respeitar cooldown antes de saneamento ou selecao"
 );
 assert(
   pos(processarFila, "diagnosticarDisponibilidadeEnvioWorkspace(clienteFila") <
-    pos(processarFila, "sanearExpiradosFila(clienteFila)"),
+    pos(processarFila, "sanearExpiradosFila(clienteFila, {"),
   "processarFila deve checar sessao antes do processamento pesado"
 );
 assert(

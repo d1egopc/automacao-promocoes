@@ -1729,24 +1729,78 @@ function candidatosExpiracaoFilaV2(clienteId = "admin") {
   };
 }
 
-async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin") {
+async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
-  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) return null;
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
+    return {
+      estado: "legado",
+      fonte: "fila_legada",
+      clienteId: cliente,
+      conclusiva: true,
+      motivo: "fila_v2_desabilitada"
+    };
+  }
 
-  const decisao = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
-    contexto: "expiracao_selecao",
-    preflight: true
-  });
-  if (decisao?.generationConclusiva !== true) return null;
+  const recebeuProvaExecutor = Object.prototype.hasOwnProperty.call(
+    opcoes,
+    "reconciliacaoLeituraFilaV2"
+  );
+  const provaExecutor = opcoes?.reconciliacaoLeituraFilaV2;
+  const decisao = recebeuProvaExecutor
+    ? provaExecutor
+    : await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
+        contexto: "expiracao_selecao",
+        preflight: true
+      });
 
-  return candidatosExpiracaoFilaV2(cliente);
+  if (recebeuProvaExecutor && String(provaExecutor?.clienteId || "") !== cliente) {
+    return {
+      estado: "inconclusiva",
+      fonte: "inconclusiva",
+      clienteId: cliente,
+      conclusiva: false,
+      motivo: "authority_workspace_divergente"
+    };
+  }
+
+  if (decisao?.generationConclusiva !== true) {
+    return {
+      estado: "inconclusiva",
+      fonte: "inconclusiva",
+      clienteId: cliente,
+      conclusiva: false,
+      motivo: decisao?.motivo || "authority_generation_inconclusiva"
+    };
+  }
+
+  const fonteViva = candidatosExpiracaoFilaV2(cliente);
+  if (fonteViva?.fonte !== "fila_viva" || !Array.isArray(fonteViva.itens)) {
+    return {
+      estado: "inconclusiva",
+      fonte: "inconclusiva",
+      clienteId: cliente,
+      conclusiva: false,
+      motivo: "leitura_viva_indisponivel"
+    };
+  }
+
+  return {
+    ...fonteViva,
+    estado: "fila_viva",
+    clienteId: cliente,
+    conclusiva: true,
+    authorityReutilizada: recebeuProvaExecutor
+  };
 }
 
-async function sanearExpiradosFila(clienteId = "admin") {
+async function sanearExpiradosFila(clienteId = "admin", opcoes = {}) {
   const cliente = String(clienteId || "admin");
-  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente);
-  const itensCandidatos = fonteExpiracaoSelecao?.itens || fila;
-  const usandoFilaViva = fonteExpiracaoSelecao?.fonte === "fila_viva";
+  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente, opcoes);
+  if (fonteExpiracaoSelecao?.estado === "inconclusiva") {
+    throw new Error(`saneamento_expiracao_fail_closed:${fonteExpiracaoSelecao.motivo}`);
+  }
+  const usandoFilaViva = fonteExpiracaoSelecao?.estado === "fila_viva";
+  const itensCandidatos = usandoFilaViva ? fonteExpiracaoSelecao.itens : fila;
   let alterou = false;
   const itensAlterados = [];
 
@@ -2674,7 +2728,9 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
 
 async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteLog = String(clienteIdAlvo || "admin");
-  await sanearExpiradosFila(clienteLog);
+  if (opcoes?.saneamentoExpiracaoExecutado !== true) {
+    await sanearExpiradosFila(clienteLog, opcoes);
+  }
   const fonteClienteHotState = opcoes?.fonteClienteHotState;
   const colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
     ? fonteClienteHotState.itens
@@ -2696,9 +2752,14 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const agora = Date.now();
   let expirouAlguma = false;
   const expiradasSelecao = [];
-  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);
-  const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;
-  const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === "fila_viva";
+  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog, opcoes);
+  if (fonteExpiracaoSelecao?.estado === "inconclusiva") {
+    throw new Error(`selecao_expiracao_fail_closed:${fonteExpiracaoSelecao.motivo}`);
+  }
+  const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.estado === "fila_viva";
+  const itensExpiracaoSelecao = usandoFilaVivaExpiracaoSelecao
+    ? fonteExpiracaoSelecao.itens
+    : fila;
 
   for (const oferta of itensExpiracaoSelecao) {
     const mesmoCliente =
@@ -10482,7 +10543,9 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       );
     }
     resumoFila.fase = "sanear_fila";
-    await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila));
+    await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila, {
+      reconciliacaoLeituraFilaV2
+    }));
     fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
     colecaoPosEnvioProcessamento = (
       fonteClienteHotStateSelecao?.conclusiva === true &&
@@ -10531,6 +10594,8 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     const selecaoFilaComPool = await perfilProcessarFila.etapa("selecionar", () =>
       selecionarProximaOfertaFila(clienteFila, {
         fonteClienteHotState: fonteClienteHotStateSelecao,
+        reconciliacaoLeituraFilaV2,
+        saneamentoExpiracaoExecutado: true,
         retornarResultado: true
       })
     );
