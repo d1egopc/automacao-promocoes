@@ -34,7 +34,7 @@ jobs:
           const workspaces=['user_b2oogwwl','user_g3qkc18m','user_pss60lus','user_zbbk3fdr'];
           const today='2026-10-07';
           const offers=new Map();
-          const sourceCounts={durable:0,state:0,executor:0};
+          const sourceCounts={durable:0,state:0,executor:0}; let evidenceEvents=0;
           const stateHist={};
           function localDate(v){
             if(v===null||v===undefined||v==='') return null;
@@ -56,7 +56,7 @@ jobs:
             const key=ws+'|'+id; let r=offers.get(key); if(!r){r={key,workspace:ws,offerId:id,applicable:new Map(),confirmations:new Map(),sources:new Set(),seenSources:new Set(),statusValues:new Set()}; offers.set(key,r);} return r;
           }
           function addApplicable(r,d){const id=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||''); if(!id)return; if(d.estado) stateHist[String(d.estado)]=(stateHist[String(d.estado)]||0)+1; const s=String(d.estado||d.status||d.resultado||d.motivo||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[-]/g,'_'); const naoAplicavel=d.aplicavel===false || /nao[_ ]?compativel|incompativel|nao[_ ]?aplicavel|bloqueado[_ ]?repeticao[_ ]?2h/.test(s); if(naoAplicavel)return; r.applicable.set(id,{id,channel:channel(d),state:d.estado||null,enviadoEm:d.enviadoEm||null});}
-          function addConfirmation(r,d,kind,ts){if(!isToday(ts))return; const dest=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||'unknown'); const msg=String(d.messageId||d.providerMessageId||''); const k=dest+'|'+(msg||localDate(ts)); const pri={durable:3,state:2,executor:1}[kind]; const old=r.confirmations.get(k); if(!old||pri>old.priority){r.confirmations.set(k,{destinoId:dest,channel:channel(d),timestamp:String(ts),kind,priority:pri,messageIdPresent:!!msg,providerMessageIdPresent:!!d.providerMessageId}); r.sources.add(kind); sourceCounts[kind]++;}}
+          function addConfirmation(r,d,kind,ts){if(!isToday(ts))return; evidenceEvents++; const dest=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||'unknown'); const k=dest+'|'+today; const pri={durable:3,state:2,executor:1}[kind]; const old=r.confirmations.get(k); if(!old||pri>old.priority){if(old) sourceCounts[old.kind]--; r.confirmations.set(k,{destinoId:dest,channel:channel(d),timestamp:String(ts),kind,priority:pri,messageIdPresent:!!d.messageId,providerMessageIdPresent:!!d.providerMessageId}); r.sources.add(kind); sourceCounts[kind]++;}}
           function process(ws,source,v){
             const arr=Array.isArray(v)?v:[v];
             for(const wrapper of arr){const o=wrapper&&wrapper.item&&typeof wrapper.item==='object'?wrapper.item:wrapper; if(!o||typeof o!=='object')continue; const r=offerRec(ws,o); if(!r)continue;
@@ -79,6 +79,6 @@ jobs:
           const complete=rows.filter(x=>x.complete).length, partial=rows.filter(x=>x.partial).length;
           const byWorkspace={}; for(const x of rows){const b=byWorkspace[x.workspace]||(byWorkspace[x.workspace]={offers:0,complete:0,partial:0,confirmations:0,channels:{WhatsApp:0,Telegram:0,Discord:0,Outro:0}}); b.offers++; b.confirmations+=x.confirmations; if(x.complete)b.complete++; else b.partial++; for(const [c,n] of Object.entries(x.channelCounts||{}))b.channels[c]=(b.channels[c]||0)+n; }
           console.log('AUDIT_WORKSPACE',JSON.stringify(byWorkspace));
-          console.log('AUDIT_SUMMARY',JSON.stringify({today,offersWithAtLeastOneConfirmation:rows.length,completeOffers:complete,partialOffers:partial,totalDestinationConfirmations:rows.reduce((n,x)=>n+x.confirmations,0),channelCounts,sourceCounts,stateHistogram:stateHist,indeterminateCompleteness:rows.filter(x=>x.applicableDestinations===0).length}));
+          console.log('AUDIT_SUMMARY',JSON.stringify({today,offersWithAtLeastOneConfirmation:rows.length,completeOffers:complete,partialOffers:partial,totalDestinationConfirmations:rows.reduce((n,x)=>n+x.confirmations,0),evidenceEvents,channelCounts,sourceCounts,stateHistogram:stateHist,indeterminateCompleteness:rows.filter(x=>x.applicableDestinations===0).length}));
           console.log('AUDIT_OFFER_BEGIN'); for(const row of rows) console.log('AUDIT_OFFER',JSON.stringify(row)); console.log('AUDIT_OFFER_END');
           NODE
