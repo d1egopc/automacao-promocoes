@@ -263,12 +263,17 @@ assert(
 );
 
 assert(
-  saneamentoExpiracao.includes("const itensCandidatos = fonteCandidatos?.itens || fila") &&
+  saneamentoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente);") &&
+    saneamentoExpiracao.includes("const itensCandidatos = fonteExpiracaoSelecao?.itens || fila") &&
     saneamentoExpiracao.includes("if (!usandoFilaViva && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
     saneamentoExpiracao.includes("if (oferta.status !== \"pendente\") continue;") &&
-    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
-    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null"),
-  "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
+    saneamentoExpiracao.includes("const persistencia = await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
+    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null") &&
+    saneamentoExpiracao.includes("const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);") &&
+    saneamentoExpiracao.includes("reconstruirFilaStoreCliente(cliente, \"expiracao_saneamento_pos_mutacao\", {") &&
+    saneamentoExpiracao.includes("filaClienteHotState: fonteAtualizada.itens") &&
+    saneamentoExpiracao.includes("hotState: true"),
+  "saneamento deve aguardar authority, preservar fallback legitimo e reconstruir hot state apos mutacao confirmada"
 );
 
 const selecaoExpiracao = trechoEntre(

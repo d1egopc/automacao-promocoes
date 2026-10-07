@@ -1744,9 +1744,9 @@ async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin") {
 
 async function sanearExpiradosFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
-  const fonteCandidatos = candidatosExpiracaoFilaV2(cliente);
-  const itensCandidatos = fonteCandidatos?.itens || fila;
-  const usandoFilaViva = fonteCandidatos?.fonte === "fila_viva";
+  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente);
+  const itensCandidatos = fonteExpiracaoSelecao?.itens || fila;
+  const usandoFilaViva = fonteExpiracaoSelecao?.fonte === "fila_viva";
   let alterou = false;
   const itensAlterados = [];
 
@@ -1769,9 +1769,25 @@ async function sanearExpiradosFila(clienteId = "admin") {
   }
 
   if (alterou) {
-    await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento", {
+    const persistencia = await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento", {
       filaClienteHotState: usandoFilaViva ? itensCandidatos : null
     });
+
+    if (usandoFilaViva) {
+      if (persistencia?.ok !== true || persistencia?.fallbackLegado === true) {
+        throw new Error(`saneamento_hot_state_nao_confirmado:${persistencia?.motivo || "persistencia_inconclusiva"}`);
+      }
+
+      const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);
+      if (fonteAtualizada?.fonte !== "fila_viva" || !Array.isArray(fonteAtualizada.itens)) {
+        throw new Error("saneamento_hot_state_nao_confirmado:releitura_viva_inconclusiva");
+      }
+
+      reconstruirFilaStoreCliente(cliente, "expiracao_saneamento_pos_mutacao", {
+        filaClienteHotState: fonteAtualizada.itens,
+        hotState: true
+      });
+    }
   }
 
   return alterou;
