@@ -62,7 +62,7 @@ assert(
 
 assert(
   pos(processarFila, "reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")") <
-    pos(processarFila, "sanearExpiradosFila(clienteFila, {"),
+    pos(processarFila, "sanearExpiradosFila(clienteFila)"),
   "executor deve reconciliar a fila oficial antes de sanear expirados"
 );
 
@@ -263,18 +263,12 @@ assert(
 );
 
 assert(
-  saneamentoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente, opcoes);") &&
-    saneamentoExpiracao.includes("if (fonteExpiracaoSelecao?.estado === \"inconclusiva\")") &&
-    saneamentoExpiracao.includes("const itensCandidatos = usandoFilaViva ? fonteExpiracaoSelecao.itens : fila") &&
+  saneamentoExpiracao.includes("const itensCandidatos = fonteCandidatos?.itens || fila") &&
     saneamentoExpiracao.includes("if (!usandoFilaViva && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
     saneamentoExpiracao.includes("if (oferta.status !== \"pendente\") continue;") &&
-    saneamentoExpiracao.includes("const persistencia = await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
-    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null") &&
-    saneamentoExpiracao.includes("const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);") &&
-    saneamentoExpiracao.includes("reconstruirFilaStoreCliente(cliente, \"expiracao_saneamento_pos_mutacao\", {") &&
-    saneamentoExpiracao.includes("filaClienteHotState: fonteAtualizada.itens") &&
-    saneamentoExpiracao.includes("hotState: true"),
-  "saneamento deve aguardar authority, preservar fallback legitimo e reconstruir hot state apos mutacao confirmada"
+    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
+    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null"),
+  "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
 );
 
 const selecaoExpiracao = trechoEntre(
@@ -284,20 +278,17 @@ const selecaoExpiracao = trechoEntre(
 
 assert(
   selecaoExpiracao.includes("filaOperacionalV2.deveUsarFilaV2Operacional(cliente)") &&
-    selecaoExpiracao.includes("recebeuProvaExecutor") &&
-    selecaoExpiracao.includes("authority_workspace_divergente") &&
     selecaoExpiracao.includes("await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {") &&
     selecaoExpiracao.includes("contexto: \"expiracao_selecao\"") &&
-    selecaoExpiracao.includes("if (decisao?.generationConclusiva !== true)") &&
-    selecaoExpiracao.includes('estado: "inconclusiva"') &&
-    selecaoExpiracao.includes("const fonteViva = candidatosExpiracaoFilaV2(cliente);"),
-  "expiracao_selecao V2 deve reutilizar prova da mesma workspace e falhar fechado sem authority conclusiva"
+    selecaoExpiracao.includes("if (decisao?.generationConclusiva !== true) return null;") &&
+    selecaoExpiracao.includes("return candidatosExpiracaoFilaV2(cliente);"),
+  "expiracao_selecao V2 deve usar fila-viva somente quando authority generation for conclusiva"
 );
 
 assert(
-  selecaoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog, opcoes);") &&
-    selecaoExpiracao.includes("if (fonteExpiracaoSelecao?.estado === \"inconclusiva\")") &&
-    selecaoExpiracao.includes("const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.estado === \"fila_viva\";") &&
+  selecaoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);") &&
+    selecaoExpiracao.includes("const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;") &&
+    selecaoExpiracao.includes("const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === \"fila_viva\";") &&
     selecaoExpiracao.includes("for (const oferta of itensExpiracaoSelecao)") &&
     selecaoExpiracao.includes("if (!usandoFilaVivaExpiracaoSelecao && !mesmoCliente) continue;"),
   "expiracao_selecao deve ignorar stale global quando V2 conclusiva fornecer hot state da fila-viva"
@@ -523,13 +514,11 @@ assert(
 );
 
 assert(
-  processarFila.includes("sanearExpiradosFila(clienteFila, {") &&
-    processarFila.includes("reconciliacaoLeituraFilaV2") &&
-    processarFila.includes("fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
+  processarFila.includes("const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
     processarFila.includes("sanearDuplicatasPendentesFilaCliente(clienteFila, \"processar_fila\", {") &&
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao") &&
     processarFila.includes("selecionarProximaOfertaFila(clienteFila, {") &&
-    processarFila.includes("saneamentoExpiracaoExecutado: true"),
+    processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao"),
   "processarFila deve encaminhar hot state por cliente para saneamento/diagnostico/selecao sem refiltrar a global"
 );
 

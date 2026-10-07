@@ -1729,78 +1729,24 @@ function candidatosExpiracaoFilaV2(clienteId = "admin") {
   };
 }
 
-async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin", opcoes = {}) {
+async function candidatosExpiracaoSelecaoFilaV2(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
-  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) {
-    return {
-      estado: "legado",
-      fonte: "fila_legada",
-      clienteId: cliente,
-      conclusiva: true,
-      motivo: "fila_v2_desabilitada"
-    };
-  }
+  if (!filaOperacionalV2.deveUsarFilaV2Operacional(cliente)) return null;
 
-  const recebeuProvaExecutor = Object.prototype.hasOwnProperty.call(
-    opcoes,
-    "reconciliacaoLeituraFilaV2"
-  );
-  const provaExecutor = opcoes?.reconciliacaoLeituraFilaV2;
-  const decisao = recebeuProvaExecutor
-    ? provaExecutor
-    : await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
-        contexto: "expiracao_selecao",
-        preflight: true
-      });
+  const decisao = await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {
+    contexto: "expiracao_selecao",
+    preflight: true
+  });
+  if (decisao?.generationConclusiva !== true) return null;
 
-  if (recebeuProvaExecutor && String(provaExecutor?.clienteId || "") !== cliente) {
-    return {
-      estado: "inconclusiva",
-      fonte: "inconclusiva",
-      clienteId: cliente,
-      conclusiva: false,
-      motivo: "authority_workspace_divergente"
-    };
-  }
-
-  if (decisao?.generationConclusiva !== true) {
-    return {
-      estado: "inconclusiva",
-      fonte: "inconclusiva",
-      clienteId: cliente,
-      conclusiva: false,
-      motivo: decisao?.motivo || "authority_generation_inconclusiva"
-    };
-  }
-
-  const fonteViva = candidatosExpiracaoFilaV2(cliente);
-  if (fonteViva?.fonte !== "fila_viva" || !Array.isArray(fonteViva.itens)) {
-    return {
-      estado: "inconclusiva",
-      fonte: "inconclusiva",
-      clienteId: cliente,
-      conclusiva: false,
-      motivo: "leitura_viva_indisponivel"
-    };
-  }
-
-  return {
-    ...fonteViva,
-    estado: "fila_viva",
-    clienteId: cliente,
-    conclusiva: true,
-    authorityReutilizada: recebeuProvaExecutor
-  };
+  return candidatosExpiracaoFilaV2(cliente);
 }
 
-async function sanearExpiradosFila(clienteId = "admin", opcoes = {}) {
+async function sanearExpiradosFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
-  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(cliente, opcoes);
-  if (fonteExpiracaoSelecao?.estado === "inconclusiva") {
-    throw new Error(`saneamento_expiracao_fail_closed:${fonteExpiracaoSelecao.motivo}`);
-  }
-  const usandoFilaViva = fonteExpiracaoSelecao?.estado === "fila_viva";
-  const itensCandidatos = usandoFilaViva ? fonteExpiracaoSelecao.itens : fila;
+  const fonteCandidatos = candidatosExpiracaoFilaV2(cliente);
+  const itensCandidatos = fonteCandidatos?.itens || fila;
+  const usandoFilaViva = fonteCandidatos?.fonte === "fila_viva";
   let alterou = false;
   const itensAlterados = [];
 
@@ -1823,25 +1769,9 @@ async function sanearExpiradosFila(clienteId = "admin", opcoes = {}) {
   }
 
   if (alterou) {
-    const persistencia = await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento", {
+    await persistirExpiracaoFila(cliente, itensAlterados, "expiracao_saneamento", {
       filaClienteHotState: usandoFilaViva ? itensCandidatos : null
     });
-
-    if (usandoFilaViva) {
-      if (persistencia?.ok !== true || persistencia?.fallbackLegado === true) {
-        throw new Error(`saneamento_hot_state_nao_confirmado:${persistencia?.motivo || "persistencia_inconclusiva"}`);
-      }
-
-      const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);
-      if (fonteAtualizada?.fonte !== "fila_viva" || !Array.isArray(fonteAtualizada.itens)) {
-        throw new Error("saneamento_hot_state_nao_confirmado:releitura_viva_inconclusiva");
-      }
-
-      reconstruirFilaStoreCliente(cliente, "expiracao_saneamento_pos_mutacao", {
-        filaClienteHotState: fonteAtualizada.itens,
-        hotState: true
-      });
-    }
   }
 
   return alterou;
@@ -2728,26 +2658,31 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
 
 async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteLog = String(clienteIdAlvo || "admin");
-  if (opcoes?.saneamentoExpiracaoExecutado !== true) {
-    await sanearExpiradosFila(clienteLog, opcoes);
-  }
-  let fonteClienteHotState = opcoes?.fonteClienteHotState;
-  let colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
+  await sanearExpiradosFila(clienteLog);
+  const fonteClienteHotState = opcoes?.fonteClienteHotState;
+  const colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
     ? fonteClienteHotState.itens
     : fila;
   let cacheLimiteDiarioRodada = new Map();
+  const diagnostico = diagnosticarFilaCliente(clienteLog, {
+    filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
+      ? fonteClienteHotState.itens
+      : null,
+    cacheLimiteDiario: cacheLimiteDiarioRodada
+  });
+
+  diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
+
+  if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
+    console.log("ðŸ§  DiagnÃ³stico da fila", diagnostico);
+  }
 
   const agora = Date.now();
   let expirouAlguma = false;
   const expiradasSelecao = [];
-  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog, opcoes);
-  if (fonteExpiracaoSelecao?.estado === "inconclusiva") {
-    throw new Error(`selecao_expiracao_fail_closed:${fonteExpiracaoSelecao.motivo}`);
-  }
-  const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.estado === "fila_viva";
-  const itensExpiracaoSelecao = usandoFilaVivaExpiracaoSelecao
-    ? fonteExpiracaoSelecao.itens
-    : fila;
+  const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);
+  const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;
+  const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === "fila_viva";
 
   for (const oferta of itensExpiracaoSelecao) {
     const mesmoCliente =
@@ -2762,48 +2697,10 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   }
 
   if (expirouAlguma) {
-    const persistencia = await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao", {
+    await persistirExpiracaoFila(clienteIdAlvo || "admin", expiradasSelecao, "expiracao_selecao", {
       filaClienteHotState: usandoFilaVivaExpiracaoSelecao ? itensExpiracaoSelecao : null
     });
-
-    if (usandoFilaVivaExpiracaoSelecao) {
-      if (persistencia?.ok !== true || persistencia?.fallbackLegado === true) {
-        throw new Error(`selecao_hot_state_nao_confirmado:${persistencia?.motivo || "persistencia_inconclusiva"}`);
-      }
-
-      const fonteAtualizada = candidatosExpiracaoFilaV2(clienteLog);
-      if (fonteAtualizada?.fonte !== "fila_viva" || !Array.isArray(fonteAtualizada.itens)) {
-        throw new Error("selecao_hot_state_nao_confirmado:releitura_viva_inconclusiva");
-      }
-
-      reconstruirFilaStoreCliente(clienteLog, "expiracao_selecao_pos_mutacao", {
-        filaClienteHotState: fonteAtualizada.itens,
-        hotState: true
-      });
-      colecaoSelecao = fonteAtualizada.itens;
-      fonteClienteHotState = {
-        ...(fonteClienteHotState || {}),
-        fonte: "fila_store_hot_state_executor_v2",
-        clienteId: clienteLog,
-        conclusiva: true,
-        itens: fonteAtualizada.itens,
-        totalCliente: fonteAtualizada.itens.length
-      };
-    }
     cacheLimiteDiarioRodada = new Map();
-  }
-
-  const diagnostico = diagnosticarFilaCliente(clienteLog, {
-    filaClienteHotState: Array.isArray(fonteClienteHotState?.itens)
-      ? fonteClienteHotState.itens
-      : null,
-    cacheLimiteDiario: cacheLimiteDiarioRodada
-  });
-
-  diagnosticosFilaPorCliente.set(clienteLog, diagnostico);
-
-  if (deveLogarThrottle(`fila-diagnostico:${clienteLog}`)) {
-    console.log("ðŸ§  DiagnÃ³stico da fila", diagnostico);
   }
 
   const resultadoSelecao = selecionarProximaOfertaFilaCore(colecaoSelecao, clienteIdAlvo, {
@@ -2877,7 +2774,7 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     }
 
     return opcoes?.retornarResultado === true
-      ? { oferta: selecionada.oferta, resultadoSelecao, contadoresFilaViva, fonteClienteHotState }
+      ? { oferta: selecionada.oferta, resultadoSelecao, contadoresFilaViva }
       : selecionada.oferta;
   }
 
@@ -2896,7 +2793,7 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   }
 
   return opcoes?.retornarResultado === true
-    ? { oferta: null, resultadoSelecao, contadoresFilaViva, fonteClienteHotState }
+    ? { oferta: null, resultadoSelecao, contadoresFilaViva }
     : null;
 }
 function aplicarDiversidadeFila(clienteId = "admin") {
@@ -10569,9 +10466,7 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       );
     }
     resumoFila.fase = "sanear_fila";
-    await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila, {
-      reconciliacaoLeituraFilaV2
-    }));
+    await perfilProcessarFila.etapa("sanear", () => sanearExpiradosFila(clienteFila));
     fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);
     colecaoPosEnvioProcessamento = (
       fonteClienteHotStateSelecao?.conclusiva === true &&
@@ -10620,18 +10515,10 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
     const selecaoFilaComPool = await perfilProcessarFila.etapa("selecionar", () =>
       selecionarProximaOfertaFila(clienteFila, {
         fonteClienteHotState: fonteClienteHotStateSelecao,
-        reconciliacaoLeituraFilaV2,
-        saneamentoExpiracaoExecutado: true,
         retornarResultado: true
       })
     );
     oferta = selecaoFilaComPool?.oferta || null;
-    if (
-      selecaoFilaComPool?.fonteClienteHotState?.conclusiva === true &&
-      Array.isArray(selecaoFilaComPool.fonteClienteHotState.itens)
-    ) {
-      fonteClienteHotStateSelecao = selecaoFilaComPool.fonteClienteHotState;
-    }
     const resultadoSelecaoPrimeiraAvaliacao = selecaoFilaComPool?.resultadoSelecao || {};
     let resultadoPrimeiraAvaliacao = null;
     try {
