@@ -24,23 +24,59 @@ jobs:
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
           if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then echo "production_target_verified=true"; else echo "production_target_verified=false"; fi
-      - name: Read-only factual schema inspection
+      - name: Factual send audit
         shell: bash
         run: |
           set -Eeuo pipefail
-          for spec in user_b2oogwwl/fila-historico.json user_b2oogwwl/fila-viva.json user_b2oogwwl/fila.json user_b2oogwwl/controle-envio-destinos.json user_g3qkc18m/fila-historico.json user_g3qkc18m/fila-viva.json user_g3qkc18m/fila.json user_g3qkc18m/controle-envio-destinos.json user_pss60lus/fila-historico.json user_pss60lus/fila-viva.json user_pss60lus/fila.json user_pss60lus/controle-envio-destinos.json user_zbbk3fdr/fila-historico.json user_zbbk3fdr/fila-viva.json user_zbbk3fdr/fila.json user_zbbk3fdr/controle-envio-destinos.json; do
-            if [ ! -f "/opt/optimus/data/clientes/${spec}" ]; then echo "MISSING ${spec}"; continue; fi
-            node --max-old-space-size=4096 - "${spec}" <<'NODE'
+          node --max-old-space-size=4096 <<'NODE'
           const fs=require('fs'), path=require('path');
-          const rel=process.argv[2], file=path.join('/opt/optimus/data/clientes',rel);
-          let v; try { v=JSON.parse(fs.readFileSync(file,'utf8')); } catch(e) { console.log('PARSE_ERROR',rel,String(e.message)); process.exit(0); }
-          const interesting=/(dest|envio|send|status|state|time|date|claim|reserv|confirm|provider|channel|canal|workspace|offer|oferta|message|mensag|executor|event|id|erro|falha|aplic)/i;
-          function brief(x,d=0){
-            if(x===null) return 'null';
-            if(Array.isArray(x)) return {type:'array',length:x.length,items:x.slice(0,3).map(y=>brief(y,d+1))};
-            if(typeof x==='object'){const ks=Object.keys(x); const o={type:'object',keys:ks.slice(0,120).sort()}; if(d<2) for(const k of ks) if(interesting.test(k)) o[k]=brief(x[k],d+1); return o;}
-            return typeof x;
+          const root='/opt/optimus/data/clientes';
+          const workspaces=['user_b2oogwwl','user_g3qkc18m','user_pss60lus','user_zbbk3fdr'];
+          const today='2026-10-07';
+          const offers=new Map();
+          const sourceCounts={durable:0,state:0,executor:0};
+          const stateHist={};
+          function localDate(v){
+            if(v===null||v===undefined||v==='') return null;
+            if(typeof v==='number'){const d=new Date(v); if(!isNaN(d)) return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);}
+            const s=String(v); const d=new Date(s); if(!isNaN(d)) return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(d); return s.slice(0,10);
           }
-          console.log('SCHEMA',JSON.stringify({file:rel,size:fs.statSync(file).size,summary:brief(v)}));
+          function isToday(v){return localDate(v)===today;}
+          function truthy(v){return v===true || v===1 || (typeof v==='string' && /^(true|yes|ok|sucesso|success)$/i.test(v.trim()));}
+          function confirmedState(v){const s=String(v||'').toLowerCase(); if(!s) return false; if(/falh|erro|pend|aguard|cancel|bloq|nao|não|skip|sem/.test(s)) return false; return /enviad|sucess|success|confirm|sent|ok|conclu|delivered/.test(s);}
+          function channel(d){
+            const vals=[d.tipo,d.canal,d.channel,d.channelName,d.nome,d.destinoId,d.alvoId,d.grupo,d.grupoJid].filter(Boolean).map(String).join(' ').toLowerCase();
+            if(/whats|baileys|z-api|whatsapp|^wa/.test(vals)) return 'WhatsApp';
+            if(/telegram|^tg/.test(vals)) return 'Telegram';
+            if(/discord/.test(vals)) return 'Discord';
+            return 'Outro';
+          }
+          function offerRec(ws,o){
+            const id=String(o.id||o.engineOfertaUuid||o.engineOfertaId||''); if(!id) return null;
+            const key=ws+'|'+id; let r=offers.get(key); if(!r){r={key,workspace:ws,offerId:id,applicable:new Map(),confirmations:new Map(),sources:new Set(),seenSources:new Set(),statusValues:new Set()}; offers.set(key,r);} return r;
+          }
+          function addApplicable(r,d){const id=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||''); if(!id)return; r.applicable.set(id,{id,channel:channel(d),state:d.estado||null,enviadoEm:d.enviadoEm||null}); if(d.estado) stateHist[String(d.estado)]=(stateHist[String(d.estado)]||0)+1;}
+          function addConfirmation(r,d,kind,ts){if(!isToday(ts))return; const dest=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||'unknown'); const msg=String(d.messageId||d.providerMessageId||''); const k=dest+'|'+(msg||localDate(ts)); const pri={durable:3,state:2,executor:1}[kind]; const old=r.confirmations.get(k); if(!old||pri>old.priority){r.confirmations.set(k,{destinoId:dest,channel:channel(d),timestamp:String(ts),kind,priority:pri,messageIdPresent:!!msg,providerMessageIdPresent:!!d.providerMessageId}); r.sources.add(kind); sourceCounts[kind]++;}}
+          function process(ws,source,v){
+            const arr=Array.isArray(v)?v:[v];
+            for(const wrapper of arr){const o=wrapper&&wrapper.item&&typeof wrapper.item==='object'?wrapper.item:wrapper; if(!o||typeof o!=='object')continue; const r=offerRec(ws,o); if(!r)continue;
+              if(o.destinosEstado&&Array.isArray(o.destinosEstado)) for(const d of o.destinosEstado){addApplicable(r,d); if(d.enviadoEm&&confirmedState(d.estado)) addConfirmation(r,d,'state',d.enviadoEm);}
+              if(o.destinosEnviados&&Array.isArray(o.destinosEnviados)) for(const d of o.destinosEnviados){if(d.dataEnvio) addConfirmation(r,d,'durable',d.dataEnvio);}
+              if(o.logsEnvio&&Array.isArray(o.logsEnvio)) for(const d of o.logsEnvio){const ok=truthy(d.sendMessageSucesso)||truthy(d.sucesso)||!!d.providerMessageId; if(ok&&d.data) addConfirmation(r,d,'executor',d.data);}
+              if(o.status) r.statusValues.add(String(o.status)); if(o.statusOperacional) r.statusValues.add(String(o.statusOperacional)); if(o.statusPublico) r.statusValues.add(String(o.statusPublico));
+            }
+          }
+          for(const ws of workspaces){for(const name of ['fila.json','fila-historico.json']){const file=path.join(root,ws,name); if(!fs.existsSync(file)){console.log('MISSING_SOURCE',ws,name); continue;} console.log('READ_SOURCE',ws,name,fs.statSync(file).size); let v; try{v=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){console.log('PARSE_ERROR',ws,name,String(e.message));continue;} process(ws,name,v); v=null;}}
+          const rows=[]; const channelCounts={WhatsApp:0,Telegram:0,Discord:0,Outro:0};
+          for(const r of offers.values()){
+            const conf=[...r.confirmations.values()]; if(!conf.length)continue;
+            for(const c of conf) channelCounts[c.channel]=(channelCounts[c.channel]||0)+1;
+            const applicable=[...r.applicable.values()]; const allConfirmed=applicable.length>0 && applicable.every(d=>confirmedState(d.state));
+            const complete=allConfirmed; const partial=!complete;
+            rows.push({workspace:r.workspace,offerId:r.offerId,confirmations:conf.length,channels:[...new Set(conf.map(c=>c.channel))].sort(),timestamps:[...new Set(conf.map(c=>c.timestamp))].sort(),sources:[...r.sources].sort(),applicableDestinations:applicable.length,confirmedApplicable:applicable.filter(d=>confirmedState(d.state)).length,complete,partial,stateValues:[...r.statusValues].sort()});
+          }
+          rows.sort((a,b)=>(a.workspace+a.offerId).localeCompare(b.workspace+b.offerId));
+          const complete=rows.filter(x=>x.complete).length, partial=rows.filter(x=>x.partial).length;
+          console.log('AUDIT_SUMMARY',JSON.stringify({today,offersWithAtLeastOneConfirmation:rows.length,completeOffers:complete,partialOffers:partial,totalDestinationConfirmations:rows.reduce((n,x)=>n+x.confirmations,0),channelCounts,sourceCounts,stateHistogram:stateHist,indeterminateCompleteness:rows.filter(x=>x.applicableDestinations===0).length}));
+          console.log('AUDIT_OFFER_BEGIN'); for(const row of rows) console.log('AUDIT_OFFER',JSON.stringify(row)); console.log('AUDIT_OFFER_END');
           NODE
-          done
