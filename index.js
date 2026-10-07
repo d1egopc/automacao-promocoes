@@ -10519,40 +10519,76 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       })
     );
     oferta = selecaoFilaComPool?.oferta || null;
-    await perfilProcessarFila.etapa("primeiraAvaliacaoDestinos", () =>
-      filaDualRead.executarPrimeiraAvaliacaoLane({
-        candidatosInspecao: selecaoFilaComPool?.resultadoSelecao?.candidatosInspecao || [],
-        fonteClienteHotState: fonteClienteHotStateSelecao,
-        clienteId: clienteFila,
-        relocalizarOferta: filaOfertas.relocalizarOfertaFila,
-        ofertaExpiradaParaEnvio,
-        registrarDestinoEstado: registrarDestinoEstadoFanout,
-        persistirItem: async itemPreparado => {
-          const syncViva = await sincronizarItemFilaVivaAposMutacao(
-            clienteFila,
-            itemPreparado,
-            "executor_primeira_avaliacao_destinos",
-            {
-              checkpointSincronizado: false,
-              exigirMutacao: true,
-              publicarLegacyProof: false
+    const resultadoSelecaoPrimeiraAvaliacao = selecaoFilaComPool?.resultadoSelecao || {};
+    let resultadoPrimeiraAvaliacao = null;
+    try {
+      resultadoPrimeiraAvaliacao = await perfilProcessarFila.etapa("primeiraAvaliacaoDestinos", () =>
+        filaDualRead.executarPrimeiraAvaliacaoLane({
+          candidatosInspecao: resultadoSelecaoPrimeiraAvaliacao.candidatosInspecao || [],
+          fonteClienteHotState: fonteClienteHotStateSelecao,
+          clienteId: clienteFila,
+          relocalizarOferta: filaOfertas.relocalizarOfertaFila,
+          ofertaExpiradaParaEnvio,
+          registrarDestinoEstado: registrarDestinoEstadoFanout,
+          persistirItem: async itemPreparado => {
+            const syncViva = await sincronizarItemFilaVivaAposMutacao(
+              clienteFila,
+              itemPreparado,
+              "executor_primeira_avaliacao_destinos",
+              {
+                checkpointSincronizado: false,
+                exigirMutacao: true,
+                publicarLegacyProof: false
+              }
+            );
+            if (syncViva?.terminalHistorico === true) {
+              return {
+                ok: false,
+                terminalHistorico: true,
+                tipoFalha: "terminal_historico",
+                motivo: syncViva.motivo || "item_ja_terminal"
+              };
             }
-          );
-          if (syncViva?.terminalHistorico === true) {
-            return { ok: false, terminalHistorico: true, motivo: syncViva.motivo || "item_ja_terminal" };
+            if (!syncVivaMutacaoConfirmada(syncViva)) {
+              return {
+                ok: false,
+                tipoFalha: "mutacao_nao_confirmada",
+                motivo: syncViva?.motivo || "mutacao_viva_nao_confirmada"
+              };
+            }
+            checkpointFilaV2.marcarDirty(
+              clienteFila,
+              "executor_primeira_avaliacao_destinos",
+              Date.now()
+            );
+            return { ok: true, generation: syncViva.generation || syncViva.dbState?.vivaGeneration || 0 };
           }
-          if (!syncVivaMutacaoConfirmada(syncViva)) {
-            return { ok: false, motivo: syncViva?.motivo || "mutacao_viva_nao_confirmada" };
-          }
-          checkpointFilaV2.marcarDirty(
-            clienteFila,
-            "executor_primeira_avaliacao_destinos",
-            Date.now()
-          );
-          return { ok: true, generation: syncViva.generation || syncViva.dbState?.vivaGeneration || 0 };
+        })
+      );
+    } finally {
+      console.log("[FIRST-EVAL-LANE]", JSON.stringify({
+        timestamp: new Date().toISOString(),
+        clienteId: String(clienteFila || "admin"),
+        authorityConclusiva: fonteClienteHotStateSelecao?.conclusiva === true,
+        fonteHotStateValida: Array.isArray(fonteClienteHotStateSelecao?.itens),
+        totalPendentes: Number(resultadoSelecaoPrimeiraAvaliacao.totalPendentes || 0),
+        totalPendentesSemPrimeiraAvaliacao: Number(resultadoSelecaoPrimeiraAvaliacao.totalPendentesSemPrimeiraAvaliacao || 0),
+        totalCandidatosInspecao: Number(resultadoSelecaoPrimeiraAvaliacao.totalCandidatosInspecao || 0),
+        candidatosSelecionados: Number(resultadoPrimeiraAvaliacao?.candidatosSelecionados || 0),
+        resultado: {
+          ok: resultadoPrimeiraAvaliacao?.ok === true,
+          failClosed: resultadoPrimeiraAvaliacao?.failClosed === true,
+          motivo: String(resultadoPrimeiraAvaliacao?.motivo || (resultadoPrimeiraAvaliacao ? "" : "exception_nao_classificada")),
+          candidatos: Number(resultadoPrimeiraAvaliacao?.candidatos || 0),
+          inspecionados: Number(resultadoPrimeiraAvaliacao?.inspecionados || 0),
+          ignorados: Number(resultadoPrimeiraAvaliacao?.ignorados || 0),
+          falhas: Number(resultadoPrimeiraAvaliacao?.falhas || 0),
+          ignoradosPorMotivo: resultadoPrimeiraAvaliacao?.ignoradosPorMotivo || {},
+          falhasPorMotivo: resultadoPrimeiraAvaliacao?.falhasPorMotivo || {},
+          motivosPersistencia: resultadoPrimeiraAvaliacao?.motivosPersistencia || []
         }
-      })
-    );
+      }));
+    }
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";

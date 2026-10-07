@@ -75,6 +75,10 @@ function depsLane(itens, persistirItem) {
   };
 }
 
+function somaContadores(contadores = {}) {
+  return Object.values(contadores).reduce((total, valor) => total + Number(valor || 0), 0);
+}
+
 function carregarAvaliadorReal(overrides = {}) {
   const fonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const inicio = fonte.indexOf("function avaliarOfertaParaSelecaoFilaViva");
@@ -132,6 +136,9 @@ function carregarAvaliadorReal(overrides = {}) {
     });
 
     assert.strictEqual(resultado.inspecionados, 2);
+    assert.strictEqual(resultado.candidatos, 3);
+    assert.strictEqual(resultado.candidatosSelecionados, 2);
+    assert.strictEqual(resultado.inspecionados + resultado.ignorados + resultado.falhas, 2);
     assert.strictEqual(writes, 2, "facade runtime deve preservar o batch maximo da Lane");
   }
 
@@ -213,6 +220,7 @@ function carregarAvaliadorReal(overrides = {}) {
       candidatosInspecao: planos
     });
     assert.strictEqual(resultado.inspecionados, 2);
+    assert.strictEqual(resultado.candidatosSelecionados, 2);
     assert.strictEqual(writes, 2, "batch nunca pode exceder duas mutacoes");
     assert.strictEqual(itens.filter(item => item.primeiraAvaliacaoDestinosEm).length, 2);
   }
@@ -224,6 +232,8 @@ function carregarAvaliadorReal(overrides = {}) {
       candidatosInspecao: [candidato(item)]
     });
     assert.strictEqual(resultado.falhas, 1);
+    assert.strictEqual(resultado.falhasPorMotivo.exception, 1);
+    assert.strictEqual(somaContadores(resultado.falhasPorMotivo), resultado.falhas);
     assert.strictEqual(item.primeiraAvaliacaoDestinosEm, undefined, "falha antes do write nao pode marcar item local");
   }
 
@@ -280,6 +290,8 @@ function carregarAvaliadorReal(overrides = {}) {
     const segunda = await executar();
     assert.strictEqual(primeira.inspecionados, 1);
     assert.strictEqual(segunda.ignorados, 1);
+    assert.strictEqual(segunda.ignoradosPorMotivo.ja_avaliado, 1);
+    assert.strictEqual(somaContadores(segunda.ignoradosPorMotivo), segunda.ignorados);
     assert.strictEqual(writes, 1, "segunda tentativa deve observar o marcador duravel");
     assert.strictEqual(item.destinosEstado.length, 1, "upsert nao pode duplicar o mesmo destino");
     assert.strictEqual(item.destinosEstado[0].motivo, "destino_compativel");
@@ -293,6 +305,8 @@ function carregarAvaliadorReal(overrides = {}) {
       candidatosInspecao: [candidato(item)]
     });
     assert.strictEqual(resultado.ignorados, 1);
+    assert.strictEqual(resultado.ignoradosPorMotivo.expirado, 1);
+    assert.strictEqual(somaContadores(resultado.ignoradosPorMotivo), resultado.ignorados);
     assert.strictEqual(writes, 0, "item expirado entre read e write nao pode ser persistido");
     assert.strictEqual(item.primeiraAvaliacaoDestinosEm, undefined);
   }
@@ -304,7 +318,73 @@ function carregarAvaliadorReal(overrides = {}) {
       candidatosInspecao: [candidato(item)]
     });
     assert.strictEqual(resultado.falhas, 1);
+    assert.strictEqual(resultado.falhasPorMotivo.terminal_historico, 1);
+    assert.strictEqual(somaContadores(resultado.falhasPorMotivo), resultado.falhas);
     assert.strictEqual(item.primeiraAvaliacaoDestinosEm, undefined, "terminal concorrente nao pode ser ressuscitado");
+  }
+
+  {
+    const cenarios = [
+      {
+        id: "relocalizacao_falhou",
+        relocalizarOferta: () => ({ ok: false, oferta: null }),
+        motivo: "relocalizacao_falhou"
+      },
+      {
+        id: "item_ausente",
+        relocalizarOferta: () => ({ ok: true, oferta: null }),
+        motivo: "item_ausente"
+      },
+      {
+        id: "status_nao_pendente",
+        preparar: item => { item.status = "enviado"; },
+        motivo: "status_nao_pendente"
+      }
+    ];
+
+    for (const cenario of cenarios) {
+      const item = oferta(cenario.id);
+      cenario.preparar?.(item);
+      let writes = 0;
+      const resultado = await executarPrimeiraAvaliacaoLane({
+        ...depsLane([item], async () => { writes += 1; return { ok: true }; }),
+        ...(cenario.relocalizarOferta ? { relocalizarOferta: cenario.relocalizarOferta } : {}),
+        candidatosInspecao: [candidato(item)]
+      });
+      assert.strictEqual(resultado.ignorados, 1);
+      assert.strictEqual(resultado.ignoradosPorMotivo[cenario.motivo], 1);
+      assert.strictEqual(somaContadores(resultado.ignoradosPorMotivo), resultado.ignorados);
+      assert.strictEqual(writes, 0);
+    }
+  }
+
+  {
+    const cenarios = [
+      {
+        id: "mutacao_nao_confirmada",
+        persistencia: { ok: false, tipoFalha: "mutacao_nao_confirmada", motivo: "hash_divergente" },
+        motivo: "mutacao_nao_confirmada"
+      },
+      {
+        id: "persistencia_rejeitada",
+        persistencia: { ok: false, motivo: "write rejeitado: detalhe interno" },
+        motivo: "persistencia_rejeitada"
+      }
+    ];
+
+    for (const cenario of cenarios) {
+      const item = oferta(cenario.id);
+      const resultado = await executarPrimeiraAvaliacaoLane({
+        ...depsLane([item], async () => cenario.persistencia),
+        candidatosInspecao: [candidato(item)]
+      });
+      assert.strictEqual(resultado.falhas, 1);
+      assert.strictEqual(resultado.falhasPorMotivo[cenario.motivo], 1);
+      assert.strictEqual(somaContadores(resultado.falhasPorMotivo), resultado.falhas);
+      assert.strictEqual(resultado.motivosPersistencia.length, 1);
+      assert(!resultado.motivosPersistencia[0].includes(" "), "motivo persistido deve ser compacto");
+      assert.strictEqual(item.primeiraAvaliacaoDestinosEm, undefined);
+    }
   }
 
   {
@@ -316,7 +396,21 @@ function carregarAvaliadorReal(overrides = {}) {
       candidatosInspecao: [candidato(item)]
     });
     assert.strictEqual(resultado.failClosed, true);
+    assert.strictEqual(resultado.motivo, "authority_nao_conclusiva");
+    assert.strictEqual(resultado.candidatosSelecionados, 0);
     assert.strictEqual(writes, 0);
+  }
+
+  {
+    const item = oferta("dependencia_invalida");
+    const resultado = await executarPrimeiraAvaliacaoLane({
+      ...depsLane([item], async () => ({ ok: true })),
+      persistirItem: null,
+      candidatosInspecao: [candidato(item)]
+    });
+    assert.strictEqual(resultado.failClosed, true);
+    assert.strictEqual(resultado.motivo, "dependencia_invalida");
+    assert.strictEqual(resultado.inspecionados + resultado.ignorados + resultado.falhas, 0);
   }
 
   {
@@ -403,6 +497,7 @@ function carregarAvaliadorReal(overrides = {}) {
     assert.strictEqual(resultado.selecionada.oferta.id, "turbo_envio", "prioridade comercial Turbo deve continuar vencendo no envio");
     assert.strictEqual(resultado.candidatosInspecao[0].oferta.id, "comum_inspecao", "item comum deve ter protecao contra starvation na inspecao");
     assert.strictEqual(resultado.totalCandidatosInspecao, 2);
+    assert.strictEqual(resultado.totalPendentesSemPrimeiraAvaliacao, 2);
   }
 
   const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
@@ -410,6 +505,13 @@ function carregarAvaliadorReal(overrides = {}) {
   const fimLane = fonteIndex.indexOf("if (!oferta)", inicioLane);
   const trechoLane = fonteIndex.slice(inicioLane, fimLane);
   assert(inicioLane >= 0 && fimLane > inicioLane, "lane deve executar antes do retorno sem oferta");
+  assert.strictEqual(
+    (trechoLane.match(/filaDualRead\.executarPrimeiraAvaliacaoLane/g) || []).length,
+    1,
+    "telemetria nao pode executar a Lane uma segunda vez"
+  );
+  assert(trechoLane.includes('console.log("[FIRST-EVAL-LANE]"'), "index deve emitir uma linha causal por execucao");
+  assert(trechoLane.includes("totalPendentesSemPrimeiraAvaliacao"), "telemetria deve expor divida derivada da selecao existente");
   assert(trechoLane.includes("sincronizarItemFilaVivaAposMutacao"), "lane deve usar mutacao VIVA oficial");
   assert(trechoLane.includes("checkpointFilaV2.marcarDirty"), "lane deve marcar checkpoint dirty");
   for (const proibido of [

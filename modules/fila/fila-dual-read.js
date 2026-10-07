@@ -216,6 +216,35 @@ function clonarItemPrimeiraAvaliacao(item = {}) {
   };
 }
 
+function criarDiagnosticoPrimeiraAvaliacao() {
+  return {
+    ignoradosPorMotivo: {
+      relocalizacao_falhou: 0,
+      item_ausente: 0,
+      status_nao_pendente: 0,
+      ja_avaliado: 0,
+      expirado: 0
+    },
+    falhasPorMotivo: {
+      terminal_historico: 0,
+      mutacao_nao_confirmada: 0,
+      persistencia_rejeitada: 0,
+      exception: 0
+    },
+    motivosPersistencia: []
+  };
+}
+
+function registrarMotivoPersistencia(resultado = {}, motivo = "") {
+  const seguro = texto(motivo)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  if (!seguro || resultado.motivosPersistencia.includes(seguro)) return;
+  resultado.motivosPersistencia.push(seguro);
+}
+
 async function executarPrimeiraAvaliacaoLane({
   candidatosInspecao = [],
   fonteClienteHotState = null,
@@ -229,10 +258,15 @@ async function executarPrimeiraAvaliacaoLane({
   const resultado = {
     ok: true,
     failClosed: false,
+    motivo: "",
+    authorityConclusiva: fonteClienteHotState?.conclusiva === true,
+    fonteHotStateValida: Array.isArray(fonteClienteHotState?.itens),
     candidatos: Array.isArray(candidatosInspecao) ? candidatosInspecao.length : 0,
+    candidatosSelecionados: 0,
     inspecionados: 0,
     ignorados: 0,
-    falhas: 0
+    falhas: 0,
+    ...criarDiagnosticoPrimeiraAvaliacao()
   };
 
   if (fonteClienteHotState?.conclusiva !== true || !Array.isArray(fonteClienteHotState?.itens)) {
@@ -248,18 +282,34 @@ async function executarPrimeiraAvaliacaoLane({
   }
 
   const selecionados = selecionarCandidatosPrimeiraAvaliacao(candidatosInspecao);
+  resultado.candidatosSelecionados = selecionados.length;
   for (const candidato of selecionados) {
     const referencia = candidato?.oferta || candidato || {};
     const localizacao = relocalizarOferta(fonteClienteHotState.itens, referencia, { clienteId });
     const atual = localizacao?.oferta;
-    if (
-      localizacao?.ok !== true ||
-      !atual ||
-      atual.status !== "pendente" ||
-      String(atual.primeiraAvaliacaoDestinosEm || "").trim() ||
-      ofertaExpiradaParaEnvio(atual, Date.now())
-    ) {
+    if (localizacao?.ok !== true) {
       resultado.ignorados += 1;
+      resultado.ignoradosPorMotivo.relocalizacao_falhou += 1;
+      continue;
+    }
+    if (!atual) {
+      resultado.ignorados += 1;
+      resultado.ignoradosPorMotivo.item_ausente += 1;
+      continue;
+    }
+    if (atual.status !== "pendente") {
+      resultado.ignorados += 1;
+      resultado.ignoradosPorMotivo.status_nao_pendente += 1;
+      continue;
+    }
+    if (String(atual.primeiraAvaliacaoDestinosEm || "").trim()) {
+      resultado.ignorados += 1;
+      resultado.ignoradosPorMotivo.ja_avaliado += 1;
+      continue;
+    }
+    if (ofertaExpiradaParaEnvio(atual, Date.now())) {
+      resultado.ignorados += 1;
+      resultado.ignoradosPorMotivo.expirado += 1;
       continue;
     }
 
@@ -282,12 +332,24 @@ async function executarPrimeiraAvaliacaoLane({
       const persistencia = await persistirItem(preparado, atual, candidato);
       if (persistencia?.ok !== true || persistencia?.terminalHistorico === true) {
         resultado.falhas += 1;
+        registrarMotivoPersistencia(resultado, persistencia?.motivo);
+        if (persistencia?.terminalHistorico === true || persistencia?.tipoFalha === "terminal_historico") {
+          resultado.falhasPorMotivo.terminal_historico += 1;
+        } else if (
+          persistencia?.tipoFalha === "mutacao_nao_confirmada" ||
+          texto(persistencia?.motivo) === "mutacao_viva_nao_confirmada"
+        ) {
+          resultado.falhasPorMotivo.mutacao_nao_confirmada += 1;
+        } else {
+          resultado.falhasPorMotivo.persistencia_rejeitada += 1;
+        }
         continue;
       }
       Object.assign(atual, preparado);
       resultado.inspecionados += 1;
     } catch (_) {
       resultado.falhas += 1;
+      resultado.falhasPorMotivo.exception += 1;
     }
   }
 
@@ -343,9 +405,13 @@ function selecionarFilaReadOnly({
 
   const candidatosVivos = [];
   const acumuladorPrimeiraAvaliacao = criarAcumuladorPrimeiraAvaliacao();
+  let totalPendentesSemPrimeiraAvaliacao = 0;
 
   for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
     contadores.avaliadas += 1;
+
+    const semPrimeiraAvaliacao = !String(oferta.primeiraAvaliacaoDestinosEm || "").trim();
+    if (semPrimeiraAvaliacao) totalPendentesSemPrimeiraAvaliacao += 1;
 
     if (ofertaExpiradaParaEnvio(oferta, agora)) {
       contadores.expiradas += 1;
@@ -359,7 +425,7 @@ function selecionarFilaReadOnly({
       cacheLimiteDiario
     });
 
-    if (!String(oferta.primeiraAvaliacaoDestinosEm || "").trim()) {
+    if (semPrimeiraAvaliacao) {
       considerarCandidatoPrimeiraAvaliacao(acumuladorPrimeiraAvaliacao, { oferta, avaliacao });
     }
 
@@ -388,6 +454,7 @@ function selecionarFilaReadOnly({
     motivo: selecionada ? "selecionada" : "sem_candidato",
     totalPendentes: pendentes.length,
     totalElegiveis: candidatosVivos.length,
+    totalPendentesSemPrimeiraAvaliacao,
     candidatosVivos,
     candidatosInspecao,
     totalCandidatosInspecao: acumuladorPrimeiraAvaliacao.total,
