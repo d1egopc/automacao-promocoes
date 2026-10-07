@@ -509,11 +509,12 @@ async function main() {
   assert(indexSource.includes("prepararReadinessAutoridadeRecovery(workspace)"), "ciclo Executor deve injetar readiness síncrona");
   const radarStart = indexSource.indexOf("reconciliarFilaV2ParaLeituraCliente(clienteId, \"radar\")");
   assert(radarStart >= 0, "chamada Radar deve continuar presente");
-  const expiryStart = indexSource.indexOf("async function candidatosExpiracaoSelecaoFilaV2");
-  const expiryEnd = indexSource.indexOf("async function ", expiryStart + 20);
-  assert(expiryStart >= 0 && expiryEnd > expiryStart, "função de seleção por expiração deve ser localizável");
+  const expiryStart = indexSource.indexOf("function validarFonteClienteHotStateExpiracaoV2");
+  const expiryEnd = indexSource.indexOf("const filaInteligenteUltimoAbastecimento", expiryStart);
+  assert(expiryStart >= 0 && expiryEnd > expiryStart, "fronteira factual de expiração deve ser localizável");
   const expirySource = indexSource.slice(expiryStart, expiryEnd);
   assert(!expirySource.includes("executorGenerationAuthority"), "expiração não recebe override dedicado");
+  assert(!expirySource.includes("reconciliacaoLeituraFilaV2"), "expiração não deve reinterpretar reconciliação bruta");
   const quickStart = indexSource.indexOf("async function reconciliarPuloRapidoFilaV2");
   const quickEnd = indexSource.indexOf("async function rodarProcessadorFilaGlobal", quickStart);
   const quickSource = indexSource.slice(quickStart, quickEnd);

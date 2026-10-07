@@ -62,7 +62,7 @@ assert(
 
 assert(
   pos(processarFila, "reconciliarFilaV2ParaLeituraCliente(clienteFila, \"executor\")") <
-    pos(processarFila, "sanearExpiradosFila(clienteFila)"),
+    pos(processarFila, "sanearExpiradosFila(clienteFila, {"),
   "executor deve reconciliar a fila oficial antes de sanear expirados"
 );
 
@@ -263,44 +263,43 @@ assert(
 );
 
 assert(
-  saneamentoExpiracao.includes("const itensCandidatos = fonteCandidatos?.itens || fila") &&
-    saneamentoExpiracao.includes("if (!usandoFilaViva && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
+  saneamentoExpiracao.includes("validarFonteClienteHotStateExpiracaoV2") &&
+    saneamentoExpiracao.includes("const itensCandidatos = usaFilaV2 ? fonteClienteHotState.itens : fila") &&
+    saneamentoExpiracao.includes("if (!usaFilaV2 && String(oferta?.clienteId || \"admin\") !== cliente) continue;") &&
     saneamentoExpiracao.includes("if (oferta.status !== \"pendente\") continue;") &&
-    saneamentoExpiracao.includes("await persistirExpiracaoFila(cliente, itensAlterados, \"expiracao_saneamento\", {") &&
-    saneamentoExpiracao.includes("filaClienteHotState: usandoFilaViva ? itensCandidatos : null"),
-  "saneamento deve preservar caminho legado/off-V2, filtro pendente e persistencia incremental existente"
+    saneamentoExpiracao.includes("permitirFallbackLegado: usaFilaV2 ? false : undefined") &&
+    saneamentoExpiracao.includes("relerFonteClienteHotStateAposExpiracao"),
+  "saneamento deve preservar legado off-V2 e usar apenas hot state factual no caminho V2"
 );
 
 const selecaoExpiracao = trechoEntre(
-  "async function candidatosExpiracaoSelecaoFilaV2",
+  "async function selecionarProximaOfertaFila",
   "const resultadoSelecao = selecionarProximaOfertaFilaCore"
 );
 
 assert(
-  selecaoExpiracao.includes("filaOperacionalV2.deveUsarFilaV2Operacional(cliente)") &&
-    selecaoExpiracao.includes("await filaOperacionalV2.reconciliarFilaV2ParaLeitura(cliente, {") &&
-    selecaoExpiracao.includes("contexto: \"expiracao_selecao\"") &&
-    selecaoExpiracao.includes("if (decisao?.generationConclusiva !== true) return null;") &&
-    selecaoExpiracao.includes("return candidatosExpiracaoFilaV2(cliente);"),
-  "expiracao_selecao V2 deve usar fila-viva somente quando authority generation for conclusiva"
+  selecaoExpiracao.includes("validarFonteClienteHotStateExpiracaoV2(clienteLog, fonteClienteHotState)") &&
+    selecaoExpiracao.includes("const podePersistirExpiracaoV2 = usaFilaV2 && validacaoFonte?.ok === true") &&
+    selecaoExpiracao.includes("permitirFallbackLegado: podePersistirExpiracaoV2 ? false : undefined"),
+  "expiracao_selecao V2 deve persistir somente com hot state factual conclusivo"
 );
 
 assert(
-  selecaoExpiracao.includes("const fonteExpiracaoSelecao = await candidatosExpiracaoSelecaoFilaV2(clienteLog);") &&
-    selecaoExpiracao.includes("const itensExpiracaoSelecao = fonteExpiracaoSelecao?.itens || fila;") &&
-    selecaoExpiracao.includes("const usandoFilaVivaExpiracaoSelecao = fonteExpiracaoSelecao?.fonte === \"fila_viva\";") &&
+  selecaoExpiracao.includes("const itensExpiracaoSelecao = podePersistirExpiracaoV2") &&
+    selecaoExpiracao.includes(": (usaFilaV2 ? [] : fila);") &&
     selecaoExpiracao.includes("for (const oferta of itensExpiracaoSelecao)") &&
-    selecaoExpiracao.includes("if (!usandoFilaVivaExpiracaoSelecao && !mesmoCliente) continue;"),
-  "expiracao_selecao deve ignorar stale global quando V2 conclusiva fornecer hot state da fila-viva"
+    selecaoExpiracao.includes("const ofertaExpirada = podePersistirExpiracaoV2 ? { ...oferta } : oferta;"),
+  "expiracao_selecao deve evitar mutacao V2 quando authority factual estiver indisponivel"
 );
 
 assert(
-  selecaoExpiracao.includes("if (oferta?.status !== \"pendente\") continue;") &&
+    selecaoExpiracao.includes("if (oferta?.status !== \"pendente\") continue;") &&
     selecaoExpiracao.includes("if (!ofertaExpiradaParaEnvio(oferta, agora)) continue;") &&
-    selecaoExpiracao.includes("marcarOfertaExpirada(oferta);") &&
+    selecaoExpiracao.includes("marcarOfertaExpirada(ofertaExpirada);") &&
     selecaoExpiracao.includes("await persistirExpiracaoFila(clienteIdAlvo || \"admin\", expiradasSelecao, \"expiracao_selecao\", {") &&
-    selecaoExpiracao.includes("filaClienteHotState: usandoFilaVivaExpiracaoSelecao ? itensExpiracaoSelecao : null"),
-  "expiracao_selecao deve preservar regra, mutacao e persistencia checkpoint-only existentes"
+    selecaoExpiracao.includes("relerFonteClienteHotStateAposExpiracao") &&
+    selecaoExpiracao.includes("colecaoSelecao = fonteAtualizada.itens;"),
+  "expiracao_selecao conclusiva deve atualizar a fonte factual apos persistencia"
 );
 
 const diagnosticoFila = trechoEntre(
@@ -514,7 +513,9 @@ assert(
 );
 
 assert(
-  processarFila.includes("const fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
+  processarFila.includes("fonteClienteHotStateSelecao = fonteClienteHotStateExecutorV2(clienteFila, reconciliacaoLeituraFilaV2);") &&
+    processarFila.includes("sanearExpiradosFila(clienteFila, {") &&
+    processarFila.includes("saneamentoExpiracaoExecutado: true") &&
     processarFila.includes("sanearDuplicatasPendentesFilaCliente(clienteFila, \"processar_fila\", {") &&
     processarFila.includes("fonteClienteHotState: fonteClienteHotStateSelecao") &&
     processarFila.includes("selecionarProximaOfertaFila(clienteFila, {") &&
