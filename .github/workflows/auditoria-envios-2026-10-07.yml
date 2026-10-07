@@ -77,6 +77,8 @@ jobs:
           }
           rows.sort((a,b)=>(a.workspace+a.offerId).localeCompare(b.workspace+b.offerId));
           const complete=rows.filter(x=>x.complete).length, partial=rows.filter(x=>x.partial).length;
+          const byWorkspace={}; for(const x of rows){const b=byWorkspace[x.workspace]||(byWorkspace[x.workspace]={offers:0,complete:0,partial:0,confirmations:0,channels:{WhatsApp:0,Telegram:0,Discord:0,Outro:0}}); b.offers++; b.confirmations+=x.confirmations; if(x.complete)b.complete++; else b.partial++; for(const c of x.channels)b.channels[c]=(b.channels[c]||0)+x.confirmations; }
+          console.log('AUDIT_WORKSPACE',JSON.stringify(byWorkspace));
           console.log('AUDIT_SUMMARY',JSON.stringify({today,offersWithAtLeastOneConfirmation:rows.length,completeOffers:complete,partialOffers:partial,totalDestinationConfirmations:rows.reduce((n,x)=>n+x.confirmations,0),channelCounts,sourceCounts,stateHistogram:stateHist,indeterminateCompleteness:rows.filter(x=>x.applicableDestinations===0).length}));
           console.log('AUDIT_OFFER_BEGIN'); for(const row of rows) console.log('AUDIT_OFFER',JSON.stringify(row)); console.log('AUDIT_OFFER_END');
           NODE
