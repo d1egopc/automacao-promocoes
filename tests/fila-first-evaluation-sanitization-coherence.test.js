@@ -6,7 +6,8 @@ const path = require("path");
 const vm = require("vm");
 
 const { criarFilaStore } = require("../modules/fila/fila-store");
-const { executarPrimeiraAvaliacaoLane } = require("../modules/fila/fila-dual-read");
+const filaDualRead = require("../modules/fila/fila-dual-read");
+const { executarPrimeiraAvaliacaoLane } = filaDualRead;
 
 const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 const inicio = fonteIndex.indexOf("function candidatosExpiracaoFilaV2(");
@@ -33,9 +34,15 @@ const fonteProcessar = fonteIndex.slice(inicioProcessar, fimProcessar);
 assert(
   fonteProcessar.includes("sanearExpiradosFila(clienteFila, {") &&
     fonteProcessar.includes("reconciliacaoLeituraFilaV2") &&
-    fonteProcessar.includes("saneamentoExpiracaoExecutado: true"),
-  "executor deve propagar sua prova e evitar segundo saneamento na mesma rodada"
+    fonteProcessar.includes("saneamentoExpiracaoExecutado: true") &&
+    fonteProcessar.includes("fonteClienteHotStateSelecao = selecaoFilaComPool.fonteClienteHotState"),
+  "executor deve propagar sua prova, evitar segundo saneamento e encaminhar a fonte atualizada para a Lane"
 );
+
+const inicioSelecionar = fonteIndex.indexOf("function selecionarProximaOfertaFilaCore(");
+const fimSelecionar = fonteIndex.indexOf("function aplicarDiversidadeFila(", inicioSelecionar);
+const fonteSelecionar = fonteIndex.slice(inicioSelecionar, fimSelecionar);
+assert(inicioSelecionar >= 0 && fimSelecionar > inicioSelecionar, "runtime de selecao deve existir no index real");
 
 const WORKSPACE = "workspace_incidente";
 
@@ -140,6 +147,116 @@ function criarRuntime(itensIniciais, opcoes = {}) {
   };
 }
 
+function criarRuntimeSelecao(itensIniciais, opcoes = {}) {
+  let viva = itensIniciais.map(atual => ({ ...atual }));
+  const fonteInicial = {
+    fonte: "fila_store_hot_state_executor_v2",
+    clienteId: WORKSPACE,
+    conclusiva: true,
+    itens: itensIniciais.map(atual => ({ ...atual }))
+  };
+  const filaLegada = Array.isArray(opcoes.filaLegada)
+    ? opcoes.filaLegada.map(atual => ({ ...atual }))
+    : [];
+  const filaStore = criarFilaStore(fonteInicial.itens);
+  const rastros = {
+    reconciliacoesGenericas: 0,
+    leiturasViva: 0,
+    persistencias: 0,
+    rebuilds: 0,
+    diagnosticos: []
+  };
+
+  const filaOperacionalV2 = {
+    deveUsarFilaV2Operacional: () => opcoes.v2Ativo !== false,
+    reconciliarFilaV2ParaLeitura: async () => {
+      rastros.reconciliacoesGenericas += 1;
+      return provaExecutor();
+    },
+    lerFilaVivaParaMerge: () => {
+      rastros.leiturasViva += 1;
+      if (opcoes.falharLeituraVivaNumero === rastros.leiturasViva) {
+        return { ok: false, motivo: "viva_indisponivel" };
+      }
+      return {
+        ok: true,
+        motivo: "ok",
+        bytes: viva.length * 10,
+        entradas: viva.map(atual => ({ bucket: "viva", item: { ...atual } }))
+      };
+    }
+  };
+
+  const contexto = {
+    fila: filaLegada,
+    filaOperacionalV2,
+    filaDualRead,
+    config: { automacaoAtiva: true },
+    configsPorCliente: { [WORKSPACE]: { automacaoAtiva: true } },
+    demandScheduler: { ativo: () => false },
+    diagnosticosFilaPorCliente: new Map(),
+    console: { log: () => {} },
+    process: { env: {} },
+    String,
+    Array,
+    Error,
+    Object,
+    Map,
+    Date,
+    ordenarPendentesPorPrioridade: pendentes => [...pendentes],
+    ordenarOfertasFilaViva: candidatos => candidatos,
+    ofertaExpiradaParaEnvio: (oferta, agora) => Number(oferta.expiraEmMs || Infinity) < Number(agora),
+    marcarOfertaExpirada: oferta => {
+      oferta.status = "expirada_operacional";
+      oferta.expiradaEm = "2026-10-07T12:00:00.000Z";
+    },
+    avaliarOfertaParaSelecaoFilaViva: oferta => ({
+      oferta,
+      elegivel: true,
+      motivo: "elegivel",
+      destinosCompativeis: 1,
+      destinosLiberados: [{}],
+      inspecaoDestinos: [],
+      ranking: { lane: "normal", scoreFinal: 1, idadeMs: 1 }
+    }),
+    diagnosticarFilaCliente: (_cliente, parametros = {}) => {
+      const ids = Array.isArray(parametros.filaClienteHotState)
+        ? parametros.filaClienteHotState.map(atual => atual.id)
+        : filaLegada.map(atual => atual.id);
+      rastros.diagnosticos.push(ids);
+      return { ids };
+    },
+    deveLogarThrottle: () => false,
+    modoDualRead: () => false,
+    persistirExpiracaoFila: async (_cliente, alterados) => {
+      rastros.persistencias += 1;
+      const resultado = opcoes.persistencia || { ok: true, alterou: true, checkpointOnly: true };
+      if (resultado.ok === true && resultado.fallbackLegado !== true) {
+        viva = viva.filter(atual => !alterados.some(removido => removido.id === atual.id));
+      }
+      return resultado;
+    },
+    reconstruirFilaStoreCliente: (cliente, _motivo, parametros) => {
+      rastros.rebuilds += 1;
+      filaStore.rebuildCliente(parametros.filaClienteHotState, cliente, { motivo: "teste_selecao" });
+    }
+  };
+
+  vm.runInNewContext(
+    `${fonteSanear}\n${fonteSelecionar}\nresultado = selecionarProximaOfertaFila;`,
+    contexto,
+    { filename: "fila-first-evaluation-selection-runtime.js" }
+  );
+
+  return {
+    selecionar: contexto.resultado,
+    fonteInicial,
+    filaStore,
+    rastros,
+    idsViva: () => viva.map(atual => atual.id)
+  };
+}
+
 function candidato(oferta) {
   return {
     oferta,
@@ -168,6 +285,121 @@ function depsLane(itens, persistirItem) {
 }
 
 (async () => {
+  {
+    const agora = Date.now();
+    const expirouNaFronteira = item("B", { expiraEmMs: agora - 1 });
+    const elegivel = item("C", { expiraEmMs: agora + 60000 });
+    const runtime = criarRuntimeSelecao([expirouNaFronteira, elegivel]);
+
+    const resultado = await runtime.selecionar(WORKSPACE, {
+      fonteClienteHotState: runtime.fonteInicial,
+      reconciliacaoLeituraFilaV2: provaExecutor(),
+      saneamentoExpiracaoExecutado: true,
+      retornarResultado: true
+    });
+
+    assert.deepStrictEqual(runtime.idsViva(), ["C"], "segunda expiracao deve remover B da VIVA");
+    assert.deepStrictEqual(
+      resultado.fonteClienteHotState.itens.map(atual => atual.id),
+      ["C"],
+      "fonte devolvida para core/Lane deve ser factual apos a segunda expiracao"
+    );
+    assert.deepStrictEqual(
+      resultado.resultadoSelecao.candidatosVivos.map(atual => atual.oferta.id),
+      ["C"]
+    );
+    assert.deepStrictEqual(
+      resultado.resultadoSelecao.candidatosInspecao.map(atual => atual.oferta.id),
+      ["C"]
+    );
+    assert.strictEqual(resultado.oferta.id, "C");
+    assert.deepStrictEqual(runtime.rastros.diagnosticos, [["C"]]);
+    assert.strictEqual(runtime.rastros.persistencias, 1);
+    assert.strictEqual(runtime.rastros.leiturasViva, 2, "deve ler antes e uma vez apos a mutacao");
+    assert.strictEqual(runtime.rastros.rebuilds, 1);
+    assert.strictEqual(runtime.rastros.reconciliacoesGenericas, 0, "nao deve criar segunda reconciliation");
+    assert.deepStrictEqual(runtime.filaStore.itensPorCliente(WORKSPACE).map(atual => atual.id), ["C"]);
+
+    const writerCalls = { B: 0, C: 0 };
+    await executarPrimeiraAvaliacaoLane({
+      ...depsLane(resultado.fonteClienteHotState.itens, async preparado => {
+        writerCalls[preparado.id] += 1;
+        return { ok: true };
+      }),
+      candidatosInspecao: resultado.resultadoSelecao.candidatosInspecao
+    });
+    assert.strictEqual(writerCalls.B, 0, "B expirado nao pode chegar a First Evaluation Lane");
+    assert.strictEqual(writerCalls.C, 1, "C elegivel deve continuar na Lane");
+  }
+
+  {
+    const vivo = item("sem_segunda_mutacao", { expiraEmMs: Date.now() + 60000 });
+    const runtime = criarRuntimeSelecao([vivo]);
+    const resultado = await runtime.selecionar(WORKSPACE, {
+      fonteClienteHotState: runtime.fonteInicial,
+      reconciliacaoLeituraFilaV2: provaExecutor(),
+      saneamentoExpiracaoExecutado: true,
+      retornarResultado: true
+    });
+
+    assert.strictEqual(runtime.rastros.persistencias, 0);
+    assert.strictEqual(runtime.rastros.leiturasViva, 1);
+    assert.strictEqual(runtime.rastros.rebuilds, 0);
+    assert.strictEqual(resultado.fonteClienteHotState, runtime.fonteInicial, "sem mutacao deve reutilizar fonte original");
+  }
+
+  {
+    const agora = Date.now();
+    const expirado = item("legado_expirado", { expiraEmMs: agora - 1 });
+    const vivo = item("legado_vivo", { expiraEmMs: agora + 60000 });
+    const runtime = criarRuntimeSelecao([], {
+      v2Ativo: false,
+      filaLegada: [expirado, vivo]
+    });
+    const resultado = await runtime.selecionar(WORKSPACE, {
+      saneamentoExpiracaoExecutado: true,
+      retornarResultado: true
+    });
+
+    assert.strictEqual(runtime.rastros.leiturasViva, 0);
+    assert.strictEqual(runtime.rastros.rebuilds, 0);
+    assert.strictEqual(resultado.oferta.id, "legado_vivo", "V2 OFF deve preservar selecao legada");
+  }
+
+  {
+    const expirado = item("persistencia_inconclusiva_selecao", { expiraEmMs: Date.now() - 1 });
+    const runtime = criarRuntimeSelecao([expirado], {
+      persistencia: { ok: false, motivo: "mutacao_viva_nao_confirmada" }
+    });
+    await assert.rejects(
+      runtime.selecionar(WORKSPACE, {
+        fonteClienteHotState: runtime.fonteInicial,
+        reconciliacaoLeituraFilaV2: provaExecutor(),
+        saneamentoExpiracaoExecutado: true,
+        retornarResultado: true
+      }),
+      /selecao_hot_state_nao_confirmado:mutacao_viva_nao_confirmada/
+    );
+    assert.strictEqual(runtime.rastros.rebuilds, 0);
+    assert.deepStrictEqual(runtime.rastros.diagnosticos, [], "fail-closed deve ocorrer antes do core/diagnostico");
+  }
+
+  {
+    const expirado = item("releitura_inconclusiva_selecao", { expiraEmMs: Date.now() - 1 });
+    const runtime = criarRuntimeSelecao([expirado], { falharLeituraVivaNumero: 2 });
+    await assert.rejects(
+      runtime.selecionar(WORKSPACE, {
+        fonteClienteHotState: runtime.fonteInicial,
+        reconciliacaoLeituraFilaV2: provaExecutor(),
+        saneamentoExpiracaoExecutado: true,
+        retornarResultado: true
+      }),
+      /selecao_hot_state_nao_confirmado:releitura_viva_inconclusiva/
+    );
+    assert.strictEqual(runtime.rastros.rebuilds, 0);
+    assert.deepStrictEqual(runtime.rastros.diagnosticos, []);
+  }
+
   {
     const removido = item("A", { expirarNoSaneamento: true });
     const vivo = item("B");
