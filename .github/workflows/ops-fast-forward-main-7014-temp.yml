@@ -1,0 +1,34 @@
+name: Temporary Fast Forward Main 7014
+
+on:
+  push:
+    branches:
+      - ops/ff-main-7014-20261007
+
+permissions:
+  contents: write
+
+jobs:
+  fast-forward-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify and fast-forward main exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="8668f79252eae592a7b48d343e7d183ce4884186"
+          target="7014f271e900826ff3f2898e89d1f4b4bdf3f78c"
+          git fetch origin refs/heads/main:refs/remotes/origin/main refs/heads/fix/first-evaluation-local-expiration-coherence:refs/remotes/origin/candidate
+          actual="$(git rev-parse refs/remotes/origin/main)"
+          candidate="$(git rev-parse refs/remotes/origin/candidate)"
+          test "$actual" = "$expected"
+          test "$candidate" = "$target"
+          test "$(git merge-base "$expected" "$target")" = "$expected"
+          test "$(git rev-parse "$target^{tree}")" = "b9caa17eae0ddadc73fe746101fcf3c01a60cf95"
+          git push origin "${target}:refs/heads/main"
+          final="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$final" = "$target"
+          echo "FAST_FORWARD_OK=$final"
