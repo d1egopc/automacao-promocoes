@@ -1,5 +1,8 @@
 name: Auditoria factual de envios 2026-10-07
 on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
   workflow_dispatch:
 permissions:
   contents: read
