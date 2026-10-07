@@ -19,9 +19,13 @@ jobs:
           echo "runner_name=${RUNNER_NAME:-unknown}"
           echo "hostname=$(hostname)"
           echo "runner_os=${RUNNER_OS:-unknown}"
-          test -d /opt/optimus/backend
-          test -d /opt/optimus/infra
-          test -d /data
+          for p in /opt/optimus/backend /opt/optimus/infra /data; do
+            if [ -d "${p}" ]; then
+              echo "path_ok=${p}"
+            else
+              echo "path_missing=${p}"
+            fi
+          done
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
           if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then
