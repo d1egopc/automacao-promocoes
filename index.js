@@ -1781,16 +1781,20 @@ function fonteClienteHotStateExpiracaoV2(clienteId = "admin", itens = [], fonteA
 
 function relerFonteClienteHotStateAposExpiracao(clienteId = "admin", motivo = "expiracao", fonteAnterior = null) {
   const cliente = String(clienteId || "admin");
-  const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);
-  if (fonteAtualizada?.fonte !== "fila_viva" || !Array.isArray(fonteAtualizada.itens)) {
+  try {
+    const fonteAtualizada = candidatosExpiracaoFilaV2(cliente);
+    if (fonteAtualizada?.fonte !== "fila_viva" || !Array.isArray(fonteAtualizada.itens)) {
+      return null;
+    }
+
+    reconstruirFilaStoreCliente(cliente, `${motivo}_pos_mutacao`, {
+      filaClienteHotState: fonteAtualizada.itens,
+      hotState: true
+    });
+    return fonteClienteHotStateExpiracaoV2(cliente, fonteAtualizada.itens, fonteAnterior);
+  } catch {
     return null;
   }
-
-  reconstruirFilaStoreCliente(cliente, `${motivo}_pos_mutacao`, {
-    filaClienteHotState: fonteAtualizada.itens,
-    hotState: true
-  });
-  return fonteClienteHotStateExpiracaoV2(cliente, fonteAtualizada.itens, fonteAnterior);
 }
 
 async function sanearExpiradosFila(clienteId = "admin", opcoes = {}) {
@@ -1857,18 +1861,29 @@ async function sanearExpiradosFila(clienteId = "admin", opcoes = {}) {
     };
   }
 
-  const fonteAtualizada = persistencia?.ok === true
+  const confirmadas = Math.max(0, Number(persistencia?.confirmadas || 0));
+  const houveMutacaoViva = confirmadas > 0;
+  const sucessoCompleto = persistencia?.ok === true;
+  const fonteAtualizada = houveMutacaoViva
     ? relerFonteClienteHotStateAposExpiracao(
         cliente,
         motivoPersistencia,
         fonteClienteHotState
       )
     : null;
+  const mutacaoParcial = houveMutacaoViva && !sucessoCompleto;
+  const rodadaInvalidaAposMutacaoViva = houveMutacaoViva && (
+    mutacaoParcial || fonteAtualizada?.conclusiva !== true
+  );
   return {
     alterou: persistencia?.alterou === true,
     mutacaoPulada: false,
-    mutacaoConfirmada: persistencia?.ok === true,
-    motivo: persistencia?.ok === true
+    mutacaoConfirmada: sucessoCompleto,
+    mutacaoParcial,
+    confirmadas,
+    rodadaInvalidaAposMutacaoParcial: mutacaoParcial,
+    rodadaInvalidaAposMutacaoViva,
+    motivo: sucessoCompleto
       ? ""
       : (persistencia?.motivo || "mutacao_viva_nao_confirmada"),
     fonteClienteHotState: fonteAtualizada
@@ -2754,6 +2769,24 @@ function selecionarProximaOfertaFilaCore(colecao = [], clienteIdAlvo = null, opc
   });
 }
 
+function retornoSelecaoAposMutacaoExpiracaoIncompleta(opcoes = {}, dados = {}) {
+  if (opcoes?.retornarResultado !== true) return null;
+  return {
+    oferta: null,
+    resultadoSelecao: {
+      selecionada: null,
+      candidatePool: [],
+      candidatosVivos: [],
+      candidatosInspecao: []
+    },
+    contadoresFilaViva: null,
+    fonteClienteHotState: dados.fonteClienteHotState || null,
+    rodadaInvalidaAposMutacaoParcial: dados.mutacaoParcial === true,
+    rodadaInvalidaAposMutacaoViva: true,
+    motivo: dados.motivo || "expiracao_mutacao_incompleta"
+  };
+}
+
 async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
   const clienteLog = String(clienteIdAlvo || "admin");
   let fonteClienteHotState = opcoes?.fonteClienteHotState || null;
@@ -2761,6 +2794,13 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     const saneamentoInicial = await sanearExpiradosFila(clienteLog, {
       fonteClienteHotState
     });
+    if (saneamentoInicial?.rodadaInvalidaAposMutacaoViva === true) {
+      return retornoSelecaoAposMutacaoExpiracaoIncompleta(opcoes, {
+        fonteClienteHotState: saneamentoInicial.fonteClienteHotState,
+        mutacaoParcial: saneamentoInicial.rodadaInvalidaAposMutacaoParcial,
+        motivo: saneamentoInicial.motivo
+      });
+    }
     fonteClienteHotState = saneamentoInicial?.fonteClienteHotState || fonteClienteHotState;
   }
   let colecaoSelecao = Array.isArray(fonteClienteHotState?.itens)
@@ -2798,13 +2838,24 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
       filaClienteHotState: podePersistirExpiracaoV2 ? itensExpiracaoSelecao : null,
       permitirFallbackLegado: podePersistirExpiracaoV2 ? false : undefined
     });
-    if (podePersistirExpiracaoV2 && persistencia?.ok === true) {
+    const confirmadas = podePersistirExpiracaoV2
+      ? Math.max(0, Number(persistencia?.confirmadas || 0))
+      : 0;
+    if (podePersistirExpiracaoV2 && confirmadas > 0) {
       const fonteAtualizada = relerFonteClienteHotStateAposExpiracao(
         clienteLog,
         "expiracao_selecao",
         fonteClienteHotState
       );
-      if (fonteAtualizada) {
+      const mutacaoParcial = persistencia?.ok !== true;
+      if (mutacaoParcial || fonteAtualizada?.conclusiva !== true) {
+        return retornoSelecaoAposMutacaoExpiracaoIncompleta(opcoes, {
+          fonteClienteHotState: fonteAtualizada,
+          mutacaoParcial,
+          motivo: persistencia?.motivo
+        });
+      }
+      if (persistencia?.ok === true) {
         fonteClienteHotState = fonteAtualizada;
         colecaoSelecao = fonteAtualizada.itens;
       }
@@ -10594,6 +10645,12 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
         fonteClienteHotState: fonteClienteHotStateSelecao
       })
     );
+    if (resultadoSaneamentoExpiracao?.rodadaInvalidaAposMutacaoViva === true) {
+      fonteClienteHotStateSelecao = resultadoSaneamentoExpiracao.fonteClienteHotState || null;
+      resumoFila.fase = "expiracao_mutacao_incompleta";
+      resumoFila.motivoPulo = resultadoSaneamentoExpiracao.motivo || "expiracao_mutacao_incompleta";
+      return;
+    }
     fonteClienteHotStateSelecao = resultadoSaneamentoExpiracao?.fonteClienteHotState || fonteClienteHotStateSelecao;
     colecaoPosEnvioProcessamento = (
       fonteClienteHotStateSelecao?.conclusiva === true &&
@@ -10646,6 +10703,12 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
         retornarResultado: true
       })
     );
+    if (selecaoFilaComPool?.rodadaInvalidaAposMutacaoViva === true) {
+      fonteClienteHotStateSelecao = selecaoFilaComPool.fonteClienteHotState || null;
+      resumoFila.fase = "expiracao_mutacao_incompleta";
+      resumoFila.motivoPulo = selecaoFilaComPool.motivo || "expiracao_mutacao_incompleta";
+      return;
+    }
     fonteClienteHotStateSelecao = selecaoFilaComPool?.fonteClienteHotState || fonteClienteHotStateSelecao;
     oferta = selecaoFilaComPool?.oferta || null;
     const resultadoSelecaoPrimeiraAvaliacao = selecaoFilaComPool?.resultadoSelecao || {};

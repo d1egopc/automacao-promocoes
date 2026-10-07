@@ -6,6 +6,9 @@ const path = require("path");
 const vm = require("vm");
 
 const filaDualRead = require("../modules/fila/fila-dual-read");
+const {
+  sanearExpiracaoOperacionalFilaItem: sanearExpiracaoOperacionalFilaItemReal
+} = require("../modules/engine/flow-manager/flow-manager.service");
 
 const WORKSPACE = "workspace_expiration_local";
 const fonteIndex = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
@@ -40,6 +43,7 @@ function oferta(id, expiraEm, extra = {}) {
     clienteId: WORKSPACE,
     status: "pendente",
     expiraEm,
+    dataEntradaFila: new Date().toISOString(),
     primeiraAvaliacaoDestinosEm: "",
     destinosEstado: [],
     ...extra
@@ -64,8 +68,13 @@ function criarRuntime(itensIniciais, opcoes = {}) {
     releituras: 0,
     rebuilds: 0,
     fallbackLegado: 0,
+    selecoes: 0,
+    avaliacoesCore: 0,
     laneWrites: [],
+    reservas: [],
+    creditos: [],
     provider: [],
+    envios: [],
     opcoesPersistencia: []
   };
 
@@ -73,6 +82,12 @@ function criarRuntime(itensIniciais, opcoes = {}) {
     deveUsarFilaV2Operacional: () => opcoes.v2 !== false,
     lerFilaVivaParaMerge: () => {
       rastros.releituras += 1;
+      if (opcoes.falharReleitura === "throw") {
+        throw new Error("falha_releitura_teste");
+      }
+      if (opcoes.falharReleitura === true) {
+        return { ok: false, motivo: "falha_releitura_teste", entradas: [] };
+      }
       return {
         ok: true,
         motivo: "ok",
@@ -102,11 +117,13 @@ function criarRuntime(itensIniciais, opcoes = {}) {
     ordenarPendentesPorPrioridade: itens => [...itens],
     ordenarOfertasFilaViva: candidatos => candidatos,
     ofertaExpiradaParaEnvio: (item, agora = Date.now()) => Date.parse(item.expiraEm) < Number(agora),
-    sanearExpiracaoOperacionalFilaItem: item => {
-      if (Date.parse(item.expiraEm) >= Date.now()) return { alterou: false, expirou: false };
-      item.status = "expirada_operacional";
-      return { alterou: true, expirou: true, ttlMs: 1, tipoFluxo: "teste" };
-    },
+    sanearExpiracaoOperacionalFilaItem: opcoes.sanitizerReal === true
+      ? sanearExpiracaoOperacionalFilaItemReal
+      : item => {
+          if (Date.parse(item.expiraEm) >= Date.now()) return { alterou: false, expirou: false };
+          item.status = "expirada_operacional";
+          return { alterou: true, expirou: true, ttlMs: 1, tipoFluxo: "teste" };
+        },
     marcarOfertaExpirada: item => {
       item.status = "expirada_operacional";
       item.expiradaEm = new Date().toISOString();
@@ -115,11 +132,39 @@ function criarRuntime(itensIniciais, opcoes = {}) {
       rastros.persistencias += 1;
       rastros.opcoesPersistencia.push(parametros);
       if (opcoes.writerConcorrente === true) {
-        viva = viva.filter(item => !alterados.some(removido => removido.id === item.id));
-        return { ok: false, alterou: false, fallbackLegado: false, motivo: "item_nao_encontrado_na_viva" };
+        return {
+          ok: false,
+          alterou: false,
+          confirmadas: 0,
+          fallbackLegado: false,
+          motivo: "item_nao_encontrado_na_viva"
+        };
       }
-      viva = viva.filter(item => !alterados.some(removido => removido.id === item.id));
-      return { ok: true, alterou: true, checkpointOnly: true };
+      const limiteConfirmacoes = opcoes.writerParcial === true ? 1 : alterados.length;
+      for (const alterado of alterados.slice(0, limiteConfirmacoes)) {
+        const indice = viva.findIndex(item => item.id === alterado.id);
+        if (indice < 0) continue;
+        if (alterado.status === "expirada_operacional") {
+          viva.splice(indice, 1);
+        } else {
+          viva[indice] = { ...alterado };
+        }
+      }
+      if (opcoes.writerParcial === true && alterados.length > limiteConfirmacoes) {
+        return {
+          ok: false,
+          alterou: true,
+          confirmadas: limiteConfirmacoes,
+          fallbackLegado: false,
+          motivo: opcoes.motivoFalhaParcial || "mutacao_viva_nao_confirmada"
+        };
+      }
+      return {
+        ok: true,
+        alterou: alterados.length > 0,
+        checkpointOnly: true,
+        confirmadas: alterados.length
+      };
     },
     reconstruirFilaStoreCliente: (_cliente, _motivo, parametros = {}) => {
       rastros.rebuilds += 1;
@@ -131,15 +176,18 @@ function criarRuntime(itensIniciais, opcoes = {}) {
     }),
     deveLogarThrottle: () => false,
     modoDualRead: () => false,
-    avaliarOfertaParaSelecaoFilaViva: item => ({
-      elegivel: true,
-      motivo: "destino_liberado",
-      oferta: item,
-      destinosCompativeis: 1,
-      destinosLiberados: [{}],
-      inspecaoDestinos: [],
-      ranking: { lane: "normal", scoreFinal: 1, idadeMs: 1 }
-    })
+    avaliarOfertaParaSelecaoFilaViva: item => {
+      rastros.avaliacoesCore += 1;
+      return {
+        elegivel: true,
+        motivo: "destino_liberado",
+        oferta: item,
+        destinosCompativeis: 1,
+        destinosLiberados: [{}],
+        inspecaoDestinos: [],
+        ranking: { lane: "normal", scoreFinal: 1, idadeMs: 1 }
+      };
+    }
   };
 
   vm.runInNewContext(
@@ -149,8 +197,13 @@ function criarRuntime(itensIniciais, opcoes = {}) {
     { filename: "fila-expiration-cleanup-runtime.js" }
   );
 
+  const selecionarProximaOfertaFila = contexto.resultado.selecionarProximaOfertaFila;
   return {
     ...contexto.resultado,
+    selecionarProximaOfertaFila: async (...args) => {
+      rastros.selecoes += 1;
+      return selecionarProximaOfertaFila(...args);
+    },
     rastros,
     idsViva: () => viva.map(item => item.id),
     idsStore: () => store.map(item => item.id),
@@ -160,6 +213,9 @@ function criarRuntime(itensIniciais, opcoes = {}) {
         const item = colecao.find(atual => atual.id === id);
         if (item) item.expiraEm = data;
       }
+    },
+    usarWriterParcial(valor) {
+      opcoes.writerParcial = valor === true;
     }
   };
 }
@@ -169,14 +225,22 @@ async function executarCiclo(runtime, decisao, opcoes = {}) {
   const saneamento = await runtime.sanearExpiradosFila(WORKSPACE, {
     fonteClienteHotState: fonte
   });
+  if (saneamento.rodadaInvalidaAposMutacaoViva === true) {
+    return { saneamento, selecao: null, lane: null, fonte: saneamento.fonteClienteHotState || null };
+  }
   fonte = saneamento.fonteClienteHotState || fonte;
-  if (opcoes.expirarAposSaneamento) runtime.expirar(opcoes.expirarAposSaneamento);
+  for (const id of [].concat(opcoes.expirarAposSaneamento || []).filter(Boolean)) {
+    runtime.expirar(id);
+  }
 
   const selecao = await runtime.selecionarProximaOfertaFila(WORKSPACE, {
     fonteClienteHotState: fonte,
     saneamentoExpiracaoExecutado: true,
     retornarResultado: true
   });
+  if (selecao.rodadaInvalidaAposMutacaoViva === true) {
+    return { saneamento, selecao, lane: null, fonte: selecao.fonteClienteHotState || null };
+  }
   fonte = selecao.fonteClienteHotState || fonte;
 
   const lane = await filaDualRead.executarPrimeiraAvaliacaoLane({
@@ -239,6 +303,48 @@ async function provarPersistenciaSemFallbackLegado() {
   });
   assert.strictEqual(resultado.ok, false);
   assert.strictEqual(resultado.motivo, "item_nao_encontrado_na_viva");
+  assert.strictEqual(rastros.materializacoes, 0);
+  assert.strictEqual(rastros.saves, 0);
+}
+
+async function provarPersistenciaParcialMarcaDirtyUmaVez() {
+  const rastros = { chamadas: 0, dirty: 0, materializacoes: 0, saves: 0 };
+  const contexto = {
+    filaOperacionalV2: { deveUsarFilaV2Operacional: () => true },
+    sincronizarItemFilaVivaAposMutacao: async () => {
+      rastros.chamadas += 1;
+      return rastros.chamadas === 1
+        ? { ok: true, removeuDaViva: true, generation: 10 }
+        : { ok: false, motivo: "item_nao_encontrado_na_viva" };
+    },
+    syncVivaMutacaoConfirmada: resultado => resultado?.ok === true,
+    checkpointFilaV2: {
+      marcarDirty: () => {
+        rastros.dirty += 1;
+        return { mutacoes: rastros.dirty, dirtyAgeMs: 0 };
+      }
+    },
+    logFilaV22C: () => {},
+    materializarFilaClienteHotStateNaGlobal: () => { rastros.materializacoes += 1; },
+    salvarFila: () => { rastros.saves += 1; return true; },
+    registrarHistoricoLeveTerminalLegadoAposSave: () => {},
+    String,
+    Array,
+    Date
+  };
+  vm.runInNewContext(`${fontePersistencia}\nresultado = persistirExpiracaoFila;`, contexto);
+  const resultado = await contexto.resultado(
+    WORKSPACE,
+    [{ id: "A" }, { id: "B" }],
+    "expiracao_parcial",
+    { filaClienteHotState: [{ id: "A" }, { id: "B" }], permitirFallbackLegado: false }
+  );
+
+  assert.strictEqual(resultado.ok, false);
+  assert.strictEqual(resultado.alterou, true);
+  assert.strictEqual(resultado.confirmadas, 1);
+  assert.strictEqual(resultado.motivo, "item_nao_encontrado_na_viva");
+  assert.strictEqual(rastros.dirty, 1);
   assert.strictEqual(rastros.materializacoes, 0);
   assert.strictEqual(rastros.saves, 0);
 }
@@ -308,11 +414,99 @@ async function provarPersistenciaSemFallbackLegado() {
   assert.strictEqual(runtimeConcorrente.rastros.fallbackLegado, 0);
   assert.strictEqual(runtimeConcorrente.rastros.releituras, 0);
   assert.strictEqual(runtimeConcorrente.rastros.rebuilds, 0);
-  assert.deepStrictEqual(runtimeConcorrente.idsViva(), []);
+  assert.strictEqual(concorrente.saneamento.rodadaInvalidaAposMutacaoParcial, false);
+  assert.deepStrictEqual(runtimeConcorrente.idsViva(), ["C"]);
   assert.deepStrictEqual(concorrente.fonte.itens.map(item => item.id), ["C"]);
   assert.strictEqual(concorrente.selecao.oferta, null);
   assert.strictEqual(runtimeConcorrente.rastros.laneWrites.length, 0);
   assert.strictEqual(runtimeConcorrente.rastros.provider.length, 0);
+
+  const entradaAntiga = new Date(agora - (31 * 60_000)).toISOString();
+  const entradaRecente = new Date(agora - (5 * 60_000)).toISOString();
+  const runtimeParcial = criarRuntime([
+    oferta("A", "", { dataEntradaFila: entradaAntiga }),
+    oferta("B", "", { dataEntradaFila: entradaAntiga }),
+    oferta("C", "", { dataEntradaFila: entradaRecente })
+  ], {
+    sanitizerReal: true,
+    writerParcial: true,
+    motivoFalhaParcial: "item_nao_encontrado_na_viva"
+  });
+  const parcial = await executarCiclo(runtimeParcial, generation);
+  assert.strictEqual(parcial.saneamento.mutacaoParcial, true);
+  assert.strictEqual(parcial.saneamento.rodadaInvalidaAposMutacaoParcial, true);
+  assert.strictEqual(parcial.saneamento.confirmadas, 1);
+  assert.strictEqual(parcial.saneamento.motivo, "item_nao_encontrado_na_viva");
+  assert.deepStrictEqual(runtimeParcial.idsViva(), ["B", "C"]);
+  assert.deepStrictEqual(runtimeParcial.idsStore(), ["B", "C"]);
+  assert.deepStrictEqual(parcial.fonte.itens.map(item => item.id), ["B", "C"]);
+  assert.strictEqual(runtimeParcial.rastros.releituras, 1);
+  assert.strictEqual(runtimeParcial.rastros.rebuilds, 1);
+  assert.strictEqual(runtimeParcial.rastros.selecoes, 0);
+  assert.strictEqual(runtimeParcial.rastros.avaliacoesCore, 0);
+  assert.strictEqual(runtimeParcial.rastros.laneWrites.length, 0);
+  assert.strictEqual(runtimeParcial.rastros.reservas.length, 0);
+  assert.strictEqual(runtimeParcial.rastros.creditos.length, 0);
+  assert.strictEqual(runtimeParcial.rastros.provider.length, 0);
+  assert.strictEqual(runtimeParcial.rastros.envios.length, 0);
+
+  runtimeParcial.usarWriterParcial(false);
+  const rodadaSeguinte = await executarCiclo(runtimeParcial, generation);
+  assert.strictEqual(rodadaSeguinte.saneamento.rodadaInvalidaAposMutacaoViva, false);
+  assert.deepStrictEqual(runtimeParcial.idsViva(), ["C"]);
+  assert.strictEqual(rodadaSeguinte.selecao.oferta.id, "C");
+  assert(runtimeParcial.rastros.laneWrites.includes("C"));
+  assert(runtimeParcial.rastros.provider.includes("C"));
+
+  const runtimeParcialSemReleitura = criarRuntime([
+    oferta("A", "", { dataEntradaFila: entradaAntiga }),
+    oferta("B", "", { dataEntradaFila: entradaAntiga }),
+    oferta("C", "", { dataEntradaFila: entradaRecente })
+  ], {
+    sanitizerReal: true,
+    writerParcial: true,
+    falharReleitura: "throw"
+  });
+  const parcialSemReleitura = await executarCiclo(runtimeParcialSemReleitura, generation);
+  assert.strictEqual(parcialSemReleitura.saneamento.rodadaInvalidaAposMutacaoViva, true);
+  assert.strictEqual(parcialSemReleitura.fonte, null);
+  assert.strictEqual(runtimeParcialSemReleitura.rastros.releituras, 1);
+  assert.strictEqual(runtimeParcialSemReleitura.rastros.rebuilds, 0);
+  assert.strictEqual(runtimeParcialSemReleitura.rastros.selecoes, 0);
+  assert.strictEqual(runtimeParcialSemReleitura.rastros.laneWrites.length, 0);
+  assert.strictEqual(runtimeParcialSemReleitura.rastros.provider.length, 0);
+
+  const runtimeSegundaParcial = criarRuntime([
+    oferta("A", new Date(agora + 60_000).toISOString()),
+    oferta("B", new Date(agora + 120_000).toISOString()),
+    oferta("C", new Date(agora + 180_000).toISOString())
+  ], { writerParcial: true });
+  const segundaParcial = await executarCiclo(runtimeSegundaParcial, generation, {
+    expirarAposSaneamento: ["A", "B"]
+  });
+  assert.strictEqual(segundaParcial.selecao.rodadaInvalidaAposMutacaoParcial, true);
+  assert.deepStrictEqual(runtimeSegundaParcial.idsViva(), ["B", "C"]);
+  assert.deepStrictEqual(runtimeSegundaParcial.idsStore(), ["B", "C"]);
+  assert.strictEqual(runtimeSegundaParcial.rastros.releituras, 1);
+  assert.strictEqual(runtimeSegundaParcial.rastros.rebuilds, 1);
+  assert.strictEqual(runtimeSegundaParcial.rastros.avaliacoesCore, 0);
+  assert.strictEqual(runtimeSegundaParcial.rastros.laneWrites.length, 0);
+  assert.strictEqual(runtimeSegundaParcial.rastros.provider.length, 0);
+
+  runtimeSegundaParcial.usarWriterParcial(false);
+  const segundaParcialRodadaSeguinte = await executarCiclo(runtimeSegundaParcial, generation);
+  assert.strictEqual(segundaParcialRodadaSeguinte.selecao.oferta.id, "C");
+  assert.deepStrictEqual(runtimeSegundaParcial.idsViva(), ["C"]);
+
+  const guardaPrimeiroSaneamento = fonteIndex.indexOf(
+    "if (resultadoSaneamentoExpiracao?.rodadaInvalidaAposMutacaoViva === true)"
+  );
+  const guardaSegundoTtl = fonteIndex.indexOf(
+    "if (selecaoFilaComPool?.rodadaInvalidaAposMutacaoViva === true)"
+  );
+  const chamadaLane = fonteIndex.indexOf("filaDualRead.executarPrimeiraAvaliacaoLane({", guardaSegundoTtl);
+  assert(guardaPrimeiroSaneamento > 0 && guardaSegundoTtl > guardaPrimeiroSaneamento);
+  assert(chamadaLane > guardaSegundoTtl, "as guardas devem encerrar antes da Lane");
 
   const runtimeDivergente = criarRuntime([]);
   await assert.rejects(
@@ -323,6 +517,7 @@ async function provarPersistenciaSemFallbackLegado() {
   );
 
   await provarPersistenciaSemFallbackLegado();
+  await provarPersistenciaParcialMarcaDirtyUmaVez();
   console.log("fila-expiration-cleanup-local-fail-closed.test.js: PASS");
 })().catch(erro => {
   console.error(erro);
