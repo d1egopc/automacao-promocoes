@@ -25,36 +25,22 @@ jobs:
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
           if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then echo "production_target_verified=true"; else echo "production_target_verified=false"; fi
-      - name: Read-only candidate inventory
+      - name: Read-only workspace file map
         shell: bash
         run: |
           set -Eeuo pipefail
           node <<'NODE'
           const fs = require('fs');
           const path = require('path');
-          const root = '/opt/optimus/data';
-          const files = [];
-          function walk(dir, depth) {
-            let entries = [];
-            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-            for (const entry of entries) {
-              const full = path.join(dir, entry.name);
-              const rel = path.relative(root, full).replace(/\\/g, '/');
-              if (entry.isDirectory() && depth < 8) walk(full, depth + 1);
-              else if (entry.isFile()) { let size = 0; try { size = fs.statSync(full).size; } catch {} files.push({ path: rel, size }); }
-            }
-          }
-          walk(root, 0);
+          const root = '/opt/optimus/data/clientes';
           const sensitive = /(auth|key|token|session|credential|secret|cookie|private|oauth)/i;
           const focus = /(fila|histor|envio|send|delivery|destin|executor|provider|outbox|sent|message|mensag|terminal|claim|reserva|confirm|dispatch|queue)/i;
-          const clientFiles = files.filter(x => x.path.startsWith('clientes/') && !sensitive.test(x.path));
-          const baseCounts = new Map();
-          for (const x of clientFiles) { const b = path.basename(x.path); if (focus.test(b)) baseCounts.set(b, (baseCounts.get(b)||0)+1); }
-          const focusFiles = clientFiles.filter(x => focus.test(path.basename(x.path))).sort((a,b)=>a.path.localeCompare(b.path));
-          console.log('DATA_ROOT', root);
-          console.log('COUNTS', JSON.stringify({ totalFiles: files.length, clientFiles: clientFiles.length, focusFiles: focusFiles.length }));
-          console.log('FOCUS_BASENAMES', JSON.stringify([...baseCounts.entries()].sort((a,b)=>a[0].localeCompare(b[0]))));
-          console.log('FOCUS_FILES_BEGIN');
-          for (const x of focusFiles.slice(0,400)) console.log('FOCUS_FILE', JSON.stringify(x));
-          console.log('FOCUS_FILES_END');
+          const dirs = fs.readdirSync(root,{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>e.name).sort();
+          console.log('WORKSPACE_COUNT', dirs.length);
+          for (const workspace of dirs) {
+            const dir = path.join(root, workspace);
+            let names=[];
+            try { names = fs.readdirSync(dir,{withFileTypes:true}).filter(e=>e.isFile() && !sensitive.test(e.name) && focus.test(e.name)).map(e=>{let s=0;try{s=fs.statSync(path.join(dir,e.name)).size}catch{};return {name:e.name,size:s};}).sort((a,b)=>a.name.localeCompare(b.name)); } catch {}
+            console.log('WORKSPACE', JSON.stringify({workspace, files:names}));
+          }
           NODE
