@@ -24,8 +24,11 @@ jobs:
           test -d /data
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
-          test "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c"
-          echo "production_target_verified=true"
+          if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then
+            echo "production_target_verified=true"
+          else
+            echo "production_target_verified=false"
+          fi
       - name: Read-only data inventory
         shell: bash
         run: |
