@@ -20,20 +20,12 @@ jobs:
           echo "hostname=$(hostname)"
           echo "runner_os=${RUNNER_OS:-unknown}"
           for p in /opt/optimus/backend /opt/optimus/infra /data /opt/optimus/data; do
-            if [ -d "${p}" ]; then
-              echo "path_ok=${p}"
-            else
-              echo "path_missing=${p}"
-            fi
+            if [ -d "${p}" ]; then echo "path_ok=${p}"; else echo "path_missing=${p}"; fi
           done
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
-          if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then
-            echo "production_target_verified=true"
-          else
-            echo "production_target_verified=false"
-          fi
-      - name: Read-only data inventory
+          if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then echo "production_target_verified=true"; else echo "production_target_verified=false"; fi
+      - name: Read-only candidate inventory
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -41,36 +33,25 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const root = '/opt/optimus/data';
-          const maxDepth = 5;
+          const maxDepth = 8;
           const files = [];
           const dirs = [];
           function walk(dir, depth) {
             let entries = [];
-            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { console.log('READ_ERROR', path.relative(root, dir), String(e.message)); return; }
             for (const entry of entries) {
               const full = path.join(dir, entry.name);
               const rel = path.relative(root, full).replace(/\\/g, '/');
-              if (entry.isDirectory()) {
-                dirs.push(rel || '.');
-                if (depth < maxDepth) walk(full, depth + 1);
-              } else if (entry.isFile()) {
-                let size = 0;
-                try { size = fs.statSync(full).size; } catch {}
-                files.push({ path: rel, size });
-              }
+              if (entry.isDirectory()) { dirs.push(rel); if (depth < maxDepth) walk(full, depth + 1); }
+              else if (entry.isFile()) { let size = 0; try { size = fs.statSync(full).size; } catch {} files.push({ path: rel, size }); }
             }
           }
           walk(root, 0);
-          const candidateRe = /(fila|histor|envio|send|delivery|destin|executor|provider|event|outbox|sent|message|log)/i;
-          const candidates = files.filter(f => candidateRe.test(f.path)).sort((a,b) => a.path.localeCompare(b.path));
-          const top = files.filter(f => !f.path.includes('/')).sort((a,b) => a.path.localeCompare(b.path));
-          console.log(JSON.stringify({
-            modo: 'somente_leitura',
-            dataRoot: root,
-            topLevel: top,
-            directoryCount: dirs.length,
-            fileCount: files.length,
-            candidateCount: candidates.length,
-            candidates: candidates.slice(0, 500)
-          }, null, 2));
+          const re = /(fila|histor|envio|send|delivery|destin|executor|provider|event|outbox|sent|message|mensag|log|terminal|claim|reserva|confirm)/i;
+          const candidates = files.filter(x => re.test(x.path)).sort((a,b)=>a.path.localeCompare(b.path));
+          console.log('DATA_ROOT', root);
+          console.log('COUNTS', JSON.stringify({ directories: dirs.length, files: files.length, candidates: candidates.length }));
+          console.log('CANDIDATES_BEGIN');
+          for (const c of candidates) console.log('CANDIDATE', JSON.stringify(c));
+          console.log('CANDIDATES_END');
           NODE
