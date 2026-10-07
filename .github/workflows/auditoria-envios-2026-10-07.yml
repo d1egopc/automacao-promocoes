@@ -1,0 +1,66 @@
+name: Auditoria factual de envios 2026-10-07
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    name: Read-only factual send audit
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Production target preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo "runner_name=${RUNNER_NAME:-unknown}"
+          echo "hostname=$(hostname)"
+          echo "runner_os=${RUNNER_OS:-unknown}"
+          test -d /opt/optimus/backend
+          test -d /opt/optimus/infra
+          test -d /data
+          production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
+          echo "production_head=${production_head}"
+          test "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c"
+          echo "production_target_verified=true"
+      - name: Read-only data inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = '/data';
+          const maxDepth = 5;
+          const files = [];
+          const dirs = [];
+          function walk(dir, depth) {
+            let entries = [];
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              const rel = path.relative(root, full).replace(/\\/g, '/');
+              if (entry.isDirectory()) {
+                dirs.push(rel || '.');
+                if (depth < maxDepth) walk(full, depth + 1);
+              } else if (entry.isFile()) {
+                let size = 0;
+                try { size = fs.statSync(full).size; } catch {}
+                files.push({ path: rel, size });
+              }
+            }
+          }
+          walk(root, 0);
+          const candidateRe = /(fila|histor|envio|send|delivery|destin|executor|provider|event|outbox|sent|message|log)/i;
+          const candidates = files.filter(f => candidateRe.test(f.path)).sort((a,b) => a.path.localeCompare(b.path));
+          const top = files.filter(f => !f.path.includes('/')).sort((a,b) => a.path.localeCompare(b.path));
+          console.log(JSON.stringify({
+            modo: 'somente_leitura',
+            dataRoot: root,
+            topLevel: top,
+            directoryCount: dirs.length,
+            fileCount: files.length,
+            candidateCount: candidates.length,
+            candidates: candidates.slice(0, 500)
+          }, null, 2));
+          NODE
