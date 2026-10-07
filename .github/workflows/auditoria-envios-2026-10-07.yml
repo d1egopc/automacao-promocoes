@@ -19,7 +19,7 @@ jobs:
           echo "runner_name=${RUNNER_NAME:-unknown}"
           echo "hostname=$(hostname)"
           echo "runner_os=${RUNNER_OS:-unknown}"
-          for p in /opt/optimus/backend /opt/optimus/infra /data; do
+          for p in /opt/optimus/backend /opt/optimus/infra /data /opt/optimus/data; do
             if [ -d "${p}" ]; then
               echo "path_ok=${p}"
             else
@@ -40,7 +40,7 @@ jobs:
           node <<'NODE'
           const fs = require('fs');
           const path = require('path');
-          const root = '/data';
+          const root = '/opt/optimus/data';
           const maxDepth = 5;
           const files = [];
           const dirs = [];
