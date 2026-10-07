@@ -2427,27 +2427,12 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
   }
 
   const analiseDestinos = analisarDestinosCompativeisFila(clienteIdOferta, oferta, configClienteOferta);
-  const inspecaoDestinos = analiseDestinos.rejeitados.map(item => ({
-    destino: item.destino,
-    estado: "nao_compativel",
-    motivo: motivoCoberturaDestino(item?.analise?.motivo || "nao_compativel")
-  }));
-  const registrarInspecaoDestino = (destino, estado, motivo, dados = {}) => {
-    inspecaoDestinos.push({
-      destino,
-      estado,
-      motivo,
-      proximoEnvioPermitidoEm: dados.proximoEnvioPermitidoEm || ""
-    });
-  };
   if (!analiseDestinos.compativeis.length) {
     return {
       elegivel: false,
       motivo: "sem_destino_compativel",
-      oferta,
       destinosCompativeis: 0,
-      destinosLiberados: [],
-      inspecaoDestinos
+      destinosLiberados: []
     };
   }
 
@@ -2458,16 +2443,11 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
   });
 
   if (!disponibilidade.ok) {
-    for (const item of analiseDestinos.compativeis) {
-      registrarInspecaoDestino(item.destino, "aguardando", disponibilidade.motivo || "sem_integracao_funcional");
-    }
     return {
       elegivel: false,
       motivo: disponibilidade.motivo || "sem_integracao_funcional",
-      oferta,
       destinosCompativeis: analiseDestinos.compativeis.length,
-      destinosLiberados: [],
-      inspecaoDestinos
+      destinosLiberados: []
     };
   }
 
@@ -2482,7 +2462,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
 
     if (!destinoOperacionalValido(destino)) {
       motivoBloqueio = motivoBloqueio || "destino_invalido";
-      registrarInspecaoDestino(destino, "nao_compativel", "destino_invalido");
       continue;
     }
 
@@ -2492,7 +2471,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
         destinosEnviadosFanout += 1;
       }
       motivoBloqueio = motivoBloqueio || "fanout_destino_ja_enviado";
-      registrarInspecaoDestino(destino, estadoDestino?.estado || "enviado", estadoDestino?.motivo || "ja_enviado");
       continue;
     }
 
@@ -2514,11 +2492,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
         deadlineSlackMs: slot.slackMs,
         motivoBloqueio: slot.motivoBloqueio
       });
-      registrarInspecaoDestino(destino, "aguardando", "fora_horario", {
-        proximoEnvioPermitidoEm: Number.isFinite(slot.proximoElegivelEm)
-          ? new Date(slot.proximoElegivelEm).toISOString()
-          : ""
-      });
       menorRestanteMs = Math.min(
         menorRestanteMs,
         Number.isFinite(slot.proximoElegivelEm) ? Math.max(0, slot.proximoElegivelEm - agora) : Infinity
@@ -2531,7 +2504,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     });
     if (!limite.ok) {
       motivoBloqueio = motivoBloqueio || "limite_diario";
-      registrarInspecaoDestino(destino, "aguardando", "limite_diario");
       continue;
     }
 
@@ -2556,12 +2528,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       motivoBloqueio: slot.motivoBloqueio
     };
     destinosPendentesFanout.push(destinoPendenteFanout);
-    registrarInspecaoDestino(
-      destino,
-      "aguardando",
-      slot.liberadoAgora === true ? "destino_compativel" : (slot.motivoBloqueio || "intervalo"),
-      { proximoEnvioPermitidoEm: intervalo.proximoEnvioPermitidoEm || "" }
-    );
 
     if (!slot.liberadoAgora) {
       motivoBloqueio = motivoBloqueio || slot.motivoBloqueio || "intervalo";
@@ -2614,7 +2580,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
       destinosCompativeis: analiseDestinos.compativeis.length,
       destinosLiberados,
       fanout,
-      inspecaoDestinos,
       menorRestanteMs: Number.isFinite(menorRestanteMs) ? menorRestanteMs : 0,
       ranking
     };
@@ -2627,7 +2592,6 @@ function avaliarOfertaParaSelecaoFilaViva(oferta = {}, clienteIdOferta = "admin"
     destinosCompativeis: analiseDestinos.compativeis.length,
     destinosLiberados,
     fanout,
-    inspecaoDestinos,
     ranking
   };
 }
@@ -2792,9 +2756,7 @@ async function selecionarProximaOfertaFila(clienteIdAlvo = null, opcoes = {}) {
     console.log("ðŸš¨ Fila sem oferta elegÃ­vel", diagnosticoSemElegivel);
   }
 
-  return opcoes?.retornarResultado === true
-    ? { oferta: null, resultadoSelecao, contadoresFilaViva }
-    : null;
+  return null;
 }
 function aplicarDiversidadeFila(clienteId = "admin") {
   const cliente = String(clienteId || "admin");
@@ -10519,40 +10481,6 @@ async function processarFilaInterna(clienteIdAlvo = null, opcoes = {}) {
       })
     );
     oferta = selecaoFilaComPool?.oferta || null;
-    await perfilProcessarFila.etapa("primeiraAvaliacaoDestinos", () =>
-      filaDualRead.executarPrimeiraAvaliacaoLane({
-        candidatosInspecao: selecaoFilaComPool?.resultadoSelecao?.candidatosInspecao || [],
-        fonteClienteHotState: fonteClienteHotStateSelecao,
-        clienteId: clienteFila,
-        relocalizarOferta: filaOfertas.relocalizarOfertaFila,
-        ofertaExpiradaParaEnvio,
-        registrarDestinoEstado: registrarDestinoEstadoFanout,
-        persistirItem: async itemPreparado => {
-          const syncViva = await sincronizarItemFilaVivaAposMutacao(
-            clienteFila,
-            itemPreparado,
-            "executor_primeira_avaliacao_destinos",
-            {
-              checkpointSincronizado: false,
-              exigirMutacao: true,
-              publicarLegacyProof: false
-            }
-          );
-          if (syncViva?.terminalHistorico === true) {
-            return { ok: false, terminalHistorico: true, motivo: syncViva.motivo || "item_ja_terminal" };
-          }
-          if (!syncVivaMutacaoConfirmada(syncViva)) {
-            return { ok: false, motivo: syncViva?.motivo || "mutacao_viva_nao_confirmada" };
-          }
-          checkpointFilaV2.marcarDirty(
-            clienteFila,
-            "executor_primeira_avaliacao_destinos",
-            Date.now()
-          );
-          return { ok: true, generation: syncViva.generation || syncViva.dbState?.vivaGeneration || 0 };
-        }
-      })
-    );
 
 if (!oferta) {
   resumoFila.fase = "diagnostico_sem_oferta";

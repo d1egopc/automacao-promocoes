@@ -10,7 +10,6 @@ const FLAG_DUAL_READ_ATIVA = "FILA_V2_DUAL_READ_ATIVA";
 const TAG_TELEMETRIA = "[FILA-V2-DUAL-READ]";
 const INTERVALO_LOG_PADRAO_MS = 5 * 60 * 1000;
 const COOLDOWN_RECOVERY_VIVA_INVALIDA_MS = 2 * 60 * 1000;
-const LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE = 2;
 const ultimoLogPorChave = new Map();
 
 function texto(valor = "") {
@@ -104,196 +103,6 @@ function construirCandidatePoolShadow(candidatosOrdenados = []) {
   return candidatePool;
 }
 
-function timestampPrimeiraAvaliacao(oferta = {}) {
-  const campos = [
-    oferta.dataEntradaFila,
-    oferta.adicionadoEm,
-    oferta.createdAt,
-    oferta.criadoEm,
-    oferta.timestamp
-  ];
-
-  for (const valor of campos) {
-    const direto = Date.parse(String(valor || ""));
-    if (Number.isFinite(direto)) return direto;
-
-    const match = String(valor || "").match(
-      /^(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/
-    );
-    if (!match) continue;
-    const [, dia, mes, ano, hora, minuto, segundo = "0"] = match;
-    const local = new Date(
-      Number(ano),
-      Number(mes) - 1,
-      Number(dia),
-      Number(hora),
-      Number(minuto),
-      Number(segundo)
-    ).getTime();
-    if (Number.isFinite(local)) return local;
-  }
-
-  return Number.MAX_SAFE_INTEGER;
-}
-
-function candidatoTurboPrimeiraAvaliacao(candidato = {}) {
-  const oferta = candidato?.oferta || {};
-  const pendentes = candidato?.avaliacao?.fanout?.destinosPendentes || [];
-  return Boolean(
-    candidato?.avaliacao?.ranking?.turboComercial === true ||
-    pendentes.some(item => item?.intervalo?.turboAplicado === true) ||
-    oferta.turbo === true ||
-    oferta.cupomTurbo === true ||
-    oferta.turboElegivel === true ||
-    oferta.tipoFluxo === "cupom_turbo" ||
-    oferta.tipoOperacional === "cupom_turbo"
-  );
-}
-
-function criarAcumuladorPrimeiraAvaliacao() {
-  return {
-    total: 0,
-    proximoIndice: 0,
-    maisAntigos: [],
-    comum: null
-  };
-}
-
-function considerarCandidatoPrimeiraAvaliacao(acumulador, candidato) {
-  const indice = acumulador.proximoIndice;
-  acumulador.proximoIndice += 1;
-  acumulador.total += 1;
-  const comparar = (a, b) => {
-    const diferenca = a.timestamp - b.timestamp;
-    return diferenca || a.indice - b.indice;
-  };
-  const entrada = { candidato, indice, timestamp: timestampPrimeiraAvaliacao(candidato?.oferta) };
-  acumulador.maisAntigos.push(entrada);
-  acumulador.maisAntigos.sort(comparar);
-  if (acumulador.maisAntigos.length > LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE) acumulador.maisAntigos.pop();
-
-  if (
-    !candidatoTurboPrimeiraAvaliacao(candidato) &&
-    (!acumulador.comum || comparar(entrada, acumulador.comum) < 0)
-  ) {
-    acumulador.comum = entrada;
-  }
-}
-
-function finalizarCandidatosPrimeiraAvaliacao(acumulador, limite = LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE) {
-  const maximo = Math.max(0, Math.min(LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE, Number(limite) || 0));
-  if (!maximo) return [];
-  const selecionados = [];
-
-  if (acumulador.comum) selecionados.push(acumulador.comum.candidato);
-  for (const item of acumulador.maisAntigos) {
-    if (selecionados.length >= maximo) break;
-    if (item.candidato === acumulador.comum?.candidato) continue;
-    selecionados.push(item.candidato);
-  }
-
-  return selecionados;
-}
-
-function selecionarCandidatosPrimeiraAvaliacao(candidatos = [], limite = LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE) {
-  const acumulador = criarAcumuladorPrimeiraAvaliacao();
-  for (const candidato of Array.isArray(candidatos) ? candidatos : []) {
-    considerarCandidatoPrimeiraAvaliacao(acumulador, candidato);
-  }
-  return finalizarCandidatosPrimeiraAvaliacao(acumulador, limite);
-}
-
-function clonarItemPrimeiraAvaliacao(item = {}) {
-  return {
-    ...item,
-    destinosEstado: Array.isArray(item.destinosEstado)
-      ? item.destinosEstado.map(destino => ({
-          ...destino,
-          snapshotAlvos: Array.isArray(destino?.snapshotAlvos) ? destino.snapshotAlvos.map(alvo => ({ ...alvo })) : destino?.snapshotAlvos,
-          alvosEstado: Array.isArray(destino?.alvosEstado) ? destino.alvosEstado.map(alvo => ({ ...alvo })) : destino?.alvosEstado
-        }))
-      : []
-  };
-}
-
-async function executarPrimeiraAvaliacaoLane({
-  candidatosInspecao = [],
-  fonteClienteHotState = null,
-  clienteId = "admin",
-  agora = Date.now(),
-  relocalizarOferta,
-  ofertaExpiradaParaEnvio,
-  registrarDestinoEstado,
-  persistirItem
-} = {}) {
-  const resultado = {
-    ok: true,
-    failClosed: false,
-    candidatos: Array.isArray(candidatosInspecao) ? candidatosInspecao.length : 0,
-    inspecionados: 0,
-    ignorados: 0,
-    falhas: 0
-  };
-
-  if (fonteClienteHotState?.conclusiva !== true || !Array.isArray(fonteClienteHotState?.itens)) {
-    return { ...resultado, ok: false, failClosed: true, motivo: "authority_nao_conclusiva" };
-  }
-  if (
-    typeof relocalizarOferta !== "function" ||
-    typeof ofertaExpiradaParaEnvio !== "function" ||
-    typeof registrarDestinoEstado !== "function" ||
-    typeof persistirItem !== "function"
-  ) {
-    return { ...resultado, ok: false, failClosed: true, motivo: "dependencia_invalida" };
-  }
-
-  const selecionados = selecionarCandidatosPrimeiraAvaliacao(candidatosInspecao);
-  for (const candidato of selecionados) {
-    const referencia = candidato?.oferta || candidato || {};
-    const localizacao = relocalizarOferta(fonteClienteHotState.itens, referencia, { clienteId });
-    const atual = localizacao?.oferta;
-    if (
-      localizacao?.ok !== true ||
-      !atual ||
-      atual.status !== "pendente" ||
-      String(atual.primeiraAvaliacaoDestinosEm || "").trim() ||
-      ofertaExpiradaParaEnvio(atual, Date.now())
-    ) {
-      resultado.ignorados += 1;
-      continue;
-    }
-
-    const preparado = clonarItemPrimeiraAvaliacao(atual);
-    const avaliadaEm = new Date(Number(agora) || Date.now()).toISOString();
-    const planos = Array.isArray(candidato?.avaliacao?.inspecaoDestinos)
-      ? candidato.avaliacao.inspecaoDestinos
-      : [];
-
-    for (const plano of planos) {
-      registrarDestinoEstado(preparado, plano.destino || {}, plano.estado, {
-        motivo: plano.motivo || "",
-        proximoEnvioPermitidoEm: plano.proximoEnvioPermitidoEm || "",
-        data: avaliadaEm
-      });
-    }
-    preparado.primeiraAvaliacaoDestinosEm = avaliadaEm;
-
-    try {
-      const persistencia = await persistirItem(preparado, atual, candidato);
-      if (persistencia?.ok !== true || persistencia?.terminalHistorico === true) {
-        resultado.falhas += 1;
-        continue;
-      }
-      Object.assign(atual, preparado);
-      resultado.inspecionados += 1;
-    } catch (_) {
-      resultado.falhas += 1;
-    }
-  }
-
-  return resultado;
-}
-
 function selecionarFilaReadOnly({
   fila = [],
   clienteIdAlvo = null,
@@ -342,7 +151,6 @@ function selecionarFilaReadOnly({
   };
 
   const candidatosVivos = [];
-  const acumuladorPrimeiraAvaliacao = criarAcumuladorPrimeiraAvaliacao();
 
   for (const oferta of ordenarPendentesPorPrioridade(pendentes)) {
     contadores.avaliadas += 1;
@@ -358,10 +166,6 @@ function selecionarFilaReadOnly({
       agora,
       cacheLimiteDiario
     });
-
-    if (!String(oferta.primeiraAvaliacaoDestinosEm || "").trim()) {
-      considerarCandidatoPrimeiraAvaliacao(acumuladorPrimeiraAvaliacao, { oferta, avaliacao });
-    }
 
     if (avaliacao.elegivel) {
       candidatosVivos.push(avaliacao);
@@ -380,7 +184,6 @@ function selecionarFilaReadOnly({
   const candidatosOrdenados = ordenarOfertasFilaViva(candidatosVivos, { agora });
   const selecionada = candidatosOrdenados[0] || null;
   const candidatePool = construirCandidatePoolShadow(candidatosOrdenados);
-  const candidatosInspecao = finalizarCandidatosPrimeiraAvaliacao(acumuladorPrimeiraAvaliacao);
 
   return {
     ok: true,
@@ -389,8 +192,6 @@ function selecionarFilaReadOnly({
     totalPendentes: pendentes.length,
     totalElegiveis: candidatosVivos.length,
     candidatosVivos,
-    candidatosInspecao,
-    totalCandidatosInspecao: acumuladorPrimeiraAvaliacao.total,
     candidatosOrdenados,
     candidatePool,
     contadores,
@@ -646,9 +447,6 @@ module.exports = {
   INTERVALO_LOG_PADRAO_MS,
   modoDualRead,
   construirCandidatePoolShadow,
-  LIMITE_PRIMEIRA_AVALIACAO_POR_WORKSPACE,
-  selecionarCandidatosPrimeiraAvaliacao,
-  executarPrimeiraAvaliacaoLane,
   selecionarFilaReadOnly,
   compararSelecaoDualRead,
   compararAntidupDualRead,
