@@ -1,4 +1,4 @@
-name: Auditoria factual de envios 2026-10-07
+name: Auditoria de perda comercial 2026-10-07
 on:
   push:
     branches:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   audit:
-    name: Read-only factual send audit
+    name: Read-only commercial loss audit
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     steps:
@@ -20,65 +20,41 @@ jobs:
           echo "hostname=$(hostname)"
           echo "runner_os=${RUNNER_OS:-unknown}"
           echo "today_local=$(TZ=America/Sao_Paulo date -Iseconds)"
+          echo "cutoff_utc=2026-10-07T23:52:05Z"
           for p in /opt/optimus/backend /opt/optimus/infra /data /opt/optimus/data; do if [ -d "${p}" ]; then echo "path_ok=${p}"; else echo "path_missing=${p}"; fi; done
           production_head="$(git -C /opt/optimus/backend rev-parse HEAD 2>/dev/null || true)"
           echo "production_head=${production_head}"
           if [ "${production_head}" = "7014f271e900826ff3f2898e89d1f4b4bdf3f78c" ]; then echo "production_target_verified=true"; else echo "production_target_verified=false"; fi
-      - name: Factual send audit
+      - name: Read-only commercial loss aggregation
         shell: bash
         run: |
           set -Eeuo pipefail
           node --max-old-space-size=4096 <<'NODE'
-          const fs=require('fs'), path=require('path');
+          const fs=require('fs'),path=require('path');
           const root='/opt/optimus/data/clientes';
-          const workspaces=['user_b2oogwwl','user_g3qkc18m','user_pss60lus','user_zbbk3fdr'];
-          const today='2026-10-07';
-          const offers=new Map();
-          const sourceCounts={durable:0,state:0,executor:0}; let evidenceEvents=0;
-          const stateHist={};
-          function localDate(v){
-            if(v===null||v===undefined||v==='') return null;
-            if(typeof v==='number'){const d=new Date(v); if(!isNaN(d)) return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);}
-            const s=String(v); const d=new Date(s); if(!isNaN(d)) return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(d); return s.slice(0,10);
-          }
-          function isToday(v){return localDate(v)===today;}
-          function truthy(v){return v===true || v===1 || (typeof v==='string' && /^(true|yes|ok|sucesso|success)$/i.test(v.trim()));}
-          function confirmedState(v){const s=String(v||'').toLowerCase(); if(!s) return false; if(/falh|erro|pend|aguard|cancel|bloq|nao|não|skip|sem/.test(s)) return false; return /enviad|sucess|success|confirm|sent|ok|conclu|delivered/.test(s);}
-          function channel(d){
-            const vals=[d.tipo,d.canal,d.channel,d.channelName,d.nome,d.destinoId,d.alvoId,d.grupo,d.grupoJid].filter(Boolean).map(String).join(' ').toLowerCase();
-            if(/whats|baileys|z-api|whatsapp|^wa/.test(vals)) return 'WhatsApp';
-            if(/telegram|^tg/.test(vals)) return 'Telegram';
-            if(/discord/.test(vals)) return 'Discord';
-            return 'Outro';
-          }
-          function offerRec(ws,o){
-            const id=String(o.id||o.engineOfertaUuid||o.engineOfertaId||''); if(!id) return null;
-            const key=ws+'|'+id; let r=offers.get(key); if(!r){r={key,workspace:ws,offerId:id,applicable:new Map(),confirmations:new Map(),sources:new Set(),seenSources:new Set(),statusValues:new Set()}; offers.set(key,r);} return r;
-          }
-          function addApplicable(r,d){const id=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||''); if(!id)return; if(d.estado) stateHist[String(d.estado)]=(stateHist[String(d.estado)]||0)+1; const s=String(d.estado||d.status||d.resultado||d.motivo||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[-]/g,'_'); const naoAplicavel=d.aplicavel===false || /nao[_ ]?compativel|incompativel|nao[_ ]?aplicavel|bloqueado[_ ]?repeticao[_ ]?2h/.test(s); if(naoAplicavel)return; r.applicable.set(id,{id,channel:channel(d),state:d.estado||null,enviadoEm:d.enviadoEm||null});}
-          function addConfirmation(r,d,kind,ts){if(!isToday(ts))return; evidenceEvents++; const dest=String(d.destinoId||d.id||d.chave||d.alvoId||d.nome||'unknown'); const k=dest+'|'+today; const pri={durable:3,executor:2,state:1}[kind]; const old=r.confirmations.get(k); if(!old||pri>old.priority){if(old) sourceCounts[old.kind]--; r.confirmations.set(k,{destinoId:dest,channel:channel(d),timestamp:String(ts),kind,priority:pri,messageIdPresent:!!d.messageId,providerMessageIdPresent:!!d.providerMessageId}); r.sources.add(kind); sourceCounts[kind]++;}}
-          function process(ws,source,v){
-            const arr=Array.isArray(v)?v:[v];
-            for(const wrapper of arr){const o=wrapper&&wrapper.item&&typeof wrapper.item==='object'?wrapper.item:wrapper; if(!o||typeof o!=='object')continue; const r=offerRec(ws,o); if(!r)continue;
-              if(o.destinosEstado&&Array.isArray(o.destinosEstado)) for(const d of o.destinosEstado){addApplicable(r,d); if(d.enviadoEm&&confirmedState(d.estado)) addConfirmation(r,d,'state',d.enviadoEm);}
-              if(o.destinosEnviados&&Array.isArray(o.destinosEnviados)) for(const d of o.destinosEnviados){if(d.dataEnvio) addConfirmation(r,d,'durable',d.dataEnvio);}
-              if(o.logsEnvio&&Array.isArray(o.logsEnvio)) for(const d of o.logsEnvio){const ok=truthy(d.sendMessageSucesso)||truthy(d.sucesso)||!!d.providerMessageId; if(ok&&d.data) addConfirmation(r,d,'executor',d.data);}
-              if(o.status) r.statusValues.add(String(o.status)); if(o.statusOperacional) r.statusValues.add(String(o.statusOperacional)); if(o.statusPublico) r.statusValues.add(String(o.statusPublico));
-            }
-          }
-          for(const ws of workspaces){for(const name of ['fila.json','fila-historico.json']){const file=path.join(root,ws,name); if(!fs.existsSync(file)){console.log('MISSING_SOURCE',ws,name); continue;} console.log('READ_SOURCE',ws,name,fs.statSync(file).size); let v; try{v=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){console.log('PARSE_ERROR',ws,name,String(e.message));continue;} process(ws,name,v); v=null;}}
-          const rows=[]; const channelCounts={WhatsApp:0,Telegram:0,Discord:0,Outro:0};
-          for(const r of offers.values()){
-            const conf=[...r.confirmations.values()]; if(!conf.length)continue;
-            for(const c of conf) channelCounts[c.channel]=(channelCounts[c.channel]||0)+1;
-            const applicable=[...r.applicable.values()]; const allConfirmed=applicable.length>0 && applicable.every(d=>confirmedState(d.state));
-            const complete=allConfirmed; const partial=!complete;
-            rows.push({workspace:r.workspace,offerId:r.offerId,confirmations:conf.length,channels:[...new Set(conf.map(c=>c.channel))].sort(),channelCounts:conf.reduce((m,c)=>{m[c.channel]=(m[c.channel]||0)+1;return m},{}),timestamps:[...new Set(conf.map(c=>c.timestamp))].sort(),sources:[...r.sources].sort(),applicableDestinations:applicable.length,confirmedApplicable:applicable.filter(d=>confirmedState(d.state)).length,complete,partial,stateValues:[...r.statusValues].sort()});
-          }
-          rows.sort((a,b)=>(a.workspace+a.offerId).localeCompare(b.workspace+b.offerId));
-          const complete=rows.filter(x=>x.complete).length, partial=rows.filter(x=>x.partial).length;
-          const byWorkspace={}; for(const x of rows){const b=byWorkspace[x.workspace]||(byWorkspace[x.workspace]={offers:0,complete:0,partial:0,confirmations:0,channels:{WhatsApp:0,Telegram:0,Discord:0,Outro:0}}); b.offers++; b.confirmations+=x.confirmations; if(x.complete)b.complete++; else b.partial++; for(const [c,n] of Object.entries(x.channelCounts||{}))b.channels[c]=(b.channels[c]||0)+n; }
-          console.log('AUDIT_WORKSPACE',JSON.stringify(byWorkspace));
-          console.log('AUDIT_SUMMARY',JSON.stringify({today,offersWithAtLeastOneConfirmation:rows.length,completeOffers:complete,partialOffers:partial,totalDestinationConfirmations:rows.reduce((n,x)=>n+x.confirmations,0),evidenceEvents,channelCounts,sourceCounts,stateHistogram:stateHist,indeterminateCompleteness:rows.filter(x=>x.applicableDestinations===0).length}));
-          console.log('AUDIT_OFFER_BEGIN'); for(const row of rows) console.log('AUDIT_OFFER',JSON.stringify(row)); console.log('AUDIT_OFFER_END');
+          const workspaces=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'];
+          const start=Date.parse('2026-10-07T03:00:00Z');
+          const cutoff=Date.parse('2026-10-07T23:52:05Z');
+          const recs=new Map();
+          const nonApplicable=/nao[_ ]?compativel|incompativel|nao[_ ]?aplicavel|bloqueado[_ ]?repeticao[_ ]?2h/i;
+          const sendState=/enviad|sucess|success|sent|confirm|delivered|ok/i;
+          const failState=/falh|erro|pend|aguard|cancel|bloq|sem[_ ]?imagem|nao[_ ]?enviado/i;
+          const keyFields=/(captur|criad|entrada|expir|avali|slot|oportun|selecion|liberad|proximo|interval|cadenc|limite|janela|autor|claim|reserv|credit|destino|status|motivo|erro|process|envio|enviad|data|timestamp|marketplace|origem|categoria|ttl)/i;
+          function ms(v){if(v===null||v===undefined||v==='')return NaN; if(typeof v==='number')return Number.isFinite(v)?v:NaN; const n=Date.parse(String(v)); return Number.isFinite(n)?n:NaN;}
+          function inPeriod(v){const t=ms(v);return Number.isFinite(t)&&t>=start&&t<=cutoff;}
+          function firstTime(o,keys){for(const k of keys){if(o&&o[k]&&Number.isFinite(ms(o[k])))return o[k];}return '';}
+          function idOf(o,w){return String(o.engineOfertaUuid||o.engineOfertaId||o.id||o.ofertaId||o.filaId||'')||w+'|unknown';}
+          function recFor(w,o){const id=idOf(o,w),k=w+'|'+id;let r=recs.get(k);if(!r){r={workspace:w,offerId:id,captures:[],expires:[],firstEval:[],applicable:new Map(),sendEvidence:[],slotSignals:new Set(),slotFields:new Set(),causeSignals:new Set(),marketplaces:new Set(),statuses:new Set(),sources:new Set(),fieldPresence:new Set()};recs.set(k,r);}return r;}
+          function ch(v){return String(v??'').trim();}
+          function addDest(r,d){if(!d||typeof d!=='object')return; const state=ch(d.estado||d.status||d.resultado||d.motivo); const id=ch(d.destinoId||d.id||d.chave||d.alvoId||d.nome); if(state)r.statuses.add(state); if(d.aplicavel===false||nonApplicable.test(state))return; if(id)r.applicable.set(id,{state,enviadoEm:d.enviadoEm||d.dataEnvio||'',tipo:d.tipo||d.canal||''});}
+          function inspect(o,r,depth=0,prefix=''){if(!o||typeof o!=='object'||depth>4)return; for(const [k,v] of Object.entries(o)){const p=prefix?prefix+'.'+k:k; if(keyFields.test(k))r.fieldPresence.add(k); const kl=k.toLowerCase(); if(/(marketplace|origem|categoria)/i.test(k)&&typeof v!=='object'&&ch(v))r.marketplaces.add(ch(v)); if(/primeiraavaliacao|firstevaluation/i.test(kl)&&ch(v))r.firstEval.push(v); if(/(slotreal|oportunidade(real)?|liberadoagora|slotantesdodeadline)/i.test(kl)&&((v===true)||String(v).toLowerCase()==='true')){r.slotSignals.add('explicit_slot_flag');r.slotFields.add(p);} if(/(selecionadoem|selectedat|slotocupadoem)/i.test(kl)&&inPeriod(v)){r.slotSignals.add('selection_timestamp');r.slotFields.add(p);} if(/(proximoslot|destinosdisponiveis|slotsdisponiveis)/i.test(kl)&&Number(v)>0){r.slotSignals.add('slot_quantity');r.slotFields.add(p);} if(/(motivo|erro|status|estado|resultado|bloqueio)/i.test(kl)&&typeof v!=='object'&&ch(v)){const s=ch(v); if(/limite|interval|cadenc|horario|janela|claim|reserv|credit|authority|capacidade|slot|selecion|repeti|retenc|provider|executor|imagem|expir/i.test(s))r.causeSignals.add(s);} if(v&&typeof v==='object')inspect(v,r,depth+1,p);}}
+          function process(w,source,v){const arr=Array.isArray(v)?v:[v];for(const wrapper of arr){const o=wrapper&&wrapper.item&&typeof wrapper.item==='object'?wrapper.item:wrapper;if(!o||typeof o!=='object')continue;const r=recFor(w,o);r.sources.add(source);const cap=firstTime(o,['capturadoEm','capturadaEm','dataCaptura','radarCapturadoEm','criadoEmRadar','dataEntradaFila','criadoEm','dataCriacao']);if(cap)r.captures.push(cap);const exp=firstTime(o,['expiraEm','expiradoEm','finalizadoEm','terminalOcorridoEm']);if(exp)r.expires.push(exp);for(const k of ['primeiraAvaliacaoDestinosEm','primeiraAvaliacaoEm','firstEvaluationAt'])if(o[k])r.firstEval.push(o[k]);if(o.marketplace)r.marketplaces.add(ch(o.marketplace));if(o.origem)r.marketplaces.add(ch(o.origem));if(o.status)r.statuses.add(ch(o.status));if(o.statusOperacional)r.statuses.add(ch(o.statusOperacional));if(o.statusPublico)r.statuses.add(ch(o.statusPublico));if(Array.isArray(o.destinosEstado))for(const d of o.destinosEstado){addDest(r,d);if(d.enviadoEm||d.dataEnvio)r.sendEvidence.push({kind:'destination_state',ts:d.enviadoEm||d.dataEnvio,destinoId:d.destinoId||d.id});}if(Array.isArray(o.destinosEnviados))for(const d of o.destinosEnviados)r.sendEvidence.push({kind:'durable_destination',ts:d.dataEnvio||d.enviadoEm,destinoId:d.destinoId||d.id});if(Array.isArray(o.logsEnvio))for(const d of o.logsEnvio){if(d.providerMessageId||d.sendMessageSucesso===true||d.sucesso===true)r.sendEvidence.push({kind:'executor_provider',ts:d.data||d.sendMessageSucesso,destinoId:d.destinoId||d.id});}inspect(o,r);}}
+          for(const w of workspaces){for(const name of ['fila.json','fila-historico.json']){const f=path.join(root,w,name);if(!fs.existsSync(f)){console.log('MISSING',w,name);continue;}let v;try{v=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){console.log('PARSE_ERROR',w,name,String(e.message));continue;}process(w,name,v);v=null;}}
+          const all=[...recs.values()];const captured=all.filter(r=>r.captures.some(inPeriod));const applicable=captured.filter(r=>r.applicable.size>0);const sent=captured.filter(r=>r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))));const zero=captured.filter(r=>!r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))));
+          const proven=applicable.filter(r=>r.slotSignals.size>0);const indeterminate=applicable.filter(r=>r.slotSignals.size===0);const lost=proven.filter(r=>!r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))));
+          const e1=lost.filter(r=>r.firstEval.length===0&&r.slotSignals.has('explicit_slot_flag')===true);const e2=lost.filter(r=>r.firstEval.length>0);const byWs={};for(const r of captured){const b=byWs[r.workspace]||(byWs[r.workspace]={captured:0,applicable:0,slotProven:0,sent:0,lost:0,indeterminate:0});b.captured++;if(r.applicable.size)b.applicable++;if(r.slotSignals.size)b.slotProven++;if(r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))))b.sent++;if(r.slotSignals.size&&!r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))))b.lost++;if(r.applicable.size&&!r.slotSignals.size)b.indeterminate++;}
+          const byM={};for(const r of proven){const m=[...r.marketplaces].find(Boolean)||'indeterminado';const b=byM[m]||(byM[m]={slotProven:0,sent:0,lost:0});b.slotProven++;if(r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))))b.sent++;else b.lost++;}
+          const examples=lost.slice(0,20).map(r=>({workspace:r.workspace,offerId:r.offerId,capturedAt:r.captures.find(inPeriod)||r.captures[0]||'',expiresAt:r.expires[0]||'',firstEvaluation:r.firstEval[0]||null,applicableDestinations:r.applicable.size,slotSignals:[...r.slotSignals],slotFields:[...r.slotFields].slice(0,8),lastStatus:[...r.statuses].slice(-3),causes:[...r.causeSignals].slice(0,6),marketplaces:[...r.marketplaces]}));
+          console.log('LOSS_SUMMARY',JSON.stringify({periodStart:'2026-10-07T00:00:00-03:00',cutoff:'2026-10-07T20:52:05-03:00',capturedEnqueued:captured.length,withApplicableDestination:applicable.length,slotRealProven:proven.length,knownSentFromSourceScan:sent.length,knownSentHomologated:276,slotRealZeroSend:lost.length,indeterminate:indeterminate.length,zeroSendCaptured:zero.length,beforeFirstEvaluation:e1.length,afterFirstEvaluation:e2.length,byWorkspace:byWs,byMarketplace:byM,fieldPresenceTop:[...new Set(captured.flatMap(r=>[...r.fieldPresence]))].sort()}));
+          console.log('LOSS_EXAMPLES',JSON.stringify(examples));
           NODE
