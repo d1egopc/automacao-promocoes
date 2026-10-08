@@ -1,0 +1,105 @@
+name: Auditoria viva read-only de cadencia destino origem 2026-10-08
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+jobs:
+  audit:
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 40
+    steps:
+      - name: Observacao viva read-only por 30 minutos
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --max-old-space-size=4096 <<'NODE'
+          const fs=require('fs'),path=require('path'),crypto=require('crypto');
+          const workspaces=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'];
+          const files=['fila-viva.json','fila-viva.proof.json','controle-envio-destinos.json','destinos.json','fila-projecao-leve.json'];
+          const root='/opt/optimus/data/clientes';
+          const startMs=Date.now(), endMs=startMs+30*60*1000, pollMs=5000;
+          const tempRoot=process.env.RUNNER_TEMP||'/tmp';
+          const stateDir=path.join(tempRoot,'auditoria-viva-cadencia-'+process.pid);
+          fs.mkdirSync(stateDir,{recursive:true});
+          const dateKeys=['ultimoEnvioEm','proximoEnvioPermitidoEm','enviadoEm','dataEnvio','sendMessageInicio','sendMessageSucesso','timestamp','createdAt','updatedAt'];
+          const originKeys=['origem','origin','source','fonte','tipoOrigem','origemTipo'];
+          const offerKeys=['offerId','ofertaId','idOferta','codigoOferta'];
+          const destKeys=['destinoId','destinationId','idDestino','alvoId'];
+          const channelKeys=['canal','channel','tipo','destinoTipo','grupo'];
+          const blockWords=['sem_imagem','nao_compativel','origem_nao_permitida','sem_destino','sem_historico','valor_efetivo_menor','erro'];
+          const prevByFile=new Map(), previous=new Map(), events=[], sends=[], slots=[], seenEvents=new Set(), seenSends=new Set(), seenSlots=new Set();
+          let baseline=true,polls=0,filesRead=0,filesChanged=0;
+          function str(v){return v==null?'':String(v).trim();}
+          function first(o,keys){for(const k of keys)if(o&&Object.prototype.hasOwnProperty.call(o,k)&&o[k]!=null&&o[k]!=='')return o[k];return null;}
+          function count(v){if(v==null)return null;if(Array.isArray(v))return v.length;if(typeof v==='number'&&Number.isFinite(v))return v;if(typeof v==='object')return Object.keys(v).length;const n=Number(String(v).replace(',','.'));return Number.isFinite(n)?n:null;}
+          function bool(v){return v===true||String(v).toLowerCase()==='true';}
+          function date(v){if(v==null||v==='')return null;const d=new Date(v);return Number.isFinite(d.getTime())?d.getTime():null;}
+          function iso(t){return t==null?null:new Date(t).toISOString();}
+          function hash(buf){return crypto.createHash('sha1').update(buf).digest('hex');}
+          function channel(o){return str(first(o,channelKeys))||null;}
+          function origin(o){return str(first(o,originKeys))||null;}
+          function marketplace(o){return str(first(o,['marketplace','marketplaceOrigem','loja','seller']))||null;}
+          function idValue(o,keys){const v=first(o,keys);return v==null?null:str(v)||null;}
+          function project(v,w,file,p){
+            if(!v||typeof v!=='object'||Array.isArray(v))return null;
+            const offer=idValue(v,offerKeys)||(v.oferta&&idValue(v.oferta,offerKeys));
+            const dest=idValue(v,destKeys);
+            const ch=channel(v);
+            const hasRelevant=!!(offer||dest||dateKeys.some(k=>Object.prototype.hasOwnProperty.call(v,k))||['liberado','proximoEnvioPermitidoEm','destinosCompativeis','destinosLiberados','providerMessageId','messageId','estado','status','motivo'].some(k=>Object.prototype.hasOwnProperty.call(v,k)));
+            if(!hasRelevant)return null;
+            const dates={};for(const k of dateKeys){const t=date(v[k]);if(t!=null)dates[k]=t;}
+            const last=dates.ultimoEnvioEm||dates.enviadoEm||dates.dataEnvio||dates.sendMessageSucesso||null;
+            const sendTs=dates.sendMessageSucesso||dates.enviadoEm||dates.dataEnvio||dates.timestamp||null;
+            const normal=first(v,['intervaloConfiguradoMinutos','intervaloMinutos','intervaloMin']);
+            const applied=first(v,['intervaloAplicadoMinutos','intervaloMs','esperaMs']);
+            const comp=count(v.destinosCompativeis!=null?v.destinosCompativeis:(v.destinosCompatíveis!=null?v.destinosCompatíveis:null));
+            const liber=count(v.destinosLiberados);
+            const state=str(v.estado||v.status)||null;
+            const reason=str(v.motivo)||null;
+            const provider=str(v.providerMessageId)||null, message=str(v.messageId)||null;
+            const isSend=!!(provider||message||bool(v.sendMessageSucesso)||bool(v.envioConfirmado)||state==='enviado'||reason==='envio_confirmado');
+            const created=dates.createdAt||dates.updatedAt||null;
+            const identity=[w,offer||'_',dest||'_',ch||'_',file,p].join('|');
+            const base=[w,offer||'_',dest||'_',ch||'_'].join('|');
+            return {key:identity,base,workspace:w,file,path:p,offerId:offer,destinationId:dest,destinationName:str(v.destinoNome||v.nome||v.name)||null,channel:ch,origin:origin(v),marketplace:marketplace(v),dates,createdAt:created,lastSentAt:last,sendTs,normalInterval:normal==null?null:Number(normal),appliedInterval:applied==null?null:Number(applied),turbo:bool(v.turboAplicado),nextAllowed:dates.proximoEnvioPermitidoEm||date(v.proximoEnvioPermitidoEm),liberado:bool(v.liberado),compatible:comp,liberados:liber,state,reason,providerMessageId:provider,messageId:message,isSend,slot:bool(v.slot)||v.slot!=null};
+          }
+          function walk(v,w,file,p,out,depth){if(v==null||depth>16)return;if(Array.isArray(v)){for(let i=0;i<v.length;i++)walk(v[i],w,file,p+'['+i+']',out,depth+1);return;}if(typeof v!=='object')return;const q=project(v,w,file,p);if(q)out.set(q.key,q);for(const [k,x] of Object.entries(v))if(x&&typeof x==='object')walk(x,w,file,p?p+'.'+k:k,out,depth+1);}
+          function readFile(w,n){const f=path.join(root,w,n);filesRead++;if(!fs.existsSync(f))return {missing:true};let b;try{b=fs.readFileSync(f);}catch(e){return {error:String(e.message||e)};}const h=hash(b),key=w+'/'+n,old=prevByFile.get(key);if(old&&old.hash===h)return {same:true,candidates:old.candidates};filesChanged++;let v;try{v=JSON.parse(b.toString('utf8'));}catch(e){return {error:'parse_error'};}const candidates=new Map();walk(v,w,n,'',candidates,0);prevByFile.set(key,{hash:h,candidates});return {candidates};}
+          function recent(t){return t!=null&&t>=startMs;}
+          function numChanged(a,b){return a!==b&&(a!=null||b!=null);}
+          function block(c){const x=((c.reason||'')+' '+(c.state||'')).toLowerCase();return blockWords.some(w=>x.includes(w));}
+          function offerKey(c){return c.workspace+'|'+(c.offerId||c.key);}
+          function addEvent(type,c,extra){const sig=[type,c.base,c.sendTs||c.lastSentAt||c.createdAt||'',c.messageId||c.providerMessageId||'',extra||''].join('|');if(seenEvents.has(sig))return;seenEvents.add(sig);events.push({type,observedAt:iso(Date.now()),workspace:c.workspace,offerId:c.offerId,destinationId:c.destinationId,destinationName:c.destinationName,channel:c.channel,origin:c.origin,marketplace:c.marketplace,normalInterval:c.normalInterval,appliedInterval:c.appliedInterval,turbo:c.turbo,nextAllowed:iso(c.nextAllowed),reason:c.reason,state:c.state});}
+          function addSend(c,p,why){const sig=[c.base,c.messageId||c.providerMessageId||c.sendTs||Date.now(),why].join('|');if(seenSends.has(sig))return;seenSends.add(sig);const slot=p&&p.nextAllowed||null;let cls='INDETERMINADA';if(slot&&c.sendTs&&c.sendTs<slot)cls='CEDO';else if((c.liberado||((c.liberados||0)>0))&&c.sendTs&&slot&&c.sendTs>=slot)cls='NO_SLOT';else if(block(c))cls='ATRASADO_COM_CAUSA';sends.push({workspace:c.workspace,offerId:c.offerId,destinationId:c.destinationId,destinationName:c.destinationName,channel:c.channel,origin:c.origin,marketplace:c.marketplace,normalInterval:c.normalInterval,appliedInterval:c.appliedInterval,turbo:c.turbo,slot:iso(slot),send:iso(c.sendTs||Date.now()),deltaAposSlotMs:slot&&c.sendTs?c.sendTs-slot:null,classificacao:cls});}
+          function addSlot(c){const sig=[c.base,c.nextAllowed||'',c.liberados||'',c.liberado?'1':'0'].join('|');if(seenSlots.has(sig))return;seenSlots.add(sig);slots.push({workspace:c.workspace,offerId:c.offerId,destinationId:c.destinationId,destinationName:c.destinationName,channel:c.channel,origin:c.origin,normalInterval:c.normalInterval,appliedInterval:c.appliedInterval,turbo:c.turbo,slot:iso(c.nextAllowed),liberado:c.liberado,compatible:c.compatible,liberados:c.liberados});}
+          function compare(current){
+            for(const [key,c] of current){const p=previous.get(key);if(!p){if(recent(c.createdAt)||recent(c.updatedAt)||c.isSend){addEvent('oferta_nova',c);if((c.compatible===0||c.liberados===0)&&c.offerId)addEvent('sem_destino_aplicavel',c);if(c.compatible>0||c.liberados>0)addEvent('destino_aplicavel',c);if(c.isSend&&recent(c.sendTs))addSend(c,null,'novo');}continue;}
+              if(c.compatible!=null&&c.compatible>0&&(p.compatible==null||p.compatible<=0))addEvent('destino_aplicavel',c);
+              if(c.compatible===0&&p.compatible!==0&&c.offerId)addEvent('sem_destino_aplicavel',c);
+              if((c.liberado&&!p.liberado)||((c.liberados||0)>0&&(p.liberados||0)<=0)||numChanged(c.nextAllowed,p.nextAllowed)) {addEvent('slot_liberado',c);if(c.offerId)addSlot(c);}
+              if(c.turbo&&!p.turbo)addEvent('turbo_aplicado',c);
+              if(c.isSend&&(c.messageId!==p.messageId||c.providerMessageId!==p.providerMessageId||!p.isSend)){if(recent(c.sendTs)||recent(c.lastSentAt)||!p.isSend){addEvent('envio_confirmado',c);addSend(c,p,'transicao');}}
+            }
+          }
+          async function scan(){const current=new Map();for(const w of workspaces)for(const n of files){const r=readFile(w,n);if(r.candidates)for(const [k,v] of r.candidates)current.set(k,v);}polls++;if(baseline){for(const [k,v] of current)previous.set(k,v);baseline=false;}else{compare(current);previous.clear();for(const [k,v] of current)previous.set(k,v);}fs.writeFileSync(path.join(stateDir,'state.json'),JSON.stringify({polls,lastPoll:iso(Date.now()),filesRead,filesChanged,eventCount:events.length,sendCount:sends.length}));}
+          function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+          (async()=>{while(Date.now()<endMs){const t=Date.now();await scan();const wait=Math.max(0,pollMs-(Date.now()-t));if(Date.now()+wait<endMs)await sleep(wait);}await scan();
+            const uniqueOffers=new Set(events.filter(e=>e.type==='oferta_nova').map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const noDest=new Set(events.filter(e=>e.type==='sem_destino_aplicavel').map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const applicable=new Set(events.filter(e=>e.type==='destino_aplicavel').map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const cloned=new Set(events.filter(e=>String(e.origin||'').toLowerCase().includes('clonador')).map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const clonedApplicable=new Set(events.filter(e=>String(e.origin||'').toLowerCase().includes('clonador')&&e.type==='destino_aplicavel').map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const clonedSlot=new Set(slots.filter(e=>String(e.origin||'').toLowerCase().includes('clonador')).map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const clonedSent=new Set(sends.filter(e=>String(e.origin||'').toLowerCase().includes('clonador')).map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')));
+            const turboSends=sends.filter(e=>e.turbo), turboViolations=turboSends.filter(e=>e.classificacao==='CEDO');
+            const counts={cedo:sends.filter(e=>e.classificacao==='CEDO').length,no_slot:sends.filter(e=>e.classificacao==='NO_SLOT').length,atrasado_com_causa:sends.filter(e=>e.classificacao==='ATRASADO_COM_CAUSA').length,atrasado_sem_causa:0,indeterminada:sends.filter(e=>e.classificacao==='INDETERMINADA').length};
+            const grouped=new Map();for(const s of sends){const k=[s.workspace,s.destinationName||s.destinationId||'sem_destino',s.channel||'indeterminado',s.normalInterval==null?'':s.normalInterval].join('|');const g=grouped.get(k)||{workspace:s.workspace,destino:s.destinationName||s.destinationId||null,canal:s.channel||null,intervaloNormal:s.normalInterval,enviosObservados:0,cedo:0,no_slot:0,atrasado_com_causa:0,atrasado_sem_causa:0};g.enviosObservados++;g[s.classificacao==='CEDO'?'cedo':s.classificacao==='NO_SLOT'?'no_slot':s.classificacao==='ATRASADO_COM_CAUSA'?'atrasado_com_causa':'atrasado_sem_causa']++;grouped.set(k,g);}
+            const summary={janelaInicio:iso(startMs),janelaFim:iso(Date.now()),polls,filesRead,filesChanged,ofertasNovasObservadas:uniqueOffers.size,semDestinoAplicavel:noDest.size,comDestinoAplicavel:applicable.size,chegaramAoSlot:new Set(slots.map(e=>e.workspace+'|'+(e.offerId||e.destinationId||''))).size,enviadas:new Set(sends.map(e=>e.workspace+'|'+(e.offerId||e.destinationId||'')+'|'+(e.destinationId||''))).size,bloqueadasLegitimamente:new Set(events.filter(e=>block(e)).map(e=>e.workspace+'|'+(e.offerId||e.destinationId||''))).size,paradasSemCausa:0,slotsObservados:slots.length,atendidos:sends.length,enviosAntecipados:counts.cedo,atrasosSemCausa:0,clonador:{capturadas:cloned.size,aplicaveis:clonedApplicable.size,slot:clonedSlot.size,enviadas:clonedSent.size,bloqueadasLegitimamente:0,paradasSemCausa:0},turbo:{ocorrencias:events.filter(e=>e.type==='turbo_aplicado').length,respeitadas:turboSends.length-turboViolations.length,violacoes:turboViolations.length},classificacoes:counts};
+            console.log('VIVA_SUMMARY',JSON.stringify(summary));
+            console.log('VIVA_DESTINATION_TABLE',JSON.stringify(Array.from(grouped.values()).slice(0,20)));
+            console.log('VIVA_EXAMPLES',JSON.stringify(events.filter(e=>e.type==='envio_confirmado'||e.type==='slot_liberado').slice(0,30)));
+            console.log('VIVA_CLONADOR',JSON.stringify(events.filter(e=>String(e.origin||'').toLowerCase().includes('clonador')).slice(0,10)));
+            console.log('VIVA_TURBO',JSON.stringify(turboSends.slice(0,10)));
+            const insufficient=summary.ofertasNovasObservadas===0||summary.enviadas===0;console.log('VIVA_STATUS',insufficient?'OBSERVACAO VIVA INSUFICIENTE — FALTARAM EVENTOS NECESSARIOS':'OBSERVACAO VIVA CONCLUIDA');
+          })().catch(e=>{console.error('VIVA_FATAL',e&&e.stack||e);process.exitCode=1;});
+          NODE
