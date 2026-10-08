@@ -275,6 +275,7 @@ async function testarDeduplicacaoIsoladaPorOrigem() {
   limparModulo("../modules/engine/inbox.service");
   const eventos = [];
   let proximoId = 1;
+  let contadoresJobs = { criados: 1, existentes: 0 };
 
   mockModulo("../modules/engine/database", {
     queryEngine: async (sql, params = []) => {
@@ -321,7 +322,7 @@ async function testarDeduplicacaoIsoladaPorOrigem() {
     }
   });
   mockModulo("../modules/engine/jobs.service", {
-    criarJobsParaClientes: async () => ({ ok: true, criados: 1, existentes: 0 })
+    criarJobsParaClientes: async () => ({ ok: true, ...contadoresJobs })
   });
 
   const { registrarEventoBruto } = require("../modules/engine/inbox.service");
@@ -374,6 +375,40 @@ async function testarDeduplicacaoIsoladaPorOrigem() {
   const eventosRadar = eventos.filter(evento => evento.origem === "radar");
   assert(eventosRadar.every(evento => !evento.metadata.clonadorGrupos));
   assert(eventosRadar.every(evento => !evento.metadata.comercialCapturado));
+
+  for (const contadores of [{ criados: 1, existentes: 0 }, { criados: 0, existentes: 1 }]) {
+    contadoresJobs = contadores;
+    const repo = criarRepoMemoria();
+    repo.adicionarBuffer(itemBuffer({
+      id: `contadores_${contadores.criados}`,
+      grupoJid: `grupo_contadores_${contadores.criados}@g.us`
+    }));
+    const logs = [];
+    let retorno;
+    const bridge = criarBridgeClonadorGrupos({
+      repository: repo,
+      resolverRedirectUniversal: async () => ({ ok: false, status: "ignorado" }),
+      registrarEventoBruto: async (evento, opcoes) => {
+        retorno = await registrarEventoBruto(evento, opcoes);
+        return retorno;
+      },
+      logger: { log: (tag, payload) => logs.push({ tag, payload: JSON.parse(payload) }) }
+    });
+
+    const resultado = await bridge.processarCapturasPendentes({ limite: 1 });
+    assert.strictEqual(resultado.prontas, 1);
+    assert.strictEqual(retorno.ok, true);
+    assert.ok(retorno.id);
+    assert.strictEqual(retorno.duplicado, false);
+    assert.strictEqual(retorno.jobsCriados, contadores.criados);
+    assert.strictEqual(retorno.jobsExistentes, contadores.existentes);
+    const persistido = repo.estado.buffer[0].metadata.clonadorGruposBridge;
+    const log = logs.find(item => item.tag === "[CLONADOR-BRIDGE-ENGINE]").payload;
+    for (const dados of [persistido, log]) {
+      assert.strictEqual(dados.jobsCriados, contadores.criados);
+      assert.strictEqual(dados.jobsExistentes, contadores.existentes);
+    }
+  }
 }
 
 function testarComercialCapturado() {

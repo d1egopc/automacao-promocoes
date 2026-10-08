@@ -477,6 +477,8 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       ok: true,
       id,
       duplicado: false,
+      jobsCriados: Number(jobs.criados || 0),
+      jobsExistentes: Number(jobs.existentes || 0),
       ...(coberturaRadar.flagAtiva() ? { hashEvento, jobNovoCriado: Number(jobs.criados || 0) > 0 } : {})
     };
   } catch (e) {
