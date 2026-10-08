@@ -1,0 +1,29 @@
+name: Inventario read-only de fontes de cadencia 2026-10-07
+
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+  workflow_dispatch:
+
+jobs:
+  source-inventory:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Read-only source inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo runner_name=$RUNNER_NAME
+          echo hostname=$(hostname)
+          echo production_head=$(git -C /opt/optimus/backend rev-parse HEAD)
+          for root in /opt/optimus/data /opt/optimus/backend /opt/optimus/infra; do
+            echo ROOT=$root
+            if [ -d "$root" ]; then
+              find "$root" -maxdepth 4 -type f 2>/dev/null | sed -E 's#^#FILE #;' | grep -Ei '(fila|histor|event|send|envio|destin|scheduler|cadenc|turbo|log|audit|outbox|queue|confirm)' | head -200 || true
+            else
+              echo MISSING=$root
+            fi
+          done
+          echo DATA_DIRS
+          find /opt/optimus/data -maxdepth 3 -type d 2>/dev/null | sort | head -200 || true
