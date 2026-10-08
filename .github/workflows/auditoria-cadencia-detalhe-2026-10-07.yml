@@ -33,4 +33,4 @@ jobs:
           console.log('DETAIL_CONFIRMATIONS',JSON.stringify(conf.slice(0,500)));
           console.log('DETAIL_CADENCE_RECORDS',JSON.stringify(records.slice(0,400)));
           console.log('DETAIL_SLOT_OBJECTS',JSON.stringify(slots.slice(0,120)));
-NODE
+          NODE
