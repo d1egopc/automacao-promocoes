@@ -32,3 +32,5 @@ jobs:
           console.log('DETAIL_SUMMARY',JSON.stringify({targetLocalDay:target,workspaces:ws,recordCount:records.length,confirmationCount:conf.length,confirmationByChannel:byChannel,recordDateBuckets:localDates,turboRecords:records.filter(x=>x.turbo).length,slotObjects:slots.length}));
           console.log('DETAIL_CONFIRMATIONS',JSON.stringify(conf.slice(0,500)));
           console.log('DETAIL_CADENCE_RECORDS',JSON.stringify(records.slice(0,400)));
+          console.log('DETAIL_SLOT_OBJECTS',JSON.stringify(slots.slice(0,120)));
+NODE
