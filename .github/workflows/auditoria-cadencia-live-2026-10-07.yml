@@ -1,0 +1,29 @@
+name: Auditoria read-only de cadencia viva 2026-10-07
+
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+  workflow_dispatch:
+
+jobs:
+  live-cadence:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Read-only live cadence evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --max-old-space-size=4096 <<'NODE'
+          const fs=require('fs'),path=require('path');
+          const ws=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'],root='/opt/optimus/data/clientes';
+          const keyRe=/intervalo|cadenc|turbo|proximoEnvio|ultimoEnvio|enviado|dataEnvio|confirmado|liberad|slot|janela|horar|limite|credito|fair|provider|executor|dedupe|compat|motivo|estado|status/i;
+          const fields=new Map(), dates={}, turbo=[] , samples=[];
+          function safe(v){if(v==null)return null;if(typeof v==='boolean'||typeof v==='number')return v;if(Array.isArray(v))return {array:v.length};if(typeof v==='object')return {object:Object.keys(v).slice(0,16)};let s=String(v).trim();if(!s)return '';if(/^https?:\/\//i.test(s))try{const u=new URL(s);return 'url:'+u.hostname+u.pathname.slice(0,80);}catch{return 'url:invalid';}return s.length>160?s.slice(0,160)+'…':s;}
+          function dateVal(v){if(v==null||v==='')return NaN;if(typeof v==='number')return v;const s=String(v).trim();const br=s.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}):(\d{2}):(\d{2})/);if(br)return Date.parse(br[3]+'-'+br[2]+'-'+br[1]+'T'+br[4]+':'+br[5]+':'+br[6]+'-03:00');const n=Date.parse(s);return Number.isFinite(n)?n:NaN;}
+          function walk(v,file,w,p='',depth=0){if(v==null||depth>14)return;if(Array.isArray(v)){for(const x of v.slice(0,120))walk(x,file,w,p,depth+1);return;}if(typeof v!=='object')return;const local={};for(const [k,x] of Object.entries(v)){if(keyRe.test(k)){const val=safe(x);const f=fields.get(k)||{count:0,samples:[]};f.count++;if(f.samples.length<4&&val!==''&&val!=null)f.samples.push(val);fields.set(k,f);local[k]=val;const d=dateVal(x);if(d===d){const day=new Date(d).toISOString().slice(0,10);dates[day]=(dates[day]||0)+1;}}if(k==='turboAplicado'&&(x===true||String(x).toLowerCase()==='true')&&turbo.length<40)turbo.push({workspace:w,file,path:p,keys:Object.keys(v).slice(0,30),object:Object.fromEntries(Object.entries(v).filter(([a])=>keyRe.test(a)).slice(0,30))});}if(Object.keys(local).length&&samples.length<50&&(/fila-viva|proof|controle-envio|destinos/.test(file)))samples.push({workspace:w,file,path:p,fields:local});for(const [k,x] of Object.entries(v))if(x&&typeof x==='object')walk(x,file,w,p?p+'.'+k:k,depth+1);}
+          for(const w of ws){for(const n of ['fila-viva.json','fila-viva.proof.json','controle-envio-destinos.json','destinos.json','fila-projecao-leve.json']){const f=path.join(root,w,n);if(!fs.existsSync(f)){console.log('MISSING',w,n);continue;}let v;try{v=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){console.log('PARSE_ERROR',w,n);continue;}walk(v,n,w);v=null;}}
+          console.log('LIVE_CADENCE_SUMMARY',JSON.stringify({workspaces:ws,files:['fila-viva.json','fila-viva.proof.json','controle-envio-destinos.json','destinos.json','fila-projecao-leve.json'],dates,fieldTop:[...fields.entries()].sort((a,b)=>b[1].count-a[1].count).slice(0,120),turboOccurrences:turbo.length}));
+          console.log('LIVE_TURBO_SAMPLES',JSON.stringify(turbo));
+          console.log('LIVE_CADENCE_SAMPLES',JSON.stringify(samples.slice(0,50)));
+          NODE
