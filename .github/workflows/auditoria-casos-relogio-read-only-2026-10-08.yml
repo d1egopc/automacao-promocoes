@@ -45,8 +45,8 @@ jobs:
           const { spawnSync } = require('child_process');
           const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
 
-          const BACKEND = '/opt/optimus/backend';
-          const DATA = '/opt/optimus/data';
+          const BACKEND = '/app';
+          const DATA = '/data';
           const WORKSPACES = ['user_pss60lus', 'user_zbbk3fdr'];
           const TARGETS = [
             { key: '98596-geral', offerId: '98596', workspace: 'user_pss60lus', destinationId: '5717ad91-3d64-4165-9aad-5100f20502fc', label: 'Geral' },
@@ -145,11 +145,12 @@ jobs:
               const jids = new Set(js.map(x => txt(x.id)));
               const qids = new Set([target.filaItemId, ...js.map(x => txt(valueAt(safeJson(x.metadata), ['filaItemId','fila_item_id'])))].filter(Boolean));
               const es = [...caseEvents, ...priorEvents].filter(e => (txt(e.offer_id) === target.offerId || jids.has(txt(e.job_id)) || qids.has(txt(e.queue_item_id))) && (txt(e.workspace) === target.workspace || !txt(e.workspace)));
-              const ps = checkpoints.filter(c => txt(c.workspace) === target.workspace && (qids.has(txt(c.queue_item_id)) || destinationIn(c.destination_key, target.destinationId)));
+              const ps = checkpoints.filter(c => txt(c.workspace) === target.workspace && qids.size > 0 && qids.has(txt(c.queue_item_id)));
               const raw = rawEvents.filter(e => js.some(j => txt(j.event_id) === txt(e.id)));
               const offer = offersById.get(target.offerId) || null;
               const metaRoots = [offer, ...js, ...raw].map(x => x ? metaObject(x) : {}).flatMap(x => [x.root, x.job, x.event, x.offer]);
-              const readyRaw = target.knownReadyAt || valueAt(metaRoots, ['readyAt','ready_at','filaClienteAdicionadaAt','fila_cliente_adicionada_at','prontoEm','pronto_em']);
+              const metadataReady = valueAt(metaRoots, ['readyAt','ready_at','filaClienteAdicionadaAt','fila_cliente_adicionada_at','prontoEm','pronto_em']);
+              const readyRaw = target.knownReadyAt || metadataReady || (offer && txt(offer.status) === 'fila' ? offer.updated_at : null);
               const expRaw = valueAt(metaRoots, ['expiraEm','expira_em','expiresAt','expires_at','terminalizadoEm','terminalizado_em','finalizadoEm','finalizado_em']);
               const readyAt = iso(readyRaw), expiresAt = iso(expRaw);
               const matching = e => destinationIn(e.destination_id, target.destinationId) || destinationIn(e.metadata, target.destinationId) || !txt(e.destination_id);
@@ -177,7 +178,7 @@ jobs:
               if (!latestSend && cooldownRejects.length && cooldownEnd && !reevalAfterCooldown.length && readyAt && (!expiresAt || ms(cooldownEnd) < ms(expiresAt))) classification = 'C';
               if (!latestSend && readyAt && slotHistorical && (!expiresAt || ms(slotHistorical) < ms(expiresAt)) && !cooldownRejects.length) classification = 'D';
               if (decisions.some(x => x.type === 'executor_erro_final') && decisions.some(x => x.type === 'destino_selecionado')) classification = 'F';
-              return { ...target, originReal:realOrigin, readyAt, expiresAt, terminalizedAt: valueAt(metaRoots,['terminalizadoEm','terminalizado_em']) ? iso(valueAt(metaRoots,['terminalizadoEm','terminalizado_em'])) : null, offer:offer ? { status:txt(offer.status), reason:txt(offer.reason), createdAt:iso(offer.created_at), updatedAt:iso(offer.updated_at) } : null, jobs:js.map(x=>({id:txt(x.id),eventId:txt(x.event_id),status:txt(x.status),createdAt:iso(x.created_at),updatedAt:iso(x.updated_at)})), rawEvents:raw.map(x=>({id:txt(x.id),capturedAt:iso(x.captured_at),createdAt:iso(x.created_at),origin:txt(x.origin),source:txt(x.source),originType:txt(x.origin_type)})), decisions, checkpoints:cps, lastConfirmedBeforeReady:prev, slotHistorical:slotHistorical || 'INDETERMINADO', cooldownEndedAt:cooldownEnd || null, reevalAfterCooldown, envioConfirmado:latestSend, classification };
+              return { ...target, originReal:realOrigin, readyAt, readyAtSource:target.knownReadyAt ? 'provided_case_fact' : metadataReady ? 'metadata' : (offer && txt(offer.status) === 'fila' ? 'offer.updated_at_fallback' : null), expiresAt, terminalizedAt: valueAt(metaRoots,['terminalizadoEm','terminalizado_em']) ? iso(valueAt(metaRoots,['terminalizadoEm','terminalizado_em'])) : null, offer:offer ? { status:txt(offer.status), reason:txt(offer.reason), createdAt:iso(offer.created_at), updatedAt:iso(offer.updated_at) } : null, jobs:js.map(x=>({id:txt(x.id),eventId:txt(x.event_id),status:txt(x.status),createdAt:iso(x.created_at),updatedAt:iso(x.updated_at)})), rawEvents:raw.map(x=>({id:txt(x.id),capturedAt:iso(x.captured_at),createdAt:iso(x.created_at),origin:txt(x.origin),source:txt(x.source),originType:txt(x.origin_type)})), decisions, checkpoints:cps, lastConfirmedBeforeReady:prev, slotHistorical:slotHistorical || 'INDETERMINADO', cooldownEndedAt:cooldownEnd || null, reevalAfterCooldown, envioConfirmado:latestSend, classification };
             };
             const records = TARGETS.map(rowsFor);
             const gapRecords = GAP_IDS.map(offerId => rowsFor({ key:'gap-'+offerId, offerId, workspace:'user_pss60lus', destinationId:GAP_DEST, label:'OP Clone' }));
