@@ -1,0 +1,212 @@
+name: Auditoria final fanout e destino ocioso read-only 2026-10-08
+
+on:
+  push:
+    branches:
+      - audit/clonador-duravel-2026-10-08
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auditoria-fanout-destino-ocioso-2026-10-08
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Auditoria factual read-only de fanout e destinos
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readonly EXPECTED_SHA='568c4fe1f848a9ad695929dd0d5706defa822ad7'
+          readonly BACKEND='/opt/optimus/backend'
+          readonly INFRA='/opt/optimus/infra'
+          readonly COMPOSE='/opt/optimus/infra/compose.yml'
+          [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=event_or_branch'; exit 2; }
+          [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
+          backend_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          printf 'PREFLIGHT_BACKEND_SHA=%s\n' "$backend_sha"
+          [[ "$backend_sha" == "$EXPECTED_SHA" ]] || { echo 'PREFLIGHT_FAIL=backend_sha'; exit 2; }
+          cd "$INFRA"
+          backend_id="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          [[ -n "$backend_id" && -n "$postgres_id" ]] || { echo 'PREFLIGHT_FAIL=containers_not_running'; exit 2; }
+          echo 'PREFLIGHT=PASS; production SHA, paths, and running containers confirmed.'
+
+          if docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+
+          const WORKSPACE = 'user_pss60lus';
+          const DESTINATIONS = {
+            geral: '5717ad91-3d64-4165-9aad-5100f20502fc',
+            op_clone: 'e2bdb503-1710-47e8-870c-0ce34936910b',
+            pescador: 'b5f8fe37-1125-40e5-94a4-40c2c2b0c468'
+          };
+          const WINDOWS = {
+            geral_1: ['2026-10-08T18:10:00Z', '2026-10-08T18:50:00Z', 'geral'],
+            geral_2: ['2026-10-08T19:15:00Z', '2026-10-08T20:00:00Z', 'geral'],
+            op_clone: ['2026-10-08T18:10:00Z', '2026-10-08T21:20:00Z', 'op_clone'],
+            pescador: ['2026-10-08T16:00:00Z', '2026-10-08T22:40:00Z', 'pescador']
+          };
+          const TARGET_ITEMS = {
+            '98596': null,
+            '98775': 'engine_98775_1791487389316',
+            '98614': null,
+            '98639': 'engine_98639_1791484247439'
+          };
+          const TARGET_OFFERS = Object.keys(TARGET_ITEMS);
+          const txt = v => v == null ? '' : String(v).trim();
+          const iso = v => { if (v == null || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+          const ms = v => { const x = iso(v); return x ? Date.parse(x) : NaN; };
+          const safeJson = v => { if (v && typeof v === 'object') return v; if (typeof v === 'string') { try { return JSON.parse(v); } catch {} } return {}; };
+          const clean = v => v == null ? null : (typeof v === 'object' ? v : txt(v));
+          const col = (set, name, type = 'text') => set.has(name) ? `"${name}"` : `NULL::${type}`;
+          const colA = (set, alias, name, type = 'text') => set.has(name) ? `${alias}."${name}"` : `NULL::${type}`;
+
+          async function q(label, sql, params = []) {
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
+            const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 20000 });
+            if (!r || !r.ok) throw new Error('select_failed:' + label);
+            return r.resultado && r.resultado.rows || [];
+          }
+
+          function contains(v, needle) {
+            if (v == null) return false;
+            if (Array.isArray(v)) return v.some(x => contains(x, needle));
+            if (typeof v === 'object') return Object.values(v).some(x => contains(x, needle));
+            return txt(v).toLowerCase().includes(txt(needle).toLowerCase());
+          }
+
+          function projectObject(v, depth = 0) {
+            if (depth > 8 || v == null) return null;
+            if (Array.isArray(v)) return v.map(x => projectObject(x, depth + 1));
+            if (typeof v !== 'object') return v;
+            const out = {};
+            for (const [k, x] of Object.entries(v)) {
+              if (/^(status|statusDetalhe|motivo|motivoRetencao|proximaTentativaEnvioEm|primeiraAvaliacaoDestinosEm|destinosEstado|destinosEnviados|enviadoEm|expiraEm|terminalizadoEm|retidaEm|atualizadoEm|processandoEm|filaItemId|engineOfertaId|ofertaId|marketplace|origem|categoriaOferta|categoria|canal|tipo|chave|estado|tentativas|proximaTentativa|enviadoEm|motivoCodigo|motivoBruto|reason|reasonRaw)$/i.test(k)) out[k] = projectObject(x, depth + 1);
+            }
+            return Object.keys(out).length ? out : undefined;
+          }
+
+          function extractMatches(value, file, targetIds, out, pathHint = '$', depth = 0) {
+            if (depth > 12 || value == null) return;
+            if (Array.isArray(value)) return value.forEach((x, i) => extractMatches(x, file, targetIds, out, `${pathHint}[${i}]`, depth + 1));
+            if (typeof value !== 'object') return;
+            const serialized = JSON.stringify(value);
+            if (targetIds.some(id => serialized.includes(id))) {
+              const projected = projectObject(value);
+              if (projected) out.push({ file, path: pathHint, record: projected });
+            }
+            for (const [k, x] of Object.entries(value)) extractMatches(x, file, targetIds, out, `${pathHint}.${k}`, depth + 1);
+          }
+
+          function readFocusedFiles() {
+            const root = '/data/clientes/' + WORKSPACE;
+            const names = new Set(['fila-viva.json', 'fila-viva.proof.json', 'fila-projecao-leve.json', 'fila-terminal-index.json']);
+            const files = [];
+            function walk(dir, depth = 0) {
+              if (depth > 3 || files.length > 400) return;
+              let entries = [];
+              try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+              for (const entry of entries) {
+                const p = path.join(dir, entry.name);
+                if (entry.isDirectory()) walk(p, depth + 1);
+                else if (names.has(entry.name) || entry.name.startsWith('evento-') || entry.name.endsWith('.jsonl')) files.push(p);
+              }
+            }
+            walk(root);
+            const hits = [];
+            const ids = [...TARGET_OFFERS, ...Object.values(TARGET_ITEMS).filter(Boolean)];
+            for (const file of files) {
+              let raw = '';
+              try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+              if (!ids.some(id => raw.includes(id))) continue;
+              try { extractMatches(JSON.parse(raw), file, ids, hits); }
+              catch {
+                for (const [i, line] of raw.split(/\r?\n/).entries()) if (ids.some(id => line.includes(id))) hits.push({ file, line: i + 1, raw: line.slice(0, 2000) });
+              }
+            }
+            return { scannedFiles: files.length, matches: hits.slice(0, 500) };
+          }
+
+          function gapSummary(rows, start, end) {
+            const s = ms(start), e = ms(end);
+            const points = rows.map(x => ms(x.confirmed_at)).filter(t => Number.isFinite(t) && t >= s && t <= e).sort((a, b) => a - b);
+            const gaps = [];
+            for (let i = 1; i < points.length; i++) gaps.push({ from: new Date(points[i - 1]).toISOString(), to: new Date(points[i]).toISOString(), gapMs: points[i] - points[i - 1], gapMin: (points[i] - points[i - 1]) / 60000 });
+            gaps.sort((a, b) => b.gapMs - a.gapMs);
+            return { first: points.length ? new Date(points[0]).toISOString() : null, last: points.length ? new Date(points[points.length - 1]).toISOString() : null, count: points.length, maxGap: gaps[0] || null, gaps: gaps.slice(0, 10) };
+          }
+
+          async function main() {
+            const wanted = ['fila_checkpoints_entrega', 'engine_eventos_comerciais', 'engine_ofertas', 'engine_jobs_cliente'];
+            const schemaRows = await q('schema', 'SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[])', [wanted]);
+            const schema = new Map();
+            for (const row of schemaRows) { if (!schema.has(row.table_name)) schema.set(row.table_name, new Set()); schema.get(row.table_name).add(row.column_name); }
+            const pcols = schema.get('fila_checkpoints_entrega') || new Set();
+            const ecols = schema.get('engine_eventos_comerciais') || new Set();
+            const ocols = schema.get('engine_ofertas') || new Set();
+            const jcols = schema.get('engine_jobs_cliente') || new Set();
+            if (!schema.has('fila_checkpoints_entrega')) { console.log('FANOUT_AUDIT_FATAL ' + JSON.stringify({ reason: 'fila_checkpoints_entrega_absent' })); return; }
+
+            const allWindows = Object.values(WINDOWS);
+            const minWindow = allWindows.map(x => x[0]).sort()[0];
+            const maxWindow = allWindows.map(x => x[1]).sort().pop();
+            const destinationIds = Object.values(DESTINATIONS);
+            const patterns = destinationIds.map(x => '%' + x + '%');
+            const checkpoints = await q('destination_checkpoints', `SELECT ${col(pcols,'cliente_id')} AS workspace,${col(pcols,'fila_item_id')} AS fila_item_id,${col(pcols,'destino_chave')} AS destino_chave,${col(pcols,'alvo_chave')} AS alvo_chave,${col(pcols,'estado')} AS estado,${col(pcols,'confirmado_em','timestamptz')} AS confirmado_em,${col(pcols,'provider_message_id')} AS provider_message_id,${col(pcols,'attempt_id')} AS attempt_id,${col(pcols,'criado_em','timestamptz')} AS criado_em,${col(pcols,'atualizado_em','timestamptz')} AS atualizado_em FROM fila_checkpoints_entrega WHERE cliente_id=$1 AND estado='enviado' AND confirmado_em IS NOT NULL AND confirmado_em >= $2::timestamptz AND confirmado_em <= $3::timestamptz AND destino_chave ILIKE ANY($4::text[]) ORDER BY confirmado_em,fila_item_id`, [WORKSPACE, minWindow, maxWindow, patterns]);
+            const checkpointRows = checkpoints.map(x => ({ filaItemId: txt(x.fila_item_id), destinoChave: txt(x.destino_chave), alvoChave: txt(x.alvo_chave), confirmadoEm: iso(x.confirmado_em), providerMessageId: txt(x.provider_message_id) || null, attemptId: txt(x.attempt_id) || null, criadoEm: iso(x.criado_em), atualizadoEm: iso(x.atualizado_em) }));
+            const occupancy = {};
+            for (const [windowName, [start, end, destinationKey]] of Object.entries(WINDOWS)) {
+              const destinationId = DESTINATIONS[destinationKey];
+              const rows = checkpointRows.filter(x => x.destinoChave.toLowerCase().includes(destinationId.toLowerCase()));
+              const inside = rows.filter(x => { const t = ms(x.confirmadoEm); return t >= ms(start) && t <= ms(end); });
+              occupancy[windowName] = { destination: destinationKey, destinationId, start, end, sends: inside, gap: gapSummary(inside, start, end) };
+            }
+
+            let events = [];
+            if (schema.has('engine_eventos_comerciais')) {
+              events = await q('commercial_events', `SELECT ${col(ecols,'id')}::text AS id,${col(ecols,'tipo_evento')} AS tipo_evento,COALESCE(${col(ecols,'cliente_id')},${col(ecols,'workspace_id')}) AS workspace,${col(ecols,'oferta_id')}::text AS oferta_id,${col(ecols,'job_id')}::text AS job_id,${col(ecols,'fila_item_id')} AS fila_item_id,${col(ecols,'destino_id')} AS destino_id,${col(ecols,'canal')} AS canal,${col(ecols,'marketplace')} AS marketplace,${col(ecols,'ocorrido_em','timestamptz')} AS ocorrido_em,${col(ecols,'origem_pipeline')} AS origem_pipeline,${col(ecols,'metadata','jsonb')} AS metadata FROM engine_eventos_comerciais WHERE COALESCE(${col(ecols,'cliente_id')},${col(ecols,'workspace_id')})=$1 AND ocorrido_em >= $2::timestamptz AND ocorrido_em <= $3::timestamptz AND (destino_id=ANY($4::text[]) OR metadata::text ILIKE ANY($5::text[]) OR fila_item_id=ANY($6::text[]) OR oferta_id=ANY($7::bigint[])) ORDER BY ocorrido_em,id`, [WORKSPACE, minWindow, maxWindow, destinationIds, patterns, Object.values(TARGET_ITEMS).filter(Boolean), TARGET_OFFERS]);
+            }
+            const eventRows = events.map(e => ({ id: txt(e.id), tipo: txt(e.tipo_evento), ofertaId: txt(e.oferta_id), filaItemId: txt(e.fila_item_id), destinoId: txt(e.destino_id), canal: txt(e.canal), marketplace: txt(e.marketplace), ocorridoEm: iso(e.ocorrido_em), origemPipeline: txt(e.origem_pipeline), metadata: safeJson(e.metadata) }));
+            const gapsWithEvidence = {};
+            for (const [windowName, info] of Object.entries(occupancy)) {
+              const g = info.gap.maxGap;
+              const destinationId = info.destinationId;
+              if (!g) { gapsWithEvidence[windowName] = { maxGap: null, pendentesCompativeis: [], ofertasVivasCompativeis: [], conclusion: 'indeterminado_sem_duas_confirmacoes' }; continue; }
+              const inGap = eventRows.filter(e => { const t = ms(e.ocorridoEm); return t > ms(g.from) && t < ms(g.to) && (e.destinoId === destinationId || contains(e.metadata, destinationId)) && ['destino_candidato','destino_selecionado','destino_rejeitado','fila_item_pendente','executor_enviado','executor_bloqueado'].includes(e.tipo); });
+              gapsWithEvidence[windowName] = { maxGap: g, pendentesCompativeis: inGap.filter(e => ['destino_candidato','destino_rejeitado','fila_item_pendente'].includes(e.tipo)), ofertasVivasCompativeis: inGap.filter(e => ['destino_candidato','destino_selecionado','destino_rejeitado','fila_item_pendente'].includes(e.tipo)), conclusion: inGap.length ? 'evidencia_eventual_de_braco' : 'sem_evento_compativel_observado' };
+            }
+
+            const itemEvents = eventRows.filter(e => TARGET_OFFERS.includes(e.ofertaId) || Object.values(TARGET_ITEMS).filter(Boolean).includes(e.filaItemId));
+            const rawReasons = itemEvents.filter(e => ['destino_candidato','destino_rejeitado','destino_selecionado'].includes(e.tipo)).map(e => ({ ofertaId:e.ofertaId, filaItemId:e.filaItemId, destinoId:e.destinoId, ocorridoEm:e.ocorridoEm, motivo:e.metadata?.motivo ?? null, motivoBruto:e.metadata?.motivoBruto ?? null, motivoCodigo:e.metadata?.motivoCodigo ?? null, categoriaOferta:e.metadata?.categoriaOferta ?? null, categoriaDestino:e.metadata?.categoriaDestino ?? null, marketplace:e.marketplace, origemPipeline:e.origemPipeline }));
+            const focusedFiles = readFocusedFiles();
+
+            const code = { productionSha: EXPECTED_SHA, fanoutRule: { destinoJaEnviadoFanout: '/app/index.js:8076-8105', resumoDestinosEstadoFanout: '/app/index.js:8197-8213', posEnvioPendingBranch: '/app/index.js:12194-12246', terminalFinalizeOnlyAfterNoPending: '/app/index.js:12249-12318', checkpointSync: '/app/modules/fila/fila-checkpoint-recovery.service.js' }, normalizarMotivoDestino: '/app/modules/engine/ofc/commercial-events.service.js:78-125; caller: :348-401', conclusion: 'A enviado + B aguardando mantém a oferta pendente e agenda proximaTentativaDestino; finalizacao enviada ocorre apenas quando nao ha pendentes.' };
+            const summary = { workspace: WORKSPACE, destinations: DESTINATIONS, windows: WINDOWS, checkpointRows: checkpointRows.length, eventRows: eventRows.length, focusedFiles: focusedFiles.scannedFiles, directDestinationSource: 'fila_checkpoints_entrega estado=enviado confirmado_em nao nulo sem correlacao previa com offerId', rawReasonCaveat: 'nao_determinado e normalizado; motivoBruto so e afirmado quando metadata/arquivo o preserva', classificationLimit: 'gap sem checkpoint ou sem evento nao prova ocupacao nem estoque; e indeterminado' };
+            console.log('FANOUT_AUDIT_SUMMARY ' + JSON.stringify(summary));
+            console.log('FANOUT_DESTINATION_CHECKPOINTS ' + JSON.stringify(checkpointRows));
+            console.log('FANOUT_OCCUPANCY ' + JSON.stringify(occupancy));
+            console.log('FANOUT_GAP_EVIDENCE ' + JSON.stringify(gapsWithEvidence));
+            console.log('FANOUT_ITEM_EVENTS ' + JSON.stringify(itemEvents));
+            console.log('FANOUT_RAW_REASONS ' + JSON.stringify(rawReasons));
+            console.log('FANOUT_FOCUSED_FILES ' + JSON.stringify(focusedFiles));
+            console.log('FANOUT_CODE ' + JSON.stringify(code));
+          }
+          main().catch(e => { console.log('FANOUT_AUDIT_FATAL ' + JSON.stringify({ reason: txt(e && e.message || 'audit_error').slice(0, 300) })); process.exitCode = 1; }).finally(async () => { try { const p = getEngineShadowPool(); if (p) await p.end(); } catch {} });
+          NODE
+          then audit_rc=0; else audit_rc=$?; fi
+          backend_sha_after="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          printf 'POST_AUDIT_BACKEND_SHA=%s\nPOST_AUDIT_BACKEND_ID=%s\nPOST_AUDIT_POSTGRES_ID=%s\n' "$backend_sha_after" "$backend_id_after" "$postgres_id_after"
+          [[ "$backend_sha_after" == "$EXPECTED_SHA" && "$backend_id_after" == "$backend_id" && "$postgres_id_after" == "$postgres_id" ]] || { echo 'POST_AUDIT_STABILITY=CHANGED'; exit 3; }
+          echo 'POST_AUDIT_STABILITY=UNCHANGED; backend SHA and running containers preserved.'
+          if [[ "$audit_rc" -ne 0 ]]; then printf 'AUDIT_EXIT_STATUS=%s\n' "$audit_rc"; exit "$audit_rc"; fi
