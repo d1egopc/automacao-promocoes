@@ -1,0 +1,32 @@
+name: Auditoria detalhada de estados de imagem 2026-10-07
+
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+  workflow_dispatch:
+
+jobs:
+  image-details:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Read-only image field detail
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --max-old-space-size=4096 <<'NODE'
+          const fs=require('fs'),path=require('path');
+          const targets=new Set([
+            'engine_94343_1791370128773','engine_94541_1791374360177','engine_94580_1791375247887','engine_95053_1791386001498','engine_95132_1791387775203','engine_95202_1791389234955','engine_95215_1791389313509','engine_95393_1791392473221','engine_96006_1791405357600','engine_96508_1791416463434','engine_94576_1791375230394','engine_94700_1791378246576','engine_95050_1791385971717','engine_95389_1791392447210','engine_96506_1791416432205','engine_94579_1791375241767','engine_96069_1791406933012'
+          ]);
+          const root='/opt/optimus/data/clientes'; const ws=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'];
+          const wanted=/^(imagem|image|imagemUrl|imagemUrlPresente|imagemOrigem|imagemBaseOrigem|origemImagemFinal|imagemStatus|imagemEnviavel|imagemAusenteMotivo|motivoImagemNaoPublicavel|imagemFallbackUsado|imagemFallback|imagemEspelhoPiloto|imagemOficial|imagemMaterializada|imagemMaterializadaEm|imagemMaterializacaoOrigem|imagemMaterializacaoStorage|imagemMaterializacaoMimeType|imagemMaterializacaoBytes|imagemCanonicaFinal|imagemCanonicaDuravel|urlSelecionada|origem|motivoSelecao|cacheHit|materializacoes|materializacao|status|motivo|aplicada|ativo|imagemObrigatoria|exigirImagem|modoTexto|textOnly|urlOriginal|urlOriginalRadar)$/i;
+          function idOf(o){return String(o?.offerId||o?.ofertaId||o?.idOferta||o?.trackingId||o?.id||'');}
+          function safe(v){if(v==null)return null;if(typeof v==='boolean'||typeof v==='number')return v;if(Array.isArray(v))return {type:'array',length:v.length};if(typeof v==='object')return {type:'object',keys:Object.keys(v).slice(0,20)};let s=String(v).trim();if(!s)return '';if(/^https?:\/\//i.test(s)){try{const u=new URL(s);return 'url:'+u.hostname+u.pathname.slice(0,120);}catch{return 'url:[invalid]';}}if(/\/(?:data|opt|tmp)\/i.test(s)||s.includes('\\data\\'))return 'local-path:'+s.split(/[\\/]/).slice(-2).join('/');return s.length>180?s.slice(0,180)+'…':s;}
+          const found=new Map(); const seen=new WeakSet();
+          function walk(v,w,source,prefix='',depth=0){if(v==null||depth>8)return;if(typeof v!=='object')return;if(seen.has(v))return;seen.add(v);if(Array.isArray(v)){for(let i=0;i<Math.min(v.length,60);i++)walk(v[i],w,source,prefix+'['+i+']',depth+1);return;}const id=idOf(v);if(targets.has(id)){let r=found.get(id);if(!r){r={offerId:id,workspace:w,sources:new Set(),fields:{}};found.set(id,r);}r.sources.add(source);for(const [k,x] of Object.entries(v)){if(wanted.test(k)){const sv=safe(x);if(sv!==''&&sv!=null)r.fields[prefix?prefix+'.'+k:k]=sv;}walk(x,w,source,prefix?prefix+'.'+k:k,depth+1);}return;}for(const [k,x] of Object.entries(v))walk(x,w,source,prefix?prefix+'.'+k:k,depth+1);}
+          for(const w of ws){for(const n of ['fila.json','fila-historico.json']){const f=path.join(root,w,n);if(!fs.existsSync(f))continue;let v;try{v=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){continue;}walk(v,w,n);v=null;}}
+          const rows=[...found.values()].sort((a,b)=>a.offerId.localeCompare(b.offerId)).map(r=>({offerId:r.offerId,workspace:r.workspace,sources:[...r.sources],fields:r.fields}));
+          console.log('IMAGE_DETAIL_SUMMARY',JSON.stringify({targets:targets.size,found:rows.length,missing:[...targets].filter(x=>!found.some?false:!found.has(x))}));
+          console.log('IMAGE_DETAIL_ROWS',JSON.stringify(rows));
+          NODE
