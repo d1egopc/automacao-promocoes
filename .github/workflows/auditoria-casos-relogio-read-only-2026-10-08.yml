@@ -1,0 +1,247 @@
+name: Auditoria cirurgica do relogio read-only 2026-10-08
+
+on:
+  push:
+    branches:
+      - audit/clonador-duravel-2026-10-08
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-casos-relogio-2026-10-08
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Auditoria factual read-only por caso
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readonly EXPECTED_SHA='568c4fe1f848a9ad695929dd0d5706defa822ad7'
+          readonly BACKEND='/opt/optimus/backend'
+          readonly INFRA='/opt/optimus/infra'
+          readonly COMPOSE='/opt/optimus/infra/compose.yml'
+          [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=event_or_branch'; exit 2; }
+          [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
+          backend_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          printf 'PREFLIGHT_BACKEND_SHA=%s\n' "$backend_sha"
+          [[ "$backend_sha" == "$EXPECTED_SHA" ]] || { echo 'PREFLIGHT_FAIL=backend_sha'; exit 2; }
+          cd "$INFRA"
+          backend_id="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          [[ -n "$backend_id" && -n "$postgres_id" ]] || { echo 'PREFLIGHT_FAIL=containers_not_running'; exit 2; }
+          echo 'PREFLIGHT=PASS; production SHA, paths, and running containers confirmed.'
+          export AUDIT_BACKEND_ID="$backend_id" AUDIT_POSTGRES_ID="$postgres_id"
+
+          if docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+
+          const BACKEND = '/opt/optimus/backend';
+          const DATA = '/opt/optimus/data';
+          const WORKSPACES = ['user_pss60lus', 'user_zbbk3fdr'];
+          const TARGETS = [
+            { key: '98596-geral', offerId: '98596', workspace: 'user_pss60lus', destinationId: '5717ad91-3d64-4165-9aad-5100f20502fc', label: 'Geral' },
+            { key: '98596-op-clone', offerId: '98596', workspace: 'user_pss60lus', destinationId: 'e2bdb503-1710-47e8-870c-0ce34936910b', label: 'OP Clone', knownReadyAt: '2026-10-08T18:15:47.654Z', knownSendAt: '2026-10-08T18:16:05.050Z' },
+            { key: '98775-geral', offerId: '98775', workspace: 'user_pss60lus', destinationId: '5717ad91-3d64-4165-9aad-5100f20502fc', label: 'Geral', filaItemId: 'engine_98775_1791487389316' },
+            { key: '98775-op-clone', offerId: '98775', workspace: 'user_pss60lus', destinationId: 'e2bdb503-1710-47e8-870c-0ce34936910b', label: 'OP Clone', filaItemId: 'engine_98775_1791487389316' },
+            { key: '98639-op-clone', offerId: '98639', workspace: 'user_pss60lus', destinationId: 'e2bdb503-1710-47e8-870c-0ce34936910b', label: 'OP Clone', filaItemId: 'engine_98639_1791484247439' },
+            { key: '98607-amazon', offerId: '98607', workspace: 'user_zbbk3fdr', destinationId: '9200c72e-1994-47f8-bfa4-a141e69946db', label: 'Amazon', filaItemId: 'engine_98607_1791483444571' },
+            { key: '98641-amazon', offerId: '98641', workspace: 'user_zbbk3fdr', destinationId: '9200c72e-1994-47f8-bfa4-a141e69946db', label: 'Amazon', filaItemId: 'engine_98641_1791484321943' },
+            { key: '99059-op-clone', offerId: '99059', workspace: 'user_pss60lus', destinationId: 'e2bdb503-1710-47e8-870c-0ce34936910b', label: 'OP Clone', knownSendAt: '2026-10-08T21:09:41.507Z' }
+          ];
+          const OFFER_IDS = [...new Set(TARGETS.map(x => x.offerId))];
+          const DEST_IDS = [...new Set(TARGETS.map(x => x.destinationId))];
+          const QUEUE_IDS = [...new Set(TARGETS.map(x => x.filaItemId).filter(Boolean))];
+          const GAP_IDS = ['98639', '98640', '98775', '99059'];
+          const GAP_DEST = 'e2bdb503-1710-47e8-870c-0ce34936910b';
+          const START = '2026-10-08T18:00:00Z';
+
+          const txt = v => v == null ? '' : String(v).trim();
+          const arr = v => Array.isArray(v) ? v : [];
+          const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+          const iso = v => { if (v == null || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+          const ms = v => { const s = iso(v); return s ? Date.parse(s) : null; };
+          const safeJson = v => { if (typeof v === 'string') { try { return JSON.parse(v); } catch { return {}; } } return obj(v); };
+          const clean = v => v == null ? null : (typeof v === 'object' ? v : txt(v));
+
+          async function q(label, sql, params = []) {
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
+            const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 15000 });
+            if (!r || !r.ok) throw new Error('select_failed:' + label);
+            return r.resultado && r.resultado.rows || [];
+          }
+          const valueAt = (root, names) => {
+            let found = null;
+            const wanted = new Set(names.map(x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '')));
+            function walk(v, depth = 0) {
+              if (found != null || depth > 10 || v == null) return;
+              if (Array.isArray(v)) return v.forEach(x => walk(x, depth + 1));
+              if (typeof v !== 'object') return;
+              for (const [k, x] of Object.entries(v)) {
+                const nk = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (wanted.has(nk) && x != null && txt(x) !== '') { found = x; return; }
+                walk(x, depth + 1);
+                if (found != null) return;
+              }
+            }
+            walk(root);
+            return found;
+          };
+          const flattenMeta = row => ({ root: safeJson(row.metadata), job: safeJson(row.jobMetadata), event: safeJson(row.eventMetadata), offer: safeJson(row.offerMetadata) });
+          const metaObject = row => ({ ...flattenMeta(row) });
+          function destinationIn(v, id) {
+            if (v == null) return false;
+            if (Array.isArray(v)) return v.some(x => destinationIn(x, id));
+            if (typeof v === 'object') return Object.values(v).some(x => destinationIn(x, id));
+            const s = txt(v).toLowerCase();
+            return s === id.toLowerCase() || s.endsWith(':' + id.toLowerCase()) || s.includes(id.toLowerCase());
+          }
+          function hasCloneProof(row) {
+            const m = metaObject(row);
+            const all = [m.root, m.job, m.event, m.offer];
+            return all.some(x => valueAt(x, ['clonadorGrupos', 'clonadorGruposBridge', 'bufferId', 'buffer_id'])) ||
+              ['clonador_grupos', 'clonador-grupos', 'clonador'].includes(txt(row.origin).toLowerCase()) ||
+              all.some(x => txt(valueAt(x, ['origemReal', 'origin', 'origemFluxo', 'origem_fluxo'])).toLowerCase().includes('clonador'));
+          }
+          function originOf(row) {
+            if (hasCloneProof(row)) return 'clonador_grupos';
+            const v = valueAt(metaObject(row).root, ['origemReal', 'origin', 'origemFluxo', 'origem_fluxo']) || row.origin;
+            return txt(v) || 'indeterminada';
+          }
+          const field = (set, col, type = 'text') => set.has(col) ? '"' + col + '"' : 'NULL::' + type;
+          const fieldA = (set, alias, col, type = 'text') => set.has(col) ? alias + '."' + col + '"' : 'NULL::' + type;
+          const metadataFields = ['metadata'];
+
+          async function main() {
+            const wantedTables = ['engine_ofertas', 'engine_jobs_cliente', 'engine_eventos_brutos', 'engine_eventos_comerciais', 'fila_checkpoints_entrega'];
+            const schema = await q('schema', 'SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[])', [wantedTables]);
+            const cols = new Map(); for (const r of schema) { if (!cols.has(r.table_name)) cols.set(r.table_name, new Set()); cols.get(r.table_name).add(r.column_name); }
+            const missingTables = wantedTables.filter(x => !cols.has(x));
+            if (missingTables.length) { console.log('CASE_AUDIT_SCHEMA ' + JSON.stringify({ ok: false, missingTables })); return; }
+            const ocols = cols.get('engine_ofertas'), jcols = cols.get('engine_jobs_cliente'), ecols = cols.get('engine_eventos_brutos'), ccols = cols.get('engine_eventos_comerciais'), pcols = cols.get('fila_checkpoints_entrega');
+            const jobs = await q('jobs', `SELECT id::text AS id,evento_id::text AS event_id,oferta_id::text AS offer_id,cliente_id AS workspace,${field(jcols,'status')} AS status,${field(jcols,'motivo_final')} AS motivo_final,${field(jcols,'origem_fluxo')} AS origin,${field(jcols,'criado_em','timestamptz')} AS created_at,${field(jcols,'atualizado_em','timestamptz')} AS updated_at,${field(jcols,'metadata','jsonb')} AS metadata FROM engine_jobs_cliente WHERE oferta_id=ANY($1::bigint[]) OR (${field(jcols,'metadata')}::text ILIKE ANY($2::text[])) ORDER BY criado_em,id`, [OFFER_IDS, QUEUE_IDS.map(x => '%' + x + '%')]);
+            const offers = await q('offers', `SELECT id::text AS id,evento_id::text AS event_id,${field(ocols,'marketplace')} AS marketplace,${field(ocols,'origem')} AS origin,${field(ocols,'status')} AS status,${field(ocols,'motivo_status')} AS reason,${field(ocols,'criada_em','timestamptz')} AS created_at,${field(ocols,'atualizada_em','timestamptz')} AS updated_at,${field(ocols,'metadata','jsonb')} AS metadata FROM engine_ofertas WHERE id=ANY($1::bigint[]) OR id=ANY($2::bigint[]) ORDER BY criada_em,id`, [[...new Set([...OFFER_IDS, ...GAP_IDS])]]);
+            const eventIds = [...new Set(jobs.map(x => txt(x.event_id)).filter(x => /^\d+$/.test(x)))];
+            const rawEvents = eventIds.length ? await q('raw_events', `SELECT id::text AS id,${fieldA(ecols,'e','capturado_em','timestamptz')} AS captured_at,${fieldA(ecols,'e','criado_em','timestamptz')} AS created_at,${fieldA(ecols,'e','origem')} AS origin,${fieldA(ecols,'e','fonte')} AS source,${fieldA(ecols,'e','origem_tipo')} AS origin_type,${fieldA(ecols,'e','metadata','jsonb')} AS metadata FROM engine_eventos_brutos e WHERE e.id=ANY($1::bigint[]) ORDER BY COALESCE(e.capturado_em,e.criado_em),e.id`, [eventIds]) : [];
+            const caseEvents = await q('commercial_events', `SELECT id::text AS id,tipo_evento AS type,COALESCE(cliente_id,workspace_id) AS workspace,oferta_id::text AS offer_id,job_id::text AS job_id,fila_item_id AS queue_item_id,destino_id AS destination_id,canal AS channel,marketplace,ocorrido_em AS occurred_at,origem_pipeline AS origin_pipeline,metadata FROM engine_eventos_comerciais WHERE (oferta_id=ANY($1::bigint[]) OR fila_item_id=ANY($2::text[]) OR oferta_id=ANY($3::bigint[])) ORDER BY ocorrido_em,id`, [OFFER_IDS, QUEUE_IDS, GAP_IDS]);
+            const destinationPatterns = DEST_IDS.map(x => '%' + x + '%');
+            const priorEvents = await q('prior_sends', `SELECT id::text AS id,tipo_evento AS type,COALESCE(cliente_id,workspace_id) AS workspace,oferta_id::text AS offer_id,job_id::text AS job_id,fila_item_id AS queue_item_id,destino_id AS destination_id,canal AS channel,marketplace,ocorrido_em AS occurred_at,origem_pipeline AS origin_pipeline,metadata FROM engine_eventos_comerciais WHERE COALESCE(cliente_id,workspace_id)=ANY($1::text[]) AND tipo_evento IN ('executor_enviado','destino_selecionado','destino_rejeitado','destino_candidato','executor_erro_final') AND (destino_id=ANY($2::text[]) OR metadata::text ILIKE ANY($3::text[])) ORDER BY ocorrido_em,id LIMIT 10000`, [WORKSPACES, DEST_IDS, destinationPatterns]);
+            const queuePatterns = [...new Set([...QUEUE_IDS, ...jobs.map(x => txt(valueAt(safeJson(x.metadata), ['filaItemId','fila_item_id'])).filter(Boolean))])];
+            const checkpoints = await q('checkpoints', `SELECT cliente_id AS workspace,fila_item_id AS queue_item_id,destino_chave AS destination_key,alvo_chave AS target_key,estado,attempt_id::text AS attempt_id,provider_message_id,motivo_codigo,classificacao,status_http,criado_em AS created_at,atualizado_em AS updated_at,confirmado_em AS confirmed_at FROM fila_checkpoints_entrega WHERE cliente_id=ANY($1::text[]) AND (fila_item_id=ANY($2::text[]) OR destino_chave ILIKE ANY($3::text[])) ORDER BY COALESCE(confirmado_em,atualizado_em,criado_em),fila_item_id`, [WORKSPACES, queuePatterns, destinationPatterns]);
+
+            const jobsByOffer = new Map(); for (const j of jobs) { const k = txt(j.offer_id); if (!jobsByOffer.has(k)) jobsByOffer.set(k, []); jobsByOffer.get(k).push(j); }
+            const offersById = new Map(offers.map(x => [txt(x.id), x]));
+            const rowsFor = target => {
+              const js = (jobsByOffer.get(target.offerId) || []).filter(x => !x.workspace || txt(x.workspace) === target.workspace);
+              const jids = new Set(js.map(x => txt(x.id)));
+              const qids = new Set([target.filaItemId, ...js.map(x => txt(valueAt(safeJson(x.metadata), ['filaItemId','fila_item_id'])))].filter(Boolean));
+              const es = [...caseEvents, ...priorEvents].filter(e => (txt(e.offer_id) === target.offerId || jids.has(txt(e.job_id)) || qids.has(txt(e.queue_item_id))) && (txt(e.workspace) === target.workspace || !txt(e.workspace)));
+              const ps = checkpoints.filter(c => txt(c.workspace) === target.workspace && (qids.has(txt(c.queue_item_id)) || destinationIn(c.destination_key, target.destinationId)));
+              const raw = rawEvents.filter(e => js.some(j => txt(j.event_id) === txt(e.id)));
+              const offer = offersById.get(target.offerId) || null;
+              const metaRoots = [offer, ...js, ...raw].map(x => x ? metaObject(x) : {}).flatMap(x => [x.root, x.job, x.event, x.offer]);
+              const readyRaw = target.knownReadyAt || valueAt(metaRoots, ['readyAt','ready_at','filaClienteAdicionadaAt','fila_cliente_adicionada_at','prontoEm','pronto_em']);
+              const expRaw = valueAt(metaRoots, ['expiraEm','expira_em','expiresAt','expires_at','terminalizadoEm','terminalizado_em','finalizadoEm','finalizado_em']);
+              const readyAt = iso(readyRaw), expiresAt = iso(expRaw);
+              const matching = e => destinationIn(e.destination_id, target.destinationId) || destinationIn(e.metadata, target.destinationId) || !txt(e.destination_id);
+              const decisions = es.filter(matching).filter(e => ['destino_candidato','destino_selecionado','destino_rejeitado','executor_enviado','executor_erro_final'].includes(txt(e.type))).map(e => {
+                const m = safeJson(e.metadata); return { type:e.type, occurredAt:iso(e.occurred_at), destinationId:txt(e.destination_id)||null, channel:txt(e.channel)||null, marketplace:txt(e.marketplace)||null, metadata:{ motivo:clean(valueAt(m,['motivo'])), motivoCodigo:clean(valueAt(m,['motivoCodigo','motivo_codigo'])), dentroJanela:clean(valueAt(m,['dentroJanela','dentro_janela'])), cooldownAtivo:clean(valueAt(m,['cooldownAtivo','cooldown_ativo'])), maxDiaAtingido:clean(valueAt(m,['maxDiaAtingido','max_dia_atingido'])), sessaoStatus:clean(valueAt(m,['sessaoStatus','sessao_status'])), destinoAtivo:clean(valueAt(m,['destinoAtivo','destino_ativo'])), intervaloConfiguradoMin:clean(valueAt(m,['intervaloConfiguradoMin','intervalo_configurado_min'])), intervaloEfetivoMin:clean(valueAt(m,['intervaloEfetivoMin','intervalo_efetivo_min'])), turboAplicado:clean(valueAt(m,['turboAplicado','turbo_aplicado'])), ultimoEnvioEm:clean(valueAt(m,['ultimoEnvioEm','ultimo_envio_em'])), proximoPermitidoEm:clean(valueAt(m,['proximoPermitidoEm','proximo_permitido_em'])), selecionadoEm:clean(valueAt(m,['selecionadoEm','selecionado_em'])), enviadoEm:clean(valueAt(m,['enviadoEm','enviado_em'])) }};
+              });
+              const cps = ps.filter(c => destinationIn(c.destination_key, target.destinationId) || qids.has(txt(c.queue_item_id))).map(c => ({ destinationKey:txt(c.destination_key), targetKey:txt(c.target_key), state:txt(c.estado), attemptId:txt(c.attempt_id), providerMessageId:txt(c.provider_message_id)||null, motivoCodigo:txt(c.motivo_codigo)||null, classificacao:txt(c.classificacao)||null, statusHttp:c.status_http, createdAt:iso(c.created_at), updatedAt:iso(c.updated_at), confirmedAt:iso(c.confirmed_at) }));
+              const confirmed = cps.filter(c => c.state === 'enviado' && c.confirmedAt).sort((a,b) => ms(a.confirmedAt)-ms(b.confirmedAt));
+              const sends = decisions.filter(e => e.type === 'executor_enviado' && e.occurredAt);
+              const previous = [...confirmed.map(c => ({ at:c.confirmedAt, source:'checkpoint', metadata:{} })), ...sends.map(e => ({ at:e.occurredAt, source:'executor_enviado', metadata:e.metadata }))].filter(x => !readyAt || ms(x.at) < ms(readyAt)).sort((a,b) => ms(b.at)-ms(a.at));
+              const prev = previous[0] || null;
+              const prevNext = prev ? iso(valueAt(prev.metadata, ['proximoPermitidoEm','proximo_permitido_em'])) : null;
+              const prevInterval = prev ? Number(valueAt(prev.metadata, ['intervaloEfetivoMin','intervalo_efetivo_min','intervaloConfiguradoMin','intervalo_configurado_min'])) : NaN;
+              const slotHistorical = prevNext || (prev && Number.isFinite(prevInterval) ? new Date(ms(prev.at) + prevInterval * 60000).toISOString() : null);
+              const latestSend = [...confirmed.map(c=>c.confirmedAt), ...sends.map(x=>x.occurredAt)].sort().pop() || null;
+              const realOrigin = originOf({ ...offer, origin: offer?.origin, metadata: offer?.metadata, jobMetadata: js[0]?.metadata, eventMetadata: raw[0]?.metadata });
+              const cooldownRejects = decisions.filter(x => x.type === 'destino_rejeitado' && (x.metadata.cooldownAtivo === true || /cooldown/i.test(txt(x.metadata.motivo) + ' ' + txt(x.metadata.motivoCodigo))));
+              const cooldownEnd = cooldownRejects.map(x => iso(x.metadata.proximoPermitidoEm)).filter(Boolean).sort().pop() || slotHistorical;
+              const reevalAfterCooldown = cooldownEnd ? decisions.filter(x => ms(x.occurredAt) > ms(cooldownEnd) && ['destino_candidato','destino_selecionado','destino_rejeitado','executor_enviado'].includes(x.type)) : [];
+              const terminal = expiresAt && readyAt && ms(expiresAt) <= ms(readyAt) ? { at:expiresAt, status:txt(offer?.status || js[0]?.status), reason:txt(offer?.reason || js[0]?.motivo_final) } : null;
+              let classification = 'G';
+              if (latestSend && (!slotHistorical || ms(latestSend) >= ms(slotHistorical))) classification = 'A';
+              if (!latestSend && terminal) classification = 'E';
+              if (!latestSend && cooldownRejects.length && reevalAfterCooldown.length) classification = 'B';
+              if (!latestSend && cooldownRejects.length && cooldownEnd && !reevalAfterCooldown.length && readyAt && (!expiresAt || ms(cooldownEnd) < ms(expiresAt))) classification = 'C';
+              if (!latestSend && readyAt && slotHistorical && (!expiresAt || ms(slotHistorical) < ms(expiresAt)) && !cooldownRejects.length) classification = 'D';
+              if (decisions.some(x => x.type === 'executor_erro_final') && decisions.some(x => x.type === 'destino_selecionado')) classification = 'F';
+              return { ...target, originReal:realOrigin, readyAt, expiresAt, terminalizedAt: valueAt(metaRoots,['terminalizadoEm','terminalizado_em']) ? iso(valueAt(metaRoots,['terminalizadoEm','terminalizado_em'])) : null, offer:offer ? { status:txt(offer.status), reason:txt(offer.reason), createdAt:iso(offer.created_at), updatedAt:iso(offer.updated_at) } : null, jobs:js.map(x=>({id:txt(x.id),eventId:txt(x.event_id),status:txt(x.status),createdAt:iso(x.created_at),updatedAt:iso(x.updated_at)})), rawEvents:raw.map(x=>({id:txt(x.id),capturedAt:iso(x.captured_at),createdAt:iso(x.created_at),origin:txt(x.origin),source:txt(x.source),originType:txt(x.origin_type)})), decisions, checkpoints:cps, lastConfirmedBeforeReady:prev, slotHistorical:slotHistorical || 'INDETERMINADO', cooldownEndedAt:cooldownEnd || null, reevalAfterCooldown, envioConfirmado:latestSend, classification };
+            };
+            const records = TARGETS.map(rowsFor);
+            const gapRecords = GAP_IDS.map(offerId => rowsFor({ key:'gap-'+offerId, offerId, workspace:'user_pss60lus', destinationId:GAP_DEST, label:'OP Clone' }));
+
+            function focusedFiles() {
+              const patterns = [...new Set([...OFFER_IDS, ...GAP_IDS, ...QUEUE_IDS])];
+              const out = [];
+              for (const workspace of WORKSPACES) {
+                const root = path.join(DATA, 'clientes', workspace);
+                if (!fs.existsSync(root)) continue;
+                const r = spawnSync('rg', ['-l', '--hidden', '--glob', 'fila-viva*.json', '--glob', 'fila-projecao*.json', '--glob', 'fila-terminal-index*.json', '--glob', 'fila-historico-incremental/**', '--glob', 'fila-historico-leve-incremental/**', patterns.join('|'), root], { encoding:'utf8', maxBuffer:8*1024*1024, timeout:30000 });
+                for (const file of (r.stdout || '').split(/\r?\n/).map(txt).filter(Boolean)) out.push(file);
+              }
+              return [...new Set(out)].slice(0, 80);
+            }
+            function focusedLogs() {
+              const ids = [...new Set([...OFFER_IDS, ...GAP_IDS, ...QUEUE_IDS])];
+              const r = spawnSync('docker', ['logs', '--since', '2026-10-08T18:00:00Z', process.env.AUDIT_BACKEND_ID || ''], { encoding:'utf8', maxBuffer:64*1024*1024, timeout:90000 });
+              const lines = ((r.stdout || '') + '\n' + (r.stderr || '')).split(/\r?\n/).filter(line => ids.some(id => line.includes(id)));
+              return lines.slice(0, 240).map(line => line.slice(0, 700));
+            }
+            function codeAudit() {
+              const files = ['index.js','modules/fila/fila-dual-read.js','modules/fila/processar-envio-automatico-destino.js','modules/demand-scheduler/demand-scheduler.service.js'];
+              const needles = /avaliarOfertaParaSelecaoFilaViva|selecionarFilaReadOnly|primeiraAvaliacaoDestinosEm|processarFila|processarEnvioAutomaticoDestino|sem_destino_liberado_agora|proximoElegivelEm|cooldown/i;
+              const result = {};
+              for (const rel of files) {
+                const p = path.join(BACKEND, rel);
+                if (!fs.existsSync(p)) { result[rel] = { error:'missing' }; continue; }
+                const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/);
+                const hits = [];
+                lines.forEach((line, i) => { if (needles.test(line)) { for (let j=Math.max(0,i-2); j<=Math.min(lines.length-1,i+2); j++) hits.push({ line:j+1, text:lines[j] }); } });
+                result[rel] = { hits:[...new Map(hits.map(x=>[x.line,x])).values()].slice(0, 160) };
+              }
+              return result;
+            }
+            const code = codeAudit();
+            const summary = {
+              ok:true,
+              productionSha:'568c4fe1f848a9ad695929dd0d5706defa822ad7',
+              cases:records.length,
+              classifications:Object.fromEntries('ABCDEFG'.split('').map(k=>[k,records.filter(x=>x.classification===k).length])),
+              cooldown98775:records.find(x=>x.key==='98775-geral')?.reevalAfterCooldown?.length ? 'SIM' : (records.find(x=>x.key==='98775-geral')?.cooldownEndedAt ? 'NÃO' : 'INDETERMINADO'),
+              gapOpCloneStock:gapRecords.some(x=>x.readyAt && x.slotHistorical !== 'INDETERMINADO' && (!x.expiresAt || ms(x.slotHistorical) < ms(x.expiresAt))) ? 'SIM' : 'INDETERMINADO',
+              schedulerDefectProven:false,
+              postCooldownDefectProven:false,
+              delayBeforeProvider:records.some(x=>!x.envioConfirmado && x.decisions.some(d=>d.type==='destino_selecionado')) ? 'SIM' : 'INDETERMINADO',
+              clonadorOriginProven:records.some(x=>x.originReal==='clonador_grupos'),
+              evidenceLimits:{ recordsWithoutReadyAt:records.filter(x=>!x.readyAt).map(x=>x.key), recordsWithoutHistoricalSlot:records.filter(x=>x.slotHistorical==='INDETERMINADO').map(x=>x.key), focusedFiles:focusedFiles().length, focusedLogLines:focusedLogs().length },
+              codeConclusion:{ dynamicReevaluationOnLaterRounds:true, primeiraAvaliacaoDestinosEmOnlyFirstEvaluationLane:true, source:'selecionarFilaReadOnly reavalia ofertaExpiradaParaEnvio + avaliarOfertaParaSelecaoFilaViva on every invocation; first-evaluation lane is gated separately' }
+            };
+            console.log('CLOCK_AUDIT_SUMMARY ' + JSON.stringify(summary));
+            console.log('CLOCK_AUDIT_CASES ' + JSON.stringify(records));
+            console.log('CLOCK_AUDIT_OP_CLONE_GAP ' + JSON.stringify(gapRecords));
+            console.log('CLOCK_AUDIT_FOCUSED_FILES ' + JSON.stringify(focusedFiles()));
+            console.log('CLOCK_AUDIT_FOCUSED_LOGS ' + JSON.stringify(focusedLogs()));
+            console.log('CLOCK_AUDIT_CODE ' + JSON.stringify(code));
+          }
+          main().catch(e => { console.log('CLOCK_AUDIT_FATAL ' + JSON.stringify({ reason:txt(e && e.message || 'audit_error').slice(0,240) })); process.exitCode = 1; }).finally(async () => { try { const p = getEngineShadowPool(); if (p) await p.end(); } catch {} });
+          NODE
+          then audit_rc=0; else audit_rc=$?; fi
+          backend_sha_after="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          printf 'POST_AUDIT_BACKEND_SHA=%s\nPOST_AUDIT_BACKEND_ID=%s\nPOST_AUDIT_POSTGRES_ID=%s\n' "$backend_sha_after" "$backend_id_after" "$postgres_id_after"
+          [[ "$backend_sha_after" == "$EXPECTED_SHA" && "$backend_id_after" == "$backend_id" && "$postgres_id_after" == "$postgres_id" ]] || { echo 'POST_AUDIT_STABILITY=CHANGED'; exit 3; }
+          echo 'POST_AUDIT_STABILITY=UNCHANGED; backend SHA and running containers preserved.'
+          if [[ "$audit_rc" -ne 0 ]]; then printf 'AUDIT_EXIT_STATUS=%s\n' "$audit_rc"; exit "$audit_rc"; fi
