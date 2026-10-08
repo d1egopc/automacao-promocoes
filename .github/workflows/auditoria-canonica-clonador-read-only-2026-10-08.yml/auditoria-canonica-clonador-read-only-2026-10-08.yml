@@ -1,0 +1,141 @@
+name: Auditoria canonica buffer event job oferta read-only 2026-10-08
+
+on:
+  push:
+    branches:
+      - audit/clonador-duravel-2026-10-08
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auditoria-canonica-clonador-read-only-2026-10-08
+  cancel-in-progress: false
+
+jobs:
+  canonical-audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 25
+    steps:
+      - name: Preflight and canonical audit (SELECT only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readonly EXPECTED_SHA='568c4fe1f848a9ad695929dd0d5706defa822ad7'
+          readonly BACKEND='/opt/optimus/backend'
+          readonly INFRA='/opt/optimus/infra'
+          readonly COMPOSE='/opt/optimus/infra/compose.yml'
+          readonly START='2026-10-08T16:00:00Z'
+          readonly END='2026-10-08T22:45:00Z'
+          [[ "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=branch'; exit 2; }
+          [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
+          backend_before="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_id_before="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id_before="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          printf 'PREFLIGHT_BACKEND_SHA=%s\nPREFLIGHT_BACKEND_ID=%s\nPREFLIGHT_POSTGRES_ID=%s\n' "$backend_before" "$backend_id_before" "$postgres_id_before"
+          [[ "$backend_before" == "$EXPECTED_SHA" && -n "$backend_id_before" && -n "$postgres_id_before" ]] || { echo 'PREFLIGHT_FAIL=production_state'; exit 2; }
+          export AUDIT_BACKEND_BEFORE="$backend_before" AUDIT_BACKEND_ID_BEFORE="$backend_id_before" AUDIT_POSTGRES_ID_BEFORE="$postgres_id_before"
+          docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
+          'use strict';
+          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+          const START = '2026-10-08T16:00:00Z';
+          const END = '2026-10-08T22:45:00Z';
+          const WORKSPACE = 'user_pss60lus';
+          const TABLES = ['clonador_grupos_buffer','engine_eventos_brutos','engine_jobs_cliente','engine_ofertas','fila_checkpoints_entrega'];
+          const txt = v => v == null ? '' : String(v).trim();
+          const arr = v => Array.isArray(v) ? v : [];
+          const json = v => { if (v && typeof v === 'object') return v; if (typeof v === 'string') { try { return JSON.parse(v); } catch { return {}; } } return {}; };
+          const asTime = v => { if (v == null || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+          const field = (row, names) => { for (const n of names) if (row && row[n] !== undefined && row[n] !== null && row[n] !== '') return row[n]; return undefined; };
+          const id = (row, names) => txt(field(row, names));
+          const time = (row, names) => asTime(field(row, names));
+          const scrub = (v, key = '', depth = 0) => {
+            if (/(token|secret|password|passwd|authorization|cookie|private.?key)/i.test(key)) return '[REDACTED]';
+            if (depth > 5) return '[DEPTH_LIMIT]';
+            if (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return typeof v === 'string' && v.length > 1000 ? v.slice(0,1000)+'...[TRUNCATED]' : v;
+            if (Array.isArray(v)) return v.slice(0,50).map(x => scrub(x,key,depth+1));
+            const o = {}; for (const [k,x] of Object.entries(v).slice(0,120)) o[k] = scrub(x,k,depth+1); return o;
+          };
+          const raw = row => scrub(row);
+          const emit = (tag, value) => console.log(tag + ' ' + JSON.stringify(value));
+          async function q(label, sql, params = []) {
+            if (!/^\\s*SELECT\\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
+            const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 20000 });
+            if (!r || !r.ok) throw new Error('select_failed:' + label);
+            return (r.resultado && r.resultado.rows) || [];
+          }
+          function unique(values) { return [...new Set(values.map(txt).filter(Boolean))]; }
+          function workspaceOf(row) { return id(row,['workspace','workspace_id','cliente_id','client_id']) || txt(json(field(row,['metadata','meta'])).workspace || json(field(row,['metadata','meta'])).workspaceId); }
+          function metadataIds(row, keys) { const m = json(field(row,['metadata','meta','metadata_event','metadata_job'])); const out=[]; const walk=(v,d=0)=>{ if(!v || typeof v!=='object' || d>7)return; for(const [k,x] of Object.entries(v)){ if(keys.includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,'')) && x!=null) out.push(txt(x)); if(x&&typeof x==='object')walk(x,d+1); } }; walk(m); return unique(out); }
+          function inWindow(v) { const t = Date.parse(v || ''); return Number.isFinite(t) && t >= Date.parse(START) && t <= Date.parse(END); }
+          function statusClass(job, hasOffer) {
+            const s = txt(field(job,['status','estado','status_final','statusFinal'])).toLowerCase();
+            if (/pend|queued|na_fila|aguard/.test(s)) return 'PENDENTE';
+            if (/process|running|execut/.test(s)) return 'PROCESSANDO';
+            if (/lease|lock/.test(s) && /expir/.test(s)) return 'LEASE_EXPIRADO';
+            if (/retry|tempor/.test(s)) return 'ERRO_RETRYAVEL';
+            if (/erro|error|falha|failed/.test(s)) return hasOffer ? 'TERMINAL_COM_OFERTA' : 'ERRO_TERMINAL';
+            if (/expir|cancel|descart|bloque/.test(s)) return hasOffer ? 'TERMINAL_COM_OFERTA' : 'TERMINAL_SEM_OFERTA_COM_MOTIVO';
+            if (hasOffer) return 'TERMINAL_COM_OFERTA';
+            if (s) return 'TERMINAL_SEM_OFERTA_SEM_MOTIVO';
+            return 'INDETERMINADO';
+          }
+          async function main() {
+            const schema = await q('schema', "SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[]) ORDER BY table_name,column_name", [TABLES]);
+            const byTable = new Map(); for (const r of schema) { if (!byTable.has(r.table_name)) byTable.set(r.table_name, []); byTable.get(r.table_name).push(r); }
+            emit('CANONICAL_SCHEMA', { requestedTables: TABLES, presentTables: [...byTable.keys()], missingTables: TABLES.filter(x => !byTable.has(x)), columns: Object.fromEntries([...byTable].map(([k,v]) => [k,v])) });
+            const data = {}; const errors = [];
+            for (const table of TABLES) { if (!byTable.has(table)) { data[table] = []; continue; } try { data[table] = await q(table, 'SELECT * FROM "' + table + '" LIMIT 50000'); } catch (e) { data[table] = []; errors.push({ table, error: txt(e.message).slice(0,180) }); } }
+            const buffers = data.clonador_grupos_buffer.filter(r => workspaceOf(r) === WORKSPACE && inWindow(time(r,['captured_at','capturado_em','capturedAt','created_at','criado_em','timestamp'])));
+            const bufferById = new Map(buffers.map(r => [id(r,['id','buffer_id','bufferId']), r]));
+            for (const b of buffers) emit('CANONICAL_BUFFER', { id:id(b,['id','buffer_id','bufferId']), workspace:workspaceOf(b), capturedAt:time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em','timestamp']), raw:raw(b) });
+            const eventRows = data.engine_eventos_brutos;
+            const eventById = new Map(eventRows.map(r => [id(r,['id','event_id','evento_id','eventId']), r]));
+            const edges = []; const candidateEventIds = new Set();
+            for (const b of buffers) {
+              const bid = id(b,['id','buffer_id','bufferId']);
+              const explicit = unique([id(b,['bridge_event_id','bridgeEventId','event_id','evento_id']), ...metadataIds(b,['bridgeeventid','eventid','eventoid'])]);
+              const candidates = [];
+              for (const e of eventRows) {
+                const eid = id(e,['id','event_id','evento_id','eventId']);
+                const ebid = id(e,['buffer_id','bufferId','id_buffer','idBuffer']);
+                const byBridge = explicit.includes(eid);
+                const byBuffer = ebid && ebid === bid;
+                const byMeta = metadataIds(e,['bufferid','buffer_id']).includes(bid);
+                if (byBridge || byBuffer || byMeta) candidates.push({ e, eid, relation: byBridge ? 'BRIDGE_EVENT_ID' : byBuffer ? 'DIRECT_BUFFER_ID' : 'METADATA_EXPLICIT' });
+              }
+              const dedup = [...new Map(candidates.map(x => [x.eid, x])).values()];
+              for (const c of dedup) candidateEventIds.add(c.eid);
+              let edgeClass = dedup.length === 0 ? 'UNRESOLVED' : dedup.length > 1 ? 'AMBIGUOUS' : dedup[0].relation;
+              if (dedup.length === 1) { const et = time(dedup[0].e,['captured_at','capturado_em','capturedAt','created_at','criado_em']); const bt = time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em']); if (et && bt && Date.parse(et) < Date.parse(bt)) edgeClass = 'INVALID_TEMPORAL'; }
+              for (const c of dedup) emit('CANONICAL_EDGE_BUFFER_EVENT', { bufferId:bid, eventId:c.eid, classification:edgeClass, relation:c.relation, bufferCapturedAt:time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em']), eventAt:time(c.e,['captured_at','capturado_em','capturedAt','created_at','criado_em']), raw:c.re });
+              edges.push({ bufferId:bid, eventIds:dedup.map(x=>x.eid), classification:edgeClass });
+            }
+            const events = [...candidateEventIds].map(x => eventById.get(x)).filter(Boolean);
+            for (const e of events) emit('CANONICAL_EVENT', { id:id(e,['id','event_id','evento_id','eventId']), workspace:workspaceOf(e), capturedAt:time(e,['captured_at','capturado_em','capturedAt']), createdAt:time(e,['created_at','criado_em','createdAt']), raw:raw(e) });
+            const eventIds = new Set(events.map(e => id(e,['id','event_id','evento_id','eventId'])));
+            const jobs = data.engine_jobs_cliente.filter(j => eventIds.has(id(j,['event_id','evento_id','engine_event_id','engineEventId'])) || metadataIds(j,['eventid','eventoid','engineeventid']).some(x=>eventIds.has(x)));
+            const eventJobEdges = []; const jobsById = new Map(jobs.map(j => [id(j,['id','job_id','jobId','engine_job_id','engineJobId']),j]));
+            for (const e of events) { const eid=id(e,['id','event_id','evento_id','eventId']); const matches=jobs.filter(j=>id(j,['event_id','evento_id','engine_event_id','engineEventId'])===eid || metadataIds(j,['eventid','eventoid','engineeventid']).includes(eid)); if (!matches.length) emit('CANONICAL_EDGE_EVENT_JOB',{eventId:eid,jobId:null,classification:'UNRESOLVED'}); for(const j of matches){const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']); emit('CANONICAL_EDGE_EVENT_JOB',{eventId:eid,jobId:jid,classification:matches.length>1?'AMBIGUOUS':'DIRECT_EVENT_ID',raw:j}); eventJobEdges.push({eventId:eid,jobId:jid});} }
+            const offerRows = data.engine_ofertas; const offersById = new Map(offerRows.map(o=>[id(o,['id','offer_id','offerId','oferta_id','ofertaId']),o])); const offersByJob = new Map(); const offerEdges=[];
+            for (const j of jobs) { const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']); const eid=id(j,['event_id','evento_id','engine_event_id','engineEventId']); const oid=id(j,['offer_id','oferta_id','offerId','ofertaId']); const matches=offerRows.filter(o=>id(o,['id','offer_id','offerId','oferta_id','ofertaId'])===oid || id(o,['job_id','jobId','engine_job_id','engineJobId'])===jid || id(o,['event_id','evento_id','engine_event_id','engineEventId'])===eid || metadataIds(o,['jobid','enginejobid','eventid','eventoid']).includes(jid) || metadataIds(o,['jobid','enginejobid','eventid','eventoid']).includes(eid)); const ids=unique(matches.map(o=>id(o,['id','offer_id','offerId','oferta_id','ofertaId']))); offersByJob.set(jid,ids); if(!matches.length) emit('CANONICAL_EDGE_JOB_OFFER',{jobId:jid,offerId:null,classification:'UNRESOLVED'}); for(const o of matches){const ooid=id(o,['id','offer_id','offerId','oferta_id','ofertaId']); const cls=matches.length>1?'AMBIGUOUS':'JOB_OFFER_ID'; emit('CANONICAL_EDGE_JOB_OFFER',{jobId:jid,offerId:ooid,eventId:eid,classification:cls,raw:o}); offerEdges.push({jobId:jid,offerId:ooid});} }
+            const relatedOfferIds = new Set(offerEdges.map(x=>x.offerId));
+            for (const o of offerRows.filter(x=>relatedOfferIds.has(id(x,['id','offer_id','offerId','oferta_id','ofertaId'])))) emit('CANONICAL_OFFER',{id:id(o,['id','offer_id','offerId','oferta_id','ofertaId']),workspace:workspaceOf(o),createdAt:time(o,['created_at','criado_em','createdAt','criada_em']),status:txt(field(o,['status','estado'])),raw:raw(o)});
+            const jobsSummary = jobs.map(j=>{const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']);const hasOffer=(offersByJob.get(jid)||[]).length>0;const latest=statusClass(j,hasOffer);const created=time(j,['created_at','criado_em','createdAt']);const updated=time(j,['updated_at','atualizado_em','updatedAt']);const out={id:jid,eventId:id(j,['event_id','evento_id','engine_event_id','engineEventId']),workspace:workspaceOf(j),createdAt:created,updatedAt:updated,latestState:latest,stateAtCutoff:'INDETERMINADO_SEM_HISTORICO',offerIds:offersByJob.get(jid)||[],reason:txt(field(j,['reason','motivo','motivo_final','motivoFinal'])),raw:raw(j)};emit('CANONICAL_JOB',out);emit('CANONICAL_JOB_STATUS',{jobId:jid,latestState:latest,stateAtCutoff:out.stateAtCutoff,createdAt:created,updatedAt:updated,offerIds:out.offerIds,reason:out.reason||null});return out;});
+            const checkpoints = data.fila_checkpoints_entrega.filter(c=>txt(field(c,['estado','state','status'])).toLowerCase()==='enviado' && time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at']) && inWindow(time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at'])));
+            for(const c of checkpoints) emit('CANONICAL_CONFIRMATION',{workspace:workspaceOf(c),queueItemId:id(c,['fila_item_id','queue_item_id','queueItemId']),destinationKey:txt(field(c,['destino_chave','destination_key','destinationKey'])),channel:txt(field(c,['canal','channel']))||txt(field(c,['destino_chave','destination_key'])).split(':')[0],confirmedAt:time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at']),providerMessageId:field(c,['provider_message_id','providerMessageId','message_id','messageId'])||null,raw:raw(c)});
+            const edgeCounts={bufferEvent:{UNRESOLVED:0,AMBIGUOUS:0,INVALID_TEMPORAL:0,DIRECT_BUFFER_ID:0,BRIDGE_EVENT_ID:0,METADATA_EXPLICIT:0},eventJob:{zero:0,one:0,many:0},jobOffer:{zero:0,one:0,many:0}}; for(const e of edges) edgeCounts.bufferEvent[e.classification]=(edgeCounts.bufferEvent[e.classification]||0)+1; for(const e of events){const n=eventJobEdges.filter(x=>x.eventId===id(e,['id','event_id','evento_id','eventId'])).length;edgeCounts.eventJob[n===0?'zero':n===1?'one':'many']++;} for(const j of jobs){const n=(offersByJob.get(id(j,['id','job_id','jobId','engine_job_id','engineJobId']))||[]).length;edgeCounts.jobOffer[n===0?'zero':n===1?'one':'many']++;}
+            const byWorkspace={}; for(const b of buffers){const w=workspaceOf(b)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].buffers++;} for(const e of events){const w=workspaceOf(e)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].events++;} for(const j of jobs){const w=workspaceOf(j)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].jobs++;} for(const o of offerRows.filter(x=>relatedOfferIds.has(id(x,['id','offer_id','offerId','oferta_id','ofertaId'])))){const w=workspaceOf(o)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].offers++;}
+            const summary={windowStart:START,windowEnd:END,workspace:WORKSPACE,cardinality:{buffersUnique:new Set(buffers.map(x=>id(x,['id','buffer_id','bufferId']))).size,candidateEventsUnique:events.length,validEventEdges:edges.filter(x=>x.classification!=='UNRESOLVED').length,jobsUnique:new Set(jobs.map(x=>id(x,['id','job_id','jobId','engine_job_id','engineJobId']))).size,offersUnique:relatedOfferIds.size,confirmedDestinations:checkpoints.length},edgeCounts,byWorkspace,queryErrors:errors,missingTables:TABLES.filter(x=>!byTable.has(x)),notes:{stateAtCutoff:'INDETERMINADO_SEM_HISTORICO; não inferido do estado atual',offersAllJobs:true,offersAllEvents:true,oldFirstElementSelection:false}};
+            emit('CANONICAL_CARDINALITY',summary.cardinality); emit('CANONICAL_SUMMARY',summary);
+            emit('CANONICAL_DECISION',{causalChainComplete:summary.cardinality.buffersUnique>0&&summary.cardinality.jobsUnique>=0,defectProven:false,productPatchAuthorized:false,decision:'AUDITORIA_FACTUAL_READ_ONLY',indeterminate:errors.length>0||summary.missingTables.length>0||edges.some(x=>x.classification==='AMBIGUOUS'||x.classification==='UNRESOLVED'||x.classification==='INVALID_TEMPORAL')});
+          }
+          main().catch(e=>{ emit('CANONICAL_FATAL',{ok:false,error:txt(e.message).slice(0,240)}); process.exitCode=1; }).finally(async()=>{try{const p=getEngineShadowPool();if(p)await p.end();}catch{}});
+          NODE
+          backend_after="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          printf 'POSTFLIGHT_BACKEND_SHA=%s\nPOSTFLIGHT_BACKEND_ID=%s\nPOSTFLIGHT_POSTGRES_ID=%s\n' "$backend_after" "$backend_id_after" "$postgres_id_after"
+          [[ "$backend_after" == "$backend_before" && "$backend_id_after" == "$backend_id_before" && "$postgres_id_after" == "$postgres_id_before" ]] || { echo 'POSTFLIGHT_PRODUCTION_STABILITY=CHANGED'; exit 3; }
+          echo 'PREFLIGHT_POSTFLIGHT=STABLE; SELECT-only audit completed.'
