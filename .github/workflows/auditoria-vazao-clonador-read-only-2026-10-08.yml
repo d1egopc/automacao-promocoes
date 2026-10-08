@@ -588,7 +588,7 @@ jobs:
             console.log('PRODUCTION_STABILITY '+JSON.stringify(stability));
             if(!stability.unchanged)process.exitCode=3;
           }
-          main().catch(()=>{console.error('AUDIT_FATAL=unexpected_read_only_audit_error');process.exitCode=1;});
+          main().catch(e=>{console.error('AUDIT_FATAL=unexpected_read_only_audit_error '+JSON.stringify({name:txt(e&&e.name),message:txt(e&&e.message).slice(0,240),stack:txt(e&&e.stack).slice(0,600)}));process.exitCode=1;});
           NODE
           then
             audit_rc=0
