@@ -1,0 +1,553 @@
+name: Auditoria read-only de vazao do Clonador 2026-10-08
+
+on:
+  push:
+    branches:
+      - audit/clonador-duravel-2026-10-08
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-vazao-clonador-2026-10-08
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 25
+    steps:
+      - name: Preflight e correlacao factual read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readonly EXPECTED_SHA='568c4fe1f848a9ad695929dd0d5706defa822ad7'
+          readonly BACKEND='/opt/optimus/backend'
+          readonly INFRA='/opt/optimus/infra'
+          readonly COMPOSE='/opt/optimus/infra/compose.yml'
+          readonly START='2026-10-08T18:09:32Z'
+          [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=event_or_branch'; exit 2; }
+          [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
+          backend_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          printf 'PREFLIGHT_BACKEND_SHA=%s\n' "$backend_sha"
+          [[ "$backend_sha" == "$EXPECTED_SHA" ]] || { echo 'PREFLIGHT_FAIL=backend_sha'; exit 2; }
+          cd "$INFRA"
+          backend_id="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          [[ -n "$backend_id" && -n "$postgres_id" ]] || { echo 'PREFLIGHT_FAIL=containers_not_running'; exit 2; }
+          export AUDIT_EXPECTED_SHA="$EXPECTED_SHA" AUDIT_BACKEND_ID="$backend_id" AUDIT_POSTGRES_ID="$postgres_id" AUDIT_START="$START"
+          echo 'PREFLIGHT=PASS; production SHA, paths, and running containers confirmed.'
+          if node --max-old-space-size=4096 <<'NODE'
+          'use strict';
+          const fs = require('fs');
+          const path = require('path');
+          const crypto = require('crypto');
+          const { spawn, spawnSync } = require('child_process');
+          const EXPECTED = process.env.AUDIT_EXPECTED_SHA;
+          const START = process.env.AUDIT_START;
+          const BACKEND = '/opt/optimus/backend';
+          const INFRA = '/opt/optimus/infra';
+          const COMPOSE = '/opt/optimus/infra/compose.yml';
+          const DATA = '/opt/optimus/data';
+          const WORKSPACE_ROOT = path.join(DATA, 'clientes');
+          const TABLES = ['clonador_grupos_buffer', 'engine_eventos_brutos', 'engine_jobs_cliente', 'engine_ofertas', 'fila_checkpoints_entrega', 'engine_eventos_comerciais'];
+          const SAFE_LOG_TAGS = /ENGINE-DISTRIBUIDOR-DESTINO-DIAGNOSTICO|ENGINE-DISTRIBUIDOR-FILA-MEMORIA|FILA-VIVA-SELECAO|FILA-DESTINO-LIBERADO|DEMAND-SCHEDULER|FILA-CHECKPOINT-ENTREGA|EXECUTOR|FILA-INTERVALO-AVALIADO|FILA-DESTINO-BLOQUEADO-INTERVALO|FILA-ULTIMO-ENVIO-ATUALIZADO/;
+          const HASH_MAX = 80 * 1024 * 1024;
+          const txt = v => v == null ? '' : String(v).trim();
+          const obj = v => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+          const arr = v => Array.isArray(v) ? v : [];
+          const iso = v => { if (v == null || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
+          const millis = v => { const s = iso(v); return s ? Date.parse(s) : null; };
+          const normId = v => txt(v);
+          const numericIds = values => [...new Set(values.map(normId).filter(v => /^\d+$/.test(v)))];
+          function parseJson(v) { if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { throw new Error('invalid_required_metadata_json:'+txt(e&&e.name)); } } return obj(v); }
+          function cloneMeta(source) {
+            const root = parseJson(source && source.metadata);
+            const jobMeta = parseJson(source && (source.job_metadata || source.jobMetadata));
+            const eventMeta = parseJson(source && (source.evento_metadata || source.eventoMetadata));
+            const candidates = [
+              root.clonadorGrupos,
+              obj(root.metadataEvento).clonadorGrupos,
+              obj(jobMeta.metadataEvento).clonadorGrupos,
+              eventMeta.clonadorGrupos,
+              root.clonadorGruposBridge,
+              obj(root.metadataEvento).clonadorGruposBridge,
+              obj(jobMeta.metadataEvento).clonadorGruposBridge,
+              eventMeta.clonadorGruposBridge
+            ];
+            const clone = candidates.find(v => v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'destinoIds')) || candidates.find(v => v && typeof v === 'object' && !Array.isArray(v)) || null;
+            const has = Boolean(clone && Object.prototype.hasOwnProperty.call(clone, 'destinoIds'));
+            const targets = has ? (Array.isArray(clone.destinoIds) ? clone.destinoIds : [clone.destinoIds]).map(txt).filter(Boolean) : [];
+            const buffer = clone && (clone.bufferId || clone.buffer_id);
+            const queueId = [root.filaItemId, root.fila_item_id, obj(root.clonadorGrupos).filaItemId, obj(root.clonadorGruposBridge).filaItemId].find(Boolean);
+            const origin = [source && source.origem_fluxo, source && source.origemFluxo, root.origemFluxo, root.origem_fluxo, obj(root.metadataEvento).origemFluxo, obj(jobMeta.metadataEvento).origemFluxo, eventMeta.origemFluxo, source && source.origem, root.origem].map(txt).find(Boolean) || '';
+            return { targets, hasTargetSnapshot: has, bufferId: buffer ? txt(buffer) : '', queueItemId: queueId ? txt(queueId) : '', origin };
+          }
+          const dbScript = String.raw`
+          'use strict';
+          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+          const START = '2026-10-08T18:09:32Z';
+          const TABLES = ['clonador_grupos_buffer','engine_eventos_brutos','engine_jobs_cliente','engine_ofertas','fila_checkpoints_entrega','engine_eventos_comerciais'];
+          async function q(label, sql, params = []) {
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
+            const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 15000 });
+            if (!r || !r.ok) throw new Error('select_failed:' + label);
+            return r.resultado && r.resultado.rows || [];
+          }
+          const txt = v => v == null ? '' : String(v).trim();
+          function meta(v) { if (typeof v === 'string') { try { return JSON.parse(v); } catch (e) { throw new Error('invalid_required_db_json:'+txt(e&&e.name)); } } return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+          function cloneInfo(source) {
+            const m = meta(source.metadata), jm = meta(source.metadata_job), em = meta(source.metadata_event);
+            const candidates = [m.clonadorGrupos, meta(m.metadataEvento).clonadorGrupos, meta(jm.metadataEvento).clonadorGrupos, em.clonadorGrupos, m.clonadorGruposBridge, meta(m.metadataEvento).clonadorGruposBridge, meta(jm.metadataEvento).clonadorGruposBridge, em.clonadorGruposBridge];
+            const c = candidates.find(x => x && typeof x === 'object' && !Array.isArray(x) && Object.prototype.hasOwnProperty.call(x,'destinoIds')) || candidates.find(x => x && typeof x === 'object' && !Array.isArray(x)) || null;
+            const has = !!(c && Object.prototype.hasOwnProperty.call(c,'destinoIds'));
+            return { clone: !!(c || ['clonador_grupos'].includes(txt(source.origem).toLowerCase()) || ['clonador_grupos'].includes(txt(source.fonte).toLowerCase()) || ['clonador_grupos'].includes(txt(source.origem_tipo).toLowerCase())), targets: has ? (Array.isArray(c.destinoIds) ? c.destinoIds : [c.destinoIds]).map(txt).filter(Boolean) : [], hasTargetSnapshot: has, bufferId: txt(c && (c.bufferId || c.buffer_id)), queueItemId: txt(c && (c.filaItemId || c.fila_item_id)), origin: txt(source.origem_fluxo || source.origemFluxo || m.origemFluxo || m.origem_fluxo || meta(m.metadataEvento).origemFluxo || meta(m.metadataEvento).origem_fluxo || meta(jm.metadataEvento).origemFluxo || em.origemFluxo || source.origem || m.origem) };
+          }
+          async function main() {
+            const schema = await q('schema', "SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[])", [TABLES]);
+            const cols = new Map(); for (const row of schema) { if (!cols.has(row.table_name)) cols.set(row.table_name,new Set()); cols.get(row.table_name).add(row.column_name); }
+            const missingTables = TABLES.filter(t => !cols.has(t));
+            if (missingTables.length) { console.log('DB_AUDIT_JSON ' + JSON.stringify({ok:false,reason:'missing_tables',missingTables})); return; }
+            const bcols=cols.get('clonador_grupos_buffer'), ecols=cols.get('engine_eventos_brutos'), jcols=cols.get('engine_jobs_cliente'), ocols=cols.get('engine_ofertas'), ccols=cols.get('fila_checkpoints_entrega'), xcols=cols.get('engine_eventos_comerciais');
+            const needed = [['clonador_grupos_buffer',['id','cliente_id','capturado_em']],['engine_eventos_brutos',['id']],['engine_jobs_cliente',['id','evento_id','cliente_id','oferta_id']],['engine_ofertas',['id']],['fila_checkpoints_entrega',['cliente_id','fila_item_id','destino_chave','alvo_chave','estado','confirmado_em']],['engine_eventos_comerciais',['tipo_evento','oferta_id','job_id','fila_item_id','ocorrido_em','metadata']]];
+            const missingColumns=[]; for (const [t,cs] of needed) for (const c of cs) if (!cols.get(t).has(c)) missingColumns.push(t+'.'+c);
+            if (missingColumns.length) { console.log('DB_AUDIT_JSON ' + JSON.stringify({ok:false,reason:'missing_columns',missingColumns})); return; }
+            const optional = (set,alias,col,type='text') => set.has(col) ? (alias ? alias+'."'+col+'"' : '"'+col+'"') : 'NULL::'+type;
+            const bmeta = bcols.has('metadata') ? 'metadata' : "'{}'::jsonb";
+            const blinks = bcols.has('links') ? 'links' : "'[]'::jsonb";
+            const buffersSql='SELECT id::text AS id, cliente_id::text AS workspace, capturado_em AS captured_at, '+optional(bcols,'','status')+' AS status, '+blinks+' AS links, '+bmeta+' AS metadata FROM clonador_grupos_buffer WHERE capturado_em >= $1::timestamptz ORDER BY capturado_em,id';
+            const buffersRaw = await q('buffers', buffersSql, [START]);
+            const bridgeIds = [...new Set(buffersRaw.map(b => { const m=meta(b.metadata); return txt(meta(m.clonadorGruposBridge).eventoId || meta(m.clonadorGrupos).eventoId); }).filter(v => /^\d+$/.test(v)))];
+            const predicates=[];
+            for (const c of ['origem','fonte','origem_tipo','origem_fluxo']) if (ecols.has(c)) predicates.push('LOWER(COALESCE(e."'+c+'"::text,\'\'))=\'clonador_grupos\'');
+            if (ecols.has('metadata')) predicates.push("(e.metadata ? 'clonadorGrupos' OR e.metadata ? 'clonadorGruposBridge' OR e.metadata #> '{metadataEvento,clonadorGrupos}' IS NOT NULL OR e.metadata #> '{metadataEvento,clonadorGruposBridge}' IS NOT NULL OR LOWER(COALESCE(e.metadata->>'origemFluxo',e.metadata->>'origem_fluxo',e.metadata->>'origem',e.metadata #>> '{metadataEvento,origemFluxo}',e.metadata #>> '{metadataEvento,origem_fluxo}',''))='clonador_grupos')");
+            if (ecols.has('id')) predicates.push('e.id::text = ANY($2::text[])');
+            const timePred=[]; for (const c of ['capturado_em','criado_em']) if (ecols.has(c)) timePred.push('e."'+c+'" >= $1::timestamptz');
+            const eventTimeFilter=timePred.length ? '('+timePred.join(' OR ')+')' : 'TRUE';
+            const eventMeta=ecols.has('metadata')?'e.metadata':"'{}'::jsonb";
+            const eventSql='SELECT e.id::text AS id, '+optional(ecols,'e','capturado_em')+' AS captured_at, '+optional(ecols,'e','criado_em')+' AS created_at, '+optional(ecols,'e','origem')+' AS origem, '+optional(ecols,'e','fonte')+' AS fonte, '+optional(ecols,'e','origem_tipo')+' AS origem_tipo, '+optional(ecols,'e','origem_fluxo')+' AS origem_fluxo, '+eventMeta+' AS metadata FROM engine_eventos_brutos e WHERE '+eventTimeFilter+' AND ('+(predicates.join(' OR ')||'FALSE')+') ORDER BY COALESCE('+optional(ecols,'e','capturado_em')+','+optional(ecols,'e','criado_em')+') NULLS LAST,e.id';
+            const eventsRaw=await q('events',eventSql,[START,bridgeIds]);
+            const eventIds=[...new Set(eventsRaw.map(x=>txt(x.id)).filter(v=>/^\d+$/.test(v)))];
+            const jobMeta=jcols.has('metadata')?'metadata':"'{}'::jsonb";
+            const jobsSql='SELECT id::text AS id,evento_id::text AS event_id,cliente_id::text AS workspace,'+optional(jcols,'','status')+' AS status,'+optional(jcols,'','motivo_final')+' AS motivo_final,'+optional(jcols,'','marketplace')+' AS marketplace,'+optional(jcols,'','marketplace_detectado')+' AS marketplace_detectado,'+optional(jcols,'','origem_fluxo')+' AS origem_fluxo,oferta_id::text AS offer_id,'+optional(jcols,'','criado_em','timestamptz')+' AS created_at,'+optional(jcols,'','atualizado_em','timestamptz')+' AS updated_at,'+jobMeta+' AS metadata FROM engine_jobs_cliente WHERE evento_id=ANY($1::bigint[]) ORDER BY evento_id,id';
+            const jobsRaw=eventIds.length ? await q('jobs',jobsSql,[eventIds]) : [];
+            const offerIds=[...new Set(jobsRaw.map(x=>txt(x.offer_id)).filter(v=>/^\d+$/.test(v)))];
+            const offerMeta=ocols.has('metadata')?'metadata':"'{}'::jsonb";
+            const offersSql='SELECT id::text AS id,'+optional(ocols,'','evento_id')+'::text AS event_id,'+optional(ocols,'','marketplace')+' AS marketplace,'+optional(ocols,'','origem')+' AS origem,'+optional(ocols,'','origem_fluxo')+' AS origem_fluxo,'+optional(ocols,'','status')+' AS status,'+optional(ocols,'','motivo_status')+' AS reason,'+optional(ocols,'','criada_em')+' AS created_at,'+optional(ocols,'','atualizada_em')+' AS updated_at,'+optional(ocols,'','categoria')+' AS category,'+offerMeta+' AS metadata FROM engine_ofertas WHERE id::text=ANY($1::text[]) ORDER BY id';
+            const offersRaw=offerIds.length ? await q('offers',offersSql,[offerIds]) : [];
+            const checkpointSql='SELECT cliente_id::text AS workspace,fila_item_id::text AS queue_item_id,destino_chave::text AS destination_key,alvo_chave::text AS target_key,attempt_id::text AS attempt_id,estado,provider_message_id,credito_debitado,motivo_codigo,classificacao,status_http,confirmado_em,criado_em,atualizado_em FROM fila_checkpoints_entrega WHERE estado=\'enviado\' AND confirmado_em IS NOT NULL AND confirmado_em >= $1::timestamptz ORDER BY confirmado_em,cliente_id,fila_item_id,destino_chave,alvo_chave';
+            const checkpointsRaw=await q('checkpoints',checkpointSql,[START]);
+            const commercialSql='SELECT tipo_evento,COALESCE(cliente_id,workspace_id)::text AS workspace,cliente_id::text AS cliente_id,workspace_id::text AS workspace_id,oferta_id::text AS offer_id,job_id::text AS job_id,fila_item_id::text AS queue_item_id,destino_id::text AS destination_id,canal,marketplace,ocorrido_em,origem_pipeline,metadata FROM engine_eventos_comerciais WHERE ocorrido_em >= $1::timestamptz ORDER BY ocorrido_em,id';
+            const commercialRaw=await q('commercial_events',commercialSql,[START]);
+            const result = {
+              ok:true,
+              buffers:buffersRaw.map(b=>{const c=cloneInfo({metadata:b.metadata});const m=meta(b.metadata);const parsedLinks=typeof b.links==='string'?JSON.parse(b.links):b.links;return {id:txt(b.id),workspace:txt(b.workspace),capturedAt:b.captured_at,status:txt(b.status),linkCount:Array.isArray(parsedLinks)?parsedLinks.length:0,bridgeEventId:txt(meta(m.clonadorGruposBridge).eventoId||meta(m.clonadorGrupos).eventoId),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,origin:c.origin||'clonador_grupos'};}),
+              events:eventsRaw.map(e=>{const c=cloneInfo({metadata:e.metadata,origem:e.origem,fonte:e.fonte,origem_tipo:e.origem_tipo,origem_fluxo:e.origem_fluxo});return {id:txt(e.id),capturedAt:e.captured_at,createdAt:e.created_at,origem:txt(e.origem),fonte:txt(e.fonte),origemTipo:txt(e.origem_tipo),origemFluxo:txt(e.origem_fluxo),bufferId:c.bufferId,targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,origin:c.origin};}),
+              jobs:jobsRaw.map(j=>{const c=cloneInfo({metadata:j.metadata,origem_fluxo:j.origem_fluxo,job_metadata:j.metadata});return {id:txt(j.id),eventId:txt(j.event_id),workspace:txt(j.workspace),status:txt(j.status),reason:txt(j.motivo_final),marketplace:txt(j.marketplace||j.marketplace_detectado),offerId:txt(j.offer_id),createdAt:j.created_at,updatedAt:j.updated_at,targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId,origin:c.origin};}),
+              offers:offersRaw.map(o=>{const c=cloneInfo({metadata:o.metadata,origem:o.origem,origem_fluxo:o.origem_fluxo});return {id:txt(o.id),eventId:txt(o.event_id),marketplace:txt(o.marketplace),origin:txt(o.origem_fluxo||o.origem||c.origin),status:txt(o.status),reason:txt(o.reason),createdAt:o.created_at,updatedAt:o.updated_at,category:txt(o.category),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId};}),
+              checkpoints:checkpointsRaw.map(c=>({workspace:txt(c.workspace),queueItemId:txt(c.queue_item_id),destinationKey:txt(c.destination_key),targetKey:txt(c.target_key),attemptId:txt(c.attempt_id),state:txt(c.estado),providerMessageId:txt(c.provider_message_id)||null,creditDebited:c.credito_debitado,motivoCodigo:txt(c.motivo_codigo)||null,classificacao:txt(c.classificacao)||null,statusHttp:c.status_http,confirmedAt:c.confirmado_em,createdAt:c.criado_em,updatedAt:c.atualizado_em})),
+              commercialEvents:commercialRaw.map(e=>({type:txt(e.tipo_evento),workspace:txt(e.workspace||e.cliente_id||e.workspace_id),offerId:txt(e.offer_id),jobId:txt(e.job_id),queueItemId:txt(e.queue_item_id),destinationId:txt(e.destination_id),channel:txt(e.canal),marketplace:txt(e.marketplace),occurredAt:e.ocorrido_em,originPipeline:txt(e.origem_pipeline),metadata:meta(e.metadata)}))
+            };
+            console.log('DB_AUDIT_JSON ' + JSON.stringify(result));
+          }
+          main().catch(e=>console.log('DB_AUDIT_JSON ' + JSON.stringify({ok:false,reason:'query_error',evidenceErrors:[String(e&&e.message||'query_error').replace(/[^a-z0-9_.:-]/gi,'_').slice(0,120)]}))).finally(async()=>{try{const p=getEngineShadowPool();if(p)await p.end();}catch{}});
+          `;
+          function command(cmd, args, options = {}) { return spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, ...options }); }
+          function dbRead() {
+            const r = command('docker', ['compose','-f',COMPOSE,'exec','-T','backend','node','-'], { cwd: INFRA, input: dbScript, timeout: 120000 });
+            if (r.error || r.status !== 0) return { ok:false, reason:'backend_select_command_failed' };
+            const line = (r.stdout || '').split(/\r?\n/).reverse().find(x => x.startsWith('DB_AUDIT_JSON '));
+            if (!line) return { ok:false, reason:'database_result_missing' };
+            try { return JSON.parse(line.slice('DB_AUDIT_JSON '.length)); } catch { return { ok:false, reason:'database_result_invalid' }; }
+          }
+          function metadataConfirmaEnvio(metadata) {
+            let confirmou=false;
+            function walk(v,depth=0){if(confirmou||!v||typeof v!=='object'||depth>10)return;for(const[k,x]of Object.entries(v)){const nk=String(k).toLowerCase().replace(/[^a-z0-9]/g,'');const sv=txt(x).toLowerCase();if((nk==='status'&&sv==='enviado')||(nk==='motivo'&&sv==='envio_confirmado')){confirmou=true;return;}if(x&&typeof x==='object')walk(x,depth+1);}}
+            walk(parseJson(metadata));return confirmou;
+          }
+          function eventoComercialConfirmaEnvio(evento={}) { return txt(evento.type).toLowerCase()==='executor_enviado'||metadataConfirmaEnvio(evento.metadata); }
+          function destinoCorresponde(destinationKey,destinationId){const key=txt(destinationKey).toLowerCase(),id=txt(destinationId).toLowerCase();return Boolean(key&&id&&(key===id||key.endsWith(':'+id)));}
+          function montarCadeiasCompletas(db={}) {
+            const buffers=arr(db.buffers),events=arr(db.events),jobs=arr(db.jobs),offers=arr(db.offers);
+            const bufferById=new Map(buffers.map(x=>[txt(x.id),x]));const bufferByEvent=new Map(buffers.filter(x=>x.bridgeEventId).map(x=>[txt(x.bridgeEventId),x]));const eventById=new Map(events.map(x=>[txt(x.id),x]));const offerById=new Map(offers.map(x=>[txt(x.id),x]));
+            const completas=[],incompletas=[];const seenOffers=new Set();
+            for(const job of jobs){const event=eventById.get(txt(job.eventId));const buffer=event&&(bufferById.get(txt(event.bufferId))||bufferByEvent.get(txt(event.id)));const offer=offerById.get(txt(job.offerId));const workspace=txt(job.workspace);const reasons=[];
+              if(!event)reasons.push('evento_ausente');if(!buffer)reasons.push('buffer_ausente');if(!offer)reasons.push('oferta_ausente');if(!workspace)reasons.push('workspace_ausente');if(buffer&&workspace&&txt(buffer.workspace)!==workspace)reasons.push('workspace_divergente');if(offer&&offer.eventId&&event&&txt(offer.eventId)!==txt(event.id))reasons.push('evento_oferta_divergente');
+              const record={workspace,bufferId:txt(buffer&&buffer.id),eventId:txt(event&&event.id),jobId:txt(job.id),offerId:txt(offer&&offer.id||job.offerId),buffer,event,job,offer,reasons};
+              if(reasons.length){incompletas.push(record);continue;}if(seenOffers.has(workspace+'|'+record.offerId))continue;seenOffers.add(workspace+'|'+record.offerId);completas.push(record);
+            }
+            for(const buffer of buffers){if(completas.some(x=>x.bufferId===txt(buffer.id))||incompletas.some(x=>x.bufferId===txt(buffer.id)))continue;const event=events.find(e=>txt(e.bufferId)===txt(buffer.id)||txt(buffer.bridgeEventId)===txt(e.id));const job=event&&jobs.find(j=>txt(j.eventId)===txt(event.id)&&txt(j.workspace)===txt(buffer.workspace));const offer=job&&offerById.get(txt(job.offerId));const reasons=[];if(!event)reasons.push('evento_ausente');else if(!job)reasons.push('job_ausente');else if(!offer)reasons.push('oferta_ausente');incompletas.push({workspace:txt(buffer.workspace),bufferId:txt(buffer.id),eventId:txt(event&&event.id)||null,jobId:txt(job&&job.id)||null,offerId:txt(offer&&offer.id)||null,reasons});}
+            return {completas,incompletas,populationConcluded:buffers.every(b=>completas.some(x=>x.bufferId===txt(b.id))||incompletas.some(x=>x.bufferId===txt(b.id)))};
+          }
+          function construirFatosDuraveis(db={},cadeias=[],queueFallbackOffers=[]) {
+            const commercial=arr(db.commercialEvents),checkpoints=arr(db.checkpoints).filter(c=>txt(c.state)==='enviado'&&iso(c.confirmedAt));const chainByOffer=new Map(),chainByJob=new Map();
+            for(const c of cadeias){chainByOffer.set(c.workspace+'|'+c.offerId,c);chainByJob.set(c.workspace+'|'+c.jobId,c);}
+            const queueToChain=new Map();
+            for(const e of commercial){const workspace=txt(e.workspace),queue=txt(e.queueItemId);if(!workspace||!queue)continue;const chain=chainByOffer.get(workspace+'|'+txt(e.offerId))||chainByJob.get(workspace+'|'+txt(e.jobId));if(chain)queueToChain.set(workspace+'|'+queue,chain);}
+            for(const c of cadeias){for(const q of [c.offer&&c.offer.queueItemId,c.job&&c.job.queueItemId].map(txt).filter(Boolean))queueToChain.set(c.workspace+'|'+q,c);}
+            for(const o of queueFallbackOffers){const chain=chainByOffer.get(txt(o.workspace)+'|'+txt(o.offerId));if(chain)for(const q of o.queueItemIds||[])if(txt(q))queueToChain.set(chain.workspace+'|'+txt(q),chain);}
+            const targetConfirmations=[];
+            for(const cp of checkpoints){const chain=queueToChain.get(txt(cp.workspace)+'|'+txt(cp.queueItemId));if(!chain)continue;const events=commercial.filter(e=>txt(e.workspace)===txt(cp.workspace)&&txt(e.queueItemId)===txt(cp.queueItemId));const confirmedEvent=events.find(eventoComercialConfirmaEnvio)||null;const matchingEvent=events.find(e=>destinoCorresponde(cp.destinationKey,e.destinationId))||confirmedEvent||events[0]||null;targetConfirmations.push({...cp,offerKey:chain.workspace+'|'+chain.offerId,offerId:chain.offerId,jobId:chain.jobId,bufferId:chain.bufferId,eventId:chain.eventId,destinationId:txt(matchingEvent&&matchingEvent.destinationId)||null,channel:txt(matchingEvent&&matchingEvent.channel)||null,commercialConfirmation:Boolean(confirmedEvent)});}
+            const logicalMap=new Map();
+            for(const c of targetConfirmations){const key=[c.workspace,c.queueItemId,c.destinationKey].join('|');const current=logicalMap.get(key)||{workspace:c.workspace,queueItemId:c.queueItemId,destinationKey:c.destinationKey,destinationId:c.destinationId,channel:c.channel,offerKey:c.offerKey,offerId:c.offerId,jobId:c.jobId,confirmedAt:c.confirmedAt,targets:[]};current.targets.push(c);if(Date.parse(c.confirmedAt)<Date.parse(current.confirmedAt))current.confirmedAt=c.confirmedAt;if(!current.destinationId&&c.destinationId)current.destinationId=c.destinationId;if(!current.channel&&c.channel)current.channel=c.channel;logicalMap.set(key,current);}
+            const logicalSends=[...logicalMap.values()].sort((a,b)=>Date.parse(a.confirmedAt)-Date.parse(b.confirmedAt));
+            return {targetConfirmations,logicalSends,offersSent:new Set(logicalSends.map(x=>x.offerKey)),uncorrelatedCheckpoints:checkpoints.length-targetConfirmations.length};
+          }
+          function executarTestesSinteticos() {
+            const base={buffers:[{id:'b1',workspace:'w1',bridgeEventId:'e1'}],events:[{id:'e1',bufferId:'b1'}],jobs:[{id:'j1',eventId:'e1',workspace:'w1',offerId:'o1'}],offers:[{id:'o1',eventId:'e1'}],commercialEvents:[{type:'executor_enviado',workspace:'w1',offerId:'o1',jobId:'j1',queueItemId:'q1',destinationId:'',channel:'telegram',metadata:{status:'enviado'}},{type:'outro',workspace:'w1',offerId:'o1',jobId:'j1',queueItemId:'q2',destinationId:'d2',channel:'discord',metadata:{motivo:'envio_confirmado'}}],checkpoints:[{workspace:'w1',queueItemId:'q1',destinationKey:'telegram:d1',targetKey:'a1',state:'enviado',confirmedAt:'2026-10-08T18:10:00Z'},{workspace:'w1',queueItemId:'q2',destinationKey:'discord:d2',targetKey:'a1',state:'enviado',confirmedAt:'2026-10-08T18:11:00Z'},{workspace:'w1',queueItemId:'q2',destinationKey:'discord:d2',targetKey:'a2',state:'enviado',confirmedAt:'2026-10-08T18:11:01Z'},{workspace:'w1',queueItemId:'q1',destinationKey:'telegram:d1',targetKey:'nulo',state:'enviado',confirmedAt:null}]};
+            const chain=montarCadeiasCompletas(base);const facts=construirFatosDuraveis(base,chain.completas);const assertions=[chain.completas.length===1,facts.targetConfirmations.length===3,facts.logicalSends.length===2,facts.offersSent.size===1,eventoComercialConfirmaEnvio(base.commercialEvents[0]),eventoComercialConfirmaEnvio(base.commercialEvents[1]),facts.logicalSends.some(x=>x.destinationKey==='telegram:d1'),facts.logicalSends.find(x=>x.destinationKey==='discord:d2').targets.length===2];
+            const broken=montarCadeiasCompletas({...base,jobs:[{id:'j2',eventId:'missing',workspace:'w1',offerId:'o1'}]});assertions.push(broken.completas.length===0&&broken.incompletas.length>0);
+            const evidenceFixture={queryGates:{buffers:true,events:true,jobs:true,offers:true,checkpoints:true,commercialEvents:true},chainComplete:true,parseErrors:[{file:'obrigatorio.json',line:null,type:'json_parse_error',critical:true}],readErrors:[],durablePrimary:true,correlatedGaps:true};assertions.push(calcularEvidenceComplete(evidenceFixture)===false);
+            if(assertions.some(x=>x!==true))throw new Error('synthetic_parser_test_failed');return {ok:true,cases:7};
+          }
+          function calcularEvidenceComplete(g={}) { const q=g.queryGates||{};return ['buffers','events','jobs','offers','checkpoints','commercialEvents'].every(k=>q[k]===true)&&g.chainComplete===true&&!arr(g.parseErrors).some(e=>e.critical!==false)&&!arr(g.readErrors).some(e=>e.critical!==false)&&g.durablePrimary===true&&g.correlatedGaps===true; }
+          const ID_KEYS = new Map([
+            ['offerid','offer'],['ofertaid','offer'],['engineofertaid','offer'],['idoferta','offer'],['jobid','job'],['enginejobid','job'],['eventoid','event'],['engineeventoid','event'],['eventid','event'],['bufferid','buffer'],['filaitemid','queue']
+          ]);
+          function keyNorm(k) { return String(k).toLowerCase().replace(/[^a-z0-9]/g,''); }
+          function getField(fields, ...names) { for (const [k,v] of Object.entries(fields||{})) if (names.includes(keyNorm(k)) && v != null) return v; return undefined; }
+          function safeReason(value) { const s=txt(value); return /^[A-Za-z0-9_.:-]{1,100}$/.test(s)?s:(s?'detalhe_textual_omitido':''); }
+          function dateFieldPairs(node, out = [], depth = 0) {
+            if (!node || typeof node !== 'object' || depth > 12) return out;
+            for (const [k,v] of Object.entries(node)) {
+              if (v == null) continue;
+              if (Array.isArray(v)) { for (const x of v) if (x && typeof x === 'object') dateFieldPairs(x,out,depth+1); continue; }
+              if (v && typeof v === 'object') { dateFieldPairs(v,out,depth+1); continue; }
+              out.push([k,v]);
+            }
+            return out;
+          }
+          function idsOf(node) {
+            const got={offer:[],job:[],event:[],buffer:[],queue:[]};
+            for (const [k,v] of dateFieldPairs(node)) { const type=ID_KEYS.get(keyNorm(k)); if (type) got[type].push(txt(v)); }
+            for (const key of Object.keys(got)) got[key]=[...new Set(got[key].filter(Boolean))];
+            return got;
+          }
+          function safeSummary(node, sourceFile, queueFamily = false) {
+            const pairs=dateFieldPairs(node);
+            const out={source:sourceFile};
+            const allowed=new Set(['id','offerid','ofertaid','engineofertaid','idoferta','jobid','enginejobid','eventoid','engineeventoid','eventid','bufferid','filaitemid','status','statusfinal','statusdetalhe','estado','motivo','motivofinal','motivostatus','createdat','updatedat','criadoem','atualizadoem','dataentradafila','enviadoem','dataenvio','processadoem','terminalizadoem','expiradoem','slotliberadoem','proximoenviopermitidoem','ultimoenvioem','intervalomin','intervalominutos','intervaloaplicadominutos','intervaloconfiguradominutos','canal','channel','destinoid','destinationid','destinotipo','origem','origemfluxo','marketplace','providerconfirmed','envioconfirmado','liberado']);
+            for (const [k,v] of pairs) { const nk=keyNorm(k); if (!allowed.has(nk)) continue; if (['id'].includes(nk) && !queueFamily) continue; if (typeof v==='string' || typeof v==='number' || typeof v==='boolean') { if (out[k]===undefined) out[k]=['motivo','motivofinal','motivostatus'].includes(nk)?safeReason(v):String(v).slice(0,120); } }
+            for (const [k,v] of pairs) { const nk=keyNorm(k); if (['destinosenviados','destinospendentes','destinosautorizadosids','destinoids'].includes(nk) && Array.isArray(v)) out[k]=v.map(x=>typeof x==='object'?(x.destinoId||x.destino_id||x.id||''):x).map(txt).filter(Boolean).slice(0,30); }
+            if (queueFamily && node && !Array.isArray(node) && typeof node==='object' && node.id != null && out.filaItemId===undefined) out.filaItemId=txt(node.id);
+            return out;
+          }
+          function eventLogFields(node, depth = 0, out = {}) {
+            if (!node || typeof node !== 'object' || depth > 5) return out;
+            const allow=new Set(['offerid','ofertaid','engineofertaid','idoferta','jobid','enginejobid','eventoid','engineeventoid','eventid','bufferid','filaitemid','destinoid','destinationid','clienteid','workspaceid','canal','channel','marketplace','origem','origemfluxo','fonte','status','estado','motivo','motivofinal','aceito','ativo','marketplacecompativel','aceitamarketplace','aceitacategoria','providermessageid','messageid','sendmessagesucesso','envioconfirmado','proximosendpermitidoem','ultimoenvioem','enviadoem','dataenvio','intervalomin','intervalominutos','intervaloaplicadominutos','intervaloconfiguradominutos','intervaloaplicado','intervaloconfigurado','liberado','slotliberadoem','slot']);
+            for (const [k,v] of Object.entries(node)) {
+              const nk=keyNorm(k);
+              if (allow.has(nk)) {
+                if (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k]=['motivo','motivofinal'].includes(nk)?safeReason(v):(typeof v==='string'?v.slice(0,120):v);
+                else if (Array.isArray(v) && /destino/i.test(k)) out[k]=v.map(x=>typeof x==='object'?(x.destinoId||x.destino_id||x.id||''):x).map(txt).filter(Boolean).slice(0,30);
+              }
+              if (v && typeof v==='object') eventLogFields(v,depth+1,out);
+            }
+            return out;
+          }
+          function logJson(line, onError = () => {}) {
+            const i=line.indexOf('{'), j=line.lastIndexOf('}');
+            if (i<0||j<=i) return null;
+            try { return JSON.parse(line.slice(i,j+1)); } catch(e) { onError(e);return null; }
+          }
+          function timestampFrom(line) { const m=line.match(/\b20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/); return m?iso(m[0]):null; }
+          function scanLogs(offers, queueIds) {
+            return new Promise(resolve=>{
+              const child=spawn('docker',['compose','-f',COMPOSE,'logs','--since',START,'--timestamps','backend'],{cwd:INFRA,stdio:['ignore','pipe','pipe']});
+              let stderr='', pending='', lineCount=0, relevant=0, failed=false, targetEventsTruncated=false,logParseErrors=0;
+              const targetIdMap=new Map();
+              for (const o of offers) for (const [kind,ids] of Object.entries(o.ids)) for (const id of ids) if(id){const token=kind+':'+id;if(!targetIdMap.has(token))targetIdMap.set(token,new Set());targetIdMap.get(token).add(o.key);}
+              for (const o of offers) for (const id of o.queueItemIds) if(id){const token='queue:'+id;if(!targetIdMap.has(token))targetIdMap.set(token,new Set());targetIdMap.get(token).add(o.key);}
+              const targetEvents=[], sends=[];
+              function handle(line) {
+                if(!line)return;lineCount++;
+                const tagMatch=line.match(/\[([A-Z0-9_-]{3,80})\]/);const tag=tagMatch?tagMatch[1]:'';
+                const raw=logJson(line,()=>{logParseErrors++;});const fields=raw?eventLogFields(raw):{};
+                const eventIds=idsOf(raw||{});const tokens=Object.entries(eventIds).flatMap(([kind,ids])=>ids.map(id=>kind+':'+id));
+                const allIds=Object.values(eventIds).flat();
+                const matched=new Set();for(const token of tokens)for(const k of targetIdMap.get(token)||[])matched.add(k);
+                const hasSendTag=/CHECKPOINT-ENTREGA-FIM/.test(tag);
+                const state=txt(getField(fields,'estado','status')).toLowerCase();
+                const sendSuccess=getField(fields,'sendmessagesucesso','envioconfirmado');
+                const envioConfirmado=txt(getField(fields,'motivo')).toLowerCase()==='envio_confirmado';
+                const provider=Boolean(getField(fields,'providermessageid','messageid')||sendSuccess===true||String(sendSuccess).toLowerCase()==='true'||state==='enviado'||envioConfirmado||/estado\s*[=:]\s*["']?enviado\b/i.test(line));
+                const possibleSend=hasSendTag||provider||envioConfirmado;
+                if(!matched.size&&!possibleSend&&!SAFE_LOG_TAGS.test(line))return;
+                relevant++;
+                const record={at:timestampFrom(line),tag:tag||'SEM_TAG',fields,ids:eventIds,matched:[...matched]};
+                if(matched.size){if(targetEvents.length<3000)targetEvents.push(record);else targetEventsTruncated=true;}
+                if(possibleSend&&provider) {
+                  const destination=txt(getField(fields,'destinoid','destinationid'));
+                  const workspace=txt(getField(fields,'workspaceid','clienteid'));
+                  if(destination&&workspace){
+                    const providerId=getField(fields,'providermessageid','messageid');
+                    const sig=[workspace,destination,allIds.join(','),record.at||'',txt(providerId)].join('|');
+                    if(!sends.some(x=>x.sig===sig))sends.push({sig,at:record.at,workspace,destinationId:destination,channel:txt(getField(fields,'canal','channel')),offerId:txt(getField(fields,'ofertaid','offerid','engineofertaid')),jobId:txt(getField(fields,'jobid','enginejobid')),eventId:txt(getField(fields,'eventoid','engineeventoid','eventid')),bufferId:txt(getField(fields,'bufferid')),filaItemId:txt(getField(fields,'filaitemid')),providerConfirmed:Boolean(providerId),checkpointConfirmed:provider,fields,matched:[...matched]});
+                  }
+                }
+              }
+              child.stdout.setEncoding('utf8');child.stdout.on('data',chunk=>{pending+=chunk;let idx;while((idx=pending.indexOf('\n'))>=0){handle(pending.slice(0,idx).replace(/\r$/,''));pending=pending.slice(idx+1);}});
+              child.stderr.setEncoding('utf8');child.stderr.on('data',chunk=>{stderr+=chunk.slice(0,2000);});
+              child.on('error',()=>{failed=true;});
+              child.on('close',code=>{if(pending)handle(pending);resolve({ok:!failed&&code===0,code,lineCount,relevant,targetEvents,sends,truncated:targetEventsTruncated,parseErrors:logParseErrors});});
+            });
+          }
+          function sha256(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+          function fileRecord(file, relative, docs, evidence, workspace = '', optional = true) {
+            try {
+              const st=fs.statSync(file); if(!st.isFile()) return;
+              if(st.size>HASH_MAX){evidence.skippedLarge.push({file:relative,optional:optional===true});return;}
+              const bytes=fs.readFileSync(file); const hash=sha256(bytes); const ext=path.extname(file).toLowerCase();
+              let parsed=[]; let parseError=false;
+              if(ext==='.jsonl'||ext==='.ndjson') { let lineNo=0;for(const line of bytes.toString('utf8').split(/\r?\n/)){lineNo++;if(!line.trim())continue;try{parsed.push(JSON.parse(line));}catch(e){parseError=true;evidence.parseErrors.push({workspace:workspace||null,file:relative,line:lineNo,type:'jsonl_parse_error',optional:optional===true,critical:optional!==true,message:txt(e&&e.name)||'SyntaxError'});}} }
+              else { try{parsed=[JSON.parse(bytes.toString('utf8'))];}catch(e){parseError=true;evidence.parseErrors.push({workspace:workspace||null,file:relative,line:null,type:'json_parse_error',optional:optional===true,critical:optional!==true,message:txt(e&&e.name)||'SyntaxError'});} }
+              const doc={file,relative,workspace,hash,bytes:st.size,mtimeMs:st.mtimeMs,parseError,parsed}; docs.push(doc);
+              evidence.files.push({workspace:workspace||null,file:relative,size:st.size,sha256:hash.slice(0,16),parsed:!parseError});
+            } catch(e) { if(e.code!=='ENOENT')evidence.readErrors.push({workspace:workspace||null,file:relative,code:e.code||'read_error',optional:optional===true,critical:optional!==true}); }
+          }
+          function listFilesForWorkspace(workspace, docs, evidence) {
+            if(!/^[A-Za-z0-9_.-]+$/.test(workspace)||workspace.includes('..')){evidence.readErrors.push({workspace,file:'workspace_path',code:'unsafe_workspace',optional:false,critical:true});return;}
+            const root=path.join(WORKSPACE_ROOT,workspace);
+            const direct=['fila-viva.json','fila-viva.proof.json','fila-projecao-leve.json','controle-envio-destinos.json','fila-terminal-index.json','destinos.json'];
+            for(const name of direct) fileRecord(path.join(root,name),`clientes/${workspace}/${name}`,docs,evidence,workspace,false);
+            for(const dirName of ['fila-historico-incremental','fila-historico-leve-incremental']) {
+              const dir=path.join(root,dirName);
+              try {
+                const stack=[dir];let seen=0;
+                while(stack.length&&seen<3000){const current=stack.pop();let entries;try{entries=fs.readdirSync(current,{withFileTypes:true});}catch(e){if(e.code!=='ENOENT')evidence.readErrors.push({workspace,file:`clientes/${workspace}/${dirName}`,code:e.code||'read_error',optional:false,critical:true});continue;}
+                  for(const ent of entries){const p=path.join(current,ent.name);if(ent.isDirectory()){stack.push(p);continue;}if(!ent.isFile()||!['.json','.jsonl','.ndjson'].includes(path.extname(ent.name).toLowerCase()))continue;seen++;fileRecord(p,`clientes/${workspace}/${path.relative(root,p).split(path.sep).join('/')}`,docs,evidence,workspace,false);}
+                }
+                if(seen>=3000)evidence.skippedLarge.push({file:`clientes/${workspace}/${dirName}:file_count_limit`,optional:false});
+              } catch(e){evidence.readErrors.push({workspace,file:`clientes/${workspace}/${dirName}`,code:e.code||'scan_error',optional:false,critical:true});}
+            }
+          }
+          function destinationEntries(data, workspace, source, entries = [], context = '', keyHint = '') {
+            if(!data||typeof data!=='object')return entries;
+            if(Array.isArray(data)){for(const x of data)destinationEntries(x,workspace,source,entries,context,keyHint);return entries;}
+            const id=txt(data.id||data.destinoId||data.destino_id||(/^[0-9a-f-]{36}$/i.test(keyHint)?keyHint:''));
+            const activeValue=data.ativo??data.active;const active=activeValue===true||String(activeValue).toLowerCase()==='true'?true:(activeValue===false||String(activeValue).toLowerCase()==='false'?false:null);
+            if(id){entries.push({workspace,source,destinoId:id,nome:txt(data.nome||data.name),channel:txt(data.canal||data.channel||data.tipo||data.destinoTipo),active,marketplaces:arr(data.marketplaces||data.marketplacesPermitidos).map(txt).filter(Boolean),categories:arr(data.categorias||data.categoriasPermitidas).map(txt).filter(Boolean),interval:extractIntervals(data)});}
+            for(const [k,v] of Object.entries(data))if(v&&typeof v==='object'){const next=(k===workspace||context===workspace)?workspace:context;destinationEntries(v,workspace,source,entries,next,k);}
+            return entries;
+          }
+          function globalEntriesForWorkspace(data, workspace, source, entries=[]) {
+            if(!data||typeof data!=='object')return entries;
+            if(Array.isArray(data)){for(const x of data)globalEntriesForWorkspace(x,workspace,source,entries);return entries;}
+            for(const [k,v] of Object.entries(data))if(v&&typeof v==='object'){
+              if(k===workspace)destinationEntries(v,workspace,source,entries,workspace);
+              else globalEntriesForWorkspace(v,workspace,source,entries);
+            }
+            return entries;
+          }
+          function extractIntervals(node) {
+            const wanted=/interval|minuto|cadencia|cooldown/i;const out={};
+            function walk(v,p='',d=0){if(!v||typeof v!=='object'||d>5)return;for(const[k,x]of Object.entries(v)){const key=p?p+'.'+k:k;if(wanted.test(k)){if(x==null||typeof x==='number'||typeof x==='string'||typeof x==='boolean')out[key]=String(x).slice(0,80);else if(x&&typeof x==='object')walk(x,key,d+1);}else if(x&&typeof x==='object')walk(x,key,d+1);}}
+            walk(node);return out;
+          }
+          function scanObject(node, pathText, callback, depth=0) {
+            if(!node||typeof node!=='object'||depth>20)return;
+            if(!Array.isArray(node))callback(node,pathText);
+            if(Array.isArray(node)){for(let i=0;i<node.length;i++)scanObject(node[i],`${pathText}[${i}]`,callback,depth+1);return;}
+            for(const[k,v]of Object.entries(node))if(v&&typeof v==='object')scanObject(v,pathText?`${pathText}.${k}`:k,callback,depth+1);
+          }
+          const TSTAMP_KEYS=new Set(['criadoem','createdat','dataentradafila','enviadoem','dataenvio','sendmessagesucesso','timestamp','updatedat','atualizadoem','processadoem','terminalizadoem','expiradoem','slotliberadoem','proximoenviopermitidoem','ultimoenvioem','updated_at','criado_em','criada_em']);
+          function fieldVals(node, predicate) { const out=[];for(const[k,v]of dateFieldPairs(node))if(predicate(keyNorm(k),k,v))out.push(v);return out; }
+          function matchingOffers(node,workspace,offers,queueFamily,pathText) {
+            const ids=idsOf(node), out=[];
+            for(const o of offers){if(o.workspace!==workspace)continue;let hit=false;
+              if(ids.offer.some(x=>o.ids.offer.includes(x))||ids.job.some(x=>o.ids.job.includes(x))||ids.event.some(x=>o.ids.event.includes(x))||ids.buffer.some(x=>o.ids.buffer.includes(x)))hit=true;
+              if(ids.queue.some(x=>o.ids.queue.includes(x)||o.queueItemIds.has(x)))hit=true;
+              if(queueFamily&&Array.isArray(o.queueItemIds)&&o.queueItemIds.some(x=>pathText.split(/[.\[\]]/).includes(x)))hit=true;
+              if(hit)out.push(o);
+            }
+            return out;
+          }
+          function queueSummary(node, relative, queueFamily) {
+            const summary=safeSummary(node,relative,queueFamily);
+            summary.identity=idsOf(node);
+            const dates=fieldVals(node,(nk)=>TSTAMP_KEYS.has(nk)).map(iso).filter(Boolean).sort();
+            if(dates.length)summary.timestamps=[...new Set(dates)].slice(0,10);
+            const readyDates=fieldVals(node,nk=>['dataentradafila','queueenteredat','enteredqueueat'].includes(nk)).map(iso).filter(Boolean).sort();
+            if(readyDates.length)summary.readyTimestamps=[...new Set(readyDates)].slice(0,10);
+            const status=fieldVals(node,nk=>['status','statusfinal','statusdetalhe','estado'].includes(nk)).map(txt).filter(Boolean);
+            if(status.length)summary.statuses=[...new Set(status)].slice(0,8);
+            const reasons=fieldVals(node,nk=>['motivo','motivofinal','motivostatus','reason'].includes(nk)).map(safeReason).filter(Boolean);
+            if(reasons.length)summary.reasons=[...new Set(reasons.map(x=>x.slice(0,100)))].slice(0,5);
+            return summary;
+          }
+          function readGlobalConfig(file, docs, evidence) { fileRecord(file,path.relative(DATA,file).split(path.sep).join('/'),docs,evidence,'',true); }
+          function latestTimestamp(record, keys) { const values=fieldVals(record,(nk)=>keys.has(nk)).map(millis).filter(x=>x!=null);return values.length?Math.max(...values):null; }
+          function getNumericField(record, names) { for(const [k,v] of dateFieldPairs(record)){if(names.has(keyNorm(k))&&Number.isFinite(Number(v))&&Number(v)>=0)return Number(v);}return null; }
+          function allPairs(node) { return dateFieldPairs(node); }
+          function safeTimeFromControl(node) { const keys=new Set(['proximoenviopermitidoem','ultimoenvioem','dataenvio','enviadoem','sendmessagesucesso','updatedat','timestamp']);const t=latestTimestamp(node,keys);return t==null?null:new Date(t).toISOString(); }
+          function controlMatches(doc, workspace, destId) {
+            if(!doc||doc.workspace!==workspace||!doc.relative.endsWith('/controle-envio-destinos.json'))return [];
+            const out=[];for(const root of doc.parsed)scanObject(root,'',(node,p)=>{
+              const ids=idsOf(node);const explicit=fieldVals(node,nk=>['destinoid','destinationid','iddestino'].includes(nk)).map(txt);
+              const keyMatch=p.split(/[.\[\]]/).includes(destId);
+              if(explicit.includes(destId)||keyMatch){const summary=safeSummary(node,doc.relative,false);summary.controlTime=safeTimeFromControl(node);summary.intervals=extractIntervals(node);out.push(summary);}
+            });return out;
+          }
+          function buildRows(db, docs, evidence, logs, configDocs) {
+            const buffers=db.buffers||[],events=db.events||[],jobs=db.jobs||[],rawOffers=db.offers||[];
+            const bufferById=new Map(buffers.map(x=>[txt(x.id),x]));const bufferByEvent=new Map(buffers.filter(x=>x.bridgeEventId).map(x=>[txt(x.bridgeEventId),x]));const eventById=new Map(events.map(x=>[txt(x.id),x]));
+            const jobsByOffer=new Map();for(const j of jobs){const k=txt(j.offerId);if(!jobsByOffer.has(k))jobsByOffer.set(k,[]);jobsByOffer.get(k).push(j);}
+            const offers=[];
+            for(const offer of rawOffers){const relatedJobs=jobsByOffer.get(txt(offer.id))||[];const event=eventById.get(txt(offer.eventId))||relatedJobs.map(j=>eventById.get(txt(j.eventId))).find(Boolean)||null;const workspace=txt(relatedJobs[0]&&relatedJobs[0].workspace)||txt((event&&event.workspace)||'');const buffer=(event&&event.bufferId?bufferById.get(txt(event.bufferId)):null)||bufferByEvent.get(txt(event&&event.id))||null;
+              const ids={offer:[txt(offer.id)].filter(Boolean),job:relatedJobs.map(x=>txt(x.id)).filter(Boolean),event:[txt(offer.eventId),...relatedJobs.map(x=>txt(x.eventId)),txt(event&&event.id)].filter(Boolean),buffer:[txt(buffer&&buffer.id),txt(event&&event.bufferId)].filter(Boolean),queue:[txt(offer.queueItemId),...relatedJobs.map(x=>txt(x.queueItemId))].filter(Boolean)};
+              const targetSources=[offer,event,...relatedJobs,buffer].filter(Boolean);const targets=[...new Set(targetSources.flatMap(x=>arr(x.targets).map(txt)).filter(Boolean))];const hasTargetSnapshot=targetSources.some(x=>x.hasTargetSnapshot===true);
+              const row={key:`${workspace}|${txt(offer.id)}`,workspace,bufferId:txt(buffer&&buffer.id)||ids.buffer[0]||'',eventId:txt(offer.eventId||event&&event.id||relatedJobs[0]&&relatedJobs[0].eventId),jobIds:ids.job,offerId:txt(offer.id),marketplace:txt(offer.marketplace||relatedJobs[0]&&relatedJobs[0].marketplace),origin:txt(offer.origin||event&&event.origin||relatedJobs[0]&&relatedJobs[0].origin),capturedAt:buffer&&buffer.capturedAt||event&&event.capturedAt||null,offerCreatedAt:offer.createdAt||null,category:txt(offer.category),targets,hasTargetSnapshot,ids,queueItemIds:new Set(ids.queue),queueEvidence:[],files:[],logEvents:[],diagnostics:[],slots:[],sends:[],config:{}};
+              offers.push(row);
+            }
+            const configByWorkspace=new Map();
+            for(const workspace of new Set(offers.map(x=>x.workspace).filter(Boolean))){const entries=[];for(const d of docs){if(d.workspace===workspace&&d.relative===`clientes/${workspace}/destinos.json`){for(const root of d.parsed)destinationEntries(root,workspace,d.relative,entries,workspace);}else if(!d.workspace&&['destinos.json','destinos_clientes.json','configs_clientes.json'].includes(d.relative)){for(const root of d.parsed)globalEntriesForWorkspace(root,workspace,d.relative,entries);}}configByWorkspace.set(workspace,entries);}
+            for(const o of offers){o.config.destinations=[];for(const destId of o.targets){const matches=(configByWorkspace.get(o.workspace)||[]).filter(d=>d.destinoId===destId);o.config.destinations.push({destinoId:destId,configured:matches.length>0,entries:matches.map(d=>({source:d.source,name:d.nome||null,channel:d.channel||null,active:d.active,marketplaces:d.marketplaces,categories:d.categories,interval:d.interval}))});}}
+            for(const doc of docs){if(!doc.workspace||!doc.relative.includes('/clientes/'))continue;const queueFamily=/fila-viva\.json|fila-projecao-leve\.json|fila-terminal-index\.json|fila-historico-(?:leve-)?incremental/.test(doc.relative);for(const root of doc.parsed)scanObject(root,'',(node,p)=>{for(const o of matchingOffers(node,doc.workspace,offers,queueFamily,p)){const summary=queueSummary(node,doc.relative,queueFamily);if(queueFamily&&node.id!=null&&!summary.filaItemId){summary.filaItemId=txt(node.id);o.queueItemIds.add(txt(node.id));}else if(summary.filaItemId)o.queueItemIds.add(txt(summary.filaItemId));const sig=JSON.stringify(summary);if(o.queueEvidence.length<60&&!o.queueEvidence.some(x=>JSON.stringify(x)===sig))o.queueEvidence.push(summary);if(!o.files.includes(doc.relative))o.files.push(doc.relative);}});}
+            const queueIds=new Set(offers.flatMap(o=>[...o.queueItemIds]));
+            if(queueIds.size){for(const doc of docs){if(!doc.workspace||!doc.relative.includes('/clientes/'))continue;const queueFamily=/fila-viva\.json|fila-projecao-leve\.json|fila-terminal-index\.json|fila-historico-(?:leve-)?incremental/.test(doc.relative);for(const root of doc.parsed)scanObject(root,'',(node,p)=>{const direct=idsOf(node);const keyTokens=p.split(/[.\[\]]/);const match=[...direct.queue,...(node.id!=null&&queueFamily?[txt(node.id)]:[]),...keyTokens].some(x=>queueIds.has(txt(x)));if(!match)return;for(const o of offers)if(o.workspace===doc.workspace&&[...o.queueItemIds].some(x=>txt(x)===txt(node.id)||direct.queue.includes(x)||keyTokens.includes(x))){const summary=queueSummary(node,doc.relative,queueFamily);if(o.queueEvidence.length<80)o.queueEvidence.push(summary);if(!o.files.includes(doc.relative))o.files.push(doc.relative);}});}}
+            const targetsByOffer=new Map(offers.map(o=>[o.key,o]));
+            for(const ev of logs.targetEvents){for(const key of ev.matched){const o=targetsByOffer.get(key);if(!o)continue;o.logEvents.push(ev);if(/ENGINE-DISTRIBUIDOR-DESTINO-DIAGNOSTICO/.test(ev.tag))o.diagnostics.push(ev);if(/FILA-DESTINO-LIBERADO|DEMAND-SCHEDULER/.test(ev.tag))o.slots.push(ev);}}
+            for(const s of logs.sends){for(const key of s.matched){const o=targetsByOffer.get(key);if(o)o.sends.push(s);}}
+            const sendAll=logs.sends.map(s=>({at:s.at,workspace:s.workspace,destinationId:s.destinationId,channel:s.channel,offerId:s.offerId,jobId:s.jobId,eventId:s.eventId,bufferId:s.bufferId,filaItemId:s.filaItemId,providerConfirmed:s.providerConfirmed,checkpointConfirmed:s.checkpointConfirmed,matched:s.matched}));
+            const now=Date.now();const resultRows=[];
+            function entryMatchesDiagnostic(diag,destId){const f=diag.fields||{};return txt(getField(f,'destinoid','destinationid'))===destId;}
+            function timestampFromEvidence(evidence,names){for(const x of evidence){for(const [k,v]of dateFieldPairs(x)){if(names.has(keyNorm(k))){const t=millis(v);if(t!=null)return t;}}}return null;}
+            function isTerminal(status){return /^(enviado|erro|error|expirado|expirada|descartado|descartada|cancelado|cancelada|bloqueado|terminal|publicado|falha|falhou)$/i.test(txt(status));}
+            for(const o of offers){const evBuffer=buffers.find(b=>txt(b.id)===o.bufferId);const queue=o.queueEvidence;const qTimes=queue.flatMap(x=>x.readyTimestamps||[]).map(millis).filter(x=>x!=null);const readyLog=o.logEvents.filter(e=>/ENGINE-DISTRIBUIDOR-FILA-MEMORIA/.test(e.tag)&&e.at).map(e=>Date.parse(e.at));const readyAt=qTimes.length?Math.min(...qTimes):readyLog.length?Math.min(...readyLog):null;
+              const vivaEvidence=queue.some(x=>x.source.endsWith('/fila-viva.json'));const terminalEvidence=queue.some(x=>(x.statuses||[]).some(isTerminal)||/fila-terminal-index/.test(x.source));
+              const reasons=[...new Set(queue.flatMap(x=>x.reasons||[]))];const stateEvidence=queue.find(x=>/fila-terminal-index/.test(x.source))||queue.find(x=>x.source.endsWith('/fila-viva.json'))||queue.find(x=>x.source.endsWith('/fila-viva.proof.json'))||queue[0];const statusCandidates=stateEvidence&&stateEvidence.statuses||[];const statusFinal=statusCandidates.length?statusCandidates[statusCandidates.length-1]:'';
+              const destIds=o.targets.length?o.targets:(o.hasTargetSnapshot?['__NO_AUTHORIZED_DESTINATIONS__']:['__SNAPSHOT_AUSENTE__']);
+              for(const destId of destIds){const configured=(o.config.destinations||[]).find(x=>x.destinoId===destId);const diagnostics=o.diagnostics.filter(d=>entryMatchesDiagnostic(d,destId));const accepted=diagnostics.some(d=>String(getField(d.fields,'aceito')).toLowerCase()==='true');const rejected=diagnostics.length>0&&!accepted;const applicable=accepted?true:(rejected?false:(destId==='__SNAPSHOT_AUSENTE__'?null:null));
+                const slotEvents=o.slots.filter(e=>txt(getField(e.fields,'destinoid','destinationid'))===destId);const explicitSlot=slotEvents.find(e=>readyAt!=null&&e.at&&Date.parse(e.at)>=readyAt&&(String(getField(e.fields,'liberado')).toLowerCase()==='true'||/FILA-DESTINO-LIBERADO/.test(e.tag)));
+                const offerSends=o.sends.filter(s=>s.destinationId===destId&&s.workspace===o.workspace).sort((a,b)=>Date.parse(a.at||0)-Date.parse(b.at||0));const send=offerSends[0]||null;
+                const ctrl=docs.flatMap(d=>controlMatches(d,o.workspace,destId));const ctrlNext=ctrl.map(x=>latestTimestamp(x,new Set(['proximoenviopermitidoem']))).filter(x=>x!=null);const ctrlLast=ctrl.map(x=>latestTimestamp(x,new Set(['ultimoenvioem','enviadoem','dataenvio']))).filter(x=>x!=null);
+                const configEntry=configured&&configured.entries.find(x=>x.active===true||x.active===null);const cadenceVals=[];if(configEntry)for(const v of Object.values(configEntry.interval||{})){const n=Number(v);if(Number.isFinite(n)&&n>0&&n<100000)cadenceVals.push(n);}const appliedVals=queue.flatMap(x=>fieldVals(x,nk=>['intervaloaplicadominutos','intervalominutos','intervalomin'].includes(nk))).map(Number).filter(n=>Number.isFinite(n)&&n>0);
+                const sendAt=send&&send.at?Date.parse(send.at):null;const allSends=sendAll.filter(s=>s.workspace===o.workspace&&s.destinationId===destId&&s.at).sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));const prior=readyAt==null?null:allSends.filter(s=>Date.parse(s.at)<readyAt).pop()||null;const priorControlLast=readyAt==null?[]:ctrlLast.filter(x=>x<readyAt);const lastTime=prior?Date.parse(prior.at):(priorControlLast.length?Math.max(...priorControlLast):null);const nextTimeRaw=ctrlNext.length?Math.min(...ctrlNext):null;const nextTime=nextTimeRaw!=null&&sendAt!=null&&nextTimeRaw<=sendAt&&lastTime!=null&&lastTime<readyAt?nextTimeRaw:null;const cadenceMin=appliedVals[0]||cadenceVals[0]||null;const eligibleSlotEvents=slotEvents.filter(e=>readyAt!=null&&e.at&&Date.parse(e.at)>=readyAt).sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));const actualSlot=eligibleSlotEvents.find(e=>String(getField(e.fields,'liberado')).toLowerCase()==='true'||/FILA-DESTINO-LIBERADO/.test(e.tag));let firstSlot=actualSlot&&actualSlot.at?Math.max(readyAt,Date.parse(actualSlot.at)):null;let firstSlotSource=firstSlot!=null?'log_slot_liberado':null;
+                if(firstSlot==null&&readyAt!=null&&nextTime!=null){firstSlot=Math.max(readyAt,nextTime);firstSlotSource='controle_envio_destinos_historico_compatível';}
+                if(firstSlot==null&&readyAt!=null&&lastTime!=null&&cadenceMin!=null){firstSlot=Math.max(readyAt,lastTime+cadenceMin*60000);firstSlotSource='ultimo_envio_mais_intervalo';}
+                const queueStillPending=/^(pendente|aguardando|processando|na_fila|queued)$/i.test(statusFinal);const waitMs=firstSlot==null?null:(sendAt!=null?sendAt-firstSlot:(applicable===true&&queueStillPending&&firstSlot<now?now-firstSlot:null));
+                const blockPattern=/^(sem_imagem|imagem_nao_publicavel|marketplace_bloqueado|categoria_incompativel|origem_nao_permitida|destino_inativo|usuario_inativo|creditos_insuficientes|expirado|expirada|duplicidade_fila|erro|falha|falhou|bloqueado)$/i;
+                const blockEvidence=queue.some(x=>(x.reasons||[]).some(r=>blockPattern.test(r))||(x.statuses||[]).some(r=>blockPattern.test(r)))||o.logEvents.some(e=>blockPattern.test(txt(getField(e.fields,'motivofinal','motivo','status','estado'))));
+                let destinationClass='E';if(sendAt!=null&&firstSlot!=null&&readyAt!=null)destinationClass=waitMs>60000?'D':(firstSlot-readyAt>60000?'B':'A');else if(sendAt!=null)destinationClass='E';else if(blockEvidence)destinationClass='C';else if(applicable===true&&queueStillPending&&firstSlot!=null&&firstSlot<now-60000)destinationClass='D';
+                resultRows.push({workspace:o.workspace,bufferId:o.bufferId||null,eventId:o.eventId||null,jobIds:o.jobIds,offerId:o.offerId,marketplace:o.marketplace||null,capturedAt:o.capturedAt||evBuffer&&evBuffer.capturedAt||null,offerCreatedAt:o.offerCreatedAt||null,destinoId:destId.startsWith('__')?null:destId,channel:configured&&configured.entries.map(x=>x.channel).find(Boolean)||send&&send.channel||null,contractTargetsPresent:o.hasTargetSnapshot,contractDestinoIds:o.targets,configured:configured?configured.configured:null,configuredDestinations:configured?configured.entries:[],applicable:destId==='__NO_AUTHORIZED_DESTINATIONS__'?false:applicable,applicabilityEvidence:destId==='__NO_AUTHORIZED_DESTINATIONS__'?[{reason:'clonador_destinos_snapshot_vazio'}]:diagnostics.map(d=>({at:d.at,accepted:String(getField(d.fields,'aceito')).toLowerCase()==='true',active:getField(d.fields,'ativo'),marketplaceCompatible:getField(d.fields,'marketplacecompativel','aceitamarketplace'),categoryAccepted:getField(d.fields,'aceitacategoria'),reason:safeReason(getField(d.fields,'motivofinal','motivo'))||null})),filaItemIds:[...o.queueItemIds],enteredQueue:queue.length>0,enteredViva:vivaEvidence,terminalized:terminalEvidence,statusFinal:statusFinal||null,motivoFinal:reasons[0]||null,readyAt:readyAt==null?null:new Date(readyAt).toISOString(),ultimoEnvioAnterior:lastTime==null?null:new Date(lastTime).toISOString(),intervaloConfiguradoMinutos:cadenceVals[0]||null,intervaloAplicadoMinutos:appliedVals[0]||null,proximoEnvioPermitidoEm:nextTime==null?null:new Date(nextTime).toISOString(),primeiroSlotPossivel:firstSlot==null?null:new Date(firstSlot).toISOString(),primeiroSlotFonte:firstSlotSource,slotEvidence:slotEvents.map(e=>({tag:e.tag,at:e.at,liberado:getField(e.fields,'liberado')||null})),checkpointInicio:o.logEvents.filter(e=>/FILA-CHECKPOINT-ENTREGA/.test(e.tag)&&!/FIM/.test(e.tag)).map(e=>e.at).filter(Boolean),checkpointFim:o.logEvents.filter(e=>/FILA-CHECKPOINT-ENTREGA-FIM/.test(e.tag)).map(e=>e.at).filter(Boolean),enviadoEm:send&&send.at||null,providerConfirmado:send?send.providerConfirmed:false,executorCheckpointConfirmado:send?send.checkpointConfirmed:false,esperaAposPrimeiroSlotMs:waitMs,classificacao:destinationClass,queueSources:[...new Set(queue.map(x=>x.source))],queueEvidence:queue.slice(0,12),logEvidence:o.logEvents.slice(0,30).map(e=>({tag:e.tag,at:e.at,fields:e.fields}))});
+              }
+            }
+            return {offers,resultRows,sendAll};
+          }
+          function legacyGapMetricsUnused(resultRows, buffers, offers, sendAll) {
+            const byDest=new Map();for(const s of sendAll){if(!s.at||!s.workspace||!s.destinationId)continue;const o=offers.find(x=>x.key===s.matched?.[0]);const linked=offers.some(x=>x.workspace===s.workspace&&(x.ids.offer.includes(txt(s.offerId))||x.ids.job.includes(txt(s.jobId))||x.ids.queue.includes(txt(s.filaItemId))||x.queueItemIds.has(txt(s.filaItemId))));if(!linked)continue;const k=s.workspace+'|'+s.destinationId;if(!byDest.has(k))byDest.set(k,[]);byDest.get(k).push(s);}
+            const gaps=[];const thresholds={over10:0,over20:0,over30:0,over60:0};
+            for(const [key,list] of byDest){list.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));for(let i=1;i<list.length;i++){const a=list[i-1],b=list[i],gap=Date.parse(b.at)-Date.parse(a.at);if(gap>10*60000)thresholds.over10++;if(gap>20*60000)thresholds.over20++;if(gap>30*60000)thresholds.over30++;if(gap>60*60000)thresholds.over60++;if(gap<=20*60000)continue;const [workspace,destinationId]=key.split('|');const eligible=resultRows.filter(r=>r.workspace===workspace&&r.destinoId===destinationId&&r.applicable===true&&r.readyAt&&Date.parse(r.readyAt)>Date.parse(a.at)&&Date.parse(r.readyAt)<=Date.parse(b.at));const waited=eligible.filter(r=>r.primeiroSlotPossivel&&Date.parse(r.primeiroSlotPossivel)<=Date.parse(b.at)&&(!r.enviadoEm||Date.parse(r.enviadoEm)>Date.parse(b.at)));const captureCount=buffers.filter(x=>x.workspace===workspace&&x.capturedAt&&Date.parse(x.capturedAt)>Date.parse(a.at)&&Date.parse(x.capturedAt)<=Date.parse(b.at)).length;const offerCount=offers.filter(x=>x.workspace===workspace&&x.capturedAt&&Date.parse(x.capturedAt)>Date.parse(a.at)&&Date.parse(x.capturedAt)<=Date.parse(b.at)).length;let classification='INDETERMINADO';if(waited.length)classification='OFERTA ESPERANDO ALÉM DO SLOT';else if(!eligible.length)classification='SEM OFERTA ELEGÍVEL';else if(eligible.every(r=>r.primeiroSlotPossivel&&Date.parse(r.primeiroSlotPossivel)>Date.parse(b.at)))classification='COOLDOWN LEGÍTIMO';else if(eligible.every(r=>r.classificacao==='B'))classification='BLOQUEIO LEGÍTIMO';gaps.push({workspace,destinationId,from:a.at,to:b.at,gapMinutes:Math.round(gap/60000),captureCount,offersFromCaptures:offerCount,applicableOffers:eligible.length,eligibleWaiting:waited.map(r=>({offerId:r.offerId,filaItemId:r.filaItemIds[0]||null,readyAt:r.readyAt,firstSlot:r.primeiroSlotPossivel})),classification});}}
+            return {thresholds,gaps};
+          }
+          function gapMetricsSafe(resultRows, buffers, offers, sendAll) {
+            const byDest=new Map();
+            for(const s of sendAll){if(!s.at||!s.workspace||!s.destinationId||!s.matched.length)continue;const k=s.workspace+'|'+s.destinationId;if(!byDest.has(k))byDest.set(k,[]);byDest.get(k).push(s);}
+            const gaps=[];const thresholds={over10:0,over20:0,over30:0,over60:0};
+            for(const [key,list] of byDest){
+              list.sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));
+              for(let i=1;i<list.length;i++){
+                const a=list[i-1],b=list[i],from=Date.parse(a.at),to=Date.parse(b.at),gap=to-from;
+                if(gap>10*60000)thresholds.over10++;if(gap>20*60000)thresholds.over20++;if(gap>30*60000)thresholds.over30++;if(gap>60*60000)thresholds.over60++;if(gap<=20*60000)continue;
+                const [workspace,destinationId]=key.split('|');
+                const candidates=resultRows.filter(r=>r.workspace===workspace&&r.destinoId===destinationId&&r.applicable===true&&r.readyAt&&Date.parse(r.readyAt)<=to&&(!r.enviadoEm||Date.parse(r.enviadoEm)>=to));
+                const unknownCandidates=resultRows.filter(r=>r.workspace===workspace&&r.destinoId===destinationId&&r.applicable===true&&!r.readyAt&&(!r.enviadoEm||Date.parse(r.enviadoEm)>=to)&&[r.capturedAt,r.offerCreatedAt].some(t=>t&&Date.parse(t)<=to));
+                const waited=candidates.filter(r=>r.primeiroSlotPossivel&&Date.parse(r.primeiroSlotPossivel)<=to&&(!r.enviadoEm||Date.parse(r.enviadoEm)-Date.parse(r.primeiroSlotPossivel)>60000));
+                const captureCount=buffers.filter(x=>x.workspace===workspace&&x.capturedAt&&Date.parse(x.capturedAt)>from&&Date.parse(x.capturedAt)<=to).length;
+                const offerCount=offers.filter(x=>x.workspace===workspace&&x.capturedAt&&Date.parse(x.capturedAt)>from&&Date.parse(x.capturedAt)<=to).length;
+                let classification='INDETERMINADO';
+                if(waited.length)classification='OFERTA ESPERANDO ALÉM DO SLOT';
+                else if(unknownCandidates.length)classification='INDETERMINADO';
+                else if(!candidates.length)classification='SEM OFERTA ELEGÍVEL';
+                else if(candidates.every(r=>r.primeiroSlotPossivel&&Date.parse(r.primeiroSlotPossivel)>to))classification='COOLDOWN LEGÍTIMO';
+                else if(candidates.every(r=>r.classificacao==='C'))classification='BLOQUEIO LEGÍTIMO';
+                gaps.push({workspace,destinationId,from:a.at,to:b.at,gapMinutes:Math.round(gap/60000),captureCount,offersFromCaptures:offerCount,applicableOffers:new Set(candidates.map(r=>r.offerId)).size,eligibleWaiting:waited.map(r=>({offerId:r.offerId,filaItemId:r.filaItemIds[0]||null,readyAt:r.readyAt,firstSlot:r.primeiroSlotPossivel,sendAt:r.enviadoEm,waitMs:r.esperaAposPrimeiroSlotMs})),offersWithUnknownReadiness:unknownCandidates.map(r=>({offerId:r.offerId,capturedAt:r.capturedAt,offerCreatedAt:r.offerCreatedAt})),classification});
+              }
+            }
+            return {thresholds,gaps};
+          }
+          function gapMetricsDurable(resultRows, offers, logicalSends) {
+            const byDest=new Map();for(const s of logicalSends){const k=s.workspace+'|'+s.destinationKey;if(!byDest.has(k))byDest.set(k,[]);byDest.get(k).push(s);}
+            const thresholds={over10:0,over20:0,over30:0,over60:0},gaps=[];
+            for(const [key,list] of byDest){list.sort((a,b)=>Date.parse(a.confirmedAt)-Date.parse(b.confirmedAt));for(let i=1;i<list.length;i++){const a=list[i-1],b=list[i],from=Date.parse(a.confirmedAt),to=Date.parse(b.confirmedAt),gap=to-from;if(gap>10*60000)thresholds.over10++;if(gap>20*60000)thresholds.over20++;if(gap>30*60000)thresholds.over30++;if(gap>60*60000)thresholds.over60++;if(gap<=20*60000)continue;const workspace=a.workspace,destinationKey=a.destinationKey;
+              const candidates=resultRows.filter(r=>r.workspace===workspace&&r.applicable===true&&r.readyAt&&Date.parse(r.readyAt)<=to&&(destinoCorresponde(destinationKey,r.destinoId)||(!r.destinoId&&offers.filter(o=>o.workspace===workspace&&o.offerId===r.offerId).length===1)));
+              const eligible=candidates.filter(r=>r.primeiroSlotPossivel&&Date.parse(r.primeiroSlotPossivel)<=to);const waited=eligible.filter(r=>{const send=logicalSends.find(s=>s.offerKey===r.workspace+'|'+r.offerId&&s.destinationKey===destinationKey);return !send||Date.parse(send.confirmedAt)-Date.parse(r.primeiroSlotPossivel)>60000;});
+              const unknown=candidates.filter(r=>!r.primeiroSlotPossivel);let classification='INDETERMINADO';if(waited.length)classification='OFERTA ESPERANDO ALÉM DO SLOT';else if(unknown.length)classification='INDETERMINADO';else if(!candidates.length)classification='SEM OFERTA ELEGÍVEL';
+              gaps.push({workspace,destinationKey,from:a.confirmedAt,to:b.confirmedAt,gapMinutes:Math.round(gap/60000),applicableOffers:new Set(candidates.map(r=>r.offerId)).size,eligibleWaiting:waited.map(r=>({offerId:r.offerId,readyAt:r.readyAt,firstSlot:r.primeiroSlotPossivel})),offersWithUnknownSlot:unknown.map(r=>({offerId:r.offerId,readyAt:r.readyAt})),classification});}}
+            return {thresholds,gaps};
+          }
+          function median(nums){const a=nums.filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return null;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;}
+          async function main() {
+            const backendSha=command('git',['-C',BACKEND,'rev-parse','HEAD']).stdout.trim();
+            if(backendSha!==EXPECTED){console.log('AUDIT_FATAL=backend_sha_changed_before_query');process.exitCode=2;return;}
+            const syntheticTests=executarTestesSinteticos();console.log('SYNTHETIC_TESTS '+JSON.stringify(syntheticTests));
+            const db=dbRead();if(!db.ok){console.log('DB_STATUS '+JSON.stringify({ok:false,reason:db.reason,missingTables:db.missingTables||[],missingColumns:db.missingColumns||[]}));}
+            const buffers=db.ok?db.buffers:[],events=db.ok?db.events:[],jobs=db.ok?db.jobs:[],rawOffers=db.ok?db.offers:[];
+            const chains=montarCadeiasCompletas(db.ok?db:{});
+            const strictOffers=chains.completas.map(c=>c.offer),strictJobs=chains.completas.map(c=>c.job),strictEvents=chains.completas.map(c=>c.event),strictBuffers=chains.completas.map(c=>c.buffer);
+            const offers=chains.completas.map(c=>{const sources=[c.offer,c.event,c.job,c.buffer].filter(Boolean);const targets=[...new Set(sources.flatMap(x=>arr(x.targets).map(txt)).filter(Boolean))];const queues=new Set([c.offer.queueItemId,c.job.queueItemId,...arr(db.commercialEvents).filter(e=>txt(e.workspace)===c.workspace&&(txt(e.offerId)===c.offerId||txt(e.jobId)===c.jobId)).map(e=>e.queueItemId)].map(txt).filter(Boolean));return {key:c.workspace+'|'+c.offerId,workspace:c.workspace,bufferId:c.bufferId,eventId:c.eventId,jobIds:[c.jobId],offerId:c.offerId,marketplace:txt(c.offer.marketplace||c.job.marketplace),origin:txt(c.offer.origin||c.event.origin||c.job.origin),capturedAt:c.buffer.capturedAt||c.event.capturedAt||null,offerCreatedAt:c.offer.createdAt||null,category:txt(c.offer.category),targets,hasTargetSnapshot:sources.some(x=>x.hasTargetSnapshot===true),ids:{offer:[c.offerId],job:[c.jobId],event:[c.eventId],buffer:[c.bufferId],queue:[...queues]},queueItemIds:queues,queueEvidence:[],files:[],logEvents:[],diagnostics:[],slots:[],sends:[],config:{destinations:[]}};});
+            const docs=[],evidence={files:[],readErrors:[],parseErrors:[],skippedLarge:[]};
+            const workspaces=[...new Set(offers.map(x=>x.workspace).filter(Boolean))];
+            for(const w of workspaces)listFilesForWorkspace(w,docs,evidence);
+            for(const name of ['destinos.json','destinos_clientes.json','configs_clientes.json'])readGlobalConfig(path.join(DATA,name),docs,evidence);
+            for(const doc of docs){if(!doc.workspace||!doc.relative.includes('/clientes/'))continue;const queueFamily=/fila-viva\.json|fila-projecao-leve\.json|fila-terminal-index\.json|fila-historico-(?:leve-)?incremental/.test(doc.relative);for(const root of doc.parsed)scanObject(root,'',(node,p)=>{for(const o of matchingOffers(node,doc.workspace,offers,queueFamily,p)){const summary=queueSummary(node,doc.relative,queueFamily);if(queueFamily&&node.id!=null&&!summary.filaItemId){summary.filaItemId=txt(node.id);o.queueItemIds.add(txt(node.id));}else if(summary.filaItemId)o.queueItemIds.add(txt(summary.filaItemId));const sig=JSON.stringify(summary);if(o.queueEvidence.length<60&&!o.queueEvidence.some(x=>JSON.stringify(x)===sig))o.queueEvidence.push(summary);if(!o.files.includes(doc.relative))o.files.push(doc.relative);}});}
+            const logs=await scanLogs(offers,new Set(offers.flatMap(x=>[...x.queueItemIds])));
+            if(!logs.ok)console.log('LOG_STATUS '+JSON.stringify({ok:false,code:logs.code,lines:logs.lineCount,relevant:logs.relevant}));
+            const strictDb=db.ok?{...db,buffers:strictBuffers,events:strictEvents,jobs:strictJobs,offers:strictOffers}:{buffers:[],events:[],jobs:[],offers:[]};
+            const built=buildRows(strictDb,docs,evidence,logs,docs);
+            const rowOffers=built.offers.length?built.offers:offers;
+            const rows=built.resultRows;
+            const durable=construirFatosDuraveis(db.ok?db:{},chains.completas,rowOffers);
+            for(const r of rows){const candidates=durable.logicalSends.filter(s=>s.offerKey===r.workspace+'|'+r.offerId);const send=candidates.find(s=>destinoCorresponde(s.destinationKey,r.destinoId))||(candidates.length===1?candidates[0]:null);r.enviadoEm=send?iso(send.confirmedAt):null;r.destinationKey=send?send.destinationKey:null;r.confirmacoesPorAlvo=send?send.targets.length:0;r.providerConfirmado=Boolean(send&&send.targets.some(t=>t.providerMessageId));r.executorCheckpointConfirmado=Boolean(send);if(send&&!r.channel)r.channel=send.channel||null;if(r.primeiroSlotPossivel&&r.enviadoEm)r.esperaAposPrimeiroSlotMs=Date.parse(r.enviadoEm)-Date.parse(r.primeiroSlotPossivel);}
+            const gaps=gapMetricsDurable(rows,rowOffers,durable.logicalSends);
+            const uniqueSent=durable.offersSent;
+            const applicable=new Set(rows.filter(r=>r.applicable===true).map(r=>r.workspace+'|'+r.offerId));
+            const unknownApplicable=new Set(rows.filter(r=>r.applicable==null).map(r=>r.workspace+'|'+r.offerId));
+            const captureToOffer=buffers.length?100*rowOffers.length/buffers.length:null;
+            const lowConversion=captureToOffer!=null&&captureToOffer<=16.4;
+            const readinessUnknown=rows.some(r=>r.applicable===true&&!r.readyAt&&!r.terminalized);
+            const applicabilityComplete=rows.length>0&&rows.every(r=>r.applicable!==null);
+            for(const skipped of evidence.skippedLarge)evidence.parseErrors.push({file:skipped.file,line:null,type:'file_skipped',optional:skipped.optional===true,critical:skipped.optional!==true});
+            const evidenceGates={queryGates:{buffers:db.ok,events:db.ok,jobs:db.ok,offers:db.ok,checkpoints:db.ok,commercialEvents:db.ok},chainComplete:chains.populationConcluded===true,parseErrors:evidence.parseErrors,readErrors:evidence.readErrors,durablePrimary:true,correlatedGaps:durable.logicalSends.every(s=>Boolean(s.offerKey))};
+            const enough=calcularEvidenceComplete(evidenceGates)&&rowOffers.length>0&&rows.length>0&&applicabilityComplete&&!readinessUnknown;
+            const pendingAfterSlot=rows.some(r=>r.classificacao==='D');
+            const waitGap=pendingAfterSlot||gaps.gaps.some(g=>g.classification==='OFERTA ESPERANDO ALÉM DO SLOT');
+            const noEligibleGap=gaps.gaps.some(g=>g.classification==='SEM OFERTA ELEGÍVEL');
+            let classification='E';if(enough){if(waitGap)classification=(lowConversion||noEligibleGap)?'D':'C';else if(lowConversion)classification='A';else if(noEligibleGap)classification='B';}
+            const defect=waitGap;
+            const delays=rows.filter(r=>r.enviadoEm&&r.readyAt).map(r=>Date.parse(r.enviadoEm)-Date.parse(r.readyAt)).filter(x=>Number.isFinite(x)&&x>=0);
+            const slotDelays=rows.map(r=>r.esperaAposPrimeiroSlotMs).filter(x=>Number.isFinite(x)&&x>=0);
+            const offerToApplicable=rowOffers.length?100*applicable.size/rowOffers.length:null;const applicableToSend=applicable.size?100*new Set(rows.filter(r=>r.applicable===true&&r.enviadoEm).map(r=>r.workspace+'|'+r.offerId)).size/applicable.size:null;
+            const channels={};for(const s of durable.logicalSends){const k=s.channel||'INDETERMINADO';channels[k]=(channels[k]||0)+1;}
+            const classificationLabel=({A:'BAIXA VAZÃO EXPLICADA PELO BAIXO APROVEITAMENTO',B:'DESTINO OCIOSO POR FALTA DE OFERTA ELEGÍVEL',C:'OFERTA ELEGÍVEL ESPERANDO ALÉM DO SLOT',D:'MISTO',E:'AINDA INDETERMINADO'})[classification];
+            const summary={windowStart:START,windowEnd:new Date().toISOString(),productionSha:backendSha,runnerRef:process.env.GITHUB_REF||null,captures:buffers.length,offers:rowOffers.length,incompleteChains:chains.incompletas.length,offersWithApplicableDestination:applicable.size,offersApplicabilityUnknown:unknownApplicable.size,offersSent:uniqueSent.size,confirmacoesPorAlvo:durable.targetConfirmations.length,enviosLogicosPorDestino:durable.logicalSends.length,ofertasComAlgumEnvio:uniqueSent.size,uncorrelatedDurableCheckpoints:durable.uncorrelatedCheckpoints,providerMessageIdPresent:durable.targetConfirmations.filter(s=>s.providerMessageId).length,byChannel:channels,bufferToOfferPercent:captureToOffer==null?null:Number(captureToOffer.toFixed(1)),previousBufferToOfferReferencePercent:16.4,offerToApplicablePercent:offerToApplicable==null?null:Number(offerToApplicable.toFixed(1)),applicableToSendPercent:applicableToSend==null?null:Number(applicableToSend.toFixed(1)),gaps:gaps.thresholds,gapsOver20Details:gaps.gaps,medianReadyToSendMs:median(delays),maxWaitAfterFirstSlotMs:slotDelays.length?Math.max(...slotDelays):null,classification,defectProven:defect,evidenceComplete:enough,evidenceErrors:[...arr(db.evidenceErrors).map(x=>({type:'query_error',detail:x})),...evidence.readErrors,...evidence.parseErrors],dbStatus:{ok:db.ok,reason:db.reason||null},logStatus:{ok:logs.ok,lines:logs.lineCount,relevant:logs.relevant,matched:logs.targetEvents.length,targetEventsTruncated:logs.truncated,parseErrors:logs.parseErrors,role:'tertiary_only'},files:{read:evidence.files.length,errors:evidence.readErrors,parseErrors:evidence.parseErrors,skipped:evidence.skippedLarge.length}};
+            console.log('VAZAO_CLASSIFICATION '+JSON.stringify({classification,label:classificationLabel,defectProven:defect,evidenceComplete:enough}));
+            console.log('VAZAO_SUMMARY '+JSON.stringify(summary));
+            console.log('VAZAO_OFFERS '+JSON.stringify(rowOffers.map(o=>({workspace:o.workspace,bufferId:o.bufferId||null,eventId:o.eventId||null,jobIds:o.jobIds,offerId:o.offerId,marketplace:o.marketplace||null,capturedAt:o.capturedAt,offerCreatedAt:o.offerCreatedAt,contractDestinoIds:o.targets,contractDestinoSnapshotPresent:o.hasTargetSnapshot,queueItemIds:[...o.queueItemIds],queueSources:[...new Set(o.queueEvidence.map(x=>x.source))]}))));
+            console.log('VAZAO_INCOMPLETE_CHAINS '+JSON.stringify(chains.incompletas.map(x=>({workspace:x.workspace,bufferId:x.bufferId,eventId:x.eventId,jobId:x.jobId,offerId:x.offerId,reasons:x.reasons}))));
+            console.log('VAZAO_DURABLE_SENDS '+JSON.stringify(durable.logicalSends.map(x=>({workspace:x.workspace,queueItemId:x.queueItemId,destinationKey:x.destinationKey,destinationId:x.destinationId,channel:x.channel,offerId:x.offerId,confirmedAt:x.confirmedAt,targetConfirmations:x.targets.length}))));
+            for(const r of rows)console.log('VAZAO_DESTINATION '+JSON.stringify(r));
+            console.log('VAZAO_GAPS '+JSON.stringify(gaps.gaps));
+            console.log('VAZAO_DECISION '+JSON.stringify({classification,defectProven:defect,bufferToOfferPercent:captureToOffer,applicabilityUnknownOffers:unknownApplicable.size,missingEvidence:!enough?{database:!db.ok,offers:rowOffers.length===0,queueReadiness:readinessUnknown,applicability:!applicabilityComplete,chainPopulationNotConcluded:chains.populationConcluded!==true,fileReadErrors:evidence.readErrors.length,parseErrors:evidence.parseErrors,filesSkipped:evidence.skippedLarge.length}:null}));
+            const backendAfter=command('git',['-C',BACKEND,'rev-parse','HEAD']).stdout.trim();
+            const idsAfter=command('docker',['compose','-f',COMPOSE,'ps','--status','running','-q','backend','postgres'],{cwd:INFRA}).stdout.trim().split(/\r?\n/).filter(Boolean).sort();
+            const idsBefore=[process.env.AUDIT_BACKEND_ID,process.env.AUDIT_POSTGRES_ID].filter(Boolean).sort();
+            const stability={backendShaBefore:backendSha,backendShaAfter:backendAfter,containerIdsBefore:idsBefore,containerIdsAfter:idsAfter,unchanged:backendAfter===EXPECTED&&idsBefore.join(',')===idsAfter.join(',')};
+            console.log('PRODUCTION_STABILITY '+JSON.stringify(stability));
+            if(!stability.unchanged)process.exitCode=3;
+          }
+          main().catch(()=>{console.error('AUDIT_FATAL=unexpected_read_only_audit_error');process.exitCode=1;});
+          NODE
+          then
+            audit_rc=0
+          else
+            audit_rc=$?
+          fi
+          backend_sha_after="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
+          postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
+          printf 'POST_AUDIT_BACKEND_SHA=%s\nPOST_AUDIT_BACKEND_ID=%s\nPOST_AUDIT_POSTGRES_ID=%s\n' "$backend_sha_after" "$backend_id_after" "$postgres_id_after"
+          [[ "$backend_sha_after" == "$EXPECTED_SHA" && "$backend_id_after" == "$backend_id" && "$postgres_id_after" == "$postgres_id" ]] || { echo 'POST_AUDIT_STABILITY=CHANGED'; exit 3; }
+          echo 'POST_AUDIT_STABILITY=UNCHANGED; backend SHA and running containers preserved.'
+          exit "$audit_rc"
