@@ -42,6 +42,7 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+          const EXPECTED_SHA = '568c4fe1f848a9ad695929dd0d5706defa822ad7';
 
           const WORKSPACE = 'user_pss60lus';
           const DESTINATIONS = {
