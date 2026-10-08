@@ -1,0 +1,159 @@
+name: Auditoria duravel read-only Clonador pos-deploy 2026-10-08
+
+on:
+  push:
+    branches:
+      - audit/clonador-duravel-2026-10-08
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-clonador-duravel-2026-10-08
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Preflight e auditoria somente leitura
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          readonly EXPECTED_SHA='568c4fe1f848a9ad695929dd0d5706defa822ad7'
+          readonly BACKEND='/opt/optimus/backend'
+          readonly INFRA='/opt/optimus/infra'
+          readonly COMPOSE='/opt/optimus/infra/compose.yml'
+          [[ "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=event_or_branch'; exit 2; }
+          [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=path'; exit 2; }
+          backend_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          printf 'PREFLIGHT_BACKEND_SHA=%s\n' "$backend_sha"
+          [[ "$backend_sha" == "$EXPECTED_SHA" ]] || { echo 'PREFLIGHT_FAIL=backend_sha'; exit 2; }
+          cd "$INFRA"
+          services="$(docker compose -f "$COMPOSE" config --services)"
+          grep -Fxq backend <<< "$services" && grep -Fxq postgres <<< "$services" || { echo 'PREFLIGHT_FAIL=services'; exit 2; }
+          backend_before="$(docker compose -f "$COMPOSE" ps -q backend)"
+          postgres_before="$(docker compose -f "$COMPOSE" ps -q postgres)"
+          [[ -n "$backend_before" && -n "$postgres_before" ]] || { echo 'PREFLIGHT_FAIL=containers'; exit 2; }
+          echo 'PREFLIGHT=PASS; SHA e servicos confirmados.'
+          if docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
+          'use strict';
+          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+          const DEPLOY = '2026-10-08T18:09:32Z';
+          const WIN0 = '2026-10-08T18:52:05.855Z';
+          const WIN1 = '2026-10-08T19:22:07.639Z';
+          const TABLES = ['clonador_grupos_buffer','engine_eventos_brutos','engine_links','engine_jobs_cliente','engine_ofertas'];
+          const HOSTS = ['mercadolivre.com.br','mercadolivre.com','mercadolibre.com.br','mercadolibre.com','amazon.com.br','amazon.com','amzn.to','shopee.com.br','shopee.com','shp.ee','aliexpress.com','magazineluiza.com.br','magalu.com','magazinevoce.com.br','kabum.com.br','awin.com','awin1.com'];
+          const txt = v => v == null ? '' : String(v).trim();
+          const ids = a => [...new Set(a.map(txt).filter(x => /^\d+$/.test(x)))];
+          function domain(v) {
+            let s = txt(v).toLowerCase(); if (!s) return null;
+            try { s = /^https?:\/\//.test(s) ? new URL(s).hostname : s.split(/[/?#]/,1)[0]; } catch { return null; }
+            return s.replace(/^www\./,'').replace(/:\d+$/,'') || null;
+          }
+          function kind(v) {
+            const d = domain(v); if (!d) return 'SEM LINK';
+            if (d === 'ofertou.me' || d.endsWith('.ofertou.me')) return 'ofertou.me';
+            return HOSTS.some(h => d === h || d.endsWith('.' + h)) ? 'SUPORTADO' : 'OUTRO/NÃO IDENTIFICADO';
+          }
+          function captureDomains(value) {
+            const arr = Array.isArray(value) ? value : [];
+            const ds = arr.map(x => typeof x === 'string' ? x : ['url','urlOriginal','url_original','urlExpandida','url_expandida','href','link'].map(k => x && x[k]).find(Boolean)).map(domain).filter(Boolean);
+            return [...new Set(ds)].map(d => ({domain:d, classificacao:kind(d)}));
+          }
+          async function q(label, sql, params=[]) {
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked');
+            const r = await queryEngineShadow(sql, params, {timeoutSqlMs:10000});
+            if (!r || !r.ok) throw new Error(label + ':' + txt(r && r.motivo || 'read_failed'));
+            return r.resultado && r.resultado.rows || [];
+          }
+          function num(v) { if (v == null || txt(v) === '') return null; const n=Number(v); return Number.isSafeInteger(n) && n >= 0 ? n : null; }
+          function reasonKind(s) {
+            const x = txt(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+            if (/erro|exception|timeout|falha_tecnica|importador.*falh|indisponivel/.test(x)) return 'TECH';
+            if (/marketplace_nao_detectado|redirect.*nao.*permit|sem_link|sem link|dedupe|duplicad|evento_duplicado|origem_nao_permitida|nao_compativel/.test(x)) return 'BLOCK';
+            return 'OTHER';
+          }
+          function classify(r) {
+            if (r.events.length && r.jobs.length && r.offers.length) return 'A';
+            if (r.events.length && r.jobs.length && !r.offers.length) {
+              const ks = r.reasons.map(reasonKind);
+              if (ks.includes('TECH')) return 'C';
+              if (ks.length && ks.every(x => x === 'BLOCK')) return 'B';
+              return 'G';
+            }
+            if (r.events.length && !r.jobs.length) return 'D';
+            if (!r.events.length && !r.jobs.length && !r.offers.length) return r.hasLink ? 'E' : 'F';
+            return 'G';
+          }
+          function counter(b, n, mapped) {
+            const c=num(b.c), e=num(b.e);
+            if (c == null || e == null) return 'SEM AMOSTRA';
+            if (!mapped) return 'SEM EVENTO MAPEADO';
+            const d = txt(b.d).toLowerCase();
+            if (['true','t','1','sim'].includes(d)) return c === 0 && e === n ? 'CORRETO' : 'DIVERGENTE';
+            if (['false','f','0','nao','não'].includes(d)) return c === n && e === 0 ? 'CORRETO' : 'DIVERGENTE';
+            return c + e === n ? 'CORRETO' : 'DIVERGENTE';
+          }
+          async function main() {
+            const schema = await q('schema',"SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_name=ANY($1::text[])",[TABLES]);
+            const found = new Set(schema.map(x => x.table_name));
+            const missing = TABLES.filter(x => !found.has(x));
+            if (missing.length) { console.log('AUDIT_SCHEMA_UNAVAILABLE',JSON.stringify({missing})); process.exitCode=2; return; }
+            const buffers = await q('buffer',"SELECT id::text AS id,cliente_id,capturado_em,status,links,metadata #>> '{clonadorGruposBridge,eventoId}' AS bridge_event_id,metadata #>> '{clonadorGruposBridge,jobsCriados}' AS c,metadata #>> '{clonadorGruposBridge,jobsExistentes}' AS e,metadata #>> '{clonadorGruposBridge,duplicado}' AS d FROM clonador_grupos_buffer WHERE capturado_em >= $1::timestamptz ORDER BY capturado_em,id",[DEPLOY]);
+            const bridgeIds = ids(buffers.map(x => x.bridge_event_id));
+            const events = await q('events',"SELECT id::text AS id,capturado_em,criado_em,origem,fonte,origem_tipo,marketplace_detectado,COALESCE(metadata #>> '{clonadorGrupos,bufferId}',metadata #>> '{clonadorGruposBridge,bufferId}') AS buffer_id FROM engine_eventos_brutos WHERE (capturado_em >= $1::timestamptz OR criado_em >= $1::timestamptz) AND (origem='clonador_grupos' OR fonte='clonador_grupos' OR metadata ? 'clonadorGrupos' OR metadata ? 'clonadorGruposBridge' OR id=ANY($2::bigint[])) ORDER BY COALESCE(capturado_em,criado_em),id",[DEPLOY,bridgeIds]);
+            const eventIds = ids([...events.map(x => x.id),...bridgeIds]);
+            const [links,jobs] = eventIds.length ? await Promise.all([
+              q('links',"SELECT evento_id::text AS evento_id,dominio_original,dominio_final,redirect_ok,motivo_redirect,marketplace_detectado FROM engine_links WHERE evento_id=ANY($1::bigint[]) ORDER BY evento_id,id",[eventIds]),
+              q('jobs',"SELECT id::text AS id,evento_id::text AS evento_id,cliente_id,status,motivo_final,marketplace_detectado,marketplace,oferta_id::text AS oferta_id,criado_em,atualizado_em FROM engine_jobs_cliente WHERE evento_id=ANY($1::bigint[]) ORDER BY evento_id,id",[eventIds])
+            ]) : [[],[]];
+            const offerIds = ids(jobs.map(x => x.oferta_id));
+            const offers = offerIds.length ? await q('offers',"SELECT id::text AS id,evento_id::text AS evento_id,marketplace,origem,status,motivo_status,criada_em FROM engine_ofertas WHERE id=ANY($1::bigint[]) ORDER BY criada_em,id",[offerIds]) : [];
+            const group = (rows,key) => { const m=new Map(); for (const x of rows) { const k=txt(x[key]); if(!m.has(k))m.set(k,[]); m.get(k).push(x); } return m; };
+            const lb=group(links,'evento_id'), jb=group(jobs,'evento_id'), ob=new Map(offers.map(x=>[txt(x.id),x]));
+            const records = buffers.map(b => {
+              const bid=txt(b.bridge_event_id);
+              const es=events.filter(x=>txt(x.buffer_id)===txt(b.id)||(bid&&txt(x.id)===bid));
+              const eids=ids([...es.map(x=>x.id),bid]);
+              const ls=eids.flatMap(x=>lb.get(x)||[]), js=eids.flatMap(x=>jb.get(x)||[]);
+              const os=[...new Map(js.map(j=>ob.get(txt(j.oferta_id))).filter(Boolean).map(o=>[txt(o.id),o])).values()];
+              const cd=captureDomains(b.links), hasLink=cd.length>0||ls.some(x=>domain(x.dominio_original)||domain(x.dominio_final));
+              const reasons=js.map(x=>txt(x.motivo_final)).filter(Boolean);
+              const r={bufferId:txt(b.id),workspace:txt(b.cliente_id),capturedAt:b.capturado_em?new Date(b.capturado_em).toISOString():null,inVivaWindow:!!b.capturado_em&&Date.parse(b.capturado_em)>=Date.parse(WIN0)&&Date.parse(b.capturado_em)<=Date.parse(WIN1),status:b.status,captureLinks:{count:Array.isArray(b.links)?b.links.length:0,domains:cd},bridge:{eventoId:bid||null,jobsCriados:num(b.c),jobsExistentes:num(b.e),duplicado:b.d,counterStatus:counter(b,js.length,eids.length>0)},eventIds:eids,events:es.map(x=>({eventoId:txt(x.id),capturadoEm:x.capturado_em,criadoEm:x.criado_em,origem:x.origem,fonte:x.fonte,origemTipo:x.origem_tipo,marketplaceDetectado:x.marketplace_detectado,bufferId:x.buffer_id})),engineLinks:ls.map(x=>({dominioOriginal:domain(x.dominio_original),classOriginal:kind(x.dominio_original),dominioFinal:domain(x.dominio_final),classFinal:kind(x.dominio_final),redirectOk:x.redirect_ok,motivoRedirect:x.motivo_redirect,marketplaceDetectado:x.marketplace_detectado})),jobs:js.map(x=>({jobId:txt(x.id),eventoId:txt(x.evento_id),clienteId:x.cliente_id,status:x.status,motivoFinal:x.motivo_final,marketplaceDetectado:x.marketplace_detectado,marketplace:x.marketplace,ofertaId:x.oferta_id,criadoEm:x.criado_em,atualizadoEm:x.atualizado_em})),offers:os.map(x=>({ofertaId:txt(x.id),eventoId:x.evento_id,marketplace:x.marketplace,origem:x.origem,status:x.status,motivoStatus:x.motivo_status,criadaEm:x.criada_em})),reasons,hasLink};
+              r.classification=classify(r); return r;
+            });
+            const counts=Object.fromEntries('ABCDEFG'.split('').map(k=>[k,records.filter(x=>x.classification===k).length]));
+            const comparable=records.filter(x=>['CORRETO','DIVERGENTE'].includes(x.bridge.counterStatus));
+            const counterProof=!comparable.length?'SEM AMOSTRA':comparable.every(x=>x.bridge.counterStatus==='CORRETO')?'SIM':'NÃO';
+            const noOffer={}; for(const j of jobs.filter(x=>!x.oferta_id)){const k=txt(j.motivo_final)||'sem_motivo_final';noOffer[k]=(noOffer[k]||0)+1;}
+            const candidates=[];
+            for(const r of records.filter(x=>x.classification==='A')){
+              const supportedCapture=r.captureLinks.domains.some(x=>x.classificacao==='SUPORTADO');
+              const supportedFinal=r.engineLinks.some(x=>x.redirectOk===true&&x.classFinal==='SUPORTADO');
+              if(!supportedCapture&&!supportedFinal)continue;
+              for(const j of r.jobs.filter(x=>x.ofertaId)){const o=r.offers.find(x=>x.ofertaId===j.ofertaId);if(o)candidates.push({bufferId:r.bufferId,eventoId:j.eventoId,jobId:j.jobId,ofertaId:o.ofertaId,workspace:r.workspace,jobClienteId:j.clienteId,marketplace:o.marketplace||j.marketplace||j.marketplaceDetected||null,capturadoEm:r.capturedAt,ofertaCriadaEm:o.criadaEm});}
+            }
+            candidates.sort((a,b)=>Date.parse(b.ofertaCriadaEm||b.capturadoEm||0)-Date.parse(a.ofertaCriadaEm||a.capturadoEm||0));
+            const mapped=new Set(records.flatMap(x=>x.eventIds));
+            const orphans=events.filter(x=>!mapped.has(txt(x.id))).map(x=>({eventoId:txt(x.id),capturadoEm:x.capturado_em,criadoEm:x.criado_em,origem:x.origem,fonte:x.fonte,origemTipo:x.origem_tipo,marketplaceDetectado:x.marketplace_detectado,bufferId:x.buffer_id}));
+            console.log('AUDIT_SUMMARY',JSON.stringify({deploy:DEPLOY,vivaWindow:{start:WIN0,end:WIN1},bufferPostDeploy:buffers.length,bufferInVivaWindow:records.filter(x=>x.inVivaWindow).length,bufferWithLink:records.filter(x=>x.captureLinks.domains.length).length,bufferWithoutLink:records.filter(x=>!x.captureLinks.domains.length).length,engineEventsPostDeploy:events.length,realJobs:jobs.length,realOffersFromJobs:offers.length,bridgeCountersProven:counterProof,bridgeCounterComparableBuffers:comparable.length,bridgeCounterMismatches:comparable.filter(x=>x.bridge.counterStatus==='DIVERGENTE').length,classifications:counts,noOfferJobReasons:noOffer,candidatePositiveNaturalFound:candidates.length>0,candidateCount:candidates.length}));
+            console.log('AUDIT_BUFFER_DETAILS',JSON.stringify(records));
+            console.log('AUDIT_ORPHAN_ENGINE_EVENTS',JSON.stringify(orphans));
+            console.log('AUDIT_CANDIDATE',JSON.stringify(candidates[0]||null));
+          }
+          main().catch(e=>{console.error('AUDIT_FATAL',txt(e&&e.message).slice(0,180));process.exitCode=1;}).finally(async()=>{try{const p=getEngineShadowPool();if(p)await p.end();}catch{console.error('AUDIT_POOL_CLOSE=failed');}});
+          NODE
+          then
+            audit_status=0
+          else
+            audit_status=$?
+          fi
+          backend_sha_after="$(git -C "$BACKEND" rev-parse HEAD)"
+          backend_after="$(docker compose -f "$COMPOSE" ps -q backend)"
+          postgres_after="$(docker compose -f "$COMPOSE" ps -q postgres)"
+          if [[ "$backend_sha_after" != "$EXPECTED_SHA" || "$backend_after" != "$backend_before" || "$postgres_after" != "$postgres_before" ]]; then echo 'POST_AUDIT_STABILITY=CHANGED'; exit 3; fi
+          echo 'POST_AUDIT_STABILITY=UNCHANGED; backend SHA e containers preservados.'
+          if [[ "$audit_status" -ne 0 ]]; then printf 'AUDIT_EXIT_STATUS=%s\n' "$audit_status"; exit "$audit_status"; fi
