@@ -1,0 +1,68 @@
+name: Auditoria focal do caminho de imagem 2026-10-07
+
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+  workflow_dispatch:
+
+jobs:
+  image-root-cause:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Production target preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo runner_name=$RUNNER_NAME
+          echo hostname=$(hostname)
+          echo today_local=$(TZ=America/Sao_Paulo date -Is)
+          echo cutoff_utc=2026-10-07T23:52:05Z
+          test -d /opt/optimus/backend && echo path_ok=/opt/optimus/backend
+          test -d /opt/optimus/infra && echo path_ok=/opt/optimus/infra
+          test -d /opt/optimus/data && echo path_ok=/opt/optimus/data
+          printf 'production_head='; git -C /opt/optimus/backend rev-parse HEAD
+      - name: Read-only image root-cause aggregation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --max-old-space-size=4096 <<'NODE'
+          const fs=require('fs'), path=require('path');
+          const START=Date.parse('2026-10-07T03:00:00Z');
+          const CUTOFF=Date.parse('2026-10-07T23:52:05Z');
+          const workspaces=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'];
+          const root='/opt/optimus/data/clientes';
+          const ch=v=>v==null?'':String(v).trim();
+          const ms=v=>{if(v==null||v==='')return NaN; if(typeof v==='number')return v; const n=Date.parse(v); return Number.isFinite(n)?n:NaN;};
+          const inPeriod=v=>{const n=ms(v);return Number.isFinite(n)&&n>=START&&n<=CUTOFF;};
+          const first=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k];}return '';};
+          const offerId=o=>ch(first(o,['offerId','ofertaId','idOferta','trackingId','id','codigoCapturado','codigo']));
+          const nonApplicable=d=>{const s=ch(d&& (d.estado||d.state||d.status||d.statusOperacional||d.motivo)).toLowerCase();return d&&d.aplicavel===false||['nao_compativel','incompativel','nao_aplicavel','bloqueado_repeticao_2h'].some(x=>s.includes(x));};
+          const recs=new Map();
+          function recFor(w,o){const id=offerId(o);if(!id)return null;const key=w+'|'+id;let r=recs.get(key);if(!r){r={workspace:w,offerId:id,objects:[],captures:[],expires:[],firstEval:[],applicable:new Map(),sendEvidence:[],slotSignals:new Set(),slotFields:new Set(),statuses:[],causeSignals:[],fieldValues:[],marketplaces:new Set(),markers:{}};recs.set(key,r);}return r;}
+          function sane(v){if(v==null)return null;if(typeof v==='boolean'||typeof v==='number')return v;if(Array.isArray(v))return {type:'array',length:v.length};if(typeof v==='object')return {type:'object',keys:Object.keys(v).slice(0,12)};let s=String(v).trim();if(!s)return '';if(/^https?:\/\//i.test(s)){try{const u=new URL(s);return 'url:'+u.hostname+u.pathname.slice(0,100);}catch{return 'url:[invalid]';}}if(/^\/?(opt|data|tmp|var)\//i.test(s)||s.includes('/data/imagens')||s.includes('\\data\\imagens'))return 'local-path:'+s.split(/[\\/]/).slice(-2).join('/');return s.length>180?s.slice(0,180)+'…':s;}
+          const keyText=k=>String(k).toLowerCase();
+          function inspect(v,r,depth=0,prefix=''){if(v==null||depth>7)return;if(Array.isArray(v)){for(let i=0;i<Math.min(v.length,40);i++)inspect(v[i],r,depth+1,prefix+'['+i+']');return;}if(typeof v!=='object')return;for(const [k,x] of Object.entries(v)){const p=prefix?prefix+'.'+k:k;const kl=keyText(k);const sv=typeof x==='string'?x.trim():'';const low=sv.toLowerCase();
+              if(/(marketplace|origem|categoria)/i.test(k)&&typeof x!=='object'&&sv)r.marketplaces.add(sv.toLowerCase());
+              if(/(status|estado|motivo|erro|bloqueio|resultado|causa|imagem|image|foto|picture|thumbnail|mime|http|material|fallback|canon|normaliz|selecion|public|arquivo|path|local|url)/i.test(k))r.fieldValues.push({path:p,key:k,value:sane(x),raw:sv});
+              if(/primeiraavaliacao|firstevaluation/i.test(kl)&&sv&&inPeriod(sv))r.firstEval.push(sv);
+              if(/(selecionadaem|selecionadoem|selectedat|slotocupadoem)/i.test(kl)&&inPeriod(x)){r.slotSignals.add('selection_timestamp');r.slotFields.add(p);}
+              if(/(destinosliberados|slotsdisponiveis|destinosdisponiveis)/i.test(kl)&&((Array.isArray(x)&&x.length>0)||Number(x)>0)){r.slotSignals.add('slot_quantity');r.slotFields.add(p);}
+              if(/(slotreal|oportunidade(real)?|liberadoagora|slotantesdodeadline)/i.test(kl)&&((x===true)||low==='true')){r.slotSignals.add('explicit_slot_flag');r.slotFields.add(p);}
+              if(/(status|estado|motivo|erro|bloqueio|resultado|causa)/i.test(k)&&sv&&/(imagem|sem_imagem|nao_publicavel|nao_segura|mime|material|download|fallback|expir|interval|authority|provider|executor)/i.test(low))r.causeSignals.push(sv);
+              inspect(x,r,depth+1,p);
+          }}
+          function addDest(r,d){if(!d||typeof d!=='object')return;const id=ch(d.destinoId||d.id||d.destinationId||d.canalId||d.canal||d.tipo);if(!id||nonApplicable(d))return;const state=ch(d.estado||d.state||d.status||d.statusOperacional||d.motivo);r.applicable.set(id,{tipo:ch(d.tipo||d.canal||d.kind),state});const ts=d.enviadoEm||d.dataEnvio||d.confirmadoEm;if(ts)r.sendEvidence.push({ts,kind:'destination'});const prox=d.proximoEnvioPermitidoEm;if(inPeriod(prox)&&(!d.expiraEm||!Number.isFinite(ms(d.expiraEm))||ms(prox)<=ms(d.expiraEm))){r.slotSignals.add('interval_before_deadline');r.slotFields.add('destinosEstado.proximoEnvioPermitidoEm');}}
+          function process(w,source,v){const arr=Array.isArray(v)?v:[v];for(const wrapper of arr){const o=wrapper&&wrapper.item&&typeof wrapper.item==='object'?wrapper.item:wrapper;if(!o||typeof o!=='object')continue;const r=recFor(w,o);if(!r)continue;r.objects.push({source,o});const cap=first(o,['capturadoEm','capturadaEm','dataCaptura','radarCapturadoEm','criadoEmRadar','dataEntradaFila','criadoEm','dataCriacao']);if(cap)r.captures.push(cap);const exp=first(o,['expiraEm','expiradoEm','finalizadoEm','terminalOcorridoEm']);if(exp)r.expires.push(exp);for(const k of ['primeiraAvaliacaoDestinosEm','primeiraAvaliacaoEm','firstEvaluationAt'])if(o[k]&&inPeriod(o[k]))r.firstEval.push(o[k]);if(o.marketplace)r.marketplaces.add(ch(o.marketplace).toLowerCase());if(o.origem)r.marketplaces.add(ch(o.origem).toLowerCase());if(Array.isArray(o.destinosEstado))for(const d of o.destinosEstado)addDest(r,d);if(Array.isArray(o.destinosEnviados))for(const d of o.destinosEnviados){const ts=d.dataEnvio||d.enviadoEm||d.confirmadoEm;if(ts)r.sendEvidence.push({ts,kind:'durable_destination'});}if(Array.isArray(o.logsEnvio))for(const d of o.logsEnvio){if(d.providerMessageId||d.sendMessageSucesso===true||d.sucesso===true)r.sendEvidence.push({ts:d.data||d.enviadoEm||d.confirmadoEm,kind:'provider'});}if(o.filaVivaSelecao&&typeof o.filaVivaSelecao==='object'){const f=o.filaVivaSelecao;if(inPeriod(f.selecionadaEm)){r.slotSignals.add('selection_timestamp');r.slotFields.add('filaVivaSelecao.selecionadaEm');}const q=Array.isArray(f.destinosLiberados)?f.destinosLiberados.length:Number(f.destinosLiberados||0);if(q>0){r.slotSignals.add('slot_quantity');r.slotFields.add('filaVivaSelecao.destinosLiberados');}r.markers.filaVivaSelecao={selecionadaEm:f.selecionadaEm||'',lane:f.lane||'',scoreFinal:f.scoreFinal??null,destinosCompativeis:f.destinosCompativeis??null,destinosLiberados:q};}inspect(o,r);}}
+          for(const w of workspaces){for(const name of ['fila.json','fila-historico.json']){const f=path.join(root,w,name);if(!fs.existsSync(f)){console.log('MISSING',w,name);continue;}let v;try{v=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){console.log('PARSE_ERROR',w,name,String(e.message));continue;}process(w,name,v);v=null;}}
+          const all=[...recs.values()];const captured=all.filter(r=>r.captures.some(inPeriod));const applicable=captured.filter(r=>r.applicable.size>0);const proven=applicable.filter(r=>r.slotSignals.size>0);const lost=proven.filter(r=>!r.sendEvidence.some(e=>Number.isFinite(ms(e.ts))));
+          function vals(r){return r.fieldValues.filter(x=>x.value!==''&&x.value!=null);}
+          function text(r){return vals(r).map(x=>String(x.key)+'='+String(x.value)).join(' | ').toLowerCase();}
+          function has(r,re){return vals(r).some(x=>re.test(String(x.key)+' '+String(x.value)));}
+          function group(r,re){return vals(r).filter(x=>re.test(String(x.key)+' '+String(x.value)));}
+          function imageEvidence(r){const allText=text(r);const captured=group(r,/(captur|original|entrada|thumbnail|thumb|picture|og:image|urlOriginal|imagemUrl|imageUrl)/i).filter(x=>String(x.value).length>0);const normalized=group(r,/(canon|normaliz|selecionad|principal|final|urlSelecionada|imagemCanonica)/i).filter(x=>String(x.value).length>0);const material=group(r,/(materializ|local|arquivo|path|cache|filesystem|statusHttpImagem|imagemEnviada|download)/i).filter(x=>String(x.value).length>0);const fallback=group(r,/(fallback|candidata|melhorImagem|imagemOficial|espelho|radar)/i).filter(x=>String(x.value).length>0);const publicability=group(r,/(public|segura|mime|statusHttpImagem|imagemStatus|sem_imagem)/i).filter(x=>String(x.value).length>0);const reject=/nao_publicavel|nao_segura|mime_nao_imagem|imagem_indisponivel|nenhuma_fonte_de_imagem|sem_imagem/.test(allText);const localGood=has(r,/(local|arquivo|path|cache|materializ)/i)&&!/(ausente|vazio|missing|null|falh|erro|inacess|nao_encontr)/i.test(allText);const localBad=/(ausente|vazio|missing|null|falh|erro|inacess|nao_encontr|download.*fail|http.*4\d\d|http.*5\d\d)/i.test(allText);const explicitText=group(r,/(imagemObrigatoria|exigirImagem|imagemRequired|textOnly|modoTexto|permit.*texto)/i);let textOnly='indeterminado';if(explicitText.some(x=>/false|nao|no|0/.test(String(x.value).toLowerCase())))textOnly='sim';else if(explicitText.some(x=>/true|sim|yes|1/.test(String(x.value).toLowerCase())))textOnly='nao';let cause='I',recoverable='nao';if(localGood&&/sem_imagem/.test(allText)&&!localBad){cause='G';recoverable='sim';}else if(reject&&/(nao_publicavel|nao_segura|mime_nao_imagem)/.test(allText)){cause='F';recoverable='nao';}else if(normalized.length&&localBad&&/(materializ|download|http|arquivo|path|local)/i.test(allText)){cause='C';recoverable='sim';}else if(localGood&&localBad&&/(invalid|inacess|mime|tamanho|0 bytes)/i.test(allText)){cause='D';recoverable='sim';}else if(fallback.length&&/(melhor_imagem_disponivel|candidata)/.test(allText)&&!/(fallback.*(usad|selecion)|origemSelecionada)/.test(allText)){cause='E';recoverable='sim';}else if(captured.length&&normalized.length===0&&/(normaliz|redirect|url.*vazia|url.*inval|perdeu)/i.test(allText)){cause='B';recoverable='sim';}else if(captured.length===0&&/(nenhuma_fonte|imagem_indisponivel|sem_imagem)/.test(allText)){cause='A';recoverable='nao';}else if(/expirada_operacional|ttl operacional/.test(allText)){cause='H';recoverable='nao';}return {capturedImage:captured.length?'presente':'ausente',capturedFields:captured.slice(0,5),normalizedImage:normalized.length?'presente':'ausente',normalizedFields:normalized.slice(0,5),materialization:material.length?(localBad?'falhou/sem arquivo válido':'tentada ou presente'):'não evidenciada',materializationFields:material.slice(0,6),fallback:fallback.length?fallback.slice(0,5):[],publicability:publicability.slice(0,5),textOnly,cause,recoverable,marketplaceSpecific:/(mercadolivre|mercado livre|meli)/.test(allText),signals:[...new Set(r.causeSignals)].slice(0,10)};}
+          const rows=lost.map(r=>{const im=imageEvidence(r);return {offerId:r.offerId,workspace:r.workspace,marketplace:[...r.marketplaces].filter(Boolean).slice(0,4),capturedAt:r.captures.find(inPeriod)||r.captures[0]||'',expiresAt:r.expires[0]||'',firstEvaluation:r.firstEval[0]||null,applicableDestinations:r.applicable.size,slotProof:{signals:[...r.slotSignals],fields:[...r.slotFields].slice(0,6),marker:r.markers.filaVivaSelecao||null},image:im,lastStatus:[...new Set(r.causeSignals)].slice(-5)};});
+          const counts={A:0,B:0,C:0,D:0,E:0,F:0,G:0,H:0,I:0};for(const x of rows)counts[x.image.cause]++;
+          console.log('IMAGE_ROOT_SUMMARY',JSON.stringify({cutoff:'2026-10-07T20:52:05-03:00',slotLosses:rows.length,counts,dominant:Object.entries(counts).sort((a,b)=>b[1]-a[1])[0],recoverable:rows.filter(x=>x.image.recoverable==='sim').length,legitimate:rows.filter(x=>x.image.recoverable==='nao').length,indeterminate:counts.I}));
+          console.log('IMAGE_LOSS_CASES',JSON.stringify(rows));
+          NODE
