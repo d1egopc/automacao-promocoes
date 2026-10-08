@@ -17,13 +17,13 @@ jobs:
           echo runner_name=$RUNNER_NAME
           echo hostname=$(hostname)
           echo production_head=$(git -C /opt/optimus/backend rev-parse HEAD)
-          for root in /opt/optimus/data /opt/optimus/backend /opt/optimus/infra; do
+          for root in /opt/optimus/data/clientes /opt/optimus/backend /opt/optimus/infra; do
             echo ROOT=$root
             if [ -d "$root" ]; then
-              find "$root" -maxdepth 4 -type f 2>/dev/null | sed -E 's#^#FILE #;' | grep -Ei '(fila|histor|event|send|envio|destin|scheduler|cadenc|turbo|log|audit|outbox|queue|confirm)' | head -200 || true
+              find "$root" -maxdepth 2 -type f -printf 'FILE %p size=%s mtime=%TY-%Tm-%TdT%TH:%TM\n' 2>/dev/null || true
             else
               echo MISSING=$root
             fi
           done
           echo DATA_DIRS
-          find /opt/optimus/data -maxdepth 3 -type d 2>/dev/null | sort | head -200 || true
+          find /opt/optimus/data -maxdepth 3 -type d -print 2>/dev/null || true
