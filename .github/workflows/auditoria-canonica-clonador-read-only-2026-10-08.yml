@@ -60,7 +60,7 @@ jobs:
           const raw = row => scrub(row);
           const emit = (tag, value) => console.log(tag + ' ' + JSON.stringify(value));
           async function q(label, sql, params = []) {
-            if (!/^\\s*SELECT\\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
             const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 20000 });
             if (!r || !r.ok) throw new Error('select_failed:' + label);
             return (r.resultado && r.resultado.rows) || [];
