@@ -26,7 +26,7 @@ jobs:
           const fs=require('fs'),path=require('path');
           const START=Date.parse('2026-10-07T03:00:00Z'), CUTOFF=Date.parse('2026-10-07T23:52:05Z');
           const workspaces=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'], root='/opt/optimus/data/clientes';
-          const ms=v=>{if(v==null||v==='')return NaN;if(typeof v==='number')return v;const n=Date.parse(v);return Number.isFinite(n)?n:Number(v);};
+          const ms=v=>{if(v==null||v==='')return NaN;if(typeof v==='number')return v;const s=String(v).trim();const br=s.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}):(\d{2}):(\d{2})/);if(br)return Date.parse(br[3]+'-'+br[2]+'-'+br[1]+'T'+br[4]+':'+br[5]+':'+br[6]+'-03:00');const n=Date.parse(s);return Number.isFinite(n)?n:Number(s);};
           const inPeriod=v=>{const n=ms(v);return Number.isFinite(n)&&n>=START&&n<=CUTOFF;};
           const str=v=>v==null?'':String(v).trim();
           const idOf=o=>str(o?.offerId||o?.ofertaId||o?.idOferta||o?.trackingId||o?.id||'');
