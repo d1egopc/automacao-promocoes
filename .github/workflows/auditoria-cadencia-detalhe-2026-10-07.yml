@@ -1,13 +1,15 @@
 name: Auditoria read-only de cadencia detalhada 2026-10-07
 
+
 on:
   push:
     branches:
       - audit/read-only-envios-2026-10-07
 
+
 jobs:
   audit:
-    runs-on: [self-hosted, srv1947615]
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Leitura factual de cadencia por destino
         shell: bash
@@ -34,3 +36,4 @@ jobs:
           console.log('DETAIL_CADENCE_RECORDS',JSON.stringify(records.slice(0,400)));
           console.log('DETAIL_SLOT_OBJECTS',JSON.stringify(slots.slice(0,120)));
           NODE
+
