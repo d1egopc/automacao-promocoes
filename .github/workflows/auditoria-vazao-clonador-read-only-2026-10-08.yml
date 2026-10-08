@@ -107,6 +107,65 @@ jobs:
             const has = !!(c && Object.prototype.hasOwnProperty.call(c,'destinoIds'));
             return { clone: !!(c || ['clonador_grupos'].includes(txt(source.origem).toLowerCase()) || ['clonador_grupos'].includes(txt(source.fonte).toLowerCase()) || ['clonador_grupos'].includes(txt(source.origem_tipo).toLowerCase())), targets: has ? (Array.isArray(c.destinoIds) ? c.destinoIds : [c.destinoIds]).map(txt).filter(Boolean) : [], hasTargetSnapshot: has, bufferId: txt(c && (c.bufferId || c.buffer_id)), queueItemId: txt(c && (c.filaItemId || c.fila_item_id)), origin: txt(source.origem_fluxo || source.origemFluxo || m.origemFluxo || m.origem_fluxo || meta(m.metadataEvento).origemFluxo || meta(m.metadataEvento).origem_fluxo || meta(jm.metadataEvento).origemFluxo || em.origemFluxo || source.origem || m.origem) };
           }
+          function opCloneImageFacts(value, depth=0, out={url:false,local:false,publishable:null}) {
+            if (!value || depth>8 || typeof value!=='object') return out;
+            for (const [k,v] of Object.entries(value)) {
+              const nk=String(k).toLowerCase().replace(/[^a-z0-9]/g,'');
+              if (v!=null && typeof v!=='object' && /(imagem|image|thumbnail|thumb|foto|picture|imageurl|urlimagem)/.test(nk) && txt(v)) out.url=true;
+              if (v!=null && typeof v!=='object' && /(arquivoimagem|imagemlocal|localimage|fileimagem|caminhoimagem)/.test(nk) && txt(v)) out.local=true;
+              if (typeof v==='boolean' && /(publicavel|publishable|imagemvalida|imagevalid)/.test(nk)) out.publishable=v;
+              if (v && typeof v==='object') opCloneImageFacts(v,depth+1,out);
+            }
+            return out;
+          }
+          function opCloneMarketplace(value) {
+            const s=txt(value).toLowerCase(); if(!s)return '';
+            if(/mercado.?livre|meli/.test(s))return 'mercadolivre'; if(/amazon/.test(s))return 'amazon'; if(/shopee/.test(s))return 'shopee'; if(/ali.?express/.test(s))return 'aliexpress'; if(/kabum|awin/.test(s))return 'kabum'; if(/magalu|magazine/.test(s))return 'magalu'; return s.replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+          }
+          function opCloneMarketplaceFromHosts(hosts) { for(const h of arr(hosts)){const m=opCloneMarketplace(h);if(['mercadolivre','amazon','shopee','aliexpress','kabum','magalu'].includes(m))return m;} return ''; }
+          function opCloneCause(record) {
+            if(record.sent)return 'enviado';
+            if(!record.link)return 'sem_link';
+            if(!record.event)return 'indeterminado';
+            if(!record.job)return 'indeterminado';
+            if(!record.offer)return 'indeterminado';
+            if(!record.marketplace)return 'marketplace_nao_detectado';
+            if(record.imageBlock)return 'sem_imagem';
+            const reason=txt(record.op&&record.op.motivoFinal).toLowerCase().replace(/[^a-z0-9_:-]/g,'_');
+            for(const c of ['sem_imagem','imagem_nao_publicavel','duplicidade','repeticao','preco_baixo','desconto_baixo','ttl_expirado','sem_destino','origem_nao_permitida','categoria','marketplace','cooldown','limite','sessao','erro_provider','produto_nao_encontrado','link_invalido','importador_falhou'])if(reason.includes(c))return c;
+            if(record.op && record.op.applicable===false)return 'sem_destino';
+            return 'indeterminado';
+          }
+          function opCloneStat(values) { const a=values.filter(x=>Number.isFinite(x)).sort((x,y)=>x-y); if(!a.length)return {n:0,medianaMs:null,p95Ms:null,maxMs:null}; const q=p=>a[Math.min(a.length-1,Math.ceil(a.length*p)-1)]; return {n:a.length,medianaMs:q(.5),p95Ms:q(.95),maxMs:a[a.length-1]}; }
+          function opClonePct(n,d) { return d?Number((100*n/d).toFixed(1)):null; }
+          function opCloneFunnel(db,built,durable) {
+            const TARGET='e2bdb503-1710-47e8-870c-0ce34936910b',WS='user_pss60lus';
+            const buffers=arr(db.buffers).filter(b=>b.workspace===WS),events=arr(db.events),jobs=arr(db.jobs),offers=arr(db.offers),rowOffers=arr(built.offers),rows=arr(built.resultRows);
+            const targetRows=rows.filter(r=>r.workspace===WS&&r.destinoId===TARGET);
+            const records=buffers.map(b=>{
+              const ev=events.find(e=>txt(e.id)===txt(b.bridgeEventId)||txt(e.bufferId)===txt(b.id))||null;
+              const evIds=new Set([txt(ev&&ev.id),txt(b.bridgeEventId)].filter(Boolean));
+              const js=jobs.filter(j=>evIds.has(txt(j.eventId))); const job=js[0]||null;
+              const offerIds=new Set(js.map(j=>txt(j.offerId)).filter(Boolean)); const of=offers.filter(o=>offerIds.has(txt(o.id))||txt(o.eventId)===txt(ev&&ev.id)); const offer=of[0]||null;
+              const ro=rowOffers.find(o=>o.workspace===WS&&((o.bufferId&&txt(o.bufferId)===txt(b.id))||(offer&&txt(o.offerId)===txt(offer.id))))||null;
+              const op=targetRows.find(r=>r.offerId&&offer&&txt(r.offerId)===txt(offer.id))||null;
+              const image=opCloneImageFacts(offer&&offer.metadata); const evidenceText=JSON.stringify(op||{}); const imageBlock=/sem_imagem|imagem_nao_publicavel/i.test(evidenceText);
+              const market=opCloneMarketplace(offer&&offer.marketplace)||opCloneMarketplace(job&&job.marketplace)||opCloneMarketplaceFromHosts(b.linkHosts);
+              const send=(durable.logicalSends||[]).find(s=>s.workspace===WS&&s.destinationKey===('whatsapp:'+TARGET)&&ro&&s.queueItemId&&[...ro.queueItemIds].includes(s.queueItemId))||null;
+              const sent=Boolean(send); const readyAt=op&&op.readyAt||null;
+              const selectionEvidence=arr(op&&op.logEvidence).filter(e=>e&&e.at&&/SELEC|CANDIDATO|DESTINO.*SELEC/i.test(txt(e.tag))).sort((a,c)=>Date.parse(a.at)-Date.parse(c.at));
+              const selectionAt=selectionEvidence[0]&&selectionEvidence[0].at||null; const eventAt=ev&&(ev.capturedAt||ev.createdAt)||null; const jobAt=job&&job.createdAt||null; const offerAt=offer&&offer.createdAt||null; const confirmAt=send&&send.confirmedAt||null;
+              const rec={bufferId:txt(b.id),workspace:WS,capturedAt:b.capturedAt,link:b.linkCount>0,linkCount:b.linkCount,linkHosts:b.linkHosts,event:ev?{id:txt(ev.id),at:eventAt}:null,job:job?{id:txt(job.id),at:jobAt}:null,offer:offer?{id:txt(offer.id),at:offerAt}:null,marketplace:market||null,marketplaceDetected:Boolean(market),op:op?{applicable:op.applicable,enteredQueue:op.enteredQueue,readyAt:readyAt,motivoFinal:op.motivoFinal,legitimateBlock:op.legitimateBlock,filaItemIds:op.filaItemIds}:null,queue:Boolean(op&&op.enteredQueue)||Boolean(ro&&ro.queueItemIds.size),ready:Boolean(readyAt),sent,sendConfirmedAt:confirmAt,selectionAt,imageOriginalPresent:image.url,imageLocalPresent:image.local,imagePublishable:image.publishable===true,imageBlock,cause:null,stage:{captureToEventMs:eventAt&&b.capturedAt?Date.parse(eventAt)-Date.parse(b.capturedAt):null,eventToJobMs:eventAt&&jobAt?Date.parse(jobAt)-Date.parse(eventAt):null,jobToOfferMs:jobAt&&offerAt?Date.parse(offerAt)-Date.parse(jobAt):null,offerToReadyMs:offerAt&&readyAt?Date.parse(readyAt)-Date.parse(offerAt):null,readyToSelectionMs:readyAt&&selectionAt?Date.parse(selectionAt)-Date.parse(readyAt):null,selectionToConfirmMs:selectionAt&&confirmAt?Date.parse(confirmAt)-Date.parse(selectionAt):null}};
+              rec.cause=opCloneCause(rec); return rec;
+            });
+            const sent=records.filter(r=>r.sent),withEvent=records.filter(r=>r.event),withJob=records.filter(r=>r.job),withOffer=records.filter(r=>r.offer),withMarket=records.filter(r=>r.marketplaceDetected),withQueue=records.filter(r=>r.queue),withImage=records.filter(r=>r.imagePublishable),withReady=records.filter(r=>r.ready),withLink=records.filter(r=>r.link),compatible=records.filter(r=>r.op&&r.op.applicable===true);
+            const causes={};for(const r of records.filter(x=>!x.sent))causes[r.cause]=(causes[r.cause]||0)+1;
+            const stageNames=['captureToEventMs','eventToJobMs','jobToOfferMs','offerToReadyMs','readyToSelectionMs','selectionToConfirmMs'];const timings={};for(const n of stageNames)timings[n]=opCloneStat(records.map(r=>r.stage[n]));
+            const gapFrom=Date.parse('2026-10-08T18:58:25.221Z'),gapTo=Date.parse('2026-10-08T21:09:41.507Z');const gap=records.filter(r=>{const t=Date.parse(r.capturedAt);return Number.isFinite(t)&&t>gapFrom&&t<=gapTo;});
+            const marketplace={};for(const r of records){const k=r.marketplace||'indeterminado';if(!marketplace[k])marketplace[k]={capturas:0,jobs:0,ofertas:0,ready:0,envios:0};marketplace[k].capturas++;if(r.job)marketplace[k].jobs++;if(r.offer)marketplace[k].ofertas++;if(r.ready)marketplace[k].ready++;if(r.sent)marketplace[k].envios++;}
+            const gapSummary={capturas:gap.length,comLink:gap.filter(r=>r.link).length,jobs:gap.filter(r=>r.job).length,ofertas:gap.filter(r=>r.offer).length,filaReady:gap.filter(r=>r.ready).length,aptasOP:gap.filter(r=>r.op&&r.op.applicable===true).length,semImagem:gap.filter(r=>r.imageBlock).length,duplicadas:gap.filter(r=>r.cause==='duplicidade').length,marketplaceNaoDetectado:gap.filter(r=>r.cause==='marketplace_nao_detectado').length,outros:gap.filter(r=>!['sem_imagem','duplicidade','marketplace_nao_detectado','enviado'].includes(r.cause)).length,casos:gap.map(r=>({bufferId:r.bufferId,offerId:r.offer&&r.offer.id,readyAt:r.op&&r.op.readyAt,sent:r.sent,cause:r.cause}))};
+            return {workspace:WS,destinationId:TARGET,windowStart:START,windowEnd:new Date().toISOString(),counts:{capturasBrutas:records.length,comLink:withLink.length,semLink:records.length-withLink.length,eventosEngine:withEvent.length,semEvento:records.length-withEvent.length,jobs:withJob.length,semJob:records.length-withJob.length,marketplaceDetectado:withMarket.length,marketplaceNaoDetectado:records.length-withMarket.length,ofertas:withOffer.length,semOferta:records.length-withOffer.length,filaAdicionada:withQueue.length,naoAdicionada:records.length-withQueue.length,imagemPublicavel:withImage.length,semImagemOuInvalida:records.length-withImage.length,compativeisOP:compatible.length,readyOP:withReady.length,enviadasOP:sent.length},conversion:{bufferEvento:opClonePct(withEvent.length,records.length),eventoJob:opClonePct(withJob.length,withEvent.length),jobOferta:opClonePct(withOffer.length,withJob.length),ofertaFila:opClonePct(withQueue.length,withOffer.length),filaReady:opClonePct(withReady.length,withQueue.length),readyEnvio:opClonePct(sent.length,withReady.length),bufferEnvio:opClonePct(sent.length,records.length)},causasPerda:causes,perdas:records.filter(r=>!r.sent),timings,marketplace,gapPrincipal:gapSummary,positiveControls:records.filter(r=>['98596','99059'].includes(r.offer&&r.offer.id)),evidence:{recordsWithBufferLink:records.filter(r=>r.event||r.job||r.offer).length,originFieldWarning:'originDimension do motor não foi usado; população foi definida por clonador_grupos_buffer'}};
+          }
           async function main() {
             const schema = await q('schema', "SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[])", [TABLES]);
             const cols = new Map(); for (const row of schema) { if (!cols.has(row.table_name)) cols.set(row.table_name,new Set()); cols.get(row.table_name).add(row.column_name); }
@@ -121,28 +180,33 @@ jobs:
             const commercialRaw=await q('commercial_events',commercialSql,[START,WORKSPACES]);
             const commercialOfferIds=[...new Set(commercialRaw.map(x=>txt(x.offer_id)).filter(v=>/^\d+$/.test(v)))];
             const jobMeta=jcols.has('metadata')?'metadata':"'{}'::jsonb";
-            const jobsSql='SELECT id::text AS id,evento_id::text AS event_id,cliente_id::text AS workspace,'+optional(jcols,'','status')+' AS status,'+optional(jcols,'','motivo_final')+' AS motivo_final,'+optional(jcols,'','marketplace')+' AS marketplace,'+optional(jcols,'','marketplace_detectado')+' AS marketplace_detectado,'+optional(jcols,'','categoria')+' AS categoria,'+optional(jcols,'','origem_fluxo')+' AS origem_fluxo,oferta_id::text AS offer_id,'+optional(jcols,'','criado_em','timestamptz')+' AS created_at,'+optional(jcols,'','atualizado_em','timestamptz')+' AS updated_at,'+jobMeta+' AS metadata FROM engine_jobs_cliente WHERE cliente_id=ANY($2::text[]) AND ('+optional(jcols,'','criado_em','timestamptz')+' >= $1::timestamptz OR '+optional(jcols,'','atualizado_em','timestamptz')+' >= $1::timestamptz OR oferta_id::text=ANY($3::text[])) ORDER BY criado_em,id';
-            const jobsRaw=await q('jobs',jobsSql,[START,WORKSPACES,commercialOfferIds]);
+            const jobsSql='SELECT id::text AS id,evento_id::text AS event_id,cliente_id::text AS workspace,'+optional(jcols,'','status')+' AS status,'+optional(jcols,'','motivo_final')+' AS motivo_final,'+optional(jcols,'','marketplace')+' AS marketplace,'+optional(jcols,'','marketplace_detectado')+' AS marketplace_detectado,'+optional(jcols,'','categoria')+' AS categoria,'+optional(jcols,'','origem_fluxo')+' AS origem_fluxo,oferta_id::text AS offer_id,'+optional(jcols,'','criado_em','timestamptz')+' AS created_at,'+optional(jcols,'','atualizado_em','timestamptz')+' AS updated_at,'+jobMeta+' AS metadata FROM engine_jobs_cliente WHERE cliente_id=ANY($2::text[]) AND ('+optional(jcols,'','criado_em','timestamptz')+' >= $1::timestamptz OR '+optional(jcols,'','atualizado_em','timestamptz')+' >= $1::timestamptz OR oferta_id::text=ANY($3::text[]) OR evento_id::text=ANY($4::text[])) ORDER BY criado_em,id';
+            let jobsRaw=await q('jobs',jobsSql,[START,WORKSPACES,commercialOfferIds,[]]);
             const eventIds=[...new Set(jobsRaw.map(x=>txt(x.event_id)).filter(v=>/^\d+$/.test(v)))];
             const eventMeta=ecols.has('metadata')?'e.metadata':"'{}'::jsonb";
-            const eventSql='SELECT e.id::text AS id, '+optional(ecols,'e','capturado_em')+' AS captured_at, '+optional(ecols,'e','criado_em')+' AS created_at, '+optional(ecols,'e','origem')+' AS origem, '+optional(ecols,'e','fonte')+' AS fonte, '+optional(ecols,'e','origem_tipo')+' AS origem_tipo, '+optional(ecols,'e','origem_fluxo')+' AS origem_fluxo, '+eventMeta+' AS metadata FROM engine_eventos_brutos e WHERE e.id::text=ANY($1::text[]) ORDER BY e.id';
-            const eventsRaw=eventIds.length?await q('events',eventSql,[eventIds]):[];
+            const eventWindow=[ecols.has('capturado_em')?'e.capturado_em >= $2::timestamptz':'false',ecols.has('criado_em')?'e.criado_em >= $2::timestamptz':'false'].filter(Boolean).join(' OR ')||'false';
+            const eventSql='SELECT e.id::text AS id, '+optional(ecols,'e','capturado_em')+' AS captured_at, '+optional(ecols,'e','criado_em')+' AS created_at, '+optional(ecols,'e','origem')+' AS origem, '+optional(ecols,'e','fonte')+' AS fonte, '+optional(ecols,'e','origem_tipo')+' AS origem_tipo, '+optional(ecols,'e','origem_fluxo')+' AS origem_fluxo, '+eventMeta+' AS metadata FROM engine_eventos_brutos e WHERE e.id::text=ANY($1::text[]) OR ('+eventWindow+') ORDER BY e.id';
+            const eventsRaw=await q('events',eventSql,[eventIds,START]);
             const offerIds=[...new Set([...jobsRaw.map(x=>txt(x.offer_id)),...commercialOfferIds].filter(v=>/^\d+$/.test(v)))];
             const offerMeta=ocols.has('metadata')?'metadata':"'{}'::jsonb";
             const offersSql='SELECT id::text AS id,'+optional(ocols,'','evento_id')+'::text AS event_id,'+optional(ocols,'','marketplace')+' AS marketplace,'+optional(ocols,'','origem')+' AS origem,'+optional(ocols,'','origem_fluxo')+' AS origem_fluxo,'+optional(ocols,'','status')+' AS status,'+optional(ocols,'','motivo_status')+' AS reason,'+optional(ocols,'','criada_em')+' AS created_at,'+optional(ocols,'','atualizada_em')+' AS updated_at,'+optional(ocols,'','categoria')+' AS category,'+offerMeta+' AS metadata FROM engine_ofertas WHERE id::text=ANY($1::text[]) ORDER BY id';
-            const offersRaw=offerIds.length ? await q('offers',offersSql,[offerIds]) : [];
+            let offersRaw=offerIds.length ? await q('offers',offersSql,[offerIds]) : [];
             const bmeta = bcols.has('metadata') ? 'metadata' : "'{}'::jsonb";
             const blinks = bcols.has('links') ? 'links' : "'[]'::jsonb";
             const buffersSql='SELECT id::text AS id, cliente_id::text AS workspace, capturado_em AS captured_at, '+optional(bcols,'','status')+' AS status, '+blinks+' AS links, '+bmeta+' AS metadata FROM clonador_grupos_buffer WHERE capturado_em >= $1::timestamptz AND cliente_id=ANY($2::text[]) ORDER BY capturado_em,id';
             const buffersRaw = await q('buffers', buffersSql, [START,WORKSPACES]);
+            const bufferEventIds=[...new Set(buffersRaw.map(b=>{const m=meta(b.metadata),cg=meta(m.clonadorGrupos),cb=meta(m.clonadorGruposBridge),me=meta(m.metadataEvento);return txt(cb.eventoId||cg.eventoId||me.eventoId||m.eventoId);}).filter(v=>/^\d+$/.test(v)))];
+            if(bufferEventIds.length){const extraJobs=await q('jobs_by_clonador_buffers',jobsSql,[START,WORKSPACES,commercialOfferIds,bufferEventIds]);const seenJobs=new Set(jobsRaw.map(j=>txt(j.id)));for(const j of extraJobs)if(!seenJobs.has(txt(j.id))){jobsRaw.push(j);seenJobs.add(txt(j.id));}}
+            const extraOfferIds=[...new Set(jobsRaw.map(x=>txt(x.offer_id)).filter(v=>/^\d+$/.test(v)))].filter(id=>!offerIds.includes(id));
+            if(extraOfferIds.length){const extraOffers=await q('offers_by_clonador_buffers',offersSql,[extraOfferIds]);const seenOffers=new Set(offersRaw.map(o=>txt(o.id)));for(const o of extraOffers)if(!seenOffers.has(txt(o.id))){offersRaw.push(o);seenOffers.add(txt(o.id));}}
             const checkpointSql='SELECT cliente_id::text AS workspace,fila_item_id::text AS queue_item_id,destino_chave::text AS destination_key,alvo_chave::text AS target_key,attempt_id::text AS attempt_id,estado,provider_message_id,credito_debitado,motivo_codigo,classificacao,status_http,confirmado_em,criado_em,atualizado_em FROM fila_checkpoints_entrega WHERE estado=\'enviado\' AND confirmado_em IS NOT NULL AND confirmado_em >= $1::timestamptz AND cliente_id=ANY($2::text[]) ORDER BY confirmado_em,cliente_id,fila_item_id,destino_chave,alvo_chave';
             const checkpointsRaw=await q('checkpoints',checkpointSql,[START,WORKSPACES]);
             const result = {
               ok:true,
-              buffers:buffersRaw.map(b=>{const c=cloneInfo({metadata:b.metadata});const m=meta(b.metadata);const parsedLinks=typeof b.links==='string'?JSON.parse(b.links):b.links;return {id:txt(b.id),workspace:txt(b.workspace),capturedAt:b.captured_at,status:txt(b.status),linkCount:Array.isArray(parsedLinks)?parsedLinks.length:0,bridgeEventId:txt(meta(m.clonadorGruposBridge).eventoId||meta(m.clonadorGrupos).eventoId),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,origin:c.origin||'clonador_grupos'};}),
+              buffers:buffersRaw.map(b=>{const c=cloneInfo({metadata:b.metadata});const m=meta(b.metadata);const parsedLinks=typeof b.links==='string'?JSON.parse(b.links):b.links;const linkValues=(Array.isArray(parsedLinks)?parsedLinks:[]).map(x=>typeof x==='string'?x:(x&&typeof x==='object'?(x.url||x.href||x.link||x.permalink||x.text||''):'' )).map(txt).filter(Boolean);const linkHosts=linkValues.map(u=>{try{return new URL(u).hostname.toLowerCase();}catch{return '';}}).filter(Boolean);return {id:txt(b.id),workspace:txt(b.workspace),capturedAt:b.captured_at,status:txt(b.status),linkCount:linkValues.length,linkHosts,bridgeEventId:txt(meta(m.clonadorGruposBridge).eventoId||meta(m.clonadorGrupos).eventoId),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,origin:c.origin||'clonador_grupos'};}),
               events:eventsRaw.map(e=>{const c=cloneInfo({metadata:e.metadata,origem:e.origem,fonte:e.fonte,origem_tipo:e.origem_tipo,origem_fluxo:e.origem_fluxo});return {id:txt(e.id),capturedAt:e.captured_at,createdAt:e.created_at,origem:txt(e.origem),fonte:txt(e.fonte),origemTipo:txt(e.origem_tipo),origemFluxo:txt(e.origem_fluxo),bufferId:c.bufferId,targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,origin:c.origin};}),
-              jobs:jobsRaw.map(j=>{const c=cloneInfo({metadata:j.metadata,origem_fluxo:j.origem_fluxo,job_metadata:j.metadata});return {id:txt(j.id),eventId:txt(j.event_id),workspace:txt(j.workspace),status:txt(j.status),reason:txt(j.motivo_final),marketplace:txt(j.marketplace||j.marketplace_detectado),category:txt(j.categoria),offerId:txt(j.offer_id),createdAt:j.created_at,updatedAt:j.updated_at,targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId,origin:c.origin};}),
-              offers:offersRaw.map(o=>{const c=cloneInfo({metadata:o.metadata,origem:o.origem,origem_fluxo:o.origem_fluxo});return {id:txt(o.id),eventId:txt(o.event_id),marketplace:txt(o.marketplace),origin:txt(o.origem_fluxo||o.origem||c.origin),status:txt(o.status),reason:txt(o.reason),createdAt:o.created_at,updatedAt:o.updated_at,category:txt(o.category),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId};}),
+              jobs:jobsRaw.map(j=>{const c=cloneInfo({metadata:j.metadata,origem_fluxo:j.origem_fluxo,job_metadata:j.metadata});return {id:txt(j.id),eventId:txt(j.event_id),workspace:txt(j.workspace),status:txt(j.status),reason:txt(j.motivo_final),marketplace:txt(j.marketplace||j.marketplace_detectado),category:txt(j.categoria),offerId:txt(j.offer_id),createdAt:j.created_at,updatedAt:j.updated_at,targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId,origin:c.origin,metadata:j.metadata};}),
+              offers:offersRaw.map(o=>{const c=cloneInfo({metadata:o.metadata,origem:o.origem,origem_fluxo:o.origem_fluxo});return {id:txt(o.id),eventId:txt(o.event_id),marketplace:txt(o.marketplace),origin:txt(o.origem_fluxo||o.origem||c.origin),status:txt(o.status),reason:txt(o.reason),createdAt:o.created_at,updatedAt:o.updated_at,category:txt(o.category),targets:c.targets,hasTargetSnapshot:c.hasTargetSnapshot,queueItemId:c.queueItemId,metadata:o.metadata};}),
               checkpoints:checkpointsRaw.map(c=>({workspace:txt(c.workspace),queueItemId:txt(c.queue_item_id),destinationKey:txt(c.destination_key),targetKey:txt(c.target_key),attemptId:txt(c.attempt_id),state:txt(c.estado),providerMessageId:txt(c.provider_message_id)||null,creditDebited:c.credito_debitado,motivoCodigo:txt(c.motivo_codigo)||null,classificacao:txt(c.classificacao)||null,statusHttp:c.status_http,confirmedAt:c.confirmado_em,createdAt:c.criado_em,updatedAt:c.atualizado_em})),
               commercialEvents:commercialRaw.map(e=>({type:txt(e.tipo_evento),workspace:txt(e.workspace||e.cliente_id||e.workspace_id),offerId:txt(e.offer_id),jobId:txt(e.job_id),queueItemId:txt(e.queue_item_id),destinationId:txt(e.destination_id),channel:txt(e.canal),marketplace:txt(e.marketplace),occurredAt:e.ocorrido_em,originPipeline:txt(e.origem_pipeline),metadata:meta(e.metadata)}))
             };
@@ -480,6 +544,7 @@ jobs:
             const rowOffers=built.offers;
             const rows=built.resultRows;
             const durable=construirFatosDuraveis(db.ok?db:{},rowOffers);const destinationCorrelation=atribuirEnviosExatos(rows,durable.logicalSends);
+            const opCloneFunnelResult=opCloneFunnel(db.ok?db:{},built,durable);
             const gaps=gapMetricsDurable(rows,rowOffers,durable.logicalSends);
             const demandFulfillment=demandSlotFulfillment(gaps.gaps);const observedGaps=userObservedGaps(gaps.gaps);
             const uniqueSent=durable.offersSent;
@@ -515,6 +580,7 @@ jobs:
             console.log('DEMAND_SLOT_FULFILLMENT '+JSON.stringify(demandFulfillment));
             console.log('VAZAO_USER_OBSERVED_GAPS '+JSON.stringify(observedGaps));
             console.log('VAZAO_DECISION '+JSON.stringify({classification,defectProven:defect,bufferToOfferPercent:captureToOffer,applicabilityUnknownOffers:unknownApplicable.size,missingEvidence:!enough?{database:!db.ok,offers:rowOffers.length===0,queueReadiness:readinessUnknown,applicability:!applicabilityComplete,chainPopulationNotConcluded:chains.populationConcluded!==true,fileReadErrors:evidence.readErrors.length,parseErrors:evidence.parseErrors,filesSkipped:evidence.skippedLarge.length}:null}));
+            console.log('OPCLONE_FUNNEL '+JSON.stringify(opCloneFunnelResult));
             const backendAfter=command('git',['-C',BACKEND,'rev-parse','HEAD']).stdout.trim();
             const idsAfter=command('docker',['compose','-f',COMPOSE,'ps','--status','running','-q','backend','postgres'],{cwd:INFRA}).stdout.trim().split(/\r?\n/).filter(Boolean).sort();
             const idsBefore=[process.env.AUDIT_BACKEND_ID,process.env.AUDIT_POSTGRES_ID].filter(Boolean).sort();
