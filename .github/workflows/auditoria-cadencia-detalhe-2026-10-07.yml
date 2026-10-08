@@ -1,0 +1,36 @@
+name: Auditoria read-only de cadencia detalhada 2026-10-07
+
+on:
+  push:
+    branches:
+      - audit/read-only-envios-2026-10-07
+
+jobs:
+  audit:
+    runs-on: [self-hosted, srv1947615]
+    steps:
+      - name: Leitura factual de cadencia por destino
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --max-old-space-size=4096 <<'NODE'
+          const fs=require('fs'),path=require('path');
+          const ws=['user_pss60lus','user_g3qkc18m','user_b2oogwwl','user_zbbk3fdr'];
+          const root='/opt/optimus/data/clientes';
+          const target='2026-10-07';
+          const intervalKeys=['intervaloConfiguradoMinutos','intervaloAplicadoMinutos','intervaloMinutos','intervaloMin','intervaloMs','esperaMs','intervalo'];
+          const dateKeys=['ultimoEnvioEm','proximoEnvioPermitidoEm','enviadoEm','dataEnvio','data','sendMessageInicio','sendMessageSucesso','timestamp','createdAt','updatedAt'];
+          const records=[],conf=[],turbo=[],slots=[]; const seen=new Set();
+          function safe(v){if(v==null)return null;if(typeof v==='boolean'||typeof v==='number')return v;if(Array.isArray(v))return '[array:'+v.length+']';if(typeof v==='object')return '[object]';let s=String(v).trim();return s.length>180?s.slice(0,180)+'…':s;}
+          function time(v){if(v==null||v==='')return null;let s=String(v).trim();let d;if(/^\d{2}\/\d{2}\/\d{4}/.test(s)){const m=s.match(/^(\d{2})\/(\d{2})\/(\d{4}),?\s*(\d{2}):(\d{2}):(\d{2})/);if(m)d=new Date(Date.UTC(+m[3],+m[2]-1,+m[1],+m[4]+3,+m[5],+m[6]));}else d=new Date(s);if(!d||!Number.isFinite(d.getTime()))return null;const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(d).reduce((a,x)=>(a[x.type]=x.value,a),{});return {iso:d.toISOString(),local:parts.year+'-'+parts.month+'-'+parts.day+'T'+parts.hour+':'+parts.minute+':'+parts.second,day:parts.year+'-'+parts.month+'-'+parts.day};}
+          function pick(o,keys){const x={};for(const k of keys)if(Object.prototype.hasOwnProperty.call(o,k)&&o[k]!==''&&o[k]!=null)x[k]=safe(o[k]);return x;}
+          function channel(o){return o.tipo||o.canal||o.channel||o.nome||o.destinoTipo||o.grupo||null;}
+          function walk(v,file,w,p='',depth=0){if(v==null||depth>18)return;if(Array.isArray(v)){for(const x of v)walk(x,file,w,p,depth+1);return;}if(typeof v!=='object')return;const keys=Object.keys(v);const hasCad=keys.some(k=>intervalKeys.includes(k)||/proximoEnvio|ultimoEnvio|destinoId|destinationId|turboAplicado|liberado|janela|slot/i.test(k));const hasConf=!!(v.providerMessageId||v.messageId||v.sendMessageSucesso===true||v.estado==='enviado'||v.motivo==='envio_confirmado');const times=[];for(const k of dateKeys){if(v[k]!=null&&v[k]!==''){const t=time(v[k]);if(t)times.push([k,t]);}}if(hasCad){const obj={workspace:w,file,path:p,channel:channel(v),id:v.destinoId||v.destinationId||v.id||v.alvoId||null,name:v.nome||v.name||null,interval:pick(v,intervalKeys),dates:Object.fromEntries(times.map(([k,t])=>[k,t.local])),turbo:v.turboAplicado===true||String(v.turboAplicado).toLowerCase()==='true',liberado:v.liberado===true||String(v.liberado).toLowerCase()==='true',estado:v.estado||v.status||null,providerMessageId:v.providerMessageId||null,messageId:v.messageId||null,fields:pick(v,['proximoEnvioPermitidoEm','ultimoEnvioEm','intervaloAplicadoMinutos','intervaloConfiguradoMinutos','intervaloMs','esperaMs','destinosLiberados','destinosCompativeis','enviadoEm','dataEnvio','janela','slot','motivo'])};const sig=JSON.stringify(obj);if(!seen.has(sig)&&records.length<400){seen.add(sig);records.push(obj);}}if((hasConf||v.destinoId||v.destinationId)&&times.some(([,t])=>t.day===target)){const t=times.find(([,x])=>x.day===target)[1];const c={workspace:w,file,path:p,channel:channel(v),destinationId:v.destinoId||v.destinationId||v.id||v.alvoId||null,name:v.nome||v.name||null,timestamp:t.local,providerMessageId:v.providerMessageId||null,messageId:v.messageId||null,state:v.estado||v.status||null,reason:v.motivo||null};const sig=JSON.stringify(c);if(!seen.has('C'+sig)){seen.add('C'+sig);conf.push(c);}}if(keys.some(k=>['destinosEstado','destinosLiberados','destinosCompativeis','alvosEstado'].includes(k))){slots.push({workspace:w,file,path:p,fields:pick(v,['destinosEstado','destinosLiberados','destinosCompativeis','alvosEstado','statusOperacional','statusPublico','enviados','status','motivo','ofertaId','id'])});}for(const [k,x] of Object.entries(v))if(x&&typeof x==='object')walk(x,file,w,p?p+'.'+k:k,depth+1);}
+          for(const w of ws){for(const n of ['fila-viva.json','fila-viva.proof.json','controle-envio-destinos.json','destinos.json','fila-projecao-leve.json']){const f=path.join(root,w,n);if(!fs.existsSync(f)){console.log('MISSING',w,n);continue;}let v;try{v=JSON.parse(fs.readFileSync(f,'utf8'));}catch(e){console.log('PARSE_ERROR',w,n);continue;}walk(v,n,w);v=null;}}
+          const byChannel={};for(const c of conf){const k=String(c.channel||'unknown').toLowerCase();byChannel[k]=(byChannel[k]||0)+1;}
+          const localDates={};for(const r of records)for(const d of Object.values(r.dates||{})){const day=d.slice(0,10);localDates[day]=(localDates[day]||0)+1;}
+          console.log('DETAIL_SUMMARY',JSON.stringify({targetLocalDay:target,workspaces:ws,recordCount:records.length,confirmationCount:conf.length,confirmationByChannel:byChannel,recordDateBuckets:localDates,turboRecords:records.filter(x=>x.turbo).length,slotObjects:slots.length}));
+          console.log('DETAIL_CONFIRMATIONS',JSON.stringify(conf.slice(0,500)));
+          console.log('DETAIL_CADENCE_RECORDS',JSON.stringify(records.slice(0,400)));
+          console.log('DETAIL_SLOT_OBJECTS',JSON.stringify(slots.slice(0,120)));
+          NODE
