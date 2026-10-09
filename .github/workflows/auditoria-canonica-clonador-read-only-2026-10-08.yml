@@ -92,8 +92,9 @@ jobs:
             if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_rejected:' + label);
             const started = Date.now();
             try {
-              const rows = await queryEngineShadow(sql, params, { timeoutSqlMs: 10000 });
-              const out = Array.isArray(rows) ? rows : (rows && Array.isArray(rows.rows) ? rows.rows : (rows && Array.isArray(rows.result) ? rows.result : []));
+              const response = await queryEngineShadow(sql, params, { timeoutSqlMs: 10000 });
+              if (response && response.ok === false) throw new Error(String(response.error || response.erro || (response.resultado && response.resultado.error) || 'select_failed'));
+              const out = Array.isArray(response) ? response : (response && response.resultado && Array.isArray(response.resultado.rows) ? response.resultado.rows : (response && Array.isArray(response.rows) ? response.rows : (response && Array.isArray(response.result) ? response.result : [])));
               timings.push({ label, ms: Date.now() - started, rows: out.length, timeoutMs: 10000 });
               emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
               return out;
