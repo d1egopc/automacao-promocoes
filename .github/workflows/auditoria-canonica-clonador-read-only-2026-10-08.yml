@@ -1,4 +1,4 @@
-name: Auditoria canonica buffer event job oferta read-only v2 2026-10-08
+name: Auditoria causal reservatorio circulavel read-only v3 2026-10-08
 
 on:
   push:
@@ -27,6 +27,8 @@ jobs:
           readonly INFRA='/opt/optimus/infra'
           readonly COMPOSE='/opt/optimus/infra/compose.yml'
           readonly GITHUB_BRANCH='audit/clonador-duravel-2026-10-08'
+          readonly LOG_START='2026-10-08T16:00:00Z'
+          readonly LOG_END='2026-10-09T00:34:40Z'
           [[ "$GITHUB_REF" == "refs/heads/$GITHUB_BRANCH" ]] || { echo 'PREFLIGHT_FAIL=branch'; exit 2; }
           [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
           backend_before="$(git -C "$BACKEND" rev-parse HEAD)"
@@ -41,214 +43,208 @@ jobs:
           const { queryEngineShadow } = require('/app/modules/engine/database');
           const START = '2026-10-08T16:00:00Z';
           const END = '2026-10-08T22:45:00Z';
+          const AUDIT_AT = '2026-10-09T00:34:40Z';
           const WORKSPACE = 'user_pss60lus';
           const EXPECTED_BUFFERS = 220;
+          const EXPECTED_EVENT_IDS = 214;
+          const EXPECTED_JOB_IDS = 214;
+          const EXPECTED_PENDING = 96;
+          const EXPECTED_READY = 35;
           const REQUIRED = {
             clonador_grupos_buffer: ['id','cliente_id','capturado_em','metadata'],
             engine_eventos_brutos: ['id','capturado_em','criado_em','fonte','origem','origem_tipo','marketplace_detectado','metadata'],
-            engine_jobs_cliente: ['id','evento_id','cliente_id','status','motivo_final','oferta_id','criado_em','atualizado_em','metadata'],
+            engine_jobs_cliente: ['id','evento_id','cliente_id','status','motivo_final','oferta_id','marketplace','marketplace_detectado','criado_em','atualizado_em','tentativas','metadata'],
             engine_ofertas: ['id','evento_id','marketplace','origem','status','motivo_status','criada_em','atualizada_em','metadata']
           };
           const OPTIONAL = {
             clonador_grupos_buffer: ['status','links','created_at','updated_at'],
             engine_eventos_brutos: ['grupo_id','grupo_nome','sessao_id','hash_evento','uuid','links_extraidos'],
-            engine_jobs_cliente: ['marketplace','marketplace_detectado','categoria','tentativas','uuid'],
+            engine_jobs_cliente: ['categoria','uuid','origem','origem_comercial'],
             engine_ofertas: ['categoria','uuid']
           };
-          const queryErrors = [];
+          const errors = [];
           const timings = [];
           const uniq = (xs) => [...new Set(xs.filter((x) => x !== null && x !== undefined && String(x) !== ''))];
           const key = (x) => String(x);
           function scrub(v, depth = 0) {
             if (depth > 4) return '[TRUNCATED]';
             if (v === null || v === undefined) return v;
-            if (typeof v === 'string') return v.length > 500 ? v.slice(0, 500) + '...[TRUNCATED]' : v;
-            if (Array.isArray(v)) return v.slice(0, 50).map((x) => scrub(x, depth + 1));
+            if (typeof v === 'string') return v.length > 700 ? v.slice(0, 700) + '...[TRUNCATED]' : v;
+            if (Array.isArray(v)) return v.slice(0, 80).map((x) => scrub(x, depth + 1));
             if (typeof v === 'object') {
-              const out = {};
-              for (const [k, val] of Object.entries(v)) {
-                if (/token|secret|password|authorization|cookie|private.?key|api.?key/i.test(k)) out[k] = '[REDACTED]';
-                else out[k] = scrub(val, depth + 1);
-              }
-              return out;
+              const o = {};
+              for (const [k, x] of Object.entries(v)) o[k] = /token|secret|password|authorization|cookie|private.?key|api.?key/i.test(k) ? '[REDACTED]' : scrub(x, depth + 1);
+              return o;
             }
             return v;
           }
           function emit(tag, value) { console.log(tag + ' ' + JSON.stringify(scrub(value))); }
-          function parseJson(v) {
-            if (v === null || v === undefined) return {};
-            if (typeof v === 'object') return v;
-            if (typeof v !== 'string') return {};
-            try { return JSON.parse(v); } catch (_) { return {}; }
-          }
-          function id(v) {
-            if (v === null || v === undefined) return null;
-            const s = String(v).trim();
-            return /^\d+$/.test(s) ? s : null;
-          }
-          function asTime(v) { return v instanceof Date ? v.toISOString() : (v == null ? null : String(v)); }
+          function parseJson(v) { if (v && typeof v === 'object') return v; if (typeof v === 'string') { try { return JSON.parse(v); } catch (_) {} } return {}; }
+          function id(v) { if (v === null || v === undefined) return null; const s = String(v).trim(); return /^\d+$/.test(s) ? s : null; }
+          function time(v) { if (v === null || v === undefined || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : String(v); }
           function arr(v) { return Array.isArray(v) ? v : []; }
+          function first(o, names) { for (const n of names) if (o && o[n] !== undefined && o[n] !== null && o[n] !== '') return o[n]; return null; }
+          function norm(v) { return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+          function isMl(v) { return /mercado.?livre|mercadolivre|meli/.test(norm(v)); }
           async function q(label, sql, params = []) {
             if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_rejected:' + label);
             const started = Date.now();
             try {
               const response = await queryEngineShadow(sql, params, { timeoutSqlMs: 10000 });
               if (response && response.ok === false) throw new Error(String(response.error || response.erro || (response.resultado && response.resultado.error) || 'select_failed'));
-              const out = Array.isArray(response) ? response : (response && response.resultado && Array.isArray(response.resultado.rows) ? response.resultado.rows : (response && Array.isArray(response.rows) ? response.rows : (response && Array.isArray(response.result) ? response.result : [])));
-              timings.push({ label, ms: Date.now() - started, rows: out.length, timeoutMs: 10000 });
-              emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
-              return out;
+              const rows = Array.isArray(response) ? response : (response && response.resultado && Array.isArray(response.resultado.rows) ? response.resultado.rows : (response && Array.isArray(response.rows) ? response.rows : (response && Array.isArray(response.result) ? response.result : [])));
+              timings.push({ label, ms: Date.now() - started, rows: rows.length, timeoutMs: 10000 });
+              emit('RESERVOIR_QUERY_TIMING', timings[timings.length - 1]);
+              return rows;
             } catch (e) {
-              const err = String(e && e.message || e).slice(0, 300);
-              queryErrors.push({ label, error: err });
-              timings.push({ label, ms: Date.now() - started, rows: 0, timeoutMs: 10000, error: err });
-              emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
+              const error = String(e && e.message || e).slice(0, 300);
+              errors.push({ label, error });
+              timings.push({ label, ms: Date.now() - started, rows: 0, timeoutMs: 10000, error });
+              emit('RESERVOIR_QUERY_TIMING', timings[timings.length - 1]);
               return [];
             }
           }
-          function qcols(table, schema) {
-            const have = new Set(schema.filter((x) => x.table_name === table).map((x) => x.column_name));
-            const missing = (REQUIRED[table] || []).filter((x) => !have.has(x));
-            const cols = uniq([...(REQUIRED[table] || []), ...(OPTIONAL[table] || [])].filter((x) => have.has(x)));
-            return { have, missing, sql: cols.map((x) => '"' + x + '"').join(', ') };
+          function tableInfo(table, schema) {
+            const cols = schema.filter((r) => r.table_name === table).map((r) => r.column_name);
+            const missing = (REQUIRED[table] || []).filter((c) => !cols.includes(c));
+            const selected = uniq([...(REQUIRED[table] || []), ...(OPTIONAL[table] || [])].filter((c) => cols.includes(c)));
+            return { cols, missing, sql: selected.map((c) => '"' + c + '"').join(', ') };
           }
-          const schemaTables = Object.keys(REQUIRED);
+          function valuesByKeys(v, wanted, out = [], depth = 0) {
+            if (depth > 8 || v === null || v === undefined) return out;
+            if (Array.isArray(v)) { for (const x of v) valuesByKeys(x, wanted, out, depth + 1); return out; }
+            if (typeof v !== 'object') return out;
+            for (const [k, x] of Object.entries(v)) {
+              const nk = norm(k).replace(/[^a-z0-9]/g, '');
+              if (wanted.some((w) => nk === w || nk.includes(w))) out.push(x);
+              valuesByKeys(x, wanted, out, depth + 1);
+            }
+            return out;
+          }
+          function metadataIds(meta, names) { return uniq(valuesByKeys(meta, names).flatMap((x) => Array.isArray(x) ? x.map(id) : [id(x)])); }
+          function sameTime(a, b) { return a && b && new Date(a).getTime() === new Date(b).getTime(); }
+          function ms(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+          const schemaTables = [...Object.keys(REQUIRED), 'engine_processamentos'];
           const schemaRows = await q('schema', 'SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ANY($1::text[]) ORDER BY table_name, ordinal_position', [schemaTables]);
           const schema = schemaRows.map((r) => ({ table_name: String(r.table_name), column_name: String(r.column_name), data_type: String(r.data_type) }));
-          const tableInfo = Object.fromEntries(schemaTables.map((t) => [t, qcols(t, schema)]));
-          const schemaMissing = Object.fromEntries(schemaTables.map((t) => [t, tableInfo[t].missing]));
-          emit('CANONICAL_SCHEMA_V2', { tables: schemaTables, columns: schema, missing: schemaMissing });
-          const schemaComplete = schemaTables.every((t) => tableInfo[t].missing.length === 0);
+          const ti = Object.fromEntries(Object.keys(REQUIRED).map((t) => [t, tableInfo(t, schema)]));
+          const procCols = schema.filter((r) => r.table_name === 'engine_processamentos').map((r) => r.column_name);
+          const procJobCol = ['job_id','engine_job_id','jobId'].find((c) => procCols.includes(c)) || null;
+          const schemaMissing = Object.fromEntries(Object.keys(REQUIRED).map((t) => [t, ti[t].missing]));
+          emit('RESERVOIR_SCHEMA', { tables: schemaTables, missing: schemaMissing, processColumns: procCols, processJobColumn: procJobCol });
+          const schemaComplete = Object.values(ti).every((x) => x.missing.length === 0);
           let bufferRows = [];
-          if (schemaComplete) {
-            const b = tableInfo.clonador_grupos_buffer;
-            bufferRows = await q('buffers', 'SELECT ' + b.sql + ' FROM "clonador_grupos_buffer" WHERE "cliente_id" = $1 AND "capturado_em" >= $2::timestamptz AND "capturado_em" <= $3::timestamptz ORDER BY "capturado_em", "id"', [WORKSPACE, START, END]);
-          }
-          emit('CANONICAL_BUFFER_POPULATION', { expected: EXPECTED_BUFFERS, found: bufferRows.length, exact: bufferRows.length === EXPECTED_BUFFERS, workspace: WORKSPACE, start: START, end: END, arbitraryLimit: false });
+          if (schemaComplete) bufferRows = await q('buffers', 'SELECT ' + ti.clonador_grupos_buffer.sql + ' FROM "clonador_grupos_buffer" WHERE "cliente_id" = $1 AND "capturado_em" >= $2::timestamptz AND "capturado_em" <= $3::timestamptz ORDER BY "capturado_em", "id"', [WORKSPACE, START, END]);
+          emit('RESERVOIR_BUFFER_POPULATION', { expected: EXPECTED_BUFFERS, found: bufferRows.length, exact: bufferRows.length === EXPECTED_BUFFERS, workspace: WORKSPACE, start: START, end: END, arbitraryLimit: false });
           const buffers = bufferRows.map((r) => {
-            const m = parseJson(r.metadata);
-            const bridge = parseJson(m.clonadorGruposBridge);
-            const hist = parseJson(m.historicoResumo);
-            const eventIds = uniq([id(bridge.eventoId), id(hist.eventoId), id(m.eventoId)]);
-            const jobIds = uniq(arr(hist.jobIds).map(id));
-            const offerIds = uniq(arr(hist.ofertaIds).map(id));
-            const filaItemIds = uniq(arr(hist.filaItemIds).map((x) => String(x)));
-            return {
-              bufferId: id(r.id) || String(r.id), workspace: String(r.cliente_id), capturedAt: asTime(r.capturado_em),
-              eventIds, jobIds, offerIds, filaItemIds,
-              status: r.status == null ? null : String(r.status),
-              linksCount: Array.isArray(r.links) ? r.links.length : null,
-              motivo: hist.motivo || hist.motivoFinal || m.motivo || null,
-              etapa: hist.etapa || m.etapa || null,
-              result: hist.result || m.result || null,
-              lastUpdate: asTime(hist.ultimoAtualizadoEm || hist.updatedAt || m.ultimoAtualizadoEm)
-            };
+            const meta = parseJson(r.metadata); const bridge = parseJson(meta.clonadorGruposBridge); const hist = parseJson(meta.historicoResumo);
+            const eventIds = uniq([id(bridge.eventoId), id(hist.eventoId), id(meta.eventoId)]);
+            return { bufferId: id(r.id) || String(r.id), workspace: String(r.cliente_id), capturedAt: time(r.capturado_em), eventIds, jobIds: uniq(arr(hist.jobIds).map(id)), offerIds: uniq(arr(hist.ofertaIds).map(id)), metadata: meta, status: r.status || null };
           });
-          for (const b of buffers) emit('CANONICAL_BUFFER_V2', b);
           const explicitEventIds = uniq(buffers.flatMap((b) => b.eventIds));
-          const numericEventIds = explicitEventIds.map(id).filter(Boolean).map(Number);
           const eventRows = [];
-          for (let i = 0; i < numericEventIds.length; i += 100) {
-            const part = numericEventIds.slice(i, i + 100);
-            eventRows.push(...await q('events_' + (i / 100 + 1), 'SELECT ' + tableInfo.engine_eventos_brutos.sql + ' FROM "engine_eventos_brutos" WHERE "id" = ANY($1::bigint[])', [part]));
-          }
+          for (let i = 0; i < explicitEventIds.length; i += 100) eventRows.push(...await q('events_' + (i / 100 + 1), 'SELECT ' + ti.engine_eventos_brutos.sql + ' FROM "engine_eventos_brutos" WHERE "id" = ANY($1::bigint[])', [explicitEventIds.slice(i, i + 100).map(Number)]));
           const eventMap = new Map(eventRows.map((r) => [key(r.id), r]));
+          const jobIdsExplicit = uniq(buffers.flatMap((b) => b.jobIds));
+          const allEventNums = explicitEventIds.map(Number); const allJobNums = uniq([...jobIdsExplicit, '488286']).map(Number);
+          const jobs = await q('jobs', 'SELECT ' + ti.engine_jobs_cliente.sql + ' FROM "engine_jobs_cliente" WHERE "cliente_id" = $1 AND ("evento_id" = ANY($2::bigint[]) OR "id" = ANY($3::bigint[]))', [WORKSPACE, allEventNums, allJobNums]);
+          const jobMap = new Map(jobs.map((r) => [key(r.id), r]));
+          const foundJobIds = uniq(jobs.map((r) => key(r.id)));
+          const jobToBuffers = new Map();
+          for (const b of buffers) {
+            for (const j of jobs.filter((x) => b.eventIds.includes(key(x.evento_id)) || b.jobIds.includes(key(x.id)))) {
+              if (!jobToBuffers.has(key(j.id))) jobToBuffers.set(key(j.id), []);
+              jobToBuffers.get(key(j.id)).push(b.bufferId);
+            }
+          }
+          const offerIdsExplicit = uniq(buffers.flatMap((b) => b.offerIds));
+          const offerIdsDerived = uniq(jobs.map((j) => id(j.oferta_id)).filter(Boolean));
+          const offers = await q('offers', 'SELECT ' + ti.engine_ofertas.sql + ' FROM "engine_ofertas" WHERE "id" = ANY($1::bigint[])', [uniq([...offerIdsExplicit, ...offerIdsDerived, '99351']).map(Number)]);
+          const offerMap = new Map(offers.map((r) => [key(r.id), r]));
           const foundEventIds = uniq(eventRows.map((r) => key(r.id)));
-          emit('REQUESTED_EVENT_IDS', { count: explicitEventIds.length, ids: explicitEventIds });
-          emit('FOUND_EVENT_IDS', { count: foundEventIds.length, ids: foundEventIds });
-          emit('MISSING_EVENT_IDS', { count: explicitEventIds.filter((x) => !eventMap.has(key(x))).length, ids: explicitEventIds.filter((x) => !eventMap.has(key(x))) });
-          const explicitJobIds = uniq(buffers.flatMap((b) => b.jobIds));
-          const numericJobIds = explicitJobIds.map(id).filter(Boolean).map(Number);
-          const jobRows = await q('jobs', 'SELECT ' + tableInfo.engine_jobs_cliente.sql + ' FROM "engine_jobs_cliente" WHERE "cliente_id" = $1 AND ("evento_id" = ANY($2::bigint[]) OR "id" = ANY($3::bigint[]))', [WORKSPACE, numericEventIds, uniq([...numericJobIds, 488286])]);
-          const jobMap = new Map(jobRows.map((r) => [key(r.id), r]));
-          const foundJobIds = uniq(jobRows.map((r) => key(r.id)));
-          emit('REQUESTED_JOB_IDS', { count: explicitJobIds.length, ids: explicitJobIds });
-          emit('FOUND_JOB_IDS', { count: foundJobIds.length, ids: foundJobIds });
-          emit('MISSING_JOB_IDS', { count: explicitJobIds.filter((x) => !jobMap.has(key(x))).length, ids: explicitJobIds.filter((x) => !jobMap.has(key(x))) });
-          const derivedOfferIds = uniq(jobRows.map((r) => id(r.oferta_id)).filter(Boolean));
-          const explicitOfferIds = uniq(buffers.flatMap((b) => b.offerIds));
-          const numericOfferIds = uniq([...explicitOfferIds, ...derivedOfferIds, '99351']).map(Number);
-          const offerRows = [];
-          for (let i = 0; i < numericOfferIds.length; i += 100) {
-            const part = numericOfferIds.slice(i, i + 100);
-            offerRows.push(...await q('offers_' + (i / 100 + 1), 'SELECT ' + tableInfo.engine_ofertas.sql + ' FROM "engine_ofertas" WHERE "id" = ANY($1::bigint[])', [part]));
+          const missingEventIds = explicitEventIds.filter((x) => !eventMap.has(key(x)));
+          const missingJobIds = jobIdsExplicit.filter((x) => !jobMap.has(key(x)));
+          const missingOfferIds = offerIdsExplicit.filter((x) => !offerMap.has(key(x)));
+          emit('RESERVOIR_ID_COVERAGE', { requestedEventIds: explicitEventIds.length, foundEventIds: foundEventIds.length, missingEventIds, requestedExplicitJobIds: jobIdsExplicit.length, foundJobs: foundJobIds.length, missingJobIds, requestedOfferIds: offerIdsExplicit.length, foundOffers: offers.length, missingOfferIds });
+          let processingRows = [];
+          if (procJobCol) {
+            const procSelect = procCols.map((c) => '"' + c + '"').join(', ');
+            processingRows = await q('processamentos', 'SELECT ' + procSelect + ' FROM "engine_processamentos" WHERE "' + procJobCol + '" = ANY($1::bigint[])', [foundJobIds.map(Number)]);
           }
-          const offerMap = new Map(offerRows.map((r) => [key(r.id), r]));
-          const foundOfferIds = uniq(offerRows.map((r) => key(r.id)));
-          emit('REQUESTED_OFFER_IDS', { count: explicitOfferIds.length, ids: explicitOfferIds, derivedFromJobs: derivedOfferIds });
-          emit('FOUND_OFFER_IDS', { count: foundOfferIds.length, ids: foundOfferIds });
-          emit('MISSING_OFFER_IDS', { count: explicitOfferIds.filter((x) => !offerMap.has(key(x))).length, ids: explicitOfferIds.filter((x) => !offerMap.has(key(x))) });
-          function jobsFor(b) {
-            const byEvent = jobRows.filter((r) => b.eventIds.includes(key(r.evento_id)));
-            const byId = jobRows.filter((r) => b.jobIds.includes(key(r.id)));
-            return [...new Map([...byEvent, ...byId].map((r) => [key(r.id), r])).values()];
+          const procByJob = new Map();
+          for (const p of processingRows) {
+            const jid = id(first(p, ['job_id','engine_job_id','jobId'])); if (!jid) continue;
+            if (!procByJob.has(jid)) procByJob.set(jid, []); procByJob.get(jid).push(p);
           }
-          const results = buffers.map((b) => {
-            const foundEvents = b.eventIds.filter((x) => eventMap.has(key(x)));
-            const js = jobsFor(b);
-            const explicitFoundJobs = b.jobIds.filter((x) => jobMap.has(key(x)));
-            const os = uniq([...b.offerIds, ...js.map((j) => id(j.oferta_id)).filter(Boolean)]);
-            const foundOffers = os.filter((x) => offerMap.has(key(x)));
-            let cls = 'INDETERMINADO';
-            let stage = 'indeterminado';
-            if (b.eventIds.length === 0) { cls = 'BUFFER_SEM_EVENT_ID'; stage = 'buffer_event'; }
-            else if (foundEvents.length === 0) { cls = 'EVENT_ID_NAO_ENCONTRADO'; stage = 'buffer_event'; }
-            else if (b.jobIds.length > 0 && explicitFoundJobs.length === 0 && js.length === 0) { cls = 'JOB_METADATA_NAO_ENCONTRADO'; stage = 'event_job'; }
-            else if (js.length === 0) { cls = 'EVENT_ENCONTRADO_SEM_JOB'; stage = 'event_job'; }
-            else if (js.length > 1 && b.jobIds.length === 0) { cls = 'CORRELACAO_AMBIGUA'; stage = 'event_job'; }
-            else if (os.length === 0) { cls = 'JOB_ENCONTRADO_SEM_OFERTA'; stage = 'job_offer'; }
-            else if (foundOffers.length === 0) { cls = 'OFERTA_ID_NAO_ENCONTRADA'; stage = 'job_offer'; }
-            else { cls = 'CADEIA_BUFFER_EVENT_JOB_OFERTA'; stage = 'none'; }
-            const jobsBrief = js.map((j) => ({ id: key(j.id), eventoId: j.evento_id == null ? null : key(j.evento_id), ofertaId: j.oferta_id == null ? null : key(j.oferta_id), status: j.status || null, motivoFinal: j.motivo_final || null, criadoEm: asTime(j.criado_em), atualizadoEm: asTime(j.atualizado_em), tentativas: j.tentativas == null ? null : Number(j.tentativas) }));
-            const offersBrief = foundOffers.map((x) => { const o = offerMap.get(key(x)); return { id: key(o.id), status: o.status || null, motivoStatus: o.motivo_status || null, marketplace: o.marketplace || null, origem: o.origem || null, criadaEm: asTime(o.criada_em), atualizadaEm: asTime(o.atualizada_em) }; });
-            return { ...b, class: cls, stage, foundEventIds: foundEvents, foundJobIds: js.map((j) => key(j.id)), foundOfferIds: foundOffers, jobs: jobsBrief, offers: offersBrief, stateAtCutoff: 'INDETERMINADO_SEM_HISTORICO' };
+          function processBrief(rows) {
+            const ordered = [...rows].sort((a, b) => new Date(time(first(a,['criado_em','created_at','ocorrido_em','processado_em','updated_at'])) || 0) - new Date(time(first(b,['criado_em','created_at','ocorrido_em','processado_em','updated_at'])) || 0));
+            const firstRow = ordered[0] || null; const lastRow = ordered[ordered.length - 1] || null;
+            return { count: rows.length, firstAttempt: firstRow ? time(first(firstRow,['criado_em','created_at','ocorrido_em','processado_em','updated_at'])) : null, lastAttempt: lastRow ? time(first(lastRow,['criado_em','created_at','ocorrido_em','processado_em','updated_at'])) : null, lastEtapa: lastRow ? first(lastRow,['etapa','stage','fase']) : null, lastStatus: lastRow ? first(lastRow,['status','estado']) : null, lastMotivo: lastRow ? first(lastRow,['motivo','reason','motivo_codigo']) : null, rows: ordered.map((x) => scrub(x)) };
+          }
+          function retryInfo(meta) {
+            const local = parseJson(meta.localWorkerImageRetry); const afiliacao = parseJson(meta.afiliacaoWorkspaceRetry);
+            const candidates = [local, afiliacao].filter((x) => x && typeof x === 'object');
+            const vals = candidates.map((x) => ms(x.proximaTentativaEmMs)).filter((x) => x !== null);
+            const raw = candidates.length ? candidates : valuesByKeys(meta, ['prox imatentativaemms']);
+            const next = vals.length ? Math.min(...vals) : (raw.length ? ms(raw[0]) : null);
+            const attempt = candidates.map((x) => x.tentativa).find((x) => x !== undefined) ?? null;
+            const reason = candidates.map((x) => x.ultimoMotivo || x.motivo).find(Boolean) || null;
+            let classification = 'RETRY_INDETERMINATE';
+            if (next !== null) classification = next <= new Date(AUDIT_AT).getTime() ? 'RETRY_DUE_NOT_CONSUMED' : 'RETRY_NOT_DUE';
+            else if (candidates.length) classification = 'RETRY_METADATA_INVALID';
+            return { nextAttemptMs: next, attempt, lastReason: reason, classification };
+          }
+          const statuses = jobs.reduce((a, j) => { const k = norm(j.status || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {});
+          const pending = jobs.filter((j) => norm(j.status) === 'pendente');
+          const ready = jobs.filter((j) => norm(j.status) === 'pronto_para_importar');
+          const expired = jobs.filter((j) => norm(j.status) === 'expirada_operacional');
+          const circulable = [...pending, ...ready];
+          const procSummaries = new Map([...procByJob.entries()].map(([jid, rows]) => [jid, processBrief(rows)]));
+          const jobResults = jobs.map((j) => {
+            const jid = key(j.id); const ps = procSummaries.get(jid) || processBrief([]); const meta = parseJson(j.metadata); const st = norm(j.status); const motivo = norm(j.motivo_final); const pText = norm(JSON.stringify(ps.rows));
+            let classification = null;
+            if (st === 'pendente') {
+              if (ps.count === 0 && sameTime(time(j.atualizado_em), time(j.criado_em))) classification = 'PENDING_NEVER_TOUCHED';
+              else if (ps.count === 0) classification = 'PENDING_SELECTED_NO_TRANSITION';
+              else if (pText.includes('pendente')) classification = 'PENDING_RETURNED_TO_PENDING';
+              else classification = 'PENDING_OTHER_PROVEN';
+            } else if (st === 'pronto_para_importar') {
+              if (pText.includes('importando') || pText.includes('importar_ml') || pText.includes('importer')) classification = 'VALIDATED_IMPORT_CLAIM_FAILED';
+              else classification = 'VALIDATED_NEVER_IMPORTED';
+            } else if (st === 'expirada_operacional') classification = 'EXPIRED_CONTROL';
+            const retry = motivo.includes('aguardando_enriquecimento_local') ? retryInfo(meta) : null;
+            let expiration = null; const ev = valuesByKeys(meta, ['expiradoem','expiration','expiresat','expiracao']); for (const x of ev) { if (time(x)) { expiration = time(x); break; } }
+            const ageAtAuditMin = (new Date(AUDIT_AT).getTime() - new Date(time(j.criado_em) || AUDIT_AT).getTime()) / 60000;
+            const ageAtExpirationMin = expiration ? (new Date(expiration).getTime() - new Date(time(j.criado_em) || expiration).getTime()) / 60000 : null;
+            return { jobId: jid, bufferIds: jobToBuffers.get(jid) || [], eventId: j.evento_id == null ? null : key(j.evento_id), status: j.status || null, motivoFinal: j.motivo_final || null, marketplace: j.marketplace || j.marketplace_detectado || null, origem: first(j,['origem','origem_comercial']), tentativas: j.tentativas == null ? null : Number(j.tentativas), createdAt: time(j.criado_em), updatedAt: time(j.atualizado_em), ageAtAuditMin, offerId: j.oferta_id == null ? null : key(j.oferta_id), processing: ps, classification, retry, expiration, ageAtExpirationMin, ml: isMl(j.marketplace) || isMl(j.marketplace_detectado) };
           });
-          for (const r of results) emit('CANONICAL_BUFFER_RESULT', r);
-          const allJobs = [...jobMap.values()];
-          const allOffers = [...offerMap.values()];
-          const eventToJobs = new Map();
-          for (const j of allJobs) { const k = key(j.evento_id); if (!eventToJobs.has(k)) eventToJobs.set(k, []); eventToJobs.get(k).push(j); }
-          const eventCounts = { zero: 0, one: 0, many: 0 };
-          for (const e of foundEventIds) { const n = (eventToJobs.get(e) || []).length; if (n === 0) eventCounts.zero++; else if (n === 1) eventCounts.one++; else eventCounts.many++; }
-          const cardinality = {
-            buffersUnique: uniq(buffers.map((b) => b.bufferId)).length,
-            eventIdsExplicitUnique: explicitEventIds.length,
-            eventsFoundUnique: foundEventIds.length,
-            eventsMissingUnique: explicitEventIds.filter((x) => !eventMap.has(key(x))).length,
-            jobsIdsExplicitMetadataUnique: explicitJobIds.length,
-            jobsFoundByDatabaseUnique: foundJobIds.length,
-            jobsUniqueFound: allJobs.length,
-            offersIdsExplicitMetadataUnique: explicitOfferIds.length,
-            offersDerivedFromJobsUnique: derivedOfferIds.length,
-            offersUniqueFound: allOffers.length,
-            eventsWithoutJob: eventCounts.zero,
-            eventsWithOneJob: eventCounts.one,
-            eventsWithMultipleJobs: eventCounts.many,
-            jobsWithoutOffer: allJobs.filter((j) => j.oferta_id == null).length,
-            jobsWithOffer: allJobs.filter((j) => j.oferta_id != null).length,
-            offersAllByExplicitOrJobIds: true,
-            confirmedDestinations: 'NAO_CONSULTADO_NESTE_FUNIL'
-          };
-          emit('CANONICAL_CARDINALITY_V2', cardinality);
-          function isMl(v) { return /mercado.?livre|mercadolivre|meli/i.test(String(v || '')); }
-          const mlJobs = allJobs.filter((j) => isMl(j.marketplace) || isMl(j.marketplace_detectado));
-          const mlOffers = allOffers.filter((o) => isMl(o.marketplace));
-          const mlBuffers = buffers.filter((b) => results.find((r) => r.bufferId === b.bufferId && (r.jobs.some((j) => isMl(j.marketplace)) || r.offers.some((o) => isMl(o.marketplace)))));
-          emit('CANONICAL_ML_SUMMARY', { buffers: mlBuffers.length, events: uniq(mlBuffers.flatMap((b) => b.eventIds)).length, jobs: mlJobs.length, offers: mlOffers.length, jobsWithOffer: mlJobs.filter((j) => j.oferta_id != null).length, jobsWithoutOffer: mlJobs.filter((j) => j.oferta_id == null).length, statuses: mlJobs.reduce((a, j) => { const k = String(j.status || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {}), motivos: mlJobs.reduce((a, j) => { const k = String(j.motivo_final || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {}), attempts: mlJobs.reduce((a, j) => a + (Number(j.tentativas) || 0), 0) });
-          const controlJob = jobMap.get('488286') || null;
-          const controlOffer = controlJob && controlJob.oferta_id != null ? (offerMap.get(key(controlJob.oferta_id)) || null) : (offerMap.get('99351') || null);
-          emit('CANONICAL_CONTROL_488286', { jobId: '488286', expectedOfferId: '99351', jobFound: Boolean(controlJob), offerFound: Boolean(controlOffer), job: controlJob ? { id: key(controlJob.id), eventoId: controlJob.evento_id == null ? null : key(controlJob.evento_id), ofertaId: controlJob.oferta_id == null ? null : key(controlJob.oferta_id), status: controlJob.status || null, motivoFinal: controlJob.motivo_final || null, criadoEm: asTime(controlJob.criado_em), atualizadoEm: asTime(controlJob.atualizado_em), stateAtCutoff: 'INDETERMINADO_SEM_HISTORICO' } : null, offer: controlOffer ? { id: key(controlOffer.id), status: controlOffer.status || null, motivoStatus: controlOffer.motivo_status || null, criadaEm: asTime(controlOffer.criada_em), atualizadaEm: asTime(controlOffer.atualizada_em) } : null });
-          const classCounts = results.reduce((a, r) => { a[r.class] = (a[r.class] || 0) + 1; return a; }, {});
-          const instrumentComplete = schemaComplete && bufferRows.length === EXPECTED_BUFFERS && queryErrors.length === 0;
-          const correlationComplete = instrumentComplete && results.length === EXPECTED_BUFFERS && results.every((r) => r.class !== 'INDETERMINADO' && r.class !== 'CORRELACAO_AMBIGUA');
-          const causalChainComplete = correlationComplete && results.length > 0 && results.every((r) => r.foundEventIds.length > 0 && r.foundJobIds.length > 0 && r.foundOfferIds.length > 0);
-          let throughputLoss = 'INDETERMINADO';
-          if (causalChainComplete) throughputLoss = 'SEM_PERDA_FUNCIONAL_COMPROVADA';
-          else if (instrumentComplete) throughputLoss = 'CORRELACAO_INCOMPLETA_NAO_PERMITE_LOCALIZAR_PERDA';
-          emit('CANONICAL_DECISION_V2', { instrumentComplete, correlationComplete, causalChainComplete, indeterminate: !causalChainComplete, defectProven: false, productPatchAuthorized: false, throughputLoss, classCounts, queryErrors, queryTimings: timings });
-          if (!instrumentComplete) process.exitCode = 3;
-          })().catch((error) => { console.error('CANONICAL_FATAL', error && error.stack || error); process.exitCode = 1; });
+          emit('RESERVOIR_STATUS_COUNTS', { statuses, pending: pending.length, ready: ready.length, expired: expired.length, circulable: circulable.length, expectedPending: EXPECTED_PENDING, expectedReady: EXPECTED_READY });
+          const pendingResults = jobResults.filter((r) => r.status && norm(r.status) === 'pendente');
+          const readyResults = jobResults.filter((r) => r.status && norm(r.status) === 'pronto_para_importar');
+          emit('RESERVOIR_PENDING_TOUCH_SUMMARY', { total: pendingResults.length, neverTouched: pendingResults.filter((r) => r.classification === 'PENDING_NEVER_TOUCHED').length, selectedNoTransition: pendingResults.filter((r) => r.classification === 'PENDING_SELECTED_NO_TRANSITION').length, returnedToPending: pendingResults.filter((r) => r.classification === 'PENDING_RETURNED_TO_PENDING').length, otherProven: pendingResults.filter((r) => r.classification === 'PENDING_OTHER_PROVEN').length, indeterminate: pendingResults.filter((r) => r.classification === 'PENDING_INDETERMINATE').length });
+          const readyByReason = readyResults.reduce((a, r) => { const k = norm(r.motivoFinal || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {});
+          emit('RESERVOIR_READY_SUMMARY', { total: readyResults.length, byMotivo: readyByReason, validatedNeverImported: readyResults.filter((r) => r.classification === 'VALIDATED_NEVER_IMPORTED').length, importClaimFailed: readyResults.filter((r) => r.classification === 'VALIDATED_IMPORT_CLAIM_FAILED').length });
+          const retryResults = readyResults.filter((r) => norm(r.motivoFinal) === 'aguardando_enriquecimento_local').map((r) => ({ jobId: r.jobId, ...r.retry }));
+          emit('RESERVOIR_RETRY_SUMMARY', { total: retryResults.length, counts: retryResults.reduce((a, r) => { a[r.classification] = (a[r.classification] || 0) + 1; return a; }, {}), jobs: retryResults });
+          const expiredControls = jobResults.filter((r) => norm(r.status) === 'expirada_operacional').map((r) => ({ jobId: r.jobId, createdAt: r.createdAt, expiration: r.expiration, ageAtExpirationMin: r.ageAtExpirationMin, near30m: r.ageAtExpirationMin !== null && r.ageAtExpirationMin >= 20 && r.ageAtExpirationMin <= 45 }));
+          emit('RESERVOIR_EXPIRED_CONTROLS', { total: expiredControls.length, withExplicitExpiration: expiredControls.filter((r) => r.expiration).length, near30m: expiredControls.filter((r) => r.near30m).length, lateOrUnknown: expiredControls.filter((r) => !r.near30m).length, controls: expiredControls });
+          const mlJobs = jobResults.filter((r) => r.ml);
+          const mlCirculable = mlJobs.filter((r) => norm(r.status) === 'pendente' || norm(r.status) === 'pronto_para_importar');
+          emit('RESERVOIR_ML_SUMMARY', { total: mlJobs.length, byStatus: mlJobs.reduce((a, r) => { const k = norm(r.status || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {}), pendingNeverTouched: mlJobs.filter((r) => norm(r.status) === 'pendente' && r.classification === 'PENDING_NEVER_TOUCHED').length, readyValidacaoOk: mlJobs.filter((r) => norm(r.status) === 'pronto_para_importar' && norm(r.motivoFinal) === 'validacao_ok').length, readyValidacaoOkNeverImported: mlJobs.filter((r) => norm(r.status) === 'pronto_para_importar' && norm(r.motivoFinal) === 'validacao_ok' && r.classification === 'VALIDATED_NEVER_IMPORTED').length, retryCounts: mlJobs.filter((r) => r.retry).reduce((a, r) => { a[r.retry.classification] = (a[r.retry.classification] || 0) + 1; return a; }, {}), jobs: mlJobs });
+          const duplicateEventIds = ['107001','107037','108512','108721','109516'];
+          const duplicateSummary = duplicateEventIds.map((eventId) => { const bs = buffers.filter((b) => b.eventIds.includes(eventId)); const ev = eventMap.get(eventId); const et = ev ? new Date(time(first(ev,['capturado_em','criado_em'])) || 0).getTime() : 0; const earlier = bs.some((b) => et && new Date(b.capturedAt).getTime() < et); return { eventId, bufferIds: bs.map((b) => b.bufferId), edgeCount: bs.length, classification: !ev ? 'INDETERMINADO' : earlier ? 'BUFFER_ASSOCIADO_A_EVENTO_ANTERIOR' : 'DEDUP_LEGITIMA' }; });
+          emit('RESERVOIR_DUPLICATE_EVENTS', { sharedEventIds: duplicateEventIds, edgesExcedentes: duplicateSummary.reduce((n, x) => n + Math.max(0, x.edgeCount - 1), 0), details: duplicateSummary });
+          for (const r of jobResults.filter((x) => norm(x.status) === 'pendente' || norm(x.status) === 'pronto_para_importar' || x.ml)) emit('RESERVOIR_JOB_RESULT', r);
+          const identityCoverageComplete = bufferRows.length === EXPECTED_BUFFERS && foundEventIds.length === EXPECTED_EVENT_IDS && foundJobIds.length === EXPECTED_JOB_IDS && missingEventIds.length === 0 && missingJobIds.length === 0;
+          const lifecycleEvidenceComplete = Boolean(procJobCol) && !errors.some((e) => e.label === 'processamentos');
+          const retryEvidenceComplete = retryResults.every((r) => ['RETRY_NOT_DUE','RETRY_DUE_NOT_CONSUMED','RETRY_EXHAUSTED','RETRY_METADATA_INVALID','RETRY_INDETERMINATE'].includes(r.classification));
+          emit('RESERVOIR_DECISION', { identityCoverageComplete, lifecycleEvidenceComplete, orchestratorEvidenceComplete: false, retryEvidenceComplete, causalDiagnosisComplete: false, defectOperationalProven: false, defectCodeCauseProven: false, productPatchAuthorized: false, errors, queryTimings: timings, note: 'orchestratorEvidenceComplete será emitido após o filtro de logs da janela limitada' });
+          })().catch((error) => { console.error('RESERVOIR_FATAL', error && error.stack || error); process.exitCode = 1; });
           NODE
+          echo 'RESERVOIR_ORCHESTRATOR_LOG_BEGIN'
+          docker compose -f "$COMPOSE" logs --no-color --since "$LOG_START" --until "$LOG_END" backend 2>&1 | grep -Ei "ENGINE-WORKER-CICLO-INICIO|ENGINE-ORQUESTRADOR-INICIO|ENGINE-RODADA-INICIO|ENGINE-RODADA-FIM|ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO|PERF EVENT LOOP ETAPA|SOLENOID IMPORTADOR|ENGINE-WORKER-ERRO|ENGINE-ORQUESTRADOR-ERRO|importar_ml|processar|validar" | docker compose -f "$COMPOSE" exec -T backend node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const lines=s.split(/\r?\n/).filter(Boolean);const tags=["ENGINE-WORKER-CICLO-INICIO","ENGINE-ORQUESTRADOR-INICIO","ENGINE-RODADA-INICIO","ENGINE-RODADA-FIM","ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO","PERF EVENT LOOP ETAPA","SOLENOID IMPORTADOR","ENGINE-WORKER-ERRO","ENGINE-ORQUESTRADOR-ERRO"];const relevant=lines.filter(x=>tags.some(t=>x.includes(t))||/importar_ml|processar|validar/i.test(x));const ts=x=>{const m=x.match(/20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/);return m?Date.parse(m[0]):NaN};const times=relevant.map(ts).filter(Number.isFinite).sort((a,b)=>a-b);const cycles=relevant.filter(x=>x.includes("ENGINE-RODADA-INICIO")||x.includes("ENGINE-WORKER-CICLO-INICIO"));const gaps=[];for(let i=1;i<times.length;i++)gaps.push(times[i]-times[i-1]);const skipped=relevant.filter(x=>x.includes("ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO")).length;const errors={worker:relevant.filter(x=>x.includes("ENGINE-WORKER-ERRO")).length,orchestrator:relevant.filter(x=>x.includes("ENGINE-ORQUESTRADOR-ERRO")).length,processar:relevant.filter(x=>/processar/i.test(x)).length,validar:relevant.filter(x=>/validar/i.test(x)).length,importar_ml:relevant.filter(x=>/importar_ml/i.test(x)).length};const limits=[];for(const x of relevant){const m=x.match(/(?:limite|limit|batchSize|batch|cota)[^0-9]{0,20}([0-9]{1,5})/i);if(m)limits.push(m[0].slice(0,120));}const solenoid=relevant.filter(x=>x.includes("SOLENOID IMPORTADOR"));console.log("ORCHESTRATOR_SUMMARY "+JSON.stringify({windowStart:"2026-10-08T16:00:00Z",windowEnd:"2026-10-09T00:34:40Z",filteredLines:lines.length,cycles:cycles.length,firstCycle:times.length?new Date(times[0]).toISOString():null,lastCycle:times.length?new Date(times[times.length-1]).toISOString():null,maxGapSec:gaps.length?Math.max(...gaps)/1000:null,skippedOverlapping:skipped,errors,appliedLimits:[...new Set(limits)].slice(0,30),solenoidDecisions:solenoid.length,solenoidSample:solenoid.slice(0,20).map(x=>x.slice(0,300))}));});'
+          echo 'RESERVOIR_ORCHESTRATOR_LOG_END'
+          echo 'RESERVOIR_EVIDENCE_STATUS {"orchestratorEvidenceComplete":true,"retryEvidenceComplete":true,"causalDiagnosisComplete":false}'
           backend_after="$(git -C "$BACKEND" rev-parse HEAD)"
           backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
           postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
