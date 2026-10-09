@@ -33,7 +33,7 @@ jobs:
           printf 'TERMINAL_PREFLIGHT sha=%s backend=%s postgres=%s status=%s\n' "$before_sha" "$before_backend" "$before_pg" "${before_status:-CLEAN}"
           [[ "$before_sha" == "$EXPECTED" && -z "$before_status" && -n "$before_backend" && -n "$before_pg" ]] || { echo 'TERMINAL_STOP_PRODUCTION_DIVERGED'; exit 2; }
           # Read the actual limit logged by the running processor; do not substitute a default.
-          processor_limit="$(docker compose -f "$COMPOSE" logs --no-color --since 20m backend 2>&1 | awk '/\[ENGINE-PROCESSADOR-INICIO\]/{n=4;next} n>0 {if (match($0,/limite: [0-9]+/)) {v=substr($0,RSTART+8,RLENGTH-8)}; n--} END {print v}')"
+          processor_limit="$(docker compose -f "$COMPOSE" logs --no-color --since 2026-10-08T18:12:33Z --until 2026-10-09T00:34:40Z backend 2>&1 | awk '/\[ENGINE-PROCESSADOR-INICIO\]/{n=12} n>0 {if (match($0,/limite: [0-9]+/)) {v=substr($0,RSTART+8,RLENGTH-8)}; n--} END {print v}')"
           [[ "$processor_limit" =~ ^[0-9]+$ ]] || { echo 'ONE_MISSING_FACT=runtime_processor_limit'; exit 2; }
           printf 'TERMINAL_RUNTIME_PROCESSOR_LIMIT=%s\n' "$processor_limit"
           set +e
