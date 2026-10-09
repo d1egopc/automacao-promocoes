@@ -1,4 +1,4 @@
-name: Auditoria causal reservatorio circulavel read-only v3 2026-10-08
+name: Auditoria terminal de vazao read-only 2026-10-08
 
 on:
   push:
@@ -13,8 +13,129 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  canonical-audit:
+  terminal-audit:
     if: github.event_name == 'push' && github.ref == 'refs/heads/audit/clonador-duravel-2026-10-08'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 25
+    steps:
+      - name: Terminal selector and capacity audit (SELECT only)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          BACKEND=/opt/optimus/backend
+          COMPOSE=/opt/optimus/infra/compose.yml
+          EXPECTED=568c4fe1f848a9ad695929dd0d5706defa822ad7
+          [[ "$GITHUB_REF" == refs/heads/audit/clonador-duravel-2026-10-08 ]]
+          before_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          before_status="$(git -C "$BACKEND" status --porcelain)"
+          before_backend="$(docker compose -f "$COMPOSE" ps --status running -q backend)"
+          before_pg="$(docker compose -f "$COMPOSE" ps --status running -q postgres)"
+          printf 'TERMINAL_PREFLIGHT sha=%s backend=%s postgres=%s status=%s\n' "$before_sha" "$before_backend" "$before_pg" "${before_status:-CLEAN}"
+          [[ "$before_sha" == "$EXPECTED" && -z "$before_status" && -n "$before_backend" && -n "$before_pg" ]] || { echo 'TERMINAL_STOP_PRODUCTION_DIVERGED'; exit 2; }
+          # Read the actual limit logged by the running processor; do not substitute a default.
+          processor_limit="$(docker compose -f "$COMPOSE" logs --no-color --since 20m backend 2>&1 | awk '/\[ENGINE-PROCESSADOR-INICIO\]/{n=4;next} n>0 {if (match($0,/limite: [0-9]+/)) {v=substr($0,RSTART+8,RLENGTH-8)}; n--} END {print v}')"
+          [[ "$processor_limit" =~ ^[0-9]+$ ]] || { echo 'ONE_MISSING_FACT=runtime_processor_limit'; exit 2; }
+          printf 'TERMINAL_RUNTIME_PROCESSOR_LIMIT=%s\n' "$processor_limit"
+          set +e
+          docker compose -f "$COMPOSE" exec -T -e AUDIT_PROCESSOR_LIMIT="$processor_limit" backend node - <<'NODE'
+          (async () => {
+            const fs = require('fs');
+            const vm = require('vm');
+            const { queryEngineShadow } = require('/app/modules/engine/database');
+            const { sqlBuscarJobsPendentes, separarResultadoJobsPendentes } = require('/app/modules/engine/processor.service');
+            const { calcularCotasFrescorPreImporter, avaliarFrescorPreImporter } = require('/app/modules/engine/frescor-pre-importer.service');
+            const processorFairness = require('/app/modules/engine/processor-fairness.service');
+            const WORKSPACE = 'user_pss60lus';
+            const emit = (tag, x) => console.log(tag + ' ' + JSON.stringify(x));
+            const id = x => String(x.id);
+            const origin = x => String(x.origem_fluxo_explicita_pre_importer || x.origemFluxo || '').toLowerCase();
+            const date = x => new Date(x).getTime();
+            async function select(label, sql, params = []) {
+              if (!/^\s*(SELECT|WITH)\b/i.test(sql) || /\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE|MERGE|CALL)\b/i.test(sql)) throw new Error('non_select_sql:' + label);
+              const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 15000 });
+              if (!r?.ok) throw new Error(label + ':' + String(r?.erro || r?.motivo || 'query_failed'));
+              return r.resultado?.rows || [];
+            }
+            const now = (await select('clock', 'SELECT NOW() AS audit_at'))[0].audit_at;
+            const limit = Number(process.env.AUDIT_PROCESSOR_LIMIT);
+            const c = calcularCotasFrescorPreImporter(limit);
+            const params = [c.aguaNova, c.frescaEmRisco, c.frescaCirculavel, c.limpeza, c.totalSelecao];
+            const sql = sqlBuscarJobsPendentes();
+            const result = await select('processor_real_sql', sql, params);
+            const split = separarResultadoJobsPendentes(result);
+            const baseline = result.filter(x => x.tipo_saida_pre_importer === 'baseline');
+            const pool = result.filter(x => x.tipo_saida_pre_importer === 'candidate_pool');
+            const pending = await select('workspace_pending', `SELECT j.id,j.cliente_id,j.status,j.criado_em,j.atualizado_em,j.prioridade,j.metadata,e.capturado_em AS evento_capturado_em,e.metadata AS evento_metadata,
+              COALESCE(e.capturado_em,j.criado_em) AS origem_comercial_pre_importer,
+              LOWER(COALESCE(NULLIF(j.metadata->>'origemFluxo',''),NULLIF(j.metadata->>'origem_fluxo',''),NULLIF(j.metadata #>> '{metadataEvento,origemFluxo}',''),NULLIF(j.metadata #>> '{metadataEvento,origem_fluxo}',''),NULLIF(e.metadata->>'origemFluxo',''),NULLIF(e.metadata->>'origem_fluxo',''),'')) AS origem_fluxo_explicita_pre_importer
+              FROM engine_jobs_cliente j LEFT JOIN engine_eventos_brutos e ON e.id=j.evento_id
+              WHERE j.status='pendente' AND j.cliente_id=$1 ORDER BY j.criado_em,j.id`, [WORKSPACE]);
+            const targets = pending.filter(x => origin(x)==='clonador_grupos' && date(x.origem_comercial_pre_importer) < date(now)-30*60000);
+            const expired = await select('all_expired_pending', `SELECT j.id,j.cliente_id,j.criado_em,j.prioridade,
+              COALESCE(e.capturado_em,j.criado_em) AS origem_comercial_pre_importer,
+              ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(TRIM(j.cliente_id),''),'workspace_desconhecido') ORDER BY COALESCE(e.capturado_em,j.criado_em),j.criado_em,j.id) AS workspace_rank_pre_importer
+              FROM engine_jobs_cliente j LEFT JOIN engine_eventos_brutos e ON e.id=j.evento_id
+              WHERE j.status='pendente' AND COALESCE(e.capturado_em,j.criado_em)<NOW()-INTERVAL '30 minutes'`);
+            expired.sort((a,b)=>Number(a.workspace_rank_pre_importer)-Number(b.workspace_rank_pre_importer)||date(a.origem_comercial_pre_importer)-date(b.origem_comercial_pre_importer)||date(a.criado_em)-date(b.criado_em)||Number(a.id)-Number(b.id));
+            const expPos = new Map(expired.map((x,i)=>[id(x),i+1]));
+            const expByWs = Object.entries(expired.reduce((o,x)=>(o[x.cliente_id]=(o[x.cliente_id]||0)+1,o),{})).sort((a,b)=>b[1]-a[1]);
+            const wsHead = expired.find(x=>x.cliente_id===WORKSPACE && Number(x.workspace_rank_pre_importer)===1);
+            emit('TERMINAL_PROCESSOR_SUMMARY',{auditAt:now,limit,quotas:c,globalExpired:expired.length,workspaces:expByWs.length,byWorkspace:expByWs,cleanupHeads:expired.filter(x=>Number(x.workspace_rank_pre_importer)===1).map(x=>({workspace:x.cliente_id,jobId:id(x),globalPosition:expPos.get(id(x))})),workspaceHead:wsHead?{jobId:id(wsHead),globalPosition:expPos.get(id(wsHead))}:null,cleanupIds:expired.slice(0,c.limpeza).map(id),baselineIds:baseline.map(id),candidateIds:pool.map(id),targetCount:targets.length});
+            const sample = [...targets.slice(0,10),...targets.slice(Math.max(0,Math.floor(targets.length/2)-5),Math.floor(targets.length/2)+5),...targets.slice(-10)];
+            const baselineIds = new Set(baseline.map(id)), poolIds = new Set(pool.map(id));
+            for (const x of [...new Map(sample.map(y=>[id(y),y])).values()]) emit('TERMINAL_PENDING_JOB',{jobId:id(x),ageMin:Math.round((date(now)-date(x.origem_comercial_pre_importer))/60000),workspaceRank:expired.find(y=>id(y)===id(x))?.workspace_rank_pre_importer||null,globalCleanupPosition:expPos.get(id(x))||null,inCleanup:(expPos.get(id(x))||Infinity)<=c.limpeza,inBaseline:baselineIds.has(id(x)),inCandidatePool:poolIds.has(id(x)),reason:!baselineIds.has(id(x))?'cleanup_global_limit_or_lane_quota':'selected'});
+            const indexed = split.jobs.map((x,i)=>({...x,indiceBaseline:i}));
+            const idx = new Map(indexed.map(x=>[id(x),x.indiceBaseline]));
+            const candidates = split.candidatePool.filter(x=>!avaliarFrescorPreImporter(x).expirada).map(x=>({...x,indiceBaseline:idx.get(id(x))}));
+            const states = await select('fairness_states',`SELECT etapa,lane,ultima_origem_atendida FROM engine_fairness_origem_fluxo WHERE cliente_id=$1 AND etapa IN ('diagnostico_final','importacao_final')`,[WORKSPACE]);
+            const stateMap = new Map(states.map(x=>[x.etapa+'|'+x.lane,x.ultima_origem_atendida]));
+            const groups = processorFairness.montarGruposFairness(indexed.filter(x=>x.lane_vazao_pre_importer!=='expirada'),candidates).filter(x=>x.clienteId===WORKSPACE);
+            for (const g of groups) {const heads=processorFairness.headsProtegidas(g);const plan=processorFairness.montarSelecaoGrupo(g,stateMap.get('diagnostico_final|'+g.lane)||'');const slots=new Set(plan.slots.map(x=>x.posicao));emit('TERMINAL_PROCESSOR_FAIRNESS',{group:g.chave,baseline:g.baseline.map(x=>({id:id(x),position:x.indiceBaseline})),candidatePool:g.candidates.map(x=>({id:id(x),head:x.origemFluxoHead,origin:x.origemFluxo})),heads:[...heads].map(([o,x])=>({origin:o,id:id(x)})),selected:plan.selecionados.map(id),slots:plan.slots.map(x=>({id:id(x.job),position:x.posicao})),unclaimedBaselinePositions:g.baseline.filter(x=>!slots.has(x.indiceBaseline)).map(x=>({id:id(x),position:x.indiceBaseline})),lastOrigin:stateMap.get('diagnostico_final|'+g.lane)||''});}
+            // Capture the exact importer SELECT by evaluating only its function with a stubbed queryEngine.
+            const source=fs.readFileSync('/app/modules/engine/importer/importer.service.js','utf8');
+            const start=source.indexOf('async function buscarJobsProntos('),end=source.indexOf('function removerCamposInternosCandidatePoolImporter(',start);
+            if(start<0||end<0)throw new Error('importer_source_function_missing');
+            const captured=[];
+            const context={queryEngine:async(s,p)=>{captured.push({sql:s,params:p});return {ok:true,resultado:{rows:[]}}},calcularCotasFrescorPreImporter,limitarJobs:n=>Math.min(100,Math.max(1,Number(n)||10)),separarResultadoJobsProntos:()=>({jobs:[],candidatePool:[]}),console:{log:()=>{}}};
+            vm.runInNewContext(source.slice(start,end)+'\nthis.capture=buscarJobsProntos;',context,{timeout:1000});
+            for(const importerLimit of [35,18]){captured.length=0;await context.capture({limite:importerLimit,marketplace:'mercadolivre'});const sel=captured[0];if(!sel||!/^\s*WITH\b/i.test(sel.sql))throw new Error('importer_select_missing');const rows=await select('importer_real_sql_'+importerLimit,sel.sql,sel.params);const b=rows.filter(x=>x.tipo_saida_pre_importer==='baseline'),p=rows.filter(x=>x.tipo_saida_pre_importer==='candidate_pool');emit('TERMINAL_IMPORTER_SELECT',{limit:importerLimit,baseline:b.map(x=>({id:id(x),workspace:x.cliente_id,lane:x.lane_vazao_pre_importer,rank:x.workspace_rank_pre_importer,position:x.baseline_ordem_pre_importer,origin:origin(x)})),candidatePool:p.map(x=>({id:id(x),workspace:x.cliente_id,lane:x.lane_vazao_pre_importer,rank:x.workspace_rank_pre_importer,origin:origin(x)}))});}
+            const ready=await select('workspace_ready_ml',`SELECT j.id,j.status,j.motivo_final,j.marketplace,j.marketplace_detectado,j.atualizado_em,j.tentativas,j.metadata,e.capturado_em AS evento_capturado_em,
+              COALESCE(NULLIF(j.metadata #>> '{afiliacaoWorkspaceRetry,proximaTentativaEmMs}',''),NULLIF(j.metadata #>> '{localWorkerImageRetry,proximaTentativaEmMs}','')) AS retry_ms
+              FROM engine_jobs_cliente j LEFT JOIN engine_eventos_brutos e ON e.id=j.evento_id WHERE j.cliente_id=$1 AND j.status='pronto_para_importar' AND LOWER(COALESCE(NULLIF(TRIM(j.marketplace),''),NULLIF(TRIM(j.marketplace_detectado),''),''))='mercadolivre' ORDER BY j.id`,[WORKSPACE]);
+            for(const x of ready)emit('TERMINAL_READY_JOB',{jobId:id(x),reason:x.motivo_final,status:x.status,marketplace:x.marketplace||x.marketplace_detectado,updatedAt:x.atualizado_em,retryMs:x.retry_ms,retryDue:x.retry_ms==null||Number(x.retry_ms)<=date(now),retryDelayMin:x.retry_ms==null?null:Math.round((date(now)-Number(x.retry_ms))/60000),attempts:x.tentativas});
+            emit('TERMINAL_SNAPSHOT_DONE',{auditAt:now,pendingTargets:targets.length,readyMl:ready.length});
+          })().catch(e=>{console.error('TERMINAL_FATAL',e.stack||String(e));process.exitCode=1});
+          NODE
+          audit_rc=$?
+          set -e
+          docker compose -f "$COMPOSE" logs --no-color --since 2026-10-08T18:12:33Z --until 2026-10-09T00:34:40Z backend 2>&1 | awk '/\[ENGINE-RODADA-INICIO\]|\[ENGINE-RODADA-FIM\]|\[ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO\]|\[ENGINE-PROCESSADOR-INICIO\]|\[ENGINE-PROCESSADOR-FIM\]|\[ENGINE-IMPORTER-INICIO\]|\[ENGINE-IMPORTER-FIM\]|\[SOLENOID IMPORTADOR\]|\[PERF EVENT LOOP ETAPA\]/{n=18;print;next} n>0{print;n--}' | docker compose -f "$COMPOSE" exec -T backend node -e '
+          let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{
+            const lines=s.split(/\r?\n/);const starts=[],ends=[],skips=[],sol=[];const proc=[],imp=[];let lastMarketplace="";
+            const json=x=>{try{return JSON.parse(x.slice(x.indexOf("{")).trim())}catch{return null}};
+            const block=(i)=>lines.slice(i,i+20).join(" ");const number=(x,k)=>{const m=x.match(new RegExp(k+"\\s*:\\s*(\\d+)"));return m?Number(m[1]):null};
+            for(let i=0;i<lines.length;i++){let x=lines[i];if(x.includes("[ENGINE-RODADA-INICIO]")){let j=json(x);if(j)starts.push(j)}
+              if(x.includes("[ENGINE-RODADA-FIM]")){let j=json(x);if(j)ends.push(j)}
+              if(x.includes("[ENGINE-ORQUESTRADOR-PULADO-EM-EXECUCAO]"))skips.push(x);
+              if(x.includes("[SOLENOID IMPORTADOR]")){let j=json(x);if(j&&j.marketplace==="mercadolivre")sol.push(j)}
+              if(x.includes("[ENGINE-IMPORTER-INICIO]")){let b=block(i);let m=b.match(/marketplace:\s*[\x27\x22]?([a-z]+)/);lastMarketplace=m?m[1]:""}
+              if(x.includes("[ENGINE-PROCESSADOR-FIM]")){let b=block(i);proc.push({processados:number(b,"processados"),diagnosticados:number(b,"diagnosticados"),expiradosPreImporter:number(b,"expiradosPreImporter")})}
+              if(x.includes("[ENGINE-IMPORTER-FIM]")&&lastMarketplace==="mercadolivre"){let b=block(i);imp.push({processados:number(b,"processados"),ofertaCriada:number(b,"ofertaCriada")})}
+            }
+            const byId=new Map(ends.map(x=>[x.rodadaId,x]));const durations=starts.map(x=>Number(byId.get(x.rodadaId)?.wallMs)).filter(Number.isFinite).sort((a,b)=>a-b);
+            const p=x=>durations.length?durations[Math.min(durations.length-1,Math.floor((durations.length-1)*x))]:null;
+            const sum=(a,k)=>a.reduce((n,x)=>n+Number(x[k]||0),0);const hours=(Date.parse("2026-10-09T00:34:40Z")-Date.parse("2026-10-08T18:12:33Z"))/3600000;
+            console.log("TERMINAL_CAPACITY "+JSON.stringify({roundsStarted:starts.length,roundsFinished:ends.length,skipped:skips.length,durationMedianMs:p(.5),durationP95Ms:p(.95),durationMaxMs:p(1),processorCalls:proc.length,processorProcessed:sum(proc,"processados"),processorDiagnosed:sum(proc,"diagnosticados"),processorExpired:sum(proc,"expiradosPreImporter"),processedPerHour:sum(proc,"processados")/hours,mlImporterCalls:imp.length,mlProcessed:sum(imp,"processados"),mlOffers:sum(imp,"ofertaCriada"),mlSolenoid35:sol.filter(x=>x.limiteAplicado===35).length,mlSolenoid18:sol.filter(x=>x.limiteAplicado===18).length,mlSolenoidSkipped:sol.filter(x=>x.limiteAplicado===0).length,windowHours:hours}));
+          });'
+          after_sha="$(git -C "$BACKEND" rev-parse HEAD)"
+          after_status="$(git -C "$BACKEND" status --porcelain)"
+          after_backend="$(docker compose -f "$COMPOSE" ps --status running -q backend)"
+          after_pg="$(docker compose -f "$COMPOSE" ps --status running -q postgres)"
+          printf 'TERMINAL_POSTFLIGHT sha=%s backend=%s postgres=%s status=%s\n' "$after_sha" "$after_backend" "$after_pg" "${after_status:-CLEAN}"
+          [[ "$after_sha" == "$before_sha" && "$after_status" == "$before_status" && "$after_backend" == "$before_backend" && "$after_pg" == "$before_pg" ]] || { echo 'TERMINAL_POSTFLIGHT_CHANGED'; exit 3; }
+          echo 'TERMINAL_POSTFLIGHT_STABLE'
+          exit "$audit_rc"
+  canonical-audit:
+    if: ${{ false }}
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 25
     steps:
