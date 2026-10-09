@@ -37,6 +37,7 @@ jobs:
           printf 'PREFLIGHT_BACKEND_SHA=%s\nPREFLIGHT_BACKEND_ID=%s\nPREFLIGHT_POSTGRES_ID=%s\nPREFLIGHT_GIT_STATUS=%s\n' "$backend_before" "$backend_id_before" "$postgres_id_before" "$status_display"
           [[ "$backend_before" == "$EXPECTED_SHA" && -n "$backend_id_before" && -n "$postgres_id_before" ]] || { echo 'PREFLIGHT_FAIL=production_state'; exit 2; }
           docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
+          (async () => {
           const { queryEngineShadow } = require('/app/modules/engine/database');
           const START = '2026-10-08T16:00:00Z';
           const END = '2026-10-08T22:45:00Z';
@@ -245,6 +246,7 @@ jobs:
           else if (instrumentComplete) throughputLoss = 'CORRELACAO_INCOMPLETA_NAO_PERMITE_LOCALIZAR_PERDA';
           emit('CANONICAL_DECISION_V2', { instrumentComplete, correlationComplete, causalChainComplete, indeterminate: !causalChainComplete, defectProven: false, productPatchAuthorized: false, throughputLoss, classCounts, queryErrors, queryTimings: timings });
           if (!instrumentComplete) process.exitCode = 3;
+          })().catch((error) => { console.error('CANONICAL_FATAL', error && error.stack || error); process.exitCode = 1; });
           NODE
           backend_after="$(git -C "$BACKEND" rev-parse HEAD)"
           backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
