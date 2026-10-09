@@ -245,7 +245,7 @@ jobs:
           else if (instrumentComplete) throughputLoss = 'CORRELACAO_INCOMPLETA_NAO_PERMITE_LOCALIZAR_PERDA';
           emit('CANONICAL_DECISION_V2', { instrumentComplete, correlationComplete, causalChainComplete, indeterminate: !causalChainComplete, defectProven: false, productPatchAuthorized: false, throughputLoss, classCounts, queryErrors, queryTimings: timings });
           if (!instrumentComplete) process.exitCode = 3;
-NODE
+          NODE
           backend_after="$(git -C "$BACKEND" rev-parse HEAD)"
           backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
           postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
