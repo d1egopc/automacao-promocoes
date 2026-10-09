@@ -1,4 +1,4 @@
-name: Auditoria canonica buffer event job oferta read-only 2026-10-08
+name: Auditoria canonica buffer event job oferta read-only v2 2026-10-08
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 25
     steps:
-      - name: Preflight and canonical audit (SELECT only)
+      - name: Preflight and canonical V2 audit (SELECT only)
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -26,116 +26,231 @@ jobs:
           readonly BACKEND='/opt/optimus/backend'
           readonly INFRA='/opt/optimus/infra'
           readonly COMPOSE='/opt/optimus/infra/compose.yml'
-          readonly START='2026-10-08T16:00:00Z'
-          readonly END='2026-10-08T22:45:00Z'
-          [[ "$GITHUB_REF" == 'refs/heads/audit/clonador-duravel-2026-10-08' ]] || { echo 'PREFLIGHT_FAIL=branch'; exit 2; }
+          readonly GITHUB_BRANCH='audit/clonador-duravel-2026-10-08'
+          [[ "$GITHUB_REF" == "refs/heads/$GITHUB_BRANCH" ]] || { echo 'PREFLIGHT_FAIL=branch'; exit 2; }
           [[ -d "$BACKEND" && -d "$INFRA" && -f "$COMPOSE" ]] || { echo 'PREFLIGHT_FAIL=production_paths'; exit 2; }
           backend_before="$(git -C "$BACKEND" rev-parse HEAD)"
           backend_id_before="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
           postgres_id_before="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
-          printf 'PREFLIGHT_BACKEND_SHA=%s\nPREFLIGHT_BACKEND_ID=%s\nPREFLIGHT_POSTGRES_ID=%s\n' "$backend_before" "$backend_id_before" "$postgres_id_before"
+          git_status_before="$(git -C "$BACKEND" status --short)"
+          status_display="$git_status_before"; [ -n "$status_display" ] || status_display=CLEAN
+          printf 'PREFLIGHT_BACKEND_SHA=%s\nPREFLIGHT_BACKEND_ID=%s\nPREFLIGHT_POSTGRES_ID=%s\nPREFLIGHT_GIT_STATUS=%s\n' "$backend_before" "$backend_id_before" "$postgres_id_before" "$status_display"
           [[ "$backend_before" == "$EXPECTED_SHA" && -n "$backend_id_before" && -n "$postgres_id_before" ]] || { echo 'PREFLIGHT_FAIL=production_state'; exit 2; }
-          export AUDIT_BACKEND_BEFORE="$backend_before" AUDIT_BACKEND_ID_BEFORE="$backend_id_before" AUDIT_POSTGRES_ID_BEFORE="$postgres_id_before"
           docker compose -f "$COMPOSE" exec -T backend node - <<'NODE'
-          'use strict';
-          const { queryEngineShadow, getEngineShadowPool } = require('/app/modules/engine/database');
+          const { queryEngineShadow } = require('/app/modules/engine/database');
           const START = '2026-10-08T16:00:00Z';
           const END = '2026-10-08T22:45:00Z';
           const WORKSPACE = 'user_pss60lus';
-          const TABLES = ['clonador_grupos_buffer','engine_eventos_brutos','engine_jobs_cliente','engine_ofertas','fila_checkpoints_entrega'];
-          const txt = v => v == null ? '' : String(v).trim();
-          const arr = v => Array.isArray(v) ? v : [];
-          const json = v => { if (v && typeof v === 'object') return v; if (typeof v === 'string') { try { return JSON.parse(v); } catch { return {}; } } return {}; };
-          const asTime = v => { if (v == null || v === '') return null; const d = new Date(v); return Number.isFinite(d.getTime()) ? d.toISOString() : null; };
-          const field = (row, names) => { for (const n of names) if (row && row[n] !== undefined && row[n] !== null && row[n] !== '') return row[n]; return undefined; };
-          const id = (row, names) => txt(field(row, names));
-          const time = (row, names) => asTime(field(row, names));
-          const scrub = (v, key = '', depth = 0) => {
-            if (/(token|secret|password|passwd|authorization|cookie|private.?key)/i.test(key)) return '[REDACTED]';
-            if (depth > 5) return '[DEPTH_LIMIT]';
-            if (v == null || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return typeof v === 'string' && v.length > 1000 ? v.slice(0,1000)+'...[TRUNCATED]' : v;
-            if (Array.isArray(v)) return v.slice(0,50).map(x => scrub(x,key,depth+1));
-            const o = {}; for (const [k,x] of Object.entries(v).slice(0,120)) o[k] = scrub(x,k,depth+1); return o;
+          const EXPECTED_BUFFERS = 220;
+          const REQUIRED = {
+            clonador_grupos_buffer: ['id','cliente_id','capturado_em','metadata'],
+            engine_eventos_brutos: ['id','capturado_em','criado_em','fonte','origem','origem_tipo','marketplace_detectado','metadata'],
+            engine_jobs_cliente: ['id','evento_id','cliente_id','status','motivo_final','oferta_id','criado_em','atualizado_em','metadata'],
+            engine_ofertas: ['id','evento_id','marketplace','origem','status','motivo_status','criada_em','atualizada_em','metadata']
           };
-          const raw = row => scrub(row);
-          const emit = (tag, value) => console.log(tag + ' ' + JSON.stringify(value));
-          async function q(label, sql, params = []) {
-            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_blocked:' + label);
-            const r = await queryEngineShadow(sql, params, { timeoutSqlMs: 20000 });
-            if (!r || !r.ok) throw new Error('select_failed:' + label);
-            return (r.resultado && r.resultado.rows) || [];
-          }
-          function unique(values) { return [...new Set(values.map(txt).filter(Boolean))]; }
-          function workspaceOf(row) { return id(row,['workspace','workspace_id','cliente_id','client_id']) || txt(json(field(row,['metadata','meta'])).workspace || json(field(row,['metadata','meta'])).workspaceId); }
-          function metadataIds(row, keys) { const m = json(field(row,['metadata','meta','metadata_event','metadata_job'])); const out=[]; const walk=(v,d=0)=>{ if(!v || typeof v!=='object' || d>7)return; for(const [k,x] of Object.entries(v)){ if(keys.includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,'')) && x!=null) out.push(txt(x)); if(x&&typeof x==='object')walk(x,d+1); } }; walk(m); return unique(out); }
-          function inWindow(v) { const t = Date.parse(v || ''); return Number.isFinite(t) && t >= Date.parse(START) && t <= Date.parse(END); }
-          function statusClass(job, hasOffer) {
-            const s = txt(field(job,['status','estado','status_final','statusFinal'])).toLowerCase();
-            if (/pend|queued|na_fila|aguard/.test(s)) return 'PENDENTE';
-            if (/process|running|execut/.test(s)) return 'PROCESSANDO';
-            if (/lease|lock/.test(s) && /expir/.test(s)) return 'LEASE_EXPIRADO';
-            if (/retry|tempor/.test(s)) return 'ERRO_RETRYAVEL';
-            if (/erro|error|falha|failed/.test(s)) return hasOffer ? 'TERMINAL_COM_OFERTA' : 'ERRO_TERMINAL';
-            if (/expir|cancel|descart|bloque/.test(s)) return hasOffer ? 'TERMINAL_COM_OFERTA' : 'TERMINAL_SEM_OFERTA_COM_MOTIVO';
-            if (hasOffer) return 'TERMINAL_COM_OFERTA';
-            if (s) return 'TERMINAL_SEM_OFERTA_SEM_MOTIVO';
-            return 'INDETERMINADO';
-          }
-          async function main() {
-            const schema = await q('schema', "SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=ANY($1::text[]) ORDER BY table_name,column_name", [TABLES]);
-            const byTable = new Map(); for (const r of schema) { if (!byTable.has(r.table_name)) byTable.set(r.table_name, []); byTable.get(r.table_name).push(r); }
-            emit('CANONICAL_SCHEMA', { requestedTables: TABLES, presentTables: [...byTable.keys()], missingTables: TABLES.filter(x => !byTable.has(x)), columns: Object.fromEntries([...byTable].map(([k,v]) => [k,v])) });
-            const data = {}; const errors = [];
-            for (const table of TABLES) { if (!byTable.has(table)) { data[table] = []; continue; } try { data[table] = await q(table, 'SELECT * FROM "' + table + '" LIMIT 50000'); } catch (e) { data[table] = []; errors.push({ table, error: txt(e.message).slice(0,180) }); } }
-            const buffers = data.clonador_grupos_buffer.filter(r => workspaceOf(r) === WORKSPACE && inWindow(time(r,['captured_at','capturado_em','capturedAt','created_at','criado_em','timestamp'])));
-            const bufferById = new Map(buffers.map(r => [id(r,['id','buffer_id','bufferId']), r]));
-            for (const b of buffers) emit('CANONICAL_BUFFER', { id:id(b,['id','buffer_id','bufferId']), workspace:workspaceOf(b), capturedAt:time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em','timestamp']), raw:raw(b) });
-            const eventRows = data.engine_eventos_brutos;
-            const eventById = new Map(eventRows.map(r => [id(r,['id','event_id','evento_id','eventId']), r]));
-            const edges = []; const candidateEventIds = new Set();
-            for (const b of buffers) {
-              const bid = id(b,['id','buffer_id','bufferId']);
-              const explicit = unique([id(b,['bridge_event_id','bridgeEventId','event_id','evento_id']), ...metadataIds(b,['bridgeeventid','eventid','eventoid'])]);
-              const candidates = [];
-              for (const e of eventRows) {
-                const eid = id(e,['id','event_id','evento_id','eventId']);
-                const ebid = id(e,['buffer_id','bufferId','id_buffer','idBuffer']);
-                const byBridge = explicit.includes(eid);
-                const byBuffer = ebid && ebid === bid;
-                const byMeta = metadataIds(e,['bufferid','buffer_id']).includes(bid);
-                if (byBridge || byBuffer || byMeta) candidates.push({ e, eid, relation: byBridge ? 'BRIDGE_EVENT_ID' : byBuffer ? 'DIRECT_BUFFER_ID' : 'METADATA_EXPLICIT' });
+          const OPTIONAL = {
+            clonador_grupos_buffer: ['status','links','created_at','updated_at'],
+            engine_eventos_brutos: ['grupo_id','grupo_nome','sessao_id','hash_evento','uuid','links_extraidos'],
+            engine_jobs_cliente: ['marketplace','marketplace_detectado','categoria','tentativas','uuid'],
+            engine_ofertas: ['categoria','uuid']
+          };
+          const queryErrors = [];
+          const timings = [];
+          const uniq = (xs) => [...new Set(xs.filter((x) => x !== null && x !== undefined && String(x) !== ''))];
+          const key = (x) => String(x);
+          function scrub(v, depth = 0) {
+            if (depth > 4) return '[TRUNCATED]';
+            if (v === null || v === undefined) return v;
+            if (typeof v === 'string') return v.length > 500 ? v.slice(0, 500) + '...[TRUNCATED]' : v;
+            if (Array.isArray(v)) return v.slice(0, 50).map((x) => scrub(x, depth + 1));
+            if (typeof v === 'object') {
+              const out = {};
+              for (const [k, val] of Object.entries(v)) {
+                if (/token|secret|password|authorization|cookie|private.?key|api.?key/i.test(k)) out[k] = '[REDACTED]';
+                else out[k] = scrub(val, depth + 1);
               }
-              const dedup = [...new Map(candidates.map(x => [x.eid, x])).values()];
-              for (const c of dedup) candidateEventIds.add(c.eid);
-              let edgeClass = dedup.length === 0 ? 'UNRESOLVED' : dedup.length > 1 ? 'AMBIGUOUS' : dedup[0].relation;
-              if (dedup.length === 1) { const et = time(dedup[0].e,['captured_at','capturado_em','capturedAt','created_at','criado_em']); const bt = time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em']); if (et && bt && Date.parse(et) < Date.parse(bt)) edgeClass = 'INVALID_TEMPORAL'; }
-              for (const c of dedup) emit('CANONICAL_EDGE_BUFFER_EVENT', { bufferId:bid, eventId:c.eid, classification:edgeClass, relation:c.relation, bufferCapturedAt:time(b,['captured_at','capturado_em','capturedAt','created_at','criado_em']), eventAt:time(c.e,['captured_at','capturado_em','capturedAt','created_at','criado_em']), raw:c.re });
-              edges.push({ bufferId:bid, eventIds:dedup.map(x=>x.eid), classification:edgeClass });
+              return out;
             }
-            const events = [...candidateEventIds].map(x => eventById.get(x)).filter(Boolean);
-            for (const e of events) emit('CANONICAL_EVENT', { id:id(e,['id','event_id','evento_id','eventId']), workspace:workspaceOf(e), capturedAt:time(e,['captured_at','capturado_em','capturedAt']), createdAt:time(e,['created_at','criado_em','createdAt']), raw:raw(e) });
-            const eventIds = new Set(events.map(e => id(e,['id','event_id','evento_id','eventId'])));
-            const jobs = data.engine_jobs_cliente.filter(j => eventIds.has(id(j,['event_id','evento_id','engine_event_id','engineEventId'])) || metadataIds(j,['eventid','eventoid','engineeventid']).some(x=>eventIds.has(x)));
-            const eventJobEdges = []; const jobsById = new Map(jobs.map(j => [id(j,['id','job_id','jobId','engine_job_id','engineJobId']),j]));
-            for (const e of events) { const eid=id(e,['id','event_id','evento_id','eventId']); const matches=jobs.filter(j=>id(j,['event_id','evento_id','engine_event_id','engineEventId'])===eid || metadataIds(j,['eventid','eventoid','engineeventid']).includes(eid)); if (!matches.length) emit('CANONICAL_EDGE_EVENT_JOB',{eventId:eid,jobId:null,classification:'UNRESOLVED'}); for(const j of matches){const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']); emit('CANONICAL_EDGE_EVENT_JOB',{eventId:eid,jobId:jid,classification:matches.length>1?'AMBIGUOUS':'DIRECT_EVENT_ID',raw:j}); eventJobEdges.push({eventId:eid,jobId:jid});} }
-            const offerRows = data.engine_ofertas; const offersById = new Map(offerRows.map(o=>[id(o,['id','offer_id','offerId','oferta_id','ofertaId']),o])); const offersByJob = new Map(); const offerEdges=[];
-            for (const j of jobs) { const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']); const eid=id(j,['event_id','evento_id','engine_event_id','engineEventId']); const oid=id(j,['offer_id','oferta_id','offerId','ofertaId']); const matches=offerRows.filter(o=>id(o,['id','offer_id','offerId','oferta_id','ofertaId'])===oid || id(o,['job_id','jobId','engine_job_id','engineJobId'])===jid || id(o,['event_id','evento_id','engine_event_id','engineEventId'])===eid || metadataIds(o,['jobid','enginejobid','eventid','eventoid']).includes(jid) || metadataIds(o,['jobid','enginejobid','eventid','eventoid']).includes(eid)); const ids=unique(matches.map(o=>id(o,['id','offer_id','offerId','oferta_id','ofertaId']))); offersByJob.set(jid,ids); if(!matches.length) emit('CANONICAL_EDGE_JOB_OFFER',{jobId:jid,offerId:null,classification:'UNRESOLVED'}); for(const o of matches){const ooid=id(o,['id','offer_id','offerId','oferta_id','ofertaId']); const cls=matches.length>1?'AMBIGUOUS':'JOB_OFFER_ID'; emit('CANONICAL_EDGE_JOB_OFFER',{jobId:jid,offerId:ooid,eventId:eid,classification:cls,raw:o}); offerEdges.push({jobId:jid,offerId:ooid});} }
-            const relatedOfferIds = new Set(offerEdges.map(x=>x.offerId));
-            for (const o of offerRows.filter(x=>relatedOfferIds.has(id(x,['id','offer_id','offerId','oferta_id','ofertaId'])))) emit('CANONICAL_OFFER',{id:id(o,['id','offer_id','offerId','oferta_id','ofertaId']),workspace:workspaceOf(o),createdAt:time(o,['created_at','criado_em','createdAt','criada_em']),status:txt(field(o,['status','estado'])),raw:raw(o)});
-            const jobsSummary = jobs.map(j=>{const jid=id(j,['id','job_id','jobId','engine_job_id','engineJobId']);const hasOffer=(offersByJob.get(jid)||[]).length>0;const latest=statusClass(j,hasOffer);const created=time(j,['created_at','criado_em','createdAt']);const updated=time(j,['updated_at','atualizado_em','updatedAt']);const out={id:jid,eventId:id(j,['event_id','evento_id','engine_event_id','engineEventId']),workspace:workspaceOf(j),createdAt:created,updatedAt:updated,latestState:latest,stateAtCutoff:'INDETERMINADO_SEM_HISTORICO',offerIds:offersByJob.get(jid)||[],reason:txt(field(j,['reason','motivo','motivo_final','motivoFinal'])),raw:raw(j)};emit('CANONICAL_JOB',out);emit('CANONICAL_JOB_STATUS',{jobId:jid,latestState:latest,stateAtCutoff:out.stateAtCutoff,createdAt:created,updatedAt:updated,offerIds:out.offerIds,reason:out.reason||null});return out;});
-            const checkpoints = data.fila_checkpoints_entrega.filter(c=>txt(field(c,['estado','state','status'])).toLowerCase()==='enviado' && time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at']) && inWindow(time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at'])));
-            for(const c of checkpoints) emit('CANONICAL_CONFIRMATION',{workspace:workspaceOf(c),queueItemId:id(c,['fila_item_id','queue_item_id','queueItemId']),destinationKey:txt(field(c,['destino_chave','destination_key','destinationKey'])),channel:txt(field(c,['canal','channel']))||txt(field(c,['destino_chave','destination_key'])).split(':')[0],confirmedAt:time(c,['confirmado_em','confirmed_at','confirmedAt','enviado_em','sent_at']),providerMessageId:field(c,['provider_message_id','providerMessageId','message_id','messageId'])||null,raw:raw(c)});
-            const edgeCounts={bufferEvent:{UNRESOLVED:0,AMBIGUOUS:0,INVALID_TEMPORAL:0,DIRECT_BUFFER_ID:0,BRIDGE_EVENT_ID:0,METADATA_EXPLICIT:0},eventJob:{zero:0,one:0,many:0},jobOffer:{zero:0,one:0,many:0}}; for(const e of edges) edgeCounts.bufferEvent[e.classification]=(edgeCounts.bufferEvent[e.classification]||0)+1; for(const e of events){const n=eventJobEdges.filter(x=>x.eventId===id(e,['id','event_id','evento_id','eventId'])).length;edgeCounts.eventJob[n===0?'zero':n===1?'one':'many']++;} for(const j of jobs){const n=(offersByJob.get(id(j,['id','job_id','jobId','engine_job_id','engineJobId']))||[]).length;edgeCounts.jobOffer[n===0?'zero':n===1?'one':'many']++;}
-            const byWorkspace={}; for(const b of buffers){const w=workspaceOf(b)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].buffers++;} for(const e of events){const w=workspaceOf(e)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].events++;} for(const j of jobs){const w=workspaceOf(j)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].jobs++;} for(const o of offerRows.filter(x=>relatedOfferIds.has(id(x,['id','offer_id','offerId','oferta_id','ofertaId'])))){const w=workspaceOf(o)||'INDETERMINADO';if(!byWorkspace[w])byWorkspace[w]={buffers:0,events:0,jobs:0,offers:0};byWorkspace[w].offers++;}
-            const summary={windowStart:START,windowEnd:END,workspace:WORKSPACE,cardinality:{buffersUnique:new Set(buffers.map(x=>id(x,['id','buffer_id','bufferId']))).size,candidateEventsUnique:events.length,validEventEdges:edges.filter(x=>x.classification!=='UNRESOLVED').length,jobsUnique:new Set(jobs.map(x=>id(x,['id','job_id','jobId','engine_job_id','engineJobId']))).size,offersUnique:relatedOfferIds.size,confirmedDestinations:checkpoints.length},edgeCounts,byWorkspace,queryErrors:errors,missingTables:TABLES.filter(x=>!byTable.has(x)),notes:{stateAtCutoff:'INDETERMINADO_SEM_HISTORICO; não inferido do estado atual',offersAllJobs:true,offersAllEvents:true,oldFirstElementSelection:false}};
-            emit('CANONICAL_CARDINALITY',summary.cardinality); emit('CANONICAL_SUMMARY',summary);
-            emit('CANONICAL_DECISION',{causalChainComplete:summary.cardinality.buffersUnique>0&&summary.cardinality.jobsUnique>=0,defectProven:false,productPatchAuthorized:false,decision:'AUDITORIA_FACTUAL_READ_ONLY',indeterminate:errors.length>0||summary.missingTables.length>0||edges.some(x=>x.classification==='AMBIGUOUS'||x.classification==='UNRESOLVED'||x.classification==='INVALID_TEMPORAL')});
+            return v;
           }
-          main().catch(e=>{ emit('CANONICAL_FATAL',{ok:false,error:txt(e.message).slice(0,240)}); process.exitCode=1; }).finally(async()=>{try{const p=getEngineShadowPool();if(p)await p.end();}catch{}});
-          NODE
+          function emit(tag, value) { console.log(tag + ' ' + JSON.stringify(scrub(value))); }
+          function parseJson(v) {
+            if (v === null || v === undefined) return {};
+            if (typeof v === 'object') return v;
+            if (typeof v !== 'string') return {};
+            try { return JSON.parse(v); } catch (_) { return {}; }
+          }
+          function id(v) {
+            if (v === null || v === undefined) return null;
+            const s = String(v).trim();
+            return /^\d+$/.test(s) ? s : null;
+          }
+          function asTime(v) { return v instanceof Date ? v.toISOString() : (v == null ? null : String(v)); }
+          function arr(v) { return Array.isArray(v) ? v : []; }
+          async function q(label, sql, params = []) {
+            if (!/^\s*SELECT\b/i.test(sql)) throw new Error('non_select_rejected:' + label);
+            const started = Date.now();
+            try {
+              const rows = await queryEngineShadow(sql, params, { timeoutSqlMs: 10000 });
+              const out = Array.isArray(rows) ? rows : [];
+              timings.push({ label, ms: Date.now() - started, rows: out.length, timeoutMs: 10000 });
+              emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
+              return out;
+            } catch (e) {
+              const err = String(e && e.message || e).slice(0, 300);
+              queryErrors.push({ label, error: err });
+              timings.push({ label, ms: Date.now() - started, rows: 0, timeoutMs: 10000, error: err });
+              emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
+              return [];
+            }
+          }
+          function qcols(table, schema) {
+            const have = new Set(schema.filter((x) => x.table_name === table).map((x) => x.column_name));
+            const missing = (REQUIRED[table] || []).filter((x) => !have.has(x));
+            const cols = uniq([...(REQUIRED[table] || []), ...(OPTIONAL[table] || [])].filter((x) => have.has(x)));
+            return { have, missing, sql: cols.map((x) => '"' + x + '"').join(', ') };
+          }
+          const schemaTables = Object.keys(REQUIRED);
+          const schemaRows = await q('schema', 'SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ANY($1::text[]) ORDER BY table_name, ordinal_position', [schemaTables]);
+          const schema = schemaRows.map((r) => ({ table_name: String(r.table_name), column_name: String(r.column_name), data_type: String(r.data_type) }));
+          const tableInfo = Object.fromEntries(schemaTables.map((t) => [t, qcols(t, schema)]));
+          const schemaMissing = Object.fromEntries(schemaTables.map((t) => [t, tableInfo[t].missing]));
+          emit('CANONICAL_SCHEMA_V2', { tables: schemaTables, columns: schema, missing: schemaMissing });
+          const schemaComplete = schemaTables.every((t) => tableInfo[t].missing.length === 0);
+          let bufferRows = [];
+          if (schemaComplete) {
+            const b = tableInfo.clonador_grupos_buffer;
+            bufferRows = await q('buffers', 'SELECT ' + b.sql + ' FROM "clonador_grupos_buffer" WHERE "cliente_id" = $1 AND "capturado_em" >= $2::timestamptz AND "capturado_em" <= $3::timestamptz ORDER BY "capturado_em", "id"', [WORKSPACE, START, END]);
+          }
+          emit('CANONICAL_BUFFER_POPULATION', { expected: EXPECTED_BUFFERS, found: bufferRows.length, exact: bufferRows.length === EXPECTED_BUFFERS, workspace: WORKSPACE, start: START, end: END, arbitraryLimit: false });
+          const buffers = bufferRows.map((r) => {
+            const m = parseJson(r.metadata);
+            const bridge = parseJson(m.clonadorGruposBridge);
+            const hist = parseJson(m.historicoResumo);
+            const eventIds = uniq([id(bridge.eventoId), id(hist.eventoId), id(m.eventoId)]);
+            const jobIds = uniq(arr(hist.jobIds).map(id));
+            const offerIds = uniq(arr(hist.ofertaIds).map(id));
+            const filaItemIds = uniq(arr(hist.filaItemIds).map((x) => String(x)));
+            return {
+              bufferId: id(r.id) || String(r.id), workspace: String(r.cliente_id), capturedAt: asTime(r.capturado_em),
+              eventIds, jobIds, offerIds, filaItemIds,
+              status: r.status == null ? null : String(r.status),
+              linksCount: Array.isArray(r.links) ? r.links.length : null,
+              motivo: hist.motivo || hist.motivoFinal || m.motivo || null,
+              etapa: hist.etapa || m.etapa || null,
+              result: hist.result || m.result || null,
+              lastUpdate: asTime(hist.ultimoAtualizadoEm || hist.updatedAt || m.ultimoAtualizadoEm)
+            };
+          });
+          for (const b of buffers) emit('CANONICAL_BUFFER_V2', b);
+          const explicitEventIds = uniq(buffers.flatMap((b) => b.eventIds));
+          const numericEventIds = explicitEventIds.map(id).filter(Boolean).map(Number);
+          const eventRows = [];
+          for (let i = 0; i < numericEventIds.length; i += 100) {
+            const part = numericEventIds.slice(i, i + 100);
+            eventRows.push(...await q('events_' + (i / 100 + 1), 'SELECT ' + tableInfo.engine_eventos_brutos.sql + ' FROM "engine_eventos_brutos" WHERE "id" = ANY($1::bigint[])', [part]));
+          }
+          const eventMap = new Map(eventRows.map((r) => [key(r.id), r]));
+          const foundEventIds = uniq(eventRows.map((r) => key(r.id)));
+          emit('REQUESTED_EVENT_IDS', { count: explicitEventIds.length, ids: explicitEventIds });
+          emit('FOUND_EVENT_IDS', { count: foundEventIds.length, ids: foundEventIds });
+          emit('MISSING_EVENT_IDS', { count: explicitEventIds.filter((x) => !eventMap.has(key(x))).length, ids: explicitEventIds.filter((x) => !eventMap.has(key(x))) });
+          const explicitJobIds = uniq(buffers.flatMap((b) => b.jobIds));
+          const numericJobIds = explicitJobIds.map(id).filter(Boolean).map(Number);
+          const jobRows = await q('jobs', 'SELECT ' + tableInfo.engine_jobs_cliente.sql + ' FROM "engine_jobs_cliente" WHERE "cliente_id" = $1 AND ("evento_id" = ANY($2::bigint[]) OR "id" = ANY($3::bigint[]))', [WORKSPACE, numericEventIds, uniq([...numericJobIds, 488286])]);
+          const jobMap = new Map(jobRows.map((r) => [key(r.id), r]));
+          const foundJobIds = uniq(jobRows.map((r) => key(r.id)));
+          emit('REQUESTED_JOB_IDS', { count: explicitJobIds.length, ids: explicitJobIds });
+          emit('FOUND_JOB_IDS', { count: foundJobIds.length, ids: foundJobIds });
+          emit('MISSING_JOB_IDS', { count: explicitJobIds.filter((x) => !jobMap.has(key(x))).length, ids: explicitJobIds.filter((x) => !jobMap.has(key(x))) });
+          const derivedOfferIds = uniq(jobRows.map((r) => id(r.oferta_id)).filter(Boolean));
+          const explicitOfferIds = uniq(buffers.flatMap((b) => b.offerIds));
+          const numericOfferIds = uniq([...explicitOfferIds, ...derivedOfferIds, '99351']).map(Number);
+          const offerRows = [];
+          for (let i = 0; i < numericOfferIds.length; i += 100) {
+            const part = numericOfferIds.slice(i, i + 100);
+            offerRows.push(...await q('offers_' + (i / 100 + 1), 'SELECT ' + tableInfo.engine_ofertas.sql + ' FROM "engine_ofertas" WHERE "id" = ANY($1::bigint[])', [part]));
+          }
+          const offerMap = new Map(offerRows.map((r) => [key(r.id), r]));
+          const foundOfferIds = uniq(offerRows.map((r) => key(r.id)));
+          emit('REQUESTED_OFFER_IDS', { count: explicitOfferIds.length, ids: explicitOfferIds, derivedFromJobs: derivedOfferIds });
+          emit('FOUND_OFFER_IDS', { count: foundOfferIds.length, ids: foundOfferIds });
+          emit('MISSING_OFFER_IDS', { count: explicitOfferIds.filter((x) => !offerMap.has(key(x))).length, ids: explicitOfferIds.filter((x) => !offerMap.has(key(x))) });
+          function jobsFor(b) {
+            const byEvent = jobRows.filter((r) => b.eventIds.includes(key(r.evento_id)));
+            const byId = jobRows.filter((r) => b.jobIds.includes(key(r.id)));
+            return [...new Map([...byEvent, ...byId].map((r) => [key(r.id), r])).values()];
+          }
+          const results = buffers.map((b) => {
+            const foundEvents = b.eventIds.filter((x) => eventMap.has(key(x)));
+            const js = jobsFor(b);
+            const explicitFoundJobs = b.jobIds.filter((x) => jobMap.has(key(x)));
+            const os = uniq([...b.offerIds, ...js.map((j) => id(j.oferta_id)).filter(Boolean)]);
+            const foundOffers = os.filter((x) => offerMap.has(key(x)));
+            let cls = 'INDETERMINADO';
+            let stage = 'indeterminado';
+            if (b.eventIds.length === 0) { cls = 'BUFFER_SEM_EVENT_ID'; stage = 'buffer_event'; }
+            else if (foundEvents.length === 0) { cls = 'EVENT_ID_NAO_ENCONTRADO'; stage = 'buffer_event'; }
+            else if (b.jobIds.length > 0 && explicitFoundJobs.length === 0 && js.length === 0) { cls = 'JOB_METADATA_NAO_ENCONTRADO'; stage = 'event_job'; }
+            else if (js.length === 0) { cls = 'EVENT_ENCONTRADO_SEM_JOB'; stage = 'event_job'; }
+            else if (js.length > 1 && b.jobIds.length === 0) { cls = 'CORRELACAO_AMBIGUA'; stage = 'event_job'; }
+            else if (os.length === 0) { cls = 'JOB_ENCONTRADO_SEM_OFERTA'; stage = 'job_offer'; }
+            else if (foundOffers.length === 0) { cls = 'OFERTA_ID_NAO_ENCONTRADA'; stage = 'job_offer'; }
+            else { cls = 'CADEIA_BUFFER_EVENT_JOB_OFERTA'; stage = 'none'; }
+            const jobsBrief = js.map((j) => ({ id: key(j.id), eventoId: j.evento_id == null ? null : key(j.evento_id), ofertaId: j.oferta_id == null ? null : key(j.oferta_id), status: j.status || null, motivoFinal: j.motivo_final || null, criadoEm: asTime(j.criado_em), atualizadoEm: asTime(j.atualizado_em), tentativas: j.tentativas == null ? null : Number(j.tentativas) }));
+            const offersBrief = foundOffers.map((x) => { const o = offerMap.get(key(x)); return { id: key(o.id), status: o.status || null, motivoStatus: o.motivo_status || null, marketplace: o.marketplace || null, origem: o.origem || null, criadaEm: asTime(o.criada_em), atualizadaEm: asTime(o.atualizada_em) }; });
+            return { ...b, class: cls, stage, foundEventIds: foundEvents, foundJobIds: js.map((j) => key(j.id)), foundOfferIds: foundOffers, jobs: jobsBrief, offers: offersBrief, stateAtCutoff: 'INDETERMINADO_SEM_HISTORICO' };
+          });
+          for (const r of results) emit('CANONICAL_BUFFER_RESULT', r);
+          const allJobs = [...jobMap.values()];
+          const allOffers = [...offerMap.values()];
+          const eventToJobs = new Map();
+          for (const j of allJobs) { const k = key(j.evento_id); if (!eventToJobs.has(k)) eventToJobs.set(k, []); eventToJobs.get(k).push(j); }
+          const eventCounts = { zero: 0, one: 0, many: 0 };
+          for (const e of foundEventIds) { const n = (eventToJobs.get(e) || []).length; if (n === 0) eventCounts.zero++; else if (n === 1) eventCounts.one++; else eventCounts.many++; }
+          const cardinality = {
+            buffersUnique: uniq(buffers.map((b) => b.bufferId)).length,
+            eventIdsExplicitUnique: explicitEventIds.length,
+            eventsFoundUnique: foundEventIds.length,
+            eventsMissingUnique: explicitEventIds.filter((x) => !eventMap.has(key(x))).length,
+            jobsIdsExplicitMetadataUnique: explicitJobIds.length,
+            jobsFoundByDatabaseUnique: foundJobIds.length,
+            jobsUniqueFound: allJobs.length,
+            offersIdsExplicitMetadataUnique: explicitOfferIds.length,
+            offersDerivedFromJobsUnique: derivedOfferIds.length,
+            offersUniqueFound: allOffers.length,
+            eventsWithoutJob: eventCounts.zero,
+            eventsWithOneJob: eventCounts.one,
+            eventsWithMultipleJobs: eventCounts.many,
+            jobsWithoutOffer: allJobs.filter((j) => j.oferta_id == null).length,
+            jobsWithOffer: allJobs.filter((j) => j.oferta_id != null).length,
+            offersAllByExplicitOrJobIds: true,
+            confirmedDestinations: 'NAO_CONSULTADO_NESTE_FUNIL'
+          };
+          emit('CANONICAL_CARDINALITY_V2', cardinality);
+          function isMl(v) { return /mercado.?livre|mercadolivre|meli/i.test(String(v || '')); }
+          const mlJobs = allJobs.filter((j) => isMl(j.marketplace) || isMl(j.marketplace_detectado));
+          const mlOffers = allOffers.filter((o) => isMl(o.marketplace));
+          const mlBuffers = buffers.filter((b) => results.find((r) => r.bufferId === b.bufferId && (r.jobs.some((j) => isMl(j.marketplace)) || r.offers.some((o) => isMl(o.marketplace)))));
+          emit('CANONICAL_ML_SUMMARY', { buffers: mlBuffers.length, events: uniq(mlBuffers.flatMap((b) => b.eventIds)).length, jobs: mlJobs.length, offers: mlOffers.length, jobsWithOffer: mlJobs.filter((j) => j.oferta_id != null).length, jobsWithoutOffer: mlJobs.filter((j) => j.oferta_id == null).length, statuses: mlJobs.reduce((a, j) => { const k = String(j.status || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {}), motivos: mlJobs.reduce((a, j) => { const k = String(j.motivo_final || 'NULL'); a[k] = (a[k] || 0) + 1; return a; }, {}), attempts: mlJobs.reduce((a, j) => a + (Number(j.tentativas) || 0), 0) });
+          const controlJob = jobMap.get('488286') || null;
+          const controlOffer = controlJob && controlJob.oferta_id != null ? (offerMap.get(key(controlJob.oferta_id)) || null) : (offerMap.get('99351') || null);
+          emit('CANONICAL_CONTROL_488286', { jobId: '488286', expectedOfferId: '99351', jobFound: Boolean(controlJob), offerFound: Boolean(controlOffer), job: controlJob ? { id: key(controlJob.id), eventoId: controlJob.evento_id == null ? null : key(controlJob.evento_id), ofertaId: controlJob.oferta_id == null ? null : key(controlJob.oferta_id), status: controlJob.status || null, motivoFinal: controlJob.motivo_final || null, criadoEm: asTime(controlJob.criado_em), atualizadoEm: asTime(controlJob.atualizado_em), stateAtCutoff: 'INDETERMINADO_SEM_HISTORICO' } : null, offer: controlOffer ? { id: key(controlOffer.id), status: controlOffer.status || null, motivoStatus: controlOffer.motivo_status || null, criadaEm: asTime(controlOffer.criada_em), atualizadaEm: asTime(controlOffer.atualizada_em) } : null });
+          const classCounts = results.reduce((a, r) => { a[r.class] = (a[r.class] || 0) + 1; return a; }, {});
+          const instrumentComplete = schemaComplete && bufferRows.length === EXPECTED_BUFFERS && queryErrors.length === 0;
+          const correlationComplete = instrumentComplete && results.length === EXPECTED_BUFFERS && results.every((r) => r.class !== 'INDETERMINADO' && r.class !== 'CORRELACAO_AMBIGUA');
+          const causalChainComplete = correlationComplete && results.length > 0 && results.every((r) => r.foundEventIds.length > 0 && r.foundJobIds.length > 0 && r.foundOfferIds.length > 0);
+          let throughputLoss = 'INDETERMINADO';
+          if (causalChainComplete) throughputLoss = 'SEM_PERDA_FUNCIONAL_COMPROVADA';
+          else if (instrumentComplete) throughputLoss = 'CORRELACAO_INCOMPLETA_NAO_PERMITE_LOCALIZAR_PERDA';
+          emit('CANONICAL_DECISION_V2', { instrumentComplete, correlationComplete, causalChainComplete, indeterminate: !causalChainComplete, defectProven: false, productPatchAuthorized: false, throughputLoss, classCounts, queryErrors, queryTimings: timings });
+          if (!instrumentComplete) process.exitCode = 3;
+NODE
           backend_after="$(git -C "$BACKEND" rev-parse HEAD)"
           backend_id_after="$(docker compose -f "$COMPOSE" ps --status running -q backend | head -n 1)"
           postgres_id_after="$(docker compose -f "$COMPOSE" ps --status running -q postgres | head -n 1)"
-          printf 'POSTFLIGHT_BACKEND_SHA=%s\nPOSTFLIGHT_BACKEND_ID=%s\nPOSTFLIGHT_POSTGRES_ID=%s\n' "$backend_after" "$backend_id_after" "$postgres_id_after"
-          [[ "$backend_after" == "$backend_before" && "$backend_id_after" == "$backend_id_before" && "$postgres_id_after" == "$postgres_id_before" ]] || { echo 'POSTFLIGHT_PRODUCTION_STABILITY=CHANGED'; exit 3; }
-          echo 'PREFLIGHT_POSTFLIGHT=STABLE; SELECT-only audit completed.'
+          git_status_after="$(git -C "$BACKEND" status --short)"
+          status_display="$git_status_after"; [ -n "$status_display" ] || status_display=CLEAN
+          printf 'POSTFLIGHT_BACKEND_SHA=%s\nPOSTFLIGHT_BACKEND_ID=%s\nPOSTFLIGHT_POSTGRES_ID=%s\nPOSTFLIGHT_GIT_STATUS=%s\n' "$backend_after" "$backend_id_after" "$postgres_id_after" "$status_display"
+          [[ "$backend_after" == "$backend_before" && "$backend_id_after" == "$backend_id_before" && "$postgres_id_after" == "$postgres_id_before" && "$git_status_after" == "$git_status_before" ]] || { echo 'PREFLIGHT_POSTFLIGHT=CHANGED'; exit 3; }
+          echo 'PREFLIGHT_POSTFLIGHT=STABLE'
