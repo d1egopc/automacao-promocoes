@@ -93,7 +93,7 @@ jobs:
             const started = Date.now();
             try {
               const rows = await queryEngineShadow(sql, params, { timeoutSqlMs: 10000 });
-              const out = Array.isArray(rows) ? rows : [];
+              const out = Array.isArray(rows) ? rows : (rows && Array.isArray(rows.rows) ? rows.rows : (rows && Array.isArray(rows.result) ? rows.result : []));
               timings.push({ label, ms: Date.now() - started, rows: out.length, timeoutMs: 10000 });
               emit('CANONICAL_QUERY_TIMING', timings[timings.length - 1]);
               return out;
