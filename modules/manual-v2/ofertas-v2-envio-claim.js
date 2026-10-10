@@ -28,6 +28,59 @@ function reservaPostgres() {
       );
       return Boolean(r.rows?.length);
     },
+    async consultarDetalhe(client, clienteId, filaItemId) {
+      const r = await client.query(
+        `SELECT claim_token,lease_expires_at FROM fila_claims_ativos
+         WHERE cliente_id=$1 AND fila_item_id=$2 AND lease_expires_at>NOW()`,
+        [clienteId, filaItemId]
+      );
+      return r.rows?.[0] || null;
+    },
+    async carregarOwnerTarget(client, { ownerId, clienteId, destinoId,
+      targetId, leaseToken }) {
+      const r = await client.query(
+        `SELECT o.owner_id,o.commercial_reservation_key,o.reservation_token
+           FROM engine_universal_fanout_owners o
+           JOIN engine_universal_queue_destinations d
+             ON d.fanout_owner_id=o.owner_id
+            AND d.queue_item_id=o.queue_item_id
+            AND d.operation_epoch_started_at=o.operation_epoch_started_at
+            AND d.workspace_id=o.workspace_id
+            AND d.destination_id=o.destination_id
+          WHERE o.owner_id=$1 AND o.workspace_id=$2 AND o.destination_id=$3
+            AND d.id=$4 AND d.lease_token=$5 AND d.status='claimed'
+            AND d.lease_until>clock_timestamp()
+            AND o.operation_epoch_started_at=(
+              SELECT operation_epoch_started_at FROM engine_operation_state
+              WHERE id=1 AND mode='UNIVERSAL')`,
+        [ownerId, clienteId, destinoId, targetId, leaseToken]
+      );
+      return r.rows?.[0] || null;
+    },
+    async vincularOwner(client, { ownerId, clienteId, chaveReserva, token }) {
+      const r = await client.query(
+        `UPDATE engine_universal_fanout_owners
+            SET commercial_reservation_key=$3,reservation_token=$4,
+                updated_at=clock_timestamp()
+          WHERE owner_id=$1 AND workspace_id=$2
+            AND commercial_reservation_key IS NULL
+            AND reservation_token IS NULL
+          RETURNING owner_id`,
+        [ownerId, clienteId, chaveReserva, token]
+      );
+      return r.rowCount === 1;
+    },
+    async desvincularOwner(client, { ownerId, clienteId, token }) {
+      const r = await client.query(
+        `UPDATE engine_universal_fanout_owners
+            SET commercial_reservation_key=NULL,reservation_token=NULL,
+                updated_at=clock_timestamp()
+          WHERE owner_id=$1 AND workspace_id=$2 AND reservation_token=$3
+          RETURNING owner_id`,
+        [ownerId, clienteId, token]
+      );
+      return r.rowCount === 1;
+    },
     async preparar(client, clienteId, filaItemId, leaseExpiresAt) {
       const token = crypto.randomUUID();
       const r = await client.query(
@@ -71,7 +124,8 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     throw new Error("ofertas_v2_advisory_invalido");
   }
 
-  async function adquirir({ clienteId = "", oferta = {}, destinoId = "" } = {}) {
+  async function adquirir({ clienteId = "", oferta = {}, destinoId = "",
+    fanoutOwnerId = "", targetId = null, targetLeaseToken = "" } = {}) {
     const filaItemId = chaveClaimProdutoDestino({ clienteId, oferta, destinoId });
     if (!filaItemId) return { resultado: "identidade_operacional_ausente", handle: null, filaItemId: "" };
     const estado = await advisory.adquirir({
@@ -81,11 +135,47 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     if (estado?.resultado !== "adquirido") return estado;
     try {
       const chaveReserva = filaItemId.replace("ofertas-v2-par:", "ofertas-v2-duravel:");
-      if (await reserva.consultar(estado.handle?.client, clienteId, chaveReserva)) {
+      const ownerRequested = Boolean(fanoutOwnerId || targetId || targetLeaseToken);
+      if (ownerRequested && (!fanoutOwnerId || !targetId || !targetLeaseToken ||
+          typeof reserva.carregarOwnerTarget !== "function" ||
+          typeof reserva.consultarDetalhe !== "function")) {
+        await advisory.finalizar(estado, { statusFinal: "owner_incompleto" });
+        return { resultado: "owner_incompleto", filaItemId };
+      }
+      const owner = ownerRequested ? await reserva.carregarOwnerTarget(
+        estado.handle?.client, { ownerId: fanoutOwnerId, clienteId, destinoId,
+          targetId, leaseToken: targetLeaseToken }) : null;
+      if (ownerRequested && !owner) {
+        await advisory.finalizar(estado, { statusFinal: "owner_target_invalido" });
+        return { resultado: "owner_target_invalido", filaItemId };
+      }
+      const active = ownerRequested
+        ? await reserva.consultarDetalhe(estado.handle?.client, clienteId,
+          chaveReserva)
+        : await reserva.consultar(estado.handle?.client, clienteId, chaveReserva);
+      if (active && ownerRequested &&
+          owner.commercial_reservation_key === chaveReserva &&
+          String(owner.reservation_token) === String(active.claim_token)) {
+        await advisory.finalizar(estado, { statusFinal: "mesmo_fanout_owner" });
+        return { resultado: "adquirido", filaItemId, chaveReserva, clienteId,
+          destinoId,
+          fanoutOwnerId, ownerContinuation: true,
+          reservaToken: String(active.claim_token), advisoryLiberado: true,
+          handle: null };
+      }
+      if (active) {
         await advisory.finalizar(estado, { statusFinal: "envio_recente_ou_indeterminado" });
         return { resultado: "ocupado_recente", filaItemId };
       }
-      return { ...estado, filaItemId, chaveReserva, clienteId, reservaToken: "", advisoryLiberado: false };
+      // A previously bound owner without its matching live reservation must
+      // not silently create another commercial dispatch.
+      if (ownerRequested && owner.reservation_token) {
+        await advisory.finalizar(estado, { statusFinal: "owner_reservation_missing" });
+        return { resultado: "owner_reservation_missing", filaItemId };
+      }
+      return { ...estado, filaItemId, chaveReserva, clienteId, destinoId,
+        fanoutOwnerId: ownerRequested ? fanoutOwnerId : "",
+        ownerContinuation: false, reservaToken: "", advisoryLiberado: false };
     } catch {
       await advisory.finalizar(estado, { statusFinal: "reserva_indisponivel" });
       return { resultado: "reserva_indisponivel", filaItemId };
@@ -94,10 +184,26 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
 
   async function prepararTransporte(estado) {
     if (estado?.resultado !== "adquirido" || !estado.chaveReserva) return false;
+    if (estado.ownerContinuation === true) return Boolean(estado.reservaToken);
     let token = "";
     try {
-      token = await reserva.preparar(estado.handle?.client, estado.clienteId,
-        estado.chaveReserva, new Date(now() + JANELA_MS).toISOString());
+      const client = estado.handle?.client;
+      if (estado.fanoutOwnerId) await client.query("BEGIN");
+      try {
+        token = await reserva.preparar(client, estado.clienteId,
+          estado.chaveReserva, new Date(now() + JANELA_MS).toISOString());
+        if (estado.fanoutOwnerId) {
+          if (!token || typeof reserva.vincularOwner !== "function" ||
+              !await reserva.vincularOwner(client, { ownerId: estado.fanoutOwnerId,
+                clienteId: estado.clienteId, chaveReserva: estado.chaveReserva,
+                token })) throw new Error("fanout_owner_binding_failed");
+          await client.query("COMMIT");
+        }
+      } catch (error) {
+        if (estado.fanoutOwnerId) await client.query("ROLLBACK").catch(() => {});
+        token = "";
+        if (estado.fanoutOwnerId) throw error;
+      }
       estado.reservaToken = token;
     } finally {
       // A reserva duravel, nao o lock de sessao, protege o par durante rede.
@@ -109,9 +215,46 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
   }
 
   async function descartarSemTransporte(estado) {
-    if (!estado?.reservaToken) return;
-    await reserva.descartar(null, estado.clienteId, estado.chaveReserva, estado.reservaToken);
+    if (!estado?.reservaToken || estado.ownerContinuation === true) return;
+    if (estado.fanoutOwnerId) {
+      const client = await getEnginePool().connect();
+      try {
+        await client.query("BEGIN");
+        await reserva.descartar(client, estado.clienteId, estado.chaveReserva,
+          estado.reservaToken);
+        if (!await reserva.desvincularOwner(client, {
+          ownerId: estado.fanoutOwnerId, clienteId: estado.clienteId,
+          token: estado.reservaToken })) throw new Error("fanout_owner_release_failed");
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally { client.release(); }
+    } else {
+      await reserva.descartar(null, estado.clienteId, estado.chaveReserva,
+        estado.reservaToken);
+    }
     estado.reservaToken = "";
+  }
+
+  async function validarTitularidade(estado, { targetId, targetLeaseToken } = {}) {
+    if (!estado?.fanoutOwnerId || !estado.reservaToken ||
+        !targetId || !targetLeaseToken ||
+        typeof reserva.carregarOwnerTarget !== "function" ||
+        typeof reserva.consultarDetalhe !== "function") return false;
+    const client = await getEnginePool().connect();
+    try {
+      const owner = await reserva.carregarOwnerTarget(client, {
+        ownerId: estado.fanoutOwnerId, clienteId: estado.clienteId,
+        destinoId: estado.destinoId, targetId,
+        leaseToken: targetLeaseToken });
+      if (!owner || owner.commercial_reservation_key !== estado.chaveReserva ||
+          String(owner.reservation_token) !== String(estado.reservaToken)) return false;
+      const active = await reserva.consultarDetalhe(client, estado.clienteId,
+        estado.chaveReserva);
+      return Boolean(active &&
+        String(active.claim_token) === String(estado.reservaToken));
+    } finally { client.release(); }
   }
 
   async function finalizar(estado, dados = {}) {
@@ -119,7 +262,8 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     return advisory.finalizar(estado, dados);
   }
 
-  return { adquirir, prepararTransporte, descartarSemTransporte, finalizar, chaveClaimProdutoDestino };
+  return { adquirir, prepararTransporte, descartarSemTransporte,
+    validarTitularidade, finalizar, chaveClaimProdutoDestino };
 }
 
 module.exports = { chaveClaimProdutoDestino, criarCoordenadorEnvioProdutoDestino };

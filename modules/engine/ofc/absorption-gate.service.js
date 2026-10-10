@@ -922,7 +922,7 @@ function slotsCobertura(coberturaMinutos = 0, intervaloMinutos = 1) {
   return Math.max(0, Math.floor(cobertura / intervalo));
 }
 
-function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = [], agoraMs) {
+function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = [], agoraMs, oferta = {}) {
   const id = destinoId(destino, indice);
   const ativo = destino?.ativo !== false;
   const integracaoConfigurada = ativo && destinoPossuiIntegracaoBasica(destino);
@@ -935,7 +935,7 @@ function capacidadeDestinoShadow(destino = {}, indice = 0, filaItens = [], agora
   const turboAplicavel = destinoApto && turboAplicavelDestino(destino);
   const cadencia = resolverCadenciaDestino({
     destino,
-    considerarTurboSemOferta: turboAplicavel,
+    oferta,
     ...(agoraMs === undefined ? {} : { agoraMs })
   });
   const intervaloTurbo = cadencia.intervaloTurboMin || cadencia.intervaloEfetivoMin;
@@ -988,8 +988,8 @@ function metricasEventosWorkspace(linhas = []) {
   return mapa;
 }
 
-function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens = [], agoraMs) {
-  const capacidadePorDestino = lista(destinos).map((destino, indice) => capacidadeDestinoShadow(destino, indice, filaItens, agoraMs));
+function avaliarDestinosWorkspace(destinos = [], janelaMinutos = 15, filaItens = [], agoraMs, oferta = {}) {
+  const capacidadePorDestino = lista(destinos).map((destino, indice) => capacidadeDestinoShadow(destino, indice, filaItens, agoraMs, oferta));
   const destinosAtivos = capacidadePorDestino.filter(item => item.destinoHabilitado).length;
   const destinosTopologiaPotencial = capacidadePorDestino
     .filter(item => item.destinoHabilitado && item.integracaoConfigurada).length;

@@ -171,6 +171,27 @@ async function registrarOrigemAtendidaFairness(client, entrada = {}, origem = ""
   return normalizarEstado(resultado.rows[0], chave);
 }
 
+async function registrarAtendimentoWorkspaceFairness(client, entrada = {}, origem = "") {
+  const transacao = exigirClientTransacional(client);
+  const chave = normalizarChaveFairness(entrada);
+  const origemFinal = texto(origem) ? normalizarOrigemProtegida(origem) : null;
+  const resultado = await transacao.query(
+    `UPDATE engine_fairness_origem_fluxo
+        SET ultima_origem_atendida = COALESCE($4, ultima_origem_atendida),
+            ultimo_atendimento_em = GREATEST(
+              COALESCE(ultimo_atendimento_em + INTERVAL '1 microsecond', '-infinity'::timestamptz),
+              clock_timestamp()
+            ),
+            atualizado_em = NOW()
+      WHERE cliente_id = $1 AND etapa = $2 AND lane = $3
+      RETURNING cliente_id, etapa, lane, ultima_origem_atendida,
+                ultimo_atendimento_em, criado_em, atualizado_em`,
+    [...paramsChave(chave), origemFinal]
+  );
+  if (!resultado.rows[0]) throw new Error("fairness_estado_ausente_para_atualizacao");
+  return normalizarEstado(resultado.rows[0], chave);
+}
+
 module.exports = {
   ORIGENS_PROTEGIDAS,
   ETAPAS_FAIRNESS,
@@ -184,5 +205,6 @@ module.exports = {
   garantirEstadoFairness,
   obterEstadoFairness,
   bloquearEstadoFairness,
-  registrarOrigemAtendidaFairness
+  registrarOrigemAtendidaFairness,
+  registrarAtendimentoWorkspaceFairness
 };

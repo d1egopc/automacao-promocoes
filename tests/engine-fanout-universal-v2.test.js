@@ -144,6 +144,7 @@ async function executarFanoutJobs({ marketplace, links, clientes, existentes = [
     const retorno = await inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo@g.us",
       textoOriginal: "Oferta duplicada https://meli.la/abc",
       linksExtraidos: ["https://meli.la/abc"]

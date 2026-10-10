@@ -274,6 +274,10 @@ function criarTransacaoFinanceira(client) {
 }
 
 function criarRepositorioFinanceiroPostgres({ pool } = {}) {
+  const queryRepositorio = pool
+    ? async (sql, params = []) => ({ ok: true,
+      resultado: await pool.query(sql, params) })
+    : queryFinanceiro;
   return {
     async transacao(fn) {
       return executarTransacaoFinanceira(fn, { pool: pool || getFinanceiroPool });
@@ -408,6 +412,10 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
         params.push(String(filtros.clienteId));
         where.push(`l.cliente_id = $${params.length}`);
       }
+      if (filtros.ledgerId) {
+        params.push(String(filtros.ledgerId));
+        where.push(`l.id = $${params.length}::uuid`);
+      }
       if (filtros.provider) {
         joinPayment = true;
         params.push(String(filtros.provider));
@@ -419,7 +427,7 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
         where.push(`p.external_payment_id = $${params.length}`);
       }
 
-      const resultado = await queryFinanceiro(
+      const resultado = await queryRepositorio(
         `SELECT l.*
          FROM financial_credit_ledger l
          ${joinPayment ? "JOIN financial_payments p ON p.id = l.payment_id" : ""}
@@ -433,7 +441,7 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
     },
 
     async marcarLedgerProjetado(ledgerId) {
-      return queryFinanceiro(
+      return queryRepositorio(
         `UPDATE financial_credit_ledger
          SET projection_status = 'projected',
              projected_at = NOW(),
@@ -445,7 +453,7 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
     },
 
     async marcarLedgerFalha(ledgerId, erro) {
-      return queryFinanceiro(
+      return queryRepositorio(
         `UPDATE financial_credit_ledger
          SET projection_status = 'pending',
              projection_attempts = projection_attempts + 1,

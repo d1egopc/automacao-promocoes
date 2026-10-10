@@ -33,6 +33,8 @@ function permanentRadarRejection(reason = "") {
     "sem_links",
     "origem_tipo_invalida",
     "grupo_ou_chat_ausente",
+    "captura_expirada_antes_admissao",
+    "captura_sem_tempo_factual",
     "TELERADAR_HANDOFF_ORIGIN_INVALID",
     "TELERADAR_REJEITADO_PROTECTED_CONTENT"
   ].includes(String(reason));
@@ -43,6 +45,10 @@ function createRadarIngressAdapter({ processarMensagemRadar } = {}) {
   return Object.freeze({
     async accept(envelope, observability = {}) {
       validateEnvelope(envelope);
+      if (!envelope.capturedAt || !Number.isFinite(Date.parse(envelope.capturedAt))) {
+        return { accepted: false, durable: false, retryable: false,
+          code: "captura_sem_tempo_factual" };
+      }
       const handler = explicitHandler || registeredRadarIngress;
       if (typeof handler !== "function") {
         return { accepted: false, durable: false, retryable: true, code: "RADAR_INGRESS_UNAVAILABLE" };
@@ -61,7 +67,7 @@ function createRadarIngressAdapter({ processarMensagemRadar } = {}) {
         grupoId: envelope.chatId,
         grupoNome: "",
         texto: envelope.text,
-        capturadaEm: envelope.capturedAt || envelope.receivedAt,
+        capturadaEm: envelope.capturedAt,
         raw: {
           key: { id: envelope.messageId, remoteJid: envelope.chatId, fromMe: false },
           teleradar: {
@@ -88,7 +94,7 @@ function createRadarIngressAdapter({ processarMensagemRadar } = {}) {
           chatId: envelope.chatId,
           messageId: envelope.messageId,
           entities,
-          capturedAt: observability.capturedAt || envelope.capturedAt || envelope.receivedAt,
+          capturedAt: envelope.capturedAt,
           envelopeCreatedAt: observability.envelopeCreatedAt || envelope.envelopeCreatedAt,
           handoffPersistedAt: observability.handoffPersistedAt || null,
           handoffAttemptedAt: observability.handoffAttemptedAt || null,

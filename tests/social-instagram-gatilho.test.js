@@ -15,7 +15,8 @@ process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN = "verify_optimus";
 process.env.META_GRAPH_VERSION = "v20.0";
 
 const instagram = require("../modules/social/instagram");
-const { readClienteJson, writeClienteJson } = require("../utils/storage");
+const fonteUniversalSocial = require("../modules/social/universal-opportunities.source");
+const { readClienteJson, writeClienteJson, readGlobalJson, writeGlobalJson } = require("../utils/storage");
 const routesFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "social", "routes.js"), "utf8");
 const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
 
@@ -47,7 +48,16 @@ function payloadComentario({ ig = "ig_cliente_a", media = "media_pub_a", comment
   };
 }
 
+function registrarClienteAtivo(clienteId) {
+  const usuarios = readGlobalJson("usuarios.json", []);
+  if (!usuarios.some(usuario => usuario.id === clienteId)) {
+    writeGlobalJson("usuarios.json", [...usuarios,
+      { id: clienteId, ativo: true, plano: "pro" }]);
+  }
+}
+
 function salvarClienteInstagram(clienteId, { ig = "ig_cliente_a", media = "media_pub_a", oferta = "oferta_a", link = "https://go.optimus.test/a/oferta", cupom = "PROMO10" } = {}) {
+  registrarClienteAtivo(clienteId);
   writeClienteJson(clienteId, "social-instagram.json", {
     clienteId,
     conectado: true,
@@ -119,6 +129,7 @@ function salvarClienteInstagramPersonalizado(clienteId, {
   mensagemPrivada = "",
   respostaPublica = gatilho?.respostaPublica || ""
 } = {}) {
+  registrarClienteAtivo(clienteId);
   writeClienteJson(clienteId, "social-instagram.json", {
     clienteId,
     conectado: true,
@@ -566,6 +577,50 @@ function mockHttpClient(opcoes = {}) {
   assert.ok(listaA.some(item => item.instagramCommentId === "comment_1"));
   assert.strictEqual(listaB.some(item => item.instagramCommentId === "comment_1"), false);
   assert.deepStrictEqual(readClienteJson("cliente_b", "social-interacoes.json", []), []);
+
+  salvarClienteInstagram("cliente_universal", {
+    ig: "ig_universal", media: "media_universal", oferta: "101",
+    link: "https://go.optimus.test/legacy-only"
+  });
+  const epoch = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+  fonteUniversalSocial.configurarFonteUniversalSocial({
+    getMode: () => "UNIVERSAL",
+    getPool: () => ({
+      async query(sql) {
+        if (sql.includes("FROM engine_operation_state")) {
+          return { rows: [{ mode: "UNIVERSAL", operation_epoch_started_at: epoch }] };
+        }
+        return { rows: [{ id: 1, operation_epoch_started_at: epoch,
+          oferta_id: 101, origem_fluxo: "radar",
+          capturado_em: new Date(Date.now() - 60_000).toISOString(),
+          item_payload: { clienteId: "cliente_universal", titulo: "Oferta Universal",
+            marketplace: "amazon", imagem: "https://cdn.optimus.test/oferta.jpg",
+            precoAtual: 99.9, cupom: "PROMO10",
+            linkAfiliado: "https://go.optimus.test/postgres-only" } }] };
+      }
+    })
+  });
+  const universalPayload = payloadComentario({ ig: "ig_universal",
+    media: "media_universal", comment: "comment_universal_concorrente" });
+  const universalAssinado = assinar(universalPayload);
+  const httpUniversal = mockHttpClient();
+  const universalConcorrente = await Promise.all([0, 1].map(() =>
+    instagram.processarWebhookInstagram({ payload: universalPayload,
+      ...universalAssinado, httpClient: httpUniversal })));
+  assert.deepStrictEqual(universalConcorrente.map(item => item.resultados[0].status).sort(),
+    ["duplicado", "respondida"]);
+  assert.strictEqual(httpUniversal.chamadas.filter(chamada =>
+    chamada.url.endsWith("/messages")).length, 1);
+  assert.ok(httpUniversal.chamadas.some(chamada =>
+    String(chamada.body || "").includes("postgres-only")));
+  assert.ok(!httpUniversal.chamadas.some(chamada =>
+    String(chamada.body || "").includes("legacy-only")));
+  const universalRetry = await instagram.processarWebhookInstagram({
+    payload: universalPayload, ...universalAssinado, httpClient: httpUniversal
+  });
+  assert.strictEqual(universalRetry.resultados[0].status, "duplicado");
+  assert.strictEqual(httpUniversal.chamadas.filter(chamada =>
+    chamada.url.endsWith("/messages")).length, 1);
 
   console.log("social-instagram-gatilho: ok");
 })().catch(erro => {

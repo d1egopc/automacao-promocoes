@@ -1,8 +1,11 @@
 const { queryEngine } = require("../database");
+const { sqlFiltroEpochReal } = require("../universal-ingress-fence");
 const { normalizarNumeroMoeda } = require("../../../utils/moeda");
 const {
   resolverPrioridadeFinalCupom
 } = require("../../cupom/prioridade-cupom");
+const { classificarTurboComercialCandidato } =
+  require("../turbo-classification.candidate");
 const {
   marcarJobStatus,
   registrarProcessamento,
@@ -11,7 +14,9 @@ const {
   limitarJobs
 } = require("../processor.service");
 const {
-  calcularCotasFrescorPreImporter
+  calcularCotasFrescorPreImporter,
+  sqlFrescorComercialPreImporter,
+  sqlRetryPreImporter
 } = require("../frescor-pre-importer.service");
 const { normalizarTexto } = require("../normalizers");
 const { classificarCategoriaOferta } = require("../../../marketplaces/inteligencia/classificador-categorias");
@@ -573,17 +578,13 @@ function logSelecaoImagemMercadoLivre({ job = {}, evento = {}, oferta = {}, ofer
 }
 
 async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
+  const frescor = sqlFrescorComercialPreImporter("j", "e");
   const params = [];
-  const retryAgendadoMs = "NULLIF(j.metadata #>> '{afiliacaoWorkspaceRetry,proximaTentativaEmMs}', '')";
-  const retryLocalWorkerMs = "NULLIF(j.metadata #>> '{localWorkerImageRetry,proximaTentativaEmMs}', '')";
-  const retryQualquerMs = `COALESCE(${retryAgendadoMs}, ${retryLocalWorkerMs})`;
+  const retry = sqlRetryPreImporter("j");
   const filtros = [
     "j.status = 'pronto_para_importar'",
-    `(CASE
-       WHEN ${retryQualquerMs} ~ '^[0-9]+$'
-         THEN ${retryQualquerMs}::bigint <= (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
-       ELSE TRUE
-     END)`
+    retry.vencido,
+    sqlFiltroEpochReal("e")
   ];
   const marketplaceExpr = "LOWER(COALESCE(NULLIF(TRIM(marketplace), ''), NULLIF(TRIM(marketplace_detectado), ''), ''))";
   const marketplaceExprJob = "LOWER(COALESCE(NULLIF(TRIM(j.marketplace), ''), NULLIF(TRIM(j.marketplace_detectado), ''), ''))";
@@ -607,7 +608,15 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
   const paramLimite = params.length;
 
   const resultado = await queryEngine(
-    `WITH base AS (
+    `WITH limpeza_ids AS MATERIALIZED (
+       SELECT j.id
+         FROM engine_jobs_cliente j
+         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
+        WHERE ${filtros.join(" AND ")} AND ${frescor.morto}
+        ORDER BY j.criado_em ASC, j.id ASC
+        LIMIT $${paramLimpeza}
+     ),
+     base_raw AS (
        SELECT j.id, j.uuid, j.evento_id, j.oferta_id, j.cliente_id, j.marketplace_detectado,
               j.marketplace, j.status, j.motivo_final, j.metadata, j.prioridade,
               j.criado_em, j.atualizado_em,
@@ -638,19 +647,27 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                 ELSE ''
               END AS origem_fluxo_explicita_pre_importer,
               COALESCE(e.capturado_em, j.criado_em) AS origem_comercial_pre_importer,
-              CASE
-                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 1
-                ELSE 0
-              END AS bucket_frescor_pre_importer,
-              CASE
-                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 'expirada'
-                WHEN COALESCE(e.capturado_em, j.criado_em) >= NOW() - INTERVAL '5 minutes' THEN 'agua_nova'
-                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '20 minutes' THEN 'fresca_em_risco'
-                ELSE 'fresca_circulavel'
-              END AS lane_vazao_pre_importer
+              ${frescor.bucket} AS bucket_frescor_pre_importer,
+              ${frescor.lane} AS lane_vazao_pre_importer
          FROM engine_jobs_cliente j
          LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
         WHERE ${filtros.join(" AND ")}
+          AND (${frescor.vivo} OR j.id IN (SELECT id FROM limpeza_ids))
+     ),
+     base AS (
+       SELECT b.*, f.ultimo_atendimento_em AS workspace_ultimo_atendimento_em,
+              geral.ultimo_atendimento_em AS workspace_ultimo_atendimento_geral
+         FROM base_raw b
+         LEFT JOIN engine_fairness_origem_fluxo f
+           ON f.cliente_id = b.workspace_chave_pre_importer
+          AND f.etapa = 'importacao_final'
+          AND f.lane = b.marketplace_chave_pre_importer || ':' || b.lane_vazao_pre_importer
+         LEFT JOIN (
+           SELECT cliente_id, MAX(ultimo_atendimento_em) AS ultimo_atendimento_em
+             FROM engine_fairness_origem_fluxo
+            WHERE etapa = 'importacao_final'
+            GROUP BY cliente_id
+         ) geral ON geral.cliente_id = b.workspace_chave_pre_importer
      ),
      agua_nova_ranked AS (
        SELECT *,
@@ -658,6 +675,10 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
               ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS workspace_marketplace_rank_pre_importer,
               ROW_NUMBER() OVER (
                 PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer, origem_fluxo_explicita_pre_importer
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
@@ -668,7 +689,7 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
      agua_nova AS (
        SELECT *, 0 AS bucket_selecao_pre_importer
          FROM agua_nova_ranked
-        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
         LIMIT $${paramAguaNova}
      ),
      fresca_em_risco_ranked AS (
@@ -677,6 +698,10 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
               ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS workspace_marketplace_rank_pre_importer,
               ROW_NUMBER() OVER (
                 PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer, origem_fluxo_explicita_pre_importer
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
@@ -687,7 +712,7 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
      fresca_em_risco AS (
        SELECT *, 1 AS bucket_selecao_pre_importer
          FROM fresca_em_risco_ranked
-        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $${paramFrescaEmRisco}
      ),
      fresca_circulavel_ranked AS (
@@ -696,6 +721,10 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
               ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer
+                ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+              ) AS workspace_marketplace_rank_pre_importer,
               ROW_NUMBER() OVER (
                 PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer, origem_fluxo_explicita_pre_importer
                 ORDER BY COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
@@ -706,7 +735,7 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
      fresca_circulavel AS (
        SELECT *, 2 AS bucket_selecao_pre_importer
          FROM fresca_circulavel_ranked
-        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
         LIMIT $${paramFrescaCirculavel}
      ),
      limpeza_ranked AS (
@@ -715,6 +744,10 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                 PARTITION BY COALESCE(NULLIF(TRIM(cliente_id), ''), 'workspace_desconhecido')
                 ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
               ) AS workspace_rank_pre_importer,
+              ROW_NUMBER() OVER (
+                PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer
+                ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+              ) AS workspace_marketplace_rank_pre_importer,
               ROW_NUMBER() OVER (
                 PARTITION BY workspace_chave_pre_importer, marketplace_chave_pre_importer, origem_fluxo_explicita_pre_importer
                 ORDER BY origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
@@ -725,10 +758,10 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
      limpeza AS (
        SELECT *, 3 AS bucket_selecao_pre_importer
          FROM limpeza_ranked
-        ORDER BY workspace_rank_pre_importer ASC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $${paramLimpeza}
      ),
-     baseline_bruto AS (
+     cotas_brutas AS (
        SELECT * FROM agua_nova
        UNION ALL
        SELECT * FROM fresca_em_risco
@@ -737,11 +770,49 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
        UNION ALL
        SELECT * FROM limpeza
      ),
+     backfill AS (
+       SELECT ranked.*, 4 AS bucket_selecao_pre_importer
+         FROM (
+           SELECT * FROM agua_nova_ranked
+           UNION ALL
+           SELECT * FROM fresca_em_risco_ranked
+           UNION ALL
+           SELECT * FROM fresca_circulavel_ranked
+         ) ranked
+        WHERE NOT EXISTS (SELECT 1 FROM cotas_brutas c WHERE c.id = ranked.id)
+        ORDER BY CASE ranked.lane_vazao_pre_importer
+                   WHEN 'agua_nova' THEN 0 WHEN 'fresca_em_risco' THEN 1 ELSE 2 END ASC,
+                 ranked.workspace_rank_pre_importer ASC,
+                 COALESCE(ranked.prioridade, 0) DESC,
+                 CASE WHEN ranked.lane_vazao_pre_importer = 'fresca_em_risco' THEN ranked.origem_comercial_pre_importer END ASC NULLS LAST,
+                 CASE WHEN ranked.lane_vazao_pre_importer <> 'fresca_em_risco' THEN ranked.origem_comercial_pre_importer END DESC NULLS LAST,
+                 ranked.id ASC
+        LIMIT GREATEST(0, $${paramLimite}::int - $${paramLimpeza}::int -
+          (SELECT COUNT(*)::int FROM cotas_brutas WHERE lane_vazao_pre_importer <> 'expirada'))
+     ),
+     baseline_bruto AS (
+       SELECT * FROM cotas_brutas WHERE $${paramLimite}::int > 4
+       UNION ALL
+       SELECT * FROM backfill WHERE $${paramLimite}::int > 4
+       UNION ALL
+       SELECT ranked.*, 0 AS bucket_selecao_pre_importer
+         FROM (
+           SELECT * FROM agua_nova_ranked
+           UNION ALL
+           SELECT * FROM fresca_em_risco_ranked
+           UNION ALL
+           SELECT * FROM fresca_circulavel_ranked
+         ) ranked
+        WHERE $${paramLimite}::int <= 4
+     ),
      baseline AS (
        SELECT *,
               ROW_NUMBER() OVER (
-                ORDER BY bucket_selecao_pre_importer ASC,
+                ORDER BY CASE WHEN $${paramLimite}::int <= 4 THEN workspace_ultimo_atendimento_em END ASC NULLS FIRST,
+                         CASE WHEN $${paramLimite}::int <= 4 THEN workspace_ultimo_atendimento_geral END ASC NULLS FIRST,
+                         bucket_selecao_pre_importer ASC,
                          workspace_rank_pre_importer ASC,
+                         CASE WHEN $${paramLimite}::int <= 4 THEN origem_comercial_pre_importer END ASC NULLS LAST,
                          COALESCE(prioridade, 0) DESC,
                          CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
                          CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
@@ -749,8 +820,11 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
                          id ASC
               ) AS baseline_ordem_pre_importer
          FROM baseline_bruto
-        ORDER BY bucket_selecao_pre_importer ASC,
+        ORDER BY CASE WHEN $${paramLimite}::int <= 4 THEN workspace_ultimo_atendimento_em END ASC NULLS FIRST,
+                 CASE WHEN $${paramLimite}::int <= 4 THEN workspace_ultimo_atendimento_geral END ASC NULLS FIRST,
+                 bucket_selecao_pre_importer ASC,
                  workspace_rank_pre_importer ASC,
+                 CASE WHEN $${paramLimite}::int <= 4 THEN origem_comercial_pre_importer END ASC NULLS LAST,
                  COALESCE(prioridade, 0) DESC,
                  CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
                  CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
@@ -759,9 +833,11 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
         LIMIT $${paramLimite}
      ),
      grupos_representados_baseline AS (
-       SELECT DISTINCT workspace_chave_pre_importer, marketplace_chave_pre_importer, lane_vazao_pre_importer
+       SELECT workspace_chave_pre_importer, marketplace_chave_pre_importer, lane_vazao_pre_importer,
+              COUNT(*)::int AS baseline_slots
          FROM baseline
         WHERE lane_vazao_pre_importer <> 'expirada'
+        GROUP BY workspace_chave_pre_importer, marketplace_chave_pre_importer, lane_vazao_pre_importer
      ),
      heads_protegidas_brutas AS (
        SELECT ranked.*, 0 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
@@ -797,6 +873,19 @@ async function buscarJobsProntos({ limite = 10, marketplace = "" } = {}) {
        UNION ALL
        SELECT *, 'head_protegida'::text AS candidate_pool_origem_pre_importer
          FROM heads_protegidas_brutas
+       UNION ALL
+       SELECT ranked.*, 4 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer,
+              'reposicao'::text AS candidate_pool_origem_pre_importer
+         FROM (
+           SELECT * FROM agua_nova_ranked
+           UNION ALL SELECT * FROM fresca_em_risco_ranked
+           UNION ALL SELECT * FROM fresca_circulavel_ranked
+         ) ranked
+         JOIN grupos_representados_baseline grupos
+           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
+          AND grupos.marketplace_chave_pre_importer = ranked.marketplace_chave_pre_importer
+          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
+        WHERE ranked.workspace_marketplace_rank_pre_importer <= GREATEST(2, grupos.baseline_slots * 2)
      ),
      candidate_pool_ranqueado AS (
        SELECT *,
@@ -873,6 +962,7 @@ function removerCamposInternosCandidatePoolImporter(linha = {}) {
     tipo_saida_pre_importer,
     workspace_chave_pre_importer,
     marketplace_chave_pre_importer,
+    workspace_marketplace_rank_pre_importer,
     origem_fluxo_explicita_pre_importer,
     origem_head_rank_pre_importer,
     baseline_ordem_pre_importer,
@@ -4888,6 +4978,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
     ofertaUniversalSchemaVersion: ofertaUniversalInicial.schemaVersion,
     ofertaUniversal: congelarOfertaUniversal(ofertaUniversalInicial),
     ofertaUniversalValidacao: validacaoOfertaUniversal
+  };
+  metadataFinal = {
+    ...metadataFinal,
+    classificacaoTurboCandidata: classificarTurboComercialCandidato({
+      ...oferta,
+      metadata: metadataFinal
+    })
   };
 
   console.log("[OFERTA-UNIVERSAL-CRIADA]", JSON.stringify(resumoOfertaUniversalLog(ofertaUniversalInicial, validacaoOfertaUniversal)));

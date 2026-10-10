@@ -6,6 +6,7 @@ const {
   listClientes
 } = require("../../utils/storage");
 const { logSocial, logErroSocial } = require("./logs");
+const fonteUniversal = require("./universal-opportunities.source");
 
 const ARQUIVOS = {
   config: "social-config.json",
@@ -1174,6 +1175,10 @@ function encontrarItemFilaSocial(clienteId = "admin", ofertaId = "") {
 function validarOportunidadeSocialManual(clienteId = "admin", ofertaId = "", opcoes = {}) {
   const clienteSeguro = texto(clienteId || "admin");
   const item = encontrarItemFilaSocial(clienteSeguro, ofertaId);
+  return validarOportunidadeSocialManualDeItem(clienteSeguro, ofertaId, item, opcoes);
+}
+
+function validarOportunidadeSocialManualDeItem(clienteSeguro, ofertaId, item, opcoes = {}) {
   const id = texto(ofertaId);
   if (!item) return { ok: false, motivo: "oferta_nao_encontrada" };
 
@@ -1194,15 +1199,26 @@ function validarOportunidadeSocialManual(clienteId = "admin", ofertaId = "", opc
   return { ok: true, motivo: "", ofertaId: id };
 }
 
-function limparOportunidadesSocial(clienteId = "admin", { modo = "galeria", idadeMaximaHoras = 6, agora = new Date() } = {}) {
+async function validarOportunidadeSocialManualOperacional(clienteId = "admin", ofertaId = "", opcoes = {}) {
+  const clienteSeguro = texto(clienteId || "admin");
+  if (fonteUniversal.modoFonteSocial() === "LEGACY") {
+    return module.exports.validarOportunidadeSocialManual(clienteSeguro, ofertaId, opcoes);
+  }
+  const item = await fonteUniversal.encontrarItemUniversalSocial(clienteSeguro, ofertaId);
+  return validarOportunidadeSocialManualDeItem(clienteSeguro, ofertaId, item, opcoes);
+}
+
+function limparOportunidadesSocialDeItens(clienteId, itens, { modo = "galeria", idadeMaximaHoras = 6, agora = new Date() } = {}) {
   const clienteSeguro = texto(clienteId || "admin");
   const controle = getControleOportunidadesSocial(clienteSeguro);
-  const fila = lista(readClienteJson(clienteSeguro, "fila.json", []))
+  const fila = lista(itens)
     .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
   const agoraMs = agora instanceof Date ? agora.getTime() : Number(agora || Date.now());
   const limiteMinutos = Math.max(1, Number(idadeMaximaHoras || 6) || 6) * 60;
   const ofertasVisiveis = modo === "galeria"
-    ? new Set(listarOportunidadesSocial(clienteSeguro, 50).map(item => texto(item.ofertaId)).filter(Boolean))
+    ? new Set(listarOportunidadesSocialDeItens(clienteSeguro, 50, fila,
+      fonteUniversal.modoFonteSocial() === "UNIVERSAL" ? "postgres_universal" : "fila_cliente")
+      .map(item => texto(item.ofertaId)).filter(Boolean))
     : null;
   let ocultadas = 0;
 
@@ -1231,13 +1247,27 @@ function limparOportunidadesSocial(clienteId = "admin", { modo = "galeria", idad
   return { ok: true, clienteId: clienteSeguro, modo, ocultadas };
 }
 
-function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
+function limparOportunidadesSocial(clienteId = "admin", opcoes = {}) {
+  const clienteSeguro = texto(clienteId || "admin");
+  return limparOportunidadesSocialDeItens(clienteSeguro,
+    readClienteJson(clienteSeguro, "fila.json", []), opcoes);
+}
+
+async function limparOportunidadesSocialOperacional(clienteId = "admin", opcoes = {}) {
+  if (fonteUniversal.modoFonteSocial() === "LEGACY") {
+    return module.exports.limparOportunidadesSocial(clienteId, opcoes);
+  }
+  const itens = await fonteUniversal.listarItensUniversaisSocial(clienteId);
+  return limparOportunidadesSocialDeItens(clienteId, itens, opcoes);
+}
+
+function listarOportunidadesSocialDeItens(clienteId, limite, itensFonte, fonte = "fila_cliente") {
   const limiteSeguro = Math.max(1, Math.min(50, Number(limite || 50) || 50));
   const clienteSeguro = texto(clienteId || "admin");
   const configAutomatico = getConfigAutomaticoSocial(clienteSeguro);
   const controle = getControleOportunidadesSocial(clienteSeguro);
   const agora = Date.now();
-  const itens = lista(readClienteJson(clienteSeguro, "fila.json", []))
+  const itens = lista(itensFonte)
     .filter(item => !texto(item?.clienteId) || texto(item?.clienteId) === clienteSeguro);
   const vistas = new Set();
   const oportunidades = [];
@@ -1343,13 +1373,27 @@ function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
 
   logSocial("[SOCIAL-OPORTUNIDADES-FONTE]", {
     clienteId,
-    fonte: "fila_cliente",
+    fonte,
     totalFonte: itens.length,
     elegiveis: oportunidades.length,
     retornadas: resultado.length
   });
 
   return resultado;
+}
+
+function listarOportunidadesSocial(clienteId = "admin", limite = 100) {
+  const clienteSeguro = texto(clienteId || "admin");
+  return listarOportunidadesSocialDeItens(clienteSeguro, limite,
+    readClienteJson(clienteSeguro, "fila.json", []));
+}
+
+async function listarOportunidadesSocialOperacional(clienteId = "admin", limite = 100) {
+  if (fonteUniversal.modoFonteSocial() === "LEGACY") {
+    return module.exports.listarOportunidadesSocial(clienteId, limite);
+  }
+  const itens = await fonteUniversal.listarItensUniversaisSocial(clienteId);
+  return listarOportunidadesSocialDeItens(clienteId, limite, itens, "postgres_universal");
 }
 
 function getConfigAutomaticoSocial(clienteId = "admin") {
@@ -1750,8 +1794,11 @@ module.exports = {
   listarPublicacoesSocial,
   registrarPublicacaoSocial,
   listarOportunidadesSocial,
+  listarOportunidadesSocialOperacional,
   validarOportunidadeSocialManual,
+  validarOportunidadeSocialManualOperacional,
   limparOportunidadesSocial,
+  limparOportunidadesSocialOperacional,
   criarMetaPadrao,
   getConexaoMetaSocial,
   setConexaoMetaSocial,

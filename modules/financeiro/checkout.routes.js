@@ -174,6 +174,7 @@ function criarRotasCheckoutFinanceiro({
   getPlatformVariableImpl,
   agora = () => new Date(),
   renovarFinanceiroUsuario = null,
+  lerSaldoCreditos = null,
   resolverFinanceiroUsuario = null
 } = {}) {
   const router = express.Router();
@@ -270,7 +271,7 @@ function criarRotasCheckoutFinanceiro({
     }
   });
 
-  router.get("/assinatura", (req, res) => {
+  router.get("/assinatura", async (req, res) => {
     const usuario = req.usuario;
     if (!req.clienteId || !usuario || usuario.ativo === false) {
       return erroHttp(res, "usuario_nao_autenticado", 401);
@@ -280,13 +281,16 @@ function criarRotasCheckoutFinanceiro({
       renovarFinanceiroUsuario(usuario);
     }
 
+    const creditos = typeof lerSaldoCreditos === "function"
+      ? await lerSaldoCreditos(req.clienteId, usuario)
+      : numeroInteiro(usuario.creditos, 0);
     return res.json({
       ok: true,
       clienteId: "self",
       plano: texto(usuario.plano),
       planoAssinatura: texto(usuario.planoAssinatura || usuario.plano),
       assinaturaStatus: texto(usuario.assinaturaStatus),
-      creditos: numeroInteiro(usuario.creditos, 0),
+      creditos,
       cicloAtualInicio: texto(usuario.cicloAtualInicio),
       cicloAtualFim: texto(usuario.cicloAtualFim),
       proximaRenovacao: texto(usuario.proximaRenovacao),
