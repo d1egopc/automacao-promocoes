@@ -115,6 +115,19 @@ async function main() {
     assert.deepStrictEqual(metadataSanitizada.lista, ["normal", "a�b", emojiValido]);
     assert.strictEqual(JSON.parse(JSON.stringify(metadataSanitizada)).emojiValido, emojiValido, "resultado final deve continuar JSON válido");
 
+    const teleRadar = await inbox.registrarEventoBruto({
+      origem: "radar", fonte: "teleradar", origemTipo: "telegram",
+      hashEvento: "tele_unicode_fixture", capturadoEm: "2026-10-09T12:00:00.000Z",
+      grupoId: "tele-unicode", textoOriginal: "Café 🚀",
+      linksExtraidos: ["https://meli.la/tele"],
+      metadata: { nested: [`válido ${lowIsolado}`, emojiValido] }
+    }, { clientes: ["workspace_teste"] });
+    assert.strictEqual(teleRadar.ok, true);
+    const insertTele = chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql))[2];
+    assert.deepStrictEqual(JSON.parse(insertTele.params[10]).nested,
+      ["válido �", emojiValido]);
+    assert.strictEqual(insertTele.params[9], "tele_unicode_fixture");
+
     falharInsert = true;
     const retorno = await inbox.registrarEventoBruto({
       origem: "clonador_grupos",
@@ -129,7 +142,7 @@ async function main() {
     assert.strictEqual(retorno.ok, false);
     assert.strictEqual(retorno.motivo, "query_falhou");
     assert.strictEqual(retorno.erro, "invalid input syntax for type json");
-    assert.strictEqual(chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql)).length, 3);
+    assert.strictEqual(chamadas.filter(item => /INSERT INTO engine_eventos_brutos/i.test(item.sql)).length, 4);
 
     const diagnostico = retorno.diagnostico;
     assert.deepStrictEqual(diagnostico.postgres, {

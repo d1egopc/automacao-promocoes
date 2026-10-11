@@ -7,6 +7,7 @@ const { validarEstadoOperacional, exigirCapturaUniversal } =
 const { classificarFilaUniversal } = require("./universal-queue-status");
 const { holdForTargetTx, settleConfirmedTx, releaseForTargetTx } =
   require("./universal-credits.repository");
+const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 
 const RECOVERY_BATCH = 20;
 const CHANNELS = new Set(["whatsapp", "telegram", "discord"]);
@@ -171,7 +172,7 @@ async function enqueue({ pool, workspaceId, jobId, ofertaId, itemPayload,
         CASE WHEN $9='no_opportunity' THEN clock_timestamp() ELSE NULL END)
       ON CONFLICT (operation_epoch_started_at,workspace_id,oferta_id) DO NOTHING
       RETURNING id`, [epoch, workspace, source.evento_id, jobId, ofertaId,
-      source.origem_fluxo, capturedAt, JSON.stringify(itemPayload),
+      source.origem_fluxo, capturedAt, serializarJsonbSeguro(itemPayload, {}),
       targets.length ? "pending" : "no_opportunity"])).rows[0];
     const item = inserted || (await client.query(`SELECT id,job_id,evento_id,
         capturado_em,origem_fluxo FROM engine_universal_queue_items
@@ -388,9 +389,10 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
 
 async function markSendStarted({ pool, destinationId, leaseToken,
   commercialCta = {} }) {
+  const commercialCtaJson = serializarJsonbSeguro(commercialCta, {});
   if (!commercialCta || typeof commercialCta !== "object" ||
       Array.isArray(commercialCta) ||
-      Buffer.byteLength(JSON.stringify(commercialCta), "utf8") > 16384) {
+      Buffer.byteLength(commercialCtaJson, "utf8") > 16384) {
     throw new Error("universal_commercial_cta_invalid");
   }
   return transaction(pool, async client => {
@@ -421,7 +423,7 @@ async function markSendStarted({ pool, destinationId, leaseToken,
       WHERE id=$1 AND operation_epoch_started_at=$3 AND lease_token=$2
         AND status='claimed' AND lease_until>clock_timestamp()
       RETURNING workspace_id`, [destinationId, leaseToken,
-      state.operationEpochStartedAt, JSON.stringify(commercialCta)])).rows[0];
+      state.operationEpochStartedAt, commercialCtaJson])).rows[0];
     if (!row) throw new Error("claim_lost_after_credit_hold");
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET revision=revision+1,checkpoint_revision=revision+1,

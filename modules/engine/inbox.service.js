@@ -21,6 +21,7 @@ const coberturaRadar = require("../radar/cobertura-v1");
 const { classificarLinkEngine } = require("./link-role.service");
 const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 const { verificarCapturaIngressReal } = require("./universal-ingress-fence");
+const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -85,11 +86,7 @@ function marketplacePrincipal(links = []) {
   return (links || []).map(detectarMarketplaceLink).find(Boolean) || "";
 }
 
-function jsonbParam(valor, fallback) {
-  const base = sanitizarJsonbValor(valor === undefined ? fallback : valor);
-  const serializado = JSON.stringify(base);
-  return serializado === undefined ? JSON.stringify(fallback) : serializado;
-}
+const jsonbParam = serializarJsonbSeguro;
 
 function diagnosticoJsonbSeguro(valor, serializado = "") {
   let stringifyOk = true;
@@ -130,43 +127,6 @@ function diagnosticoErroInsertEvento({ insert = {}, linksExtraidos, linksSeriali
       metadata: diagnosticoJsonbSeguro(metadata, metadataSerializada)
     }
   };
-}
-
-function sanitizarJsonbValor(valor) {
-  if (typeof valor === "string") {
-    let textoSanitizado = "";
-    for (let indice = 0; indice < valor.length; indice += 1) {
-      const codigo = valor.charCodeAt(indice);
-      const highSurrogate = codigo >= 0xD800 && codigo <= 0xDBFF;
-      const lowSurrogate = codigo >= 0xDC00 && codigo <= 0xDFFF;
-
-      if (highSurrogate) {
-        const proximo = valor.charCodeAt(indice + 1);
-        if (proximo >= 0xDC00 && proximo <= 0xDFFF) {
-          textoSanitizado += valor[indice] + valor[indice + 1];
-          indice += 1;
-        } else {
-          textoSanitizado += "\uFFFD";
-        }
-      } else if (lowSurrogate) {
-        textoSanitizado += "\uFFFD";
-      } else {
-        textoSanitizado += valor[indice];
-      }
-    }
-    return textoSanitizado.replace(/\u0000/g, "");
-  }
-  if (Array.isArray(valor)) {
-    return valor.map(sanitizarJsonbValor);
-  }
-  if (valor && typeof valor === "object") {
-    const saida = {};
-    for (const [chave, item] of Object.entries(valor)) {
-      saida[sanitizarJsonbValor(chave)] = sanitizarJsonbValor(item);
-    }
-    return saida;
-  }
-  return valor;
 }
 
 async function existeEventoDuplicado(evento = {}, contextoPerf = {}) {

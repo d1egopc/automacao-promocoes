@@ -32,7 +32,7 @@ const input = (hash, ageMinutes) => ({ origem: "radar", fonte: "radar",
   textoOriginal: `fixture ${hash}`,
   linksExtraidos: ["https://example.invalid/item"], hashEvento: hash,
   capturadoEm: new Date(Date.now() - ageMinutes * 60000).toISOString(),
-  metadata: { fixture: true } });
+  metadata: { fixture: true, unicode: `Caf\u00e9 \ud83d\ude80 ${String.fromCharCode(0xDC00)}` } });
 
 async function crashChild() {
   configureFixtureRuntime();
@@ -83,7 +83,7 @@ async function run() {
     const child = spawnSync(process.execPath, [__filename, "--crash", schema], {
       env: { ...process.env }, encoding: "utf8", timeout: 10000 });
     assert.equal(child.status, 77, `child=${child.status} ${child.stderr}`);
-    const durable = (await admin.query(`SELECT e.id,e.capturado_em,
+    const durable = (await admin.query(`SELECT e.id,e.capturado_em,e.metadata,
       (SELECT count(*)::int FROM engine_links l WHERE l.evento_id=e.id) AS links,
       (SELECT count(*)::int FROM engine_radar_replay_intents_candidate i
         WHERE i.evento_id=e.id AND i.status='pendente') AS intents,
@@ -92,6 +92,7 @@ async function run() {
       FROM engine_eventos_brutos e WHERE e.hash_evento='active_crash'`)).rows[0];
     assert(durable);
     assert.deepEqual([durable.links,durable.intents,durable.jobs], [1,1,0]);
+    assert.equal(durable.metadata.unicode, "Caf\u00e9 \ud83d\ude80 \uFFFD");
 
     configureFixtureRuntime();
     const { getEnginePool } = require("../modules/engine/database");

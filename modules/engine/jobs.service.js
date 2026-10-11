@@ -19,6 +19,8 @@ const {
 const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 const { modoIngressReal, verificarCapturaIngressReal } =
   require("./universal-ingress-fence");
+const { sanitizarValorJsonb: sanitizarJsonbValor,
+  serializarJsonbSeguro: jsonbParam } = require("../../utils/jsonb-safe");
 
 const CONFIRMACAO_RETENCAO_JOBS_POSTGRES = "LIMPAR_JOBS_POSTGRES_FINALIZADOS_12H";
 const RETENCAO_JOBS_LOCK_ID = 902260733;
@@ -121,47 +123,6 @@ function avaliarClientesParaJobs(clientes = [], opcoes = {}) {
 function marketplacePrincipal(links = []) {
   const normalizados = normalizarLinksExtraidos(links);
   return normalizados.map(detectarMarketplaceLink).find(Boolean) || "";
-}
-
-function sanitizarJsonbValor(valor) {
-  if (typeof valor === "string") {
-    let textoSanitizado = "";
-    for (let indice = 0; indice < valor.length; indice += 1) {
-      const codigo = valor.charCodeAt(indice);
-      const highSurrogate = codigo >= 0xD800 && codigo <= 0xDBFF;
-      const lowSurrogate = codigo >= 0xDC00 && codigo <= 0xDFFF;
-
-      if (highSurrogate) {
-        const proximo = valor.charCodeAt(indice + 1);
-        if (proximo >= 0xDC00 && proximo <= 0xDFFF) {
-          textoSanitizado += valor[indice] + valor[indice + 1];
-          indice += 1;
-        } else {
-          textoSanitizado += "\uFFFD";
-        }
-      } else if (lowSurrogate) {
-        textoSanitizado += "\uFFFD";
-      } else {
-        textoSanitizado += valor[indice];
-      }
-    }
-    return textoSanitizado.replace(/\u0000/g, "");
-  }
-  if (Array.isArray(valor)) return valor.map(sanitizarJsonbValor);
-  if (valor && typeof valor === "object") {
-    const saida = {};
-    for (const [chave, item] of Object.entries(valor)) {
-      saida[sanitizarJsonbValor(chave)] = sanitizarJsonbValor(item);
-    }
-    return saida;
-  }
-  return valor;
-}
-
-function jsonbParam(valor, fallback) {
-  const base = sanitizarJsonbValor(valor === undefined ? fallback : valor);
-  const serializado = JSON.stringify(base);
-  return serializado === undefined ? JSON.stringify(fallback) : serializado;
 }
 
 async function ignorarJobsAdminNaoOperacional() {

@@ -102,8 +102,9 @@ async function main() {
       capturedAt: "2026-10-09T12:10:00.000Z" });
     const deferred = await createOffer(admin, { workspace: "ws_NEW",
       capturedAt: "2026-10-09T12:11:00.000Z" });
-    const payload = { title: "fixture", image: "https://example.test/i",
-      linkAfiliado: "https://example.test/a" };
+    const payload = { title: `Caf\u00e9 \ud83d\ude80 ${String.fromCharCode(0xDC00)} R$ 99`,
+      image: "https://example.test/i", linkAfiliado: "https://example.test/a",
+      nested: [{ [String.fromCharCode(0xD800)]: "v\u00e1lido" }] };
     const aResult = await queue.enqueue({ pool, workspaceId: "ws_A",
       jobId: a.jobId, ofertaId: a.offerId, itemPayload: payload,
       destinations: [
@@ -116,6 +117,11 @@ async function main() {
       FROM engine_universal_queue_items WHERE id=$1`, [aResult.itemId])).rows[0].item_payload;
     assert.equal(durablePayload.id, `universal_${aResult.itemId}`);
     assert.equal(durablePayload.operationEpochStartedAt, epoch);
+    assert.equal(durablePayload.title, "Caf\u00e9 \ud83d\ude80 \uFFFD R$ 99");
+    assert.equal(durablePayload.nested[0]["\uFFFD"], "v\u00e1lido");
+    assert.equal((await admin.query(`SELECT count(*)::int AS n FROM
+      engine_universal_queue_destinations WHERE queue_item_id=$1`,
+    [aResult.itemId])).rows[0].n, 3);
     assert.equal((await queue.enqueue({ pool, workspaceId: "ws_A",
       jobId: a.jobId, ofertaId: a.offerId, itemPayload: payload,
       destinations: [
@@ -280,7 +286,8 @@ async function main() {
     assert.notEqual(retriedNew.leaseToken, crashedNew.leaseToken);
     assert.equal(retriedNew.destination_id, "new_wa");
     const historyA = await consultarHistoricoUniversal({ pool,
-      workspaceId: "ws_A", from: epoch, to: "2026-10-11T00:00:00.000Z" });
+      workspaceId: "ws_A", from: epoch,
+      to: new Date(Date.now() + 86400000).toISOString() });
     assert.equal(historyA.metrics.enviadas, 1);
     assert.equal(historyA.metrics.sem_oportunidade, 1);
     assert.equal(historyA.metrics.erros, 1);

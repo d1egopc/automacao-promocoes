@@ -4,6 +4,7 @@
 // never chooses a tenant from message text or an arbitrary payload.
 const { avaliarFrescorPreImporter } = require("./frescor-pre-importer.service");
 const { verificarCapturaIngressReal } = require("./universal-ingress-fence");
+const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 
 function validarCaptura(entrada = {}) {
   const hash = String(entrada.hashEvento || "").trim();
@@ -37,7 +38,7 @@ async function persistirCapturaComIntencoes(client, entrada = {}, hooks = {}) {
         AND criado_em>=NOW()-interval '5 minutes'
       ORDER BY id DESC LIMIT 1`, [String(entrada.grupoId || ""),
       String(entrada.textoOriginal || ""),
-      JSON.stringify(entrada.linksExtraidos || [])]);
+      serializarJsonbSeguro(entrada.linksExtraidos || [], [])]);
     const inserido = byContent.rowCount ? { rowCount: 0, rows: [] }
       : await client.query(`INSERT INTO engine_eventos_brutos
       (origem,fonte,origem_tipo,sessao_id,grupo_id,grupo_nome,
@@ -48,9 +49,9 @@ async function persistirCapturaComIntencoes(client, entrada = {}, hooks = {}) {
       RETURNING id`, [String(entrada.origemTipo || "whatsapp"),
       String(entrada.sessaoId || ""), String(entrada.grupoId || ""),
       String(entrada.grupoNome || ""), hash, String(entrada.textoOriginal || ""),
-      JSON.stringify(entrada.linksExtraidos || []),
+      serializarJsonbSeguro(entrada.linksExtraidos || [], []),
       String(entrada.marketplaceDetectado || ""),
-      JSON.stringify(entrada.metadata || {}), capturadoEm]);
+      serializarJsonbSeguro(entrada.metadata || {}, {}), capturadoEm]);
     const evento = byContent.rows[0] || inserido.rows[0] || (await client.query(`SELECT id,capturado_em
       FROM engine_eventos_brutos WHERE hash_evento=$1`, [hash])).rows[0];
     if (!evento) throw new Error("radar_intent_event_missing");
@@ -149,7 +150,7 @@ async function promoverProximaIntencao(client, {
         VALUES ($1,$2,$3,$3,'pendente',$4::jsonb)
         ON CONFLICT (evento_id,cliente_id) DO NOTHING RETURNING id`,
       [intent.evento_id,intent.cliente_id,intent.marketplace_detectado || "",
-        JSON.stringify({ metadataEvento: intent.metadata || {} })]);
+        serializarJsonbSeguro({ metadataEvento: intent.metadata || {} }, {})]);
       criado = inserted.rowCount === 1;
     }
     const jobId = (await client.query(`SELECT id
