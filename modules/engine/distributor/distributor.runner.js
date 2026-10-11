@@ -1060,6 +1060,15 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
     marketplace: oferta.marketplace || ""
   });
   const fila = await adicionarOfertaNaFilaCliente(oferta, contextoFila);
+  if (fila.oneShotBound === true) {
+    medidorFila.fim({ ok: true, filaOk: false,
+      motivo: "cutover_validation_bound", ofertaId: oferta.id || null });
+    await registrarEtapaDistribuicao(oferta.job_id,"one_shot_binding","ok",
+      "cutover_validation_bound",{ oneShotId: fila.smokeBinding.id,
+        eventoId: fila.smokeBinding.eventId });
+    return { ok: true, oneShotBound: true,
+      oneShotId: fila.smokeBinding.id };
+  }
   medidorFila.fim({
     ok: fila.ok === true,
     filaOk: fila.ok === true,

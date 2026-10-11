@@ -6,6 +6,12 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { Client, Pool } = require("pg");
+const localDataRoot=fs.mkdtempSync(path.join(__dirname,"..",
+  ".local-test-tmp","one-shot-data-"));
+process.env.DATA_DIR=localDataRoot;
+const { writeGlobalJson } = require("../utils/storage");
+writeGlobalJson("usuarios.json",[{id:"user_pss60lus",ativo:true,
+  plano:"pro"}]);
 const { SQL_SCHEMA_FINANCEIRO_V1 } =
   require("../modules/financeiro/financeiro.schema");
 const { prepararModoOperacionalReal } =
@@ -18,8 +24,12 @@ const { consultarHistoricoValidacaoCutover } =
   require("../modules/engine/universal-history.read-model");
 const { reservaPostgres } =
   require("../modules/manual-v2/ofertas-v2-envio-claim");
+const distributor = require("../modules/engine/distributor/distributor.service");
+const { criarHandlerRadarServidor } =
+  require("./helpers/universal-flow-radar-server-handler");
 const normalQueue = require("../modules/engine/universal-queue.repository");
-const { armOneShot, readOneShot, oneShotRepository, activeOneShot,
+const { armOneShot, bindRadarOfferOneShot, readOneShot,
+  oneShotRepository, activeOneShot,
   smokeCreditAvailable } =
   require("../modules/engine/universal-one-shot-smoke");
 
@@ -27,6 +37,61 @@ const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1", port: 55433, user: "postgres",
   database: "optimus_universal_fixture", connectionTimeoutMillis: 5000 };
 const workspace = "user_pss60lus";
+const sourceSessionId = "controlled_session";
+const sourceGroupJid = "controlled_source@g.us";
+
+function armArgs(destinationId, targetKey) {
+  return { workspaceId:workspace,destinationId,targetKey,
+    channel:"whatsapp",sourceSessionId,sourceGroupJid };
+}
+
+function destinationFor(gate) {
+  return {id:gate.destinationId,tipo:"whatsapp",
+    grupo:gate.targetKey};
+}
+
+function bindFor(pool,gate,real,itemPayload=real.payload) {
+  return bindRadarOfferOneShot({pool,offer:real.offer,itemPayload,
+    compatibleDestinations:[destinationFor(gate)]});
+}
+
+async function realRadarOffer(admin,{source="radar",session=sourceSessionId,
+  group=sourceGroupJid,capturedAt=null,title="Oferta real"}={}) {
+  const event=(await admin.query(`INSERT INTO engine_eventos_brutos
+    (origem,fonte,origem_tipo,sessao_id,grupo_id,texto_original,
+     links_extraidos,metadata,capturado_em)
+    VALUES ('radar',$1,'whatsapp',$2,$3,$4,
+      '["https://example.test/real"]'::jsonb,
+      jsonb_build_object('fonteCaptura',$1::text),
+      COALESCE($5::timestamptz,clock_timestamp()))
+    RETURNING id,capturado_em`,[source,session,group,title,capturedAt])).rows[0];
+  const offer=(await admin.query(`INSERT INTO engine_ofertas
+    (evento_id,origem,status,titulo,imagem,link_afiliado,capturada_em)
+    VALUES ($1,'radar','distribuindo',$2,
+      'https://example.test/real.jpg','https://example.test/real',$3)
+    RETURNING id`,[event.id,title,event.capturado_em])).rows[0];
+  const job=(await admin.query(`INSERT INTO engine_jobs_cliente
+    (evento_id,oferta_id,cliente_id,status)
+    VALUES ($1,$2,$3,'importado') RETURNING id`,
+  [event.id,offer.id,workspace])).rows[0];
+  const payload={titulo:title,imagem:"https://example.test/real.jpg",
+    imagemEnviavel:true,
+    linkAfiliado:"https://example.test/real",origem:"radar"};
+  return { eventId:event.id,jobId:job.id,offerId:offer.id,
+    offer:{id:offer.id,job_id:job.id,cliente_id:workspace,
+      evento_id:event.id,marketplace:"shopee",titulo:title,
+      imagem:"https://example.test/real.jpg",categoria:"geral",preco:42,
+      status:"distribuindo",link_original:"https://example.test/real",
+      link_afiliado:"https://example.test/real"},payload };
+}
+
+async function armAndBind(admin,pool,destinationId,targetKey,title="Oferta real") {
+  const armed=await armOneShot({pool,...armArgs(destinationId,targetKey)});
+  const real=await realRadarOffer(admin,{title});
+  const bound=await bindFor(pool,armed,real);
+  assert.equal(bound.bound,true);
+  return {...armed,...bound,destinationId,targetKey};
+}
 
 async function fixture(admin,{ prepared = true } = {}) {
   const schema=`uf_one_shot_${crypto.randomBytes(6).toString("hex")}`;
@@ -81,13 +146,23 @@ async function main() {
     assert.match(spentIndex?.indexdef || "",/provider_call_count = 1/);
     assert.equal((await admin.query(`SELECT count(*)::int AS n
       FROM engine_universal_one_shot_smoke`)).rows[0].n,0);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_one_shot_trigger`)).rows[0].n,0);
+    const triggerFk=(await admin.query(`SELECT count(*)::int AS n
+      FROM pg_constraint WHERE conrelid=
+        'engine_universal_one_shot_trigger'::regclass
+        AND confrelid='engine_universal_one_shot_smoke'::regclass
+        AND contype='f'`)).rows[0].n;
+    assert.equal(triggerFk,1);
+    assert.equal(await admin.query(`INSERT INTO engine_universal_one_shot_trigger
+      (id,source_type,source_session_id,source_group_jid)
+      VALUES ($1,'radar',$2,$3)`,[crypto.randomUUID(),sourceSessionId,
+      sourceGroupJid]).then(()=>"allowed",error=>error.code),"23503");
     assert.equal((await admin.query(`SELECT column_default FROM information_schema.columns
       WHERE table_schema=current_schema()
         AND table_name='engine_universal_one_shot_smoke'
         AND column_name='state'`)).rows[0].column_default,null);
-    assert.equal(await armOneShot({pool,workspaceId:workspace,
-      destinationId:"pre_mode_dest",targetKey:"pre_mode_target",
-      channel:"whatsapp",itemPayload:{titulo:"Antes PREPARED"}})
+    assert.equal(await armOneShot({pool,...armArgs("pre_mode_dest","pre_mode_target")})
       .then(()=>"allowed",error=>error.message),
     "smoke_requires_prepared_without_epoch");
     await admin.query(`UPDATE engine_operation_state
@@ -97,21 +172,162 @@ async function main() {
     "universal_mode_not_active");
     assert.equal((await armOneShot({pool,workspaceId:"ws_other",
       destinationId:"d",targetKey:"t",channel:"whatsapp",
-      itemPayload:{titulo:"x"}}).catch(error=>error.message)),
+      sourceSessionId,sourceGroupJid}).catch(error=>error.message)),
     "smoke_arm_identity_invalid");
-    const gate = await armOneShot({pool,workspaceId:workspace,
-      destinationId:"controlled_destination",targetKey:"controlled_target",
-      channel:"whatsapp",itemPayload:{titulo:"Oferta controlada",
-        linkAfiliado:"https://example.test/controlled"}});
+    const armed=await armOneShot({pool,...armArgs(
+      "controlled_destination","controlled_target")});
+    assert.equal(armed.state,"armed_waiting_trigger");
+    assert.equal(armed.eventId,null);
+    const waitingGate=(await admin.query(`SELECT state,binding_state,
+      queue_item_id,queue_destination_id,provider_call_count
+      FROM engine_universal_one_shot_smoke WHERE id=$1`,[armed.id])).rows[0];
+    assert.equal(waitingGate.state,"armed");
+    assert.equal(waitingGate.binding_state,"waiting");
+    assert.equal(waitingGate.queue_item_id,null);
+    assert.equal(waitingGate.queue_destination_id,null);
+    assert.equal(Number(waitingGate.provider_call_count),0);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_one_shot_trigger WHERE id=$1`,
+    [armed.id])).rows[0].n,1);
+    assert.equal(await admin.query(`UPDATE engine_universal_one_shot_smoke
+      SET binding_state='bound' WHERE id=$1`,[armed.id])
+      .then(()=>"allowed",error=>error.code),"23514");
+    assert.equal(await admin.query(`UPDATE engine_universal_one_shot_smoke
+      SET state='claimed' WHERE id=$1`,[armed.id])
+      .then(()=>"allowed",error=>error.code),"23514");
+    assert.equal((await readOneShot({pool,id:armed.id})).state,
+      "armed_waiting_trigger");
+    assert.equal((await activeOneShot({pool})),null);
+    assert.equal(await oneShotRepository(armed.id).claimDestination({pool,
+      workspaceId:workspace}).then(()=>"allowed",error=>error.message),
+    "smoke_gate_not_armed");
+    assert.equal(await smokeCreditAvailable({pool,id:armed.id,
+      workspaceId:workspace,destinationId:armed.destinationId,
+      targetKey:armed.targetKey,queueItemId:null}),false);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_items`)).rows[0].n,0);
+    for (const table of ["engine_eventos_brutos","engine_ofertas",
+      "engine_jobs_cliente"]) {
+      assert.equal((await admin.query(`SELECT count(*)::int AS n FROM ${table}`))
+        .rows[0].n,0);
+    }
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_destinations`)).rows[0].n,0);
+    await new Promise(resolve=>setTimeout(resolve,30100));
+    assert.equal((await activeOneShot({pool})),null);
+    const restartedPool=new Pool({...config,max:2,
+      options:`-c search_path=${first.schema},public`});
+    assert.equal((await readOneShot({pool:restartedPool,id:armed.id})).state,
+      "armed_waiting_trigger");
+    await restartedPool.end();
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_destinations`)).rows[0].n,0);
+    const wrong=await realRadarOffer(admin,{group:"wrong_source@g.us"});
+    assert.equal((await bindFor(pool,armed,wrong)).bound,false);
+    const otherSession=await realRadarOffer(admin,{session:"other_session"});
+    assert.equal((await bindFor(pool,armed,otherSession)).bound,false);
+    const tele=await realRadarOffer(admin,{source:"teleradar"});
+    assert.equal((await bindFor(pool,armed,tele)).bound,false);
+    const old=await realRadarOffer(admin,{capturedAt:new Date(
+      new Date(armed.armedAt).getTime()-1000).toISOString()});
+    assert.equal((await bindFor(pool,armed,old)).bound,false);
+    const invalid=await realRadarOffer(admin,{});
+    assert.equal((await bindFor(pool,armed,invalid,
+      {...invalid.payload,imagem:""})).bound,false);
+    assert.equal((await bindFor(pool,armed,invalid,
+      {...invalid.payload,imagemEnviavel:false})).bound,false);
+    assert.equal((await bindRadarOfferOneShot({pool,
+      offer:{...invalid.offer,link_afiliado:""},
+      itemPayload:invalid.payload,
+      compatibleDestinations:[destinationFor(armed)]})).bound,false);
+    assert.equal((await bindRadarOfferOneShot({pool,offer:invalid.offer,
+      itemPayload:invalid.payload,
+      compatibleDestinations:[{...destinationFor(armed),
+        grupo:"another_target"}]})).bound,false);
+    let real=null;
+    const radarHandler=criarHandlerRadarServidor(async input=>{
+      assert.equal(input.origem,"radar");
+      assert.equal(input.metadata?.fonteCaptura,"radar");
+      assert.equal(input.sessaoId,sourceSessionId);
+      assert.equal(input.grupoId,sourceGroupJid);
+      real=await realRadarOffer(admin,{
+        session:input.sessaoId,group:input.grupoId,
+        capturedAt:input.capturadoEm,title:"Oferta Radar do usuário"});
+      return {ok:true,id:real.eventId};
+    });
+    const seconds=Math.floor(Date.now()/1000);
+    const capture=await radarHandler({origemTipo:"whatsapp",
+      sessaoId:sourceSessionId,grupoId:sourceGroupJid,
+      texto:"Oferta Radar do usuário https://www.amazon.com.br/dp/B012345678",
+      linksCapturados:["https://www.amazon.com.br/dp/B012345678"],
+      raw:{messageTimestamp:{toNumber:()=>seconds}},
+      aguardarAckEngine:true,origemAutorizadaInternamente:true});
+    assert.equal(capture.radarAccepted,true);
+    assert.ok(real);
+    let legacyWrites=0;
+    const distributeReal=()=>distributor.adicionarOfertaNaFilaCliente(real.offer,{
+      destinosCompativeisImagem:[destinationFor(armed)],
+      deps:{oneShotPool:pool,adicionarOfertaNaFilaGlobal:async()=>{
+        legacyWrites+=1;return {ok:true};
+      }}
+    });
+    const [distributed,concurrentSame]=await Promise.all([
+      distributeReal(),distributeReal()]);
+    assert.equal(distributed.oneShotBound,true);
+    assert.equal(concurrentSame.oneShotBound,true);
+    assert.equal([distributed,concurrentSame].filter(item=>
+      item.smokeBinding.alreadyBound === true).length,1);
+    assert.equal(legacyWrites,0);
+    const bound=distributed.smokeBinding;
+    const sameOfferAgain=await distributeReal();
+    assert.equal(sameOfferAgain.oneShotBound,true);
+    assert.equal(sameOfferAgain.smokeBinding.alreadyBound,true);
+    assert.equal(legacyWrites,0);
+    const gate={...armed,...bound,
+      destinationId:"controlled_destination",targetKey:"controlled_target"};
     assert.equal((await activeOneShot({pool})).id,gate.id);
+    const boundGate=(await admin.query(`SELECT state,binding_state,
+      queue_item_id,queue_destination_id,provider_call_count
+      FROM engine_universal_one_shot_smoke WHERE id=$1`,[gate.id])).rows[0];
+    assert.equal(boundGate.binding_state,"bound");
+    assert.ok(boundGate.queue_item_id);
+    assert.ok(boundGate.queue_destination_id);
+    assert.equal(Number(boundGate.provider_call_count),0);
+    assert.equal(await admin.query(`UPDATE engine_universal_one_shot_smoke
+      SET queue_destination_id=NULL WHERE id=$1`,[gate.id])
+      .then(()=>"allowed",error=>error.code),"23514");
+    assert.equal(String((await readOneShot({pool,id:gate.id})).boundEventId),
+      String(real.eventId));
+    assert.equal(new Date((await admin.query(`SELECT capture_t0 FROM
+      engine_universal_one_shot_trigger WHERE id=$1`,[gate.id]))
+      .rows[0].capture_t0).toISOString(),
+    new Date((await admin.query(`SELECT capturado_em FROM
+      engine_eventos_brutos WHERE id=$1`,[real.eventId]))
+      .rows[0].capturado_em).toISOString());
+    const reboundPool=new Pool({...config,max:2,
+      options:`-c search_path=${first.schema},public`});
+    assert.equal(String((await readOneShot({pool:reboundPool,
+      id:gate.id})).boundEventId),String(real.eventId));
+    await reboundPool.end();
+    const afterBinding=await realRadarOffer(admin,{title:"Segunda captura"});
+    assert.equal((await bindFor(pool,armed,afterBinding)).bound,false);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_destinations`)).rows[0].n,1);
     const source = (await admin.query(`SELECT j.status AS job_status,
-      o.status AS offer_status,e.capturado_em,i.capturado_em AS queue_t0
+      o.status AS offer_status,e.capturado_em,i.capturado_em AS queue_t0,
+      i.item_payload
       FROM engine_jobs_cliente j JOIN engine_ofertas o ON o.id=j.oferta_id
       JOIN engine_eventos_brutos e ON e.id=j.evento_id
       JOIN engine_universal_queue_items i ON i.job_id=j.id
       WHERE j.id=$1`,[gate.jobId])).rows[0];
     assert.equal(source.job_status,"cutover_validation");
     assert.equal(source.offer_status,"cutover_validation");
+    assert.equal((await admin.query(`UPDATE engine_ofertas
+      SET status='distribuindo' WHERE id=$1
+        AND status IN ('importada','oferta_criada') RETURNING id`,
+    [gate.offerId])).rowCount,0);
+    assert.equal(source.item_payload.titulo,"Oferta Radar do usuário");
+    assert.equal(source.item_payload.linkAfiliado,"https://example.test/real");
     assert.equal(new Date(source.capturado_em).toISOString(),
       new Date(source.queue_t0).toISOString());
     assert.equal((await admin.query(`SELECT 1 FROM engine_jobs_cliente
@@ -129,7 +345,7 @@ async function main() {
     "smoke_workspace_preflight_required");
     assert.equal((await repo.preflightWorkspace({pool,workspaceId:workspace})).ok,true);
     const before = await repo.claimDestination({pool,workspaceId:workspace,
-      leaseMs:1000});
+      leaseMs:30000});
     assert.equal(before.empty,false);
     const ownerIdentity={ownerId:before.fanout_owner_id,
       clienteId:workspace,destinoId:gate.destinationId,
@@ -234,16 +450,14 @@ async function main() {
     assert.equal((await activeOneShot({pool})),null);
     assert.equal(await reservation.carregarOwnerTarget(admin,
       {...ownerIdentity,smokeGateId:gate.id}),null);
-    assert.equal(await armOneShot({pool,workspaceId:workspace,
-      destinationId:"forbidden_after_call",targetKey:"forbidden_target",
-      channel:"whatsapp",itemPayload:{titulo:"Nao rearmar"}})
+    assert.equal(await armOneShot({pool,...armArgs(
+      "forbidden_after_call","forbidden_target")})
       .then(()=>"allowed",error=>error.message),
     "smoke_budget_already_spent");
     const expiringFixture=await fixture(admin);
     fixtures.push(expiringFixture);pool=expiringFixture.pool;
-    const expiring=await armOneShot({pool,workspaceId:workspace,
-      destinationId:"expire_dest",targetKey:"expire_target",channel:"whatsapp",
-      itemPayload:{titulo:"Expirando"}});
+    const expiring=await armAndBind(admin,pool,"expire_dest","expire_target",
+      "Expirando");
     const expiringRepo=oneShotRepository(expiring.id);
     assert.equal((await expiringRepo.preflightWorkspace({pool,
       workspaceId:workspace})).ok,true);
@@ -263,9 +477,8 @@ async function main() {
     assert.equal(providerCalls,1);
     const ackFixture=await fixture(admin);
     fixtures.push(ackFixture);pool=ackFixture.pool;
-    const afterAck=await armOneShot({pool,workspaceId:workspace,
-      destinationId:"ack_dest",targetKey:"ack_target",channel:"whatsapp",
-      itemPayload:{titulo:"Crash apos ACK"}});
+    const afterAck=await armAndBind(admin,pool,"ack_dest","ack_target",
+      "Crash apos ACK");
     const ackRepo=oneShotRepository(afterAck.id);
     assert.equal((await ackRepo.preflightWorkspace({pool,
       workspaceId:workspace})).ok,true);
@@ -295,16 +508,14 @@ async function main() {
     assert.equal((await readOneShot({pool,id:afterAck.id}))
       .historyFact.creditDebits,1);
     assert.equal(providerCalls,1);
-    assert.equal(await armOneShot({pool,workspaceId:workspace,
-      destinationId:"forbidden_after_ack",targetKey:"forbidden_target",
-      channel:"whatsapp",itemPayload:{titulo:"Nao rearmar ACK"}})
+    assert.equal(await armOneShot({pool,...armArgs(
+      "forbidden_after_ack","forbidden_target")})
       .then(()=>"allowed",error=>error.message),
     "smoke_budget_already_spent");
     const ambiguousFixture=await fixture(admin);
     fixtures.push(ambiguousFixture);pool=ambiguousFixture.pool;
-    const ambiguous=await armOneShot({pool,workspaceId:workspace,
-      destinationId:"ambiguous_dest",targetKey:"ambiguous_target",
-      channel:"whatsapp",itemPayload:{titulo:"ACK ausente"}});
+    const ambiguous=await armAndBind(admin,pool,"ambiguous_dest",
+      "ambiguous_target","ACK ausente");
     const ambiguousRepo=oneShotRepository(ambiguous.id);
     assert.equal((await ambiguousRepo.preflightWorkspace({pool,
       workspaceId:workspace})).ok,true);
@@ -325,9 +536,8 @@ async function main() {
     assert.equal(await ambiguousRepo.claimDestination({pool,
       workspaceId:workspace}).then(()=>"allowed",error=>error.message),
     "smoke_gate_not_armed");
-    assert.equal(await armOneShot({pool,workspaceId:workspace,
-      destinationId:"second_dest",targetKey:"second_target",
-      channel:"whatsapp",itemPayload:{titulo:"Segundo smoke"}})
+    assert.equal(await armOneShot({pool,...armArgs(
+      "second_dest","second_target")})
       .then(()=>"allowed",error=>error.message),
     "smoke_budget_already_spent");
     assert.equal(providerCalls,1);
@@ -338,11 +548,57 @@ async function main() {
       "completed");
     assert.equal((await readOneShot({pool,id:ambiguous.id}))
       .historyFact.creditDebits,1);
-    assert.equal(await armOneShot({pool,workspaceId:workspace,
-      destinationId:"forbidden_after_late_ack",targetKey:"forbidden_target",
-      channel:"whatsapp",itemPayload:{titulo:"Nao rearmar tardio"}})
+    assert.equal(await armOneShot({pool,...armArgs(
+      "forbidden_after_late_ack","forbidden_target")})
       .then(()=>"allowed",error=>error.message),
     "smoke_budget_already_spent");
+    const waitingFixture=await fixture(admin);
+    fixtures.push(waitingFixture);pool=waitingFixture.pool;
+    const waiting=await armOneShot({pool,...armArgs(
+      "waiting_dest","waiting_target")});
+    assert.equal((await activeOneShot({pool})),null);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_one_shot_smoke`)).rows[0].n,1);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_items`)).rows[0].n,0);
+    await admin.query(`UPDATE engine_universal_one_shot_smoke
+      SET smoke_epoch_at=clock_timestamp()-interval '3 minutes',
+        created_at=clock_timestamp()-interval '3 minutes',
+        expires_at=clock_timestamp()-interval '1 second'
+      WHERE id=$1`,[waiting.id]);
+    assert.equal((await activeOneShot({pool})),null);
+    assert.equal((await admin.query(`SELECT state FROM
+      engine_universal_one_shot_smoke WHERE id=$1`,[waiting.id]))
+      .rows[0].state,"expired");
+    const late=await realRadarOffer(admin,{});
+    assert.equal((await bindFor(pool,waiting,late)).bound,false);
+    assert.equal((await admin.query(`SELECT state FROM
+      engine_universal_one_shot_smoke WHERE id=$1`,[waiting.id]))
+      .rows[0].state,"expired");
+    assert.equal((await readOneShot({pool,id:waiting.id})).providerCallCount,0);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_destinations`)).rows[0].n,0);
+    const raceFixture=await fixture(admin);
+    fixtures.push(raceFixture);pool=raceFixture.pool;
+    const race=await armOneShot({pool,...armArgs(
+      "race_dest","race_target")});
+    const firstRace=await realRadarOffer(admin,{title:"Primeira real"});
+    const secondRace=await realRadarOffer(admin,{title:"Segunda real"});
+    const bindings=await Promise.all([firstRace,secondRace].map(item=>
+      bindFor(pool,race,item)));
+    assert.equal(bindings.filter(item=>item.bound).length,1);
+    const winner=bindings[0].bound?firstRace:secondRace;
+    const loser=bindings[0].bound?secondRace:firstRace;
+    assert.equal((await admin.query(`SELECT bound_event_id FROM
+      engine_universal_one_shot_trigger WHERE id=$1`,[race.id]))
+      .rows[0].bound_event_id,String(winner.eventId));
+    assert.equal((await admin.query(`SELECT status FROM engine_ofertas
+      WHERE id=$1`,[winner.offerId])).rows[0].status,
+    "cutover_validation");
+    assert.equal((await admin.query(`SELECT status FROM engine_ofertas
+      WHERE id=$1`,[loser.offerId])).rows[0].status,"distribuindo");
+    assert.equal((await admin.query(`SELECT count(*)::int AS n
+      FROM engine_universal_queue_destinations`)).rows[0].n,1);
     console.log("ONE_SHOT_POSTGRES17_PASS",JSON.stringify({
       version:identity.version,providerCalls,gate:result.state,
       history:result.historyFact.resultadoFinalPublico,
@@ -355,9 +611,10 @@ async function main() {
       await admin.query(`DROP SCHEMA ${item.schema} CASCADE`);
     }
     await admin.end().catch(()=>{});
+    fs.rmSync(localDataRoot,{recursive:true,force:true});
   }
 }
 
 main().catch(error=>{console.error("ONE_SHOT_POSTGRES17_FAIL",
   error?.code || error?.message,error?.constraint || "",
-  error?.message || "");process.exitCode=1;});
+  error?.stack || error?.message || "");process.exitCode=1;});

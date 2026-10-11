@@ -11,6 +11,7 @@ const filaOfertas = require("../../../utils/fila-ofertas");
 const destinosUtils = require("../../../utils/destinos");
 const tipoMidiaV2 = require("../../destinos/tipo-midia-v2");
 const { resolverImagemUniversal } = require("../../imagens/resolver-imagem-universal");
+const { bindRadarOfferOneShot } = require("../universal-one-shot-smoke");
 const { selecionarImagemEspelhoPiloto } = require("../../ofc-v2/espelho-piloto");
 const fidelidadeObs = require("../../fidelidade/observabilidade-v1");
 const coberturaRadar = require("../../radar/cobertura-v1");
@@ -1493,6 +1494,19 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
     destino: "",
     tipoMidia: ""
   });
+
+  // The Distributor already owns this offer via the PostgreSQL status CAS.
+  // Bind before either legacy queue writer runs; binding changes the offer
+  // status in the same transaction as creating the one-shot target.
+  const smokeBinding = await bindRadarOfferOneShot({
+    pool: deps.oneShotPool ||
+      (typeof getEnginePool === "function" ? getEnginePool() : null),
+    offer: oferta, itemPayload: itemFila,
+    compatibleDestinations: destinosImagemOuPreview
+  });
+  if (smokeBinding.bound) {
+    return { ok: true, oneShotBound: true, smokeBinding, itemFila };
+  }
 
   if (typeof deps.adicionarOfertaNaFilaGlobal === "function") {
     const resultadoMemoria = await deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila, {
