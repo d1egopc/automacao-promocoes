@@ -1,5 +1,6 @@
 const path = require("path");
 const { getEnginePool, engineDbHabilitado } = require("../database");
+const { sqlFiltroEpochReal } = require("../universal-ingress-fence");
 const { limitarJobs } = require("../processor.service");
 const { normalizarTexto } = require("../normalizers");
 const {
@@ -843,7 +844,7 @@ function montarItemFilaEngine(oferta = {}) {
 
 async function buscarOfertasDistribuiveis({ limite = 10, marketplace = "", clienteId = "", excluirOfertaIds = [] } = {}) {
   const params = [];
-  const filtros = ["o.status IN ('importada', 'oferta_criada')"];
+  const filtros = ["o.status IN ('importada', 'oferta_criada')", sqlFiltroEpochReal("e")];
   const idsExcluidos = Array.isArray(excluirOfertaIds)
     ? [...new Set(excluirOfertaIds.map(id => Number(id)).filter(id => Number.isSafeInteger(id) && id > 0))]
     : [];
@@ -1494,7 +1495,10 @@ async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
   });
 
   if (typeof deps.adicionarOfertaNaFilaGlobal === "function") {
-    const resultadoMemoria = await deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila);
+    const resultadoMemoria = await deps.adicionarOfertaNaFilaGlobal(clienteId, itemFila, {
+      oferta,
+      destinosCompativeis: destinosImagemOuPreview
+    });
 
     if (resultadoMemoria?.duplicada) {
       console.log("[ENGINE-DISTRIBUIDOR-FILA-DUPLICADA]", {

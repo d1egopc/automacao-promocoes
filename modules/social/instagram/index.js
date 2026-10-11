@@ -9,6 +9,7 @@ const {
   logUsuarioInativoIgnorado
 } = require("../../../utils/usuarios-atividade");
 const { logSocial } = require("../logs");
+const fonteUniversalSocial = require("../universal-opportunities.source");
 const {
   obterConfigInstagramEnv,
   obterConfigInstagramAsync
@@ -727,6 +728,23 @@ function carregarOfertaCliente(clienteId = "admin", ofertaId = "") {
   const oferta = ofertas.find(item => idsOferta(item).has(alvo));
   if (!oferta) throw new Error("oferta_nao_encontrada");
 
+  return montarOfertaCliente(oferta, alvo, clienteId);
+}
+
+function carregarOfertaClienteOperacional(clienteId = "admin", ofertaId = "") {
+  if (fonteUniversalSocial.modoFonteSocial() === "LEGACY") {
+    return carregarOfertaCliente(clienteId, ofertaId);
+  }
+  const alvo = texto(ofertaId);
+  if (!alvo) throw new Error("oferta_id_obrigatorio");
+  return fonteUniversalSocial.encontrarItemUniversalSocial(clienteId, alvo)
+    .then(oferta => {
+      if (!oferta) throw new Error("oferta_nao_encontrada");
+      return montarOfertaCliente(oferta, alvo, clienteId);
+    });
+}
+
+function montarOfertaCliente(oferta, alvo, clienteId) {
   const v2 = oferta.inteligenciaUniversalV2 || {};
   const imagem = texto(oferta.imagem || oferta.image || oferta.thumbnail);
   const videoUrl = texto(oferta.videoUrl || oferta.video_url || oferta.mediaUrl || oferta.midiaUrl || oferta.video);
@@ -1691,7 +1709,7 @@ async function publicarImagemInstagram({
     };
   }
 
-  const oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
+  const oferta = await carregarOfertaClienteOperacional(clienteId, ofertaIdSeguro);
   if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   const imagemOriginalUrl = validarImagemPublica(oferta.imagem);
   const gatilhoSeguro = gatilho && typeof gatilho === "object" ? sanitizarGatilhoInstagram(gatilho) : null;
@@ -1900,7 +1918,7 @@ async function publicarReelInstagram({
         publicacao: publicacaoSanitizada(duplicada)
       };
     }
-    oferta = carregarOfertaCliente(clienteId, ofertaIdSeguro);
+    oferta = await carregarOfertaClienteOperacional(clienteId, ofertaIdSeguro);
     if (!oferta.linkAfiliado) throw new Error("oferta_link_ausente");
   }
 
@@ -2545,7 +2563,23 @@ function montarMensagemDirectInstagram({ oferta = {}, gatilho = {} } = {}) {
   return linhas.filter(Boolean).join("\n");
 }
 
-async function processarEventoComentarioInstagram(evento = {}, { httpClient = httpClientPadrao() } = {}) {
+const comentariosWebhookEmProcessamento = new Set();
+
+async function processarEventoComentarioInstagram(evento = {}, deps = {}) {
+  const chave = [evento.instagramUserId, evento.instagramMediaId,
+    evento.instagramCommentId].map(texto).join(":");
+  if (evento.instagramCommentId && comentariosWebhookEmProcessamento.has(chave)) {
+    return { status: "duplicado" };
+  }
+  if (evento.instagramCommentId) comentariosWebhookEmProcessamento.add(chave);
+  try {
+    return await processarEventoComentarioInstagramInterno(evento, deps);
+  } finally {
+    if (evento.instagramCommentId) comentariosWebhookEmProcessamento.delete(chave);
+  }
+}
+
+async function processarEventoComentarioInstagramInterno(evento = {}, { httpClient = httpClientPadrao() } = {}) {
   const encontrado = encontrarPublicacaoPorMedia(evento.instagramUserId, evento.instagramMediaId);
   if (!encontrado) {
     logWebhookDescartadoInstagram("media_nao_encontrada", {
@@ -2640,9 +2674,11 @@ async function processarEventoComentarioInstagram(evento = {}, { httpClient = ht
   }
 
   const tipoPublicacaoWebhook = texto(publicacao.tipoPublicacao || (texto(publicacao.ofertaId) ? "oferta" : "livre"));
-  const oferta = texto(publicacao.ofertaId)
-    ? carregarOfertaCliente(clienteId, publicacao.ofertaId)
+  const ofertaEncontrada = texto(publicacao.ofertaId)
+    ? carregarOfertaClienteOperacional(clienteId, publicacao.ofertaId)
     : ofertaDaPublicacaoLivre({ ...publicacao, clienteId });
+  const oferta = ofertaEncontrada && typeof ofertaEncontrada.then === "function"
+    ? await ofertaEncontrada : ofertaEncontrada;
   if (tipoPublicacaoWebhook === "livre") {
     oferta.linkAfiliado = texto(oferta.linkAfiliado) || linkFinalPublicacaoLivre(publicacao);
   }
@@ -3100,6 +3136,7 @@ module.exports = {
   sanitizarGatilhoInstagram,
   contemGatilhoSeguro,
   carregarOfertaCliente,
+  carregarOfertaClienteOperacional,
   montarLegendaInstagram,
   validarImagemPublica,
   validarVideoReelsPublico,

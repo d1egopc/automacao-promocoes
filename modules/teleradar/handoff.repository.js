@@ -77,7 +77,7 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
           eventId,
           status: HANDOFF_STATUS.PENDING,
           envelope,
-          capturedAt: iso(envelope.capturedAt || envelope.receivedAt, "captured_at"),
+          capturedAt: iso(envelope.capturedAt, "captured_at"),
           envelopeCreatedAt: iso(envelope.envelopeCreatedAt || envelope.receivedAt, "envelope_created_at"),
           handoffPersistedAt: when,
           handoffAttemptedAt: null,

@@ -1,7 +1,12 @@
 const crypto = require("crypto");
 
-const { queryEngine } = require("./database");
+const { queryEngine, getEnginePool } = require("./database");
 const { criarJobsParaClientes } = require("./jobs.service");
+const { avaliarWorkspaceParaEngine } = require("../workspace");
+const {
+  persistirCapturaComIntencoes,
+  promoverProximaIntencao
+} = require("./radar-replay.candidate");
 const {
   detectarMarketplaceLink,
   normalizarEventoBruto,
@@ -15,6 +20,7 @@ const {
 const coberturaRadar = require("../radar/cobertura-v1");
 const { classificarLinkEngine } = require("./link-role.service");
 const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
+const { verificarCapturaIngressReal } = require("./universal-ingress-fence");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -248,7 +254,8 @@ function localizarRedirectEvento(metadata = {}, linkResolvido = "") {
   ) || null;
 }
 
-async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, evento = {}) {
+async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, evento = {},
+  { query = queryEngine, estrito = false } = {}) {
   for (const link of links) {
     const redirectEvento = localizarRedirectEvento(metadataEvento, link);
     const urlOriginal = redirectEvento?.linkOriginalCapturado || link;
@@ -270,7 +277,7 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
       },
       url: urlExpandida || urlNormalizada || urlOriginal
     });
-    const resultado = await queryEngine(
+    const resultado = await query(
       `INSERT INTO engine_links (
          evento_id, url_original, url_normalizada, url_expandida,
          dominio_original, dominio_final, redirect_ok, motivo_redirect,
@@ -302,11 +309,93 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
 
     if (!resultado.ok) {
       logEngineEventoBrutoErro({ eventoId, motivo: "link_insert_falhou", erro: resultado.erro || resultado.motivo || "" });
+      if (estrito) throw new Error("radar_intent_link_insert_failed");
     }
   }
 }
 
+// Opt-in local candidate. The ordinary Radar/Clonador/TeleRadar path is
+// unchanged until a separate gate approves the schema and bootstrap.
+async function registrarRadarComReplayCandidato({ evento, eventoBruto, opcoes,
+  hashEvento, marketplaceDetectado, metadataEvento }) {
+  const pool = getEnginePool();
+  if (!pool) return { ok: false, motivo: "radar_intent_pool_indisponivel" };
+  const clientes = Array.isArray(opcoes.clientes) ? opcoes.clientes : [];
+  const validarWorkspace = typeof opcoes.validarWorkspaceRadarCandidate === "function"
+    ? opcoes.validarWorkspaceRadarCandidate
+    : id => avaliarWorkspaceParaEngine(id, { origemFluxo: "optimus" }).elegivelEngine === true;
+  const client = await pool.connect();
+  let persisted;
+  try {
+    persisted = await persistirCapturaComIntencoes(client, {
+      hashEvento, clientes, validarWorkspace,
+      origemTipo: evento.origemTipo, sessaoId: evento.sessaoId,
+      grupoId: evento.grupoId, grupoNome: evento.grupoNome,
+      textoOriginal: evento.textoOriginal, linksExtraidos: evento.linksExtraidos,
+      marketplaceDetectado, metadata: metadataEvento,
+      capturadoEm: evento.capturadoEm
+    }, {
+      persistLinks: async (db, id) => salvarLinksEvento(id, evento.linksExtraidos,
+        metadataEvento, evento, {
+          query: async (sql, params) => ({ ok: true,
+            resultado: await db.query(sql, params) }), estrito: true
+        })
+    });
+  } catch (error) {
+    return { ok: false, motivo: "radar_intent_persist_failed",
+      erro: String(error.message || error) };
+  } finally {
+    client.release();
+  }
+  let jobsCriados = 0;
+  let jobsExistentes = 0;
+  const clientesAdmissaoPendente = [];
+  for (const clienteId of clientes) {
+    const worker = await pool.connect();
+    try {
+      const promoted = await promoverProximaIntencao(worker, {
+        eventoId: persisted.eventoId, clienteId,
+        criarJob: intent => criarJobsParaClientes({
+          eventoId: intent.evento_id, clientes: [intent.cliente_id],
+          marketplaceDetectado: intent.marketplace_detectado || "",
+          linksExtraidos: intent.links_extraidos || [],
+          metadataEvento: intent.metadata || {}
+        })
+      });
+      if (promoted.estado === "admission_negada") clientesAdmissaoPendente.push(clienteId);
+      if (promoted.estado === "criada") jobsCriados += 1;
+      if (promoted.estado === "existente") jobsExistentes += 1;
+    } catch (error) {
+      return { ok: false, motivo: "radar_intent_replay_failed",
+        erro: String(error.message || error), id: persisted.eventoId,
+        clientesAdmissaoPendente: [clienteId] };
+    } finally {
+      worker.release();
+    }
+  }
+  if (clientesAdmissaoPendente.length) return { ok: false,
+    motivo: "hot_admission_denied", id: persisted.eventoId,
+    duplicado: !persisted.novoEvento, jobsCriados, jobsExistentes,
+    clientesAdmissaoPendente };
+  return { ok: true, id: persisted.eventoId, duplicado: !persisted.novoEvento,
+    jobsCriados, jobsExistentes };
+}
+
 async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
+  const epochIngress = verificarCapturaIngressReal(
+    eventoBruto.capturadoEm || eventoBruto.capturado_em);
+  if (!epochIngress.ok) {
+    return { ok: false, motivo: epochIngress.reason,
+      jobsCriados: 0, jobsExistentes: 0 };
+  }
+  const fonteAutomatica = String(eventoBruto.fonte || eventoBruto.origem || "")
+    .trim().toLowerCase();
+  if (["radar", "teleradar", "clonador_grupos"].includes(fonteAutomatica)) {
+    const capturaOriginal = eventoBruto.capturadoEm || eventoBruto.capturado_em;
+    if (!capturaOriginal || !Number.isFinite(new Date(capturaOriginal).getTime())) {
+      return { ok: false, motivo: "captura_sem_tempo_factual" };
+    }
+  }
   const evento = normalizarEventoBruto(eventoBruto);
   const hashEventoExplicito = Boolean(eventoBruto.hashEvento || eventoBruto.hash_evento);
   const idempotenciaTransporteTeleRadar = hashEventoExplicito && eventoBruto.fonte === "teleradar";
@@ -316,6 +405,10 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
   const origemFluxo = resolverOrigemFluxo(eventoBruto, { metadata: metadataEvento });
   const metadataEventoFinal = origemFluxo ? { ...metadataEvento, origemFluxo } : metadataEvento;
   const clientes = opcoes.clientes || eventoBruto.clientes || ["admin"];
+  if (opcoes.radarReplayCandidate === true && eventoBruto.fonte === "radar") {
+    return registrarRadarComReplayCandidato({ evento, eventoBruto, opcoes,
+      hashEvento, marketplaceDetectado, metadataEvento: metadataEventoFinal });
+  }
   const contextoCobertura = {
     coberturaTraceId: eventoBruto.coberturaTraceId || metadataEvento.coberturaTraceId || "",
     fidelidadeTraceId: eventoBruto.fidelidadeTraceId || metadataEvento.fidelidadeTraceId || "",
@@ -351,6 +444,18 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
         linksExtraidos: evento.linksExtraidos,
         metadataEvento: metadataEventoFinal
       });
+      if (jobs.motivo === "hot_admission_denied") {
+        return { ok: false, motivo: jobs.motivo, id: duplicado.id,
+          duplicado: true, jobsCriados: jobs.criados,
+          jobsExistentes: jobs.existentes,
+          clientesAdmissaoPendente: jobs.clientesAdmissaoPendente };
+      }
+      if (jobs.ok === false) {
+        return { ok: false, motivo: jobs.motivo || "jobs_not_created",
+          id: duplicado.id, duplicado: true,
+          jobsCriados: Number(jobs.criados || 0),
+          jobsExistentes: Number(jobs.existentes || 0) };
+      }
       logEngineEventoBrutoDuplicado({ id: duplicado.id, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
       coberturaRadar.registrar("engine_evento_duplicado", {
         ...contextoCobertura,
@@ -435,6 +540,18 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
             metadataEvento: metadataEventoFinal
           })
         : { criados: 0, existentes: 0 };
+      if (jobs.motivo === "hot_admission_denied") {
+        return { ok: false, motivo: jobs.motivo, id: eventoExistenteId,
+          duplicado: true, jobsCriados: jobs.criados,
+          jobsExistentes: jobs.existentes,
+          clientesAdmissaoPendente: jobs.clientesAdmissaoPendente };
+      }
+      if (jobs.ok === false) {
+        return { ok: false, motivo: jobs.motivo || "jobs_not_created",
+          id: eventoExistenteId || null, duplicado: true,
+          jobsCriados: Number(jobs.criados || 0),
+          jobsExistentes: Number(jobs.existentes || 0) };
+      }
       logEngineEventoBrutoDuplicado({ grupoId: evento.grupoId, links: evento.linksExtraidos.length, hashEvento });
       coberturaRadar.registrar("engine_evento_duplicado", {
         ...contextoCobertura,
@@ -465,6 +582,17 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       linksExtraidos: evento.linksExtraidos,
       metadataEvento: metadataEventoFinal
     });
+    if (jobs.motivo === "hot_admission_denied") {
+      return { ok: false, motivo: jobs.motivo, id, duplicado: false,
+        jobsCriados: jobs.criados, jobsExistentes: jobs.existentes,
+        clientesAdmissaoPendente: jobs.clientesAdmissaoPendente };
+    }
+    if (jobs.ok === false) {
+      return { ok: false, motivo: jobs.motivo || "jobs_not_created",
+        id, duplicado: false,
+        jobsCriados: Number(jobs.criados || 0),
+        jobsExistentes: Number(jobs.existentes || 0) };
+    }
 
     coberturaRadar.registrar("engine_evento_criado", {
       ...contextoCobertura,

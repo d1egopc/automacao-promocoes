@@ -44,7 +44,7 @@ async function testarPersistenciaRetry() {
     tentativasAnteriores: 3
   });
   await service.buscarJobsProntos({ limite: 1 });
-  const consultaElegibilidade = chamadas.find(chamada => /WITH base AS/.test(chamada.sql));
+  const consultaElegibilidade = chamadas.find(chamada => /^\s*WITH\b/.test(chamada.sql));
   assert.ok(consultaElegibilidade, "worker consulta jobs persistidos");
   assert.match(consultaElegibilidade.sql, /afiliacaoWorkspaceRetry,proximaTentativaEmMs/);
   assert.match(consultaElegibilidade.sql, /EXTRACT\(EPOCH FROM NOW\(\)\)/);

@@ -492,6 +492,10 @@ async function testarRepositorioTransacional() {
 
 function testarClaimFairEntreWorkspaces() {
   const fonte = fs.readFileSync(path.join(raiz, "modules/clonador-grupos/repository.js"), "utf8");
+  const inicioClaim = fonte.indexOf("async function reivindicarProximaCaptura(");
+  const fimClaim = fonte.indexOf("async function atualizarBufferStatus(", inicioClaim);
+  const fonteClaim = fonte.slice(inicioClaim, fimClaim);
+  assert.ok(inicioClaim >= 0 && fimClaim > inicioClaim);
 
   assert.ok(
     /WITH pendentes_por_workspace[\s\S]*?SELECT DISTINCT ON \(b\.cliente_id\)/.test(fonte),
@@ -510,7 +514,7 @@ function testarClaimFairEntreWorkspaces() {
     "dentro do workspace escolhido a ordem deve continuar capturado_em ASC, id ASC"
   );
   assert.strictEqual(
-    (fonte.match(/FOR UPDATE(?: OF b)? SKIP LOCKED/g) || []).length,
+    (fonteClaim.match(/FOR UPDATE(?: OF b)? SKIP LOCKED/g) || []).length,
     2,
     "workspace representativo e buffer final devem permanecer protegidos por SKIP LOCKED"
   );

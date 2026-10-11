@@ -60,6 +60,7 @@ async function main() {
     const normal = await inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo-normal@g.us",
       textoOriginal: "Oferta normal",
       linksExtraidos: ["https://meli.la/normal"],
@@ -92,6 +93,7 @@ async function main() {
     const sanitizado = await inbox.registrarEventoBruto({
       origem: "clonador_grupos",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo-surrogate@g.us",
       textoOriginal: "Oferta com Unicode",
       linksExtraidos: ["https://meli.la/valido", `https://meli.la/${highIsolado}`],
@@ -117,6 +119,7 @@ async function main() {
     const retorno = await inbox.registrarEventoBruto({
       origem: "clonador_grupos",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo@g.us",
       textoOriginal: `Oferta ${segredo}`,
       linksExtraidos: [`https://exemplo.test/${segredo}`],

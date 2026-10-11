@@ -120,6 +120,7 @@ function mockModulo(relativo, exports) {
     const { logs, retorno } = await capturarLogs(() => inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo@g.us",
       textoOriginal: "Produto ML",
       linksExtraidos: ["https://meli.la/2HRuzPf"],
@@ -173,6 +174,7 @@ function mockModulo(relativo, exports) {
     const retorno = await inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       sessaoId: "admin_Zoio Claro",
       grupoId: "120363420033826376@g.us",
       grupoNome: "Lobao das Promocoes #92",
@@ -284,6 +286,7 @@ function mockModulo(relativo, exports) {
     const { logs, retorno } = await capturarLogs(() => inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo@g.us",
       textoOriginal: `Oferta Amazon ${linkAmazonDivulgador}\n${linkAmazonAmzlink}\n${linkAmazonLinkAmazon}`,
       linksExtraidos: [linkAmazonDivulgador, linkAmazonAmzlink, linkAmazonLinkAmazon],
@@ -324,6 +327,7 @@ function mockModulo(relativo, exports) {
     const { logs, retorno } = await capturarLogs(() => inbox.registrarEventoBruto({
       origem: "radar",
       origemTipo: "whatsapp",
+      capturadoEm: "2026-10-09T12:00:00.000Z",
       grupoId: "grupo@g.us",
       textoOriginal: "Produto com falha JSON",
       linksExtraidos: ["https://meli.la/falha"]

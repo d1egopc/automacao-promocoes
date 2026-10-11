@@ -1,6 +1,7 @@
 ﻿
 const fs = require("fs");
 const path = require("path");
+const { randomUUID, createHash } = require("node:crypto");
 const { AsyncLocalStorage } = require("async_hooks");
 const axios = require("axios");
 const csv = require("csv-parser");
@@ -20,6 +21,9 @@ const {
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
+const { avaliarFrescorHandoffTeleRadar } = require("./modules/radar/ingress-frescor-retry.candidate");
+const { capturaFactualRadarCandidata } = require("./modules/radar/capture-clock.candidate");
+const { recuperarIntencoesRadarCandidatas } = require("./modules/engine/radar-replay-runtime.candidate");
 const { avaliarGateCapturaRadarWhatsapp, avaliarJanela: avaliarJanelaRadarWhatsapp } = require("./modules/radar/whatsapp-capture-gate");
 const {
   criarRotasTelemetria
@@ -64,8 +68,52 @@ const {
   distribuirOfertasEngine
 } = require("./modules/engine");
 const {
-  queryEngine
+  queryEngine,
+  getEnginePool
 } = require("./modules/engine/database");
+const {
+  prepararModoOperacionalReal,
+  escolherMotorOperacional
+} = require("./modules/engine/universal-runtime-bootstrap");
+const { instalarEstadoIngressReal, modoIngressReal,
+  exigirAutoridadeLegacyReal } =
+  require("./modules/engine/universal-ingress-fence");
+const {
+  selecionarAlvosParaProvider,
+  criarDispatcherProviderExistentePorAlvo
+} = require("./modules/engine/universal-target-provider-bridge");
+const {
+  criarCallbackFilaUniversal
+} = require("./modules/engine/universal-queue-distributor.adapter");
+const { criarExecutorFilaUniversal } =
+  require("./modules/engine/universal-queue-executor.adapter");
+const { criarPreflightFilaUniversal } =
+  require("./modules/engine/universal-queue-preflight");
+const { readDestinationDailyUsage } =
+  require("./modules/engine/universal-queue.repository");
+const { processVitrineProjectionBatch } =
+  require("./modules/engine/universal-vitrine-projector");
+const { consultarFilaPublicaUniversal, consultarDetalheUniversal } =
+  require("./modules/engine/universal-history.read-model");
+const { readBalance: lerSaldoUniversal,
+  setAdminBalance: definirSaldoAdminUniversal,
+  prepareRegistrationOpening: prepararAberturaCadastroUniversal,
+  reconcileRegistrationOpening: reconciliarAberturaCadastroUniversal,
+  recoverRegistrationOpenings: recuperarAberturasCadastroUniversal,
+  registerSimulatedCycle: registrarCicloSimuladoUniversal } =
+  require("./modules/engine/universal-credits.repository");
+const { criarRepositorioFinanceiroPostgres } =
+  require("./modules/financeiro/financeiro.repository");
+const { reconciliarLedgerFinanceiroPendente } =
+  require("./modules/financeiro/financeiro.service");
+
+let modoMotorReal = "BOOTSTRAPPING";
+let writerFilaUniversalReal = null;
+function writerDistribuidorOperacional() {
+  if (modoMotorReal !== "UNIVERSAL") return adicionarOfertaNaFilaGlobalEngine;
+  if (!writerFilaUniversalReal) throw new Error("universal_queue_writer_not_ready");
+  return writerFilaUniversalReal;
+}
 const {
   agendarRetryImagemMagaluLocal,
   agendarRetryImagemMercadoLivreLocal
@@ -256,10 +304,11 @@ const {
   publicarOfertaConfirmadaVitrine
 } = require("./modules/vitrine/hook");
 const {
-  upsertOfertaVitrine
+  upsertOfertaVitrine, VITRINE_RETENCAO_MS
 } = require("./modules/vitrine/storage");
 const {
   capturarOfertaComercialConfirmadaVitrine,
+  extrairCamposCtaEnvioVitrine,
   montarOfertaParaVitrinePosEnvio
 } = require("./utils/vitrine-handoff-pos-envio");
 const {
@@ -3655,6 +3704,7 @@ function aplicarFastPathExecutorFilaViva(clienteId = "admin", decisaoGeneration 
 }
 
 function salvarFila(clienteId = "admin", opcoes = {}) {
+  exigirAutoridadeLegacyReal("legacy_viva_write");
   return executarMutacaoFilaCliente(clienteId, "salvarFila", () => {
   const estadoInicializacao = estadoFilaClienteInicializacao(clienteId);
   if (estadoInicializacao !== ESTADO_FILA_CLIENTE_INICIALIZADO) {
@@ -4727,6 +4777,7 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
 }
 
 async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
+  exigirAutoridadeLegacyReal("legacy_distributor_writer");
   const medidorFilaGlobal = criarMedidorEngineMemoryStage("engine_v2_fila_global", {
     ofertaId: itemFila.engineOfertaId || itemFila.ofertaId || null,
     marketplace: itemFila.marketplace || itemFila.origemMarketplace || ""
@@ -5097,6 +5148,7 @@ function obterPlanoUsuarioObjeto(usuario = {}) {
 
 function renovarCreditosSeNecessario(usuario) {
   if (!usuario) return;
+  if (modoMotorReal !== "LEGACY") return;
 
   const plano = obterPlanoUsuarioObjeto(usuario);
   if (!plano) {
@@ -5124,6 +5176,7 @@ function renovarCreditosSeNecessario(usuario) {
 // ================ FUNCAO USUARIO TEM CRÃ‰DITO ==================
 
 function usuarioTemCreditos(clienteId, quantidade = 1) {
+  if (modoMotorReal !== "LEGACY") return false;
   if (!usuarioAtivoOperacional(clienteId)) {
     logUsuarioInativoOperacional(clienteId, "creditos_validacao");
     return false;
@@ -5139,6 +5192,9 @@ function usuarioTemCreditos(clienteId, quantidade = 1) {
 }
 
 function debitarCreditos(clienteId, quantidade = 1) {
+  if (modoMotorReal !== "LEGACY") {
+    throw new Error("universal_json_credit_debit_forbidden");
+  }
   if (!usuarioAtivoOperacional(clienteId)) {
     logUsuarioInativoOperacional(clienteId, "creditos_debito");
     return false;
@@ -5167,6 +5223,57 @@ function debitarCreditos(clienteId, quantidade = 1) {
   });
 
   return true;
+}
+
+async function creditoDisponivelParaEnvio(clienteId, quantidade = 1) {
+  if (modoMotorReal === "LEGACY") {
+    return usuarioTemCreditos(clienteId, quantidade);
+  }
+  if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
+  if (!usuarioAtivoOperacional(clienteId)) return false;
+  await renovarCreditosUniversalSeNecessario(obterUsuario(clienteId));
+  const credit = await lerSaldoUniversal({ pool: getEnginePool(),
+    workspaceId: clienteId });
+  return credit.available >= quantidade;
+}
+
+async function saldoCreditosParaExibicao(clienteId, usuario = null) {
+  if (modoMotorReal === "LEGACY") return usuario?.creditos ?? null;
+  if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
+  if (usuario) await renovarCreditosUniversalSeNecessario(usuario);
+  const credit = await lerSaldoUniversal({ pool: getEnginePool(),
+    workspaceId: clienteId });
+  return credit.balance;
+}
+
+async function renovarCreditosUniversalSeNecessario(usuario) {
+  if (modoMotorReal !== "UNIVERSAL" || !usuario) return;
+  const plano = obterPlanoUsuarioObjeto(usuario);
+  if (!plano) return;
+  const current = await lerSaldoUniversal({ pool: getEnginePool(),
+    workspaceId: usuario.id });
+  const candidato = { ...structuredClone(usuario), creditos: current.balance };
+  const resultado = saasFundacao.renovarCreditosPorPlano(candidato, plano);
+  if (resultado?.alterou !== true) return;
+  const next = Number(candidato.creditos);
+  if (!Number.isSafeInteger(next) || next < 0) {
+    throw new Error("universal_credit_policy_amount_invalid");
+  }
+  if (next !== current.balance) {
+    const policyIdentity = createHash("sha256").update(JSON.stringify([
+      usuario.id, usuario.proximaRenovacao || usuario.cicloAtualFim || "",
+      resultado.motivo, next
+    ])).digest("hex");
+    const movement = await definirSaldoAdminUniversal({ pool: getEnginePool(),
+      workspaceId: usuario.id, amount: next,
+      idempotencyKey: `universal:policy:${policyIdentity}`,
+      reason: resultado.motivo, movementType: "POLICY_BALANCE_SET" });
+    if (!movement.ok) throw new Error(movement.reason || "universal_credit_policy_deferred");
+  }
+  for (const [campo, valor] of Object.entries(candidato)) {
+    if (campo !== "creditos") usuario[campo] = valor;
+  }
+  salvarUsuarios();
 }
 
 // ================= FUNCAO SALVA PLANO ===================
@@ -8970,6 +9077,210 @@ function telemetriaCadenciaExecutorEnviado(clienteId = "admin", destino = {}, in
 
 // ========================== ENVIO DESTINO INTELIGENTE ============================
 
+function resolverTelegramsDestinoComercial(clienteId, destino) {
+  const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
+  const idsSelecionados = idsTelegramDestinoFila(destino);
+  const telegramsDiretos = telegramsDiretosDestinoFila(destino);
+  let selecionados = idsSelecionados.length
+    ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
+    : telegrams.filter(t => t.ativo);
+  if (telegramsDiretos.length) selecionados = [...telegramsDiretos, ...selecionados];
+  if (!selecionados.length && telegrams.length === 1) {
+    selecionados = telegrams.filter(t => t.ativo);
+  }
+  const vistos = new Set();
+  selecionados = selecionados.filter(t => {
+    const chave = `${t.botToken || ""}:${t.chatId || ""}`;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+  return { telegrams, selecionados };
+}
+
+function resolverAlvosTelegramFilaUniversal(clienteId, destino) {
+  return resolverTelegramsDestinoComercial(clienteId, destino).selecionados
+    .filter(t => t.ativo && t.botToken && t.chatId)
+    .map(t => ({ ...t, targetKey: chaveAlvoEntrega("telegram", t),
+      connectionId: String(t.id || t.botId || t.telegramId || "") }));
+}
+
+function criarPreflightFilaUniversalReal(pool) {
+  return criarPreflightFilaUniversal({
+    pool,
+    configGlobal: config,
+    resolveDestination: async ({ claim, oferta, workspaceId, destinationId }) => {
+      if (!usuarioAtivoOperacional(workspaceId)) {
+        return { ok: false, reason: "workspace_inactive" };
+      }
+      const configCliente = configsPorCliente?.[workspaceId] || {};
+      const match = analisarDestinosCompativeisFila(workspaceId, oferta,
+        configCliente).compativeis.find(item =>
+          String(item.destino?.id || item.destino?.destinoId || "") === destinationId);
+      const destination = match?.destino;
+      if (!destination || String(destination.tipo || destination.canal || "").toLowerCase() !==
+          String(claim.channel || "").toLowerCase()) {
+        return { ok: false, reason: "destination_not_current" };
+      }
+      try {
+        const targets = String(claim.channel).toLowerCase() === "telegram"
+          ? resolverAlvosTelegramFilaUniversal(workspaceId, destination)
+          : destinosMultiAlvo.normalizarAlvosDestino(destination);
+        selecionarAlvosParaProvider({ canal: claim.channel, alvos: targets,
+          targetKey: claim.target_key });
+      } catch {
+        return { ok: false, reason: "destination_target_not_current" };
+      }
+      return { ok: true, destination, configCliente };
+    },
+    checkWindow: ({ destination, nowMs }) =>
+      destinoDentroHorario(destination, nowMs)
+        ? { ok: true }
+        : { ok: false, reason: "destination_window_closed",
+          retryAt: new Date(destinosUtils.proximoInstanteDentroHorario(
+            destinoOperacionalSeguro(destination), nowMs)).toISOString() },
+    checkDailyLimit: async ({ workspaceId, destinationId, destination }) => {
+      const limit = limiteDiarioDestino(destination);
+      if (!limit) return { ok: true };
+      const usage = await readDestinationDailyUsage({ pool, workspaceId,
+        destinationId });
+      return usage.sentToday < limit ? { ok: true }
+        : { ok: false, reason: "destination_daily_limit_reached",
+          retryAt: new Date(usage.nextResetAt).toISOString() };
+    },
+    checkSession: ({ claim, workspaceId, destination }) => {
+      const channel = String(claim.channel || "").toLowerCase();
+      if (channel === "whatsapp") return {
+        ok: sessaoPertenceAoWorkspaceExclusivo(destination.conexaoId,
+          sessoesMeta?.[destination.conexaoId] || {}, workspaceId) &&
+          sessaoWhatsappAptaEnvio(destination.conexaoId),
+        reason: "destination_session_unavailable" };
+      if (channel === "telegram") return {
+        ok: resolverAlvosTelegramFilaUniversal(workspaceId, destination)
+          .some(target => target.targetKey === claim.target_key),
+        reason: "destination_session_unavailable" };
+      if (channel === "discord") return {
+        ok: diagnosticarDestinoDiscordAptoEnvio(workspaceId,
+          destination).ok === true,
+        reason: "destination_session_unavailable" };
+      return { ok: false, reason: "destination_channel_invalid" };
+    },
+    checkCredits: async ({ workspaceId }) => ({
+      ok: await creditoDisponivelParaEnvio(workspaceId, 1),
+      reason: "workspace_credits_unavailable" }),
+    checkMedia: ({ oferta }) => {
+      const image = avaliarImagemPublicavelOfertaExecutor(oferta);
+      return { ok: image.ok === true,
+        reason: image.motivoTecnico || "required_media_unpublishable",
+        terminalFailure: image.ok !== true };
+    },
+    checkLinks: context => {
+      const plano = resolverPlanoManualV2Scheduler(context.workspaceId);
+      const link = resolverLinkOfertaPorDestino({ oferta: context.oferta,
+        destino: context.destination, clienteId: context.workspaceId,
+        plano, recursos: plano?.recursos, configGlobal: config });
+      context.linkOfertaDestino = link;
+      const resolved = link.oferta || context.oferta;
+      return { ok: Boolean(link.linkFinal ||
+          listarLinksComerciaisOferta(resolved).some(item => item?.url)),
+        reason: "commercial_link_unproven", terminalFailure: true };
+    },
+    renderMessage: context => {
+      const plano = resolverPlanoManualV2Scheduler(context.workspaceId);
+      const ofertaParaMensagem = context.linkOfertaDestino?.oferta || context.oferta;
+      const message = montarMensagemOferta(ofertaParaMensagem, {
+        destino: context.destination, plano, clienteId: context.workspaceId,
+        arquiteturaComercial: context.configCliente?.arquiteturaComercial,
+        rioOficialAtivo: context.configCliente?.arquiteturaComercial?.rioOficial !== false
+      });
+      return { ok: Boolean(message), message,
+        linkFinal: context.linkOfertaDestino?.linkFinal || "",
+        vitrineCta: {
+          ...extrairCamposCtaEnvioVitrine(ofertaParaMensagem),
+          linkFinal: context.linkOfertaDestino?.linkFinal || ""
+        } };
+    },
+    checkDedup: async context => {
+      if (!context.claim.fanout_owner_id) {
+        return { ok: false, reason: "fanout_owner_missing" };
+      }
+      const commercialClaim = await coordenadorEnvioProdutoDestino.adquirir({
+        clienteId: context.workspaceId, oferta: context.oferta,
+        destinoId: context.destinationId,
+        fanoutOwnerId: context.claim.fanout_owner_id,
+        targetId: context.claim.id,
+        targetLeaseToken: context.claim.leaseToken });
+      if (commercialClaim?.resultado !== "adquirido") {
+        return { ok: false,
+          reason: commercialClaim?.resultado || "destination_dedup_blocked",
+          ...(commercialClaim?.resultado === "ocupado_recente"
+            ? { terminalNoSend: true } : {}) };
+      }
+      context.commercialClaim = commercialClaim;
+      return { ok: true };
+    }
+  });
+}
+
+function criarExecutorFilaUniversalReal(pool) {
+  const prepare = criarPreflightFilaUniversalReal(pool);
+  const providerPorAlvo = criarDispatcherProviderExistentePorAlvo({
+    send: enviarParaDestinoInteligente,
+    resolveConfigCliente: workspaceId => configsPorCliente?.[workspaceId] || {}
+  });
+  const dispatch = async (claim, prepared, { startAttempt }) => {
+    const commercialClaim = prepared.commercialClaim;
+    if (commercialClaim?.resultado !== "adquirido") {
+      throw new Error("universal_commercial_claim_missing");
+    }
+    let crossedProviderBoundary = false;
+    try {
+      if (!await coordenadorEnvioProdutoDestino.prepararTransporte(commercialClaim)) {
+        return { reason: "commercial_reservation_unavailable" };
+      }
+      return await providerPorAlvo(claim, prepared, {
+        startAttempt: async () => {
+          const evaluation = avaliarWorkspaceEngineOperacional(
+            claim.workspace_id, { log: false });
+          if (evaluation.elegivelEngine !== true) {
+            throw new Error(evaluation.motivo || "workspace_not_operational");
+          }
+          const current = await prepare(claim, { skipDedup: true });
+          if (current.ready !== true ||
+              JSON.stringify(current.destination) !== JSON.stringify(prepared.destination) ||
+              current.rendered.message !== prepared.rendered.message ||
+              current.rendered.linkFinal !== prepared.rendered.linkFinal) {
+            throw new Error(current.reason || "universal_preprovider_context_changed");
+          }
+          if (!await coordenadorEnvioProdutoDestino.validarTitularidade(
+            commercialClaim, { targetId: claim.id,
+              targetLeaseToken: claim.leaseToken })) {
+            throw new Error("universal_commercial_owner_not_current");
+          }
+          await startAttempt();
+          crossedProviderBoundary = true;
+        }
+      });
+    } finally {
+      if (!crossedProviderBoundary) {
+        await coordenadorEnvioProdutoDestino.descartarSemTransporte(
+          commercialClaim);
+        await coordenadorEnvioProdutoDestino.finalizar(commercialClaim, {
+          statusFinal: "universal_sem_transporte"
+        });
+      }
+    }
+  };
+  return criarExecutorFilaUniversal({ pool,
+    prepare, dispatch,
+    checkWorkspace: workspaceId => {
+      const evaluation = avaliarWorkspaceEngineOperacional(workspaceId,
+        { log: false });
+      return { ok: evaluation.elegivelEngine === true,
+        reason: evaluation.motivo };
+    } });
+}
+
 async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId, configCliente, opcoes = {}) {
   let tentouEnvio = false;
   let confirmouEnvio = false;
@@ -9083,6 +9394,10 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
       permitirNovaTentativaAposFalhaConfirmada = false,
       exigirProviderMessageId = false
     } = {}) => {
+      if (opcoes.universalTargetKey &&
+          typeof opcoes.beforeUniversalProvider !== "function") {
+        throw new Error("universal_provider_boundary_hook_missing");
+      }
       const checkpoint = await checkpointEntregaFuncionalFila.executar({
         clienteId,
         oferta,
@@ -9091,21 +9406,57 @@ async function enviarParaDestinoInteligente(destino, oferta, mensagem, clienteId
         canal,
         advisoryHandle: opcoes.advisoryHandle || null,
         reservaParDuravel: opcoes.reservaParDuravel === true,
-        enviar,
-        falhaConfirmada,
-        classificarFalha,
-        permitirNovaTentativaAposFalhaConfirmada,
-        exigirProviderMessageId
+        enviar: opcoes.universalTargetKey ? async () => {
+          try {
+            await opcoes.beforeUniversalProvider({ canal, alvo });
+          } catch (error) {
+            const boundaryError = error instanceof Error ? error :
+              new Error(String(error || "universal_provider_boundary_failed"));
+            boundaryError.universalBeforeProviderFailed = true;
+            throw boundaryError;
+          }
+          return enviar();
+        } : enviar,
+        falhaConfirmada: error => error?.universalBeforeProviderFailed === true ||
+          (typeof falhaConfirmada === "function" && falhaConfirmada(error) === true),
+        classificarFalha: error => error?.universalBeforeProviderFailed === true
+          ? { confirmada: true, classificacao: "pre_efeito",
+            motivoCodigo: "universal_claim_not_current" }
+          : (typeof classificarFalha === "function" ? classificarFalha(error) : null),
+        permitirNovaTentativaAposFalhaConfirmada:
+          permitirNovaTentativaAposFalhaConfirmada || Boolean(opcoes.universalTargetKey),
+        exigirProviderMessageId: exigirProviderMessageId ||
+          Boolean(opcoes.universalTargetKey)
       });
+      if (opcoes.universalTargetKey) {
+        opcoes.onUniversalTargetCheckpoint?.({ canal, alvo, checkpoint });
+      }
       await atualizarResumoCheckpointClonador({ clienteId, oferta, contexto: checkpoint?.contexto });
       return checkpoint;
     };
     const registrarCreditoCheckpoint = async (checkpoint) => {
-      const debitou = debitarCreditos(clienteId, 1);
-      if (debitou === true && checkpoint?.contexto) {
-        await checkpointEntregaFuncionalFila.registrarCreditoDebitado(checkpoint.contexto);
+      if (opcoes.universalTargetKey) {
+        // The durable ACK is reconciled with the target and financial ledger
+        // in one PostgreSQL transaction by the Universal queue.
+        return false;
       }
-      return debitou === true;
+      let debitou = false;
+      let marcadorDuravel = false;
+      try {
+        debitou = debitarCreditos(clienteId, 1) === true;
+        if (debitou && checkpoint?.contexto) {
+          const registro = await checkpointEntregaFuncionalFila
+            .registrarCreditoDebitado(checkpoint.contexto);
+          marcadorDuravel = registro?.registrado === true;
+        }
+      } catch (error) {
+        if (!opcoes.universalTargetKey) throw error;
+      }
+      if (opcoes.universalTargetKey) {
+        opcoes.onUniversalCreditResult?.({ debitou,
+          marcadorDuravel, attemptId: checkpoint?.contexto?.attemptId || "" });
+      }
+      return debitou;
     };
     const erroCheckpoint = (checkpoint) => {
       if (checkpoint?.erro instanceof Error) return checkpoint.erro;
@@ -9227,7 +9578,9 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     return { enviado: false, tentouEnvio: false, motivo: "sessao_offline" };
   }
 
-  const grupos = alvosPendentesFanout(oferta, destino)
+  const grupos = selecionarAlvosParaProvider({ canal: "whatsapp",
+    alvos: alvosPendentesFanout(oferta, destino),
+    targetKey: opcoes.universalTargetKey })
     .map(alvo => ({
       alvo,
       grupo: alvo.grupoId || alvo.id || alvo.value || null
@@ -9251,7 +9604,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     const grupo = itemAlvo.grupo;
     alvoAtualFanout = alvoFanout;
 
-    if (!usuarioTemCreditos(clienteId, 1)) {
+    if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
       logOptimus("AVISO", "Sem creditos", { clienteId });
       registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
         decisao: "bloqueado",
@@ -9594,7 +9947,10 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
         return { enviado: false, tentouEnvio: false, motivo: "discord_plano_indisponivel" };
       }
 
-      const alvosDiscordPendentes = alvosPendentesFanout(oferta, destino);
+      const alvosDiscordPendentes = selecionarAlvosParaProvider({
+        canal: "discord", alvos: alvosPendentesFanout(oferta, destino),
+        targetKey: opcoes.universalTargetKey
+      });
       if (!alvosDiscordPendentes.length) {
         return { enviado: true, tentouEnvio: false, motivo: "alvos_concluidos" };
       }
@@ -9605,7 +9961,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       for (const alvoDiscord of alvosDiscordPendentes) {
         alvoAtualFanout = alvoDiscord;
 
-        if (!usuarioTemCreditos(clienteId, 1)) {
+        if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
           logOptimus("AVISO", "Sem creditos", { clienteId });
           registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
             decisao: "bloqueado",
@@ -9835,35 +10191,12 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     // ================= ENVIO TELEGRAM =================
 
     if (String(destino.tipo || "").toLowerCase() === "telegram") {
-      const resolucaoTelegram = etapaEnvioSync("resolverCanal", () => {
-        const telegrams = listarTelegramsCliente(clienteId).map(normalizarTelegramFila);
-        const idsSelecionados = idsTelegramDestinoFila(destino);
-        const telegramsDiretos = telegramsDiretosDestinoFila(destino);
-
-        let selecionados = idsSelecionados.length
-          ? telegrams.filter(t => idsSelecionados.some(id => t.chaves.includes(id)))
-          : telegrams.filter(t => t.ativo);
-
-        if (telegramsDiretos.length) {
-          selecionados = [...telegramsDiretos, ...selecionados];
-        }
-
-        if (!selecionados.length && telegrams.length === 1) {
-          selecionados = telegrams.filter(t => t.ativo);
-        }
-
-        const vistosTelegram = new Set();
-        selecionados = selecionados.filter(t => {
-          const chave = `${t.botToken || ""}:${t.chatId || ""}`;
-          if (vistosTelegram.has(chave)) return false;
-          vistosTelegram.add(chave);
-          return true;
-        });
-
-        return { telegrams, selecionados };
-      });
+      const resolucaoTelegram = etapaEnvioSync("resolverCanal", () =>
+        resolverTelegramsDestinoComercial(clienteId, destino));
       const telegrams = resolucaoTelegram.telegrams;
-      const selecionados = resolucaoTelegram.selecionados;
+      const selecionados = selecionarAlvosParaProvider({ canal: "telegram",
+        alvos: resolucaoTelegram.selecionados,
+        targetKey: opcoes.universalTargetKey });
 
       if (!selecionados.length) {
         logOptimus("TELEGRAM", "Nenhum destino selecionado", {
@@ -9947,7 +10280,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           continue;
         }
 
-        if (!usuarioTemCreditos(clienteId, 1)) {
+        if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
           logOptimus("AVISO", "Sem creditos", { clienteId });
           logFilaTelegramDebug({
             clienteId,
@@ -12466,6 +12799,7 @@ console.log("[ENVIO] Enviado com controle de tempo");
 }
 
 async function processarFila(clienteIdAlvo = null, opcoes = {}) {
+  exigirAutoridadeLegacyReal("legacy_queue_executor");
   const clienteFila = clienteIdAlvo || "admin";
   const rodadaLogIntervalo = throttleLogFilaIntervalo.iniciarRodada({
     rodadaId: `processar_fila_${Date.now()}_${proximaRodadaLogFilaIntervalo++}`,
@@ -12536,6 +12870,10 @@ registrarMiddlewaresOperacionais(app, {
 
 app.post("/fila", auth, async (req, res) => {
   try {
+    if (modoMotorReal === "UNIVERSAL") {
+      return res.status(409).json({ ok: false,
+        erro: "legacy_manual_queue_unavailable_in_universal_epoch" });
+    }
     const body = req.body || {};
     const clienteId = getClienteId(req);
 
@@ -12587,6 +12925,10 @@ app.post("/enviar-manual", async (req, res) => {
  console.log("[ENVIO] Envio manual recebido:", req.body?.titulo);
 
   try {
+    if (modoMotorReal === "UNIVERSAL") {
+      return res.status(409).json({ ok: false,
+        erro: "legacy_manual_queue_unavailable_in_universal_epoch" });
+    }
     const body = req.body || {};
 
     const categoriaManual =
@@ -13219,6 +13561,28 @@ app.get("/fila", auth, async (req, res) => {
     perf.fim({ clienteId, statusCode: res.statusCode, bytesResposta: totalRespostaBytes });
   });
   clienteId = perf.etapaSync("cliente", () => getClienteId(req));
+  if (modoMotorReal === "UNIVERSAL") {
+    try {
+      const readModel = await consultarFilaPublicaUniversal({
+        pool: getEnginePool(), workspaceId: clienteId,
+        filtros: filtrosPublicosFila(req.query),
+        page: req.query?.page, limit: req.query?.limit
+      });
+      const metricas = metricasPublicasComAliases(readModel.metricas);
+      const resumo = { pendentesTotal: metricas.emDistribuicao,
+        enviadasTotal: metricas.enviadas, retidasTotal: 0,
+        errosTotal: metricas.comErro };
+      const payload = { ...readModel, clienteId, metricas, resumo,
+        filtros: filtrosPublicosFila(req.query),
+        pendentes: resumo.pendentesTotal, enviados: resumo.enviadasTotal,
+        retidas: 0, erros: resumo.errosTotal };
+      totalRespostaBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+      return res.json(payload);
+    } catch (error) {
+      return res.status(503).json({ ok: false, clienteId,
+        motivo: "universal_history_unavailable" });
+    }
+  }
   const inicializada = await perf.etapa("garantir_inicializacao", () =>
     garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila")
   );
@@ -13292,11 +13656,6 @@ app.get("/fila", auth, async (req, res) => {
 app.get("/fila/detalhe", auth, async (req, res) => {
   const perf = criarPerfTimer("PERF FILA DETALHE", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
-  const inicializada = await perf.etapa("garantir_inicializacao", () =>
-    garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila_detalhe")
-  );
-  if (!inicializada) return;
-
   let detalheRef = req.query?.detalheRef || {
     arquivo: req.query?.arquivo,
     id: req.query?.id
@@ -13311,6 +13670,24 @@ app.get("/fila/detalhe", auth, async (req, res) => {
       };
     }
   }
+
+  if (modoMotorReal === "UNIVERSAL") {
+    try {
+      const resultado = await consultarDetalheUniversal({
+        pool: getEnginePool(), workspaceId: clienteId, detalheRef });
+      if (!resultado.ok) return res.status(404).json({
+        ok: false, clienteId, motivo: resultado.motivo,
+        detalheRef: resultado.detalheRef || detalheRef });
+      return res.json({ ...resultado, clienteId });
+    } catch {
+      return res.status(503).json({ ok: false, clienteId,
+        motivo: "universal_history_unavailable" });
+    }
+  }
+  const inicializada = await perf.etapa("garantir_inicializacao", () =>
+    garantirFilaClienteInicializadaHttp(res, clienteId, "rota_get_fila_detalhe")
+  );
+  if (!inicializada) return;
 
   const resultado = perf.etapaSync("resolver_detalhe_publico", () =>
     resolverDetalhePublicoFilaPorRef({
@@ -13881,6 +14258,7 @@ app.get("/automacao/status", async (req, res) => {
     })
     .length;
 
+  const saldoCreditos = await saldoCreditosParaExibicao(clienteId, usuario);
   return res.json({
     ok: true,
     clienteId,
@@ -13889,7 +14267,7 @@ app.get("/automacao/status", async (req, res) => {
     retidas: itensCliente.filter(o => o.status === "retida").length,
     erros: itensCliente.filter(o => o.status === "erro").length,
     enviadasHoje: enviadas.filter(ofertaEnviadaHoje).length,
-    creditos: usuario?.creditos ?? null,
+    creditos: saldoCreditos,
     sessoesAtivas,
     destinosAtivos,
     ultimoEnvio: ultimaOfertaEnviada?.enviadoEm || ultimaOfertaEnviada?.dataEnvio || null,
@@ -14336,6 +14714,34 @@ function normalizarSaasConfigAdminInput(body = {}, atual = obterConfigSaasAtual(
 
 const executarCadastroSaasSerializado = saasFundacao.criarSerializadorCadastro();
 
+function transicaoCadastroCreditosUniversal() {
+  if (modoMotorReal === "LEGACY") return {};
+  if (modoMotorReal !== "UNIVERSAL") {
+    throw new Error("credit_registration_mode_not_ready");
+  }
+  return {
+    antesDePersistir: async usuario => {
+      await prepararAberturaCadastroUniversal({ pool: getEnginePool(),
+        workspaceId: usuario.id, openingBalance: usuario.creditos,
+        planId: usuario.plano });
+      delete usuario.creditos;
+    },
+    depoisDePersistir: async usuario => {
+      await reconciliarAberturaCadastroUniversal({ pool: getEnginePool(),
+        workspaceId: usuario.id,
+        userExists: buscarUsuarioPorIdSeguro(usuarios, usuario.id) === usuario });
+    }
+  };
+}
+
+async function usuarioAdminComSaldoOperacional(usuario) {
+  if (modoMotorReal === "UNIVERSAL" && usuario?.papel === "admin_master") {
+    return { ...sanitizarUsuarioAdmin(usuario), creditos: null };
+  }
+  return { ...sanitizarUsuarioAdmin(usuario),
+    creditos: await saldoCreditosParaExibicao(usuario.id, usuario) };
+}
+
 async function executarCadastroPublicoAtomico(body = {}) {
   return executarCadastroSaasSerializado(async () => {
     const saasConfig = obterConfigSaasAtual();
@@ -14349,9 +14755,10 @@ async function executarCadastroPublicoAtomico(body = {}) {
       gerarSenhaHash,
       prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
       salvarUsuarios,
-      salvarConfigsClientes
+      salvarConfigsClientes,
+      ...transicaoCadastroCreditosUniversal()
     });
-    return sanitizarUsuarioAdmin(novoUsuario);
+    return usuarioAdminComSaldoOperacional(novoUsuario);
   });
 }
 
@@ -14380,7 +14787,8 @@ async function executarCadastroGooglePublicoAtomico(identidade = {}, body = {}) 
       gerarId,
       prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
       salvarUsuarios,
-      salvarConfigsClientes
+      salvarConfigsClientes,
+      ...transicaoCadastroCreditosUniversal()
     });
   });
 }
@@ -14403,7 +14811,8 @@ async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
       gerarSenhaHash,
       prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
       salvarUsuarios,
-      salvarConfigsClientes
+      salvarConfigsClientes,
+      ...transicaoCadastroCreditosUniversal()
     });
 
     console.log("[SAAS-CADASTRO-INTERNO]", {
@@ -14414,11 +14823,11 @@ async function executarCadastroInternoAdminAtomico(body = {}, operador = {}) {
       autorizarCicloTeste: body.autorizarCicloTeste === true
     });
 
-    return sanitizarUsuarioAdmin(novoUsuario);
+    return usuarioAdminComSaldoOperacional(novoUsuario);
   });
 }
 
-function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, operador = {}) {
+async function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, operador = {}) {
   const usuario = buscarUsuarioPorIdSeguro(usuarios, usuarioId);
   if (!usuario) {
     const erro = new Error("Usuario nao encontrado");
@@ -14436,7 +14845,14 @@ function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, ope
     throw erro;
   }
 
-  const resultado = saasFundacao.aplicarPagamentoSimulado(usuario, plano, {
+  if (modoMotorReal !== "LEGACY" && modoMotorReal !== "UNIVERSAL") {
+    throw new Error("credit_payment_mode_not_ready");
+  }
+  const universal = modoMotorReal === "UNIVERSAL";
+  const candidato = universal ? { ...structuredClone(usuario),
+    creditos: (await lerSaldoUniversal({ pool: getEnginePool(),
+      workspaceId: usuario.id })).balance } : usuario;
+  const resultado = saasFundacao.aplicarPagamentoSimulado(candidato, plano, {
     estado: body.estado || body.status || "",
     pagamentoId: body.pagamentoId || body.idPagamento || "",
     operador: operador?.id || operador?.email || "",
@@ -14450,7 +14866,43 @@ function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, ope
     throw erro;
   }
 
-  salvarUsuarios();
+  if (universal) {
+    const estado = String(body.estado || body.status || "").trim().toLowerCase();
+    if (estado === "aprovado") {
+      const pagamentoId = String(body.pagamentoId || body.idPagamento || "").trim();
+      const movement = await registrarCicloSimuladoUniversal({
+        pool: getEnginePool(), workspaceId: usuario.id,
+        paymentId: pagamentoId, planId: plano.nome,
+        amount: candidato.creditos, cycleStart: candidato.cicloAtualInicio,
+        cycleEnd: candidato.cicloAtualFim,
+        allowCreate: resultado.idempotente !== true,
+        operator: operador?.id || operador?.email || ""
+      });
+      if (!movement.projected) {
+        const projection = await reconciliarLedgerFinanceiroPendente({
+          repositorio: criarRepositorioFinanceiroPostgres({ pool: getEnginePool() }),
+          lerUsuarios: async () => usuarios,
+          salvarUsuarios: async () => salvarUsuarios(),
+          limite: 1, filtro: { ledgerId: movement.ledgerId }
+        });
+        if (projection.projetados !== 1) {
+          const erro = new Error("Pagamento simulado registrado; projecao pendente");
+          erro.statusCode = 503;
+          erro.codigo = "pagamento_simulado_projecao_pendente";
+          throw erro;
+        }
+      }
+      resultado.idempotente = movement.duplicate;
+    } else {
+      // Rejected/pending payments are metadata only; never write JSON credits.
+      for (const [key, value] of Object.entries(candidato)) {
+        if (key !== "creditos") usuario[key] = value;
+      }
+      salvarUsuarios();
+    }
+  } else {
+    salvarUsuarios();
+  }
 
   console.log("[SAAS-PAGAMENTO-SIMULADO]", {
     operador: operador?.id || operador?.email || "",
@@ -14464,7 +14916,7 @@ function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {}, ope
 
   return {
     resultado,
-    usuario: sanitizarUsuarioAdmin(usuario)
+    usuario: await usuarioAdminComSaldoOperacional(usuario)
   };
 }
 
@@ -14574,9 +15026,9 @@ app.put("/admin/saas-config", exigirAdminMasterEstrito, (req, res) => {
   });
 });
 
-app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", exigirAdminMasterEstrito, (req, res) => {
+app.post("/admin/assinaturas/:usuarioId/pagamento-simulado", exigirAdminMasterEstrito, async (req, res) => {
   try {
-    const resposta = executarPagamentoSimuladoAssinaturaAdmin(req.params.usuarioId, req.body || {}, req.usuario || {});
+    const resposta = await executarPagamentoSimuladoAssinaturaAdmin(req.params.usuarioId, req.body || {}, req.usuario || {});
     return res.json({
       ok: true,
       ...resposta
@@ -14619,7 +15071,7 @@ if (!global.__optimusMercadoPagoReconciliationScheduler) {
   });
 }
 
-app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
+app.get("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
   if (!isAdminMaster(req)) {
     return res.status(403).json({
       ok: false,
@@ -14627,10 +15079,13 @@ app.get("/admin/usuarios", exigirAdminMasterEstrito, (req, res) => {
     });
   }
 
-  return res.json({
-    ok: true,
-    usuarios: usuarios.map(sanitizarUsuarioAdmin)
-  });
+  try {
+    return res.json({ ok: true,
+      usuarios: await Promise.all(usuarios.map(usuarioAdminComSaldoOperacional)) });
+  } catch (erro) {
+    return res.status(503).json({ ok: false,
+      codigo: "saldo_operacional_indisponivel" });
+  }
 });
 
 app.get("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
@@ -15104,6 +15559,17 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
     body
   });
 
+  let cadastroCreditoUniversal = null;
+  try {
+    cadastroCreditoUniversal = transicaoCadastroCreditosUniversal();
+    if (cadastroCreditoUniversal.antesDePersistir) {
+      await cadastroCreditoUniversal.antesDePersistir(novoUsuario);
+    }
+  } catch (erro) {
+    return res.status(503).json({ ok: false,
+      codigo: "cadastro_credito_universal_indisponivel" });
+  }
+
   const snapshotUsuarios = JSON.parse(JSON.stringify(usuarios));
   const snapshotConfigs = JSON.parse(JSON.stringify(configsPorCliente));
 
@@ -15127,9 +15593,18 @@ app.post("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
     });
   }
 
+  if (cadastroCreditoUniversal.depoisDePersistir) {
+    try {
+      await cadastroCreditoUniversal.depoisDePersistir(novoUsuario);
+    } catch (erro) {
+      return res.status(503).json({ ok: false,
+        codigo: "cadastro_credito_universal_pendente" });
+    }
+  }
+
   return res.json({
     ok: true,
-    usuario: sanitizarUsuarioAdmin(novoUsuario)
+    usuario: await usuarioAdminComSaldoOperacional(novoUsuario)
   });
 });
 
@@ -15154,7 +15629,7 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
 
   const body = req.body || {};
   const ativoAntes = usuario.ativo !== false;
-  const creditosAntes = Number(usuario.creditos ?? 0);
+  const creditosAntes = Number(await saldoCreditosParaExibicao(id, usuario) ?? 0);
   const planoAntes = String(usuario.plano || "").trim();
   const planoInformado = Object.prototype.hasOwnProperty.call(body, "plano");
   const planoNovoValor = planoInformado ? String(body.plano || "").trim() : planoAntes;
@@ -15199,37 +15674,57 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
     }
   });
 
+  const creditoUniversal = modoMotorReal === "UNIVERSAL";
+  const sujeitoCredito = creditoUniversal
+    ? { ...structuredClone(usuario), creditos: creditosAntes }
+    : usuario;
   if (planoMudou) {
     const planoNovoUsuario = getPlanoPorNome(usuario.plano);
     if (planoNovoUsuario) {
       saasFundacao.aplicarTrocaManualPlanoAdmin({
-        usuario,
+        usuario: sujeitoCredito,
         plano: planoNovoUsuario,
         planoIdentidade: usuario.plano,
         body
       });
     } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
       saasFundacao.aplicarCreditoManualAdmin({
-        usuario,
+        usuario: sujeitoCredito,
         plano: getPlanoPorNome(usuario.plano) || {},
         quantidade: body.creditos
       });
     }
   } else if (Object.prototype.hasOwnProperty.call(body, "creditos")) {
     saasFundacao.aplicarCreditoManualAdmin({
-      usuario,
+      usuario: sujeitoCredito,
       plano: getPlanoPorNome(usuario.plano) || {},
       quantidade: body.creditos
     });
   }
 
-  if (usuario.creditos !== creditosAntes) {
+  const creditosDepois = Number(sujeitoCredito.creditos ?? creditosAntes);
+  if (creditoUniversal) {
+    if (creditosDepois !== creditosAntes) {
+      const ajustado = await definirSaldoAdminUniversal({ pool: getEnginePool(),
+        workspaceId: id, amount: creditosDepois,
+        idempotencyKey: `universal:admin:${String(body.creditOperationId ||
+          body.idempotencyKey || randomUUID())}`,
+        reason: String(body.motivoCredito || body.motivo || "ajuste_admin") });
+      if (!ajustado.ok) return res.status(409).json({ ok: false,
+        erro: ajustado.reason || "saldo_universal_indisponivel" });
+    }
+    for (const [campo, valor] of Object.entries(sujeitoCredito)) {
+      if (campo !== "creditos") usuario[campo] = valor;
+    }
+  }
+
+  if (creditosDepois !== creditosAntes) {
     usuario.auditoriaCreditos = Array.isArray(usuario.auditoriaCreditos)
       ? usuario.auditoriaCreditos
       : [];
     usuario.auditoriaCreditos.push({
       anterior: creditosAntes,
-      novo: usuario.creditos,
+      novo: creditosDepois,
       motivo: String(body.motivoCredito || body.motivo || "ajuste_admin").slice(0, 200),
       operador: getClienteId(req) || "admin",
       data: new Date().toISOString()
@@ -15251,7 +15746,8 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
 
   return res.json({
     ok: true,
-    usuario: sanitizarUsuarioAdmin(usuario)
+    usuario: { ...sanitizarUsuarioAdmin(usuario),
+      creditos: await saldoCreditosParaExibicao(id, usuario) }
   });
 });
 
@@ -15755,6 +16251,7 @@ app.get("/extension/oportunidades/resumo", async (req, res) => {
 app.use("/financeiro", criarRotasCheckoutFinanceiro({
   getPlanos: () => planos,
   renovarFinanceiroUsuario: renovarCreditosSeNecessario,
+  lerSaldoCreditos: saldoCreditosParaExibicao,
   resolverFinanceiroUsuario: resolverFinanceiroUsuarioMe
 }));
 app.use(criarRotasAjudaContextual({
@@ -16080,10 +16577,11 @@ app.post("/engine/distribuir-ofertas", async (req, res) => {
         marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor()
       },
       deps: {
+        universalFlowFreshnessCandidate: true,
         readClienteJson,
         writeClienteJson,
         getClientePath,
-        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        adicionarOfertaNaFilaGlobal: writerDistribuidorOperacional(),
         atualizarResumoHistoricoClonador,
         aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
         getPlanoCliente: resolverPlanoManualV2Scheduler,
@@ -22324,6 +22822,10 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
   });
 
   try {
+    const frescorHandoff = avaliarFrescorHandoffTeleRadar(dados);
+    if (!frescorHandoff.ok) {
+      return { ok: false, motivo: frescorHandoff.motivo, redirectsRadar: [] };
+    }
     const temRedirectConhecido = linksDados.some(linkRedirectPermitidoRadar);
     const temIdentidadeCanonica = linksDados.some(link =>
       Boolean(camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link }).chaveCanonica)
@@ -22334,6 +22836,8 @@ async function registrarEventoBrutoEngineRadar(dados = {}) {
     const dadosEngine = preparacao.dados;
     const resultado = await registrarEventoBruto(dadosEngine, {
       clientes: listarClientesEngineRadar(dadosEngine),
+      radarReplayCandidate: modoMotorReal === "UNIVERSAL" ||
+        process.env.UF_RADAR_REPLAY_LOCAL_CANDIDATE === "1",
       perf: {
         rodadaId,
         clienteId: clientesDados[0] || "",
@@ -22468,6 +22972,11 @@ async function processarMensagemRadar({
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
+  const capturadaEmFactualCandidata = capturaFactualRadarCandidata({
+    origemTipo: origemTipoFinal, fonte, raw, capturadaEm });
+  if (!capturadaEmFactualCandidata) {
+    return { ok: false, motivo: "captura_sem_tempo_factual" };
+  }
   const grupoIdTexto = textoRadarId(grupoId);
   const grupoNomeTexto = textoRadarId(grupoNome);
   const sessaoIdTexto = textoRadarId(sessaoId || (origemTipoFinal === "telegram" ? "telegram" : ""));
@@ -22668,7 +23177,7 @@ try {
     origemTipo: origemTipoFinal,
     grupoId: grupoIdTexto,
     grupoNome: grupoNomeTexto,
-    capturadaEm: capturadaEm || new Date().toISOString(),
+    capturadaEm: capturadaEmFactualCandidata,
     metadadosMidia: {
       imagemPresente: Boolean(
         raw?.message?.imageMessage ||
@@ -22734,7 +23243,7 @@ let radarMirrorBase = criarRadarMirror({
   sessaoId: sessaoIdTexto,
   grupoId: grupoIdTexto,
   grupoNome: grupoNomeTexto,
-  capturadaEm: capturadaEm || new Date().toISOString(),
+  capturadaEm: capturadaEmFactualCandidata,
   textoOriginal: texto,
   links,
   extracaoRadarLocal,
@@ -22819,7 +23328,7 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
   grupoNome: grupoNomeTexto,
   textoOriginal: texto,
   linksExtraidos: links,
-  capturadoEm: capturadaEm || new Date(),
+  capturadoEm: capturadaEmFactualCandidata,
   coberturaTraceId: coberturaTraceIdRadar,
   fidelidadeTraceId: fidelidadeTraceIdPrincipal,
   metadata: {
@@ -22832,7 +23341,8 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
     ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {})
   }
 });
-const registroEngineRadar = (temRedirectConhecidoRadar || aguardarAckEngine === true)
+const registroEngineRadar = (temRedirectConhecidoRadar || aguardarAckEngine === true ||
+  process.env.UF_RADAR_REPLAY_LOCAL_CANDIDATE === "1" || modoMotorReal === "UNIVERSAL")
   ? await registroEngineRadarPromise
   : null;
 
@@ -23006,9 +23516,7 @@ function comAckRadar(resultado = {}) {
   });
   const resultados = [];
   const marketplacesResumoRadar = new Set();
-  const dataCaptura = capturadaEm || new Date().toLocaleString("pt-BR", {
-    timeZone: "America/Sao_Paulo"
-  });
+  const dataCaptura = capturadaEmFactualCandidata;
 
   for (const link of links) {
     const correlationId = criarCorrelationIdRadar();
@@ -25379,6 +25887,7 @@ app.use("/mensageiro", criarRotasMensageiro({
 const clonadorGruposRepository = criarRepositorioClonadorGrupos();
 const clonadorGruposService = criarServicoClonadorGrupos({
   repository: clonadorGruposRepository,
+  exigirCapturaFactualCandidata: true,
   getClienteId,
   usuarioTemRecurso,
   clienteTemRecurso: clienteTemRecursoPlano,
@@ -25400,6 +25909,7 @@ const clonadorGruposBridge = criarBridgeClonadorGrupos({
   repository: clonadorGruposRepository,
   resolverRedirectUniversal: resolverRedirectClonador,
   registrarEventoBruto,
+  aplicarFrescorEsperaCandidato: true,
   logger: console
 });
 async function atualizarResumoHistoricoClonador({ clienteId, bufferId, resumo } = {}) {
@@ -25515,6 +26025,8 @@ app.use("/identidade-visual-ofertas", criarRotasIdentidadeVisualOfertas({
 
 // =============== ROTA DO SOCIAL MODULE =================
 
+require("./modules/social/universal-opportunities.source")
+  .configurarFonteUniversalSocial({ getMode: () => modoMotorReal, getPool: getEnginePool });
 app.use("/social", criarRotasSocial({
   getClienteId,
   getPlanoUsuario,
@@ -26186,7 +26698,8 @@ function emitirJwtOptimusUsuario(usuario = {}) {
   );
 }
 
-function payloadLoginUsuario(usuario = {}, token = "") {
+async function payloadLoginUsuario(usuario = {}, token = "") {
+  const creditos = await saldoCreditosParaExibicao(usuario.id, usuario);
   return {
     ok: true,
     token,
@@ -26196,7 +26709,7 @@ function payloadLoginUsuario(usuario = {}, token = "") {
       email: usuario.email,
       papel: usuario.papel,
       plano: usuario.plano,
-      creditos: usuario.creditos,
+      creditos,
       ativo: usuario.ativo
     }
   };
@@ -26268,7 +26781,7 @@ async function autenticarGoogleOptimus(idToken = "", body = {}) {
   });
 
   const token = emitirJwtOptimusUsuario(usuario);
-  return payloadLoginUsuario(usuario, token);
+  return await payloadLoginUsuario(usuario, token);
 }
 
 app.post("/auth/google", googleAuthRateLimit, async (req, res) => {
@@ -26354,7 +26867,7 @@ app.post("/login", async (req, res) => {
 
   const token = perf.etapaSync("jwt", () => emitirJwtOptimusUsuario(usuario));
 
-  const payload = perf.etapaSync("payload", () => payloadLoginUsuario(usuario, token));
+  const payload = await perf.etapa("payload", () => payloadLoginUsuario(usuario, token));
 
   perf.fim({ clienteId: usuario.id || "", usuarioEncontrado: true, senhaOk: true, statusCode: 200 });
   return res.json(payload);
@@ -26490,7 +27003,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
 // ================= ME ==========================
 
-app.get("/me", (req, res) => {
+app.get("/me", async (req, res) => {
   const perf = criarPerfTimer("PERF ME", contextoPerfHttp(req));
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
@@ -26505,6 +27018,7 @@ app.get("/me", (req, res) => {
   }
 
   perf.etapaSync("renovar_creditos", () => renovarCreditosSeNecessario(usuario));
+  const saldoCreditos = await saldoCreditosParaExibicao(clienteId, usuario);
 
   const usoConexoes = perf.etapaSync("conexoes", () => contarConexoesWorkspace(clienteId));
 
@@ -26542,7 +27056,7 @@ app.get("/me", (req, res) => {
       cicloAtualFim: usuario.cicloAtualFim || "",
       proximaRenovacao: usuario.proximaRenovacao || "",
       pagamentoUltimoStatus: usuario.pagamentoUltimoStatus || "",
-      creditos: usuario.creditos,
+      creditos: saldoCreditos,
       papel: usuario.papel,
       ativo: usuario.ativo,
       marketplacesLiberados: planoAtual.marketplaces || [],
@@ -33098,8 +33612,116 @@ console.log("[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO]", {
   produtoresAutomaticosLegados: "desligados_definitivamente"
 });
 
-initEngineDatabase()
-  .then(async () => {
+let executorFilaUniversalReal = null;
+let executorFilaUniversalRodando = false;
+
+async function processarVitrineUniversalReal() {
+  const summary = await processVitrineProjectionBatch({
+    pool: getEnginePool(), retentionMs: VITRINE_RETENCAO_MS,
+    buildOffer: claim => montarOfertaParaVitrinePosEnvio({
+        ...(claim.itemPayload || {}), clienteId: claim.workspaceId,
+        status: "enviado", enviadoEm: new Date(claim.terminalAt).toISOString(),
+        destinosEnviados: claim.confirmed
+      }, claim.commercialCta, { destinosEnviados: claim.confirmed }),
+    publish: (claim, offer) => publicarOfertaConfirmadaVitrine({
+        clienteId: claim.workspaceId, oferta: offer,
+        destinosEnviados: claim.confirmed,
+        deps: { readClienteJson, writeClienteJson, readGlobalJson,
+          writeGlobalJson, clienteTemRecurso: clienteTemRecursoPlano,
+          criarLinkOptimus, gerarLinkOptimus, logger: console }
+      })
+  });
+  if (summary.failed) console.error("[UNIVERSAL-VITRINE-FAILED]",
+    JSON.stringify(summary));
+}
+
+function iniciarExecutorFilaUniversalReal() {
+  if (modoMotorReal !== "UNIVERSAL" ||
+      typeof executorFilaUniversalReal !== "function") {
+    throw new Error("universal_executor_not_ready");
+  }
+  const tick = async () => {
+    if (executorFilaUniversalRodando || modoMotorReal !== "UNIVERSAL") return;
+    executorFilaUniversalRodando = true;
+    try {
+      for (const usuario of usuarios) {
+        const workspaceId = String(usuario?.id || "").trim();
+        if (!workspaceId || usuario.ativo === false) continue;
+        try {
+          await executorFilaUniversalReal(workspaceId);
+        } catch (error) {
+          console.error("[UNIVERSAL-QUEUE-EXECUTOR]", JSON.stringify({
+            workspaceId, reason: String(error?.message || error)
+          }));
+        }
+      }
+      await processarVitrineUniversalReal();
+    } finally {
+      executorFilaUniversalRodando = false;
+    }
+  };
+  const timer = setInterval(() => {
+    tick().catch(error => console.error("[UNIVERSAL-QUEUE-TICK]",
+      String(error?.message || error)));
+  }, 10000);
+  timer.unref?.();
+  void tick();
+}
+
+const promessaBootstrapEngine = initEngineDatabase()
+  .then(async resultadoInitEngine => {
+    if (resultadoInitEngine?.ok !== true) {
+      throw new Error(resultadoInitEngine?.motivo || "engine_database_unavailable");
+    }
+    const estadoOperacional = await prepararModoOperacionalReal({
+      pool: getEnginePool()
+    });
+    modoMotorReal = escolherMotorOperacional(estadoOperacional);
+    instalarEstadoIngressReal(estadoOperacional);
+    if (modoMotorReal === "UNIVERSAL") {
+      const recuperarCadastros = () => recuperarAberturasCadastroUniversal({
+        pool: getEnginePool(),
+        userExists: workspaceId => !!buscarUsuarioPorIdSeguro(usuarios, workspaceId),
+        limit: 20
+      });
+      await recuperarCadastros();
+      const timerCadastros = setInterval(() => {
+        recuperarCadastros().catch(error => console.error(
+          "[UNIVERSAL-CREDIT-REGISTRATION-RECOVERY]", String(error?.message || error)));
+      }, 30000);
+      timerCadastros.unref?.();
+      writerFilaUniversalReal = criarCallbackFilaUniversal({
+        pool: getEnginePool(),
+        resolveTelegramTargets: resolverAlvosTelegramFilaUniversal
+      });
+      executorFilaUniversalReal = criarExecutorFilaUniversalReal(getEnginePool());
+      if (typeof writerFilaUniversalReal !== "function" ||
+          typeof executorFilaUniversalReal !== "function") {
+        throw new Error("universal_runtime_incomplete");
+      }
+    } else {
+      carregarFilaLegacyBoot();
+    }
+    if ((modoMotorReal === "UNIVERSAL" ||
+        process.env.UF_RADAR_REPLAY_LOCAL_CANDIDATE === "1") &&
+        resultadoInitEngine?.ok === true) {
+      let replayRodando = false;
+      const recuperar = async () => {
+        if (replayRodando) return;
+        replayRodando = true;
+        try {
+          const resumo = await recuperarIntencoesRadarCandidatas({ limite: 10 });
+          console.log("[RADAR-REPLAY-RUNTIME-CANDIDATE]", JSON.stringify(resumo));
+        } catch (erro) {
+          console.warn("[RADAR-REPLAY-RUNTIME-CANDIDATE-ERRO]", String(erro.message || erro));
+        } finally {
+          replayRodando = false;
+        }
+      };
+      await recuperar();
+      const timerReplay = setInterval(recuperar, 30000);
+      timerReplay.unref?.();
+    }
     const localWorkerSchema = await localWorkerService.ensureSchema();
     if (!localWorkerSchema?.ok) {
       console.log("[LOCAL-WORKER-SCHEMA]", JSON.stringify({
@@ -33183,10 +33805,11 @@ initEngineDatabase()
         marketplacesAtivosPorCliente: listarMarketplacesAtivosEngineProcessor()
       }),
       getDepsDistribuidor: () => ({
+        universalFlowFreshnessCandidate: true,
         readClienteJson,
         writeClienteJson,
         getClientePath,
-        adicionarOfertaNaFilaGlobal: adicionarOfertaNaFilaGlobalEngine,
+        adicionarOfertaNaFilaGlobal: writerDistribuidorOperacional(),
         atualizarResumoHistoricoClonador,
         aplicarIdentidadeVisualOferta: identidadeVisualOfertasService.aplicarIdentidadeVisualOferta,
         getPlanoCliente: resolverPlanoManualV2Scheduler,
@@ -33195,14 +33818,17 @@ initEngineDatabase()
         }
       })
     });
+    if (modoMotorReal === "UNIVERSAL") iniciarExecutorFilaUniversalReal();
   })
   .catch((e) => {
+    modoMotorReal = "FAILED";
     console.log("[ENGINE-DB-ERRO]", {
       motivo: "init_exception",
       erro: e.message
     });
   });
 
+function carregarFilaLegacyBoot() {
 for (const usuario of usuarios) {
   if (!usuario) continue;
   if (usuario.ativo === false) {
@@ -33278,6 +33904,7 @@ console.log("[BOOT] Dados iniciais carregados:", {
   integracoesClientes: Object.keys(integracoesPorCliente || {}).length,
   destinosClientes: Object.keys(destinosPorCliente || {}).length
 });
+}
 
 function totalItensObjetoListasInfraMemoria(valor = {}) {
   return Object.values(valor || {}).reduce((total, lista) => {
@@ -33353,6 +33980,8 @@ function iniciarInfraMemoryTelemetryOperacional() {
   });
 }
 
+promessaBootstrapEngine.then(() => {
+if (modoMotorReal !== "LEGACY" && modoMotorReal !== "UNIVERSAL") return;
 app.listen(PORT, () => {
   console.log("[API]ðŸŸ¢ðŸ§  API ONLINE NA PORTA " + PORT);
   const adminMasterTeleRadar = usuarios.find(usuario => usuario && usuario.papel === "admin_master");
@@ -33414,6 +34043,7 @@ const sessoesParaReconectar = decisoesReconexaoBoot
     });
 
   }, 3000);
+});
 });
 
 
@@ -33960,6 +34590,7 @@ async function reconciliarPuloRapidoFilaV2(clienteId = "admin", puloRapido = {})
 }
 
 async function rodarProcessadorFilaGlobal() {
+  if (modoMotorReal !== "LEGACY") return;
   if (processadorFilaGlobalRodando) {
     console.log("[FILA-PROCESSADOR-GLOBAL-SKIP]", JSON.stringify({
       motivo: "rodada_em_execucao",
@@ -34023,6 +34654,7 @@ async function rodarProcessadorFilaGlobal() {
 }
 
 setInterval(() => {
+  if (modoMotorReal !== "LEGACY") return;
   rodarProcessadorFilaGlobal().catch(e => {
     logOptimus("ERRO", "Falha no processador global da fila", {
       erro: e.message
