@@ -446,7 +446,21 @@ async function setAdminBalance({ pool, workspaceId, amount,
 }
 
 async function rollbackBalanceProjection({ pool, workspaceId }) {
-  const current = await readBalance({ pool, workspaceId });
+  const workspace = text(workspaceId);
+  if (!workspace || !pool || typeof pool.query !== "function") {
+    throw new Error("universal_credit_rollback_identity_invalid");
+  }
+  const selected = await pool.query(`SELECT b.balance,b.reserved,b.opening_balance,
+      b.revision,b.operation_epoch_started_at
+    FROM engine_operation_state s JOIN engine_universal_credit_balances b
+      ON b.operation_epoch_started_at=s.operation_epoch_started_at
+    WHERE s.id=1 AND s.mode IN ('UNIVERSAL','ROLLBACK_FROZEN')
+      AND b.workspace_id=$1`, [workspace]);
+  if (selected.rowCount !== 1) throw new Error("universal_credit_rollback_opening_missing");
+  const row = selected.rows[0];
+  const current = { balance: Number(row.balance), reserved: Number(row.reserved),
+    openingBalance: Number(row.opening_balance), revision: Number(row.revision),
+    operationEpochStartedAt: epochIso(row.operation_epoch_started_at) };
   if (current.reserved !== 0) throw new Error("universal_credit_rollback_holds_open");
   const result = await pool.query(`SELECT universal_movement_type,
       amount,balance_policy,universal_balance_revision,universal_balance_after
@@ -480,6 +494,7 @@ async function rollbackBalanceProjection({ pool, workspaceId }) {
   return { workspaceId, operationEpochStartedAt: current.operationEpochStartedAt,
     openingBalance: current.openingBalance,
     movementCount: result.rows.length,
+    balanceRevision: current.revision,
     rollbackBalance: current.balance };
 }
 

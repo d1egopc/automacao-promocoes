@@ -1,7 +1,6 @@
 "use strict";
 
-// Local cutover building block; not imported by the production startup.
-// This module is deliberately independent of the legacy queue. The cutover
+// Active-epoch boundary, independent of the archived epoch history. The cutover
 // timestamp is an explicit, durable operational boundary, never a substitute
 // for an offer's factual capture clock (T0).
 const MODES = Object.freeze({
@@ -29,11 +28,13 @@ function validarEstadoOperacional(row) {
   const mode = String(row.mode || "");
   if (!Object.values(MODES).includes(mode)) throw new Error("operation_mode_unknown");
   const raw = row.operation_epoch_started_at;
-  if (mode === MODES.UNIVERSAL && !raw) {
-    throw new Error("universal_epoch_missing");
+  if ([MODES.UNIVERSAL, MODES.ROLLBACK_FROZEN].includes(mode) && !raw) {
+    throw new Error(mode === MODES.UNIVERSAL
+      ? "universal_epoch_missing" : "rollback_epoch_missing");
   }
-  if (mode === MODES.LEGACY && raw) {
-    throw new Error("legacy_epoch_inconsistent");
+  if ([MODES.LEGACY, MODES.CUTOVER_PREPARED].includes(mode) && raw) {
+    throw new Error(mode === MODES.LEGACY
+      ? "legacy_epoch_inconsistent" : "prepared_epoch_inconsistent");
   }
   return Object.freeze({ mode,
     operationEpochStartedAt: raw ? utcInstant(raw, "operation_epoch").toISOString() : null });

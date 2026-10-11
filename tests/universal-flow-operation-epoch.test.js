@@ -40,6 +40,10 @@ test("post-epoch capture preserves factual T0", () => {
 test("ambiguous mode or missing T0 fails closed", () => {
   assert.throws(() => validarEstadoOperacional({ mode: "unknown" }), /unknown/);
   assert.throws(() => validarEstadoOperacional({ mode: MODES.UNIVERSAL }), /missing/);
+  assert.throws(() => validarEstadoOperacional({ mode: MODES.ROLLBACK_FROZEN }),
+    /rollback_epoch_missing/);
+  assert.throws(() => validarEstadoOperacional({ mode: MODES.CUTOVER_PREPARED,
+    operation_epoch_started_at: epoch }), /prepared_epoch_inconsistent/);
   assert.throws(() => exigirCapturaUniversal({ capturedAt: "",
     state: { mode: MODES.UNIVERSAL, operationEpochStartedAt: epoch } }), /capture_t0/);
   assert.equal(exigirCapturaUniversal({ capturedAt: epoch,
