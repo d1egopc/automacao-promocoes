@@ -2,6 +2,7 @@
 
 const { getEnginePool, queryEngine } = require("../engine/database");
 const { avaliarFrescorEsperaClonador } = require("./wait-freshness.candidate");
+const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 
 const MAX_FONTES_ATIVAS = 4;
 // `ignorada` e' um registro de auditoria: nunca entra no bridge porque ele
@@ -68,7 +69,11 @@ function limitarBuffer(valor = 50) {
 }
 
 function jsonObjeto(valor = {}) {
-  return JSON.stringify(valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {});
+  return serializarJsonbSeguro(valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {}, {});
+}
+
+function jsonLinks(links) {
+  return serializarJsonbSeguro(Array.isArray(links) ? links : [], []);
 }
 
 function metadataComDisposicao(metadata = {}, code = "", limite = 0, extra = {}) {
@@ -487,7 +492,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
               texto_original,links,capturado_em,status,metadata,created_at,updated_at`, [
               clienteId,sessaoId,grupoJid,texto(item.grupoNome || item.grupo_nome),mensagemId,
               String(item.textoOriginal ?? item.texto_original ?? ""),
-              JSON.stringify(Array.isArray(item.links) ? item.links : []),capturadoEm,
+              jsonLinks(item.links),capturadoEm,
               jsonObjeto(metadataFria)
             ]);
             const itemFrio = normalizarBuffer(ignorada.rows[0]);
@@ -516,7 +521,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
           texto_original,links,capturado_em,status,metadata,created_at,updated_at`, [
           clienteId,sessaoId,grupoJid,texto(item.grupoNome || item.grupo_nome),mensagemId,
           String(item.textoOriginal ?? item.texto_original ?? ""),
-          JSON.stringify(Array.isArray(item.links) ? item.links : []),capturadoEm,
+          jsonLinks(item.links),capturadoEm,
           jsonObjeto(metadataNovo)
         ]);
         return { inserido: true, item: normalizarBuffer(resultado.rows[0]),
@@ -540,10 +545,10 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
       texto(item.grupoNome || item.grupo_nome),
       texto(item.mensagemId || item.mensagem_id),
       String(item.textoOriginal ?? item.texto_original ?? ""),
-      JSON.stringify(Array.isArray(item.links) ? item.links : []),
+      jsonLinks(item.links),
       item.capturadoEm || item.capturado_em || null,
       normalizarStatusBuffer(item.status),
-      JSON.stringify(item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata : {})
+      jsonObjeto(item.metadata)
     ], query);
     const row = resultado.rows[0] || null;
     return row ? { inserido: true, item: normalizarBuffer(row) } : { inserido: false, item: null };
