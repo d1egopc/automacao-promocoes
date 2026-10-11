@@ -123,17 +123,101 @@
     const imagens = imagensProduto(produto).sort((a, b) => pontuarImagem(b) - pontuarImagem(a));
     return { titulo, imagens, chave: JSON.stringify({ titulo, imagens }) };
   }
+  function pageMlbu(valor = "") {
+    const url = urlMercadoLivre(valor);
+    return url?.pathname.match(/\/up\/(MLBU\d{6,})\/?$/i)?.[1]?.toUpperCase() || "";
+  }
+  function contextoNordic(html = "") {
+    const fontes = [];
+    const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+    let match;
+    while ((match = re.exec(html))) {
+      if (atributos(match[1]).id === "__NORDIC_RENDERING_CTX__") fontes.push(match[2]);
+    }
+    if (fontes.length !== 1 || fontes[0].length > 1_000_000) throw new Error("ml_identity_contexto_ausente_ou_ambiguo");
+    const fonte = fontes[0];
+    const inicio = fonte.match(/^\s*_n\.ctx\.r\s*=\s*/)?.[0].length;
+    if (inicio === undefined || fonte[inicio] !== "{") throw new Error("ml_identity_contexto_invalido");
+    let nivel = 0, aspas = false, escape = false;
+    for (let i = inicio; i < fonte.length; i++) {
+      const c = fonte[i];
+      if (aspas) {
+        if (escape) escape = false;
+        else if (c === "\\") escape = true;
+        else if (c === '"') aspas = false;
+      } else if (c === '"') aspas = true;
+      else if (c === "{") nivel++;
+      else if (c === "}" && --nivel === 0) return JSON.parse(fonte.slice(inicio, i + 1)).appProps?.pageProps?.initialState;
+    }
+    throw new Error("ml_identity_contexto_invalido");
+  }
+  function associacaoMlbu(html, finalUrl) {
+    const page = pageMlbu(finalUrl);
+    const estado = contextoNordic(html);
+    const c = estado?.components;
+    const mlb = texto(c?.bookmark?.item_id);
+    if (!page || estado?.id !== page || !/^MLB\d{6,}$/.test(mlb)) throw new Error("ml_identity_binding_invalido");
+    const bookmark = c.bookmark.add?.track?.melidata_event?.event_data;
+    const track = c.track?.melidata_event?.event_data;
+    for (const contexto of [bookmark, track]) {
+      if (!contexto || contexto.item_id !== mlb || contexto.pid !== page || contexto.user_product_id !== page) {
+        throw new Error("ml_identity_binding_conflitante");
+      }
+    }
+    for (const contexto of [c.bookmark.delete?.track?.melidata_event?.event_data,
+      c.share?.action?.track?.melidata_event?.event_data, c.share?.show_track?.melidata_event?.event_data]) {
+      if (!contexto) continue;
+      if ((contexto.item_id && contexto.item_id !== mlb) ||
+          (contexto.pid && contexto.pid !== page) || (contexto.user_product_id && contexto.user_product_id !== page) ||
+          (contexto.object_id && contexto.object_id !== page)) throw new Error("ml_identity_binding_conflitante");
+    }
+    const canonicas = [];
+    const links = /<link\b([^>]+)>/gi;
+    let link;
+    while ((link = links.exec(html))) {
+      const attrs = atributos(link[1]);
+      if (texto(attrs.rel).toLowerCase().split(/\s+/).includes("canonical")) canonicas.push(attrs.href);
+    }
+    const metas = /<meta\b([^>]+)>/gi;
+    let meta;
+    while ((meta = metas.exec(html))) {
+      const attrs = atributos(meta[1]);
+      if (attrs.property === "og:url") canonicas.push(attrs.content);
+    }
+    if (!canonicas.length || canonicas.some(url => pageMlbu(url) !== page)) throw new Error("ml_identity_canonical_divergente");
+    if (c.share?.permalink) {
+      const share = new URL(decode(c.share.permalink));
+      if (pageMlbu(share.toString()) !== page ||
+          (share.searchParams.has("pdp_filters") && share.searchParams.get("pdp_filters") !== `item_id:${mlb}`)) {
+        throw new Error("ml_identity_binding_conflitante");
+      }
+    }
+    const produtos = jsonLdProdutos(html);
+    if (!produtos.length || produtos.some(p => texto(p.productID) !== page ||
+        (p.sku && texto(p.sku) !== page) || (p.url && pageMlbu(p.url) !== page) ||
+        (p["@id"] && pageMlbu(p["@id"]) !== page) || pageMlbu(p.offers?.url) !== page || mlbsProduto(p).length)) {
+      throw new Error("ml_identity_product_identificadores_conflitantes");
+    }
+    const titulo = texto(c.header?.title || c.header?.heading_label?.text).replace(/\s+/g, " ");
+    const h1 = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+    if (!titulo || produtos.some(p => texto(p.name).replace(/\s+/g, " ") !== titulo) ||
+        (h1 && decode(h1.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim() !== titulo)) {
+      throw new Error("ml_identity_contexto_produto_divergente");
+    }
+    return { pageMlbu: page, mlb, source: "nordic_current_product", bookmarkItem: mlb, bookmarkPage: page, trackItem: mlb, trackPage: page };
+  }
   function extrair(html, expectedMlb, finalUrl) {
-    const esperado = normalizarMlb(expectedMlb);
+    const associacaoPagina = pageMlbu(finalUrl) ? associacaoMlbu(html, finalUrl) : null;
+    const esperado = normalizarMlb(expectedMlb || associacaoPagina?.mlb);
     const final = urlMercadoLivre(finalUrl);
-    if (!esperado || !final || normalizarMlb(final.pathname) !== esperado) throw new Error("ml_identity_final_url_invalida");
+    if (!esperado || !final || (associacaoPagina ? associacaoPagina.mlb !== esperado : normalizarMlb(final.pathname) !== esperado)) throw new Error("ml_identity_final_url_invalida");
     const canonical = canonicalPagina(html, final.toString());
     const canonicalMlb = canonical ? normalizarMlb(canonical.pathname) : "";
     if (canonical && canonicalMlb && canonicalMlb !== esperado) throw new Error("ml_identity_canonical_divergente");
 
     const produtos = jsonLdProdutos(html);
     const candidatos = produtos
-      .filter(produto => mlbsProduto(produto).includes(esperado))
+      .filter(produto => associacaoPagina ? produto.productID === associacaoPagina.pageMlbu : mlbsProduto(produto).includes(esperado))
       .map(produto => ({ produto, ...assinaturaProduto(produto, final.toString()) }));
     if (candidatos.some(item => mlbsProduto(item.produto).some(mlb => mlb !== esperado))) {
       throw new Error("ml_identity_product_identificadores_conflitantes");
@@ -162,28 +246,64 @@
       origemImagem: imagem ? "jsonld.image" : "",
       finalUrl: final.toString(),
       canonicalUrl: canonical?.toString() || "",
-      variationId: variationIds[0] || ""
+      variationId: variationIds[0] || "",
+      ...(associacaoPagina ? { associacaoPagina } : {})
     };
   }
-  async function fetchTexto(url, timeoutMs = TIMEOUT_MS) {
+  async function fetchTexto(url, timeoutMs = TIMEOUT_MS, fetchImpl = fetch) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
     try {
-      response = await fetch(url, { redirect: "follow", signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
-      return { response, html: await response.text() };
+      // Validate each redirect before the request, not only the final URL.
+      for (let i = 0; i < 4; i++) {
+        response = await fetchImpl(url, { redirect: "manual", signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const next = urlMercadoLivre(response.headers?.get?.("location"), url);
+        await response.body?.cancel?.();
+        if (!next || i === 3) throw new Error("ml_identity_redirect_invalido");
+        url = next.toString();
+      }
+      if (Number(response.headers?.get?.("content-length")) > 2_000_000) throw new Error("ml_identity_html_muito_grande");
+      let html;
+      if (response.body?.getReader) {
+        const reader = response.body.getReader(), chunks = [];
+        let total = 0;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.byteLength;
+            if (total > 2_000_000) throw new Error("ml_identity_html_muito_grande");
+            chunks.push(value);
+          }
+        } finally { await reader.cancel(); reader.releaseLock(); }
+        const bytes = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        html = new TextDecoder().decode(bytes);
+      } else html = await response.text();
+      if (html.length > 2_000_000) throw new Error("ml_identity_html_muito_grande");
+      return { response, html };
     } finally {
       clearTimeout(timer);
       try { await response?.body?.cancel?.(); } catch (_) {}
     }
   }
-  async function validarImagem(url, timeoutMs = TIMEOUT_MS) {
+  async function validarImagem(url, timeoutMs = TIMEOUT_MS, fetchImpl = fetch) {
     if (!url) return "";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
     try {
-      response = await fetch(url, { redirect: "follow", signal: controller.signal });
+      for (let i = 0; i < 4; i++) {
+        response = await fetchImpl(url, { redirect: "manual", signal: controller.signal });
+        if (![301, 302, 303, 307, 308].includes(response.status)) break;
+        const next = imagemOficial(response.headers?.get?.("location"), url);
+        await response.body?.cancel?.();
+        if (!next || i === 3) throw new Error("ml_identity_imagem_redirect_invalido");
+        url = next;
+      }
       const finalUrl = imagemOficial(response.url || url);
       const contentType = texto(response.headers?.get?.("content-type") || "").toLowerCase().split(";", 1)[0];
       if (!response.ok || !finalUrl || !contentType.startsWith("image/")) throw new Error("ml_identity_imagem_http_invalida");
@@ -193,15 +313,16 @@
       try { await response?.body?.cancel?.(); } catch (_) {}
     }
   }
-  async function resolver({ productId, sourceUrl }) {
+  async function resolver({ productId, sourceUrl }, opcoes = {}) {
     const esperado = normalizarMlb(productId);
     const origem = urlMercadoLivre(sourceUrl);
-    if (!esperado || !origem || normalizarMlb(origem.pathname) !== esperado) throw new Error("ml_identity_entrada_invalida");
-    const leitura = await fetchTexto(origem.toString());
+    if (!origem || (!pageMlbu(origem.toString()) && (!esperado || normalizarMlb(origem.pathname) !== esperado))) throw new Error("ml_identity_entrada_invalida");
+    const leitura = await fetchTexto(origem.toString(), TIMEOUT_MS, opcoes.fetch || fetch);
     const finalUrl = urlMercadoLivre(leitura.response?.url || origem.toString());
     if (!leitura.response?.ok || !finalUrl) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
+    if (pageMlbu(origem.toString()) && pageMlbu(origem.toString()) !== pageMlbu(finalUrl.toString())) throw new Error("ml_identity_redirect_produto_divergente");
     const resultado = extrair(leitura.html, esperado, finalUrl.toString());
-    if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial);
+    if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial, TIMEOUT_MS, opcoes.fetch || fetch);
     const collectedAt = new Date().toISOString();
     return {
       capability: CAPABILITY,
@@ -223,7 +344,8 @@
         finalUrl: resultado.finalUrl,
         canonicalUrl: resultado.canonicalUrl,
         variationId: resultado.variationId,
-        collectedAt
+        collectedAt,
+        ...(resultado.associacaoPagina ? { associacaoPagina: resultado.associacaoPagina } : {})
       }
     };
   }
@@ -231,6 +353,8 @@
   global.OptimusMercadoLivreIdentityResolver = {
     resolver,
     extrair,
+    associacaoMlbu,
+    pageMlbu,
     tituloFactual,
     normalizarMlb,
     CAPABILITY,

@@ -94,6 +94,11 @@
       if (normalizadoOpcional(bruto.instrucaoCupom || bruto.cupomInstrucao || bruto.avisoCupom)) produto.instrucaoCupom = texto(bruto.instrucaoCupom || bruto.cupomInstrucao || bruto.avisoCupom);
       if (normalizadoOpcional(bruto.beneficioTexto || bruto.beneficio)) produto.beneficioTexto = texto(bruto.beneficioTexto || bruto.beneficio);
     }
+    if (produto.marketplace === "mercadolivre" && bruto.identidadeMlCandidata?.source === "nordic_current_product") {
+      // Candidate only: backend must re-read/validate the first-party source.
+      produto.identidadeMlCandidata = { pageMlbu: texto(bruto.identidadeMlCandidata.pageMlbu),
+        mlb: texto(bruto.identidadeMlCandidata.mlb), source: "nordic_current_product" };
+    }
 
     for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
       if (produto[campo] === "" || produto[campo] === null || produto[campo] === undefined) delete produto[campo];
@@ -131,6 +136,7 @@
       observacoes: normalizado.observacoes,
       origem: normalizado.origem
     };
+    if (normalizado.identidadeMlCandidata) payload.identidadeMlCandidata = { ...normalizado.identidadeMlCandidata };
     for (const campo of ["precoPix", "taxa", "frete", "freteValor", "linkApp", "linkPC", "linkMoedas", "linkResgate", "produtoId", "ean", "sku", "parcelamento"]) {
       if (normalizado[campo] !== "" && normalizado[campo] !== null && normalizado[campo] !== undefined) payload[campo] = normalizado[campo];
     }

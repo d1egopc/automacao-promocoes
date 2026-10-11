@@ -354,12 +354,20 @@
     botao.title = enviado ? "Oferta ja enviada para o preview atual" : "";
   }
 
+  const MENSAGEM_IDENTIDADE_LISTA_ML = "Não foi possível identificar este produto do Mercado Livre para adicionar à lista.";
+
+  function listaBloqueadaPorIdentidade() {
+    return state.previewOferta?.marketplace === "mercadolivre" &&
+      state.previewOferta?.listaCaptura?.elegivel === false;
+  }
+
   function atualizarBotaoLista() {
     const botao = el("botaoLista");
     if (!botao) return;
     const temPreview = previewCorrespondeAoFormulario();
     botao.hidden = !temPreview;
-    botao.disabled = !temPreview || state.carregandoListas || state.adicionandoLista;
+    botao.disabled = !temPreview || state.carregandoListas || state.adicionandoLista || listaBloqueadaPorIdentidade();
+    botao.title = listaBloqueadaPorIdentidade() ? MENSAGEM_IDENTIDADE_LISTA_ML : "";
   }
 
   function ocultarDestinos() {
@@ -996,6 +1004,7 @@
 
   async function abrirListaModal() {
     if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.carregandoListas) return;
+    if (listaBloqueadaPorIdentidade()) return;
     setHidden("listaModal", false);
     mostrarCriacaoLista(false);
     state.listas = [];
@@ -1025,6 +1034,10 @@
 
   async function adicionarOfertaNaLista(listaId, nomeLista) {
     if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.adicionandoLista) return false;
+    if (listaBloqueadaPorIdentidade()) {
+      mostrarFeedbackLista(MENSAGEM_IDENTIDADE_LISTA_ML, "erro");
+      return false;
+    }
     const previewKey = state.previewKey;
     state.adicionandoLista = true;
     el("adicionarListaExistente").disabled = true;
@@ -1047,6 +1060,12 @@
         return false;
       }
       const jaExiste = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
+      const semIdentidade = String(erro?.body?.motivo || erro?.message || "") === "produto_sem_identidade_operacional";
+      if (semIdentidade && state.previewOferta?.marketplace === "mercadolivre") {
+        console.warn("[CAPTURE-LISTA-REJEITADA]", { marketplace: "mercadolivre", codigo: "produto_sem_identidade_operacional" });
+        mostrarFeedbackLista(MENSAGEM_IDENTIDADE_LISTA_ML, "erro");
+        return false;
+      }
       mostrarFeedbackLista(jaExiste ? "Esta oferta ja esta nesta lista" : "Nao foi possivel adicionar a oferta.", jaExiste ? "" : "erro");
       return false;
     } finally {
@@ -1189,8 +1208,8 @@
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
       atualizarBotaoLista();
-      setTexto("estadoPagina", "Oferta pronta");
-      setTexto("statusLink", "Oferta pronta");
+      setTexto("estadoPagina", listaBloqueadaPorIdentidade() ? "Oferta pronta para salvar; indisponível para Lista" : "Oferta pronta");
+      setTexto("statusLink", listaBloqueadaPorIdentidade() ? MENSAGEM_IDENTIDADE_LISTA_ML : "Oferta pronta");
       logTiming("preview_pronto", {
         marketplace: produto.marketplace,
         asin: asinSeguro(produto.urlOriginal),

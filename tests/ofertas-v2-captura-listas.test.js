@@ -15,6 +15,8 @@ const { urlMercadoLivreSegura } = require("../modules/manual-v2/manual-capture.s
 const { ordenarElegiveis } = require("../modules/manual-v2/manual-auto-dispatch");
 const { criarProvaAfiliacaoWorkspaceAliExpress } =
   require("../modules/marketplaces/aliexpress/afiliacao-workspace");
+const { criarProvaAfiliacaoWorkspaceShopee } =
+  require("../modules/marketplaces/shopee/afiliacao-workspace");
 const { criarProvaAfiliacaoWorkspaceMagalu, PROOF_TYPE_DETERMINISTIC_WORKSPACE } =
   require("../modules/marketplaces/magalu/afiliacao-workspace");
 
@@ -42,6 +44,7 @@ async function main() {
   const workspace = "user_captura_lista";
   const outroWorkspace = "user_captura_lista_outro";
   const credenciais = { appKey: "app_lista", trackingId: "tracking_lista", secret: "secret_lista" };
+  const credenciaisShopee = { appId: "12345", secret: "secret_lista_shopee" };
   const produtoId = "1005001234567890";
   const urlOriginal = `https://pt.aliexpress.com/item/${produtoId}.html`;
   const urlAfiliada = "https://s.click.aliexpress.com/e/_captura_lista";
@@ -74,6 +77,7 @@ async function main() {
     getClienteId: (req) => req.header("x-cliente-id") || "",
     getIntegracaoCliente: (_clienteId, marketplace) => {
       if (marketplace === "aliexpress") return { credenciais };
+      if (marketplace === "shopee") return { credenciais: credenciaisShopee };
       if (marketplace === "magalu") return { credenciais: { promoterId: "d1egopc" } };
       return null;
     }
@@ -195,7 +199,8 @@ async function main() {
     assert.strictEqual(idProdutoPorUrl("mercadolivre", urlMlbDireta), "mlb5287366788");
     assert.strictEqual(urlMercadoLivreSegura(urlMlbDireta).ok, true);
     const mlBase = { marketplace: "mercadolivre", urlOriginal: urlMlbDireta,
-      urlAfiliada: "https://meli.la/captura-ml", titulo: "Produto ML", precoAtual: "59,90" };
+      urlAfiliada: "https://meli.la/captura-ml", titulo: "Produto ML", precoAtual: "59,90",
+      imagem: "https://http2.mlstatic.com/D_NQ_NP_848037-MLB119040009107_102026-O.webp" };
     assert.strictEqual(componentesIdentidadeCanonica({ ...mlBase, produtoId: "MLB-5287366788" }).identidadeProduto,
       "mlb5287366788");
     assert.strictEqual(identidadeCanonica({ ...mlBase, produtoId: "MLB-5287366788" }),
@@ -222,6 +227,10 @@ async function main() {
     });
     assert.strictEqual(capturaMl.status, 200);
     assert.strictEqual(capturaMl.body.lista.itens.length, 1);
+    const mlPersistida = listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens[0].oferta;
+    for (const campo of ["titulo", "imagem", "urlOriginal", "urlAfiliada"]) {
+      assert.strictEqual(mlPersistida[campo], mlBase[campo]);
+    }
     const mlDuplicada = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
       origem: "captura_extensao", oferta: { ...mlBase, urlOriginal: urlMlbSemHifen,
         produtoId: "MLB5287366788" }
@@ -236,6 +245,65 @@ async function main() {
     assert.strictEqual(listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens.length, 1);
     assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 1,
       "+ Lista ML nao cria Oferta alem da Oferta legada salva explicitamente");
+
+    const urlMlbu = "https://www.mercadolivre.com.br/conjunto-moletom-calca-unissex-paris-canguru-casaco-frio/up/MLBU3862120597";
+    for (const ofertaSemIdentidade of [
+      { ...mlBase, urlOriginal: urlMlbu, produtoId: "" },
+      { ...mlBase, urlOriginal: `${urlMlbu}#wid=MLB6524249752`, produtoId: "" },
+      { ...mlBase, urlOriginal: `${urlMlbu}?wid=MLB6524249752`, produtoId: "" },
+      { ...mlBase, urlOriginal: urlMlbu, produtoId: "MLB3862120597" },
+      { ...mlBase, urlOriginal: urlMlbu, produtoId: "MLB6524249752",
+        identidadeProdutoVerificada: { origem: "engine_importer", marketplace: "mercadolivre", id: "MLB6524249752" },
+        listaCaptura: { elegivel: true } }
+    ]) {
+      const bloqueada = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+        origem: "captura_extensao", oferta: ofertaSemIdentidade
+      });
+      assert.strictEqual(bloqueada.status, 422);
+      assert.strictEqual(bloqueada.body.motivo, "produto_sem_identidade_operacional");
+    }
+    assert.strictEqual(listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens.length, 1);
+    assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 1, "rejeicoes nao criam ofertas fantasmas");
+
+    const manualMlbu = await request(server, "POST", "/manual-v2/ofertas", workspace, {
+      oferta: { ...mlBase, urlOriginal: urlMlbu, produtoId: "" }
+    });
+    assert.strictEqual(manualMlbu.status, 201, "Salvar Manual MLBU continua valido");
+    assert.strictEqual(manualMlbu.body.oferta.urlOriginal, urlMlbu);
+    assert.strictEqual(manualMlbu.body.oferta.urlAfiliada, mlBase.urlAfiliada);
+    assert.strictEqual(manualMlbu.body.oferta.titulo, mlBase.titulo);
+    assert.strictEqual(manualMlbu.body.oferta.imagem, mlBase.imagem);
+    const manualParaLista = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+      origem: "ofertas", ofertaId: manualMlbu.body.oferta.id
+    });
+    assert.strictEqual(manualParaLista.status, 200, "fallback isolado do Manual salvo permanece inalterado");
+
+    const originalShopee = "https://shopee.com.br/product/123456/987654";
+    const afiliadaShopee = "https://s.shopee.com.br/captura_lista";
+    const provaShopee = criarProvaAfiliacaoWorkspaceShopee({
+      clienteId: workspace, credenciais: credenciaisShopee, urlOriginal: originalShopee,
+      urlAfiliadaWorkspace: afiliadaShopee,
+      urlFinalExpandida: `${originalShopee}?mmp_pid=an_12345`, papel: "produto"
+    });
+    const listaRegressao = listas.criarLista(workspace, "Regressoes de captura");
+    let totalRegressoes = 0;
+    for (const regressao of [
+      { marketplace: "amazon", produtoId: "B0ABC12345",
+        urlOriginal: "https://www.amazon.com.br/dp/B0ABC12345", urlAfiliada: "https://amzn.to/captura_lista" },
+      { marketplace: "shopee", produtoId: "123456/987654", urlOriginal: originalShopee,
+        urlAfiliada: afiliadaShopee, afiliacaoWorkspaceVerificada: provaShopee },
+      { marketplace: "kabum", produtoId: "123456", urlOriginal: "https://www.kabum.com.br/produto/123456/produto",
+        urlAfiliada: "https://www.kabum.com.br/produto/123456/produto?tag=lista" }
+    ]) {
+      const adicionada = await request(server, "POST", `/manual-v2/listas/${listaRegressao.id}/itens`, workspace, {
+        origem: "captura_extensao", oferta: { ...regressao, titulo: "Produto capturado", precoAtual: "99,90" }
+      });
+      assert.strictEqual(adicionada.status, 200, `${regressao.marketplace}: captura direta preservada`);
+      assert.strictEqual(adicionada.body.lista.itens.length, ++totalRegressoes);
+      assert.strictEqual(listas.lerListas(workspace).find((item) => item.id === listaRegressao.id)
+        .itens[totalRegressoes - 1].oferta.urlAfiliada, regressao.urlAfiliada);
+    }
+    assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 2, "regressoes de Lista nao criam ofertas");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     if (segredoAnterior === undefined) delete process.env.JWT_SECRET;

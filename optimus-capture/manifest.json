@@ -76,6 +76,7 @@
       "js": [
         "core/product-contract.js",
         "core/marketplace-detector.js",
+        "local-worker/mercadolivre-identity.js",
         "adapters/mercadolivre.js",
         "adapters/amazon.js",
         "adapters/shopee.js",

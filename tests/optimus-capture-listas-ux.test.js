@@ -88,6 +88,12 @@ async function executar() {
   let envios = 0;
   let duplicar = false;
   let falharAdicao = false;
+  let listaSemIdentidade = false;
+  let erroIdentidade = false;
+  let identidadeVerificada = null;
+  const payloadsPreview = [];
+  let tabUpdated;
+  const warnings = [];
   const payloadsAdicao = [];
   const ofertasSalvas = [];
   const produto = {
@@ -101,7 +107,7 @@ async function executar() {
   };
 
   const contexto = {
-    console,
+    console: { ...console, warn: (...args) => warnings.push(args) },
     setTimeout,
     clearTimeout,
     document: {
@@ -118,7 +124,7 @@ async function executar() {
         async query() { return [{ id: 1, url: produto.urlOriginal }]; },
         async sendMessage() { capturas += 1; return { produto }; },
         onActivated: { addListener() {} },
-        onUpdated: { addListener() {} }
+        onUpdated: { addListener(callback) { tabUpdated = callback; } }
       }
     },
     OptimusCaptureAuth: {
@@ -128,7 +134,10 @@ async function executar() {
     OptimusCaptureApi: {
       async gerarPreviewCapture(_token, payload) {
         previews += 1;
-        return { oferta: { ...payload, urlAfiliada: "https://s.click.aliexpress.com/e/teste" } };
+        payloadsPreview.push(payload);
+        return { oferta: { ...payload, urlAfiliada: "https://s.click.aliexpress.com/e/teste",
+          ...(identidadeVerificada ? { identidadeMlCapture: identidadeVerificada, listaCaptura: { elegivel: true, motivo: "" } } : {}),
+          ...(listaSemIdentidade ? { listaCaptura: { elegivel: false, motivo: "produto_sem_identidade_operacional" } } : {}) } };
       },
       async salvarOfertaManualV2(_token, oferta) {
         saves += 1;
@@ -149,6 +158,12 @@ async function executar() {
       async adicionarCapturaListaManualV2(_token, listaId, oferta) {
         adicoes += 1;
         payloadsAdicao.push({ listaId, oferta });
+        if (erroIdentidade) {
+          const erro = new Error("produto_sem_identidade_operacional");
+          erro.status = 422;
+          erro.body = { ok: false, motivo: "produto_sem_identidade_operacional" };
+          throw erro;
+        }
         if (duplicar) {
           const erro = new Error("item_ja_na_lista");
           erro.status = 409;
@@ -251,6 +266,57 @@ async function executar() {
   assert.strictEqual(ofertasSalvas[0].titulo, "Titulo editado");
   assert.ok(elemento("botaoSalvar").listeners.click, "Salvar no Optimus permanece ligado");
   assert.ok(elemento("botaoEnviar").listeners.click, "Enviar agora permanece ligado");
+
+  produto.marketplace = "mercadolivre";
+  produto.urlOriginal = "https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597#wid=MLB6524249752";
+  listaSemIdentidade = true;
+  tabUpdated(1, { status: "complete" });
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  assert.strictEqual(elemento("botaoLista").disabled, true);
+  assert.match(elemento("botaoLista").title, /identificar este produto do Mercado Livre/);
+  assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta para salvar; indisponível para Lista");
+  assert.strictEqual(elemento("botaoSalvar").disabled, false);
+  const adicoesAntes = adicoes;
+  await elemento("botaoLista").listeners.click();
+  assert.strictEqual(elemento("listaModal").hidden, true, "guard impede abrir mesmo por click sintetico");
+  assert.strictEqual(adicoes, adicoesAntes);
+  await elemento("botaoSalvar").listeners.click();
+  assert.strictEqual(saves, 2, "bloqueio de Lista nao impede Salvar Manual");
+
+  // Backend anterior sem diagnóstico: a resposta factual ainda tem UX segura.
+  listaSemIdentidade = false;
+  erroIdentidade = true;
+  elemento("campoTitulo").value = "Conjunto Moletom Paris editado";
+  elemento("campoTitulo").listeners.input();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await elemento("botaoLista").listeners.click();
+  const radioMl = elemento("listasDisponiveis").children[0].children[0];
+  radioMl.listeners.change();
+  await elemento("adicionarListaExistente").listeners.click();
+  assert.match(elemento("listaModalFeedback").textContent, /identificar este produto do Mercado Livre/);
+  assert.strictEqual(warnings.length, 1);
+  assert.strictEqual(JSON.stringify(warnings[0]), JSON.stringify([
+    "[CAPTURE-LISTA-REJEITADA]", { marketplace: "mercadolivre", codigo: "produto_sem_identidade_operacional" }
+  ]), "log nao inclui JWT, URL, titulo ou payload");
+
+  // A verified MLBU re-enables List, keeps the candidate through form edits and transports the receipt.
+  erroIdentidade = false;
+  identidadeVerificada = { mlb: "MLB6524249752", assinatura: "test-receipt-from-preview" };
+  produto.identidadeMlCandidata = { pageMlbu: "MLBU3862120597", mlb: "MLB6524249752", source: "nordic_current_product" };
+  produto.urlOriginal = "https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597?picker=true";
+  tabUpdated(1, { status: "complete" });
+  await new Promise(resolve => setTimeout(resolve, 700));
+  assert.strictEqual(elemento("botaoLista").disabled, false);
+  assert.strictEqual(payloadsPreview.at(-1).identidadeMlCandidata.mlb, "MLB6524249752");
+  elemento("campoTitulo").value = "Conjunto Moletom Paris editado novamente";
+  elemento("campoTitulo").listeners.input();
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.strictEqual(payloadsPreview.at(-1).identidadeMlCandidata.mlb, "MLB6524249752");
+  await elemento("botaoLista").listeners.click();
+  elemento("listasDisponiveis").children[0].children[0].listeners.change();
+  await elemento("adicionarListaExistente").listeners.click();
+  assert.strictEqual(payloadsAdicao.at(-1).oferta.identidadeMlCapture, identidadeVerificada);
+  assert.strictEqual(saves, 2, "verified MLBU List still does not create an intermediate Manual offer");
 }
 
 executar().then(() => {

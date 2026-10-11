@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { validarProvaCaptureMl } = require("../local-worker/ml-identity.contract");
 
 function texto(valor) { return String(valor ?? "").trim(); }
 function mercado(valor) {
@@ -93,7 +94,10 @@ function componentesIdentidadeCanonica(oferta = {}) {
   const universalValidada = metadata.ofertaUniversalValidacao?.ok === true &&
     mercado(universal.marketplace) === marketplace &&
     texto(universal.workspaceId) === texto(oferta.clienteId || oferta.workspaceId) && idUniversal;
+  const idCapture = marketplace === "mercadolivre"
+    ? formatoId(marketplace, validarProvaCaptureMl(oferta.identidadeMlCapture || {}, oferta)) : "";
   const ids = new Set([...idsUrl, ...(comprovado ? [idOficial] : []),
+    ...(idCapture ? [idCapture] : []),
     ...(universalValidada ? [idUniversal] : [])]);
   if (ids.size !== 1 || (candidatos.length && candidatos.some((id) => !ids.has(formatoId(marketplace, id))))) return null;
   if (marketplace === "mercadolivre") {
@@ -107,7 +111,7 @@ function componentesIdentidadeCanonica(oferta = {}) {
   return {
     marketplace,
     identidadeProduto: [...ids][0],
-    origem: comprovado || universalValidada ? "adapter_oficial" : "url_produto_oficial"
+    origem: comprovado || universalValidada ? "adapter_oficial" : (idCapture ? "ml_identity_v1" : "url_produto_oficial")
   };
 }
 

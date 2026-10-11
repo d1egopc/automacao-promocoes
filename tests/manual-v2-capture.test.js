@@ -187,6 +187,22 @@ function arquivoOfertas(clienteId) {
   const server = await ouvir(app);
 
   try {
+    for (const [urlOriginal, elegivel] of [
+      ["https://produto.mercadolivre.com.br/MLB-6524249752-conjunto-_JM", true],
+      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597", false],
+      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597#wid=MLB6524249752", false]
+    ]) {
+      const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_ml_identidade", payloadValido({ urlOriginal }));
+      assert.strictEqual(resposta.status, 200, "Preview/Salvar permanece disponivel");
+      assert.strictEqual(resposta.body.oferta.listaCaptura.elegivel, elegivel);
+      assert.strictEqual(resposta.body.oferta.listaCaptura.motivo, elegivel ? "" : "produto_sem_identidade_operacional");
+      assert.strictEqual(resposta.body.oferta.urlOriginal, urlOriginal);
+      assert.strictEqual(resposta.body.oferta.titulo, payloadValido().titulo);
+      assert.strictEqual(resposta.body.oferta.imagem, payloadValido().imagem);
+      assert.strictEqual(resposta.body.oferta.urlAfiliada, "https://meli.la/captureOk");
+    }
+    chamadas.length = 0;
+    logger.eventos.length = 0;
     {
       const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "", payloadValido());
       assert.strictEqual(resposta.status, 401, "sem cliente autenticado deve rejeitar");

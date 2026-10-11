@@ -1,4 +1,6 @@
 "use strict";
+const crypto = require("crypto");
+const { pageMlbu } = require("../../optimus-capture/local-worker/mercadolivre-identity");
 
 const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
 const ML_IDENTITY_CONTRACT_VERSION = 1;
@@ -99,10 +101,18 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
   if (!Number.isFinite(collectedAt.getTime()) || collectedAt.getTime() > agoraMs + 30_000 || agoraMs - collectedAt.getTime() >= ttlMs) throw erroContrato("ml_identity_resultado_stale");
 
   const finalUrl = sanitizarUrlMercadoLivre(payload.finalUrl || prova.finalUrl);
-  if (!finalUrl || !urlMercadoLivreCompativel(finalUrl, expectedMlb)) throw erroContrato("ml_identity_final_url_invalida");
+  const associacao = payload.associacaoPagina || prova.associacaoPagina;
+  const bindingValido = associacao && associacao.source === "nordic_current_product" &&
+    /^MLBU\d{6,}$/.test(associacao.pageMlbu) && associacao.mlb === expectedMlb &&
+    associacao.bookmarkItem === expectedMlb && associacao.trackItem === expectedMlb &&
+    associacao.bookmarkPage === associacao.pageMlbu && associacao.trackPage === associacao.pageMlbu &&
+    JSON.stringify(associacao) === JSON.stringify(prova.associacaoPagina) && pageMlbu(finalUrl) === associacao.pageMlbu;
+  if (!finalUrl || (pageMlbu(finalUrl) ? !bindingValido : !urlMercadoLivreCompativel(finalUrl, expectedMlb))) throw erroContrato("ml_identity_final_url_invalida");
   const canonicalInformada = texto(payload.canonicalUrl || prova.canonicalUrl);
   const canonicalUrl = canonicalInformada ? sanitizarUrlMercadoLivre(canonicalInformada) : "";
-  if (canonicalInformada && (!canonicalUrl || !urlMercadoLivreCompativel(canonicalUrl, expectedMlb, { exigirMlb: false }))) throw erroContrato("ml_identity_canonical_invalida");
+  if (canonicalInformada && (!canonicalUrl || (bindingValido
+    ? pageMlbu(canonicalUrl) !== associacao.pageMlbu
+    : !urlMercadoLivreCompativel(canonicalUrl, expectedMlb, { exigirMlb: false })))) throw erroContrato("ml_identity_canonical_invalida");
 
   const tituloInformado = texto(payload.tituloOficial).replace(/\s+/g, " ");
   const tituloOficial = tituloFactualMercadoLivreValido(tituloInformado) ? tituloInformado : "";
@@ -136,6 +146,7 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
     canonicalUrl,
     variationId,
     collectedAt: collectedAt.toISOString(),
+    ...(bindingValido ? { associacaoPagina: { ...associacao } } : {}),
     provaTecnica: {
       capability: ML_IDENTITY_CAPABILITY,
       contractVersion: ML_IDENTITY_CONTRACT_VERSION,
@@ -150,9 +161,36 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
       finalUrl,
       canonicalUrl,
       variationId,
-      collectedAt: collectedAt.toISOString()
+      collectedAt: collectedAt.toISOString(),
+      ...(bindingValido ? { associacaoPagina: { ...associacao } } : {})
     }
   };
+}
+
+function payloadProvaCapture(prova) {
+  return JSON.stringify(["capture.ml_identity_v1", prova.workspaceId, prova.urlOriginal,
+    prova.urlCanonica, prova.pageMlbu, prova.mlb, prova.collectedAt]);
+}
+// Mint only after trusted first-party revalidation; raw content-script evidence is never a receipt.
+function criarProvaCaptureMl(resultado, { clienteId, urlOriginal } = {}) {
+  const validado = validarResultadoMlIdentity(resultado);
+  if (!validado.associacaoPagina || !process.env.JWT_SECRET || !texto(clienteId) ||
+      pageMlbu(urlOriginal) !== validado.associacaoPagina.pageMlbu) throw erroContrato("ml_identity_capture_prova_invalida");
+  const prova = { workspaceId: texto(clienteId), urlOriginal: texto(urlOriginal),
+    urlCanonica: validado.canonicalUrl, pageMlbu: validado.associacaoPagina.pageMlbu,
+    mlb: validado.expectedMlb, collectedAt: validado.collectedAt };
+  return { ...prova, assinatura: crypto.createHmac("sha256", process.env.JWT_SECRET).update(payloadProvaCapture(prova)).digest("hex") };
+}
+function validarProvaCaptureMl(prova = {}, oferta = {}, agoraMs = Date.now()) {
+  if (!process.env.JWT_SECRET || oferta.marketplace !== "mercadolivre" ||
+      !/^MLB\d{6,}$/.test(texto(prova.mlb)) || !/^MLBU\d{6,}$/.test(texto(prova.pageMlbu)) ||
+      texto(prova.workspaceId) !== texto(oferta.clienteId || oferta.workspaceId) ||
+      texto(prova.urlOriginal) !== texto(oferta.urlOriginal) || pageMlbu(prova.urlOriginal) !== prova.pageMlbu ||
+      pageMlbu(prova.urlCanonica) !== prova.pageMlbu || !/^[a-f0-9]{64}$/.test(texto(prova.assinatura))) return null;
+  const at = Date.parse(prova.collectedAt);
+  if (!Number.isFinite(at) || at > agoraMs + 30_000 || agoraMs - at >= ML_IDENTITY_RESULT_TTL_MS) return null;
+  const assinatura = crypto.createHmac("sha256", process.env.JWT_SECRET).update(payloadProvaCapture(prova)).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(assinatura, "hex"), Buffer.from(prova.assinatura, "hex")) ? prova.mlb : null;
 }
 
 module.exports = {
@@ -165,5 +203,7 @@ module.exports = {
   sanitizarUrlMlstatic,
   urlMlstaticValida,
   tituloFactualMercadoLivreValido,
-  validarResultadoMlIdentity
+  validarResultadoMlIdentity,
+  criarProvaCaptureMl,
+  validarProvaCaptureMl
 };

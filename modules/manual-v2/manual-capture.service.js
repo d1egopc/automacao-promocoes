@@ -2,6 +2,9 @@ const {
   normalizarMarketplaceManualV2,
   normalizarOfertaManualV2
 } = require("./manual-offers.contract");
+const { componentesIdentidadeCanonica } = require("./ofertas-v2-identidade");
+const identidadeMl = require("../../optimus-capture/local-worker/mercadolivre-identity");
+const { criarProvaCaptureMl } = require("../local-worker/ml-identity.contract");
 const {
   gerarShortLinkShopee
 } = require("../../marketplaces/shopee/importar");
@@ -338,6 +341,15 @@ function respostaPreview(ofertaNormalizada = {}) {
   delete oferta.status;
   delete oferta.criadoEm;
   delete oferta.atualizadoEm;
+  // Diagnóstico da mesma regra usada pela Lista; não é autoridade de admissão.
+  // Salvar Manual continua disponível mesmo sem identidade canônica de produto.
+  if (oferta.marketplace === "mercadolivre") {
+    const elegivel = Boolean(componentesIdentidadeCanonica(oferta));
+    oferta.listaCaptura = {
+      elegivel,
+      motivo: elegivel ? "" : "produto_sem_identidade_operacional"
+    };
+  }
   return oferta;
 }
 
@@ -473,6 +485,19 @@ async function gerarPreviewCaptureManualV2(entrada = {}, deps = {}) {
     seller: texto(entrada.seller || entrada.vendedor || entrada.loja || entrada.store),
     urlOriginal: urlValidada.url
   };
+  if (marketplace === "mercadolivre" && identidadeMl.pageMlbu(urlValidada.url) &&
+      entrada.identidadeMlCandidata?.source === "nordic_current_product") {
+    try {
+      const candidata = entrada.identidadeMlCandidata;
+      if (candidata.pageMlbu !== identidadeMl.pageMlbu(urlValidada.url) || !/^MLB\d{6,}$/.test(candidata.mlb)) throw new Error("ml_identity_binding_invalido");
+      const resultado = await identidadeMl.resolver({ productId: candidata.mlb, sourceUrl: urlValidada.url }, { fetch: deps.fetch || global.fetch });
+      baseConversao.identidadeMlCapture = criarProvaCaptureMl(resultado, { clienteId, urlOriginal: urlValidada.url });
+      // Do not override user product IDs that contradict the verified identity.
+      if (!baseConversao.produtoId) baseConversao.produtoId = resultado.expectedMlb;
+    } catch {
+      // Identity failure blocks List only, not the established Manual save contract.
+    }
+  }
 
   let urlAfiliada = "";
   try {

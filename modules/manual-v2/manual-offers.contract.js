@@ -257,6 +257,9 @@ function normalizarOfertaManualV2(entrada = {}, contexto = {}) {
     linkMoedas: primeiroTexto(entrada.linkMoedas, entrada.urlMoedas),
     linkResgate: primeiroTexto(entrada.linkResgate, entrada.linkResgateCupom, entrada.urlResgate),
     produtoId: primeiroTexto(entrada.produtoId, entrada.productId, entrada.itemId),
+    // Transport only. The shared identity helper verifies signature, workspace, URL and TTL.
+    ...(marketplaceEntrada === "mercadolivre" && entrada.identidadeMlCapture && typeof entrada.identidadeMlCapture === "object"
+      ? { identidadeMlCapture: { ...entrada.identidadeMlCapture } } : {}),
     ...(contexto.identidadeImportadorConfiavel === true && entrada.identidadeProdutoVerificada?.origem === "engine_importer"
       ? { identidadeProdutoVerificada: { origem: "engine_importer",
         marketplace: primeiroTexto(entrada.identidadeProdutoVerificada.marketplace),
