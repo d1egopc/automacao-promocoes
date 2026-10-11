@@ -154,8 +154,8 @@ async function armOneShot({ pool, workspaceId, destinationId, targetKey,
         cutoverValidationId: id, sourceHash }),epoch]);
     await client.query(`INSERT INTO engine_universal_one_shot_smoke
       (id,smoke_epoch_at,workspace_id,destination_id,target_key,channel,
-       queue_item_id,queue_destination_id,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+       queue_item_id,queue_destination_id,state,expires_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'armed',
         clock_timestamp()+($9::integer * interval '1 second'))`,
     [id,epoch,workspace,destination,target,type,item.id,targetRow.id,ttl]);
     return { id, workspaceId: workspace, destinationId: destination,

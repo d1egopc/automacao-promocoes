@@ -81,6 +81,10 @@ async function main() {
     assert.match(spentIndex?.indexdef || "",/provider_call_count = 1/);
     assert.equal((await admin.query(`SELECT count(*)::int AS n
       FROM engine_universal_one_shot_smoke`)).rows[0].n,0);
+    assert.equal((await admin.query(`SELECT column_default FROM information_schema.columns
+      WHERE table_schema=current_schema()
+        AND table_name='engine_universal_one_shot_smoke'
+        AND column_name='state'`)).rows[0].column_default,null);
     assert.equal(await armOneShot({pool,workspaceId:workspace,
       destinationId:"pre_mode_dest",targetKey:"pre_mode_target",
       channel:"whatsapp",itemPayload:{titulo:"Antes PREPARED"}})

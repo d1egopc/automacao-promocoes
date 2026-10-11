@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS engine_universal_one_shot_smoke (
   queue_item_id bigint NOT NULL UNIQUE REFERENCES engine_universal_queue_items(id),
   queue_destination_id bigint NOT NULL UNIQUE
     REFERENCES engine_universal_queue_destinations(id),
-  state text NOT NULL DEFAULT 'armed' CHECK (state IN
+  state text NOT NULL CHECK (state IN
     ('armed','claimed','consumed','completed','aborted','expired')),
   provider_call_budget integer NOT NULL DEFAULT 1
     CHECK (provider_call_budget = 1),
