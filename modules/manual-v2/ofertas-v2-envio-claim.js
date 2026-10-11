@@ -37,7 +37,7 @@ function reservaPostgres() {
       return r.rows?.[0] || null;
     },
     async carregarOwnerTarget(client, { ownerId, clienteId, destinoId,
-      targetId, leaseToken }) {
+      targetId, leaseToken, smokeGateId = null }) {
       const r = await client.query(
         `SELECT o.owner_id,o.commercial_reservation_key,o.reservation_token
            FROM engine_universal_fanout_owners o
@@ -50,10 +50,25 @@ function reservaPostgres() {
           WHERE o.owner_id=$1 AND o.workspace_id=$2 AND o.destination_id=$3
             AND d.id=$4 AND d.lease_token=$5 AND d.status='claimed'
             AND d.lease_until>clock_timestamp()
-            AND o.operation_epoch_started_at=(
+            AND (o.operation_epoch_started_at=(
               SELECT operation_epoch_started_at FROM engine_operation_state
-              WHERE id=1 AND mode='UNIVERSAL')`,
-        [ownerId, clienteId, destinoId, targetId, leaseToken]
+              WHERE id=1 AND mode='UNIVERSAL')
+              OR ($6::uuid IS NOT NULL AND EXISTS (
+                SELECT 1 FROM engine_universal_one_shot_smoke g
+                JOIN engine_operation_state s ON s.id=1
+                  AND s.mode='CUTOVER_PREPARED'
+                  AND s.operation_epoch_started_at IS NULL
+                WHERE g.id=$6::uuid AND g.smoke_epoch_at=o.operation_epoch_started_at
+                  AND g.queue_item_id=o.queue_item_id
+                  AND g.queue_destination_id=d.id
+                  AND g.workspace_id=o.workspace_id
+                  AND g.destination_id=o.destination_id
+                  AND g.target_key=d.target_key AND g.channel=d.channel
+                  AND g.state IN ('armed','claimed')
+                  AND g.provider_call_count=0
+                  AND g.expires_at>clock_timestamp()
+              )))`,
+        [ownerId, clienteId, destinoId, targetId, leaseToken, smokeGateId]
       );
       return r.rows?.[0] || null;
     },
@@ -125,7 +140,8 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
   }
 
   async function adquirir({ clienteId = "", oferta = {}, destinoId = "",
-    fanoutOwnerId = "", targetId = null, targetLeaseToken = "" } = {}) {
+    fanoutOwnerId = "", targetId = null, targetLeaseToken = "",
+    smokeGateId = null } = {}) {
     const filaItemId = chaveClaimProdutoDestino({ clienteId, oferta, destinoId });
     if (!filaItemId) return { resultado: "identidade_operacional_ausente", handle: null, filaItemId: "" };
     const estado = await advisory.adquirir({
@@ -144,7 +160,7 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
       }
       const owner = ownerRequested ? await reserva.carregarOwnerTarget(
         estado.handle?.client, { ownerId: fanoutOwnerId, clienteId, destinoId,
-          targetId, leaseToken: targetLeaseToken }) : null;
+          targetId, leaseToken: targetLeaseToken, smokeGateId }) : null;
       if (ownerRequested && !owner) {
         await advisory.finalizar(estado, { statusFinal: "owner_target_invalido" });
         return { resultado: "owner_target_invalido", filaItemId };
@@ -237,7 +253,8 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     estado.reservaToken = "";
   }
 
-  async function validarTitularidade(estado, { targetId, targetLeaseToken } = {}) {
+  async function validarTitularidade(estado, { targetId, targetLeaseToken,
+    smokeGateId = null } = {}) {
     if (!estado?.fanoutOwnerId || !estado.reservaToken ||
         !targetId || !targetLeaseToken ||
         typeof reserva.carregarOwnerTarget !== "function" ||
@@ -247,7 +264,7 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
       const owner = await reserva.carregarOwnerTarget(client, {
         ownerId: estado.fanoutOwnerId, clienteId: estado.clienteId,
         destinoId: estado.destinoId, targetId,
-        leaseToken: targetLeaseToken });
+        leaseToken: targetLeaseToken, smokeGateId });
       if (!owner || owner.commercial_reservation_key !== estado.chaveReserva ||
           String(owner.reservation_token) !== String(estado.reservaToken)) return false;
       const active = await reserva.consultarDetalhe(client, estado.clienteId,
@@ -266,4 +283,5 @@ function criarCoordenadorEnvioProdutoDestino({ advisory, reserva = reservaPostgr
     validarTitularidade, finalizar, chaveClaimProdutoDestino };
 }
 
-module.exports = { chaveClaimProdutoDestino, criarCoordenadorEnvioProdutoDestino };
+module.exports = { chaveClaimProdutoDestino, criarCoordenadorEnvioProdutoDestino,
+  reservaPostgres };

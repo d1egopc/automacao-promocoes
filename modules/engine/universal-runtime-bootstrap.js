@@ -14,6 +14,7 @@ async function prepararModoOperacionalReal({ pool, readFile = name =>
   }
   await pool.query(readFile("operation-epoch.additive.sql"));
   await pool.query(readFile("universal-queue.additive.sql"));
+  await pool.query(readFile("universal-one-shot-smoke.additive.sql"));
   await pool.query(`INSERT INTO engine_operation_state (id,mode)
     VALUES (1,'LEGACY') ON CONFLICT (id) DO NOTHING`);
   const state = await lerEstadoOperacional(pool);

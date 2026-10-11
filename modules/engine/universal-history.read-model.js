@@ -18,6 +18,44 @@ function statusPublico(status) {
   return result;
 }
 
+// Operational validation is deliberately outside the definitive epoch and
+// therefore outside the normal public History. Its factual row remains
+// queryable by the exact gate/workspace identity for cutover audit.
+async function consultarHistoricoValidacaoCutover({ pool, gateId,
+  workspaceId } = {}) {
+  const workspace=String(workspaceId || "").trim();
+  if (!pool || typeof pool.query!=="function" || !workspace ||
+      !/^[0-9a-f-]{36}$/i.test(String(gateId || ""))) {
+    throw new Error("cutover_validation_history_identity_required");
+  }
+  const row=(await pool.query(`SELECT g.id,g.smoke_epoch_at,
+      i.id AS item_id,i.evento_id,i.job_id,i.oferta_id,i.status,
+      i.capturado_em,i.terminal_at,
+      d.destination_id,d.target_key,d.channel,d.confirmed_at,
+      d.provider_message_id,d.credit_debited
+    FROM engine_universal_one_shot_smoke g
+    JOIN engine_universal_queue_items i ON i.id=g.queue_item_id
+      AND i.operation_epoch_started_at=g.smoke_epoch_at
+      AND i.workspace_id=g.workspace_id
+    JOIN engine_universal_queue_destinations d
+      ON d.id=g.queue_destination_id AND d.queue_item_id=i.id
+      AND d.operation_epoch_started_at=g.smoke_epoch_at
+      AND d.workspace_id=g.workspace_id
+    WHERE g.id=$1::uuid AND g.workspace_id=$2`,
+  [gateId,workspace])).rows[0];
+  if (!row || !row.terminal_at) return null;
+  return { kind:"CUTOVER_VALIDATION",id:row.id,
+    workspaceId:workspace,operationEpochStartedAt:null,
+    smokeEpochAt:row.smoke_epoch_at,itemId:row.item_id,
+    eventoId:row.evento_id,jobId:row.job_id,ofertaId:row.oferta_id,
+    capturadoEm:row.capturado_em,terminalOcorridoEm:row.terminal_at,
+    resultadoFinalPublico:statusPublico(row.status),
+    destino:{destinationId:row.destination_id,targetKey:row.target_key,
+      channel:row.channel,confirmedAt:row.confirmed_at,
+      providerMessageId:row.provider_message_id,
+      creditDebited:row.credit_debited===true} };
+}
+
 async function consultarHistoricoUniversal({ pool, workspaceId, from, to,
   limit = 50, cursor = null } = {}) {
   const workspace = String(workspaceId || "").trim();
@@ -279,5 +317,6 @@ async function consultarDetalheUniversal({ pool, workspaceId, detalheRef } = {})
   } finally { client.release(); }
 }
 
-module.exports = { statusPublico, consultarHistoricoUniversal,
+module.exports = { statusPublico, consultarHistoricoValidacaoCutover,
+  consultarHistoricoUniversal,
   consultarFilaPublicaUniversal, consultarDetalheUniversal };

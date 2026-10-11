@@ -24,8 +24,8 @@ test("real startup migration leaves LEGACY as the only executor", async () => {
   const state = await prepararModoOperacionalReal({ pool: db,
     readFile: name => `-- ${name}` });
   assert.equal(escolherMotorOperacional(state), "LEGACY");
-  assert.equal(db.calls.length, 6);
-  assert.match(db.calls[2], /ON CONFLICT \(id\) DO NOTHING/);
+  assert.equal(db.calls.length, 7);
+  assert.match(db.calls[3], /ON CONFLICT \(id\) DO NOTHING/);
 });
 
 test("PREPARED does not start Universal sends", async () => {

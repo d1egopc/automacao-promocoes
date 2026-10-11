@@ -6,7 +6,7 @@
 const queue = require("./universal-queue.repository");
 
 function criarExecutorFilaUniversal({ pool, prepare, dispatch, checkWorkspace,
-  repository = queue }) {
+  repository = queue, oneShot = false }) {
   if (!pool || typeof pool.connect !== "function" ||
       typeof prepare !== "function" || typeof dispatch !== "function" ||
       (checkWorkspace !== undefined && typeof checkWorkspace !== "function")) {
@@ -56,7 +56,10 @@ function criarExecutorFilaUniversal({ pool, prepare, dispatch, checkWorkspace,
     }
     let crossedProviderBoundary = false;
     const startAttempt = async () => {
-      if (crossedProviderBoundary) return { ok: true, duplicate: true };
+      if (crossedProviderBoundary) {
+        if (oneShot) throw new Error("smoke_provider_call_budget_exhausted");
+        return { ok: true, duplicate: true };
+      }
       const started = await repository.markSendStarted({ pool,
         destinationId: claim.id, leaseToken: claim.leaseToken,
         commercialCta: prepared.rendered?.vitrineCta || {} });

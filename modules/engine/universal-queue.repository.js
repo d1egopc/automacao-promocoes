@@ -98,7 +98,8 @@ async function ensureVitrineProjectionTx(client, { epoch, destination,
   [epoch, destination.queue_item_id, destination.workspace_id]);
 }
 
-async function confirmFactualSendTx(client, { destination, epoch, ack }) {
+async function confirmFactualSendTx(client, { destination, epoch, ack,
+  skipVitrine = false }) {
   const movement = await settleConfirmedTx(client, { epoch,
     workspaceId: destination.workspace_id, targetId: destination.id });
   const [itemKey, destinationKey, targetKey] = checkpointKeys(destination);
@@ -130,7 +131,9 @@ async function confirmFactualSendTx(client, { destination, epoch, ack }) {
     SET status=$2,terminal_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,
         revision=revision+1,updated_at=clock_timestamp()
     WHERE id=$1`, [destination.queue_item_id, summary.status, summary.terminal]);
-  await ensureVitrineProjectionTx(client, { epoch, destination, summary });
+  if (!skipVitrine) {
+    await ensureVitrineProjectionTx(client, { epoch, destination, summary });
+  }
   await client.query(`UPDATE engine_universal_queue_workspace_state
     SET health=CASE WHEN health='AMBIGUOUS' THEN 'UNKNOWN' ELSE health END,
         revision=revision+1,checkpoint_revision=revision+1,
@@ -768,4 +771,5 @@ module.exports = { enqueue, preflightWorkspace, claimDestination,
   readDestinationDailyUsage, countConfirmedToday, confirmSend,
   confirmFailure, completeWithoutSend, claimVitrineProjection,
   finishVitrineProjection, cleanupVitrineProjections,
-  validarDestinos };
+  validarDestinos, factualAckTx, confirmFactualSendTx,
+  checkpointKeys };

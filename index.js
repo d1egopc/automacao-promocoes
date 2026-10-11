@@ -87,6 +87,8 @@ const {
 } = require("./modules/engine/universal-queue-distributor.adapter");
 const { criarExecutorFilaUniversal } =
   require("./modules/engine/universal-queue-executor.adapter");
+const { activeOneShot, oneShotRepository, smokeCreditAvailable } =
+  require("./modules/engine/universal-one-shot-smoke");
 const { criarPreflightFilaUniversal } =
   require("./modules/engine/universal-queue-preflight");
 const { readDestinationDailyUsage } =
@@ -4778,6 +4780,10 @@ function itemEngineDuplicadoFilaGlobal(clienteId = "admin", itemFila = {}) {
 
 async function adicionarOfertaNaFilaGlobalEngine(clienteId = "admin", itemFila = {}) {
   exigirAutoridadeLegacyReal("legacy_distributor_writer");
+  if (itemFila?.cutoverValidation?.kind === "CUTOVER_VALIDATION" ||
+      itemFila?.origemFluxo === "cutover_validation") {
+    return { ok: false, motivo: "cutover_validation_not_legacy_work" };
+  }
   const medidorFilaGlobal = criarMedidorEngineMemoryStage("engine_v2_fila_global", {
     ofertaId: itemFila.engineOfertaId || itemFila.ofertaId || null,
     marketplace: itemFila.marketplace || itemFila.origemMarketplace || ""
@@ -5225,7 +5231,17 @@ function debitarCreditos(clienteId, quantidade = 1) {
   return true;
 }
 
-async function creditoDisponivelParaEnvio(clienteId, quantidade = 1) {
+async function creditoDisponivelParaEnvio(clienteId, quantidade = 1,
+  opcoes = {}) {
+  if (opcoes?.cutoverValidationId) {
+    if (modoMotorReal !== "LEGACY" || !opcoes.universalTargetKey) return false;
+    return smokeCreditAvailable({ pool: getEnginePool(),
+      id: opcoes.cutoverValidationId,workspaceId: clienteId,
+      destinationId: opcoes.cutoverValidationDestinationId,
+      targetKey: opcoes.universalTargetKey,
+      queueItemId: opcoes.cutoverValidationQueueItemId,
+      quantity: quantidade });
+  }
   if (modoMotorReal === "LEGACY") {
     return usuarioTemCreditos(clienteId, quantidade);
   }
@@ -9105,10 +9121,11 @@ function resolverAlvosTelegramFilaUniversal(clienteId, destino) {
       connectionId: String(t.id || t.botId || t.telegramId || "") }));
 }
 
-function criarPreflightFilaUniversalReal(pool) {
+function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
   return criarPreflightFilaUniversal({
     pool,
     configGlobal: config,
+    ...(oneShotId ? { readClock: async () => null } : {}),
     resolveDestination: async ({ claim, oferta, workspaceId, destinationId }) => {
       if (!usuarioAtivoOperacional(workspaceId)) {
         return { ok: false, reason: "workspace_inactive" };
@@ -9133,15 +9150,29 @@ function criarPreflightFilaUniversalReal(pool) {
       }
       return { ok: true, destination, configCliente };
     },
-    checkWindow: ({ destination, nowMs }) =>
-      destinoDentroHorario(destination, nowMs)
-        ? { ok: true }
-        : { ok: false, reason: "destination_window_closed",
+    checkWindow: ({ workspaceId, destination, oferta, nowMs }) => {
+      if (!destinoDentroHorario(destination, nowMs)) {
+        return { ok: false, reason: "destination_window_closed",
           retryAt: new Date(destinosUtils.proximoInstanteDentroHorario(
-            destinoOperacionalSeguro(destination), nowMs)).toISOString() },
+            destinoOperacionalSeguro(destination), nowMs)).toISOString() };
+      }
+      if (oneShotId) {
+        const interval = intervaloDestinoInfo(workspaceId, destination,
+          configsPorCliente?.[workspaceId] || {}, oferta, nowMs);
+        if (!interval.liberado) return { ok: false,
+          reason: "destination_cadence_wait",
+          retryAt: interval.proximoEnvioPermitidoEm };
+      }
+      return { ok: true };
+    },
     checkDailyLimit: async ({ workspaceId, destinationId, destination }) => {
       const limit = limiteDiarioDestino(destination);
       if (!limit) return { ok: true };
+      if (oneShotId) {
+        const usage = destinoLimiteDiarioDisponivel(workspaceId, destination);
+        return usage.ok ? { ok: true } : {
+          ok: false, reason: "destination_daily_limit_reached" };
+      }
       const usage = await readDestinationDailyUsage({ pool, workspaceId,
         destinationId });
       return usage.sentToday < limit ? { ok: true }
@@ -9165,9 +9196,19 @@ function criarPreflightFilaUniversalReal(pool) {
         reason: "destination_session_unavailable" };
       return { ok: false, reason: "destination_channel_invalid" };
     },
-    checkCredits: async ({ workspaceId }) => ({
-      ok: await creditoDisponivelParaEnvio(workspaceId, 1),
-      reason: "workspace_credits_unavailable" }),
+    checkCredits: async ({ workspaceId, claim }) => {
+      if (oneShotId) {
+        const balance = (await pool.query(`SELECT balance,reserved
+          FROM engine_universal_credit_balances
+          WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+        [claim.operationEpochStartedAt,workspaceId])).rows[0];
+        return { ok: balance &&
+          Number(balance.balance)-Number(balance.reserved)>=1,
+        reason: "workspace_credits_unavailable" };
+      }
+      return { ok: await creditoDisponivelParaEnvio(workspaceId, 1),
+        reason: "workspace_credits_unavailable" };
+    },
     checkMedia: ({ oferta }) => {
       const image = avaliarImagemPublicavelOfertaExecutor(oferta);
       return { ok: image.ok === true,
@@ -9209,7 +9250,8 @@ function criarPreflightFilaUniversalReal(pool) {
         destinoId: context.destinationId,
         fanoutOwnerId: context.claim.fanout_owner_id,
         targetId: context.claim.id,
-        targetLeaseToken: context.claim.leaseToken });
+        targetLeaseToken: context.claim.leaseToken,
+        ...(oneShotId ? { smokeGateId: oneShotId } : {}) });
       if (commercialClaim?.resultado !== "adquirido") {
         return { ok: false,
           reason: commercialClaim?.resultado || "destination_dedup_blocked",
@@ -9222,10 +9264,18 @@ function criarPreflightFilaUniversalReal(pool) {
   });
 }
 
-function criarExecutorFilaUniversalReal(pool) {
-  const prepare = criarPreflightFilaUniversalReal(pool);
+function criarExecutorFilaUniversalReal(pool, { oneShotId = null } = {}) {
+  const prepare = criarPreflightFilaUniversalReal(pool, { oneShotId });
   const providerPorAlvo = criarDispatcherProviderExistentePorAlvo({
-    send: enviarParaDestinoInteligente,
+    send: (destination,offer,message,workspace,customerConfig,options) =>
+      enviarParaDestinoInteligente(destination,offer,message,workspace,
+        customerConfig,oneShotId ? {
+          ...options,cutoverValidationId:oneShotId,
+          cutoverValidationDestinationId:
+            String(destination.id || destination.destinoId || ""),
+          cutoverValidationQueueItemId:
+            Number(String(offer.id || "").replace(/^universal_/, ""))
+        } : options),
     resolveConfigCliente: workspaceId => configsPorCliente?.[workspaceId] || {}
   });
   const dispatch = async (claim, prepared, { startAttempt }) => {
@@ -9254,7 +9304,8 @@ function criarExecutorFilaUniversalReal(pool) {
           }
           if (!await coordenadorEnvioProdutoDestino.validarTitularidade(
             commercialClaim, { targetId: claim.id,
-              targetLeaseToken: claim.leaseToken })) {
+              targetLeaseToken: claim.leaseToken,
+              ...(oneShotId ? { smokeGateId: oneShotId } : {}) })) {
             throw new Error("universal_commercial_owner_not_current");
           }
           await startAttempt();
@@ -9273,6 +9324,8 @@ function criarExecutorFilaUniversalReal(pool) {
   };
   return criarExecutorFilaUniversal({ pool,
     prepare, dispatch,
+    ...(oneShotId ? { repository: oneShotRepository(oneShotId),
+      oneShot: true } : {}),
     checkWorkspace: workspaceId => {
       const evaluation = avaliarWorkspaceEngineOperacional(workspaceId,
         { log: false });
@@ -9604,7 +9657,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
     const grupo = itemAlvo.grupo;
     alvoAtualFanout = alvoFanout;
 
-    if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
+    if (!await creditoDisponivelParaEnvio(clienteId, 1, opcoes)) {
       logOptimus("AVISO", "Sem creditos", { clienteId });
       registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
         decisao: "bloqueado",
@@ -9961,7 +10014,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
       for (const alvoDiscord of alvosDiscordPendentes) {
         alvoAtualFanout = alvoDiscord;
 
-        if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
+        if (!await creditoDisponivelParaEnvio(clienteId, 1, opcoes)) {
           logOptimus("AVISO", "Sem creditos", { clienteId });
           registrarCoberturaExecutor("executor_bloqueado", oferta, clienteId, destino, {
             decisao: "bloqueado",
@@ -10280,7 +10333,7 @@ if (String(destino.tipo || "").toLowerCase() === "whatsapp") {
           continue;
         }
 
-        if (!await creditoDisponivelParaEnvio(clienteId, 1)) {
+        if (!await creditoDisponivelParaEnvio(clienteId, 1, opcoes)) {
           logOptimus("AVISO", "Sem creditos", { clienteId });
           logFilaTelegramDebug({
             clienteId,
@@ -33614,6 +33667,34 @@ console.log("[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO]", {
 
 let executorFilaUniversalReal = null;
 let executorFilaUniversalRodando = false;
+let executorOneShotRodando = false;
+
+function iniciarObservadorOneShotPrepared(pool) {
+  let timer;
+  const tick = async () => {
+    if (executorOneShotRodando) return;
+    executorOneShotRodando = true;
+    try {
+      const gate = await activeOneShot({ pool });
+      if (!gate) {
+        const spent = await pool.query(`SELECT 1
+          FROM engine_universal_one_shot_smoke
+          WHERE provider_call_count=1 LIMIT 1`);
+        if (spent.rowCount > 0) clearInterval(timer);
+        return;
+      }
+      const run = criarExecutorFilaUniversalReal(pool,
+        { oneShotId: gate.id });
+      await run(gate.workspace_id);
+    } catch (error) {
+      console.error("[CUTOVER-VALIDATION-ONE-SHOT]",
+        String(error?.message || error));
+    } finally { executorOneShotRodando = false; }
+  };
+  timer = setInterval(() => { void tick(); }, 10000);
+  timer.unref?.();
+  void tick();
+}
 
 async function processarVitrineUniversalReal() {
   const summary = await processVitrineProjectionBatch({
@@ -33701,6 +33782,9 @@ const promessaBootstrapEngine = initEngineDatabase()
       }
     } else {
       carregarFilaLegacyBoot();
+      if (estadoOperacional.mode === "CUTOVER_PREPARED") {
+        iniciarObservadorOneShotPrepared(getEnginePool());
+      }
     }
     if ((modoMotorReal === "UNIVERSAL" ||
         process.env.UF_RADAR_REPLAY_LOCAL_CANDIDATE === "1") &&
