@@ -25,6 +25,7 @@ const {
 const {
   chaveGrupo,
   montarGruposFairness,
+  headsProtegidas,
   reivindicarSlotFairness
 } = require("./importer-fairness.service");
 const {
@@ -483,6 +484,7 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
       baselineComIndice.filter(job => job.lane_vazao_pre_importer !== "expirada"),
       candidatosElegiveis
     )
+      .filter(grupo => headsProtegidas(grupo).size === 2)
       .map(grupo => [grupo.chave, grupo])
   );
   const planosFairness = new Map();

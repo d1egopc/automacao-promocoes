@@ -413,9 +413,7 @@ assert.ok(migracaoSenha.includes("salvarUsuarios()"), "migracao deve persistir s
 const rotaPutUsuario = trechoEntre(indexFonte, 'app.put("/admin/usuarios/:id"', 'app.post("/minha-config"');
 assert.ok(rotaPutUsuario.includes("auditoriaCreditos"), "ajuste manual de creditos deve registrar auditoria");
 assert.ok(rotaPutUsuario.includes("anterior: creditosAntes"), "auditoria deve guardar saldo anterior");
-assert.ok(rotaPutUsuario.includes("novo: creditosDepois") ||
-  rotaPutUsuario.includes("novo: usuario.creditos"),
-"auditoria deve guardar novo saldo operacional");
+assert.ok(rotaPutUsuario.includes("novo: usuario.creditos"), "auditoria deve guardar novo saldo");
 assert.ok(rotaPutUsuario.includes("planoMudou"), "edicao Admin deve detectar troca de plano");
 assert.ok(rotaPutUsuario.includes("aplicarTrocaManualPlanoAdmin"), "troca manual de plano deve reutilizar helper central");
 assert.ok(rotaPutUsuario.includes("aplicarCreditoManualAdmin"), "ajuste manual de creditos deve reutilizar helper central de reativacao Admin");

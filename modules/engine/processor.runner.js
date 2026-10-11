@@ -13,7 +13,8 @@ const {
 const {
   chaveGrupo,
   montarGruposFairness,
-  reivindicarSlotFairness
+  headsProtegidas,
+  reivindicarGrupoFairness
 } = require("./processor-fairness.service");
 const { processarJobEngine } = require("./processor.steps");
 const {
@@ -97,39 +98,43 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
       baselineComIndice.filter(job => job.lane_vazao_pre_importer !== "expirada"),
       candidatosElegiveis
     )
+      .filter(grupo => headsProtegidas(grupo).size === 2)
       .map(grupo => [grupo.chave, grupo])
   );
-  const planosFairness = new Map();
-  const idsReservadosFairness = new Map();
+  const gruposReivindicados = new Map();
+  const confirmadosPorPosicao = new Map();
 
   for (const job of baselineComIndice) {
+    const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
+      registrarProcessamento,
+      marcarJobStatus,
+      statusEsperado: "pendente"
+    });
+    if (frescorPreImporter.expirou) {
+      resumo.expiradosPreImporter += 1;
+      continue;
+    }
+
     const grupo = gruposFairness.get(chaveGrupo(job));
     let jobConfirmado = job;
     if (grupo) {
-      const idsReservados = idsReservadosFairness.get(grupo.chave) || new Set();
-      const claim = await reivindicarSlotFairness(grupo, job.indiceBaseline, {
-        plano: planosFairness.get(grupo.chave), idsReservados
-      });
-      if (claim.plano) planosFairness.set(grupo.chave, claim.plano);
-      if (!claim.ok) {
-        resumo.erros += 1;
-        logEngineProcessadorErro({ jobId: job.id, etapa: "fairness_slot_claim", motivo: claim.motivo, erro: claim.erro || "" });
-        continue;
+      if (!gruposReivindicados.has(grupo.chave)) {
+        const resultadoFairness = await reivindicarGrupoFairness(grupo);
+        gruposReivindicados.set(grupo.chave, resultadoFairness);
+        if (resultadoFairness.ok) {
+          for (const confirmado of resultadoFairness.confirmados) {
+            confirmadosPorPosicao.set(Number(confirmado.posicao), confirmado.job);
+          }
+        }
       }
-      if (!claim.job) continue;
-      jobConfirmado = claim.job;
-      idsReservados.add(Number(jobConfirmado.id));
-      idsReservadosFairness.set(grupo.chave, idsReservados);
-    } else {
-      const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
-        registrarProcessamento,
-        marcarJobStatus,
-        statusEsperado: "pendente"
-      });
-      if (frescorPreImporter.expirou) {
-        resumo.expiradosPreImporter += 1;
-        continue;
+      const resultadoFairness = gruposReivindicados.get(grupo.chave);
+      if (resultadoFairness?.ok) {
+        jobConfirmado = confirmadosPorPosicao.get(Number(job.indiceBaseline));
+        if (!jobConfirmado) continue;
       }
+    }
+
+    if (!grupo || !gruposReivindicados.get(grupo.chave)?.ok) {
       const lock = await tentarMarcarProcessando(job.id);
       if (!lock.ok) {
         if (lock.ignorado) continue;

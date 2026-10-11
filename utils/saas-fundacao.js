@@ -1008,8 +1008,6 @@ async function executarCadastroAtomico({
   prepararConfig,
   salvarUsuarios,
   salvarConfigsClientes,
-  antesDePersistir,
-  depoisDePersistir,
   agora = new Date()
 } = {}) {
   const contextoCadastro = textoLower(contexto || "publico") || "publico";
@@ -1081,10 +1079,6 @@ async function executarCadastroAtomico({
     });
   }
 
-  if (typeof antesDePersistir === "function") {
-    await antesDePersistir(novoUsuario);
-  }
-
   try {
     usuarios.push(novoUsuario);
     configsPorCliente[novoUsuario.id] = typeof prepararConfig === "function"
@@ -1103,12 +1097,6 @@ async function executarCadastroAtomico({
     erro.statusCode = 500;
     erro.codigo = "cadastro_rollback_executado";
     throw erro;
-  }
-
-  // A durable post-persist effect must never be included in the JSON rollback:
-  // if it fails, the saved account remains available for idempotent recovery.
-  if (typeof depoisDePersistir === "function") {
-    await depoisDePersistir(novoUsuario);
   }
 
   return novoUsuario;

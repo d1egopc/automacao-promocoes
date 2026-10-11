@@ -6,8 +6,7 @@ const path = require("path");
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-social-publicador-"));
 process.env.DATA_DIR = dataDir;
 
-const { writeClienteJson, writeGlobalJson } = require("../utils/storage");
-const { usuarioAtivo } = require("../utils/usuarios-atividade");
+const { writeClienteJson } = require("../utils/storage");
 const storage = require("../modules/social/storage");
 const { publicarNoInstagram, normalizarOrigem, chaveIdempotencia } = require("../modules/social/publicador-instagram.service");
 const {
@@ -95,12 +94,6 @@ function restaurarEnv(nome, valorAnterior) {
 }
 
 (async () => {
-  writeGlobalJson("usuarios.json", [
-    "cliente_a", "cliente_b", "cliente_legenda_vazia",
-    "cliente_renderer_erro", "cliente_auto", "cliente_agendada"
-  ].map(id => ({ id, ativo: true, plano: "pro" })));
-  assert.strictEqual(usuarioAtivo("cliente_auto"), true,
-    "fixture deve cadastrar workspace ativo antes do scheduler Social");
   assert.notStrictEqual(
     chaveIdempotencia({ clienteId: "cliente_a", tipoPublicacao: "oferta", formato: "feed", ofertaId: "oferta_a" }),
     chaveIdempotencia({ clienteId: "cliente_a", tipoPublicacao: "oferta", formato: "reels", ofertaId: "oferta_a" }),

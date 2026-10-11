@@ -77,10 +77,9 @@ function criarRepoMemoria() {
       };
       return clone(item);
     },
-    async atualizarBufferStatus(bufferId = "", status = "", metadata = {}, statusEsperado = null) {
+    async atualizarBufferStatus(bufferId = "", status = "", metadata = {}) {
       const item = estado.buffer.find(registro => String(registro.id) === String(bufferId));
       if (!item) return null;
-      if (statusEsperado && item.status !== statusEsperado) return null;
       item.status = status;
       item.metadata = {
         ...(item.metadata || {}),
@@ -223,31 +222,6 @@ async function testarErroBridgeNaoDerrubaPipeline() {
   assert.strictEqual(resultado.processadas, 1);
   assert.strictEqual(resultado.erros, 1);
   assert.strictEqual(repo.estado.buffer[0].status, "erro");
-}
-
-async function testarPressaoAdmissaoAdiaSemLoop() {
-  const repo = criarRepoMemoria();
-  repo.adicionarBuffer(itemBuffer({ id: "105_pressao", mensagemId: "msg_pressao" }));
-  let chamadas = 0;
-  const bridge = criarBridgeClonadorGrupos({
-    repository: repo,
-    resolverRedirectUniversal: async () => ({ ok: false, status: "ignorado" }),
-    registrarEventoBruto: async () => {
-      chamadas += 1;
-      if (chamadas === 1) return { ok: false, motivo: "hot_admission_denied", id: 9005 };
-      return { ok: true, id: 9005, duplicado: true, jobsCriados: 1, jobsExistentes: 0 };
-    },
-    logger: { log() {} }
-  });
-  const primeira = await bridge.processarCapturasPendentes({ limite: 5 });
-  assert.strictEqual(primeira.processadas, 0);
-  assert.strictEqual(primeira.esperaAdmissao, 1);
-  assert.strictEqual(primeira.erros, 0);
-  assert.strictEqual(chamadas, 1);
-  assert.strictEqual(repo.estado.buffer[0].status, "capturada");
-  const segunda = await bridge.processarCapturasPendentes({ limite: 1 });
-  assert.strictEqual(segunda.prontas, 1);
-  assert.strictEqual(repo.estado.buffer[0].status, "pronta");
 }
 
 async function testarDiagnosticoInboxPropagadoParaBuffer() {
@@ -401,18 +375,6 @@ async function testarDeduplicacaoIsoladaPorOrigem() {
   const eventosRadar = eventos.filter(evento => evento.origem === "radar");
   assert(eventosRadar.every(evento => !evento.metadata.clonadorGrupos));
   assert(eventosRadar.every(evento => !evento.metadata.comercialCapturado));
-
-  contadoresJobs = { ok: false, motivo: "hot_admission_denied", criados: 0,
-    existentes: 0, clientesAdmissaoPendente: ["workspace_a"] };
-  const negado = await registrar("clonador_grupos", "admissao_adiada", metadataClonador);
-  assert.strictEqual(negado.ok, false);
-  assert.strictEqual(negado.motivo, "hot_admission_denied");
-  assert.ok(negado.id, "evento factual deve permanecer identificado");
-  contadoresJobs = { criados: 1, existentes: 0 };
-  const retomado = await registrar("clonador_grupos", "admissao_adiada", metadataClonador);
-  assert.strictEqual(retomado.ok, true);
-  assert.strictEqual(retomado.duplicado, true);
-  assert.strictEqual(retomado.id, negado.id);
 
   for (const contadores of [{ criados: 1, existentes: 0 }, { criados: 0, existentes: 1 }]) {
     contadoresJobs = contadores;
@@ -711,7 +673,6 @@ async function main() {
     await testarConcorrenciaNaoDuplica();
     await testarFalhaRedirectPreservaOriginal();
     await testarErroBridgeNaoDerrubaPipeline();
-    await testarPressaoAdmissaoAdiaSemLoop();
     await testarDiagnosticoInboxPropagadoParaBuffer();
     await testarWorkspaceNaoUsaDestinosDeOutroCliente();
     await testarDeduplicacaoIsoladaPorOrigem();

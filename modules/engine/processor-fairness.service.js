@@ -1,10 +1,9 @@
 const { getEnginePool } = require("./database");
 const {
   bloquearEstadoFairness,
-  registrarAtendimentoWorkspaceFairness
+  registrarOrigemAtendidaFairness
 } = require("./origem-fairness.repository");
 const { reivindicarJobsProcessandoComExecutor } = require("./processor.service");
-const { reivindicarSlotPreImporter } = require("./fairness-slot-pre-importer.service");
 
 const ETAPA_PROCESSOR_FAIRNESS = "diagnostico_final";
 const ORIGENS_PROTEGIDAS = new Set(["optimus", "clonador_grupos"]);
@@ -72,16 +71,12 @@ function headsProtegidas(grupo = {}) {
 
 function montarSlots(grupo = {}, selecionados = []) {
   const idsSelecionados = new Set(selecionados.map(job => Number(job.id)));
-  const candidatosPorId = new Map((grupo.candidates || []).map(job => [Number(job.id), job]));
   const extras = selecionados.filter(job => !(grupo.baseline || []).some(item => Number(item.id) === Number(job.id)));
   const slotsLivres = (grupo.baseline || []).filter(job => !idsSelecionados.has(Number(job.id)));
   const slots = [];
 
   for (const job of grupo.baseline || []) {
-    if (idsSelecionados.has(Number(job.id))) slots.push({
-      job: candidatosPorId.get(Number(job.id)) || job,
-      posicao: Number(job.indiceBaseline || 0)
-    });
+    if (idsSelecionados.has(Number(job.id))) slots.push({ job, posicao: Number(job.indiceBaseline || 0) });
   }
   for (const [indice, job] of extras.entries()) {
     const substituido = slotsLivres[slotsLivres.length - 1 - indice];
@@ -157,14 +152,12 @@ async function reivindicarGrupoFairness(grupo = {}, opcoes = {}) {
       .filter(Boolean)
       .at(-1);
 
-    if (confirmados.length) {
-      const ultimaOrigemConfirmada = [...confirmados].reverse()
-        .map(item => origemProtegida(item.job)).find(Boolean) || "";
-      await registrarAtendimentoWorkspaceFairness(client, {
+    if (ultimoProtegido) {
+      await registrarOrigemAtendidaFairness(client, {
         clienteId: grupo.clienteId,
         etapa: ETAPA_PROCESSOR_FAIRNESS,
         lane: grupo.lane
-      }, ultimaOrigemConfirmada);
+      }, ultimoProtegido);
     }
 
     await client.query("COMMIT");
@@ -182,17 +175,6 @@ async function reivindicarGrupoFairness(grupo = {}, opcoes = {}) {
   }
 }
 
-function reivindicarSlotFairness(grupo = {}, posicao, opcoes = {}) {
-  return reivindicarSlotPreImporter(grupo, posicao, {
-    ...opcoes,
-    etapa: ETAPA_PROCESSOR_FAIRNESS,
-    statusEsperado: "pendente",
-    claim: reivindicarJobsProcessandoComExecutor,
-    montarPlano: montarSelecaoGrupo,
-    origemProtegida
-  });
-}
-
 module.exports = {
   ETAPA_PROCESSOR_FAIRNESS,
   origemProtegida,
@@ -200,6 +182,5 @@ module.exports = {
   montarGruposFairness,
   headsProtegidas,
   montarSelecaoGrupo,
-  reivindicarGrupoFairness,
-  reivindicarSlotFairness
+  reivindicarGrupoFairness
 };

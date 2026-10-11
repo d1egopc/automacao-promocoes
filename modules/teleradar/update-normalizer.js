@@ -70,7 +70,7 @@ function normalizeTelegramUpdate(update = {}, { clock = () => new Date() } = {})
   }
 
   const observedAt = iso(clock(), "received_at");
-  const rawSourceTimestamp = update.telegramTimestamp ?? update.messageDate ?? update.date ?? null;
+  const rawSourceTimestamp = update.telegramTimestamp ?? update.messageDate ?? update.date ?? update.receivedAt ?? null;
   const sourceTimestamp = iso(rawSourceTimestamp, "source_timestamp");
   const text = String(update.text || "");
   return Object.freeze({

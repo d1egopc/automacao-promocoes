@@ -1,10 +1,9 @@
 const { getEnginePool } = require("../database");
 const {
   bloquearEstadoFairness,
-  registrarAtendimentoWorkspaceFairness
+  registrarOrigemAtendidaFairness
 } = require("../origem-fairness.repository");
 const { tentarMarcarImportando } = require("./importer.service");
-const { jobClaimadoAindaVivo, buscarReposicaoGrupoPreImporter } = require("../fairness-slot-pre-importer.service");
 
 const ETAPA_IMPORTER_FAIRNESS = "importacao_final";
 const ORIGENS_PROTEGIDAS = new Set(["optimus", "clonador_grupos"]);
@@ -76,15 +75,11 @@ function headsProtegidas(grupo = {}) {
 
 function montarSlots(grupo = {}, selecionados = []) {
   const idsSelecionados = new Set(selecionados.map(job => Number(job.id)));
-  const candidatosPorId = new Map((grupo.candidates || []).map(job => [Number(job.id), job]));
   const extras = selecionados.filter(job => !(grupo.baseline || []).some(item => Number(item.id) === Number(job.id)));
   const slotsLivres = (grupo.baseline || []).filter(job => !idsSelecionados.has(Number(job.id)));
   const slots = [];
   for (const job of grupo.baseline || []) {
-    if (idsSelecionados.has(Number(job.id))) slots.push({
-      job: candidatosPorId.get(Number(job.id)) || job,
-      posicao: Number(job.indiceBaseline || 0)
-    });
+    if (idsSelecionados.has(Number(job.id))) slots.push({ job, posicao: Number(job.indiceBaseline || 0) });
   }
   for (const [indice, job] of extras.entries()) {
     const substituido = slotsLivres[slotsLivres.length - 1 - indice];
@@ -152,40 +147,18 @@ async function reivindicarSlotFairness(grupo = {}, posicao, opcoes = {}) {
     const slot = (plano.slots || []).find(item => Number(item.posicao) === Number(posicao));
     const idsReservados = opcoes.idsReservados instanceof Set ? opcoes.idsReservados : new Set();
     const tentativas = [slot?.job, ...candidatosReposicao(grupo, plano, idsReservados)].filter(Boolean);
-    const experimentados = new Set(idsReservados);
-    let recarregou = false;
-    for (let indice = 0; ; indice += 1) {
-      if (indice >= tentativas.length) {
-        if (recarregou) break;
-        recarregou = true;
-        const extras = await buscarReposicaoGrupoPreImporter(client, grupo, "pronto_para_importar",
-          [...experimentados, ...tentativas.map(item => Number(item.id))], { verificarRetry: true });
-        tentativas.push(...extras);
-        if (indice >= tentativas.length) break;
-      }
-      const candidato = tentativas[indice];
-      experimentados.add(Number(candidato.id));
+
+    for (const candidato of tentativas) {
       if (idsReservados.has(Number(candidato.id))) continue;
-      await client.query("SAVEPOINT candidato_frescor");
       const claim = await tentarMarcarImportando(candidato.id, client);
       if (!claim.ok) {
-        if (claim.ignorado) {
-          await client.query("ROLLBACK TO SAVEPOINT candidato_frescor");
-          await client.query("RELEASE SAVEPOINT candidato_frescor");
-          continue;
-        }
+        if (claim.ignorado) continue;
         throw new Error(claim.erro || claim.motivo || "claim_falhou");
       }
-      if (!(await jobClaimadoAindaVivo(client, candidato.id, { verificarRetry: true }))) {
-        await client.query("ROLLBACK TO SAVEPOINT candidato_frescor");
-        await client.query("RELEASE SAVEPOINT candidato_frescor");
-        continue;
-      }
-      await client.query("RELEASE SAVEPOINT candidato_frescor");
 
       const protegido = (plano.protegidos || []).some(item => Number(item.id) === Number(candidato.id));
-      const origem = origemProtegida(candidato);
-      await registrarAtendimentoWorkspaceFairness(client, chave, origem);
+      const origem = protegido ? origemProtegida(candidato) : "";
+      if (origem) await registrarOrigemAtendidaFairness(client, chave, origem);
       await client.query("COMMIT");
       emTransacao = false;
       return { ok: true, job: candidato, plano, protegido, ultimoProtegido: origem };

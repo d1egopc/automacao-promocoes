@@ -136,14 +136,12 @@ async function testarRunnerNaoValidaSemClaimECatchProtegido() {
   const validatorPath = require.resolve("../modules/engine/validator.service");
   const processorPath = require.resolve("../modules/engine/processor.service");
   const frescorPath = require.resolve("../modules/engine/frescor-pre-importer.service");
-  const fairnessPath = require.resolve("../modules/engine/validator-fairness.service");
   const loggerPath = require.resolve("../modules/engine/logger");
   const runnerPath = require.resolve("../modules/engine/validator.runner");
   const originais = {
     validator: require.cache[validatorPath],
     processor: require.cache[processorPath],
     frescor: require.cache[frescorPath],
-    fairness: require.cache[fairnessPath],
     logger: require.cache[loggerPath],
     runner: require.cache[runnerPath]
   };
@@ -171,11 +169,6 @@ async function testarRunnerNaoValidaSemClaimECatchProtegido() {
     mock("../modules/engine/frescor-pre-importer.service", {
       expirarJobPreImporterSeNecessario: async () => ({ expirou: false }),
       resumirSelecaoFrescorPreImporter: () => ({ frescosSelecionados: 1, expiradosCandidatos: 0, idadeMediaJobsSelecionadosMs: 0 })
-    });
-    mock("../modules/engine/validator-fairness.service", {
-      chaveGrupo: () => "workspace|agua_nova",
-      montarGruposFairness: () => [],
-      reivindicarSlotFairness: async () => { throw new Error("fairness_nao_e_alvo_deste_teste"); }
     });
     mock("../modules/engine/logger", {
       logEngineProcessadorInicio: () => {},
@@ -209,7 +202,6 @@ async function testarRunnerNaoValidaSemClaimECatchProtegido() {
     restaurar(validatorPath, originais.validator);
     restaurar(processorPath, originais.processor);
     restaurar(frescorPath, originais.frescor);
-    restaurar(fairnessPath, originais.fairness);
     restaurar(loggerPath, originais.logger);
     restaurar(runnerPath, originais.runner);
   }

@@ -43,7 +43,6 @@ function criarPoolMemoria(idsPendentes = [], opcoes = {}) {
   const fairness = new Map();
   let copiaJobs = null;
   let copiaFairness = null;
-  let savepointJobs = null;
   const client = {
     release() {},
     async query(sql, params = []) {
@@ -58,18 +57,6 @@ function criarPoolMemoria(idsPendentes = [], opcoes = {}) {
         return { rows: [], rowCount: 0 };
       }
       if (sql === "COMMIT") return { rows: [], rowCount: 0 };
-      if (sql === "SAVEPOINT candidato_frescor") {
-        savepointJobs = new Map(jobs);
-        return { rows: [], rowCount: 0 };
-      }
-      if (sql === "ROLLBACK TO SAVEPOINT candidato_frescor") {
-        jobs.clear(); for (const [id, status] of savepointJobs.entries()) jobs.set(id, status);
-        return { rows: [], rowCount: 0 };
-      }
-      if (sql === "RELEASE SAVEPOINT candidato_frescor") return { rows: [], rowCount: 0 };
-      if (/WITH instante AS \(SELECT clock_timestamp\(\) AS agora\)/i.test(sql)) {
-        return { rows: [{ vivo: !((opcoes.staleIds || []).includes(Number(params[0]))) }], rowCount: 1 };
-      }
 
       const chave = params.slice(0, 3).join("|");
       if (/INSERT INTO engine_fairness_origem_fluxo/i.test(sql)) {
@@ -146,12 +133,6 @@ async function testarClaimPerdidoERollback() {
   assert.strictEqual(resultadoRollback.ok, false);
   assert.strictEqual(rollback.jobs.get(1), "pronto_para_importar", "rollback desfaz claim");
   assert.strictEqual(rollback.fairness.size, 0, "rollback desfaz memoria");
-
-  const expirado = criarPoolMemoria([1, 1000], { staleIds: [1] });
-  const reposicao = await reivindicarSlotFairness(grupo, 0, { pool: expirado.pool });
-  assert.strictEqual(reposicao.ok, true);
-  assert.strictEqual(reposicao.job.id, 1000, "slot vencido recebe candidato ainda vivo");
-  assert.strictEqual(expirado.jobs.get(1), "pronto_para_importar", "claim vencido revertido no savepoint");
 }
 
 (async () => {

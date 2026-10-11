@@ -172,8 +172,7 @@ async function testarClaimAtomicoEFalhas() {
   assert.strictEqual(planoPerdido.ok, true);
   assert.deepStrictEqual(planoPerdido.confirmados.map(item => item.job.id), [1], "claim protegido perdido e preenchido pelo baseline disponivel");
   assert.strictEqual(perdido.fairness.get("workspace_a|validacao_final|agua_nova").ultima, "optimus", "claim protegido perdido nao avanca memoria");
-  assert.strictEqual(perdido.consultas.filter(item => /UPDATE engine_fairness_origem_fluxo/i.test(item.sql)).length, 1,
-    "claim de reposicao confirmado registra atendimento do workspace sem inventar claim protegido");
+  assert.strictEqual(perdido.consultas.filter(item => /UPDATE engine_fairness_origem_fluxo/i.test(item.sql)).length, 0, "claim protegido perdido nao atualiza memoria");
 
   const rollback = criarPoolMemoria([1, 1000], { falharAoRegistrarFairness: true });
   const falhou = await reivindicarGrupoFairness(grupoComDuasOrigens(1, "optimus"), { pool: rollback.pool });
@@ -210,7 +209,8 @@ async function testarRunnerValidaSomenteConfirmadoPelaFairness() {
     mock("../modules/engine/validator-fairness.service", {
       chaveGrupo: () => "workspace_a|agua_nova",
       montarGruposFairness: () => [{ chave: "workspace_a|agua_nova" }],
-      reivindicarSlotFairness: async () => ({ ok: true, job: job(1000, "clonador_grupos") })
+      headsProtegidas: () => new Set(["optimus", "clonador_grupos"]),
+      reivindicarGrupoFairness: async () => ({ ok: true, confirmados: [{ posicao: 0, job: job(1000, "clonador_grupos") }] })
     });
     mock("../modules/engine/processor.service", {
       limitarJobs: valor => Number(valor || 20),

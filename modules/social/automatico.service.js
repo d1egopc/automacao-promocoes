@@ -438,17 +438,8 @@ function proximosHorariosDisponiveis({ config = {}, agendamentos = [], agora = n
 }
 
 function simularSelecaoAutomatica({ clienteId = "admin", limite = 50, agora = new Date() } = {}) {
-  const oportunidades = storage.listarOportunidadesSocial(clienteId, limite);
-  return simularSelecaoComOportunidades({ clienteId, agora, oportunidades });
-}
-
-async function simularSelecaoAutomaticaOperacional({ clienteId = "admin", limite = 50, agora = new Date() } = {}) {
-  const oportunidades = await storage.listarOportunidadesSocialOperacional(clienteId, limite);
-  return simularSelecaoComOportunidades({ clienteId, agora, oportunidades });
-}
-
-function simularSelecaoComOportunidades({ clienteId, agora, oportunidades }) {
   const config = storage.getConfigAutomaticoSocial(clienteId);
+  const oportunidades = storage.listarOportunidadesSocial(clienteId, limite);
   const publicacoes = listarPublicacoesInstagram(clienteId, 200);
   const agendamentos = storage.listarAgendamentosSocial(clienteId);
   const limiteDia = calcularVagasAutomaticasDia({ config, agendamentos, agora });
@@ -574,14 +565,14 @@ async function executarAutomaticoCliente({
     }
 
     if (config.limparAutomaticamenteOportunidadesAntigas === true) {
-      await storage.limparOportunidadesSocialOperacional(clienteSeguro, {
+      storage.limparOportunidadesSocial(clienteSeguro, {
         modo: "antigas",
         idadeMaximaHoras: config.idadeMaximaHoras,
         agora
       });
     }
 
-    const oportunidades = await storage.listarOportunidadesSocialOperacional(clienteSeguro, 50);
+    const oportunidades = storage.listarOportunidadesSocial(clienteSeguro, 50);
     const publicacoes = listarPublicacoesInstagram(clienteSeguro, 200);
     const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
     const limiteDia = calcularVagasAutomaticasDia({ config, agendamentos, agora });
@@ -1116,7 +1107,6 @@ function limparAgendamentosConcluidosAutomaticamenteTodosClientes({
 
 module.exports = {
   simularSelecaoAutomatica,
-  simularSelecaoAutomaticaOperacional,
   executarAutomaticoCliente,
   executarAutomaticoTodosClientes,
   executarAgendamentosPendentesCliente,

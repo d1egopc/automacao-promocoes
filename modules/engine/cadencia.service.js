@@ -143,10 +143,19 @@ function destinoAceitaTurboCupom(destino = {}) {
   );
 }
 
-function cupomFastLaneReal(oferta = {}) {
-  // Lazy import: the shared classifier uses this module's Shopee link validator.
-  const { classificarTurboComercialCandidato } = require("./turbo-classification.candidate");
-  return classificarTurboComercialCandidato(oferta).turbo;
+function cupomFastLaneReal(oferta = {}, cupomFastLaneTipo = null, agoraMs = Date.now()) {
+  if (typeof cupomFastLaneTipo === "function") {
+    return cupomFastLaneTipo(oferta, agoraMs) === "real_detectado" || linkResgateShopeeValidoParaCadencia(oferta);
+  }
+  return Boolean(
+    oferta.cupomReal === true ||
+    oferta.cupomConfirmado === true ||
+    oferta.cupomTurbo === true ||
+    oferta.cupom_turbo === true ||
+    oferta.tipoFluxo === "cupom_turbo" ||
+    oferta.tipoOperacional === "cupom_turbo" ||
+    linkResgateShopeeValidoParaCadencia(oferta)
+  );
 }
 
 function resolverCadenciaDestino({
@@ -154,11 +163,14 @@ function resolverCadenciaDestino({
   configCliente = {},
   configGlobal = {},
   oferta = {},
+  cupomFastLaneTipo = null,
+  considerarTurboSemOferta = false,
+  agoraMs = Date.now()
 } = {}) {
   const contrato = contratoCadenciaAtual(configGlobal, configCliente);
   const intervaloConfiguradoMin = resolverIntervaloConfiguradoCadencia(destino, configCliente, configGlobal);
   const turboElegivel = destinoAceitaTurboCupom(destino);
-  const cupomReal = cupomFastLaneReal(oferta);
+  const cupomReal = considerarTurboSemOferta ? turboElegivel : cupomFastLaneReal(oferta, cupomFastLaneTipo, agoraMs);
   const turboAplicado = turboElegivel && cupomReal;
   const intervaloNormalMin = contrato.aplicaMinimoNormal && Number.isFinite(contrato.normalMinimoMin)
     ? Math.max(intervaloConfiguradoMin, contrato.normalMinimoMin)

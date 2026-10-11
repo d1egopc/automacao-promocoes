@@ -116,15 +116,14 @@ function testarComposicoesDeOrigemELanes() {
   assert.deepStrictEqual(multiplosGrupos.candidatePool.map(item => item.id), [4001, 4002, 4003, 4004]);
 }
 
-function testarSqlFairnessSomenteLeituraSemMudancaClaim() {
+function testarSqlSemFairnessOuMudancaClaim() {
   const sql = sqlBuscarJobsDiagnosticados();
   for (const trecho of ["baseline_bruto AS", "grupos_representados_baseline AS", "heads_protegidas_brutas AS", "candidate_pool_ranqueado AS", "saida_pre_importer AS"]) {
     assert(sql.includes(trecho), `SQL deve conter ${trecho}`);
   }
   assert(sql.includes("PARTITION BY id"));
   assert(sql.includes("origem_fluxo_explicita_pre_importer IN ('optimus', 'clonador_grupos')"));
-  assert(sql.includes("LEFT JOIN engine_fairness_origem_fluxo"), "selector consulta o ultimo atendimento do workspace");
-  assert(!/UPDATE engine_fairness_origem_fluxo/i.test(sql), "selector nao grava memoria de fairness");
+  assert(!sql.includes("engine_fairness_origem_fluxo"));
   assert(!sql.includes("FOR UPDATE"), "candidate pool nao pode mudar o claim");
   for (const parametro of ["$1", "$2", "$3", "$4", "$5"]) assert(sql.includes(parametro));
 }
@@ -133,5 +132,5 @@ testarCotasELimitesPreservados();
 testarBaselinePermaneceFuncional();
 testarCabecaMinoritariaEOrigemLegada();
 testarComposicoesDeOrigemELanes();
-testarSqlFairnessSomenteLeituraSemMudancaClaim();
+testarSqlSemFairnessOuMudancaClaim();
 console.log("engine-validator-candidate-pool.test.js OK");

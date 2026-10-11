@@ -37,10 +37,6 @@ const {
   avaliarFrescorComercialOferta,
   flowManagerAtivoWorkspace
 } = require("../flow-manager/flow-manager.service");
-const { avaliarFrescorPosClassificacaoCandidato } =
-  require("../post-classification-freshness.candidate");
-const { classificarTurboComercialCandidato } =
-  require("../turbo-classification.candidate");
 const {
   chaveGrupo,
   montarGruposFairness,
@@ -77,7 +73,6 @@ function numeroNaoNegativo(valor = 0) {
 }
 
 function tipoOperacionalOferta(oferta = {}) {
-  if (classificarTurboComercialCandidato(oferta).turbo) return "cupom_turbo";
   const metadata = metadataObjeto(oferta.metadata);
   const jobMetadata = metadataObjeto(oferta.job_metadata);
   return String(
@@ -92,7 +87,15 @@ function tipoOperacionalOferta(oferta = {}) {
 }
 
 function cupomTurboOferta(oferta = {}) {
-  return classificarTurboComercialCandidato(oferta).turbo;
+  const metadata = metadataObjeto(oferta.metadata);
+  const jobMetadata = metadataObjeto(oferta.job_metadata);
+  return oferta.cupomTurbo === true ||
+    oferta.cupom_turbo === true ||
+    metadata.cupomTurbo === true ||
+    metadata.cupom_turbo === true ||
+    jobMetadata.cupomTurbo === true ||
+    jobMetadata.cupom_turbo === true ||
+    tipoOperacionalOferta(oferta).toLowerCase() === "cupom_turbo";
 }
 
 function registrarGateResumo(resumo = null, decisao = {}) {
@@ -821,27 +824,6 @@ async function distribuirOfertaEngine(oferta = {}, contexto = {}, resumo = null)
       motivo: validacao.motivo || "validacao_distribuicao_rejeitada"
     });
     return reterOferta(oferta, validacao.motivo, validacao.detalhes || {}, resumo, contexto);
-  }
-
-  // Local opt-in only. Recheck the classified commercial type against the
-  // immutable event clock before any flow/fila decision can send the offer.
-  if (contexto?.deps?.universalFlowFreshnessCandidate === true) {
-    const frescor = avaliarFrescorPosClassificacaoCandidato(oferta,
-      contexto?.deps?.agoraMs ?? Date.now());
-    if (!frescor.ok) {
-      return reterOferta(oferta, frescor.motivo, {
-        origem: "frescor_pos_classificacao_candidato",
-        resultadoDistribuicao: "expirada_frescor_comercial_pre_fila",
-        definitivoOperacional: true,
-        classificacaoOperacional: "definitivo",
-        statusOperacional: "terminal",
-        filaRecebeu: false,
-        escopo: "workspace",
-        tipoFluxo: frescor.tipoFluxo || "",
-        ttlMs: frescor.ttlMs ?? null,
-        expiraEmComercial: frescor.expiraEmComercial || ""
-      }, resumo, contexto);
-    }
   }
 
   const snapshotOptions = {

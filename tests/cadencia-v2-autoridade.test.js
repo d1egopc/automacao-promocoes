@@ -49,7 +49,7 @@ assert.strictEqual(normalComPiso.intervaloEfetivoMin, 2.5);
 
 const turbo = resolverCadenciaDestino({
   destino: { intervaloMinutos: 4, prioridadeCupomAtiva: true },
-  oferta: { cupom: "APP20" },
+  oferta: { cupom: "PROMO" },
   cupomFastLaneTipo: () => "real_detectado"
 });
 assert.strictEqual(turbo.modo, "cadencia_v2");
@@ -164,7 +164,7 @@ const gateSemOferta = resolverCadenciaDestino({
   destino: { intervaloMinutos: 5, cupomTurbo: true },
   considerarTurboSemOferta: true
 });
-assert.strictEqual(gateSemOferta.intervaloEfetivoMin, 5);
-assert.strictEqual(gateSemOferta.turboAplicado, false);
+assert.strictEqual(gateSemOferta.intervaloEfetivoMin, 1.5);
+assert.strictEqual(gateSemOferta.turboAplicado, true);
 
 console.log("cadencia-v2-autoridade.test.js OK");

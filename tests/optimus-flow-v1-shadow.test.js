@@ -1121,39 +1121,6 @@ async function testarReentradaVelhaNaoCriaFilaNemCredito() {
   assert.strictEqual(ctx.ofertas[0].capturadaEm, "2026-08-03T05:00:00.000Z");
 }
 
-async function testarGuardPosClassificacaoCandidatoAntesDaFila() {
-  const agoraMs = Date.now();
-  const capturadaEm = new Date(agoraMs - 15 * 60000).toISOString();
-  const ctx = prepararRunnerComEstado([
-    ofertaDistribuivel(603, GENERICO, {
-      evento_capturado_em: capturadaEm,
-      metadata: { cupomTurbo: true }
-    })
-  ]);
-  const resultado = await ctx.runner.distribuirOfertasEngine({
-    limite: 1,
-    deps: { universalFlowFreshnessCandidate: true, agoraMs }
-  });
-  assert.strictEqual(resultado.adicionadasFila, 0);
-  assert.strictEqual(ctx.adicionados.length, 0);
-  assert(ctx.statusMarcados.some(item => item.id === 603 &&
-    item.status === "retida" &&
-    item.motivo === "captura_expirada_pos_classificacao"));
-  assert.strictEqual(ctx.ofertas[0].evento_capturado_em, capturadaEm);
-
-  const vivo = prepararRunnerComEstado([
-    ofertaDistribuivel(604, GENERICO, {
-      evento_capturado_em: new Date(agoraMs - 20 * 60000).toISOString()
-    })
-  ]);
-  const aceito = await vivo.runner.distribuirOfertasEngine({
-    limite: 1,
-    deps: { universalFlowFreshnessCandidate: true, agoraMs }
-  });
-  assert.strictEqual(aceito.adicionadasFila, 1);
-  assert.strictEqual(vivo.adicionados.length, 1);
-}
-
 async function testarFlowExpiradoPeloAvaliadorRetemTerminal() {
   const ctx = prepararRunnerComEstado([
     ofertaDistribuivel(602, GENERICO, {
@@ -1387,7 +1354,6 @@ async function testarFase3BLiberaReservaQuandoGateBloqueia() {
   await testarTurboAguardandoMaisQueTtlExpira();
   await testarCapacidadeVoltaAntesDoTtlEntra();
   await testarReentradaVelhaNaoCriaFilaNemCredito();
-  await testarGuardPosClassificacaoCandidatoAntesDaFila();
   await testarFlowExpiradoPeloAvaliadorRetemTerminal();
   await testarAceiteGeraFilaUmaUnicaVez();
   await testarFase3APersisteBufferVivoShadowEmAceite();

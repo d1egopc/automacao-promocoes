@@ -17,7 +17,8 @@ const {
 const {
   chaveGrupo,
   montarGruposFairness,
-  reivindicarSlotFairness
+  headsProtegidas,
+  reivindicarGrupoFairness
 } = require("./validator-fairness.service");
 const {
   logEngineProcessadorInicio,
@@ -84,42 +85,49 @@ async function validarJobsDiagnosticadosEngine({ limite = 20, clientesValidos = 
       baselineComIndice.filter(job => job.lane_vazao_pre_importer !== "expirada"),
       candidatosElegiveis
     )
+      .filter(grupo => headsProtegidas(grupo).size === 2)
       .map(grupo => [grupo.chave, grupo])
   );
-  const planosFairness = new Map();
-  const idsReservadosFairness = new Map();
+  const gruposReivindicados = new Map();
+  const confirmadosPorPosicao = new Map();
 
   for (const job of baselineComIndice) {
     logEngineProcessadorJob({ modo: "validacao", jobId: job.id, eventoId: job.evento_id, clienteId: job.cliente_id });
     let jobConfirmado = job;
 
     try {
+      const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
+        registrarProcessamento,
+        marcarJobStatus,
+        statusEsperado: "diagnosticado"
+      });
+      if (frescorPreImporter.expirou) {
+        resumo.expiradosPreImporter += 1;
+        continue;
+      }
+
       const grupo = gruposFairness.get(chaveGrupo(job));
       if (grupo) {
-        const idsReservados = idsReservadosFairness.get(grupo.chave) || new Set();
-        const claim = await reivindicarSlotFairness(grupo, job.indiceBaseline, {
-          plano: planosFairness.get(grupo.chave), idsReservados
-        });
-        if (claim.plano) planosFairness.set(grupo.chave, claim.plano);
-        if (!claim.ok || !claim.job) {
-          resumo.claimsPerdidos += 1;
-          if (!claim.ok) logEngineProcessadorErro({ modo: "validacao", jobId: job.id,
-            etapa: "fairness_slot_claim", motivo: claim.motivo, erro: claim.erro || "" });
-          continue;
+        if (!gruposReivindicados.has(grupo.chave)) {
+          const resultadoFairness = await reivindicarGrupoFairness(grupo);
+          gruposReivindicados.set(grupo.chave, resultadoFairness);
+          if (resultadoFairness.ok) {
+            for (const confirmado of resultadoFairness.confirmados) {
+              confirmadosPorPosicao.set(Number(confirmado.posicao), confirmado.job);
+            }
+          }
         }
-        jobConfirmado = claim.job;
-        idsReservados.add(Number(jobConfirmado.id));
-        idsReservadosFairness.set(grupo.chave, idsReservados);
-      } else {
-        const frescorPreImporter = await expirarJobPreImporterSeNecessario(job, {
-          registrarProcessamento,
-          marcarJobStatus,
-          statusEsperado: "diagnosticado"
-        });
-        if (frescorPreImporter.expirou) {
-          resumo.expiradosPreImporter += 1;
-          continue;
+        const resultadoFairness = gruposReivindicados.get(grupo.chave);
+        if (resultadoFairness?.ok) {
+          jobConfirmado = confirmadosPorPosicao.get(Number(job.indiceBaseline));
+          if (!jobConfirmado) {
+            resumo.claimsPerdidos += 1;
+            continue;
+          }
         }
+      }
+
+      if (!grupo || !gruposReivindicados.get(grupo.chave)?.ok) {
         const claim = await tentarMarcarValidando(job.id);
         if (!claim.ok || !claim.claimed) {
           resumo.claimsPerdidos += 1;

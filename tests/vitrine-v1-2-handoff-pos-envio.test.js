@@ -188,10 +188,9 @@ assert.ok(
     chamadaCapturaExecutor,
   "captura deve acontecer apenas apos envio confirmado"
 );
-const finalizacaoVitrineIndex = index.indexOf('const finalizacaoEnvio = perfilProcessarFila.etapaSync("finalizarOferta", () => filaOfertas.finalizarOfertaEnviadaFila');
-const posEnvioVitrineIndex = index.indexOf('const ofertaParaVitrine = perfilProcessarFila.etapaSync("posEnvio", () => montarOfertaParaVitrinePosEnvio');
 assert.ok(
-  finalizacaoVitrineIndex >= 0 && posEnvioVitrineIndex > finalizacaoVitrineIndex,
+  index.indexOf("const finalizacaoEnvio = filaOfertas.finalizarOfertaEnviadaFila") <
+    index.indexOf("const ofertaParaVitrine = montarOfertaParaVitrinePosEnvio"),
   "oferta para Vitrine deve ser montada depois da finalizacao da fila"
 );
 assert.ok(

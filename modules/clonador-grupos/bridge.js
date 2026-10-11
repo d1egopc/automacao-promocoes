@@ -5,10 +5,7 @@ const { criarContratoPreparacaoLinks } = require("../engine/preparacao-links.ser
 const { resolverRedirectClonador } = require("../radar/redirect/redirect-resolver");
 const { extrairComercialUniversal } = require("../radar/extrator-comercial-universal");
 const { registrarEventoBruto } = require("../engine/inbox.service");
-const { avaliarFrescorEsperaClonador } = require("./wait-freshness.candidate");
-const { montarComercialCapturado: montarComercialCapturadoCompartilhado } =
-  require("./commercial-capture.candidate");
-const { classificarOcorrenciaContextualClonador, projetarIntencoesAchados } = require("./service");
+const { classificarOcorrenciaContextualClonador } = require("./service");
 
 const CONFIANCAS_ACEITAS = new Set(["alta", "media"]);
 
@@ -129,11 +126,56 @@ function textoBeneficioComercial(comercial = {}) {
   return limparEvidenciaComercial(candidatos.find(Boolean) || "");
 }
 
-function montarComercialCapturado({ textoOriginal = "", links = [], marketplaceDetectado = "",
-  linksComerciais = [], extrairComercial = extrairComercialUniversal } = {}) {
-  return montarComercialCapturadoCompartilhado({
-    textoOriginal, links, marketplaceDetectado, linksComerciais, extrairComercial
-  });
+function montarComercialCapturado({ textoOriginal = "", links = [], marketplaceDetectado = "", extrairComercial = extrairComercialUniversal } = {}) {
+  if (typeof extrairComercial !== "function") return null;
+  const comercial = extrairComercial({ textoOriginal, links, marketplaceDetectado });
+  const precoAtual = confiavel(comercial.precoAtual) ? numero(comercial.precoAtual.valor) : null;
+  const precoAnterior = precoAtual !== null && confiavel(comercial.precoAntigo)
+    ? numero(comercial.precoAntigo.valor)
+    : null;
+  const cupom = confiavel(comercial.cupom) ? texto(comercial.cupom.codigo) : "";
+  const beneficio = textoBeneficioComercial(comercial);
+  const tituloCapturado = extrairTituloCapturadoClonador(textoOriginal, links);
+
+  const contrato = {
+    versao: "clonador_comercial_capturado_v1",
+    origem: "clonador_grupos",
+    campos: {},
+    evidencias: {},
+    parser: {
+      versao: comercial.versao || "",
+      camposEncontrados: Array.isArray(comercial.camposEncontrados) ? comercial.camposEncontrados : []
+    }
+  };
+
+  if (tituloCapturado) {
+    contrato.tituloCapturado = tituloCapturado;
+    contrato.campos.titulo = true;
+    contrato.evidencias.titulo = tituloCapturado;
+  }
+  if (precoAtual !== null) {
+    contrato.precoAtual = precoAtual;
+    contrato.campos.precoAtual = true;
+    contrato.evidencias.precoAtual = comercial.precoAtual?.evidencia || "";
+  }
+  if (precoAnterior !== null && (precoAtual === null || precoAnterior > precoAtual)) {
+    contrato.precoAnterior = precoAnterior;
+    contrato.campos.precoAnterior = true;
+    contrato.evidencias.precoAnterior = comercial.precoAntigo?.evidencia || "";
+  }
+  if (cupom) {
+    contrato.cupom = cupom;
+    contrato.campos.cupom = true;
+    contrato.evidencias.cupom = comercial.cupom?.evidencia || comercial.cupom?.texto || "";
+  }
+  if (beneficio) {
+    contrato.beneficioTexto = beneficio;
+    contrato.beneficioExtra = beneficio;
+    contrato.campos.beneficio = true;
+    contrato.evidencias.beneficio = beneficio;
+  }
+
+  return Object.keys(contrato.campos).length ? contrato : null;
 }
 
 async function resolverLinksClonador(links = [], resolver = resolverRedirectClonador) {
@@ -220,21 +262,6 @@ function criarBridgeClonadorGrupos(deps = {}) {
 
   async function processarItem(item = {}) {
     const clienteId = texto(item.clienteId || item.cliente_id);
-    if (deps.aplicarFrescorEsperaCandidato === true) {
-      const frescorEspera = avaliarFrescorEsperaClonador(item);
-      if (frescorEspera.expirada || frescorEspera.manualV2) {
-        const motivo = frescorEspera.manualV2
-          ? "manual_v2_fora_buffer_automatico" : "EXPIRED_BEFORE_ADMISSION";
-        if (typeof repo.ignorarCapturaVencidaAguardando !== "function") {
-          throw new Error("repo_ignorar_captura_aguardando_indisponivel");
-        }
-        const ignorada = await repo.ignorarCapturaVencidaAguardando(
-          item.id, motivo, frescorEspera.tipoFluxo
-        );
-        return { ok: false, ignorada: Boolean(ignorada), item: ignorada || item,
-          motivo: ignorada ? motivo : "captura_status_alterado" };
-      }
-    }
     const destinos = typeof repo.listarDestinos === "function"
       ? await repo.listarDestinos(clienteId)
       : [];
@@ -245,16 +272,11 @@ function criarBridgeClonadorGrupos(deps = {}) {
       textoOriginal: item.textoOriginal,
       links: resolvidos.linksPreparados,
       marketplaceDetectado,
-      linksComerciais: item.metadata?.comercialCapturado?.linksComerciais,
       extrairComercial
-    }) || item.metadata?.comercialCapturado || null;
+    });
 
     const metadata = {
       origemFluxo: "clonador_grupos",
-      // Preserve the factual pre-admission classification; priority alone is
-      // never an authority for Turbo.
-      ...(item.metadata?.cupomTurbo === true ? { cupomTurbo: true } : {}),
-      ...(item.metadata?.tipoFluxo === "cupom_turbo" ? { tipoFluxo: "cupom_turbo" } : {}),
       clonadorGrupos: {
         bufferId: texto(item.id),
         mensagemId: texto(item.mensagemId),
@@ -297,18 +319,6 @@ function criarBridgeClonadorGrupos(deps = {}) {
         grupoId: item.grupoJid
       }
     });
-
-    if (resultado?.motivo === "hot_admission_denied") {
-      const adiado = await repo.atualizarBufferStatus(item.id, "capturada", {
-        clonadorGruposBridge: {
-          status: "aguardando_admissao", motivo: "hot_admission_denied",
-          eventoId: resultado.id || null,
-          atualizadoEm: new Date().toISOString()
-        }
-      }, "processando");
-      return { ok: false, adiada: Boolean(adiado), item: adiado || item,
-        resultado, motivo: "hot_admission_denied" };
-    }
 
     if (!resultado?.ok) {
       await repo.atualizarBufferStatus(item.id, "erro", {
@@ -383,20 +393,6 @@ function criarBridgeClonadorGrupos(deps = {}) {
   async function processarCapturasPendentes(opcoes = {}) {
     const limite = Math.max(1, Math.min(20, Number(opcoes.limite || 5)));
     const resumo = { ok: true, processadas: 0, prontas: 0, erros: 0, vazia: false };
-    if (typeof repo.listarIntencoesAchadosPendentes === "function") {
-      resumo.achadosProjection = await projetarIntencoesAchados({ repository: repo,
-        limite: Math.min(limite, 5), logger });
-      if (typeof repo.limparIntencoesAchadosTerminais === "function") {
-        resumo.achadosTerminalCleanup = await repo.limparIntencoesAchadosTerminais({
-          limite: Math.min(limite, 5)
-        });
-      }
-    }
-    if (deps.aplicarFrescorEsperaCandidato === true &&
-        typeof repo.expirarEsperaVencida === "function") {
-      const expiracao = await repo.expirarEsperaVencida({ limite });
-      resumo.expiradasNaEspera = Number(expiracao.expiradas || 0);
-    }
 
     for (let i = 0; i < limite; i += 1) {
       const item = await repo.reivindicarProximaCaptura({ timeoutMinutos: opcoes.timeoutMinutos || 15 });
@@ -409,14 +405,6 @@ function criarBridgeClonadorGrupos(deps = {}) {
       try {
         const resultado = await processarItem(item);
         if (resultado.ok) resumo.prontas += 1;
-        else if (resultado.ignorada) {
-          resumo.ignoradas = (resumo.ignoradas || 0) + 1;
-        }
-        else if (resultado.adiada) {
-          resumo.processadas -= 1;
-          resumo.esperaAdmissao = (resumo.esperaAdmissao || 0) + 1;
-          break;
-        }
         else resumo.erros += 1;
       } catch (erro) {
         resumo.erros += 1;

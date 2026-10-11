@@ -1,13 +1,11 @@
 const { queryEngine } = require("./database");
-const { sqlFiltroEpochReal } = require("./universal-ingress-fence");
 const {
   marcarJobStatus,
   registrarProcessamento,
   limitarJobs
 } = require("./processor.service");
 const {
-  calcularCotasFrescorPreImporter,
-  sqlFrescorComercialPreImporter
+  calcularCotasFrescorPreImporter
 } = require("./frescor-pre-importer.service");
 const { minutosLeaseJobsAtivos } = require("./jobs.service");
 const { normalizarTexto } = require("./normalizers");
@@ -140,17 +138,7 @@ function marketplaceAtivoClienteEngine(clienteId = "", marketplace = "", marketp
 }
 
 function sqlBuscarJobsDiagnosticados() {
-  const frescor = sqlFrescorComercialPreImporter("j", "e");
-  const epoch = sqlFiltroEpochReal("e");
-  return `WITH limpeza_ids AS MATERIALIZED (
-       SELECT j.id
-         FROM engine_jobs_cliente j
-         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
-        WHERE j.status = 'diagnosticado' AND ${epoch} AND ${frescor.morto}
-        ORDER BY j.criado_em ASC, j.id ASC
-        LIMIT $4
-     ),
-     base_raw AS (
+  return `WITH base AS (
        SELECT j.id, j.uuid, j.evento_id, j.oferta_id, j.cliente_id, j.marketplace_detectado,
               j.marketplace, j.status, j.motivo_final, j.metadata, j.prioridade,
               j.criado_em, j.atualizado_em,
@@ -180,27 +168,19 @@ function sqlBuscarJobsDiagnosticados() {
                 ELSE ''
               END AS origem_fluxo_explicita_pre_importer,
               COALESCE(e.capturado_em, j.criado_em) AS origem_comercial_pre_importer,
-              ${frescor.bucket} AS bucket_frescor_pre_importer,
-              ${frescor.lane} AS lane_vazao_pre_importer
+              CASE
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 1
+                ELSE 0
+              END AS bucket_frescor_pre_importer,
+              CASE
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '30 minutes' THEN 'expirada'
+                WHEN COALESCE(e.capturado_em, j.criado_em) >= NOW() - INTERVAL '5 minutes' THEN 'agua_nova'
+                WHEN COALESCE(e.capturado_em, j.criado_em) < NOW() - INTERVAL '20 minutes' THEN 'fresca_em_risco'
+                ELSE 'fresca_circulavel'
+              END AS lane_vazao_pre_importer
          FROM engine_jobs_cliente j
          LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
-        WHERE j.status = 'diagnosticado' AND ${epoch}
-          AND (${frescor.vivo} OR j.id IN (SELECT id FROM limpeza_ids))
-     ),
-     base AS (
-       SELECT b.*, f.ultimo_atendimento_em AS workspace_ultimo_atendimento_em,
-              geral.ultimo_atendimento_em AS workspace_ultimo_atendimento_geral
-         FROM base_raw b
-         LEFT JOIN engine_fairness_origem_fluxo f
-           ON f.cliente_id = b.workspace_chave_pre_importer
-          AND f.etapa = 'validacao_final'
-          AND f.lane = b.lane_vazao_pre_importer
-         LEFT JOIN (
-           SELECT cliente_id, MAX(ultimo_atendimento_em) AS ultimo_atendimento_em
-             FROM engine_fairness_origem_fluxo
-            WHERE etapa = 'validacao_final'
-            GROUP BY cliente_id
-         ) geral ON geral.cliente_id = b.workspace_chave_pre_importer
+        WHERE j.status = 'diagnosticado'
      ),
      agua_nova_ranked AS (
        SELECT *,
@@ -218,7 +198,7 @@ function sqlBuscarJobsDiagnosticados() {
      agua_nova AS (
        SELECT *, 0 AS bucket_selecao_pre_importer
          FROM agua_nova_ranked
-        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
         LIMIT $1
      ),
      fresca_em_risco_ranked AS (
@@ -237,7 +217,7 @@ function sqlBuscarJobsDiagnosticados() {
      fresca_em_risco AS (
        SELECT *, 1 AS bucket_selecao_pre_importer
          FROM fresca_em_risco_ranked
-        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $2
      ),
      fresca_circulavel_ranked AS (
@@ -256,7 +236,7 @@ function sqlBuscarJobsDiagnosticados() {
      fresca_circulavel AS (
        SELECT *, 2 AS bucket_selecao_pre_importer
          FROM fresca_circulavel_ranked
-        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, COALESCE(prioridade, 0) DESC, origem_comercial_pre_importer DESC, atualizado_em DESC NULLS LAST, id ASC
         LIMIT $3
      ),
      limpeza_ranked AS (
@@ -275,10 +255,10 @@ function sqlBuscarJobsDiagnosticados() {
      limpeza AS (
        SELECT *, 3 AS bucket_selecao_pre_importer
          FROM limpeza_ranked
-        ORDER BY workspace_rank_pre_importer ASC, workspace_ultimo_atendimento_em ASC NULLS FIRST, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
+        ORDER BY workspace_rank_pre_importer ASC, origem_comercial_pre_importer ASC, atualizado_em ASC NULLS FIRST, id ASC
         LIMIT $4
      ),
-     cotas_brutas AS (
+     baseline_bruto AS (
        SELECT * FROM agua_nova
        UNION ALL
        SELECT * FROM fresca_em_risco
@@ -287,47 +267,11 @@ function sqlBuscarJobsDiagnosticados() {
        UNION ALL
        SELECT * FROM limpeza
      ),
-     backfill AS (
-       SELECT ranked.*, 4 AS bucket_selecao_pre_importer
-         FROM (
-           SELECT * FROM agua_nova_ranked
-           UNION ALL
-           SELECT * FROM fresca_em_risco_ranked
-           UNION ALL
-           SELECT * FROM fresca_circulavel_ranked
-         ) ranked
-        WHERE NOT EXISTS (SELECT 1 FROM cotas_brutas c WHERE c.id = ranked.id)
-        ORDER BY CASE ranked.lane_vazao_pre_importer
-                   WHEN 'agua_nova' THEN 0 WHEN 'fresca_em_risco' THEN 1 ELSE 2 END ASC,
-                 ranked.workspace_rank_pre_importer ASC,
-                 COALESCE(ranked.prioridade, 0) DESC,
-                 CASE WHEN ranked.lane_vazao_pre_importer = 'fresca_em_risco' THEN ranked.origem_comercial_pre_importer END ASC NULLS LAST,
-                 CASE WHEN ranked.lane_vazao_pre_importer <> 'fresca_em_risco' THEN ranked.origem_comercial_pre_importer END DESC NULLS LAST,
-                 ranked.id ASC
-        LIMIT GREATEST(0, $5::int - $4::int -
-          (SELECT COUNT(*)::int FROM cotas_brutas WHERE lane_vazao_pre_importer <> 'expirada'))
-     ),
-     baseline_bruto AS (
-       SELECT * FROM cotas_brutas WHERE $5::int > 4
-       UNION ALL
-       SELECT * FROM backfill WHERE $5::int > 4
-       UNION ALL
-       SELECT ranked.*, 0 AS bucket_selecao_pre_importer
-         FROM (
-           SELECT * FROM agua_nova_ranked
-           UNION ALL SELECT * FROM fresca_em_risco_ranked
-           UNION ALL SELECT * FROM fresca_circulavel_ranked
-         ) ranked
-        WHERE $5::int <= 4
-     ),
      baseline AS (
        SELECT *,
               ROW_NUMBER() OVER (
-                ORDER BY CASE WHEN $5::int <= 4 THEN workspace_ultimo_atendimento_em END ASC NULLS FIRST,
-                         CASE WHEN $5::int <= 4 THEN workspace_ultimo_atendimento_geral END ASC NULLS FIRST,
-                         bucket_selecao_pre_importer ASC,
+                ORDER BY bucket_selecao_pre_importer ASC,
                          workspace_rank_pre_importer ASC,
-                         CASE WHEN $5::int <= 4 THEN origem_comercial_pre_importer END ASC NULLS LAST,
                          COALESCE(prioridade, 0) DESC,
                          CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
                          CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
@@ -335,11 +279,8 @@ function sqlBuscarJobsDiagnosticados() {
                          id ASC
               ) AS baseline_ordem_pre_importer
          FROM baseline_bruto
-        ORDER BY CASE WHEN $5::int <= 4 THEN workspace_ultimo_atendimento_em END ASC NULLS FIRST,
-                 CASE WHEN $5::int <= 4 THEN workspace_ultimo_atendimento_geral END ASC NULLS FIRST,
-                 bucket_selecao_pre_importer ASC,
+        ORDER BY bucket_selecao_pre_importer ASC,
                  workspace_rank_pre_importer ASC,
-                 CASE WHEN $5::int <= 4 THEN origem_comercial_pre_importer END ASC NULLS LAST,
                  COALESCE(prioridade, 0) DESC,
                  CASE WHEN lane_vazao_pre_importer = 'fresca_em_risco' THEN origem_comercial_pre_importer END ASC NULLS LAST,
                  CASE WHEN lane_vazao_pre_importer <> 'fresca_em_risco' THEN origem_comercial_pre_importer END DESC NULLS LAST,
@@ -348,10 +289,8 @@ function sqlBuscarJobsDiagnosticados() {
         LIMIT $5
      ),
      grupos_representados_baseline AS (
-       SELECT workspace_chave_pre_importer, lane_vazao_pre_importer,
-              COUNT(*)::int AS baseline_slots
+       SELECT DISTINCT workspace_chave_pre_importer, lane_vazao_pre_importer
          FROM baseline
-        GROUP BY workspace_chave_pre_importer, lane_vazao_pre_importer
      ),
      heads_protegidas_brutas AS (
        SELECT ranked.*, 0 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer
@@ -390,18 +329,6 @@ function sqlBuscarJobsDiagnosticados() {
        SELECT *, 'baseline'::text AS candidate_pool_origem_pre_importer FROM baseline
        UNION ALL
        SELECT *, 'head_protegida'::text AS candidate_pool_origem_pre_importer FROM heads_protegidas_brutas
-       UNION ALL
-       SELECT ranked.*, 4 AS bucket_selecao_pre_importer, NULL::bigint AS baseline_ordem_pre_importer,
-              'reposicao'::text AS candidate_pool_origem_pre_importer
-         FROM (
-           SELECT * FROM agua_nova_ranked
-           UNION ALL SELECT * FROM fresca_em_risco_ranked
-           UNION ALL SELECT * FROM fresca_circulavel_ranked
-         ) ranked
-         JOIN grupos_representados_baseline grupos
-           ON grupos.workspace_chave_pre_importer = ranked.workspace_chave_pre_importer
-          AND grupos.lane_vazao_pre_importer = ranked.lane_vazao_pre_importer
-        WHERE ranked.workspace_rank_pre_importer <= GREATEST(2, grupos.baseline_slots * 2)
      ),
      candidate_pool_ranqueado AS (
        SELECT *, ROW_NUMBER() OVER (

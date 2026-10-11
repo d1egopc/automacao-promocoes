@@ -1,33 +1,12 @@
 const {
-  avaliarFrescorComercialOferta,
-  TTL_NORMAL_MS,
-  TTL_TURBO_MS
+  avaliarFrescorComercialOferta
 } = require("./flow-manager/flow-manager.service");
-const { classificarTurboComercialCandidato } =
-  require("./turbo-classification.candidate");
 
 const MOTIVO_FRESCOR_PRE_IMPORTER = "flow_expirada_frescor_comercial_pre_importer";
 const STATUS_FINAL_FRESCOR_PRE_IMPORTER = "expirada_operacional";
 const AGUA_NOVA_MINUTOS_PRE_IMPORTER = 5;
 const FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER = 20;
-const TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER = Math.floor(TTL_NORMAL_MS / 60000);
-const CAMPOS_MANUAL_BOOLEANOS = Object.freeze({
-  metadata: Object.freeze(["manualV2", "manual_v2", "manual"]),
-  eventoMetadata: Object.freeze(["manualV2", "manual_v2", "manual"])
-});
-const CAMPOS_MANUAL_TEXTO = Object.freeze({
-  metadata: Object.freeze(["origem", "fonte"]),
-  eventoMetadata: Object.freeze(["origem", "fonte"]),
-  job: Object.freeze(["evento_origem", "evento_origem_tipo"])
-});
-const CAMPOS_TURBO_BOOLEANOS = Object.freeze({
-  metadata: Object.freeze(["cupomTurbo", "cupom_turbo"]),
-  eventoMetadata: Object.freeze(["cupomTurbo", "cupom_turbo"])
-});
-const CAMPOS_TIPO_FLUXO = Object.freeze({
-  metadata: Object.freeze(["tipoFluxo", "tipo_fluxo", "tipoOperacional", "tipo_operacional"]),
-  eventoMetadata: Object.freeze(["tipoFluxo", "tipo_fluxo", "tipoOperacional", "tipo_operacional"])
-});
+const TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER = 30;
 
 function numeroSeguro(valor = 0) {
   const numero = Number(valor || 0);
@@ -49,85 +28,25 @@ function contemManual(valor = "") {
 function jobManualV2(job = {}) {
   const metadata = objeto(job.metadata);
   const eventoMetadata = objeto(job.evento_metadata || metadata.metadataEvento);
-  return Object.entries(CAMPOS_MANUAL_BOOLEANOS).some(([origem, campos]) =>
-    campos.some(campo => ({ metadata, eventoMetadata })[origem][campo] === true)) ||
-    Object.entries(CAMPOS_MANUAL_TEXTO).some(([origem, campos]) =>
-      campos.some(campo => contemManual(({ metadata, eventoMetadata, job })[origem][campo])));
-}
-
-function sqlFrescorComercialPreImporter(j = "j", e = "e", opcoes = {}) {
-  if (!/^[a-z][a-z0-9_]*$/i.test(j) || !/^[a-z][a-z0-9_]*$/i.test(e)) {
-    throw new Error("alias_sql_frescor_invalido");
-  }
-  const agoraSql = opcoes.agoraSql === "instante.agora" ? "instante.agora" : "NOW()";
-  const fonteJson = {
-    metadata: `${j}.metadata`,
-    eventoMetadata: `COALESCE(NULLIF(${e}.metadata, 'null'::jsonb), ${j}.metadata->'metadataEvento', '{}'::jsonb)`
-  };
-  const campoJson = (origem, campo, textoCampo = true) =>
-    `(${fonteJson[origem]} ${textoCampo ? "->>" : "->"} '${campo}')`;
-  const manualBooleano = Object.entries(CAMPOS_MANUAL_BOOLEANOS)
-    .flatMap(([origem, campos]) => campos.map(campo => `(${campoJson(origem, campo, false)} = 'true'::jsonb) IS TRUE`));
-  const manualTexto = Object.entries(CAMPOS_MANUAL_TEXTO)
-    .flatMap(([origem, campos]) => campos.map(campo => {
-      const valor = origem === "job" ? `${e}.${campo === "evento_origem" ? "origem" : "origem_tipo"}` : campoJson(origem, campo);
-      return `POSITION('manual' IN LOWER(COALESCE(${valor}, ''))) > 0`;
-    }));
-  const manual = `(${[...manualBooleano, ...manualTexto].join(" OR ")})`;
-  const turboBooleano = Object.entries(CAMPOS_TURBO_BOOLEANOS)
-    .flatMap(([origem, campos]) => campos.map(campo => `(${campoJson(origem, campo, false)} = 'true'::jsonb) IS TRUE`));
-  const tipoFluxo = Object.entries(CAMPOS_TIPO_FLUXO)
-    .flatMap(([origem, campos]) => campos.map(campo => `NULLIF(BTRIM(${campoJson(origem, campo)}), '')`));
-  // This SQL expression is a selector hint for already persisted markers.
-  // It does not classify cupom/resgate; every selected job is revalidated by
-  // avaliarFrescorPreImporter with the shared commercial classifier before import.
-  const turbo = `(${[...turboBooleano, `LOWER(COALESCE(${tipoFluxo.join(", ")}, '')) = 'cupom_turbo'`].join(" OR ")})`;
-  // Engine commercial freshness is anchored to the event's factual capture.
-  // Job creation remains technical telemetry, never a replacement clock.
-  const origem = `${e}.capturado_em`;
-  const expiraEm = `(${origem} + (CASE WHEN ${turbo} THEN ${Math.floor(TTL_TURBO_MS / 60000)} ELSE ${Math.floor(TTL_NORMAL_MS / 60000)} END) * INTERVAL '1 minute')`;
-  const morto = `(NOT ${manual} AND ${expiraEm} <= ${agoraSql})`;
-  const lane = `(CASE
-    WHEN ${morto} THEN 'expirada'
-    WHEN ${manual} THEN 'fresca_circulavel'
-    WHEN ${expiraEm} <= ${agoraSql} + INTERVAL '${TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER - FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER} minutes' THEN 'fresca_em_risco'
-    WHEN ${origem} >= ${agoraSql} - INTERVAL '${AGUA_NOVA_MINUTOS_PRE_IMPORTER} minutes' THEN 'agua_nova'
-    ELSE 'fresca_circulavel' END)`;
-  return {
-    manual,
-    turbo,
-    origem,
-    expiraEm,
-    vivo: `(${manual} OR ${expiraEm} > ${agoraSql})`,
-    morto,
-    bucket: `(CASE WHEN ${morto} THEN 1 ELSE 0 END)`,
-    lane
-  };
-}
-
-function sqlRetryPreImporter(j = "j", opcoes = {}) {
-  if (!/^[a-z][a-z0-9_]*$/i.test(j)) throw new Error("alias_sql_retry_invalido");
-  const agoraSql = opcoes.agoraSql === "instante.agora" ? "instante.agora" : "NOW()";
-  const afiliacao = `NULLIF(${j}.metadata #>> '{afiliacaoWorkspaceRetry,proximaTentativaEmMs}', '')`;
-  const imagem = `NULLIF(${j}.metadata #>> '{localWorkerImageRetry,proximaTentativaEmMs}', '')`;
-  const bruto = `COALESCE(${afiliacao}, ${imagem})`;
-  const valido = `${bruto} ~ '^[0-9]+$'`;
-  const agoraMs = `(EXTRACT(EPOCH FROM ${agoraSql}) * 1000)::bigint`;
-  return {
-    bruto,
-    valido,
-    proximoEmMs: `(CASE WHEN ${valido} THEN ${bruto}::bigint ELSE NULL END)`,
-    vencido: `(CASE WHEN ${valido} THEN ${bruto}::bigint <= ${agoraMs} ELSE TRUE END)`,
-    futuro: `(CASE WHEN ${valido} THEN ${bruto}::bigint > ${agoraMs} ELSE FALSE END)`
-  };
+  return metadata.manualV2 === true ||
+    metadata.manual_v2 === true ||
+    metadata.manual === true ||
+    eventoMetadata.manualV2 === true ||
+    eventoMetadata.manual_v2 === true ||
+    eventoMetadata.manual === true ||
+    contemManual(metadata.origem) ||
+    contemManual(metadata.fonte) ||
+    contemManual(job.evento_origem) ||
+    contemManual(job.evento_origem_tipo) ||
+    contemManual(eventoMetadata.origem) ||
+    contemManual(eventoMetadata.fonte);
 }
 
 function calcularCotasFrescorPreImporter(limite = 20) {
   const total = Math.max(1, Math.min(100, Math.floor(Number(limite || 20))));
-  let aguaNova = Math.max(1, Math.ceil(total * 0.7));
+  const aguaNova = Math.max(1, Math.ceil(total * 0.7));
   const frescaEmRisco = total >= 5 ? Math.max(1, Math.floor(total * 0.2)) : 0;
-  const frescaCirculavel = total >= 5 ? Math.max(1, total - aguaNova - frescaEmRisco) : 0;
-  aguaNova = total - frescaEmRisco - frescaCirculavel;
+  const frescaCirculavel = Math.max(0, total - aguaNova - frescaEmRisco);
   const limpeza = total >= 5 ? Math.max(1, Math.floor(total * 0.2)) : 0;
   return {
     limite: total,
@@ -145,10 +64,6 @@ function calcularCotasFrescorPreImporter(limite = 20) {
 }
 
 function origemComercialPreImporterMs(job = {}) {
-  if (job.evento_id != null) {
-    const factual = Date.parse(job.evento_capturado_em || "");
-    return Number.isFinite(factual) ? factual : 0;
-  }
   const metadata = objeto(job.metadata);
   const eventoMetadata = objeto(job.evento_metadata || metadata.metadataEvento);
   const valor = job.evento_capturado_em ||
@@ -164,6 +79,8 @@ function origemComercialPreImporterMs(job = {}) {
     eventoMetadata.capturadoEm ||
     eventoMetadata.capturada_em ||
     eventoMetadata.capturado_em ||
+    job.criado_em ||
+    job.evento_criado_em ||
     "";
   const ms = Date.parse(valor);
   return Number.isFinite(ms) ? ms : 0;
@@ -174,15 +91,10 @@ function classificarLaneVazaoPreImporter(job = {}, opcoes = {}) {
   const agoraMs = Number.isFinite(Number(opcoes.agoraMs)) ? Number(opcoes.agoraMs) : Date.now();
   const origemMs = origemComercialPreImporterMs(job);
   if (!origemMs) return "fresca_circulavel";
-  const frescor = avaliarFrescorPreImporter(job, { agoraMs });
-  if (frescor.expirada) return "expirada";
-  const ttlMs = Number(frescor.ttlMs || TTL_NORMAL_MS);
-  if (origemMs + ttlMs <= agoraMs +
-    (TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER - FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER) * 60000) {
-    return "fresca_em_risco";
-  }
   const idadeMinutos = Math.max(0, (agoraMs - origemMs) / 60000);
+  if (idadeMinutos >= TTL_COMERCIAL_PADRAO_MINUTOS_PRE_IMPORTER) return "expirada";
   if (idadeMinutos <= AGUA_NOVA_MINUTOS_PRE_IMPORTER) return "agua_nova";
+  if (idadeMinutos >= FRESCA_EM_RISCO_MINUTOS_PRE_IMPORTER) return "fresca_em_risco";
   return "fresca_circulavel";
 }
 
@@ -268,19 +180,32 @@ function metadataComercial(job = {}) {
 function montarEntradaFrescorPreImporter(job = {}) {
   const metadata = metadataComercial(job);
   const eventoMetadata = objeto(metadata.metadataEvento);
-  const tipoDeclarado = [
-    job.tipoFluxo, job.tipo_fluxo, job.tipoOperacional, job.tipo_operacional,
-    metadata.tipoFluxo, metadata.tipo_fluxo, metadata.tipoOperacional, metadata.tipo_operacional,
-    eventoMetadata.tipoFluxo, eventoMetadata.tipo_fluxo, eventoMetadata.tipoOperacional,
+  const cupomTurbo = job.cupom_turbo === true ||
+    job.cupomTurbo === true ||
+    metadata.cupomTurbo === true ||
+    metadata.cupom_turbo === true ||
+    eventoMetadata.cupomTurbo === true ||
+    eventoMetadata.cupom_turbo === true;
+  const tipoFluxo = texto(
+    job.tipoFluxo ||
+    job.tipo_fluxo ||
+    job.tipoOperacional ||
+    job.tipo_operacional ||
+    metadata.tipoFluxo ||
+    metadata.tipo_fluxo ||
+    metadata.tipoOperacional ||
+    metadata.tipo_operacional ||
+    eventoMetadata.tipoFluxo ||
+    eventoMetadata.tipo_fluxo ||
+    eventoMetadata.tipoOperacional ||
     eventoMetadata.tipo_operacional
-  ].map(texto).find(Boolean) || "";
+  );
 
   const oferta = {
     id: job.oferta_id || null,
     jobId: job.id || null,
     eventoId: job.evento_id || null,
-    marketplace: job.marketplace || job.marketplace_detectado ||
-      metadata.marketplace || eventoMetadata.marketplace || "",
+    marketplace: job.marketplace || job.marketplace_detectado || "",
     capturadaEm: job.evento_capturado_em || job.capturadaEm || metadata.capturadaEm || eventoMetadata.capturadaEm || "",
     capturadoEm: job.evento_capturado_em || job.capturadoEm || metadata.capturadoEm || eventoMetadata.capturadoEm || "",
     capturada_em: job.evento_capturado_em || job.capturada_em || metadata.capturada_em || eventoMetadata.capturada_em || "",
@@ -289,25 +214,18 @@ function montarEntradaFrescorPreImporter(job = {}) {
     criadoEm: job.criado_em || job.evento_criado_em || "",
     criado_em: job.criado_em || "",
     criada_em: job.criado_em || "",
-    cupom: job.cupom || metadata.cupom || eventoMetadata.cupom || "",
-    codigoCupom: job.codigoCupom || metadata.codigoCupom || eventoMetadata.codigoCupom || "",
-    linksComerciais: job.linksComerciais || metadata.linksComerciais || eventoMetadata.linksComerciais,
-    linksResgate: job.linksResgate || metadata.linksResgate || eventoMetadata.linksResgate,
-    cupomSuspeito: job.cupomSuspeito === true || metadata.cupomSuspeito === true ||
-      eventoMetadata.cupomSuspeito === true,
-    cupomTurbo: job.cupomTurbo === true || job.cupom_turbo === true,
-    tipoOperacional: tipoDeclarado,
-    tipo_operacional: tipoDeclarado,
+    cupomTurbo,
+    tipoOperacional: tipoFluxo,
+    tipo_operacional: tipoFluxo,
     metadata,
     evento_metadata: eventoMetadata,
     job_metadata: metadata
   };
-  const classificacao = classificarTurboComercialCandidato(oferta);
 
   return {
     oferta,
-    tipoFluxo: classificacao.tipoFluxo,
-    cupomTurbo: classificacao.turbo
+    tipoFluxo,
+    cupomTurbo
   };
 }
 
@@ -318,12 +236,6 @@ function avaliarFrescorPreImporter(job = {}, opcoes = {}) {
       manualV2: true,
       motivo: "manual_v2_preservado"
     };
-  }
-
-  if (job.evento_id != null &&
-      !Number.isFinite(Date.parse(job.evento_capturado_em || ""))) {
-    return { expirada: true, capturaInvalida: true,
-      motivo: "captura_sem_tempo_factual" };
   }
 
   const avaliar = opcoes.avaliarFrescorComercialOferta || avaliarFrescorComercialOferta;
@@ -430,7 +342,5 @@ module.exports = {
   expirarJobPreImporterSeNecessario,
   resumirSelecaoFrescorPreImporter,
   montarEntradaFrescorPreImporter,
-  jobManualV2,
-  sqlFrescorComercialPreImporter,
-  sqlRetryPreImporter
+  jobManualV2
 };

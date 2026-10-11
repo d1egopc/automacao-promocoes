@@ -2,9 +2,6 @@
 
 const { criarHistoricoClonador } = require("./historico.service");
 const { classificarRotuloContextualCompartilhado } = require("../engine/link-role.service");
-const { detectarMarketplaceLink } = require("../engine/normalizers");
-const { montarComercialCapturado } = require("./commercial-capture.candidate");
-const { registrarAchadoCapacidadeClonador } = require("../manual-v2/ofertas-v2-achados");
 
 const MAX_FONTES_ATIVAS = 4;
 const STATUS_BUFFER = new Set(["capturada", "processando", "pronta", "encaminhada", "repetida", "erro"]);
@@ -57,29 +54,6 @@ function normalizarLinksEntrada(links = []) {
     saida.push(valor);
   }
   return saida.slice(0, 20);
-}
-
-function urlHttpValida(valor = "") {
-  try { return ["http:", "https:"].includes(new URL(texto(valor)).protocol); }
-  catch { return false; }
-}
-
-function candidatoAchadosCapacidade({ comercialCapturado = {}, links = [], marketplace = "", metadata = {} } = {}) {
-  const comercial = comercialCapturado && typeof comercialCapturado === "object" ? comercialCapturado : {};
-  const urlOriginal = (Array.isArray(links) ? links : []).find(urlHttpValida) || "";
-  return {
-    marketplace: texto(marketplace).toLowerCase(),
-    titulo: texto(comercial.tituloCapturado),
-    precoAtual: comercial.precoAtual,
-    precoAnterior: comercial.precoAnterior,
-    cupom: texto(comercial.cupom),
-    beneficioTexto: texto(comercial.beneficioTexto),
-    urlOriginal,
-    urlAfiliada: urlOriginal,
-    imagem: texto(metadata.imagem || metadata.image || metadata.thumbnail),
-    categoria: texto(metadata.categoria),
-    linksComerciais: Array.isArray(comercial.linksComerciais) ? comercial.linksComerciais : []
-  };
 }
 
 function linksOcorrenciasCapturadas(links = [], mensagemId = "") {
@@ -324,15 +298,6 @@ function timestampMensagemIso(valor = null) {
   return new Date(ms).toISOString();
 }
 
-function timestampMensagemFactualCandidato(valor = null) {
-  const bruto = typeof valor === "object" && valor !== null &&
-    typeof valor.toNumber === "function" ? valor.toNumber() : Number(valor);
-  if (!Number.isFinite(bruto) || bruto <= 0) return "";
-  const ms = bruto > 1000000000000 ? bruto : bruto * 1000;
-  const data = new Date(ms);
-  return Number.isFinite(data.getTime()) ? data.toISOString() : "";
-}
-
 function tipoMensagem(conteudo = {}) {
   return Object.keys(conteudo || {}).find(chave => Boolean(conteudo[chave])) || "";
 }
@@ -370,43 +335,8 @@ function deduplicarDestinos(destinoIds = []) {
   return [...new Set(destinoIds.map(normalizarDestinoEntrada).filter(Boolean))];
 }
 
-async function projetarIntencoesAchados({ repository, bufferIds = null, limite = 5,
-  registrarAchado = registrarAchadoCapacidadeClonador, logger = console } = {}) {
-  if (typeof repository?.projetarAchadoPendente !== "function" ||
-      typeof repository?.listarIntencoesAchadosPendentes !== "function") {
-    throw new Error("achados_projection_repository_indisponivel");
-  }
-  const ids = Array.isArray(bufferIds) ? bufferIds :
-    await repository.listarIntencoesAchadosPendentes({ limite });
-  const projecoes = [];
-  for (const bufferId of ids) {
-    try {
-      const projecao = await repository.projetarAchadoPendente(bufferId,
-        item => registrarAchado({ clienteId: item.clienteId, bufferItem: item }));
-      projecoes.push({ bufferId: String(bufferId), ...projecao });
-    } catch (error) {
-      const motivo = error?.codigo || error?.message || "achados_storage_indisponivel";
-      let projectionStatus = "pending";
-      if (typeof repository.registrarFalhaProjecaoAchados === "function") {
-        try {
-          if (await repository.registrarFalhaProjecaoAchados(bufferId, motivo)) {
-            projectionStatus = "PROJECTION_RETRYABLE_ERROR";
-          }
-        } catch (_) { /* The original pending intent remains recoverable. */ }
-      }
-      projecoes.push({ bufferId: String(bufferId), ok: false, motivo, projectionStatus });
-      if (typeof logger?.warn === "function") {
-        logger.warn("[CLONADOR-CAPACIDADE-ACHADOS-FALHA]", { bufferId, motivo });
-      }
-    }
-  }
-  return projecoes;
-}
-
 function criarServicoClonadorGrupos(deps = {}) {
   const repo = deps.repository;
-  const registrarAchadoCapacidade = typeof deps.registrarAchadoCapacidadeClonador === "function"
-    ? deps.registrarAchadoCapacidadeClonador : registrarAchadoCapacidadeClonador;
   const historico = deps.historico || criarHistoricoClonador({
     repository: repo,
     resolverFilaPorIds: deps.resolverFilaPorIds,
@@ -414,14 +344,6 @@ function criarServicoClonadorGrupos(deps = {}) {
     listarCheckpoints: deps.listarCheckpoints
   });
   if (!repo) throw new Error("repository_obrigatorio");
-
-  async function projetarCapacidadeParaAchados(resultado = {}, logger = console) {
-    const itens = Array.isArray(resultado.itensParaAchados) ? resultado.itensParaAchados : [];
-    if (!itens.length) return [];
-    return projetarIntencoesAchados({ repository: repo,
-      bufferIds: itens.map(item => item.id), registrarAchado: registrarAchadoCapacidade,
-      logger });
-  }
 
   function clienteAtual(req) {
     const clienteId = typeof deps.getClienteId === "function"
@@ -702,42 +624,15 @@ function criarServicoClonadorGrupos(deps = {}) {
         };
       });
       const metadataBase = metadadosSegurosMensagem(mensagem, entrada.metadata || {});
-      const marketplaceDetectado = texto(entrada.marketplace || entrada.marketplaceDetectado) ||
-        links.map(detectarMarketplaceLink).find(Boolean) || "";
-      const linksComerciais = [
-        ...(Array.isArray(metadataBase?.comercialCapturado?.linksComerciais)
-          ? metadataBase.comercialCapturado.linksComerciais : []),
-      ];
-      const comercialCapturado = montarComercialCapturado({
-        textoOriginal,
-        links,
-        marketplaceDetectado,
-        linksComerciais,
-        ...(typeof deps.extrairComercialUniversal === "function"
-          ? { extrairComercial: deps.extrairComercialUniversal } : {})
-      }) || metadataBase.comercialCapturado || null;
       const metadata = {
         ...metadataBase,
-        ...(comercialCapturado ? {
-          comercialCapturado,
-          achadosCapacidade: candidatoAchadosCapacidade({
-            comercialCapturado, links, marketplace: marketplaceDetectado, metadata: metadataBase
-          })
-        } : {}),
         clonadorGrupos: {
           ...(metadataBase.clonadorGrupos && typeof metadataBase.clonadorGrupos === "object" ? metadataBase.clonadorGrupos : {}),
           linksOcorrencias
         }
       };
       const grupoNome = texto(entrada.grupoNome || fonte.grupoNome);
-      const capturaFactualCandidata = deps.exigirCapturaFactualCandidata === true
-        ? timestampMensagemFactualCandidato(mensagem.messageTimestamp) : "";
-      if (deps.exigirCapturaFactualCandidata === true && !capturaFactualCandidata) {
-        return { ok: true, capturada: false, motivo: "captura_sem_tempo_factual" };
-      }
 
-      const capturadoEm = capturaFactualCandidata || entrada.capturadoEm ||
-        timestampMensagemIso(mensagem.messageTimestamp);
       const resultado = await repo.inserirBufferCaptura({
         clienteId,
         sessaoId,
@@ -746,23 +641,10 @@ function criarServicoClonadorGrupos(deps = {}) {
         mensagemId,
         textoOriginal,
         links,
-        capturadoEm,
+        capturadoEm: entrada.capturadoEm || timestampMensagemIso(mensagem.messageTimestamp),
         status: "capturada",
         metadata
       });
-      const projecoesAchados = await projetarCapacidadeParaAchados(resultado, logger);
-
-      if (resultado.ignorado === true) {
-        if (typeof logger.log === "function") {
-          logger.log("[CLONADOR-OVERLOAD-NOT-ADMITTED]", JSON.stringify({
-            clienteId, sessaoId, grupoJid, mensagemId,
-            motivo: resultado.motivo || "overload_not_admitted"
-          }));
-        }
-        return { ok: true, capturada: false,
-          motivo: resultado.motivo || "overload_not_admitted", item: resultado.item,
-          achados: projecoesAchados };
-      }
 
       if (resultado.inserido && typeof logger.log === "function") {
         logger.log("[CLONADOR-CAPTURA]", JSON.stringify({
@@ -803,8 +685,7 @@ function criarServicoClonadorGrupos(deps = {}) {
         ok: true,
         capturada: resultado.inserido === true,
         motivo: resultado.inserido ? "capturada" : "duplicada",
-        item: resultado.item,
-        achados: projecoesAchados
+        item: resultado.item
       };
     } catch (e) {
       if (typeof logger.log === "function") {
@@ -839,7 +720,6 @@ function criarServicoClonadorGrupos(deps = {}) {
 module.exports = {
   MAX_FONTES_ATIVAS,
   criarServicoClonadorGrupos,
-  projetarIntencoesAchados,
   destinoIdOficial,
   grupoIdOficial,
   linksOcorrenciasCapturadas,

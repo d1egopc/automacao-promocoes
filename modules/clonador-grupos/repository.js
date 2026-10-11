@@ -1,7 +1,6 @@
 "use strict";
 
 const { getEnginePool, queryEngine } = require("../engine/database");
-const { avaliarFrescorEsperaClonador } = require("./wait-freshness.candidate");
 
 const MAX_FONTES_ATIVAS = 4;
 // `ignorada` e' um registro de auditoria: nunca entra no bridge porque ele
@@ -71,48 +70,9 @@ function jsonObjeto(valor = {}) {
   return JSON.stringify(valor && typeof valor === "object" && !Array.isArray(valor) ? valor : {});
 }
 
-function metadataComDisposicao(metadata = {}, code = "", limite = 0, extra = {}) {
-  const base = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
-  return {
-    ...base,
-    capacityDisposition: {
-      code,
-      limite,
-      automatico: false,
-      projectionStatus: "pending",
-      ...extra
-    },
-    overloadNotAdmitted: {
-      motivo: code,
-      limite
-    }
-  };
-}
-
-function chaveDeterministicaEspera(item = {}) {
-  return [item.sessaoId || item.sessao_id, item.grupoJid || item.grupo_jid,
-    item.mensagemId || item.mensagem_id, item.id || ""].map(texto).join("|");
-}
-
-function compararPreservacaoComercial(a = {}, b = {}) {
-  const prioridadeA = Number(a.frescor?.prioridadeComercial || 0);
-  const prioridadeB = Number(b.frescor?.prioridadeComercial || 0);
-  if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
-  const deadlineA = Date.parse(a.frescor?.expiraEmComercial || "");
-  const deadlineB = Date.parse(b.frescor?.expiraEmComercial || "");
-  if (deadlineA !== deadlineB) return deadlineA - deadlineB;
-  const capturaA = new Date(a.capturadoEm || a.capturado_em || 0).getTime();
-  const capturaB = new Date(b.capturadoEm || b.capturado_em || 0).getTime();
-  if (capturaA !== capturaB) return capturaA - capturaB;
-  return chaveDeterministicaEspera(a).localeCompare(chaveDeterministicaEspera(b));
-}
-
 function criarRepositorioClonadorGrupos(opcoes = {}) {
   const query = opcoes.queryEngine || queryEngine;
   const pool = opcoes.pool || getEnginePool;
-  // Opt-in local candidate only. No production limit is inferred here.
-  const pushWaitLimitPerWorkspace = Number.isSafeInteger(opcoes.pushWaitLimitPerWorkspace)
-    && opcoes.pushWaitLimitPerWorkspace > 0 ? opcoes.pushWaitLimitPerWorkspace : 0;
 
   function poolAtual() {
     return typeof pool === "function" ? pool() : pool;
@@ -214,25 +174,6 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
           ON clonador_grupos_buffer (cliente_id, sessao_id, grupo_jid, capturado_em DESC);
         CREATE INDEX IF NOT EXISTS idx_clonador_grupos_buffer_historico
           ON clonador_grupos_buffer (cliente_id, capturado_em DESC, id DESC);
-        CREATE INDEX IF NOT EXISTS idx_clonador_achados_projection_retryable
-          ON clonador_grupos_buffer (id)
-          WHERE status = 'ignorada' AND
-            (metadata #>> '{capacityDisposition,projectionStatus}') IN
-              ('pending', 'PROJECTION_RETRYABLE_ERROR');
-        CREATE INDEX IF NOT EXISTS idx_clonador_achados_projection_terminal_cleanup
-          ON clonador_grupos_buffer (updated_at, id)
-          WHERE status = 'ignorada' AND
-            (metadata #>> '{capacityDisposition,projectionStatus}') IN
-              ('MATERIALIZED', 'EXPIRED_BEFORE_ACHADOS_PROJECTION', 'rejected');
-        ${pushWaitLimitPerWorkspace > 0 ? `
-        CREATE INDEX IF NOT EXISTS idx_clonador_push_wait_age_candidate
-          ON clonador_grupos_buffer (capturado_em ASC, id ASC)
-          WHERE status = 'capturada';
-        CREATE INDEX IF NOT EXISTS idx_clonador_push_wait_turbo_age_candidate
-          ON clonador_grupos_buffer (capturado_em ASC, id ASC)
-          WHERE status = 'capturada' AND
-            ((metadata->>'cupomTurbo') = 'true' OR
-             (metadata->>'tipoFluxo') = 'cupom_turbo');` : ""}
       `, [], query).catch((erro) => {
         schemaPromise = null;
         throw erro;
@@ -388,141 +329,6 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
 
   async function inserirBufferCaptura(item = {}) {
     await pronto();
-    if (pushWaitLimitPerWorkspace > 0) {
-      const clienteId = texto(item.clienteId || item.cliente_id);
-      const sessaoId = texto(item.sessaoId || item.sessao_id);
-      const grupoJid = texto(item.grupoJid || item.grupo_jid);
-      const mensagemId = texto(item.mensagemId || item.mensagem_id);
-      const capturadoEm = item.capturadoEm || item.capturado_em || new Date();
-      const capturadoEmMs = new Date(capturadoEm).getTime();
-      if (!Number.isFinite(capturadoEmMs)) throw erroValidacao("capturado_em_invalido");
-      const agoraMs = Date.now();
-      const frescorNovo = avaliarFrescorEsperaClonador({
-        capturadoEm, metadata: item.metadata
-      }, agoraMs);
-      const metadataNovo = frescorNovo.metadataClassificada;
-      return comTransacao(async (client) => {
-        await bloquearWorkspace(client, "clonador_grupos:push_wait", clienteId);
-        const duplicado = await client.query(`SELECT id FROM clonador_grupos_buffer
-          WHERE cliente_id=$1 AND sessao_id=$2 AND grupo_jid=$3 AND mensagem_id=$4
-          LIMIT 1`, [clienteId, sessaoId, grupoJid, mensagemId]);
-        if (duplicado.rowCount) return { inserido: false, item: null };
-
-        // Waiting is count-bounded, so re-evaluating at most that many rows
-        // uses the shared Normal/Turbo/Manual freshness authority. In-flight
-        // `processando` rows are never modified behind the bridge's back.
-        const aguardando = await client.query(`SELECT id,cliente_id,sessao_id,grupo_jid,
-          grupo_nome,mensagem_id,texto_original,links,capturado_em,status,metadata,
-          created_at,updated_at
-          FROM clonador_grupos_buffer
-          WHERE cliente_id=$1 AND status='capturada'
-          ORDER BY capturado_em ASC,id ASC
-          FOR UPDATE SKIP LOCKED LIMIT $2`, [clienteId,pushWaitLimitPerWorkspace]);
-        const vigentes = [];
-        for (const anterior of aguardando.rows) {
-          const frescor = avaliarFrescorEsperaClonador({
-            capturadoEm: anterior.capturado_em, metadata: anterior.metadata
-          }, agoraMs);
-          if (!frescor.expirada) {
-            vigentes.push({ ...anterior, frescor });
-            continue;
-          }
-          await client.query(`UPDATE clonador_grupos_buffer
-            SET status='ignorada',texto_original='',links='[]'::jsonb,
-                metadata=$2::jsonb,updated_at=NOW()
-            WHERE id=$1 AND status='capturada'`, [anterior.id, jsonObjeto({
-              ...frescor.metadataClassificada,
-              admissionDisposition: {
-                code: "EXPIRED_BEFORE_ADMISSION",
-                tipoFluxo: frescor.tipoFluxo
-              }
-            })]);
-        }
-
-        if (frescorNovo.expirada || frescorNovo.manualV2) {
-          const motivo = frescorNovo.manualV2
-            ? "manual_v2_fora_buffer_automatico" : "EXPIRED_BEFORE_ADMISSION";
-          const ignorada = await client.query(`INSERT INTO clonador_grupos_buffer (
-            cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-            texto_original,links,capturado_em,status,metadata
-          ) VALUES ($1,$2,$3,$4,$5,'','[]'::jsonb,$6,'ignorada',$7::jsonb)
-          RETURNING id,cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-            texto_original,links,capturado_em,status,metadata,created_at,updated_at`, [
-            clienteId,sessaoId,grupoJid,texto(item.grupoNome || item.grupo_nome),mensagemId,
-            capturadoEm,
-            jsonObjeto({ ...metadataNovo, admissionDisposition: { code: motivo,
-              tipoFluxo: frescorNovo.tipoFluxo } })
-          ]);
-          return { inserido: false, ignorado: true, motivo,
-            item: normalizarBuffer(ignorada.rows[0]) };
-        }
-
-        let deslocada = null;
-        const ocupacaoAtual = (await client.query(`SELECT COUNT(*)::int AS n
-          FROM clonador_grupos_buffer WHERE cliente_id=$1 AND status='capturada'`,
-        [clienteId])).rows[0].n;
-        if (ocupacaoAtual >= pushWaitLimitPerWorkspace) {
-          const pior = vigentes.length >= pushWaitLimitPerWorkspace
-            ? [...vigentes].sort(compararPreservacaoComercial)[0] : null;
-          const nova = {
-            ...item,
-            clienteId,
-            sessaoId,
-            grupoJid,
-            mensagemId,
-            capturadoEm,
-            frescor: frescorNovo
-          };
-          // A row locked by another worker is conservatively counted but never
-          // displaced without inspection. The new item goes cold instead of
-          // allowing the automatic wait to exceed H.
-          if (!pior || compararPreservacaoComercial(nova, pior) <= 0) {
-            const metadataFria = metadataComDisposicao(metadataNovo,
-              "CAPACITY_NEW_ITEM_TO_ACHADOS", pushWaitLimitPerWorkspace);
-            const ignorada = await client.query(`INSERT INTO clonador_grupos_buffer (
-              cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-              texto_original,links,capturado_em,status,metadata
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'ignorada',$9::jsonb)
-            RETURNING id,cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-              texto_original,links,capturado_em,status,metadata,created_at,updated_at`, [
-              clienteId,sessaoId,grupoJid,texto(item.grupoNome || item.grupo_nome),mensagemId,
-              String(item.textoOriginal ?? item.texto_original ?? ""),
-              JSON.stringify(Array.isArray(item.links) ? item.links : []),capturadoEm,
-              jsonObjeto(metadataFria)
-            ]);
-            const itemFrio = normalizarBuffer(ignorada.rows[0]);
-            return { inserido: false, ignorado: true,
-              motivo: "CAPACITY_NEW_ITEM_TO_ACHADOS", item: itemFrio,
-              itensParaAchados: [itemFrio] };
-          }
-          const metadataDeslocada = metadataComDisposicao(pior.frescor.metadataClassificada,
-            "CAPACITY_DISPLACED_TO_ACHADOS", pushWaitLimitPerWorkspace,
-            { displacedByMensagemId: mensagemId });
-          const atualizada = await client.query(`UPDATE clonador_grupos_buffer
-            SET status='ignorada',metadata=$2::jsonb,updated_at=NOW()
-            WHERE id=$1 AND status='capturada'
-            RETURNING id,cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-              texto_original,links,capturado_em,status,metadata,created_at,updated_at`,
-          [pior.id,jsonObjeto(metadataDeslocada)]);
-          if (!atualizada.rowCount) throw erroDb({ motivo: "push_wait_sem_candidata_desbloqueada" });
-          deslocada = normalizarBuffer(atualizada.rows[0]);
-        }
-
-        const resultado = await client.query(`INSERT INTO clonador_grupos_buffer (
-          cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-          texto_original,links,capturado_em,status,metadata
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'capturada',$9::jsonb)
-        RETURNING id,cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-          texto_original,links,capturado_em,status,metadata,created_at,updated_at`, [
-          clienteId,sessaoId,grupoJid,texto(item.grupoNome || item.grupo_nome),mensagemId,
-          String(item.textoOriginal ?? item.texto_original ?? ""),
-          JSON.stringify(Array.isArray(item.links) ? item.links : []),capturadoEm,
-          jsonObjeto(metadataNovo)
-        ]);
-        return { inserido: true, item: normalizarBuffer(resultado.rows[0]),
-          itensParaAchados: deslocada ? [deslocada] : [] };
-      });
-    }
     const resultado = await executar(`
       INSERT INTO clonador_grupos_buffer (
         cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
@@ -547,97 +353,6 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     ], query);
     const row = resultado.rows[0] || null;
     return row ? { inserido: true, item: normalizarBuffer(row) } : { inserido: false, item: null };
-  }
-
-  async function listarIntencoesAchadosPendentes({ limite = 5 } = {}) {
-    await pronto();
-    const max = Math.max(1, Math.min(20, Math.floor(Number(limite) || 5)));
-    const resultado = await executar(`SELECT id FROM clonador_grupos_buffer
-      WHERE status='ignorada' AND
-        (metadata #>> '{capacityDisposition,projectionStatus}') IN
-          ('pending', 'PROJECTION_RETRYABLE_ERROR')
-      ORDER BY id ASC LIMIT $1`, [max], query);
-    return resultado.rows.map(row => String(row.id));
-  }
-
-  async function registrarFalhaProjecaoAchados(bufferId, motivo = "achados_storage_indisponivel") {
-    await pronto();
-    const resultado = await executar(`UPDATE clonador_grupos_buffer
-      SET metadata=jsonb_set(jsonb_set(metadata,
-          '{capacityDisposition,projectionStatus}',
-          '"PROJECTION_RETRYABLE_ERROR"'::jsonb,false),
-          '{capacityDisposition,lastProjectionError}',to_jsonb($2::text),true),
-          updated_at=NOW()
-      WHERE id=$1 AND status='ignorada' AND
-        (metadata #>> '{capacityDisposition,projectionStatus}') IN
-          ('pending', 'PROJECTION_RETRYABLE_ERROR')
-      RETURNING id`, [Number(bufferId), String(motivo).slice(0, 120)], query);
-    return resultado.rowCount > 0;
-  }
-
-  async function limparIntencoesAchadosTerminais({ limite = 5, retencaoDias = 7 } = {}) {
-    await pronto();
-    const max = Math.max(1, Math.min(20, Math.floor(Number(limite) || 5)));
-    const dias = Math.max(7, Math.floor(Number(retencaoDias) || 7));
-    const resultado = await executar(`DELETE FROM clonador_grupos_buffer WHERE id IN (
-      SELECT id FROM clonador_grupos_buffer
-      WHERE status='ignorada' AND updated_at < NOW() - ($2::int * INTERVAL '1 day') AND
-        (metadata #>> '{capacityDisposition,projectionStatus}') IN
-          ('MATERIALIZED', 'EXPIRED_BEFORE_ACHADOS_PROJECTION', 'rejected')
-      ORDER BY updated_at ASC,id ASC LIMIT $1 FOR UPDATE SKIP LOCKED
-    ) RETURNING id`, [max, dias], query);
-    return { removidas: resultado.rowCount };
-  }
-
-  async function projetarAchadoPendente(bufferId, projetar) {
-    if (typeof projetar !== "function") {
-      throw erroValidacao("projetor_achados_indisponivel");
-    }
-    await pronto();
-    return comTransacao(async client => {
-      const resultado = await client.query(`SELECT id,cliente_id,sessao_id,grupo_jid,
-        grupo_nome,mensagem_id,texto_original,links,capturado_em,status,metadata,
-        created_at,updated_at FROM clonador_grupos_buffer
-        WHERE id=$1 AND status='ignorada' AND
-          (metadata #>> '{capacityDisposition,projectionStatus}') IN
-            ('pending', 'PROJECTION_RETRYABLE_ERROR')
-        FOR UPDATE`, [Number(bufferId)]);
-      if (!resultado.rowCount) {
-        const atual = await client.query(`SELECT metadata #>>
-          '{capacityDisposition,projectionStatus}' AS projection_status
-          FROM clonador_grupos_buffer WHERE id=$1 AND status='ignorada'`,
-        [Number(bufferId)]);
-        const estado = atual.rows[0]?.projection_status || "NOT_FOUND";
-        return { ok: estado === "MATERIALIZED", jaConcluida: true,
-          motivo: estado === "EXPIRED_BEFORE_ACHADOS_PROJECTION" ? estado : undefined,
-          projectionStatus: estado };
-      }
-      const item = normalizarBuffer(resultado.rows[0]);
-      await bloquearWorkspace(client, "clonador_grupos:achados_projection", item.clienteId);
-      const projecao = await projetar(item);
-      if (projecao?.ok !== true && !["INVALID_TECHNICAL",
-        "EXPIRED_BEFORE_ACHADOS_PROJECTION"].includes(projecao?.motivo)) {
-        throw erroDb({ motivo: projecao?.motivo || "achados_projection_falhou" });
-      }
-      const estado = projecao.ok ? "MATERIALIZED" :
-        projecao.motivo === "EXPIRED_BEFORE_ACHADOS_PROJECTION"
-          ? "EXPIRED_BEFORE_ACHADOS_PROJECTION" : "rejected";
-      await client.query(`UPDATE clonador_grupos_buffer
-        SET metadata=jsonb_set(metadata,
-          '{capacityDisposition,projectionStatus}',to_jsonb($2::text),false),
-          updated_at=NOW()
-        WHERE id=$1 AND status='ignorada' AND
-          (metadata #>> '{capacityDisposition,projectionStatus}') IN
-            ('pending', 'PROJECTION_RETRYABLE_ERROR')`,
-      [Number(bufferId), estado]);
-      if (projecao.motivo === "INVALID_TECHNICAL") {
-        await client.query(`UPDATE clonador_grupos_buffer
-          SET metadata=jsonb_set(metadata,'{admissionDisposition}',
-            '{"code":"INVALID_TECHNICAL"}'::jsonb,true)
-          WHERE id=$1`, [Number(bufferId)]);
-      }
-      return { ...projecao, bufferId: String(bufferId), projectionStatus: estado };
-    });
   }
 
   // Guarda somente o motivo e a identidade tecnica da captura descartada. O
@@ -781,7 +496,7 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     return row ? normalizarBuffer(row) : null;
   }
 
-  async function atualizarBufferStatus(bufferId = "", status = "capturada", metadata = {}, statusEsperado = null) {
+  async function atualizarBufferStatus(bufferId = "", status = "capturada", metadata = {}) {
     await pronto();
     const statusNormalizado = normalizarStatusBuffer(status);
     const resultado = await executar(`
@@ -792,76 +507,12 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
                 CASE WHEN ($3::jsonb ? 'historicoResumo') THEN jsonb_build_object(
                   'historicoResumo', COALESCE(metadata -> 'historicoResumo', '{}'::jsonb) || ($3::jsonb -> 'historicoResumo')
                 ) ELSE '{}'::jsonb END
-       WHERE id = $1 AND ($4::text IS NULL OR status = $4)
+       WHERE id = $1
        RETURNING id, cliente_id, sessao_id, grupo_jid, grupo_nome, mensagem_id,
          texto_original, links, capturado_em, status, metadata, created_at, updated_at
-    `, [Number(bufferId), statusNormalizado, jsonObjeto(metadata), statusEsperado], query);
+    `, [Number(bufferId), statusNormalizado, jsonObjeto(metadata)], query);
     const row = resultado.rows[0] || null;
     return row ? normalizarBuffer(row) : null;
-  }
-
-  async function ignorarCapturaVencidaAguardando(bufferId, motivo, tipoFluxo = "") {
-    await pronto();
-    const resultado = await executar(`UPDATE clonador_grupos_buffer
-      SET status='ignorada',texto_original='',links='[]'::jsonb,
-          metadata=jsonb_build_object('admissionWait',
-            jsonb_build_object('motivo',$2::text,'tipoFluxo',$3::text,
-              'terminalizadaEm',NOW())),updated_at=NOW()
-      WHERE id=$1 AND status='processando'
-      RETURNING id,cliente_id,sessao_id,grupo_jid,grupo_nome,mensagem_id,
-        texto_original,links,capturado_em,status,metadata,created_at,updated_at`,
-    [Number(bufferId),texto(motivo),texto(tipoFluxo)],query);
-    return resultado.rows[0] ? normalizarBuffer(resultado.rows[0]) : null;
-  }
-
-  async function expirarEsperaVencida({ limite = 10, agoraMs = Date.now() } = {}) {
-    if (pushWaitLimitPerWorkspace <= 0) return { ok: true, pulado: true, expiradas: 0 };
-    await pronto();
-    const max = Math.max(1, Math.min(100, Math.floor(Number(limite) || 10)));
-    const instante = Number(agoraMs);
-    if (!Number.isFinite(instante)) throw erroValidacao("agora_invalido");
-    return comTransacao(async client => {
-      const normalCutoff = new Date(instante - 30 * 60 * 1000);
-      const turboCutoff = new Date(instante - 10 * 60 * 1000);
-      const candidatos = [];
-      const antigos = await client.query(`SELECT id,capturado_em,metadata
-        FROM clonador_grupos_buffer
-        WHERE status='capturada' AND capturado_em <= $1
-        ORDER BY capturado_em ASC,id ASC
-        FOR UPDATE SKIP LOCKED LIMIT $2`, [normalCutoff,max]);
-      candidatos.push(...antigos.rows);
-      if (candidatos.length < max) {
-        const turbo = await client.query(`SELECT id,capturado_em,metadata
-          FROM clonador_grupos_buffer
-          WHERE status='capturada' AND capturado_em <= $1 AND
-            ((metadata->>'cupomTurbo') = 'true' OR
-             (metadata->>'tipoFluxo') = 'cupom_turbo')
-          ORDER BY capturado_em ASC,id ASC
-          FOR UPDATE SKIP LOCKED LIMIT $2`, [turboCutoff,max-candidatos.length]);
-        candidatos.push(...turbo.rows);
-      }
-      let expiradas = 0;
-      for (const row of candidatos) {
-        const frescor = avaliarFrescorEsperaClonador({
-          capturadoEm: row.capturado_em, metadata: row.metadata
-        }, instante);
-        if (!frescor.expirada && !frescor.manualV2) continue;
-        const motivo = frescor.manualV2
-          ? "manual_v2_fora_buffer_automatico" : "EXPIRED_BEFORE_ADMISSION";
-        const atualizado = await client.query(`UPDATE clonador_grupos_buffer
-          SET status='ignorada',texto_original='',links='[]'::jsonb,
-              metadata=$2::jsonb,updated_at=$3
-          WHERE id=$1 AND status='capturada'`,
-        [row.id,jsonObjeto({
-          ...frescor.metadataClassificada,
-          admissionWait: { motivo, tipoFluxo: frescor.tipoFluxo,
-            terminalizadaEm: new Date(instante).toISOString() },
-          admissionDisposition: { code: motivo, tipoFluxo: frescor.tipoFluxo }
-        }),new Date(instante)]);
-        expiradas += atualizado.rowCount;
-      }
-      return { ok: true, expiradas, examinadas: candidatos.length, limite: max };
-    });
   }
 
   async function listarBuffer(clienteId = "", filtros = {}) {
@@ -1000,16 +651,10 @@ function criarRepositorioClonadorGrupos(opcoes = {}) {
     listarDestinos,
     substituirDestinos,
     inserirBufferCaptura,
-    listarIntencoesAchadosPendentes,
-    registrarFalhaProjecaoAchados,
-    limparIntencoesAchadosTerminais,
-    projetarAchadoPendente,
     registrarCapturaIgnorada,
     registrarRepeticaoCaptura,
     reivindicarProximaCaptura,
     atualizarBufferStatus,
-    ignorarCapturaVencidaAguardando,
-    expirarEsperaVencida,
     listarBuffer,
     listarHistoricoBase,
     atualizarResumoHistorico,

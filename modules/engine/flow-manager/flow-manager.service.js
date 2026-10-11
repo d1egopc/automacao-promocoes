@@ -9,8 +9,6 @@ const {
   calcularBufferVivoWorkspace,
   resumirDivergenciaBufferVivo
 } = require("../ofc/buffer-vivo-workspace.service");
-const { classificarTurboComercialCandidato } =
-  require("../turbo-classification.candidate");
 
 const COBERTURA_NORMAL_MINUTOS = 10;
 const COBERTURA_TURBO_MINUTOS = 5;
@@ -209,20 +207,18 @@ function timestampComercialOferta(oferta = {}, agoraMs = Date.now()) {
 
 function tipoFluxoOferta(entrada = {}) {
   const oferta = objeto(entrada.oferta);
-  return classificarTurboComercialCandidato({
-    ...oferta, ...entrada,
-    marketplace: entrada.marketplace || oferta.marketplace,
-    cupom: entrada.cupom || oferta.cupom,
-    codigoCupom: entrada.codigoCupom || oferta.codigoCupom,
-    linksComerciais: entrada.linksComerciais || oferta.linksComerciais,
-    linksResgate: entrada.linksResgate || oferta.linksResgate,
-    tipoOperacional: entrada.tipoOperacional || entrada.tipo_operacional ||
-      oferta.tipoOperacional || oferta.tipo_operacional,
-    cupomTurbo: entrada.cupomTurbo === true || entrada.cupom_turbo === true ||
-      oferta.cupomTurbo === true || oferta.cupom_turbo === true,
-    metadata: { ...objeto(oferta.metadata), ...objeto(entrada.metadata) },
-    job_metadata: { ...objeto(entrada.job_metadata), ...oferta }
-  }).tipoFluxo;
+  const tipo = texto(
+    entrada.tipoFluxo ||
+    entrada.tipoOperacional ||
+    entrada.tipo_operacional ||
+    oferta.tipoOperacional ||
+    oferta.tipo_operacional
+  ).toLowerCase();
+  const turbo = entrada.cupomTurbo === true ||
+    oferta.cupomTurbo === true ||
+    oferta.cupom_turbo === true ||
+    tipo === "cupom_turbo";
+  return turbo ? "cupom_turbo" : "oferta_comum";
 }
 
 function ttlFluxoMs(tipoFluxo = "") {
@@ -658,7 +654,6 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
   const workspaceId = texto(entrada.workspaceId || entrada.clienteId || entrada.oferta?.cliente_id);
   const oferta = objeto(entrada.oferta);
   const marketplace = texto(entrada.marketplace || oferta.marketplace);
-  const ofertaCadencia = { ...entrada, ...oferta, marketplace };
   const ofertaId = entrada.ofertaId ?? oferta.id ?? null;
   const tipoFluxo = tipoFluxoOferta(entrada);
   const coberturaMinutos = coberturaFluxoMinutos(tipoFluxo);
@@ -698,7 +693,7 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
 
   try {
     const destinos = lista(entrada.destinosCompativeis);
-    const destinosPreview = avaliarDestinosWorkspace(destinos, coberturaMinutos, [], undefined, ofertaCadencia);
+    const destinosPreview = avaliarDestinosWorkspace(destinos, coberturaMinutos, []);
     const snapshot = opcoes.distributorSnapshot;
     const snapshotValido = snapshot?.ok === true &&
       snapshot.workspaceId === workspaceId &&
@@ -713,9 +708,9 @@ async function avaliarFluxoWorkspaceShadow(entrada = {}, opcoes = {}) {
           readClienteJson: opcoes.readClienteJson || readClienteJson,
           janelaAbertaAgora: destinosPreview.janelaAbertaAgora
         });
-    const destinosResumo = snapshotValido && !classificarTurboComercialCandidato(ofertaCadencia).turbo
+    const destinosResumo = snapshotValido
       ? snapshot.facts.flow.destinosResumo
-      : avaliarDestinosWorkspace(destinos, coberturaMinutos, fila.itens || [], undefined, ofertaCadencia);
+      : avaliarDestinosWorkspace(destinos, coberturaMinutos, fila.itens || []);
     const credito = await verificarCreditos(workspaceId, oferta, opcoes);
     const runtime = diagnosticarRuntime({ ...entrada, workspaceId, oferta }, opcoes);
     if (snapshotValido) {

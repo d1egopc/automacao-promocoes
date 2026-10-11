@@ -305,7 +305,6 @@ CREATE TABLE IF NOT EXISTS fila_checkpoints_entrega (
 ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS motivo_codigo TEXT;
 ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS classificacao TEXT;
 ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS status_http INTEGER;
-ALTER TABLE fila_checkpoints_entrega ADD COLUMN IF NOT EXISTS confirmado_em TIMESTAMPTZ;
 
 -- Cursor minimo e duravel da varredura bounded do recovery. Nao e lease,
 -- TTL, heartbeat nem autoridade sobre estado da fila ou da entrega.

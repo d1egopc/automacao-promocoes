@@ -12,9 +12,6 @@ const {
   FINANCIAL_PAYMENT_STATUSES
 } = require("./financeiro.schema");
 const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository");
-const { getEnginePool } = require("../engine/database");
-const { applyFinancialLedger } =
-  require("../engine/universal-credits.repository");
 
 function texto(valor = "") {
   return String(valor ?? "").trim();
@@ -479,63 +476,6 @@ function projetarLedgerEmUsuario(usuario = {}, ledger = {}, agora = new Date()) 
   return { ok: true, alterou: true };
 }
 
-function projetarMetadadosFinanceirosUniversal(usuario = {}, ledger = {}, agora = new Date()) {
-  const ledgerId = texto(ledger.id);
-  if (!ledgerId) throw new Error("universal_financial_ledger_id_missing");
-  if (ledgerJaProjetado(usuario, ledgerId)) return false;
-  const tipo = ledger.ledger_type || ledger.ledgerType;
-  if (tipo === "cycle_credit") {
-    const metadata = ledger.metadata || {};
-    const snapshot = metadata.planSnapshot || metadata.plan_snapshot || {};
-    usuario.creditosModelo = "ciclo";
-    usuario.plano = snapshot.planoId || metadata.planoId || usuario.plano;
-    usuario.planoAssinatura = snapshot.planoId || metadata.planoId ||
-      usuario.planoAssinatura || usuario.plano;
-    usuario.assinaturaStatus = "ativa";
-    usuario.statusConta = "ativa";
-    usuario.pagamentoUltimoId = metadata.externalPaymentId ||
-      metadata.pagamentoId || usuario.pagamentoUltimoId || "";
-    usuario.pagamentoUltimoStatus = metadata.paymentStatus || "approved";
-    usuario.cicloAtualInicio = ledger.cycle_start || ledger.cycleStart ||
-      usuario.cicloAtualInicio || iso(agora);
-    usuario.cicloAtualFim = ledger.cycle_end || ledger.cycleEnd || usuario.cicloAtualFim;
-    usuario.proximaRenovacao = ledger.cycle_end || ledger.cycleEnd ||
-      usuario.proximaRenovacao;
-    usuario.ultimoCicloCreditoId = ledger.idempotency_key ||
-      ledger.idempotencyKey || ledgerId;
-    usuario.ultimoCicloCreditoIdempotencyKey = ledger.idempotency_key ||
-      ledger.idempotencyKey || ledgerId;
-    if (metadata.origin === "admin_simulated_payment") {
-      usuario.ultimoCicloCreditoId = metadata.externalPaymentId;
-      usuario.ultimoCicloCreditoIdempotencyKey = metadata.externalPaymentId;
-      usuario.auditoriaAssinatura = Array.isArray(usuario.auditoriaAssinatura)
-        ? usuario.auditoriaAssinatura : [];
-      usuario.auditoriaAssinatura.push({ tipo: "pagamento_simulado",
-        estado: "aprovado", pagamentoId: metadata.externalPaymentId,
-        plano: snapshot.planoId, operador: metadata.operator || "",
-        resultado: "ciclo_aberto", motivo: "ciclo_aberto",
-        data: iso(agora) });
-    }
-  } else if (!["admin_credit", "adjustment", "refund_adjustment"].includes(tipo)) {
-    throw new Error("universal_financial_ledger_type_invalid");
-  }
-  registrarLedgerProjetado(usuario, ledgerId);
-  usuario.financeiroUltimaProjecaoEm = iso(agora);
-  return true;
-}
-
-async function modoCreditoPersistido() {
-  const pool = getEnginePool();
-  if (!pool) return { mode: "LEGACY", pool: null };
-  try {
-    const result = await pool.query(`SELECT mode FROM engine_operation_state WHERE id=1`);
-    return { mode: result.rows[0]?.mode || "LEGACY", pool };
-  } catch (error) {
-    if (error?.code === "42P01") return { mode: "LEGACY", pool };
-    throw error;
-  }
-}
-
 async function reconciliarLedgerFinanceiroPendente({
   repositorio = criarRepositorioFinanceiroPostgres(),
   lerUsuarios,
@@ -552,7 +492,6 @@ async function reconciliarLedgerFinanceiroPendente({
   }
 
   const pendentes = await repositorio.listarLedgerPendente({ ...filtro, limite });
-  const authority = await modoCreditoPersistido();
   let projetados = 0;
   let falhas = 0;
 
@@ -568,19 +507,8 @@ async function reconciliarLedgerFinanceiroPendente({
         continue;
       }
 
-      if (authority.mode === "UNIVERSAL") {
-        const applied = await applyFinancialLedger({ pool: authority.pool,
-          ledgerId: ledger.id });
-        if (!applied.ok) throw new Error(applied.reason || "universal_financial_deferred");
-        if (projetarMetadadosFinanceirosUniversal(usuario, ledger, agora)) {
-          await salvarUsuarios(lista);
-        }
-      } else if (authority.mode === "LEGACY") {
-        projetarLedgerEmUsuario(usuario, ledger, agora);
-        await salvarUsuarios(lista);
-      } else {
-        throw new Error("financial_projection_operational_mode_closed");
-      }
+      projetarLedgerEmUsuario(usuario, ledger, agora);
+      await salvarUsuarios(lista);
       await repositorio.marcarLedgerProjetado(ledger.id);
       projetados += 1;
     } catch (e) {

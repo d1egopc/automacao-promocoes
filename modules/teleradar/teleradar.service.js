@@ -225,7 +225,7 @@ function createTeleRadarService({
         message
       );
     }
-    const eventAt = new Date(message.sourceTimestamp).getTime();
+    const eventAt = new Date(message.sourceTimestamp || message.receivedAt).getTime();
     const activatedAt = new Date(source.activatedAt).getTime();
     if (!Number.isFinite(eventAt) || !Number.isFinite(activatedAt) || eventAt <= activatedAt) {
       return reject("rejectedBeforeActivation", "TELERADAR_REJEITADO_BEFORE_ACTIVATION", message);

@@ -275,86 +275,6 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
   return { ok: true, achado: consolidado, atualizado: Boolean(existente) };
 }
 
-function registrarAchadoCapacidadeClonador({ clienteId, bufferItem = {} } = {}) {
-  const id = normalizarClienteId(clienteId);
-  const metadata = objeto(bufferItem.metadata);
-  const candidato = objeto(metadata.achadosCapacidade);
-  const disposicao = objeto(metadata.capacityDisposition);
-  const motivosAceitos = new Set([
-    "CAPACITY_DISPLACED_TO_ACHADOS",
-    "CAPACITY_NEW_ITEM_TO_ACHADOS"
-  ]);
-  const marketplace = texto(candidato.marketplace).toLowerCase();
-  const titulo = texto(candidato.titulo);
-  const precoAtual = Number(candidato.precoAtual);
-  const urlOriginal = texto(candidato.urlOriginal);
-  const capturadoEm = texto(bufferItem.capturadoEm || bufferItem.capturado_em);
-  const bufferId = texto(bufferItem.id);
-  let urlValida = false;
-  try { urlValida = ["http:", "https:"].includes(new URL(urlOriginal).protocol); } catch {}
-
-  if (!motivosAceitos.has(texto(disposicao.code)) || !MARKETPLACES_ACHADOS.has(marketplace) ||
-      !bufferId || !titulo || !Number.isFinite(precoAtual) || precoAtual <= 0 ||
-      !urlValida || !Number.isFinite(Date.parse(capturadoEm))) {
-    return { ok: false, motivo: "INVALID_TECHNICAL" };
-  }
-  // The capture clock, not the replay clock, determines Achados eligibility.
-  if (Date.now() - Date.parse(capturadoEm) >= TTL_ACHADOS_MS) {
-    return { ok: false, motivo: "EXPIRED_BEFORE_ACHADOS_PROJECTION" };
-  }
-
-  const achado = {
-    id: `clonador-capacidade-${bufferId}`,
-    clienteId: id,
-    marketplace,
-    titulo,
-    produtoId: texto(candidato.produtoId),
-    categoria: texto(candidato.categoria),
-    tituloOrigem: "clonador_grupos.comercial_capturado",
-    precoAtual,
-    precoAnterior: candidato.precoAnterior != null && Number.isFinite(Number(candidato.precoAnterior))
-      ? Number(candidato.precoAnterior) : null,
-    cupom: texto(candidato.cupom),
-    parcelamento: "",
-    frete: "",
-    beneficios: texto(candidato.beneficioTexto) ? [texto(candidato.beneficioTexto)] : [],
-    imagem: texto(candidato.imagem),
-    imagemOrigem: texto(candidato.imagem) ? "clonador_grupos" : "",
-    urlOriginal,
-    urlAfiliada: texto(candidato.urlAfiliada || urlOriginal),
-    linksComerciais: linksCompactos(candidato.linksComerciais, marketplace),
-    afiliacaoWorkspace: {},
-    capturadoEm,
-    ultimaObservacaoEm: capturadoEm,
-    origemFria: "clonador_capacidade_v1",
-    motivoCapacidade: texto(disposicao.code),
-    identidadeObservacaoId: `clonador:${id}:${bufferId}`
-  };
-  const atual = lerAchados(id);
-  const canonicalKey = identidadeAchado(achado);
-  if (!canonicalKey) return { ok: false, motivo: "produto_sem_identidade_canonica" };
-  const existente = atual.filter(item => identidadeAchado(item) === canonicalKey)
-    .sort((a, b) => instanteAchado(b) - instanteAchado(a))[0];
-  const consolidado = {
-    ...mesclarIdentidadeVisual(existente, achado),
-    id: existente?.id || achado.id,
-    canonicalKey,
-    ofertaIdAtual: achado.id,
-    primeiroCapturadoEm: texto(existente?.primeiroCapturadoEm || existente?.capturadoEm) || capturadoEm
-  };
-  const proximo = selecionarEstoque([consolidado, ...atual.filter(item =>
-    item.id !== consolidado.id && identidadeAchado(item) !== canonicalKey)]);
-  // A full marketplace shelf (or a boundary crossing) may reject this item.
-  // In neither case may the outbox acknowledge materialization.
-  if (!proximo.some(item => item.id === consolidado.id)) {
-    return Date.now() - Date.parse(capturadoEm) >= TTL_ACHADOS_MS
-      ? { ok: false, motivo: "EXPIRED_BEFORE_ACHADOS_PROJECTION" }
-      : { ok: false, motivo: "ACHADOS_NOT_MATERIALIZED_RETRYABLE" };
-  }
-  writeClienteJson(id, ARQUIVO_ACHADOS, proximo);
-  return { ok: true, achado: consolidado, atualizado: Boolean(existente) };
-}
-
 function listarAchados(clienteId, { marketplace = "", categoria = "", busca = "", nowMs = Date.now() } = {}) {
   const id = normalizarClienteId(clienteId);
   const todos = selecionarEstoque(lerAchados(id), nowMs);
@@ -373,5 +293,5 @@ function buscarAchado(clienteId, achadoId, nowMs = Date.now()) {
 module.exports = {
   ARQUIVO_ACHADOS, TTL_ACHADOS_MS, LIMITE_POR_MARKETPLACE, MARKETPLACES_ACHADOS,
   identidadeAchado, mesclarIdentidadeVisual, consolidarCanonicos, selecionarEstoque,
-  registrarAchado, registrarAchadoCapacidadeClonador, listarAchados, buscarAchado
+  registrarAchado, listarAchados, buscarAchado
 };

@@ -9,7 +9,6 @@ const { createEnvelope } = require("../modules/teleradar/envelope.contract");
 const { createHandoffRepository, HANDOFFS_FILE } = require("../modules/teleradar/handoff.repository");
 const { createHandoffService } = require("../modules/teleradar/handoff.service");
 const { createRadarIngressAdapter } = require("../modules/teleradar/radar-ingress.adapter");
-const { avaliarFrescorHandoffTeleRadar } = require("../modules/radar/ingress-frescor-retry.candidate");
 const { createTeleRadarService } = require("../modules/teleradar");
 
 const context = Object.freeze({
@@ -186,14 +185,11 @@ async function testRestartResumesPendingAndPermanentFailureObservable() {
     clock: time.clock,
     setTimeoutFn: timersA.setTimeoutFn,
     clearTimeoutFn: timersA.clearTimeoutFn,
-    radarIngress: { accept: async () => ({ accepted: false, durable: false, retryable: true, code: "hot_admission_denied" }) }
+    radarIngress: { accept: async () => ({ accepted: false, durable: false, retryable: true, code: "DB_DOWN" }) }
   });
   await first.start();
   await first.persistEnvelope(envelope);
   await first.attempt(envelope.eventId);
-  assert.equal((await first.get(envelope.eventId)).status, "pending");
-  assert.equal((await first.get(envelope.eventId)).capturedAt, envelope.capturedAt);
-  assert.equal((await first.get(envelope.eventId)).lastErrorCode, "hot_admission_denied");
   await first.stop();
   time.advance(1000);
 
@@ -231,40 +227,6 @@ async function testRestartResumesPendingAndPermanentFailureObservable() {
   const permanentRecord = await permanent.get(permanentEnvelope.eventId);
   assert.equal(permanentRecord.status, "failed_permanent");
   assert.equal(permanentRecord.lastErrorCode, "sem_links");
-}
-
-async function testAdmissionDeniedExpiresBeforeRetryAfterRestart() {
-  const store = createMemoryTeleradarStore();
-  const time = clockFixture();
-  const envelope = envelopeFixture({ messageId: "108" });
-  const first = createHandoffService({ context, store, clock: time.clock,
-    setTimeoutFn: fakeTimers().setTimeoutFn, clearTimeoutFn: () => {},
-    radarIngress: { accept: async () => ({ accepted: false, durable: false,
-      retryable: true, code: "hot_admission_denied" }) } });
-  await first.start();
-  await first.persistEnvelope(envelope);
-  await first.attempt(envelope.eventId);
-  await first.stop();
-  time.advance(31 * 60 * 1000);
-  let promoted = 0;
-  const resumed = createHandoffService({ context, store, clock: time.clock,
-    setTimeoutFn: fakeTimers().setTimeoutFn, clearTimeoutFn: () => {},
-    radarIngress: createRadarIngressAdapter({
-      processarMensagemRadar: async payload => {
-        const frescor = avaliarFrescorHandoffTeleRadar({
-          fonte: "teleradar", capturadoEm: payload.capturadaEm
-        }, time.clock().getTime());
-        if (!frescor.ok) return { ok: false, motivo: frescor.motivo };
-        promoted += 1;
-        return {};
-      } }) });
-  await resumed.start();
-  const record = await resumed.get(envelope.eventId);
-  assert.equal(promoted, 0);
-  assert.equal(record.status, "failed_permanent");
-  assert.equal(record.lastErrorCode, "captura_expirada_antes_admissao");
-  assert.equal(record.capturedAt, envelope.capturedAt);
-  await resumed.stop();
 }
 
 async function testRestartReschedulesActiveLease() {
@@ -348,35 +310,10 @@ async function testRadarIngressContract() {
     processarMensagemRadar: async () => ({ ok: false, motivo: "radar_chamada_falhou" })
   });
   assert.equal((await notPersisted.accept(envelope)).retryable, true);
-  const admissionDenied = createRadarIngressAdapter({
-    processarMensagemRadar: async () => ({ ok: false, motivo: "hot_admission_denied" })
-  });
-  assert.deepEqual(await admissionDenied.accept(envelope), {
-    accepted: false, durable: false, retryable: true, code: "hot_admission_denied"
-  });
   const noLinks = createRadarIngressAdapter({
     processarMensagemRadar: async () => ({ ok: false, motivo: "sem_links" })
   });
   assert.equal((await noLinks.accept(envelope)).retryable, false);
-  const expired = createRadarIngressAdapter({
-    processarMensagemRadar: async () => ({ ok: false, motivo: "captura_expirada_antes_admissao" })
-  });
-  assert.deepEqual(await expired.accept(envelope), {
-    accepted: false, durable: false, retryable: false,
-    code: "captura_expirada_antes_admissao"
-  });
-}
-
-async function testTeleRadarOriginalCaptureFreshness() {
-  const input = { fonte: "teleradar", capturadoEm: "2026-09-21T18:00:00.000Z" };
-  assert.equal(avaliarFrescorHandoffTeleRadar(input,
-    Date.parse("2026-09-21T18:00:05.000Z")).ok, true);
-  const expired = avaliarFrescorHandoffTeleRadar(input,
-    Date.parse("2026-09-21T18:31:00.000Z"));
-  assert.equal(expired.ok, false);
-  assert.equal(expired.motivo, "captura_expirada_antes_admissao");
-  assert.equal(expired.capturadoEm, input.capturadoEm);
-  assert.equal(avaliarFrescorHandoffTeleRadar({ fonte: "radar" }).aplicavel, false);
 }
 
 async function testOutboxBeforeCheckpointFailure() {
@@ -418,7 +355,6 @@ async function testOutboxBeforeCheckpointFailure() {
     messageId: "106",
     senderId: "90071992547409932",
     receivedAt: time.clock().toISOString(),
-    telegramTimestamp: time.clock().toISOString(),
     text: "Oferta https://example.com",
     textSource: "text",
     hasMedia: false,
@@ -536,11 +472,9 @@ async function main() {
   await testObservabilityAndRecoveryStayScoped();
   await testRetryConcurrencyAndCallbackException();
   await testRestartResumesPendingAndPermanentFailureObservable();
-  await testAdmissionDeniedExpiresBeforeRetryAfterRestart();
   await testRestartReschedulesActiveLease();
   await testProtectedNeverPersists();
   await testRadarIngressContract();
-  await testTeleRadarOriginalCaptureFreshness();
   await testOutboxBeforeCheckpointFailure();
   await testExplicitEventIdControlsEngineIdempotency();
   await testStaticBoundaries();

@@ -17,8 +17,6 @@ const {
   aplicarImagemCanonicaMetadata
 } = require("../imagens/cache-canonico-evento");
 const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
-const { modoIngressReal, verificarCapturaIngressReal } =
-  require("./universal-ingress-fence");
 
 const CONFIRMACAO_RETENCAO_JOBS_POSTGRES = "LIMPAR_JOBS_POSTGRES_FINALIZADOS_12H";
 const RETENCAO_JOBS_LOCK_ID = 902260733;
@@ -275,17 +273,6 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     return { ok: false, motivo: "evento_id_ausente", criados: 0 };
   }
 
-  if (modoIngressReal() === "UNIVERSAL") {
-    const source = await queryEngine(`SELECT capturado_em
-      FROM engine_eventos_brutos WHERE id=$1`, [eventoId]);
-    const capture = source.ok ? source.resultado?.rows?.[0]?.capturado_em : null;
-    const eligibility = verificarCapturaIngressReal(capture);
-    if (!eligibility.ok) {
-      return { ok: false, motivo: eligibility.reason || "capture_t0_unproven",
-        criados: 0, existentes: 0 };
-    }
-  }
-
   await ignorarJobsAdminNaoOperacional();
 
   const origemFluxoEntrada = resolverOrigemFluxo({ metadata: metadataEvento });
@@ -319,7 +306,6 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
   };
   let criados = 0;
   let existentes = 0;
-  const clientesAdmissaoPendente = [];
 
   const adminIgnorado = avaliacaoClientes.ignorados
     .some(item => item.motivos.includes("workspace_admin") || normalizarTexto(item.clienteId).toLowerCase() === "admin");
@@ -377,30 +363,6 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
       );
 
       if (!insert.ok) {
-        if (String(insert.erro || "").includes("UF_HOT_ADMISSION_DENIED")) {
-          clientesAdmissaoPendente.push(clienteId);
-          coberturaRadar.registrar("engine_job_nao_criado", {
-            ...contextoCobertura, clienteId, decisao: "adiado",
-            motivo: "hot_admission_denied", jobNovoCriado: false
-          });
-          continue;
-        }
-        if (insert.erroCodigo === "23505" &&
-            insert.erroConstraint === "engine_jobs_event_workspace_unique_candidate") {
-          const concorrente = await queryEngine(
-            `SELECT id FROM engine_jobs_cliente
-              WHERE evento_id=$1 AND cliente_id=$2 LIMIT 1`,
-            [eventoId, clienteId]
-          );
-          if (concorrente.ok && concorrente.resultado.rows[0]?.id) {
-            existentes += 1;
-            coberturaRadar.registrar("engine_job_existente", {
-              ...contextoCobertura, clienteId, decisao: "reaproveitado",
-              motivo: "job_existente_concorrente", jobNovoCriado: false
-            });
-            continue;
-          }
-        }
         logEngineJobClienteErro({ eventoId, clienteId, motivo: insert.motivo || "insert_falhou", erro: insert.erro || "" });
         coberturaRadar.registrar("engine_job_erro", {
           ...contextoCobertura,
@@ -437,10 +399,6 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
         jobNovoCriado: true
       });
     } catch (e) {
-      if (String(e.message || "").includes("UF_HOT_ADMISSION_DENIED")) {
-        clientesAdmissaoPendente.push(clienteId);
-        continue;
-      }
       logEngineJobClienteErro({ eventoId, clienteId, motivo: "erro_inesperado", erro: e.message });
       coberturaRadar.registrar("engine_job_erro", {
         ...contextoCobertura,
@@ -453,13 +411,7 @@ async function criarJobsParaClientes({ eventoId, ofertaId = null, clientes = [],
     }
   }
 
-  return {
-    ok: clientesAdmissaoPendente.length === 0,
-    ...(clientesAdmissaoPendente.length ? {
-      motivo: "hot_admission_denied", clientesAdmissaoPendente
-    } : {}),
-    criados, existentes
-  };
+  return { ok: true, criados, existentes };
 }
 
 function normalizarStatusLimpeza(status = []) {
