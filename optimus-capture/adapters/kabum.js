@@ -66,6 +66,46 @@
     return /(?:^|[\s:;-])(?:a|à)\s+vista\s+no\s+pix\b/i.test(textoVisivel(no));
   }
 
+  function textoNumberFlow(no) {
+    const data = texto(no?.getAttribute?.("data"));
+    if (!data) return "";
+    try {
+      const partes = JSON.parse(data);
+      return [
+        ...(Array.isArray(partes?.pre) ? partes.pre : []),
+        ...(Array.isArray(partes?.integer) ? partes.integer : []),
+        ...(Array.isArray(partes?.fraction) ? partes.fraction : []),
+        ...(Array.isArray(partes?.post) ? partes.post : [])
+      ]
+        .map(item => String(item?.value ?? ""))
+        .join("")
+        .replace(/\u00a0/g, " ")
+        .trim();
+    } catch {
+      return "";
+    }
+  }
+
+  function contextoPrecoSecundario(no) {
+    return /(outras\s+op[cç][oõ]es\s+de\s+compra|outros?\s+vendedores?|produtos?\s+relacionados?|patrocinados?|recomendados?)/i.test(textoVisivel(no));
+  }
+
+  function blocoNumberFlowPix(documento) {
+    const raiz = mainProduto(documento);
+    const componentes = Array.from(raiz?.querySelectorAll?.("number-flow-react[data]") || []);
+    for (const componente of componentes) {
+      const preco = valorMonetarioUnico(textoNumberFlow(componente));
+      if (!preco) continue;
+      let atual = componente.parentElement || null;
+      for (let nivel = 0; atual && nivel < 6; nivel += 1) {
+        if (contextoPrecoSecundario(atual)) break;
+        if (temPix(atual)) return { no: componente, bloco: atual, preco };
+        atual = atual.parentElement || null;
+      }
+    }
+    return null;
+  }
+
   function candidatosH4Pix(raiz) {
     const h4s = Array.from(raiz?.querySelectorAll?.("h4") || []);
     const candidatos = [];
@@ -110,6 +150,9 @@
 
   function blocoPrecoPix(documento) {
     const raiz = mainProduto(documento);
+    const porNumberFlow = blocoNumberFlowPix(documento);
+    if (porNumberFlow) return porNumberFlow;
+
     const [porH4] = candidatosH4Pix(raiz);
     if (porH4) return porH4;
 
@@ -121,6 +164,12 @@
     }
 
     return candidatoPSpanPix(raiz);
+  }
+
+  function parcelamentoKabum(bloco) {
+    const valor = textoVisivel(bloco);
+    const match = valor.match(/\b\d{1,2}\s*x(?:\s+de)?\s*R\$\s*[0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}(?:\s*(?:s\/?\s*juros|sem\s+juros))?/i);
+    return limparTexto(match?.[0] || "");
   }
 
   function temLineThrough(no) {
@@ -343,6 +392,7 @@
       precoAtual,
       precoAnterior: precoAnterior && precoAtual && precoAnterior > precoAtual ? precoAnterior : "",
       condicaoPrecoPor: bloco ? "pix" : "",
+      parcelamento: parcelamentoKabum(bloco?.bloco),
       imagem: imagemKabum(documento, html, produtoId),
       cupom: "",
       fonte: "dom_kabum_v1",
@@ -356,6 +406,7 @@
     capturarKabumDaPagina,
     capturarKabumDeHtml,
     blocoPrecoPix,
+    textoNumberFlow,
     precoAnteriorKabum,
     produtoIdKabum
   };

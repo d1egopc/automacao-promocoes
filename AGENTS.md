@@ -77,6 +77,21 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 
 Considere Turbo, Historico, VIVA/recovery, Solenoide, Auto Clean, fila operacional e contratos comerciais congelados quando nao forem o escopo explicitamente autorizado.
 
+## Extension Golden Regression Gate
+
+Antes de alterar Launcher, Side Panel, captura compartilhada, registry, product-contract, marketplace-detector, empacotamento da extensao ou implementar Modo Selecao:
+
+1. Preserve os seis adapters homologados: Mercado Livre, Amazon, Shopee, AliExpress, Magalu e KaBuM.
+2. Trate KaBuM como invariante comercial: preco Pix estruturado em `number-flow-react[data]` tem prioridade, o fallback legado permanece, e parcelamento, outros sellers e relacionados nunca substituem o preco principal.
+3. Preserve Mercado Livre com MLBU factual e MLB somente como alias comprovado.
+4. Mantenha o Launcher abrindo nos seis marketplaces e preserve na Shopee a estrategia de nao colisao com o chat.
+5. Mantenha Salvar, Enviar agora e `+ Lista` como acoes distintas e funcionais.
+6. Exija regressao executavel dos seis marketplaces antes de candidata/release quando houver mudanca compartilhada da extensao.
+7. Nao substitua comportamento mais novo de uma fonte oficial por copia mais velha sem diff e prova explicita.
+8. Faca o Modo Selecao reutilizar os adapters e o pipeline homologados; nao crie segunda autoridade de captura.
+
+Este texto nao substitui testes executaveis; o gate documental e a regressao automatizada sao obrigatorios.
+
 ## Indice de contratos
 
 - [Topologia](docs/contracts/PLATFORM-TOPOLOGY.md)
