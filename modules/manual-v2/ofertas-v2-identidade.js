@@ -63,6 +63,24 @@ function idProdutoPorUrl(marketplace, valor) {
   } catch { return ""; }
 }
 
+// MLBU is the factual identity of Mercado Livre's current product page.  It is
+// intentionally distinct from the operational MLB item identity: a URL may
+// prove the former without proving the latter.
+function idFonteMlbuPorUrl(valor) {
+  try {
+    const url = new URL(texto(valor));
+    if (dominioDa(url) !== "mercadolivre") return "";
+    const match = decodeURIComponent(url.pathname).match(/\/up\/(MLBU\d{6,})(?:\/|$)/i);
+    return match ? match[1].toUpperCase() : "";
+  } catch { return ""; }
+}
+
+function chaveIdentidade(marketplace, identidadeProduto) {
+  return crypto.createHash("sha256")
+    .update(JSON.stringify([marketplace, identidadeProduto]))
+    .digest("hex");
+}
+
 function componentesIdentidadeCanonica(oferta = {}) {
   const marketplace = mercado(oferta.marketplace);
   if (!marketplace || !["amazon", "mercadolivre", "shopee", "aliexpress", "kabum"].includes(marketplace)) return null;
@@ -118,9 +136,66 @@ function componentesIdentidadeCanonica(oferta = {}) {
 function identidadeCanonica(oferta = {}) {
   const componentes = componentesIdentidadeCanonica(oferta);
   if (!componentes) return "";
-  return crypto.createHash("sha256")
-    .update(JSON.stringify([componentes.marketplace, componentes.identidadeProduto]))
-    .digest("hex");
+  return chaveIdentidade(componentes.marketplace, componentes.identidadeProduto);
+}
+
+// Capture-to-List has a different minimum than operational dispatch: its
+// source identity must be factual, while an operational marketplace identity
+// remains an optional, verified alias.  This never derives MLB from MLBU or
+// from wid/title data.
+function componentesIdentidadeCaptura(oferta = {}) {
+  const marketplace = mercado(oferta.marketplace);
+  const operacional = componentesIdentidadeCanonica(oferta);
+  if (marketplace === "mercadolivre") {
+    const mlbu = idFonteMlbuPorUrl(oferta.urlOriginal || oferta.linkOriginal || oferta.url);
+    if (mlbu) {
+      const identidadeFonte = mlbu.toLowerCase();
+      const chaveFonte = chaveIdentidade(marketplace, identidadeFonte);
+      const mlbVerificado = operacional?.identidadeProduto || "";
+      const chaves = [chaveFonte, ...(mlbVerificado
+        ? [chaveIdentidade(marketplace, mlbVerificado)] : [])];
+      return {
+        marketplace,
+        canonicalKey: chaveFonte,
+        identityKeys: [...new Set(chaves)],
+        sourceProductIdentity: {
+          marketplace,
+          type: "MLBU",
+          value: mlbu,
+          source: "url_original"
+        },
+        ...(mlbVerificado ? {
+          operationalMarketplaceIdentity: {
+            marketplace,
+            type: "MLB",
+            value: mlbVerificado.toUpperCase(),
+            verification: operacional.origem
+          }
+        } : {})
+      };
+    }
+  }
+  if (!operacional) return null;
+  const chave = chaveIdentidade(operacional.marketplace, operacional.identidadeProduto);
+  return {
+    marketplace: operacional.marketplace,
+    canonicalKey: chave,
+    identityKeys: [chave],
+    sourceProductIdentity: {
+      marketplace: operacional.marketplace,
+      type: operacional.marketplace === "mercadolivre" ? "MLB" : "marketplace_product",
+      value: operacional.identidadeProduto,
+      source: operacional.origem
+    },
+    ...(operacional.marketplace === "mercadolivre" ? {
+      operationalMarketplaceIdentity: {
+        marketplace: operacional.marketplace,
+        type: "MLB",
+        value: operacional.identidadeProduto.toUpperCase(),
+        verification: operacional.origem
+      }
+    } : {})
+  };
 }
 
 function normalizarTituloConservador(valor) {
@@ -163,7 +238,9 @@ function identidadeIsoladaObservacao(oferta = {}) {
 module.exports = {
   canonicalizarUrl,
   idProdutoPorUrl,
+  idFonteMlbuPorUrl,
   componentesIdentidadeCanonica,
+  componentesIdentidadeCaptura,
   identidadeCanonica,
   normalizarTituloConservador,
   identidadeTituloConservadora,

@@ -268,7 +268,7 @@ async function executar() {
   assert.ok(elemento("botaoEnviar").listeners.click, "Enviar agora permanece ligado");
 
   produto.marketplace = "mercadolivre";
-  produto.urlOriginal = "https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597#wid=MLB6524249752";
+  produto.urlOriginal = "https://www.mercadolivre.com.br/produto/MLBU3862120597";
   listaSemIdentidade = true;
   tabUpdated(1, { status: "complete" });
   await new Promise((resolve) => setTimeout(resolve, 700));
@@ -299,24 +299,24 @@ async function executar() {
     "[CAPTURE-LISTA-REJEITADA]", { marketplace: "mercadolivre", codigo: "produto_sem_identidade_operacional" }
   ]), "log nao inclui JWT, URL, titulo ou payload");
 
-  // A verified MLBU re-enables List, keeps the candidate through form edits and transports the receipt.
+  // A factual MLBU page re-enables List even when no verified MLB alias is available.
   erroIdentidade = false;
-  identidadeVerificada = { mlb: "MLB6524249752", assinatura: "test-receipt-from-preview" };
-  produto.identidadeMlCandidata = { pageMlbu: "MLBU3862120597", mlb: "MLB6524249752", source: "nordic_current_product" };
+  identidadeVerificada = null;
+  delete produto.identidadeMlCandidata;
   produto.urlOriginal = "https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597?picker=true";
   tabUpdated(1, { status: "complete" });
   await new Promise(resolve => setTimeout(resolve, 700));
   assert.strictEqual(elemento("botaoLista").disabled, false);
-  assert.strictEqual(payloadsPreview.at(-1).identidadeMlCandidata.mlb, "MLB6524249752");
+  assert.strictEqual(payloadsPreview.at(-1).urlOriginal, produto.urlOriginal);
   elemento("campoTitulo").value = "Conjunto Moletom Paris editado novamente";
   elemento("campoTitulo").listeners.input();
   await new Promise(resolve => setTimeout(resolve, 500));
-  assert.strictEqual(payloadsPreview.at(-1).identidadeMlCandidata.mlb, "MLB6524249752");
+  assert.strictEqual(payloadsPreview.at(-1).urlOriginal, produto.urlOriginal);
   await elemento("botaoLista").listeners.click();
   elemento("listasDisponiveis").children[0].children[0].listeners.change();
   await elemento("adicionarListaExistente").listeners.click();
-  assert.strictEqual(payloadsAdicao.at(-1).oferta.identidadeMlCapture, identidadeVerificada);
-  assert.strictEqual(saves, 2, "verified MLBU List still does not create an intermediate Manual offer");
+  assert.strictEqual(payloadsAdicao.at(-1).oferta.identidadeMlCapture, undefined);
+  assert.strictEqual(saves, 2, "factual MLBU List still does not create an intermediate Manual offer");
 }
 
 executar().then(() => {

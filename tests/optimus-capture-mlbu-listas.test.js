@@ -136,6 +136,43 @@ async function main() {
       assert.strictEqual(item.status, "aguardando");
     });
     assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 0, "no ghost Manual offer");
+
+    // A factual MLBU page is sufficient for List.  A later verified MLB is
+    // reconciled as an alias on that same list item, never as a second item.
+    const listaFonte = listas.criarLista(workspace, "MLBU fonte factual");
+    const somenteFonte = { ...previews[0] };
+    delete somenteFonte.identidadeMlCapture;
+    delete somenteFonte.produtoId;
+    const adicionadaFonte = await api.adicionarCapturaListaManualV2(workspace, listaFonte.id, somenteFonte);
+    assert.strictEqual(adicionadaFonte.ok, true);
+    let itemFonte = listas.lerListas(workspace).find(item => item.id === listaFonte.id).itens[0];
+    assert.strictEqual(itemFonte.sourceProductIdentity.value, samples[0].page);
+    assert.strictEqual(itemFonte.operationalMarketplaceIdentity, undefined);
+    await assert.rejects(api.adicionarCapturaListaManualV2(workspace, listaFonte.id, previews[0]), err => err.status === 409);
+    itemFonte = listas.lerListas(workspace).find(item => item.id === listaFonte.id).itens[0];
+    assert.strictEqual(itemFonte.operationalMarketplaceIdentity.value, samples[0].mlb);
+    assert.strictEqual(itemFonte.identityKeys.length, 2, "MLBU and verified MLB share the same item");
+
+    // If an old MLB-only entry and an MLBU-first entry coexisted before the
+    // verified association arrived, the proof joins them into one factual
+    // item. Neither MLBU nor MLB is guessed during the initial adds.
+    const listaAliasTardio = listas.criarLista(workspace, "Alias ML tardio");
+    await api.adicionarCapturaListaManualV2(workspace, listaAliasTardio.id, somenteFonte);
+    const mlbDireto = {
+      ...previews[0],
+      urlOriginal: `https://www.mercadolivre.com.br/produto/${samples[0].mlb}`,
+      produtoId: samples[0].mlb
+    };
+    delete mlbDireto.identidadeMlCapture;
+    await api.adicionarCapturaListaManualV2(workspace, listaAliasTardio.id, mlbDireto);
+    assert.strictEqual(listas.lerListas(workspace).find(item => item.id === listaAliasTardio.id).itens.length, 2,
+      "unverified MLBU and independent MLB are not guessed as equal");
+    await assert.rejects(api.adicionarCapturaListaManualV2(workspace, listaAliasTardio.id, previews[0]), err => err.status === 409);
+    const itensReconciliados = listas.lerListas(workspace).find(item => item.id === listaAliasTardio.id).itens;
+    assert.strictEqual(itensReconciliados.length, 1, "verified MLBU-to-MLB association collapses only the proven duplicate");
+    assert.strictEqual(itensReconciliados[0].sourceProductIdentity.type, "MLBU");
+    assert.strictEqual(itensReconciliados[0].operationalMarketplaceIdentity.value, samples[0].mlb);
+
     await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id,
       { ...previews[0], titulo: "Outro titulo editado", precoAtual: 75 }), err => err.status === 409);
     assert.strictEqual(listas.lerListas(workspace)[0].itens.length, 2);
@@ -163,25 +200,31 @@ async function main() {
       assert.throws(() => resolver.extrair(htmlBackend, s.mlb, urlPagina(s)), /ml_identity_/, label);
       const capture = adapter.capturarMercadoLivreDeHtml(htmlBackend, `${urlPagina(s)}?wid=${s.mlb}`);
       assert.strictEqual(capture.identidadeMlCandidata, undefined, label);
-      // Even a valid local candidate cannot overrule conflicting/missing trusted HTML.
+      // Missing/contradictory operational evidence cannot invent MLB, but the
+      // factual MLBU capture remains valid for List.
       const preview = await api.gerarPreviewCapture(workspace, contrato.payloadPreview(validCandidate));
-      assert.strictEqual(preview.oferta.listaCaptura.elegivel, false, label);
-      await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id, preview.oferta), err => err.status === 422, label);
+      assert.strictEqual(preview.oferta.listaCaptura.elegivel, true, label);
+      assert.strictEqual(preview.oferta.identidadeMlCapture, undefined, label);
+      await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id, preview.oferta), err => err.status === 409, label);
     }
     htmlBackend = fixture(samples[1]);
     const mismatch = await api.gerarPreviewCapture(workspace, contrato.payloadPreview(validCandidate));
-    assert.strictEqual(mismatch.oferta.listaCaptura.elegivel, false, "DOM/page identity cannot overrule trusted response");
+    assert.strictEqual(mismatch.oferta.listaCaptura.elegivel, true, "MLBU factual identity survives unavailable operational alias");
+    assert.strictEqual(mismatch.oferta.identidadeMlCapture, undefined);
     htmlBackend = fixture(s);
     const contradictory = await api.gerarPreviewCapture(workspace,
       { ...contrato.payloadPreview(validCandidate), produtoId: samples[1].mlb });
-    assert.strictEqual(contradictory.oferta.listaCaptura.elegivel, false, "verified association never overrides a conflicting product ID");
-    await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id, contradictory.oferta), err => err.status === 422);
+    assert.strictEqual(contradictory.oferta.listaCaptura.elegivel, true, "raw MLB never overrides factual MLBU");
+    assert.strictEqual(componentesIdentidadeCanonica(contradictory.oferta), null,
+      "a prova transportada nao vira alias quando um MLB bruto a contradiz");
+    await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id, contradictory.oferta), err => err.status === 409);
     const withoutCandidate = contrato.payloadPreview(validCandidate);
     delete withoutCandidate.identidadeMlCandidata;
     withoutCandidate.urlOriginal += `?wid=${s.mlb}`;
     withoutCandidate.produtoId = s.mlb;
     const widOnly = await api.gerarPreviewCapture(workspace, withoutCandidate);
-    assert.strictEqual(widOnly.oferta.listaCaptura.elegivel, false);
+    assert.strictEqual(widOnly.oferta.listaCaptura.elegivel, true);
+    assert.strictEqual(widOnly.oferta.identidadeMlCapture, undefined, "wid alone never becomes an operational alias");
     const saved = await api.salvarOfertaManualV2(workspace, widOnly.oferta, "manual-mlbu-only");
     assert.ok(saved.oferta.id, "unresolved ML still saves explicitly in Manual");
     assert.strictEqual(saved.oferta.urlOriginal, withoutCandidate.urlOriginal);
@@ -195,13 +238,14 @@ async function main() {
     ];
     for (const proof of tampered) {
       await assert.rejects(api.adicionarCapturaListaManualV2(workspace, lista.id,
-        { ...previews[0], identidadeMlCapture: proof }), err => err.status === 422);
+        { ...previews[0], identidadeMlCapture: proof }), err => err.status === 409);
     }
     assert.strictEqual(mlContract.validarProvaCaptureMl(originalProof, previews[0],
       Date.parse(originalProof.collectedAt) + 10 * 60_000), null, "receipt TTL fails closed");
     assert.strictEqual(componentesIdentidadeCanonica({ ...previews[0], urlOriginal: urlPagina(samples[1]) }), null);
     const otherList = listas.criarLista("another_workspace", "Isolated");
-    await assert.rejects(api.adicionarCapturaListaManualV2("another_workspace", otherList.id, previews[0]), err => err.status === 422);
+    const otherWorkspace = await api.adicionarCapturaListaManualV2("another_workspace", otherList.id, previews[0]);
+    assert.strictEqual(otherWorkspace.ok, true, "foreign proof is ignored; the factual MLBU identity is re-derived for the authenticated workspace");
 
     // Approved hosts must be validated before every redirect request.
     for (const imageRedirect of [false, true]) {

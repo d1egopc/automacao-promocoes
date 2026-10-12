@@ -247,7 +247,7 @@ async function main() {
       "+ Lista ML nao cria Oferta alem da Oferta legada salva explicitamente");
 
     const urlMlbu = "https://www.mercadolivre.com.br/conjunto-moletom-calca-unissex-paris-canguru-casaco-frio/up/MLBU3862120597";
-    for (const ofertaSemIdentidade of [
+    const capturasMlbu = [
       { ...mlBase, urlOriginal: urlMlbu, produtoId: "" },
       { ...mlBase, urlOriginal: `${urlMlbu}#wid=MLB6524249752`, produtoId: "" },
       { ...mlBase, urlOriginal: `${urlMlbu}?wid=MLB6524249752`, produtoId: "" },
@@ -255,15 +255,27 @@ async function main() {
       { ...mlBase, urlOriginal: urlMlbu, produtoId: "MLB6524249752",
         identidadeProdutoVerificada: { origem: "engine_importer", marketplace: "mercadolivre", id: "MLB6524249752" },
         listaCaptura: { elegivel: true } }
-    ]) {
-      const bloqueada = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
-        origem: "captura_extensao", oferta: ofertaSemIdentidade
+    ];
+    for (const [indice, capturaMlbu] of capturasMlbu.entries()) {
+      const respostaMlbu = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+        origem: "captura_extensao", oferta: capturaMlbu
       });
-      assert.strictEqual(bloqueada.status, 422);
-      assert.strictEqual(bloqueada.body.motivo, "produto_sem_identidade_operacional");
+      assert.strictEqual(respostaMlbu.status, indice === 0 ? 200 : 409,
+        "MLBU factual entra sem MLB; wid e campos brutos nao viram autoridade MLB");
     }
-    assert.strictEqual(listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens.length, 1);
-    assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 1, "rejeicoes nao criam ofertas fantasmas");
+    const itensMl = listas.lerListas(workspace).find((item) => item.id === listaMl.id).itens;
+    assert.strictEqual(itensMl.length, 2, "MLBU factual adiciona um item, sem criar duplicatas por wid ou titulo");
+    const mlbuPersistida = itensMl.find((item) => item.sourceProductIdentity?.value === "MLBU3862120597");
+    assert.strictEqual(mlbuPersistida.operationalMarketplaceIdentity, undefined,
+      "MLB bruto ou wid nunca sao persistidos como alias operacional");
+    assert.strictEqual(manual.listarOfertasManuaisV2(workspace).length, 1, "+ Lista MLBU nao cria Oferta fantasma");
+
+    const semFonteFactual = await request(server, "POST", `/manual-v2/listas/${listaMl.id}/itens`, workspace, {
+      origem: "captura_extensao", oferta: { ...mlBase,
+        urlOriginal: "https://www.mercadolivre.com.br/produto-sem-identidade", produtoId: "" }
+    });
+    assert.strictEqual(semFonteFactual.status, 422, "captura sem identidade factual permanece fail-closed");
+    assert.strictEqual(semFonteFactual.body.motivo, "produto_sem_identidade_operacional");
 
     const manualMlbu = await request(server, "POST", "/manual-v2/ofertas", workspace, {
       oferta: { ...mlBase, urlOriginal: urlMlbu, produtoId: "" }

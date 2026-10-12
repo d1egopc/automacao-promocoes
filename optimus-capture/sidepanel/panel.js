@@ -1361,16 +1361,15 @@
     atualizarBotaoSalvar();
 
     try {
-      const ofertaId = await salvarPreviewAtual();
-      if (!ofertaId) throw new Error("oferta_nao_salva");
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
+      const oferta = ofertaPreviewParaSalvar(state.previewOferta);
       let resposta;
       try {
-        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, oferta, destinosIds, chaveEnvio, state.captureFlowId);
       } catch (erro) {
         if (!erroRedeAmbiguo(erro)) throw erro;
         setTexto("statusLink", "Nao foi possivel confirmar o envio. Verificando...");
-        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, oferta, destinosIds, chaveEnvio, state.captureFlowId);
       }
       if (state.previewKey !== previewKey) return;
       const envio = resposta?.envio || {};

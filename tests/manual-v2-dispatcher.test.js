@@ -960,6 +960,68 @@ function assertSemSegredos(retorno) {
   }
 
   {
+    const ordem = [];
+    const { deps, chamadas } = baseDeps({
+      usuarioTemCreditos: () => { throw new Error("json_credit_must_not_be_read"); },
+      debitarCreditos: () => { throw new Error("json_credit_must_not_be_debited"); },
+      reservarCreditoEnvio: async () => {
+        ordem.push("reserve");
+        return { ok: false, reason: "sem_creditos" };
+      },
+      confirmarCreditoEnvio: async () => {
+        ordem.push("confirm");
+        return { ok: true };
+      },
+      enviarWhatsApp: async () => {
+        ordem.push("provider");
+        chamadas.wa.push({});
+      }
+    });
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"],
+      attemptId: "attempt_sem_creditos"
+    }, deps);
+    assert.strictEqual(retorno.ok, false);
+    assert.strictEqual(retorno.resultados[0].erro, "Sem creditos");
+    assert.strictEqual(retorno.resultados[0].efeitoExternoPossivel, false);
+    assert.deepStrictEqual(ordem, ["reserve"]);
+    assert.strictEqual(chamadas.wa.length, 0);
+  }
+
+  {
+    const ordem = [];
+    const reserva = { ok: true, workspaceId: "cliente_a",
+      operationId: "attempt_credito:wa_ok", destinationId: "wa_ok" };
+    const { deps } = baseDeps({
+      usuarioTemCreditos: () => { throw new Error("json_credit_must_not_be_read"); },
+      debitarCreditos: () => { throw new Error("json_credit_must_not_be_debited"); },
+      reservarCreditoEnvio: async (entrada) => {
+        ordem.push("reserve");
+        assert.strictEqual(entrada.operationId, "attempt_credito:wa_ok");
+        return reserva;
+      },
+      confirmarCreditoEnvio: async (entrada) => {
+        ordem.push("confirm");
+        assert.strictEqual(entrada, reserva);
+        return { ok: true, debited: true };
+      },
+      liberarCreditoEnvio: async () => {
+        ordem.push("release");
+        return { ok: true };
+      },
+      enviarWhatsApp: async () => { ordem.push("provider"); },
+      registrarEnvioRecenteConfirmado: async () => { ordem.push("factual_send"); }
+    });
+    const retorno = await enviarOfertaManualV2({
+      clienteId: "cliente_a", ofertaId: "oferta_a", destinosIds: ["wa_ok"],
+      attemptId: "attempt_credito"
+    }, deps);
+    assert.strictEqual(retorno.ok, true);
+    assert.strictEqual(retorno.creditosDebitados, 1);
+    assert.deepStrictEqual(ordem, ["reserve", "provider", "confirm"]);
+  }
+
+  {
     const adaptada = adaptarOfertaManualParaTemplate(ofertaA);
     assert.strictEqual(adaptada.titulo, "Oferta Manual A");
     assert.strictEqual(adaptada.nome, "Oferta Manual A");

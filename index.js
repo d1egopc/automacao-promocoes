@@ -358,6 +358,11 @@ const {
 } = require("./modules/manual-v2/manual-dispatcher");
 const manualV2Storage = require("./modules/manual-v2/manual-offers.storage");
 const {
+  reservarCreditoManualUniversal,
+  confirmarCreditoManualUniversal,
+  liberarCreditoManualUniversal
+} = require("./modules/manual-v2/manual-universal-credit");
+const {
   destinosRecentesDaOferta
 } = require("./modules/manual-v2/ofertas-v2-envios-recentes");
 const {
@@ -5260,6 +5265,31 @@ async function saldoCreditosParaExibicao(clienteId, usuario = null) {
   const credit = await lerSaldoUniversal({ pool: getEnginePool(),
     workspaceId: clienteId });
   return credit.balance;
+}
+
+async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId, destinationId } = {}) {
+  if (modoMotorReal === "LEGACY") {
+    return { ok: usuarioTemCreditos(clienteId, 1), legacy: true, clienteId };
+  }
+  if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
+  if (!usuarioAtivoOperacional(clienteId)) return { ok: false, reason: "workspace_inativo" };
+  await renovarCreditosUniversalSeNecessario(obterUsuario(clienteId));
+  return reservarCreditoManualUniversal({
+    pool: getEnginePool(),
+    workspaceId: clienteId,
+    operationId,
+    destinationId: destinationId || destinoId
+  });
+}
+
+async function confirmarCreditoEnvioManualV2(reserva = {}) {
+  if (reserva.legacy === true) return { ok: debitarCreditos(reserva.clienteId, 1) === true };
+  return confirmarCreditoManualUniversal({ pool: getEnginePool(), reserva });
+}
+
+async function liberarCreditoEnvioManualV2(reserva = {}) {
+  if (reserva.legacy === true) return { ok: true, released: false };
+  return liberarCreditoManualUniversal({ pool: getEnginePool(), reserva });
 }
 
 async function renovarCreditosUniversalSeNecessario(usuario) {
@@ -26157,7 +26187,7 @@ function resolverPlanoManualV2Scheduler(clienteId = "admin") {
 function verificarEnvioRecenteProdutoDestino({ clienteId = "admin", oferta = {}, destinoId = "" } = {}) {
   return destinosRecentesDaOferta(clienteId, oferta, [destinoId], {
     listarEnviosRecentesAutomaticos: (id, agoraMs) => filaStore.enviadosRecentesPorCliente(id, agoraMs),
-    listarOfertasManuaisV2: manualV2Storage.listarOfertasManuaisV2
+    listarOfertasManuaisV2: manualV2Storage.listarOfertasManuaisV2IncluindoTecnicas
   }).length > 0;
 }
 
@@ -26171,6 +26201,9 @@ function iniciarManualV2SchedulerOperacional() {
     resolverPlanoManualV2: resolverPlanoManualV2Scheduler,
     usuarioTemCreditos,
     debitarCreditos,
+    reservarCreditoEnvio: reservarCreditoEnvioManualV2,
+    confirmarCreditoEnvio: confirmarCreditoEnvioManualV2,
+    liberarCreditoEnvio: liberarCreditoEnvioManualV2,
     montarMensagemOferta,
     resolverLinkOfertaPorDestino,
     enviarWhatsApp: enviarWhatsAppCampanha,
@@ -26226,6 +26259,9 @@ app.use("/manual-v2", criarRotasManualV2({
   clienteTemRecurso: clienteTemRecursoPlano,
   usuarioTemCreditos,
   debitarCreditos,
+  reservarCreditoEnvio: reservarCreditoEnvioManualV2,
+  confirmarCreditoEnvio: confirmarCreditoEnvioManualV2,
+  liberarCreditoEnvio: liberarCreditoEnvioManualV2,
   montarMensagemOferta,
   resolverLinkOfertaPorDestino,
   gerarLinkAfiliadoCliente: gerarLinkAfiliadoClienteManualV2,

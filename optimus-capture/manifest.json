@@ -84,9 +84,35 @@
         "adapters/kabum.js",
         "adapters/magalu.js",
         "adapters/registry.js",
-        "content/capture-content.js"
+        "content/capture-content.js",
+        "core/launcher-policy.js",
+        "content/launcher.js"
       ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/icon-32.png"],
+      "matches": [
+        "https://*.mercadolivre.com.br/*",
+        "https://*.mercadolibre.com/*",
+        "https://amazon.com.br/*",
+        "https://www.amazon.com.br/*",
+        "https://shopee.com.br/*",
+        "https://www.shopee.com.br/*",
+        "https://aliexpress.com/*",
+        "https://*.aliexpress.com/*",
+        "https://kabum.com.br/*",
+        "https://www.kabum.com.br/*",
+        "https://magazineluiza.com.br/*",
+        "https://*.magazineluiza.com.br/*",
+        "https://magazinevoce.com.br/*",
+        "https://*.magazinevoce.com.br/*",
+        "https://www.magazinevoce.com.br/*",
+        "https://magalu.com/*",
+        "https://*.magalu.com/*"
+      ]
     }
   ]
 }

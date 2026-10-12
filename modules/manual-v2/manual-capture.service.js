@@ -2,7 +2,7 @@ const {
   normalizarMarketplaceManualV2,
   normalizarOfertaManualV2
 } = require("./manual-offers.contract");
-const { componentesIdentidadeCanonica } = require("./ofertas-v2-identidade");
+const { componentesIdentidadeCaptura } = require("./ofertas-v2-identidade");
 const identidadeMl = require("../../optimus-capture/local-worker/mercadolivre-identity");
 const { criarProvaCaptureMl } = require("../local-worker/ml-identity.contract");
 const {
@@ -342,9 +342,10 @@ function respostaPreview(ofertaNormalizada = {}) {
   delete oferta.criadoEm;
   delete oferta.atualizadoEm;
   // Diagnóstico da mesma regra usada pela Lista; não é autoridade de admissão.
-  // Salvar Manual continua disponível mesmo sem identidade canônica de produto.
+  // A Lista aceita a identidade factual da página capturada. MLB continua sendo
+  // apenas um alias operacional adicional quando houver prova para ele.
   if (oferta.marketplace === "mercadolivre") {
-    const elegivel = Boolean(componentesIdentidadeCanonica(oferta));
+    const elegivel = Boolean(componentesIdentidadeCaptura(oferta));
     oferta.listaCaptura = {
       elegivel,
       motivo: elegivel ? "" : "produto_sem_identidade_operacional"

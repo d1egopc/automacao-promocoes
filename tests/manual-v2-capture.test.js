@@ -189,8 +189,8 @@ function arquivoOfertas(clienteId) {
   try {
     for (const [urlOriginal, elegivel] of [
       ["https://produto.mercadolivre.com.br/MLB-6524249752-conjunto-_JM", true],
-      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597", false],
-      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597#wid=MLB6524249752", false]
+      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597", true],
+      ["https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597#wid=MLB6524249752", true]
     ]) {
       const resposta = await request(server, "POST", "/manual-v2/capture/ofertas", "cliente_ml_identidade", payloadValido({ urlOriginal }));
       assert.strictEqual(resposta.status, 200, "Preview/Salvar permanece disponivel");

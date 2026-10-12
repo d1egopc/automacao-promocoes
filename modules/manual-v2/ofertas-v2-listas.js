@@ -9,7 +9,11 @@ const { enviarOfertaManualV2 } = require("./manual-dispatcher");
 const { INTERVALO_AUTO_MINIMO_MS, INTERVALO_AUTO_MAXIMO_MS } = require("./manual-auto-dispatch");
 const { buscarAchado } = require("./ofertas-v2-achados");
 const { gerarPreviewCaptureManualV2, urlAliExpressCaptureSegura } = require("./manual-capture.service");
-const { identidadeCanonica: identidadeCanonicaBase, identidadeIsoladaObservacao } = require("./ofertas-v2-identidade");
+const {
+  identidadeCanonica: identidadeCanonicaBase,
+  identidadeIsoladaObservacao,
+  componentesIdentidadeCaptura
+} = require("./ofertas-v2-identidade");
 const {
   JANELA_ENVIO_RECENTE_MS,
   listarEnviosRecentes,
@@ -115,6 +119,9 @@ function duplicarLista(clienteId, listaId, deps = {}) {
     origem: texto(item.origem),
     origemId: texto(item.origemId),
     canonicalKey: texto(item.canonicalKey),
+    identityKeys: chavesIdentidadeItem(item),
+    ...(item.sourceProductIdentity ? { sourceProductIdentity: { ...item.sourceProductIdentity } } : {}),
+    ...(item.operationalMarketplaceIdentity ? { operationalMarketplaceIdentity: { ...item.operationalMarketplaceIdentity } } : {}),
     oferta: JSON.parse(JSON.stringify(item.oferta || {})),
     status: "aguardando",
     motivo: ""
@@ -156,18 +163,83 @@ function identidadeCanonica(oferta) {
   if (!identidade) throw erro("produto_sem_identidade_operacional", 422);
   return identidade;
 }
-function identidadeCanonicaCaptura(oferta) {
-  const identidade = identidadeCanonicaBase(oferta);
+function identidadeCaptura(oferta) {
+  const identidade = componentesIdentidadeCaptura(oferta);
   if (identidade) return identidade;
   const prova = oferta.afiliacaoWorkspaceVerificada?.principal || oferta.afiliacaoWorkspaceVerificada || {};
   if (oferta.marketplace === "magalu" && texto(prova.productId) &&
       texto(prova.productId) === texto(oferta.produtoId) &&
       texto(prova.workspaceId) === texto(oferta.clienteId)) {
-    return crypto.createHash("sha256")
+    const canonicalKey = crypto.createHash("sha256")
       .update(JSON.stringify(["magalu", texto(prova.productId)]))
       .digest("hex");
+    return {
+      canonicalKey,
+      identityKeys: [canonicalKey],
+      sourceProductIdentity: {
+        marketplace: "magalu",
+        type: "marketplace_product",
+        value: texto(prova.productId),
+        source: "affiliate_workspace_proof"
+      }
+    };
   }
   throw erro("produto_sem_identidade_operacional", 422);
+}
+
+function chavesIdentidadeItem(item = {}) {
+  return [...new Set([texto(item.canonicalKey), ...lista(item.identityKeys).map(texto)].filter(Boolean))];
+}
+
+function mesmaIdentidadeOperacional(a, b) {
+  return texto(a?.marketplace) === texto(b?.marketplace) &&
+    texto(a?.type) === texto(b?.type) && texto(a?.value) === texto(b?.value);
+}
+
+function reconciliarAliasesCaptura(item, identidade) {
+  const atual = chavesIdentidadeItem(item);
+  const novas = [...new Set([...atual, ...lista(identidade.identityKeys).map(texto).filter(Boolean)])];
+  const operacionalAtual = item.operationalMarketplaceIdentity;
+  const operacionalNovo = identidade.operationalMarketplaceIdentity;
+  if (operacionalAtual && operacionalNovo && !mesmaIdentidadeOperacional(operacionalAtual, operacionalNovo)) {
+    throw erro("identidade_operacional_conflitante", 422);
+  }
+  const mudouChaves = novas.length !== atual.length || novas.some((chave, indice) => chave !== atual[indice]);
+  const precisaFonte = !item.sourceProductIdentity && identidade.sourceProductIdentity;
+  const precisaOperacional = !operacionalAtual && operacionalNovo;
+  if (!mudouChaves && !precisaFonte && !precisaOperacional) return { item, mudou: false };
+  return {
+    item: {
+      ...item,
+      identityKeys: novas,
+      ...(precisaFonte ? { sourceProductIdentity: identidade.sourceProductIdentity } : {}),
+      ...(precisaOperacional ? { operationalMarketplaceIdentity: operacionalNovo } : {})
+    },
+    mudou: true
+  };
+}
+function identidadePersistidaDoItem(item) {
+  return {
+    identityKeys: chavesIdentidadeItem(item),
+    ...(item.sourceProductIdentity ? { sourceProductIdentity: item.sourceProductIdentity } : {}),
+    ...(item.operationalMarketplaceIdentity ? { operationalMarketplaceIdentity: item.operationalMarketplaceIdentity } : {})
+  };
+}
+function indicePrincipalParaAlias(itens, indices) {
+  // When an MLBU-first capture is later linked to MLB, keep the source-page
+  // item as the durable record. It preserves the factual page identity rather
+  // than replacing it with an operational alias.
+  const fonteMlbu = indices.find((indice) => texto(itens[indice]?.sourceProductIdentity?.type) === "MLBU");
+  return fonteMlbu === undefined ? indices[0] : fonteMlbu;
+}
+function reconciliarItensComAlias(itens, indices, identidade) {
+  const indicePrincipal = indicePrincipalParaAlias(itens, indices);
+  let reconciliada = reconciliarAliasesCaptura(itens[indicePrincipal], identidade).item;
+  for (const indice of indices) {
+    if (indice === indicePrincipal) continue;
+    reconciliada = reconciliarAliasesCaptura(reconciliada, identidadePersistidaDoItem(itens[indice])).item;
+  }
+  return { indicePrincipal, item: reconciliada };
 }
 function provarAfiliacao(oferta, clienteId, deps = {}) {
   const marketplace = oferta.marketplace;
@@ -363,14 +435,44 @@ async function adicionarItem(clienteId, listaId, { origem, ofertaId, oferta: ofe
     provarAfiliacao(oferta, id, deps);
   } else throw erro("origem_lista_invalida");
   if (!texto(oferta.urlAfiliada)) throw erro("oferta_sem_link_afiliado", 422);
-  const canonicalKey = origem === "captura_extensao"
-    ? identidadeCanonicaCaptura(oferta)
-    : identidadeCanonica(oferta);
+  const identidade = origem === "captura_extensao"
+    ? identidadeCaptura(oferta)
+    : (() => {
+      const canonicalKey = identidadeCanonica(oferta);
+      return { canonicalKey, identityKeys: [canonicalKey] };
+    })();
+  const canonicalKey = identidade.canonicalKey;
+  const existente = lerListas(id).find((item) => item.id === texto(listaId));
+  if (!existente) throw erro("lista_nao_encontrada", 404);
+  const indicesExistentes = existente.itens.reduce((indices, item, indice) => {
+    if (chavesIdentidadeItem(item).some((chave) => lista(identidade.identityKeys).includes(chave))) indices.push(indice);
+    return indices;
+  }, []);
+  if (indicesExistentes.length) {
+    const reconciliada = reconciliarItensComAlias(existente.itens, indicesExistentes, identidade);
+    const itemOriginal = existente.itens[reconciliada.indicePrincipal];
+    const mudou = reconciliada.item !== itemOriginal || indicesExistentes.length > 1;
+    if (mudou) {
+      atualizarLista(id, listaId, (item) => {
+        exigirParada(item);
+        return { ...item, itens: item.itens.reduce((resultado, entrada, indice) => {
+          if (!indicesExistentes.includes(indice)) resultado.push(entrada);
+          else if (indice === reconciliada.indicePrincipal) resultado.push(reconciliada.item);
+          return resultado;
+        }, []) };
+      });
+    }
+    throw erro("item_ja_na_lista", 409);
+  }
   return atualizarLista(id, listaId, (item) => {
     exigirParada(item);
-    if (item.itens.some((i) => i.canonicalKey === canonicalKey)) throw erro("item_ja_na_lista", 409);
+    if (item.itens.some((i) => chavesIdentidadeItem(i).some((chave) => lista(identidade.identityKeys).includes(chave))))
+      throw erro("item_ja_na_lista", 409);
     return { ...item, itens: [...item.itens, { id: crypto.randomUUID(), origem, origemId: texto(ofertaId),
-      canonicalKey, oferta, status: "aguardando", motivo: "" }] };
+      canonicalKey, identityKeys: identidade.identityKeys,
+      ...(identidade.sourceProductIdentity ? { sourceProductIdentity: identidade.sourceProductIdentity } : {}),
+      ...(identidade.operationalMarketplaceIdentity ? { operationalMarketplaceIdentity: identidade.operationalMarketplaceIdentity } : {}),
+      oferta, status: "aguardando", motivo: "" }] };
   });
 }
 

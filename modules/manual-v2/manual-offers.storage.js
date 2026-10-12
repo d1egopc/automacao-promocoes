@@ -224,7 +224,8 @@ function sanitizarResultadoEnvio(resultado = {}) {
     tipo: tipoSanitizado,
     status,
     enviadoEm: texto(resultado.enviadoEm),
-    erro: status === "erro" ? texto(resultado.erro || erroDiscord).slice(0, 500) : ""
+    erro: status === "erro" ? texto(resultado.erro || erroDiscord).slice(0, 500) : "",
+    efeitoExternoPossivel: status === "erro" && resultado.efeitoExternoPossivel === true
   };
 
   if (tipoSanitizado === "discord") {
@@ -298,6 +299,11 @@ function salvarListaCliente(clienteId = "admin", lista = [], deps = {}) {
 }
 
 function listarOfertasManuaisV2(clienteId = "admin", deps = {}) {
+  return lerListaCliente(clienteId, deps)
+    .filter((oferta) => oferta?.persistenciaManualV2?.visibilidade !== "tecnica");
+}
+
+function listarOfertasManuaisV2IncluindoTecnicas(clienteId = "admin", deps = {}) {
   return lerListaCliente(clienteId, deps);
 }
 
@@ -333,7 +339,7 @@ function buscarOfertaManualV2(clienteId = "admin", ofertaId = "", deps = {}) {
   const id = String(ofertaId || "").trim();
   if (!id) return null;
 
-  return listarOfertasManuaisV2(clienteId, deps)
+  return lerListaCliente(clienteId, deps)
     .find((oferta) => String(oferta.id || "") === id) || null;
 }
 
@@ -396,6 +402,52 @@ function criarOfertaManualV2Idempotente(clienteId = "admin", entrada = {}, idemp
   oferta.clienteId = id;
   oferta.criadoEm = oferta.criadoEm || agora;
   oferta.atualizadoEm = agora;
+  oferta.idempotencia = {
+    ...(oferta.idempotencia && typeof oferta.idempotencia === "object" ? oferta.idempotencia : {}),
+    salvar: { hash: chave, fingerprint, criadoEm: agora }
+  };
+  salvarListaCliente(id, [oferta, ...lista], deps);
+  return { oferta, idempotencyReplayed: false };
+}
+
+function criarOfertaTecnicaEnvioManualV2Idempotente(clienteId = "admin", entrada = {}, idempotencyHash = "", deps = {}) {
+  const storage = resolverDepsStorage(deps);
+  const id = storage.normalizarClienteId(clienteId || "admin");
+  const chave = hashIdempotencia(idempotencyHash);
+  if (!chave) {
+    const erro = new Error("idempotency_key_obrigatoria");
+    erro.codigo = "idempotency_key_obrigatoria";
+    erro.statusCode = 400;
+    throw erro;
+  }
+  const lista = lerListaCliente(id, deps);
+  const fingerprint = fingerprintPayloadComercialManualV2(entrada);
+  const existente = lista.find((oferta) =>
+    oferta?.persistenciaManualV2?.visibilidade === "tecnica" &&
+    hashIdempotencia(oferta?.idempotencia?.salvar?.hash) === chave
+  );
+  if (existente) {
+    const fingerprintExistente = texto(existente?.idempotencia?.salvar?.fingerprint);
+    if (!fingerprintExistente || fingerprintExistente !== fingerprint) {
+      return { oferta: existente, idempotencyConflict: true, idempotencyReplayed: false };
+    }
+    return { oferta: existente, idempotencyReplayed: true };
+  }
+
+  const agora = storage.now();
+  const oferta = normalizarOfertaManualV2(
+    { ...entrada, status: STATUS_INICIAL_MANUAL_V2 },
+    { clienteId: id, now: agora, idFactory: storage.idFactory }
+  );
+  oferta.status = STATUS_INICIAL_MANUAL_V2;
+  oferta.clienteId = id;
+  oferta.criadoEm = oferta.criadoEm || agora;
+  oferta.atualizadoEm = agora;
+  oferta.persistenciaManualV2 = {
+    visibilidade: "tecnica",
+    finalidade: "enviar_agora",
+    criadoEm: agora
+  };
   oferta.idempotencia = {
     ...(oferta.idempotencia && typeof oferta.idempotencia === "object" ? oferta.idempotencia : {}),
     salvar: { hash: chave, fingerprint, criadoEm: agora }
@@ -525,7 +577,8 @@ function marcarFalhaConfirmadaEnvioManualV2Idempotente(clienteId = "admin", ofer
   if (index < 0) return null;
   const existente = lista[index];
   const envio = existente?.idempotencia?.enviar || {};
-  if (texto(envio.attemptId) !== alvoAttemptId || estadoEnvioIdempotente(envio.estado) !== "solicitado") return null;
+  if (texto(envio.attemptId) !== alvoAttemptId ||
+      !["solicitado", "processando"].includes(estadoEnvioIdempotente(envio.estado))) return null;
   const agora = storage.now();
   const proximaOferta = {
     ...existente,
@@ -856,11 +909,13 @@ module.exports = {
   ARQUIVO_CONFIG_MANUAL_V2,
   normalizarConfigManualV2,
   listarOfertasManuaisV2,
+  listarOfertasManuaisV2IncluindoTecnicas,
   lerConfigManualV2,
   salvarConfigManualV2,
   buscarOfertaManualV2,
   criarOfertaManualV2,
   criarOfertaManualV2Idempotente,
+  criarOfertaTecnicaEnvioManualV2Idempotente,
   fingerprintPayloadComercialManualV2,
   reservarEnvioManualV2Idempotente,
   iniciarProcessamentoEnvioManualV2Idempotente,

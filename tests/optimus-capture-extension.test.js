@@ -764,7 +764,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(apiFonte.includes("function listarDestinosManualV2"));
     assert.ok(apiFonte.includes('requestJson(`/manual-v2/destinos?_=${Date.now()}`'));
     assert.ok(apiFonte.includes("function enviarAgoraManualV2"));
-    assert.ok(apiFonte.includes('body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }'));
+    assert.ok(apiFonte.includes('requestJson("/manual-v2/ofertas/enviar-agora"'));
+    assert.ok(apiFonte.includes('body: { oferta: oferta && typeof oferta === "object" ? oferta : {}'));
     assert.ok(!apiFonte.includes("clienteId"));
     assert.ok(manifestFonte.includes("https://shopee.com.br/*"));
     assert.ok(manifestFonte.includes("adapters/shopee.js"));
@@ -2116,10 +2117,10 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             ]
           };
         },
-        async enviarAgoraManualV2(token, ofertaId, destinosIds) {
+        async enviarAgoraManualV2(token, oferta, destinosIds) {
           assert.strictEqual(token, "jwt_teste");
           envios += 1;
-          enviosPayloads.push({ ofertaId, destinosIds });
+          enviosPayloads.push({ oferta, destinosIds });
           if (envioPendente) {
             await new Promise((resolve) => {
               liberarEnvioPendente = resolve;
@@ -2206,7 +2207,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
     await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(envios, 1);
-    assert.strictEqual(enviosPayloads[0].ofertaId, "manual_salvo_1");
+    assert.strictEqual(enviosPayloads[0].oferta.titulo, "Produto A");
     assert.deepStrictEqual(Array.from(enviosPayloads[0].destinosIds), ["wa_ok", "tg_ok"]);
     assert.strictEqual(saves, 1, "oferta ja salva deve reutilizar ofertaSalvaId");
     assert.strictEqual(previews, 1, "enviar nao deve chamar preview/capture novamente");
@@ -2251,11 +2252,11 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     liberarEnvioPendente();
     await Promise.all([primeiroEnvio, segundoEnvio]);
     assert.strictEqual(envios, 2);
-    assert.strictEqual(saves, 2, "preview nao salvo deve ser salvo uma unica vez antes do envio");
-    assert.strictEqual(enviosPayloads[1].ofertaId, "manual_salvo_2");
+    assert.strictEqual(saves, 1, "Enviar agora nao pode persistir oferta nao salva");
+    assert.strictEqual(enviosPayloads[1].oferta.titulo, "Produto B");
     assert.deepStrictEqual(Array.from(enviosPayloads[1].destinosIds), ["wa_ok"]);
-    assert.strictEqual(ofertasSalvas[1].urlAfiliada, "https://meli.la/teste");
-    assert.ok(!("clienteId" in ofertasSalvas[1]));
+    assert.strictEqual(enviosPayloads[1].oferta.urlAfiliada, "https://meli.la/teste");
+    assert.ok(!("clienteId" in enviosPayloads[1].oferta));
 
     urlAtual = "https://produto.mercadolivre.com.br/MLB-333-produto-c-_JM";
     produtoAtual = {
@@ -2272,14 +2273,14 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     falharSave = true;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 3);
+    assert.strictEqual(saves, 2);
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel salvar. Tente novamente.");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(envios, 2, "falha no save nao deve chamar enviar-agora");
     falharSave = false;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 4);
-    assert.strictEqual(ofertasSalvas[3].precoAtual, 89.9);
+    assert.strictEqual(saves, 3);
+    assert.strictEqual(ofertasSalvas[2].precoAtual, 89.9);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
 
     urlAtual = "https://produto.mercadolivre.com.br/MLB-333-conflito-_JM";
@@ -2308,15 +2309,15 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("destinosLista").children[0].children[0].checked = true;
     elemento("destinosLista").children[0].children[0].listeners.change();
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 6);
+    assert.strictEqual(saves, 4, "Enviar agora com falha nao deve salvar oferta");
     assert.strictEqual(envios, 3);
-    assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_6");
+    assert.strictEqual(enviosPayloads[2].oferta.titulo, "Produto D");
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel enviar: envio_temporario");
     falharEnvio = false;
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 6, "falha no envio preserva ID salvo para retry seguro");
+    assert.strictEqual(saves, 4, "falha no envio preserva a separacao entre enviar e salvar");
     assert.strictEqual(envios, 4);
-    assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_6");
+    assert.strictEqual(enviosPayloads[3].oferta.titulo, "Produto D");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
   }
 
@@ -2786,8 +2787,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             ]
           };
         },
-        async enviarAgoraManualV2(_token, ofertaId, destinosIds) {
-          envios.push({ ofertaId, destinosIds: Array.from(destinosIds || []) });
+        async enviarAgoraManualV2(_token, oferta, destinosIds) {
+          envios.push({ oferta, destinosIds: Array.from(destinosIds || []) });
           return { envio: { enviados: 1, erros: 0 } };
         }
       },

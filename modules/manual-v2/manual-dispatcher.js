@@ -153,14 +153,16 @@ function resolverTelegramDestino(destino = {}, telegrams = []) {
   ) || null;
 }
 
-function resultadoErro({ destinoId = "", nome = "", tipo = "", erro = "", enviadoEm = "" } = {}) {
+function resultadoErro({ destinoId = "", nome = "", tipo = "", erro = "", enviadoEm = "",
+  efeitoExternoPossivel = false } = {}) {
   return {
     destinoId,
     nome,
     tipo,
     status: "erro",
     enviadoEm,
-    erro: texto(erro) || "Erro ao enviar"
+    erro: texto(erro) || "Erro ao enviar",
+    efeitoExternoPossivel: efeitoExternoPossivel === true
   };
 }
 
@@ -449,7 +451,7 @@ function destinosPorClienteAtual(deps = {}) {
   return deps.destinosPorCliente || {};
 }
 
-async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destinosIds = [] } = {}, deps = {}) {
+async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destinosIds = [], attemptId = "" } = {}, deps = {}) {
   const cliente = texto(clienteId) || "admin";
   const idOferta = texto(ofertaId);
   const idsSolicitados = lista(destinosIds).map(texto).filter(Boolean);
@@ -584,16 +586,8 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       continue;
     }
 
-    if (!usuarioTemCreditos(cliente, 1)) {
-      retorno.erros += 1;
-      retorno.resultados.push(resultadoErro({
-        ...destinoBase,
-        erro: "Sem creditos"
-      }));
-      continue;
-    }
-
     let claimPar = null;
+    let reservaCredito = null;
     let transporteIniciado = false;
     try {
       if (deps.coordenadorEnvioProdutoDestino?.adquirir) {
@@ -638,7 +632,35 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       const tipo = tipoDestino(destino);
       let detalhesEnvio = {};
       if (!["telegram", "whatsapp", "discord"].includes(tipo)) throw new Error("Canal indisponivel");
-      const marcarTransporteIniciado = () => { transporteIniciado = true; };
+      const operacaoCreditoId = texto(attemptId) ||
+        texto(oferta?.idempotencia?.enviar?.attemptId) ||
+        texto(oferta?.agendamentoLockId) || texto(oferta.id || idOferta);
+      if (typeof deps.reservarCreditoEnvio === "function") {
+        reservaCredito = await deps.reservarCreditoEnvio({
+          clienteId: cliente,
+          ofertaId: oferta.id || idOferta,
+          destinoId: destinoIdSolicitado,
+          operationId: `${operacaoCreditoId}:${destinoIdSolicitado}`,
+          quantidade: 1
+        });
+        if (reservaCredito?.ok !== true) {
+          retorno.erros += 1;
+          retorno.resultados.push(resultadoErro({ ...destinoBase, erro: "Sem creditos" }));
+          continue;
+        }
+      } else if (!await usuarioTemCreditos(cliente, 1)) {
+        retorno.erros += 1;
+        retorno.resultados.push(resultadoErro({ ...destinoBase, erro: "Sem creditos" }));
+        continue;
+      }
+      const marcarTransporteIniciado = () => {
+        transporteIniciado = true;
+        if (typeof deps.onTransporteIniciado === "function") deps.onTransporteIniciado({
+          clienteId: cliente,
+          ofertaId: oferta.id || idOferta,
+          destinoId: destinoIdSolicitado
+        });
+      };
       if (tipo === "telegram") {
         await enviarTelegramManual({ destino, oferta: ofertaParaMensagem, mensagem, deps, clienteId: cliente,
           onTransporteIniciado: marcarTransporteIniciado });
@@ -665,7 +687,9 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
       // O fato do transporte e duravel antes do bookkeeping. Falha no debito
       // nao reclassifica uma entrega confirmada como tentativa nao enviada.
       try {
-        const debitou = await debitarCreditos(cliente, 1);
+        const debitou = typeof deps.confirmarCreditoEnvio === "function"
+          ? (await deps.confirmarCreditoEnvio(reservaCredito))?.ok === true
+          : await debitarCreditos(cliente, 1);
         if (debitou) {
           retorno.creditosDebitados += 1;
           if (claimPar?.resultado === "adquirido") {
@@ -681,13 +705,18 @@ async function enviarOfertaManualV2({ clienteId = "admin", ofertaId = "", destin
         sucesso.erroBookkeeping = "falha_ao_registrar_creditos";
       }
     } catch (e) {
+      if (!transporteIniciado && reservaCredito?.ok === true &&
+          typeof deps.liberarCreditoEnvio === "function") {
+        try { await deps.liberarCreditoEnvio(reservaCredito); } catch {}
+      }
       if (!transporteIniciado && claimPar?.reservaToken) {
         try { await deps.coordenadorEnvioProdutoDestino.descartarSemTransporte(claimPar); } catch {}
       }
       retorno.erros += 1;
       retorno.resultados.push(resultadoErro({
         ...destinoBase,
-        erro: e.message || "Falha no envio"
+        erro: e.message || "Falha no envio",
+        efeitoExternoPossivel: transporteIniciado
       }));
     } finally {
       if (claimPar?.resultado === "adquirido" && deps.coordenadorEnvioProdutoDestino?.finalizar) {

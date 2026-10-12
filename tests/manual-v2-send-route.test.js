@@ -184,7 +184,13 @@ function criarOferta(clienteId, id, extra = {}) {
   });
   const dispatcher = async (entrada, deps) => {
     chamadas.push({ entrada, deps });
-    assert.deepStrictEqual(Object.keys(entrada).sort(), ["clienteId", "destinosIds", "ofertaId"].sort());
+    assert.deepStrictEqual(
+      Object.keys(entrada).filter((chave) => chave !== "attemptId").sort(),
+      ["clienteId", "destinosIds", "ofertaId"].sort()
+    );
+    if (modo === "throw_pre_provider") {
+      throw new Error("falha_pre_provider_fixture");
+    }
     if (modo === "falha") {
       return {
         ok: false,
@@ -199,8 +205,21 @@ function criarOferta(clienteId, id, extra = {}) {
           status: "erro",
           enviadoEm: "",
           erro: "falha_mock",
+          efeitoExternoPossivel: true,
           botToken: "NAO_SAIR"
         }]
+      };
+    }
+    if (modo === "sem_creditos") {
+      return {
+        ok: false,
+        ofertaId: entrada.ofertaId,
+        enviados: 0,
+        erros: 1,
+        creditosDebitados: 0,
+        resultados: [{ destinoId: entrada.destinosIds[0], nome: "WA Ofertas",
+          tipo: "whatsapp", status: "erro", enviadoEm: "", erro: "Sem creditos",
+          efeitoExternoPossivel: false }]
       };
     }
     if (modo === "parcial") {
@@ -418,6 +437,58 @@ function criarOferta(clienteId, id, extra = {}) {
     }
 
     {
+      modo = "sucesso";
+      const visiveisAntes = storage.listarOfertasManuaisV2("cliente_a", storageOptions).length;
+      const resposta = await request(server, "POST", "/manual-v2/ofertas/enviar-agora", "cliente_a", {
+        oferta: { marketplace: "mercadolivre", titulo: "Envio direto sem salvar",
+          urlOriginal: "https://produto.mercadolivre.com.br/MLB-123", precoAtual: 99.9 },
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": "d".repeat(64) });
+      assert.strictEqual(resposta.status, 200);
+      assert.strictEqual(resposta.body.envio.enviados, 1);
+      assert.strictEqual(storage.listarOfertasManuaisV2("cliente_a", storageOptions).length, visiveisAntes,
+        "Enviar agora nao pode criar card visivel em Ofertas");
+      const tecnicas = storage.listarOfertasManuaisV2IncluindoTecnicas("cliente_a", storageOptions)
+        .filter((oferta) => oferta.persistenciaManualV2?.visibilidade === "tecnica");
+      assert.strictEqual(tecnicas.length, 1);
+      assert.strictEqual(tecnicas[0].status, "enviada");
+      assert.strictEqual(tecnicas[0].envioManual.enviados, 1, "fato de envio permanece duravel");
+    }
+
+    {
+      modo = "sem_creditos";
+      const visiveisAntes = storage.listarOfertasManuaisV2("cliente_a", storageOptions).length;
+      const resposta = await request(server, "POST", "/manual-v2/ofertas/enviar-agora", "cliente_a", {
+        oferta: { marketplace: "mercadolivre", titulo: "Sem credito sem salvar",
+          urlOriginal: "https://produto.mercadolivre.com.br/MLB-124", precoAtual: 79.9 },
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": "e".repeat(64) });
+      assert.strictEqual(resposta.status, 400);
+      assert.strictEqual(resposta.body.erro, "manual_v2_envio_falha_confirmada");
+      assert.strictEqual(resposta.body.reconciliacaoNecessaria, false);
+      assert.strictEqual(storage.listarOfertasManuaisV2("cliente_a", storageOptions).length, visiveisAntes);
+      const tecnica = storage.listarOfertasManuaisV2IncluindoTecnicas("cliente_a", storageOptions)
+        .find((oferta) => oferta.titulo === "Sem credito sem salvar");
+      assert.strictEqual(tecnica.idempotencia.enviar.estado, "falha_confirmada");
+    }
+
+    {
+      modo = "throw_pre_provider";
+      const oferta = criarOferta("cliente_a", "oferta_falha_pre_provider");
+      const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
+        destinosIds: ["wa_ok"]
+      }, { "Idempotency-Key": "1".repeat(64) });
+      assert.strictEqual(resposta.status, 500);
+      assert.strictEqual(resposta.body.erro, "manual_v2_envio_falha_confirmada");
+      assert.strictEqual(resposta.body.motivo, "falha_pre_provider_fixture");
+      assert.strictEqual(resposta.body.reconciliacaoNecessaria, false);
+      const persistida = storage.buscarOfertaManualV2("cliente_a", oferta.id);
+      assert.strictEqual(persistida.status, "erro");
+      assert.strictEqual(persistida.idempotencia.enviar.estado, "falha_confirmada");
+      assert.strictEqual(persistida.envioManual.resultados[0].erro, "falha_pre_provider_fixture");
+    }
+
+    {
       modo = "discord_sucesso";
       const oferta = criarOferta("cliente_a", "oferta_discord_sucesso");
       const resposta = await request(server, "POST", `/manual-v2/ofertas/${oferta.id}/enviar-agora`, "cliente_a", {
@@ -611,7 +682,9 @@ function criarOferta(clienteId, id, extra = {}) {
         const respostaShopeeSemIntegracao = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaShopeeSemIntegracao.id}/enviar-agora`, "cliente_a", {
           destinosIds: ["wa_ok"]
         });
-        assert.strictEqual(respostaShopeeSemIntegracao.status, 409);
+        assert.strictEqual(respostaShopeeSemIntegracao.status, 400);
+        assert.strictEqual(respostaShopeeSemIntegracao.body.erro, "manual_v2_envio_falha_confirmada");
+        assert.strictEqual(respostaShopeeSemIntegracao.body.reconciliacaoNecessaria, false);
         assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.motivoGlobal, "afiliacao_workspace_incompleta");
         assert.deepStrictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.resultados, []);
         assert.strictEqual(respostaShopeeSemIntegracao.body.oferta.envioManual.erroResumo, "Motivo: afiliacao_workspace_incompleta");
@@ -655,7 +728,9 @@ function criarOferta(clienteId, id, extra = {}) {
         const respostaAliSemIntegracao = await request(serverReal, "POST", `/manual-v2/ofertas/${ofertaAliSemIntegracao.id}/enviar-agora`, "cliente_a", {
           destinosIds: ["wa_ok"]
         });
-        assert.strictEqual(respostaAliSemIntegracao.status, 409);
+        assert.strictEqual(respostaAliSemIntegracao.status, 400);
+        assert.strictEqual(respostaAliSemIntegracao.body.erro, "manual_v2_envio_falha_confirmada");
+        assert.strictEqual(respostaAliSemIntegracao.body.reconciliacaoNecessaria, false);
         assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.motivoGlobal, "afiliacao_workspace_incompleta");
         assert.deepStrictEqual(respostaAliSemIntegracao.body.oferta.envioManual.resultados, []);
         assert.strictEqual(respostaAliSemIntegracao.body.oferta.envioManual.erroResumo, "Motivo: afiliacao_workspace_incompleta");
