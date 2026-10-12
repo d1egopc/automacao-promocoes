@@ -10,7 +10,32 @@ const { holdForTargetTx, settleConfirmedTx, releaseForTargetTx } =
 const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
 
 const RECOVERY_BATCH = 20;
+const EXPIRED_RETIRE_BATCH = 100;
 const CHANNELS = new Set(["whatsapp", "telegram", "discord"]);
+
+function expiryExpression(alias = "i") {
+  return `COALESCE(NULLIF(${alias}.item_payload->>'expiraEm', ''),
+    NULLIF(${alias}.item_payload->'metadata'->'flowOperacional'->>'expiraEm', ''))`;
+}
+
+function freshItemPredicate(alias = "i") {
+  const expiry = expiryExpression(alias);
+  return `(CASE
+    WHEN NULLIF(${expiry}, '') IS NULL THEN TRUE
+    WHEN NULLIF(${expiry}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      THEN NULLIF(${expiry}, '')::timestamptz > clock_timestamp()
+    ELSE TRUE
+  END)`;
+}
+
+function expiredItemPredicate(alias = "i") {
+  const expiry = expiryExpression(alias);
+  return `(CASE
+    WHEN NULLIF(${expiry}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+      THEN NULLIF(${expiry}, '')::timestamptz <= clock_timestamp()
+    ELSE FALSE
+  END)`;
+}
 
 function validarDestinos(destinations) {
   if (!Array.isArray(destinations)) throw new Error("queue_destinations_required");
@@ -365,6 +390,7 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
       WHERE d.operation_epoch_started_at=$1 AND d.workspace_id=$2
         AND d.status='pending' AND d.available_at<=clock_timestamp()
         AND i.terminal_at IS NULL
+        AND ${freshItemPredicate("i")}
         AND NOT EXISTS (SELECT 1 FROM engine_universal_queue_destinations active
           WHERE active.operation_epoch_started_at=d.operation_epoch_started_at
             AND active.workspace_id=d.workspace_id
@@ -392,6 +418,84 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
     }
     throw error;
   }
+}
+
+async function retireExpiredDestinations({ pool, workspaceId,
+  limit = EXPIRED_RETIRE_BATCH }) {
+  const workspace = String(workspaceId || "").trim();
+  if (!workspace) throw new Error("queue_workspace_required");
+  const batch = Math.max(1, Math.min(EXPIRED_RETIRE_BATCH,
+    Math.floor(Number(limit) || EXPIRED_RETIRE_BATCH)));
+  return transaction(pool, async client => {
+    const state = await activeEpoch(client);
+    const epoch = state.operationEpochStartedAt;
+    const expired = (await client.query(`SELECT d.id,d.queue_item_id,d.workspace_id
+      FROM engine_universal_queue_destinations d
+      JOIN engine_universal_queue_items i ON i.id=d.queue_item_id
+      WHERE d.operation_epoch_started_at=$1 AND d.workspace_id=$2
+        AND d.status='pending' AND i.terminal_at IS NULL
+        AND ${expiredItemPredicate("i")}
+      ORDER BY d.available_at,d.id
+      LIMIT $3 FOR UPDATE OF d SKIP LOCKED`,
+    [epoch, workspace, batch])).rows;
+    if (!expired.length) return { ok: true, retired: 0,
+      operationEpochStartedAt: epoch };
+    const ids = expired.map(row => row.id);
+    const aggregate = (await client.query(`WITH retired AS (
+        UPDATE engine_universal_queue_destinations
+        SET status='skipped',terminal_reason='commercially_expired_before_claim',
+            terminal_status='not_sent',terminal_evidence='commercial_expiry_filter',
+            resolved_at=clock_timestamp(),resolution_source='universal_expiry_cleanup',
+            revision=revision+1,updated_at=clock_timestamp()
+        WHERE id=ANY($1::bigint[]) AND status='pending'
+        RETURNING id,queue_item_id
+      ), affected AS (
+        SELECT DISTINCT queue_item_id FROM retired
+      ), effective_destinations AS (
+        SELECT d.queue_item_id,
+          CASE WHEN r.id IS NOT NULL THEN 'skipped' ELSE d.status END AS status
+        FROM engine_universal_queue_destinations d
+        JOIN affected a ON a.queue_item_id=d.queue_item_id
+        LEFT JOIN retired r ON r.id=d.id
+      ), summary AS (
+        SELECT d.queue_item_id,
+          COUNT(*) FILTER (WHERE d.status='sent')::int AS sent,
+          COUNT(*) FILTER (WHERE d.status IN
+            ('pending','claimed','send_started','ambiguous'))::int AS open,
+          COUNT(*) FILTER (WHERE d.status='failed')::int AS failed,
+          COUNT(*)::int AS total
+        FROM effective_destinations d
+        GROUP BY d.queue_item_id
+      ), classified AS (
+        SELECT queue_item_id,
+          CASE
+            WHEN open > 0 THEN CASE WHEN sent > 0 THEN 'partial' ELSE 'pending' END
+            WHEN sent = total THEN 'sent'
+            WHEN sent > 0 THEN 'partial'
+            WHEN failed > 0 THEN 'error'
+            ELSE 'not_sent'
+          END AS next_status,
+          (open = 0) AS terminal
+        FROM summary
+      ), updated_items AS (
+        UPDATE engine_universal_queue_items i
+        SET status=c.next_status,
+            terminal_at=CASE WHEN c.terminal
+              THEN COALESCE(i.terminal_at,clock_timestamp()) ELSE NULL END,
+            revision=i.revision+1,updated_at=clock_timestamp()
+        FROM classified c WHERE i.id=c.queue_item_id
+        RETURNING i.id
+      )
+      SELECT (SELECT COUNT(*)::int FROM retired) AS retired,
+        (SELECT COUNT(*)::int FROM updated_items) AS items_updated`, [ids])).rows[0];
+    await client.query(`UPDATE engine_universal_queue_workspace_state
+      SET revision=revision+1,checkpoint_revision=revision+1,
+          updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+    [epoch, workspace]);
+    return { ok: true, retired: Number(aggregate.retired || 0),
+      operationEpochStartedAt: epoch };
+  });
 }
 
 async function markSendStarted({ pool, destinationId, leaseToken,
@@ -851,6 +955,7 @@ async function cleanupVitrineProjections({ pool, limit = 20 }) {
 }
 
 module.exports = { enqueue, preflightWorkspace, claimDestination,
+  retireExpiredDestinations,
   markSendStarted, releaseUnstarted, readDestinationClock,
   readDestinationDailyUsage, countConfirmedToday, confirmSend,
   confirmFailure, discardAmbiguousWithoutReplay, completeWithoutSend,

@@ -20,6 +20,10 @@ function criarExecutorFilaUniversal({ pool, prepare, dispatch, checkWorkspace,
       if (current?.ok !== true) return { ok: false,
         reason: current?.reason || "workspace_not_operational" };
     }
+    if (typeof repository.retireExpiredDestinations === "function") {
+      await repository.retireExpiredDestinations({ pool,
+        workspaceId: workspace });
+    }
     const preflight = await repository.preflightWorkspace({ pool,
       workspaceId: workspace });
     if (preflight.ok !== true) return { ok: false,
