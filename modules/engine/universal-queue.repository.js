@@ -318,6 +318,9 @@ async function preflightWorkspace({ pool, workspaceId }) {
         AND ((status='claimed' AND lease_until<clock_timestamp()) OR
              (status='send_started' AND lease_until<clock_timestamp()))
       LIMIT 1`, [epoch, workspace])).rowCount > 0;
+    // An ambiguous target is quarantined at destination level. It remains
+    // eligible for ACK reconciliation, but it must not close unrelated
+    // destinations in the same workspace.
     const health = ambiguous ? "AMBIGUOUS" : moreDue ? "RECOVERING" : "HEALTHY";
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET health=$3,revision=revision+$4,
@@ -325,8 +328,10 @@ async function preflightWorkspace({ pool, workspaceId }) {
           updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
     [epoch, workspace, health, uncertain + reset]);
-    return { ok: health === "HEALTHY", health, workspaceId: workspace,
-      recoveredClaims: reset, recoveredAcks, ambiguousSends: uncertain };
+    return { ok: health === "HEALTHY" || health === "AMBIGUOUS", health,
+      claimAllowed: health === "HEALTHY" || health === "AMBIGUOUS",
+      workspaceId: workspace, recoveredClaims: reset, recoveredAcks,
+      ambiguousSends: uncertain };
   });
 }
 
@@ -341,15 +346,14 @@ async function claimDestination({ pool, workspaceId, leaseMs = 30000 }) {
       FROM engine_universal_queue_workspace_state
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
     [epoch, workspace])).rows[0];
-    if (!health || health.health !== "HEALTHY" ||
+    if (!health || !["HEALTHY", "AMBIGUOUS"].includes(health.health) ||
         Number(health.revision) !== Number(health.checkpoint_revision)) {
       return { ok: false, reason: "workspace_preflight_required" };
     }
     const unsafe = (await client.query(`SELECT 1
       FROM engine_universal_queue_destinations
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND
-        (status='ambiguous' OR
-         (status IN ('claimed','send_started') AND lease_until<clock_timestamp()))
+        (status IN ('claimed','send_started') AND lease_until<clock_timestamp())
       LIMIT 1`, [epoch, workspace])).rowCount > 0;
     if (unsafe) return { ok: false, reason: "workspace_recovery_required" };
     const target = (await client.query(`SELECT d.id,d.workspace_id,d.queue_item_id,d.destination_id,
@@ -411,7 +415,7 @@ async function markSendStarted({ pool, destinationId, leaseToken,
       FROM engine_universal_queue_workspace_state
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
     [state.operationEpochStartedAt, candidate.workspace_id])).rows[0];
-    if (!health || health.health !== "HEALTHY" ||
+    if (!health || !["HEALTHY", "AMBIGUOUS"].includes(health.health) ||
         Number(health.revision) !== Number(health.checkpoint_revision)) {
       return { ok: false, reason: "workspace_preflight_required" };
     }
@@ -625,6 +629,86 @@ async function confirmFailure({ pool, destinationId, leaseToken,
   });
 }
 
+// Explicit operator/reconciler resolution for a post-transport uncertainty.
+// This is deliberately separate from confirmFailure: no ACK is invented,
+// no provider call is made, and the target can never become claimable again.
+async function discardAmbiguousWithoutReplay({ pool, workspaceId,
+  destinationId, terminalReason = "discard_without_replay",
+  evidence = "external_effect_indeterminate",
+  resolutionSource = "manual_reconciliation" }) {
+  const workspace = String(workspaceId || "").trim();
+  const reason = String(terminalReason || "").trim();
+  const fact = String(evidence || "").trim();
+  const source = String(resolutionSource || "").trim();
+  if (!workspace || !destinationId || !reason || !fact || !source) {
+    throw new Error("ambiguous_discard_identity_required");
+  }
+  return transaction(pool, async client => {
+    const state = await activeEpoch(client);
+    const epoch = state.operationEpochStartedAt;
+    const identity = (await client.query(`SELECT workspace_id
+      FROM engine_universal_queue_destinations
+      WHERE id=$1 AND operation_epoch_started_at=$2`,
+    [destinationId, epoch])).rows[0];
+    if (!identity || identity.workspace_id !== workspace) {
+      throw new Error("ambiguous_discard_identity_conflict");
+    }
+    await client.query(`SELECT 1 FROM engine_universal_queue_workspace_state
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
+    [epoch, workspace]);
+    const destination = (await client.query(`SELECT id,queue_item_id,status,
+        workspace_id,destination_id,target_key,channel,terminal_reason,
+        terminal_status,terminal_evidence,resolved_at,resolution_source
+      FROM engine_universal_queue_destinations
+      WHERE id=$1 AND operation_epoch_started_at=$2 FOR UPDATE`,
+    [destinationId, epoch])).rows[0];
+    if (!destination) throw new Error("ambiguous_discard_identity_conflict");
+    if (destination.status === "discarded_without_replay") {
+      if (destination.terminal_reason !== reason ||
+          destination.terminal_evidence !== fact ||
+          destination.resolution_source !== source) {
+        throw new Error("ambiguous_discard_fact_conflict");
+      }
+      return { ok: true, duplicate: true,
+        itemStatus: null, terminal: true };
+    }
+    if (destination.status !== "ambiguous") {
+      throw new Error("ambiguous_discard_boundary_unproven");
+    }
+    // If the durable executor checkpoint has appeared, reconciliation must win
+    // over discard; this operation is never allowed to hide a factual ACK.
+    const ack = await factualAckTx(client, destination);
+    if (ack) throw new Error("ambiguous_discard_ack_exists");
+    await releaseForTargetTx(client, { epoch, workspaceId: workspace,
+      targetId: destinationId });
+    await client.query(`UPDATE engine_universal_queue_destinations
+      SET status='discarded_without_replay',lease_token=NULL,lease_until=NULL,
+          terminal_status='discarded_without_replay',terminal_reason=$2,
+          terminal_evidence=$3,resolved_at=clock_timestamp(),
+          resolution_source=$4,revision=revision+1,updated_at=clock_timestamp()
+      WHERE id=$1 AND status='ambiguous'`,
+    [destinationId, reason, fact, source]);
+    const states = (await client.query(`SELECT status
+      FROM engine_universal_queue_destinations
+      WHERE queue_item_id=$1 AND operation_epoch_started_at=$2
+        AND workspace_id=$3`, [destination.queue_item_id, epoch, workspace])).rows;
+    const summary = classificarFilaUniversal(states);
+    await client.query(`UPDATE engine_universal_queue_items
+      SET status=$2,terminal_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,
+          revision=revision+1,updated_at=clock_timestamp()
+      WHERE id=$1 AND operation_epoch_started_at=$4 AND workspace_id=$5`,
+    [destination.queue_item_id, summary.status, summary.terminal, epoch, workspace]);
+    await client.query(`UPDATE engine_universal_queue_workspace_state
+      SET health='UNKNOWN',revision=revision+1,checkpoint_revision=revision+1,
+          updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+    [epoch, workspace]);
+    return { ok: true, duplicate: false, itemStatus: summary.status,
+      terminal: summary.terminal, terminalStatus: "discarded_without_replay",
+      resolutionSource: source };
+  });
+}
+
 async function completeWithoutSend({ pool, destinationId, leaseToken,
   reason }) {
   const terminalReason = String(reason || "").trim();
@@ -769,7 +853,8 @@ async function cleanupVitrineProjections({ pool, limit = 20 }) {
 module.exports = { enqueue, preflightWorkspace, claimDestination,
   markSendStarted, releaseUnstarted, readDestinationClock,
   readDestinationDailyUsage, countConfirmedToday, confirmSend,
-  confirmFailure, completeWithoutSend, claimVitrineProjection,
+  confirmFailure, discardAmbiguousWithoutReplay, completeWithoutSend,
+  claimVitrineProjection,
   finishVitrineProjection, cleanupVitrineProjections,
   validarDestinos, factualAckTx, confirmFactualSendTx,
   checkpointKeys };

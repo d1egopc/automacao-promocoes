@@ -5,11 +5,12 @@
 function classificarFilaUniversal(destinations = []) {
   if (!Array.isArray(destinations)) throw new Error("queue_destinations_required");
   if (destinations.length === 0) return { status: "no_opportunity", terminal: true };
-  const counts = { sent: 0, skipped: 0, failed: 0, open: 0 };
+  const counts = { sent: 0, skipped: 0, discarded: 0, failed: 0, open: 0 };
   for (const destination of destinations) {
     const status = typeof destination === "string" ? destination : destination?.status;
     if (status === "sent") counts.sent += 1;
     else if (status === "skipped") counts.skipped += 1;
+    else if (status === "discarded_without_replay") counts.discarded += 1;
     else if (status === "failed") counts.failed += 1;
     else if (["pending", "claimed", "send_started", "ambiguous"].includes(status)) counts.open += 1;
     else throw new Error("queue_destination_state_unknown");

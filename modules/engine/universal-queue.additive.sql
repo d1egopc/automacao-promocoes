@@ -70,8 +70,10 @@ CREATE TABLE IF NOT EXISTS engine_universal_queue_destinations (
   target_key text NOT NULL CHECK (btrim(target_key) <> ''),
   connection_id text,
   channel text NOT NULL CHECK (channel IN ('whatsapp','telegram','discord')),
-  status text NOT NULL DEFAULT 'pending' CHECK (status IN
-    ('pending','claimed','send_started','sent','skipped','failed','ambiguous')),
+  status text NOT NULL DEFAULT 'pending' CONSTRAINT engine_uq_destination_status_check
+    CHECK (status IN
+    ('pending','claimed','send_started','sent','skipped','failed','ambiguous',
+     'discarded_without_replay')),
   available_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   lease_token uuid,
   lease_until timestamptz,
@@ -82,6 +84,10 @@ CREATE TABLE IF NOT EXISTS engine_universal_queue_destinations (
   commercial_cta jsonb,
   credit_debited boolean,
   terminal_reason text,
+  terminal_status text,
+  terminal_evidence text,
+  resolved_at timestamptz,
+  resolution_source text,
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -98,7 +104,15 @@ CREATE TABLE IF NOT EXISTS engine_universal_queue_destinations (
     (confirmed_at IS NOT NULL AND confirmation_key IS NOT NULL
       AND btrim(confirmation_key) <> '' AND credit_debited IS NOT NULL)),
   CHECK (status NOT IN ('claimed','send_started') OR
-    (lease_token IS NOT NULL AND lease_until IS NOT NULL))
+    (lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+  CHECK (status <> 'discarded_without_replay' OR
+    (terminal_status='discarded_without_replay' AND
+     btrim(COALESCE(terminal_reason,''))<>'' AND
+     btrim(COALESCE(terminal_evidence,''))<>'' AND
+     resolved_at IS NOT NULL AND
+     btrim(COALESCE(resolution_source,''))<>'' AND
+     provider_message_id IS NULL AND confirmed_at IS NULL AND
+     credit_debited IS NOT TRUE))
 );
 
 -- An earlier local foundation may already have the destination table. Keep
@@ -108,6 +122,49 @@ ALTER TABLE engine_universal_queue_destinations
   ADD COLUMN IF NOT EXISTS fanout_owner_id text;
 ALTER TABLE engine_universal_queue_destinations
   ADD COLUMN IF NOT EXISTS commercial_cta jsonb;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS terminal_status text;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS terminal_evidence text;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS resolution_source text;
+DO $$ DECLARE item record; BEGIN
+  -- An older additive bootstrap created an unnamed status CHECK. Replace only
+  -- that narrow constraint so the new terminal quarantine state is additive.
+  FOR item IN SELECT c.conname FROM pg_constraint c
+    WHERE c.conrelid='engine_universal_queue_destinations'::regclass
+      AND c.contype='c' AND c.conname<>'engine_uq_destination_status_check'
+      AND lower(pg_get_constraintdef(c.oid)) LIKE '%status%'
+      AND lower(pg_get_constraintdef(c.oid)) LIKE '%ambiguous%'
+      AND lower(pg_get_constraintdef(c.oid)) LIKE '%send_started%'
+      AND lower(pg_get_constraintdef(c.oid)) LIKE '%pending%' LOOP
+    EXECUTE format('ALTER TABLE engine_universal_queue_destinations DROP CONSTRAINT %I', item.conname);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+    WHERE conrelid='engine_universal_queue_destinations'::regclass
+      AND conname='engine_uq_destination_status_check') THEN
+    ALTER TABLE engine_universal_queue_destinations
+      ADD CONSTRAINT engine_uq_destination_status_check CHECK (status IN
+        ('pending','claimed','send_started','sent','skipped','failed','ambiguous',
+         'discarded_without_replay')) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+    WHERE conrelid='engine_universal_queue_destinations'::regclass
+      AND conname='engine_uq_discarded_without_replay_fact') THEN
+    ALTER TABLE engine_universal_queue_destinations
+      ADD CONSTRAINT engine_uq_discarded_without_replay_fact CHECK
+      (status <> 'discarded_without_replay' OR
+       (terminal_status='discarded_without_replay' AND
+        btrim(COALESCE(terminal_reason,''))<>'' AND
+        btrim(COALESCE(terminal_evidence,''))<>'' AND
+        resolved_at IS NOT NULL AND
+        btrim(COALESCE(resolution_source,''))<>'' AND
+        provider_message_id IS NULL AND confirmed_at IS NULL AND
+        credit_debited IS NOT TRUE)) NOT VALID;
+  END IF;
+END $$;
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
     WHERE conrelid='engine_universal_queue_destinations'::regclass

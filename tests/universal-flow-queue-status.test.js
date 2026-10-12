@@ -13,6 +13,8 @@ test("terminal public outcomes reflect confirmed destinations", () => {
   assert.deepEqual(classificarFilaUniversal(["sent", "skipped"]).status, "partial");
   assert.deepEqual(classificarFilaUniversal(["failed", "skipped"]).status, "error");
   assert.deepEqual(classificarFilaUniversal(["skipped"]).status, "not_sent");
+  assert.equal(classificarFilaUniversal(["discarded_without_replay"]).terminal, true);
+  assert.equal(classificarFilaUniversal(["discarded_without_replay"]).status, "not_sent");
 });
 
 test("ambiguous provider outcome stays open and never becomes a false terminal", () => {

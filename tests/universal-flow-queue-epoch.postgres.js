@@ -208,8 +208,10 @@ async function main() {
       SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`, [firstB.id]);
     const recoveryB = await queue.preflightWorkspace({ pool, workspaceId: "ws_B" });
     assert.equal(recoveryB.health, "AMBIGUOUS");
-    assert.equal((await queue.claimDestination({ pool,
-      workspaceId: "ws_B" })).ok, false);
+    const quarantinedOnlyClaim = await queue.claimDestination({ pool,
+      workspaceId: "ws_B" });
+    assert.equal(quarantinedOnlyClaim.ok, true);
+    assert.equal(quarantinedOnlyClaim.empty, true);
     const ackB1 = await durableAck(admin, firstB, "dc_1");
     assert.equal((await queue.confirmSend({ pool, destinationId: firstB.id,
       leaseToken: firstB.leaseToken, ...ackB1 })).ok, true);

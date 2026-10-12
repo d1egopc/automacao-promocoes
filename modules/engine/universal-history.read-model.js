@@ -32,7 +32,8 @@ async function consultarHistoricoValidacaoCutover({ pool, gateId,
       i.id AS item_id,i.evento_id,i.job_id,i.oferta_id,i.status,
       i.capturado_em,i.terminal_at,
       d.destination_id,d.target_key,d.channel,d.confirmed_at,
-      d.provider_message_id,d.credit_debited
+      d.provider_message_id,d.credit_debited,d.terminal_status,
+      d.terminal_reason,d.terminal_evidence,d.resolved_at,d.resolution_source
     FROM engine_universal_one_shot_smoke g
     JOIN engine_universal_queue_items i ON i.id=g.queue_item_id
       AND i.operation_epoch_started_at=g.smoke_epoch_at
@@ -53,7 +54,10 @@ async function consultarHistoricoValidacaoCutover({ pool, gateId,
     destino:{destinationId:row.destination_id,targetKey:row.target_key,
       channel:row.channel,confirmedAt:row.confirmed_at,
       providerMessageId:row.provider_message_id,
-      creditDebited:row.credit_debited===true} };
+      creditDebited:row.credit_debited===true,
+      terminalStatus:row.terminal_status,terminalReason:row.terminal_reason,
+      terminalEvidence:row.terminal_evidence,resolvedAt:row.resolved_at,
+      resolutionSource:row.resolution_source} };
 }
 
 async function consultarHistoricoUniversal({ pool, workspaceId, from, to,
@@ -105,7 +109,8 @@ async function consultarHistoricoUniversal({ pool, workspaceId, from, to,
     const ids = rows.map(row => row.id);
     const destinations = ids.length ? (await client.query(`SELECT queue_item_id,
       destination_id,target_key,connection_id,channel,status,
-      confirmed_at,provider_message_id,credit_debited
+      confirmed_at,provider_message_id,credit_debited,terminal_status,
+      terminal_reason,terminal_evidence,resolved_at,resolution_source
       FROM engine_universal_queue_destinations
       WHERE queue_item_id=ANY($1::bigint[])
       ORDER BY queue_item_id,id`, [ids])).rows : [];
@@ -244,7 +249,8 @@ async function consultarFilaPublicaUniversal({ pool, workspaceId,
     const ids = rows.map(row => row.id);
     const targets = ids.length ? (await client.query(`SELECT queue_item_id,
       destination_id,target_key,channel,status,confirmed_at,provider_message_id,
-      credit_debited FROM engine_universal_queue_destinations
+      credit_debited,terminal_status,terminal_reason,terminal_evidence,
+      resolved_at,resolution_source FROM engine_universal_queue_destinations
       WHERE queue_item_id=ANY($1::bigint[]) ORDER BY queue_item_id,id`, [ids])).rows : [];
     const byItem = new Map();
     for (const target of targets) {
@@ -300,6 +306,8 @@ async function consultarDetalheUniversal({ pool, workspaceId, detalheRef } = {})
     [id, state.operationEpochStartedAt, workspace])).rows[0];
     const targets = row ? (await client.query(`SELECT destination_id,
       target_key,channel,status,confirmed_at,provider_message_id,credit_debited
+      ,terminal_status,terminal_reason,terminal_evidence,resolved_at,
+      resolution_source
       FROM engine_universal_queue_destinations
       WHERE queue_item_id=$1 AND operation_epoch_started_at=$2
         AND workspace_id=$3 ORDER BY id`,
