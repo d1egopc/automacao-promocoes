@@ -49,6 +49,7 @@ function environment(url = urls[0], { width = 1440, height = 900, blockers = [] 
     contains(node) { return node === this || this.children.some((child) => child.contains(node)); }
     attachShadow(options) { this.shadowOptions = options; this.shadow = new Node("shadow"); return this.shadow; }
     setAttribute(name, value) { this[name] = value; }
+    getAttribute(name) { return this[name]; }
     addEventListener(name, callback) { assert(!this.listeners[name], "no duplicate node listener"); this.listeners[name] = callback; }
   }
   const document = {
@@ -111,11 +112,14 @@ function obstacle(rect, position = "fixed", tag = "div") {
     const env = environment(url); env.inject();
     assert.strictEqual(env.host().style.display, "block", url);
     assert.strictEqual(env.host().shadowOptions.mode, "open");
-    assert.strictEqual(env.context.__optimusCaptureLauncherV1.modeActions.openSelectionMode, null);
+    assert.strictEqual(typeof env.context.__optimusCaptureLauncherV1.modeActions.openSelectionMode, "function");
     env.button().listeners.click({ isTrusted: false });
     assert.strictEqual(env.messages.length, 0, "synthetic click cannot open panel");
     env.button().listeners.click({ isTrusted: true });
-    assert.strictEqual(env.messages.length, 1, "sendMessage runs synchronously within click");
+    assert.strictEqual(env.messages.length, 0, "launcher click opens the mode picker first");
+    const menu = env.host().shadow.children.find((node) => node.className === "menu");
+    menu.children[0].listeners.click({ isTrusted: true });
+    assert.strictEqual(env.messages.length, 1, "current product menu action sends synchronously within click");
     assert.deepStrictEqual(JSON.parse(JSON.stringify(env.messages[0])), { type: "OPTIMUS_OPEN_CURRENT_PRODUCT" });
     await new Promise(setImmediate);
     assert.strictEqual(env.button().disabled, false);
@@ -146,6 +150,7 @@ function obstacle(rect, position = "fixed", tag = "div") {
     assert.strictEqual(env.host().style.display, "block", `domain-only: ${url}`);
     assert.strictEqual(env.timers.size, 0);
     env.button().listeners.click({ isTrusted: true });
+    env.host().shadow.children.find((node) => node.className === "menu").children[0].listeners.click({ isTrusted: true });
     assert.strictEqual(env.messages.length, 1, "home/search opens panel, not product capture in launcher");
   }
   const shopeePosition = environment(urls[2]); shopeePosition.inject();

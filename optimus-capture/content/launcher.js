@@ -10,17 +10,20 @@
   const policy = global.OptimusLauncherPolicy;
   if (!doc?.documentElement || !policy) return;
 
-  // Mode actions are independent of the UI. A future picker can call this
-  // same action; selection has no implementation/entry point in phase 1.
   function openCurrentProductMode() {
     return global.chrome.runtime.sendMessage({ type: "OPTIMUS_OPEN_CURRENT_PRODUCT" });
   }
-  const modeActions = Object.freeze({ openCurrentProductMode, openSelectionMode: null });
+  function openSelectionMode() {
+    return global.OptimusSelectionMode?.start?.() || { ok: false, motivo: "selection_mode_unavailable" };
+  }
+  const modeActions = Object.freeze({ openCurrentProductMode, openSelectionMode });
   let host = null;
   let button = null;
+  let menu = null;
   let status = null;
   let timer = null;
   let opening = false;
+  let selectionModeActive = false;
   let lastUrl = "";
   const HOST_ID = "optimus-capture-launcher-v1";
 
@@ -28,9 +31,16 @@
     return policy.contextForUrl(global.location.href).homologated;
   }
 
-  function handleLauncherClick(event) {
+  function closeMenu() {
+    if (!menu || !button) return;
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
+
+  function handleCurrentProductClick(event) {
     const context = policy.contextForUrl(global.location.href);
     if (!event.isTrusted || opening || !context.homologated) return;
+    closeMenu();
     opening = true;
     button.disabled = true;
     // No async preparation precedes the sendMessage/user gesture.
@@ -45,6 +55,24 @@
       status.textContent = "Não foi possível abrir o painel. Recarregue a página ou use o ícone da extensão.";
       button.title = status.textContent;
     }).finally(() => { opening = false; button.disabled = false; });
+  }
+
+  function handleSelectionClick(event) {
+    if (!event.isTrusted || !policy.contextForUrl(global.location.href).homologated) return;
+    closeMenu();
+    const result = modeActions.openSelectionMode();
+    if (!result?.ok) {
+      status.textContent = "Não foi possível iniciar o Modo Seleção.";
+      return;
+    }
+    status.textContent = "Modo Seleção ativo.";
+  }
+
+  function handleLauncherClick(event) {
+    if (!event.isTrusted || opening) return;
+    const expanded = button.getAttribute("aria-expanded") === "true";
+    menu.hidden = expanded;
+    button.setAttribute("aria-expanded", expanded ? "false" : "true");
   }
 
   function mount() {
@@ -67,12 +95,20 @@
       button:focus-visible { outline:3px solid #8c61d8; outline-offset:3px; }
       button:disabled { cursor:wait; opacity:.7; }
       img { width:24px; height:24px; object-fit:contain; flex:none; }
+      .menu { position:absolute; right:0; bottom:52px; width:100%; box-sizing:border-box;
+        display:grid; gap:6px; padding:7px; border:1px solid #ded9ed; border-radius:14px;
+        background:#fff; box-shadow:0 7px 24px #24183b2e; }
+      .menu[hidden] { display:none; }
+      .menu button { height:38px; border-radius:10px; justify-content:flex-start; box-shadow:none;
+        padding:7px 10px; font-size:13px; }
       .optimus-launcher-status { position:absolute; width:1px; height:1px;
         overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
     `;
     button = doc.createElement("button");
     button.type = "button";
     button.setAttribute("aria-label", "Enviar oferta — abrir Optimus Capture");
+    button.setAttribute("aria-haspopup", "menu");
+    button.setAttribute("aria-expanded", "false");
     button.title = "Abrir o produto atual no Optimus Capture";
     const logo = doc.createElement("img");
     logo.src = global.chrome.runtime.getURL("assets/icon-32.png");
@@ -86,7 +122,22 @@
     status.setAttribute("role", "status");
     button.append(logo, label);
     button.addEventListener("click", handleLauncherClick);
-    shadow.append(style, button, status);
+    menu = doc.createElement("div");
+    menu.className = "menu";
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    const current = doc.createElement("button");
+    current.type = "button";
+    current.setAttribute("role", "menuitem");
+    current.textContent = "📦 Produto atual";
+    current.addEventListener("click", handleCurrentProductClick);
+    const selection = doc.createElement("button");
+    selection.type = "button";
+    selection.setAttribute("role", "menuitem");
+    selection.textContent = "☑ Modo Seleção";
+    selection.addEventListener("click", handleSelectionClick);
+    menu.append(current, selection);
+    shadow.append(style, menu, button, status);
     doc.documentElement.append(host);
   }
 
@@ -127,6 +178,7 @@
     }
     mount();
     host.style.setProperty("display", "none", "important");
+    if (selectionModeActive) return;
     const viewportWidth = doc.documentElement.clientWidth || global.innerWidth;
     const width = Math.min(176, viewportWidth - 32);
     host.style.setProperty("width", `${width}px`, "important");
@@ -153,6 +205,15 @@
     if (timer !== null) global.clearTimeout(timer);
     timer = global.setTimeout(() => { timer = null; refresh(); }, 120);
   }
+  function setSelectionModeActive(value) {
+    selectionModeActive = value === true;
+    closeMenu();
+    if (selectionModeActive) {
+      host?.style?.setProperty("display", "none", "important");
+      return;
+    }
+    refresh();
+  }
   const onNavigation = () => { if (lastUrl !== global.location.href) scheduleRefresh(); };
   global.addEventListener("popstate", onNavigation);
   global.addEventListener("hashchange", onNavigation);
@@ -166,7 +227,7 @@
       scheduleRefresh();
     }
   });
-  global[SINGLETON] = Object.freeze({ refresh, modeActions });
+  global[SINGLETON] = Object.freeze({ refresh, modeActions, setSelectionModeActive });
   refresh();
   observer.observe(doc.documentElement, { childList: true, subtree: true });
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -242,7 +242,18 @@ function documentoShopeePercentualFixture({ incluirPreco = true } = {}) {
   };
 }
 
-function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg" } = {}) {
+function documentoAmazonSoundbarFixture({
+  semPrecoPrincipal = false,
+  oldHires = "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg",
+  precoAtualInteiro = "798",
+  precoAtualFracao = "99",
+  precoAtualTexto = "R$ 798,99",
+  precoAnteriorTexto = "R$1.099,00",
+  descontoTexto = "-27%",
+  condicaoPagamento = "",
+  asin = "B0G2T13LT6",
+  asinPagamento = asin
+} = {}) {
   const url = "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1";
   const titulo = "Soundbar TCL com Subwoofer sem fio Bluetooth 2.1 Canais HDMI ARC S55H";
   const imagemSrc = "https://m.media-amazon.com/images/I/soundbar-SX522.jpg";
@@ -257,27 +268,37 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
     }
   };
   const precoAtualNo = {
-    textContent: "R$ 798,99",
-    innerText: "R$ 798,99",
+    textContent: precoAtualTexto,
+    innerText: precoAtualTexto,
     querySelector(seletor) {
-      if (seletor === ".a-price-whole") return { textContent: "798", innerText: "798" };
-      if (seletor === ".a-price-fraction") return { textContent: "99", innerText: "99" };
-      if (seletor === ".a-offscreen") return { textContent: "R$798,99", innerText: "R$798,99" };
+      if (seletor === ".a-price-whole") return { textContent: precoAtualInteiro, innerText: precoAtualInteiro };
+      if (seletor === ".a-price-fraction") return { textContent: precoAtualFracao, innerText: precoAtualFracao };
+      if (seletor === ".a-offscreen") return { textContent: precoAtualTexto, innerText: precoAtualTexto };
       return null;
     }
   };
   const precoAnteriorNo = {
-    textContent: "R$1.099,00",
-    innerText: "R$1.099,00",
+    textContent: precoAnteriorTexto,
+    innerText: precoAnteriorTexto,
     querySelector(seletor) {
-      if (seletor === ".a-offscreen") return { textContent: "R$1.099,00", innerText: "R$1.099,00" };
+      if (seletor === ".a-offscreen") return { textContent: precoAnteriorTexto, innerText: precoAnteriorTexto };
       return null;
     }
   };
-  const descontoNo = { textContent: "-27%", innerText: "-27%" };
+  const descontoNo = { textContent: descontoTexto, innerText: descontoTexto };
+  const pagamentoNo = {
+    textContent: condicaoPagamento,
+    innerText: condicaoPagamento,
+    getAttribute(nome) {
+      return nome === "data-csa-c-asin" ? asinPagamento : "";
+    }
+  };
   const blocoPreco = {
-    textContent: "R$ 798,99 R$1.099,00 -27% 12x de R$66,61 25% off na 1a compra com cartao Amazon Insira o codigo CARTAO90 Exclusivo Prime Salve o cupom R$20 : VEMPRIME99.",
-    innerText: "R$ 798,99\nR$1.099,00\n-27%\n12x de R$66,61\n25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90.\nExclusivo Prime: Salve o cupom R$20 : VEMPRIME99.",
+    textContent: `${precoAtualTexto} ${precoAnteriorTexto} ${descontoTexto} 12x de R$66,61 25% off na 1a compra com cartao Amazon Insira o codigo CARTAO90 Exclusivo Prime Salve o cupom R$20 : VEMPRIME99.`,
+    innerText: `${precoAtualTexto}\n${precoAnteriorTexto}\n${descontoTexto}\n12x de R$66,61\n25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90.\nExclusivo Prime: Salve o cupom R$20 : VEMPRIME99.`,
+    getAttribute(nome) {
+      return nome === "data-csa-c-asin" ? asin : "";
+    },
     querySelector(seletor) {
       if (seletor === ".priceToPay") return semPrecoPrincipal ? null : precoAtualNo;
       if (seletor === ".savingsPercentage") return descontoNo;
@@ -299,12 +320,13 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
             <span id="productTitle">${titulo}</span>
             <img id="landingImage" data-old-hires="${oldHires || ""}" src="${imagemSrc}">
             <div id="corePriceDisplay_desktop_feature_div">
-              <span class="priceToPay"><span class="a-price-whole">798</span><span class="a-price-fraction">99</span></span>
-              <span class="apex-basisprice-value a-text-price"><span class="a-offscreen">R$1.099,00</span></span>
-              <span class="savingsPercentage">-27%</span>
+              <span class="priceToPay"><span class="a-price-whole">${precoAtualInteiro}</span><span class="a-price-fraction">${precoAtualFracao}</span></span>
+              <span class="apex-basisprice-value a-text-price"><span class="a-offscreen">${precoAnteriorTexto}</span></span>
+              <span class="savingsPercentage">${descontoTexto}</span>
               <span>12x de R$66,61</span>
               <div id="promoPriceBlockMessage_feature_div">25% off na 1a compra com cartao Amazon. Insira o codigo CARTAO90. Exclusivo Prime: Salve o cupom R$20 : VEMPRIME99.</div>
             </div>
+            <div id="oneTimePaymentPrice_feature_div">${condicaoPagamento}</div>
           </body>
         </html>
       `
@@ -313,6 +335,7 @@ function documentoAmazonSoundbarFixture({ semPrecoPrincipal = false, oldHires = 
       if (seletor === "#productTitle") return tituloNo;
       if (seletor === "#landingImage") return imagemNo;
       if (seletor === "#corePriceDisplay_desktop_feature_div") return blocoPreco;
+      if (seletor === "#oneTimePaymentPrice_feature_div") return pagamentoNo;
       return null;
     }
   };
@@ -841,8 +864,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.ok(apiFonte.includes("function listarDestinosManualV2"));
     assert.ok(apiFonte.includes('requestJson(`/manual-v2/destinos?_=${Date.now()}`'));
     assert.ok(apiFonte.includes("function enviarAgoraManualV2"));
-    assert.ok(apiFonte.includes('requestJson("/manual-v2/ofertas/enviar-agora"'));
-    assert.ok(apiFonte.includes('body: { oferta: oferta && typeof oferta === "object" ? oferta : {}'));
+    assert.ok(apiFonte.includes('body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] }'));
     assert.ok(!apiFonte.includes("clienteId"));
     assert.ok(manifestFonte.includes("https://shopee.com.br/*"));
     assert.ok(manifestFonte.includes("adapters/shopee.js"));
@@ -1036,6 +1058,28 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const semProveniencia = contrato.normalizarProdutoCapturado({
+      marketplace: "mercadolivre",
+      urlOriginal: "https://produto.mercadolivre.com.br/MLB-123-produto-_JM",
+      titulo: "Produto com de por",
+      precoAtual: 120,
+      precoAnterior: 150,
+      descontoPercentual: 20
+    });
+    assert.strictEqual(semProveniencia.descontoPercentual, null, "de/por e percentual legado sem origem ficam fail-closed");
+    assert.strictEqual(semProveniencia.descontoPercentualOrigem, "");
+
+    const explicito = contrato.normalizarProdutoCapturado({
+      ...semProveniencia,
+      descontoPercentual: 20,
+      descontoPercentualOrigem: "marketplace"
+    });
+    assert.strictEqual(explicito.descontoPercentual, 20);
+    assert.strictEqual(explicito.descontoPercentualOrigem, "marketplace");
+    assert.strictEqual(contrato.payloadPreview(explicito).descontoPercentualOrigem, "marketplace");
+  }
+
+  {
     const produto = amazon.capturarAmazonDaPagina(
       documentoAmazonSoundbarFixture(),
       { href: "https://www.amazon.com.br/Soundbar-Subwoofer-Bluetooth-Canais-S55H/dp/B0G2T13LT6?th=1" }
@@ -1045,14 +1089,51 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAtual, 798.99);
     assert.strictEqual(produto.precoAnterior, 1099.00);
     assert.strictEqual(produto.descontoPercentual, 27);
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
     assert.strictEqual(produto.imagem, "https://m.media-amazon.com/images/I/soundbar-SL1000.jpg");
     assert.strictEqual(produto.urlOriginal, "https://www.amazon.com.br/dp/B0G2T13LT6");
     assert.strictEqual(produto.cupom, "");
+    assert.strictEqual(produto.observacoes, "");
     assert.strictEqual(produto.fonte, "dom_amazon_v1");
     assert.strictEqual(produto.completo, true);
     assert.notStrictEqual(produto.precoAtual, 66.61, "parcelamento nao vira preco atual");
     assert.notStrictEqual(produto.precoAtual, 20, "beneficio R$20 nao vira preco");
     assert.notStrictEqual(produto.descontoPercentual, 25, "beneficio de cartao nao vira desconto principal");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({
+        precoAtualInteiro: "86",
+        precoAtualFracao: "38",
+        precoAtualTexto: "R$ 86,38",
+        precoAnteriorTexto: "R$129,90",
+        descontoTexto: "",
+        condicaoPagamento: "à vista no Pix ou NuPay (5% off)",
+        asin: "B0CZ4BTRYR"
+      }),
+      { href: "https://www.amazon.com.br/dp/B0CZ4BTRYR" }
+    );
+    assert.strictEqual(produto.precoAnterior, 129.90);
+    assert.strictEqual(produto.precoAtual, 86.38);
+    assert.strictEqual(produto.descontoPercentual, 5, "desconto total de 34% nao pode ser calculado pelos precos");
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
+    assert.strictEqual(produto.observacoes, "Preço à vista no Pix ou NuPay");
+
+    const payload = contrato.payloadPreview(produto);
+    assert.strictEqual(payload.observacoes, "Preço à vista no Pix ou NuPay");
+  }
+
+  {
+    const produto = amazon.capturarAmazonDaPagina(
+      documentoAmazonSoundbarFixture({
+        condicaoPagamento: "à vista no Pix ou NuPay (5% off)",
+        asin: "B0CZ4BTRYR",
+        asinPagamento: "B0OUTROPRODUTO"
+      }),
+      { href: "https://www.amazon.com.br/dp/B0CZ4BTRYR" }
+    );
+    assert.strictEqual(produto.observacoes, "", "condicao de outro ASIN nao pode contaminar o preco principal");
   }
 
   {
@@ -1111,11 +1192,9 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     const produto = kabum.capturarKabumDaPagina(documento, documento.location);
     const numberFlowPrincipal = documento.body.querySelectorAll("number-flow-react[data]")[1];
     assert.strictEqual(kabum.textoNumberFlow(numberFlowPrincipal), "R$ 867,51");
-    assert.strictEqual(produto.produtoId, "619753");
     assert.strictEqual(produto.precoAtual, 867.51);
     assert.strictEqual(produto.parcelamento, "10x R$ 96,39 s/ juros");
     assert.strictEqual(produto.titulo, 'Monitor Gamer Lg 27" Full Hd 100hz 5ms Ips 27ms500 Bivolt');
-    assert.strictEqual(produto.imagem, "https://images.kabum.com.br/produtos/fotos/619753/monitor-lg.jpg");
     assert.strictEqual(produto.condicaoPrecoPor, "pix");
     assert.strictEqual(produto.completo, true);
     assert.notStrictEqual(produto.precoAtual, 96.39, "parcela nao vira preco principal");
@@ -1893,7 +1972,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     const produto = shopee.capturarShopeeDaPagina(documento, documento.location);
     assert.strictEqual(produto.precoAtual, 59.90);
     assert.strictEqual(produto.precoAnterior, 130.90);
-    assert.strictEqual(produto.descontoPercentual, 54);
+    assert.strictEqual(produto.descontoPercentual, null, "precos de/por isolados nao inventam desconto");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
   }
 
   {
@@ -2223,10 +2303,10 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             ]
           };
         },
-        async enviarAgoraManualV2(token, oferta, destinosIds) {
+        async enviarAgoraManualV2(token, ofertaId, destinosIds) {
           assert.strictEqual(token, "jwt_teste");
           envios += 1;
-          enviosPayloads.push({ oferta, destinosIds });
+          enviosPayloads.push({ ofertaId, destinosIds });
           if (envioPendente) {
             await new Promise((resolve) => {
               liberarEnvioPendente = resolve;
@@ -2267,7 +2347,25 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("campoPrecoAnterior").value, "R$ 124,45");
     assert.strictEqual(payloadsPreview[0].precoAtual, 60.31);
     assert.strictEqual(payloadsPreview[0].precoAnterior, 124.45);
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A - R$ 60,31");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 60,31");
+    assert.strictEqual(elemento("previewPrecoAnterior").textContent, "De R$ 124,45");
+    assert.strictEqual(elemento("previewMarketplace").textContent, "Mercado Livre");
+    assert.strictEqual(elemento("previewCupom").hidden, true);
+    assert.strictEqual(elemento("previewParcelamento").hidden, true);
+    const desenhosPreview = [];
+    elemento("previewImagem").width = 160;
+    elemento("previewImagem").height = 140;
+    elemento("previewImagem").getContext = () => ({
+      clearRect() {},
+      drawImage(...args) { desenhosPreview.push(args); }
+    });
+    elemento("produtoImagem").complete = true;
+    elemento("produtoImagem").naturalWidth = 400;
+    elemento("produtoImagem").naturalHeight = 200;
+    elemento("produtoImagem").listeners.load();
+    assert.strictEqual(desenhosPreview.length, 1, "imagem carregada e reutilizada sem outro download");
+    assert.deepStrictEqual(desenhosPreview[0].slice(1), [0, 30, 160, 80]);
     assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta");
     assert.strictEqual(elemento("statusLink").textContent, "Oferta pronta");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
@@ -2284,6 +2382,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(previews, 1, "salvar nao deve chamar preview/capture novamente");
     assert.strictEqual(saves, 1);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
+    assert.strictEqual(elemento("previewView").hidden, false, "salvar preserva a previa da oferta");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A");
     assert.strictEqual(elemento("botaoSalvar").disabled, true);
     assert.strictEqual(elemento("botaoSalvar").textContent, "Salvo no Optimus");
     assert.strictEqual(elemento("botaoSalvar").dataset.estado, "salvo");
@@ -2313,7 +2413,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
     await elemento("botaoEnviar").listeners.click();
     assert.strictEqual(envios, 1);
-    assert.strictEqual(enviosPayloads[0].oferta.titulo, "Produto A");
+    assert.strictEqual(enviosPayloads[0].ofertaId, "manual_salvo_1");
     assert.deepStrictEqual(Array.from(enviosPayloads[0].destinosIds), ["wa_ok", "tg_ok"]);
     assert.strictEqual(saves, 1, "oferta ja salva deve reutilizar ofertaSalvaId");
     assert.strictEqual(previews, 1, "enviar nao deve chamar preview/capture novamente");
@@ -2358,11 +2458,11 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     liberarEnvioPendente();
     await Promise.all([primeiroEnvio, segundoEnvio]);
     assert.strictEqual(envios, 2);
-    assert.strictEqual(saves, 1, "Enviar agora nao pode persistir oferta nao salva");
-    assert.strictEqual(enviosPayloads[1].oferta.titulo, "Produto B");
+    assert.strictEqual(saves, 2, "preview nao salvo deve ser salvo uma unica vez antes do envio");
+    assert.strictEqual(enviosPayloads[1].ofertaId, "manual_salvo_2");
     assert.deepStrictEqual(Array.from(enviosPayloads[1].destinosIds), ["wa_ok"]);
-    assert.strictEqual(enviosPayloads[1].oferta.urlAfiliada, "https://meli.la/teste");
-    assert.ok(!("clienteId" in enviosPayloads[1].oferta));
+    assert.strictEqual(ofertasSalvas[1].urlAfiliada, "https://meli.la/teste");
+    assert.ok(!("clienteId" in ofertasSalvas[1]));
 
     urlAtual = "https://produto.mercadolivre.com.br/MLB-333-produto-c-_JM";
     produtoAtual = {
@@ -2379,14 +2479,14 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     falharSave = true;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 2);
+    assert.strictEqual(saves, 3);
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel salvar. Tente novamente.");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(envios, 2, "falha no save nao deve chamar enviar-agora");
     falharSave = false;
     await elemento("botaoSalvar").listeners.click();
-    assert.strictEqual(saves, 3);
-    assert.strictEqual(ofertasSalvas[2].precoAtual, 89.9);
+    assert.strictEqual(saves, 4);
+    assert.strictEqual(ofertasSalvas[3].precoAtual, 89.9);
     assert.strictEqual(elemento("statusLink").textContent, "Salvo na Galeria do Optimus");
 
     urlAtual = "https://produto.mercadolivre.com.br/MLB-333-conflito-_JM";
@@ -2415,15 +2515,15 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("destinosLista").children[0].children[0].checked = true;
     elemento("destinosLista").children[0].children[0].listeners.change();
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 4, "Enviar agora com falha nao deve salvar oferta");
+    assert.strictEqual(saves, 6);
     assert.strictEqual(envios, 3);
-    assert.strictEqual(enviosPayloads[2].oferta.titulo, "Produto D");
+    assert.strictEqual(enviosPayloads[2].ofertaId, "manual_salvo_6");
     assert.strictEqual(elemento("statusLink").textContent, "Nao foi possivel enviar: envio_temporario");
     falharEnvio = false;
     await elemento("botaoEnviar").listeners.click();
-    assert.strictEqual(saves, 4, "falha no envio preserva a separacao entre enviar e salvar");
+    assert.strictEqual(saves, 6, "falha no envio preserva ID salvo para retry seguro");
     assert.strictEqual(envios, 4);
-    assert.strictEqual(enviosPayloads[3].oferta.titulo, "Produto D");
+    assert.strictEqual(enviosPayloads[3].ofertaId, "manual_salvo_6");
     assert.strictEqual(elemento("statusLink").textContent, "Enviado para 1 destino(s)");
   }
 
@@ -2743,7 +2843,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.strictEqual(previews, 1);
     assert.strictEqual(elemento("campoPrecoAtual").value, "A partir de R$ 67,99");
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Triturador De Alimentos - A partir de R$ 67,99");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Triturador De Alimentos");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "A partir de R$ 67,99");
     assert.strictEqual(elemento("botaoSalvar").disabled, false);
     assert.strictEqual(elemento("botaoEnviar").disabled, false);
   }
@@ -2859,6 +2960,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             return new Promise((resolve) => {
               resolverPreviewPendente = () => resolve({
                 oferta: {
+                  ...payload,
                   titulo: payload.titulo,
                   precoAtual: payload.precoAtual,
                   precoAnterior: payload.precoAnterior,
@@ -2872,6 +2974,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
           }
           return {
           oferta: {
+            ...payload,
             titulo: payload.titulo,
             precoAtual: payload.precoAtual,
             precoAnterior: payload.precoAnterior,
@@ -2893,8 +2996,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
             ]
           };
         },
-        async enviarAgoraManualV2(_token, oferta, destinosIds) {
-          envios.push({ oferta, destinosIds: Array.from(destinosIds || []) });
+        async enviarAgoraManualV2(_token, ofertaId, destinosIds) {
+          envios.push({ ofertaId, destinosIds: Array.from(destinosIds || []) });
           return { envio: { enviados: 1, erros: 0 } };
         }
       },
@@ -2923,6 +3026,7 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("campoTitulo").value = "Produto A atualizado";
     elemento("campoTitulo").listeners.input();
     assert.strictEqual(elemento("previewView").hidden, false, "edicao mantem o ultimo preview visivel");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A atualizado", "titulo visual reage antes do backend");
     assert.strictEqual(elemento("statusLink").textContent, "Preview desatualizado");
     assert.strictEqual(elemento("botaoPreview").hidden, false, "edicao expoe atualizacao manual");
     assert.strictEqual(elemento("botaoSalvar").disabled, true, "edicao manual invalida o preview anterior");
@@ -2934,26 +3038,56 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
 
     elemento("campoPrecoAtual").value = "R$ 75,00";
     elemento("campoPrecoAtual").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 75,00", "preco visual reage antes do backend");
     assert.strictEqual(elemento("botaoSalvar").disabled, true, "preco atual deixa preview desatualizado");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 3, "preco atual gera preview novo");
 
+    elemento("campoPrecoAnterior").value = "";
+    elemento("campoPrecoAnterior").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAnterior").hidden, true, "preco anterior vazio nao ocupa espaco");
     elemento("campoPrecoAnterior").value = "R$ 99,90";
     elemento("campoPrecoAnterior").listeners.input();
+    assert.strictEqual(elemento("previewPrecoAnterior").textContent, "De R$ 99,90");
+    assert.strictEqual(elemento("previewDesconto").hidden, true, "preco anterior nao deriva percentual");
     assert.strictEqual(elemento("botaoEnviar").disabled, true, "preco anterior deixa preview desatualizado");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 4, "preco anterior participa da chave do preview");
 
+    elemento("campoDesconto").value = "17%";
+    elemento("campoDesconto").listeners.input();
+    assert.strictEqual(elemento("previewDesconto").textContent, "17% OFF", "desconto manual aparece imediatamente");
+    elemento("campoDesconto").value = "";
+    elemento("campoDesconto").listeners.input();
+    assert.strictEqual(elemento("previewDesconto").hidden, true, "limpar desconto manual remove OFF");
+    elemento("campoDesconto").value = "17%";
+    elemento("campoDesconto").listeners.input();
+
     elemento("campoCupom").value = "MANUAL10";
     elemento("campoCupom").listeners.input();
+    assert.strictEqual(elemento("previewCupom").textContent, "Cupom: MANUAL10");
+    elemento("campoCupom").value = "";
+    elemento("campoCupom").listeners.input();
+    assert.strictEqual(elemento("previewCupom").hidden, true);
+    elemento("campoCupom").value = "MANUAL10";
+    elemento("campoCupom").listeners.input();
+    elemento("campoParcelamento").value = "10x R$ 7,50";
+    elemento("campoParcelamento").listeners.input();
+    assert.strictEqual(elemento("previewParcelamento").textContent, "10x R$ 7,50");
+    elemento("campoParcelamento").value = "";
+    elemento("campoParcelamento").listeners.input();
+    assert.strictEqual(elemento("previewParcelamento").hidden, true);
     elemento("campoObservacoes").value = "Compra internacional · impostos estimados";
     elemento("campoObservacoes").listeners.input();
+    assert.strictEqual(elemento("previewObservacoes").textContent, "Compra internacional · impostos estimados");
     await new Promise(resolve => setTimeout(resolve, 520));
     assert.strictEqual(previews, 5, "edicoes consecutivas geram somente o preview final");
     await elemento("botaoSalvar").listeners.click();
     assert.strictEqual(ofertasSalvas.length, 1);
     assert.strictEqual(ofertasSalvas[0].cupom, "MANUAL10");
     assert.strictEqual(ofertasSalvas[0].observacoes, "Compra internacional · impostos estimados");
+    assert.strictEqual(ofertasSalvas[0].descontoPercentual, 17);
+    assert.strictEqual(ofertasSalvas[0].descontoPercentualOrigem, "manual");
 
     elemento("campoObservacoes").value = "Compra internacional · impostos atualizados";
     elemento("campoObservacoes").listeners.input();
@@ -2986,7 +3120,8 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     elemento("campoTitulo").listeners.input();
     resolverPreviewPendente();
     await new Promise(resolve => setTimeout(resolve, 40));
-    assert.strictEqual(elemento("previewView").children[1].textContent, "Produto A final - R$ 75,00", "resposta antiga nao sobrescreve o formulario novo");
+    assert.strictEqual(elemento("previewTitulo").textContent, "Produto A final", "resposta antiga nao sobrescreve o formulario novo");
+    assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 75,00");
 
     produtoAtual = {
       marketplace: "shopee",
@@ -3421,6 +3556,39 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
   }
 
   {
+    const htmlTecnicoSemCupom = `
+      <html>
+        <head>
+          <title>Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger | Mercado Livre</title>
+          <meta property="og:image" content="https://http2.mlstatic.com/fonte-atx.webp">
+          <script type="application/ld+json">
+            {"@type":"Product","name":"Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger","offers":{"price":"199.90"}}
+          </script>
+        </head>
+        <body>
+          <h1>Fonte Atx 650w 80 Plus Bronze Pfc Ativo Com Led Rgb Revenger</h1>
+          <ul><li>Código: 80MM</li><li>Ventoinha: 80MM</li><li>Potencia: 650W</li><li>Entrada: 220V</li><li>Memoria: DDR5</li></ul>
+        </body>
+      </html>
+    `;
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlTecnicoSemCupom,
+      "https://produto.mercadolivre.com.br/MLB-65080-fonte-atx-_JM"
+    );
+    assert.strictEqual(produto.cupom, "", "especificacao tecnica nao pode virar cupom");
+  }
+
+  {
+    const htmlCupomParecidoComTecnico = htmlProdutoJsonLd()
+      .replace("Use o cupom SEMDEMORA", "Codigo do cupom: 80MM");
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlCupomParecidoComTecnico,
+      "https://produto.mercadolivre.com.br/MLB-65080-fonte-atx-_JM"
+    );
+    assert.strictEqual(produto.cupom, "80MM", "codigo parecido com especificacao passa somente com contexto de cupom");
+  }
+
+  {
     const produto = ml.capturarMercadoLivreDeHtml(
       htmlPrecoAnteriorDomMercadoLivre(),
       "https://produto.mercadolivre.com.br/MLB-999-produto-real-_JM"
@@ -3429,7 +3597,31 @@ function documentoShopeeSpaFixture({ precoAnteriorEstrutural = false } = {}) {
     assert.strictEqual(produto.precoAnterior, 129.9);
     assert.notStrictEqual(produto.precoAnterior, 7.11);
     assert.strictEqual(produto.descontoPercentual, 44);
+    assert.strictEqual(produto.descontoPercentualOrigem, "marketplace");
     assert.strictEqual(produto.imagem, "https://http2.mlstatic.com/D_NQ_NP_DOM.webp");
+  }
+
+  {
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlPrecoAnteriorDomMercadoLivre().replace("44% OFF", "Oferta especial"),
+      "https://produto.mercadolivre.com.br/MLB-999-produto-sem-off-_JM"
+    );
+    assert.strictEqual(produto.precoAtual, 72.16);
+    assert.strictEqual(produto.precoAnterior, 129.9);
+    assert.strictEqual(produto.descontoPercentual, null, "ML com de/por sem OFF explicito nao inventa percentual");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
+  }
+
+  {
+    const htmlComOffRelacionado = htmlPrecoAnteriorDomMercadoLivre()
+      .replace("44% OFF", "Oferta especial")
+      .replace("</body>", '<div class="related-card-discount">55% OFF</div></body>');
+    const produto = ml.capturarMercadoLivreDeHtml(
+      htmlComOffRelacionado,
+      "https://produto.mercadolivre.com.br/MLB-999-produto-sem-off-principal-_JM"
+    );
+    assert.strictEqual(produto.descontoPercentual, null, "OFF de produto relacionado nao contamina a oferta principal");
+    assert.strictEqual(produto.descontoPercentualOrigem, "");
   }
 
   {

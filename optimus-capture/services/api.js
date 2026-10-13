@@ -134,12 +134,11 @@
     });
   }
 
-  function enviarAgoraManualV2(token, oferta, destinosIds, idempotencyKey, requestId) {
-    return requestJson("/manual-v2/ofertas/enviar-agora", {
+  function enviarAgoraManualV2(token, ofertaId, destinosIds, idempotencyKey, requestId) {
+    return requestJson(`/manual-v2/ofertas/${encodeURIComponent(texto(ofertaId))}/enviar-agora`, {
       method: "POST",
       token,
-      body: { oferta: oferta && typeof oferta === "object" ? oferta : {},
-        destinosIds: Array.isArray(destinosIds) ? destinosIds : [] },
+      body: { destinosIds: Array.isArray(destinosIds) ? destinosIds : [] },
       headers: {
         ...(idempotencyKey ? { "Idempotency-Key": texto(idempotencyKey) } : {}),
         ...(texto(requestId) ? { "X-Request-ID": texto(requestId) } : {})

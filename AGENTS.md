@@ -112,3 +112,24 @@ Este texto nao substitui testes executaveis; o gate documental e a regressao aut
 - [Performance](docs/contracts/PERFORMANCE.md)
 - [Roteamento de capacidade](docs/contracts/MODEL-ROUTING.md)
 - [Evidencias temporais](docs/contracts/EVIDENCE-REGISTER.md)
+
+## Fonte única de desenvolvimento
+
+- Backend e frontend oficiais são a fonte única de trabalho.
+- Pasta externa, worktree ou candidata só pode ser usada quando houver necessidade técnica explícita.
+- Candidata anterior não é baseline implícita para trabalho novo.
+- Ao terminar um experimento, reconciliar o resultado na árvore oficial.
+- Backup manual é proteção e não fonte de desenvolvimento.
+
+## Selection Mode — invariantes de distribuição
+
+- Selection Mode escolhe produtos; a captura segue o pipeline oficial.
+- Não criar uma segunda autoridade para título, preço ou imagem.
+- Um card canônico não pode possuir múltiplos controles de Selection.
+- Swatches, variantes, badges e wrappers não são produtos independentes.
+- Shopee Selection preserva o Capture oficial e a semantic readiness de preço.
+- Semantic readiness não pode ser substituída por sleep fixo.
+- Mudanças de UX não podem alterar Capture, List API ou adapters.
+- Scroll e infinite scroll preservam identidade e estado de seleção.
+- `+ Nova lista` reutiliza o contrato oficial de criação de listas.
+- O launcher fica oculto enquanto Selection Mode estiver ativo.

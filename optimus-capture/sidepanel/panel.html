@@ -96,28 +96,33 @@
         </section>
 
         <section id="produtoView" class="produto" hidden>
-          <div class="produto-media">
-            <img id="produtoImagem" alt="" class="produto-imagem">
-          </div>
-          <div id="produtoMarketplace" class="marketplace">Marketplace</div>
-          <label>
-            Titulo
-            <textarea id="campoTitulo" rows="3"></textarea>
-          </label>
-          <div class="grid">
-            <label>
-              Preco atual
-              <input id="campoPrecoAtual" inputmode="decimal" type="text">
-            </label>
-            <label>
-              Preco anterior
-              <input id="campoPrecoAnterior" inputmode="decimal" type="text">
-            </label>
+          <div class="produto-resumo">
+            <div class="produto-media">
+              <img id="produtoImagem" alt="" class="produto-imagem">
+            </div>
+            <div class="produto-resumo-corpo">
+              <div id="produtoMarketplace" class="marketplace">Marketplace</div>
+              <label class="produto-titulo">
+                Titulo
+                <textarea id="campoTitulo" rows="2"></textarea>
+              </label>
+              <div class="produto-resumo-precos">
+                <label class="produto-preco-atual">
+                  Preco atual
+                  <input id="campoPrecoAtual" inputmode="decimal" type="text">
+                </label>
+                <label class="produto-preco-anterior">
+                  Preco anterior
+                  <input id="campoPrecoAnterior" inputmode="decimal" type="text">
+                </label>
+              </div>
+              <p id="resumoParcelamento" class="resumo-parcelamento" hidden></p>
+            </div>
           </div>
           <div class="grid">
             <label>
               Desconto
-              <input id="campoDesconto" type="text" readonly>
+              <input id="campoDesconto" type="text" inputmode="decimal" placeholder="Ex.: 20%">
             </label>
             <label>
               Cupom
@@ -172,7 +177,28 @@
           <button id="botaoPreview" class="primary" hidden>Atualizar preview</button>
         </section>
 
-        <section id="previewView" class="preview" hidden></section>
+        <section id="previewView" class="preview" aria-label="Prévia da oferta" hidden>
+          <div id="previewMedia" class="preview-media" hidden>
+            <canvas id="previewImagem" width="160" height="140" role="img" aria-label="Imagem do produto" class="preview-imagem"></canvas>
+          </div>
+          <div class="preview-conteudo">
+            <p class="preview-secao">Prévia da oferta</p>
+            <h2 id="previewTitulo"></h2>
+            <p id="previewMarketplace" class="preview-marketplace"></p>
+            <p id="previewAvaliacao" class="preview-detalhe" hidden></p>
+            <p id="previewPrecoAnterior" class="preview-preco-anterior" hidden></p>
+            <div id="previewPrecoLinha" class="preview-preco-linha">
+              <strong id="previewPrecoAtual" class="preview-preco-atual"></strong>
+              <span id="previewDesconto" class="preview-desconto" hidden></span>
+            </div>
+            <p id="previewCupom" class="preview-detalhe" hidden></p>
+            <p id="previewParcelamento" class="preview-detalhe" hidden></p>
+            <p id="previewTaxa" class="preview-detalhe" hidden></p>
+            <p id="previewObservacoes" class="preview-observacoes" hidden></p>
+            <p id="previewLinkLinha" class="preview-link" hidden>Produto: <a id="previewLink" target="_blank" rel="noopener noreferrer">Link da oferta</a></p>
+            <p class="preview-aviso">Prévia padrão. O envio final segue o template do destino.</p>
+          </div>
+        </section>
       </section>
     </main>
 
@@ -185,6 +211,7 @@
     <script src="../services/auth.js"></script>
     <script src="../core/product-contract.js"></script>
     <script src="../core/marketplace-detector.js"></script>
+    <script src="../selection/bulk-list-runner.js"></script>
     <script src="./panel.js"></script>
   </body>
 </html>

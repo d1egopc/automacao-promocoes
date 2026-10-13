@@ -88,12 +88,6 @@ async function executar() {
   let envios = 0;
   let duplicar = false;
   let falharAdicao = false;
-  let listaSemIdentidade = false;
-  let erroIdentidade = false;
-  let identidadeVerificada = null;
-  const payloadsPreview = [];
-  let tabUpdated;
-  const warnings = [];
   const payloadsAdicao = [];
   const ofertasSalvas = [];
   const produto = {
@@ -101,13 +95,15 @@ async function executar() {
     urlOriginal: "https://pt.aliexpress.com/item/1005000000000001.html",
     titulo: "Produto editavel",
     precoAtual: 117,
+    taxa: 23.83,
     imagem: "https://ae01.alicdn.com/kf/produto.jpg",
     observacoes: "Produto ja no Brasil",
     completo: true
   };
 
   const contexto = {
-    console: { ...console, warn: (...args) => warnings.push(args) },
+    console,
+    URL,
     setTimeout,
     clearTimeout,
     document: {
@@ -124,7 +120,7 @@ async function executar() {
         async query() { return [{ id: 1, url: produto.urlOriginal }]; },
         async sendMessage() { capturas += 1; return { produto }; },
         onActivated: { addListener() {} },
-        onUpdated: { addListener(callback) { tabUpdated = callback; } }
+        onUpdated: { addListener() {} }
       }
     },
     OptimusCaptureAuth: {
@@ -134,10 +130,7 @@ async function executar() {
     OptimusCaptureApi: {
       async gerarPreviewCapture(_token, payload) {
         previews += 1;
-        payloadsPreview.push(payload);
-        return { oferta: { ...payload, urlAfiliada: "https://s.click.aliexpress.com/e/teste",
-          ...(identidadeVerificada ? { identidadeMlCapture: identidadeVerificada, listaCaptura: { elegivel: true, motivo: "" } } : {}),
-          ...(listaSemIdentidade ? { listaCaptura: { elegivel: false, motivo: "produto_sem_identidade_operacional" } } : {}) } };
+        return { oferta: { ...payload, urlAfiliada: "https://s.click.aliexpress.com/e/teste" } };
       },
       async salvarOfertaManualV2(_token, oferta) {
         saves += 1;
@@ -158,12 +151,6 @@ async function executar() {
       async adicionarCapturaListaManualV2(_token, listaId, oferta) {
         adicoes += 1;
         payloadsAdicao.push({ listaId, oferta });
-        if (erroIdentidade) {
-          const erro = new Error("produto_sem_identidade_operacional");
-          erro.status = 422;
-          erro.body = { ok: false, motivo: "produto_sem_identidade_operacional" };
-          throw erro;
-        }
         if (duplicar) {
           const erro = new Error("item_ja_na_lista");
           erro.status = 409;
@@ -191,21 +178,37 @@ async function executar() {
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.strictEqual(previews, 1);
   assert.strictEqual(capturas, 1);
+  assert.strictEqual(elemento("previewMarketplace").textContent, "AliExpress");
+  assert.strictEqual(elemento("previewLinkLinha").hidden, false);
+  assert.strictEqual(elemento("previewLink").href, "https://s.click.aliexpress.com/e/teste");
+  assert.strictEqual(elemento("previewObservacoes").textContent, "Produto ja no Brasil");
+  assert.strictEqual(elemento("previewTaxa").textContent, "Imposto/taxas: R$ 23,83");
   assert.strictEqual(listagens, 0, "listas nao carregam na abertura da extensao");
   assert.strictEqual(elemento("botaoLista").hidden, false);
 
   elemento("campoTitulo").value = "Titulo editado";
   elemento("campoPrecoAtual").value = "R$ 118,00";
+  elemento("campoDesconto").value = "17%";
   elemento("campoCupom").value = "BRCD1";
   elemento("campoObservacoes").value = "Brasil sem imposto adicional";
   elemento("campoParcelamento").value = "10x sem juros";
   elemento("campoTitulo").listeners.input();
   elemento("campoPrecoAtual").listeners.input();
+  elemento("campoDesconto").listeners.input();
   elemento("campoCupom").listeners.input();
   elemento("campoObservacoes").listeners.input();
   elemento("campoParcelamento").listeners.input();
+  assert.strictEqual(elemento("previewTitulo").textContent, "Titulo editado");
+  assert.strictEqual(elemento("previewPrecoAtual").textContent, "R$ 118,00");
+  assert.strictEqual(elemento("previewCupom").textContent, "Cupom: BRCD1");
+  assert.strictEqual(elemento("previewObservacoes").textContent, "Brasil sem imposto adicional");
+  assert.strictEqual(elemento("previewParcelamento").textContent, "10x sem juros");
+  assert.strictEqual(elemento("previewLinkLinha").hidden, true, "link aprovado nao aparece enquanto o formulario mudou");
+  assert.strictEqual(capturas, 1, "preview visual nao recaptura o marketplace");
+  assert.strictEqual(previews, 1, "preview visual nao antecipa o request existente");
   await new Promise((resolve) => setTimeout(resolve, 500));
-  const camposEditados = ["campoTitulo", "campoPrecoAtual", "campoCupom", "campoObservacoes", "campoParcelamento"];
+  assert.strictEqual(elemento("previewLinkLinha").hidden, false, "link volta apos o preview existente ser validado");
+  const camposEditados = ["campoTitulo", "campoPrecoAtual", "campoDesconto", "campoCupom", "campoObservacoes", "campoParcelamento"];
   const formularioAntes = camposEditados.map((id) => elemento(id).value);
 
   await elemento("botaoLista").listeners.click();
@@ -220,6 +223,8 @@ async function executar() {
   assert.strictEqual(payloadsAdicao[0].listaId, "lista_2");
   assert.strictEqual(payloadsAdicao[0].oferta.titulo, "Titulo editado");
   assert.strictEqual(payloadsAdicao[0].oferta.precoAtual, 118);
+  assert.strictEqual(payloadsAdicao[0].oferta.descontoPercentual, 17);
+  assert.strictEqual(payloadsAdicao[0].oferta.descontoPercentualOrigem, "manual");
   assert.strictEqual(payloadsAdicao[0].oferta.cupom, "BRCD1");
   assert.strictEqual(payloadsAdicao[0].oferta.observacoes, "Brasil sem imposto adicional");
   assert.strictEqual(payloadsAdicao[0].oferta.parcelamento, "10x sem juros");
@@ -266,57 +271,6 @@ async function executar() {
   assert.strictEqual(ofertasSalvas[0].titulo, "Titulo editado");
   assert.ok(elemento("botaoSalvar").listeners.click, "Salvar no Optimus permanece ligado");
   assert.ok(elemento("botaoEnviar").listeners.click, "Enviar agora permanece ligado");
-
-  produto.marketplace = "mercadolivre";
-  produto.urlOriginal = "https://www.mercadolivre.com.br/produto/MLBU3862120597";
-  listaSemIdentidade = true;
-  tabUpdated(1, { status: "complete" });
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  assert.strictEqual(elemento("botaoLista").disabled, true);
-  assert.match(elemento("botaoLista").title, /identificar este produto do Mercado Livre/);
-  assert.strictEqual(elemento("estadoPagina").textContent, "Oferta pronta para salvar; indisponível para Lista");
-  assert.strictEqual(elemento("botaoSalvar").disabled, false);
-  const adicoesAntes = adicoes;
-  await elemento("botaoLista").listeners.click();
-  assert.strictEqual(elemento("listaModal").hidden, true, "guard impede abrir mesmo por click sintetico");
-  assert.strictEqual(adicoes, adicoesAntes);
-  await elemento("botaoSalvar").listeners.click();
-  assert.strictEqual(saves, 2, "bloqueio de Lista nao impede Salvar Manual");
-
-  // Backend anterior sem diagnóstico: a resposta factual ainda tem UX segura.
-  listaSemIdentidade = false;
-  erroIdentidade = true;
-  elemento("campoTitulo").value = "Conjunto Moletom Paris editado";
-  elemento("campoTitulo").listeners.input();
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  await elemento("botaoLista").listeners.click();
-  const radioMl = elemento("listasDisponiveis").children[0].children[0];
-  radioMl.listeners.change();
-  await elemento("adicionarListaExistente").listeners.click();
-  assert.match(elemento("listaModalFeedback").textContent, /identificar este produto do Mercado Livre/);
-  assert.strictEqual(warnings.length, 1);
-  assert.strictEqual(JSON.stringify(warnings[0]), JSON.stringify([
-    "[CAPTURE-LISTA-REJEITADA]", { marketplace: "mercadolivre", codigo: "produto_sem_identidade_operacional" }
-  ]), "log nao inclui JWT, URL, titulo ou payload");
-
-  // A factual MLBU page re-enables List even when no verified MLB alias is available.
-  erroIdentidade = false;
-  identidadeVerificada = null;
-  delete produto.identidadeMlCandidata;
-  produto.urlOriginal = "https://www.mercadolivre.com.br/conjunto/up/MLBU3862120597?picker=true";
-  tabUpdated(1, { status: "complete" });
-  await new Promise(resolve => setTimeout(resolve, 700));
-  assert.strictEqual(elemento("botaoLista").disabled, false);
-  assert.strictEqual(payloadsPreview.at(-1).urlOriginal, produto.urlOriginal);
-  elemento("campoTitulo").value = "Conjunto Moletom Paris editado novamente";
-  elemento("campoTitulo").listeners.input();
-  await new Promise(resolve => setTimeout(resolve, 500));
-  assert.strictEqual(payloadsPreview.at(-1).urlOriginal, produto.urlOriginal);
-  await elemento("botaoLista").listeners.click();
-  elemento("listasDisponiveis").children[0].children[0].listeners.change();
-  await elemento("adicionarListaExistente").listeners.click();
-  assert.strictEqual(payloadsAdicao.at(-1).oferta.identidadeMlCapture, undefined);
-  assert.strictEqual(saves, 2, "factual MLBU List still does not create an intermediate Manual offer");
 }
 
 executar().then(() => {

@@ -124,7 +124,8 @@
     if (faixaBloco) return { precoAtual: null, ...faixaBloco };
     const precoBloco = extrairPrimeiroPreco(textoBloco);
     if (precoBloco) return { precoAtual: precoBloco, precoMin: null, precoMax: null, temVariacaoPreco: false };
-    const htmlBloco = (String(html || "").match(/<section\b(?=[^>]*aria-live=["']polite["'])[^>]*>([\s\S]*?)<\/section>/i) || [])[1] || "";
+    const htmlFonte = String(html || bloco?.outerHTML || "");
+    const htmlBloco = (htmlFonte.match(/<section\b(?=[^>]*aria-live=["']polite["'])[^>]*>([\s\S]*?)<\/section>/i) || [])[1] || "";
     const textoHtml = textoHtmlFragmento(htmlBloco);
     const faixaHtml = extrairFaixaPreco(textoHtml);
     if (faixaHtml) return { precoAtual: null, ...faixaHtml };
@@ -143,6 +144,12 @@
 
   function precoAtualShopee(documento, html) {
     return precosAtuaisShopee(documento, html).precoAtual;
+  }
+
+  function precoProntoShopee(documento) {
+    const bloco = blocoPrecoPrincipal(documento);
+    const textoBloco = textoVisivel(bloco);
+    return Boolean(extrairFaixaPreco(textoBloco) || extrairPrimeiroPreco(textoBloco));
   }
 
   function precoAnteriorEstrutural(documento, precoAtual) {
@@ -191,7 +198,8 @@
     capturarShopeeDeHtml,
     precoAtualShopee,
     precosAtuaisShopee,
-    precoAnteriorEstrutural
+    precoAnteriorEstrutural,
+    precoProntoShopee
   };
   global.OptimusCaptureShopee = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

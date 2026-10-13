@@ -3,6 +3,7 @@
   const api = global.OptimusCaptureApi;
   const contrato = global.OptimusCaptureContract;
   const detector = global.OptimusCaptureDetector;
+  const bulkListRunner = global.OptimusCaptureBulkListRunner;
   const oportunidades = global.OptimusCaptureOportunidades;
   const oportunidadesVistas = global.OptimusCaptureOportunidadesVistas;
 
@@ -30,6 +31,7 @@
     previewOferta: null,
     previewKey: "",
     previewDesatualizado: false,
+    previewImagemFonte: "",
     previewTimer: null,
     salvandoOferta: false,
     ofertaSalvaId: "",
@@ -46,6 +48,10 @@
     listaSelecionadaId: "",
     carregandoListas: false,
     adicionandoLista: false,
+    selectionBatch: null,
+    selectionProcessing: false,
+    selectionRestoring: false,
+    selectionStorageListenerRegistered: false,
     oportunidadesCliente: null,
     oportunidadesVistas: null,
     oportunidades: [],
@@ -54,7 +60,7 @@
   const AMAZON_RETRY_DELAYS_MS = Object.freeze([500, 1000, 1600]);
   const PREVIEW_DEBOUNCE_MS = 450;
   const CAMPOS_MANUAIS = Object.freeze([
-    "campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoCupom", "campoObservacoes",
+    "campoTitulo", "campoPrecoAtual", "campoPrecoAnterior", "campoDesconto", "campoCupom", "campoObservacoes",
     "campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"
   ]);
 
@@ -66,6 +72,12 @@
   function setHidden(id, hidden) {
     const node = el(id);
     if (node) node.hidden = hidden;
+  }
+
+  function atualizarResumoParcelamento() {
+    const texto = String(el("campoParcelamento")?.value || "").trim();
+    setTexto("resumoParcelamento", texto);
+    setHidden("resumoParcelamento", !texto);
   }
 
   function urlOportunidadeSegura(valor = "") {
@@ -286,12 +298,66 @@
     return formatarMoeda(produto.precoAtual);
   }
 
+  function renderizarPreviewVisual() {
+    if (!state.produto) return;
+    const produto = produtoEditado();
+    setHidden("previewMedia", !state.produto.imagem);
+    atualizarImagemPreview();
+    setTexto("previewMarketplace", marketplaceLabel(produto.marketplace));
+    setTexto("previewTitulo", produto.titulo);
+    const avaliacao = String(produto.avaliacao ?? "").trim();
+    setTexto("previewAvaliacao", avaliacao ? `Avaliação: ${avaliacao}` : "");
+    setHidden("previewAvaliacao", !avaliacao);
+    const precoAnterior = formatarMoeda(produto.precoAnterior);
+    setTexto("previewPrecoAnterior", precoAnterior ? `De ${precoAnterior}` : "");
+    setHidden("previewPrecoAnterior", !precoAnterior);
+    const precoAtual = textoPrecoProduto(produto);
+    setTexto("previewPrecoAtual", precoAtual);
+    setHidden("previewPrecoLinha", !precoAtual);
+    const desconto = produto.descontoPercentual ? `${produto.descontoPercentual}% OFF` : "";
+    setTexto("previewDesconto", desconto);
+    setHidden("previewDesconto", !desconto);
+    setTexto("previewCupom", produto.cupom ? `Cupom: ${produto.cupom}` : "");
+    setHidden("previewCupom", !produto.cupom);
+    setTexto("previewParcelamento", produto.parcelamento);
+    setHidden("previewParcelamento", !produto.parcelamento);
+    const taxa = produto.marketplace === "aliexpress" && produto.taxa
+      ? (formatarMoeda(produto.taxa) || String(produto.taxa).trim()) : "";
+    setTexto("previewTaxa", taxa ? `Imposto/taxas: ${taxa}` : "");
+    setHidden("previewTaxa", !taxa);
+    setTexto("previewObservacoes", produto.observacoes);
+    setHidden("previewObservacoes", !produto.observacoes);
+    const link = el("previewLink");
+    const url = !state.previewDesatualizado && state.previewKey === chavePreview(produto)
+      ? urlOportunidadeSegura(state.previewOferta?.urlAfiliada) : "";
+    if (link) link.href = url;
+    setHidden("previewLinkLinha", !url);
+  }
+
+  function atualizarImagemPreview() {
+    if (!state.produto || (state.previewImagemFonte && state.previewImagemFonte === state.produto.imagem)) return;
+    const origem = el("produtoImagem");
+    const canvas = el("previewImagem");
+    const contexto = canvas?.getContext?.("2d");
+    if (!contexto) return;
+    contexto.clearRect(0, 0, canvas.width, canvas.height);
+    state.previewImagemFonte = "";
+    if (!state.produto.imagem || !origem?.complete || !origem.naturalWidth || !origem.naturalHeight) return;
+    const escala = Math.min(canvas.width / origem.naturalWidth, canvas.height / origem.naturalHeight);
+    const largura = origem.naturalWidth * escala;
+    const altura = origem.naturalHeight * escala;
+    contexto.drawImage(origem, (canvas.width - largura) / 2, (canvas.height - altura) / 2, largura, altura);
+    state.previewImagemFonte = state.produto.imagem;
+  }
+
   function chavePreview(produto = {}) {
     return [
       produto.urlOriginal || "",
       produto.titulo || "",
       produto.precoAtual || "",
       produto.precoAnterior || "",
+      produto.descontoPercentual || "",
+      produto.descontoPercentualOrigem || "",
       produto.precoMin || "",
       produto.precoMax || "",
       produto.temVariacaoPreco === true ? "variacao" : "",
@@ -398,13 +464,6 @@
     atualizarBotaoSalvar();
     atualizarBotaoEnviar();
     atualizarBotaoLista();
-  }
-
-  function atualizarDescontoDerivado() {
-    const campo = el("campoDesconto");
-    if (!campo) return;
-    const desconto = produtoEditado().descontoPercentual;
-    campo.value = desconto ? `${desconto}%` : "";
   }
 
   function agendarAtualizacaoPreview() {
@@ -722,6 +781,7 @@
       el("campoObservacoes").value = "";
     }
     setHidden("camposMagaluOpcionais", true);
+    atualizarResumoParcelamento();
     el("campoDesconto").value = "";
     setTexto("produtoMarketplace", "Marketplace");
     setTexto("statusProduto", "Produto ainda nao carregado");
@@ -752,12 +812,13 @@
     el("campoPrecoMin").value = manterCampoManual("campoPrecoMin", formatarMoeda(state.produto.precoMin), preservarFormulario);
     el("campoPrecoMax").value = manterCampoManual("campoPrecoMax", formatarMoeda(state.produto.precoMax), preservarFormulario);
     el("campoParcelamento").value = manterCampoManual("campoParcelamento", state.produto.parcelamento || "", preservarFormulario);
+    atualizarResumoParcelamento();
     setHidden("camposMagaluOpcionais", state.produto.marketplace !== "magalu");
     setHidden("camposFaixaPreco", state.produto.marketplace !== "magalu");
     el("campoObservacoes").value = manterCampoManual("campoObservacoes", preservarObservacaoManual
       ? state.observacaoManualValor
       : (state.produto.observacoes || ""), preservarFormulario);
-    el("campoDesconto").value = state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "";
+    el("campoDesconto").value = manterCampoManual("campoDesconto", state.produto.descontoPercentual ? `${state.produto.descontoPercentual}%` : "", preservarFormulario);
     setTexto("produtoMarketplace", marketplaceLabel(state.produto.marketplace));
     setTexto("statusProduto", capturaUtilizavel(state.produto) ? "Produto capturado" : "Captura incompleta");
     setTexto("statusLink", capturaUtilizavel(state.produto) ? "Preparando oferta..." : "Nao foi possivel preparar a oferta");
@@ -830,6 +891,8 @@
       }
       if (automatico && !forcar && state.ultimaUrlCapturada === urlCaptura && state.produto?.urlOriginal === urlCaptura) {
         if (capturaUtilizavel(state.produto)) {
+          renderizarPreviewVisual();
+          setHidden("previewView", false);
           const previewKeyAtual = chavePreview(produtoEditado());
           if (!previewCorrespondeAoFormulario() || state.ultimoPreviewKey !== previewKeyAtual) {
             setTexto("estadoPagina", "Preparando oferta...");
@@ -891,6 +954,11 @@
         setTexto("estadoPagina", "Nao foi possivel capturar este produto.");
         return;
       }
+      renderizarPreviewVisual();
+      setHidden("previewView", false);
+      atualizarBotaoSalvar();
+      atualizarBotaoEnviar();
+      atualizarBotaoLista();
       state.ultimaUrlCapturada = produto.urlOriginal || urlCaptura;
       logTiming("captura_local_valida", {
         marketplace: produto.marketplace,
@@ -913,11 +981,14 @@
   }
 
   function produtoEditado() {
+    const descontoEditado = state.camposEditados.has("campoDesconto");
     return contrato.normalizarProdutoCapturado({
       ...(state.produto || {}),
       titulo: valor("campoTitulo"),
       precoAtual: valor("campoPrecoAtual"),
       precoAnterior: valor("campoPrecoAnterior"),
+      descontoPercentual: valor("campoDesconto"),
+      descontoPercentualOrigem: descontoEditado ? "manual" : state.produto?.descontoPercentualOrigem,
       precoPix: valorOpcionalEditado("campoPrecoPix", state.produto?.precoPix),
       precoMin: valorOpcionalEditado("campoPrecoMin", state.produto?.precoMin),
       precoMax: valorOpcionalEditado("campoPrecoMax", state.produto?.precoMax),
@@ -932,8 +1003,8 @@
   }
 
   function invalidarPreviewPorEdicao() {
-    atualizarDescontoDerivado();
     state.previewDesatualizado = true;
+    renderizarPreviewVisual();
     setTexto("estadoPagina", "Preview desatualizado");
     setTexto("statusLink", "Preview desatualizado");
     setHidden("botaoPreview", false);
@@ -949,6 +1020,158 @@
     feedback.hidden = !mensagem;
     feedback.textContent = mensagem;
     feedback.dataset.tipo = tipo;
+  }
+
+  async function notificarSelecao(payload = {}) {
+    const batch = state.selectionBatch;
+    if (!batch?.sourceTabId || !batch?.requestId) return;
+    try {
+      await chrome.tabs.sendMessage(batch.sourceTabId, {
+        type: "OPTIMUS_SELECTION_PROGRESS",
+        requestId: batch.requestId,
+        ...payload
+      });
+    } catch {
+      // A aba de origem pode ter sido fechada; o processamento continua no painel.
+    }
+  }
+
+  function esperarAbaCompleta(tabId, timeoutMs = 25000) {
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      const finish = (error, tab) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated?.removeListener?.(onUpdated);
+        error ? reject(error) : resolve(tab);
+      };
+      const onUpdated = (updatedId, changeInfo, tab) => {
+        if (updatedId === tabId && changeInfo?.status === "complete") finish(null, tab);
+      };
+      const timeout = setTimeout(() => finish(new Error("selection_tab_timeout")), timeoutMs);
+      chrome.tabs.onUpdated?.addListener?.(onUpdated);
+      Promise.resolve(chrome.tabs.get(tabId)).then((tab) => {
+        if (tab?.status === "complete") finish(null, tab);
+      }).catch((error) => finish(error));
+    });
+  }
+
+  async function processarItemSelecionado(item, listaId, itemIndex = -1) {
+    let tab = null;
+    let abaOriginalId = null;
+    try {
+      const shopee = item.marketplace === "shopee";
+      if (shopee) abaOriginalId = (await abaAtiva())?.id || null;
+      tab = await chrome.tabs.create({ url: item.url, active: shopee });
+      await esperarAbaCompleta(tab.id);
+      tab = await chrome.tabs.get(tab.id);
+      const deteccao = detector.detectarMarketplacePorUrl(tab?.url || item.url);
+      if (!deteccao.suportado || deteccao.marketplace !== item.marketplace) throw new Error("selection_product_url_invalid");
+      const contextoCaptura = {
+        marketplace: deteccao.marketplace,
+        asin: deteccao.asin || asinSeguro(deteccao.url),
+        deteccao,
+        inicioCapturaMs: agoraMs(),
+        continua: async () => {
+          try {
+            const atual = await chrome.tabs.get(tab.id);
+            const vigente = detector.detectarMarketplacePorUrl(atual?.url || "");
+            return vigente.suportado && vigente.marketplace === item.marketplace;
+          } catch { return false; }
+        }
+      };
+      if (shopee) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "OPTIMUS_SHOPEE_SELECTION_READINESS_WAIT",
+            timeoutMs: 3500,
+            intervalMs: 250
+          });
+        } catch {
+          // Se a aba perder o content script, mantém o Capture oficial como fallback.
+        }
+      }
+      const resposta = await enviarMensagemCapturaComRecuperacao(tab.id, contextoCaptura);
+      const produto = contrato.normalizarProdutoCapturado(resposta?.produto || {});
+      if (!capturaUtilizavel(produto) || motivoAmazonIncompleta(produto, deteccao)) throw new Error("selection_capture_incomplete");
+      const flowId = novaChaveIdempotencia("selection-flow");
+      const preview = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto), flowId);
+      const oferta = ofertaPreviewParaSalvar(preview?.oferta || {});
+      if (!oferta?.titulo || oferta?.listaCaptura?.elegivel === false) throw new Error("selection_offer_not_list_eligible");
+      await api.adicionarCapturaListaManualV2(state.auth.token, listaId, oferta);
+      return "added";
+    } catch (erro) {
+      const duplicate = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
+      return duplicate ? "existing" : "error";
+    } finally {
+      if (tab?.id) {
+        try { await chrome.tabs.remove(tab.id); } catch { /* aba já fechada */ }
+      }
+      if (abaOriginalId) {
+        try { await chrome.tabs.update(abaOriginalId, { active: true }); } catch { /* aba original pode ter sido fechada */ }
+      }
+    }
+  }
+
+  async function processarSelecaoEmLista(lista) {
+    if (!state.selectionBatch || state.selectionProcessing || !bulkListRunner) return;
+    const batch = state.selectionBatch;
+    state.selectionProcessing = true;
+    state.adicionandoLista = true;
+    el("adicionarListaExistente").disabled = true;
+    mostrarFeedbackLista(`Adicionando... 0/${batch.items.length}`, "");
+    try {
+      let shopeeLane = Promise.resolve();
+      const processItem = (item, itemIndex) => {
+        if (item.marketplace !== "shopee") return processarItemSelecionado(item, lista.id, itemIndex);
+        const current = shopeeLane.catch(() => {}).then(() => processarItemSelecionado(item, lista.id, itemIndex));
+        shopeeLane = current.catch(() => {});
+        return current;
+      };
+      const summary = await bulkListRunner.run({
+        items: batch.items,
+        concurrency: 2,
+        processItem,
+        onProgress: async (progress) => {
+          mostrarFeedbackLista(`Adicionando... ${progress.completed}/${progress.total}`, "");
+          await notificarSelecao({ completed: progress.completed, total: progress.total });
+        }
+      });
+      mostrarFeedbackLista(`Adicionados ${summary.added} | Já existentes ${summary.existing} | Erro ${summary.errors}`,
+        summary.errors ? "erro" : "sucesso");
+      await notificarSelecao({ done: true, summary });
+      state.selectionBatch = null;
+      try { await chrome.storage.session.remove(bulkListRunner.SESSION_KEY); } catch { /* resultado já terminal no painel */ }
+      setTexto("listaModalTitulo", "Adicionar à lista");
+      setHidden("abrirCriarLista", false);
+    } finally {
+      state.selectionProcessing = false;
+      state.adicionandoLista = false;
+      el("adicionarListaExistente").disabled = !state.listaSelecionadaId;
+    }
+  }
+
+  async function restaurarSelecaoPendente() {
+    if (!bulkListRunner || !state.auth?.token || state.selectionProcessing || state.selectionRestoring) return;
+    state.selectionRestoring = true;
+    try {
+      const stored = await chrome.storage.session.get(bulkListRunner.SESSION_KEY);
+      const batch = stored?.[bulkListRunner.SESSION_KEY];
+      if (!batch?.requestId || !Array.isArray(batch.items) || !batch.items.length || batch.items.length > 30) return;
+      state.selectionBatch = batch;
+      await abrirListaModal({ selection: true, createList: batch.createList === true });
+    } finally {
+      state.selectionRestoring = false;
+    }
+  }
+
+  function registrarSelecaoStorage() {
+    if (state.selectionStorageListenerRegistered || !chrome.storage?.onChanged) return;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "session" && changes[bulkListRunner?.SESSION_KEY]?.newValue) void restaurarSelecaoPendente();
+    });
+    state.selectionStorageListenerRegistered = true;
   }
 
   function renderizarListas() {
@@ -988,7 +1211,15 @@
   }
 
   function fecharListaModal() {
+    if (state.selectionProcessing) return;
+    if (state.selectionBatch && bulkListRunner) {
+      void notificarSelecao({ done: true, summary: { added: 0, existing: 0, errors: 0 }, cancelled: true });
+      void chrome.storage.session.remove(bulkListRunner.SESSION_KEY);
+      state.selectionBatch = null;
+    }
     setHidden("listaModal", true);
+    setTexto("listaModalTitulo", "Adicionar à lista");
+    setHidden("abrirCriarLista", false);
     state.listaSelecionadaId = "";
     state.carregandoListas = false;
     mostrarFeedbackLista();
@@ -1002,11 +1233,14 @@
     if (criar) el("nomeNovaLista")?.focus?.();
   }
 
-  async function abrirListaModal() {
-    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.carregandoListas) return;
-    if (listaBloqueadaPorIdentidade()) return;
+  async function abrirListaModal(opcoes = {}) {
+    const selection = opcoes.selection === true && Boolean(state.selectionBatch);
+    if (!state.auth?.token || (!selection && !previewCorrespondeAoFormulario()) || state.carregandoListas) return;
+    if (!selection && listaBloqueadaPorIdentidade()) return;
+    setTexto("listaModalTitulo", selection ? `Adicionar ${state.selectionBatch.items.length} produtos à lista` : "Adicionar à lista");
+    setHidden("abrirCriarLista", selection);
     setHidden("listaModal", false);
-    mostrarCriacaoLista(false);
+    mostrarCriacaoLista(selection && opcoes.createList === true);
     state.listas = [];
     state.listaSelecionadaId = "";
     state.carregandoListas = true;
@@ -1062,7 +1296,6 @@
       const jaExiste = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
       const semIdentidade = String(erro?.body?.motivo || erro?.message || "") === "produto_sem_identidade_operacional";
       if (semIdentidade && state.previewOferta?.marketplace === "mercadolivre") {
-        console.warn("[CAPTURE-LISTA-REJEITADA]", { marketplace: "mercadolivre", codigo: "produto_sem_identidade_operacional" });
         mostrarFeedbackLista(MENSAGEM_IDENTIDADE_LISTA_ML, "erro");
         return false;
       }
@@ -1079,6 +1312,10 @@
   async function adicionarListaExistente() {
     const lista = state.listas.find((item) => String(item?.id || "") === state.listaSelecionadaId);
     if (!lista) return;
+    if (state.selectionBatch) {
+      await processarSelecaoEmLista(lista);
+      return;
+    }
     await adicionarOfertaNaLista(lista.id, lista.nome);
   }
 
@@ -1105,9 +1342,15 @@
       return;
     }
     state.adicionandoLista = false;
+    state.listas = [...state.listas, lista];
+    state.listaSelecionadaId = String(lista.id);
+    renderizarListas();
+    if (state.selectionBatch) {
+      await processarSelecaoEmLista(lista);
+      return;
+    }
     const adicionou = await adicionarOfertaNaLista(lista.id, lista.nome || nome);
     if (adicionou) {
-      state.listas = [...state.listas, lista];
       mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada e oferta adicionada`, "sucesso");
     } else {
       mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada, mas a oferta nao foi adicionada.`, "erro");
@@ -1169,25 +1412,6 @@
         return;
       }
       const oferta = resposta?.oferta || {};
-      const preview = el("previewView");
-      preview.innerHTML = "";
-      const titulo = document.createElement("h2");
-      titulo.textContent = "Preview aprovado";
-      const resumo = document.createElement("p");
-      const tituloResumo = oferta.titulo || produto.titulo;
-      const precoResumo = textoPrecoProduto({
-        ...produto,
-        ...oferta,
-        precoAtual: oferta.precoAtual || produto.precoAtual,
-        precoMin: oferta.precoMin || produto.precoMin,
-        precoMax: oferta.precoMax || produto.precoMax,
-        temVariacaoPreco: oferta.temVariacaoPreco === true || produto.temVariacaoPreco === true
-      });
-      resumo.textContent = precoResumo ? `${tituloResumo} - ${precoResumo}` : tituloResumo;
-      const link = document.createElement("p");
-      link.textContent = oferta.urlAfiliada ? "Link afiliado gerado pelo Optimus." : "Link afiliado nao retornado.";
-      preview.append(titulo, resumo, link);
-      setHidden("previewView", false);
       state.ultimoPreviewKey = previewKey;
       state.previewOferta = ofertaPreviewParaSalvar(oferta);
       if (state.previewKey !== previewKey) {
@@ -1197,6 +1421,8 @@
       }
       state.previewKey = previewKey;
       state.previewDesatualizado = false;
+      renderizarPreviewVisual();
+      setHidden("previewView", false);
       setHidden("botaoPreview", true);
       if (state.previewSalvoKey !== previewKey) {
         state.ofertaSalvaId = "";
@@ -1361,15 +1587,16 @@
     atualizarBotaoSalvar();
 
     try {
+      const ofertaId = await salvarPreviewAtual();
+      if (!ofertaId) throw new Error("oferta_nao_salva");
       if (state.previewKey !== previewKey) throw new Error("preview_alterado");
-      const oferta = ofertaPreviewParaSalvar(state.previewOferta);
       let resposta;
       try {
-        resposta = await api.enviarAgoraManualV2(state.auth.token, oferta, destinosIds, chaveEnvio, state.captureFlowId);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
       } catch (erro) {
         if (!erroRedeAmbiguo(erro)) throw erro;
         setTexto("statusLink", "Nao foi possivel confirmar o envio. Verificando...");
-        resposta = await api.enviarAgoraManualV2(state.auth.token, oferta, destinosIds, chaveEnvio, state.captureFlowId);
+        resposta = await api.enviarAgoraManualV2(state.auth.token, ofertaId, destinosIds, chaveEnvio, state.captureFlowId);
       }
       if (state.previewKey !== previewKey) return;
       const envio = resposta?.envio || {};
@@ -1513,6 +1740,7 @@
   async function init() {
     state.oportunidadesCliente = oportunidades?.criarClienteOportunidades?.({ api }) || null;
     state.oportunidadesVistas = oportunidadesVistas?.criarRegistroVistas?.() || null;
+    registrarSelecaoStorage();
     registrarEventosAbas();
     el("botaoConectar").addEventListener("click", conectarComOptimus);
     el("botaoLogin").addEventListener("click", entrar);
@@ -1528,14 +1756,20 @@
     el("criarEAdicionarLista").addEventListener("click", criarEAdicionarLista);
     el("botaoCancelarEnvio").addEventListener("click", ocultarDestinos);
     el("botaoOportunidades").addEventListener("click", alternarPopoverOportunidades);
+    el("produtoImagem").addEventListener("load", atualizarImagemPreview);
     el("fecharOportunidades")?.addEventListener("click", fecharPopoverOportunidades);
     el("campoTitulo").addEventListener("input", () => { marcarCampoEditado("campoTitulo"); invalidarPreviewPorEdicao(); });
     el("campoPrecoAtual").addEventListener("input", () => { marcarCampoEditado("campoPrecoAtual"); invalidarPreviewPorEdicao(); });
     el("campoPrecoAnterior").addEventListener("input", () => { marcarCampoEditado("campoPrecoAnterior"); invalidarPreviewPorEdicao(); });
+    el("campoDesconto").addEventListener("input", () => { marcarCampoEditado("campoDesconto"); invalidarPreviewPorEdicao(); });
     el("campoCupom").addEventListener("input", () => { marcarCampoEditado("campoCupom"); invalidarPreviewPorEdicao(); });
     el("campoObservacoes").addEventListener("input", () => { marcarCampoEditado("campoObservacoes"); invalidarPreviewPorObservacaoManual(); });
     ["campoPrecoPix", "campoPrecoMin", "campoPrecoMax", "campoParcelamento"].forEach((id) => {
-      el(id).addEventListener("input", () => { marcarCampoEditado(id); invalidarPreviewPorEdicao(); });
+      el(id).addEventListener("input", () => {
+        marcarCampoEditado(id);
+        if (id === "campoParcelamento") atualizarResumoParcelamento();
+        invalidarPreviewPorEdicao();
+      });
     });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) void carregarOportunidades();
@@ -1557,6 +1791,7 @@
       state.auth = await global.OptimusCaptureStorage.lerAuth();
     }
     renderAuth();
+    void restaurarSelecaoPendente();
   }
 
   document.addEventListener("DOMContentLoaded", init);

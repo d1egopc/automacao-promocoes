@@ -86,6 +86,8 @@
         "adapters/registry.js",
         "content/capture-content.js",
         "core/launcher-policy.js",
+        "selection/card-strategy.js",
+        "selection/selection-mode.js",
         "content/launcher.js"
       ],
       "run_at": "document_idle"

@@ -250,60 +250,25 @@
       ...(associacaoPagina ? { associacaoPagina } : {})
     };
   }
-  async function fetchTexto(url, timeoutMs = TIMEOUT_MS, fetchImpl = fetch) {
+  async function fetchTexto(url, timeoutMs = TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
     try {
-      // Validate each redirect before the request, not only the final URL.
-      for (let i = 0; i < 4; i++) {
-        response = await fetchImpl(url, { redirect: "manual", signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
-        if (![301, 302, 303, 307, 308].includes(response.status)) break;
-        const next = urlMercadoLivre(response.headers?.get?.("location"), url);
-        await response.body?.cancel?.();
-        if (!next || i === 3) throw new Error("ml_identity_redirect_invalido");
-        url = next.toString();
-      }
-      if (Number(response.headers?.get?.("content-length")) > 2_000_000) throw new Error("ml_identity_html_muito_grande");
-      let html;
-      if (response.body?.getReader) {
-        const reader = response.body.getReader(), chunks = [];
-        let total = 0;
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            total += value.byteLength;
-            if (total > 2_000_000) throw new Error("ml_identity_html_muito_grande");
-            chunks.push(value);
-          }
-        } finally { await reader.cancel(); reader.releaseLock(); }
-        const bytes = new Uint8Array(total);
-        let offset = 0;
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        html = new TextDecoder().decode(bytes);
-      } else html = await response.text();
-      if (html.length > 2_000_000) throw new Error("ml_identity_html_muito_grande");
-      return { response, html };
+      response = await fetch(url, { redirect: "follow", signal: controller.signal, headers: { Accept: "text/html,application/xhtml+xml" } });
+      return { response, html: await response.text() };
     } finally {
       clearTimeout(timer);
       try { await response?.body?.cancel?.(); } catch (_) {}
     }
   }
-  async function validarImagem(url, timeoutMs = TIMEOUT_MS, fetchImpl = fetch) {
+  async function validarImagem(url, timeoutMs = TIMEOUT_MS) {
     if (!url) return "";
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response = null;
     try {
-      for (let i = 0; i < 4; i++) {
-        response = await fetchImpl(url, { redirect: "manual", signal: controller.signal });
-        if (![301, 302, 303, 307, 308].includes(response.status)) break;
-        const next = imagemOficial(response.headers?.get?.("location"), url);
-        await response.body?.cancel?.();
-        if (!next || i === 3) throw new Error("ml_identity_imagem_redirect_invalido");
-        url = next;
-      }
+      response = await fetch(url, { redirect: "follow", signal: controller.signal });
       const finalUrl = imagemOficial(response.url || url);
       const contentType = texto(response.headers?.get?.("content-type") || "").toLowerCase().split(";", 1)[0];
       if (!response.ok || !finalUrl || !contentType.startsWith("image/")) throw new Error("ml_identity_imagem_http_invalida");
@@ -313,16 +278,16 @@
       try { await response?.body?.cancel?.(); } catch (_) {}
     }
   }
-  async function resolver({ productId, sourceUrl }, opcoes = {}) {
+  async function resolver({ productId, sourceUrl }) {
     const esperado = normalizarMlb(productId);
     const origem = urlMercadoLivre(sourceUrl);
     if (!origem || (!pageMlbu(origem.toString()) && (!esperado || normalizarMlb(origem.pathname) !== esperado))) throw new Error("ml_identity_entrada_invalida");
-    const leitura = await fetchTexto(origem.toString(), TIMEOUT_MS, opcoes.fetch || fetch);
+    const leitura = await fetchTexto(origem.toString());
     const finalUrl = urlMercadoLivre(leitura.response?.url || origem.toString());
     if (!leitura.response?.ok || !finalUrl) throw new Error(`ml_identity_http_${leitura.response?.status || 0}`);
     if (pageMlbu(origem.toString()) && pageMlbu(origem.toString()) !== pageMlbu(finalUrl.toString())) throw new Error("ml_identity_redirect_produto_divergente");
     const resultado = extrair(leitura.html, esperado, finalUrl.toString());
-    if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial, TIMEOUT_MS, opcoes.fetch || fetch);
+    if (resultado.imagemOficial) resultado.imagemOficial = await validarImagem(resultado.imagemOficial);
     const collectedAt = new Date().toISOString();
     return {
       capability: CAPABILITY,
