@@ -13,6 +13,7 @@ function integer(value) {
   }
   return number;
 }
+const MAX_CREDIT_BALANCE = 2147483647;
 function epochIso(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) throw new Error("universal_credit_epoch_invalid");
@@ -445,6 +446,80 @@ async function setAdminBalance({ pool, workspaceId, amount,
   });
 }
 
+// Additive administrative top-ups never rewrite the absolute balance policy
+// and never touch an existing transport reservation. The balance row lock
+// serializes this movement with holds, ACK settlement and releases.
+async function addAdminBalance({ pool, workspaceId, amount,
+  idempotencyKey, reason = "admin_credit_topup", operatorId = "" }) {
+  const workspace = text(workspaceId);
+  const key = text(idempotencyKey);
+  const delta = Number(amount);
+  if (!workspace || !key || key.length > 200) {
+    throw new Error("universal_admin_credit_topup_identity_invalid");
+  }
+  if (!Number.isSafeInteger(delta) || delta <= 0 || delta > MAX_CREDIT_BALANCE) {
+    throw new Error("universal_admin_credit_topup_amount_invalid");
+  }
+  return transaction(pool, async client => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [key]);
+    const state = (await client.query(`SELECT mode,operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1 FOR SHARE`)).rows[0];
+    if (state?.mode !== "UNIVERSAL" || !state.operation_epoch_started_at) {
+      throw new Error("universal_admin_credit_mode_required");
+    }
+    const epoch = epochIso(state.operation_epoch_started_at);
+    const balance = (await client.query(`SELECT balance,reserved,revision
+      FROM engine_universal_credit_balances
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
+    [epoch, workspace])).rows[0];
+    if (!balance) throw new Error("universal_admin_credit_opening_missing");
+
+    const existing = (await client.query(`SELECT cliente_id,amount,
+        operation_epoch_started_at,universal_movement_type,balance_policy
+      FROM financial_credit_ledger WHERE idempotency_key=$1`, [key])).rows[0];
+    if (existing) {
+      const existingEpoch = existing.operation_epoch_started_at
+        ? epochIso(existing.operation_epoch_started_at) : "";
+      if (existing.cliente_id !== workspace || Number(existing.amount) !== delta ||
+          existingEpoch !== epoch ||
+          existing.universal_movement_type !== "FINANCIAL_MOVEMENT" ||
+          existing.balance_policy !== "add") {
+        throw new Error("universal_admin_credit_idempotency_conflict");
+      }
+      return { ok: true, duplicate: true, delta,
+        balance: Number(balance.balance), reserved: Number(balance.reserved),
+        available: Number(balance.balance) - Number(balance.reserved) };
+    }
+
+    const current = Number(balance.balance);
+    const next = current + delta;
+    if (!Number.isSafeInteger(next) || next > MAX_CREDIT_BALANCE ||
+        next < Number(balance.reserved)) {
+      throw new Error("universal_admin_credit_topup_projection_invalid");
+    }
+    const revision = Number(balance.revision) + 1;
+    await client.query(`UPDATE engine_universal_credit_balances
+      SET balance=$3,revision=$4,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+    [epoch, workspace, next, revision]);
+    await client.query(`INSERT INTO financial_credit_ledger
+      (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
+       projection_status,metadata,operation_epoch_started_at,
+       universal_movement_type,universal_balance_revision,
+       universal_balance_after)
+      VALUES ($1,'admin_credit',$2,'add',$3,$4,'projected',$5::jsonb,$6,
+        'FINANCIAL_MOVEMENT',$7,$8)`,
+    [workspace, delta, text(reason).slice(0, 200), key,
+      JSON.stringify({ authority: "postgresql_universal",
+        origin: "admin_credit_topup", operatorId: text(operatorId) }),
+      epoch, revision, next]);
+    return { ok: true, duplicate: false, delta,
+      balanceBefore: current, balance: next,
+      reserved: Number(balance.reserved),
+      available: next - Number(balance.reserved), revision };
+  });
+}
+
 async function rollbackBalanceProjection({ pool, workspaceId }) {
   const workspace = text(workspaceId);
   if (!workspace || !pool || typeof pool.query !== "function") {
@@ -503,4 +578,5 @@ module.exports = { openBalance, prepareRegistrationOpening,
   registerSimulatedCycle,
   readBalance, holdForTargetTx,
   settleConfirmedTx, releaseForTargetTx, applyFinancialLedger,setAdminBalance,
+  addAdminBalance,
   rollbackBalanceProjection };

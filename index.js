@@ -101,6 +101,7 @@ const { historicoResumo, listHistory, historyDetail, projectPreUniversalTerminal
   require("./modules/engine/universal-history.repository");
 const { readBalance: lerSaldoUniversal,
   setAdminBalance: definirSaldoAdminUniversal,
+  addAdminBalance: adicionarSaldoAdminUniversal,
   prepareRegistrationOpening: prepararAberturaCadastroUniversal,
   reconcileRegistrationOpening: reconciliarAberturaCadastroUniversal,
   recoverRegistrationOpenings: recuperarAberturasCadastroUniversal,
@@ -15886,6 +15887,84 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
     usuario: { ...sanitizarUsuarioAdmin(usuario),
       creditos: await saldoCreditosParaExibicao(id, usuario) }
   });
+});
+
+app.post("/admin/usuarios/:id/creditos/topup", exigirAdminMasterEstrito, async (req, res) => {
+  if (!isAdminMaster(req)) {
+    return res.status(403).json({
+      ok: false,
+      erro: "Acesso restrito"
+    });
+  }
+
+  const { id } = req.params;
+  const usuario = buscarUsuarioPorIdSeguro(usuarios, id);
+  if (!usuario) {
+    return res.status(404).json({
+      ok: false,
+      erro: "Usuario nao encontrado"
+    });
+  }
+
+  const body = req.body || {};
+  const quantidade = Number(body.quantidade);
+  const idempotencyKey = String(body.idempotencyKey || body.creditOperationId || "").trim();
+  if (!Number.isSafeInteger(quantidade) || quantidade <= 0) {
+    return res.status(400).json({
+      ok: false,
+      erro: "universal_admin_credit_topup_amount_invalid"
+    });
+  }
+  if (!idempotencyKey || idempotencyKey.length > 160) {
+    return res.status(400).json({
+      ok: false,
+      erro: "universal_admin_credit_topup_idempotency_required"
+    });
+  }
+  if (modoMotorReal !== "UNIVERSAL") {
+    return res.status(409).json({
+      ok: false,
+      erro: "universal_admin_credit_mode_required"
+    });
+  }
+
+  try {
+    const movimento = await adicionarSaldoAdminUniversal({
+      pool: getEnginePool(),
+      workspaceId: id,
+      amount: quantidade,
+      idempotencyKey: `universal:admin:topup:${idempotencyKey}`,
+      reason: String(body.motivoCredito || body.motivo || "admin_credit_topup"),
+      operatorId: getClienteId(req) || "admin"
+    });
+    return res.json({
+      ok: true,
+      duplicate: movimento.duplicate === true,
+      movimento: {
+        quantidade: movimento.delta,
+        balance: movimento.balance,
+        reserved: movimento.reserved,
+        available: movimento.available
+      },
+      usuario: { ...sanitizarUsuarioAdmin(usuario),
+        creditos: movimento.balance }
+    });
+  } catch (error) {
+    const codigo = String(error?.message || "universal_admin_credit_topup_failed");
+    if (codigo === "universal_admin_credit_opening_missing" ||
+        codigo === "universal_admin_credit_mode_required" ||
+        codigo === "universal_admin_credit_topup_projection_invalid") {
+      return res.status(409).json({ ok: false, erro: codigo });
+    }
+    if (codigo === "universal_admin_credit_idempotency_conflict") {
+      return res.status(409).json({ ok: false, erro: codigo });
+    }
+    if (codigo === "universal_admin_credit_topup_amount_invalid" ||
+        codigo === "universal_admin_credit_topup_identity_invalid") {
+      return res.status(400).json({ ok: false, erro: codigo });
+    }
+    throw error;
+  }
 });
 
 app.post("/minha-config", async (req, res) => {
