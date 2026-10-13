@@ -52,7 +52,11 @@ Destino e alvo são capturados no fanout e copiados para o Histórico na mesma
 transação da decisão terminal. A chave `(workspace_id, source_key)` torna a
 projeção idempotente. Falhas anteriores ao Universal só podem ser projetadas
 depois de uma transição terminal persistida e quando o motivo puder ser
-classificado com segurança.
+classificado com segurança. Além do motivo, o writer pré-Universal exige
+evidência comercial estruturada já persistida: marketplace identificado,
+identidade canônica de produto, link comercial classificado ou título e preço
+capturados com proveniência. Texto da mensagem, título isolado e URL não
+comercial não bastam. Esse gate não altera a terminalização técnica do job.
 
 ## Performance
 

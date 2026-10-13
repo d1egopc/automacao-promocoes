@@ -100,12 +100,49 @@ async function projectUniversalTerminalTx(client, { queueItemId, workspaceId } =
 }
 
 const SAFE_PRE_UNIVERSAL = /(?:sem_imagem|imagem.*apos_retries|sem_link|link.*ausent|afiliacao.*apos_retries|marketplace_nao_detectado|adapter_nao_implementado|erro_parser|parser.*falh|contrato.*inval|evento_nao_encontrado|integracao_ausente)/i;
+const PRE_UNIVERSAL_MARKETPLACES = new Set(["mercadolivre", "amazon", "shopee", "aliexpress", "awin", "kabum", "magalu"]);
+const PRODUCT_LINK_ROLES = new Set(["produto", "link_produto", "afiliado", "pc", "link_pc", "app", "link_app", "moedas", "link_moedas"]);
+function preUniversalCommercialEvidence(job = {}) {
+  const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata : {};
+  const eventMetadata = metadata.metadataEvento && typeof metadata.metadataEvento === "object" ? metadata.metadataEvento : {};
+  const capturedPayloads = [metadata.comercialCapturado, eventMetadata.comercialCapturado]
+    .filter(value => value && typeof value === "object" && !Array.isArray(value));
+  const marketplaces = [first(job, ["marketplace", "marketplace_detectado"]),
+    ...capturedPayloads.map(value => text(value.marketplaceDetectado))];
+  if (marketplaces.some(value => PRE_UNIVERSAL_MARKETPLACES.has(value.toLowerCase()))) return "marketplace_identificado";
+  const redirects = eventMetadata.clonadorGrupos?.redirects || metadata.clonadorGrupos?.redirects || [];
+  if (Array.isArray(redirects) && redirects.some(item =>
+    PRE_UNIVERSAL_MARKETPLACES.has(text(item?.marketplaceCanonico).toLowerCase()) &&
+    text(item?.produtoIdCanonico))) return "identidade_canonica";
+  const { detectarMarketplaceLink } = require("./normalizers");
+  if (capturedPayloads.some(captured => Array.isArray(captured.linksComerciais) && captured.linksComerciais.some(item => {
+    const role = text(item?.tipo || item?.papelLink || item?.papel).toLowerCase();
+    const classifiedMarketplace = text(item?.marketplace).toLowerCase();
+    if (!PRODUCT_LINK_ROLES.has(role) || !PRE_UNIVERSAL_MARKETPLACES.has(classifiedMarketplace)) return false;
+    return ["original", "resolvido", "urlOriginal", "url", "urlProduto"].some(key => {
+      try {
+        const url = new URL(text(item[key]));
+        const linkMarketplace = detectarMarketplaceLink(url.origin);
+        return ["http:", "https:"].includes(url.protocol) &&
+          (linkMarketplace === classifiedMarketplace ||
+            (classifiedMarketplace === "awin" && linkMarketplace === "kabum"));
+      } catch { return false; }
+    });
+  }))) return "link_comercial_classificado";
+  if (capturedPayloads.some(captured => captured.campos?.titulo === true && captured.campos?.precoAtual === true &&
+      text(captured.evidencias?.titulo) && text(captured.evidencias?.precoAtual) &&
+      text(captured.tituloCapturado) && Number(captured.precoAtual) > 0)) return "produto_preco_capturados";
+  return "";
+}
 async function projectPreUniversalTerminalError({ pool, job = {}, reason, stage } = {}) {
   const workspace = text(job.cliente_id || job.clienteId);
   const jobId = Number(job.id);
   const code = text(reason);
   if (!pool || typeof pool.query !== "function" || !workspace || !Number.isSafeInteger(jobId) || jobId <= 0 || !SAFE_PRE_UNIVERSAL.test(code)) {
     return { projected: false, reason: "pre_universal_not_safely_classified" };
+  }
+  if (!preUniversalCommercialEvidence(job)) {
+    return { projected: false, reason: "pre_universal_without_commercial_evidence" };
   }
   const error = publicError(code, stage);
   const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata : {};
