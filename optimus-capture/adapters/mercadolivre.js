@@ -1,5 +1,6 @@
 (function publicarAdapterMercadoLivre(global) {
   const contrato = global.OptimusCaptureContract || require("../core/product-contract");
+  const identidade = global.OptimusMercadoLivreIdentityResolver || (typeof require === "function" ? require("../local-worker/mercadolivre-identity") : null);
 
   function texto(valor) {
     return contrato.texto(valor);
@@ -226,6 +227,11 @@
     const warnings = [];
     if (detectarWall(htmlTexto, url)) warnings.push("wall_captcha_detectado");
     if (precoAmbiguo) warnings.push("preco_ambiguo");
+    let identidadeMlCandidata;
+    if (identidade?.pageMlbu(url)) {
+      try { identidadeMlCandidata = identidade.associacaoMlbu(htmlTexto, url); }
+      catch { warnings.push("produto_sem_identidade_operacional"); }
+    }
 
     return contrato.normalizarProdutoCapturado({
       marketplace: "mercadolivre",
@@ -240,6 +246,7 @@
       fonte,
       precoAmbiguo,
       warnings,
+      identidadeMlCandidata,
       ids: idsEncontrados(`${url} ${htmlTexto}`)
     });
   }

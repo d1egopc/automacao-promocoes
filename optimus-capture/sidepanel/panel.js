@@ -3,6 +3,7 @@
   const api = global.OptimusCaptureApi;
   const contrato = global.OptimusCaptureContract;
   const detector = global.OptimusCaptureDetector;
+  const bulkListRunner = global.OptimusCaptureBulkListRunner;
   const oportunidades = global.OptimusCaptureOportunidades;
   const oportunidadesVistas = global.OptimusCaptureOportunidadesVistas;
 
@@ -47,6 +48,10 @@
     listaSelecionadaId: "",
     carregandoListas: false,
     adicionandoLista: false,
+    selectionBatch: null,
+    selectionProcessing: false,
+    selectionRestoring: false,
+    selectionStorageListenerRegistered: false,
     oportunidadesCliente: null,
     oportunidadesVistas: null,
     oportunidades: [],
@@ -415,12 +420,20 @@
     botao.title = enviado ? "Oferta ja enviada para o preview atual" : "";
   }
 
+  const MENSAGEM_IDENTIDADE_LISTA_ML = "Não foi possível identificar este produto do Mercado Livre para adicionar à lista.";
+
+  function listaBloqueadaPorIdentidade() {
+    return state.previewOferta?.marketplace === "mercadolivre" &&
+      state.previewOferta?.listaCaptura?.elegivel === false;
+  }
+
   function atualizarBotaoLista() {
     const botao = el("botaoLista");
     if (!botao) return;
     const temPreview = previewCorrespondeAoFormulario();
     botao.hidden = !temPreview;
-    botao.disabled = !temPreview || state.carregandoListas || state.adicionandoLista;
+    botao.disabled = !temPreview || state.carregandoListas || state.adicionandoLista || listaBloqueadaPorIdentidade();
+    botao.title = listaBloqueadaPorIdentidade() ? MENSAGEM_IDENTIDADE_LISTA_ML : "";
   }
 
   function ocultarDestinos() {
@@ -1009,6 +1022,158 @@
     feedback.dataset.tipo = tipo;
   }
 
+  async function notificarSelecao(payload = {}) {
+    const batch = state.selectionBatch;
+    if (!batch?.sourceTabId || !batch?.requestId) return;
+    try {
+      await chrome.tabs.sendMessage(batch.sourceTabId, {
+        type: "OPTIMUS_SELECTION_PROGRESS",
+        requestId: batch.requestId,
+        ...payload
+      });
+    } catch {
+      // A aba de origem pode ter sido fechada; o processamento continua no painel.
+    }
+  }
+
+  function esperarAbaCompleta(tabId, timeoutMs = 25000) {
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      const finish = (error, tab) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated?.removeListener?.(onUpdated);
+        error ? reject(error) : resolve(tab);
+      };
+      const onUpdated = (updatedId, changeInfo, tab) => {
+        if (updatedId === tabId && changeInfo?.status === "complete") finish(null, tab);
+      };
+      const timeout = setTimeout(() => finish(new Error("selection_tab_timeout")), timeoutMs);
+      chrome.tabs.onUpdated?.addListener?.(onUpdated);
+      Promise.resolve(chrome.tabs.get(tabId)).then((tab) => {
+        if (tab?.status === "complete") finish(null, tab);
+      }).catch((error) => finish(error));
+    });
+  }
+
+  async function processarItemSelecionado(item, listaId, itemIndex = -1) {
+    let tab = null;
+    let abaOriginalId = null;
+    try {
+      const shopee = item.marketplace === "shopee";
+      if (shopee) abaOriginalId = (await abaAtiva())?.id || null;
+      tab = await chrome.tabs.create({ url: item.url, active: shopee });
+      await esperarAbaCompleta(tab.id);
+      tab = await chrome.tabs.get(tab.id);
+      const deteccao = detector.detectarMarketplacePorUrl(tab?.url || item.url);
+      if (!deteccao.suportado || deteccao.marketplace !== item.marketplace) throw new Error("selection_product_url_invalid");
+      const contextoCaptura = {
+        marketplace: deteccao.marketplace,
+        asin: deteccao.asin || asinSeguro(deteccao.url),
+        deteccao,
+        inicioCapturaMs: agoraMs(),
+        continua: async () => {
+          try {
+            const atual = await chrome.tabs.get(tab.id);
+            const vigente = detector.detectarMarketplacePorUrl(atual?.url || "");
+            return vigente.suportado && vigente.marketplace === item.marketplace;
+          } catch { return false; }
+        }
+      };
+      if (shopee) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: "OPTIMUS_SHOPEE_SELECTION_READINESS_WAIT",
+            timeoutMs: 3500,
+            intervalMs: 250
+          });
+        } catch {
+          // Se a aba perder o content script, mantém o Capture oficial como fallback.
+        }
+      }
+      const resposta = await enviarMensagemCapturaComRecuperacao(tab.id, contextoCaptura);
+      const produto = contrato.normalizarProdutoCapturado(resposta?.produto || {});
+      if (!capturaUtilizavel(produto) || motivoAmazonIncompleta(produto, deteccao)) throw new Error("selection_capture_incomplete");
+      const flowId = novaChaveIdempotencia("selection-flow");
+      const preview = await api.gerarPreviewCapture(state.auth.token, contrato.payloadPreview(produto), flowId);
+      const oferta = ofertaPreviewParaSalvar(preview?.oferta || {});
+      if (!oferta?.titulo || oferta?.listaCaptura?.elegivel === false) throw new Error("selection_offer_not_list_eligible");
+      await api.adicionarCapturaListaManualV2(state.auth.token, listaId, oferta);
+      return "added";
+    } catch (erro) {
+      const duplicate = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
+      return duplicate ? "existing" : "error";
+    } finally {
+      if (tab?.id) {
+        try { await chrome.tabs.remove(tab.id); } catch { /* aba já fechada */ }
+      }
+      if (abaOriginalId) {
+        try { await chrome.tabs.update(abaOriginalId, { active: true }); } catch { /* aba original pode ter sido fechada */ }
+      }
+    }
+  }
+
+  async function processarSelecaoEmLista(lista) {
+    if (!state.selectionBatch || state.selectionProcessing || !bulkListRunner) return;
+    const batch = state.selectionBatch;
+    state.selectionProcessing = true;
+    state.adicionandoLista = true;
+    el("adicionarListaExistente").disabled = true;
+    mostrarFeedbackLista(`Adicionando... 0/${batch.items.length}`, "");
+    try {
+      let shopeeLane = Promise.resolve();
+      const processItem = (item, itemIndex) => {
+        if (item.marketplace !== "shopee") return processarItemSelecionado(item, lista.id, itemIndex);
+        const current = shopeeLane.catch(() => {}).then(() => processarItemSelecionado(item, lista.id, itemIndex));
+        shopeeLane = current.catch(() => {});
+        return current;
+      };
+      const summary = await bulkListRunner.run({
+        items: batch.items,
+        concurrency: 2,
+        processItem,
+        onProgress: async (progress) => {
+          mostrarFeedbackLista(`Adicionando... ${progress.completed}/${progress.total}`, "");
+          await notificarSelecao({ completed: progress.completed, total: progress.total });
+        }
+      });
+      mostrarFeedbackLista(`Adicionados ${summary.added} | Já existentes ${summary.existing} | Erro ${summary.errors}`,
+        summary.errors ? "erro" : "sucesso");
+      await notificarSelecao({ done: true, summary });
+      state.selectionBatch = null;
+      try { await chrome.storage.session.remove(bulkListRunner.SESSION_KEY); } catch { /* resultado já terminal no painel */ }
+      setTexto("listaModalTitulo", "Adicionar à lista");
+      setHidden("abrirCriarLista", false);
+    } finally {
+      state.selectionProcessing = false;
+      state.adicionandoLista = false;
+      el("adicionarListaExistente").disabled = !state.listaSelecionadaId;
+    }
+  }
+
+  async function restaurarSelecaoPendente() {
+    if (!bulkListRunner || !state.auth?.token || state.selectionProcessing || state.selectionRestoring) return;
+    state.selectionRestoring = true;
+    try {
+      const stored = await chrome.storage.session.get(bulkListRunner.SESSION_KEY);
+      const batch = stored?.[bulkListRunner.SESSION_KEY];
+      if (!batch?.requestId || !Array.isArray(batch.items) || !batch.items.length || batch.items.length > 30) return;
+      state.selectionBatch = batch;
+      await abrirListaModal({ selection: true, createList: batch.createList === true });
+    } finally {
+      state.selectionRestoring = false;
+    }
+  }
+
+  function registrarSelecaoStorage() {
+    if (state.selectionStorageListenerRegistered || !chrome.storage?.onChanged) return;
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "session" && changes[bulkListRunner?.SESSION_KEY]?.newValue) void restaurarSelecaoPendente();
+    });
+    state.selectionStorageListenerRegistered = true;
+  }
+
   function renderizarListas() {
     const container = el("listasDisponiveis");
     if (!container) return;
@@ -1046,7 +1211,15 @@
   }
 
   function fecharListaModal() {
+    if (state.selectionProcessing) return;
+    if (state.selectionBatch && bulkListRunner) {
+      void notificarSelecao({ done: true, summary: { added: 0, existing: 0, errors: 0 }, cancelled: true });
+      void chrome.storage.session.remove(bulkListRunner.SESSION_KEY);
+      state.selectionBatch = null;
+    }
     setHidden("listaModal", true);
+    setTexto("listaModalTitulo", "Adicionar à lista");
+    setHidden("abrirCriarLista", false);
     state.listaSelecionadaId = "";
     state.carregandoListas = false;
     mostrarFeedbackLista();
@@ -1060,10 +1233,14 @@
     if (criar) el("nomeNovaLista")?.focus?.();
   }
 
-  async function abrirListaModal() {
-    if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.carregandoListas) return;
+  async function abrirListaModal(opcoes = {}) {
+    const selection = opcoes.selection === true && Boolean(state.selectionBatch);
+    if (!state.auth?.token || (!selection && !previewCorrespondeAoFormulario()) || state.carregandoListas) return;
+    if (!selection && listaBloqueadaPorIdentidade()) return;
+    setTexto("listaModalTitulo", selection ? `Adicionar ${state.selectionBatch.items.length} produtos à lista` : "Adicionar à lista");
+    setHidden("abrirCriarLista", selection);
     setHidden("listaModal", false);
-    mostrarCriacaoLista(false);
+    mostrarCriacaoLista(selection && opcoes.createList === true);
     state.listas = [];
     state.listaSelecionadaId = "";
     state.carregandoListas = true;
@@ -1091,6 +1268,10 @@
 
   async function adicionarOfertaNaLista(listaId, nomeLista) {
     if (!state.auth?.token || !previewCorrespondeAoFormulario() || state.adicionandoLista) return false;
+    if (listaBloqueadaPorIdentidade()) {
+      mostrarFeedbackLista(MENSAGEM_IDENTIDADE_LISTA_ML, "erro");
+      return false;
+    }
     const previewKey = state.previewKey;
     state.adicionandoLista = true;
     el("adicionarListaExistente").disabled = true;
@@ -1113,6 +1294,11 @@
         return false;
       }
       const jaExiste = erro?.status === 409 && String(erro?.message || erro?.body?.motivo || "") === "item_ja_na_lista";
+      const semIdentidade = String(erro?.body?.motivo || erro?.message || "") === "produto_sem_identidade_operacional";
+      if (semIdentidade && state.previewOferta?.marketplace === "mercadolivre") {
+        mostrarFeedbackLista(MENSAGEM_IDENTIDADE_LISTA_ML, "erro");
+        return false;
+      }
       mostrarFeedbackLista(jaExiste ? "Esta oferta ja esta nesta lista" : "Nao foi possivel adicionar a oferta.", jaExiste ? "" : "erro");
       return false;
     } finally {
@@ -1126,6 +1312,10 @@
   async function adicionarListaExistente() {
     const lista = state.listas.find((item) => String(item?.id || "") === state.listaSelecionadaId);
     if (!lista) return;
+    if (state.selectionBatch) {
+      await processarSelecaoEmLista(lista);
+      return;
+    }
     await adicionarOfertaNaLista(lista.id, lista.nome);
   }
 
@@ -1152,9 +1342,15 @@
       return;
     }
     state.adicionandoLista = false;
+    state.listas = [...state.listas, lista];
+    state.listaSelecionadaId = String(lista.id);
+    renderizarListas();
+    if (state.selectionBatch) {
+      await processarSelecaoEmLista(lista);
+      return;
+    }
     const adicionou = await adicionarOfertaNaLista(lista.id, lista.nome || nome);
     if (adicionou) {
-      state.listas = [...state.listas, lista];
       mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada e oferta adicionada`, "sucesso");
     } else {
       mostrarFeedbackLista(`Lista "${String(lista.nome || nome)}" criada, mas a oferta nao foi adicionada.`, "erro");
@@ -1238,8 +1434,8 @@
       atualizarBotaoSalvar();
       atualizarBotaoEnviar();
       atualizarBotaoLista();
-      setTexto("estadoPagina", "Oferta pronta");
-      setTexto("statusLink", "Oferta pronta");
+      setTexto("estadoPagina", listaBloqueadaPorIdentidade() ? "Oferta pronta para salvar; indisponível para Lista" : "Oferta pronta");
+      setTexto("statusLink", listaBloqueadaPorIdentidade() ? MENSAGEM_IDENTIDADE_LISTA_ML : "Oferta pronta");
       logTiming("preview_pronto", {
         marketplace: produto.marketplace,
         asin: asinSeguro(produto.urlOriginal),
@@ -1544,6 +1740,7 @@
   async function init() {
     state.oportunidadesCliente = oportunidades?.criarClienteOportunidades?.({ api }) || null;
     state.oportunidadesVistas = oportunidadesVistas?.criarRegistroVistas?.() || null;
+    registrarSelecaoStorage();
     registrarEventosAbas();
     el("botaoConectar").addEventListener("click", conectarComOptimus);
     el("botaoLogin").addEventListener("click", entrar);
@@ -1594,6 +1791,7 @@
       state.auth = await global.OptimusCaptureStorage.lerAuth();
     }
     renderAuth();
+    void restaurarSelecaoPendente();
   }
 
   document.addEventListener("DOMContentLoaded", init);
