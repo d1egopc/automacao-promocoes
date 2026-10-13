@@ -26,7 +26,12 @@ function normalizarDestinosAplicaveis(destinations, {
       const connectionId = String(target?.connectionId || target?.conexaoId ||
         target?.sessao || "").trim();
       if (!targetKey) throw new Error("distributor_target_identity_missing");
-      return { destinationId, channel, targetKey, connectionId };
+      const destinationNameSnapshot = String(destination?.nome ||
+        destination?.name || destinationId).trim();
+      const targetLabelSnapshot = String(target?.nome || target?.name ||
+        target?.label || target?.grupoNome || target?.channelName || targetKey).trim();
+      return { destinationId, channel, targetKey, connectionId,
+        destinationNameSnapshot, targetLabelSnapshot };
     });
   });
 }

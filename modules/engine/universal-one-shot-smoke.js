@@ -449,7 +449,7 @@ async function reconcileAckTx(client, gate, target) {
   if (target.status !== "sent") {
     const result = await confirmFactualSendTx(client, {
       destination: target, epoch: gate.smoke_epoch_at,
-      ack, skipVitrine: true });
+      ack, skipVitrine: true, skipHistory: true });
     await client.query(`UPDATE financial_credit_ledger
       SET reason='cutover_validation_target_confirmed',
         metadata=metadata || jsonb_build_object(

@@ -8,6 +8,7 @@ const { classificarFilaUniversal } = require("./universal-queue-status");
 const { holdForTargetTx, settleConfirmedTx, releaseForTargetTx } =
   require("./universal-credits.repository");
 const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
+const { projectUniversalTerminalTx } = require("./universal-history.repository");
 
 const RECOVERY_BATCH = 20;
 const EXPIRED_RETIRE_BATCH = 100;
@@ -50,7 +51,9 @@ function validarDestinos(destinations) {
       throw new Error("queue_destination_invalid_or_duplicate");
     }
     seen.add(identity);
-    return { destinationId: id, targetKey, connectionId, channel };
+    return { destinationId: id, targetKey, connectionId, channel,
+      destinationNameSnapshot: String(destination?.destinationNameSnapshot || id).trim(),
+      targetLabelSnapshot: String(destination?.targetLabelSnapshot || targetKey).trim() };
   });
 }
 
@@ -124,7 +127,7 @@ async function ensureVitrineProjectionTx(client, { epoch, destination,
 }
 
 async function confirmFactualSendTx(client, { destination, epoch, ack,
-  skipVitrine = false }) {
+  skipVitrine = false, skipHistory = false }) {
   const movement = await settleConfirmedTx(client, { epoch,
     workspaceId: destination.workspace_id, targetId: destination.id });
   const [itemKey, destinationKey, targetKey] = checkpointKeys(destination);
@@ -156,6 +159,10 @@ async function confirmFactualSendTx(client, { destination, epoch, ack,
     SET status=$2,terminal_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,
         revision=revision+1,updated_at=clock_timestamp()
     WHERE id=$1`, [destination.queue_item_id, summary.status, summary.terminal]);
+  if (summary.terminal && !skipHistory) {
+    await projectUniversalTerminalTx(client, { queueItemId: destination.queue_item_id,
+      workspaceId: destination.workspace_id });
+  }
   if (!skipVitrine) {
     await ensureVitrineProjectionTx(client, { epoch, destination, summary });
   }
@@ -244,10 +251,12 @@ async function enqueue({ pool, workspaceId, jobId, ofertaId, itemPayload,
       for (const target of targets) {
         await client.query(`INSERT INTO engine_universal_queue_destinations
           (queue_item_id,operation_epoch_started_at,workspace_id,
-           destination_id,fanout_owner_id,target_key,connection_id,channel)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [item.id, epoch, workspace,
+           destination_id,fanout_owner_id,target_key,connection_id,channel,
+           destination_name_snapshot,target_label_snapshot)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [item.id, epoch, workspace,
           target.destinationId, ownerIds.get(target.destinationId),
-          target.targetKey, target.connectionId || null, target.channel]);
+          target.targetKey, target.connectionId || null, target.channel,
+          target.destinationNameSnapshot, target.targetLabelSnapshot]);
       }
       await client.query(`INSERT INTO engine_universal_queue_workspace_state
         (operation_epoch_started_at,workspace_id,health,revision)
@@ -493,6 +502,10 @@ async function retireExpiredDestinations({ pool, workspaceId,
           updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
     [epoch, workspace]);
+    for (const queueItemId of [...new Set(expired.map(row => row.queue_item_id))]) {
+      await projectUniversalTerminalTx(client, { queueItemId,
+        workspaceId: workspace });
+    }
     return { ok: true, retired: Number(aggregate.retired || 0),
       operationEpochStartedAt: epoch };
   });
@@ -710,9 +723,11 @@ async function confirmFailure({ pool, destinationId, leaseToken,
         workspaceId: destination.workspace_id, targetId: destinationId });
     }
     await client.query(`UPDATE engine_universal_queue_destinations
-      SET status='failed',terminal_reason=$2,revision=revision+1,
+      SET status='failed',terminal_reason=$2,terminal_evidence=$3,
+        terminal_status='failed',resolved_at=clock_timestamp(),
+        resolution_source='universal_confirm_failure',revision=revision+1,
         updated_at=clock_timestamp() WHERE id=$1`,
-    [destinationId, failureReason]);
+    [destinationId, failureReason, fact]);
     const states = (await client.query(`SELECT status
       FROM engine_universal_queue_destinations WHERE queue_item_id=$1`,
     [destination.queue_item_id])).rows;
@@ -721,6 +736,10 @@ async function confirmFailure({ pool, destinationId, leaseToken,
       SET status=$2,terminal_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,
           revision=revision+1,updated_at=clock_timestamp()
       WHERE id=$1`, [destination.queue_item_id, summary.status, summary.terminal]);
+    if (summary.terminal) {
+      await projectUniversalTerminalTx(client, { queueItemId: destination.queue_item_id,
+        workspaceId: destination.workspace_id });
+    }
     await ensureVitrineProjectionTx(client, { epoch, destination, summary });
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET health=CASE WHEN health='AMBIGUOUS' THEN 'UNKNOWN' ELSE health END,
@@ -802,6 +821,10 @@ async function discardAmbiguousWithoutReplay({ pool, workspaceId,
           revision=revision+1,updated_at=clock_timestamp()
       WHERE id=$1 AND operation_epoch_started_at=$4 AND workspace_id=$5`,
     [destination.queue_item_id, summary.status, summary.terminal, epoch, workspace]);
+    if (summary.terminal) {
+      await projectUniversalTerminalTx(client, { queueItemId: destination.queue_item_id,
+        workspaceId: workspace });
+    }
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET health='UNKNOWN',revision=revision+1,checkpoint_revision=revision+1,
           updated_at=clock_timestamp()
@@ -857,6 +880,10 @@ async function completeWithoutSend({ pool, destinationId, leaseToken,
       SET status=$2,terminal_at=CASE WHEN $3 THEN clock_timestamp() ELSE NULL END,
           revision=revision+1,updated_at=clock_timestamp()
       WHERE id=$1`, [destination.queue_item_id, summary.status, summary.terminal]);
+    if (summary.terminal) {
+      await projectUniversalTerminalTx(client, { queueItemId: destination.queue_item_id,
+        workspaceId: destination.workspace_id });
+    }
     await ensureVitrineProjectionTx(client, { epoch, destination, summary });
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET revision=revision+1,checkpoint_revision=revision+1,

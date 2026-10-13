@@ -444,6 +444,10 @@ async function main() {
     assert.equal((await admin.query(`SELECT count(*)::int AS n FROM
       engine_universal_vitrine_outbox WHERE queue_item_id=$1`,
     [gate.queueItemId])).rows[0].n,0);
+    assert.equal((await admin.query(`SELECT count(*)::int AS n FROM
+      engine_history_items WHERE universal_item_id=$1`,
+    [gate.queueItemId])).rows[0].n,0,
+    "one-shot smoke não entra no Histórico comercial");
     assert.equal((await admin.query(`SELECT mode,operation_epoch_started_at
       FROM engine_operation_state WHERE id=1`)).rows[0].mode,
     "CUTOVER_PREPARED");

@@ -97,6 +97,8 @@ const { processVitrineProjectionBatch } =
   require("./modules/engine/universal-vitrine-projector");
 const { consultarFilaPublicaUniversal, consultarDetalheUniversal } =
   require("./modules/engine/universal-history.read-model");
+const { listHistory, historyDetail, projectPreUniversalTerminalError } =
+  require("./modules/engine/universal-history.repository");
 const { readBalance: lerSaldoUniversal,
   setAdminBalance: definirSaldoAdminUniversal,
   prepareRegistrationOpening: prepararAberturaCadastroUniversal,
@@ -13636,6 +13638,43 @@ function consultarReadModelPublicoFila(clienteId = "admin", query = {}, opcoes =
   };
 }
 
+app.get("/historico", auth, async (req, res) => {
+  const clienteId = getClienteId(req);
+  try {
+    const result = await listHistory({
+      pool: getEnginePool(), workspaceId: clienteId,
+      period: req.query?.periodo === "7dias" ? "7dias" : "hoje",
+      status: ["sent","partial","error"].includes(String(req.query?.status || ""))
+        ? String(req.query.status) : "all",
+      marketplace: req.query?.marketplace || "",
+      channel: req.query?.canal || "",
+      destinationId: req.query?.destinoId || "",
+      search: req.query?.busca || "",
+      cursor: req.query?.cursor || "",
+      limit: req.query?.limit
+    });
+    return res.json({ ...result, clienteId });
+  } catch (error) {
+    const invalid = /history_(?:cursor_invalid|context_required)/.test(String(error?.message || ""));
+    return res.status(invalid ? 400 : 503).json({ ok: false, clienteId,
+      motivo: invalid ? error.message : "history_unavailable" });
+  }
+});
+
+app.get("/historico/:historyId", auth, async (req, res) => {
+  const clienteId = getClienteId(req);
+  try {
+    const detail = await historyDetail({ pool: getEnginePool(),
+      workspaceId: clienteId, historyId: req.params.historyId });
+    if (!detail) return res.status(404).json({ ok: false, clienteId,
+      motivo: "history_not_found" });
+    return res.json({ ok: true, clienteId, detail });
+  } catch {
+    return res.status(503).json({ ok: false, clienteId,
+      motivo: "history_unavailable" });
+  }
+});
+
 app.get("/fila", auth, async (req, res) => {
   const perf = criarPerfTimer("PERF FILA", contextoPerfHttp(req));
   let clienteId = "";
@@ -26025,6 +26064,15 @@ function comercialCapturadoClonador(item = {}) {
   return {};
 }
 async function observarHistoricoClonadorTerminal({ job = {}, motivo = "", etapa = "" } = {}) {
+  try {
+    await projectPreUniversalTerminalError({ pool: getEnginePool(), job,
+      reason: motivo, stage: etapa });
+  } catch (erro) {
+    console.log("[HISTORICO-PRE-UNIVERSAL-ERRO]", {
+      workspaceId: job.cliente_id || job.clienteId || "", jobId: job.id || null,
+      motivo: erro?.message || "projection_failed"
+    });
+  }
   const bufferId = bufferIdClonadorDoJob(job);
   if (!bufferId) return;
   try {
