@@ -188,10 +188,11 @@ async function main() {
       idempotencyKey: "universal:admin:topup:invalid-range" }),
     /topup_amount_invalid/);
     const openHold = await createAmbiguousTarget(admin, pool, "ws_topup", "c");
-    await assert.rejects(credits.setAdminBalance({ pool,
+    const blocked = await credits.setAdminBalance({ pool,
       workspaceId: "ws_topup", amount: 9,
-      idempotencyKey: "universal:admin:absolute-with-hold" }),
-    /universal_admin_credit_holds_open/);
+      idempotencyKey: "universal:admin:absolute-with-hold" });
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.reason, "universal_admin_credit_holds_open");
     await queue.confirmFailure({ pool, destinationId: openHold.id,
       leaseToken: openHold.leaseToken, reason: "provider_no_effect",
       evidence: "provider_no_effect_confirmed" });
