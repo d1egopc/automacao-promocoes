@@ -78,9 +78,13 @@ const { normalizarDestinosAplicaveis } = require("../modules/engine/universal-qu
   assert.equal(preUniversalCalls.length, 1, "retry intermediario nao gera Historico");
 
   const calls = [];
-  const pool = { query: async (sql) => {
+  const pool = { query: async (sql, params = []) => {
     calls.push(sql);
-    if (/count\(\*\)::int AS finalized/.test(sql)) return { rows: [{ finalized: 3, sent: 2, partial: 1, errors: 1 }] };
+    if (/count\(\*\)::int AS finalized/.test(sql)) {
+      return { rows: [params[0] === "w-other"
+        ? { finalized: 0, sent: 0, partial: 0, errors: 0 }
+        : { finalized: 3, sent: 2, partial: 1, errors: 1 }] };
+    }
     return { rows: [{ history_id: 7, thumbnail_url: "thumb", title: "Produto", price_text: "R$ 10", marketplace: "amazon", category: "Casa", commercial_status: "partial", total_targets: 2, sent_targets: 1, failed_targets: 1, destination_summary: "2 destinos", channels: ["whatsapp"], finalized_at: new Date().toISOString() }] };
   } };
   const listed = await history.listHistory({ pool, workspaceId: "w1", period: "hoje" });
@@ -88,6 +92,9 @@ const { normalizarDestinosAplicaveis } = require("../modules/engine/universal-qu
   assert.equal(listed.items[0].status, "partial");
   assert.equal(calls.some(sql => /FROM engine_history_targets/.test(sql)), false,
     "listagem sem filtro nao carrega targets/ACKs");
+  const isolatedSummary = await history.historicoResumo({ pool, workspace: "w-other", periodo: "hoje" });
+  assert.deepEqual(isolatedSummary, { finalized: 0, sent: 0, partial: 0, errors: 0, sendRate: 0 },
+    "resumo isola o workspace");
 
   const schema = fs.readFileSync(path.join(__dirname, "../modules/engine/universal-history.additive.sql"), "utf8");
   assert.match(schema, /commercial_status IN \('sent','partial','error'\)/);
@@ -109,9 +116,19 @@ const { normalizarDestinosAplicaveis } = require("../modules/engine/universal-qu
     "Historico nao consulta fila viva");
   assert.match(repoSource.slice(detailStart), /FROM engine_history_targets/,
     "detalhe carrega targets sob demanda");
+  const summaryStart = repoSource.indexOf("async function historicoResumo");
+  assert.match(repoSource.slice(summaryStart, listStart), /commercial_status IN \('sent','partial'\)/,
+    "Enviadas soma sent + partial na autoridade única");
 
   const indexSource = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
   assert.match(indexSource, /app\.get\("\/historico"/);
+  assert.match(indexSource, /app\.get\("\/historico\/resumo"/);
   assert.match(indexSource, /app\.get\("\/historico\/:historyId"/);
+  const summaryRouteStart = indexSource.indexOf('app.get("/historico/resumo"');
+  const detailRouteStart = indexSource.indexOf('app.get("/historico/:historyId"');
+  assert(summaryRouteStart >= 0 && summaryRouteStart < detailRouteStart,
+    "resumo deve preceder a rota parametrizada do detalhe");
+  assert.doesNotMatch(indexSource.slice(summaryRouteStart, detailRouteStart), /fila|engine_universal_queue|engine_history_targets/,
+    "resumo nao consulta fila viva nem materializa itens/targets");
   console.log("historico definitivo v1: ok");
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -97,7 +97,7 @@ const { processVitrineProjectionBatch } =
   require("./modules/engine/universal-vitrine-projector");
 const { consultarFilaPublicaUniversal, consultarDetalheUniversal } =
   require("./modules/engine/universal-history.read-model");
-const { listHistory, historyDetail, projectPreUniversalTerminalError } =
+const { historicoResumo, listHistory, historyDetail, projectPreUniversalTerminalError } =
   require("./modules/engine/universal-history.repository");
 const { readBalance: lerSaldoUniversal,
   setAdminBalance: definirSaldoAdminUniversal,
@@ -13658,6 +13658,21 @@ app.get("/historico", auth, async (req, res) => {
     const invalid = /history_(?:cursor_invalid|context_required)/.test(String(error?.message || ""));
     return res.status(invalid ? 400 : 503).json({ ok: false, clienteId,
       motivo: invalid ? error.message : "history_unavailable" });
+  }
+});
+
+app.get("/historico/resumo", auth, async (req, res) => {
+  const clienteId = getClienteId(req);
+  try {
+    const summary = await historicoResumo({
+      pool: getEnginePool(),
+      workspace: clienteId,
+      periodo: req.query?.periodo === "7dias" ? "7dias" : "hoje",
+    });
+    return res.json({ ok: true, clienteId, summary });
+  } catch {
+    return res.status(503).json({ ok: false, clienteId,
+      motivo: "history_unavailable" });
   }
 });
 
