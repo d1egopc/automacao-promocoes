@@ -1,0 +1,123 @@
+name: Admin credit topup PostgreSQL 17 isolated
+
+on:
+  push:
+    branches:
+      - validation/admin-credit-topup-postgres17
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-credit-topup-postgres17
+  cancel-in-progress: true
+
+jobs:
+  postgres-test:
+    name: PostgreSQL 17 disposable topup proof
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/admin-credit-topup-postgres17'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PGDATA: ${{ github.workspace }}/.local-postgres/data
+      PGHOST: 127.0.0.1
+      PGPORT: "55433"
+      PGUSER: postgres
+      PGDATABASE: optimus_universal_fixture
+      DATABASE_URL: ""
+    steps:
+      - name: Checkout without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install PostgreSQL 17 without starting default services
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          policy=/usr/sbin/policy-rc.d
+          policy_backup="$RUNNER_TEMP/admin-credit-topup-policy-rc.d.backup"
+          test ! -e "$policy_backup"
+          if [ -e "$policy" ]; then
+            sudo cp -p "$policy" "$policy_backup"
+          fi
+          restore_policy() {
+            if [ -e "$policy_backup" ]; then
+              sudo mv -f "$policy_backup" "$policy"
+            else
+              sudo rm -f "$policy"
+            fi
+          }
+          trap restore_policy EXIT
+          printf '#!/bin/sh\nexit 101\n' | sudo tee "$policy" >/dev/null
+          sudo chmod +x "$policy"
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes -o /etc/apt/keyrings/pgdg.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-17
+
+      - name: Initialize owned PostgreSQL cluster
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+          test "$PGDATA" = "$GITHUB_WORKSPACE/.local-postgres/data"
+          test "$(id -u)" -ne 0
+          test ! -e "$GITHUB_WORKSPACE/.local-postgres"
+          if ss -ltnH | awk '$4 ~ /:55433$/ { found=1 } END { exit found ? 0 : 1 }'; then
+            echo "porta 55433 já está ocupada"
+            exit 1
+          fi
+          mkdir -m 700 "$GITHUB_WORKSPACE/.local-postgres"
+          touch "$GITHUB_WORKSPACE/.local-postgres/.owned-by-admin-credit-topup-pg17"
+          /usr/lib/postgresql/17/bin/initdb \
+            -D "$PGDATA" \
+            --username=postgres \
+            --auth-local=trust \
+            --auth-host=trust \
+            --no-locale \
+            --encoding=UTF8
+          test "$(stat -c '%u' "$PGDATA")" = "$(id -u)"
+          /usr/lib/postgresql/17/bin/pg_ctl \
+            -D "$PGDATA" \
+            -l "$GITHUB_WORKSPACE/.local-postgres/postgres.log" \
+            -o "-h 127.0.0.1 -p 55433" \
+            -w start
+          /usr/lib/postgresql/17/bin/createdb \
+            -h 127.0.0.1 -p 55433 -U postgres \
+            optimus_universal_fixture
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run financial PostgreSQL proof
+        run: |
+          node tests/admin-credit-topup-contract.test.js
+          node tests/universal-admin-topup.postgres.js
+
+      - name: Stop and remove only owned disposable resources
+        if: always()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          root="$GITHUB_WORKSPACE/.local-postgres"
+          if [ -f "$root/.owned-by-admin-credit-topup-pg17" ] && \
+             [ "$PGDATA" = "$root/data" ]; then
+            if [ -f "$PGDATA/postmaster.pid" ]; then
+              /usr/lib/postgresql/17/bin/pg_ctl -D "$PGDATA" -m fast -w stop
+            fi
+            rm -rf -- "$root"
+            test ! -e "$root"
+          fi
