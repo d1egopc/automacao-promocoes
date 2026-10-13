@@ -76,12 +76,29 @@ jobs:
           test "$PGDATA" = "$GITHUB_WORKSPACE/.local-postgres/data"
           test "$(id -u)" -ne 0
           test ! -e "$GITHUB_WORKSPACE/.local-postgres"
+          root="$GITHUB_WORKSPACE/.local-postgres"
+          pg_log="$root/postgres.log"
+          socket_dir="$root/socket"
+          on_init_failure() {
+            rc=$?
+            set +e
+            echo "PostgreSQL initialization failed; last 80 log lines (credentials redacted):"
+            if [ -f "$pg_log" ]; then
+              tail -n 80 "$pg_log" \
+                | sed -E 's/(password|token|secret|authorization)[[:space:]]*[:=][^[:space:]]+/\1=[REDACTED]/Ig'
+            else
+              echo "postgres.log was not created"
+            fi
+            exit "$rc"
+          }
+          trap on_init_failure ERR
           if ss -ltnH | awk '$4 ~ /:55433$/ { found=1 } END { exit found ? 0 : 1 }'; then
             echo "porta 55433 já está ocupada"
             exit 1
           fi
-          mkdir -m 700 "$GITHUB_WORKSPACE/.local-postgres"
-          touch "$GITHUB_WORKSPACE/.local-postgres/.owned-by-admin-credit-topup-pg17"
+          mkdir -m 700 "$root"
+          mkdir -m 700 "$socket_dir"
+          touch "$root/.owned-by-admin-credit-topup-pg17"
           /usr/lib/postgresql/17/bin/initdb \
             -D "$PGDATA" \
             --username=postgres \
@@ -92,8 +109,8 @@ jobs:
           test "$(stat -c '%u' "$PGDATA")" = "$(id -u)"
           /usr/lib/postgresql/17/bin/pg_ctl \
             -D "$PGDATA" \
-            -l "$GITHUB_WORKSPACE/.local-postgres/postgres.log" \
-            -o "-h 127.0.0.1 -p 55433" \
+            -l "$pg_log" \
+            -o "-h 127.0.0.1 -p 55433 -k $socket_dir" \
             -w start
           /usr/lib/postgresql/17/bin/createdb \
             -h 127.0.0.1 -p 55433 -U postgres \
@@ -117,6 +134,14 @@ jobs:
              [ "$PGDATA" = "$root/data" ]; then
             if [ -f "$PGDATA/postmaster.pid" ]; then
               /usr/lib/postgresql/17/bin/pg_ctl -D "$PGDATA" -m fast -w stop
+            fi
+            if /usr/lib/postgresql/17/bin/pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then
+              echo "PostgreSQL ainda está em execução; diretório não será removido"
+              exit 1
+            fi
+            if ss -ltnH | awk '$4 ~ /:55433$/ { found=1 } END { exit found ? 0 : 1 }'; then
+              echo "porta 55433 ainda está em uso; diretório não será removido"
+              exit 1
             fi
             rm -rf -- "$root"
             test ! -e "$root"
