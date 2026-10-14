@@ -1,0 +1,108 @@
+name: Magalu identity validation (no deploy)
+
+on:
+  push:
+    branches:
+      - validation/magalu-identity-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magalu-identity-v1-validation
+  cancel-in-progress: false
+
+jobs:
+  magalu-identity:
+    name: Magalu identity and regression suite
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/magalu-identity-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: ""
+      NODE_ENV: test
+    steps:
+      - name: Checkout exact pushed commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated ref and clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/magalu-identity-v1
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = v24
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "${DATABASE_URL:-}"
+          test -z "${SSH_PRIVATE_KEY:-}"
+          test -z "${HOSTINGER_SSH_KEY:-}"
+          test -z "${DEPLOY_TOKEN:-}"
+          test -z "$(git status --porcelain)"
+          git diff --check
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Syntax and manifest checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            node --check "$file"
+          done <<'FILES'
+          index.js
+          modules/engine/importer/adapters/magalu.adapter.js
+          modules/engine/importer/importer.runner.js
+          modules/local-worker/local-worker.routes.js
+          modules/local-worker/local-worker.service.js
+          modules/local-worker/magalu-identity.contract.js
+          optimus-capture/background/service-worker.js
+          optimus-capture/local-worker/magalu-identity.js
+          optimus-capture/local-worker/task-runner.js
+          optimus-capture/local-worker/worker-client.js
+          tests/magalu-identity-engine-importer.test.js
+          tests/magalu-local-worker-identity.test.js
+          FILES
+          node -e "JSON.parse(require('fs').readFileSync('optimus-capture/manifest.json','utf8'))"
+
+      - name: Encoding audit
+        run: npm run audit:encoding
+
+      - name: Magalu identity tests
+        run: |
+          node tests/magalu-local-worker-identity.test.js
+          node tests/magalu-identity-engine-importer.test.js
+          node tests/magalu-engine-importer.test.js
+
+      - name: Marketplace and engine regressions
+        run: |
+          node tests/mercadolivre-work-backend-order.test.js
+          node tests/optimus-capture-local-worker-ml-identity.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/engine-processor-candidate-pool.test.js
+          node tests/engine-processor-origem-fairness.test.js
+
+      - name: Social regressions
+        run: |
+          node tests/universal-flow-social-routes.test.js
+          node tests/social-instagram-gatilho.test.js
+          node tests/social-meta-ativos-messaging.test.js
+          node tests/social-publicador-oficial.test.js
+
+      - name: Final repository integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --cached --check
+          test -z "$(git status --porcelain)"
