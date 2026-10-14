@@ -1,0 +1,70 @@
+name: AliExpress SQL claim and persistence validation
+
+on:
+  push:
+    branches:
+      - validation/aliexpress-sql-e2e
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aliexpress-sql-disposable-validation
+  cancel-in-progress: false
+
+jobs:
+  aliexpress-sql-proof:
+    name: PostgreSQL 17 isolated AliExpress SQL proof (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/aliexpress-sql-e2e'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_aliexpress_fixture
+          POSTGRES_USER: aliexpress_ci
+          POSTGRES_PASSWORD: aliexpress_ci_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aliexpress_ci -d optimus_aliexpress_fixture"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: ""
+      ALIEXPRESS_TEST_DATABASE_URL: postgresql://aliexpress_ci:aliexpress_ci_disposable_only@127.0.0.1:5432/optimus_aliexpress_fixture
+      PGSSLMODE: disable
+      ALIEXPRESS_SQL_VALIDATION_ONLY: "1"
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify isolated ref and no production inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/aliexpress-sql-e2e
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+          test -n "$ALIEXPRESS_TEST_DATABASE_URL"
+          test -z "${SSH_PRIVATE_KEY:-}"
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Validate syntax and apply disposable engine schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check tests/aliexpress-sql-claim-persistence.postgres.js
+          sha256sum modules/engine/schema.sql
+          psql "$ALIEXPRESS_TEST_DATABASE_URL" -X --set=ON_ERROR_STOP=1 --file=modules/engine/schema.sql
+      - name: Run real SQL selection, CAS claim, importer and persistence proof
+        run: node tests/aliexpress-sql-claim-persistence.postgres.js
