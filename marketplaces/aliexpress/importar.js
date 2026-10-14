@@ -765,6 +765,16 @@ async function importarAliExpress(urlEntrada, config = {}) {
   const expansaoShortlink = await expandirShortlinkAliExpressSeguro(urlOriginal);
   const urlCanonicaProduto = expansaoShortlink.ok ? expansaoShortlink.url : urlOriginal;
   const productId = extrairProductIdAliExpressManual(urlCanonicaProduto);
+  let landingMoedasComProdutoFactual = false;
+  if (conversaoLinkAlternativo && /^\d{12,20}$/.test(productId || "")) {
+    try {
+      const landing = new URL(urlCanonicaProduto);
+      landingMoedasComProdutoFactual = landing.protocol === "https:" &&
+        landing.hostname === "m.aliexpress.com" &&
+        landing.pathname === "/p/coin-index/index.html" &&
+        landing.searchParams.get("productIds") === productId;
+    } catch (_) { /* URL invalida continua no tratamento existente. */ }
+  }
   const ehBrasil =
     urlCanonicaProduto.includes("ship_from%22%3A%22BR") ||
     urlCanonicaProduto.includes('"ship_from":"BR"') ||
@@ -785,10 +795,11 @@ async function importarAliExpress(urlEntrada, config = {}) {
     expansaoMotivo: expansaoShortlink.motivo || ""
   });
 
-  if (!productId) {
-    const imagemMetadata = deveBuscarImagemMetadataAliExpress({ expansaoShortlink, urlCanonicaProduto })
+  if (!productId || landingMoedasComProdutoFactual) {
+    const imagemMetadata = !productId && deveBuscarImagemMetadataAliExpress({ expansaoShortlink, urlCanonicaProduto })
       ? await buscarImagemMetadataAliExpressHtml(urlCanonicaProduto)
-      : { imagem: "", origem: "", motivo: "metadata_nao_avaliada_shortlink_inseguro" };
+      : { imagem: "", origem: "", motivo: landingMoedasComProdutoFactual
+        ? "metadata_nao_necessaria_para_conversao_app" : "metadata_nao_avaliada_shortlink_inseguro" };
     if (conversaoLinkAlternativo && urlAliExpressSegura(urlCanonicaProduto, { permitirShortlink: true })) {
       if (!appKey || !secret || !trackingId) {
         return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
@@ -824,7 +835,9 @@ async function importarAliExpress(urlEntrada, config = {}) {
         imagemOrigem: imagemMetadata.origem || "",
         categoria: "AliExpress",
         avisoCupom,
-        aviso: "Landing AliExpress convertida sem productId direto.",
+        aviso: landingMoedasComProdutoFactual
+          ? "Landing AliExpress convertida com identidade de produto factual."
+          : "Landing AliExpress convertida sem productId direto.",
         tipoLinkAfiliado: papelLinkAlternativo,
         papelLink: papelLinkAlternativo,
         conversaoPapel: papelLinkAlternativo,
@@ -833,7 +846,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
           papelLink: papelLinkAlternativo,
           conversaoPapel: papelLinkAlternativo,
           conversaoLinkAlternativo: true,
-          productId: "",
+          productId: landingMoedasComProdutoFactual ? productId : "",
           sourceValuesUsado: sourceValuesAfiliado,
           afiliacaoWorkspace: {
             workspaceId: clienteId,
@@ -845,7 +858,8 @@ async function importarAliExpress(urlEntrada, config = {}) {
             motivoConversao: conversaoWorkspaceValida ? "link_api_convertido" : "link_api_sem_retorno"
           },
           urlCanonicaProduto,
-          motivo: "landing_sem_product_id_convertida",
+          motivo: landingMoedasComProdutoFactual
+            ? "landing_moedas_produto_factual_convertida" : "landing_sem_product_id_convertida",
           imagemOrigem: imagemMetadata.origem || "",
           imagemFallbackConservador: Boolean(imagemMetadata.imagem),
           imagemFallbackMotivo: imagemMetadata.motivo || ""

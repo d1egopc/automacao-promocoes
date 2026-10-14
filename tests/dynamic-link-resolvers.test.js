@@ -179,6 +179,82 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     });
     assert.equal(resultadoCupom.marketplaceDetectado, "shopee");
     assert.equal(resultadoCupom.urlFinal, "https://shopee.com.br/coupon/100off");
+    const registroSeuhardware = {
+      localizar(url) {
+        return new URL(url).hostname === "seuhardware.com" && new URL(url).pathname.startsWith("/s/")
+          ? { id: "fixture-144302", host: "seuhardware.com", pathPrefix: "/s/" } : null;
+      }
+    };
+    const produtoPc = "https://pt.aliexpress.com/item/1005012689379802.html";
+    const landingPc = `https://star.aliexpress.com/share/share.htm?redirectUrl=${encodeURIComponent(produtoPc)}&aff_trace_key=fixture`;
+    const htmlPc = `<html><meta property="og:url" content="${produtoPc}?sourceType=620"></html>`;
+    const chamadasPc = [];
+    const resultadoPc = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: "https://a.aliexpress.com/_fixturePc" },
+          { status: 302, location: landingPc },
+          { status: 200, body: htmlPc }
+        ], chamadasPc)
+      }
+    });
+    assert.equal(resultadoPc.ok, true);
+    assert.equal(resultadoPc.urlOriginal, "https://seuhardware.com/s/Gfdisrw");
+    assert.equal(resultadoPc.urlFinal, produtoPc);
+    assert.equal(resultadoPc.metodo, "parametro_e_html_produto");
+    assert.equal(chamadasPc.length, 3, "a prova usa apenas os hops HTTP já limitados pelo resolver");
+
+    const resultadoSemProva = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: landingPc },
+          { status: 200, body: "<html><meta property=\"og:url\" content=\"https://pt.aliexpress.com/item/1005012689379803.html\"></html>" }
+        ], [])
+      }
+    });
+    assert.equal(resultadoSemProva.urlFinal, landingPc, "IDs divergentes não confirmam identidade");
+    assert.notEqual(resultadoSemProva.metodo, "parametro_e_html_produto");
+
+    const resultado403 = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: landingPc },
+          { status: 403, body: htmlPc }
+        ], [])
+      }
+    });
+    assert.equal(resultado403.ok, false, "HTTP 403 não pode confirmar produto pelo parâmetro");
+    assert.equal(resultado403.statusHttp, 403);
+
+    const landingNaoOficial = `https://star.aliexpress.com/share/share.htm?redirectUrl=${encodeURIComponent("https://outro.example/item/1005012689379802.html")}`;
+    const resultadoDestinoNaoOficial = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: landingNaoOficial },
+          { status: 200, body: htmlPc }
+        ], [])
+      }
+    });
+    assert.equal(resultadoDestinoNaoOficial.urlFinal, landingNaoOficial, "destino externo não prova identidade");
+    assert.notEqual(resultadoDestinoNaoOficial.metodo, "parametro_e_html_produto");
+
+    const landingApp = "https://m.aliexpress.com/p/coin-index/index.html?productIds=1005012689379802";
+    const resultadoApp = await resolverRedirectUniversal("https://seuhardware.com/s/9MOH2U7", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: "https://a.aliexpress.com/_fixtureApp" },
+          { status: 302, location: landingApp },
+          { status: 200, body: "<html></html>" }
+        ], [])
+      }
+    });
+    assert.equal(resultadoApp.urlFinal, landingApp, "link App não vira a URL canônica do PC");
+    assert.notEqual(resultadoApp.metodo, "parametro_e_html_produto");
     const fonteApp = "https://www.seuhardware.com/r/app";
     const fontePc = "https://www.seuhardware.com/r/pc";
     const textoAli = `Link APP: ${fonteApp}\nLink PC: ${fontePc}`;

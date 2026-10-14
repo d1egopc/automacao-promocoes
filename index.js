@@ -20061,7 +20061,11 @@ function limparUrlProdutoRadar(url = "", marketplace = "") {
       if (itemMatch?.[1]) {
         parsed.pathname = `/item/${itemMatch[1]}.html`;
       }
+      const productIds = parsed.hostname.toLowerCase() === "m.aliexpress.com" &&
+        parsed.pathname === "/p/coin-index/index.html"
+        ? parsed.searchParams.get("productIds") : "";
       parsed.search = "";
+      if (/^\d{12,20}$/.test(productIds || "")) parsed.searchParams.set("productIds", productIds);
       return parsed.toString();
     }
 

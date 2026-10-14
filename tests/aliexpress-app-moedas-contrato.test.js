@@ -1,10 +1,23 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
 const {
   construirEspelhoComercialV24,
   montarTemplateEspelhoShadow
 } = require("../modules/ofc-v2/espelho-comercial");
+const {
+  montarOfertaUniversalEngine,
+  validarContratoOfertaUniversal
+} = require("../modules/engine/oferta-universal.contract");
+const {
+  criarProvaAfiliacaoWorkspaceAliExpress,
+  validarProvaAfiliacaoWorkspaceAliExpress
+} = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
+const {
+  importarAliExpress
+} = require("../marketplaces/aliexpress/importar");
 
 function integracao() {
   return {
@@ -476,6 +489,478 @@ async function testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp() {
   assert.ok(!resultado.metadata.linksClassificados.some(item => item.papelLink === "link_pc"));
 }
 
+async function testarFixtures8BitDoPreservamContratoComercialPorWorkspace() {
+  const produtoId = "1005011559438577";
+  const titulo = "Controle 8BitDo Ultimate 2C, Analógicos Hall Effect, Sem Fio";
+  const imagem = "https://ae01.alicdn.com/kf/8bitdo-ultimate-2c.jpg";
+  const categoria = "Games e Acessórios";
+  const fixtures = [
+    {
+      eventoId: 141428,
+      jobId: 661858,
+      workspaceId: "workspace_8bitdo_a",
+      precoRadar: 129,
+      moedas: 25,
+      app: "https://a.aliexpress.com/_c3i0kXx5",
+      pc: "https://a.aliexpress.com/_c4E58VUP"
+    },
+    {
+      eventoId: 141430,
+      jobId: 661872,
+      workspaceId: "workspace_8bitdo_b",
+      precoRadar: 126,
+      moedas: 24,
+      app: "https://a.aliexpress.com/_c3MhiHLv",
+      pc: "https://a.aliexpress.com/_c3X8TGoP"
+    }
+  ];
+  const resultados = [];
+
+  for (const fixture of fixtures) {
+    const credenciais = {
+      appKey: `app_${fixture.workspaceId}`,
+      secret: `secret_${fixture.workspaceId}`,
+      trackingId: `tracking_${fixture.workspaceId}`
+    };
+    const afiliadas = {
+      link_app: `https://s.click.aliexpress.com/e/_${fixture.workspaceId}_APP`,
+      link_pc: `https://s.click.aliexpress.com/e/_${fixture.workspaceId}_PC`
+    };
+    const chamadas = [];
+    const evento = {
+      id: fixture.eventoId,
+      texto_original: [
+        titulo,
+        `R$ ${fixture.precoRadar}`,
+        `Cupom: BRCD1 + ${fixture.moedas} moedas no APP`,
+        fixture.app,
+        "NO PC",
+        fixture.pc
+      ].join("\n")
+    };
+    const job = {
+      id: fixture.jobId,
+      evento_id: fixture.eventoId,
+      cliente_id: fixture.workspaceId,
+      marketplace: "aliexpress"
+    };
+
+    const resultado = await importarAliExpressEngine({
+      job,
+      evento,
+      links: [
+        { url_original: fixture.app, metadata: { papelLink: "link_app", papelLinkMotivo: "contexto_link_app_aliexpress" } },
+        { url_original: fixture.pc, metadata: { papelLink: "link_pc", papelLinkMotivo: "contexto_link_pc_aliexpress" } }
+      ],
+      deps: {
+        getIntegracaoCliente: (clienteId) => {
+          assert.strictEqual(clienteId, fixture.workspaceId);
+          return { credenciais };
+        },
+        importarAliExpress: async (url, config = {}) => {
+          const papel = config.contextoEngine?.papelLink || "";
+          assert.strictEqual(config.clienteId, fixture.workspaceId);
+          chamadas.push({ url, papel, trackingId: config.credenciais?.trackingId });
+          const urlAfiliada = afiliadas[papel];
+          assert.ok(urlAfiliada, `papel inesperado: ${papel}`);
+          return {
+            marketplace: "aliexpress",
+            titulo,
+            productId: produtoId,
+            precoAtual: "199,90",
+            precoOriginal: "249,90",
+            linkOriginal: url,
+            linkExpandido: `https://www.aliexpress.com/item/${produtoId}.html`,
+            linkAfiliado: urlAfiliada,
+            imagem,
+            categoria,
+            papelLink: papel,
+            metadata: {
+              afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceAliExpress({
+                clienteId: fixture.workspaceId,
+                credenciais,
+                urlOriginal: url,
+                urlAfiliadaWorkspace: urlAfiliada,
+                papel,
+                conversaoStatus: "convertida",
+                motivoConversao: "fixture_api_workspace"
+              })
+            }
+          };
+        }
+      }
+    });
+
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(chamadas[0].papel, "link_pc", "link PC deve abastecer o enriquecimento principal");
+    assert.deepStrictEqual(new Set(chamadas.map(item => item.papel)), new Set(["link_pc", "link_app"]));
+    assert.ok(chamadas.every(item => item.trackingId === credenciais.trackingId));
+    assert.strictEqual(resultado.metadata.produtoCanonico.produtoId, produtoId);
+    assert.strictEqual(resultado.titulo, titulo);
+    assert.strictEqual(resultado.imagem, imagem);
+    assert.strictEqual(resultado.imagemOrigem, "aliexpress_produto_canonico_pc");
+    assert.strictEqual(resultado.categoria, categoria);
+    assert.strictEqual(resultado.preco, fixture.precoRadar, "preço Radar deve vencer a referência da API");
+    assert.strictEqual(resultado.precoOrigem, "texto_radar");
+    assert.strictEqual(resultado.precoReferenciaApi, 199.9);
+    assert.strictEqual(resultado.cupom, "BRCD1");
+    assert.ok(resultado.moedasTexto.includes(String(fixture.moedas)));
+
+    const links = resultado.metadata.linksClassificados.filter(item => ["link_app", "link_pc"].includes(item.papelLink));
+    assert.strictEqual(links.length, 2);
+    assert.deepStrictEqual(links.map(item => item.papelLink).sort(), ["link_app", "link_pc"]);
+    assert.strictEqual(links.find(item => item.papelLink === "link_app").urlOriginal, fixture.app);
+    assert.strictEqual(links.find(item => item.papelLink === "link_pc").urlOriginal, fixture.pc);
+    assert.strictEqual(links.find(item => item.papelLink === "link_app").urlAfiliada, afiliadas.link_app);
+    assert.strictEqual(links.find(item => item.papelLink === "link_pc").urlAfiliada, afiliadas.link_pc);
+    assert.ok(links.every(item => item.conversaoWorkspace.workspaceId === fixture.workspaceId));
+    assert.ok(links.every(item => item.conversaoWorkspace.trackingIdEnviado === credenciais.trackingId));
+
+    const ofertaUniversal = montarOfertaUniversalEngine({
+      oferta: resultado,
+      ofertaEntrada: resultado,
+      job,
+      evento,
+      link: { url_original: fixture.pc, url_expandida: resultado.linkExpandido },
+      metadata: resultado.metadata
+    });
+    assert.strictEqual(validarContratoOfertaUniversal(ofertaUniversal).ok, true);
+    assert.strictEqual(ofertaUniversal.produto.idExterno, produtoId);
+    assert.strictEqual(ofertaUniversal.comercial.precoAtual, fixture.precoRadar);
+    assert.strictEqual(ofertaUniversal.comercial.cupom, "BRCD1");
+    assert.strictEqual(ofertaUniversal.midia.imagemPrincipal, imagem);
+    assert.strictEqual(ofertaUniversal.produto.categoriaNormalizada, categoria);
+    resultados.push({ fixture, resultado, afiliadas });
+  }
+
+  const [workspaceA, workspaceB] = resultados;
+  assert.ok(workspaceA.resultado.metadata.linksClassificados.every(item =>
+    !item.urlAfiliada || !Object.values(workspaceB.afiliadas).includes(item.urlAfiliada)
+  ), "workspace A não pode receber link convertido do workspace B");
+  assert.ok(workspaceB.resultado.metadata.linksClassificados.every(item =>
+    !item.urlAfiliada || !Object.values(workspaceA.afiliadas).includes(item.urlAfiliada)
+  ), "workspace B não pode receber link convertido do workspace A");
+}
+
+async function testar8BitDoAtravessaImporterRealSemDespacho() {
+  const app = "https://a.aliexpress.com/_c3MhiHLv";
+  const pc = "https://a.aliexpress.com/_c3X8TGoP";
+  const productId = "1005011559438577";
+  const credenciais = { appKey: "app_integrado", secret: "secret_integrado", trackingId: "tracking_integrado" };
+  const chamadas = [];
+  const fetchOriginal = global.fetch;
+  global.fetch = async (url, opcoes = {}) => {
+    const body = opcoes.body instanceof URLSearchParams
+      ? opcoes.body
+      : new URLSearchParams(opcoes.body || "");
+    const method = body.get("method");
+    chamadas.push({ url: String(url), method, sourceValues: body.get("source_values") || "" });
+
+    if (!method) {
+      return {
+        ok: true,
+        status: 200,
+        url: `https://www.aliexpress.com/item/${productId}.html`,
+        headers: { get: () => "" },
+        text: async () => "",
+        json: async () => ({})
+      };
+    }
+    if (method === "aliexpress.affiliate.productdetail.get") {
+      return {
+        ok: true,
+        status: 200,
+        url: String(url),
+        headers: { get: () => "" },
+        text: async () => "",
+        json: async () => ({
+          aliexpress_affiliate_productdetail_get_response: {
+            resp_result: {
+              resp_code: "200",
+              result: {
+                products: {
+                  product: {
+                    product_id: productId,
+                    product_title: "Controle 8BitDo Ultimate 2C",
+                    target_sale_price: "199.90",
+                    target_original_price: "249.90",
+                    product_main_image_url: "//ae01.alicdn.com/kf/8bitdo-integrado.jpg",
+                    promotion_link: `https://s.click.aliexpress.com/e/_${productId}`,
+                    product_detail_url: `https://www.aliexpress.com/item/${productId}.html`,
+                    first_level_category_name: "Games e Acessórios"
+                  }
+                }
+              }
+            }
+          }
+        })
+      };
+    }
+    if (method === "aliexpress.affiliate.link.generate") {
+      const source = body.get("source_values") || "";
+      const sufixo = source === app ? "APP_INTEGRADO" : "PC_INTEGRADO";
+      return {
+        ok: true,
+        status: 200,
+        url: String(url),
+        headers: { get: () => "" },
+        text: async () => "",
+        json: async () => ({
+          aliexpress_affiliate_link_generate_response: {
+            resp_result: {
+              result: {
+                promotion_links: {
+                  promotion_link: [{ promotion_link: `https://s.click.aliexpress.com/e/_${sufixo}` }]
+                }
+              }
+            }
+          }
+        })
+      };
+    }
+    throw new Error(`método AliExpress inesperado: ${method}`);
+  };
+
+  try {
+    const resultado = await importarAliExpressEngine({
+      job: { id: 661872, evento_id: 141430, cliente_id: "workspace_8bitdo_integrado", marketplace: "aliexpress" },
+      evento: {
+        texto_original: [
+          "Controle 8BitDo Ultimate 2C",
+          "R$ 126",
+          "Cupom: BRCD1 + 24 moedas no APP",
+          app,
+          "NO PC",
+          pc
+        ].join("\n")
+      },
+      links: [
+        { url_original: app, metadata: { papelLink: "link_app", papelLinkMotivo: "contexto_link_app_aliexpress" } },
+        { url_original: pc, metadata: { papelLink: "link_pc", papelLinkMotivo: "contexto_link_pc_aliexpress" } }
+      ],
+      deps: {
+        getIntegracaoCliente: () => ({ credenciais }),
+        importarAliExpress
+      }
+    });
+
+    assert.strictEqual(resultado.ok, true);
+    assert.strictEqual(resultado.produtoId, productId);
+    assert.strictEqual(resultado.titulo, "Controle 8BitDo Ultimate 2C");
+    assert.strictEqual(resultado.preco, 126);
+    assert.strictEqual(resultado.cupom, "BRCD1");
+    assert.ok(resultado.moedasTexto.includes("24"));
+    assert.strictEqual(resultado.imagem, "https://ae01.alicdn.com/kf/8bitdo-integrado.jpg");
+    assert.strictEqual(resultado.categoria, "Games e Acessórios");
+    const appConvertido = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+    const pcConvertido = resultado.metadata.linksClassificados.find(item => item.papelLink === "link_pc");
+    assert.strictEqual(appConvertido.urlAfiliada, "https://s.click.aliexpress.com/e/_APP_INTEGRADO");
+    assert.strictEqual(pcConvertido.urlAfiliada, "https://s.click.aliexpress.com/e/_PC_INTEGRADO");
+    assert.ok(chamadas.some(item => item.method === "aliexpress.affiliate.productdetail.get"));
+    assert.deepStrictEqual(
+      chamadas.filter(item => item.method === "aliexpress.affiliate.link.generate").map(item => item.sourceValues).sort(),
+      [app, pc].sort(),
+      "cada ocorrência deve ser afiliada a partir de sua própria URL capturada"
+    );
+  } finally {
+    global.fetch = fetchOriginal;
+  }
+}
+
+async function testarMouse144302HandoffPcAppSemCodigoInventado() {
+  const productId = "1005012689379802";
+  const app = "https://seuhardware.com/s/9MOH2U7";
+  const pc = "https://seuhardware.com/s/Gfdisrw";
+  const appExpandido = `https://m.aliexpress.com/p/coin-index/index.html?productIds=${productId}`;
+  const pcExpandido = `https://pt.aliexpress.com/item/${productId}.html`;
+  const workspaceId = "workspace_mouse_fixture";
+  const credenciais = { appKey: "app_mouse_fixture", secret: "secret_mouse_fixture", trackingId: "tracking_mouse_fixture" };
+  const chamadas = [];
+  const fetchOriginal = global.fetch;
+  global.fetch = async (url, opcoes = {}) => {
+    const body = opcoes.body instanceof URLSearchParams
+      ? opcoes.body : new URLSearchParams(opcoes.body || "");
+    const method = body.get("method");
+    const sourceValues = body.get("source_values") || "";
+    chamadas.push({ method, sourceValues });
+    if (method === "aliexpress.affiliate.productdetail.get") {
+      return {
+        ok: true, status: 200, url: String(url), headers: { get: () => "" },
+        json: async () => ({ aliexpress_affiliate_productdetail_get_response: { resp_result: {
+          resp_code: "200", result: { products: { product: {
+            product_id: productId,
+            product_title: "Mouse Delux M900 Pro",
+            target_sale_price: "199.90",
+            product_main_image_url: "//ae01.alicdn.com/kf/mouse-fixture.jpg",
+            promotion_link: "https://s.click.aliexpress.com/e/_mouse-base",
+            product_detail_url: pcExpandido,
+            first_level_category_name: "Mouses"
+          } } }
+        } } })
+      };
+    }
+    if (method === "aliexpress.affiliate.link.generate") {
+      assert.ok([appExpandido, pcExpandido].includes(sourceValues), "a API recebe somente cada URL oficial expandida");
+      const papel = sourceValues === appExpandido ? "APP" : "PC";
+      return {
+        ok: true, status: 200, url: String(url), headers: { get: () => "" },
+        json: async () => ({ aliexpress_affiliate_link_generate_response: { resp_result: { result: {
+          promotion_links: { promotion_link: [{ promotion_link: `https://s.click.aliexpress.com/e/_mouse_${papel}` }] }
+        } } } })
+      };
+    }
+    throw new Error(`método inesperado: ${method}`);
+  };
+
+  try {
+    const resultado = await importarAliExpressEngine({
+      job: { id: "fixture_144302", evento_id: 144302, cliente_id: workspaceId, marketplace: "aliexpress" },
+      evento: { texto_original: [
+        "Mouse Delux M900 Pro, PAW3395, 8000 Hz, com dock",
+        "R$ 176 + 967 moedas",
+        "Cupom: seguir a loja e resgatar; nenhum código explícito",
+        `APP: ${app}`, `PC: ${pc}`
+      ].join("\n") },
+      links: [
+        { url_original: app, url_expandida: appExpandido, metadata: { papelLink: "link_app" } },
+        { url_original: pc, url_expandida: pcExpandido, metadata: { papelLink: "link_pc" } }
+      ],
+      deps: { getIntegracaoCliente: clienteId => clienteId === workspaceId ? { credenciais } : null, importarAliExpress }
+    });
+
+    assert.equal(resultado.ok, true);
+    assert.equal(resultado.produtoId, productId);
+    assert.equal(resultado.titulo, "Mouse Delux M900 Pro");
+    assert.equal(resultado.imagem, "https://ae01.alicdn.com/kf/mouse-fixture.jpg");
+    assert.equal(resultado.categoria, "Mouses");
+    assert.equal(resultado.preco, 176);
+    assert.equal(resultado.cupom, "", "orientação de resgate não é código de cupom");
+    assert.ok(resultado.beneficioComercial.includes("seguir a loja"), "instrução do Radar permanece textual");
+    assert.ok(resultado.moedasTexto.includes("967"));
+    const links = resultado.metadata.linksClassificados;
+    const porPapel = Object.fromEntries(links.map(item => [item.papelLink, item]));
+    assert.equal(porPapel.link_app.urlOriginal, app);
+    assert.equal(porPapel.link_pc.urlOriginal, pc);
+    assert.equal(porPapel.link_app.sourceValuesUsado, appExpandido);
+    assert.equal(porPapel.link_pc.sourceValuesUsado, pcExpandido);
+    assert.notEqual(porPapel.link_app.urlAfiliada, porPapel.link_pc.urlAfiliada);
+    for (const [papel, original] of [["link_app", app], ["link_pc", pc]]) {
+      assert.equal(porPapel[papel].renderizavel, true);
+      assert.equal(porPapel[papel].afiliacaoWorkspace.urlOriginal, original);
+      assert.equal(porPapel[papel].afiliacaoWorkspace.papel, papel);
+      assert.equal(validarProvaAfiliacaoWorkspaceAliExpress(porPapel[papel].afiliacaoWorkspace,
+        { clienteId: workspaceId, credenciais, exigirAssinatura: true }).valida, true);
+    }
+    assert.equal(chamadas.filter(item => item.method === "aliexpress.affiliate.productdetail.get").length, 1);
+    assert.deepEqual(chamadas.filter(item => item.method === "aliexpress.affiliate.link.generate")
+      .map(item => item.sourceValues).sort(), [appExpandido, pcExpandido].sort());
+
+    const divergente = await importarAliExpressEngine({
+      job: { id: "fixture_144302_divergente", evento_id: 144302, cliente_id: workspaceId, marketplace: "aliexpress" },
+      evento: { texto_original: `Mouse Delux M900 Pro\nR$ 176\nAPP: ${app}\nPC: ${pc}` },
+      links: [
+        { url_original: app, url_expandida: "https://m.aliexpress.com/p/coin-index/index.html?productIds=1005012689379803", metadata: { papelLink: "link_app" } },
+        { url_original: pc, url_expandida: pcExpandido, metadata: { papelLink: "link_pc" } }
+      ],
+      deps: { getIntegracaoCliente: () => ({ credenciais }), importarAliExpress }
+    });
+    assert.equal(divergente.ok, false, "APP divergente impede a oferta comercial inteira");
+    assert.equal(divergente.motivo, "afiliacao_workspace_incompleta");
+    const appDivergente = divergente.metadata.linksClassificados.find(item => item.papelLink === "link_app");
+    assert.equal(appDivergente.renderizavel, false);
+    assert.equal(appDivergente.motivoConversao, "link_app_produto_nao_comprovado");
+  } finally {
+    global.fetch = fetchOriginal;
+  }
+}
+
+async function testarMouse144302ApiVaziaFalhaFechado() {
+  const productId = "1005012689379802";
+  const pc = "https://pt.aliexpress.com/item/1005012689379802.html";
+  const fetchOriginal = global.fetch;
+  global.fetch = async (url, opcoes = {}) => {
+    const body = opcoes.body instanceof URLSearchParams
+      ? opcoes.body : new URLSearchParams(opcoes.body || "");
+    const method = body.get("method");
+    if (method === "aliexpress.affiliate.productdetail.get") {
+      return {
+        ok: true,
+        status: 200,
+        url: String(url),
+        headers: { get: () => "" },
+        json: async () => ({
+          aliexpress_affiliate_productdetail_get_response: {
+            resp_result: {
+              resp_code: 200,
+              resp_msg: "success",
+              result: { current_record_count: 0, products: {} }
+            }
+          }
+        })
+      };
+    }
+    if (method === "aliexpress.affiliate.product.query") {
+      return {
+        ok: true,
+        status: 200,
+        url: String(url),
+        headers: { get: () => "" },
+        json: async () => ({
+          aliexpress_affiliate_product_query_response: {
+            resp_result: { resp_code: 405, resp_msg: "The result is empty", result: {} }
+          }
+        })
+      };
+    }
+    throw new Error(`método inesperado: ${method}`);
+  };
+
+  try {
+    const resultado = await importarAliExpress(pc, {
+      credenciais: { appKey: "fixture", secret: "fixture", trackingId: "fixture" },
+      clienteId: "workspace_mouse_fixture",
+      contextoEngine: { papelLink: "link_pc", conversaoLinkAlternativo: true }
+    });
+
+    assert.equal(resultado.erroTecnico, "aliexpress_manual_fallback_generico");
+    assert.equal(resultado.titulo, "Produto AliExpress");
+    assert.equal(resultado.imagem, "");
+    assert.equal(resultado.categoria, "AliExpress");
+    assert.equal(resultado.precoAtual, "");
+  } finally {
+    global.fetch = fetchOriginal;
+  }
+}
+
+function testarRadarPreservaSomenteProductIdsFactualNaLandingApp() {
+  const codigo = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+  const inicio = codigo.indexOf("function limparUrlProdutoRadar(");
+  const fim = codigo.indexOf("function isUrlIntermediariaMercadoLivreRadar(", inicio);
+  assert.ok(inicio >= 0 && fim > inicio);
+  const limpar = new Function("normalizarMarketplaceRadar", "detectarMarketplaceRadarLink",
+    `${codigo.slice(inicio, fim)}; return limparUrlProdutoRadar;`)(valor => valor, () => "aliexpress");
+  assert.equal(
+    limpar("https://m.aliexpress.com/p/coin-index/index.html?productIds=1005012689379802&aff_trace_key=sensivel", "aliexpress"),
+    "https://m.aliexpress.com/p/coin-index/index.html?productIds=1005012689379802"
+  );
+  assert.equal(
+    limpar("https://m.aliexpress.com/p/coin-index/index.html?productIds=outro&aff_trace_key=sensivel", "aliexpress"),
+    "https://m.aliexpress.com/p/coin-index/index.html"
+  );
+  assert.equal(
+    limpar("https://pt.aliexpress.com/item/1005012689379802.html?tracking=remover", "aliexpress"),
+    "https://pt.aliexpress.com/item/1005012689379802.html"
+  );
+}
+
+function testarRegistroNoPipelineUnico() {
+  const runner = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "importer", "importer.runner.js"), "utf8");
+  const orchestrator = fs.readFileSync(path.join(__dirname, "..", "modules", "engine", "orchestrator.runner.js"), "utf8");
+  assert.ok(runner.includes("aliexpress: importarAliExpressEngine"), "importer oficial deve registrar o adapter AliExpress");
+  assert.ok(orchestrator.includes("importar_aliexpress"), "orquestrador deve importar AliExpress pelo Engine");
+  assert.ok(orchestrator.includes("distribuir_aliexpress"), "orquestrador deve entregar AliExpress ao distribuidor do RIO");
+}
+
 (async () => {
   await testarPrecoRadarVenceApiELinkMoedasConverte();
   testarEspelhoUsaAfiliadaENaoOriginal();
@@ -486,6 +971,12 @@ async function testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp() {
   await testarFalhaConversaoMantemOcorrenciaAuditavel();
   await testarApiSemCanonicoPreservaAppPcConvertidosDoRadar();
   await testarResgateConservadorNaoFabricaPcQuandoRadarTrouxeSoApp();
+  await testarFixtures8BitDoPreservamContratoComercialPorWorkspace();
+  await testar8BitDoAtravessaImporterRealSemDespacho();
+  await testarMouse144302HandoffPcAppSemCodigoInventado();
+  await testarMouse144302ApiVaziaFalhaFechado();
+  testarRadarPreservaSomenteProductIdsFactualNaLandingApp();
+  testarRegistroNoPipelineUnico();
   console.log("aliexpress-app-moedas-contrato.test.js OK");
 })().catch((erro) => {
   console.error(erro);

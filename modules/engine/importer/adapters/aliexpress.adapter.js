@@ -193,6 +193,8 @@ function normalizarCupomAliExpress(cupom = "") {
     "VALOR",
     "MOEDAS",
     "MOEDA",
+    "SEGUIR",
+    "RESGATAR",
     "APP",
     "SITE",
     "BRASIL",
@@ -221,8 +223,11 @@ function extrairMoedasTextoAliExpress(textoRadar = "") {
 }
 
 function extrairBeneficioTextoAliExpress(produto = {}, evento = {}) {
-  const moedasTexto = extrairMoedasTextoAliExpress(textoOriginalEvento(evento));
+  const textoRadar = textoOriginalEvento(evento);
+  const moedasTexto = extrairMoedasTextoAliExpress(textoRadar);
+  const instrucaoResgateRadar = textoRadar.match(/(?:^|\n)\s*(?:cupom|resgate)\s*:\s*(seguir a loja[^\n]{0,120})/i)?.[1]?.trim() || "";
   return primeiroValor(
+    instrucaoResgateRadar,
     produto.beneficioComercial,
     produto.beneficioTexto,
     produto.beneficioExtra,
@@ -334,6 +339,33 @@ function urlOriginalAliExpressSegura(url = "") {
       || host.endsWith(".aliexpress.com");
   } catch (_) {
     return false;
+  }
+}
+
+function urlExpandidaAliExpressSegura(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.port &&
+      urlOriginalAliExpressSegura(parsed.href);
+  } catch {
+    return false;
+  }
+}
+
+function produtoIdFactualUrlExpandidaAliExpress(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    if (!urlExpandidaAliExpressSegura(parsed.href)) return "";
+    const itemId = parsed.pathname.match(/^\/item\/(\d{12,20})\.html$/i)?.[1] || "";
+    if (itemId) return itemId;
+    if (parsed.hostname.toLowerCase() === "m.aliexpress.com" &&
+      parsed.pathname === "/p/coin-index/index.html") {
+      const productIds = parsed.searchParams.get("productIds") || "";
+      return /^\d{12,20}$/.test(productIds) ? productIds : "";
+    }
+    return "";
+  } catch {
+    return "";
   }
 }
 
@@ -616,12 +648,21 @@ async function converterLinksAlternativosAliExpress({
 } = {}) {
   const convertidos = new Map();
 
-  async function converter(url = "", papelLink = "") {
+  async function converter(url = "", papelLink = "", urlExpandida = "") {
     const alvo = texto(url);
     const papel = texto(papelLink);
     if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio", appValidado: false, produtoCanonico: "", produtoCanonicoPrincipal: "" };
+    if (!urlOriginalAliExpressSegura(alvo) && ["link_app", "link_moedas"].includes(papel)) {
+      const idExpandido = produtoIdFactualUrlExpandidaAliExpress(urlExpandida);
+      const idPrincipal = produtoIdFactualUrlExpandidaAliExpress(urlPrincipal);
+      if (!idExpandido || !idPrincipal || idExpandido !== idPrincipal) {
+        return { urlAfiliada: "", renderizavel: false, motivo: "link_app_produto_nao_comprovado", appValidado: false, produtoCanonico: idExpandido, produtoCanonicoPrincipal: idPrincipal };
+      }
+    }
+    const urlParaImportar = urlOriginalAliExpressSegura(alvo) ? alvo
+      : (urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : alvo);
 
-    if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
+    if (texto(urlPrincipal) && urlParaImportar === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
       const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
         papelLink: papel,
         urlAfiliada: linkAfiliadoPrincipal,
@@ -647,7 +688,7 @@ async function converterLinksAlternativosAliExpress({
     // A conversao principal ja foi tentada acima. Quando ela nao produziu
     // uma afiliada valida, preservar essa ocorrencia como falha auditavel e
     // seguir para as demais ocorrencias sem repetir a chamada da API.
-    if (texto(urlPrincipal) && alvo === texto(urlPrincipal) && !texto(linkAfiliadoPrincipal)) {
+    if (texto(urlPrincipal) && urlParaImportar === texto(urlPrincipal) && !texto(linkAfiliadoPrincipal)) {
       const urlAfiliadaTentada = primeiroValor(produtoPrincipal?.linkAfiliado, produtoPrincipal?.linkFinal, produtoPrincipal?.link);
       const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
         papelLink: papel,
@@ -675,7 +716,7 @@ async function converterLinksAlternativosAliExpress({
     if (convertidos.has(chaveCache)) return convertidos.get(chaveCache);
 
     try {
-      const produtoConvertido = await importarLegado(alvo, {
+      const produtoConvertido = await importarLegado(urlParaImportar, {
         ...integracao,
         credenciais,
         clienteId,
@@ -704,7 +745,7 @@ async function converterLinksAlternativosAliExpress({
         renderizavel: avaliacao.renderizavel && proveniencia.valida,
         motivo: avaliacao.renderizavel && !proveniencia.valida ? "afiliacao_workspace_incompleta" : avaliacao.motivo,
         appValidado: avaliacao.appValidado,
-        sourceValuesUsado: primeiroValor(produtoConvertido?.metadata?.sourceValuesUsado, alvo),
+        sourceValuesUsado: primeiroValor(produtoConvertido?.metadata?.sourceValuesUsado, urlParaImportar),
         produtoCanonico: avaliacao.produtoCanonico || "",
         produtoCanonicoPrincipal: avaliacao.produtoCanonicoPrincipal || "",
         afiliacaoWorkspace: proveniencia.prova
@@ -746,7 +787,7 @@ async function converterLinksAlternativosAliExpress({
     }
     let conversao = conversoesPorPapelUrl.get(chaveCacheOcorrencia);
     if (!conversao) {
-      conversao = await converter(urlOriginal, papelLink);
+      conversao = await converter(urlOriginal, papelLink, link.urlExpandida);
       conversoesPorPapelUrl.set(chaveCacheOcorrencia, conversao);
     }
     saida.push({
@@ -928,6 +969,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     ? primeiroValor(produto.linkAfiliado, produto.linkFinal, produto.link)
     : "";
   const imagemOficial = imagemAliExpressOficialProduto(produto);
+  const produtoCanonico = resolverProdutoCanonicoAliExpress(produto, urlOriginalEngine);
 
   logAliExpressAdapter("[ENGINE-ALIEXPRESS-IMPORTADOR-RETORNO]", {
     jobId: job.id,
@@ -1050,6 +1092,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   return {
     ok: true,
     marketplace: "aliexpress",
+    produtoId: produtoCanonico.produtoId,
     titulo: produto.titulo || produto.nome || "",
     preco: precoNumerico,
     precoAtual: precoNumerico,
@@ -1110,7 +1153,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       },
       camposProduto: Object.keys(produto || {}),
       produto,
-      produtoCanonico: resolverProdutoCanonicoAliExpress(produto, urlOriginalEngine)
+      produtoCanonico
     }
   };
 }
