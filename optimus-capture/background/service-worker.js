@@ -1,4 +1,4 @@
-importScripts("../local-worker/worker-client.js", "../local-worker/magalu-image.js", "../local-worker/magalu-opportunity.js", "../local-worker/mercadolivre-image.js", "../local-worker/mercadolivre-identity.js", "../local-worker/task-runner.js");
+importScripts("../local-worker/worker-client.js", "../local-worker/magalu-image.js", "../local-worker/magalu-identity.js", "../local-worker/magalu-opportunity.js", "../local-worker/mercadolivre-image.js", "../local-worker/mercadolivre-identity.js", "../local-worker/task-runner.js");
 importScripts("../core/marketplace-detector.js");
 importScripts("../core/launcher-policy.js");
 

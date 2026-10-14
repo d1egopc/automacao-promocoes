@@ -25,6 +25,11 @@ const {
   escolherProdutoPrincipal,
   resumoLinksClassificados
 } = require("../../link-role.service");
+const {
+  sanitizarUrlOneLinkMagalu,
+  sanitizarUrlProdutoMagalu,
+  produtoIdUrlMagalu
+} = require("../../../local-worker/magalu-identity.contract");
 
 const POLITICA_MAGALU_ENGINE = Object.freeze({
   timeoutMs: 2500,
@@ -274,6 +279,22 @@ function escolherLinkMagalu(links = [], evento = {}) {
   return escolherProdutoPrincipal(validos, "magalu", evento);
 }
 
+function escolherOneLinkMagalu(links = [], evento = {}) {
+  const candidatos = [];
+  for (const link of Array.isArray(links) ? links : []) {
+    candidatos.push({ url: link.url_original, link, campo: "url_original" });
+    candidatos.push({ url: link.url_normalizada, link, campo: "url_normalizada" });
+  }
+  if (Array.isArray(evento.links_extraidos)) {
+    for (const url of evento.links_extraidos) candidatos.push({ url, link: null, campo: "links_extraidos" });
+  }
+  for (const candidato of candidatos) {
+    const url = sanitizarUrlOneLinkMagalu(candidato.url);
+    if (url) return { ...candidato, url };
+  }
+  return { url: "", link: null, campo: "" };
+}
+
 function credencialPromoterIdMagalu(integracao = {}) {
   return texto(integracao?.credenciais?.promoterId || integracao?.promoterId);
 }
@@ -418,12 +439,81 @@ function registrarBuscaImagemMagazineVoce({ job = {}, clienteId = "", productId 
 
 async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
-  const linkEscolhido = escolherLinkMagalu(links, evento);
-  const urlOriginalEngine = linkEscolhido.url;
+  let linkEscolhido = escolherLinkMagalu(links, evento);
+  let urlOriginalEngine = linkEscolhido.url;
   const linksClassificados = resumoLinksClassificados(links, evento, "magalu");
+  let integracao = null;
+  let promoterId = "";
+  let identidadeLocalWorker = null;
 
   if (!clienteId) {
     return { ok: false, marketplace: "magalu", motivo: "cliente_invalido" };
+  }
+
+  const oneLinkPendente = !urlOriginalEngine ? escolherOneLinkMagalu(links, evento) : { url: "" };
+  if (!urlOriginalEngine && oneLinkPendente.url &&
+    typeof deps.obterIdentidadeMagaluLocalWorker === "function" &&
+    typeof deps.garantirIdentidadeMagaluLocalWorker === "function") {
+    if (typeof deps.getIntegracaoCliente !== "function") {
+      return { ok: false, marketplace: "magalu", motivo: "get_integracao_indisponivel", linkOriginal: oneLinkPendente.url };
+    }
+    integracao = deps.getIntegracaoCliente(clienteId, "magalu");
+    promoterId = credencialPromoterIdMagalu(integracao);
+    if (!integracao || !promoterId) {
+      return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: oneLinkPendente.url };
+    }
+    try {
+      identidadeLocalWorker = await deps.obterIdentidadeMagaluLocalWorker({ sourceUrl: oneLinkPendente.url });
+    } catch (erro) {
+      logMagaluAdapter("[ENGINE-MAGALU-IDENTIDADE-LOCAL-CACHE-ERRO]", {
+        jobId: job.id || null,
+        eventoId: job.evento_id || null,
+        clienteId,
+        motivo: "identidade_cache_consulta_falhou",
+        erro: texto(erro?.message).slice(0, 180)
+      });
+    }
+    const urlIdentificada = sanitizarUrlProdutoMagalu(identidadeLocalWorker?.canonicalUrl || identidadeLocalWorker?.finalUrl);
+    const productIdIdentificado = produtoIdUrlMagalu(urlIdentificada);
+    if (identidadeLocalWorker?.identidadeValidada === true && urlIdentificada &&
+      productIdIdentificado === texto(identidadeLocalWorker.observedProductId).toLowerCase()) {
+      urlOriginalEngine = urlIdentificada;
+      linkEscolhido = {
+        url: urlIdentificada,
+        link: oneLinkPendente.link,
+        campo: "local_worker_identity",
+        papelLink: "produto",
+        papelLinkMotivo: "magalu_identity_v1"
+      };
+    } else {
+      let taskIdentidade = null;
+      try {
+        taskIdentidade = await deps.garantirIdentidadeMagaluLocalWorker({ sourceUrl: oneLinkPendente.url });
+      } catch (erro) {
+        logMagaluAdapter("[ENGINE-MAGALU-IDENTIDADE-LOCAL-TASK-ERRO]", {
+          jobId: job.id || null,
+          eventoId: job.evento_id || null,
+          clienteId,
+          motivo: "identidade_task_criacao_falhou",
+          erro: texto(erro?.message).slice(0, 180)
+        });
+      }
+      return {
+        ok: false,
+        marketplace: "magalu",
+        motivo: "sem_link_produto_confirmado",
+        motivoDetalhe: "aguardando_identidade_local",
+        retriavel: Boolean(taskIdentidade?.ok),
+        linkOriginal: oneLinkPendente.url,
+        metadata: {
+          adapter: "magalu",
+          linksClassificados,
+          localWorkerIdentity: taskIdentidade?.task
+            ? { taskId: taskIdentidade.task.id, status: taskIdentidade.task.status, capability: taskIdentidade.task.capability }
+            : null
+        }
+      };
+    }
   }
 
   if (!urlOriginalEngine) {
@@ -442,8 +532,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
     return { ok: false, marketplace: "magalu", motivo: "get_integracao_indisponivel", linkOriginal: urlOriginalEngine };
   }
 
-  const integracao = deps.getIntegracaoCliente(clienteId, "magalu");
-  const promoterId = credencialPromoterIdMagalu(integracao);
+  if (!integracao) integracao = deps.getIntegracaoCliente(clienteId, "magalu");
+  if (!promoterId) promoterId = credencialPromoterIdMagalu(integracao);
   if (!integracao || !promoterId) {
     return { ok: false, marketplace: "magalu", motivo: "integracao_ausente", linkOriginal: urlOriginalEngine };
   }
@@ -925,6 +1015,15 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados,
+      identidadeLocalWorker: identidadeLocalWorker
+        ? {
+            capability: identidadeLocalWorker.capability || "",
+            identityKey: identidadeLocalWorker.identityKey || "",
+            observedProductId: identidadeLocalWorker.observedProductId || "",
+            canonicalUrl: identidadeLocalWorker.canonicalUrl || "",
+            collectedAt: identidadeLocalWorker.collectedAt || ""
+          }
+        : null,
       linksComerciais: linksClassificados.map(item => ({
         ...item,
         papel: item.papelLink,

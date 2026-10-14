@@ -16,6 +16,15 @@ const {
   sanitizarUrlMlstatic,
   validarResultadoMlIdentity
 } = require("./ml-identity.contract");
+const {
+  MAGALU_IDENTITY_CAPABILITY,
+  MAGALU_IDENTITY_TASK_TYPE,
+  MAGALU_IDENTITY_RESULT_TTL_MS,
+  MAGALU_IDENTITY_CACHE_TTL_MS,
+  sanitizarUrlOneLinkMagalu,
+  chaveIdentidadeMagalu,
+  validarResultadoMagaluIdentity
+} = require("./magalu-identity.contract");
 
 const MAGALU_CAPABILITY = "magalu_image_v1";
 const MAGALU_TASK_TYPE = "imagem_oficial";
@@ -258,7 +267,7 @@ function criarLocalWorkerService(opcoes = {}) {
     }
   }
 
-  async function resultado({ worker, taskId, leaseToken, marketplace, productId, imagemOficialUrl, provaTecnica, capability, accessible, indicatorFound, finalUrl, checkedAt, expectedMlb, observedMlb, identidadeValidada, tituloOficial, imagemOficial, origemTitulo, origemImagem, canonicalUrl, variationId, collectedAt } = {}) {
+  async function resultado({ worker, taskId, leaseToken, marketplace, productId, imagemOficialUrl, provaTecnica, capability, accessible, indicatorFound, finalUrl, checkedAt, expectedMlb, observedMlb, observedProductId, identityKey, sourceUrl, identidadeValidada, tituloOficial, imagemOficial, origemTitulo, origemImagem, canonicalUrl, variationId, collectedAt } = {}) {
     validarWorker(worker, "");
     const task = await repo.obterTask(taskId);
     if (!task) throw erro("task_inexistente", 404);
@@ -268,6 +277,38 @@ function criarLocalWorkerService(opcoes = {}) {
       const conclusao = await repo.completarTecnica({ taskId, workerId: worker.workerId, leaseToken, metadata });
       if (conclusao?.ok && onOpportunityResult) onOpportunityResult(metadata);
       return conclusao;
+    }
+    if (task.capability === MAGALU_IDENTITY_CAPABILITY) {
+      let validado;
+      try {
+        validado = validarResultadoMagaluIdentity({
+          capability,
+          contractVersion: provaTecnica?.contractVersion,
+          marketplace,
+          identityKey,
+          sourceUrl,
+          observedProductId,
+          identidadeValidada,
+          finalUrl,
+          canonicalUrl,
+          collectedAt,
+          provaTecnica
+        }, {
+          identityKey: task.productId,
+          sourceUrl: task.sourceUrl,
+          agoraMs: agora().getTime(),
+          ttlMs: MAGALU_IDENTITY_RESULT_TTL_MS
+        });
+      } catch (falha) {
+        throw erro(texto(falha?.codigo || falha?.message || "magalu_identity_resultado_invalido"), 422);
+      }
+      return repo.completarIdentidade({
+        taskId,
+        workerId: worker.workerId,
+        leaseToken,
+        resultado: validado,
+        cacheTtlMs: MAGALU_IDENTITY_CACHE_TTL_MS
+      });
     }
     if (task.capability === ML_IDENTITY_CAPABILITY) {
       const validado = validarResultadoIdentidadeMercadoLivre({
@@ -395,6 +436,43 @@ function criarLocalWorkerService(opcoes = {}) {
     });
   }
 
+  async function garantirIdentidadeMagalu({ sourceUrl = "" } = {}) {
+    const origem = sanitizarUrlOneLinkMagalu(sourceUrl);
+    const identityKey = chaveIdentidadeMagalu(origem);
+    if (!origem || !identityKey) return { ok: false, motivo: "task_magalu_identity_invalida" };
+    return repo.garantirTask({
+      type: MAGALU_IDENTITY_TASK_TYPE,
+      marketplace: "magalu",
+      productId: identityKey,
+      sourceUrl: origem,
+      capability: MAGALU_IDENTITY_CAPABILITY,
+      idempotencyKey: `magalu:${identityKey}:${MAGALU_IDENTITY_CAPABILITY}`,
+      maxAttempts: 3,
+      ttlMs: 15 * 60 * 1000,
+      reutilizarCompleted: false
+    });
+  }
+
+  async function obterIdentidadeMagalu({ sourceUrl = "" } = {}) {
+    if (typeof repo.obterCacheIdentidade !== "function") return null;
+    const origem = sanitizarUrlOneLinkMagalu(sourceUrl);
+    const identityKey = chaveIdentidadeMagalu(origem);
+    if (!origem || !identityKey) return null;
+    const cache = await repo.obterCacheIdentidade({ marketplace: "magalu", productId: identityKey, capability: MAGALU_IDENTITY_CAPABILITY });
+    if (!cache?.result) return null;
+    try {
+      const resultado = validarResultadoMagaluIdentity(cache.result, {
+        identityKey,
+        sourceUrl: origem,
+        agoraMs: agora().getTime(),
+        ttlMs: MAGALU_IDENTITY_CACHE_TTL_MS
+      });
+      return { ...resultado, cacheValidatedAt: cache.validatedAt || null, cacheExpiresAt: cache.expiresAt || null };
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function garantirImagemMercadoLivre({ productId, sourceUrl = "" } = {}) {
     const pid = texto(productId).toUpperCase();
     if (!/^MLB\d+$/.test(pid) || !urlMercadoLivreProdutoValida(sourceUrl, pid)) return { ok: false, motivo: "task_ml_invalida" };
@@ -496,7 +574,7 @@ function criarLocalWorkerService(opcoes = {}) {
 
   async function status() { return repo.status(); }
 
-  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, garantirImagemMercadoLivre, garantirIdentidadeMercadoLivre, obterIdentidadeMercadoLivre, obterTaskImagemMagalu, obterImagemCache, garantirOportunidadeMagalu, obterOportunidadeMagaluRecente, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, ML_CAPABILITY, ML_TASK_TYPE, ML_IDENTITY_CAPABILITY, ML_IDENTITY_TASK_TYPE };
+  return { ensureSchema, registrarWorker, autenticar, claim, heartbeat, resultado, falha, revogar, garantirImagemMagalu, garantirIdentidadeMagalu, obterIdentidadeMagalu, garantirImagemMercadoLivre, garantirIdentidadeMercadoLivre, obterIdentidadeMercadoLivre, obterTaskImagemMagalu, obterImagemCache, garantirOportunidadeMagalu, obterOportunidadeMagaluRecente, status, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_IDENTITY_CAPABILITY, MAGALU_IDENTITY_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, ML_CAPABILITY, ML_TASK_TYPE, ML_IDENTITY_CAPABILITY, ML_IDENTITY_TASK_TYPE };
 }
 
-module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, MAGALU_OPPORTUNITY_PRODUCT_ID, MAGALU_OPPORTUNITY_URL, MAGALU_OPPORTUNITY_TTL_MS, ML_CAPABILITY, ML_TASK_TYPE, ML_IDENTITY_CAPABILITY, ML_IDENTITY_TASK_TYPE, urlOportunidadeMagaluValida };
+module.exports = { criarLocalWorkerService, MAGALU_CAPABILITY, MAGALU_TASK_TYPE, MAGALU_IDENTITY_CAPABILITY, MAGALU_IDENTITY_TASK_TYPE, MAGALU_OPPORTUNITY_CAPABILITY, MAGALU_OPPORTUNITY_TASK_TYPE, MAGALU_OPPORTUNITY_PRODUCT_ID, MAGALU_OPPORTUNITY_URL, MAGALU_OPPORTUNITY_TTL_MS, ML_CAPABILITY, ML_TASK_TYPE, ML_IDENTITY_CAPABILITY, ML_IDENTITY_TASK_TYPE, urlOportunidadeMagaluValida };

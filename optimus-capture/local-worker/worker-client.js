@@ -6,10 +6,11 @@
   const USER_AUTH_STORAGE_KEY = "optimus_capture_auth";
   const BOOTSTRAP_BLOCK_KEY = "optimus_local_worker_bootstrap_block_v1";
   const CAPABILITY = "magalu_image_v1";
+  const MAGALU_IDENTITY_CAPABILITY = "magalu_identity_v1";
   const OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const ML_CAPABILITY = "ml_image_v1";
   const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
-  const CAPABILITIES = Object.freeze([CAPABILITY, OPPORTUNITY_CAPABILITY, ML_CAPABILITY, ML_IDENTITY_CAPABILITY]);
+  const CAPABILITIES = Object.freeze([CAPABILITY, MAGALU_IDENTITY_CAPABILITY, OPPORTUNITY_CAPABILITY, ML_CAPABILITY, ML_IDENTITY_CAPABILITY]);
   let bootstrapEmCurso = null;
 
   function texto(valor) { return String(valor ?? "").trim(); }
@@ -189,6 +190,7 @@
   }
   const client = {
     CAPABILITY,
+    MAGALU_IDENTITY_CAPABILITY,
     OPPORTUNITY_CAPABILITY,
     ML_CAPABILITY,
     ML_IDENTITY_CAPABILITY,

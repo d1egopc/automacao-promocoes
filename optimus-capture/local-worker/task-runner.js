@@ -20,6 +20,7 @@
   });
   const MAX_BREADCRUMBS = 20;
   const MAGALU_HOST = "www.magazinevoce.com.br";
+  const MAGALU_IDENTITY_CAPABILITY = "magalu_identity_v1";
   const MAGALU_OPPORTUNITY_CAPABILITY = "magalu_opportunity_v1";
   const ML_CAPABILITY = "ml_image_v1";
   const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
@@ -118,6 +119,9 @@
     if (prova.canonicalUrl !== undefined) resultado.canonicalUrl = texto(prova.canonicalUrl);
     if (prova.variationId !== undefined) resultado.variationId = texto(prova.variationId);
     if (prova.collectedAt !== undefined) resultado.collectedAt = texto(prova.collectedAt);
+    if (prova.identityKey !== undefined) resultado.identityKey = texto(prova.identityKey);
+    if (prova.observedProductId !== undefined) resultado.observedProductId = texto(prova.observedProductId);
+    if (prova.redirected !== undefined) resultado.redirected = prova.redirected === true;
     return resultado;
   }
   function resultadoOportunidadePublico(resultado = {}) {
@@ -140,6 +144,8 @@
       identidadeValidada: valor.identidadeValidada === true,
       expectedMlb: texto(valor.expectedMlb),
       observedMlb: texto(valor.observedMlb),
+      observedProductId: texto(valor.observedProductId),
+      identityKey: texto(valor.identityKey),
       origemTitulo: texto(valor.origemTitulo),
       origemImagem: texto(valor.origemImagem),
       canonicalUrl: texto(valor.canonicalUrl),
@@ -217,6 +223,11 @@
       return texto(task.type) === "identidade_oficial" && Boolean(texto(task.sourceUrl)) && /^MLB\d+$/i.test(texto(task.productId));
     }
     if (texto(task.marketplace) !== "magalu") return false;
+    if (capability === MAGALU_IDENTITY_CAPABILITY) {
+      return texto(task.type) === "identidade_oficial" &&
+        /^url_[a-f0-9]{32}$/.test(texto(task.productId)) &&
+        Boolean(global.OptimusMagaluIdentityResolver?.sourceUrlSegura?.(task.sourceUrl));
+    }
     if (capability === MAGALU_OPPORTUNITY_CAPABILITY) {
       return texto(task.type) === "oportunidade_oficial" && texto(task.sourceUrl) === global.OptimusMagaluOpportunityResolver?.URL_OFICIAL;
     }
@@ -545,7 +556,75 @@
       throw new Error("local_worker_stage_invalido");
     }
   }
+
+  async function continuarMagaluIdentidade(estado, task) {
+    let atual = estado;
+    while (atual) {
+      if (atual.stage === STAGES.CLAIMED) {
+        atual = await marcarStage(atual, STAGES.RESOLVING_PAGE);
+        continue;
+      }
+      if (atual.stage === STAGES.RESOLVING_PAGE) {
+        if (!await validarLease(task, atual)) return;
+        await registrarBreadcrumb("MAGALU_IDENTITY_START", task, { taskStage: atual.stage });
+        try {
+          const resolvido = await global.OptimusMagaluIdentityResolver.resolver({ sourceUrl: task.sourceUrl, identityKey: task.productId });
+          if (resolvido?.identidadeValidada !== true || !resolvido?.observedProductId || !resolvido?.provaTecnica) {
+            throw new Error("magalu_identity_resultado_incompleto");
+          }
+          atual = await marcarStage(atual, STAGES.IDENTITY_IDENTIFIED, {
+            identityKey: resolvido.identityKey,
+            observedProductId: resolvido.observedProductId,
+            identidadeValidada: true,
+            finalUrl: resolvido.finalUrl,
+            canonicalUrl: resolvido.canonicalUrl,
+            collectedAt: resolvido.collectedAt,
+            provaTecnica: resolvido.provaTecnica
+          });
+          continue;
+        } catch (erro) {
+          await registrarBreadcrumb("MAGALU_IDENTITY_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          if (erroAmbiguo(erro)) { await registrarSemProgresso(atual, task); return; }
+          throw erro;
+        }
+      }
+      if (atual.stage === STAGES.IDENTITY_IDENTIFIED) {
+        atual = await marcarStage(atual, STAGES.RESULT_PENDING);
+        continue;
+      }
+      if (atual.stage === STAGES.RESULT_PENDING) {
+        try {
+          const resposta = await global.OptimusLocalWorkerClient.result(task, {
+            leaseToken: task.leaseToken,
+            capability: MAGALU_IDENTITY_CAPABILITY,
+            marketplace: "magalu",
+            identityKey: atual.identityKey,
+            sourceUrl: task.sourceUrl,
+            observedProductId: atual.observedProductId,
+            identidadeValidada: atual.identidadeValidada === true,
+            finalUrl: atual.finalUrl,
+            canonicalUrl: atual.canonicalUrl,
+            collectedAt: atual.collectedAt,
+            provaTecnica: atual.provaTecnica
+          });
+          if (!resposta || resposta.ok === false) throw new Error(texto(resposta?.motivo) || "result_rejeitado");
+          await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_OK", task, { taskStage: atual.stage });
+          atual = await marcarStage(atual, STAGES.COMPLETED);
+          await limparEstado();
+          return;
+        } catch (erro) {
+          await registrarBreadcrumb("MAGALU_IDENTITY_RESULT_ERROR", task, { motivo: erroTexto(erro), status: erro?.status, taskStage: atual.stage });
+          if (erroAmbiguo(erro)) return;
+          throw erro;
+        }
+      }
+      if (atual.stage === STAGES.FAILURE_PENDING) { await enviarFailure(atual, task); return; }
+      if (atual.stage === STAGES.COMPLETED) { await limparEstado(); return; }
+      throw new Error("local_worker_stage_invalido");
+    }
+  }
   async function continuar(estado, task) {
+    if (texto(task?.capability) === MAGALU_IDENTITY_CAPABILITY) return continuarMagaluIdentidade(estado, task);
     if (texto(task?.capability) === ML_IDENTITY_CAPABILITY) return continuarMercadoLivreIdentidade(estado, task);
     if (texto(task?.capability) === ML_CAPABILITY) return continuarMercadoLivre(estado, task);
     if (texto(task?.capability) === MAGALU_OPPORTUNITY_CAPABILITY) return continuarOportunidade(estado, task);
@@ -643,7 +722,7 @@
     }
   }
   async function processar() {
-    if (executando || !global.OptimusLocalWorkerClient || (!global.OptimusMagaluLocalResolver && !global.OptimusMercadoLivreLocalResolver && !global.OptimusMercadoLivreIdentityResolver && !global.OptimusMagaluOpportunityResolver)) return;
+    if (executando || !global.OptimusLocalWorkerClient || (!global.OptimusMagaluLocalResolver && !global.OptimusMagaluIdentityResolver && !global.OptimusMercadoLivreLocalResolver && !global.OptimusMercadoLivreIdentityResolver && !global.OptimusMagaluOpportunityResolver)) return;
     executando = true;
     let estado = null;
     let task = null;
@@ -735,6 +814,6 @@
       }
     } catch (_) {}
   }
-  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
+  global.OptimusLocalWorkerRunner = { iniciar, processar, limparEstado, INTERVAL_MINUTES, ALARM_NAME, STAGES, STORAGE_KEYS, MAX_BREADCRUMBS, LIVENESS, MAGALU_IDENTITY_CAPABILITY, ML_CAPABILITY, ML_IDENTITY_CAPABILITY };
   if (typeof module !== "undefined" && module.exports) module.exports = global.OptimusLocalWorkerRunner;
 })(typeof globalThis !== "undefined" ? globalThis : self);

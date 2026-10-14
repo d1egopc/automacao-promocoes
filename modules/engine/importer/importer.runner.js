@@ -183,20 +183,37 @@ async function tratarFalhaRetriavelShopee(job, resultadoAdapter = {}, marketplac
 }
 
 async function tratarFalhaRetriavelMagalu(job = {}, resultadoAdapter = {}, marketplace, resumo, contexto = {}) {
-  if (marketplace !== "magalu" || resultadoAdapter.retriavel !== true || resultadoAdapter.motivo !== "sem_imagem") return null;
+  const identidadePendente = resultadoAdapter.motivo === "sem_link_produto_confirmado" &&
+    resultadoAdapter.motivoDetalhe === "aguardando_identidade_local";
+  const imagemPendente = resultadoAdapter.motivo === "sem_imagem";
+  if (marketplace !== "magalu" || resultadoAdapter.retriavel !== true || (!imagemPendente && !identidadePendente)) return null;
+  const motivoPendente = identidadePendente ? "aguardando_identidade_local" : "imagem_oficial_local_pendente";
+  const motivoResumo = identidadePendente ? "aguardando_identidade_local" : "aguardando_enriquecimento_local";
   const agendar = typeof contexto?.deps?.agendarRetryImagemMagaluLocal === "function"
     ? contexto.deps.agendarRetryImagemMagaluLocal
     : agendarRetryImagemMagaluLocal;
-  const agendamento = await agendar(job, { motivo: "imagem_oficial_local_pendente" });
+  const agendamento = await agendar(job, {
+    motivo: motivoPendente,
+    capability: resultadoAdapter.metadata?.localWorkerIdentity?.capability || resultadoAdapter.metadata?.localWorker?.capability || ""
+  });
   if (agendamento?.ok) {
     if (resumo) {
       resumo.retentativas = (resumo.retentativas || 0) + 1;
-      motivoAdicionar(resumo, "aguardando_enriquecimento_local");
+      motivoAdicionar(resumo, motivoResumo);
     }
-    return { ok: false, retriavel: true, reagendado: true, motivo: "aguardando_enriquecimento_local", tentativa: agendamento.tentativa };
+    return { ok: false, retriavel: true, reagendado: true, motivo: motivoResumo, tentativa: agendamento.tentativa };
   }
-  if (agendamento?.esgotado) return finalizarErro(job, "sem_imagem", { marketplace, tentativasRetry: agendamento.tentativa }, resumo, contexto);
-  return finalizarErro(job, "falha_agendar_retry_imagem_magalu", { marketplace, erro: agendamento?.erro || "" }, resumo, contexto);
+  if (agendamento?.esgotado) {
+    return finalizarErro(job, identidadePendente ? "sem_link_produto_confirmado" : "sem_imagem", {
+      marketplace,
+      etapaLocalWorker: identidadePendente ? "identidade" : "imagem",
+      tentativasRetry: agendamento.tentativa
+    }, resumo, contexto);
+  }
+  return finalizarErro(job, identidadePendente ? "falha_agendar_retry_identidade_magalu" : "falha_agendar_retry_imagem_magalu", {
+    marketplace,
+    erro: agendamento?.erro || ""
+  }, resumo, contexto);
 }
 
 async function tratarFalhaRetriavelMercadoLivre(job = {}, resultado = {}, marketplace, resumo, contexto = {}) {
@@ -558,5 +575,6 @@ async function importarJobsProntosEngine({ limite = 10, marketplace = "", deps =
 
 module.exports = {
   importarJobsProntosEngine,
-  importarJobPronto
+  importarJobPronto,
+  tratarFalhaRetriavelMagalu
 };
