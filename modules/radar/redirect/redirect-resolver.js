@@ -311,6 +311,29 @@ function extrairDestinoHtml(html = "", base = "") {
   return { url: "", metodo: "html_sem_redirect" };
 }
 
+function produtoAliExpressConfirmadoNaLanding(urlFinal = "", html = "") {
+  try {
+    const landing = new URL(urlFinal);
+    if (landing.protocol !== "https:" || landing.hostname !== "star.aliexpress.com" ||
+      landing.pathname !== "/share/share.htm") return "";
+
+    const destino = new URL(landing.searchParams.get("redirectUrl") || "");
+    const hostOficial = host => host === "aliexpress.com" || host.endsWith(".aliexpress.com");
+    const id = destino.pathname.match(/^\/item\/(\d{8,20})\.html$/i)?.[1] || "";
+    if (destino.protocol !== "https:" || !hostOficial(destino.hostname) ||
+      destino.username || destino.password || destino.port || !id) return "";
+
+    const evidenciaHtml = new URL(extrairDestinoHtml(html, landing.href).url || "");
+    if (evidenciaHtml.protocol !== "https:" || !hostOficial(evidenciaHtml.hostname) ||
+      evidenciaHtml.username || evidenciaHtml.password || evidenciaHtml.port ||
+      evidenciaHtml.pathname.match(/^\/item\/(\d{8,20})\.html$/i)?.[1] !== id) return "";
+
+    return `https://${destino.hostname}/item/${id}.html`;
+  } catch {
+    return "";
+  }
+}
+
 function resultadoFalha(urlOriginal, dados = {}) {
   return {
     ok: false,
@@ -409,22 +432,24 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       }
 
       const marketplaceHttp = detectarMarketplaceRedirect(urlFinal);
+      const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
       if (marketplaceHttp && urlFinal !== urlOriginal) {
+        const produtoAliExpress = contexto.secureDynamic === true && marketplaceHttp === "aliexpress"
+          ? produtoAliExpressConfirmadoNaLanding(urlFinal, html) : "";
         return {
           ok: true,
           urlOriginal,
-          urlFinal,
-          urlExpandida: urlFinal,
+          urlFinal: produtoAliExpress || urlFinal,
+          urlExpandida: produtoAliExpress || urlFinal,
           marketplaceDetectado: marketplaceHttp,
           status: "resolvido",
           statusHttp,
-          metodo,
+          metodo: produtoAliExpress ? "parametro_e_html_produto" : metodo,
           motivo: "redirect_resolvido_marketplace",
           ...dadosHops
         };
       }
 
-      const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
       if (typeof contexto.onHtml === "function") {
         try {
           contexto.onHtml({ html, urlFinal, statusHttp });
