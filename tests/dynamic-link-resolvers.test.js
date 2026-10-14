@@ -205,6 +205,31 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     assert.equal(resultadoPc.metodo, "parametro_e_html_produto");
     assert.equal(chamadasPc.length, 3, "a prova usa apenas os hops HTTP já limitados pelo resolver");
 
+    const respostasRetryPc = [
+      { status: 302, location: "https://hop-1.example/r" },
+      { status: 302, location: "https://hop-2.example/r" },
+      { status: 302, location: "https://hop-3.example/r" },
+      { status: 302, location: "https://hop-4.example/r" },
+      { status: 302, location: "https://hop-5.example/r" },
+      { status: 302, location: "https://hop-6.example/r" },
+      { status: 302, location: produtoPc },
+      { status: 200, body: htmlPc }
+    ];
+    const chamadasRetryPc = [];
+    const resultadoRetryPc = await resolverRedirectUniversal("https://seuhardware.com/s/Mp1Pl67", {
+      dynamicRegistry: registroSeuhardware,
+      maxRedirects: 5,
+      retryTransient: true,
+      safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte(respostasRetryPc, chamadasRetryPc)
+      }
+    });
+    assert.equal(resultadoRetryPc.ok, true, "uma única nova tentativa recupera REDIRECT_LIMIT transitório");
+    assert.equal(resultadoRetryPc.urlFinal, produtoPc);
+    assert.equal(resultadoRetryPc.retryTransient, true);
+    assert.equal(chamadasRetryPc.length, 8, "o limite continua cinco redirects por tentativa");
+
     const resultadoSemProva = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
       dynamicRegistry: registroSeuhardware, safeHttpDeps: {
         lookup: lookupPublico,
@@ -255,6 +280,36 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     });
     assert.equal(resultadoApp.urlFinal, landingApp, "link App não vira a URL canônica do PC");
     assert.notEqual(resultadoApp.metodo, "parametro_e_html_produto");
+
+    assert.equal(dominioRedirectPermitido("https://a.aliexpress.com/_oki1IkV"), true);
+    const chamadasAula = [];
+    const produtoAula = "https://pt.aliexpress.com/item/1005007038412139.html";
+    const resultadoAula = await resolverRedirectUniversal("https://a.aliexpress.com/_oki1IkV", {
+      retryTransient: true,
+      safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: "https://tracking-publico.example/ali/aula" },
+          { status: 302, location: produtoAula },
+          { status: 200 }
+        ], chamadasAula)
+      }
+    });
+    assert.equal(resultadoAula.ok, true);
+    assert.equal(resultadoAula.marketplaceDetectado, "aliexpress");
+    assert.equal(resultadoAula.urlFinal, produtoAula);
+    assert.equal(chamadasAula.length, 3, "intermediário público continua sujeito a DNS/SSRF e final oficial");
+
+    const resultadoAulaFinalExterno = await resolverRedirectUniversal("https://a.aliexpress.com/_oki1IkV", {
+      safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: "https://tracking-publico.example/ali/aula" },
+          { status: 200 }
+        ], [])
+      }
+    });
+    assert.equal(resultadoAulaFinalExterno.ok, false, "destino final externo nunca vira produto AliExpress");
     const fonteApp = "https://www.seuhardware.com/r/app";
     const fontePc = "https://www.seuhardware.com/r/pc";
     const textoAli = `Link APP: ${fonteApp}\nLink PC: ${fontePc}`;

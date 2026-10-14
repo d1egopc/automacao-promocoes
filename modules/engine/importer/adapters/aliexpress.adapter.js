@@ -342,6 +342,14 @@ function urlOriginalAliExpressSegura(url = "") {
   }
 }
 
+function shortlinkAliExpressOficial(url = "") {
+  try {
+    return new URL(texto(url)).hostname.replace(/^www\./i, "").toLowerCase() === "a.aliexpress.com";
+  } catch {
+    return false;
+  }
+}
+
 function urlExpandidaAliExpressSegura(url = "") {
   try {
     const parsed = new URL(texto(url));
@@ -659,8 +667,10 @@ async function converterLinksAlternativosAliExpress({
         return { urlAfiliada: "", renderizavel: false, motivo: "link_app_produto_nao_comprovado", appValidado: false, produtoCanonico: idExpandido, produtoCanonicoPrincipal: idPrincipal };
       }
     }
-    const urlParaImportar = urlOriginalAliExpressSegura(alvo) ? alvo
-      : (urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : alvo);
+    const expandidaSegura = urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : "";
+    const urlParaImportar = expandidaSegura && (!urlOriginalAliExpressSegura(alvo) || shortlinkAliExpressOficial(alvo))
+      ? expandidaSegura
+      : alvo;
 
     if (texto(urlPrincipal) && urlParaImportar === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
       const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({

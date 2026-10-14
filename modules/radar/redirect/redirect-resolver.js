@@ -32,6 +32,21 @@ function hostname(url = "") {
   }
 }
 
+function sanitizarUrlAliExpressLog(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (parsed.protocol !== "https:" || !(host === "aliexpress.com" || host.endsWith(".aliexpress.com")) ||
+      parsed.username || parsed.password || parsed.port) return "";
+    const productIds = parsed.pathname === "/p/coin-index/index.html"
+      ? parsed.searchParams.get("productIds") || "" : "";
+    const queryFactual = /^\d{12,20}$/.test(productIds) ? `?productIds=${productIds}` : "";
+    return `https://${parsed.hostname.toLowerCase()}${parsed.pathname || "/"}${queryFactual}`;
+  } catch {
+    return "";
+  }
+}
+
 function detectarMarketplaceRedirect(url = "") {
   const host = hostname(url);
   if (!host) return "";
@@ -743,12 +758,29 @@ async function resolverAOferta(urlOriginal = "", contexto = {}) {
   return resultado;
 }
 
+async function resolverShortlinkAliExpress(urlOriginal = "", contexto = {}) {
+  return resolverHttpGenerico(urlOriginal, { ...contexto, secureDynamic: true });
+}
+
+function falhaRedirectTransitoria(resultado = {}) {
+  const motivo = texto(resultado.motivo).toUpperCase();
+  const statusHttp = Number(resultado.statusHttp || 0);
+  return motivo === "REDIRECT_LIMIT" || motivo === "REDIRECT_TIMEOUT" ||
+    statusHttp === 408 || statusHttp === 425 || statusHttp === 429 ||
+    (statusHttp >= 500 && statusHttp <= 504);
+}
+
 function logAuditoriaRedirect(resultado = {}, tempoMs = 0) {
   const dinamico = String(resultado.resolver || "").startsWith("dinamico:");
+  const shortlinkAliExpress = resultado.resolver === "aliexpress_shortlink";
+  const urlOriginalAliExpress = shortlinkAliExpress ? sanitizarUrlAliExpressLog(resultado.urlOriginal || "") : "";
+  const urlFinalAliExpress = shortlinkAliExpress ? sanitizarUrlAliExpressLog(resultado.urlFinal || "") : "";
+  const urlFinalLog = urlFinalAliExpress || (Number(resultado.statusHttp || 0) >= 400 ? "" : (resultado.urlFinal || ""));
   console.log("[REDIRECT-RESOLVER-AUDITORIA]", JSON.stringify({
-    urlOriginal: dinamico ? "[REDACTED]" : (resultado.urlOriginal || ""),
-    urlFinal: dinamico ? "[REDACTED]" : (resultado.urlFinal || ""),
-    urlExpandida: dinamico ? "[REDACTED]" : (resultado.urlExpandida || ""),
+    urlOriginal: dinamico ? "[REDACTED]" : (urlOriginalAliExpress || resultado.urlOriginal || ""),
+    urlFinal: dinamico ? "[REDACTED]" : urlFinalLog,
+    urlExpandida: dinamico ? "[REDACTED]" : (shortlinkAliExpress
+      ? sanitizarUrlAliExpressLog(resultado.urlExpandida || "") : (resultado.urlExpandida || "")),
     marketplaceDetectado: resultado.marketplaceDetectado || "",
     resolver: resultado.resolver || "",
     metodo: resultado.metodo || "",
@@ -803,15 +835,21 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
     return ignorado;
   }
 
-  let resultado;
-  try {
-    resultado = await registro.resolver(urlOriginal, registro.dinamico ? { ...opcoes, secureDynamic: true } : opcoes);
-  } catch (e) {
-    resultado = resultadoFalha(urlOriginal, {
-      metodo: "erro_resolver",
-      motivo: registro.dinamico ? "redirect_bloqueado" : (e.message || "resolver_falhou"),
-      erro: registro.dinamico ? "" : (e.message || "")
-    });
+  async function executarResolver() {
+    try {
+      return await registro.resolver(urlOriginal, registro.dinamico ? { ...opcoes, secureDynamic: true } : opcoes);
+    } catch (e) {
+      return resultadoFalha(urlOriginal, {
+        metodo: "erro_resolver",
+        motivo: registro.dinamico ? "redirect_bloqueado" : (e.message || "resolver_falhou"),
+        erro: registro.dinamico ? "" : (e.message || "")
+      });
+    }
+  }
+
+  let resultado = await executarResolver();
+  if (opcoes.retryTransient === true && !resultado.ok && falhaRedirectTransitoria(resultado)) {
+    resultado = { ...(await executarResolver()), retryTransient: true };
   }
 
   const final = aplicarIdentidadeCanonicaRedirect({ ...resultado, urlOriginal, resolver: registro.nome });
@@ -911,6 +949,12 @@ registrarResolverRedirect({
   nome: "amazon_divulguei",
   dominios: ["amzn.divulguei.app"],
   resolver: resolverAmazonDivulguei
+});
+
+registrarResolverRedirect({
+  nome: "aliexpress_shortlink",
+  dominios: ["a.aliexpress.com"],
+  resolver: resolverShortlinkAliExpress
 });
 
 module.exports = {

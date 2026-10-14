@@ -932,6 +932,112 @@ async function testarMouse144302ApiVaziaFalhaFechado() {
   }
 }
 
+async function testarEventos147056e147058PreservamContratos() {
+  const ssdId = "1005013273524257";
+  const ssdApp = "https://seuhardware.com/s/lGgujCJ";
+  const ssdPc = "https://seuhardware.com/s/Mp1Pl67";
+  const ssdAppExpandido = `https://m.aliexpress.com/p/coin-index/index.html?productIds=${ssdId}`;
+  const ssdPcExpandido = `https://pt.aliexpress.com/item/${ssdId}.html`;
+  const aulaId = "1005007038412139";
+  const aulaOriginal = "https://a.aliexpress.com/_oki1IkV";
+  const aulaExpandida = `https://pt.aliexpress.com/item/${aulaId}.html`;
+  const credenciais = { appKey: "app_fixture", secret: "secret_fixture", trackingId: "tracking_fixture" };
+  const chamadas = [];
+  const fetchOriginal = global.fetch;
+
+  global.fetch = async (url, opcoes = {}) => {
+    const body = opcoes.body instanceof URLSearchParams
+      ? opcoes.body : new URLSearchParams(opcoes.body || "");
+    const method = body.get("method");
+    const productId = body.get("product_ids") || "";
+    const sourceValues = body.get("source_values") || "";
+    chamadas.push({ method, productId, sourceValues });
+    if (method === "aliexpress.affiliate.productdetail.get") {
+      const ssd = productId === ssdId;
+      return {
+        ok: true, status: 200, url: String(url), headers: { get: () => "" },
+        json: async () => ({ aliexpress_affiliate_productdetail_get_response: { resp_result: {
+          resp_code: "200", result: { products: { product: {
+            product_id: productId,
+            product_title: ssd ? "SSD NVMe Kootion X15 Lite 512 GB" : "Teclado Mecânico Aula F3261",
+            target_sale_price: ssd ? "399.90" : "89.90",
+            product_main_image_url: ssd ? "//ae01.alicdn.com/kf/ssd-kootion.jpg" : "//ae01.alicdn.com/kf/aula-f3261.jpg",
+            promotion_link: `https://s.click.aliexpress.com/e/_base_${productId}`,
+            product_detail_url: ssd ? ssdPcExpandido : aulaExpandida,
+            first_level_category_name: ssd ? "Armazenamento" : "Teclados"
+          } } }
+        } } })
+      };
+    }
+    if (method === "aliexpress.affiliate.link.generate") {
+      return {
+        ok: true, status: 200, url: String(url), headers: { get: () => "" },
+        json: async () => ({ aliexpress_affiliate_link_generate_response: { resp_result: { result: {
+          promotion_links: { promotion_link: [{ promotion_link: `https://s.click.aliexpress.com/e/_fixture_${Buffer.from(sourceValues).toString("hex").slice(-10)}` }] }
+        } } } })
+      };
+    }
+    throw new Error(`método inesperado: ${method || url}`);
+  };
+
+  try {
+    const ssd = await importarAliExpressEngine({
+      job: { id: "fixture_147056", evento_id: 147056, cliente_id: "workspace_ssd", marketplace: "aliexpress" },
+      evento: { texto_original: [
+        "SSD NVMe Kootion X15 Lite 512 GB, 2100 MB/s",
+        "R$ 340 + 866 moedas e 3x sem juros",
+        "Cupom: KT0120 + IFPHVXCD ou IFPKJEJV",
+        `APP: ${ssdApp}`, `PC: ${ssdPc}`
+      ].join("\n") },
+      links: [
+        { url_original: ssdApp, url_expandida: ssdAppExpandido, metadata: { papelLink: "link_app" } },
+        { url_original: ssdPc, url_expandida: ssdPcExpandido, metadata: { papelLink: "link_pc" } }
+      ],
+      deps: { getIntegracaoCliente: () => ({ credenciais }), importarAliExpress }
+    });
+    assert.equal(ssd.ok, true);
+    assert.equal(ssd.produtoId, ssdId);
+    assert.equal(ssd.titulo, "SSD NVMe Kootion X15 Lite 512 GB");
+    assert.equal(ssd.preco, 340, "preço Radar vence a referência da API");
+    assert.equal(ssd.cupom, "KT0120", "somente o código explicitamente extraído é estruturado");
+    assert.equal(ssd.moedasTexto, "+866 moedas");
+    assert.equal(ssd.imagem, "https://ae01.alicdn.com/kf/ssd-kootion.jpg");
+    assert.equal(ssd.categoria, "Armazenamento");
+    assert.ok(ssd.metadata.produtoCanonico.produtoId === ssdId);
+    const ssdLinks = ssd.metadata.linksClassificados.filter(item => item.renderizavel === true);
+    assert.equal(ssdLinks.length, 2);
+    assert.notEqual(ssdLinks[0].urlAfiliada, ssdLinks[1].urlAfiliada);
+    assert.deepEqual(ssdLinks.map(item => item.urlOriginal), [ssdApp, ssdPc]);
+
+    const inicioAula = chamadas.length;
+    const aula = await importarAliExpressEngine({
+      job: { id: "fixture_147058", evento_id: 147058, cliente_id: "workspace_aula", marketplace: "aliexpress" },
+      evento: { texto_original: `Teclado Mecânico Aula F3261\nR$ 70\n932 moedas no APP e Google Pay\nCupom: CODL20OFF\n${aulaOriginal}` },
+      links: [
+        { url_original: aulaOriginal, url_expandida: aulaExpandida, metadata: { papelLink: "produto" } }
+      ],
+      deps: { getIntegracaoCliente: () => ({ credenciais }), importarAliExpress }
+    });
+    assert.equal(aula.ok, true);
+    assert.equal(aula.produtoId, aulaId);
+    assert.equal(aula.titulo, "Teclado Mecânico Aula F3261");
+    assert.equal(aula.preco, 70);
+    assert.equal(aula.cupom, "CODL20OFF");
+    assert.equal(aula.moedasTexto, "+932 moedas");
+    assert.equal(aula.imagem, "https://ae01.alicdn.com/kf/aula-f3261.jpg");
+    assert.equal(aula.categoria, "Teclados");
+    const aulaLinks = aula.metadata.linksClassificados.filter(item => item.renderizavel === true);
+    assert.equal(aulaLinks.length, 1, "entrada com um link preserva uma única ocorrência");
+    assert.equal(aulaLinks[0].urlOriginal, aulaOriginal);
+    const chamadasAula = chamadas.slice(inicioAula);
+    assert.equal(chamadasAula.filter(item => item.method === "aliexpress.affiliate.link.generate").length, 1,
+      "a ocorrência única não dispara uma segunda conversão afiliada");
+    assert.equal(chamadasAula.find(item => item.method === "aliexpress.affiliate.link.generate").sourceValues, aulaExpandida);
+  } finally {
+    global.fetch = fetchOriginal;
+  }
+}
+
 function testarRadarPreservaSomenteProductIdsFactualNaLandingApp() {
   const codigo = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const inicio = codigo.indexOf("function limparUrlProdutoRadar(");
@@ -975,6 +1081,7 @@ function testarRegistroNoPipelineUnico() {
   await testar8BitDoAtravessaImporterRealSemDespacho();
   await testarMouse144302HandoffPcAppSemCodigoInventado();
   await testarMouse144302ApiVaziaFalhaFechado();
+  await testarEventos147056e147058PreservamContratos();
   testarRadarPreservaSomenteProductIdsFactualNaLandingApp();
   testarRegistroNoPipelineUnico();
   console.log("aliexpress-app-moedas-contrato.test.js OK");

@@ -21597,7 +21597,8 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
     const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
     const redirect = await resolverRedirectUniversal(capturada, {
       timeout: 4500,
-      maxRedirects: 5
+      maxRedirects: 5,
+      retryTransient: true
     });
     const resolvida = redirect.urlFinal || "";
     const marketplaceFinal = normalizarMarketplaceRadar(redirect.marketplaceDetectado || "");
