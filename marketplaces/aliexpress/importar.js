@@ -757,6 +757,9 @@ async function importarAliExpress(urlEntrada, config = {}) {
   const secret = credenciais.secret || credenciais.appSecret || "";
   const trackingId = credenciais.trackingId || "";
   const clienteId = config?.clienteId || config?.cliente || "";
+  const cacheProdutoAliExpress = config?.cacheProdutoAliExpress instanceof Map
+    ? config.cacheProdutoAliExpress
+    : null;
   const contextoEngine = config?.contextoEngine && typeof config.contextoEngine === "object" ? config.contextoEngine : {};
   const papelLinkAlternativo = String(contextoEngine.papelLink || "").trim();
   const conversaoOcorrenciaRadar = contextoEngine.conversaoLinkAlternativo === true;
@@ -795,11 +798,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
     expansaoMotivo: expansaoShortlink.motivo || ""
   });
 
-  if (!productId || landingMoedasComProdutoFactual) {
-    const imagemMetadata = !productId && deveBuscarImagemMetadataAliExpress({ expansaoShortlink, urlCanonicaProduto })
+  if (!productId) {
+    const imagemMetadata = deveBuscarImagemMetadataAliExpress({ expansaoShortlink, urlCanonicaProduto })
       ? await buscarImagemMetadataAliExpressHtml(urlCanonicaProduto)
-      : { imagem: "", origem: "", motivo: landingMoedasComProdutoFactual
-        ? "metadata_nao_necessaria_para_conversao_app" : "metadata_nao_avaliada_shortlink_inseguro" };
+      : { imagem: "", origem: "", motivo: "metadata_nao_avaliada_shortlink_inseguro" };
     if (conversaoLinkAlternativo && urlAliExpressSegura(urlCanonicaProduto, { permitirShortlink: true })) {
       if (!appKey || !secret || !trackingId) {
         return produtoAliExpressGenerico(urlOriginal, "Erro ao consultar API AliExpress", {
@@ -835,9 +837,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
         imagemOrigem: imagemMetadata.origem || "",
         categoria: "AliExpress",
         avisoCupom,
-        aviso: landingMoedasComProdutoFactual
-          ? "Landing AliExpress convertida com identidade de produto factual."
-          : "Landing AliExpress convertida sem productId direto.",
+        aviso: "Landing AliExpress convertida sem productId direto.",
         tipoLinkAfiliado: papelLinkAlternativo,
         papelLink: papelLinkAlternativo,
         conversaoPapel: papelLinkAlternativo,
@@ -846,7 +846,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
           papelLink: papelLinkAlternativo,
           conversaoPapel: papelLinkAlternativo,
           conversaoLinkAlternativo: true,
-          productId: landingMoedasComProdutoFactual ? productId : "",
+          productId: "",
           sourceValuesUsado: sourceValuesAfiliado,
           afiliacaoWorkspace: {
             workspaceId: clienteId,
@@ -858,8 +858,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
             motivoConversao: conversaoWorkspaceValida ? "link_api_convertido" : "link_api_sem_retorno"
           },
           urlCanonicaProduto,
-          motivo: landingMoedasComProdutoFactual
-            ? "landing_moedas_produto_factual_convertida" : "landing_sem_product_id_convertida",
+          motivo: "landing_sem_product_id_convertida",
           imagemOrigem: imagemMetadata.origem || "",
           imagemFallbackConservador: Boolean(imagemMetadata.imagem),
           imagemFallbackMotivo: imagemMetadata.motivo || ""
@@ -888,11 +887,23 @@ async function importarAliExpress(urlEntrada, config = {}) {
   let origemProduto = "";
   let detalheErro = "";
 
-  try {
-    produto = await consultarDetalheAliExpress(productId, credenciais);
-    origemProduto = "productdetail";
-  } catch (erro) {
-    detalheErro = erro.message || "erro_productdetail";
+  const produtoCache = cacheProdutoAliExpress?.get(productId);
+  const matchCache = selecionarProdutoAliExpressPorId([produtoCache], productId);
+  if (matchCache.produto && produtoAliExpressTemCamposEssenciais(matchCache.produto)) {
+    produto = matchCache.produto;
+    origemProduto = "cache_execucao";
+  } else {
+    try {
+      const detalhe = await consultarDetalheAliExpress(productId, credenciais);
+      const matchDetalhe = selecionarProdutoAliExpressPorId([detalhe], productId);
+      produto = matchDetalhe.produto || {};
+      origemProduto = matchDetalhe.produto ? "productdetail" : "";
+      if (!matchDetalhe.produto && detalhe && Object.keys(detalhe).length) {
+        detalheErro = "productdetail_product_id_divergente";
+      }
+    } catch (erro) {
+      detalheErro = erro.message || "erro_productdetail";
+    }
   }
 
   console.log("[ALIEXPRESS-DETAIL-RESULTADO]", {
@@ -929,6 +940,10 @@ async function importarAliExpress(urlEntrada, config = {}) {
     });
   }
 
+  if (cacheProdutoAliExpress) {
+    cacheProdutoAliExpress.set(productId, produto);
+  }
+
   const linkOriginalAfiliado = primeiroCampoAliExpress(produto, [
     "promotion_link_short",
     "promotion_link",
@@ -960,11 +975,17 @@ async function importarAliExpress(urlEntrada, config = {}) {
   });
 
   const produtoFinal = montarProdutoAliExpressManual(produto, urlCanonicaProduto, avisoCupom, conversaoWorkspaceValida ? (linkFinal || linkAliCurto) : "");
+  produtoFinal.tipoLinkAfiliado = papelLinkAlternativo || produtoFinal.tipoLinkAfiliado || "";
+  produtoFinal.papelLink = papelLinkAlternativo || produtoFinal.papelLink || "";
+  produtoFinal.conversaoPapel = papelLinkAlternativo || produtoFinal.conversaoPapel || "";
+  produtoFinal.landingMoedasAliExpress = landingMoedasComProdutoFactual;
   produtoFinal.metadata = {
     ...(produtoFinal.metadata || {}),
     papelLink: papelLinkAlternativo || produtoFinal.metadata?.papelLink || "",
     conversaoPapel: papelLinkAlternativo || produtoFinal.metadata?.conversaoPapel || "",
     conversaoLinkAlternativo: conversaoOcorrenciaRadar || produtoFinal.metadata?.conversaoLinkAlternativo === true,
+    landingMoedasAliExpress: landingMoedasComProdutoFactual,
+    productId,
     sourceValuesUsado: sourceValuesAfiliado,
     linkAfiliadoBaseProduto: linkAfiliadoBase,
     afiliacaoWorkspace: {

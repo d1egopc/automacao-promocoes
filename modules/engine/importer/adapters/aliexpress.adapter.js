@@ -210,7 +210,7 @@ function normalizarCupomAliExpress(cupom = "") {
 function extrairCupomTextoAliExpress(textoRadar = "") {
   const fonte = String(textoRadar || "");
   const match =
-    fonte.match(/(?:cupom|use o cupom|aplique o cupom|codigo|c[oó]digo|coupon|promo\s*code)\s*:?\s*([A-Z0-9_-]{4,30})/i) ||
+    fonte.match(/(?:cupom|cupons|use o cupom|aplique o cupom|codigo|c[oó]digo|coupon|promo\s*code)(?:\s+alternativos?)?\s*:?\s*([A-Z0-9_-]{4,30})/i) ||
     fonte.match(/\b([A-Z]{3,}[A-Z0-9_-]{1,27})\b\s*(?:no aliexpress|ali|aliexpress|no carrinho|com cupom)/i);
 
   return normalizarCupomAliExpress(match?.[1] || "");
@@ -379,6 +379,25 @@ function preservarAliExpressAppComPcComprovado({ papelLink = "", urlAfiliada = "
   if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
   if (!urlAliExpressConvertidaSegura(urlAfiliadaPrincipal, urlPrincipal)) return false;
   return true;
+}
+
+function preservarOcorrenciaPrincipalExpandidaFactualAliExpress({
+  papelLink = "",
+  urlAfiliada = "",
+  urlOriginal = "",
+  urlExpandida = "",
+  urlPrincipal = "",
+  produtoPrincipal = {}
+} = {}) {
+  const papel = texto(papelLink);
+  if (!["link_app", "link_moedas"].includes(papel)) return false;
+  if (!texto(urlOriginal) || urlOriginalAliExpressSegura(urlOriginal)) return false;
+  if (!urlExpandidaAliExpressSegura(urlExpandida) || texto(urlExpandida) !== texto(urlPrincipal)) return false;
+  if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
+
+  const produtoExpandido = produtoIdFactualUrlExpandidaAliExpress(urlExpandida);
+  const produtoCanonico = resolverProdutoCanonicoAliExpress(produtoPrincipal, urlPrincipal);
+  return Boolean(produtoExpandido && produtoCanonico.produtoId === produtoExpandido);
 }
 
 function extrairIdProdutoAliExpressValor(valor = "") {
@@ -644,7 +663,8 @@ async function converterLinksAlternativosAliExpress({
   job = {},
   urlPrincipal = "",
   linkAfiliadoPrincipal = "",
-  produtoPrincipal = {}
+  produtoPrincipal = {},
+  cacheProdutoAliExpress = null
 } = {}) {
   const convertidos = new Map();
 
@@ -663,15 +683,34 @@ async function converterLinksAlternativosAliExpress({
       : (urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : alvo);
 
     if (texto(urlPrincipal) && urlParaImportar === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
-      const avaliacaoPrincipal = avaliarConversaoAliExpressPorPapel({
+      const ocorrenciaPrincipalExpandidaFactual = preservarOcorrenciaPrincipalExpandidaFactualAliExpress({
         papelLink: papel,
         urlAfiliada: linkAfiliadoPrincipal,
         urlOriginal: alvo,
-        produtoConvertido: produtoPrincipal,
-        produtoPrincipal,
-        urlPrincipal: alvo,
-        urlAfiliadaPrincipal: linkAfiliadoPrincipal
+        urlExpandida,
+        urlPrincipal,
+        produtoPrincipal
       });
+      const produtoPrincipalCanonico = resolverProdutoCanonicoAliExpress(produtoPrincipal, urlPrincipal);
+      const avaliacaoPrincipal = ocorrenciaPrincipalExpandidaFactual
+        ? {
+          renderizavel: true,
+          motivo: papel === "link_moedas"
+            ? "cta_moedas_workspace_convertido_principal_factual"
+            : "cta_app_workspace_convertido_principal_factual",
+          appValidado: true,
+          produtoCanonico: produtoPrincipalCanonico.produtoId,
+          produtoCanonicoPrincipal: produtoPrincipalCanonico.produtoId
+        }
+        : avaliarConversaoAliExpressPorPapel({
+          papelLink: papel,
+          urlAfiliada: linkAfiliadoPrincipal,
+          urlOriginal: alvo,
+          produtoConvertido: produtoPrincipal,
+          produtoPrincipal,
+          urlPrincipal: alvo,
+          urlAfiliadaPrincipal: linkAfiliadoPrincipal
+        });
       const proveniencia = provenienciaAfiliacaoWorkspaceAliExpress(produtoPrincipal, clienteId, credenciais);
       return {
         urlAfiliada: avaliacaoPrincipal.renderizavel && proveniencia.valida ? linkAfiliadoPrincipal : "",
@@ -720,6 +759,7 @@ async function converterLinksAlternativosAliExpress({
         ...integracao,
         credenciais,
         clienteId,
+        cacheProdutoAliExpress,
         textoOriginal: textoOriginalEvento(evento),
         contextoEngine: {
           jobId: job.id,
@@ -907,6 +947,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   const importarLegado = typeof deps.importarAliExpress === "function"
     ? deps.importarAliExpress
     : importarAliExpress;
+  const cacheProdutoAliExpress = new Map();
 
   let produto;
   try {
@@ -914,6 +955,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       ...integracao,
       credenciais,
       clienteId,
+      cacheProdutoAliExpress,
       textoOriginal: textoOriginalEvento(evento),
       contextoEngine: {
         jobId: job.id,
@@ -1016,7 +1058,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     job,
     urlPrincipal: urlOriginalEngine,
     linkAfiliadoPrincipal: linkAfiliado,
-    produtoPrincipal: produto
+    produtoPrincipal: produto,
+    cacheProdutoAliExpress
   });
   const linksClassificadosComConversao = linksConvertidos.map(item => {
     if (item.renderizavel !== true) return item;
