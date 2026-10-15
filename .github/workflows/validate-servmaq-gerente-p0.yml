@@ -1,0 +1,64 @@
+name: Validate Servmaq manager P0
+
+on:
+  push:
+    branches:
+      - validation/servmaq-gerente-p0-ci
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: github.ref == 'refs/heads/validation/servmaq-gerente-p0-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Validate exact scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = '.github/workflows/validate-servmaq-gerente-p0.yml'
+          git diff --check HEAD~2 HEAD
+          git diff --name-only HEAD~2 HEAD~1 | sort > /tmp/servmaq-scope.actual
+          printf '%s\n' index.js modules/mensageiro/gerente-trace.js modules/mensageiro/gerente.service.js tests/mensageiro-gerente-trace.test.cjs | sort > /tmp/servmaq-scope.expected
+          diff -u /tmp/servmaq-scope.expected /tmp/servmaq-scope.actual
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Syntax and encoding
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check index.js
+          node --check modules/mensageiro/gerente-trace.js
+          node --check modules/mensageiro/gerente.service.js
+          node --check tests/mensageiro-gerente-trace.test.cjs
+          node scripts/audit-encoding.cjs > /tmp/servmaq-encoding.log
+          grep -E 'UTF-8 invalido:|Finais mistos:|Corrupcao forte:' /tmp/servmaq-encoding.log | head -4
+          grep -Fxq 'UTF-8 invalido: 0' /tmp/servmaq-encoding.log
+          grep -Fxq 'Finais mistos: 0' /tmp/servmaq-encoding.log
+      - name: Focused Messenger and workspace regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for file in \
+            tests/mensageiro-gerente-trace.test.cjs \
+            tests/mensageiro-gerente-grupo.test.cjs \
+            tests/mensageiro-grupo-envio.test.cjs \
+            tests/mensageiro-perfis.test.cjs \
+            tests/mensageiro-programacoes.test.cjs \
+            tests/mensageiro-bot-comandos.test.cjs \
+            tests/whatsapp-socket-listener-lifecycle.test.js \
+            tests/observabilidade-v25-mensageiro-backend.test.cjs \
+            tests/usuarios-inativos-hotfix.test.js; do
+            echo "TEST=$file"
+            node "$file" > /tmp/servmaq-test.log 2>&1 || { tail -60 /tmp/servmaq-test.log; exit 1; }
+            echo 'RESULT=PASS'
+          done
