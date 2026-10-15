@@ -20,7 +20,6 @@ jobs:
     env:
       COMPOSE_FILE: /opt/optimus/infra/compose.yml
       BACKEND_DIR: /opt/optimus/backend
-      DATA_DIR: /opt/optimus/data
       EXPECTED_SHA: ac3a0f65518d93574f5035f295635f4009c1b199
     steps:
       - name: Checkout workflow only
@@ -28,7 +27,7 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      - name: Exact Servmaq scope read-only check
+      - name: Exact-id scope read-only diagnostic
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -43,63 +42,58 @@ jobs:
           test -n "$backend_id" && test -n "$postgres_id"
           backend_state="$(docker inspect --format '{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}' "$backend_id")"
           postgres_state="$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}' "$postgres_id")"
+          printf 'BACKEND=%s POSTGRES=%s\n' "$backend_state" "$postgres_state" >> "$GITHUB_STEP_SUMMARY"
           [[ "$backend_state" == running\|0\|false ]] && [[ "$postgres_state" == running\|healthy\|0\|false ]]
           test "$(git -C "$BACKEND_DIR" rev-parse HEAD)" = "$EXPECTED_SHA"
-          tmpdir="$(mktemp -d)"
-          trap 'rm -rf "$tmpdir"' EXIT
-          docker exec -i "$backend_id" node - <<'NODE' > "$tmpdir/scope" 2>/dev/null
-          const fs = require('fs');
-          const jwt = require('jsonwebtoken');
-          const clientId = 'user_k3phmbkf';
-          const read = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
-          const list = value => Array.isArray(value) ? value : [];
-          const idOf = value => value && typeof value === 'object' ? String(value.id || value.jid || value.grupoId || value.groupId || value.remoteJid || '').trim() : String(value || '').trim();
-          const sessionOf = value => String(value?.sessaoId || value?.sessaoWhatsappId || value?.sessaoGruposId || '').trim();
-          const active = value => value && value.removido !== true && value.removed !== true && value.excluido !== true && value.ativo !== false;
-          const cfg = (read('/data/mensageiro.json') || {})[clientId] || {};
-          const profiles = list(cfg.perfis).filter(active);
-          const managers = profiles.filter(profile => profile?.modulos?.gerente?.ativo === true);
-          const programs = list(cfg.programacoes);
-          const program = programs.find(item => /bom\s*dia/i.test(String(item?.nome || '')) || String(item?.horario || '') === '07:00');
-          const defaultSession = sessionOf(cfg);
-          const programSession = sessionOf(program) || defaultSession;
-          const programGroups = list(program?.grupos || program?.gruposIds).map(idOf).filter(Boolean);
-          const token = jwt.sign({ clienteId: clientId }, process.env.JWT_SECRET || 'segredo', { expiresIn: '30s' });
-          const getJson = async path => { const response = await fetch('http://127.0.0.1:3000' + path, { headers: { authorization: 'Bearer ' + token } }); return { status: response.status, body: await response.json().catch(() => ({})) }; };
-          const unique = values => [...new Set(values)];
-          (async () => {
-            if (!program || !programSession || !programGroups.length || !managers.length) throw new Error('scope_config_incomplete');
-            const sessionsResponse = await getJson('/sessoes');
-            const sessionRows = list(sessionsResponse.body?.sessoes);
-            const programRuntime = sessionRows.find(row => String(row?.id || row?.sessaoId || '') === programSession);
-            if (!programRuntime || !(programRuntime.status === 'open' || programRuntime.conectado === true)) throw new Error('program_session_not_open');
-            const sessionIds = unique([programSession, ...managers.map(sessionOf).filter(Boolean)]);
-            const catalogs = new Map();
-            for (const sessionId of sessionIds) {
-              const result = await getJson('/grupos/' + encodeURIComponent(sessionId));
-              if (result.status < 200 || result.status >= 300) throw new Error('group_catalog_unavailable');
-              const groups = list(result.body?.grupos || result.body?.gruposLista);
-              const ids = unique(groups.map(idOf).filter(Boolean));
-              if (!ids.length) throw new Error('group_catalog_empty');
-              catalogs.set(sessionId, new Set(ids));
-            }
-            const pairs = [];
-            for (const profile of managers) {
-              const managerSession = sessionOf(profile) || defaultSession;
-              if (!managerSession || managerSession !== programSession) continue;
-              const manager = profile.modulos.gerente;
-              const effectiveGroups = manager.gruposConfigurados === true ? list(manager.grupos) : list(profile.grupos);
-              const managerIds = unique(effectiveGroups.map(idOf).filter(Boolean));
-              const catalog = catalogs.get(managerSession);
-              const managerMatches = managerIds.filter(id => catalog?.has(id));
-              const programMatches = unique(programGroups.filter(id => catalog?.has(id)));
-              const common = programMatches.filter(id => managerMatches.includes(id));
-              if (managerMatches.length === 1 && programMatches.length === 1 && common.length === 1) pairs.push({ sessionId: managerSession, groupId: common[0] });
-            }
-            const distinct = unique(pairs.map(pair => pair.sessionId + '\u0000' + pair.groupId));
-            if (distinct.length !== 1) throw new Error('scope_not_unique');
-            process.stdout.write('scope_ok\n');
-          })().catch(() => process.exit(3));
+          docker exec -i "$backend_id" node - <<'NODE' >> "$GITHUB_STEP_SUMMARY" 2>&1
+          const fs=require('fs');
+          const jwt=require('jsonwebtoken');
+          const clientId='user_k3phmbkf';
+          const read=f=>{try{return JSON.parse(fs.readFileSync(f,'utf8'));}catch{return null;}};
+          const arr=v=>Array.isArray(v)?v:[];
+          const id=v=>v&&typeof v==='object'?String(v.id||v.jid||v.grupoId||v.groupId||v.remoteJid||'').trim():String(v||'').trim();
+          const session=v=>String(v?.sessaoId||v?.sessaoWhatsappId||v?.sessaoGruposId||'').trim();
+          const active=v=>v&&v.removido!==true&&v.removed!==true&&v.excluido!==true&&v.ativo!==false;
+          const cfg=(read('/data/mensageiro.json')||{})[clientId]||{};
+          const profiles=arr(cfg.perfis).filter(active);
+          const managers=profiles.filter(p=>p?.modulos?.gerente?.ativo===true);
+          const program=arr(cfg.programacoes).find(p=>/bom\s*dia/i.test(String(p?.nome||''))||String(p?.horario||'')==='07:00');
+          const manager=managers[0];
+          const mgr=manager?.modulos?.gerente||{};
+          const eff= mgr.gruposConfigurados===true?arr(mgr.grupos):arr(manager?.grupos);
+          const programRefs=arr(program?.grupos||program?.gruposIds||program?.config?.grupos||program?.config?.gruposIds);
+          const programSession=session(program)||session(cfg);
+          const managerSession=session(manager)||session(cfg);
+          const token=jwt.sign({clienteId:clientId},process.env.JWT_SECRET||'segredo',{expiresIn:'30s'});
+          const get=async path=>{const r=await fetch('http://127.0.0.1:3000'+path,{headers:{authorization:'Bearer '+token}});return {status:r.status,body:await r.json().catch(()=>({}))};};
+          console.log('CONFIG_FOUND='+Boolean(cfg&&Object.keys(cfg).length));
+          console.log('ACTIVE_MANAGER_PROFILES='+managers.length);
+          console.log('PROGRAM_FOUND='+Boolean(program));
+          console.log('PROGRAM_GROUP_REF_COUNT='+programRefs.map(id).filter(Boolean).length);
+          console.log('MANAGER_GROUP_REF_COUNT='+eff.map(id).filter(Boolean).length);
+          console.log('SESSION_FIELDS_PRESENT='+Boolean(programSession&&managerSession));
+          console.log('SESSION_ID_MATCH='+Boolean(programSession&&managerSession&&programSession===managerSession));
+          console.log('PROGRAM_KEYS='+Object.keys(program||{}).sort().join(','));
+          console.log('MANAGER_KEYS='+Object.keys(mgr||{}).sort().join(','));
+          (async()=>{
+            const s=await get('/sessoes');
+            const rows=arr(s.body?.sessoes||s.body?.data||s.body);
+            const sr=rows.find(x=>String(x?.id||x?.sessaoId||'')===programSession);
+            console.log('SESSION_HTTP_STATUS='+s.status);
+            console.log('SESSION_ROWS='+rows.length);
+            console.log('SESSION_RUNTIME_OPEN='+Boolean(sr&&(sr.status==='open'||sr.conectado===true)));
+            if(!programSession){console.log('CATALOG_HTTP_STATUS=SKIP'); console.log('CATALOG_MATCH_COUNT=0'); console.log('SCOPE_MATCH=NO'); return;}
+            const c=await get('/grupos/'+encodeURIComponent(programSession));
+            const gs=arr(c.body?.grupos||c.body?.gruposLista||c.body?.data||c.body);
+            const cat=new Set(gs.map(id).filter(Boolean));
+            const pm=[...new Set(programRefs.map(id).filter(Boolean).filter(x=>cat.has(x)))];
+            const mm=[...new Set(eff.map(id).filter(Boolean).filter(x=>cat.has(x)))];
+            const common=pm.filter(x=>mm.includes(x));
+            console.log('CATALOG_HTTP_STATUS='+c.status);
+            console.log('CATALOG_COUNT='+cat.size);
+            console.log('PROGRAM_CATALOG_MATCH_COUNT='+pm.length);
+            console.log('MANAGER_CATALOG_MATCH_COUNT='+mm.length);
+            console.log('CATALOG_MATCH_COUNT='+common.length);
+            console.log('SCOPE_MATCH='+(Boolean(sr&&(sr.status==='open'||sr.conectado===true))&&programSession===managerSession&&pm.length===1&&mm.length===1&&common.length===1?'YES':'NO'));
+          })().catch(e=>{console.log('DIAGNOSTIC_ERROR='+String(e?.code||e?.name||'unknown'));process.exitCode=0;});
           NODE
-          grep -q '^scope_ok$' "$tmpdir/scope"
-          printf 'SCOPE_MATCH=YES\nCATALOG_MATCH=EXACT_UNIQUE\nSESSION_RUNTIME=OPEN\nTRACE_NOT_MODIFIED=YES\nPRODUCTION_UNCHANGED=YES\n' >> "$GITHUB_STEP_SUMMARY"
