@@ -148,19 +148,19 @@ jobs:
             exit 3
           fi
           if ! env_file="$(COMPOSE_JSON_FILE="$tmpdir/compose.json" node - <<'NODE'
-const fs=require('fs');
-let pathValue='';
-try {
-  const doc=JSON.parse(fs.readFileSync(process.env.COMPOSE_JSON_FILE,'utf8'));
-  const entries=doc?.services?.backend?.env_file;
-  if (!Array.isArray(entries) || entries.length !== 1) process.exit(3);
-  const entry=entries[0];
-  if (!entry || typeof entry.path !== 'string' || entry.path.trim() !== entry.path) process.exit(3);
-  pathValue=fs.realpathSync(entry.path);
-} catch { process.exit(3); }
-if (pathValue !== '/opt/optimus/backend/.env') process.exit(3);
-process.stdout.write(pathValue);
-NODE
+          const fs=require('fs');
+          let pathValue='';
+          try {
+            const doc=JSON.parse(fs.readFileSync(process.env.COMPOSE_JSON_FILE,'utf8'));
+            const entries=doc?.services?.backend?.env_file;
+            if (!Array.isArray(entries) || entries.length !== 1) process.exit(3);
+            const entry=entries[0];
+            if (!entry || typeof entry.path !== 'string' || entry.path.trim() !== entry.path) process.exit(3);
+            pathValue=fs.realpathSync(entry.path);
+          } catch { process.exit(3); }
+          if (pathValue !== '/opt/optimus/backend/.env') process.exit(3);
+          process.stdout.write(pathValue);
+          NODE
           )"; then
             printf 'TRACE_STAGE=env_path_guard_failed\n' >> "$summary"
             exit 3
