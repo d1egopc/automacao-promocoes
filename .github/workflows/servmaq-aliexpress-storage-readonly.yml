@@ -1,0 +1,151 @@
+name: Servmaq and AliExpress storage read-only
+
+on:
+  push:
+    branches:
+      - validation/servmaq-aliexpress-storage-readonly-20261015
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servmaq-aliexpress-storage-readonly
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Storage and pipeline evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/servmaq-aliexpress-storage-readonly-20261015'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    env:
+      COMPOSE_FILE: /opt/optimus/infra/compose.yml
+      BACKEND_DIR: /opt/optimus/backend
+      DATA_DIR: /opt/optimus/data
+      CLIENT_ID: user_k3phmbkf
+      EXPECTED_SHA: 15655d2c4b668ed027c3357e1f4afb352603d581
+      DEPLOY_CUTOFF: '2026-10-15T04:43:00Z'
+
+    steps:
+      - name: Checkout workflow only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify isolated read-only scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/servmaq-aliexpress-storage-readonly-20261015
+          test "$GITHUB_WORKSPACE" != "$BACKEND_DIR"
+          files="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+          test "$files" = '.github/workflows/servmaq-aliexpress-storage-readonly.yml'
+          printf 'scope=isolated read_only=true production_mutation=false\n'
+
+      - name: Read Servmaq JSON and AliExpress PostgreSQL evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '\n### Storage and pipeline evidence\n' >> "$GITHUB_STEP_SUMMARY"
+          exec > >(tee -a "$GITHUB_STEP_SUMMARY") 2>&1
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          test -n "$backend_id" && test -n "$postgres_id"
+          docker inspect --format 'backend_status={{.State.Status}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$backend_id"
+          docker inspect --format 'postgres_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$postgres_id"
+          printf 'production_sha='; git -C "$BACKEND_DIR" rev-parse HEAD
+          test "$(git -C "$BACKEND_DIR" rev-parse HEAD)" = "$EXPECTED_SHA"
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" DEPLOY_CUTOFF="$DEPLOY_CUTOFF" node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const { Pool } = require('pg');
+          const clientId = process.env.CLIENT_ID;
+          const cutoff = process.env.DEPLOY_CUTOFF;
+          const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { console.log('FILE_READ_FAILED=' + path.basename(file)); return null; } };
+          const global = readJson('/data/mensageiro.json');
+          const client = readJson(`/data/clientes/${clientId}/mensageiro-config.json`);
+          const cfg = global && global[clientId] && typeof global[clientId] === 'object' ? global[clientId] : null;
+          const profiles = Array.isArray(cfg?.perfis) ? cfg.perfis : [];
+          const byProfile = new Map(profiles.map(p => [String(p?.id || ''), p]));
+          const programs = Array.isArray(cfg?.programacoes) ? cfg.programacoes : [];
+          const selected = programs.filter(p => /bom\s*dia/i.test(String(p?.nome || '')) || String(p?.horario || '') === '07:00');
+          console.log('SERVMAQ_CONFIG_FILE_READ=' + Boolean(cfg));
+          console.log('SERVMAQ_HISTORY_FILE_READ=' + Boolean(client));
+          console.log('SERVMAQ_PROGRAM_FOUND=' + (selected.length > 0));
+          console.log('SERVMAQ_PROGRAM_COUNT=' + selected.length);
+          for (const p of selected.slice(0, 10)) {
+            const profile = byProfile.get(String(p?.perfilId || ''));
+            const groups = Array.isArray(p?.grupos) ? p.grupos : (Array.isArray(p?.gruposIds) ? p.gruposIds : []);
+            const contents = Array.isArray(p?.conteudos) ? p.conteudos : [];
+            const image = contents.find(c => /imagem/i.test(String(c?.tipo || '')) || c?.imagem || c?.imagemUrl || c?.url);
+            console.log('SERVMAQ_PROGRAM=' + JSON.stringify({
+              id: String(p?.id || ''), nome: String(p?.nome || ''), ativo: p?.ativo === true,
+              horario: String(p?.horario || ''), perfilId: String(p?.perfilId || ''), status: String(p?.status || ''),
+              nextRunAt: String(p?.nextRunAt || ''), ultimoEnvioEm: String(p?.ultimoEnvioEm || ''),
+              ultimoRunIdPresent: Boolean(p?.ultimoRunId), lockAtePresent: Boolean(p?.lockAte), groupsCount: groups.length,
+              imagePresent: Boolean(image), imageType: image ? String(image?.tipo || 'unknown') : '',
+              globalSessionPresent: Boolean(cfg?.sessaoId || cfg?.sessaoWhatsappId || cfg?.sessaoGruposId),
+              profileSessionPresent: Boolean(profile?.sessaoId),
+              profileSessionMatches: Boolean(profile && String(profile.sessaoId || '') === String(cfg?.sessaoId || cfg?.sessaoWhatsappId || cfg?.sessaoGruposId || ''))
+            }));
+          }
+          const managerFiles = ['/data/clientes/' + clientId + '/mensageiro-gerente-infracoes.json', '/data/clientes/' + clientId + '/mensageiro-gerente-operacional.json'];
+          for (const file of managerFiles) {
+            const data = readJson(file);
+            const entries = Array.isArray(data?.infracoes) ? data.infracoes : (Array.isArray(data?.motivos) ? data.motivos : []);
+            const hits = entries.filter(x => /teste/i.test(JSON.stringify(x || {})) || /07:20|10:20/.test(JSON.stringify(x || {})));
+            console.log('SERVMAQ_MANAGER_FILE=' + path.basename(file) + ' entries=' + entries.length + ' matching_window=' + hits.length);
+          }
+          const historySources = [client?.atendimento?.historico, client?.historicoProgramacoes, client?.programacoesHistorico, cfg?.historicoProgramacoes];
+          const history = historySources.find(Array.isArray) || [];
+          const h0700 = history.filter(x => /07:00|2026-10-15/.test(JSON.stringify(x || {})));
+          console.log('SERVMAQ_HISTORY_COUNT=' + history.length);
+          console.log('SERVMAQ_HISTORY_0700_COUNT=' + h0700.length);
+          for (const h of h0700.slice(0, 30)) console.log('SERVMAQ_HISTORY_0700=' + JSON.stringify({
+            status: String(h?.status || h?.resultado || ''), resultado: String(h?.resultado || ''),
+            timestamp: String(h?.timestamp || h?.data || h?.executadoEm || h?.criadoEm || ''),
+            runIdPresent: Boolean(h?.runId || h?.ultimoRunId), lockPresent: Boolean(h?.lockAte),
+            reason: String(h?.codigo || h?.motivo || h?.erro || '').slice(0, 80)
+          }));
+          const safeName = n => '"' + String(n).replaceAll('"', '""') + '"';
+          const safeValue = (name, value) => {
+            if (value === null || value === undefined) return null;
+            if (/url|text|message|body|title|name|cookie|token|secret|password|credential|key|image|link/i.test(name)) return '<omitted>';
+            const s = String(value); return s.length > 120 ? s.slice(0, 120) + '…' : s;
+          };
+          const wanted = ['engine_eventos_brutos','engine_links','engine_jobs_cliente','engine_processamentos','engine_ofertas','engine_eventos_comerciais','engine_universal_queue_items','engine_universal_queue_destinations','fila_claims_ativos','fila_checkpoints_entrega'];
+          const timeCols = ['created_at','createdAt','captured_at','received_at','occurred_at','updated_at','capturado_em','criado_em','atualizado_em','ocorrido_em','criada_em','claimed_at','confirmed_at','started_at'];
+          (async () => {
+            const url = process.env.DATABASE_URL || process.env.DATABASE_URL_UNIVERSAL;
+            if (!url) { console.log('ALIEXPRESS_DB_READONLY=UNAVAILABLE'); return; }
+            const pool = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 4000 });
+            const c = await pool.connect();
+            try {
+              await c.query('BEGIN'); await c.query('SET TRANSACTION READ ONLY'); await c.query("SET LOCAL statement_timeout='5000ms'");
+              const meta = (await c.query('SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name = ANY($2::text[]) ORDER BY table_name,ordinal_position', ['public', wanted])).rows;
+              const by = new Map(); for (const r of meta) { if (!by.has(r.table_name)) by.set(r.table_name, []); by.get(r.table_name).push(r.column_name); }
+              console.log('ALIEXPRESS_DB_READONLY=PASS');
+              for (const table of wanted) {
+                const cols = by.get(table) || []; if (!cols.length) { console.log('ALIEXPRESS_TABLE=' + table + ' unavailable'); continue; }
+                const tc = timeCols.find(x => cols.includes(x)); if (!tc) { console.log('ALIEXPRESS_TABLE=' + table + ' skipped_no_time_column'); continue; }
+                const select = ['id','uuid','evento_id','event_id','link_id','job_id','cliente_id','workspace_id','marketplace','marketplace_detectado','status','tentativas','motivo_final','motivo_status','etapa','oferta_id','fila_item_id','destination_id','terminal_status','credit_debited','confirmed_at','criado_em','atualizado_em'].filter(x => cols.includes(x));
+                if (!select.length) { console.log('ALIEXPRESS_TABLE=' + table + ' skipped_no_safe_columns'); continue; }
+                const marketplace = cols.includes('marketplace') ? ` AND ${safeName('marketplace')}::text ILIKE '%aliexpress%'` : (cols.includes('marketplace_detectado') ? ` AND ${safeName('marketplace_detectado')}::text ILIKE '%aliexpress%'` : '');
+                const sql = `SELECT ${select.map(safeName).join(',')} FROM ${safeName(table)} WHERE ${safeName(tc)} >= $1${marketplace} ORDER BY ${safeName(tc)} DESC LIMIT 50`;
+                const rows = (await c.query(sql, [cutoff])).rows;
+                console.log('ALIEXPRESS_TABLE=' + table + ' rows=' + rows.length);
+                for (const row of rows.slice(0, 20)) { const out = {}; for (const [k,v] of Object.entries(row)) out[k] = safeValue(k,v); console.log('ALIEXPRESS_ROW=' + JSON.stringify(out)); }
+              }
+              await c.query('COMMIT');
+            } catch (e) { try { await c.query('ROLLBACK'); } catch {} console.log('ALIEXPRESS_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)); }
+            finally { c.release(); await pool.end(); }
+          })().catch(e => console.log('ALIEXPRESS_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)));
+          NODE
+
+      - name: Read-only HTTP smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --output /dev/null --write-out 'public_http=%{http_code} latency_s=%{time_total}\n' https://go.optimuspromo.com.br/
