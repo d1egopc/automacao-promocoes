@@ -350,6 +350,132 @@ jobs:
           })().catch(error => console.log('SERVMAQ_RUNTIME_SESSION=FAILED reason=' + String(error.message).replace(/[^a-zA-Z0-9_. -]/g, ' ').slice(0, 120)));
           NODE
 
+      - name: Reconcile all active Servmaq manager profiles read-only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          test -n "$backend_id"
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" TARGET_PROGRAM=5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618 node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const jwt = require('jsonwebtoken');
+          const clientId = process.env.CLIENT_ID;
+          const programId = process.env.TARGET_PROGRAM;
+          const hash = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
+          const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+          const idOf = value => {
+            if (value && typeof value === 'object') return String(value.id || value.jid || value.grupoId || value.groupId || value.remoteJid || '').trim();
+            return String(value || '').trim();
+          };
+          const nameOf = value => value && typeof value === 'object'
+            ? String(value.nome || value.name || value.subject || value.titulo || '').trim()
+            : '';
+          const sessionOf = value => String(value?.sessaoId || value?.sessaoWhatsappId || value?.sessaoGruposId || '').trim();
+          const list = value => Array.isArray(value) ? value : [];
+          const activeProfile = profile => profile && profile.removido !== true && profile.removed !== true && profile.excluido !== true && profile.ativo !== false;
+          const cfg = (readJson('/data/mensageiro.json') || {})[clientId] || {};
+          const programs = list(cfg.programacoes);
+          const program = programs.find(item => String(item?.id || '') === programId) || null;
+          const defaultSession = sessionOf(cfg);
+          const profiles = list(cfg.perfis).filter(activeProfile);
+          const managerProfiles = profiles.filter(profile => profile?.modulos?.gerente?.ativo === true);
+          const sessionIds = [...new Set([defaultSession, ...managerProfiles.map(sessionOf), ...[program].filter(Boolean).map(sessionOf)].filter(Boolean))];
+          const profileRows = managerProfiles.map(profile => {
+            const gerente = profile?.modulos?.gerente || {};
+            const ownGroups = list(gerente.grupos);
+            const inheritedGroups = list(profile.grupos);
+            const effectiveGroups = gerente.gruposConfigurados === true ? ownGroups : inheritedGroups;
+            const configuracao = gerente.configuracao || {};
+            const rules = list(configuracao.regras).filter(rule => rule?.ativo === true);
+            const words = rules
+              .filter(rule => String(rule?.tipo || '').toLowerCase() === 'palavras_proibidas')
+              .flatMap(rule => list(rule?.parametros?.palavras || rule?.parametros?.termos || rule?.palavras || rule?.termos))
+              .map(word => String(word).trim().toLowerCase())
+              .filter(Boolean);
+            return {
+              profileHash: hash(profile.id),
+              profileNamePresent: Boolean(profile.nome),
+              sessionHash: hash(sessionOf(profile) || defaultSession),
+              sessionOwn: Boolean(sessionOf(profile)),
+              active: profile.ativo !== false,
+              gerenteGroupsConfigured: gerente.gruposConfigurados === true,
+              effectiveGroupHashes: effectiveGroups.map(idOf).filter(Boolean).slice(0, 30).map(hash),
+              effectiveGroupCount: effectiveGroups.map(idOf).filter(Boolean).length,
+              rulesActive: rules.length,
+              testWordActive: words.includes('teste'),
+              bolsonaroWordActive: words.includes('bolsonaro'),
+              actions: [...new Set(rules.map(rule => String(rule?.acao || '').trim()).filter(Boolean))].slice(0, 10),
+              isentarAdmins: configuracao.isentarAdmins !== false,
+              isentarDono: configuracao.isentarDono !== false,
+              authorizedCount: list(configuracao.autorizados).length,
+              moderatorCount: list(configuracao.moderadores).length
+            };
+          });
+          const programGroups = list(program?.grupos || program?.gruposIds).map(idOf).filter(Boolean);
+          const programSession = sessionOf(program) || defaultSession;
+          const secret = process.env.JWT_SECRET || 'segredo';
+          const token = jwt.sign({ clienteId: clientId }, secret, { expiresIn: '30s' });
+          const getJson = async path => {
+            const response = await fetch(`http://127.0.0.1:3000${path}`, { headers: { authorization: `Bearer ${token}` } });
+            const body = await response.json().catch(() => ({}));
+            return { status: response.status, body };
+          };
+          (async () => {
+            const sessionsResponse = await getJson('/sessoes');
+            const sessionRows = list(sessionsResponse.body?.sessoes);
+            const runtimeRows = sessionIds.map(id => {
+              const row = sessionRows.find(item => String(item?.id || item?.sessaoId || '') === id);
+              return { id, row };
+            });
+            const openRuntime = runtimeRows.filter(item => item.row?.status === 'open' || item.row?.conectado === true);
+            const groupCatalogs = [];
+            for (const item of openRuntime.slice(0, 10)) {
+              const result = await getJson(`/grupos/${encodeURIComponent(item.id)}`);
+              const groups = list(result.body?.grupos || result.body?.gruposLista);
+              groupCatalogs.push({
+                sessionId: item.id,
+                httpStatus: result.status,
+                groups: groups.map(group => ({ id: idOf(group), name: nameOf(group) })).filter(group => group.id)
+              });
+            }
+            const catalogFor = id => groupCatalogs.find(item => item.sessionId === id)?.groups || [];
+            const actualProgramGroups = catalogFor(programSession);
+            const actualProgramIds = new Set(actualProgramGroups.map(group => group.id));
+            const programMatches = programGroups.filter(id => actualProgramIds.has(id));
+            const servmaqNames = actualProgramGroups.map(group => group.name).filter(name => /servmaq/i.test(name)).slice(0, 5);
+            const managerRows = profileRows.map(row => {
+              const profile = managerProfiles.find(item => hash(item.id) === row.profileHash);
+              const manager = profile?.modulos?.gerente || {};
+              const effective = manager.gruposConfigurados === true ? list(manager.grupos) : list(profile?.grupos);
+              const sessionId = sessionOf(profile) || defaultSession;
+              const actual = catalogFor(sessionId);
+              const actualIds = new Set(actual.map(group => group.id));
+              const ids = effective.map(idOf).filter(Boolean);
+              const matching = ids.filter(id => actualIds.has(id));
+              return { ...row, groupMatches: matching.length, actualGroupCount: actual.length, servmaqNames: actual.map(group => group.name).filter(name => /servmaq/i.test(name)).slice(0, 5) };
+            });
+            const sessionRow = runtimeRows.find(item => item.id === (programSession || defaultSession));
+            const senderCriteria = managerRows.map(row => ({ profileHash: row.profileHash, fromMeIgnoredByCode: true, isentarAdmins: row.isentarAdmins, isentarDono: row.isentarDono, authorizedCount: row.authorizedCount, moderatorCount: row.moderatorCount }));
+            console.log('SESSION_OPEN=' + JSON.stringify({
+              httpStatus: sessionsResponse.status,
+              sessionHash: hash(programSession || defaultSession),
+              status: sessionRow?.row?.status || 'not_found',
+              conectado: sessionRow?.row?.conectado === true,
+              grupos: Number(sessionRow?.row?.grupos || sessionRow?.row?.totalGrupos || 0),
+              qrDisponivel: sessionRow?.row?.qrDisponivel === true
+            }));
+            console.log('ACTIVE_MANAGER_PROFILES=' + JSON.stringify({ count: managerRows.length, profiles: managerRows }));
+            console.log('MANAGER_RULES=' + JSON.stringify({ profiles: managerRows.map(row => ({ profileHash: row.profileHash, rulesActive: row.rulesActive, actions: row.actions })) }));
+            console.log('TEST_WORD_ACTIVE=' + managerRows.some(row => row.testWordActive));
+            console.log('BOLSONARO_WORD_ACTIVE=' + managerRows.some(row => row.bolsonaroWordActive));
+            console.log('MANAGER_GROUPS=' + JSON.stringify({ profiles: managerRows.map(row => ({ profileHash: row.profileHash, sessionHash: row.sessionHash, groupMatches: row.groupMatches, actualGroupCount: row.actualGroupCount, servmaqNames: row.servmaqNames })) }));
+            console.log('PROGRAM_GROUP_NAME=' + JSON.stringify({ sessionHash: hash(programSession), configuredGroupCount: programGroups.length, matchedGroupCount: programMatches.length, servmaqNames }));
+            console.log('GROUP_MATCH=' + JSON.stringify({ program: programGroups.length > 0 && programMatches.length === programGroups.length, managers: managerRows.map(row => ({ profileHash: row.profileHash, allGroupsInSession: row.effectiveGroupCount > 0 && row.groupMatches === row.effectiveGroupCount })) }));
+            console.log('POSSIBLE_EXEMPTION=' + JSON.stringify({ senderProvided: false, criteria: senderCriteria }));
+          })().catch(error => console.log('SERVMAQ_MANAGER_RECONCILIATION=FAILED reason=' + String(error.message).replace(/[^a-zA-Z0-9_. -]/g, ' ').slice(0, 160)));
+          NODE
+
       - name: Read-only HTTP smoke
         shell: bash
         run: |
