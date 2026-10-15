@@ -1,0 +1,81 @@
+name: Mensageiro welcome validation
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-welcome-p1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mensageiro-welcome-p1-validation
+  cancel-in-progress: false
+
+jobs:
+  linux-node24:
+    name: Linux / Node 24 / Mensageiro regressions
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-welcome-p1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated branch, base and scope
+        shell: bash
+        env:
+          BASE_SHA: 2e01537104803bba5417bb4770696b30370336da
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-welcome-p1
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          expected=$(printf '%s\n' \
+            .github/workflows/validate-mensageiro-welcome.yml \
+            modules/mensageiro/service.js \
+            tests/mensageiro-grupo-envio.test.cjs | sort)
+          actual=$(git diff --name-only "$BASE_SHA...HEAD" | sort)
+          test "$actual" = "$expected"
+          git diff --check "$BASE_SHA...HEAD"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Syntax and encoding checks
+        run: |
+          node --check index.js
+          node --check modules/mensageiro/service.js
+          node --check tests/mensageiro-grupo-envio.test.cjs
+          npm run audit:encoding
+
+      - name: Mensageiro profile and welcome regressions
+        env:
+          TEMP: /tmp/optimus-mensageiro-tests
+          TMP: /tmp/optimus-mensageiro-tests
+        run: |
+          mkdir -p "$TEMP"
+          node tests/mensageiro-grupo-envio.test.cjs
+          node tests/mensageiro-perfis.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-bot-comandos.test.cjs
+
+      - name: WhatsApp lifecycle regressions
+        run: |
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/whatsapp-reconnect-seguro.test.js
+          node tests/baileys-session-observability.test.js
