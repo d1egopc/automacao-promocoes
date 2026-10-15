@@ -86,13 +86,21 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker inspect --format '{{range .Mounts}}{{.Type}}:{{.Source}} -> {{.Destination}};{{end}}' "$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
-          mount_count="$(find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
-          if [[ -d "$DATA_DIR/baileys-auth" ]]; then
-            auth_count="$(find "$DATA_DIR/baileys-auth" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          docker inspect --format '{{range .Mounts}}{{.Type}}:{{.Source}} -> {{.Destination}};{{end}}' "$backend_id"
+          if docker exec "$backend_id" sh -c 'test -d /data'; then
+            mount_count="$(docker exec "$backend_id" sh -c 'find /data -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l')"
+            if docker exec "$backend_id" sh -c 'test -d /data/baileys-auth'; then
+              auth_count="$(docker exec "$backend_id" sh -c 'find /data/baileys-auth -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l')"
+            else
+              auth_count=0
+              printf 'baileys_auth_directory=absent\n'
+            fi
+            printf 'container_data_directory=present\n'
           else
+            mount_count=0
             auth_count=0
-            printf 'baileys_auth_directory=absent\n'
+            printf 'container_data_directory=absent\n'
           fi
           printf 'data_top_level_directories=%s baileys_session_directories=%s\n' "$mount_count" "$auth_count"
 
