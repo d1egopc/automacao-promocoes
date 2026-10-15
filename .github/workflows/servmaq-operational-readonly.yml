@@ -24,8 +24,8 @@ jobs:
       DATA_DIR: /opt/optimus/data
       CLIENT_ID: user_k3phmbkf
       SESSION_ID: user_k3phmbkf_Servmaq
-      WINDOW_START: '2026-10-15T05:35:00Z'
-      WINDOW_END: '2026-10-15T05:41:00Z'
+      WINDOW_START: '2026-10-15T10:18:00Z'
+      WINDOW_END: '2026-10-15T10:23:00Z'
 
     steps:
       - name: Checkout validation workflow only
