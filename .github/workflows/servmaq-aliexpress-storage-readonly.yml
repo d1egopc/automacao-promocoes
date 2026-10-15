@@ -356,7 +356,7 @@ jobs:
           set -Eeuo pipefail
           backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
           test -n "$backend_id"
-          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" TARGET_PROGRAM=5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618 node - <<'NODE'
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" TARGET_PROGRAM=5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618 node - <<'NODE' | tee -a "$GITHUB_STEP_SUMMARY"
           const fs = require('fs');
           const crypto = require('crypto');
           const jwt = require('jsonwebtoken');
