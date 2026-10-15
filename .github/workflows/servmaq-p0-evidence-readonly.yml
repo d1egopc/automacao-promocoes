@@ -40,6 +40,13 @@ jobs:
           docker image inspect "$backend_image_id" --format 'ROLLBACK_SOURCE_IMAGE_PRESENT=true' >/dev/null
           echo 'ROLLBACK_SOURCE_IMAGE_PRESENT=true'
           docker inspect "$backend_id" --format '{{json .Mounts}}' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const mounts=JSON.parse(raw);console.log("BACKEND_DATA_BIND="+mounts.some(m=>m.Destination==="/data"&&m.Type==="bind"&&m.Source==="/opt/optimus/data"))})'
+          docker compose -f /opt/optimus/infra/compose.yml config --format json | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const b=JSON.parse(raw).services?.backend||{};console.log("COMPOSE_BACKEND_IMAGE_CONFIGURED="+Boolean(b.image));console.log("COMPOSE_BACKEND_BUILD_CONFIGURED="+Boolean(b.build))})'
+          docker compose -f /opt/optimus/infra/compose.yml -f - config --format json <<'ROLLBACK_YAML' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const b=JSON.parse(raw).services?.backend||{};console.log("ROLLBACK_OVERRIDE_VALID="+(b.image==="pre-servmaq-p0-20261015"&&!b.build))})'
+          services:
+            backend:
+              image: pre-servmaq-p0-20261015
+              build: !reset null
+          ROLLBACK_YAML
           docker exec -i "$backend_id" node - <<'NODE'
           const fs = require('fs');
           const root = '/data';
