@@ -1,0 +1,51 @@
+name: Protect Servmaq P0 rollback image
+
+on:
+  push:
+    branches:
+      - validation/servmaq-p0-rollback-tag
+
+permissions:
+  contents: read
+
+jobs:
+  protect:
+    if: github.ref == 'refs/heads/validation/servmaq-p0-rollback-tag'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify exclusive rollback-tag scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = '.github/workflows/servmaq-p0-rollback-tag.yml'
+          test "$GITHUB_WORKSPACE" != /opt/optimus/backend
+      - name: Protect exact running image without touching services
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected_sha=ac3a0f65518d93574f5035f295635f4009c1b199
+          expected_image=sha256:e6d6980f5bf7703b5fd6f5ba154a6e27dff6ca4ff02d0dd7aec8600c9e7ecda4
+          rollback_tag=pre-servmaq-p0-20261015
+          test "$(git -C /opt/optimus/backend rev-parse HEAD)" = "$expected_sha"
+          backend_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q backend)"
+          postgres_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q postgres)"
+          test -n "$backend_id" && test -n "$postgres_id"
+          test "$(docker inspect --format '{{.Image}}' "$backend_id")" = "$expected_image"
+          test "$(docker inspect --format '{{.State.Status}}' "$backend_id")" = running
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$postgres_id")" = healthy
+          docker inspect "$backend_id" --format '{{json .Mounts}}' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const ok=JSON.parse(raw).some(m=>m.Destination==="/data"&&m.Type==="bind"&&m.Source==="/opt/optimus/data");if(!ok)process.exit(1)})'
+          prior="$(docker image inspect --format '{{.Id}}' "$rollback_tag" 2>/dev/null || true)"
+          test -z "$prior" || test "$prior" = "$expected_image"
+          docker tag "$expected_image" "$rollback_tag"
+          test "$(docker image inspect --format '{{.Id}}' "$rollback_tag")" = "$expected_image"
+          test "$(docker inspect --format '{{.Image}}' "$backend_id")" = "$expected_image"
+          test "$(docker inspect --format '{{.State.Status}}' "$backend_id")" = running
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$postgres_id")" = healthy
+          echo "ROLLBACK_TAG=$rollback_tag"
+          echo "ROLLBACK_IMAGE_ID=$expected_image"
+          echo 'PRODUCTION_CONTAINER_UNCHANGED=true'
