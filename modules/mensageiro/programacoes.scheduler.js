@@ -250,7 +250,12 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
   });
 
   try {
-    const sessaoId = String(config.sessaoGruposId || config.sessaoWhatsappId || config.sessaoId || "");
+    const perfilDaProgramacao = programacao.perfilId && Array.isArray(config.perfis)
+      ? config.perfis.find(item => item?.id === programacao.perfilId && item?.ativo !== false && !item?.removidoEm)
+      : null;
+    const sessaoId = String(programacao.perfilId
+      ? perfilDaProgramacao?.sessaoId || ""
+      : config.sessaoGruposId || config.sessaoWhatsappId || config.sessaoId || "");
     const sock = typeof deps.getSock === "function" ? deps.getSock(sessaoId) : null;
     const statusSessao = typeof deps.getStatusSessao === "function" ? deps.getStatusSessao(sessaoId) : "";
     const sessaoAberta = Boolean(sock && (!statusSessao || statusSessao === "open" || statusSessao === "aberto"));

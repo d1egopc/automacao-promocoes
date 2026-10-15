@@ -27,6 +27,7 @@ function criarSock({ falharGrupos = [] } = {}) {
 function baseProgramacao(patch = {}) {
   const programacao = {
     id: patch.id || "prog_1",
+    perfilId: patch.perfilId || "",
     ativo: patch.ativo === undefined ? true : patch.ativo,
     nome: patch.nome || "Bom dia",
     tipo: patch.tipo || "intervalo",
@@ -195,6 +196,39 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
   sock = await rodar({ sock: criarSock({ falharGrupos: ["grupo_1@g.us"] }) });
   assert.ok(sock.envios.some((e) => e.jid === "grupo_2@g.us"), "falha de uma programacao nao impede as outras");
   assert.ok(storage.getAtendimentoConfigCliente("cliente_prog").historico.some((e) => e.tipo === "programacao" && e.status === "enviado"), "historico registra envio");
+
+  configurar([baseProgramacao({ id: "perfil_migrado", perfilId: "perfil_novo", grupos: ["grupo_novo@g.us"], gruposConfigurados: true, nextRunAt: "2026-08-24T14:59:00.000Z" })], {
+    perfis: [{ id: "perfil_novo", nome: "Novo celular", ativo: true, sessaoId: "sessao_nova", grupos: [], modulos: { programacoes: { ativo: true } } }]
+  });
+  const chamadasSessao = [];
+  const sockNovo = criarSock();
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: (id) => { chamadasSessao.push(id); return id === "sessao_nova" ? sockNovo : null; },
+    getStatusSessao: (id) => id === "sessao_nova" ? "open" : "closed"
+  });
+  assert.deepStrictEqual(chamadasSessao, ["sessao_nova"], "programacao vinculada usa a sessao do perfil migrado");
+  assert.deepStrictEqual(sockNovo.envios.map((item) => item.jid), ["grupo_novo@g.us"], "programacao envia somente ao grupo novo");
+
+  configurar([baseProgramacao({ id: "legado_global", grupos: ["grupo_1@g.us"], nextRunAt: "2026-08-24T14:59:00.000Z" })], {
+    perfis: [{ id: "perfil_novo", nome: "Novo celular", ativo: true, sessaoId: "sessao_nova", grupos: [], modulos: { programacoes: { ativo: true } } }]
+  });
+  const chamadasLegado = [];
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: (id) => { chamadasLegado.push(id); return id === "sessao_prog" ? criarSock() : null; },
+    getStatusSessao: (id) => id === "sessao_prog" ? "open" : "closed"
+  });
+  assert.deepStrictEqual(chamadasLegado, ["sessao_prog"], "programacao legada DiegoPC preserva sessao global");
+
+  configurar([baseProgramacao({ id: "perfil_ausente", perfilId: "perfil_removido", grupos: ["grupo_1@g.us"], gruposConfigurados: true, nextRunAt: "2026-08-24T14:59:00.000Z" })]);
+  const chamadasOrfas = [];
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: (id) => { chamadasOrfas.push(id); return null; },
+    getStatusSessao: () => "closed"
+  });
+  assert.deepStrictEqual(chamadasOrfas, [""], "perfil removido não herda a sessão global e falha fechado");
 
   const antiga = storage.setMensageiroCliente("cliente_antigo_prog", { ativo: true });
   assert.deepStrictEqual(antiga.programacoes, [], "config antiga sem programacoes continua valida");
