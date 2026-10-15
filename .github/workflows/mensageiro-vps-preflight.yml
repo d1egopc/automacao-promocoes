@@ -1,0 +1,99 @@
+name: Mensageiro VPS read-only preflight
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-vps-preflight
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mensageiro-vps-read-only-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Hostinger VPS read-only baseline
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-vps-preflight'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    env:
+      BASE_SHA: 2e01537104803bba5417bb4770696b30370336da
+      RELEASE_SHA: 15655d2c4b668ed027c3357e1f4afb352603d581
+      BACKEND_DIR: /opt/optimus/backend
+      INFRA_DIR: /opt/optimus/infra
+      COMPOSE_FILE: /opt/optimus/infra/compose.yml
+      DATA_DIR: /opt/optimus/data
+
+    steps:
+      - name: Checkout validation commit only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify validation scope and no deploy workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-vps-preflight
+          test "$RUNNER_ENVIRONMENT" = github-hosted || test "$RUNNER_ENVIRONMENT" = self-hosted
+          test "$GITHUB_WORKSPACE" != "$BACKEND_DIR"
+          git cat-file -e "$RELEASE_SHA^{commit}"
+          git merge-base --is-ancestor "$RELEASE_SHA" HEAD
+          temporary=$(git diff --name-only "$RELEASE_SHA..HEAD")
+          test "$temporary" = '.github/workflows/mensageiro-vps-preflight.yml'
+          git cat-file -e "$BASE_SHA^{commit}"
+          expected=$(printf '%s\n' modules/mensageiro/service.js tests/mensageiro-grupo-envio.test.cjs | sort)
+          actual=$(git diff --name-only "$BASE_SHA..$RELEASE_SHA" | sort)
+          test "$actual" = "$expected"
+          git diff --check "$BASE_SHA..$RELEASE_SHA"
+          test -f .github/workflows/deploy-backend-vps.yml
+          test "$(rg -n '^  deploy:' .github/workflows/mensageiro-vps-preflight.yml | wc -l)" -eq 0
+
+      - name: Confirm production paths without reading secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -d "$BACKEND_DIR"
+          test -d "$INFRA_DIR"
+          test -f "$COMPOSE_FILE"
+          test -d "$DATA_DIR"
+          printf 'backend_dir=present infra_dir=present compose=present data_dir=present\n'
+          sha256sum "$COMPOSE_FILE"
+          if [[ -f "$INFRA_DIR/compose.override.yml" ]]; then sha256sum "$INFRA_DIR/compose.override.yml"; else echo 'compose_override=absent'; fi
+          services="$(docker compose -f "$COMPOSE_FILE" config --services)"
+          grep -Fxq backend <<<"$services"
+          grep -Fxq postgres <<<"$services"
+
+      - name: Read backend checkout and container state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git -C "$BACKEND_DIR" rev-parse HEAD
+          git -C "$BACKEND_DIR" status --short --branch
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          test -n "$backend_id"
+          test -n "$postgres_id"
+          docker inspect --format 'backend_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}} image={{.Image}}' "$backend_id"
+          docker inspect --format 'postgres_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}} image={{.Image}}' "$postgres_id"
+          docker image inspect "$(docker inspect --format '{{.Image}}' "$backend_id")" --format 'rollback_image_id={{.Id}} tags={{json .RepoTags}} digests={{json .RepoDigests}}'
+
+      - name: Verify persistent mounts and session directory counts
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker inspect --format '{{range .Mounts}}{{.Type}}:{{.Source}} -> {{.Destination}};{{end}}' "$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          mount_count="$(find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+          auth_count="$(find "$DATA_DIR/baileys-auth" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+          printf 'data_top_level_directories=%s baileys_session_directories=%s\n' "$mount_count" "$auth_count"
+
+      - name: Read-only local and public HTTP checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --output /dev/null --write-out 'local_http=%{http_code} latency_s=%{time_total}\n' http://127.0.0.1:3000/
+          curl --fail --silent --show-error --output /dev/null --write-out 'public_http=%{http_code} latency_s=%{time_total}\n' https://go.optimuspromo.com.br/
