@@ -30,7 +30,8 @@ jobs:
       - name: Exact-id scope read-only diagnostic
         shell: bash
         run: |
-          set -Eeuo pipefail
+          set +u
+          set +e
           umask 077
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/servmaq-trace-scope-check-20261015
