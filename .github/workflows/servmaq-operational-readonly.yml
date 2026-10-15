@@ -130,7 +130,7 @@ jobs:
           const count = (re) => lines.filter(line => re.test(line)).length;
           const inWindow = lines.filter(line => /messages\.upsert|listener_recebeu|listener_erro_mensagem|invalid_prekey_id|GERENTE|mensageiro|connection\.update|group-participants\.update|bolsonaro|teste no grupo serv maq/i.test(line));
           console.log('LOG_WINDOW_LINES=' + lines.length);
-          console.log('SESSION_REFERENCE_LINES=' + count(new RegExp(session.replace(/[.*+?^${}()|[\\]\\/]/g, '\\$&'), 'i')));
+          console.log('SESSION_REFERENCE_LINES=' + lines.filter(line => line.includes(session)).length);
           console.log('MESSAGES_UPSERT=' + count(/messages\.upsert|listener_recebeu/i));
           console.log('SIGNAL_INVALID_PREKEY=' + count(/invalid_prekey_id/i));
           console.log('PARTICIPANT_EVENTS=' + count(/group-participants\.update/i));
