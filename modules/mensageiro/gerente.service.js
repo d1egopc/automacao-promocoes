@@ -14,7 +14,7 @@ const {
 const { agendarExclusaoMensagemTemporaria } = require("./service");
 const { resolverBotAdminGerente } = require("./gerente-identidade");
 const { appendTrace, traceEnabled } = require("./gerente-trace");
-const { readClienteJson, writeClienteJson } = require("../../utils/storage");
+const { readClienteJson, writeClienteJson, readGlobalJson } = require("../../utils/storage");
 
 const JANELAS_GERENTE_MS = 10 * 60 * 1000;
 const resultadosMensagemGerente = new Map();
@@ -396,24 +396,30 @@ async function tratarMensagemGrupoGerente({
     limparMapRecente(janelasGerente);
 
     const grupoTrace = normalizarJid(mensagem?.key?.remoteJid || "");
-    const traceAtivo = traceEnabled();
+    const traceAtivo = traceEnabled(process.env, { clienteId, sessaoId });
     const mensagemTrace = traceAtivo ? String(mensagem?.key?.id || "") : "";
-    const configTrace = traceAtivo ? getMensageiroCliente(clienteId) : null;
-    const trace = traceAtivo
-      ? (codigo, patch = {}) => appendTrace({
-        clienteId,
-        sessaoId,
-        grupoId: patch.grupoId || grupoTrace,
-        perfilId: patch.perfilId || "",
-        regraId: patch.regraId || "",
-        mensagemId: mensagemTrace,
-        etapa: patch.etapa || "gerente",
-        codigo,
-        config: configTrace || patch.config,
-        readClienteJson,
-        writeClienteJson
-      })
-      : () => false;
+    let configTrace = null;
+    if (traceAtivo) {
+      try { configTrace = readGlobalJson("mensageiro.json", {})?.[clienteId] || null; } catch {}
+    }
+    const trace = (codigo, patch = {}) => {
+      if (!traceAtivo || !configTrace) return false;
+      try {
+        return appendTrace({
+          clienteId,
+          sessaoId,
+          grupoId: patch.grupoId || grupoTrace,
+          perfilId: patch.perfilId || "",
+          regraId: patch.regraId || "",
+          mensagemId: mensagemTrace,
+          etapa: patch.etapa || "gerente",
+          codigo,
+          config: configTrace,
+          readClienteJson,
+          writeClienteJson
+        });
+      } catch { return false; }
+    };
     trace("handler_called");
 
     if (!usuarioAtivo(clienteId)) {

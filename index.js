@@ -33454,20 +33454,32 @@ registrarListenerUnicoSocket({
         ...contextoListenerCobertura,
         decisao: "recebido"
       });
-      if (gerenteTraceEnabled()) {
-        appendGerenteTrace({
-          clienteId: clienteIdMensageiro,
-          sessaoId: id,
-          grupoId: mensagem?.key?.remoteJid || "",
-          mensagemId: contextoListenerCobertura.mensagemId,
-          codigo: "received",
-          etapa: "listener",
-          config: mensageiro.getMensageiroCliente(clienteIdMensageiro),
-          readClienteJson,
-          writeClienteJson
-        });
+      const clienteTrace = id === "user_k3phmbkf_Servmaq" ? "user_k3phmbkf" : clienteIdMensageiro;
+      const traceGerenteAtivo = gerenteTraceEnabled(process.env, { clienteId: clienteTrace, sessaoId: id });
+      let configTraceGerente = null;
+      if (traceGerenteAtivo) {
+        try { configTraceGerente = readGlobalJson("mensageiro.json", {})?.[clienteTrace] || null; } catch {}
       }
+      const registrarEtapaGerente = codigo => {
+        if (!traceGerenteAtivo || !configTraceGerente) return;
+        try {
+          appendGerenteTrace({
+            clienteId: clienteTrace,
+            sessaoId: id,
+            grupoId: mensagem?.key?.remoteJid || "",
+            mensagemId: contextoListenerCobertura.mensagemId,
+            codigo,
+            etapa: "listener",
+            config: configTraceGerente,
+            readClienteJson,
+            writeClienteJson
+          });
+        } catch {}
+      };
+      registrarEtapaGerente("received");
+      registrarEtapaGerente(clienteIdMensageiro === clienteTrace ? "tenant_resolved" : "tenant_mismatch");
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        registrarEtapaGerente("usuario_inativo_listener");
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
         coberturaRadar.registrar("listener_ignorado", {
           ...contextoListenerCobertura,
@@ -33489,6 +33501,8 @@ registrarListenerUnicoSocket({
         })
       });
 
+      registrarEtapaGerente("radar_returned");
+      registrarEtapaGerente("mensageiro_dispatched");
       const execucaoGerente = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_gerente",
         contexto: contextoListenerCobertura,

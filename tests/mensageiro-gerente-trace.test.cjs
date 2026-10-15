@@ -122,6 +122,34 @@ async function executar(msg, options = {}) {
   }), false, "flag desligada nao registra");
   assert.strictEqual(offWrites.length, 0, "flag desligada nao escreve");
 
+  const temporaryConfig = {
+    ...config,
+    programacoes: [{ id: "5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618", grupos: [grupoId] }]
+  };
+  const temporaryEnv = { JWT_SECRET: "synthetic-app-secret", SERVMAQ_GERENTE_TRACE_ENABLED: "false" };
+  const beforeExpiry = trace.TEMPORARY_TRACE_UNTIL - 1000;
+  assert.strictEqual(trace.temporaryTraceEnabled({ clienteId, sessaoId, env: temporaryEnv, now: beforeExpiry }), true);
+  assert.strictEqual(trace.temporaryTraceEnabled({ clienteId, sessaoId, env: temporaryEnv, now: trace.TEMPORARY_TRACE_UNTIL }), false, "trace expira automaticamente");
+  assert.strictEqual(trace.temporaryTraceEnabled({ clienteId: "user_other", sessaoId, env: temporaryEnv, now: beforeExpiry }), false, "outra workspace nao ativa trace");
+  assert.strictEqual(trace.temporaryTraceEnabled({ clienteId, sessaoId: "outra_sessao", env: temporaryEnv, now: beforeExpiry }), false, "outra sessao nao ativa trace");
+  assert.strictEqual(trace.temporaryTraceEnabled({ clienteId, sessaoId, env: {}, now: beforeExpiry }), false, "sem chave HMAC nao ativa trace");
+  assert.strictEqual(trace.temporaryTargetGroup(temporaryConfig), grupoId);
+  assert.strictEqual(trace.temporaryTargetGroup({ ...temporaryConfig, programacoes: [] }), "", "programacao ausente bloqueia escopo");
+  assert.strictEqual(trace.temporaryTargetGroup({ ...temporaryConfig, perfis: [...temporaryConfig.perfis, temporaryConfig.perfis[0]] }), "", "perfil ambiguo bloqueia escopo");
+  assert.strictEqual(trace.isTraceTarget({ clienteId, sessaoId, grupoId, config: temporaryConfig, env: temporaryEnv, now: beforeExpiry }), true);
+  assert.strictEqual(trace.isTraceTarget({ clienteId, sessaoId, grupoId: "outro@g.us", config: temporaryConfig, env: temporaryEnv, now: beforeExpiry }), false);
+  assert.strictEqual(trace.isTraceTarget({ clienteId, sessaoId, grupoId, config: temporaryConfig, env: temporaryEnv, now: trace.TEMPORARY_TRACE_UNTIL }), false);
+  const temporaryWrites = [];
+  const temporaryPayload = { clienteId, sessaoId, grupoId, mensagemId: "synthetic-message", codigo: "tenant_resolved", config: temporaryConfig,
+    env: temporaryEnv, now: () => new Date(beforeExpiry).toISOString(), readClienteJson: () => ({ eventos: [] }),
+    writeClienteJson: (_cliente, _file, payload) => temporaryWrites.push(payload) };
+  assert.strictEqual(trace.appendTrace(temporaryPayload), true, "trace temporario registra no grupo unico");
+  assert.deepStrictEqual(temporaryWrites[0].eventos.map(item => item.codigo), ["tenant_resolved"]);
+  assert.ok(!JSON.stringify(temporaryWrites).includes(grupoId), "JID bruto nao persiste");
+  assert.ok(!JSON.stringify(temporaryWrites).includes("synthetic-message"), "ID de mensagem bruto nao persiste");
+  assert.strictEqual(trace.appendTrace({ ...temporaryPayload, now: () => new Date(trace.TEMPORARY_TRACE_UNTIL).toISOString() }), false,
+    "trace expirado nao persiste nova mensagem");
+
   process.env.SERVMAQ_GERENTE_TRACE_ENABLED = "true";
   assert.strictEqual(trace.isTraceTarget({ clienteId, sessaoId, grupoId, config: storage.getMensageiroCliente(clienteId) }), true, "escopo Servmaq reconhecido");
   trace.appendTrace({ clienteId, sessaoId, grupoId, codigo: "received", config, readClienteJson: storageUtils.readClienteJson, writeClienteJson: storageUtils.writeClienteJson });
