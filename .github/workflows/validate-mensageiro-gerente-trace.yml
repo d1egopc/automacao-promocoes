@@ -1,0 +1,87 @@
+name: Validate Servmaq gerente trace (no deploy)
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-p1-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-mensageiro-gerente-trace
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Linux Node 24 Mensageiro validation
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-p1-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ""
+      SERVMAQ_GERENTE_TRACE_ENABLED: ""
+      SERVMAQ_GERENTE_TRACE_SECRET: ""
+      SERVMAQ_GERENTE_TRACE_SESSION_HASH: ""
+      SERVMAQ_GERENTE_TRACE_GROUP_HASH: ""
+
+    steps:
+      - name: Checkout exact validation commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated ref and no production inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-p1-ci
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+          test -z "$SERVMAQ_GERENTE_TRACE_ENABLED"
+          test -z "$SERVMAQ_GERENTE_TRACE_SECRET"
+          test -z "$SERVMAQ_GERENTE_TRACE_SESSION_HASH"
+          test -z "$SERVMAQ_GERENTE_TRACE_GROUP_HASH"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Confirm commercial patch scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            index.js \
+            modules/mensageiro/gerente.service.js \
+            modules/mensageiro/gerente-trace.js \
+            tests/mensageiro-gerente-trace.test.cjs | sort)
+          actual=$(git show --format= --name-only ac3a0f65518d93574f5035f295635f4009c1b199 | sed '/^$/d' | sort)
+          test "$actual" = "$expected"
+          git diff --check 15655d2c4b668ed027c3357e1f4afb352603d581..ac3a0f65518d93574f5035f295635f4009c1b199
+
+      - name: Syntax checks
+        run: |
+          node --check index.js
+          node --check modules/mensageiro/gerente.service.js
+          node --check modules/mensageiro/gerente-trace.js
+          node --check tests/mensageiro-gerente-trace.test.cjs
+
+      - name: Focused Mensageiro and isolation tests
+        run: |
+          node tests/mensageiro-gerente-trace.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-grupo-envio.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-bot-comandos.test.cjs
+          node tests/mensageiro-perfis.test.cjs
+          node tests/observabilidade-v25-mensageiro-backend.test.cjs
+
+      - name: Encoding audit
+        run: npm run audit:encoding
