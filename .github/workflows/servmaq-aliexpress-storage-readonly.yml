@@ -265,6 +265,91 @@ jobs:
           })().catch(e => console.log('TARGET_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,180)));
           NODE
 
+      - name: Read-only Servmaq runtime routing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" TARGET_PROGRAM=5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618 node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const jwt = require('jsonwebtoken');
+          const clientId = process.env.CLIENT_ID;
+          const programId = process.env.TARGET_PROGRAM;
+          const hash = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
+          const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+          const groupId = value => {
+            if (value && typeof value === 'object') return String(value.id || value.jid || value.grupoId || value.groupId || value.remoteJid || '').trim();
+            return String(value || '').trim();
+          };
+          const groupName = value => value && typeof value === 'object'
+            ? String(value.nome || value.name || value.subject || value.titulo || '').trim()
+            : '';
+          const listGroups = value => Array.isArray(value) ? value : [];
+          const global = readJson('/data/mensageiro.json') || {};
+          const client = readJson(`/data/clientes/${clientId}/mensageiro-config.json`) || {};
+          const sessionsMeta = readJson('/data/sessoes.json') || {};
+          const cfg = global[clientId] && typeof global[clientId] === 'object' ? global[clientId] : {};
+          const sessionId = String(cfg.sessaoId || cfg.sessaoWhatsappId || cfg.sessaoGruposId || '').trim();
+          const profiles = Array.isArray(cfg.perfis) ? cfg.perfis : [];
+          const profileById = new Map(profiles.map(p => [String(p?.id || ''), p]));
+          const programs = Array.isArray(cfg.programacoes) ? cfg.programacoes : [];
+          const program = programs.find(p => String(p?.id || '') === programId) || null;
+          const profile = program?.perfilId ? profileById.get(String(program.perfilId)) : null;
+          const gerente = profile?.modulos?.gerente || null;
+          const gerenteConfig = gerente?.configuracao || {};
+          const gerenteGroups = listGroups(gerente?.grupos);
+          const profileGroups = listGroups(profile?.grupos);
+          const programGroups = listGroups(program?.grupos || program?.gruposIds);
+          const effectiveGerenteGroups = gerente?.gruposConfigurados === true ? gerenteGroups : profileGroups;
+          const names = [...gerenteGroups, ...profileGroups, ...programGroups].map(groupName).filter(Boolean);
+          const rules = Array.isArray(gerenteConfig.regras) ? gerenteConfig.regras : [];
+          const activeRules = rules.filter(r => r && r.ativo === true);
+          const wordRules = activeRules.filter(r => String(r.tipo || '').toLowerCase() === 'palavras_proibidas');
+          const words = wordRules.flatMap(r => Array.isArray(r?.parametros?.palavras) ? r.parametros.palavras : []).map(v => String(v).toLowerCase());
+          const sessaoMeta = sessionsMeta[sessionId] && typeof sessionsMeta[sessionId] === 'object' ? sessionsMeta[sessionId] : null;
+          console.log('SERVMAQ_PERSISTED_ROUTING=' + JSON.stringify({
+            sessionHash: hash(sessionId),
+            programFound: Boolean(program),
+            programPerfilIdPresent: Boolean(program?.perfilId),
+            profileFound: Boolean(profile),
+            profileActive: profile?.ativo === true,
+            gerenteActive: gerente?.ativo === true,
+            gerenteOwnGroups: gerente?.gruposConfigurados === true,
+            gerenteGroupHashes: effectiveGerenteGroups.map(groupId).filter(Boolean).slice(0, 20).map(hash),
+            gerenteGroupsNamedServmaq: effectiveGerenteGroups.some(g => /servmaq/i.test(groupName(g))),
+            programGroupHashes: programGroups.map(groupId).filter(Boolean).slice(0, 20).map(hash),
+            programGroupsNamedServmaq: programGroups.some(g => /servmaq/i.test(groupName(g))),
+            persistedSessionStatus: sessaoMeta?.status || '',
+            persistedSessionWorkspace: Boolean(sessaoMeta?.workspaceId || sessaoMeta?.clienteId),
+            activeRules: activeRules.length,
+            blockedTestWord: words.includes('teste'),
+            blockedBolsonaroWord: words.includes('bolsonaro'),
+            isentarAdmins: gerenteConfig.isentarAdmins !== false,
+            isentarDono: gerenteConfig.isentarDono !== false,
+            authorizedCount: Array.isArray(gerenteConfig.autorizados) ? gerenteConfig.autorizados.length : 0,
+            moderatorCount: Array.isArray(gerenteConfig.moderadores) ? gerenteConfig.moderadores.length : 0
+          }));
+
+          (async () => {
+            const secret = process.env.JWT_SECRET || 'segredo';
+            const token = jwt.sign({ clienteId: clientId }, secret, { expiresIn: '30s' });
+            const response = await fetch('http://127.0.0.1:3000/sessoes', { headers: { authorization: `Bearer ${token}` } });
+            const body = await response.json().catch(() => ({}));
+            const rows = Array.isArray(body?.sessoes) ? body.sessoes : [];
+            const match = rows.find(row => String(row?.id || row?.sessaoId || '') === sessionId);
+            console.log('SERVMAQ_RUNTIME_SESSION=' + JSON.stringify({
+              httpStatus: response.status,
+              sessionFound: Boolean(match),
+              sessionHash: hash(match?.id || match?.sessaoId || sessionId),
+              status: match?.status || 'not_found',
+              conectado: match?.conectado === true,
+              grupos: Number(match?.grupos || match?.totalGrupos || 0),
+              qrDisponivel: match?.qrDisponivel === true
+            }));
+          })().catch(error => console.log('SERVMAQ_RUNTIME_SESSION=FAILED reason=' + String(error.message).replace(/[^a-zA-Z0-9_. -]/g, ' ').slice(0, 120)));
+          NODE
+
       - name: Read-only HTTP smoke
         shell: bash
         run: |
