@@ -1275,7 +1275,6 @@ async function tratarEventoGrupoMensageiro({
     const config = getMensageiroCliente(clienteId);
 
     if (!config?.ativo) return;
-    if (config.sessaoId && config.sessaoId !== sessaoId) return;
 
     const grupoId = evento.id;
     const participantes = evento.participants || [];
@@ -1289,6 +1288,7 @@ async function tratarEventoGrupoMensageiro({
       acao
     });
     if (resolucaoEvento?.legado === true) {
+      if (config.sessaoId && config.sessaoId !== sessaoId) return;
       if (acao === "add" && !config.boasVindasAtivo) return;
       if ((acao === "remove" || acao === "leave") && !config.despedidaAtivo) return;
     }
