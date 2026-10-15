@@ -143,13 +143,33 @@ jobs:
           }
           check_session "$backend_id"
 
-          docker compose -f "$COMPOSE_FILE" config --no-interpolate > "$tmpdir/compose" 2>/dev/null
-          candidates="$(awk '/^  backend:/{b=1;next}/^  [A-Za-z0-9_-]+:/&&b{exit}b&&/^    env_file:/{e=1;next}b&&e&&/^      - /{sub(/^      - /,"");print}b&&e&&!/^        /&&!/^      - /{e=0}' "$tmpdir/compose")"
-          env_file="$(printf '%s\n' "$candidates" | sed -n '1p')"
-          extra="$(printf '%s\n' "$candidates" | sed -n '2p')"
-          test -n "$env_file" && test -z "$extra"
-          if [[ "$env_file" != /* ]]; then env_file="$(cd "$(dirname "$COMPOSE_FILE")" && pwd)/$env_file"; fi
-          test -f "$env_file" && test -w "$env_file"
+          if ! docker compose -f "$COMPOSE_FILE" config --no-interpolate --format json > "$tmpdir/compose.json" 2>/dev/null; then
+            printf 'TRACE_STAGE=env_config_guard_failed\n' >> "$summary"
+            exit 3
+          fi
+          if ! env_file="$(COMPOSE_JSON_FILE="$tmpdir/compose.json" node - <<'NODE'
+const fs=require('fs');
+let pathValue='';
+try {
+  const doc=JSON.parse(fs.readFileSync(process.env.COMPOSE_JSON_FILE,'utf8'));
+  const entries=doc?.services?.backend?.env_file;
+  if (!Array.isArray(entries) || entries.length !== 1) process.exit(3);
+  const entry=entries[0];
+  if (!entry || typeof entry.path !== 'string' || entry.path.trim() !== entry.path) process.exit(3);
+  pathValue=fs.realpathSync(entry.path);
+} catch { process.exit(3); }
+if (pathValue !== '/opt/optimus/backend/.env') process.exit(3);
+process.stdout.write(pathValue);
+NODE
+          )"; then
+            printf 'TRACE_STAGE=env_path_guard_failed\n' >> "$summary"
+            exit 3
+          fi
+          if [[ "$env_file" != "$BACKEND_DIR/.env" ]] || [[ ! -f "$env_file" ]] || [[ ! -r "$env_file" ]] || [[ ! -w "$env_file" ]]; then
+            printf 'TRACE_STAGE=env_path_guard_failed\n' >> "$summary"
+            exit 3
+          fi
+          printf 'TRACE_STAGE=env_path_pass\n' >> "$summary"
 
           printf 'TRACE_STAGE=pre_mutation\n' >> "$summary"
           backup="$env_file.pre-servmaq-trace.$(date -u +%Y%m%dT%H%M%SZ)"
