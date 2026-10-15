@@ -60,13 +60,17 @@ jobs:
           docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" DEPLOY_CUTOFF="$DEPLOY_CUTOFF" node - <<'NODE'
           const fs = require('fs');
           const path = require('path');
-          const { Pool } = require('pg');
+          const pg = require('pg');
+          const NativePromise = globalThis.Promise;
+          if (typeof NativePromise !== 'function') throw new Error('native_promise_unavailable');
+          if (pg.defaults && typeof pg.defaults === 'object') pg.defaults.Promise = NativePromise;
+          const { Pool } = pg;
           const clientId = process.env.CLIENT_ID;
           const cutoff = process.env.DEPLOY_CUTOFF;
           const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { console.log('FILE_READ_FAILED=' + path.basename(file)); return null; } };
-          const global = readJson('/data/mensageiro.json');
+          const globalConfig = readJson('/data/mensageiro.json');
           const client = readJson(`/data/clientes/${clientId}/mensageiro-config.json`);
-          const cfg = global && global[clientId] && typeof global[clientId] === 'object' ? global[clientId] : null;
+          const cfg = globalConfig && globalConfig[clientId] && typeof globalConfig[clientId] === 'object' ? globalConfig[clientId] : null;
           const profiles = Array.isArray(cfg?.perfis) ? cfg.perfis : [];
           const byProfile = new Map(profiles.map(p => [String(p?.id || ''), p]));
           const programs = Array.isArray(cfg?.programacoes) ? cfg.programacoes : [];
