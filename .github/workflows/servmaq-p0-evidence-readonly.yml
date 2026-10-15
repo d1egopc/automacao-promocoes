@@ -180,9 +180,18 @@ jobs:
           console.log('CONFIG_NAMED_OP_GERAL_COUNT=' + named.length);
           console.log('OP_GERAL_IN_MANAGER_SCOPE=' + (named.length === 1 && selected.includes(named[0].id)));
           console.log('CONFIG_GROUP_OBJECT_COUNT=' + names.length);
-          function status(session) { return new Promise((resolve, reject) => {
+          const rules = Array.isArray(manager?.modulos?.gerente?.configuracao?.regras) ? manager.modulos.gerente.configuracao.regras.filter(value => value?.ativo !== false) : [];
+          console.log('CLARO_MANAGER_ACTIVE_RULES=' + rules.length);
+          console.log('CLARO_TEST_WORD=' + rules.some(rule => (Array.isArray(rule?.parametros?.palavras) ? rule.parametros.palavras : []).some(word => String(word).toLocaleLowerCase('pt-BR') === 'teste')));
+          console.log('CLARO_ADMIN_EXEMPT=' + (manager?.modulos?.gerente?.configuracao?.isentarAdmins !== false));
+          const operational = read('/data/clientes/' + workspace + '/mensageiro-gerente-operacional.json');
+          const reasons = Array.isArray(operational?.motivos) ? operational.motivos : [];
+          const since = Date.now() - 2 * 60 * 60 * 1000;
+          const currentReasons = claro.length === 1 ? reasons.filter(value => value?.sessaoId === claro[0].id && Date.parse(value?.timestamp || '') >= since).slice(-20) : [];
+          console.log('CLARO_OPERATIONAL_RECENT=' + JSON.stringify(currentReasons.map(value => ({ at: value.timestamp, code: String(value.codigo || '').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 60) }))));
+          function status(route) { return new Promise((resolve, reject) => {
             const token = jwt.sign({ clienteId: workspace }, process.env.JWT_SECRET, { expiresIn: '30s' });
-            const request = http.get({ hostname: '127.0.0.1', port: Number(process.env.PORT || 3000), path: '/status/' + encodeURIComponent(session), headers: { Authorization: `Bearer ${token}` }, timeout: 3000 }, response => {
+            const request = http.get({ hostname: '127.0.0.1', port: Number(process.env.PORT || 3000), path: route, headers: { Authorization: `Bearer ${token}` }, timeout: 5000 }, response => {
               let body = '';
               response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(); });
               response.on('end', () => response.statusCode === 200 ? resolve(JSON.parse(body)) : reject(new Error('http_' + response.statusCode)));
@@ -192,8 +201,14 @@ jobs:
           }); }
           (async () => {
             if (claro.length !== 1) return;
-            const state = await status(claro[0].id);
+            const state = await status('/status/' + encodeURIComponent(claro[0].id));
             console.log('CLARO_RUNTIME_OPEN=' + (state?.status === 'open' && state?.conectado === true));
             console.log('CLARO_RUNTIME_GROUP_COUNT=' + Number(state?.grupos || 0));
+            const catalog = await status('/grupos/' + encodeURIComponent(claro[0].id));
+            const groupList = Array.isArray(catalog?.grupos) ? catalog.grupos : [];
+            const matches = groupList.filter(value => String(value?.nome || value?.name || value?.subject || '').trim() === 'OP GERAL');
+            console.log('OP_GERAL_CATALOG_MATCH_COUNT=' + matches.length);
+            console.log('CLARO_SELECTED_GROUP_IN_CATALOG=' + (selected.length === 1 && groupList.some(value => idOf(value) === selected[0])));
+            console.log('OP_GERAL_SELECTED_BY_MANAGER=' + (matches.length === 1 && selected.includes(idOf(matches[0]))));
           })().catch(error => { console.log('CLARO_STATUS_ERROR=' + String(error?.message || '').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 50)); process.exitCode = 1; });
           CURRENT_SCOPE
