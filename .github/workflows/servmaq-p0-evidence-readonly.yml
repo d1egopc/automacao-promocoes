@@ -1,0 +1,112 @@
+name: Servmaq P0 focused evidence read only
+
+on:
+  push:
+    branches:
+      - validation/servmaq-p0-readonly
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    if: github.ref == 'refs/heads/validation/servmaq-p0-readonly'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = '.github/workflows/servmaq-p0-evidence-readonly.yml'
+          test "$GITHUB_WORKSPACE" != /opt/optimus/backend
+      - name: Read focused production evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C /opt/optimus/backend rev-parse HEAD)" = ac3a0f65518d93574f5035f295635f4009c1b199
+          backend_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q backend)"
+          postgres_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q postgres)"
+          test -n "$backend_id" && test -n "$postgres_id"
+          docker inspect --format 'BACKEND={{.State.Status}} RESTARTS={{.RestartCount}} OOM={{.State.OOMKilled}}' "$backend_id"
+          docker inspect --format 'POSTGRES={{.State.Status}} HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$postgres_id"
+          docker exec -i "$backend_id" node - <<'NODE'
+          const fs = require('fs');
+          const root = '/data';
+          const workspace = 'user_k3phmbkf';
+          const session = 'user_k3phmbkf_Servmaq';
+          const start = Date.parse('2026-10-15T16:00:00Z');
+          const end = Date.parse('2026-10-15T17:00:00Z');
+          function read(file, fallback) {
+            try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+            catch { return fallback; }
+          }
+          const users = read(`${root}/usuarios.json`, []);
+          const plans = read(`${root}/planos.json`, {});
+          const user = (Array.isArray(users) ? users : []).find(v => v?.id === workspace);
+          const planName = String(user?.plano || '');
+          const plan = Object.entries(plans).find(([key, value]) =>
+            [key, value?.id, value?.planoId, value?.nome, ...(Array.isArray(value?.aliasesLegados) ? value.aliasesLegados : [])]
+              .some(v => String(v || '').toLowerCase() === planName.toLowerCase()))?.[1];
+          console.log('USER_FOUND=' + Boolean(user));
+          console.log('USER_ACTIVE=' + (user?.ativo !== false));
+          console.log('PLAN_FOUND=' + Boolean(plan));
+          console.log('PLAN_MENSAGEIRO=' + String(plan?.recursos?.mensageiro));
+          const global = read(`${root}/mensageiro.json`, {});
+          const cfg = global?.[workspace] || {};
+          const profiles = (Array.isArray(cfg.perfis) ? cfg.perfis : [])
+            .filter(p => p?.ativo === true && !p?.removidoEm && !p?.removido);
+          const managers = profiles.filter(p => p?.modulos?.gerente?.ativo === true);
+          const manager = managers.find(p => p.sessaoId === session);
+          const managerGroups = manager?.modulos?.gerente?.gruposConfigurados === true
+            ? manager.modulos.gerente.grupos : manager?.grupos;
+          const rules = manager?.modulos?.gerente?.configuracao?.regras || [];
+          const active = (Array.isArray(rules) ? rules : []).filter(r => r?.ativo !== false);
+          const hasTest = active.some(r =>
+            (Array.isArray(r?.parametros?.palavras) ? r.parametros.palavras : [])
+              .some(w => String(w).toLocaleLowerCase('pt-BR') === 'teste'));
+          console.log('CONFIG_ACTIVE=' + (cfg.ativo === true));
+          console.log('CONFIG_SESSION_MATCH=' + ([cfg.sessaoId,cfg.sessaoWhatsappId,cfg.sessaoGruposId].includes(session)));
+          console.log('MANAGER_PROFILE_COUNT=' + managers.length);
+          console.log('MANAGER_SESSION_MATCH=' + Boolean(manager));
+          console.log('MANAGER_EFFECTIVE_GROUP_COUNT=' + (Array.isArray(managerGroups) ? managerGroups.length : 0));
+          console.log('MANAGER_ACTIVE_RULE_COUNT=' + active.length);
+          console.log('MANAGER_TEST_WORD=' + hasTest);
+          const history = read(`${root}/clientes/${workspace}/mensageiro-config.json`, {});
+          const records = history?.atendimento?.historico || [];
+          const relevant = (Array.isArray(records) ? records : []).filter(v => {
+            const t = Date.parse(v?.data || v?.timestamp || v?.criadoEm || '');
+            return Number.isFinite(t) && t >= start && t <= end && v?.tipo === 'moderacao';
+          });
+          console.log('HISTORY_WINDOW_MODERATION_COUNT=' + relevant.length);
+          console.log('HISTORY_WINDOW_RESULTS=' + JSON.stringify(relevant.slice(0, 20).map(v => ({ status: String(v?.status || '').slice(0, 50), resultado: String(v?.resultado || '').slice(0, 50) }))));
+          console.log('HISTORY_LATEST_AT=' + (Array.isArray(records) ? records.map(v => v?.data).filter(Boolean).sort().at(-1) || 'none' : 'none'));
+          const operational = read(`${root}/clientes/${workspace}/mensageiro-gerente-operacional.json`, {});
+          const reasons = Array.isArray(operational?.motivos) ? operational.motivos : [];
+          const reasonsInWindow = reasons.filter(v => {
+            const t = Date.parse(v?.timestamp || '');
+            return Number.isFinite(t) && t >= start && t <= end && v?.sessaoId === session;
+          });
+          console.log('GERENTE_OPERATIONAL_WINDOW=' + JSON.stringify(reasonsInWindow.slice(0, 30).map(v => ({ at: v.timestamp, code: String(v.codigo || '').slice(0, 60) }))));
+          console.log('GERENTE_OPERATIONAL_LATEST_AT=' + (reasons.map(v => v?.timestamp).filter(Boolean).sort().at(-1) || 'none'));
+          const infractions = read(`${root}/clientes/${workspace}/mensageiro-gerente-infracoes.json`, {});
+          const infractionRows = Array.isArray(infractions?.infracoes) ? infractions.infracoes : [];
+          console.log('INFRACTIONS_WINDOW_COUNT=' + infractionRows.filter(v => {
+            const t = Date.parse(v?.ultimaInfracaoEm || '');
+            return Number.isFinite(t) && t >= start && t <= end && v?.sessaoId === session;
+          }).length);
+          const tracePath = `${root}/clientes/${workspace}/mensageiro-gerente-trace.json`;
+          const trace = read(tracePath, {});
+          const traceRows = (Array.isArray(trace?.eventos) ? trace.eventos : []).filter(v => {
+            const t = Date.parse(v?.timestamp || '');
+            return Number.isFinite(t) && t >= start && t <= end;
+          });
+          console.log('TRACE_FILE_EXISTS=' + fs.existsSync(tracePath));
+          console.log('TRACE_WINDOW_COUNT=' + traceRows.length);
+          console.log('TRACE_WINDOW_CODES=' + JSON.stringify(traceRows.slice(0, 30).map(v => String(v?.codigo || '').slice(0, 50))));
+          console.log('TRACE_FLAG_ENABLED=' + /^(1|true|sim|yes|on)$/i.test(String(process.env.SERVMAQ_GERENTE_TRACE_ENABLED || '')));
+          NODE
