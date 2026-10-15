@@ -35,6 +35,7 @@ jobs:
           set -Eeuo pipefail
           umask 077
           summary="$GITHUB_STEP_SUMMARY"
+printf 'TRACE_STAGE=preflight_start\n' >> "$summary"
           tmpdir="$(mktemp -d)"
           env_file=""
           backup=""
@@ -60,6 +61,7 @@ jobs:
           production_sha="$(git -C "$BACKEND_DIR" rev-parse HEAD)"
           printf 'PRODUCTION_SHA=%s\n' "$production_sha" >> "$summary"
           test "$production_sha" = "$EXPECTED_SHA"
+printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
           data_before="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$backend_id")"
           test "$data_before" = "$DATA_DIR"
           image_before="$(docker inspect --format '{{.Image}}' "$backend_id")"
@@ -115,12 +117,14 @@ jobs:
             }
             const uniquePairs = [...new Map(pairs.map(pair => [pair.sessionId + '\\u0000' + pair.groupId, pair])).values()];
             if (uniquePairs.length !== 1) process.exit(3);
-            process.stdout.write(uniquePairs[0].sessionId + '\\n' + uniquePairs[0].groupId + '\\n');
+            console.log(uniquePairs[0].sessionId); console.log(uniquePairs[0].groupId);
           })().catch(() => process.exit(3));
           NODE
           test "$(sed -n '1p' "$tmpdir/scope")" && test "$(sed -n '2p' "$tmpdir/scope")"
           session_id="$(sed -n '1p' "$tmpdir/scope")"
           group_id="$(sed -n '2p' "$tmpdir/scope")"
+          case "$session_id$group_id" in *\\*|*$'\r'*) printf 'TRACE_STAGE=scope_id_guard_failed\n' >> "$summary"; exit 3;; esac
+          printf 'TRACE_STAGE=scope_ids_pass\n' >> "$summary"
 
           check_session() {
             docker exec -i "$1" env SESSION_ID="$session_id" node - <<'NODE' > "$tmpdir/runtime" 2>/dev/null
@@ -150,7 +154,8 @@ jobs:
           NODE
           shash="$(sed -n '1p' "$tmpdir/hashes")"
           ghash="$(sed -n '2p' "$tmpdir/hashes")"
-          test "$(printf '%s' "$shash" | wc -c)" -eq 16 && test "$(printf '%s' "$ghash" | wc -c)" -eq 16
+          [[ "$shash" =~ ^[0-9a-f]{16}$ ]] && [[ "$ghash" =~ ^[0-9a-f]{16}$ ]] || { printf 'TRACE_STAGE=hmac_guard_failed\n' >> "$summary"; exit 3; }; printf 'TRACE_STAGE=hmac_pass\n' >> "$summary"
+          printf 'TRACE_STAGE=pre_mutation\n' >> "$summary"
           new_env="$(mktemp "$(dirname "$env_file")/.servmaq-trace.XXXXXX")"
           awk '!/^SERVMAQ_GERENTE_TRACE_(ENABLED|SECRET|SESSION_HASH|GROUP_HASH)=/' "$env_file" > "$new_env"
           printf 'SERVMAQ_GERENTE_TRACE_ENABLED=1\nSERVMAQ_GERENTE_TRACE_SECRET=%s\nSERVMAQ_GERENTE_TRACE_SESSION_HASH=%s\nSERVMAQ_GERENTE_TRACE_GROUP_HASH=%s\n' "$secret" "$shash" "$ghash" >> "$new_env"
