@@ -58,15 +58,26 @@ function moduloEventoGrupoMensageiro(acao = "") {
   return "";
 }
 
-function grupoPermitidoModuloMensagem({ clienteId, config = {}, sessaoId = "", grupoId = "", acao = "" } = {}) {
+function resolverEventoGrupoMensageiro({ clienteId, config = {}, sessaoId = "", grupoId = "", acao = "" } = {}) {
   const modulo = moduloEventoGrupoMensageiro(acao);
-  if (!modulo) return false;
+  if (!modulo) return { ok: false, legado: false, perfil: null, moduloConfig: null };
 
   const perfis = Array.isArray(config.perfis)
     ? config.perfis.filter(perfil => perfil?.ativo !== false && !perfil?.removidoEm)
     : [];
 
-  if (!perfis.length) return grupoPermitido(clienteId, grupoId);
+  if (!perfis.length && Array.isArray(config.perfis) && config.perfis.length) {
+    return { ok: false, legado: false, perfil: null, moduloConfig: null };
+  }
+
+  if (!perfis.length) {
+    return {
+      ok: grupoPermitido(clienteId, grupoId),
+      legado: true,
+      perfil: null,
+      moduloConfig: null
+    };
+  }
 
   const resolucao = resolverPerfilMensageiro({
     clienteId,
@@ -76,7 +87,10 @@ function grupoPermitidoModuloMensagem({ clienteId, config = {}, sessaoId = "", g
     config
   });
 
-  return Boolean(resolucao?.ok && resolucao.legado !== true);
+  return {
+    ...resolucao,
+    moduloConfig: resolucao?.perfil?.modulos?.[modulo] || null
+  };
 }
 
 function obterMensagemBoasVindas(clienteId) {
@@ -213,10 +227,10 @@ function logMensageiroJson(tag, dados = {}) {
   console.log(`${tag} ${JSON.stringify(dados)}`);
 }
 
-function resolverEnvioGrupoMensageiro(config = {}, acao = "") {
-  const envio = acao === "add"
+function resolverEnvioGrupoMensageiro(config = {}, acao = "", envioOverride = null) {
+  const envio = envioOverride || (acao === "add"
     ? config.boasVindasEnvio
-    : config.despedidaEnvio;
+    : config.despedidaEnvio);
 
   return {
     destino: envio?.destino === "grupo" ? "grupo" : "privado",
@@ -227,6 +241,57 @@ function resolverEnvioGrupoMensageiro(config = {}, acao = "") {
     apagarAposSegundos: Math.max(
       1,
       Math.min(3600, Number(envio?.apagarAposSegundos || 20) || 20)
+    )
+  };
+}
+
+function envioModuloEventoEfetivo(moduloConfig = {}) {
+  const envio = moduloConfig?.configuracao?.envio || {};
+  return Boolean(
+    envio.destino === "grupo" ||
+    envio.modoGrupo !== "imagem_texto" ||
+    envio.mensagemTemporaria === true ||
+    Number(envio.apagarAposSegundos || 20) !== 20
+  );
+}
+
+function configuracaoModuloEventoEfetiva(moduloConfig = {}) {
+  const configuracao = moduloConfig?.configuracao || {};
+  return Boolean(
+    String(configuracao.mensagem || "").trim() ||
+    String(configuracao.imagem || "").trim() ||
+    envioModuloEventoEfetivo(moduloConfig)
+  );
+}
+
+function resolverConteudoEventoGrupo({ clienteId, config = {}, resolucao = {}, acao = "" } = {}) {
+  const moduloConfig = resolucao?.moduloConfig;
+  const configuracaoPerfil = configuracaoModuloEventoEfetiva(moduloConfig)
+    ? moduloConfig?.configuracao || {}
+    : {};
+  const mensagemLegada = acao === "add"
+    ? obterMensagemBoasVindas(clienteId)
+    : obterMensagemDespedida(clienteId);
+  const imagemLegada = acao === "add"
+    ? config.imagemBoasVindas
+    : config.imagemDespedida;
+  const envioLegado = acao === "add"
+    ? config.boasVindasEnvio
+    : config.despedidaEnvio;
+
+  return {
+    mensagem: String(configuracaoPerfil.mensagem || "").trim()
+      ? configuracaoPerfil.mensagem
+      : mensagemLegada,
+    imagem: String(configuracaoPerfil.imagem || "").trim()
+      ? configuracaoPerfil.imagem
+      : imagemLegada,
+    envio: resolverEnvioGrupoMensageiro(
+      config,
+      acao,
+      envioModuloEventoEfetivo(moduloConfig)
+        ? configuracaoPerfil.envio
+        : envioLegado
     )
   };
 }
@@ -1216,20 +1281,28 @@ async function tratarEventoGrupoMensageiro({
     const participantes = evento.participants || [];
     const acao = evento.action;
 
-    if (acao === "add" && !config.boasVindasAtivo) return;
-    if ((acao === "remove" || acao === "leave") && !config.despedidaAtivo) return;
-    if (!grupoPermitidoModuloMensagem({ clienteId, config, sessaoId, grupoId, acao })) return;
+    const resolucaoEvento = resolverEventoGrupoMensageiro({
+      clienteId,
+      config,
+      sessaoId,
+      grupoId,
+      acao
+    });
+    if (resolucaoEvento?.legado === true) {
+      if (acao === "add" && !config.boasVindasAtivo) return;
+      if ((acao === "remove" || acao === "leave") && !config.despedidaAtivo) return;
+    }
+    if (!resolucaoEvento?.ok) return;
 
-    const mensagem =
-      acao === "add"
-        ? obterMensagemBoasVindas(clienteId)
-        : obterMensagemDespedida(clienteId);
-
-    const imagem =
-      acao === "add"
-        ? config.imagemBoasVindas
-        : config.imagemDespedida;
-    const envioEvento = resolverEnvioGrupoMensageiro(config, acao);
+    const conteudoEvento = resolverConteudoEventoGrupo({
+      clienteId,
+      config,
+      resolucao: resolucaoEvento,
+      acao
+    });
+    const mensagem = conteudoEvento.mensagem;
+    const imagem = conteudoEvento.imagem;
+    const envioEvento = conteudoEvento.envio;
     const eventoLogGrupo = acao === "add"
       ? "[boas_vindas_grupo_enviada]"
       : "[despedida_grupo_enviada]";
