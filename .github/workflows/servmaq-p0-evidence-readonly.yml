@@ -34,6 +34,12 @@ jobs:
           test -n "$backend_id" && test -n "$postgres_id"
           docker inspect --format 'BACKEND={{.State.Status}} RESTARTS={{.RestartCount}} OOM={{.State.OOMKilled}}' "$backend_id"
           docker inspect --format 'POSTGRES={{.State.Status}} HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$postgres_id"
+          backend_image_id="$(docker inspect --format '{{.Image}}' "$backend_id")"
+          test -n "$backend_image_id"
+          echo "BACKEND_IMAGE_ID=$backend_image_id"
+          docker image inspect "$backend_image_id" --format 'ROLLBACK_SOURCE_IMAGE_PRESENT=true' >/dev/null
+          echo 'ROLLBACK_SOURCE_IMAGE_PRESENT=true'
+          docker inspect "$backend_id" --format '{{json .Mounts}}' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const mounts=JSON.parse(raw);console.log("BACKEND_DATA_BIND="+mounts.some(m=>m.Destination==="/data"&&m.Type==="bind"&&m.Source==="/opt/optimus/data"))})'
           docker exec -i "$backend_id" node - <<'NODE'
           const fs = require('fs');
           const root = '/data';
@@ -74,6 +80,13 @@ jobs:
           console.log('MANAGER_PROFILE_COUNT=' + managers.length);
           console.log('MANAGER_SESSION_MATCH=' + Boolean(manager));
           console.log('MANAGER_EFFECTIVE_GROUP_COUNT=' + (Array.isArray(managerGroups) ? managerGroups.length : 0));
+          const program = (Array.isArray(cfg.programacoes) ? cfg.programacoes : [])
+            .find(v => v?.id === '5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618');
+          const idOf = v => String(v?.id || v?.jid || v?.grupoId || v || '').trim();
+          const programGroups = Array.isArray(program?.grupos || program?.gruposIds)
+            ? (program.grupos || program.gruposIds).map(idOf) : [];
+          console.log('TRACE_UNIQUE_GROUP_SCOPE=' + (Array.isArray(managerGroups) && managerGroups.length === 1 && programGroups.length === 1 && idOf(managerGroups[0]) === programGroups[0]));
+          console.log('TRACE_HMAC_KEY_AVAILABLE=' + Boolean(process.env.SERVMAQ_GERENTE_TRACE_SECRET || process.env.JWT_SECRET));
           console.log('MANAGER_ACTIVE_RULE_COUNT=' + active.length);
           console.log('MANAGER_TEST_WORD=' + hasTest);
           const history = read(`${root}/clientes/${workspace}/mensageiro-config.json`, {});
