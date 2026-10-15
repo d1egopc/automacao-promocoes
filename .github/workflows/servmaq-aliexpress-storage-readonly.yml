@@ -60,6 +60,7 @@ jobs:
           docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" DEPLOY_CUTOFF="$DEPLOY_CUTOFF" node - <<'NODE'
           const fs = require('fs');
           const path = require('path');
+          const crypto = require('crypto');
           const pg = require('pg');
           const NativePromise = globalThis.Promise;
           if (typeof NativePromise !== 'function') throw new Error('native_promise_unavailable');
@@ -68,6 +69,7 @@ jobs:
           const clientId = process.env.CLIENT_ID;
           const cutoff = process.env.DEPLOY_CUTOFF;
           const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { console.log('FILE_READ_FAILED=' + path.basename(file)); return null; } };
+          const hashId = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
           const globalConfig = readJson('/data/mensageiro.json');
           const client = readJson(`/data/clientes/${clientId}/mensageiro-config.json`);
           const cfg = globalConfig && globalConfig[clientId] && typeof globalConfig[clientId] === 'object' ? globalConfig[clientId] : null;
@@ -119,7 +121,11 @@ jobs:
               imagePresent: Boolean(image), imageType: image ? String(image?.tipo || 'unknown') : '',
               globalSessionPresent: Boolean(cfg?.sessaoId || cfg?.sessaoWhatsappId || cfg?.sessaoGruposId),
               profileSessionPresent: Boolean(profile?.sessaoId),
-              profileSessionMatches: Boolean(profile && String(profile.sessaoId || '') === String(cfg?.sessaoId || cfg?.sessaoWhatsappId || cfg?.sessaoGruposId || ''))
+              profileSessionMatches: Boolean(profile && String(profile.sessaoId || '') === String(cfg?.sessaoId || cfg?.sessaoWhatsappId || cfg?.sessaoGruposId || '')),
+              globalSessionHashes: [cfg?.sessaoId, cfg?.sessaoWhatsappId, cfg?.sessaoGruposId].filter(Boolean).map(hashId),
+              profileSessionHash: hashId(profile?.sessaoId),
+              programGroupHashes: groups.slice(0, 20).map(g => hashId(typeof g === 'object' ? (g?.id || g?.jid || g?.grupoId || g?.groupId) : g)),
+              sendResultFieldsPresent: ['ultimoResultado','resultadoEnvio','ultimoEnvioResultado','ultimoErro','respostaEnvio'].some(k => p?.[k] !== undefined)
             }));
           }
           const managerFiles = ['/data/clientes/' + clientId + '/mensageiro-gerente-infracoes.json', '/data/clientes/' + clientId + '/mensageiro-gerente-operacional.json'];
@@ -173,6 +179,90 @@ jobs:
             } catch (e) { try { await c.query('ROLLBACK'); } catch {} console.log('ALIEXPRESS_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)); }
             finally { c.release(); await pool.end(); }
           })().catch(e => console.log('ALIEXPRESS_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)));
+          NODE
+
+      - name: Read-only targeted queue and delivery state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          docker exec -i "$backend_id" env TARGET_WORKSPACE=user_pss60lus TARGET_EVENT=150165 TARGET_JOB=716302 TARGET_OFFER=125928 TARGET_ITEM=9474 node - <<'NODE'
+          const crypto = require('crypto');
+          const pg = require('pg');
+          const NativePromise = globalThis.Promise;
+          if (typeof NativePromise !== 'function') throw new Error('native_promise_unavailable');
+          if (pg.defaults && typeof pg.defaults === 'object') pg.defaults.Promise = NativePromise;
+          const { Pool } = pg;
+          const workspace = process.env.TARGET_WORKSPACE;
+          const eventId = Number(process.env.TARGET_EVENT);
+          const jobId = Number(process.env.TARGET_JOB);
+          const offerId = Number(process.env.TARGET_OFFER);
+          const itemId = Number(process.env.TARGET_ITEM);
+          const hash = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
+          const safeName = name => '"' + String(name).replaceAll('"', '""') + '"';
+          const pick = (row, names) => { for (const n of names) if (Object.prototype.hasOwnProperty.call(row, n)) return row[n]; return null; };
+          const proofWorkspace = value => {
+            if (!value || typeof value !== 'object') return false;
+            const candidates = [value.workspaceId, value.workspace_id, value.clienteId, value.cliente_id, value.afiliacaoWorkspace?.workspaceId, value.conversaoWorkspace?.workspaceId];
+            return candidates.some(v => String(v || '') === workspace);
+          };
+          const metadataWorkspaceMatches = value => {
+            if (!value) return false;
+            try { return proofWorkspace(typeof value === 'string' ? JSON.parse(value) : value); } catch { return false; }
+          };
+          const urlProof = value => {
+            if (!value) return { present: false, https: false, host: '' };
+            try { const u = new URL(String(value)); return { present: true, https: u.protocol === 'https:', host: u.hostname }; }
+            catch { return { present: true, https: false, host: '' }; }
+          };
+          const safeFields = ['id','status','state','revision','terminal_at','terminal_status','terminal_reason','created_at','updated_at','available_at','send_started_at','confirmed_at','credit_debited','resolved_at','resolution_source','channel','attempts','tentativas','motivo_codigo','classificacao','status_http','estado','criado_em','atualizado_em','fila_item_id','queue_item_id','evento_id','job_id','oferta_id','workspace_id','cliente_id','tipo_evento','origem_pipeline'];
+          const readTable = async (c, table, predicate, params) => {
+            const cols = (await c.query('SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position', ['public', table])).rows.map(r => r.column_name);
+            if (!cols.length) { console.log('TARGET_TABLE=' + table + ' unavailable'); return []; }
+            const selected = safeFields.filter(x => cols.includes(x));
+            for (const extra of ['metadata','link_afiliado','cliente_id']) if (cols.includes(extra) && !selected.includes(extra)) selected.push(extra);
+            const rows = (await c.query(`SELECT ${selected.map(safeName).join(',')} FROM ${safeName(table)} WHERE ${predicate}`, params)).rows;
+            console.log('TARGET_TABLE=' + table + ' rows=' + rows.length);
+            return rows;
+          };
+          const sanitizeRow = row => {
+            const out = {};
+            for (const [k,v] of Object.entries(row)) {
+              if (/metadata/i.test(k)) continue;
+              if (/destination_id|connection_id|provider_message_id|confirmation_key|workspace_id|cliente_id|fila_item_id|queue_item_id|grupo|sessao|link|url/i.test(k)) out[k] = v ? '<present:' + hash(v) + '>' : v;
+              else if (/terminal_reason|motivo_codigo|classificacao/i.test(k)) out[k] = v == null ? null : String(v).slice(0, 100);
+              else out[k] = v;
+            }
+            return out;
+          };
+          (async () => {
+            const url = process.env.DATABASE_URL || process.env.DATABASE_URL_UNIVERSAL;
+            if (!url) { console.log('TARGET_DB_READONLY=UNAVAILABLE'); return; }
+            const pool = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 4000 });
+            const c = await pool.connect();
+            try {
+              await c.query('BEGIN'); await c.query('SET TRANSACTION READ ONLY'); await c.query("SET LOCAL statement_timeout='5000ms'");
+              const items = await readTable(c, 'engine_universal_queue_items', '"id"=$1', [itemId]);
+              for (const row of items) console.log('TARGET_QUEUE_ITEM=' + JSON.stringify(sanitizeRow(row)));
+              const destinations = await readTable(c, 'engine_universal_queue_destinations', '"queue_item_id"=$1 AND "workspace_id"=$2', [itemId, workspace]);
+              console.log('TARGET_DESTINATIONS_COUNT=' + destinations.length);
+              for (const row of destinations) console.log('TARGET_DESTINATION=' + JSON.stringify(sanitizeRow(row)));
+              const checkpoints = await readTable(c, 'fila_checkpoints_entrega', '"fila_item_id"=$1', ['universal_' + itemId]);
+              for (const row of checkpoints) console.log('TARGET_CHECKPOINT=' + JSON.stringify(sanitizeRow(row)));
+              const events = await readTable(c, 'engine_eventos_comerciais', '(("job_id"=$1) OR ("oferta_id"=$2)) AND ("workspace_id"=$3 OR "cliente_id"=$3)', [jobId, offerId, workspace]);
+              for (const row of events) console.log('TARGET_COMMERCIAL_EVENT=' + JSON.stringify(sanitizeRow(row)));
+              const offers = await readTable(c, 'engine_ofertas', '"id"=$1 AND "evento_id"=$2', [offerId, eventId]);
+              for (const row of offers) {
+                const link = urlProof(row.link_afiliado);
+                console.log('TARGET_OFFER=' + JSON.stringify({ id: row.id, status: row.status, motivo_status: row.motivo_status, linkAfiliadoPresent: link.present, linkAfiliadoHttps: link.https, linkAfiliadoHost: link.host || '', metadataWorkspaceMatches: metadataWorkspaceMatches(row.metadata) }));
+              }
+              const jobs = await readTable(c, 'engine_jobs_cliente', '"id"=$1 AND "evento_id"=$2 AND "cliente_id"=$3', [jobId, eventId, workspace]);
+              for (const row of jobs) console.log('TARGET_JOB=' + JSON.stringify({ id: row.id, status: row.status, tentativas: row.tentativas, motivo_final: row.motivo_final, oferta_id: row.oferta_id, linkAfiliadoPresent: Boolean(row.link_afiliado), metadataWorkspaceMatches: metadataWorkspaceMatches(row.metadata) }));
+              await c.query('COMMIT');
+              console.log('TARGET_DB_READONLY=PASS');
+            } catch (e) { try { await c.query('ROLLBACK'); } catch {} console.log('TARGET_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,180)); }
+            finally { c.release(); await pool.end(); }
+          })().catch(e => console.log('TARGET_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,180)));
           NODE
 
       - name: Read-only HTTP smoke
