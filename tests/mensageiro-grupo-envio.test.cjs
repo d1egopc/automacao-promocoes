@@ -49,6 +49,7 @@ function configurar(dados = {}) {
 }
 
 function perfilMensagem({
+  id = "perfil_msg",
   ativo = true,
   sessaoId = "sessao_mensageiro",
   grupos = ["grupo_monitorado@g.us"],
@@ -66,7 +67,7 @@ function perfilMensagem({
   despedidaEnvio = { destino: "privado" }
 } = {}) {
   return {
-    id: "perfil_msg",
+    id,
     nome: "Perfil mensagem",
     ativo,
     sessaoId,
@@ -185,6 +186,72 @@ function sleep(ms) {
   assert.strictEqual(sock.envios.length, 0, "modulo de boas-vindas desativado permanece bloqueado");
   sock = await disparar({ action: "remove", participante: "5511000000029@s.whatsapp.net" });
   assert.strictEqual(sock.envios.length, 0, "modulo de despedida desativado permanece bloqueado");
+
+  configurar({
+    sessaoId: "sessao_global_legada",
+    sessaoWhatsappId: "sessao_global_legada",
+    sessaoGruposId: "sessao_global_legada",
+    boasVindasAtivo: false,
+    despedidaAtivo: false,
+    perfis: [
+      perfilMensagem({
+        id: "perfil_sessao_a",
+        sessaoId: "sessao_a",
+        grupos: [],
+        boasVindasGrupos: ["grupo_a@g.us"],
+        boasVindasGruposConfigurados: true,
+        despedidaGrupos: ["grupo_a@g.us"],
+        despedidaGruposConfigurados: true,
+        boasVindasMensagem: "Sessao A {numero}",
+        despedidaMensagem: "Saiu A {numero}"
+      }),
+      perfilMensagem({
+        id: "perfil_sessao_b",
+        sessaoId: "sessao_b",
+        grupos: [],
+        boasVindasGrupos: ["grupo_b@g.us"],
+        boasVindasGruposConfigurados: true,
+        despedidaGrupos: ["grupo_b@g.us"],
+        despedidaGruposConfigurados: true,
+        boasVindasMensagem: "Sessao B {numero}",
+        despedidaMensagem: "Saiu B {numero}"
+      })
+    ]
+  });
+  sock = await disparar({
+    sessaoId: "sessao_b",
+    grupo: "grupo_b@g.us",
+    participante: "5511000000036@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 1, "perfil com zero grupos globais usa os grupos proprios de boas-vindas na sessao efetiva");
+  assert.deepStrictEqual(sock.envios[0].payload, { text: "Sessao B 5511000000036" }, "boas-vindas usa o conteudo do perfil resolvido");
+  sock = await disparar({
+    sessaoId: "sessao_b",
+    grupo: "grupo_b@g.us",
+    action: "remove",
+    participante: "5511000000037@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 1, "perfil com zero grupos globais usa os grupos proprios de despedida na sessao efetiva");
+  assert.deepStrictEqual(sock.envios[0].payload, { text: "Saiu B 5511000000037" }, "despedida usa o conteudo do perfil resolvido");
+  sock = await disparar({
+    sessaoId: "sessao_a",
+    grupo: "grupo_b@g.us",
+    participante: "5511000000038@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 0, "grupo de outro perfil nao atravessa a sessao");
+  sock = await disparar({
+    sessaoId: "sessao_b",
+    grupo: "grupo_a@g.us",
+    participante: "5511000000039@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 0, "sessao de outro perfil nao herda grupos do primeiro");
+
+  configurar({ perfis: [] });
+  sock = await disparar({
+    sessaoId: "sessao_errada",
+    participante: "5511000000040@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 0, "configuracao legada continua limitada a sessao global");
 
   storage.setMensageiroCliente("cliente_outro", {
     ativo: true,
