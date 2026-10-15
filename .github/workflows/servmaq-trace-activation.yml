@@ -1,0 +1,138 @@
+name: Servmaq trace activation controlled
+
+on:
+  push:
+    branches:
+      - validation/servmaq-aliexpress-storage-readonly-20261015
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servmaq-trace-activation
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/servmaq-aliexpress-storage-readonly-20261015'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    env:
+      COMPOSE_FILE: /opt/optimus/infra/compose.yml
+      BACKEND_DIR: /opt/optimus/backend
+      DATA_DIR: /opt/optimus/data
+      CLIENT_ID: user_k3phmbkf
+      EXPECTED_SHA: ac3a0f65518d93574f5035f295635f4009c1b199
+    steps:
+      - name: Checkout workflow only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Controlled preflight activation and verification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          summary="$GITHUB_STEP_SUMMARY"
+          tmpdir="$(mktemp -d)"
+          env_file=""
+          backup=""
+          activated=0
+          rollback_on_failure() {
+            rc=$?
+            if [[ "$rc" -ne 0 && "$activated" -eq 1 && -n "$backup" && -f "$backup" ]]; then
+              cp -p "$backup" "$env_file" >/dev/null 2>&1 || true
+              docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate backend >/dev/null 2>&1 || true
+              printf 'ROLLBACK_ON_FAILURE=attempted\n' >> "$summary"
+            fi
+            rm -rf "$tmpdir"
+            exit "$rc"
+          }
+          trap rollback_on_failure EXIT
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          test -n "$backend_id" && test -n "$postgres_id"
+          backend_state="$(docker inspect --format '{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}' "$backend_id")"
+          postgres_state="$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.RestartCount}}|{{.State.OOMKilled}}' "$postgres_id")"
+          printf 'BACKEND_PRE=%s\nPOSTGRES_PRE=%s\n' "$backend_state" "$postgres_state" >> "$summary"
+          [[ "$backend_state" == running\|0\|false ]] && [[ "$postgres_state" == running\|healthy\|0\|false ]]
+          production_sha="$(git -C "$BACKEND_DIR" rev-parse HEAD)"
+          printf 'PRODUCTION_SHA=%s\n' "$production_sha" >> "$summary"
+          test "$production_sha" = "$EXPECTED_SHA"
+          data_before="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$backend_id")"
+          test "$data_before" = "$DATA_DIR"
+          image_before="$(docker inspect --format '{{.Image}}' "$backend_id")"
+          test -n "$image_before"
+
+          docker exec -i "$backend_id" node - <<'NODE' > "$tmpdir/scope" 2>/dev/null
+          const fs = require('fs');
+          const id = 'user_k3phmbkf';
+          const cfg = (JSON.parse(fs.readFileSync('/data/mensageiro.json','utf8')) || {})[id] || {};
+          const p = (Array.isArray(cfg.perfis) ? cfg.perfis : []).find(x => x && x.removido !== true && x.removed !== true && x.excluido !== true && x.ativo !== false && x.modulos?.gerente?.ativo === true);
+          const m = p?.modulos?.gerente || {};
+          const gs = m.gruposConfigurados === true ? (Array.isArray(m.grupos) ? m.grupos : []) : (Array.isArray(p?.grupos) ? p.grupos : []);
+          const gid = x => x && typeof x === 'object' ? String(x.id || x.jid || x.grupoId || x.groupId || x.remoteJid || '').trim() : String(x || '').trim();
+          const gn = x => x && typeof x === 'object' ? String(x.nome || x.name || x.subject || x.titulo || '').trim() : '';
+          const g = gs.find(x => /servmaq/i.test(gn(x)));
+          const s = String(p?.sessaoId || p?.sessaoWhatsappId || p?.sessaoGruposId || cfg.sessaoId || cfg.sessaoWhatsappId || cfg.sessaoGruposId || '').trim();
+          if (!s || !g || !gid(g)) process.exit(3);
+          process.stdout.write(s + '\n' + gid(g) + '\n');
+          NODE
+          test "$(sed -n '1p' "$tmpdir/scope")" && test "$(sed -n '2p' "$tmpdir/scope")"
+          session_id="$(sed -n '1p' "$tmpdir/scope")"
+          group_id="$(sed -n '2p' "$tmpdir/scope")"
+
+          check_session() {
+            docker exec -i "$1" env SESSION_ID="$session_id" node - <<'NODE' > "$tmpdir/runtime" 2>/dev/null
+          const jwt = require('jsonwebtoken');
+          const token = jwt.sign({clienteId:'user_k3phmbkf'}, process.env.JWT_SECRET || 'segredo', {expiresIn:'20s'});
+          fetch('http://127.0.0.1:3000/sessoes',{headers:{authorization:'Bearer '+token}}).then(r=>r.json()).then(b=>{const a=Array.isArray(b?.sessoes)?b.sessoes:[];const x=a.find(v=>String(v?.id||v?.sessaoId||'')===process.env.SESSION_ID);console.log(x && (x.status==='open'||x.conectado===true) ? 'open=true' : 'open=false');console.log('open_count='+a.filter(v=>v&&(v.status==='open'||v.conectado===true)).length);}).catch(()=>{console.log('open=false');process.exitCode=1;});
+          NODE
+            grep -q '^open=true$' "$tmpdir/runtime"
+          }
+          check_session "$backend_id"
+
+          docker compose -f "$COMPOSE_FILE" config --no-interpolate > "$tmpdir/compose" 2>/dev/null
+          candidates="$(awk '/^  backend:/{b=1;next}/^  [A-Za-z0-9_-]+:/&&b{exit}b&&/^    env_file:/{e=1;next}b&&e&&/^      - /{sub(/^      - /,"");print}b&&e&&!/^        /&&!/^      - /{e=0}' "$tmpdir/compose")"
+          env_file="$(printf '%s\n' "$candidates" | sed -n '1p')"
+          extra="$(printf '%s\n' "$candidates" | sed -n '2p')"
+          test -n "$env_file" && test -z "$extra"
+          if [[ "$env_file" != /* ]]; then env_file="$(cd "$(dirname "$COMPOSE_FILE")" && pwd)/$env_file"; fi
+          test -f "$env_file" && test -w "$env_file"
+
+          backup="$env_file.pre-servmaq-trace.$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$env_file" "$backup"
+          chmod 600 "$backup" >/dev/null 2>&1 || true
+          secret="$(openssl rand -hex 32)"
+          test "$(printf '%s' "$secret" | wc -c)" -eq 64
+          SESSION_ID="$session_id" GROUP_ID="$group_id" SECRET="$secret" node - <<'NODE' > "$tmpdir/hashes"
+          const crypto=require('crypto'); const h=x=>crypto.createHmac('sha256',process.env.SECRET).update(x).digest('hex').slice(0,16); console.log(h(process.env.SESSION_ID)); console.log(h(process.env.GROUP_ID));
+          NODE
+          shash="$(sed -n '1p' "$tmpdir/hashes")"
+          ghash="$(sed -n '2p' "$tmpdir/hashes")"
+          test "$(printf '%s' "$shash" | wc -c)" -eq 16 && test "$(printf '%s' "$ghash" | wc -c)" -eq 16
+          new_env="$(mktemp "$(dirname "$env_file")/.servmaq-trace.XXXXXX")"
+          awk '!/^SERVMAQ_GERENTE_TRACE_(ENABLED|SECRET|SESSION_HASH|GROUP_HASH)=/' "$env_file" > "$new_env"
+          printf 'SERVMAQ_GERENTE_TRACE_ENABLED=1\nSERVMAQ_GERENTE_TRACE_SECRET=%s\nSERVMAQ_GERENTE_TRACE_SESSION_HASH=%s\nSERVMAQ_GERENTE_TRACE_GROUP_HASH=%s\n' "$secret" "$shash" "$ghash" >> "$new_env"
+          chmod --reference="$env_file" "$new_env" >/dev/null 2>&1 || chmod 600 "$new_env"
+          chown --reference="$env_file" "$new_env" >/dev/null 2>&1 || true
+          mv "$new_env" "$env_file"
+          activated=1
+          unset secret shash ghash
+
+          docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate backend >/dev/null
+          new_backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          test -n "$new_backend_id"
+          test "$(docker compose -f "$COMPOSE_FILE" ps -q postgres)" = "$postgres_id"
+          for i in $(seq 1 30); do state="$(docker inspect --format '{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}' "$new_backend_id")"; [[ "$state" == running\|0\|false ]] && break; sleep 2; done
+          [[ "$state" == running\|0\|false ]]
+          test "$(docker inspect --format '{{.Image}}' "$new_backend_id")" = "$image_before"
+          test "$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$new_backend_id")" = "$DATA_DIR"
+          check_session "$new_backend_id"
+
+          docker exec -i "$new_backend_id" env TRACE_SESSION_ID="$session_id" TRACE_GROUP_ID="$group_id" node - <<'NODE' > "$tmpdir/target" 2>/dev/null
+          const fs=require('fs'),path=require('path'); let t; for(const r of [process.cwd(),'/app','/opt/app','/workspace','/backend']){const f=path.join(r,'modules','mensageiro','gerente-trace.js');if(fs.existsSync(f)){t=require(f);break;}} if(!t) process.exit(3); const c=(JSON.parse(fs.readFileSync('/data/mensageiro.json','utf8'))||{})['user_k3phmbkf']||{}; console.log('target='+String(t.isTraceTarget({clienteId:'user_k3phmbkf',sessaoId:process.env.TRACE_SESSION_ID,grupoId:process.env.TRACE_GROUP_ID,config:c,env:process.env}))); console.log('other='+String(t.isTraceTarget({clienteId:'other_workspace',sessaoId:process.env.TRACE_SESSION_ID,grupoId:process.env.TRACE_GROUP_ID,config:c,env:process.env})));
+          NODE
+          grep -q '^target=true$' "$tmpdir/target" && grep -q '^other=false$' "$tmpdir/target"
+          printf 'ACTIVATION=SUCCESS\nPRODUCTION_SHA=%s\nBACKEND_HEALTH=running\nPOSTGRES_HEALTH=preserved\nOTHER_SESSIONS=backend_recreated_only\nSERVMAQ_OPEN=YES\nTRACE_SECRET_DEDICATED=YES\nTRACE_SCOPE_VERIFIED=target_true_non_target_false\nTRACE_ENABLED=YES\nREADY_FOR_REAL_TEST=TRUE\nROLLBACK_ENV_BACKUP=CREATED\nDEACTIVATION_PLAN=restore_protected_env_backup_and_recreate_backend_only\n' "$production_sha" >> "$summary"
