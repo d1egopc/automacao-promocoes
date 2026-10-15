@@ -155,3 +155,45 @@ jobs:
             console.log('DIEGOPC_OPEN_COUNT=' + diegoSessions.filter(v => v?.status === 'open' || v?.conectado === true).length);
           })().catch(error => { console.log('STATUS_API_ERROR=' + String(error?.message || 'unknown').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 60)); process.exitCode = 1; });
           NODE
+          docker exec -i "$backend_id" node - <<'CURRENT_SCOPE'
+          const fs = require('fs');
+          const http = require('http');
+          const jwt = require('jsonwebtoken');
+          const workspace = 'user_k3phmbkf';
+          const read = path => { try { return JSON.parse(fs.readFileSync(path, 'utf8')); } catch { return {}; } };
+          const cfg = read('/data/mensageiro.json')[workspace] || {};
+          const metadata = read('/data/sessoes.json');
+          const sessions = Object.entries(metadata).map(([key, value]) => ({ id: String(value?.id || key), name: String(value?.nome || value?.nomeSessao || value?.apelido || '') }));
+          const claro = sessions.filter(value => /^TESTE CLARO$/i.test(value.name.trim()) && value.id.startsWith(workspace + '_'));
+          const active = (Array.isArray(cfg.perfis) ? cfg.perfis : []).filter(value => value?.ativo === true && !value?.removidoEm && !value?.removido);
+          const managers = active.filter(value => value?.modulos?.gerente?.ativo === true);
+          const idOf = value => String(value?.id || value?.jid || value?.grupoId || value || '').trim();
+          const groupsOf = profile => profile?.modulos?.gerente?.gruposConfigurados === true ? profile.modulos.gerente.grupos : profile?.grupos;
+          const names = (Array.isArray(cfg.grupos) ? cfg.grupos : []).filter(value => typeof value === 'object').map(value => ({ id: idOf(value), name: String(value?.nome || value?.name || value?.subject || '') }));
+          const named = names.filter(value => value.name.trim() === 'OP GERAL');
+          const manager = claro.length === 1 ? managers.find(value => value.sessaoId === claro[0].id) : null;
+          const selected = Array.isArray(groupsOf(manager)) ? groupsOf(manager).map(idOf) : [];
+          console.log('CLARO_SESSION_UNIQUE=' + (claro.length === 1));
+          console.log('ACTIVE_MANAGER_PROFILES=' + managers.length);
+          console.log('CLARO_MANAGER_PROFILE_MATCH=' + Boolean(manager));
+          console.log('CLARO_MANAGER_GROUP_COUNT=' + selected.length);
+          console.log('CONFIG_NAMED_OP_GERAL_COUNT=' + named.length);
+          console.log('OP_GERAL_IN_MANAGER_SCOPE=' + (named.length === 1 && selected.includes(named[0].id)));
+          console.log('CONFIG_GROUP_OBJECT_COUNT=' + names.length);
+          function status(session) { return new Promise((resolve, reject) => {
+            const token = jwt.sign({ clienteId: workspace }, process.env.JWT_SECRET, { expiresIn: '30s' });
+            const request = http.get({ hostname: '127.0.0.1', port: Number(process.env.PORT || 3000), path: '/status/' + encodeURIComponent(session), headers: { Authorization: `Bearer ${token}` }, timeout: 3000 }, response => {
+              let body = '';
+              response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(); });
+              response.on('end', () => response.statusCode === 200 ? resolve(JSON.parse(body)) : reject(new Error('http_' + response.statusCode)));
+            });
+            request.on('timeout', () => request.destroy(new Error('timeout')));
+            request.on('error', reject);
+          }); }
+          (async () => {
+            if (claro.length !== 1) return;
+            const state = await status(claro[0].id);
+            console.log('CLARO_RUNTIME_OPEN=' + (state?.status === 'open' && state?.conectado === true));
+            console.log('CLARO_RUNTIME_GROUP_COUNT=' + Number(state?.grupos || 0));
+          })().catch(error => { console.log('CLARO_STATUS_ERROR=' + String(error?.message || '').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 50)); process.exitCode = 1; });
+          CURRENT_SCOPE
