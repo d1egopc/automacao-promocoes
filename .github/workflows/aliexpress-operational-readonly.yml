@@ -1,0 +1,161 @@
+name: AliExpress operational read-only VPS
+
+on:
+  push:
+    branches:
+      - validation/aliexpress-operational-readonly-20261015
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aliexpress-operational-readonly-vps
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: AliExpress VPS read-only evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/aliexpress-operational-readonly-20261015'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    env:
+      BACKEND_DIR: /opt/optimus/backend
+      COMPOSE_FILE: /opt/optimus/infra/compose.yml
+      DEPLOY_CUTOFF: '2026-10-14T21:40:00-03:00'
+      RELEASE_SHA: 2e01537104803bba5417bb4770696b30370336da
+
+    steps:
+      - name: Checkout diagnostic workflow only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify isolated read-only scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/aliexpress-operational-readonly-20261015
+          test "$GITHUB_WORKSPACE" != "$BACKEND_DIR"
+          files="$(git diff --name-only "$RELEASE_SHA..HEAD")"
+          test "$files" = '.github/workflows/aliexpress-operational-readonly.yml'
+          test -f .github/workflows/deploy-backend-vps.yml
+          ! rg -n '^\s*(docker compose .* (up|down|restart|build)|git (pull|reset)|UPDATE |DELETE |INSERT |ALTER |DROP )' .github/workflows/aliexpress-operational-readonly.yml
+          printf 'scope=isolated read_only=true deploy_workflow_unchanged=true\n'
+
+      - name: Capture deployment and runtime cutoff
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -f "$COMPOSE_FILE"
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          test -n "$backend_id"
+          test -n "$postgres_id"
+          printf 'deploy_cutoff=%s\n' "$DEPLOY_CUTOFF"
+          git -C "$BACKEND_DIR" log -1 --format='vps_checkout=%H committed_at=%cI subject=%s'
+          git -C "$BACKEND_DIR" status --short --branch
+          git show -s --format='release_commit=%H committed_at=%cI subject=%s' "$RELEASE_SHA"
+          docker inspect --format 'backend_created={{.Created}} backend_status={{.State.Status}} restart={{.RestartCount}} oom={{.State.OOMKilled}} image={{.Image}}' "$backend_id"
+          docker inspect --format 'postgres_created={{.Created}} postgres_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$postgres_id"
+
+      - name: Read PostgreSQL schema and bounded AliExpress evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          docker exec -i "$backend_id" node - <<'NODE'
+          const { Pool } = require('pg');
+          const cutoff = process.env.DEPLOY_CUTOFF;
+          const safeName = (name) => '"' + String(name).replaceAll('"', '""') + '"';
+          const safeValue = (name, value) => {
+            if (value === null || value === undefined) return null;
+            if (/url|text|message|body|title|name|cookie|token|secret|password|credential|key/i.test(name)) return '<omitted>';
+            const s = String(value);
+            return s.length > 160 ? s.slice(0, 160) + '…' : s;
+          };
+          (async () => {
+            const url = process.env.DATABASE_URL || process.env.DATABASE_URL_UNIVERSAL;
+            if (!url) { console.log('DB_READONLY=UNAVAILABLE reason=connection_not_exposed'); return; }
+            const pool = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 4000 });
+            const client = await pool.connect();
+            try {
+              await client.query('BEGIN');
+              await client.query('SET TRANSACTION READ ONLY');
+              await client.query("SET LOCAL statement_timeout='5000ms'");
+              const tables = (await client.query(`
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema='public' AND table_type='BASE TABLE'
+                  AND table_name ~* '(engine|radar|rio|job|oferta|process|link|event|queue|fila|destin|history)'
+                ORDER BY table_name
+                LIMIT 200
+              `)).rows.map(r => r.table_name);
+              console.log('DB_READONLY=PASS tables=' + tables.join(','));
+              if (!tables.length) { console.log('ALIEXPRESS_DB_EVIDENCE=NO_MATCHING_TABLES'); await client.query('ROLLBACK'); return; }
+              const colRows = (await client.query(`
+                SELECT table_name,column_name
+                FROM information_schema.columns
+                WHERE table_schema='public' AND table_name = ANY($1::text[])
+                ORDER BY table_name,ordinal_position
+              `, [tables])).rows;
+              const byTable = new Map();
+              for (const r of colRows) { if (!byTable.has(r.table_name)) byTable.set(r.table_name, []); byTable.get(r.table_name).push(r.column_name); }
+              const timeCandidates = ['created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','inserted_at','timestamp','published_at','updated_at','data_captura','data_criacao'];
+              const safeCandidates = ['id','event_id','link_id','job_id','workspace_id','cliente_id','client_id','marketplace','marketplace_name','status','state','reason','motivo','product_id','productId','attempts','tentativas','priority','prioridade','claimed_at','finished_at','created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','updated_at'];
+              for (const table of tables) {
+                const cols = byTable.get(table) || [];
+                const visible = cols.filter(c => !/url|text|message|body|title|name|cookie|token|secret|password|credential|key/i.test(c)).slice(0, 80);
+                console.log('TABLE=' + table + ' columns=' + visible.join(','));
+                const timeCol = timeCandidates.find(c => cols.includes(c));
+                if (!timeCol) { console.log('TABLE=' + table + ' evidence=SKIPPED_NO_TIME_COLUMN'); continue; }
+                const selected = safeCandidates.filter(c => cols.includes(c));
+                if (!selected.length) { console.log('TABLE=' + table + ' evidence=SKIPPED_NO_SAFE_COLUMNS'); continue; }
+                const predicates = [];
+                for (const c of ['marketplace','marketplace_name']) if (cols.includes(c)) predicates.push(`${safeName(c)}::text ILIKE '%aliexpress%'`);
+                const where = `${safeName(timeCol)} >= $1` + (predicates.length ? ` AND (${predicates.join(' OR ')})` : '');
+                const sql = `SELECT ${selected.map(safeName).join(',')} FROM ${safeName(table)} WHERE ${where} ORDER BY ${safeName(timeCol)} DESC LIMIT 50`;
+                try {
+                  const rows = (await client.query(sql, [cutoff])).rows;
+                  console.log('TABLE=' + table + ' recent_rows=' + rows.length);
+                  for (const row of rows.slice(0, 20)) {
+                    const out = {}; for (const [k,v] of Object.entries(row)) out[k] = safeValue(k,v);
+                    console.log('ROW=' + JSON.stringify(out));
+                  }
+                } catch (e) { console.log('TABLE=' + table + ' evidence=QUERY_FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,120)); }
+              }
+              await client.query('COMMIT');
+            } catch (e) {
+              try { await client.query('ROLLBACK'); } catch {}
+              console.log('DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160));
+            } finally { client.release(); await pool.end(); }
+          })().catch(e => console.log('DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)));
+          NODE
+
+      - name: Read bounded backend logs and persisted file inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          docker compose -f "$COMPOSE_FILE" logs --since "$DEPLOY_CUTOFF" --tail=500 backend > "$log_file" 2>&1 || true
+          printf 'log_lines=%s aliexpress_mentions=%s importer_mentions=%s rio_mentions=%s error_mentions=%s\n' \
+            "$(wc -l < "$log_file")" \
+            "$(grep -Eio 'aliexpress' "$log_file" | wc -l)" \
+            "$(grep -Eio 'import|job|oferta' "$log_file" | wc -l)" \
+            "$(grep -Eio 'rio|fila|destino' "$log_file" | wc -l)" \
+            "$(grep -Eio 'error|falha|link_afiliado|integracao_ausente' "$log_file" | wc -l)"
+          grep -Ei 'aliexpress|link_afiliado|integracao_ausente|productdetail|importer|rio|fila|destino' "$log_file" \
+            | sed -E 's/(token|secret|cookie|authorization|password|api[_-]?key)[=:][^[:space:]]+/\1=<REDACTED>/gi; s#https?://[^[:space:]]+#<URL_REDACTED>#g; s/[0-9]{8,}/<ID_REDACTED>/g' \
+            | head -n 60 || true
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          printf 'persisted_inventory='
+          docker exec "$backend_id" sh -lc "find /data -maxdepth 2 -type f 2>/dev/null | sed 's#^/data/##' | grep -Ei 'log|event|job|offer|history|radar' | head -n 80 | wc -l" || true
+          printf 'persisted_data_mount=verified\n'
+
+      - name: Read-only HTTP smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error --output /dev/null --write-out 'public_http=%{http_code} latency_s=%{time_total}\n' https://go.optimuspromo.com.br/
