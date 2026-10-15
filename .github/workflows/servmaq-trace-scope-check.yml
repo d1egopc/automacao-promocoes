@@ -47,7 +47,8 @@ jobs:
           test "$(git -C "$BACKEND_DIR" rev-parse HEAD)" = "$EXPECTED_SHA"
           docker exec -i "$backend_id" node - <<'NODE' >> "$GITHUB_STEP_SUMMARY" 2>&1
           const fs=require('fs');
-          const jwt=require('jsonwebtoken');
+          let jwt=null; for(const root of [process.cwd(),'/app','/usr/src/app','/opt/app','/workspace','/backend']){try{jwt=require(require.resolve('jsonwebtoken',{paths:[root]}));break;}catch{}}
+          console.log('JWT_AVAILABLE='+Boolean(jwt));
           const clientId='user_k3phmbkf';
           const read=f=>{try{return JSON.parse(fs.readFileSync(f,'utf8'));}catch{return null;}};
           const arr=v=>Array.isArray(v)?v:[];
@@ -64,8 +65,8 @@ jobs:
           const programRefs=arr(program?.grupos||program?.gruposIds||program?.config?.grupos||program?.config?.gruposIds);
           const programSession=session(program)||session(cfg);
           const managerSession=session(manager)||session(cfg);
-          const token=jwt.sign({clienteId:clientId},process.env.JWT_SECRET||'segredo',{expiresIn:'30s'});
-          const get=async path=>{const r=await fetch('http://127.0.0.1:3000'+path,{headers:{authorization:'Bearer '+token}});return {status:r.status,body:await r.json().catch(()=>({}))};};
+          const token=jwt?jwt.sign({clienteId:clientId},process.env.JWT_SECRET||'segredo',{expiresIn:'30s'}):'';
+          const get=async path=>{const headers=token?{authorization:'Bearer '+token}:{}; const r=await fetch('http://127.0.0.1:3000'+path,{headers});return {status:r.status,body:await r.json().catch(()=>({}))};};
           console.log('CONFIG_FOUND='+Boolean(cfg&&Object.keys(cfg).length));
           console.log('ACTIVE_MANAGER_PROFILES='+managers.length);
           console.log('PROGRAM_FOUND='+Boolean(program));
