@@ -67,17 +67,56 @@ jobs:
 
           docker exec -i "$backend_id" node - <<'NODE' > "$tmpdir/scope" 2>/dev/null
           const fs = require('fs');
-          const id = 'user_k3phmbkf';
-          const cfg = (JSON.parse(fs.readFileSync('/data/mensageiro.json','utf8')) || {})[id] || {};
-          const p = (Array.isArray(cfg.perfis) ? cfg.perfis : []).find(x => x && x.removido !== true && x.removed !== true && x.excluido !== true && x.ativo !== false && x.modulos?.gerente?.ativo === true);
-          const m = p?.modulos?.gerente || {};
-          const gs = m.gruposConfigurados === true ? (Array.isArray(m.grupos) ? m.grupos : []) : (Array.isArray(p?.grupos) ? p.grupos : []);
-          const gid = x => x && typeof x === 'object' ? String(x.id || x.jid || x.grupoId || x.groupId || x.remoteJid || '').trim() : String(x || '').trim();
-          const gn = x => x && typeof x === 'object' ? String(x.nome || x.name || x.subject || x.titulo || '').trim() : '';
-          const g = gs.find(x => /servmaq/i.test(gn(x)));
-          const s = String(p?.sessaoId || p?.sessaoWhatsappId || p?.sessaoGruposId || cfg.sessaoId || cfg.sessaoWhatsappId || cfg.sessaoGruposId || '').trim();
-          if (!s || !g || !gid(g)) process.exit(3);
-          process.stdout.write(s + '\n' + gid(g) + '\n');
+          const clientId = 'user_k3phmbkf';
+          const read = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+          const list = value => Array.isArray(value) ? value : [];
+          const idOf = value => value && typeof value === 'object' ? String(value.id || value.jid || value.grupoId || value.groupId || value.remoteJid || '').trim() : String(value || '').trim();
+          const sessionOf = value => String(value?.sessaoId || value?.sessaoWhatsappId || value?.sessaoGruposId || '').trim();
+          const active = value => value && value.removido !== true && value.removed !== true && value.excluido !== true && value.ativo !== false;
+          const bodyList = (body, keys) => { if (Array.isArray(body)) return body; for (const key of keys) if (Array.isArray(body?.[key])) return body[key]; return []; };
+          const cfg = (read('/data/mensageiro.json') || {})[clientId] || {};
+          const profiles = list(cfg.perfis).filter(active);
+          const managers = profiles.filter(profile => profile?.modulos?.gerente?.ativo === true);
+          const program = list(cfg.programacoes).find(item => /bom\\s*dia/i.test(String(item?.nome || '')) || String(item?.horario || '') === '07:00');
+          const defaultSession = sessionOf(cfg);
+          const programSession = sessionOf(program) || defaultSession;
+          const programIds = list(program?.grupos || program?.gruposIds).map(idOf).filter(Boolean);
+          let jwt = null;
+          for (const root of [process.cwd(), '/app', '/usr/src/app', '/opt/app', '/workspace', '/backend']) { try { jwt = require(require.resolve('jsonwebtoken', { paths: [root] })); break; } catch {} }
+          if (!program || !programSession || programIds.length !== 1 || managers.length === 0 || !jwt) process.exit(3);
+          const token = jwt.sign({ clienteId: clientId }, process.env.JWT_SECRET || 'segredo', { expiresIn: '30s' });
+          const getJson = async path => { const response = await fetch('http://127.0.0.1:3000' + path, { headers: { authorization: 'Bearer ' + token } }); return { status: response.status, body: await response.json().catch(() => ({})) }; };
+          (async () => {
+            const sessions = await getJson('/sessoes');
+            const sessionRows = bodyList(sessions.body, ['sessoes', 'data']);
+            const runtime = sessionRows.find(row => String(row?.id || row?.sessaoId || '') === programSession);
+            if (sessions.status < 200 || sessions.status >= 300 || !runtime || !(runtime.status === 'open' || runtime.status === 'connected' || runtime.conectado === true)) process.exit(3);
+            const catalogBySession = new Map();
+            const sessionIds = [...new Set([programSession, ...managers.map(sessionOf).filter(Boolean)])];
+            for (const sessionId of sessionIds) {
+              const result = await getJson('/grupos/' + encodeURIComponent(sessionId));
+              const rows = bodyList(result.body, ['grupos', 'gruposLista', 'data']);
+              const ids = new Set(rows.map(idOf).filter(Boolean));
+              if (result.status < 200 || result.status >= 300 || ids.size === 0) process.exit(3);
+              catalogBySession.set(sessionId, ids);
+            }
+            const pairs = [];
+            for (const profile of managers) {
+              const managerSession = sessionOf(profile) || defaultSession;
+              if (!managerSession || managerSession !== programSession) continue;
+              const manager = profile.modulos.gerente || {};
+              const effective = manager.gruposConfigurados === true ? list(manager.grupos) : list(profile.grupos);
+              const managerIds = [...new Set(effective.map(idOf).filter(Boolean))];
+              const catalog = catalogBySession.get(managerSession);
+              const managerMatches = managerIds.filter(groupId => catalog.has(groupId));
+              const programMatches = [...new Set(programIds.filter(groupId => catalog.has(groupId)))];
+              const common = programMatches.filter(groupId => managerMatches.includes(groupId));
+              if (managerMatches.length === 1 && programMatches.length === 1 && common.length === 1) pairs.push({ sessionId: managerSession, groupId: common[0] });
+            }
+            const uniquePairs = [...new Map(pairs.map(pair => [pair.sessionId + '\\u0000' + pair.groupId, pair])).values()];
+            if (uniquePairs.length !== 1) process.exit(3);
+            process.stdout.write(uniquePairs[0].sessionId + '\\n' + uniquePairs[0].groupId + '\\n');
+          })().catch(() => process.exit(3));
           NODE
           test "$(sed -n '1p' "$tmpdir/scope")" && test "$(sed -n '2p' "$tmpdir/scope")"
           session_id="$(sed -n '1p' "$tmpdir/scope")"
