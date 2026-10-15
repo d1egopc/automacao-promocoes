@@ -59,7 +59,7 @@ jobs:
           test "$RUNNER_OS" = Linux
           test -z "${DATABASE_URL:-}"
           test -z "${SSH_PRIVATE_KEY:-}"
-          test "$(git rev-parse HEAD^)" = 2e01537104803bba5417bb4770696b30370336da
+          git merge-base --is-ancestor 2e01537104803bba5417bb4770696b30370336da "$GITHUB_SHA"
 
       - name: Install locked dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
@@ -81,7 +81,7 @@ jobs:
           node --check marketplaces/aliexpress/importar.js
           node --check modules/engine/importer/adapters/aliexpress.adapter.js
           node --check tests/aliexpress-moedas-productdetail-engine.test.js
-          git diff --check "$GITHUB_SHA^^" "$GITHUB_SHA^"
+          git diff --check 2e01537104803bba5417bb4770696b30370336da^ 2e01537104803bba5417bb4770696b30370336da
 
       - name: Run candidate JavaScript regression matrix
         shell: bash
@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           baseline="$RUNNER_TEMP/aliexpress-baseline"
-          git worktree add --detach "$baseline" "$GITHUB_SHA^^"
+          git worktree add --detach "$baseline" 2e01537104803bba5417bb4770696b30370336da^
           cleanup() { git worktree remove --force "$baseline"; }
           trap cleanup EXIT
           npm ci --ignore-scripts --prefix "$baseline"
