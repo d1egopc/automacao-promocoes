@@ -10,7 +10,11 @@ const { writeGlobalJson } = require("../utils/storage");
 const storage = require("../modules/mensageiro/storage");
 const mensageiro = require("../modules/mensageiro/service");
 
-writeGlobalJson("usuarios.json", [{ id: "cliente_mensageiro", ativo: true }]);
+writeGlobalJson("usuarios.json", [
+  { id: "cliente_mensageiro", ativo: true },
+  { id: "cliente_outro", ativo: true },
+  { id: "cliente_terceiro", ativo: true }
+]);
 
 function criarSock({ semKey = false, falharDelete = false } = {}) {
   const envios = [];
@@ -45,30 +49,40 @@ function configurar(dados = {}) {
 }
 
 function perfilMensagem({
+  ativo = true,
+  sessaoId = "sessao_mensageiro",
   grupos = ["grupo_monitorado@g.us"],
   boasVindasGrupos,
   boasVindasGruposConfigurados = false,
+  boasVindasAtivo = true,
+  boasVindasMensagem = "",
+  boasVindasImagem = "",
+  boasVindasEnvio = { destino: "privado" },
   despedidaGrupos,
-  despedidaGruposConfigurados = false
+  despedidaGruposConfigurados = false,
+  despedidaAtivo = true,
+  despedidaMensagem = "",
+  despedidaImagem = "",
+  despedidaEnvio = { destino: "privado" }
 } = {}) {
   return {
     id: "perfil_msg",
     nome: "Perfil mensagem",
-    ativo: true,
-    sessaoId: "sessao_mensageiro",
+    ativo,
+    sessaoId,
     grupos,
     modulos: {
       boasVindas: {
-        ativo: true,
+        ativo: boasVindasAtivo,
         grupos: boasVindasGrupos || [],
         gruposConfigurados: boasVindasGruposConfigurados,
-        configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } }
+        configuracao: { mensagem: boasVindasMensagem, imagem: boasVindasImagem, envio: boasVindasEnvio }
       },
       despedida: {
-        ativo: true,
+        ativo: despedidaAtivo,
         grupos: despedidaGrupos || [],
         gruposConfigurados: despedidaGruposConfigurados,
-        configuracao: { mensagem: "", imagem: "", envio: { destino: "privado" } }
+        configuracao: { mensagem: despedidaMensagem, imagem: despedidaImagem, envio: despedidaEnvio }
       },
       comandos: { ativo: true, grupos: [], gruposConfigurados: false },
       programacoes: { ativo: true },
@@ -77,10 +91,10 @@ function perfilMensagem({
   };
 }
 
-async function disparar({ action = "add", participante = "5511999999999@s.whatsapp.net", grupo = "grupo_monitorado@g.us", sock = criarSock() } = {}) {
+async function disparar({ clienteId = "cliente_mensageiro", sessaoId = "sessao_mensageiro", action = "add", participante = "5511999999999@s.whatsapp.net", grupo = "grupo_monitorado@g.us", sock = criarSock() } = {}) {
   await mensageiro.tratarEventoGrupoMensageiro({
-    clienteId: "cliente_mensageiro",
-    sessaoId: "sessao_mensageiro",
+    clienteId,
+    sessaoId,
     sock,
     evento: { id: grupo, participants: [participante], action }
   });
@@ -112,6 +126,114 @@ function sleep(ms) {
   assert.strictEqual(sock.envios.length, 1, "grupo monitorado deve receber mensagem");
   assert.strictEqual(sock.envios[0].jid, "grupo_monitorado@g.us", "modo grupo envia no grupo");
   assert.deepStrictEqual(sock.envios[0].payload, { text: "Bem-vindo 5511000000004" }, "grupo texto deve montar payload correto");
+
+  const imagemPerfil = `data:image/png;base64,${Buffer.from("profile-image").toString("base64")}`;
+  configurar({
+    boasVindasAtivo: false,
+    despedidaAtivo: false,
+    perfis: [perfilMensagem({
+      boasVindasMensagem: "Perfil {numero}",
+      boasVindasImagem: imagemPerfil,
+      boasVindasEnvio: { destino: "grupo", modoGrupo: "imagem_texto", mensagemTemporaria: false, apagarAposSegundos: 20 },
+      despedidaMensagem: "Ate logo {numero}",
+      despedidaImagem: imagemPerfil,
+      despedidaEnvio: { destino: "grupo", modoGrupo: "imagem_texto", mensagemTemporaria: false, apagarAposSegundos: 20 }
+    })]
+  });
+  sock = await disparar({ participante: "5511000000020@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 1, "modulo ativo do perfil nao depende da flag global");
+  assert.strictEqual(sock.envios[0].jid, "grupo_monitorado@g.us", "perfil preserva o destino de grupo");
+  assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "perfil preserva a imagem configurada");
+  assert.strictEqual(sock.envios[0].payload.caption, "Perfil 5511000000020", "perfil preserva a mensagem configurada");
+  await disparar({ participante: "5511000000020@s.whatsapp.net", sock });
+  assert.strictEqual(sock.envios.length, 1, "evento repetido nao duplica a boas-vindas");
+  sock = await disparar({ action: "remove", participante: "5511000000023@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 1, "despedida ativa do perfil nao depende da flag global");
+  assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "despedida preserva a imagem do perfil");
+  assert.strictEqual(sock.envios[0].payload.caption, "Ate logo 5511000000023", "despedida preserva o texto do perfil");
+  await disparar({ action: "remove", participante: "5511000000023@s.whatsapp.net", sock });
+  assert.strictEqual(sock.envios.length, 1, "evento repetido nao duplica a despedida");
+  sock = await disparar({ action: "leave", participante: "5511000000035@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 1, "leave tambem respeita a despedida ativa do perfil");
+  assert.strictEqual(sock.envios[0].payload.caption, "Ate logo 5511000000035", "leave preserva conteudo da despedida");
+  sock = await disparar({ action: "add", participante: "5511000000024@s.whatsapp.net", grupo: "grupo_fora@g.us" });
+  assert.strictEqual(sock.envios.length, 0, "perfil nao envia em grupo fora do alcance");
+  sock = await disparar({ action: "add", participante: "5511000000025@s.whatsapp.net", sessaoId: "sessao_errada" });
+  assert.strictEqual(sock.envios.length, 0, "perfil nao envia por outra sessao");
+  configurar({
+    perfis: [perfilMensagem({ sessaoId: "sessao_de_outro_perfil" })]
+  });
+  sock = await disparar({ participante: "5511000000034@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "sessao do perfil deve corresponder a sessao do evento");
+
+  configurar({
+    boasVindasAtivo: true,
+    despedidaAtivo: true,
+    perfis: [perfilMensagem({ ativo: false, boasVindasMensagem: "Nao enviar", despedidaMensagem: "Nao enviar" })]
+  });
+  sock = await disparar({ participante: "5511000000026@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "perfil desativado nao ativa boas-vindas");
+  sock = await disparar({ action: "remove", participante: "5511000000027@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "perfil desativado nao ativa despedida");
+
+  configurar({
+    boasVindasAtivo: false,
+    despedidaAtivo: false,
+    perfis: [perfilMensagem({ boasVindasAtivo: false, despedidaAtivo: false, boasVindasMensagem: "Nao enviar" })]
+  });
+  sock = await disparar({ participante: "5511000000028@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "modulo de boas-vindas desativado permanece bloqueado");
+  sock = await disparar({ action: "remove", participante: "5511000000029@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "modulo de despedida desativado permanece bloqueado");
+
+  storage.setMensageiroCliente("cliente_outro", {
+    ativo: true,
+    sessaoId: "sessao_outro",
+    boasVindasAtivo: true,
+    mensagemBoasVindas: "Outro {numero}",
+    grupos: ["grupo_monitorado@g.us"],
+    programacoes: [{
+      id: "vitrine_diegopc_fixture",
+      ativo: true,
+      nome: "Vitrine a cada tres horas",
+      tipo: "intervalo",
+      intervaloMinutos: 180,
+      grupos: ["grupo_monitorado@g.us"],
+      conteudos: [{
+        id: "foto_link",
+        tipo: "imagem_texto",
+        texto: "Vitrine https://example.test/produto",
+        imagem: "https://cdn.example.test/vitrine.jpg"
+      }]
+    }]
+  });
+  const programacoesAntes = storage.getMensageiroCliente("cliente_outro").programacoes;
+  sock = await disparar({
+    clienteId: "cliente_outro",
+    sessaoId: "sessao_outro",
+    participante: "5511000000030@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 1, "outro workspace usa a propria configuracao");
+  assert.deepStrictEqual(sock.envios[0].payload, { text: "Outro 5511000000030" }, "outro workspace nao herda mensagem do primeiro");
+  assert.deepStrictEqual(storage.getMensageiroCliente("cliente_outro").programacoes, programacoesAntes, "evento de grupo nao altera a vitrine programada de 180 minutos com foto e link");
+  storage.setMensageiroCliente("cliente_terceiro", {
+    ativo: true,
+    sessaoId: "sessao_terceiro",
+    boasVindasAtivo: false,
+    grupos: ["grupo_monitorado@g.us"]
+  });
+  sock = await disparar({
+    clienteId: "cliente_terceiro",
+    sessaoId: "sessao_terceiro",
+    participante: "5511000000031@s.whatsapp.net"
+  });
+  assert.strictEqual(sock.envios.length, 0, "terceiro workspace nao herda ativacao de outro");
+
+  configurar({ boasVindasAtivo: false, despedidaAtivo: false, perfis: [] });
+  sock = await disparar({ participante: "5511000000032@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "legado com boas-vindas global falsa continua bloqueado");
+  sock = await disparar({ action: "remove", participante: "5511000000033@s.whatsapp.net" });
+  assert.strictEqual(sock.envios.length, 0, "legado com despedida global falsa continua bloqueado");
 
   configurar({
     grupos: ["grupo_legado@g.us"],
