@@ -25,6 +25,8 @@ jobs:
       CLIENT_ID: user_k3phmbkf
       EXPECTED_SHA: 15655d2c4b668ed027c3357e1f4afb352603d581
       DEPLOY_CUTOFF: '2026-10-15T04:43:00Z'
+      SERVMAQ_WINDOW_START: '2026-10-15T12:03:00Z'
+      SERVMAQ_WINDOW_END: '2026-10-15T12:08:00Z'
 
     steps:
       - name: Checkout workflow only
@@ -474,6 +476,59 @@ jobs:
             console.log('GROUP_MATCH=' + JSON.stringify({ program: programGroups.length > 0 && programMatches.length === programGroups.length, managers: managerRows.map(row => ({ profileHash: row.profileHash, allGroupsInSession: row.effectiveGroupCount > 0 && row.groupMatches === row.effectiveGroupCount })) }));
             console.log('POSSIBLE_EXEMPTION=' + JSON.stringify({ senderProvided: false, criteria: senderCriteria }));
           })().catch(error => console.log('SERVMAQ_MANAGER_RECONCILIATION=FAILED reason=' + String(error.message).replace(/[^a-zA-Z0-9_. -]/g, ' ').slice(0, 160)));
+          NODE
+
+      - name: Read-only targeted Servmaq event evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          test -n "$backend_id"
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" WINDOW_START="$SERVMAQ_WINDOW_START" WINDOW_END="$SERVMAQ_WINDOW_END" node - <<'NODE' | tee -a "$GITHUB_STEP_SUMMARY"
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const clientId = process.env.CLIENT_ID;
+          const start = Date.parse(process.env.WINDOW_START);
+          const end = Date.parse(process.env.WINDOW_END);
+          const hash = value => value ? crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 12) : '';
+          const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+          const inWindow = value => {
+            const ts = Date.parse(String(value || ''));
+            return Number.isFinite(ts) && ts >= start && ts <= end;
+          };
+          const timestampOf = value => value?.timestamp || value?.data || value?.executadoEm || value?.criadoEm || value?.createdAt || value?.created_at || '';
+          const safeCode = value => String(value || '').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 80);
+          const operational = readJson(`/data/clientes/${clientId}/mensageiro-gerente-operacional.json`);
+          const operationalRows = Array.isArray(operational?.motivos) ? operational.motivos : [];
+          const operationalWindow = operationalRows.filter(row => inWindow(timestampOf(row)));
+          console.log('SERVMAQ_OPERATIONAL_WINDOW_COUNT=' + operationalWindow.length);
+          console.log('SERVMAQ_OPERATIONAL_CODES=' + JSON.stringify([...new Set(operationalWindow.map(row => safeCode(row?.codigo)).filter(Boolean))]));
+          console.log('SERVMAQ_OPERATIONAL_EVENTS=' + JSON.stringify(operationalWindow.slice(0, 30).map(row => ({
+            timestamp: String(timestampOf(row)),
+            code: safeCode(row?.codigo),
+            profilePresent: Boolean(row?.perfilId),
+            sessionHash: hash(row?.sessaoId),
+            groupHash: hash(row?.grupoId)
+          }))));
+          const infra = readJson(`/data/clientes/${clientId}/mensageiro-gerente-infracoes.json`);
+          const infraRows = Array.isArray(infra?.infracoes) ? infra.infracoes : [];
+          const infraWindow = infraRows.filter(row => inWindow(timestampOf(row)));
+          console.log('SERVMAQ_INFRACTION_WINDOW_COUNT=' + infraWindow.length);
+          console.log('SERVMAQ_INFRACTION_RESULTS=' + JSON.stringify([...new Set(infraWindow.map(row => safeCode(row?.resultado || row?.status)).filter(Boolean))]));
+          const cfg = readJson(`/data/clientes/${clientId}/mensageiro-config.json`);
+          const histories = [cfg?.atendimento?.historico, cfg?.historico, cfg?.historicoGerente].filter(Array.isArray).flat();
+          const historyWindow = histories.filter(row => inWindow(timestampOf(row)) && (/moderacao|gerente/i.test(String(row?.tipo || row?.origem || row?.modulo || '')) || row?.resultado || row?.status));
+          console.log('SERVMAQ_HISTORY_WINDOW_COUNT=' + historyWindow.length);
+          console.log('SERVMAQ_HISTORY_RESULTS=' + JSON.stringify([...new Set(historyWindow.map(row => safeCode(row?.resultado || row?.status || row?.codigo)).filter(Boolean))]));
+          const eventEvidence = operationalWindow.length || infraWindow.length || historyWindow.length;
+          let blocker = eventEvidence ? 'SEE_PERSISTED_RESULTS' : 'NO_PERSISTED_EVENT_EVIDENCE';
+          if (operationalWindow.some(row => ['from_me','isento_admin','isento_dono','isento_autorizado','isento_moderador'].includes(String(row?.codigo)))) blocker = 'EVENT_IGNORED_BY_GATE';
+          else if (operationalWindow.some(row => ['participante_nao_resolvido','key_incompleta','perfil_nao_resolvido','gerente_inativo','sem_regras_ativas','sem_violacao','bot_sem_admin','metadata_indisponivel'].includes(String(row?.codigo)))) blocker = 'GERENTE_GATE_RECORDED';
+          else if (operationalWindow.some(row => String(row?.codigo) === 'delete_falhou')) blocker = 'DELETE_FAILED_RECORDED';
+          else if (operationalWindow.some(row => String(row?.codigo) === 'delete_ok')) blocker = 'DELETE_SUCCEEDED_RECORDED';
+          console.log('SERVMAQ_FIRST_PROVEN_BLOCKER=' + blocker);
+          console.log('SERVMAQ_SENDER_IDENTITY_OBSERVED=false');
+          console.log('SERVMAQ_FROM_ME_OBSERVED=false');
           NODE
 
       - name: Read-only HTTP smoke
