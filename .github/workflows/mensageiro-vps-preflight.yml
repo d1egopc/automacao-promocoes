@@ -25,6 +25,8 @@ jobs:
       INFRA_DIR: /opt/optimus/infra
       COMPOSE_FILE: /opt/optimus/infra/compose.yml
       DATA_DIR: /opt/optimus/data
+      EXPECTED_IMAGE_ID: sha256:c12d0c186ee37853a5c75e1bfbe18163c29c8c0ee9d69b14066a9301251162ce
+      ROLLBACK_TAG: infra-backend:pre-mensageiro-20261015
 
     steps:
       - name: Checkout validation commit only
@@ -110,3 +112,30 @@ jobs:
           set -Eeuo pipefail
           curl --fail --silent --show-error --output /dev/null --write-out 'local_http=%{http_code} latency_s=%{time_total}\n' http://127.0.0.1:3000/
           curl --fail --silent --show-error --output /dev/null --write-out 'public_http=%{http_code} latency_s=%{time_total}\n' https://go.optimuspromo.com.br/
+
+      - name: Protect rollback image and validate Compose override
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          running_image="$(docker inspect --format '{{.Image}}' "$backend_id")"
+          test "$running_image" = "$EXPECTED_IMAGE_ID"
+          docker image inspect "$running_image" >/dev/null
+          docker tag "$running_image" "$ROLLBACK_TAG"
+          protected_id="$(docker image inspect "$ROLLBACK_TAG" --format '{{.Id}}')"
+          test "$protected_id" = "$EXPECTED_IMAGE_ID"
+          printf 'rollback_tag=%s image_id=%s\n' "$ROLLBACK_TAG" "$protected_id"
+
+          override_file="$(mktemp)"
+          trap 'rm -f "$override_file"' EXIT
+          printf 'services:\n  backend:\n    image: %s\n' "$ROLLBACK_TAG" > "$override_file"
+          rollback_images="$(docker compose -f "$COMPOSE_FILE" -f "$override_file" config --images)"
+          grep -Fxq "$ROLLBACK_TAG" <<<"$rollback_images"
+          services="$(docker compose -f "$COMPOSE_FILE" -f "$override_file" config --services)"
+          grep -Fxq backend <<<"$services"
+          grep -Fxq postgres <<<"$services"
+          printf 'compose_rollback=valid postgres_service=present\n'
+
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          docker inspect --format 'backend_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$backend_id"
+          docker inspect --format 'postgres_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$postgres_id"
