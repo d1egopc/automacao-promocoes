@@ -36,7 +36,7 @@ Antes de mudar producao, registre SHA/tree, status Git, container/image IDs, res
 5. Confirme o SHA efetivamente implantado e repita a baseline.
 6. Preserve evidencias antes de rollback.
 
-Rollback nao e `reset --hard` improvisado. Reimplante um SHA previamente comprovado pelo mesmo caminho controlado.
+Rollback nao e `reset --hard` improvisado. Antes do deploy, comprove que a imagem anterior ainda existe pelo ID/digest exato, que uma tag protegida aponta para esse mesmo ID e que o Compose pode selecionar essa imagem sem recriar PostgreSQL ou tocar `/data`. Se esse caminho nao estiver disponivel, prove uma reconstrucao controlada de SHA anterior antes de chamar o rollback de operacional. Registre a imagem e o SHA efetivamente ativos depois de qualquer reversao.
 
 ## Frontend
 
@@ -58,3 +58,9 @@ Empacote a partir de uma tree Git comprovada, com `manifest.json` na raiz. Exclu
 ## Evidencia temporal
 
 Mantenha IDs e hashes atuais em [EVIDENCE-REGISTER.md](EVIDENCE-REGISTER.md), nao neste contrato.
+
+## Backup manual de codigo
+
+Registre caminho, branch, HEAD, estado Git e referencias separadas de frontend e extensao. Um commit WIP local preserva trabalho, mas nao transforma a branch experimental em codigo aprovado para producao. Nao use copia espelhada nem substitua a pasta oficial por uma worktree antiga.
+
+Nao envie sem protecao adequada `.env`, chaves, tokens, cookies, sessoes WhatsApp, dados pessoais, dumps de producao ou arquivos temporarios. `node_modules` e artefato reinstalavel, nao parte do backup de fonte. O backup do codigo nao substitui plano de backup de `/data` ou PostgreSQL.

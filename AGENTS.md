@@ -5,9 +5,9 @@ Preserve o que ja funciona. Melhore somente com prova. Use a menor capacidade de
 ## Fonte da verdade
 
 - Trate `main` como branch canonica somente quando ela estiver reconciliada com producao.
-- Backend oficial: `main`, SHA reconciliado `a8492586a86a392e143515a9113013f2f7272c24`.
-- Frontend oficial: repositorio `optimuspromo-frontend`, `main`, SHA/Production reconciliado `c6c79d2d7540df3efdfb702ce117ee00fd9a82a0`.
-- Extensao oficial: tag `extension/v0.2.0`, tree `d724a8620a1f0ecb53601ae71d76eaa671a321b0`; a release permanece draft ate autorizacao humana.
+- Backend oficial de desenvolvimento: esta pasta `BACKEND-OFICIAL-2026`, no repositorio `d1egopc/automacao-promocoes`. Confira `origin/main`, checkout e SHA ativo na VPS separadamente antes de afirmar equivalencia.
+- Frontend oficial: repositorio `d1egopc/optimuspromo-frontend`. A branch Git e o deployment Production da Vercel sao referencias distintas; confirme o SHA publicado no painel antes de promover ou reverter.
+- Extensao oficial no codigo: subtree `optimus-capture` deste backend. Diferencie a tree do checkout, a tag/artefato distribuido e a versao realmente instalada; o numero do `manifest.json` sozinho nao prova equivalencia.
 - Compare codigo/runtime atual, testes, configuracao ativa e documentacao. Nao resolva contradicoes silenciosamente.
 - Coloque SHAs ativos, containers, flags, hashes e metricas temporais em [EVIDENCE-REGISTER.md](docs/contracts/EVIDENCE-REGISTER.md), nunca como contrato eterno.
 
@@ -120,6 +120,8 @@ Este texto nao substitui testes executaveis; o gate documental e a regressao aut
 - Candidata anterior não é baseline implícita para trabalho novo.
 - Ao terminar um experimento, reconciliar o resultado na árvore oficial.
 - Backup manual é proteção e não fonte de desenvolvimento.
+- Antes de sincronizar uma arvore oficial com alteracoes locais, preserve cada arquivo versionavel em branch/commit local verificavel; nunca use `reset --hard`, `git clean` ou copia espelhada para ocultar conflito.
+- Backup de codigo nao deve incluir `.env`, tokens, cookies, credenciais, sessoes WhatsApp, dados pessoais, dumps de producao, `node_modules` ou temporarios sem protecao apropriada. Inventarie branch, SHA, status e referencia de frontend/extensao separadamente.
 
 ## Selection Mode — invariantes de distribuição
 

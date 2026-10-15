@@ -2,13 +2,13 @@
 
 ## Fontes canonicas
 
-| Superficie | Repositorio / fonte | Branch ou tag | Referencia reconciliada |
-| --- | --- | --- | --- |
-| Backend | `d1egopc/automacao-promocoes` | `main` | `a8492586a86a392e143515a9113013f2f7272c24` |
-| Frontend | `d1egopc/optimuspromo-frontend` | `main` | `c6c79d2d7540df3efdfb702ce117ee00fd9a82a0` |
-| Extensao | subtree `optimus-capture` do backend | `extension/v0.2.0` | tree `d724a8620a1f0ecb53601ae71d76eaa671a321b0` |
+| Superficie | Repositorio / fonte | Referencia a verificar |
+| --- | --- | --- |
+| Backend | `d1egopc/automacao-promocoes`, pasta `BACKEND-OFICIAL-2026` | `origin/main`, checkout local e SHA ativo na VPS, conferidos separadamente |
+| Frontend | `d1egopc/optimuspromo-frontend` | branch Git e deployment Production da Vercel, conferidos separadamente |
+| Extensao | subtree `optimus-capture` do backend | tree Git, tag/artefato distribuido e instalacao local, conferidos separadamente |
 
-Essas referencias registram a reconciliacao de 2026-10-04. Confirme o estado atual no remote/runtime e atualize apenas o `EVIDENCE-REGISTER` quando elas avancarem.
+SHAs e deployments datados ficam em [EVIDENCE-REGISTER.md](EVIDENCE-REGISTER.md). Nenhuma branch, tag ou numero do manifesto prova sozinho o runtime ativo.
 
 ## Runtime de producao
 

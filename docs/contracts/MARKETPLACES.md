@@ -29,7 +29,9 @@ Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco 
 
 ## AliExpress
 
-- Preserve produto, app/moda/moedas, tracking e beneficio em papeis separados.
+- Preserve produto/PC, App, Moda, Moedas e Resgate como ocorrencias e papeis comerciais distintos; nao fabrique link ausente nem substitua um PC nao resolvido pelo productId de outro papel.
+- Landing oficial de Moedas com productId factual pode enriquecer titulo, imagem e categoria pela API existente, mas nao comprova a identidade de outro link da mensagem. Sem detalhes oficiais suficientes, falhe fechado.
+- O Radar continua autoridade de preco, cupom e beneficios capturados; moedas nao viram desconto presumido. Converta cada link comercial pela integracao da propria workspace, preservando a URL original da ocorrencia e sua prova de afiliacao.
 - Prova assinada deve vincular workspace e produto.
 - Achado legado sem URL/identidade verificavel permanece bloqueado; link afiliado salvo nao basta.
 - Brasil/Internacional, impostos, taxas e observacoes so aparecem quando presentes nos dados.

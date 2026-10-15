@@ -2,6 +2,14 @@
 
 Este arquivo registra uma fotografia temporal. Confirme novamente antes de agir. Nao transforme IDs, metricas ou flags daqui em invariantes eternos.
 
+## Consolidacao local para backup manual - 2026-10-15
+
+- Backend oficial local: `C:\Users\Liva D1EGOPC\Documents\BACKEND-OFICIAL-2026`, branch `main` sincronizada por fast-forward com `origin/main` em `798b86fdb39148213d81065092bc3af357a82150`. `git ls-remote origin main` confirmou essa referencia antes da sincronizacao. Esta verificacao de codigo **nao** substitui leitura do SHA/container ativo na VPS.
+- Trabalho local anterior: branch `validation/aliexpress-sql-e2e`, commits `26197c53dae22ae33b11b79254e813c743026499` e `4c188eaa73b89a56fc8fab705e4701d05f3142ec`, mais commit WIP local `6d592932d3f9174498cfb89e4bb766d69d439b7` que preserva 13 arquivos. Nao foi promovido para `main` nem publicado.
+- Frontend Production visto no painel Vercel do projeto `optimus-promo/optimuspromo`: deployment `BTRWD7KZt4ipvQfGnRwRckRVc3Yf`, estado `Ready`, source SHA `3460513b72dd57811d02996b304a2a64a678adcf` da branch `preview/mensageiro-session-migration`, dominio `www.optimuspromo.com.br`. Nao confundir com a `main` local do frontend.
+- Extensao na main backend acima: `optimus-capture/manifest.json` version `0.2.0`, tree `d1b47b2cfa2e1c98b3fdf9dbe4f607281dc4c15d`. A tag/artefato historico abaixo possui tree diferente; a versao instalada no PC nao foi verificada nesta consolidacao.
+- Nenhum push, deploy, restart ou alteracao de producao ocorreu nesta consolidacao. Imagem, trace e sessoes da VPS nao foram revalidados por esta operacao.
+
 ## Prova de 2026-10-04
 
 ### Backend

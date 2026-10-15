@@ -2,14 +2,11 @@
 
 ## Fonte oficial
 
-- Versao: `0.2.0`.
-- Tag: `extension/v0.2.0`.
-- Commit: `612a4d02414005d8849809b2b5d18a1d84b1a346`.
-- Tree: `d724a8620a1f0ecb53601ae71d76eaa671a321b0`.
-- Artefato atual esta em release draft e nao foi distribuido automaticamente.
-- A copia `0.1.0` embutida em checkouts antigos do backend nao e fonte oficial.
+- Fonte de desenvolvimento: subtree `optimus-capture` da main reconciliada do backend. Verifique sua tree Git e o `manifest.json` antes de empacotar.
+- A tag `extension/v0.2.0` e o ZIP draft registram um artefato historico, nao necessariamente a tree mais recente da main ou a extensao instalada em cada navegador.
+- Uma extensao unpacked observada no PC nao comprova distribuicao oficial. Nao substitua a subtree atual por copia antiga com o mesmo numero de versao.
 
-Valores temporais de ZIP/hash ficam no `EVIDENCE-REGISTER`.
+Versao, tag, commit/tree, ZIP/hash e estado de distribuicao datados ficam no [EVIDENCE-REGISTER.md](EVIDENCE-REGISTER.md).
 
 ## Fluxos
 
