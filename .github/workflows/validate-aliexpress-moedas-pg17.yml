@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/validation/aliexpress-moedas-pg17
-          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test "$RUNNER_OS" = Linux
           test -z "${DATABASE_URL:-}"
           test -z "${SSH_PRIVATE_KEY:-}"
           test "$(git rev-parse HEAD^)" = 2e01537104803bba5417bb4770696b30370336da
