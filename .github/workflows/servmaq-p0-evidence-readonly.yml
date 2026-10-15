@@ -129,4 +129,28 @@ jobs:
           console.log('TRACE_WINDOW_COUNT=' + traceRows.length);
           console.log('TRACE_WINDOW_CODES=' + JSON.stringify(traceRows.slice(0, 30).map(v => String(v?.codigo || '').slice(0, 50))));
           console.log('TRACE_FLAG_ENABLED=' + /^(1|true|sim|yes|on)$/i.test(String(process.env.SERVMAQ_GERENTE_TRACE_ENABLED || '')));
+          const http = require('http');
+          const jwt = require('jsonwebtoken');
+          function getScopedStatus(clientId, route) {
+            return new Promise((resolve, reject) => {
+              const token = jwt.sign({ clienteId: clientId }, process.env.JWT_SECRET, { expiresIn: '30s' });
+              const request = http.get({ hostname: '127.0.0.1', port: Number(process.env.PORT || 3000), path: route,
+                headers: { Authorization: `Bearer ${token}` }, timeout: 3000 }, response => {
+                let body = '';
+                response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(); });
+                response.on('end', () => response.statusCode === 200 ? resolve(JSON.parse(body)) : reject(new Error('status_http_' + response.statusCode)));
+              });
+              request.on('timeout', () => request.destroy(new Error('status_timeout')));
+              request.on('error', reject);
+            });
+          }
+          (async () => {
+            const servmaq = await getScopedStatus(workspace, `/status/${session}`);
+            const diegopc = await getScopedStatus('user_pss60lus', '/sessoes');
+            const diegoSessions = Array.isArray(diegopc?.sessoes) ? diegopc.sessoes : [];
+            console.log('SERVMAQ_RUNTIME_OPEN=' + (servmaq?.status === 'open' && servmaq?.conectado === true));
+            console.log('SERVMAQ_RUNTIME_GROUP_COUNT=' + Number(servmaq?.grupos || 0));
+            console.log('DIEGOPC_SESSION_COUNT=' + diegoSessions.length);
+            console.log('DIEGOPC_OPEN_COUNT=' + diegoSessions.filter(v => v?.status === 'open' || v?.conectado === true).length);
+          })().catch(error => { console.log('STATUS_API_ERROR=' + String(error?.message || 'unknown').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 60)); process.exitCode = 1; });
           NODE
