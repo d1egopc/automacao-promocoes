@@ -1,0 +1,163 @@
+name: Servmaq operational read-only
+
+on:
+  push:
+    branches:
+      - validation/servmaq-operational-readonly-20261015
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servmaq-operational-readonly
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Servmaq read-only evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/servmaq-operational-readonly-20261015'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 10
+    env:
+      COMPOSE_FILE: /opt/optimus/infra/compose.yml
+      BACKEND_DIR: /opt/optimus/backend
+      DATA_DIR: /opt/optimus/data
+      CLIENT_ID: user_k3phmbkf
+      SESSION_ID: user_k3phmbkf_Servmaq
+      WINDOW_START: '2026-10-15T05:35:00Z'
+      WINDOW_END: '2026-10-15T05:41:00Z'
+
+    steps:
+      - name: Checkout validation workflow only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify isolated read-only scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/servmaq-operational-readonly-20261015
+          test "$GITHUB_WORKSPACE" != "$BACKEND_DIR"
+          files="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+          test "$files" = '.github/workflows/servmaq-operational-readonly.yml'
+          ! rg -n '(^|[[:space:]])(UPDATE|DELETE|INSERT|ALTER|DROP|TRUNCATE|docker[[:space:]]+compose[^\n]*(up|down|restart|build)|git[[:space:]]+(pull|reset|checkout))([[:space:]]|$)' .github/workflows/servmaq-operational-readonly.yml
+          printf 'scope=isolated read_only=true production_mutation=false\n'
+
+      - name: Capture runtime health without mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '\n### Runtime\n' >> "$GITHUB_STEP_SUMMARY"
+          exec > >(tee -a "$GITHUB_STEP_SUMMARY") 2>&1
+          test -f "$COMPOSE_FILE" && test -d "$DATA_DIR"
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          postgres_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+          test -n "$backend_id" && test -n "$postgres_id"
+          docker inspect --format 'backend_status={{.State.Status}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$backend_id"
+          docker inspect --format 'postgres_status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} oom={{.State.OOMKilled}}' "$postgres_id"
+          printf 'backend_checkout='; git -C "$BACKEND_DIR" rev-parse HEAD
+          printf 'data_mount='; docker inspect --format '{{range .Mounts}}{{.Source}}->{{.Destination}};{{end}}' "$backend_id" | sed -E 's#/(opt/optimus/)?data#<DATA>#g'
+
+      - name: Read Servmaq config and bounded logs
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '\n### Servmaq evidence\n' >> "$GITHUB_STEP_SUMMARY"
+          exec > >(tee -a "$GITHUB_STEP_SUMMARY") 2>&1
+          backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
+          docker exec -i "$backend_id" env CLIENT_ID="$CLIENT_ID" SESSION_ID="$SESSION_ID" node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = '/data';
+          const clientId = process.env.CLIENT_ID;
+          const sessionId = process.env.SESSION_ID;
+          const files = [];
+          function walk(dir, depth = 0) {
+            if (depth > 4) return;
+            let entries = [];
+            try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+            for (const ent of entries) {
+              const p = path.join(dir, ent.name);
+              if (ent.isDirectory()) walk(p, depth + 1);
+              else if (/^(mensageiro\.json|mensageiro-config\.json)$/.test(ent.name)) files.push(p);
+            }
+          }
+          walk(root);
+          const strings = [];
+          const walkStrings = (v) => {
+            if (typeof v === 'string') strings.push(v);
+            else if (Array.isArray(v)) v.forEach(walkStrings);
+            else if (v && typeof v === 'object') Object.values(v).forEach(walkStrings);
+          };
+          const matchesClient = [];
+          let config = null;
+          for (const file of files) {
+            let data;
+            try { data = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { continue; }
+            if (path.basename(file) === 'mensageiro.json' && data && data[clientId]) config = data[clientId];
+            if (file.includes(clientId) && path.basename(file) === 'mensageiro-config.json') config = data;
+          }
+          if (config) {
+            const perfis = Array.isArray(config.perfis) ? config.perfis : [];
+            const ativos = perfis.filter(p => p && p.ativo === true);
+            const gerentes = ativos.filter(p => p.modulos?.gerente?.ativo === true);
+            const regras = gerentes.flatMap(p => Array.isArray(p.modulos?.gerente?.configuracao?.regras) ? p.modulos.gerente.configuracao.regras : []);
+            const grupos = gerentes.flatMap(p => Array.isArray(p.grupos) ? p.grupos : []).length;
+            walkStrings(config);
+            console.log('CONFIG_FOUND=true');
+            console.log('CONFIG_ACTIVE=' + (config.ativo === true));
+            console.log('CONFIG_SESSION_MATCH=' + (String(config.sessaoId || '') === sessionId));
+            console.log('PROFILE_COUNT=' + perfis.length + ' ACTIVE_PROFILE_COUNT=' + ativos.length + ' ACTIVE_MANAGER_COUNT=' + gerentes.length);
+            console.log('MANAGER_RULE_COUNT=' + regras.length + ' MANAGER_GROUP_REFS=' + grupos);
+            console.log('FORBIDDEN_BOLSONARO=' + strings.some(s => s.trim().toLocaleLowerCase('pt-BR') === 'bolsonaro'));
+            console.log('CONFIG_FILES_FOUND=' + files.length);
+          } else {
+            console.log('CONFIG_FOUND=false');
+          }
+          NODE
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          docker compose -f "$COMPOSE_FILE" logs --since "$WINDOW_START" --until "$WINDOW_END" --tail=1200 backend > "$log_file" 2>&1 || true
+          node - "$log_file" "$SESSION_ID" <<'NODE'
+          const fs = require('fs');
+          const file = process.argv[2];
+          const session = process.argv[3];
+          const raw = fs.readFileSync(file, 'utf8');
+          const lines = raw.split(/\r?\n/).filter(Boolean);
+          const count = (re) => lines.filter(line => re.test(line)).length;
+          const inWindow = lines.filter(line => /messages\.upsert|listener_recebeu|listener_erro_mensagem|invalid_prekey_id|GERENTE|mensageiro|connection\.update|group-participants\.update|bolsonaro|teste no grupo serv maq/i.test(line));
+          console.log('LOG_WINDOW_LINES=' + lines.length);
+          console.log('SESSION_REFERENCE_LINES=' + count(new RegExp(session.replace(/[.*+?^${}()|[\\]\\/]/g, '\\$&'), 'i')));
+          console.log('MESSAGES_UPSERT=' + count(/messages\.upsert|listener_recebeu/i));
+          console.log('SIGNAL_INVALID_PREKEY=' + count(/invalid_prekey_id/i));
+          console.log('PARTICIPANT_EVENTS=' + count(/group-participants\.update/i));
+          console.log('GERENTE_GATE=' + count(/GERENTE-GATE|GERENTE-REGRA-MATCH|GERENTE-DELETE|GERENTE-AVISO/i));
+          console.log('ACTION_ATTEMPTS=' + count(/GERENTE-DELETE-(OK|ERRO)|GERENTE-AVISO-(OK|ERRO)/i));
+          console.log('EXACT_BOLSONARO=' + count(/\bbolsonaro\b/i));
+          console.log('EXACT_TEST_MESSAGE=' + count(/teste no grupo serv maq/i));
+          console.log('SESSION_CONNECTION_LINES=' + count(/connection\.update|conectad|open|close|qr/i));
+          console.log('SANITIZED_LOG_MATCHES_START');
+          for (const line of inWindow.slice(0, 80)) {
+            let s = line.replace(/https?:\/\/\S+/gi, '<URL_REDACTED>');
+            s = s.replace(/([0-9]{8,}|[0-9]+@(?:s\.whatsapp\.net|g\.us|lid))/gi, '<ID_REDACTED>');
+            s = s.replace(/(message|body|text|caption|conteudoPreview|mensagem)\s*[:=]\s*[^,}]+/gi, '$1=<REDACTED>');
+            console.log(s.slice(0, 500));
+          }
+          console.log('SANITIZED_LOG_MATCHES_END');
+          let blocker = 'NOT_PROVEN';
+          if (count(/invalid_prekey_id/i) > 0) blocker = 'SIGNAL_INVALID_PREKEY_BEFORE_HANDLER';
+          else if (count(/messages\.upsert|listener_recebeu/i) === 0) blocker = 'NO_MESSAGES_UPSERT_EVIDENCE';
+          else if (count(/GERENTE-GATE|GERENTE-REGRA-MATCH/i) === 0) blocker = 'GERENTE_HANDLER_NOT_OBSERVED';
+          else if (count(/GERENTE-DELETE|GERENTE-AVISO/i) === 0) blocker = 'NO_ACTION_ATTEMPT_OBSERVED';
+          console.log('FIRST_BLOCKER=' + blocker);
+          NODE
+      - name: Read-only HTTP smoke
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          printf '\n### HTTP\n' >> "$GITHUB_STEP_SUMMARY"
+          exec > >(tee -a "$GITHUB_STEP_SUMMARY") 2>&1
+          curl --fail --silent --show-error --output /dev/null --write-out 'public_http=%{http_code} latency_s=%{time_total}\n' https://go.optimuspromo.com.br/
