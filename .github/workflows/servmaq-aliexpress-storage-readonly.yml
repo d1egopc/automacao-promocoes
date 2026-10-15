@@ -71,6 +71,33 @@ jobs:
           const globalConfig = readJson('/data/mensageiro.json');
           const client = readJson(`/data/clientes/${clientId}/mensageiro-config.json`);
           const cfg = globalConfig && globalConfig[clientId] && typeof globalConfig[clientId] === 'object' ? globalConfig[clientId] : null;
+          const radar = readJson(`/data/clientes/${clientId}/radar-config.json`);
+          const radarSessions = Array.isArray(radar?.sessoesWhatsappMonitoradas) ? radar.sessoesWhatsappMonitoradas : [];
+          const radarGroups = radarSessions.flatMap(s => Array.isArray(s?.gruposMonitorados) ? s.gruposMonitorados : []);
+          console.log('ALIEXPRESS_RADAR_SOURCE_CONFIG=' + JSON.stringify({
+            workspace: clientId,
+            monitoramentoAtivo: radar?.monitoramentoAtivo === true,
+            sessions: radarSessions.length,
+            activeSessions: radarSessions.filter(s => s?.ativo !== false).length,
+            groups: radarGroups.length,
+            activeGroups: radarGroups.filter(g => g?.ativo !== false).length,
+            sessionIdsPresent: radarSessions.filter(s => s?.sessaoId || s?.id || s?.sessionId).length,
+            groupIdsPresent: radarGroups.filter(g => g?.id || g?.grupoId || g?.jid).length
+          }));
+          let radarConfigCount = 0; let activeRadarConfigCount = 0; let monitoredSessionCount = 0; let monitoredGroupCount = 0;
+          try {
+            const dirs = fs.readdirSync('/data/clientes', { withFileTypes: true }).filter(d => d.isDirectory()).slice(0, 200);
+            for (const dir of dirs) {
+              const r = readJson(`/data/clientes/${dir.name}/radar-config.json`);
+              if (!r) continue;
+              radarConfigCount++;
+              if (r.monitoramentoAtivo === true) activeRadarConfigCount++;
+              const ss = Array.isArray(r.sessoesWhatsappMonitoradas) ? r.sessoesWhatsappMonitoradas : [];
+              monitoredSessionCount += ss.filter(s => s?.ativo !== false).length;
+              monitoredGroupCount += ss.reduce((n, s) => n + (Array.isArray(s?.gruposMonitorados) ? s.gruposMonitorados.filter(g => g?.ativo !== false).length : 0), 0);
+            }
+          } catch {}
+          console.log('ALIEXPRESS_RADAR_CONFIG_SUMMARY=' + JSON.stringify({ radarConfigCount, activeRadarConfigCount, monitoredSessionCount, monitoredGroupCount }));
           const profiles = Array.isArray(cfg?.perfis) ? cfg.perfis : [];
           const byProfile = new Map(profiles.map(p => [String(p?.id || ''), p]));
           const programs = Array.isArray(cfg?.programacoes) ? cfg.programacoes : [];
@@ -116,7 +143,7 @@ jobs:
           const safeName = n => '"' + String(n).replaceAll('"', '""') + '"';
           const safeValue = (name, value) => {
             if (value === null || value === undefined) return null;
-            if (/url|text|message|body|title|name|cookie|token|secret|password|credential|key|image|link/i.test(name)) return '<omitted>';
+            if (/url|text|message|body|title|name|cookie|token|secret|password|credential|key|image|link|grupo|sessao|jid|phone/i.test(name)) return '<omitted>';
             const s = String(value); return s.length > 120 ? s.slice(0, 120) + '…' : s;
           };
           const wanted = ['engine_eventos_brutos','engine_links','engine_jobs_cliente','engine_processamentos','engine_ofertas','engine_eventos_comerciais','engine_universal_queue_items','engine_universal_queue_destinations','fila_claims_ativos','fila_checkpoints_entrega'];
@@ -134,13 +161,13 @@ jobs:
               for (const table of wanted) {
                 const cols = by.get(table) || []; if (!cols.length) { console.log('ALIEXPRESS_TABLE=' + table + ' unavailable'); continue; }
                 const tc = timeCols.find(x => cols.includes(x)); if (!tc) { console.log('ALIEXPRESS_TABLE=' + table + ' skipped_no_time_column'); continue; }
-                const select = ['id','uuid','evento_id','event_id','link_id','job_id','cliente_id','workspace_id','marketplace','marketplace_detectado','status','tentativas','motivo_final','motivo_status','etapa','oferta_id','fila_item_id','destination_id','terminal_status','credit_debited','confirmed_at','criado_em','atualizado_em'].filter(x => cols.includes(x));
+                const select = ['id','uuid','evento_id','event_id','link_id','job_id','cliente_id','workspace_id','marketplace','marketplace_detectado','fonte','origem_tipo','grupo_id','status','tentativas','motivo_final','motivo_status','etapa','oferta_id','fila_item_id','destination_id','terminal_status','credit_debited','confirmed_at','criado_em','atualizado_em','link_afiliado','link_original','link_expandido'].filter(x => cols.includes(x));
                 if (!select.length) { console.log('ALIEXPRESS_TABLE=' + table + ' skipped_no_safe_columns'); continue; }
                 const marketplace = cols.includes('marketplace') ? ` AND ${safeName('marketplace')}::text ILIKE '%aliexpress%'` : (cols.includes('marketplace_detectado') ? ` AND ${safeName('marketplace_detectado')}::text ILIKE '%aliexpress%'` : '');
                 const sql = `SELECT ${select.map(safeName).join(',')} FROM ${safeName(table)} WHERE ${safeName(tc)} >= $1${marketplace} ORDER BY ${safeName(tc)} DESC LIMIT 50`;
                 const rows = (await c.query(sql, [cutoff])).rows;
                 console.log('ALIEXPRESS_TABLE=' + table + ' rows=' + rows.length);
-                for (const row of rows.slice(0, 20)) { const out = {}; for (const [k,v] of Object.entries(row)) out[k] = safeValue(k,v); console.log('ALIEXPRESS_ROW=' + JSON.stringify(out)); }
+                for (const row of rows.slice(0, 20)) { const out = {}; const presentFields = []; for (const [k,v] of Object.entries(row)) { if (/link_afiliado|link_original|link_expandido/i.test(k) && v) presentFields.push(k); out[k] = safeValue(k,v); } if (presentFields.length) out.present_fields = presentFields; console.log('ALIEXPRESS_ROW=' + JSON.stringify(out)); }
               }
               await c.query('COMMIT');
             } catch (e) { try { await c.query('ROLLBACK'); } catch {} console.log('ALIEXPRESS_DB_READONLY=FAILED reason=' + String(e.message).replace(/[^a-zA-Z0-9_. -]/g,' ').slice(0,160)); }
