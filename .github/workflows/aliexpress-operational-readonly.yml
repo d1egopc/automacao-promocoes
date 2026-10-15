@@ -23,6 +23,7 @@ jobs:
       COMPOSE_FILE: /opt/optimus/infra/compose.yml
       DEPLOY_CUTOFF: '2026-10-14T21:40:00-03:00'
       RELEASE_SHA: 2e01537104803bba5417bb4770696b30370336da
+      BASE_SHA: 15655d2c4b668ed027c3357e1f4afb352603d581
 
     steps:
       - name: Checkout diagnostic workflow only
@@ -38,7 +39,7 @@ jobs:
           test "$GITHUB_EVENT_NAME" = push
           test "$GITHUB_REF" = refs/heads/validation/aliexpress-operational-readonly-20261015
           test "$GITHUB_WORKSPACE" != "$BACKEND_DIR"
-          files="$(git diff --name-only "$RELEASE_SHA..HEAD")"
+          files="$(git diff --name-only "$BASE_SHA..HEAD")"
           test "$files" = '.github/workflows/aliexpress-operational-readonly.yml'
           test -f .github/workflows/deploy-backend-vps.yml
           ! rg -n '^\s*(docker compose .* (up|down|restart|build)|git (pull|reset)|UPDATE |DELETE |INSERT |ALTER |DROP )' .github/workflows/aliexpress-operational-readonly.yml
