@@ -5,16 +5,8 @@ const TRACE_FILE = "mensageiro-gerente-trace.json";
 const TRACE_MAX_RECORDS = 120;
 const TRACE_MAX_BYTES = 64 * 1024;
 const TRACE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const TEMPORARY_TRACE_UNTIL = Date.parse("2026-10-16T18:00:00Z");
-const TEMPORARY_SESSION_ID = "user_k3phmbkf_Servmaq";
-const TEMPORARY_PROGRAM_ID = "5b31e3c6-9aaa-481c-b5f2-a47ec2b3f618";
 const TRACE_CODES = new Set([
   "received",
-  "tenant_resolved",
-  "tenant_mismatch",
-  "usuario_inativo_listener",
-  "radar_returned",
-  "mensageiro_dispatched",
   "handler_called",
   "usuario_inativo",
   "plano_nao_liberado",
@@ -34,27 +26,12 @@ const TRACE_CODES = new Set([
   "aviso_erro"
 ]);
 
-function explicitTraceEnabled(env = process.env) {
+function traceEnabled(env = process.env) {
   return /^(1|true|sim|yes|on)$/i.test(String(env.SERVMAQ_GERENTE_TRACE_ENABLED || "").trim());
 }
 
-function temporaryTraceEnabled({ clienteId, sessaoId, env = process.env, now = Date.now() } = {}) {
-  return now < TEMPORARY_TRACE_UNTIL && Boolean(env.JWT_SECRET) &&
-    String(clienteId || "") === TRACE_WORKSPACE_ID && String(sessaoId || "") === TEMPORARY_SESSION_ID;
-}
-
-function traceEnabled(env = process.env, scope = {}) {
-  return explicitTraceEnabled(env) || temporaryTraceEnabled({ ...scope, env });
-}
-
 function traceSecret(env = process.env) {
-  const dedicated = String(env.SERVMAQ_GERENTE_TRACE_SECRET || "").trim();
-  if (dedicated) return dedicated;
-  const appSecret = String(env.JWT_SECRET || "").trim();
-  if (explicitTraceEnabled(env)) return appSecret;
-  return appSecret
-    ? crypto.createHmac("sha256", appSecret).update("servmaq-gerente-trace-v1").digest("hex")
-    : "";
+  return String(env.SERVMAQ_GERENTE_TRACE_SECRET || env.JWT_SECRET || "").trim();
 }
 
 function hashIdentifier(value, secret) {
@@ -101,34 +78,14 @@ function configuredScope(config = {}) {
   return { sessionIds, groupIds };
 }
 
-function temporaryTargetGroup(config = {}) {
-  const managers = list(config.perfis).filter(profile =>
-    profile && profile.ativo === true && profile.removido !== true && !profile.removidoEm &&
-    sessionOf(profile) === TEMPORARY_SESSION_ID && profile.modulos?.gerente?.ativo === true
-  );
-  if (managers.length !== 1) return "";
-  const manager = managers[0];
-  const groups = manager.modulos.gerente.gruposConfigurados === true
-    ? list(manager.modulos.gerente.grupos)
-    : list(manager.grupos);
-  if (groups.length !== 1) return "";
-  const group = idOf(groups[0]);
-  const program = list(config.programacoes).find(item => item?.id === TEMPORARY_PROGRAM_ID);
-  const programGroups = list(program?.grupos || program?.gruposIds).map(idOf);
-  return group && programGroups.length === 1 && programGroups[0] === group ? group : "";
-}
-
-function isTraceTarget({ clienteId, sessaoId, grupoId, config, env = process.env, now = Date.now() } = {}) {
-  if (!traceEnabled(env, { clienteId, sessaoId, now }) || String(clienteId || "") !== TRACE_WORKSPACE_ID) return false;
+function isTraceTarget({ clienteId, sessaoId, grupoId, config, env = process.env } = {}) {
+  if (!traceEnabled(env) || String(clienteId || "") !== TRACE_WORKSPACE_ID) return false;
   const secret = traceSecret(env);
   if (!secret) return false;
   const scope = configuredScope(config);
   const session = String(sessaoId || "").trim();
   const group = String(grupoId || "").trim();
   if (!session || !group || !scope.sessionIds.has(session) || !scope.groupIds.has(group)) return false;
-  if (!explicitTraceEnabled(env)) {
-    return temporaryTraceEnabled({ clienteId, sessaoId, env, now }) && group === temporaryTargetGroup(config);
-  }
   const expectedSessionHash = String(env.SERVMAQ_GERENTE_TRACE_SESSION_HASH || "").trim();
   const expectedGroupHash = String(env.SERVMAQ_GERENTE_TRACE_GROUP_HASH || "").trim();
   if (!expectedSessionHash || !expectedGroupHash) return false;
@@ -156,12 +113,12 @@ function appendTrace({
   env = process.env,
   now = () => new Date().toISOString()
 } = {}) {
+  if (!TRACE_CODES.has(String(codigo)) || !isTraceTarget({ clienteId, sessaoId, grupoId, config, env })) return false;
+  if (typeof readClienteJson !== "function" || typeof writeClienteJson !== "function") return false;
+  const secret = traceSecret(env);
   const timestamp = now();
   const timestampMs = Date.parse(timestamp);
   const agoraMs = Number.isFinite(timestampMs) ? timestampMs : Date.now();
-  if (!TRACE_CODES.has(String(codigo)) || !isTraceTarget({ clienteId, sessaoId, grupoId, config, env, now: agoraMs })) return false;
-  if (typeof readClienteJson !== "function" || typeof writeClienteJson !== "function") return false;
-  const secret = traceSecret(env);
   const row = {
     timestamp,
     etapa: safeCode(etapa),
@@ -197,9 +154,6 @@ module.exports = {
   TRACE_MAX_BYTES,
   TRACE_MAX_AGE_MS,
   traceEnabled,
-  temporaryTraceEnabled,
-  temporaryTargetGroup,
-  TEMPORARY_TRACE_UNTIL,
   hashIdentifier,
   isTraceTarget,
   appendTrace
