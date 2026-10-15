@@ -1,16 +1,16 @@
-name: Protect Servmaq P0 rollback image
+name: Execute guarded Servmaq P0 image rollback
 
 on:
   push:
     branches:
-      - validation/servmaq-p0-rollback-tag
+      - validation/servmaq-p0-rollback-execute
 
 permissions:
   contents: read
 
 jobs:
-  protect:
-    if: github.ref == 'refs/heads/validation/servmaq-p0-rollback-tag'
+  rollback:
+    if: github.ref == 'refs/heads/validation/servmaq-p0-rollback-execute'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 5
     steps:
@@ -18,34 +18,78 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
-      - name: Verify exclusive rollback-tag scope
+      - name: Verify exclusive rollback scope
         shell: bash
         run: |
           set -Eeuo pipefail
           test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = '.github/workflows/servmaq-p0-rollback-tag.yml'
           test "$GITHUB_WORKSPACE" != /opt/optimus/backend
-      - name: Protect exact running image without touching services
+      - name: Restore exact protected image to backend only
         shell: bash
         run: |
           set -Eeuo pipefail
-          expected_sha=ac3a0f65518d93574f5035f295635f4009c1b199
+          expected_sha=1100ad65be6b40abe627fff2912cc051af661423
+          deployed_image=sha256:66fa44ea9f4eb564e47e70326498ed96dc94fb8e944da4c08d6a07fb4e56e48e
           expected_image=sha256:e6d6980f5bf7703b5fd6f5ba154a6e27dff6ca4ff02d0dd7aec8600c9e7ecda4
           rollback_tag=pre-servmaq-p0-20261015
           test "$(git -C /opt/optimus/backend rev-parse HEAD)" = "$expected_sha"
           backend_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q backend)"
           postgres_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q postgres)"
           test -n "$backend_id" && test -n "$postgres_id"
-          test "$(docker inspect --format '{{.Image}}' "$backend_id")" = "$expected_image"
+          test "$(docker inspect --format '{{.Image}}' "$backend_id")" = "$deployed_image"
           test "$(docker inspect --format '{{.State.Status}}' "$backend_id")" = running
           test "$(docker inspect --format '{{.State.Health.Status}}' "$postgres_id")" = healthy
           docker inspect "$backend_id" --format '{{json .Mounts}}' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const ok=JSON.parse(raw).some(m=>m.Destination==="/data"&&m.Type==="bind"&&m.Source==="/opt/optimus/data");if(!ok)process.exit(1)})'
-          prior="$(docker image inspect --format '{{.Id}}' "$rollback_tag" 2>/dev/null || true)"
-          test -z "$prior" || test "$prior" = "$expected_image"
-          docker tag "$expected_image" "$rollback_tag"
           test "$(docker image inspect --format '{{.Id}}' "$rollback_tag")" = "$expected_image"
-          test "$(docker inspect --format '{{.Image}}' "$backend_id")" = "$expected_image"
-          test "$(docker inspect --format '{{.State.Status}}' "$backend_id")" = running
+          docker compose -f /opt/optimus/infra/compose.yml -f - config --format json <<'ROLLBACK_YAML' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const b=JSON.parse(raw).services?.backend||{};if(b.image!=="pre-servmaq-p0-20261015"||b.build)process.exit(1)})'
+          services:
+            backend:
+              image: pre-servmaq-p0-20261015
+              build: !reset null
+          ROLLBACK_YAML
+          docker compose -f /opt/optimus/infra/compose.yml -f - up -d --no-deps --no-build backend <<'ROLLBACK_YAML'
+          services:
+            backend:
+              image: pre-servmaq-p0-20261015
+              build: !reset null
+          ROLLBACK_YAML
+          restored_id="$(docker compose -f /opt/optimus/infra/compose.yml ps -q backend)"
+          test -n "$restored_id"
+          test "$(docker inspect --format '{{.Image}}' "$restored_id")" = "$expected_image"
+          test "$(docker inspect --format '{{.State.Status}}' "$restored_id")" = running
+          test "$(docker compose -f /opt/optimus/infra/compose.yml ps -q postgres)" = "$postgres_id"
           test "$(docker inspect --format '{{.State.Health.Status}}' "$postgres_id")" = healthy
-          echo "ROLLBACK_TAG=$rollback_tag"
+          docker inspect "$restored_id" --format '{{json .Mounts}}' | node -e 'let raw="";process.stdin.on("data",c=>raw+=c);process.stdin.on("end",()=>{const ok=JSON.parse(raw).some(m=>m.Destination==="/data"&&m.Type==="bind"&&m.Source==="/opt/optimus/data");if(!ok)process.exit(1)})'
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 5 -o /dev/null https://go.optimuspromo.com.br/; then break; fi
+            if test "$attempt" = 30; then exit 1; fi
+            sleep 2
+          done
+          docker exec -i "$restored_id" node - <<'NODE'
+          const http = require('http');
+          const jwt = require('jsonwebtoken');
+          const status = (workspace, route) => new Promise((resolve, reject) => {
+            const token = jwt.sign({ clienteId: workspace }, process.env.JWT_SECRET, { expiresIn: '30s' });
+            const request = http.get({ hostname: '127.0.0.1', port: Number(process.env.PORT || 3000), path: route,
+              headers: { Authorization: `Bearer ${token}` }, timeout: 3000 }, response => {
+              let body = '';
+              response.on('data', chunk => { body += chunk; if (body.length > 65536) request.destroy(); });
+              response.on('end', () => response.statusCode === 200 ? resolve(JSON.parse(body)) : reject(new Error('status_http_' + response.statusCode)));
+            });
+            request.on('timeout', () => request.destroy(new Error('status_timeout')));
+            request.on('error', reject);
+          });
+          (async () => {
+            const servmaq = await status('user_k3phmbkf', '/status/user_k3phmbkf_Servmaq');
+            const diegopc = await status('user_pss60lus', '/sessoes');
+            const diegoSessions = Array.isArray(diegopc?.sessoes) ? diegopc.sessoes : [];
+            const servmaqOpen = servmaq?.status === 'open' && servmaq?.conectado === true;
+            const diegopcOpen = diegoSessions.filter(v => v?.status === 'open' || v?.conectado === true).length;
+            console.log('SERVMAQ_OPEN=' + servmaqOpen);
+            console.log('DIEGOPC_OPEN_COUNT=' + diegopcOpen);
+            if (!servmaqOpen || diegopcOpen < 2) process.exitCode = 1;
+          })().catch(error => { console.log('SESSION_STATUS_ERROR=' + String(error?.message || 'unknown').replace(/[^a-z0-9_:-]/gi, '_').slice(0, 60)); process.exitCode = 1; });
+          NODE
           echo "ROLLBACK_IMAGE_ID=$expected_image"
-          echo 'PRODUCTION_CONTAINER_UNCHANGED=true'
+          echo 'BACKEND_RESTORED=true'
+          echo 'POSTGRES_AND_DATA_PRESERVED=true'
