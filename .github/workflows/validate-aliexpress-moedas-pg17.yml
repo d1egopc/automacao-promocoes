@@ -1,0 +1,169 @@
+name: AliExpress Moedas PostgreSQL 17 validation
+
+on:
+  push:
+    branches:
+      - validation/aliexpress-moedas-pg17
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aliexpress-moedas-pg17-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Linux Node 24 and disposable PostgreSQL 17
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/aliexpress-moedas-pg17'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: aliexpress_ci_disposable
+          POSTGRES_USER: aliexpress_ci
+          POSTGRES_PASSWORD: aliexpress_ci_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aliexpress_ci -d aliexpress_ci_disposable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: ""
+      FILA_CHECKPOINT_TEST_DATABASE_URL: postgresql://aliexpress_ci:aliexpress_ci_disposable_only@127.0.0.1:5432/aliexpress_ci_disposable
+      ALIEXPRESS_PG17_ISOLATED: github-actions-service-17
+
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify isolated ref and environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/aliexpress-moedas-pg17
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${SSH_PRIVATE_KEY:-}"
+          test "$(git rev-parse HEAD^)" = 2e01537104803bba5417bb4770696b30370336da
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Prove PostgreSQL 17 disposable service
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(psql "$FILA_CHECKPOINT_TEST_DATABASE_URL" -Atqc 'SHOW server_version_num')"
+          case "$version" in
+            17*) echo "POSTGRES17_REAL_TEST=PASS version=$version" ;;
+            *) echo "expected PostgreSQL 17, got $version" >&2; exit 1 ;;
+          esac
+
+      - name: Syntax and diff checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check marketplaces/aliexpress/importar.js
+          node --check modules/engine/importer/adapters/aliexpress.adapter.js
+          node --check tests/aliexpress-moedas-productdetail-engine.test.js
+          git diff --check "$GITHUB_SHA^^" "$GITHUB_SHA^"
+
+      - name: Run candidate JavaScript regression matrix
+        shell: bash
+        run: |
+          set -uo pipefail
+          : > "$RUNNER_TEMP/candidate-results.tsv"
+          run_case() {
+            name="$1"; shift
+            "$@" >"$RUNNER_TEMP/candidate-$name.log" 2>&1
+            code=$?
+            printf '%s\t%s\n' "$name" "$code" >> "$RUNNER_TEMP/candidate-results.tsv"
+            echo "CANDIDATE $name exit=$code"
+            tail -n 18 "$RUNNER_TEMP/candidate-$name.log" || true
+          }
+          run_case ali-monedas node tests/aliexpress-moedas-productdetail-engine.test.js
+          run_case ali-app-moedas node tests/aliexpress-app-moedas-contrato.test.js
+          run_case ali-afiliacao node tests/aliexpress-afiliacao-workspace.test.js
+          run_case ali-imagem node tests/aliexpress-imagem-gate.test.js
+          run_case ali-manual node tests/aliexpress-manual-importador.test.js
+          run_case links-v2 node tests/links-comerciais-v2-aliexpress-shopee.test.js
+          run_case memoria node tests/ofertas-v2-achados-dedupe-memoria.test.js
+          run_case memoria-destino node tests/p0-3-memoria-destino.test.js
+          run_case universal node tests/contrato-comercial-final-universal.test.js
+          run_case template node tests/template-universal-visual-contract.test.js
+          run_case amazon node tests/amazon-shortlink-afiliacao.test.js
+          run_case mercadolivre node tests/mercadolivre-identidade-canonica.test.js
+          run_case shopee node tests/shopee-afiliacao-workspace.test.js
+          run_case magalu node tests/magalu-engine-importer.test.js
+          run_case kabum node tests/destinos-compatibilidade-kabum-awin.test.js
+          run_case encoding npm run audit:encoding
+
+      - name: Run existing PostgreSQL repository test against service
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILA_CHECKPOINT_POSTGRES_REQUIRED=1 node tests/fila-checkpoints-entrega.postgres.test.js
+
+      - name: Run matching baseline and classify regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$RUNNER_TEMP/aliexpress-baseline"
+          git worktree add --detach "$baseline" "$GITHUB_SHA^^"
+          cleanup() { git worktree remove --force "$baseline"; }
+          trap cleanup EXIT
+          npm ci --ignore-scripts --prefix "$baseline"
+          : > "$RUNNER_TEMP/baseline-results.tsv"
+          run_base() {
+            name="$1"; shift
+            set +e
+            (cd "$baseline" && NODE_PATH="$baseline/node_modules" "$@") >"$RUNNER_TEMP/baseline-$name.log" 2>&1
+            code=$?
+            set -e
+            printf '%s\t%s\n' "$name" "$code" >> "$RUNNER_TEMP/baseline-results.tsv"
+            echo "BASELINE $name exit=$code"
+          }
+          run_base ali-monedas node tests/aliexpress-moedas-productdetail-engine.test.js
+          run_base ali-app-moedas node tests/aliexpress-app-moedas-contrato.test.js
+          run_base ali-afiliacao node tests/aliexpress-afiliacao-workspace.test.js
+          run_base ali-imagem node tests/aliexpress-imagem-gate.test.js
+          run_base ali-manual node tests/aliexpress-manual-importador.test.js
+          run_base links-v2 node tests/links-comerciais-v2-aliexpress-shopee.test.js
+          run_base memoria node tests/ofertas-v2-achados-dedupe-memoria.test.js
+          run_base memoria-destino node tests/p0-3-memoria-destino.test.js
+          run_base universal node tests/contrato-comercial-final-universal.test.js
+          run_base template node tests/template-universal-visual-contract.test.js
+          run_base amazon node tests/amazon-shortlink-afiliacao.test.js
+          run_base mercadolivre node tests/mercadolivre-identidade-canonica.test.js
+          run_base shopee node tests/shopee-afiliacao-workspace.test.js
+          run_base magalu node tests/magalu-engine-importer.test.js
+          run_base kabum node tests/destinos-compatibilidade-kabum-awin.test.js
+          run_base encoding npm run audit:encoding
+          regression=0
+          while IFS=$'\t' read -r name candidate; do
+            baseline_code="$(awk -F '\t' -v n="$name" '$1==n {print $2}' "$RUNNER_TEMP/baseline-results.tsv")"
+            if [[ "$candidate" != 0 && "$baseline_code" == 0 ]]; then
+              echo "NEW_REGRESSION=$name candidate=$candidate baseline=$baseline_code"
+              regression=1
+            elif [[ "$candidate" != 0 ]]; then
+              echo "BASELINE_FAILURE=$name candidate=$candidate baseline=$baseline_code"
+            else
+              echo "PASS_OR_RECOVERED=$name candidate=$candidate baseline=$baseline_code"
+            fi
+          done < "$RUNNER_TEMP/candidate-results.tsv"
+          if [[ "$regression" != 0 ]]; then exit 1; fi
