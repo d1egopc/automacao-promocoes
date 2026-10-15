@@ -269,6 +269,7 @@ const {
 } = require("./campanhas/agendamentosCampanhas");
 
 const mensageiro = require("./modules/mensageiro");
+const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
@@ -33453,6 +33454,19 @@ registrarListenerUnicoSocket({
         ...contextoListenerCobertura,
         decisao: "recebido"
       });
+      if (gerenteTraceEnabled()) {
+        appendGerenteTrace({
+          clienteId: clienteIdMensageiro,
+          sessaoId: id,
+          grupoId: mensagem?.key?.remoteJid || "",
+          mensagemId: contextoListenerCobertura.mensagemId,
+          codigo: "received",
+          etapa: "listener",
+          config: mensageiro.getMensageiroCliente(clienteIdMensageiro),
+          readClienteJson,
+          writeClienteJson
+        });
+      }
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
         coberturaRadar.registrar("listener_ignorado", {
