@@ -90,8 +90,10 @@ jobs:
           : > "$RUNNER_TEMP/candidate-results.tsv"
           run_case() {
             name="$1"; shift
+            set +e
             "$@" >"$RUNNER_TEMP/candidate-$name.log" 2>&1
             code=$?
+            set -e
             printf '%s\t%s\n' "$name" "$code" >> "$RUNNER_TEMP/candidate-results.tsv"
             echo "CANDIDATE $name exit=$code"
             tail -n 18 "$RUNNER_TEMP/candidate-$name.log" || true
