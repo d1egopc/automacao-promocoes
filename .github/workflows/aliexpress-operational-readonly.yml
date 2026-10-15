@@ -107,8 +107,8 @@ jobs:
               `, [tables])).rows;
               const byTable = new Map();
               for (const r of colRows) { if (!byTable.has(r.table_name)) byTable.set(r.table_name, []); byTable.get(r.table_name).push(r.column_name); }
-              const timeCandidates = ['created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','inserted_at','timestamp','published_at','updated_at','data_captura','data_criacao'];
-              const safeCandidates = ['id','event_id','link_id','job_id','workspace_id','cliente_id','client_id','marketplace','marketplace_name','status','state','reason','motivo','product_id','productId','attempts','tentativas','priority','prioridade','claimed_at','finished_at','created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','updated_at'];
+              const timeCandidates = ['created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','inserted_at','timestamp','published_at','updated_at','data_captura','data_criacao','capturado_em','criado_em','atualizado_em','ocorrido_em','criada_em','finalizado_em','confirmado_em','claimed_at','finished_at','started_at'];
+              const safeCandidates = ['id','uuid','event_id','evento_id','link_id','job_id','workspace_id','cliente_id','client_id','marketplace','marketplace_name','marketplace_detectado','status','state','reason','motivo','motivo_final','motivo_status','product_id','productId','attempts','tentativas','priority','prioridade','claimed_at','finished_at','created_at','createdAt','captured_at','received_at','receivedAt','occurred_at','updated_at','capturado_em','criado_em','atualizado_em','ocorrido_em','criada_em','categoria','origem','etapa','oferta_id','redirect_ok','motivo_redirect'];
               for (const table of tables) {
                 const cols = byTable.get(table) || [];
                 const visible = cols.filter(c => !/url|text|message|body|title|name|cookie|token|secret|password|credential|key/i.test(c)).slice(0, 80);
@@ -153,7 +153,8 @@ jobs:
             "$(grep -Eio 'import|job|oferta' "$log_file" | wc -l)" \
             "$(grep -Eio 'rio|fila|destino' "$log_file" | wc -l)" \
             "$(grep -Eio 'error|falha|link_afiliado|integracao_ausente' "$log_file" | wc -l)"
-          grep -Ei 'aliexpress|link_afiliado|integracao_ausente|productdetail|importer|rio|fila|destino' "$log_file" \
+          grep -Ei 'aliexpress|link_afiliado|integracao_ausente|productdetail|importer|promozone|redirect_(loop|limit|bloqueado)|api\.aliexpress' "$log_file" \
+            | grep -Eiv 'PERF DB POOL|SOCIAL-' \
             | sed -E 's/(token|secret|cookie|authorization|password|api[_-]?key)[=:][^[:space:]]+/\1=<REDACTED>/gi; s#https?://[^[:space:]]+#<URL_REDACTED>#g; s/[0-9]{8,}/<ID_REDACTED>/g' \
             | head -n 60 || true
           backend_id="$(docker compose -f "$COMPOSE_FILE" ps -q backend)"
