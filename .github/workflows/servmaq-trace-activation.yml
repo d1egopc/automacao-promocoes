@@ -35,7 +35,7 @@ jobs:
           set -Eeuo pipefail
           umask 077
           summary="$GITHUB_STEP_SUMMARY"
-printf 'TRACE_STAGE=preflight_start\n' >> "$summary"
+          printf 'TRACE_STAGE=preflight_start\n' >> "$summary"
           tmpdir="$(mktemp -d)"
           env_file=""
           backup=""
@@ -61,7 +61,7 @@ printf 'TRACE_STAGE=preflight_start\n' >> "$summary"
           production_sha="$(git -C "$BACKEND_DIR" rev-parse HEAD)"
           printf 'PRODUCTION_SHA=%s\n' "$production_sha" >> "$summary"
           test "$production_sha" = "$EXPECTED_SHA"
-printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
+          printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
           data_before="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$backend_id")"
           test "$data_before" = "$DATA_DIR"
           image_before="$(docker inspect --format '{{.Image}}' "$backend_id")"
@@ -117,13 +117,20 @@ printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
             }
             const uniquePairs = [...new Map(pairs.map(pair => [pair.sessionId + '\\u0000' + pair.groupId, pair])).values()];
             if (uniquePairs.length !== 1) process.exit(3);
-            console.log(uniquePairs[0].sessionId); console.log(uniquePairs[0].groupId);
+            console.log(uniquePairs[0].sessionId);
+          console.log(uniquePairs[0].groupId);
           })().catch(() => process.exit(3));
           NODE
           test "$(sed -n '1p' "$tmpdir/scope")" && test "$(sed -n '2p' "$tmpdir/scope")"
           session_id="$(sed -n '1p' "$tmpdir/scope")"
           group_id="$(sed -n '2p' "$tmpdir/scope")"
-          case "$session_id$group_id" in *\\*|*$'\r'*) printf 'TRACE_STAGE=scope_id_guard_failed\n' >> "$summary"; exit 3;; esac
+          case "$session_id$group_id" in
+            *\\*) printf 'TRACE_STAGE=scope_id_guard_failed\n' >> "$summary"; exit 3;;
+          esac
+          if printf '%s' "$session_id$group_id" | LC_ALL=C grep -q '[^[:print:]]'; then
+            printf 'TRACE_STAGE=scope_id_guard_failed\n' >> "$summary"
+            exit 3
+          fi
           printf 'TRACE_STAGE=scope_ids_pass\n' >> "$summary"
 
           check_session() {
@@ -144,6 +151,7 @@ printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
           if [[ "$env_file" != /* ]]; then env_file="$(cd "$(dirname "$COMPOSE_FILE")" && pwd)/$env_file"; fi
           test -f "$env_file" && test -w "$env_file"
 
+          printf 'TRACE_STAGE=pre_mutation\n' >> "$summary"
           backup="$env_file.pre-servmaq-trace.$(date -u +%Y%m%dT%H%M%SZ)"
           cp -p "$env_file" "$backup"
           chmod 600 "$backup" >/dev/null 2>&1 || true
@@ -154,8 +162,11 @@ printf 'TRACE_STAGE=preflight_pass\n' >> "$summary"
           NODE
           shash="$(sed -n '1p' "$tmpdir/hashes")"
           ghash="$(sed -n '2p' "$tmpdir/hashes")"
-          [[ "$shash" =~ ^[0-9a-f]{16}$ ]] && [[ "$ghash" =~ ^[0-9a-f]{16}$ ]] || { printf 'TRACE_STAGE=hmac_guard_failed\n' >> "$summary"; exit 3; }; printf 'TRACE_STAGE=hmac_pass\n' >> "$summary"
-          printf 'TRACE_STAGE=pre_mutation\n' >> "$summary"
+          if ! [[ "$shash" =~ ^[0-9a-f]{16}$ ]] || ! [[ "$ghash" =~ ^[0-9a-f]{16}$ ]]; then
+            printf 'TRACE_STAGE=hmac_guard_failed\n' >> "$summary"
+            exit 3
+          fi
+          printf 'TRACE_STAGE=hmac_pass\n' >> "$summary"
           new_env="$(mktemp "$(dirname "$env_file")/.servmaq-trace.XXXXXX")"
           awk '!/^SERVMAQ_GERENTE_TRACE_(ENABLED|SECRET|SESSION_HASH|GROUP_HASH)=/' "$env_file" > "$new_env"
           printf 'SERVMAQ_GERENTE_TRACE_ENABLED=1\nSERVMAQ_GERENTE_TRACE_SECRET=%s\nSERVMAQ_GERENTE_TRACE_SESSION_HASH=%s\nSERVMAQ_GERENTE_TRACE_GROUP_HASH=%s\n' "$secret" "$shash" "$ghash" >> "$new_env"
