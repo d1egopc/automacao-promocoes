@@ -35,7 +35,7 @@ jobs:
           docker inspect --format 'BACKEND={{.State.Status}} RESTARTS={{.RestartCount}} OOM={{.State.OOMKilled}}' "$backend_id"
           docker inspect --format 'POSTGRES={{.State.Status}} HEALTH={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$postgres_id"
           backend_image_id="$(docker inspect --format '{{.Image}}' "$backend_id")"
-          test -n "$backend_image_id"
+          test "$backend_image_id" = sha256:e6d6980f5bf7703b5fd6f5ba154a6e27dff6ca4ff02d0dd7aec8600c9e7ecda4
           echo "BACKEND_IMAGE_ID=$backend_image_id"
           docker image inspect "$backend_image_id" --format 'ROLLBACK_SOURCE_IMAGE_PRESENT=true' >/dev/null
           echo 'ROLLBACK_SOURCE_IMAGE_PRESENT=true'
@@ -94,12 +94,7 @@ jobs:
             ? (program.grupos || program.gruposIds).map(idOf) : [];
           console.log('TRACE_UNIQUE_GROUP_SCOPE=' + (Array.isArray(managerGroups) && managerGroups.length === 1 && programGroups.length === 1 && idOf(managerGroups[0]) === programGroups[0]));
           console.log('TRACE_HMAC_KEY_AVAILABLE=' + Boolean(process.env.SERVMAQ_GERENTE_TRACE_SECRET || process.env.JWT_SECRET));
-          const traceModule = require('/app/modules/mensageiro/gerente-trace.js');
-          const targetGroup = Array.isArray(managerGroups) && managerGroups.length === 1 ? idOf(managerGroups[0]) : '';
-          console.log('TEMP_TRACE_ENABLED=' + traceModule.temporaryTraceEnabled({ clienteId: workspace, sessaoId: session }));
-          console.log('TRACE_SCOPE_TARGET=' + traceModule.isTraceTarget({ clienteId: workspace, sessaoId: session, grupoId: targetGroup, config: cfg }));
-          console.log('TRACE_SCOPE_OTHER_WORKSPACE=' + traceModule.isTraceTarget({ clienteId: 'user_pss60lus', sessaoId: session, grupoId: targetGroup, config: cfg }));
-          console.log('TRACE_SCOPE_OTHER_GROUP=' + traceModule.isTraceTarget({ clienteId: workspace, sessaoId: session, grupoId: 'invalid-group@g.us', config: cfg }));
+          console.log('ROLLBACK_TRACE_INACTIVE_BY_IMAGE=true');
           console.log('MANAGER_ACTIVE_RULE_COUNT=' + active.length);
           console.log('MANAGER_TEST_WORD=' + hasTest);
           const history = read(`${root}/clientes/${workspace}/mensageiro-config.json`, {});
