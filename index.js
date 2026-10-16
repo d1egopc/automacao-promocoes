@@ -21452,8 +21452,8 @@ function dominioRadar(url = "") {
   }
 }
 
-function linkRedirectPermitidoRadar(url = "") {
-  return dominioRedirectPermitido(url);
+function linkRedirectPermitidoRadar(url = "", opcoes = {}) {
+  return dominioRedirectPermitido(url, opcoes);
 }
 
 function linkEngineV2Radar(url = "") {
@@ -21601,11 +21601,13 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
     linkOriginal: capturada
   });
 
-  if (linkRedirectPermitidoRadar(capturada)) {
+  if (linkRedirectPermitidoRadar(capturada, opcoes)) {
     const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
     const redirect = await resolverRedirectUniversal(capturada, {
       timeout: 4500,
-      maxRedirects: 5
+      maxRedirects: 5,
+      ...(opcoes.ponteInteligente ? { ponteInteligente: opcoes.ponteInteligente } : {}),
+      ...(opcoes.safeHttpDeps ? { safeHttpDeps: opcoes.safeHttpDeps } : {})
     });
     const resolvida = redirect.urlFinal || "";
     const marketplaceFinal = normalizarMarketplaceRadar(redirect.marketplaceDetectado || "");
@@ -21659,7 +21661,10 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
         marketplaceReal: marketplaceFinal || marketplacePromozoneSugerido || "",
         tipoLinkRadar: "promozone",
         statusHttp: redirect.statusHttp || "",
-        erro: redirect.erro || ""
+        erro: redirect.erro || "",
+        ...(redirect.status === "candidato" && redirect.destinoCandidato
+          ? { destinoCandidato: redirect.destinoCandidato,
+            marketplaceCandidato: redirect.marketplaceCandidato || "" } : {})
       };
     }
 
@@ -22946,14 +22951,14 @@ function listarClientesEngineRadar(dados = {}) {
     return [];
   }
 }
-async function prepararLinksRedirectEngineRadar(dados = {}) {
+async function prepararLinksRedirectEngineRadar(dados = {}, opcoes = {}) {
   const linksCapturados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
   const redirectsRadar = [];
   const identidadesCanonicas = [];
   const linksEngine = [];
 
   for (const link of linksCapturados) {
-    if (!linkRedirectPermitidoRadar(link)) {
+    if (!linkRedirectPermitidoRadar(link, opcoes)) {
       const camposCanonicosLink = camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link });
       if (camposCanonicosLink.chaveCanonica) {
         identidadesCanonicas.push({
@@ -22967,7 +22972,7 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       continue;
     }
 
-    const resolucao = await resolverLinkOriginalRadar(link);
+    const resolucao = await resolverLinkOriginalRadar(link, opcoes);
     const linkResolvido = resolucao?.ok
       ? (resolucao.linkOriginalLimpo || resolucao.linkResolvido || resolucao.urlResolvida || "")
       : "";
@@ -22981,6 +22986,9 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       marketplaceCanonico: resolucao?.marketplaceCanonico || "",
       status: resolucao?.ok ? "resolvido" : "falhou",
       motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou"),
+      ...(!resolucao?.ok && resolucao?.destinoCandidato
+        ? { destinoCandidato: resolucao.destinoCandidato,
+          marketplaceCandidato: resolucao.marketplaceCandidato || "" } : {}),
       ...(!resolucao?.ok && resolucao?.motivoRedirectTecnico
         ? { motivoRedirectTecnico: resolucao.motivoRedirectTecnico } : {})
     });

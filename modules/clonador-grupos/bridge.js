@@ -169,7 +169,10 @@ async function resolverLinksClonador(links = [], resolver = resolverRedirectClon
       produtoIdCanonico: resolucao?.produtoIdCanonico || "",
       marketplaceCanonico: resolucao?.marketplaceCanonico || "",
       status: resolucao?.ok ? "resolvido" : (resolucao?.status || "falhou"),
-      motivo: resolucao?.ok ? "" : (resolucao?.motivo || "redirect_falhou")
+      motivo: resolucao?.ok ? "" : (resolucao?.motivo || "redirect_falhou"),
+      ...(!resolucao?.ok && resolucao?.destinoCandidato
+        ? { destinoCandidato: resolucao.destinoCandidato,
+          marketplaceCandidato: resolucao.marketplaceCandidato || "" } : {})
     });
   }
 
