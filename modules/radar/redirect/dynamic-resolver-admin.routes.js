@@ -4,6 +4,8 @@ const express = require("express");
 const { inferirFamilia, inferirFamiliaRascunho, registroDinamicoPadrao } = require("./dynamic-resolver-registry");
 const { validarUrlPublica } = require("./safe-redirect-http");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
+const { criarContratoPreparacaoLinks } = require("../../engine/preparacao-links.service");
+const { normalizarMotivoTecnicoRedirect } = require("./redirect-diagnostic-code");
 const {
   detectarMarketplaceRedirect, listarResolversRedirect, resolverRedirectUniversal,
   urlAmazonComAsinExplicito, urlMercadoLivreComMlbExplicito
@@ -14,6 +16,75 @@ const segmentosEstruturais = new Set([
   "p", "dp", "gp", "coupon", "coupons", "cupom", "resgate", "offer", "offers", "checkout",
   "shop", "store", "app", "pc", "pdp", "catalog", "detail", "details", "promotion", "promotions"
 ]);
+const papeisPreview = new Set(["nao_informado", "produto", "app", "pc", "moedas", "moda", "resgate"]);
+const metodosPreview = new Set(["http_redirect", "html_contextual", "html_marketplace_url",
+  "meta_refresh", "window_location", "parametro_e_html_produto", "http_sem_redirect"]);
+
+function ocorrenciasPreview(body = {}) {
+  if (!body || typeof body !== "object") throw new Error("PREVIEW_OCORRENCIAS_INVALIDAS");
+  const entradas = body.ocorrencias === undefined
+    ? [{ urlExemplo: body.urlExemplo, papel: body.papel }]
+    : body.ocorrencias;
+  if (!Array.isArray(entradas) || entradas.length < 1 || entradas.length > 5)
+    throw new Error("PREVIEW_OCORRENCIAS_INVALIDAS");
+  return entradas.map(item => {
+    const urlExemplo = item?.urlExemplo;
+    const papel = item?.papel === undefined ? "nao_informado" : item.papel;
+    if (typeof urlExemplo !== "string" || !urlExemplo || urlExemplo !== urlExemplo.trim() ||
+        urlExemplo.length > 2048) throw new Error("PREVIEW_OCORRENCIAS_INVALIDAS");
+    if (!papeisPreview.has(papel)) throw new Error("PREVIEW_PAPEL_INVALIDO");
+    return { urlExemplo, papel };
+  });
+}
+
+// Only the administrative preview owns this contract. A discovered destination is
+// recorded as a redirect candidate, never as a prepared commercial/affiliate link.
+function montarContratoPreview(ocorrencias, analises) {
+  return criarContratoPreparacaoLinks({
+    linksOriginais: ocorrencias.map(item => item.urlExemplo),
+    linksPreparados: [],
+    redirects: analises.map((analise, indice) => ({
+      linkOriginalCapturado: ocorrencias[indice].urlExemplo,
+      linkResolvido: analise.ok ? (analise.resultado.urlExpandida || analise.resultado.urlFinal || "") : "",
+      marketplaceDetectado: analise.ok ? analise.marketplace : "",
+      status: analise.ok ? "resolvido" : "falhou",
+      motivo: analise.ok ? "" : normalizarMotivoTecnicoRedirect(analise.resultado),
+      papelOriginal: ocorrencias[indice].papel,
+      proveniencia: "admin_links_preview"
+    })),
+    identidadesCanonicas: []
+  });
+}
+
+function projecaoPreview(registro, ocorrencias, analises) {
+  const contrato = montarContratoPreview(ocorrencias, analises);
+  return {
+    ok: analises.every(item => item.ok),
+    modo: "previsualizacao_sem_ingresso",
+    prontoComercial: false,
+    rascunhoId: registro.id,
+    contrato: {
+      linksOriginais: contrato.linksOriginais.length,
+      destinosCandidatos: contrato.redirects.filter(item => item.status === "resolvido").length,
+      linksPreparados: contrato.linksPreparados.length,
+      identidadesCanonicas: contrato.identidadesCanonicas.length
+    },
+    ocorrencias: analises.map((analise, indice) => ({
+      indice,
+      papelOriginal: ocorrencias[indice].papel,
+      proveniencia: "admin_links_preview",
+      statusDestino: analise.ok ? "candidato_encontrado" : "nao_encontrado",
+      destinoCandidato: analise.ok ? analise.debug.destino : "",
+      marketplaceCandidato: analise.ok ? analise.marketplace : "nao_comprovado",
+      metodo: analise.ok && metodosPreview.has(analise.metodo) ? analise.metodo : "nao_comprovado",
+      identidade: analise.ok ? "pendente" : "nao_comprovada",
+      afiliacao: "nao_comprovada",
+      produtoConfirmado: false,
+      afiliacaoConfirmada: false,
+      motivoTecnico: analise.ok ? null : normalizarMotivoTecnicoRedirect(analise.resultado)
+    }))
+  };
+}
 
 function segmentoEstruturalSeguro(segmento) {
   let decodificado;
@@ -77,7 +148,7 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     const marketplace = detectarMarketplaceRedirect(final);
     const ok = resultado.ok === true && Boolean(marketplace) &&
       marketplace === resultado.marketplaceDetectado;
-    return { familia, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
+    return { familia, resultado, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
       evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
       debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
   }
@@ -106,7 +177,8 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     const codigo = String(error?.message || "");
     const publico = new Set(["URL_EXEMPLO_INVALIDA", "FAMILIA_NAO_INFERIVEL", "RESOLVER_DUPLICADO",
       "RESOLVER_NAO_ENCONTRADO", "URL_BLOQUEADA_SEGURANCA", "RESOLVER_HARDCODED", "ATIVO_INVALIDO",
-      "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_INCOMPATIVEL"]);
+      "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_INCOMPATIVEL", "PREVIEW_OCORRENCIAS_INVALIDAS",
+      "PREVIEW_PAPEL_INVALIDO"]);
     return res.status(codigo === "RESOLVER_DUPLICADO" ? 409 : publico.has(codigo) ? 400 : 500)
       .json({ ok: false, erro: publico.has(codigo) ? codigo : "LINK_RESOLVER_OPERATION_FAILED" });
   }
@@ -126,6 +198,22 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
         marketplace: analise.marketplace, metodo: analise.metodo, debug: analise.debug
       });
       return res.status(201).json({ ok: true, resolver: registroPublico(registro) });
+    } catch (error) { return erro(res, error); }
+  });
+  router.post("/drafts/:id/engine-preview", async (req, res) => {
+    try {
+      const registro = getStore().buscar(req.params.id);
+      if (!registro || registro.estado !== "rascunho" || registro.ativo !== false)
+        throw new Error("RESOLVER_NAO_ENCONTRADO");
+      const ocorrencias = ocorrenciasPreview(req.body);
+      for (const item of ocorrencias) {
+        const familia = inferirFamiliaRascunho(item.urlExemplo);
+        if (familia.host !== registro.host || familia.pathPrefix !== registro.pathPrefix ||
+            familia.pathMode !== registro.pathMode) throw new Error("RASCUNHO_INCOMPATIVEL");
+      }
+      const analises = [];
+      for (const item of ocorrencias) analises.push(await descobrir(item.urlExemplo));
+      return res.json(projecaoPreview(registro, ocorrencias, analises));
     } catch (error) { return erro(res, error); }
   });
   router.post("/drafts/:id/test", async (req, res) => {
@@ -197,4 +285,4 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   return router;
 }
 
-module.exports = { criarRotasResolversDinamicos, diagnosticoSeguro, tipoResultado };
+module.exports = { criarRotasResolversDinamicos, diagnosticoSeguro, tipoResultado, montarContratoPreview };

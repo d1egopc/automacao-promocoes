@@ -56,6 +56,7 @@ jobs:
         run: |
           node tests/links-discovery-draft.test.js
           node tests/links-engine-capture-diagnostic-api.test.js
+          node tests/links-engine-preparation-preview.test.js
           node tests/radar-redirect-diagnostico-persistencia.test.js
 
       - name: Detect shared marketplace changes
