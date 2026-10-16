@@ -52,3 +52,20 @@ Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco 
 ## Gate minimo
 
 Teste os seis marketplaces nos fluxos de captura/preview, Salvar, `+ Lista`, Enviar agora e pipeline automatico sempre que um contrato compartilhado mudar.
+
+## Mapa de regressao executavel existente
+
+Estes arquivos existem na main oficial; sua presenca nao significa que o CI de producao os execute ou que uma oferta real tenha sido comprovada:
+
+- Mercado Livre: Engine/identidade/imagem/Work em `tests/mercadolivre-identidade-canonica.test.js`, `tests/mercadolivre-imagem-oficial-fallback.test.js` e `tests/mercadolivre-work-backend-order.test.js`; Manual V2 em `tests/manual-v2-import-mercadolivre.test.js`; extensao em `tests/optimus-capture-extension.test.js` e `tests/optimus-capture-local-worker-ml-image.test.js`.
+- Amazon: Engine/afiliacao em `tests/amazon-shortlink-afiliacao.test.js`; Manual V2 em `tests/manual-v2-import-amazon.test.js`; titulo/imagem/captura da extensao em `tests/optimus-capture-extension.test.js`.
+- Shopee: Engine, produto/resgate, titulo e afiliacao em `tests/shopee-resgate-ocorrencias.test.js`, `tests/shopee-rio-titulo-beneficio.test.js` e `tests/shopee-afiliacao-workspace.test.js`; Manual V2 em `tests/manual-v2-import-shopee.test.js`; extensao em `tests/optimus-capture-extension.test.js`.
+- AliExpress: Engine, APP/PC/Moedas e prova por workspace em `tests/aliexpress-app-moedas-contrato.test.js`, `tests/aliexpress-moedas-productdetail-engine.test.js` e `tests/aliexpress-afiliacao-workspace.test.js`; Manual V2 em `tests/manual-v2-import-aliexpress.test.js`; extensao em `tests/optimus-capture-extension.test.js`.
+- Magalu: Engine/identidade/imagem/afiliacao em `tests/magalu-v2-golden-path.test.js`, `tests/magalu-identity-engine-importer.test.js` e `tests/magalu-image-resolver.test.js`; Manual V2 em `tests/manual-v2-import-magalu.test.js`; extensao/Work em `tests/optimus-capture-magalu.test.js` e `tests/magalu-local-worker-identity.test.js`.
+- KaBuM/AWIN: Engine/importador e preco em `tests/kabum-hotfix.test.js` e `tests/destinos-compatibilidade-kabum-awin.test.js`; Manual V2 em `tests/manual-v2-import-kabum.test.js`; extensao e Launcher em `tests/optimus-capture-extension.test.js` e `tests/optimus-capture-launcher.test.js`.
+
+Para alteracao compartilhada de links, classificacao, imagem, afiliacao ou template, acrescente `tests/engine-v2-marketplaces-fidelidade.test.js`, `tests/link-conversao-ocorrencia-marketplaces.test.js`, `tests/contrato-comercial-final-universal.test.js`, `tests/imagem-link-contrato-universal.test.js`, `tests/template-universal-visual-contract.test.js`, `tests/dynamic-link-resolvers.test.js` e `tests/redirect-resolver-shortlinks-seguros.test.js`. Compare qualquer falha com a baseline; nao enfraqueca assertions para fechar o gate.
+
+## Lacuna do CI oficial
+
+Na revisao desta main, `.github/workflows/deploy-backend-vps.yml` roda bootstrap, financeiro e configuracao de links, mas nao chama as suites acima de Engine, Manual V2 ou extensao dos seis marketplaces. Antes de publicar mudanca **compartilhada** nessas areas, a matriz acima e os testes transversais impactados devem ser gate obrigatorio em CI Linux Node 24 do candidato, com falhas comparadas a sua baseline. Isto e uma exigencia proposta de homologacao; o workflow ainda nao foi alterado. PostgreSQL 17 isolado continua necessario quando a mudanca tocar selecao, claim ou persistencia SQL, nao por toda edicao documental.

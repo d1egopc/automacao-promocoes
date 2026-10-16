@@ -30,6 +30,13 @@ O gerente opera mensagens de grupo, permissoes administrativas, regras, avisos, 
 - Para programacao, `gruposConfigurados` proprio tem precedencia; caso contrario vale o alcance proprio do modulo de programacoes, depois `config.grupos`. Programacao com `perfilId` usa a sessao do perfil ativo; programacao legada sem `perfilId` continua usando a sessao global configurada.
 - O trace temporario do Gerente e opt-in, desligado por padrao e condicionado a workspace, sessao e grupo exatos. Nao o habilite por mudanca documental ou deploy nao relacionado; sua ativacao e evidencias pertencem ao registro temporal.
 
+## Diagnostico autorizado por workspace
+
+- Encontre a configuracao global em `/data/mensageiro.json`, pela chave `clienteId`, e o historico/configuracao complementar em `/data/clientes/<clienteId>/mensageiro-config.json`. Para diagnostico READ-ONLY, leia e analise JSON diretamente; nao chame getters do storage que possam normalizar e gravar.
+- Compare a sessao do perfil, o grupo por ID e o alcance efetivo do modulo com o estado **runtime** do socket Baileys. Sessao configurada nao equivale a `open`; nome da sessao ou do grupo nao prova identidade nem permissao no grupo.
+- Siga o listener ativo `messages.upsert` em `index.js` ate `tratarMensagemGrupoGerente()` em `modules/mensageiro/gerente.service.js`. Separe recebimento/decriptacao, roteamento do tenant, perfil/regra, isencao do remetente, permissao do bot e resultado de delete/aviso.
+- Use somente SSH verificado ou runner READ-ONLY com autorizacao especifica, conforme [PRODUCTION-DEPLOYMENT.md](PRODUCTION-DEPLOYMENT.md). Logs Docker sem cobertura historica nao comprovam ausencia de mensagem. Nao exponha JIDs, numeros, texto privado, auth ou chaves Signal e nao execute teste real sem autorizacao.
+
 ## Mudanca segura
 
 Teste grupo e privado separadamente; preserve imagens, texto, programacoes, cooldown e permissoes. Nao altere sessao, grupos ou moderacao como efeito colateral de mudanca na fila/oferta.

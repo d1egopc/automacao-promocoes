@@ -15,6 +15,13 @@ Preserve o que ja funciona. Melhore somente com prova. Use a menor capacidade de
 
 Leia [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md) e os contratos da area tocada antes de alterar qualquer arquivo.
 
+## Entrada para uma nova sessao Codex
+
+1. Abra esta pasta oficial, leia este `AGENTS.md` e os contratos do modulo antes de usar uma worktree, backup ou candidata como referencia.
+2. Confirme repositorio, branch, HEAD, `origin/main` e alteracoes locais; verifique o SHA ativo de producao por canal autorizado antes de equiparar codigo local a runtime.
+3. Para operacao, siga [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md) e, para WhatsApp, [MESSENGER.md](docs/contracts/MESSENGER.md). Nao presuma SSH funcional nem reutilize workflows de deploy para diagnostico.
+4. Worktrees antigas e commits WIP preservam experimentos, mas nunca substituem a base oficial nem autorizam mescla ou publicacao automatica.
+
 ## Classificacao obrigatoria
 
 Antes de trabalhar, registre:
@@ -86,7 +93,7 @@ Antes de alterar Launcher, Side Panel, captura compartilhada, registry, product-
 3. Preserve Mercado Livre com MLBU factual e MLB somente como alias comprovado.
 4. Mantenha o Launcher abrindo nos seis marketplaces e preserve na Shopee a estrategia de nao colisao com o chat.
 5. Mantenha Salvar, Enviar agora e `+ Lista` como acoes distintas e funcionais.
-6. Exija regressao executavel dos seis marketplaces antes de candidata/release quando houver mudanca compartilhada da extensao.
+6. Exija regressao executavel dos seis marketplaces antes de candidata/release quando houver mudanca compartilhada da extensao; use o [mapa de testes golden](docs/contracts/MARKETPLACES.md#mapa-de-regressao-executavel-existente) e confira o CI realmente acionado.
 7. Nao substitua comportamento mais novo de uma fonte oficial por copia mais velha sem diff e prova explicita.
 8. Faca o Modo Selecao reutilizar os adapters e o pipeline homologados; nao crie segunda autoridade de captura.
 

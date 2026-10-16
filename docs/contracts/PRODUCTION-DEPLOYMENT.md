@@ -23,6 +23,14 @@ Nunca:
 - limpe ou substitua `/data`;
 - use Railway como baseline.
 
+## Canais de consulta operacional
+
+- Codigo e CI: consulte o repositorio oficial e os runs do GitHub Actions. O workflow de deploy acima e o mecanismo de publicacao, nao uma autorizacao para diagnosticos ou mudancas ad hoc.
+- VPS Hostinger: use SSH somente quando a identidade do host e a autenticacao desta sessao estiverem comprovadas. Como alternativa, um workflow READ-ONLY explicitamente autorizado pode consultar o runner self-hosted `[self-hosted, Linux, X64]`. A existencia do runner nao prova acesso SSH local nem autoriza criar/executar workflow sem escopo aprovado.
+- No host autorizado, localize o checkout `/opt/optimus/backend`, Compose `/opt/optimus/infra/compose.yml` e bind `/opt/optimus/data -> /data`. Para infraestrutura, consulte metadados de container, imagem, mounts, health, restart/OOM e logs sanitizados com janela e cobertura verificadas; configuracoes de modulo seguem seu contrato proprio. Nao imprima `docker compose config` completo, `.env`, auth ou dados privados.
+- Banco: identifique o esquema antes de consultar. Use transacao READ ONLY, `statement_timeout`, filtros indexados e limites; nunca interprete ausencia de log sem confirmar cobertura.
+- API publica: `https://go.optimuspromo.com.br`; frontend: painel Vercel do projeto `optimus-promo/optimuspromo` e dominio `https://www.optimuspromo.com.br`. Confirme deployment Production e source SHA no painel; nao infira Production pela branch local ou por um Preview READY.
+
 ## Baseline obrigatoria
 
 Antes de mudar producao, registre SHA/tree, status Git, container/image IDs, restart/OOM, Postgres health, mounts, hashes de Compose/env, flags relevantes, HTTP local/publico e CPU/RSS. Nao exponha valores secretos; registre apenas hashes e flags nao sensiveis.
