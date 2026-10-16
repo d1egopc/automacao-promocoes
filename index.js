@@ -532,7 +532,10 @@ const {
   resolverRedirectClonador,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
+const { normalizarMotivoTecnicoRedirect } =
+  require("./modules/radar/redirect/redirect-diagnostic-code");
 const { criarRotasResolversDinamicos } = require("./modules/radar/redirect/dynamic-resolver-admin.routes");
+const { criarRotasDiagnosticoCapturaEngine } = require("./modules/links/engine-capture-diagnostic.routes");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
   extrairTransporteShowProductMercadoLivreHtml,
@@ -16496,6 +16499,7 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
 }));
 app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
 app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos());
+app.use("/admin/links/engine-eventos", exigirAdminMasterEstrito, criarRotasDiagnosticoCapturaEngine());
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
@@ -21641,6 +21645,9 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
         ok: false,
         motivo: motivoFalha,
         motivoTecnico: motivoFalha,
+        motivoRedirectTecnico: redirect.ok
+          ? "destino_comercial_nao_comprovado"
+          : normalizarMotivoTecnicoRedirect(redirect),
         ...camposCanonicosRedirect,
         urlCapturada: capturada,
         urlResolvida: resolvida,
@@ -22056,6 +22063,7 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
       ok: false,
       motivo: "redirect_bloqueado",
       motivoTecnico: "redirect_bloqueado",
+      motivoRedirectTecnico: normalizarMotivoTecnicoRedirect(e?.message || ""),
       ...camposCanonicosCapturada,
       urlCapturada: capturada,
       linkOriginalRadar: capturada,
@@ -22969,7 +22977,9 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       produtoIdCanonico: resolucao?.produtoIdCanonico || "",
       marketplaceCanonico: resolucao?.marketplaceCanonico || "",
       status: resolucao?.ok ? "resolvido" : "falhou",
-      motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou")
+      motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou"),
+      ...(!resolucao?.ok && resolucao?.motivoRedirectTecnico
+        ? { motivoRedirectTecnico: resolucao.motivoRedirectTecnico } : {})
     });
     if (resolucao?.chaveCanonica) {
       identidadesCanonicas.push({

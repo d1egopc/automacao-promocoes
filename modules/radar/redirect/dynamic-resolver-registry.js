@@ -18,6 +18,24 @@ function inferirFamilia(urlExemplo) {
   return { host, pathPrefix, urlExemplo: url.toString() };
 }
 
+function inferirFamiliaRascunho(urlExemplo) {
+  let url;
+  try { url = new URL(String(urlExemplo || "")); }
+  catch { throw new Error("URL_EXEMPLO_INVALIDA"); }
+  const partes = url.pathname.split("/").filter(Boolean);
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash ||
+      !url.hostname.includes(".") || url.href.length > 2048 || url.pathname.length > 512 ||
+      partes.length < 1 || partes.length > 4 ||
+      partes.slice(0, -1).some(parte => !/^[a-z0-9_-]{1,64}$/i.test(parte)) ||
+      !/^[a-z0-9_-]{1,256}$/i.test(partes.at(-1))) {
+    throw new Error("URL_EXEMPLO_INVALIDA");
+  }
+  return { host: url.hostname.toLowerCase(),
+    pathPrefix: partes.length === 1 ? "/" : `/${partes.slice(0, -1).join("/")}/`,
+    pathMode: "one_segment_suffix",
+    urlExemplo: url.toString() };
+}
+
 function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
   let registros = [];
   if (fs.existsSync(file)) {
@@ -56,7 +74,9 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     try { url = new URL(String(urlTexto || "")); } catch { return null; }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port) return null;
     return registros.find(item => item.ativo === true && item.host === url.hostname.toLowerCase() &&
-      (item.pathPrefix.endsWith("/") ? url.pathname.startsWith(item.pathPrefix) : url.pathname === item.pathPrefix)) || null;
+      (item.pathPrefix.endsWith("/") ? url.pathname.startsWith(item.pathPrefix) : url.pathname === item.pathPrefix) &&
+      (item.pathMode !== "one_segment_suffix" ||
+        /^[a-z0-9_-]{1,256}$/i.test(url.pathname.slice(item.pathPrefix.length)))) || null;
   }
   function adicionar(familia, diagnostico = {}) {
     if (registros.some(item => item.host === familia.host && item.pathPrefix === familia.pathPrefix)) throw new Error("RESOLVER_DUPLICADO");
@@ -72,9 +92,27 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     salvar([...registros, novo]);
     return { ...novo };
   }
+  function adicionarRascunho(familia, diagnostico = {}) {
+    if (registros.some(item => item.host === familia.host && item.pathPrefix === familia.pathPrefix))
+      throw new Error("RESOLVER_DUPLICADO");
+    const agora = new Date().toISOString();
+    const novo = {
+      id: crypto.randomUUID(), host: familia.host, pathPrefix: familia.pathPrefix,
+      pathMode: familia.pathMode, ativo: false, estado: "rascunho", urlExemplo: familia.urlExemplo,
+      criadoEm: agora, atualizadoEm: agora, ultimoTesteEm: agora,
+      ultimoSucessoEm: "", ultimoMarketplaceDetectado: diagnostico.marketplace || "",
+      ultimoTipoDetectado: "nao_determinado", falhasConsecutivas: 0,
+      ultimoDebugSeguro: diagnostico.debug || null,
+      metodoDescoberto: diagnostico.metodo || ""
+    };
+    salvar([...registros, novo]);
+    return { ...novo };
+  }
   function atualizar(id, alteracoes) {
     const atual = buscar(id);
     if (!atual) throw new Error("RESOLVER_NAO_ENCONTRADO");
+    if (atual.estado === "rascunho" && alteracoes?.ativo === true)
+      throw new Error("RASCUNHO_NAO_HOMOLOGADO");
     const proximo = { ...atual, ...alteracoes, id: atual.id, host: atual.host, pathPrefix: atual.pathPrefix,
       urlExemplo: atual.urlExemplo, atualizadoEm: new Date().toISOString() };
     salvar(registros.map(item => item.id === id ? proximo : item));
@@ -84,7 +122,7 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     if (!buscar(id)) throw new Error("RESOLVER_NAO_ENCONTRADO");
     salvar(registros.filter(item => item.id !== id));
   }
-  return { listar, buscar, localizar, adicionar, atualizar, excluir };
+  return { listar, buscar, localizar, adicionar, adicionarRascunho, atualizar, excluir };
 }
 
 let registroPadrao;
@@ -98,4 +136,4 @@ function registroDinamicoPadrao() {
   return registroPadrao;
 }
 
-module.exports = { criarRegistroDinamico, inferirFamilia, registroDinamicoPadrao };
+module.exports = { criarRegistroDinamico, inferirFamilia, inferirFamiliaRascunho, registroDinamicoPadrao };

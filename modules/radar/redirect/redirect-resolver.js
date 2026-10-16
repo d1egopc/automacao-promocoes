@@ -2,6 +2,7 @@ const axios = require("axios");
 const { performance } = require("node:perf_hooks");
 const { registroDinamicoPadrao } = require("./dynamic-resolver-registry");
 const { obterHttpSeguro, validarUrlPublica, enderecoPublico } = require("./safe-redirect-http");
+const { extrairCandidatoContextual } = require("./contextual-html-candidate");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
 const {
   camposIdentidadeCanonicaOferta,
@@ -296,7 +297,7 @@ function extrairUrlsMarketplaceHtml(html = "", base = "") {
     .map(item => item.url);
 }
 
-function extrairDestinoHtml(html = "", base = "") {
+function extrairDestinoHtml(html = "", base = "", { descobertaContextual = false } = {}) {
   const metaRefresh = extrairMetaRefresh(html);
   const metaUrl = urlAbsoluta(metaRefresh, base);
   if (metaUrl) return { url: metaUrl, metodo: "meta_refresh" };
@@ -304,6 +305,11 @@ function extrairDestinoHtml(html = "", base = "") {
   const windowLocation = extrairWindowLocation(html);
   const jsUrl = urlAbsoluta(windowLocation, base);
   if (jsUrl) return { url: jsUrl, metodo: "window_location" };
+
+  if (descobertaContextual) {
+    return extrairCandidatoContextual(html, base, detectarMarketplaceRedirect) ||
+      { url: "", metodo: "html_sem_destino_contextual" };
+  }
 
   const urlSolta = extrairUrlsMarketplaceHtml(html, base)[0] || "";
   if (urlSolta) return { url: urlSolta, metodo: "html_marketplace_url" };
@@ -455,7 +461,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           contexto.onHtml({ html, urlFinal, statusHttp });
         } catch {}
       }
-      const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual);
+      const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual,
+        { descobertaContextual: contexto.descobertaContextual === true });
       if (!destinoHtml.url) {
         return resultadoFalha(urlOriginal, {
           urlFinal,
@@ -481,6 +488,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           status: "resolvido",
           statusHttp,
           metodo: destinoHtml.metodo,
+          ...(contexto.descobertaContextual === true && destinoHtml.evidencia
+            ? { evidencia: destinoHtml.evidencia } : {}),
           motivo: "redirect_resolvido_marketplace",
           ...dadosHops
         };

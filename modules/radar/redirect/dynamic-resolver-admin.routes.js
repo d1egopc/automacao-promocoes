@@ -1,7 +1,7 @@
 "use strict";
 
 const express = require("express");
-const { inferirFamilia, registroDinamicoPadrao } = require("./dynamic-resolver-registry");
+const { inferirFamilia, inferirFamiliaRascunho, registroDinamicoPadrao } = require("./dynamic-resolver-registry");
 const { validarUrlPublica } = require("./safe-redirect-http");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
 const {
@@ -58,9 +58,36 @@ function registroPublico(registro) {
   return publico;
 }
 
-function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedirectUniversal } = {}) {
+function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedirectUniversal,
+  safeHttpDeps = null } = {}) {
   const router = express.Router();
   const getStore = () => registry || registroDinamicoPadrao();
+  async function descobrir(urlExemplo) {
+    const familia = inferirFamiliaRascunho(urlExemplo);
+    validarUrlPublica(familia.urlExemplo);
+    if (listarResolversRedirect().some(item => item.dominios.some(host =>
+      familia.host === host || familia.host.endsWith(`.${host}`)))) throw new Error("RESOLVER_HARDCODED");
+    // O modo administrativo não consulta a allowlist ativa e não a modifica.
+    const resultado = await resolve(familia.urlExemplo, {
+      adminValidation: true, dynamicRegistry: { localizar: () => null },
+      descobertaContextual: true, timeout: 4500, maxRedirects: 5,
+      ...(safeHttpDeps ? { safeHttpDeps } : {})
+    });
+    const final = resultado.urlExpandida || resultado.urlFinal || "";
+    const marketplace = detectarMarketplaceRedirect(final);
+    const ok = resultado.ok === true && Boolean(marketplace) &&
+      marketplace === resultado.marketplaceDetectado;
+    return { familia, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
+      evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
+      debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
+  }
+  function projecaoDescoberta(analise) {
+    return { ok: analise.ok, familia: { host: analise.familia.host, pathPrefix: analise.familia.pathPrefix,
+      pathMode: analise.familia.pathMode },
+      metodo: analise.metodo, destinoCandidato: analise.ok ? analise.debug.destino : "",
+      marketplaceCandidato: analise.marketplace || "nao_comprovado", evidencia: analise.evidencia || "",
+      motivo: analise.debug.motivo, produtoConfirmado: false, afiliacaoConfirmada: false };
+  }
   async function validar(entrada) {
     validarUrlPublica(entrada);
     const resultado = await resolve(entrada, { adminValidation: true, timeout: 4500, maxRedirects: 5 });
@@ -78,13 +105,41 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   function erro(res, error) {
     const codigo = String(error?.message || "");
     const publico = new Set(["URL_EXEMPLO_INVALIDA", "FAMILIA_NAO_INFERIVEL", "RESOLVER_DUPLICADO",
-      "RESOLVER_NAO_ENCONTRADO", "URL_BLOQUEADA_SEGURANCA", "RESOLVER_HARDCODED", "ATIVO_INVALIDO"]);
+      "RESOLVER_NAO_ENCONTRADO", "URL_BLOQUEADA_SEGURANCA", "RESOLVER_HARDCODED", "ATIVO_INVALIDO",
+      "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_INCOMPATIVEL"]);
     return res.status(codigo === "RESOLVER_DUPLICADO" ? 409 : publico.has(codigo) ? 400 : 500)
       .json({ ok: false, erro: publico.has(codigo) ? codigo : "LINK_RESOLVER_OPERATION_FAILED" });
   }
   router.get("/", (_req, res) => {
     try { return res.json({ ok: true, resolvers: getStore().listar().map(registroPublico) }); }
     catch (error) { return erro(res, error); }
+  });
+  router.post("/discover", async (req, res) => {
+    try { return res.json(projecaoDescoberta(await descobrir(req.body?.urlExemplo))); }
+    catch (error) { return erro(res, error); }
+  });
+  router.post("/drafts", async (req, res) => {
+    try {
+      const analise = await descobrir(req.body?.urlExemplo);
+      if (!analise.ok) return res.status(422).json({ ...projecaoDescoberta(analise), erro: "DESTINO_NAO_SUPORTADO" });
+      const registro = getStore().adicionarRascunho(analise.familia, {
+        marketplace: analise.marketplace, metodo: analise.metodo, debug: analise.debug
+      });
+      return res.status(201).json({ ok: true, resolver: registroPublico(registro) });
+    } catch (error) { return erro(res, error); }
+  });
+  router.post("/drafts/:id/test", async (req, res) => {
+    try {
+      const registro = getStore().buscar(req.params.id);
+      if (!registro || registro.estado !== "rascunho") throw new Error("RESOLVER_NAO_ENCONTRADO");
+      const familia = inferirFamiliaRascunho(req.body?.urlExemplo);
+      if (familia.host !== registro.host || familia.pathPrefix !== registro.pathPrefix ||
+          familia.pathMode !== registro.pathMode ||
+          familia.urlExemplo === registro.urlExemplo) throw new Error("RASCUNHO_INCOMPATIVEL");
+      const analise = await descobrir(familia.urlExemplo);
+      return res.json({ ...projecaoDescoberta(analise), reutilizavel: analise.ok &&
+        analise.metodo === registro.metodoDescoberto });
+    } catch (error) { return erro(res, error); }
   });
   router.post("/", async (req, res) => {
     try {
