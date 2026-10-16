@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -49,6 +51,127 @@ jobs:
           node tests/financeiro-checkout-pix-publico-v1.test.js
           node tests/link-optimus-repository.test.js
           node tests/link-optimus-admin-config.test.js
+
+      - name: Compare five local failures with clean Linux baseline
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          baseline_sha=798b86fdb39148213d81065092bc3af357a82150
+          git fetch --no-tags --depth=1 origin "$baseline_sha"
+          [[ "$(git rev-parse FETCH_HEAD)" == "$baseline_sha" ]] || { echo 'Baseline SHA mismatch'; exit 1; }
+          git diff --quiet "$baseline_sha" HEAD -- package.json package-lock.json || { echo 'Dependency lock differs from baseline'; exit 1; }
+          baseline_dir="$RUNNER_TEMP/optimus-golden-baseline"
+          mkdir -p "$baseline_dir"
+          git archive "$baseline_sha" | tar -x -C "$baseline_dir"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          suites=(
+            tests/engine-v2-marketplaces-fidelidade.test.js
+            tests/kabum-hotfix.test.js
+            tests/link-conversao-ocorrencia-marketplaces.test.js
+            tests/shopee-rio-titulo-beneficio.test.js
+            tests/template-universal-visual-contract.test.js
+          )
+          for suite in "${suites[@]}"; do
+            if (cd "$baseline_dir" && node "$suite") >"$RUNNER_TEMP/baseline-test.log" 2>&1; then
+              echo "BASELINE_PASS $suite"
+            else
+              echo "BASELINE_FAIL $suite"
+              tail -n 18 "$RUNNER_TEMP/baseline-test.log"
+            fi
+          done
+
+      - name: Detect shared marketplace changes
+        id: golden_scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo 'run_golden=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          before='${{ github.event.before }}'
+          if ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            echo 'run_golden=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          run_golden=false
+          while IFS= read -r changed; do
+            case "$changed" in
+              index.js|marketplaces/*|modules/engine/*|modules/links/*|modules/radar/*|modules/teleradar/*|modules/clonador-grupos/*|modules/manual-v2/*|modules/marketplaces/*|modules/imagens/*|modules/identidade-visual-ofertas/*|modules/fidelidade/*|modules/template-universal/*|modules/templates-clientes/*|modules/destinos/*|utils/*|optimus-capture/*|tests/*)
+                run_golden=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only "$before" "$GITHUB_SHA")
+          echo "run_golden=$run_golden" >> "$GITHUB_OUTPUT"
+
+      - name: Golden marketplace gate
+        if: steps.golden_scope.outputs.run_golden == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          golden=(
+            tests/aliexpress-afiliacao-workspace.test.js
+            tests/aliexpress-app-moedas-contrato.test.js
+            tests/aliexpress-moedas-productdetail-engine.test.js
+            tests/amazon-shortlink-afiliacao.test.js
+            tests/clonador-grupos-engine-bridge.test.js
+            tests/clonador-multilink-papeis.test.js
+            tests/contrato-comercial-final-universal.test.js
+            tests/destinos-compatibilidade-kabum-awin.test.js
+            tests/dynamic-link-resolvers.test.js
+            tests/engine-v2-marketplaces-fidelidade.test.js
+            tests/imagem-link-contrato-universal.test.js
+            tests/kabum-hotfix.test.js
+            tests/link-conversao-ocorrencia-marketplaces.test.js
+            tests/magalu-identity-engine-importer.test.js
+            tests/magalu-image-resolver.test.js
+            tests/magalu-local-worker-identity.test.js
+            tests/magalu-v2-golden-path.test.js
+            tests/manual-v2-import-aliexpress.test.js
+            tests/manual-v2-import-amazon.test.js
+            tests/manual-v2-import-kabum.test.js
+            tests/manual-v2-import-magalu.test.js
+            tests/manual-v2-import-mercadolivre.test.js
+            tests/manual-v2-import-shopee.test.js
+            tests/mercadolivre-identidade-canonica.test.js
+            tests/mercadolivre-imagem-oficial-fallback.test.js
+            tests/mercadolivre-work-backend-order.test.js
+            tests/nucleo-resolucao-radar-clonador-caracterizacao.test.js
+            tests/optimus-capture-extension.test.js
+            tests/optimus-capture-launcher.test.js
+            tests/optimus-capture-local-worker-ml-image.test.js
+            tests/optimus-capture-magalu.test.js
+            tests/redirect-resolver-shortlinks-seguros.test.js
+            tests/shopee-afiliacao-workspace.test.js
+            tests/shopee-resgate-ocorrencias.test.js
+            tests/shopee-rio-titulo-beneficio.test.js
+            tests/template-universal-visual-contract.test.js
+          )
+          [[ ${#golden[@]} -eq 36 ]] || { echo 'Golden inventory mismatch'; exit 1; }
+          failures=0
+          for index in "${!golden[@]}"; do
+            suite="${golden[$index]}"
+            [[ -f "$suite" ]] || { echo "Missing golden suite: $suite"; exit 1; }
+            log="$RUNNER_TEMP/optimus-golden-$index.log"
+            if node "$suite" >"$log" 2>&1; then
+              echo "PASS $suite"
+            else
+              failures=$((failures + 1))
+              case "$suite" in
+                tests/engine-v2-marketplaces-fidelidade.test.js|tests/kabum-hotfix.test.js|tests/link-conversao-ocorrencia-marketplaces.test.js|tests/shopee-rio-titulo-beneficio.test.js|tests/template-universal-visual-contract.test.js)
+                  echo "SUITE_WITH_LOCAL_BASELINE_FAILURE $suite (new failure not ruled out; deploy blocked)"
+                  ;;
+                *) echo "NEW_OR_UNCLASSIFIED_FAILURE $suite" ;;
+              esac
+              tail -n 24 "$log"
+            fi
+          done
+          if (( failures > 0 )); then
+            echo "$failures golden suite(s) failed; production deploy blocked."
+            exit 1
+          fi
 
   deploy:
     name: Deploy VPS
