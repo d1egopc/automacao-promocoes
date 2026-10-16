@@ -1,9 +1,48 @@
 const eventosMensageiroRecentes = new Map();
+const atendimentosPrivadosEmExecucao = new Map();
+const eventosPrivadosRespondidos = new Map();
+const DEDUPE_EVENTO_PRIVADO_MS = 24 * 60 * 60 * 1000;
+const MAX_EVENTOS_PRIVADOS_RESPONDIDOS = 5000;
+
+function eventoPrivadoJaRespondido(chave) {
+  if (!chave) return false;
+  const instante = eventosPrivadosRespondidos.get(chave);
+  if (!instante) return false;
+  if (Date.now() - instante < DEDUPE_EVENTO_PRIVADO_MS) return true;
+  eventosPrivadosRespondidos.delete(chave);
+  return false;
+}
+
+function registrarEventoPrivadoRespondido(chave) {
+  if (!chave) return;
+  eventosPrivadosRespondidos.set(chave, Date.now());
+  if (eventosPrivadosRespondidos.size > MAX_EVENTOS_PRIVADOS_RESPONDIDOS) {
+    eventosPrivadosRespondidos.delete(eventosPrivadosRespondidos.keys().next().value);
+  }
+}
+
+async function executarAtendimentoPrivadoExclusivo(chave, executar) {
+  const anterior = atendimentosPrivadosEmExecucao.get(chave);
+  let liberar;
+  const atual = new Promise(resolve => { liberar = resolve; });
+  atendimentosPrivadosEmExecucao.set(chave, atual);
+  if (anterior) await anterior;
+  try {
+    return await executar();
+  } finally {
+    if (atendimentosPrivadosEmExecucao.get(chave) === atual) {
+      atendimentosPrivadosEmExecucao.delete(chave);
+    }
+    liberar();
+  }
+}
 
 const {
   getMensageiroCliente,
   setMensageiroCliente,
   getAtendimentoConfigCliente,
+  listarAtendimentosPerfilCliente,
+  listarVinculosContatoPerfilCliente,
   registrarHistoricoAtendimento,
   resolverPerfilMensageiro,
   moduloPossuiAlcanceProprio,
@@ -266,7 +305,8 @@ function configuracaoModuloEventoEfetiva(moduloConfig = {}) {
 
 function resolverConteudoEventoGrupo({ clienteId, config = {}, resolucao = {}, acao = "" } = {}) {
   const moduloConfig = resolucao?.moduloConfig;
-  const configuracaoPerfil = configuracaoModuloEventoEfetiva(moduloConfig)
+  const conteudoConfigurado = moduloConfig?.conteudoConfigurado === true;
+  const configuracaoPerfil = conteudoConfigurado || configuracaoModuloEventoEfetiva(moduloConfig)
     ? moduloConfig?.configuracao || {}
     : {};
   const mensagemLegada = acao === "add"
@@ -282,14 +322,14 @@ function resolverConteudoEventoGrupo({ clienteId, config = {}, resolucao = {}, a
   return {
     mensagem: String(configuracaoPerfil.mensagem || "").trim()
       ? configuracaoPerfil.mensagem
-      : mensagemLegada,
+      : conteudoConfigurado ? "" : mensagemLegada,
     imagem: String(configuracaoPerfil.imagem || "").trim()
       ? configuracaoPerfil.imagem
-      : imagemLegada,
+      : conteudoConfigurado ? "" : imagemLegada,
     envio: resolverEnvioGrupoMensageiro(
       config,
       acao,
-      envioModuloEventoEfetivo(moduloConfig)
+      conteudoConfigurado || envioModuloEventoEfetivo(moduloConfig)
         ? configuracaoPerfil.envio
         : envioLegado
     )
@@ -787,15 +827,23 @@ async function tratarMensagemAtendimentoV1({
   sock,
   mensagem,
   texto,
-  jid
+  jid,
+  configAtendimento = null,
+  perfilId = "",
+  chaveEvento = ""
 } = {}) {
-  const configAtendimento = getAtendimentoConfigCliente(clienteId);
+  configAtendimento = configAtendimento || getAtendimentoConfigCliente(clienteId);
 
-  if (configAtendimento?.atendimentoAtivo !== true) return false;
+  if (configAtendimento?.atendimentoAtivo !== true && configAtendimento?.ativo !== true &&
+      configAtendimento?.faqAtivo !== true && configAtendimento?.fluxosAtivo !== true) return false;
   if (configAtendimento.sessaoId && configAtendimento.sessaoId !== sessaoId) return false;
   if (!atendimentoEscopoPermitido({ clienteId, jid, escopo: configAtendimento.escopo })) return false;
 
-  const gatilho = encontrarGatilhoAtendimento(texto, configAtendimento.gatilhos);
+  const gatilhosElegiveis = perfilId ? configAtendimento.gatilhos.filter(item =>
+    (item.categoria === "faq" && configAtendimento.faqAtivo === true) ||
+    (item.categoria === "fluxos" && configAtendimento.fluxosAtivo === true) ||
+    (item.categoria === "atendimento" && configAtendimento.ativo === true)) : configAtendimento.gatilhos;
+  const gatilho = encontrarGatilhoAtendimento(texto, gatilhosElegiveis);
   if (!gatilho) {
     if (texto) {
       logGatilhoNaoCorresponde({
@@ -803,19 +851,20 @@ async function tratarMensagemAtendimentoV1({
         sessaoId,
         jid,
         mensagem: texto,
-        gatilhosVerificados: contarGatilhosAtendimento(configAtendimento.gatilhos)
+        gatilhosVerificados: contarGatilhosAtendimento(gatilhosElegiveis)
       });
     }
     return false;
   }
 
-  const chaveCooldown = `${clienteId}:${sessaoId}:${jid}:${gatilho.id}`;
+  const chaveCooldown = `${clienteId}:${perfilId || "legado"}:${sessaoId}:${jid}:${gatilho.id}`;
   const agora = Date.now();
   const ultimo = eventosMensageiroRecentes.get(chaveCooldown) || 0;
   const cooldownMs = Math.max(1, Number(configAtendimento.cooldownMinutos || 10) || 10) * 60 * 1000;
 
   if (agora - ultimo < cooldownMs) {
     registrarHistoricoSeguro(clienteId, {
+      perfilId,
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
       grupo: jid.endsWith("@g.us") ? jid : "",
@@ -834,6 +883,7 @@ async function tratarMensagemAtendimentoV1({
 
   if (!jidFinalAtendimento) {
     registrarHistoricoSeguro(clienteId, {
+      perfilId,
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
       grupo: jid.endsWith("@g.us") ? jid : "",
@@ -858,10 +908,16 @@ async function tratarMensagemAtendimentoV1({
         sessaoId,
         jidOriginalLog: jidOriginalAtendimento
       });
-      if (enviada) respostasEnviadas.push(`${resposta.tipo}:${String(resposta.conteudo || "").slice(0, 80)}`);
+      if (enviada) {
+        respostasEnviadas.push(`${resposta.tipo}:${String(resposta.conteudo || "").slice(0, 80)}`);
+        registrarEventoPrivadoRespondido(chaveEvento);
+      }
     }
 
+    if (!respostasEnviadas.length) eventosMensageiroRecentes.delete(chaveCooldown);
+
     registrarHistoricoSeguro(clienteId, {
+      perfilId,
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
       grupo: jid.endsWith("@g.us") ? jid : "",
@@ -886,6 +942,7 @@ async function tratarMensagemAtendimentoV1({
 
     return true;
   } catch (e) {
+    if (!respostasEnviadas.length) eventosMensageiroRecentes.delete(chaveCooldown);
     logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ERRO]", {
       clienteId,
       sessaoId,
@@ -895,6 +952,7 @@ async function tratarMensagemAtendimentoV1({
     });
 
     registrarHistoricoSeguro(clienteId, {
+      perfilId,
       origem: jid.endsWith("@g.us") ? "grupo" : "privado",
       contato: jid,
       grupo: jid.endsWith("@g.us") ? jid : "",
@@ -909,18 +967,45 @@ async function tratarMensagemAtendimentoV1({
   }
 }
 
+async function resolverAtendimentoPrivadoPerfil({ clienteId, sessaoId, sock, mensagem, jid }) {
+  const configurados = listarAtendimentosPerfilCliente(clienteId, sessaoId, { estrito: true })
+    .filter(item => item.atendimento.configurado === true);
+  const elegiveis = configurados.filter(item => item.atendimento.ativo === true ||
+    item.atendimento.faqAtivo === true || item.atendimento.fluxosAtivo === true ||
+    item.atendimento.respostasRapidasAtivo === true);
+
+  const senderPn = String(mensagem?.key?.senderPn || mensagem?.senderPn || "").trim();
+  const pn = /^\d{5,20}(@s\.whatsapp\.net)?$/.test(senderPn)
+    ? (senderPn.includes("@") ? senderPn : `${senderPn}@s.whatsapp.net`) : "";
+  const contatoId = pn || (jidPrivadoWhatsappValido(jid) ? jid :
+    await resolverJidPrivadoMensageiro(sock, jid, { clienteId, sessaoId }) || jid);
+  const vinculos = listarVinculosContatoPerfilCliente(clienteId, sessaoId, { incluirInvalidos: true })
+    .filter(item => item.contatoId === contatoId);
+  if (vinculos.length) {
+    if (vinculos.length !== 1) return { modo: "bloqueado", motivo: "vinculo_invalido" };
+    const escolhido = elegiveis.find(item => item.perfil.id === vinculos[0].perfilId);
+    return escolhido ? { modo: "perfil", ...escolhido } :
+      { modo: "bloqueado", motivo: "vinculo_invalido" };
+  }
+  if (!configurados.length) return { modo: "legado" };
+  if (elegiveis.length === 1) return { modo: "perfil", ...elegiveis[0] };
+  return { modo: "bloqueado", motivo: elegiveis.length ? "contato_ambiguo" : "perfil_desativado" };
+}
+
 function comandoPossuiAlcanceProprio(comando = {}) {
   return Boolean(comando && typeof comando === "object" && comando.gruposConfigurados === true);
 }
 
 function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "", sessaoId = "") {
   const gruposComando = Array.isArray(comando.grupos) ? comando.grupos : [];
-  if (comandoPossuiAlcanceProprio(comando)) return gruposComando.includes(grupoId);
-
   const perfis = Array.isArray(config.perfis) ? config.perfis : [];
   const perfilComando = comando.perfilId
-    ? perfis.find(perfil => perfil?.id === comando.perfilId && perfil?.ativo !== false && !perfil?.removidoEm)
+    ? perfis.find(perfil => perfil?.id === comando.perfilId && perfil?.ativo !== false && !perfil?.removidoEm &&
+      perfil?.sessaoId === sessaoId && perfil?.modulos?.comandos?.ativo === true)
     : null;
+  if (comando.perfilId && !perfilComando) return false;
+  if (!comando.perfilId && config.sessaoId && config.sessaoId !== sessaoId) return false;
+  if (comandoPossuiAlcanceProprio(comando)) return gruposComando.includes(grupoId);
   const resolucao = perfilComando
     ? { ok: true, legado: false, perfil: perfilComando }
     : resolverPerfilMensageiro({
@@ -952,12 +1037,13 @@ function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "", sessaoId
   return grupoPermitido(config.clienteId, grupoId);
 }
 
-function encontrarComandoGrupo(texto = "", comandos = []) {
+function encontrarComandoGrupo(texto = "", comandos = [], permitido = () => true) {
   const textoNormalizado = normalizarTextoMensagem(texto);
   if (!textoNormalizado || !Array.isArray(comandos)) return null;
 
   for (const comando of comandos) {
     if (comando?.ativo === false) continue;
+    if (!permitido(comando)) continue;
     const correspondencia = comando?.correspondencia === "inicia" ? "inicia" : "exato";
     const gatilhos = Array.isArray(comando?.gatilhos) ? comando.gatilhos : [];
 
@@ -1034,14 +1120,12 @@ async function tratarMensagemGrupoComando({
 
     const config = getMensageiroCliente(clienteId);
     if (config?.ativo !== true) return false;
-    if (config.sessaoId && config.sessaoId !== sessaoId) return false;
-
     const texto = extrairTextoMensagemAtendimento(mensagem);
-    const encontrado = encontrarComandoGrupo(texto, config.comandos);
+    const encontrado = encontrarComandoGrupo(texto, config.comandos, comando =>
+      comandoGrupoPermitido({ ...config, clienteId }, comando, grupoId, sessaoId));
     if (!encontrado) return false;
 
     const { comando, gatilho } = encontrado;
-    if (!comandoGrupoPermitido({ ...config, clienteId }, comando, grupoId, sessaoId)) return false;
 
     const participante = extrairParticipanteGrupoMensagem(mensagem);
     const messageId = String(mensagem?.key?.id || "");
@@ -1156,7 +1240,7 @@ async function tratarMensagemGrupoComando({
   }
 }
 
-async function tratarMensagemPrivadaAtendimento({
+async function processarMensagemPrivadaAtendimento({
   clienteId,
   sessaoId,
   sock,
@@ -1193,22 +1277,33 @@ async function tratarMensagemPrivadaAtendimento({
 
     const texto = extrairTextoMensagemAtendimento(mensagem);
 
+    const roteamento = await resolverAtendimentoPrivadoPerfil({ clienteId, sessaoId, sock, mensagem, jid });
+    if (roteamento.modo === "bloqueado") return;
+    const perfilId = roteamento.modo === "perfil" ? roteamento.perfil.id : "";
+    const mensagemId = String(mensagem?.key?.id || "").trim();
+    const chaveEvento = mensagemId
+      ? JSON.stringify([clienteId, sessaoId, jid, mensagemId]) : "";
+    if (eventoPrivadoJaRespondido(chaveEvento)) return;
+
     const processouV1 = await tratarMensagemAtendimentoV1({
       clienteId,
       sessaoId,
       sock,
       mensagem,
       texto,
-      jid
+      jid,
+      perfilId,
+      chaveEvento,
+      configAtendimento: roteamento.modo === "perfil" ? roteamento.atendimento : null
     });
 
     if (processouV1) return;
 
     const config = getMensageiroCliente(clienteId);
-    const atendimento = config?.atendimento || {};
+    const atendimento = perfilId ? roteamento.atendimento : config?.atendimento || {};
 
-    if (config?.ativo !== true) return;
-    if (atendimento.ativo !== true) return;
+    if (!perfilId && config?.ativo !== true) return;
+    if (perfilId ? atendimento.respostasRapidasAtivo !== true : atendimento.ativo !== true) return;
     if (String(atendimento.escopo || "privado") !== "privado") return;
     const sessaoAtendimentoLegado = String(atendimento.sessaoAtendimentoId || atendimento.sessaoId || "");
     if (sessaoAtendimentoLegado && sessaoAtendimentoLegado !== sessaoId) return;
@@ -1232,6 +1327,13 @@ async function tratarMensagemPrivadaAtendimento({
       return;
     }
 
+    const chaveResposta = perfilId ? `${clienteId}:${perfilId}:${sessaoId}:${jid}:rapida:${respostaRapida.id}` : "";
+    if (chaveResposta) {
+      const agora = Date.now();
+      const ultimo = eventosMensageiroRecentes.get(chaveResposta) || 0;
+      if (agora - ultimo < atendimento.cooldownMinutos * 60 * 1000) return;
+    }
+
     const jidOriginalRespostaRapida = normalizarJidMensageiro(jid);
     const jidFinalRespostaRapida = await resolverJidPrivadoMensageiro(sock, jidOriginalRespostaRapida, { clienteId, sessaoId });
     if (!jidFinalRespostaRapida) return;
@@ -1247,6 +1349,17 @@ async function tratarMensagemPrivadaAtendimento({
     });
 
     if (enviado) {
+      registrarEventoPrivadoRespondido(chaveEvento);
+      if (chaveResposta) eventosMensageiroRecentes.set(chaveResposta, Date.now());
+      if (perfilId) registrarHistoricoSeguro(clienteId, {
+        perfilId,
+        origem: "privado",
+        contato: jid,
+        mensagemRecebida: texto,
+        gatilhoId: respostaRapida.id,
+        respostaEnviada: ["resposta_rapida"],
+        status: "enviado"
+      });
       logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-RESPOSTA-RAPIDA-ENVIADA]", {
         clienteId,
         sessaoId,
@@ -1258,6 +1371,16 @@ async function tratarMensagemPrivadaAtendimento({
   } catch (e) {
     console.log("[MENSAGEIRO-ERRO] atendimento privado:", e.message);
   }
+}
+
+async function tratarMensagemPrivadaAtendimento(dados = {}) {
+  const jid = dados.mensagem?.key?.remoteJid || "";
+  const senderPn = String(dados.mensagem?.key?.senderPn || dados.mensagem?.senderPn || "").trim();
+  const contato = /^\d{5,20}(@s\.whatsapp\.net)?$/.test(senderPn)
+    ? (senderPn.includes("@") ? senderPn : `${senderPn}@s.whatsapp.net`)
+    : normalizarJidMensageiro(jid) || jid;
+  const chave = JSON.stringify([dados.clienteId, dados.sessaoId, contato]);
+  return executarAtendimentoPrivadoExclusivo(chave, () => processarMensagemPrivadaAtendimento(dados));
 }
 
 async function tratarEventoGrupoMensageiro({
