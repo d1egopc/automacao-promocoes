@@ -419,7 +419,9 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
       }
     }));
     const indexFonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
-    assert.match(indexFonte, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\)\)/);
+    assert.match(indexFonte, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\{/);
+    assert.match(indexFonte, /obterIdentidadeMercadoLivre:\s*localWorkerService\.obterIdentidadeMercadoLivre/);
+    assert.match(indexFonte, /obterIdentidadeMagalu:\s*localWorkerService\.obterIdentidadeMagalu/);
     assert.match(indexFonte, /const redirect = await resolverRedirectUniversal\(capturada/);
     assert.match(indexFonte, /resolverRedirectUniversal:\s*resolverRedirectClonador/);
     const bridgeFonte = fs.readFileSync(path.join(__dirname, "..", "modules", "clonador-grupos", "bridge.js"), "utf8");

@@ -12,7 +12,9 @@ const { criarRotasResolversDinamicos, montarContratoPreview } =
   require("../modules/radar/redirect/dynamic-resolver-admin.routes");
 
 const entrada = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
-assert.match(entrada, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\)\)/);
+assert.match(entrada, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\{/);
+assert.match(entrada, /obterIdentidadeMercadoLivre:\s*localWorkerService\.obterIdentidadeMercadoLivre/);
+assert.match(entrada, /obterIdentidadeMagalu:\s*localWorkerService\.obterIdentidadeMagalu/);
 
 function transporte(chamadas) {
   return (url, _opcoes, callback) => {

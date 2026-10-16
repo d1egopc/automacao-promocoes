@@ -6,6 +6,10 @@ const { validarUrlPublica } = require("./safe-redirect-http");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
 const { criarContratoPreparacaoLinks } = require("../../engine/preparacao-links.service");
 const { normalizarMotivoTecnicoRedirect } = require("./redirect-diagnostic-code");
+const { normalizarMlb, validarResultadoMlIdentity } = require("../../local-worker/ml-identity.contract");
+const {
+  chaveIdentidadeMagalu, produtoIdUrlMagalu, validarResultadoMagaluIdentity
+} = require("../../local-worker/magalu-identity.contract");
 const {
   detectarMarketplaceRedirect, listarResolversRedirect, resolverRedirectUniversal,
   urlAmazonComAsinExplicito, urlMercadoLivreComMlbExplicito
@@ -39,7 +43,7 @@ function ocorrenciasPreview(body = {}) {
 
 // Only the administrative preview owns this contract. A discovered destination is
 // recorded as a redirect candidate, never as a prepared commercial/affiliate link.
-function montarContratoPreview(ocorrencias, analises) {
+function montarContratoPreview(ocorrencias, analises, evidencias = []) {
   return criarContratoPreparacaoLinks({
     linksOriginais: ocorrencias.map(item => item.urlExemplo),
     linksPreparados: [],
@@ -52,12 +56,16 @@ function montarContratoPreview(ocorrencias, analises) {
       papelOriginal: ocorrencias[indice].papel,
       proveniencia: "admin_links_preview"
     })),
-    identidadesCanonicas: []
+    identidadesCanonicas: evidencias.flatMap((evidencia, indice) => evidencia?.estado === "valida" ? [{
+      indice, linkOriginalCapturado: ocorrencias[indice].urlExemplo,
+      marketplace: evidencia.marketplace, chaveCanonica: evidencia.productId,
+      proveniencia: evidencia.proveniencia
+    }] : [])
   });
 }
 
-function projecaoPreview(registro, ocorrencias, analises) {
-  const contrato = montarContratoPreview(ocorrencias, analises);
+function projecaoPreview(registro, ocorrencias, analises, evidencias = []) {
+  const contrato = montarContratoPreview(ocorrencias, analises, evidencias);
   return {
     ok: analises.every(item => item.ok),
     modo: "previsualizacao_sem_ingresso",
@@ -78,6 +86,7 @@ function projecaoPreview(registro, ocorrencias, analises) {
       marketplaceCandidato: analise.ok ? analise.marketplace : "nao_comprovado",
       metodo: analise.ok && metodosPreview.has(analise.metodo) ? analise.metodo : "nao_comprovado",
       identidade: analise.ok ? "pendente" : "nao_comprovada",
+      evidenciaOficial: evidencias[indice]?.estado || "nao_avaliada",
       afiliacao: "nao_comprovada",
       produtoConfirmado: false,
       afiliacaoConfirmada: false,
@@ -130,7 +139,7 @@ function registroPublico(registro) {
 }
 
 function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedirectUniversal,
-  safeHttpDeps = null } = {}) {
+  safeHttpDeps = null, obterIdentidadeMercadoLivre = null, obterIdentidadeMagalu = null } = {}) {
   const router = express.Router();
   const getStore = () => registry || registroDinamicoPadrao();
   async function descobrir(urlExemplo) {
@@ -151,6 +160,42 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     return { familia, resultado, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
       evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
       debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
+  }
+  // Consulta somente resultados previamente validados no cache oficial. Nao cria Work-task.
+  async function evidenciaOficialPreview(ocorrencia, analise) {
+    if (!analise.ok) return { estado: "nao_avaliada" };
+    const destino = analise.resultado.urlExpandida || analise.resultado.urlFinal || "";
+    try {
+      if (analise.marketplace === "mercadolivre" && typeof obterIdentidadeMercadoLivre === "function" &&
+          urlMercadoLivreComMlbExplicito(destino)) {
+        const expectedMlb = normalizarMlb(destino);
+        if (!expectedMlb) return { estado: "ausente" };
+        const payload = await obterIdentidadeMercadoLivre({ productId: expectedMlb });
+        if (!payload) return { estado: "ausente" };
+        const validado = validarResultadoMlIdentity(payload, {
+          expectedMlb, ttlMs: 24 * 60 * 60 * 1000
+        });
+        return { estado: "valida", marketplace: "mercadolivre", productId: validado.expectedMlb,
+          proveniencia: validado.provaTecnica.provenance };
+      }
+      if (analise.marketplace === "magalu" && typeof obterIdentidadeMagalu === "function") {
+        const productId = produtoIdUrlMagalu(destino);
+        const identityKey = chaveIdentidadeMagalu(ocorrencia.urlExemplo);
+        if (!productId || !identityKey) return { estado: "ausente" };
+        const payload = await obterIdentidadeMagalu({ sourceUrl: ocorrencia.urlExemplo });
+        if (!payload) return { estado: "ausente" };
+        const validado = validarResultadoMagaluIdentity(payload, {
+          sourceUrl: ocorrencia.urlExemplo, identityKey, ttlMs: 6 * 60 * 60 * 1000
+        });
+        return { estado: validado.observedProductId === productId ? "valida" : "incompativel",
+          marketplace: "magalu", productId: validado.observedProductId,
+          proveniencia: validado.provaTecnica.provenance };
+      }
+      return { estado: "nao_avaliada" };
+    } catch (error) {
+      // 403 ou erro de cache nao significa produto inexistente. Nenhum detalhe interno e retornado.
+      return { estado: error?.codigo ? "incompativel" : "indisponivel" };
+    }
   }
   function projecaoDescoberta(analise) {
     return { ok: analise.ok, familia: { host: analise.familia.host, pathPrefix: analise.familia.pathPrefix,
@@ -213,7 +258,11 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       }
       const analises = [];
       for (const item of ocorrencias) analises.push(await descobrir(item.urlExemplo));
-      return res.json(projecaoPreview(registro, ocorrencias, analises));
+      const evidencias = [];
+      for (let indice = 0; indice < ocorrencias.length; indice++) {
+        evidencias.push(await evidenciaOficialPreview(ocorrencias[indice], analises[indice]));
+      }
+      return res.json(projecaoPreview(registro, ocorrencias, analises, evidencias));
     } catch (error) { return erro(res, error); }
   });
   router.post("/drafts/:id/test", async (req, res) => {

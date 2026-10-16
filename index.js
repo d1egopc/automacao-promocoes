@@ -16498,7 +16498,10 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
 app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
-app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos());
+app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos({
+  obterIdentidadeMercadoLivre: localWorkerService.obterIdentidadeMercadoLivre,
+  obterIdentidadeMagalu: localWorkerService.obterIdentidadeMagalu
+}));
 app.use("/admin/links/engine-eventos", exigirAdminMasterEstrito, criarRotasDiagnosticoCapturaEngine());
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);

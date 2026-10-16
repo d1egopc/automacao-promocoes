@@ -17,7 +17,9 @@ const { extrairCandidatoContextual } =
 const { criarContratoPreparacaoLinks } = require("../modules/engine/preparacao-links.service");
 
 const arquivo = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
-assert.match(arquivo, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\)\)/);
+assert.match(arquivo, /app\.use\("\/admin\/links\/resolvers",\s*exigirAdminMasterEstrito,\s*criarRotasResolversDinamicos\(\{/);
+assert.match(arquivo, /obterIdentidadeMercadoLivre:\s*localWorkerService\.obterIdentidadeMercadoLivre/);
+assert.match(arquivo, /obterIdentidadeMagalu:\s*localWorkerService\.obterIdentidadeMagalu/);
 
 function transporte(chamadas) {
   return (url, _opcoes, callback) => {
