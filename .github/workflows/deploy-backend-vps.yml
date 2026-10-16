@@ -58,6 +58,7 @@ jobs:
           node tests/links-engine-capture-diagnostic-api.test.js
           node tests/links-engine-preparation-preview.test.js
           node tests/links-engine-preview-official-identity.test.js
+          node tests/links-static-base64-discovery.test.js
           node tests/optimus-capture-local-worker-ml-identity.test.js
           node tests/magalu-local-worker-identity.test.js
           node tests/radar-redirect-diagnostico-persistencia.test.js

@@ -2,9 +2,11 @@
 
 const assert = require("node:assert/strict");
 const express = require("express");
+const { EventEmitter } = require("node:events");
 const { criarRotasResolversDinamicos, montarContratoPreview } =
   require("../modules/radar/redirect/dynamic-resolver-admin.routes");
 const { chaveIdentidadeMagalu } = require("../modules/local-worker/magalu-identity.contract");
+const { detectarMarketplaceHost } = require("../modules/engine/normalizers");
 
 const mlb = "MLB123456789";
 const mlUrl = `https://produto.mercadolivre.com.br/${mlb}-tenis`;
@@ -41,6 +43,26 @@ function provaMagalu() {
   };
 }
 
+function transporteMagaluSeguro(statusProduto) {
+  return (url, _opcoes, callback) => {
+    const requisicao = new EventEmitter();
+    requisicao.end = () => process.nextTick(() => {
+      const onelink = url.hostname === "magazineluiza.onelink.me";
+      const resposta = new EventEmitter();
+      resposta.statusCode = onelink ? 302 : statusProduto;
+      resposta.headers = onelink ? { location: magaluUrl.replace("www.magalu.com", "www.magazineluiza.com.br") } : {};
+      resposta.complete = true;
+      resposta.destroyed = false;
+      resposta.destroy = () => { resposta.destroyed = true; };
+      callback(resposta);
+      if (!onelink) resposta.emit("data", Buffer.from("<html><body>Produto oficial</body></html>"));
+      resposta.emit("end");
+    });
+    requisicao.destroy = error => { if (error) requisicao.emit("error", error); };
+    return requisicao;
+  };
+}
+
 async function executar() {
   const registroMl = { id: "ml", estado: "rascunho", ativo: false,
     host: "tidd.ly", pathPrefix: "/", pathMode: "one_segment_suffix" };
@@ -52,12 +74,14 @@ async function executar() {
   let evidenciaMl = provaMl();
   let evidenciaMagalu = provaMagalu();
   let consultaFalha = false;
+  let resultadoMagalu = null;
   const consultas = [];
   let resolucoes = 0;
   const resolve = async url => {
     resolucoes++;
     if (falhaRedirect) return { ok: false, motivo: "HTTP_403", urlFinal: "" };
     const ml = new URL(url).hostname === "tidd.ly";
+    if (!ml && resultadoMagalu) return resultadoMagalu;
     return { ok: true, urlExpandida: ml ? destinoMl : destinoMagalu,
       marketplaceDetectado: ml ? "mercadolivre" : "magalu", metodo: "http_redirect" };
   };
@@ -126,13 +150,53 @@ async function executar() {
       "403 com redirect e prova oficial valida nao significa produto ausente");
     assert.equal(magalu.data.contrato.identidadesCanonicas, 1);
     assert.deepEqual(consultas.at(-1), ["magalu", magaluOriginal]);
+    assert.equal(magalu.data.ocorrencias[0].marketplaceReconhecido, "magalu");
+    assert.equal(magalu.data.ocorrencias[0].afiliacaoConfirmada, false);
 
     destinoMagalu = magaluUrl.replace("www.magalu.com", "www.magazineluiza.com.br");
-    const antesDominio = consultas.length;
-    const dominioNaoClassificado = await post("magalu", magaluOriginal);
-    assert.equal(dominioNaoClassificado.data.ocorrencias[0].evidenciaOficial, "nao_avaliada",
-      "o classificador V2.3 ainda nao reconhece este host; nao ampliar o resolvedor aqui");
-    assert.equal(consultas.length, antesDominio);
+    const dominioComWww = await post("magalu", magaluOriginal);
+    assert.equal(dominioComWww.data.ocorrencias[0].marketplaceCandidato, "magalu");
+    assert.equal(dominioComWww.data.ocorrencias[0].evidenciaOficial, "valida");
+    destinoMagalu = destinoMagalu.replace("www.magazineluiza.com.br", "magazineluiza.com.br");
+    const dominioSemWww = await post("magalu", magaluOriginal);
+    assert.equal(dominioSemWww.data.ocorrencias[0].marketplaceCandidato, "magalu");
+    assert.equal(dominioSemWww.data.ocorrencias[0].evidenciaOficial, "valida");
+    assert.equal(detectarMarketplaceHost("www.magazineluiza.com.br"), "magalu");
+    assert.equal(detectarMarketplaceHost("magazineluiza.com.br"), "magalu");
+    assert.equal(detectarMarketplaceHost("magazineluiza.onelink.me"), "magalu");
+    assert.equal(detectarMarketplaceHost("evilmagalu.com"), "");
+    assert.equal(detectarMarketplaceHost("www.magazineluiza.com.br.evil.example"), "");
+    assert.equal(detectarMarketplaceHost("amazon.com.br"), "amazon");
+    destinoMagalu = magaluUrl;
+
+    resultadoMagalu = { ok: false, urlFinal: magaluUrl.replace("www.magalu.com", "www.magazineluiza.com.br"),
+      statusHttp: 200, motivo: "redirect_nao_resolvido", metodo: "http_redirect" };
+    const candidatoHttp200 = await post("magalu", magaluOriginal);
+    assert.equal(candidatoHttp200.data.ok, true);
+    assert.equal(candidatoHttp200.data.ocorrencias[0].statusDestino, "candidato_encontrado");
+    assert.equal(candidatoHttp200.data.ocorrencias[0].evidenciaOficial, "valida");
+    assert.equal(candidatoHttp200.data.ocorrencias[0].identidade, "pendente");
+    assert.equal(candidatoHttp200.data.ocorrencias[0].produtoConfirmado, false);
+    assert.equal(candidatoHttp200.data.ocorrencias[0].afiliacaoConfirmada, false);
+    resultadoMagalu = { ok: false, urlFinal: magaluOriginal, statusHttp: 200,
+      motivo: "redirect_nao_resolvido", metodo: "http_sem_redirect" };
+    const onelinkSemDestino = await post("magalu", magaluOriginal);
+    assert.equal(onelinkSemDestino.data.ocorrencias[0].marketplaceReconhecido, "magalu");
+    assert.equal(onelinkSemDestino.data.ocorrencias[0].statusDestino, "nao_encontrado");
+    assert.equal(onelinkSemDestino.data.ocorrencias[0].evidenciaOficial, "nao_avaliada");
+    resultadoMagalu = null;
+
+    destinoMagalu = "https://evilmagalu.com/p/123456789";
+    const antesHostFalso = consultas.length;
+    const hostFalso = await post("magalu", magaluOriginal);
+    assert.equal(hostFalso.data.ocorrencias[0].statusDestino, "nao_encontrado");
+    assert.equal(hostFalso.data.ocorrencias[0].marketplaceCandidato, "nao_comprovado");
+    assert.equal(consultas.length, antesHostFalso);
+    destinoMagalu = "https://www.amazon.com.br/dp/B012345678";
+    const outroMarketplace = await post("magalu", magaluOriginal);
+    assert.equal(outroMarketplace.data.ocorrencias[0].marketplaceCandidato, "nao_comprovado");
+    assert.equal(outroMarketplace.data.ocorrencias[0].evidenciaOficial, "nao_avaliada");
+    assert.equal(consultas.length, antesHostFalso);
     destinoMagalu = magaluUrl;
 
     destinoMagalu = magaluUrl.replace("123456789", "987654321");
@@ -140,6 +204,12 @@ async function executar() {
     assert.equal(divergente.data.ocorrencias[0].evidenciaOficial, "incompativel");
     assert.equal(divergente.data.contrato.identidadesCanonicas, 0);
     destinoMagalu = magaluUrl;
+
+    evidenciaMagalu = null;
+    const cacheAusente = await post("magalu", magaluOriginal);
+    assert.equal(cacheAusente.data.ocorrencias[0].evidenciaOficial, "ausente");
+    assert.equal(cacheAusente.data.contrato.identidadesCanonicas, 0);
+    evidenciaMagalu = provaMagalu();
 
     evidenciaMl = { ...provaMl(), provaTecnica: { ...provaMl().provaTecnica,
       provenance: "forjada" } };
@@ -158,14 +228,55 @@ async function executar() {
     const antesFalha = consultas.length;
     const naoResolvido = await post("magalu", magaluOriginal);
     assert.equal(naoResolvido.data.ocorrencias[0].evidenciaOficial, "nao_avaliada");
+    assert.equal(naoResolvido.data.ocorrencias[0].marketplaceReconhecido, "magalu");
+    assert.equal(naoResolvido.data.ocorrencias[0].statusDestino, "nao_encontrado");
     assert.equal(consultas.length, antesFalha, "403 do resolvedor nao consulta cache nem afirma ausencia");
-    for (const resposta of [ml, magalu, divergente, invalida, indisponivel, naoResolvido]) {
+    for (const resposta of [ml, magalu, dominioComWww, dominioSemWww, candidatoHttp200,
+      onelinkSemDestino, hostFalso, outroMarketplace, divergente, cacheAusente, invalida,
+      indisponivel, naoResolvido]) {
       const texto = JSON.stringify(resposta.data);
       for (const segredo of [mlb, "123456789", "987654321", "token=privado", "IFPVFHL2",
         "1769.91", "https://tidd.ly/um", magaluOriginal]) {
         assert.equal(texto.includes(segredo), false, `saida administrativa vazou ${segredo}`);
       }
       assert.equal(resposta.data.prontoComercial, false);
+      assert.equal(resposta.data.ocorrencias[0].afiliacaoConfirmada, false);
+    }
+
+    let statusProduto = 200;
+    let consultasReais = 0;
+    const appSeguro = express();
+    appSeguro.use(express.json());
+    appSeguro.use("/admin/links/resolvers", (req, res, next) =>
+      req.get("x-admin") === "yes" ? next() : res.status(403).json({ erro: "FORBIDDEN" }),
+    criarRotasResolversDinamicos({ registry,
+      safeHttpDeps: { lookup: async () => [{ address: "8.8.8.8", family: 4 }],
+        requestImpl: (...args) => transporteMagaluSeguro(statusProduto)(...args) },
+      obterIdentidadeMagalu: async () => { consultasReais++; return provaMagalu(); }
+    }));
+    const servidorSeguro = await new Promise(ok => {
+      const listening = appSeguro.listen(0, "127.0.0.1", () => ok(listening));
+    });
+    try {
+      const url = `http://127.0.0.1:${servidorSeguro.address().port}/admin/links/resolvers/drafts/magalu/engine-preview`;
+      const requisitar = async () => (await fetch(url, { method: "POST",
+        headers: { "content-type": "application/json", "x-admin": "yes" },
+        body: JSON.stringify({ urlExemplo: magaluOriginal, papel: "pc" }) })).json();
+      const http200 = await requisitar();
+      assert.equal(http200.ocorrencias[0].statusDestino, "candidato_encontrado");
+      assert.equal(http200.ocorrencias[0].evidenciaOficial, "valida");
+      assert.equal(http200.ocorrencias[0].produtoConfirmado, false);
+      assert.equal(http200.prontoComercial, false);
+      assert.equal(consultasReais, 1);
+      statusProduto = 403;
+      const http403 = await requisitar();
+      assert.equal(http403.ocorrencias[0].marketplaceReconhecido, "magalu");
+      assert.equal(http403.ocorrencias[0].statusDestino, "nao_encontrado");
+      assert.equal(http403.ocorrencias[0].evidenciaOficial, "nao_avaliada");
+      assert.equal(http403.ocorrencias[0].afiliacaoConfirmada, false);
+      assert.equal(consultasReais, 1, "403 nao autoriza consultar cache nem provar produto");
+    } finally {
+      await new Promise(ok => servidorSeguro.close(ok));
     }
     console.log("links-engine-preview-official-identity.test.js PASS");
   } finally {

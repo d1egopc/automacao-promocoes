@@ -317,6 +317,44 @@ function extrairDestinoHtml(html = "", base = "", { descobertaContextual = false
   return { url: "", metodo: "html_sem_redirect" };
 }
 
+// Apenas descoberta administrativa: interpreta literais de navegacao, nunca executa JavaScript.
+function extrairDestinoEstaticoHtml(html = "", base = "") {
+  if (Buffer.byteLength(String(html || ""), "utf8") > 1024 * 1024) return null;
+  const literal = String.raw`atob\s*\(\s*(["'])([A-Za-z0-9+/]{16,2732}={0,2})\1\s*\)`;
+  const padroes = [
+    new RegExp(String.raw`(?:\b(?:window|document|self)\s*\.\s*)?location\s*\.\s*(?:replace|assign)\s*\(\s*${literal}\s*\)`, "gi"),
+    new RegExp(String.raw`(?:\b(?:window|document|self)\s*\.\s*)?location(?:\s*\.\s*href)?\s*=\s*${literal}`, "gi")
+  ];
+  const candidatos = new Set();
+  let scripts = 0;
+  for (const match of String(html || "").matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (++scripts > 32) return null;
+    if (/\bsrc\s*=/.test(match[1]) || match[2].length > 32768) continue;
+    for (const padrao of padroes) {
+      for (const chamada of match[2].matchAll(padrao)) {
+        const base64 = chamada[2];
+        if (base64.length % 4 === 1) continue;
+        const bytes = Buffer.from(base64, "base64");
+        if (bytes.length > 2048 || bytes.toString("base64").replace(/=+$/, "") !== base64.replace(/=+$/, "")) continue;
+        const destino = bytes.toString("utf8");
+        if (!Buffer.from(destino, "utf8").equals(bytes) || destino.length > 2048) continue;
+        try {
+          const url = validarUrlPublica(destino);
+          if (url.protocol !== "https:" || !detectarMarketplaceRedirect(url.href)) continue;
+          candidatos.add(url.href);
+        } catch { continue; }
+        if (candidatos.size > 1) return { url: "", metodo: "html_static_ambiguous" };
+      }
+    }
+  }
+  if (candidatos.size !== 1) return null;
+  const escolhido = [...candidatos][0];
+  if (extrairUrlsMarketplaceHtml(html, base).some(url => url !== escolhido)) {
+    return { url: "", metodo: "html_static_ambiguous" };
+  }
+  return { url: escolhido, metodo: "html_static_base64" };
+}
+
 function produtoAliExpressConfirmadoNaLanding(urlFinal = "", html = "") {
   try {
     const landing = new URL(urlFinal);
@@ -461,8 +499,12 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           contexto.onHtml({ html, urlFinal, statusHttp });
         } catch {}
       }
-      const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual,
+      let destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual,
         { descobertaContextual: contexto.descobertaContextual === true });
+      if (!destinoHtml.url && contexto.adminValidation === true && contexto.descobertaContextual === true &&
+          contexto.secureDynamic === true) {
+        destinoHtml = extrairDestinoEstaticoHtml(html, urlFinal || urlAtual) || destinoHtml;
+      }
       if (!destinoHtml.url) {
         return resultadoFalha(urlOriginal, {
           urlFinal,
@@ -927,6 +969,7 @@ module.exports = {
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
   extrairDestinoHtml,
+  extrairDestinoEstaticoHtml,
   extrairProdutoIdKabum: extrairProdutoIdKabumUrl,
   extrairMetaRefresh,
   extrairUrlsMarketplaceHtml,

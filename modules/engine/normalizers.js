@@ -20,18 +20,24 @@ function normalizarLinksExtraidos(links = []) {
   )];
 }
 
+function detectarMarketplaceHost(hostname = "") {
+  const host = normalizarTexto(hostname).toLowerCase().replace(/^www\./, "");
+  if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
+  if (host === "shopee.com.br" || host.endsWith(".shopee.com.br") || host.includes("shopee.")) return "shopee";
+  if (hostAmazonReconhecido(host)) return "amazon";
+  if (host.includes("aliexpress.")) return "aliexpress";
+  if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
+  if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
+  if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magazineluiza.com.br" || host.endsWith(".magazineluiza.com.br") || host === "magazinevoce.com.br" || host.endsWith(".magazinevoce.com.br") || host === "magalu.com" || host.endsWith(".magalu.com") || host === "magazineluiza.onelink.me") return "magalu";
+  return "";
+}
+
 function detectarMarketplaceLink(url = "") {
   const texto = normalizarTexto(url).toLowerCase();
   if (!texto) return "";
   try {
-    const host = new URL(texto).hostname.toLowerCase().replace(/^www\./, "");
-    if (host === "meli.la" || host.endsWith(".meli.la") || host === "mercadolivre.com" || host.endsWith(".mercadolivre.com") || host === "mercadolivre.com.br" || host.endsWith(".mercadolivre.com.br")) return "mercadolivre";
-    if (host === "shopee.com.br" || host.endsWith(".shopee.com.br") || host.includes("shopee.")) return "shopee";
-    if (hostAmazonReconhecido(host)) return "amazon";
-    if (host.includes("aliexpress.")) return "aliexpress";
-    if (host === "kabum.com.br" || host.endsWith(".kabum.com.br")) return "kabum";
-    if (host === "awin1.com" || host.endsWith(".awin1.com") || host === "awin.com" || host.endsWith(".awin.com")) return "awin";
-    if (host === "magazineluiza.com" || host.endsWith(".magazineluiza.com") || host === "magazineluiza.com.br" || host.endsWith(".magazineluiza.com.br") || host === "magazinevoce.com.br" || host.endsWith(".magazinevoce.com.br") || host === "magalu.com" || host.endsWith(".magalu.com") || host === "magazineluiza.onelink.me") return "magalu";
+    const marketplace = detectarMarketplaceHost(new URL(texto).hostname);
+    if (marketplace) return marketplace;
   } catch {}
 
   if (texto.includes("mercadolivre.com") || texto.includes("meli.la")) return "mercadolivre";
@@ -76,6 +82,7 @@ module.exports = {
   normalizarTexto,
   normalizarOrigemTipo,
   normalizarLinksExtraidos,
+  detectarMarketplaceHost,
   detectarMarketplaceLink,
   normalizarUrl,
   normalizarEventoBruto

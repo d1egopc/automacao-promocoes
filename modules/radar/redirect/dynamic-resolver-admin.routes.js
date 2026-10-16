@@ -4,6 +4,7 @@ const express = require("express");
 const { inferirFamilia, inferirFamiliaRascunho, registroDinamicoPadrao } = require("./dynamic-resolver-registry");
 const { validarUrlPublica } = require("./safe-redirect-http");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
+const { detectarMarketplaceHost } = require("../../engine/normalizers");
 const { criarContratoPreparacaoLinks } = require("../../engine/preparacao-links.service");
 const { normalizarMotivoTecnicoRedirect } = require("./redirect-diagnostic-code");
 const { normalizarMlb, validarResultadoMlIdentity } = require("../../local-worker/ml-identity.contract");
@@ -22,7 +23,24 @@ const segmentosEstruturais = new Set([
 ]);
 const papeisPreview = new Set(["nao_informado", "produto", "app", "pc", "moedas", "moda", "resgate"]);
 const metodosPreview = new Set(["http_redirect", "html_contextual", "html_marketplace_url",
-  "meta_refresh", "window_location", "parametro_e_html_produto", "http_sem_redirect"]);
+  "meta_refresh", "window_location", "parametro_e_html_produto", "http_sem_redirect",
+  "html_static_base64"]);
+
+// Completa apenas a classificacao da prévia com o host oficial da Engine.
+// O fallback textual de detectarMarketplaceLink não pode autorizar um host citado em query/path.
+function marketplacePreview(urlTexto) {
+  const legado = detectarMarketplaceRedirect(urlTexto);
+  if (legado) return legado;
+  try {
+    const url = new URL(urlTexto);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return "";
+    return detectarMarketplaceHost(url.hostname) === "magalu" ? "magalu" : "";
+  } catch { return ""; }
+}
+
+function destinoCandidatoPreview(analise) {
+  return analise.ok === true || analise.candidatoMagaluHttp200 === true;
+}
 
 function ocorrenciasPreview(body = {}) {
   if (!body || typeof body !== "object") throw new Error("PREVIEW_OCORRENCIAS_INVALIDAS");
@@ -49,10 +67,10 @@ function montarContratoPreview(ocorrencias, analises, evidencias = []) {
     linksPreparados: [],
     redirects: analises.map((analise, indice) => ({
       linkOriginalCapturado: ocorrencias[indice].urlExemplo,
-      linkResolvido: analise.ok ? (analise.resultado.urlExpandida || analise.resultado.urlFinal || "") : "",
-      marketplaceDetectado: analise.ok ? analise.marketplace : "",
-      status: analise.ok ? "resolvido" : "falhou",
-      motivo: analise.ok ? "" : normalizarMotivoTecnicoRedirect(analise.resultado),
+      linkResolvido: destinoCandidatoPreview(analise) ? (analise.resultado.urlExpandida || analise.resultado.urlFinal || "") : "",
+      marketplaceDetectado: destinoCandidatoPreview(analise) ? analise.marketplace : "",
+      status: destinoCandidatoPreview(analise) ? "resolvido" : "falhou",
+      motivo: destinoCandidatoPreview(analise) ? "" : normalizarMotivoTecnicoRedirect(analise.resultado),
       papelOriginal: ocorrencias[indice].papel,
       proveniencia: "admin_links_preview"
     })),
@@ -67,7 +85,7 @@ function montarContratoPreview(ocorrencias, analises, evidencias = []) {
 function projecaoPreview(registro, ocorrencias, analises, evidencias = []) {
   const contrato = montarContratoPreview(ocorrencias, analises, evidencias);
   return {
-    ok: analises.every(item => item.ok),
+    ok: analises.every(destinoCandidatoPreview),
     modo: "previsualizacao_sem_ingresso",
     prontoComercial: false,
     rascunhoId: registro.id,
@@ -81,16 +99,17 @@ function projecaoPreview(registro, ocorrencias, analises, evidencias = []) {
       indice,
       papelOriginal: ocorrencias[indice].papel,
       proveniencia: "admin_links_preview",
-      statusDestino: analise.ok ? "candidato_encontrado" : "nao_encontrado",
-      destinoCandidato: analise.ok ? analise.debug.destino : "",
-      marketplaceCandidato: analise.ok ? analise.marketplace : "nao_comprovado",
-      metodo: analise.ok && metodosPreview.has(analise.metodo) ? analise.metodo : "nao_comprovado",
-      identidade: analise.ok ? "pendente" : "nao_comprovada",
+      statusDestino: destinoCandidatoPreview(analise) ? "candidato_encontrado" : "nao_encontrado",
+      destinoCandidato: destinoCandidatoPreview(analise) ? analise.debug.destino : "",
+      marketplaceReconhecido: marketplacePreview(ocorrencias[indice].urlExemplo) || "nao_comprovado",
+      marketplaceCandidato: destinoCandidatoPreview(analise) ? analise.marketplace : "nao_comprovado",
+      metodo: destinoCandidatoPreview(analise) && metodosPreview.has(analise.metodo) ? analise.metodo : "nao_comprovado",
+      identidade: destinoCandidatoPreview(analise) ? "pendente" : "nao_comprovada",
       evidenciaOficial: evidencias[indice]?.estado || "nao_avaliada",
       afiliacao: "nao_comprovada",
       produtoConfirmado: false,
       afiliacaoConfirmada: false,
-      motivoTecnico: analise.ok ? null : normalizarMotivoTecnicoRedirect(analise.resultado)
+      motivoTecnico: destinoCandidatoPreview(analise) ? null : normalizarMotivoTecnicoRedirect(analise.resultado)
     }))
   };
 }
@@ -154,16 +173,30 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       ...(safeHttpDeps ? { safeHttpDeps } : {})
     });
     const final = resultado.urlExpandida || resultado.urlFinal || "";
-    const marketplace = detectarMarketplaceRedirect(final);
+    const marketplace = marketplacePreview(final);
     const ok = resultado.ok === true && Boolean(marketplace) &&
       marketplace === resultado.marketplaceDetectado;
     return { familia, resultado, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
       evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
       debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
   }
+  async function descobrirPreview(urlExemplo) {
+    const analise = await descobrir(urlExemplo);
+    const resultado = analise.resultado;
+    const final = resultado.urlExpandida || resultado.urlFinal || "";
+    // O HTTP seguro chegou a uma pagina oficial de produto, mas o detector de
+    // redirects legado nao conhece este host. Isto e apenas destino candidato.
+    if (!analise.ok && resultado.motivo === "redirect_nao_resolvido" &&
+        Number(resultado.statusHttp) === 200 && marketplacePreview(final) === "magalu" &&
+        produtoIdUrlMagalu(final)) {
+      return { ...analise, candidatoMagaluHttp200: true, marketplace: "magalu",
+        metodo: resultado.metodo, debug: { ...analise.debug, destino: urlDebugSeguro(final) } };
+    }
+    return analise;
+  }
   // Consulta somente resultados previamente validados no cache oficial. Nao cria Work-task.
   async function evidenciaOficialPreview(ocorrencia, analise) {
-    if (!analise.ok) return { estado: "nao_avaliada" };
+    if (!destinoCandidatoPreview(analise)) return { estado: "nao_avaliada" };
     const destino = analise.resultado.urlExpandida || analise.resultado.urlFinal || "";
     try {
       if (analise.marketplace === "mercadolivre" && typeof obterIdentidadeMercadoLivre === "function" &&
@@ -257,7 +290,7 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
             familia.pathMode !== registro.pathMode) throw new Error("RASCUNHO_INCOMPATIVEL");
       }
       const analises = [];
-      for (const item of ocorrencias) analises.push(await descobrir(item.urlExemplo));
+      for (const item of ocorrencias) analises.push(await descobrirPreview(item.urlExemplo));
       const evidencias = [];
       for (let indice = 0; indice < ocorrencias.length; indice++) {
         evidencias.push(await evidenciaOficialPreview(ocorrencias[indice], analises[indice]));
