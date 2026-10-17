@@ -4,7 +4,6 @@ const {
   otimizarBase64
 } = require("./imagem");
 const { resolverBotAdminGerente } = require("./gerente-identidade");
-const { reconciliarProgramacoesEditadas } = require("./programacoes.scheduler");
 
 function criarRotasMensageiro(deps = {}) {
   const router = express.Router();
@@ -799,7 +798,7 @@ validarAlcanceServicosMensageiro({
 });
 
 const programacoesReconciliadas = dados.programacoes !== undefined || dados.mensageiro?.programacoes !== undefined
-  ? reconciliarProgramacoesEditadas(
+  ? require("./programacoes.scheduler").reconciliarProgramacoesEditadas(
     getMensageiroCliente(clienteId).programacoes,
     programacoesPayload,
     typeof deps.agoraProgramacoes === "function" ? deps.agoraProgramacoes() : new Date()
