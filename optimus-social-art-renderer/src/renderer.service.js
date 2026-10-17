@@ -89,6 +89,16 @@ function escaparHtml(valor = "") {
     .replace(/"/g, "&quot;");
 }
 
+function corComTransparencia(hex = "#ffffff", alpha = 0.86) {
+  const valor = /^#[0-9a-f]{6}$/i.test(texto(hex)) ? texto(hex) : "#ffffff";
+  const numero = Number(alpha);
+  const opacidade = Number.isFinite(numero) ? Math.min(1, Math.max(0.2, numero)) : 0.86;
+  const r = parseInt(valor.slice(1, 3), 16);
+  const g = parseInt(valor.slice(3, 5), 16);
+  const b = parseInt(valor.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacidade})`;
+}
+
 function imagemDataUri(buffer = Buffer.alloc(0), mimeType = "image/png") {
   return `data:${mimeType};base64,${buffer.toString("base64")}`;
 }
@@ -143,7 +153,7 @@ function tamanhoFaixaInferior(tamanho = "md") {
 function margemCard(cfg = {}) {
   const top = cfg.faixaSuperiorAtiva && texto(cfg.posicaoCard).startsWith("top") ? "margin-top: 56px;" : "";
   const bottom = texto(cfg.posicaoCard).startsWith("bottom")
-    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 64 : 0) + (cfg.mostrarDataAvisoPreco ? 74 : 0)}px;`
+    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 64 : 0) + (cfg.mostrarDataAvisoPreco ? 58 : 0)}px;`
     : "";
   return `${top}${bottom}`;
 }
@@ -151,7 +161,7 @@ function margemCard(cfg = {}) {
 function margemSelo(cfg = {}) {
   const top = cfg.faixaSuperiorAtiva && texto(cfg.seloPosicao).startsWith("top") ? "margin-top: 56px;" : "";
   const bottom = texto(cfg.seloPosicao).startsWith("bottom")
-    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 72 : 0) + (cfg.mostrarDataAvisoPreco ? 74 : 0)}px;`
+    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 72 : 0) + (cfg.mostrarDataAvisoPreco ? 58 : 0)}px;`
     : "";
   return `${top}${bottom}`;
 }
@@ -239,7 +249,7 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "", data
   const dataBr = /^\d{4}-\d{2}-\d{2}$/.test(dataPublicacao)
     ? `${dataPublicacao.slice(8, 10)}/${dataPublicacao.slice(5, 7)}/${dataPublicacao.slice(0, 4)}` : "";
   const aviso = template.mostrarDataAvisoPreco && dataBr
-    ? `<div class="price-notice" style="bottom:${template.faixaInferiorAtiva ? 64 : 0}px"><span>Oferta do dia · ${dataBr}</span><span>${escaparHtml(template.textoAvisoPreco)}</span></div>`
+    ? `<div class="price-notice" style="bottom:${template.faixaInferiorAtiva ? 64 : 0}px; background:${corComTransparencia(template.avisoPrecoCorFundo, template.avisoPrecoTransparencia)}; color:${template.avisoPrecoCorTexto}"><span>Oferta do dia · ${dataBr}</span><span>${escaparHtml(template.textoAvisoPreco)}</span></div>`
     : "";
 
   return `<!doctype html>
@@ -263,7 +273,7 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "", data
   .coupon { margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; padding: 14px 28px; color: #fff; font-size: 22px; font-weight: 850; line-height: 1; text-transform: uppercase; letter-spacing: .08em; box-shadow: 0 4px 14px rgba(15, 23, 42, .18); }
   .market { margin-top: 7px; color: rgba(100, 116, 139, .85); font-size: 17px; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .14em; }
   .bottom-band { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; gap: 14px; font-weight: 850; text-transform: uppercase; letter-spacing: .14em; box-shadow: 0 -2px 12px rgba(15, 23, 42, .22); }
-  .price-notice { position: absolute; z-index: 4; left: 0; right: 0; height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: rgba(15, 23, 42, .84); color: #fff; font-size: 19px; font-weight: 600; line-height: 1.15; text-align: center; }
+  .price-notice { position: absolute; z-index: 4; left: 0; right: 0; height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 16px; font-weight: 600; line-height: 1.1; text-align: center; }
   .price-notice span { max-width: 96%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 </style>
 </head>

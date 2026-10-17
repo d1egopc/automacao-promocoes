@@ -35,7 +35,10 @@ const CONFIG_PADRAO = Object.freeze({
   seloCor: "#dc2626",
   seloCorTexto: "#ffffff",
   mostrarDataAvisoPreco: false,
-  textoAvisoPreco: "Preços sujeitos a alteração."
+  textoAvisoPreco: "Preços sujeitos a alteração.",
+  avisoPrecoCorFundo: "#ffffff",
+  avisoPrecoCorTexto: "#0f172a",
+  avisoPrecoTransparencia: 0.86
 });
 
 function texto(valor = "") {
@@ -49,6 +52,11 @@ function cor(valor = "", fallback = "#000000") {
 
 function avisoPreco(valor) {
   return texto(valor).replace(/[<>\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").slice(0, 100).trim();
+}
+
+function opacidadeAviso(valor, fallback = 0.86) {
+  const n = Number(valor);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0.2, n)) : fallback;
 }
 
 function normalizarTemplateVisual(valor = {}) {
@@ -89,7 +97,10 @@ function normalizarTemplateVisual(valor = {}) {
     seloCor: cor(entrada.seloCor, CONFIG_PADRAO.seloCor),
     seloCorTexto: cor(entrada.seloCorTexto, CONFIG_PADRAO.seloCorTexto),
     mostrarDataAvisoPreco: entrada.mostrarDataAvisoPreco === true,
-    textoAvisoPreco: avisoPreco(entrada.textoAvisoPreco || CONFIG_PADRAO.textoAvisoPreco)
+    textoAvisoPreco: avisoPreco(entrada.textoAvisoPreco || CONFIG_PADRAO.textoAvisoPreco),
+    avisoPrecoCorFundo: cor(entrada.avisoPrecoCorFundo, CONFIG_PADRAO.avisoPrecoCorFundo),
+    avisoPrecoCorTexto: cor(entrada.avisoPrecoCorTexto, CONFIG_PADRAO.avisoPrecoCorTexto),
+    avisoPrecoTransparencia: opacidadeAviso(entrada.avisoPrecoTransparencia, CONFIG_PADRAO.avisoPrecoTransparencia)
   };
 }
 

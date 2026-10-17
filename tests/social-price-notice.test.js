@@ -22,6 +22,9 @@ assert.notEqual(padrao.hash, outroDia.hash);
 assert.equal(padrao.dataPublicacao, "2026-10-17");
 const normal = normalizarPayloadRenderer(padrao);
 assert.equal(normal.template.mostrarDataAvisoPreco, true);
+assert.equal(normal.template.avisoPrecoCorFundo, "#ffffff");
+assert.equal(normal.template.avisoPrecoCorTexto, "#0f172a");
+assert.equal(normal.template.avisoPrecoTransparencia, 0.86);
 const html = htmlPreview({ template: normal.template, dados: normal.dados, dataPublicacao: normal.dataPublicacao, imagemSrc: "data:image/png;base64,AAAA" });
 assert.match(html, /Oferta do dia · 17\/10\/2026/);
 assert.match(html, /Preços sujeitos a alteração\./);
@@ -34,5 +37,7 @@ const personalizado = normalizarPayloadRenderer({ ...padrao, template: { ...anti
 const htmlPersonalizado = htmlPreview({ template: personalizado.template, dados: personalizado.dados, dataPublicacao: personalizado.dataPublicacao });
 assert.match(htmlPersonalizado, /Aviso privado/);
 assert.doesNotMatch(htmlPersonalizado, /<privado>/);
+assert.equal(personalizado.template.avisoPrecoCorFundo, "#ffffff");
+assert.equal(personalizado.template.avisoPrecoCorTexto, "#0f172a");
 assert.equal(normalizarTemplateVisual({ mostrarDataAvisoPreco: false }).mostrarDataAvisoPreco, false);
 console.log("social-price-notice: PASS");

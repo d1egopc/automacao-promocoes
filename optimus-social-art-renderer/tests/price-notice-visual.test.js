@@ -41,6 +41,7 @@ const payload = { ...base, hash: hashPayload(base) };
         return { aviso: caixa(".price-notice"), card: caixa(".card"), selo: caixa(".badge"), cta: caixa(".bottom-band"), texto: document.querySelector(".price-notice").innerText };
       });
       assert.match(caixas.texto, /Oferta do dia · 17\/10\/2026/);
+      assert.match(caixas.texto, /Preços sujeitos a alteração/);
       assert.ok(caixas.card.bottom <= caixas.aviso.top, "aviso não cobre preço");
       assert.ok(caixas.selo.bottom <= caixas.aviso.top, "aviso não cobre selo");
       assert.ok(caixas.aviso.bottom <= caixas.cta.top, "aviso não cobre CTA");

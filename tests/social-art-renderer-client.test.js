@@ -54,6 +54,9 @@ const {
   });
   assert.strictEqual(payloadLigado.versao, 1);
   assert.strictEqual(payloadLigado.template.mostrarDataAvisoPreco, true, "Padrão Optimus exibe aviso");
+  assert.strictEqual(payloadLigado.template.avisoPrecoCorFundo, "#ffffff");
+  assert.strictEqual(payloadLigado.template.avisoPrecoCorTexto, "#0f172a");
+  assert.strictEqual(payloadLigado.template.avisoPrecoTransparencia, 0.86);
   assert.match(payloadLigado.dataPublicacao, /^\d{4}-\d{2}-\d{2}$/);
   assert.strictEqual(payloadLigado.template.faixaInferiorAtiva, true);
   assert.strictEqual(payloadLigado.cta, 'COMENTE "QUERO"');
