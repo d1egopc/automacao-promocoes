@@ -13,6 +13,7 @@ const {
 } = require("../../local-worker/magalu-identity.contract");
 const {
   detectarMarketplaceRedirect, listarResolversRedirect, resolverRedirectUniversal,
+  resolverHttpGenerico,
   urlAmazonComAsinExplicito, urlMercadoLivreComMlbExplicito
 } = require("./redirect-resolver");
 
@@ -129,6 +130,11 @@ function urlDebugSeguro(valor) {
   } catch { return ""; }
 }
 
+function urlDebugPublico(valor) {
+  try { validarUrlPublica(valor); return urlDebugSeguro(valor); }
+  catch { return ""; }
+}
+
 function tipoResultado(resultado) {
   const url = resultado.urlExpandida || resultado.urlFinal || "";
   const classificacao = classificarLinkEngine({ marketplace: resultado.marketplaceDetectado, url });
@@ -158,7 +164,8 @@ function registroPublico(registro) {
 }
 
 function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedirectUniversal,
-  safeHttpDeps = null, obterIdentidadeMercadoLivre = null, obterIdentidadeMagalu = null } = {}) {
+  resolveInspecao = resolverHttpGenerico, safeHttpDeps = null,
+  obterIdentidadeMercadoLivre = null, obterIdentidadeMagalu = null } = {}) {
   const router = express.Router();
   const getStore = () => registry || registroDinamicoPadrao();
   async function descobrir(urlExemplo) {
@@ -263,6 +270,47 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   router.get("/", (_req, res) => {
     try { return res.json({ ok: true, resolvers: getStore().listar().map(registroPublico) }); }
     catch (error) { return erro(res, error); }
+  });
+  // Inspecao administrativa sem registry, escrita ou promocao comercial. O HTTP
+  // seguro do resolvedor compartilhado valida DNS/IP em cada salto.
+  router.post("/inspect", async (req, res) => {
+    try {
+      const entrada = req.body?.urlExemplo;
+      if (typeof entrada !== "string" || !entrada || entrada !== entrada.trim() ||
+          entrada.length > 2048) throw new Error("URL_EXEMPLO_INVALIDA");
+      validarUrlPublica(entrada);
+      const resultado = await resolveInspecao(entrada, {
+        secureDynamic: true, adminValidation: true, descobertaContextual: true,
+        timeout: 4500, maxRedirects: 5,
+        ...(safeHttpDeps ? { safeHttpDeps } : {})
+      });
+      const expandida = resultado.urlExpandida || resultado.urlFinal || "";
+      const marketplace = resultado.ok === true && marketplacePreview(expandida) === resultado.marketplaceDetectado
+        ? resultado.marketplaceDetectado : "";
+      const candidato = Boolean(marketplace);
+      let familia = null;
+      if (candidato) {
+        try {
+          const inferida = inferirFamiliaRascunho(entrada);
+          const fixo = listarResolversRedirect().some(item => item.dominios.some(host =>
+            inferida.host === host || inferida.host.endsWith(`.${host}`)));
+          if (!fixo && !marketplacePreview(entrada)) familia = { host: inferida.host, pathPrefix: inferida.pathPrefix,
+            pathMode: inferida.pathMode };
+        } catch { /* URLs com query ou sem familia restrita nao viram rascunho. */ }
+      }
+      const motivoTecnico = candidato ? null : normalizarMotivoTecnicoRedirect(resultado);
+      const falha = !["html_destino_nao_identificado", "redirect_nao_resolvido",
+        "destino_comercial_nao_comprovado"].includes(motivoTecnico);
+      const estado = candidato ? "oferta_candidata" : falha ? "falha_resolucao" :
+        expandida && expandida !== entrada ? "link_intermediario" : "destino_desconhecido";
+      return res.json({ ok: true, estado, urlOriginalSanitizada: urlDebugPublico(entrada),
+        urlExpandidaSanitizada: urlDebugPublico(expandida),
+        marketplaceReconhecido: marketplacePreview(expandida || entrada) || "nao_comprovado",
+        marketplaceCandidato: marketplace || "nao_comprovado",
+        metodo: metodosPreview.has(resultado.metodo) ? resultado.metodo : "nao_comprovado",
+        motivoTecnico, familia, rascunhoElegivel: Boolean(familia),
+        produtoConfirmado: false, afiliacaoConfirmada: false, prontoComercial: false });
+    } catch (error) { return erro(res, error); }
   });
   router.post("/discover", async (req, res) => {
     try { return res.json(projecaoDescoberta(await descobrir(req.body?.urlExemplo))); }
