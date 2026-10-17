@@ -33,7 +33,9 @@ const CONFIG_PADRAO = Object.freeze({
   seloTexto: "OFERTA DO DIA",
   seloPosicao: "top-right",
   seloCor: "#dc2626",
-  seloCorTexto: "#ffffff"
+  seloCorTexto: "#ffffff",
+  mostrarDataAvisoPreco: false,
+  textoAvisoPreco: "Preços sujeitos a alteração."
 });
 
 function texto(valor = "") {
@@ -43,6 +45,10 @@ function texto(valor = "") {
 function cor(valor = "", fallback = "#000000") {
   const v = texto(valor);
   return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+}
+
+function avisoPreco(valor) {
+  return texto(valor).replace(/[<>\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").slice(0, 100).trim();
 }
 
 function normalizarTemplateVisual(valor = {}) {
@@ -81,7 +87,9 @@ function normalizarTemplateVisual(valor = {}) {
     seloTexto: texto(entrada.seloTexto || CONFIG_PADRAO.seloTexto).slice(0, 40),
     seloPosicao: POSICOES_VALIDAS.has(seloPosicao) ? seloPosicao : CONFIG_PADRAO.seloPosicao,
     seloCor: cor(entrada.seloCor, CONFIG_PADRAO.seloCor),
-    seloCorTexto: cor(entrada.seloCorTexto, CONFIG_PADRAO.seloCorTexto)
+    seloCorTexto: cor(entrada.seloCorTexto, CONFIG_PADRAO.seloCorTexto),
+    mostrarDataAvisoPreco: entrada.mostrarDataAvisoPreco === true,
+    textoAvisoPreco: avisoPreco(entrada.textoAvisoPreco || CONFIG_PADRAO.textoAvisoPreco)
   };
 }
 
@@ -111,6 +119,7 @@ function normalizarPayloadRenderer(payload = {}) {
     template: normalizarTemplateVisual(payload.template),
     dados: normalizarDados(payload.dados),
     cta: texto(payload.cta).slice(0, 120),
+    dataPublicacao: /^\d{4}-\d{2}-\d{2}$/.test(texto(payload.dataPublicacao)) ? texto(payload.dataPublicacao) : "",
     versao: VERSAO_TEMPLATE_VISUAL
   };
   if (!base.clienteIdInterno) throw new Error("cliente_id_obrigatorio");

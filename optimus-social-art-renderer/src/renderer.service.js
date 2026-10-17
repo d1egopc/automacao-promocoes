@@ -142,13 +142,17 @@ function tamanhoFaixaInferior(tamanho = "md") {
 
 function margemCard(cfg = {}) {
   const top = cfg.faixaSuperiorAtiva && texto(cfg.posicaoCard).startsWith("top") ? "margin-top: 56px;" : "";
-  const bottom = cfg.faixaInferiorAtiva && texto(cfg.posicaoCard).startsWith("bottom") ? "margin-bottom: 64px;" : "";
+  const bottom = texto(cfg.posicaoCard).startsWith("bottom")
+    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 64 : 0) + (cfg.mostrarDataAvisoPreco ? 74 : 0)}px;`
+    : "";
   return `${top}${bottom}`;
 }
 
 function margemSelo(cfg = {}) {
   const top = cfg.faixaSuperiorAtiva && texto(cfg.seloPosicao).startsWith("top") ? "margin-top: 56px;" : "";
-  const bottom = cfg.faixaInferiorAtiva && texto(cfg.seloPosicao).startsWith("bottom") ? "margin-bottom: 72px;" : "";
+  const bottom = texto(cfg.seloPosicao).startsWith("bottom")
+    ? `margin-bottom: ${(cfg.faixaInferiorAtiva ? 72 : 0) + (cfg.mostrarDataAvisoPreco ? 74 : 0)}px;`
+    : "";
   return `${top}${bottom}`;
 }
 
@@ -207,7 +211,7 @@ function htmlPreviewLegado({ template = {}, dados = {}, cta = "", imagemSrc = ""
 </html>`;
 }
 
-function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {}) {
+function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "", dataPublicacao = "" } = {}) {
   const precoAntigo = template.mostrarPrecoAntigo && dados.precoAntigo
     ? `<span class="old">De ${escaparHtml(formatarPrecoBRL(dados.precoAntigo))}</span>`
     : "";
@@ -232,6 +236,11 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
   const faixaInferior = template.faixaInferiorAtiva
     ? `<div class="bottom-band" style="background:${template.faixaInferiorCor}; color:${template.faixaInferiorCorTexto}; ${tamanhoFaixaInferior(template.faixaInferiorTamanho)} ${alinhamentoFlex(template.faixaInferiorAlinhamento)}"><span>\uD83D\uDD25</span><span>${escaparHtml(cta)}</span></div>`
     : "";
+  const dataBr = /^\d{4}-\d{2}-\d{2}$/.test(dataPublicacao)
+    ? `${dataPublicacao.slice(8, 10)}/${dataPublicacao.slice(5, 7)}/${dataPublicacao.slice(0, 4)}` : "";
+  const aviso = template.mostrarDataAvisoPreco && dataBr
+    ? `<div class="price-notice" style="bottom:${template.faixaInferiorAtiva ? 64 : 0}px"><span>Oferta do dia · ${dataBr}</span><span>${escaparHtml(template.textoAvisoPreco)}</span></div>`
+    : "";
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -254,6 +263,8 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
   .coupon { margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; padding: 14px 28px; color: #fff; font-size: 22px; font-weight: 850; line-height: 1; text-transform: uppercase; letter-spacing: .08em; box-shadow: 0 4px 14px rgba(15, 23, 42, .18); }
   .market { margin-top: 7px; color: rgba(100, 116, 139, .85); font-size: 17px; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .14em; }
   .bottom-band { position: absolute; inset: auto 0 0 0; display: flex; align-items: center; gap: 14px; font-weight: 850; text-transform: uppercase; letter-spacing: .14em; box-shadow: 0 -2px 12px rgba(15, 23, 42, .22); }
+  .price-notice { position: absolute; z-index: 4; left: 0; right: 0; height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: rgba(15, 23, 42, .84); color: #fff; font-size: 19px; font-weight: 600; line-height: 1.15; text-align: center; }
+  .price-notice span { max-width: 96%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -262,6 +273,7 @@ function htmlPreview({ template = {}, dados = {}, cta = "", imagemSrc = "" } = {
     ${faixaSuperior}
     ${selo}
     ${cardPreco}
+    ${aviso}
     ${faixaInferior}
   </div>
 </body>
@@ -300,6 +312,7 @@ async function renderizarPng(payloadEntrada = {}, {
       template: payload.template,
       dados: payload.dados,
       cta: payload.cta,
+      dataPublicacao: payload.dataPublicacao,
       imagemSrc: imagemDataUri(imagem.buffer, imagem.mimeType)
     }), { waitUntil: "domcontentloaded" });
     await page.evaluate(async () => {

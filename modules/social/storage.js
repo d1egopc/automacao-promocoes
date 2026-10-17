@@ -6,6 +6,7 @@ const {
   listClientes
 } = require("../../utils/storage");
 const { logSocial, logErroSocial } = require("./logs");
+const { sanitizarAvisoPreco } = require("./post-visual-template.contract");
 const fonteUniversal = require("./universal-opportunities.source");
 
 const ARQUIVOS = {
@@ -503,7 +504,14 @@ function normalizarTemplate(clienteId, template = {}, index = 0) {
   const rede = normalizarRede(template.rede) || "instagram";
   const gatilhoEntrada = objeto(template.gatilho);
   const ctaEntrada = objeto(template.cta);
-  const visual = objeto(template.visual || template.visualConfig || template.templateVisual);
+  const visualEntrada = objeto(template.visual || template.visualConfig || template.templateVisual);
+  const visual = { ...visualEntrada };
+  if (Object.prototype.hasOwnProperty.call(visual, "textoAvisoPreco")) {
+    visual.textoAvisoPreco = sanitizarAvisoPreco(visual.textoAvisoPreco);
+  }
+  if (Object.prototype.hasOwnProperty.call(visual, "mostrarDataAvisoPreco")) {
+    visual.mostrarDataAvisoPreco = visual.mostrarDataAvisoPreco === true;
+  }
   const mensagemDirect = texto(
     template.mensagemDirect ||
     template.mensagemPrivada ||

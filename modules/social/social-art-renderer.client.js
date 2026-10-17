@@ -109,13 +109,14 @@ async function resolverConfigRendererSocial({
 
 function templateVisualCliente(clienteId = "admin", templateId = "padrao-instagram") {
   const id = texto(templateId || "padrao-instagram");
+  if (id === "padrao-instagram") return normalizarTemplateVisual(CONFIG_PADRAO);
   const templates = storage.listarTemplatesSocial(clienteId);
   const template = templates.find(item => texto(item.id) === id);
   const visual = template?.visual || template?.visualConfig || template?.templateVisual || {};
   return normalizarTemplateVisual(visual && typeof visual === "object" ? visual : CONFIG_PADRAO);
 }
 
-function montarPayloadArteSocial({ clienteId = "admin", ofertaId = "", oferta = {}, templateId = "padrao-instagram", gatilho = null } = {}) {
+function montarPayloadArteSocial({ clienteId = "admin", ofertaId = "", oferta = {}, templateId = "padrao-instagram", gatilho = null, dataPublicacao = new Date() } = {}) {
   const templateBase = templateVisualCliente(clienteId, templateId);
   const { cfg, cta } = aplicarGatilhoTemplateVisual(templateBase, gatilho);
   return criarPayloadRenderer({
@@ -123,7 +124,8 @@ function montarPayloadArteSocial({ clienteId = "admin", ofertaId = "", oferta = 
     ofertaId,
     template: cfg,
     dados: montarDadosTemplateVisual(oferta),
-    cta
+    cta,
+    dataPublicacao
   });
 }
 
@@ -133,6 +135,7 @@ async function renderizarArtePublicacaoSocial({
   oferta = {},
   templateId = "padrao-instagram",
   gatilho = null,
+  dataPublicacao = new Date(),
   fetchImpl = globalThis.fetch,
   timeoutMs,
   getPlatformVariableImpl = getPlatformVariable,
@@ -146,7 +149,7 @@ async function renderizarArtePublicacaoSocial({
   if (!base || !token) throw new Error("social_art_renderer_nao_configurado");
   if (typeof fetchImpl !== "function") throw new Error("social_art_fetch_indisponivel");
 
-  const payload = montarPayloadArteSocial({ clienteId, ofertaId, oferta, templateId, gatilho });
+  const payload = montarPayloadArteSocial({ clienteId, ofertaId, oferta, templateId, gatilho, dataPublicacao });
   const endpoint = `${base}/render/social/post-art`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutFinalMs);

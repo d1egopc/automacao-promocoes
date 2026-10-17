@@ -20,7 +20,9 @@ const CONFIG_PADRAO = Object.freeze({
   posicaoCard: "bottom-left",
   corMoldura: "#0f172a",
   corCard: "#ffffff",
-  corDestaquePreco: "#16a34a"
+  corDestaquePreco: "#16a34a",
+  mostrarDataAvisoPreco: true,
+  textoAvisoPreco: "Preços sujeitos a alteração."
 });
 
 function texto(valor = "") {
@@ -48,6 +50,20 @@ function numero(valor) {
   return Number.isFinite(n) ? n : null;
 }
 
+function sanitizarAvisoPreco(valor) {
+  return texto(valor).replace(/[<>\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").slice(0, 100).trim();
+}
+
+function dataPublicacaoSaoPaulo(valor) {
+  const data = valor instanceof Date ? valor : new Date(valor);
+  if (!Number.isFinite(data.getTime())) throw new Error("social_data_publicacao_invalida");
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(data);
+  const ler = tipo => partes.find(parte => parte.type === tipo)?.value;
+  return `${ler("year")}-${ler("month")}-${ler("day")}`;
+}
+
 function normalizarTemplateVisual(valor = {}) {
   const entrada = valor && typeof valor === "object" ? valor : {};
   const posicao = texto(entrada.posicaoCard || CONFIG_PADRAO.posicaoCard);
@@ -68,7 +84,9 @@ function normalizarTemplateVisual(valor = {}) {
     posicaoCard: POSICOES_VALIDAS.has(posicao) ? posicao : CONFIG_PADRAO.posicaoCard,
     corMoldura: cor(entrada.corMoldura, CONFIG_PADRAO.corMoldura),
     corCard: cor(entrada.corCard, CONFIG_PADRAO.corCard),
-    corDestaquePreco: cor(entrada.corDestaquePreco, CONFIG_PADRAO.corDestaquePreco)
+    corDestaquePreco: cor(entrada.corDestaquePreco, CONFIG_PADRAO.corDestaquePreco),
+    mostrarDataAvisoPreco: booleano(entrada.mostrarDataAvisoPreco, false),
+    textoAvisoPreco: sanitizarAvisoPreco(entrada.textoAvisoPreco || CONFIG_PADRAO.textoAvisoPreco)
   };
 }
 
@@ -129,7 +147,8 @@ function criarPayloadRenderer({
   ofertaId = "",
   template = CONFIG_PADRAO,
   dados = {},
-  cta = ""
+  cta = "",
+  dataPublicacao = new Date()
 } = {}) {
   const payloadBase = {
     clienteIdInterno: texto(clienteIdInterno),
@@ -144,6 +163,7 @@ function criarPayloadRenderer({
       imagem: texto(dados.imagem)
     },
     cta: texto(cta),
+    dataPublicacao: dataPublicacaoSaoPaulo(dataPublicacao),
     versao: VERSAO_TEMPLATE_VISUAL
   };
   return {
@@ -162,5 +182,7 @@ module.exports = {
   montarDadosTemplateVisual,
   aplicarGatilhoTemplateVisual,
   criarPayloadRenderer,
-  hashPayloadArte
+  hashPayloadArte,
+  sanitizarAvisoPreco,
+  dataPublicacaoSaoPaulo
 };

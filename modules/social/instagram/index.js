@@ -1759,7 +1759,8 @@ async function publicarImagemInstagram({
           imagem: imagemOriginalUrl
         },
         templateId: tpl,
-        gatilho: gatilhoSeguro
+        gatilho: gatilhoSeguro,
+        dataPublicacao: publicacaoAtual.criadoEm
       });
       imagemUrl = validarImagemPublica(arte?.imagemUrlPublica || arte?.imagemUrl || arte?.url);
       publicacaoAtual = salvarPublicacaoInstagram(clienteId, {

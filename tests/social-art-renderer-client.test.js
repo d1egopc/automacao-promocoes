@@ -53,6 +53,8 @@ const {
     gatilho: { ativo: true, palavra: "quero" }
   });
   assert.strictEqual(payloadLigado.versao, 1);
+  assert.strictEqual(payloadLigado.template.mostrarDataAvisoPreco, true, "Padrão Optimus exibe aviso");
+  assert.match(payloadLigado.dataPublicacao, /^\d{4}-\d{2}-\d{2}$/);
   assert.strictEqual(payloadLigado.template.faixaInferiorAtiva, true);
   assert.strictEqual(payloadLigado.cta, 'COMENTE "QUERO"');
   assert.strictEqual(payloadLigado.dados.imagem, "https://cdn.optimus.test/produto-a.jpg");
@@ -67,6 +69,14 @@ const {
   });
   assert.strictEqual(payloadDesligado.template.faixaInferiorAtiva, false);
   assert.strictEqual(payloadDesligado.cta, "");
+  const instante = "2026-10-18T02:59:59.000Z";
+  const payloadData = montarPayloadArteSocial({ clienteId: "cliente_a", ofertaId: "oferta_a", oferta, dataPublicacao: instante });
+  const payloadRetry = montarPayloadArteSocial({ clienteId: "cliente_a", ofertaId: "oferta_a", oferta, dataPublicacao: instante });
+  assert.strictEqual(payloadData.dataPublicacao, "2026-10-17");
+  assert.strictEqual(payloadData.hash, payloadRetry.hash, "retry conserva hash e data");
+  writeClienteJson("cliente_a", "social-templates.json", [{ id: "personalizado_antigo", visual: { mostrarCupom: false } }]);
+  const payloadAntigo = montarPayloadArteSocial({ clienteId: "cliente_a", ofertaId: "oferta_a", oferta, templateId: "personalizado_antigo", dataPublicacao: instante });
+  assert.strictEqual(payloadAntigo.template.mostrarDataAvisoPreco, false, "template antigo não muda visual");
 
   assert.strictEqual(validarUrlHttps("https://cdn.optimus.test/a.png"), "https://cdn.optimus.test/a.png");
   assert.throws(() => validarUrlHttps("http://cdn.optimus.test/a.png"), /social_art_url_publica_invalida/);
