@@ -54,6 +54,7 @@ jobs:
 
       - name: Links discovery and diagnostic contracts
         run: |
+          node tests/links-admin-inspect.test.js
           node tests/links-discovery-draft.test.js
           node tests/links-engine-capture-diagnostic-api.test.js
           node tests/links-engine-preparation-preview.test.js
