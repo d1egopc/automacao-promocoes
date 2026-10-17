@@ -132,6 +132,99 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
   sock = await rodar();
   assert.strictEqual(sock.envios.length, 0, "programacao.grupos=[] explicito nao envia");
 
+  const imagemServmaq = `data:image/jpeg;base64,${Buffer.from("imagem-sintetica").toString("base64")}`;
+  configurar([baseProgramacao({
+    id: "servmaq_1050",
+    perfilId: "servmaq_1",
+    tipo: "horario",
+    horario: "10:50",
+    grupos: [],
+    gruposConfigurados: true,
+    nextRunAt: "2026-08-24T13:50:00.000Z",
+    conteudos: [{ id: "imagem", tipo: "imagem", texto: "", imagem: imagemServmaq }]
+  })], {
+    grupos: [],
+    perfis: [{
+      id: "servmaq_1", nome: "Perfil de teste", ativo: true, sessaoId: "sessao_prog", grupos: [],
+      modulos: {
+        programacoes: { ativo: true },
+        boasVindas: { ativo: true, grupos: ["grupo_1@g.us"], gruposConfigurados: true }
+      }
+    }]
+  });
+  sock = await rodar({ agora: new Date("2026-08-24T10:50:16-03:00") });
+  prog = storage.getMensageiroCliente("cliente_prog").programacoes.find((p) => p.id === "servmaq_1050");
+  assert.strictEqual(sock.envios.length, 0, "grupo de outro card nao deve receber a imagem programada");
+  assert.strictEqual(prog.status, "sem_grupo", "destino vazio explica a falha da ocorrencia");
+  assert.strictEqual(prog.nextRunAt, "2026-08-25T13:50:00.000Z", "recorrencia diaria permanece agendada");
+  assert.strictEqual(prog.conteudos[0].imagem, imagemServmaq, "imagem e preservada sem envio indevido");
+
+  const somenteGrupo = scheduler.reconciliarProgramacoesEditadas(
+    [prog], [{ ...prog, grupos: ["grupo_1@g.us"], nextRunAt: "" }],
+    new Date("2026-08-24T12:17:54-03:00")
+  );
+  assert.strictEqual(somenteGrupo[0].nextRunAt, "2026-08-25T13:50:00.000Z", "edicao sem mudar agenda nao altera proximo horario");
+
+  const reagendada = scheduler.reconciliarProgramacoesEditadas(
+    [prog], [{ ...prog, grupos: ["grupo_1@g.us"], horario: "12:21" }],
+    new Date("2026-08-24T12:17:54-03:00")
+  );
+  assert.strictEqual(reagendada[0].nextRunAt, "2026-08-24T15:21:00.000Z", "horario futuro substitui agendamento antigo por hoje");
+  assert.strictEqual(reagendada[0].status, "agendada", "reagendamento sai de sem_grupo");
+  configurar(reagendada, {
+    grupos: [],
+    perfis: [{
+      id: "servmaq_1", nome: "Perfil de teste", ativo: true, sessaoId: "sessao_prog", grupos: [],
+      modulos: { programacoes: { ativo: true } }
+    }]
+  });
+  sock = criarSock();
+  await rodar({ sock, agora: new Date("2026-08-24T12:21:10-03:00") });
+  await rodar({ sock, agora: new Date("2026-08-24T12:21:40-03:00") });
+  prog = storage.getMensageiroCliente("cliente_prog").programacoes.find((p) => p.id === "servmaq_1050");
+  assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_1@g.us"], "imagem e enviada uma unica vez ao grupo da sessao do perfil");
+  assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "imagem base64 chega ao envio simulado");
+  assert.strictEqual(prog.nextRunAt, "2026-08-25T15:21:00.000Z", "proximo envio fica para amanha as 12h21");
+
+  const horarioJaPassou = scheduler.reconciliarProgramacoesEditadas(
+    [prog], [{ ...prog, horario: "12:20" }], new Date("2026-08-24T12:21:40-03:00")
+  );
+  assert.strictEqual(horarioJaPassou[0].nextRunAt, "2026-08-25T15:20:00.000Z", "horario passado agenda amanha sem envio atrasado");
+
+  assert.throws(() => scheduler.reconciliarProgramacoesEditadas(
+    [{ ...prog, processandoEm: "2026-08-24T15:21:00.000Z", lockAte: "2026-08-24T15:23:00.000Z" }],
+    [{ ...prog, horario: "12:22" }],
+    new Date("2026-08-24T12:21:40-03:00")
+  ), erro => erro.statusCode === 409 && erro.code === "programacao_em_processamento", "edicao durante envio nao libera lock nem duplica envio");
+
+  const novaComDataDoCliente = scheduler.reconciliarProgramacoesEditadas(
+    [], [baseProgramacao({ id: "nova_reagenda", tipo: "horario", horario: "12:21", nextRunAt: "2026-08-25T13:50:00.000Z" })],
+    new Date("2026-08-24T12:17:54-03:00")
+  );
+  assert.strictEqual(novaComDataDoCliente[0].nextRunAt, "2026-08-24T15:21:00.000Z", "nova programacao ignora nextRunAt obsoleto do cliente");
+
+  configurar([baseProgramacao({
+    id: "servmaq_1050_destino",
+    perfilId: "servmaq_1",
+    tipo: "horario",
+    horario: "10:50",
+    grupos: ["grupo_1@g.us"],
+    gruposConfigurados: true,
+    nextRunAt: "2026-08-24T13:50:00.000Z",
+    conteudos: [{ id: "imagem", tipo: "imagem", texto: "", imagem: imagemServmaq }]
+  })], {
+    grupos: [],
+    perfis: [{
+      id: "servmaq_1", nome: "Perfil de teste", ativo: true, sessaoId: "sessao_prog", grupos: [],
+      modulos: { programacoes: { ativo: true } }
+    }]
+  });
+  sock = await rodar({ agora: new Date("2026-08-24T10:50:16-03:00") });
+  prog = storage.getMensageiroCliente("cliente_prog").programacoes.find((p) => p.id === "servmaq_1050_destino");
+  assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_1@g.us"], "grupo proprio recebe uma vez na sessao do perfil");
+  assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "imagem e preparada para o envio simulado");
+  assert.strictEqual(prog.nextRunAt, "2026-08-25T13:50:00.000Z", "envio diario avanca para o dia seguinte");
+
   configurar([baseProgramacao({ id: "grupo_proprio", grupos: ["grupo_2@g.us"], gruposConfigurados: true, nextRunAt: "2026-08-24T14:59:00.000Z" })], { grupos: ["grupo_1@g.us"] });
   sock = await rodar();
   assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_2@g.us"], "programacao.grupos proprio nao depende de config.grupos");
@@ -232,6 +325,41 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
 
   const antiga = storage.setMensageiroCliente("cliente_antigo_prog", { ativo: true });
   assert.deepStrictEqual(antiga.programacoes, [], "config antiga sem programacoes continua valida");
+
+  configurar([baseProgramacao({
+    id: "rota_reagendamento", perfilId: "servmaq_1", tipo: "horario", horario: "10:50",
+    grupos: [], gruposConfigurados: true, nextRunAt: "2026-08-25T13:50:00.000Z",
+    conteudos: [{ id: "imagem", tipo: "imagem", texto: "", imagem: "https://example.invalid/imagem.jpg" }]
+  })], {
+    grupos: [],
+    perfis: [{ id: "servmaq_1", nome: "Perfil de teste", ativo: true, sessaoId: "sessao_prog", grupos: [], modulos: { programacoes: { ativo: true } } }]
+  });
+  const criarRotasMensageiro = require("../modules/mensageiro/routes");
+  const rotas = criarRotasMensageiro({
+    getClienteId: () => "cliente_prog",
+    usuarioTemRecurso: () => true,
+    getMensageiroCliente: storage.getMensageiroCliente,
+    setMensageiroCliente: storage.setMensageiroCliente,
+    validarPerfisMensageiro: storage.validarPerfisMensageiro,
+    listarSessoesMensageiro: () => [{ id: "sessao_prog" }],
+    listarGruposSessaoMensageiro: () => [{ id: "grupo_1@g.us", sessaoId: "sessao_prog" }],
+    agoraProgramacoes: () => new Date("2026-08-24T12:17:54-03:00")
+  });
+  const rotaSalvar = rotas.stack.find(item => item.route?.path === "/" && item.route.methods.post).route.stack[0].handle;
+  const antesDaRota = storage.getMensageiroCliente("cliente_prog").programacoes[0];
+  const resposta = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await rotaSalvar({ body: { programacoes: [{ ...antesDaRota, horario: "12:21", grupos: ["grupo_1@g.us"] }] } }, resposta);
+  assert.strictEqual(resposta.statusCode, 200, "rota oficial aceita reagendamento valido");
+  assert.strictEqual(storage.getMensageiroCliente("cliente_prog").programacoes[0].nextRunAt, "2026-08-24T15:21:00.000Z", "rota persiste horario recalculado pelo backend");
+  const depoisDaRota = storage.getMensageiroCliente("cliente_prog").programacoes[0];
+  const respostaEdicaoComum = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await rotaSalvar({ body: { programacoes: [{ ...depoisDaRota, nome: "Imagem atualizada", nextRunAt: "2026-08-25T13:50:00.000Z" }] } }, respostaEdicaoComum);
+  assert.strictEqual(respostaEdicaoComum.statusCode, 200, "edicao comum continua valida");
+  assert.strictEqual(storage.getMensageiroCliente("cliente_prog").programacoes[0].nextRunAt, "2026-08-24T15:21:00.000Z", "rota ignora nextRunAt obsoleto em edicao sem mudar agenda");
+  const respostaOutraConfig = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  await rotaSalvar({ body: { mensagemBoasVindas: "Boas-vindas atualizadas" } }, respostaOutraConfig);
+  assert.strictEqual(respostaOutraConfig.statusCode, 200, "configuracao independente continua valida");
+  assert.strictEqual(storage.getMensageiroCliente("cliente_prog").programacoes[0].nextRunAt, "2026-08-24T15:21:00.000Z", "configuracao de outro card nao reagenda programacao");
 
   console.log("mensageiro-programacoes.test.cjs OK");
 })().catch((e) => {

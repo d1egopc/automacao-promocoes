@@ -4,6 +4,7 @@ const {
   otimizarBase64
 } = require("./imagem");
 const { resolverBotAdminGerente } = require("./gerente-identidade");
+const { reconciliarProgramacoesEditadas } = require("./programacoes.scheduler");
 
 function criarRotasMensageiro(deps = {}) {
   const router = express.Router();
@@ -797,6 +798,14 @@ validarAlcanceServicosMensageiro({
   configAtual: configAtualMensageiro
 });
 
+const programacoesReconciliadas = dados.programacoes !== undefined || dados.mensageiro?.programacoes !== undefined
+  ? reconciliarProgramacoesEditadas(
+    getMensageiroCliente(clienteId).programacoes,
+    programacoesPayload,
+    typeof deps.agoraProgramacoes === "function" ? deps.agoraProgramacoes() : new Date()
+  )
+  : getMensageiroCliente(clienteId).programacoes;
+
 const atualizado = setMensageiroCliente(clienteId, {
   ativo: dados.ativo === undefined
     ? configAtualMensageiro.ativo
@@ -832,7 +841,7 @@ const atualizado = setMensageiroCliente(clienteId, {
   despedidaEnvio,
   perfis: perfisPayload,
   comandos: comandosPayload,
-  programacoes: programacoesPayload,
+  programacoes: programacoesReconciliadas,
 
   atendimento: atendimentoNormalizado
 });

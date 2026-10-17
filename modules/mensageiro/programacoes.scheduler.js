@@ -119,6 +119,58 @@ function calcularProximoRunAt(programacao = {}, referencia = new Date()) {
   return iso(candidato);
 }
 
+function assinaturaAgendamento(programacao = {}) {
+  const base = [
+    programacao.ativo !== false,
+    programacao.tipo || "horario",
+    programacao.timezone || TZ_PADRAO,
+    programacao.janelaInicio ? normalizarHorario(programacao.janelaInicio) : "",
+    programacao.janelaFim ? normalizarHorario(programacao.janelaFim) : ""
+  ];
+  return JSON.stringify(programacao.tipo === "intervalo"
+    ? [...base, Number(programacao.intervaloMinutos || 30)]
+    : [...base, normalizarHorario(programacao.horario || "00:00"), String(programacao.data || "").trim()]);
+}
+
+function reconciliarProgramacoesEditadas(anteriores = [], recebidas = [], agora = new Date()) {
+  const porId = new Map(anteriores.map(item => [String(item.id), item]));
+  return recebidas.map(programacao => {
+    const anterior = porId.get(String(programacao.id));
+    const alterouAgenda = !anterior || assinaturaAgendamento(anterior) !== assinaturaAgendamento(programacao);
+    if (!alterouAgenda) {
+      return anterior ? {
+        ...programacao,
+        nextRunAt: anterior.nextRunAt,
+        ultimoEnvioEm: anterior.ultimoEnvioEm,
+        processandoEm: anterior.processandoEm,
+        lockAte: anterior.lockAte,
+        status: anterior.status,
+        ultimoRunId: anterior.ultimoRunId,
+        indiceAtual: anterior.indiceAtual
+      } : programacao;
+    }
+
+    if (anterior?.processandoEm && new Date(anterior.lockAte || 0).getTime() > agora.getTime()) {
+      const erro = new Error("Programacao em processamento. Aguarde e tente salvar novamente.");
+      erro.statusCode = 409;
+      erro.code = "programacao_em_processamento";
+      throw erro;
+    }
+
+    const nextRunAt = programacao.ativo !== false ? calcularProximoRunAt(programacao, agora) : "";
+    return {
+      ...programacao,
+      nextRunAt,
+      ultimoEnvioEm: anterior?.ultimoEnvioEm || "",
+      processandoEm: "",
+      lockAte: "",
+      ultimoRunId: anterior?.ultimoRunId || "",
+      indiceAtual: anterior?.indiceAtual ?? programacao.indiceAtual ?? 0,
+      status: nextRunAt ? "agendada" : "pendente"
+    };
+  });
+}
+
 function montarPayloadProgramacao(conteudo = {}) {
   const texto = String(conteudo.texto || "");
   const imagem = String(conteudo.imagem || "");
@@ -416,6 +468,7 @@ module.exports = {
   INTERVALO_SCHEDULER_MS,
   ATRASO_MAXIMO_MS,
   calcularProximoRunAt,
+  reconciliarProgramacoesEditadas,
   dentroDaJanela,
   montarPayloadProgramacao,
   rodarProgramacoesMensageiroPendentes,
