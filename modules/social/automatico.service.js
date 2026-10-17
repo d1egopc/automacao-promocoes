@@ -32,6 +32,11 @@ function normalizar(valor = "") {
     .trim();
 }
 
+function normalizarMarketplaceAutomatico(valor = "") {
+  const marketplace = normalizar(valor);
+  return ["kabum", "awin"].includes(marketplace) ? "awin" : marketplace;
+}
+
 function numero(valor) {
   if (valor === null || valor === undefined || valor === "") return null;
   if (typeof valor === "number") return Number.isFinite(valor) ? valor : null;
@@ -277,11 +282,13 @@ function recenciaMs(oferta = {}) {
 function validarElegibilidadeOferta({ oferta = {}, config = {}, publicacoes = [], agendamentos = [], agora = new Date() } = {}) {
   const motivos = [];
   const score = Number(oferta.score ?? 0);
-  const marketplace = normalizar(oferta.marketplace);
+  const marketplace = normalizarMarketplaceAutomatico(oferta.marketplace);
   const categoria = normalizar(oferta.categoria);
   const cupom = texto(oferta.cupom);
   const ofertaId = texto(oferta.ofertaId);
-  const permitidosMarketplace = new Set((config.marketplacesPermitidos || []).map(normalizar).filter(Boolean));
+  const permitidosMarketplace = new Set((config.marketplacesPermitidos || [])
+    .map(normalizarMarketplaceAutomatico)
+    .filter(Boolean));
   const permitidasCategorias = new Set((config.categoriasPermitidas || []).map(normalizar).filter(Boolean));
   const capturadaMs = recenciaMs(oferta);
   const idadeMs = capturadaMs ? agora.getTime() - capturadaMs : Infinity;
@@ -852,6 +859,21 @@ function agendamentoVencido(agendamento = {}, agora = new Date()) {
   return data > 0 && data <= agora.getTime();
 }
 
+function validarFrescorAgendamentoAutomatico(agendamento = {}, agora = new Date()) {
+  if (texto(agendamento.origem) !== "automatico") return { ok: true, verificado: false };
+  const auditoria = agendamento.automatico || agendamento.regras?.automatico || {};
+  const capturadaMs = dataMs(auditoria.capturadaEm);
+  const idadeMaximaHoras = Number(auditoria.config?.idadeMaximaHoras);
+  if (!capturadaMs || !Number.isFinite(idadeMaximaHoras) || idadeMaximaHoras <= 0) {
+    return { ok: true, verificado: false };
+  }
+  const idadeMs = agora.getTime() - capturadaMs;
+  if (idadeMs < 0 || idadeMs > idadeMaximaHoras * 60 * 60 * 1000) {
+    return { ok: false, motivo: "fora_idade_maxima" };
+  }
+  return { ok: true, verificado: true };
+}
+
 function payloadPublicadorAgendamento(clienteSeguro = "admin", agendamento = {}, extras = {}) {
   const tipoPublicacao = texto(agendamento.tipoPublicacao || "oferta") || "oferta";
   const origemAgendamento = texto(agendamento.origem || "agendada") || "agendada";
@@ -943,6 +965,28 @@ async function executarAgendamentosPendentesCliente({
   try {
     const agendamentos = storage.listarAgendamentosSocial(clienteSeguro);
     for (const agendamento of agendamentos.filter(item => agendamentoVencido(item, agora))) {
+      const frescor = validarFrescorAgendamentoAutomatico(agendamento, agora);
+      if (!frescor.ok) {
+        const cancelado = storage.salvarAgendamentoSocial(clienteSeguro, {
+          ...agendamento,
+          ativo: false,
+          status: "cancelada",
+          motivo: frescor.motivo,
+          atualizadoEm: agora.toISOString()
+        });
+        logSocial("[SOCIAL-AGENDAMENTO-IGNORADO]", {
+          clienteId: clienteSeguro,
+          agendamentoId: cancelado.id,
+          motivo: frescor.motivo
+        });
+        executados.push({
+          agendamentoId: cancelado.id,
+          status: "cancelada",
+          publicacao: null,
+          erro: frescor.motivo
+        });
+        continue;
+      }
       const resultado = await publicarAgendamentoSocial({
         clienteId: clienteSeguro,
         agendamento,

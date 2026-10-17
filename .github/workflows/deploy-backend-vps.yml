@@ -49,6 +49,14 @@ jobs:
           node tests/financeiro-checkout-pix-publico-v1.test.js
           node tests/link-optimus-repository.test.js
           node tests/link-optimus-admin-config.test.js
+          node tests/social-oportunidades.test.js
+          node tests/social-automatico-agendamentos.test.js
+          node tests/social-publicador-oficial.test.js
+          node tests/social-instagram-gatilho.test.js
+          node tests/universal-flow-social-opportunities.test.js
+          node tests/universal-flow-post-classification-freshness.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/social-rascunhos-agenda.test.js
 
   deploy:
     name: Deploy VPS

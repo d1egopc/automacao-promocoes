@@ -697,6 +697,18 @@ function horaSaoPaulo(input) {
   assert.ok(simFiltros.diagnostico.some(item => item.ofertaId === "marketplace_bloqueado" && item.motivos.includes("marketplace_bloqueado")));
   assert.ok(simFiltros.diagnostico.some(item => item.ofertaId === "velha" && item.motivos.includes("fora_idade_maxima")));
 
+  conectar("cliente_awin_alias", "awin_alias");
+  writeClienteJson("cliente_awin_alias", "fila.json", [
+    oferta("awin_alias", { marketplace: "awin", score: 95, cupom: "AWIN" })
+  ]);
+  storage.setConfigAutomaticoSocial("cliente_awin_alias", configAutomatico({
+    quantidadeDiaria: 1,
+    marketplacesPermitidos: ["kabum"]
+  }));
+  const simAwinAlias = simularSelecaoAutomatica({ clienteId: "cliente_awin_alias", agora: AGORA });
+  assert.deepStrictEqual(simAwinAlias.selecionadas.map(item => item.marketplace), ["awin"], "KaBuM configurado deve aceitar o marketplace canonico AWIN");
+  assert.ok(!simAwinAlias.diagnostico[0].motivos.includes("marketplace_bloqueado"));
+
   conectar("cliente_aprovacao", "aprovacao");
   writeClienteJson("cliente_aprovacao", "fila.json", [
     oferta("aprovacao_auto", { cupom: "APROVA", score: 95 })
@@ -738,6 +750,50 @@ function horaSaoPaulo(input) {
   assert.strictEqual(execScheduler.executados[0].publicacao.origem, "automatica");
   assert.strictEqual(execScheduler.executados[0].publicacao.ofertaId, "scheduler_auto");
   assert.strictEqual(rendererScheduler.chamadas.length, 1, "publicador oficial/renderizador sao usados no scheduler");
+
+  conectar("cliente_scheduler_frescor", "scheduler_frescor");
+  storage.setConfigAutomaticoSocial("cliente_scheduler_frescor", configAutomatico());
+  storage.salvarAgendamentoSocial("cliente_scheduler_frescor", {
+    origem: "automatico",
+    tipoPublicacao: "oferta",
+    ofertaId: "scheduler_frescor_auto",
+    status: "agendada",
+    ativo: true,
+    imagemUrl: "https://cdn.optimus.test/scheduler_frescor_auto.jpg",
+    agendadoPara: "2026-07-14T11:50:00.000Z",
+    automatico: {
+      capturadaEm: "2026-07-14T00:00:00.000Z",
+      config: { idadeMaximaHoras: 6 }
+    }
+  });
+  const httpSchedulerFrescor = mockHttpClient("scheduler_frescor");
+  const rendererSchedulerFrescor = rendererOk("scheduler_frescor");
+  const execSchedulerFrescor = await executarAgendamentosPendentesCliente({
+    clienteId: "cliente_scheduler_frescor",
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerFrescor,
+    httpClient: httpSchedulerFrescor,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(execSchedulerFrescor.executados.length, 1, "scheduler registra o agendamento automatico antigo como ignorado");
+  assert.strictEqual(execSchedulerFrescor.executados[0].status, "cancelada");
+  assert.strictEqual(execSchedulerFrescor.executados[0].erro, "fora_idade_maxima");
+  assert.strictEqual(rendererSchedulerFrescor.chamadas.length, 0, "oferta antiga nao chega ao publicador");
+  assert.strictEqual(httpSchedulerFrescor.chamadas.length, 0, "oferta antiga nao gera chamada HTTP");
+  const retrySchedulerFrescor = await executarAgendamentosPendentesCliente({
+    clienteId: "cliente_scheduler_frescor",
+    agora: AGORA,
+    renderizadorArte: rendererSchedulerFrescor,
+    httpClient: httpSchedulerFrescor,
+    polling: POLLING_TESTE
+  });
+  assert.strictEqual(retrySchedulerFrescor.executados.length, 0, "cancelamento por frescor e idempotente");
+  const agendamentoFrescorCancelado = storage
+    .listarAgendamentosSocial("cliente_scheduler_frescor")
+    .find(item => item.ofertaId === "scheduler_frescor_auto");
+  assert.strictEqual(agendamentoFrescorCancelado.status, "cancelada");
+  assert.strictEqual(agendamentoFrescorCancelado.ativo, false);
+  assert.strictEqual(agendamentoFrescorCancelado.motivo, "fora_idade_maxima");
 
   conectar("cliente_limpeza_auto", "limpeza_auto");
   writeClienteJson("cliente_limpeza_auto", "fila.json", [
