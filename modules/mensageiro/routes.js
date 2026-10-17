@@ -16,6 +16,11 @@ const {
   setMensageiroCliente,
   getAtendimentoConfigCliente,
   setAtendimentoConfigCliente,
+  getAtendimentoConfigPerfilCliente,
+  setAtendimentoConfigPerfilCliente,
+  listarVinculosContatoPerfilCliente,
+  salvarVinculoContatoPerfilCliente,
+  removerVinculoContatoPerfilCliente,
   encontrarGatilhoAtendimento,
   validarPerfisMensageiro,
   listarInfracoesGerenteCliente,
@@ -372,6 +377,18 @@ function validarAlcanceServicosMensageiro({ comandos = [], programacoes = [], pe
   };
   const validarLista = (lista, tipo) => {
     for (const item of Array.isArray(lista) ? lista : []) {
+      const itemId = String(item?.id || "").trim();
+      const perfilId = String(item?.perfilId || "").trim();
+      const antigos = tipo === "comando" ? configAtual.comandos : configAtual.programacoes;
+      const vinculoLegadoPreservado = Array.isArray(antigos) && antigos.some(antigo =>
+        String(antigo?.id || "") === itemId && String(antigo?.perfilId || "") === perfilId);
+      if (perfilId && !perfisPorId.has(perfilId) && !vinculoLegadoPreservado) {
+        throw erroContratoMensageiroRoutes("perfil_invalido", "Perfil do servico nao pertence ao workspace.", {
+          tipo,
+          id: itemId,
+          perfilId
+        });
+      }
       if (item?.gruposConfigurados !== true) continue;
       const perfil = item.perfilId ? perfisPorId.get(String(item.perfilId)) : null;
       const sessaoId = String(perfil?.sessaoId || sessaoPadrao || "").trim();
@@ -391,6 +408,75 @@ function validarAlcanceServicosMensageiro({ comandos = [], programacoes = [], pe
   validarLista(comandos, "comando");
   validarLista(programacoes, "programacao");
 }
+
+const perfilAtendimentoDaWorkspace = (clienteId, perfilId) =>
+  (getMensageiroCliente(clienteId)?.perfis || [])
+    .find(perfil => perfil.id === perfilId && !perfil.removidoEm);
+
+router.get("/perfis/:perfilId/atendimento", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  const perfilId = String(req.params.perfilId || "");
+  if (!perfilAtendimentoDaWorkspace(clienteId, perfilId)) {
+    return res.status(404).json({ ok: false, codigo: "perfil_nao_encontrado" });
+  }
+  return res.json({ ok: true, clienteId, perfilId, config: getAtendimentoConfigPerfilCliente(clienteId, perfilId) });
+});
+
+router.post("/perfis/:perfilId/atendimento", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  const perfilId = String(req.params.perfilId || "");
+  const perfil = perfilAtendimentoDaWorkspace(clienteId, perfilId);
+  if (!perfil) return res.status(404).json({ ok: false, codigo: "perfil_nao_encontrado" });
+  const dados = req.body?.config && typeof req.body.config === "object" ? req.body.config : req.body || {};
+  const sessaoInformada = String(dados.sessaoId || dados.sessaoAtendimentoId || "");
+  if (sessaoInformada && sessaoInformada !== perfil.sessaoId) {
+    return res.status(400).json({ ok: false, codigo: "sessao_divergente" });
+  }
+  try {
+    const config = setAtendimentoConfigPerfilCliente(clienteId, perfilId, dados);
+    return res.json({ ok: true, clienteId, perfilId, config });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({ ok: false, codigo: erro.code || "erro_atendimento_perfil" });
+  }
+});
+
+router.get("/perfis/:perfilId/contatos", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  const perfil = perfilAtendimentoDaWorkspace(clienteId, String(req.params.perfilId || ""));
+  if (!perfil) return res.status(404).json({ ok: false, codigo: "perfil_nao_encontrado" });
+  const vinculos = listarVinculosContatoPerfilCliente(clienteId, perfil.sessaoId)
+    .filter(item => item.perfilId === perfil.id);
+  return res.json({ ok: true, perfilId: perfil.id, vinculos });
+});
+
+router.post("/perfis/:perfilId/contatos", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  const perfil = perfilAtendimentoDaWorkspace(clienteId, String(req.params.perfilId || ""));
+  if (!perfil) return res.status(404).json({ ok: false, codigo: "perfil_nao_encontrado" });
+  try {
+    const vinculo = salvarVinculoContatoPerfilCliente(clienteId, perfil.id, req.body?.contatoId);
+    return res.json({ ok: true, vinculo });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({ ok: false, codigo: erro.code || "erro_vinculo_contato" });
+  }
+});
+
+router.delete("/perfis/:perfilId/contatos/:contatoId", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  const perfil = perfilAtendimentoDaWorkspace(clienteId, String(req.params.perfilId || ""));
+  if (!perfil) return res.status(404).json({ ok: false, codigo: "perfil_nao_encontrado" });
+  try {
+    const removido = removerVinculoContatoPerfilCliente(clienteId, perfil.id, req.params.contatoId);
+    return res.json({ ok: true, removido });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({ ok: false, codigo: erro.code || "erro_vinculo_contato" });
+  }
+});
 
 router.get("/config", (req, res) => {
   const clienteId = getClienteId(req);
