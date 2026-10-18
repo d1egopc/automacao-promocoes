@@ -21,7 +21,7 @@ concurrency:
 
 env:
   BASE_PRODUCTION_SHA: 67f80eb613a6b10eaae23800379f5658588a9998
-  FUNCTIONAL_SHA: 633859d5d4e4ed3a07f7da8a86ef733beecab3ba
+  FUNCTIONAL_SHA: 633859d554cecf5bdad419d07c210ab8741cd72c
 
 jobs:
   linux-node24:
