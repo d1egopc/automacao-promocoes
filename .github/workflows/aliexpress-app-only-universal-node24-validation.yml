@@ -102,7 +102,7 @@ jobs:
           git worktree add --detach "$base" "$BASE_PRODUCTION_SHA"
           ln -s "$GITHUB_WORKSPACE/node_modules" "$base/node_modules"
           python3 - "$GITHUB_WORKSPACE" "$base" <<'PY'
-          import pathlib, subprocess, sys
+          import pathlib, re, subprocess, sys
 
           candidate, baseline = map(pathlib.Path, sys.argv[1:])
           suites = [
@@ -115,11 +115,37 @@ jobs:
               return p.returncode, p.stdout + p.stderr
 
           def signature(out):
+              """Stable semantic signature; paths and source coordinates are not identity."""
               lines = out.splitlines()
-              for i, line in enumerate(lines):
-                  if any(x in line for x in ("AssertionError", "TypeError", "ReferenceError", "SyntaxError")):
-                      return " | ".join([line.strip()] + [x.strip() for x in lines[i + 1:i + 5] if x.strip()])
-              return "<no assertion signature>"
+              error_types = ("AssertionError", "TypeError", "ReferenceError", "SyntaxError", "RangeError", "Error")
+              error_index = next((i for i, line in enumerate(lines) if any(kind in line for kind in error_types)), None)
+              if error_index is None:
+                  return ("<no assertion signature>", "", "", "", "")
+
+              error_line = lines[error_index].strip()
+              type_match = re.search(r"(?:^|:)\s*([A-Za-z]+Error(?:\s+\[[^]]+\])?)", error_line)
+              error_type = type_match.group(1) if type_match else error_line.split(":", 1)[0]
+              message = error_line.split("]:", 1)[1].strip() if "]:" in error_line else error_line.split(":", 1)[-1].strip()
+              detail_lines = []
+              for line in lines[error_index + 1:]:
+                  stripped = line.strip()
+                  if re.match(r"^at\s", stripped):
+                      break
+                  if stripped and stripped != "^":
+                      detail_lines.append(stripped)
+              details = " | ".join(detail_lines)
+              frame_function = "<anonymous>"
+              frame_file = "<unknown>"
+              for line in lines[error_index + 1:]:
+                  frame = re.search(r"^\s*at\s+(?:(.*?)\s+\()?(.+?):\d+:\d+\)?$", line)
+                  if not frame:
+                      continue
+                  frame_function = (frame.group(1) or "<anonymous>").strip()
+                  path = frame.group(2).replace("\\", "/")
+                  relative = re.search(r"(tests/[^():]+)$", path)
+                  frame_file = relative.group(1) if relative else path.rsplit("/", 1)[-1]
+                  break
+              return (error_type, message, details, frame_function, frame_file)
 
           new = []
           for suite in suites:
