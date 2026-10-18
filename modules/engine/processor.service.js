@@ -1,4 +1,4 @@
-const { queryEngine } = require("./database");
+const { queryEngine, getEnginePool } = require("./database");
 const { STATUS_JOBS_ATIVOS_COM_LEASE } = require("./jobs.service");
 const { sqlFiltroEpochReal } = require("./universal-ingress-fence");
 const {
@@ -316,6 +316,125 @@ function sqlBuscarJobsPendentes() {
                id ASC`;
 }
 
+function sqlDiagnosticarAlvosPreImporter() {
+  const frescor = sqlFrescorComercialPreImporter("j", "e");
+  const epoch = sqlFiltroEpochReal("e");
+  return `WITH limpeza_ids AS MATERIALIZED (
+       SELECT j.id
+         FROM engine_jobs_cliente j
+         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
+        WHERE j.status = 'pendente' AND ${epoch} AND ${frescor.morto}
+        ORDER BY j.criado_em ASC, j.id ASC
+        LIMIT $2
+     ),
+     alvo AS (
+       SELECT j.id, j.status, j.cliente_id,
+              ${frescor.lane} AS lane_vazao_pre_importer,
+              (${epoch}) AS epoch_ok,
+              ${frescor.vivo} AS fresco_vivo,
+              (j.id IN (SELECT id FROM limpeza_ids)) AS selecionado_limpeza_sql
+         FROM engine_jobs_cliente j
+         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
+        WHERE j.id = ANY($1::bigint[])
+     ),
+     workspaces_alvo AS (
+       SELECT DISTINCT COALESCE(NULLIF(BTRIM(cliente_id), ''), 'workspace_desconhecido') AS workspace_chave
+         FROM alvo
+        WHERE status = 'pendente' AND epoch_ok IS TRUE
+          AND (fresco_vivo IS TRUE OR selecionado_limpeza_sql IS TRUE)
+     ),
+     rankeaveis AS (
+       SELECT j.id,
+              COALESCE(NULLIF(BTRIM(j.cliente_id), ''), 'workspace_desconhecido') AS workspace_chave,
+              ${frescor.lane} AS lane_vazao_pre_importer,
+              COALESCE(e.capturado_em, j.criado_em) AS origem_comercial,
+              j.criado_em,
+              COALESCE(j.prioridade, 0) AS prioridade,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(NULLIF(BTRIM(j.cliente_id), ''), 'workspace_desconhecido'), ${frescor.lane}
+                ORDER BY CASE WHEN ${frescor.lane} <> 'expirada' THEN COALESCE(j.prioridade, 0) END DESC NULLS LAST,
+                         CASE WHEN ${frescor.lane} = 'expirada' OR ${frescor.lane} = 'fresca_em_risco'
+                              THEN COALESCE(e.capturado_em, j.criado_em) END ASC NULLS LAST,
+                         CASE WHEN ${frescor.lane} NOT IN ('expirada', 'fresca_em_risco')
+                              THEN COALESCE(e.capturado_em, j.criado_em) END DESC NULLS LAST,
+                         CASE WHEN ${frescor.lane} IN ('expirada', 'fresca_em_risco') THEN j.criado_em END ASC NULLS LAST,
+                         CASE WHEN ${frescor.lane} NOT IN ('expirada', 'fresca_em_risco') THEN j.criado_em END DESC NULLS LAST,
+                         j.id ASC
+              ) AS posicao_workspace_lane,
+              COUNT(*) OVER (PARTITION BY COALESCE(NULLIF(BTRIM(j.cliente_id), ''), 'workspace_desconhecido'), ${frescor.lane})::int AS candidatos_lane
+         FROM engine_jobs_cliente j
+         LEFT JOIN engine_eventos_brutos e ON e.id = j.evento_id
+        WHERE j.status = 'pendente'
+          AND ${epoch}
+          AND (${frescor.vivo} OR j.id IN (SELECT id FROM limpeza_ids))
+          AND COALESCE(NULLIF(BTRIM(j.cliente_id), ''), 'workspace_desconhecido')
+              IN (SELECT workspace_chave FROM workspaces_alvo)
+     )
+     SELECT a.id AS job_id, a.status,
+            a.lane_vazao_pre_importer AS lane,
+            r.posicao_workspace_lane, r.candidatos_lane,
+            (a.status = 'pendente' AND a.epoch_ok IS TRUE AND
+             (a.fresco_vivo IS TRUE OR a.selecionado_limpeza_sql IS TRUE)) AS elegivel_sql,
+            CASE
+              WHEN a.status <> 'pendente' THEN 'status_nao_pendente'
+              WHEN a.epoch_ok IS NOT TRUE THEN 'fora_epoch'
+              WHEN a.fresco_vivo IS NOT TRUE AND a.selecionado_limpeza_sql IS TRUE THEN 'elegivel_limpeza'
+              WHEN a.fresco_vivo IS NOT TRUE THEN 'fora_cota_limpeza'
+              ELSE 'elegivel'
+            END AS motivo_selecao
+       FROM alvo a
+      LEFT JOIN rankeaveis r ON r.id = a.id
+      ORDER BY a.id`;
+}
+
+async function buscarDiagnosticoAlvosPreImporter(idsAlvo = [], quotaLimpeza = 0) {
+  const pool = getEnginePool();
+  if (!pool || typeof pool.connect !== "function") return { ok: false, motivo: "pool_indisponivel", rows: [] };
+  // Diagnóstico nunca deve disputar uma conexão com o Processor.
+  if (Number(pool.waitingCount || 0) > 0 || Number(pool.idleCount || 0) < 1) {
+    return { ok: false, motivo: "pool_ocupado", rows: [] };
+  }
+  let client = null;
+  let transacao = false;
+  const inicio = process.hrtime.bigint();
+  let timeoutAquisicao = null;
+  let aquisicaoExpirada = false;
+  try {
+    const aquisicao = Promise.resolve().then(() => pool.connect()).then(conexao => {
+      if (aquisicaoExpirada) {
+        conexao.release();
+        return null;
+      }
+      return conexao;
+    });
+    client = await Promise.race([
+      aquisicao,
+      new Promise(resolve => {
+        timeoutAquisicao = setTimeout(() => {
+          aquisicaoExpirada = true;
+          resolve(null);
+        }, 100);
+      })
+    ]);
+    clearTimeout(timeoutAquisicao);
+    if (!client) return { ok: false, motivo: "aquisicao_timeout", rows: [], duracaoMs: Number(process.hrtime.bigint() - inicio) / 1e6 };
+    await client.query("BEGIN READ ONLY");
+    transacao = true;
+    await client.query("SET LOCAL statement_timeout = '750ms'");
+    const resultado = await client.query(sqlDiagnosticarAlvosPreImporter(), [idsAlvo, quotaLimpeza]);
+    await client.query("ROLLBACK");
+    transacao = false;
+    return { ok: true, rows: resultado.rows || [], duracaoMs: Number(process.hrtime.bigint() - inicio) / 1e6 };
+  } catch (erro) {
+    if (transacao) await client.query("ROLLBACK").catch(() => {});
+    const motivo = erro?.code === "57014" ? "timeout" : "consulta_indisponivel";
+    return { ok: false, motivo, rows: [], duracaoMs: Number(process.hrtime.bigint() - inicio) / 1e6 };
+  } finally {
+    clearTimeout(timeoutAquisicao);
+    if (client && typeof client.release === "function") client.release();
+  }
+}
+
 function removerCamposInternosPreImporter(linha = {}) {
   const {
     tipo_saida_pre_importer,
@@ -360,7 +479,26 @@ async function buscarJobsPendentes(limite = 20) {
   );
 
   if (!resultado.ok) return { ok: false, jobs: [], motivo: resultado.motivo, erro: resultado.erro };
-  return { ok: true, ...separarResultadoJobsPendentes(resultado.resultado?.rows) };
+  const separados = separarResultadoJobsPendentes(resultado.resultado?.rows);
+  if (String(process.env.ENGINE_PRE_IMPORTER_TRACE_ENABLED || "").trim() !== "1") return { ok: true, ...separados };
+  const trace = require("./pre-importer-diagnostic-trace").carregarConfiguracao();
+  if (!trace.enabled) return { ok: true, ...separados };
+  const idsVisiveis = new Set([...separados.jobs, ...separados.candidatePool].map(job => String(job.id)));
+  const idsAusentes = trace.ids.filter(id => !idsVisiveis.has(id));
+  const diagnostico = idsAusentes.length
+    ? await buscarDiagnosticoAlvosPreImporter(idsAusentes, cotas.limpeza)
+    : { ok: true, motivo: "alvos_visiveis", rows: [], duracaoMs: 0 };
+  return {
+    ok: true,
+    ...separados,
+    diagnosticoPreImporter: {
+      ok: diagnostico.ok,
+      motivo: diagnostico.motivo || "",
+      duracaoMs: diagnostico.duracaoMs,
+      rows: diagnostico.rows
+    },
+    traceConfig: trace
+  };
 }
 
 async function marcarJobStatus(jobId, status, motivo = "", extras = {}) {
@@ -520,6 +658,8 @@ async function carregarLinksEvento(eventoId) {
 module.exports = {
   limitarJobs,
   sqlBuscarJobsPendentes,
+  sqlDiagnosticarAlvosPreImporter,
+  buscarDiagnosticoAlvosPreImporter,
   removerCamposInternosPreImporter,
   separarResultadoJobsPendentes,
   buscarJobsPendentes,

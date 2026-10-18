@@ -79,6 +79,29 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
     limite: limiteFinal
   });
 
+  const traceConfig = pendentes.traceConfig;
+  const traceCollector = traceConfig?.enabled === true
+    ? require("./pre-importer-diagnostic-trace").criarColetor({
+      config: traceConfig,
+      quotas: (() => {
+        const cotas = require("./frescor-pre-importer.service").calcularCotasFrescorPreImporter(limiteFinal);
+        return {
+          agua_nova: cotas.aguaNova,
+          fresca_em_risco: cotas.frescaEmRisco,
+          fresca_circulavel: cotas.frescaCirculavel,
+          expirada: cotas.limpeza
+        };
+      })()
+    })
+    : null;
+  if (traceCollector) {
+    traceCollector.aplicarDiagnostico(
+      pendentes.diagnosticoPreImporter?.ok === true ? pendentes.diagnosticoPreImporter.rows : [],
+      pendentes.jobs,
+      pendentes.candidatePool || []
+    );
+  }
+
   const metricasSelecao = resumirSelecaoFrescorPreImporter(pendentes.jobs);
   resumo.frescosSelecionados = metricasSelecao.frescosSelecionados;
   resumo.expiradosCandidatosPreImporter = metricasSelecao.expiradosCandidatos;
@@ -107,8 +130,10 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
     let jobConfirmado = job;
     if (grupo) {
       const idsReservados = idsReservadosFairness.get(grupo.chave) || new Set();
+      const diagnosticoGrupo = traceCollector && [ ...(grupo.baseline || []), ...(grupo.candidates || []) ]
+        .some(item => traceCollector.ids.includes(String(item.id))) ? traceCollector : null;
       const claim = await reivindicarSlotFairness(grupo, job.indiceBaseline, {
-        plano: planosFairness.get(grupo.chave), idsReservados
+        plano: planosFairness.get(grupo.chave), idsReservados, diagnostico: diagnosticoGrupo
       });
       if (claim.plano) planosFairness.set(grupo.chave, claim.plano);
       if (!claim.ok) {
@@ -127,11 +152,26 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
         statusEsperado: "pendente"
       });
       if (frescorPreImporter.expirou) {
+        if (traceCollector?.ids.includes(String(job.id))) {
+          traceCollector.claimAttempt(job.id, { etapa: "pre_claim_frescor", resultado: "bloqueado", motivo: "expirada_antes_claim" });
+          traceCollector.transaction(job.id, { resultado: "sem_claim_expiracao", motivo: "expirada_antes_claim", duracaoMs: 0 });
+        }
         resumo.expiradosPreImporter += 1;
         continue;
       }
+      const alvoDiagnostico = traceCollector?.ids.includes(String(job.id)) === true;
+      const inicioClaim = alvoDiagnostico ? process.hrtime.bigint() : null;
+      if (alvoDiagnostico) {
+        traceCollector.selecaoPlano(job.id, true, "baseline_sem_slot_fairness", job.indiceBaseline);
+        traceCollector.claimAttempt(job.id, { etapa: "claim_autocommit", resultado: "tentativa" });
+      }
       const lock = await tentarMarcarProcessando(job.id);
       if (!lock.ok) {
+        if (alvoDiagnostico) traceCollector.transaction(job.id, {
+          resultado: lock.ignorado ? "claim_nao_confirmado" : "claim_falhou",
+          motivo: lock.motivo || "claim_nao_confirmado",
+          duracaoMs: Number(process.hrtime.bigint() - inicioClaim) / 1e6
+        });
         if (lock.ignorado) continue;
         resumo.erros += 1;
         console.log("[ENGINE-WORKER-ERRO]", {
@@ -142,6 +182,10 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
         });
         logEngineProcessadorErro({ jobId: job.id, etapa: "marcar_processando", motivo: lock.motivo || "lock_falhou", erro: lock.erro || "" });
         continue;
+      }
+      if (alvoDiagnostico) {
+        traceCollector.claimAttempt(job.id, { etapa: "claim_autocommit", resultado: "confirmado" });
+        traceCollector.transaction(job.id, { resultado: "autocommit_confirmado", duracaoMs: Number(process.hrtime.bigint() - inicioClaim) / 1e6 });
       }
     }
 
@@ -190,6 +234,11 @@ async function processarJobsPendentesEngine({ limite = 20, clientesValidos = [],
       }
     }
   }
+
+  if (traceCollector) traceCollector.flush({
+    diagnosticoQuery: pendentes.diagnosticoPreImporter?.ok === true ? "ok" : pendentes.diagnosticoPreImporter?.motivo || "indisponivel",
+    diagnosticoQueryMs: Math.round(Number(pendentes.diagnosticoPreImporter?.duracaoMs || 0))
+  });
 
   logEngineProcessadorFim(resumo);
   return resumo;

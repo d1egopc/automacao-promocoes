@@ -66,6 +66,11 @@ async function reivindicarSlotPreImporter(grupo = {}, posicao, opcoes = {}) {
 
   let client = null;
   let transacao = false;
+  let etapaFinalizacao = "execucao";
+  const diagnostico = opcoes.diagnostico || null;
+  const inicioTransacao = diagnostico ? process.hrtime.bigint() : null;
+  const idsAlvoTentados = diagnostico ? new Set() : null;
+  const idsAlvoClaimados = diagnostico ? new Set() : null;
   try {
     client = await pool.connect();
     await client.query("BEGIN");
@@ -74,6 +79,14 @@ async function reivindicarSlotPreImporter(grupo = {}, posicao, opcoes = {}) {
     const estado = await bloquearEstadoFairness(client, chave);
     const plano = opcoes.plano || opcoes.montarPlano(grupo, estado.ultimaOrigemAtendida);
     const slot = (plano.slots || []).find(item => Number(item.posicao) === Number(posicao));
+    if (diagnostico) {
+      const idsGrupo = new Set([...(grupo.baseline || []), ...(grupo.candidates || [])].map(item => String(item.id)));
+      for (const id of diagnostico.ids) {
+        if (!idsGrupo.has(id)) continue;
+        const selecionado = (plano.selecionados || []).some(item => String(item.id) === id);
+        diagnostico.selecaoPlano(id, selecionado, selecionado ? "plano_fairness" : "substituido_no_plano", posicao);
+      }
+    }
     const reservados = opcoes.idsReservados instanceof Set ? opcoes.idsReservados : new Set();
     const idsPlano = new Set((plano.selecionados || []).map(item => Number(item.id)));
     const tentativas = [slot?.job, ...(grupo.candidates || []).filter(item =>
@@ -92,31 +105,64 @@ async function reivindicarSlotPreImporter(grupo = {}, posicao, opcoes = {}) {
       const candidato = tentativas[indice];
       experimentados.add(Number(candidato.id));
       if (reservados.has(Number(candidato.id))) continue;
+      const alvoDiagnostico = diagnostico?.ids.includes(String(candidato.id)) === true;
+      if (alvoDiagnostico) {
+        idsAlvoTentados.add(String(candidato.id));
+        diagnostico.claimAttempt(candidato.id, { etapa: "fairness_slot", resultado: "tentativa" });
+      }
       await client.query("SAVEPOINT candidato_frescor");
       const claim = await opcoes.claim(client, [candidato.id]);
       if (!claim.ok) throw new Error(claim.erro || claim.motivo || "claim_falhou");
       if (!claim.jobs?.length) {
+        if (alvoDiagnostico) diagnostico.claimAttempt(candidato.id, { etapa: "fairness_slot", resultado: "nao_claimado", motivo: "status_origem_alterado" });
         await client.query("ROLLBACK TO SAVEPOINT candidato_frescor");
         await client.query("RELEASE SAVEPOINT candidato_frescor");
         continue;
       }
       if (!(await jobClaimadoAindaVivo(client, candidato.id, { verificarRetry: opcoes.verificarRetry === true }))) {
+        if (alvoDiagnostico) diagnostico.claimAttempt(candidato.id, { etapa: "fairness_slot", resultado: "rollback_savepoint", motivo: "frescor_revalidado" });
         await client.query("ROLLBACK TO SAVEPOINT candidato_frescor");
         await client.query("RELEASE SAVEPOINT candidato_frescor");
         continue;
       }
       await client.query("RELEASE SAVEPOINT candidato_frescor");
+      if (alvoDiagnostico) idsAlvoClaimados.add(String(candidato.id));
       const origem = opcoes.origemProtegida(candidato);
       await registrarAtendimentoWorkspaceFairness(client, chave, origem);
+      etapaFinalizacao = "commit";
       await client.query("COMMIT");
       transacao = false;
+      for (const id of idsAlvoTentados || []) diagnostico.transaction(id, {
+        resultado: idsAlvoClaimados.has(id) ? "commit_confirmado" : "commit_sem_claim",
+        motivo: idsAlvoClaimados.has(id) ? "" : "claim_nao_confirmado",
+        duracaoMs: Number(process.hrtime.bigint() - inicioTransacao) / 1e6
+      });
       return { ok: true, job: { ...candidato, status: claim.jobs[0].status }, plano, origem };
     }
+    etapaFinalizacao = "commit";
     await client.query("COMMIT");
     transacao = false;
+    for (const id of idsAlvoTentados || []) diagnostico.transaction(id, {
+      resultado: idsAlvoClaimados.has(id) ? "commit_confirmado" : "commit_sem_claim",
+      motivo: idsAlvoClaimados.has(id) ? "" : "nenhum_candidato_claimado",
+      duracaoMs: Number(process.hrtime.bigint() - inicioTransacao) / 1e6
+    });
     return { ok: true, ignorado: true, motivo: "nenhum_candidato_claimado", plano };
   } catch (erro) {
-    if (transacao) await client.query("ROLLBACK").catch(() => {});
+    let rollbackConfirmado = false;
+    if (transacao) {
+      try {
+        await client.query("ROLLBACK");
+        rollbackConfirmado = true;
+      } catch (_) {}
+    }
+    for (const id of idsAlvoTentados || []) diagnostico.transaction(id, {
+      resultado: etapaFinalizacao === "commit"
+        ? "commit_resultado_desconhecido"
+        : (rollbackConfirmado ? "rollback_confirmado" : "rollback_sem_confirmacao"),
+      motivo: etapaFinalizacao === "commit" ? "commit_falhou" : "fairness_claim_falhou",
+      duracaoMs: Number(process.hrtime.bigint() - inicioTransacao) / 1e6
+    });
     return { ok: false, motivo: "fairness_slot_claim_falhou", erro: erro.message || String(erro) };
   } finally {
     if (client && typeof client.release === "function") client.release();

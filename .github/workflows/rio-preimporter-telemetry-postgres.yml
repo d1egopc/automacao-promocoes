@@ -1,0 +1,78 @@
+name: Rio pre-importer telemetry PostgreSQL
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rio-preimporter-telemetry-postgres
+  cancel-in-progress: true
+
+jobs:
+  isolated-postgres:
+    if: github.ref == 'refs/heads/validation/rio-preimporter-telemetry-pg'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rio_trace_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rio_trace_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout isolated validation branch
+        uses: actions/checkout@v4
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run focal telemetry and Engine regressions
+        env:
+          NODE_PATH: ${{ github.workspace }}/node_modules
+        run: |
+          node tests/engine-pre-importer-diagnostic-trace.test.js
+          node tests/engine-frescor-pre-importer-prioridade.test.js
+          node tests/engine-processor-origem-fairness.test.js
+          node tests/engine-processor-candidate-pool.test.js
+          node tests/engine-origem-fairness.repository.test.js
+          node tests/engine-importer-origem-fairness.test.js
+          node tests/engine-validator-origem-fairness.test.js
+          node tests/engine-validator-claim-recovery.test.js
+          node tests/extension-oportunidades-vistas.test.js
+          node tests/extension-oportunidades-ux.test.js
+          node tests/radar-whatsapp-capture-gate.test.js
+          node tests/clonador-grupos-engine-bridge.test.js
+          node tests/clonador-multilink-papeis.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/teleradar-operational-control.test.js
+          node tests/contrato-comercial-final-universal.test.js
+      - name: Run isolated PostgreSQL benchmark and plans
+        env:
+          CI_POSTGRES_ISOLATED: '1'
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: rio_trace_ci
+          NODE_PATH: ${{ github.workspace }}/node_modules
+        run: node tests/engine-pre-importer-diagnostic-trace.postgres.test.cjs
+      - name: Syntax and diff checks
+        run: |
+          node --check modules/engine/processor.service.js
+          node --check modules/engine/processor.runner.js
+          node --check modules/engine/fairness-slot-pre-importer.service.js
+          node --check modules/engine/pre-importer-diagnostic-trace.js
+          git diff --check
