@@ -58,6 +58,15 @@ jobs:
           node tests/contrato-comercial-final-universal.test.js
           node tests/social-rascunhos-agenda.test.js
 
+      - name: AliExpress GUDGA focused regression gate
+        run: |
+          node --check modules/engine/importer/adapters/aliexpress.adapter.js
+          node --check tests/aliexpress-preco-variantes-radar.test.js
+          node tests/aliexpress-preco-variantes-radar.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/aliexpress-afiliacao-workspace.test.js
+          node tests/aliexpress-shortlink-candidate.test.js
+
   deploy:
     name: Deploy VPS
     runs-on: [self-hosted, Linux, X64]
