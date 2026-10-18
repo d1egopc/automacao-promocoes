@@ -1,7 +1,9 @@
 name: Rio pre-importer telemetry PostgreSQL
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - validation/rio-preimporter-telemetry-pg
 
 permissions:
   contents: read
@@ -12,7 +14,7 @@ concurrency:
 
 jobs:
   isolated-postgres:
-    if: github.ref == 'refs/heads/validation/rio-preimporter-telemetry-pg'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/rio-preimporter-telemetry-pg'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
