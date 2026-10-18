@@ -21,6 +21,7 @@ concurrency:
 
 env:
   BASE_PRODUCTION_SHA: 67f80eb613a6b10eaae23800379f5658588a9998
+  FUNCTIONAL_SHA: 633859d5d4e4ed3a07f7da8a86ef733beecab3ba
 
 jobs:
   linux-node24:
@@ -52,7 +53,9 @@ jobs:
           test "$(node --version | cut -c1-3)" = "v24"
           test -z "${DATABASE_URL:-}"
           git cat-file -e "$BASE_PRODUCTION_SHA^{commit}"
-          test "$(git diff --name-only "$BASE_PRODUCTION_SHA...HEAD" | sort | tr '\n' ' ')" = "docs/contracts/LINKS-MEDIA.md docs/contracts/MARKETPLACES.md modules/engine/importer/adapters/aliexpress.adapter.js tests/aliexpress-app-pc-fallback-oficial.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/links-comerciais-v2-aliexpress-shopee.test.js "
+          git cat-file -e "$FUNCTIONAL_SHA^{commit}"
+          test "$(git rev-parse "$FUNCTIONAL_SHA^")" = "$BASE_PRODUCTION_SHA"
+          test "$(git diff --name-only "$BASE_PRODUCTION_SHA...$FUNCTIONAL_SHA" | sort | tr '\n' ' ')" = "docs/contracts/LINKS-MEDIA.md docs/contracts/MARKETPLACES.md modules/engine/importer/adapters/aliexpress.adapter.js tests/aliexpress-app-pc-fallback-oficial.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/links-comerciais-v2-aliexpress-shopee.test.js "
 
       - name: Install locked dependencies
         run: npm ci
