@@ -36,12 +36,15 @@ CREATE TABLE engine_operation_state (
   id INTEGER PRIMARY KEY, mode TEXT NOT NULL, operation_epoch_started_at TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE engine_eventos_brutos (
-  id BIGINT PRIMARY KEY, capturado_em TIMESTAMPTZ NOT NULL, criado_em TIMESTAMPTZ NOT NULL,
+  id BIGINT PRIMARY KEY, uuid TEXT, capturado_em TIMESTAMPTZ NOT NULL, criado_em TIMESTAMPTZ NOT NULL,
+  origem TEXT, origem_tipo TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE TABLE engine_jobs_cliente (
-  id BIGINT PRIMARY KEY, evento_id BIGINT NOT NULL, cliente_id TEXT NOT NULL,
+  id BIGINT PRIMARY KEY, uuid TEXT, evento_id BIGINT NOT NULL, oferta_id BIGINT,
+  cliente_id TEXT NOT NULL,
   marketplace_detectado TEXT, marketplace TEXT, status TEXT NOT NULL,
+  motivo_final TEXT,
   prioridade INTEGER DEFAULT 0, metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   criado_em TIMESTAMPTZ NOT NULL, atualizado_em TIMESTAMPTZ NOT NULL
 );
@@ -54,6 +57,28 @@ CREATE INDEX jobs_workspace_status_created ON engine_jobs_cliente(cliente_id, st
 CREATE INDEX events_captured ON engine_eventos_brutos(capturado_em, id);
 INSERT INTO engine_operation_state VALUES (1, 'UNIVERSAL', NOW() - INTERVAL '1 day');
 `;
+
+const REQUIRED_FIXTURE_COLUMNS = Object.freeze({
+  engine_eventos_brutos: ["id", "uuid", "capturado_em", "criado_em", "origem", "origem_tipo", "metadata"],
+  engine_jobs_cliente: [
+    "id", "uuid", "evento_id", "oferta_id", "cliente_id", "marketplace_detectado", "marketplace",
+    "status", "motivo_final", "metadata", "prioridade", "criado_em", "atualizado_em"
+  ],
+  engine_fairness_origem_fluxo: ["cliente_id", "etapa", "lane", "ultima_origem_atendida", "ultimo_atendimento_em"]
+});
+
+function assertFixtureSchemaComplete() {
+  for (const [table, columns] of Object.entries(REQUIRED_FIXTURE_COLUMNS)) {
+    const tableBlock = DDL.match(new RegExp(`CREATE TABLE ${table} \\(([\\s\\S]*?)\\n\\);`));
+    assert(tableBlock, `fixture table missing: ${table}`);
+    for (const column of columns) {
+      assert(
+        new RegExp(`(?:^|\\n|,)\\s*${column}\\s+`, "i").test(tableBlock[1]),
+        `fixture column missing: ${table}.${column}`
+      );
+    }
+  }
+}
 
 function percentile(values, p) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -201,10 +226,16 @@ async function poolWaitProof() {
   try {
     await client.connect();
     const identity = (await client.query(
-      "SELECT current_database() AS db, host(inet_server_addr()) AS host, inet_server_port() AS port"
+      "SELECT current_database() AS db, version() AS version, host(inet_server_addr()) AS host, inet_server_port() AS port"
     )).rows[0];
-    assert.equal(identity.host, "127.0.0.1");
+    assert.equal(process.env.CI_POSTGRES_ISOLATED, "1");
+    assert.match(String(config.host), /^(127\.0\.0\.1|localhost)$/i);
+    assert.match(String(config.database), /^rio_trace(?:_|$)/i);
+    assert.equal(identity.db, config.database);
+    assert.match(String(identity.version), /^PostgreSQL 16(?:\D|$)/);
+    assert.match(String(identity.host || ""), /^(127\.0\.0\.1|::1|10\.|192\.168\.|172\.(?:1[6-9]|2[0-9]|3[0-1])\.)/);
     assert.equal(identity.port, config.port);
+    assertFixtureSchemaComplete();
     await client.query(`CREATE SCHEMA ${q(schema)}`);
     await client.query(`SET search_path TO ${q(schema)}, public`);
     await client.query(DDL);
