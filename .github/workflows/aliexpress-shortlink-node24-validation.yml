@@ -1,0 +1,42 @@
+name: AliExpress shortlink Node 24 validation
+
+on:
+  push:
+    branches:
+      - validation/aliexpress-shortlink-node24
+
+permissions:
+  contents: read
+
+jobs:
+  focal-tests:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/aliexpress-shortlink-node24'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax and diff check
+        run: |
+          node --check modules/engine/link-role.service.js
+          node --check tests/aliexpress-shortlink-candidate.test.js
+          git diff --check HEAD~2 HEAD
+
+      - name: Four focal regressions
+        run: |
+          node tests/aliexpress-shortlink-candidate.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/clonador-multilink-papeis.test.js
+          node tests/contrato-comercial-papeis.test.js
