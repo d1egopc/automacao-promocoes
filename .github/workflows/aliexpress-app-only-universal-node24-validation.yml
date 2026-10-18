@@ -1,0 +1,138 @@
+name: AliExpress APP PC universal Node 24 validation
+
+on:
+  push:
+    branches:
+      - validation/aliexpress-app-only-universal-node24
+  workflow_dispatch:
+    inputs:
+      ref_guard:
+        description: Exact validation ref guard
+        required: true
+        default: validation/aliexpress-app-only-universal-node24
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aliexpress-app-only-universal-node24
+  cancel-in-progress: false
+
+env:
+  BASE_PRODUCTION_SHA: 67f80eb613a6b10eaae23800379f5658588a9998
+
+jobs:
+  linux-node24:
+    name: Linux Node 24 focal AliExpress contract
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/validation/aliexpress-app-only-universal-node24') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/aliexpress-app-only-universal-node24' && inputs.ref_guard == 'validation/aliexpress-app-only-universal-node24')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout full validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Safety guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/aliexpress-app-only-universal-node24
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(node --version | cut -c1-3)" = "v24"
+          test -z "${DATABASE_URL:-}"
+          git cat-file -e "$BASE_PRODUCTION_SHA^{commit}"
+          test "$(git diff --name-only "$BASE_PRODUCTION_SHA...HEAD" | sort | tr '\n' ' ')" = "docs/contracts/LINKS-MEDIA.md docs/contracts/MARKETPLACES.md modules/engine/importer/adapters/aliexpress.adapter.js tests/aliexpress-app-pc-fallback-oficial.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/links-comerciais-v2-aliexpress-shopee.test.js "
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Syntax and whitespace checks
+        run: |
+          node --check modules/engine/importer/adapters/aliexpress.adapter.js
+          node --check tests/aliexpress-app-pc-fallback-oficial.test.js
+          node --check tests/aliexpress-moedas-productdetail-engine.test.js
+          node --check tests/links-comerciais-v2-aliexpress-shopee.test.js
+          git diff --check "$BASE_PRODUCTION_SHA...HEAD"
+
+      - name: Focal AliExpress and shared-contract suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          suites=(
+            tests/aliexpress-app-pc-fallback-oficial.test.js
+            tests/aliexpress-app-moedas-contrato.test.js
+            tests/aliexpress-moedas-productdetail-engine.test.js
+            tests/aliexpress-preco-variantes-radar.test.js
+            tests/aliexpress-afiliacao-workspace.test.js
+            tests/aliexpress-shortlink-candidate.test.js
+            tests/aliexpress-manual-importador.test.js
+            tests/ofc-v24-espelho-comercial.test.js
+            tests/fila-checkpoint-entrega-funcional.test.js
+            tests/fila-checkpoints-entrega.repository.test.js
+            tests/radar-espelho-comercial.test.js
+            tests/ofertas-v2-achados-listas.test.js
+            tests/shopee-afiliacao-workspace.test.js
+            tests/shopee-ocorrencias-clonador-passivas.test.js
+            tests/manual-v2-import-shopee.test.js
+          )
+          for suite in "${suites[@]}"; do
+            echo "=== $suite ==="
+            node "$suite"
+          done
+
+      - name: Compare known broad baseline failures without hiding regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/aliexpress-base"
+          git worktree add --detach "$base" "$BASE_PRODUCTION_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$base/node_modules"
+          python3 - "$GITHUB_WORKSPACE" "$base" <<'PY'
+          import pathlib, subprocess, sys
+
+          candidate, baseline = map(pathlib.Path, sys.argv[1:])
+          suites = [
+              "tests/links-comerciais-v2-aliexpress-shopee.test.js",
+              "tests/links-comerciais.test.js",
+          ]
+
+          def run(root, suite):
+              p = subprocess.run(["node", suite], cwd=root, text=True, capture_output=True)
+              return p.returncode, p.stdout + p.stderr
+
+          def signature(out):
+              lines = out.splitlines()
+              for i, line in enumerate(lines):
+                  if any(x in line for x in ("AssertionError", "TypeError", "ReferenceError", "SyntaxError")):
+                      return " | ".join([line.strip()] + [x.strip() for x in lines[i + 1:i + 5] if x.strip()])
+              return "<no assertion signature>"
+
+          new = []
+          for suite in suites:
+              c_status, c_out = run(candidate, suite)
+              b_status, b_out = run(baseline, suite)
+              print(f"{suite}: candidate={c_status} baseline={b_status}")
+              if c_status == 0:
+                  continue
+              if b_status != 0 and signature(c_out) == signature(b_out):
+                  print(f"BASELINE_FAILURE_SAME_ASSERTION: {signature(c_out)}")
+              else:
+                  new.append((suite, signature(c_out), signature(b_out)))
+          if new:
+              for suite, current, base_sig in new:
+                  print(f"NEW_OR_DIFFERENT_FAILURE: {suite}\ncurrent: {current}\nbaseline: {base_sig}")
+              raise SystemExit(1)
+          print("No new broad-suite regressions.")
+          PY
+          git worktree remove --force "$base"
