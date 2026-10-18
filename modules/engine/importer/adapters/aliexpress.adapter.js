@@ -165,6 +165,20 @@ function extrairPrecoTextoRadarAliExpress(textoRadar = "") {
   return "";
 }
 
+function precoVariantesAmbiguasRadarAliExpress(textoRadar = "") {
+  const precosPorVariante = new Map();
+  for (const linha of String(textoRadar || "").split(/\r?\n/)) {
+    const normalizada = linha.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (/\b(cupom|off|desconto|cashback|frete|limite|voucher|coupon)\b/.test(normalizada)) continue;
+    const preco = linha.match(/R\$\s*\d{1,3}(?:[.\s]?\d{3})*(?:,\d{2})?|R\$\s*\d+(?:,\d{2})?/i);
+    const variante = normalizada.match(/\b\d+(?:\s*[x×]\s*\d+)?\s*(?:gb|tb|mhz)\b/);
+    if (!preco || !variante) continue;
+    const valor = numeroPreco(preco[0]);
+    if (valor !== null) precosPorVariante.set(variante[0].replace(/\s+/g, ""), valor);
+  }
+  return new Set(precosPorVariante.values()).size > 1;
+}
+
 function extrairPrecoRadarSeguroAliExpress(evento = {}) {
   return primeiroValor(
     extrairPrecoTextoRadarAliExpress(textoOriginalEvento(evento)),
@@ -929,6 +943,12 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   const credenciais = integracao?.credenciais || {};
   if (!credenciais.appKey || !(credenciais.secret || credenciais.appSecret) || !credenciais.trackingId) {
     return { ok: false, marketplace: "aliexpress", motivo: "credenciais_incompletas", linkOriginal: urlOriginalEngine };
+  }
+
+  // O preço estruturado pode repetir o primeiro valor do texto, inclusive uma comparação
+  // de kit. Sem variante factual selecionada, nenhum dos valores é publicável.
+  if (precoVariantesAmbiguasRadarAliExpress(textoOriginalEvento(evento))) {
+    return { ok: false, marketplace: "aliexpress", motivo: "preco_variantes_ambiguas", linkOriginal: urlOriginalEngine };
   }
 
   logAliExpressAdapter("[ENGINE-ALIEXPRESS-IMPORTADOR-CHAMADA]", {
