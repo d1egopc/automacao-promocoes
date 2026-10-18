@@ -205,6 +205,25 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     assert.equal(resultadoPc.metodo, "parametro_e_html_produto");
     assert.equal(chamadasPc.length, 3, "a prova usa apenas os hops HTTP já limitados pelo resolver");
 
+    const chamadasPcRegional = [];
+    const resultadoPcRegional = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
+      dynamicRegistry: registroSeuhardware, safeHttpDeps: {
+        lookup: lookupPublico,
+        requestImpl: transporte([
+          { status: 302, location: "https://a.aliexpress.com/_fixturePc" },
+          { status: 302, location: "https://www.aliexpress.com/item/1005012689379802.html" },
+          { status: 302, location: "https://www.aliexpress.us/item/3256812689379802.html" },
+          { status: 302, location: "https://login.aliexpress.com/" },
+          { status: 302, location: "https://login.aliexpress.us/" },
+          { status: 302, location: "https://www.aliexpress.us/item/3256812689379802.html" }
+        ], chamadasPcRegional)
+      }
+    });
+    assert.equal(resultadoPcRegional.ok, false, "ID regional divergente não prova identidade PC");
+    assert.equal(resultadoPcRegional.motivo, "REDIRECT_LIMIT");
+    assert.equal(resultadoPcRegional.urlExpandida, "", "intermediário não pode virar destino validado");
+    assert.equal(chamadasPcRegional.length, 6, "limite HTTP permanece inalterado");
+
     const resultadoSemProva = await resolverRedirectUniversal("https://seuhardware.com/s/Gfdisrw", {
       dynamicRegistry: registroSeuhardware, safeHttpDeps: {
         lookup: lookupPublico,

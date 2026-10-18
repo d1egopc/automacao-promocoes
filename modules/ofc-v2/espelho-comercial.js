@@ -1592,10 +1592,12 @@ function linkAlternativoAliExpressRenderizavel(item = {}) {
     && Boolean(primeiroTexto(item.urlAfiliadaWorkspace, item.urlAfiliada, item.urlOptimus, item.url));
 }
 
-function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {} } = {}) {
+function extrairLinksComerciais({ textoOriginal = "", oferta = {}, ofertaEntrada = {}, link = {}, metadata: metadataEntrada = {} } = {}) {
   const links = [];
-  const metadata = objeto(oferta.metadata || ofertaEntrada.metadata || {});
   const marketplace = primeiroTexto(oferta.marketplace, ofertaEntrada.marketplace, link.marketplace);
+  const metadata = marketplaceAliExpressValor(marketplace) && Array.isArray(metadataEntrada.linksComerciais)
+    ? objeto(metadataEntrada)
+    : objeto(oferta.metadata || ofertaEntrada.metadata || {});
   const linksEstruturados = linksComerciaisIntegridade({ oferta, ofertaEntrada, metadata });
   if (!linksEstruturados.length) {
     for (const item of urlsDoTexto(textoOriginal)) {
@@ -2487,7 +2489,7 @@ function construirEspelhoComercialV24(entrada = {}) {
   const instrucaoComercial = extrairInstrucaoComercial(textoOriginal, cupom.cupomCodigo, oferta, ofertaEntrada);
   const formaPagamentoTexto = extrairFormaPagamento(textoOriginal, oferta, ofertaEntrada);
   const condicoesComerciais = extrairCondicoes({ textoOriginal, oferta, ofertaEntrada, comercialNormalizado });
-  const linksBrutos = extrairLinksComerciais({ textoOriginal, oferta, ofertaEntrada, link });
+  const linksBrutos = extrairLinksComerciais({ textoOriginal, oferta, ofertaEntrada, link, metadata });
 
   const podeComplementarPrecoDe = !textoOriginal || precosTexto.precoDeValor !== null;
   const precoDeValor = precosTexto.precoDeValor ?? (podeComplementarPrecoDe

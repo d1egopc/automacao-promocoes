@@ -216,8 +216,23 @@ function localizarRedirectEvento(metadata = {}, linkResolvido = "") {
   ) || null;
 }
 
+function papelRadarAliExpress(metadataEvento = {}, urlOriginal = "") {
+  const classificados = [
+    ...(Array.isArray(metadataEvento?.radarMirror?.links?.classificados)
+      ? metadataEvento.radarMirror.links.classificados : []),
+    ...(Array.isArray(metadataEvento?.radarMirror?.comercial?.links?.classificados)
+      ? metadataEvento.radarMirror.comercial.links.classificados : [])
+  ];
+  const papeis = new Set(classificados
+    .filter(item => String(item?.link || item?.url || "") === urlOriginal)
+    .map(item => String(item?.tipo || "").toLowerCase())
+    .filter(papel => ["app", "moedas", "pc"].includes(papel))
+    .map(papel => papel === "pc" ? "link_pc" : "link_app"));
+  return papeis.size === 1 ? [...papeis][0] : "";
+}
+
 async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, evento = {},
-  { query = queryEngine, estrito = false } = {}) {
+  { query = queryEngine, estrito = false, marketplaceContexto = "" } = {}) {
   for (const link of links) {
     const redirectEvento = localizarRedirectEvento(metadataEvento, link);
     const urlOriginal = redirectEvento?.linkOriginalCapturado || link;
@@ -227,6 +242,8 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
       ? normalizarMotivoTecnicoRedirect(redirectEvento.motivoRedirectTecnico)
       : "";
     const marketplaceDetectado = detectarMarketplaceLink(urlExpandida || urlNormalizada || urlOriginal);
+    const papelRadar = String(marketplaceContexto || "").toLowerCase() === "aliexpress" && !marketplaceDetectado
+      ? papelRadarAliExpress(metadataEvento, urlOriginal) : "";
     const classificacao = classificarLinkEngine({
       marketplace: marketplaceDetectado,
       evento,
@@ -237,7 +254,8 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
         marketplace_detectado: marketplaceDetectado,
         metadata: {
           linkOriginalCapturado: redirectEvento?.linkOriginalCapturado || "",
-          linkResolvido: urlResolvidaRedirect(redirectEvento)
+          linkResolvido: urlResolvidaRedirect(redirectEvento),
+          ...(papelRadar ? { papelLink: papelRadar, papelLinkMotivo: "radar_mirror_link_original", papelLinkConfianca: "alta" } : {})
         }
       },
       url: urlExpandida || urlNormalizada || urlOriginal
@@ -304,7 +322,8 @@ async function registrarRadarComReplayCandidato({ evento, eventoBruto, opcoes,
       persistLinks: async (db, id) => salvarLinksEvento(id, evento.linksExtraidos,
         metadataEvento, evento, {
           query: async (sql, params) => ({ ok: true,
-            resultado: await db.query(sql, params) }), estrito: true
+            resultado: await db.query(sql, params) }), estrito: true,
+          marketplaceContexto: marketplaceDetectado
         })
     });
   } catch (error) {
@@ -537,7 +556,7 @@ async function registrarEventoBruto(eventoBruto = {}, opcoes = {}) {
       };
     }
 
-    await salvarLinksEvento(id, evento.linksExtraidos, metadataEventoFinal, evento);
+    await salvarLinksEvento(id, evento.linksExtraidos, metadataEventoFinal, evento, { marketplaceContexto: marketplaceDetectado });
 
     logEngineEventoBrutoSalvo({ id, origem: evento.origem, origemTipo: evento.origemTipo, grupoId: evento.grupoId, links: evento.linksExtraidos.length });
 

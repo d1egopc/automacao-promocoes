@@ -682,10 +682,14 @@ async function converterLinksAlternativosAliExpress({
 } = {}) {
   const convertidos = new Map();
 
-  async function converter(url = "", papelLink = "", urlExpandida = "") {
+  async function converter(url = "", papelLink = "", urlExpandida = "", urlPcCanonicaGerada = "") {
     const alvo = texto(url);
     const papel = texto(papelLink);
     if (!alvo) return { urlAfiliada: "", renderizavel: false, motivo: "link_vazio", appValidado: false, produtoCanonico: "", produtoCanonicoPrincipal: "" };
+    if (papel === "link_pc" && !urlOriginalAliExpressSegura(alvo) &&
+        !urlExpandidaAliExpressSegura(urlExpandida) && !urlPcCanonicaGerada) {
+      return { urlAfiliada: "", renderizavel: false, motivo: "pc_original_sem_destino_validado", appValidado: false, produtoCanonico: "", produtoCanonicoPrincipal: "" };
+    }
     if (!urlOriginalAliExpressSegura(alvo) && ["link_app", "link_moedas"].includes(papel)) {
       const idExpandido = produtoIdFactualUrlExpandidaAliExpress(urlExpandida);
       const idPrincipal = produtoIdFactualUrlExpandidaAliExpress(urlPrincipal);
@@ -693,8 +697,8 @@ async function converterLinksAlternativosAliExpress({
         return { urlAfiliada: "", renderizavel: false, motivo: "link_app_produto_nao_comprovado", appValidado: false, produtoCanonico: idExpandido, produtoCanonicoPrincipal: idPrincipal };
       }
     }
-    const urlParaImportar = urlOriginalAliExpressSegura(alvo) ? alvo
-      : (urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : alvo);
+    const urlParaImportar = urlPcCanonicaGerada || (urlOriginalAliExpressSegura(alvo) ? alvo
+      : (urlExpandidaAliExpressSegura(urlExpandida) ? texto(urlExpandida) : alvo));
 
     if (texto(urlPrincipal) && urlParaImportar === texto(urlPrincipal) && texto(linkAfiliadoPrincipal)) {
       const ocorrenciaPrincipalExpandidaFactual = preservarOcorrenciaPrincipalExpandidaFactualAliExpress({
@@ -841,7 +845,7 @@ async function converterLinksAlternativosAliExpress({
     }
     let conversao = conversoesPorPapelUrl.get(chaveCacheOcorrencia);
     if (!conversao) {
-      conversao = await converter(urlOriginal, papelLink, link.urlExpandida);
+      conversao = await converter(urlOriginal, papelLink, link.urlExpandida, link.urlPcCanonicaGerada);
       conversoesPorPapelUrl.set(chaveCacheOcorrencia, conversao);
     }
     saida.push({
@@ -855,6 +859,9 @@ async function converterLinksAlternativosAliExpress({
       conversaoStatus: conversao.renderizavel ? "convertida" : "falhou",
       motivoConversao: conversao.motivo,
       sourceValuesUsado: conversao.sourceValuesUsado || urlOriginal,
+      produtoCanonico: conversao.produtoCanonico || "",
+      produtoCanonicoPrincipal: conversao.produtoCanonicoPrincipal || "",
+      afiliacaoWorkspace: conversao.afiliacaoWorkspace || {},
       conversaoWorkspace: {
         papel: papelLink,
         ocorrenciaId,
@@ -890,6 +897,33 @@ async function converterLinksAlternativosAliExpress({
   }
   return saida;
 }
+
+function variantePcCanonicaPendenteAliExpress(textoRadar = "") {
+  return /\b\d+(?:[.,]\d+)?\s*(?:gb|tb|mb)\b|\b(?:variante|capacidade|tamanho|vers[aã]o|cor)\s*[:\-]/i
+    .test(textoRadar);
+}
+
+function appAliExpressFactualEProprio({ links = [], produto = {}, produtoCanonico = {},
+  linkEscolhido = {}, clienteId = "", credenciais = {}, radarDefiniuPreco = false,
+  textoRadar = "" } = {}) {
+  if (!radarDefiniuPreco || produto?.metadata?.origemProdutoDetalhe !== "productdetail" ||
+      !produtoCanonico.produtoId ||
+      texto(produto?.metadata?.productId) !== produtoCanonico.produtoId ||
+      linkEscolhido.papelLink !== "link_app" ||
+      variantePcCanonicaPendenteAliExpress(textoRadar)) return null;
+  const apps = links.filter(item => item.papelLink === "link_app");
+  const pcs = links.filter(item => item.papelLink === "link_pc");
+  const outrosProdutos = links.some(item => ["produto", "link_produto"].includes(item.papelLink));
+  if (apps.length !== 1 || pcs.length !== 1 || outrosProdutos) return null;
+  const app = apps[0];
+  const idApp = produtoIdFactualUrlExpandidaAliExpress(app.urlExpandida || produto.linkOriginal);
+  if (!idApp || idApp !== produtoCanonico.produtoId || app.renderizavel !== true ||
+      !validarProvaAfiliacaoWorkspaceAliExpress(app.afiliacaoWorkspace, {
+        clienteId, credenciais, exigirAssinatura: true
+      }).valida) return null;
+  return app;
+}
+
 async function importarAliExpressEngine({ job = {}, evento = {}, links = [], deps = {} } = {}) {
   const clienteId = texto(job.cliente_id || job.clienteId || "");
   const linkEscolhido = escolherLinkAliExpress(links, evento);
@@ -1094,20 +1128,77 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     urlAfiliada: linkAfiliado, papel: linkEscolhido.papelLink || "produto"
   });
 
-  const linksSeguros = linksClassificadosComConversao.filter(item => {
+  const linksFalhosWorkspace = linksClassificadosComConversao.filter(item =>
+    papelExigeAfiliacaoWorkspaceAliExpress(texto(item.papelLink)) &&
+    item.renderizavel !== true
+  );
+  let linksPublicaveis = linksClassificadosComConversao;
+  let aproveitamentoParcialApp = false;
+  let pcCanonicoGerado = false;
+  const appFactual = appAliExpressFactualEProprio({
+    links: linksClassificadosComConversao, produto, produtoCanonico,
+    linkEscolhido, clienteId, credenciais, radarDefiniuPreco,
+    textoRadar: textoOriginalEvento(evento)
+  });
+  const pcOriginalFalho = linksFalhosWorkspace.find(item =>
+    item.papelLink === "link_pc" && !urlOriginalAliExpressSegura(item.urlOriginal)
+  );
+  if (appFactual && pcOriginalFalho) {
+    const urlPcOficial = texto(produto?.metadata?.urlPcCanonicaProductDetail);
+    const idPcOficial = produtoIdFactualUrlExpandidaAliExpress(urlPcOficial);
+    const idPcExpandido = produtoIdFactualUrlExpandidaAliExpress(pcOriginalFalho.urlExpandida);
+    if (idPcOficial === produtoCanonico.produtoId && urlPcOficial &&
+        !idPcExpandido) {
+      const [pcConvertido] = await converterLinksAlternativosAliExpress({
+        linksClassificados: [{
+          ...pcOriginalFalho,
+          urlPcCanonicaGerada: urlPcOficial,
+          pcCanonicoGerado: true
+        }],
+        importarLegado, integracao, credenciais, clienteId, evento, job,
+        urlPrincipal: urlOriginalEngine,
+        linkAfiliadoPrincipal: linkAfiliado,
+        produtoPrincipal: produto,
+        cacheProdutoAliExpress
+      });
+      const provaPc = provaAssinadaDaConversaoAliExpress(pcConvertido?.afiliacaoWorkspace || {}, {
+        clienteId, credenciais, urlOriginal: pcOriginalFalho.urlOriginal,
+        urlAfiliada: pcConvertido?.urlAfiliadaWorkspace || "", papel: "link_pc"
+      });
+      if (pcConvertido?.renderizavel === true &&
+          pcConvertido.sourceValuesUsado === urlPcOficial &&
+          pcConvertido.produtoCanonico === produtoCanonico.produtoId &&
+          pcConvertido.produtoCanonicoPrincipal === produtoCanonico.produtoId &&
+          !urlsAliExpressAfiliadasIguais(pcConvertido.urlAfiliadaWorkspace, appFactual.urlAfiliadaWorkspace) &&
+          validarProvaAfiliacaoWorkspaceAliExpress(provaPc, {
+            clienteId, credenciais, exigirAssinatura: true
+          }).valida) {
+        linksPublicaveis = linksClassificadosComConversao.map(item => item === pcOriginalFalho
+          ? { ...pcConvertido, afiliacaoWorkspace: provaPc,
+            motivoConversao: "cta_pc_canonico_productdetail_workspace_convertido" }
+          : item);
+        pcCanonicoGerado = true;
+      }
+    }
+    if (!pcCanonicoGerado) {
+      // O PC original continua auditável no evento e em linksFalhosWorkspace,
+      // mas nunca entra no contrato dos CTAs quando somente o APP foi provado.
+      linksPublicaveis = linksClassificadosComConversao.filter(item => item !== pcOriginalFalho);
+      aproveitamentoParcialApp = true;
+    }
+  }
+
+  const linksSeguros = linksPublicaveis.filter(item => {
     const prova = item.conversaoWorkspace || item.afiliacaoWorkspace || {};
     return item.renderizavel === true &&
       Boolean(texto(item.urlAfiliadaWorkspace || item.urlAfiliada)) &&
       prova.origemConversao === "workspace_api" &&
       prova.conversaoStatus === "convertida";
   });
-  const linksFalhosWorkspace = linksClassificadosComConversao.filter(item =>
-    papelExigeAfiliacaoWorkspaceAliExpress(texto(item.papelLink)) &&
-    item.renderizavel !== true
-  );
-  const papeisContextuaisCapturados = new Set(linksClassificadosComConversao.map(item => texto(item.papelLink)));
+  const papeisContextuaisCapturados = new Set(linksPublicaveis.map(item => texto(item.papelLink)));
   const exigeAppPcIntegral = papeisContextuaisCapturados.has("link_app") && papeisContextuaisCapturados.has("link_pc");
-  const falhaAppPcObrigatoria = exigeAppPcIntegral && linksFalhosWorkspace.some(item =>
+  const falhaAppPcObrigatoria = exigeAppPcIntegral && linksPublicaveis.some(item =>
+    item.renderizavel !== true &&
     ["link_app", "link_pc"].includes(texto(item.papelLink))
   );
   const motivoBloqueioAfiliacao = falhaAppPcObrigatoria
@@ -1132,7 +1223,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       motivo: motivoBloqueioAfiliacao,
       linkOriginal: urlOriginalEngine,
       metadata: {
-        linksClassificados: linksClassificadosComConversao,
+        linksClassificados: linksPublicaveis,
+        linksClassificadosCapturados: linksClassificadosComConversao,
         linksFalhosWorkspace
       }
     };
@@ -1197,8 +1289,11 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       campoLinkEscolhido: linkEscolhido.campo || "",
       papelLinkEscolhido: linkEscolhido.papelLink || "",
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
-      linksClassificados: linksClassificadosComConversao,
+      linksClassificados: linksPublicaveis,
+      linksClassificadosCapturados: linksClassificadosComConversao,
       linksFalhosWorkspace,
+      aproveitamentoParcialApp,
+      pcCanonicoGerado,
       afiliacaoWorkspace: provaPrincipalAssinada,
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,

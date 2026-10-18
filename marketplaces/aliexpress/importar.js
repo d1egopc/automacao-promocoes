@@ -595,6 +595,30 @@ function selecionarProdutoAliExpressPorId(produtos = [], productId = "") {
   };
 }
 
+function urlPcCanonicaProductDetailAliExpress(produto = {}, productId = "") {
+  if (!/^\d{12,20}$/.test(String(productId || ""))) return "";
+  for (const campo of ["product_id", "productId", "item_id", "itemId"]) {
+    const id = String(produto[campo] || "").trim();
+    if (id && id !== productId) return "";
+  }
+  if (["selected_sku_id", "selectedSkuId", "sku_id", "skuId"].some(campo => produto[campo])) return "";
+  const urlOriginal = primeiroCampoAliExpress(produto, ["product_detail_url"]);
+  try {
+    const url = new URL(urlOriginal);
+    if (!urlAliExpressSegura(url.href, { permitirShortlink: false }) ||
+        url.username || url.password || url.port || url.search || url.hash || url.href.length > 2048) return "";
+    const idUrl = url.pathname.match(/^\/item\/(\d{12,20})\.html$/i)?.[1] || "";
+    if (idUrl !== productId) return "";
+    for (const campo of ["product_url", "target_sale_url"]) {
+      const outroId = extrairProductIdAliExpressManual(produto[campo] || "");
+      if (outroId && outroId !== productId) return "";
+    }
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
 function limparLinkAfiliadoAliExpress(link = "") {
   let linkAfiliado = String(link || "").trim();
   if (linkAfiliado.includes("s.click.aliexpress.com/s/")) {
@@ -986,6 +1010,9 @@ async function importarAliExpress(urlEntrada, config = {}) {
     conversaoLinkAlternativo: conversaoOcorrenciaRadar || produtoFinal.metadata?.conversaoLinkAlternativo === true,
     landingMoedasAliExpress: landingMoedasComProdutoFactual,
     productId,
+    origemProdutoDetalhe: origemProduto,
+    urlPcCanonicaProductDetail: origemProduto === "productdetail"
+      ? urlPcCanonicaProductDetailAliExpress(produto, productId) : "",
     sourceValuesUsado: sourceValuesAfiliado,
     linkAfiliadoBaseProduto: linkAfiliadoBase,
     afiliacaoWorkspace: {
