@@ -262,7 +262,8 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     const codigo = String(error?.message || "");
     const publico = new Set(["URL_EXEMPLO_INVALIDA", "FAMILIA_NAO_INFERIVEL", "RESOLVER_DUPLICADO",
       "RESOLVER_NAO_ENCONTRADO", "URL_BLOQUEADA_SEGURANCA", "RESOLVER_HARDCODED", "ATIVO_INVALIDO",
-      "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_INCOMPATIVEL", "PREVIEW_OCORRENCIAS_INVALIDAS",
+      "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_NAO_HOMOLOGAVEL", "RASCUNHO_REVALIDACAO_FALHOU",
+      "SEGUNDO_EXEMPLO_OBRIGATORIO", "RASCUNHO_INCOMPATIVEL", "PREVIEW_OCORRENCIAS_INVALIDAS",
       "PREVIEW_PAPEL_INVALIDO"]);
     return res.status(codigo === "RESOLVER_DUPLICADO" ? 409 : publico.has(codigo) ? 400 : 500)
       .json({ ok: false, erro: publico.has(codigo) ? codigo : "LINK_RESOLVER_OPERATION_FAILED" });
@@ -357,6 +358,40 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       const analise = await descobrir(familia.urlExemplo);
       return res.json({ ...projecaoDescoberta(analise), reutilizavel: analise.ok &&
         analise.metodo === registro.metodoDescoberto });
+    } catch (error) { return erro(res, error); }
+  });
+  router.post("/drafts/:id/authorize", async (req, res) => {
+    try {
+      const registro = getStore().buscar(req.params.id);
+      if (!registro || registro.estado !== "rascunho" || registro.ativo !== false)
+        throw new Error("RESOLVER_NAO_ENCONTRADO");
+      const primeira = await descobrir(registro.urlExemplo);
+      if (!primeira.ok || primeira.metodo !== registro.metodoDescoberto)
+        throw new Error("RASCUNHO_REVALIDACAO_FALHOU");
+      let exemplos = 1;
+      const segundo = typeof req.body?.urlExemplo === "string" ? req.body.urlExemplo.trim() : "";
+      if (registro.metodoDescoberto === "html_contextual" && !segundo)
+        throw new Error("SEGUNDO_EXEMPLO_OBRIGATORIO");
+      if (segundo) {
+        const familia = inferirFamiliaRascunho(segundo);
+        if (familia.host !== registro.host || familia.pathPrefix !== registro.pathPrefix ||
+            familia.pathMode !== registro.pathMode || familia.urlExemplo === registro.urlExemplo)
+          throw new Error("RASCUNHO_INCOMPATIVEL");
+        const segunda = await descobrir(segundo);
+        if (!segunda.ok || segunda.metodo !== registro.metodoDescoberto)
+          throw new Error("RASCUNHO_REVALIDACAO_FALHOU");
+        exemplos = 2;
+      }
+      const homologado = getStore().homologar(registro.id, {
+        ...primeira,
+        debug: { ...primeira.debug, exemplosHomologados: exemplos }
+      });
+      console.log("[LINK-RESOLVER-DINAMICO-HOMOLOGADO]", JSON.stringify({
+        host: homologado.host, padrao: homologado.pathPrefix,
+        marketplace: homologado.ultimoMarketplaceDetectado, metodo: homologado.metodoHomologado,
+        exemplosHomologados: exemplos
+      }));
+      return res.json({ ok: true, resolver: registroPublico(homologado) });
     } catch (error) { return erro(res, error); }
   });
   router.post("/", async (req, res) => {

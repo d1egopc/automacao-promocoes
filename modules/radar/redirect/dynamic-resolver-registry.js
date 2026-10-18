@@ -118,11 +118,35 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     salvar(registros.map(item => item.id === id ? proximo : item));
     return { ...proximo };
   }
+  function homologar(id, diagnostico = {}) {
+    const atual = buscar(id);
+    if (!atual) throw new Error("RESOLVER_NAO_ENCONTRADO");
+    if (atual.estado !== "rascunho" || atual.ativo !== false)
+      throw new Error("RASCUNHO_NAO_HOMOLOGAVEL");
+    if (diagnostico.ok !== true || !diagnostico.marketplace || !diagnostico.metodo)
+      throw new Error("RASCUNHO_REVALIDACAO_FALHOU");
+    const agora = new Date().toISOString();
+    const proximo = {
+      ...atual,
+      ativo: true,
+      estado: "homologado",
+      homologadoEm: agora,
+      ultimoTesteEm: agora,
+      ultimoSucessoEm: agora,
+      ultimoMarketplaceDetectado: diagnostico.marketplace,
+      ultimoTipoDetectado: diagnostico.tipo || atual.ultimoTipoDetectado || "nao_determinado",
+      falhasConsecutivas: 0,
+      ultimoDebugSeguro: diagnostico.debug || atual.ultimoDebugSeguro || null,
+      metodoHomologado: diagnostico.metodo
+    };
+    salvar(registros.map(item => item.id === id ? proximo : item));
+    return { ...proximo };
+  }
   function excluir(id) {
     if (!buscar(id)) throw new Error("RESOLVER_NAO_ENCONTRADO");
     salvar(registros.filter(item => item.id !== id));
   }
-  return { listar, buscar, localizar, adicionar, adicionarRascunho, atualizar, excluir };
+  return { listar, buscar, localizar, adicionar, adicionarRascunho, atualizar, homologar, excluir };
 }
 
 let registroPadrao;

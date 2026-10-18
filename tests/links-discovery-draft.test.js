@@ -12,6 +12,7 @@ const { resolverRedirectUniversal, detectarMarketplaceRedirect } =
   require("../modules/radar/redirect/redirect-resolver");
 const { criarRotasResolversDinamicos } =
   require("../modules/radar/redirect/dynamic-resolver-admin.routes");
+const { resolverLinksClonador } = require("../modules/clonador-grupos/bridge");
 const { extrairCandidatoContextual } =
   require("../modules/radar/redirect/contextual-html-candidate");
 const { criarContratoPreparacaoLinks } = require("../modules/engine/preparacao-links.service");
@@ -100,10 +101,31 @@ async function executar() {
       assert.equal(salvo.data.resolver.ativo, false);
       assert.equal(registro.localizar(`https://${host}/dois`), null);
       assert.equal(criarRegistroDinamico({ file }).buscar(salvo.data.resolver.id).estado, "rascunho");
+      assert.equal((await request(`/drafts/${salvo.data.resolver.id}/authorize`,
+        { urlExemplo: `https://${host}/dois` }, false)).status, 403);
       const segundo = await request(`/drafts/${salvo.data.resolver.id}/test`,
         { urlExemplo: `https://${host}/dois` });
       assert.equal(segundo.data.reutilizavel, true);
       assert.equal(segundo.data.metodo, "http_redirect");
+      if (host === "tidd.ly") {
+        const autorizado = await request(`/drafts/${salvo.data.resolver.id}/authorize`,
+          { urlExemplo: `https://${host}/dois` });
+        assert.equal(autorizado.status, 200);
+        assert.equal(autorizado.data.resolver.ativo, true);
+        assert.equal(autorizado.data.resolver.estado, "homologado");
+        assert.equal(registro.localizar(`https://${host}/tres`).id, salvo.data.resolver.id);
+        const operacional = await resolverRedirectUniversal(`https://${host}/tres`, {
+          dynamicRegistry: registro, safeHttpDeps: deps
+        });
+        assert.equal(operacional.ok, true);
+        assert.equal(operacional.marketplaceDetectado, "amazon");
+        assert.equal(operacional.urlFinal, "https://www.amazon.com.br/dp/B087654321");
+        const clonador = await resolverLinksClonador([`https://${host}/tres`], url =>
+          resolverRedirectUniversal(url, { dynamicRegistry: registro, safeHttpDeps: deps }));
+        assert.deepEqual(clonador.linksOriginais, [`https://${host}/tres`]);
+        assert.deepEqual(clonador.linksPreparados, ["https://www.amazon.com.br/dp/B087654321"]);
+        assert.equal(clonador.redirects[0].status, "resolvido");
+      }
       const cruzado = await request(`/drafts/${salvo.data.resolver.id}/test`,
         { urlExemplo: `https://${host === "tidd.ly" ? "desc.vc" : "tidd.ly"}/dois` });
       assert.equal(cruzado.status, 400);
@@ -117,6 +139,9 @@ async function executar() {
     const segundoContexto = await request(`/drafts/${rascunho.data.resolver.id}/test`,
       { urlExemplo: "https://descontos.example/oferta/dois" });
     assert.equal(segundoContexto.data.reutilizavel, true);
+    const contextoSemSegundo = await request(`/drafts/${rascunho.data.resolver.id}/authorize`, {});
+    assert.equal(contextoSemSegundo.status, 400);
+    assert.equal(contextoSemSegundo.data.erro, "SEGUNDO_EXEMPLO_OBRIGATORIO");
     const ambiguo = await request("/discover", { urlExemplo: "https://descontos.example/oferta/ambigua" });
     assert.equal(ambiguo.data.ok, false);
     assert.equal(ambiguo.data.destinoCandidato, "");
