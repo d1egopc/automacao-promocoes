@@ -33,6 +33,24 @@ Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco 
 - Prova assinada deve vincular workspace e produto.
 - Achado legado sem URL/identidade verificavel permanece bloqueado; link afiliado salvo nao basta.
 - Brasil/Internacional, impostos, taxas e observacoes so aparecem quando presentes nos dados.
+- Preco, cupom, moedas, variantes, quantidade, ordem e contexto capturados pelo
+  Radar/TeleRadar permanecem soberanos sobre o enriquecimento tecnico da API.
+- Cupom explicitamente rotulado pode ser alfanumerico ou numerico; texto de
+  beneficio, preco ou instrucao sem rotulo de codigo nao vira cupom por heuristica.
+- Cada ocorrencia APP/moedas e PC e convertida e validada separadamente com as
+  credenciais da workspace. A mesma mensagem pode transportar 2, 3 ou 4 links;
+  deduplicacao so ocorre para a mesma ocorrencia/URL comprovadamente repetida.
+- APP factual, afiliado e assinado pode seguir sozinho quando o PC falha; o PC
+  original continua auditavel e nao e substituido por APP. Um PC canonico gerado
+  exige ProductDetail e identidade consistentes, conversao propria e prova da
+  mesma workspace.
+- IDs de produtos secundarios ou variantes conflitantes nao podem contaminar o
+  produto principal. Sem identidade ou variante factual, a oferta permanece
+  retida.
+- Cobertura executavel: `tests/aliexpress-app-pc-fallback-oficial.test.js`,
+  `tests/aliexpress-app-moedas-contrato.test.js`,
+  `tests/aliexpress-preco-variantes-radar.test.js` e
+  `tests/links-comerciais-v2-aliexpress-shopee.test.js`.
 - Fontes: `modules/engine/importer/adapters/aliexpress.adapter.js`, `modules/manual-v2/adapters/aliexpress.manual.adapter.js`, `optimus-capture/adapters/aliexpress.js`.
 
 ## Magalu

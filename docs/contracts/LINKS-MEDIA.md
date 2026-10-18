@@ -21,6 +21,28 @@ Nao fabrique identidade a partir de link afiliado, tracking, marketplace ou apar
 - Registro legado sem evidencia suficiente permanece bloqueado.
 - Nunca afrouxe o gate para fazer um item antigo passar.
 
+## AliExpress APP/PC e ocorrencias
+
+- Radar e TeleRadar permanecem autoridades para preco, cupom, moedas, beneficios,
+  variantes, ordem e papel de cada ocorrencia capturada.
+- Cada ocorrencia APP/moedas e PC conserva `urlOriginal`, expansao, papel, ordem e
+  proveniencia; a conversao de uma ocorrencia nunca substitui outra.
+- Uma mensagem pode conter duas, tres ou quatro ocorrencias validas. O contrato
+  nao limita artificialmente a um APP e um PC: ocorrencias do mesmo produto podem
+  ser preservadas, enquanto IDs canonicos divergentes sao separados ou bloqueados.
+- Produto principal e links de produtos secundarios nao podem compartilhar
+  titulo, imagem, preco ou afiliacao por inferencia. Links secundarios ficam
+  auditaveis e nao contaminam o CTA do principal sem identidade comprovada.
+- Se o PC falhar, somente um APP com ProductDetail factual, prova assinada e
+  afiliacao propria da workspace pode seguir sozinho. O PC falho permanece no
+  registro capturado e nunca e copiado para o campo PC.
+- PC canonico alternativo exige ProductDetail coerente, identidade reconciliada e
+  nova conversao propria; redirect, login ou ID coincidente isolado nao bastam.
+- As invariantes sao exercitadas por
+  `tests/aliexpress-app-pc-fallback-oficial.test.js`,
+  `tests/aliexpress-app-moedas-contrato.test.js` e
+  `tests/links-comerciais-v2-aliexpress-shopee.test.js`.
+
 ## Titulo e imagem
 
 - Preserve origem e fallback comprovado.

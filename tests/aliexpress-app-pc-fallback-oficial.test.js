@@ -25,16 +25,32 @@ const clienteId = "workspace_fixture";
 const credenciais = { appKey: "app_fixture", secret: "secret_fixture", trackingId: "tracking_fixture" };
 
 async function executar({ pcExpandido = "", productDetailUrl = pcOficial,
-  afiliacaoApp = true, afiliacaoPc = true, texto = "Headset sem variante\nR$ 136,92\nCupom: IFPENUO\n1000 moedas no APP" } = {}) {
+  afiliacaoApp = true, afiliacaoPc = true, texto = "Headset sem variante\nR$ 136,92\nCupom: IFPENUO\n1000 moedas no APP",
+  falharPrimeiroProductDetail = false, metadataEvento = {},
+  clienteIdExec = clienteId, credenciaisExec = credenciais, semIntegracao = false,
+  appOriginalExec = appOriginal } = {}) {
   const chamadas = [];
+  let chamadasProductDetail = 0;
   const fetchAnterior = global.fetch;
   global.fetch = async (url, opcoes = {}) => {
     const body = opcoes.body instanceof URLSearchParams
       ? opcoes.body : new URLSearchParams(opcoes.body || "");
     const method = body.get("method");
     const sourceValues = body.get("source_values") || "";
+    if (!method && /^https:\/\/a\.aliexpress\.com\//i.test(String(url))) {
+      const expandida = String(url).includes("_PC_PRINCIPAL") ? pcOficial : appExpandido;
+      return { ok: true, status: 200, url: expandida, headers: { get: () => "" },
+        text: async () => "" };
+    }
     chamadas.push({ method, sourceValues });
     if (method === "aliexpress.affiliate.productdetail.get") {
+      chamadasProductDetail += 1;
+      if (falharPrimeiroProductDetail && chamadasProductDetail === 1) {
+        return { ok: true, status: 200, url: String(url), headers: { get: () => "" },
+          json: async () => ({ aliexpress_affiliate_productdetail_get_response: { resp_result: {
+            resp_code: "405", resp_msg: "Api access frequency exceeds the limit. this ban will last 1 seconds"
+          } } }) };
+      }
       return { ok: true, status: 200, url: String(url), headers: { get: () => "" },
         json: async () => ({ aliexpress_affiliate_productdetail_get_response: { resp_result: {
           resp_code: "200", result: { products: { product: {
@@ -47,8 +63,14 @@ async function executar({ pcExpandido = "", productDetailUrl = pcOficial,
           } } }
         } } }) };
     }
+    if (method === "aliexpress.affiliate.product.query") {
+      return { ok: true, status: 200, url: String(url), headers: { get: () => "" },
+        json: async () => ({ aliexpress_affiliate_product_query_response: { resp_result: {
+          resp_code: "405", resp_msg: "The result is empty"
+        } } }) };
+    }
     if (method === "aliexpress.affiliate.link.generate") {
-      const convertido = sourceValues === appExpandido
+      const convertido = sourceValues === appExpandido || sourceValues === appOriginalExec
         ? (afiliacaoApp ? afiliadoApp : "")
         : (sourceValues === pcOficial && afiliacaoPc ? afiliadoPc : "");
       return { ok: true, status: 200, url: String(url), headers: { get: () => "" },
@@ -60,16 +82,17 @@ async function executar({ pcExpandido = "", productDetailUrl = pcOficial,
   };
 
   try {
-    const evento = { texto_original: `${texto}\n🪙 ${appOriginal}\n⬇️ NO PC\n${pcOriginal}` };
+    const evento = { texto_original: `${texto}\n🪙 ${appOriginalExec}\n⬇️ NO PC\n${pcOriginal}`,
+      metadata: metadataEvento };
     const resultado = await importarAliExpressEngine({
-      job: { id: 1, evento_id: 2, cliente_id: clienteId, marketplace: "aliexpress" },
+      job: { id: 1, evento_id: 2, cliente_id: clienteIdExec, marketplace: "aliexpress" },
       evento,
       links: [
-        { url_original: appOriginal, url_expandida: appExpandido, metadata: { papelLink: "link_app" } },
+        { url_original: appOriginalExec, url_expandida: appExpandido, metadata: { papelLink: "link_app" } },
         { url_original: pcOriginal, url_expandida: pcExpandido || null,
           redirect_ok: Boolean(pcExpandido), metadata: { papelLink: "link_pc", motivoRedirectTecnico: pcExpandido ? "" : "REDIRECT_LIMIT" } }
       ],
-      deps: { getIntegracaoCliente: () => ({ credenciais }), importarAliExpress }
+      deps: { getIntegracaoCliente: () => semIntegracao ? null : ({ credenciais: credenciaisExec }), importarAliExpress }
     });
     return { resultado, chamadas, evento };
   } finally {
@@ -228,12 +251,78 @@ function renderizar(resultado, evento) {
   const semAfiliacaoApp = await executar({ afiliacaoApp: false });
   assert.equal(semAfiliacaoApp.resultado.ok, false, "sem afiliação própria APP não há oferta");
 
-  const variante = await executar({ texto: "Memória 512 GB\nR$ 315\nCupom: IFPIGKJ2\n584 moedas no APP" });
-  assert.equal(variante.resultado.ok, false,
-    "sem SKU comprovado, uma variante não pode ser aproveitada parcialmente");
-  assert.notEqual(variante.resultado.metadata.pcCanonicoGerado, true,
-    "sem SKU comprovado, PC canônico não substitui caminho da variante");
-  assert.equal(variante.resultado.metadata.aproveitamentoParcialApp, undefined);
+  const principalPcFalhaAppFactual = await executar({
+    pcExpandido: "https://a.aliexpress.com/_PC_PRINCIPAL",
+    appOriginalExec: "https://a.aliexpress.com/_APP_PRINCIPAL",
+    productDetailUrl: "",
+    falharPrimeiroProductDetail: true,
+    texto: "Kit placa mãe com 16 GB de memória\nR$ 342\nCupom: IFPS7PCS\n500 moedas no APP"
+  });
+  assert.equal(principalPcFalhaAppFactual.resultado.ok, true,
+    "APP factual não pode depender do ProductDetail falho do PC escolhido como principal");
+  assert.equal(principalPcFalhaAppFactual.resultado.metadata.aproveitamentoParcialApp, true);
+  assert.equal(principalPcFalhaAppFactual.resultado.produtoId, productId);
+  assert.equal(principalPcFalhaAppFactual.resultado.linkAfiliado, afiliadoApp);
+  assert.equal(principalPcFalhaAppFactual.resultado.titulo, "Headset Fifine H6");
+  assert.equal(principalPcFalhaAppFactual.resultado.imagem, "https://ae01.alicdn.com/kf/fifine-fixture.jpg");
+  assert.deepEqual(Object.keys(linksPorPapel(principalPcFalhaAppFactual.resultado)), ["link_app"]);
+  assert.equal(principalPcFalhaAppFactual.chamadas
+    .filter(item => item.method === "aliexpress.affiliate.productdetail.get").length, 2);
+  assert.deepEqual(principalPcFalhaAppFactual.chamadas
+    .filter(item => item.method === "aliexpress.affiliate.link.generate")
+    .map(item => item.sourceValues), ["https://a.aliexpress.com/_APP_PRINCIPAL"]);
+
+  const mencaoGbSemVarianteEstruturada = await executar({
+    productDetailUrl: "",
+    texto: "Kit placa mãe com 16 GB de memória\nR$ 342\nCupom: IFPS7PCS\n500 moedas no APP"
+  });
+  assert.equal(mencaoGbSemVarianteEstruturada.resultado.ok, true,
+    "GB descritivo não é evidência estruturada de variante ambígua");
+
+  const cupomNumerico = await executar({
+    productDetailUrl: "",
+    texto: "Oferta sem variante\nR$ 342\nCupom: 123456\n500 moedas no APP"
+  });
+  assert.equal(cupomNumerico.resultado.cupom, "123456",
+    "cupom numerico explicitamente rotulado pelo Radar deve ser preservado");
+
+  const varianteAmbigua = await executar({
+    productDetailUrl: "",
+    metadataEvento: { radarMirror: { comercialNormalizado: { variantes: ["512 GB", "1 TB"] } } },
+    texto: "Memória disponível em duas capacidades\nR$ 315\nCupom: IFPIGKJ2\n584 moedas no APP"
+  });
+  assert.equal(varianteAmbigua.resultado.ok, false,
+    "variantes estruturadas conflitantes continuam impedindo aproveitamento parcial");
+  assert.notEqual(varianteAmbigua.resultado.metadata.pcCanonicoGerado, true);
+
+  const credenciaisNovaWorkspace = {
+    appKey: "app_workspace_nova", secret: "secret_workspace_nova", trackingId: "tracking_workspace_nova"
+  };
+  const novaWorkspace = await executar({
+    productDetailUrl: "",
+    clienteIdExec: "workspace_nova_sintetica",
+    credenciaisExec: credenciaisNovaWorkspace
+  });
+  assert.equal(novaWorkspace.resultado.ok, true);
+  const provaNovaWorkspace = linksPorPapel(novaWorkspace.resultado).link_app.afiliacaoWorkspace;
+  assert.equal(validarProvaAfiliacaoWorkspaceAliExpress(provaNovaWorkspace, {
+    clienteId: "workspace_nova_sintetica", credenciais: credenciaisNovaWorkspace, exigirAssinatura: true
+  }).valida, true);
+  assert.equal(validarProvaAfiliacaoWorkspaceAliExpress(provaNovaWorkspace, {
+    clienteId, credenciais, exigirAssinatura: true
+  }).valida, false, "prova APP não pode atravessar workspaces");
+  const provaSemAssinatura = { ...provaNovaWorkspace };
+  delete provaSemAssinatura.assinatura;
+  assert.equal(validarProvaAfiliacaoWorkspaceAliExpress(provaSemAssinatura, {
+    clienteId: "workspace_nova_sintetica", credenciais: credenciaisNovaWorkspace, exigirAssinatura: true
+  }).valida, false, "APP sem assinatura própria não pode liberar oferta");
+
+  const workspaceSemIntegracao = await executar({
+    clienteIdExec: "workspace_sem_integracao",
+    semIntegracao: true
+  });
+  assert.equal(workspaceSemIntegracao.resultado.ok, false);
+  assert.equal(workspaceSemIntegracao.resultado.motivo, "integracao_ausente");
 
   const pcConflitante = await executar({ pcExpandido: "https://www.aliexpress.com/item/3256812689379802.html" });
   assert.equal(pcConflitante.resultado.ok, false,

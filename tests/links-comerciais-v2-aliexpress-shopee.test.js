@@ -183,6 +183,44 @@ async function testarAliExpress() {
   assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 1, "APP repetido deve deduplicar por URL");
   assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 1, "PC deve permanecer como papel distinto");
 
+  const tresLinksMesmoProduto = [
+    "MCHOSE com dois caminhos APP",
+    "Por R$ 149,90",
+    "APP:",
+    "https://a.aliexpress.com/_mchoseApp1",
+    "APP:",
+    "https://a.aliexpress.com/_mchoseApp2",
+    "PC:",
+    "https://a.aliexpress.com/_mchosePc1"
+  ].join("\n");
+  const { resultado: resultadoTresLinks } = await importarAliFixture({
+    titulo: "MCHOSE com dois caminhos APP", texto: tresLinksMesmoProduto
+  });
+  assert.strictEqual(resultadoTresLinks.ok, true, "três ocorrências do mesmo produto devem atravessar o adapter");
+  assert.strictEqual(resultadoTresLinks.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 2);
+  assert.strictEqual(resultadoTresLinks.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 1);
+  assert.strictEqual(resultadoTresLinks.metadata.linksClassificados.filter(item => item.renderizavel === true).length, 3);
+
+  const quatroLinksMesmoProduto = [
+    "MACHINIST com dois APP e dois PC",
+    "Por R$ 299,90",
+    "APP:",
+    "https://a.aliexpress.com/_machinistApp1",
+    "APP:",
+    "https://a.aliexpress.com/_machinistApp2",
+    "PC:",
+    "https://a.aliexpress.com/_machinistPc1",
+    "PC:",
+    "https://a.aliexpress.com/_machinistPc2"
+  ].join("\n");
+  const { resultado: resultadoQuatroLinks } = await importarAliFixture({
+    titulo: "MACHINIST com dois APP e dois PC", texto: quatroLinksMesmoProduto
+  });
+  assert.strictEqual(resultadoQuatroLinks.ok, true, "quatro ocorrências do mesmo produto devem atravessar o adapter");
+  assert.strictEqual(resultadoQuatroLinks.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 2);
+  assert.strictEqual(resultadoQuatroLinks.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 2);
+  assert.strictEqual(resultadoQuatroLinks.metadata.linksClassificados.filter(item => item.renderizavel === true).length, 4);
+
   const dareu = [
     "Teclado Magnetico Com Fio DAREU 8Khz, Base De Aluminio",
     "🏷CUPOM: BRGM2 + 1214 Moedas + Cupom Da Loja",

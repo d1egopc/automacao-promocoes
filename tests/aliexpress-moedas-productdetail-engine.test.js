@@ -199,7 +199,7 @@ async function testEvent148876CoinOccurrenceBecomesSafeWithoutPcFabrication() {
   }
 }
 
-async function testUnresolvedCapturedPcStillBlocksIntegralContract() {
+async function testUnresolvedCapturedPcPreservesAuditAndAllowsFactualApp() {
   const calls = [];
   const restore = installFetch([
     { method: "aliexpress.affiliate.productdetail.get", response: detailResponse() },
@@ -217,13 +217,20 @@ async function testUnresolvedCapturedPcStillBlocksIntegralContract() {
       deps: { getIntegracaoCliente: () => ({ credenciais: CREDENTIALS }), importarAliExpress }
     });
 
-    assert.equal(result.ok, false);
-    assert.equal(result.motivo, "afiliacao_workspace_incompleta");
-    const pc = result.metadata.linksClassificados.find(link => link.papelLink === "link_pc");
+    assert.equal(result.ok, true);
+    assert.equal(result.metadata.aproveitamentoParcialApp, true);
+    assert.equal(result.linkAfiliado, "https://s.click.aliexpress.com/e/_COIN_WORKSPACE");
+    assert.equal(result.metadata.linksClassificados.length, 1,
+      "somente a ocorrência APP factual e própria pode seguir ao contrato comercial");
+    assert.equal(result.metadata.linksClassificados[0].papelLink, "link_app");
+    const pc = result.metadata.linksClassificadosCapturados.find(link => link.papelLink === "link_pc");
     assert.ok(pc);
     assert.equal(pc.renderizavel, false);
     assert.equal(pc.urlAfiliada, "");
     assert.notEqual(pc.produtoCanonico, PRODUCT_ID, "PC opaco não herda identidade de Moedas");
+    assert.equal(result.metadata.linksFalhosWorkspace.some(link =>
+      link.papelLink === "link_pc" && link.urlOriginal === PC_ORIGINAL
+    ), true, "PC original e sua falha permanecem auditáveis sem serem publicados");
   } finally {
     restore();
   }
@@ -258,7 +265,7 @@ async function testMismatchedDetailFallsBackOnlyToExactQueryProduct() {
 (async () => {
   await testCoinLandingUsesOfficialProductDetailOnce();
   await testEvent148876CoinOccurrenceBecomesSafeWithoutPcFabrication();
-  await testUnresolvedCapturedPcStillBlocksIntegralContract();
+  await testUnresolvedCapturedPcPreservesAuditAndAllowsFactualApp();
   await testMismatchedDetailFallsBackOnlyToExactQueryProduct();
   console.log("aliexpress-moedas-productdetail-engine.test.js OK");
 })().catch(error => {
