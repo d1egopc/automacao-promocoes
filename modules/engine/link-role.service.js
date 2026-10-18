@@ -80,6 +80,24 @@ function urlEstrutural(candidato = {}) {
   return minusculo(candidato.url || link.url_expandida || link.url_normalizada || link.url_original || "");
 }
 
+// Shortlinks oficiais ainda não provam produto: eles só podem seguir para o
+// importador, que expande com limites de segurança e exige identidade factual.
+// O reconhecimento é estrito para não transformar campanhas de terceiros em
+// candidatos nem ampliar a superfície de SSRF.
+function ehShortlinkAliExpressOficial(url = "") {
+  try {
+    const parsed = new URL(texto(url));
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "a.aliexpress.com") {
+      return /^\/_[a-z0-9_-]{2,128}$/i.test(parsed.pathname);
+    }
+    if (host === "s.click.aliexpress.com") {
+      return /^\/(?:e|s)\/_[a-z0-9_-]{2,128}$/i.test(parsed.pathname);
+    }
+  } catch {}
+  return false;
+}
+
 function decodificarUrlAte3x(valor = "") {
   let atual = texto(valor);
   for (let i = 0; i < 3; i += 1) {
@@ -403,6 +421,10 @@ function classificarAliExpress(candidato = {}, evento = {}) {
 
   if (/category|catId|wholesale/i.test(url)) {
     return { papelLink: PAPEL_LINK.CATEGORIA, motivo: "aliexpress_url_categoria", confianca: "alta" };
+  }
+
+  if (ehShortlinkAliExpressOficial(url)) {
+    return { papelLink: PAPEL_LINK.PRODUTO, motivo: "aliexpress_shortlink_candidato", confianca: "media" };
   }
 
   if (/promotion|promo|campaign|sale|choice|\/e\//i.test(url) && !/a\.aliexpress\.com\/_/i.test(url)) {
