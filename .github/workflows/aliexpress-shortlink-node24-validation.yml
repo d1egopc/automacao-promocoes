@@ -18,6 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 4
 
       - name: Setup Node 24
         uses: actions/setup-node@v4
@@ -32,7 +33,7 @@ jobs:
         run: |
           node --check modules/engine/link-role.service.js
           node --check tests/aliexpress-shortlink-candidate.test.js
-          git diff --check HEAD~2 HEAD
+          git diff --check HEAD~3 HEAD
 
       - name: Four focal regressions
         run: |
