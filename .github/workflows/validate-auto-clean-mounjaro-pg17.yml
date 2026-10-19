@@ -68,12 +68,14 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md index.js modules/engine/auto-clean/auto-clean.service.js modules/engine/universal-history.repository.js tests/auto-clean-postgres-guards.postgres.js tests/historico-definitivo-v1.test.js tests/historico-pre-universal-elegibilidade.test.js tests/optimus-auto-clean-v1-shadow.test.js "
+          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md index.js modules/engine/auto-clean/auto-clean.service.js modules/engine/orchestrator.runner.js modules/engine/universal-history.repository.js tests/auto-clean-postgres-guards.postgres.js tests/auto-clean-recorrente.test.js tests/historico-definitivo-v1.test.js tests/historico-pre-universal-elegibilidade.test.js tests/optimus-auto-clean-v1-shadow.test.js "
           node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check modules/engine/orchestrator.runner.js
           node --check modules/engine/universal-history.repository.js
           node --check index.js
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           node --check tests/auto-clean-postgres-guards.postgres.js
+          node --check tests/auto-clean-recorrente.test.js
           node --check tests/historico-definitivo-v1.test.js
           node --check tests/historico-pre-universal-elegibilidade.test.js
 
@@ -91,6 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           node tests/postgres-jobs-retencao.test.js
+          node tests/auto-clean-recorrente.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
           node tests/auto-clean-gc-relay-phase1.test.js

@@ -19,6 +19,11 @@ const {
 
 const ENV_SHADOW = "OPTIMUS_AUTO_CLEAN_SHADOW";
 const ENV_EXECUTE = "OPTIMUS_AUTO_CLEAN_EXECUTE";
+// Recurring cleanup is an explicit, PostgreSQL-only opt-in.  It deliberately
+// remains separate from OPTIMUS_AUTO_CLEAN_EXECUTE because that legacy flag
+// also permits the filesystem/queue paths.
+const ENV_RECURRING = "OPTIMUS_AUTO_CLEAN_RECURRING";
+const ENV_RECURRING_INTERVAL_MINUTES = "OPTIMUS_AUTO_CLEAN_RECURRING_INTERVAL_MINUTES";
 const DEFAULT_DATA_DIR = process.env.DATA_DIR || "/data";
 const LOTE_LIMITE_PADRAO = 100;
 const LOTES_DB_POR_CICLO_PADRAO = 3;
@@ -29,6 +34,24 @@ const AUTO_CLEAN_OFERTAS_LOCK_ID = 902260735;
 const AUTO_CLEAN_LINKS_LOCK_ID = 902260736;
 const AUTO_CLEAN_EVENTOS_BRUTOS_LOCK_ID = 902260737;
 const AUTO_CLEAN_HISTORICO_LOCK_ID = 902260738;
+const AUTO_CLEAN_ORFAOS_PROCESSAMENTOS_LOCK_ID = 902260739;
+const AUTO_CLEAN_ORFAOS_EVENTOS_LOCK_ID = 902260740;
+const AUTO_CLEAN_RECURRING_INTERVAL_MINUTES_PADRAO = 10;
+const AUTO_CLEAN_RECURRING_MAX_DURATION_MS = 12000;
+const AUTO_CLEAN_RECURRING_LOCK_TIMEOUT_MS = 2000;
+
+let autoCleanRecorrenteRodando = false;
+let autoCleanRecorrenteUltimaExecucaoMs = 0;
+let autoCleanRecorrenteEtapa = 0;
+const AUTO_CLEAN_RECURRING_STAGES = Object.freeze([
+  "jobs",
+  "ofertas",
+  "links",
+  "eventos_brutos",
+  "historico",
+  "processamentos_orfaos",
+  "eventos_comerciais_orfaos"
+]);
 
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
@@ -331,6 +354,22 @@ function autoCleanExecuteAtivo(opcoes = {}) {
   if (opcoes.execute === true) return true;
   if (opcoes.execute === false) return false;
   return flagLigada(process.env[ENV_EXECUTE]);
+}
+
+function autoCleanRecorrenteAtivo(opcoes = {}) {
+  if (opcoes.recorrente === true) return true;
+  if (opcoes.recorrente === false) return false;
+  return flagLigada(process.env[ENV_RECURRING]);
+}
+
+function intervaloAutoCleanRecorrenteMs(opcoes = {}) {
+  const minutos = limitarInteiro(
+    opcoes.intervaloRecorrenteMinutos ?? process.env[ENV_RECURRING_INTERVAL_MINUTES],
+    AUTO_CLEAN_RECURRING_INTERVAL_MINUTES_PADRAO,
+    5,
+    24 * 60
+  );
+  return minutos * 60 * 1000;
 }
 
 function limitarInteiro(valor, padrao, min, max) {
@@ -1320,6 +1359,162 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   }
 }
 
+// Orphan cleanup is intentionally a different stage from root-job cleanup.
+// The former can require a large anti-join on legacy databases, while the
+// bounded root canary must never pay that cost.  Current schema versions use
+// a NOT NULL/FK job_id for processings, so the indexed NULL probe is the only
+// valid orphan shape there; commercial events remain nullable by contract.
+async function executarBatchOrfaosPostgresAutoClean(client, {
+  tipo,
+  loteLimite,
+  horasMinimas = RETENCAO_OPERACIONAL_PADRAO_HORAS
+}) {
+  if (tipo === "processamentos") {
+    const resultado = await client.query(`
+      WITH candidatos AS (
+        SELECT p0.id
+          FROM engine_processamentos p0
+         WHERE p0.job_id IS NULL
+           AND p0.criado_em IS NOT NULL
+           AND p0.criado_em < NOW() - ($1::int * INTERVAL '1 hour')
+           AND LOWER(COALESCE(p0.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
+         ORDER BY p0.criado_em ASC, p0.id ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT $2
+      ), removidos AS (
+        DELETE FROM engine_processamentos p
+         USING candidatos c
+         WHERE p.id = c.id
+           AND p.job_id IS NULL
+        RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
+      )
+      SELECT COUNT(*)::int AS processamentos_orfaos_removidos,
+             COALESCE(SUM(bytes), 0)::bigint AS bytes_processamentos_orfaos
+        FROM removidos`, [horasMinimas, loteLimite]);
+    return resultado.rows[0] || {};
+  }
+
+  if (tipo === "eventos_comerciais") {
+    const resultado = await client.query(`
+      WITH candidatos AS (
+        SELECT e0.id
+          FROM engine_eventos_comerciais e0
+         WHERE e0.job_id IS NULL
+           AND e0.ocorrido_em IS NOT NULL
+           AND e0.ocorrido_em < NOW() - ($1::int * INTERVAL '1 hour')
+           AND COALESCE(e0.metadata->>'terminalOcorridoEm', '') <> ''
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE e0.oferta_id IS NOT NULL
+                AND qi.oferta_id = e0.oferta_id
+           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_ofertas o
+              WHERE o.id = e0.oferta_id
+                AND (
+                  COALESCE(o.atualizada_em, o.criada_em) IS NULL
+                  OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($1::int * INTERVAL '1 hour')
+                  OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
+                )
+           )
+           AND e0.fila_item_id IS NULL
+           AND e0.destino_id IS NULL
+           AND COALESCE(e0.metadata->>'imutavel', 'false') <> 'true'
+           AND LOWER(COALESCE(e0.tipo_evento, '')) !~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
+         ORDER BY e0.ocorrido_em ASC, e0.id ASC
+         FOR UPDATE SKIP LOCKED
+         LIMIT $2
+      ), removidos AS (
+        DELETE FROM engine_eventos_comerciais e
+         USING candidatos c
+         WHERE e.id = c.id
+           AND e.job_id IS NULL
+        RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
+      )
+      SELECT COUNT(*)::int AS eventos_comerciais_orfaos_removidos,
+             COALESCE(SUM(bytes), 0)::bigint AS bytes_eventos_comerciais_orfaos
+        FROM removidos`, [horasMinimas, loteLimite]);
+    return resultado.rows[0] || {};
+  }
+
+  throw new Error("auto_clean_tipo_orfao_invalido");
+}
+
+async function executarOrfaosPostgresAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao({ ...opcoes, canarioPostgres: true });
+  const tipo = opcoes.tipoOrfaos === "eventos_comerciais" ? "eventos_comerciais" : "processamentos";
+  const limiteTotalMutacoes = Number.isFinite(Number(opcoes.limiteTotalMutacoes))
+    ? limitarInteiro(opcoes.limiteTotalMutacoes, LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO, 1, 10000)
+    : LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO;
+  const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
+  const resumo = {
+    origem: tipo === "eventos_comerciais" ? "postgres_eventos_comerciais_orfaos" : "postgres_processamentos_orfaos",
+    tipoRegistro: tipo === "eventos_comerciais" ? "engine_eventos_comerciais" : "engine_processamentos",
+    modo: "execute",
+    loteLimite: politica.loteLimite,
+    limiteTotalMutacoes,
+    leasesPulados: true,
+    processamentosOrfaosRemovidos: 0,
+    eventosComerciaisOrfaosRemovidos: 0,
+    espacoLogicoLiberadoBytes: 0,
+    aplicouMudancas: false
+  };
+
+  if (!pool) return { ...resumo, ok: false, failOpen: true, motivo: "banco_indisponivel" };
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+    await client.query(`SET LOCAL statement_timeout = '${AUTO_CLEAN_RECURRING_MAX_DURATION_MS}ms'`);
+    await client.query(`SET LOCAL lock_timeout = '${AUTO_CLEAN_RECURRING_LOCK_TIMEOUT_MS}ms'`);
+    const lockId = tipo === "eventos_comerciais"
+      ? AUTO_CLEAN_ORFAOS_EVENTOS_LOCK_ID
+      : AUTO_CLEAN_ORFAOS_PROCESSAMENTOS_LOCK_ID;
+    const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [lockId]);
+    if (lock.rows[0]?.locked !== true) {
+      await client.query("ROLLBACK");
+      return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_orfaos_lock_ocupado" };
+    }
+
+    const batch = await executarBatchOrfaosPostgresAutoClean(client, {
+      tipo,
+      loteLimite: politica.loteLimite,
+      horasMinimas: RETENCAO_OPERACIONAL_PADRAO_HORAS
+    });
+    const processamentos = Number(batch.processamentos_orfaos_removidos || 0);
+    const eventos = Number(batch.eventos_comerciais_orfaos_removidos || 0);
+    const mutacoes = processamentos + eventos;
+    if (mutacoes > limiteTotalMutacoes) {
+      await client.query("ROLLBACK");
+      return { ...resumo, ok: false, failOpen: true,
+        motivo: "auto_clean_limite_total_mutacoes_excedido", mutacoesDetectadas: mutacoes };
+    }
+    await client.query("COMMIT");
+    resumo.processamentosOrfaosRemovidos = processamentos;
+    resumo.eventosComerciaisOrfaosRemovidos = eventos;
+    resumo.espacoLogicoLiberadoBytes = Number(batch.bytes_processamentos_orfaos || 0) +
+      Number(batch.bytes_eventos_comerciais_orfaos || 0);
+    resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
+    resumo.aplicouMudancas = mutacoes > 0;
+    return { ...resumo, ok: true, failOpen: false };
+  } catch (erro) {
+    try { await client?.query("ROLLBACK"); } catch (_) {}
+    return {
+      ...resumo,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_orfaos_execute_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      erroMensagem: String(erro?.message || "").slice(0, 180)
+    };
+  } finally {
+    client?.release();
+  }
+}
+
 async function executarBatchHistoricoDefinitivoPostgresAutoClean(client, {
   loteLimite,
   horasRetencao = RETENCAO_HISTORICO_DEFINITIVO_HORAS,
@@ -2257,6 +2452,164 @@ async function executarAutoCleanExecute(opcoes = {}) {
   return resumo;
 }
 
+const AUTO_CLEAN_BOUND_QUERY = Symbol("autoCleanBoundQuery");
+
+function criarPoolAutoCleanComLimites(pool, {
+  statementTimeoutMs = AUTO_CLEAN_RECURRING_MAX_DURATION_MS,
+  lockTimeoutMs = AUTO_CLEAN_RECURRING_LOCK_TIMEOUT_MS
+} = {}) {
+  if (!pool || typeof pool.connect !== "function") return pool;
+  return {
+    connect: async () => {
+      const client = await pool.connect();
+      if (client[AUTO_CLEAN_BOUND_QUERY]) return client;
+      const queryOriginal = client.query.bind(client);
+      client[AUTO_CLEAN_BOUND_QUERY] = true;
+      client.query = (...args) => {
+        const texto = typeof args[0] === "string" ? args[0] : String(args[0]?.text || "");
+        if (/^\s*BEGIN\b/i.test(texto)) {
+          return queryOriginal(...args).then(async resultado => {
+            await queryOriginal(`SET LOCAL statement_timeout = '${Math.max(1000, Math.floor(statementTimeoutMs))}ms'`);
+            await queryOriginal(`SET LOCAL lock_timeout = '${Math.max(100, Math.floor(lockTimeoutMs))}ms'`);
+            return resultado;
+          });
+        }
+        return queryOriginal(...args);
+      };
+      return client;
+    }
+  };
+}
+
+function contarMutacoesAutoClean(resumo = {}) {
+  return [
+    resumo.jobsRemovidos,
+    resumo.processamentosRemovidos,
+    resumo.eventosComerciaisRemovidos,
+    resumo.processamentosOrfaosRemovidos,
+    resumo.eventosComerciaisOrfaosRemovidos,
+    resumo.ofertasRemovidas,
+    resumo.linksRemovidos,
+    resumo.eventosBrutosRemovidos,
+    resumo.historicoItensRemovidos,
+    resumo.historicoTargetsRemovidos
+  ].reduce((total, valor) => total + Number(valor || 0), 0);
+}
+
+async function executarAutoCleanPostgresRecorrenteSeguro(opcoes = {}) {
+  if (!autoCleanRecorrenteAtivo(opcoes)) {
+    return { ok: true, pulado: true, motivo: "recorrente_desligado", aplicouMudancas: false };
+  }
+  const agora = Date.now();
+  const intervaloMs = intervaloAutoCleanRecorrenteMs(opcoes);
+  if (autoCleanRecorrenteRodando) {
+    return { ok: true, pulado: true, motivo: "recorrente_em_execucao", aplicouMudancas: false };
+  }
+  if (autoCleanRecorrenteUltimaExecucaoMs > 0 &&
+      agora - autoCleanRecorrenteUltimaExecucaoMs < intervaloMs) {
+    return { ok: true, pulado: true, motivo: "recorrente_intervalo", aplicouMudancas: false };
+  }
+
+  autoCleanRecorrenteRodando = true;
+  autoCleanRecorrenteUltimaExecucaoMs = agora;
+  const stage = AUTO_CLEAN_RECURRING_STAGES[autoCleanRecorrenteEtapa % AUTO_CLEAN_RECURRING_STAGES.length];
+  autoCleanRecorrenteEtapa += 1;
+  const limiteTotalMutacoes = limitarInteiro(
+    opcoes.limiteTotalMutacoes,
+    LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO,
+    1,
+    LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO
+  );
+  const base = {
+    ...opcoes,
+    canarioPostgres: true,
+    pularExpiracaoLeases: true,
+    loteLimite: 1,
+    lotesDbPorCiclo: 1,
+    limiteTotalMutacoes,
+    incluirOrfaosNoCanario: false,
+    incluirArquivos: false,
+    permitirLimpezaArquivos: false,
+    execute: false,
+    recorrente: true
+  };
+
+  try {
+    let resultado;
+    if (typeof opcoes.executarEstagio === "function") {
+      resultado = await opcoes.executarEstagio(stage, base);
+    } else {
+      const pool = base.pool || (typeof base.getEnginePool === "function" ? base.getEnginePool() : getEnginePool());
+      const poolLimitado = criarPoolAutoCleanComLimites(pool);
+      const args = { ...base, pool: poolLimitado };
+      switch (stage) {
+        case "jobs":
+          resultado = await executarJobsPostgresAutoClean(args);
+          break;
+        case "ofertas":
+          resultado = await executarOfertasPostgresAutoClean(args);
+          break;
+        case "links":
+          resultado = await executarLinksPostgresAutoClean(args);
+          break;
+        case "eventos_brutos":
+          resultado = await executarEventosBrutosPostgresAutoClean(args);
+          break;
+        case "historico":
+          resultado = await executarHistoricoDefinitivoPostgresAutoClean(args);
+          break;
+        case "processamentos_orfaos":
+          resultado = await executarOrfaosPostgresAutoClean({ ...args, tipoOrfaos: "processamentos" });
+          break;
+        case "eventos_comerciais_orfaos":
+          resultado = await executarOrfaosPostgresAutoClean({ ...args, tipoOrfaos: "eventos_comerciais" });
+          break;
+        default:
+          throw new Error("auto_clean_stage_invalido");
+      }
+    }
+    const mutacoes = contarMutacoesAutoClean(resultado);
+    const resumo = {
+      origem: "auto_clean_recorrente",
+      modo: "postgres_only",
+      stage,
+      ok: resultado?.ok !== false && mutacoes <= limiteTotalMutacoes,
+      failOpen: resultado?.ok === false || mutacoes > limiteTotalMutacoes,
+      motivo: mutacoes > limiteTotalMutacoes ? "auto_clean_limite_total_mutacoes_excedido" : (resultado?.motivo || ""),
+      mutacoes,
+      limiteTotalMutacoes,
+      duracaoMs: Date.now() - agora,
+      leasesPulados: true,
+      arquivosExecutados: false,
+      filaJsonRegravada: false,
+      resultado
+    };
+    logAutoClean("[OPTIMUS-AUTO-CLEAN-RECORRENTE]", resumo, opcoes.logger || console);
+    return resumo;
+  } catch (erro) {
+    const resumo = {
+      origem: "auto_clean_recorrente",
+      modo: "postgres_only",
+      stage,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_recorrente_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      erroMensagem: String(erro?.message || "").slice(0, 180),
+      mutacoes: 0,
+      limiteTotalMutacoes,
+      duracaoMs: Date.now() - agora,
+      leasesPulados: true,
+      arquivosExecutados: false,
+      filaJsonRegravada: false
+    };
+    logAutoClean("[OPTIMUS-AUTO-CLEAN-RECORRENTE-ERRO]", resumo, opcoes.logger || console);
+    return resumo;
+  } finally {
+    autoCleanRecorrenteRodando = false;
+  }
+}
+
 async function executarAutoCleanShadow(opcoes = {}) {
   const inicio = Date.now();
   const politica = criarPoliticaRetencao(opcoes);
@@ -2351,6 +2704,7 @@ async function executarAutoCleanShadowSeguro(opcoes = {}) {
 module.exports = {
   ENV_SHADOW,
   ENV_EXECUTE,
+  ENV_RECURRING,
   TTL_PADRAO,
   LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO,
   RETENCAO_HISTORICO_DEFINITIVO_HORAS,
@@ -2359,12 +2713,16 @@ module.exports = {
   flagDesligada,
   autoCleanShadowAtivo,
   autoCleanExecuteAtivo,
+  autoCleanRecorrenteAtivo,
+  intervaloAutoCleanRecorrenteMs,
   criarPoliticaRetencao,
   avaliarRegistroAutoClean,
   executarAutoCleanShadow,
   executarAutoCleanShadowSeguro,
   executarAutoCleanExecute,
+  executarAutoCleanPostgresRecorrenteSeguro,
   executarJobsPostgresAutoClean,
+  executarOrfaosPostgresAutoClean,
   executarHistoricoDefinitivoPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,

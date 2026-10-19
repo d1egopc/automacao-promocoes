@@ -18,7 +18,9 @@ const autoGateShadow = createAutoGateShadow();
 const { criarMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
 const {
   autoCleanShadowAtivo,
-  executarAutoCleanShadowSeguro
+  executarAutoCleanShadowSeguro,
+  autoCleanRecorrenteAtivo,
+  executarAutoCleanPostgresRecorrenteSeguro
 } = require("./auto-clean/auto-clean.service");
 const {
   criarMedidorEngineMemoryStage,
@@ -430,6 +432,21 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
       }, { rodadaId, medidorCiclo });
+    }
+
+    // The recurring cleaner is deliberately detached from the commercial
+    // cycle: a slow/failed bounded PostgreSQL stage must never delay claims,
+    // imports, distributions or WhatsApp sends.  It is opt-in through its
+    // own flag and internally throttled/serialized by the service.
+    if (autoCleanRecorrenteAtivo()) {
+      void executarAutoCleanPostgresRecorrenteSeguro({
+        logger: console
+      }).catch((erro) => {
+        console.log("[OPTIMUS-AUTO-CLEAN-RECORRENTE-ERRO]", {
+          etapa: "agendamento",
+          erro: erro?.message || "auto_clean_recorrente_falhou"
+        });
+      });
     }
 
     let inicioFornecedorMs = Date.now();

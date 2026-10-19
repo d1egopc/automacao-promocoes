@@ -23,6 +23,7 @@ const { Pool } = require("pg");
 const {
   executarAutoCleanExecute,
   executarJobsPostgresAutoClean,
+  executarOrfaosPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,
   executarEventosBrutosPostgresAutoClean,
@@ -446,6 +447,46 @@ async function main() {
     assert.ok(canaryDurationMs < 5000,
       `canario bounded excedeu 5s com backlog sintetico (${Math.round(canaryDurationMs)}ms)`);
     checkpoint(`jobs:canary-bounded:${Math.round(canaryDurationMs)}ms`);
+
+    const orfaosAntes = Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL"
+    )).rows[0].n);
+    const orphanCycleStartedAt = performance.now();
+    const orphanCycle = await executarOrfaosPostgresAutoClean({
+      pool,
+      tipoOrfaos: "processamentos",
+      canarioPostgres: true,
+      pularExpiracaoLeases: true
+    });
+    const orphanCycleDurationMs = performance.now() - orphanCycleStartedAt;
+    assert.strictEqual(orphanCycle.ok, true);
+    assert.strictEqual(orphanCycle.leasesPulados, true);
+    assert.strictEqual(orphanCycle.processamentosOrfaosRemovidos, 1,
+      "ciclo proprio remove somente um processamento orfao");
+    assert.strictEqual(Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL"
+    )).rows[0].n), orfaosAntes - 1);
+    assert.ok(orphanCycleDurationMs < 5000,
+      `ciclo de orfaos excedeu 5s (${Math.round(orphanCycleDurationMs)}ms)`);
+    checkpoint(`jobs:orphan-cycle:${Math.round(orphanCycleDurationMs)}ms`);
+
+    const eventoOrfaoRecorrente = (await pool.query(
+      `INSERT INTO engine_eventos_comerciais (tipo_evento,job_id,ocorrido_em,metadata)
+       VALUES ('job_expirada_operacional',NULL,$1,$2::jsonb) RETURNING id`,
+      [old, JSON.stringify({ terminalOcorridoEm: old })]
+    )).rows[0].id;
+    const eventoOrfaoCycle = await executarOrfaosPostgresAutoClean({
+      pool,
+      tipoOrfaos: "eventos_comerciais",
+      canarioPostgres: true,
+      pularExpiracaoLeases: true
+    });
+    assert.strictEqual(eventoOrfaoCycle.ok, true);
+    assert.strictEqual(eventoOrfaoCycle.eventosComerciaisOrfaosRemovidos, 1);
+    assert.strictEqual(Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_eventos_comerciais WHERE id=$1", [eventoOrfaoRecorrente]
+    )).rows[0].n), 0);
+    checkpoint("commercial-events:orphan-cycle:done");
 
     const ofertaLivre = (await pool.query(
       `INSERT INTO engine_ofertas (status,criada_em,atualizada_em) VALUES ('erro_final',$1,$1) RETURNING id`, [old]
