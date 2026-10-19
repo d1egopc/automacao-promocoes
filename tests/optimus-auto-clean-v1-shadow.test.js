@@ -498,12 +498,18 @@ async function testarArquivosProtegidosEShadow() {
   tocarArquivo(path.join(dir, "logs", "app.log"), "linha antiga", AGORA - 20 * 24 * 60 * 60 * 1000);
   tocarArquivo(path.join(dir, "cache", "imagem.tmp"), "cache", AGORA - 5 * 24 * 60 * 60 * 1000);
   tocarArquivo(path.join(dir, "sessions", "auth", "creds.json"), "segredo", AGORA - 60 * 24 * 60 * 60 * 1000);
+  tocarArquivo(path.join(dir, "backups", "backend.sql.bak"), "backup", AGORA - 90 * 24 * 60 * 60 * 1000);
+  tocarArquivo(path.join(dir, "rollback", "backend-image.tar"), "rollback", AGORA - 90 * 24 * 60 * 60 * 1000);
 
   const resumos = inventariarArquivosPorCategoria({ dataDir: dir, agoraMs: AGORA, loteLimite: 100 });
   const logs = resumos.find(item => item.origem === "logs_persistidos");
   const temporarios = resumos.find(item => item.origem === "temporarios");
+  const backups = resumos.find(item => item.origem === "backups_operacionais");
   assert.strictEqual(logs.elegiveis, 1);
   assert.strictEqual(temporarios.elegiveis, 1);
+  assert.strictEqual(backups.elegiveis, 0, "backup/rollback nunca entra na elegibilidade");
+  assert.strictEqual(backups.protegidos, 2, "backup/rollback permanece protegido no inventario");
+  assert.strictEqual(backups.motivos.backup_protegido, 2);
   assert.ok(!JSON.stringify(resumos).includes("creds.json"), "sessao/auth nao entra no inventario de limpeza");
 }
 
@@ -578,7 +584,7 @@ async function testarExecutePostgresControlado() {
     queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } }),
     loteLimite: 2,
     lotesDbPorCiclo: 3,
-    horasMinimas: 12
+    horasMinimas: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -597,7 +603,7 @@ async function testarExecutePostgresControlado() {
     deleteSql.sql.indexOf("processamentos_removidos") < deleteSql.sql.indexOf("jobs_removidos"),
     "dependencias saem antes do job principal"
   );
-  assert.strictEqual(deleteSql.params[1], 12);
+  assert.strictEqual(deleteSql.params[1], 168);
   assert.strictEqual(deleteSql.params[2], 2);
   assert.ok(deleteSql.params[0].includes("expirada_operacional"));
   assert.ok(deleteSql.params[0].includes("oferta_criada"));
@@ -621,7 +627,7 @@ async function testarExecuteOfertasPostgresD1() {
     pool,
     loteLimite: 2,
     lotesDbPorCiclo: 3,
-    horasMinimasOfertas: 12
+    horasMinimasOfertas: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -646,10 +652,10 @@ async function testarExecuteOfertasPostgresD1() {
   assert.ok(deleteFinalSql.includes("NOT EXISTS"), "DELETE final deve revalidar ausencia de job vivo");
   assert.ok(deleteFinalSql.includes("j.oferta_id = o.id"), "DELETE final protege corrida por oferta_id");
   assert.ok(deleteFinalSql.includes("j.evento_id = o.evento_id"), "DELETE final protege corrida por evento_id");
-  assert.ok(deleteFinalSql.includes("COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >7d");
   assert.ok(deleteFinalSql.includes("retidaTerminal"), "DELETE final revalida terminalidade");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 2, "CTE e DELETE final precisam proteger job vivo");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.strictEqual(deleteSql.params[2], 2);
   assert.ok(deleteSql.params[1].includes("pendente"));
   assert.ok(deleteSql.params[1].includes("processando"));
@@ -678,7 +684,7 @@ async function testarCorridaOfertasPostgresD1Revalidada() {
     pool: { async connect() { return client; } },
     loteLimite: 10,
     lotesDbPorCiclo: 1,
-    horasMinimasOfertas: 12
+    horasMinimasOfertas: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -697,7 +703,7 @@ async function testarExecuteLinksPostgresD2() {
     pool,
     loteLimite: 2,
     lotesDbPorCiclo: 3,
-    horasMinimasLinks: 12
+    horasMinimasLinks: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -716,14 +722,14 @@ async function testarExecuteLinksPostgresD2() {
   assert.ok(deleteSql.sql.includes("FOR UPDATE SKIP LOCKED"), "D2 usa skip locked");
 
   const deleteFinalSql = deleteSql.sql.slice(deleteSql.sql.indexOf("DELETE FROM engine_links"));
-  assert.ok(deleteFinalSql.includes("l.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("l.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >7d");
   assert.ok(deleteFinalSql.includes("j.evento_id = l.evento_id"), "DELETE final protege job vivo pelo evento");
   assert.ok(deleteFinalSql.includes("o.link_id = l.id"), "DELETE final protege oferta por link_id");
   assert.ok(deleteFinalSql.includes("o.evento_id = l.evento_id"), "DELETE final protege oferta por evento_id");
   assert.ok(deleteFinalSql.includes("retidaTerminal"), "DELETE final reconhece terminalidade comprovada");
   assert.ok(deleteFinalSql.includes("OR NOT ("), "oferta ambigua/nao terminal bloqueia link");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 4, "CTE e DELETE final precisam revalidar dependencias");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.ok(deleteSql.params[1].includes("pendente"));
   assert.ok(deleteSql.params[1].includes("retry"));
   assert.strictEqual(deleteSql.params[2], 2);
@@ -753,7 +759,7 @@ async function testarCorridaLinksPostgresD2Revalidada() {
     pool: { async connect() { return client; } },
     loteLimite: 10,
     lotesDbPorCiclo: 1,
-    horasMinimasLinks: 12
+    horasMinimasLinks: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -772,7 +778,7 @@ async function testarExecuteEventosBrutosPostgresD3() {
     pool,
     loteLimite: 2,
     lotesDbPorCiclo: 3,
-    horasMinimasEventosBrutos: 12
+    horasMinimasEventosBrutos: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -791,12 +797,12 @@ async function testarExecuteEventosBrutosPostgresD3() {
   assert.ok(deleteSql.sql.includes("FOR UPDATE SKIP LOCKED"), "D3 usa skip locked");
 
   const deleteFinalSql = deleteSql.sql.slice(deleteSql.sql.indexOf("DELETE FROM engine_eventos_brutos"));
-  assert.ok(deleteFinalSql.includes("e.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("e.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >7d");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)"), "DELETE final protege qualquer job filho");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)"), "DELETE final protege qualquer oferta filha");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)"), "DELETE final protege qualquer link filho");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 6, "CTE e DELETE final precisam revalidar filhos");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.strictEqual(deleteSql.params[1], 2);
 }
 
@@ -823,7 +829,7 @@ async function testarCorridaEventosBrutosPostgresD3Revalidada() {
     pool: { async connect() { return client; } },
     loteLimite: 10,
     lotesDbPorCiclo: 1,
-    horasMinimasEventosBrutos: 12
+    horasMinimasEventosBrutos: 168
   });
 
   assert.strictEqual(resumo.ok, true);
@@ -910,10 +916,14 @@ async function testarExecuteArquivosProtegePermanentes() {
   const cacheAntigo = path.join(dir, "cache", "thumb.tmp");
   const authAntigo = path.join(dir, "auth", "sessao", "creds.json");
   const configAntiga = path.join(dir, "clientes", "user_config", "config.json");
+  const backupAntigo = path.join(dir, "backup", "db.sql.bak");
+  const rollbackAntigo = path.join(dir, "rollback", "backend.tar");
   tocarArquivo(logAntigo, "log antigo", AGORA - 2 * 24 * 60 * 60 * 1000);
   tocarArquivo(cacheAntigo, "cache antigo", AGORA - 2 * 24 * 60 * 60 * 1000);
   tocarArquivo(authAntigo, "segredo", AGORA - 30 * 24 * 60 * 60 * 1000);
   tocarArquivo(configAntiga, "{}", AGORA - 30 * 24 * 60 * 60 * 1000);
+  tocarArquivo(backupAntigo, "backup", AGORA - 30 * 24 * 60 * 60 * 1000);
+  tocarArquivo(rollbackAntigo, "rollback", AGORA - 30 * 24 * 60 * 60 * 1000);
 
   const resumo = executarArquivosAutoClean({ dataDir: dir, agoraMs: AGORA, loteLimite: 10 });
   assert.strictEqual(resumo.arquivosRemovidos, 2);
@@ -921,6 +931,8 @@ async function testarExecuteArquivosProtegePermanentes() {
   assert.strictEqual(fs.existsSync(cacheAntigo), false);
   assert.strictEqual(fs.existsSync(authAntigo), true);
   assert.strictEqual(fs.existsSync(configAntiga), true);
+  assert.strictEqual(fs.existsSync(backupAntigo), true, "backup nao pode ser removido");
+  assert.strictEqual(fs.existsSync(rollbackAntigo), true, "rollback nao pode ser removido");
 }
 
 async function testarRotacaoPersistenteEErroIsolado() {
@@ -998,6 +1010,62 @@ async function testarExecuteUniversalPorFlag() {
   assert.ok(!logs.join("\n").includes("payload"));
 }
 
+async function testarGuardasFilaCanarioEOrfaos() {
+  const politica = criarPoliticaRetencao({ canarioPostgres: true });
+  assert.strictEqual(politica.loteLimite, 1, "canario PostgreSQL usa lote 1");
+  assert.strictEqual(politica.lotesDbPorCiclo, 1, "canario PostgreSQL usa um lote por ciclo");
+
+  const { pool, chamadas } = criarPoolJobsAutoClean([{ jobs: 0 }]);
+  const resumo = await executarJobsPostgresAutoClean({
+    pool,
+    canarioPostgres: true,
+    queryEngine: async () => ({ ok: true, resultado: { rows: [{ jobs_expirados: "0" }] } })
+  });
+  assert.strictEqual(resumo.horasMinimas, 168, "execucao sem override respeita retencao operacional de 7 dias");
+  const sql = chamadas.find(chamada => /WITH candidatos/i.test(chamada.sql)).sql;
+  assert.ok(sql.includes("engine_universal_queue_items"), "job com referencia de fila nunca e candidato");
+  assert.ok(sql.includes("p.criado_em"), "processamento precisa provar idade terminal");
+  assert.ok(sql.includes("fila_item_id") && sql.includes("destino_id"), "evento comercial com prova de fila/destino fica protegido");
+  assert.ok(sql.includes("terminalOcorridoEm"), "evento comercial sem marco terminal permanece protegido");
+  assert.ok(sql.includes("processamentos_orfaos_removidos") && sql.includes("LIMIT $3"), "orfaos respeitam o lote do canario");
+  assert.strictEqual(chamadas.find(chamada => /WITH candidatos/i.test(chamada.sql)).params[2], 1);
+
+  const canario = await executarAutoCleanExecute({
+    canarioPostgres: true,
+    incluirArquivos: true,
+    pool: criarPoolJobsAutoClean([{ jobs: 0 }]).pool,
+    queryEngine: async () => ({ ok: true, resultado: { rows: [] } })
+  });
+  assert.ok(canario.etapas.every(etapa => String(etapa.origem || "").startsWith("postgres_")),
+    "canario PostgreSQL nao executa fila.json, GC ou arquivos");
+}
+
+async function testarRollbackPostgresFailOpen() {
+  let rollbackExecutado = false;
+  const client = {
+    async query(sql) {
+      if (sql === "BEGIN" || sql === "COMMIT") return { rows: [] };
+      if (sql === "ROLLBACK") {
+        rollbackExecutado = true;
+        return { rows: [] };
+      }
+      if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
+      if (/WITH candidatos/i.test(sql)) throw new Error("falha_sintetica_no_batch");
+      throw new Error(`query inesperada: ${sql}`);
+    },
+    release() {}
+  };
+  const resumo = await executarJobsPostgresAutoClean({
+    pool: { async connect() { return client; } },
+    queryEngine: async () => ({ ok: true, resultado: { rows: [] } }),
+    canarioPostgres: true
+  });
+  assert.strictEqual(resumo.ok, false);
+  assert.strictEqual(resumo.failOpen, true);
+  assert.strictEqual(resumo.aplicouMudancas, false);
+  assert.strictEqual(rollbackExecutado, true, "falha do batch sempre faz rollback da transacao");
+}
+
 async function testarFailOpenEFlags() {
   const shadowAnterior = process.env.OPTIMUS_AUTO_CLEAN_SHADOW;
   const executeAnterior = process.env.OPTIMUS_AUTO_CLEAN_EXECUTE;
@@ -1058,6 +1126,8 @@ async function testarFailOpenEFlags() {
   await testarCorridaEventosBrutosPostgresD3Revalidada();
   await testarOrdemExecuteD1D2D3();
   await testarExecutePostgresFailOpen();
+  await testarGuardasFilaCanarioEOrfaos();
+  await testarRollbackPostgresFailOpen();
   await testarExecuteFilaJsonSeguro();
   await testarExecuteArquivosProtegePermanentes();
   await testarRotacaoPersistenteEErroIsolado();

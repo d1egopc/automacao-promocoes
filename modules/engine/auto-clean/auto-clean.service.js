@@ -44,6 +44,13 @@ const TTL_PADRAO = Object.freeze({
   snapshotsMs: 30 * 24 * 60 * 60 * 1000
 });
 
+const RETENCAO_OPERACIONAL_PADRAO_HORAS = 7 * 24;
+const STATUS_PROCESSAMENTO_TERMINAL_SQL = [
+  "ok", "concluido", "concluida", "finalizado", "finalizada", "erro",
+  "erro_final", "erro_permanente", "falha", "falha_final", "cancelado",
+  "cancelada", "expirado", "expirada", "descartado", "descartada"
+].map(status => `'${status}'`).join(",");
+
 const STATUS_FILA_VIVO = filaHistoricoPolicy.STATUS_VIVO;
 const STATUS_FILA_PROCESSANDO = filaHistoricoPolicy.STATUS_PROCESSANDO;
 const STATUS_FILA_ENVIADO = filaHistoricoPolicy.STATUS_ENVIADO;
@@ -328,13 +335,18 @@ function criarPoliticaRetencao(opcoes = {}) {
   if (opcoes.leaseMinutos !== undefined) {
     ttl.jobsAtivosLeaseMs = minutosLeaseJobsAtivos(opcoes.leaseMinutos) * 60 * 1000;
   }
-  return {
+  const politica = {
     ttl,
     loteLimite: limitarInteiro(opcoes.loteLimite, LOTE_LIMITE_PADRAO, 1, LOTE_LIMITE_PADRAO),
     lotesDbPorCiclo: limitarInteiro(opcoes.lotesDbPorCiclo, LOTES_DB_POR_CICLO_PADRAO, 1, 10),
     workspacesFilaPorCiclo: limitarInteiro(opcoes.workspacesFilaPorCiclo, WORKSPACES_FILA_POR_CICLO_PADRAO, 1, 50),
     dataDir: opcoes.dataDir || DEFAULT_DATA_DIR
   };
+  if (opcoes.canarioPostgres === true) {
+    politica.loteLimite = 1;
+    politica.lotesDbPorCiclo = 1;
+  }
+  return politica;
 }
 
 function normalizarStatus(valor = "") {
@@ -407,6 +419,12 @@ function avaliarRegistroAutoClean(registro = {}, opcoes = {}) {
   const idadeMs = Number.isFinite(Number(registro.idadeMs)) ? Number(registro.idadeMs) : idadeMsDesde(registro.referenciaTemporal, agoraMs);
   const ttlMs = ttlPorRegistro({ ...registro, status }, politica);
   const motivoProtecao = motivoProtecaoBase(registro);
+
+  // Backups and rollback artifacts are recovery material, never retention
+  // candidates. They must not be mapped to the generic temporary policy.
+  if (registro.tipoRegistro === "backups_operacionais") {
+    return { ...registro, status, idadeMs, ttlMs: null, elegivel: false, motivo: "backup_protegido", aplicouMudancas: false };
+  }
 
   if (motivoProtecao) {
     return { ...registro, status, idadeMs, ttlMs, elegivel: false, motivo: motivoProtecao, aplicouMudancas: false };
@@ -502,12 +520,16 @@ function sanitizarLogPayload(payload = {}) {
     "politicaCentral",
     "lotes",
     "limiteLotesPorCiclo",
+    "horasMinimas",
+    "horasRetencaoComercial",
     "jobsRemovidos",
     "ofertasRemovidas",
     "linksRemovidos",
     "eventosBrutosRemovidos",
     "processamentosRemovidos",
+    "processamentosOrfaosRemovidos",
     "eventosComerciaisRemovidos",
+    "eventosComerciaisOrfaosRemovidos",
     "arquivosRemovidos",
     "filasRegravadas",
     "workspacesProcessados",
@@ -567,7 +589,7 @@ function categoriaArquivoAutoClean(dataDir, caminho, stats) {
   if (rel.startsWith("reset-esteiras/") || rel.startsWith("reset-operacional/") || rel.includes("snapshot")) return "snapshots_reset";
   if (EXT_LOG.has(ext) || rel.includes("log")) return "logs_persistidos";
   if (EXT_TEMP.has(ext)) return "temporarios";
-  if (EXT_BACKUP.has(ext) || rel.includes("backup") || rel.includes("bak")) return "backups_operacionais";
+  if (EXT_BACKUP.has(ext) || rel.includes("backup") || rel.includes("bak") || rel.includes("rollback")) return "backups_operacionais";
   if (rel.includes("cache")) return "caches";
   if (EXT_MIDIA.has(ext) || rel.includes("image") || rel.includes("imagem") || rel.includes("media") || rel.includes("midia")) return "midias_referencia_pendente";
   if (stats?.isFile?.()) return "arquivos_auditoria";
@@ -614,7 +636,7 @@ function inventariarArquivosPorCategoria(opcoes = {}) {
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const registro = avaliarRegistroAutoClean({
       origem: categoria,
-      tipoRegistro: categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
+      tipoRegistro,
       status: "arquivo",
       referenciaTemporal: new Date(stats.mtimeMs || stats.ctimeMs || agoraMs).toISOString(),
       bytesEstimados: Number(stats.size || 0),
@@ -947,27 +969,152 @@ async function inventariarPostgres(opcoes = {}) {
   return origens;
 }
 
-async function executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas }) {
+async function executarBatchJobsPostgresAutoClean(client, {
+  loteLimite,
+  horasMinimas,
+  horasRetencaoComercial = RETENCAO_OPERACIONAL_PADRAO_HORAS
+}) {
   const resultado = await client.query(
     `WITH candidatos AS (
        SELECT id
          FROM engine_jobs_cliente
         WHERE status = ANY($1::text[])
-          AND criado_em IS NOT NULL
-          AND criado_em < NOW() - (GREATEST($2::int, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
-        ORDER BY criado_em ASC, id ASC
+          AND COALESCE(atualizado_em, criado_em) IS NOT NULL
+          AND COALESCE(atualizado_em, criado_em) < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+          AND NOT EXISTS (
+            SELECT 1
+              FROM engine_universal_queue_items qi
+             WHERE qi.job_id = engine_jobs_cliente.id
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM engine_processamentos p
+             WHERE p.job_id = engine_jobs_cliente.id
+               AND (
+                 p.criado_em IS NULL
+                 OR p.criado_em >= NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+                 OR LOWER(COALESCE(p.status, '')) NOT IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
+               )
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM engine_eventos_comerciais c
+             WHERE c.job_id = engine_jobs_cliente.id
+               AND (
+                 c.ocorrido_em IS NULL
+                 OR c.ocorrido_em >= NOW() - ($4::int * INTERVAL '1 hour')
+                 OR c.fila_item_id IS NOT NULL
+                 OR c.destino_id IS NOT NULL
+                 OR EXISTS (
+                   SELECT 1
+                     FROM engine_ofertas o
+                    WHERE o.id = c.oferta_id
+                      AND (
+                        COALESCE(o.atualizada_em, o.criada_em) IS NULL
+                        OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($4::int * INTERVAL '1 hour')
+                        OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
+                      )
+                 )
+                  OR EXISTS (
+                    SELECT 1
+                      FROM engine_universal_queue_items qi
+                     WHERE qi.job_id = c.job_id
+                        OR (c.oferta_id IS NOT NULL AND qi.oferta_id = c.oferta_id)
+                  )
+                  OR COALESCE(c.metadata->>'terminalOcorridoEm', '') = ''
+                 OR COALESCE(c.metadata->>'imutavel', 'false') = 'true'
+                 OR LOWER(COALESCE(c.tipo_evento, '')) ~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
+               )
+          )
+        ORDER BY COALESCE(atualizado_em, criado_em) ASC, id ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $3
      ), eventos_removidos AS (
        DELETE FROM engine_eventos_comerciais e
         USING candidatos c
         WHERE e.job_id = c.id
+           AND e.ocorrido_em IS NOT NULL
+           AND e.ocorrido_em < NOW() - ($4::int * INTERVAL '1 hour')
+           AND e.fila_item_id IS NULL
+           AND e.destino_id IS NULL
+            AND COALESCE(e.metadata->>'terminalOcorridoEm', '') <> ''
+            AND NOT EXISTS (
+              SELECT 1
+                FROM engine_universal_queue_items qi
+               WHERE qi.job_id = e.job_id
+                  OR (e.oferta_id IS NOT NULL AND qi.oferta_id = e.oferta_id)
+            )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_ofertas o
+              WHERE o.id = e.oferta_id
+                AND (
+                  COALESCE(o.atualizada_em, o.criada_em) IS NULL
+                  OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($4::int * INTERVAL '1 hour')
+                  OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
+                )
+           )
+           AND COALESCE(e.metadata->>'imutavel', 'false') <> 'true'
+           AND LOWER(COALESCE(e.tipo_evento, '')) !~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
         RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
      ), processamentos_removidos AS (
        DELETE FROM engine_processamentos p
         USING candidatos c
         WHERE p.job_id = c.id
+           AND p.criado_em IS NOT NULL
+           AND p.criado_em < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+           AND LOWER(COALESCE(p.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
         RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
+      ), processamentos_orfaos_removidos AS (
+        DELETE FROM engine_processamentos p
+         USING (
+           SELECT p0.id
+             FROM engine_processamentos p0
+            WHERE p0.criado_em IS NOT NULL
+              AND p0.criado_em < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+              AND LOWER(COALESCE(p0.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
+              AND NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j0 WHERE j0.id = p0.job_id)
+            ORDER BY p0.criado_em ASC, p0.id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT $3
+         ) orphan_candidates
+         WHERE p.id = orphan_candidates.id
+        RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
+      ), eventos_comerciais_orfaos_removidos AS (
+        DELETE FROM engine_eventos_comerciais e
+         USING (
+           SELECT e0.id
+             FROM engine_eventos_comerciais e0
+            WHERE e0.ocorrido_em IS NOT NULL
+              AND e0.ocorrido_em < NOW() - ($4::int * INTERVAL '1 hour')
+              AND e0.job_id IS NULL
+              AND COALESCE(e0.metadata->>'terminalOcorridoEm', '') <> ''
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM engine_universal_queue_items qi
+                 WHERE qi.job_id = e0.job_id
+                    OR (e0.oferta_id IS NOT NULL AND qi.oferta_id = e0.oferta_id)
+              )
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM engine_ofertas o
+                 WHERE o.id = e0.oferta_id
+                   AND (
+                     COALESCE(o.atualizada_em, o.criada_em) IS NULL
+                     OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($4::int * INTERVAL '1 hour')
+                     OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
+                   )
+              )
+              AND e0.fila_item_id IS NULL
+              AND e0.destino_id IS NULL
+              AND COALESCE(e0.metadata->>'imutavel', 'false') <> 'true'
+              AND LOWER(COALESCE(e0.tipo_evento, '')) !~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
+            ORDER BY e0.ocorrido_em ASC, e0.id ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT $3
+         ) orphan_candidates
+         WHERE e.id = orphan_candidates.id
+        RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
      ), jobs_removidos AS (
        DELETE FROM engine_jobs_cliente j
         USING candidatos c
@@ -978,10 +1125,14 @@ async function executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMin
        (SELECT COUNT(*)::int FROM jobs_removidos) AS jobs_removidos,
        (SELECT COUNT(*)::int FROM processamentos_removidos) AS processamentos_removidos,
        (SELECT COUNT(*)::int FROM eventos_removidos) AS eventos_comerciais_removidos,
+        (SELECT COUNT(*)::int FROM processamentos_orfaos_removidos) AS processamentos_orfaos_removidos,
+        (SELECT COUNT(*)::int FROM eventos_comerciais_orfaos_removidos) AS eventos_comerciais_orfaos_removidos,
        COALESCE((SELECT SUM(bytes) FROM jobs_removidos), 0)::bigint AS bytes_jobs,
        COALESCE((SELECT SUM(bytes) FROM processamentos_removidos), 0)::bigint AS bytes_processamentos,
-       COALESCE((SELECT SUM(bytes) FROM eventos_removidos), 0)::bigint AS bytes_eventos_comerciais`,
-    [STATUS_JOB_REMOVIVEL_AUTO_CLEAN, horasMinimas, loteLimite]
+        COALESCE((SELECT SUM(bytes) FROM eventos_removidos), 0)::bigint AS bytes_eventos_comerciais,
+        COALESCE((SELECT SUM(bytes) FROM processamentos_orfaos_removidos), 0)::bigint AS bytes_processamentos_orfaos,
+        COALESCE((SELECT SUM(bytes) FROM eventos_comerciais_orfaos_removidos), 0)::bigint AS bytes_eventos_comerciais_orfaos`,
+    [STATUS_JOB_REMOVIVEL_AUTO_CLEAN, horasMinimas, loteLimite, horasRetencaoComercial]
   );
 
   return resultado.rows[0] || {};
@@ -991,7 +1142,16 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
-  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimas, 12, 12, 168));
+  const horasMinimas = opcoes.horasMinimas === undefined
+    ? RETENCAO_OPERACIONAL_PADRAO_HORAS
+    : Math.max(
+      RETENCAO_OPERACIONAL_PADRAO_HORAS,
+      limitarInteiro(opcoes.horasMinimas, RETENCAO_OPERACIONAL_PADRAO_HORAS, RETENCAO_OPERACIONAL_PADRAO_HORAS, 168)
+    );
+  const horasRetencaoComercial = Math.max(
+    RETENCAO_OPERACIONAL_PADRAO_HORAS,
+    limitarInteiro(opcoes.horasRetencaoComercial, RETENCAO_OPERACIONAL_PADRAO_HORAS, RETENCAO_OPERACIONAL_PADRAO_HORAS, 365 * 24)
+  );
   const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
   const resumo = {
     origem: "postgres_jobs",
@@ -1000,9 +1160,13 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     lotes: 0,
     limiteLotesPorCiclo,
     loteLimite,
+    horasMinimas,
+    horasRetencaoComercial,
     jobsRemovidos: 0,
     processamentosRemovidos: 0,
     eventosComerciaisRemovidos: 0,
+    processamentosOrfaosRemovidos: 0,
+    eventosComerciaisOrfaosRemovidos: 0,
     jobsExpiradosLease: 0,
     processandoExpiradosLease: 0,
     importandoExpiradosLease: 0,
@@ -1040,20 +1204,26 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
           return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_jobs_lock_ocupado" };
         }
 
-        const batch = await executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas });
+         const batch = await executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas, horasRetencaoComercial });
         await client.query("COMMIT");
 
         const jobsRemovidos = Number(batch.jobs_removidos || 0);
-        if (!jobsRemovidos) break;
+        const processamentosOrfaosRemovidos = Number(batch.processamentos_orfaos_removidos || 0);
+        const eventosComerciaisOrfaosRemovidos = Number(batch.eventos_comerciais_orfaos_removidos || 0);
+        if (!jobsRemovidos && !processamentosOrfaosRemovidos && !eventosComerciaisOrfaosRemovidos) break;
 
         resumo.lotes += 1;
         resumo.jobsRemovidos += jobsRemovidos;
         resumo.processamentosRemovidos += Number(batch.processamentos_removidos || 0);
         resumo.eventosComerciaisRemovidos += Number(batch.eventos_comerciais_removidos || 0);
+        resumo.processamentosOrfaosRemovidos += Number(batch.processamentos_orfaos_removidos || 0);
+        resumo.eventosComerciaisOrfaosRemovidos += Number(batch.eventos_comerciais_orfaos_removidos || 0);
         resumo.espacoLogicoLiberadoBytes +=
           Number(batch.bytes_jobs || 0) +
           Number(batch.bytes_processamentos || 0) +
-          Number(batch.bytes_eventos_comerciais || 0);
+          Number(batch.bytes_eventos_comerciais || 0) +
+          Number(batch.bytes_processamentos_orfaos || 0) +
+          Number(batch.bytes_eventos_comerciais_orfaos || 0);
       } catch (erro) {
         try { await client.query("ROLLBACK"); } catch (_) {}
         throw erro;
@@ -1063,7 +1233,10 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     }
 
     resumo.ok = true;
-    resumo.aplicouMudancas = resumo.jobsRemovidos > 0 || resumo.jobsExpiradosLease > 0;
+    resumo.aplicouMudancas = resumo.jobsRemovidos > 0 ||
+      resumo.processamentosOrfaosRemovidos > 0 ||
+      resumo.eventosComerciaisOrfaosRemovidos > 0 ||
+      resumo.jobsExpiradosLease > 0;
     resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
     return resumo;
   } catch (erro) {
@@ -1073,7 +1246,9 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
       failOpen: true,
       motivo: "auto_clean_jobs_execute_falhou",
       erroTipo: erro?.code || erro?.name || "erro",
-      aplicouMudancas: resumo.jobsRemovidos > 0,
+      aplicouMudancas: resumo.jobsRemovidos > 0 ||
+        resumo.processamentosOrfaosRemovidos > 0 ||
+        resumo.eventosComerciaisOrfaosRemovidos > 0,
       espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
     };
   }
@@ -1093,6 +1268,11 @@ async function executarBatchOfertasPostgresAutoClean(client, { loteLimite, horas
              WHERE (j.oferta_id = o.id OR j.evento_id = o.evento_id)
                AND j.status = ANY($2::text[])
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.oferta_id = o.id
+           )
         ORDER BY COALESCE(o.atualizada_em, o.criada_em) ASC, o.id ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $3
@@ -1109,6 +1289,11 @@ async function executarBatchOfertasPostgresAutoClean(client, { loteLimite, horas
              WHERE (j.oferta_id = o.id OR j.evento_id = o.evento_id)
                AND j.status = ANY($2::text[])
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.oferta_id = o.id
+           )
         RETURNING o.id, o.status, pg_column_size(o.*)::bigint AS bytes
      )
      SELECT
@@ -1124,7 +1309,12 @@ async function executarOfertasPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
-  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimasOfertas, 12, 12, 168));
+  const horasMinimas = opcoes.horasMinimasOfertas === undefined
+    ? RETENCAO_OPERACIONAL_PADRAO_HORAS
+    : Math.max(
+      RETENCAO_OPERACIONAL_PADRAO_HORAS,
+      limitarInteiro(opcoes.horasMinimasOfertas, RETENCAO_OPERACIONAL_PADRAO_HORAS, RETENCAO_OPERACIONAL_PADRAO_HORAS, 168)
+    );
   const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
   const resumo = {
     origem: "postgres_ofertas",
@@ -1204,12 +1394,22 @@ async function executarBatchLinksPostgresAutoClean(client, { loteLimite, horasMi
              WHERE j.evento_id = l.evento_id
                AND j.status = ANY($2::text[])
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.evento_id = l.evento_id
+           )
           AND NOT EXISTS (
             SELECT 1
               FROM engine_ofertas o
              WHERE (o.link_id = l.id OR o.evento_id = l.evento_id)
                AND ${ofertaBloqueiaLinkSql}
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.evento_id = l.evento_id
+           )
         ORDER BY l.criado_em ASC, l.id ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $3
@@ -1225,12 +1425,22 @@ async function executarBatchLinksPostgresAutoClean(client, { loteLimite, horasMi
              WHERE j.evento_id = l.evento_id
                AND j.status = ANY($2::text[])
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.evento_id = l.evento_id
+           )
           AND NOT EXISTS (
             SELECT 1
               FROM engine_ofertas o
              WHERE (o.link_id = l.id OR o.evento_id = l.evento_id)
                AND ${ofertaBloqueiaLinkSql}
           )
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.evento_id = l.evento_id
+           )
         RETURNING l.id, pg_column_size(l.*)::bigint AS bytes
      )
      SELECT
@@ -1246,7 +1456,12 @@ async function executarLinksPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
-  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimasLinks, 12, 12, 168));
+  const horasMinimas = opcoes.horasMinimasLinks === undefined
+    ? RETENCAO_OPERACIONAL_PADRAO_HORAS
+    : Math.max(
+      RETENCAO_OPERACIONAL_PADRAO_HORAS,
+      limitarInteiro(opcoes.horasMinimasLinks, RETENCAO_OPERACIONAL_PADRAO_HORAS, RETENCAO_OPERACIONAL_PADRAO_HORAS, 168)
+    );
   const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
   const resumo = {
     origem: "postgres_links",
@@ -1319,6 +1534,11 @@ async function executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite,
        SELECT e.id
          FROM engine_eventos_brutos e
         WHERE ${condicaoEventoRemovivelSql}
+       AND NOT EXISTS (
+         SELECT 1
+           FROM engine_universal_queue_items qi
+          WHERE qi.evento_id = e.id
+       )
         ORDER BY e.criado_em ASC, e.id ASC
         FOR UPDATE SKIP LOCKED
         LIMIT $2
@@ -1327,6 +1547,11 @@ async function executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite,
         USING candidatos c
         WHERE e.id = c.id
           AND ${condicaoEventoRemovivelSql}
+           AND NOT EXISTS (
+             SELECT 1
+               FROM engine_universal_queue_items qi
+              WHERE qi.evento_id = e.id
+           )
         RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
      )
      SELECT
@@ -1342,7 +1567,12 @@ async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
-  const horasMinimas = Math.max(12, limitarInteiro(opcoes.horasMinimasEventosBrutos, 12, 12, 168));
+  const horasMinimas = opcoes.horasMinimasEventosBrutos === undefined
+    ? RETENCAO_OPERACIONAL_PADRAO_HORAS
+    : Math.max(
+      RETENCAO_OPERACIONAL_PADRAO_HORAS,
+      limitarInteiro(opcoes.horasMinimasEventosBrutos, RETENCAO_OPERACIONAL_PADRAO_HORAS, RETENCAO_OPERACIONAL_PADRAO_HORAS, 168)
+    );
   const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
   const resumo = {
     origem: "postgres_eventos_brutos",
@@ -1629,11 +1859,11 @@ function coletarArquivosElegiveisAutoClean(opcoes = {}) {
     if (!stats.isFile || !stats.isFile()) continue;
 
     const categoria = categoriaArquivoAutoClean(dataDir, atual, stats);
-    if (categoria === "protegido_sensivel" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "midias_referencia_pendente" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
+    if (categoria === "protegido_sensivel" || categoria === "backups_operacionais" || categoria === "fila_thumbnails_gerenciadas" || categoria === "fila_json_arquivo" || categoria === "midias_referencia_pendente" || categoria === "arquivos_auditoria" || categoria === "outros") continue;
     const tipoRegistro = categoria === "logs_persistidos" ? "logs_persistidos" : categoria;
     const decisao = avaliarRegistroAutoClean({
       origem: categoria,
-      tipoRegistro: categoria === "backups_operacionais" ? "temporarios" : tipoRegistro,
+      tipoRegistro,
       status: "arquivo",
       referenciaTemporal: new Date(stats.mtimeMs || stats.ctimeMs || agoraMs).toISOString(),
       bytesEstimados: Number(stats.size || 0),
@@ -1710,7 +1940,10 @@ async function executarAutoCleanExecute(opcoes = {}) {
     etapas.push(await executarLinksPostgresAutoClean({ ...opcoes, politica }));
     etapas.push(await executarEventosBrutosPostgresAutoClean({ ...opcoes, politica }));
   }
-  if (opcoes.incluirArquivos !== false) {
+  // The first canary is PostgreSQL-only. File/fila/GC execution requires an
+  // explicit opt-in so the production execute flag cannot rewrite fila.json
+  // or remove filesystem material accidentally.
+  if (opcoes.permitirLimpezaArquivos === true && opcoes.incluirArquivos !== false) {
     etapas.push(executarFilaJsonAutoClean({ ...opcoes, politica }));
     etapas.push(executarFilaThumbnailsAutoClean({ ...opcoes, politica }));
     etapas.push(executarArquivosAutoClean({ ...opcoes, politica }));
@@ -1730,7 +1963,9 @@ async function executarAutoCleanExecute(opcoes = {}) {
     processandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.processandoExpiradosLease || 0), 0),
     importandoExpiradosLease: etapas.reduce((soma, etapa) => soma + Number(etapa.importandoExpiradosLease || 0), 0),
     processamentosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.processamentosRemovidos || 0), 0),
+    processamentosOrfaosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.processamentosOrfaosRemovidos || 0), 0),
     eventosComerciaisRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisRemovidos || 0), 0),
+    eventosComerciaisOrfaosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisOrfaosRemovidos || 0), 0),
     arquivosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.arquivosRemovidos || 0), 0),
     filasRegravadas: etapas.reduce((soma, etapa) => soma + Number(etapa.filasRegravadas || 0), 0),
     compactados: etapas.reduce((soma, etapa) => soma + Number(etapa.compactados || 0), 0),
@@ -1753,7 +1988,9 @@ async function executarAutoCleanShadow(opcoes = {}) {
   const logger = opcoes.logger || console;
   const origens = [];
   const executarDb = opcoes.incluirPostgres !== false;
-  const executarArquivos = opcoes.incluirArquivos !== false;
+  const executarArquivos = opcoes.canarioPostgres === true
+    ? false
+    : opcoes.incluirArquivos !== false;
 
   if (executarDb) origens.push(...await inventariarPostgres({ ...opcoes, politica }));
   if (executarArquivos) {
