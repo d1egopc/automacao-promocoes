@@ -1,0 +1,219 @@
+name: Mensageiro guard and Mounjaro Linux validation
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-guard-mounjaro-node24-pg17-20261019
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mensageiro-mounjaro-node24-pg17-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: GitHub-hosted Linux / Node 24 / PostgreSQL 17
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-guard-mounjaro-node24-pg17-20261019'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: mensageiro_mounjaro_ci
+          POSTGRES_USER: ci_disposable
+          POSTGRES_PASSWORD: ci_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_disposable -d mensageiro_mounjaro_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      FUNCTIONAL_SHA: 0b94161b364dc629523d1994eb9d7eb8d4b296d4
+      BASELINE_SHA: 4eddd3377c388c3bf30982141df6317404e5d1ce
+      AUTO_CLEAN_TEST_DATABASE_URL: postgresql://ci_disposable:ci_disposable_only@127.0.0.1:5432/mensageiro_mounjaro_ci
+      DATABASE_URL: ""
+      PGPASSWORD: ""
+      NODE_ENV: test
+    steps:
+      - name: Checkout full validation history without credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove isolated ref, runner and disposable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-guard-mounjaro-node24-pg17-20261019
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${PGPASSWORD:-}"
+          test "$AUTO_CLEAN_TEST_DATABASE_URL" = postgresql://ci_disposable:ci_disposable_only@127.0.0.1:5432/mensageiro_mounjaro_ci
+          git cat-file -e "$FUNCTIONAL_SHA^{commit}"
+          git cat-file -e "$BASELINE_SHA^{commit}"
+          git merge-base --is-ancestor "$FUNCTIONAL_SHA" HEAD
+          test "$(git rev-parse HEAD)" != "$FUNCTIONAL_SHA"
+          echo "FUNCTIONAL_SHA=$FUNCTIONAL_SHA"
+          echo "CI_ONLY_SHA=$(git rev-parse HEAD)"
+
+      - name: Set up Node 24 on GitHub-hosted runner
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove Node major and install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --version | grep -E '^v24\.'
+          npm ci
+
+      - name: Check CI-only scope, syntax and encoding
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          changed="$(git diff --name-only "$FUNCTIONAL_SHA" HEAD | sort | tr '\n' ' ')"
+          test "$changed" = ".github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml "
+          node --check index.js
+          node --check modules/mensageiro/programacoes.scheduler.js
+          node --check modules/engine/index.js
+          node --check modules/engine/preflight.service.js
+          node --check modules/engine/executor.service.js
+          node --check modules/engine/distributor.service.js
+          node --check modules/engine/auto-clean/auto-clean.service.js
+          npm run audit:encoding
+
+      - name: Run Mensageiro guard and workspace isolation suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-multiperfil-isolamento.test.cjs
+          node tests/mensageiro-perfis.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+
+      - name: Run pool provider and Universal Executor suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/universal-flow-queue-preflight.test.js
+          node tests/universal-flow-queue-executor.test.js
+
+      - name: Compare inherited distributor assertion without masking regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/distributor-candidate.log"
+          baseline_dir="$RUNNER_TEMP/distributor-baseline"
+          baseline_log="$RUNNER_TEMP/distributor-baseline.log"
+          set +e
+          node tests/universal-flow-queue-distributor.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/universal-flow-queue-distributor.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+          known_failure() {
+            grep -q 'destinationNameSnapshot' "$1" \
+              && grep -q 'targetLabelSnapshot' "$1" \
+              && grep -q 'Expected values to be strictly deep-equal' "$1"
+          }
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'DISTRIBUTOR_BASELINE_COMPARISON=both_pass'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]] \
+            && known_failure "$candidate_log" && known_failure "$baseline_log"; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED=destinationNameSnapshot/targetLabelSnapshot'
+          else
+            echo 'DISTRIBUTOR_BASELINE_COMPARISON=candidate_or_baseline_mismatch' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi
+
+      - name: Run Mounjaro shadow and GC suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/auto-clean-gc-reference-index-phase12.test.js
+          node tests/auto-clean-gc-reference-index-phase13.test.js
+          node tests/auto-clean-gc-reference-index-phase14.test.js
+          node tests/auto-clean-gc-reference-index-phase141.test.js
+          node tests/auto-clean-gc-relay-phase1.test.js
+
+      - name: Compare known phase141 baseline debt
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/phase141-candidate.log"
+          baseline_dir="$RUNNER_TEMP/phase141-baseline"
+          baseline_log="$RUNNER_TEMP/phase141-baseline.log"
+          set +e
+          node tests/auto-clean-gc-reference-index-phase141.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASELINE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/auto-clean-gc-reference-index-phase141.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+          known_phase141_failure() {
+            grep -q 'testStaleCrashAndWriterCatchUp' "$1" \
+              && grep -q 'actual.*true' "$1" \
+              && grep -q 'expected.*false' "$1"
+          }
+          components_unchanged() {
+            git diff --quiet "$BASELINE_SHA" HEAD -- \
+              tests/auto-clean-gc-reference-index-phase141.test.js \
+              modules/engine/auto-clean/gc-reference-index-builder.js \
+              modules/engine/auto-clean/gc-relay.service.js
+          }
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'PHASE141_BASELINE_COMPARISON=both_pass'
+          elif [[ "$candidate_rc" -eq 0 && "$baseline_rc" -ne 0 ]] \
+            && known_phase141_failure "$baseline_log" && components_unchanged; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED=phase141'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]] \
+            && known_phase141_failure "$candidate_log" \
+            && known_phase141_failure "$baseline_log" \
+            && components_unchanged; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED=phase141_candidate_and_base'
+          else
+            echo 'PHASE141_BASELINE_COMPARISON=candidate_or_baseline_mismatch' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi
+
+      - name: Run disposable PostgreSQL 17 guard harness (skip forbidden)
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/auto-clean-postgres-guards.log"
+          node tests/auto-clean-postgres-guards.postgres.js 2>&1 | tee "$output"
+          ! grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_SKIPPED' "$output"
+          grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_PASS' "$output"
+
+      - name: Assert validation workflow has no production job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^  validate:' .github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml)" -eq 1
+          test "$(grep -c '^    runs-on: ubuntu-latest' .github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml)" -eq 1
+          test "$(grep -c '^    services:' .github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml)" -eq 1
