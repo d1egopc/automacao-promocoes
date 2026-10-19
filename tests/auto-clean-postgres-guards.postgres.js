@@ -363,6 +363,27 @@ async function main() {
     const segunda = await executarJobsPostgresAutoClean({ pool, queryEngine, canarioPostgres: true });
     assert.strictEqual(segunda.jobsRemovidos, 0, "segunda execucao e idempotente");
 
+    // A PostgreSQL-only canary must not expire leases as a side effect.  The
+    // normal executor keeps the lease step enabled; this explicit opt-in is
+    // restricted to canarioPostgres and must use only the terminal cleanup.
+    const leasePreservada = await job("workspace_lease_preservada", "processando");
+    const terminalCanario = await job("workspace_canario_sem_lease");
+    const canarioSemLease = await executarJobsPostgresAutoClean({
+      pool,
+      canarioPostgres: true,
+      pularExpiracaoLeases: true,
+      queryEngine: async () => { throw new Error("queryEngine de lease nao deveria ser chamado"); }
+    });
+    assert.strictEqual(canarioSemLease.ok, true);
+    assert.strictEqual(canarioSemLease.leasesPulados, true);
+    assert.strictEqual(canarioSemLease.jobsRemovidos, 1);
+    assert.strictEqual((await pool.query(
+      "SELECT status FROM engine_jobs_cliente WHERE id=$1", [leasePreservada]
+    )).rows[0].status, "processando", "canario nao expira lease vivo");
+    assert.strictEqual((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_jobs_cliente WHERE id=$1", [terminalCanario]
+    )).rows[0].n, 0);
+
     const ofertaLivre = (await pool.query(
       `INSERT INTO engine_ofertas (status,criada_em,atualizada_em) VALUES ('erro_final',$1,$1) RETURNING id`, [old]
     )).rows[0].id;
@@ -390,12 +411,15 @@ async function main() {
       pool,
       queryEngine,
       canarioPostgres: true,
+      pularExpiracaoLeases: true,
       incluirArquivos: true
     });
     assert.strictEqual(canarioResumo.totalOrigens, 5, "canario executa somente as cinco etapas PostgreSQL");
     assert.strictEqual(canarioResumo.filasRegravadas, 0, "canario nao regrava fila JSON");
     assert.strictEqual(canarioResumo.arquivosRemovidos, 0, "canario nao remove arquivos ou midias");
     assert.strictEqual(canarioResumo.compactados, 0, "canario nao compacta arquivos");
+    assert.strictEqual(canarioResumo.etapas.find(etapa => etapa.origem === "postgres_jobs").leasesPulados, true,
+      "canario global deve manter leases intocados");
     checkpoint("canary:done");
 
     console.log("AUTO_CLEAN_POSTGRES_GUARDS_PASS");

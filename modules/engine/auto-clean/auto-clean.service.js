@@ -1178,6 +1178,7 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     jobsExpiradosLease: 0,
     processandoExpiradosLease: 0,
     importandoExpiradosLease: 0,
+    leasesPulados: false,
     leaseMinutos: minutosLeaseJobsAtivos(opcoes.leaseMinutos),
     espacoLogicoLiberadoBytes: 0,
     aplicouMudancas: false,
@@ -1189,18 +1190,31 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   }
 
   try {
-    const lease = await expirarJobsAtivosPorLease({
-      ...opcoes,
-      leaseMinutos: resumo.leaseMinutos,
-      loteLimite,
-      deps: { queryEngine: opcoes.queryEngine || queryEngine }
-    });
-    if (lease.ok === false) {
-      return { ...resumo, ok: false, failOpen: true, motivo: lease.motivo || "lease_jobs_ativos_falhou" };
+    const pularExpiracaoLeases = opcoes.pularExpiracaoLeases === true;
+    if (pularExpiracaoLeases && opcoes.canarioPostgres !== true) {
+      return {
+        ...resumo,
+        ok: false,
+        failOpen: true,
+        motivo: "auto_clean_skip_lease_requer_canario_postgres"
+      };
     }
-    resumo.jobsExpiradosLease = Number(lease.jobsExpirados || 0);
-    resumo.processandoExpiradosLease = Number(lease.processandoExpirados || 0);
-    resumo.importandoExpiradosLease = Number(lease.importandoExpirados || 0);
+    if (pularExpiracaoLeases) {
+      resumo.leasesPulados = true;
+    } else {
+      const lease = await expirarJobsAtivosPorLease({
+        ...opcoes,
+        leaseMinutos: resumo.leaseMinutos,
+        loteLimite,
+        deps: { queryEngine: opcoes.queryEngine || queryEngine }
+      });
+      if (lease.ok === false) {
+        return { ...resumo, ok: false, failOpen: true, motivo: lease.motivo || "lease_jobs_ativos_falhou" };
+      }
+      resumo.jobsExpiradosLease = Number(lease.jobsExpirados || 0);
+      resumo.processandoExpiradosLease = Number(lease.processandoExpirados || 0);
+      resumo.importandoExpiradosLease = Number(lease.importandoExpirados || 0);
+    }
 
     for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
       const client = await pool.connect();

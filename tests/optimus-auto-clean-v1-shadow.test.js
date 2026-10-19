@@ -1073,6 +1073,47 @@ async function testarRollbackPostgresFailOpen() {
   assert.strictEqual(rollbackExecutado, true, "falha do batch sempre faz rollback da transacao");
 }
 
+async function testarCanarioPostgresNaoExpiraLeases() {
+  const chamadas = [];
+  const client = {
+    async query(sql) {
+      chamadas.push(sql);
+      if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
+      if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
+      if (/WITH candidatos/i.test(sql)) {
+        return { rows: [{
+          jobs_removidos: 0,
+          processamentos_removidos: 0,
+          eventos_comerciais_removidos: 0,
+          processamentos_orfaos_removidos: 0,
+          eventos_comerciais_orfaos_removidos: 0
+        }] };
+      }
+      throw new Error(`query inesperada: ${sql}`);
+    },
+    release() {}
+  };
+
+  const resumo = await executarJobsPostgresAutoClean({
+    pool: { async connect() { return client; } },
+    canarioPostgres: true,
+    pularExpiracaoLeases: true,
+    queryEngine: async () => { throw new Error("lease nao pode ser chamado no canario"); }
+  });
+  assert.strictEqual(resumo.ok, true);
+  assert.strictEqual(resumo.leasesPulados, true);
+  assert.strictEqual(resumo.jobsExpiradosLease, 0);
+  assert.ok(!chamadas.some(sql => /SET\s+status\s*=\s*'expirada_operacional'|lease_jobs_ativos/i.test(sql)),
+    "canario nao executa SQL de expiracao de lease");
+
+  const invalido = await executarJobsPostgresAutoClean({
+    pool: { async connect() { return client; } },
+    pularExpiracaoLeases: true
+  });
+  assert.strictEqual(invalido.ok, false);
+  assert.strictEqual(invalido.motivo, "auto_clean_skip_lease_requer_canario_postgres");
+}
+
 async function testarFailOpenEFlags() {
   const shadowAnterior = process.env.OPTIMUS_AUTO_CLEAN_SHADOW;
   const executeAnterior = process.env.OPTIMUS_AUTO_CLEAN_EXECUTE;
@@ -1135,6 +1176,7 @@ async function testarFailOpenEFlags() {
   await testarExecutePostgresFailOpen();
   await testarGuardasFilaCanarioEOrfaos();
   await testarRollbackPostgresFailOpen();
+  await testarCanarioPostgresNaoExpiraLeases();
   await testarExecuteFilaJsonSeguro();
   await testarExecuteArquivosProtegePermanentes();
   await testarRotacaoPersistenteEErroIsolado();
