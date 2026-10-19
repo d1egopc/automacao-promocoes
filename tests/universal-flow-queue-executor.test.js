@@ -174,3 +174,50 @@ test("provider adapter denial before transport keeps SEND_STARTED absent", async
   assert.equal((await run("ws_A")).reason, "session_closed");
   assert.deepEqual(calls, ["release"]);
 });
+
+test("executor resolves the current pool after a pool recreation", async () => {
+  const poolA = { id: "pool-A", connect() {} };
+  const poolB = { id: "pool-B", connect() {} };
+  let currentPool = poolA;
+  const seen = [];
+  const run = criarExecutorFilaUniversal({ pool: poolA,
+    getPool: () => currentPool,
+    repository: {
+      preflightWorkspace: async ({ pool }) => {
+        seen.push(["preflight", pool.id]); return { ok: true };
+      },
+      claimDestination: async ({ pool }) => {
+        seen.push(["claim", pool.id]); return { ok: true, empty: true };
+      }
+    },
+    prepare: async () => { throw new Error("must_not_prepare"); },
+    dispatch: async () => { throw new Error("must_not_send"); }
+  });
+  await run("ws_A");
+  currentPool = poolB;
+  await run("ws_A");
+  assert.deepEqual(seen, [["preflight", "pool-A"], ["claim", "pool-A"],
+    ["preflight", "pool-B"], ["claim", "pool-B"]]);
+});
+
+test("executor recovers after a transient pool-provider failure", async () => {
+  const poolA = { id: "pool-A", connect() {} };
+  let attempts = 0;
+  const run = criarExecutorFilaUniversal({ pool: poolA,
+    getPool: () => {
+      attempts += 1;
+      if (attempts === 3) throw new Error("pool_reconnect_in_progress");
+      return poolA;
+    },
+    repository: {
+      preflightWorkspace: async () => ({ ok: true }),
+      claimDestination: async () => ({ ok: true, empty: true })
+    },
+    prepare: async () => { throw new Error("must_not_prepare"); },
+    dispatch: async () => { throw new Error("must_not_send"); }
+  });
+  await run("ws_A");
+  await assert.rejects(() => run("ws_A"), /pool_reconnect_in_progress/);
+  assert.deepEqual(await run("ws_A"), { ok: true, empty: true });
+  assert.equal(attempts, 4);
+});

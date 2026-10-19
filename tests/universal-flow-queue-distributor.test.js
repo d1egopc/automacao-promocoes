@@ -60,3 +60,26 @@ test("two workspaces cannot cross-provide an offer", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.motivo, "queue_distributor_identity_unproven");
 });
+
+test("distributor resolves the current pool after a pool recreation", async () => {
+  const poolA = { id: "pool-A", connect() {} };
+  const poolB = { id: "pool-B", connect() {} };
+  let currentPool = poolA;
+  const seen = [];
+  const callback = criarCallbackFilaUniversal({ pool: poolA,
+    getPool: () => currentPool,
+    enqueueFn: async ({ pool }) => {
+      seen.push(pool.id);
+      return { itemId: seen.length,
+        operationEpochStartedAt: "2026-10-10T12:00:00.000Z" };
+    }
+  });
+  const payload = { clienteId: "ws_A", engineOfertaId: 7, engineJobId: 9 };
+  const context = { oferta: { id: 7, job_id: 9 }, destinosCompativeis: [
+    { id: "wa", tipo: "whatsapp", alvos: [{ grupoId: "g1", sessao: "s1" }] }
+  ] };
+  await callback("ws_A", payload, context);
+  currentPool = poolB;
+  await callback("ws_A", payload, context);
+  assert.deepEqual(seen, ["pool-A", "pool-B"]);
+});

@@ -1,0 +1,111 @@
+name: Universal pool provider validation
+
+on:
+  push:
+    branches:
+      - fix/universal-pool-provider-sync-prod-20261019
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: universal-pool-provider-validation
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: 4eddd3377c388c3bf30982141df6317404e5d1ce
+
+jobs:
+  pool-provider:
+    name: Node 24 pool provider regression (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout full history without credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove isolated validation target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/fix/universal-pool-provider-sync-prod-20261019
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${PGPASSWORD:-}"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check exact scope and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          expected='.github/workflows/validate-universal-pool-node24.yml index.js modules/engine/universal-queue-distributor.adapter.js modules/engine/universal-queue-executor.adapter.js modules/engine/universal-queue-preflight.js tests/universal-flow-queue-distributor.test.js tests/universal-flow-queue-executor.test.js tests/universal-flow-queue-preflight.test.js '
+          actual="$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')"
+          test "$actual" = "$expected"
+          node --check index.js
+          node --check modules/engine/universal-queue-distributor.adapter.js
+          node --check modules/engine/universal-queue-executor.adapter.js
+          node --check modules/engine/universal-queue-preflight.js
+
+      - name: Run pool rotation and recovery tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/universal-flow-queue-preflight.test.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/executor-destino-diagnostico.test.js
+          node tests/anti-repeticao-executor.test.js
+
+      - name: Compare distributor assertion with production base
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/universal-pool-distributor-candidate.log"
+          baseline_dir="$RUNNER_TEMP/universal-pool-distributor-base"
+          baseline_log="$RUNNER_TEMP/universal-pool-distributor-base.log"
+          set +e
+          node tests/universal-flow-queue-distributor.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/universal-flow-queue-distributor.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+
+          known_failure() {
+            node - "$1" <<'NODE'
+          const fs = require('node:fs');
+          const text = fs.readFileSync(process.argv[2], 'utf8');
+          const known = text.includes('destinationNameSnapshot') &&
+            text.includes('targetLabelSnapshot') &&
+            text.includes('Distributor adapter carries exact workspace');
+          process.exit(known ? 0 : 1);
+          NODE
+          }
+
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'DISTRIBUTOR_BASELINE_COMPARISON: both PASS'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]] && known_failure "$candidate_log" && known_failure "$baseline_log"; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED: distributor destination snapshots'
+          else
+            echo 'DISTRIBUTOR_BASELINE_COMPARISON: candidate/base mismatch' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi

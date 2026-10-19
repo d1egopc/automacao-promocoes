@@ -9158,9 +9158,12 @@ function resolverAlvosTelegramFilaUniversal(clienteId, destino) {
       connectionId: String(t.id || t.botId || t.telegramId || "") }));
 }
 
-function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
+function criarPreflightFilaUniversalReal(pool, { oneShotId = null,
+  getPool = null } = {}) {
+  const resolvePool = typeof getPool === "function" ? getPool : () => pool;
   return criarPreflightFilaUniversal({
     pool,
+    getPool: resolvePool,
     configGlobal: config,
     ...(oneShotId ? { readClock: async () => null } : {}),
     resolveDestination: async ({ claim, oferta, workspaceId, destinationId }) => {
@@ -9210,7 +9213,7 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
         return usage.ok ? { ok: true } : {
           ok: false, reason: "destination_daily_limit_reached" };
       }
-      const usage = await readDestinationDailyUsage({ pool, workspaceId,
+      const usage = await readDestinationDailyUsage({ pool: resolvePool(), workspaceId,
         destinationId });
       return usage.sentToday < limit ? { ok: true }
         : { ok: false, reason: "destination_daily_limit_reached",
@@ -9235,7 +9238,7 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
     },
     checkCredits: async ({ workspaceId, claim }) => {
       if (oneShotId) {
-        const balance = (await pool.query(`SELECT balance,reserved
+        const balance = (await resolvePool().query(`SELECT balance,reserved
           FROM engine_universal_credit_balances
           WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
         [claim.operationEpochStartedAt,workspaceId])).rows[0];
@@ -9301,8 +9304,10 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
   });
 }
 
-function criarExecutorFilaUniversalReal(pool, { oneShotId = null } = {}) {
-  const prepare = criarPreflightFilaUniversalReal(pool, { oneShotId });
+function criarExecutorFilaUniversalReal(pool, { oneShotId = null,
+  getPool = null } = {}) {
+  getPool = typeof getPool === "function" ? getPool : () => pool;
+  const prepare = criarPreflightFilaUniversalReal(pool, { oneShotId, getPool });
   const providerPorAlvo = criarDispatcherProviderExistentePorAlvo({
     send: (destination,offer,message,workspace,customerConfig,options) =>
       enviarParaDestinoInteligente(destination,offer,message,workspace,
@@ -9359,7 +9364,7 @@ function criarExecutorFilaUniversalReal(pool, { oneShotId = null } = {}) {
       }
     }
   };
-  return criarExecutorFilaUniversal({ pool,
+  return criarExecutorFilaUniversal({ pool, getPool,
     prepare, dispatch,
     ...(oneShotId ? { repository: oneShotRepository(oneShotId),
       oneShot: true } : {}),
@@ -34019,9 +34024,12 @@ const promessaBootstrapEngine = initEngineDatabase()
       timerCadastros.unref?.();
       writerFilaUniversalReal = criarCallbackFilaUniversal({
         pool: getEnginePool(),
+        getPool: getEnginePool,
         resolveTelegramTargets: resolverAlvosTelegramFilaUniversal
       });
-      executorFilaUniversalReal = criarExecutorFilaUniversalReal(getEnginePool());
+      executorFilaUniversalReal = criarExecutorFilaUniversalReal(getEnginePool(), {
+        getPool: getEnginePool
+      });
       if (typeof writerFilaUniversalReal !== "function" ||
           typeof executorFilaUniversalReal !== "function") {
         throw new Error("universal_runtime_incomplete");

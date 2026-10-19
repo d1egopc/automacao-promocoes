@@ -134,3 +134,28 @@ test("same-attempt revalidation does not reacquire the commercial reservation", 
   assert.equal((await check(fixture(), { skipDedup: true })).ready, true);
   assert.equal(reservations, 1);
 });
+
+test("preflight reads the current pool after a pool recreation", async () => {
+  const poolA = { id: "pool-A", query() {} };
+  const poolB = { id: "pool-B", query() {} };
+  let currentPool = poolA;
+  const seen = [];
+  const preflight = criarPreflightFilaUniversal({ pool: poolA,
+    getPool: () => currentPool, now: () => NOW,
+    readClock: async ({ pool }) => { seen.push(pool.id); return null; },
+    resolveDestination: async ({ destinationId }) => ({ ok: true,
+      destination: { id: destinationId, tipo: "whatsapp", intervaloMinutos: 2.5 } }),
+    checkWindow: async () => ({ ok: true }),
+    checkDailyLimit: async () => ({ ok: true }),
+    checkSession: async () => ({ ok: true }),
+    checkCredits: async () => ({ ok: true }),
+    checkMedia: async () => ({ ok: true }),
+    checkLinks: async () => ({ ok: true }),
+    checkDedup: async () => ({ ok: true }),
+    renderMessage: async () => ({ ok: true, message: "fixture" })
+  });
+  assert.equal((await preflight(fixture())).ready, true);
+  currentPool = poolB;
+  assert.equal((await preflight(fixture())).ready, true);
+  assert.deepEqual(seen, ["pool-A", "pool-B"]);
+});
