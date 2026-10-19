@@ -67,9 +67,23 @@ const { normalizarDestinosAplicaveis } = require("../modules/engine/universal-qu
   const pre = await history.projectPreUniversalTerminalError({ pool: prePool,
     job: { id: 33, cliente_id: "w1", marketplace: "magalu",
       metadata: { comercialCapturado: { titulo: "Produto sem imagem" } } },
-    reason: "sem_imagem_apos_retries", stage: "importacao_final" });
+    reason: "sem_imagem_apos_retries", stage: "importacao_final",
+    terminalAt: new Date().toISOString() });
   assert.equal(pre.projected, true);
   assert.equal(preUniversalCalls.length, 1);
+  const missingMarker = await history.projectPreUniversalTerminalError({ pool: prePool,
+    job: { id: 35, cliente_id: "w1", marketplace: "magalu",
+      metadata: { comercialCapturado: { titulo: "Sem marco" } } },
+    reason: "sem_imagem_apos_retries", stage: "importacao_final" });
+  assert.deepEqual(missingMarker, { projected: false, reason: "terminal_fact_missing" });
+  assert.equal(preUniversalCalls.length, 1, "sem marco terminal não inventa data nem grava histórico");
+  const expiredMarker = await history.projectPreUniversalTerminalError({ pool: prePool,
+    job: { id: 36, cliente_id: "w1", marketplace: "magalu",
+      metadata: { comercialCapturado: { titulo: "Marco antigo" } } },
+    reason: "sem_imagem_apos_retries", stage: "importacao_final",
+    terminalAt: new Date(Date.now() - (192 * 60 * 60 * 1000 + 1_000)).toISOString() });
+  assert.deepEqual(expiredMarker, { projected: false, reason: "terminal_fact_expired" });
+  assert.equal(preUniversalCalls.length, 1, "marco expirado não grava histórico");
   const retry = await history.projectPreUniversalTerminalError({ pool: prePool,
     job: { id: 34, cliente_id: "w1" }, reason: "retry",
     stage: "importacao_retry_agendado" });

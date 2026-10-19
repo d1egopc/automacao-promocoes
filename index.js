@@ -26190,10 +26190,32 @@ function comercialCapturadoClonador(item = {}) {
   }
   return {};
 }
+async function marcadorTerminalPersistido(job = {}, motivo = "") {
+  const jobId = Number(job?.id);
+  const reason = String(motivo || "").trim();
+  if (!Number.isSafeInteger(jobId) || jobId <= 0 || !reason) return null;
+  try {
+    const pool = getEnginePool();
+    if (!pool || typeof pool.query !== "function") return null;
+    const result = await pool.query(`SELECT atualizado_em
+      FROM engine_jobs_cliente
+      WHERE id=$1
+        AND motivo_final=$2
+        AND status NOT IN ('pendente','diagnosticado','validando','pronto',
+          'pronto_para_importar','processando','importando','distribuindo',
+          'executando','retry','agendado','claimed','bloqueado','oferta_criada')
+      LIMIT 1`, [jobId, reason]);
+    return result.rows?.[0]?.atualizado_em || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function observarHistoricoClonadorTerminal({ job = {}, motivo = "", etapa = "" } = {}) {
   try {
+    const terminalAt = await marcadorTerminalPersistido(job, motivo);
     await projectPreUniversalTerminalError({ pool: getEnginePool(), job,
-      reason: motivo, stage: etapa });
+      reason: motivo, stage: etapa, terminalAt });
   } catch (erro) {
     console.log("[HISTORICO-PRE-UNIVERSAL-ERRO]", {
       workspaceId: job.cliente_id || job.clienteId || "", jobId: job.id || null,

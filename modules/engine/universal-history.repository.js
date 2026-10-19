@@ -159,7 +159,10 @@ async function projectPreUniversalTerminalError({ pool, job = {}, reason, stage,
   }
   const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata : {};
   const terminalMarker = terminalAt || job.terminal_at || job.terminalAt ||
-    metadata.terminalAt || metadata.terminal_at || new Date().toISOString();
+    metadata.terminalAt || metadata.terminal_at || "";
+  if (!terminalMarker) {
+    return { projected: false, reason: "terminal_fact_missing" };
+  }
   if (!terminalFactValid(terminalMarker)) {
     return { projected: false, reason: "terminal_fact_invalid" };
   }

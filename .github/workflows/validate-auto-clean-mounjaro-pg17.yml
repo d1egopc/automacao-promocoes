@@ -68,11 +68,14 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md modules/engine/auto-clean/auto-clean.service.js modules/engine/universal-history.repository.js tests/auto-clean-postgres-guards.postgres.js tests/optimus-auto-clean-v1-shadow.test.js "
+          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md index.js modules/engine/auto-clean/auto-clean.service.js modules/engine/universal-history.repository.js tests/auto-clean-postgres-guards.postgres.js tests/historico-definitivo-v1.test.js tests/historico-pre-universal-elegibilidade.test.js tests/optimus-auto-clean-v1-shadow.test.js "
           node --check modules/engine/auto-clean/auto-clean.service.js
           node --check modules/engine/universal-history.repository.js
+          node --check index.js
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           node --check tests/auto-clean-postgres-guards.postgres.js
+          node --check tests/historico-definitivo-v1.test.js
+          node --check tests/historico-pre-universal-elegibilidade.test.js
 
       - name: Run disposable PostgreSQL 17 guard harness (skip forbidden)
         shell: bash
@@ -95,6 +98,8 @@ jobs:
           node tests/fila-historico-leve-v2.test.js
           node tests/fila-terminal-guard-legado.test.js
           node tests/engine-database-json-safety.test.js
+          node tests/historico-definitivo-v1.test.js
+          node tests/historico-pre-universal-elegibilidade.test.js
 
       - name: Compare phase14 filesystem timestamp debt with the base
         shell: bash
@@ -156,8 +161,19 @@ jobs:
           baseline_rc=$?
           set -e
           git worktree remove --force "$baseline_dir"
+          is_known_phase141_failure() {
+            node -e 'const fs=require("node:fs"); const text=fs.readFileSync(process.argv[1], "utf8"); if(!text.includes("testStaleCrashAndWriterCatchUp")) process.exit(1); const match=text.match(/testStaleCrashAndWriterCatchUp[\s\S]*?actual:\s*(true|false)[\s\S]*?expected:\s*(true|false)/); if(!match || match[1]!=="true" || match[2]!=="false") process.exit(1);' "$1"
+          }
+          phase141_components_unchanged() {
+            git diff --quiet "$BASE_SHA" HEAD -- \
+              tests/auto-clean-gc-reference-index-phase141.test.js \
+              modules/engine/auto-clean/gc-reference-index-builder.js \
+              modules/engine/auto-clean/gc-relay.service.js
+          }
           if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
             echo 'PHASE141_BASELINE_COMPARISON: both PASS'
+          elif [[ "$candidate_rc" -eq 0 && "$baseline_rc" -ne 0 ]] && is_known_phase141_failure "$baseline_log" && phase141_components_unchanged; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED: phase141 baseline-only known failure'
           elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]]; then
             node - "$candidate_log" "$baseline_log" <<'NODE'
             const fs = require('node:fs');

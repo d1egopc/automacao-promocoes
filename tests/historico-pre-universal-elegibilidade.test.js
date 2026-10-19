@@ -99,7 +99,8 @@ async function processarCaso({ mensagem, urls = [], metadata = {}, job: prepared
     avaliarWorkspaceParaEngine: () => ({ elegivelEngine: true }),
     observarHistoricoClonadorTerminal: ({ job: terminalJob, motivo, etapa }) => {
       assert.equal(terminal?.status, "erro", "writer roda depois da transição terminal");
-      return projectPreUniversalTerminalError({ pool, job: terminalJob, reason: motivo, stage: etapa });
+      return projectPreUniversalTerminalError({ pool, job: terminalJob, reason: motivo, stage: etapa,
+        terminalAt: new Date().toISOString() });
     }
   });
   assert.equal(result.motivo, "marketplace_nao_detectado");
@@ -173,7 +174,7 @@ async function processarCaso({ mensagem, urls = [], metadata = {}, job: prepared
       const before = inserts.length;
       const result = await projectPreUniversalTerminalError({ pool,
         job: { id: nextJobId++, cliente_id: "workspace-teste", ...caso.job },
-        reason: caso.reason, stage: "importacao_final" });
+        reason: caso.reason, stage: "importacao_final", terminalAt: new Date().toISOString() });
       assert.equal(result.projected, true, caso.reason);
       assert.equal(inserts.length, before + 1, `erro comercial preservado: ${caso.reason}`);
     }
