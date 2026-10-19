@@ -85,6 +85,26 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
   let sock = await rodar();
   assert.strictEqual(sock.envios.length, 0, "programacao inativa nao envia");
 
+  configurar([baseProgramacao({ id: "modulo_desligado", perfilId: "perfil_desligado", nextRunAt: "2026-08-24T14:59:00.000Z" })], {
+    perfis: [{ id: "perfil_desligado", ativo: true, sessaoId: "sessao_desligada", modulos: { programacoes: { ativo: false } } }]
+  });
+  const chamadasModuloDesligado = [];
+  sock = await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: id => { chamadasModuloDesligado.push(id); return criarSock(); },
+    getStatusSessao: () => "open"
+  });
+  assert.deepStrictEqual(chamadasModuloDesligado, [], "modulo de programacoes desligado nao acessa sessao nem envia");
+
+  configurar([baseProgramacao({ id: "mensageiro_desligado", nextRunAt: "2026-08-24T14:59:00.000Z" })], { ativo: false });
+  const chamadasMensageiroDesligado = [];
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: id => { chamadasMensageiroDesligado.push(id); return criarSock(); },
+    getStatusSessao: () => "open"
+  });
+  assert.deepStrictEqual(chamadasMensageiroDesligado, [], "mensageiro global desligado nao acessa sessao nem envia");
+
   configurar([baseProgramacao({ nextRunAt: "2026-08-24T16:00:00.000Z" })]);
   sock = await rodar();
   assert.strictEqual(sock.envios.length, 0, "horario futuro nao envia");
@@ -228,7 +248,142 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
     getSock: (id) => { chamadasOrfas.push(id); return null; },
     getStatusSessao: () => "closed"
   });
-  assert.deepStrictEqual(chamadasOrfas, [""], "perfil removido não herda a sessão global e falha fechado");
+  assert.deepStrictEqual(chamadasOrfas, [], "perfil removido não herda a sessão global e não envia");
+
+  configurar([baseProgramacao({ id: "corrida_exclusao", nextRunAt: "2026-08-24T14:59:00.000Z" })]);
+  const sockCorridaExclusao = criarSock();
+  let primeiraConsultaSessao = true;
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: () => sockCorridaExclusao,
+    getStatusSessao: () => {
+      if (primeiraConsultaSessao) {
+        primeiraConsultaSessao = false;
+        storage.setMensageiroCliente("cliente_prog", { programacoes: [] });
+      }
+      return "open";
+    }
+  });
+  assert.strictEqual(sockCorridaExclusao.envios.length, 0, "exclusao durante o processamento impede novo disparo");
+  assert.deepStrictEqual(storage.getMensageiroCliente("cliente_prog").programacoes, [], "exclusao permanece persistida");
+
+  const corridaEdicao = baseProgramacao({
+    id: "corrida_edicao",
+    nextRunAt: "2026-08-24T14:59:00.000Z",
+    conteudos: [{ id: "antes", tipo: "texto", texto: "antes", imagem: "" }]
+  });
+  configurar([corridaEdicao]);
+  const sockCorridaEdicao = criarSock();
+  primeiraConsultaSessao = true;
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: () => sockCorridaEdicao,
+    getStatusSessao: () => {
+      if (primeiraConsultaSessao) {
+        primeiraConsultaSessao = false;
+        const atual = storage.getMensageiroCliente("cliente_prog");
+        storage.setMensageiroCliente("cliente_prog", {
+          programacoes: atual.programacoes.map(item => item.id === "corrida_edicao"
+            ? { ...item, conteudos: [{ id: "depois", tipo: "texto", texto: "depois", imagem: "" }] }
+            : item)
+        });
+      }
+      return "open";
+    }
+  });
+  assert.strictEqual(sockCorridaEdicao.envios.length, 0, "edicao durante o processamento impede envio da configuracao antiga");
+  assert.strictEqual(
+    storage.getMensageiroCliente("cliente_prog").programacoes.find(item => item.id === "corrida_edicao").conteudos[0].texto,
+    "depois",
+    "edicao permanece persistida"
+  );
+
+  const corridaDesativacao = baseProgramacao({ id: "corrida_desativacao", nextRunAt: "2026-08-24T14:59:00.000Z" });
+  configurar([corridaDesativacao]);
+  const sockCorridaDesativacao = criarSock();
+  primeiraConsultaSessao = true;
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: () => sockCorridaDesativacao,
+    getStatusSessao: () => {
+      if (primeiraConsultaSessao) {
+        primeiraConsultaSessao = false;
+        const atual = storage.getMensageiroCliente("cliente_prog");
+        storage.setMensageiroCliente("cliente_prog", {
+          programacoes: atual.programacoes.map(item => item.id === "corrida_desativacao"
+            ? { ...item, ativo: false }
+            : item)
+        });
+      }
+      return "open";
+    }
+  });
+  assert.strictEqual(sockCorridaDesativacao.envios.length, 0, "desativacao durante o processamento impede envio");
+
+  const corridaEscopo = baseProgramacao({
+    id: "corrida_escopo",
+    perfilId: "perfil_escopo",
+    grupos: [],
+    gruposConfigurados: false,
+    nextRunAt: "2026-08-24T14:59:00.000Z"
+  });
+  configurar([corridaEscopo], {
+    perfis: [{
+      id: "perfil_escopo",
+      ativo: true,
+      sessaoId: "sessao_escopo",
+      modulos: { programacoes: { ativo: true, gruposConfigurados: true, grupos: ["grupo_escopo@g.us"] } }
+    }]
+  });
+  const sockCorridaEscopo = criarSock();
+  primeiraConsultaSessao = true;
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: () => sockCorridaEscopo,
+    getStatusSessao: () => {
+      if (primeiraConsultaSessao) {
+        primeiraConsultaSessao = false;
+        const atual = storage.getMensageiroCliente("cliente_prog");
+        storage.setMensageiroCliente("cliente_prog", {
+          perfis: atual.perfis.map(item => item.id === "perfil_escopo"
+            ? { ...item, sessaoId: "sessao_trocada", modulos: { programacoes: { ativo: true, gruposConfigurados: true, grupos: ["grupo_trocado@g.us"] } } }
+            : item)
+        });
+      }
+      return "open";
+    }
+  });
+  assert.strictEqual(sockCorridaEscopo.envios.length, 0, "mudanca de sessao ou grupo herdado impede envio antigo");
+
+  const corridaFinalizacao = baseProgramacao({
+    id: "corrida_finalizacao",
+    nextRunAt: "2026-08-24T14:59:00.000Z"
+  });
+  configurar([corridaFinalizacao]);
+  const sockCorridaFinalizacao = {
+    envios: [],
+    async sendMessage(jid, payload) {
+      this.envios.push({ jid, payload });
+      const atual = storage.getMensageiroCliente("cliente_prog");
+      storage.setMensageiroCliente("cliente_prog", {
+        programacoes: atual.programacoes.map(item => item.id === "corrida_finalizacao"
+          ? { ...item, nome: "editada durante envio" }
+          : item)
+      });
+      return { key: { remoteJid: jid, id: "corrida_finalizacao", fromMe: true } };
+    }
+  };
+  await scheduler.rodarProgramacoesMensageiroPendentes({
+    agora: new Date("2026-08-24T12:00:00-03:00"),
+    getSock: () => sockCorridaFinalizacao,
+    getStatusSessao: () => "open"
+  });
+  assert.strictEqual(sockCorridaFinalizacao.envios.length, 1, "envio autorizado ocorre uma vez");
+  assert.strictEqual(
+    storage.getMensageiroCliente("cliente_prog").programacoes.find(item => item.id === "corrida_finalizacao").nome,
+    "editada durante envio",
+    "finalizacao nao sobrescreve edicao persistida"
+  );
 
   const antiga = storage.setMensageiroCliente("cliente_antigo_prog", { ativo: true });
   assert.deepStrictEqual(antiga.programacoes, [], "config antiga sem programacoes continua valida");
