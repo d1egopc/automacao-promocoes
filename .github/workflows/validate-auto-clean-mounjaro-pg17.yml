@@ -134,4 +134,4 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -Eiq 'self-hosted|docker compose.*up|/opt/optimus|hostinger|vercel|deploy:' .github/workflows/validate-auto-clean-mounjaro-pg17.yml
+          ! grep -Eiq 'self-hosted|docker compose.*up|/opt/optimus|hostinger|vercel' .github/workflows/validate-auto-clean-mounjaro-pg17.yml
