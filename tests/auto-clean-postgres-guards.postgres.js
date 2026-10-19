@@ -35,7 +35,7 @@ CREATE TABLE engine_jobs_cliente (
   criado_em TIMESTAMPTZ NOT NULL, atualizado_em TIMESTAMPTZ NOT NULL
 );
 CREATE TABLE engine_processamentos (
-  id BIGSERIAL PRIMARY KEY, job_id BIGINT, status TEXT, criado_em TIMESTAMPTZ,
+  id BIGSERIAL PRIMARY KEY, job_id BIGINT, etapa TEXT, status TEXT, motivo TEXT, criado_em TIMESTAMPTZ,
   detalhes JSONB DEFAULT '{}'::jsonb
 );
 CREATE TABLE engine_eventos_comerciais (
