@@ -384,6 +384,29 @@ async function main() {
       "SELECT COUNT(*)::int AS n FROM engine_jobs_cliente WHERE id=$1", [terminalCanario]
     )).rows[0].n, 0);
 
+    const limiteJob = await job("workspace_limite_mutacoes");
+    await pool.query(
+      `INSERT INTO engine_processamentos (job_id,status,criado_em) VALUES
+       ($1,'concluido',$2),($1,'erro_final',$2)`, [limiteJob, old]
+    );
+    const limiteExcedido = await executarJobsPostgresAutoClean({
+      pool,
+      canarioPostgres: true,
+      pularExpiracaoLeases: true,
+      limiteTotalMutacoes: 1,
+      queryEngine: async () => { throw new Error("queryEngine de lease nao deveria ser chamado"); }
+    });
+    assert.strictEqual(limiteExcedido.ok, false, "lote excedente deve falhar fechado");
+    assert.strictEqual(limiteExcedido.motivo, "auto_clean_limite_total_mutacoes_excedido");
+    assert.ok(Number(limiteExcedido.mutacoesDetectadas) > 1);
+    assert.strictEqual((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_jobs_cliente WHERE id=$1", [limiteJob]
+    )).rows[0].n, 1, "limite excedido faz rollback do job");
+    assert.strictEqual((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id=$1", [limiteJob]
+    )).rows[0].n, 2, "limite excedido faz rollback das dependencias");
+    checkpoint("jobs:mutation-budget:done");
+
     const ofertaLivre = (await pool.query(
       `INSERT INTO engine_ofertas (status,criada_em,atualizada_em) VALUES ('erro_final',$1,$1) RETURNING id`, [old]
     )).rows[0].id;

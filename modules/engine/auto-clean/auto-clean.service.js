@@ -22,6 +22,7 @@ const ENV_EXECUTE = "OPTIMUS_AUTO_CLEAN_EXECUTE";
 const DEFAULT_DATA_DIR = process.env.DATA_DIR || "/data";
 const LOTE_LIMITE_PADRAO = 100;
 const LOTES_DB_POR_CICLO_PADRAO = 3;
+const LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO = 32;
 const WORKSPACES_FILA_POR_CICLO_PADRAO = 5;
 const AUTO_CLEAN_JOBS_LOCK_ID = 902260734;
 const AUTO_CLEAN_OFERTAS_LOCK_ID = 902260735;
@@ -347,6 +348,9 @@ function criarPoliticaRetencao(opcoes = {}) {
     ttl,
     loteLimite: limitarInteiro(opcoes.loteLimite, LOTE_LIMITE_PADRAO, 1, LOTE_LIMITE_PADRAO),
     lotesDbPorCiclo: limitarInteiro(opcoes.lotesDbPorCiclo, LOTES_DB_POR_CICLO_PADRAO, 1, 10),
+    limiteTotalMutacoes: opcoes.canarioPostgres === true
+      ? limitarInteiro(opcoes.limiteTotalMutacoes, LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO, 1, 10000)
+      : null,
     workspacesFilaPorCiclo: limitarInteiro(opcoes.workspacesFilaPorCiclo, WORKSPACES_FILA_POR_CICLO_PADRAO, 1, 50),
     dataDir: opcoes.dataDir || DEFAULT_DATA_DIR
   };
@@ -1150,6 +1154,7 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const limiteTotalMutacoes = politica.limiteTotalMutacoes;
   const horasMinimas = opcoes.horasMinimas === undefined
     ? RETENCAO_OPERACIONAL_PADRAO_HORAS
     : Math.max(
@@ -1168,6 +1173,7 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
     lotes: 0,
     limiteLotesPorCiclo,
     loteLimite,
+    limiteTotalMutacoes,
     horasMinimas,
     horasRetencaoComercial,
     jobsRemovidos: 0,
@@ -1227,6 +1233,23 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
         }
 
          const batch = await executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas, horasRetencaoComercial });
+         const mutacoesBatch = [
+           batch.jobs_removidos,
+           batch.processamentos_removidos,
+           batch.eventos_comerciais_removidos,
+           batch.processamentos_orfaos_removidos,
+           batch.eventos_comerciais_orfaos_removidos
+         ].reduce((total, valor) => total + Number(valor || 0), 0);
+         if (Number.isFinite(limiteTotalMutacoes) && mutacoesBatch > limiteTotalMutacoes) {
+           await client.query("ROLLBACK");
+           return {
+             ...resumo,
+             ok: false,
+             failOpen: true,
+             motivo: "auto_clean_limite_total_mutacoes_excedido",
+             mutacoesDetectadas: mutacoesBatch
+           };
+         }
         await client.query("COMMIT");
 
         const jobsRemovidos = Number(batch.jobs_removidos || 0);
@@ -1353,6 +1376,7 @@ async function executarHistoricoDefinitivoPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const limiteTotalMutacoes = politica.limiteTotalMutacoes;
   const horasRetencao = Math.max(
     RETENCAO_HISTORICO_DEFINITIVO_HORAS,
     limitarInteiro(opcoes.horasRetencaoHistorico, RETENCAO_HISTORICO_DEFINITIVO_HORAS,
@@ -1368,6 +1392,7 @@ async function executarHistoricoDefinitivoPostgresAutoClean(opcoes = {}) {
     horasRetencao,
     loteLimite,
     limiteLotesPorCiclo,
+    limiteTotalMutacoes,
     workspaceId,
     lotes: 0,
     candidatos: 0,
@@ -1397,6 +1422,18 @@ async function executarHistoricoDefinitivoPostgresAutoClean(opcoes = {}) {
         const batch = await executarBatchHistoricoDefinitivoPostgresAutoClean(client, {
           loteLimite, horasRetencao, workspaceId
         });
+        const mutacoesBatch = Number(batch.historicoItensRemovidos || 0) +
+          Number(batch.historicoTargetsRemovidos || 0);
+        if (Number.isFinite(limiteTotalMutacoes) && mutacoesBatch > limiteTotalMutacoes) {
+          await client.query("ROLLBACK");
+          return {
+            ...resumo,
+            ok: false,
+            failOpen: true,
+            motivo: "auto_clean_limite_total_mutacoes_excedido",
+            mutacoesDetectadas: mutacoesBatch
+          };
+        }
         await client.query("COMMIT");
         resumo.candidatos += Number(batch.candidatos || 0);
         resumo.historicoItensRemovidos += Number(batch.historicoItensRemovidos || 0);
@@ -1483,6 +1520,7 @@ async function executarOfertasPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const limiteTotalMutacoes = politica.limiteTotalMutacoes;
   const horasMinimas = opcoes.horasMinimasOfertas === undefined
     ? RETENCAO_OPERACIONAL_PADRAO_HORAS
     : Math.max(
@@ -1497,6 +1535,7 @@ async function executarOfertasPostgresAutoClean(opcoes = {}) {
     lotes: 0,
     limiteLotesPorCiclo,
     loteLimite,
+    limiteTotalMutacoes,
     horasMinimas,
     ofertasRemovidas: 0,
     espacoLogicoLiberadoBytes: 0,
@@ -1520,6 +1559,17 @@ async function executarOfertasPostgresAutoClean(opcoes = {}) {
         }
 
         const batch = await executarBatchOfertasPostgresAutoClean(client, { loteLimite, horasMinimas });
+        const mutacoesBatch = Number(batch.ofertas_removidas || 0);
+        if (Number.isFinite(limiteTotalMutacoes) && mutacoesBatch > limiteTotalMutacoes) {
+          await client.query("ROLLBACK");
+          return {
+            ...resumo,
+            ok: false,
+            failOpen: true,
+            motivo: "auto_clean_limite_total_mutacoes_excedido",
+            mutacoesDetectadas: mutacoesBatch
+          };
+        }
         await client.query("COMMIT");
 
         const ofertasRemovidas = Number(batch.ofertas_removidas || 0);
@@ -1630,6 +1680,7 @@ async function executarLinksPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const limiteTotalMutacoes = politica.limiteTotalMutacoes;
   const horasMinimas = opcoes.horasMinimasLinks === undefined
     ? RETENCAO_OPERACIONAL_PADRAO_HORAS
     : Math.max(
@@ -1644,6 +1695,7 @@ async function executarLinksPostgresAutoClean(opcoes = {}) {
     lotes: 0,
     limiteLotesPorCiclo,
     loteLimite,
+    limiteTotalMutacoes,
     horasMinimas,
     linksRemovidos: 0,
     espacoLogicoLiberadoBytes: 0,
@@ -1667,6 +1719,17 @@ async function executarLinksPostgresAutoClean(opcoes = {}) {
         }
 
         const batch = await executarBatchLinksPostgresAutoClean(client, { loteLimite, horasMinimas });
+        const mutacoesBatch = Number(batch.links_removidos || 0);
+        if (Number.isFinite(limiteTotalMutacoes) && mutacoesBatch > limiteTotalMutacoes) {
+          await client.query("ROLLBACK");
+          return {
+            ...resumo,
+            ok: false,
+            failOpen: true,
+            motivo: "auto_clean_limite_total_mutacoes_excedido",
+            mutacoesDetectadas: mutacoesBatch
+          };
+        }
         await client.query("COMMIT");
 
         const linksRemovidos = Number(batch.links_removidos || 0);
@@ -1741,6 +1804,7 @@ async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const limiteTotalMutacoes = politica.limiteTotalMutacoes;
   const horasMinimas = opcoes.horasMinimasEventosBrutos === undefined
     ? RETENCAO_OPERACIONAL_PADRAO_HORAS
     : Math.max(
@@ -1755,6 +1819,7 @@ async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
     lotes: 0,
     limiteLotesPorCiclo,
     loteLimite,
+    limiteTotalMutacoes,
     horasMinimas,
     eventosBrutosRemovidos: 0,
     espacoLogicoLiberadoBytes: 0,
@@ -1778,6 +1843,17 @@ async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
         }
 
         const batch = await executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite, horasMinimas });
+        const mutacoesBatch = Number(batch.eventos_brutos_removidos || 0);
+        if (Number.isFinite(limiteTotalMutacoes) && mutacoesBatch > limiteTotalMutacoes) {
+          await client.query("ROLLBACK");
+          return {
+            ...resumo,
+            ok: false,
+            failOpen: true,
+            motivo: "auto_clean_limite_total_mutacoes_excedido",
+            mutacoesDetectadas: mutacoesBatch
+          };
+        }
         await client.query("COMMIT");
 
         const eventosBrutosRemovidos = Number(batch.eventos_brutos_removidos || 0);
@@ -2152,6 +2228,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
     duracaoMs: Date.now() - inicio,
     loteLimite: politica.loteLimite,
     limiteLotesPorCiclo: politica.lotesDbPorCiclo,
+    limiteTotalMutacoes: politica.limiteTotalMutacoes,
     etapas
   };
   resumo.bytesLiberadosLegivel = bytesLegiveis(resumo.bytesLiberados);
@@ -2254,6 +2331,7 @@ module.exports = {
   ENV_SHADOW,
   ENV_EXECUTE,
   TTL_PADRAO,
+  LIMITE_TOTAL_MUTACOES_CANARIO_PADRAO,
   RETENCAO_HISTORICO_DEFINITIVO_HORAS,
   MATRIZ_STATUS_AUTO_CLEAN,
   flagLigada,
