@@ -1,6 +1,7 @@
 "use strict";
 
 const COMMERCIAL = new Set(["sent", "partial", "error"]);
+const HISTORICO_RETENCAO_MS = 192 * 60 * 60 * 1000;
 
 function text(value = "") { return String(value ?? "").trim(); }
 function first(payload, keys) {
@@ -39,6 +40,15 @@ function commercialStatus(targets) {
   return null;
 }
 
+function terminalFactExpired(value) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp >= HISTORICO_RETENCAO_MS;
+}
+
+function terminalFactValid(value) {
+  return Number.isFinite(new Date(value).getTime());
+}
+
 async function projectUniversalTerminalTx(client, { queueItemId, workspaceId } = {}) {
   const workspace = text(workspaceId);
   if (!client || typeof client.query !== "function" || !workspace || !Number.isSafeInteger(Number(queueItemId))) {
@@ -48,6 +58,9 @@ async function projectUniversalTerminalTx(client, { queueItemId, workspaceId } =
       terminal_at,origem_fluxo FROM engine_universal_queue_items
     WHERE id=$1 AND workspace_id=$2 FOR SHARE`, [queueItemId, workspace])).rows[0];
   if (!item?.terminal_at) return { projected: false, reason: "not_terminal" };
+  if (terminalFactExpired(item.terminal_at)) {
+    return { projected: false, reason: "terminal_fact_expired" };
+  }
   const rawTargets = (await client.query(`SELECT destination_id,target_key,channel,
       status,provider_message_id,confirmed_at,terminal_reason,terminal_evidence,
       destination_name_snapshot,target_label_snapshot
@@ -134,7 +147,7 @@ function preUniversalCommercialEvidence(job = {}) {
       text(captured.tituloCapturado) && Number(captured.precoAtual) > 0)) return "produto_preco_capturados";
   return "";
 }
-async function projectPreUniversalTerminalError({ pool, job = {}, reason, stage } = {}) {
+async function projectPreUniversalTerminalError({ pool, job = {}, reason, stage, terminalAt } = {}) {
   const workspace = text(job.cliente_id || job.clienteId);
   const jobId = Number(job.id);
   const code = text(reason);
@@ -144,20 +157,29 @@ async function projectPreUniversalTerminalError({ pool, job = {}, reason, stage 
   if (!preUniversalCommercialEvidence(job)) {
     return { projected: false, reason: "pre_universal_without_commercial_evidence" };
   }
-  const error = publicError(code, stage);
   const metadata = job.metadata && typeof job.metadata === "object" ? job.metadata : {};
+  const terminalMarker = terminalAt || job.terminal_at || job.terminalAt ||
+    metadata.terminalAt || metadata.terminal_at || new Date().toISOString();
+  if (!terminalFactValid(terminalMarker)) {
+    return { projected: false, reason: "terminal_fact_invalid" };
+  }
+  if (terminalFactExpired(terminalMarker)) {
+    return { projected: false, reason: "terminal_fact_expired" };
+  }
+  const error = publicError(code, stage);
   const payload = metadata.comercialCapturado || metadata.metadataEvento?.comercialCapturado || metadata;
   const row = (await pool.query(`INSERT INTO engine_history_items
     (workspace_id,source_key,marketplace,title,thumbnail_url,price_text,category,
      commercial_status,total_targets,sent_targets,failed_targets,channels,
      finalized_at,source_origin,error_stage,error_code,error_public_message)
     VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),'error',0,0,0,
-      '{}'::text[],clock_timestamp(),$8,$9,$10,$11)
+      '{}'::text[],$8,$9,$10,$11,$12)
     ON CONFLICT (workspace_id,source_key) DO NOTHING RETURNING history_id`,
   [workspace, `pre_universal:job:${jobId}`, first(job,["marketplace","marketplace_detectado"]),
     first(payload,["titulo","tituloCapturado","nome","title"]),
     first(payload,["imagem","imagemUrl","thumbnail"]), first(payload,["precoAtual","preco","price"]),
-    first(payload,["categoria","category"]), first(metadata,["origemFluxo","origem"]) || "engine_pre_universal",
+    first(payload,["categoria","category"]), terminalMarker,
+    first(metadata,["origemFluxo","origem"]) || "engine_pre_universal",
     error.stage, error.code, error.message])).rows[0];
   return { projected: true, duplicate: !row, historyId: row?.history_id || null };
 }

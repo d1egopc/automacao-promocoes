@@ -68,8 +68,9 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md modules/engine/auto-clean/auto-clean.service.js tests/auto-clean-postgres-guards.postgres.js tests/optimus-auto-clean-v1-shadow.test.js "
+          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml docs/contracts/HISTORY.md modules/engine/auto-clean/auto-clean.service.js modules/engine/universal-history.repository.js tests/auto-clean-postgres-guards.postgres.js tests/optimus-auto-clean-v1-shadow.test.js "
           node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check modules/engine/universal-history.repository.js
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           node --check tests/auto-clean-postgres-guards.postgres.js
 

@@ -27,6 +27,18 @@ const {
   executarEventosBrutosPostgresAutoClean,
   executarHistoricoDefinitivoPostgresAutoClean
 } = require("../modules/engine/auto-clean/auto-clean.service");
+const { projectUniversalTerminalTx, projectPreUniversalTerminalError } =
+  require("../modules/engine/universal-history.repository");
+
+const HARNESS_TIMEOUT_MS = 120_000;
+const harnessTimeout = setTimeout(() => {
+  console.error(`AUTO_CLEAN_POSTGRES_GUARDS_TIMEOUT: ${HARNESS_TIMEOUT_MS}ms`);
+  process.exit(124);
+}, HARNESS_TIMEOUT_MS);
+
+function checkpoint(name) {
+  console.log(`AUTO_CLEAN_CHECKPOINT:${name}`);
+}
 
 const schema = `auto_clean_ci_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "_").toLowerCase();
 const ddl = `
@@ -68,9 +80,25 @@ CREATE TABLE engine_history_targets (
 CREATE TABLE engine_universal_queue_items (
   id BIGSERIAL PRIMARY KEY, evento_id BIGINT, job_id BIGINT, oferta_id BIGINT,
   operation_epoch_started_at TIMESTAMPTZ DEFAULT NOW(), workspace_id TEXT DEFAULT 'ci',
-  capturado_em TIMESTAMPTZ DEFAULT NOW(), item_payload JSONB DEFAULT '{}'::jsonb,
+  origem_fluxo TEXT DEFAULT 'ci', capturado_em TIMESTAMPTZ DEFAULT NOW(),
+  item_payload JSONB DEFAULT '{}'::jsonb,
   status TEXT, revision BIGINT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(), terminal_at TIMESTAMPTZ
+);
+CREATE TABLE engine_universal_fanout_owners (
+  owner_id TEXT PRIMARY KEY, queue_item_id BIGINT NOT NULL,
+  operation_epoch_started_at TIMESTAMPTZ, workspace_id TEXT NOT NULL,
+  destination_id TEXT NOT NULL, target_snapshot_hash TEXT NOT NULL
+);
+CREATE TABLE engine_universal_queue_destinations (
+  id BIGSERIAL PRIMARY KEY, queue_item_id BIGINT NOT NULL,
+  operation_epoch_started_at TIMESTAMPTZ, workspace_id TEXT NOT NULL,
+  destination_id TEXT NOT NULL, fanout_owner_id TEXT,
+  target_key TEXT NOT NULL, connection_id TEXT, channel TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', confirmation_key TEXT,
+  provider_message_id TEXT, confirmed_at TIMESTAMPTZ,
+  terminal_reason TEXT, terminal_evidence TEXT,
+  destination_name_snapshot TEXT NOT NULL, target_label_snapshot TEXT NOT NULL
 );
 CREATE TABLE engine_ofertas (
   id BIGSERIAL PRIMARY KEY, evento_id BIGINT, link_id BIGINT, status TEXT,
@@ -120,6 +148,7 @@ async function createHistory(pool, {
 }
 
 async function main() {
+  checkpoint("bootstrap:start");
   const poolOptions = {
     connectionString,
     max: 2,
@@ -135,6 +164,7 @@ async function main() {
   const queryEngine = async (sql, params = []) => ({ ok: true, resultado: await pool.query(sql, params) });
   try {
     await pool.query(ddl);
+    checkpoint("fixtures:ready");
 
     // Definitive history retention: the 7-day display window has a 24-hour
     // physical grace period. Fixtures are tenant-scoped and disposable.
@@ -186,6 +216,7 @@ async function main() {
     assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
       FROM engine_history_items WHERE history_id=$1`, [historyProtected])).rows[0].n, 1,
     "historico referenciado por fila viva permanece protegido");
+    checkpoint("history:first-batch:done");
 
     const secondHistoryBatch = await executarHistoricoDefinitivoPostgresAutoClean({
       pool, canarioPostgres: true, workspaceId: "workspace_a"
@@ -202,6 +233,7 @@ async function main() {
         ON hi.history_id=ht.history_id AND hi.workspace_id=ht.workspace_id
       WHERE hi.history_id IS NULL`)).rows[0].n, 0,
     "nenhum target fica orfao");
+    checkpoint("history:second-batch:done");
 
     const rollbackHistory = await createHistory(pool, {
       workspaceId: "workspace_rollback", sourceKey: "history-rollback",
@@ -213,11 +245,17 @@ async function main() {
       async connect() {
         const client = await pool.connect();
         const query = client.query.bind(client);
-        client.query = async (sql, params) => {
-          if (/DELETE FROM engine_history_items/i.test(sql)) throw new Error("fixture_history_delete_failure");
-          return query(sql, params);
+        // Never mutate a pooled pg client: a leaked monkeypatch can poison
+        // later pool.query calls and make the rollback scenario hang.
+        return {
+          query: async (sql, params) => {
+            if (/DELETE FROM engine_history_items/i.test(sql)) {
+              throw new Error("fixture_history_delete_failure");
+            }
+            return query(sql, params);
+          },
+          release: (...args) => client.release(...args)
         };
-        return client;
       }
     };
     const rollback = await executarHistoricoDefinitivoPostgresAutoClean({
@@ -231,12 +269,50 @@ async function main() {
     assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
       FROM engine_history_targets WHERE history_id=$1`, [rollbackHistory])).rows[0].n, 1,
     "falha SQL preserva os targets no rollback");
+    checkpoint("history:rollback:done");
+
+    // Anti-replay: after physical cleanup, the same terminal fact must not
+    // recreate definitive history through either writer.
+    const replayHistory = await createHistory(pool, {
+      workspaceId: "workspace_replay", sourceKey: "replay-history",
+      finalizedAt: new Date(Date.now() - (9 * 24) * 60 * 60 * 1000).toISOString()
+    });
+    const replayCleanup = await executarHistoricoDefinitivoPostgresAutoClean({
+      pool, canarioPostgres: true, workspaceId: "workspace_replay"
+    });
+    assert.strictEqual(replayCleanup.historicoItensRemovidos, 1,
+      "o fato terminal antigo deve ser removido antes da prova anti-replay");
+    assert.strictEqual((await pool.query(
+      "SELECT count(*)::int AS n FROM engine_history_items WHERE history_id=$1",
+      [replayHistory])).rows[0].n, 0);
+    const replayQueue = (await pool.query(`INSERT INTO engine_universal_queue_items
+      (workspace_id,status,terminal_at,item_payload)
+      VALUES ('workspace_replay','sent',$1,$2::jsonb) RETURNING id`,
+    [new Date(Date.now() - (9 * 24) * 60 * 60 * 1000).toISOString(),
+      JSON.stringify({ marketplace: "amazon", titulo: "Replay antigo" })])).rows[0].id;
+    const replayTerminalAt = (await pool.query(
+      "SELECT terminal_at FROM engine_universal_queue_items WHERE id=$1",
+      [replayQueue])).rows[0].terminal_at;
+    const replayUniversal = await projectUniversalTerminalTx({
+      query: (sql, params) => pool.query(sql, params)
+    }, { queueItemId: Number(replayQueue), workspaceId: "workspace_replay" });
+    assert.deepStrictEqual(replayUniversal, { projected: false, reason: "terminal_fact_expired" },
+      "writer Universal nao pode ressuscitar fato terminal fora da retenção");
+    const replayPre = await projectPreUniversalTerminalError({ pool,
+      job: { id: 9001, cliente_id: "workspace_replay", marketplace: "amazon",
+        terminal_at: replayTerminalAt,
+        metadata: { comercialCapturado: { titulo: "Replay antigo" } } },
+      reason: "sem_imagem_apos_retries", stage: "importacao_final" });
+    assert.deepStrictEqual(replayPre, { projected: false, reason: "terminal_fact_expired" },
+      "writer pre-Universal nao pode ressuscitar fato terminal fora da retenção");
+    checkpoint("history:anti-replay:done");
 
     const idempotent = await executarHistoricoDefinitivoPostgresAutoClean({
       pool, canarioPostgres: true, workspaceId: "workspace_a"
     });
     assert.strictEqual(idempotent.historicoItensRemovidos, 0,
       "ciclo repetido nao ressuscita nem duplica historico");
+    checkpoint("history:idempotence:done");
 
     const old = isoDaysAgo(8);
     const now = new Date().toISOString();
@@ -320,9 +396,11 @@ async function main() {
     assert.strictEqual(canarioResumo.filasRegravadas, 0, "canario nao regrava fila JSON");
     assert.strictEqual(canarioResumo.arquivosRemovidos, 0, "canario nao remove arquivos ou midias");
     assert.strictEqual(canarioResumo.compactados, 0, "canario nao compacta arquivos");
+    checkpoint("canary:done");
 
     console.log("AUTO_CLEAN_POSTGRES_GUARDS_PASS");
   } finally {
+    clearTimeout(harnessTimeout);
     await pool.end();
     const cleanup = new Pool(poolOptions);
     await cleanup.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
