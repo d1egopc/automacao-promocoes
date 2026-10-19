@@ -3,6 +3,7 @@
 // Destructive by design only inside a disposable CI database. Never point this
 // test at DATABASE_URL or a production connection string.
 const assert = require("assert");
+const { performance } = require("perf_hooks");
 const connectionString = process.env.AUTO_CLEAN_TEST_DATABASE_URL;
 
 if (!connectionString) {
@@ -349,7 +350,7 @@ async function main() {
     )).rows[0].id;
 
     const primeira = await executarJobsPostgresAutoClean({
-      pool, queryEngine, canarioPostgres: true
+      pool, queryEngine, canarioPostgres: true, incluirOrfaosNoCanario: true
     });
     assert.strictEqual(primeira.ok, true);
     assert.strictEqual(primeira.jobsRemovidos, 1, "somente job terminal sem dependencias e removido");
@@ -406,6 +407,45 @@ async function main() {
       "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id=$1", [limiteJob]
     )).rows[0].n, 2, "limite excedido faz rollback das dependencias");
     checkpoint("jobs:mutation-budget:done");
+
+    // Production-sized orphan backlogs must not make the bounded canary scan
+    // the whole processing table. The normal executor still exercises the
+    // orphan sweep above with an explicit opt-in; the canary leaves this
+    // independent backlog untouched for a separate bounded cycle.
+    await pool.query(
+      `INSERT INTO engine_processamentos (job_id,status,criado_em)
+       SELECT NULL,'concluido',$1 FROM generate_series(1,50000)`, [old]
+    );
+    const canaryFastJob = await job("workspace_canario_rapido");
+    const jobsBeforeCanary = Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_jobs_cliente"
+    )).rows[0].n);
+    const orphanBefore = Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL"
+    )).rows[0].n);
+    const canaryStartedAt = performance.now();
+    const canaryFast = await executarJobsPostgresAutoClean({
+      pool,
+      canarioPostgres: true,
+      pularExpiracaoLeases: true,
+      queryEngine: async () => { throw new Error("queryEngine de lease nao deveria ser chamado"); }
+    });
+    const canaryDurationMs = performance.now() - canaryStartedAt;
+    assert.strictEqual(canaryFast.ok, true);
+    assert.strictEqual(canaryFast.jobsRemovidos, 1);
+    assert.strictEqual(canaryFast.processamentosOrfaosRemovidos, 0,
+      "canario bounded nao executa a varredura de orfaos pesada");
+    assert.strictEqual(Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL"
+    )).rows[0].n), orphanBefore,
+    "backlog de orfaos fica preservado para ciclo proprio");
+    assert.strictEqual(Number((await pool.query(
+      "SELECT COUNT(*)::int AS n FROM engine_jobs_cliente"
+    )).rows[0].n), jobsBeforeCanary - 1,
+    "canario bounded remove uma raiz terminal sem varrer orfaos");
+    assert.ok(canaryDurationMs < 5000,
+      `canario bounded excedeu 5s com backlog sintetico (${Math.round(canaryDurationMs)}ms)`);
+    checkpoint(`jobs:canary-bounded:${Math.round(canaryDurationMs)}ms`);
 
     const ofertaLivre = (await pool.query(
       `INSERT INTO engine_ofertas (status,criada_em,atualizada_em) VALUES ('erro_final',$1,$1) RETURNING id`, [old]

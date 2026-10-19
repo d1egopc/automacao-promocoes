@@ -984,8 +984,74 @@ async function inventariarPostgres(opcoes = {}) {
 async function executarBatchJobsPostgresAutoClean(client, {
   loteLimite,
   horasMinimas,
-  horasRetencaoComercial = RETENCAO_OPERACIONAL_PADRAO_HORAS
+  horasRetencaoComercial = RETENCAO_OPERACIONAL_PADRAO_HORAS,
+  incluirOrfaos = true
 }) {
+  // The orphan sweeps are intentionally separate from the bounded canary.
+  // On production-sized databases the processing anti-join can scan millions
+  // of rows even when a root job is immediately eligible. Keeping it out of
+  // the canary preserves the strict mutation budget and lets the normal
+  // executor retain its existing orphan-cleanup behavior.
+  const orphanCtes = incluirOrfaos
+    ? `, processamentos_orfaos_removidos AS (
+         DELETE FROM engine_processamentos p
+          USING (
+            SELECT p0.id
+              FROM engine_processamentos p0
+             WHERE p0.criado_em IS NOT NULL
+               AND p0.criado_em < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
+               AND LOWER(COALESCE(p0.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
+               AND NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j0 WHERE j0.id = p0.job_id)
+             ORDER BY p0.criado_em ASC, p0.id ASC
+             FOR UPDATE SKIP LOCKED
+             LIMIT $3
+          ) orphan_candidates
+          WHERE p.id = orphan_candidates.id
+         RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
+       ), eventos_comerciais_orfaos_removidos AS (
+         DELETE FROM engine_eventos_comerciais e
+          USING (
+            SELECT e0.id
+              FROM engine_eventos_comerciais e0
+             WHERE e0.ocorrido_em IS NOT NULL
+               AND e0.ocorrido_em < NOW() - ($4::int * INTERVAL '1 hour')
+               AND e0.job_id IS NULL
+               AND COALESCE(e0.metadata->>'terminalOcorridoEm', '') <> ''
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM engine_universal_queue_items qi
+                  WHERE qi.job_id = e0.job_id
+                     OR (e0.oferta_id IS NOT NULL AND qi.oferta_id = e0.oferta_id)
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM engine_ofertas o
+                  WHERE o.id = e0.oferta_id
+                    AND (
+                      COALESCE(o.atualizada_em, o.criada_em) IS NULL
+                      OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($4::int * INTERVAL '1 hour')
+                      OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
+                    )
+               )
+               AND e0.fila_item_id IS NULL
+               AND e0.destino_id IS NULL
+               AND COALESCE(e0.metadata->>'imutavel', 'false') <> 'true'
+               AND LOWER(COALESCE(e0.tipo_evento, '')) !~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
+             ORDER BY e0.ocorrido_em ASC, e0.id ASC
+             FOR UPDATE SKIP LOCKED
+             LIMIT $3
+          ) orphan_candidates
+          WHERE e.id = orphan_candidates.id
+         RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
+       )`
+    : `, processamentos_orfaos_removidos AS (
+         SELECT NULL::bigint AS id, 0::bigint AS bytes
+          WHERE FALSE
+       ), eventos_comerciais_orfaos_removidos AS (
+         SELECT NULL::bigint AS id, 0::bigint AS bytes
+          WHERE FALSE
+       )`;
+
   const resultado = await client.query(
     `WITH candidatos AS (
        SELECT id
@@ -1077,57 +1143,7 @@ async function executarBatchJobsPostgresAutoClean(client, {
            AND p.criado_em < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
            AND LOWER(COALESCE(p.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
         RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
-      ), processamentos_orfaos_removidos AS (
-        DELETE FROM engine_processamentos p
-         USING (
-           SELECT p0.id
-             FROM engine_processamentos p0
-            WHERE p0.criado_em IS NOT NULL
-              AND p0.criado_em < NOW() - (GREATEST($2::int, ${RETENCAO_OPERACIONAL_PADRAO_HORAS}, CASE ${TTL_JOB_CASE_SQL} ELSE 12 END)::int * INTERVAL '1 hour')
-              AND LOWER(COALESCE(p0.status, '')) IN (${STATUS_PROCESSAMENTO_TERMINAL_SQL})
-              AND NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j0 WHERE j0.id = p0.job_id)
-            ORDER BY p0.criado_em ASC, p0.id ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT $3
-         ) orphan_candidates
-         WHERE p.id = orphan_candidates.id
-        RETURNING p.id, pg_column_size(p.*)::bigint AS bytes
-      ), eventos_comerciais_orfaos_removidos AS (
-        DELETE FROM engine_eventos_comerciais e
-         USING (
-           SELECT e0.id
-             FROM engine_eventos_comerciais e0
-            WHERE e0.ocorrido_em IS NOT NULL
-              AND e0.ocorrido_em < NOW() - ($4::int * INTERVAL '1 hour')
-              AND e0.job_id IS NULL
-              AND COALESCE(e0.metadata->>'terminalOcorridoEm', '') <> ''
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM engine_universal_queue_items qi
-                 WHERE qi.job_id = e0.job_id
-                    OR (e0.oferta_id IS NOT NULL AND qi.oferta_id = e0.oferta_id)
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM engine_ofertas o
-                 WHERE o.id = e0.oferta_id
-                   AND (
-                     COALESCE(o.atualizada_em, o.criada_em) IS NULL
-                     OR COALESCE(o.atualizada_em, o.criada_em) >= NOW() - ($4::int * INTERVAL '1 hour')
-                     OR NOT (${CONDICAO_OFERTA_TERMINAL_SQL})
-                   )
-              )
-              AND e0.fila_item_id IS NULL
-              AND e0.destino_id IS NULL
-              AND COALESCE(e0.metadata->>'imutavel', 'false') <> 'true'
-              AND LOWER(COALESCE(e0.tipo_evento, '')) !~ '(ack|envi|confirm|destino|fila|credito|histor|send)'
-            ORDER BY e0.ocorrido_em ASC, e0.id ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT $3
-         ) orphan_candidates
-         WHERE e.id = orphan_candidates.id
-        RETURNING e.id, pg_column_size(e.*)::bigint AS bytes
-     ), jobs_removidos AS (
+      )${orphanCtes}, jobs_removidos AS (
        DELETE FROM engine_jobs_cliente j
         USING candidatos c
         WHERE j.id = c.id
@@ -1232,7 +1248,12 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
           return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_jobs_lock_ocupado" };
         }
 
-         const batch = await executarBatchJobsPostgresAutoClean(client, { loteLimite, horasMinimas, horasRetencaoComercial });
+         const batch = await executarBatchJobsPostgresAutoClean(client, {
+           loteLimite,
+           horasMinimas,
+           horasRetencaoComercial,
+           incluirOrfaos: opcoes.canarioPostgres !== true || opcoes.incluirOrfaosNoCanario === true
+         });
          const mutacoesBatch = [
            batch.jobs_removidos,
            batch.processamentos_removidos,
