@@ -219,4 +219,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ! grep -Eiq 'self-hosted|docker compose.*up|/opt/optimus|hostinger|vercel' .github/workflows/validate-auto-clean-mounjaro-pg17.yml
+          if grep -Ev 'grep -Eiq' .github/workflows/validate-auto-clean-mounjaro-pg17.yml | grep -Eiq 'self-hosted|docker compose.*up|/opt/optimus|hostinger|vercel'; then
+            echo 'DEPLOY_GUARD: forbidden deployment marker found' >&2
+            exit 1
+          fi
