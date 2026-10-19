@@ -87,9 +87,9 @@ jobs:
           node --check index.js
           node --check modules/mensageiro/programacoes.scheduler.js
           node --check modules/engine/index.js
-          node --check modules/engine/preflight.service.js
-          node --check modules/engine/executor.service.js
-          node --check modules/engine/distributor.service.js
+          node --check modules/engine/universal-queue-preflight.js
+          node --check modules/engine/universal-queue-executor.adapter.js
+          node --check modules/engine/universal-queue-distributor.adapter.js
           node --check modules/engine/auto-clean/auto-clean.service.js
           npm run audit:encoding
 
