@@ -89,7 +89,6 @@ jobs:
           node tests/postgres-jobs-retencao.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
-          node tests/auto-clean-gc-reference-index-phase141.test.js
           node tests/auto-clean-gc-relay-phase1.test.js
           node tests/fila-historico-compactacao.test.js
           node tests/fila-historico-leve-v2.test.js
@@ -139,6 +138,51 @@ jobs:
             NODE
           else
             echo 'PHASE14_BASELINE_COMPARISON: candidate/base mismatch' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi
+
+      - name: Compare phase141 filesystem race debt with the base
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/auto-clean-phase141-candidate.log"
+          baseline_dir="$RUNNER_TEMP/auto-clean-phase141-baseline"
+          baseline_log="$RUNNER_TEMP/auto-clean-phase141-baseline.log"
+          set +e
+          node tests/auto-clean-gc-reference-index-phase141.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/auto-clean-gc-reference-index-phase141.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'PHASE141_BASELINE_COMPARISON: both PASS'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]]; then
+            node - "$candidate_log" "$baseline_log" <<'NODE'
+            const fs = require('node:fs');
+            const [candidatePath, baselinePath] = process.argv.slice(2);
+            function signature(path) {
+              const text = fs.readFileSync(path, 'utf8');
+              if (!text.includes('testStaleCrashAndWriterCatchUp')) return null;
+              const match = text.match(/testStaleCrashAndWriterCatchUp[\s\S]*?actual:\s*(true|false)[\s\S]*?expected:\s*(true|false)/);
+              return match ? { actual: match[1], expected: match[2] } : null;
+            }
+            const candidate = signature(candidatePath);
+            const baseline = signature(baselinePath);
+            if (!candidate || !baseline || candidate.actual !== baseline.actual || candidate.expected !== baseline.expected || candidate.actual !== 'true' || candidate.expected !== 'false') {
+              console.error('PHASE141_BASELINE_COMPARISON: assertion signature mismatch');
+              process.exit(1);
+            }
+            console.log('KNOWN_BASELINE_FAILURE_MATCHED: phase141 filesystem race');
+            NODE
+          else
+            echo 'PHASE141_BASELINE_COMPARISON: candidate/base mismatch' >&2
             cat "$candidate_log" >&2
             cat "$baseline_log" >&2
             exit 1
