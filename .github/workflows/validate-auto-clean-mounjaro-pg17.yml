@@ -135,7 +135,7 @@ jobs:
               process.exit(1);
             }
             console.log(`KNOWN_BASELINE_FAILURE_MATCHED: phase14 filesystem timestamp watermark (delta=${candidate.delta}ms)`);
-            NODE
+          NODE
           else
             echo 'PHASE14_BASELINE_COMPARISON: candidate/base mismatch' >&2
             cat "$candidate_log" >&2
@@ -180,7 +180,7 @@ jobs:
               process.exit(1);
             }
             console.log('KNOWN_BASELINE_FAILURE_MATCHED: phase141 filesystem race');
-            NODE
+          NODE
           else
             echo 'PHASE141_BASELINE_COMPARISON: candidate/base mismatch' >&2
             cat "$candidate_log" >&2
