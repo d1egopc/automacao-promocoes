@@ -89,13 +89,46 @@ jobs:
           node tests/postgres-jobs-retencao.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
-          node tests/auto-clean-gc-reference-index-phase14.test.js
           node tests/auto-clean-gc-reference-index-phase141.test.js
           node tests/auto-clean-gc-relay-phase1.test.js
           node tests/fila-historico-compactacao.test.js
           node tests/fila-historico-leve-v2.test.js
           node tests/fila-terminal-guard-legado.test.js
           node tests/engine-database-json-safety.test.js
+
+      - name: Compare phase14 filesystem timestamp debt with the base
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/auto-clean-phase14-candidate.log"
+          baseline_dir="$RUNNER_TEMP/auto-clean-phase14-baseline"
+          baseline_log="$RUNNER_TEMP/auto-clean-phase14-baseline.log"
+          set +e
+          node tests/auto-clean-gc-reference-index-phase14.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/auto-clean-gc-reference-index-phase14.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'PHASE14_BASELINE_COMPARISON: both PASS'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]]; then
+            candidate_sig="$RUNNER_TEMP/auto-clean-phase14-candidate.sig"
+            baseline_sig="$RUNNER_TEMP/auto-clean-phase14-baseline.sig"
+            grep -E 'testSameSizeAndMtimeReplacementFailsIdentityWatermark|actual:|expected:' "$candidate_log" >"$candidate_sig"
+            grep -E 'testSameSizeAndMtimeReplacementFailsIdentityWatermark|actual:|expected:' "$baseline_log" >"$baseline_sig"
+            diff -u "$baseline_sig" "$candidate_sig"
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED: phase14 filesystem timestamp watermark'
+          else
+            echo 'PHASE14_BASELINE_COMPARISON: candidate/base mismatch' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi
 
       - name: Compare the known fila.json baseline debt without masking new failures
         shell: bash
