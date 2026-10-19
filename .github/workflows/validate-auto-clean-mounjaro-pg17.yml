@@ -1,0 +1,137 @@
+name: Auto-Clean Mounjaro PostgreSQL 17 validation
+
+on:
+  push:
+    branches:
+      - validation/auto-clean-mounjaro-node24-pg17
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-clean-mounjaro-pg17-validation
+  cancel-in-progress: false
+
+jobs:
+  postgres-17-proof:
+    name: PostgreSQL 17 disposable proof (no deploy)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/auto-clean-mounjaro-node24-pg17'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: auto_clean_ci
+          POSTGRES_USER: auto_clean_ci
+          POSTGRES_PASSWORD: auto_clean_ci_disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auto_clean_ci -d auto_clean_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AUTO_CLEAN_TEST_DATABASE_URL: postgresql://auto_clean_ci:auto_clean_ci_disposable@127.0.0.1:5432/auto_clean_ci
+      DATABASE_URL: ""
+      NODE_ENV: test
+      BASE_SHA: 31c9db301f4a5301d8aec0296b7ede78401d80d4
+    steps:
+      - name: Checkout validation branch only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24 on GitHub-hosted runner
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove ref and runner cannot target production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = push
+          test "$GITHUB_REF" = refs/heads/validation/auto-clean-mounjaro-node24-pg17
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "$DATABASE_URL"
+          test "$AUTO_CLEAN_TEST_DATABASE_URL" = postgresql://auto_clean_ci:auto_clean_ci_disposable@127.0.0.1:5432/auto_clean_ci
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check exact candidate scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --name-only "$BASE_SHA" HEAD | sort | tr '\n' ' ')" = ".github/workflows/validate-auto-clean-mounjaro-pg17.yml modules/engine/auto-clean/auto-clean.service.js tests/auto-clean-postgres-guards.postgres.js tests/optimus-auto-clean-v1-shadow.test.js "
+          node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check tests/optimus-auto-clean-v1-shadow.test.js
+          node --check tests/auto-clean-postgres-guards.postgres.js
+
+      - name: Run disposable PostgreSQL 17 guard harness (skip forbidden)
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/auto-clean-postgres.log"
+          node tests/auto-clean-postgres-guards.postgres.js 2>&1 | tee "$output"
+          ! grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_SKIPPED' "$output"
+          grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_PASS' "$output"
+
+      - name: Run Node 24 retention and regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/postgres-jobs-retencao.test.js
+          node tests/auto-clean-gc-reference-index-phase12.test.js
+          node tests/auto-clean-gc-reference-index-phase13.test.js
+          node tests/auto-clean-gc-reference-index-phase14.test.js
+          node tests/auto-clean-gc-reference-index-phase141.test.js
+          node tests/auto-clean-gc-relay-phase1.test.js
+          node tests/fila-historico-compactacao.test.js
+          node tests/fila-historico-leve-v2.test.js
+          node tests/fila-terminal-guard-legado.test.js
+          node tests/engine-database-json-safety.test.js
+
+      - name: Compare the known fila.json baseline debt without masking new failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_log="$RUNNER_TEMP/auto-clean-candidate-shadow.log"
+          baseline_dir="$RUNNER_TEMP/auto-clean-baseline"
+          baseline_log="$RUNNER_TEMP/auto-clean-baseline-shadow.log"
+          set +e
+          node tests/optimus-auto-clean-v1-shadow.test.js >"$candidate_log" 2>&1
+          candidate_rc=$?
+          set -e
+          git worktree add --detach "$baseline_dir" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          set +e
+          (cd "$baseline_dir" && node tests/optimus-auto-clean-v1-shadow.test.js) >"$baseline_log" 2>&1
+          baseline_rc=$?
+          set -e
+          git worktree remove --force "$baseline_dir"
+          if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+            echo 'SHADOW_BASELINE_COMPARISON: both PASS'
+          elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]] \
+            && grep -q 'testarExecuteFilaJsonSeguro' "$candidate_log" \
+            && grep -q 'testarExecuteFilaJsonSeguro' "$baseline_log" \
+            && grep -q 'false !== true' "$candidate_log" \
+            && grep -q 'false !== true' "$baseline_log"; then
+            echo 'KNOWN_BASELINE_FAILURE_MATCHED: testarExecuteFilaJsonSeguro / false !== true'
+          else
+            echo 'SHADOW_BASELINE_COMPARISON: candidate/base mismatch or new failure' >&2
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            exit 1
+          fi
+
+      - name: Assert no deploy job exists in this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -Eiq 'self-hosted|docker compose.*up|/opt/optimus|hostinger|vercel|deploy:' .github/workflows/validate-auto-clean-mounjaro-pg17.yml
