@@ -24,7 +24,8 @@ const {
   executarJobsPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,
-  executarEventosBrutosPostgresAutoClean
+  executarEventosBrutosPostgresAutoClean,
+  executarHistoricoDefinitivoPostgresAutoClean
 } = require("../modules/engine/auto-clean/auto-clean.service");
 
 const schema = `auto_clean_ci_${process.pid}_${Date.now()}`.replace(/[^a-z0-9_]/gi, "_").toLowerCase();
@@ -42,6 +43,27 @@ CREATE TABLE engine_eventos_comerciais (
   id BIGSERIAL PRIMARY KEY, tipo_evento TEXT NOT NULL, cliente_id TEXT,
   oferta_id BIGINT, job_id BIGINT, fila_item_id TEXT, destino_id TEXT,
   ocorrido_em TIMESTAMPTZ, metadata JSONB DEFAULT '{}'::jsonb
+);
+CREATE TABLE engine_history_items (
+  history_id BIGSERIAL PRIMARY KEY, workspace_id TEXT NOT NULL,
+  source_key TEXT NOT NULL, universal_item_id BIGINT, marketplace TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '', thumbnail_url TEXT, price_text TEXT, category TEXT,
+  commercial_status TEXT NOT NULL CHECK (commercial_status IN ('sent','partial','error')),
+  total_targets INTEGER NOT NULL DEFAULT 0, sent_targets INTEGER NOT NULL DEFAULT 0,
+  failed_targets INTEGER NOT NULL DEFAULT 0, destination_summary TEXT,
+  channels TEXT[] NOT NULL DEFAULT '{}', finalized_at TIMESTAMPTZ NOT NULL,
+  source_origin TEXT, error_stage TEXT, error_code TEXT, error_public_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (workspace_id, source_key), UNIQUE (history_id, workspace_id)
+);
+CREATE TABLE engine_history_targets (
+  history_target_id BIGSERIAL PRIMARY KEY, history_id BIGINT NOT NULL,
+  workspace_id TEXT NOT NULL, destination_id TEXT NOT NULL,
+  destination_name_snapshot TEXT NOT NULL, target_label_snapshot TEXT NOT NULL,
+  channel TEXT NOT NULL, target_key TEXT NOT NULL, status TEXT NOT NULL,
+  provider_message_id TEXT, confirmed_at TIMESTAMPTZ, error_stage TEXT,
+  error_code TEXT, error_public_message TEXT,
+  FOREIGN KEY (history_id, workspace_id) REFERENCES engine_history_items(history_id, workspace_id)
 );
 CREATE TABLE engine_universal_queue_items (
   id BIGSERIAL PRIMARY KEY, evento_id BIGINT, job_id BIGINT, oferta_id BIGINT,
@@ -67,10 +89,34 @@ CREATE INDEX engine_commercial_events_cleanup_idx ON engine_eventos_comerciais (
 CREATE INDEX engine_queue_job_cleanup_idx ON engine_universal_queue_items (job_id, id);
 CREATE INDEX engine_queue_offer_cleanup_idx ON engine_universal_queue_items (oferta_id, id);
 CREATE INDEX engine_queue_event_cleanup_idx ON engine_universal_queue_items (evento_id, id);
+CREATE INDEX engine_history_items_workspace_finalized_idx
+  ON engine_history_items (workspace_id, finalized_at DESC, history_id DESC);
+CREATE INDEX engine_history_targets_workspace_idx
+  ON engine_history_targets (workspace_id, history_id);
 `;
 
 function isoDaysAgo(days) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+async function createHistory(pool, {
+  workspaceId, sourceKey, finalizedAt, universalItemId = null, target = null
+}) {
+  const row = (await pool.query(`INSERT INTO engine_history_items
+    (workspace_id,source_key,universal_item_id,marketplace,title,commercial_status,
+     total_targets,sent_targets,failed_targets,finalized_at)
+    VALUES ($1,$2,$3,'amazon',$4,'sent',1,1,0,$5)
+    RETURNING history_id`, [workspaceId, sourceKey, universalItemId,
+    sourceKey, finalizedAt])).rows[0];
+  if (target) {
+    await pool.query(`INSERT INTO engine_history_targets
+      (history_id,workspace_id,destination_id,destination_name_snapshot,
+       target_label_snapshot,channel,target_key,status,provider_message_id,confirmed_at)
+      VALUES ($1,$2,$3,$4,$5,'whatsapp',$6,'sent',$7,$8)`,
+    [row.history_id, workspaceId, target.destinationId, target.destinationName,
+      target.targetLabel, target.targetKey, `provider-${row.history_id}`, finalizedAt]);
+  }
+  return Number(row.history_id);
 }
 
 async function main() {
@@ -89,6 +135,108 @@ async function main() {
   const queryEngine = async (sql, params = []) => ({ ok: true, resultado: await pool.query(sql, params) });
   try {
     await pool.query(ddl);
+
+    // Definitive history retention: the 7-day display window has a 24-hour
+    // physical grace period. Fixtures are tenant-scoped and disposable.
+    const historySixDays = await createHistory(pool, {
+      workspaceId: "workspace_a", sourceKey: "history-6d",
+      finalizedAt: isoDaysAgo(6)
+    });
+    const historyGrace = await createHistory(pool, {
+      workspaceId: "workspace_a", sourceKey: "history-7d-2h",
+      finalizedAt: new Date(Date.now() - (7 * 24 + 2) * 60 * 60 * 1000).toISOString()
+    });
+    const historyEligibleA = await createHistory(pool, {
+      workspaceId: "workspace_a", sourceKey: "history-8d-a",
+      finalizedAt: new Date(Date.now() - (10 * 24) * 60 * 60 * 1000).toISOString(),
+      target: { destinationId: "dest-history-a", destinationName: "Destino A",
+        targetLabel: "Grupo A", targetKey: "history-a" }
+    });
+    const historyEligibleA2 = await createHistory(pool, {
+      workspaceId: "workspace_a", sourceKey: "history-8d-a2",
+      finalizedAt: new Date(Date.now() - (9 * 24) * 60 * 60 * 1000).toISOString()
+    });
+    const historyEligibleB = await createHistory(pool, {
+      workspaceId: "workspace_b", sourceKey: "history-8d-b",
+      finalizedAt: new Date(Date.now() - (9 * 24) * 60 * 60 * 1000).toISOString()
+    });
+    const liveQueue = (await pool.query(`INSERT INTO engine_universal_queue_items
+      (workspace_id,status,terminal_at) VALUES ('workspace_a','pending',NULL)
+      RETURNING id`)).rows[0].id;
+    const historyProtected = await createHistory(pool, {
+      workspaceId: "workspace_a", sourceKey: "history-live-dependency",
+      finalizedAt: new Date(Date.now() - (10 * 24) * 60 * 60 * 1000).toISOString(),
+      universalItemId: liveQueue
+    });
+
+    const firstHistoryBatch = await executarHistoricoDefinitivoPostgresAutoClean({
+      pool, canarioPostgres: true, workspaceId: "workspace_a"
+    });
+    assert.strictEqual(firstHistoryBatch.ok, true);
+    assert.strictEqual(firstHistoryBatch.historicoItensRemovidos, 1,
+      "canario inicial remove somente um historico elegivel da workspace escolhida");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_targets WHERE history_id=$1`, [historyEligibleA])).rows[0].n, 0,
+    "targets sao removidos antes do item principal");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id=$1`, [historyEligibleA])).rows[0].n, 0);
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id IN ($1,$2)`, [historySixDays, historyGrace])).rows[0].n, 2,
+    "historico dentro da janela de exibicao e da carencia permanece");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id=$1`, [historyProtected])).rows[0].n, 1,
+    "historico referenciado por fila viva permanece protegido");
+
+    const secondHistoryBatch = await executarHistoricoDefinitivoPostgresAutoClean({
+      pool, canarioPostgres: true, workspaceId: "workspace_a"
+    });
+    assert.strictEqual(secondHistoryBatch.historicoItensRemovidos, 1,
+      "segundo ciclo avanca sem ultrapassar o limite do lote");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id=$1`, [historyEligibleA2])).rows[0].n, 0);
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id=$1`, [historyEligibleB])).rows[0].n, 1,
+    "workspace B nao e afetada pela limpeza escopada em A");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_targets ht LEFT JOIN engine_history_items hi
+        ON hi.history_id=ht.history_id AND hi.workspace_id=ht.workspace_id
+      WHERE hi.history_id IS NULL`)).rows[0].n, 0,
+    "nenhum target fica orfao");
+
+    const rollbackHistory = await createHistory(pool, {
+      workspaceId: "workspace_rollback", sourceKey: "history-rollback",
+      finalizedAt: new Date(Date.now() - (9 * 24) * 60 * 60 * 1000).toISOString(),
+      target: { destinationId: "dest-rollback", destinationName: "Destino rollback",
+        targetLabel: "Grupo rollback", targetKey: "history-rollback" }
+    });
+    const failPool = {
+      async connect() {
+        const client = await pool.connect();
+        const query = client.query.bind(client);
+        client.query = async (sql, params) => {
+          if (/DELETE FROM engine_history_items/i.test(sql)) throw new Error("fixture_history_delete_failure");
+          return query(sql, params);
+        };
+        return client;
+      }
+    };
+    const rollback = await executarHistoricoDefinitivoPostgresAutoClean({
+      pool: failPool, canarioPostgres: true, workspaceId: "workspace_rollback"
+    });
+    assert.strictEqual(rollback.ok, false, "falha de SQL impede sucesso do lote");
+    assert.strictEqual(rollback.aplicouMudancas, false, "rollback nao relata exclusao parcial");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_items WHERE history_id=$1`, [rollbackHistory])).rows[0].n, 1,
+    "falha SQL preserva o item principal");
+    assert.strictEqual((await pool.query(`SELECT count(*)::int AS n
+      FROM engine_history_targets WHERE history_id=$1`, [rollbackHistory])).rows[0].n, 1,
+    "falha SQL preserva os targets no rollback");
+
+    const idempotent = await executarHistoricoDefinitivoPostgresAutoClean({
+      pool, canarioPostgres: true, workspaceId: "workspace_a"
+    });
+    assert.strictEqual(idempotent.historicoItensRemovidos, 0,
+      "ciclo repetido nao ressuscita nem duplica historico");
 
     const old = isoDaysAgo(8);
     const now = new Date().toISOString();
@@ -168,7 +316,7 @@ async function main() {
       canarioPostgres: true,
       incluirArquivos: true
     });
-    assert.strictEqual(canarioResumo.totalOrigens, 4, "canario executa somente as quatro etapas PostgreSQL");
+    assert.strictEqual(canarioResumo.totalOrigens, 5, "canario executa somente as cinco etapas PostgreSQL");
     assert.strictEqual(canarioResumo.filasRegravadas, 0, "canario nao regrava fila JSON");
     assert.strictEqual(canarioResumo.arquivosRemovidos, 0, "canario nao remove arquivos ou midias");
     assert.strictEqual(canarioResumo.compactados, 0, "canario nao compacta arquivos");

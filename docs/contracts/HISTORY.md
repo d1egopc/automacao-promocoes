@@ -19,6 +19,21 @@ PostgreSQL aditiva `engine_history_items` + `engine_history_targets`.
 - Fatos anteriores ao cutover não são reconstruídos com configuração atual,
   JSON, shadow, legado ou filas operacionais; isso evitaria inventar snapshots.
 
+### Retenção física
+
+- A exibição comercial continua limitada ao período contratado de 7 dias.
+- A exclusão física automática só considera `finalized_at` com pelo menos 192
+  horas (7 dias mais 24 horas de carência).
+- A rotina é PostgreSQL-only, tenant-scoped por `workspace_id`, usa lotes
+  limitados, transação curta, `FOR UPDATE SKIP LOCKED` e lock advisory próprio.
+- `engine_history_targets` é removida antes de `engine_history_items`; qualquer
+  falha de referência, lock ou consulta faz rollback do lote inteiro.
+- Um item ligado a fila universal ainda viva ou sem terminalidade permanece
+  protegido. Itens do usuário, agendamentos, configurações, mídias, backups,
+  fila JSON e demais arquivos não são candidatos dessa rotina.
+- O executor não reconstitui nem ressuscita históricos antigos: o ciclo só faz
+  `DELETE` em fatos já persistidos e elegíveis, de forma idempotente.
+
 ## Resultados comerciais
 
 - `sent`: pelo menos um ACK confirmado e nenhuma falha terminal factual.

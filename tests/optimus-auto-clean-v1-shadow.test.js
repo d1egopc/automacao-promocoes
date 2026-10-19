@@ -7,6 +7,7 @@ const path = require("path");
 
 const {
   TTL_PADRAO,
+  RETENCAO_HISTORICO_DEFINITIVO_HORAS,
   autoCleanShadowAtivo,
   autoCleanExecuteAtivo,
   criarPoliticaRetencao,
@@ -95,6 +96,10 @@ function criarPoolJobsAutoClean(batches = []) {
       chamadas.push({ sql, params });
       if (sql === "BEGIN" || sql === "COMMIT" || sql === "ROLLBACK") return { rows: [] };
       if (/pg_try_advisory_xact_lock/i.test(sql)) return { rows: [{ locked: true }] };
+      if (/to_regclass\('engine_history_items'\)/i.test(sql)) {
+        return { rows: [{ items: "engine_history_items", targets: "engine_history_targets" }] };
+      }
+      if (/SELECT h\.history_id/i.test(sql)) return { rows: [] };
       if (/WITH candidatos/i.test(sql)) {
         if (/eventos_brutos_removidos/i.test(sql)) {
           const batch = batches[indiceBatch] || {};
@@ -1014,6 +1019,8 @@ async function testarGuardasFilaCanarioEOrfaos() {
   const politica = criarPoliticaRetencao({ canarioPostgres: true });
   assert.strictEqual(politica.loteLimite, 1, "canario PostgreSQL usa lote 1");
   assert.strictEqual(politica.lotesDbPorCiclo, 1, "canario PostgreSQL usa um lote por ciclo");
+  assert.strictEqual(RETENCAO_HISTORICO_DEFINITIVO_HORAS, 192,
+    "historico definitivo usa 7 dias mais 24 horas de carencia");
 
   const { pool, chamadas } = criarPoolJobsAutoClean([{ jobs: 0 }]);
   const resumo = await executarJobsPostgresAutoClean({

@@ -27,6 +27,7 @@ const AUTO_CLEAN_JOBS_LOCK_ID = 902260734;
 const AUTO_CLEAN_OFERTAS_LOCK_ID = 902260735;
 const AUTO_CLEAN_LINKS_LOCK_ID = 902260736;
 const AUTO_CLEAN_EVENTOS_BRUTOS_LOCK_ID = 902260737;
+const AUTO_CLEAN_HISTORICO_LOCK_ID = 902260738;
 
 const TTL_PADRAO = Object.freeze({
   flowNaoAceitaMs: 24 * 60 * 60 * 1000,
@@ -39,12 +40,14 @@ const TTL_PADRAO = Object.freeze({
   linksOperacionaisMs: 12 * 60 * 60 * 1000,
   processamentosMs: 24 * 60 * 60 * 1000,
   eventosComerciaisMs: 7 * 24 * 60 * 60 * 1000,
+  historicoDefinitivoMs: 8 * 24 * 60 * 60 * 1000,
   logsMs: 24 * 60 * 60 * 1000,
   temporariosCacheMs: 24 * 60 * 60 * 1000,
   snapshotsMs: 30 * 24 * 60 * 60 * 1000
 });
 
 const RETENCAO_OPERACIONAL_PADRAO_HORAS = 7 * 24;
+const RETENCAO_HISTORICO_DEFINITIVO_HORAS = 8 * 24;
 const STATUS_PROCESSAMENTO_TERMINAL_SQL = [
   "ok", "concluido", "concluida", "finalizado", "finalizada", "erro",
   "erro_final", "erro_permanente", "falha", "falha_final", "cancelado",
@@ -296,6 +299,11 @@ const STATUS_JOB_REMOVIVEL_AUTO_CLEAN = [
 const TTL_JOB_CASE_SQL = STATUS_JOB_REMOVIVEL_AUTO_CLEAN
   .map(status => `WHEN status = '${status.replace(/'/g, "''")}' THEN ${ttlHorasStatusJob(status)}`)
   .join(" ");
+
+const STATUS_HISTORICO_QUEUE_VIVO_SQL = Array.from(STATUS_FILA_VIVO)
+  .concat(Array.from(STATUS_FILA_PROCESSANDO))
+  .map(status => `'${String(status).replace(/'/g, "''")}'`)
+  .join(",");
 
 const EXT_LOG = new Set([".log", ".out", ".err"]);
 const EXT_TEMP = new Set([".tmp", ".temp", ".old", ".swp"]);
@@ -1254,6 +1262,158 @@ async function executarJobsPostgresAutoClean(opcoes = {}) {
   }
 }
 
+async function executarBatchHistoricoDefinitivoPostgresAutoClean(client, {
+  loteLimite,
+  horasRetencao = RETENCAO_HISTORICO_DEFINITIVO_HORAS,
+  workspaceId = null
+}) {
+  const candidatos = (await client.query(`
+    SELECT h.history_id, h.workspace_id, h.universal_item_id
+      FROM engine_history_items h
+     WHERE h.finalized_at < NOW() - ($1::int * INTERVAL '1 hour')
+       AND ($2::text IS NULL OR h.workspace_id = $2::text)
+       AND NOT EXISTS (
+         SELECT 1
+           FROM engine_universal_queue_items qi
+          WHERE qi.id = h.universal_item_id
+            AND qi.workspace_id = h.workspace_id
+            AND (qi.terminal_at IS NULL OR COALESCE(qi.status, '') IN (${STATUS_HISTORICO_QUEUE_VIVO_SQL}))
+       )
+     ORDER BY h.workspace_id ASC, h.finalized_at ASC, h.history_id ASC
+     FOR UPDATE SKIP LOCKED
+     LIMIT $3`, [horasRetencao, workspaceId, loteLimite])).rows;
+
+  if (!candidatos.length) return {
+    historicoItensRemovidos: 0,
+    historicoTargetsRemovidos: 0,
+    bytesHistoricoItens: 0,
+    bytesHistoricoTargets: 0,
+    candidatos: 0
+  };
+
+  const historyIds = candidatos.map(row => Number(row.history_id));
+  const workspaces = candidatos.map(row => String(row.workspace_id));
+  const queueIds = [...new Set(candidatos
+    .map(row => Number(row.universal_item_id))
+    .filter(id => Number.isSafeInteger(id) && id > 0))];
+  if (queueIds.length) {
+    // Lock referenced queue rows before the final delete.  This closes the
+    // race where a terminal item becomes live after candidate selection.
+    await client.query(`SELECT id FROM engine_universal_queue_items
+      WHERE id = ANY($1::bigint[]) FOR SHARE`, [queueIds]);
+    const liveReference = await client.query(`SELECT 1
+      FROM engine_universal_queue_items
+     WHERE id = ANY($1::bigint[])
+       AND (terminal_at IS NULL OR COALESCE(status, '') IN (${STATUS_HISTORICO_QUEUE_VIVO_SQL}))
+     LIMIT 1`, [queueIds]);
+    if (liveReference.rowCount) throw new Error("auto_clean_historico_referencia_fila_viva");
+  }
+  const alvoParams = [historyIds, workspaces];
+  const targets = await client.query(`
+    DELETE FROM engine_history_targets
+     WHERE (history_id, workspace_id) IN (
+       SELECT * FROM unnest($1::bigint[], $2::text[])
+     )
+    RETURNING pg_column_size(engine_history_targets.*)::bigint AS bytes`, alvoParams);
+  const itens = await client.query(`
+    DELETE FROM engine_history_items
+     WHERE (history_id, workspace_id) IN (
+       SELECT * FROM unnest($1::bigint[], $2::text[])
+     )
+    RETURNING pg_column_size(engine_history_items.*)::bigint AS bytes`, alvoParams);
+
+  if (itens.rowCount !== candidatos.length) {
+    throw new Error("auto_clean_historico_itens_nao_removidos_integralmente");
+  }
+
+  return {
+    historicoItensRemovidos: itens.rowCount,
+    historicoTargetsRemovidos: targets.rowCount,
+    bytesHistoricoItens: itens.rows.reduce((sum, row) => sum + Number(row.bytes || 0), 0),
+    bytesHistoricoTargets: targets.rows.reduce((sum, row) => sum + Number(row.bytes || 0), 0),
+    candidatos: candidatos.length
+  };
+}
+
+async function executarHistoricoDefinitivoPostgresAutoClean(opcoes = {}) {
+  const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
+  const loteLimite = politica.loteLimite;
+  const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
+  const horasRetencao = Math.max(
+    RETENCAO_HISTORICO_DEFINITIVO_HORAS,
+    limitarInteiro(opcoes.horasRetencaoHistorico, RETENCAO_HISTORICO_DEFINITIVO_HORAS,
+      RETENCAO_HISTORICO_DEFINITIVO_HORAS, 365 * 24)
+  );
+  const workspaceId = typeof opcoes.workspaceId === "string" && opcoes.workspaceId.trim()
+    ? opcoes.workspaceId.trim() : null;
+  const pool = opcoes.pool || (typeof opcoes.getEnginePool === "function" ? opcoes.getEnginePool() : getEnginePool());
+  const resumo = {
+    origem: "postgres_historico_definitivo",
+    tipoRegistro: "engine_history_items",
+    modo: "execute",
+    horasRetencao,
+    loteLimite,
+    limiteLotesPorCiclo,
+    workspaceId,
+    lotes: 0,
+    candidatos: 0,
+    historicoItensRemovidos: 0,
+    historicoTargetsRemovidos: 0,
+    espacoLogicoLiberadoBytes: 0,
+    aplicouMudancas: false,
+    vacuumExecutado: false
+  };
+  if (!pool) return { ...resumo, ok: false, failOpen: true, motivo: "banco_indisponivel" };
+
+  try {
+    for (let lote = 0; lote < limiteLotesPorCiclo; lote += 1) {
+      const client = await pool.connect();
+      try {
+        const tables = (await client.query(`SELECT to_regclass('engine_history_items') AS items,
+          to_regclass('engine_history_targets') AS targets`)).rows[0] || {};
+        if (!tables.items || !tables.targets) {
+          return { ...resumo, ok: true, pulado: true, motivo: "historico_definitivo_indisponivel" };
+        }
+        await client.query("BEGIN");
+        const lock = await client.query("SELECT pg_try_advisory_xact_lock($1) AS locked", [AUTO_CLEAN_HISTORICO_LOCK_ID]);
+        if (lock.rows[0]?.locked !== true) {
+          await client.query("ROLLBACK");
+          return { ...resumo, ok: false, failOpen: true, motivo: "auto_clean_historico_lock_ocupado" };
+        }
+        const batch = await executarBatchHistoricoDefinitivoPostgresAutoClean(client, {
+          loteLimite, horasRetencao, workspaceId
+        });
+        await client.query("COMMIT");
+        resumo.candidatos += Number(batch.candidatos || 0);
+        resumo.historicoItensRemovidos += Number(batch.historicoItensRemovidos || 0);
+        resumo.historicoTargetsRemovidos += Number(batch.historicoTargetsRemovidos || 0);
+        resumo.espacoLogicoLiberadoBytes += Number(batch.bytesHistoricoItens || 0) + Number(batch.bytesHistoricoTargets || 0);
+        if (!batch.historicoItensRemovidos) break;
+        resumo.lotes += 1;
+      } catch (erro) {
+        try { await client.query("ROLLBACK"); } catch (_) {}
+        throw erro;
+      } finally {
+        client.release();
+      }
+    }
+    resumo.ok = true;
+    resumo.aplicouMudancas = resumo.historicoItensRemovidos > 0;
+    resumo.espacoLogicoLiberado = bytesLegiveis(resumo.espacoLogicoLiberadoBytes);
+    return resumo;
+  } catch (erro) {
+    return {
+      ...resumo,
+      ok: false,
+      failOpen: true,
+      motivo: "auto_clean_historico_execute_falhou",
+      erroTipo: erro?.code || erro?.name || "erro",
+      aplicouMudancas: false,
+      espacoLogicoLiberado: bytesLegiveis(resumo.espacoLogicoLiberadoBytes)
+    };
+  }
+}
+
 async function executarBatchOfertasPostgresAutoClean(client, { loteLimite, horasMinimas }) {
   const resultado = await client.query(
     `WITH candidatos AS (
@@ -1939,6 +2099,7 @@ async function executarAutoCleanExecute(opcoes = {}) {
     etapas.push(await executarOfertasPostgresAutoClean({ ...opcoes, politica }));
     etapas.push(await executarLinksPostgresAutoClean({ ...opcoes, politica }));
     etapas.push(await executarEventosBrutosPostgresAutoClean({ ...opcoes, politica }));
+    etapas.push(await executarHistoricoDefinitivoPostgresAutoClean({ ...opcoes, politica }));
   }
   // The first canary is PostgreSQL-only. File/fila/GC execution requires an
   // explicit opt-in so the production execute flag cannot rewrite fila.json
@@ -1966,6 +2127,8 @@ async function executarAutoCleanExecute(opcoes = {}) {
     processamentosOrfaosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.processamentosOrfaosRemovidos || 0), 0),
     eventosComerciaisRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisRemovidos || 0), 0),
     eventosComerciaisOrfaosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.eventosComerciaisOrfaosRemovidos || 0), 0),
+    historicoItensRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.historicoItensRemovidos || 0), 0),
+    historicoTargetsRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.historicoTargetsRemovidos || 0), 0),
     arquivosRemovidos: etapas.reduce((soma, etapa) => soma + Number(etapa.arquivosRemovidos || 0), 0),
     filasRegravadas: etapas.reduce((soma, etapa) => soma + Number(etapa.filasRegravadas || 0), 0),
     compactados: etapas.reduce((soma, etapa) => soma + Number(etapa.compactados || 0), 0),
@@ -2077,6 +2240,7 @@ module.exports = {
   ENV_SHADOW,
   ENV_EXECUTE,
   TTL_PADRAO,
+  RETENCAO_HISTORICO_DEFINITIVO_HORAS,
   MATRIZ_STATUS_AUTO_CLEAN,
   flagLigada,
   flagDesligada,
@@ -2088,6 +2252,7 @@ module.exports = {
   executarAutoCleanShadowSeguro,
   executarAutoCleanExecute,
   executarJobsPostgresAutoClean,
+  executarHistoricoDefinitivoPostgresAutoClean,
   executarOfertasPostgresAutoClean,
   executarLinksPostgresAutoClean,
   executarEventosBrutosPostgresAutoClean,
