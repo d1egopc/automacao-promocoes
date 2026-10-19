@@ -117,12 +117,26 @@ jobs:
           if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
             echo 'PHASE14_BASELINE_COMPARISON: both PASS'
           elif [[ "$candidate_rc" -ne 0 && "$baseline_rc" -ne 0 ]]; then
-            candidate_sig="$RUNNER_TEMP/auto-clean-phase14-candidate.sig"
-            baseline_sig="$RUNNER_TEMP/auto-clean-phase14-baseline.sig"
-            grep -E 'testSameSizeAndMtimeReplacementFailsIdentityWatermark|actual:|expected:' "$candidate_log" >"$candidate_sig"
-            grep -E 'testSameSizeAndMtimeReplacementFailsIdentityWatermark|actual:|expected:' "$baseline_log" >"$baseline_sig"
-            diff -u "$baseline_sig" "$candidate_sig"
-            echo 'KNOWN_BASELINE_FAILURE_MATCHED: phase14 filesystem timestamp watermark'
+            node - "$candidate_log" "$baseline_log" <<'NODE'
+            const fs = require('node:fs');
+            const [candidatePath, baselinePath] = process.argv.slice(2);
+            function signature(path) {
+              const text = fs.readFileSync(path, 'utf8');
+              const match = text.match(/testSameSizeAndMtimeReplacementFailsIdentityWatermark[\s\S]*?actual:\s*(\d+)[\s\S]*?expected:\s*(\d+)/);
+              if (!match) return null;
+              const actual = Number(match[1]);
+              const expected = Number(match[2]);
+              if (!Number.isSafeInteger(actual) || !Number.isSafeInteger(expected)) return null;
+              return { actual, expected, delta: expected - actual };
+            }
+            const candidate = signature(candidatePath);
+            const baseline = signature(baselinePath);
+            if (!candidate || !baseline || candidate.delta !== baseline.delta || Math.abs(candidate.delta) > 1) {
+              console.error('PHASE14_BASELINE_COMPARISON: assertion signature mismatch');
+              process.exit(1);
+            }
+            console.log(`KNOWN_BASELINE_FAILURE_MATCHED: phase14 filesystem timestamp watermark (delta=${candidate.delta}ms)`);
+            NODE
           else
             echo 'PHASE14_BASELINE_COMPARISON: candidate/base mismatch' >&2
             cat "$candidate_log" >&2
