@@ -1,0 +1,97 @@
+name: Mission C.3 backend Node 24 validation
+
+on:
+  push:
+    branches:
+      - validation/mission-c3-backend-node24-20261020
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mission-c3-backend-node24
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: GitHub-hosted Linux / Node 24 / PostgreSQL 17 disposable
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/validation/mission-c3-backend-node24-20261020') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/mission-c3-backend-node24-20261020')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: mission_c3_disposable
+          POSTGRES_USER: mission_c3
+          POSTGRES_PASSWORD: mission_c3_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mission_c3 -d mission_c3_disposable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      AUTO_CLEAN_TEST_DATABASE_URL: postgresql://mission_c3:mission_c3_disposable_only@127.0.0.1:5432/mission_c3_disposable
+      DATABASE_URL: ""
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Assert isolated runner and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v24.11.1" || [[ "$(node --version)" == v24.* ]]
+          test "${DATABASE_URL}" = ""
+          test "${AUTO_CLEAN_TEST_DATABASE_URL}" = "postgresql://mission_c3:mission_c3_disposable_only@127.0.0.1:5432/mission_c3_disposable"
+          ! grep -RInE 'self-hosted|/opt/optimus|hostinger|docker compose.*up|vercel.*production' .github/workflows/mission-c3-backend-node24.yml
+          pg_isready -h 127.0.0.1 -p 5432 -U mission_c3 -d mission_c3_disposable
+
+      - name: Syntax and whitespace gates
+        run: |
+          node --check index.js
+          node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check modules/mensageiro/programacoes.scheduler.js
+          node --check modules/mensageiro/storage.js
+          node --check modules/mensageiro/routes.js
+          node --check modules/mensageiro/service.js
+          git diff --check
+
+      - name: Mensageiro and pool focal tests
+        run: |
+          node tests/mensageiro-profile-delete.test.cjs
+          node tests/mensageiro-profile-delete-route.test.cjs
+          node tests/mensageiro-profile-delete-destination.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-multiperfil-isolamento.test.cjs
+          node tests/engine-validator-candidate-pool.test.js
+          node tests/engine-processor-candidate-pool.test.js
+
+      - name: Commercial and template regressions
+        run: |
+          node tests/template-marketplaces-b54.test.js
+          node tests/manual-v2-achados-universal-provenance.test.js
+          node tests/manual-v2-achados-actions.test.js
+
+      - name: Auto-Clean shadow and PostgreSQL 17 disposable proof
+        run: |
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/auto-clean-postgres-guards.postgres.js
