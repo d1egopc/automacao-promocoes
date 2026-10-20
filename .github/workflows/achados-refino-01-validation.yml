@@ -82,7 +82,7 @@ jobs:
           node tests/manual-v2-import-magalu.test.js
           node tests/manual-v2-import-mercadolivre.test.js
           node tests/manual-v2-import-shopee.test.js
-          node tests/auto-clean-recorrente.test.js
+          node tests/auto-clean-gc-relay-phase1.test.js
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/mensageiro-programacoes.test.cjs
           node tests/mensageiro-gerente-grupo.test.cjs
