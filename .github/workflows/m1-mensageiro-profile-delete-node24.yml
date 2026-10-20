@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           git cat-file -e "$BASE_SHA^{commit}"
           git diff --check
-          expected='index.js modules/mensageiro/programacoes.scheduler.js modules/mensageiro/routes.js modules/mensageiro/service.js modules/mensageiro/storage.js tests/mensageiro-profile-delete-route.test.cjs tests/mensageiro-profile-delete.test.cjs'
+          expected='index.js modules/mensageiro/programacoes.scheduler.js modules/mensageiro/routes.js modules/mensageiro/service.js modules/mensageiro/storage.js tests/mensageiro-profile-delete-destination.test.cjs tests/mensageiro-profile-delete-route.test.cjs tests/mensageiro-profile-delete.test.cjs'
           actual="$(git diff --name-only "$BASE_SHA" HEAD -- . ':(exclude).github/workflows/m1-mensageiro-profile-delete-node24.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
           test "$actual" = "$expected"
           node --check index.js
@@ -70,6 +70,7 @@ jobs:
         run: |
           set -euo pipefail
           node tests/mensageiro-profile-delete.test.cjs
+          node tests/mensageiro-profile-delete-destination.test.cjs
           node tests/mensageiro-profile-delete-route.test.cjs
           node tests/mensageiro-perfis.test.cjs
           node tests/mensageiro-programacoes.test.cjs
