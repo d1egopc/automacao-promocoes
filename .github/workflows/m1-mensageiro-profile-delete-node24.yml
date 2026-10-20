@@ -37,7 +37,8 @@ jobs:
           test "${RUNNER_OS:-}" = Linux
           test -z "${DATABASE_URL:-}"
           test -z "${PGPASSWORD:-}"
-          ! grep -Eiq 'self-hosted|hostinger|/opt/optimus|docker compose.*up|vercel.*production|deploy:' .github/workflows/m1-mensageiro-profile-delete-node24.yml
+          forbidden='self-hosted|hostinger|/opt/optimus|docker compose.*up|vercel.*production'
+          ! grep -Eiq "$forbidden" .github/workflows/m1-mensageiro-profile-delete-node24.yml
 
       - name: Set up Node 24
         uses: actions/setup-node@v4
@@ -81,4 +82,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(grep -c '^  deploy:' .github/workflows/m1-mensageiro-profile-delete-node24.yml)" -eq 0
+          colon=':'
+          test "$(grep -c "^  deploy${colon}" .github/workflows/m1-mensageiro-profile-delete-node24.yml)" -eq 0
