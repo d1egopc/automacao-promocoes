@@ -91,6 +91,25 @@ jobs:
           node tests/manual-v2-achados-universal-provenance.test.js
           node tests/manual-v2-achados-actions.test.js
 
+      - name: RIO, Manual V2, History, Radar and multitenancy regressions
+        run: |
+          node tests/engine-distributor-candidate-pool.test.js
+          node tests/universal-flow-queue-preflight.test.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/universal-flow-queue-distributor.test.js
+          node tests/distributor-prioridade-esteira.test.js
+          node tests/manual-v2-idempotency.test.js
+          node tests/manual-v2-destinations.test.js
+          node tests/manual-v2-dispatcher.test.js
+          node tests/ofertas-v2-achados-listas.test.js
+          node tests/clonador-grupos-historico.test.js
+          node tests/fila-historico-v2-leitura.test.js
+          node tests/historico-definitivo-v1.test.js
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-atendimento-perfil-pv.test.cjs
+          node tests/radar-template-fiel.test.js
+          node tests/radar-redirect-diagnostico-persistencia.test.js
+
       - name: Auto-Clean shadow regression
         run: node tests/optimus-auto-clean-v1-shadow.test.js
 
