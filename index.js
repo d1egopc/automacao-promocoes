@@ -26099,6 +26099,7 @@ app.use("/mensageiro", criarRotasMensageiro({
   usuarioTemRecurso,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente,
+  excluirPerfilMensageiro: mensageiro.excluirPerfilMensageiro,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
   getAtendimentoConfigPerfilCliente: mensageiro.getAtendimentoConfigPerfilCliente,

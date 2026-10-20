@@ -3,6 +3,7 @@ const {
   setMensageiroCliente,
   listarClientesMensageiro,
   moduloPossuiAlcanceProprio,
+  perfilExcluidoBloqueia,
   registrarHistoricoAtendimento
 } = require("./storage");
 const {
@@ -248,6 +249,15 @@ function autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperad
   }
   if (assinaturaEsperada && assinaturaProgramacao(programacao) !== assinaturaEsperada) {
     return { ok: false, motivo: "configuracao_alterada" };
+  }
+
+  if (!programacao.perfilId) {
+    const bloqueio = perfilExcluidoBloqueia({
+      config,
+      sessaoId: sessaoDaProgramacao(config, programacao),
+      grupoId: gruposValidosProgramacao(config, programacao)[0] || ""
+    });
+    if (!bloqueio.ok) return { ok: false, motivo: bloqueio.codigo };
   }
 
   if (programacao.perfilId) {
@@ -512,6 +522,8 @@ module.exports = {
   calcularProximoRunAt,
   dentroDaJanela,
   montarPayloadProgramacao,
+  autorizacaoProgramacaoAtual,
+  processarProgramacao,
   rodarProgramacoesMensageiroPendentes,
   iniciarSchedulerProgramacoesMensageiro,
   pararSchedulerProgramacoesMensageiro

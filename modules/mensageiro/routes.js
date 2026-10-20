@@ -14,6 +14,7 @@ const {
   usuarioTemRecurso,
   getMensageiroCliente,
   setMensageiroCliente,
+  excluirPerfilMensageiro,
   getAtendimentoConfigCliente,
   setAtendimentoConfigCliente,
   getAtendimentoConfigPerfilCliente,
@@ -412,6 +413,37 @@ function validarAlcanceServicosMensageiro({ comandos = [], programacoes = [], pe
 const perfilAtendimentoDaWorkspace = (clienteId, perfilId) =>
   (getMensageiroCliente(clienteId)?.perfis || [])
     .find(perfil => perfil.id === perfilId && !perfil.removidoEm);
+
+router.delete("/perfis/:perfilId", (req, res) => {
+  const clienteId = getClienteId(req);
+  if (!mensageiroPermitido(req, clienteId)) {
+    return res.status(403).json({ ok: false, codigo: "acesso_negado" });
+  }
+  const perfilId = String(req.params.perfilId || "").trim();
+  if (req.body?.confirmar !== true) {
+    return res.status(400).json({ ok: false, codigo: "confirmacao_obrigatoria" });
+  }
+  try {
+    if (typeof excluirPerfilMensageiro !== "function") {
+      return res.status(501).json({ ok: false, codigo: "exclusao_indisponivel" });
+    }
+    const resultado = excluirPerfilMensageiro(clienteId, perfilId);
+    return res.json({
+      ok: true,
+      clienteId,
+      perfilId,
+      removido: true,
+      jaExcluido: resultado.jaExcluido === true,
+      mensageiro: resultado.config || getMensageiroCliente(clienteId)
+    });
+  } catch (erro) {
+    return res.status(erro.statusCode || 500).json({
+      ok: false,
+      codigo: erro.code || "erro_excluir_perfil",
+      erro: erro.message || "Falha ao excluir perfil."
+    });
+  }
+});
 
 router.get("/perfis/:perfilId/atendimento", (req, res) => {
   const clienteId = getClienteId(req);

@@ -45,6 +45,7 @@ const {
   listarVinculosContatoPerfilCliente,
   registrarHistoricoAtendimento,
   resolverPerfilMensageiro,
+  perfilExcluidoBloqueia,
   moduloPossuiAlcanceProprio,
   gruposAlcanceModuloPerfil
 } = require("./storage");
@@ -110,6 +111,10 @@ function resolverEventoGrupoMensageiro({ clienteId, config = {}, sessaoId = "", 
   }
 
   if (!perfis.length) {
+    const bloqueio = perfilExcluidoBloqueia({ config, sessaoId, grupoId });
+    if (!bloqueio.ok) {
+      return { ok: false, legado: true, bloqueado: true, codigo: bloqueio.codigo, perfil: null, moduloConfig: null };
+    }
     return {
       ok: grupoPermitido(clienteId, grupoId),
       legado: true,
@@ -987,7 +992,11 @@ async function resolverAtendimentoPrivadoPerfil({ clienteId, sessaoId, sock, men
     return escolhido ? { modo: "perfil", ...escolhido } :
       { modo: "bloqueado", motivo: "vinculo_invalido" };
   }
-  if (!configurados.length) return { modo: "legado" };
+  if (!configurados.length) {
+    const config = getMensageiroCliente(clienteId);
+    const bloqueio = perfilExcluidoBloqueia({ config, sessaoId });
+    return bloqueio.ok ? { modo: "legado" } : { modo: "bloqueado", motivo: bloqueio.codigo };
+  }
   if (elegiveis.length === 1) return { modo: "perfil", ...elegiveis[0] };
   return { modo: "bloqueado", motivo: elegiveis.length ? "contato_ambiguo" : "perfil_desativado" };
 }
@@ -1033,6 +1042,9 @@ function comandoGrupoPermitido(config = {}, comando = {}, grupoId = "", sessaoId
     const gruposPerfil = Array.isArray(perfil.grupos) ? perfil.grupos : [];
     return !gruposPerfil.length || gruposPerfil.includes(grupoId);
   }
+
+  const bloqueioLegado = perfilExcluidoBloqueia({ config, sessaoId, grupoId });
+  if (!bloqueioLegado.ok) return false;
 
   return grupoPermitido(config.clienteId, grupoId);
 }
