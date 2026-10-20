@@ -355,14 +355,27 @@ function registrarAchadoCapacidadeClonador({ clienteId, bufferItem = {} } = {}) 
   return { ok: true, achado: consolidado, atualizado: Boolean(existente) };
 }
 
-function listarAchados(clienteId, { marketplace = "", categoria = "", busca = "", nowMs = Date.now() } = {}) {
+function listarAchados(clienteId, {
+  marketplace = "",
+  categoria = "",
+  busca = "",
+  nowMs = Date.now(),
+  resolverLinkProduto
+} = {}) {
   const id = normalizarClienteId(clienteId);
   const todos = selecionarEstoque(lerAchados(id), nowMs);
   const termo = texto(busca).toLowerCase();
   return todos.filter((item) => (!marketplace || item.marketplace === marketplace) &&
       (!categoria || item.categoria === categoria) &&
       (!termo || item.titulo.toLowerCase().includes(termo) || item.produtoId.toLowerCase().includes(termo)))
-    .map(({ linksComerciais, afiliacaoWorkspace, urlOriginal, urlAfiliada, ...publico }) => publico);
+    .map((item) => {
+      const { linksComerciais, afiliacaoWorkspace, urlOriginal, urlAfiliada, ...publico } = item;
+      if (typeof resolverLinkProduto !== "function") return publico;
+      let link = null;
+      try { link = resolverLinkProduto(item); } catch { link = null; }
+      const urlProduto = texto(link?.urlAfiliada);
+      return urlProduto ? { ...publico, urlProduto } : publico;
+    });
 }
 
 function buscarAchado(clienteId, achadoId, nowMs = Date.now()) {

@@ -91,6 +91,15 @@ async function requisitar(server, method, url, body, headers = {}) {
 (async () => {
   const server = await ouvir();
   try {
+    const lista = await requisitar(server, "GET", "/manual-v2/achados");
+    assert.strictEqual(lista.status, 200);
+    assert.strictEqual(lista.body.achados[0].urlProduto, linkAfiliado,
+      "a listagem expõe somente o link afiliado já validado para a workspace");
+    assert.ok(!Object.hasOwn(lista.body.achados[0], "urlOriginal"),
+      "a listagem não expõe a URL original");
+    assert.ok(!Object.hasOwn(lista.body.achados[0], "afiliacaoWorkspace"),
+      "a listagem não expõe a prova de afiliação");
+
     const produto = await requisitar(server, "GET", `/manual-v2/achados/${achadoId}/produto`);
     assert.strictEqual(produto.status, 200);
     assert.strictEqual(produto.body.produto.urlAfiliada, linkAfiliado);
@@ -99,6 +108,19 @@ async function requisitar(server, method, url, body, headers = {}) {
       JSON.stringify([{ ...achado, urlAfiliada: "not-a-url" }]));
     const linkIndisponivel = await requisitar(server, "GET", `/manual-v2/achados/${achadoId}/produto`);
     assert.strictEqual(linkIndisponivel.status, 422, "link ausente ou inválido não abre destino");
+    const listaSemLink = await requisitar(server, "GET", "/manual-v2/achados");
+    assert.strictEqual(listaSemLink.status, 200);
+    assert.ok(!Object.hasOwn(listaSemLink.body.achados[0], "urlProduto"),
+      "a listagem não publica URL quando a prova afiliada está inválida");
+    fs.writeFileSync(getClienteJsonPath(clienteId, "manual_achados_v2.json"),
+      JSON.stringify([{ ...achado, afiliacaoWorkspace: { ...achado.afiliacaoWorkspace, workspaceId: "cliente_b" } }]));
+    const provaDivergente = await requisitar(server, "GET", "/manual-v2/achados");
+    assert.strictEqual(provaDivergente.status, 200);
+    assert.ok(!Object.hasOwn(provaDivergente.body.achados[0], "urlProduto"),
+      "prova de outra workspace não publica o link afiliado");
+    const produtoProvaDivergente = await requisitar(server, "GET", `/manual-v2/achados/${achadoId}/produto`);
+    assert.strictEqual(produtoProvaDivergente.status, 422,
+      "o endpoint dedicado rejeita prova afiliada de outra workspace");
     fs.writeFileSync(getClienteJsonPath(clienteId, "manual_achados_v2.json"), JSON.stringify([achado]));
 
     const chave = "achado-action-test-0001";
