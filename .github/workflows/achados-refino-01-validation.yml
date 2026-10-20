@@ -1,0 +1,89 @@
+name: Achados Refino 01 validation
+
+on:
+  push:
+    branches:
+      - validation/achados-a7-refino-01-node24
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: achados-a7-refino-01-validation
+  cancel-in-progress: false
+
+jobs:
+  node24-focal:
+    name: GitHub-hosted Linux / Node 24 / Achados focal
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/achados-a7-refino-01-node24' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/achados-a7-refino-01-node24'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_SHA: 0b94161b364dc629523d1994eb9d7eb8d4b296d4
+    steps:
+      - name: Checkout complete validation history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove isolated runner and branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/achados-a7-refino-01-node24
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify functional scope and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git diff --check
+          expected='modules/manual-v2/manual-offers.routes.js modules/manual-v2/ofertas-v2-listas.js tests/manual-v2-achados-actions.test.js'
+          actual="$(git diff --name-only "$BASE_SHA" HEAD -- . ':(exclude).github/workflows/achados-refino-01-validation.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+          test "$actual" = "$expected"
+          node --check modules/manual-v2/manual-offers.routes.js
+          node --check modules/manual-v2/ofertas-v2-listas.js
+          node --check tests/manual-v2-achados-actions.test.js
+
+      - name: Achados and Manual V2 focal tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/manual-v2-achados-actions.test.js
+          node tests/manual-v2-send-route.test.js
+          node tests/manual-v2-routes.test.js
+          node tests/manual-v2-dispatcher.test.js
+          node tests/manual-v2-destinations.test.js
+          node tests/manual-v2-storage.test.js
+          node tests/manual-v2-idempotency.test.js
+          node tests/ofertas-v2-achados-dedupe-memoria.test.js
+          node tests/ofertas-v2-achados-listas.test.js
+
+      - name: Marketplace and protected-module regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/manual-v2-import-aliexpress.test.js
+          node tests/manual-v2-import-amazon.test.js
+          node tests/manual-v2-import-kabum.test.js
+          node tests/manual-v2-import-magalu.test.js
+          node tests/manual-v2-import-mercadolivre.test.js
+          node tests/manual-v2-import-shopee.test.js
+          node tests/auto-clean-recorrente.test.js
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-multiperfil-isolamento.test.cjs
