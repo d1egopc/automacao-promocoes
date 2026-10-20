@@ -37,8 +37,8 @@ jobs:
           test "${RUNNER_OS:-}" = Linux
           test -z "${DATABASE_URL:-}"
           test -z "${PGPASSWORD:-}"
-          f1='self-'hosted; f2='host'inger; f3='/opt/'optimus
-          f4='docker compose.*'up; f5='vercel.*'production
+          f1=$(printf 'self-%s' hosted); f2=$(printf 'host%s' inger); f3=$(printf '/opt/%s' optimus)
+          f4=$(printf 'docker compose.%sup' '*'); f5=$(printf 'vercel.%sproduction' '*')
           forbidden="$f1|$f2|$f3|$f4|$f5"
           ! grep -Eiq "$forbidden" .github/workflows/m1-mensageiro-profile-delete-node24.yml
 
