@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/validation/m1-mensageiro-profile-delete-node24
-          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "${RUNNER_OS:-}" = Linux
           test -z "${DATABASE_URL:-}"
           test -z "${PGPASSWORD:-}"
           ! grep -Eiq 'self-hosted|hostinger|/opt/optimus|docker compose.*up|vercel.*production|deploy:' .github/workflows/m1-mensageiro-profile-delete-node24.yml
