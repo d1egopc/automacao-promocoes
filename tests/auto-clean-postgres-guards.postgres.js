@@ -353,15 +353,37 @@ async function main() {
     });
     assert.strictEqual(primeira.ok, true);
     assert.strictEqual(primeira.jobsRemovidos, 1, "somente job terminal sem dependencias e removido");
-    assert.strictEqual(primeira.processamentosOrfaosRemovidos, 1, "um processamento orfao terminal e removido no lote");
-    assert.strictEqual(primeira.eventosComerciaisOrfaosRemovidos, 1, "somente evento orfao com marco terminal e removido");
+    assert.strictEqual(primeira.processamentosOrfaosRemovidos, 0,
+      "canario padrao nao inclui processamentos orfaos sem autorizacao explicita");
+    assert.strictEqual(primeira.eventosComerciaisOrfaosRemovidos, 0,
+      "canario padrao nao inclui eventos comerciais orfaos sem autorizacao explicita");
     assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_jobs_cliente WHERE id=$1", [livre])).rows[0].n, 0);
     assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_jobs_cliente WHERE id IN ($1,$2,$3)", [fila, ack, desconhecido])).rows[0].n, 3);
     assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_eventos_comerciais WHERE id=$1", [eventoOrfaoProtegido])).rows[0].n, 1);
+    assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL")).rows[0].n, 1,
+      "processamento orfao permanece protegido no canario padrao");
+    assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_eventos_comerciais WHERE id=$1", [eventoOrfaoSeguro])).rows[0].n, 1,
+      "evento orfao terminal permanece protegido no canario padrao");
+
+    const orfaosAutorizados = await executarJobsPostgresAutoClean({
+      pool, queryEngine, canarioPostgres: true, incluirOrfaosNoCanario: true
+    });
+    assert.strictEqual(orfaosAutorizados.ok, true);
+    assert.strictEqual(orfaosAutorizados.jobsRemovidos, 0,
+      "varredura explicita de orfaos nao remove jobs adicionais");
+    assert.strictEqual(orfaosAutorizados.processamentosOrfaosRemovidos, 1,
+      "varredura explicitamente autorizada remove o processamento orfao terminal");
+    assert.strictEqual(orfaosAutorizados.eventosComerciaisOrfaosRemovidos, 1,
+      "varredura explicitamente autorizada remove o evento orfao com marco terminal");
+    assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_processamentos WHERE job_id IS NULL")).rows[0].n, 0);
     assert.strictEqual((await pool.query("SELECT COUNT(*)::int AS n FROM engine_eventos_comerciais WHERE id=$1", [eventoOrfaoSeguro])).rows[0].n, 0);
 
-    const segunda = await executarJobsPostgresAutoClean({ pool, queryEngine, canarioPostgres: true });
+    const segunda = await executarJobsPostgresAutoClean({
+      pool, queryEngine, canarioPostgres: true, incluirOrfaosNoCanario: true
+    });
     assert.strictEqual(segunda.jobsRemovidos, 0, "segunda execucao e idempotente");
+    assert.strictEqual(segunda.processamentosOrfaosRemovidos, 0, "segunda varredura de orfaos e idempotente");
+    assert.strictEqual(segunda.eventosComerciaisOrfaosRemovidos, 0, "segunda varredura de eventos orfaos e idempotente");
 
     // A PostgreSQL-only canary must not expire leases as a side effect.  The
     // normal executor keeps the lease step enabled; this explicit opt-in is
