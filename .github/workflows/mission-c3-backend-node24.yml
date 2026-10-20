@@ -91,7 +91,8 @@ jobs:
           node tests/manual-v2-achados-universal-provenance.test.js
           node tests/manual-v2-achados-actions.test.js
 
-      - name: Auto-Clean shadow and PostgreSQL 17 disposable proof
-        run: |
-          node tests/optimus-auto-clean-v1-shadow.test.js
-          node tests/auto-clean-postgres-guards.postgres.js
+      - name: Auto-Clean shadow regression
+        run: node tests/optimus-auto-clean-v1-shadow.test.js
+
+      - name: PostgreSQL 17 disposable proof
+        run: node tests/auto-clean-postgres-guards.postgres.js
