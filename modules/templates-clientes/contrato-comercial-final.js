@@ -15,8 +15,35 @@ const {
   filtrarLinksResgatePublicaveis
 } = require("./link-resgate-publicavel");
 
+const CAMPOS_TEXTO_COMERCIAL_EXPLICITOS = [
+  "texto",
+  "text",
+  "evidencia",
+  "evidence",
+  "descricao",
+  "description",
+  "valor",
+  "value",
+  "label",
+  "mensagem",
+  "message"
+];
+
 function texto(valor = "") {
-  return String(valor ?? "").trim();
+  if (valor === undefined || valor === null) return "";
+  if (typeof valor === "string" || typeof valor === "number") {
+    const resultado = String(valor).trim();
+    return /^\[object Object\]$/i.test(resultado) ? "" : resultado;
+  }
+  if (!valor || typeof valor !== "object" || Array.isArray(valor)) return "";
+
+  for (const campo of CAMPOS_TEXTO_COMERCIAL_EXPLICITOS) {
+    const candidato = valor[campo];
+    if (typeof candidato !== "string" && typeof candidato !== "number") continue;
+    const resultado = String(candidato).trim();
+    if (resultado && !/^\[object Object\]$/i.test(resultado)) return resultado;
+  }
+  return "";
 }
 
 function normalizarComparacao(valor = "") {

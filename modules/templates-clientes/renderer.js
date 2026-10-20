@@ -22,10 +22,37 @@ const {
 const AVISO_FINAL_PADRAO = "Oferta sujeita à alteração de preço.";
 const TIPOS_AVISO_FINAL = new Set(["aviso_final", "aviso_preco", "aviso_alteracao"]);
 
+const CAMPOS_TEXTO_COMERCIAL_EXPLICITOS = [
+  "texto",
+  "text",
+  "evidencia",
+  "evidence",
+  "descricao",
+  "description",
+  "valor",
+  "value",
+  "label",
+  "mensagem",
+  "message"
+];
+
 function textoUtil(valor) {
   if (valor === undefined || valor === null) return "";
-  const texto = String(valor).trim();
-  if (!texto) return "";
+  let texto = "";
+  if (typeof valor === "string" || typeof valor === "number") {
+    texto = String(valor).trim();
+  } else if (valor && typeof valor === "object" && !Array.isArray(valor)) {
+    for (const campo of CAMPOS_TEXTO_COMERCIAL_EXPLICITOS) {
+      const candidato = valor[campo];
+      if (typeof candidato !== "string" && typeof candidato !== "number") continue;
+      const convertido = String(candidato).trim();
+      if (convertido) {
+        texto = convertido;
+        break;
+      }
+    }
+  }
+  if (!texto || /^\[object Object\]$/i.test(texto)) return "";
   if (["undefined", "null", "nan"].includes(texto.toLowerCase())) return "";
   return texto;
 }
@@ -948,6 +975,7 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
   const blocosRenderizados = [];
   const blocosIgnorados = [];
   let avisoFinalRenderizado = false;
+  const fatosBeneficioRenderizados = new Set();
 
   for (const bloco of ativosOrdenados) {
     const catalogo = getBlocoCatalogo(bloco.tipo);
@@ -978,6 +1006,14 @@ function renderizarTemplatePersonalizado({ oferta = {}, template = {}, canal = "
     if (!textoUtil(linha)) {
       blocosIgnorados.push({ tipo: bloco.tipo, motivo: "sem_dados" });
       continue;
+    }
+    if (["beneficio", "observacao_manual_v2", "descricao_adicional"].includes(bloco.tipo)) {
+      const fato = assinaturaFatoComercial(linha);
+      if (fato && fatosBeneficioRenderizados.has(fato)) {
+        blocosIgnorados.push({ tipo: bloco.tipo, motivo: "beneficio_duplicado" });
+        continue;
+      }
+      if (fato) fatosBeneficioRenderizados.add(fato);
     }
     linhas.push({ tipo: bloco.tipo, linha });
     blocosRenderizados.push(bloco.tipo);

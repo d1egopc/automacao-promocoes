@@ -3,24 +3,24 @@ name: Achados Refino 01 validation
 on:
   push:
     branches:
-      - validation/achados-a7-refino-01-node24
+      - validation/achados-b51-node24
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: achados-a7-refino-01-validation
+  group: achados-b51-validation
   cancel-in-progress: false
 
 jobs:
   node24-focal:
     name: GitHub-hosted Linux / Node 24 / Achados focal
-    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/achados-a7-refino-01-node24' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/achados-a7-refino-01-node24'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/achados-b51-node24' || github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/achados-b51-node24'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      BASE_SHA: 0b94161b364dc629523d1994eb9d7eb8d4b296d4
+      BASE_SHA: ad41bb2af02118be8a2d3ef67177f3a12ddec9a8
     steps:
       - name: Checkout complete validation history
         uses: actions/checkout@v4
@@ -32,9 +32,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/validation/achados-a7-refino-01-node24
+          test "$GITHUB_REF" = refs/heads/validation/achados-b51-node24
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
+          test -z "${PGPASSWORD:-}"
 
       - name: Set up Node 24
         uses: actions/setup-node@v4
@@ -51,12 +52,14 @@ jobs:
           set -euo pipefail
           git cat-file -e "$BASE_SHA^{commit}"
           git diff --check
-          expected='modules/manual-v2/manual-offers.routes.js modules/manual-v2/ofertas-v2-listas.js tests/manual-v2-achados-actions.test.js'
+          expected='modules/template-universal/index.js modules/templates-clientes/contrato-comercial-final.js modules/templates-clientes/normalizador-apresentacao-comercial.js modules/templates-clientes/renderer.js tests/template-amazon-b51.test.js'
           actual="$(git diff --name-only "$BASE_SHA" HEAD -- . ':(exclude).github/workflows/achados-refino-01-validation.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
           test "$actual" = "$expected"
-          node --check modules/manual-v2/manual-offers.routes.js
-          node --check modules/manual-v2/ofertas-v2-listas.js
-          node --check tests/manual-v2-achados-actions.test.js
+          node --check modules/template-universal/index.js
+          node --check modules/templates-clientes/contrato-comercial-final.js
+          node --check modules/templates-clientes/normalizador-apresentacao-comercial.js
+          node --check modules/templates-clientes/renderer.js
+          node --check tests/template-amazon-b51.test.js
 
       - name: Achados and Manual V2 focal tests
         shell: bash
@@ -71,6 +74,9 @@ jobs:
           node tests/manual-v2-idempotency.test.js
           node tests/ofertas-v2-achados-dedupe-memoria.test.js
           node tests/ofertas-v2-achados-listas.test.js
+          node tests/template-amazon-b51.test.js
+          node tests/contrato-comercial-final-universal.test.js
+          node tests/amazon-rio-captcha-guard.test.js
 
       - name: Marketplace and protected-module regressions
         shell: bash
