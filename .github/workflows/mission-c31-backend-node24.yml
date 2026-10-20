@@ -1,0 +1,127 @@
+name: Mission C.3.1 backend debt and regression gate
+
+on:
+  push:
+    branches:
+      - validation/mission-c31-backend-node24-20261020
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mission-c31-backend-node24
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: GitHub-hosted Linux / Node 24 / PostgreSQL 17 disposable
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/validation/mission-c31-backend-node24-20261020') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/mission-c31-backend-node24-20261020')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: mission_c31_disposable
+          POSTGRES_USER: mission_c31
+          POSTGRES_PASSWORD: mission_c31_disposable_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mission_c31 -d mission_c31_disposable"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NODE_ENV: test
+      AUTO_CLEAN_TEST_DATABASE_URL: postgresql://mission_c31:mission_c31_disposable_only@127.0.0.1:5432/mission_c31_disposable
+      DATABASE_URL: ""
+      BASELINE_SHA: 798b86fdb39148213d81065092bc3af357a82150
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Assert isolated runner and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${DATABASE_URL}" = ""
+          test "${AUTO_CLEAN_TEST_DATABASE_URL}" = "postgresql://mission_c31:mission_c31_disposable_only@127.0.0.1:5432/mission_c31_disposable"
+          ! grep -RInE 'self-hosted|/opt/optimus|hostinger|docker compose.*up|vercel.*production' .github/workflows/mission-c31-backend-node24.yml
+          pg_isready -h 127.0.0.1 -p 5432 -U mission_c31 -d mission_c31_disposable
+          node --version
+
+      - name: Syntax and whitespace gates
+        run: |
+          node --check index.js
+          node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check modules/mensageiro/programacoes.scheduler.js
+          node --check modules/engine/universal-queue-distributor.adapter.js
+          git diff --check
+
+      - name: Classify distributor debt against clean baseline
+        shell: bash
+        run: |
+          set -uo pipefail
+          rm -rf /tmp/mission-c31-baseline
+          git worktree add --detach /tmp/mission-c31-baseline "${BASELINE_SHA}"
+          set +e
+          baseline_output=$(node /tmp/mission-c31-baseline/tests/universal-flow-queue-distributor.test.js 2>&1)
+          baseline_status=$?
+          set -e
+          printf '%s\n' "${baseline_output}"
+          test "${baseline_status}" -ne 0
+          grep -q 'destinationNameSnapshot' <<<"${baseline_output}"
+          grep -q 'targetLabelSnapshot' <<<"${baseline_output}"
+          echo 'BASELINE_DEBT_CONFIRMED=destinationNameSnapshot,targetLabelSnapshot'
+
+      - name: Distributor fixture aligned to snapshot contract
+        run: node tests/universal-flow-queue-distributor.test.js
+
+      - name: Run all post-distributor regressions without early skip
+        shell: bash
+        run: |
+          set -uo pipefail
+          failures=()
+          run_case() {
+            local label="$1"; shift
+            echo "=== ${label} ==="
+            "$@"
+            local status=$?
+            if [ "${status}" -ne 0 ]; then failures+=("${label}"); fi
+            return 0
+          }
+          run_case 'distributor priority' node tests/distributor-prioridade-esteira.test.js
+          run_case 'Manual V2 idempotency' node tests/manual-v2-idempotency.test.js
+          run_case 'Manual V2 destinations' node tests/manual-v2-destinations.test.js
+          run_case 'Manual V2 dispatcher' node tests/manual-v2-dispatcher.test.js
+          run_case 'Achados Lists' node tests/ofertas-v2-achados-listas.test.js
+          run_case 'Clonador history' node tests/clonador-grupos-historico.test.js
+          run_case 'History queue' node tests/fila-historico-v2-leitura.test.js
+          run_case 'Definitive History' node tests/historico-definitivo-v1.test.js
+          run_case 'Mensageiro group manager' node tests/mensageiro-gerente-grupo.test.cjs
+          run_case 'Mensageiro profile PV' node tests/mensageiro-atendimento-perfil-pv.test.cjs
+          run_case 'Radar template' node tests/radar-template-fiel.test.js
+          run_case 'Radar redirect diagnostics' node tests/radar-redirect-diagnostico-persistencia.test.js
+          run_case 'Auto-Clean shadow' node tests/optimus-auto-clean-v1-shadow.test.js
+          run_case 'PostgreSQL 17 disposable proof' node tests/auto-clean-postgres-guards.postgres.js
+          if [ "${#failures[@]}" -ne 0 ]; then
+            printf 'POST_DISTRIBUTOR_FAILURES=%s\n' "${failures[*]}"
+            exit 1
+          fi
+          echo 'POST_DISTRIBUTOR_FAILURES=none'

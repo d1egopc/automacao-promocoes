@@ -33,10 +33,13 @@ test("Distributor adapter carries exact workspace, offer, T0 payload and fanout"
   assert.equal(calls[0].workspaceId, "ws_A");
   assert.equal(calls[0].itemPayload, payload);
   assert.deepEqual(calls[0].destinations, [
-    { destinationId: "wa", channel: "whatsapp", targetKey: "g1", connectionId: "s1" },
-    { destinationId: "wa", channel: "whatsapp", targetKey: "g2", connectionId: "s1" },
+    { destinationId: "wa", channel: "whatsapp", targetKey: "g1", connectionId: "s1",
+      destinationNameSnapshot: "wa", targetLabelSnapshot: "g1" },
+    { destinationId: "wa", channel: "whatsapp", targetKey: "g2", connectionId: "s1",
+      destinationNameSnapshot: "wa", targetLabelSnapshot: "g2" },
     { destinationId: "tg", channel: "telegram", targetKey: "bot_1:chat_1",
-      connectionId: "bot_1" }
+      connectionId: "bot_1", destinationNameSnapshot: "tg",
+      targetLabelSnapshot: "bot_1:chat_1" }
   ]);
 });
 
