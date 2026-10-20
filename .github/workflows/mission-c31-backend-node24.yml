@@ -98,14 +98,20 @@ jobs:
         run: |
           set -uo pipefail
           failures=()
+          failure_file="${RUNNER_TEMP}/mission-c31-failures"
+          : > "${failure_file}"
           run_case() {
             local label="$1"; shift
             echo "=== ${label} ==="
+            local file_label="${label// /_}"
+            local output_file="${RUNNER_TEMP}/mission-c31-${file_label}.log"
             set +e
-            "$@"
+            "$@" >"${output_file}" 2>&1
             local status=$?
             set -e
+            cat "${output_file}"
             if [ "${status}" -ne 0 ]; then failures+=("${label}"); fi
+            if [ "${status}" -ne 0 ]; then printf '%s\n' "${label}" >> "${failure_file}"; fi
             return 0
           }
           run_case 'distributor priority' node tests/distributor-prioridade-esteira.test.js
@@ -124,6 +130,57 @@ jobs:
           run_case 'PostgreSQL 17 disposable proof' node tests/auto-clean-postgres-guards.postgres.js
           if [ "${#failures[@]}" -ne 0 ]; then
             printf 'POST_DISTRIBUTOR_FAILURES=%s\n' "${failures[*]}"
+          else
+            echo 'POST_DISTRIBUTOR_FAILURES=none'
+          fi
+
+      - name: Classify post-distributor failures against clean baseline
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          failure_file="${RUNNER_TEMP}/mission-c31-failures"
+          if [ ! -s "${failure_file}" ]; then
+            echo 'POST_DISTRIBUTOR_CLASSIFICATION=none'
+            exit 0
+          fi
+          rm -rf /tmp/mission-c31-baseline-post
+          git worktree add --detach /tmp/mission-c31-baseline-post "${BASELINE_SHA}"
+          ln -s "${GITHUB_WORKSPACE}/node_modules" /tmp/mission-c31-baseline-post/node_modules
+          classified=()
+          unknown=()
+          while IFS= read -r label; do
+            case "${label}" in
+              'History queue')
+                baseline_test='tests/fila-historico-v2-leitura.test.js'
+                signature='GET /fila/status deve continuar existindo'
+                ;;
+              'Radar template')
+                baseline_test='tests/radar-template-fiel.test.js'
+                signature='Cupom: F3L1Z200'
+                ;;
+              *)
+                echo "UNKNOWN_POST_DISTRIBUTOR_FAILURE=${label}"
+                unknown+=("${label}")
+                continue
+                ;;
+            esac
+            set +e
+            baseline_output=$(node "/tmp/mission-c31-baseline-post/${baseline_test}" 2>&1)
+            baseline_status=$?
+            set -e
+            printf '%s\n' "${baseline_output}"
+            if [ "${baseline_status}" -ne 0 ] && grep -Fq "${signature}" <<<"${baseline_output}"; then
+              echo "INHERITED_FAILURE=${label} signature=${signature}"
+              classified+=("${label}")
+            else
+              echo "NEW_FAILURE=${label} baseline_status=${baseline_status}"
+              unknown+=("${label}")
+            fi
+          done < "${failure_file}"
+          git worktree remove --force /tmp/mission-c31-baseline-post
+          if [ "${#unknown[@]}" -ne 0 ]; then
+            printf 'NEW_POST_DISTRIBUTOR_FAILURES=%s\n' "${unknown[*]}"
             exit 1
           fi
-          echo 'POST_DISTRIBUTOR_FAILURES=none'
+          printf 'INHERITED_POST_DISTRIBUTOR_FAILURES=%s\n' "${classified[*]}"
