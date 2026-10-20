@@ -251,15 +251,6 @@ function autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperad
     return { ok: false, motivo: "configuracao_alterada" };
   }
 
-  if (!programacao.perfilId) {
-    const bloqueio = perfilExcluidoBloqueia({
-      config,
-      sessaoId: sessaoDaProgramacao(config, programacao),
-      grupoId: gruposValidosProgramacao(config, programacao)[0] || ""
-    });
-    if (!bloqueio.ok) return { ok: false, motivo: bloqueio.codigo };
-  }
-
   if (programacao.perfilId) {
     const perfil = Array.isArray(config.perfis)
       ? config.perfis.find(item => item?.id === programacao.perfilId)
@@ -273,6 +264,34 @@ function autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperad
   }
 
   return { ok: true, config, programacao };
+}
+
+function autorizacaoDestinoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperada = "", grupoId = "") {
+  const autorizacao = autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperada);
+  if (!autorizacao.ok) return autorizacao;
+
+  const grupo = String(grupoId || "").trim();
+  const gruposValidos = gruposValidosProgramacao(autorizacao.config, autorizacao.programacao);
+  if (!grupo || !gruposValidos.includes(grupo)) {
+    return { ...autorizacao, ok: false, motivo: "grupo_nao_autorizado" };
+  }
+
+  if (!autorizacao.programacao.perfilId) {
+    const bloqueio = perfilExcluidoBloqueia({
+      config: autorizacao.config,
+      sessaoId: sessaoDaProgramacao(autorizacao.config, autorizacao.programacao),
+      grupoId: grupo
+    });
+    if (!bloqueio.ok) {
+      return { ...autorizacao, ok: false, motivo: bloqueio.codigo, perfilId: bloqueio.perfilId };
+    }
+  }
+
+  return {
+    ...autorizacao,
+    sessaoId: sessaoDaProgramacao(autorizacao.config, autorizacao.programacao),
+    grupoId: grupo
+  };
 }
 
 function atualizarProgramacaoSeAutorizada(clienteId, programacaoId, assinaturaEsperada, patch = {}) {
@@ -394,14 +413,17 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     let enviados = 0;
     for (const grupoId of gruposValidos) {
       try {
-        const autorizacaoAntesDoEnvio = autorizacaoProgramacaoAtual(
+        const autorizacaoAntesDoEnvio = autorizacaoDestinoProgramacaoAtual(
           clienteId,
           programacao.id,
-          assinaturaExecucao
+          assinaturaExecucao,
+          grupoId
         );
-        if (!autorizacaoAntesDoEnvio.ok) break;
-        if (sessaoDaProgramacao(autorizacaoAntesDoEnvio.config, autorizacaoAntesDoEnvio.programacao) !== sessaoId) break;
-        if (!gruposValidosProgramacao(autorizacaoAntesDoEnvio.config, autorizacaoAntesDoEnvio.programacao).includes(grupoId)) break;
+        if (!autorizacaoAntesDoEnvio.ok) {
+          if (["perfil_excluido", "grupo_nao_autorizado"].includes(autorizacaoAntesDoEnvio.motivo)) continue;
+          break;
+        }
+        if (autorizacaoAntesDoEnvio.sessaoId !== sessaoId) break;
         const statusAntesDoEnvio = typeof deps.getStatusSessao === "function"
           ? deps.getStatusSessao(sessaoId)
           : "";
@@ -523,6 +545,7 @@ module.exports = {
   dentroDaJanela,
   montarPayloadProgramacao,
   autorizacaoProgramacaoAtual,
+  autorizacaoDestinoProgramacaoAtual,
   processarProgramacao,
   rodarProgramacoesMensageiroPendentes,
   iniciarSchedulerProgramacoesMensageiro,

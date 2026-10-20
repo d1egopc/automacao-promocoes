@@ -615,6 +615,7 @@ function normalizarPerfisExcluidos(perfis = []) {
         nome: String(raw.nome || "").trim().slice(0, 80),
         sessaoId: String(raw.sessaoId || "").trim(),
         grupos: normalizarListaPalavras(raw.grupos),
+        limpezaExclusivaPendente: raw.limpezaExclusivaPendente === true,
         removidoEm: String(raw.removidoEm || "").trim() || new Date().toISOString()
       };
     })
@@ -1453,6 +1454,33 @@ function removerDadosExclusivosPerfil(clienteId, perfilId) {
   writeClienteJson(clienteId, "mensageiro-config.json", proximo);
 }
 
+function atualizarPendenciaLimpezaPerfil(clienteId, perfilId, pendente) {
+  const atual = getMensageiroCliente(clienteId);
+  const tombstones = normalizarPerfisExcluidos(atual.perfisExcluidos);
+  if (!tombstones.some((item) => item.perfilId === perfilId)) {
+    throw erroContratoMensageiro("perfil_tombstone_ausente", "Tombstone do perfil nao encontrado.", { perfilId });
+  }
+  return setMensageiroCliente(clienteId, {
+    perfisExcluidos: tombstones.map((item) => item.perfilId === perfilId
+      ? { ...item, limpezaExclusivaPendente: pendente === true }
+      : item)
+  });
+}
+
+function concluirLimpezaExclusivaPerfil(clienteId, perfilId) {
+  removerDadosExclusivosPerfil(clienteId, perfilId);
+  try {
+    return atualizarPendenciaLimpezaPerfil(clienteId, perfilId, false);
+  } catch (error) {
+    // Keep the durable marker pending if the final publication fails. A retry
+    // must be able to finish the cleanup instead of reporting false success.
+    try {
+      atualizarPendenciaLimpezaPerfil(clienteId, perfilId, true);
+    } catch {}
+    throw error;
+  }
+}
+
 function excluirPerfilMensageiro(clienteId, perfilId) {
   const id = String(perfilId || "").trim();
   if (!id || id === PERFIL_LEGADO_ID) {
@@ -1463,8 +1491,13 @@ function excluirPerfilMensageiro(clienteId, perfilId) {
   const perfil = (atual.perfis || []).find((item) => item.id === id);
   const bloqueios = normalizarPerfisExcluidos(atual.perfisExcluidos);
   if (!perfil) {
-    if (bloqueios.some((item) => item.perfilId === id)) {
-      return { ok: true, jaExcluido: true, perfilId: id, config: atual };
+    const tombstone = bloqueios.find((item) => item.perfilId === id);
+    if (tombstone) {
+      if (tombstone.limpezaExclusivaPendente) {
+        const config = concluirLimpezaExclusivaPerfil(clienteId, id);
+        return { ok: true, jaExcluido: true, limpezaConcluida: true, perfilId: id, config };
+      }
+      return { ok: true, jaExcluido: true, limpezaConcluida: true, perfilId: id, config: atual };
     }
     throw erroContratoMensageiro("perfil_nao_encontrado", "Perfil nao pertence ao workspace.");
   }
@@ -1480,6 +1513,7 @@ function excluirPerfilMensageiro(clienteId, perfilId) {
     nome: perfil.nome,
     sessaoId: perfil.sessaoId,
     grupos: [...grupos].filter(Boolean),
+    limpezaExclusivaPendente: true,
     removidoEm: new Date().toISOString()
   };
   const proximo = setMensageiroCliente(clienteId, {
@@ -1493,8 +1527,8 @@ function excluirPerfilMensageiro(clienteId, perfilId) {
   });
 
   // Dados privados do perfil são removidos somente no arquivo da própria workspace.
-  removerDadosExclusivosPerfil(clienteId, id);
-  return { ok: true, jaExcluido: false, perfilId: id, config: proximo };
+  const config = concluirLimpezaExclusivaPerfil(clienteId, id);
+  return { ok: true, jaExcluido: false, limpezaConcluida: true, perfilId: id, config };
 }
 
 function listarClientesMensageiro() {
