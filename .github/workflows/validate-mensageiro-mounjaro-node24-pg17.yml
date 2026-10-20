@@ -83,7 +83,10 @@ jobs:
           set -euo pipefail
           git diff --check
           changed="$(git diff --name-only "$FUNCTIONAL_SHA" HEAD | sort | tr '\n' ' ')"
-          test "$changed" = ".github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml "
+          expected="$(printf '%s\n' \
+            '.github/workflows/validate-mensageiro-mounjaro-node24-pg17.yml' \
+            'tests/auto-clean-postgres-guards.postgres.js' | sort | tr '\n' ' ')"
+          test "$changed" = "$expected"
           node --check index.js
           node --check modules/mensageiro/programacoes.scheduler.js
           node --check modules/engine/index.js
