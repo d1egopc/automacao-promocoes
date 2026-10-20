@@ -414,6 +414,38 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
   return oferta;
 }
 
+function provaImportadorLegado(achado = {}, clienteId = "", marketplace = "", url = "", credenciais = {}) {
+  if (texto(achado.clienteId) !== texto(clienteId) ||
+      texto(achado.identidadeProdutoVerificada?.origem) !== "engine_importer" ||
+      !texto(achado.identidadeProdutoVerificada?.marketplace) ||
+      texto(achado.identidadeProdutoVerificada.marketplace) !== marketplace ||
+      texto(achado.identidadeProdutoVerificada?.id) !== texto(achado.produtoId)) return {};
+  let parsed;
+  try { parsed = new URL(url); } catch { return {}; }
+  if (!["http:", "https:"].includes(parsed.protocol)) return {};
+  const host = parsed.hostname.toLowerCase();
+  if (marketplace === "amazon") {
+    const tagEsperada = texto(credenciais.trackingId || credenciais.partnerTag ||
+      credenciais.tag || credenciais.affiliateTag);
+    const tagAtual = texto(parsed.searchParams.get("tag"));
+    if (!tagEsperada || !tagAtual || tagAtual !== tagEsperada ||
+        !(host === "amzn.to" || host.endsWith(".amazon.com") || host.endsWith(".amazon.com.br"))) return {};
+  } else if (marketplace === "mercadolivre") {
+    if (!(host === "meli.la" || host.endsWith(".mercadolivre.com") || host.endsWith(".mercadolivre.com.br")) ||
+        texto(url) === texto(achado.urlOriginal)) return {};
+  } else if (marketplace === "kabum") {
+    if (!(host === "www.awin1.com" || host.endsWith(".awin1.com") || host.endsWith(".kabum.com.br")) ||
+        texto(url) === texto(achado.urlOriginal)) return {};
+  } else return {};
+  const urlOriginal = texto(achado.urlOriginal);
+  if (!urlOriginal) return {};
+  return {
+    marketplace, workspaceId: texto(clienteId), papel: "produto",
+    urlOriginal, urlAfiliadaWorkspace: texto(url), urlFinalPublicada: texto(url),
+    origemConversao: "oferta_universal_validada_legada", conversaoStatus: "convertida"
+  };
+}
+
 /**
  * Retorna somente um link de produto já afiliado e comprovado para a workspace.
  * A leitura não recaptura, não expande URLs e não gera uma nova conversão.
@@ -424,8 +456,13 @@ function linkAfiliadoAchado(achado = {}, clienteId = "", deps = {}) {
   const integracao = typeof deps.getIntegracaoCliente === "function"
     ? deps.getIntegracaoCliente(id, marketplace) || {} : {};
   const credenciais = integracao.credenciais || integracao || {};
+  const provaSalva = achado.afiliacaoWorkspace && typeof achado.afiliacaoWorkspace === "object"
+    ? achado.afiliacaoWorkspace : {};
+  const provaPrincipal = Object.keys(provaSalva).length
+    ? provaSalva
+    : provaImportadorLegado(achado, id, marketplace, texto(achado.urlAfiliada), credenciais);
   const candidatos = [
-    { url: texto(achado.urlAfiliada), prova: achado.afiliacaoWorkspace || {} },
+    { url: texto(achado.urlAfiliada), prova: provaPrincipal },
     ...lista(achado.linksComerciais).map((link) => ({
       url: texto(link?.urlAfiliadaWorkspace || link?.urlAfiliada),
       prova: link?.afiliacaoWorkspace || {}

@@ -21,10 +21,26 @@ function erro(codigo) { const e = new Error(codigo); e.codigo = codigo; e.status
 const CAMPOS_PROVA = ["marketplace", "workspaceId", "appId", "affiliateIdEsperado", "affiliateIdDetectado",
   "appKey", "trackingIdEnviado", "papel", "urlOriginal", "urlAfiliadaWorkspace", "urlFinalPublicada",
   "urlFinalExpandida", "origemConversao", "conversaoStatus", "motivoConversao", "assinatura"];
+const MARKETPLACES_PROVA_UNIVERSAL = new Set(["amazon", "mercadolivre", "kabum"]);
 function provaCompacta(valor) {
   const prova = objeto(valor);
   return Object.fromEntries(CAMPOS_PROVA.filter((campo) => Object.hasOwn(prova, campo))
     .map((campo) => [campo, texto(prova[campo])]));
+}
+function provaOfertaUniversal(universal, clienteId) {
+  const marketplace = texto(universal?.marketplace).toLowerCase();
+  if (!MARKETPLACES_PROVA_UNIVERSAL.has(marketplace) ||
+      texto(universal?.workspaceId) !== texto(clienteId) ||
+      texto(universal?.afiliacao?.statusConversao) !== "convertida") return {};
+  const url = texto(universal?.afiliacao?.urlAfiliada);
+  const urlOriginal = texto(universal?.produto?.urlOriginal || universal?.produto?.urlCanonica);
+  const urlCanonica = texto(universal?.produto?.urlCanonica);
+  if (!url || !urlOriginal || url === urlOriginal || url === urlCanonica) return {};
+  return {
+    marketplace, workspaceId: texto(clienteId), papel: "produto",
+    urlOriginal, urlAfiliadaWorkspace: url, urlFinalPublicada: url,
+    origemConversao: "oferta_universal_validada", conversaoStatus: "convertida"
+  };
 }
 function linksCompactos(links, marketplace) {
   if (!["shopee", "aliexpress"].includes(marketplace)) return [];
@@ -227,6 +243,11 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
 
   const capturadoEm = texto(capturedAt || universal.criadoEm || new Date().toISOString());
   if (!Number.isFinite(Date.parse(capturadoEm))) return { ok: false, motivo: "captura_sem_tempo" };
+  const provaMetadata = objeto(metadata.afiliacaoWorkspace);
+  const provaPersistida = Object.keys(provaMetadata).length
+    ? (["shopee", "aliexpress"].includes(universal.marketplace)
+      ? provaCompacta(provaMetadata) : provaMetadata)
+    : provaOfertaUniversal(universal, id);
   const achado = {
     id: String(ofertaId), clienteId: id, marketplace: universal.marketplace,
     titulo: texto(universal.produto.titulo), produtoId: texto(universal.produto.idExterno),
@@ -250,8 +271,7 @@ function registrarAchado({ clienteId, ofertaId, ofertaUniversal, metadata = {}, 
     urlAfiliada: texto(universal.afiliacao.urlAfiliada),
     // Somente a evidência de saída do importer; nunca aceitar esses campos da API pública.
     linksComerciais: linksCompactos(metadata.linksComerciais, universal.marketplace),
-    afiliacaoWorkspace: ["shopee", "aliexpress"].includes(universal.marketplace)
-      ? provaCompacta(metadata.afiliacaoWorkspace) : objeto(metadata.afiliacaoWorkspace),
+    afiliacaoWorkspace: provaPersistida,
     capturadoEm,
     ultimaObservacaoEm: capturadoEm
   };
