@@ -155,8 +155,8 @@ test("M3.2.1 — fence persistente sobrevive ao restart e não migra por padrão
   first.markMigrated("workspace-a", { source: "test" });
   const restarted = createPersistentWorkspaceFence({ filePath: fencePath });
   assert.equal(restarted.isMigrated("workspace-a"), true);
-  restarted.markLegacy("workspace-a");
-  assert.equal(createPersistentWorkspaceFence({ filePath: fencePath }).isMigrated("workspace-a"), false);
+  assert.throws(() => restarted.markLegacy("workspace-a"), /fence_reversao_bloqueada/);
+  assert.equal(createPersistentWorkspaceFence({ filePath: fencePath }).isMigrated("workspace-a"), true);
 });
 
 test("M3.2.1 — ingressos reais usam V3 para workspace migrada e nunca fazem fallback silencioso", async () => {

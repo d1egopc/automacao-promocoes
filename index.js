@@ -26200,7 +26200,12 @@ function getSockMensageiroLegacySeguro(sessaoId) {
   const id = String(sessaoId || "").trim();
   const meta = sessoesMeta?.[id] || {};
   const workspaceId = String(meta.workspaceId || meta.clienteId || "").trim();
-  if (workspaceId && mensageiroV3Routes.fence.v3Required(workspaceId)) return null;
+  try {
+    if (workspaceId && mensageiroV3Routes.fence.v3Required(workspaceId)) return null;
+  } catch (error) {
+    console.warn("[MENSAGEIRO-V3-FENCE-BLOCKED]", error?.message || String(error));
+    return null;
+  }
   return sessoes[id];
 }
 

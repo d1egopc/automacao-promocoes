@@ -53,17 +53,20 @@ jobs:
           node --check modules/mensageiro-v3/adapter.js
           node --check modules/mensageiro-v3/handler-adapters.js
           node --check modules/mensageiro-v3/handler-bridge.js
+          node --check modules/mensageiro-v3/durable-path.js
           node --check modules/mensageiro-v3/routes.js
           node --check modules/mensageiro-v3/workspace-fence.js
           node --check modules/mensageiro-v3/src/v3/store.js
           node --check modules/mensageiro-v3/src/v3/scheduler.js
           node --check tests/mensageiro-v3-m33-persistence.test.cjs
+          node --check tests/mensageiro-v3-m331-durability.test.cjs
           npm run audit:encoding
           git diff --check origin/main...HEAD
 
       - name: V3 persistence, routes, fence, and real handler gates
         run: |
           node --test --test-concurrency=1 tests/mensageiro-v3-m33-persistence.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m331-durability.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m32-integration.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-routes.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m322-real-handlers.test.cjs

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { assertAbsolute, assertDurableStorage } = require("../../durable-path");
 
 const SCHEMA_VERSION = 3;
 
@@ -22,7 +23,7 @@ function nowIso(clock) {
 }
 
 function emptyState() {
-  return { schemaVersion: SCHEMA_VERSION, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} } };
+  return { schemaVersion: SCHEMA_VERSION, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} }, workspaceFences: {} };
 }
 
 function ensureState(state) {
@@ -33,6 +34,7 @@ function ensureState(state) {
   base.deletedIds = base.deletedIds && typeof base.deletedIds === "object" ? base.deletedIds : { profiles: {}, schedules: {} };
   base.deletedIds.profiles ||= {};
   base.deletedIds.schedules ||= {};
+  base.workspaceFences = base.workspaceFences && typeof base.workspaceFences === "object" ? base.workspaceFences : {};
   return base;
 }
 
@@ -48,17 +50,25 @@ function freshWorkspace(workspaceId) {
 }
 
 class V3Store {
-  constructor({ filePath, clock = Date.now } = {}) {
+  constructor({ filePath, clock = Date.now, requireExisting = false } = {}) {
     if (!filePath) throw new Error("filePath_obrigatorio");
-    this.filePath = filePath;
+    this.filePath = assertAbsolute(filePath, "filePath_invalido");
+    if (requireExisting) assertDurableStorage(this.filePath);
     this.clock = clock;
-    this.lockPath = `${filePath}.lock`;
+    this.lockPath = `${this.filePath}.lock`;
+    this.migrationMarkerPath = `${this.filePath}.migration-authority`;
     this.state = ensureState(this.read());
   }
 
   read() {
     try { return JSON.parse(fs.readFileSync(this.filePath, "utf8")); }
-    catch (error) { if (error.code === "ENOENT") return emptyState(); throw error; }
+    catch (error) {
+      if (error.code === "ENOENT") {
+        if (fs.existsSync(this.migrationMarkerPath)) throw new Error("mensageiro_v3_authority_missing");
+        return emptyState();
+      }
+      throw error;
+    }
   }
 
   reload() { this.state = ensureState(this.read()); return clone(this.state); }
@@ -114,6 +124,33 @@ class V3Store {
     return workspace;
   }
 
+  _fenceEntry(workspaceId) {
+    const idValue = String(workspaceId || "").trim();
+    if (!idValue) throw new Error("workspace_obrigatoria");
+    return this.state.workspaceFences[idValue] || { status: "LEGACY", revision: 0 };
+  }
+
+  getWorkspaceFence(workspaceId) { return clone(this._fenceEntry(workspaceId)); }
+
+  transitionWorkspaceFence(workspaceId, nextStatus, details = {}) {
+    const allowed = { LEGACY: ["PREPARING"], PREPARING: ["QUIESCED"], QUIESCED: ["V3_MIGRATED"], V3_MIGRATED: [] };
+    return this._mutate(() => {
+      const idValue = String(workspaceId || "").trim();
+      if (!idValue || !Object.prototype.hasOwnProperty.call(allowed, nextStatus)) throw new Error("fence_estado_invalido");
+      const current = this._fenceEntry(idValue);
+      if (current.status === nextStatus) return clone(current);
+      if (!allowed[current.status]?.includes(nextStatus)) throw new Error("fence_transicao_invalida");
+      const next = { ...current, ...clone(details), status: nextStatus, revision: Number(current.revision || 0) + 1, updatedAt: nowIso(this.clock) };
+      if (nextStatus === "V3_MIGRATED") {
+        fs.mkdirSync(path.dirname(this.migrationMarkerPath), { recursive: true });
+        fs.writeFileSync(this.migrationMarkerPath, JSON.stringify({ workspaceId: idValue, revision: next.revision, at: next.updatedAt }), { mode: 0o600 });
+      }
+      this.state.workspaceFences[idValue] = next;
+      this._touch(this._workspace(idValue, true), "workspace_fence_transition", { status: nextStatus, fenceRevision: next.revision });
+      return next;
+    });
+  }
+
   _persist() {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
@@ -124,25 +161,32 @@ class V3Store {
       // Windows disposable fixtures may reject fsync on this handle. Linux
       // CI/production keeps the durability barrier required by the contract.
       if (process.platform !== "win32") fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
+    } catch (error) {
+      try { fs.closeSync(fd); } catch {}
+      try { fs.rmSync(tmp, { force: true }); } catch {}
+      throw error;
     }
-    if (process.platform === "win32" && fs.existsSync(this.filePath)) {
-      // Windows does not replace an existing file with renameSync. The
-      // production/CI path is Linux and remains a same-filesystem rename;
-      // this fallback keeps the local disposable harness usable on Windows.
-      fs.copyFileSync(tmp, this.filePath);
-      fs.rmSync(tmp, { force: true });
-    } else {
-      fs.renameSync(tmp, this.filePath);
-      if (process.platform !== "win32") {
-        try {
-          const dirFd = fs.openSync(dir, "r");
-          try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
-        } catch (error) {
-          if (error.code !== "EINVAL" && error.code !== "EISDIR") throw error;
+    fs.closeSync(fd);
+    try {
+      if (process.platform === "win32" && fs.existsSync(this.filePath)) {
+        // Windows disposable fixtures may reject rename-over-open-file. The
+        // production/CI path is Linux and remains same-filesystem rename.
+        fs.copyFileSync(tmp, this.filePath);
+        fs.rmSync(tmp, { force: true });
+      } else {
+        fs.renameSync(tmp, this.filePath);
+        if (process.platform !== "win32") {
+          try {
+            const dirFd = fs.openSync(dir, "r");
+            try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+          } catch (error) {
+            if (error.code !== "EINVAL" && error.code !== "EISDIR") throw error;
+          }
         }
       }
+    } catch (error) {
+      try { fs.rmSync(tmp, { force: true }); } catch {}
+      throw error;
     }
   }
 

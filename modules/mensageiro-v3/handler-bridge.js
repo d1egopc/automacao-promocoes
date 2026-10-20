@@ -27,11 +27,23 @@ function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {
     const cardName = String(card || "").trim();
     if (!workspace || !profile || !CARD_NAMES.includes(cardName)) return { ok: false, blocked: true, reason: "contexto_v3_invalido" };
 
-    if (!fence.v3Required(workspace)) {
+    let v3Required;
+    let legacyAllowed;
+    try {
+      v3Required = fence.v3Required(workspace) === true;
+      legacyAllowed = typeof fence.legacyAllowed === "function" ? fence.legacyAllowed(workspace) === true : !v3Required;
+    } catch (error) {
+      logger({ workspaceId: workspace, profileId: profile, card: cardName, reason: "fence_indisponivel", error: error?.message || String(error) });
+      return { ok: false, blocked: true, reason: "fence_indisponivel" };
+    }
+
+    if (!v3Required && legacyAllowed) {
       const legacy = legacyHandlers[cardName];
       if (typeof legacy !== "function") return { ok: false, blocked: true, reason: "handler_legado_indisponivel" };
       return { ok: true, mode: "legacy", result: await legacy(args) };
     }
+
+    if (!v3Required) return { ok: false, blocked: true, reason: "fence_transicao_incompleta" };
 
     const cardAtivo = current => cardName === "attendance"
       ? ["attendance", "faq", "flows", "quickReplies"].some(name => current?.cards?.[name]?.active === true)

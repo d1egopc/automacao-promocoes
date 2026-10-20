@@ -1,21 +1,25 @@
 "use strict";
 
 const express = require("express");
-const path = require("node:path");
 const { V3Store } = require("./src/v3/store");
 const { buildViewModel } = require("./src/v3/view-model");
 const { createPersistentWorkspaceFence } = require("./workspace-fence");
+const { resolveDurablePath, assertDurableStorage } = require("./durable-path");
 
 const CARD_NAMES = new Set(["scheduled", "commands", "attendance", "groupManager", "welcome", "farewell", "faq", "flows", "quickReplies"]);
 
 function criarRotasMensageiroV3(deps = {}) {
   const router = express.Router();
-  const store = deps.store || new V3Store({
-    filePath: deps.filePath || process.env.MENSAGEIRO_V3_STATE_PATH || path.join(process.cwd(), "data", "mensageiro-v3", "state.json")
+  const paths = deps.store ? null : resolveDurablePath({
+    statePath: deps.filePath,
+    fencePath: deps.fencePath || (deps.filePath ? `${deps.filePath}.fence` : undefined),
+    dataDir: deps.dataDir
   });
-  const fence = deps.fence || createPersistentWorkspaceFence({
-    filePath: deps.fencePath || process.env.MENSAGEIRO_V3_FENCE_PATH || path.join(process.cwd(), "data", "mensageiro-v3", "workspace-fence.json")
-  });
+  if (!deps.store) assertDurableStorage(paths.statePath, { createParent: true });
+  const store = deps.store || new V3Store({ filePath: paths.statePath });
+  const fence = deps.fence || (deps.filePath || deps.fencePath
+    ? createPersistentWorkspaceFence({ filePath: paths.fencePath })
+    : createPersistentWorkspaceFence({ store }));
 
   function workspace(req) {
     const value = typeof deps.getClienteId === "function" ? deps.getClienteId(req) : "";
@@ -29,6 +33,13 @@ function criarRotasMensageiroV3(deps = {}) {
       return null;
     }
     return id;
+  }
+
+  function fenceStatus(res, workspaceId) {
+    try { return fence.status ? fence.status(workspaceId) : (fence.isMigrated(workspaceId) ? "V3_MIGRATED" : "LEGACY"); }
+    catch (error) {
+      return res.status(503).json({ ok: false, codigo: error.code || error.message || "mensageiro_v3_autoridade_indisponivel" });
+    }
   }
 
   function profileOr404(res, workspaceId, profileId) {
@@ -48,7 +59,8 @@ function criarRotasMensageiroV3(deps = {}) {
 
   router.get("/state", (req, res) => {
     const id = allowed(req, res); if (!id) return;
-    return res.json({ ok: true, source: "mensageiro_v3", migrated: fence.isMigrated(id), ...view(id) });
+    const status = fenceStatus(res, id); if (!status) return;
+    return res.json({ ok: true, source: "mensageiro_v3", migrated: status === "V3_MIGRATED", fenceStatus: status, ...view(id) });
   });
 
   router.get("/profiles", (req, res) => {
@@ -160,8 +172,9 @@ function criarRotasMensageiroV3(deps = {}) {
 
   router.get("/status", (req, res) => {
     const id = allowed(req, res); if (!id) return;
+    const status = fenceStatus(res, id); if (!status) return;
     const current = view(id);
-    return res.json({ ok: true, source: "mensageiro_v3", workspaceId: id, migrated: fence.isMigrated(id), profiles: current.profiles.map(profile => ({
+    return res.json({ ok: true, source: "mensageiro_v3", workspaceId: id, migrated: status === "V3_MIGRATED", fenceStatus: status, profiles: current.profiles.map(profile => ({
       id: profile.id,
       active: profile.active,
       cards: profile.cards,

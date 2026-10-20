@@ -12,7 +12,14 @@ class V3Scheduler {
       const now = Number(this.clock());
       this.store.reload();
       for (const workspaceId of Object.keys(this.store.snapshot().workspaces)) {
-        if (this.isWorkspaceMigrated(workspaceId) !== true) continue;
+        let migrated = false;
+        try { migrated = this.isWorkspaceMigrated(workspaceId) === true; }
+        catch (error) {
+          blocked.push({ workspaceId, reason: "fence_indisponivel" });
+          this.logger({ workspaceId, reason: "fence_indisponivel", error: error?.message || String(error) });
+          continue;
+        }
+        if (!migrated) continue;
         for (const candidate of this.store.effectiveSchedules(workspaceId, now)) {
           this.store.reload();
           const fresh = this.store.getSchedule(workspaceId, candidate.id);
