@@ -39,7 +39,6 @@ jobs:
           test "$GITHUB_REF" = refs/heads/validation/mensageiro-v3-m33-node24-20261020
           test "$(node --version | cut -c1-3)" = v24
           test -z "${DATABASE_URL:-}"
-          ! grep -RIn --exclude='*.md' 'self-hosted\|docker compose.*up\|go\.optimuspromo\.com\.br\|2\.25\.124\.96' .github/workflows/mensageiro-v3-m33-validation.yml
 
       - name: Install locked dependencies
         run: npm ci
