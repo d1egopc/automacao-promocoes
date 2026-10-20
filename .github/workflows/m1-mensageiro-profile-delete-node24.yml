@@ -1,0 +1,84 @@
+name: Mensageiro profile deletion M1 validation
+
+on:
+  push:
+    branches:
+      - validation/m1-mensageiro-profile-delete-node24
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mensageiro-profile-delete-m1-validation
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: 17b6f336b3044bd13d046931d1f020a872a1e299
+
+jobs:
+  node24-focal:
+    name: GitHub-hosted Linux / Node 24 / Mensageiro M1
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/validation/m1-mensageiro-profile-delete-node24') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/m1-mensageiro-profile-delete-node24')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove isolated CI-only target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/validation/m1-mensageiro-profile-delete-node24
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${PGPASSWORD:-}"
+          ! grep -Eiq 'self-hosted|hostinger|/opt/optimus|docker compose.*up|vercel.*production|deploy:' .github/workflows/m1-mensageiro-profile-delete-node24.yml
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Check exact functional scope and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git diff --check
+          expected='index.js modules/mensageiro/programacoes.scheduler.js modules/mensageiro/routes.js modules/mensageiro/service.js modules/mensageiro/storage.js tests/mensageiro-profile-delete-route.test.cjs tests/mensageiro-profile-delete.test.cjs'
+          actual="$(git diff --name-only "$BASE_SHA" HEAD -- . ':(exclude).github/workflows/m1-mensageiro-profile-delete-node24.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+          test "$actual" = "$expected"
+          node --check index.js
+          node --check modules/mensageiro/programacoes.scheduler.js
+          node --check modules/mensageiro/routes.js
+          node --check modules/mensageiro/service.js
+          node --check modules/mensageiro/storage.js
+
+      - name: Mensageiro M1 focal and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/mensageiro-profile-delete.test.cjs
+          node tests/mensageiro-profile-delete-route.test.cjs
+          node tests/mensageiro-perfis.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-multiperfil-isolamento.test.cjs
+          node tests/mensageiro-grupo-envio.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-bot-comandos.test.cjs
+          node tests/mensageiro-atendimento-perfil-pv.test.cjs
+
+      - name: Assert no deployment job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^  deploy:' .github/workflows/m1-mensageiro-profile-delete-node24.yml)" -eq 0
