@@ -271,6 +271,10 @@ const {
 const mensageiro = require("./modules/mensageiro");
 const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
 const criarRotasMensageiro = require("./modules/mensageiro/routes");
+const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
+const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
+const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
+const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
@@ -532,7 +536,10 @@ const {
   resolverRedirectClonador,
   resolverRedirectUniversal
 } = require("./modules/radar/redirect/redirect-resolver");
+const { normalizarMotivoTecnicoRedirect } =
+  require("./modules/radar/redirect/redirect-diagnostic-code");
 const { criarRotasResolversDinamicos } = require("./modules/radar/redirect/dynamic-resolver-admin.routes");
+const { criarRotasDiagnosticoCapturaEngine } = require("./modules/links/engine-capture-diagnostic.routes");
 const {
   extrairProvaIdentidadeMercadoLivreHtml,
   extrairTransporteShowProductMercadoLivreHtml,
@@ -16495,7 +16502,11 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
 app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
-app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos());
+app.use("/admin/links/resolvers", exigirAdminMasterEstrito, criarRotasResolversDinamicos({
+  obterIdentidadeMercadoLivre: localWorkerService.obterIdentidadeMercadoLivre,
+  obterIdentidadeMagalu: localWorkerService.obterIdentidadeMagalu
+}));
+app.use("/admin/links/engine-eventos", exigirAdminMasterEstrito, criarRotasDiagnosticoCapturaEngine());
 app.get("/admin/config/links-optimus", responderAdminConfigLinksOptimus);
 app.put("/admin/config/links-optimus", salvarAdminConfigLinksOptimus);
 
@@ -21445,8 +21456,8 @@ function dominioRadar(url = "") {
   }
 }
 
-function linkRedirectPermitidoRadar(url = "") {
-  return dominioRedirectPermitido(url);
+function linkRedirectPermitidoRadar(url = "", opcoes = {}) {
+  return dominioRedirectPermitido(url, opcoes);
 }
 
 function linkEngineV2Radar(url = "") {
@@ -21594,11 +21605,13 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
     linkOriginal: capturada
   });
 
-  if (linkRedirectPermitidoRadar(capturada)) {
+  if (linkRedirectPermitidoRadar(capturada, opcoes)) {
     const marketplacePromozoneSugerido = normalizarMarketplaceRadar(detectarMarketplaceRadarLink(capturada));
     const redirect = await resolverRedirectUniversal(capturada, {
       timeout: 4500,
-      maxRedirects: 5
+      maxRedirects: 5,
+      ...(opcoes.ponteInteligente ? { ponteInteligente: opcoes.ponteInteligente } : {}),
+      ...(opcoes.safeHttpDeps ? { safeHttpDeps: opcoes.safeHttpDeps } : {})
     });
     const resolvida = redirect.urlFinal || "";
     const marketplaceFinal = normalizarMarketplaceRadar(redirect.marketplaceDetectado || "");
@@ -21641,6 +21654,9 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
         ok: false,
         motivo: motivoFalha,
         motivoTecnico: motivoFalha,
+        motivoRedirectTecnico: redirect.ok
+          ? "destino_comercial_nao_comprovado"
+          : normalizarMotivoTecnicoRedirect(redirect),
         ...camposCanonicosRedirect,
         urlCapturada: capturada,
         urlResolvida: resolvida,
@@ -21649,7 +21665,10 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
         marketplaceReal: marketplaceFinal || marketplacePromozoneSugerido || "",
         tipoLinkRadar: "promozone",
         statusHttp: redirect.statusHttp || "",
-        erro: redirect.erro || ""
+        erro: redirect.erro || "",
+        ...(redirect.status === "candidato" && redirect.destinoCandidato
+          ? { destinoCandidato: redirect.destinoCandidato,
+            marketplaceCandidato: redirect.marketplaceCandidato || "" } : {})
       };
     }
 
@@ -22056,6 +22075,7 @@ async function resolverLinkOriginalRadar(url = "", opcoes = {}) {
       ok: false,
       motivo: "redirect_bloqueado",
       motivoTecnico: "redirect_bloqueado",
+      motivoRedirectTecnico: normalizarMotivoTecnicoRedirect(e?.message || ""),
       ...camposCanonicosCapturada,
       urlCapturada: capturada,
       linkOriginalRadar: capturada,
@@ -22935,14 +22955,14 @@ function listarClientesEngineRadar(dados = {}) {
     return [];
   }
 }
-async function prepararLinksRedirectEngineRadar(dados = {}) {
+async function prepararLinksRedirectEngineRadar(dados = {}, opcoes = {}) {
   const linksCapturados = Array.isArray(dados.linksExtraidos) ? dados.linksExtraidos : [];
   const redirectsRadar = [];
   const identidadesCanonicas = [];
   const linksEngine = [];
 
   for (const link of linksCapturados) {
-    if (!linkRedirectPermitidoRadar(link)) {
+    if (!linkRedirectPermitidoRadar(link, opcoes)) {
       const camposCanonicosLink = camposIdentidadeCanonicaOferta({ urlOriginal: link, linkOriginal: link });
       if (camposCanonicosLink.chaveCanonica) {
         identidadesCanonicas.push({
@@ -22956,7 +22976,7 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       continue;
     }
 
-    const resolucao = await resolverLinkOriginalRadar(link);
+    const resolucao = await resolverLinkOriginalRadar(link, opcoes);
     const linkResolvido = resolucao?.ok
       ? (resolucao.linkOriginalLimpo || resolucao.linkResolvido || resolucao.urlResolvida || "")
       : "";
@@ -22969,7 +22989,12 @@ async function prepararLinksRedirectEngineRadar(dados = {}) {
       produtoIdCanonico: resolucao?.produtoIdCanonico || "",
       marketplaceCanonico: resolucao?.marketplaceCanonico || "",
       status: resolucao?.ok ? "resolvido" : "falhou",
-      motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou")
+      motivo: resolucao?.ok ? "" : (resolucao?.motivo || resolucao?.motivoTecnico || "redirect_falhou"),
+      ...(!resolucao?.ok && resolucao?.destinoCandidato
+        ? { destinoCandidato: resolucao.destinoCandidato,
+          marketplaceCandidato: resolucao.marketplaceCandidato || "" } : {}),
+      ...(!resolucao?.ok && resolucao?.motivoRedirectTecnico
+        ? { motivoRedirectTecnico: resolucao.motivoRedirectTecnico } : {})
     });
     if (resolucao?.chaveCanonica) {
       identidadesCanonicas.push({
@@ -26075,6 +26100,11 @@ app.use("/mensageiro", criarRotasMensageiro({
   setMensageiroCliente: mensageiro.setMensageiroCliente,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
+  getAtendimentoConfigPerfilCliente: mensageiro.getAtendimentoConfigPerfilCliente,
+  setAtendimentoConfigPerfilCliente: mensageiro.setAtendimentoConfigPerfilCliente,
+  listarVinculosContatoPerfilCliente: mensageiro.listarVinculosContatoPerfilCliente,
+  salvarVinculoContatoPerfilCliente: mensageiro.salvarVinculoContatoPerfilCliente,
+  removerVinculoContatoPerfilCliente: mensageiro.removerVinculoContatoPerfilCliente,
   encontrarGatilhoAtendimento: mensageiro.encontrarGatilhoAtendimento,
   validarPerfisMensageiro: mensageiro.validarPerfisMensageiro,
   listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
@@ -26104,6 +26134,113 @@ app.use("/mensageiro", criarRotasMensageiro({
     return null;
   }
 }));
+
+// M3.2 candidate-only API. The route is authenticated by the existing app
+// middleware and uses only the authenticated workspace from getClienteId;
+// it does not migrate or enable any production workspace by itself.
+const mensageiroV3Routes = criarRotasMensageiroV3({
+  getClienteId,
+  usuarioTemRecurso,
+  listSessoes: (clienteId) => listarSessoesWhatsappCliente(clienteId),
+  listGrupos: (clienteId, sessaoId) => {
+    const idNormalizado = normalizarSessaoId(clienteId, sessaoId);
+    return gruposPorSessao[sessaoId] || gruposPorSessao[idNormalizado] || [];
+  }
+});
+app.use("/mensageiro-v3", mensageiroV3Routes.router);
+
+// Candidate-only ingress bridge.  Non-migrated workspaces continue through
+// the existing handlers; a durably migrated workspace can only reach the
+// same handlers after the V3 profile/card gate has authorized the event.
+const mensageiroV3HandlerBridge = createHandlerBridge({
+  fence: mensageiroV3Routes.fence,
+  store: mensageiroV3Routes.store,
+  legacyHandlers: {
+    groupManager: (args) => mensageiro.tratarMensagemGrupoGerente(args),
+    commands: (args) => mensageiro.tratarMensagemGrupoComando(args),
+    attendance: (args) => mensageiro.tratarMensagemPrivadaAtendimento(args),
+    welcome: (args) => mensageiro.tratarEventoGrupoMensageiro(args),
+    farewell: (args) => mensageiro.tratarEventoGrupoMensageiro(args),
+    faq: (args) => mensageiro.tratarMensagemPrivadaAtendimento(args),
+    flows: (args) => mensageiro.tratarMensagemPrivadaAtendimento(args),
+    quickReplies: (args) => mensageiro.tratarMensagemPrivadaAtendimento(args)
+  },
+  v3Handlers: createV3HandlerAdapters({ store: mensageiroV3Routes.store }),
+  logger: payload => console.warn("[MENSAGEIRO-V3-BRIDGE-BLOCKED]", JSON.stringify(payload))
+});
+
+function perfilV3ParaSessao(clienteId, sessaoId, card) {
+  const snapshot = mensageiroV3Routes.store.snapshot();
+  const profiles = Object.values(snapshot.workspaces?.[String(clienteId)]?.profiles || {});
+  return profiles.find(profile => {
+    if (profile.active !== true || profile.sessionId !== String(sessaoId)) return false;
+    if (card === "attendance") {
+      return ["attendance", "faq", "flows", "quickReplies"].some(name => profile.cards?.[name]?.active === true);
+    }
+    return profile.cards?.[card]?.active === true;
+  })?.id || "legacy";
+}
+
+async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado }) {
+  const profileId = perfilV3ParaSessao(clienteId, sessaoId, card);
+  const eventId = mensagem?.key?.id || evento?.id || `${card}:${sessaoId}:${Date.now()}`;
+  const args = { clienteId, sessaoId, sock, mensagem, evento, planoLiberado };
+  const outcome = await mensageiroV3HandlerBridge.dispatch({
+    workspaceId: clienteId,
+    profileId,
+    card,
+    args,
+    eventId
+  });
+  if (outcome.ok === true) return outcome.result;
+  return { bloqueada: true, motivo: outcome.reason || "mensageiro_v3_bloqueado" };
+}
+
+function getSockMensageiroLegacySeguro(sessaoId) {
+  const id = String(sessaoId || "").trim();
+  const meta = sessoesMeta?.[id] || {};
+  const workspaceId = String(meta.workspaceId || meta.clienteId || "").trim();
+  if (workspaceId && mensageiroV3Routes.fence.v3Required(workspaceId)) return null;
+  return sessoes[id];
+}
+
+// V3 must use the current session transport after its own durable profile/card
+// authorization. This deliberately does not reuse the legacy cutover guard:
+// the guard blocks only the old scheduler, while V3 still needs the live socket.
+function getSockMensageiroAtual(sessaoId) {
+  const id = String(sessaoId || "").trim();
+  return id ? sessoes[id] : null;
+}
+
+const mensageiroV3Scheduler = new V3Scheduler({
+  store: mensageiroV3Routes.store,
+  isWorkspaceMigrated: workspaceId => mensageiroV3Routes.fence.v3Required(workspaceId),
+  clock: () => Date.now(),
+  transport: {
+    authorizeSend: async ({ workspaceId, profileId, destination }) => {
+      const profile = mensageiroV3Routes.store.getProfile(workspaceId, profileId);
+      if (!profile || profile.active !== true || profile.cards?.scheduled?.active !== true) return false;
+      if (!profile.sessionId || !destination) return false;
+      const sock = getSockMensageiroAtual(profile.sessionId);
+      return Boolean(sock && (statusSessao[profile.sessionId] === "open" || statusSessao[profile.sessionId] === "connected"));
+    },
+    sendMessage: async ({ workspaceId, profileId, sessionId, destination, content }) => {
+      const profile = mensageiroV3Routes.store.getProfile(workspaceId, profileId);
+      if (!profile || profile.sessionId !== sessionId) throw new Error("sessao_v3_invalida");
+      const sock = getSockMensageiroAtual(sessionId);
+      if (!sock || !(statusSessao[sessionId] === "open" || statusSessao[sessionId] === "connected")) throw new Error("sessao_v3_indisponivel");
+      return sock.sendMessage(destination, content);
+    },
+  },
+  logger: payload => console.warn("[MENSAGEIRO-V3-SCHEDULER]", JSON.stringify(payload))
+});
+
+function iniciarMensageiroV3Scheduler() {
+  if (global.__optimusMensageiroV3SchedulerTimer) return;
+  const run = () => mensageiroV3Scheduler.tick().catch(error => console.warn("[MENSAGEIRO-V3-SCHEDULER-ERRO]", error.message));
+  run();
+  global.__optimusMensageiroV3SchedulerTimer = setInterval(run, Number(process.env.MENSAGEIRO_V3_INTERVALO_MS || 60000));
+}
 
 // =============== ROTA DO CLONADOR DE GRUPOS =================
 
@@ -33492,11 +33629,12 @@ registrarListenerUnicoSocket({
       const execucaoGerente = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_gerente",
         contexto: contextoListenerCobertura,
-        executar: () => mensageiro.tratarMensagemGrupoGerente({
+        executar: () => dispatchMensageiroV3Ingress({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
           sock,
           mensagem,
+          card: "groupManager",
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
         })
       });
@@ -33506,11 +33644,12 @@ registrarListenerUnicoSocket({
         await executarConsumidorMensagemIsolado({
           consumidor: "mensageiro_comando",
           contexto: contextoListenerCobertura,
-          executar: () => mensageiro.tratarMensagemGrupoComando({
+          executar: () => dispatchMensageiroV3Ingress({
             clienteId: clienteIdMensageiro,
             sessaoId: id,
             sock,
             mensagem,
+            card: "commands",
             planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
           })
         });
@@ -33519,11 +33658,12 @@ registrarListenerUnicoSocket({
       await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_atendimento",
         contexto: contextoListenerCobertura,
-        executar: () => mensageiro.tratarMensagemPrivadaAtendimento({
+        executar: () => dispatchMensageiroV3Ingress({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
           sock,
           mensagem,
+          card: "attendance",
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
         })
       });
@@ -33601,11 +33741,13 @@ sock.ev.on("group-participants.update", async (evento) => {
       return;
     }
 
-    await mensageiro.tratarEventoGrupoMensageiro({
+    const card = evento?.action === "add" ? "welcome" : "farewell";
+    await dispatchMensageiroV3Ingress({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
-      evento
+      evento,
+      card
     });
   } catch (e) {
     console.log("[ERRO]âš ï¸ Erro evento Mensageiro:", e.message);
@@ -34277,9 +34419,13 @@ app.listen(PORT, () => {
   iniciarManualV2SchedulerOperacional();
   iniciarManualV2RetentionOperacional();
   mensageiro.iniciarSchedulerProgramacoesMensageiro({
-    getSock: (sessaoId) => sessoes[sessaoId],
+    // A migrated workspace is cut over to V3 and must never fall back to the
+    // legacy scheduler after restart. Unmigrated workspaces retain legacy
+    // behavior until an explicit durable migration.
+    getSock: (sessaoId) => getSockMensageiroLegacySeguro(sessaoId),
     getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
   });
+  iniciarMensageiroV3Scheduler();
   iniciarInfraMemoryTelemetryOperacional();
 
 decairConfiancaCupons();

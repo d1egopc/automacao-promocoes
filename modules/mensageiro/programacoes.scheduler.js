@@ -187,6 +187,93 @@ function gruposPermitidosProgramacao(config = {}, programacao = {}) {
   return Array.isArray(config.grupos) ? config.grupos : [];
 }
 
+function perfilAtivoDaProgramacao(config = {}, programacao = {}) {
+  return programacao.perfilId && Array.isArray(config.perfis)
+    ? config.perfis.find(item => item?.id === programacao.perfilId && item?.ativo !== false && !item?.removidoEm)
+    : null;
+}
+
+function sessaoDaProgramacao(config = {}, programacao = {}) {
+  const perfil = perfilAtivoDaProgramacao(config, programacao);
+  return String(programacao.perfilId
+    ? perfil?.sessaoId || ""
+    : config.sessaoGruposId || config.sessaoWhatsappId || config.sessaoId || "");
+}
+
+function gruposValidosProgramacao(config = {}, programacao = {}) {
+  const grupos = [...new Set(gruposPermitidosProgramacao(config, programacao))];
+  return programacaoPossuiAlcanceProprio(programacao)
+    ? grupos
+    : grupos.filter(grupoId => grupoPermitidoConfig(config, grupoId));
+}
+
+function assinaturaProgramacao(programacao = {}) {
+  return JSON.stringify({
+    id: String(programacao.id || ""),
+    ativo: programacao.ativo !== false,
+    nome: String(programacao.nome || ""),
+    perfilId: String(programacao.perfilId || ""),
+    tipo: String(programacao.tipo || ""),
+    horario: String(programacao.horario || ""),
+    data: String(programacao.data || ""),
+    timezone: String(programacao.timezone || ""),
+    intervaloMinutos: Number(programacao.intervaloMinutos || 0) || 0,
+    janelaInicio: String(programacao.janelaInicio || ""),
+    janelaFim: String(programacao.janelaFim || ""),
+    gruposConfigurados: programacao.gruposConfigurados === true,
+    grupos: Array.isArray(programacao.grupos) ? [...programacao.grupos].map(String).sort() : [],
+    conteudos: Array.isArray(programacao.conteudos)
+      ? programacao.conteudos.map(item => ({
+          tipo: String(item?.tipo || ""),
+          texto: String(item?.texto || ""),
+          imagem: String(item?.imagem || "")
+        }))
+      : []
+  });
+}
+
+function autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperada = "") {
+  if (!usuarioAtivo(clienteId)) {
+    return { ok: false, motivo: "usuario_inativo" };
+  }
+
+  const config = getMensageiroCliente(clienteId);
+  if (config?.ativo !== true) return { ok: false, motivo: "mensageiro_inativo" };
+
+  const programacao = Array.isArray(config.programacoes)
+    ? config.programacoes.find(item => item?.id === programacaoId)
+    : null;
+  if (!programacao || programacao.ativo !== true) {
+    return { ok: false, motivo: "programacao_inativa_ou_excluida" };
+  }
+  if (assinaturaEsperada && assinaturaProgramacao(programacao) !== assinaturaEsperada) {
+    return { ok: false, motivo: "configuracao_alterada" };
+  }
+
+  if (programacao.perfilId) {
+    const perfil = Array.isArray(config.perfis)
+      ? config.perfis.find(item => item?.id === programacao.perfilId)
+      : null;
+    if (!perfil || perfil.ativo === false || perfil.removidoEm) {
+      return { ok: false, motivo: "perfil_inativo_ou_removido" };
+    }
+    if (perfil.modulos?.programacoes?.ativo === false) {
+      return { ok: false, motivo: "modulo_programacoes_inativo" };
+    }
+  }
+
+  return { ok: true, config, programacao };
+}
+
+function atualizarProgramacaoSeAutorizada(clienteId, programacaoId, assinaturaEsperada, patch = {}) {
+  const autorizacao = autorizacaoProgramacaoAtual(clienteId, programacaoId, assinaturaEsperada);
+  if (!autorizacao.ok) return autorizacao;
+  return {
+    ...autorizacao,
+    config: atualizarProgramacao(clienteId, programacaoId, patch)
+  };
+}
+
 async function processarProgramacao({ clienteId, programacao, deps = {}, agora = new Date() }) {
   if (!programacao?.ativo) return false;
   if (!usuarioAtivo(clienteId)) {
@@ -194,11 +281,13 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     return false;
   }
 
-  const config = getMensageiroCliente(clienteId);
-  if (config?.ativo !== true) return false;
+  const inicio = autorizacaoProgramacaoAtual(clienteId, programacao.id, assinaturaProgramacao(programacao));
+  if (!inicio.ok) return false;
+  programacao = inicio.programacao;
+  const assinaturaExecucao = assinaturaProgramacao(programacao);
 
   if (!programacao.nextRunAt) {
-    atualizarProgramacao(clienteId, programacao.id, {
+    atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
       nextRunAt: calcularProximoRunAt(programacao, agora),
       status: "agendada"
     });
@@ -213,7 +302,7 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
 
   if (agora.getTime() - proximo.getTime() > ATRASO_MAXIMO_MS) {
     const nextRunAt = calcularProximoRunAt(programacao, agora);
-    atualizarProgramacao(clienteId, programacao.id, {
+    atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
       nextRunAt,
       processandoEm: "",
       lockAte: "",
@@ -234,7 +323,7 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
 
   if (!dentroDaJanela(agora, programacao)) {
     const nextRunAt = calcularProximoRunAt(programacao, agora);
-    atualizarProgramacao(clienteId, programacao.id, {
+    atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
       nextRunAt,
       status: "fora_janela"
     });
@@ -242,26 +331,22 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
   }
 
   const runId = `prog_${programacao.id}_${agora.getTime()}`;
-  atualizarProgramacao(clienteId, programacao.id, {
+  const bloqueio = atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
     processandoEm: iso(agora),
     lockAte: iso(new Date(agora.getTime() + LOCK_MS)),
     ultimoRunId: runId,
     status: "processando"
   });
+  if (!bloqueio.ok) return false;
 
   try {
-    const perfilDaProgramacao = programacao.perfilId && Array.isArray(config.perfis)
-      ? config.perfis.find(item => item?.id === programacao.perfilId && item?.ativo !== false && !item?.removidoEm)
-      : null;
-    const sessaoId = String(programacao.perfilId
-      ? perfilDaProgramacao?.sessaoId || ""
-      : config.sessaoGruposId || config.sessaoWhatsappId || config.sessaoId || "");
+    const sessaoId = sessaoDaProgramacao(bloqueio.config, programacao);
     const sock = typeof deps.getSock === "function" ? deps.getSock(sessaoId) : null;
     const statusSessao = typeof deps.getStatusSessao === "function" ? deps.getStatusSessao(sessaoId) : "";
     const sessaoAberta = Boolean(sock && (!statusSessao || statusSessao === "open" || statusSessao === "aberto"));
     if (!sessaoId || !sessaoAberta || typeof sock.sendMessage !== "function") {
       const nextRunAt = calcularProximoRunAt(programacao, agora);
-      atualizarProgramacao(clienteId, programacao.id, {
+      atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
         processandoEm: "",
         lockAte: "",
         nextRunAt,
@@ -284,13 +369,10 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     const envio = montarPayloadProgramacao(conteudo);
     if (!envio) throw new Error("conteudo_programacao_invalido");
 
-    const gruposProgramacao = gruposPermitidosProgramacao(config, programacao);
-    const gruposValidos = programacaoPossuiAlcanceProprio(programacao)
-      ? [...new Set(gruposProgramacao)]
-      : [...new Set(gruposProgramacao)].filter(grupoId => grupoPermitidoConfig(config, grupoId));
+    const gruposValidos = gruposValidosProgramacao(bloqueio.config, programacao);
     if (!gruposValidos.length) {
       const nextRunAt = calcularProximoRunAt(programacao, agora);
-      atualizarProgramacao(clienteId, programacao.id, {
+      atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
         processandoEm: "",
         lockAte: "",
         nextRunAt,
@@ -302,6 +384,18 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     let enviados = 0;
     for (const grupoId of gruposValidos) {
       try {
+        const autorizacaoAntesDoEnvio = autorizacaoProgramacaoAtual(
+          clienteId,
+          programacao.id,
+          assinaturaExecucao
+        );
+        if (!autorizacaoAntesDoEnvio.ok) break;
+        if (sessaoDaProgramacao(autorizacaoAntesDoEnvio.config, autorizacaoAntesDoEnvio.programacao) !== sessaoId) break;
+        if (!gruposValidosProgramacao(autorizacaoAntesDoEnvio.config, autorizacaoAntesDoEnvio.programacao).includes(grupoId)) break;
+        const statusAntesDoEnvio = typeof deps.getStatusSessao === "function"
+          ? deps.getStatusSessao(sessaoId)
+          : "";
+        if (statusAntesDoEnvio && !["open", "aberto"].includes(String(statusAntesDoEnvio).toLowerCase())) break;
         await sock.sendMessage(grupoId, envio.payload);
         enviados += 1;
         registrarHistoricoProgramacao(clienteId, {
@@ -335,7 +429,7 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     const finalizada = programacao.tipo === "horario" && programacao.data;
     const indiceSeguinte = conteudos.length ? (indiceAtual + 1) % conteudos.length : 0;
     const nextRunAt = finalizada ? "" : calcularProximoRunAt(programacao, agora);
-    atualizarProgramacao(clienteId, programacao.id, {
+    atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
       indiceAtual: indiceSeguinte,
       ultimoEnvioEm: enviados ? iso(agora) : programacao.ultimoEnvioEm || "",
       processandoEm: "",
@@ -347,7 +441,7 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
     return enviados > 0;
   } catch (e) {
     const nextRunAt = calcularProximoRunAt(programacao, agora);
-    atualizarProgramacao(clienteId, programacao.id, {
+    atualizarProgramacaoSeAutorizada(clienteId, programacao.id, assinaturaExecucao, {
       processandoEm: "",
       lockAte: "",
       nextRunAt,

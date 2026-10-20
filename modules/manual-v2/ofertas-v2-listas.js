@@ -413,6 +413,55 @@ async function ofertaDoAchado(achado, clienteId, deps = {}) {
   provarAfiliacao(oferta, clienteId, deps);
   return oferta;
 }
+
+/**
+ * Retorna somente um link de produto já afiliado e comprovado para a workspace.
+ * A leitura não recaptura, não expande URLs e não gera uma nova conversão.
+ */
+function linkAfiliadoAchado(achado = {}, clienteId = "", deps = {}) {
+  const id = normalizarClienteId(clienteId);
+  const marketplace = texto(achado.marketplace).toLowerCase();
+  const integracao = typeof deps.getIntegracaoCliente === "function"
+    ? deps.getIntegracaoCliente(id, marketplace) || {} : {};
+  const credenciais = integracao.credenciais || integracao || {};
+  const candidatos = [
+    { url: texto(achado.urlAfiliada), prova: achado.afiliacaoWorkspace || {} },
+    ...lista(achado.linksComerciais).map((link) => ({
+      url: texto(link?.urlAfiliadaWorkspace || link?.urlAfiliada),
+      prova: link?.afiliacaoWorkspace || {}
+    }))
+  ];
+  for (const candidato of candidatos) {
+    const url = candidato.url;
+    if (!url) continue;
+    try {
+      if (!["http:", "https:"].includes(new URL(url).protocol)) continue;
+    } catch { continue; }
+    const prova = candidato.prova || {};
+    const papel = texto(prova.papel || prova.papelLink || prova.tipo).toLowerCase();
+    const papelProduto = marketplace === "aliexpress"
+      ? ["produto", "link_produto", "link_app", "link_pc"].includes(papel)
+      : marketplace === "shopee"
+        ? ["produto", "link_produto"].includes(papel)
+        : (!papel || ["produto", "link_produto"].includes(papel));
+    if (!papelProduto) continue;
+    let valida = texto(prova.workspaceId) === id &&
+      texto(prova.urlAfiliadaWorkspace) === url &&
+      (!prova.conversaoStatus || texto(prova.conversaoStatus) === "convertida");
+    if (valida && marketplace === "aliexpress") {
+      valida = validarProvaAfiliacaoWorkspaceAliExpress(prova, {
+        clienteId: id, credenciais, exigirAssinatura: true
+      }).valida;
+    } else if (valida && marketplace === "shopee") {
+      valida = validarProvaAfiliacaoWorkspaceShopee(prova, {
+        clienteId: id, credenciais, exigirAssinatura: true
+      }).valida;
+    }
+    if (valida) return { urlAfiliada: url, marketplace, produtoId: texto(achado.produtoId), papel: texto(prova.papel) };
+  }
+  return null;
+}
+
 async function adicionarItem(clienteId, listaId, { origem, ofertaId, oferta: ofertaCapturada } = {}, deps = {}) {
   const id = normalizarClienteId(clienteId);
   let oferta;
@@ -673,5 +722,6 @@ module.exports = {
   ARQUIVO_LISTAS, ARQUIVO_DEDUPE, MAX_LISTAS, DEDUPE_MS,
   lerListas, listarListas, criarLista, duplicarLista, renomearLista, excluirLista, esvaziarLista,
   adicionarItem, removerItem, reservarDestinos, interromperLista, recuperarExecucoes,
-  preflightLista, processarLista, processarListasCliente, identidadeCanonica, ofertaDoAchado
+  preflightLista, processarLista, processarListasCliente, identidadeCanonica, ofertaDoAchado,
+  linkAfiliadoAchado
 };

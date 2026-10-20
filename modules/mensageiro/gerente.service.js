@@ -389,7 +389,8 @@ async function tratarMensagemGrupoGerente({
   sessaoId,
   sock,
   mensagem,
-  planoLiberado = false
+  planoLiberado = false,
+  configOverride = null
 } = {}) {
   try {
     limparMapRecente(resultadosMensagemGerente);
@@ -398,7 +399,7 @@ async function tratarMensagemGrupoGerente({
     const grupoTrace = normalizarJid(mensagem?.key?.remoteJid || "");
     const traceAtivo = traceEnabled();
     const mensagemTrace = traceAtivo ? String(mensagem?.key?.id || "") : "";
-    const configTrace = traceAtivo ? getMensageiroCliente(clienteId) : null;
+    const configTrace = traceAtivo ? (configOverride || getMensageiroCliente(clienteId)) : null;
     const trace = traceAtivo
       ? (codigo, patch = {}) => appendTrace({
         clienteId,
@@ -460,7 +461,7 @@ async function tratarMensagemGrupoGerente({
       return retornarOperacional("key_incompleta");
     }
 
-    const config = getMensageiroCliente(clienteId);
+    const config = configOverride || getMensageiroCliente(clienteId);
     if (config?.ativo !== true) return retornarOperacional("mensageiro_inativo");
 
     const resolucao = resolverPerfilMensageiro({

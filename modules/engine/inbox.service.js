@@ -22,6 +22,8 @@ const { classificarLinkEngine } = require("./link-role.service");
 const { resolverOrigemFluxo } = require("../../utils/origem-fluxo");
 const { verificarCapturaIngressReal } = require("./universal-ingress-fence");
 const { serializarJsonbSeguro } = require("../../utils/jsonb-safe");
+const { normalizarMotivoTecnicoRedirect } =
+  require("../radar/redirect/redirect-diagnostic-code");
 
 let proximoIdOperacaoEventoBruto = 1;
 let chamadasAtivasEventoBruto = 0;
@@ -221,6 +223,9 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
     const urlOriginal = redirectEvento?.linkOriginalCapturado || link;
     const urlNormalizada = normalizarUrl(urlOriginal);
     const urlExpandida = urlResolvidaRedirect(redirectEvento) || null;
+    const motivoRedirectTecnico = redirectEvento?.status === "falhou" && redirectEvento?.motivoRedirectTecnico
+      ? normalizarMotivoTecnicoRedirect(redirectEvento.motivoRedirectTecnico)
+      : "";
     const marketplaceDetectado = detectarMarketplaceLink(urlExpandida || urlNormalizada || urlOriginal);
     const classificacao = classificarLinkEngine({
       marketplace: marketplaceDetectado,
@@ -258,6 +263,7 @@ async function salvarLinksEvento(eventoId, links = [], metadataEvento = {}, even
           fase: "1.1",
           linkOriginalCapturado: redirectEvento?.linkOriginalCapturado || "",
           linkResolvido: urlResolvidaRedirect(redirectEvento),
+          ...(motivoRedirectTecnico ? { motivoRedirectTecnico } : {}),
           tipoLink: redirectEvento ? "redirect_conhecido" : "direto",
           papelLink: classificacao.papelLink,
           papelLinkMotivo: classificacao.motivo,

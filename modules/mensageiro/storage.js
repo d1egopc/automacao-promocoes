@@ -410,6 +410,7 @@ function normalizarModuloMensagemPerfil(raw = {}, fallback = {}) {
   const fonte = raw && typeof raw === "object" ? raw : {};
   return aplicarAlcanceGrupos(fonte, {
     ativo: fonte.ativo === undefined ? fallback.ativo === true : fonte.ativo === true,
+    conteudoConfigurado: fonte.conteudoConfigurado === true,
     configuracao: normalizarConfigMensagemPerfil(fonte.configuracao || fonte, fallback.configuracao || {})
   });
 }
@@ -667,7 +668,7 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
     );
   }
 
-  const gruposAtivos = new Map();
+  const alcancesAtivos = new Map();
   for (const perfil of ativos) {
     if (!perfil.sessaoId) {
       throw erroContratoMensageiro("sessao_invalida", "Perfil do Mensageiro precisa de uma sessao valida.", { perfilId: perfil.id });
@@ -684,15 +685,6 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
           grupoId
         });
       }
-      const dono = gruposAtivos.get(grupoId);
-      if (dono && dono.perfilId !== perfil.id) {
-        throw erroContratoMensageiro("grupo_duplicado_em_perfis", "Grupo duplicado em perfis ativos do Mensageiro.", {
-          grupoId,
-          perfilId: perfil.id,
-          conflitoPerfilId: dono.perfilId
-        });
-      }
-      gruposAtivos.set(grupoId, { perfilId: perfil.id, sessaoId: perfil.sessaoId });
     }
 
     const alcancesModulares = [
@@ -702,8 +694,8 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
       ["comandos", perfil.modulos?.comandos]
     ];
     for (const [modulo, moduloConfig] of alcancesModulares) {
-      if (!moduloPossuiAlcanceProprio(moduloConfig)) continue;
-      const gruposModulo = Array.isArray(moduloConfig.grupos) ? moduloConfig.grupos : [];
+      if (moduloConfig?.ativo !== true) continue;
+      const gruposModulo = gruposAlcanceModuloPerfil(perfil, modulo);
       for (const grupoId of gruposModulo) {
         if (gruposValidosSessao.size && !gruposValidosSessao.has(grupoId)) {
           throw erroContratoMensageiro("grupo_fora_da_sessao", "Grupo do modulo nao pertence a sessao informada.", {
@@ -712,6 +704,17 @@ function validarPerfisMensageiro(perfis = [], opcoes = {}) {
             grupoId
           });
         }
+        const chave = `${perfil.sessaoId}:${modulo}:${grupoId}`;
+        const dono = alcancesAtivos.get(chave);
+        if (dono && dono !== perfil.id) {
+          throw erroContratoMensageiro("grupo_duplicado_em_perfis", "Grupo e modulo duplicados em perfis ativos do Mensageiro.", {
+            grupoId,
+            modulo,
+            perfilId: perfil.id,
+            conflitoPerfilId: dono
+          });
+        }
+        alcancesAtivos.set(chave, perfil.id);
       }
     }
   }
@@ -813,6 +816,7 @@ function normalizarGatilhoAtendimento(gatilho = {}, index = 0) {
 
   return {
     id: String(gatilho?.id || `gatilho_${Date.now()}_${index}`),
+    categoria: ["atendimento", "faq", "fluxos"].includes(gatilho?.categoria) ? gatilho.categoria : "atendimento",
     ativo: gatilho?.ativo !== false,
     nome: String(gatilho?.nome || `Gatilho ${index + 1}`).trim(),
     modo: MODOS_GATILHO_ATENDIMENTO.has(gatilho?.modo) ? gatilho.modo : "todas",
@@ -912,6 +916,159 @@ function getAtendimentoConfigCliente(clienteId) {
   }
 
   return normalizarConfigAtendimentoCliente(clienteId, config);
+}
+
+function perfilAtendimentoCliente(clienteId, perfilId) {
+  const id = String(perfilId || "").trim();
+  const perfil = getMensageiroCliente(clienteId).perfis.find(item => item.id === id && !item.removidoEm);
+  if (!perfil) throw erroContratoMensageiro("perfil_invalido", "Perfil nao pertence ao workspace.");
+  return perfil;
+}
+
+function normalizarRespostaRapidaPerfil(item = {}, index = 0) {
+  const raw = item && typeof item === "object" ? item : {};
+  const resposta = raw.resposta && typeof raw.resposta === "object" ? raw.resposta : {};
+  return {
+    id: String(raw.id || `resposta_${index}`),
+    nome: String(raw.nome || "").slice(0, 100),
+    ativo: raw.ativo !== false,
+    gatilhos: normalizarListaPalavras(raw.gatilhos),
+    tipoCorrespondencia: String(raw.tipoCorrespondencia || "contem"),
+    resposta: {
+      tipo: String(resposta.tipo || "texto"),
+      conteudo: String(resposta.conteudo || ""),
+      nome: String(resposta.nome || "")
+    }
+  };
+}
+
+function normalizarAtendimentoPerfil(perfil, dados = {}) {
+  const raw = dados && typeof dados === "object" ? dados : {};
+  return {
+    perfilId: perfil.id,
+    configurado: raw.configurado === true,
+    ativo: raw.ativo === true,
+    faqAtivo: raw.faqAtivo === true,
+    fluxosAtivo: raw.fluxosAtivo === true,
+    respostasRapidasAtivo: raw.respostasRapidasAtivo === true,
+    sessaoId: perfil.sessaoId,
+    escopo: "privado",
+    delaySegundos: Math.max(0, Math.min(60, Number(raw.delaySegundos ?? 2) || 0)),
+    cooldownMinutos: Math.max(1, Math.min(120, Number(raw.cooldownMinutos ?? 10) || 10)),
+    gatilhos: Array.isArray(raw.gatilhos) ? raw.gatilhos.map(normalizarGatilhoAtendimento)
+      .filter(item => item.palavrasObrigatorias.length && item.respostas.length) : [],
+    respostasRapidas: Array.isArray(raw.respostasRapidas) ? raw.respostasRapidas
+      .map(normalizarRespostaRapidaPerfil)
+      .filter(item => item.gatilhos.length && item.resposta.conteudo) : []
+  };
+}
+
+function getAtendimentoConfigPerfilCliente(clienteId, perfilId) {
+  const perfil = perfilAtendimentoCliente(clienteId, perfilId);
+  const arquivo = readClienteJson(clienteId, "mensageiro-config.json", {});
+  const porPerfil = arquivo?.atendimentosPorPerfil && typeof arquivo.atendimentosPorPerfil === "object"
+    ? arquivo.atendimentosPorPerfil : {};
+  return normalizarAtendimentoPerfil(perfil, porPerfil[perfil.id]);
+}
+
+function lerArquivoAtendimentoClienteEstrito(clienteId) {
+  try {
+    const arquivo = JSON.parse(fs.readFileSync(getMensageiroConfigFile(clienteId), "utf8"));
+    if (!arquivo || typeof arquivo !== "object" || Array.isArray(arquivo)) throw new Error("formato_invalido");
+    return arquivo;
+  } catch (erro) {
+    if (erro?.code === "ENOENT") return {};
+    throw erroContratoMensageiro("atendimento_indisponivel", "Consulta de atendimento indisponivel.");
+  }
+}
+
+function listarAtendimentosPerfilCliente(clienteId, sessaoId, { estrito = false } = {}) {
+  const perfis = (getMensageiroCliente(clienteId).perfis || []).filter(perfil =>
+    perfil?.ativo !== false && !perfil?.removidoEm && perfil?.sessaoId === sessaoId);
+  if (!perfis.length) return [];
+  const arquivo = estrito ? lerArquivoAtendimentoClienteEstrito(clienteId) :
+    readClienteJson(clienteId, "mensageiro-config.json", {});
+  if (estrito && arquivo.atendimentosPorPerfil !== undefined &&
+      (!arquivo.atendimentosPorPerfil || typeof arquivo.atendimentosPorPerfil !== "object" ||
+        Array.isArray(arquivo.atendimentosPorPerfil))) {
+    throw erroContratoMensageiro("atendimento_indisponivel", "Consulta de atendimento indisponivel.");
+  }
+  const porPerfil = arquivo?.atendimentosPorPerfil && typeof arquivo.atendimentosPorPerfil === "object"
+    ? arquivo.atendimentosPorPerfil : {};
+  return perfis.map(perfil => ({ perfil, atendimento: normalizarAtendimentoPerfil(perfil, porPerfil[perfil.id]) }));
+}
+
+function setAtendimentoConfigPerfilCliente(clienteId, perfilId, dados = {}) {
+  const perfil = perfilAtendimentoCliente(clienteId, perfilId);
+  const arquivo = readClienteJson(clienteId, "mensageiro-config.json", {});
+  const porPerfil = arquivo?.atendimentosPorPerfil && typeof arquivo.atendimentosPorPerfil === "object"
+    ? arquivo.atendimentosPorPerfil : {};
+  const atual = normalizarAtendimentoPerfil(perfil, porPerfil[perfil.id]);
+  const atualizado = normalizarAtendimentoPerfil(perfil, {
+    ...atual,
+    ...(dados && typeof dados === "object" ? dados : {}),
+    configurado: true
+  });
+  writeClienteJson(clienteId, "mensageiro-config.json", {
+    ...arquivo,
+    atendimentosPorPerfil: { ...porPerfil, [perfil.id]: atualizado }
+  });
+  return atualizado;
+}
+
+function normalizarContatoVinculado(valor = "") {
+  const contatoId = String(valor || "").trim();
+  if (!/^\d{5,20}@(s\.whatsapp\.net|lid)$/.test(contatoId)) {
+    throw erroContratoMensageiro("contato_invalido", "Informe um contato WhatsApp valido.");
+  }
+  return contatoId;
+}
+
+function listarVinculosContatoPerfilCliente(clienteId, sessaoId = "", { incluirInvalidos = false } = {}) {
+  const arquivo = incluirInvalidos ? lerArquivoAtendimentoClienteEstrito(clienteId) :
+    readClienteJson(clienteId, "mensageiro-config.json", {});
+  if (incluirInvalidos && arquivo.vinculosContatoPerfil !== undefined &&
+      !Array.isArray(arquivo.vinculosContatoPerfil)) {
+    throw erroContratoMensageiro("vinculos_indisponiveis", "Consulta de vinculos indisponivel.");
+  }
+  const lista = Array.isArray(arquivo?.vinculosContatoPerfil) ? arquivo.vinculosContatoPerfil : [];
+  const perfis = getMensageiroCliente(clienteId).perfis || [];
+  return lista.filter(item => item && item.sessaoId === sessaoId &&
+    (incluirInvalidos || perfis.some(perfil =>
+      perfil.id === item.perfilId && !perfil.removidoEm && perfil.sessaoId === sessaoId)) &&
+    /^\d{5,20}@(s\.whatsapp\.net|lid)$/.test(item.contatoId || ""))
+    .map(item => ({ sessaoId: item.sessaoId, contatoId: item.contatoId, perfilId: item.perfilId }));
+}
+
+function salvarVinculoContatoPerfilCliente(clienteId, perfilId, contato) {
+  const perfil = perfilAtendimentoCliente(clienteId, perfilId);
+  if (!perfil.sessaoId) throw erroContratoMensageiro("sessao_invalida", "Perfil sem sessao WhatsApp.");
+  const contatoId = normalizarContatoVinculado(contato);
+  const arquivo = readClienteJson(clienteId, "mensageiro-config.json", {});
+  const anteriores = Array.isArray(arquivo?.vinculosContatoPerfil) ? arquivo.vinculosContatoPerfil : [];
+  const vinculo = { sessaoId: perfil.sessaoId, contatoId, perfilId: perfil.id };
+  writeClienteJson(clienteId, "mensageiro-config.json", {
+    ...arquivo,
+    vinculosContatoPerfil: [
+      ...anteriores.filter(item => item?.sessaoId !== perfil.sessaoId || item?.contatoId !== contatoId),
+      vinculo
+    ]
+  });
+  return vinculo;
+}
+
+function removerVinculoContatoPerfilCliente(clienteId, perfilId, contato) {
+  const perfil = perfilAtendimentoCliente(clienteId, perfilId);
+  const contatoId = normalizarContatoVinculado(contato);
+  const arquivo = readClienteJson(clienteId, "mensageiro-config.json", {});
+  const anteriores = Array.isArray(arquivo?.vinculosContatoPerfil) ? arquivo.vinculosContatoPerfil : [];
+  const existe = anteriores.some(item => item?.sessaoId === perfil.sessaoId && item?.contatoId === contatoId && item?.perfilId === perfil.id);
+  if (!existe) return false;
+  writeClienteJson(clienteId, "mensageiro-config.json", {
+    ...arquivo,
+    vinculosContatoPerfil: anteriores.filter(item => item?.sessaoId !== perfil.sessaoId || item?.contatoId !== contatoId)
+  });
+  return true;
 }
 
 function setAtendimentoConfigCliente(clienteId, dados = {}) {
@@ -1239,6 +1396,12 @@ module.exports = {
   listarClientesMensageiro,
   getAtendimentoConfigCliente,
   setAtendimentoConfigCliente,
+  getAtendimentoConfigPerfilCliente,
+  listarAtendimentosPerfilCliente,
+  setAtendimentoConfigPerfilCliente,
+  listarVinculosContatoPerfilCliente,
+  salvarVinculoContatoPerfilCliente,
+  removerVinculoContatoPerfilCliente,
   registrarHistoricoAtendimento,
   normalizarConfigAtendimentoCliente,
   normalizarProgramacoesMensageiro,

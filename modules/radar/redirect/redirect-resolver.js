@@ -1,7 +1,8 @@
 const axios = require("axios");
 const { performance } = require("node:perf_hooks");
-const { registroDinamicoPadrao } = require("./dynamic-resolver-registry");
+const { inferirFamiliaRascunho, registroDinamicoPadrao } = require("./dynamic-resolver-registry");
 const { obterHttpSeguro, validarUrlPublica, enderecoPublico } = require("./safe-redirect-http");
+const { extrairCandidatoContextual } = require("./contextual-html-candidate");
 const { classificarLinkEngine } = require("../../engine/link-role.service");
 const {
   camposIdentidadeCanonicaOferta,
@@ -13,6 +14,7 @@ const {
 } = require("../mercadolivre-social-identidade");
 
 const resolversRegistrados = [];
+const METODOS_FAMILIA_INTELIGENTE = new Set(["http_redirect", "html_contextual", "html_static_base64"]);
 const PROMOZONE_API_BASE = "https://link-shortener-501307668672.southamerica-east1.run.app";
 const MARKETPLACES_PROMOZONE_PERMITIDOS = new Set(["mercadolivre", "shopee", "amazon", "aliexpress", "awin"]);
 
@@ -142,6 +144,32 @@ function registrarResolverRedirect({ nome = "", dominios = [], resolver } = {}) 
   return registro;
 }
 
+// Opt-in interno, sem fonte de configuracao de producao nesta etapa. Nunca usa
+// o estado `ativo` dos resolvedores legados nem o diagnostico historico Admin.
+function localizarFamiliaInteligente(url = "", opcoes = {}) {
+  const ponte = opcoes.ponteInteligente;
+  if (ponte?.habilitada !== true || !Array.isArray(ponte.familias) ||
+      ponte.familias.length > 32) return null;
+  let entrada;
+  try { entrada = inferirFamiliaRascunho(url); } catch { return null; }
+  const compativeis = ponte.familias.filter(registro => {
+    if (registro?.estado !== "homologado_inteligente" || registro.aprovadoInteligente !== true ||
+        registro.ativo !== false || !METODOS_FAMILIA_INTELIGENTE.has(registro.metodoDescoberto) ||
+        typeof registro.id !== "string" || !registro.id) return false;
+    try {
+      const exemplo = inferirFamiliaRascunho(registro.urlExemplo);
+      return entrada.host === exemplo.host && entrada.pathPrefix === exemplo.pathPrefix &&
+        entrada.pathMode === exemplo.pathMode && registro.host === exemplo.host &&
+        registro.pathPrefix === exemplo.pathPrefix && registro.pathMode === exemplo.pathMode;
+    } catch { return false; }
+  });
+  if (compativeis.length !== 1) return null;
+  const registro = compativeis[0];
+  return { nome: `dinamico:aprendido:${registro.id}`, dominios: [registro.host],
+    pathPrefix: registro.pathPrefix, resolver: resolverHttpGenerico, dinamico: true,
+    aprendido: true, metodoDescoberto: registro.metodoDescoberto };
+}
+
 function localizarResolverRedirect(url = "", opcoes = {}) {
   const host = hostname(url);
   if (!host) return null;
@@ -150,7 +178,9 @@ function localizarResolverRedirect(url = "", opcoes = {}) {
   try {
     const dinamico = (opcoes.dynamicRegistry || registroDinamicoPadrao()).localizar(url);
     return dinamico ? { nome: `dinamico:${dinamico.id}`, dominios: [dinamico.host], pathPrefix: dinamico.pathPrefix,
-      resolver: resolverHttpGenerico, dinamico: true } : null;
+      resolver: resolverHttpGenerico, dinamico: true } :
+      opcoes.adminValidation !== true && opcoes.ponteInteligente?.habilitada === true
+        ? localizarFamiliaInteligente(url, opcoes) : null;
   } catch {
     return null; // storage inválido nunca amplia a allowlist
   }
@@ -296,7 +326,7 @@ function extrairUrlsMarketplaceHtml(html = "", base = "") {
     .map(item => item.url);
 }
 
-function extrairDestinoHtml(html = "", base = "") {
+function extrairDestinoHtml(html = "", base = "", { descobertaContextual = false } = {}) {
   const metaRefresh = extrairMetaRefresh(html);
   const metaUrl = urlAbsoluta(metaRefresh, base);
   if (metaUrl) return { url: metaUrl, metodo: "meta_refresh" };
@@ -305,10 +335,53 @@ function extrairDestinoHtml(html = "", base = "") {
   const jsUrl = urlAbsoluta(windowLocation, base);
   if (jsUrl) return { url: jsUrl, metodo: "window_location" };
 
+  if (descobertaContextual) {
+    return extrairCandidatoContextual(html, base, detectarMarketplaceRedirect) ||
+      { url: "", metodo: "html_sem_destino_contextual" };
+  }
+
   const urlSolta = extrairUrlsMarketplaceHtml(html, base)[0] || "";
   if (urlSolta) return { url: urlSolta, metodo: "html_marketplace_url" };
 
   return { url: "", metodo: "html_sem_redirect" };
+}
+
+// Apenas descoberta administrativa: interpreta literais de navegacao, nunca executa JavaScript.
+function extrairDestinoEstaticoHtml(html = "", base = "") {
+  if (Buffer.byteLength(String(html || ""), "utf8") > 1024 * 1024) return null;
+  const literal = String.raw`atob\s*\(\s*(["'])([A-Za-z0-9+/]{16,2732}={0,2})\1\s*\)`;
+  const padroes = [
+    new RegExp(String.raw`(?:\b(?:window|document|self)\s*\.\s*)?location\s*\.\s*(?:replace|assign)\s*\(\s*${literal}\s*\)`, "gi"),
+    new RegExp(String.raw`(?:\b(?:window|document|self)\s*\.\s*)?location(?:\s*\.\s*href)?\s*=\s*${literal}`, "gi")
+  ];
+  const candidatos = new Set();
+  let scripts = 0;
+  for (const match of String(html || "").matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (++scripts > 32) return null;
+    if (/\bsrc\s*=/.test(match[1]) || match[2].length > 32768) continue;
+    for (const padrao of padroes) {
+      for (const chamada of match[2].matchAll(padrao)) {
+        const base64 = chamada[2];
+        if (base64.length % 4 === 1) continue;
+        const bytes = Buffer.from(base64, "base64");
+        if (bytes.length > 2048 || bytes.toString("base64").replace(/=+$/, "") !== base64.replace(/=+$/, "")) continue;
+        const destino = bytes.toString("utf8");
+        if (!Buffer.from(destino, "utf8").equals(bytes) || destino.length > 2048) continue;
+        try {
+          const url = validarUrlPublica(destino);
+          if (url.protocol !== "https:" || !detectarMarketplaceRedirect(url.href)) continue;
+          candidatos.add(url.href);
+        } catch { continue; }
+        if (candidatos.size > 1) return { url: "", metodo: "html_static_ambiguous" };
+      }
+    }
+  }
+  if (candidatos.size !== 1) return null;
+  const escolhido = [...candidatos][0];
+  if (extrairUrlsMarketplaceHtml(html, base).some(url => url !== escolhido)) {
+    return { url: "", metodo: "html_static_ambiguous" };
+  }
+  return { url: escolhido, metodo: "html_static_base64" };
 }
 
 function produtoAliExpressConfirmadoNaLanding(urlFinal = "", html = "") {
@@ -455,7 +528,13 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           contexto.onHtml({ html, urlFinal, statusHttp });
         } catch {}
       }
-      const destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual);
+      let destinoHtml = extrairDestinoHtml(html, urlFinal || urlAtual,
+        { descobertaContextual: contexto.descobertaContextual === true });
+      if (!destinoHtml.url && (contexto.adminValidation === true || contexto.ponteInteligenteValidada === true) &&
+          contexto.descobertaContextual === true &&
+          contexto.secureDynamic === true) {
+        destinoHtml = extrairDestinoEstaticoHtml(html, urlFinal || urlAtual) || destinoHtml;
+      }
       if (!destinoHtml.url) {
         return resultadoFalha(urlOriginal, {
           urlFinal,
@@ -481,6 +560,8 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           status: "resolvido",
           statusHttp,
           metodo: destinoHtml.metodo,
+          ...(contexto.descobertaContextual === true && destinoHtml.evidencia
+            ? { evidencia: destinoHtml.evidencia } : {}),
           motivo: "redirect_resolvido_marketplace",
           ...dadosHops
         };
@@ -805,7 +886,11 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
 
   let resultado;
   try {
-    resultado = await registro.resolver(urlOriginal, registro.dinamico ? { ...opcoes, secureDynamic: true } : opcoes);
+    resultado = await registro.resolver(urlOriginal, registro.dinamico ? {
+      ...opcoes, secureDynamic: true,
+      ...(registro.aprendido ? { adminValidation: false, descobertaContextual: true,
+        ponteInteligenteValidada: true } : {})
+    } : opcoes);
   } catch (e) {
     resultado = resultadoFalha(urlOriginal, {
       metodo: "erro_resolver",
@@ -814,7 +899,21 @@ async function resolverRedirectUniversal(url = "", opcoes = {}) {
     });
   }
 
-  const final = aplicarIdentidadeCanonicaRedirect({ ...resultado, urlOriginal, resolver: registro.nome });
+  // Uma familia aprendida pode produzir somente um candidato. Mesmo que a URL
+  // final contenha um ID aparente, nao a promovemos a link preparado/afiliado.
+  const final = registro.aprendido && resultado.ok === true
+    ? resultado.metodo === registro.metodoDescoberto &&
+      detectarMarketplaceRedirect(resultado.urlExpandida || resultado.urlFinal || "") === resultado.marketplaceDetectado
+      ? { ok: false, urlOriginal, urlFinal: "", urlExpandida: "", marketplaceDetectado: "",
+        destinoCandidato: resultado.urlExpandida || resultado.urlFinal, marketplaceCandidato: resultado.marketplaceDetectado,
+        resolver: registro.nome, metodo: resultado.metodo, status: "candidato",
+        motivo: "identidade_pendente", prontoComercial: false, afiliacaoConfirmada: false }
+      : { ...resultadoFalha(urlOriginal, { motivo: "familia_metodo_divergente" }), resolver: registro.nome }
+    : registro.aprendido
+      ? { ...resultadoFalha(urlOriginal, { statusHttp: resultado.statusHttp,
+        metodo: resultado.metodo, motivo: resultado.motivo, hops: resultado.hops }),
+        resolver: registro.nome, prontoComercial: false }
+      : aplicarIdentidadeCanonicaRedirect({ ...resultado, urlOriginal, resolver: registro.nome });
   logAuditoriaRedirect(final, Date.now() - inicio);
   if (registro.dinamico && opcoes.adminValidation !== true) {
     const papel = final.ok ? classificarLinkEngine({ marketplace: final.marketplaceDetectado,
@@ -918,6 +1017,7 @@ module.exports = {
   detectarMarketplaceRedirect,
   dominioRedirectPermitido,
   extrairDestinoHtml,
+  extrairDestinoEstaticoHtml,
   extrairProdutoIdKabum: extrairProdutoIdKabumUrl,
   extrairMetaRefresh,
   extrairUrlsMarketplaceHtml,

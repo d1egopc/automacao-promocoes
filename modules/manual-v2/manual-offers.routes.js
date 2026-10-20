@@ -359,6 +359,27 @@ function criarRotasManualV2(deps = {}) {
       storageOptions: deps.storageOptions
     }) };
   }));
+  router.get("/achados/:id/produto", (req, res) => {
+    const clienteId = clienteAutenticado(req, res);
+    if (!clienteId) return;
+    try {
+      const agoraMs = Date.parse(agoraIso(deps));
+      const achado = achadosV2.buscarAchado(clienteId, req.params.id,
+        Number.isFinite(agoraMs) ? agoraMs : Date.now());
+      if (!achado) {
+        return res.status(404).json({ ok: false, erro: "achado_expirado_ou_nao_encontrado", motivo: "achado_expirado_ou_nao_encontrado" });
+      }
+      const link = listasV2.linkAfiliadoAchado(achado, clienteId, {
+        getIntegracaoCliente: deps.getIntegracaoCliente
+      });
+      if (!link) {
+        return res.status(422).json({ ok: false, erro: "achado_link_afiliado_indisponivel", motivo: "achado_link_afiliado_indisponivel" });
+      }
+      return res.json({ ok: true, produto: link });
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "achado_link_produto_falhou"));
+    }
+  });
   router.get("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ listas: listasV2.listarListas(id) })));
   router.post("/listas", (req, res) => responderOfertasV2(req, res, (id) => ({ lista: listasV2.criarLista(id, req.body?.nome) })));
   router.post("/listas/:id/duplicar", (req, res) => responderOfertasV2(req, res,
@@ -921,6 +942,43 @@ function criarRotasManualV2(deps = {}) {
       });
     }
   };
+
+  router.post("/achados/:id/enviar-agora", async (req, res) => {
+    try {
+      const clienteId = clienteAutenticado(req, res);
+      if (!clienteId) return;
+      const chaveHash = idempotencyHash(req);
+      if (!chaveHash) {
+        return res.status(400).json({ ok: false, erro: "idempotency_key_obrigatoria", motivo: "idempotency_key_obrigatoria" });
+      }
+      const agoraMs = Date.parse(agoraIso(deps));
+      const achado = achadosV2.buscarAchado(clienteId, req.params.id,
+        Number.isFinite(agoraMs) ? agoraMs : Date.now());
+      if (!achado) {
+        return res.status(404).json({ ok: false, erro: "achado_expirado_ou_nao_encontrado", motivo: "achado_expirado_ou_nao_encontrado" });
+      }
+      const oferta = await listasV2.ofertaDoAchado(achado, clienteId, {
+        getIntegracaoCliente: deps.getIntegracaoCliente,
+        gerarLinkAfiliadoCliente: deps.gerarLinkAfiliadoCliente,
+        gerarShortLinkShopee: deps.gerarShortLinkShopee,
+        expandirShortlinkShopee: deps.expandirShortlinkShopee,
+        fetch: deps.fetch
+      });
+      const criacao = storage.criarOfertaTecnicaEnvioManualV2Idempotente(
+        clienteId,
+        oferta,
+        `achado-send-now:${chaveHash}`,
+        deps.storageOptions || {}
+      );
+      if (criacao.idempotencyConflict) {
+        return res.status(409).json({ ok: false, erro: "idempotency_conflict", motivo: "idempotency_conflict" });
+      }
+      req.params.id = texto(criacao.oferta?.id);
+      return executarEnvioAgora(req, res);
+    } catch (e) {
+      return res.status(statusErro(e)).json(payloadErro(e, "achado_envio_falhou"));
+    }
+  });
 
   router.post("/ofertas/enviar-agora", async (req, res) => {
     try {
