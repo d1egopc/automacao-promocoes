@@ -52,7 +52,7 @@ jobs:
           set -euo pipefail
           git cat-file -e "$BASE_SHA^{commit}"
           git diff --check
-          expected='modules/template-universal/index.js modules/templates-clientes/contrato-comercial-final.js modules/templates-clientes/normalizador-apresentacao-comercial.js modules/templates-clientes/renderer.js tests/template-amazon-b51.test.js'
+          expected='modules/template-universal/index.js modules/templates-clientes/contrato-comercial-final.js modules/templates-clientes/normalizador-apresentacao-comercial.js modules/templates-clientes/renderer.js tests/template-amazon-b51.test.js tests/template-marketplaces-b54.test.js'
           actual="$(git diff --name-only "$BASE_SHA" HEAD -- . ':(exclude).github/workflows/achados-refino-01-validation.yml' | sort | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
           test "$actual" = "$expected"
           node --check modules/template-universal/index.js
@@ -60,6 +60,7 @@ jobs:
           node --check modules/templates-clientes/normalizador-apresentacao-comercial.js
           node --check modules/templates-clientes/renderer.js
           node --check tests/template-amazon-b51.test.js
+          node --check tests/template-marketplaces-b54.test.js
 
       - name: Achados and Manual V2 focal tests
         shell: bash
@@ -75,6 +76,7 @@ jobs:
           node tests/ofertas-v2-achados-dedupe-memoria.test.js
           node tests/ofertas-v2-achados-listas.test.js
           node tests/template-amazon-b51.test.js
+          node tests/template-marketplaces-b54.test.js
           node tests/contrato-comercial-final-universal.test.js
           node tests/amazon-rio-captcha-guard.test.js
 
