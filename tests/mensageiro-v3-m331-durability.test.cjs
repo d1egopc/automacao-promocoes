@@ -28,11 +28,13 @@ test("M3.3.1 — V3 usa autoridade durável explícita, nunca process.cwd", () =
   const f = fixture();
   try {
     assert.equal(path.isAbsolute(resolveDurablePath({ statePath: f.filePath }).statePath), true);
-    const defaultPath = resolveDurablePath({ env: {} });
-    assert.equal(path.isAbsolute(defaultPath.statePath), true);
-    assert.equal(defaultPath.statePath.includes(process.cwd()), false);
     if (process.platform === "win32") {
+      assert.throws(() => resolveDurablePath({ env: {} }), /storage_path_required/);
       assert.throws(() => resolveDurablePath({ env: { MENSAGEIRO_V3_DATA_DIR: "relative" } }), /storage_path_invalido/);
+    } else {
+      const defaultPath = resolveDurablePath({ env: {} });
+      assert.equal(path.isAbsolute(defaultPath.statePath), true);
+      assert.equal(defaultPath.statePath.includes(process.cwd()), false);
     }
     assert.doesNotThrow(() => assertDurableStorage(f.filePath));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
