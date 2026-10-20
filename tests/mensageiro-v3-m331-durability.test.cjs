@@ -3,6 +3,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { V3Store } = require("../modules/mensageiro-v3/src/v3/store");
 const { createPersistentWorkspaceFence, createWorkspaceFence } = require("../modules/mensageiro-v3/workspace-fence");
 const { createHandlerBridge } = require("../modules/mensageiro-v3/handler-bridge");
@@ -90,6 +91,59 @@ test("M3.3.1 — estados intermediários bloqueiam legado até o corte completo"
     assert.equal((await bridge.dispatch({ workspaceId: "workspace-a", profileId, card: "commands", eventId: "m" })).ok, true);
     assert.deepEqual(calls, ["v3"]);
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test("M3.3.1 — dois processos independentes compartilham o volume sem claim duplicado", async () => {
+  const f = fixture();
+  const ready = [path.join(f.dir, "p1.ready"), path.join(f.dir, "p2.ready")];
+  const start = path.join(f.dir, "start.signal");
+  try {
+    const store = new V3Store({ filePath: f.filePath });
+    const profile = activeProfile(store, "workspace-processes");
+    const modulePath = path.resolve(__dirname, "../modules/mensageiro-v3/src/v3/store.js");
+    const script = [
+      "const fs = require('node:fs');",
+      "const { V3Store } = require(process.env.V3_STORE_MODULE);",
+      "fs.writeFileSync(process.env.V3_READY, String(process.pid), { flag: 'wx' });",
+      "while (!fs.existsSync(process.env.V3_START)) {}",
+      "const claim = new V3Store({ filePath: process.env.V3_STATE }).claimExecution(process.env.V3_WORKSPACE, 'same-event', { source: String(process.pid) });",
+      "process.stdout.write(JSON.stringify({ claim, pid: process.pid }));"
+    ].join("\n");
+    const children = ready.map((readyPath) => spawn(process.execPath, ["-e", script], {
+      env: {
+        ...process.env,
+        V3_STORE_MODULE: modulePath,
+        V3_STATE: f.filePath,
+        V3_WORKSPACE: "workspace-processes",
+        V3_READY: readyPath,
+        V3_START: start
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    }));
+    const resultPromises = children.map((child) => new Promise((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("close", (code) => code === 0
+        ? resolve(JSON.parse(stdout))
+        : reject(new Error(`processo filho terminou com ${code}: ${stderr}`)));
+    }));
+    const deadline = Date.now() + 5000;
+    while (!ready.every((readyPath) => fs.existsSync(readyPath))) {
+      if (Date.now() > deadline) throw new Error("processos não sinalizaram prontidão");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    fs.writeFileSync(start, "go");
+    const results = await Promise.all(resultPromises);
+    assert.equal(results.filter((result) => result.claim).length, 1);
+    assert.equal(new V3Store({ filePath: f.filePath }).snapshot().workspaces["workspace-processes"].claims["same-event"] !== undefined, true);
+    assert.equal(results.every((result) => Number.isInteger(result.pid)), true);
+    assert.equal(profile.startsWith("profile_"), true);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
 });
 
 test("M3.3.1 — configuração, exclusão e perfil recriado não ressuscitam após recriar container", () => {
