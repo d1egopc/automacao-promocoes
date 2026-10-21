@@ -350,8 +350,14 @@ function criarRotasManualV2(deps = {}) {
   }
 
   router.get("/achados", (req, res) => responderOfertasV2(req, res, (id) => {
-    const achados = achadosV2.listarAchados(id, { marketplace: texto(req.query.marketplace),
-      categoria: texto(req.query.categoria), busca: texto(req.query.busca) });
+    const achados = achadosV2.listarAchados(id, {
+      marketplace: texto(req.query.marketplace),
+      categoria: texto(req.query.categoria),
+      busca: texto(req.query.busca),
+      resolverLinkProduto: (achado) => listasV2.linkAfiliadoAchado(achado, id, {
+        getIntegracaoCliente: deps.getIntegracaoCliente
+      })
+    });
     return { achados: enriquecerOfertasComDestinosRecentes(id, achados, {
       now: deps.now,
       listarEnviosRecentesAutomaticos: deps.listarEnviosRecentesAutomaticos,

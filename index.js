@@ -9164,9 +9164,12 @@ function resolverAlvosTelegramFilaUniversal(clienteId, destino) {
       connectionId: String(t.id || t.botId || t.telegramId || "") }));
 }
 
-function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
+function criarPreflightFilaUniversalReal(pool, { oneShotId = null,
+  getPool = null } = {}) {
+  const resolvePool = typeof getPool === "function" ? getPool : () => pool;
   return criarPreflightFilaUniversal({
     pool,
+    getPool: resolvePool,
     configGlobal: config,
     ...(oneShotId ? { readClock: async () => null } : {}),
     resolveDestination: async ({ claim, oferta, workspaceId, destinationId }) => {
@@ -9216,7 +9219,7 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
         return usage.ok ? { ok: true } : {
           ok: false, reason: "destination_daily_limit_reached" };
       }
-      const usage = await readDestinationDailyUsage({ pool, workspaceId,
+      const usage = await readDestinationDailyUsage({ pool: resolvePool(), workspaceId,
         destinationId });
       return usage.sentToday < limit ? { ok: true }
         : { ok: false, reason: "destination_daily_limit_reached",
@@ -9241,7 +9244,7 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
     },
     checkCredits: async ({ workspaceId, claim }) => {
       if (oneShotId) {
-        const balance = (await pool.query(`SELECT balance,reserved
+        const balance = (await resolvePool().query(`SELECT balance,reserved
           FROM engine_universal_credit_balances
           WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
         [claim.operationEpochStartedAt,workspaceId])).rows[0];
@@ -9307,8 +9310,10 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null } = {}) {
   });
 }
 
-function criarExecutorFilaUniversalReal(pool, { oneShotId = null } = {}) {
-  const prepare = criarPreflightFilaUniversalReal(pool, { oneShotId });
+function criarExecutorFilaUniversalReal(pool, { oneShotId = null,
+  getPool = null } = {}) {
+  getPool = typeof getPool === "function" ? getPool : () => pool;
+  const prepare = criarPreflightFilaUniversalReal(pool, { oneShotId, getPool });
   const providerPorAlvo = criarDispatcherProviderExistentePorAlvo({
     send: (destination,offer,message,workspace,customerConfig,options) =>
       enviarParaDestinoInteligente(destination,offer,message,workspace,
@@ -9365,7 +9370,7 @@ function criarExecutorFilaUniversalReal(pool, { oneShotId = null } = {}) {
       }
     }
   };
-  return criarExecutorFilaUniversal({ pool,
+  return criarExecutorFilaUniversal({ pool, getPool,
     prepare, dispatch,
     ...(oneShotId ? { repository: oneShotRepository(oneShotId),
       oneShot: true } : {}),
@@ -26101,6 +26106,7 @@ app.use("/mensageiro", criarRotasMensageiro({
   usuarioTemRecurso,
   getMensageiroCliente: mensageiro.getMensageiroCliente,
   setMensageiroCliente: mensageiro.setMensageiroCliente,
+  excluirPerfilMensageiro: mensageiro.excluirPerfilMensageiro,
   getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
   setAtendimentoConfigCliente: mensageiro.setAtendimentoConfigCliente,
   getAtendimentoConfigPerfilCliente: mensageiro.getAtendimentoConfigPerfilCliente,
@@ -26337,10 +26343,32 @@ function comercialCapturadoClonador(item = {}) {
   }
   return {};
 }
+async function marcadorTerminalPersistido(job = {}, motivo = "") {
+  const jobId = Number(job?.id);
+  const reason = String(motivo || "").trim();
+  if (!Number.isSafeInteger(jobId) || jobId <= 0 || !reason) return null;
+  try {
+    const pool = getEnginePool();
+    if (!pool || typeof pool.query !== "function") return null;
+    const result = await pool.query(`SELECT atualizado_em
+      FROM engine_jobs_cliente
+      WHERE id=$1
+        AND motivo_final=$2
+        AND status NOT IN ('pendente','diagnosticado','validando','pronto',
+          'pronto_para_importar','processando','importando','distribuindo',
+          'executando','retry','agendado','claimed','bloqueado','oferta_criada')
+      LIMIT 1`, [jobId, reason]);
+    return result.rows?.[0]?.atualizado_em || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function observarHistoricoClonadorTerminal({ job = {}, motivo = "", etapa = "" } = {}) {
   try {
+    const terminalAt = await marcadorTerminalPersistido(job, motivo);
     await projectPreUniversalTerminalError({ pool: getEnginePool(), job,
-      reason: motivo, stage: etapa });
+      reason: motivo, stage: etapa, terminalAt });
   } catch (erro) {
     console.log("[HISTORICO-PRE-UNIVERSAL-ERRO]", {
       workspaceId: job.cliente_id || job.clienteId || "", jobId: job.id || null,
@@ -33665,12 +33693,11 @@ registrarListenerUnicoSocket({
       const execucaoGerente = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_gerente",
         contexto: contextoListenerCobertura,
-        executar: () => dispatchMensageiroV3Ingress({
+        executar: () => mensageiro.tratarMensagemGrupoGerente({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
           sock,
           mensagem,
-          card: "groupManager",
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
         })
       });
@@ -33680,12 +33707,11 @@ registrarListenerUnicoSocket({
         await executarConsumidorMensagemIsolado({
           consumidor: "mensageiro_comando",
           contexto: contextoListenerCobertura,
-          executar: () => dispatchMensageiroV3Ingress({
+          executar: () => mensageiro.tratarMensagemGrupoComando({
             clienteId: clienteIdMensageiro,
             sessaoId: id,
             sock,
             mensagem,
-            card: "commands",
             planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
           })
         });
@@ -33694,12 +33720,11 @@ registrarListenerUnicoSocket({
       await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_atendimento",
         contexto: contextoListenerCobertura,
-        executar: () => dispatchMensageiroV3Ingress({
+        executar: () => mensageiro.tratarMensagemPrivadaAtendimento({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
           sock,
           mensagem,
-          card: "attendance",
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
         })
       });
@@ -33798,13 +33823,11 @@ sock.ev.on("group-participants.update", async (evento) => {
       return;
     }
 
-    const card = evento?.action === "add" ? "welcome" : "farewell";
-    await dispatchMensageiroV3Ingress({
+    await mensageiro.tratarEventoGrupoMensageiro({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
-      evento,
-      card
+      evento
     });
   } catch (e) {
     console.log("[ERRO]âš ï¸ Erro evento Mensageiro:", e.message);
@@ -34170,9 +34193,12 @@ const promessaBootstrapEngine = initEngineDatabase()
       timerCadastros.unref?.();
       writerFilaUniversalReal = criarCallbackFilaUniversal({
         pool: getEnginePool(),
+        getPool: getEnginePool,
         resolveTelegramTargets: resolverAlvosTelegramFilaUniversal
       });
-      executorFilaUniversalReal = criarExecutorFilaUniversalReal(getEnginePool());
+      executorFilaUniversalReal = criarExecutorFilaUniversalReal(getEnginePool(), {
+        getPool: getEnginePool
+      });
       if (typeof writerFilaUniversalReal !== "function" ||
           typeof executorFilaUniversalReal !== "function") {
         throw new Error("universal_runtime_incomplete");
