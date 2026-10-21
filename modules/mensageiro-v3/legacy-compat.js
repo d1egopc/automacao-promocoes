@@ -165,13 +165,16 @@ function legacySchedule(schedule) {
   const contents = asArray(content.conteudos || content.contents);
   const fallbackContent = Object.keys(content).length ? content : { tipo: "texto", texto: "" };
   const intervalMs = Number(schedule.intervalMs || content.intervaloMinutos * 60_000 || 0) || 0;
+  const originalTipo = content.tipo === "intervalo" ? "intervalo" : "horario";
   return {
     ...clone(content),
     id: schedule.id,
     perfilId: schedule.profileId,
     ativo: schedule.active === true,
     nome: text(schedule.name || content.nome, "Programação"),
-    tipo: intervalMs > 0 ? "intervalo" : (content.tipo === "intervalo" ? "intervalo" : "horario"),
+    // Daily horario schedules use a 24h V3 interval internally, but must
+    // remain a horario in the original form. A dated horario stays one-shot.
+    tipo: originalTipo,
     grupos: asArray(schedule.destinations).map(String).filter(Boolean),
     gruposConfigurados: true,
     timezone: text(schedule.timezone, "America/Sao_Paulo"),
@@ -363,7 +366,9 @@ function scheduleInput(item, now = Date.now()) {
     texto: contents[0]?.texto || raw.texto || raw.mensagem || "",
     imagem: contents[0]?.imagem || raw.imagem || ""
   };
-  const intervalMs = raw.tipo === "intervalo" ? Math.max(0, Number(raw.intervaloMinutos || 0) * 60_000) : 0;
+  const intervalMs = raw.tipo === "intervalo"
+    ? Math.max(0, Number(raw.intervaloMinutos || 0) * 60_000)
+    : (!raw.data ? 24 * 60 * 60 * 1000 : 0);
   return {
     name: text(raw.nome, "Programação"),
     timezone: text(raw.timezone, "America/Sao_Paulo"),

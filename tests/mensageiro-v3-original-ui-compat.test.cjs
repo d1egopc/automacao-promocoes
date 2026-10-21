@@ -102,11 +102,26 @@ function createFixture(clock = Date.now) {
         timezone: "America/Sao_Paulo",
         grupos: ["group-a"],
         conteudos: [{ id: "content-schedule", tipo: "texto", texto: "mensagem mock" }]
+      }, {
+        perfilId: profile.id,
+        nome: "Única mock",
+        ativo: true,
+        tipo: "horario",
+        data: "2026-10-23",
+        horario: "07:01",
+        timezone: "America/Sao_Paulo",
+        grupos: ["group-a"],
+        conteudos: [{ id: "content-one-shot", tipo: "texto", texto: "mensagem única" }]
       }]
     });
     assert.equal(activeSchedule.status, 200);
-    const persistedSchedule = fixture.store.listSchedules("workspace-a", { includeInactive: true })[0];
+    const persistedSchedules = fixture.store.listSchedules("workspace-a", { includeInactive: true });
+    const persistedSchedule = persistedSchedules.find(item => item.content?.nome === "Horário mock");
+    const persistedOneShot = persistedSchedules.find(item => item.content?.nome === "Única mock");
     assert.match(persistedSchedule.nextRunAt, /^2026-10-21T10:01:00\.000Z$/);
+    assert.equal(activeSchedule.body.programacoes.find(item => item.nome === "Horário mock").tipo, "horario");
+    assert.equal(activeSchedule.body.programacoes.find(item => item.nome === "Única mock").tipo, "horario");
+    assert.equal(persistedOneShot.intervalMs, 0, "data específica permanece execução única");
     const restartedStore = new V3Store({ filePath: fixture.filePath, clock: () => fakeNow });
     fakeNow = Date.parse("2026-10-21T10:01:00.000Z");
     const scheduler = new V3Scheduler({
@@ -121,7 +136,37 @@ function createFixture(clock = Date.now) {
     const scheduledRun = await scheduler.tick();
     assert.equal(scheduledRun.sent.length, 1);
     assert.equal(scheduledRun.sent[0].destination, "group-a");
-    assert.equal(restartedStore.listSchedules("workspace-a", { includeInactive: true })[0].active, false);
+    const afterFirstDay = restartedStore.listSchedules("workspace-a", { includeInactive: true }).find(item => item.id === persistedSchedule.id);
+    assert.equal(afterFirstDay.active, true);
+    assert.match(afterFirstDay.nextRunAt, /^2026-10-22T10:01:00\.000Z$/);
+    assert.equal((await scheduler.tick()).sent.length, 0, "uma ocorrência não duplica no mesmo dia");
+
+    // Restart between daily occurrences, then execute the next day exactly
+    // once. The original horário/data shape remains the persisted authority.
+    const secondDayStore = new V3Store({ filePath: fixture.filePath, clock: () => fakeNow });
+    fakeNow = Date.parse("2026-10-22T10:01:00.000Z");
+    const secondDayScheduler = new V3Scheduler({
+      store: secondDayStore,
+      clock: () => fakeNow,
+      isWorkspaceMigrated: () => true,
+      transport: {
+        authorizeSend: async () => true,
+        sendMessage: async () => ({ confirmed: true, transportMessageId: "mock-message-2" })
+      }
+    });
+    assert.equal((await secondDayScheduler.tick()).sent.length, 1);
+    assert.equal((await secondDayScheduler.tick()).sent.length, 0, "restart não duplica a segunda ocorrência");
+    const afterSecondDay = secondDayStore.listSchedules("workspace-a", { includeInactive: true }).find(item => item.id === persistedSchedule.id);
+    assert.equal(afterSecondDay.active, true);
+    assert.match(afterSecondDay.nextRunAt, /^2026-10-23T10:01:00\.000Z$/);
+
+    // OFF and deletion both remain fail-closed for the following occurrence.
+    secondDayStore.deactivateSchedule("workspace-a", afterSecondDay.id);
+    assert.equal((await secondDayScheduler.tick()).sent.length, 0);
+    secondDayStore.deleteSchedule("workspace-a", afterSecondDay.id);
+    secondDayStore.deleteSchedule("workspace-a", persistedOneShot.id);
+    const afterDeleteScheduleStore = new V3Store({ filePath: fixture.filePath, clock: () => fakeNow });
+    assert.equal(afterDeleteScheduleStore.listSchedules("workspace-a", { includeInactive: true }).length, 0);
 
     const atendimento = await request(fixture.server, "POST", `/mensageiro/perfis/${profile.id}/atendimento`, {
       atendimentoAtivo: true,
@@ -178,7 +223,7 @@ function createFixture(clock = Date.now) {
     const finalRestartedStore = new V3Store({ filePath: fixture.filePath });
     assert.equal(finalRestartedStore.listProfiles("workspace-a").length, 0);
     assert.equal(Object.keys(finalRestartedStore.snapshot().deletedIds.profiles).length, 1);
-    assert.equal(Object.keys(finalRestartedStore.snapshot().deletedIds.schedules).length, 2);
+    assert.equal(Object.keys(finalRestartedStore.snapshot().deletedIds.schedules).length, 3);
   } finally {
     await new Promise(resolve => fixture.server.close(resolve));
     fs.rmSync(fixture.dir, { recursive: true, force: true });
