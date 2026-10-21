@@ -1,8 +1,8 @@
 "use strict";
 
-// M3.2 isolated integration seam. This module deliberately does not replace
-// the production Mensageiro routes or scheduler. It gives the four real cards
-// one explicit contract for a later, feature-gated cutover.
+// Isolated integration seam for all V3 cards. This module deliberately does
+// not replace the production transport; it gives every card one explicit
+// contract for controlled tests with simulated adapters.
 const { INTEGRATION_MATRIX } = require("./src/v3/integration-matrix");
 
 const REAL_CARD_ADAPTERS = Object.freeze({
@@ -29,6 +29,36 @@ const REAL_CARD_ADAPTERS = Object.freeze({
     existingRoute: "/mensageiro/gerente/status",
     existingExecutor: "tratarMensagemGrupoGerente",
     v3Status: INTEGRATION_MATRIX.groupManager.status
+  }),
+  welcome: Object.freeze({
+    card: "welcome",
+    existingRoute: "/mensageiro/perfis/:perfilId/boas-vindas",
+    existingExecutor: "tratarEventoGrupoMensageiro",
+    v3Status: INTEGRATION_MATRIX.welcome.status
+  }),
+  farewell: Object.freeze({
+    card: "farewell",
+    existingRoute: "/mensageiro/perfis/:perfilId/despedida",
+    existingExecutor: "tratarEventoGrupoMensageiro",
+    v3Status: INTEGRATION_MATRIX.farewell.status
+  }),
+  faq: Object.freeze({
+    card: "faq",
+    existingRoute: "/mensageiro/perfis/:perfilId/faq",
+    existingExecutor: "tratarMensagemPrivadaAtendimento",
+    v3Status: INTEGRATION_MATRIX.faq.status
+  }),
+  flows: Object.freeze({
+    card: "flows",
+    existingRoute: "/mensageiro/perfis/:perfilId/fluxos",
+    existingExecutor: "tratarMensagemPrivadaAtendimento",
+    v3Status: INTEGRATION_MATRIX.flows.status
+  }),
+  quickReplies: Object.freeze({
+    card: "quickReplies",
+    existingRoute: "/mensageiro/perfis/:perfilId/respostas-rapidas",
+    existingExecutor: "tratarMensagemPrivadaAtendimento",
+    v3Status: INTEGRATION_MATRIX.quickReplies.status
   })
 });
 

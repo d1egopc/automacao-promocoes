@@ -26135,10 +26135,12 @@ app.use("/mensageiro", criarRotasMensageiro({
   }
 }));
 
-// M3.2 candidate-only API. The route is authenticated by the existing app
-// middleware and uses only the authenticated workspace from getClienteId;
-// it does not migrate or enable any production workspace by itself.
+// Mensageiro V3 is the universal authority. The route is authenticated by
+// the existing app middleware and uses only the authenticated workspace from
+// getClienteId; every workspace starts with an empty V3 state and no legacy
+// Mensageiro configuration is imported or executable.
 const mensageiroV3Routes = criarRotasMensageiroV3({
+  universal: true,
   getClienteId,
   usuarioTemRecurso,
   listSessoes: (clienteId) => listarSessoesWhatsappCliente(clienteId),
@@ -26149,9 +26151,9 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
 
-// Candidate-only ingress bridge.  Non-migrated workspaces continue through
-// the existing handlers; a durably migrated workspace can only reach the
-// same handlers after the V3 profile/card gate has authorized the event.
+// Universal ingress bridge. Legacy handlers remain injectable only as a
+// compatibility seam for isolated tests; the universal fence prevents them
+// from being invoked in production.
 const mensageiroV3HandlerBridge = createHandlerBridge({
   fence: mensageiroV3Routes.fence,
   store: mensageiroV3Routes.store,
@@ -34423,13 +34425,15 @@ app.listen(PORT, () => {
   }
   iniciarManualV2SchedulerOperacional();
   iniciarManualV2RetentionOperacional();
-  mensageiro.iniciarSchedulerProgramacoesMensageiro({
-    // A migrated workspace is cut over to V3 and must never fall back to the
-    // legacy scheduler after restart. Unmigrated workspaces retain legacy
-    // behavior until an explicit durable migration.
-    getSock: (sessaoId) => getSockMensageiroLegacySeguro(sessaoId),
-    getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
-  });
+  if (mensageiroV3Routes.fence.universal !== true) {
+    mensageiro.iniciarSchedulerProgramacoesMensageiro({
+      getSock: (sessaoId) => getSockMensageiroLegacySeguro(sessaoId),
+      getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
+    });
+  } else {
+    mensageiro.desativarSchedulerProgramacoesMensageiro();
+    console.log("[MENSAGEIRO-LEGACY-BLOCKED] scheduler legado desativado; autoridade universal V3");
+  }
   iniciarMensageiroV3Scheduler();
   iniciarInfraMemoryTelemetryOperacional();
 

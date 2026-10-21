@@ -18,8 +18,8 @@ function criarRotasMensageiroV3(deps = {}) {
   if (!deps.store) assertDurableStorage(paths.statePath, { createParent: true });
   const store = deps.store || new V3Store({ filePath: paths.statePath });
   const fence = deps.fence || (deps.filePath || deps.fencePath
-    ? createPersistentWorkspaceFence({ filePath: paths.fencePath })
-    : createPersistentWorkspaceFence({ store }));
+    ? createPersistentWorkspaceFence({ filePath: paths.fencePath, universal: deps.universal === true })
+    : createPersistentWorkspaceFence({ store, universal: deps.universal === true }));
 
   function workspace(req) {
     const value = typeof deps.getClienteId === "function" ? deps.getClienteId(req) : "";
@@ -60,7 +60,7 @@ function criarRotasMensageiroV3(deps = {}) {
   router.get("/state", (req, res) => {
     const id = allowed(req, res); if (!id) return;
     const status = fenceStatus(res, id); if (!status) return;
-    return res.json({ ok: true, source: "mensageiro_v3", migrated: status === "V3_MIGRATED", fenceStatus: status, ...view(id) });
+    return res.json({ ok: true, source: "mensageiro_v3", universal: fence.universal === true, migrated: status === "V3_MIGRATED", fenceStatus: status, ...view(id) });
   });
 
   router.get("/profiles", (req, res) => {
@@ -174,7 +174,7 @@ function criarRotasMensageiroV3(deps = {}) {
     const id = allowed(req, res); if (!id) return;
     const status = fenceStatus(res, id); if (!status) return;
     const current = view(id);
-    return res.json({ ok: true, source: "mensageiro_v3", workspaceId: id, migrated: status === "V3_MIGRATED", fenceStatus: status, profiles: current.profiles.map(profile => ({
+    return res.json({ ok: true, source: "mensageiro_v3", workspaceId: id, universal: fence.universal === true, migrated: status === "V3_MIGRATED", fenceStatus: status, profiles: current.profiles.map(profile => ({
       id: profile.id,
       active: profile.active,
       cards: profile.cards,

@@ -8,8 +8,17 @@ const { assertAbsolute, assertDurableStorage } = require("./durable-path");
 const STATUSES = Object.freeze(["LEGACY", "PREPARING", "QUIESCED", "V3_MIGRATED"]);
 const TRANSITIONS = Object.freeze({ LEGACY: ["PREPARING"], PREPARING: ["QUIESCED"], QUIESCED: ["V3_MIGRATED"], V3_MIGRATED: [] });
 
-function createWorkspaceFence({ migratedWorkspaceIds = [] } = {}) {
+function createWorkspaceFence({ migratedWorkspaceIds = [], universal = false } = {}) {
   const migrated = new Set(migratedWorkspaceIds.map(value => String(value).trim()).filter(Boolean));
+  if (universal) {
+    return Object.freeze({
+      universal: true,
+      status() { return "V3_MIGRATED"; },
+      isMigrated() { return true; },
+      legacyAllowed() { return false; },
+      v3Required() { return true; }
+    });
+  }
   return Object.freeze({
     isMigrated(workspaceId) { return migrated.has(String(workspaceId || "")); },
     legacyAllowed(workspaceId) { return !migrated.has(String(workspaceId || "")); },
@@ -23,18 +32,27 @@ function validateState(value) {
   return value;
 }
 
-function createPersistentWorkspaceFence({ filePath, store } = {}) {
+function createPersistentWorkspaceFence({ filePath, store, universal = false } = {}) {
   if (store) {
-    const status = workspaceId => store.getWorkspaceFence(workspaceId).status;
+    const rawStatus = workspaceId => store.getWorkspaceFence(workspaceId).status;
+    const status = workspaceId => universal ? "V3_MIGRATED" : rawStatus(workspaceId);
     const api = {
+      universal: universal === true,
       status,
-      isMigrated(workspaceId) { return status(workspaceId) === "V3_MIGRATED"; },
-      legacyAllowed(workspaceId) { return status(workspaceId) === "LEGACY"; },
-      v3Required(workspaceId) { return status(workspaceId) === "V3_MIGRATED"; },
-      markPreparing(workspaceId, details = {}) { return store.transitionWorkspaceFence(workspaceId, "PREPARING", details); },
-      markQuiesced(workspaceId, details = {}) { return store.transitionWorkspaceFence(workspaceId, "QUIESCED", details); },
+      isMigrated(workspaceId) { return universal || status(workspaceId) === "V3_MIGRATED"; },
+      legacyAllowed(workspaceId) { return !universal && status(workspaceId) === "LEGACY"; },
+      v3Required(workspaceId) { return universal || status(workspaceId) === "V3_MIGRATED"; },
+      markPreparing(workspaceId, details = {}) {
+        if (universal) throw new Error("fence_universal_sem_migracao");
+        return store.transitionWorkspaceFence(workspaceId, "PREPARING", details);
+      },
+      markQuiesced(workspaceId, details = {}) {
+        if (universal) throw new Error("fence_universal_sem_migracao");
+        return store.transitionWorkspaceFence(workspaceId, "QUIESCED", details);
+      },
       markMigrated(workspaceId, details = {}) {
         const current = status(workspaceId);
+        if (universal) return { status: "V3_MIGRATED", universal: true, workspaceId: String(workspaceId || "") };
         if (current === "V3_MIGRATED") return store.getWorkspaceFence(workspaceId);
         if (current === "LEGACY") store.transitionWorkspaceFence(workspaceId, "PREPARING", details);
         if (store.getWorkspaceFence(workspaceId).status === "PREPARING") store.transitionWorkspaceFence(workspaceId, "QUIESCED", details);
@@ -100,15 +118,24 @@ function createPersistentWorkspaceFence({ filePath, store } = {}) {
     if (nextStatus === "V3_MIGRATED") fs.writeFileSync(markerPath, JSON.stringify({ workspaceId: id, revision: next.revision, at: next.updatedAt }), { mode: 0o600 });
     write(state); return next;
   });
-  const status = workspaceId => (read().workspaces[String(workspaceId || "")] || { status: "LEGACY", revision: 0 }).status;
+  const rawStatus = workspaceId => (read().workspaces[String(workspaceId || "")] || { status: "LEGACY", revision: 0 }).status;
+  const status = workspaceId => universal ? "V3_MIGRATED" : rawStatus(workspaceId);
   return Object.freeze({
+    universal: universal === true,
     status,
-    isMigrated: workspaceId => status(workspaceId) === "V3_MIGRATED",
-    legacyAllowed: workspaceId => status(workspaceId) === "LEGACY",
-    v3Required: workspaceId => status(workspaceId) === "V3_MIGRATED",
-    markPreparing: (workspaceId, details) => transition(workspaceId, "PREPARING", details),
-    markQuiesced: (workspaceId, details) => transition(workspaceId, "QUIESCED", details),
+    isMigrated: workspaceId => universal || status(workspaceId) === "V3_MIGRATED",
+    legacyAllowed: workspaceId => !universal && status(workspaceId) === "LEGACY",
+    v3Required: workspaceId => universal || status(workspaceId) === "V3_MIGRATED",
+    markPreparing(workspaceId, details) {
+      if (universal) throw new Error("fence_universal_sem_migracao");
+      return transition(workspaceId, "PREPARING", details);
+    },
+    markQuiesced(workspaceId, details) {
+      if (universal) throw new Error("fence_universal_sem_migracao");
+      return transition(workspaceId, "QUIESCED", details);
+    },
     markMigrated(workspaceId, details = {}) {
+      if (universal) return { status: "V3_MIGRATED", universal: true, workspaceId: String(workspaceId || "") };
       const current = status(workspaceId);
       if (current === "V3_MIGRATED") return read().workspaces[String(workspaceId)];
       if (current === "LEGACY") transition(workspaceId, "PREPARING", details);

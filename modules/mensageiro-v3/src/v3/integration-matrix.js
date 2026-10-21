@@ -22,6 +22,36 @@ const INTEGRATION_MATRIX = Object.freeze({
     engine: "handler-bridge -> tratarMensagemGrupoGerente",
     status: "v3_config_adapter_real_handler",
     requiredProductionAdapters: ["route_gerente_grupos_v3", "group_manager_dispatcher", "group_ownership_guard"]
+  },
+  welcome: {
+    card: "welcome",
+    engine: "handler-bridge -> tratarEventoGrupoMensageiro",
+    status: "v3_config_adapter_real_handler",
+    requiredProductionAdapters: ["route_boas_vindas_v3", "welcome_dispatcher", "profile_session_guard"]
+  },
+  farewell: {
+    card: "farewell",
+    engine: "handler-bridge -> tratarEventoGrupoMensageiro",
+    status: "v3_config_adapter_real_handler",
+    requiredProductionAdapters: ["route_despedida_v3", "farewell_dispatcher", "profile_session_guard"]
+  },
+  faq: {
+    card: "faq",
+    engine: "handler-bridge -> tratarMensagemPrivadaAtendimento",
+    status: "v3_config_adapter_real_handler",
+    requiredProductionAdapters: ["route_faq_v3", "attendance_dispatcher", "profile_session_guard"]
+  },
+  flows: {
+    card: "flows",
+    engine: "handler-bridge -> tratarMensagemPrivadaAtendimento",
+    status: "v3_config_adapter_real_handler",
+    requiredProductionAdapters: ["route_fluxos_v3", "attendance_dispatcher", "profile_session_guard"]
+  },
+  quickReplies: {
+    card: "quickReplies",
+    engine: "handler-bridge -> tratarMensagemPrivadaAtendimento",
+    status: "v3_config_adapter_real_handler",
+    requiredProductionAdapters: ["route_respostas_rapidas_v3", "attendance_dispatcher", "profile_session_guard"]
   }
 });
 

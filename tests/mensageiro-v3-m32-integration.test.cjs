@@ -26,9 +26,9 @@ function activeProfile(store, workspaceId) {
   return profile.id;
 }
 
-test("M3.2 — quatro cards têm adapters reais inventariados e adapters simulados injetáveis", () => {
+test("M3.2 — todos os cards têm adapters reais inventariados e adapters simulados injetáveis", () => {
   const matrix = buildCardIntegrationMatrix();
-  assert.deepEqual(Object.keys(matrix).sort(), ["attendance", "commands", "groupManager", "scheduledMessages"]);
+  assert.deepEqual(Object.keys(matrix).sort(), ["attendance", "commands", "farewell", "flows", "groupManager", "quickReplies", "scheduledMessages", "welcome", "faq"].sort());
   assert.equal(matrix.scheduledMessages.existingExecutor, "programacoes.scheduler.js");
   assert.equal(matrix.commands.existingExecutor, "tratarMensagemGrupoComando");
   assert.equal(matrix.attendance.existingExecutor, "tratarMensagemPrivadaAtendimento");
@@ -38,7 +38,7 @@ test("M3.2 — quatro cards têm adapters reais inventariados e adapters simulad
     authorize: async () => true,
     send: async payload => calls.push({ name, payload })
   }])));
-  assert.equal(Object.keys(adapters).length, 4);
+  assert.equal(Object.keys(adapters).length, 9);
   assert.equal(calls.length, 0);
 });
 
@@ -88,18 +88,19 @@ test("M3.2.1 — scheduler V3 respeita fence e só envia após migração duráv
   assert.equal(sent[0].destination, "group-fence");
 });
 
-test("M3.2 — cards não integrados ficam explicitamente bloqueados no corte", () => {
+test("M3.2 — todos os cards permanecem prontos para integração V3", () => {
   const matrix = buildCardIntegrationMatrix();
-  for (const card of ["commands", "attendance", "groupManager"]) {
-    assert.equal(matrix[card].v3Status, "v3_config_adapter_real_handler");
+  for (const card of Object.keys(matrix)) {
+    if (card !== "scheduledMessages") assert.equal(matrix[card].v3Status, "v3_config_adapter_real_handler");
   }
+  assert.equal(matrix.scheduledMessages.v3Status, "implemented_isolated");
 });
 
 test("M3.2 — Comandos, Atendimento e Gerente usam a mesma autoridade persistida", async () => {
   const f = fixture();
   const profileId = activeProfile(f.store, "workspace-a");
   const calls = [];
-  const adapters = Object.fromEntries(["scheduledMessages", "commands", "attendance", "groupManager"].map(name => [name, {
+  const adapters = Object.fromEntries(Object.keys(buildCardIntegrationMatrix()).map(name => [name, {
     authorize: async () => true,
     send: async payload => calls.push(payload)
   }]));
@@ -123,7 +124,7 @@ test("M3.2 — cards e claims permanecem isolados entre workspaces e instâncias
   f.store.saveCard("workspace-a", a, "commands", { active: true });
   f.store.saveCard("workspace-b", b, "commands", { active: true });
   const calls = [];
-  const adapters = Object.fromEntries(["scheduledMessages", "commands", "attendance", "groupManager"].map(name => [name, {
+  const adapters = Object.fromEntries(Object.keys(buildCardIntegrationMatrix()).map(name => [name, {
     authorize: async () => true,
     send: async payload => calls.push(payload)
   }]));

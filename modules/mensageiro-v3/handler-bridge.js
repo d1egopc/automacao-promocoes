@@ -1,9 +1,8 @@
 "use strict";
 
-// Candidate-only ingress gate for the real Mensageiro handlers.  Unmigrated
-// workspaces keep the existing handlers unchanged.  Once a workspace is
-// durably marked as V3, every ingress must pass the V3 profile/card gate; a
-// missing V3 handler fails closed instead of silently falling back to legacy.
+// Ingress gate for the real Mensageiro handlers.  Universal mode never calls
+// a legacy handler: every workspace must pass the V3 profile/card gate, and a
+// missing V3 handler fails closed instead of silently falling back.
 
 const CARD_NAMES = Object.freeze([
   "scheduled",
@@ -20,6 +19,7 @@ const CARD_NAMES = Object.freeze([
 function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {}, logger = () => {} } = {}) {
   if (!fence || typeof fence.v3Required !== "function") throw new Error("fence_v3_obrigatorio");
   if (!store || typeof store.getProfile !== "function") throw new Error("store_v3_obrigatorio");
+  const universal = fence.universal === true;
 
   const invoke = async ({ workspaceId, profileId, card, args = {}, eventId = "", claimKey = "" } = {}) => {
     const workspace = String(workspaceId || "").trim();
@@ -30,8 +30,8 @@ function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {
     let v3Required;
     let legacyAllowed;
     try {
-      v3Required = fence.v3Required(workspace) === true;
-      legacyAllowed = typeof fence.legacyAllowed === "function" ? fence.legacyAllowed(workspace) === true : !v3Required;
+      v3Required = universal || fence.v3Required(workspace) === true;
+      legacyAllowed = !universal && (typeof fence.legacyAllowed === "function" ? fence.legacyAllowed(workspace) === true : !v3Required);
     } catch (error) {
       logger({ workspaceId: workspace, profileId: profile, card: cardName, reason: "fence_indisponivel", error: error?.message || String(error) });
       return { ok: false, blocked: true, reason: "fence_indisponivel" };
@@ -49,7 +49,14 @@ function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {
       ? ["attendance", "faq", "flows", "quickReplies"].some(name => current?.cards?.[name]?.active === true)
       : current?.cards?.[cardName]?.active === true;
     store.reload();
-    let current = store.getProfile(workspace, profile);
+    const readProfile = () => {
+      try { return store.getProfile(workspace, profile); }
+      catch (error) {
+        logger({ workspaceId: workspace, profileId: profile, card: cardName, reason: "perfil_v3_indisponivel", error: error?.message || String(error) });
+        return null;
+      }
+    };
+    let current = readProfile();
     if (!current || current.workspaceId !== workspace || current.active !== true || !cardAtivo(current)) {
       return { ok: false, blocked: true, reason: "card_v3_inativo" };
     }
@@ -67,7 +74,7 @@ function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {
 
     // The real handler is invoked only after an immediate durable re-read.
     store.reload();
-    current = store.getProfile(workspace, profile);
+    current = readProfile();
     if (!current || current.workspaceId !== workspace || current.active !== true || !cardAtivo(current)) {
       return { ok: false, blocked: true, reason: "configuracao_alterada" };
     }

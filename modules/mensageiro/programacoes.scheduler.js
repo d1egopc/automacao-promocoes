@@ -18,6 +18,7 @@ const TZ_PADRAO = "America/Sao_Paulo";
 
 let schedulerTimer = null;
 let schedulerRodando = false;
+let schedulerLegadoDesativado = false;
 
 function iso(date) {
   return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : "";
@@ -493,6 +494,9 @@ async function processarProgramacao({ clienteId, programacao, deps = {}, agora =
 }
 
 async function rodarProgramacoesMensageiroPendentes(deps = {}) {
+  if (schedulerLegadoDesativado || deps.legacyDisabled === true) {
+    return { ok: false, blocked: true, reason: "mensageiro_legado_desativado" };
+  }
   if (schedulerRodando) return { ok: true, ignorado: "rodada_em_andamento" };
   schedulerRodando = true;
   const agora = deps.agora instanceof Date ? deps.agora : new Date();
@@ -518,6 +522,7 @@ async function rodarProgramacoesMensageiroPendentes(deps = {}) {
 }
 
 function iniciarSchedulerProgramacoesMensageiro(deps = {}) {
+  if (schedulerLegadoDesativado || deps.legacyDisabled === true) return null;
   if (schedulerTimer) return schedulerTimer;
 
   const rodada = () => {
@@ -538,6 +543,12 @@ function pararSchedulerProgramacoesMensageiro() {
   schedulerRodando = false;
 }
 
+function desativarSchedulerProgramacoesMensageiro() {
+  schedulerLegadoDesativado = true;
+  pararSchedulerProgramacoesMensageiro();
+  return { ok: true, blocked: true, reason: "mensageiro_legado_desativado" };
+}
+
 module.exports = {
   INTERVALO_SCHEDULER_MS,
   ATRASO_MAXIMO_MS,
@@ -549,5 +560,6 @@ module.exports = {
   processarProgramacao,
   rodarProgramacoesMensageiroPendentes,
   iniciarSchedulerProgramacoesMensageiro,
-  pararSchedulerProgramacoesMensageiro
+  pararSchedulerProgramacoesMensageiro,
+  desativarSchedulerProgramacoesMensageiro
 };
