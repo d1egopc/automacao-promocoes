@@ -129,13 +129,15 @@ jobs:
           set -Eeuo pipefail
           package_visibility() {
             local suffix="$1"
-            curl --fail --silent --show-error \
+            local metadata
+            metadata="$(curl --fail --silent --show-error \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GHCR_VISIBILITY_TOKEN" \
-              'https://api.github.com/user/packages?package_type=container&per_page=100' \
-              | jq -er --arg suffix "$suffix" \
-                '.[] | select((.name == ($suffix | ltrimstr("/"))) or (.name | endswith($suffix))) | .visibility' \
-              | head -n 1
+              'https://api.github.com/user/packages?package_type=container&per_page=100')"
+            jq -er --arg suffix "$suffix" \
+              '[.[] | select((.name == ($suffix | ltrimstr("/"))) or (.name | endswith($suffix)))]
+               | if length == 1 then .[0].visibility else error("unexpected package match count") end' \
+              <<<"$metadata"
           }
           publication_visibility="$(package_visibility '/mensageiro-v3-publication')"
           recovery_visibility="$(package_visibility '/mensageiro-v3-recovery')"
