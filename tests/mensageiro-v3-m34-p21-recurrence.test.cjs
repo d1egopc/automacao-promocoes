@@ -6,7 +6,7 @@ const path = require("node:path");
 const { V3Store, buildOccurrenceKey } = require("../modules/mensageiro-v3/src/v3/store");
 const { V3Scheduler } = require("../modules/mensageiro-v3/src/v3/scheduler");
 
-function fixture(start = "2026-10-20T12:00:00.000Z") {
+function fixture(start = "2026-10-20T09:00:00.000Z") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "m34-p21-recurrence-"));
   const filePath = path.join(dir, "state.json");
   fs.writeFileSync(filePath, JSON.stringify({ schemaVersion: 3, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} }, workspaceFences: {} }));
@@ -64,14 +64,15 @@ test("M3.4-P2.1 — recorrência diária avança nextRunAt e executa cada ocorr�
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 
-test("M3.4-P2.1 — intervalo atrasado pula períodos sem avalanche", async () => {
+test("M3.4-P2.1 — intervalo atrasado pula períodos sem replay ou avalanche", async () => {
   const f = fixture("2026-10-23T12:00:00.000Z");
   try {
     const { schedule: initial } = schedule(f, { intervalMs: 60 * 60 * 1000, nextRunAt: "2026-10-20T09:00:00.000Z" });
     const calls = [];
     const result = await scheduler(f.store, f.now, calls).tick();
-    assert.equal(result.sent.length, 1);
-    assert.equal(calls.length, 1);
+    assert.equal(result.sent.length, 0);
+    assert.equal(calls.length, 0);
+    assert.equal(result.blocked[0]?.reason, "atraso_sem_replay");
     assert.equal(f.store.getSchedule("workspace-a", initial.id).nextRunAt, "2026-10-23T13:00:00.000Z");
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });

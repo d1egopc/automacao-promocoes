@@ -37,6 +37,7 @@ jobs:
             modules/mensageiro-v3/operational-gates.js \
             modules/mensageiro-v3/src/v3/scheduler.js \
             modules/mensageiro-v3/src/v3/store.js \
+            tests/mensageiro-v3-m34-p21-recurrence.test.cjs \
             tests/mensageiro-v3-operational-hotfix.test.cjs | sort)"
           test "$changed" = "$expected"
           git diff --check 1e9bd1104ae549cf09f9095e726cc8c0addfdd48..HEAD
