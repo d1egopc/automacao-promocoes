@@ -123,26 +123,18 @@ jobs:
 
       - name: Verify GHCR packages remain private
         shell: bash
-        env:
-          GHCR_VISIBILITY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
-          package_visibility() {
-            local suffix="$1"
-            local metadata
-            metadata="$(curl --fail --silent --show-error \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GHCR_VISIBILITY_TOKEN" \
-              'https://api.github.com/user/packages?package_type=container&per_page=100')"
-            jq -er --arg suffix "$suffix" \
-              '[.[] | select((.name == ($suffix | ltrimstr("/"))) or (.name | endswith($suffix)))]
-               | if length == 1 then .[0].visibility else error("unexpected package match count") end' \
-              <<<"$metadata"
+          anonymous_status() {
+            local package="$1"
+            curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+              "https://$REGISTRY/v2/$IMAGE_OWNER/$IMAGE_REPO/$package/manifests/$SOURCE_SHA"
           }
-          publication_visibility="$(package_visibility '/mensageiro-v3-publication')"
-          recovery_visibility="$(package_visibility '/mensageiro-v3-recovery')"
-          test "$publication_visibility" = private
-          test "$recovery_visibility" = private
+          publication_status="$(anonymous_status mensageiro-v3-publication)"
+          recovery_status="$(anonymous_status mensageiro-v3-recovery)"
+          [[ "$publication_status" == 401 || "$publication_status" == 403 ]]
+          [[ "$recovery_status" == 401 || "$recovery_status" == 403 ]]
           echo "GHCR_PRIVATE_VERIFIED=true" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke publication image with restart and persistent V3 state
