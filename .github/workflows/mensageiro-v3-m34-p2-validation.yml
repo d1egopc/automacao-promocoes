@@ -107,5 +107,9 @@ jobs:
           cleanup() { docker volume rm "$volume" >/dev/null 2>&1 || true; docker image rm "$image" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           docker volume create "$volume" >/dev/null
+          # An empty Docker volume is root-owned even though the image's
+          # application data directory is node-owned. Initialize only this
+          # disposable volume before running the unprivileged smoke checks.
+          docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$image" sh -lc 'chown -R node:node /data/mensageiro-v3'
           docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$image" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
           docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$image" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
