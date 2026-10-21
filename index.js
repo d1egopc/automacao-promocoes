@@ -275,6 +275,7 @@ const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
+const { createV3BaileysAckCorrelator, messageIdOf } = require("./modules/mensageiro-v3/src/v3/baileys-ack-correlator");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
@@ -26150,6 +26151,10 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
   }
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
+const mensageiroV3AckCorrelator = createV3BaileysAckCorrelator({
+  store: mensageiroV3Routes.store,
+  logger: payload => console.warn("[MENSAGEIRO-V3-ACK]", JSON.stringify(payload))
+});
 
 // Universal ingress bridge. Legacy handlers remain injectable only as a
 // compatibility seam for isolated tests; the universal fence prevents them
@@ -26231,12 +26236,23 @@ const mensageiroV3Scheduler = new V3Scheduler({
       const sock = getSockMensageiroAtual(profile.sessionId);
       return Boolean(sock && (statusSessao[profile.sessionId] === "open" || statusSessao[profile.sessionId] === "connected"));
     },
-    sendMessage: async ({ workspaceId, profileId, sessionId, destination, content }) => {
+    sendMessage: async ({ workspaceId, profileId, sessionId, destination, content, claimKey }) => {
       const profile = mensageiroV3Routes.store.getProfile(workspaceId, profileId);
       if (!profile || profile.sessionId !== sessionId) throw new Error("sessao_v3_invalida");
       const sock = getSockMensageiroAtual(sessionId);
       if (!sock || !(statusSessao[sessionId] === "open" || statusSessao[sessionId] === "connected")) throw new Error("sessao_v3_indisponivel");
-      return sock.sendMessage(destination, content);
+      const localResult = await sock.sendMessage(destination, content);
+      const transportMessageId = messageIdOf(localResult);
+      if (!transportMessageId) return { confirmed: false, ambiguous: true, transportState: "local_return_without_message_id" };
+      const correlation = mensageiroV3AckCorrelator.register({
+        workspaceId,
+        profileId,
+        claimKey,
+        sessionId,
+        messageId: transportMessageId
+      });
+      if (!correlation.ok) return { confirmed: false, ambiguous: true, transportMessageId, transportState: "local_return_without_ack" };
+      return { confirmed: false, ambiguous: true, transportMessageId, transportState: "local_return_without_ack" };
     },
   },
   logger: payload => console.warn("[MENSAGEIRO-V3-SCHEDULER]", JSON.stringify(payload))
@@ -33728,6 +33744,27 @@ registrarListenerUnicoSocket({
     sessaoId: id,
     totalMensagensLote: messages.length
   });
+  }
+});
+
+registrarListenerUnicoSocket({
+  sock,
+  evento: "messages.update",
+  chave: "messages.update.v3-ack",
+  sessaoId: id,
+  socketGeracao,
+  motivoRegistro: force ? "reconnect_ack" : "boot_ack",
+  logger: console,
+  handler: async (updates = []) => {
+    if (!socketEhAtual(sessoes, id, sock)) return;
+    const resultado = mensageiroV3AckCorrelator.observe({ sessionId: id, updates });
+    if (resultado.observed > 0) {
+      console.log("[MENSAGEIRO-V3-ACK-OBSERVED]", JSON.stringify({
+        sessaoId: id,
+        observed: resultado.observed,
+        statuses: resultado.results.map(item => item.status)
+      }));
+    }
   }
 });
 

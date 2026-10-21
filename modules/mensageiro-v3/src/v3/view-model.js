@@ -2,6 +2,7 @@ function buildViewModel(store, workspaceId, now = Date.now()) {
   const profiles = store.listProfiles(workspaceId).map(profile => ({
     id: profile.id,
     workspaceId: profile.workspaceId,
+    revision: profile.revision,
     name: profile.name,
     active: profile.active === true,
     sessionId: profile.sessionId,
@@ -18,6 +19,7 @@ function buildViewModel(store, workspaceId, now = Date.now()) {
       id: schedule.id,
       workspaceId: schedule.workspaceId,
       profileId: schedule.profileId,
+      revision: schedule.revision,
       name: schedule.name,
       active: schedule.active === true,
       timezone: schedule.timezone,

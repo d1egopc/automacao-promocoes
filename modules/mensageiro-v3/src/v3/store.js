@@ -496,6 +496,34 @@ class V3Store {
     });
   }
 
+  recordTransportAck(workspaceId, key, {
+    transportMessageId,
+    transportAckStatus,
+    transportAckObservedAt
+  } = {}) {
+    return this._mutate(() => {
+      const w = this._workspace(workspaceId);
+      const claimKey = String(key || "");
+      const claim = w.claims[claimKey];
+      if (!claim) return { ok: false, reason: "claim_nao_encontrado" };
+      const status = String(transportAckStatus || "").trim();
+      if (!status) throw new Error("ack_status_obrigatorio");
+      const messageId = String(transportMessageId || claim.transportMessageId || "").trim();
+      if (!messageId) throw new Error("ack_message_id_obrigatorio");
+      const observedAt = String(transportAckObservedAt || nowIso(this.clock));
+      const patch = {
+        transportMessageId: messageId,
+        transportAckStatus: status,
+        transportAckObservedAt: observedAt
+      };
+      w.claims[claimKey] = { ...claim, ...patch };
+      const occurrenceKey = String(claim.occurrenceKey || "");
+      if (occurrenceKey && w.occurrences[occurrenceKey]) w.occurrences[occurrenceKey] = { ...w.occurrences[occurrenceKey], ...patch };
+      this._touch(w, "transport_ack_observed", { key: claimKey, status, messageId });
+      return { ok: true, status, messageId, observedAt };
+    });
+  }
+
   advanceScheduleOccurrence(workspaceId, scheduleId, { occurrenceAt, expectedRevision, now = typeof this.clock === "function" ? this.clock() : Date.now() } = {}) {
     return this._mutate(() => {
       const w = this._workspace(workspaceId); const idValue = String(scheduleId || ""); const s = w.schedules[idValue];

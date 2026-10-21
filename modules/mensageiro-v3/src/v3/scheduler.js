@@ -81,9 +81,14 @@ class V3Scheduler {
                 this.store.advanceScheduleOccurrence(workspaceId, afterAuthorization.id, { occurrenceAt, expectedRevision: afterAuthorization.revision, now });
                 continue;
               }
-              const transportResult = await this.transport.sendMessage({ workspaceId, profileId: beforeSend.profileId, sessionId: beforeSendProfile.sessionId, destination, content: beforeSend.content });
+              const transportResult = await this.transport.sendMessage({ workspaceId, profileId: beforeSend.profileId, sessionId: beforeSendProfile.sessionId, destination, content: beforeSend.content, claimKey });
               const status = transportResult?.ambiguous === true || transportResult?.confirmed === false ? "ambiguous" : "confirmed";
-              this.store.completeExecution(workspaceId, claimKey, { status, occurrenceKey: claimKey });
+              this.store.completeExecution(workspaceId, claimKey, {
+                status,
+                occurrenceKey: claimKey,
+                transportMessageId: transportResult?.transportMessageId || undefined,
+                transportState: transportResult?.transportState || (status === "ambiguous" ? "local_return_without_ack" : "confirmed_by_transport_return")
+              });
               if (status === "confirmed") {
                 sent.push({ workspaceId, scheduleId: beforeSend.id, destination });
                 this.store.recordDecision(workspaceId, { scheduleId: beforeSend.id, destination, decision: "sent" });
