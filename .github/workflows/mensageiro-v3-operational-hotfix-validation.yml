@@ -74,3 +74,66 @@ jobs:
           docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$publication" sh -lc 'chown -R node:node /data/mensageiro-v3'
           docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$publication" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
           docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify -e V3_SMOKE_EXPECT_RECOVERY_DISABLED=true "$recovery" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+
+  private-images:
+    needs: node24-docker
+    if: github.ref == 'refs/heads/validation/mensageiro-v3-operational-hotfix-20261021'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require private GHCR packages before publishing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for role in publication recovery; do
+            package="automacao-promocoes%2Fmensageiro-v3-${role}"
+            visibility="$(gh api "/users/d1egopc/packages/container/${package}" --jq '.visibility')"
+            test "$visibility" = private
+          done
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Publish both candidate roles by unique SHA tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for role in publication recovery; do
+            image="ghcr.io/d1egopc/automacao-promocoes/mensageiro-v3-${role}"
+            build_args=()
+            if [[ "$role" == recovery ]]; then build_args+=(--build-arg MENSAGEIRO_V3_RECOVERY_DISABLED=true); fi
+            docker buildx build --pull=false --provenance=false --sbom=false \
+              --file Dockerfile "${build_args[@]}" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --label "org.optimus.mensageiro.role=$role" \
+              --tag "$image:$GITHUB_SHA" --push .
+            digest="$(docker buildx imagetools inspect "$image:$GITHUB_SHA" --format '{{.Manifest.Digest}}')"
+            [[ "$digest" == sha256:* ]]
+            docker pull "$image@$digest"
+            echo "${role^^}_REF=$image@$digest" >> "$GITHUB_ENV"
+            echo "${role^^}_REF=$image@$digest" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Verify private visibility and fence-aware recovery from immutable digests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for role in publication recovery; do
+            package="automacao-promocoes%2Fmensageiro-v3-${role}"
+            test "$(gh api "/users/d1egopc/packages/container/${package}" --jq '.visibility')" = private
+          done
+          volume="v3-hotfix-pull-${GITHUB_RUN_ID}"
+          trap 'docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$PUBLICATION_REF" sh -lc 'chown -R node:node /data/mensageiro-v3'
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify -e V3_SMOKE_EXPECT_RECOVERY_DISABLED=true "$RECOVERY_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
