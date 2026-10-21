@@ -1,21 +1,21 @@
-name: Mensageiro V3 M3.4-P2 isolated validation
+name: Mensageiro V3 M3.4-P3 isolated validation
 
 on:
   push:
     branches:
-      - validation/mensageiro-v3-m34-p2-node24-20261020
+      - validation/mensageiro-v3-m34-p3-node24-20261020
 
 permissions:
   contents: read
 
 concurrency:
-  group: mensageiro-v3-m34-p2-${{ github.ref_name }}
+  group: mensageiro-v3-m34-p3-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   linux-node24:
-    name: GitHub-hosted Linux / Node 24 / production reconciliation
-    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-v3-m34-p2-node24-20261020'
+    name: GitHub-hosted Linux / Node 24 / fence-aware rollback
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-v3-m34-p3-node24-20261020'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -57,6 +57,8 @@ jobs:
           node --check tests/mensageiro-programacoes.test.cjs
           node --check tests/mensageiro-v3-m33-persistence.test.cjs
           node --check tests/mensageiro-v3-m34-p21-recurrence.test.cjs
+          node --check tests/mensageiro-v3-m34-p3-rollback.test.cjs
+          node --check tests/mensageiro-v3-m34-p3-container-smoke.cjs
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           npm run audit:encoding
           git diff --check origin/main...HEAD
@@ -69,6 +71,7 @@ jobs:
           node --test --test-concurrency=1 tests/mensageiro-v3-routes.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m322-real-handlers.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m34-p21-recurrence.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m34-p3-rollback.test.cjs
 
       - name: Legacy Mensageiro and production guard regressions
         run: |
@@ -83,3 +86,26 @@ jobs:
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/fila-historico-compactacao.test.js
           node tests/engine-validator-claim-recovery.test.js
+
+      - name: Build disposable fence-aware image (no registry, no production)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="mensageiro-v3-m34-p3:${GITHUB_SHA}"
+          docker build --pull=false --file Dockerfile --tag "$image" .
+          digest="$(docker image inspect "$image" --format '{{index .RepoDigests 0}}' 2>/dev/null || true)"
+          image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+          printf 'IMAGE_TAG=%s\nIMAGE_ID=%s\nIMAGE_REPO_DIGEST=%s\n' "$image" "$image_id" "${digest:-unpublished-local-image}" | tee -a "$GITHUB_STEP_SUMMARY"
+          docker image inspect "$image" --format '{{.Config.User}}' | grep -qx node
+
+      - name: Prove restart and container recreation with disposable volume
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          volume="mensageiro-v3-m34-p3-smoke-${GITHUB_RUN_ID}"
+          image="mensageiro-v3-m34-p3:${GITHUB_SHA}"
+          cleanup() { docker volume rm "$volume" >/dev/null 2>&1 || true; docker image rm "$image" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$image" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$image" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
