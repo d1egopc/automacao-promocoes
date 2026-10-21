@@ -51,9 +51,12 @@ jobs:
           node --check modules/mensageiro/programacoes.scheduler.js
           node --check modules/mensageiro-v3/src/v3/store.js
           node --check modules/mensageiro-v3/src/v3/scheduler.js
+          node --check modules/mensageiro-v3/adapter.js
+          node --check modules/mensageiro-v3/handler-bridge.js
           node --check modules/engine/auto-clean/auto-clean.service.js
           node --check tests/mensageiro-programacoes.test.cjs
           node --check tests/mensageiro-v3-m33-persistence.test.cjs
+          node --check tests/mensageiro-v3-m34-p21-recurrence.test.cjs
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           npm run audit:encoding
           git diff --check origin/main...HEAD
@@ -65,6 +68,7 @@ jobs:
           node --test --test-concurrency=1 tests/mensageiro-v3-m32-integration.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-routes.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m322-real-handlers.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m34-p21-recurrence.test.cjs
 
       - name: Legacy Mensageiro and production guard regressions
         run: |

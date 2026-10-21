@@ -82,8 +82,14 @@ function createCardRuntime({ store, adapters = {} } = {}) {
     if (!beforeSend || beforeSend.active !== true || beforeSend.cards?.[card]?.active !== true || beforeSend.revision !== fresh.revision) {
       return { ok: false, reason: "configuracao_alterada" };
     }
-    await adapter.send({ workspaceId, profileId, card, ...payload });
-    return { ok: true, card, profileId, workspaceId };
+    try {
+      const result = await adapter.send({ workspaceId, profileId, card, ...payload });
+      if (typeof store.completeExecution === "function") store.completeExecution(workspaceId, key, { status: result?.ambiguous === true || result?.confirmed === false ? "ambiguous" : "confirmed" });
+      return { ok: true, card, profileId, workspaceId, ambiguous: result?.ambiguous === true || result?.confirmed === false };
+    } catch (error) {
+      if (typeof store.completeExecution === "function") store.completeExecution(workspaceId, key, { status: "failed" });
+      throw error;
+    }
   };
 }
 

@@ -71,7 +71,14 @@ function createHandlerBridge({ fence, store, legacyHandlers = {}, v3Handlers = {
     if (!current || current.workspaceId !== workspace || current.active !== true || !cardAtivo(current)) {
       return { ok: false, blocked: true, reason: "configuracao_alterada" };
     }
-    return { ok: true, mode: "v3", result: await v3({ ...args, workspaceId: workspace, profileId: profile, card: cardName }) };
+    try {
+      const result = await v3({ ...args, workspaceId: workspace, profileId: profile, card: cardName });
+      if (typeof store.completeExecution === "function") store.completeExecution(workspace, key, { status: result?.ambiguous === true || result?.confirmed === false ? "ambiguous" : "confirmed" });
+      return { ok: true, mode: "v3", result };
+    } catch (error) {
+      if (typeof store.completeExecution === "function") store.completeExecution(workspace, key, { status: "failed" });
+      throw error;
+    }
   };
 
   return Object.freeze({

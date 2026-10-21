@@ -1,3 +1,5 @@
+const { buildOccurrenceKey } = require("./store");
+
 class V3Scheduler {
   constructor({ store, transport, clock = () => Date.now(), logger = () => {}, isWorkspaceMigrated = () => true } = {}) {
     if (!store || !transport || typeof transport.sendMessage !== "function") throw new Error("dependencias_scheduler_obrigatorias");
@@ -6,8 +8,8 @@ class V3Scheduler {
   }
 
   async tick() {
-    if (this.running) return { ok: true, skipped: "rodada_em_andamento", sent: 0, blocked: 0 };
-    this.running = true; const sent = []; const blocked = [];
+    if (this.running) return { ok: true, skipped: "rodada_em_andamento", sent: 0, blocked: 0, ambiguous: 0 };
+    this.running = true; const sent = []; const blocked = []; const ambiguous = [];
     try {
       const now = Number(this.clock());
       this.store.reload();
@@ -26,7 +28,10 @@ class V3Scheduler {
           const profile = fresh && this.store.getProfile(workspaceId, fresh.profileId);
           const reason = this._reason(fresh, profile, now);
           if (reason) { blocked.push({ workspaceId, scheduleId: candidate.id, reason }); this.store.recordDecision(workspaceId, { scheduleId: candidate.id, decision: "blocked", reason }); continue; }
+          const occurrenceAt = new Date(fresh.nextRunAt).toISOString();
           for (const destination of fresh.destinations) {
+            let claimKey = "";
+            let claimed = false;
             try {
               if (typeof this.transport.authorizeSend === "function") {
                 const authorized = await this.transport.authorizeSend({ workspaceId, profileId: fresh.profileId, destination, schedule: fresh });
@@ -49,9 +54,16 @@ class V3Scheduler {
                 this.store.recordDecision(workspaceId, { scheduleId: fresh.id, destination, decision: "blocked", reason: decisionReason });
                 continue;
               }
-              // Claim only after authorization so a denied transport can retry.
-              const key = `${workspaceId}:${afterAuthorization.id}:${afterAuthorization.revision}:${destination}`;
-              if (!this.store.claimExecution(workspaceId, key, { scheduleId: afterAuthorization.id, profileId: afterAuthorization.profileId, destination })) continue;
+              // A claim is unique to this scheduled occurrence and destination.
+              claimKey = buildOccurrenceKey(workspaceId, afterAuthorization.id, afterAuthorization.revision, occurrenceAt, destination);
+              if (!this.store.claimExecution(workspaceId, claimKey, {
+                scheduleId: afterAuthorization.id,
+                profileId: afterAuthorization.profileId,
+                destination,
+                occurrenceKey: claimKey,
+                occurrenceAt
+              })) continue;
+              claimed = true;
               // The claim is durable; perform one final fail-closed read before
               // calling the transport.
               this.store.reload();
@@ -64,21 +76,35 @@ class V3Scheduler {
                 !Array.isArray(beforeSend?.destinations) || !beforeSend.destinations.includes(destination)) {
                 const decisionReason = beforeSendReason || "configuracao_alterada";
                 blocked.push({ workspaceId, scheduleId: afterAuthorization.id, destination, reason: decisionReason });
+                this.store.completeExecution(workspaceId, claimKey, { status: "blocked", occurrenceKey: claimKey, reason: decisionReason });
                 this.store.recordDecision(workspaceId, { scheduleId: afterAuthorization.id, destination, decision: "blocked", reason: decisionReason });
+                this.store.advanceScheduleOccurrence(workspaceId, afterAuthorization.id, { occurrenceAt, expectedRevision: afterAuthorization.revision, now });
                 continue;
               }
-              await this.transport.sendMessage({ workspaceId, profileId: beforeSend.profileId, sessionId: beforeSendProfile.sessionId, destination, content: beforeSend.content });
-              sent.push({ workspaceId, scheduleId: beforeSend.id, destination });
-              this.store.recordDecision(workspaceId, { scheduleId: beforeSend.id, destination, decision: "sent" });
+              const transportResult = await this.transport.sendMessage({ workspaceId, profileId: beforeSend.profileId, sessionId: beforeSendProfile.sessionId, destination, content: beforeSend.content });
+              const status = transportResult?.ambiguous === true || transportResult?.confirmed === false ? "ambiguous" : "confirmed";
+              this.store.completeExecution(workspaceId, claimKey, { status, occurrenceKey: claimKey });
+              if (status === "confirmed") {
+                sent.push({ workspaceId, scheduleId: beforeSend.id, destination });
+                this.store.recordDecision(workspaceId, { scheduleId: beforeSend.id, destination, decision: "sent" });
+              } else {
+                ambiguous.push({ workspaceId, scheduleId: beforeSend.id, destination, reason: "transport_ambiguous" });
+                this.store.recordDecision(workspaceId, { scheduleId: beforeSend.id, destination, decision: "ambiguous" });
+              }
+              this.store.advanceScheduleOccurrence(workspaceId, beforeSend.id, { occurrenceAt, expectedRevision: afterAuthorization.revision, now });
             } catch (error) {
               blocked.push({ workspaceId, scheduleId: fresh.id, destination, reason: "transport_error" });
+              if (claimed && claimKey) {
+                this.store.completeExecution(workspaceId, claimKey, { status: "failed", occurrenceKey: claimKey, reason: "transport_error" });
+                this.store.advanceScheduleOccurrence(workspaceId, fresh.id, { occurrenceAt, expectedRevision: fresh.revision, now });
+              }
               this.store.recordDecision(workspaceId, { scheduleId: fresh.id, destination, decision: "blocked", reason: "transport_error" });
               this.logger({ error: error?.message || String(error), workspaceId, scheduleId: fresh.id });
             }
           }
         }
       }
-      return { ok: true, sent, blocked };
+      return { ok: true, sent, blocked, ambiguous };
     } finally { this.running = false; }
   }
 
@@ -91,7 +117,10 @@ class V3Scheduler {
     if (!profile.sessionId) return "session_missing";
     if (!Array.isArray(schedule.destinations) || !schedule.destinations.length) return "destination_missing";
     if (schedule.content === null || schedule.content === undefined) return "content_removed";
-    if (!schedule.nextRunAt || Date.parse(schedule.nextRunAt) > now) return "not_due";
+    if (!schedule.nextRunAt) return "not_due";
+    const nextRun = Date.parse(schedule.nextRunAt);
+    if (!Number.isFinite(nextRun)) return "next_run_invalido";
+    if (nextRun > now) return "not_due";
     return "";
   }
 }

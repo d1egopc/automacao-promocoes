@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const { assertAbsolute, assertDurableStorage } = require("../../durable-path");
 
 const SCHEMA_VERSION = 3;
+const TERMINAL_EXECUTION_STATUSES = new Set(["confirmed", "ambiguous", "failed", "blocked"]);
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -26,6 +27,62 @@ function emptyState() {
   return { schemaVersion: SCHEMA_VERSION, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} }, workspaceFences: {} };
 }
 
+function occurrenceTimestamp(value) {
+  const timestamp = Date.parse(value || "");
+  if (!Number.isFinite(timestamp)) throw new Error("ocorrencia_invalida");
+  return new Date(timestamp).toISOString();
+}
+
+function buildOccurrenceBaseKey(workspaceId, scheduleId, revision, occurrenceAt) {
+  return JSON.stringify([String(workspaceId), String(scheduleId), Number(revision), occurrenceTimestamp(occurrenceAt)]);
+}
+
+function buildOccurrenceKey(workspaceId, scheduleId, revision, occurrenceAt, destination) {
+  return JSON.stringify([String(workspaceId), String(scheduleId), Number(revision), occurrenceTimestamp(occurrenceAt), String(destination)]);
+}
+
+function zonedParts(timestamp, timezone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(new Date(timestamp)).filter(part => part.type !== "literal").map(part => [part.type, part.value]));
+  return { year: Number(parts.year), month: Number(parts.month), day: Number(parts.day), hour: Number(parts.hour), minute: Number(parts.minute), second: Number(parts.second) };
+}
+
+function zonedToTimestamp(parts, timezone) {
+  const guess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  const represented = zonedParts(guess, timezone);
+  const representedAsUtc = Date.UTC(represented.year, represented.month - 1, represented.day, represented.hour, represented.minute, represented.second);
+  return guess - (representedAsUtc - guess);
+}
+
+function nextOccurrenceAt(occurrenceAt, intervalMs, now, timezone) {
+  const origin = Date.parse(occurrenceAt);
+  const interval = Number(intervalMs);
+  const current = Number(now);
+  if (!Number.isFinite(origin) || !Number.isFinite(interval) || interval <= 0) return null;
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (timezone && interval % dayMs === 0) {
+    try {
+      const days = interval / dayMs;
+      let local = zonedParts(origin, timezone);
+      let candidate;
+      do {
+        const localUtc = Date.UTC(local.year, local.month - 1, local.day) + days * dayMs;
+        const date = new Date(localUtc);
+        local = { ...local, year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+        candidate = zonedToTimestamp(local, timezone);
+      } while (candidate <= current);
+      return new Date(candidate).toISOString();
+    } catch {
+      // Invalid timezone data fails back to the explicit instant interval.
+    }
+  }
+  const missed = current > origin ? Math.floor((current - origin) / interval) + 1 : 1;
+  return new Date(origin + missed * interval).toISOString();
+}
+
 function ensureState(state) {
   const base = state && typeof state === "object" ? state : emptyState();
   if (base.schemaVersion !== SCHEMA_VERSION) throw new Error("mensageiro_v3_schema_incompativel");
@@ -35,6 +92,11 @@ function ensureState(state) {
   base.deletedIds.profiles ||= {};
   base.deletedIds.schedules ||= {};
   base.workspaceFences = base.workspaceFences && typeof base.workspaceFences === "object" ? base.workspaceFences : {};
+  for (const workspace of Object.values(base.workspaces)) {
+    if (!workspace || typeof workspace !== "object") continue;
+    workspace.claims = workspace.claims && typeof workspace.claims === "object" ? workspace.claims : {};
+    workspace.occurrences = workspace.occurrences && typeof workspace.occurrences === "object" ? workspace.occurrences : {};
+  }
   return base;
 }
 
@@ -45,6 +107,7 @@ function freshWorkspace(workspaceId) {
     profiles: {},
     schedules: {},
     claims: {},
+    occurrences: {},
     audit: []
   };
 }
@@ -338,13 +401,31 @@ class V3Store {
       const allowed = ["name", "active", "timezone", "nextRunAt", "intervalMs", "destinations", "content", "artifactId"];
       for (const key of allowed) if (patch[key] !== undefined) s[key] = clone(patch[key]);
       if (Array.isArray(s.destinations)) s.destinations = [...new Set(s.destinations.map(String).map(x => x.trim()).filter(Boolean))];
+      if (patch?.active === false) s.deactivatedAt = nowIso(this.clock);
+      if (patch?.active === true) delete s.deactivatedAt;
       s.revision += 1; s.updatedAt = nowIso(this.clock);
       this._touch(w, "schedule_updated", { profileId: s.profileId, scheduleId, scheduleRevision: s.revision });
       return s;
     });
   }
 
-  activateSchedule(workspaceId, scheduleId, expectedRevision) { return this.updateSchedule(workspaceId, scheduleId, { active: true }, { expectedRevision }); }
+  activateSchedule(workspaceId, scheduleId, expectedRevision) {
+    return this._mutate(() => {
+      const w = this._workspace(workspaceId); const s = w.schedules[String(scheduleId || "")];
+      if (!s) throw new Error("programacao_nao_encontrada");
+      if (expectedRevision !== undefined && Number(expectedRevision) !== s.revision) throw new Error("conflito_revisao");
+      const currentNow = Number(this.clock());
+      if (s.active !== true && s.deactivatedAt && Number(s.intervalMs) > 0 && s.nextRunAt && Date.parse(s.nextRunAt) <= currentNow) {
+        const next = nextOccurrenceAt(s.nextRunAt, s.intervalMs, currentNow, s.timezone);
+        if (next) s.nextRunAt = next;
+      }
+      s.active = true;
+      delete s.deactivatedAt;
+      s.revision += 1; s.updatedAt = nowIso(this.clock);
+      this._touch(w, "schedule_updated", { profileId: s.profileId, scheduleId, scheduleRevision: s.revision });
+      return s;
+    });
+  }
   deactivateSchedule(workspaceId, scheduleId, expectedRevision) { return this.updateSchedule(workspaceId, scheduleId, { active: false }, { expectedRevision }); }
 
   deleteSchedule(workspaceId, scheduleId, { expectedRevision } = {}) {
@@ -385,19 +466,75 @@ class V3Store {
     return this._mutate(() => {
       const w = this._workspace(workspaceId); const k = String(key);
       if (w.claims[k]) return false;
-      w.claims[k] = { ...clone(details), claimedAt: nowIso(this.clock) };
+      const occurrenceKey = details?.occurrenceKey ? String(details.occurrenceKey) : "";
+      if (occurrenceKey && w.occurrences[occurrenceKey]) return false;
+      const claimedAt = nowIso(this.clock);
+      w.claims[k] = { ...clone(details), status: "claimed", claimedAt };
+      if (occurrenceKey) w.occurrences[occurrenceKey] = { ...clone(details), claimKey: k, status: "claimed", claimedAt };
       this._touch(w, "execution_claimed", { key: k });
       return true;
     });
   }
 
+  completeExecution(workspaceId, key, { status = "confirmed", occurrenceKey, ...details } = {}) {
+    return this._mutate(() => {
+      const w = this._workspace(workspaceId); const k = String(key); const claim = w.claims[k];
+      if (!claim) return { ok: false, reason: "claim_nao_encontrado" };
+      if (!TERMINAL_EXECUTION_STATUSES.has(status)) throw new Error("resultado_execucao_invalido");
+      if (TERMINAL_EXECUTION_STATUSES.has(claim.status)) return { ok: true, alreadyCompleted: true, status: claim.status };
+      const completedAt = nowIso(this.clock);
+      const resolvedOccurrenceKey = String(occurrenceKey || claim.occurrenceKey || "");
+      w.claims[k] = { ...claim, ...clone(details), status, completedAt };
+      if (resolvedOccurrenceKey) {
+        w.occurrences[resolvedOccurrenceKey] = {
+          ...(w.occurrences[resolvedOccurrenceKey] || {}),
+          ...clone(details), claimKey: k, occurrenceKey: resolvedOccurrenceKey, status, completedAt
+        };
+      }
+      this._touch(w, "execution_completed", { key: k, status, occurrenceKey: resolvedOccurrenceKey || undefined });
+      return { ok: true, status, completedAt, occurrenceKey: resolvedOccurrenceKey || undefined };
+    });
+  }
+
+  advanceScheduleOccurrence(workspaceId, scheduleId, { occurrenceAt, expectedRevision, now = typeof this.clock === "function" ? this.clock() : Date.now() } = {}) {
+    return this._mutate(() => {
+      const w = this._workspace(workspaceId); const idValue = String(scheduleId || ""); const s = w.schedules[idValue];
+      if (!s) return { advanced: false, reason: "schedule_removed" };
+      if (expectedRevision !== undefined && Number(expectedRevision) !== s.revision) return { advanced: false, reason: "schedule_revision_changed" };
+      const scheduledAt = occurrenceTimestamp(occurrenceAt);
+      if (occurrenceTimestamp(s.nextRunAt) !== scheduledAt) return { advanced: false, reason: "occurrence_stale" };
+      const baseKey = buildOccurrenceBaseKey(workspaceId, idValue, s.revision, scheduledAt);
+      const terminal = TERMINAL_EXECUTION_STATUSES;
+      const destinationKeys = (Array.isArray(s.destinations) ? s.destinations : []).map(destination => buildOccurrenceKey(workspaceId, idValue, s.revision, scheduledAt, destination));
+      if (!destinationKeys.length || destinationKeys.some(key => !terminal.has(w.occurrences[key]?.status))) {
+        return { advanced: false, reason: "ocorrencia_incompleta", occurrenceKey: baseKey };
+      }
+      const previous = s.nextRunAt;
+      const next = Number(s.intervalMs) > 0 ? nextOccurrenceAt(scheduledAt, s.intervalMs, Number(now), s.timezone) : null;
+      if (next) {
+        s.nextRunAt = next;
+        s.revision += 1;
+        s.updatedAt = nowIso(this.clock);
+        this._touch(w, "schedule_occurrence_advanced", { scheduleId: idValue, occurrenceAt: scheduledAt, nextRunAt: next, occurrenceKey: baseKey });
+        return { advanced: true, completed: false, occurrenceAt: scheduledAt, previousNextRunAt: previous, nextRunAt: next, occurrenceKey: baseKey };
+      }
+      s.active = false;
+      s.nextRunAt = null;
+      s.completedAt = nowIso(this.clock);
+      s.revision += 1;
+      s.updatedAt = s.completedAt;
+      this._touch(w, "schedule_completed", { scheduleId: idValue, occurrenceAt: scheduledAt, occurrenceKey: baseKey });
+      return { advanced: true, completed: true, occurrenceAt: scheduledAt, previousNextRunAt: previous, nextRunAt: null, occurrenceKey: baseKey };
+    });
+  }
+
   /**
-   * Compact only claims that are older than an explicitly supplied replay
-   * horizon.  Claims are the idempotency fence, so deleting them without a
-   * proven horizon could allow an old event to be sent twice.  The method is
-   * intentionally opt-in and bounded: callers must provide both the replay
-   * horizon and a positive batch limit.  Claims with an invalid timestamp are
-   * retained (fail-closed).
+   * Compact only terminal claims that are older than an explicitly supplied
+   * replay horizon. Claims are the idempotency fence, so deleting an in-flight
+   * claim or its terminal occurrence marker could allow an old event to be
+   * sent twice. The method is intentionally opt-in and bounded: callers must
+   * provide both the replay horizon and a positive batch limit. Claims with
+   * an invalid timestamp or a non-terminal status are retained (fail-closed).
    */
   compactClaims(workspaceId, {
     now = typeof this.clock === "function" ? this.clock() : Date.now(),
@@ -420,7 +557,7 @@ class V3Store {
       const cutoff = Number(now) - retention;
       const eligible = Object.entries(workspace.claims || {})
         .map(([key, claim]) => ({ key, claim, claimedAt: Date.parse(claim?.claimedAt || "") }))
-        .filter(entry => Number.isFinite(entry.claimedAt) && entry.claimedAt <= cutoff)
+        .filter(entry => Number.isFinite(entry.claimedAt) && entry.claimedAt <= cutoff && TERMINAL_EXECUTION_STATUSES.has(entry.claim?.status))
         .sort((a, b) => a.claimedAt - b.claimedAt)
         .slice(0, limit);
 
@@ -450,4 +587,4 @@ class V3Store {
   snapshot() { return clone(this.state); }
 }
 
-module.exports = { V3Store, SCHEMA_VERSION, emptyState };
+module.exports = { V3Store, SCHEMA_VERSION, emptyState, buildOccurrenceBaseKey, buildOccurrenceKey, nextOccurrenceAt };

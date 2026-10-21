@@ -105,6 +105,7 @@ test("M3.4-P1 — claims só compactam com horizonte de replay explícito e lote
     const store = new V3Store({ filePath: f.filePath, clock });
     activeProfile(store, "workspace-a");
     assert.equal(store.claimExecution("workspace-a", "old", { source: "old" }), true);
+    assert.equal(store.completeExecution("workspace-a", "old", { status: "confirmed" }).status, "confirmed");
     assert.throws(() => store.compactClaims("workspace-a", {
       now: clock(), retentionMs: 48 * 60 * 60 * 1000, maxRemovals: 1
     }), /claims_retencao_insegura/);
