@@ -30,6 +30,93 @@ function asArray(value) { return Array.isArray(value) ? value : []; }
 function text(value, fallback = "") { return value === undefined || value === null ? fallback : String(value); }
 function bool(value, fallback = false) { return value === undefined ? fallback : value === true; }
 
+// The original form stores a human schedule (data/horario or intervalo),
+// while the V3 scheduler consumes an absolute nextRunAt instant.  Keep this
+// translation here, at the compatibility boundary, so the V3 store and its
+// scheduler remain the single execution authority.
+function zonedParts(timestamp, timezone) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(timestamp))
+      .filter(part => part.type !== "literal")
+      .map(part => [part.type, part.value])
+  );
+  return {
+    year: Number(parts.year), month: Number(parts.month), day: Number(parts.day),
+    hour: Number(parts.hour), minute: Number(parts.minute), second: Number(parts.second)
+  };
+}
+
+function zonedToTimestamp(parts, timezone) {
+  const guess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  const represented = zonedParts(guess, timezone);
+  const representedAsUtc = Date.UTC(
+    represented.year, represented.month - 1, represented.day,
+    represented.hour, represented.minute, represented.second
+  );
+  return guess - (representedAsUtc - guess);
+}
+
+function nextRunAtFromLegacy(raw, now = Date.now()) {
+  const explicit = Date.parse(raw?.nextRunAt || "");
+  if (Number.isFinite(explicit)) return new Date(explicit).toISOString();
+  if (raw?.ativo !== true) return null;
+
+  const current = Number(now);
+  const timezone = text(raw?.timezone, "America/Sao_Paulo");
+  if (raw?.tipo === "intervalo") {
+    const minutes = Math.max(1, Number(raw?.intervaloMinutos || 0) || 1);
+    return new Date(current + minutes * 60_000).toISOString();
+  }
+
+  const horario = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(text(raw?.horario, "08:00"));
+  if (!horario) return null;
+  let local = raw?.data && /^\d{4}-\d{2}-\d{2}$/.test(String(raw.data))
+    ? { year: Number(String(raw.data).slice(0, 4)), month: Number(String(raw.data).slice(5, 7)), day: Number(String(raw.data).slice(8, 10)) }
+    : zonedParts(current, timezone);
+  local = { ...local, hour: Number(horario[1]), minute: Number(horario[2]), second: 0 };
+  let candidate;
+  try { candidate = zonedToTimestamp(local, timezone); } catch { return null; }
+  if (candidate <= current) {
+    // A dated one-shot in the past must not be replayed.  An undated daily
+    // schedule advances to the next local day.
+    if (raw?.data) return null;
+    const nextLocalDate = new Date(Date.UTC(local.year, local.month - 1, local.day) + 86_400_000);
+    local = { ...local, year: nextLocalDate.getUTCFullYear(), month: nextLocalDate.getUTCMonth() + 1, day: nextLocalDate.getUTCDate() };
+    try { candidate = zonedToTimestamp(local, timezone); } catch { return null; }
+  }
+  return Number.isFinite(candidate) ? new Date(candidate).toISOString() : null;
+}
+
+function normalizeTriggerText(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function findTrigger(texto, triggers = []) {
+  const normalized = normalizeTriggerText(texto);
+  if (!normalized) return null;
+  for (const trigger of asArray(triggers)) {
+    if (trigger?.ativo !== true) continue;
+    const required = asArray(trigger.palavrasObrigatorias).map(normalizeTriggerText).filter(Boolean);
+    const optional = asArray(trigger.palavrasOpcionais).map(normalizeTriggerText).filter(Boolean);
+    if (!required.length) continue;
+    const mode = text(trigger.modo, "todas").toLowerCase();
+    const matchType = text(trigger.tipoCorrespondencia || trigger.correspondencia || trigger.match, "exato").toLowerCase();
+    const matches = word => matchType === "contem" || matchType === "contém"
+      ? normalized.includes(word)
+      : matchType === "inicia" ? normalized.startsWith(word) : normalized === word;
+    const matched = mode === "qualquer"
+      ? [...required, ...optional].some(matches)
+      : required.every(matches);
+    if (matched) return trigger;
+  }
+  return null;
+}
+
 function card(profile, name) {
   const raw = profile?.cards?.[name] || {};
   const configuration = asObject(raw.configuration);
@@ -154,6 +241,31 @@ function attendanceConfig(profile) {
   };
 }
 
+function triggerPreviewFor(store, workspaceId, texto) {
+  const profiles = listProfilesSafe(store, workspaceId);
+  for (const candidate of profiles) {
+    if (candidate?.active !== true) continue;
+    for (const [cardName, categoria] of [["attendance", "atendimento"], ["faq", "faq"], ["flows", "fluxos"]]) {
+      const current = card(candidate, cardName);
+      if (current.raw.active !== true) continue;
+      const trigger = findTrigger(texto, current.configuration.gatilhos);
+      if (!trigger) continue;
+      return {
+        encontrou: true,
+        perfilId: candidate.id,
+        categoria: trigger.categoria || categoria,
+        gatilho: {
+          id: trigger.id,
+          nome: trigger.nome,
+          modo: trigger.modo,
+          respostas: clone(trigger.respostas || [])
+        }
+      };
+    }
+  }
+  return { encontrou: false, perfilId: null, categoria: null, gatilho: null };
+}
+
 function stateFor(store, workspaceId) {
   store.reload?.();
   const profiles = listProfilesSafe(store, workspaceId);
@@ -242,7 +354,7 @@ function applyProfile(store, workspaceId, input) {
   return store.getProfile(workspaceId, profile.id);
 }
 
-function scheduleInput(item) {
+function scheduleInput(item, now = Date.now()) {
   const raw = asObject(item);
   const contents = asArray(raw.conteudos);
   const content = {
@@ -255,7 +367,7 @@ function scheduleInput(item) {
   return {
     name: text(raw.nome, "Programação"),
     timezone: text(raw.timezone, "America/Sao_Paulo"),
-    nextRunAt: raw.nextRunAt || null,
+    nextRunAt: nextRunAtFromLegacy(raw, now),
     intervalMs,
     destinations: asArray(raw.grupos).map(String).filter(Boolean),
     content,
@@ -264,13 +376,13 @@ function scheduleInput(item) {
   };
 }
 
-function applySchedules(store, workspaceId, profileId, items) {
+function applySchedules(store, workspaceId, profileId, items, now = Date.now()) {
   const incoming = asArray(items).filter(item => text(item?.perfilId) === String(profileId));
   const current = store.listSchedules(workspaceId, { includeInactive: true }).filter(item => item.profileId === String(profileId));
   const seen = new Set();
   for (const item of incoming) {
     const id = text(item.id);
-    const patch = scheduleInput(item);
+    const patch = scheduleInput(item, now);
     if (id && store.getSchedule(workspaceId, id)) {
       store.updateSchedule(workspaceId, id, { ...patch, active: item.ativo === true });
       seen.add(id);
@@ -318,6 +430,7 @@ function createLegacyCompatRoutes(deps = {}) {
     const id = allowed(req, res); if (!id) return;
     try {
       const body = asObject(req.body);
+      const now = typeof deps.clock === "function" ? Number(deps.clock()) : Date.now();
       const profileIdMap = new Map();
       for (const item of asArray(body.perfis)) {
         const saved = applyProfile(store, id, item);
@@ -333,7 +446,7 @@ function createLegacyCompatRoutes(deps = {}) {
         if (current.cards.scheduled.active !== true && schedulesByProfile.some(item => text(item?.perfilId) === p.id)) {
           store.saveCard(id, p.id, "scheduled", { active: false, configuration: current.cards.scheduled.configuration || {} });
         }
-        applySchedules(store, id, p.id, schedulesByProfile);
+        applySchedules(store, id, p.id, schedulesByProfile, now);
       }
       return res.json(stateFor(store, id));
     } catch (error) { return res.status(422).json({ ok: false, codigo: errorCode(error) }); }
@@ -381,7 +494,23 @@ function createLegacyCompatRoutes(deps = {}) {
   });
 
   router.get("/historico", (req, res) => { const id = allowed(req, res); if (id) res.json({ ok: true, source: "mensageiro_v3_compat", historico: [] }); });
-  router.post("/testar-gatilho", (req, res) => { const id = allowed(req, res); if (id) res.json({ ok: true, source: "mensageiro_v3_compat", dryRun: true, workspaceId: id, texto: text(req.body?.texto) }); });
+  router.post("/testar-gatilho", (req, res) => {
+    const id = allowed(req, res); if (!id) return;
+    const texto = text(req.body?.texto || req.body?.mensagem);
+    const preview = triggerPreviewFor(store, id, texto);
+    // This is deliberately a renderer/authorization preview. It never calls
+    // a transport or opens a WhatsApp session.
+    return res.json({
+      ok: true,
+      source: "mensageiro_v3_compat",
+      dryRun: true,
+      executaria: preview.encontrou,
+      envio: false,
+      workspaceId: id,
+      texto,
+      ...preview
+    });
+  });
 
   router.get("/perfis/:profileId/contatos", (req, res) => {
     const id = allowed(req, res); if (!id) return;
