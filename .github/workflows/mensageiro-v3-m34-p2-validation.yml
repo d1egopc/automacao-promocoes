@@ -69,12 +69,17 @@ jobs:
           node --check tests/mensageiro-v3-m34-p3-container-smoke.cjs
           node --check tests/mensageiro-v3-universal.test.cjs
           node --check tests/mensageiro-v3-original-ui-compat.test.cjs
+          node --check tests/mensageiro-v3-release-bootstrap.test.cjs
+          node --check modules/links/engine-capture-diagnostic.routes.js
+          node --check modules/radar/redirect/contextual-html-candidate.js
+          node --check modules/radar/redirect/redirect-diagnostic-code.js
           node --check tests/optimus-auto-clean-v1-shadow.test.js
           npm run audit:encoding
           git diff --check origin/main...HEAD
 
       - name: V3 persistence, restart, fence, and real handler gates
         run: |
+          node --test tests/mensageiro-v3-release-bootstrap.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m33-persistence.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m331-durability.test.cjs
           node --test --test-concurrency=1 tests/mensageiro-v3-m32-integration.test.cjs

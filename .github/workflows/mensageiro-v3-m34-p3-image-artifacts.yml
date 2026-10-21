@@ -22,7 +22,8 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE_OWNER: d1egopc
       IMAGE_REPO: automacao-promocoes
-      SOURCE_SHA: 193218356f80863af4bdf2864391115805bcbb3a
+      BASE_SHA: ecaeb3cfd9acede0d4902e50bee28f79810a0519
+      SOURCE_SHA: ${{ github.sha }}
     steps:
       - name: Checkout without persisted credentials
         uses: actions/checkout@v4
@@ -30,13 +31,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Require the homologated source SHA
+      - name: Require only the three recovered modules and release gates
         shell: bash
         run: |
           set -Eeuo pipefail
-          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
-          changed="$(git diff --name-only "$SOURCE_SHA..HEAD")"
-          test "$changed" = ".github/workflows/mensageiro-v3-m34-p3-image-artifacts.yml"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          changed="$(git diff --name-only "$BASE_SHA..HEAD" | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/mensageiro-v3-m34-p2-validation.yml \
+            .github/workflows/mensageiro-v3-m34-p3-image-artifacts.yml \
+            modules/links/engine-capture-diagnostic.routes.js \
+            modules/radar/redirect/contextual-html-candidate.js \
+            modules/radar/redirect/redirect-diagnostic-code.js \
+            tests/mensageiro-v3-release-bootstrap.test.cjs \
+            tests/mensageiro-v3-release-http-smoke.sh | sort)"
+          test "$changed" = "$expected"
 
       - name: Use Node 24 for gate tooling
         uses: actions/setup-node@v4
@@ -48,6 +57,15 @@ jobs:
         run: |
           set -Eeuo pipefail
           node --version | grep -Eq '^v24\.'
+
+      - name: Verify recovered bootstrap dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          node --test tests/mensageiro-v3-release-bootstrap.test.cjs
+          node --check index.js
+          git diff --check "$BASE_SHA..HEAD"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -168,3 +186,10 @@ jobs:
           after="$(docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$RECOVERY_REF" sha256sum /data/mensageiro-v3/state.json | awk '{print $1}')"
           test "$before" = "$after"
           echo "Recovery image kept the V3 state unchanged and blocked the legacy handler." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Bootstrap both images with disposable PostgreSQL 17 and HTTP
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tests/mensageiro-v3-release-http-smoke.sh "$PUBLICATION_REF"
+          bash tests/mensageiro-v3-release-http-smoke.sh "$RECOVERY_REF"
