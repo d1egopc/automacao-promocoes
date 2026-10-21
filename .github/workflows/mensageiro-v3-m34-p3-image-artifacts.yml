@@ -1,0 +1,146 @@
+name: Mensageiro V3 M3.4-P3 image artifacts
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-v3-m34-p3-node24-20261020
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: mensageiro-v3-m34-p3-images-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-publish-and-smoke:
+    name: GitHub-hosted Linux / Node 24 / immutable images
+    if: github.ref == 'refs/heads/validation/mensageiro-v3-m34-p3-node24-20261020'
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_OWNER: d1egopc
+      IMAGE_REPO: automacao-promocoes
+      SOURCE_SHA: 4a9a30f69fe463a19b9aedc0f98da62b8214a978
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Require the homologated source SHA
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          changed="$(git diff --name-only "$SOURCE_SHA..HEAD")"
+          test "$changed" = ".github/workflows/mensageiro-v3-m34-p3-image-artifacts.yml"
+
+      - name: Use Node 24 for gate tooling
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Confirm Node 24
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --version | grep -Eq '^v24\.'
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR with the ephemeral GitHub token
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable publication image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="$REGISTRY/$IMAGE_OWNER/$IMAGE_REPO/mensageiro-v3-publication"
+          ref="$image:$SOURCE_SHA"
+          docker buildx build \
+            --pull=false \
+            --provenance=false \
+            --sbom=false \
+            --file Dockerfile \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$IMAGE_OWNER/$IMAGE_REPO" \
+            --label "org.optimus.mensageiro.role=publication" \
+            --tag "$ref" \
+            --push .
+          echo "PUBLICATION_REF=$ref" >> "$GITHUB_ENV"
+
+      - name: Build and push immutable fence-aware recovery image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          image="$REGISTRY/$IMAGE_OWNER/$IMAGE_REPO/mensageiro-v3-recovery"
+          ref="$image:$SOURCE_SHA"
+          docker buildx build \
+            --pull=false \
+            --provenance=false \
+            --sbom=false \
+            --file Dockerfile \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/$IMAGE_OWNER/$IMAGE_REPO" \
+            --label "org.optimus.mensageiro.role=fence-aware-recovery" \
+            --label "org.optimus.mensageiro.legacy=blocked" \
+            --tag "$ref" \
+            --push .
+          echo "RECOVERY_REF=$ref" >> "$GITHUB_ENV"
+
+      - name: Pull by immutable references and record digests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker pull "$PUBLICATION_REF"
+          docker pull "$RECOVERY_REF"
+          publication_digest="$(docker image inspect "$PUBLICATION_REF" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
+          recovery_digest="$(docker image inspect "$RECOVERY_REF" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
+          test "$publication_digest" = sha256:* 
+          test "$recovery_digest" = sha256:*
+          {
+            echo "IMAGE_PUBLICATION_REF=$PUBLICATION_REF"
+            echo "IMAGE_PUBLICATION_DIGEST=$publication_digest"
+            echo "IMAGE_RECOVERY_REF=$RECOVERY_REF"
+            echo "IMAGE_RECOVERY_DIGEST=$recovery_digest"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "PUBLICATION_DIGEST=$publication_digest" >> "$GITHUB_ENV"
+          echo "RECOVERY_DIGEST=$recovery_digest" >> "$GITHUB_ENV"
+
+      - name: Smoke publication image with restart and persistent V3 state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          volume="mensageiro-v3-p3-publish-${GITHUB_RUN_ID}"
+          cleanup() { docker volume rm "$volume" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$PUBLICATION_REF" sh -lc 'chown -R node:node /data/mensageiro-v3'
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          cid="$(docker create --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs)"
+          docker start -a "$cid"
+          docker rm "$cid" >/dev/null
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+
+      - name: Smoke fence-aware recovery without changing V3 state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          volume="mensageiro-v3-p3-recovery-${GITHUB_RUN_ID}"
+          cleanup() { docker volume rm "$volume" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker volume create "$volume" >/dev/null
+          docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$PUBLICATION_REF" sh -lc 'chown -R node:node /data/mensageiro-v3'
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs >/tmp/v3-seed.json
+          before="$(docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$RECOVERY_REF" sha256sum /data/mensageiro-v3/state.json | awk '{print $1}')"
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$RECOVERY_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          after="$(docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$RECOVERY_REF" sha256sum /data/mensageiro-v3/state.json | awk '{print $1}')"
+          test "$before" = "$after"
+          echo "Recovery image kept the V3 state unchanged and blocked the legacy handler." | tee -a "$GITHUB_STEP_SUMMARY"
