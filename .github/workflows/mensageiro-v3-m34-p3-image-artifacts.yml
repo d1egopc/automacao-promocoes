@@ -22,7 +22,7 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE_OWNER: d1egopc
       IMAGE_REPO: automacao-promocoes
-      SOURCE_SHA: 4a9a30f69fe463a19b9aedc0f98da62b8214a978
+      SOURCE_SHA: 193218356f80863af4bdf2864391115805bcbb3a
     steps:
       - name: Checkout without persisted credentials
         uses: actions/checkout@v4
@@ -88,6 +88,7 @@ jobs:
             --provenance=false \
             --sbom=false \
             --file Dockerfile \
+            --build-arg MENSAGEIRO_V3_RECOVERY_DISABLED=true \
             --label "org.opencontainers.image.revision=$SOURCE_SHA" \
             --label "org.opencontainers.image.source=https://github.com/$IMAGE_OWNER/$IMAGE_REPO" \
             --label "org.optimus.mensageiro.role=fence-aware-recovery" \
@@ -163,7 +164,7 @@ jobs:
           docker run --rm --user root --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$PUBLICATION_REF" sh -lc 'chown -R node:node /data/mensageiro-v3'
           docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=seed "$PUBLICATION_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs >/tmp/v3-seed.json
           before="$(docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$RECOVERY_REF" sha256sum /data/mensageiro-v3/state.json | awk '{print $1}')"
-          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify "$RECOVERY_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" -e V3_SMOKE_ROOT=/data/mensageiro-v3 -e V3_SMOKE_MODE=verify -e V3_SMOKE_EXPECT_RECOVERY_DISABLED=true "$RECOVERY_REF" node tests/mensageiro-v3-m34-p3-container-smoke.cjs
           after="$(docker run --rm --user node --mount "type=volume,src=$volume,dst=/data/mensageiro-v3" "$RECOVERY_REF" sha256sum /data/mensageiro-v3/state.json | awk '{print $1}')"
           test "$before" = "$after"
           echo "Recovery image kept the V3 state unchanged and blocked the legacy handler." | tee -a "$GITHUB_STEP_SUMMARY"
