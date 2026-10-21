@@ -36,7 +36,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          test "$GITHUB_REF" = refs/heads/validation/mensageiro-v3-m34-p2-node24-20261020
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-v3-m34-p3-node24-20261020
           test "$(node --version | cut -c1-3)" = v24
           test -z "${DATABASE_URL:-}"
 
