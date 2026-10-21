@@ -28,6 +28,7 @@ test("ingress selects only the active card, same session, same group and workspa
     assert.equal(selectProfile(store, { workspaceId: "ws-a", sessionId: "session-a", card, groupId: "a@g.us" }).profileId, profileId);
     assert.equal(selectProfile(store, { workspaceId: "ws-a", sessionId: "session-a", card, groupId: "b@g.us" }).reason, "GRUPO_NAO_AUTORIZADO");
     assert.equal(selectProfile(store, { workspaceId: "ws-b", sessionId: "session-a", card, groupId: "a@g.us" }).reason, "PERFIL_INATIVO");
+    assert.equal(selectProfile(store, { workspaceId: "ws-a", sessionId: "session-b", card, groupId: "a@g.us" }).reason, "SESSAO_INCORRETA");
   }
   store.saveCard("ws-a", profileId, "commands", { active: false });
   assert.equal(selectProfile(store, { workspaceId: "ws-a", sessionId: "session-a", card: "commands", groupId: "a@g.us" }).reason, "CARD_INATIVO");
@@ -74,7 +75,7 @@ test("Baileys-like ingress reaches authorized V3 handlers, but not wrong group/w
   }
   assert.deepEqual(await ingress({ workspaceId: "ws-a", sessionId: "session-a", card: "attendance", message: { key: { id: "private-1", remoteJid: "member@s.whatsapp.net" } }, sock, planAllowed: true }), { handled: true });
   assert.equal(calls.length, 5);
-  assert.equal((await ingress({ workspaceId: "ws-a", sessionId: "session-a", card: "commands", message: groupMessage("m-commands"), sock, planAllowed: true })).reason, "claim_existente");
+  assert.equal((await ingress({ workspaceId: "ws-a", sessionId: "session-a", card: "commands", message: groupMessage("m-commands"), sock, planAllowed: true })).reason, "CLAIM_EXISTENTE");
   assert.equal((await ingress({ workspaceId: "ws-a", sessionId: "session-a", card: "welcome", event: { id: "b@g.us", action: "add", participants: ["member@s.whatsapp.net"] }, sock, planAllowed: true })).reason, "GRUPO_NAO_AUTORIZADO");
   assert.equal((await ingress({ workspaceId: "ws-b", sessionId: "session-a", card: "commands", message: groupMessage("m-other"), sock, planAllowed: true })).reason, "PERFIL_INATIVO");
   assert.equal(calls.length, 5);

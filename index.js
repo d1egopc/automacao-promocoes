@@ -26197,10 +26197,19 @@ const mensageiroV3HandlerBridge = createHandlerBridge({
   logger: payload => console.warn("[MENSAGEIRO-V3-BRIDGE-BLOCKED]", JSON.stringify(payload))
 });
 
+const ultimoDiagnosticoMensageiroV3 = new Map();
+function diagnosticoMensageiroV3({ card, reason }) {
+  const key = `${card}:${reason}`;
+  const now = Date.now();
+  if (now - (ultimoDiagnosticoMensageiroV3.get(key) || 0) < 300_000) return;
+  ultimoDiagnosticoMensageiroV3.set(key, now);
+  console.warn("[MENSAGEIRO-V3-DECISAO]", JSON.stringify({ card, code: reason }));
+}
 const ingressMensageiroV3 = createOperationalIngress({
   store: mensageiroV3Routes.store,
   bridge: mensageiroV3HandlerBridge,
-  recoveryDisabled: isMensageiroV3RecoveryDisabled
+  recoveryDisabled: isMensageiroV3RecoveryDisabled,
+  diagnostic: diagnosticoMensageiroV3
 });
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado }) {
   return ingressMensageiroV3({
@@ -26266,11 +26275,15 @@ const mensageiroV3Scheduler = new V3Scheduler({
 
 function iniciarMensageiroV3Scheduler() {
   if (isMensageiroV3RecoveryDisabled()) {
+    diagnosticoMensageiroV3({ card: "scheduled", reason: "SCHEDULER_PARADO" });
     console.warn("[MENSAGEIRO-V3-RECOVERY] execução V3 desativada; fence universal permanece ativo");
     return;
   }
   if (global.__optimusMensageiroV3SchedulerTimer) return;
-  const run = () => mensageiroV3Scheduler.tick().catch(error => console.warn("[MENSAGEIRO-V3-SCHEDULER-ERRO]", error.message));
+  const run = () => mensageiroV3Scheduler.tick().then(result => {
+    for (const item of result.blocked || []) diagnosticoMensageiroV3({ card: "scheduled", reason: item.reason === "atraso_sem_replay" ? "PROGRAMACAO_NAO_ELEGIVEL" : item.reason });
+    if ((result.ambiguous || []).length) diagnosticoMensageiroV3({ card: "scheduled", reason: "ACK_AMBIGUO" });
+  }).catch(error => console.warn("[MENSAGEIRO-V3-SCHEDULER-ERRO]", error.message));
   run();
   global.__optimusMensageiroV3SchedulerTimer = setInterval(run, Number(process.env.MENSAGEIRO_V3_INTERVALO_MS || 60000));
 }

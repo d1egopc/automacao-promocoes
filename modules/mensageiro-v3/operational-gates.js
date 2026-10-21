@@ -20,6 +20,7 @@ function allowedGroups(profile, card) {
 function selectProfile(store, { workspaceId, sessionId, card, groupId = "" }) {
   store.reload();
   const profiles = Object.values(store.snapshot().workspaces?.[String(workspaceId)]?.profiles || {});
+  const anyActive = profiles.some(profile => profile.workspaceId === String(workspaceId) && profile.active === true);
   const session = profiles.filter(profile => profile.workspaceId === String(workspaceId) &&
     profile.sessionId === String(sessionId) && profile.active === true);
   const active = session.filter(profile => cardActive(profile, card));
@@ -28,7 +29,7 @@ function selectProfile(store, { workspaceId, sessionId, card, groupId = "" }) {
     : PRIVATE_CARDS.has(card) ? active : [];
   if (eligible.length !== 1) return {
     profileId: "",
-    reason: !session.length ? "PERFIL_INATIVO" : !active.length ? "CARD_INATIVO" :
+    reason: !session.length ? (anyActive ? "SESSAO_INCORRETA" : "PERFIL_INATIVO") : !active.length ? "CARD_INATIVO" :
       !eligible.length ? "GRUPO_NAO_AUTORIZADO" : "PERFIL_AMBIGUO"
   };
   return { profileId: eligible[0].id, reason: "" };
@@ -63,21 +64,22 @@ function scheduledPayload(content) {
   return tipo === "imagem_texto" && texto ? { image, caption: texto } : { image };
 }
 
-function createOperationalIngress({ store, bridge, recoveryDisabled = () => false, clock = () => Date.now() }) {
+function createOperationalIngress({ store, bridge, recoveryDisabled = () => false, clock = () => Date.now(), diagnostic = () => {} }) {
   if (!store || !bridge || typeof bridge.dispatch !== "function") throw new Error("ingress_v3_dependencias_obrigatorias");
   return async ({ workspaceId, sessionId, card, message, event, sock, planAllowed }) => {
-    if (recoveryDisabled()) return { blocked: true, reason: "TRANSPORTE_INDISPONIVEL" };
-    if (planAllowed !== true) return { blocked: true, reason: "PLANO_BLOQUEADO" };
+    const blocked = reason => { diagnostic({ card, reason }); return { blocked: true, reason }; };
+    if (recoveryDisabled()) return blocked("TRANSPORTE_INDISPONIVEL");
+    if (planAllowed !== true) return blocked("PLANO_BLOQUEADO");
     const groupId = message?.key?.remoteJid || event?.id || "";
     const selected = selectProfile(store, { workspaceId, sessionId, card, groupId });
-    if (!selected.profileId) return { blocked: true, reason: selected.reason };
+    if (!selected.profileId) return blocked(selected.reason);
     const eventId = eventIdentity({ message, event, card, now: clock() });
-    if (!eventId) return { blocked: true, reason: "EVENTO_NAO_RECEBIDO" };
+    if (!eventId) return blocked("EVENTO_NAO_RECEBIDO");
     const outcome = await bridge.dispatch({
       workspaceId, profileId: selected.profileId, card, eventId,
       args: { clienteId: workspaceId, sessaoId: sessionId, sock, mensagem: message, evento: event, planoLiberado: planAllowed }
     });
-    return outcome.ok === true ? outcome.result : { blocked: true, reason: outcome.reason || "CONFIGURACAO_NAO_AUTORIZADA" };
+    return outcome.ok === true ? outcome.result : blocked(outcome.reason === "claim_existente" ? "CLAIM_EXISTENTE" : outcome.reason || "CONFIGURACAO_NAO_AUTORIZADA");
   };
 }
 
