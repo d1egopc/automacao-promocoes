@@ -104,16 +104,42 @@ jobs:
           docker pull "$RECOVERY_REF"
           publication_digest="$(docker image inspect "$PUBLICATION_REF" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
           recovery_digest="$(docker image inspect "$RECOVERY_REF" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
-          test "$publication_digest" = sha256:* 
-          test "$recovery_digest" = sha256:*
+          [[ "$publication_digest" == sha256:* ]]
+          [[ "$recovery_digest" == sha256:* ]]
+          publication_repo="${PUBLICATION_REF%:*}"
+          recovery_repo="${RECOVERY_REF%:*}"
+          publication_immutable="$publication_repo@$publication_digest"
+          recovery_immutable="$recovery_repo@$recovery_digest"
+          docker pull "$publication_immutable"
+          docker pull "$recovery_immutable"
           {
-            echo "IMAGE_PUBLICATION_REF=$PUBLICATION_REF"
+            echo "IMAGE_PUBLICATION_REF=$publication_immutable"
             echo "IMAGE_PUBLICATION_DIGEST=$publication_digest"
-            echo "IMAGE_RECOVERY_REF=$RECOVERY_REF"
+            echo "IMAGE_RECOVERY_REF=$recovery_immutable"
             echo "IMAGE_RECOVERY_DIGEST=$recovery_digest"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "PUBLICATION_DIGEST=$publication_digest" >> "$GITHUB_ENV"
-          echo "RECOVERY_DIGEST=$recovery_digest" >> "$GITHUB_ENV"
+          echo "PUBLICATION_REF=$publication_immutable" >> "$GITHUB_ENV"
+          echo "RECOVERY_REF=$recovery_immutable" >> "$GITHUB_ENV"
+
+      - name: Verify GHCR packages remain private
+        shell: bash
+        env:
+          GHCR_VISIBILITY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          package_visibility() {
+            local package="$1"
+            curl --fail-with-body --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GHCR_VISIBILITY_TOKEN" \
+              "https://api.github.com/users/$IMAGE_OWNER/packages/container/$package" \
+              | jq -er '.visibility'
+          }
+          publication_visibility="$(package_visibility 'automacao-promocoes%2Fmensageiro-v3-publication')"
+          recovery_visibility="$(package_visibility 'automacao-promocoes%2Fmensageiro-v3-recovery')"
+          test "$publication_visibility" = private
+          test "$recovery_visibility" = private
+          echo "GHCR_PRIVATE_VERIFIED=true" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke publication image with restart and persistent V3 state
         shell: bash
