@@ -128,15 +128,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           package_visibility() {
-            local package="$1"
-            curl --fail-with-body --silent --show-error \
+            local suffix="$1"
+            curl --fail --silent --show-error \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer $GHCR_VISIBILITY_TOKEN" \
-              "https://api.github.com/users/$IMAGE_OWNER/packages/container/$package" \
-              | jq -er '.visibility'
+              'https://api.github.com/user/packages?package_type=container&per_page=100' \
+              | jq -er --arg suffix "$suffix" \
+                '.[] | select((.name == ($suffix | ltrimstr("/"))) or (.name | endswith($suffix))) | .visibility' \
+              | head -n 1
           }
-          publication_visibility="$(package_visibility 'automacao-promocoes%2Fmensageiro-v3-publication')"
-          recovery_visibility="$(package_visibility 'automacao-promocoes%2Fmensageiro-v3-recovery')"
+          publication_visibility="$(package_visibility '/mensageiro-v3-publication')"
+          recovery_visibility="$(package_visibility '/mensageiro-v3-recovery')"
           test "$publication_visibility" = private
           test "$recovery_visibility" = private
           echo "GHCR_PRIVATE_VERIFIED=true" | tee -a "$GITHUB_STEP_SUMMARY"
