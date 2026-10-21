@@ -391,6 +391,58 @@ class V3Store {
     });
   }
 
+  /**
+   * Compact only claims that are older than an explicitly supplied replay
+   * horizon.  Claims are the idempotency fence, so deleting them without a
+   * proven horizon could allow an old event to be sent twice.  The method is
+   * intentionally opt-in and bounded: callers must provide both the replay
+   * horizon and a positive batch limit.  Claims with an invalid timestamp are
+   * retained (fail-closed).
+   */
+  compactClaims(workspaceId, {
+    now = typeof this.clock === "function" ? this.clock() : Date.now(),
+    retentionMs,
+    replayHorizonMs,
+    maxRemovals
+  } = {}) {
+    return this._mutate(() => {
+      const retention = Number(retentionMs);
+      const replayHorizon = Number(replayHorizonMs);
+      const limit = Number(maxRemovals);
+      if (!Number.isFinite(retention) || retention <= 0 ||
+        !Number.isFinite(replayHorizon) || replayHorizon <= 0 ||
+        retention < replayHorizon) {
+        throw new Error("claims_retencao_insegura");
+      }
+      if (!Number.isInteger(limit) || limit < 1) throw new Error("claims_lote_obrigatorio");
+
+      const workspace = this._workspace(workspaceId);
+      const cutoff = Number(now) - retention;
+      const eligible = Object.entries(workspace.claims || {})
+        .map(([key, claim]) => ({ key, claim, claimedAt: Date.parse(claim?.claimedAt || "") }))
+        .filter(entry => Number.isFinite(entry.claimedAt) && entry.claimedAt <= cutoff)
+        .sort((a, b) => a.claimedAt - b.claimedAt)
+        .slice(0, limit);
+
+      for (const entry of eligible) delete workspace.claims[entry.key];
+      if (eligible.length) {
+        this._touch(workspace, "claims_compacted", {
+          removed: eligible.length,
+          retentionMs: retention,
+          replayHorizonMs: replayHorizon,
+          cutoff: new Date(cutoff).toISOString()
+        });
+      }
+      return {
+        removed: eligible.length,
+        remaining: Object.keys(workspace.claims || {}).length,
+        cutoff: new Date(cutoff).toISOString(),
+        retentionMs: retention,
+        replayHorizonMs: replayHorizon
+      };
+    });
+  }
+
   recordDecision(workspaceId, decision) {
     return this._mutate(() => { const w = this._workspace(workspaceId); this._touch(w, "scheduler_decision", clone(decision)); return true; });
   }

@@ -58,6 +58,7 @@ function configurar(programacoes, extras = {}) {
     sessaoGruposId: "sessao_prog",
     grupos: ["grupo_1@g.us", "grupo_2@g.us", "grupo_3@g.us"],
     programacoes,
+    perfisExcluidos: [],
     ...extras
   });
 }
@@ -159,6 +160,24 @@ function forcarDue(id, nextRunAt = "2026-08-24T14:59:00.000Z") {
   configurar([baseProgramacao({ id: "multi", grupos: ["grupo_1@g.us", "grupo_2@g.us"], nextRunAt: "2026-08-24T14:59:00.000Z" })]);
   sock = await rodar();
   assert.deepStrictEqual(sock.envios.map((e) => e.jid), ["grupo_1@g.us", "grupo_2@g.us"], "multiplos grupos recebem uma vez cada");
+
+  configurar([baseProgramacao({
+    id: "legacy_tombstone_por_destino",
+    grupos: ["grupo_1@g.us", "grupo_2@g.us"],
+    nextRunAt: "2026-08-24T14:59:00.000Z"
+  })], {
+    perfisExcluidos: [{
+      perfilId: "perfil_excluido",
+      sessaoId: "sessao_prog",
+      grupos: ["grupo_2@g.us"]
+    }]
+  });
+  sock = await rodar();
+  assert.deepStrictEqual(
+    sock.envios.map((e) => e.jid),
+    ["grupo_1@g.us"],
+    "tombstone bloqueia o destino excluido sem perder grupo legado inequivocamente permitido"
+  );
 
   configurar([baseProgramacao({ id: "offline", nextRunAt: "2026-08-24T14:59:00.000Z" })]);
   sock = await rodar({ status: "closed" });

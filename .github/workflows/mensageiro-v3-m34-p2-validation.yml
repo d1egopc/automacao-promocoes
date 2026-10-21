@@ -1,0 +1,81 @@
+name: Mensageiro V3 M3.4-P2 isolated validation
+
+on:
+  push:
+    branches:
+      - validation/mensageiro-v3-m34-p2-node24-20261020
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mensageiro-v3-m34-p2-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  linux-node24:
+    name: GitHub-hosted Linux / Node 24 / production reconciliation
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/mensageiro-v3-m34-p2-node24-20261020'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove isolated runner, ref, and no production database
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REF" = refs/heads/validation/mensageiro-v3-m34-p2-node24-20261020
+          test "$(node --version | cut -c1-3)" = v24
+          test -z "${DATABASE_URL:-}"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Syntax, encoding, and isolated scope checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check modules/mensageiro/storage.js
+          node --check modules/mensageiro/programacoes.scheduler.js
+          node --check modules/mensageiro-v3/src/v3/store.js
+          node --check modules/mensageiro-v3/src/v3/scheduler.js
+          node --check modules/engine/auto-clean/auto-clean.service.js
+          node --check tests/mensageiro-programacoes.test.cjs
+          node --check tests/mensageiro-v3-m33-persistence.test.cjs
+          node --check tests/optimus-auto-clean-v1-shadow.test.js
+          npm run audit:encoding
+          git diff --check origin/main...HEAD
+
+      - name: V3 persistence, restart, fence, and real handler gates
+        run: |
+          node --test --test-concurrency=1 tests/mensageiro-v3-m33-persistence.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m331-durability.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m32-integration.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-routes.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-v3-m322-real-handlers.test.cjs
+
+      - name: Legacy Mensageiro and production guard regressions
+        run: |
+          node tests/mensageiro-programacoes.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-bot-comandos.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-atendimento-perfil-pv.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-gerente-grupo.test.cjs
+          node --test --test-concurrency=1 tests/mensageiro-multiperfil-isolamento.test.cjs
+
+      - name: Auto-Clean production contract and claims isolation
+        run: |
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/fila-historico-compactacao.test.js
+          node tests/engine-validator-claim-recovery.test.js

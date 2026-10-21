@@ -98,6 +98,58 @@ test("M3.3 — duas instâncias serializam revisão e claim sem duplicação", a
   }
 });
 
+test("M3.4-P1 — claims só compactam com horizonte de replay explícito e lote limitado", () => {
+  const f = fixture();
+  try {
+    const clock = () => Date.parse("2026-01-10T00:00:00.000Z");
+    const store = new V3Store({ filePath: f.filePath, clock });
+    activeProfile(store, "workspace-a");
+    assert.equal(store.claimExecution("workspace-a", "old", { source: "old" }), true);
+    assert.throws(() => store.compactClaims("workspace-a", {
+      now: clock(), retentionMs: 48 * 60 * 60 * 1000, maxRemovals: 1
+    }), /claims_retencao_insegura/);
+    assert.throws(() => store.compactClaims("workspace-a", {
+      now: clock(), retentionMs: 48 * 60 * 60 * 1000,
+      replayHorizonMs: 72 * 60 * 60 * 1000, maxRemovals: 1
+    }), /claims_retencao_insegura/);
+
+    const result = store.compactClaims("workspace-a", {
+      now: Date.parse("2026-01-20T00:00:00.000Z"),
+      retentionMs: 7 * 24 * 60 * 60 * 1000,
+      replayHorizonMs: 24 * 60 * 60 * 1000,
+      maxRemovals: 1
+    });
+    assert.equal(result.removed, 1);
+    assert.equal(result.remaining, 0);
+    assert.equal(new V3Store({ filePath: f.filePath }).claimExecution("workspace-a", "old"), true);
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("M3.4-P1 — claim sem timestamp válido permanece preservado", () => {
+  const f = fixture();
+  try {
+    const store = new V3Store({ filePath: f.filePath });
+    activeProfile(store, "workspace-a");
+    store._mutate(() => {
+      const workspace = store._workspace("workspace-a");
+      workspace.claims.invalid = { source: "fixture" };
+      store._touch(workspace, "fixture_claim_invalid");
+    });
+    const result = store.compactClaims("workspace-a", {
+      now: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      retentionMs: 7 * 24 * 60 * 60 * 1000,
+      replayHorizonMs: 24 * 60 * 60 * 1000,
+      maxRemovals: 10
+    });
+    assert.equal(result.removed, 0);
+    assert.deepEqual(new V3Store({ filePath: f.filePath }).snapshot().workspaces["workspace-a"].claims.invalid, { source: "fixture" });
+  } finally {
+    fs.rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test("M3.3 — falha de persistência não retorna sucesso nem perde estado confirmado", () => {
   const f = fixture();
   const fsModule = require("node:fs");

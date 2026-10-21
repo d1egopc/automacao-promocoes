@@ -597,7 +597,9 @@ async function testarExecutePostgresControlado() {
     deleteSql.sql.indexOf("processamentos_removidos") < deleteSql.sql.indexOf("jobs_removidos"),
     "dependencias saem antes do job principal"
   );
-  assert.strictEqual(deleteSql.params[1], 12);
+  // The production contract enforces the 168h commercial minimum even when
+  // a caller supplies a shorter operational hint.
+  assert.strictEqual(deleteSql.params[1], 168);
   assert.strictEqual(deleteSql.params[2], 2);
   assert.ok(deleteSql.params[0].includes("expirada_operacional"));
   assert.ok(deleteSql.params[0].includes("oferta_criada"));
@@ -646,10 +648,10 @@ async function testarExecuteOfertasPostgresD1() {
   assert.ok(deleteFinalSql.includes("NOT EXISTS"), "DELETE final deve revalidar ausencia de job vivo");
   assert.ok(deleteFinalSql.includes("j.oferta_id = o.id"), "DELETE final protege corrida por oferta_id");
   assert.ok(deleteFinalSql.includes("j.evento_id = o.evento_id"), "DELETE final protege corrida por evento_id");
-  assert.ok(deleteFinalSql.includes("COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("COALESCE(o.atualizada_em, o.criada_em) < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >168h");
   assert.ok(deleteFinalSql.includes("retidaTerminal"), "DELETE final revalida terminalidade");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 2, "CTE e DELETE final precisam proteger job vivo");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.strictEqual(deleteSql.params[2], 2);
   assert.ok(deleteSql.params[1].includes("pendente"));
   assert.ok(deleteSql.params[1].includes("processando"));
@@ -716,14 +718,14 @@ async function testarExecuteLinksPostgresD2() {
   assert.ok(deleteSql.sql.includes("FOR UPDATE SKIP LOCKED"), "D2 usa skip locked");
 
   const deleteFinalSql = deleteSql.sql.slice(deleteSql.sql.indexOf("DELETE FROM engine_links"));
-  assert.ok(deleteFinalSql.includes("l.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("l.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >168h");
   assert.ok(deleteFinalSql.includes("j.evento_id = l.evento_id"), "DELETE final protege job vivo pelo evento");
   assert.ok(deleteFinalSql.includes("o.link_id = l.id"), "DELETE final protege oferta por link_id");
   assert.ok(deleteFinalSql.includes("o.evento_id = l.evento_id"), "DELETE final protege oferta por evento_id");
   assert.ok(deleteFinalSql.includes("retidaTerminal"), "DELETE final reconhece terminalidade comprovada");
   assert.ok(deleteFinalSql.includes("OR NOT ("), "oferta ambigua/nao terminal bloqueia link");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 4, "CTE e DELETE final precisam revalidar dependencias");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.ok(deleteSql.params[1].includes("pendente"));
   assert.ok(deleteSql.params[1].includes("retry"));
   assert.strictEqual(deleteSql.params[2], 2);
@@ -791,12 +793,12 @@ async function testarExecuteEventosBrutosPostgresD3() {
   assert.ok(deleteSql.sql.includes("FOR UPDATE SKIP LOCKED"), "D3 usa skip locked");
 
   const deleteFinalSql = deleteSql.sql.slice(deleteSql.sql.indexOf("DELETE FROM engine_eventos_brutos"));
-  assert.ok(deleteFinalSql.includes("e.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >12h");
+  assert.ok(deleteFinalSql.includes("e.criado_em < NOW() - ($1::int * INTERVAL '1 hour')"), "DELETE final revalida idade >168h");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id = e.id)"), "DELETE final protege qualquer job filho");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_ofertas o WHERE o.evento_id = e.id)"), "DELETE final protege qualquer oferta filha");
   assert.ok(deleteFinalSql.includes("NOT EXISTS (SELECT 1 FROM engine_links l WHERE l.evento_id = e.id)"), "DELETE final protege qualquer link filho");
   assert.ok((deleteSql.sql.match(/NOT EXISTS/g) || []).length >= 6, "CTE e DELETE final precisam revalidar filhos");
-  assert.strictEqual(deleteSql.params[0], 12);
+  assert.strictEqual(deleteSql.params[0], 168);
   assert.strictEqual(deleteSql.params[1], 2);
 }
 

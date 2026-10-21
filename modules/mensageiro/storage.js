@@ -151,6 +151,7 @@ function normalizarConfigMensageiro(clienteId, config = {}) {
     boasVindasEnvio: normalizarEnvioMensageiro(config.boasVindasEnvio),
     despedidaEnvio: normalizarEnvioMensageiro(config.despedidaEnvio),
     perfis: normalizarPerfisMensageiro(config.perfis),
+    perfisExcluidos: normalizarPerfisExcluidos(config.perfisExcluidos),
     comandos: normalizarComandosMensageiro(config.comandos),
     programacoes: normalizarProgramacoesMensageiro(config.programacoes)
   };
@@ -204,6 +205,9 @@ function criarConfigPadraoMensageiro(clienteId) {
     despedidaEnvio: criarEnvioPadraoMensageiro(),
 
     perfis: [],
+    // Tombstones impedem que a compatibilidade legado ressuscite um perfil removido.
+    // Eles não representam perfis ativos nem são exibidos como configuração editável.
+    perfisExcluidos: [],
     comandos: [],
     programacoes: [],
 
@@ -598,6 +602,44 @@ function normalizarPerfisMensageiro(perfis = []) {
     .filter(perfil => perfil.id && perfil.nome);
 }
 
+function normalizarPerfisExcluidos(perfis = []) {
+  if (!Array.isArray(perfis)) return [];
+  const vistos = new Set();
+  return perfis
+    .map((item) => {
+      const raw = item && typeof item === "object" ? item : {};
+      const perfilId = String(raw.perfilId || raw.id || "").trim();
+      if (!perfilId) return null;
+      return {
+        perfilId,
+        nome: String(raw.nome || "").trim().slice(0, 80),
+        sessaoId: String(raw.sessaoId || "").trim(),
+        grupos: normalizarListaPalavras(raw.grupos),
+        limpezaExclusivaPendente: raw.limpezaExclusivaPendente === true,
+        removidoEm: String(raw.removidoEm || "").trim() || new Date().toISOString()
+      };
+    })
+    .filter((item) => {
+      if (!item || vistos.has(item.perfilId)) return false;
+      vistos.add(item.perfilId);
+      return true;
+    });
+}
+
+function perfilExcluidoBloqueia({ config = {}, sessaoId = "", grupoId = "" } = {}) {
+  const sessao = String(sessaoId || "").trim();
+  const grupo = String(grupoId || "").trim();
+  const bloqueio = normalizarPerfisExcluidos(config.perfisExcluidos).find((item) => {
+    if (sessao && item.sessaoId && item.sessaoId !== sessao) return false;
+    if (!sessao && item.sessaoId) return false;
+    if (!grupo) return true;
+    return !item.grupos.length || item.grupos.includes(grupo);
+  });
+  return bloqueio
+    ? { ok: false, codigo: "perfil_excluido", perfilId: bloqueio.perfilId }
+    : { ok: true };
+}
+
 function criarPerfilLegadoVirtual(config = {}) {
   return {
     id: PERFIL_LEGADO_ID,
@@ -729,6 +771,16 @@ function resolverPerfilMensageiro({ clienteId, sessaoId = "", grupoId = "", modu
   const moduloSolicitado = String(modulo || "").trim();
 
   if (!perfisAtivos.length) {
+    const bloqueioLegado = perfilExcluidoBloqueia({ config: base, sessaoId, grupoId });
+    if (!bloqueioLegado.ok) {
+      return {
+        ok: false,
+        legado: true,
+        codigo: bloqueioLegado.codigo,
+        perfilId: bloqueioLegado.perfilId,
+        erro: "Perfil excluido nao pode ser adotado pelo modo legado."
+      };
+    }
     const legado = criarPerfilLegadoVirtual(base);
     return {
       ok: true,
@@ -1384,6 +1436,101 @@ function setMensageiroCliente(clienteId, dados = {}) {
   return mensageiroPorCliente[clienteId];
 }
 
+function removerDadosExclusivosPerfil(clienteId, perfilId) {
+  const arquivo = readClienteJson(clienteId, "mensageiro-config.json", {});
+  const porPerfil = arquivo?.atendimentosPorPerfil && typeof arquivo.atendimentosPorPerfil === "object"
+    ? arquivo.atendimentosPorPerfil
+    : {};
+  const vinculos = Array.isArray(arquivo?.vinculosContatoPerfil)
+    ? arquivo.vinculosContatoPerfil
+    : [];
+  const proximo = {
+    ...arquivo,
+    atendimentosPorPerfil: Object.fromEntries(
+      Object.entries(porPerfil).filter(([id]) => id !== perfilId)
+    ),
+    vinculosContatoPerfil: vinculos.filter((item) => item?.perfilId !== perfilId)
+  };
+  writeClienteJson(clienteId, "mensageiro-config.json", proximo);
+}
+
+function atualizarPendenciaLimpezaPerfil(clienteId, perfilId, pendente) {
+  const atual = getMensageiroCliente(clienteId);
+  const tombstones = normalizarPerfisExcluidos(atual.perfisExcluidos);
+  if (!tombstones.some((item) => item.perfilId === perfilId)) {
+    throw erroContratoMensageiro("perfil_tombstone_ausente", "Tombstone do perfil nao encontrado.", { perfilId });
+  }
+  return setMensageiroCliente(clienteId, {
+    perfisExcluidos: tombstones.map((item) => item.perfilId === perfilId
+      ? { ...item, limpezaExclusivaPendente: pendente === true }
+      : item)
+  });
+}
+
+function concluirLimpezaExclusivaPerfil(clienteId, perfilId) {
+  removerDadosExclusivosPerfil(clienteId, perfilId);
+  try {
+    return atualizarPendenciaLimpezaPerfil(clienteId, perfilId, false);
+  } catch (error) {
+    // Keep the durable marker pending if the final publication fails. A retry
+    // must be able to finish the cleanup instead of reporting false success.
+    try {
+      atualizarPendenciaLimpezaPerfil(clienteId, perfilId, true);
+    } catch {}
+    throw error;
+  }
+}
+
+function excluirPerfilMensageiro(clienteId, perfilId) {
+  const id = String(perfilId || "").trim();
+  if (!id || id === PERFIL_LEGADO_ID) {
+    throw erroContratoMensageiro("perfil_nao_excluivel", "O perfil legado nao pode ser excluido.");
+  }
+
+  const atual = getMensageiroCliente(clienteId);
+  const perfil = (atual.perfis || []).find((item) => item.id === id);
+  const bloqueios = normalizarPerfisExcluidos(atual.perfisExcluidos);
+  if (!perfil) {
+    const tombstone = bloqueios.find((item) => item.perfilId === id);
+    if (tombstone) {
+      if (tombstone.limpezaExclusivaPendente) {
+        const config = concluirLimpezaExclusivaPerfil(clienteId, id);
+        return { ok: true, jaExcluido: true, limpezaConcluida: true, perfilId: id, config };
+      }
+      return { ok: true, jaExcluido: true, limpezaConcluida: true, perfilId: id, config: atual };
+    }
+    throw erroContratoMensageiro("perfil_nao_encontrado", "Perfil nao pertence ao workspace.");
+  }
+
+  const grupos = new Set(normalizarListaPalavras(perfil.grupos));
+  for (const modulo of Object.values(perfil.modulos || {})) {
+    if (modulo && typeof modulo === "object" && Array.isArray(modulo.grupos)) {
+      modulo.grupos.forEach((grupo) => grupos.add(String(grupo || "").trim()));
+    }
+  }
+  const tombstone = {
+    perfilId: id,
+    nome: perfil.nome,
+    sessaoId: perfil.sessaoId,
+    grupos: [...grupos].filter(Boolean),
+    limpezaExclusivaPendente: true,
+    removidoEm: new Date().toISOString()
+  };
+  const proximo = setMensageiroCliente(clienteId, {
+    perfis: (atual.perfis || []).filter((item) => item.id !== id),
+    comandos: (atual.comandos || []).filter((item) => item.perfilId !== id),
+    programacoes: (atual.programacoes || []).filter((item) => item.perfilId !== id),
+    perfisExcluidos: [
+      ...bloqueios.filter((item) => item.perfilId !== id),
+      tombstone
+    ]
+  });
+
+  // Dados privados do perfil são removidos somente no arquivo da própria workspace.
+  const config = concluirLimpezaExclusivaPerfil(clienteId, id);
+  return { ok: true, jaExcluido: false, limpezaConcluida: true, perfilId: id, config };
+}
+
 function listarClientesMensageiro() {
   return Object.keys(mensageiroPorCliente || {});
 }
@@ -1417,6 +1564,9 @@ module.exports = {
   validarPerfisMensageiro,
   criarPerfilLegadoVirtual,
   resolverPerfilMensageiro,
+  perfilExcluidoBloqueia,
+  excluirPerfilMensageiro,
+  normalizarPerfisExcluidos,
   moduloPossuiAlcanceProprio,
   gruposAlcanceModuloPerfil,
   MAX_PERFIS_MENSAGEIRO,
