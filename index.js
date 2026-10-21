@@ -274,6 +274,7 @@ const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { createLegacyCompatRoutes } = require("./modules/mensageiro-v3/legacy-compat");
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
+const { createOperationalIngress, scheduledPayload: payloadProgramacaoV3 } = require("./modules/mensageiro-v3/operational-gates");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
 const { createV3BaileysAckCorrelator, messageIdOf } = require("./modules/mensageiro-v3/src/v3/baileys-ack-correlator");
 const { isMensageiroV3RecoveryDisabled } = require("./modules/mensageiro-v3/recovery-mode");
@@ -26196,32 +26197,16 @@ const mensageiroV3HandlerBridge = createHandlerBridge({
   logger: payload => console.warn("[MENSAGEIRO-V3-BRIDGE-BLOCKED]", JSON.stringify(payload))
 });
 
-function perfilV3ParaSessao(clienteId, sessaoId, card) {
-  const snapshot = mensageiroV3Routes.store.snapshot();
-  const profiles = Object.values(snapshot.workspaces?.[String(clienteId)]?.profiles || {});
-  return profiles.find(profile => {
-    if (profile.active !== true || profile.sessionId !== String(sessaoId)) return false;
-    if (card === "attendance") {
-      return ["attendance", "faq", "flows", "quickReplies"].some(name => profile.cards?.[name]?.active === true);
-    }
-    return profile.cards?.[card]?.active === true;
-  })?.id || "legacy";
-}
-
+const ingressMensageiroV3 = createOperationalIngress({
+  store: mensageiroV3Routes.store,
+  bridge: mensageiroV3HandlerBridge,
+  recoveryDisabled: isMensageiroV3RecoveryDisabled
+});
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado }) {
-  if (isMensageiroV3RecoveryDisabled()) return { bloqueada: true, motivo: "mensageiro_v3_recovery_disabled" };
-  const profileId = perfilV3ParaSessao(clienteId, sessaoId, card);
-  const eventId = mensagem?.key?.id || evento?.id || `${card}:${sessaoId}:${Date.now()}`;
-  const args = { clienteId, sessaoId, sock, mensagem, evento, planoLiberado };
-  const outcome = await mensageiroV3HandlerBridge.dispatch({
-    workspaceId: clienteId,
-    profileId,
-    card,
-    args,
-    eventId
+  return ingressMensageiroV3({
+    workspaceId: clienteId, sessionId: sessaoId, card,
+    message: mensagem, event: evento, sock, planAllowed: planoLiberado
   });
-  if (outcome.ok === true) return outcome.result;
-  return { bloqueada: true, motivo: outcome.reason || "mensageiro_v3_bloqueado" };
 }
 
 function getSockMensageiroLegacySeguro(sessaoId) {
@@ -26262,7 +26247,7 @@ const mensageiroV3Scheduler = new V3Scheduler({
       if (!profile || profile.sessionId !== sessionId) throw new Error("sessao_v3_invalida");
       const sock = getSockMensageiroAtual(sessionId);
       if (!sock || !(statusSessao[sessionId] === "open" || statusSessao[sessionId] === "connected")) throw new Error("sessao_v3_indisponivel");
-      const localResult = await sock.sendMessage(destination, content);
+      const localResult = await sock.sendMessage(destination, payloadProgramacaoV3(content));
       const transportMessageId = messageIdOf(localResult);
       if (!transportMessageId) return { confirmed: false, ambiguous: true, transportState: "local_return_without_message_id" };
       const correlation = mensageiroV3AckCorrelator.register({
@@ -33696,12 +33681,14 @@ registrarListenerUnicoSocket({
         })
       });
 
+      const mensagemGrupoV3 = String(mensagem?.key?.remoteJid || "").endsWith("@g.us");
       const execucaoGerente = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_gerente",
         contexto: contextoListenerCobertura,
-        executar: () => mensageiro.tratarMensagemGrupoGerente({
+        executar: () => mensagemGrupoV3 && dispatchMensageiroV3Ingress({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
+          card: "groupManager",
           sock,
           mensagem,
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
@@ -33713,9 +33700,10 @@ registrarListenerUnicoSocket({
         await executarConsumidorMensagemIsolado({
           consumidor: "mensageiro_comando",
           contexto: contextoListenerCobertura,
-          executar: () => mensageiro.tratarMensagemGrupoComando({
+          executar: () => mensagemGrupoV3 && dispatchMensageiroV3Ingress({
             clienteId: clienteIdMensageiro,
             sessaoId: id,
+            card: "commands",
             sock,
             mensagem,
             planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
@@ -33726,9 +33714,10 @@ registrarListenerUnicoSocket({
       await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_atendimento",
         contexto: contextoListenerCobertura,
-        executar: () => mensageiro.tratarMensagemPrivadaAtendimento({
+        executar: () => !mensagemGrupoV3 && dispatchMensageiroV3Ingress({
           clienteId: clienteIdMensageiro,
           sessaoId: id,
+          card: "attendance",
           sock,
           mensagem,
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
@@ -33829,11 +33818,14 @@ sock.ev.on("group-participants.update", async (evento) => {
       return;
     }
 
-    await mensageiro.tratarEventoGrupoMensageiro({
+    await dispatchMensageiroV3Ingress({
       clienteId: clienteIdMensageiro,
       sessaoId: id,
       sock,
-      evento
+      evento,
+      card: evento?.action === "add" ? "welcome" :
+        ["remove", "leave"].includes(evento?.action) ? "farewell" : "",
+      planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
     });
   } catch (e) {
     console.log("[ERRO]âš ï¸ Erro evento Mensageiro:", e.message);

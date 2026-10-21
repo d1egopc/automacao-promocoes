@@ -559,6 +559,27 @@ class V3Store {
     });
   }
 
+  skipOverdueOccurrence(workspaceId, scheduleId, { occurrenceAt, expectedRevision, now, maxLagMs } = {}) {
+    return this._mutate(() => {
+      const w = this._workspace(workspaceId);
+      const s = w.schedules[String(scheduleId || "")];
+      if (!s || s.active !== true || Number(s.revision) !== Number(expectedRevision)) return { skipped: false, reason: "configuracao_alterada" };
+      const due = occurrenceTimestamp(occurrenceAt);
+      const current = Number(now);
+      const lag = Number(maxLagMs);
+      if (occurrenceTimestamp(s.nextRunAt) !== due || !Number.isFinite(current) || !Number.isFinite(lag) || lag < 0 || current - Date.parse(due) <= lag) {
+        return { skipped: false, reason: "ocorrencia_nao_vencida" };
+      }
+      const next = Number(s.intervalMs) > 0 ? nextOccurrenceAt(due, s.intervalMs, current, s.timezone) : null;
+      s.nextRunAt = next;
+      if (!next) { s.active = false; s.completedAt = nowIso(this.clock); }
+      s.revision += 1;
+      s.updatedAt = nowIso(this.clock);
+      this._touch(w, "schedule_occurrence_skipped", { scheduleId: s.id, occurrenceAt: due, nextRunAt: next, reason: "atraso_sem_replay" });
+      return { skipped: true, nextRunAt: next };
+    });
+  }
+
   /**
    * Compact only terminal claims that are older than an explicitly supplied
    * replay horizon. Claims are the idempotency fence, so deleting an in-flight

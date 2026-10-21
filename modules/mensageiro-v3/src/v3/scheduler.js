@@ -1,4 +1,5 @@
 const { buildOccurrenceKey } = require("./store");
+const MAX_DUE_LAG_MS = 90_000;
 
 class V3Scheduler {
   constructor({ store, transport, clock = () => Date.now(), logger = () => {}, isWorkspaceMigrated = () => true } = {}) {
@@ -28,6 +29,16 @@ class V3Scheduler {
           const profile = fresh && this.store.getProfile(workspaceId, fresh.profileId);
           const reason = this._reason(fresh, profile, now);
           if (reason) { blocked.push({ workspaceId, scheduleId: candidate.id, reason }); this.store.recordDecision(workspaceId, { scheduleId: candidate.id, decision: "blocked", reason }); continue; }
+          if (now - Date.parse(fresh.nextRunAt) > MAX_DUE_LAG_MS) {
+            const skipped = this.store.skipOverdueOccurrence(workspaceId, fresh.id, {
+              occurrenceAt: fresh.nextRunAt, expectedRevision: fresh.revision, now, maxLagMs: MAX_DUE_LAG_MS
+            });
+            if (skipped.skipped) {
+              blocked.push({ workspaceId, scheduleId: fresh.id, reason: "atraso_sem_replay" });
+              this.store.recordDecision(workspaceId, { scheduleId: fresh.id, decision: "skipped", reason: "atraso_sem_replay" });
+            }
+            continue;
+          }
           const occurrenceAt = new Date(fresh.nextRunAt).toISOString();
           for (const destination of fresh.destinations) {
             let claimKey = "";
