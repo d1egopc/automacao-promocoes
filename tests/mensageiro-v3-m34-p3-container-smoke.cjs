@@ -6,6 +6,7 @@ const path = require("node:path");
 const { V3Store } = require("../modules/mensageiro-v3/src/v3/store");
 const { createPersistentWorkspaceFence } = require("../modules/mensageiro-v3/workspace-fence");
 const { createHandlerBridge } = require("../modules/mensageiro-v3/handler-bridge");
+const { isMensageiroV3RecoveryDisabled } = require("../modules/mensageiro-v3/recovery-mode");
 
 const root = path.resolve(process.env.V3_SMOKE_ROOT || "/data/mensageiro-v3");
 const statePath = path.join(root, "state.json");
@@ -41,6 +42,9 @@ async function seed() {
 }
 
 async function verify() {
+  if (process.env.V3_SMOKE_EXPECT_RECOVERY_DISABLED === "true") {
+    assert.equal(isMensageiroV3RecoveryDisabled(), true);
+  }
   const store = new V3Store({ filePath: statePath });
   const fence = createPersistentWorkspaceFence({ store });
   assert.equal(fence.status(workspaceId), "V3_MIGRATED");

@@ -276,6 +276,7 @@ const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge"
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
 const { createV3BaileysAckCorrelator, messageIdOf } = require("./modules/mensageiro-v3/src/v3/baileys-ack-correlator");
+const { isMensageiroV3RecoveryDisabled } = require("./modules/mensageiro-v3/recovery-mode");
 const socialModule = require("./modules/social");
 const criarRotasSocial = require("./modules/social/routes");
 const criarRotasTemplatesClientes = require("./modules/templates-clientes/routes");
@@ -26208,6 +26209,7 @@ function perfilV3ParaSessao(clienteId, sessaoId, card) {
 }
 
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado }) {
+  if (isMensageiroV3RecoveryDisabled()) return { bloqueada: true, motivo: "mensageiro_v3_recovery_disabled" };
   const profileId = perfilV3ParaSessao(clienteId, sessaoId, card);
   const eventId = mensagem?.key?.id || evento?.id || `${card}:${sessaoId}:${Date.now()}`;
   const args = { clienteId, sessaoId, sock, mensagem, evento, planoLiberado };
@@ -26278,6 +26280,10 @@ const mensageiroV3Scheduler = new V3Scheduler({
 });
 
 function iniciarMensageiroV3Scheduler() {
+  if (isMensageiroV3RecoveryDisabled()) {
+    console.warn("[MENSAGEIRO-V3-RECOVERY] execução V3 desativada; fence universal permanece ativo");
+    return;
+  }
   if (global.__optimusMensageiroV3SchedulerTimer) return;
   const run = () => mensageiroV3Scheduler.tick().catch(error => console.warn("[MENSAGEIRO-V3-SCHEDULER-ERRO]", error.message));
   run();

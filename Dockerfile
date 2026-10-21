@@ -1,5 +1,7 @@
 FROM node:24-bookworm-slim
 
+ARG MENSAGEIRO_V3_RECOVERY_DISABLED=false
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -15,6 +17,7 @@ RUN mkdir -p /data && chown -R node:node /app /data
 
 ENV NODE_ENV=production
 ENV DATA_DIR=/data
+ENV MENSAGEIRO_V3_RECOVERY_DISABLED=$MENSAGEIRO_V3_RECOVERY_DISABLED
 
 EXPOSE 3000
 
