@@ -270,8 +270,8 @@ const {
 
 const mensageiro = require("./modules/mensageiro");
 const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
-const criarRotasMensageiro = require("./modules/mensageiro/routes");
 const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
+const { createLegacyCompatRoutes } = require("./modules/mensageiro-v3/legacy-compat");
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
@@ -6262,7 +6262,8 @@ if (sessoesMeta && Object.keys(sessoesMeta).length) {
   console.log("[OK]âœ… Sesses meta carregadas:", Object.keys(sessoesMeta).length);
 }
 
-  mensageiro.carregarMensageiro();
+  // V3 is the sole Messenger authority. Do not load/normalize the legacy
+  // mensageiro.json files during boot; old data remains inert backup only.
   socialModule.inicializarSocialModule({ logger: console });
 
   criarPlanosPadrao();
@@ -16497,9 +16498,9 @@ app.use("/admin/observabilidade", criarRotasObservabilidadeAdmin({
   getUsuarios: () => usuarios,
   getConfigsPorCliente: () => configsPorCliente,
   getIntegracoesPorCliente: () => integracoesPorCliente,
-  getMensageiroCliente: mensageiro.getMensageiroCliente,
-  getAtendimentoConfigCliente: mensageiro.getAtendimentoConfigCliente,
-  listarInfracoesGerenteCliente: mensageiro.listarInfracoesGerenteCliente,
+  getMensageiroCliente: (clienteId) => mensageiroCompatRoutes.stateFor(mensageiroV3Routes.store, clienteId),
+  getAtendimentoConfigCliente: (clienteId) => mensageiroCompatRoutes.stateFor(mensageiroV3Routes.store, clienteId).atendimento,
+  listarInfracoesGerenteCliente: () => [],
   getStatusSessao: (sessaoId) => statusSessao[sessaoId] || ""
 }));
 app.use("/admin/platform-variables", exigirAdminMasterEstrito, criarRotasPlatformVariables());
@@ -26093,6 +26094,7 @@ app.post("/radar/adicionar-fila", async (req, res) => {
 
 // =============== ROTA DO MENSAGEIRO =================
 
+/*
 app.use("/mensageiro", criarRotasMensageiro({
   getClienteId,
   getPlanoUsuario,
@@ -26135,6 +26137,7 @@ app.use("/mensageiro", criarRotasMensageiro({
     return null;
   }
 }));
+*/
 
 // Mensageiro V3 is the universal authority. The route is authenticated by
 // the existing app middleware and uses only the authenticated workspace from
@@ -26151,6 +26154,16 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
   }
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
+// The original UI remains the public surface, but its data authority is now
+// the universal V3 store. The legacy router above is intentionally not
+// mounted: legacy JSON/configuration cannot be read or executed after the
+// V3 fence.
+const mensageiroCompatRoutes = createLegacyCompatRoutes({
+  store: mensageiroV3Routes.store,
+  getClienteId,
+  usuarioTemRecurso
+});
+app.use("/mensageiro", mensageiroCompatRoutes.router);
 const mensageiroV3AckCorrelator = createV3BaileysAckCorrelator({
   store: mensageiroV3Routes.store,
   logger: payload => console.warn("[MENSAGEIRO-V3-ACK]", JSON.stringify(payload))
@@ -33622,7 +33635,7 @@ registrarListenerUnicoSocket({
           mensagemId: contextoListenerCobertura.mensagemId,
           codigo: "received",
           etapa: "listener",
-          config: mensageiro.getMensageiroCliente(clienteIdMensageiro),
+          config: mensageiroCompatRoutes.stateFor(mensageiroV3Routes.store, clienteIdMensageiro),
           readClienteJson,
           writeClienteJson
         });

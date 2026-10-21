@@ -362,7 +362,10 @@ class V3Store {
     return this._mutate(() => {
       const w = this._workspace(workspaceId); const p = w.profiles[String(profileId || "")];
       if (!p) throw new Error("perfil_nao_encontrado");
-      if (!p.cards.scheduled || p.cards.scheduled.active !== true) throw new Error("card_programacoes_inativo");
+      // A configuration may be saved before its card is activated. Execution
+      // remains fail-closed in effectiveSchedules/scheduler; the compat layer
+      // opts into this persistence-only path for the original UI.
+      if (!p.cards.scheduled || (p.cards.scheduled.active !== true && input?.allowInactive !== true)) throw new Error("card_programacoes_inativo");
       const destinations = [...new Set((input?.destinations || []).map(String).map(x => x.trim()).filter(Boolean))];
       if (!destinations.length) throw new Error("destinos_obrigatorios");
       if (input?.content === null || input?.content === undefined) throw new Error("conteudo_obrigatorio");
