@@ -7,7 +7,7 @@ const path = require("node:path");
 const { V3Store } = require("../modules/mensageiro-v3/src/v3/store");
 const { V3Scheduler } = require("../modules/mensageiro-v3/src/v3/scheduler");
 const { createHandlerBridge } = require("../modules/mensageiro-v3/handler-bridge");
-const { selectProfile, eventIdentity, scheduledPayload, createOperationalIngress } = require("../modules/mensageiro-v3/operational-gates");
+const { selectProfile, eventIdentity, scheduledPayload, authorizedDestination, createOperationalIngress } = require("../modules/mensageiro-v3/operational-gates");
 
 const root = fs.mkdtempSync(path.join(__dirname, ".m3-hotfix-"));
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -86,6 +86,18 @@ test("V3 transport receives a Baileys payload, never the persisted legacy config
   assert.deepEqual(scheduledPayload({ text: "V3" }), { text: "V3" });
   assert.deepEqual(scheduledPayload({ conteudos: [{ tipo: "imagem_texto", texto: "caption", imagem: "https://example.test/art.png" }] }), { image: { url: "https://example.test/art.png" }, caption: "caption" });
   assert.throws(() => scheduledPayload({ conteudos: [{ tipo: "texto", texto: "" }] }), /conteudo_programacao_invalido/);
+});
+
+test("scheduled transport rechecks session ownership and exact group before sending", () => {
+  const base = { workspaceId: "ws-a", sessionId: "session-a", destination: "a@g.us", sessionMeta: { owner: "ws-a" }, groups: [{ id: "a@g.us" }], belongsToWorkspace: (meta, id) => meta.owner === id };
+  assert.equal(authorizedDestination(base), true);
+  assert.equal(authorizedDestination({ ...base, workspaceId: "ws-b" }), false);
+  assert.equal(authorizedDestination({ ...base, destination: "b@g.us" }), false);
+  assert.equal(authorizedDestination({ ...base, groups: [] }), false);
+  assert.equal(authorizedDestination({ ...base, sessionMeta: null }), false);
+  const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
+  assert.match(source, /authorizeSend:[\s\S]*?destinoMensageiroV3Autorizado/);
+  assert.match(source, /sendMessage: async \(\{ workspaceId[\s\S]*?destinoMensageiroV3Autorizado/);
 });
 
 test("12/15 minute schedules execute once, advance, survive restart and never replay stale occurrences", async () => {

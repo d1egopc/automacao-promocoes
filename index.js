@@ -274,7 +274,7 @@ const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { createLegacyCompatRoutes } = require("./modules/mensageiro-v3/legacy-compat");
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
-const { createOperationalIngress, scheduledPayload: payloadProgramacaoV3 } = require("./modules/mensageiro-v3/operational-gates");
+const { createOperationalIngress, scheduledPayload: payloadProgramacaoV3, authorizedDestination: destinoAutorizadoV3 } = require("./modules/mensageiro-v3/operational-gates");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
 const { createV3BaileysAckCorrelator, messageIdOf } = require("./modules/mensageiro-v3/src/v3/baileys-ack-correlator");
 const { isMensageiroV3RecoveryDisabled } = require("./modules/mensageiro-v3/recovery-mode");
@@ -26239,6 +26239,16 @@ function getSockMensageiroAtual(sessaoId) {
   return id ? sessoes[id] : null;
 }
 
+function destinoMensageiroV3Autorizado(workspaceId, sessaoId, destination) {
+  const meta = sessoesMeta?.[sessaoId];
+  const idNormalizado = normalizarSessaoId(workspaceId, sessaoId);
+  const grupos = gruposPorSessao[sessaoId] || gruposPorSessao[idNormalizado] || [];
+  return destinoAutorizadoV3({
+    workspaceId, sessionId: sessaoId, destination, sessionMeta: meta, groups: grupos,
+    belongsToWorkspace: (sessao, id) => canalPertenceAoWorkspace(sessao, id, { usuarios })
+  });
+}
+
 const mensageiroV3Scheduler = new V3Scheduler({
   store: mensageiroV3Routes.store,
   isWorkspaceMigrated: workspaceId => mensageiroV3Routes.fence.v3Required(workspaceId),
@@ -26248,12 +26258,14 @@ const mensageiroV3Scheduler = new V3Scheduler({
       const profile = mensageiroV3Routes.store.getProfile(workspaceId, profileId);
       if (!profile || profile.active !== true || profile.cards?.scheduled?.active !== true) return false;
       if (!profile.sessionId || !destination) return false;
+      if (!destinoMensageiroV3Autorizado(workspaceId, profile.sessionId, destination)) return false;
       const sock = getSockMensageiroAtual(profile.sessionId);
       return Boolean(sock && (statusSessao[profile.sessionId] === "open" || statusSessao[profile.sessionId] === "connected"));
     },
     sendMessage: async ({ workspaceId, profileId, sessionId, destination, content, claimKey }) => {
       const profile = mensageiroV3Routes.store.getProfile(workspaceId, profileId);
       if (!profile || profile.sessionId !== sessionId) throw new Error("sessao_v3_invalida");
+      if (!destinoMensageiroV3Autorizado(workspaceId, sessionId, destination)) throw new Error("destino_v3_nao_autorizado");
       const sock = getSockMensageiroAtual(sessionId);
       if (!sock || !(statusSessao[sessionId] === "open" || statusSessao[sessionId] === "connected")) throw new Error("sessao_v3_indisponivel");
       const localResult = await sock.sendMessage(destination, payloadProgramacaoV3(content));

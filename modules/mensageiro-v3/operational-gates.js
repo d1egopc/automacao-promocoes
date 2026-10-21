@@ -64,6 +64,13 @@ function scheduledPayload(content) {
   return tipo === "imagem_texto" && texto ? { image, caption: texto } : { image };
 }
 
+function authorizedDestination({ workspaceId, sessionId, destination, sessionMeta, groups, belongsToWorkspace }) {
+  if (!sessionId || !destination || !sessionMeta || typeof belongsToWorkspace !== "function" ||
+    belongsToWorkspace(sessionMeta, workspaceId) !== true) return false;
+  return Array.isArray(groups) && groups.some(group =>
+    String(group?.id || group?.jid || group?.grupoId || "") === String(destination));
+}
+
 function createOperationalIngress({ store, bridge, recoveryDisabled = () => false, clock = () => Date.now(), diagnostic = () => {} }) {
   if (!store || !bridge || typeof bridge.dispatch !== "function") throw new Error("ingress_v3_dependencias_obrigatorias");
   return async ({ workspaceId, sessionId, card, message, event, sock, planAllowed }) => {
@@ -83,4 +90,4 @@ function createOperationalIngress({ store, bridge, recoveryDisabled = () => fals
   };
 }
 
-module.exports = { selectProfile, eventIdentity, scheduledPayload, createOperationalIngress };
+module.exports = { selectProfile, eventIdentity, scheduledPayload, authorizedDestination, createOperationalIngress };
