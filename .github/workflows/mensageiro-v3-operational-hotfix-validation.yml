@@ -109,9 +109,12 @@ jobs:
           set -Eeuo pipefail
           for role in publication recovery; do
             package="automacao-promocoes%2Fmensageiro-v3-hotfix-20261021-f51c73ab-${role}"
-            existing="$(gh api "/users/d1egopc/packages/container/${package}" --jq '.visibility' 2>/dev/null || true)"
-            if [[ -n "$existing" ]]; then
-              echo "GHCR_NEW_PACKAGE_REQUIRED_${role^^}"
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Accept: application/vnd.github+json' \
+              "https://api.github.com/users/d1egopc/packages/container/${package}")"
+            if [[ "$status" != 404 ]]; then
+              echo "GHCR_NEW_PACKAGE_REQUIRED_${role^^}_HTTP=$status"
               exit 1
             fi
           done
@@ -123,12 +126,13 @@ jobs:
             docker push "$image:privacy-seed-$GITHUB_RUN_ID"
             visibility=""
             for attempt in 1 2 3 4 5; do
-              visibility="$(gh api "/users/d1egopc/packages/container/${package}" --jq '.visibility' 2>/dev/null || true)"
-              [[ -n "$visibility" ]] && break
+              metadata="$(gh api "/users/d1egopc/packages/container/${package}" --jq '[.name, .visibility] | @tsv' 2>/dev/null || true)"
+              IFS=$'\t' read -r actual_name visibility <<< "$metadata"
+              [[ "$actual_name" == "automacao-promocoes/mensageiro-v3-hotfix-20261021-f51c73ab-${role}" && "$visibility" == private ]] && break
               sleep 2
             done
             echo "GHCR_SEED_${role^^}_VISIBILITY=${visibility:-UNKNOWN}" >> "$GITHUB_STEP_SUMMARY"
-            if [[ "$visibility" != private ]]; then
+            if [[ "$actual_name" != "automacao-promocoes/mensageiro-v3-hotfix-20261021-f51c73ab-${role}" || "$visibility" != private ]]; then
               echo "GHCR_PRIVATE_GATE_FAILED_${role^^}=${visibility:-UNKNOWN}"
               exit 1
             fi
@@ -158,7 +162,10 @@ jobs:
           set -Eeuo pipefail
           for role in publication recovery; do
             package="automacao-promocoes%2Fmensageiro-v3-hotfix-20261021-f51c73ab-${role}"
-            test "$(gh api "/users/d1egopc/packages/container/${package}" --jq '.visibility')" = private
+            metadata="$(gh api "/users/d1egopc/packages/container/${package}" --jq '[.name, .visibility] | @tsv')"
+            IFS=$'\t' read -r actual_name visibility <<< "$metadata"
+            test "$actual_name" = "automacao-promocoes/mensageiro-v3-hotfix-20261021-f51c73ab-${role}"
+            test "$visibility" = private
           done
           volume="v3-hotfix-pull-${GITHUB_RUN_ID}"
           trap 'docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
