@@ -345,7 +345,7 @@ async function runAdminCheckpointResume(options = {}) {
   return {
     ok: stateAfterResult?.ok === true && readiness?.ready === true && stateAfter?.authorityReady === true,
     clienteId, revision: pending.revision, targetGeneration: pending.target,
-    rebuild, index, readiness, state: stateAfter,
+    rebuild, index, readiness, confirmedState, state: stateAfter,
     motivo: stateAfter?.authorityReady === true ? "checkpoint_admin_resume_complete" : "authority_not_ready"
   };
 }
