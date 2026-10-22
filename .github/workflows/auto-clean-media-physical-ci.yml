@@ -106,6 +106,7 @@ jobs:
           node tests/auto-clean-gc-relay-phase1.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
+          node tests/checkpoint-projecao-coerencia.test.js
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/social-media-upload.test.js
           node tests/identidade-visual-ofertas-renderer.test.js
