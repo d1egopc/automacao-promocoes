@@ -174,3 +174,64 @@ test("provider adapter denial before transport keeps SEND_STARTED absent", async
   assert.equal((await run("ws_A")).reason, "session_closed");
   assert.deepEqual(calls, ["release"]);
 });
+
+test("pool rotation keeps claim, transport boundary and durable ACK on current pool", async () => {
+  const makePool = name => ({ name, ended: false, connect() {},
+    end() { this.ended = true; } });
+  const first = makePool("first");
+  const second = makePool("second");
+  const third = makePool("third");
+  const fourth = makePool("fourth");
+  let active = first;
+  const seen = [];
+  const expectCurrent = (step, candidate) => {
+    assert.equal(candidate, active, `${step} must use the current pool`);
+    assert.equal(candidate.ended, false, `${step} must not use an ended pool`);
+    seen.push([step, candidate.name]);
+  };
+  const run = criarExecutorFilaUniversal({ pool: first, getPool: () => active,
+    repository: {
+      retireExpiredDestinations: async ({ pool: current }) => {
+        expectCurrent("retire", current);
+        first.end(); active = second;
+      },
+      preflightWorkspace: async ({ pool: current }) => {
+        expectCurrent("preflight", current); return { ok: true };
+      },
+      claimDestination: async ({ pool: current }) => {
+        expectCurrent("claim", current); return claim;
+      },
+      markSendStarted: async ({ pool: current }) => {
+        expectCurrent("start", current); return { ok: true };
+      },
+      confirmSend: async ({ pool: current }) => {
+        expectCurrent("ack", current); return { ok: true, terminal: true };
+      }
+    },
+    prepare: async () => {
+      second.end(); active = third;
+      return { ready: true };
+    },
+    dispatch: async (_claim, _prepared, { startAttempt }) => {
+      await startAttempt();
+      third.end(); active = fourth;
+      return { confirmed: true, confirmationKey: "durable_ack",
+        providerMessageId: "provider_1", creditDebited: true };
+    } });
+  assert.deepEqual(await run("ws_A"), { ok: true, terminal: true });
+  assert.deepEqual(seen, [["retire", "first"], ["preflight", "second"],
+    ["claim", "second"], ["start", "third"], ["ack", "fourth"]]);
+});
+
+test("missing current pool fails before claim or transport", async () => {
+  let active = pool;
+  const run = criarExecutorFilaUniversal({ pool, getPool: () => active,
+    repository: {
+      preflightWorkspace: async () => { throw new Error("must_not_preflight"); },
+      claimDestination: async () => { throw new Error("must_not_claim"); }
+    },
+    prepare: async () => { throw new Error("must_not_prepare"); },
+    dispatch: async () => { throw new Error("must_not_send"); } });
+  active = null;
+  await assert.rejects(run("ws_A"), /queue_pool_required/);
+});

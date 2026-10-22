@@ -1,0 +1,52 @@
+name: RIO pool rotation CI only
+
+on:
+  push:
+    branches:
+      - fix/rio-pool-rotation-20261021
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Scope and runtime
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          node --version | grep -Eq '^v24\.'
+          git diff --check a0e14ccb974fe02c12d7f8a178a43a861b0c6363..HEAD
+          changed="$(git diff --name-only a0e14ccb974fe02c12d7f8a178a43a861b0c6363..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/rio-pool-rotation-ci.yml \
+            modules/engine/universal-queue-executor.adapter.js \
+            tests/universal-flow-queue-executor.test.js | sort)"
+          test "$changed" = "$expected"
+      - run: npm ci
+      - name: Focal executor and queue tests
+        run: |
+          set -Eeuo pipefail
+          node --check modules/engine/universal-queue-executor.adapter.js
+          node --test \
+            tests/universal-flow-queue-executor.test.js \
+            tests/universal-flow-queue-preflight.test.js \
+            tests/universal-flow-queue-status.test.js
+      - name: Disposable Docker bootstrap and rotation test
+        run: |
+          set -Eeuo pipefail
+          image="rio-pool-rotation:${GITHUB_SHA}"
+          docker build --pull=false -t "$image" .
+          docker run --rm "$image" node --test tests/universal-flow-queue-executor.test.js
+          bash tests/mensageiro-v3-release-http-smoke.sh "$image"
+          docker image inspect "$image" --format 'IMAGE_ID={{.Id}}'
