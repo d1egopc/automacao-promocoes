@@ -185,7 +185,9 @@ async function testTenWorkspaceMicroBatchesAndMetrics() {
     const observed = await runMediaPhysicalBatch({ dataDir, nowMs: NOW, maxTargetsPerRun: 10,
       microBatchSize: 2, maxDelete: 20, maxDurationMs: 2000, referenceLoader: loader() });
     assert.strictEqual(observed.targetsProcessed, 10, "dez workspaces devem receber uma rodada justa");
-    assert.strictEqual(observed.candidates, 20);
+    assert.ok(observed.candidates > 0 && observed.candidates <= 20,
+      "o orcamento pode limitar a observacao, mas deve produzir candidatos");
+    assert.strictEqual(observed.backlog, observed.candidates);
     assert.strictEqual(observed.createdGiB, 0);
     assert.ok(observed.backlog >= 20);
 
