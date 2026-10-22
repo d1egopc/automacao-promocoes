@@ -57,9 +57,11 @@ test("runner real retoma pending revision em PostgreSQL 17 isolado", async () =>
       fs, logger: quiet
     };
     const vivaProof = queue.publicarProofFilaViva(workspace,
-      { generation: 85681, fileRevision: "viva-85681" }, { ...storageDeps, agora: Date.now() });
+      { generation: 85681, fileRevision: "viva-85681", contentHash: sha(fs.readFileSync(file("fila-viva.json"))) },
+      { ...storageDeps, agora: Date.now() });
     const legacyProof = queue.publicarProofFilaLegada(workspace,
-      { targetGeneration: 85675, fileRevision: revision }, { ...storageDeps, agora: Date.now() });
+      { targetGeneration: 85675, fileRevision: revision, contentHash: sha(fs.readFileSync(file("fila.json"))) },
+      { ...storageDeps, agora: Date.now() });
     assert(vivaProof.ok && legacyProof.ok);
     put(refs.FILA_GC_REFERENCES_ARQUIVO,
       refs.projetarReferenciasFilaViva(JSON.parse(fs.readFileSync(file("fila-viva.json"), "utf8")), workspace,
