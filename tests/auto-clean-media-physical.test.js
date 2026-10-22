@@ -117,6 +117,24 @@ async function testPostgresReferenceContract() {
   assert.strictEqual(failed.complete, false); assert.strictEqual(failed.refs.size, 0);
 }
 
+async function testStaleIndexFailsClosed() {
+  const f = fixture();
+  try {
+    const target = file(f.identity, `${"f".repeat(64)}.png`);
+    const stale = async () => ({ complete: false, refs: new Map(),
+      reasonCode: "REFERENCE_INDEX_STALE" });
+    const first = await run(f, NOW, { referenceLoader: stale });
+    assert.strictEqual(first.referenceComplete, false);
+    assert.strictEqual(first.referenceReasonCode, "REFERENCE_INDEX_STALE");
+    const attempted = await run(f, NOW + OBSERVATION_DELAY_MS + 1, {
+      execute: true, mediaDeleteEnabled: true, referenceLoader: stale
+    });
+    assert.strictEqual(attempted.removed, 0);
+    assert.strictEqual(attempted.errors, 1);
+    assert.ok(fs.existsSync(target), "indice stale deve bloquear exclusao");
+  } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+}
+
 async function testFutureSocialReferenceAndWorkspaceIsolation() {
   const f = fixture();
   try {
@@ -156,6 +174,7 @@ async function main() {
   await testConcurrentReferenceAndRewriteFailClosed();
   await testSocialMultiworkspaceAndIncomplete();
   await testPostgresReferenceContract();
+  await testStaleIndexFailsClosed();
   await testFutureSocialReferenceAndWorkspaceIsolation();
   await testBatchLimit();
   console.log("AUTO_CLEAN_MEDIA_PHYSICAL_TESTS_PASS");

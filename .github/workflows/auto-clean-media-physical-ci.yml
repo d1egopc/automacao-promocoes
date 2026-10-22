@@ -1,0 +1,145 @@
+name: Auto-Clean physical media CI only
+
+on:
+  push:
+    branches:
+      - validation/auto-clean-media-physical-node24-20261021
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-clean-media-physical-node24-pg17
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/auto-clean-media-physical-node24-20261021'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: auto_clean_media_ci
+          POSTGRES_USER: auto_clean_media_ci
+          POSTGRES_PASSWORD: auto_clean_media_ci_disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auto_clean_media_ci -d auto_clean_media_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BASE_SHA: b9ad272e4fe4867327927909522f946110941a3b
+      AUTO_CLEAN_TEST_DATABASE_URL: postgresql://auto_clean_media_ci:auto_clean_media_ci_disposable@127.0.0.1:5432/auto_clean_media_ci
+      DATABASE_URL: ""
+      OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL: "false"
+      OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE: "false"
+      NODE_ENV: test
+    steps:
+      - name: Checkout isolated validation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove isolation, runtime and exact scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REF" = refs/heads/validation/auto-clean-media-physical-node24-20261021
+          test -z "${DATABASE_URL:-}"
+          node --version | grep -Eq '^v24\.'
+          git cat-file -e "$BASE_SHA^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          git diff --check "$BASE_SHA"..HEAD
+          changed="$(git diff --name-only "$BASE_SHA"..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/auto-clean-media-physical-ci.yml \
+            modules/engine/auto-clean/gc-media-physical.service.js \
+            modules/engine/auto-clean/gc-reference-index-builder.js \
+            modules/engine/auto-clean/gc-reference-index.js \
+            modules/engine/auto-clean/gc-relay.service.js \
+            modules/engine/auto-clean/gc-social-reference-index.js \
+            tests/auto-clean-gc-relay-phase1.test.js \
+            tests/auto-clean-media-physical.test.js | sort)"
+          test "$changed" = "$expected"
+          test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
+          test "$OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE" = false
+
+      - name: Install locked dependencies and audit source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          node --check modules/engine/auto-clean/gc-media-physical.service.js
+          node --check modules/engine/auto-clean/gc-social-reference-index.js
+          node --check modules/engine/auto-clean/gc-reference-index-builder.js
+          node --check modules/engine/auto-clean/gc-reference-index.js
+          node --check modules/engine/auto-clean/gc-relay.service.js
+          node --check tests/auto-clean-media-physical.test.js
+          npm run audit:encoding
+
+      - name: Physical GC safety and regression suites
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/auto-clean-media-physical.test.js
+          node tests/auto-clean-gc-relay-phase1.test.js
+          node tests/auto-clean-gc-reference-index-phase12.test.js
+          node tests/auto-clean-gc-reference-index-phase13.test.js
+          node tests/auto-clean-gc-reference-index-phase14.test.js
+          node tests/auto-clean-gc-reference-index-phase141.test.js
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/social-media-upload.test.js
+          node tests/identidade-visual-ofertas-renderer.test.js
+
+      - name: Disposable PostgreSQL 17 guard harness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          output="$RUNNER_TEMP/auto-clean-postgres-guards.log"
+          node tests/auto-clean-postgres-guards.postgres.js 2>&1 | tee "$output"
+          ! grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_SKIPPED' "$output"
+          grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_PASS' "$output"
+
+      - name: Build candidate and fence-aware recovery images
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          candidate="auto-clean-media-candidate:${GITHUB_SHA}"
+          recovery="auto-clean-media-recovery:${GITHUB_SHA}"
+          volume="auto-clean-media-v3-${GITHUB_RUN_ID}"
+          trap 'docker volume rm -f "$volume" >/dev/null 2>&1 || true' EXIT
+          docker build --pull=false -t "$candidate" .
+          docker build --pull=false --build-arg MENSAGEIRO_V3_RECOVERY_DISABLED=true -t "$recovery" .
+          docker run --rm "$candidate" node tests/auto-clean-media-physical.test.js
+          docker volume create "$volume" >/dev/null
+          docker run --rm -v "$volume:/data" -e V3_SMOKE_MODE=seed "$candidate" \
+            node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm -v "$volume:/data" "$candidate" \
+            node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm -v "$volume:/data" -e V3_SMOKE_EXPECT_RECOVERY_DISABLED=true "$recovery" \
+            node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          docker run --rm -v "$volume:/data" -e V3_SMOKE_EXPECT_RECOVERY_DISABLED=true "$recovery" \
+            node tests/mensageiro-v3-m34-p3-container-smoke.cjs
+          bash tests/mensageiro-v3-release-http-smoke.sh "$candidate"
+          bash tests/mensageiro-v3-release-http-smoke.sh "$recovery"
+          echo "CANDIDATE_IMAGE_ID=$(docker image inspect "$candidate" --format '{{.Id}}')"
+          echo "RECOVERY_IMAGE_ID=$(docker image inspect "$recovery" --format '{{.Id}}')"
+
+      - name: Prove CI-only workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(grep -c '^  validate:' .github/workflows/auto-clean-media-physical-ci.yml)" -eq 1
+          ! grep -Eiq 'self-hosted|/opt/optimus|docker compose|hostinger|vercel|ghcr|packages: write' .github/workflows/auto-clean-media-physical-ci.yml
