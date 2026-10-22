@@ -78,12 +78,21 @@ test("runner real retoma pending revision em PostgreSQL 17 isolado", async () =>
     [workspace, vivaProof.proof, legacyProof.proof, revision]);
 
     queue.resetarEstadoProjecaoLeveParaTeste(workspace);
-    const result = await runAdminCheckpointResume({
-      dataDir: root, clienteId: workspace, expectedRevision: revision,
-      expectedTargetGeneration: 85681, expectedReferenceCount: 665,
-      expectedProtectedHash: protectedHash, execute: true, authorization: "true",
-      pool, logger: quiet
-    });
+    let result;
+    try {
+      result = await runAdminCheckpointResume({
+        dataDir: root, clienteId: workspace, expectedRevision: revision,
+        expectedTargetGeneration: 85681, expectedReferenceCount: 665,
+        expectedProtectedHash: protectedHash, execute: true, authorization: "true",
+        pool, logger: quiet
+      });
+    } catch (error) {
+      console.log(`::error file=tests/checkpoint-resume-admin.postgres.test.cjs::runner_exception_b64=${Buffer.from(String(error?.stack || error)).toString("base64")}`);
+      throw error;
+    }
+    if (result.ok !== true) {
+      console.log(`::error file=tests/checkpoint-resume-admin.postgres.test.cjs::runner_result_b64=${Buffer.from(JSON.stringify({ stage: result.stage, motivo: result.motivo, confirmedState: result.confirmedState, index: result.index, rebuild: result.rebuild })).toString("base64")}`);
+    }
     assert.equal(result.ok, true, JSON.stringify({ stage: result.stage, motivo: result.motivo, readiness: result.readiness }));
     assert.equal(Number(result.state.vivaGeneration), 85681);
     assert.equal(Number(result.state.durableCheckpointGeneration), 85681);
