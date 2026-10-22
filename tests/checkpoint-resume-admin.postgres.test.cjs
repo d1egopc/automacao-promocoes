@@ -75,6 +75,7 @@ test("runner real retoma pending revision em PostgreSQL 17 isolado", async () =>
       pending_checkpoint_target_generation) VALUES($1,113520,85681,85675,85676,false,$2,$3,$4,85681)`,
     [workspace, vivaProof.proof, legacyProof.proof, revision]);
 
+    queue.resetarEstadoProjecaoLeveParaTeste(workspace);
     const result = await runAdminCheckpointResume({
       dataDir: root, clienteId: workspace, expectedRevision: revision,
       expectedTargetGeneration: 85681, expectedReferenceCount: 665,
