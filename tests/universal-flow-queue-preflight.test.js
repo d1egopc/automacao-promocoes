@@ -134,3 +134,26 @@ test("same-attempt revalidation does not reacquire the commercial reservation", 
   assert.equal((await check(fixture(), { skipDedup: true })).ready, true);
   assert.equal(reservations, 1);
 });
+
+test("preflight resolves the current pool after rotation without retrying a failed clock read", async () => {
+  const first = { connect() {}, ended: false };
+  const second = { connect() {}, ended: false };
+  let active = first;
+  const seen = [];
+  const preflight = build({ overrides: {
+    pool: first, getPool: () => active,
+    readClock: async ({ pool: selected }) => {
+      seen.push(selected);
+      if (selected.ended) throw new Error("pool_ended");
+      return null;
+    }
+  } });
+  assert.equal((await preflight(fixture())).ready, true);
+  first.ended = true;
+  active = second;
+  assert.equal((await preflight(fixture())).ready, true);
+  assert.deepEqual(seen, [first, second]);
+  active = null;
+  await assert.rejects(preflight(fixture()), /queue_pool_required/);
+  assert.equal(seen.length, 2);
+});

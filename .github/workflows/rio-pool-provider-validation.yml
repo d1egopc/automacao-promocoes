@@ -1,0 +1,67 @@
+name: RIO pool provider CI only
+
+on:
+  push:
+    branches:
+      - validation/rio-pool-provider-node24-20261022
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/validation/rio-pool-provider-node24-20261022'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable_ci_only
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGPASSWORD: disposable_ci_only
+      DATABASE_URL: ""
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Isolated scope and runtime
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$GITHUB_REF" = refs/heads/validation/rio-pool-provider-node24-20261022
+          node --version | grep -Eq '^v24\.'
+          git diff --check 08663a561a3890a2986e5b94adc3bbc897dfda7f..HEAD
+          changed="$(git diff --name-only 08663a561a3890a2986e5b94adc3bbc897dfda7f..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/rio-pool-provider-validation.yml \
+            modules/engine/universal-queue-preflight.js \
+            modules/engine/universal-queue-distributor.adapter.js \
+            tests/universal-flow-queue-preflight.test.js \
+            tests/universal-flow-queue-distributor.test.js | sort)"
+          test "$changed" = "$expected"
+      - run: npm ci
+      - name: Pool rotation and commercial safety
+        run: |
+          set -Eeuo pipefail
+          node --check modules/engine/universal-queue-preflight.js
+          node --check modules/engine/universal-queue-distributor.adapter.js
+          node --test tests/universal-flow-queue-preflight.test.js tests/universal-flow-queue-distributor.test.js tests/universal-flow-queue-executor.test.js
+          node tests/universal-flow-queue-epoch.postgres.js
+          npm run audit:encoding

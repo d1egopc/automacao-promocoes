@@ -36,9 +36,16 @@ function normalizarDestinosAplicaveis(destinations, {
   });
 }
 
-function criarCallbackFilaUniversal({ pool, enqueueFn = enqueue,
+function criarCallbackFilaUniversal({ pool, getPool = null, enqueueFn = enqueue,
   resolveTelegramTargets }) {
   if (!pool || typeof pool.connect !== "function") throw new Error("queue_pool_required");
+  const poolAtual = () => {
+    const current = typeof getPool === "function" ? getPool() : pool;
+    if (!current || typeof current.connect !== "function") {
+      throw new Error("queue_pool_required");
+    }
+    return current;
+  };
   return async (clienteId, itemFila, contexto = {}) => {
     const offer = contexto.oferta;
     if (!offer || String(itemFila?.clienteId || "") !== String(clienteId || "") ||
@@ -47,7 +54,7 @@ function criarCallbackFilaUniversal({ pool, enqueueFn = enqueue,
       return { ok: false, motivo: "queue_distributor_identity_unproven" };
     }
     try {
-      const result = await enqueueFn({ pool, workspaceId: clienteId,
+      const result = await enqueueFn({ pool: poolAtual(), workspaceId: clienteId,
         jobId: Number(offer.job_id), ofertaId: Number(offer.id),
         itemPayload: itemFila,
         destinations: normalizarDestinosAplicaveis(contexto.destinosCompativeis,

@@ -14,12 +14,19 @@ const { readDestinationClock } = require("./universal-queue.repository");
 const REQUIRED = ["resolveDestination", "checkWindow", "checkDailyLimit", "checkSession",
   "checkCredits", "checkMedia", "checkLinks", "checkDedup", "renderMessage"];
 
-function criarPreflightFilaUniversal({ pool, configGlobal = {},
+function criarPreflightFilaUniversal({ pool, getPool = null, configGlobal = {},
   readClock = readDestinationClock, now = Date.now, ...checks } = {}) {
   if (!pool || REQUIRED.some(name => typeof checks[name] !== "function") ||
       typeof readClock !== "function" || typeof now !== "function") {
     throw new Error("universal_send_preflight_dependencies_required");
   }
+  const poolAtual = () => {
+    const current = typeof getPool === "function" ? getPool() : pool;
+    if (!current || typeof current.connect !== "function") {
+      throw new Error("queue_pool_required");
+    }
+    return current;
+  };
   return async (claim, { skipDedup = false } = {}) => {
     const workspaceId = String(claim?.workspace_id || "").trim();
     const destinationId = String(claim?.destination_id || "").trim();
@@ -61,7 +68,7 @@ function criarPreflightFilaUniversal({ pool, configGlobal = {},
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
       return { ready: false, reason: "destination_cadence_invalid" };
     }
-    const lastConfirmed = await readClock({ pool, workspaceId, destinationId });
+    const lastConfirmed = await readClock({ pool: poolAtual(), workspaceId, destinationId });
     const lastMs = lastConfirmed ? new Date(lastConfirmed).getTime() : 0;
     if (lastConfirmed && !Number.isFinite(lastMs)) {
       return { ready: false, reason: "destination_clock_invalid" };
