@@ -4252,6 +4252,8 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       projecaoAposCheckpoint = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(cliente, {
         checkpointRevision: targetDb?.checkpointRevision || "",
         targetGeneration: vivaGenerationAlvoCheckpoint,
+        ...(checkpointTemp.ok === true && checkpointTemp.checkpointProjection
+          ? { checkpointSnapshot: checkpointTemp.checkpointProjection } : {}),
         agora: Date.now()
       }, {
         dataDir: process.env.DATA_DIR || "/data",

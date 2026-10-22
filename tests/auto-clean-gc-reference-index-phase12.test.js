@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -15,6 +16,7 @@ const {
 } = require("../modules/engine/auto-clean/gc-reference-index-builder");
 const { runOnce, closeSession, CANDIDATE_AGE_MS } = require("../modules/engine/auto-clean/gc-relay.service");
 const { projetarReferenciasFilaViva, FILA_GC_REFERENCES_ARQUIVO } = require("../modules/fila/fila-gc-references");
+const { checksumCoberturaCheckpoint } = require("../modules/fila/fila-gc-references");
 
 const NOW = Date.parse("2026-09-22T12:00:00.000Z");
 const H1 = "a".repeat(64);
@@ -48,6 +50,32 @@ function projection(f, items = []) {
     total: items.length,
     itens: items
   });
+}
+
+function attachCheckpointCoverage(f, hashes = []) {
+  const legacy = path.join(f.clientDir, "fila.json");
+  const raw = fs.readFileSync(legacy);
+  const stat = fs.lstatSync(legacy, { bigint: true });
+  const contentHash = crypto.createHash("sha256").update(raw).digest("hex");
+  const identity = `${stat.dev}:${stat.ino}`;
+  const proof = {
+    proofVersion: 1, clienteId: f.workspace, arquivo: "fila.json", generation: 1,
+    fileRevision: "fixture-checkpoint", contentHash, size: Number(stat.size),
+    mtimeMs: Math.trunc(Number(stat.mtimeMs)), identity,
+    dev: String(stat.dev), ino: String(stat.ino)
+  };
+  writeJson(path.join(f.clientDir, "fila.proof.json"), proof);
+  const projectionFile = path.join(f.clientDir, "fila-projecao-leve.json");
+  const value = JSON.parse(fs.readFileSync(projectionFile, "utf8"));
+  value.gcCoverage = {
+    versao: 1, clienteId: f.workspace, checkpointRevision: proof.fileRevision,
+    targetGeneration: proof.generation,
+    proof: { fileRevision: proof.fileRevision, generation: proof.generation,
+      size: proof.size, mtimeMs: proof.mtimeMs, contentHash, identity },
+    hashes: [...hashes].sort()
+  };
+  value.gcCoverage.checksum = checksumCoberturaCheckpoint(value.gcCoverage);
+  writeJson(projectionFile, value);
 }
 
 function oldRender(f, hash) {
@@ -117,8 +145,10 @@ async function testLargeLegacyIsGuardOnly() {
       return base.readFile(file, ...args);
     };
     const result = await build(f, { fsApi: observed });
-    assert.strictEqual(result.complete, true);
-    assert.ok(result.refs.has(H1));
+    assert.strictEqual(result.complete, false,
+      "fila.json sem proof de cobertura nao pode autorizar COMPLETE");
+    assert.strictEqual(result.reasonCode, REASON.COMPACT_SOURCE_STALE);
+    assert.strictEqual(result.refs.size, 0);
   } finally { await cleanup(f); }
 }
 
@@ -127,13 +157,16 @@ async function testBootstrapCursorAndPromotion() {
   try {
     writeJson(path.join(f.clientDir, "fila.json"), []);
     const projectionFile = projection(f, [{ statusOperacional: "pendente", imagemRef: renderUrl(f, H1) }]);
+    attachCheckpointCoverage(f, [H1]);
     const day = new Date(NOW).toISOString().slice(0, 10);
     const file = path.join(f.clientDir, "fila-historico-leve-incremental", `${day}.jsonl`);
     const firstLine = `${JSON.stringify({ imagemRef: renderUrl(f, H1) })}\n`;
     const secondLine = `${JSON.stringify({ imagemRef: renderUrl(f, H2) })}\n`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, firstLine + secondLine);
-    const budget = fs.statSync(projectionFile).size + Buffer.byteLength(firstLine);
+    // Discovery validates the compact projection content before processing it;
+    // account for that guarded read and the source pass in this budget fixture.
+    const budget = fs.statSync(projectionFile).size * 2 + Buffer.byteLength(firstLine);
     const first = await build(f, { maxBytesPerRun: budget });
     assert.strictEqual(first.complete, false);
     assert.strictEqual(first.reasonCode, REASON.BUILD_BUDGET);

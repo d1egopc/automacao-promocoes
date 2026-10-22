@@ -289,6 +289,7 @@ function aguardarFilaAsync() {
         generation: target.targetGeneration,
         targetGeneration: target.targetGeneration,
         fileRevision: target.checkpointRevision,
+        contentHash: "a".repeat(64),
         size: 100,
         mtimeMs: 200,
         publishedAt: "2026-08-28T00:00:01.000Z"
@@ -336,6 +337,7 @@ function aguardarFilaAsync() {
         generation: 1,
         targetGeneration: 1,
         fileRevision: "checkpoint_telemetry",
+        contentHash: "a".repeat(64),
         size: 100,
         mtimeMs: 200
       }
@@ -394,6 +396,7 @@ function aguardarFilaAsync() {
             generation: 1,
             targetGeneration: 1,
             fileRevision: checkpointRevision,
+            contentHash: "a".repeat(64),
             size: 123,
             mtimeMs: 456,
             publishedAt: "2026-08-28T00:00:02.000Z"
@@ -418,6 +421,8 @@ function aguardarFilaAsync() {
     const novo = await repo.capturarTargetCheckpoint("cliente_checkpoint_antigo", {
       checkpointRevision: "checkpoint_novo"
     }, { pool });
+    assert.strictEqual(novo.ok, false);
+    assert.strictEqual(novo.motivo, "checkpoint_pending_revision_protegida");
     let publicouAntigo = false;
     const confirmacaoAntiga = await repo.confirmarCheckpointDuravel("cliente_checkpoint_antigo", {
       targetGeneration: antigo.targetGeneration,
@@ -427,18 +432,19 @@ function aguardarFilaAsync() {
         return { ok: true };
       }
     }, { pool });
-    const confirmacaoNova = await repo.confirmarCheckpointDuravel("cliente_checkpoint_antigo", {
-      targetGeneration: novo.targetGeneration,
-      checkpointRevision: novo.checkpointRevision,
+    const confirmacaoRetomada = await repo.confirmarCheckpointDuravel("cliente_checkpoint_antigo", {
+      targetGeneration: antigo.targetGeneration,
+      checkpointRevision: antigo.checkpointRevision,
       publicarCheckpoint: async ({ checkpointRevision }) => ({
         ok: true,
         legacyFileProof: {
           proofVersion: 1,
           clienteId: "cliente_checkpoint_antigo",
           arquivo: "fila.json",
-          generation: novo.targetGeneration,
-          targetGeneration: novo.targetGeneration,
+          generation: antigo.targetGeneration,
+          targetGeneration: antigo.targetGeneration,
           fileRevision: checkpointRevision,
+          contentHash: "a".repeat(64),
           size: 10,
           mtimeMs: 20,
           publishedAt: "2026-08-28T00:00:03.000Z"
@@ -447,10 +453,10 @@ function aguardarFilaAsync() {
     }, { pool });
 
     assert.strictEqual(confirmacaoAntiga.ok, false, "checkpoint antigo perde propriedade antes do rename");
-    assert.strictEqual(confirmacaoAntiga.motivo, "checkpoint_revision_nao_pertence");
-    assert.strictEqual(publicouAntigo, false, "checkpoint antigo nao pode publicar fisicamente depois de substituido");
-    assert.strictEqual(confirmacaoNova.ok, true);
-    assert.strictEqual(confirmacaoNova.state.durableCheckpointGeneration, antigo.targetGeneration);
+    assert.strictEqual(confirmacaoAntiga.motivo, "checkpoint_proof_conteudo_invalido");
+    assert.strictEqual(publicouAntigo, true, "a publicacao sem proof valido nao pode confirmar durable");
+    assert.strictEqual(confirmacaoRetomada.ok, true);
+    assert.strictEqual(confirmacaoRetomada.state.durableCheckpointGeneration, antigo.targetGeneration);
   }
 
   {

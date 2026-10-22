@@ -7,6 +7,36 @@ const { hashRenderEmValor } = require("../engine/auto-clean/gc-reference-index")
 const FILA_GC_REFERENCES_ARQUIVO = "fila-gc-references.json";
 const FILA_GC_REFERENCES_VERSION = 1;
 
+function checksumCoberturaCheckpoint(cobertura = {}) {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    versao: cobertura.versao,
+    clienteId: cobertura.clienteId,
+    checkpointRevision: cobertura.checkpointRevision,
+    targetGeneration: cobertura.targetGeneration,
+    proof: cobertura.proof,
+    hashes: cobertura.hashes
+  })).digest("hex");
+}
+
+function coberturaCheckpointValida(cobertura, workspaceId, proof, guard) {
+  if (cobertura?.versao !== 1 || cobertura.clienteId !== workspaceId ||
+      !Array.isArray(cobertura.hashes) || !/^[a-f0-9]{64}$/.test(String(cobertura.checksum || "")) ||
+      !cobertura.hashes.every(hash => /^[a-f0-9]{32,64}$/.test(hash)) ||
+      cobertura.hashes.some((hash, index) => index > 0 && cobertura.hashes[index - 1] >= hash) ||
+      cobertura.checksum !== checksumCoberturaCheckpoint(cobertura)) return false;
+  const expected = cobertura.proof;
+  return Boolean(proof && guard && expected &&
+    cobertura.checkpointRevision === proof.fileRevision &&
+    cobertura.targetGeneration === proof.generation &&
+    proof.clienteId === workspaceId && proof.arquivo === "fila.json" &&
+    expected.fileRevision === proof.fileRevision && expected.generation === proof.generation &&
+    expected.size === proof.size && expected.mtimeMs === proof.mtimeMs &&
+    /^[a-f0-9]{64}$/.test(String(expected.contentHash || "")) &&
+    expected.contentHash === proof.contentHash &&
+    expected.size === guard.size && Math.trunc(expected.mtimeMs) === guard.mtimeMs &&
+    Boolean(expected.identity && guard.identity) && expected.identity === guard.identity);
+}
+
 function identidadeArquivo(stat = {}) {
   const dev = stat.dev;
   const ino = stat.ino;
@@ -207,6 +237,8 @@ function bootstrapReferenciasFilaViva(clienteId, deps = {}) {
 module.exports = {
   FILA_GC_REFERENCES_ARQUIVO,
   FILA_GC_REFERENCES_VERSION,
+  checksumCoberturaCheckpoint,
+  coberturaCheckpointValida,
   coberturaArquivo,
   hashesFilaViva,
   projetarReferenciasFilaViva,

@@ -10,7 +10,8 @@ const {
 } = require("./gc-reference-index");
 const {
   FILA_GC_REFERENCES_ARQUIVO,
-  projecaoCobreFilaViva
+  projecaoCobreFilaViva,
+  coberturaCheckpointValida
 } = require("../../fila/fila-gc-references");
 
 // v3 also indexes /social/midia/publica references in the same authoritative index.
@@ -233,6 +234,35 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi, validatedQu
     if (newestGuard > projection.mtimeMs) {
       discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: projection.file };
     }
+    const legacyGuard = legacyGuards.find(item => item.key === "guard:fila");
+    projection.requiresCheckpointCoverage = Boolean(legacyGuard);
+    if (legacyGuard && !discoveryError) {
+      try {
+        if (projection.size > MAX_QUEUE_PROJECTION_BYTES) throw new Error("projection_too_large");
+        const projectionRaw = await fsApi.readFile(projection.absolutePath, "utf8");
+        bytesRead += Buffer.byteLength(projectionRaw, "utf8");
+        const parsed = JSON.parse(projectionRaw);
+        const proofFile = path.join(root, "fila.proof.json");
+        const proofBefore = await statOptional(proofFile, fsApi);
+        if (!proofBefore.stat || Number(proofBefore.stat.size) > 16384) throw new Error("proof_invalid");
+        const proof = JSON.parse(await fsApi.readFile(proofFile, "utf8"));
+        const proofAfter = await statOptional(proofFile, fsApi);
+        const projectionAfter = await statOptional(projection.absolutePath, fsApi);
+        const legacyAfter = await statOptional(path.join(root, "fila.json"), fsApi);
+        if (!proofAfter.stat || !projectionAfter.stat || !legacyAfter.stat ||
+            !sameSourceMeta(projection, safeMeta(projectionAfter.stat, projection.key, projection.kind, projection.source, projection.absolutePath)) ||
+            !sameSourceMeta(legacyGuard, safeMeta(legacyAfter.stat, legacyGuard.key, legacyGuard.kind, legacyGuard.source, path.join(root, "fila.json"))) ||
+            !sameSourceMeta(safeMeta(proofBefore.stat, "proof", "guard", "fila", proofFile),
+              safeMeta(proofAfter.stat, "proof", "guard", "fila", proofFile)) ||
+            parsed?.total !== parsed?.itens?.length ||
+            !coberturaCheckpointValida(parsed?.gcCoverage, workspaceId, proof, legacyGuard)) {
+          throw new Error("coverage_invalid");
+        }
+        projection.prevalidatedCoverage = parsed.gcCoverage;
+      } catch {
+        discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: projection.file };
+      }
+    }
   }
   const filaVivaGuard = guards.find(item => item.key === "guard:fila-viva");
   const filaGcProjection = sources.find(item => item.key === "compact:fila-gc-references");
@@ -409,6 +439,15 @@ async function processJsonSource({ source, workspaceId, nowMs, remainingBytes, m
       for (const hash of parsed.hashes) refs[hash] = [source.source];
     } else {
       addValueRefs(liveDocument(parsed, source, source.file, nowMs, workspaceId), workspaceId, source.source, refs);
+      if (source.kind === "projection") {
+        if (source.requiresCheckpointCoverage && (!source.prevalidatedCoverage ||
+            JSON.stringify(parsed.gcCoverage) !== JSON.stringify(source.prevalidatedCoverage))) {
+          return { complete: false, bytes: source.size, fatal: true, reasonCode: REASON.COMPACT_SOURCE_STALE };
+        }
+        if (source.prevalidatedCoverage) {
+          for (const hash of parsed.gcCoverage.hashes) refs[hash] = [source.source];
+        }
+      }
     }
   }
   catch (error) {

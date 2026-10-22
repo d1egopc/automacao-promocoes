@@ -28,6 +28,8 @@ const { construirTerminalIndex, construirTerminalIndexDelta } = require("./termi
 const mutationIntent = require("./viva-mutation-intent");
 const removalFence = require("./viva-removal-fence");
 const { classificarItemFilaV2 } = require("./fila-v2-shadow");
+const { projetarFilaLeve } = require("./fila-v2-shadow");
+const { hashesFilaViva } = require("./fila-gc-references");
 
 let filaOperacionalV2 = null;
 
@@ -293,6 +295,17 @@ function prepare(job) {
       stringifyMs: escrita.stringifyMs, writeMs: escrita.physicalWriteMs });
     if (memoryStages) memoryStages.afterWriter = memoriaAtual();
     const tempIdentity = statIdentity(tempPath);
+    const checkpointProjection = {
+      projecao: projetarFilaLeve(source.filaCliente, {
+        clienteId: paths.cliente, agora: Number(job.nowMs) || agoraMs()
+      }),
+      hashes: hashesFilaViva(source.filaCliente, paths.cliente),
+      contentHash: mutationIntent.hashArquivo(tempPath)
+    };
+    if (!/^[a-f0-9]{64}$/.test(String(checkpointProjection.contentHash || "")) ||
+        !sameIdentity(tempIdentity, statIdentity(tempPath))) {
+      throw new Error("checkpoint_projection_snapshot_stale");
+    }
     progress("prepare_completed", { legacyBytes: source.sourceBytes.legacy,
       vivaBytes: source.sourceBytes.viva, outputBytes: escrita.bytes });
     return {
@@ -303,6 +316,7 @@ function prepare(job) {
       tempPath,
       tempIdentity,
       sourceRevisions: source.sourceRevisions,
+      checkpointProjection,
       itens: source.filaCliente.length,
       bytes: escrita.bytes,
       merge: {
@@ -364,6 +378,11 @@ function publish(job) {
   fs.renameSync(tempPath, paths.arquivo);
   const renameMs = Number(process.hrtime.bigint() - renameStarted) / 1e6;
   const finalStat = statIdentity(paths.arquivo);
+  const contentHash = mutationIntent.hashArquivo(paths.arquivo);
+  if (!/^[a-f0-9]{64}$/.test(String(contentHash || "")) ||
+      !sameIdentity(finalStat, statIdentity(paths.arquivo))) {
+    return { ok: false, operation: OP_PUBLISH, motivo: "checkpoint_conteudo_alterado_antes_proof" };
+  }
   if (removalFence.listar(dataDir, paths.cliente).some(fence =>
     fence.generation <= Number(job.targetGeneration || 0))) {
     const publicado = readArray(paths.arquivo);
@@ -374,7 +393,8 @@ function publish(job) {
   }
   const proof = operacional.publicarProofFilaLegada(paths.cliente, {
     targetGeneration: job.targetGeneration,
-    fileRevision: revision
+    fileRevision: revision,
+    contentHash
   }, { agora: agoraMs(), logger: console });
   if (proof.ok !== true) {
     return {

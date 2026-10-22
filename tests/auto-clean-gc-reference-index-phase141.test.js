@@ -167,7 +167,7 @@ async function testStaleCrashAndWriterCatchUp() {
   } finally { await cleanup(f); }
 }
 
-async function testLegacyLightProjectionStaleRecoversOnQueueLoad() {
+async function testLegacyLightProjectionStaleRemainsBlockedWithoutCheckpoint() {
   const f = fixture("user_gc_light_stale141");
   try {
     const item = { id: "offer-light", clienteId: f.workspace, status: "pendente",
@@ -184,9 +184,10 @@ async function testLegacyLightProjectionStaleRecoversOnQueueLoad() {
     reconciliarProjecaoHotPublicaCliente(f.workspace,
       { fila: [item], motivo: "carregarFila" }, f.deps);
     assert.strictEqual((await bootstrapReferenciasFilaViva(f.workspace, f.deps)).ok, true);
-    const ready = await build(f);
-    assert.strictEqual(ready.complete, true, JSON.stringify({ reasonCode: ready.reasonCode, file: ready.file }));
-    assert.ok(ready.refs.has(H1));
+    const stillBlocked = await build(f);
+    assert.strictEqual(stillBlocked.complete, false);
+    assert.strictEqual(stillBlocked.reasonCode, REASON.COMPACT_SOURCE_STALE,
+      "fila-viva isolada nao pode substituir o checkpoint mesclado");
   } finally { await cleanup(f); }
 }
 
@@ -266,7 +267,7 @@ async function testManyItemsRemainCompleteWithoutBudgetIncrease() {
 async function main() {
   await testExistingQueueBootstrapsNaturally();
   await testStaleCrashAndWriterCatchUp();
-  await testLegacyLightProjectionStaleRecoversOnQueueLoad();
+  await testLegacyLightProjectionStaleRemainsBlockedWithoutCheckpoint();
   await testLegacyBuildingMigratesWithoutRestart();
   await testManyItemsRemainCompleteWithoutBudgetIncrease();
   console.log("AUTO_CLEAN_GC_REFERENCE_INDEX_PHASE141_TESTS_PASS");

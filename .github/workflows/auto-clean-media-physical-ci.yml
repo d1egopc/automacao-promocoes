@@ -32,8 +32,9 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      BASE_SHA: b9ad272e4fe4867327927909522f946110941a3b
+      BASE_SHA: 08663a561a3890a2986e5b94adc3bbc897dfda7f
       AUTO_CLEAN_TEST_DATABASE_URL: postgresql://auto_clean_media_ci:auto_clean_media_ci_disposable@127.0.0.1:5432/auto_clean_media_ci
+      TEST_DATABASE_URL: postgresql://auto_clean_media_ci:auto_clean_media_ci_disposable@127.0.0.1:5432/auto_clean_media_ci
       DATABASE_URL: ""
       OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL: "false"
       OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE: "false"
@@ -65,19 +66,19 @@ jobs:
           changed="$(git diff --name-only "$BASE_SHA"..HEAD | sort)"
           expected="$(printf '%s\n' \
             .github/workflows/auto-clean-media-physical-ci.yml \
-            modules/engine/auto-clean/gc-media-physical.service.js \
-            modules/engine/auto-clean/auto-clean.service.js \
             modules/engine/auto-clean/gc-reference-index-builder.js \
-            modules/engine/auto-clean/gc-reference-index.js \
-            modules/engine/auto-clean/gc-relay.service.js \
-            modules/engine/auto-clean/gc-social-reference-index.js \
-            tests/auto-clean-gc-relay-phase1.test.js \
-            tests/auto-clean-media-physical.postgres.js \
-             tests/auto-clean-media-physical.test.js \
-             tests/auto-clean-media-physical-wiring.test.js \
+            modules/fila/fila-gc-references.js \
+            modules/fila/fila-manifest-state.repository.js \
+            modules/fila/fila-operacional-v2.js \
+            modules/fila/persistence-worker.js \
              index.js \
-             modules/fila/fila-operacional-v2.js \
-             tests/checkpoint-projecao-coerencia.test.js | sort)"
+            tests/checkpoint-85681-postgres.test.cjs \
+            tests/checkpoint-projecao-coerencia.test.js \
+            tests/auto-clean-gc-relay-phase1.test.js \
+            tests/auto-clean-gc-reference-index-phase12.test.js \
+            tests/auto-clean-gc-reference-index-phase13.test.js \
+            tests/auto-clean-gc-reference-index-phase141.test.js \
+            tests/fila-manifest-state-repository.test.js | sort)"
           test "$changed" = "$expected"
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE" = false
@@ -93,6 +94,12 @@ jobs:
           node --check modules/engine/auto-clean/gc-reference-index-builder.js
           node --check modules/engine/auto-clean/gc-reference-index.js
           node --check modules/engine/auto-clean/gc-relay.service.js
+          node --check modules/fila/fila-gc-references.js
+          node --check modules/fila/fila-manifest-state.repository.js
+          node --check modules/fila/fila-operacional-v2.js
+          node --check modules/fila/persistence-worker.js
+          node --check tests/checkpoint-85681-postgres.test.cjs
+          node --check tests/fila-manifest-state-repository.test.js
           node --check tests/auto-clean-media-physical.test.js
           node --check tests/auto-clean-media-physical-wiring.test.js
           npm run audit:encoding
@@ -174,6 +181,24 @@ jobs:
           output="$RUNNER_TEMP/auto-clean-media-postgres.log"
           node tests/auto-clean-media-physical.postgres.js 2>&1 | tee "$output"
           grep -q 'AUTO_CLEAN_MEDIA_PHYSICAL_POSTGRES17_PASS' "$output"
+
+      - name: Checkpoint 85681 adversarial PostgreSQL 17 gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --test tests/checkpoint-85681-postgres.test.cjs
+
+      - name: RIO, queue, history, ACK and Mensageiro V3 regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/checkpoint-projecao-coerencia.test.js
+          node tests/fila-manifest-state-repository.test.js
+          node tests/fila-checkpoint-recovery.test.js
+          node tests/fila-checkpoints-entrega.repository.test.js
+          node tests/historico-definitivo-v1.test.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/mensageiro-v3-universal.test.cjs
 
       - name: Build candidate and fence-aware recovery images
         shell: bash

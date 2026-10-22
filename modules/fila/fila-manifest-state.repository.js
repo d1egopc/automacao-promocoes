@@ -247,6 +247,7 @@ function normalizarProof(valor = null) {
     generation,
     targetGeneration: generation,
     fileRevision,
+    contentHash: /^[a-f0-9]{64}$/.test(String(valor.contentHash || "")) ? valor.contentHash : "",
     size,
     mtimeMs,
     ctimeMs: Number.isFinite(Number(valor.ctimeMs)) ? Number(valor.ctimeMs) : null,
@@ -265,6 +266,13 @@ function proofLegadoCobreGeneration(valor = null, clienteId = "admin", generatio
   if (proof.arquivo !== "fila.json") return null;
   if (proof.generation !== alvo) return null;
   return proof;
+}
+
+function mesmoProofCheckpoint(a, b) {
+  if (!a || !b || !/^[a-f0-9]{64}$/.test(a.contentHash || "")) return false;
+  return ["proofVersion", "clienteId", "arquivo", "generation", "fileRevision",
+    "contentHash", "size", "mtimeMs", "ctimeMs", "ino", "dev"]
+    .every(key => a[key] === b[key]);
 }
 
 function estadoZero(clienteId = "admin") {
@@ -824,6 +832,25 @@ async function capturarTargetCheckpoint(clienteId = "admin", dados = {}, deps = 
         state
       };
     }
+    if (state.pendingCheckpointRevision) {
+      const mesmaRevisao = textoSeguro(dados.checkpointRevision) === state.pendingCheckpointRevision;
+      const mesmoTarget = expectedTargetGeneration !== null &&
+        expectedTargetGeneration === state.pendingCheckpointTargetGeneration &&
+        expectedTargetGeneration === state.vivaGeneration;
+      let provaFisica = false;
+      if (mesmaRevisao && mesmoTarget && typeof deps.validarRetomadaCheckpoint === "function") {
+        try { provaFisica = await deps.validarRetomadaCheckpoint(state) === true; }
+        catch { provaFisica = false; }
+      }
+      if (!mesmaRevisao || !mesmoTarget || !provaFisica) {
+        return { ok: false, motivo: "checkpoint_pending_revision_protegida",
+          clienteId: cliente, state };
+      }
+      return { ok: true, retomado: true, motivo: "checkpoint_pending_retomado",
+        clienteId: cliente, targetGeneration: state.vivaGeneration,
+        checkpointRevision: state.pendingCheckpointRevision,
+        pendingCheckpointRevision: state.pendingCheckpointRevision, state };
+    }
     const checkpointRevision = textoSeguro(dados.checkpointRevision) || gerarRevisionArquivo();
     const startedAt = new Date().toISOString();
     const pendente = await atualizarState(client, {
@@ -872,6 +899,22 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
     if (checkpointRevision) {
       if (atual.pendingCheckpointRevision !== checkpointRevision ||
           atual.pendingCheckpointTargetGeneration !== target) {
+        const proofAtual = normalizarProof(atual.legacyFileProof);
+        const proofTentativa = normalizarProof(dados.legacyFileProof);
+        const mesmoProof = mesmoProofCheckpoint(proofAtual, proofTentativa) &&
+          proofAtual.fileRevision === checkpointRevision && proofAtual.generation === target;
+        if (!atual.pendingCheckpointRevision && mesmoProof &&
+            atual.durableCheckpointGeneration === target && atual.vivaGeneration === target &&
+            typeof deps.validarCheckpointConfirmado === "function") {
+          let provaFisica = false;
+          try { provaFisica = await deps.validarCheckpointConfirmado(proofAtual) === true; }
+          catch { provaFisica = false; }
+          if (provaFisica) {
+            return { ok: true, jaConfirmado: true, motivo: "checkpoint_ja_confirmado",
+              clienteId: cliente, targetGeneration: target,
+              checkpointRevision, legacyFileProof: proofAtual, state: atual };
+          }
+        }
         logCheckpointB2C(deps, {
           clienteId: cliente,
           subfase: atual.pendingCheckpointRevision !== checkpointRevision
@@ -958,6 +1001,10 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
     }
 
     const legacyFileProofConfirmado = proofLegadoCobreGeneration(legacyFileProof, cliente, target);
+    if (checkpointRevision && !/^[a-f0-9]{64}$/.test(String(legacyFileProofConfirmado?.contentHash || ""))) {
+      return { ok: false, motivo: "checkpoint_proof_conteudo_invalido",
+        clienteId: cliente, checkpointRevision, targetGeneration: target, state: atual };
+    }
     const targetDuravel = legacyFileProofConfirmado
       ? target
       : atual.durableCheckpointGeneration;

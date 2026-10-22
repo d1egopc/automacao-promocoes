@@ -29,7 +29,8 @@ const {
 const manifestStateRepository = require("./fila-manifest-state.repository");
 const filaThumbnailService = require("./fila-thumbnail.service");
 const vivaProofTelemetry = require("./viva-proof-telemetry");
-const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva } = require("./fila-gc-references");
+const { publicarReferenciasFilaViva, bootstrapReferenciasFilaViva,
+  hashesFilaViva, checksumCoberturaCheckpoint } = require("./fila-gc-references");
 const terminalIndexShadow = require("./terminal-index-shadow");
 const terminalIndexAuthority = require("./terminal-index-authority");
 const mutationIntent = require("./viva-mutation-intent");
@@ -321,6 +322,8 @@ function proofArquivo(clienteId = "admin", arquivo = "", dados = {}, stat = {}, 
     generation,
     targetGeneration: generation,
     fileRevision: texto(dados.fileRevision),
+    ...( /^[a-f0-9]{64}$/.test(String(dados.contentHash || ""))
+      ? { contentHash: dados.contentHash } : {} ),
     size: Number(stat.size ?? stat.bytes ?? 0),
     mtimeMs: Number(stat.mtimeMs || 0),
     ctimeMs: Number.isFinite(Number(stat.ctimeMs)) ? Number(stat.ctimeMs) : null,
@@ -492,13 +495,13 @@ function assinaturaArquivoProjecao(file = "", deps = {}) {
   const fsImpl = deps.fs || fs;
   if (!file || typeof fsImpl.statSync !== "function") return null;
   try {
-    const stat = fsImpl.statSync(file);
+    const stat = fsImpl.statSync(file, { bigint: true });
     if (!stat.isFile()) return null;
     return {
       size: Number(stat.size || 0),
       mtimeMs: Number(stat.mtimeMs || 0),
-      dev: Number(stat.dev || 0),
-      ino: Number(stat.ino || 0)
+      dev: String(stat.dev || ""),
+      ino: String(stat.ino || "")
     };
   } catch {
     return null;
@@ -519,14 +522,106 @@ function formaComparavelProjecao(projecao = {}) {
 async function reconstruirProjecaoLeveAposCheckpoint(clienteId = "admin", params = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const caminhoLegado = caminhoJsonCliente(cliente, FILA_LEGADA_ARQUIVO, deps);
+  const revision = texto(params.checkpointRevision);
+  const target = Number(params.targetGeneration);
+  const lerCheckpointState = deps.lerCheckpointState || manifestStateRepository.lerStateObservacional;
+  const stateInicial = await lerCheckpointState(cliente, deps);
+  const state = stateInicial.state;
+  const proof = state?.legacyFileProof;
+  if (stateInicial.ok !== true || !revision || !Number.isSafeInteger(target) ||
+      state?.durableCheckpointGeneration !== target || state?.vivaGeneration !== target ||
+      state?.pendingCheckpointRevision || proof?.fileRevision !== revision || proof?.generation !== target ||
+      !/^[a-f0-9]{64}$/.test(String(proof?.contentHash || ""))) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return { ok: false, clienteId: cliente, motivo: "checkpoint_projecao_autoridade_invalida" };
+  }
+  const proofValido = validarProofPublicado(cliente, {
+    prefixo: "legacy", arquivoDados: FILA_LEGADA_ARQUIVO,
+    arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+    generation: target, proofDb: proof
+  }, deps);
+  if (proofValido.ok !== true) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return { ok: false, clienteId: cliente, motivo: proofValido.motivo || "checkpoint_proof_invalido" };
+  }
+  const assinaturaLegadoAntes = assinaturaArquivoProjecao(caminhoLegado, deps);
   const assinaturaAntes = assinaturaArquivoProjecao(caminhoViva, deps);
-  if (!assinaturaAntes) {
-    return { ok: false, clienteId: cliente, motivo: "fila_viva_inexistente_ou_ilegivel" };
+  if (!assinaturaAntes || !assinaturaLegadoAntes) {
+    return { ok: false, clienteId: cliente, motivo: "checkpoint_fonte_inexistente_ou_ilegivel" };
   }
 
   const agora = params.agora || deps.agora || Date.now();
+  let filaPublicada;
+  let projecaoPreparada;
+  let hashes;
+  if (params.checkpointSnapshot) {
+    const snapshot = params.checkpointSnapshot;
+    if (snapshot.contentHash !== proof.contentHash ||
+        snapshot.projecao?.clienteId !== cliente ||
+        snapshot.projecao?.versao !== 1 ||
+        !Array.isArray(snapshot.projecao?.itens) ||
+        snapshot.projecao.total !== snapshot.projecao.itens.length ||
+        !Array.isArray(snapshot.hashes) ||
+        snapshot.hashes.some((hash, index) => !/^[a-f0-9]{32,64}$/.test(hash) ||
+          (index > 0 && snapshot.hashes[index - 1] >= hash))) {
+      projectionReadyProjecaoLeve.set(cliente, false);
+      return { ok: false, clienteId: cliente, motivo: "checkpoint_snapshot_worker_invalido" };
+    }
+    projecaoPreparada = snapshot.projecao;
+    hashes = snapshot.hashes;
+  } else {
+    // Recovery path only: the regular checkpoint supplies the compact worker snapshot.
+    try {
+      const fsImpl = deps.fs || fs;
+      const raw = await fsImpl.promises.readFile(caminhoLegado, "utf8");
+      if (crypto.createHash("sha256").update(raw).digest("hex") !== proof.contentHash) {
+        throw new Error("checkpoint_snapshot_hash_mismatch");
+      }
+      filaPublicada = JSON.parse(raw);
+      if (!Array.isArray(filaPublicada)) throw new Error("checkpoint_snapshot_invalido");
+    } catch {
+      projectionReadyProjecaoLeve.set(cliente, false);
+      return { ok: false, clienteId: cliente, motivo: "checkpoint_snapshot_ilegivel" };
+    }
+  }
+  if (!mesmaAssinaturaArquivo(assinaturaLegadoAntes, assinaturaArquivoProjecao(caminhoLegado, deps)) ||
+      !mesmaAssinaturaArquivo(assinaturaAntes, assinaturaArquivoProjecao(caminhoViva, deps))) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return { ok: false, clienteId: cliente, motivo: "checkpoint_fonte_alterada" };
+  }
+  try {
+    if (!projecaoPreparada) {
+      const viva = lerItensFilaVivaParaProjecaoLeve(cliente, { ...deps, agora });
+      if (viva.ok !== true) throw new Error("fila_viva_ilegivel");
+      hashes = hashesFilaViva(filaPublicada, cliente);
+      const cobertura = new Set(hashes);
+      if (hashesFilaViva(viva.itens, cliente).some(hash => !cobertura.has(hash))) {
+        throw new Error("checkpoint_nao_cobre_fila_viva");
+      }
+    } else {
+      const cobertura = new Set(hashes);
+      if (hashesFilaViva(projecaoPreparada.itens, cliente).some(hash => !cobertura.has(hash))) {
+        throw new Error("checkpoint_projecao_referencias_inconsistentes");
+      }
+    }
+  }
+  catch {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return { ok: false, clienteId: cliente, motivo: "checkpoint_referencias_invalidas" };
+  }
+  const coverage = {
+    versao: 1, clienteId: cliente, checkpointRevision: revision, targetGeneration: target,
+    proof: { fileRevision: proof.fileRevision, generation: proof.generation,
+      size: proof.size, mtimeMs: proof.mtimeMs, contentHash: proof.contentHash,
+      identity: assinaturaLegadoAntes.dev && assinaturaLegadoAntes.ino
+        ? `${assinaturaLegadoAntes.dev}:${assinaturaLegadoAntes.ino}` : "" },
+    hashes
+  };
+  coverage.checksum = checksumCoberturaCheckpoint(coverage);
   const bootstrap = bootstrapProjecaoLeveCliente(cliente, {
-    usarFilaViva: true,
+    ...(projecaoPreparada ? { projecaoPronta: projecaoPreparada } : { fila: filaPublicada }),
+    gcCoverage: coverage,
     agora
   }, deps);
   if (bootstrap.ok !== true || !bootstrap.projecao) {
@@ -540,7 +635,9 @@ async function reconstruirProjecaoLeveAposCheckpoint(clienteId = "admin", params
   }
 
   const assinaturaDepois = assinaturaArquivoProjecao(caminhoViva, deps);
-  if (!mesmaAssinaturaArquivo(assinaturaAntes, assinaturaDepois)) {
+  const assinaturaLegadoDepois = assinaturaArquivoProjecao(caminhoLegado, deps);
+  if (!mesmaAssinaturaArquivo(assinaturaAntes, assinaturaDepois) ||
+      !mesmaAssinaturaArquivo(assinaturaLegadoAntes, assinaturaLegadoDepois)) {
     projectionReadyProjecaoLeve.set(cliente, false);
     return {
       ok: false,
@@ -548,6 +645,15 @@ async function reconstruirProjecaoLeveAposCheckpoint(clienteId = "admin", params
       motivo: "fila_viva_alterada_durante_projecao",
       bootstrap
     };
+  }
+
+  const stateFinal = await lerCheckpointState(cliente, deps);
+  if (stateFinal.ok !== true || stateFinal.state?.vivaGeneration !== target ||
+      stateFinal.state?.durableCheckpointGeneration !== target ||
+      stateFinal.state?.legacyFileProof?.fileRevision !== revision ||
+      stateFinal.state?.pendingCheckpointRevision) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return { ok: false, clienteId: cliente, motivo: "checkpoint_projecao_generation_alterada" };
   }
 
   const leitura = lerProjecaoLeve(cliente, { ...deps, agora });
@@ -609,7 +715,7 @@ async function reconstruirProjecaoLeveAposCheckpoint(clienteId = "admin", params
     ok: true,
     clienteId: cliente,
     motivo: "projecao_checkpoint_confirmada",
-    fonte: "fila_viva",
+    fonte: "checkpoint_mesclado_confirmado",
     bootstrap,
     leitura,
     filaViva: assinaturaDepois
@@ -858,7 +964,9 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
   let itens = [];
   let leituraMs = 0;
 
-  if (Array.isArray(params.fila)) {
+  if (params.projecaoPronta) {
+    fonte = "checkpoint_worker";
+  } else if (Array.isArray(params.fila)) {
     itens = params.fila.filter(item => clienteSeguro(item?.clienteId || "admin") === cliente);
   } else if (params.usarFilaViva === true) {
     const inicioLeitura = process.hrtime.bigint();
@@ -885,7 +993,10 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
   }
 
   const inicioProjecao = process.hrtime.bigint();
-  const projecao = projetarFilaLeve(itens, { clienteId: cliente, agora });
+  const projecao = params.projecaoPronta
+    ? { ...params.projecaoPronta }
+    : projetarFilaLeve(itens, { clienteId: cliente, agora });
+  if (params.gcCoverage) projecao.gcCoverage = params.gcCoverage;
   const projecaoMs = Math.round(Number(process.hrtime.bigint() - inicioProjecao) / 1e6);
   const escrita = escreverProjecaoLeve(cliente, projecao, { ...deps, agora });
   if (escrita.ok === true) {
@@ -1045,6 +1156,7 @@ function normalizarProofAutoridade(valor = null) {
     generation,
     targetGeneration: generation,
     fileRevision,
+    contentHash: /^[a-f0-9]{64}$/.test(String(valor.contentHash || "")) ? valor.contentHash : "",
     size,
     mtimeMs,
     ctimeMs: Number.isFinite(Number(valor.ctimeMs)) ? Number(valor.ctimeMs) : null,
@@ -1250,6 +1362,7 @@ function validarProofPublicado(clienteId = "admin", config = {}, deps = {}) {
       proofDb.generation !== generationEsperada ||
       proofArquivo.generation !== generationEsperada ||
       proofDb.fileRevision !== proofArquivo.fileRevision ||
+      proofDb.contentHash !== proofArquivo.contentHash ||
       proofDb.size !== proofArquivo.size ||
       !mtimeCompatível(proofDb.mtimeMs, proofArquivo.mtimeMs)) {
     const motivo = `${config.prefixo}_proof_mismatch`;
@@ -2333,7 +2446,14 @@ async function capturarTargetCheckpointCoordenado(clienteId = "admin", dados = {
   return repo.capturarTargetCheckpoint(cliente, {
     ...dados,
     bootstrapManifest: dados.bootstrapManifest || bootstrap
-  }, deps);
+  }, {
+    ...deps,
+    validarRetomadaCheckpoint: state => validarProofPublicado(cliente, {
+      prefixo: "viva", arquivoDados: FILA_VIVA_ARQUIVO,
+      arquivoProof: FILA_VIVA_PROOF_ARQUIVO,
+      generation: state.vivaGeneration, proofDb: state.vivaFileProof
+    }, deps).ok === true
+  });
 }
 
 async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, deps = {}) {
@@ -2360,7 +2480,22 @@ async function confirmarCheckpointCoordenado(clienteId = "admin", dados = {}, de
       }
     } : {}),
     bootstrapManifest: dados.bootstrapManifest || bootstrap
-  }, deps);
+  }, {
+    ...deps,
+    validarCheckpointConfirmado: proof => {
+      const valido = validarProofPublicado(cliente, {
+        prefixo: "legacy", arquivoDados: FILA_LEGADA_ARQUIVO,
+        arquivoProof: FILA_LEGADA_PROOF_ARQUIVO,
+        generation: proof.generation, proofDb: proof
+      }, deps);
+      if (valido.ok !== true || !/^[a-f0-9]{64}$/.test(proof.contentHash)) return false;
+      const caminho = caminhoJsonCliente(cliente, FILA_LEGADA_ARQUIVO, deps);
+      const before = assinaturaArquivoProjecao(caminho, deps);
+      const hash = mutationIntent.hashArquivo(caminho);
+      return hash === proof.contentHash &&
+        mesmaAssinaturaArquivo(before, assinaturaArquivoProjecao(caminho, deps));
+    }
+  });
 
   if (resultadoDb.ok !== true) {
     compararDbJsonManifestState(cliente, resultadoDb, bootstrap, {

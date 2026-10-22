@@ -3,6 +3,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const filaOperacionalV2 = require("../modules/fila/fila-operacional-v2");
 const {
@@ -57,9 +58,24 @@ function setMtime(file, millis) {
 function baseSources(f) {
   const viva = [{ item: item(f.workspace), bucket: "viva", id: "oferta_1", status: "pendente" }];
   writeJson(path.join(f.clientDir, "fila-viva.json"), viva);
-  writeJson(path.join(f.clientDir, "fila.json"), []);
+  writeJson(path.join(f.clientDir, "fila.json"), [viva[0].item]);
   writeJson(path.join(f.clientDir, "fila-historico.json"), []);
   return viva;
+}
+
+function checkpointComprovado(f, revision = "checkpoint-1") {
+  const legacy = path.join(f.clientDir, "fila.json");
+  const contentHash = crypto.createHash("sha256").update(fs.readFileSync(legacy)).digest("hex");
+  const published = filaOperacionalV2.publicarProofFilaLegada(f.workspace, {
+    targetGeneration: 1, fileRevision: revision, contentHash
+  }, { getClienteJsonPath: f.getClienteJsonPath, writeClienteJson: f.writeClienteJson });
+  assert.strictEqual(published.ok, true);
+  return {
+    lerCheckpointState: async () => ({ ok: true, state: {
+      vivaGeneration: 1, durableCheckpointGeneration: 1,
+      pendingCheckpointRevision: null, legacyFileProof: published.proof
+    } })
+  };
 }
 
 function cleanup(f) {
@@ -74,12 +90,15 @@ async function testCheckpointRepairsStaleProjectionAndPreservesSources() {
     writeJson(path.join(f.clientDir, "fila-projecao-leve.json"), { versao: 1, clienteId: f.workspace, total: 0, itens: [] });
     setMtime(path.join(f.clientDir, "fila-projecao-leve.json"), AGORA - 7_746);
     setMtime(path.join(f.clientDir, "fila.json"), AGORA);
+    const confirmed = checkpointComprovado(f);
     const filaAntes = fs.readFileSync(path.join(f.clientDir, "fila-viva.json"), "utf8");
     const historicoAntes = fs.readFileSync(path.join(f.clientDir, "fila-historico.json"), "utf8");
     const result = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, {
       agora: AGORA,
       checkpointRevision: "checkpoint-1"
+      , targetGeneration: 1
     }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },
@@ -92,7 +111,7 @@ async function testCheckpointRepairsStaleProjectionAndPreservesSources() {
     assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(f.clientDir, "fila-projecao-leve.json"), "utf8")).itens[0].id, "oferta_1");
     assert.strictEqual(fs.readFileSync(path.join(f.clientDir, "fila-viva.json"), "utf8"), filaAntes);
     assert.strictEqual(fs.readFileSync(path.join(f.clientDir, "fila-historico.json"), "utf8"), historicoAntes);
-    assert.deepStrictEqual(f.writes.map(write => write.arquivo), ["fila-projecao-leve.json"]);
+    assert.deepStrictEqual(f.writes.filter(write => write.arquivo === "fila-projecao-leve.json").map(write => write.arquivo), ["fila-projecao-leve.json"]);
     assert.strictEqual(viva.length, 1);
   } finally { cleanup(f); }
 }
@@ -101,13 +120,16 @@ async function testConcurrentCheckpointsCoalesceAndRetainLiveReference() {
   const f = fixture("user_concurrent");
   try {
     baseSources(f);
-    const a = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    const confirmed = checkpointComprovado(f);
+    const a = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },
       validarProjecaoAposCheckpoint: async () => ({ ok: true })
     });
-    const b = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA + 1 }, {
+    const b = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA + 1, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },
@@ -126,14 +148,18 @@ async function testEmptyWorkspaceAndWriteFailureStayFailClosed() {
   const f = fixture("user_empty");
   try {
     writeJson(path.join(f.clientDir, "fila-viva.json"), []);
-    const empty = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    writeJson(path.join(f.clientDir, "fila.json"), []);
+    const confirmed = checkpointComprovado(f);
+    const empty = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },
       validarProjecaoAposCheckpoint: async () => ({ ok: true })
     });
     assert.strictEqual(empty.ok, true, "workspace sem atividade recente pode publicar projeção vazia coerente");
-    const failed = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    const failed = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: () => false,
       logger: { log() {} },
@@ -147,14 +173,18 @@ async function testReadFailureStaysFailClosed() {
   const f = fixture("user_read_failure");
   try {
     fs.writeFileSync(path.join(f.clientDir, "fila-viva.json"), "{invalid", "utf8");
-    const result = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    writeJson(path.join(f.clientDir, "fila.json"), []);
+    const confirmed = checkpointComprovado(f);
+    const result = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },
       validarProjecaoAposCheckpoint: async () => ({ ok: true })
     });
     assert.strictEqual(result.ok, false, "JSON vivo inválido deve bloquear a projeção");
-    assert.strictEqual(f.writes.length, 0, "falha de leitura não pode escrever projeção");
+    assert.strictEqual(f.writes.filter(write => write.arquivo === "fila-projecao-leve.json").length, 0,
+      "falha de leitura não pode escrever projeção");
   } finally { cleanup(f); }
 }
 
@@ -162,6 +192,7 @@ async function testSourceChangeDuringWriteBlocksProjection() {
   const f = fixture("user_race");
   try {
     baseSources(f);
+    const confirmed = checkpointComprovado(f);
     const original = f.writeClienteJson;
     const raceWriter = (cliente, arquivo, value) => {
       const result = original(cliente, arquivo, value);
@@ -170,7 +201,8 @@ async function testSourceChangeDuringWriteBlocksProjection() {
       }
       return result;
     };
-    const result = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    const result = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: raceWriter,
       logger: { log() {} },
@@ -187,7 +219,9 @@ async function testIndexReachesCompleteAfterProjectionRecovery() {
     const viva = baseSources(f);
     setMtime(path.join(f.clientDir, "fila.json"), AGORA - 1_000);
     setMtime(path.join(f.clientDir, "fila-historico.json"), AGORA - 1_000);
-    const rebuilt = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA }, {
+    const confirmed = checkpointComprovado(f);
+    const rebuilt = await filaOperacionalV2.reconstruirProjecaoLeveAposCheckpoint(f.workspace, { agora: AGORA, checkpointRevision: "checkpoint-1", targetGeneration: 1 }, {
+      ...confirmed,
       getClienteJsonPath: f.getClienteJsonPath,
       writeClienteJson: f.writeClienteJson,
       logger: { log() {} },

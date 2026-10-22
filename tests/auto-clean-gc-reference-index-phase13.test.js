@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("assert");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -12,6 +13,7 @@ const {
   BUILDING_FILE,
   REASON
 } = require("../modules/engine/auto-clean/gc-reference-index-builder");
+const { checksumCoberturaCheckpoint } = require("../modules/fila/fila-gc-references");
 
 const NOW = Date.parse("2026-09-22T12:00:00.000Z");
 const H1 = "1".repeat(64);
@@ -46,7 +48,36 @@ function writeProjection(f, hash = H1, revision = 0) {
     itens: hash ? [{ statusOperacional: "pendente", imagemRef: renderUrl(f, hash) }] : []
   });
   fs.utimesSync(file, new Date(Date.now() + revision + 1000), new Date(Date.now() + revision + 1000));
+  const legacy = path.join(f.clientDir, "fila.json");
+  if (fs.existsSync(legacy)) attachCheckpointCoverage(f, hash ? [hash] : []);
   return file;
+}
+
+function attachCheckpointCoverage(f, hashes = []) {
+  const legacy = path.join(f.clientDir, "fila.json");
+  const raw = fs.readFileSync(legacy);
+  const stat = fs.lstatSync(legacy, { bigint: true });
+  const contentHash = crypto.createHash("sha256").update(raw).digest("hex");
+  const identity = `${stat.dev}:${stat.ino}`;
+  const proof = {
+    proofVersion: 1, clienteId: f.workspace, arquivo: "fila.json", generation: 1,
+    fileRevision: "fixture-checkpoint", contentHash, size: Number(stat.size),
+    mtimeMs: Math.trunc(Number(stat.mtimeMs)), identity,
+    dev: String(stat.dev), ino: String(stat.ino)
+  };
+  writeJson(path.join(f.clientDir, "fila.proof.json"), proof);
+  const projectionFile = path.join(f.clientDir, "fila-projecao-leve.json");
+  const value = JSON.parse(fs.readFileSync(projectionFile, "utf8"));
+  value.gcCoverage = {
+    versao: 1, clienteId: f.workspace, checkpointRevision: proof.fileRevision,
+    targetGeneration: proof.generation,
+    proof: { fileRevision: proof.fileRevision, generation: proof.generation,
+      size: proof.size, mtimeMs: proof.mtimeMs, contentHash, identity },
+    hashes: [...hashes].sort()
+  };
+  value.gcCoverage.checksum = checksumCoberturaCheckpoint(value.gcCoverage);
+  writeJson(projectionFile, value);
+  fs.utimesSync(projectionFile, new Date(Date.now() + 10000), new Date(Date.now() + 10000));
 }
 
 function historyFile(f) {

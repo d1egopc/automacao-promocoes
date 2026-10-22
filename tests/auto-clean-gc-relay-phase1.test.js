@@ -170,9 +170,15 @@ async function testVitrineExpiredAndHistoryWindow() {
     json(path.join(f.clientDir, "fila-historico.json"), [{
       item: { imagem: url(f, H1), status: "enviado", enviadoEm: new Date(NOW - 8 * 24 * 60 * 60 * 1000).toISOString() }
     }]);
-    json(path.join(f.clientDir, "fila-projecao-leve.json"), {
+    const projectionFile = path.join(f.clientDir, "fila-projecao-leve.json");
+    json(projectionFile, {
       versao: 1, clienteId: f.workspace, geradoEm: new Date(NOW).toISOString(), itens: []
     });
+    // The compact projection is a valid snapshot for this fixture; the historical
+    // source is intentionally older so the stale-source guard is not triggered.
+    fs.utimesSync(path.join(f.clientDir, "fila-historico.json"),
+      new Date(NOW - 1000), new Date(NOW - 1000));
+    fs.utimesSync(projectionFile, new Date(NOW), new Date(NOW));
     json(path.join(f.clientDir, "manual_ofertas_v2.json"), [{
       imagem: url(f, H1), status: "enviada", enviadoEm: new Date(NOW - 8 * 24 * 60 * 60 * 1000).toISOString()
     }]);
