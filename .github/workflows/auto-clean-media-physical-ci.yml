@@ -71,6 +71,7 @@ jobs:
             modules/engine/auto-clean/gc-relay.service.js \
             modules/engine/auto-clean/gc-social-reference-index.js \
             tests/auto-clean-gc-relay-phase1.test.js \
+            tests/auto-clean-media-physical.postgres.js \
             tests/auto-clean-media-physical.test.js | sort)"
           test "$changed" = "$expected"
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
@@ -157,14 +158,13 @@ jobs:
             testStaleCrashAndWriterCatchUp stale_boolean
           git worktree remove --force "$baseline_dir"
 
-      - name: Disposable PostgreSQL 17 guard harness
+      - name: Disposable PostgreSQL 17 physical media reference gate
         shell: bash
         run: |
           set -Eeuo pipefail
-          output="$RUNNER_TEMP/auto-clean-postgres-guards.log"
-          node tests/auto-clean-postgres-guards.postgres.js 2>&1 | tee "$output"
-          ! grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_SKIPPED' "$output"
-          grep -q 'AUTO_CLEAN_POSTGRES_GUARDS_PASS' "$output"
+          output="$RUNNER_TEMP/auto-clean-media-postgres.log"
+          node tests/auto-clean-media-physical.postgres.js 2>&1 | tee "$output"
+          grep -q 'AUTO_CLEAN_MEDIA_PHYSICAL_POSTGRES17_PASS' "$output"
 
       - name: Build candidate and fence-aware recovery images
         shell: bash
