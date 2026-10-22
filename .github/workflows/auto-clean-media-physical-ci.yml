@@ -196,4 +196,5 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$(grep -c '^  validate:' .github/workflows/auto-clean-media-physical-ci.yml)" -eq 1
-          ! grep -Eiq 'self-hosted|/opt/optimus|docker compose|hostinger|vercel|ghcr|packages: write' .github/workflows/auto-clean-media-physical-ci.yml
+          ! grep -Ev 'grep -Eiq' .github/workflows/auto-clean-media-physical-ci.yml \
+            | grep -Eiq 'self-hosted|/opt/optimus|docker compose|hostinger|vercel|ghcr|packages: write'
