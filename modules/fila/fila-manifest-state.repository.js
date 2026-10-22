@@ -895,6 +895,17 @@ async function confirmarCheckpointDuravel(clienteId = "admin", dados = {}, deps 
     await inicializarSchemaQueueManifestState(client);
     const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
     const checkpointRevision = textoSeguro(dados.checkpointRevision);
+    const expectedVivaGeneration = numeroInteiroNaoNegativo(dados.expectedVivaGeneration);
+    if (expectedVivaGeneration !== null && atual.vivaGeneration !== expectedVivaGeneration) {
+      return {
+        ok: false,
+        motivo: "checkpoint_generation_nao_pertence",
+        clienteId: cliente,
+        targetGeneration: target,
+        expectedVivaGeneration,
+        state: atual
+      };
+    }
     if (telemetry) telemetry.fileRevision = checkpointRevision;
     if (checkpointRevision) {
       if (atual.pendingCheckpointRevision !== checkpointRevision ||

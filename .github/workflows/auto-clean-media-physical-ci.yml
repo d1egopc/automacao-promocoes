@@ -79,6 +79,7 @@ jobs:
             tests/auto-clean-gc-reference-index-phase13.test.js \
             tests/auto-clean-gc-reference-index-phase141.test.js \
             tests/fila-manifest-state-repository.test.js | sort)"
+          expected="$(printf '%s\n' "$expected" scripts/checkpoint-resume-admin.cjs tests/checkpoint-resume-admin.test.cjs | sort)"
           test "$changed" = "$expected"
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE" = false
@@ -99,6 +100,8 @@ jobs:
           node --check modules/fila/fila-operacional-v2.js
           node --check modules/fila/persistence-worker.js
           node --check tests/checkpoint-85681-postgres.test.cjs
+          node --check scripts/checkpoint-resume-admin.cjs
+          node --check tests/checkpoint-resume-admin.test.cjs
           node --check tests/fila-manifest-state-repository.test.js
           node --check tests/auto-clean-media-physical.test.js
           node --check tests/auto-clean-media-physical-wiring.test.js
@@ -114,6 +117,7 @@ jobs:
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
           node tests/checkpoint-projecao-coerencia.test.js
+          node --test tests/checkpoint-resume-admin.test.cjs
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/social-media-upload.test.js
           node tests/identidade-visual-ofertas-renderer.test.js

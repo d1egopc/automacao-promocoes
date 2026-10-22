@@ -319,6 +319,35 @@ function aguardarFilaAsync() {
 
   {
     const pool = criarPoolFake();
+    await repo.registrarMutacaoDuravel("cliente_checkpoint_generation_guard", {}, { pool });
+    const target = await repo.capturarTargetCheckpoint("cliente_checkpoint_generation_guard", {
+      checkpointRevision: "checkpoint_generation_guard"
+    }, { pool });
+    await repo.registrarMutacaoDuravel("cliente_checkpoint_generation_guard", {}, { pool });
+    const blocked = await repo.confirmarCheckpointDuravel("cliente_checkpoint_generation_guard", {
+      targetGeneration: target.targetGeneration,
+      expectedVivaGeneration: target.targetGeneration,
+      checkpointRevision: target.checkpointRevision,
+      legacyFileProof: {
+        proofVersion: 1,
+        clienteId: "cliente_checkpoint_generation_guard",
+        arquivo: "fila.json",
+        generation: target.targetGeneration,
+        targetGeneration: target.targetGeneration,
+        fileRevision: target.checkpointRevision,
+        contentHash: "a".repeat(64),
+        size: 10,
+        mtimeMs: 20
+      }
+    }, { pool });
+    assert.strictEqual(blocked.ok, false);
+    assert.strictEqual(blocked.motivo, "checkpoint_generation_nao_pertence");
+    assert.strictEqual(blocked.state.durableCheckpointGeneration, 0);
+    assert.strictEqual(blocked.state.pendingCheckpointRevision, target.checkpointRevision);
+  }
+
+  {
+    const pool = criarPoolFake();
     const env = {
       FILA_V2_EXECUTOR_GENERATION_AUTHORITY: "1",
       FILA_V2_EXECUTOR_GENERATION_CANARY_CLIENTES: "user_b2oogwwl"
