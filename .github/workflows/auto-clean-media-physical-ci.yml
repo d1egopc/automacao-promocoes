@@ -136,6 +136,11 @@ jobs:
           } else if (!/actual:\s*true[\s\S]*?expected:\s*false/.test(text)) process.exit(1);
           NODE
             }
+            if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -ne 0 ]] \
+              && known_signature "$baseline_log"; then
+              echo "${slug}=candidate_pass_baseline_known_filesystem_debt"
+              return 0
+            fi
             if [[ "$candidate_rc" -ne 0 ]] && known_signature "$candidate_log"; then
               if [[ "$baseline_rc" -eq 0 ]] || grep -q "$known_pattern" "$baseline_log"; then
                 echo "${slug}=known_baseline_filesystem_debt"
