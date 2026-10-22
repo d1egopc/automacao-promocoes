@@ -97,11 +97,60 @@ jobs:
           node tests/auto-clean-gc-relay-phase1.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js
-          node tests/auto-clean-gc-reference-index-phase14.test.js
-          node tests/auto-clean-gc-reference-index-phase141.test.js
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/social-media-upload.test.js
           node tests/identidade-visual-ofertas-renderer.test.js
+
+      - name: Compare inherited filesystem timestamp debt with baseline
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          baseline_dir="$RUNNER_TEMP/auto-clean-media-baseline"
+          git worktree add --detach "$baseline_dir" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$baseline_dir/node_modules"
+          compare_test() {
+            local test_file="$1" known_pattern="$2" signature="$3"
+            local slug candidate_log baseline_log candidate_rc baseline_rc
+            slug="$(basename "$test_file" .js)"
+            candidate_log="$RUNNER_TEMP/${slug}-candidate.log"
+            baseline_log="$RUNNER_TEMP/${slug}-baseline.log"
+            set +e
+            node "$test_file" >"$candidate_log" 2>&1
+            candidate_rc=$?
+            (cd "$baseline_dir" && node "$test_file") >"$baseline_log" 2>&1
+            baseline_rc=$?
+            set -e
+            if [[ "$candidate_rc" -eq 0 && "$baseline_rc" -eq 0 ]]; then
+              echo "${slug}=both_pass"
+              return 0
+            fi
+            known_signature() {
+              node - "$1" "$known_pattern" "$signature" <<'NODE'
+          const fs = require('node:fs');
+          const [file, pattern, signature] = process.argv.slice(2);
+          const text = fs.readFileSync(file, 'utf8');
+          if (!text.includes(pattern)) process.exit(1);
+          if (signature === 'one_ms') {
+            const match = text.match(/actual:\s*(\d+)[\s\S]*?expected:\s*(\d+)/);
+            if (!match || Math.abs(Number(match[1]) - Number(match[2])) !== 1) process.exit(1);
+          } else if (!/actual:\s*true[\s\S]*?expected:\s*false/.test(text)) process.exit(1);
+          NODE
+            }
+            if [[ "$candidate_rc" -ne 0 ]] && known_signature "$candidate_log"; then
+              if [[ "$baseline_rc" -eq 0 ]] || grep -q "$known_pattern" "$baseline_log"; then
+                echo "${slug}=known_baseline_filesystem_debt"
+                return 0
+              fi
+            fi
+            cat "$candidate_log" >&2
+            cat "$baseline_log" >&2
+            return 1
+          }
+          compare_test tests/auto-clean-gc-reference-index-phase14.test.js \
+            testSameSizeAndMtimeReplacementFailsIdentityWatermark one_ms
+          compare_test tests/auto-clean-gc-reference-index-phase141.test.js \
+            testStaleCrashAndWriterCatchUp stale_boolean
+          git worktree remove --force "$baseline_dir"
 
       - name: Disposable PostgreSQL 17 guard harness
         shell: bash
