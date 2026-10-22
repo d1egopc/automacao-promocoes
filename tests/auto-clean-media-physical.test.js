@@ -4,7 +4,7 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { runMediaPhysical, RETENTION_MS, OBSERVATION_DELAY_MS, MAX_DELETE_PER_RUN } =
+const { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS, MAX_DELETE_PER_RUN } =
   require("../modules/engine/auto-clean/gc-media-physical.service");
 const { referenciasSocialPostgres } = require("../modules/engine/auto-clean/gc-social-reference-index");
 const { chavesMidiaSocialEmValor } = require("../modules/engine/auto-clean/gc-reference-index");
@@ -169,6 +169,60 @@ async function testBatchLimit() {
   } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 }
 
+async function testTenWorkspaceMicroBatchesAndMetrics() {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-media-gc-ten-"));
+  const files = [];
+  try {
+    for (let index = 0; index < 10; index += 1) {
+      const workspace = `user_${String(index).padStart(2, "0")}`;
+      const identity = path.join(dataDir, "identidade-visual-ofertas", "clientes", workspace, "renderizados");
+      fs.mkdirSync(identity, { recursive: true });
+      fs.mkdirSync(path.join(dataDir, "clientes", workspace), { recursive: true });
+      for (let item = 0; item < 2; item += 1) {
+        files.push(file(identity, `${String.fromCharCode(97 + index)}${item}`.padEnd(64, "a") + ".png"));
+      }
+    }
+    const observed = await runMediaPhysicalBatch({ dataDir, nowMs: NOW, maxTargetsPerRun: 10,
+      microBatchSize: 2, maxDelete: 20, maxDurationMs: 2000, referenceLoader: loader() });
+    assert.strictEqual(observed.targetsProcessed, 10, "dez workspaces devem receber uma rodada justa");
+    assert.strictEqual(observed.candidates, 20);
+    assert.strictEqual(observed.createdGiB, 0);
+    assert.ok(observed.backlog >= 20);
+
+    const revalidationCalls = { count: 0 };
+    const deleted = await runMediaPhysicalBatch({ dataDir, nowMs: NOW + OBSERVATION_DELAY_MS + 1,
+      maxTargetsPerRun: 10, microBatchSize: 2, maxDelete: 20, maxDurationMs: 2000,
+      execute: true, mediaDeleteEnabled: true,
+      referenceLoader: async (...args) => { revalidationCalls.count += 1; return loader()(...args); }
+    });
+    assert.strictEqual(deleted.removed, 20, "micro-lotes devem reduzir o backlog dos dez workspaces");
+    assert.strictEqual(deleted.revalidations, 20, "cada exclusao exige revalidacao propria");
+    assert.strictEqual(revalidationCalls.count, 20);
+    assert.strictEqual(deleted.bytesFreedGiB, 20 * 16 / (1024 ** 3));
+    assert.strictEqual(deleted.backlog, 0);
+    for (const target of files) assert.ok(!fs.existsSync(target));
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+}
+
+async function testLoadGuardStopsWithoutStarvation() {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-media-gc-load-"));
+  try {
+    for (let index = 0; index < 10; index += 1) {
+      const workspace = `user_${String(index).padStart(2, "0")}`;
+      const identity = path.join(dataDir, "identidade-visual-ofertas", "clientes", workspace, "renderizados");
+      fs.mkdirSync(identity, { recursive: true });
+      fs.mkdirSync(path.join(dataDir, "clientes", workspace), { recursive: true });
+      file(identity, `${String.fromCharCode(97 + index)}`.repeat(64) + ".png");
+    }
+    let calls = 0;
+    const result = await runMediaPhysicalBatch({ dataDir, nowMs: NOW, maxTargetsPerRun: 10,
+      loadGuard: () => { calls += 1; return calls <= 2; }, referenceLoader: loader() });
+    assert.strictEqual(result.targetsProcessed, 2, "o guard de carga deve interromper o lote sem varrer o restante");
+    assert.strictEqual(result.throttled, true);
+    assert.strictEqual(result.stopReason, "load_guard");
+  } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
+}
+
 async function main() {
   await testIdentityProtectionExpiryAndGate();
   await testConcurrentReferenceAndRewriteFailClosed();
@@ -177,6 +231,8 @@ async function main() {
   await testStaleIndexFailsClosed();
   await testFutureSocialReferenceAndWorkspaceIsolation();
   await testBatchLimit();
+  await testTenWorkspaceMicroBatchesAndMetrics();
+  await testLoadGuardStopsWithoutStarvation();
   console.log("AUTO_CLEAN_MEDIA_PHYSICAL_TESTS_PASS");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -317,6 +317,26 @@ async function testIntervalAndSingleFlight() {
   } finally { await cleanup(f); }
 }
 
+async function testPhysicalRunnerCadenceIsIndependentFromRelayInterval() {
+  const f = fixture();
+  const previous = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL;
+  try {
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL = "true";
+    const calls = [];
+    const runner = async options => { calls.push(options.nowMs); return { dryRun: true, removed: 0 }; };
+    await executarGcRelaySeguro({ dataDir: f.dataDir, nowMs: NOW, minIntervalMs: 60 * 60 * 1000,
+      mediaPhysicalRunner: runner, logger: { log() {} } });
+    const skipped = await executarGcRelaySeguro({ dataDir: f.dataDir, nowMs: NOW + 1000,
+      minIntervalMs: 60 * 60 * 1000, mediaPhysicalRunner: runner, logger: { log() {} } });
+    assert.strictEqual(skipped.reason, "interval", "runOnce deve estar pulado pelo intervalo");
+    assert.strictEqual(calls.length, 2, "relay ainda chama o coletor fisico quando runOnce e pulado");
+  } finally {
+    if (previous === undefined) delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL;
+    else process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL = previous;
+    await cleanup(f);
+  }
+}
+
 async function main() {
   await testRoundRobin();
   await testYoungAndOrphan();
@@ -328,6 +348,7 @@ async function main() {
   await testNoLogoNoSymlinkAndFailClosed();
   await testReferenceReasonCodes();
   await testIntervalAndSingleFlight();
+  await testPhysicalRunnerCadenceIsIndependentFromRelayInterval();
   console.log("AUTO_CLEAN_GC_RELAY_PHASE1_TESTS_PASS");
 }
 

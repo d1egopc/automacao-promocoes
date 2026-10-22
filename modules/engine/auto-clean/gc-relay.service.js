@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const { selecionarRoundRobin } = require("./workspace-rotation");
 const { buildOrLoadReferenceIndex } = require("./gc-reference-index-builder");
-const { runMediaPhysical } = require("./gc-media-physical.service");
+const { runMediaPhysicalBatch } = require("./gc-media-physical.service");
 
 const STATE_FILE = "auto-clean-gc-relay-state.json";
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
@@ -203,7 +203,7 @@ async function executarGcRelaySeguro(options = {}) {
   try {
     const summary = sanitizeSummary(await inFlight);
     summary.mediaPhysical = mediaPhysicalEnabled(options)
-      ? await (options.mediaPhysicalRunner || runMediaPhysical)(options)
+      ? await (options.mediaPhysicalRunner || runMediaPhysicalBatch)(options)
       : { skipped: true, reason: "media_physical_disabled", dryRun: true };
     if (!summary.skipped) {
       try { (options.logger || console).log("[AUTO-CLEAN-GC-RELAY]", JSON.stringify(summary)); } catch {}
