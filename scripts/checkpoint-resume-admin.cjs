@@ -61,9 +61,82 @@ function sourceSnapshot(dataDir, clienteId) {
     dir,
     viva,
     legacy,
+    vivaProof: path.join(dir, "fila-viva.proof.json"),
+    legacyProof: path.join(dir, "fila.proof.json"),
     vivaIdentity: identity(viva),
     legacyIdentity: identity(legacy),
-    vivaHash: sha256(viva)
+    vivaHash: sha256(viva),
+    legacyHash: sha256(legacy)
+  };
+}
+
+function proofCoversFile(proofDb, proofPath, filePath, clienteId, arquivo, generation) {
+  if (!proofDb || !fs.existsSync(proofPath) || !fs.existsSync(filePath)) return false;
+  let proofArquivo;
+  try { proofArquivo = JSON.parse(fs.readFileSync(proofPath, "utf8")); }
+  catch { return false; }
+  const stat = identity(filePath);
+  const hash = sha256(filePath);
+  const campos = ["clienteId", "arquivo", "generation", "fileRevision", "contentHash", "size", "mtimeMs"];
+  return campos.every(campo => proofDb[campo] === proofArquivo?.[campo]) &&
+    proofDb.clienteId === clienteId && proofDb.arquivo === arquivo &&
+    Number(proofDb.generation) === Number(generation) &&
+    proofDb.contentHash === hash && Number(proofDb.size) === stat.size &&
+    Math.abs(Number(proofDb.mtimeMs) - stat.mtimeMs) <= 1;
+}
+
+function validateConfirmedState(stateBefore, stateAfter, sources, clienteId, target) {
+  if (!stateAfter || !Number.isSafeInteger(Number(stateAfter.revision)) ||
+      Number(stateAfter.revision) <= Number(stateBefore?.revision || 0)) {
+    return { ok: false, motivo: "checkpoint_revision_nao_avancou" };
+  }
+  if (Number(stateAfter.vivaGeneration) !== Number(target) ||
+      Number(stateAfter.durableCheckpointGeneration) !== Number(target) ||
+      stateAfter.pendingCheckpointRevision || stateAfter.pendingCheckpointTargetGeneration !== null ||
+      stateAfter.authorityReady === true) {
+    return { ok: false, motivo: "checkpoint_confirmado_state_invalido" };
+  }
+  const vivaProof = proofCoversFile(
+    stateAfter.vivaFileProof, sources.vivaProof, sources.viva, clienteId, "fila-viva.json", target
+  );
+  const legacyProof = proofCoversFile(
+    stateAfter.legacyFileProof, sources.legacyProof, sources.legacy, clienteId, "fila.json", target
+  );
+  if (!vivaProof || !legacyProof) return { ok: false, motivo: "checkpoint_proof_fisico_invalido", vivaProof, legacyProof };
+  return { ok: true, revision: Number(stateAfter.revision), vivaProof, legacyProof };
+}
+
+function parseCliArgs(argv = [], env = process.env) {
+  const values = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = String(argv[i]);
+    if (arg === "--execute") { values.execute = true; continue; }
+    const match = arg.match(/^--(workspace|pending-revision|target-generation|expected-reference-count|protected-hash)=(.+)$/);
+    if (match) { values[match[1]] = match[2]; continue; }
+    const key = arg.match(/^--(workspace|pending-revision|target-generation|expected-reference-count|protected-hash)$/)?.[1];
+    if (key && argv[i + 1] && !String(argv[i + 1]).startsWith("--")) { values[key] = String(argv[++i]); continue; }
+    return { ok: false, motivo: "checkpoint_cli_argumento_invalido" };
+  }
+  const required = ["workspace", "pending-revision", "target-generation", "expected-reference-count", "protected-hash"];
+  if (required.some(key => !texto(values[key]))) return { ok: false, motivo: "checkpoint_cli_guard_incompleto" };
+  if (!/^user_[a-z0-9]+$/.test(values.workspace) ||
+      !/^[a-f0-9-]{36}$/.test(values["pending-revision"]) ||
+      !/^\d+$/.test(values["target-generation"]) ||
+      !/^\d+$/.test(values["expected-reference-count"]) ||
+      !/^[a-f0-9]{64}$/.test(values["protected-hash"])) {
+    return { ok: false, motivo: "checkpoint_cli_guard_invalido" };
+  }
+  return {
+    ok: true,
+    options: {
+      clienteId: values.workspace,
+      expectedRevision: values["pending-revision"],
+      expectedTargetGeneration: Number(values["target-generation"]),
+      expectedReferenceCount: Number(values["expected-reference-count"]),
+      expectedProtectedHash: values["protected-hash"],
+      execute: values.execute === true,
+      authorization: env.CHECKPOINT_ADMIN_EXECUTE
+    }
   };
 }
 
@@ -108,6 +181,7 @@ async function runAdminCheckpointResume(options = {}) {
   };
   const repo = options.manifestStateRepository || api.repo || manifestRepo;
   const deps = { env, dataDir, logger, manifestStateRepository: repo };
+  if (options.pool) deps.pool = options.pool;
   const readState = options.readState || (async () => repo.lerStateObservacional(clienteId, deps));
   const stateBeforeResult = await readState();
   if (stateBeforeResult?.ok !== true) {
@@ -202,6 +276,17 @@ async function runAdminCheckpointResume(options = {}) {
     return { ok: false, stage: "confirm", motivo: confirmed?.motivo || "checkpoint_confirm_failed", confirmed };
   }
 
+  const stateAfterConfirmResult = await readState();
+  const stateAfterConfirm = stateAfterConfirmResult?.state;
+  const sourcesAfterConfirm = sourceSnapshot(dataDir, clienteId);
+  const confirmedState = stateAfterConfirmResult?.ok === true
+    ? validateConfirmedState(stateBefore, stateAfterConfirm, sourcesAfterConfirm, clienteId, pending.target)
+    : { ok: false, motivo: "checkpoint_state_releitura_falhou" };
+  if (!confirmedState.ok) {
+    await persistence.shutdown?.();
+    return { ok: false, stage: "confirm_revalidation", motivo: confirmedState.motivo, confirmedState, state: stateAfterConfirm };
+  }
+
   const rebuild = await api.fila.reconstruirProjecaoLeveAposCheckpoint(clienteId, {
     checkpointRevision: pending.revision,
     targetGeneration: pending.target,
@@ -235,7 +320,7 @@ async function runAdminCheckpointResume(options = {}) {
   }
   const readiness = await api.fila.prepararReadinessAutoridadeRecovery(clienteId, {
     ...deps,
-    expectedRevision: Number(stateBefore.revision)
+    expectedRevision: confirmedState.revision
   });
   await persistence.shutdown?.();
   const stateAfterResult = await readState();
@@ -248,10 +333,22 @@ async function runAdminCheckpointResume(options = {}) {
   };
 }
 
-module.exports = { runAdminCheckpointResume, expectedFromState, sourceSnapshot, sameIdentity };
+module.exports = {
+  runAdminCheckpointResume,
+  expectedFromState,
+  sourceSnapshot,
+  sameIdentity,
+  proofCoversFile,
+  validateConfirmedState,
+  parseCliArgs
+};
 
 if (require.main === module) {
-  runAdminCheckpointResume({ execute: process.argv.includes("--execute") })
+  const parsed = parseCliArgs(process.argv.slice(2), process.env);
+  if (!parsed.ok) {
+    process.stdout.write(`${JSON.stringify({ ok: false, stage: "cli", motivo: parsed.motivo })}\n`);
+    process.exitCode = 2;
+  } else runAdminCheckpointResume(parsed.options)
     .then(result => {
       process.stdout.write(`${JSON.stringify({ ok: result.ok, stage: result.stage || "complete", motivo: result.motivo || "", clienteId: result.clienteId || "" })}\n`);
       process.exitCode = result.ok ? 0 : 1;

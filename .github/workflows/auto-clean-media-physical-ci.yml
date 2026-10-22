@@ -73,6 +73,7 @@ jobs:
             modules/fila/persistence-worker.js \
              index.js \
             tests/checkpoint-85681-postgres.test.cjs \
+            tests/checkpoint-resume-admin.postgres.test.cjs \
             tests/checkpoint-projecao-coerencia.test.js \
             tests/auto-clean-gc-relay-phase1.test.js \
             tests/auto-clean-gc-reference-index-phase12.test.js \
@@ -100,6 +101,7 @@ jobs:
           node --check modules/fila/fila-operacional-v2.js
           node --check modules/fila/persistence-worker.js
           node --check tests/checkpoint-85681-postgres.test.cjs
+          node --check tests/checkpoint-resume-admin.postgres.test.cjs
           node --check scripts/checkpoint-resume-admin.cjs
           node --check tests/checkpoint-resume-admin.test.cjs
           node --check tests/fila-manifest-state-repository.test.js
@@ -191,6 +193,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           node --test tests/checkpoint-85681-postgres.test.cjs
+          node --test tests/checkpoint-resume-admin.postgres.test.cjs
 
       - name: RIO, queue, history, ACK and Mensageiro V3 regressions
         shell: bash
