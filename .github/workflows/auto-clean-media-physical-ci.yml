@@ -66,13 +66,15 @@ jobs:
           expected="$(printf '%s\n' \
             .github/workflows/auto-clean-media-physical-ci.yml \
             modules/engine/auto-clean/gc-media-physical.service.js \
+            modules/engine/auto-clean/auto-clean.service.js \
             modules/engine/auto-clean/gc-reference-index-builder.js \
             modules/engine/auto-clean/gc-reference-index.js \
             modules/engine/auto-clean/gc-relay.service.js \
             modules/engine/auto-clean/gc-social-reference-index.js \
             tests/auto-clean-gc-relay-phase1.test.js \
             tests/auto-clean-media-physical.postgres.js \
-            tests/auto-clean-media-physical.test.js | sort)"
+            tests/auto-clean-media-physical.test.js \
+            tests/auto-clean-media-physical-wiring.test.js | sort)"
           test "$changed" = "$expected"
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE" = false
@@ -83,11 +85,13 @@ jobs:
           set -Eeuo pipefail
           npm ci
           node --check modules/engine/auto-clean/gc-media-physical.service.js
+          node --check modules/engine/auto-clean/auto-clean.service.js
           node --check modules/engine/auto-clean/gc-social-reference-index.js
           node --check modules/engine/auto-clean/gc-reference-index-builder.js
           node --check modules/engine/auto-clean/gc-reference-index.js
           node --check modules/engine/auto-clean/gc-relay.service.js
           node --check tests/auto-clean-media-physical.test.js
+          node --check tests/auto-clean-media-physical-wiring.test.js
           npm run audit:encoding
 
       - name: Physical GC safety and regression suites
@@ -95,6 +99,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           node tests/auto-clean-media-physical.test.js
+          node tests/auto-clean-media-physical-wiring.test.js
           node tests/auto-clean-gc-relay-phase1.test.js
           node tests/auto-clean-gc-reference-index-phase12.test.js
           node tests/auto-clean-gc-reference-index-phase13.test.js

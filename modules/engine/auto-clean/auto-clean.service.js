@@ -356,6 +356,12 @@ function autoCleanExecuteAtivo(opcoes = {}) {
   return flagLigada(process.env[ENV_EXECUTE]);
 }
 
+function autoCleanMediaPhysicalAutorizado() {
+  const physical = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL || "").trim().toLowerCase() === "true";
+  const execute = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE || "").trim().toLowerCase() === "true";
+  return { physical, execute: physical && execute };
+}
+
 function autoCleanRecorrenteAtivo(opcoes = {}) {
   if (opcoes.recorrente === true) return true;
   if (opcoes.recorrente === false) return false;
@@ -2660,10 +2666,16 @@ async function executarAutoCleanShadow(opcoes = {}) {
   let gcRelay = null;
   if (executarArquivos) {
     try {
+      const mediaPhysical = autoCleanMediaPhysicalAutorizado();
       gcRelay = await (opcoes.gcRelay || executarGcRelaySeguro)({
         dataDir: politica.dataDir,
         logger,
-        ...(opcoes.gcRelayOptions || {})
+        ...(opcoes.gcRelayOptions || {}),
+        // Environment flags are the only production authorization.  Explicit
+        // caller options cannot bypass either gate or enable deletion alone.
+        mediaPhysicalEnabled: mediaPhysical.physical,
+        execute: mediaPhysical.execute,
+        mediaDeleteEnabled: mediaPhysical.execute
       });
     } catch {
       gcRelay = { dryRun: true, inspected: 0, errors: 1, reason: "relay_failed" };
@@ -2721,6 +2733,7 @@ module.exports = {
   autoCleanShadowAtivo,
   autoCleanExecuteAtivo,
   autoCleanRecorrenteAtivo,
+  autoCleanMediaPhysicalAutorizado,
   intervaloAutoCleanRecorrenteMs,
   criarPoliticaRetencao,
   avaliarRegistroAutoClean,
