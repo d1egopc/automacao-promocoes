@@ -70,6 +70,19 @@ function sourceSnapshot(dataDir, clienteId) {
   };
 }
 
+function resolverClienteJson(dataDir, clienteId, arquivo) {
+  return path.join(path.resolve(dataDir), "clientes", clienteId, arquivo);
+}
+
+function escreverClienteJsonAtomic(dataDir, clienteId, arquivo, valor) {
+  const destino = resolverClienteJson(dataDir, clienteId, arquivo);
+  fs.mkdirSync(path.dirname(destino), { recursive: true });
+  const temporario = `${destino}.admin-${process.pid}-${Date.now()}.tmp`;
+  fs.writeFileSync(temporario, JSON.stringify(valor, null, 2));
+  fs.renameSync(temporario, destino);
+  return true;
+}
+
 function proofCoversFile(proofDb, proofPath, filePath, clienteId, arquivo, generation) {
   if (!proofDb || !fs.existsSync(proofPath) || !fs.existsSync(filePath)) return false;
   let proofArquivo;
@@ -180,7 +193,11 @@ async function runAdminCheckpointResume(options = {}) {
     buildIndex: buildOrLoadReferenceIndex
   };
   const repo = options.manifestStateRepository || api.repo || manifestRepo;
-  const deps = { env, dataDir, logger, manifestStateRepository: repo };
+  const deps = {
+    env, dataDir, logger, manifestStateRepository: repo,
+    getClienteJsonPath: (id, arquivo) => resolverClienteJson(dataDir, id, arquivo),
+    writeClienteJson: (id, arquivo, valor) => escreverClienteJsonAtomic(dataDir, id, arquivo, valor)
+  };
   if (options.pool) deps.pool = options.pool;
   const readState = options.readState || (async () => repo.lerStateObservacional(clienteId, deps));
   const stateBeforeResult = await readState();
