@@ -163,7 +163,7 @@ async function testRelayWorkspaceRotationAndRestartCursor() {
 async function testVitrineExpiredAndHistoryWindow() {
   const f = fixture();
   try {
-    render(f, H1, 8 * 24 * 60 * 60 * 1000);
+    render(f, H1, CANDIDATE_AGE_MS + 1000);
     json(path.join(f.clientDir, "vitrine.json"), { ofertas: [
       { imagem: url(f, H1), ultimoEnvioEm: new Date(NOW - 4 * 24 * 60 * 60 * 1000).toISOString() }
     ] });

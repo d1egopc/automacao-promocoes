@@ -32,6 +32,15 @@ function hashRenderEmValor(value, workspaceId) {
   return found;
 }
 
+function chavesMidiaSocialEmValor(value) {
+  const pattern = /(?:^|\/)social\/midia\/publica\/(engine|[a-zA-Z0-9_-]+)\/([^\s"'?#\\/]+\.(?:jpe?g|png|webp|mp4|mov|webm))(?:$|[?#])/ig;
+  const found = [];
+  for (const match of String(value || "").replace(/\\/g, "/").matchAll(pattern)) {
+    found.push(`social:${match[1]}/${match[2]}`);
+  }
+  return found;
+}
+
 function coletarObjeto(value, workspaceId, source, refs, budget, depth = 0) {
   if (depth > 32 || ++budget.nodes > 300000) {
     const error = new Error(REFERENCE_REASON.COMPLEXITY_LIMIT);
@@ -42,6 +51,10 @@ function coletarObjeto(value, workspaceId, source, refs, budget, depth = 0) {
     for (const hash of hashRenderEmValor(value, workspaceId)) {
       if (!refs.has(hash)) refs.set(hash, new Set());
       refs.get(hash).add(source);
+    }
+    for (const key of chavesMidiaSocialEmValor(value)) {
+      if (!refs.has(key)) refs.set(key, new Set());
+      refs.get(key).add(source);
     }
   } else if (Array.isArray(value)) {
     for (const item of value) coletarObjeto(item, workspaceId, source, refs, budget, depth + 1);
@@ -231,4 +244,4 @@ async function inventariarReferenciasVivas({ dataDir, workspaceId, nowMs = Date.
 
 module.exports = { inventariarReferenciasVivas, hashRenderEmValor, ofertasVitrineVivas,
   selecionarConteudoVivo, DEFAULT_MAX_REFERENCE_BYTES, VITRINE_RETENTION_MS, HISTORY_RETENTION_MS,
-  REFERENCE_REASON };
+  REFERENCE_REASON, chavesMidiaSocialEmValor };

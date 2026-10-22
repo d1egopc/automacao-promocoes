@@ -13,7 +13,8 @@ const {
   projecaoCobreFilaViva
 } = require("../../fila/fila-gc-references");
 
-const SCHEMA_VERSION = 2;
+// v3 also indexes /social/midia/publica references in the same authoritative index.
+const SCHEMA_VERSION = 3;
 const INDEX_ROOT = path.join("auto-clean", "gc-references");
 const CURRENT_FILE = "current.json";
 const BUILDING_FILE = "building.json";

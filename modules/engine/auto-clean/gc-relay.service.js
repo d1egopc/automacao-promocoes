@@ -4,10 +4,11 @@ const fs = require("fs");
 const path = require("path");
 const { selecionarRoundRobin } = require("./workspace-rotation");
 const { buildOrLoadReferenceIndex } = require("./gc-reference-index-builder");
+const { runMediaPhysical } = require("./gc-media-physical.service");
 
 const STATE_FILE = "auto-clean-gc-relay-state.json";
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
-const CANDIDATE_AGE_MS = 36 * 60 * 60 * 1000;
+const CANDIDATE_AGE_MS = 192 * 60 * 60 * 1000;
 const MAX_ENTRIES_PER_RUN = 50;
 const MAX_DURATION_MS = 3000;
 const CLASSIFICACAO = Object.freeze({
@@ -191,11 +192,19 @@ function sanitizeSummary(summary) {
   return Object.fromEntries(fields.filter(key => summary[key] !== undefined).map(key => [key, summary[key]]));
 }
 
+function mediaPhysicalEnabled(options = {}) {
+  return options.mediaPhysicalEnabled === true ||
+    String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL || "").toLowerCase() === "true";
+}
+
 async function executarGcRelaySeguro(options = {}) {
   if (inFlight) return { dryRun: true, skipped: true, reason: "already_running", inspected: 0 };
   inFlight = runOnce(options);
   try {
     const summary = sanitizeSummary(await inFlight);
+    summary.mediaPhysical = mediaPhysicalEnabled(options)
+      ? await (options.mediaPhysicalRunner || runMediaPhysical)(options)
+      : { skipped: true, reason: "media_physical_disabled", dryRun: true };
     if (!summary.skipped) {
       try { (options.logger || console).log("[AUTO-CLEAN-GC-RELAY]", JSON.stringify(summary)); } catch {}
     }
@@ -210,4 +219,5 @@ async function executarGcRelaySeguro(options = {}) {
 }
 
 module.exports = { executarGcRelaySeguro, runOnce, closeSession, STATE_FILE,
-  MIN_INTERVAL_MS, CANDIDATE_AGE_MS, MAX_ENTRIES_PER_RUN, CLASSIFICACAO, classificarRender };
+  MIN_INTERVAL_MS, CANDIDATE_AGE_MS, MAX_ENTRIES_PER_RUN, CLASSIFICACAO, classificarRender,
+  mediaPhysicalEnabled };
