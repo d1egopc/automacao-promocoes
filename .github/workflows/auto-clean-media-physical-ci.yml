@@ -3,7 +3,7 @@ name: Auto-Clean physical media CI only
 on:
   push:
     branches:
-      - validation/auto-clean-media-physical-node24-20261021
+      - validation/auto-clean-stale-projection-node24-20261022
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   validate:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/auto-clean-media-physical-node24-20261021'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/auto-clean-stale-projection-node24-20261022'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -56,7 +56,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          test "$GITHUB_REF" = refs/heads/validation/auto-clean-media-physical-node24-20261021
+          test "$GITHUB_REF" = refs/heads/validation/auto-clean-stale-projection-node24-20261022
           test -z "${DATABASE_URL:-}"
           node --version | grep -Eq '^v24\.'
           git cat-file -e "$BASE_SHA^{commit}"
@@ -73,8 +73,11 @@ jobs:
             modules/engine/auto-clean/gc-social-reference-index.js \
             tests/auto-clean-gc-relay-phase1.test.js \
             tests/auto-clean-media-physical.postgres.js \
-            tests/auto-clean-media-physical.test.js \
-            tests/auto-clean-media-physical-wiring.test.js | sort)"
+             tests/auto-clean-media-physical.test.js \
+             tests/auto-clean-media-physical-wiring.test.js \
+             index.js \
+             modules/fila/fila-operacional-v2.js \
+             tests/checkpoint-projecao-coerencia.test.js | sort)"
           test "$changed" = "$expected"
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL" = false
           test "$OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE" = false

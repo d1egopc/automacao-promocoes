@@ -74,6 +74,7 @@ const recoveryComparacaoLogThrottle = new Map();
 const manifestStateLogThrottle = new Map();
 const pendenciasProjecaoLeve = new Map();
 const projectionReadyProjecaoLeve = new Map();
+const atualizacoesProjecaoAposCheckpoint = new Map();
 const workspaceHealthGuardTentativas = new Map();
 
 function texto(valor = "") {
@@ -487,6 +488,169 @@ function lerItensFilaVivaParaProjecaoLeve(clienteId = "admin", deps = {}) {
   };
 }
 
+function assinaturaArquivoProjecao(file = "", deps = {}) {
+  const fsImpl = deps.fs || fs;
+  if (!file || typeof fsImpl.statSync !== "function") return null;
+  try {
+    const stat = fsImpl.statSync(file);
+    if (!stat.isFile()) return null;
+    return {
+      size: Number(stat.size || 0),
+      mtimeMs: Number(stat.mtimeMs || 0),
+      dev: Number(stat.dev || 0),
+      ino: Number(stat.ino || 0)
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mesmaAssinaturaArquivo(a = null, b = null) {
+  return Boolean(a && b) && a.size === b.size && a.mtimeMs === b.mtimeMs &&
+    (!a.dev || !b.dev || a.dev === b.dev) && (!a.ino || !b.ino || a.ino === b.ino);
+}
+
+function formaComparavelProjecao(projecao = {}) {
+  if (!projecao || typeof projecao !== "object") return null;
+  const { geradoEm, ...semGeradoEm } = projecao;
+  return semGeradoEm;
+}
+
+async function reconstruirProjecaoLeveAposCheckpoint(clienteId = "admin", params = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const caminhoViva = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
+  const assinaturaAntes = assinaturaArquivoProjecao(caminhoViva, deps);
+  if (!assinaturaAntes) {
+    return { ok: false, clienteId: cliente, motivo: "fila_viva_inexistente_ou_ilegivel" };
+  }
+
+  const agora = params.agora || deps.agora || Date.now();
+  const bootstrap = bootstrapProjecaoLeveCliente(cliente, {
+    usarFilaViva: true,
+    agora
+  }, deps);
+  if (bootstrap.ok !== true || !bootstrap.projecao) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return {
+      ok: false,
+      clienteId: cliente,
+      motivo: bootstrap.motivo || "projecao_checkpoint_bootstrap_falhou",
+      bootstrap
+    };
+  }
+
+  const assinaturaDepois = assinaturaArquivoProjecao(caminhoViva, deps);
+  if (!mesmaAssinaturaArquivo(assinaturaAntes, assinaturaDepois)) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return {
+      ok: false,
+      clienteId: cliente,
+      motivo: "fila_viva_alterada_durante_projecao",
+      bootstrap
+    };
+  }
+
+  const leitura = lerProjecaoLeve(cliente, { ...deps, agora });
+  if (leitura.ok !== true || JSON.stringify(formaComparavelProjecao(leitura.projecao)) !==
+      JSON.stringify(formaComparavelProjecao(bootstrap.projecao))) {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return {
+      ok: false,
+      clienteId: cliente,
+      motivo: "projecao_checkpoint_conteudo_inconsistente",
+      bootstrap,
+      leitura
+    };
+  }
+
+  if (typeof deps.validarProjecaoAposCheckpoint !== "function") {
+    projectionReadyProjecaoLeve.set(cliente, false);
+    return {
+      ok: false,
+      clienteId: cliente,
+      motivo: "projecao_checkpoint_validacao_nao_configurada",
+      bootstrap
+    };
+  }
+  if (typeof deps.validarProjecaoAposCheckpoint === "function") {
+    let validacao;
+    try {
+      validacao = await deps.validarProjecaoAposCheckpoint({
+        clienteId: cliente,
+        agora,
+        checkpointRevision: params.checkpointRevision || "",
+        targetGeneration: params.targetGeneration || 0,
+        projecao: leitura.projecao,
+        filaViva: assinaturaDepois
+      });
+    } catch (erro) {
+      projectionReadyProjecaoLeve.set(cliente, false);
+      return {
+        ok: false,
+        clienteId: cliente,
+        motivo: "projecao_checkpoint_validacao_falhou",
+        erro: erro?.message || "validacao_projecao_falhou",
+        bootstrap
+      };
+    }
+    if (validacao?.ok !== true) {
+      projectionReadyProjecaoLeve.set(cliente, false);
+      return {
+        ok: false,
+        clienteId: cliente,
+        motivo: validacao?.motivo || "projecao_checkpoint_fontes_inconsistentes",
+        validacao,
+        bootstrap
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    clienteId: cliente,
+    motivo: "projecao_checkpoint_confirmada",
+    fonte: "fila_viva",
+    bootstrap,
+    leitura,
+    filaViva: assinaturaDepois
+  };
+}
+
+function agendarProjecaoLeveAposCheckpoint(clienteId = "admin", params = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  let estado = atualizacoesProjecaoAposCheckpoint.get(cliente);
+  if (!estado) {
+    estado = { pendente: null, promise: null };
+    atualizacoesProjecaoAposCheckpoint.set(cliente, estado);
+  }
+  estado.pendente = { params: { ...params }, deps: { ...deps } };
+  if (!estado.promise) {
+    estado.promise = (async () => {
+      await Promise.resolve();
+      let resultado = { ok: false, motivo: "projecao_checkpoint_nao_executada" };
+      while (estado.pendente) {
+        const atual = estado.pendente;
+        estado.pendente = null;
+        try {
+          resultado = await reconstruirProjecaoLeveAposCheckpoint(cliente, atual.params, atual.deps);
+        } catch (erro) {
+          projectionReadyProjecaoLeve.set(cliente, false);
+          resultado = {
+            ok: false,
+            clienteId: cliente,
+            motivo: "projecao_checkpoint_execucao_falhou",
+            erro: erro?.message || "erro_projecao_checkpoint"
+          };
+        }
+      }
+      return resultado;
+    })().finally(() => {
+      atualizacoesProjecaoAposCheckpoint.delete(cliente);
+    });
+  }
+  return { ok: true, agendado: true, clienteId: cliente, promise: estado.promise };
+}
+
 function bootstrapProjecaoLeveSeAusente(clienteId = "admin", leituraProjecao = {}, deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const bootstrapFilaVivaPermitido = deps.bootstrapProjecaoLeveDeFilaViva === true;
@@ -700,6 +864,17 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
     const inicioLeitura = process.hrtime.bigint();
     const leitura = lerItensFilaVivaParaProjecaoLeve(cliente, { ...deps, agora });
     leituraMs = Math.round(Number(process.hrtime.bigint() - inicioLeitura) / 1e6);
+    if (leitura.ok !== true) {
+      return {
+        ok: false,
+        motivo: leitura.motivo || "fila_viva_leitura_falhou",
+        erro: leitura.erro,
+        clienteId: cliente,
+        fonte: "fila_viva",
+        leituraMs,
+        totalMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6)
+      };
+    }
     fonte = "fila_viva";
     itens = Array.isArray(leitura?.itens) ? leitura.itens : [];
   } else {
@@ -745,6 +920,7 @@ function bootstrapProjecaoLeveCliente(clienteId = "admin", params = {}, deps = {
     leituraMs,
     projecaoMs,
     totalMs: Math.round(Number(process.hrtime.bigint() - inicio) / 1e6),
+    projecao,
     escrita
   };
 }
@@ -820,6 +996,7 @@ function resetarEstadoProjecaoLeveParaTeste(clienteId = "") {
     const estado = pendenciasProjecaoLeve.get(cliente);
     if (estado?.timer) clearTimeout(estado.timer);
     pendenciasProjecaoLeve.delete(cliente);
+    atualizacoesProjecaoAposCheckpoint.delete(cliente);
     projectionReadyProjecaoLeve.delete(cliente);
     return;
   }
@@ -827,6 +1004,7 @@ function resetarEstadoProjecaoLeveParaTeste(clienteId = "") {
     if (estado?.timer) clearTimeout(estado.timer);
   }
   pendenciasProjecaoLeve.clear();
+  atualizacoesProjecaoAposCheckpoint.clear();
   projectionReadyProjecaoLeve.clear();
 }
 
@@ -6971,6 +7149,10 @@ function criarControladorFilaOperacionalV2(opcoes = {}) {
     removerProjecaoLeveIncremental: (clienteId, item, deps = {}) => removerProjecaoLeveIncremental(clienteId, item, { ...opcoes, ...deps }),
     flushProjecaoLeveCliente: (clienteId, deps = {}) => flushProjecaoLeveCliente(clienteId, { ...opcoes, ...deps }),
     bootstrapProjecaoLeveCliente: (clienteId, params = {}, deps = {}) => bootstrapProjecaoLeveCliente(clienteId, params, { ...opcoes, ...deps }),
+    reconstruirProjecaoLeveAposCheckpoint: (clienteId, params = {}, deps = {}) =>
+      reconstruirProjecaoLeveAposCheckpoint(clienteId, params, { ...opcoes, ...deps }),
+    agendarProjecaoLeveAposCheckpoint: (clienteId, params = {}, deps = {}) =>
+      agendarProjecaoLeveAposCheckpoint(clienteId, params, { ...opcoes, ...deps }),
     reconciliarProjecaoHotPublicaCliente: (clienteId, params = {}, deps = {}) => reconciliarProjecaoHotPublicaCliente(clienteId, params, { ...opcoes, ...deps }),
     projectionReadyProjecaoHotPublica,
     resetarEstadoProjecaoLeveParaTeste,
@@ -7054,6 +7236,8 @@ module.exports = {
   removerProjecaoLeveIncremental,
   flushProjecaoLeveCliente,
   bootstrapProjecaoLeveCliente,
+  reconstruirProjecaoLeveAposCheckpoint,
+  agendarProjecaoLeveAposCheckpoint,
   reconciliarProjecaoHotPublicaCliente,
   projectionReadyProjecaoHotPublica,
   resetarEstadoProjecaoLeveParaTeste,

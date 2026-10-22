@@ -91,6 +91,8 @@ const { activeOneShot, oneShotRepository, smokeCreditAvailable } =
   require("./modules/engine/universal-one-shot-smoke");
 const { criarPreflightFilaUniversal } =
   require("./modules/engine/universal-queue-preflight");
+const { discoverSources: discoverGcReferenceSources } =
+  require("./modules/engine/auto-clean/gc-reference-index-builder");
 const { readDestinationDailyUsage } =
   require("./modules/engine/universal-queue.repository");
 const { processVitrineProjectionBatch } =
@@ -4245,6 +4247,28 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       agora: Date.now(),
       motivo: decisao.motivo || motivo
     });
+    let projecaoAposCheckpoint = null;
+    if (checkpointDuravel?.ok === true && typeof filaOperacionalV2.agendarProjecaoLeveAposCheckpoint === "function") {
+      projecaoAposCheckpoint = filaOperacionalV2.agendarProjecaoLeveAposCheckpoint(cliente, {
+        checkpointRevision: targetDb?.checkpointRevision || "",
+        targetGeneration: vivaGenerationAlvoCheckpoint,
+        agora: Date.now()
+      }, {
+        dataDir: process.env.DATA_DIR || "/data",
+        validarProjecaoAposCheckpoint: async ({ clienteId, agora }) => {
+          const descoberta = await discoverGcReferenceSources({
+            dataDir: process.env.DATA_DIR || "/data",
+            workspaceId: clienteId,
+            nowMs: agora,
+            fsApi: fs.promises
+          });
+          return descoberta.error
+            ? { ok: false, motivo: descoberta.error.reasonCode || "reference_sources_incomplete", descoberta }
+            : { ok: true, descoberta };
+        },
+        logger: console
+      });
+    }
     logFilaV22C({
       evento: "checkpoint_legado_batched",
       clienteId: cliente,
@@ -4273,6 +4297,10 @@ async function checkpointLegadoFilaV22C(clienteId = "admin", motivo = "checkpoin
       } : null,
       checkpointLegadoMs: duracaoMs,
       bytesCheckpoint,
+      projecaoAposCheckpoint: projecaoAposCheckpoint ? {
+        agendado: projecaoAposCheckpoint.agendado === true,
+        motivo: projecaoAposCheckpoint.motivo || ""
+      } : null,
       hotPathResumo: snapshotMetricasFilaV22C(cliente, true),
       politica: decisao.politica
     });
