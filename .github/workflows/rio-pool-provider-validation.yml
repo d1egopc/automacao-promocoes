@@ -66,4 +66,5 @@ jobs:
           node --check modules/engine/universal-queue-distributor.adapter.js
           node --test tests/universal-flow-queue-preflight.test.js tests/universal-flow-queue-distributor.test.js tests/universal-flow-queue-executor.test.js
           node tests/universal-pool-provider-postgres.cjs
+          node --test tests/universal-flow-queue-status.test.js tests/manual-v2-dispatcher.test.js tests/manual-v2-idempotency.test.js tests/clonador-grupos-engine-bridge.test.js tests/radar-engine-v2-magalu-route.test.js tests/mensageiro-v3-universal.test.cjs tests/auto-clean-media-physical.test.js
           npm run audit:encoding
