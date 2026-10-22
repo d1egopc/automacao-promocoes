@@ -199,7 +199,8 @@ async function testTenWorkspaceMicroBatchesAndMetrics() {
     assert.ok(deleted.removed > 0 && deleted.removed <= 20,
       "micro-lotes devem reduzir o backlog sem ultrapassar o teto global");
     assert.strictEqual(deleted.revalidations, deleted.removed, "cada exclusao exige revalidacao propria");
-    assert.strictEqual(revalidationCalls.count, deleted.removed);
+    assert.strictEqual(revalidationCalls.count, deleted.revalidations + deleted.targetsProcessed,
+      "leituras iniciais e revalidacoes devem ser contabilizadas separadamente");
     assert.strictEqual(deleted.bytesFreedGiB, deleted.removed * 16 / (1024 ** 3));
     assert.ok(deleted.backlog <= observed.candidates,
       "o backlog final nao pode exceder os candidatos observados");
