@@ -70,6 +70,7 @@ jobs:
             modules/fila/fila-gc-references.js \
             modules/fila/fila-manifest-state.repository.js \
             modules/fila/fila-operacional-v2.js \
+            modules/fila/persistence-coordinator.js \
             modules/fila/persistence-worker.js \
             index.js \
             scripts/checkpoint-proof-recovery-admin.cjs \

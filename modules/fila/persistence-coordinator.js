@@ -742,6 +742,7 @@ function criarCoordenadorPersistencia(opcoes = {}) {
     }
     if (operation === OP_VIVA_SNAPSHOT_PROBE) {
       job.probeViva = payload.probeViva !== false;
+      job.includeLegacyCheckpointProjection = payload.includeLegacyCheckpointProjection === true;
       job.previousHash = payload.previousHash || null;
       job.targetHash = payload.targetHash || null;
       job.legacyFenceHashes = Array.isArray(payload.legacyFenceHashes) ? payload.legacyFenceHashes : [];
