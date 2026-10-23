@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const { getClienteJsonPath, normalizarClienteId, writeClienteJson } = require("../../utils/storage");
-const { compactInWorker } = require("./handoff-compaction.worker");
+const { compactInWorker, mutateHandoffInWorker } = require("./handoff-compaction.worker");
 
 const STORAGE_SCHEMA_VERSION = 1;
 const CHECKPOINTS_FILE = "teleradar-checkpoints.json";
@@ -106,6 +106,17 @@ function createTeleradarJsonStore({ read = readClienteJsonStrict, write = writeC
         return clone(result);
       });
     },
+    async mutateEntry(context, fileName, entryKey, operation, payload = {}) {
+      const valid = validateTeleRadarContext(context);
+      const queueKey = `${valid.clientId}:${fileName}`;
+      return enqueueMutation(queueKey, () => mutateHandoffInWorker({
+        file: getClienteJsonPath(valid.clientId, fileName),
+        clientId: valid.clientId,
+        entryKey: String(entryKey || ""),
+        operation,
+        payload
+      }));
+    },
     async compactTerminalRecords(context, fileName, options = {}) {
       const valid = validateTeleRadarContext(context);
       const queueKey = `${valid.clientId}:${fileName}`;
@@ -145,10 +156,11 @@ function createTeleradarJsonStore({ read = readClienteJsonStrict, write = writeC
 
 function createMemoryTeleradarStore(seed = {}) {
   const files = new Map(Object.entries(clone(seed)));
-  const store = createTeleradarJsonStore({
+  const storeWithWorker = createTeleradarJsonStore({
     read: async (clientId, fileName, fallback) => clone(files.get(`${clientId}:${fileName}`) || fallback),
     write: async (clientId, fileName, value) => { files.set(`${clientId}:${fileName}`, clone(value)); }
   });
+  const { mutateEntry: _workerMutation, ...store } = storeWithWorker;
   return Object.freeze({
     ...store,
     compactTerminalRecords: async () => ({ compacted: false, reason: "memory_store" }),

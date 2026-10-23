@@ -57,6 +57,13 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
     return scopedKey("handoff", validContext, id);
   }
 
+  function mutateEntry(entryKey, operation, payload, fallback) {
+    if (typeof store.mutateEntry === "function") {
+      return store.mutateEntry(validContext, HANDOFFS_FILE, entryKey, operation, payload);
+    }
+    return store.mutate(validContext, HANDOFFS_FILE, fallback);
+  }
+
   function scopedRecords(state = {}) {
     return Object.entries(state.entries || {})
       .filter(([storageKey, record]) => {
@@ -79,25 +86,25 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
     async persist({ envelope, persistedAt }) {
       const eventId = validateEnvelope(envelope);
       const when = iso(persistedAt, "persisted_at");
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
-        const handoffKey = key(eventId);
+      const handoffKey = key(eventId);
+      const record = {
+        eventId,
+        status: HANDOFF_STATUS.PENDING,
+        envelope,
+        capturedAt: iso(envelope.capturedAt, "captured_at"),
+        envelopeCreatedAt: iso(envelope.envelopeCreatedAt || envelope.receivedAt, "envelope_created_at"),
+        handoffPersistedAt: when,
+        handoffAttemptedAt: null,
+        radarAcceptedAt: null,
+        handoffLatencyMs: null,
+        attempts: 0,
+        nextAttemptAt: when,
+        leaseUntil: null,
+        lastErrorCode: null,
+        radarReceipt: null
+      };
+      return mutateEntry(handoffKey, "persist", { record }, entries => {
         if (entries[handoffKey]) return { created: false, record: entries[handoffKey] };
-        const record = {
-          eventId,
-          status: HANDOFF_STATUS.PENDING,
-          envelope,
-          capturedAt: iso(envelope.capturedAt, "captured_at"),
-          envelopeCreatedAt: iso(envelope.envelopeCreatedAt || envelope.receivedAt, "envelope_created_at"),
-          handoffPersistedAt: when,
-          handoffAttemptedAt: null,
-          radarAcceptedAt: null,
-          handoffLatencyMs: null,
-          attempts: 0,
-          nextAttemptAt: when,
-          leaseUntil: null,
-          lastErrorCode: null,
-          radarReceipt: null
-        };
         entries[handoffKey] = record;
         return { created: true, record };
       });
@@ -141,7 +148,8 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
       const when = iso(attemptedAt, "attempted_at");
       const nowMs = Date.parse(when);
       const leaseDuration = Math.max(1000, Number(leaseMs) || 30000);
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
+      const handoffKey = key(eventId);
+      return mutateEntry(handoffKey, "claim", { attemptedAt: when, leaseMs: leaseDuration }, entries => {
         const record = entries[key(eventId)];
         if (!record) return { claimed: false, reason: "handoff_not_found" };
         if ([HANDOFF_STATUS.ACKED, HANDOFF_STATUS.FAILED_PERMANENT].includes(record.status)) {
@@ -166,7 +174,8 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
 
     async markAttempted({ eventId, attemptedAt }) {
       const when = iso(attemptedAt, "attempted_at");
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
+      const handoffKey = key(eventId);
+      return mutateEntry(handoffKey, "mark_attempted", { attemptedAt: when }, entries => {
         const record = entries[key(eventId)];
         if (!record) throw new Error("TELERADAR_HANDOFF_NOT_FOUND");
         record.handoffAttemptedAt = when;
@@ -177,13 +186,15 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
 
     async markRetry({ eventId, nextAttemptAt, errorCode }) {
       const when = iso(nextAttemptAt, "next_attempt_at");
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
+      const handoffKey = key(eventId);
+      const safeErrorCode = text(errorCode).slice(0, 120) || "RADAR_INGRESS_FAILED";
+      return mutateEntry(handoffKey, "retry", { nextAttemptAt: when, errorCode: safeErrorCode }, entries => {
         const record = entries[key(eventId)];
         if (!record) throw new Error("TELERADAR_HANDOFF_NOT_FOUND");
         record.status = HANDOFF_STATUS.PENDING;
         record.nextAttemptAt = when;
         record.leaseUntil = null;
-        record.lastErrorCode = text(errorCode).slice(0, 120) || "RADAR_INGRESS_FAILED";
+        record.lastErrorCode = safeErrorCode;
         entries[key(eventId)] = record;
         return record;
       });
@@ -191,7 +202,15 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
 
     async markAccepted({ eventId, acceptedAt, receipt }) {
       const when = iso(acceptedAt, "accepted_at");
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
+      const handoffKey = key(eventId);
+      const safeReceipt = receipt && typeof receipt === "object" ? {
+        code: "RADAR_ACCEPTED",
+        radarEventId: receipt.radarEventId === undefined || receipt.radarEventId === null
+          ? null
+          : String(receipt.radarEventId),
+        duplicate: receipt.duplicate === true
+      } : { code: "RADAR_ACCEPTED", radarEventId: null, duplicate: false };
+      return mutateEntry(handoffKey, "accepted", { acceptedAt: when, receipt: safeReceipt }, entries => {
         const record = entries[key(eventId)];
         if (!record) throw new Error("TELERADAR_HANDOFF_NOT_FOUND");
         record.status = HANDOFF_STATUS.ACKED;
@@ -200,13 +219,7 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
         record.nextAttemptAt = null;
         record.leaseUntil = null;
         record.lastErrorCode = null;
-        record.radarReceipt = receipt && typeof receipt === "object" ? {
-          code: "RADAR_ACCEPTED",
-          radarEventId: receipt.radarEventId === undefined || receipt.radarEventId === null
-            ? null
-            : String(receipt.radarEventId),
-          duplicate: receipt.duplicate === true
-        } : { code: "RADAR_ACCEPTED", radarEventId: null, duplicate: false };
+        record.radarReceipt = safeReceipt;
         entries[key(eventId)] = record;
         return record;
       });
@@ -214,14 +227,16 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
 
     async markPermanentFailure({ eventId, failedAt, errorCode }) {
       const when = iso(failedAt, "failed_at");
-      return store.mutate(validContext, HANDOFFS_FILE, entries => {
+      const handoffKey = key(eventId);
+      const safeErrorCode = text(errorCode).slice(0, 120) || "RADAR_INGRESS_REJECTED";
+      return mutateEntry(handoffKey, "permanent", { failedAt: when, errorCode: safeErrorCode }, entries => {
         const record = entries[key(eventId)];
         if (!record) throw new Error("TELERADAR_HANDOFF_NOT_FOUND");
         record.status = HANDOFF_STATUS.FAILED_PERMANENT;
         record.failedAt = when;
         record.nextAttemptAt = null;
         record.leaseUntil = null;
-        record.lastErrorCode = text(errorCode).slice(0, 120) || "RADAR_INGRESS_REJECTED";
+        record.lastErrorCode = safeErrorCode;
         entries[key(eventId)] = record;
         return record;
       });

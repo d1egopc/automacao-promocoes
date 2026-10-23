@@ -107,6 +107,117 @@ async function writeActiveAtomic(file, content, sourceStat) {
   }
 }
 
+async function writeJsonAtomicFromWorker(file, content, sourceStat = null) {
+  if (sourceStat) {
+    await writeActiveAtomic(file, content, sourceStat);
+    return;
+  }
+  const temp = `${file}.write.${process.pid}.${Date.now()}`;
+  await fs.promises.writeFile(temp, content, { flag: "wx", mode: 0o600 });
+  await syncFile(temp);
+  try {
+    await fs.promises.rename(temp, file);
+  } catch (error) {
+    await fs.promises.unlink(temp).catch(() => {});
+    throw error;
+  }
+}
+
+function handoffMutation(state, { entryKey, operation, payload = {} } = {}) {
+  const entries = state.entries;
+  const current = entries[entryKey] || null;
+  if (operation === "persist") {
+    if (current) return { changed: false, result: { created: false, record: current } };
+    entries[entryKey] = payload.record;
+    return { changed: true, result: { created: true, record: payload.record } };
+  }
+  if (operation === "claim") {
+    if (!current) return { changed: false, result: { claimed: false, reason: "handoff_not_found" } };
+    if (current.status === "acked" || current.status === "failed_permanent") {
+      return { changed: false, result: { claimed: false, reason: current.status, record: current } };
+    }
+    const nowMs = Date.parse(payload.attemptedAt);
+    const nextMs = Date.parse(current.nextAttemptAt || "");
+    if (current.status === "pending" && Number.isFinite(nextMs) && nextMs > nowMs) {
+      return { changed: false, result: { claimed: false, reason: "backoff", record: current } };
+    }
+    const currentLeaseMs = Date.parse(current.leaseUntil || "");
+    if (current.status === "delivering" && Number.isFinite(currentLeaseMs) && currentLeaseMs > nowMs) {
+      return { changed: false, result: { claimed: false, reason: "leased", record: current } };
+    }
+    current.status = "delivering";
+    current.attempts = Number(current.attempts || 0) + 1;
+    current.handoffAttemptedAt = payload.attemptedAt;
+    current.leaseUntil = new Date(nowMs + Math.max(1000, Number(payload.leaseMs) || 30000)).toISOString();
+    entries[entryKey] = current;
+    return { changed: true, result: { claimed: true, record: current } };
+  }
+  if (!current) throw new Error("TELERADAR_HANDOFF_NOT_FOUND");
+  if (operation === "mark_attempted") {
+    current.handoffAttemptedAt = payload.attemptedAt;
+  } else if (operation === "retry") {
+    current.status = "pending";
+    current.nextAttemptAt = payload.nextAttemptAt;
+    current.leaseUntil = null;
+    current.lastErrorCode = payload.errorCode;
+  } else if (operation === "accepted") {
+    current.status = "acked";
+    current.radarAcceptedAt = payload.acceptedAt;
+    current.handoffLatencyMs = Math.max(0, Date.parse(payload.acceptedAt) - Date.parse(current.capturedAt));
+    current.nextAttemptAt = null;
+    current.leaseUntil = null;
+    current.lastErrorCode = null;
+    current.radarReceipt = payload.receipt;
+  } else if (operation === "permanent") {
+    current.status = "failed_permanent";
+    current.failedAt = payload.failedAt;
+    current.nextAttemptAt = null;
+    current.leaseUntil = null;
+    current.lastErrorCode = payload.errorCode;
+  } else {
+    throw new Error("TELERADAR_HANDOFF_MUTATION_UNKNOWN");
+  }
+  entries[entryKey] = current;
+  return { changed: true, result: current };
+}
+
+async function mutateHandoffFile({ file, entryKey, clientId, operation, payload } = {}) {
+  if (!path.isAbsolute(String(file || ""))) throw new Error("TELERADAR_MUTATION_PATH_REQUIRED");
+  let raw;
+  let sourceStat = null;
+  try {
+    raw = await fs.promises.readFile(file, "utf8");
+    sourceStat = await fs.promises.stat(file);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    raw = JSON.stringify({ schemaVersion: 1, entries: {}, clienteId: clientId });
+  }
+  const state = JSON.parse(raw);
+  if (state?.schemaVersion !== 1 || !state.entries || Array.isArray(state.entries)) {
+    throw new Error("TELERADAR_STORAGE_CORRUPTED");
+  }
+  const mutation = handoffMutation(state, { entryKey, operation, payload });
+  if (mutation.changed) {
+    const content = Buffer.from(`${JSON.stringify(state, null, 2)}\n`, "utf8");
+    await writeJsonAtomicFromWorker(file, content, sourceStat);
+  }
+  return mutation.result;
+}
+
+function mutateHandoffInWorker(options = {}) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(__filename, { workerData: { mode: "mutate_handoff", ...options } });
+    worker.once("message", message => {
+      if (message?.ok === true) resolve(message.result);
+      else reject(Object.assign(new Error(message?.error || "TELERADAR_MUTATION_FAILED"), { code: message?.code }));
+    });
+    worker.once("error", reject);
+    worker.once("exit", code => {
+      if (code !== 0) reject(new Error(`TELERADAR_MUTATION_WORKER_EXIT_${code}`));
+    });
+  });
+}
+
 async function compactFile({
   file,
   keepTerminal = 512,
@@ -186,9 +297,12 @@ function compactInWorker(options = {}) {
 }
 
 if (!isMainThread) {
-  compactFile(workerData)
+  const task = workerData?.mode === "mutate_handoff"
+    ? mutateHandoffFile(workerData)
+    : compactFile(workerData);
+  task
     .then(result => parentPort.postMessage({ ok: true, result }))
     .catch(error => parentPort.postMessage({ ok: false, error: error?.message, code: error?.code || null }));
 }
 
-module.exports = { compactInWorker, compactFile };
+module.exports = { compactInWorker, compactFile, mutateHandoffInWorker, mutateHandoffFile };

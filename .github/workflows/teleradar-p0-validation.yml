@@ -67,6 +67,7 @@ jobs:
             modules/teleradar/handoff.repository.js \
             modules/teleradar/handoff.service.js \
             tests/teleradar-handoff-compaction-stress.test.js \
+            tests/teleradar-handoff-real-mutations-stress.test.js \
             tests/teleradar-handoff.test.js \
             tests/teleradar.test.js | sort)"
           test "$changed" = "$expected"
@@ -96,6 +97,7 @@ jobs:
           node tests/teleradar-semantica-comercial.test.js
           node tests/teleradar-handoff.test.js
           node tests/teleradar-handoff-compaction-stress.test.js
+          node tests/teleradar-handoff-real-mutations-stress.test.js
 
       - name: PostgreSQL client transaction and protected-module regressions
         shell: bash
