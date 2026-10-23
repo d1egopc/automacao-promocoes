@@ -1,0 +1,41 @@
+name: Messenger profile and image save Node24 backend
+on:
+  push:
+    branches: [validation/mensageiro-profile-image-save-node24-20261023]
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/validation/mensageiro-profile-image-save-node24-20261023'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Scope and isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --version | grep -Eq '^v24\.'
+          git diff --check 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD
+          git diff --name-only 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD | sort > /tmp/actual
+          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' | sort > /tmp/expected
+          diff -u /tmp/expected /tmp/actual
+      - run: npm ci
+      - name: Messenger focal regressions
+        run: |
+          node tests/mensageiro-v3-original-ui-compat.test.cjs
+          node tests/mensageiro-v3-operational-hotfix.test.cjs
+          node tests/mensageiro-v3-m322-real-handlers.test.cjs
+          node tests/mensageiro-v3-m34-p21-recurrence.test.cjs
+          node tests/mensageiro-v3-baileys-ack.test.cjs
+          node tests/mensageiro-v3-universal.test.cjs
+          node tests/mensageiro-v3-m34-p3-rollback.test.cjs

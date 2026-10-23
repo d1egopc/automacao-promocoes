@@ -120,6 +120,7 @@ class V3Store {
     this.clock = clock;
     this.lockPath = `${this.filePath}.lock`;
     this.migrationMarkerPath = `${this.filePath}.migration-authority`;
+    this.transactionDepth = 0;
     this.state = ensureState(this.read());
   }
 
@@ -259,11 +260,32 @@ class V3Store {
     this.state.revision += 1;
     workspace.audit.push({ at, event, ...details });
     workspace.audit = workspace.audit.slice(-500);
-    this._persist();
+    if (this.transactionDepth === 0) this._persist();
     return at;
   }
 
+  transaction(fn) {
+    if (typeof fn !== "function") throw new Error("transacao_funcao_obrigatoria");
+    if (this.transactionDepth > 0) return clone(fn());
+    return this._withFileLock(() => {
+      this.state = ensureState(this.read());
+      const before = clone(this.state);
+      this.transactionDepth = 1;
+      try {
+        const result = fn();
+        this._persist();
+        return clone(result);
+      } catch (error) {
+        this.state = before;
+        throw error;
+      } finally {
+        this.transactionDepth = 0;
+      }
+    });
+  }
+
   _mutate(fn) {
+    if (this.transactionDepth > 0) return clone(fn());
     return this._withFileLock(() => {
       // Always load the last committed revision while holding the lock. This
       // makes two independent scheduler/store instances serialize safely.

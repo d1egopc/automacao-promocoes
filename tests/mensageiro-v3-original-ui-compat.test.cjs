@@ -31,7 +31,7 @@ function createFixture(clock = Date.now) {
   fs.writeFileSync(filePath, JSON.stringify({ schemaVersion: 3, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} } }));
   const store = new V3Store({ filePath, clock });
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
   const mounted = createLegacyCompatRoutes({ store, clock, getClienteId: () => "workspace-a", usuarioTemRecurso: () => true });
   app.use("/mensageiro", mounted.router);
   const server = app.listen(0);
@@ -81,6 +81,51 @@ function createFixture(clock = Date.now) {
     assert.deepEqual(Object.keys(fixture.store.getProfile("workspace-a", profile.id).cards).sort(), [
       "attendance", "commands", "faq", "farewell", "flows", "groupManager", "quickReplies", "scheduled", "welcome"
     ]);
+
+    // A compat write is one durable transaction. A later validation failure
+    // must not leave the profile migrated while its schedules remain stale.
+    const invalidMigration = await request(fixture.server, "POST", "/mensageiro", {
+      perfis: [{
+        id: profile.id, nome: "Perfil original", ativo: true,
+        sessaoId: "session-b", grupos: ["group-b"],
+        modulos: { programacoes: { ativo: true } }
+      }],
+      programacoes: [{
+        id: "draft-not-persisted", perfilId: profile.id, nome: "Inválida",
+        ativo: true, tipo: "intervalo", intervaloMinutos: 15, grupos: [],
+        conteudos: [{ id: "invalid-content", tipo: "texto", texto: "não persistir" }]
+      }]
+    });
+    assert.equal(invalidMigration.status, 422);
+    assert.equal(invalidMigration.body.codigo, "destinos_obrigatorios");
+    const afterInvalidMigration = await request(fixture.server, "GET", "/mensageiro");
+    assert.equal(afterInvalidMigration.body.perfis[0].sessaoId, "session-a", "422 reverte a troca de sessão inteira");
+    assert.equal(afterInvalidMigration.body.programacoes.length, 1, "422 não remove programação existente");
+
+    const imageDataUrl = `data:image/jpeg;base64,${Buffer.alloc(2_000_000, 1).toString("base64")}`;
+    const persistedScheduleId = saved.body.programacoes[0].id;
+    let persistCalls = 0;
+    const originalPersist = fixture.store._persist.bind(fixture.store);
+    fixture.store._persist = () => { persistCalls += 1; return originalPersist(); };
+    const migratedWithImage = await request(fixture.server, "POST", "/mensageiro", {
+      perfis: [{
+        id: profile.id, nome: "Perfil original", ativo: true,
+        sessaoId: "session-b", grupos: ["group-b"],
+        modulos: { programacoes: { ativo: true } }
+      }],
+      programacoes: [{
+        id: persistedScheduleId, perfilId: profile.id, nome: "Imagem persistida",
+        ativo: true, tipo: "intervalo", intervaloMinutos: 15, grupos: ["group-b"],
+        conteudos: [{ id: "content-image", tipo: "imagem", texto: "", imagem: imageDataUrl }]
+      }]
+    });
+    assert.equal(migratedWithImage.status, 200);
+    assert.equal(persistCalls, 1, "perfil, cards e programação são publicados em uma única persistência");
+    const reloadedAfterImage = new V3Store({ filePath: fixture.filePath, clock: () => fakeNow });
+    assert.equal(reloadedAfterImage.getProfile("workspace-a", profile.id).sessionId, "session-b");
+    const imageSchedule = reloadedAfterImage.getSchedule("workspace-a", persistedScheduleId);
+    assert.equal(imageSchedule.destinations[0], "group-b");
+    assert.equal(imageSchedule.content.conteudos[0].imagem, imageDataUrl, "imagem sobrevive ao reload do store");
 
     // The original form sends horario/data, not an absolute nextRunAt. The
     // compat boundary must translate it before the persisted V3 scheduler

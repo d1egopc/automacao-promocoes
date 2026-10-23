@@ -434,25 +434,29 @@ function createLegacyCompatRoutes(deps = {}) {
   router.post("/", (req, res) => {
     const id = allowed(req, res); if (!id) return;
     try {
-      const body = asObject(req.body);
-      const now = typeof deps.clock === "function" ? Number(deps.clock()) : Date.now();
-      const profileIdMap = new Map();
-      for (const item of asArray(body.perfis)) {
-        const saved = applyProfile(store, id, item);
-        if (item?.id) profileIdMap.set(String(item.id), saved.id);
-      }
-      const profiles = listProfilesSafe(store, id);
-      const commands = asArray(body.comandos);
-      const commandsByProfile = commands.map(item => ({ ...item, perfilId: profileIdMap.get(text(item?.perfilId)) || text(item?.perfilId) }));
-      const schedulesByProfile = asArray(body.programacoes).map(item => ({ ...item, perfilId: profileIdMap.get(text(item?.perfilId)) || text(item?.perfilId) }));
-      for (const p of profiles) if (commandsByProfile.some(item => text(item?.perfilId) === p.id)) applyCommands(store, id, p.id, commandsByProfile);
-      for (const p of profiles) if (schedulesByProfile.some(item => text(item?.perfilId) === p.id)) {
-        const current = store.getProfile(id, p.id);
-        if (current.cards.scheduled.active !== true && schedulesByProfile.some(item => text(item?.perfilId) === p.id)) {
-          store.saveCard(id, p.id, "scheduled", { active: false, configuration: current.cards.scheduled.configuration || {} });
+      const persist = () => {
+        const body = asObject(req.body);
+        const now = typeof deps.clock === "function" ? Number(deps.clock()) : Date.now();
+        const profileIdMap = new Map();
+        for (const item of asArray(body.perfis)) {
+          const saved = applyProfile(store, id, item);
+          if (item?.id) profileIdMap.set(String(item.id), saved.id);
         }
-        applySchedules(store, id, p.id, schedulesByProfile, now);
-      }
+        const profiles = listProfilesSafe(store, id);
+        const commands = asArray(body.comandos);
+        const commandsByProfile = commands.map(item => ({ ...item, perfilId: profileIdMap.get(text(item?.perfilId)) || text(item?.perfilId) }));
+        const schedulesByProfile = asArray(body.programacoes).map(item => ({ ...item, perfilId: profileIdMap.get(text(item?.perfilId)) || text(item?.perfilId) }));
+        for (const p of profiles) if (commandsByProfile.some(item => text(item?.perfilId) === p.id)) applyCommands(store, id, p.id, commandsByProfile);
+        for (const p of profiles) if (schedulesByProfile.some(item => text(item?.perfilId) === p.id)) {
+          const current = store.getProfile(id, p.id);
+          if (current.cards.scheduled.active !== true && schedulesByProfile.some(item => text(item?.perfilId) === p.id)) {
+            store.saveCard(id, p.id, "scheduled", { active: false, configuration: current.cards.scheduled.configuration || {} });
+          }
+          applySchedules(store, id, p.id, schedulesByProfile, now);
+        }
+      };
+      if (typeof store.transaction === "function") store.transaction(persist);
+      else persist();
       return res.json(stateFor(store, id));
     } catch (error) { return res.status(422).json({ ok: false, codigo: errorCode(error) }); }
   });
