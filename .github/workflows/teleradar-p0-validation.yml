@@ -97,11 +97,36 @@ jobs:
           node tests/teleradar-handoff.test.js
           node tests/teleradar-handoff-compaction-stress.test.js
 
-      - name: RIO PostgreSQL runtime and protected-module regressions
+      - name: PostgreSQL client transaction and protected-module regressions
         shell: bash
         run: |
           set -Eeuo pipefail
-          node tests/universal-flow-radar-runtime-process.postgres.js
+          node - <<'NODE'
+          const { Client } = require('pg');
+          (async () => {
+            const client = new Client({
+              host: process.env.PGHOST,
+              port: Number(process.env.PGPORT),
+              user: process.env.PGUSER,
+              database: process.env.PGDATABASE,
+              ssl: false,
+            });
+            await client.connect();
+            try {
+              await client.query('BEGIN');
+              await client.query('CREATE TEMP TABLE teleradar_ci_probe (id integer primary key, status text not null) ON COMMIT DROP');
+              await client.query("INSERT INTO teleradar_ci_probe (id, status) VALUES (1, 'ready')");
+              const result = await client.query('SELECT status FROM teleradar_ci_probe WHERE id = 1');
+              if (result.rows[0]?.status !== 'ready') throw new Error('POSTGRES_TRANSACTION_PROBE_FAILED');
+              await client.query('COMMIT');
+            } finally {
+              await client.end();
+            }
+          })().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
+          NODE
           node tests/universal-flow-queue-executor.test.js
           node tests/clonador-grupos-engine-bridge.test.js
           node tests/manual-v2-contract.test.js
