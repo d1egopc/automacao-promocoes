@@ -1149,6 +1149,43 @@ async function invalidarAuthorityReady(clienteId = "admin", dados = {}, deps = {
   }, deps);
 }
 
+async function recuperarProofFilaVivaPosConfirmacao(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const expectedRevision = numeroInteiroNaoNegativo(dados.expectedRevision);
+  const expectedGeneration = numeroInteiroNaoNegativo(dados.expectedGeneration);
+  if (expectedRevision === null || expectedGeneration === null ||
+      typeof dados.publicarProofCoordenado !== "function") {
+    return { ok: false, motivo: "proof_recovery_guard_incompleto", clienteId: cliente };
+  }
+  return comTransacao(async (client) => {
+    await inicializarSchemaQueueManifestState(client);
+    const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    if (atual.revision !== expectedRevision) {
+      return { ok: false, motivo: "revision_stale", clienteId: cliente, state: atual };
+    }
+    if (atual.vivaGeneration !== expectedGeneration ||
+        atual.durableCheckpointGeneration !== expectedGeneration ||
+        atual.dirtyGeneration !== null || atual.pendingCheckpointRevision ||
+        atual.pendingCheckpointTargetGeneration !== null || atual.authorityReady === true) {
+      return { ok: false, motivo: "proof_recovery_state_invalido", clienteId: cliente, state: atual };
+    }
+    const publicado = await dados.publicarProofCoordenado({ state: atual });
+    const proof = normalizarProof(publicado?.proof);
+    if (publicado?.ok !== true || !proof || proof.clienteId !== cliente ||
+        proof.arquivo !== "fila-viva.json" || proof.generation !== expectedGeneration ||
+        !/^[a-f0-9]{64}$/.test(String(proof.contentHash || ""))) {
+      return { ok: false, motivo: publicado?.motivo || "proof_recovery_publicacao_invalida",
+        clienteId: cliente, state: atual };
+    }
+    const atualizado = await atualizarState(client, {
+      ...atual,
+      vivaFileProof: proof,
+      authorityReady: false
+    }, dados.motivo || "viva_proof_pos_confirmacao");
+    return { ...atualizado, recuperado: atualizado.ok === true, proof };
+  }, deps);
+}
+
 async function lerStateObservacional(clienteId = "admin", deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const pool = poolPadrao(deps);
@@ -1308,6 +1345,7 @@ module.exports = {
   lerStateObservacional,
   normalizarStateDb,
   prepararReadinessAutoridade,
+  recuperarProofFilaVivaPosConfirmacao,
   invalidarAuthorityReady,
   registrarLegacySyncDuravel,
   registrarMutacaoDuravel,

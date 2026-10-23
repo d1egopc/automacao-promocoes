@@ -565,6 +565,7 @@ function mutateViva(job) {
     statusDepois: String(resultado?.statusDepois || ""),
     causaInterna: String(resultado?.causaInterna || ""),
     totalViva: Number(resultado?.totalViva || 0),
+    targetHash: mutationIntent.hashArquivo(paths.viva),
     bytesLidosViva: Number(resultado?.bytesLidosViva || 0),
     bytesFilaViva: Number(resultado?.bytesFilaViva || 0),
     bytesHistorico: Number(resultado?.bytesHistorico || 0),
@@ -636,14 +637,11 @@ function probeVivaSnapshot(job) {
     operation: OP_VIVA_SNAPSHOT_PROBE,
     workerThreadId: threadId,
     currentHash,
+    currentIdentity: vivaAfterHash,
     matchPrevious: currentHash === job.previousHash,
     matchTarget: currentHash === job.targetHash,
     legacyFenceCovered,
     ...(probeVivaFence ? {
-      currentIdentity: vivaAfterHash ? {
-        size: Number(vivaAfterHash.size || 0),
-        mtimeMs: Number(vivaAfterHash.mtimeMs || 0)
-      } : null,
       vivaFenceCovered,
       vivaItemCount,
       ...(job.includeFenceCandidates === true ? {

@@ -322,8 +322,9 @@ function proofArquivo(clienteId = "admin", arquivo = "", dados = {}, stat = {}, 
     generation,
     targetGeneration: generation,
     fileRevision: texto(dados.fileRevision),
-    ...( /^[a-f0-9]{64}$/.test(String(dados.contentHash || ""))
-      ? { contentHash: dados.contentHash } : {} ),
+    contentHash: /^[a-f0-9]{64}$/.test(String(dados.contentHash || ""))
+      ? String(dados.contentHash)
+      : "",
     size: Number(stat.size ?? stat.bytes ?? 0),
     mtimeMs: Number(stat.mtimeMs || 0),
     ctimeMs: Number.isFinite(Number(stat.ctimeMs)) ? Number(stat.ctimeMs) : null,
@@ -394,7 +395,17 @@ function publicarProofFilaViva(clienteId = "admin", dados = {}, deps = {}) {
   const caminho = caminhoJsonCliente(cliente, FILA_VIVA_ARQUIVO, deps);
   const stat = statArquivoSeguro(caminho, fsImpl);
   if (!stat.existe) return { ok: false, motivo: "fila_viva_inexistente_para_proof" };
-  const proof = proofArquivo(cliente, FILA_VIVA_ARQUIVO, dados, stat, deps.agora || Date.now());
+  let contentHash = String(dados.contentHash || "");
+  if (!/^[a-f0-9]{64}$/.test(contentHash)) {
+    const hashArquivo = typeof deps.hashArquivo === "function"
+      ? deps.hashArquivo
+      : mutationIntent.hashArquivo;
+    contentHash = String(hashArquivo(caminho) || "");
+  }
+  if (!/^[a-f0-9]{64}$/.test(contentHash)) {
+    return { ok: false, motivo: "content_hash_invalido" };
+  }
+  const proof = proofArquivo(cliente, FILA_VIVA_ARQUIVO, { ...dados, contentHash }, stat, deps.agora || Date.now());
   if (!proof.fileRevision) return { ok: false, motivo: "file_revision_invalido", proof };
   const telemetry = deps.vivaProofTelemetry || vivaProofTelemetry.obterOuCriarContexto(cliente, deps, {
     caller: deps.caller || deps.origem || deps.motivo
@@ -2090,7 +2101,8 @@ async function executarMutacaoVivaNoModoConfigurado(clienteId, mutationType, ite
 
   const proof = publicarProofFilaViva(cliente, {
     generation: contexto.nextGeneration,
-    fileRevision: contexto.fileRevision
+    fileRevision: contexto.fileRevision,
+    contentHash: resultado.targetHash
   }, deps);
   if (proof.ok !== true) {
     return {
@@ -3851,7 +3863,8 @@ async function reconciliarIntentMutacaoViva(clienteId = "admin", deps = {}) {
         return { ok: false, motivo: "intent_state_changed" };
       }
       const proof = publicarProofFilaViva(cliente, {
-        generation: intent.targetGeneration, fileRevision: intent.fileRevision
+        generation: intent.targetGeneration, fileRevision: intent.fileRevision,
+        contentHash: revalidado.currentHash
       }, deps);
       return proof.ok === true
         ? { ok: true, vivaFileProof: proof.proof, legacyFileProof: legacyProof,
@@ -4102,7 +4115,8 @@ function escreverFilaViva(clienteId = "admin", entradas = [], deps = {}) {
     if (ok !== false && deps.publicarFileProof === true) {
       const proof = publicarProofFilaViva(cliente, {
         generation: deps.generation,
-        fileRevision: deps.fileRevision
+        fileRevision: deps.fileRevision,
+        contentHash: deps.contentHash
       }, deps);
       if (proof.ok !== true) {
         return {
