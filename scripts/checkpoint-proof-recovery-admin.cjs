@@ -108,8 +108,10 @@ async function executarRecoveryProofPosConfirmacao(options = {}) {
   const persistence = options.persistence || criarCoordenadorPersistencia({ env, logger });
   try {
     const probe = await persistence.probeVivaSnapshot({ clienteId, dataDir,
-      checkpointRevision: legacyProof.fileRevision, probeViva: true, persistenceMode: "worker" });
-    if (probe?.ok !== true || !HASH_RE.test(texto(probe.currentHash)) || !probe.currentIdentity) {
+      checkpointRevision: legacyProof.fileRevision, probeViva: true,
+      includeLegacyCheckpointProjection: true, persistenceMode: "worker" });
+    if (probe?.ok !== true || !HASH_RE.test(texto(probe.currentHash)) || !probe.currentIdentity ||
+        probe.checkpointProjection?.contentHash !== legacyProof.contentHash) {
       return { ok: false, stage: "probe", motivo: probe?.motivo || "proof_recovery_probe_invalido" };
     }
     const recuperado = await repo.recuperarProofFilaVivaPosConfirmacao(clienteId, {
@@ -138,20 +140,13 @@ async function executarRecoveryProofPosConfirmacao(options = {}) {
       return { ok: false, stage: "proof_revalidation", motivo: "proof_recovery_db_invalido", state: afterProof };
     }
 
-    const prepared = await persistence.prepare({ clienteId, dataDir,
-      checkpointRevision: legacyProof.fileRevision, targetGeneration: generation,
-      expectedVivaHash: probe.currentHash, nowMs: Date.now(), persistenceMode: "worker" });
-    if (prepared?.ok !== true || !prepared.checkpointProjection) {
-      return { ok: false, stage: "projection_prepare", motivo: prepared?.motivo || "projection_prepare_failed" };
-    }
     const rebuild = await api.fila.reconstruirProjecaoLeveAposCheckpoint(clienteId, {
       checkpointRevision: legacyProof.fileRevision, targetGeneration: generation,
-      checkpointSnapshot: prepared.checkpointProjection, agora: Date.now()
+      checkpointSnapshot: probe.checkpointProjection, agora: Date.now()
     }, { ...deps, validarProjecaoAposCheckpoint: async ({ agora }) => {
       const descoberta = await discoverSources({ dataDir, workspaceId: clienteId, nowMs: agora, fsApi: fs.promises });
       return descoberta.error ? { ok: false, motivo: descoberta.error.reasonCode } : { ok: true, descoberta };
     } });
-    await persistence.cleanup?.({ clienteId, dataDir, checkpointRevision: legacyProof.fileRevision, persistenceMode: "worker" });
     if (rebuild?.ok !== true) return { ok: false, stage: "projection", motivo: rebuild?.motivo || "projection_failed" };
 
     const index = await api.buildIndex({ dataDir, workspaceId: clienteId, nowMs: Date.now(),

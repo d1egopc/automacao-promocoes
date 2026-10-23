@@ -599,6 +599,22 @@ function probeVivaSnapshot(job) {
   let vivaFenceCandidates = [];
   let vivaFenceRelatedCandidates = [];
   let vivaItemCount = null;
+  let checkpointProjection = null;
+  if (job.includeLegacyCheckpointProjection === true) {
+    const legacy = readArray(paths.arquivo, { absentOk: false });
+    const legacyHash = mutationIntent.hashArquivo(paths.arquivo);
+    if (!sameOptionalIdentity(legacy.identity, statOptional(paths.arquivo)) ||
+        !/^[a-f0-9]{64}$/.test(String(legacyHash || ""))) {
+      return { ok: false, operation: OP_VIVA_SNAPSHOT_PROBE, motivo: "legacy_snapshot_changed_during_probe" };
+    }
+    checkpointProjection = {
+      projecao: projetarFilaLeve(legacy.value, {
+        clienteId: paths.cliente, agora: Number(job.nowMs) || agoraMs()
+      }),
+      hashes: hashesFilaViva(legacy.value, paths.cliente),
+      contentHash: legacyHash
+    };
+  }
   if (probeVivaFence) {
     const hashes = new Set(job.vivaFenceHashes);
     const viva = readArray(paths.viva, { absentOk: true });
@@ -638,6 +654,7 @@ function probeVivaSnapshot(job) {
     workerThreadId: threadId,
     currentHash,
     currentIdentity: vivaAfterHash,
+    checkpointProjection,
     matchPrevious: currentHash === job.previousHash,
     matchTarget: currentHash === job.targetHash,
     legacyFenceCovered,
