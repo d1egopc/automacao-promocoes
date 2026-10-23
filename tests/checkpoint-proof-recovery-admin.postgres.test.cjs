@@ -34,10 +34,10 @@ test("recovery pos-confirmacao publica hash real e restaura cobertura 665/665", 
   const put = (name, value) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file(name), JSON.stringify(value)); };
   try {
     const live = Array.from({ length: 876 }, (_, i) => ({ id: `live_${i}`, clienteId: workspace,
-      status: "pendente", imagem: `/social/${sha(`media_${i % 664}`)}.jpg` }));
+      status: "pendente", imagem: `/data/clientes/${workspace}/renderizados/${sha(`media_${i % 664}`)}.png` }));
     const exclusive = { id: "engine_105447_1791732816360", engineOfertaId: "105447", engineJobId: "606927",
       clienteId: workspace, status: "expirado",
-      imagem: `/identidade-visual-ofertas/${protectedHash}.png`,
+      imagem: `/data/clientes/${workspace}/renderizados/${protectedHash}.png`,
       destinosEstado: { first: { estado: "enviado", ack: "duravel" }, second: { estado: "aguardando" } } };
     put("fila.json", [...live, exclusive]);
     put("fila-viva.json", live.map(item => ({ id: item.id, item, bucket: "viva" })));
