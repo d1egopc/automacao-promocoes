@@ -107,7 +107,8 @@ async function executarRecoveryProofPosConfirmacao(options = {}) {
 
   const persistence = options.persistence || criarCoordenadorPersistencia({ env, logger });
   try {
-    const probe = await persistence.probeVivaSnapshot({ clienteId, dataDir, probeViva: true, persistenceMode: "worker" });
+    const probe = await persistence.probeVivaSnapshot({ clienteId, dataDir,
+      checkpointRevision: legacyProof.fileRevision, probeViva: true, persistenceMode: "worker" });
     if (probe?.ok !== true || !HASH_RE.test(texto(probe.currentHash)) || !probe.currentIdentity) {
       return { ok: false, stage: "probe", motivo: probe?.motivo || "proof_recovery_probe_invalido" };
     }
