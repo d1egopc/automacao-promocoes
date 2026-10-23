@@ -375,6 +375,7 @@ async function testStaticBoundaries() {
     "checkpoint.repository.js",
     "dedupe.repository.js",
     "envelope.contract.js",
+    "handoff-compaction.worker.js",
     "handoff.repository.js",
     "handoff.service.js",
     "index.js",

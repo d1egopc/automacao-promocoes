@@ -1,0 +1,108 @@
+name: TeleRadar P0 persistence CI only
+
+on:
+  push:
+    branches:
+      - validation/teleradar-p0-node24-20261022
+
+permissions:
+  contents: read
+
+concurrency:
+  group: teleradar-p0-node24-pg17
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/validation/teleradar-p0-node24-20261022'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BASE_SHA: cbc8cb776965bd7a472099a6a46a160e70d73035
+      UF_TEST_PG_PORT: "5432"
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGDATABASE: optimus_universal_fixture
+
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prove isolated scope and runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --version | grep -Eq '^v24\.'
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          git diff --check "$BASE_SHA"..HEAD
+          changed="$(git diff --name-only "$BASE_SHA"..HEAD | sort)"
+          expected="$(printf '%s\n' \
+            .github/workflows/teleradar-p0-validation.yml \
+            modules/teleradar/checkpoint.repository.js \
+            modules/teleradar/handoff-compaction.worker.js \
+            modules/teleradar/handoff.repository.js \
+            modules/teleradar/handoff.service.js \
+            tests/teleradar-handoff-compaction-stress.test.js \
+            tests/teleradar-handoff.test.js \
+            tests/teleradar.test.js | sort)"
+          test "$changed" = "$expected"
+          test "$(grep -Ec '^    runs-on: ubuntu-latest$' .github/workflows/teleradar-p0-validation.yml)" = 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: PostgreSQL 17 disposable proof
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          psql -Atqc "show server_version" | grep -Eq '^17\.'
+          psql -v ON_ERROR_STOP=1 -c 'select 1 as disposable_database_ready'
+
+      - name: Syntax and focused TeleRadar tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node --check modules/teleradar/checkpoint.repository.js
+          node --check modules/teleradar/handoff-compaction.worker.js
+          node --check modules/teleradar/handoff.repository.js
+          node --check modules/teleradar/handoff.service.js
+          node tests/teleradar.test.js
+          node tests/teleradar-control-plane.test.js
+          node tests/teleradar-operational-control.test.js
+          node tests/teleradar-semantica-comercial.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/teleradar-handoff-compaction-stress.test.js
+
+      - name: RIO PostgreSQL runtime and protected-module regressions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node tests/universal-flow-radar-runtime-process.postgres.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/clonador-grupos-engine-bridge.test.js
+          node tests/manual-v2-contract.test.js
+          node tests/mensageiro-v3-operational-hotfix.test.cjs

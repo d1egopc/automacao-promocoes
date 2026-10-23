@@ -44,6 +44,13 @@ function validateEnvelope(envelope = {}) {
 function createHandoffRepository({ store = createTeleradarJsonStore(), context } = {}) {
   const validContext = validateTeleRadarContext(context);
 
+  async function compactTerminals(options = {}) {
+    if (typeof store.compactTerminalRecords !== "function") {
+      return { compacted: false, reason: "store_without_compaction" };
+    }
+    return store.compactTerminalRecords(validContext, HANDOFFS_FILE, options);
+  }
+
   function key(eventId) {
     const id = text(eventId);
     if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("TELERADAR_EVENT_ID_INVALID");
@@ -67,6 +74,8 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
   }
 
   return Object.freeze({
+    compactTerminals,
+
     async persist({ envelope, persistedAt }) {
       const eventId = validateEnvelope(envelope);
       const when = iso(persistedAt, "persisted_at");
@@ -148,6 +157,7 @@ function createHandoffRepository({ store = createTeleradarJsonStore(), context }
         }
         record.status = HANDOFF_STATUS.DELIVERING;
         record.attempts = Number(record.attempts || 0) + 1;
+        record.handoffAttemptedAt = when;
         record.leaseUntil = new Date(nowMs + leaseDuration).toISOString();
         entries[key(eventId)] = record;
         return { claimed: true, record };

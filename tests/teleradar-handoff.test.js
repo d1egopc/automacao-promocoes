@@ -233,6 +233,41 @@ async function testRestartResumesPendingAndPermanentFailureObservable() {
   assert.equal(permanentRecord.lastErrorCode, "sem_links");
 }
 
+async function testCompactionFailureNeverRegressesDurableAck() {
+  const store = createMemoryTeleradarStore();
+  const baseRepository = createHandoffRepository({ store, context });
+  let warnings = 0;
+  let ingressCalls = 0;
+  const repository = {
+    ...baseRepository,
+    async compactTerminals() { throw new Error("archive_indisponivel"); }
+  };
+  const handoff = createHandoffService({
+    context,
+    store,
+    repository,
+    logger: { warn() { warnings += 1; } },
+    radarIngress: {
+      async accept() {
+        ingressCalls += 1;
+        return { accepted: true, durable: true, code: "RADAR_ACCEPTED", radarEventId: "43003" };
+      }
+    }
+  });
+  const envelope = envelopeFixture({ messageId: "109" });
+  await handoff.persistEnvelope(envelope);
+  const delivered = await handoff.attempt(envelope.eventId);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(delivered.accepted, true);
+  assert.equal((await handoff.get(envelope.eventId)).status, "acked");
+  assert.equal(ingressCalls, 1);
+  assert.equal(warnings, 1, "falha de manutencao e observavel sem reabrir o ACK");
+  const duplicate = await handoff.attempt(envelope.eventId);
+  assert.equal(duplicate.skipped, true);
+  assert.equal(duplicate.reason, "acked");
+  assert.equal(ingressCalls, 1, "falha de compactacao nunca autoriza replay");
+}
+
 async function testAdmissionDeniedExpiresBeforeRetryAfterRestart() {
   const store = createMemoryTeleradarStore();
   const time = clockFixture();
@@ -536,6 +571,7 @@ async function main() {
   await testObservabilityAndRecoveryStayScoped();
   await testRetryConcurrencyAndCallbackException();
   await testRestartResumesPendingAndPermanentFailureObservable();
+  await testCompactionFailureNeverRegressesDurableAck();
   await testAdmissionDeniedExpiresBeforeRetryAfterRestart();
   await testRestartReschedulesActiveLease();
   await testProtectedNeverPersists();

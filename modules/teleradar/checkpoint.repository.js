@@ -2,10 +2,13 @@
 
 const fs = require("fs");
 const { getClienteJsonPath, normalizarClienteId, writeClienteJson } = require("../../utils/storage");
+const { compactInWorker } = require("./handoff-compaction.worker");
 
 const STORAGE_SCHEMA_VERSION = 1;
 const CHECKPOINTS_FILE = "teleradar-checkpoints.json";
 const mutationQueues = new Map();
+const compactionCooldowns = new Map();
+const compactionInflight = new Map();
 
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -102,6 +105,40 @@ function createTeleradarJsonStore({ read = readClienteJsonStrict, write = writeC
         await write(valid.clientId, fileName, state);
         return clone(result);
       });
+    },
+    async compactTerminalRecords(context, fileName, options = {}) {
+      const valid = validateTeleRadarContext(context);
+      const queueKey = `${valid.clientId}:${fileName}`;
+      const file = getClienteJsonPath(valid.clientId, fileName);
+      const maxActiveBytes = Math.max(1024, Number(options.maxActiveBytes) || 4 * 1024 * 1024);
+      const cooldownMs = Math.max(1000, Number(options.cooldownMs) || 30000);
+      if (compactionInflight.has(queueKey)) return compactionInflight.get(queueKey);
+      if (options.force !== true && Number(compactionCooldowns.get(queueKey) || 0) > Date.now()) {
+        return { compacted: false, reason: "coalesced" };
+      }
+      let stat;
+      try { stat = fs.statSync(file); } catch (error) {
+        if (error?.code === "ENOENT") return { compacted: false, reason: "file_absent" };
+        throw error;
+      }
+      if (stat.size <= maxActiveBytes && options.force !== true) {
+        compactionCooldowns.set(queueKey, Date.now() + cooldownMs);
+        return { compacted: false, reason: "below_size_threshold", bytesBefore: stat.size };
+      }
+      const compaction = enqueueMutation(queueKey, async () => {
+        const result = await compactInWorker({
+          file,
+          keepTerminal: options.keepTerminal,
+          terminalHighWater: options.terminalHighWater,
+          maxActiveBytes
+        });
+        compactionCooldowns.set(queueKey, Date.now() + cooldownMs);
+        return result;
+      });
+      compactionInflight.set(queueKey, compaction);
+      return compaction.finally(() => {
+        if (compactionInflight.get(queueKey) === compaction) compactionInflight.delete(queueKey);
+      });
     }
   });
 }
@@ -112,7 +149,11 @@ function createMemoryTeleradarStore(seed = {}) {
     read: async (clientId, fileName, fallback) => clone(files.get(`${clientId}:${fileName}`) || fallback),
     write: async (clientId, fileName, value) => { files.set(`${clientId}:${fileName}`, clone(value)); }
   });
-  return Object.freeze({ ...store, snapshot: () => clone(Object.fromEntries(files)) });
+  return Object.freeze({
+    ...store,
+    compactTerminalRecords: async () => ({ compacted: false, reason: "memory_store" }),
+    snapshot: () => clone(Object.fromEntries(files))
+  });
 }
 
 function messageId(value) {
