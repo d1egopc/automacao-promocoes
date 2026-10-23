@@ -27,11 +27,12 @@ jobs:
           node --version | grep -Eq '^v24\.'
           git diff --check 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD
           git diff --name-only 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD | sort > /tmp/actual
-          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' | sort > /tmp/expected
+          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' 'tests/mensageiro-v3-lock-identity.test.cjs' | sort > /tmp/expected
           diff -u /tmp/expected /tmp/actual
       - run: npm ci
       - name: Messenger focal regressions
         run: |
+          node --test tests/mensageiro-v3-lock-identity.test.cjs
           node tests/mensageiro-v3-original-ui-compat.test.cjs
           node tests/mensageiro-v3-operational-hotfix.test.cjs
           node tests/mensageiro-v3-m322-real-handlers.test.cjs
@@ -39,3 +40,23 @@ jobs:
           node tests/mensageiro-v3-baileys-ack.test.cjs
           node tests/mensageiro-v3-universal.test.cjs
           node tests/mensageiro-v3-m34-p3-rollback.test.cjs
+      - name: PID 1 lock lifecycle in disposable Node24 containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          live="v3-lock-live-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          trap 'docker rm -f "$live" >/dev/null 2>&1 || true' EXIT
+          docker pull node:24
+          docker run --rm --network none --entrypoint node -v "$PWD:/fixture:ro" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs
+          docker run --rm --network none --entrypoint node -v "$PWD:/fixture:ro" -v "$scratch:/locks" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs docker-legacy-exit /locks/dead
+          sleep 6
+          docker run --rm --network none --entrypoint node -v "$PWD:/fixture:ro" -v "$scratch:/locks" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs docker-blocked /locks/dead
+          docker run -d --name "$live" --network none --entrypoint node -v "$PWD:/fixture:ro" -v "$scratch:/locks" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs docker-legacy-live /locks/live
+          for attempt in {1..20}; do test -f "$scratch/live/state.json.lock" && break; sleep 0.2; done
+          test -f "$scratch/live/state.json.lock"
+          sleep 6
+          test "$(docker inspect -f '{{.State.Running}}' "$live")" = true
+          docker run --rm --network none --entrypoint node -v "$PWD:/fixture:ro" -v "$scratch:/locks" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs docker-blocked /locks/live
+          test "$(docker inspect -f '{{.State.Running}}' "$live")" = true
+          docker run --rm --network none --entrypoint node -v "$PWD:/fixture:ro" -v "$scratch:/locks" -w /fixture node:24 tests/mensageiro-v3-lock-identity.test.cjs docker-valid /locks/valid

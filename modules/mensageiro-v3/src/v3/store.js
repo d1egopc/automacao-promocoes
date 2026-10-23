@@ -14,9 +14,46 @@ function id(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-function sleepSync(milliseconds) {
-  const shared = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(shared), 0, 0, milliseconds);
+const INSTANCE_TOKEN = crypto.randomUUID();
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
+
+function processIdentity(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8");
+    return {
+      boot: fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim(),
+      namespace: fs.readlinkSync("/proc/self/ns/pid"),
+      start: stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]
+    };
+  } catch { return null; }
+}
+
+function lockFailure(reason) {
+  const error = new Error(`mensageiro_v3_lock_timeout:${reason}`);
+  error.code = "MENSAGEIRO_V3_LOCK_BUSY";
+  error.reason = reason;
+  return error;
+}
+
+function ownerTerminated(lock) {
+  if (!Number.isInteger(lock?.pid) || lock.pid < 1) return false;
+  if (!lock.identity) {
+    // Legacy timestamps + PID cannot prove death across container namespaces:
+    // another live container may also have PID 1 and share this directory.
+    // Such locks require a separately authorized, quiesced recovery.
+    return false;
+  }
+  const self = processIdentity(process.pid);
+  if (!self || lock.version !== 2 || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(lock.identity.boot || "") ||
+      !/^pid:\[\d+\]$/.test(lock.identity.namespace || "") || !/^\d+$/.test(lock.identity.start || "") ||
+      typeof lock.token !== "string" || typeof lock.instance !== "string") return false;
+  if (self.boot !== lock.identity.boot) return true;
+  if (self.namespace !== lock.identity.namespace) return false;
+  const current = processIdentity(lock.pid);
+  if (current) return current.start !== lock.identity.start;
+  try { process.kill(lock.pid, 0); } catch (error) { return error.code === "ESRCH"; }
+  return false;
 }
 
 function nowIso(clock) {
@@ -138,44 +175,43 @@ class V3Store {
   reload() { this.state = ensureState(this.read()); return clone(this.state); }
 
   _withFileLock(fn) {
-    const startedAt = Date.now();
+    // Serialize lock metadata transitions too: stat/unlink alone is a TOCTOU
+    // race between reclaimers. A crashed transition guard remains fail-closed.
+    const guard = `${this.lockPath}.guard`;
+    const transition = action => {
+      try { fs.mkdirSync(guard, { mode: 0o700 }); }
+      catch (error) { if (error.code === "EEXIST") throw lockFailure("transition_busy_or_interrupted"); throw error; }
+      try { return action(); } finally { fs.rmdirSync(guard); }
+    };
+    const token = crypto.randomUUID();
     let fd;
-    for (;;) {
+    transition(() => {
       try {
-        fd = fs.openSync(this.lockPath, "wx", 0o600);
-        fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-        break;
-      } catch (error) {
-        if (error.code !== "EEXIST") throw error;
-        try {
-          const stat = fs.statSync(this.lockPath);
-          let ownerAlive = true;
-          try {
-            const lock = JSON.parse(fs.readFileSync(this.lockPath, "utf8"));
-            if (Number.isInteger(lock.pid) && lock.pid !== process.pid) {
-              try { process.kill(lock.pid, 0); } catch (probeError) {
-                if (probeError.code === "ESRCH") ownerAlive = false;
-              }
-            }
-          } catch {
-            // A partially-written lock is treated as live until its age is
-            // clearly stale; never remove a lock merely because it is unreadable.
-            ownerAlive = true;
-          }
-          if (!ownerAlive || (Date.now() - stat.mtimeMs > 10 * 60_000 && stat.size === 0)) {
-            fs.rmSync(this.lockPath, { force: true });
-          }
-        } catch (statError) {
-          if (statError.code !== "ENOENT") throw statError;
-        }
-        if (Date.now() - startedAt >= 10_000) throw new Error("mensageiro_v3_lock_timeout");
-        sleepSync(10);
-      }
-    }
+        const stat = fs.lstatSync(this.lockPath);
+        if (!stat.isFile() || stat.size > 4096) throw lockFailure("owner_ambiguous");
+        let previous;
+        try { previous = JSON.parse(fs.readFileSync(this.lockPath, "utf8")); }
+        catch { throw lockFailure("owner_partial_or_invalid"); }
+        if (!ownerTerminated(previous)) throw lockFailure(previous?.identity ? "owner_alive_or_unproven" : "legacy_or_unidentified_owner");
+        fs.unlinkSync(this.lockPath);
+      } catch (error) { if (error.code !== "ENOENT") throw error; }
+      const owner = { version: 2, token, instance: INSTANCE_TOKEN, pid: process.pid,
+        processStartedAt: PROCESS_STARTED_AT, identity: processIdentity(process.pid), at: new Date().toISOString() };
+      fd = fs.openSync(this.lockPath, "wx", 0o600);
+      try { fs.writeFileSync(fd, JSON.stringify(owner)); fs.fsyncSync(fd); }
+      catch (error) { fs.closeSync(fd); fd = undefined; throw error; }
+    });
     try { return fn(); }
     finally {
-      try { fs.closeSync(fd); } catch {}
-      try { fs.rmSync(this.lockPath, { force: true }); } catch {}
+      try {
+        // An alive owner cannot be reclaimed by any compliant contender. Release
+        // must not compete for the transition guard (which a contender may hold).
+        const actual = fs.lstatSync(this.lockPath);
+        const held = fs.fstatSync(fd);
+        const record = JSON.parse(fs.readFileSync(this.lockPath, "utf8"));
+        if (!actual.isFile() || actual.dev !== held.dev || actual.ino !== held.ino || record.token !== token) throw lockFailure("ownership_changed");
+        fs.unlinkSync(this.lockPath);
+      } finally { fs.closeSync(fd); }
     }
   }
 
