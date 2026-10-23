@@ -107,7 +107,8 @@ test("M3.2.2 — boas-vindas, despedida, FAQ e respostas rápidas usam cards V3 
   const event = { id: "123@g.us", action: "add", participants: ["5511999999999@s.whatsapp.net"] };
   const welcome = await bridge.dispatch({ workspaceId: "ws-v3", profileId, card: "welcome", args: { evento: event, sock: sock(calls), sessaoId: "sess-v3" }, eventId: "welcome-1" });
   assert.equal(welcome.ok, true);
-  assert.equal(calls[0].payload.text, "bem-vindo V3");
+  assert.equal(calls[0].payload.text, "@5511999999999 bem-vindo V3");
+  assert.deepEqual(calls[0].payload.mentions, ["5511999999999@s.whatsapp.net"]);
   const farewellCalls = [];
   const farewell = await bridge.dispatch({ workspaceId: "ws-v3", profileId, card: "farewell", args: { evento: { id: "123@g.us", action: "remove", participants: ["5511999999999@s.whatsapp.net"] }, sock: sock(farewellCalls), sessaoId: "sess-v3" }, eventId: "farewell-1" });
   assert.equal(farewell.ok, true);
