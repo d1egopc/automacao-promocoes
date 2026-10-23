@@ -61,9 +61,9 @@ function zonedToTimestamp(parts, timezone) {
   return guess - (representedAsUtc - guess);
 }
 
-function nextRunAtFromLegacy(raw, now = Date.now()) {
+function nextRunAtFromLegacy(raw, now = Date.now(), { ignoreExplicit = false } = {}) {
   const explicit = Date.parse(raw?.nextRunAt || "");
-  if (Number.isFinite(explicit)) return new Date(explicit).toISOString();
+  if (!ignoreExplicit && Number.isFinite(explicit)) return new Date(explicit).toISOString();
   if (raw?.ativo !== true) return null;
 
   const current = Number(now);
@@ -357,26 +357,63 @@ function applyProfile(store, workspaceId, input) {
   return store.getProfile(workspaceId, profile.id);
 }
 
-function scheduleInput(item, now = Date.now()) {
-  const raw = asObject(item);
-  const contents = asArray(raw.conteudos);
-  const content = {
-    ...clone(raw),
-    conteudos: contents,
-    texto: contents[0]?.texto || raw.texto || raw.mensagem || "",
-    imagem: contents[0]?.imagem || raw.imagem || ""
+const SCHEDULE_TIMING_KEYS = Object.freeze(["tipo", "horario", "data", "timezone", "intervaloMinutos"]);
+
+function scheduleTimingValues(raw) {
+  const value = asObject(raw);
+  const content = asObject(value.content);
+  const intervalMs = Number(value.intervalMs || 0) || 0;
+  const tipo = text(value.tipo ?? content.tipo, intervalMs > 0 ? "intervalo" : "horario");
+  return {
+    tipo,
+    horario: text(value.horario ?? content.horario),
+    data: text(value.data ?? content.data),
+    timezone: text(value.timezone ?? content.timezone, "America/Sao_Paulo"),
+    intervaloMinutos: Number(value.intervaloMinutos ?? content.intervaloMinutos ?? (intervalMs > 0 ? intervalMs / 60_000 : 0)) || 0
   };
+}
+
+function hasScheduleTimingInput(raw) {
+  return SCHEDULE_TIMING_KEYS.some(key => Object.prototype.hasOwnProperty.call(raw || {}, key));
+}
+
+function scheduleTimingChanged(raw, previous) {
+  if (!previous) return hasScheduleTimingInput(raw);
+  if (!hasScheduleTimingInput(raw)) return false;
+  const incoming = scheduleTimingValues({ ...scheduleTimingValues(previous), ...asObject(raw) });
+  const persisted = scheduleTimingValues(previous);
+  return SCHEDULE_TIMING_KEYS.some(key => incoming[key] !== persisted[key]);
+}
+
+function scheduleInput(item, now = Date.now(), previous = null) {
+  const incoming = asObject(item);
+  const previousLegacy = previous ? legacySchedule(previous) : null;
+  const changedTiming = scheduleTimingChanged(incoming, previousLegacy);
+  const raw = previousLegacy ? { ...previousLegacy, ...incoming } : incoming;
+  const contentBase = previous?.content && typeof previous.content === "object"
+    ? { ...clone(previous.content), ...clone(incoming) }
+    : raw;
+  const contents = asArray(contentBase.conteudos);
+  const fallbackContent = Object.keys(contentBase).length ? contentBase : { tipo: "texto", texto: "" };
   const intervalMs = raw.tipo === "intervalo"
     ? Math.max(0, Number(raw.intervaloMinutos || 0) * 60_000)
     : (!raw.data ? 24 * 60 * 60 * 1000 : 0);
+  const nextRunAt = previous && !changedTiming
+    ? previous.nextRunAt || null
+    : nextRunAtFromLegacy(raw, now, { ignoreExplicit: Boolean(hasScheduleTimingInput(incoming)) });
   return {
-    name: text(raw.nome, "Programação"),
-    timezone: text(raw.timezone, "America/Sao_Paulo"),
-    nextRunAt: nextRunAtFromLegacy(raw, now),
+    name: text(raw.nome || raw.name, previous?.name || "Programação"),
+    timezone: text(raw.timezone, previous?.timezone || "America/Sao_Paulo"),
+    nextRunAt,
     intervalMs,
-    destinations: asArray(raw.grupos).map(String).filter(Boolean),
-    content,
-    artifactId: raw.artifactId || null,
+    destinations: asArray(raw.grupos ?? previous?.destinations).map(String).filter(Boolean),
+    content: {
+      ...clone(fallbackContent),
+      conteudos: contents,
+      texto: contents[0]?.texto || raw.texto || raw.mensagem || "",
+      imagem: contents[0]?.imagem || raw.imagem || ""
+    },
+    artifactId: raw.artifactId || previous?.artifactId || null,
     allowInactive: true
   };
 }
@@ -387,8 +424,9 @@ function applySchedules(store, workspaceId, profileId, items, now = Date.now()) 
   const seen = new Set();
   for (const item of incoming) {
     const id = text(item.id);
-    const patch = scheduleInput(item, now);
-    if (id && store.getSchedule(workspaceId, id)) {
+    const previous = id ? store.getSchedule(workspaceId, id) : null;
+    const patch = scheduleInput(item, now, previous);
+    if (id && previous) {
       store.updateSchedule(workspaceId, id, { ...patch, active: item.ativo === true });
       seen.add(id);
     } else {

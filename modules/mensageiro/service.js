@@ -376,6 +376,20 @@ function montarPayloadGrupoMensageiro({ imagem = "", texto = "", modoGrupo = "im
   return texto ? { payload: { text: texto }, tipo: "texto" } : null;
 }
 
+function montarPayloadEventoGrupoMensageiro({ imagem = "", texto = "", modoGrupo = "imagem_texto", participante = "" } = {}) {
+  const participanteNormalizado = normalizarJidMensageiro(participante);
+  const mencaoSegura = typeof participanteNormalizado === "string" &&
+    (participanteNormalizado.endsWith("@s.whatsapp.net") || participanteNormalizado.endsWith("@lid"));
+  const numeroMencao = mencaoSegura ? participanteNormalizado.split("@")[0] : "";
+  const textoFinal = mencaoSegura && texto ? `@${numeroMencao} ${texto}` : texto;
+  const envio = montarPayloadGrupoMensageiro({ imagem, texto: textoFinal, modoGrupo });
+  if (!envio) return null;
+  if (mencaoSegura && (envio.payload.text || envio.payload.caption)) {
+    envio.payload.mentions = [participanteNormalizado];
+  }
+  return envio;
+}
+
 function montarPayloadComandoGrupo({ resposta = {}, mencionarAutor = false, participante = "" } = {}) {
   const tipo = ["texto", "imagem", "imagem_texto"].includes(resposta?.tipo)
     ? resposta.tipo
@@ -1498,10 +1512,11 @@ eventosMensageiroRecentes.set(
     if (!jidGrupoWhatsapp(grupoId)) continue;
     jidFinalEnviado = grupoId;
 
-    const envioGrupo = montarPayloadGrupoMensageiro({
+    const envioGrupo = montarPayloadEventoGrupoMensageiro({
       imagem,
       texto: textoFinal,
-      modoGrupo: envioEvento.modoGrupo
+      modoGrupo: envioEvento.modoGrupo,
+      participante
     });
     if (!envioGrupo) continue;
 

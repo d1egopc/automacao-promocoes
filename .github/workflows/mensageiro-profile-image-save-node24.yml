@@ -27,7 +27,7 @@ jobs:
           node --version | grep -Eq '^v24\.'
           git diff --check 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD
           git diff --name-only 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD | sort > /tmp/actual
-          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' 'tests/mensageiro-v3-lock-identity.test.cjs' | sort > /tmp/expected
+          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'modules/mensageiro/service.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' 'tests/mensageiro-v3-lock-identity.test.cjs' 'tests/mensageiro-v3-schedule-timezone.test.cjs' 'tests/mensageiro-grupo-envio.test.cjs' | sort > /tmp/expected
           diff -u /tmp/expected /tmp/actual
       - run: npm ci
       - name: Messenger focal regressions
@@ -40,6 +40,8 @@ jobs:
           node tests/mensageiro-v3-baileys-ack.test.cjs
           node tests/mensageiro-v3-universal.test.cjs
           node tests/mensageiro-v3-m34-p3-rollback.test.cjs
+          node tests/mensageiro-v3-schedule-timezone.test.cjs
+          node tests/mensageiro-grupo-envio.test.cjs
       - name: PID 1 lock lifecycle in disposable Node24 containers
         shell: bash
         run: |

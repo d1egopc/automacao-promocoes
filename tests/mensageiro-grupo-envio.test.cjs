@@ -126,7 +126,10 @@ function sleep(ms) {
   sock = await disparar({ participante: "5511000000004@s.whatsapp.net" });
   assert.strictEqual(sock.envios.length, 1, "grupo monitorado deve receber mensagem");
   assert.strictEqual(sock.envios[0].jid, "grupo_monitorado@g.us", "modo grupo envia no grupo");
-  assert.deepStrictEqual(sock.envios[0].payload, { text: "Bem-vindo 5511000000004" }, "grupo texto deve montar payload correto");
+  assert.deepStrictEqual(sock.envios[0].payload, {
+    text: "@5511000000004 Bem-vindo 5511000000004",
+    mentions: ["5511000000004@s.whatsapp.net"]
+  }, "grupo texto deve montar payload correto com menção PN");
 
   const imagemPerfil = `data:image/png;base64,${Buffer.from("profile-image").toString("base64")}`;
   configurar({
@@ -145,18 +148,20 @@ function sleep(ms) {
   assert.strictEqual(sock.envios.length, 1, "modulo ativo do perfil nao depende da flag global");
   assert.strictEqual(sock.envios[0].jid, "grupo_monitorado@g.us", "perfil preserva o destino de grupo");
   assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "perfil preserva a imagem configurada");
-  assert.strictEqual(sock.envios[0].payload.caption, "Perfil 5511000000020", "perfil preserva a mensagem configurada");
+  assert.strictEqual(sock.envios[0].payload.caption, "@5511000000020 Perfil 5511000000020", "perfil preserva a mensagem configurada com menção PN");
+  assert.deepStrictEqual(sock.envios[0].payload.mentions, ["5511000000020@s.whatsapp.net"], "boas-vindas com imagem deve mencionar PN");
   await disparar({ participante: "5511000000020@s.whatsapp.net", sock });
   assert.strictEqual(sock.envios.length, 1, "evento repetido nao duplica a boas-vindas");
   sock = await disparar({ action: "remove", participante: "5511000000023@s.whatsapp.net" });
   assert.strictEqual(sock.envios.length, 1, "despedida ativa do perfil nao depende da flag global");
   assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "despedida preserva a imagem do perfil");
-  assert.strictEqual(sock.envios[0].payload.caption, "Ate logo 5511000000023", "despedida preserva o texto do perfil");
+  assert.strictEqual(sock.envios[0].payload.caption, "@5511000000023 Ate logo 5511000000023", "despedida preserva o texto do perfil com menção PN");
+  assert.deepStrictEqual(sock.envios[0].payload.mentions, ["5511000000023@s.whatsapp.net"], "despedida com imagem deve mencionar PN");
   await disparar({ action: "remove", participante: "5511000000023@s.whatsapp.net", sock });
   assert.strictEqual(sock.envios.length, 1, "evento repetido nao duplica a despedida");
   sock = await disparar({ action: "leave", participante: "5511000000035@s.whatsapp.net" });
   assert.strictEqual(sock.envios.length, 1, "leave tambem respeita a despedida ativa do perfil");
-  assert.strictEqual(sock.envios[0].payload.caption, "Ate logo 5511000000035", "leave preserva conteudo da despedida");
+  assert.strictEqual(sock.envios[0].payload.caption, "@5511000000035 Ate logo 5511000000035", "leave preserva conteudo da despedida com menção PN");
   sock = await disparar({ action: "add", participante: "5511000000024@s.whatsapp.net", grupo: "grupo_fora@g.us" });
   assert.strictEqual(sock.envios.length, 0, "perfil nao envia em grupo fora do alcance");
   sock = await disparar({ action: "add", participante: "5511000000025@s.whatsapp.net", sessaoId: "sessao_errada" });
@@ -224,7 +229,16 @@ function sleep(ms) {
     participante: "5511000000036@s.whatsapp.net"
   });
   assert.strictEqual(sock.envios.length, 1, "perfil com zero grupos globais usa os grupos proprios de boas-vindas na sessao efetiva");
-  assert.deepStrictEqual(sock.envios[0].payload, { text: "Sessao B 5511000000036" }, "boas-vindas usa o conteudo do perfil resolvido");
+  assert.deepStrictEqual(sock.envios[0].payload, {
+    text: "@5511000000036 Sessao B 5511000000036",
+    mentions: ["5511000000036@s.whatsapp.net"]
+  }, "boas-vindas usa o conteudo do perfil resolvido com menção PN");
+  sock = await disparar({
+    sessaoId: "sessao_b",
+    grupo: "grupo_b@g.us",
+    participante: "12345@lid"
+  });
+  assert.deepStrictEqual(sock.envios[0].payload.mentions, ["12345@lid"], "boas-vindas deve mencionar identidade LID sem consulta extra");
   sock = await disparar({
     sessaoId: "sessao_b",
     grupo: "grupo_b@g.us",
@@ -368,7 +382,7 @@ function sleep(ms) {
   });
   sock = await disparar({ participante: "5511000000006@s.whatsapp.net" });
   assert.ok(Buffer.isBuffer(sock.envios[0].payload.image), "grupo imagem/texto deve enviar imagem");
-  assert.strictEqual(sock.envios[0].payload.caption, "Bem-vindo 5511000000006", "grupo imagem/texto deve enviar caption");
+  assert.strictEqual(sock.envios[0].payload.caption, "@5511000000006 Bem-vindo 5511000000006", "grupo imagem/texto deve enviar caption com menção PN");
   await sleep(1100);
   assert.strictEqual(sock.envios.length, 1, "temporaria off nao agenda delete");
 
