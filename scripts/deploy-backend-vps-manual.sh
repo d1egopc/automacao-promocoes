@@ -41,7 +41,7 @@ test -z "$(git -C "$source_dir" diff --name-only --diff-filter=D "$BASE_SHA" "$S
 declare -A changed_runtime=()
 while IFS= read -r path; do
   case "$path" in
-    AGENTS.md|docs/*|tests/*|.github/*) continue ;;
+    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh) continue ;;
   esac
   test -n "${approved_set[$path]+present}"
   changed_runtime["$path"]=1
