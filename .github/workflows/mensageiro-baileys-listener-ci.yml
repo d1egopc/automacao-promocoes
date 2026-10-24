@@ -58,6 +58,7 @@ jobs:
                 scripts/deploy-backend-vps-manual.sh
                 scripts/benchmark-gerente-observability-v2.cjs
                 tests/deploy-backend-v2-overlay-validation.test.cjs
+                tests/deploy-backend-manual-diagnostics.test.cjs
                 tests/mensageiro-gerente-observability-v2.test.cjs
                 tests/whatsapp-socket-listener-baileys-real.test.cjs
               )
@@ -75,7 +76,9 @@ jobs:
             node tests/deploy-backend-compose-image-validation.test.cjs
           else
             bash -n scripts/deploy-backend-vps-manual.sh
+            node tests/deploy-backend-compose-image-validation.test.cjs
             node tests/deploy-backend-v2-overlay-validation.test.cjs
+            node tests/deploy-backend-manual-diagnostics.test.cjs
           fi
       - run: npm ci
       - name: Listener and Messenger regressions

@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
 # Runs only from an explicit workflow_dispatch on main. Never uses /opt/optimus/backend.
 set -Eeuo pipefail
+deploy_stage=initialize
+switched=0
+had_release=0
+# BEGIN deploy failure diagnostics
+report_deploy_failure() {
+  local rc=$?
+  local line="${BASH_LINENO[0]:-unknown}"
+  local stage="${deploy_stage:-unknown}"
+  trap - ERR
+  printf 'deploy_failure stage=%s line=%s exit_code=%s result=command_failed\n' "$stage" "$line" "$rc" >&2
+  if [[ "${switched:-0}" == 1 ]]; then
+    rollback "$rc"
+  fi
+  exit "$rc"
+}
+trap report_deploy_failure ERR
+# END deploy failure diagnostics
 umask 077
 
+deploy_stage=validate_inputs
 [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$BASE_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
 test "$GITHUB_EVENT_NAME" = workflow_dispatch
 test "$GITHUB_REF" = refs/heads/main
 
+deploy_stage=validate_source_checkout
 source_dir="$GITHUB_WORKSPACE/release-source"
 infra=/opt/optimus/infra
 compose="$infra/compose.yml"
@@ -26,6 +45,7 @@ git -C "$source_dir" diff --check "$BASE_SHA" "$SOURCE_SHA"
 
 # Every runtime delta must be named in the manual authorization. Documentation
 # and tests are excluded from the image, and deleted runtime files fail closed.
+deploy_stage=validate_runtime_allowlist
 IFS=, read -r -a approved <<< "$RUNTIME_FILES"
 test "${#approved[@]}" -gt 0
 declare -A approved_set=()
@@ -96,6 +116,7 @@ validate_runtime_overlay_path() {
 # END runtime overlay validation helpers
 
 # Prove that the advertised rollback image is the actual running image.
+deploy_stage=validate_production_baseline
 active_id="$(docker inspect -f '{{.Image}}' optimus-backend)"
 test "$active_id" = "$BASE_IMAGE"
 test "$(docker image inspect -f '{{.Id}}' "$BASE_IMAGE")" = "$BASE_IMAGE"
@@ -123,17 +144,20 @@ docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'i
 # Existing paths must match the published base byte-for-byte. New paths are
 # accepted only when absent from both that base tree and the active image.
 # Every candidate path must match the authorized source commit.
+deploy_stage=validate_runtime_hashes
 for path in "${approved[@]}"; do
   validate_runtime_overlay_path "$path" "${changed_runtime_status[$path]}"
 done
 
+deploy_stage=prepare_release_artifacts
 scratch="$(mktemp -d)"
 staging="$(mktemp -p "$infra" .backend-release.XXXXXXXX.yml)"
 had_release=0
 switched=0
 cleanup() { rm -rf -- "$scratch"; rm -f -- "$staging"; }
+# BEGIN deploy rollback handler
 rollback() {
-  rc=$?
+  local rc="${1:-$?}"
   trap - ERR
   if test "$switched" = 1; then
     if test "$had_release" = 1; then cp -p -- "$backup" "$release"; else rm -f -- "$release"; fi
@@ -146,9 +170,10 @@ rollback() {
   fi
   exit "$rc"
 }
+# END deploy rollback handler
 trap cleanup EXIT
-trap rollback ERR
 
+deploy_stage=validate_compose_baseline
 files=(-f "$compose")
 if test -f "$release"; then files+=(-f "$release"); fi
 release_fingerprint=absent
@@ -172,12 +197,14 @@ assert_compose_image_matches_base() {
   [[ "$resolved_image_id" == "$BASE_IMAGE" ]]
 }
 if ! assert_compose_image_matches_base "$compose_image"; then
+  printf 'deploy_failure stage=%s line=%s exit_code=1 result=compose_image_mismatch\n' "$deploy_stage" "$LINENO" >&2
   echo 'Compose backend image does not resolve to the running rollback image'
   exit 1
 fi
 
 # Build in a clean Actions checkout, using the verified running image as base.
 # Never git pull, build or edit the detached, dirty production checkout.
+deploy_stage=build_candidate_image
 base_tag="local/optimus-deploy-base:$run_key"
 recovery_tag="local/optimus-backend-recovery:$run_key"
 candidate_tag="local/optimus-backend:$SOURCE_SHA-$run_key"
@@ -198,6 +225,7 @@ docker run --rm --network none --entrypoint node "$candidate_tag" --check /app/i
 
 # A persistent Compose overlay changes only backend.image. The base Compose,
 # env_file, secrets, mounts, ports, networks and PostgreSQL are untouched.
+deploy_stage=validate_compose_overlay
 printf 'services:\n  backend:\n    image: %s\n' "$candidate_tag" > "$staging"
 docker compose -f "$compose" -f "$staging" config --format json > "$scratch/after.json"
 python3 - "$scratch/before.json" "$scratch/after.json" <<'PY'
@@ -219,15 +247,18 @@ if test -f "$release"; then
   had_release=1
 fi
 
+deploy_stage=switch_backend
 switched=1
 mv -f -- "$staging" "$release"
 docker compose -f "$compose" -f "$release" up -d --no-deps --no-build --force-recreate backend
+deploy_stage=verify_backend
 test "$(docker inspect -f '{{.Image}}' optimus-backend)" = "$candidate_id"
 test "$(env_fingerprint optimus-backend)" = "$baseline_env"
 test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts"
 docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'import json,sys; u=json.load(sys.stdin); core=[x for x in u if x.get("Name")=="core"]; assert len(core)==1 and core[0]["Soft"]==0 and core[0]["Hard"]==0'
 test "$(docker compose -f "$compose" -f "$release" ps -q postgres)" = "$postgres_id"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")" = healthy
+deploy_stage=post_deploy_readiness
 for attempt in {1..12}; do
   if test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:3000/)" = 200 &&
      curl -fsS -o /dev/null --max-time 5 https://go.optimuspromo.com.br/; then
