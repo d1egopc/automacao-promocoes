@@ -72,6 +72,8 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 ## Git e producao
 
 - Confirme repositorio, branch, worktree, base e status antes de editar.
+- Push em `main` executa somente CI; nunca presuma deploy automatico. O deploy backend exige `workflow_dispatch` explicito de `.github/workflows/deploy-backend-vps.yml`, com SHA de fonte, SHA-base, ID completo da imagem ativa e lista exata de arquivos runtime autorizados. Veja [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md).
+- O workflow de publicacao usa checkout limpo do SHA no runner e overlay sobre a imagem ativa verificada; nao usa `/opt/optimus/backend` (HEAD destacado/sujo), nao faz `git pull` nem `docker compose build` no Compose produtivo. A selecao persistente de imagem fica em `backend-release.yml` separado do Compose-base.
 - Use `git add` seletivo. Nunca use `git add .` ou `git add -A`.
 - Informe SHA completo e rollback conhecido.
 - Nunca chame gate local de "CI remoto verde".

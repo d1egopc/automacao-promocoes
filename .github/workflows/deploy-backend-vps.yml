@@ -2,9 +2,25 @@ name: Deploy Backend VPS
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full authorized source commit SHA
+        required: true
+        type: string
+      base_sha:
+        description: Full source SHA represented by the running image
+        required: true
+        type: string
+      base_image:
+        description: Full sha256 image ID currently running and retained for rollback
+        required: true
+        type: string
+      runtime_files:
+        description: Comma-separated changed runtime paths authorized for overlay
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -15,29 +31,37 @@ concurrency:
 
 jobs:
   ci:
-    name: CI
+    name: CI only on push
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Validate manual inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          BASE_IMAGE: ${{ inputs.base_image }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASE_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Syntax check
-        run: node --check index.js
-
-      - name: Encoding audit
-        run: npm run audit:encoding
-
+      - run: npm ci
+      - run: node --check index.js
+      - run: npm run audit:encoding
+      - name: Validate manual deploy script syntax
+        if: github.event_name == 'push'
+        run: bash -n scripts/deploy-backend-vps-manual.sh
       - name: Critical tests
         run: |
           node tests/clean-install-bootstrap.test.js
@@ -51,61 +75,28 @@ jobs:
           node tests/link-optimus-admin-config.test.js
 
   deploy:
-    name: Deploy VPS
+    name: Manual deploy by approved SHA
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64]
     needs: ci
-    if: github.ref == 'refs/heads/main'
-    timeout-minutes: 20
-
+    timeout-minutes: 25
     steps:
-      - name: Production target preflight
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build clean image and switch backend only
         shell: bash
-        run: |
-          set -Eeuo pipefail
-          backend_dir=/opt/optimus/backend
-          infra_dir=/opt/optimus/infra
-          compose_file=${infra_dir}/compose.yml
-
-          if [[ ! -d "${backend_dir}" || ! -d "${infra_dir}" || ! -f "${compose_file}" ]]; then
-            echo "alvo de producao nao reconhecido"
-            exit 1
-          fi
-
-          services="$(docker compose -f "${compose_file}" config --services)"
-          if ! grep -Fxq "backend" <<<"${services}"; then
-            echo "alvo de producao nao reconhecido"
-            exit 1
-          fi
-
-          echo "alvo de producao reconhecido: Hostinger VPS / backend"
-
-      - name: Deploy backend
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cd /opt/optimus/backend
-          git pull --ff-only origin main
-          cd /opt/optimus/infra
-          docker compose -f compose.yml build backend
-          docker compose -f compose.yml up -d backend
-          docker compose -f compose.yml ps backend
-
-      - name: Health check
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          for tentativa in {1..10}; do
-            if curl -fsS https://go.optimuspromo.com.br/; then
-              exit 0
-            fi
-            echo "Health check ainda indisponivel. Tentativa ${tentativa}/10."
-            sleep 3
-          done
-          exit 1
-
-      - name: Backend logs on failure
-        if: failure()
-        shell: bash
-        run: |
-          cd /opt/optimus/infra
-          docker compose -f compose.yml logs --tail=200 backend
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          BASE_IMAGE: ${{ inputs.base_image }}
+          RUNTIME_FILES: ${{ inputs.runtime_files }}
+        run: bash scripts/deploy-backend-vps-manual.sh

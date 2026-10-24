@@ -12,7 +12,20 @@ O unico alvo oficial e a Hostinger VPS:
 
 Este contrato substitui, para topologia de dominios, a descricao legada de `docs/PRODUCTION.md` que chama `www` de endpoint publico canonico. A funcao comprovada e: `www` serve o frontend na Vercel; `go` serve a API/backend na Hostinger.
 
-O workflow `.github/workflows/deploy-backend-vps.yml` roda em push para `main`. O gate usa Node 24, `npm ci`, `node --check index.js`, `npm run audit:encoding` e os testes criticos declarados no workflow. O deploy usa `git pull --ff-only`, build do backend e `docker compose up -d backend`.
+O workflow `.github/workflows/deploy-backend-vps.yml` executa **somente CI** em push para `main`: Node 24, `npm ci`, `node --check index.js`, `npm run audit:encoding` e os testes criticos declarados. Push/fast-forward na `main` **nao publica**. O job de publicacao e condicionado a `workflow_dispatch` explicito na `main`, apos CI verde, com quatro entradas obrigatorias: `source_sha` (40 caracteres), `base_sha` (40 caracteres), `base_image` (ID completo `sha256:` da imagem ativa) e `runtime_files` (caminhos alterados de runtime autorizados, separados por virgula).
+
+### Publicacao manual por imagem versionada
+
+1. Confirme imagem realmente ativa, SHA-base que ela representa, ancestry do SHA autorizado, saude, dados/mounts, Compose efetivo e rollback. Nao equipare Git `main` a imagem produtiva sem prova.
+2. Antes do fast-forward, confira que o commit de destino **ja contem este workflow corrigido**. O GitHub Actions usa o arquivo de workflow do SHA associado ao evento de push; portanto esse push executara a versao CI-only, nao a versao antiga. Acompanhe o CI do push; nao acione publicacao automaticamente.
+3. Acione manualmente **Deploy Backend VPS** na `main`, fornecendo os quatro valores acima. Para o candidato Mensageiro de 2026-10-23, o exemplo de `runtime_files` e `index.js,modules/mensageiro-v3/legacy-compat.js,modules/mensageiro-v3/operational-gates.js`; releia o diff antes de reutilizar.
+4. O runner verifica que o SHA esta na ancestry da `main`, que o diff runtime corresponde exatamente a lista autorizada e que cada arquivo-base na imagem ativa tem o mesmo SHA-256 da versao `base_sha`. Qualquer divergencia aborta antes da troca.
+5. O build parte da **imagem ativa verificada** e copia somente os arquivos runtime autorizados do checkout limpo do `source_sha` no runner. Preserva os demais arquivos comerciais da imagem, sem usar nem modificar o checkout destacado/sujo `/opt/optimus/backend`. A imagem nova recebe tag versionada por SHA e run ID, e o IMAGE ID e registrado.
+6. O Compose-base `/opt/optimus/infra/compose.yml` permanece intacto. O workflow compara o Compose efetivo completo antes/depois, permitindo apenas `services.backend.image`, e salva a selecao em `/opt/optimus/infra/backend-release.yml`. Env, secrets, `/data`, portas, redes, ulimit, PostgreSQL e demais servicos devem ser identicos. A recriacao usa `docker compose -f compose.yml -f backend-release.yml up -d --no-deps --no-build --force-recreate backend`.
+7. Antes da troca, uma tag de recovery referencia o mesmo ID da imagem ativa. Em falha de publicacao/health, o workflow restaura o overlay anterior (ou remove somente o overlay novo) e recria **apenas backend** na imagem anterior. Confirme IMAGE ID, HTTP e PostgreSQL depois; se a recuperacao falhar, trate como incidente e nao repita cegamente.
+8. Depois do deploy, prove IMAGE ID ativo, HTTP local/publico, PostgreSQL no mesmo container, sessao/mount `/data`, RIO e contratos afetados. Nao remova imagens de recovery. Para operacoes manuais futuras de Compose, inclua sempre `backend-release.yml` quando ele existir, evitando reverter acidentalmente a imagem.
+
+O checkout `/opt/optimus/backend` e referencia historica e pode estar em HEAD destacado com modificacoes locais; `git pull` ou build dele sao proibidos nesse caminho. O overlay de imagem nao autoriza mudar `/data`, PostgreSQL, flags ou estado do Mensageiro.
 
 Nunca:
 
