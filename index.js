@@ -291,6 +291,8 @@ const criarRotasManualV2 = require("./modules/manual-v2/manual-offers.routes");
 const criarRotasDiscord = require("./modules/discord/discord.routes");
 const criarRotasAjudaContextual = require("./modules/ajuda-contextual/routes");
 const criarRotasVitrine = require("./modules/vitrine/routes");
+const { createLandingPageService, createVitrineOfferReader } = require("./modules/landing-page/service");
+const { createLandingPageRoutes } = require("./modules/landing-page/routes");
 const {
   criarRotasClonadorGrupos,
   criarRepositorioClonadorGrupos,
@@ -6186,6 +6188,9 @@ function normalizarRecursosPlanosRuntime() {
 
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "vitrine")) {
       plano.recursos.vitrine = false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(plano.recursos, "landing_page")) {
+      plano.recursos.landing_page = false;
     }
     if (!Object.prototype.hasOwnProperty.call(plano.recursos, "copyIaGenerativa")) {
       plano.recursos.copyIaGenerativa = false;
@@ -15447,6 +15452,7 @@ app.post("/admin/planos", exigirAdminMasterEstrito, (req, res) => {
       discord: booleanPlano("discord", recursosAnteriores.discord),
       automacao: booleanPlano("automacao", recursosAnteriores.automacao),
       vitrine: booleanPlano("vitrine", recursosAnteriores.vitrine),
+      landing_page: booleanPlano("landing_page", recursosAnteriores.landing_page),
       clonador_grupos: booleanPlano("clonador_grupos", recursosAnteriores.clonador_grupos),
       identidade_visual_ofertas: normalizarPoliticaIdentidadeVisual(
         Object.prototype.hasOwnProperty.call(recursosBody, "identidade_visual_ofertas")
@@ -16487,6 +16493,18 @@ app.use(criarRotasVitrine({
   readClienteJson,
   readGlobalJson
 }));
+const landingPageService = createLandingPageService({
+  dataDir: process.env.DATA_DIR || "/data",
+  canPublish: (clienteId) => {
+    const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
+    return Boolean(usuario && usuario.ativo !== false && clienteTemRecursoPlano(clienteId, "landing_page"));
+  },
+  getOffers: createVitrineOfferReader({
+    getWorkspaceDir: (clienteId) => path.join(process.env.DATA_DIR || "/data", "clientes", clienteId),
+    canRead: (clienteId) => clienteTemRecursoPlano(clienteId, "vitrine")
+  })
+});
+app.use(createLandingPageRoutes({ service: landingPageService, publicRoutes: true }));
 
 const captureHandoffService = criarCaptureHandoffService();
 app.use("/auth/capture/handoff", criarRotasCaptureHandoff({
@@ -16500,6 +16518,7 @@ app.use("/local-worker", criarRotasLocalWorker({
   auth
 }));
 app.use(auth);
+app.use(createLandingPageRoutes({ service: landingPageService, getClienteId, usuarioTemRecurso }));
 app.get("/extension/oportunidades/resumo", async (req, res) => {
   const clienteId = getClienteId(req);
   const oportunidades = await listarOportunidadesAtivas(clienteId, {
