@@ -16,7 +16,34 @@ const helpers = deployScript.slice(helperStart, helperEnd);
 const runtimePath = "modules/mensageiro/gerente-observability-v2.js";
 const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";
 
+function sanitizeDiagnostic(value) {
+  return String(value || "")
+    .replace(/\bauthorization\s*:\s*bearer\s+\S+/gi, "Authorization: <redacted>")
+    .replace(/\b(token|password|secret|cookie)\b\s*[:=]\s*\S+/gi, "$1=<redacted>")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, "<token>")
+    .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "<token>")
+    .replace(/[A-Za-z]:\\[^:\r\n]*/g, "<local-path>")
+    .replace(/\/(?:home|tmp|Users|opt|workspace|runner|mnt|var)\/[^\s:\r\n]*/g, "<path>")
+    .split(/\r?\n/)
+    .slice(-30)
+    .join("\n")
+    .slice(-4000);
+}
+
+function processDiagnostic(scenario, result) {
+  return [
+    `scenario=${scenario}`,
+    `expected=${result.expected || "scenario assertion"}`,
+    `actual_exit_code=${result.status === null ? "null" : result.status}`,
+    `signal=${result.signal || "none"}`,
+    result.error ? `spawn_error=${sanitizeDiagnostic(result.error.message)}` : "",
+    `stdout:\n${sanitizeDiagnostic(result.stdout) || "<empty>"}`,
+    `stderr:\n${sanitizeDiagnostic(result.stderr) || "<empty>"}`
+  ].filter(Boolean).join("\n");
+}
+
 function runCase({
+  scenario = "unnamed-scenario",
   mode = "overlay",
   changeType = "A",
   pathValue = runtimePath,
@@ -37,6 +64,8 @@ function runCase({
 
   const harness = String.raw`
 set -Eeuo pipefail
+STEP=fixture_setup
+trap 'rc=$?; printf "harness_exit scenario=%s stage=%s code=%s\n" "$SCENARIO" "$STEP" "$rc" >&2' EXIT
 source_dir="$FIXTURE_DIR"
 BASE_SHA=base-sha
 SOURCE_SHA=source-sha
@@ -54,16 +83,18 @@ git() {
   if [[ "$1" == "-C" ]]; then shift 2; fi
   case "$1" in
     ls-tree)
+      printf 'mock_git=ls-tree\n' >&2
       if [[ "$MOCK_BASE_PRESENT" == "yes" ]]; then printf '%s\n' "$MOCK_PATH"; fi
       return 0
       ;;
     show)
       case "$2" in
         "$BASE_SHA:$MOCK_PATH")
+          printf 'mock_git=show-base\n' >&2
           [[ "$MOCK_BASE_PRESENT" == "yes" ]] || return 128
           printf '%s' "$MOCK_BASE_CONTENT"
           ;;
-        "$SOURCE_SHA:$MOCK_PATH") printf '%s' "$MOCK_SOURCE_CONTENT" ;;
+        "$SOURCE_SHA:$MOCK_PATH") printf 'mock_git=show-source\n' >&2; printf '%s' "$MOCK_SOURCE_CONTENT" ;;
         *) return 128 ;;
       esac
       ;;
@@ -73,8 +104,9 @@ git() {
 docker() {
   [[ "$1" == exec && "$2" == optimus-backend ]] || return 97
   case "$3" in
-    sh) printf '%s' "$MOCK_IMAGE_STATE" ;;
+    sh) printf 'mock_docker=inspect-path\n' >&2; printf '%s' "$MOCK_IMAGE_STATE" ;;
     sha256sum)
+      printf 'mock_docker=hash-active\n' >&2
       [[ "$MOCK_IMAGE_STATE" == file ]] || return 96
       printf '%s  %s\n' "$(printf '%s' "$MOCK_IMAGE_CONTENT" | command sha256sum | cut -d' ' -f1)" "$4"
       ;;
@@ -84,13 +116,17 @@ docker() {
 ${helpers}
 case "$MODE" in
   overlay)
+    STEP=path_validation
     validate_runtime_path "$FIXTURE_PATH"
+    STEP=overlay_base_validation
     validate_runtime_overlay_path "$FIXTURE_PATH" "$FIXTURE_CHANGE_TYPE"
     ;;
   record)
+    STEP=runtime_allowlist_classification
     record_runtime_change "$FIXTURE_CHANGE_TYPE" "$FIXTURE_PATH"
     ;;
   invalid-path)
+    STEP=expected_path_rejection
     if validate_runtime_path "$FIXTURE_PATH"; then exit 44; else exit 0; fi
     ;;
   *) exit 45 ;;
@@ -103,6 +139,7 @@ esac
       encoding: "utf8",
       env: {
         ...process.env,
+        SCENARIO: scenario,
         MODE: mode,
         FIXTURE_DIR: fixture,
         FIXTURE_PATH: pathValue,
@@ -121,85 +158,114 @@ esac
 }
 
 test("arquivo novo autorizado, ausente da base e da imagem, passa após validar o hash do candidato", () => {
-  const result = runCase({ changeType: "A", basePresent: false, imageState: "absent" });
-  assert.equal(result.status, 0, result.stderr);
+  const scenario = "new-file-authorized-absent-from-base-and-image";
+  const result = runCase({ scenario, changeType: "A", basePresent: false, imageState: "absent" });
+  result.expected = "exit code 0";
+  assert.equal(result.status, 0, processDiagnostic(scenario, result));
 });
 
 test("tipo A declarado é rejeitado quando o caminho já existe na base", () => {
-  const result = runCase({ changeType: "A", basePresent: true, imageState: "file" });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /already exists in base/);
+  const scenario = "declared-new-but-present-in-base";
+  const result = runCase({ scenario, changeType: "A", basePresent: true, imageState: "file" });
+  result.expected = "nonzero exit and base-exists diagnostic";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+  assert.match(sanitizeDiagnostic(result.stderr), /already exists in base/, processDiagnostic(scenario, result));
 });
 
 test("tipo A declarado é rejeitado quando o caminho já existe na imagem ativa", () => {
-  const result = runCase({ changeType: "A", basePresent: false, imageState: "file" });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /already exists in active image/);
+  const scenario = "declared-new-but-present-in-active-image";
+  const result = runCase({ scenario, changeType: "A", basePresent: false, imageState: "file" });
+  result.expected = "nonzero exit and active-image-exists diagnostic";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+  assert.match(sanitizeDiagnostic(result.stderr), /already exists in active image/, processDiagnostic(scenario, result));
 });
 
 test("arquivo modificado é aceito somente quando a imagem contém o hash exato da base", () => {
+  const scenario = "modified-file-with-matching-base-image-hash";
   const result = runCase({
+    scenario,
     changeType: "M",
     basePresent: true,
     imageState: "file",
     baseContent: "same-base-bytes",
     imageContent: "same-base-bytes"
   });
-  assert.equal(result.status, 0, result.stderr);
+  result.expected = "exit code 0";
+  assert.equal(result.status, 0, processDiagnostic(scenario, result));
 });
 
 test("arquivo existente com hash incorreto na imagem é rejeitado", () => {
+  const scenario = "modified-file-with-wrong-active-image-hash";
   const result = runCase({
+    scenario,
     changeType: "M",
     basePresent: true,
     imageState: "file",
     baseContent: "expected-base-bytes",
     imageContent: "wrong-image-bytes"
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Base image content\/hash mismatch/);
+  result.expected = "nonzero exit and base-image-hash diagnostic";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+  assert.match(sanitizeDiagnostic(result.stderr), /Base image content\/hash mismatch/, processDiagnostic(scenario, result));
 });
 
 test("conteúdo do candidato diverge do blob do SOURCE_SHA e é rejeitado", () => {
+  const scenario = "candidate-checkout-content-diverges-from-source-commit";
   const result = runCase({
+    scenario,
     changeType: "A",
     basePresent: false,
     imageState: "absent",
     sourceContent: "committed-content",
     checkoutContent: "tampered-checkout-content"
   });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Candidate content\/hash mismatch/);
+  result.expected = "nonzero exit and candidate-hash diagnostic";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+  assert.match(sanitizeDiagnostic(result.stderr), /Candidate content\/hash mismatch/, processDiagnostic(scenario, result));
 });
 
 test("runtime novo fora da allowlist é rejeitado", () => {
+  const scenario = "new-runtime-outside-allowlist";
   const result = runCase({
+    scenario,
     mode: "record",
     changeType: "A",
     pathValue: "modules/other/new.js",
     approvedPath: runtimePath
   });
-  assert.notEqual(result.status, 0);
+  result.expected = "nonzero exit";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
 });
 
 test("caminhos absolutos e com travessia são rejeitados", () => {
-  for (const pathValue of ["/etc/passwd", "../escape.js", "modules/../../secret.js", "modules\\escape.js"]) {
-    const result = runCase({ mode: "invalid-path", pathValue });
-    assert.equal(result.status, 0, `${pathValue}: ${result.stderr}`);
+  const invalidPaths = [
+    ["absolute-path", "/etc/passwd"],
+    ["parent-traversal", "../escape.js"],
+    ["nested-traversal", "modules/../../secret.js"],
+    ["backslash-path", "modules\\escape.js"]
+  ];
+  for (const [scenario, pathValue] of invalidPaths) {
+    const result = runCase({ scenario, mode: "invalid-path", pathValue });
+    result.expected = "exit code 0 after rejecting the path";
+    assert.equal(result.status, 0, processDiagnostic(scenario, result));
   }
 });
 
 test("deletions e tipos runtime inesperados seguem bloqueados", () => {
   for (const changeType of ["D", "T", "R100"]) {
-    const result = runCase({ mode: "record", changeType, pathValue: runtimePath, approvedPath: runtimePath });
-    assert.notEqual(result.status, 0, changeType);
+    const scenario = `runtime-change-type-${changeType}-rejected`;
+    const result = runCase({ scenario, mode: "record", changeType, pathValue: runtimePath, approvedPath: runtimePath });
+    result.expected = "nonzero exit";
+    assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
   }
   assert.match(deployScript, /diff --name-only --diff-filter=D --no-renames/);
 });
 
 test("runtime alterado não autorizado continua bloqueado", () => {
-  const result = runCase({ mode: "record", changeType: "M", pathValue: "modules/engine/unapproved.js" });
-  assert.notEqual(result.status, 0);
+  const scenario = "modified-runtime-outside-allowlist";
+  const result = runCase({ scenario, mode: "record", changeType: "M", pathValue: "modules/engine/unapproved.js" });
+  result.expected = "nonzero exit";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
 });
 
 test("ancestralidade, imagem ativa, Compose, mounts, ambiente e rollback continuam protegidos", () => {
