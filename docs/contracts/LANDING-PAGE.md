@@ -79,4 +79,26 @@ O seletor Aparência → Temas oferece oito paletas predefinidas. Escolher uma t
 
 Validação V1.1 em Node 24.22.1: API Landing 16/16 e frontend Landing 5/5; catálogo Vitrine/planos 1/1. Os oito pares de cor de botão/texto passam contraste mínimo 4,5:1. O teste confirma atualização imediata da prévia a partir do rascunho e a grade de temas em 4 colunas no celular e 8 em telas maiores; o editor preserva a prévia móvel de 390 px. Build Vite client/SSR/Nitro passou após as alterações de tema.
 
+## Homologação funcional isolada — autenticação e planos
+
+Base funcional: backend `676e3a8615010128cee27c29f13558ee1602eddc`; frontend `e182d5e04549021ff9544f9d5bc76dad52ae2e57`. Esta etapa acrescenta somente testes, fixtures, preparação de CI e este checkpoint. Não altera arquivos funcionais.
+
+A fixture executa trechos exatos de `index.js`: middleware JWT, autorização Admin Master, GET/POST de planos, resolução de recursos, GET /me e o wiring Landing. Usa os módulos reais de identidade, planos, serviço e rotas. Contadores de consumo e financeiro de /me recebem valores locais fixos; não se inicia index.js inteiro, schedulers, PostgreSQL ou WhatsApp. O JWT tem segredo aleatório exclusivo da fixture. Apenas usuários fictícios e diretórios temporários são utilizados.
+
+A prova confirma habilitação pelo Admin e persistência do plano, bloqueio de cliente na administração, tokens inválidos/expirados, usuário inativo, 403 em todas as operações privadas sem recurso, dois tenants independentes, DTO público anônimo, quatro ofertas de cada fonte autorizada, rascunho versus snapshot, temas e revogação imediata do plano. Domínio continua `not_verified`, Pixel `not_activated` e só o ID é retido; não há execução de código colado.
+
+As respostas sanitizadas de /me da fixture alimentam o teste do AppSidebar real no frontend. Somente contextos React, roteador e componentes visuais de contorno são substituídos; a decisão de cadeado, o link, a guarda da rota e os serializadores do Admin são os existentes. O JSON de fixture versionado não contém tokens nem dados de clientes.
+
+Typecheck comparado usando a mesma versão instalada do TypeScript e uma árvore extraída por Git do SHA frontend exato `ce05231617a3d34fa530aad7395241222cf019dc`: 32 diagnósticos na base, 32 no candidato, zero novos e zero resolvidos. A comparação mantém arquivo, código, categoria, mensagem e multiplicidade; ignora posição deslocada e ordenação equivalente de unions literais. Novos erros, duplicatas e literais diferentes reprovam em testes negativos.
+
+Execução local Node 24.22.1 desta etapa: backend 25/25 (16 focais e 9 da integração), além de identidade de planos e fundação SaaS aprovadas; frontend 15/15, incluindo renderização do menu com as respostas /me, serializador Admin, comparação de diagnósticos e Vitrine. O build V1.1 já aprovado é reutilizado porque nenhum arquivo funcional mudou.
+
+CI preparado, ainda não executado remotamente:
+
+- Backend: reutiliza `.github/workflows/guardian-v1-ci.yml` para `feature/landing-page-v1-*`; acrescenta a integração, planos e fundação SaaS, preservando Guardião e regressões existentes. Base Landing fixa `5a31e605...`.
+- Frontend: `.github/workflows/landing-page-ci.yml`, único job `validate`, testes Landing/menu/planos/Vitrine, comparação estrita do typecheck e build completo. Base fixa `ce052316...`.
+- Ambos: Linux hospedado, Node 24, token contents:read, checkout sem credencial persistente, nenhum job de deploy, nenhum segredo produtivo. Nenhum push ou dispatch foi executado. Um futuro push frontend pode gerar Preview pela integração Vercel; isso exige autorização específica junto ao push.
+
+Próxima ação: autorizar os pushes isolados e a execução dos dois CIs após revisar os commits locais de validação. Publicação continua pendente de gate próprio.
+
 Validação V1.1 em Node 24.22.1: API Landing 16/16 e frontend Landing 5/5; catálogo Vitrine/planos 1/1. Os oito pares de cor de botão/texto passam contraste mínimo 4,5:1. O teste confirma atualização imediata da prévia a partir do rascunho e a grade de temas em 4 colunas no celular e 8 em telas maiores; o editor preserva a prévia móvel de 390 px. Build Vite final registrada após as alterações desta versão.

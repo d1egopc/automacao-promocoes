@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - feature/landing-page-v1-*
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Landing Page isolated integration
+        if: startsWith(github.ref, 'refs/heads/feature/landing-page-v1-')
+        env:
+          LANDING_AUTH_CONTRACT_FILE: ${{ runner.temp }}/landing-auth-contract.json
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/landing-page-v1.test.cjs tests/landing-page-auth-plans-integration.test.cjs
+          node tests/planos-identidade-estavel-v1.test.js
+          node tests/saas-fundacao-v1.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: Validate affected contracts
@@ -30,6 +41,9 @@ jobs:
         run: |
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
+          case "$GITHUB_REF" in
+            refs/heads/feature/landing-page-v1-*) base=5a31e60524d9caac45883ca07511dcc208852f53 ;;
+          esac
           source="$(git rev-parse HEAD)"
           node scripts/guardian-v1.cjs validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json"
       - name: Deploy mechanism regressions
