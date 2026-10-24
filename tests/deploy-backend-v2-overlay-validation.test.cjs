@@ -66,6 +66,7 @@ function runCase({
 set -Eeuo pipefail
 STEP=fixture_setup
 trap 'rc=$?; printf "harness_exit scenario=%s stage=%s code=%s\n" "$SCENARIO" "$STEP" "$rc" >&2' EXIT
+trap 'rc=$?; printf "harness_error scenario=%s stage=%s line=%s code=%s\n" "$SCENARIO" "$STEP" "$LINENO" "$rc" >&2; exit "$rc"' ERR
 source_dir="$FIXTURE_DIR"
 BASE_SHA=base-sha
 SOURCE_SHA=source-sha
@@ -75,13 +76,25 @@ MOCK_BASE_CONTENT="$FIXTURE_BASE_CONTENT"
 MOCK_IMAGE_STATE="$FIXTURE_IMAGE_STATE"
 MOCK_IMAGE_CONTENT="$FIXTURE_IMAGE_CONTENT"
 MOCK_SOURCE_CONTENT="$FIXTURE_SOURCE_CONTENT"
+approved=("$FIXTURE_APPROVED_PATH")
 declare -A approved_set=()
 declare -A changed_runtime=()
 declare -A changed_runtime_status=()
-approved_set["$FIXTURE_APPROVED_PATH"]=1
+STEP=fixture_helper_bootstrap
 git() {
   if [[ "$1" == "-C" ]]; then shift 2; fi
   case "$1" in
+    diff)
+      case "$2" in
+        --name-only) printf 'mock_git=diff-deletions\n' >&2; return 0 ;;
+        --name-status)
+          printf 'mock_git=diff-runtime-status\n' >&2
+          printf '%s\t%s\n' "$FIXTURE_CHANGE_TYPE" "$FIXTURE_APPROVED_PATH"
+          return 0
+          ;;
+        *) return 98 ;;
+      esac
+      ;;
     ls-tree)
       printf 'mock_git=ls-tree\n' >&2
       if [[ "$MOCK_BASE_PRESENT" == "yes" ]]; then printf '%s\n' "$MOCK_PATH"; fi
@@ -100,6 +113,13 @@ git() {
       ;;
     *) return 98 ;;
   esac
+}
+sha256sum() {
+  if [[ "$#" == 1 && -f "$1" ]]; then
+    command sha256sum < "$1"
+  else
+    command sha256sum "$@"
+  fi
 }
 docker() {
   [[ "$1" == exec && "$2" == optimus-backend ]] || return 97
