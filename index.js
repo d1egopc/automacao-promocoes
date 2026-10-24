@@ -12977,7 +12977,8 @@ const {
 const {
   marcarSocketAtual,
   registrarListenerUnicoSocket,
-  socketEhAtual
+  socketEhAtual,
+  diagnosticarEntradaUpsert
 } = require("./modules/whatsapp/socket-listener-lifecycle.service");
 const {
   executarConsumidorMensagemIsolado
@@ -33670,6 +33671,13 @@ registrarListenerUnicoSocket({
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
   handler: async ({ messages = [], type } = {}) => {
+  diagnosticarEntradaUpsert({
+    workspaceId: clienteIdMensageiro,
+    sessaoId: id,
+    socketGeracao,
+    messages,
+    type
+  });
   if (!socketEhAtual(sessoes, id, sock)) {
     diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id, card: "messages.upsert", stage: "listener_rejected", reason: "socket_obsoleto" });
     console.log("[WHATSAPP-LISTENER-UPSERT-IGNORADO]", JSON.stringify({

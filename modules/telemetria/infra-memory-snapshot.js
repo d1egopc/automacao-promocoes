@@ -124,21 +124,21 @@ function contarSessoesWhatsapp({ sessoes = {}, statusSessao = {}, sessoesMeta = 
 
 function contarListenerSocket(sock, evento = "") {
   const emissor = sock?.ev || sock?.events || sock;
-  if (!emissor || !evento) return 0;
+  if (!emissor || !evento) return null;
   try {
     if (typeof emissor.listenerCount === "function") return numeroSeguro(emissor.listenerCount(evento));
     if (typeof emissor.listeners === "function") return tamanhoEstrutura(emissor.listeners(evento));
   } catch (_) {
-    return 0;
+    return null;
   }
-  return 0;
+  return null;
 }
 
 function contarSocketsWhatsapp(sessoes = {}) {
   const resumo = {
     vivosConhecidos: 0,
     listeners: EVENTOS_SOCKET_WHATSAPP.reduce((acc, evento) => {
-      acc[evento] = { total: 0, maxPorSocket: 0 };
+      acc[evento] = { total: 0, maxPorSocket: 0, socketsSemContagem: 0 };
       return acc;
     }, {})
   };
@@ -148,6 +148,13 @@ function contarSocketsWhatsapp(sessoes = {}) {
     resumo.vivosConhecidos += 1;
     for (const evento of EVENTOS_SOCKET_WHATSAPP) {
       const totalSocket = contarListenerSocket(sock, evento);
+      if (totalSocket === null) {
+        resumo.listeners[evento].socketsSemContagem += 1;
+        resumo.listeners[evento].total = null;
+        resumo.listeners[evento].maxPorSocket = null;
+        continue;
+      }
+      if (resumo.listeners[evento].total === null) continue;
       resumo.listeners[evento].total += totalSocket;
       resumo.listeners[evento].maxPorSocket = Math.max(resumo.listeners[evento].maxPorSocket, totalSocket);
     }
