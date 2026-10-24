@@ -29,25 +29,71 @@ git -C "$source_dir" diff --check "$BASE_SHA" "$SOURCE_SHA"
 IFS=, read -r -a approved <<< "$RUNTIME_FILES"
 test "${#approved[@]}" -gt 0
 declare -A approved_set=()
-for path in "${approved[@]}"; do
-  [[ "$path" =~ ^[A-Za-z0-9._/-]+$ ]]
-  [[ "$path" != /* && "$path" != *..* && "$path" != .* ]]
+# BEGIN runtime overlay validation helpers
+validate_runtime_path() {
+  local path="${1:-}"
+  [[ "$path" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$path" != /* && "$path" != *..* && "$path" != .* ]] || return 1
   test -f "$source_dir/$path"
   test ! -L "$source_dir/$path"
+}
+for path in "${approved[@]}"; do
+  validate_runtime_path "$path"
   test -z "${approved_set[$path]+present}"
   approved_set["$path"]=1
 done
-test -z "$(git -C "$source_dir" diff --name-only --diff-filter=D "$BASE_SHA" "$SOURCE_SHA")"
+test -z "$(git -C "$source_dir" diff --name-only --diff-filter=D --no-renames "$BASE_SHA" "$SOURCE_SHA")"
 declare -A changed_runtime=()
-while IFS= read -r path; do
+declare -A changed_runtime_status=()
+record_runtime_change() {
+  local status="$1" path="$2"
   case "$path" in
-    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh) continue ;;
+    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh) return 0 ;;
+  esac
+  case "$status" in
+    A|M) ;;
+    *) echo "Unsupported runtime change type: $status $path" >&2; return 1 ;;
   esac
   test -n "${approved_set[$path]+present}"
   changed_runtime["$path"]=1
-done < <(git -C "$source_dir" diff --name-only "$BASE_SHA" "$SOURCE_SHA")
+  changed_runtime_status["$path"]="$status"
+}
+while IFS=$'\t' read -r status path; do
+  record_runtime_change "$status" "$path"
+done < <(git -C "$source_dir" diff --name-status --no-renames "$BASE_SHA" "$SOURCE_SHA")
 test "${#changed_runtime[@]}" -eq "${#approved_set[@]}"
 for path in "${approved[@]}"; do test -n "${changed_runtime[$path]+present}"; done
+
+validate_runtime_overlay_path() {
+  local path="$1" change_type="$2" base_entry="" image_state=""
+  local source_hash="" checkout_hash="" base_hash="" image_hash=""
+  [[ "$change_type" == A || "$change_type" == M ]] || return 1
+  base_entry="$(git -C "$source_dir" ls-tree -r --name-only "$BASE_SHA" -- "$path")"
+  source_hash="$(git -C "$source_dir" show "$SOURCE_SHA:$path" | sha256sum | cut -d' ' -f1)"
+  checkout_hash="$(sha256sum "$source_dir/$path" | cut -d' ' -f1)"
+  [[ "$source_hash" =~ ^[0-9a-f]{64}$ && "$checkout_hash" == "$source_hash" ]] || {
+    echo "Candidate content/hash mismatch: $path" >&2
+    return 1
+  }
+  image_state="$(docker exec optimus-backend sh -c 'if [ -L "$1" ]; then printf symlink; elif [ -f "$1" ]; then printf file; elif [ -e "$1" ]; then printf other; else printf absent; fi' sh "/app/$path")"
+  case "$change_type" in
+    A)
+      test -z "$base_entry" || { echo "New runtime path already exists in base: $path" >&2; return 1; }
+      test "$image_state" = absent || { echo "New runtime path already exists in active image: $path" >&2; return 1; }
+      ;;
+    M)
+      test "$base_entry" = "$path" || { echo "Modified runtime path missing from base: $path" >&2; return 1; }
+      test "$image_state" = file || { echo "Modified runtime path missing or not a regular file in active image: $path" >&2; return 1; }
+      base_hash="$(git -C "$source_dir" show "$BASE_SHA:$path" | sha256sum | cut -d' ' -f1)"
+      image_hash="$(docker exec optimus-backend sha256sum "/app/$path" | cut -d' ' -f1)"
+      [[ "$base_hash" =~ ^[0-9a-f]{64}$ && "$image_hash" == "$base_hash" ]] || {
+        echo "Base image content/hash mismatch: $path" >&2
+        return 1
+      }
+      ;;
+  esac
+}
+# END runtime overlay validation helpers
 
 # Prove that the advertised rollback image is the actual running image.
 active_id="$(docker inspect -f '{{.Image}}' optimus-backend)"
@@ -74,12 +120,11 @@ baseline_env="$(env_fingerprint optimus-backend)"
 baseline_mounts="$(mount_fingerprint optimus-backend)"
 docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'import json,sys; u=json.load(sys.stdin); core=[x for x in u if x.get("Name")=="core"]; assert len(core)==1 and core[0]["Soft"]==0 and core[0]["Hard"]==0'
 
-# The active image must contain exactly the published base version of each
-# overlaid file. This preserves all other commercial code already in the image.
+# Existing paths must match the published base byte-for-byte. New paths are
+# accepted only when absent from both that base tree and the active image.
+# Every candidate path must match the authorized source commit.
 for path in "${approved[@]}"; do
-  expected="$(git -C "$source_dir" show "$BASE_SHA:$path" | sha256sum | cut -d' ' -f1)"
-  actual="$(docker exec optimus-backend sha256sum "/app/$path" | cut -d' ' -f1)"
-  test "$expected" = "$actual" || { echo "base mismatch: $path"; exit 1; }
+  validate_runtime_overlay_path "$path" "${changed_runtime_status[$path]}"
 done
 
 scratch="$(mktemp -d)"
