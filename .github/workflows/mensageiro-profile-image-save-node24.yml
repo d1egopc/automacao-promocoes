@@ -1,12 +1,12 @@
 name: Messenger profile and image save Node24 backend
 on:
   push:
-    branches: [validation/mensageiro-profile-image-save-node24-20261023]
+    branches: [validation/mensageiro-profile-image-save-node24-20261023, reconcile/official-published-backend-20261023]
 permissions:
   contents: read
 jobs:
   validate:
-    if: github.ref == 'refs/heads/validation/mensageiro-profile-image-save-node24-20261023'
+    if: github.ref == 'refs/heads/validation/mensageiro-profile-image-save-node24-20261023' || github.ref == 'refs/heads/reconcile/official-published-backend-20261023'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -25,9 +25,19 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node --version | grep -Eq '^v24\.'
-          git diff --check 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD
-          git diff --name-only 3ddc4f32cbb05647dcbec593ccdced7715402185 HEAD | sort > /tmp/actual
-          printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'modules/mensageiro/service.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' 'tests/mensageiro-v3-lock-identity.test.cjs' 'tests/mensageiro-v3-m322-real-handlers.test.cjs' 'tests/mensageiro-v3-schedule-timezone.test.cjs' 'tests/mensageiro-grupo-envio.test.cjs' | sort > /tmp/expected
+          case "$GITHUB_REF" in
+            refs/heads/reconcile/official-published-backend-20261023)
+              baseline=4601e0cc1d334a5bb49850a8064895eefc0efc84
+              printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'AGENTS.md' 'docs/contracts/EVIDENCE-REGISTER.md' 'index.js' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/operational-gates.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' | sort > /tmp/expected
+              ;;
+            refs/heads/validation/mensageiro-profile-image-save-node24-20261023)
+              baseline=3ddc4f32cbb05647dcbec593ccdced7715402185
+              printf '%s\n' '.github/workflows/mensageiro-profile-image-save-node24.yml' 'modules/mensageiro-v3/legacy-compat.js' 'modules/mensageiro-v3/src/v3/store.js' 'modules/mensageiro/service.js' 'tests/mensageiro-v3-original-ui-compat.test.cjs' 'tests/mensageiro-v3-lock-identity.test.cjs' 'tests/mensageiro-v3-m322-real-handlers.test.cjs' 'tests/mensageiro-v3-schedule-timezone.test.cjs' 'tests/mensageiro-grupo-envio.test.cjs' | sort > /tmp/expected
+              ;;
+            *) exit 1 ;;
+          esac
+          git diff --check "$baseline" HEAD
+          git diff --name-only "$baseline" HEAD | sort > /tmp/actual
           diff -u /tmp/expected /tmp/actual
       - run: npm ci
       - name: Messenger focal regressions
