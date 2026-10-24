@@ -55,3 +55,12 @@ jobs:
           node tests/mensageiro-v3-schedule-timezone.test.cjs
           node tests/mensageiro-v3-original-ui-compat.test.cjs
           node tests/mensageiro-v3-operational-hotfix.test.cjs
+      - name: RIO Radar TeleRadar Clonador and live queue contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/universal-flow-queue-executor.test.js
+          node tests/radar-cobertura-v1.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/fila-viva-runtime-wiring.test.js
