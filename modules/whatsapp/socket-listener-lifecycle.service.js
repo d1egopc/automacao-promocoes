@@ -124,7 +124,7 @@ function registrarListenerUnicoSocket({
     return { ok: false, registrado: false, motivo: "chave_listener_em_uso" };
   }
 
-  if (mesmoRegistro && (handlerPresente === true || (handlerPresente === null && totalAntes !== 0))) {
+  if (mesmoRegistro && handlerPresente === true) {
     logger?.log?.("[WHATSAPP-LISTENER-UPSERT]", JSON.stringify({
       sessaoId,
       socketGeracao,
@@ -137,10 +137,27 @@ function registrarListenerUnicoSocket({
     return { ok: true, registrado: false, totalListeners: totalAntes };
   }
 
-  sock.ev.on(evento, handler);
-  estado[chaveListener] = { emissor: sock.ev, evento, handler };
+  // Baileys 6.7.22 nao expoe listeners/listenerCount. Reinstalar somente o
+  // nosso callback com off/on permite recuperar removeAllListeners sem duplicar.
+  // Ambos sao sincronicos; nenhum evento pode intercalar a troca neste tick.
+  if (anterior && typeof anterior.emissor?.off !== "function") {
+    return { ok: false, registrado: false, motivo: "remocao_listener_indisponivel" };
+  }
+  const emissor = sock.ev;
+  const handlerAtual = (...args) => {
+    if (sock.ev !== emissor || estado[chaveListener]?.handler !== handlerAtual) return;
+    return handler(...args);
+  };
+  try {
+    if (anterior) anterior.emissor.off(anterior.evento, anterior.handler);
+    emissor.on(evento, handlerAtual);
+  } catch (_) {
+    delete estado[chaveListener];
+    return { ok: false, registrado: false, motivo: "falha_registro_listener" };
+  }
+  estado[chaveListener] = { emissor, evento, handler: handlerAtual };
 
-  const totalDepois = listenerCountSeguro(sock.ev, evento);
+  const totalDepois = listenerCountSeguro(emissor, evento);
   logger?.log?.("[WHATSAPP-LISTENER-UPSERT]", JSON.stringify({
     sessaoId,
     socketGeracao,

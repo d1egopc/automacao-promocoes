@@ -34,9 +34,38 @@ async function main() {
   const handler1 = () => { if (socketEhAtual(sessoes, id, primeiro)) chamadas1++; };
   const args1 = { sock: primeiro, evento: "messages.upsert", chave: "messages.upsert", handler: handler1, sessaoId: id, socketGeracao: geracao1, logger };
   assert.equal(registrarListenerUnicoSocket(args1).registrado, true);
-  assert.equal(registrarListenerUnicoSocket(args1).registrado, false);
+  assert.equal(registrarListenerUnicoSocket(args1).registrado, true,
+    "sem introspeccao, off/on reinstala apenas o callback proprio");
   primeiro.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "fixture@g.us" } }] });
   assert.equal(chamadas1, 1, "registro repetido nao duplica callback");
+
+  primeiro.ev.removeAllListeners("messages.upsert");
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 1, "emissor real confirma a remocao");
+  assert.equal(registrarListenerUnicoSocket(args1).registrado, true);
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 2, "registro repetido restaura listener removido");
+  registrarListenerUnicoSocket(args1);
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 3, "restauracao nao duplica listener");
+
+  const emissorSubstituido = primeiro.ev;
+  primeiro.ev = makeEventBuffer(logger);
+  emissorSubstituido.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 3, "emissor antigo fica inerte imediatamente apos a troca");
+  assert.equal(registrarListenerUnicoSocket(args1).registrado, true);
+  emissorSubstituido.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 3, "emissor substituido nao alcanca handler atual");
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 4, "novo emissor do mesmo socket recebe evento");
+  registrarListenerUnicoSocket(args1);
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 5, "novo emissor nao duplica callback em registro repetido");
+  let handlerNovo = 0;
+  registrarListenerUnicoSocket({ ...args1, handler: () => { if (socketEhAtual(sessoes, id, primeiro)) handlerNovo++; } });
+  primeiro.ev.emit("messages.upsert", { type: "notify", messages: [] });
+  assert.equal(chamadas1, 5, "callback anterior foi substituido");
+  assert.equal(handlerNovo, 1, "callback mais recente recebe uma unica vez");
 
   const segundo = criarSocket();
   const geracao2 = marcarSocketAtual({ sessoes, geracoes, sessaoId: id, sock: segundo, logger }).socketGeracao;
@@ -46,7 +75,8 @@ async function main() {
     handler: () => { if (socketEhAtual(sessoes, id, segundo)) chamadas2++; } }).registrado, true);
   primeiro.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "fixture@g.us" } }] });
   segundo.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: "fixture@g.us" } }] });
-  assert.equal(chamadas1, 1, "socket antigo nao processa apos reconexao");
+  assert.equal(chamadas1, 5, "socket antigo nao processa apos reconexao");
+  assert.equal(handlerNovo, 1, "callback atual do socket antigo nao processa apos reconexao");
   assert.equal(chamadas2, 1, "nova geracao recebe evento");
 
   let participantes = 0;
@@ -61,6 +91,11 @@ async function main() {
   assert.equal(registrarListenerUnicoSocket({ sock: nodeSock, evento: "messages.upsert", handler: handler1, logger }).registrado, true);
   nodeSock.ev.removeAllListeners("messages.upsert");
   assert.equal(registrarListenerUnicoSocket({ sock: nodeSock, evento: "messages.upsert", handler: handler1, logger }).registrado, true);
+
+  const semRemocao = { ev: { on() {} } };
+  assert.equal(registrarListenerUnicoSocket({ sock: semRemocao, evento: "messages.upsert", handler: handler1, logger }).registrado, true);
+  assert.equal(registrarListenerUnicoSocket({ sock: semRemocao, evento: "messages.upsert", handler: handler1, logger }).motivo,
+    "remocao_listener_indisponivel", "sem off e sem introspeccao deve falhar fechado");
 
   const fonte = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const inicio = fonte.indexOf('registrarListenerUnicoSocket({\n  sock,\n  evento: "messages.upsert"');

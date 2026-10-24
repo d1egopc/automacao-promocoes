@@ -1,0 +1,57 @@
+name: Mensageiro Baileys listener CI only
+
+on:
+  push:
+    branches: [validation/mensageiro-baileys-listener-observability-20261023]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/validation/mensageiro-baileys-listener-observability-20261023'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify isolated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --version | grep -Eq '^v24\.'
+          base=348cde4cf7a20c518a60435b7ddb0768e97e86ba
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --check "$base" HEAD
+          git diff --name-only "$base" HEAD | sort > /tmp/listener-actual
+          printf '%s\n' \
+            .github/workflows/mensageiro-baileys-listener-ci.yml \
+            index.js \
+            modules/telemetria/infra-memory-snapshot.js \
+            modules/whatsapp/socket-listener-lifecycle.service.js \
+            tests/whatsapp-socket-listener-baileys-real.test.cjs | sort > /tmp/listener-expected
+          diff -u /tmp/listener-expected /tmp/listener-actual
+      - run: npm ci
+      - name: Listener and Messenger regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/infra-memory-snapshot.test.js
+          node tests/mensageiro-bot-comandos.test.cjs
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+          node tests/mensageiro-v3-schedule-timezone.test.cjs
+          node tests/mensageiro-v3-original-ui-compat.test.cjs
+          node tests/mensageiro-v3-operational-hotfix.test.cjs
