@@ -4,6 +4,8 @@ Preserve o que ja funciona. Melhore somente com prova. Use a menor capacidade de
 
 ## Fonte da verdade
 
+- Reconciliacao local de 2026-10-23: esta pasta continua sendo a oficial. Consulte o registro temporal em `docs/contracts/EVIDENCE-REGISTER.md` antes de trocar de branch; backups locais e patches do Mensageiro nao substituem o SHA ativo em producao. Para atualizar: preservar o estado sujo em ref Git verificavel, confirmar ancestry e deployment, criar branch local na base publicada, aplicar somente o delta autorizado, testar e aguardar autorizacao de publicacao.
+
 - Trate `main` como branch canonica somente quando ela estiver reconciliada com producao.
 - Backend oficial de desenvolvimento: esta pasta `BACKEND-OFICIAL-2026`, no repositorio `d1egopc/automacao-promocoes`. Confira `origin/main`, checkout e SHA ativo na VPS separadamente antes de afirmar equivalencia.
 - Frontend oficial: repositorio `d1egopc/optimuspromo-frontend`. A branch Git e o deployment Production da Vercel sao referencias distintas; confirme o SHA publicado no painel antes de promover ou reverter.

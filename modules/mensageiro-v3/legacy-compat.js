@@ -6,6 +6,7 @@
 // conhece. O scheduler/handlers legados continuam fora do runtime universal.
 
 const express = require("express");
+const { resolverBotAdminGerente } = require("../mensageiro/gerente-identidade");
 
 const CARD_BY_MODULE = Object.freeze({
   boasVindas: "welcome",
@@ -167,7 +168,6 @@ function legacySchedule(schedule) {
   const intervalMs = Number(schedule.intervalMs || content.intervaloMinutos * 60_000 || 0) || 0;
   const originalTipo = content.tipo === "intervalo" ? "intervalo" : "horario";
   return {
-    ...clone(content),
     id: schedule.id,
     perfilId: schedule.profileId,
     ativo: schedule.active === true,
@@ -179,14 +179,21 @@ function legacySchedule(schedule) {
     gruposConfigurados: true,
     timezone: text(schedule.timezone, "America/Sao_Paulo"),
     intervaloMinutos: intervalMs > 0 ? Math.max(1, Math.round(intervalMs / 60_000)) : Number(content.intervaloMinutos || 30),
+    horario: content.horario || "",
+    data: content.data || "",
+    janelaInicio: content.janelaInicio || "",
+    janelaFim: content.janelaFim || "",
+    indiceAtual: Number(content.indiceAtual || 0),
+    ultimoEnvioEm: content.ultimoEnvioEm || "",
+    processandoEm: content.processandoEm || "",
+    lockAte: content.lockAte || "",
     nextRunAt: schedule.nextRunAt || "",
     conteudos: contents.length ? clone(contents) : [clone(fallbackContent)],
-    conteudo: clone(fallbackContent),
     status: schedule.active === true ? "pendente" : "inativo"
   };
 }
 
-function legacyProfile(profile, schedules) {
+function legacyProfile(profile) {
   const commandsCard = card(profile, "commands");
   const manager = moduleScope(profile, "gerente");
   return {
@@ -209,8 +216,7 @@ function legacyProfile(profile, schedules) {
       },
       programacoes: { ativo: card(profile, "scheduled").raw.active === true },
       gerente: manager
-    },
-    programacoes: schedules.map(legacySchedule)
+    }
   };
 }
 
@@ -274,7 +280,7 @@ function stateFor(store, workspaceId) {
   const profiles = listProfilesSafe(store, workspaceId);
   const schedules = listSchedulesSafe(store, workspaceId);
   const legacySchedules = schedules.map(legacySchedule);
-  const legacyProfiles = profiles.map(profile => legacyProfile(profile, schedules.filter(item => item.profileId === profile.id)));
+  const legacyProfiles = profiles.map(legacyProfile);
   const first = profiles.find(profile => profile.active === true) || profiles[0] || null;
   const attendance = attendanceConfig(first);
   const commands = legacyProfiles.flatMap(profile => profile.modulos.comandos.comandos || []);
@@ -453,6 +459,37 @@ function createLegacyCompatRoutes(deps = {}) {
   const router = express.Router();
   if (!deps.store) throw new Error("store_v3_obrigatorio");
   const store = deps.store;
+  const adminCache = new Map();
+  const metadataTimeoutMs = 1200;
+  const verificarAdmin = async (workspaceId, sessionId, groupId) => {
+    const sock = deps.getSockMensageiro?.(workspaceId, sessionId);
+    if (!sock || typeof sock.groupMetadata !== "function") return { permissao: "nao_verificado", estado: "sessao_indisponivel" };
+    const key = JSON.stringify([workspaceId, sessionId, groupId]);
+    const cached = adminCache.get(key);
+    if (cached?.sock === sock && cached.expiresAt > Date.now()) return cached.result;
+    if (cached?.sock === sock && cached.pending) return cached.pending;
+    let timer;
+    const pending = (async () => { try {
+      const metadata = await Promise.race([
+        sock.groupMetadata(groupId),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("metadata_timeout")), metadataTimeoutMs); })
+      ]);
+      const bot = resolverBotAdminGerente(sock, metadata);
+      const result = !bot.botEncontrado
+        ? { permissao: "nao_verificado", estado: "identidade_nao_confirmada" }
+        : bot.botAdmin
+          ? { permissao: "administrador", estado: "pronto_para_moderar" }
+          : { permissao: "sem_permissao", estado: "bot_sem_admin" };
+      adminCache.set(key, { sock, result, expiresAt: Date.now() + 20_000 });
+      return result;
+    } catch {
+      const result = { permissao: "nao_verificado", estado: "metadata_indisponivel" };
+      adminCache.set(key, { sock, result, expiresAt: Date.now() + 5_000 });
+      return result;
+    } finally { clearTimeout(timer); } })();
+    adminCache.set(key, { sock, pending });
+    return pending;
+  };
   const workspace = req => String(typeof deps.getClienteId === "function" ? deps.getClienteId(req) : "").trim();
   const allowed = (req, res) => {
     const id = workspace(req);
@@ -585,9 +622,31 @@ function createLegacyCompatRoutes(deps = {}) {
   });
 
   router.get("/gerente/infracoes", (req, res) => { const id = allowed(req, res); if (id) res.json({ ok: true, source: "mensageiro_v3_compat", infracoes: [] }); });
-  router.get("/gerente/status", (req, res) => {
+  router.get("/gerente/status", async (req, res) => {
     const id = allowed(req, res); if (!id) return;
-    const profiles = listProfilesSafe(store, id).map(p => ({ perfilId: p.id, estado: p.cards.groupManager?.active === true ? "pronto_para_moderar" : "gerente_inativo", permissaoResumo: "nao_verificado" }));
+    store.reload?.();
+    const perfilId = text(req.query.perfilId);
+    const profiles = await Promise.all(listProfilesSafe(store, id).filter(p => !perfilId || p.id === perfilId).map(async p => {
+      const manager = card(p, "groupManager");
+      const groups = manager.configuration.gruposConfigurados === true
+        ? asArray(manager.configuration.grupos)
+        : asArray(p.destinations);
+      const rules = asArray(manager.configuration.regras).filter(rule => rule?.ativo === true).length;
+      const groupStatus = await Promise.all(groups.map(async groupId => {
+        const checked = await verificarAdmin(id, p.sessionId, String(groupId));
+        return { grupoRef: String(groupId), nome: String(groupId), sessaoId: p.sessionId,
+          gerenteAtivo: manager.raw.active === true, regrasAtivas: rules,
+          permissao: checked.permissao, admin: checked.permissao === "administrador", estado: checked.estado };
+      }));
+      const summary = !groupStatus.length || groupStatus.some(group => group.permissao === "nao_verificado")
+        ? "nao_verificado" : groupStatus.every(group => group.permissao === "administrador")
+          ? "administrador" : "sem_permissao";
+      return { perfilId: p.id, perfilNome: p.name, perfilAtivo: p.active === true,
+        gerenteAtivo: manager.raw.active === true, sessaoId: p.sessionId,
+        regrasAtivas: rules, gruposSelecionados: groups.length,
+        estado: manager.raw.active === true ? "gerente_ativo" : "gerente_inativo",
+        permissaoResumo: summary, grupos: groupStatus };
+    }));
     return res.json({ ok: true, source: "mensageiro_v3_compat", perfis: profiles });
   });
   router.post("/gerente/infracoes/reset", (req, res) => { const id = allowed(req, res); if (id) res.json({ ok: true, source: "mensageiro_v3_compat", infracoes: [] }); });

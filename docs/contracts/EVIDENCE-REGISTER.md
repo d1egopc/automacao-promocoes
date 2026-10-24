@@ -127,4 +127,11 @@ Na prova, `main` dos dois repositorios retornou `protected=false`. Ativar bloque
 
 ## Atualizacao
 
+### Reconciliacao das pastas oficiais — 2026-10-23
+
+- Backend oficial: `BACKEND-OFICIAL-2026`, branch local `reconcile/official-published-backend-20261023`, base informada `4601e0cc1d334a5bb49850a8064895eefc0efc84`; GitHub confirmou esse SHA na branch `validation/mensageiro-profile-image-save-node24-20261023`. HEAD anterior `2d8536c22a65208ebf7a768ac5330ef17484dcc7` e ancestral da base.
+- Frontend oficial: `optimuspromo-frontend`, branch local `reconcile/official-published-frontend-20261023`, base informada `5815f9f7588175b5d0908533cf46dd7bcfed9851`; GitHub confirmou esse SHA na branch de validacao correspondente. HEAD anterior `3460513b72dd57811d02996b304a2a64a678adcf` e ancestral.
+- Alteracoes locais anteriores preservadas em refs Git `refs/backup/codex-reconcile-20261023-backend` (`611cc29a917495e297c714558cccdfc462458dad`) e `refs/backup/codex-reconcile-20261023-frontend` (`06ce2064797c0d1ff9be79a3fc5a391563f60ae5`), alem de stashes identificadas. Nenhum push ou deploy foi feito.
+- Os pequenos deltas de resposta leve, status de administrador e diagnostico delimitado foram aplicados depois das bases acima. Confirmacao independente de source SHA do deployment Vercel Production ainda pendente; branch Git nao prova Production.
+
 Ao atualizar esta fotografia, registre data, fonte do dado e apenas informacao nao sensivel. Nunca cole token, cookie, senha, chave privada ou valor de secret/env.

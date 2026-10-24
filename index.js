@@ -26199,7 +26199,12 @@ app.use("/mensageiro-v3", mensageiroV3Routes.router);
 const mensageiroCompatRoutes = createLegacyCompatRoutes({
   store: mensageiroV3Routes.store,
   getClienteId,
-  usuarioTemRecurso
+  usuarioTemRecurso,
+  getSockMensageiro: (workspaceId, sessionId) => {
+    const meta = sessoesMeta?.[sessionId];
+    if (!meta || !canalPertenceAoWorkspace(meta, workspaceId, { usuarios })) return null;
+    return sessoes[sessionId] || null;
+  }
 });
 app.use("/mensageiro", mensageiroCompatRoutes.router);
 const mensageiroV3AckCorrelator = createV3BaileysAckCorrelator({
@@ -26228,8 +26233,20 @@ const mensageiroV3HandlerBridge = createHandlerBridge({
 });
 
 const ultimoDiagnosticoMensageiroV3 = new Map();
-function diagnosticoMensageiroV3({ card, reason }) {
+const janelaTraceMensageiroV3 = new Map();
+function diagnosticoMensageiroV3({ workspaceId, sessionId, groupId, profileId, card, stage, reason }) {
+  if (process.env.OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_WORKSPACE === workspaceId && workspaceId) {
+    const now = Date.now();
+    const window = janelaTraceMensageiroV3.get(sessionId);
+    const current = window && now - window.startedAt < 60_000 ? window : { startedAt: now, count: 0 };
+    janelaTraceMensageiroV3.set(sessionId, current);
+    if (current.count++ < 120) {
+      const groupHash = groupId ? require("node:crypto").createHash("sha256").update(groupId).digest("hex").slice(0, 12) : "";
+      console.warn("[MENSAGEIRO-V3-TRACE]", JSON.stringify({ workspaceId, sessionId, groupHash, profileId, card, stage, reason }));
+    }
+  }
   const key = `${card}:${reason}`;
+  if (!reason) return;
   const now = Date.now();
   if (now - (ultimoDiagnosticoMensageiroV3.get(key) || 0) < 300_000) return;
   ultimoDiagnosticoMensageiroV3.set(key, now);
@@ -33654,6 +33671,7 @@ registrarListenerUnicoSocket({
   logger: console,
   handler: async ({ messages = [], type } = {}) => {
   if (!socketEhAtual(sessoes, id, sock)) {
+    diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id, card: "messages.upsert", stage: "listener_rejected", reason: "socket_obsoleto" });
     console.log("[WHATSAPP-LISTENER-UPSERT-IGNORADO]", JSON.stringify({
       sessaoId: id,
       socketGeracao,
@@ -33677,6 +33695,8 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
+      diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id,
+        groupId: mensagem?.key?.remoteJid || "", card: "messages.upsert", stage: "listener_received", reason: "" });
       indiceMensagemCobertura = indiceMensagem;
       mensagemAtualCobertura = mensagem;
       const coberturaTraceId = coberturaRadar.criarCoberturaTraceId(mensagem, {
@@ -33857,6 +33877,10 @@ registrarListenerUnicoSocket({
 });
 
 sock.ev.on("group-participants.update", async (evento) => {
+
+  diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id,
+    groupId: evento?.id || "", card: evento?.action === "add" ? "welcome" : "farewell",
+    stage: "listener_received", reason: "" });
 
   console.log("[INFO] EVENTO GRUPO MENSAGEIRO:", {
     quando: new Date().toISOString(),

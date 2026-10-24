@@ -74,19 +74,28 @@ function authorizedDestination({ workspaceId, sessionId, destination, sessionMet
 function createOperationalIngress({ store, bridge, recoveryDisabled = () => false, clock = () => Date.now(), diagnostic = () => {} }) {
   if (!store || !bridge || typeof bridge.dispatch !== "function") throw new Error("ingress_v3_dependencias_obrigatorias");
   return async ({ workspaceId, sessionId, card, message, event, sock, planAllowed }) => {
-    const blocked = reason => { diagnostic({ card, reason }); return { blocked: true, reason }; };
+    const groupId = message?.key?.remoteJid || event?.id || "";
+    const report = (stage, reason, profileId = "") => diagnostic({ workspaceId, sessionId, groupId, card, stage, reason, profileId });
+    const blocked = reason => { report("blocked", reason); return { blocked: true, reason }; };
     if (recoveryDisabled()) return blocked("TRANSPORTE_INDISPONIVEL");
     if (planAllowed !== true) return blocked("PLANO_BLOQUEADO");
-    const groupId = message?.key?.remoteJid || event?.id || "";
     const selected = selectProfile(store, { workspaceId, sessionId, card, groupId });
     if (!selected.profileId) return blocked(selected.reason);
     const eventId = eventIdentity({ message, event, card, now: clock() });
     if (!eventId) return blocked("EVENTO_NAO_RECEBIDO");
-    const outcome = await bridge.dispatch({
-      workspaceId, profileId: selected.profileId, card, eventId,
-      args: { clienteId: workspaceId, sessaoId: sessionId, sock, mensagem: message, evento: event, planoLiberado: planAllowed }
-    });
-    return outcome.ok === true ? outcome.result : blocked(outcome.reason === "claim_existente" ? "CLAIM_EXISTENTE" : outcome.reason || "CONFIGURACAO_NAO_AUTORIZADA");
+    report("profile_selected", "", selected.profileId);
+    let outcome;
+    try {
+      outcome = await bridge.dispatch({
+        workspaceId, profileId: selected.profileId, card, eventId,
+        args: { clienteId: workspaceId, sessaoId: sessionId, sock, mensagem: message, evento: event, planoLiberado: planAllowed }
+      });
+    } catch (error) {
+      report("handler_error", error?.code || "handler_error", selected.profileId);
+      throw error;
+    }
+    if (outcome.ok === true) { report("handler_returned", "", selected.profileId); return outcome.result; }
+    return blocked(outcome.reason === "claim_existente" ? "CLAIM_EXISTENTE" : outcome.reason || "CONFIGURACAO_NAO_AUTORIZADA");
   };
 }
 

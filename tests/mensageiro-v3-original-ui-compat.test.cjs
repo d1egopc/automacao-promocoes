@@ -25,14 +25,14 @@ function request(server, method, url, body) {
   });
 }
 
-function createFixture(clock = Date.now) {
+function createFixture(clock = Date.now, getSockMensageiro = () => null) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mensageiro-v3-compat-"));
   const filePath = path.join(dir, "state.json");
   fs.writeFileSync(filePath, JSON.stringify({ schemaVersion: 3, revision: 0, workspaces: {}, deletedIds: { profiles: {}, schedules: {} } }));
   const store = new V3Store({ filePath, clock });
   const app = express();
   app.use(express.json({ limit: "10mb" }));
-  const mounted = createLegacyCompatRoutes({ store, clock, getClienteId: () => "workspace-a", usuarioTemRecurso: () => true });
+  const mounted = createLegacyCompatRoutes({ store, clock, getClienteId: () => "workspace-a", usuarioTemRecurso: () => true, getSockMensageiro });
   app.use("/mensageiro", mounted.router);
   const server = app.listen(0);
   return { dir, filePath, store, server };
@@ -40,7 +40,14 @@ function createFixture(clock = Date.now) {
 
 (async () => {
   let fakeNow = Date.parse("2026-10-21T10:00:00.000Z");
-  const fixture = createFixture(() => fakeNow);
+  let metadataCalls = 0;
+  const sock = { user: { id: "5511999999999@s.whatsapp.net" }, groupMetadata: async () => {
+    metadataCalls += 1;
+    return { participants: [{ id: "5511999999999@s.whatsapp.net", admin: "admin" }] };
+  } };
+  let activeSock = sock;
+  const fixture = createFixture(() => fakeNow, (workspaceId, sessionId) =>
+    workspaceId === "workspace-a" && sessionId === "session-a" ? activeSock : null);
   try {
     const empty = await request(fixture.server, "GET", "/mensageiro");
     assert.equal(empty.status, 200);
@@ -78,6 +85,19 @@ function createFixture(clock = Date.now) {
     assert.equal(saved.body.comandos[0].perfilId, profile.id);
     assert.equal(saved.body.programacoes[0].perfilId, profile.id);
     assert.equal(saved.body.programacoes[0].ativo, false);
+    assert.equal("programacoes" in profile, false, "perfil não repete as mídias da lista canônica");
+    const managerStatus = await request(fixture.server, "GET", "/mensageiro/gerente/status");
+    assert.equal(managerStatus.body.perfis[0].grupos[0].permissao, "administrador");
+    assert.equal(managerStatus.body.perfis[0].permissaoResumo, "administrador");
+    await request(fixture.server, "GET", "/mensageiro/gerente/status");
+    assert.equal(metadataCalls, 1, "consulta de metadata usa cache curto");
+    activeSock = { user: sock.user, groupMetadata: async () => ({ participants: [{ id: sock.user.id, admin: null }] }) };
+    const withoutAdmin = await request(fixture.server, "GET", "/mensageiro/gerente/status");
+    assert.equal(withoutAdmin.body.perfis[0].grupos[0].permissao, "sem_permissao");
+    activeSock = { user: sock.user, groupMetadata: async () => { throw new Error("metadata indisponível"); } };
+    const unavailable = await request(fixture.server, "GET", "/mensageiro/gerente/status");
+    assert.equal(unavailable.body.perfis[0].grupos[0].permissao, "nao_verificado");
+    assert.equal(unavailable.body.perfis[0].grupos[0].estado, "metadata_indisponivel");
     assert.deepEqual(Object.keys(fixture.store.getProfile("workspace-a", profile.id).cards).sort(), [
       "attendance", "commands", "faq", "farewell", "flows", "groupManager", "quickReplies", "scheduled", "welcome"
     ]);
@@ -120,12 +140,18 @@ function createFixture(clock = Date.now) {
       }]
     });
     assert.equal(migratedWithImage.status, 200);
+    assert.equal(migratedWithImage.body.programacoes[0].conteudos[0].imagem, imageDataUrl);
+    assert.equal("conteudo" in migratedWithImage.body.programacoes[0], false, "imagem não aparece no fallback duplicado");
+    assert.ok(Buffer.byteLength(JSON.stringify(migratedWithImage.body)) < imageDataUrl.length * 1.5,
+      "resposta HTTP não deve repetir a mídia em perfil, conteúdo e fallback");
     assert.equal(persistCalls, 1, "perfil, cards e programação são publicados em uma única persistência");
     const reloadedAfterImage = new V3Store({ filePath: fixture.filePath, clock: () => fakeNow });
     assert.equal(reloadedAfterImage.getProfile("workspace-a", profile.id).sessionId, "session-b");
     const imageSchedule = reloadedAfterImage.getSchedule("workspace-a", persistedScheduleId);
     assert.equal(imageSchedule.destinations[0], "group-b");
     assert.equal(imageSchedule.content.conteudos[0].imagem, imageDataUrl, "imagem sobrevive ao reload do store");
+    const imageReload = await request(fixture.server, "GET", "/mensageiro");
+    assert.equal(imageReload.body.programacoes[0].conteudos[0].imagem, imageDataUrl);
 
     // The original form sends horario/data, not an absolute nextRunAt. The
     // compat boundary must translate it before the persisted V3 scheduler
