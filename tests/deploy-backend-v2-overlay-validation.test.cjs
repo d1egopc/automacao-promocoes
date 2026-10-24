@@ -257,6 +257,32 @@ test("runtime novo fora da allowlist é rejeitado", () => {
   assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
 });
 
+test("benchmark sintético específico é excluído da classificação de runtime", () => {
+  const scenario = "authorized-synthetic-benchmark-is-non-runtime";
+  const result = runCase({
+    scenario,
+    mode: "record",
+    changeType: "A",
+    pathValue: "scripts/benchmark-gerente-observability-v2.cjs",
+    approvedPath: runtimePath
+  });
+  result.expected = "exit code 0 for the exact non-runtime benchmark path";
+  assert.equal(result.status, 0, processDiagnostic(scenario, result));
+});
+
+test("outro arquivo inesperado sob scripts continua bloqueado", () => {
+  const scenario = "unexpected-script-remains-runtime-blocked";
+  const result = runCase({
+    scenario,
+    mode: "record",
+    changeType: "A",
+    pathValue: "scripts/outro-helper.cjs",
+    approvedPath: runtimePath
+  });
+  result.expected = "nonzero exit for any other scripts path";
+  assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+});
+
 test("caminhos absolutos e com travessia são rejeitados", () => {
   const invalidPaths = [
     ["absolute-path", "/etc/passwd"],
