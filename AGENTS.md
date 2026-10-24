@@ -81,6 +81,7 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 - Nunca use `docker compose down`, remova volumes, recrie PostgreSQL ou toque `/data` sem plano explicito.
 - Nao altere env/flags durante deploy fora do escopo aprovado.
 - Sempre registre baseline e prove saude depois do deploy.
+- O overlay de tres arquivos do deploy manual de outubro/2026 e exclusivo do hotfix do Mensageiro aprovado no SHA 4db00b0b. Nao o reutilize como procedimento geral: qualquer publicacao futura que modifique dependencias ou outros modulos exige imagem completa construida de checkout limpo pelo SHA autorizado, com comparacao da base produtiva, CI, rollback e deploy manual controlado.
 - Frontend: Preview `READY` -> gate humano -> promover o mesmo SHA -> provar Production 200.
 - Extensao: distribua somente artefato versionado, verificado por hash e aprovado por humano.
 
