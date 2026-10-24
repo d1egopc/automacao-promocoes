@@ -2,7 +2,9 @@ name: Mensageiro Baileys listener CI only
 
 on:
   push:
-    branches: [validation/mensageiro-baileys-listener-observability-20261023]
+    branches:
+      - validation/mensageiro-baileys-listener-observability-20261023
+      - validation/gerente-v2-observability-20261024
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
 
 jobs:
   validate:
-    if: github.ref == 'refs/heads/validation/mensageiro-baileys-listener-observability-20261023'
+    if: github.ref == 'refs/heads/validation/mensageiro-baileys-listener-observability-20261023' || github.ref == 'refs/heads/validation/gerente-v2-observability-20261024'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -29,19 +31,41 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node --version | grep -Eq '^v24\.'
-          base=348cde4cf7a20c518a60435b7ddb0768e97e86ba
+          case "$GITHUB_REF" in
+            refs/heads/validation/mensageiro-baileys-listener-observability-20261023)
+              base=348cde4cf7a20c518a60435b7ddb0768e97e86ba
+              expected=(
+                .github/workflows/mensageiro-baileys-listener-ci.yml
+                index.js
+                modules/telemetria/infra-memory-snapshot.js
+                modules/whatsapp/socket-listener-lifecycle.service.js
+                scripts/deploy-backend-vps-manual.sh
+                tests/deploy-backend-runtime-classification.test.cjs
+                tests/deploy-backend-compose-image-validation.test.cjs
+                tests/whatsapp-socket-listener-baileys-real.test.cjs
+              )
+              ;;
+            refs/heads/validation/gerente-v2-observability-20261024)
+              base=10b066f827117bb78af310e982de99b5880119bc
+              expected=(
+                .github/workflows/mensageiro-baileys-listener-ci.yml
+                docs/GERENTE-V2-OBSERVABILITY.md
+                index.js
+                modules/mensageiro-v3/operational-gates.js
+                modules/mensageiro/gerente-observability-v2.js
+                modules/mensageiro/gerente-observability-v2.routes.js
+                modules/mensageiro/gerente.service.js
+                scripts/benchmark-gerente-observability-v2.cjs
+                tests/mensageiro-gerente-observability-v2.test.cjs
+                tests/whatsapp-socket-listener-baileys-real.test.cjs
+              )
+              ;;
+            *) echo "unsupported_ref:$GITHUB_REF" >&2; exit 1 ;;
+          esac
           git merge-base --is-ancestor "$base" HEAD
           git diff --check "$base" HEAD
           git diff --name-only "$base" HEAD | sort > /tmp/listener-actual
-          printf '%s\n' \
-            .github/workflows/mensageiro-baileys-listener-ci.yml \
-            index.js \
-            modules/telemetria/infra-memory-snapshot.js \
-            modules/whatsapp/socket-listener-lifecycle.service.js \
-            scripts/deploy-backend-vps-manual.sh \
-            tests/deploy-backend-runtime-classification.test.cjs \
-            tests/deploy-backend-compose-image-validation.test.cjs \
-            tests/whatsapp-socket-listener-baileys-real.test.cjs | sort > /tmp/listener-expected
+          printf '%s\n' "${expected[@]}" | sort > /tmp/listener-expected
           diff -u /tmp/listener-expected /tmp/listener-actual
           bash -n scripts/deploy-backend-vps-manual.sh
           node tests/deploy-backend-runtime-classification.test.cjs
@@ -52,6 +76,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check index.js
+          if [ "$GITHUB_REF" = 'refs/heads/validation/gerente-v2-observability-20261024' ]; then
+            node tests/mensageiro-gerente-observability-v2.test.cjs
+          fi
           node tests/whatsapp-socket-listener-baileys-real.test.cjs
           node tests/whatsapp-socket-listener-lifecycle.test.js
           node tests/infra-memory-snapshot.test.js

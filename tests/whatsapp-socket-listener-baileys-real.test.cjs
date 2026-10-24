@@ -14,6 +14,7 @@ const {
   diagnosticarEntradaUpsert
 } = require("../modules/whatsapp/socket-listener-lifecycle.service.js");
 const { contarSocketsWhatsapp } = require("../modules/telemetria/infra-memory-snapshot.js");
+const { createGerenteObservabilityV2 } = require("../modules/mensageiro/gerente-observability-v2");
 
 async function main() {
   const baileysRoot = path.join(__dirname, "..", "node_modules", "@whiskeysockets", "baileys", "lib");
@@ -109,19 +110,32 @@ async function main() {
 
   const logs = [];
   const ordem = [];
-  const sessaoTrace = "fixture_Claro";
+  const sessaoTrace = "user_k3phmbkf_ClaroTeste";
   const grupo = "fixture@g.us";
   const sessaoProdutiva = {};
   const sock = criarSocket();
   const socketGeracao = marcarSocketAtual({ sessoes: sessaoProdutiva, geracoes: {}, sessaoId: sessaoTrace, sock, logger }).socketGeracao;
-  const ambiente = {
+  const v2RunId = "713f90be-4ebf-4c2c-9fd9-69a6586dfdd1";
+  const gerenteObservabilityV2 = createGerenteObservabilityV2({
+    validateTarget: ({ workspaceId, sessionId, groupId }) =>
+      workspaceId === "user_k3phmbkf" && sessionId === sessaoTrace && groupId === grupo
+  });
+  assert.equal(gerenteObservabilityV2.start({
+    workspaceId: "user_k3phmbkf", sessionId: sessaoTrace, groupId: grupo,
+    durationMs: 900_000, maxEvents: 10, runId: v2RunId
+  }).ok, true);
+  const ambienteV2 = {
+    OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_WORKSPACE: "user_k3phmbkf",
+    OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_SESSION: sessaoTrace
+  };
+  const ambienteLegado = {
     OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_WORKSPACE: "fixture_workspace",
     OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_SESSION: sessaoTrace
   };
   const registro = {
     sock, id: sessaoTrace, socketGeracao, sessoes: sessaoProdutiva, force: false,
-    clienteIdMensageiro: "fixture_workspace", registrarListenerUnicoSocket, socketEhAtual,
-    diagnosticarEntradaUpsert: args => diagnosticarEntradaUpsert({ ...args, env: ambiente,
+    clienteIdMensageiro: "user_k3phmbkf", gerenteObservabilityV2, registrarListenerUnicoSocket, socketEhAtual,
+    diagnosticarEntradaUpsert: args => diagnosticarEntradaUpsert({ ...args, env: ambienteV2,
       logger: { warn: (tag, payload) => { ordem.push("trace"); logs.push({ tag, payload: JSON.parse(payload) }); } } }),
     diagnosticoMensageiroV3() {},
     coberturaRadar: { flagAtiva: () => false, registrar() {}, criarCoberturaTraceId: () => "fixture",
@@ -151,6 +165,12 @@ async function main() {
   assert.equal(logs[0].payload.groupHash.length, 12);
   assert.ok(!JSON.stringify(logs).includes(grupo));
   assert.ok(!JSON.stringify(logs).includes("SEGREDO_NAO_LOGAR"));
+  const v2InitialEvents = gerenteObservabilityV2.readEvents(v2RunId);
+  assert.deepEqual(v2InitialEvents.slice(0, 4).map(event => event.stage), [
+    "ingress", "session_workspace", "group_resolution", "socket_guard"
+  ], "V2 records the Baileys ingress before downstream filters");
+  assert.ok(!JSON.stringify(v2InitialEvents).includes(grupo));
+  assert.ok(!JSON.stringify(v2InitialEvents).includes("SEGREDO_NAO_LOGAR"));
   const novoSocket = criarSocket();
   marcarSocketAtual({ sessoes: sessaoProdutiva, geracoes: { [sessaoTrace]: socketGeracao },
     sessaoId: sessaoTrace, sock: novoSocket, logger });
@@ -165,9 +185,11 @@ async function main() {
   assert.equal(diagnosticarEntradaUpsert({ workspaceId: "fixture_workspace", sessaoId: sessaoTrace,
     messages: [{ key: { remoteJid: grupo } }], env: {}, logger: { warn() { throw new Error("nao deveria logar"); } } }), 0);
   assert.doesNotThrow(() => diagnosticarEntradaUpsert({ workspaceId: "fixture_workspace", sessaoId: sessaoTrace,
-    messages: [{ key: { remoteJid: grupo } }], env: ambiente,
+    messages: [{ key: { remoteJid: grupo } }], env: ambienteLegado,
     logger: { warn() { throw new Error("logger_indisponivel"); } } }),
   "falha do logger nao pode bloquear os handlers");
+
+  gerenteObservabilityV2.dispose();
 
   console.log(`PASS ${process.version}: Baileys 6.7.22, dedup, reconexao, trace inicial e handlers V3`);
 }

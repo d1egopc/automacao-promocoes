@@ -390,7 +390,8 @@ async function tratarMensagemGrupoGerente({
   sock,
   mensagem,
   planoLiberado = false,
-  configOverride = null
+  configOverride = null,
+  diagnosticV2 = null
 } = {}) {
   try {
     limparMapRecente(resultadosMensagemGerente);
@@ -415,19 +416,29 @@ async function tratarMensagemGrupoGerente({
         writeClienteJson
       })
       : () => false;
+    const traceV2 = typeof diagnosticV2 === "function"
+      ? (stage, code, details = {}) => {
+        try { diagnosticV2(stage, code, details); }
+        catch { /* Observability must not affect moderation decisions. */ }
+      }
+      : null;
     trace("handler_called");
+    traceV2?.("handler_result", "handler_called", { result: "ok" });
 
     if (!usuarioAtivo(clienteId)) {
       trace("usuario_inativo");
+      traceV2?.("handler_result", "user_inactive", { result: "blocked" });
       logUsuarioInativoIgnorado({ clienteId, fluxo: "mensageiro_gerente_grupo" });
       return resultadoGerente({ codigo: "usuario_inativo" });
     }
     if (planoLiberado !== true) {
       trace("plano_nao_liberado");
+      traceV2?.("card_scope", "plan_blocked", { result: "blocked" });
       return resultadoGerente({ codigo: "plano_sem_mensageiro" });
     }
     if (mensagem?.key?.fromMe) {
       trace("from_me");
+      traceV2?.("handler_result", "from_me", { result: "blocked" });
       return resultadoGerente({ codigo: "from_me" });
     }
 
@@ -454,10 +465,12 @@ async function tratarMensagemGrupoGerente({
     const participante = extrairParticipante(mensagem);
     if (!participante) {
       trace("participante_nao_resolvido");
+      traceV2?.("handler_result", "unknown", { result: "blocked" });
       return retornarOperacional("participante_nao_resolvido");
     }
     if (!mensagem?.key || !mensagem.key.id || !mensagem.key.remoteJid) {
       trace("key_incompleta");
+      traceV2?.("handler_result", "message_key_incomplete", { result: "blocked" });
       return retornarOperacional("key_incompleta");
     }
 
@@ -473,14 +486,17 @@ async function tratarMensagemGrupoGerente({
     });
     if (!resolucao?.ok || resolucao.legado === true) {
       trace("profile_not_resolved");
+      traceV2?.("profile_selection", "profile_not_resolved", { result: "blocked" });
       return retornarOperacional(resolucao?.codigo || "perfil_nao_resolvido");
     }
 
     const perfil = resolucao.perfil || {};
     const gerente = perfil.modulos?.gerente || {};
     trace("profile_resolved", { perfilId: perfil.id });
+    traceV2?.("profile_selection", "profile_selected", { profileId: perfil.id, result: "ok" });
     if (gerente.ativo !== true) {
       trace("manager_inactive", { perfilId: perfil.id });
+      traceV2?.("card_scope", "manager_inactive", { profileId: perfil.id, result: "blocked" });
       return retornarOperacional("gerente_inativo", {}, { perfilId: perfil.id });
     }
     registrarOperacional("gerente_ativo", { perfilId: perfil.id });
@@ -491,6 +507,7 @@ async function tratarMensagemGrupoGerente({
       : [];
     if (!regrasAtivas.length) {
       trace("rules_empty", { perfilId: perfil.id });
+      traceV2?.("rule_evaluation", "rules_empty", { profileId: perfil.id, result: "blocked" });
       return retornarOperacional("sem_regras_ativas", {}, { perfilId: perfil.id });
     }
 
@@ -503,22 +520,31 @@ async function tratarMensagemGrupoGerente({
       tipoMidia,
       contexto
     });
-    if (!violacao) return retornarOperacional("sem_violacao", { processada: true }, { perfilId: perfil.id });
+    if (!violacao) {
+      traceV2?.("rule_evaluation", "no_rule_match", { profileId: perfil.id, result: "ok" });
+      return retornarOperacional("sem_violacao", { processada: true }, { perfilId: perfil.id });
+    }
 
     const regra = violacao.regra;
     trace("rule_match", { perfilId: perfil.id, regraId: regra.id });
+    traceV2?.("rule_evaluation", "rule_match", { profileId: perfil.id, ruleId: regra.id, result: "ok" });
     registrarOperacional("violacao_detectada", {
       perfilId: perfil.id,
       regraId: regra.id,
       tipoRegra: regra.tipo,
       acao: regra.acao
     }, "[GERENTE-REGRA-MATCH]");
+    const metadataStartedAt = typeof diagnosticV2 === "function" ? Date.now() : 0;
     const permissao = await obterPermissoesGrupo({ sock, grupoId, participante });
     if (!permissao.ok) {
+      traceV2?.("bot_admin", "metadata_unavailable", { profileId: perfil.id, ruleId: regra.id, result: "unknown", durationMs: Date.now() - metadataStartedAt });
       return retornarOperacional(permissao.codigo || "metadata_indisponivel", { processada: true }, { perfilId: perfil.id });
     }
 
     const isencao = participanteIsento({ participante, permissao, configuracao });
+    traceV2?.("exemption", isencao ? "sender_exempt" : "sender_not_exempt", {
+      profileId: perfil.id, ruleId: regra.id, result: isencao ? "blocked" : "ok"
+    });
     if (isencao) {
       trace("isento", { perfilId: perfil.id, regraId: regra.id });
       registrarHistoricoGerente(clienteId, {
@@ -540,6 +566,7 @@ async function tratarMensagemGrupoGerente({
 
     if (!permissao.botAdmin) {
       trace("bot_sem_admin", { perfilId: perfil.id, regraId: regra.id });
+      traceV2?.("bot_admin", "bot_not_admin", { profileId: perfil.id, ruleId: regra.id, result: "blocked", durationMs: Date.now() - metadataStartedAt });
       registrarOperacional("bot_sem_admin", { perfilId: perfil.id }, "[GERENTE-SEM-ADMIN]");
       registrarHistoricoGerente(clienteId, {
         contato: participante,
@@ -557,11 +584,14 @@ async function tratarMensagemGrupoGerente({
       });
       return resultadoGerente({ processada: true, codigo: "bot_sem_admin" });
     }
+    traceV2?.("bot_admin", "bot_admin", { profileId: perfil.id, ruleId: regra.id, result: "ok", durationMs: Date.now() - metadataStartedAt });
     registrarOperacional("bot_admin", { perfilId: perfil.id });
 
     try {
+      traceV2?.("delete_attempt", "delete_started", { profileId: perfil.id, ruleId: regra.id, result: "unknown" });
       await sock.sendMessage(grupoId, { delete: mensagem.key });
       trace("delete_ok", { perfilId: perfil.id, regraId: regra.id });
+      traceV2?.("delete_result", "delete_succeeded", { profileId: perfil.id, ruleId: regra.id, result: "ok" });
       registrarOperacional("delete_ok", {
         perfilId: perfil.id,
         regraId: regra.id,
@@ -570,6 +600,7 @@ async function tratarMensagemGrupoGerente({
       }, "[GERENTE-DELETE-OK]");
     } catch (e) {
       trace("delete_erro", { perfilId: perfil.id, regraId: regra.id });
+      traceV2?.("delete_result", "delete_failed", { profileId: perfil.id, ruleId: regra.id, result: "blocked" });
       registrarOperacional("delete_falhou", {
         perfilId: perfil.id,
         regraId: regra.id,

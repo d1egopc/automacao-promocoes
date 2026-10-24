@@ -277,6 +277,8 @@ const { createLegacyCompatRoutes } = require("./modules/mensageiro-v3/legacy-com
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
 const { createOperationalIngress, scheduledPayload: payloadProgramacaoV3, authorizedDestination: destinoAutorizadoV3 } = require("./modules/mensageiro-v3/operational-gates");
+const { createGerenteObservabilityV2 } = require("./modules/mensageiro/gerente-observability-v2");
+const { createGerenteObservabilityV2Routes } = require("./modules/mensageiro/gerente-observability-v2.routes");
 const { V3Scheduler } = require("./modules/mensageiro-v3/src/v3/scheduler");
 const { createV3BaileysAckCorrelator, messageIdOf } = require("./modules/mensageiro-v3/src/v3/baileys-ack-correlator");
 const { isMensageiroV3RecoveryDisabled } = require("./modules/mensageiro-v3/recovery-mode");
@@ -26193,6 +26195,28 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
   }
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
+
+function grupoGerenteConfiguradoNoPerfil(profile, groupId) {
+  const manager = profile?.cards?.groupManager?.configuration || {};
+  const ownGroups = Array.isArray(manager.grupos) ? manager.grupos : [];
+  const inheritedGroups = Array.isArray(profile?.destinations) ? profile.destinations : [];
+  const configured = manager.gruposConfigurados === true || ownGroups.length > 0 ? ownGroups : inheritedGroups;
+  return configured.some(item => String(item?.id || item?.jid || item?.grupoId || item || "") === String(groupId));
+}
+
+const gerenteObservabilityV2 = createGerenteObservabilityV2({
+  validateTarget: ({ workspaceId, sessionId, groupId }) => {
+    if (workspaceId !== "user_k3phmbkf") return false;
+    try { mensageiroV3Routes.store.reload(); } catch { return false; }
+    const profiles = Object.values(mensageiroV3Routes.store.snapshot().workspaces?.[workspaceId]?.profiles || {});
+    return profiles.some(profile => profile?.workspaceId === workspaceId &&
+      String(profile?.sessionId || "") === String(sessionId) && grupoGerenteConfiguradoNoPerfil(profile, groupId));
+  }
+});
+app.use("/admin/mensageiro/gerente-v2", createGerenteObservabilityV2Routes({
+  requireAdminMaster: exigirAdminMasterEstrito,
+  controller: gerenteObservabilityV2
+}));
 // The original UI remains the public surface, but its data authority is now
 // the universal V3 store. The legacy router above is intentionally not
 // mounted: legacy JSON/configuration cannot be read or executed after the
@@ -26259,10 +26283,10 @@ const ingressMensageiroV3 = createOperationalIngress({
   recoveryDisabled: isMensageiroV3RecoveryDisabled,
   diagnostic: diagnosticoMensageiroV3
 });
-async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado }) {
+async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2 }) {
   return ingressMensageiroV3({
     workspaceId: clienteId, sessionId: sessaoId, card,
-    message: mensagem, event: evento, sock, planAllowed: planoLiberado
+    message: mensagem, event: evento, sock, planAllowed: planoLiberado, diagnosticV2
   });
 }
 
@@ -33678,7 +33702,29 @@ registrarListenerUnicoSocket({
     messages,
     type
   });
+  const gerenteDiagnosticV2ByMessage = gerenteObservabilityV2.isActiveFor({ workspaceId: clienteIdMensageiro, sessionId: id })
+    ? new WeakMap()
+    : null;
+  if (gerenteDiagnosticV2ByMessage) {
+    for (const message of messages) {
+      if (!message || typeof message !== "object") continue;
+      const diagnosticV2 = gerenteObservabilityV2.beginEvent({
+        workspaceId: clienteIdMensageiro,
+        sessionId: id,
+        groupId: message?.key?.remoteJid || "",
+        messageId: message?.key?.id || ""
+      });
+      if (!diagnosticV2) continue;
+      gerenteDiagnosticV2ByMessage.set(message, diagnosticV2);
+      diagnosticV2("ingress", "received", { result: "ok" });
+      diagnosticV2("session_workspace", "resolved", { result: "ok" });
+      diagnosticV2("group_resolution", "resolved", { result: "ok" });
+    }
+  }
   if (!socketEhAtual(sessoes, id, sock)) {
+    if (gerenteDiagnosticV2ByMessage) {
+      for (const message of messages) gerenteDiagnosticV2ByMessage.get(message)?.("socket_guard", "socket_stale", { result: "blocked" });
+    }
     diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id, card: "messages.upsert", stage: "listener_rejected", reason: "socket_obsoleto" });
     console.log("[WHATSAPP-LISTENER-UPSERT-IGNORADO]", JSON.stringify({
       sessaoId: id,
@@ -33686,6 +33732,9 @@ registrarListenerUnicoSocket({
       motivo: "socket_obsoleto"
     }));
     return;
+  }
+  if (gerenteDiagnosticV2ByMessage) {
+    for (const message of messages) gerenteDiagnosticV2ByMessage.get(message)?.("socket_guard", "socket_current", { result: "ok" });
   }
 
   const loteTraceIdCobertura = coberturaRadar.flagAtiva()
@@ -33703,6 +33752,9 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
+      const gerenteDiagnosticV2 = mensagem && typeof mensagem === "object"
+        ? gerenteDiagnosticV2ByMessage?.get(mensagem)
+        : null;
       diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id,
         groupId: mensagem?.key?.remoteJid || "", card: "messages.upsert", stage: "listener_received", reason: "" });
       indiceMensagemCobertura = indiceMensagem;
@@ -33743,6 +33795,7 @@ registrarListenerUnicoSocket({
         });
       }
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        gerenteDiagnosticV2?.("card_scope", "user_inactive", { result: "blocked" });
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
         coberturaRadar.registrar("listener_ignorado", {
           ...contextoListenerCobertura,
@@ -33765,6 +33818,8 @@ registrarListenerUnicoSocket({
       });
 
       const mensagemGrupoV3 = String(mensagem?.key?.remoteJid || "").endsWith("@g.us");
+      const gerenteDispatchStartedAtV2 = gerenteDiagnosticV2 ? Date.now() : 0;
+      gerenteDiagnosticV2?.("card_scope", "manager_dispatch_started", { result: "ok" });
       const execucaoGerente = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_gerente",
         contexto: contextoListenerCobertura,
@@ -33774,10 +33829,15 @@ registrarListenerUnicoSocket({
           card: "groupManager",
           sock,
           mensagem,
-          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
+          diagnosticV2: gerenteDiagnosticV2
         })
       });
       const resultadoGerente = execucaoGerente.resultado;
+      gerenteDiagnosticV2?.("card_scope", "manager_dispatch_completed", {
+        result: execucaoGerente.ok === false ? "blocked" : "ok",
+        durationMs: gerenteDispatchStartedAtV2 ? Date.now() - gerenteDispatchStartedAtV2 : undefined
+      });
 
       if (resultadoGerente?.bloqueada !== true) {
         await executarConsumidorMensagemIsolado({
