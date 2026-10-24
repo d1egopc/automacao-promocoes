@@ -17,10 +17,6 @@ on:
         description: Full sha256 image ID currently running and retained for rollback
         required: true
         type: string
-      runtime_files:
-        description: Comma-separated changed runtime paths authorized for overlay
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -35,6 +31,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      runtime_files: ${{ steps.guardian.outputs.runtime_files }}
     steps:
       - name: Validate manual inputs
         if: github.event_name == 'workflow_dispatch'
@@ -57,6 +55,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Derive and validate runtime overlay
+        id: guardian
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+        run: node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$SOURCE_SHA" --github-output "$GITHUB_OUTPUT"
       - run: node --check index.js
       - run: npm run audit:encoding
       - name: Validate manual deploy script syntax
@@ -64,6 +70,10 @@ jobs:
         run: bash -n scripts/deploy-backend-vps-manual.sh
       - name: Critical tests
         run: |
+          node tests/guardian-v1.test.cjs
+          node tests/deploy-backend-v2-overlay-validation.test.cjs
+          node tests/deploy-backend-compose-image-validation.test.cjs
+          node tests/deploy-backend-manual-diagnostics.test.cjs
           node tests/clean-install-bootstrap.test.js
           node tests/financeiro-bootstrap-schema.test.js
           node tests/platform-variables-v1.test.js
@@ -98,5 +108,5 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
           BASE_IMAGE: ${{ inputs.base_image }}
-          RUNTIME_FILES: ${{ inputs.runtime_files }}
+          RUNTIME_FILES: ${{ needs.ci.outputs.runtime_files }}
         run: bash scripts/deploy-backend-vps-manual.sh

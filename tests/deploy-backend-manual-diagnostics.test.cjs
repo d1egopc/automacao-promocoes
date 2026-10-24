@@ -53,10 +53,15 @@ function makeFixture(scenario, { activeMismatch = false, switched = false } = {}
   const infra = path.join(dir, "infra");
   const temp = path.join(dir, "tmp");
   fs.mkdirSync(source, { recursive: true });
+  fs.mkdirSync(path.join(workspace, "scripts"), { recursive: true });
   fs.mkdirSync(infra, { recursive: true });
   fs.mkdirSync(temp, { recursive: true });
   fs.writeFileSync(path.join(infra, "compose.yml"), "fixture compose; never parsed by Docker\n");
   fs.writeFileSync(path.join(source, "index.js"), "base fixture bytes\n");
+  fs.copyFileSync(
+    path.join(root, "scripts", "guardian-v1.cjs"),
+    path.join(workspace, "scripts", "guardian-v1.cjs")
+  );
   run("git", ["-C", source, "init", "-q"]);
   run("git", ["-C", source, "config", "user.email", "fixture@example.invalid"]);
   run("git", ["-C", source, "config", "user.name", "Deploy fixture"]);
@@ -156,6 +161,7 @@ docker() {
   if [[ "$action" == inspect ]]; then
     case "$format" in
       '{{.Image}}') cat "$DEPLOY_FIXTURE_ACTIVE_IMAGE" ;;
+      '{{.State.StartedAt}}') printf '2026-10-24T00:00:00Z' ;;
       '{{.State.Health.Status}}') printf healthy ;;
       '{{.State.Status}}') printf running ;;
       '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}') printf bind ;;
@@ -167,6 +173,13 @@ docker() {
     return 0
   fi
   case "$action" in
+    logs)
+      printf '[WHATSAPP] WHATSAPP CONECTADO: fixture\n[EXECUTOR-GENERATION-AUTHORITY] fixture\n'
+      if [[ "$DEPLOY_FIXTURE_SCENARIO" == operational_error ]]; then
+        printf 'Cannot use a pool after calling end on the pool\n'
+      fi
+      return 0
+      ;;
     tag) return 0 ;;
     build)
       if [[ "$DEPLOY_FIXTURE_SCENARIO" == build ]]; then return 37; fi
@@ -315,8 +328,18 @@ test("fixture de sucesso percorre overlay e termina sem acionar diagnóstico", (
     const result = executeFixture(fixture);
     assert.equal(result.status, 0, diagnosticOutput(result));
     assert.match(diagnosticOutput(result), /Published source=/);
+    assert.match(diagnosticOutput(result), /guardian_health backend=PASS postgres=PASS http=PASS sessions=PASS rio=PASS/);
     assert.doesNotMatch(diagnosticOutput(result), /deploy_failure/);
     assert.equal(fs.readFileSync(fixture.activeImageFile, "utf8"), candidateImage);
+  });
+});
+
+test("erro operacional novo após a troca aciona rollback", () => {
+  withFixture("operational_error", {}, (fixture) => {
+    const result = executeFixture(fixture);
+    assertDiagnostic(result, "post_deploy_operational_observation", 1);
+    assert.equal(fs.readFileSync(fixture.activeImageFile, "utf8"), baseImage);
+    assert.equal(fs.readFileSync(fixture.rollbackMarker, "utf8").trim().split(/\r?\n/).length, 2);
   });
 });
 

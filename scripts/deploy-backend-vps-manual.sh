@@ -46,6 +46,9 @@ git -C "$source_dir" diff --check "$BASE_SHA" "$SOURCE_SHA"
 # Every runtime delta must be named in the manual authorization. Documentation
 # and tests are excluded from the image, and deleted runtime files fail closed.
 deploy_stage=validate_runtime_allowlist
+guardian_runtime="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format value)"
+test -n "$guardian_runtime"
+test "$RUNTIME_FILES" = "$guardian_runtime"
 IFS=, read -r -a approved <<< "$RUNTIME_FILES"
 test "${#approved[@]}" -gt 0
 declare -A approved_set=()
@@ -68,7 +71,7 @@ declare -A changed_runtime_status=()
 record_runtime_change() {
   local status="$1" path="$2"
   case "$path" in
-    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/benchmark-gerente-observability-v2.cjs) return 0 ;;
+    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/benchmark-gerente-observability-v2.cjs) return 0 ;;
   esac
   case "$status" in
     A|M) ;;
@@ -267,4 +270,23 @@ for attempt in {1..12}; do
   test "$attempt" -lt 12
   sleep 3
 done
+deploy_stage=post_deploy_operational_observation
+started_at="$(docker inspect -f '{{.State.StartedAt}}' optimus-backend)"
+docker logs --since "$started_at" optimus-backend > "$scratch/post-deploy.log" 2>&1
+count_log() { grep -Ec "$1" "$scratch/post-deploy.log" || true; }
+session_connected="$(count_log '\[WHATSAPP\] WHATSAPP CONECTADO')"
+session_qr="$(count_log 'QR RECEBIDO|needs.?qr|precisa.?qr')"
+rio_activity="$(count_log '\[EXECUTOR')"
+pool_errors="$(count_log 'Cannot use a pool after calling end on the pool')"
+programadas_errors="$(count_log 'MENSAGEIRO-V3-SCHEDULER-ERRO|MENSAGEIRO-PROGRAMACAO-SCHEDULER-ERRO')"
+teleradar_errors="$(count_log 'TELERADAR[^]]*ERRO|TELERADAR[^]]*ERROR')"
+test "$session_qr" -eq 0
+test "$pool_errors" -eq 0
+test "$programadas_errors" -eq 0
+test "$teleradar_errors" -eq 0
+sessions_status=BLOCKED_NO_ACTIVITY
+rio_status=BLOCKED_NO_ACTIVITY
+test "$session_connected" -eq 0 || sessions_status=PASS
+test "$rio_activity" -eq 0 || rio_status=PASS
+printf 'guardian_health backend=PASS postgres=PASS http=PASS sessions=%s rio=%s programadas=PASS_NO_ERRORS persistence=PASS mounts=PASS\n' "$sessions_status" "$rio_status"
 echo "Published source=$SOURCE_SHA image=$candidate_id rollback=$BASE_IMAGE"

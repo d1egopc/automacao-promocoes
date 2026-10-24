@@ -1,0 +1,42 @@
+name: Guardian V1 CI only
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Guardião V1 self-tests
+        run: node tests/guardian-v1.test.cjs
+      - name: Validate affected contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$(git merge-base origin/main HEAD)"
+          source="$(git rev-parse HEAD)"
+          node scripts/guardian-v1.cjs validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json"
+      - name: Deploy mechanism regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/deploy-backend-vps-manual.sh
+          node tests/deploy-backend-v2-overlay-validation.test.cjs
+          node tests/deploy-backend-compose-image-validation.test.cjs
+          node tests/deploy-backend-manual-diagnostics.test.cjs
