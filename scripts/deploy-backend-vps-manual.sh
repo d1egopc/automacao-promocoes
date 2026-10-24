@@ -109,17 +109,27 @@ if test -f "$release"; then files+=(-f "$release"); fi
 release_fingerprint=absent
 if test -f "$release"; then release_fingerprint="$(sha256sum "$release" | cut -d' ' -f1)"; fi
 docker compose "${files[@]}" config --format json > "$scratch/before.json"
-python3 - "$scratch/before.json" "$BASE_IMAGE" <<'PY'
+python3 - "$scratch/before.json" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
 image = config['services']['backend']['image']
-if image != sys.argv[2] and not image.endswith('@' + sys.argv[2]):
-    raise SystemExit('Compose image differs from the running rollback image')
+if not isinstance(image, str) or not image.strip():
+    raise SystemExit('Compose backend image is missing')
 if 'build' in config['services']['backend']:
     raise SystemExit('Unexpected build context in production Compose')
 PY
 compose_image="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["services"]["backend"]["image"])' "$scratch/before.json")"
-test "$(docker image inspect -f '{{.Id}}' "$compose_image")" = "$BASE_IMAGE"
+assert_compose_image_matches_base() {
+  local compose_image="${1:-}"
+  [[ -n "$compose_image" ]] || return 1
+  local resolved_image_id
+  resolved_image_id="$(docker image inspect -f '{{.Id}}' "$compose_image")" || return 1
+  [[ "$resolved_image_id" == "$BASE_IMAGE" ]]
+}
+if ! assert_compose_image_matches_base "$compose_image"; then
+  echo 'Compose backend image does not resolve to the running rollback image'
+  exit 1
+fi
 
 # Build in a clean Actions checkout, using the verified running image as base.
 # Never git pull, build or edit the detached, dirty production checkout.

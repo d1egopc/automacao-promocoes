@@ -40,10 +40,12 @@ jobs:
             modules/whatsapp/socket-listener-lifecycle.service.js \
             scripts/deploy-backend-vps-manual.sh \
             tests/deploy-backend-runtime-classification.test.cjs \
+            tests/deploy-backend-compose-image-validation.test.cjs \
             tests/whatsapp-socket-listener-baileys-real.test.cjs | sort > /tmp/listener-expected
           diff -u /tmp/listener-expected /tmp/listener-actual
           bash -n scripts/deploy-backend-vps-manual.sh
           node tests/deploy-backend-runtime-classification.test.cjs
+          node tests/deploy-backend-compose-image-validation.test.cjs
       - run: npm ci
       - name: Listener and Messenger regressions
         shell: bash
