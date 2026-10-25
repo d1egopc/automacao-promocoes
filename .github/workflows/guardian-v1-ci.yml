@@ -44,6 +44,7 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           test -z "${OPTIMUS_MENSAGEIRO_V4_WORKSPACES:-}"
+          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
           git merge-base --is-ancestor af56a3af675fd7f2c005a04d90e22fe72cbc95e6 HEAD
           node --test tests/mensageiro-v4.test.cjs
           node tests/whatsapp-socket-listener-baileys-real.test.cjs
@@ -74,3 +75,34 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+
+  v4-financial:
+    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_messenger_v4_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55439:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_messenger_v4_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Official credits and exact canary scope - disposable PostgreSQL 17
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
+          node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs

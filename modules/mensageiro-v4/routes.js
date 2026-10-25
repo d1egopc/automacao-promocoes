@@ -9,6 +9,7 @@ function createV4Routes({
   hasFeature,
   listSessions,
   listGroups,
+  requireAdminMaster = (_req, res) => res.status(403).json({ ok: false, code: "admin_required" }),
 } = {}) {
   const router = express.Router();
   router.use((req, res, next) => {
@@ -254,15 +255,21 @@ function createV4Routes({
     );
   router.get(
     "/diagnostics",
+    requireAdminMaster,
     safe(async (req, res) =>
       res.json({ ok: true, ...diagnostics.status(req.v4Workspace) }),
     ),
   );
   router.post(
     "/diagnostics/start",
+    requireAdminMaster,
     safe(async (req, res) => {
       const { sessionId, groupId } = req.body || {};
       scope(req.v4Workspace, sessionId, [groupId]);
+      const target = engine.scope.match({ workspaceId: req.v4Workspace, sessionId, groupId });
+      if (!target) fail("alvo_nao_autorizado");
+      const profile = await repository.call("profile", { workspaceId: req.v4Workspace, profileId: target.profileId });
+      if (!profile.active || profile.sessionId !== sessionId) fail("alvo_nao_autorizado");
       res.json({
         ok: true,
         ...diagnostics.start({
@@ -277,6 +284,7 @@ function createV4Routes({
   );
   router.post(
     "/diagnostics/stop",
+    requireAdminMaster,
     safe(async (req, res) =>
       res.json({ ok: true, ...diagnostics.stop(req.v4Workspace) }),
     ),

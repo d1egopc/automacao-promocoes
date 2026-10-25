@@ -8,7 +8,8 @@ const { createHash } = require("node:crypto");
 
 function texto(valor) { return String(valor ?? "").trim(); }
 
-function identidade({ workspaceId, operationId, destinationId }) {
+function identidade({ workspaceId, operationId, destinationId, origin = "manual_v2" }) {
+  if (!["manual_v2", "mensageiro_v4"].includes(origin)) throw new Error("credit_origin_invalid");
   const workspace = texto(workspaceId);
   const operacao = texto(operationId);
   const destino = texto(destinationId);
@@ -20,10 +21,11 @@ function identidade({ workspaceId, operationId, destinationId }) {
     .digest("hex");
   const targetId = (BigInt(`0x${digest.slice(0, 16)}`) & ((1n << 63n) - 1n)) || 1n;
   return {
+    origin,
     workspaceId: workspace,
     operationId: operacao,
     destinationId: destino,
-    idempotencyKey: `manual-universal:${digest}`,
+    idempotencyKey: `${origin === "manual_v2" ? "manual-universal" : "mensageiro-v4-universal"}:${digest}`,
     targetId: targetId.toString()
   };
 }
@@ -68,8 +70,8 @@ function validarReservaExistente(row, id, epoch) {
   }
 }
 
-async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, destinationId }) {
-  const id = identidade({ workspaceId, operationId, destinationId });
+async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, destinationId, origin }) {
+  const id = identidade({ workspaceId, operationId, destinationId, origin });
   return transacao(pool, async (client) => {
     const epoch = await estadoUniversal(client);
     const saldo = (await client.query(`SELECT balance,reserved,revision
@@ -97,7 +99,7 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
 
     const metadata = {
       authority: "postgresql_universal",
-      origin: "manual_v2",
+      origin: id.origin,
       reservationState: "held",
       operationId: id.operationId,
       destinationId: id.destinationId,
@@ -106,9 +108,9 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
     await client.query(`INSERT INTO financial_credit_ledger
       (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
        projection_status,metadata,operation_epoch_started_at)
-      VALUES ($1,'adjustment',0,'subtract','manual_v2_credit_hold',$2,
+      VALUES ($1,'adjustment',0,'subtract',$5,$2,
         'ignored',$3::jsonb,$4)`,
-    [id.workspaceId, id.idempotencyKey, JSON.stringify(metadata), epoch]);
+    [id.workspaceId, id.idempotencyKey, JSON.stringify(metadata), epoch, `${id.origin}_credit_hold`]);
     await client.query(`UPDATE engine_universal_credit_balances
       SET reserved=reserved+1,revision=revision+1,updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
@@ -145,12 +147,12 @@ async function confirmarCreditoManualUniversal({ pool, reserva }) {
     [epoch, id.workspaceId, balanceAfter, revision]);
     await client.query(`UPDATE financial_credit_ledger SET
         amount=-1,projection_status='projected',projected_at=clock_timestamp(),
-        reason='manual_v2_target_confirmed',
+        reason=$5,
         metadata=metadata || '{"reservationState":"consumed"}'::jsonb,
         universal_movement_type='TARGET_DEBIT',universal_target_id=$2,
         universal_balance_revision=$3,universal_balance_after=$4
       WHERE idempotency_key=$1`,
-    [id.idempotencyKey, id.targetId, revision, balanceAfter]);
+    [id.idempotencyKey, id.targetId, revision, balanceAfter, `${id.origin}_target_confirmed`]);
     return { ok: true, duplicate: false, debited: true, balanceAfter };
   });
 }

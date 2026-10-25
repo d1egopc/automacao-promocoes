@@ -52,14 +52,18 @@ const CODES = new Set([
   "timeout",
   "no_identity",
   "observed",
+  "delete_error",
+  "delete_local_resolved",
 ]);
 class Diagnostics {
   constructor({
     ownsSession,
+    authorizeTarget = () => false,
     clock = () => performance.now(),
     secret = crypto.randomBytes(32),
   } = {}) {
     this.ownsSession = ownsSession;
+    this.authorizeTarget = authorizeTarget;
     this.clock = clock;
     this.secret = secret;
     this.run = null;
@@ -92,7 +96,8 @@ class Diagnostics {
     if (this.run) throw new Error("diagnostico_existente");
     if (
       !groupId?.endsWith("@g.us") ||
-      !this.ownsSession(workspaceId, sessionId)
+      !this.ownsSession(workspaceId, sessionId) ||
+      !this.authorizeTarget({ workspaceId, sessionId, groupId })
     )
       throw new Error("alvo_nao_autorizado");
     if (
@@ -113,6 +118,7 @@ class Diagnostics {
       deadline: this.clock() + durationMs,
       maxEvents,
       events: new Set(),
+      coverage: { matchingMessages: 0, keylessMessages: 0, firstObservedAt: null, lastObservedAt: null },
       records: [],
       purgeAt: Infinity,
     };
@@ -142,6 +148,8 @@ class Diagnostics {
           state: r.active ? "active" : "finished",
           runId: r.id,
           events: r.events.size,
+          coverage: { ...r.coverage, ingress: r.coverage.matchingMessages ? "observed_at_original_callback" : "not_observed_at_original_callback",
+            limitation: "No evidence about encrypted packets or events before messages.upsert" },
           records: r.records.slice(),
           retentionAfterStopMs: 300000,
         };
@@ -193,12 +201,17 @@ class Diagnostics {
     this.expire();
     const r = this.run;
     if (!r?.active || r.sessionId !== sessionId) return;
-    if (!this.ownsSession(r.workspaceId, sessionId)) {
+    if (!this.ownsSession(r.workspaceId, sessionId) ||
+        !this.authorizeTarget({ workspaceId: r.workspaceId, sessionId, groupId: r.groupId })) {
       this.stop(r.workspaceId);
       return;
     }
     for (const message of messages) {
-      if (!message?.key?.id || message.key.remoteJid !== r.groupId) continue;
+      if (message?.key?.remoteJid !== r.groupId) continue;
+      r.coverage.matchingMessages++;
+      r.coverage.lastObservedAt = new Date().toISOString();
+      r.coverage.firstObservedAt ||= r.coverage.lastObservedAt;
+      if (!message.key.id) { r.coverage.keylessMessages++; continue; }
       const eventHash = this.hash(message.key.id);
       if (!r.events.has(eventHash) && r.events.size >= r.maxEvents) continue;
       r.events.add(eventHash);

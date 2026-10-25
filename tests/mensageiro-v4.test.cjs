@@ -20,6 +20,8 @@ const vm=require("node:vm");
 const EventEmitter=require("node:events");
 const { V3Store } = require("../modules/mensageiro-v3/src/v3/store");
 const { V4Repository } = require("../modules/mensageiro-v4/repository");
+const { Scope } = require("../modules/mensageiro-v4/scope");
+const { createV3HandlerAdapters } = require("../modules/mensageiro-v3/handler-adapters");
 const { V4Engine } = require("../modules/mensageiro-v4/engine");
 const { Diagnostics } = require("../modules/mensageiro-v4/diagnostics");
 const { Moderator } = require("../modules/mensageiro-v4/moderation");
@@ -126,6 +128,11 @@ function engine(f, sock, extra = {}) {
   return new V4Engine({
     repository: f.repository,
     enabled: (w) => w === W,
+    scope: new Scope([{ workspaceId: W, sessionId: S, groupId: G, profileId: f.p.id,
+      cards: ["groupManager", "commands", "attendance", "welcome", "farewell"] }]),
+    actionAllowed: () => true,
+    // The engine suite isolates routing; the PostgreSQL suite exercises money.
+    credits: { send: async args => { await args.revalidate(); return args.transport(args.content, args.options); } },
     contextValid: (w, s, sk) => w === W && s === S && sk === sock,
     ...extra,
   });
@@ -424,7 +431,7 @@ test("commands, attendance and participant handlers are delegated once with corr
     });
   assert.deepEqual(
     called.map((c) => c.card),
-    ["commands", "attendance", "welcome", "farewell"],
+    ["commands", "welcome", "farewell"],
   );
   assert.ok(
     called.every(
@@ -473,7 +480,7 @@ test("schedule uses existing future-time conversion and deletion is definitive",
 });
 test("diagnostic observes captured-workspace mismatch without capturing the other tenant", () => {
   let now = 0;
-  const d = new Diagnostics({
+  const d = new Diagnostics({ authorizeTarget: () => true,
     ownsSession: (w, s) => w === W && s === S,
     clock: () => now,
     secret: Buffer.alloc(32, 1),
@@ -516,7 +523,7 @@ test("diagnostic observes captured-workspace mismatch without capturing the othe
   assert.equal(d.status(W).state, "off");
 });
 test("diagnostic OFF has no clock, IO or ownership lookup; capacity stays bounded", () => {
-  const d = new Diagnostics({
+  const d = new Diagnostics({ authorizeTarget: () => true,
     ownsSession: () => {
       throw Error("off_lookup");
     },
@@ -525,7 +532,7 @@ test("diagnostic OFF has no clock, IO or ownership lookup; capacity stays bounde
     },
   });
   assert.doesNotThrow(() => d.observe({ messages: [message()] }));
-  const on = new Diagnostics({ ownsSession: () => true });
+  const on = new Diagnostics({ authorizeTarget: () => true, ownsSession: () => true });
   on.start({ workspaceId: W, sessionId: S, groupId: G });
   for (let i = 0; i < 100; i++)
     on.observe({
@@ -543,7 +550,7 @@ test("original participant callback rejects stale socket/emitter and traces befo
   const start=source.indexOf("const emissorParticipantesMensageiro = sock.ev;");
   const end=source.indexOf('  sock.ev.on("connection.update"',start);assert.ok(start>0&&end>start);
   const calls=[],sockets={},sock={ev:new EventEmitter()},sessionId="fixture-session";sockets[sessionId]=sock;
-  const diagnostics=new Diagnostics({ownsSession:()=>true});diagnostics.start({workspaceId:W,sessionId,groupId:G});
+  const diagnostics=new Diagnostics({ authorizeTarget: () => true,ownsSession:()=>true});diagnostics.start({workspaceId:W,sessionId,groupId:G});
   vm.runInNewContext(source.slice(start,end),{sock,id:sessionId,clienteIdMensageiro:W,socketGeracao:1,
     mensageiroV4Diagnostics:diagnostics,socketEhAtual:(s,id,current)=>s[id]===current,sessoes:sockets,
     diagnosticoMensageiroV3(){},usuarioAtivoOperacional:()=>true,logUsuarioInativoOperacional(){},clienteTemRecursoMensageiro:()=>true,
@@ -565,7 +572,7 @@ test("private API enforces auth, plan, connected session and workspace ownership
   const f = fixture(t),
     sock = socket(),
     e = engine(f, sock),
-    d = new Diagnostics({ ownsSession: (w, s) => w === W && s === S });
+    d = new Diagnostics({ authorizeTarget: () => true, ownsSession: (w, s) => w === W && s === S });
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => {
@@ -612,6 +619,7 @@ test("private API enforces auth, plan, connected session and workspace ownership
     "content-type": "application/json",
   };
   assert.equal((await get(headers)).status, 200);
+  assert.equal((await fetch(origin + "/mensageiro-v4/diagnostics", { headers })).status, 403);
   const cross = await fetch(origin + "/mensageiro-v4/profiles", {
     method: "POST",
     headers,
@@ -676,15 +684,13 @@ test("real adapters preserve commands, private replies and PN/LID mentions with 
   const e = engine(f, sock);
   await dispatch(e, sock, message("real-command", "!pix"), "commands");
   assert.ok(sock.sent.some((s) => s.content.text === "chave pública de teste"));
-  await dispatch(
-    e,
-    sock,
-    {
-      key: { id: "real-pv", remoteJid: "peer@s.whatsapp.net", fromMe: false },
-      message: { conversation: "oi" },
-    },
-    "attendance",
-  );
+  const privateMessage = { key: { id: "real-pv", remoteJid: "peer@s.whatsapp.net", fromMe: false },
+    message: { conversation: "oi" } };
+  const privateResult = await dispatch(e, sock, privateMessage, "attendance");
+  assert.equal(privateResult.reason, "scope_unauthorized");
+  assert.ok(!sock.sent.some(s => s.to === "peer@s.whatsapp.net"));
+  await createV3HandlerAdapters({ store: f.store }).attendance({ workspaceId: W,
+    profileId: f.p.id, sessaoId: S, sock, mensagem: privateMessage, planoLiberado: true });
   assert.ok(
     sock.sent.some(
       (s) =>
@@ -719,7 +725,7 @@ test("real adapters preserve commands, private replies and PN/LID mentions with 
     );
   }
 });
-test("simultaneous private greetings produce one reply and keep self messages silent", async (t) => {
+test("group-only V4 canary rejects simultaneous private greetings without taking legacy ownership", async (t) => {
   const f = fixture(t),
     sock = socket();
   f.store.saveCard(W, f.p.id, "attendance", {
@@ -735,8 +741,8 @@ test("simultaneous private greetings produce one reply and keep self messages si
     dispatch(e, sock, pv("greet1"), "attendance"),
     dispatch(e, sock, pv("greet2"), "attendance"),
   ]);
-  assert.equal(sock.sent.length, 1);
-  assert.ok(results.some((r) => r.reason === "cooldown"));
+  assert.equal(sock.sent.length, 0);
+  assert.ok(results.every((r) => r.reason === "scope_unauthorized"));
 });
 test("legacy flood/repetition keep message dedupe and tenant-separated windows", (t) => {
   const f = fixture(t),
@@ -762,7 +768,7 @@ test("legacy flood/repetition keep message dedupe and tenant-separated windows",
 });
 test("old diagnostic callbacks cannot pollute a new capture; restart erases results", () => {
   let now = 0;
-  const d = new Diagnostics({ ownsSession: () => true, clock: () => now });
+  const d = new Diagnostics({ authorizeTarget: () => true, ownsSession: () => true, clock: () => now });
   d.start({ workspaceId: W, sessionId: S, groupId: G, durationMs: 1000 });
   const m = message();
   d.observe({
@@ -779,7 +785,7 @@ test("old diagnostic callbacks cannot pollute a new capture; restart erases resu
   assert.equal(d.status(W).records.length, 0);
   d.stop(W);
   assert.equal(
-    new Diagnostics({ ownsSession: () => true }).status(W).state,
+    new Diagnostics({ authorizeTarget: () => true, ownsSession: () => true }).status(W).state,
     "off",
   );
 });

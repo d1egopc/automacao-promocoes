@@ -116,7 +116,7 @@ async function main() {
   const sessaoProdutiva = {};
   const sock = criarSocket();
   const socketGeracao = marcarSocketAtual({ sessoes: sessaoProdutiva, geracoes: {}, sessaoId: sessaoTrace, sock, logger }).socketGeracao;
-  const mensageiroV4Diagnostics = new Diagnostics({ownsSession:(w,s)=>w==="user_k3phmbkf"&&s===sessaoTrace});
+  const mensageiroV4Diagnostics = new Diagnostics({authorizeTarget:({workspaceId,sessionId,groupId})=>workspaceId==="user_k3phmbkf"&&sessionId===sessaoTrace&&groupId===grupo,ownsSession:(w,s)=>w==="user_k3phmbkf"&&s===sessaoTrace});
   mensageiroV4Diagnostics.start({workspaceId:"user_k3phmbkf",sessionId:sessaoTrace,groupId:grupo});
   const v2RunId = "713f90be-4ebf-4c2c-9fd9-69a6586dfdd1";
   const gerenteObservabilityV2 = createGerenteObservabilityV2({

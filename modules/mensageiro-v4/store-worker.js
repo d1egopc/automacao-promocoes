@@ -247,6 +247,64 @@ function execute(operation, a) {
       profile: selected.profileId ? profile(w, selected.profileId) : null,
     };
   }
+  if (operation === "outbound_create")
+    return store.transaction(() => {
+      const p = profile(w, a.profileId);
+      const parent = store.state.workspaces[w]?.claims[a.parentKey];
+      if (!parent || parent.profileId !== p.id || parent.status !== "claimed" ||
+          p.sessionId !== a.sessionId || !p.active ||
+          a.identity?.workspaceId !== w || a.identity?.operationId !== a.key ||
+          a.identity?.destinationId !== a.groupId || a.identity?.origin !== "mensageiro_v4")
+        fail("outbound_scope_invalid");
+      return store.claimExecution(w, a.key, { profileId: p.id, card: "v4_outbound",
+        parentKey: a.parentKey, sessionId: a.sessionId, groupId: a.groupId,
+        identity: a.identity, messageId: a.messageId, stage: "prepared" });
+    });
+  if (operation === "outbound_patch")
+    return store.transaction(() => {
+      const ws = store.state.workspaces[w], row = ws?.claims[a.key];
+      if (!row || row.card !== "v4_outbound") fail("outbound_missing");
+      const transitions = { prepared: ["send_started", "not_sent"],
+        send_started: ["local_resolved", "ambiguous", "not_sent", "settled"], local_resolved: ["settled", "ambiguous"],
+        ambiguous: ["settled"], settled: [], not_sent: [] };
+      if (row.stage === a.stage || row.stage === "settled") return true;
+      if (!transitions[row.stage]?.includes(a.stage)) fail("outbound_transition_invalid");
+      if (a.messageId) {
+        if (row.messageId && row.messageId !== a.messageId) fail("outbound_identity_changed");
+        row.messageId = a.messageId;
+      }
+      if (a.stage === "settled" && !["delivery_ack", "read", "played"].includes(row.ack))
+        fail("outbound_ack_required");
+      row.stage = a.stage;
+      // Preserve uncertain holds/claims from terminal-claim compaction.
+      if (a.stage === "settled") { row.status = "confirmed"; row.completedAt = new Date().toISOString(); }
+      if (a.stage === "not_sent") { row.status = "blocked"; row.completedAt = new Date().toISOString(); }
+      store._touch(ws, "v4_outbound_state", { key: a.key, stage: a.stage });
+      return true;
+    });
+  if (operation === "outbound_recover") {
+    return Object.entries(store.state.workspaces[w]?.claims || {}).filter(([, row]) =>
+      row.card === "v4_outbound" && row.profileId === a.profileId && row.sessionId === a.sessionId &&
+      row.groupId === a.groupId && ["delivery_ack", "read", "played"].includes(row.ack) &&
+      row.stage !== "settled").slice(0, 16).map(([key, row]) => ({ key, identity: row.identity }));
+  }
+  if (operation === "outbound_ack")
+    return store.transaction(() => {
+      if (!["delivery_ack", "read", "played"].includes(a.ack)) fail("outbound_ack_invalid");
+      const ws = store.state.workspaces[w];
+      const rows = Object.entries(ws?.claims || {}).filter(([, row]) =>
+        row.card === "v4_outbound" && row.sessionId === a.sessionId &&
+        row.profileId === a.profileId && row.groupId === a.groupId &&
+        row.messageId === a.messageId && ["send_started", "local_resolved", "ambiguous"].includes(row.stage));
+      if (rows.length > 1) fail("outbound_ack_ambiguous");
+      return rows.map(([key, row]) => {
+        if (!row.ack) {
+          row.ack = a.ack; row.ackAt = new Date().toISOString();
+          store._touch(ws, "v4_outbound_ack", { key, ack: a.ack });
+        }
+        return { key, identity: row.identity };
+      });
+    });
   if (operation === "claim")
     return store.transaction(() => {
       const p = profile(w, a.profileId);

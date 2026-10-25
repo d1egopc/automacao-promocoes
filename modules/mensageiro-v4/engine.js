@@ -4,11 +4,15 @@ const {
   createV3HandlerAdapters,
 } = require("../mensageiro-v3/handler-adapters");
 const { Moderator, body } = require("./moderation");
+const { Scope } = require("./scope");
 const { reply } = require("./intelligence");
 class V4Engine {
   constructor({
     repository,
     enabled = () => false,
+    scope = new Scope(),
+    credits,
+    actionAllowed = () => false,
     contextValid = () => false,
     recoveryDisabled = () => false,
     diagnostics,
@@ -18,6 +22,9 @@ class V4Engine {
   } = {}) {
     this.repository = repository;
     this.enabled = enabled;
+    this.scope = scope;
+    this.credits = credits;
+    this.actionAllowed = actionAllowed;
     this.contextValid = contextValid;
     this.recoveryDisabled = recoveryDisabled;
     this.diagnostics = diagnostics;
@@ -31,7 +38,7 @@ class V4Engine {
     this.handlers = handlers;
   }
   owns(workspaceId) {
-    return this.enabled(workspaceId) === true;
+    return this.enabled(workspaceId) === true && this.scope.owns(workspaceId);
   }
   stats(workspaceId) {
     return {
@@ -55,10 +62,11 @@ class V4Engine {
     )
       this.workspaceStats.set(workspaceId, { inFlight: 0, blocked: 0 });
     const statistics = this.workspaceStats.get(workspaceId);
+    let deleteAttempted = false, deleteResult = "not_attempted";
     const block = (code) => {
       this.blocked++;
       if (statistics) statistics.blocked++;
-      return { blocked: true, reason: code };
+      return { blocked: true, reason: code, ...(card === "groupManager" ? { deleteAttempted, deleteResult, remoteDeletionConfirmed: false } : {}) };
     };
     if (!this.owns(workspaceId)) return block("runtime_off");
     if (!planAllowed || this.recoveryDisabled()) {
@@ -76,6 +84,8 @@ class V4Engine {
     const groupId = message?.key?.remoteJid || event?.id || "";
     if (!groupId || groupId === "status@broadcast")
       return block("destination_missing");
+    const target = this.scope.match({ workspaceId, sessionId, groupId, card });
+    if (!target) { trace("scope", "unauthorized"); return block("scope_unauthorized"); }
     if (this.active >= this.maxConcurrent) {
       trace("result", "backpressure");
       return block("backpressure");
@@ -99,6 +109,7 @@ class V4Engine {
         return block(selected.reason);
       }
       const p = selected.profile;
+      if (p.id !== target.profileId) { trace("profile", "unauthorized"); return block("profile_unauthorized"); }
       trace("profile", "selected", p.id);
       trace("scope", "matched", p.id);
       if (p.cards.groupManager.configuration?.v4?.migrationVersion !== 4) {
@@ -125,6 +136,7 @@ class V4Engine {
           moderation.action === "review"
         )
           return {
+            deleteAttempted: false, deleteResult: "not_attempted", remoteDeletionConfirmed: false,
             processada: !!moderation,
             bloqueada: false,
             reason: moderation ? "observe_only" : "no_match",
@@ -191,7 +203,9 @@ class V4Engine {
           profileId: p.id,
         });
         if (
-          current.revision !== p.revision ||
+          current.revision !== p.revision || !current.active || !current.cards[card]?.active ||
+          !this.scope.match({ workspaceId, sessionId, groupId, card, profileId: current.id }) ||
+          !this.actionAllowed(workspaceId) ||
           !this.contextValid(workspaceId, sessionId, sock) ||
           !this.owns(workspaceId) ||
           this.recoveryDisabled()
@@ -199,6 +213,25 @@ class V4Engine {
           throw new Error("context_changed");
       };
       await revalidate();
+      let slot = 0;
+      const send = async (destination, content, options) => {
+        // All adapters share this fence, including notices and private redirects.
+        if (destination !== groupId || content?.delete) throw new Error("scope_unauthorized");
+        if (!this.credits || ++slot > 8) throw new Error("credit_gate_unavailable");
+        return this.credits.send({ workspaceId, sessionId, profileId: p.id, groupId,
+          parentKey: key, slot, revalidate, content, options,
+          transport: (payload, opts) => this.transport(() => sock.sendMessage(groupId, payload, opts)) });
+      };
+      const guardedSocket = new Proxy(sock, { get(object, name) {
+        if (name === "sendMessage") return send;
+        if (name === "sendPresenceUpdate") return async (presence, destination) => {
+          if (destination !== groupId) throw new Error("scope_unauthorized");
+          await revalidate();
+          return object.sendPresenceUpdate?.(presence, destination);
+        };
+        const value = Reflect.get(object, name);
+        return typeof value === "function" ? value.bind(object) : value;
+      }});
       let result;
       if (moderation) {
         let permission;
@@ -230,34 +263,35 @@ class V4Engine {
           trace("exemption", "not_exempt", p.id);
           trace("permission", "admin", p.id);
           await revalidate();
+          deleteAttempted = true; deleteResult = "attempted";
           trace("action", "delete_started", p.id, moderation.id);
-          await this.transport(() =>
-            sock.sendMessage(groupId, { delete: message.key }),
-          );
-          trace("result", "transport_accepted", p.id, moderation.id);
-          if (moderation.action === "delete_warn") {
-            try {
-              await revalidate();
-              await this.transport(() =>
-                sock.sendMessage(groupId, { text: moderation.warning }),
-              );
-            } catch {
-              trace("result", "notice_failed", p.id, moderation.id);
+          try {
+            // No debit for deletion: no new moderation charge policy is inferred.
+            await this.transport(() => sock.sendMessage(groupId, { delete: message.key }));
+          } catch {
+            deleteResult = "error";
+            trace("result", "delete_error", p.id, moderation.id);
+            result = { processada: true, bloqueada: true, deleteAttempted: true,
+              deleteResult: "error", remoteDeletionConfirmed: false };
+          }
+          if (!result) {
+            deleteResult = "local_resolved";
+            trace("result", "delete_local_resolved", p.id, moderation.id);
+            result = { processada: true, bloqueada: true, deleteAttempted: true,
+              deleteResult: "local_resolved", remoteDeletionConfirmed: false,
+              transportAccepted: true, deletionConfirmed: false };
+            if (moderation.action === "delete_warn") {
+              try { await send(groupId, { text: moderation.warning }); }
+              catch (error) { trace("result", "notice_failed", p.id, moderation.id);
+                result.noticeResult = ["sem_creditos", "plan_blocked"].includes(error.message)
+                  ? error.message : "not_confirmed"; }
             }
           }
-          result = {
-            processada: true,
-            bloqueada: true,
-            transportAccepted: true,
-            deletionConfirmed: false,
-          };
         }
       } else if (intelligent) {
         trace("action", "reply_started", p.id);
         await revalidate();
-        await this.transport(() =>
-          sock.sendMessage(groupId, { text: intelligent.text }),
-        );
+        await send(groupId, { text: intelligent.text });
         trace("result", "reply_accepted", p.id);
         result = {
           processada: true,
@@ -283,7 +317,7 @@ class V4Engine {
           profileId: p.id,
           clienteId: workspaceId,
           sessaoId: sessionId,
-          sock,
+          sock: guardedSocket,
           mensagem: message,
           evento: event,
           planoLiberado: true,
@@ -294,9 +328,10 @@ class V4Engine {
         key,
         status: result?.blocked ? "blocked" : "ambiguous",
       });
-      return result;
+      return card === "groupManager" ? { deleteAttempted: false, deleteResult: "not_attempted",
+        remoteDeletionConfirmed: false, ...result } : result;
     } catch (error) {
-      // A timeout/exception after a claim is uncertain, never retried or billed.
+      // No retry after an uncertain claim. Only a correlated factual ACK settles money.
       if (claimed)
         try {
           await this.repository.call("complete", {
@@ -307,9 +342,8 @@ class V4Engine {
         } catch {}
       trace("result", "transport_ambiguous");
       return block(
-        error.message === "v4_backpressure"
-          ? "backpressure"
-          : "operation_uncertain",
+        ["sem_creditos", "plan_blocked", "scope_unauthorized", "credit_gate_unavailable"].includes(error.message)
+          ? error.message : error.message === "v4_backpressure" ? "backpressure" : "operation_uncertain",
       );
     } finally {
       this.active--;

@@ -274,6 +274,8 @@ const mensageiro = require("./modules/mensageiro");
 const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
 const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { V4Repository } = require("./modules/mensageiro-v4/repository");
+const { Scope: V4Scope } = require("./modules/mensageiro-v4/scope");
+const { Credits: V4Credits } = require("./modules/mensageiro-v4/credits");
 const { V4Engine } = require("./modules/mensageiro-v4/engine");
 const { Diagnostics: V4Diagnostics } = require("./modules/mensageiro-v4/diagnostics");
 const { createV4Routes } = require("./modules/mensageiro-v4/routes");
@@ -26221,15 +26223,24 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
 
-// V4 is prepared behind an explicit workspace canary. Empty by default.
-// Same V3 authority/scheduler/ledger; only one message consumer owns a workspace.
-const mensageiroV4Workspaces = new Set(String(process.env.OPTIMUS_MENSAGEIRO_V4_WORKSPACES || "").split(",").map(s => s.trim()).filter(s => /^[a-zA-Z0-9_-]{1,100}$/.test(s)));
+// V4 ownership is an exact workspace/session/group/profile/card tuple. OFF by default.
+// The old workspace-only flag intentionally does not activate execution.
+const mensageiroV4Scope = V4Scope.fromEnvironment(process.env.OPTIMUS_MENSAGEIRO_V4_TARGETS);
 const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?.[sessionId] && canalPertenceAoWorkspace(sessoesMeta[sessionId], workspaceId, { usuarios }));
 const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
-const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession });
+const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession,
+  authorizeTarget: context => Boolean(mensageiroV4Scope.match(context)) });
+const mensageiroV4Credits = new V4Credits({ repository: mensageiroV4Repository,
+  scope: mensageiroV4Scope, getPool: getEnginePool,
+  allowed: workspaceId => modoMotorReal === "UNIVERSAL" && usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
+  prepare: workspaceId => renovarCreditosUniversalSeNecessario(obterUsuario(workspaceId)) });
+// No target => no worker/DB work. Recovery settles durable ACKs, never replays.
+mensageiroV4Credits.recover().catch(() => console.warn("[MENSAGEIRO-V4-ACK] recovery_pending_no_replay"));
 const mensageiroV4Engine = new V4Engine({
   repository: mensageiroV4Repository,
-  enabled: workspaceId => mensageiroV4Workspaces.has(workspaceId),
+  enabled: workspaceId => mensageiroV4Scope.owns(workspaceId),
+  scope: mensageiroV4Scope, credits: mensageiroV4Credits,
+  actionAllowed: workspaceId => usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
   contextValid: (workspaceId, sessionId, sock) => mensageiroV4OwnsSession(workspaceId, sessionId) && socketEhAtual(sessoes, sessionId, sock),
   recoveryDisabled: isMensageiroV3RecoveryDisabled,
   diagnostics: mensageiroV4Diagnostics,
@@ -26237,7 +26248,7 @@ const mensageiroV4Engine = new V4Engine({
 });
 app.use("/mensageiro-v4", createV4Routes({
   repository: mensageiroV4Repository, engine: mensageiroV4Engine, diagnostics: mensageiroV4Diagnostics,
-  getWorkspace: getClienteId, hasFeature: usuarioTemRecurso,
+  getWorkspace: getClienteId, hasFeature: usuarioTemRecurso, requireAdminMaster: exigirAdminMasterEstrito,
   listSessions: workspaceId => listarSessoesWhatsappCliente(workspaceId).map(s => ({ id: s.id, name: s.nomeAmigavel, connected: s.conectado === true })),
   listGroups: (workspaceId, sessionId) => mensageiroV4OwnsSession(workspaceId, sessionId)
     ? (gruposPorSessao[sessionId] || []).map(g => ({ id: String(g.id || g.jid || g.grupoId || ""), name: String(g.nome || g.name || g.subject || "Grupo") })) : []
@@ -26332,7 +26343,10 @@ const ingressMensageiroV3 = createOperationalIngress({
   diagnostic: diagnosticoMensageiroV3
 });
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2 }) {
-  if (mensageiroV4Engine.owns(clienteId) && card !== "scheduled") {
+  // Reserve the tuple even for a misrouted workspace: mismatch must not fall
+  // through into the legacy handler and produce a second/out-of-scope effect.
+  if (card !== "scheduled" && mensageiroV4Scope.reserved({ sessionId: sessaoId,
+      groupId: mensagem?.key?.remoteJid || evento?.id || "", card })) {
     return mensageiroV4Engine.dispatch({ workspaceId: clienteId, sessionId: sessaoId, card, message: mensagem, event: evento, sock, planAllowed: planoLiberado && usuarioAtivoOperacional(clienteId) });
   }
   return ingressMensageiroV3({
@@ -33987,6 +34001,8 @@ registrarListenerUnicoSocket({
   handler: async (updates = []) => {
     if (!socketEhAtual(sessoes, id, sock)) return;
     const resultado = mensageiroV3AckCorrelator.observe({ sessionId: id, updates });
+    try { await mensageiroV4Credits.observe({ sessionId: id, updates }); }
+    catch { console.warn("[MENSAGEIRO-V4-ACK] settlement_pending_no_replay"); }
     if (resultado.observed > 0) {
       console.log("[MENSAGEIRO-V3-ACK-OBSERVED]", JSON.stringify({
         sessaoId: id,
