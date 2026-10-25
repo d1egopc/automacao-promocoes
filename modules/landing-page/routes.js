@@ -46,6 +46,9 @@ function createLandingPageRoutes({
           req.params.name,
           true,
         );
+        // Published, referenced assets are embedded by the frontend on another origin.
+        // Keep Helmet's default policy on private routes and rejected asset requests.
+        res.set("Cross-Origin-Resource-Policy", "cross-origin");
         res.type("webp").sendFile(file, (error) => {
           if (error && !res.headersSent) res.status(404).end();
         });

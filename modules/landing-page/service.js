@@ -106,7 +106,7 @@ function pixelId(value = "") {
   return ids[0]; // Only the numeric ID is retained; pasted code is never stored or executed.
 }
 
-function links(value, max, field) {
+function links(value, max, field, validateAvatar) {
   if (!Array.isArray(value) || value.length > max)
     throw erro(`${field}_invalidos`);
   const seen = new Set();
@@ -123,7 +123,12 @@ function links(value, max, field) {
     const label = text(item.label, 60, "nome_botao");
     const url = httpsUrl(item.url);
     if (!label || !url) throw erro(`${field}_invalidos`);
-    return { id, label, url, icon: item.icon };
+    return {
+      id, label, url, icon: item.icon,
+      ...(validateAvatar && item.avatar !== undefined
+        ? { avatar: validateAvatar(item.avatar) }
+        : {}),
+    };
   });
 }
 
@@ -187,7 +192,7 @@ function validateConfig(input, assets = []) {
     logo: asset(input.logo),
     theme,
     accent: input.accent.toLowerCase(),
-    buttons: links(input.buttons, 8, "botoes"),
+    buttons: links(input.buttons, 8, "botoes", asset),
     socials: links(input.socials, 6, "redes_sociais"),
     showcase: {
       enabled: showcase.enabled === true,
@@ -437,7 +442,7 @@ function createLandingPageService(options = {}) {
     startDomainVerification: addresses.start,
     async upload(id, revision, kind, buffer, declaredMime) {
       if (
-        !["banner", "logo"].includes(kind) ||
+        !["banner", "logo", "button"].includes(kind) ||
         !Buffer.isBuffer(buffer) ||
         !buffer.length ||
         buffer.length > MAX_UPLOAD
@@ -462,8 +467,8 @@ function createLandingPageService(options = {}) {
           output = await sharp(buffer, { limitInputPixels: 16000000 })
             .rotate()
             .resize({
-              width: kind === "logo" ? 512 : 1920,
-              height: kind === "logo" ? 512 : 1200,
+              width: kind === "banner" ? 1920 : 512,
+              height: kind === "banner" ? 1200 : 512,
               fit: "inside",
               withoutEnlargement: true,
             })
@@ -473,7 +478,7 @@ function createLandingPageService(options = {}) {
           throw erro("imagem_invalida");
         }
         const name = `${crypto.createHash("sha256").update(output).digest("hex")}.webp`;
-        return editorDto(
+        const page = await editorDto(
           await mutate(workspaceId(id), revision, async (state) => {
             if (!state.assets.some((asset) => asset.name === name)) {
               if (
@@ -504,9 +509,12 @@ function createLandingPageService(options = {}) {
               }
               state.assets.push({ name, bytes: output.length });
             }
-            state.draft[kind] = name;
+            // Buttons may still be unsaved in the editor. Register the asset only;
+            // the revision-checked Save selects it by the button's stable ID.
+            if (kind !== "button") state.draft[kind] = name;
           }),
         );
+        return kind === "button" ? { ...page, uploadedAsset: name } : page;
       } finally {
         uploading.delete(id);
       }
@@ -522,6 +530,7 @@ function createLandingPageService(options = {}) {
           ![
             state.published.config.banner,
             state.published.config.logo,
+            ...state.published.config.buttons.map((button) => button.avatar),
           ].includes(name))
       )
         throw erro("imagem_nao_encontrada", 404);

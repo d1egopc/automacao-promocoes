@@ -1,4 +1,14 @@
-# Landing Page por workspace — candidata V1.2
+# Landing Page por workspace — V1.3 candidata
+
+## V1.3 — mídia pública e miniaturas opcionais dos botões
+
+A rota pública de assets, após validar plano, publicação, registro no workspace e referência no snapshot, responde `Cross-Origin-Resource-Policy: cross-origin`: o frontend oficial e a API possuem origens diferentes. A política privada e os gates de acesso permanecem intactos. Banner/logo existentes não precisam de migração ou reupload.
+
+Cada botão aceita `avatar` opcional com nome WebP por hash registrado no próprio workspace. `POST /landing-page/assets/button` reutiliza autenticação, plano, revisão esperada, tipos JPEG/PNG/WebP, limite de 5 MiB/16 milhões de pixels, backpressure, quotas e persistência atômica existentes. Normaliza até 512 × 512 sem metadados e devolve `uploadedAsset`; o upload só registra a mídia, sem selecionar ou publicar botão. Salvar associa pelo ID estável; Publicar inclui no snapshot. Remover a miniatura não apaga arquivos, e despublicar ou perder o plano revoga o acesso público. Nenhuma foto privada é consultada.
+
+Ícones são vetores locais; identificação por hostname conhecido não segue redirects, não altera URLs e mantém o ícone explícito para links desconhecidos. A prévia busca somente mídias autorizadas, com duas requisições simultâneas, cache por nome e revogação dos Blob URLs ao remover/desmontar. Os oito temas, consentimento/Pixel, domínio, slug, Vitrine e contratos comerciais são preservados.
+
+A candidata parte das versões publicadas backend `eda20ff6b69449c69a00ac7777beb3b868e1da80` e frontend `21b39c8abceb66c9af647b9b90bd5aae34e93bb7`. O teste de preservação V1.3 compara toda a árvore frontend contra esta publicação e permite somente os quatro arquivos Landing autorizados; o teste histórico da reconciliação V1.2 permanece inalterado e não representa equivalência de novas funcionalidades com o antigo candidato V1.2.
 
 Tarefa: Landing Page V1. Área: backend/frontend, planos e página pública.
 Risco: nível 3, isolamento multiworkspace e mídia. Reversibilidade: remover o delta de código; nenhum dado produtivo foi alterado.
