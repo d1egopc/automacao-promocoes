@@ -105,4 +105,6 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
+          export V4_FIXTURE_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
+          test -n "$V4_FIXTURE_SERVER_HOST"
           node --test tests/mensageiro-v4-credit-scope.postgres.test.cjs

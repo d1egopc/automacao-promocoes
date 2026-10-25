@@ -24,8 +24,15 @@ test.before(async () => {
   assert.ok(!process.env.DATABASE_URL, "Production-style connection strings forbidden");
   admin = new Client(config); await admin.connect();
   const id = (await admin.query("SELECT current_database() AS db, host(inet_server_addr()) AS host, inet_server_port() AS port, current_setting('server_version') AS version")).rows[0];
-  assert.equal(id.db, config.database); assert.equal(id.host, config.host);
-  assert.equal(id.port, config.port); assert.match(id.version, /^17\./);
+  // Docker publishes loopback:55439 to the service's exact private IP:5432.
+  // The CI workflow obtains that IP from its own service container; do not
+  // confuse the server endpoint with the client's mapped loopback endpoint.
+  const dockerFixture = process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_ENVIRONMENT === "github-hosted";
+  const serverHost = dockerFixture ? process.env.V4_FIXTURE_SERVER_HOST : config.host;
+  assert.equal(admin.connection.stream.remoteAddress, config.host);
+  assert.match(serverHost || "", /^\d{1,3}(?:\.\d{1,3}){3}$/);
+  assert.equal(id.db, config.database); assert.equal(id.host, serverHost);
+  assert.equal(id.port, dockerFixture ? 5432 : config.port); assert.match(id.version, /^17\./);
   await admin.query(`CREATE SCHEMA ${schema}`); created = true;
   await admin.query(`SET search_path TO ${schema},public`);
   await admin.query(fs.readFileSync(path.join(__dirname, "../modules/engine/schema.sql"), "utf8"));
