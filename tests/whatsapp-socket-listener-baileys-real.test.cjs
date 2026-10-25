@@ -14,6 +14,7 @@ const {
   diagnosticarEntradaUpsert
 } = require("../modules/whatsapp/socket-listener-lifecycle.service.js");
 const { contarSocketsWhatsapp } = require("../modules/telemetria/infra-memory-snapshot.js");
+const { Diagnostics } = require("../modules/mensageiro-v4/diagnostics");
 const { createGerenteObservabilityV2 } = require("../modules/mensageiro/gerente-observability-v2");
 
 async function main() {
@@ -115,6 +116,8 @@ async function main() {
   const sessaoProdutiva = {};
   const sock = criarSocket();
   const socketGeracao = marcarSocketAtual({ sessoes: sessaoProdutiva, geracoes: {}, sessaoId: sessaoTrace, sock, logger }).socketGeracao;
+  const mensageiroV4Diagnostics = new Diagnostics({ownsSession:(w,s)=>w==="user_k3phmbkf"&&s===sessaoTrace});
+  mensageiroV4Diagnostics.start({workspaceId:"user_k3phmbkf",sessionId:sessaoTrace,groupId:grupo});
   const v2RunId = "713f90be-4ebf-4c2c-9fd9-69a6586dfdd1";
   const gerenteObservabilityV2 = createGerenteObservabilityV2({
     validateTarget: ({ workspaceId, sessionId, groupId }) =>
@@ -134,7 +137,7 @@ async function main() {
   };
   const registro = {
     sock, id: sessaoTrace, socketGeracao, sessoes: sessaoProdutiva, force: false,
-    clienteIdMensageiro: "user_k3phmbkf", gerenteObservabilityV2, registrarListenerUnicoSocket, socketEhAtual,
+    clienteIdMensageiro: "user_k3phmbkf", gerenteObservabilityV2, mensageiroV4Diagnostics, registrarListenerUnicoSocket, socketEhAtual,
     diagnosticarEntradaUpsert: args => diagnosticarEntradaUpsert({ ...args, env: ambienteV2,
       logger: { warn: (tag, payload) => { ordem.push("trace"); logs.push({ tag, payload: JSON.parse(payload) }); } } }),
     diagnosticoMensageiroV3() {},
@@ -156,7 +159,7 @@ async function main() {
     console: { log() {} }
   };
   vm.runInNewContext(callbackProdutivo, registro, { filename: "index.js:messages.upsert" });
-  sock.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { remoteJid: grupo, fromMe: false }, message: { conversation: "SEGREDO_NAO_LOGAR" } }] });
+  sock.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "fixture-real-buffer", remoteJid: grupo, fromMe: false }, message: { conversation: "SEGREDO_NAO_LOGAR" } }] });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(ordem.slice(0, 3), ["trace", "mensageiro_gerente", "mensageiro_comando"]);
   assert.equal(logs.length, 1);
@@ -189,6 +192,10 @@ async function main() {
     logger: { warn() { throw new Error("logger_indisponivel"); } } }),
   "falha do logger nao pode bloquear os handlers");
 
+  const v4Records=mensageiroV4Diagnostics.stop("user_k3phmbkf");
+  assert.ok(v4Records.records.some(r=>r.stage==="ingress"&&r.code==="received"));
+  assert.ok(!JSON.stringify(v4Records).includes("SEGREDO_NAO_LOGAR"));
+  assert.ok(!JSON.stringify(v4Records).includes(grupo));
   gerenteObservabilityV2.dispose();
 
   console.log(`PASS ${process.version}: Baileys 6.7.22, dedup, reconexao, trace inicial e handlers V3`);

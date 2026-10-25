@@ -273,6 +273,11 @@ const {
 const mensageiro = require("./modules/mensageiro");
 const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
 const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
+const { V4Repository } = require("./modules/mensageiro-v4/repository");
+const { V4Engine } = require("./modules/mensageiro-v4/engine");
+const { Diagnostics: V4Diagnostics } = require("./modules/mensageiro-v4/diagnostics");
+const { createV4Routes } = require("./modules/mensageiro-v4/routes");
+const { createPublicResources } = require("./modules/mensageiro-v4/resources");
 const { createLegacyCompatRoutes } = require("./modules/mensageiro-v3/legacy-compat");
 const { createHandlerBridge } = require("./modules/mensageiro-v3/handler-bridge");
 const { createV3HandlerAdapters } = require("./modules/mensageiro-v3/handler-adapters");
@@ -26216,6 +26221,29 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
 
+// V4 is prepared behind an explicit workspace canary. Empty by default.
+// Same V3 authority/scheduler/ledger; only one message consumer owns a workspace.
+const mensageiroV4Workspaces = new Set(String(process.env.OPTIMUS_MENSAGEIRO_V4_WORKSPACES || "").split(",").map(s => s.trim()).filter(s => /^[a-zA-Z0-9_-]{1,100}$/.test(s)));
+const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?.[sessionId] && canalPertenceAoWorkspace(sessoesMeta[sessionId], workspaceId, { usuarios }));
+const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
+const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession });
+const mensageiroV4Engine = new V4Engine({
+  repository: mensageiroV4Repository,
+  enabled: workspaceId => mensageiroV4Workspaces.has(workspaceId),
+  contextValid: (workspaceId, sessionId, sock) => mensageiroV4OwnsSession(workspaceId, sessionId) && socketEhAtual(sessoes, sessionId, sock),
+  recoveryDisabled: isMensageiroV3RecoveryDisabled,
+  diagnostics: mensageiroV4Diagnostics,
+  publicResources: createPublicResources({ dataDir: require("node:path").dirname(require("node:path").dirname(mensageiroV3Routes.store.filePath)), canUse: clienteTemRecursoPlano })
+});
+app.use("/mensageiro-v4", createV4Routes({
+  repository: mensageiroV4Repository, engine: mensageiroV4Engine, diagnostics: mensageiroV4Diagnostics,
+  getWorkspace: getClienteId, hasFeature: usuarioTemRecurso,
+  listSessions: workspaceId => listarSessoesWhatsappCliente(workspaceId).map(s => ({ id: s.id, name: s.nomeAmigavel, connected: s.conectado === true })),
+  listGroups: (workspaceId, sessionId) => mensageiroV4OwnsSession(workspaceId, sessionId)
+    ? (gruposPorSessao[sessionId] || []).map(g => ({ id: String(g.id || g.jid || g.grupoId || ""), name: String(g.nome || g.name || g.subject || "Grupo") })) : []
+}));
+
+
 function grupoGerenteConfiguradoNoPerfil(profile, groupId) {
   const manager = profile?.cards?.groupManager?.configuration || {};
   const ownGroups = Array.isArray(manager.grupos) ? manager.grupos : [];
@@ -26304,6 +26332,9 @@ const ingressMensageiroV3 = createOperationalIngress({
   diagnostic: diagnosticoMensageiroV3
 });
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2 }) {
+  if (mensageiroV4Engine.owns(clienteId) && card !== "scheduled") {
+    return mensageiroV4Engine.dispatch({ workspaceId: clienteId, sessionId: sessaoId, card, message: mensagem, event: evento, sock, planAllowed: planoLiberado && usuarioAtivoOperacional(clienteId) });
+  }
   return ingressMensageiroV3({
     workspaceId: clienteId, sessionId: sessaoId, card,
     message: mensagem, event: evento, sock, planAllowed: planoLiberado, diagnosticV2
@@ -33715,6 +33746,8 @@ registrarListenerUnicoSocket({
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
   handler: async ({ messages = [], type } = {}) => {
+  try { mensageiroV4Diagnostics.observe({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, sock,
+    current: socketEhAtual(sessoes, id, sock), generation: socketGeracao, messages, type }); } catch { /* Optional metadata diagnostics cannot block ingress. */ }
   diagnosticarEntradaUpsert({
     workspaceId: clienteIdMensageiro,
     sessaoId: id,
@@ -33965,6 +33998,7 @@ registrarListenerUnicoSocket({
 });
 
 sock.ev.on("group-participants.update", async (evento) => {
+  if (!socketEhAtual(sessoes, id, sock)) return;
 
   diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id,
     groupId: evento?.id || "", card: evento?.action === "add" ? "welcome" : "farewell",

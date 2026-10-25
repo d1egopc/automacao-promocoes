@@ -1,5 +1,18 @@
 # Messenger
 
+## Mensageiro V4 — candidata isolada
+
+- Desenvolvimento nas branches `validation/mensageiro-v4-20261025`, derivadas das mains publicadas backend `af56a3af` e frontend `1cc56ad7`. Não substitui o legado em produção antes de homologação e autorização final.
+- `OPTIMUS_MENSAGEIRO_V4_WORKSPACES` é uma allowlist explícita de workspaces, vazia por padrão. Um workspace habilitado é consumido exclusivamente pelo motor V4 nos eventos; não há fallback simultâneo para moderação V3. O scheduler V3, claims, ocorrências, ACKs e autoridade de disco continuam únicos.
+- Perfis precisam de preparação aditiva versionada (`migrationVersion=4`). A preparação conserva cards, imagens, escopos, isenções, programações e IDs; não copia claims nem executa eventos. Duplicar gera perfil inativo, com todos os cards inativos e sem clonar envios.
+- Operações V4 sobre o store V3 executam em worker com memória e admissão limitadas. Contenção rejeita rapidamente; timeout de persistência interrompe novas operações e é resultado incerto, sem repetição automática. O lock/atomicidade V3 não é relaxado.
+- O diagnóstico V4 usa o callback original; não adiciona listeners. OFF não calcula hash/relógio nem faz I/O. Uma coleta é limitada a sessão de propriedade confirmada, workspace e grupo exatos, 15 minutos, 10 eventos e 120 registros HMAC. Pode observar diferença do workspace capturado no socket sem registrar a identidade de outro workspace. Resultados em RAM são eliminados cinco minutos após encerramento; reinício perde os resultados.
+- O diagnóstico distingue aceite do transporte de confirmação real de exclusão/entrega. `sendMessage` resolvido não prova que a mensagem desapareceu no aparelho. Nenhum ACK é fabricado; resultado comercial incerto permanece `ambiguous` e não autoriza replay.
+- Intenções locais no privado usam somente configurações autorizadas e links publicados, com cooldown e sem resposta a mensagens próprias. Domínio de rede social não indica assunto; termos profissionais não anulam infrações. Regras novas começam inativas e com ação observar. Remoção de participante e ações legadas não compatíveis exigem revisão explícita antes do canário.
+- Interface `/mensageiro-v4` reutiliza autenticação e feature `mensageiro`; menu de prévia depende de `VITE_MENSAGEIRO_V4_ENABLED=true`, desligado por padrão. Configurações e dados continuam isolados pelo workspace autenticado.
+- CI usa os workflows existentes CI-only; a branch frontend tem Preview automático desabilitado no `vercel.json`. Nenhum push isolado autoriza main, deploy, canário, alteração de env produtivo ou teste WhatsApp real.
+- A causa histórica do SERVMAQ permanece não comprovada. Fixtures/Baileys em laboratório provam caminhos locais, não ingresso do socket produtivo. Canário e substituição do legado dependem de evidência real e gate humano.
+
 ## Escopo comprovado
 
 O Mensageiro esta em `modules/mensageiro` e possui storage, service, routes, scheduler de programacoes, imagem, perfis e gerente/moderacao.
