@@ -16505,6 +16505,7 @@ const landingPageService = createLandingPageService({
   })
 });
 app.use(createLandingPageRoutes({ service: landingPageService, publicRoutes: true }));
+landingPageService.startDomainVerification();
 
 const captureHandoffService = criarCaptureHandoffService();
 app.use("/auth/capture/handoff", criarRotasCaptureHandoff({

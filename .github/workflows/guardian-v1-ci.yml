@@ -31,7 +31,9 @@ jobs:
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
-          node --test tests/landing-page-v1.test.cjs tests/landing-page-auth-plans-integration.test.cjs
+          node --check modules/landing-page/addresses.js
+          node --check modules/landing-page/vercel-domains.js
+          node --test tests/landing-page-v1.test.cjs tests/landing-page-auth-plans-integration.test.cjs tests/landing-page-v12.test.cjs
           node tests/planos-identidade-estavel-v1.test.js
           node tests/saas-fundacao-v1.test.js
       - name: Guardião V1 self-tests

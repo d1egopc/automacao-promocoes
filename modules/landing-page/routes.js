@@ -26,6 +26,9 @@ function createLandingPageRoutes({
     }
   };
   if (publicRoutes) {
+    router.get("/public/landing-domain", safe(async (req, res) =>
+      res.json({ ok: true, page: await service.publicDomain(req.query.host) }),
+    ));
     router.get(
       "/public/landing/:pageId",
       safe(async (req, res) =>
@@ -63,6 +66,15 @@ function createLandingPageRoutes({
         });
     next();
   });
+  router.get(
+    "/landing-page/slug-availability",
+    safe(async (req, res) => res.json({ ok: true, ...await service.slugAvailability(getClienteId(req), req.query.slug) })),
+  );
+  for (const [action, method] of [["connect", "connectDomain"], ["verify", "verifyDomain"], ["disconnect", "disconnectDomain"]]) {
+    router.post(`/landing-page/domain/${action}`, safe(async (req, res) =>
+      res.json({ ok: true, page: await service[method](getClienteId(req), req.body?.revision, req.body?.hostname) }),
+    ));
+  }
   router.get(
     "/landing-page",
     safe(async (req, res) =>

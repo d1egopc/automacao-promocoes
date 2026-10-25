@@ -1,4 +1,4 @@
-# Landing Page por workspace — V1 local
+# Landing Page por workspace — candidata V1.2
 
 Tarefa: Landing Page V1. Área: backend/frontend, planos e página pública.
 Risco: nível 3, isolamento multiworkspace e mídia. Reversibilidade: remover o delta de código; nenhum dado produtivo foi alterado.
@@ -25,13 +25,28 @@ Banner e logo aceitam JPEG/PNG/WebP decodificáveis. Sharp limita pixels, normal
 
 Usa exclusivamente `clientes/<workspace>/vitrine.json`, projeção existente e limitada, sem queries em fila, RIO ou Histórico. Exige recurso Vitrine, configuração ativa e identidade do workspace no documento. Reutiliza retenção (72h), ordenação e sanitização existentes. Só expõe ofertas com link público Optimus já validado pela Vitrine, até quatro itens. Fonte ausente, inválida ou grande demais retorna lista vazia com status explícito. Landing Page sem Vitrine continua funcionando com o carrossel vazio; ampliar a origem comercial exige autorização e prova do contrato.
 
-## Domínio próprio e Meta Pixel
+## V1.2 — Meta Pixel, slug e domínio self-service
 
-O editor salva apenas hostname normalizado e ID numérico de Pixel. Código oficial colado pode fornecer um único `fbq('init', 'ID')`; o código é descartado. Nenhum JavaScript fornecido pelo cliente é executado ou persistido. V1 não carrega Pixel externo.
+O editor retém somente o ID numérico do Pixel, inclusive quando recebe HTML oficial contendo um único `fbq('init', 'ID')`. HTML/JavaScript não são persistidos nem executados. `metaPixelEnabled` ausente é false. Salvar altera só o rascunho; a publicação inclui ou remove o Pixel no snapshot. O componente público carrega exclusivamente o script oficial fixo após consentimento explícito, respeita GPC/DNT, desliga configuração automática e usa `trackSingle` para o ID daquele workspace. PageView é deduplicado por página/Pixel/publicação/caminho no documento, com memória limitada e sem retry após efeito incerto. Editor e Preview visual não carregam o Pixel. O teste na página publicada orienta a conferir PageView em Testar eventos da Meta/Pixel Helper; `queued` nunca é apresentado como evento recebido pela Meta. Não há CAPI, login Meta ou HTML livre.
 
-Domínio próprio permanece `not_verified`: uma etapa futura deverá criar desafio aleatório ligado a workspace/hostname, comprovar TXT DNS e titularidade, evitar domínio duplicado, verificar CNAME/A e emissão HTTPS antes de servir. DNS/HTTPS não são ativados pela V1. Tokens de verificação e segredos nunca devem integrar o DTO público.
+O slug aceita 3–50 caracteres ASCII minúsculos, números e hífen, com nomes reservados bloqueados. A disponibilidade é consultiva; a reserva única é feita sob fence interprocesso na publicação. A reserva sobrevive à despublicação. Um novo rascunho não troca o link ativo; publicar o novo endereço libera o anterior somente após commit durável. O token público original permanece utilizável. Índices pequenos de endereço apontam para a mesma autoridade de página, não constituem outra Landing Page.
 
-Pixel permanece `not_activated`: ativação futura exige homologação, política de privacidade/consentimento aplicável e implementação fixa controlada pelo sistema, sem HTML livre.
+Um domínio conectado recebe vínculo exclusivo workspace/publicId/bindingId e TXT aleatório `_optimus-verify.<hostname>`. A associação usa a API oficial Vercel, sem force, compra, transferência ou mudança de DNS. Domínios já presentes no projeto sem vínculo desta integração e domínios Optimus/Vercel são rejeitados. Os registros CNAME/A e desafios Vercel são os retornados para o domínio; não há destino DNS universal hardcoded. A ativação exige simultaneamente TXT do workspace, verificação Vercel, DNS configurado e TLS público com cadeia/certificado/SNI válidos. O probe fixa IP público validado, não faz requisição HTTP arbitrária e possui timeout. Ausência de prova, credencial, DNS, HTTPS ou plano fecha a rota de domínio; token/slug padrão continuam disponíveis conforme publicação/plano.
+
+O frontend TanStack usa `createIsomorphicFn` e a URL efetiva do Request/window, sem aceitar headers forwarded como identidade de tenant. Hosts oficiais mantêm a aplicação existente/SSR; o host do cliente renderiza somente a raiz da página pública dele e não monta autenticação/painel. A API resolve o hostname exclusivamente pelo vínculo confirmado e não usa Host para selecionar workspace. Não há redirecionamento aberto.
+
+Estado do domínio fica em registro pequeno separado da revisão editorial. Um verificador assíncrono opt-in varre no máximo 32 registros e verifica até dois por tick de 5 s; cada domínio possui cadência mínima de 60 s e prova válida por até 10 min. DNS, TLS e Vercel têm deadlines; não existe I/O síncrono novo no hot path. Alterações de diagnóstico/domínio não avançam a revisão do rascunho. O editor acompanha estados pendentes a cada 30 s, uma consulta por vez e por até 15 min, encerrando no unmount. Falhas externas invalidam prontidão e não mudam decisões de envio/comerciais.
+
+A desconexão revoga primeiro a rota do domínio, remove apenas a associação confirmada desta integração e preserva página, rascunho, slug, mídias e snapshot. Associação com resultado incerto é reconciliada por GET/TXT; não se repete POST cegamente. Locks interrompidos falham fechados; nunca são removidos por idade/PID. Sua recuperação operacional exige exclusividade comprovada, preservando o contrato de persistência existente.
+
+### Credencial única da plataforma — configuração futura, uma vez
+
+- `LANDING_VERCEL_TOKEN`: segredo exclusivo do backend Optimus; nunca usar prefixo `VITE_`, retornar por API, imprimir, colocar no Git ou copiar do login/arquivo do CLI. Nenhum cliente fornece token.
+- `LANDING_VERCEL_PROJECT_ID=prj_oi7F49tqPLMb4eTs9TyISoaWWhu3` e `LANDING_VERCEL_TEAM_ID=team_y4OAUleUSAKmAL73mL33aG7k` identificam o alvo aprovado; `LANDING_DOMAINS_ENABLED=true` habilita o serviço somente depois da configuração autorizada.
+- O proprietário provisiona credencial dedicada pelo mecanismo oficial da Vercel e a instala no armazenamento/env protegido do backend durante uma janela autorizada. Uma integração OAuth oficial deve solicitar somente `project` e `domain` Read/Write e ser instalada para o projeto Optimus. Tokens pessoais herdam permissões do titular/time; não presumir escopo por projeto quando não oferecido pelo plano. Usar o menor acesso disponível e expiração/rotação. Referências: [escopos oficiais](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations), [tokens](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token).
+- Antes de adicionar/remover, o provider lê o projeto e exige ID, time, repositório `d1egopc/optimuspromo-frontend` e Production Branch `main`; rejeita domínio com redirect, outro branch/ambiente/projeto. Isso restringe o código, não reduz o alcance administrativo intrínseco de uma credencial roubada.
+- Conferir por GET autenticado os acessos de projeto, domínio e configuração DNS. Homologar permissões de escrita em domínio descartável autorizado antes de liberar clientes. Certificado é emitido pela Vercel; o Optimus observa HTTPS sem comprar certificado ou alterar DNS externo.
+- Não instalar a credencial nem mudar VPS/Compose nesta missão. A instalação futura é um gate operacional separado e explícito: não relaxar a comparação de env/Compose do deploy para introduzir segredo silenciosamente. Falta de configuração retorna 503 nas operações de domínio, sem afetar a URL padrão.
 
 ## Utilização local
 
@@ -102,3 +117,23 @@ CI preparado, ainda não executado remotamente:
 Próxima ação: autorizar os pushes isolados e a execução dos dois CIs após revisar os commits locais de validação. Publicação continua pendente de gate próprio.
 
 Validação V1.1 em Node 24.22.1: API Landing 16/16 e frontend Landing 5/5; catálogo Vitrine/planos 1/1. Os oito pares de cor de botão/texto passam contraste mínimo 4,5:1. O teste confirma atualização imediata da prévia a partir do rascunho e a grade de temas em 4 colunas no celular e 8 em telas maiores; o editor preserva a prévia móvel de 390 px. Build Vite final registrada após as alterações desta versão.
+
+## Gerenciamento de Planos — prova focal local (2026-10-25)
+
+A integração já estava presente nas candidatas backend `eb360900...` e frontend `46b4d0c...` (que preserva a versão funcional `e8766ba...` e o demo posterior). O `PlanoEditor` real lista `landing_page` em Recursos depois de Social/Vitrine, usa o mesmo Switch e o serializador/POST `/admin/planos` existentes. A única mudança funcional desta etapa é a descrição solicitada para Landing Page; regras de permissão e persistência foram preservadas.
+
+Os testes agora exercitam os callbacks do componente real: abrir, habilitar, salvar, reabrir, desabilitar e reabrir. O teste de API lê novamente `/admin/planos` e o arquivo temporário persistido após ON/OFF; compara os demais recursos, limites e o plano não editado. Plano legado sem `landing_page` continua bloqueado. DTOs `/me` gerados pela fixture backend alimentam o menu real frontend: tenant autorizado recebe link; bloqueado/legado recebe cadeado; API privada retorna 403. Dois workspaces permanecem isolados.
+
+Resultado local Node 24.22.1: backend 26/26, frontend 16/16, regressões Vitrine/planos 4/4, build normal PASS e typecheck com os mesmos 32 diagnósticos da baseline `ce052316...`, zero novos. A primeira tentativa HTTP foi bloqueada por EACCES de loopback no sandbox; a execução autorizada com a mesma fixture passou. O Preview visual continua sem API/login e não serve para testar o Admin Master. Alterações permanecem locais nas worktrees existentes, sem commit, push ou deploy nesta etapa; próximo gate é CI autorizado do delta final.
+
+## Checkpoint V1.2 — homologação local (2026-10-25)
+
+Candidatas continuam nas worktrees vinculadas `Documents/Codex/landing-v1-backend` e `landing-v1-frontend`, branch `feature/landing-page-v1-20261024`. Os documentos e alterações das pastas oficiais foram preservados. Bases anteriores: backend `eb360900197718e1af9d515fdc0905a342770d48`, frontend `46b4d0cee036fe92d189094faa6bfb6c1dcd8c74` (preserva o funcional `e8766ba...` e o Preview demo sem API). Não equiparar a branch candidata ao código produtivo.
+
+Node 24.22.1: backend focal e integração 35/35 PASS; frontend focal, planos, demo e comparação de diagnósticos 22/22 PASS. Typecheck: baseline frontend exata `ce05231617a3d34fa530aad7395241222cf019dc` 32, candidata 32, zero novos. Build normal e build Preview demo PASS; output Vercel `nodejs22.x`. Testes exercitam extração de Pixel, consentimento/deduplicação, isolamento, slugs, domínio com DNS/TLS pendentes, projeto incorreto, Host forjado, falhas de associação/desconexão e retomada limitada. Fixture usa respostas oficiais sanitizadas; nenhum domínio real foi adicionado/removido, nenhum Pixel real disparado e nenhuma credencial instalada.
+
+O roteamento por domínio usa a URL efetiva do adaptador TanStack, não headers encaminhados como autoridade. O backend exige binding/propriedade/DNS/TLS atuais; o frontend mantém SSR do painel oficial e não monta autenticação em hosts de clientes. A implementação demo continua sem API e sem Pixel real.
+
+Guardião e CI remoto da V1.2 ainda pendentes neste checkpoint. Os workflows existentes foram estendidos somente para os testes V1.2 e continuam CI-only. Push isolado está autorizado, main/deploy produtivo não. A conexão GitHub desta sessão ainda retorna 404 ao repositório frontend privado mesmo após a autorização informada pelo proprietário; leitura de commits/workflows/Actions não está comprovada. Não declarar CI verde por testes locais.
+
+Próxima ação: commit seletivo dos deltas, Guardião no SHA exato e pushes somente da branch existente se os gates passarem; acompanhar ambos os CIs e emitir GO/NO-GO. A instalação protegida da credencial Vercel e qualquer promoção/publicação produtiva exigem o OK final. Recebimento real de PageView pela Meta e escrita em domínio descartável autorizado são gates externos separados, não comprovados pelas fixtures.

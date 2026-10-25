@@ -7,6 +7,7 @@ const net = require("node:net");
 const sharp = require("sharp");
 const { detectarMime } = require("../social/social-media-storage");
 const vitrine = require("../vitrine/storage");
+const { createLandingAddresses, slug } = require("./addresses");
 
 const MAX_UPLOAD = 5 * 1024 * 1024;
 const MAX_DOCUMENT = 64 * 1024;
@@ -140,6 +141,9 @@ function emptyConfig() {
     showcase: { enabled: false, label: "Explorar a vitrine", url: "" },
     customDomain: "",
     metaPixelId: "",
+    metaPixelEnabled: false,
+    metaPixelConsent: "required",
+    slug: "",
   };
 }
 
@@ -192,7 +196,11 @@ function validateConfig(input, assets = []) {
     },
     customDomain: normalizedDomain,
     metaPixelId: pixelId(input.metaPixelId || ""),
+    metaPixelEnabled: input.metaPixelEnabled === true,
+    metaPixelConsent: "required",
+    slug: slug(input.slug || ""),
   };
+  if (result.metaPixelEnabled && !result.metaPixelId) throw erro("pixel_id_obrigatorio");
   if (result.showcase.enabled && !result.showcase.url)
     throw erro("vitrine_url_obrigatoria");
   return result;
@@ -351,14 +359,22 @@ function createLandingPageService(options = {}) {
   const editorDto = (state) => ({
     revision: state.revision,
     publicId: state.publicId,
+    publicSlug: state.published?.config.slug || "",
+    publishedDomain: state.published?.config.customDomain || "",
     draft: state.draft,
     published: Boolean(state.published),
     publishedAt: state.published?.at || "",
     updatedAt: state.updatedAt,
-    integrations: { customDomain: "not_verified", metaPixel: "not_activated" },
+    integrations: { customDomain: "not_verified", metaPixel: state.published?.config.metaPixelEnabled ? "published_not_confirmed" : "not_activated" },
   });
 
+  const addresses = createLandingAddresses({ root, read, mutate, editorDto, readJson, atomicJson, canPublish, provider: options.domainProvider, now: options.now });
+
   async function resolvePublic(pageId) {
+    if (!PAGE_RE.test(pageId || "")) {
+      try { pageId = await addresses.resolveSlug(pageId); }
+      catch { throw erro("pagina_nao_encontrada", 404); }
+    }
     const pointer = await readJson(publicPath(pageId), 512, null);
     if (!pointer || !(await canPublish(pointer.workspaceId)))
       throw erro("pagina_nao_encontrada", 404);
@@ -371,7 +387,7 @@ function createLandingPageService(options = {}) {
   return {
     async get(id) {
       const state = await read(workspaceId(id));
-      return { ...editorDto(state), source: await offers(id) };
+      return { ...editorDto(state), domain: await addresses.domainStatus(state), source: await offers(id) };
     },
     async save(id, revision, config) {
       return editorDto(
@@ -382,7 +398,7 @@ function createLandingPageService(options = {}) {
     },
     async publish(id, revision) {
       return editorDto(
-        await mutate(workspaceId(id), revision, async (state) => {
+        await addresses.publish(workspaceId(id), revision, async (state) => {
           if (!(await canPublish(id)))
             throw erro("recurso_nao_disponivel_no_plano", 403);
           if (!state.draft.name || !state.draft.title)
@@ -390,6 +406,7 @@ function createLandingPageService(options = {}) {
           state.published = {
             config: validateConfig(state.draft, state.assets),
             at: new Date().toISOString(),
+            key: crypto.randomUUID(),
           };
         }),
       );
@@ -403,13 +420,21 @@ function createLandingPageService(options = {}) {
     },
     async publicPage(pageId) {
       const state = await resolvePublic(pageId);
-      const { customDomain, metaPixelId, ...config } = state.published.config;
+      const { customDomain, metaPixelId, metaPixelEnabled, metaPixelConsent, ...config } = state.published.config;
       return {
         publicId: state.publicId,
         config,
         source: await offers(state.workspaceId),
+        ...(metaPixelEnabled && metaPixelId ? { pixel: { id: metaPixelId, consentRequired: true, publicationKey: state.published.key || state.published.at } } : {}),
       };
     },
+    slugAvailability: addresses.availability,
+    connectDomain: addresses.connect,
+    verifyDomain: addresses.verify,
+    disconnectDomain: addresses.disconnect,
+    async publicDomain(host) { return this.publicPage(await addresses.resolveDomain(host)); },
+    verifyDueDomains: addresses.verifyDueDomains,
+    startDomainVerification: addresses.start,
     async upload(id, revision, kind, buffer, declaredMime) {
       if (
         !["banner", "logo"].includes(kind) ||

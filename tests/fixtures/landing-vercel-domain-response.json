@@ -1,0 +1,61 @@
+{
+  "source": "Vercel authenticated GET, 2026-10-25. Domain/project identities replaced; no credentials or ownership token. DNS response fields retained.",
+  "domain": {
+    "name": "ofertas.fixture-shop.com",
+    "apexName": "fixture-shop.com",
+    "projectId": "prj_fixture",
+    "redirect": null,
+    "redirectStatusCode": null,
+    "gitBranch": null,
+    "customEnvironmentId": null,
+    "updatedAt": 1784499799662,
+    "createdAt": 1784499799662,
+    "verified": true
+  },
+  "config": {
+    "configuredBy": "CNAME",
+    "nameservers": [
+      "d.sec.dns.br",
+      "e.sec.dns.br"
+    ],
+    "serviceType": "external",
+    "cnames": [
+      "ff2e9a524f4ef193.vercel-dns-017.com."
+    ],
+    "aValues": [
+      "216.198.79.65",
+      "64.29.17.65"
+    ],
+    "conflicts": [],
+    "acceptedChallenges": [
+      "http-01"
+    ],
+    "recommendedIPv4": [
+      {
+        "rank": 1,
+        "value": [
+          "216.198.79.1",
+          "64.29.17.1"
+        ]
+      },
+      {
+        "rank": 2,
+        "value": [
+          "76.76.21.21"
+        ]
+      }
+    ],
+    "recommendedCNAME": [
+      {
+        "rank": 1,
+        "value": "ff2e9a524f4ef193.vercel-dns-017.com."
+      },
+      {
+        "rank": 2,
+        "value": "cname.vercel-dns.com."
+      }
+    ],
+    "ipStatus": "no-change",
+    "misconfigured": false
+  }
+}

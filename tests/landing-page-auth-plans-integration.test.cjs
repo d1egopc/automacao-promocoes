@@ -24,6 +24,27 @@ test("Landing integrada aos handlers oficiais de JWT, Admin, planos e /me", asyn
     });
   let a;
   let b;
+  let lastReadback;
+  const lockedPlanBefore = structuredClone(planos.locked);
+  async function assertPlanReadback(enabled) {
+    const reloaded = await request("/admin/planos", admin);
+    assert.equal(reloaded.status, 200);
+    const persisted = JSON.parse(
+      await fs.readFile(path.join(dataDir, "planos-fixture.json"), "utf8"),
+    );
+    assert.equal(reloaded.body.planos.enabled.recursos.landing_page, enabled);
+    assert.equal(persisted.enabled.recursos.landing_page, enabled);
+    assert.deepEqual(reloaded.body.planos.enabled, persisted.enabled);
+    assert.deepEqual(persisted.locked, lockedPlanBefore);
+    const unchanged = structuredClone(reloaded.body.planos.enabled);
+    delete unchanged.recursos.landing_page;
+    delete unchanged.atualizadoEm;
+    if (lastReadback) assert.deepEqual(unchanged, lastReadback);
+    lastReadback = unchanged;
+    assert.equal(reloaded.body.planos.enabled.recursos.mensageiro, true);
+    assert.equal(reloaded.body.planos.enabled.recursos.vitrine, true);
+    assert.equal(reloaded.body.planos.enabled.limites.creditos, 123);
+  }
 
   await t.test(
     "JWT ausente, inválido, expirado, desconhecido e usuário inativo bloqueados",
@@ -82,8 +103,23 @@ test("Landing integrada aos handlers oficiais de JWT, Admin, planos e /me", asyn
         (await request("/landing-page", { user: "workspace_a" })).status,
         200,
       );
+      await assertPlanReadback(true);
     },
   );
+
+  await t.test("plano legado sem configuração explícita nunca libera Landing Page", async () => {
+    delete planos.locked.recursos.landing_page;
+    try {
+      const me = await request("/me", { user: "workspace_locked" });
+      assert.notEqual(me.body.usuario.recursos.landing_page, true);
+      assert.equal((await request("/landing-page", { user: "workspace_locked" })).status, 403);
+      assert.equal(planos.locked.recursos.mensageiro, true);
+      assert.equal(planos.locked.recursos.vitrine, true);
+      assert.equal(planos.locked.limites.creditos, 123);
+    } finally {
+      planos.locked.recursos.landing_page = false;
+    }
+  });
 
   await t.test(
     "plano bloqueado recebe 403 nas operações privadas e não cria documento",
@@ -284,6 +320,7 @@ test("Landing integrada aos handlers oficiais de JWT, Admin, planos e /me", asyn
     "revogação de plano fecha API privada e página pública imediatamente",
     async () => {
       assert.equal((await updatePlan(false)).status, 200);
+      await assertPlanReadback(false);
       assert.equal(
         (await request("/landing-page", { user: "workspace_a" })).status,
         403,
@@ -293,6 +330,7 @@ test("Landing integrada aos handlers oficiais de JWT, Admin, planos e /me", asyn
         404,
       );
       assert.equal((await updatePlan(true)).status, 200);
+      await assertPlanReadback(true);
       assert.equal(
         (await request("/public/landing/" + a.publicId)).status,
         200,
