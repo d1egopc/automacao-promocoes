@@ -47,7 +47,7 @@ class V4Engine {
     sock,
     planAllowed,
   }) {
-    const trace = this.diagnostics?.trace(message) || (() => {});
+    const trace = this.diagnostics?.trace(message || event) || (() => {});
     if (
       this.owns(workspaceId) &&
       !this.workspaceStats.has(workspaceId) &&

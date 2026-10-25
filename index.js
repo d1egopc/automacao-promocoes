@@ -33997,8 +33997,11 @@ registrarListenerUnicoSocket({
   }
 });
 
+const emissorParticipantesMensageiro = sock.ev;
 sock.ev.on("group-participants.update", async (evento) => {
-  if (!socketEhAtual(sessoes, id, sock)) return;
+  try { mensageiroV4Diagnostics.observeParticipants({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, event: evento,
+    current: socketEhAtual(sessoes, id, sock) && sock.ev === emissorParticipantesMensageiro, generation: socketGeracao }); } catch { /* Optional metadata only. */ }
+  if (!socketEhAtual(sessoes, id, sock) || sock.ev !== emissorParticipantesMensageiro) return;
 
   diagnosticoMensageiroV3({ workspaceId: clienteIdMensageiro, sessionId: id,
     groupId: evento?.id || "", card: evento?.action === "add" ? "welcome" : "farewell",

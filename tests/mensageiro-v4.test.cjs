@@ -16,6 +16,8 @@ fs.writeFileSync(
 test.after(() => fs.rmSync(suiteData, { recursive: true, force: true }));
 const express = require("express");
 const { monitorEventLoopDelay } = require("node:perf_hooks");
+const vm=require("node:vm");
+const EventEmitter=require("node:events");
 const { V3Store } = require("../modules/mensageiro-v3/src/v3/store");
 const { V4Repository } = require("../modules/mensageiro-v4/repository");
 const { V4Engine } = require("../modules/mensageiro-v4/engine");
@@ -535,6 +537,21 @@ test("diagnostic OFF has no clock, IO or ownership lookup; capacity stays bounde
   const s = on.stop(W);
   assert.equal(s.events, 10);
   assert.ok(s.records.length <= 120);
+});
+test("original participant callback rejects stale socket/emitter and traces before filters",async()=>{
+  const source=fs.readFileSync(path.join(__dirname,"..","index.js"),"utf8").replace(/\r\n/g,"\n");
+  const start=source.indexOf("const emissorParticipantesMensageiro = sock.ev;");
+  const end=source.indexOf('  sock.ev.on("connection.update"',start);assert.ok(start>0&&end>start);
+  const calls=[],sockets={},sock={ev:new EventEmitter()},sessionId="fixture-session";sockets[sessionId]=sock;
+  const diagnostics=new Diagnostics({ownsSession:()=>true});diagnostics.start({workspaceId:W,sessionId,groupId:G});
+  vm.runInNewContext(source.slice(start,end),{sock,id:sessionId,clienteIdMensageiro:W,socketGeracao:1,
+    mensageiroV4Diagnostics:diagnostics,socketEhAtual:(s,id,current)=>s[id]===current,sessoes:sockets,
+    diagnosticoMensageiroV3(){},usuarioAtivoOperacional:()=>true,logUsuarioInativoOperacional(){},clienteTemRecursoMensageiro:()=>true,
+    dispatchMensageiroV3Ingress:async args=>calls.push(args.card),console:{log(){}}});
+  const event={id:G,action:"add",participants:["fixture@lid"]};sock.ev.emit("group-participants.update",event);await new Promise(r=>setImmediate(r));assert.deepEqual(calls,["welcome"]);
+  assert.ok(diagnostics.status(W).records.some(r=>r.type==="participants"&&r.stage==="ingress"));
+  const previous=sock.ev;sock.ev=new EventEmitter();previous.emit("group-participants.update",{...event,action:"remove"});await new Promise(r=>setImmediate(r));assert.equal(calls.length,1);
+  sockets[sessionId]={};previous.emit("group-participants.update",event);await new Promise(r=>setImmediate(r));assert.equal(calls.length,1);diagnostics.stop(W);
 });
 test("worker backpressure rejects extra work without blocking the loop", async (t) => {
   const f = fixture(t),

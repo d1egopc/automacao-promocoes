@@ -170,9 +170,9 @@ class Diagnostics {
       ...(Number.isInteger(extra.generation)
         ? { generation: extra.generation }
         : {}),
-      ...(extra.type
+        ...(extra.type
         ? {
-            type: ["notify", "append"].includes(extra.type)
+              type: ["notify", "append", "participants"].includes(extra.type)
               ? extra.type
               : "other",
           }
@@ -225,6 +225,16 @@ class Diagnostics {
     return message && typeof message === "object"
       ? this.traces.get(message)
       : null;
+  }
+  observeParticipants(context) {
+    if(!this.run?.active)return;
+    const event=context.event;
+    if(!event?.id||!Array.isArray(event.participants)||!event.participants.length)return;
+    const identity=this.hash(JSON.stringify([event.id,event.action,event.timestamp||"",event.participants]));
+    const marker={key:{id:identity,remoteJid:event.id}};
+    this.observe({...context,messages:[marker],type:"participants"});
+    const callback=this.trace(marker);
+    if(callback)this.traces.set(event,callback);
   }
 }
 module.exports = { Diagnostics };
