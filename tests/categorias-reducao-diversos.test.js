@@ -34,6 +34,21 @@ const casos = [
   ["Kit 3 Luminárias de Emergência", "mercadolivre", "Iluminação e Elétrica"],
   ["Kit 4 Bermudas", "mercadolivre", "Diversos"],
   ["Conjunto short feminino academia", "mercadolivre", "Roupas e Moda Feminina"],
+  ["Kit 10 Iscas Artificiais Meia Água 7,2cm Cor Sortida", "mercadolivre", "Pesca e Camping"],
+  ["Conjunto de chaves de extensão com ângulo (1 chave de extensão + 4 adaptadores + 1 chave catraca)", "shopee", "Ferramentas"],
+  ["Alicate de ponta fina, ferramentas de Hardware, alicate de fio", "shopee", "Ferramentas"],
+  ["Alicate aberto de anel de pé de pássaro, alicate de ponta aberta, alicate de anel de pé", "shopee", "Ferramentas"],
+  ["Rayhaan Cordova Edp 100ml", "mercadolivre", "Perfumaria, Farmácia e Beleza"],
+  ["O CARA DAS OFERTAS ACHOU PRA VOCÊ! Your Touch Intense Maison Alhambra 100mL", "mercadolivre", "Perfumaria, Farmácia e Beleza"],
+  ["NAUTICA CLASSIC MEN RED EDT 100ML", "amazon", "Perfumaria, Farmácia e Beleza"],
+  ["Kit 4 Baby Tee Feminina - Blusa Slim Fit Manga Curta", "shopee", "Roupas e Moda Feminina"],
+  ["Kit 8 camisas sandrini dry fit masculina caminhada academia", "mercadolivre", "Roupas e Moda Masculina"],
+  ["Kit 4 Boias Cevadeira Tamba 60g - Pro Pesque", "shopee", "Pesca e Camping"],
+  ["Isca Lori-m 105mm 14g Superfície Zara Rattlin Tucunaré", "mercadolivre", "Pesca e Camping"],
+  ["Vara Albatroz Atlantic Surf 4,2m Carbono 487g Rápida", "mercadolivre", "Pesca e Camping"],
+  ["Kit 2 Amaciantes Concentrados Baby Soft Carinho e Cuidado - 3l", "shopee", "Limpeza"],
+  ["Kit Bolas de Natal Com Foto Personalizada", "shopee", "Casa, Móveis e Decoração"],
+  ["Jogo de Pratos Natalino Azevinho Xícaras e Travessas em Cerâmica", "shopee", "Casa, Móveis e Decoração"],
   ["Fechadura eletrônica", "mercadolivre", "Casa, Móveis e Decoração"],
   ["Camiseta Dark Lab", "mercadolivre", "Roupas e Moda Masculina"],
   ["Palatinose 100% pura", "mercadolivre", "Esporte e Suplementos"],
@@ -135,6 +150,21 @@ try {
     "identidades conflitantes não devem escolher categoria por prioridade arbitrária");
   assert.strictEqual(classificarCategoriaOferta({ titulo: "Creme de pentear com ketchup" }), "Diversos",
     "identidades novas conflitantes também devem permanecer em Diversos");
+  assert.strictEqual(classificarCategoriaOferta({ titulo: "EDT ajuste de sincronização do sistema" }), "Diversos",
+    "sigla ambígua isolada não deve classificar como perfumaria");
+  assert.strictEqual(classificarCategoriaOferta({ titulo: "Fantasia infantil para festa" }), "Roupas e Calçados Infantil");
+  for (const titulo of ["Vibrador com fantasia infantil", "Produto erótico infantil", "Dildo para criança fantasia", "Fantasia infantil tamanho adulto"]) {
+    assert.notStrictEqual(
+      classificarCategoriaOferta({ titulo, categoria: "Roupas e Calçados Infantil" }, titulo),
+      "Roupas e Calçados Infantil",
+      "sinal adulto explícito não pode cair em categoria infantil"
+    );
+  }
+  assert.notStrictEqual(
+    classificarCategoriaOferta({ titulo: "Meias de mergulho antiderrapante para adultos 3mm" }),
+    "Roupas e Calçados Infantil",
+    "a palavra adultos isolada não deve criar classificação infantil"
+  );
   assert.strictEqual(
     classificarCategoriaOferta({ titulo: "Cadeira gamer com tela mosquiteiro" }, "Cadeira gamer com tela mosquiteiro"),
     "Gamer e Hardware",

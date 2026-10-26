@@ -123,6 +123,7 @@ const REGRAS = [
     fortes: [
       "perfume", "parfum", "eau de parfum", "eau de toilette", "deo colonia",
       "colonia", "body splash", "malbec", "lattafa", "yara", "azzaro",
+      "rayhaan", "maison alhambra", "armaf", "nautica classic men red",
       "boticario", "natura", "eudora", "hidratante", "skincare",
       "protetor solar", "fps", "shampoo", "condicionador", "maquiagem",
       "mascara capilar", "hidratante labial", "skincare",
@@ -366,6 +367,7 @@ const REGRAS = [
       "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
       "jaqueta feminina", "puffer feminina", "jaqueta puffer feminina",
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
+      "baby tee feminina",
       "baby look", "cropped", "tomara que caia", "vestido", "saia", "short feminino",
       "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
       "oculos de sol", "bolsa de viagem", "bolsa academia", "sobretudo feminino"
@@ -393,6 +395,7 @@ const REGRAS = [
       "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
       "meia flanelada", "t shirt insider",
       "camisa adidas masculina", "camisa nike masculina", "camisa puma masculina",
+      "sandrini dry fit masculina",
       "camiseta adidas masculina", "camiseta nike masculina", "camiseta puma masculina",
       "polo adidas masculina", "polo nike masculina", "polo puma masculina",
       "short adidas masculino", "short nike masculino", "short puma masculino"
@@ -441,6 +444,9 @@ const REGRAS = [
       "maleta de ferramentas", "caixa de ferramentas", "jogo de soquetes", "kit soquetes",
       "kit ferramentas", "maleta ferramentas", "chave de fenda",
       "ferramentas profissional", "profissional eletricista", "eletricista",
+      "conjunto de chaves", "chaves de extensao", "chave catraca",
+      "alicate de ponta fina", "alicate diagonal", "alicate eletronico",
+      "alicate de fio", "alicate de ponta aberta", "alicate de anel", "ferramentas de reparo",
       "motosserra", "eletrosserra", "serra de corte", "serra marmore",
       "serra ceramica", "serra granito", "ferramenta serralheiro",
       "conjunto de chave", "jogo de chaves", "maquina assentar pisos",
@@ -469,7 +475,7 @@ const REGRAS = [
     prioridade: 58,
     fortes: [
       "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "faqueiro",
-      "talheres", "copos", "jogo de copos", "marmitas", "potes",
+      "talheres", "copos", "jogo de copos", "jogo de pratos", "bolas de natal", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
       "bacia retratil", "tabua de corte", "pote vidro", "copo",
       "cortina", "almofada", "espelho", "sofa", "rack", "painel tv",
@@ -556,9 +562,10 @@ const REGRAS = [
   regra(CATEGORIA.pesca, {
     prioridade: 50,
     fortes: [
-      "molinete", "vara de pesca", "carretilha", "anzol", "isca artificial",
+      "molinete", "vara de pesca", "carretilha", "anzol", "isca artificial", "iscas artificiais",
       "linha de pesca", "pesca", "camping", "barraca", "saco de dormir",
-      "fogareiro camping", "lanterna camping", "caixa termica"
+      "fogareiro camping", "lanterna camping", "caixa termica",
+      "boia cevadeira", "boias cevadeira", "boias cevadeiras", "vara albatroz", "tucunare"
     ],
     palavras: [
       "alicate de pesca", "colchonete", "mochila camping",
@@ -591,7 +598,7 @@ const REGRAS = [
     prioridade: 46,
     fortes: [
       "mop", "esfregao", "rodo", "vassoura", "multiuso", "desinfetante",
-      "detergente", "desengordurante", "amaciante", "sabao liquido",
+      "detergente", "desengordurante", "amaciante", "amaciantes", "sabao liquido",
       "sabao em po", "lava roupas", "tira manchas", "alvejante",
       "agua sanitaria", "limpa vidro", "limpa piso", "papel higienico",
       "odorizante ambiente", "aromatizador ambiente", "coala odorizante",
@@ -718,6 +725,14 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   const texto = textoOferta(oferta, termo);
 
   if (!texto) {
+    return CATEGORIA.diversos;
+  }
+
+  // Conteúdo adulto explícito permanece em Diversos nesta versão; nunca o
+  // encaminha a uma categoria infantil por sinais conflitantes no título.
+  const conteudoAdultoExplicito = /\b(?:sex shop|vibrador(?:es)?|dildo(?:s)?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(texto);
+  const faixaEtariaConflitante = /\badultos?\b/.test(texto) && /\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(texto);
+  if (conteudoAdultoExplicito || faixaEtariaConflitante) {
     return CATEGORIA.diversos;
   }
 

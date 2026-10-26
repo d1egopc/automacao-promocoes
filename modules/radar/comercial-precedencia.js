@@ -33,6 +33,14 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   if (/^\d{1,3}\s*%$/.test(limpo)) return false;
   const n = normalizarPapelComercial(limpo);
   if (!n) return false;
+  const semPrefixoDeEtapa = n.replace(/^(?:\d+\s+)+/, "");
+  if (
+    /^(?:vendido por marketplaces?|confira na loja|veja o produto)$/.test(n) ||
+    /^clique em inicio no rodape do app$/.test(semPrefixoDeEtapa) ||
+    /^quem nao resgatar nao consegue usar(?: \d{1,2} \d{2})?$/.test(n) ||
+    /^valido no site quase todo(?: poucas lojas nao aceitam)?$/.test(n) ||
+    /^caso nao aparece a aba de cupons relampagos procurem pelo banner acima$/.test(n)
+  ) return false;
   const compacto = n.replace(/\s+/g, "");
   const marketplace = normalizarPapelComercial(
     typeof contexto === "string" ? contexto : (contexto.marketplace || "")

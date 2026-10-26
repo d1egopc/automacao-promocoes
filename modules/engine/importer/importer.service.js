@@ -183,7 +183,7 @@ function tituloPareceSloganComercialEngine(titulo = "") {
   const texto = normalizarTitulo(titulo);
   if (!texto) return true;
 
-  const contemProduto = /\b(?:air\s*fryer|airfryer|aspirador|furadeira|parafusadeira|ducha|chuveiro|lavadora|lava\s*e\s*seca|secadora|camisa|camiseta|polo|short|tenis|chinelo|smartphone|notebook|monitor|perfume|whey|creatina|pneu|colchao|cama\s*box)\b/.test(texto);
+  const contemProduto = /\b(?:air\s*fryer|airfryer|aspirador|furadeira|parafusadeira|ducha|chuveiro|lavadora|lava\s*e\s*seca|secadora|camisa|camiseta|baby\s*tee|blusa|polo|short|tenis|chinelo|smartphone|notebook|monitor|perfume|whey|creatina|pneu|colchao|cama\s*box)\b/.test(texto);
   if (contemProduto) return false;
   if (/^(?:corre|olha|confere|cupom|promocao|promo|oferta|desconto)\b/.test(texto)) return true;
   if (/\b(?:ta barato|esta barato|baratinho|imperdivel|luxo|so por|sai por)\b/.test(texto)) return true;

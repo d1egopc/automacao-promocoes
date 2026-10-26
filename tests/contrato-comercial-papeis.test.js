@@ -12,6 +12,7 @@ const { aplicarContratoMarketplace } = require("../modules/ofc-v2/marketplace-co
 const { criarProvaAfiliacaoWorkspaceShopee, vincularUrlFinalPublicadaShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 const { normalizarApresentacaoComercial } = require("../modules/templates-clientes/normalizador-apresentacao-comercial");
 const { renderizarTemplatePersonalizado } = require("../modules/templates-clientes/renderer");
+const { resolverTituloFactualEngine, tituloFactualConfiavelEngine } = require("../modules/engine/importer/importer.service");
 
 const dataDirProva = fs.mkdtempSync(path.join(os.tmpdir(), "shopee-papeis-"));
 process.env.DATA_DIR = dataDirProva;
@@ -72,6 +73,33 @@ assert.strictEqual(tituloComercialUniversalValido("Amazon / Amazon", { marketpla
 assert.strictEqual(tituloComercialUniversalValido("10%", { marketplace: "amazon" }), false);
 assert.strictEqual(tituloComercialUniversalValido("NATORCIDA", { marketplace: "amazon", cupons: ["NATORCIDA"] }), false);
 assert.strictEqual(tituloComercialUniversalValido("Echo Dot 5a Geracao", { marketplace: "amazon" }), true);
+for (const titulo of ["Vendido por marketplaces", "Confira na loja", "Veja o produto", "2. Clique em Início no rodapé do APP", "Quem não resgatar não consegue usar 00:00", "Válido no site quase todo (poucas lojas não aceitam)", "Caso não aparece a aba de cupons relâmpagos, procurem pelo banner acima"]) {
+  assert.strictEqual(tituloComercialUniversalValido(titulo, { marketplace: "shopee" }), false, titulo);
+}
+const tituloAlternativo = resolverTituloFactualEngine(
+  { marketplace: "shopee", titulo: "Tênis de corrida factual" },
+  { produto: { titulo: "Confira na loja" } }
+);
+assert.deepStrictEqual(tituloAlternativo, {
+  titulo: "Tênis de corrida factual",
+  origem: "oferta.titulo"
+}, "rótulo genérico deve ser rejeitado e o próximo candidato confiável utilizado");
+const tituloRecuperadoDoSlug = resolverTituloFactualEngine(
+  {
+    marketplace: "mercadolivre",
+    titulo: "Quem não resgatar não consegue usar 00:00",
+    linkOriginal: "https://www.mercadolivre.com.br/kit-8-camisas-sandrini-dry-fit-masculina"
+  },
+  { produto: { titulo: "Quem não resgatar não consegue usar 00:00" } },
+  { marketplace: "mercadolivre" }
+);
+assert.deepStrictEqual(tituloRecuperadoDoSlug, {
+  titulo: "kit 8 camisas sandrini dry fit masculina",
+  origem: "slug_link_produto"
+}, "se os títulos disponíveis forem genéricos, o resolvedor deve tentar o slug confiável");
+const tituloModaFactual = "Kit 4 Baby Tee Feminina - Blusa Slim Fit Manga Curta Blusa de Compressão Várias Cores Ajuste Perfeito MODA LUXO";
+assert.strictEqual(tituloFactualConfiavelEngine(tituloModaFactual, "shopee"), true,
+  "palavra promocional ‘luxo’ não deve invalidar título que identifica peça de roupa");
 
 const tituloRadarVenceApi = resolverPrecedenciaComercialRadar({
   marketplace: "amazon",
