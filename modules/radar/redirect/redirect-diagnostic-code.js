@@ -26,6 +26,8 @@ function normalizarMotivoTecnicoRedirect(resultado = {}) {
   if (motivo === "redirect_nao_resolvido" && metodo === "html_sem_redirect") {
     return "html_destino_nao_identificado";
   }
+  if (motivo === "redirect_nao_resolvido" && metodo === "html_sem_destino_contextual") return "html_destino_nao_identificado";
+  if (motivo === "REDIRECT_TIMEOUT") return "redirect_timeout";
   if (CODIGOS.has(motivo)) return motivo;
   if (/^(?:http_status_|promozone_api_status_)[45]\d{2}$/.test(motivo || "")) return motivo;
   if (metodo === "erro_http" && /^[45]\d{2}$/.test(String(statusHttp || ""))) {

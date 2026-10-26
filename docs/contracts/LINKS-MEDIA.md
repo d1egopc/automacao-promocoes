@@ -37,3 +37,11 @@ Nao fabrique identidade a partir de link afiliado, tracking, marketplace ou apar
 - Midia Radar: `modules/radar/whatsapp-media-materializer.js`.
 
 Alterar o papel de qualquer link e mudanca de contrato comercial e requer decisao humana.
+
+## Descoberta administrativa V2.3
+
+- A aba Links usa `/admin/links/resolvers/inspect`, protegida pelo middleware oficial Admin Master, para inspecionar sem escrita. Reutiliza o leitor HTTP existente com DNS fixado, prazo de 4,5 s, até cinco redirects e limite de corpo. Não executa JavaScript, API de conversão, captura, preparação comercial ou envio.
+- Respostas distinguem `resolvido` (destino com identidade candidata), `investigacao_pendente` (rede/HTTP/HTML/identidade insuficiente) e `bloqueado_seguranca`. Host conhecido, destino candidato, produto confirmado e afiliação são estados distintos. Um shortlink oficial intermediário não comprova um produto.
+- `/investigations` reavalia a entrada e salva somente metadados sanitizados no registry existente, `ativo=false`, `estado=investigacao_pendente`, vinculados ao operador autenticado. Não armazena URL original, query, HTML, headers, exceção livre ou credencial. Outros workspaces não listam, leem nem excluem essa investigação; ela não integra a allowlist operacional.
+- Rascunhos permanecem inativos. A autorização explícita exige outro endereço do mesmo host/prefixo/mode, revalidação atual dos dois exemplos e método/marketplace compatíveis com produto identificável. PATCH não pode ativar rascunho ou investigação. Domínios oficiais, inclusive meli.la, não são cadastrados como novos padrões.
+- Testes e prévia administrativa não geram oferta ou link afiliado. Não há mudança no resolvedor operacional, fila, distribuição ou conversores. OneLink Magalu com HTTP 403 continua pendente, sem contorno de proteção.

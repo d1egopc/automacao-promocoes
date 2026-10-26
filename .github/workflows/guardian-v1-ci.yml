@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - validation/links-v23-20261026
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
@@ -31,6 +32,16 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Links V2.3 isolated fixtures and exact baseline comparison
+        if: github.ref == 'refs/heads/validation/links-v23-20261026'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git merge-base --is-ancestor 31ea52117bf98fc8d3494126cc445920332e98d1 HEAD
+          git worktree add --detach "$RUNNER_TEMP/links-v23-base" 31ea52117bf98fc8d3494126cc445920332e98d1
+          node tests/links-v23-regression-gate.cjs "$RUNNER_TEMP/links-v23-base"
       - name: Exact Baileys packaging profile - isolated only
         if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
         run: |

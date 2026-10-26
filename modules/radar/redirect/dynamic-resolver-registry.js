@@ -46,7 +46,8 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
       throw new Error("LINK_RESOLVERS_STORAGE_INVALIDO");
     }
     if (dados?.version !== 1 || !Array.isArray(dados.records)) throw new Error("LINK_RESOLVERS_STORAGE_INVALIDO");
-    registros = dados.records;
+    registros = dados.records.map(item => item.tipo === "investigacao_pendente"
+      ? { ...item, estado: "investigacao_pendente", ativo: false } : item);
   }
 
   function salvar(proximos) {
@@ -55,7 +56,11 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     try {
       const fd = fs.openSync(temporario, "wx", 0o600);
       try {
-        fs.writeFileSync(fd, JSON.stringify({ version: 1, records: proximos }));
+        // The deployed V1 reader already forbids activating a draft. Preserve
+        // that guard on rollback; only the new reader projects this as pending.
+        const records = proximos.map(item => item.estado === "investigacao_pendente"
+          ? { ...item, estado: "rascunho", tipo: "investigacao_pendente", ativo: false } : item);
+        fs.writeFileSync(fd, JSON.stringify({ version: 1, records }));
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);
@@ -73,13 +78,13 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     let url;
     try { url = new URL(String(urlTexto || "")); } catch { return null; }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.port) return null;
-    return registros.find(item => item.ativo === true && item.host === url.hostname.toLowerCase() &&
+    return registros.find(item => item.estado !== "investigacao_pendente" && item.ativo === true && item.host === url.hostname.toLowerCase() &&
       (item.pathPrefix.endsWith("/") ? url.pathname.startsWith(item.pathPrefix) : url.pathname === item.pathPrefix) &&
       (item.pathMode !== "one_segment_suffix" ||
         /^[a-z0-9_-]{1,256}$/i.test(url.pathname.slice(item.pathPrefix.length)))) || null;
   }
   function adicionar(familia, diagnostico = {}) {
-    if (registros.some(item => item.host === familia.host && item.pathPrefix === familia.pathPrefix)) throw new Error("RESOLVER_DUPLICADO");
+    if (registros.some(item => item.estado !== "investigacao_pendente" && item.host === familia.host && item.pathPrefix === familia.pathPrefix)) throw new Error("RESOLVER_DUPLICADO");
     const agora = new Date().toISOString();
     const novo = {
       id: crypto.randomUUID(), host: familia.host, pathPrefix: familia.pathPrefix,
@@ -93,7 +98,7 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     return { ...novo };
   }
   function adicionarRascunho(familia, diagnostico = {}) {
-    if (registros.some(item => item.host === familia.host && item.pathPrefix === familia.pathPrefix))
+    if (registros.some(item => item.estado !== "investigacao_pendente" && item.host === familia.host && item.pathPrefix === familia.pathPrefix))
       throw new Error("RESOLVER_DUPLICADO");
     const agora = new Date().toISOString();
     const novo = {
@@ -111,10 +116,50 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
   function atualizar(id, alteracoes) {
     const atual = buscar(id);
     if (!atual) throw new Error("RESOLVER_NAO_ENCONTRADO");
-    if (atual.estado === "rascunho" && alteracoes?.ativo === true)
+    if (["rascunho", "investigacao_pendente"].includes(atual.estado) && alteracoes?.ativo === true)
       throw new Error("RASCUNHO_NAO_HOMOLOGADO");
     const proximo = { ...atual, ...alteracoes, id: atual.id, host: atual.host, pathPrefix: atual.pathPrefix,
       urlExemplo: atual.urlExemplo, atualizadoEm: new Date().toISOString() };
+    salvar(registros.map(item => item.id === id ? proximo : item));
+    return { ...proximo };
+  }
+  function adicionarInvestigacao(diagnostico, workspaceId) {
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(workspaceId || "") ||
+        diagnostico?.resultado !== "investigacao_pendente" || diagnostico.investigacaoElegivel !== true)
+      throw new Error("INVESTIGACAO_INVALIDA");
+    const agora = new Date().toISOString();
+    // This record contains no source URL/query, response body, headers or free-form exception.
+    const novo = {
+      id: crypto.randomUUID(), ativo: false, estado: "investigacao_pendente",
+      workspaceId, host: diagnostico.host, pathPrefix: diagnostico.caminhoSanitizado,
+      criadoEm: agora, atualizadoEm: agora, ultimoTesteEm: agora, ultimoSucessoEm: "",
+      falhasConsecutivas: 0, ultimoMarketplaceDetectado: diagnostico.marketplaceCandidato === "nao_comprovado"
+        ? "" : diagnostico.marketplaceCandidato,
+      ultimoTipoDetectado: "nao_determinado", metodoDescoberto: "",
+      ultimoDebugSeguro: {
+        ok: false, entrada: diagnostico.urlOriginalSanitizada,
+        destino: diagnostico.urlExpandidaSanitizada, metodo: diagnostico.metodo,
+        motivo: diagnostico.motivoTecnico, etapa: diagnostico.etapa,
+        statusHttp: diagnostico.statusHttp, hops: diagnostico.hops.map(item => item.url)
+      }
+    };
+    salvar([...registros, novo]);
+    return { ...novo };
+  }
+  function homologar(id, diagnostico = {}) {
+    const atual = buscar(id);
+    if (!atual || atual.estado !== "rascunho" || atual.ativo !== false)
+      throw new Error("RASCUNHO_NAO_HOMOLOGADO");
+    if (diagnostico.ok !== true || diagnostico.exemplosHomologados !== 2 ||
+        !diagnostico.marketplace || diagnostico.metodo !== atual.metodoDescoberto)
+      throw new Error("RASCUNHO_REVALIDACAO_FALHOU");
+    const agora = new Date().toISOString();
+    const proximo = { ...atual, estado: "homologado", ativo: true,
+      homologadoEm: agora, ultimoTesteEm: agora, ultimoSucessoEm: agora,
+      ultimoMarketplaceDetectado: diagnostico.marketplace,
+      ultimoTipoDetectado: diagnostico.tipo || "nao_determinado",
+      metodoHomologado: diagnostico.metodo, exemplosHomologados: 2,
+      ultimoDebugSeguro: diagnostico.debug, falhasConsecutivas: 0, atualizadoEm: agora };
     salvar(registros.map(item => item.id === id ? proximo : item));
     return { ...proximo };
   }
@@ -122,7 +167,7 @@ function criarRegistroDinamico({ file = DEFAULT_FILE } = {}) {
     if (!buscar(id)) throw new Error("RESOLVER_NAO_ENCONTRADO");
     salvar(registros.filter(item => item.id !== id));
   }
-  return { listar, buscar, localizar, adicionar, adicionarRascunho, atualizar, excluir };
+  return { listar, buscar, localizar, adicionar, adicionarRascunho, adicionarInvestigacao, homologar, atualizar, excluir };
 }
 
 let registroPadrao;
