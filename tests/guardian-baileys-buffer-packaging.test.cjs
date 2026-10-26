@@ -57,7 +57,7 @@ for(const file of ["Dockerfile","scripts/apply-baileys-retry-hotfix.cjs","packag
 
 test("negative: deleted runtime, wrong base, absolute/traversal path never become an exception",()=>{
  const dir=clone();try{
-  git(dir,["rm","--","modules/whatsapp/baileys-buffer-recovery.service.js"]);git(dir,["commit","--quiet","-m","delete negative"]);
+  git(dir,["rm","--","index.js"]);git(dir,["commit","--quiet","-m","delete negative"]);
   const r=buildPlan(dir,p.baseSha,git(dir,["rev-parse","HEAD"]));assert.equal(r.validation,"BLOCKED");
   assert.ok(r.blocked.some(x=>x.cause==="deleted_file_not_supported"));
  }finally{cleanup(dir);}
