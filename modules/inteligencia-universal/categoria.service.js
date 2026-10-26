@@ -1,4 +1,4 @@
-const { classificarCategoriaOferta } = require("../../marketplaces/inteligencia/classificador-categorias");
+const { classificarCategoriaOferta, categoriaPorNaturezaExplicita } = require("../../marketplaces/inteligencia/classificador-categorias");
 const { categoriaExiste } = require("../../marketplaces/inteligencia/categorias-globais");
 const { texto } = require("./normalizacao.service");
 
@@ -35,6 +35,17 @@ function categoriaOficialAutoritativa(categoria = "") {
 function classificarCategoriaUniversal(ofertaUniversal = {}, contexto = {}) {
   const logs = [];
   const categoriaAtual = texto(ofertaUniversal.categoria);
+
+  // Exceção factual restrita: uma oficina explicitamente de brinquedo não é ferramenta real.
+  const categoriaNatureza = categoriaAtual === "Ferramentas"
+    ? categoriaPorNaturezaExplicita(ofertaUniversal, contexto.termo || "") : "";
+  if (categoriaNatureza) {
+    const categoria = classificarCategoriaOferta(ofertaUniversal,
+      contexto.termo || ofertaUniversal.titulo || ofertaUniversal.nome || "");
+    logs.push({ etapa: "categoria", status: "corrigida", motivo: "natureza_produto_explicita",
+      categoriaOriginal: categoriaAtual, categoria });
+    return { categoria, origem: "classificador_legado", logs };
+  }
 
   if (categoriaOficialAutoritativa(categoriaAtual)) {
     logs.push({ etapa: "categoria", status: "mantida", motivo: "categoria_declarada_valida", categoria: categoriaAtual });

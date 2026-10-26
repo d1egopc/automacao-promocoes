@@ -35,7 +35,7 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   if (!n) return false;
   const semPrefixoDeEtapa = n.replace(/^(?:\d+\s+)+/, "");
   if (
-    /^(?:vendido por marketplaces?|confira na loja|veja o produto)$/.test(n) ||
+    /^(?:vendido por marketplaces?|vendido por loja oficial (?:no|do) ml|produto amazon|confira na loja|veja o produto)$/.test(n) ||
     /^clique em inicio no rodape do app$/.test(semPrefixoDeEtapa) ||
     /^quem nao resgatar nao consegue usar(?: \d{1,2} \d{2})?$/.test(n) ||
     /^valido no site quase todo(?: poucas lojas nao aceitam)?$/.test(n) ||

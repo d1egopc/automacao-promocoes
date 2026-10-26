@@ -84,6 +84,14 @@ assert.deepStrictEqual(tituloAlternativo, {
   titulo: "Tênis de corrida factual",
   origem: "oferta.titulo"
 }, "rótulo genérico deve ser rejeitado e o próximo candidato confiável utilizado");
+for (const titulo of ["Vendido por Loja Oficial no ML", "Vendido por Loja Oficial do ML", "Produto Amazon"]) {
+  assert.strictEqual(tituloComercialUniversalValido(titulo), false, titulo);
+  assert.deepStrictEqual(resolverTituloFactualEngine(
+    { marketplace: "amazon", titulo: "Echo Dot 5a Geracao" }, { produto: { titulo } }
+  ), { titulo: "Echo Dot 5a Geracao", origem: "oferta.titulo" }, "deve usar o próximo título factual");
+}
+assert.strictEqual(tituloComercialUniversalValido("Produto Amazon Echo Dot 5a Geracao"), true,
+  "rótulo genérico exato não deve rejeitar título factual com identidade de produto");
 const tituloRecuperadoDoSlug = resolverTituloFactualEngine(
   {
     marketplace: "mercadolivre",

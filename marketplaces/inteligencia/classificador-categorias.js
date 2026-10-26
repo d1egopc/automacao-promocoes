@@ -367,7 +367,7 @@ const REGRAS = [
       "calcinha", "sutia", "lingerie", "camisola", "pijama feminino",
       "jaqueta feminina", "puffer feminina", "jaqueta puffer feminina",
       "biquini", "camiseta feminina", "blusa feminina", "regata feminina",
-      "baby tee feminina",
+      "baby tee feminina", "macaquinho feminino",
       "baby look", "cropped", "tomara que caia", "vestido", "saia", "short feminino",
       "shorts feminino", "calca feminina", "legging", "body feminino", "moda feminina",
       "oculos de sol", "bolsa de viagem", "bolsa academia", "sobretudo feminino"
@@ -391,7 +391,7 @@ const REGRAS = [
       "camisa social masculina", "moletom masculino", "jaqueta masculina",
       "calca jeans masculina", "bermuda masculina", "short", "shorts", "short masculino",
       "short virgulado",
-      "calca jogger masculina", "calca moletom masculina",
+      "calca jogger masculina", "calca dry fit masculina", "calca moletom masculina",
       "regata masculina", "cueca boxer", "cueca", "polo masculina", "moda masculina", "meia termica",
       "meia flanelada", "t shirt insider",
       "camisa adidas masculina", "camisa nike masculina", "camisa puma masculina",
@@ -565,7 +565,8 @@ const REGRAS = [
       "molinete", "vara de pesca", "carretilha", "anzol", "isca artificial", "iscas artificiais",
       "linha de pesca", "pesca", "camping", "barraca", "saco de dormir",
       "fogareiro camping", "lanterna camping", "caixa termica",
-      "boia cevadeira", "boias cevadeira", "boias cevadeiras", "vara albatroz", "tucunare"
+      "boia cevadeira", "boias cevadeira", "boias cevadeiras", "vara albatroz", "tucunare",
+      "isca frog", "iscas frog", "jumping jig", "massa mafish"
     ],
     palavras: [
       "alicate de pesca", "colchonete", "mochila camping",
@@ -649,7 +650,7 @@ const ALIASES_CATEGORIA = new Map(
 // Identidades de produto inequívocas que o classificador legado ainda não cobre.
 // Aplicadas apenas quando nenhuma regra existente reconheceu a oferta.
 const IDENTIDADES_CONFIAVEIS = [
-  [CATEGORIA.beleza, /\b(?:oleo capilar|finalizador capilar|creme de pentear|tonalizante capilar|cronograma capilar|hair care|knut ultra silver|oleo 10 em 1 absolut repair|truss (?:night spa|uso obrigatorio)|fitagem para cabelos|gel fixador charming|mousse desembaracante|mascara blond expert)\b/],
+  [CATEGORIA.beleza, /\b(?:oleo capilar|finalizador capilar|creme de pentear|tonalizante capilar|cronograma capilar|hair care|knut ultra silver|oleo 10 em 1 absolut repair|truss (?:night spa|uso obrigatorio)|fitagem para cabelos|gel fixador charming|mousse desembaracante|mascara blond expert|ck one calvin klein \d+ ?ml)\b/],
   [CATEGORIA.casa, /\b(?:protetores? de ralo|formas? de pastel|puff gigante|banquetas? altas?|canecas?|mala de (?:\d+ ?kg )?bordo|cestos? organizadores?|travesseiros?|cadeiras? escritorio|tela mosquiteiro|jogo (?:de )?panelas|conjunto panelas|cacarola tefal|conj de 0?6 pratos|kit silicone para panelas|jogo de facas tramontina|cortador mandoline?)\b/],
   [CATEGORIA.limpeza, /\bglade difusor de ambiente\b/],
   [CATEGORIA.esporte, /\b(?:maca peruana|energy gel(?: atlhetica)?|palatinose|z2 saltz|taurina essencial lab)\b|(?=.*\beletrolitos?\b)(?=.*\b(?:hidratacao|sodio|potassio|magnesio|saltz|endurance|ocean drop)\b)/],
@@ -659,7 +660,8 @@ const IDENTIDADES_CONFIAVEIS = [
   [CATEGORIA.tenis, /\bunder armour tribase cross\b/],
   [CATEGORIA.iluminacao, /\bluminarias? de emergencia\b/],
   [CATEGORIA.perifericos, /\bsuporte articulado(?: a gas)? para \d+ monitores?\b/],
-  [CATEGORIA.eletronicos, /\b(?:cameras? (?:de )?seguranca|camera de acao dji|starlink mini)\b/]
+  [CATEGORIA.eletronicos, /\b(?:cameras? (?:de )?seguranca|camera de acao dji|starlink mini)\b/],
+  [CATEGORIA.pesca, /(?=.*\bsuporte de vara\b)(?=.*\b(?:praia|pesqueiro|pesca)\b)/]
 ];
 
 function categoriaPorIdentidadeConfiavel(oferta = {}, termo = "") {
@@ -721,6 +723,11 @@ function desempatar(a, b) {
   return b.palavras.length - a.palavras.length;
 }
 
+function categoriaPorNaturezaExplicita(oferta = {}, termo = "") {
+  const titulo = normalizarTextoLocal(oferta.titulo || oferta.nome || termo || "");
+  return /^brinquedos? (?:bancada|oficina)\b/.test(titulo) ? CATEGORIA.brinquedos : "";
+}
+
 function classificarCategoriaOferta(oferta = {}, termo = "") {
   const texto = textoOferta(oferta, termo);
 
@@ -740,6 +747,10 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
   if (categoriaManual && !termo) {
     return categoriaManual;
   }
+
+  // A natureza explícita de brinquedo no título vence os nomes das ferramentas imitadas.
+  const categoriaNatureza = categoriaPorNaturezaExplicita(oferta, termo);
+  if (categoriaNatureza) return categoriaNatureza;
 
   const resultados = REGRAS
     .map((item) => pontuarRegra(texto, item))
@@ -769,5 +780,6 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
 
 module.exports = {
   classificarCategoriaOferta,
+  categoriaPorNaturezaExplicita,
   normalizarTextoLocal
 };

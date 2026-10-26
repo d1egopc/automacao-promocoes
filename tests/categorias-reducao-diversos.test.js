@@ -115,6 +115,50 @@ const negativosOnda1 = [
 const logOriginal = console.log;
 try {
   console.log = () => {};
+  const casosV21 = [
+    ["Kit 5 Iscas Frog Sapo Sortidas Anti Enrosco", "Pesca e Camping"],
+    ["Kit 5 Iscas Frog Sapo Sortidas Anti Enrosco Predadores", "Pesca e Camping"],
+    ["Jumping Jig Glow Slow Hook Duplo Isca Alto Mar", "Pesca e Camping"],
+    ["Kit 4 Boias Cevadeira Tamba 60g", "Pesca e Camping"],
+    ["Suporte De Vara 60cm Praia / Pesqueiro", "Pesca e Camping"],
+    ["Kit 5 Massa Mafish Vários Sabores Fedidinha", "Pesca e Camping"],
+    ["CK One Calvin Klein 200mL", "Perfumaria, Farmácia e Beleza"],
+    ["Brinquedo Bancada Interativa Ferramentas Mecânico Parafusadeira Oficina", "Brinquedos e Artigos Infantis"],
+    ["Macaquinho feminino fitness roupa academia suplex", "Roupas e Moda Feminina"],
+    ["Calça dry fit masculina tecnológica poliamida com elastano", "Roupas e Moda Masculina"]
+  ];
+  for (const [titulo, esperada] of casosV21) {
+    const oferta = { titulo, categoria: "Diversos", workspaceId: "fixture-v21" };
+    const antes = structuredClone(oferta);
+    assert.strictEqual(classificarCategoriaUniversal(oferta).categoria, esperada, titulo);
+    assert.deepStrictEqual(oferta, antes, "o classificador não pode alterar a oferta");
+  }
+  assert.strictEqual(classificarCategoriaUniversal({
+    titulo: "Kit 2 Calças Jogger Tactel Com Elastano", categoria: "Diversos",
+    descricao: "Calça jogger masculina" // Público confirmado pelo proprietário; não inferido do título.
+  }).categoria, "Roupas e Moda Masculina");
+  assert.strictEqual(classificarCategoriaUniversal({
+    titulo: "Kit 2 Calças Jogger Tactel Com Elastano", categoria: "Diversos"
+  }).categoria, "Diversos", "sem atributo de público não deve inventar gênero");
+  assert.strictEqual(classificarCategoriaUniversal({
+    titulo: casosV21[7][0], categoria: "Ferramentas"
+  }).categoria, "Brinquedos e Artigos Infantis", "natureza explícita corrige a categoria factual errada");
+  assert.strictEqual(classificarCategoriaUniversal({
+    titulo: "Brinquedo Bancada com vibrador infantil", categoria: "Ferramentas"
+  }).categoria, "Diversos", "a exceção factual deve preservar a proteção contra conteúdo adulto");
+  assert.strictEqual(classificarCategoriaUniversal({
+    titulo: "Bancada Oficina com Parafusadeira Profissional", categoria: "Ferramentas"
+  }).categoria, "Ferramentas", "ferramenta real continua ferramenta");
+  for (const titulo of ["Frog Sapo decorativo", "Jig gabarito para montagem", "Suporte De Vara", "Mafish adesivo decorativo"]) {
+    assert.notStrictEqual(classificarCategoriaUniversal({ titulo }).categoria, "Pesca e Camping", titulo);
+  }
+  assert.strictEqual(classificarCategoriaUniversal({ titulo: "Camiseta Calvin Klein" }).categoria,
+    "Roupas e Moda Masculina", "marca Calvin Klein isolada não identifica perfume");
+  for (const titulo of ["Camiseta CK One Calvin Klein", "Cueca CK One Calvin Klein"]) {
+    assert.strictEqual(classificarCategoriaUniversal({ titulo }).categoria, "Roupas e Moda Masculina",
+      "a linha CK One também pode identificar roupa; perfume exige evidência de volume");
+  }
+  assert.strictEqual(classificarCategoriaUniversal({ titulo: "CK One Calvin Klein" }).categoria, "Diversos");
   for (const [titulo, marketplace, esperada] of casos) {
     const oferta = {
       titulo, marketplace, categoria: "Diversos",
@@ -225,4 +269,4 @@ try {
 }
 
 assert.strictEqual(casos.filter(([, , categoria]) => categoria === "Diversos").length, 3);
-console.log(`categorias-reducao-diversos: ok (${casos.length + casosOnda1.length + negativosOnda1.length} casos)`);
+console.log(`categorias-reducao-diversos: ok (${casos.length + casosOnda1.length + negativosOnda1.length} casos anteriores + fixtures V2.1)`);
