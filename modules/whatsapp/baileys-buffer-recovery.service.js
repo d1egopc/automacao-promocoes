@@ -37,7 +37,7 @@ function createBufferRecovery({ workspaceId, sessionId, isCurrent,
     if (!message || typeof message !== "object") return true;
     if (historical.has(message)) return true;
     const stamp = Number(message.messageTimestamp);
-    return closed || pending || !Number.isSafeInteger(stamp) || stamp <= cutoff;
+    return closed || pending || !Number.isSafeInteger(stamp) || stamp <= cutoff || stamp > Math.ceil(now() / 1000);
   };
   return {
     isOffline: node => node?.attrs?.offline === "1",

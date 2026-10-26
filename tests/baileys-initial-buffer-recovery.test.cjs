@@ -106,6 +106,7 @@ test("normal fresh messages work after recovery; old pending work and redelivery
   await f.online(old);await f.online(f.msg("old-pending-decrypt",1005));await f.upsert(f.msg("server-offline",9999),"append");f.ev.flush();
   assert.deepEqual(f.business,["fresh"]);
   const noStamp=f.msg("unknown",undefined);delete noStamp.messageTimestamp;await f.online(noStamp);
+  await f.online(f.msg("invalid-future",9999));
   assert.deepEqual(f.business,["fresh"]);
 });
 
