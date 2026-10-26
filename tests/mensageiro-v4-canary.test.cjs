@@ -1,6 +1,6 @@
 "use strict";
 const test = require("node:test"), assert = require("node:assert/strict");
-const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), crypto = require("node:crypto");
 const suite = fs.mkdtempSync(path.join(os.tmpdir(), "v4-canary-suite-"));
 process.env.DATA_DIR = suite;
 fs.writeFileSync(path.join(suite, "usuarios.json"), "[]");
@@ -229,6 +229,23 @@ test("Admin-only preparation works OFF via official transaction, CAS and multiwo
   const headers = { auth: "fixture", admin: "yes", "content-type": "application/json" };
   const input = { sessionId: S, groupId: G, profileId: p.id, expectedRevision: p.revision };
   const post = (url, body, h = headers) => fetch(origin + url, { method: "POST", headers: h, body: JSON.stringify(body) });
+  const groupHash = crypto.createHash("sha256").update(G).digest("hex");
+  const targetUrl = "/canary/target?workspaceId=" + W + "&sessionId=" + S + "&groupHash=" + groupHash;
+  assert.equal((await fetch(origin + targetUrl)).status, 401);
+  assert.equal((await fetch(origin + targetUrl, { headers: { ...headers, admin: "no" } })).status, 403);
+  assert.equal((await fetch(origin + targetUrl, { headers: { ...headers, plan: "no", workspace: "admin_fixture" } })).status, 403);
+  assert.equal((await fetch(origin + targetUrl, { headers: { ...headers, workspace: "B" } })).status, 403);
+  assert.equal((await fetch(origin + targetUrl.replace(groupHash, "0".repeat(64)), { headers })).status, 422);
+  assert.equal((await fetch(origin + targetUrl.replace(groupHash, "malformed"), { headers })).status, 422);
+  const targetResponse = await fetch(origin + targetUrl, { headers: { ...headers, workspace: "admin_fixture" } });
+  assert.equal(targetResponse.status, 200);
+  const targetPayload = await targetResponse.json();
+  assert.deepEqual(targetPayload.target, { workspaceId: W, sessionId: S, groupId: G,
+    groupName: "Grupo autorizado", profileId: p.id, expectedRevision: p.revision,
+    readyForObservation: false });
+  assert.equal(f.c.status(W).state, "off", "target discovery never activates the canary");
+  assert.equal((await repo.call("profile", { workspaceId: W, profileId: p.id })).revision, before.revision,
+    "target discovery is read-only");
   assert.equal((await post("/canary/prepare", input, {})).status, 401);
   assert.equal((await post("/canary/prepare", input, { ...headers, admin: "no" })).status, 403);
   assert.equal((await post("/canary/prepare", input, { ...headers, plan: "no" })).status, 403);
@@ -241,6 +258,8 @@ test("Admin-only preparation works OFF via official transaction, CAS and multiwo
   assert.deepEqual(after.cards.groupManager.configuration.regras, before.cards.groupManager.configuration.regras);
   assert.deepEqual(after.destinations, before.destinations); assert.equal(after.sessionId, before.sessionId);
   assert.equal(after.cards.groupManager.configuration.v4.migrationVersion, 4);
+  const readyResponse = await fetch(origin + targetUrl, { headers: { ...headers, workspace: "admin_fixture" } });
+  assert.equal((await readyResponse.json()).target.readyForObservation, true);
   const master = await post("/canary/prepare", { ...input, expectedRevision: after.revision, workspaceId: W },
     { ...headers, workspace: "admin_fixture" });
   assert.equal(master.status, 200, "global Admin Master can nominate only the validated target, without tenant impersonation");

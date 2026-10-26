@@ -1,5 +1,6 @@
 "use strict";
 const express = require("express");
+const crypto = require("node:crypto");
 const { CARDS, CATALOG, DEFAULT_RESPONSES, fail } = require("./model");
 function createV4Routes({
   repository,
@@ -104,6 +105,30 @@ function createV4Routes({
     req.v4Workspace = w;
     next();
   };
+  router.get("/canary/target", requireAdminMaster, controlWorkspace, safe(async (req, res) => {
+    if (!canUseTarget(req.v4Workspace, req)) fail("plan_blocked");
+    if (!canary || engine.scope.targets.length) fail("alvo_nao_autorizado");
+    const sessionId = req.query.sessionId;
+    const groupHash = req.query.groupHash;
+    if (typeof sessionId !== "string" || typeof groupHash !== "string" || !/^[a-f0-9]{64}$/.test(groupHash))
+      fail("scope_invalid");
+    scope(req.v4Workspace, sessionId, []);
+    const matches = listGroups(req.v4Workspace, sessionId).filter(g =>
+      crypto.createHash("sha256").update(String(g.id || "")).digest("hex") === groupHash);
+    if (matches.length !== 1) fail("scope_invalid");
+    const groupId = matches[0].id;
+    const selected = await repository.call("select", { workspaceId: req.v4Workspace,
+      sessionId, groupId, card: "groupManager" });
+    const p = selected.profile;
+    if (!p || !p.active || !p.cards?.groupManager?.active || p.sessionId !== sessionId ||
+        !canary.authorizeTarget({ workspaceId: req.v4Workspace, sessionId, groupId, profileId: p.id }))
+      fail("alvo_nao_autorizado");
+    scope(req.v4Workspace, sessionId, [groupId]);
+    res.json({ ok: true, target: { workspaceId: req.v4Workspace, sessionId, groupId,
+      groupName: matches[0].name || "Grupo autorizado", profileId: p.id,
+      expectedRevision: p.revision,
+      readyForObservation: p.cards.groupManager.configuration?.v4?.migrationVersion === 4 } });
+  }));
   router.get("/canary", requireAdminMaster, controlWorkspace, safe(async (req, res) => res.json({ ok: true,
     canary: canary?.status(req.v4Workspace) || { state: "off" },
     diagnostic: diagnostics.status(req.v4Workspace) })));
