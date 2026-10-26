@@ -7,6 +7,7 @@ on:
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
+      - validation/baileys-buffer-servcel-20261026
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -28,6 +29,34 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Baileys buffer recovery and essential contracts
+        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026'
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/baileys-initial-buffer-recovery.test.cjs
+          node tests/baileys-retry-hotfix.test.js
+          node --test tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/mensageiro-v3-operational-hotfix.test.cjs
+          node tests/mensageiro-v3-m322-real-handlers.test.cjs
+          node tests/mensageiro-v3-schedule-timezone.test.cjs
+          node tests/mensageiro-v3-lock-identity.test.cjs
+          node tests/universal-flow-queue-executor.test.js
+          node tests/radar-cobertura-v1.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/fila-viva-runtime-wiring.test.js
+          node tests/mensageiro-gerente-grupo.test.cjs
+          node tests/mensageiro-bot-comandos.test.cjs
+          node tests/mensageiro-programacoes.test.cjs
+      - name: Clean full-image fixture only - no deploy
+        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026'
+        run: |
+          docker build --tag "optimus-buffer-fixture:$GITHUB_SHA" .
+          docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --check /app/index.js
+          docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --test /app/tests/baileys-initial-buffer-recovery.test.cjs
       - name: Landing Page isolated integration
         if: startsWith(github.ref, 'refs/heads/feature/landing-page-v1-') || github.ref == 'refs/heads/validation/landing-v13-media-buttons-20261025'
         env:
@@ -66,6 +95,7 @@ jobs:
             refs/heads/validation/mensageiro-v4-20261025) base=af56a3af675fd7f2c005a04d90e22fe72cbc95e6 ;;
             refs/heads/validation/mensageiro-v4-canary-runtime-20261025) base=760c4c11b1b2d726cb212b6aa4ac4a8ab35a478f ;;
             refs/heads/validation/mensageiro-v4-ingress-probe-20261026) base=e55890ca4cf789cbdbdaf523f289ba6a2c891755 ;;
+            refs/heads/validation/baileys-buffer-servcel-20261026) base=f50e8a294f839249e5427619e500e37332423363 ;;
             refs/heads/feature/landing-page-v1-*) base=5a31e60524d9caac45883ca07511dcc208852f53 ;;
             refs/heads/validation/landing-v13-media-buttons-20261025) base=eda20ff6b69449c69a00ac7777beb3b868e1da80 ;;
           esac

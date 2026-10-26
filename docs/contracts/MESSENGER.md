@@ -18,6 +18,15 @@
 
 ## Escopo comprovado
 
+### Correção candidata do buffer inicial Baileys 6.7.22
+
+- Referências: issue WhiskeySockets/Baileys #2810 e PR #2840 (rascunho, não merge confirmado). A versão instalada tem as mesmas conversões indevidas de `offline="0"` e o mesmo intervalo inicial sem timeout. Isso não prova qual atributo chegou na mensagem humana do SERVMAQ.
+- Hotfix pelo postinstall já existente, limitado à versão e SHA-256 exatos dos três arquivos instalados após o hotfix de retry. Conteúdo ou versão divergente aborta a instalação. Sem atualização integral do Baileys. Exige imagem COMPLETA limpa; overlay não instala patches de dependência e deve ser bloqueado pelo Guardião atual.
+- Atuação somente no socket workspace SERVMAQ/sessão ServCel. Sem configuração, os demais sockets conservam o caminho original. Corrige offline zero/missing para o caminho online e `notify`, mantendo `offline="1"` no fluxo histórico. Nenhum listener adicional.
+- Timer de 20 segundos desde o OPEN autenticado, independente de conclusão offline. Uma recuperação por instância: exige o socket/emissor ainda atuais e conexão aberta; estabelece fence histórico ANTES do flush nativo limitado. Conclusão offline real cancela o timer; fechamento/socket substituído não libera o buffer antigo. Sem replay/retry de envios ou reconexão.
+- Mensagens acumuladas no bootstrap, `append`, timestamp ausente/inválido ou anterior ao cutoff não alcançam consumidores comerciais; IDs e mensagens não são alterados ou apagados. Decriptação/ACKs continuam no Baileys. WeakSet por instância conserva a marca da mensagem retida; timestamps protegem trabalho anterior que termina depois. Contexto assíncrono por instância impede boas-vindas/despedidas históricas originadas por processMessage. O callback original mantém a sonda antes do filtro; Radar/Gerente/Comandos/Atendimento/Clonador ficam depois do fence. Programadas e liquidação de ACK/financeiro não são alteradas.
+- Este fence é conservador: bootstrap e mensagens sem prova de atualidade não geram respostas/moderação/cobrança. A correção não classifica conteúdo, não altera regras e não concede permissões V4. CI/build isolados não autorizam publicação ou ativação de canário.
+
 ### Sonda de ingresso V4 (candidata isolada, 26/10/2026)
 
 - Zero eventos na captura anterior não distingue ausência no socket, buffer Baileys, rejeição do wrapper ou divergência de grupo. Nenhuma dessas causas foi comprovada em produção.

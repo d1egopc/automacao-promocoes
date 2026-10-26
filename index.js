@@ -33689,10 +33689,16 @@ async function iniciarWhatsApp(id, force = false) {
       contexto: contextoSocketBaileys
     });
 
+    const bufferRecovery = require("./modules/whatsapp/baileys-buffer-recovery.service.js").createBufferRecovery({
+      workspaceId: clienteIdMensageiro, sessionId: id,
+      isCurrent: emitter => Boolean(sock && socketEhAtual(sessoes, id, sock) && sock.ev === emitter),
+      report: stage => console.log("[WHATSAPP-BUFFER-RECOVERY]", JSON.stringify({ session: "servcel_target", stage }))
+    });
     sock = makeWASocket({
       version,
       auth: state,
       logger: loggerBaileys,
+      optimusInitialBufferRecovery: bufferRecovery,
       makeSignalRepository: criarFabricaRepositorioSignalContextual({
         criarRepositorio: DEFAULT_CONNECTION_CONFIG.makeSignalRepository,
         contexto: contextoSocketBaileys,
@@ -33704,6 +33710,7 @@ async function iniciarWhatsApp(id, force = false) {
       browser: ["Chrome", "Desktop", "1.0.0"]
     });
 
+    Object.defineProperty(sock, "__optimusBufferRecovery", { value: bufferRecovery });
     const registroSocket = marcarSocketAtual({
       sessoes,
       geracoes: geracoesSocketWhatsapp,
@@ -33835,6 +33842,7 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
+      if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) continue;
       const gerenteDiagnosticV2 = mensagem && typeof mensagem === "object"
         ? gerenteDiagnosticV2ByMessage?.get(mensagem)
         : null;
@@ -34031,6 +34039,7 @@ registrarListenerUnicoSocket({
 
 const emissorParticipantesMensageiro = sock.ev;
 sock.ev.on("group-participants.update", async (evento) => {
+  if (sock.__optimusBufferRecovery?.suppressCurrentContext()) return;
   try { mensageiroV4Diagnostics.observeParticipants({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, event: evento,
     current: socketEhAtual(sessoes, id, sock) && sock.ev === emissorParticipantesMensageiro, generation: socketGeracao }); } catch { /* Optional metadata only. */ }
   if (!socketEhAtual(sessoes, id, sock) || sock.ev !== emissorParticipantesMensageiro) return;
