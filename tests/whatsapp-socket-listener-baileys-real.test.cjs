@@ -117,8 +117,8 @@ async function main() {
   const sessaoProdutiva = {};
   const sock = criarSocket();
   const socketGeracao = marcarSocketAtual({ sessoes: sessaoProdutiva, geracoes: {}, sessaoId: sessaoTrace, sock, logger }).socketGeracao;
-  const mensageiroV4Diagnostics = new Diagnostics({authorizeTarget:({workspaceId,sessionId,groupId})=>workspaceId==="user_k3phmbkf"&&sessionId===sessaoTrace&&groupId===grupo,ownsSession:(w,s)=>w==="user_k3phmbkf"&&s===sessaoTrace});
-  mensageiroV4Diagnostics.start({workspaceId:"user_k3phmbkf",sessionId:sessaoTrace,groupId:grupo});
+  const mensageiroV4Diagnostics = new Diagnostics({authorizeTarget:({workspaceId,sessionId,groupId})=>workspaceId==="user_k3phmbkf"&&sessionId===sessaoTrace&&groupId===grupo,ownsSession:(w,s)=>w==="user_k3phmbkf"&&s===sessaoTrace,
+    getCurrentSocket: sessionId => sessaoProdutiva[sessionId] });
   const v2RunId = "713f90be-4ebf-4c2c-9fd9-69a6586dfdd1";
   const gerenteObservabilityV2 = createGerenteObservabilityV2({
     validateTarget: ({ workspaceId, sessionId, groupId }) =>
@@ -163,10 +163,20 @@ async function main() {
     console: { log() {} }
   };
   vm.runInNewContext(callbackProdutivo, registro, { filename: "index.js:messages.upsert" });
+  assert.equal(mensageiroV4Diagnostics.status("user_k3phmbkf").state, "off");
+  const callbackRegistradoOff = sock.__optimusListeners["messages.upsert"].handler;
+  mensageiroV4Diagnostics.start({workspaceId:"user_k3phmbkf",sessionId:sessaoTrace,groupId:grupo});
   sock.ev.emit("messages.upsert", { type: "notify", messages: [{ key: { id: "fixture-real-buffer", remoteJid: grupo, fromMe: false }, message: { conversation: "SEGREDO_NAO_LOGAR" } }] });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(ordem.slice(0, 3), ["trace", "mensageiro_gerente", "mensageiro_comando"]);
   assert.equal(logs.length, 1);
+  const probe = mensageiroV4Diagnostics.status("user_k3phmbkf").ingressProbe;
+  assert.equal(sock.__optimusListeners["messages.upsert"].handler, callbackRegistradoOff);
+  assert.equal(probe.counters.wrapperCalls, 1, "hook do wrapper original alcançado");
+  assert.equal(probe.counters.observerCalls, 1, "callback registrado OFF percebe ativação runtime");
+  assert.equal(probe.bindingCurrent.socketId, probe.lastCallback.socketId);
+  assert.equal(probe.bindingCurrent.emitterId, probe.lastWrapper.emitterId);
+  assert.equal(probe.bindingCurrent.attachmentVerified, null);
   assert.equal(mensageiroV4Canary.status("user_k3phmbkf").events, 1,
     "runtime observes the existing original callback, without a parallel listener");
   assert.equal(logs[0].payload.fromMe, false);

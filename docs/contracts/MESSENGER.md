@@ -18,6 +18,14 @@
 
 ## Escopo comprovado
 
+### Sonda de ingresso V4 (candidata isolada, 26/10/2026)
+
+- Zero eventos na captura anterior não distingue ausência no socket, buffer Baileys, rejeição do wrapper ou divergência de grupo. Nenhuma dessas causas foi comprovada em produção.
+- O controle Admin Master/tupla/TTL existente permanece obrigatório. `ingressProbe` acrescenta contadores em RAM no wrapper e callback originais de `messages.upsert`; sem novo listener, socket, I/O, flush ou alteração de decisão. OFF não consulta relógio, socket ou HMAC. Eventos de participantes não incrementam os contadores de upsert.
+- Somente a sessão autorizada é contada. Outros destinos dessa sessão produzem apenas totais, sem conteúdo, JID, participante ou hash do destino. Correspondência alternativa/normalizada é somente contagem diagnóstica: não amplia o escopo nem autoriza ação.
+- Referências de socket/emissor/callback são identificadas por HMAC opaco, com geração, igualdade com registro e estado do buffer. `attachmentVerified=null` no emissor Baileys 6.7.22 significa introspecção indisponível; registro presente não comprova que o callback permaneça instalado. A sonda não acessa pacotes criptografados nem comprova chegada anterior ao emissor.
+- Usar o mesmo status autenticado durante a janela e coletar `ingressProbe`, cobertura e registros antes do descarte de cinco minutos. TTL/stop interrompem a coleta; reinício permanece OFF. Publicação e nova captura dependem de autorizações próprias; esta candidata não ativa diagnóstico ou moderação.
+
 O Mensageiro esta em `modules/mensageiro` e possui storage, service, routes, scheduler de programacoes, imagem, perfis e gerente/moderacao.
 
 O storage modela:

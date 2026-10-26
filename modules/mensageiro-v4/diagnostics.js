@@ -62,6 +62,7 @@ class Diagnostics {
     clock = () => performance.now(),
     secret = crypto.randomBytes(32),
     onStop = () => {},
+    getCurrentSocket = () => null,
   } = {}) {
     this.ownsSession = ownsSession;
     this.authorizeTarget = authorizeTarget;
@@ -71,6 +72,9 @@ class Diagnostics {
     this.traces = new WeakMap();
     this.timer = null;
     this.onStop = onStop;
+    this.getCurrentSocket = getCurrentSocket;
+    this.identities = new WeakMap();
+    this.identitySerial = 0;
   }
   hash(value) {
     return value
@@ -86,6 +90,48 @@ class Diagnostics {
       this.stop(this.run.workspaceId);
     if (this.run && !this.run.active && this.clock() >= this.run.purgeAt)
       this.run = null;
+  }
+  opaque(object) {
+    if (!object || !["object", "function"].includes(typeof object)) return null;
+    if (!this.identities.has(object)) this.identities.set(object, this.hash("binding:" + (++this.identitySerial)));
+    return this.identities.get(object);
+  }
+  binding(run) {
+    // Only the authenticated run's target is inspected; no emitter mutation,
+    // event-buffer flush, listener registration, contents or participant IDs.
+    try {
+      const sock = this.getCurrentSocket(run.sessionId);
+      if (!sock) return { available: false };
+      const entry = sock.__optimusListeners?.["messages.upsert"];
+      const emitter = sock.ev;
+      let buffering = null, attached = null;
+      if (typeof emitter?.isBuffering === "function") {
+        try { buffering = emitter.isBuffering() === true; } catch {}
+      }
+      if (entry && typeof emitter?.listeners === "function") {
+        try { attached = emitter.listeners("messages.upsert").includes(entry.handler); } catch {}
+      }
+      return { available: true, socketId: this.opaque(sock), emitterId: this.opaque(emitter),
+        registeredEmitterId: this.opaque(entry?.emissor), callbackId: this.opaque(entry?.handler),
+        generation: Number.isInteger(sock.__optimusSocketGeracao) ? sock.__optimusSocketGeracao : null,
+        registryPresent: !!entry, registryEmitterMatches: entry ? entry.emissor === emitter : null,
+        attachmentVerified: attached, buffering };
+    } catch { return { available: false, lookupFailed: true }; }
+  }
+  increment(run, key) {
+    if (Object.hasOwn(run.counters, key)) run.counters[key] = Math.min(1000000, run.counters[key] + 1);
+  }
+  observeListener({ sessionId, sock, emitter, emitterCurrent, callbackCurrent, generation }) {
+    if (!this.run?.active || this.run.sessionId !== sessionId) return;
+    this.expire();
+    const r = this.run;
+    if (!r?.active) return;
+    this.increment(r, "wrapperCalls");
+    if (!emitterCurrent) this.increment(r, "rejectedEmitter");
+    if (!callbackCurrent) this.increment(r, "rejectedCallback");
+    r.lastWrapper = { socketId: this.opaque(sock), emitterId: this.opaque(emitter),
+      generation: Number.isInteger(generation) ? generation : null,
+      emitterCurrent: emitterCurrent === true, callbackCurrent: callbackCurrent === true };
   }
   start({
     workspaceId,
@@ -123,7 +169,14 @@ class Diagnostics {
       coverage: { matchingMessages: 0, keylessMessages: 0, firstObservedAt: null, lastObservedAt: null },
       records: [],
       purgeAt: Infinity,
+      counters: Object.fromEntries(["wrapperCalls", "rejectedEmitter", "rejectedCallback",
+        "observerCalls", "observerErrors", "authorizationRejected", "invalidBatch",
+        "batchesEmpty", "messagesSeen", "nonTargetMessages", "alternateTargetMatches",
+        "normalizedTargetMatches", "workspaceMismatch", "staleSocket"].map(key => [key, 0])),
+      lastWrapper: null,
+      lastCallback: null,
     };
+    this.run.bindingAtStart = this.binding(this.run);
     this.timer = setTimeout(() => this.stop(workspaceId), durationMs);
     this.timer.unref?.();
     return this.status(workspaceId);
@@ -132,6 +185,7 @@ class Diagnostics {
     if (this.run?.workspaceId === workspaceId && this.run.active) {
       const ended = this.run;
       ended.active = false;
+      ended.bindingAtStop = this.binding(ended);
       ended.purgeAt = this.clock() + 300000;
       clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -155,6 +209,10 @@ class Diagnostics {
             limitation: "No evidence about encrypted packets or events before messages.upsert" },
           records: r.records.slice(),
           retentionAfterStopMs: 300000,
+          ingressProbe: { counters: { ...r.counters }, bindingAtStart: r.bindingAtStart,
+            bindingCurrent: r.active ? this.binding(r) : r.bindingAtStop,
+            lastWrapper: r.lastWrapper, lastCallback: r.lastCallback,
+            limitation: "Registry presence is not proof of attachment when emitter introspection is unavailable; other destinations are aggregate counts only" },
         };
   }
   record(eventHash, stage, code, profileId = "", ruleId = "", extra = {}) {
@@ -198,19 +256,42 @@ class Diagnostics {
     generation,
     messages = [],
     type,
+    probe = true,
   }) {
     // OFF costs one null/boolean check; no clock/hash/IO and no extra listener.
     if (!this.run?.active) return;
+    if (this.run.sessionId !== sessionId) return; // never count another session
+    const observedRun = this.run;
+    try {
     this.expire();
     const r = this.run;
-    if (!r?.active || r.sessionId !== sessionId) return;
+    if (!r?.active) return;
+    if (probe) {
+      this.increment(r, "observerCalls");
+      r.lastCallback = { socketId: this.opaque(sock), emitterId: this.opaque(sock?.ev),
+        generation: Number.isInteger(generation) ? generation : null, current: current === true };
+      if (capturedWorkspaceId !== r.workspaceId) this.increment(r, "workspaceMismatch");
+      if (current === false) this.increment(r, "staleSocket");
+    }
     if (!this.ownsSession(r.workspaceId, sessionId) ||
         !this.authorizeTarget({ workspaceId: r.workspaceId, sessionId, groupId: r.groupId })) {
+      if (probe) this.increment(r, "authorizationRejected");
       this.stop(r.workspaceId);
       return;
     }
+    if (!Array.isArray(messages)) { if (probe) this.increment(r, "invalidBatch"); return; }
+    if (probe && !messages.length) this.increment(r, "batchesEmpty");
     for (const message of messages) {
-      if (message?.key?.remoteJid !== r.groupId) continue;
+      if (probe) this.increment(r, "messagesSeen");
+      if (message?.key?.remoteJid !== r.groupId) {
+        if (probe) {
+          this.increment(r, "nonTargetMessages");
+          if (message?.key?.remoteJidAlt === r.groupId) this.increment(r, "alternateTargetMatches");
+          const jid = message?.key?.remoteJid;
+          if (typeof jid === "string" && jid.trim().toLowerCase() === r.groupId.toLowerCase()) this.increment(r, "normalizedTargetMatches");
+        }
+        continue;
+      }
       r.coverage.matchingMessages++;
       r.coverage.lastObservedAt = new Date().toISOString();
       r.coverage.firstObservedAt ||= r.coverage.lastObservedAt;
@@ -236,6 +317,7 @@ class Diagnostics {
           this.record(eventHash, stage, code, profileId, ruleId);
       });
     }
+    } catch { if (probe) this.increment(observedRun, "observerErrors"); }
   }
   trace(message) {
     return message && typeof message === "object"
@@ -248,7 +330,7 @@ class Diagnostics {
     if(!event?.id||!Array.isArray(event.participants)||!event.participants.length)return;
     const identity=this.hash(JSON.stringify([event.id,event.action,event.timestamp||"",event.participants]));
     const marker={key:{id:identity,remoteJid:event.id}};
-    this.observe({...context,messages:[marker],type:"participants"});
+    this.observe({...context,messages:[marker],type:"participants",probe:false});
     const callback=this.trace(marker);
     if(callback)this.traces.set(event,callback);
   }

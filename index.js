@@ -26236,6 +26236,7 @@ const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?
 const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
 const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession,
   authorizeTarget: context => Boolean(mensageiroV4Scope.match(context)),
+  getCurrentSocket: sessionId => sessoes[sessionId],
   onStop: () => mensageiroV4Canary.stop("diagnostic_stopped") });
 mensageiroV4Canary.stopDiagnostic = workspaceId => mensageiroV4Diagnostics.stop(workspaceId);
 const mensageiroV4Credits = new V4Credits({ repository: mensageiroV4Repository,
@@ -33769,6 +33770,8 @@ registrarListenerUnicoSocket({
   socketGeracao,
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
+  onInvoke: ({ emitter, emitterCurrent, callbackCurrent }) => mensageiroV4Diagnostics.observeListener({
+    sessionId: id, sock, emitter, emitterCurrent, callbackCurrent, generation: socketGeracao }),
   handler: async ({ messages = [], type } = {}) => {
   try { mensageiroV4Diagnostics.observe({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, sock,
     current: socketEhAtual(sessoes, id, sock), generation: socketGeracao, messages, type }); } catch { /* Optional metadata diagnostics cannot block ingress. */ }

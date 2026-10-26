@@ -104,7 +104,8 @@ function registrarListenerUnicoSocket({
   logger = console,
   sessaoId = "",
   socketGeracao = "",
-  motivoRegistro = ""
+  motivoRegistro = "",
+  onInvoke
 } = {}) {
   if (!sock?.ev || typeof sock.ev.on !== "function" || !evento || typeof handler !== "function") {
     return { ok: false, registrado: false, motivo: "socket_ou_handler_invalido" };
@@ -145,7 +146,14 @@ function registrarListenerUnicoSocket({
   }
   const emissor = sock.ev;
   const handlerAtual = (...args) => {
-    if (sock.ev !== emissor || estado[chaveListener]?.handler !== handlerAtual) return;
+    const emitterCurrent = sock.ev === emissor;
+    const callbackCurrent = estado[chaveListener]?.handler === handlerAtual;
+    // Optional metadata hook on the existing wrapper, before its own fences.
+    // Never forward payloads or let observability change listener behavior.
+    if (typeof onInvoke === "function") {
+      try { onInvoke({ emitter: emissor, emitterCurrent, callbackCurrent }); } catch (_) {}
+    }
+    if (!emitterCurrent || !callbackCurrent) return;
     return handler(...args);
   };
   try {
