@@ -83,6 +83,7 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 - Sempre registre baseline e prove saude depois do deploy.
 - O overlay de tres arquivos do deploy manual de outubro/2026 e exclusivo do hotfix do Mensageiro aprovado no SHA 4db00b0b. Nao o reutilize como procedimento geral: qualquer publicacao futura que modifique dependencias ou outros modulos exige imagem completa construida de checkout limpo pelo SHA autorizado, com comparacao da base produtiva, CI, rollback e deploy manual controlado.
 - Frontend: Preview `READY` -> gate humano -> promover o mesmo SHA -> provar Production 200.
+- Exceção fechada de dependência: somente o perfil hash-pinned `baileys_buffer_patch` descrito em `PRODUCTION-DEPLOYMENT.md` pode executar o instalador Baileys 6.7.22 durante o build derivado da imagem ativa. Não autoriza npm/postinstall genérico, Dockerfile modificado ou outros scripts; source/base/hashes/Compose/rollback continuam obrigatórios.
 - Extensao: distribua somente artefato versionado, verificado por hash e aprovado por humano.
 
 ## Areas congeladas
