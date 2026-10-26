@@ -10,17 +10,15 @@ function createV4Routes({
   listSessions,
   listGroups,
   requireAdminMaster = (_req, res) => res.status(403).json({ ok: false, code: "admin_required" }),
+  canary,
+  canUseTarget = (workspaceId, req) => workspaceId === getWorkspace(req) && hasFeature(req, "mensageiro"),
 } = {}) {
   const router = express.Router();
   router.use((req, res, next) => {
     res.set("Cache-Control", "no-store");
     if (!req.usuario || !getWorkspace(req))
       return res.status(401).json({ ok: false, code: "auth_required" });
-    if (!hasFeature(req, "mensageiro"))
-      return res.status(403).json({ ok: false, code: "plan_blocked" });
     req.v4Workspace = getWorkspace(req);
-    if (!engine.owns(req.v4Workspace))
-      return res.status(503).json({ ok: false, code: "v4_off" });
     next();
   });
   const safe = (fn) => async (req, res) => {
@@ -49,11 +47,19 @@ function createV4Routes({
         "session_not_connected",
         "card_invalido",
         "revision_required",
+        "plan_blocked",
+        "canary_busy",
+        "legacy_busy",
+        "canary_not_found",
+        "test_authorization_invalid",
+        "migration_required",
       ]);
       const code = known.has(error.message) ? error.message : "v4_unavailable";
       res
         .status(
-          code === "conflito_revisao"
+          code === "plan_blocked"
+            ? 403
+            : code === "conflito_revisao"
             ? 409
             : code === "v4_unavailable"
               ? 503
@@ -70,6 +76,73 @@ function createV4Routes({
     if (!Array.isArray(groups) || groups.some((g) => !allowed.has(g)))
       fail("scope_invalid");
   };
+  // Only these Admin Master control paths are available while business V4 is
+  // OFF. Preparing the existing authority never enables dispatch by itself.
+  const validateCanary = async (req) => {
+    if (!canUseTarget(req.v4Workspace, req)) fail("plan_blocked");
+    if (!canary || engine.scope.targets.length) fail("alvo_nao_autorizado");
+    const { sessionId, groupId, profileId, expectedRevision } = req.body || {};
+    scope(req.v4Workspace, sessionId, [groupId]);
+    if (!Number.isInteger(expectedRevision)) fail("revision_required");
+    const selected = await repository.call("select", { workspaceId: req.v4Workspace,
+      sessionId, groupId, card: "groupManager" });
+    const p = selected.profile;
+    if (!p || p.id !== profileId || !p.active || !p.cards.groupManager.active || p.sessionId !== sessionId)
+      fail("alvo_nao_autorizado");
+    if (p.revision !== expectedRevision) fail("conflito_revisao");
+    if (!canary.authorizeTarget({ workspaceId: req.v4Workspace, sessionId, groupId, profileId })) fail("alvo_nao_autorizado");
+    // Recheck volatile session/group authorization after the worker await.
+    scope(req.v4Workspace, sessionId, [groupId]);
+    return p;
+  };
+  // Admin Master controls a nominated target; never rewrite req.clienteId or
+  // let a customer nominate a foreign workspace on business endpoints.
+  const controlWorkspace = (req, res, next) => {
+    const w = req.body?.workspaceId || req.query.workspaceId || getWorkspace(req);
+    if (typeof w !== "string" || !/^[\w-]{1,100}$/.test(w))
+      return res.status(422).json({ ok: false, code: "alvo_nao_autorizado" });
+    req.v4Workspace = w;
+    next();
+  };
+  router.get("/canary", requireAdminMaster, controlWorkspace, safe(async (req, res) => res.json({ ok: true,
+    canary: canary?.status(req.v4Workspace) || { state: "off" },
+    diagnostic: diagnostics.status(req.v4Workspace) })));
+  router.post("/canary/prepare", requireAdminMaster, controlWorkspace, safe(async (req, res) => {
+    const p = await validateCanary(req);
+    if (canary.run?.active || canary.run?.inFlight || canary.run?.transports) fail("canary_busy");
+    const result = await repository.call("migrate", { workspaceId: req.v4Workspace,
+      profileId: p.id, expectedRevision: p.revision, strictRevision: true });
+    res.json({ ok: true, ...result, canary: canary.status(req.v4Workspace) });
+  }));
+  router.post("/canary/start", requireAdminMaster, controlWorkspace, safe(async (req, res) => {
+    const p = await validateCanary(req);
+    if (p.cards.groupManager.configuration?.v4?.migrationVersion !== 4) fail("migration_required");
+    if (req.body.mode === "controlled_test" && req.body.authorization !== "single_test_delete") fail("test_authorization_invalid");
+    const target = { workspaceId: req.v4Workspace, sessionId: p.sessionId,
+      groupId: req.body.groupId, profileId: p.id };
+    canary.start({ target, mode: req.body.mode, durationMs: req.body.durationMs,
+      maxEvents: req.body.maxEvents });
+    canary.run.profileRevision = p.revision;
+    try {
+      diagnostics.start({ ...target, durationMs: req.body.durationMs, maxEvents: req.body.maxEvents });
+    } catch (error) { canary.stop("diagnostic_unavailable"); throw error; }
+    res.json({ ok: true, canary: canary.status(req.v4Workspace) });
+  }));
+  router.post("/canary/arm", requireAdminMaster, controlWorkspace, safe(async (req, res) => {
+    if (!canUseTarget(req.v4Workspace, req)) fail("plan_blocked");
+    res.json({ ok: true, canary: canary.arm({ ...req.body, workspaceId: req.v4Workspace }) });
+  }));
+  router.post("/canary/stop", requireAdminMaster, controlWorkspace, safe(async (req, res) => {
+    const current = canary?.status(req.v4Workspace);
+    if (!current?.runId || current.runId !== req.body?.runId) fail("canary_not_found");
+    canary.stop("manual");
+    res.json({ ok: true, canary: canary.status(req.v4Workspace), diagnostic: diagnostics.status(req.v4Workspace) });
+  }));
+  router.use((req, res, next) => {
+    if (!hasFeature(req, "mensageiro")) return res.status(403).json({ ok: false, code: "plan_blocked" });
+    if (!engine.owns(req.v4Workspace)) return res.status(503).json({ ok: false, code: "v4_off" });
+    next();
+  });
   router.get(
     "/state",
     safe(async (req, res) =>

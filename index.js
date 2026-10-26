@@ -275,6 +275,7 @@ const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = r
 const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { V4Repository } = require("./modules/mensageiro-v4/repository");
 const { Scope: V4Scope } = require("./modules/mensageiro-v4/scope");
+const { Canary: V4Canary } = require("./modules/mensageiro-v4/canary");
 const { Credits: V4Credits } = require("./modules/mensageiro-v4/credits");
 const { V4Engine } = require("./modules/mensageiro-v4/engine");
 const { Diagnostics: V4Diagnostics } = require("./modules/mensageiro-v4/diagnostics");
@@ -26226,20 +26227,27 @@ app.use("/mensageiro-v3", mensageiroV3Routes.router);
 // V4 ownership is an exact workspace/session/group/profile/card tuple. OFF by default.
 // The old workspace-only flag intentionally does not activate execution.
 const mensageiroV4Scope = V4Scope.fromEnvironment(process.env.OPTIMUS_MENSAGEIRO_V4_TARGETS);
+const mensageiroV4Canary = new V4Canary({ authorizeTarget: target =>
+  target.workspaceId === "user_k3phmbkf" && target.sessionId === "user_k3phmbkf_ServCel" &&
+  target.profileId === "profile_1e75f63a-9c87-421d-a094-9284f89aa3cd" &&
+  require("node:crypto").createHash("sha256").update(target.groupId).digest("hex") === "fed5da3d29340231db9d6178bc5f29cefbb59b92a857825f29782f827fd31386" });
+mensageiroV4Scope.canary = mensageiroV4Canary;
 const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?.[sessionId] && canalPertenceAoWorkspace(sessoesMeta[sessionId], workspaceId, { usuarios }));
 const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
 const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession,
-  authorizeTarget: context => Boolean(mensageiroV4Scope.match(context)) });
+  authorizeTarget: context => Boolean(mensageiroV4Scope.match(context)),
+  onStop: () => mensageiroV4Canary.stop("diagnostic_stopped") });
+mensageiroV4Canary.stopDiagnostic = workspaceId => mensageiroV4Diagnostics.stop(workspaceId);
 const mensageiroV4Credits = new V4Credits({ repository: mensageiroV4Repository,
   scope: mensageiroV4Scope, getPool: getEnginePool,
   allowed: workspaceId => modoMotorReal === "UNIVERSAL" && usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
   prepare: workspaceId => renovarCreditosUniversalSeNecessario(obterUsuario(workspaceId)) });
-// No target => no worker/DB work. Recovery settles durable ACKs, never replays.
-mensageiroV4Credits.recover().catch(() => console.warn("[MENSAGEIRO-V4-ACK] recovery_pending_no_replay"));
+// One bounded worker read restores pending financial correlations, never runtime targets or sends.
+mensageiroV4Credits.recover({ discover: true }).catch(() => console.warn("[MENSAGEIRO-V4-ACK] recovery_pending_no_replay"));
 const mensageiroV4Engine = new V4Engine({
   repository: mensageiroV4Repository,
   enabled: workspaceId => mensageiroV4Scope.owns(workspaceId),
-  scope: mensageiroV4Scope, credits: mensageiroV4Credits,
+  scope: mensageiroV4Scope, credits: mensageiroV4Credits, canary: mensageiroV4Canary,
   actionAllowed: workspaceId => usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
   contextValid: (workspaceId, sessionId, sock) => mensageiroV4OwnsSession(workspaceId, sessionId) && socketEhAtual(sessoes, sessionId, sock),
   recoveryDisabled: isMensageiroV3RecoveryDisabled,
@@ -26247,8 +26255,9 @@ const mensageiroV4Engine = new V4Engine({
   publicResources: createPublicResources({ dataDir: require("node:path").dirname(require("node:path").dirname(mensageiroV3Routes.store.filePath)), canUse: clienteTemRecursoPlano })
 });
 app.use("/mensageiro-v4", createV4Routes({
-  repository: mensageiroV4Repository, engine: mensageiroV4Engine, diagnostics: mensageiroV4Diagnostics,
+  repository: mensageiroV4Repository, engine: mensageiroV4Engine, diagnostics: mensageiroV4Diagnostics, canary: mensageiroV4Canary,
   getWorkspace: getClienteId, hasFeature: usuarioTemRecurso, requireAdminMaster: exigirAdminMasterEstrito,
+  canUseTarget: workspaceId => usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
   listSessions: workspaceId => listarSessoesWhatsappCliente(workspaceId).map(s => ({ id: s.id, name: s.nomeAmigavel, connected: s.conectado === true })),
   listGroups: (workspaceId, sessionId) => mensageiroV4OwnsSession(workspaceId, sessionId)
     ? (gruposPorSessao[sessionId] || []).map(g => ({ id: String(g.id || g.jid || g.grupoId || ""), name: String(g.nome || g.name || g.subject || "Grupo") })) : []
@@ -26343,16 +26352,17 @@ const ingressMensageiroV3 = createOperationalIngress({
   diagnostic: diagnosticoMensageiroV3
 });
 async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2 }) {
-  // Reserve the tuple even for a misrouted workspace: mismatch must not fall
-  // through into the legacy handler and produce a second/out-of-scope effect.
-  if (card !== "scheduled" && mensageiroV4Scope.reserved({ sessionId: sessaoId,
-      groupId: mensagem?.key?.remoteJid || evento?.id || "", card })) {
-    return mensageiroV4Engine.dispatch({ workspaceId: clienteId, sessionId: sessaoId, card, message: mensagem, event: evento, sock, planAllowed: planoLiberado && usuarioAtivoOperacional(clienteId) });
-  }
-  return ingressMensageiroV3({
-    workspaceId: clienteId, sessionId: sessaoId, card,
-    message: mensagem, event: evento, sock, planAllowed: planoLiberado, diagnosticV2
-  });
+  const context = { sessionId: sessaoId, groupId: mensagem?.key?.remoteJid || evento?.id || "", card, message: mensagem };
+  const dispatchV4 = canaryLease => mensageiroV4Engine.dispatch({ workspaceId: clienteId,
+    sessionId: sessaoId, card, message: mensagem, event: evento, sock,
+    planAllowed: planoLiberado && usuarioAtivoOperacional(clienteId), canaryLease });
+  // One admission boundary tracks legacy work and fences the runtime tuple even
+  // for a misrouted workspace. No second callback/listener or scheduler.
+  return mensageiroV4Canary.route(context, () => {
+    if (card !== "scheduled" && mensageiroV4Scope.reserved(context)) return dispatchV4();
+    return ingressMensageiroV3({ workspaceId: clienteId, sessionId: sessaoId, card,
+      message: mensagem, event: evento, sock, planAllowed: planoLiberado, diagnosticV2 });
+  }, dispatchV4);
 }
 
 function getSockMensageiroLegacySeguro(sessaoId) {
@@ -33762,6 +33772,9 @@ registrarListenerUnicoSocket({
   handler: async ({ messages = [], type } = {}) => {
   try { mensageiroV4Diagnostics.observe({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, sock,
     current: socketEhAtual(sessoes, id, sock), generation: socketGeracao, messages, type }); } catch { /* Optional metadata diagnostics cannot block ingress. */ }
+  try { mensageiroV4Canary.ingress({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro,
+    current: socketEhAtual(sessoes, id, sock), messages, type }); }
+  catch { mensageiroV4Canary.stop("ingress_unavailable"); }
   diagnosticarEntradaUpsert({
     workspaceId: clienteIdMensageiro,
     sessaoId: id,

@@ -71,6 +71,22 @@ function saveSettings(w, p, input) {
   });
 }
 function execute(operation, a) {
+  if (operation === "outbound_targets") {
+    // Read-only, bounded result in the existing worker. No runtime activation,
+    // replay, refund or new financial authority after a process restart.
+    store.reload();
+    const targets = new Map();
+    for (const [workspaceId, ws] of Object.entries(store.state.workspaces))
+      for (const row of Object.values(ws.claims || {})) {
+        if (row.card !== "v4_outbound" || ["settled", "not_sent"].includes(row.stage) ||
+            row.identity?.workspaceId !== workspaceId || row.identity?.origin !== "mensageiro_v4" ||
+            row.identity?.destinationId !== row.groupId || !row.messageId) continue;
+        const t = { workspaceId, profileId: row.profileId, sessionId: row.sessionId, groupId: row.groupId };
+        targets.set(JSON.stringify(t), t);
+        if (targets.size > 64) fail("v4_ack_backpressure");
+      }
+    return [...targets.values()];
+  }
   if (!/^[a-zA-Z0-9_-]{1,100}$/.test(a.workspaceId || ""))
     fail("workspace_invalido");
   const w = a.workspaceId;
@@ -184,6 +200,7 @@ function execute(operation, a) {
   if (operation === "migrate")
     return store.transaction(() => {
       const p = profile(w, a.profileId);
+      if (a.strictRevision === true && a.expectedRevision !== p.revision) fail("conflito_revisao");
       if (p.cards.groupManager.configuration?.v4?.migrationVersion === 4)
         return { alreadyMigrated: true, profile: lightProfile(p) };
       if (a.expectedRevision !== p.revision) fail("conflito_revisao");

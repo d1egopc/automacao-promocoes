@@ -61,6 +61,7 @@ class Diagnostics {
     authorizeTarget = () => false,
     clock = () => performance.now(),
     secret = crypto.randomBytes(32),
+    onStop = () => {},
   } = {}) {
     this.ownsSession = ownsSession;
     this.authorizeTarget = authorizeTarget;
@@ -69,6 +70,7 @@ class Diagnostics {
     this.run = null;
     this.traces = new WeakMap();
     this.timer = null;
+    this.onStop = onStop;
   }
   hash(value) {
     return value
@@ -136,6 +138,7 @@ class Diagnostics {
         if (this.run === ended) this.run = null;
       }, 300000);
       this.timer.unref?.();
+      try { this.onStop(workspaceId); } catch { /* Diagnostic failures never enable actions. */ }
     }
     return this.status(workspaceId, false);
   }

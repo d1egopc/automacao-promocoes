@@ -249,3 +249,43 @@ test("1404 real credit-gated operations keep HTTP responsive with bounded admiss
     httpMaxMs: Math.round(Math.max(...timings) * 100) / 100,
     eventLoopMaxMs: Math.round(delays.max / 1e4) / 100 }));
 });
+const { Canary } = require("../modules/mensageiro-v4/canary");
+function runtimeCanary(f) {
+  const canary = new Canary({ authorizeTarget: () => true });
+  const scope = new Scope(); scope.canary = canary;
+  f.engine.scope = scope; f.engine.canary = canary; f.engine.enabled = w => scope.owns(w); f.credits.scope = scope;
+  const current = f.store.getProfile(f.w, f.p.id);
+  const run = canary.start({ target: { workspaceId: f.w, sessionId: f.s, groupId: G, profileId: f.p.id }, mode: "controlled_test" });
+  canary.run.profileRevision = current.revision;
+  const text = "https://example.org/controlled CANARIO " + run.testChallenge;
+  canary.arm({ workspaceId: f.w, runId: run.runId, participantId: "peer@lid", text,
+    authorization: "single_test_delete", sendNotice: true });
+  const message = f.message("runtime-test"); message.message.conversation = text;
+  canary.ingress({ sessionId: f.s, capturedWorkspaceId: f.w, current: true, messages: [message], type: "notify" });
+  const dispatch = () => canary.route({ sessionId: f.s, groupId: G, card: "groupManager", message },
+    () => assert.fail("legacy must not moderate test"), lease => f.engine.dispatch({ workspaceId: f.w, sessionId: f.s,
+      sock: f.sock, planAllowed: true, card: "groupManager", message, canaryLease: lease }));
+  return { canary, scope, dispatch };
+}
+test("runtime canary with official zero balance deletes free, cannot warn or create negative debit", async t => {
+  const f = await fixture(t, 0), r = runtimeCanary(f); t.after(() => r.canary.stop());
+  const result = await r.dispatch();
+  assert.equal(result.deleteResult, "local_resolved"); assert.equal(result.noticeResult, "sem_creditos");
+  assert.equal(f.sent.length, 1); assert.ok(f.sent[0].content.delete);
+  assert.equal((await f.balance()).balance, 0); assert.equal((await f.balance()).reserved, 0);
+  assert.equal(r.canary.status(f.w).state, "off");
+});
+test("runtime expiry/stop and restart preserve official ACK settlement without reactivating or resending", async t => {
+  const f = await fixture(t, 1), r = runtimeCanary(f); t.after(() => r.canary.stop());
+  const result = await r.dispatch(); assert.equal(result.deleteResult, "local_resolved");
+  assert.equal(f.sent.length, 2); assert.equal(r.canary.status(f.w).state, "off");
+  assert.equal((await f.balance()).reserved, 1); assert.equal((await f.balance()).balance, 1);
+  await f.repository.close(); f.repository = new V4Repository({ filePath: f.repository.filePath });
+  const restartedScope = new Scope(), recovered = new Credits({ repository: f.repository,
+    scope: restartedScope, getPool: () => pool });
+  await recovered.recover({ discover: true });
+  assert.equal(restartedScope.owns(f.w), false); assert.equal((await f.balance()).balance, 1);
+  await recovered.observe(f.ack()); await recovered.observe(f.ack(4));
+  assert.equal((await f.balance()).balance, 0); assert.equal((await f.balance()).reserved, 0);
+  assert.equal(f.sent.length, 2); assert.equal(restartedScope.targets.length, 0);
+});

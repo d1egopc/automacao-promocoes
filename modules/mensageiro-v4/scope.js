@@ -26,12 +26,17 @@ class Scope {
     try { return new Scope(value ? JSON.parse(value) : []); }
     catch { return new Scope(); } // fail closed; never fall back to workspace flags
   }
-  owns(workspaceId) { return this.targets.some(t => t.workspaceId === workspaceId); }
+  owns(workspaceId) {
+    this.canary?.expire();
+    return this.targets.some(t => t.workspaceId === workspaceId) ||
+      !!(this.canary?.run?.active && this.canary.run.target.workspaceId === workspaceId);
+  }
   reserved({ sessionId, groupId, card }) {
-    return this.targets.find(t => t.sessionId === sessionId && t.groupId === groupId &&
+    return this.canary?.reserved({ sessionId, groupId, card }) || this.targets.find(t => t.sessionId === sessionId && t.groupId === groupId &&
       (!card || t.cards.includes(card)));
   }
   match(context) {
+    if (this.canary?.reserved(context)) return this.canary.target(context);
     const t = this.reserved(context);
     return t && t.workspaceId === context.workspaceId &&
       (!context.profileId || t.profileId === context.profileId) ? t : null;

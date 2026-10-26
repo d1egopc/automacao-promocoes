@@ -19,6 +19,7 @@ class V4Engine {
     publicResources = async () => ({}),
     maxConcurrent = 4,
     handlers,
+    canary,
   } = {}) {
     this.repository = repository;
     this.enabled = enabled;
@@ -36,6 +37,7 @@ class V4Engine {
     this.moderator = new Moderator();
     this.cooldowns = new Map();
     this.handlers = handlers;
+    this.canary = canary;
   }
   owns(workspaceId) {
     return this.enabled(workspaceId) === true && this.scope.owns(workspaceId);
@@ -53,6 +55,7 @@ class V4Engine {
     event,
     sock,
     planAllowed,
+    canaryLease,
   }) {
     const trace = this.diagnostics?.trace(message || event) || (() => {});
     if (
@@ -86,6 +89,9 @@ class V4Engine {
       return block("destination_missing");
     const target = this.scope.match({ workspaceId, sessionId, groupId, card });
     if (!target) { trace("scope", "unauthorized"); return block("scope_unauthorized"); }
+    const canaryContext = { workspaceId, sessionId, groupId, card, profileId: target.profileId };
+    const runtime = this.canary?.reserved(canaryContext);
+    if (runtime && !this.canary.valid(canaryLease, canaryContext)) return block("runtime_off");
     if (this.active >= this.maxConcurrent) {
       trace("result", "backpressure");
       return block("backpressure");
@@ -109,6 +115,10 @@ class V4Engine {
         return block(selected.reason);
       }
       const p = selected.profile;
+      if (runtime && canaryLease.run.profileRevision !== undefined && p.revision !== canaryLease.run.profileRevision) {
+        this.canary.stop("profile_changed");
+        return block("profile_changed");
+      }
       if (p.id !== target.profileId) { trace("profile", "unauthorized"); return block("profile_unauthorized"); }
       trace("profile", "selected", p.id);
       trace("scope", "matched", p.id);
@@ -130,6 +140,23 @@ class V4Engine {
           p.id,
           moderation?.id,
         );
+        // Runtime natural traffic is always shadow. No claims, writes, credits
+        // or transport. A controlled test also requires exact participant/text,
+        // a nonce, fresh notify ingress, and a single deletion budget.
+        if (runtime && !this.canary.isTest(canaryLease, message)) {
+          let permission;
+          try { permission = await this.moderator.permission(sock, groupId,
+            message.key.participant || message.participant || ""); }
+          catch { permission = { known: false }; }
+          if (!this.canary.valid(canaryLease, canaryContext)) return block("runtime_off");
+          trace("permission", !permission.known ? "metadata_unavailable" : permission.botAdmin ? "admin" : "not_admin", p.id);
+          if (permission.known) trace("exemption", this.moderator.exempt(p.cards.groupManager.configuration || {}, permission,
+            message.key.participant || message.participant || "") ? "exempt" : "not_exempt", p.id);
+          trace("result", "observed", p.id, moderation?.id);
+          return { processada: !!moderation, bloqueada: false, reason: "observation_only",
+            simulatedDecision: moderation?.action || "no_match", deleteAttempted: false,
+            deleteResult: "not_attempted", remoteDeletionConfirmed: false };
+        }
         if (
           !moderation ||
           moderation.action === "observe" ||
@@ -204,6 +231,7 @@ class V4Engine {
         });
         if (
           current.revision !== p.revision || !current.active || !current.cards[card]?.active ||
+          (runtime && !this.canary.valid(canaryLease, canaryContext)) ||
           !this.scope.match({ workspaceId, sessionId, groupId, card, profileId: current.id }) ||
           !this.actionAllowed(workspaceId) ||
           !this.contextValid(workspaceId, sessionId, sock) ||
@@ -217,10 +245,13 @@ class V4Engine {
       const send = async (destination, content, options) => {
         // All adapters share this fence, including notices and private redirects.
         if (destination !== groupId || content?.delete) throw new Error("scope_unauthorized");
+        if (runtime) this.canary.takeNotice(canaryLease, canaryContext, message);
         if (!this.credits || ++slot > 8) throw new Error("credit_gate_unavailable");
         return this.credits.send({ workspaceId, sessionId, profileId: p.id, groupId,
           parentKey: key, slot, revalidate, content, options,
-          transport: (payload, opts) => this.transport(() => sock.sendMessage(groupId, payload, opts)) });
+          transport: (payload, opts) => this.transport(() => runtime
+            ? this.canary.physical(canaryLease, () => sock.sendMessage(groupId, payload, opts))
+            : sock.sendMessage(groupId, payload, opts)) });
       };
       const guardedSocket = new Proxy(sock, { get(object, name) {
         if (name === "sendMessage") return send;
@@ -263,16 +294,23 @@ class V4Engine {
           trace("exemption", "not_exempt", p.id);
           trace("permission", "admin", p.id);
           await revalidate();
-          deleteAttempted = true; deleteResult = "attempted";
-          trace("action", "delete_started", p.id, moderation.id);
+          if (runtime) this.canary.takeDelete(canaryLease, canaryContext, message);
+          const deleteMessage = () => {
+            deleteAttempted = true; deleteResult = "attempted";
+            if (runtime) canaryLease.run.deleteUsed = true;
+            trace("action", "delete_started", p.id, moderation.id);
+            return sock.sendMessage(groupId, { delete: message.key });
+          };
           try {
             // No debit for deletion: no new moderation charge policy is inferred.
-            await this.transport(() => sock.sendMessage(groupId, { delete: message.key }));
+            await this.transport(() => runtime
+              ? this.canary.physical(canaryLease, deleteMessage)
+              : deleteMessage());
           } catch {
-            deleteResult = "error";
+            deleteResult = deleteAttempted ? "error" : "not_attempted";
             trace("result", "delete_error", p.id, moderation.id);
-            result = { processada: true, bloqueada: true, deleteAttempted: true,
-              deleteResult: "error", remoteDeletionConfirmed: false };
+            result = { processada: true, bloqueada: true, deleteAttempted,
+              deleteResult, remoteDeletionConfirmed: false };
           }
           if (!result) {
             deleteResult = "local_resolved";

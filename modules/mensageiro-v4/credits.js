@@ -10,11 +10,26 @@ class Credits {
     makeMessageId = () => require("@whiskeysockets/baileys").generateMessageIDV2(), scope } = {}) {
     Object.assign(this, { repository, getPool, allowed, prepare, makeMessageId, scope });
     this.ackInFlight = 0;
+    this.settlementTargets = new Map();
+  }
+  remember(target) {
+    const { workspaceId, sessionId, groupId, profileId } = target;
+    const key = JSON.stringify([workspaceId, sessionId, groupId, profileId]);
+    if (!this.settlementTargets.has(key) && this.settlementTargets.size >= 64)
+      throw new Error("credit_scope_blocked");
+    this.settlementTargets.set(key, { workspaceId, sessionId, groupId, profileId });
+  }
+  targets() {
+    const targets = new Map(this.settlementTargets);
+    for (const t of this.scope.targets) targets.set(JSON.stringify([t.workspaceId, t.sessionId, t.groupId, t.profileId]), t);
+    return [...targets.values()];
   }
   async send({ workspaceId, sessionId, profileId, groupId, parentKey, slot,
     revalidate, transport, content, options }) {
     if (!(await this.allowed(workspaceId)) || !this.scope.match({ workspaceId, sessionId, groupId, profileId }))
       throw new Error("credit_scope_blocked");
+    // Settlement survives functional OFF/expiry; this grants no send authority.
+    this.remember({ workspaceId, sessionId, profileId, groupId });
     const operationId = "v4:" + createHash("sha256")
       .update(JSON.stringify([parentKey, slot])).digest("hex");
     const key = operationId;
@@ -55,9 +70,10 @@ class Credits {
       throw error;
     }
   }
-  async recover() {
+  async recover({ discover = false } = {}) {
+    if (discover) for (const t of await this.repository.call("outbound_targets")) this.remember(t);
     // One bounded settlement pass only. No physical sends, release or replay.
-    for (const target of this.scope.targets) {
+    for (const target of this.targets()) {
       const rows = await this.repository.call("outbound_recover", target);
       for (const row of rows) {
         await official.confirmarCreditoManualUniversal({ pool: this.getPool(), reserva: row.identity });
@@ -66,7 +82,7 @@ class Credits {
     }
   }
   async observe({ sessionId, updates = [] }) {
-    const targets = this.scope.targets.filter(t => t.sessionId === sessionId);
+    const targets = this.targets().filter(t => t.sessionId === sessionId);
     if (!targets.length) return { observed: 0 };
     if (this.ackInFlight >= 4 || updates.length > 64) throw new Error("v4_ack_backpressure");
     this.ackInFlight++;
@@ -79,18 +95,18 @@ class Credits {
         if (!messageId || !["delivery_ack", "read", "played"].includes(status) ||
             item.key.fromMe !== true) continue;
         const groupId = item.key.remoteJid;
-        const target = targets.find(t => t.groupId === groupId);
-        if (!target) continue;
-        const workspaceId = target.workspaceId;
-        const rows = await this.repository.call("outbound_ack", {
-          workspaceId, sessionId, groupId, profileId: target.profileId, messageId, ack: status,
-        });
-        for (const row of rows) {
-          // ACK persisted before idempotent financial settlement. A repeated
-          // ACK after process restart safely completes a previously pending debit.
-          await official.confirmarCreditoManualUniversal({ pool: this.getPool(), reserva: row.identity });
-          await this.repository.call("outbound_patch", { workspaceId, key: row.key, stage: "settled" });
-          observed++;
+        for (const target of targets.filter(t => t.groupId === groupId)) {
+          const workspaceId = target.workspaceId;
+          const rows = await this.repository.call("outbound_ack", {
+            workspaceId, sessionId, groupId, profileId: target.profileId, messageId, ack: status,
+          });
+          for (const row of rows) {
+            // ACK persisted before idempotent financial settlement. A repeated
+            // ACK after process restart safely completes a previously pending debit.
+            await official.confirmarCreditoManualUniversal({ pool: this.getPool(), reserva: row.identity });
+            await this.repository.call("outbound_patch", { workspaceId, key: row.key, stage: "settled" });
+            observed++;
+          }
         }
       }
       return { observed };

@@ -15,6 +15,7 @@ const {
 } = require("../modules/whatsapp/socket-listener-lifecycle.service.js");
 const { contarSocketsWhatsapp } = require("../modules/telemetria/infra-memory-snapshot.js");
 const { Diagnostics } = require("../modules/mensageiro-v4/diagnostics");
+const { Canary } = require("../modules/mensageiro-v4/canary");
 const { createGerenteObservabilityV2 } = require("../modules/mensageiro/gerente-observability-v2");
 
 async function main() {
@@ -135,9 +136,12 @@ async function main() {
     OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_WORKSPACE: "fixture_workspace",
     OPTIMUS_MENSAGEIRO_V3_DIAGNOSTIC_SESSION: sessaoTrace
   };
+  const mensageiroV4Canary = new Canary({ authorizeTarget: () => true });
+  mensageiroV4Canary.start({ target: { workspaceId: "user_k3phmbkf", sessionId: sessaoTrace,
+    groupId: grupo, profileId: "fixture_profile" }, mode: "observation" });
   const registro = {
     sock, id: sessaoTrace, socketGeracao, sessoes: sessaoProdutiva, force: false,
-    clienteIdMensageiro: "user_k3phmbkf", gerenteObservabilityV2, mensageiroV4Diagnostics, registrarListenerUnicoSocket, socketEhAtual,
+    clienteIdMensageiro: "user_k3phmbkf", gerenteObservabilityV2, mensageiroV4Diagnostics, mensageiroV4Canary, registrarListenerUnicoSocket, socketEhAtual,
     diagnosticarEntradaUpsert: args => diagnosticarEntradaUpsert({ ...args, env: ambienteV2,
       logger: { warn: (tag, payload) => { ordem.push("trace"); logs.push({ tag, payload: JSON.parse(payload) }); } } }),
     diagnosticoMensageiroV3() {},
@@ -163,6 +167,8 @@ async function main() {
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(ordem.slice(0, 3), ["trace", "mensageiro_gerente", "mensageiro_comando"]);
   assert.equal(logs.length, 1);
+  assert.equal(mensageiroV4Canary.status("user_k3phmbkf").events, 1,
+    "runtime observes the existing original callback, without a parallel listener");
   assert.equal(logs[0].payload.fromMe, false);
   assert.equal(logs[0].payload.tipoEvento, "notify");
   assert.equal(logs[0].payload.groupHash.length, 12);
@@ -197,6 +203,7 @@ async function main() {
   assert.ok(!JSON.stringify(v4Records).includes("SEGREDO_NAO_LOGAR"));
   assert.ok(!JSON.stringify(v4Records).includes(grupo));
   gerenteObservabilityV2.dispose();
+  mensageiroV4Canary.stop();
 
   console.log(`PASS ${process.version}: Baileys 6.7.22, dedup, reconexao, trace inicial e handlers V3`);
 }

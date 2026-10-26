@@ -5,6 +5,7 @@ on:
     branches:
       - validation/guardian-v1-*
       - validation/mensageiro-v4-20261025
+      - validation/mensageiro-v4-canary-runtime-20261025
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -39,14 +40,14 @@ jobs:
           node tests/planos-identidade-estavel-v1.test.js
           node tests/saas-fundacao-v1.test.js
       - name: Mensageiro V4 isolated contracts
-        if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025'
+        if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025'
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           test -z "${OPTIMUS_MENSAGEIRO_V4_WORKSPACES:-}"
           test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
           git merge-base --is-ancestor af56a3af675fd7f2c005a04d90e22fe72cbc95e6 HEAD
-          node --test tests/mensageiro-v4.test.cjs
+          node --test tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs
           node tests/whatsapp-socket-listener-baileys-real.test.cjs
           node tests/whatsapp-socket-listener-lifecycle.test.js
           node tests/mensageiro-v3-operational-hotfix.test.cjs
@@ -62,6 +63,7 @@ jobs:
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
             refs/heads/validation/mensageiro-v4-20261025) base=af56a3af675fd7f2c005a04d90e22fe72cbc95e6 ;;
+            refs/heads/validation/mensageiro-v4-canary-runtime-20261025) base=760c4c11b1b2d726cb212b6aa4ac4a8ab35a478f ;;
             refs/heads/feature/landing-page-v1-*) base=5a31e60524d9caac45883ca07511dcc208852f53 ;;
             refs/heads/validation/landing-v13-media-buttons-20261025) base=eda20ff6b69449c69a00ac7777beb3b868e1da80 ;;
           esac
@@ -77,7 +79,7 @@ jobs:
           node tests/deploy-backend-manual-diagnostics.test.cjs
 
   v4-financial:
-    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025'
+    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
