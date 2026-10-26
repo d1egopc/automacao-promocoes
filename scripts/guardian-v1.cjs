@@ -4,6 +4,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
 
 const SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_PATH_RE = /^[A-Za-z0-9._/-]+$/;
@@ -20,6 +21,74 @@ const RUNTIME_ROOTS = new Set([
   "modules", "utils", "marketplaces", "templates", "bootstrap", "campanhas", "assets"
 ]);
 const FULL_BUILD_PATHS = new Set(["Dockerfile", ".dockerignore", "package.json", "package-lock.json"]);
+// One reviewed dependency repair, never a general RUN/npm/build exception.
+const BAILEYS_BUFFER_PROFILE = {
+  "baseSha": "f50e8a294f839249e5427619e500e37332423363",
+  "hotfixSha": "83b9f556a069b728650afcfc8c3d765618207369",
+  "runtimeHashes": {
+    "index.js": "a7c575ade563e93c41b49c7abbcd4c7527f0773f0a3946d4c83f47ab2bc6a469",
+    "modules/whatsapp/baileys-buffer-hotfix.service.js": "0c2df86656ea45707a3fffe94e581aabdfd84b8901335f1eafd3c093802d37ac",
+    "modules/whatsapp/baileys-buffer-recovery.service.js": "bfe0f1178b379186f149cded8c1f1f9ad3e7e174d85a49328f02ae6ccb9d3bc0"
+  },
+  "unchangedBuildHashes": {
+    "Dockerfile": "d65f01c5c989274571ef8689c04b90900adb65db76be5ce1e7251a78116ed413",
+    "scripts/apply-baileys-retry-hotfix.cjs": "110f9a3be98132f472a5e2e6c91291661daabd2f6b71792bddc62ce796a8e874",
+    "package.json": "652ac4577ceea12b785a0ab2cd78058dcc6978d9e7f7063aa84498acbcfcec9b",
+    "package-lock.json": "1b61cdd9a6538e2c0650c5c92382ff551febf84cf58d2d3450c0eb3ec661dbca",
+    ".dockerignore": "93375c6a4e819eacf9abc319c4194b88ffddb798606aafecddec9cffb4eca36a"
+  },
+  "dependencies": {
+    "lib/Socket/socket.js": {
+      "before": "2d16ab13464a155a3441f497ae7625d1760a0654659ae422a361e0c99fb1cc0c",
+      "after": "b0b8d041b930c4f0264766e8de06ffce78398ecb4d27ef58482de75484f23443"
+    },
+    "lib/Socket/messages-recv.js": {
+      "before": "2a754ae09c8ad053486ae3b9743db6868e60f2e77e8fa695c4138e9667a76dd5",
+      "after": "2dd660356f4f469a6dfe1be895720acbf3f02794c5273bb83c1a867c409ab299"
+    },
+    "lib/Socket/chats.js": {
+      "before": "9eef48356529d9078e0a09ae94d443e29c2795a0c86c64f3d47580994884add4",
+      "after": "30457f342ac27afa8a211cbfddd1bd428b00a41175acf187aaff7ab8d376d776"
+    }
+  }
+};
+
+function contentHash(repo, sha, file) {
+  return crypto.createHash("sha256").update(git(repo, ["show", `${sha}:${file}`]).stdout).digest("hex");
+}
+
+function validateBufferProfile(repo, base, source, runtimeFiles) {
+  const p = BAILEYS_BUFFER_PROFILE, failures = [];
+  const reject = (file, cause) => failures.push({ file, stage: "baileys_buffer_profile", cause });
+  if (base !== p.baseSha) reject("BASE_SHA", "unapproved_hotfix_base");
+  if (git(repo, ["merge-base", "--is-ancestor", p.hotfixSha, source], { allowFailure: true }).status !== 0)
+    reject("SOURCE_SHA", "hotfix_ancestry_required");
+  if (JSON.stringify(runtimeFiles.slice().sort()) !== JSON.stringify(Object.keys(p.runtimeHashes).sort()))
+    reject("runtime_files", "exact_hotfix_runtime_set_required");
+  for (const [file, hash] of Object.entries({ ...p.runtimeHashes, ...p.unchangedBuildHashes })) {
+    try {
+      if (contentHash(repo, source, file) !== hash) reject(file, "unapproved_hotfix_content");
+    } catch { reject(file, "unapproved_hotfix_content"); }
+  }
+  return failures;
+}
+
+function renderDockerfile(plan, baseTag) {
+  if (plan.validation !== "PASS" || plan.blocked.length ||
+      !/^local\/optimus-deploy-base:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(baseTag))
+    throw new Error("unapproved_image_build");
+  if (!["overlay", "baileys_buffer_patch"].includes(plan.deployMode)) throw new Error("unapproved_build_mode");
+  const special = plan.deployMode === "baileys_buffer_patch";
+  if (special && (plan.baseSha !== BAILEYS_BUFFER_PROFILE.baseSha ||
+      JSON.stringify(plan.runtimeFiles) !== JSON.stringify(Object.keys(BAILEYS_BUFFER_PROFILE.runtimeHashes).sort())))
+    throw new Error("exact_hotfix_runtime_set_required");
+  if (!special && plan.runtimeFiles.includes("modules/whatsapp/baileys-buffer-hotfix.service.js"))
+    throw new Error("dependency_patch_mode_required");
+  return [`FROM ${baseTag}`, "USER root",
+    ...plan.runtimeFiles.map(file => `COPY --chown=node:node ${normalizeRuntimePath(file)} /app/${normalizeRuntimePath(file)}`),
+    ...(special ? ["RUN node -e \"require('/app/modules/whatsapp/baileys-buffer-hotfix.service.js').applyPatch({rootDir:'/app'})\""] : []),
+    "USER node", ""].join("\n");
+}
 
 function parseArgs(argv) {
   const result = { _: [] };
@@ -177,13 +246,15 @@ function buildPlan(repo, base, source) {
     runtimeFiles.push(file);
   }
   runtimeFiles.sort();
+  const bufferProfile = changes.some(change => change.file === "modules/whatsapp/baileys-buffer-hotfix.service.js");
+  if (bufferProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles));
   ignoredFiles.sort();
   blocked.sort((a, b) => a.file.localeCompare(b.file));
   return {
     sourceSha: source,
     baseSha: base,
     validation: blocked.length ? "BLOCKED" : "PASS",
-    deployMode: runtimeFiles.length ? "overlay" : "none",
+    deployMode: bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
     runtimeFiles,
     ignoredFiles,
     blocked
@@ -226,6 +297,10 @@ function testMatrix(plan) {
       "tests/deploy-backend-compose-image-validation.test.cjs",
       "tests/deploy-backend-manual-diagnostics.test.cjs"
     ]) add(`deploy:${path.basename(file)}`, file, process.execPath, [file], false, true);
+  }
+  if (plan.deployMode === "baileys_buffer_patch") {
+    add("baileys:buffer", "tests/baileys-initial-buffer-recovery.test.cjs", process.execPath, ["--test", "tests/baileys-initial-buffer-recovery.test.cjs"], false);
+    add("baileys:packaging", "tests/guardian-baileys-buffer-packaging.test.cjs", process.execPath, ["--test", "tests/guardian-baileys-buffer-packaging.test.cjs"], false);
   }
   return [...specs.values()];
 }
@@ -385,8 +460,18 @@ function main() {
     const plan = buildPlan(repo, base, source);
     if (args["github-output"]) writeGithubOutput(args["github-output"], plan);
     if (args.format === "value") console.log(plan.runtimeFiles.join(","));
+    else if (args.format === "mode") console.log(plan.deployMode);
+    else if (["dependencies-before", "dependencies-after"].includes(args.format)) {
+      if (plan.validation !== "PASS" || plan.deployMode !== "baileys_buffer_patch") throw new Error("dependency_profile_required");
+      const key = args.format.endsWith("before") ? "before" : "after";
+      for (const [file, hashes] of Object.entries(BAILEYS_BUFFER_PROFILE.dependencies)) console.log(`${file}\t${hashes[key]}`);
+    }
     else console.log(JSON.stringify(plan, null, 2));
     if (plan.blocked.length) process.exitCode = 2;
+    return;
+  }
+  if (command === "build-dockerfile") {
+    process.stdout.write(renderDockerfile(buildPlan(repo, base, source), args["base-tag"] || ""));
     return;
   }
   if (command === "validate") {
@@ -409,6 +494,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  BAILEYS_BUFFER_PROFILE,
+  renderDockerfile,
   buildPlan,
   isNonRuntime,
   isOverlayRuntime,

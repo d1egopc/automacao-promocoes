@@ -8,6 +8,7 @@ on:
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
       - validation/baileys-buffer-servcel-20261026
+      - validation/baileys-buffer-packaging-20261026
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -29,8 +30,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Exact Baileys packaging profile - isolated only
+        if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
+        run: |
+          node scripts/guardian-v1.cjs prepare --base f50e8a294f839249e5427619e500e37332423363 --source "$GITHUB_SHA"
+          node -e "require('./modules/whatsapp/baileys-buffer-hotfix.service.js').applyPatch()"
+          node --test tests/guardian-baileys-buffer-packaging.test.cjs
       - name: Baileys buffer recovery and essential contracts
-        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026'
+        if: github.ref == 'refs/heads/validation/baileys-buffer-servcel-20261026' || github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
@@ -57,6 +64,31 @@ jobs:
           docker build --tag "optimus-buffer-fixture:$GITHUB_SHA" .
           docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --check /app/index.js
           docker run --rm --network none --entrypoint node "optimus-buffer-fixture:$GITHUB_SHA" --test /app/tests/baileys-initial-buffer-recovery.test.cjs
+      - name: Official derived-image build fixture - no production mounts or network
+        if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=f50e8a294f839249e5427619e500e37332423363
+          mkdir "$RUNNER_TEMP/baileys-base"
+          git archive "$base" | tar -x -C "$RUNNER_TEMP/baileys-base"
+          base_tag="local/optimus-deploy-base:ci-$GITHUB_RUN_ID"
+          docker build --tag "$base_tag" "$RUNNER_TEMP/baileys-base"
+          node scripts/guardian-v1.cjs build-dockerfile --base "$base" --source "$GITHUB_SHA" --base-tag "$base_tag" > "$RUNNER_TEMP/buffer.Dockerfile"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --format dependencies-before > "$RUNNER_TEMP/before.tsv"
+          node scripts/guardian-v1.cjs prepare --base "$base" --source "$GITHUB_SHA" --format dependencies-after > "$RUNNER_TEMP/after.tsv"
+          while IFS=$'\t' read -r file hash; do
+            test "$(docker run --rm --network none --entrypoint sha256sum "$base_tag" "/app/node_modules/@whiskeysockets/baileys/$file" | cut -d' ' -f1)" = "$hash"
+          done < "$RUNNER_TEMP/before.tsv"
+          for build in 1 2; do
+            image="optimus-buffer-fixture:$GITHUB_SHA-$build"
+            docker build --no-cache --network none --pull=false -f "$RUNNER_TEMP/buffer.Dockerfile" --tag "$image" .
+            while IFS=$'\t' read -r file hash; do
+              test "$(docker run --rm --network none --entrypoint sha256sum "$image" "/app/node_modules/@whiskeysockets/baileys/$file" | cut -d' ' -f1)" = "$hash"
+            done < "$RUNNER_TEMP/after.tsv"
+            docker run --rm --network none --entrypoint node "$image" --check /app/index.js
+            docker run --rm --network none --volume "$GITHUB_WORKSPACE/tests/baileys-initial-buffer-recovery.test.cjs:/app/tests/baileys-initial-buffer-recovery.test.cjs:ro" --entrypoint node "$image" --test /app/tests/baileys-initial-buffer-recovery.test.cjs
+          done
       - name: Landing Page isolated integration
         if: startsWith(github.ref, 'refs/heads/feature/landing-page-v1-') || github.ref == 'refs/heads/validation/landing-v13-media-buttons-20261025'
         env:
@@ -96,6 +128,7 @@ jobs:
             refs/heads/validation/mensageiro-v4-canary-runtime-20261025) base=760c4c11b1b2d726cb212b6aa4ac4a8ab35a478f ;;
             refs/heads/validation/mensageiro-v4-ingress-probe-20261026) base=e55890ca4cf789cbdbdaf523f289ba6a2c891755 ;;
             refs/heads/validation/baileys-buffer-servcel-20261026) base=f50e8a294f839249e5427619e500e37332423363 ;;
+            refs/heads/validation/baileys-buffer-packaging-20261026) base=f50e8a294f839249e5427619e500e37332423363 ;;
             refs/heads/feature/landing-page-v1-*) base=5a31e60524d9caac45883ca07511dcc208852f53 ;;
             refs/heads/validation/landing-v13-media-buttons-20261025) base=eda20ff6b69449c69a00ac7777beb3b868e1da80 ;;
           esac

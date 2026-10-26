@@ -47,6 +47,8 @@ git -C "$source_dir" diff --check "$BASE_SHA" "$SOURCE_SHA"
 # and tests are excluded from the image, and deleted runtime files fail closed.
 deploy_stage=validate_runtime_allowlist
 guardian_runtime="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format value)"
+guardian_mode="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format mode)"
+[[ "$guardian_mode" == overlay || "$guardian_mode" == baileys_buffer_patch ]]
 test -n "$guardian_runtime"
 test "$RUNTIME_FILES" = "$guardian_runtime"
 IFS=, read -r -a approved <<< "$RUNTIME_FILES"
@@ -152,6 +154,22 @@ for path in "${approved[@]}"; do
   validate_runtime_overlay_path "$path" "${changed_runtime_status[$path]}"
 done
 
+# The exceptional dependency build is authorized by exact Guardian hashes.
+# Only inspect these three fixed library files; never read auth/env or /data.
+if [[ "$guardian_mode" == baileys_buffer_patch ]]; then
+  deploy_stage=validate_baileys_dependency_base
+  test "$(docker exec optimus-backend node -p "require('/app/node_modules/@whiskeysockets/baileys/package.json').version")" = 6.7.22
+  dependency_count=0
+  while IFS=$'\t' read -r dependency expected_hash; do
+    [[ "$dependency" == lib/Socket/socket.js || "$dependency" == lib/Socket/chats.js || "$dependency" == lib/Socket/messages-recv.js ]]
+    [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
+    test "$(docker exec optimus-backend sh -c 'if [ -L "$1" ]; then printf symlink; elif [ -f "$1" ]; then printf file; else printf absent; fi' sh "/app/node_modules/@whiskeysockets/baileys/$dependency")" = file
+    test "$(docker exec optimus-backend sha256sum "/app/node_modules/@whiskeysockets/baileys/$dependency" | cut -d' ' -f1)" = "$expected_hash"
+    dependency_count=$((dependency_count + 1))
+  done < <(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format dependencies-before)
+  test "$dependency_count" -eq 3
+fi
+
 deploy_stage=prepare_release_artifacts
 scratch="$(mktemp -d)"
 staging="$(mktemp -p "$infra" .backend-release.XXXXXXXX.yml)"
@@ -214,17 +232,22 @@ candidate_tag="local/optimus-backend:$SOURCE_SHA-$run_key"
 docker tag "$BASE_IMAGE" "$base_tag"
 docker tag "$BASE_IMAGE" "$recovery_tag"
 test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
-{
-  printf 'FROM %s\nUSER root\n' "$base_tag"
-  for path in "${approved[@]}"; do
-    printf 'COPY --chown=node:node %s /app/%s\n' "$path" "$path"
-  done
-  printf 'USER node\n'
-} > "$scratch/Dockerfile"
+node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" build-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
 docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$candidate_tag" "$source_dir"
 candidate_id="$(docker image inspect -f '{{.Id}}' "$candidate_tag")"
 [[ "$candidate_id" =~ ^sha256:[0-9a-f]{64}$ ]]
 docker run --rm --network none --entrypoint node "$candidate_tag" --check /app/index.js
+if [[ "$guardian_mode" == baileys_buffer_patch ]]; then
+  deploy_stage=verify_baileys_dependency_image
+  dependency_count=0
+  while IFS=$'\t' read -r dependency expected_hash; do
+    [[ "$dependency" == lib/Socket/socket.js || "$dependency" == lib/Socket/chats.js || "$dependency" == lib/Socket/messages-recv.js ]]
+    [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
+    test "$(docker run --rm --network none --entrypoint sha256sum "$candidate_tag" "/app/node_modules/@whiskeysockets/baileys/$dependency" | cut -d' ' -f1)" = "$expected_hash"
+    dependency_count=$((dependency_count + 1))
+  done < <(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format dependencies-after)
+  test "$dependency_count" -eq 3
+fi
 
 # A persistent Compose overlay changes only backend.image. The base Compose,
 # env_file, secrets, mounts, ports, networks and PostgreSQL are untouched.

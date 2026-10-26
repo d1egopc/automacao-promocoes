@@ -59,6 +59,13 @@ Antes de mudar producao, registre SHA/tree, status Git, container/image IDs, res
 
 Rollback nao e `reset --hard` improvisado. Antes do deploy, comprove que a imagem anterior ainda existe pelo ID/digest exato, que uma tag protegida aponta para esse mesmo ID e que o Compose pode selecionar essa imagem sem recriar PostgreSQL ou tocar `/data`. Se esse caminho nao estiver disponivel, prove uma reconstrucao controlada de SHA anterior antes de chamar o rollback de operacional. Registre a imagem e o SHA efetivamente ativos depois de qualquer reversao.
 
+### Exceção fechada: hotfix Baileys ServCel 6.7.22
+
+- Somente o perfil hash-pinned `baileys_buffer_patch` do Guardião autoriza uma etapa adicional no build derivado da imagem ativa. Base obrigatória f50e8a29 e ancestralidade do hotfix83b9f556; três arquivos runtime exatos, sem modificações funcionais posteriores. Dockerfile, postinstall, package.json, lock e dockerignore devem continuar nos hashes integrais da base.
+- O Dockerfile gerado pelo Guardião faz somente FROM da imagem ativa verificada, COPY dos três arquivos autorizados, um RUN node fixo do instalador revisado e USER node. Não executa npm/postinstall, rede, comandos de usuário ou leitura de secrets; não monta /data. A versão6.7.22 e os três hashes de dependência antes/depois são exigidos. Qualquer divergência interrompe antes da troca.
+- O script/workflow oficial mantém a mesma allowlist, imagem-base, ancestralidade, hashes de runtime, Compose efetivo, env/mounts, PostgreSQL, readiness e rollback. Não é autorização para qualquer script sob scripts/, Dockerfile alterado, instalação genérica ou atualização Baileys. Push main continua CI-only; deploy somente workflow_dispatch e aprovação explícita.
+- CI usa base fictícia limpa construída do mesmo SHA, duas construções sem cache/rede do Dockerfile gerado e verifica os mesmos hashes de código nas imagens. Isso prova reprodutibilidade do conteúdo autorizado, não igualdade de metadados/IMAGE IDs entre builds. Não usa imagem, dados ou volumes da VPS. A publicação futura requer reconfirmar a base real e rollback.
+
 ## Frontend
 
 - Runtime homologado: `nodejs22.x` via Nitro em `vite.config.ts`.

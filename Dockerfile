@@ -6,7 +6,6 @@ WORKDIR /app
 
 COPY package*.json ./
 COPY scripts/apply-baileys-retry-hotfix.cjs ./scripts/
-COPY modules/whatsapp/baileys-buffer-hotfix.service.js ./modules/whatsapp/
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
