@@ -9,6 +9,7 @@ function git(cwd,args){const r=spawnSync("git",args,{cwd,encoding:"utf8",windows
 function clone(){
  fs.mkdirSync(fixtureParent,{recursive:true});const dir=fs.mkdtempSync(path.join(fixtureParent,"fixture-"));
  git(root,["clone","--quiet","--shared","--no-checkout",root,dir]);
+ git(dir,["config","core.longpaths","true"]);
  git(dir,["checkout","--quiet","--detach",git(root,["rev-parse","HEAD"])]);
  git(dir,["config","user.email","fixture@example.invalid"]);git(dir,["config","user.name","Fixture"]);return dir;
 }

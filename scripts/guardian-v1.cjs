@@ -54,7 +54,13 @@ const BAILEYS_BUFFER_PROFILE = {
 };
 
 function contentHash(repo, sha, file) {
-  return crypto.createHash("sha256").update(git(repo, ["show", `${sha}:${file}`]).stdout).digest("hex");
+  // index.js exceeds spawnSync's default 1 MiB buffer. Hash bounded binary
+  // bytes, not truncated/decoded output; an incomplete read fails closed.
+  const result = spawnSync("git", ["-C", repo, "show", `${sha}:${file}`], {
+    encoding: null, windowsHide: true, timeout: 15000, maxBuffer: 4 * 1024 * 1024
+  });
+  if (result.error || result.status !== 0) throw new Error("hotfix_content_unreadable");
+  return crypto.createHash("sha256").update(result.stdout).digest("hex");
 }
 
 function validateBufferProfile(repo, base, source, runtimeFiles) {
