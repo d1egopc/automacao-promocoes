@@ -10,7 +10,7 @@ const {
   resolverIdentidadeCanonicaOferta
 } = require("../produto-canonico");
 const {
-  extrairProvaIdentidadeMercadoLivreHtml
+  extrairProvaIdentidadeMercadoLivreHtml, extrairTransporteShowProductMercadoLivreHtml
 } = require("../mercadolivre-social-identidade");
 
 const resolversRegistrados = [];
@@ -444,6 +444,10 @@ function logHtmlAmostraPromozone({ urlOriginal = "", statusHttp = "", html = "" 
 }
 
 async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
+  // Explicit administrative strategy only. Existing commercial consumers keep
+  // their current resolver/latency contract unless this opt-in is supplied.
+  const camadas = contexto.adminValidation === true && contexto.resolucaoEmCamadas === true;
+  const evidencias = camadas ? require("./redirect-product-evidence") : null;
   const httpClient = contexto.httpClient || axios;
   const timeoutTotal = Math.max(250, Number(contexto.timeout || 4500));
   const prazoAbsoluto = contexto.secureDynamic === true
@@ -452,7 +456,7 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
       : performance.now() + timeoutTotal)
     : null;
   const maxRedirects = Math.max(0, Number(contexto.maxRedirects || 5));
-  const maxHtmlHops = Math.max(1, Math.min(3, Number(contexto.maxHtmlHops || 2)));
+  const maxHtmlHops = camadas ? 4 : Math.max(1, Math.min(3, Number(contexto.maxHtmlHops || 2)));
   const inicio = Date.now();
   const headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
@@ -465,9 +469,45 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
   let metodo = "http_sem_redirect";
   const hops = [];
   const dadosHops = contexto.secureDynamic === true ? { hops } : {};
+  const visitadosHtml = new Set();
+  let bytesLidos = 0;
+  async function obterCamada(url) {
+    const redirectsUsados = hops.filter(h => h.status >= 300 && h.status < 400).length;
+    if (hops.length >= 9 || redirectsUsados > maxRedirects || bytesLidos >= 4 * 1024 * 1024)
+      throw new Error("REDIRECT_LIMIT");
+    const resposta = await obterHttpSeguro(url, {
+      timeout: timeoutTotal, deadlineAt: prazoAbsoluto,
+      maxRedirects: Math.min(maxRedirects - redirectsUsados, 8 - hops.length),
+      // Only a validated official Amazon product page gets the larger static
+      // document allowance. Shorteners/unknown hosts retain the original 1 MiB.
+      maxBytes: 2 * 1024 * 1024,
+      maxBytesForUrl: target => evidencias.identidadeUrlProduto(target.href).startsWith("amazon:")
+        ? 2 * 1024 * 1024 : 1024 * 1024,
+      maxTotalBytes: 4 * 1024 * 1024 - bytesLidos, headers,
+      ...(contexto.safeHttpDeps || {})
+    });
+    bytesLidos += resposta.bytesRead ?? Buffer.byteLength(String(resposta.data || ""));
+    return resposta;
+  }
 
   try {
+    if (camadas && contexto.secureDynamic !== true) throw new Error("URL_BLOQUEADA_SEGURANCA");
+    // Reuse the existing public provider contract; no credentials, arbitrary API
+    // endpoints or provider JavaScript. Its result remains only a destination.
+    if (camadas && ["go.promozone.ai", "promozone.ai"].includes(hostname(urlOriginal)) && codigoPromozone(urlOriginal)) {
+      const resposta = await obterCamada(`${PROMOZONE_API_BASE}/resolve/${encodeURIComponent(codigoPromozone(urlOriginal))}`);
+      hops.push(...resposta.hops);
+      if (resposta.status >= 400) return resultadoFalha(urlOriginal, {
+        statusHttp: resposta.status, motivo: `http_status_${resposta.status}`, metodo: "promozone_api", ...dadosHops });
+      const destino = extrairDestinoRespostaPromozone(resposta.data);
+      if (destino && MARKETPLACES_PROMOZONE_PERMITIDOS.has(detectarMarketplaceRedirect(destino))) {
+        urlAtual = validarUrlPublica(destino).href;
+        metodo = "promozone_api";
+      }
+    }
     for (let hop = 0; hop < maxHtmlHops; hop += 1) {
+      if (camadas && visitadosHtml.has(urlAtual)) throw new Error("REDIRECT_LOOP");
+      if (camadas) visitadosHtml.add(urlAtual);
       const restante = prazoAbsoluto === null
         ? timeoutTotal - (Date.now() - inicio)
         : prazoAbsoluto - performance.now();
@@ -482,7 +522,7 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
         maxBodyLength: 1024 * 1024,
         headers
       };
-      const resposta = contexto.secureDynamic === true
+      const resposta = camadas ? await obterCamada(urlAtual) : contexto.secureDynamic === true
         ? await obterHttpSeguro(urlAtual, {
           timeout: restante, deadlineAt: prazoAbsoluto, maxRedirects, maxBytes: 1024 * 1024, headers,
           ...(contexto.safeHttpDeps || {})
@@ -506,7 +546,25 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
 
       const marketplaceHttp = detectarMarketplaceRedirect(urlFinal);
       const html = Buffer.isBuffer(resposta.data) ? resposta.data.toString("utf8") : String(resposta.data || "");
-      if (marketplaceHttp && urlFinal !== urlOriginal) {
+      if (camadas) {
+        const prova = evidencias.evidenciaProdutoHtml(html, urlFinal);
+        if (performance.now() >= prazoAbsoluto) throw new Error("REDIRECT_TIMEOUT");
+        if (prova.confirmada) return {
+          ok: true, urlOriginal, urlFinal: prova.urlProduto, urlExpandida: prova.urlProduto,
+          marketplaceDetectado: marketplaceHttp || (prova.chave.startsWith("magalu:") ? "magalu" : ""), status: "resolvido", statusHttp,
+          metodo, motivo: "produto_identificado_html_oficial", produtoConfirmado: true,
+          provaProduto: { origem: prova.origem, chave: prova.chave }, afiliacaoConfirmada: false,
+          prontoComercial: false, ...dadosHops
+        };
+        if (typeof contexto.onHtml === "function") {
+          try { contexto.onHtml({ html, urlFinal, statusHttp }); } catch {}
+        }
+        if (urlSocialMercadoLivre(urlFinal)) {
+          const cta = extrairTransporteShowProductMercadoLivreHtml(html, { base: urlFinal });
+          if (cta.ok) { urlAtual = validarUrlPublica(cta.urlProduto).href; metodo = "html_contextual"; continue; }
+        }
+      }
+      if (marketplaceHttp && urlFinal !== urlOriginal && (!camadas || evidencias.identidadeUrlProduto(urlFinal))) {
         const produtoAliExpress = contexto.secureDynamic === true && marketplaceHttp === "aliexpress"
           ? produtoAliExpressConfirmadoNaLanding(urlFinal, html) : "";
         return {
@@ -523,7 +581,7 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
         };
       }
 
-      if (typeof contexto.onHtml === "function") {
+      if (!camadas && typeof contexto.onHtml === "function") {
         try {
           contexto.onHtml({ html, urlFinal, statusHttp });
         } catch {}
@@ -536,6 +594,12 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
         destinoHtml = extrairDestinoEstaticoHtml(html, urlFinal || urlAtual) || destinoHtml;
       }
       if (!destinoHtml.url) {
+        if (camadas && marketplaceHttp) return {
+          ok: true, urlOriginal, urlFinal, urlExpandida: urlFinal,
+          marketplaceDetectado: marketplaceHttp, status: "candidato", statusHttp,
+          metodo: destinoHtml.metodo, motivo: "identidade_nao_comprovada",
+          produtoConfirmado: false, afiliacaoConfirmada: false, prontoComercial: false, ...dadosHops
+        };
         return resultadoFalha(urlOriginal, {
           urlFinal,
           statusHttp,
@@ -551,6 +615,7 @@ async function resolverHttpGenerico(urlOriginal = "", contexto = {}) {
           const destinoSeguro = validarUrlPublica(destinoHtml.url);
           await enderecoPublico(destinoSeguro, contexto.safeHttpDeps?.lookup);
         }
+        if (camadas) { urlAtual = destinoHtml.url; metodo = destinoHtml.metodo; continue; }
         return {
           ok: true,
           urlOriginal,
@@ -862,6 +927,9 @@ function aplicarIdentidadeCanonicaRedirect(resultado = {}) {
 }
 
 async function resolverRedirectUniversal(url = "", opcoes = {}) {
+  if (opcoes.adminValidation === true && opcoes.resolucaoEmCamadas === true) {
+    return aplicarIdentidadeCanonicaRedirect(await resolverHttpGenerico(texto(url), { ...opcoes, secureDynamic: true }));
+  }
   const inicio = Date.now();
   const urlOriginal = texto(url);
   const registro = localizarResolverRedirect(urlOriginal, opcoes) ||

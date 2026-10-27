@@ -13,6 +13,16 @@ const { execFileSync } = require("node:child_process");
 const { criarAdminMasterEstrito } = require("../utils/admin-auth-estrito");
 const { criarRegistroDinamico } = require("../modules/radar/redirect/dynamic-resolver-registry");
 const { criarRotasResolversDinamicos } = require("../modules/radar/redirect/dynamic-resolver-admin.routes");
+const { identidadeUrlProduto } = require("../modules/radar/redirect/redirect-product-evidence");
+
+function paginaProdutoFixture(url) {
+  const chave = identidadeUrlProduto(url);
+  if (!chave) return "";
+  return `<link rel="canonical" href="${url}"><script type="application/ld+json">${JSON.stringify({
+    "@type": "Product", name: "Furadeira de impacto profissional", url,
+    ...(chave.startsWith("mercadolivre:") ? { productID: chave.split(":")[1], image: "https://http2.mlstatic.com/fixture.jpg" } : {})
+  })}</script>`;
+}
 
 async function fixture(run) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "links-v23-"));
@@ -27,7 +37,7 @@ async function fixture(run) {
       req.destroy = () => { req.destroyed = true; };
       req.end = () => queueMicrotask(() => {
         calls.push(url.href);
-        const value = responses.get(url.hostname + url.pathname) || responses.get(url.pathname) || { status: 200, body: "" };
+        const value = responses.get(url.hostname + url.pathname) || responses.get(url.pathname) || { status: 200, body: paginaProdutoFixture(url.href) };
         if (value.error) { req.emit("error", Object.assign(new Error(value.error), { code: value.code })); return; }
         const res = new EventEmitter();
         res.statusCode = value.status;
@@ -71,7 +81,7 @@ test("HTTP redirect, HTML contextual, meta refresh and static literals reuse the
   assert.equal(a.marketplaceReconhecido, "nao_comprovado", "a origem externa não é o marketplace final");
   assert.equal(a.marketplaceCandidato, "shopee");
   assert.deepEqual(a.hops.map(x => x.status), [302, 200]);
-  assert.equal(a.produtoConfirmado, false);
+  assert.equal(a.produtoConfirmado, true, "a página oficial da fixture contém identidade factual vinculada à URL");
   assert.equal(a.afiliacaoConfirmada, false);
   assert.equal(f.registry.listar().length, 0, "inspeção não salva nem ativa");
   f.responses.set("/s/context", { status: 200, body: '<main><h1>Furadeira de impacto profissional</h1><a href="https://shopee.com.br/product/10/20">Ver oferta</a></main>' });
@@ -114,6 +124,14 @@ test("403, timeout, network failure, loop, redirect limit and missing identity r
   assert.equal((await f.request("/drafts", { urlExemplo: "https://external.example.com/s/home" })).status, 422);
   assert.equal(home.identidade, "nao_comprovada");
   assert.equal(home.produtoConfirmado, false);
+  f.responses.set("shopee.com.br/product/10/99", { status: 200, body: "" });
+  f.responses.set("/s/no-proof", { status: 302, location: "https://shopee.com.br/product/10/99" });
+  const noProof = (await f.inspect("https://external.example.com/s/no-proof")).data;
+  assert.equal(noProof.resultado, "investigacao_pendente", "HTTP 200 e URL com ID não comprovam produto");
+  assert.equal(noProof.rascunhoElegivel, false);
+  const noProofDiscovery = await f.request("/discover", { urlExemplo: "https://external.example.com/s/no-proof" });
+  assert.equal(noProofDiscovery.data.ok, false);
+  assert.equal(noProofDiscovery.data.motivo, "identidade_nao_comprovada", "rejeição de identidade nunca pode dizer validado");
   assert.equal(home.afiliacaoConfirmada, false);
   f.responses.set("/s/legacy", { status: 302, location: "https://amzlink.to/public-fixture" });
   const legacy = f.registry.adicionar({ host: "external.example.com", pathPrefix: "/s/", urlExemplo: "https://external.example.com/s/legacy" });

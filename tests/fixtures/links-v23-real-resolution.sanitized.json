@@ -1,0 +1,797 @@
+{
+  "schema": 1,
+  "kind": "sanitized_observed_public_network_evidence_not_live_CI",
+  "sampleFingerprint": "5fa12103ca5e2902e7d969d08967280aec1f398859dcb1565f2aa71ab2671e06",
+  "sampleCount": 40,
+  "baseline": "31ea52117bf98fc8d3494126cc445920332e98d1",
+  "normalizedSourceHashes": {
+    "modules/radar/redirect/redirect-resolver.js": "97703631c5d0e2a4d69abc78f43fca2810de6d7f7264be38c7a8e52e43269b1b",
+    "modules/radar/redirect/redirect-product-evidence.js": "34c723c94150b69d8a27c9799478ab7b0623949611a3573abd4361f83c16d290",
+    "modules/radar/redirect/safe-redirect-http.js": "5d087d985c0af141bf5f458d5bb06e62063bcd0db0d29960e7e8f9b5ff35a340",
+    "marketplaces/amazon/parser.js": "04e440d55c913f809aed705a00ed201574bdd9edca428a168edecde91bce5c21"
+  },
+  "definitions": {
+    "resolved": "bounded public transport plus unique first-party factual product proof aligned with returned product URL; never HTTP 200 alone",
+    "productIdentified": "proof available in a fully read document, even if old resolver left destination at social/shortlink",
+    "affiliation": "never confirmed by this measurement",
+    "latency": "paired response replay retaining recorded HTTP durations; separate live timing recorded outside Git"
+  },
+  "before": {
+    "resolved": 9,
+    "identified": 10,
+    "medianMs": 1381
+  },
+  "after": {
+    "resolved": 18,
+    "identified": 18,
+    "medianMs": 2198
+  },
+  "gained": [
+    8,
+    9,
+    12,
+    20,
+    21,
+    32,
+    33,
+    36,
+    40
+  ],
+  "lost": [],
+  "unresolvedByReason": {
+    "identidade_nao_comprovada": 8,
+    "limite_redirect_html": 10,
+    "http_status_403": 3,
+    "redirect_nao_resolvido": 1
+  },
+  "reusableFamilyEvidence": [
+    {
+      "host": "tidd.ly",
+      "pathPrefix": "/",
+      "pathMode": "one_segment_suffix",
+      "distinctExamples": 3,
+      "rowIds": [
+        6,
+        18,
+        30
+      ],
+      "activated": false
+    }
+  ],
+  "rows": [
+    {
+      "id": 1,
+      "domain": "seuhardware.com",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 2,
+      "domain": "desc.vc",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 3,
+      "domain": "ofertou.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 4,
+      "domain": "meli.la",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 5,
+      "domain": "magazineluiza.onelink.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "http_status_403",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 6,
+      "domain": "tidd.ly",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "62289e12c8a6",
+            "bodyHash": "016138ffbaaae642b8b87d0d3ec9dbaa1e982f67d89f0c0cf0dc9f6605c551a2"
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "domain": "s.shopee.com.br",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 8,
+      "domain": "amzlink.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "7b1a456ac235",
+            "bodyHash": "096293e4620a77ca81fac2fa6ea8a19c4cdeadd184b351bba31d86cfc8ef548a"
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "domain": "amzn.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "e5b4c8a3a419",
+            "bodyHash": "f29b217966e046f71ecbe04de2a1ce4524b42475f6564023bca2b1ab1294fbd2"
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "domain": "aoferta.net",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "94c832dcc469",
+            "bodyHash": "3927d9b81bb854b97e72b2167621d98ca08bb2c9d52bac0c74d9a3fc0fdba156"
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "domain": "a.aliexpress.com",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 12,
+      "domain": "go.promozone.ai",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "428a03e77d36",
+            "bodyHash": "d7bc2b1c8ea7216388e285e8b9e99c71fb6032d09c5734a95b702088b3a32284"
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "domain": "seuhardware.com",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "4fc7b8df8240",
+            "bodyHash": "ab4160be792abad95613152872a33871feaff2d73c510680e6a53a93699bf0bd"
+          }
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "domain": "desc.vc",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "redirect_nao_resolvido",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 15,
+      "domain": "ofertou.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 16,
+      "domain": "meli.la",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 17,
+      "domain": "magazineluiza.onelink.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "http_status_403",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 18,
+      "domain": "tidd.ly",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "6a6d32300d59",
+            "bodyHash": "4bbdfdf4eb49eda0ff04958d4a190c2aa43956bfb187759b1273d23d63289071"
+          }
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "domain": "s.shopee.com.br",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 20,
+      "domain": "amzlink.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "91b9d61f7184",
+            "bodyHash": "52258e71697b7ee1b5e69b3ed2dc988273f225cceb2b1648202aabd24fd33b55"
+          }
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "domain": "amzn.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "4f8b94eb40be",
+            "bodyHash": "d0a6e94883910117e67f65614c3bfc70ace5b0ae161b06b5cd6e80874b8736d9"
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "domain": "aoferta.net",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "95b61a19936e",
+            "bodyHash": "d87812efa1b57f4dc5a3577d95f9ac5becfd4e4c04c038478b49c286aa6033c5"
+          }
+        ]
+      }
+    },
+    {
+      "id": 23,
+      "domain": "a.aliexpress.com",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 24,
+      "domain": "go.promozone.ai",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 25,
+      "domain": "seuhardware.com",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "4fc7b8df8240",
+            "bodyHash": "d76e2f01f084244a881379755a22f5627a7516ac9c58832a6eb9fbb9e46b1b99"
+          }
+        ]
+      }
+    },
+    {
+      "id": 26,
+      "domain": "desc.vc",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 27,
+      "domain": "ofertou.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 28,
+      "domain": "meli.la",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 29,
+      "domain": "magazineluiza.onelink.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "http_status_403",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 30,
+      "domain": "tidd.ly",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "32a99d33f520",
+            "bodyHash": "202376c84a971dffa3ae286902bd179e98600d9744496fbdcbf9838764e18c21"
+          }
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "domain": "s.shopee.com.br",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 32,
+      "domain": "amzlink.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "a5e5d16cdd7a",
+            "bodyHash": "6cfd05921d553184593ec2cf503c7373fd25978cb3ed3fafc0f0b2c82f0ecae9"
+          }
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "domain": "amzn.to",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "59891a400373",
+            "bodyHash": "b01959b33887842afd784b461eb6ab85be57ef75ac0231b635388792ec4cdef9"
+          }
+        ]
+      }
+    },
+    {
+      "id": 34,
+      "domain": "aoferta.net",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "95b61a19936e",
+            "bodyHash": "7474e679a2eb2ca627fb150f50ab516acabed950606b5b0532b0066feb70a2d9"
+          }
+        ]
+      }
+    },
+    {
+      "id": 35,
+      "domain": "a.aliexpress.com",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "identidade_nao_comprovada",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 36,
+      "domain": "go.promozone.ai",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.amazon.com.br",
+            "origin": "amazon_primary_title_asin_canonical",
+            "keyHash": "a48e64b1e1a7",
+            "bodyHash": "d6f8bf3c93f0e8e60827c3ee6365249c19f59ee7788f424eaaafffce75ea7d0f"
+          }
+        ]
+      }
+    },
+    {
+      "id": 37,
+      "domain": "seuhardware.com",
+      "before": {
+        "resolved": true,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.kabum.com.br",
+            "origin": "jsonld_product_url_factual",
+            "keyHash": "4fc7b8df8240",
+            "bodyHash": "752aceb5e1d2bce42cb208db4771e97d40eb96c33b059e10893da20067b87cf8"
+          }
+        ]
+      }
+    },
+    {
+      "id": 38,
+      "domain": "desc.vc",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 39,
+      "domain": "ofertou.me",
+      "before": {
+        "resolved": false,
+        "productIdentified": false
+      },
+      "after": {
+        "resolved": false,
+        "productIdentified": false,
+        "reason": "limite_redirect_html",
+        "affiliationConfirmed": false,
+        "proofs": []
+      }
+    },
+    {
+      "id": 40,
+      "domain": "meli.la",
+      "before": {
+        "resolved": false,
+        "productIdentified": true
+      },
+      "after": {
+        "resolved": true,
+        "productIdentified": true,
+        "reason": "resolved",
+        "affiliationConfirmed": false,
+        "proofs": [
+          {
+            "host": "www.mercadolivre.com.br",
+            "origin": "card-featured.polycards[0].metadata",
+            "keyHash": "7cafa69917af",
+            "bodyHash": "62ad9497dfdef8d2a9d3af450ad637c7874728ff5af80e026b16e167314a4085"
+          }
+        ]
+      }
+    }
+  ],
+  "observedAt": "2026-10-27T00:25:43.440Z",
+  "sourceRecordPeriodUtc": {
+    "from": "2026-10-21T23:47:18.572Z",
+    "through": "2026-10-26T23:57:07.085Z",
+    "datedRecords": 35,
+    "otherSources": 5
+  },
+  "liveLatencyMs": 2180.5
+}

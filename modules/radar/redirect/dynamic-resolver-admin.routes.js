@@ -24,7 +24,7 @@ const segmentosEstruturais = new Set([
 const papeisPreview = new Set(["nao_informado", "produto", "app", "pc", "moedas", "moda", "resgate"]);
 const metodosPreview = new Set(["http_redirect", "html_contextual", "html_marketplace_url",
   "meta_refresh", "window_location", "parametro_e_html_produto", "http_sem_redirect",
-  "html_static_base64"]);
+  "html_static_base64", "promozone_api"]);
 
 // Completa apenas a classificacao da prévia com o host oficial da Engine.
 // O fallback textual de detectarMarketplaceLink não pode autorizar um host citado em query/path.
@@ -130,6 +130,7 @@ function urlDebugSeguro(valor) {
 }
 
 function tipoResultado(resultado) {
+  if (resultado.produtoConfirmado === true) return "produto";
   const url = resultado.urlExpandida || resultado.urlFinal || "";
   const classificacao = classificarLinkEngine({ marketplace: resultado.marketplaceDetectado, url });
   if (classificacao.papelLink && classificacao.papelLink !== "desconhecido") return classificacao.papelLink;
@@ -163,9 +164,10 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   safeHttpDeps = null, obterIdentidadeMercadoLivre = null, obterIdentidadeMagalu = null } = {}) {
   const router = express.Router();
   const getStore = () => registry || registroDinamicoPadrao();
-  // Administrative inspection always uses the bounded, DNS-pinned HTTP reader,
-  // not provider conversion APIs or their legacy clients. Tests can inject results.
-  const resolveInspection = resolve === resolverRedirectUniversal ? resolverHttpGenerico : resolve;
+  // The universal resolver's explicit administrative strategy uses DNS-pinned
+  // HTTP and existing public destination APIs, never conversion/affiliate APIs.
+  const resolveInspection = resolve;
+  const exigeProvaProduto = resolve === resolverRedirectUniversal;
   const operador = req => String(req.usuario?.workspaceId || req.usuario?.clienteId || req.usuario?.id || "");
   const visivel = (registro, req) => registro?.estado !== "investigacao_pendente" ||
     Boolean(operador(req) && registro.workspaceId === operador(req));
@@ -179,7 +181,7 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     let resultado;
     try {
       validarUrlPublica(entrada);
-      resultado = await resolveInspection(entrada, { adminValidation: true, secureDynamic: true,
+      resultado = await resolveInspection(entrada, { adminValidation: true, secureDynamic: true, resolucaoEmCamadas: true,
         dynamicRegistry: { localizar: () => null }, descobertaContextual: true,
         timeout: 4500, maxRedirects: 5, ...(safeHttpDeps ? { safeHttpDeps } : {}) });
     } catch (error) {
@@ -190,7 +192,8 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     const marketplace = marketplacePreview(final);
     const candidato = resultado.ok === true && Boolean(marketplace) && marketplace === resultado.marketplaceDetectado;
     const identidade = candidato && Boolean(resultado.chaveCanonica || tipoResultado(resultado) === "produto");
-    const resolvido = candidato && identidade;
+    const confirmado = candidato && resultado.produtoConfirmado === true;
+    const resolvido = candidato && identidade && (!exigeProvaProduto || confirmado);
     const motivo = resolvido ? null : candidato ? "identidade_nao_comprovada" : normalizarMotivoTecnicoRedirect(resultado);
     const bloqueado = motivo === "URL_BLOQUEADA_SEGURANCA";
     let familia = null;
@@ -225,13 +228,13 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       pistaParametro, coberturaHops: Array.isArray(resultado.hops) ? "registrada" : "indisponivel",
       hops: (resultado.hops || []).slice(0, 6).map(hop => ({ url: urlDebugSeguro(hop.url), status: Number(hop.status) || null })),
       destinoHtml: /html|meta_refresh|window_location/.test(resultado.metodo || "") ? debug.destino : "",
-      identidade: identidade ? "candidata" : "nao_comprovada",
+      identidade: confirmado ? "comprovada" : identidade ? "candidata" : "nao_comprovada",
       evidencia: candidato && resultado.evidencia === "cta_unica_em_produto" ? "cta_unica_em_produto" : "",
       familia, resolverOficial: oficial,
       cadastroExistente: existente ? { id: existente.id, ativo: existente.ativo, estado: existente.estado || "legado" } : null,
       rascunhoElegivel: resolvido && Boolean(familia) && !oficial && !existente,
       investigacaoElegivel: !bloqueado && !resolvido,
-      produtoConfirmado: false, afiliacaoConfirmada: false, prontoComercial: false };
+      produtoConfirmado: confirmado, afiliacaoConfirmada: false, prontoComercial: false };
   }
   async function descobrir(urlExemplo) {
     const familia = inferirFamiliaRascunho(urlExemplo);
@@ -239,17 +242,18 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     if (familiaOficial(familia.host)) throw new Error("RESOLVER_HARDCODED");
     // O modo administrativo não consulta a allowlist ativa e não a modifica.
     const resultado = await resolve(familia.urlExemplo, {
-      adminValidation: true, dynamicRegistry: { localizar: () => null },
+      adminValidation: true, resolucaoEmCamadas: true, dynamicRegistry: { localizar: () => null },
       descobertaContextual: true, timeout: 4500, maxRedirects: 5,
       ...(safeHttpDeps ? { safeHttpDeps } : {})
     });
     const final = resultado.urlExpandida || resultado.urlFinal || "";
     const marketplace = marketplacePreview(final);
-    const ok = resultado.ok === true && Boolean(marketplace) &&
+    const ok = resultado.ok === true && (!exigeProvaProduto || resultado.produtoConfirmado === true) && Boolean(marketplace) &&
       marketplace === resultado.marketplaceDetectado;
     return { familia, resultado, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
       evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
-      debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
+      debug: diagnosticoSeguro(familia.urlExemplo, !ok && resultado.ok === true
+        ? { ...resultado, ok: false, motivo: "identidade_nao_comprovada" } : resultado) };
   }
   async function descobrirPreview(urlExemplo) {
     const analise = await descobrir(urlExemplo);
@@ -308,7 +312,7 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       marketplaceCandidato: analise.marketplace || "nao_comprovado", evidencia: analise.evidencia || "",
       motivo: analise.debug.motivo, statusHttp: analise.debug.statusHttp,
       motivoTecnico: analise.ok ? null : normalizarMotivoTecnicoRedirect(analise.resultado),
-      hops: analise.debug.hops, produtoConfirmado: false, afiliacaoConfirmada: false };
+      hops: analise.debug.hops, produtoConfirmado: analise.ok && analise.resultado.produtoConfirmado === true, afiliacaoConfirmada: false };
   }
   async function validar(entrada) {
     validarUrlPublica(entrada);
