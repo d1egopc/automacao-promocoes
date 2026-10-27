@@ -302,6 +302,7 @@ function testMatrix(plan) {
   }
   if (plan.runtimeFiles.includes("modules/engine/importer/importer.service.js")) {
     add("magalu:identity-image-retry", "tests/magalu-recovery-retry.test.cjs", process.execPath, ["--test", "tests/magalu-recovery-retry.test.cjs"], false);
+    add("magalu:platform-worker-architecture", "tests/local-worker-platform-architecture.test.cjs", process.execPath, ["--test", "tests/local-worker-platform-architecture.test.cjs"], false);
     for (const name of [
       "magalu-engine-importer", "magalu-identity-engine-importer", "magalu-local-worker-identity",
       "magalu-image-resolver", "magalu-factual-resolver", "magalu-affiliate-link", "magalu-parser",

@@ -28,4 +28,6 @@
 
 ## Gate
 
+O cache de identidade/imagem pública do Local Worker é um recurso técnico compartilhado já existente, por marketplace/produto/URL, conforme [EXTENSION.md](EXTENSION.md#worker-d1egopc--infraestrutura-compartilhada-da-plataforma). Essa exceção não se aplica a credenciais, afiliação, jobs, filas, templates ou dados comerciais privados. A workspace solicitante continua sendo a do job; o owner autenticado da extensão não a substitui. A tabela técnica não registra todos os solicitantes atualmente: documentar essa lacuna e não inventar propriedade de tarefa por tenant.
+
 Todo patch transversal precisa de teste com pelo menos dois workspaces, incluindo colisao de IDs comerciais. Persistencia/concorrencia multiworkspace eleva a tarefa para Nivel 3 ou 4.
