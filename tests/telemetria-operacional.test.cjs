@@ -234,6 +234,135 @@ async function fixture(options = {}) {
   return { base, call, close: () => new Promise((r) => server.close(r)) };
 }
 
+test("owner-provided grant works without TTY, clipboard, login or REQUEST_ID and revocation denies its next GET", async () => {
+  const f = await fixture(),
+    output = [],
+    calls = [];
+  const g = (
+    await f.call("/auditoria/ativar", "fixture-master", {
+      escopo: "workspace",
+      clienteId: "user_a",
+      ttlMinutos: 15,
+    })
+  ).body;
+  const paths = [
+    "/workspaces",
+    "/problemas",
+    "/sonda-radar",
+    "/rastreio/evento/123",
+    "",
+  ];
+  const options = {
+    fixture: true,
+    base: f.base,
+    authorization: g.codigo,
+    path: "/operacional?clienteId=user_b",
+    interactive: true,
+    input: async () => paths.shift(),
+    output: (line) => output.push(line),
+    readToken: () =>
+      assert.fail("provided authorization cannot require stdin or TTY"),
+    wait: () => assert.fail("provided authorization cannot wait for approval"),
+    fetcher: (url, config) => {
+      assert.equal(config.method, "GET");
+      assert.equal(config.headers.Authorization, `Bearer ${g.codigo}`);
+      assert.ok(!url.includes(g.codigo));
+      calls.push(url);
+      return fetch(url, config);
+    },
+  };
+  try {
+    await runClient(options);
+    assert.equal(calls.length, 5);
+    assert.ok(output.includes("PREAUTHORIZED_READ=PASS"));
+    assert.ok(output.some((line) => line.includes('"workspace":"user_a"')));
+    assert.ok(!output.join("\n").includes(g.codigo));
+    assert.ok(!output.some((line) => line.includes("REQUEST_ID=")));
+    await f.call("/auditoria/revogar", "fixture-master", {
+      auditoriaId: g.auditoriaId,
+    });
+    await assert.rejects(
+      runClient({ ...options, interactive: false }),
+      /http_401:\/operacional/,
+    );
+    assert.equal(
+      output.filter((line) => line === "PREAUTHORIZED_READ=PASS").length,
+      1,
+    );
+    assert.ok(!output.join("\n").includes(g.codigo));
+  } finally {
+    await f.close();
+  }
+});
+
+test("provided expired grant and invalid input fail closed without starting another authorization", async () => {
+  const f = await fixture();
+  const g = grant("plataforma");
+  const output = [];
+  const options = {
+    fixture: true,
+    base: f.base,
+    authorization: g.codigo,
+    output: (line) => output.push(line),
+    readToken: () => assert.fail("no terminal fallback"),
+    wait: () => assert.fail("no authorization fallback"),
+  };
+  try {
+    stored.find((a) => a.auditoriaId === g.auditoriaId).expiraEm = new Date(
+      0,
+    ).toISOString();
+    await assert.rejects(runClient(options), /http_401/);
+    for (const authorization of ["", "invalid", null, { codigo: g.codigo }]) {
+      await assert.rejects(
+        runClient({
+          ...options,
+          authorization,
+          fetcher: () => assert.fail("invalid input cannot perform HTTP"),
+        }),
+        /prepared_token_invalid/,
+      );
+    }
+    assert.deepEqual(output, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test("collector redacts reflected temporary codes and never forwards sensitive transport errors", async () => {
+  const fake = "tel_" + "F".repeat(43),
+    output = [];
+  const options = {
+    authorization: fake,
+    output: (line) => output.push(line),
+    readToken: () => assert.fail("no terminal"),
+    fetcher: async (url, config) => {
+      assert.equal(
+        url,
+        "https://go.optimuspromo.com.br/telemetria/operacional",
+      );
+      assert.equal(config.method, "GET");
+      return { ok: true, json: async () => ({ reason: fake, nested: [fake] }) };
+    },
+  };
+  await runClient(options);
+  assert.ok(!output.join("\n").includes(fake));
+  assert.match(output.join("\n"), /\[REDACTED\]/);
+  await assert.rejects(
+    runClient({
+      ...options,
+      fetcher: async () => {
+        throw Object.assign(new Error(`sensitive transport details ${fake}`), {
+          cause: { authorization: fake },
+        });
+      },
+    }),
+    (error) =>
+      error.message === "safe_request_failed" &&
+      error.cause === undefined &&
+      !error.stack.includes(fake),
+  );
+});
+
 test("tel_ defaults to 15 minutes, hashes only, zero writes on GET, immediate revoke/expiry", () => {
   const g = grant();
   assert.equal(g.ok, true);

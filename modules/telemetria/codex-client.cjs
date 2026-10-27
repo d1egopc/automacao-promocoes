@@ -7,11 +7,22 @@ const { readPreparedToken } = require("./prepared-token-input.cjs");
 const ALLOWED =
   /^\/(?:operacional|workspaces|problemas|sonda-radar|eventos|saude|rastreio\/(?:evento|job|oferta)\/\d{1,20})(?:\?[^#]*)?$/;
 
+function collectorErrorCode(error) {
+  const message = typeof error?.message === "string" ? error.message : "";
+  return /^http_\d{3}:\/[a-z/0-9-]+$/.test(message) ||
+    /^(?:prepared_(?:token_invalid|input_(?:unavailable|cancelled|timeout))|request_rejected|authorization_(?:not_received|expired)|read_path_not_allowed)$/.test(
+      message,
+    )
+    ? message
+    : "safe_request_failed";
+}
+
 async function run({
   base = "https://go.optimuspromo.com.br",
   path = "/operacional",
   interactive = false,
   prepared = false,
+  authorization,
   readToken = readPreparedToken,
   fixture = false,
   output = console.log,
@@ -35,6 +46,10 @@ async function run({
   if (origin.search || origin.hash || origin.pathname !== "/")
     throw new Error("unapproved_origin");
   let credential = "";
+  const usingPrepared = prepared || authorization !== undefined;
+  // An already-issued grant is input, never a command-line or authentication flow.
+  const emit = (text) =>
+    output(String(text).replace(/tel_[A-Za-z0-9_-]{43}/g, "[REDACTED]"));
   async function request(endpoint, body, token = "") {
     const res = await fetcher(`${origin.origin}/telemetria${endpoint}`, {
       method: body ? "POST" : "GET",
@@ -52,8 +67,12 @@ async function run({
   }
   try {
     let grant;
-    if (prepared) {
-      credential = await readToken();
+    if (usingPrepared) {
+      credential =
+        authorization !== undefined ? authorization : await readToken();
+      authorization = undefined;
+      if (typeof credential !== "string")
+        throw new Error("prepared_token_invalid");
       if (!/^tel_[A-Za-z0-9_-]{43}$/.test(credential || ""))
         throw new Error("prepared_token_invalid");
     } else {
@@ -64,8 +83,8 @@ async function run({
         .digest("base64url");
       const pending = await request("/auditoria/solicitar", { challenge });
       if (!pending.ok) throw new Error("request_rejected");
-      output(`REQUEST_ID=${pending.requestId}`);
-      output(
+      emit(`REQUEST_ID=${pending.requestId}`);
+      emit(
         "Aprovar no painel /telemetria → Auditoria Codex. Nenhum login ou token principal é solicitado.",
       );
       const deadline = Math.min(pending.expiresAt, now() + 300000);
@@ -84,7 +103,7 @@ async function run({
         throw new Error("authorization_not_received");
       credential = grant.codigo;
       delete grant.codigo;
-      output(`AUTHORIZED=YES EXPIRES_AT=${grant.expiraEm}`);
+      emit(`AUTHORIZED=YES EXPIRES_AT=${grant.expiraEm}`);
     }
     let current = path;
     let firstRead = true;
@@ -97,14 +116,18 @@ async function run({
       if (grant && now() >= new Date(grant.expiraEm).getTime())
         throw new Error("authorization_expired");
       const result = await request(current, null, credential);
-      if (prepared && firstRead) output("PREAUTHORIZED_READ=PASS");
+      if (usingPrepared && firstRead) emit("PREAUTHORIZED_READ=PASS");
       firstRead = false;
-      output(JSON.stringify(result));
+      emit(JSON.stringify(result));
       if (!interactive || !input) break;
       current = (await input("GET path (ENTER encerra): ")).trim();
     } while (current);
+  } catch (error) {
+    // Transport/input errors may carry request details. Never forward their objects or causes.
+    throw new Error(collectorErrorCode(error));
   } finally {
     credential = "";
+    authorization = undefined;
   }
 }
 
@@ -141,9 +164,7 @@ if (require.main === module) {
       input: interactive ? question : undefined,
     })
       .catch((error) => {
-        console.error(
-          `COLLECTOR_BLOCKED=${/^http_\d+:\/[a-z/-]+$/.test(error.message) || /^prepared_(?:token_invalid|input_(?:unavailable|cancelled|timeout))$/.test(error.message) ? error.message : "safe_request_failed"}`,
-        );
+        console.error(`COLLECTOR_BLOCKED=${collectorErrorCode(error)}`);
         process.exitCode = 1;
       })
       .finally(() => rl?.close());
