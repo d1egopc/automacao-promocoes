@@ -5447,21 +5447,34 @@ async function agendarRetryAfiliacaoShopee(job = {}, detalhes = {}, opcoes = {})
   return { ok: true, ...plano, estadoRetry };
 }
 
-function planoRetryImagemMagaluLocal(job = {}, agora = new Date()) {
-  const tentativasAnteriores = Number(job?.metadata?.localWorkerImageRetry?.tentativas || 0);
+function planoRetryImagemMagaluLocal(job = {}, agora = new Date(), detalhes = {}) {
+  const anterior = job?.metadata?.localWorkerImageRetry || {};
+  const etapa = detalhes.capability === "magalu_identity_v1" && detalhes.motivo === "aguardando_identidade_local"
+    ? "identidade"
+    : detalhes.capability === "magalu_image_v1" && detalhes.motivo === "imagem_oficial_local_pendente"
+      ? "imagem" : "";
+  const identidadeAnterior = anterior.etapa === "identidade" && anterior.capability === "magalu_identity_v1";
+  const imagemAnterior = anterior.etapa === "imagem" && anterior.capability === "magalu_image_v1";
+  // One forward transition in the existing retry state; never reset legacy/unknown
+  // budgets or allow image -> identity -> image to create an unbounded cycle.
+  const tentativasAnteriores = etapa === "imagem" && identidadeAnterior
+    ? 0 : Number(anterior.tentativas || 0);
   const tentativa = Number.isInteger(tentativasAnteriores) && tentativasAnteriores >= 0 ? tentativasAnteriores + 1 : 1;
+  if (etapa === "identidade" && imagemAnterior) return { reagendar: false, tentativa, tentativasAnteriores };
   const atrasoMs = [30_000, 120_000, 300_000][tentativa - 1] || null;
   const dataBase = agora instanceof Date ? agora : new Date(agora);
   if (!Number.isFinite(dataBase.getTime()) || !atrasoMs) return { reagendar: false, tentativa, tentativasAnteriores };
   const proximaTentativaEm = new Date(dataBase.getTime() + atrasoMs);
-  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime() };
+  const etapaPersistida = etapa || (identidadeAnterior ? "identidade" : imagemAnterior ? "imagem" : "");
+  return { reagendar: true, tentativa, tentativasAnteriores, atrasoMs, proximaTentativaEm: proximaTentativaEm.toISOString(), proximaTentativaEmMs: proximaTentativaEm.getTime(), ...(etapaPersistida ? { etapa: etapaPersistida } : {}) };
 }
 
 async function agendarRetryImagemMagaluLocal(job = {}, detalhes = {}, opcoes = {}) {
-  const plano = planoRetryImagemMagaluLocal(job, opcoes.agora || new Date());
+  const plano = planoRetryImagemMagaluLocal(job, opcoes.agora || new Date(), detalhes);
   if (!plano.reagendar) return { ok: false, esgotado: true, motivo: "sem_imagem_apos_retries", ...plano };
   const estadoRetry = {
     tentativas: plano.tentativa,
+    ...(plano.etapa ? { etapa: plano.etapa, capability: plano.etapa === "identidade" ? "magalu_identity_v1" : "magalu_image_v1" } : {}),
     motivo: "sem_imagem_local_worker_pendente",
     ultimoErroEm: new Date(opcoes.agora || Date.now()).toISOString(),
     proximaTentativaEm: plano.proximaTentativaEm,

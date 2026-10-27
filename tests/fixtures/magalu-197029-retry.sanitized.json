@@ -1,0 +1,26 @@
+{
+  "evidence": {
+    "source": "official Telemetria Operacional read-only, 2026-10-27",
+    "eventId": "197029",
+    "workerTaskId": "27879",
+    "jobId": "1007554",
+    "origin": "telegram",
+    "sourceUrl": "https://magazineluiza.onelink.me/589508454/xujzv9bq",
+    "identityWaits": ["2026-10-27T16:19:38.061Z", "2026-10-27T16:23:03.483Z", "2026-10-27T16:28:43.715Z"],
+    "identityCompletedAt": "2026-10-27T16:30:10.781Z",
+    "imageFailureAt": "2026-10-27T16:35:49.349Z",
+    "historicalImageTaskState": "NOT_EXPOSED_BY_TELEMETRY"
+  },
+  "simulation": {
+    "note": "Product, image, commercial text and image-task state below are synthetic. They do not assert the historical product or task result.",
+    "productId": "123456789",
+    "canonicalUrl": "https://www.magazineluiza.com.br/produto-fixture/p/123456789/ud/poud/",
+    "imageUrl": "https://a-static.mlcdn.com.br/800x560/produto-fixture/loja/123456789/fixture.jpg",
+    "title": "Kit de potes hermeticos fixture 10 pecas",
+    "price": "85,41",
+    "previousPrice": "129,90",
+    "coupon": "FIXTURE10",
+    "workspace": "workspace_fixture_a",
+    "promoter": "fixturelojaa"
+  }
+}

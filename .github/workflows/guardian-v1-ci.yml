@@ -13,6 +13,7 @@ on:
       - validation/radar-magalu-ingress-observer-20261026
       - validation/telemetria-operacional-20261027
       - validation/telemetria-v11-panel-first-20261027
+      - validation/magalu-recovery-20261027
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -162,6 +163,25 @@ jobs:
           esac
           source="$(git rev-parse HEAD)"
           node scripts/guardian-v1.cjs validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json"
+      - name: Magalu identity-to-image recovery - isolated fixtures only
+        if: github.ref == 'refs/heads/validation/magalu-recovery-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check modules/engine/importer/importer.service.js
+          # Focal + marketplace regressions above use Guardian's existing baseline comparison.
+          mkdir "$RUNNER_TEMP/magalu-published-baseline"
+          git archive 0cfac15707f6dbdcbcccedacbb6dce01c173f817 | tar -x -C "$RUNNER_TEMP/magalu-published-baseline"
+          set +e
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" MAGALU_RECOVERY_TEST_ROOT="$RUNNER_TEMP/magalu-published-baseline" node --test --test-reporter=tap --test-name-pattern='^(identity wait exhaustion does not consume the image wait budget|adapter and official runner keep a job alive when identity finishes after three waits)$' tests/magalu-recovery-retry.test.cjs > "$RUNNER_TEMP/magalu-baseline-reproduction.log" 2>&1
+          baseline_status=$?
+          set -e
+          cat "$RUNNER_TEMP/magalu-baseline-reproduction.log"
+          test "$baseline_status" -eq 1
+          test "$(grep -c '^not ok' "$RUNNER_TEMP/magalu-baseline-reproduction.log")" -eq 2
+          ! grep -Eq 'unexpected_fixture_query|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/magalu-baseline-reproduction.log"
       - name: Deploy mechanism regressions
         shell: bash
         run: |

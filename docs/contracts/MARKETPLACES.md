@@ -43,6 +43,12 @@ Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco 
 - Nao use apenas o link Magazine Voce como prova completa de identidade/origem.
 - Fontes: `modules/engine/importer/adapters/magalu.adapter.js`, `modules/manual-v2/adapters/magalu.manual.adapter.js`, `optimus-capture/adapters/magalu.js`.
 
+### Espera por identidade e imagem — candidata focal de 27/10/2026
+
+- A espera por `magalu_identity_v1` não deve consumir o orçamento de `magalu_image_v1`. Reutilizar o scheduler e a chave `localWorkerImageRetry` existentes, com fase/capability explícitas e uma única transição identidade → imagem. Cada fase conserva três esperas de 30/120/300 segundos; não aceitar regressão de fase, reiniciar orçamento legado/desconhecido ou reabrir job terminal. Frescor, TTL, CAS, deduplicação e destino permanecem sob as autoridades existentes.
+- Evidência real: evento Telegram 197029/Worker 27879/job 1007554; três esperas `sem_link_produto_confirmado` antes da identidade validada e terminal `sem_imagem` depois. O compartilhamento indevido do orçamento é reproduzido na baseline exata 0cfac157 e corrigido em fixture. A Telemetria não expõe o estado histórico da tarefa de imagem, a URL canônica ou o productId deste evento; a reprodução não os inventa nem garante recuperação daquele job.
+- A fixture `tests/fixtures/magalu-197029-retry.sanitized.json` distingue a cronologia observada dos dados comerciais/produto sintéticos. `tests/magalu-recovery-retry.test.cjs` valida limites, CAS, transição, preservação comercial, isolamento e reutilização dos caches/conversores oficiais. Identidade validada não é prova de afiliação. Imagem e afiliação continuam obrigatórias para a oferta seguir ao RIO. Nenhum reprocessamento retroativo é autorizado por esta candidata.
+
 ## KaBuM / AWIN
 
 - Captura da extensao prioriza preco Pix estruturado em `number-flow-react[data]`, mantem fallback legado e separa parcelamento.

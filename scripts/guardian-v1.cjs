@@ -300,6 +300,17 @@ function testMatrix(plan) {
   if (plan.runtimeFiles.some(file => file.startsWith("modules/engine") || file.startsWith("modules/executor") || file.startsWith("modules/fila"))) {
     add("engine:claim-recovery", "tests/engine-validator-claim-recovery.test.js", process.execPath, ["tests/engine-validator-claim-recovery.test.js"]);
   }
+  if (plan.runtimeFiles.includes("modules/engine/importer/importer.service.js")) {
+    add("magalu:identity-image-retry", "tests/magalu-recovery-retry.test.cjs", process.execPath, ["--test", "tests/magalu-recovery-retry.test.cjs"], false);
+    for (const name of [
+      "magalu-engine-importer", "magalu-identity-engine-importer", "magalu-local-worker-identity",
+      "magalu-image-resolver", "magalu-factual-resolver", "magalu-affiliate-link", "magalu-parser",
+      "magalu-v2-golden-path", "local-worker", "manual-v2-import-magalu", "optimus-capture-magalu",
+      "radar-engine-v2-magalu-route", "shopee-importer-retry", "engine-frescor-pre-importer-prioridade",
+      "engine-v2-marketplaces-fidelidade", "contrato-comercial-final-universal",
+      "imagem-link-contrato-universal", "template-universal-visual-contract"
+    ]) add(`magalu:${name}`, `tests/${name}.test.js`, process.execPath, [`tests/${name}.test.js`]);
+  }
   if (plan.ignoredFiles.some(file => file === "scripts/guardian-v1.cjs" || file === "scripts/deploy-backend-vps-manual.sh" || file.startsWith(".github/"))) {
     add("guardian:v1", "tests/guardian-v1.test.cjs", process.execPath, ["tests/guardian-v1.test.cjs"], false);
     add("deploy:syntax", "scripts/deploy-backend-vps-manual.sh", bashCommand(), ["-n", "scripts/deploy-backend-vps-manual.sh"], false, true);
