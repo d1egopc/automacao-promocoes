@@ -46,7 +46,9 @@ function criarMiddlewareTelemetria({ authNormal, isAdminMaster = usuarioAdminMas
       bucket.count++; bucket.active++; buckets.set(id, bucket);
       let released = false;
       const release = () => { if (!released) { released = true; bucket.active--; } };
-      res.once("finish", release); res.once("close", release);
+      // A disconnected caller must not free a slot while its SQL is running.
+      req.releaseTelemetryRead = release;
+      res.once("finish", release);
       req.telemetriaAuditoria = auditoria.auditoria;
       return next();
     }
@@ -99,7 +101,8 @@ function criarRotasTelemetria(opcoes = {}) {
     b.count++; b.active++; adminReads.set(id, b);
     let released = false;
     const release = () => { if (!released) { released = true; b.active--; } };
-    res.once("finish", release); res.once("close", release);
+    req.releaseTelemetryRead = release;
+    res.once("finish", release);
     next();
   }
   router.use((req, res, next) => {
@@ -137,7 +140,7 @@ function criarRotasTelemetria(opcoes = {}) {
       return res.status(resultado.ok ? 200 : 503).json(req.telemetriaAuditoria ? project(resultado) : resultado);
     } catch (e) {
       return erroPublicoTelemetria(res);
-    }
+    } finally { req.releaseTelemetryRead?.(); }
   });
 
   router.get("/eventos", autenticarLeitura, async (req, res) => {
@@ -161,7 +164,7 @@ function criarRotasTelemetria(opcoes = {}) {
         items: [],
         cursorProximo: null
       });
-    }
+    } finally { req.releaseTelemetryRead?.(); }
   });
 
   router.get("/rastrear/:eventoId", autenticarLeitura, async (req, res) => {
@@ -176,7 +179,7 @@ function criarRotasTelemetria(opcoes = {}) {
       return res.status(resultado.ok ? 200 : 400).json(req.telemetriaAuditoria ? project(resultado) : resultado);
     } catch (e) {
       return erroPublicoTelemetria(res);
-    }
+    } finally { req.releaseTelemetryRead?.(); }
   });
 
   router.post("/auditoria/ativar", autenticarAdmin, (req, res) => {
@@ -204,6 +207,7 @@ function criarRotasTelemetria(opcoes = {}) {
     router.get(path, autenticarLeitura, budgetAdminRead, async (req, res) => {
       try { return res.json(await operational[method](req.query, escopoDaRequisicao(req))); }
       catch { return erroPublicoTelemetria(res); }
+      finally { req.releaseTelemetryRead?.(); }
     });
   }
   router.get("/rastreio/:tipo/:id", autenticarLeitura, budgetAdminRead, async (req, res) => {
@@ -211,10 +215,12 @@ function criarRotasTelemetria(opcoes = {}) {
       const result = await operational.trace(req.params.tipo, req.params.id, req.query, escopoDaRequisicao(req));
       return res.status(result.ok ? 200 : 400).json(result);
     } catch { return erroPublicoTelemetria(res); }
+    finally { req.releaseTelemetryRead?.(); }
   });
   router.get("/sonda-radar", autenticarLeitura, budgetAdminRead, (req, res) => {
     try { return res.json(operational.probe(escopoDaRequisicao(req))); }
     catch { return erroPublicoTelemetria(res); }
+    finally { req.releaseTelemetryRead?.(); }
   });
   for (const [path, action] of [["/sonda-radar/iniciar", "start"], ["/sonda-radar/encerrar", "stop"]]) {
     router.post(path, autenticarAdmin, (req, res) => {

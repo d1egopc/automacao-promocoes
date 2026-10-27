@@ -497,3 +497,43 @@ test("two inflight delegated reads are the ceiling; the third triggers no SQL", 
     await f.close();
   }
 });
+
+test("aborted HTTP reads retain their SQL permits until the work settles", async () => {
+  let n = 0,
+    ready;
+  const started = new Promise((resolve) => {
+    ready = resolve;
+  });
+  const release = [];
+  const f = await fixture({
+    query: () =>
+      new Promise((resolve) => {
+        n++;
+        release.push(() => resolve(result([])));
+        if (n === 6) ready();
+      }),
+  });
+  const g = grant("plataforma");
+  const controller = new AbortController();
+  const calls = [0, 1].map(() =>
+    fetch(`${f.base}/telemetria/operacional`, {
+      headers: { Authorization: `Bearer ${g.codigo}` },
+      signal: controller.signal,
+    }).catch(() => null),
+  );
+  try {
+    await Promise.race([
+      started,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(Error("fixture_wait_timeout")), 2000),
+      ),
+    ]);
+    controller.abort();
+    await Promise.all(calls);
+    assert.equal((await f.call("/operacional", g.codigo)).status, 429);
+    assert.equal(n, 6, "disconnect cannot create extra SQL work");
+  } finally {
+    for (const fn of release) fn();
+    await f.close();
+  }
+});
