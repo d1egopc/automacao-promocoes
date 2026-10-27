@@ -582,7 +582,6 @@ function escolherProdutoPrincipal(candidatos = [], marketplace = "", evento = {}
 }
 
 function resumoLinksClassificados(links = [], evento = {}, marketplace = "") {
-  const vistosAliExpress = new Set();
   const resultado = [];
 
   for (const link of (Array.isArray(links) ? links : [])) {
@@ -597,12 +596,6 @@ function resumoLinksClassificados(links = [], evento = {}, marketplace = "") {
       papelLinkConfianca: classificacao.confianca,
       urlProduto: classificacao.urlProduto || ""
     };
-
-    if (semAcentos(marketplace).replace(/[^a-z0-9]+/g, "") === "aliexpress" && item.papelLink === PAPEL_LINK.LINK_APP) {
-      const chave = `${item.papelLink}:${texto(item.urlOriginal || item.urlExpandida).toLowerCase()}`;
-      if (vistosAliExpress.has(chave)) continue;
-      vistosAliExpress.add(chave);
-    }
 
     resultado.push(item);
   }

@@ -295,9 +295,32 @@ async function testarAppDuplicadoReutilizaConversaoEPreservaOcorrencias() {
   const apps = resultado.metadata.linksClassificados.filter(item => item.papelLink === "link_app");
   assert.strictEqual(resultado.ok, true);
   assert.deepStrictEqual(chamadas, [pc, app], "APP duplicado chama a conversao alternativa uma vez e replica o resultado");
-  assert.strictEqual(apps.length, 1);
-  assert.deepStrictEqual(apps.map(item => item.urlAfiliada), [appAfiliado]);
+  assert.strictEqual(apps.length, 2, "cada ocorrencia APP capturada deve permanecer no contrato");
+  assert.deepStrictEqual(apps.map(item => item.urlAfiliada), [appAfiliado, appAfiliado]);
+  assert.deepStrictEqual(apps.map(item => item.ocorrenciaId), ["ali:link_app:1", "ali:link_app:2"]);
   assert.ok(apps.every(item => item.renderizavel === true));
+
+  const documento = {
+    marketplace: "aliexpress",
+    tituloOriginal: "Produto AliExpress APP duplicado",
+    precoPorTexto: "R$ 120",
+    linksComerciais: resultado.metadata.linksClassificados.map(item => ({
+      tipo: item.papelLink,
+      papel: item.papelLink,
+      url: item.urlAfiliadaWorkspace,
+      ordemCaptura: Number(item.ocorrenciaId.split(":").at(-1)),
+      renderizavel: item.renderizavel
+    })),
+    blocos: [
+      { tipo: "titulo", textoOriginal: "Produto AliExpress APP duplicado", ordemSugerida: 1, essencial: true },
+      { tipo: "link_app", textoOriginal: appAfiliado, ordemSugerida: 2, essencial: true },
+      { tipo: "link_app", textoOriginal: appAfiliado, ordemSugerida: 3, essencial: true },
+      { tipo: "link_pc", textoOriginal: pcAfiliado, ordemSugerida: 4, essencial: true }
+    ]
+  };
+  const render = montarTemplateEspelhoShadow({ documentoComercialCanonico: documento }, documento);
+  assert.strictEqual(render.ok, true);
+  assert.strictEqual(render.mensagem.split(appAfiliado).length - 1, 2);
 }
 
 async function testarProdutosDistintosNaoUsamAfiliadoGlobal() {
