@@ -76,6 +76,135 @@ const req = (token) => ({
   path: "/operacional",
   headers: { authorization: `Bearer ${token}` },
 });
+
+test("panel-first reuses existing Admin issuance, TTLs, sanitized list, revocation and expiry", async () => {
+  const f = await fixture();
+  try {
+    for (const ttlMinutos of [15, 30, 60]) {
+      const body = { escopo: "plataforma", ttlMinutos };
+      assert.equal(
+        (await f.call("/auditoria/ativar", "fixture-user", body)).status,
+        403,
+      );
+      const issued = await f.call("/auditoria/ativar", "fixture-master", body);
+      assert.equal(issued.status, 201);
+      const g = issued.body;
+      assert.equal(
+        new Date(g.expiraEm) - new Date(g.criadoEm),
+        ttlMinutos * 60000,
+      );
+      assert.match(g.codigo, /^tel_[A-Za-z0-9_-]{43}$/);
+      assert.equal(issued.headers.get("cache-control"), "no-store");
+      assert.ok(!JSON.stringify(stored).includes(g.codigo));
+      assert.ok(
+        !JSON.stringify(
+          (await f.call("/auditorias", "fixture-master")).body,
+        ).includes(g.codigo),
+      );
+      for (const endpoint of [
+        "/operacional",
+        "/workspaces",
+        "/problemas",
+        "/sonda-radar",
+        "/saude",
+        "/eventos",
+        "/rastreio/evento/123",
+        "/rastreio/job/123",
+        "/rastreio/oferta/123",
+        "/rastrear/123",
+      ]) {
+        assert.equal((await f.call(endpoint, g.codigo)).status, 200, endpoint);
+      }
+      for (const endpoint of [
+        "/auditoria/ativar",
+        "/auditoria/revogar",
+        "/auditoria/autorizar",
+        "/sonda-radar/iniciar",
+        "/sonda-radar/encerrar",
+      ]) {
+        assert.equal(
+          (await f.call(endpoint, g.codigo, body)).status,
+          403,
+          endpoint,
+        );
+      }
+      assert.equal(
+        (
+          await f.call("/auditoria/revogar", "fixture-user", {
+            auditoriaId: g.auditoriaId,
+          })
+        ).status,
+        403,
+      );
+      if (ttlMinutos === 60)
+        stored.find((a) => a.auditoriaId === g.auditoriaId).expiraEm = new Date(
+          0,
+        ).toISOString();
+      else
+        assert.equal(
+          (
+            await f.call("/auditoria/revogar", "fixture-master", {
+              auditoriaId: g.auditoriaId,
+            })
+          ).status,
+          200,
+        );
+      assert.equal((await f.call("/operacional", g.codigo)).status, 401);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("prepared collector performs only scoped GETs, no new request; expired or revoked fails closed", async () => {
+  const f = await fixture();
+  const g = (
+    await f.call("/auditoria/ativar", "fixture-master", {
+      escopo: "workspace",
+      clienteId: "user_a",
+      ttlMinutos: 15,
+    })
+  ).body;
+  const methods = [],
+    output = [];
+  try {
+    const options = {
+      prepared: true,
+      fixture: true,
+      base: f.base,
+      readToken: async () => g.codigo,
+      path: "/operacional?clienteId=user_b",
+      output: (line) => output.push(line),
+      fetcher: (url, config) => {
+        methods.push([url, config.method]);
+        return fetch(url, config);
+      },
+    };
+    await runClient(options);
+    assert.ok(output.includes("PREAUTHORIZED_READ=PASS"));
+    assert.ok(output.some((line) => line.includes('"workspace":"user_a"')));
+    assert.ok(
+      methods.every(
+        ([url, method]) =>
+          method === "GET" &&
+          !url.includes("auditoria") &&
+          !url.includes(g.codigo),
+      ),
+    );
+    assert.ok(!output.join("\n").includes(g.codigo));
+    await f.call("/auditoria/revogar", "fixture-master", {
+      auditoriaId: g.auditoriaId,
+    });
+    await assert.rejects(runClient(options), /http_401/);
+    assert.ok(methods.every(([, method]) => method === "GET"));
+    await assert.rejects(
+      runClient({ ...options, readToken: async () => "invalid" }),
+      /prepared_token_invalid/,
+    );
+  } finally {
+    await f.close();
+  }
+});
 async function fixture(options = {}) {
   const app = express();
   app.use(express.json());
