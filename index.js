@@ -25603,7 +25603,7 @@ app.get("/radar/config", (req, res) => {
 });
 
 const RADAR_INGRESS_OBSERVATION_TARGET = Object.freeze({
-  workspaceId: "user_k3phmbkf",
+  workspaceId: "admin",
   groupName: "optesteradar"
 });
 

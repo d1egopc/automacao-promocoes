@@ -122,7 +122,7 @@ jobs:
         if: github.ref == 'refs/heads/validation/radar-magalu-ingress-observer-20261026'
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -z "\${DATABASE_URL:-}"
+          test -z "${DATABASE_URL:-}"
           node --check index.js
           node --check modules/radar/ingress-observation-v1.js
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js

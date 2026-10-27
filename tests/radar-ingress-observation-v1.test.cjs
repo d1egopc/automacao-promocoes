@@ -7,8 +7,8 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { createRadarIngressObservation, MAX_DURATION_MS, MAX_EVENTS } = require("../modules/radar/ingress-observation-v1");
 
-const WORKSPACE = "user_k3phmbkf";
-const SESSION = `${WORKSPACE}_ClaroTeste`;
+const WORKSPACE = "admin";
+const SESSION = `${WORKSPACE}_radar-session-fixture`;
 const GROUP = "OP_TESTE_PRIVATE_GROUP@g.us";
 const URL = "https://magazineluiza.onelink.me/589508454/new-test";
 
@@ -189,7 +189,7 @@ test("probe uses the existing upsert callback hook and adds no listener or persi
   const adminRoutes = source.slice(routeStart, routeEnd);
   const targetConfig = source.slice(source.indexOf("const RADAR_INGRESS_OBSERVATION_TARGET"), routeStart);
   assert.equal((adminRoutes.match(/exigirAdminMasterEngine\(req, res\)/g) || []).length, 3);
-  assert.match(targetConfig, /workspaceId: "user_k3phmbkf"/);
+  assert.match(targetConfig, /workspaceId: "admin"/);
   assert.match(targetConfig, /groupName: "optesteradar"/);
   assert.doesNotMatch(targetConfig, /sessionId:.*ClaroTeste|sessionId:.*ServCel/);
   assert.match(targetConfig, /item\?\.sessaoId/);
@@ -240,12 +240,12 @@ test("target binding uses the configured OP Teste Radar session and rejects a di
     return context.validateBinding();
   }
 
-  const valid = validate(WORKSPACE);
+  const valid = validate("admin");
   assert.equal(valid.ok, true);
   assert.equal(valid.sessionId, configuredSessionId);
   assert.equal(valid.groupId, "fixture-group@g.us");
 
-  const mismatch = validate("different-workspace");
+  const mismatch = validate("user_k3phmbkf");
   assert.deepEqual(
     { ok: mismatch.ok, reason: mismatch.reason },
     { ok: false, reason: "session_workspace_mismatch" }
