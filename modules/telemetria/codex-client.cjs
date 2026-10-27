@@ -110,7 +110,7 @@ async function run({
     do {
       if (
         !ALLOWED.test(current) ||
-        /auditoriaToken|token=|https?:|\\/i.test(current)
+        /auditoriaToken|token=|https?:|\\|tel_[A-Za-z0-9_-]{43}/i.test(current)
       )
         throw new Error("read_path_not_allowed");
       if (grant && now() >= new Date(grant.expiraEm).getTime())

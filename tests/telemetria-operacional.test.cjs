@@ -347,6 +347,22 @@ test("collector redacts reflected temporary codes and never forwards sensitive t
   await runClient(options);
   assert.ok(!output.join("\n").includes(fake));
   assert.match(output.join("\n"), /\[REDACTED\]/);
+  for (const path of [
+    "/auditoria/revogar",
+    "/sonda-radar/iniciar",
+    "/sonda-radar/encerrar",
+    `/operacional?unexpected=${fake}`,
+  ]) {
+    await assert.rejects(
+      runClient({
+        ...options,
+        path,
+        fetcher: () =>
+          assert.fail("control paths and secrets in URLs cannot perform HTTP"),
+      }),
+      /read_path_not_allowed/,
+    );
+  }
   await assert.rejects(
     runClient({
       ...options,
