@@ -1,5 +1,5 @@
 {
-  "provenance": "Sete relatos do proprietário em 27/10/2026; títulos e URLs fornecidos, sem payload oficial de categoria ou transporte. Demais casos são controles sintéticos.",
+  "provenance": "Doze relatos do proprietário em 27/10/2026, incluindo cinco do adendo; títulos e URLs fornecidos, sem payload oficial de categoria ou transporte. Demais casos são controles sintéticos. Gênero ausente não é inferido.",
   "real": [
     {"titulo":"30 Iscas Camarão Artificial de Silicone","url":"https://meli.la/1YwsCjg","categoria":"Pesca e Camping"},
     {"titulo":"Linha Shimano Kairiki","url":"https://meli.la/33kvzrc","categoria":"Pesca e Camping"},
@@ -7,7 +7,12 @@
     {"titulo":"Garateia Rapala Fish Fighter","url":"https://meli.la/1gNbmuF","categoria":"Pesca e Camping"},
     {"titulo":"Régua para medir peixe","url":"https://meli.la/1Cdu4t8","categoria":"Pesca e Camping"},
     {"titulo":"Graxa e óleo para carretilhas e molinetes","url":"https://meli.la/1rKCvue","categoria":"Pesca e Camping"},
-    {"titulo":"Régua de tomadas/filtro de linha","url":"https://meli.la/1pgkRhb","categoria":"Iluminação e Elétrica"}
+    {"titulo":"Régua de tomadas/filtro de linha","url":"https://meli.la/1pgkRhb","categoria":"Iluminação e Elétrica"},
+    {"titulo":"Máquina inversora de solda","url":"https://meli.la/1XyDB1L","categoria":"Ferramentas"},
+    {"titulo":"Hugo Boss Bottled Night EDT","url":"https://meli.la/1pG7YyN","categoria":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Alicate de reparo de relógios","url":"https://s.shopee.com.br/AAIGtQlHzd","marketplace":"shopee","categoria":"Ferramentas"},
+    {"titulo":"Lavadora de alta pressão","url":"https://meli.la/1zAkMeD","categoria":"Ferramentas"},
+    {"titulo":"Calça de pesca","url":"https://meli.la/1qXKxgo","categoria":"Diversos"}
   ],
   "controls": [
     {"titulo":"Linha elétrica de cobre 2,5mm","forbidden":"Pesca e Camping"},
@@ -28,6 +33,37 @@
     {"titulo":"Brinquedo Bancada Interativa Ferramentas Mecânico Parafusadeira Oficina","categoria":"Brinquedos e Artigos Infantis"},
     {"titulo":"Furadeira profissional de impacto","categoria":"Ferramentas"},
     {"titulo":"CK One Calvin Klein 200mL","categoria":"Perfumaria, Farmácia e Beleza"},
-    {"titulo":"Vibrador com fantasia infantil","categoria":"Diversos"}
+    {"titulo":"Vibrador com fantasia infantil","categoria":"Diversos"},
+    {"titulo":"Máquina inversora de solda Vonder 160A eletrodo MMA","categoria":"Ferramentas"},
+    {"titulo":"Inversora para solda Boxer 140A","categoria":"Ferramentas"},
+    {"titulo":"Máquina de solda elétrica marca independente 200A","categoria":"Ferramentas"},
+    {"titulo":"Alicate para conserto de relógio marca independente","categoria":"Ferramentas"},
+    {"titulo":"Alicate relojoeiro de ponta fina Eda","categoria":"Ferramentas"},
+    {"titulo":"Lavadora de alta pressão Wap 1800W 150bar","categoria":"Ferramentas"},
+    {"titulo":"Lavadora alta pressão Karcher K3","categoria":"Ferramentas"},
+    {"titulo":"Lavadora de alta pressão marca independente 120bar","categoria":"Ferramentas"},
+    {"titulo":"Fragrância noturna EDT 100mL marca independente","categoria":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Acqua di Gio Giorgio Armani EDT","categoria":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Essência Aurora EDP 50mL","categoria":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Linha multifilamento marca independente 0,30mm 300m","categoria":"Pesca e Camping"},
+    {"titulo":"Vara de pesca Albatroz 1,80m","categoria":"Pesca e Camping"},
+    {"titulo":"Garateia tripla VMC para isca artificial","categoria":"Pesca e Camping"},
+    {"titulo":"Brinquedo lavadora de alta pressão infantil","categoria":"Brinquedos e Artigos Infantis"},
+    {"titulo":"Brinquedo máquina inversora de solda infantil","categoria":"Brinquedos e Artigos Infantis"},
+    {"titulo":"Calça de pesca masculina marca independente","categoria":"Roupas e Moda Masculina"},
+    {"titulo":"Calça de pesca feminina marca independente","categoria":"Roupas e Moda Feminina"},
+    {"titulo":"Calça de pesca unissex","categoria":"Diversos"},
+    {"titulo":"Lavadora de roupas automática 12kg","categoria":"Eletrodomésticos"},
+    {"titulo":"Manual de máquina inversora de solda","forbidden":"Ferramentas"},
+    {"titulo":"Mangueira para lavadora de alta pressão","forbidden":"Ferramentas"},
+    {"titulo":"Líquido limpador EDT 100mL","forbidden":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Frasco vazio EDT 100mL","forbidden":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Relógio Hugo Boss Bottled Night edição especial","forbidden":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Monitor EDT 100 polegadas","forbidden":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Vara extensível para cortina","forbidden":"Pesca e Camping"},
+    {"titulo":"Linha monofilamento para impressora 3D","forbidden":"Pesca e Camping"},
+    {"titulo":"Máquina inversora de solda marca independente com cabo porta eletrodo 160A","categoria":"Ferramentas"},
+    {"titulo":"EDT edição especial","forbidden":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Hugo Boss camisa masculina","forbidden":"Perfumaria, Farmácia e Beleza"}
   ]
 }

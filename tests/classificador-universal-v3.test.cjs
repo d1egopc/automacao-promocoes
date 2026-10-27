@@ -7,7 +7,7 @@ const { classificarCategoriaUniversal } = require("../modules/inteligencia-unive
 
 for (const item of [...fixtures.real, ...fixtures.controls]) {
   test(`categoria V3: ${item.titulo}`, () => {
-    const oferta = { titulo: item.titulo, marketplace: "mercadolivre" };
+    const oferta = { titulo: item.titulo, marketplace: item.marketplace || "mercadolivre" };
     const atual = classificarCategoriaOferta(oferta, item.titulo);
     if (item.categoria) {
       assert.equal(atual, item.categoria);

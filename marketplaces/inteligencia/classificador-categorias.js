@@ -800,7 +800,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
     categoria = CATEGORIA.diversos;
     motivo = "conteudo_adulto_sem_categoria_habilitada";
-  } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?)\b/.test(titulo)) {
+  } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
     categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
@@ -808,13 +808,28 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
       : /\b(?:masculina|masculino|homem)\b/.test(titulo) ? CATEGORIA.modaMasculina
       : [CATEGORIA.modaFeminina, CATEGORIA.modaMasculina, CATEGORIA.infantil].includes(oficial?.categoria || declarada)
         ? oficial?.categoria || declarada : CATEGORIA.diversos;
+  } else if (/\blinha\b/.test(titulo) && /\b(?:monofilamento|multifilamento)\b/.test(titulo) && /\bimpressora 3d\b/.test(titulo)) {
+    categoria = CATEGORIA.diversos;
+    motivo = "finalidade_nao_pesqueira_explicita";
+  } else if (!/^(?:(?:kit|jogo) (?:de )?)?(?:manual|curso|capa|mangueira|adaptador|bico|peca|placa|cabo)\b/.test(titulo) &&
+      (/\b(?:maquina (?:inversora )?(?:de )?solda|inversora (?:para |de )?solda)\b/.test(titulo) ||
+       /\blavadora (?:de )?alta pressao\b/.test(titulo) ||
+       (/\balicate\b/.test(titulo) && /\b(?:relojoeiro|(?:reparo|conserto) de relogios?)\b/.test(titulo)))) {
+    categoria = CATEGORIA.ferramentas;
+  } else if (/\b(?:edt|edp)\b/.test(titulo) &&
+      /\b(?:perfume|fragrancia|eau de toilette|eau de parfum|hugo boss|giorgio armani)\b|\b\d+(?: \d+)?\s*ml\b/.test(titulo) &&
+      !/\b(?:frasco|vazio|vazia|limpador|limpeza|refil de tinta|relogio|camiseta|monitor)\b/.test(titulo)) {
+    // Concentração + volume ou identidade de perfumaria, nunca marca/EDT isolados.
+    categoria = CATEGORIA.beleza;
   } else if (/\b(?:regua de tomadas|filtro de linha|regua de energia)\b/.test(titulo)) {
     categoria = CATEGORIA.iluminacao;
   } else if (/\b(?:lampadas? automotivas?|oleo de motor automotivo)\b/.test(titulo)) {
     categoria = CATEGORIA.automotivo;
   } else if (/\biscas?\b.{0,60}\b(?:artificial|artificiais|camarao|camaroes|frog|sapo|jig)\b/.test(titulo) ||
       /\blinha shimano kairiki\b|\bvara lori rampage\b/.test(titulo) ||
-      (/\bgarateias?\b/.test(titulo) && /\b(?:rapala|fish fighter|pesca)\b/.test(titulo)) ||
+      (/\blinha\b/.test(titulo) && /\b(?:pesca|fluorocarbono|multifilamento|monofilamento)\b/.test(titulo)) ||
+      /\bvara (?:de |para )?pesca\b/.test(titulo) ||
+      (/\bgarateias?\b/.test(titulo) && /\b(?:rapala|fish fighter|pesca|tripla|anzol|isca artificial)\b/.test(titulo)) ||
       (/\bregua\b/.test(titulo) && /\bmedir\b/.test(titulo) && /\bpeixes?\b/.test(titulo)) ||
       (/\b(?:graxa|oleo)\b/.test(titulo) && /\b(?:carretilhas?|molinetes?)\b/.test(titulo))) {
     categoria = CATEGORIA.pesca;

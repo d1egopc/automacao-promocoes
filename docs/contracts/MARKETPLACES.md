@@ -25,6 +25,16 @@ Radar/TeleRadar/Clonador continuam entrando nos adapters/normalização/serviço
 
 Compatibilidade futura específica/abrangente é apenas projeto: uma relação como Climatização → Eletrodomésticos deverá ser opcional e decidida pelo destino, com teste de envio único. Nenhum pai/filho, expansão de seleção ou afinidade múltipla foi ativado nesta versão.
 
+### Adendo focal V3 — natureza principal e compatibilidades propostas
+
+Máquina/inversora de solda, alicate de reparo de relógios e lavadora de alta pressão são Ferramentas pela natureza explícita; marca não é requisito. Lavadora de roupas continua Eletrodomésticos. Peça, mangueira, manual ou brinquedo não herda a categoria da máquina apenas por citá-la. EDT/EDP precisa de volume ou identidade de perfumaria consistente; marca ou sigla isolada não constitui evidência. Os sete relatos iniciais e os cinco relatos posteriores têm fixtures separáveis de controles sintéticos de marcas alternativas e falsos positivos.
+
+Calça de pesca é vestuário: público masculino/feminino/infantil explícito ou já comprovado seleciona a categoria de roupa correspondente. Sem público suficiente (inclusive unissex), a taxonomia atual não permite inferir gênero: manter Diversos. Não confundir finalidade de pesca com equipamento de pesca.
+
+**NÃO IMPLEMENTADO nesta candidata:** categorias compatíveis, finalidade como afinidade adicional e distribuição multicategoria. Lavadora de alta pressão pode futuramente ter afinidade de limpeza/eletrodomésticos; calça de pesca pode ter finalidade Pesca e Camping além da categoria de vestuário. Isso é proposta, não elegibilidade atual.
+
+Contrato proposto para próxima etapa: manter uma categoria principal e representar afinidades separadamente, com fonte/confiança e política explícita do destino (opt-in). A lista de categorias selecionadas pelo cliente nunca é ampliada implicitamente; afinidade incerta não autoriza entrega especializada. A seleção deve unir destinos elegíveis e deduplicar por oferta/workspace/destino, preservando TTL, fairness, créditos, Histórico e ACK. Antes de implementação, exigir aprovação comercial e testes de principal/afinidade, opt-in/OFF, isolamento e exatamente um envio quando o destino aceita ambas. Nenhum adapter de distribuição, configuração de destino ou roteador é alterado por este adendo.
+
 ## Regra comum
 
 Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco proprios. Nao copie fallback de um marketplace para outro. Mudancas devem cobrir adapter do engine, Manual V2, extensao, templates e consumidores afetados.

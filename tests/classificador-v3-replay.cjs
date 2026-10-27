@@ -16,8 +16,8 @@ function dataset() {
       titulo, marketplace: categoria ? marketplaceOuCategoria : "mercadolivre", categoria: categoria || marketplaceOuCategoria, proveniencia: "regressao_curada_anterior"
     }));
   });
-  return [...fixtures.real.map(x => ({ ...x, marketplace: "mercadolivre", proveniencia: "relato_proprietario_20261027" })),
-    ...fixtures.controls.map(x => ({ ...x, marketplace: "mercadolivre", proveniencia: "controle_sintetico" })), ...anteriores];
+  return [...fixtures.real.map(x => ({ ...x, marketplace: x.marketplace || "mercadolivre", proveniencia: "relato_proprietario_20261027" })),
+    ...fixtures.controls.map(x => ({ ...x, marketplace: x.marketplace || "mercadolivre", proveniencia: "controle_sintetico" })), ...anteriores];
 }
 function quantile(values, q) { const v = values.slice().sort((a,b) => a-b); return v[Math.min(v.length-1, Math.floor(v.length*q))]; }
 async function main() {
