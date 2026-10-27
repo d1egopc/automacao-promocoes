@@ -279,6 +279,11 @@ function testMatrix(plan) {
     specs.set(id, { id, file, command, args, compareBaseline, requiresBash });
   add("syntax:index", "index.js", process.execPath, ["--check", "index.js"]);
   add("encoding", "scripts/audit-encoding.cjs", process.execPath, ["scripts/audit-encoding.cjs"]);
+  // Permanent release/CI gates only. Never imported by a commercial motor.
+  add("telemetria:contrato-permanente", "tests/telemetria-permanent-contract.test.cjs", process.execPath,
+    ["--test", "tests/telemetria-permanent-contract.test.cjs"], false);
+  add("telemetria:autorizacao-readonly", "tests/telemetria-operacional.test.cjs", process.execPath,
+    ["--test", "tests/telemetria-operacional.test.cjs", "tests/telemetria-prepared-input.test.cjs"], false);
 
   if (plan.runtimeFiles.length) {
     add("contract:rio", "tests/universal-flow-queue-executor.test.js", process.execPath, ["tests/universal-flow-queue-executor.test.js"]);

@@ -24,6 +24,20 @@ Leia [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DE
 3. Para operacao, siga [PLATFORM-TOPOLOGY.md](docs/contracts/PLATFORM-TOPOLOGY.md), [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md) e, para WhatsApp, [MESSENGER.md](docs/contracts/MESSENGER.md). Nao presuma SSH funcional nem reutilize workflows de deploy para diagnostico.
 4. Worktrees antigas e commits WIP preservam experimentos, mas nunca substituem a base oficial nem autorizam mescla ou publicacao automatica.
 
+## Telemetria Primeiro — regra operacional obrigatória
+
+Antes de investigar defeitos em qualquer workspace ou motor, consultar primeiro a Telemetria Operacional existente, conforme [TELEMETRIA-OPERACIONAL.md](docs/contracts/TELEMETRIA-OPERACIONAL.md#telemetria-primeiro--contrato-permanente).
+
+Ao receber relato sobre Radar, TeleRadar, Mensageiro, Clonador, RIO, Executor, marketplace, importador, links, destinos, filas ou outra parte da plataforma:
+
+1. Lembrar proativamente o proprietário de que a Telemetria Operacional já existe.
+2. Solicitar autorização temporária `tel_` ao proprietário quando necessária, com escopo plataforma/workspace e prazo autorizados. Não pedir JWT principal, SSH ou credenciais comerciais para substituir esse acesso.
+3. Consultar somente os endpoints read-only existentes, respeitando escopo, expiração e revogação. O coletor aceita a autorização previamente fornecida em memória; REQUEST_ID permanece como alternativa. Não repetir segredos em respostas, logs, URLs, comandos persistentes ou relatórios.
+4. Localizar a primeira etapa com falha comprovada e indicar fonte, horário e identificador sanitizado disponíveis.
+5. Distinguir ausência de registro de falha demonstrada: sem cobertura não há prova de que uma mensagem ou evento não chegou.
+6. Propor instrumentação adicional somente após identificar uma lacuna concreta nos sinais disponíveis. Se o acesso estiver indisponível, registrar o impedimento específico, sem repetir autenticações nem contornar permissões.
+7. Não executar ações produtivas com a autorização read-only: não iniciar sondas, alterar configuração, filas, destinos, sessões, enviar mensagens, fazer deploy ou restart.
+
 ## Classificacao obrigatoria
 
 Antes de trabalhar, registre:
