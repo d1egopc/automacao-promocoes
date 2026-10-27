@@ -66,6 +66,16 @@ test(
         snapshot.motors.find((m) => m.motor === "radar").state,
         "COMPROVADO",
       );
+      const filtered = await view.snapshot({ motor: "teleradar" }, scope);
+      assert.equal(
+        filtered.events.items.length,
+        0,
+        "motor filter cannot show a Radar event as TeleRadar",
+      );
+      assert.ok(
+        (await view.snapshot({ motor: "radar" }, scope)).events.items.length >
+          0,
+      );
       const trace = await view.trace("job", "1", {}, scope);
       assert.equal(trace.eventoId, "1");
       assert.equal(trace.magalu.oneLink.state, "COMPROVADO");

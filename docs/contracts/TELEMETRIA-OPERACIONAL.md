@@ -46,6 +46,8 @@ POST /telemetria/sonda-radar/iniciar e /encerrar exigem Admin Master autenticado
 
 COMPROVADO significa existência da evidência indicada, não sucesso comercial implícito. NAO_OBSERVADO significa ausência na janela/amostra explicitada. DESCONHECIDO significa que a fonte não permite concluir. INDISPONIVEL identifica falha/ausência da fonte ou restrição de escopo.
 
+O inventário combina o socket/status atual em memória com a propriedade indicada em sessoesMeta, carregada da persistência. Não presume que o callback capturou esse mesmo workspace; workspaceCapturedByCallback permanece DESCONHECIDO nessa listagem. O filtro por motor das etapas usa a origem persistida do evento, mantendo os filtros de workspace; não é uma alteração na captura ou distribuição.
+
 HTTP 200 não confirma produto. Tarefa completed não confirma identidade; só o campo contratual identidadeValidada=true em resultado completed é apresentado como validação registrada. Conversão exige registro do importer com conversaoStatus=convertida e proofType homologado. A telemetria não reconverte, não assina afiliação nem consulta credenciais de integração. ACK depende de etapa explicitamente registrada.
 
 ## Caso Magalu — evidência reaproveitada, sem nova captura

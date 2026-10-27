@@ -263,6 +263,11 @@ test("workspace scope is applied inside every trace SQL and shared workers do no
   );
   assert.equal(snapshot.workspace, "user_a");
   assert.equal(snapshot.runtime.length, 1);
+  assert.equal(snapshot.runtime[0].workspaceCapturedByCallback, "DESCONHECIDO");
+  assert.equal(
+    snapshot.runtime[0].ownershipSource,
+    "session_metadata_loaded_from_persistence",
+  );
   assert.ok(!JSON.stringify(snapshot).includes("5511111111111"));
   assert.equal(snapshot.magaluWorker.state, "INDISPONIVEL");
   assert.equal(snapshot.probe.reason, "outside_authorized_workspace");

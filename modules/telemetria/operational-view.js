@@ -308,7 +308,9 @@ function createOperationalView({
         .map((item) => ({
           workspaceId: code(item.workspaceId),
           sessionRef: ref(item.sessionId),
-          source: "runtime_memory",
+          source: "current_socket + sessoesMeta in memory",
+          ownershipSource: "session_metadata_loaded_from_persistence",
+          workspaceCapturedByCallback: "DESCONHECIDO",
           observedAt: at,
           state: item.socketPresent === true ? "COMPROVADO" : "DESCONHECIDO",
           status: code(item.status),
@@ -355,7 +357,7 @@ function createOperationalView({
       motors,
       runtime,
       runtimeEvidence: evidence(
-        "runtime_memory; never group cache or persistence",
+        "current socket/status in memory; ownership from session metadata, not callback ingress",
         runtimeAvailable
           ? runtime.length
             ? "COMPROVADO"
@@ -443,17 +445,15 @@ function createOperationalView({
       ok: result.ok,
       source: "existing admin observability",
       at: new Date().toISOString(),
-      problems: (result.problemas || [])
-        .slice(0, 50)
-        .map((p) => ({
-          motivo: code(p.motivoCodigo || p.motivo),
-          etapa: code(p.tipoEvento || p.etapa),
-          marketplace: code(p.marketplace),
-          quantidade: Number(p.total || p.quantidade) || 0,
-          at: stamp(
-            p.ultimoOcorridoEm || p.ultimaOcorrenciaEm || p.ultimoEventoEm,
-          ),
-        })),
+      problems: (result.problemas || []).slice(0, 50).map((p) => ({
+        motivo: code(p.motivoCodigo || p.motivo),
+        etapa: code(p.tipoEvento || p.etapa),
+        marketplace: code(p.marketplace),
+        quantidade: Number(p.total || p.quantidade) || 0,
+        at: stamp(
+          p.ultimoOcorridoEm || p.ultimaOcorrenciaEm || p.ultimoEventoEm,
+        ),
+      })),
     };
   }
   async function trace(type, id, filters, scope) {

@@ -722,6 +722,15 @@ async function consultarEventosTelemetria(opcoes = {}) {
   adicionarFiltro(params, filtros, "etapa = ?", normalizarEtapa(filtrosEntrada.etapa));
   adicionarFiltro(params, filtros, "status = ?", normalizarStatus(filtrosEntrada.status));
 
+  const origemPorMotor = {
+    radar: "(LOWER(CONCAT_WS(' ', origem_tipo, origem)) ~ 'whatsapp|radar' AND LOWER(CONCAT_WS(' ', origem_tipo, origem)) !~ 'telegram|teleradar|clonador')",
+    teleradar: "LOWER(CONCAT_WS(' ', origem_tipo, origem)) ~ 'telegram|teleradar'",
+    clonador: "LOWER(CONCAT_WS(' ', origem_tipo, origem)) ~ 'clonador'"
+  };
+  if (Object.hasOwn(origemPorMotor, opcoes.motor)) {
+    filtros.push(`EXISTS (SELECT 1 FROM engine_eventos_brutos fonte WHERE fonte.id=eventos.evento_id::bigint AND ${origemPorMotor[opcoes.motor]})`);
+  }
+
   params.push(limit + 1);
   const resultado = await executarQuery(
     `WITH eventos AS (
