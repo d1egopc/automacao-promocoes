@@ -16,10 +16,15 @@ const STATUS_JOBS_EM_CURSO_TELEMETRIA = ["processando", "importando"];
 const ROTAS_TOKEN_READ_ONLY = new Set([
   "/telemetria/saude",
   "/telemetria/eventos",
+  "/telemetria/operacional", "/telemetria/workspaces", "/telemetria/problemas", "/telemetria/sonda-radar",
+  "/operacional", "/workspaces", "/problemas", "/sonda-radar",
   "/saude",
   "/eventos"
 ]);
 const SEGREDO_PEPPER = "optimus_telemetria_v1";
+// Query usage is bounded in RAM. Persisted only by an explicit control-plane
+// mutation, never by a GET. Read grants each time: revocation has no cache delay.
+const usosAuditoria = new Map();
 const CHAVES_SENSIVEIS = /jwt|senha|password|cookie|cookies|token|secret|segredo|authorization|credencial|credential|appSecret|apiKey|apikey|access|refresh|session|sessao|html|payload|imagem|image/i;
 
 function agoraIso() {
@@ -101,10 +106,9 @@ function salvarAuditorias(lista = []) {
   const agora = Date.now();
   const retidas = lista.filter(item => {
     if (!item || typeof item !== "object") return false;
-    if (item.revogada === true) return true;
     const expiraMs = new Date(item.expiraEm || 0).getTime();
     return Number.isFinite(expiraMs) && expiraMs > agora - 24 * 60 * 60 * 1000;
-  });
+  }).slice(-200).map(item => ({ ...item, ...(usosAuditoria.get(item.auditoriaId) || {}) }));
   writeGlobalJson(AUDITORIAS_ARQUIVO, retidas);
   return retidas;
 }
@@ -118,25 +122,27 @@ function listarAuditoriasSanitizadas() {
     expiraEm: item.expiraEm,
     revogada: item.revogada === true,
     revogadaEm: item.revogadaEm || null,
-    ultimoUsoEm: item.ultimoUsoEm || null
+    ultimoUsoEm: usosAuditoria.get(item.auditoriaId)?.ultimoUsoEm || item.ultimoUsoEm || null,
+    consultas: usosAuditoria.get(item.auditoriaId)?.consultas || item.consultas || 0
   }));
 }
 
-function criarAuditoriaTemporaria({ ttlMinutos = 30, escopo = "plataforma", clienteId = "", criadoPor = "" } = {}) {
+function criarAuditoriaTemporaria({ ttlMinutos = 15, escopo = "plataforma", clienteId = "", criadoPor = "" } = {}) {
   const ttl = Number(ttlMinutos);
   if (!TTL_VALIDOS.has(ttl)) {
     return { ok: false, erro: "ttl_invalido", ttlPermitidos: [15, 30, 60] };
   }
 
+  if (!["workspace", "plataforma"].includes(escopo)) return { ok: false, erro: "escopo_invalido" };
   const escopoFinal = normalizarEscopo(escopo);
   const cliente = texto(clienteId);
-  if (escopoFinal === "workspace" && !cliente) {
+  if (escopoFinal === "workspace" && !/^[A-Za-z0-9_-]{1,120}$/.test(cliente)) {
     return { ok: false, erro: "clienteId_obrigatorio_para_workspace" };
   }
 
   const segredo = gerarCodigoAuditoria();
   const criadoEm = agoraIso();
-  const expiraEm = new Date(Date.now() + ttl * 60 * 1000).toISOString();
+  const expiraEm = new Date(new Date(criadoEm).getTime() + ttl * 60 * 1000).toISOString();
   const auditoria = {
     auditoriaId: gerarAuditoriaId(),
     hash: hashSegredo(segredo),
@@ -151,6 +157,9 @@ function criarAuditoriaTemporaria({ ttlMinutos = 30, escopo = "plataforma", clie
   };
 
   const lista = carregarAuditorias();
+  if (lista.filter(item => !item.revogada && new Date(item.expiraEm).getTime() > Date.now()).length >= 20) {
+    return { ok: false, erro: "limite_auditorias_ativas" };
+  }
   lista.push(auditoria);
   salvarAuditorias(lista);
 
@@ -183,19 +192,21 @@ function revogarAuditoriaTemporaria({ auditoriaId = "" } = {}) {
 function extrairTokenAuditoria(req = {}) {
   const header = texto(req.headers?.authorization || "");
   if (header.toLowerCase().startsWith("bearer ")) return header.slice(7).trim();
-  return texto(req.headers?.["x-telemetria-auditoria"] || req.query?.auditoriaToken || "");
+  return texto(req.headers?.["x-telemetria-auditoria"] || "");
 }
 
 function rotaPermitidaTokenAuditoria(req = {}) {
   if (req.method !== "GET") return false;
   if (ROTAS_TOKEN_READ_ONLY.has(req.path)) return true;
   return /^\/telemetria\/rastrear\/[^/]+$/.test(req.path || "") ||
-    /^\/rastrear\/[^/]+$/.test(req.path || "");
+    /^\/rastrear\/[^/]+$/.test(req.path || "") ||
+    /^(?:\/telemetria)?\/rastreio\/(evento|job|oferta)\/\d{1,20}$/.test(req.path || "");
 }
 
-function autenticarTokenAuditoria(req = {}) {
+function autenticarTokenAuditoria(req = {}, { registrarUso = true } = {}) {
   const token = extrairTokenAuditoria(req);
   if (!token) return { ok: false, motivo: "token_ausente" };
+  if (!/^tel_[A-Za-z0-9_-]{43}$/.test(token)) return { ok: false, motivo: "token_invalido" };
   if (!rotaPermitidaTokenAuditoria(req)) return { ok: false, motivo: "rota_nao_permitida" };
 
   const hash = hashSegredo(token);
@@ -212,8 +223,11 @@ function autenticarTokenAuditoria(req = {}) {
     return { ok: false, motivo: "token_expirado" };
   }
 
-  lista[indice] = { ...item, ultimoUsoEm: agoraIso() };
-  salvarAuditorias(lista);
+  if (registrarUso) {
+    if (usosAuditoria.size >= 200 && !usosAuditoria.has(item.auditoriaId)) usosAuditoria.delete(usosAuditoria.keys().next().value);
+    const uso = usosAuditoria.get(item.auditoriaId);
+    usosAuditoria.set(item.auditoriaId, { ultimoUsoEm: agoraIso(), consultas: (uso?.consultas || item.consultas || 0) + 1 });
+  }
 
   return {
     ok: true,
@@ -689,6 +703,7 @@ function adicionarFiltro(params, filtros, sql, valor) {
 }
 
 async function consultarEventosTelemetria(opcoes = {}) {
+  const executarQuery = opcoes.query || queryEngine;
   const janelaMinutos = inteiroLimitado(opcoes.janelaMinutos, 60, 1, 1440);
   const limit = inteiroLimitado(opcoes.limit, LIMITE_PADRAO_EVENTOS, 1, LIMITE_MAXIMO_EVENTOS);
   const escopo = opcoes.escopo || { tipo: "plataforma" };
@@ -708,7 +723,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
   adicionarFiltro(params, filtros, "status = ?", normalizarStatus(filtrosEntrada.status));
 
   params.push(limit + 1);
-  const resultado = await queryEngine(
+  const resultado = await executarQuery(
     `WITH eventos AS (
        SELECT e.id::text AS evento_id,
               NULL::text AS job_id,
@@ -754,7 +769,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
               COALESCE(NULLIF(TRIM(c.marketplace), ''), 'desconhecido') AS marketplace,
               LOWER(COALESCE(c.tipo_evento, 'evento_comercial')) AS etapa,
               LOWER(COALESCE(c.metadata->>'status', c.tipo_evento, 'registrado')) AS status,
-              COALESCE(c.metadata->>'motivo', c.metadata->>'erroTipo') AS motivo,
+              COALESCE(c.metadata->>'motivoCodigo', c.metadata->>'motivo', c.metadata->>'erroTipo') AS motivo,
               c.ocorrido_em AS timestamp
          FROM engine_eventos_comerciais c
          LEFT JOIN engine_jobs_cliente j ON j.id = c.job_id
@@ -811,66 +826,82 @@ async function consultarEventosTelemetria(opcoes = {}) {
 }
 
 async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
+  const executarQuery = opcoes.query || queryEngine;
   const id = texto(eventoId);
   const escopo = opcoes.escopo || { tipo: "plataforma" };
+  const cliente = escopo.tipo === "workspace" ? texto(escopo.clienteId) : null;
   if (!/^\d+$/.test(id)) return { ok: false, erro: "eventoId_invalido" };
 
+  // Operational/delegated reads must not load arbitrary message metadata into RAM.
+  // Column names below are fixed by this module, never supplied by a request.
+  const metadataSql = column => !opcoes.closedMetadata ? column : `jsonb_build_object(
+    'adapter', LEFT(${column}->>'adapter', 40),
+    'motivoCodigo', LEFT(${column}->>'motivoCodigo', 120),
+    'motivo', LEFT(${column}->>'motivo', 120),
+    'erroTipo', LEFT(${column}->>'erroTipo', 120),
+    'status', LEFT(${column}->>'status', 120),
+    'decisao', LEFT(${column}->>'decisao', 120),
+    'provaAfiliado', jsonb_build_object(
+      'conversaoStatus', LEFT(COALESCE(${column}->'provaAfiliado'->>'conversaoStatus', ${column}->'afiliacaoWorkspace'->>'conversaoStatus'), 40),
+      'proofType', LEFT(COALESCE(${column}->'provaAfiliado'->>'proofType', ${column}->'afiliacaoWorkspace'->>'proofType'), 80),
+      'motivoConversao', LEFT(COALESCE(${column}->'provaAfiliado'->>'motivoConversao', ${column}->'afiliacaoWorkspace'->>'motivoConversao'), 120)))`;
+
   const [evento, links, jobs, ofertas, processamentos, comerciais] = await Promise.all([
-    queryEngine(
+    executarQuery(
       `SELECT id, origem, origem_tipo, grupo_id, grupo_nome, marketplace_detectado,
-              links_extraidos, capturado_em, criado_em, metadata
+              ${opcoes.closedMetadata ? "NULL::jsonb" : "links_extraidos"} AS links_extraidos, capturado_em, criado_em, ${opcoes.closedMetadata ? "'{}'::jsonb" : "metadata"} AS metadata
          FROM engine_eventos_brutos
-        WHERE id = $1`,
-      [id]
+        WHERE id = $1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id=engine_eventos_brutos.id AND j.cliente_id=$2))`,
+      [id, cliente]
     ),
-    queryEngine(
+    executarQuery(
       `SELECT id, evento_id, url_original, url_expandida, dominio_original,
               dominio_final, marketplace_detectado, redirect_ok, motivo_redirect,
-              metadata, criado_em
+              ${opcoes.closedMetadata ? "'{}'::jsonb" : "metadata"} AS metadata, criado_em
          FROM engine_links
-        WHERE evento_id = $1
+        WHERE evento_id = $1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id=engine_links.evento_id AND j.cliente_id=$2))
         ORDER BY id ASC
         LIMIT 100`,
-      [id]
+      [id, cliente]
     ),
-    queryEngine(
+    executarQuery(
       `SELECT id, evento_id, oferta_id, cliente_id, marketplace, marketplace_detectado,
-              status, motivo_final, tentativas, criado_em, atualizado_em, metadata
+              status, motivo_final, tentativas, criado_em, atualizado_em, ${metadataSql("metadata")} AS metadata
          FROM engine_jobs_cliente
-        WHERE evento_id = $1
+        WHERE evento_id = $1 AND ($2::text IS NULL OR cliente_id=$2)
         ORDER BY criado_em ASC, id ASC
         LIMIT 200`,
-      [id]
+      [id, cliente]
     ),
-    queryEngine(
+    executarQuery(
       `SELECT id, evento_id, link_id, marketplace, status, motivo_status,
-              categoria, score, criada_em, atualizada_em, metadata
+              categoria, score, criada_em, atualizada_em, ${metadataSql("metadata")} AS metadata
          FROM engine_ofertas
-        WHERE evento_id = $1
+        WHERE evento_id = $1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.oferta_id=engine_ofertas.id AND j.cliente_id=$2))
         ORDER BY criada_em ASC, id ASC
         LIMIT 100`,
-      [id]
+      [id, cliente]
     ),
-    queryEngine(
-      `SELECT p.id, p.job_id, p.etapa, p.status, p.motivo, p.detalhes, p.criado_em
+    executarQuery(
+      `SELECT p.id, p.job_id, p.etapa, p.status, p.motivo, ${metadataSql("p.detalhes")} AS detalhes, p.criado_em
          FROM engine_processamentos p
          JOIN engine_jobs_cliente j ON j.id = p.job_id
-        WHERE j.evento_id = $1
+        WHERE j.evento_id = $1 AND ($2::text IS NULL OR j.cliente_id=$2)
         ORDER BY p.criado_em ASC, p.id ASC
         LIMIT 200`,
-      [id]
+      [id, cliente]
     ),
-    queryEngine(
+    executarQuery(
       `SELECT c.tipo_evento, c.cliente_id, c.workspace_id, c.oferta_id, c.job_id,
               c.fila_item_id, c.destino_id, c.canal, c.marketplace, c.ocorrido_em,
-              c.origem_pipeline, c.metadata
+              c.origem_pipeline, ${metadataSql("c.metadata")} AS metadata
          FROM engine_eventos_comerciais c
          LEFT JOIN engine_jobs_cliente j ON j.id = c.job_id
          LEFT JOIN engine_ofertas o ON o.id = c.oferta_id
-        WHERE j.evento_id = $1 OR o.evento_id = $1
+        WHERE (j.evento_id = $1 OR o.evento_id = $1) AND ($2::text IS NULL OR COALESCE(c.cliente_id,c.workspace_id)=$2)
         ORDER BY c.ocorrido_em ASC, c.id ASC
         LIMIT 200`,
-      [id]
+      [id, cliente]
     )
   ]);
 
@@ -911,6 +942,14 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
     readOnly: true,
     eventoId: id,
     statusTelemetria: "disponivel",
+    cobertura: {
+      evento: evento.ok ? "COMPROVADO" : "INDISPONIVEL",
+      links: links.ok ? "COMPROVADO" : "INDISPONIVEL",
+      jobs: jobs.ok ? "COMPROVADO" : "INDISPONIVEL",
+      ofertas: ofertas.ok ? "COMPROVADO" : "INDISPONIVEL",
+      importer: processamentos.ok ? "COMPROVADO" : "INDISPONIVEL",
+      comerciais: comerciais.ok ? "COMPROVADO" : "INDISPONIVEL"
+    },
     origem: {
       origem: eventoRow.origem,
       origemTipo: eventoRow.origem_tipo,
@@ -982,6 +1021,8 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
       })
       .map(item => ({
         etapa: item.tipo_evento,
+        motivo: item.metadata?.motivoCodigo || item.metadata?.motivo || item.metadata?.erroTipo || null,
+        status: item.metadata?.status || item.metadata?.decisao || null,
         clienteId: item.cliente_id || item.workspace_id,
         ofertaId: item.oferta_id,
         jobId: item.job_id,

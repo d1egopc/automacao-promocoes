@@ -16496,7 +16496,24 @@ carregarConfig();
 
 app.use("/telemetria", criarRotasTelemetria({
   authNormal: auth,
-  isAdminMaster: (req) => req.usuario?.papel === "admin_master"
+  isAdminMaster: (req) => req.usuario?.papel === "admin_master",
+  getUsers: () => usuarios.map(usuario => ({ id: usuario.id, ativo: usuario.ativo })),
+  getRuntime: (workspaceId) => Object.entries(sessoesMeta || {})
+    .filter(([, meta]) => meta?.workspaceId && (!workspaceId || meta.workspaceId === workspaceId))
+    .slice(0, 100).map(([sessionId, meta]) => {
+      const socket = sessoes[sessionId];
+      const listener = socket?.__optimusListeners?.["messages.upsert"];
+      let attachmentVerified = null;
+      try { if (listener && typeof socket?.ev?.listeners === "function") attachmentVerified = socket.ev.listeners("messages.upsert").includes(listener.handler); } catch {}
+      return { workspaceId: meta.workspaceId, sessionId, status: statusSessao[sessionId] || "unknown",
+        socketPresent: Boolean(socket && socketEhAtual(sessoes, sessionId, socket)),
+        generation: geracoesSocketWhatsapp[sessionId] || socket?.__optimusSocketGeracao || 0,
+        listenerRegistered: Boolean(listener && listener.emissor === socket.ev && typeof listener.handler === "function"), attachmentVerified };
+    }),
+  getProbeStatus: () => radarIngressObservation.status(),
+  validateProbeTarget: () => validarAlvoObservacaoIngressRadar(),
+  startProbe: target => radarIngressObservation.start(target),
+  stopProbe: () => radarIngressObservation.stop("manual")
 }));
 app.use(criarRotasVitrine({
   publico: true,

@@ -11,6 +11,7 @@ on:
       - validation/baileys-buffer-servcel-20261026
       - validation/baileys-buffer-packaging-20261026
       - validation/radar-magalu-ingress-observer-20261026
+      - validation/telemetria-operacional-20261027
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -128,12 +129,25 @@ jobs:
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
+      - name: Telemetry isolated authorization and read contracts
+        if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027'
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/telemetria-operacional.test.cjs
+          node tests/telemetria-v1-backend.test.js
+          node tests/observabilidade-v22-admin-backend.test.cjs
+          node tests/observabilidade-v25-mensageiro-backend.test.cjs
+          node --test tests/radar-ingress-observation-v1.test.cjs
+          node --expose-gc tests/telemetria-performance.test.cjs
+          git diff --exit-code 227c860e43d1d31904bd5a1332fa29b629a5b3de HEAD -- modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/executor modules/fila modules/mensageiro modules/mensageiro-v4
       - name: Validate affected contracts
         shell: bash
         run: |
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
             refs/heads/validation/mensageiro-v4-20261025) base=af56a3af675fd7f2c005a04d90e22fe72cbc95e6 ;;
             refs/heads/validation/mensageiro-v4-canary-runtime-20261025) base=760c4c11b1b2d726cb212b6aa4ac4a8ab35a478f ;;
             refs/heads/validation/mensageiro-v4-ingress-probe-20261026) base=e55890ca4cf789cbdbdaf523f289ba6a2c891755 ;;
@@ -153,6 +167,36 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+
+  telemetry-postgres:
+    if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_telemetry_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["55442:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_telemetry_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Read-only SQL and multiworkspace fixture
+        env:
+          TELEMETRY_FIXTURE_PG_URL: postgresql://postgres@127.0.0.1:55442/optimus_telemetry_fixture
+        run: |
+          test -z "${DATABASE_URL:-}"
+          node --test tests/telemetria-operacional.postgres.test.cjs
 
   v4-financial:
     if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026'

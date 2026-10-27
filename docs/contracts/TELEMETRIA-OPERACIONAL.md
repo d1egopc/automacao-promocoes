@@ -1,0 +1,61 @@
+# Telemetria operacional — contrato e operação
+
+## Escopo desta candidata (27/10/2026)
+
+Tarefa: recuperar a telemetria e delegação temporária de leitura. Área: Telemetria exclusiva e seu menu Admin Master. Risco: nível 3 (autorização, multiworkspace e custo de leitura). Reversibilidade: commits isolados; nenhuma publicação nesta missão. Contratos: segurança, multi-tenancy, performance, fontes de evidência e deploy oficial. Persistência: somente o arquivo já existente de auditorias na futura publicação; testes usam fixtures. Performance: nenhum novo handler de motor, listener, fila, polling obrigatório ou I/O no fluxo comercial. Superfícies: API /telemetria e página /telemetria. Capacidade mínima segura: Sol Alto, por segurança e isolamento. Escalar se houver mudança de schema/comportamento comercial ou perda de dados. Modo inicial: leitura, seguida de implementação isolada autorizada. Rollback: voltar às imagens/deployment anteriores pelo fluxo oficial após aprovação de release. Arquivos permitidos: Telemetria, opções de integração em index.js, testes, CI-only, página/componente exclusivos e um item do menu. Áreas congeladas: motores e páginas de Radar/TeleRadar, RIO, Executor, filas, ACK, Histórico, Mensageiro, créditos, destinos e dados. Decisão humana: apenas autorização real de acesso e publicação futuras.
+
+Bases verificadas por GitHub autenticado: backend main 227c860e43d1d31904bd5a1332fa29b629a5b3de; frontend main/Production 20296c4b92512785383c59c0d7bed7ec03deb8ec (deployment GitHub 7338865597, status success). Último deploy backend 40444363387 SUCCESS: fonte 227c860e, imagem registrada sha256:336a0331e41647d41659d7875dad1c70eb9d376a013e69ac92c3be0c42cec1f1, recovery sha256:4203f8ae169a4067b564dc64aa9d3c14e73fbac1caadb395c45764bef7b1cd91. Estas são evidências datadas do workflow, não nova inspeção do Docker. HTTP público raiz respondeu 200. Sem SSH nesta missão; não alegar inspeção atual de volumes/sessões/imagem em execução.
+
+## Código recuperado
+
+- `telemetria.routes.js` continua montado antes da autenticação global e usa a autenticação oficial para Admin Master. Mantém saúde, eventos, rastreio, emissão e revogação existentes.
+- `telemetria.service.js` continua como autoridade de grants tel_, hashes e escopos. Não há segundo registro de permissões.
+- `observabilidade/admin.service.js` já fornece workspaces, agregação de problemas e consultas. É reutilizado sem alterar seus motores ou o painel Admin existente.
+- A interface legada está embutida no Radar, e a central de observabilidade continua em Admin. A página dedicada /telemetria restaura o acesso operacional solicitado, com componentes próprios e os componentes visuais existentes. As áreas embutidas não foram extraídas nem removidas porque Radar/TeleRadar estão congelados.
+- A sonda `ingress-observation-v1` é a mesma instância publicada, com o mesmo callback e limites. As novas rotas apenas adaptam seus controles e retornam seu relatório completo sanitizado. O adaptador traduz `socket` do validador para `sock` exigido pelo observador; não muda o motor ou o listener.
+
+## Uso em até cinco passos
+
+1. No ambiente autorizado, executar `node modules/telemetria/codex-client.cjs --interactive`. O cliente usa exclusivamente HTTPS oficial e exibe REQUEST_ID, sem token. Para uma consulta única, usar `--path /operacional` ou outro GET listado abaixo.
+2. Admin Master abre /telemetria → Auditoria Codex, informa REQUEST_ID, escolhe plataforma/workspace e prazo. Padrão 15 minutos; 30/60 permanecem os prazos já suportados, sem introduzir novas durações.
+3. Ao clicar Autorizar solicitação, o backend valida o Admin Master e emite o mesmo grant tel_. Apenas o coletor com o verifier correto recebe o grant, uma vez, em resposta HTTPS não cacheável. Não há link de autorização com segredo, extensão, JWT principal, SSH ou token no comando.
+4. O coletor consulta GETs de Telemetria, mantendo o grant só em RAM. O painel permite ler fontes, horários, etapas, motivos, rastreio por evento/job/oferta e resultados da sonda. Um grant de workspace não pode ampliar o escopo por parâmetro.
+5. Revogar no painel ou aguardar expiração. Encerrar o coletor descarta sua credencial; solicitações pendentes somem após cinco minutos ou restart. Uma nova sessão exige nova aprovação oficial. Não transferir o tel_ para chat, arquivo, URL, Git ou relatório.
+
+GETs delegados: /saude, /eventos, /rastrear/:eventoId (legados), /operacional, /workspaces, /problemas, /sonda-radar, /rastreio/{evento|job|oferta}/:id. Demais métodos/rotas, incluindo emissão, aprovação, revogação e start/stop da sonda, não aceitam tel_. Fora de /telemetria continua valendo a autenticação principal, sem qualquer mudança.
+
+## Segurança e limites
+
+- Grants só guardam hash SHA-256 do segredo aleatório de 256 bits. Escopos são explícitos; nomes inválidos não viram plataforma. Máximo 20 grants ativos e 200 registros administrativos retidos, com retenção de até um dia após expiração nas próximas mutações.
+- A entrega usa solicitação de cinco minutos, challenge SHA-256 e verifier aleatório de 256 bits, vinculados em RAM. Nenhuma solicitação confere acesso antes da aprovação Admin Master. Máximo 20 solicitações pendentes; criação limitada por origem; polling do coletor mínimo cinco segundos. A resposta de aprovação não contém tel_. Verifier só via corpo HTTPS, nunca URL. Não registrar corpos ou Authorization em proxies/APM.
+- Tokens em query string são rejeitados. Respostas /telemetria têm Cache-Control no-store e Referrer-Policy no-referrer. O frontend reutiliza apiGet/apiPost; não extrai nem transmite seu JWT para o coletor.
+- Consultas delegadas: 30/min por grant, duas simultâneas. Novas consultas Admin: 12/min, duas simultâneas. Queries novas usam o pool shadow existente, timeout SQL de dois segundos, janelas de até 60 minutos, 50 etapas/100 ingressos/20 tarefas por amostra. Rastreio: limites existentes, no máximo dez tarefas correlacionadas. Sem SQL ou comandos recebidos do cliente.
+- Read models omitem mensagens, texto original, títulos, preços, cupons, links de afiliado, e-mails, telefones, JIDs, segredos e metadata arbitrária. As rotas legadas mantêm compatibilidade Admin; respostas delegadas usam projeção fechada. Identidades de sessão são opacas em cada processo. Workspaces são identificadores operacionais autorizados.
+- Rastreios operacionais limitam metadata já no SELECT a campos técnicos e de prova conhecidos, com comprimento máximo. /saude delegado usa o snapshot limitado; não executa o gate legado que lê filas. /eventos e /rastrear delegados usam o pool shadow e os mesmos limites operacionais. O comportamento legado Admin permanece compatível.
+- Tarefas Magalu são globais e não têm coluna de propriedade por workspace: não listar a amostra global para um grant de workspace. No rastreio, uma tarefa só é mostrada por igualdade exata de URL já ligada ao evento autorizado; não expor URL, worker, lease ou credenciais.
+- Uso de auditoria: ultimoUsoEm/contador ficam em Map de até 200 entradas, sem escrita em GET. São consolidados na próxima ativação/revogação. Após crash, o último uso ainda não consolidado pode ser perdido; expiração e revogação não dependem desse contador. A leitura do arquivo por autenticação é preservada para não atrasar revogações externas; não é chamada pelo caminho comercial.
+- Nenhum timer de Telemetria fica rodando com a ferramenta ociosa. Interface atualiza uma vez ao abrir; mudanças de filtro exigem Atualizar. Modo periódico é opcional, 30s e suspenso em aba oculta. Contagem regressiva é local; expiração faz uma consulta GET, sem reativação.
+
+## Sonda Radar
+
+GET /telemetria/sonda-radar faz preflight sem iniciar observação. Distingue socket atual, geração, registro do callback e anexação física. Quando o emissor não fornece introspecção, physicalAttachment=DESCONHECIDO; registry não prova anexação física. Um contador de execução positivo comprova o callback observado durante a janela; zero não demonstra ausência no transporte.
+
+POST /telemetria/sonda-radar/iniciar e /encerrar exigem Admin Master autenticado. O alvo é resolvido pelo validador publicado da configuração oficial admin/OP Teste Radar; o payload não pode escolher outro alvo. Falha de vínculo impede ativação. Limites permanecem cinco minutos/dez eventos, sem mensagens, exclusões, créditos ou moderação. Tel_ só consulta. Registro validado com anexação desconhecida é apresentado como tal; não declarar prova física ou CAPTURA_ATIVA antes de consultar o retorno real.
+
+## Estados e correlação
+
+COMPROVADO significa existência da evidência indicada, não sucesso comercial implícito. NAO_OBSERVADO significa ausência na janela/amostra explicitada. DESCONHECIDO significa que a fonte não permite concluir. INDISPONIVEL identifica falha/ausência da fonte ou restrição de escopo.
+
+HTTP 200 não confirma produto. Tarefa completed não confirma identidade; só o campo contratual identidadeValidada=true em resultado completed é apresentado como validação registrada. Conversão exige registro do importer com conversaoStatus=convertida e proofType homologado. A telemetria não reconverte, não assina afiliação nem consulta credenciais de integração. ACK depende de etapa explicitamente registrada.
+
+## Caso Magalu — evidência reaproveitada, sem nova captura
+
+O relatório sanitizado existente de 26/10/2026 registrou seis ocorrências/cinco OneLinks: Garimpei 20:43, 21:43, 22:04, 22:23; OP Teste 22:17 com duas URLs. Não havia evento, link ou tarefa correlacionável, mesmo com os grupos persistidos ativos. Logs não cobriam o callback antes dos filtros. Isso não comprova perda no socket, bloqueio por fromMe, buffer, resolvedor ou afiliação. Não repetir a pesquisa histórica como se criasse cobertura ausente.
+
+Os registros históricos sem_link_produto_confirmado pertencem à classe de evento já persistido: devem ser rastreados por seu próprio evento/job e estágio. Não atribuir esse motivo aos OneLinks sem evento correlacionado. As fixtures reutilizam URL pública como dado, sem acessar o destino, para provar que tarefa failed e resultado de importer permanecem distintos de transporte e afiliação.
+
+## Gates e próxima autorização
+
+RADAR_UI_DIFF=ZERO e TELERADAR_UI_DIFF=ZERO são verificados por diff contra a base frontend. Arquivos de motores backend permanecem idênticos; apenas opções de leitura são conectadas à montagem /telemetria. CI reaproveita workflows CI-only existentes; a branch frontend desabilita Vercel deployment em vercel.json. Sem promoção ou deploy nesta missão.
+
+LIVE_AUTH_PROOF=PENDENTE_DE_AUTORIZACAO. E2E local de entrega e consultas não é prova de acesso produtivo do Codex. Após revisão e futura publicação autorizada, executar uma única aprovação Admin Master no painel e comprovar um GET HTTPS do coletor a partir do ambiente Codex. Não iniciar captura natural nessa prova sem autorização própria. Revalidar imagem/sessões/rollback na ocasião da publicação.
