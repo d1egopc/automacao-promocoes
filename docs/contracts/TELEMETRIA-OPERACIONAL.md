@@ -10,7 +10,7 @@ Bases verificadas por GitHub autenticado: backend main 227c860e43d1d31904bd5a133
 
 - `telemetria.routes.js` continua montado antes da autenticação global e usa a autenticação oficial para Admin Master. Mantém saúde, eventos, rastreio, emissão e revogação existentes.
 - `telemetria.service.js` continua como autoridade de grants tel_, hashes e escopos. Não há segundo registro de permissões.
-- `observabilidade/admin.service.js` já fornece workspaces, agregação de problemas e consultas. É reutilizado sem alterar seus motores ou o painel Admin existente.
+- `observabilidade/admin.service.js` já fornece workspaces, agregação de problemas e consultas. É reutilizado; a única correção nele explicita COALESCE(cliente_id, workspace_id) no GROUP BY de Problemas, pois PostgreSQL resolve o alias cliente_id como coluna de entrada e rejeita a consulta original com erro 42803. Fonte, filtros e contratos permanecem iguais, sem alterar motores ou o painel Admin existente.
 - A interface legada está embutida no Radar, e a central de observabilidade continua em Admin. A página dedicada /telemetria restaura o acesso operacional solicitado, com componentes próprios e os componentes visuais existentes. As áreas embutidas não foram extraídas nem removidas porque Radar/TeleRadar estão congelados.
 - A sonda `ingress-observation-v1` é a mesma instância publicada, com o mesmo callback e limites. As novas rotas apenas adaptam seus controles e retornam seu relatório completo sanitizado. O adaptador traduz `socket` do validador para `sock` exigido pelo observador; não muda o motor ou o listener.
 

@@ -502,7 +502,7 @@ async function consultarProblemasObservabilidade(opcoes = {}) {
           OR metadata ? 'motivoCodigo'
           OR metadata ? 'erroTipo'
         )
-      GROUP BY motivo_codigo, marketplace, cliente_id
+      GROUP BY motivo_codigo, marketplace, COALESCE(cliente_id, workspace_id)
       ORDER BY quantidade DESC, ultimo_ocorrido_em DESC NULLS LAST
       LIMIT $${params.length}`,
     params
