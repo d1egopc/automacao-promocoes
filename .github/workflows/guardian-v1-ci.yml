@@ -14,6 +14,7 @@ on:
       - validation/telemetria-operacional-20261027
       - validation/telemetria-v11-panel-first-20261027
       - validation/magalu-recovery-20261027
+      - validation/classificador-universal-v3-20261027
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -150,6 +151,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
             refs/heads/validation/telemetria-v11-panel-first-20261027) base=ba966b2022a5489e2c794d79513714cb55accf97 ;;
             refs/heads/validation/mensageiro-v4-20261025) base=af56a3af675fd7f2c005a04d90e22fe72cbc95e6 ;;
@@ -190,6 +192,25 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+      - name: Classification V3 offline replay and benchmark
+        if: github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          mkdir "$RUNNER_TEMP/classifier-published-baseline"
+          git archive 3ab4f29d7812cf0f9e996f210762fd94c1296322 | tar -x -C "$RUNNER_TEMP/classifier-published-baseline"
+          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classifier-published-baseline" --benchmark --out "$RUNNER_TEMP/classifier-v3-replay.json"
+      - name: Preserve classification V3 validation evidence
+        if: always() && github.ref == 'refs/heads/validation/classificador-universal-v3-20261027'
+        uses: actions/upload-artifact@v4
+        with:
+          name: classifier-v3-validation
+          path: |
+            ${{ runner.temp }}/classifier-v3-replay.json
+            ${{ runner.temp }}/guardian-v1-report.json
+          if-no-files-found: error
 
   telemetry-postgres:
     if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027'

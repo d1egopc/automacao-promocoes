@@ -1,4 +1,5 @@
 "use strict";
+const { criarEvidenciaCategoriaMarketplace } = require("../../../marketplaces/inteligencia/classificador-categorias");
 
 const HOSTS_MAGALU = [
   "magazineluiza.com.br",
@@ -720,6 +721,9 @@ function parseMagaluProdutoHtml({ urlOriginal = "", html = "", urlFinal = "" } =
   if (categoria) {
     resultado.categoria = categoria;
     fontes.categoria = breadcrumbJsonLd ? "jsonld.breadcrumb" : "meta.category";
+    resultado.metadata.categoriaHierarquia = Array.isArray(breadcrumbJsonLd?.itemListElement)
+      ? breadcrumbJsonLd.itemListElement.slice(0, 8).map(item => limparTextoMagalu(item?.name || item?.item?.name || "").slice(0,120)).filter(Boolean)
+      : [];
   }
 
   const seller = conteudoDivergente ? "" : extrairSeller(conteudoSeguro);
@@ -805,6 +809,15 @@ async function consultarProdutoMagalu(urlOriginal = "", opcoes = {}) {
       });
       if (resposta.ok === false) {
         resultado.avisos.push(`magalu_http_${resposta.status || "erro"}`);
+      }
+      // Parse-only, erro HTTP, CAPTCHA, página divergente e redirect externo
+      // nunca promovem conteúdo a evidência oficial de categoria.
+      if (status >= 200 && status < 300 && resposta.ok !== false && hostMagaluValido(resposta.url || url) &&
+          produtoIdPorUrl(resposta.url || url) === resultado.produtoId && resultado.titulo &&
+          resultado.metadata.fontes.categoria === "jsonld.breadcrumb" &&
+          !resultado.avisos.some(aviso => /captcha|divergente|nao_comprovado|indisponivel/.test(aviso))) {
+        resultado.categoriaMarketplace = criarEvidenciaCategoriaMarketplace({ marketplace: "magalu", fonte: "magalu_product_jsonld",
+          produtoId: resultado.produtoId, hierarquia: resultado.metadata.categoriaHierarquia });
       }
       return anexarAuditoriaHttp(resultado, auditoria);
     } catch (erro) {

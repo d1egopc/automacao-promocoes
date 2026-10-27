@@ -1,9 +1,21 @@
 const crypto = require("crypto");
+const { criarEvidenciaCategoriaMarketplace } = require("../inteligencia/classificador-categorias");
 const { normalizarPrecoTextoBR } = require("../../utils/moeda");
 const {
   buscarProdutosAliExpressAPI,
   gerarLinkCurtoAliExpress: gerarLinkCurtoAliExpressApi
 } = require("./api");
+
+const provenienciaCategoriaAliExpress = new WeakMap();
+function evidenciaCategoriaAliExpress(produto = {}, produtoIdEsperado = "", fonte = provenienciaCategoriaAliExpress.get(produto)) {
+  const recebido = String(produto.product_id || produto.productId || "");
+  const esperado = String(produtoIdEsperado || "");
+  if (recebido && esperado && recebido !== esperado) return null;
+  return criarEvidenciaCategoriaMarketplace({ marketplace: "aliexpress",
+    fonte, produtoId: esperado || recebido,
+    categoriaId: produto.second_level_category_id || produto.first_level_category_id || "",
+    hierarquia: [produto.first_level_category_name, produto.second_level_category_name] });
+}
 
 // ================= IMPORTADOR API ALIEXPRESS =================
 
@@ -179,6 +191,9 @@ console.log("[INFO] ALIEXPRESS PRODUTO FINAL:", {
 
     return {
       marketplace: "aliexpress",
+      produtoId: productId,
+      productId,
+      categoriaMarketplace: evidenciaCategoriaAliExpress(produto, productId, "aliexpress.affiliate.productdetail.get"),
       titulo: htmlDecode(titulo),
       precoAntigo,
       precoAtual,
@@ -638,6 +653,7 @@ function montarProdutoAliExpressManual(produto = {}, urlEntrada = "", avisoCupom
     titulo: htmlDecode(titulo),
     produtoId: primeiroCampoAliExpress(produto, ["product_id", "productId", "item_id", "itemId"]) || extrairProductIdAliExpressManual(urlEntrada),
     productId: primeiroCampoAliExpress(produto, ["product_id", "productId", "item_id", "itemId"]) || extrairProductIdAliExpressManual(urlEntrada),
+    categoriaMarketplace: evidenciaCategoriaAliExpress(produto, extrairProductIdAliExpressManual(urlEntrada)),
     precoAntigo,
     precoAtual,
     cupom: "",
@@ -897,6 +913,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       const detalhe = await consultarDetalheAliExpress(productId, credenciais);
       const matchDetalhe = selecionarProdutoAliExpressPorId([detalhe], productId);
       produto = matchDetalhe.produto || {};
+      if (matchDetalhe.produto) provenienciaCategoriaAliExpress.set(produto, "aliexpress.affiliate.productdetail.get");
       origemProduto = matchDetalhe.produto ? "productdetail" : "";
       if (!matchDetalhe.produto && detalhe && Object.keys(detalhe).length) {
         detalheErro = "productdetail_product_id_divergente";
@@ -923,6 +940,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
       const produtoQuery = await buscarProdutoAliExpressPorQuery(productId, credenciais);
       if (produtoQuery) {
         produto = produtoQuery;
+        provenienciaCategoriaAliExpress.set(produto, "aliexpress.affiliate.product.query");
         origemProduto = "product_query";
       }
     } catch (erroQuery) {

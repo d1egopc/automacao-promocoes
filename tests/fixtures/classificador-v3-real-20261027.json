@@ -1,0 +1,33 @@
+{
+  "provenance": "Sete relatos do proprietário em 27/10/2026; títulos e URLs fornecidos, sem payload oficial de categoria ou transporte. Demais casos são controles sintéticos.",
+  "real": [
+    {"titulo":"30 Iscas Camarão Artificial de Silicone","url":"https://meli.la/1YwsCjg","categoria":"Pesca e Camping"},
+    {"titulo":"Linha Shimano Kairiki","url":"https://meli.la/33kvzrc","categoria":"Pesca e Camping"},
+    {"titulo":"Vara Lori Rampage","url":"https://meli.la/1dnaRqq","categoria":"Pesca e Camping"},
+    {"titulo":"Garateia Rapala Fish Fighter","url":"https://meli.la/1gNbmuF","categoria":"Pesca e Camping"},
+    {"titulo":"Régua para medir peixe","url":"https://meli.la/1Cdu4t8","categoria":"Pesca e Camping"},
+    {"titulo":"Graxa e óleo para carretilhas e molinetes","url":"https://meli.la/1rKCvue","categoria":"Pesca e Camping"},
+    {"titulo":"Régua de tomadas/filtro de linha","url":"https://meli.la/1pgkRhb","categoria":"Iluminação e Elétrica"}
+  ],
+  "controls": [
+    {"titulo":"Linha elétrica de cobre 2,5mm","forbidden":"Pesca e Camping"},
+    {"titulo":"Linha de costura poliéster","forbidden":"Pesca e Camping"},
+    {"titulo":"Camarão congelado descascado 1kg","forbidden":"Pesca e Camping"},
+    {"titulo":"Calça de pesca masculina impermeável","categoria":"Roupas e Moda Masculina"},
+    {"titulo":"Calça de pesca feminina impermeável","categoria":"Roupas e Moda Feminina"},
+    {"titulo":"Calça de pesca infantil","categoria":"Roupas e Calçados Infantil"},
+    {"titulo":"Calça de pesca impermeável","categoria":"Diversos"},
+    {"titulo":"Óleo de motor automotivo 5W30","categoria":"Automotivo"},
+    {"titulo":"Lâmpada automotiva para farol H4","categoria":"Automotivo"},
+    {"titulo":"Brinquedo de pesca infantil com molinete","categoria":"Brinquedos e Artigos Infantis"},
+    {"titulo":"Graxa lubrificante uso geral","forbidden":"Pesca e Camping"},
+    {"titulo":"Vara de cortina extensível","forbidden":"Pesca e Camping"},
+    {"titulo":"Lanterna LED para escritório","forbidden":"Pesca e Camping"},
+    {"titulo":"Barraca de camping 4 pessoas","categoria":"Pesca e Camping"},
+    {"titulo":"Kit 5 Iscas Frog Sapo Sortidas Anti Enrosco","categoria":"Pesca e Camping"},
+    {"titulo":"Brinquedo Bancada Interativa Ferramentas Mecânico Parafusadeira Oficina","categoria":"Brinquedos e Artigos Infantis"},
+    {"titulo":"Furadeira profissional de impacto","categoria":"Ferramentas"},
+    {"titulo":"CK One Calvin Klein 200mL","categoria":"Perfumaria, Farmácia e Beleza"},
+    {"titulo":"Vibrador com fantasia infantil","categoria":"Diversos"}
+  ]
+}

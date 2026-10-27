@@ -1,5 +1,30 @@
 # Marketplaces
 
+## Classificação Universal V3 — evidência existente, sem aquisição obrigatória
+
+O contrato público `classificarCategoriaOferta` continua retornando uma string da taxonomia atual. `classificarCategoriaUniversal` reutiliza o mesmo classificador e acrescenta decisão sanitizada nos logs já existentes: categoria final, origem, fonte técnica fixa, motivo, confiança, divergência e baixa confiança. A confiança é qualitativa, não uma probabilidade calibrada. Não grava novos arquivos nem registra título, URL, credenciais ou afiliação nesses novos campos.
+
+Corrigir categoria específica exige natureza factual inequívoca, como lubrificante de carretilhas/molinetes, brinquedo que imita ferramenta ou roupa de pesca com público explícito. Não classificar apenas por marca genérica, “linha”, “vara”, “óleo” ou “régua”. Roupa de pesca sem público/evidência suficiente permanece em Diversos; equipamento de camping não cria uma afinidade de pesca separada. Conteúdo adulto explícito não é classificado como infantil nem habilita uma categoria Adulto.
+
+| Conector inspecionado | Dado efetivamente disponível no código | Uso e limite |
+| --- | --- | --- |
+| Mercado Livre | Importador HTML retorna `Mercado Livre`; identidade e fatos do produto existem, mas não entrega categoria oficial/ID/hierarquia à classificação | Aplicar identidade/título factual. Não presumir acesso à API de vendedores/categorias com credencial afiliada; nenhum lookup adicional |
+| Shopee | Contrato importado retorna `Shopee`; GraphQL afiliado/conversor já existentes não fornecem hierarquia de categoria no DTO atual | Fallback existente; não solicitar scope de vendedor |
+| Amazon | Importador HTML retorna `Amazon`; não há BrowseNode/ID/hierarquia no retorno atual | Fallback existente; token afiliado/tag não comprova acesso à Product Advertising API |
+| AliExpress | A chamada afiliada já solicita `first_level_category_name` e `second_level_category_name`; ID de categoria só se presente na resposta | Preservar ambos os níveis e preferir o ramo específico conhecido. Mesmas chamadas productdetail/query e credenciais; fonte é distinguida e vínculo ao productId é obrigatório |
+| Magalu | Parser já lê BreadcrumbList/meta e SKU, mas antes entregava apenas o penúltimo nome | Preservar até oito nomes. Promover a evidência oficial somente após HTTP 2xx, hostname oficial, SKU/canônica coerentes, título factual e ausência de bloqueio/divergência. Parse-only, HTML enviado, 403 e CAPTCHA não recebem proveniência oficial |
+| KaBuM/AWIN | Importador HTML retorna `Gamer e Hardware`; AWIN usado para deeplink, sem feed de categoria/ID comprovado no caminho atual | Natureza factual pode corrigir casos inequívocos. Nenhum acesso AWIN feed é presumido |
+
+O mapa externo aceita somente ramos conhecidos e tipos inequívocos da taxonomia interna, com limites de oito níveis/120 caracteres e identidade curta. ID opaco isolado e ramos amplos (“Sports & Entertainment”) não inventam categoria. Produto/tipo contraditório vence o rótulo externo; tipo e hierarquia oficiais incompatíveis sem título conclusivo ficam em baixa confiança. Os testes puros dos seis marketplaces/AWIN não comprovam disponibilidade real de API: somente AliExpress e o HTTP factual Magalu estão conectados a essa nova proveniência nesta candidata.
+
+A origem oficial é marcada por objeto interno em memória, criado no conector após resposta/identidade válidas. JSON de cliente ou disco não restabelece essa marca; não basta declarar `fonte=oficial`. O cache técnico já existente do AliExpress preserva o produto validado, e o cache factual Magalu conserva somente a referência de prova já criada e os dados públicos permitidos. As regras de TTL, falha fechada para 403/CAPTCHA e limpeza de segredos desses caches permanecem. Categoria interna específica já persistida continua no contrato declarado, salvo correção factual restrita; não se declara “oficial” pela mera presença em cache.
+
+As palavras das regras existentes são normalizadas/deduplicadas uma vez no boot, preservando o scorer em teste determinístico contra a base. Não há nova chamada externa, consulta PostgreSQL, fila, timer, escrita síncrona ou dependência da extensão no despacho. A extensão/Worker compartilhada continua com suas capabilities atuais de identidade/imagem; não há capability de categoria homologada, e nenhuma foi criada. PC desligado não bloqueia a classificação nem o RIO.
+
+Radar/TeleRadar/Clonador continuam entrando nos adapters/normalização/serviço universal existentes; ofertas manuais e farejadores continuam usando o classificador compartilhado. A categoria é persistida em `engine_ofertas.categoria` e projetada no Template Universal pelo bloco já existente. Não modificar renderer, roteamento, destinos, ACK ou reprocessar ofertas persistidas.
+
+Compatibilidade futura específica/abrangente é apenas projeto: uma relação como Climatização → Eletrodomésticos deverá ser opcional e decidida pelo destino, com teste de envio único. Nenhum pai/filho, expansão de seleção ou afinidade múltipla foi ativado nesta versão.
+
 ## Regra comum
 
 Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco proprios. Nao copie fallback de um marketplace para outro. Mudancas devem cobrir adapter do engine, Manual V2, extensao, templates e consumidores afetados.

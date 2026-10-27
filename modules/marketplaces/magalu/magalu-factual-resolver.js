@@ -1,4 +1,5 @@
 "use strict";
+const { preservarEvidenciaCategoriaMarketplace } = require("../../../marketplaces/inteligencia/classificador-categorias");
 
 const {
   consultarProdutoMagalu,
@@ -135,7 +136,7 @@ function agoraMs(opcoes = {}) {
 }
 
 function clonar(valor) {
-  return JSON.parse(JSON.stringify(valor || null));
+  return preservarEvidenciaCategoriaMarketplace(valor, JSON.parse(JSON.stringify(valor || null)));
 }
 
 function removerCamposSensiveisCache(objeto) {

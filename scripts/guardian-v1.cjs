@@ -300,6 +300,19 @@ function testMatrix(plan) {
   if (plan.runtimeFiles.some(file => file.startsWith("modules/engine") || file.startsWith("modules/executor") || file.startsWith("modules/fila"))) {
     add("engine:claim-recovery", "tests/engine-validator-claim-recovery.test.js", process.execPath, ["tests/engine-validator-claim-recovery.test.js"]);
   }
+  if (plan.runtimeFiles.some(file => file.includes("classificador-categorias") || file.startsWith("modules/inteligencia-universal/") || file === "marketplaces/aliexpress/importar.js" || file.includes("magalu-parser.js"))) {
+    add("categorias:v3-evidencias", "tests/classificador-universal-v3.test.cjs", process.execPath,
+      ["--test", "tests/classificador-universal-v3.test.cjs", "tests/classificador-v3-evidencia-marketplace.test.cjs", "tests/classificador-v3-magalu-evidencia.test.cjs", "tests/classificador-v3-legacy-parity.test.cjs"], false);
+    for (const name of ["classificador-universal-v2-categorias", "categorias-reducao-diversos", "inteligencia-universal-decisao",
+      "aliexpress-manual-importador", "aliexpress-moedas-productdetail-engine", "aliexpress-afiliacao-workspace",
+      "magalu-parser", "magalu-factual-resolver", "magalu-engine-importer", "magalu-v2-golden-path",
+      "engine-v2-marketplaces-fidelidade", "link-conversao-ocorrencia-marketplaces", "contrato-comercial-final-universal",
+      "imagem-link-contrato-universal", "template-universal-visual-contract", "dynamic-link-resolvers", "redirect-resolver-shortlinks-seguros",
+      "manual-v2-import-aliexpress", "manual-v2-import-mercadolivre", "manual-v2-import-shopee", "manual-v2-import-amazon", "manual-v2-import-magalu", "manual-v2-import-kabum",
+      "destino-geral-distributor", "destinos-compatibilidade-kabum-awin", "local-worker", "local-worker-idempotency", "mercadolivre-work-backend-order"])
+      add(`categorias:${name}`, `tests/${name}.test.js`, process.execPath, [`tests/${name}.test.js`]);
+    add("categorias:worker-platform", "tests/local-worker-platform-architecture.test.cjs", process.execPath, ["--test", "tests/local-worker-platform-architecture.test.cjs"], false);
+  }
   if (plan.runtimeFiles.includes("modules/engine/importer/importer.service.js")) {
     add("magalu:identity-image-retry", "tests/magalu-recovery-retry.test.cjs", process.execPath, ["--test", "tests/magalu-recovery-retry.test.cjs"], false);
     add("magalu:platform-worker-architecture", "tests/local-worker-platform-architecture.test.cjs", process.execPath, ["--test", "tests/local-worker-platform-architecture.test.cjs"], false);

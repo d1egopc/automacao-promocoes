@@ -1136,6 +1136,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
     ok: true,
     marketplace: "aliexpress",
     produtoId: produtoCanonico.produtoId,
+    categoriaMarketplace: produto.categoriaMarketplace || null,
     titulo: produto.titulo || produto.nome || "",
     preco: precoNumerico,
     precoAtual: precoNumerico,

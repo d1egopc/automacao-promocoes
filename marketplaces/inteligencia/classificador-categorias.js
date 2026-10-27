@@ -75,15 +75,8 @@ function contemAlgum(texto, palavras = []) {
 }
 
 function termosEncontrados(texto, palavras = []) {
-  const encontrados = [];
-
-  for (const palavra of palavras) {
-    if (termoExiste(texto, palavra)) {
-      encontrados.push(normalizarTextoLocal(palavra));
-    }
-  }
-
-  return [...new Set(encontrados)];
+  const alvo = ` ${texto} `;
+  return palavras.filter(palavra => alvo.includes(` ${palavra} `));
 }
 
 function palavrasDosDestinos(nomeCategoria) {
@@ -105,15 +98,18 @@ function palavrasDosDestinos(nomeCategoria) {
 }
 
 function regra(categoria, opcoes = {}) {
+  // Mesma comparação e deduplicação do legado, compiladas uma vez no boot.
+  // Evita normalizar centenas de palavras novamente para cada oferta.
+  const compilar = itens => [...new Set(itens.map(normalizarTextoLocal).filter(Boolean))];
   return {
     categoria,
     prioridade: opcoes.prioridade || 0,
-    fortes: opcoes.fortes || [],
-    palavras: [
+    fortes: compilar(opcoes.fortes || []),
+    palavras: compilar([
       ...(opcoes.palavras || []),
       ...palavrasDosDestinos(categoria)
-    ],
-    negativas: opcoes.negativas || []
+    ]),
+    negativas: compilar(opcoes.negativas || [])
   };
 }
 
@@ -728,7 +724,130 @@ function categoriaPorNaturezaExplicita(oferta = {}, termo = "") {
   return /^brinquedos? (?:bancada|oficina)\b/.test(titulo) ? CATEGORIA.brinquedos : "";
 }
 
+// Proveniência em memória: JSON recebido de cliente ou reidratado de disco não
+// consegue se apresentar como resposta oficial. Não é uma permissão comercial.
+const EVIDENCIAS_MARKETPLACE = new WeakSet();
+const FONTES_CATEGORIA = Object.freeze({
+  "aliexpress.affiliate.productdetail.get": "aliexpress",
+  "aliexpress.affiliate.product.query": "aliexpress",
+  mercadolivre_api_items: "mercadolivre",
+  shopee_affiliate_graphql: "shopee",
+  amazon_product_api: "amazon",
+  magalu_product_jsonld: "magalu",
+  kabum_product_jsonld: "kabum",
+  awin_feed: "awin"
+});
+const MAPA_CATEGORIAS_EXTERNAS = [
+  [CATEGORIA.pesca, /^(?:iscas? artificiais?|artificial fishing baits|fishing (?:lures?|rods?|lines?|reels?|hooks?)|varas? de pesca|linhas? de pesca|carretilhas?|molinetes?|anz[oó]is|pesca|fishing|camping|barracas? de camping)$/],
+  [CATEGORIA.ferramentas, /^(?:ferramentas(?: eletricas)?|power tools|hand tools|tools)$/],
+  [CATEGORIA.beleza, /^(?:perfumes?|perfumaria|fragrances|skin care|hair care)$/],
+  [CATEGORIA.computadores, /^(?:notebooks?|laptops|desktop computers|computers)$/],
+  [CATEGORIA.perifericos, /^(?:computer peripherals|perifericos|keyboards|mice)$/],
+  [CATEGORIA.modaMasculina, /^(?:men s clothing|roupas masculinas|moda masculina)$/],
+  [CATEGORIA.modaFeminina, /^(?:women s clothing|roupas femininas|moda feminina)$/],
+  [CATEGORIA.infantil, /^(?:children s clothing|roupas infantis|moda infantil)$/],
+  [CATEGORIA.brinquedos, /^(?:toys(?: and games)?|brinquedos)$/],
+  [CATEGORIA.tenis, /^(?:sneakers|tenis|chinelos)$/],
+  [CATEGORIA.eletrodomesticos, /^(?:home appliances|eletrodomesticos|refrigerators)$/],
+  [CATEGORIA.iluminacao, /^(?:electrical equipment|power strips|lighting|iluminacao|material eletrico|filtros? de linha)$/],
+  [CATEGORIA.automotivo, /^(?:automotive|automotivo|auto parts)$/]
+];
+
+function criarEvidenciaCategoriaMarketplace({ marketplace, fonte, produtoId, categoriaId = "", hierarquia = [], tipoProduto = "" } = {}) {
+  if (FONTES_CATEGORIA[fonte] !== marketplace || !/^[a-z0-9_-]+(?:\/[a-z0-9_-]+)?$/i.test(String(produtoId || "")) || String(produtoId).length > 80) return null;
+  const itens = Array.isArray(hierarquia) ? hierarquia.slice(0, 8) : [];
+  const evidencia = Object.freeze({ marketplace, fonte, produtoId: String(produtoId),
+    categoriaId: String(categoriaId || "").slice(0, 80), tipoProduto: String(tipoProduto || "").slice(0, 120),
+    hierarquia: Object.freeze(itens.filter(item => item != null).map(item => String(typeof item === "object" ? item?.nome || "" : item).slice(0, 120)).filter(Boolean)) });
+  EVIDENCIAS_MARKETPLACE.add(evidencia);
+  return evidencia;
+}
+
+function categoriaMarketplaceComprovada(oferta = {}) {
+  const raw = oferta.raw || {};
+  const produto = oferta.metadata?.produto || raw.metadata?.produto || {};
+  const evidencia = oferta.categoriaMarketplace || raw.categoriaMarketplace || produto.categoriaMarketplace;
+  const identidade = String(oferta.produtoId || oferta.productId || oferta.produtoIdDetectado || raw.produtoId || raw.productId || raw.produtoIdDetectado || produto.produtoId || produto.productId || "");
+  const marketplace = String(oferta.marketplace || raw.marketplace || "").toLowerCase();
+  if (!evidencia || !EVIDENCIAS_MARKETPLACE.has(evidencia) || evidencia.produtoId !== identidade || evidencia.marketplace !== marketplace) return null;
+  if (/\b(?:sex toy|sex shop|vibrador|dildo|masturbador|erotico|erotica)\b/.test(normalizarTextoLocal(evidencia.tipoProduto)))
+    return { categoria: CATEGORIA.diversos, fonte: evidencia.fonte, adulto: true };
+  const tipo = MAPA_CATEGORIAS_EXTERNAS.find(([, padrao]) => padrao.test(normalizarTextoLocal(evidencia.tipoProduto)))?.[0];
+  for (let i = evidencia.hierarquia.length - 1; i >= 0; i--) {
+    const nome = normalizarTextoLocal(evidencia.hierarquia[i]);
+    const match = MAPA_CATEGORIAS_EXTERNAS.find(([, padrao]) => padrao.test(nome));
+    if (match) return { categoria: tipo || match[0], fonte: evidencia.fonte, conflito: Boolean(tipo && tipo !== match[0]) };
+  }
+  return tipo ? { categoria: tipo, fonte: evidencia.fonte } : null; // ID opaco ou ramo amplo não inventam taxonomia.
+}
+
+// Reutilização apenas do cache técnico em memória já validado; não revalida JSON
+// de disco/cliente nem copia afiliação. Dois caminhos fixos, sem varredura geral.
+function preservarEvidenciaCategoriaMarketplace(origem, copia) {
+  if (!origem || !copia) return copia;
+  if (EVIDENCIAS_MARKETPLACE.has(origem.categoriaMarketplace)) copia.categoriaMarketplace = origem.categoriaMarketplace;
+  if (origem.fatos && copia.fatos && EVIDENCIAS_MARKETPLACE.has(origem.fatos.categoriaMarketplace)) copia.fatos.categoriaMarketplace = origem.fatos.categoriaMarketplace;
+  return copia;
+}
+
+function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
+  const titulo = normalizarTextoLocal(String(oferta.titulo || oferta.nome || termo || "").slice(0, 1200));
+  const oficial = categoriaMarketplaceComprovada(oferta);
+  const declarada = categoriaDeclaradaValida(oferta);
+  let categoria = "", motivo = "natureza_produto_explicita";
+  if (oficial?.adulto || /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(titulo) ||
+      (/\badultos?\b/.test(titulo) && (/\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(titulo) ||
+        [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
+    categoria = CATEGORIA.diversos;
+    motivo = "conteudo_adulto_sem_categoria_habilitada";
+  } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?)\b/.test(titulo)) {
+    categoria = CATEGORIA.brinquedos;
+  } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
+    categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
+      : /\b(?:feminina|feminino|mulher)\b/.test(titulo) ? CATEGORIA.modaFeminina
+      : /\b(?:masculina|masculino|homem)\b/.test(titulo) ? CATEGORIA.modaMasculina
+      : [CATEGORIA.modaFeminina, CATEGORIA.modaMasculina, CATEGORIA.infantil].includes(oficial?.categoria || declarada)
+        ? oficial?.categoria || declarada : CATEGORIA.diversos;
+  } else if (/\b(?:regua de tomadas|filtro de linha|regua de energia)\b/.test(titulo)) {
+    categoria = CATEGORIA.iluminacao;
+  } else if (/\b(?:lampadas? automotivas?|oleo de motor automotivo)\b/.test(titulo)) {
+    categoria = CATEGORIA.automotivo;
+  } else if (/\biscas?\b.{0,60}\b(?:artificial|artificiais|camarao|camaroes|frog|sapo|jig)\b/.test(titulo) ||
+      /\blinha shimano kairiki\b|\bvara lori rampage\b/.test(titulo) ||
+      (/\bgarateias?\b/.test(titulo) && /\b(?:rapala|fish fighter|pesca)\b/.test(titulo)) ||
+      (/\bregua\b/.test(titulo) && /\bmedir\b/.test(titulo) && /\bpeixes?\b/.test(titulo)) ||
+      (/\b(?:graxa|oleo)\b/.test(titulo) && /\b(?:carretilhas?|molinetes?)\b/.test(titulo))) {
+    categoria = CATEGORIA.pesca;
+  }
+  if (categoria === CATEGORIA.pesca && /\b(?:notebook|smartphone|furadeira|parafusadeira|geladeira|perfume)\b/.test(titulo)) {
+    categoria = CATEGORIA.diversos;
+    motivo = "naturezas_produto_conflitantes";
+  }
+  // Contradições inequívocas com fonte externa também são verificadas; não
+  // reclassificam toda categoria declarada apenas por uma palavra no título.
+  if (!categoria && oficial) {
+    if (/\b(?:notebook|laptop|macbook)\b/.test(titulo)) categoria = CATEGORIA.computadores;
+    else if (/\b(?:smartphone|iphone)\b/.test(titulo)) categoria = CATEGORIA.celulares;
+    else if (/\b(?:furadeira|parafusadeira)\b/.test(titulo) && !/\bbrinquedo\b/.test(titulo)) categoria = CATEGORIA.ferramentas;
+  }
+  if (categoria || oficial) {
+    const final = categoria || (oficial.conflito ? CATEGORIA.diversos : oficial.categoria);
+    const divergencia = Boolean(oficial?.conflito || (oficial && oficial.categoria !== final) || (declarada && declarada !== CATEGORIA.diversos && declarada !== final));
+    return { categoria: final, origem: categoria && !oficial?.adulto ? "identidade_produto" : "marketplace_oficial",
+      fonteEvidencia: categoria && !oficial?.adulto ? "titulo_tipo_modelo" : oficial.fonte,
+      motivo: categoria ? motivo : oficial.conflito ? "tipo_hierarquia_divergentes" : "hierarquia_oficial_mapeada", confianca: final === CATEGORIA.diversos ? "baixa" : "alta",
+      divergencia, baixaConfianca: final === CATEGORIA.diversos };
+  }
+  return null;
+}
+
 function classificarCategoriaOferta(oferta = {}, termo = "") {
+  const evidencia = avaliarEvidenciaCategoria(oferta, termo);
+  if (evidencia) return evidencia.categoria;
+  return classificarCategoriaLegada(oferta, termo);
+}
+
+function classificarCategoriaLegada(oferta = {}, termo = "") {
   const texto = textoOferta(oferta, termo);
 
   if (!texto) {
@@ -780,6 +899,9 @@ function classificarCategoriaOferta(oferta = {}, termo = "") {
 
 module.exports = {
   classificarCategoriaOferta,
+  avaliarEvidenciaCategoria,
+  criarEvidenciaCategoriaMarketplace,
+  preservarEvidenciaCategoriaMarketplace,
   categoriaPorNaturezaExplicita,
   normalizarTextoLocal
 };
