@@ -801,7 +801,6 @@ async function converterLinksAlternativosAliExpress({
 
   const saida = [];
   const conversoesPorPapelUrl = new Map();
-  const appsVistos = new Set();
   let indiceOcorrencia = 0;
   for (const link of linksClassificados) {
     indiceOcorrencia += 1;
@@ -820,11 +819,6 @@ async function converterLinksAlternativosAliExpress({
       continue;
     }
     const chaveCacheOcorrencia = `${papelLink}:${urlOriginal}`;
-    if (papelLink === "link_app") {
-      const chaveApp = chaveUrlAliExpressAfiliada(urlOriginal) || urlOriginal.toLowerCase();
-      if (appsVistos.has(chaveApp)) continue;
-      appsVistos.add(chaveApp);
-    }
     let conversao = conversoesPorPapelUrl.get(chaveCacheOcorrencia);
     if (!conversao) {
       conversao = await converter(urlOriginal, papelLink, link.urlExpandida);
