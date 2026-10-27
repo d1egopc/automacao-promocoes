@@ -10,6 +10,7 @@ on:
       - validation/v4-admin-observation-20261026
       - validation/baileys-buffer-servcel-20261026
       - validation/baileys-buffer-packaging-20261026
+      - validation/radar-magalu-ingress-observer-20261026
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
   workflow_dispatch:
@@ -117,6 +118,14 @@ jobs:
           node tests/mensageiro-v3-m322-real-handlers.test.cjs
           node tests/mensageiro-v3-schedule-timezone.test.cjs
           node tests/mensageiro-v3-lock-identity.test.cjs
+      - name: Radar ingress observer scoped validation
+        if: github.ref == 'refs/heads/validation/radar-magalu-ingress-observer-20261026'
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "\${DATABASE_URL:-}"
+          node --check index.js
+          node --check modules/radar/ingress-observation-v1.js
+          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: Validate affected contracts

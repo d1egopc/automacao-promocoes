@@ -21,6 +21,8 @@ const {
 } = require("./modules/radar/cupom-semantico");
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
+const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
+const radarIngressObservation = createRadarIngressObservation();
 const { avaliarFrescorHandoffTeleRadar } = require("./modules/radar/ingress-frescor-retry.candidate");
 const { capturaFactualRadarCandidata } = require("./modules/radar/capture-clock.candidate");
 const { recuperarIntencoesRadarCandidatas } = require("./modules/engine/radar-replay-runtime.candidate");
@@ -23286,7 +23288,8 @@ async function processarMensagemRadar({
   origemAutorizadaInternamente = false,
   aguardarAckEngine = false,
   upsertType,
-  exigirMensagemNova = false
+  exigirMensagemNova = false,
+  diagnosticoWorkspaceId = ""
 } = {}) {
   const tipo = normalizarTexto(origemTipo || "");
   const origemTipoFinal = tipo.includes("telegram") ? "telegram" : tipo.includes("whatsapp") ? "whatsapp" : "";
@@ -23428,6 +23431,27 @@ const links = (linksContextuaisCapturados.length ? linksContextuaisCapturados : 
 const marketplaceDetectadoLinks = links
   .map(link => detectarMarketplaceRadarLink(link))
   .find(Boolean) || "";
+radarIngressObservation.recordStage({
+  workspaceId: diagnosticoWorkspaceId,
+  sessionId: sessaoIdTexto,
+  sock,
+  message: raw,
+  stage: "url_extraction",
+  decision: links.length ? "resolved" : "rejected",
+  reason: links.length ? "accepted" : "no_links",
+  urls: links
+});
+radarIngressObservation.recordStage({
+  workspaceId: diagnosticoWorkspaceId,
+  sessionId: sessaoIdTexto,
+  sock,
+  message: raw,
+  stage: "marketplace_classification",
+  decision: marketplaceDetectadoLinks ? "resolved" : "rejected",
+  reason: marketplaceDetectadoLinks ? "accepted" : "marketplace_unidentified",
+  urls: links,
+  marketplace: marketplaceDetectadoLinks || "unknown"
+});
   coberturaRadar.registrar("links_extraidos", {
     ...contextoCoberturaRadar,
     decisao: links.length ? "aceito" : "rejeitado",
@@ -23659,6 +23683,38 @@ const registroEngineRadarPromise = registrarEventoBrutoEngineRadar({
     ...(coberturaTraceIdRadar ? { coberturaTraceId: coberturaTraceIdRadar } : {})
   }
 });
+if (radarIngressObservation.isActiveFor({
+  workspaceId: diagnosticoWorkspaceId,
+  sessionId: sessaoIdTexto,
+  groupId: grupoIdTexto,
+  sock
+})) {
+  registroEngineRadarPromise.then(resultado => radarIngressObservation.recordStage({
+    workspaceId: diagnosticoWorkspaceId,
+    sessionId: sessaoIdTexto,
+    sock,
+    message: raw,
+    stage: "engine_event",
+    decision: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "accepted") : "rejected",
+    reason: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "accepted") : "engine_error",
+    urls: links,
+    marketplace: marketplaceDetectadoLinks || "unknown",
+    generation: sock?.__optimusSocketGeracao,
+    engineResult: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "created") : "failed"
+  })).catch(() => radarIngressObservation.recordStage({
+    workspaceId: diagnosticoWorkspaceId,
+    sessionId: sessaoIdTexto,
+    sock,
+    message: raw,
+    stage: "engine_event",
+    decision: "error",
+    reason: "engine_error",
+    urls: links,
+    marketplace: marketplaceDetectadoLinks || "unknown",
+    generation: sock?.__optimusSocketGeracao,
+    engineResult: "failed"
+  }));
+}
 const registroEngineRadar = (temRedirectConhecidoRadar || aguardarAckEngine === true ||
   process.env.UF_RADAR_REPLAY_LOCAL_CANDIDATE === "1" || modoMotorReal === "UNIVERSAL")
   ? await registroEngineRadarPromise
@@ -24002,8 +24058,20 @@ function comAckRadar(resultado = {}) {
 
 registerRadarIngressHandler(processarMensagemRadar);
 
-async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upsertType, coberturaTraceId: coberturaTraceIdRecebido } = {}) {
+async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upsertType, diagnosticoWorkspaceId = "", coberturaTraceId: coberturaTraceIdRecebido } = {}) {
   const remoteJid = mensagem?.key?.remoteJid || "";
+  if (mensagem) {
+    radarIngressObservation.recordStage({
+      workspaceId: diagnosticoWorkspaceId,
+      sessionId: sessaoId,
+      sock,
+      message: mensagem,
+      stage: "radar_gate",
+      decision: (!remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) ? "rejected" : "received",
+      reason: mensagem?.key?.fromMe ? "from_me" : (!remoteJid.endsWith("@g.us") ? "not_group" : "accepted"),
+      generation: sock?.__optimusSocketGeracao
+    });
+  }
   if (!remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
@@ -24015,6 +24083,16 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upse
     mensagem,
     upsertType,
     exigirMensagemNova: true
+  });
+  radarIngressObservation.recordStage({
+    workspaceId: diagnosticoWorkspaceId,
+    sessionId: sessaoId,
+    sock,
+    message: mensagem,
+    stage: "radar_gate",
+    decision: gateWhatsapp.ok ? "accepted" : "rejected",
+    reason: gateWhatsapp.ok ? "accepted" : gateWhatsapp.motivo,
+    generation: sock?.__optimusSocketGeracao
   });
   if (!gateWhatsapp.ok) return { ok: false, motivo: gateWhatsapp.motivo, ignorada: true };
   const textoExtraido = extrairTextoMensagemRadar(mensagem);
@@ -24102,7 +24180,8 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upse
     sock,
     downloadMediaMessageImpl: downloadMediaMessage,
     upsertType,
-    exigirMensagemNova: true
+    exigirMensagemNova: true,
+    diagnosticoWorkspaceId
   });
 }
 
@@ -25521,6 +25600,92 @@ app.get("/radar/config", (req, res) => {
       erro: e.message
     });
   }
+});
+
+const RADAR_INGRESS_OBSERVATION_TARGET = Object.freeze({
+  workspaceId: "user_k3phmbkf",
+  groupName: "optesteradar"
+});
+
+function validarAlvoObservacaoIngressRadar() {
+  const { workspaceId, groupName } = RADAR_INGRESS_OBSERVATION_TARGET;
+  const config = carregarRadarConfigCliente("admin", { falharFechado: true });
+  if (config.monitoramentoAtivo !== true) return { ok: false, reason: "radar_monitoring_inactive" };
+
+  const matchingGroups = (Array.isArray(config.sessoesWhatsappMonitoradas) ? config.sessoesWhatsappMonitoradas : [])
+    .flatMap(item => (Array.isArray(item?.gruposMonitorados) ? item.gruposMonitorados : [])
+      .filter(group => group?.ativo !== false && normalizarTexto(group?.nome || "") === groupName)
+      .map(group => ({ item, group, groupId: obterGrupoWhatsappIdTecnicoRadar(group) })))
+    .filter(item => item.groupId && item.groupId.endsWith("@g.us"));
+  if (matchingGroups.length !== 1) return { ok: false, reason: "radar_target_group_unverified" };
+
+  const { item, groupId } = matchingGroups[0];
+  const sessionInput = String(item?.sessaoId || "").trim();
+  const sessionId = resolverSessaoWhatsappRadarCliente("admin", sessionInput);
+  if (!sessionInput || !sessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
+
+  const metadata = sessoesMeta?.[sessionId];
+  const workspaceDaSessao = resolverClienteMensageiroPorSessao(sessionId);
+  if (!metadata || metadata.workspaceId !== workspaceId || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
+    return { ok: false, reason: "session_workspace_mismatch" };
+  }
+
+  const socket = sessoes?.[sessionId];
+  const status = String(statusSessao?.[sessionId] || "").toLowerCase();
+  if (!socket || !socket.ev || !socketEhAtual(sessoes, sessionId, socket) || !["open", "aberto"].includes(status)) {
+    return { ok: false, reason: "target_socket_not_open" };
+  }
+  const listener = socket.__optimusListeners?.["messages.upsert"];
+  if (!listener || listener.emissor !== socket.ev || listener.evento !== "messages.upsert" || typeof listener.handler !== "function") {
+    return { ok: false, reason: "listener_registration_unverified" };
+  }
+  let attachmentVerified = null;
+  if (typeof socket.ev.listeners === "function") {
+    attachmentVerified = socket.ev.listeners("messages.upsert").includes(listener.handler);
+  }
+  if (attachmentVerified === false) return { ok: false, reason: "listener_attachment_missing" };
+
+  return {
+    ok: true,
+    workspaceId,
+    sessionId,
+    groupId,
+    socket,
+    generation: Number(geracoesSocketWhatsapp?.[sessionId] || socket.__optimusSocketGeracao || 0)
+  };
+}
+
+function responderObservacaoIngressRadar(res, payload, statusCode = 200) {
+  res.set("Cache-Control", "no-store");
+  return res.status(statusCode).json(payload);
+}
+
+app.get("/admin/radar/ingress-observation", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  return responderObservacaoIngressRadar(res, radarIngressObservation.status());
+});
+
+app.post("/admin/radar/ingress-observation/start", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  const alvo = validarAlvoObservacaoIngressRadar();
+  if (!alvo.ok) {
+    return responderObservacaoIngressRadar(res, {
+      ok: false,
+      state: "off",
+      reason: alvo.reason
+    }, 409);
+  }
+  const resultado = radarIngressObservation.start({
+    ...alvo,
+    scopeValidated: true,
+    listenerRegistered: true
+  });
+  return responderObservacaoIngressRadar(res, resultado, resultado.ok ? 200 : 409);
+});
+
+app.post("/admin/radar/ingress-observation/stop", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  return responderObservacaoIngressRadar(res, radarIngressObservation.stop("manual"));
 });
 
 app.post("/radar/config", (req, res) => {
@@ -33777,9 +33942,29 @@ registrarListenerUnicoSocket({
   socketGeracao,
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
-  onInvoke: ({ emitter, emitterCurrent, callbackCurrent }) => mensageiroV4Diagnostics.observeListener({
-    sessionId: id, sock, emitter, emitterCurrent, callbackCurrent, generation: socketGeracao }),
+  onInvoke: ({ emitter, emitterCurrent, callbackCurrent }) => {
+    mensageiroV4Diagnostics.observeListener({
+      sessionId: id, sock, emitter, emitterCurrent, callbackCurrent, generation: socketGeracao
+    });
+    try {
+      radarIngressObservation.observeWrapper({
+        sessionId: id, sock, emitter, emitterCurrent, callbackCurrent, generation: socketGeracao
+      });
+    } catch { /* Optional diagnostics cannot block the shared listener. */ }
+  },
   handler: async ({ messages = [], type } = {}) => {
+  try {
+    radarIngressObservation.observeUpsert({
+      workspaceId: clienteIdMensageiro,
+      sessionId: id,
+      sock,
+      emitter: sock.ev,
+      current: socketEhAtual(sessoes, id, sock),
+      generation: socketGeracao,
+      messages,
+      type
+    });
+  } catch { /* Optional diagnostics cannot block the shared listener. */ }
   try { mensageiroV4Diagnostics.observe({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro, sock,
     current: socketEhAtual(sessoes, id, sock), generation: socketGeracao, messages, type }); } catch { /* Optional metadata diagnostics cannot block ingress. */ }
   try { mensageiroV4Canary.ingress({ sessionId: id, capturedWorkspaceId: clienteIdMensageiro,
@@ -33896,16 +34081,29 @@ registrarListenerUnicoSocket({
         continue;
       }
 
-      await executarConsumidorMensagemIsolado({
+      const execucaoRadar = await executarConsumidorMensagemIsolado({
         consumidor: "radar",
         contexto: contextoListenerCobertura,
         executar: () => processarMensagemRadarAutomatica({
           mensagem,
           sessaoId: id,
           sock,
+          diagnosticoWorkspaceId: clienteIdMensageiro,
           upsertType: type,
           coberturaTraceId
         })
+      });
+      const resultadoRadar = execucaoRadar?.resultado;
+      radarIngressObservation.recordStage({
+        workspaceId: clienteIdMensageiro,
+        sessionId: id,
+        sock,
+        message: mensagem,
+        stage: "radar_decision",
+        decision: execucaoRadar?.ok === false ? "error" : (resultadoRadar?.ok === true ? "accepted" : (resultadoRadar?.ignorada ? "ignored" : "rejected")),
+        reason: execucaoRadar?.ok === false ? "consumer_error" : (resultadoRadar?.motivo || (resultadoRadar?.ok === true ? "accepted" : "other")),
+        engineExpected: execucaoRadar?.ok === true && Number(resultadoRadar?.links) > 0,
+        generation: socketGeracao
       });
 
       const mensagemGrupoV3 = String(mensagem?.key?.remoteJid || "").endsWith("@g.us");
