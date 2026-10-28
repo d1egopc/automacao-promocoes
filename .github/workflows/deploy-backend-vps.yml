@@ -75,8 +75,8 @@ jobs:
         run: bash -n scripts/deploy-backend-vps-manual.sh
       - name: Critical tests
         run: |
-          node --test tests/garimpei-infra.test.cjs
           node --test tests/telemetria-permanent-contract.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs
+          node --test tests/garimpei-infra.test.cjs
           node tests/guardian-v1.test.cjs
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
