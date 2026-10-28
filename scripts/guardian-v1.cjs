@@ -303,6 +303,17 @@ function testMatrix(plan) {
   if (plan.runtimeFiles.some(file => file.startsWith("modules/engine") || file.startsWith("modules/executor") || file.startsWith("modules/fila"))) {
     add("engine:claim-recovery", "tests/engine-validator-claim-recovery.test.js", process.execPath, ["tests/engine-validator-claim-recovery.test.js"]);
   }
+  if (plan.runtimeFiles.some(file => file.startsWith("modules/imagens/") ||
+      ["modules/local-worker/ml-identity.contract.js", "modules/local-worker/local-worker.service.js",
+        "modules/engine/importer/ml-work-enrichment-shadow.js"].includes(file))) {
+    add("imagens:ml-identity-publicability", "tests/ml-identity-image-publicability.test.cjs", process.execPath,
+      ["--test", "tests/ml-identity-image-publicability.test.cjs"], false);
+    for (const name of ["resolver-imagem-universal", "imagem-candidatos-universal", "imagem-link-contrato-universal",
+      "ml-work-enrichment-shadow", "ml-work-enrichment-active", "ml-work-enrichment-active-integration",
+      "optimus-capture-local-worker-ml-identity", "local-worker", "local-worker-idempotency",
+      "mercadolivre-work-backend-order", "magalu-local-worker-identity", "magalu-v2-golden-path"])
+      add(`imagens:${name}`, `tests/${name}.test.js`, process.execPath, [`tests/${name}.test.js`]);
+  }
   if (plan.runtimeFiles.some(file => file.includes("classificador-categorias") || file.startsWith("modules/inteligencia-universal/") || file === "marketplaces/aliexpress/importar.js" || file.includes("magalu-parser.js"))) {
     add("categorias:copy-natureza-focal", "tests/classificador-copy-focal.test.cjs", process.execPath,
       ["--test", "tests/classificador-copy-focal.test.cjs"], false);

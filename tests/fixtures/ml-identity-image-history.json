@@ -1,0 +1,10 @@
+{
+  "workspace": "user_pss60lus",
+  "provenance": "read-only audit; real IDs and terminal facts; URLs and fresh attestations are synthetic in tests",
+  "cases": [
+    {"case":"covo","mlb":"MLB68604345","historyId":97069,"offerId":168013,"failedTargets":3},
+    {"case":"chico_bento","mlb":"MLB55696570","historyId":97108,"offerId":168048,"failedTargets":4},
+    {"case":"marine","mlb":"MLB53231644","historyId":97184,"offerId":168104,"failedTargets":3},
+    {"case":"beau","mlb":"MLB19457568","historyId":97279,"offerId":168157,"failedTargets":4}
+  ]
+}

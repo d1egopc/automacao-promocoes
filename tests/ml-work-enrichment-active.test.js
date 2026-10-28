@@ -171,7 +171,10 @@ function motivoFallbackSanitizado(motivoRejeicao) {
     imagemDuravel: true,
     metadata: { localWorkerIdentityProof: imagemAplicada.localWorkerIdentityProof }
   };
-  assert.strictEqual(resolverImagemUniversal(ofertaImagemWork).imagem, IMAGEM_WORK);
+  // Diagnostic JSON alone is not a backend-issued image receipt. Publication
+  // must fail closed; the signed Worker/cache path is covered by the focal E2E.
+  assert.strictEqual(resolverImagemUniversal(ofertaImagemWork).imagem, "");
+  assert.strictEqual(resolverImagemUniversal(ofertaImagemWork).imagemAusenteMotivo, "imagem_identidade_nao_comprovada");
 
   // 7 e 8: somente identidade/visual mudam; comércio, links, papéis e HMAC ficam byte-semanticamente iguais.
   const camposComerciais = objeto => JSON.stringify({

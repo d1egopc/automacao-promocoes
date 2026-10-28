@@ -183,8 +183,40 @@ function temProvaImagemOficialMercadoLivre(valor = {}) {
   const semProvenienciaRadar = !/radar|mirror|mensagem|grupo|whatsapp|telegram|clonador/i.test(origens);
   const urlOficial = urls.some(urlMlstaticOficial);
   const pictureIdCompativel = !pictureId || urls.some((url) => String(url).includes(pictureId));
+  let localWorkerIdentity = false;
+  const identity = metadata.localWorkerIdentityProof;
+  if (identity?.reciboImagem && /local_worker\.ml_identity_v1/i.test(origens) &&
+      (!item.marketplace || String(item.marketplace).toLowerCase().replace(/[^a-z]/g, "") === "mercadolivre") &&
+      identity.provenance === "local_worker.ml_identity_v1" && identity.source === "local_first_party" &&
+      identity.capability === "ml_identity_v1" && identity.contractVersion === 1 &&
+      identity.sameProductObject === true && identity.origemImagem === "jsonld.image" &&
+      /^MLB\d+$/.test(String(identity.expectedMlb)) && identity.observedMlb === identity.expectedMlb) {
+    const { normalizarMlb, validarReciboImagemMlIdentity } = require("../local-worker/ml-identity.contract");
+    const ids = [item.produtoId, item.productId, item.mlb, metadata.produtoId, metadata.productId,
+      metadata.mlb, metadata.produto?.produtoId, metadata.produto?.productId, metadata.produto?.id,
+      metadata.produto?.mlb, cache.produtoId, cache.productId]
+      .map(value => normalizarMlb(value)).filter(Boolean);
+    for (const value of [item.link_original, item.linkOriginal, item.urlOriginal, metadata.linkExpandidoEngine]) {
+      if (!value) continue;
+      try {
+        const url = new URL(value);
+        if (/(^|\.)mercadolivre\.com\.br$/i.test(url.hostname)) {
+          const id = normalizarMlb(url.pathname);
+          if (id) ids.push(id);
+        }
+      } catch (_) { /* No identity inference from unknown links. */ }
+    }
+    const imagem = item.imagem || item.imagemUrl || cache.imagemCanonicaDuravel || ofcImagem.urlSelecionada;
+    const oficiais = [item.imagem, item.imagemUrl, cache.imagemCanonicaDuravel, ofcImagem.urlSelecionada]
+      .filter(urlMlstaticOficial);
+    localWorkerIdentity = ids.every(id => id === identity.expectedMlb) &&
+      oficiais.every(url => url === identity.reciboImagem.imagem) &&
+      validarReciboImagemMlIdentity(identity.reciboImagem, { expectedMlb: identity.expectedMlb, imagem });
+  }
 
-  return (origemOficial || localWorkerMl) && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
+  // An invalid identity receipt cannot be rescued by a conflicting legacy label.
+  const provaReconhecida = /local_worker\.ml_identity_v1/i.test(origens) ? localWorkerIdentity : (origemOficial || localWorkerMl);
+  return provaReconhecida && urlOficial && pictureIdCompativel && semProvenienciaRadar && ofcImagem.possuiMarcaFonte !== true;
 }
 
 function motivoNaoPublicavelDaImagem(valor = {}) {
@@ -224,6 +256,9 @@ function motivoNaoPublicavelDaImagem(valor = {}) {
   const texto = textoNormalizadoImagem(textos);
 
   const provaOficialMl = temProvaImagemOficialMercadoLivre(item);
+  if (/local_worker\.ml_identity_v1/i.test(textos) && !provaOficialMl) {
+    return "imagem_identidade_nao_comprovada";
+  }
 
   if (
     item.imagemEnviavel === false ||
@@ -276,13 +311,13 @@ function avaliarPublicabilidadeImagemUniversal(valor = {}, candidato = {}) {
   const motivoOrigemMaterializada = !candidatoOficial && /(?:^|\.)(?:imagemmaterializada|imagemenviavel)$/i.test(origem)
     ? "imagem_radar_nao_publicavel"
     : "";
-  const motivoCandidato = motivoNaoPublicavelDaImagem({
+  const motivoCandidato = url ? motivoNaoPublicavelDaImagem({
     imagem: url,
     imagemUrl: url,
     imagemOrigem: origem,
     imagemStatus: camada,
     metadata: valor?.metadata
-  });
+  }) : "";
   const motivo = motivoBase || motivoOrigemMaterializada || motivoCandidato;
   return {
     ok: !motivo,

@@ -5,6 +5,7 @@ const { pageMlbu } = require("../../optimus-capture/local-worker/mercadolivre-id
 const ML_IDENTITY_CAPABILITY = "ml_identity_v1";
 const ML_IDENTITY_CONTRACT_VERSION = 1;
 const ML_IDENTITY_RESULT_TTL_MS = 10 * 60 * 1000;
+const ML_IDENTITY_IMAGE_TTL_MS = 24 * 60 * 60 * 1000; // Existing identity-cache lifetime.
 const ML_IDENTITY_TITLE_ORIGINS = new Set(["jsonld.name"]);
 const ML_IDENTITY_IMAGE_ORIGINS = new Set(["jsonld.image"]);
 
@@ -162,9 +163,45 @@ function validarResultadoMlIdentity(payload = {}, opcoes = {}) {
       canonicalUrl,
       variationId,
       collectedAt: collectedAt.toISOString(),
+      ...(validarReciboImagemMlIdentity(prova.reciboImagem, { expectedMlb, imagem: imagemOficial, agoraMs })
+        ? { reciboImagem: { ...prova.reciboImagem } } : {}),
       ...(bindingValido ? { associacaoPagina: { ...associacao } } : {})
     }
   };
+}
+
+function payloadReciboImagem(prova) {
+  return JSON.stringify(["optimus.ml_identity.image.v1", prova.mlb, prova.imagem,
+    prova.collectedAt, prova.expiresAt]);
+}
+
+// Backend-only issuance: call after the authenticated Worker result and official
+// image HTTP have both been validated. A public provenance string is not a receipt.
+function criarReciboImagemMlIdentity(resultado, http = {}, { agoraMs = Date.now(), expiresAt } = {}) {
+  if (!process.env.JWT_SECRET) return null;
+  const validado = validarResultadoMlIdentity(resultado, { agoraMs, ttlMs: ML_IDENTITY_IMAGE_TTL_MS });
+  const imagem = sanitizarUrlMlstatic(http.imagemOficialUrl);
+  if (!imagem || imagem !== validado.imagemOficial || !Number.isInteger(Number(http.statusHttp)) || Number(http.statusHttp) < 200 ||
+      Number(http.statusHttp) >= 300 || !/^image\/(?:jpeg|png|webp|avif|gif)$/i.test(texto(http.contentType))) return null;
+  const limite = Date.parse(validado.collectedAt) + ML_IDENTITY_IMAGE_TTL_MS;
+  const expiry = expiresAt ? Math.min(Date.parse(expiresAt), limite) : limite;
+  if (!Number.isFinite(expiry) || expiry <= agoraMs) return null;
+  const prova = { mlb: validado.expectedMlb, imagem, collectedAt: validado.collectedAt,
+    expiresAt: new Date(expiry).toISOString() };
+  return { ...prova, assinatura: crypto.createHmac("sha256", process.env.JWT_SECRET)
+    .update(payloadReciboImagem(prova)).digest("hex") };
+}
+
+function validarReciboImagemMlIdentity(prova, { expectedMlb, imagem, agoraMs = Date.now() } = {}) {
+  if (!process.env.JWT_SECRET || !prova || !/^MLB\d+$/.test(texto(prova.mlb)) ||
+      prova.mlb !== normalizarMlb(expectedMlb) || !/^[a-f0-9]{64}$/.test(texto(prova.assinatura)) ||
+      typeof prova.imagem !== "string" || prova.imagem.length > 2048 ||
+      !sanitizarUrlMlstatic(prova.imagem) || prova.imagem !== sanitizarUrlMlstatic(imagem)) return false;
+  const at = Date.parse(prova.collectedAt), expiry = Date.parse(prova.expiresAt);
+  if (!Number.isFinite(at) || !Number.isFinite(expiry) || at > agoraMs + 30_000 ||
+      expiry <= agoraMs || expiry <= at || expiry > at + ML_IDENTITY_IMAGE_TTL_MS) return false;
+  const assinatura = crypto.createHmac("sha256", process.env.JWT_SECRET).update(payloadReciboImagem(prova)).digest("hex");
+  return crypto.timingSafeEqual(Buffer.from(assinatura, "hex"), Buffer.from(prova.assinatura, "hex"));
 }
 
 function payloadProvaCapture(prova) {
@@ -197,6 +234,7 @@ module.exports = {
   ML_IDENTITY_CAPABILITY,
   ML_IDENTITY_CONTRACT_VERSION,
   ML_IDENTITY_RESULT_TTL_MS,
+  ML_IDENTITY_IMAGE_TTL_MS,
   normalizarMlb,
   sanitizarUrlMercadoLivre,
   urlMercadoLivreCompativel,
@@ -204,6 +242,8 @@ module.exports = {
   urlMlstaticValida,
   tituloFactualMercadoLivreValido,
   validarResultadoMlIdentity,
+  criarReciboImagemMlIdentity,
+  validarReciboImagemMlIdentity,
   criarProvaCaptureMl,
   validarProvaCaptureMl
 };

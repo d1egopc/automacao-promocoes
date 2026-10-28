@@ -193,6 +193,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
@@ -240,6 +241,19 @@ jobs:
           git archive f800da32e987c740854a9de02d5bcc93d7f149e9 | tar -x -C "$RUNNER_TEMP/classifier-copy-baseline"
           node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classifier-copy-baseline" --benchmark --out "$RUNNER_TEMP/classifier-copy-replay.json"
           git diff --exit-code f800da32e987c740854a9de02d5bcc93d7f149e9 HEAD -- modules/radar modules/teleradar modules/engine modules/fila modules/executor utils/destinos.js
+      - name: Mercado Livre official identity images - offline only
+        if: github.ref == 'refs/heads/validation/guardian-v1-ml-identity-images-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/ml-identity-image-publicability.test.cjs
+          node --test tests/resolver-imagem-universal.test.js tests/ml-work-enrichment-shadow.test.js tests/ml-work-enrichment-active.test.js tests/ml-work-enrichment-active-integration.test.js tests/optimus-capture-local-worker-ml-identity.test.js
+          node --check modules/local-worker/ml-identity.contract.js
+          node --check modules/local-worker/local-worker.service.js
+          node --check modules/imagens/resolver-imagem-universal.js
+          git diff --exit-code b8f5746e4d562deaa5c4081738de89e0bf5fc508 HEAD -- marketplaces modules/radar modules/teleradar modules/fila modules/executor modules/ofc-v2 modules/engine/distributor utils/destinos.js
       - name: Deploy mechanism regressions
         shell: bash
         run: |

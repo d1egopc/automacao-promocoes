@@ -14,7 +14,8 @@ const {
   ML_IDENTITY_RESULT_TTL_MS,
   sanitizarUrlMercadoLivre,
   sanitizarUrlMlstatic,
-  validarResultadoMlIdentity
+  validarResultadoMlIdentity,
+  criarReciboImagemMlIdentity
 } = require("./ml-identity.contract");
 const {
   MAGALU_IDENTITY_CAPABILITY,
@@ -337,6 +338,8 @@ function criarLocalWorkerService(opcoes = {}) {
         validado.provaTecnica.statusHttp = http.statusHttp;
         validado.provaTecnica.contentType = http.contentType;
         validado.provaTecnica.hostImagem = new URL(imagemFinalSanitizada).hostname;
+        const recibo = criarReciboImagemMlIdentity(validado, validado.provaTecnica, { agoraMs: agora().getTime() });
+        if (recibo) validado.provaTecnica.reciboImagem = recibo;
       }
       return repo.completarIdentidade({
         taskId,
@@ -512,12 +515,19 @@ function criarLocalWorkerService(opcoes = {}) {
     if (!/^MLB\d+$/.test(pid)) return null;
     const cache = await repo.obterCacheIdentidade({ marketplace: "mercadolivre", productId: pid, capability: ML_IDENTITY_CAPABILITY });
     if (!cache?.result) return null;
+    if (cache.expiresAt && !(Date.parse(cache.expiresAt) > agora().getTime())) return null;
     try {
       const resultado = validarResultadoMlIdentity(cache.result, {
         expectedMlb: pid,
         agoraMs: agora().getTime(),
         ttlMs: 24 * 60 * 60 * 1000
       });
+      // This cache is read from the backend repository, never client metadata.
+      // Revalidate its original HTTP evidence and preserve the original expiry.
+      const recibo = criarReciboImagemMlIdentity(cache.result, cache.result.provaTecnica, {
+        agoraMs: agora().getTime(), expiresAt: cache.expiresAt
+      });
+      if (recibo) resultado.provaTecnica.reciboImagem = recibo;
       return { ...resultado, cacheValidatedAt: cache.validatedAt || null, cacheExpiresAt: cache.expiresAt || null };
     } catch (_) {
       return null;

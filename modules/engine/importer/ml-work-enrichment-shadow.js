@@ -68,7 +68,8 @@ function provaIdentidadeSanitizada(resultado = {}) {
     origemTitulo: texto(resultado.origemTitulo || prova.origemTitulo),
     origemImagem: texto(resultado.origemImagem || prova.origemImagem),
     variationId: texto(resultado.variationId || prova.variationId),
-    collectedAt: texto(resultado.collectedAt || prova.collectedAt)
+    collectedAt: texto(resultado.collectedAt || prova.collectedAt),
+    ...(prova.reciboImagem ? { reciboImagem: prova.reciboImagem } : {})
   };
 }
 
