@@ -37,6 +37,19 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Definitive Messenger backend - isolated fixtures only, no deploy
+        if: github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
+          node --test tests/mensageiro-backend-definitivo.test.cjs tests/mensageiro-v3-*.test.cjs tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs tests/mensageiro-release-readiness.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/whatsapp-reconnect-seguro.test.js
+          git diff --exit-code dc4f3f0b9f6f61ce3bbaee0f87675b796bd4b58e HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/fila modules/executor optimus-capture bootstrap package.json package-lock.json
       - name: Universal Messenger - real routers and existing engines, isolated only
         if: github.ref == 'refs/heads/validation/guardian-v1-messenger-universal-20261028'
         run: |
@@ -341,7 +354,7 @@ jobs:
           node --test tests/telemetria-operacional.postgres.test.cjs
 
   v4-financial:
-    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026' || github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028' || github.ref == 'refs/heads/validation/guardian-v1-messenger-universal-20261028'
+    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026' || github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028' || github.ref == 'refs/heads/validation/guardian-v1-messenger-universal-20261028' || github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

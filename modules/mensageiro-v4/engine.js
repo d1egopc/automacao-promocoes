@@ -6,6 +6,7 @@ const {
 const { Moderator, body } = require("./moderation");
 const { Scope } = require("./scope");
 const { reply } = require("./intelligence");
+const { executeModule, contactRef } = require("./module-runtime");
 class V4Engine {
   constructor({
     repository,
@@ -66,6 +67,8 @@ class V4Engine {
       if (!Number.isFinite(Date.parse(settings.activatedAt)) || p.sessionId !== sessionId) return blocked("activation_required");
       const group = groupId.endsWith("@g.us");
       if (group && !this.groupAllowed(workspaceId, sessionId, groupId)) return blocked("scope_unauthorized");
+      const configured=p.cards[card]?.configuration?.universal;
+      if(group && configured && (!p.destinations.includes(groupId) || configured.groups && !configured.groups.includes(groupId))) return blocked("scope_unauthorized");
       if (!group && !["attendance", "faq", "flows", "quickReplies"].includes(card)) return blocked("scope_unauthorized");
       if (message) {
         const raw = message.messageTimestamp;
@@ -75,7 +78,8 @@ class V4Engine {
           return blocked("historical_or_unproven_event");
       } else if (!event || !this.participantReady(sock)) return blocked("offline_sync_unproven");
       const destinations = [groupId];
-      if (["welcome", "farewell"].includes(card) && p.cards[card].configuration?.envio?.destino === "privado") {
+      if (["welcome", "farewell"].includes(card) && (p.cards[card].configuration?.envio?.destino === "privado" ||
+          p.cards[card].configuration?.universal?.destination === "private")) {
         for (const participant of event?.participants || []) {
           const id = typeof participant === "string" ? participant : participant.id || participant.lid;
           if (/^[A-Za-z0-9_:-]+@(?:s\.whatsapp\.net|lid)$/.test(id || "")) destinations.push(id);
@@ -217,7 +221,7 @@ class V4Engine {
             reason: moderation ? "observe_only" : "no_match",
           };
       }
-      if (card === "attendance") {
+      if (card === "attendance" && !p.cards.attendance.configuration?.universal) {
         const config = buildV3HandlerConfig(p).atendimento;
         const service = require("../mensageiro/service");
         const configuredReply = service.encontrarGatilhoAtendimento(body(message), config.gatilhos) ||
@@ -356,9 +360,32 @@ class V4Engine {
         ) {
           trace("exemption", "exempt", p.id);
           result = { blocked: true, reason: "sender_exempt" };
-        } else if (!permission.botAdmin) {
+        } else if ((p.cards.groupManager.configuration?.universal && permission.admin) || !permission.botAdmin && moderation.action !== "warn") {
           trace("permission", "not_admin", p.id);
           result = { blocked: true, reason: "bot_not_admin" };
+        } else if (["warn","warn_ban"].includes(moderation.action)) {
+          if(runtime) throw new Error("scope_unauthorized");
+          await revalidate();
+          const count=await this.repository.call("strike",{workspaceId,profileId:p.id,sessionId,expectedRevision:p.revision,
+            contactRef:contactRef(p,sessionId,groupId+":"+(message.key.participant||"")),
+            eventRef:require("node:crypto").createHash("sha256").update(message.key.id).digest("hex"),
+            ruleId:moderation.id,windowMinutes:moderation.strikeWindowMinutes||60});
+          result={processada:true,ruleId:moderation.id,strikes:count.count,banAttempted:false,banResult:"not_attempted"};
+          if(moderation.action === "warn_ban" && count.count >= moderation.strikes) {
+            // Re-fetch administration immediately before removal. Never remove
+            // an admin, owner, bot or participant other than this event sender.
+            const fresh=await this.moderator.permission(sock,groupId,message.key.participant||"",true);
+            if(!fresh.known||!fresh.botAdmin||fresh.admin||fresh.owner) {result.blocked=true;result.reason="ban_permission_unproven";}
+            else {
+              await revalidate();
+              result.banAttempted=true;
+              try { await this.transport(()=>sock.groupParticipantsUpdate(groupId,[message.key.participant],"remove")); result.banResult="local_resolved"; }
+              catch {result.banResult="error";}
+            }
+          } else {
+            try {await send(groupId,{text:moderation.warning});result.noticeResult="local_resolved";}
+            catch(error) {result.noticeResult=error.message==="sem_creditos"?"sem_creditos":"not_confirmed";}
+          }
         } else {
           trace("exemption", "not_exempt", p.id);
           trace("permission", "admin", p.id);
@@ -407,6 +434,10 @@ class V4Engine {
           deliveryConfirmed: false,
         };
       } else {
+        const configured = await executeModule({profile:p,card,message,event,sessionId,groupId,
+          send,repository:this.repository,revalidate});
+        if(configured) result=configured;
+        else {
         const handlers =
           this.handlers ||
           createV3HandlerAdapters({
@@ -429,11 +460,14 @@ class V4Engine {
           evento: event,
           planoLiberado: true,
         });
+        }
       }
+      if(moderation && result) result.ruleId=moderation.id;
       await this.repository.call("complete", {
         workspaceId,
         key,
         status: result?.blocked ? "blocked" : "ambiguous",
+        result,
       });
       return card === "groupManager" ? { deleteAttempted: false, deleteResult: "not_attempted",
         remoteDeletionConfirmed: false, ...result } : result;

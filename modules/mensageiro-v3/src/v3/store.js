@@ -404,6 +404,15 @@ class V3Store {
       if (!Object.prototype.hasOwnProperty.call(p.cards, card)) throw new Error("card_invalido");
       const current = p.cards[card];
       if (expectedRevision !== undefined && Number(expectedRevision) !== current.revision) throw new Error("conflito_revisao");
+      if(patch?.configuration?.universal) {
+        patch=clone(patch);
+        patch.configuration.universal=require("../../../mensageiro-v4/module-contract").normalizeModule(card,patch.configuration.universal,p.destinations||[]);
+        if(card!=="attendance") {
+          patch.configuration.grupos=patch.configuration.universal.groups||[];
+          patch.configuration.gruposConfigurados=patch.configuration.universal.groups!==undefined;
+        }
+        if(Buffer.byteLength(JSON.stringify(patch.configuration))>9*1024*1024) throw new Error("configuracao_grande");
+      }
       p.cards[card] = { ...current, ...clone(patch), revision: current.revision + 1, updatedAt: nowIso(this.clock) };
       p.revision += 1; p.updatedAt = nowIso(this.clock);
       this._touch(w, "card_saved", { profileId, card, cardRevision: p.cards[card].revision });
@@ -428,6 +437,7 @@ class V3Store {
       if (!destinations.length) throw new Error("destinos_obrigatorios");
       if (input?.content === null || input?.content === undefined) throw new Error("conteudo_obrigatorio");
       const scheduleId = this._newEntityId("schedule", w.schedules, "schedules");
+      require("../../../mensageiro-v4/schedule-options").assertSchedule(p,{...input,destinations});
       const schedule = {
         id: scheduleId, workspaceId: String(workspaceId), profileId: String(profileId),
         active: false, revision: 1, name: String(input?.name || "").trim(),
@@ -462,6 +472,7 @@ class V3Store {
       const allowed = ["name", "active", "timezone", "nextRunAt", "intervalMs", "destinations", "content", "artifactId"];
       for (const key of allowed) if (patch[key] !== undefined) s[key] = clone(patch[key]);
       if (Array.isArray(s.destinations)) s.destinations = [...new Set(s.destinations.map(String).map(x => x.trim()).filter(Boolean))];
+      require("../../../mensageiro-v4/schedule-options").assertSchedule(w.profiles[s.profileId],s);
       if (patch?.active === false) s.deactivatedAt = nowIso(this.clock);
       if (patch?.active === true) delete s.deactivatedAt;
       s.revision += 1; s.updatedAt = nowIso(this.clock);
@@ -477,7 +488,7 @@ class V3Store {
       if (expectedRevision !== undefined && Number(expectedRevision) !== s.revision) throw new Error("conflito_revisao");
       const currentNow = Number(this.clock());
       if (s.active !== true && s.deactivatedAt && Number(s.intervalMs) > 0 && s.nextRunAt && Date.parse(s.nextRunAt) <= currentNow) {
-        const next = nextOccurrenceAt(s.nextRunAt, s.intervalMs, currentNow, s.timezone);
+        const next = s.content?.recurrenceV4 ? require("../../../mensageiro-v4/schedule-options").next(s.content.recurrenceV4,currentNow,s.id) : nextOccurrenceAt(s.nextRunAt, s.intervalMs, currentNow, s.timezone);
         if (next) s.nextRunAt = next;
       }
       s.active = true;
@@ -599,8 +610,9 @@ class V3Store {
         return { advanced: false, reason: "ocorrencia_incompleta", occurrenceKey: baseKey };
       }
       const previous = s.nextRunAt;
-      const next = Number(s.intervalMs) > 0 ? nextOccurrenceAt(scheduledAt, s.intervalMs, Number(now), s.timezone) : null;
+      const next = s.content?.recurrenceV4 ? require("../../../mensageiro-v4/schedule-options").next(s.content.recurrenceV4,Math.max(Date.parse(scheduledAt),Number(now)),s.id) : Number(s.intervalMs) > 0 ? nextOccurrenceAt(scheduledAt, s.intervalMs, Number(now), s.timezone) : null;
       if (next) {
+        if(s.content?.recurrenceV4) s.content.occurrenceIndex=(Number(s.content.occurrenceIndex)||0)+1;
         s.nextRunAt = next;
         s.revision += 1;
         s.updatedAt = nowIso(this.clock);
@@ -628,7 +640,7 @@ class V3Store {
       if (occurrenceTimestamp(s.nextRunAt) !== due || !Number.isFinite(current) || !Number.isFinite(lag) || lag < 0 || current - Date.parse(due) <= lag) {
         return { skipped: false, reason: "ocorrencia_nao_vencida" };
       }
-      const next = Number(s.intervalMs) > 0 ? nextOccurrenceAt(due, s.intervalMs, current, s.timezone) : null;
+      const next = s.content?.recurrenceV4 ? require("../../../mensageiro-v4/schedule-options").next(s.content.recurrenceV4,current,s.id) : Number(s.intervalMs) > 0 ? nextOccurrenceAt(due, s.intervalMs, current, s.timezone) : null;
       s.nextRunAt = next;
       if (!next) { s.active = false; s.completedAt = nowIso(this.clock); }
       s.revision += 1;

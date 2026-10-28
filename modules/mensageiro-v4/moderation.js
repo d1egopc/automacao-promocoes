@@ -42,7 +42,7 @@ class Moderator {
       sender = message.key.participant || "";
     // Preserve current deterministic rules and priority. Newly offered categories
     // require explicit terms; a domain never implies politics/sexual content.
-    for (const rule of configuration.regras || []) {
+    for (const rule of configuration.universal ? [] : configuration.regras || []) {
       if (!rule.ativo) continue;
       let violated = false;
       if (["flood", "excesso_mensagens", "repeticao"].includes(rule.tipo)) {
@@ -87,7 +87,7 @@ class Moderator {
           warning: rule.avisoTexto || "Mensagem removida pela regra do grupo.",
         };
     }
-    const v4 = normalizeModeration(configuration.v4);
+    const v4 = configuration.universal || normalizeModeration(configuration.v4);
     for (const rule of v4.rules) {
       if (!rule.enabled) continue;
       let violated = false;
@@ -131,7 +131,8 @@ class Moderator {
         });
       // Professional words are descriptive context, never a bypass of a rule.
       if (violated)
-        return { id: rule.id, action: rule.action, warning: rule.warning };
+        return { id: rule.id, action: rule.action, warning: rule.warning,
+          strikes:rule.strikes,strikeWindowMinutes:rule.strikeWindowMinutes };
     }
     return null;
   }
@@ -160,14 +161,14 @@ class Moderator {
     this.windows.set(key, entries.slice(-31));
     return entries.length;
   }
-  async permission(sock, group, sender) {
+  async permission(sock, group, sender, force = false) {
     let cache = this.metadata.get(sock);
     if (!cache) {
       cache = new Map();
       this.metadata.set(sock, cache);
     }
     let entry = cache.get(group);
-    if (!entry || Date.now() - entry.at > 20000) {
+    if (force || !entry || Date.now() - entry.at > 20000) {
       let timer;
       try {
         const metadata = await Promise.race([
@@ -204,6 +205,7 @@ class Moderator {
   }
   exempt(configuration, permission, sender) {
     configuration = { ...configuration, ...configuration.configuracao };
+    if(configuration.universal && (permission.admin || permission.owner)) return true;
     if (configuration.isentarAdmins !== false && permission.admin) return true;
     if (configuration.isentarDono !== false && permission.owner) return true;
     const aliases = new Set(

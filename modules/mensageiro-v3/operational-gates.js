@@ -7,6 +7,7 @@ const PRIVATE_CARDS = new Set(["attendance", "faq", "flows", "quickReplies"]);
 const V2_PROFILE_SELECTION_REASONS = new Set(["PERFIL_INATIVO", "SESSAO_INCORRETA", "CARD_INATIVO", "GRUPO_NAO_AUTORIZADO", "PERFIL_AMBIGUO"]);
 
 function cardActive(profile, card) {
+  if(card === "attendance" && profile.cards?.attendance?.configuration?.universal) return profile.cards.attendance.active === true;
   if (card === "attendance") return [...PRIVATE_CARDS].some(name => profile.cards?.[name]?.active === true);
   return profile.cards?.[card]?.active === true;
 }
@@ -65,6 +66,7 @@ function eventIdentity({ message, event, card, now = Date.now() }) {
 }
 
 function scheduledPayload(content) {
+  if(content?.recurrenceV4) return require("../mensageiro-v4/schedule-options").schedulePayload(content);
   const raw = content && typeof content === "object" && !Array.isArray(content) ? content : {};
   const entries = Array.isArray(raw.conteudos) && raw.conteudos.length ? raw.conteudos : [raw];
   const index = Math.max(0, Number(raw.indiceAtual) || 0) % entries.length;

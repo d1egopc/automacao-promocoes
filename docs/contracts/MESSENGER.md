@@ -1,5 +1,7 @@
 # Messenger
 
+Contrato da candidata backend definitiva, sem deploy: [MESSENGER-BACKEND-V1.md](MESSENGER-BACKEND-V1.md). Reutiliza os motores abaixo e documenta API de módulos, modelos, atendimento/handoff, recorrências e mídia. As seções históricas/publicadas permanecem preservadas.
+
 ## Mensageiro universal por adesao explicita — 28/10/2026
 
 Este contrato sucede a limitacao comercial do canario historico abaixo. A interface V4 e as rotas de configuracao ficam disponiveis a todas as workspaces autenticadas com recurso mensageiro. Nao existe cliente fixo, flag somente por workspace ou dependencia de uma tela administrativa aberta. O canario antigo permanece sem autoridade comercial na montagem universal.

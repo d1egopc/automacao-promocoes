@@ -654,4 +654,4 @@ function createLegacyCompatRoutes(deps = {}) {
   return { router, stateFor };
 }
 
-module.exports = { createLegacyCompatRoutes, stateFor, attendanceConfig, legacyProfile, legacySchedule, scheduleInput };
+module.exports = { createLegacyCompatRoutes, stateFor, attendanceConfig, legacyProfile, legacySchedule, scheduleInput, zonedParts, zonedToTimestamp };

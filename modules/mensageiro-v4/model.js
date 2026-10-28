@@ -165,6 +165,8 @@ function settings(profile) {
 function lightProfile(profile) {
   return {
     id: profile.id,
+    workspaceId: profile.workspaceId,
+    niche: profile.niche || "",
     name: profile.name,
     sessionId: profile.sessionId,
     active: profile.active === true,

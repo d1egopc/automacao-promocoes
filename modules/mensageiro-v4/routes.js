@@ -2,6 +2,9 @@
 const express = require("express");
 const crypto = require("node:crypto");
 const { CARDS, CATALOG, DEFAULT_RESPONSES, fail } = require("./model");
+const { MODULES, stateOf, media } = require("./module-contract");
+const { catalog } = require("./templates");
+const { contactRef } = require("./module-runtime");
 function createV4Routes({
   repository,
   engine,
@@ -22,6 +25,7 @@ function createV4Routes({
     if (!req.usuario || !getWorkspace(req))
       return res.status(401).json({ ok: false, code: "auth_required" });
     req.v4Workspace = getWorkspace(req);
+    req.body ||= {};
     next();
   });
   const safe = (fn) => async (req, res) => {
@@ -59,6 +63,10 @@ function createV4Routes({
         "activation_confirmation_required",
         "active_card_required",
         "legacy_review_required",
+        "configuracao_invalida", "midia_invalida", "resposta_vazia", "horario_invalido", "comando_invalido",
+        "comando_duplicado", "gatilho_invalido", "fluxo_invalido", "modelo_nao_encontrado",
+        "desative_perfil_para_modelo", "contato_invalido", "runtime_limit", "programacao_nao_encontrada",
+        "configuracao_grande",
       ]);
       const code = known.has(error.message) ? error.message : "v4_unavailable";
       res
@@ -189,6 +197,57 @@ function createV4Routes({
       }),
     ),
   );
+  router.get("/templates",safe(async(_req,res)=>res.json({ok:true,templates:catalog()})));
+  router.get("/sessions",safe(async(req,res)=>res.json({ok:true,sessions:listSessions(req.v4Workspace)})));
+  router.get("/profiles",safe(async(req,res)=>res.json({ok:true,...await repository.call("state",{workspaceId:req.v4Workspace})})));
+  router.get("/profiles/:id/modules/:module",safe(async(req,res)=> {
+    if(!MODULES.includes(req.params.module)) fail("card_invalido");
+    const p=await repository.call("profile",{workspaceId:req.v4Workspace,profileId:req.params.id});
+    const name=req.params.module, card=p.cards[name], session=listSessions(req.v4Workspace).find(s=>s.id===p.sessionId);
+    res.json({ok:true,profileId:p.id,revision:p.revision,module:name,active:card.active,
+      state:stateOf(p,name,session),configuration:card.configuration?.universal||null,
+      legacyConfiguration:card.configuration?.universal?undefined:card.configuration||{}});
+  }));
+  router.post("/profiles/:id/template",safe(async(req,res)=> {
+    const result=await repository.call("apply_template",{workspaceId:req.v4Workspace,profileId:req.params.id,
+      templateId:req.body.templateId,expectedRevision:req.body.expectedRevision});
+    res.json({ok:true,profile:result});
+  }));
+  router.get("/profiles/:id/modules",safe(async(req,res)=> {
+    const p=await repository.call("profile",{workspaceId:req.v4Workspace,profileId:req.params.id});
+    const session=listSessions(req.v4Workspace).find(s=>s.id===p.sessionId);
+    res.json({ok:true,profileId:p.id,revision:p.revision,niche:p.niche||"",modules:Object.fromEntries(MODULES.map(name=>[name,{
+      active:p.cards[name].active,revision:p.cards[name].revision,state:stateOf(p,name,session),
+      configuration:p.cards[name].configuration?.universal || null,legacyConfiguration:p.cards[name].configuration?.universal ? undefined:p.cards[name].configuration||{}}]))});
+  }));
+  router.put("/profiles/:id/modules/:module",safe(async(req,res)=> {
+    const w=req.v4Workspace, p=await repository.call("profile",{workspaceId:w,profileId:req.params.id});
+    scope(w,p.sessionId,p.destinations);
+    const saved=await repository.call("module",{workspaceId:w,profileId:p.id,card:req.params.module,
+      configuration:req.body.configuration,active:req.body.active,expectedRevision:req.body.expectedRevision});
+    res.json({ok:true,profile:saved});
+  }));
+  router.post("/profiles/:id/media",safe(async(req,res)=> {
+    await repository.call("profile",{workspaceId:req.v4Workspace,profileId:req.params.id});
+    res.json({ok:true,media:media(req.body.media),storage:"profile_configuration",persisted:false});
+  }));
+  router.get("/profiles/:id/history",safe(async(req,res)=>res.json({ok:true,source:"mensageiro_v3_audit",
+    records:await repository.call("history",{workspaceId:req.v4Workspace,profileId:req.params.id,limit:req.query.limit})})));
+  router.get("/profiles/:id/diagnostic",safe(async(req,res)=> {
+    const p=await repository.call("profile",{workspaceId:req.v4Workspace,profileId:req.params.id});
+    const session=listSessions(req.v4Workspace).find(s=>s.id===p.sessionId);
+    res.json({ok:true,readOnly:true,profileId:p.id,revision:p.revision,session:session||null,
+      modules:Object.fromEntries(MODULES.map(name=>[name,stateOf(p,name,session)])),adminPermission:"desconhecido_ate_verificacao_runtime",
+      workspaceTotals:engine.stats(req.v4Workspace),source:"mensageiro_v4_state_and_v3_audit",
+      records:await repository.call("history",{workspaceId:req.v4Workspace,profileId:p.id,limit:10})});
+  }));
+  router.post("/profiles/:id/human",safe(async(req,res)=> {
+    const p=await repository.call("profile",{workspaceId:req.v4Workspace,profileId:req.params.id});
+    if(!/^[A-Za-z0-9_:-]+@(?:s\.whatsapp\.net|lid)$/.test(req.body.contactId||"")) fail("contato_invalido");
+    res.json({ok:true,...await repository.call("human",{workspaceId:p.workspaceId,profileId:p.id,sessionId:p.sessionId,
+      expectedRevision:req.body.expectedRevision,contactRef:contactRef(p,p.sessionId,req.body.contactId),
+      paused:req.body.paused===true,minutes:req.body.minutes})});
+  }));
   router.get(
     "/groups",
     safe(async (req, res) => {

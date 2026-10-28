@@ -37,7 +37,7 @@ async function fixture(t) {
     credits: { send: async args => { await args.revalidate(); debits.push({ w: args.workspaceId, to: args.groupId });
       return args.transport(args.content, args.options); } },
   });
-  const app = express(); app.use(express.json());
+  const app = express(); app.use(express.json({limit:"10mb"}));
   app.use((req, _res, next) => { req.clienteId = req.headers["x-fixture-workspace"];
     if (req.clienteId) req.usuario = { id: req.clienteId }; next(); });
   app.use("/mensageiro-v4", createV4Routes({ repository, engine, universal: true,
@@ -67,8 +67,9 @@ async function fixture(t) {
     workspaceId: w, sessionId: session(w), sock: sockets[w], planAllowed: true, card: kind, upsertType: "notify",
     message: { key: { id, remoteJid: destination, participant: P, fromMe: false },
       messageTimestamp: Math.ceil(Date.now() / 1000), message: { conversation: text } }, ...overrides });
-  return { api, create, card, activate, current, dispatch, store, repository, scope, refresh, session, sockets, sent, debits, filePath };
+  return { api, create, card, activate, current, dispatch, store, repository, scope, refresh, session, sockets, sent, debits, filePath,engine };
 }
+module.exports={fixture,W,B,G,P,image};
 
 test("all authenticated entitled workspaces can prepare; explicit activation and CAS are mandatory", async t => {
   const f = await fixture(t);

@@ -296,6 +296,8 @@ function testMatrix(plan) {
     add("contract:fila-viva", "tests/fila-viva-runtime-wiring.test.js", process.execPath, ["tests/fila-viva-runtime-wiring.test.js"]);
   }
   if (plan.runtimeFiles.some(file => file === "index.js" || file.startsWith("modules/mensageiro"))) {
+    add("mensageiro:backend-definitivo", "tests/mensageiro-backend-definitivo.test.cjs", process.execPath,
+      ["--test", "tests/mensageiro-backend-definitivo.test.cjs"], false);
     add("mensageiro:gerente", "tests/mensageiro-gerente-grupo.test.cjs", process.execPath, ["tests/mensageiro-gerente-grupo.test.cjs"]);
     add("mensageiro:comandos", "tests/mensageiro-bot-comandos.test.cjs", process.execPath, ["tests/mensageiro-bot-comandos.test.cjs"]);
     add("mensageiro:programadas", "tests/mensageiro-programacoes.test.cjs", process.execPath, ["tests/mensageiro-programacoes.test.cjs"]);

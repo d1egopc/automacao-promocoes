@@ -3,6 +3,7 @@ const { parentPort, workerData } = require("node:worker_threads");
 const { V3Store } = require("../mensageiro-v3/src/v3/store");
 const { selectProfile, cardActive } = require("../mensageiro-v3/operational-gates");
 const { scheduleInput } = require("../mensageiro-v3/legacy-compat");
+const {normalizeSchedule}=require("./schedule-options");
 const {
   CARDS,
   lightProfile,
@@ -14,6 +15,8 @@ const {
   validateImages,
 } = require("./model");
 const store = new V3Store({ filePath: workerData.filePath });
+const { normalizeModule, MODULES } = require("./module-contract");
+const { template } = require("./templates");
 const profile = (w, id) => {
   const p = store.state.workspaces[w] ? store.getProfile(w, id) : null;
   if (!p || p.id !== id || p.workspaceId !== w) fail("perfil_nao_encontrado");
@@ -25,9 +28,9 @@ function conflict(w, p) {
     if (other.id === p.id || !other.active || other.sessionId !== p.sessionId)
       continue;
     const privateCards = ["attendance", "faq", "flows", "quickReplies"];
-    if (privateCards.some(c => p.cards[c]?.active) && privateCards.some(c => other.cards[c]?.active))
+    if (cardActive(p,"attendance") && cardActive(other,"attendance"))
       fail("perfis_conflitantes");
-    for (const card of CARDS.filter((c) => c !== "scheduled")) {
+    for (const card of CARDS.filter((c) => c !== "scheduled" && !privateCards.includes(c))) {
       if (!p.cards[card]?.active || !other.cards[card]?.active) continue;
       const groups = (value) =>
         value.cards[card].configuration?.gruposConfigurados === true ||
@@ -105,6 +108,77 @@ function execute(operation, a) {
     fail("workspace_invalido");
   const w = a.workspaceId;
   store.reload();
+  if (operation === "module" || operation === "apply_template") return store.transaction(() => {
+    const p = profile(w,a.profileId);
+    if(a.expectedRevision !== p.revision) fail("conflito_revisao");
+    if(operation === "apply_template") {
+      if(p.active) fail("desative_perfil_para_modelo");
+      const model = template(a.templateId,p.destinations);
+      for(const [name,configuration] of Object.entries(model.modules)) store.saveCard(w,p.id,name,{active:false,
+        configuration:{universal:configuration,...(name==="groupManager"?{v4:{migrationVersion:4,rules:[]}}:{})}});
+      for(const name of ["faq","flows","quickReplies"]) store.saveCard(w,p.id,name,{active:false,configuration:p.cards[name].configuration||{}});
+      const current=store.state.workspaces[w].profiles[p.id];
+      current.niche=model.niche; current.template={id:model.id,version:model.version};
+      return lightProfile(profile(w,p.id));
+    }
+    if(!MODULES.includes(a.card)) fail("card_invalido");
+    const current=p.cards[a.card], previous=current.configuration?.universal;
+    const config=normalizeModule(a.card,a.configuration === undefined ? previous || {} : a.configuration,p.destinations);
+    const active=a.active===undefined?current.active:a.active===true;
+    store.saveCard(w,p.id,a.card,{active,configuration:{...current.configuration,universal:config,
+      ...(config.groups===undefined?{grupos:[],gruposConfigurados:false}:{grupos:config.groups,gruposConfigurados:true})}});
+    if(a.card==="attendance") for(const name of ["faq","flows","quickReplies"]) store.saveCard(w,p.id,name,{active:false,configuration:p.cards[name].configuration||{}});
+    conflict(w,profile(w,p.id));
+    return lightProfile(profile(w,p.id));
+  });
+  if (["conversation","interaction","human","strike"].includes(operation)) {
+    const p=profile(w,a.profileId);
+    if(!/^[a-f0-9]{64}$/.test(a.contactRef||"")) fail("contato_invalido");
+    if(operation === "conversation") return store.state.workspaces[w].messengerRuntime?.[a.contactRef] || {};
+    return store.transaction(()=> {
+      const current=profile(w,a.profileId);
+      if(current.revision!==a.expectedRevision || current.sessionId!==a.sessionId) fail("conflito_revisao");
+      if(operation!=="human" && (!current.active || current.execution?.version!==4)) fail("activation_confirmation_required");
+      const ws=store.state.workspaces[w], now=Date.now();
+      ws.messengerRuntime ||= {};
+      for(const [key,row] of Object.entries(ws.messengerRuntime)) if(now-(row.at||0)>86400000 && !(row.humanUntil>now)) delete ws.messengerRuntime[key];
+      if(Object.keys(ws.messengerRuntime).length>=1000 && !ws.messengerRuntime[a.contactRef]) fail("runtime_limit");
+      const row=ws.messengerRuntime[a.contactRef] ||= {profileId:p.id,sessionId:p.sessionId,at:now,cooldowns:{}};
+      if(row.profileId!==p.id || row.sessionId!==p.sessionId) fail("scope_invalid");
+      if(operation === "human") {
+        row.humanUntil=a.paused===true?now+Math.max(1,Math.min(1440,Number(a.minutes)||60))*60000:0;
+        row.node=null;
+      } else if(operation === "strike") {
+        row.strikes ||= {};
+        const strikeKey="rule:"+a.ruleId;
+        if(Object.keys(row.strikes).length>=30&&!row.strikes[strikeKey]) fail("runtime_limit");
+        const entries=(row.strikes[strikeKey]||[]).filter(e=>now-e.at<a.windowMinutes*60000);
+        if(!entries.some(e=>e.id===a.eventRef)) entries.push({id:a.eventRef,at:now});
+        row.strikes[strikeKey]=entries.slice(-4); row.at=now;
+        store._touch(ws,"messenger_strike",{profileId:p.id,ruleId:a.ruleId,count:entries.length});
+        return {count:entries.length};
+      } else {
+        if(row.humanUntil>now) return {allowed:false,reason:"human_paused"};
+        if((row.cooldowns[a.slot]||0)>now) return {allowed:false,reason:"cooldown"};
+        if(Object.keys(row.cooldowns).length>=60 && !Object.hasOwn(row.cooldowns,a.slot)) fail("runtime_limit");
+        row.cooldowns[a.slot]=now+(Number(a.cooldownSeconds)||0)*1000;
+        if(a.humanPauseMinutes) {row.humanUntil=now+a.humanPauseMinutes*60000;row.node=null;}
+        else if(Object.hasOwn(a,"node")) row.node=a.node;
+      }
+      row.at=now; store._touch(ws,"messenger_conversation",{profileId:p.id,operation});
+      return {allowed:true,humanUntil:row.humanUntil||0,node:row.node||null};
+    });
+  }
+  if(operation === "history") {
+    profile(w,a.profileId);
+    const ws=store.state.workspaces[w];
+    return (ws.audit || []).slice(-500).map(e=>({event:e,claim:e.key?ws.claims[e.key]:null}))
+      .filter(({event:e,claim:c})=>e.profileId===a.profileId||c?.profileId===a.profileId)
+      .slice(-Math.min(100,Math.max(1,Number(a.limit)||30)))
+      .map(({event:e,claim:c})=>({at:e.at,event:e.event,profileId:a.profileId,ruleId:e.ruleId,count:e.count,
+        executionRef:e.key?require("node:crypto").createHash("sha256").update(e.key).digest("hex"):undefined,
+        card:c?.card,status:c?.status,stage:c?.stage,ack:c?.ack,ackAt:c?.ackAt,result:c?.result}));
+  }
   if (operation === "state") {
     const workspace = store.state.workspaces[w];
     return {
@@ -137,14 +211,18 @@ function execute(operation, a) {
         !cardActive(p, a.card)) return false;
     if (operation === "scheduled_authorize") {
       const s = store.getSchedule(w, a.scheduleId);
+      const module=p.cards.scheduled.configuration?.universal;
+      if(module && (!p.destinations.includes(a.destination)||module.groups&&!module.groups.includes(a.destination))) return false;
       return !!(s && s.profileId === p.id && s.active && s.revision === a.scheduleRevision && s.destinations.includes(a.destination));
     }
     return true;
   }
-  if (operation === "schedules")
+  if (operation === "schedules") {
+    profile(w,a.profileId);
     return store
       .listSchedules(w, { includeInactive: true })
       .filter((s) => s.profileId === a.profileId);
+  }
   if (operation === "schedule")
     return store.transaction(() => {
       const p = profile(w, a.profileId);
@@ -165,7 +243,7 @@ function execute(operation, a) {
           w,
           s.id,
           {
-            ...scheduleInput(a.input, Date.now(), s),
+            ...normalizeSchedule(a.input, s),
             active:
               a.input.ativo === undefined ? s.active : a.input.ativo === true,
           },
@@ -174,9 +252,9 @@ function execute(operation, a) {
       }
       const input = { ...a.input };
       delete input.nextRunAt;
-      if (!["horario", "intervalo"].includes(input.tipo))
+      if (!input.recurrence && !["horario", "intervalo"].includes(input.tipo))
         fail("programacao_invalida");
-      const normalized = scheduleInput(input);
+      const normalized = normalizeSchedule(input);
       if (
         !normalized.nextRunAt ||
         Date.parse(normalized.nextRunAt) <= Date.now()
@@ -221,6 +299,9 @@ function execute(operation, a) {
         });
       }
       if (!p.name) fail("nome_obrigatorio");
+      if(body.niche!==undefined) store.state.workspaces[w].profiles[p.id].niche=text(body.niche,100);
+      for(const [name,current] of Object.entries(p.cards)) if(current.configuration?.universal) normalizeModule(name,current.configuration.universal,p.destinations);
+      for(const schedule of store.listSchedules(w,{includeInactive:true}).filter(s=>s.profileId===p.id)) require("./schedule-options").assertSchedule(p,schedule);
       saveSettings(w, p, body);
       if (a.universal === true) {
         const current = profile(w, p.id);
@@ -260,6 +341,7 @@ function execute(operation, a) {
         destinations: original.destinations,
         active: false,
       });
+      store.state.workspaces[w].profiles[p.id].niche=original.niche||"";
       if (a.universal === true) store.state.workspaces[w].profiles[p.id].execution = { version: 4, activatedAt: null };
       for (const card of CARDS) {
         const copy = JSON.parse(JSON.stringify(original.cards[card]));
@@ -298,9 +380,22 @@ function execute(operation, a) {
       card: a.card,
       groupId: a.groupId,
     });
+    const selectedProfile=selected.profileId ? profile(w, selected.profileId) : null;
+    if(selectedProfile?.cards[a.card]?.configuration?.universal) {
+      for(const [name,card] of Object.entries(selectedProfile.cards)) if(name!==a.card) card.configuration=name==="groupManager"
+        ? {v4:{migrationVersion:card.configuration?.v4?.migrationVersion}} : {};
+      const prepare=value=> {
+        if(!value||typeof value!=="object") return;
+        if(value.media?.dataUri) {const m=value.media; value.media={type:m.type,mime:m.mime,bytes:m.bytes,prepared:Buffer.from(m.dataUri.split(",")[1],"base64")};}
+        for(const [key,item] of Object.entries(value)) if(key!=="media") {
+          if(Array.isArray(item)) item.forEach(prepare); else if(item&&typeof item==="object") prepare(item);
+        }
+      };
+      prepare(selectedProfile.cards[a.card].configuration.universal);
+    }
     return {
       ...selected,
-      profile: selected.profileId ? profile(w, selected.profileId) : null,
+      profile: selectedProfile,
     };
   }
   if (operation === "outbound_create")
@@ -368,7 +463,10 @@ function execute(operation, a) {
       return store.claimExecution(w, a.key, { profileId: p.id, card: a.card });
     });
   if (operation === "complete")
-    return store.completeExecution(w, a.key, { status: a.status });
+    return store.completeExecution(w, a.key, { status: a.status,
+      ...(a.result?{result:Object.fromEntries(Object.entries(a.result).filter(([key,value])=>
+        ["ruleId","reason","deleteAttempted","deleteResult","banAttempted","banResult","noticeResult","transportAccepted","deliveryConfirmed"].includes(key)&&
+        (typeof value==="boolean"||typeof value==="string"&&value.length<=100)))}:{}) });
   fail("operacao_invalida");
 }
 parentPort.on("message", ({ id, operation, args }) => {
