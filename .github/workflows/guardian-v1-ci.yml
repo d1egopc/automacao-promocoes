@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
-      - validation/shopee-magalu-recovery-20261028
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
@@ -38,6 +37,59 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Garimpei reconciled release - preserve published Shopee and exact sensor
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-release-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          git merge-base --is-ancestor 711f864885710e03324735abbdef708d2f6f6d19 HEAD
+          git merge-base --is-ancestor 58ac3d19840bb25c8f72bb29e5ac60128a148bd4 HEAD
+          git diff --exit-code 868a0cf2d176bb06c014443100b0384269d73016 HEAD -- marketplaces/shopee/importar.js modules/engine/importer/adapters/shopee.adapter.js
+          git diff --exit-code ee8f56360e8e943ada9ba360566ef12b2bf107d7 HEAD -- index.js modules/radar modules/telemetria scripts/garimpei-infra-guard.py scripts/garimpei-journal-cleanup.py docs/infra
+          git diff --exit-code 58ac3d19840bb25c8f72bb29e5ac60128a148bd4 HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 utils marketplaces optimus-capture package.json package-lock.json
+          python3 -B tests/garimpei-infra-fixtures.py -v
+          node --test tests/garimpei-infra.test.cjs tests/garimpei-compose-integration.test.cjs tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
+          node --test tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node scripts/benchmark-garimpei-sensor24h.cjs
+      - name: Garimpei infrastructure - closed mount and retention on Linux
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-infra-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          python3 -B tests/garimpei-infra-fixtures.py -v
+          node --test tests/garimpei-infra.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-ingress-observation-v1.test.cjs
+          node scripts/benchmark-garimpei-sensor24h.cjs
+          git diff --exit-code 711f864885710e03324735abbdef708d2f6f6d19 HEAD -- index.js modules utils marketplaces optimus-capture package.json package-lock.json
+          node --test tests/garimpei-compose-integration.test.cjs
+      - name: Garimpei 24h sensor - privacy, bounded journal and on-demand read
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
+          node scripts/benchmark-garimpei-sensor24h.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils package.json package-lock.json .github/workflows/deploy-backend-vps.yml
+      - name: Garimpei passive observation - exact target and isolated fixtures
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-observation-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils package.json package-lock.json .github/workflows/deploy-backend-vps.yml
       - name: Shopee contextual recovery and preserved Magalu Telegram contracts
         if: github.ref == 'refs/heads/validation/shopee-magalu-recovery-20261028' || github.ref == 'refs/heads/validation/guardian-v1-shopee-release-20261028'
         shell: bash
@@ -244,7 +296,11 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-garimpei-release-20261028) base=58ac3d19840bb25c8f72bb29e5ac60128a148bd4 ;;
             refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
+            refs/heads/validation/guardian-v1-garimpei-infra-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
+            refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
+            refs/heads/validation/guardian-v1-garimpei-observation-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;

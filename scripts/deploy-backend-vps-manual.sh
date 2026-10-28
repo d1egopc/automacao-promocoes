@@ -26,6 +26,9 @@ deploy_stage=validate_inputs
 [[ "$BASE_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
 test "$GITHUB_EVENT_NAME" = workflow_dispatch
 test "$GITHUB_REF" = refs/heads/main
+sensor_mount_approved="${GARIMPEI_SENSOR_MOUNT_APPROVED:-false}"
+[[ "$sensor_mount_approved" == true || "$sensor_mount_approved" == false ]]
+sensor_guard="$GITHUB_WORKSPACE/scripts/garimpei-infra-guard.py"
 
 deploy_stage=validate_source_checkout
 source_dir="$GITHUB_WORKSPACE/release-source"
@@ -73,7 +76,7 @@ declare -A changed_runtime_status=()
 record_runtime_change() {
   local status="$1" path="$2"
   case "$path" in
-    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/benchmark-gerente-observability-v2.cjs) return 0 ;;
+    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/benchmark-gerente-observability-v2.cjs|scripts/benchmark-garimpei-sensor24h.cjs|scripts/garimpei-infra-guard.py|scripts/garimpei-journal-cleanup.py) return 0 ;;
     optimus-capture/adapters/magalu.js|optimus-capture/local-worker/magalu-identity.js) return 0 ;;
   esac
   case "$status" in
@@ -201,6 +204,28 @@ if test -f "$release"; then files+=(-f "$release"); fi
 release_fingerprint=absent
 if test -f "$release"; then release_fingerprint="$(sha256sum "$release" | cut -d' ' -f1)"; fi
 docker compose "${files[@]}" config --format json > "$scratch/before.json"
+docker inspect -f '{{json .Mounts}}' optimus-backend > "$scratch/mounts-before.json"
+sensor_mount_before="$(python3 "$sensor_guard" mode "$scratch/before.json")"
+sensor_mount_selected=false
+if [[ "$sensor_mount_before" == present || "$sensor_mount_approved" == true ]]; then
+  sensor_mount_selected=true
+  python3 "$sensor_guard" path
+  test "$(docker exec optimus-backend id -u)" = 1000
+  test "$(docker exec optimus-backend id -g)" = 1000
+fi
+if [[ "$sensor_mount_before" == absent && "$sensor_mount_approved" == true ]]; then
+  # Closed opt-in, candidate ancestry and retention service must be proven before changing mounts.
+  git -C "$source_dir" merge-base --is-ancestor 711f864885710e03324735abbdef708d2f6f6d19 "$SOURCE_SHA"
+  test -f "$source_dir/modules/radar/ingress-sensor-journal.js"
+  test "$(sha256sum /opt/optimus/infra/garimpei-journal-cleanup.py | cut -d' ' -f1)" = "$(sha256sum "$GITHUB_WORKSPACE/scripts/garimpei-journal-cleanup.py" | cut -d' ' -f1)"
+  test ! -L /opt/optimus/infra/garimpei-journal-cleanup.py
+  for unit in garimpei-sensor-cleanup.service garimpei-sensor-cleanup.timer; do
+    test ! -L "/etc/systemd/system/$unit"
+    test "$(sha256sum "/etc/systemd/system/$unit" | cut -d' ' -f1)" = "$(sha256sum "$GITHUB_WORKSPACE/docs/infra/$unit" | cut -d' ' -f1)"
+  done
+  systemctl is-enabled --quiet garimpei-sensor-cleanup.timer
+  systemctl is-active --quiet garimpei-sensor-cleanup.timer
+fi
 python3 - "$scratch/before.json" <<'PY'
 import json, sys
 config = json.load(open(sys.argv[1]))
@@ -254,14 +279,14 @@ fi
 # env_file, secrets, mounts, ports, networks and PostgreSQL are untouched.
 deploy_stage=validate_compose_overlay
 printf 'services:\n  backend:\n    image: %s\n' "$candidate_tag" > "$staging"
+if [[ "$sensor_mount_selected" == true ]]; then
+  printf '    volumes:\n      - type: bind\n        source: /opt/optimus/observability/garimpei-sensor\n        target: /var/log/optimus/garimpei-sensor\n        bind:\n          create_host_path: false\n' >> "$staging"
+fi
 docker compose -f "$compose" -f "$staging" config --format json > "$scratch/after.json"
-python3 - "$scratch/before.json" "$scratch/after.json" <<'PY'
-import json, sys
-before, after = (json.load(open(path)) for path in sys.argv[1:])
-after['services']['backend']['image'] = before['services']['backend']['image']
-if before != after:
-    raise SystemExit('Effective Compose changed beyond backend image')
-PY
+if ! python3 "$sensor_guard" compose "$scratch/before.json" "$scratch/after.json" "$sensor_mount_approved"; then
+  echo 'Effective Compose changed beyond backend image or explicitly approved sensor mount'
+  false
+fi
 test "$(docker image inspect -f '{{.Id}}' "$candidate_tag")" = "$candidate_id"
 if test "$release_fingerprint" = absent; then
   test ! -e "$release"
@@ -281,7 +306,12 @@ docker compose -f "$compose" -f "$release" up -d --no-deps --no-build --force-re
 deploy_stage=verify_backend
 test "$(docker inspect -f '{{.Image}}' optimus-backend)" = "$candidate_id"
 test "$(env_fingerprint optimus-backend)" = "$baseline_env"
-test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts"
+if [[ "$sensor_mount_approved" == true && "$sensor_mount_before" == absent ]]; then
+  docker inspect -f '{{json .Mounts}}' optimus-backend > "$scratch/mounts-after.json"
+  python3 "$sensor_guard" live "$scratch/mounts-before.json" "$scratch/mounts-after.json" true
+else
+  test "$(mount_fingerprint optimus-backend)" = "$baseline_mounts"
+fi
 docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'import json,sys; u=json.load(sys.stdin); core=[x for x in u if x.get("Name")=="core"]; assert len(core)==1 and core[0]["Soft"]==0 and core[0]["Hard"]==0'
 test "$(docker compose -f "$compose" -f "$release" ps -q postgres)" = "$postgres_id"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")" = healthy

@@ -22,7 +22,13 @@ const {
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
 const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
-const radarIngressObservation = createRadarIngressObservation();
+const { createSensorJournal } = require("./modules/radar/ingress-sensor-journal");
+let garimpeiSensorEnabled = false;
+const radarIngressObservation = createRadarIngressObservation({
+  sensorEnabled: () => garimpeiSensorEnabled,
+  onSensorStopped: () => { garimpeiSensorEnabled = false; },
+  journal: createSensorJournal({ directory: "/var/log/optimus/garimpei-sensor" })
+});
 const { avaliarFrescorHandoffTeleRadar } = require("./modules/radar/ingress-frescor-retry.candidate");
 const { capturaFactualRadarCandidata } = require("./modules/radar/capture-clock.candidate");
 const { recuperarIntencoesRadarCandidatas } = require("./modules/engine/radar-replay-runtime.candidate");
@@ -23717,7 +23723,8 @@ if (radarIngressObservation.isActiveFor({
     urls: links,
     marketplace: marketplaceDetectadoLinks || "unknown",
     generation: sock?.__optimusSocketGeracao,
-    engineResult: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "created") : "failed"
+    engineResult: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "created") : "failed",
+    eventId: resultado?.ok === true ? resultado.id : undefined
   })).catch(() => radarIngressObservation.recordStage({
     workspaceId: diagnosticoWorkspaceId,
     sessionId: sessaoIdTexto,
@@ -25621,17 +25628,25 @@ app.get("/radar/config", (req, res) => {
 
 const RADAR_INGRESS_OBSERVATION_TARGET = Object.freeze({
   workspaceId: "admin",
-  groupName: "optesteradar"
+  sessionId: "admin_ZOIAO",
+  groupRef: "ec288ef5bc72eae2"
 });
 
 function validarAlvoObservacaoIngressRadar() {
-  const { workspaceId, groupName } = RADAR_INGRESS_OBSERVATION_TARGET;
+  const { workspaceId, sessionId: expectedSessionId, groupRef } = RADAR_INGRESS_OBSERVATION_TARGET;
   const config = carregarRadarConfigCliente("admin", { falharFechado: true });
   if (config.monitoramentoAtivo !== true) return { ok: false, reason: "radar_monitoring_inactive" };
 
   const matchingGroups = (Array.isArray(config.sessoesWhatsappMonitoradas) ? config.sessoesWhatsappMonitoradas : [])
     .flatMap(item => (Array.isArray(item?.gruposMonitorados) ? item.gruposMonitorados : [])
-      .filter(group => group?.ativo !== false && normalizarTexto(group?.nome || "") === groupName)
+      .filter(group => {
+        const jid = obterGrupoWhatsappIdTecnicoRadar(group);
+        const identities = [group?.id, group?.grupoId, group?.remoteJid].filter(Boolean);
+        return group?.ativo !== false && /^\d+(?:-\d+)?@g\.us$/.test(jid) &&
+          identities.every(value => value === jid) &&
+          (!group?.sessaoId || group.sessaoId === expectedSessionId) &&
+          createHash("sha256").update(jid).digest("hex").slice(0, 16) === groupRef;
+      })
       .map(group => ({ item, group, groupId: obterGrupoWhatsappIdTecnicoRadar(group) })))
     .filter(item => item.groupId && item.groupId.endsWith("@g.us"));
   if (matchingGroups.length !== 1) return { ok: false, reason: "radar_target_group_unverified" };
@@ -25639,11 +25654,12 @@ function validarAlvoObservacaoIngressRadar() {
   const { item, groupId } = matchingGroups[0];
   const sessionInput = String(item?.sessaoId || "").trim();
   const sessionId = resolverSessaoWhatsappRadarCliente("admin", sessionInput);
-  if (!sessionInput || !sessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
+  if (sessionInput !== expectedSessionId || sessionId !== expectedSessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
 
   const metadata = sessoesMeta?.[sessionId];
   const workspaceDaSessao = resolverClienteMensageiroPorSessao(sessionId);
-  if (!metadata || metadata.workspaceId !== workspaceId || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
+  if (!metadata || metadata.workspaceId !== workspaceId ||
+      (metadata.clienteId && metadata.clienteId !== workspaceId) || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
     return { ok: false, reason: "session_workspace_mismatch" };
   }
 
@@ -25703,6 +25719,26 @@ app.post("/admin/radar/ingress-observation/start", (req, res) => {
 app.post("/admin/radar/ingress-observation/stop", (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
   return responderObservacaoIngressRadar(res, radarIngressObservation.stop("manual"));
+});
+
+// Explicit Admin Master activation only; enabling the flag never starts observation.
+app.post("/admin/radar/ingress-observation/sensor24h/start", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  if (req.body?.confirm !== "GARIMPEI_24H") return responderObservacaoIngressRadar(res, { ok: false, reason: "sensor_confirmation_required" }, 400);
+  const alvo = validarAlvoObservacaoIngressRadar();
+  if (!alvo.ok) return responderObservacaoIngressRadar(res, { ok: false, reason: alvo.reason }, 409);
+  garimpeiSensorEnabled = true;
+  let result;
+  try { result = await radarIngressObservation.startSensor({ ...alvo, sock: alvo.socket,
+    scopeValidated: true, listenerRegistered: true }); }
+  catch { result = { ok: false, reason: "sensor_start_unavailable" }; }
+  if (!result.ok && radarIngressObservation.status().state !== "active") garimpeiSensorEnabled = false;
+  return responderObservacaoIngressRadar(res, result, result.ok ? 200 : 409);
+});
+app.get("/admin/radar/ingress-observation/sensor24h/archive", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  try { return responderObservacaoIngressRadar(res, await radarIngressObservation.archive()); }
+  catch { return responderObservacaoIngressRadar(res, { ok: false, reason: "sensor_archive_unavailable" }, 409); }
 });
 
 app.post("/radar/config", (req, res) => {
@@ -34071,7 +34107,11 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
-      if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) continue;
+      if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) {
+        radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
+          message: mensagem, stage: "listener_gate", decision: "ignored", reason: "buffer_recovery_suppressed" });
+        continue;
+      }
       const gerenteDiagnosticV2 = mensagem && typeof mensagem === "object"
         ? gerenteDiagnosticV2ByMessage?.get(mensagem)
         : null;
@@ -34115,6 +34155,8 @@ registrarListenerUnicoSocket({
         });
       }
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
+          message: mensagem, stage: "listener_gate", decision: "ignored", reason: "usuario_inativo" });
         gerenteDiagnosticV2?.("card_scope", "user_inactive", { result: "blocked" });
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
         coberturaRadar.registrar("listener_ignorado", {

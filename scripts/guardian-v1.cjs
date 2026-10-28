@@ -15,6 +15,9 @@ const NON_RUNTIME_EXACT = new Set([
   "scripts/deploy-backend-vps-manual.sh",
   "scripts/guardian-v1.cjs",
   "scripts/benchmark-gerente-observability-v2.cjs",
+  "scripts/benchmark-garimpei-sensor24h.cjs",
+  "scripts/garimpei-infra-guard.py",
+  "scripts/garimpei-journal-cleanup.py",
   // Artefatos da extensão: testados no CI, nunca transportados no overlay Docker.
   "optimus-capture/adapters/magalu.js",
   "optimus-capture/local-worker/magalu-identity.js"
@@ -281,6 +284,10 @@ function testMatrix(plan) {
   const add = (id, file, command, args, compareBaseline = true, requiresBash = false) =>
     specs.set(id, { id, file, command, args, compareBaseline, requiresBash });
   add("syntax:index", "index.js", process.execPath, ["--check", "index.js"]);
+  if (plan.ignoredFiles?.includes("scripts/garimpei-infra-guard.py")) {
+    add("infra:garimpei-closed-mount", "tests/garimpei-infra.test.cjs", process.execPath,
+      ["--test", "tests/garimpei-infra.test.cjs"], false);
+  }
   add("encoding", "scripts/audit-encoding.cjs", process.execPath, ["scripts/audit-encoding.cjs"]);
   // Permanent release/CI gates only. Never imported by a commercial motor.
   add("telemetria:contrato-permanente", "tests/telemetria-permanent-contract.test.cjs", process.execPath,
@@ -289,6 +296,16 @@ function testMatrix(plan) {
     ["--test", "tests/telemetria-operacional.test.cjs", "tests/telemetria-prepared-input.test.cjs"], false);
 
   if (plan.runtimeFiles.length) {
+    if (plan.runtimeFiles.some(file => file === "index.js" || file === "modules/radar/ingress-observation-v1.js")) {
+      add("radar:ingress-observation", "tests/radar-ingress-observation-v1.test.cjs", process.execPath,
+        ["--test", "tests/radar-ingress-observation-v1.test.cjs"]);
+      add("radar:garimpei-observation", "tests/radar-garimpei-observation.test.cjs", process.execPath,
+        ["--test", "tests/radar-garimpei-observation.test.cjs"], false);
+      if (plan.runtimeFiles.includes("modules/radar/ingress-sensor-journal.js")) {
+        add("radar:garimpei-sensor24h", "tests/radar-garimpei-sensor24h.test.cjs", process.execPath,
+          ["--test", "tests/radar-garimpei-sensor24h.test.cjs"], false);
+      }
+    }
     add("contract:rio", "tests/universal-flow-queue-executor.test.js", process.execPath, ["tests/universal-flow-queue-executor.test.js"]);
     add("contract:radar", "tests/radar-cobertura-v1.test.js", process.execPath, ["tests/radar-cobertura-v1.test.js"]);
     add("contract:teleradar", "tests/teleradar-handoff.test.js", process.execPath, ["tests/teleradar-handoff.test.js"]);

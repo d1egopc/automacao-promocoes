@@ -186,6 +186,7 @@ function createOperationalView({
     } catch {
       /* unknown remains unknown */
     }
+    const report = getProbeStatus();
     return {
       available: true,
       readOnly: true,
@@ -206,8 +207,10 @@ function createOperationalView({
         socketRef: ref(socket && target.sessionId),
         generation: Number(target.generation) || null,
       },
-      report: getProbeStatus(),
-      limits: { durationMs: 300000, maxEvents: 10 },
+      report,
+      limits: report?.profile === "sensor24h"
+        ? { durationMs: 86400000, maxEvents: 32, maxInspected: 10000 }
+        : { durationMs: 300000, maxEvents: 10 },
       coverage:
         "Only the authorized group; zero records do not prove absence at WhatsApp transport.",
     };
