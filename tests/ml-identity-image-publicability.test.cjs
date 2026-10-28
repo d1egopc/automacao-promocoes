@@ -71,6 +71,7 @@ for(const [name,mutate] of [
  ["WhatsApp group thumbnail",o=>{o.imagem=o.imagemUrl="https://mmg.whatsapp.net/group.jpg";}],
  ["source watermark",o=>o.metadata.ofcV24.imagemComercial.possuiMarcaFonte=true],
  ["incompatible version",o=>o.metadata.localWorkerIdentityProof.contractVersion=2],
+ ["incompatible proof collection time",o=>o.metadata.localWorkerIdentityProof.collectedAt=new Date(Date.now()-48*60*60*1000).toISOString()],
  ["missing product proof",o=>o.metadata.localWorkerIdentityProof.sameProductObject=false]
 ])test(`reject ${name}`,async()=>{
  const o=offer(await trusted());mutate(o);

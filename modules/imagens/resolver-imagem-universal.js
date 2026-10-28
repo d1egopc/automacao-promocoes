@@ -190,6 +190,7 @@ function temProvaImagemOficialMercadoLivre(valor = {}) {
       identity.provenance === "local_worker.ml_identity_v1" && identity.source === "local_first_party" &&
       identity.capability === "ml_identity_v1" && identity.contractVersion === 1 &&
       identity.sameProductObject === true && identity.origemImagem === "jsonld.image" &&
+      identity.collectedAt === identity.reciboImagem.collectedAt &&
       /^MLB\d+$/.test(String(identity.expectedMlb)) && identity.observedMlb === identity.expectedMlb) {
     const { normalizarMlb, validarReciboImagemMlIdentity } = require("../local-worker/ml-identity.contract");
     const ids = [item.produtoId, item.productId, item.mlb, metadata.produtoId, metadata.productId,
