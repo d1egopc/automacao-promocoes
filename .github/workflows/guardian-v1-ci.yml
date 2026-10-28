@@ -39,7 +39,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Shopee contextual recovery and preserved Magalu Telegram contracts
-        if: github.ref == 'refs/heads/validation/shopee-magalu-recovery-20261028'
+        if: github.ref == 'refs/heads/validation/shopee-magalu-recovery-20261028' || github.ref == 'refs/heads/validation/guardian-v1-shopee-release-20261028'
         shell: bash
         run: |
           set -euo pipefail
@@ -244,6 +244,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
