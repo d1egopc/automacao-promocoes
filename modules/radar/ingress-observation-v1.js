@@ -8,6 +8,7 @@ const RETENTION_MS = 15 * 60 * 1000;
 const MAX_STAGES_PER_EVENT = 16;
 const STAGES = new Set([
   "upsert_callback",
+  "listener_gate",
   "radar_gate",
   "url_extraction",
   "marketplace_classification",
@@ -28,7 +29,8 @@ const REASONS = new Set([
   "whatsapp_timestamp_ausente", "radar_ativacao_invalida",
   "whatsapp_mensagem_anterior_ativacao", "whatsapp_mensagem_anterior_janela",
   "remotejid_ausente", "origem_tipo_invalida", "grupo_ou_chat_ausente",
-  "mensagem_nao_monitoravel", "captura_sem_tempo_factual", "tamanho_maximo_atingido"
+  "mensagem_nao_monitoravel", "captura_sem_tempo_factual", "tamanho_maximo_atingido",
+  "buffer_recovery_suppressed", "usuario_inativo"
 ]);
 
 function createRadarIngressObservation({
@@ -115,6 +117,7 @@ function createRadarIngressObservation({
       expiresAt: run.expiresAt,
       finishedAt: run.finishedAt || null,
       stopReason: run.stopReason || "",
+      sampleStatus: run.records.length ? "AMOSTRA_OBSERVADA" : (run.state === "active" ? "AGUARDANDO_AMOSTRA" : "SEM_AMOSTRA"),
       events: run.records.length,
       scope: { workspaceHash: run.workspaceHash, sessionHash: run.sessionHash, groupHash: run.groupHash },
       binding: run.binding ? { ...run.binding } : null,
@@ -125,6 +128,8 @@ function createRadarIngressObservation({
         socketHash: record.socketHash,
         emitterHash: record.emitterHash,
         generation: record.generation,
+        observedAt: record.observedAt,
+        workspaceHash: record.workspaceHash,
         fromMe: record.fromMe,
         upsertType: record.upsertType,
         generationMatch: record.generationMatch,
@@ -243,6 +248,7 @@ function createRadarIngressObservation({
       socketMatch,
       emitterMatch,
       current: current === true,
+      capturedWorkspaceHash: hash("workspace", workspaceId),
       generationMatch,
       attachmentVerified: null
     };
@@ -277,6 +283,8 @@ function createRadarIngressObservation({
         socketHash: opaqueObjectId("socket", sock),
         emitterHash: opaqueObjectId("emitter", emitter),
         generation: Number(generation) || 0,
+        observedAt: now(),
+        workspaceHash: hash("workspace", workspaceId),
         fromMe: typeof message?.key?.fromMe === "boolean" ? message.key.fromMe : null,
         upsertType: ["notify", "append", "replace", "read", "issue"].includes(String(type || "").toLowerCase())
           ? String(type).toLowerCase()
@@ -292,7 +300,7 @@ function createRadarIngressObservation({
     return null;
   }
 
-  function recordStage({ workspaceId, sessionId, sock, message, stage, decision, reason, urls, marketplace, generation, engineExpected, engineResult } = {}) {
+  function recordStage({ workspaceId, sessionId, sock, message, stage, decision, reason, urls, marketplace, generation, engineExpected, engineResult, eventId } = {}) {
     expireIfNeeded();
     if (!run || !STAGES.has(stage)) return false;
 
@@ -306,6 +314,8 @@ function createRadarIngressObservation({
     const safeUrls = Array.isArray(urls) ? urls.slice(0, 10).filter(value => typeof value === "string" && value.trim()) : [];
     record.stages.push({
       stage,
+      observedAt: now(),
+      eventId: stage === "engine_event" && /^[1-9]\d{0,19}$/.test(String(eventId || "")) ? String(eventId) : undefined,
       decision: ["received", "accepted", "ignored", "rejected", "error", "resolved", "pending", "duplicate"].includes(decision) ? decision : "unknown",
       reason: validBoundedValue(reason, REASONS),
       urlCount: Array.isArray(urls) ? Math.min(urls.length, 10) : null,

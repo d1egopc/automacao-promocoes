@@ -289,6 +289,12 @@ function testMatrix(plan) {
     ["--test", "tests/telemetria-operacional.test.cjs", "tests/telemetria-prepared-input.test.cjs"], false);
 
   if (plan.runtimeFiles.length) {
+    if (plan.runtimeFiles.some(file => file === "index.js" || file === "modules/radar/ingress-observation-v1.js")) {
+      add("radar:ingress-observation", "tests/radar-ingress-observation-v1.test.cjs", process.execPath,
+        ["--test", "tests/radar-ingress-observation-v1.test.cjs"]);
+      add("radar:garimpei-observation", "tests/radar-garimpei-observation.test.cjs", process.execPath,
+        ["--test", "tests/radar-garimpei-observation.test.cjs"], false);
+    }
     add("contract:rio", "tests/universal-flow-queue-executor.test.js", process.execPath, ["tests/universal-flow-queue-executor.test.js"]);
     add("contract:radar", "tests/radar-cobertura-v1.test.js", process.execPath, ["tests/radar-cobertura-v1.test.js"]);
     add("contract:teleradar", "tests/teleradar-handoff.test.js", process.execPath, ["tests/teleradar-handoff.test.js"]);

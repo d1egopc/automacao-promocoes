@@ -23717,7 +23717,8 @@ if (radarIngressObservation.isActiveFor({
     urls: links,
     marketplace: marketplaceDetectadoLinks || "unknown",
     generation: sock?.__optimusSocketGeracao,
-    engineResult: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "created") : "failed"
+    engineResult: resultado?.ok === true ? (resultado?.duplicado === true ? "duplicate" : "created") : "failed",
+    eventId: resultado?.ok === true ? resultado.id : undefined
   })).catch(() => radarIngressObservation.recordStage({
     workspaceId: diagnosticoWorkspaceId,
     sessionId: sessaoIdTexto,
@@ -25621,17 +25622,25 @@ app.get("/radar/config", (req, res) => {
 
 const RADAR_INGRESS_OBSERVATION_TARGET = Object.freeze({
   workspaceId: "admin",
-  groupName: "optesteradar"
+  sessionId: "admin_ZOIAO",
+  groupRef: "ec288ef5bc72eae2"
 });
 
 function validarAlvoObservacaoIngressRadar() {
-  const { workspaceId, groupName } = RADAR_INGRESS_OBSERVATION_TARGET;
+  const { workspaceId, sessionId: expectedSessionId, groupRef } = RADAR_INGRESS_OBSERVATION_TARGET;
   const config = carregarRadarConfigCliente("admin", { falharFechado: true });
   if (config.monitoramentoAtivo !== true) return { ok: false, reason: "radar_monitoring_inactive" };
 
   const matchingGroups = (Array.isArray(config.sessoesWhatsappMonitoradas) ? config.sessoesWhatsappMonitoradas : [])
     .flatMap(item => (Array.isArray(item?.gruposMonitorados) ? item.gruposMonitorados : [])
-      .filter(group => group?.ativo !== false && normalizarTexto(group?.nome || "") === groupName)
+      .filter(group => {
+        const jid = obterGrupoWhatsappIdTecnicoRadar(group);
+        const identities = [group?.id, group?.grupoId, group?.remoteJid].filter(Boolean);
+        return group?.ativo !== false && /^\d+(?:-\d+)?@g\.us$/.test(jid) &&
+          identities.every(value => value === jid) &&
+          (!group?.sessaoId || group.sessaoId === expectedSessionId) &&
+          createHash("sha256").update(jid).digest("hex").slice(0, 16) === groupRef;
+      })
       .map(group => ({ item, group, groupId: obterGrupoWhatsappIdTecnicoRadar(group) })))
     .filter(item => item.groupId && item.groupId.endsWith("@g.us"));
   if (matchingGroups.length !== 1) return { ok: false, reason: "radar_target_group_unverified" };
@@ -25639,11 +25648,12 @@ function validarAlvoObservacaoIngressRadar() {
   const { item, groupId } = matchingGroups[0];
   const sessionInput = String(item?.sessaoId || "").trim();
   const sessionId = resolverSessaoWhatsappRadarCliente("admin", sessionInput);
-  if (!sessionInput || !sessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
+  if (sessionInput !== expectedSessionId || sessionId !== expectedSessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
 
   const metadata = sessoesMeta?.[sessionId];
   const workspaceDaSessao = resolverClienteMensageiroPorSessao(sessionId);
-  if (!metadata || metadata.workspaceId !== workspaceId || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
+  if (!metadata || metadata.workspaceId !== workspaceId ||
+      (metadata.clienteId && metadata.clienteId !== workspaceId) || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
     return { ok: false, reason: "session_workspace_mismatch" };
   }
 
@@ -34071,7 +34081,11 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
-      if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) continue;
+      if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) {
+        radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
+          message: mensagem, stage: "listener_gate", decision: "ignored", reason: "buffer_recovery_suppressed" });
+        continue;
+      }
       const gerenteDiagnosticV2 = mensagem && typeof mensagem === "object"
         ? gerenteDiagnosticV2ByMessage?.get(mensagem)
         : null;
@@ -34115,6 +34129,8 @@ registrarListenerUnicoSocket({
         });
       }
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
+          message: mensagem, stage: "listener_gate", decision: "ignored", reason: "usuario_inativo" });
         gerenteDiagnosticV2?.("card_scope", "user_inactive", { result: "blocked" });
         logUsuarioInativoOperacional(clienteIdMensageiro, "whatsapp_messages_upsert");
         coberturaRadar.registrar("listener_ignorado", {

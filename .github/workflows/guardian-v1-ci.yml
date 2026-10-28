@@ -37,6 +37,17 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Garimpei passive observation - exact target and isolated fixtures
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-observation-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/telemetria-operacional.test.cjs tests/telemetria-prepared-input.test.cjs tests/telemetria-permanent-contract.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils package.json package-lock.json .github/workflows/deploy-backend-vps.yml
       - name: Definitive Messenger backend - isolated fixtures only, no deploy
         if: github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
         shell: bash
@@ -234,6 +245,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-garimpei-observation-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
