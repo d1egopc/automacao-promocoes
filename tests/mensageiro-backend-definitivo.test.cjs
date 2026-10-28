@@ -201,3 +201,15 @@ test("schedule HTTP supports recurrence, image/video response, inactive creation
   assert.equal((await f.api(B,"GET",`/profiles/${p.id}/schedules`)).body.code,"perfil_nao_encontrado");
   const removed=await f.api(W,"DELETE",`/profiles/${p.id}/schedules/${s.id}`,{expectedRevision:patched.body.schedule.revision});assert.equal(removed.status,200);
 });
+test("calendar jitter is stable across creation, advancement and restart; never repeats the same day",()=> {
+  const now=Date.parse("2026-11-02T09:00:00-03:00");
+  for(const mode of ["daily","weekly"]) {
+    const normalized=normalizeSchedule({recurrence:{mode,days:[1,3,5],time:"10:00",jitterMinutes:{min:0,max:10}},responses:[{text:"Uma por dia"}],grupos:[G]},null,now);
+    const first=normalized.nextRunAt;
+    for(let i=0;i<50;i++) {
+      const following=next(JSON.parse(JSON.stringify(normalized.content.recurrenceV4)),Date.parse(first),"schedule_"+i);
+      assert.notEqual(following.slice(0,10),first.slice(0,10));
+      assert.equal(following,next(normalized.content.recurrenceV4,Date.parse(first),"after_restart"));
+    }
+  }
+});
