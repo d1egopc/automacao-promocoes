@@ -165,6 +165,20 @@ jobs:
           esac
           source="$(git rev-parse HEAD)"
           node scripts/guardian-v1.cjs validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json"
+      - name: AliExpress occurrences and Magalu safety - isolated fixtures
+        if: github.ref == 'refs/heads/validation/ali-magalu-recovery-v3-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/aliexpress-moedas-productdetail-engine.test.js
+          node tests/aliexpress-afiliacao-workspace.test.js
+          node tests/magalu-v2-golden-path.test.js
+          node tests/magalu-affiliate-link.test.js
+          node tests/magalu-factual-resolver.test.js
+          node tests/magalu-image-resolver.test.js
       - name: Magalu identity-to-image recovery - isolated fixtures only
         if: github.ref == 'refs/heads/validation/magalu-recovery-20261027'
         shell: bash
