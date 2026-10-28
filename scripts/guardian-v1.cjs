@@ -14,7 +14,10 @@ const NON_RUNTIME_EXACT = new Set([
   "AGENTS.md",
   "scripts/deploy-backend-vps-manual.sh",
   "scripts/guardian-v1.cjs",
-  "scripts/benchmark-gerente-observability-v2.cjs"
+  "scripts/benchmark-gerente-observability-v2.cjs",
+  // Artefatos da extensão: testados no CI, nunca transportados no overlay Docker.
+  "optimus-capture/adapters/magalu.js",
+  "optimus-capture/local-worker/magalu-identity.js"
 ]);
 const NON_RUNTIME_PREFIXES = ["docs/", "tests/", ".github/"];
 const RUNTIME_ROOTS = new Set([

@@ -105,6 +105,29 @@ test("script inesperado e raiz desconhecida permanecem bloqueados", () => {
   }
 });
 
+test("somente os dois arquivos Magalu da extensão ficam fora do overlay backend", () => {
+  const repo = createRepo();
+  try {
+    const permitidos = ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js"];
+    for (const relativo of permitidos) {
+      const destino = path.join(repo.dir, ...relativo.split("/"));
+      fs.mkdirSync(path.dirname(destino), { recursive: true });
+      fs.writeFileSync(destino, "module.exports = true;\n");
+    }
+    let source = commit(repo, "extension-approved-paths");
+    let result = prepare(repo, source);
+    assert.equal(result.body.validation, "PASS");
+    assert.deepEqual(result.body.runtimeFiles, []);
+    assert.deepEqual(result.body.ignoredFiles, permitidos);
+    const inesperado = path.join(repo.dir, "optimus-capture", "local-worker", "unexpected.js");
+    fs.writeFileSync(inesperado, "module.exports = true;\n");
+    source = commit(repo, "extension-unexpected-path");
+    result = prepare(repo, source);
+    assert.equal(result.body.validation, "BLOCKED");
+    assert.equal(result.body.blocked[0].file, "optimus-capture/local-worker/unexpected.js");
+  } finally { cleanup(repo); }
+});
+
 test("dependência e Dockerfile exigem fluxo futuro de imagem completa", () => {
   for (const relative of ["package.json", "package-lock.json", "Dockerfile"]) {
     const repo = createRepo();
