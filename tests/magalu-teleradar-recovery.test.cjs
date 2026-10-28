@@ -16,4 +16,3 @@ const {detectarMarketplaceHost}=require('../modules/engine/normalizers');
  assert.notEqual(detectarMarketplaceHost('magazineluiza.onelink.me.evil.test'),'magalu');
  console.log('Magalu Telegram handoff/legacy/domain: PASS (fixtures only; no production ingress claimed)');
 })().catch(e=>{console.error(e.stack);process.exitCode=1;});
-
