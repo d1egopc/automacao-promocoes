@@ -1,10 +1,18 @@
 const assert = require("assert");
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "links-workspace-proof-"));
+process.env.DATA_DIR = fixtureDir;
+fs.mkdirSync(path.join(fixtureDir, "clientes", "workspace_links_v2"), {recursive:true});
+fs.writeFileSync(path.join(fixtureDir, "clientes", "workspace_links_v2", "integracoes.json"),
+  JSON.stringify({shopee:{credenciais:{appId:"app",secret:"secret"}}}));
+process.on("exit", () => fs.rmSync(fixtureDir, {recursive:true,force:true}));
 
 const { classificarLinksComerciais } = require("../modules/radar/links-comerciais");
 const { resumoLinksClassificados } = require("../modules/engine/link-role.service");
 const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
 const { importarShopeeEngine } = require("../modules/engine/importer/adapters/shopee.adapter");
 const { gerarTemplateUniversal } = require("../modules/template-universal");
+const { vincularUrlFinalPublicadaShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
 
 function urls(texto) {
   return [...String(texto || "").matchAll(/https?:\/\/\S+/gi)].map(match => match[0]);
@@ -233,7 +241,9 @@ async function importarShopeeFixture(titulo) {
     deps: {
       getIntegracaoCliente: () => ({ credenciais: { appId: "app", secret: "secret" } }),
       gerarShortLinkShopee: async () => ({ ok: true, shortLink: afiliadoResgate }),
-      expandirShortlinkShopee: async () => "https://shopee.com.br/m/cupom-de-desconto",
+      expandirShortlinkShopee: async url => url === afiliadoProduto
+        ? "https://shopee.com.br/product/111/222?mmp_pid=an_app"
+        : "https://shopee.com.br/m/cupom-de-desconto?mmp_pid=an_app",
       importarShopee: async (url) => {
         assert.strictEqual(url, produto, `${titulo}: resgate nunca deve substituir produto no importador`);
         return {
@@ -274,8 +284,14 @@ async function testarShopee() {
 
     const mensagem = gerarTemplateUniversal({
       ...resultado,
+      workspaceId: "workspace_links_v2",
       linksComerciais: resultado.linksComerciais.map(item => ({
         ...item,
+        afiliacaoWorkspace: vincularUrlFinalPublicadaShopee(item.afiliacaoWorkspace, {
+          clienteId:"workspace_links_v2", credenciais:{appId:"app",secret:"secret"},
+          urlAtual:item.urlAfiliadaWorkspace,
+          urlFinal:item.tipo === "produto" ? "https://go.optimuspromo.com.br/r/produto" : "https://go.optimuspromo.com.br/r/resgate"
+        }),
         urlOptimus: item.tipo === "produto"
           ? "https://go.optimuspromo.com.br/r/produto"
           : "https://go.optimuspromo.com.br/r/resgate"

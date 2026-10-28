@@ -623,6 +623,7 @@ return async function importarShopee(url, config) {
       "https://open-api.affiliate.shopee.com.br/graphql",
       {
         method: "POST",
+        ...(config.contextoEngine?.shopeeIdentidadeResolvida ? {signal: AbortSignal.timeout(8000)} : {}),
         headers: {
           "Content-Type": "application/json",
           "Authorization": `SHA256 Credential=${appId}, Timestamp=${timestamp}, Signature=${sign}`
@@ -748,7 +749,9 @@ return async function importarShopee(url, config) {
       const data = await chamarShopeeGraphQL(bodyPayload);
       const nodes = data?.data?.productOfferV2?.nodes || [];
 
-      produto =
+      produto = config.contextoEngine?.shopeeIdentidadeResolvida
+        ? nodes.find(p => String(p.itemId) === String(ids.itemId) && String(p.shopId) === String(ids.shopId)) || null
+        :
         nodes.find((p) => String(p.itemId) === String(ids.itemId)) ||
         nodes[0] ||
         null;
@@ -758,6 +761,10 @@ return async function importarShopee(url, config) {
   }
 
   // 2) Se não achou, tenta por keyword do link
+  if (!produto && config.contextoEngine?.shopeeIdentidadeResolvida) {
+    return {ok: false, marketplace: "shopee", motivo: "shopee_identidade_produto_nao_confirmada",
+      linkOriginal: urlOriginalShopee, linkExpandido: url};
+  }
   if (!produto && keyword) {
     try {
       const bodyPayload = {
@@ -1170,6 +1177,9 @@ logPrecoOrigemShopee({
 
   return {
     marketplace: "shopee",
+    ...(config.contextoEngine?.shopeeIdentidadeResolvida ? {identidadeProdutoValidada: {
+      fonte: "api.productOfferV2", shopId: String(produto.shopId), itemId: String(produto.itemId)
+    }} : {}),
     titulo: htmlDecode(tituloFinalApi)
       .replace(" | Shopee Brasil", "")
       .replace(" | Shopee", "")

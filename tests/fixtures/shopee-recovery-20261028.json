@@ -1,0 +1,194 @@
+[
+  {
+    "eventId": 199215,
+    "jobId": 1014784,
+    "role": "cupom",
+    "product": {
+      "shopId": "1624177702",
+      "itemId": "41978917153",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199218,
+    "jobId": 1014801,
+    "role": "cupom",
+    "product": null
+  },
+  {
+    "eventId": 199221,
+    "jobId": 1014818,
+    "role": "moedas",
+    "product": null
+  },
+  {
+    "eventId": 199240,
+    "jobId": 1014900,
+    "role": "cupom",
+    "product": {
+      "shopId": "1059412251",
+      "itemId": "22797761702",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199242,
+    "jobId": 1014909,
+    "role": "cupom",
+    "product": {
+      "shopId": "1930141978",
+      "itemId": "22895378547",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199243,
+    "jobId": 1014917,
+    "role": "cupom",
+    "product": {
+      "shopId": "1930141978",
+      "itemId": "58220043065",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199192,
+    "jobId": 1014670,
+    "role": "cupom",
+    "product": {
+      "shopId": "1334945356",
+      "itemId": "27892724973",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199193,
+    "jobId": 1014678,
+    "role": "cupom",
+    "product": {
+      "shopId": "1334945356",
+      "itemId": "27892724973",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199194,
+    "jobId": 1014686,
+    "role": "cupom",
+    "product": {
+      "shopId": "754723385",
+      "itemId": "58265173456",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199206,
+    "jobId": 1014747,
+    "role": "cupom",
+    "product": {
+      "shopId": "811034337",
+      "itemId": "21297874783",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199210,
+    "jobId": 1014765,
+    "role": "cupom",
+    "product": {
+      "shopId": "1736335904",
+      "itemId": "58206635283",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199214,
+    "jobId": 1014776,
+    "role": "cupom",
+    "product": {
+      "shopId": "1495626487",
+      "itemId": "23898309961",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199246,
+    "jobId": 1014927,
+    "role": "cupom",
+    "product": {
+      "shopId": "1526836548",
+      "itemId": "22098558079",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199247,
+    "jobId": 1014935,
+    "role": "cupom",
+    "product": {
+      "shopId": "1311743114",
+      "itemId": "23993729111",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199254,
+    "jobId": 1014963,
+    "role": "cupom",
+    "product": {
+      "shopId": "1929663743",
+      "itemId": "58219534693",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199261,
+    "jobId": 1014991,
+    "role": "cupom",
+    "product": {
+      "shopId": "1929663743",
+      "itemId": "58219534693",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199280,
+    "jobId": 1015065,
+    "role": "cupom",
+    "product": {
+      "shopId": "1494995608",
+      "itemId": "19899648802",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199283,
+    "jobId": 1015082,
+    "role": "cupom",
+    "product": {
+      "shopId": "627750190",
+      "itemId": "23892996530",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199284,
+    "jobId": 1015090,
+    "role": "cupom",
+    "product": {
+      "shopId": "1930141978",
+      "itemId": "58220516278",
+      "officialApiMatched": true
+    }
+  },
+  {
+    "eventId": 199285,
+    "jobId": 1015098,
+    "role": "cupom",
+    "product": {
+      "shopId": "627750190",
+      "itemId": "22898984823",
+      "officialApiMatched": true
+    }
+  }
+]

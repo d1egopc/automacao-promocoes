@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation/guardian-v1-*
+      - validation/shopee-magalu-recovery-20261028
       - validation/mensageiro-v4-20261025
       - validation/mensageiro-v4-canary-runtime-20261025
       - validation/mensageiro-v4-ingress-probe-20261026
@@ -37,6 +38,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Shopee contextual recovery and preserved Magalu Telegram contracts
+        if: github.ref == 'refs/heads/validation/shopee-magalu-recovery-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test --test-concurrency=1 tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs tests/shopee-*.test.js tests/manual-v2-import-shopee.test.js tests/links-comerciais-v2-aliexpress-shopee.test.js tests/magalu-teleradar-recovery.test.cjs tests/magalu-affiliate-link.test.js tests/magalu-factual-resolver.test.js tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-recovery-retry.test.cjs tests/teleradar.test.js tests/teleradar-handoff.test.js tests/teleradar-operational-control.test.js tests/teleradar-semantica-comercial.test.js tests/safe-redirect-http-lifecycle.test.js
+          git diff --exit-code 12589a07843954fb6ea858f34da4c56861e64f8a HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro-v3 modules/mensageiro-v4 optimus-capture utils/template-universal.js package.json package-lock.json
       - name: Definitive Messenger backend - isolated fixtures only, no deploy
         if: github.ref == 'refs/heads/validation/guardian-v1-messenger-backend-definitivo-20261028'
         shell: bash

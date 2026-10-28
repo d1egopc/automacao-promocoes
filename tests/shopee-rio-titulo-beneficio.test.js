@@ -102,7 +102,9 @@ async function importarOfertaShopeeComTexto(textoOriginal, precoAtual = "33,67")
           itemId: "58255334999"
         }),
         gerarShortLinkShopee: async () => ({ ok: true, shortLink: "https://s.shopee.com.br/3qMtmumOle" }),
-        expandirShortlinkShopee: async () => "https://shopee.com.br/user/voucher-wallet?x=1"
+        expandirShortlinkShopee: async url => url === "https://s.shopee.com.br/W6Pu1lwe3"
+          ? "https://shopee.com.br/product/344373801/58255334999?mmp_pid=an_app"
+          : "https://shopee.com.br/user/voucher-wallet?x=1&mmp_pid=an_app"
       }
     });
   } finally {
