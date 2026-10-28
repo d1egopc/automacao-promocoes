@@ -11,7 +11,9 @@ const {
   messageIdOf
 } = require("../modules/mensageiro-v3/src/v3/baileys-ack-correlator");
 
-const root = fs.mkdtempSync(path.join(process.cwd(), ".tmp-mensageiro-v3-ack-"));
+// Keep disposable ACK state outside the checkout so Guardiao can verify a
+// clean source tree after the integrated tests. This is never production data.
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "mensageiro-v3-ack-"));
 const filePath = path.join(root, "state.json");
 const store = new V3Store({ filePath });
 const workspaceId = "workspace-ack";
