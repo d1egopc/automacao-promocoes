@@ -366,7 +366,7 @@ function contratoAliExpress(entrada) {
     if (["link_app", "link_pc", "link_moedas"].includes(papel)) {
       const seguro = linkAlternativoSeguroAliExpress(link, entrada, papel);
       if (!seguro) saida.avisos.push("link_aliexpress_sem_conversao_segura");
-      adicionarLink(saida, linkBase(link, papel, {
+      adicionarLink(saida, { ...linkBase(link, papel, {
         urlAfiliada: texto(link.urlOptimus || link.urlAfiliadaWorkspace || link.urlAfiliada || link.linkAfiliado || ""),
         urlAfiliadaWorkspace: texto(link.urlAfiliadaWorkspace || ""),
         urlOptimus: texto(link.urlOptimus || ""),
@@ -379,7 +379,7 @@ function contratoAliExpress(entrada) {
         conversaoStatus: seguro ? (texto(link.conversaoStatus) || "convertida") : (texto(link.conversaoStatus) || "falhou"),
         motivoConversao: texto(link.motivoConversao || link.conversaoWorkspace?.motivo || (seguro ? "cta_workspace_convertido" : "link_sem_conversao_workspace")),
         dedupeKey: `${papel}:${link.ordemCaptura}:${dedupeUrl(link.url)}`
-      }));
+      }), urlOriginal: texto(link.urlOriginal || link.url) });
     }
   }
 

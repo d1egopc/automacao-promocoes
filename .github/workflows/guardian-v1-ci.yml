@@ -133,6 +133,33 @@ jobs:
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
+      - name: AliExpress real source fidelity and marketplace regressions
+        if: github.ref == 'refs/heads/validation/guardian-v1-aliexpress-reconciled-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/aliexpress-app-moedas-contrato.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/aliexpress-afiliacao-workspace.test.js tests/aliexpress-imagem-gate.test.js tests/manual-v2-import-aliexpress.test.js tests/ofc-v24-espelho-comercial.test.js tests/contrato-comercial-final-universal.test.js tests/magalu-v2-golden-path.test.js tests/magalu-affiliate-link.test.js tests/magalu-image-resolver.test.js > "$RUNNER_TEMP/ali-focal.log" 2>&1 || { tail -n 100 "$RUNNER_TEMP/ali-focal.log"; exit 1; }
+          tail -n 12 "$RUNNER_TEMP/ali-focal.log"
+          mkdir "$RUNNER_TEMP/ali-baseline"
+          git archive dc7bdffc766512ade17e363f87345acd6d2f271f | tar -x -C "$RUNNER_TEMP/ali-baseline"
+          for file in links-comerciais-v2-aliexpress-shopee ofc-v24-espelho-piloto; do
+            set +e
+            node "tests/$file.test.js" > "$RUNNER_TEMP/$file-candidate.log" 2>&1
+            candidate_rc=$?
+            NODE_PATH="$GITHUB_WORKSPACE/node_modules" node "$RUNNER_TEMP/ali-baseline/tests/$file.test.js" > "$RUNNER_TEMP/$file-baseline.log" 2>&1
+            baseline_rc=$?
+            set -e
+            test "$candidate_rc" -eq 1 && test "$baseline_rc" -eq 1
+            case "$file" in
+              links-comerciais-v2-aliexpress-shopee) signature='Smart TV Philco deve importar' ;;
+              ofc-v24-espelho-piloto) signature='assert(mensagem.includes("Resgate:"))' ;;
+            esac
+            grep -F "$signature" "$RUNNER_TEMP/$file-candidate.log"
+            grep -F "$signature" "$RUNNER_TEMP/$file-baseline.log"
+            ! grep -E 'MODULE_NOT_FOUND|SyntaxError|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/$file-candidate.log" "$RUNNER_TEMP/$file-baseline.log"
+          done
       - name: Magalu first-party Worker - isolated fixtures only
         if: github.ref == 'refs/heads/validation/magalu-firstparty-worker-v3-20261027'
         shell: bash

@@ -990,7 +990,47 @@ function adicionarBlocosDeLinks(blocos = [], doc = {}, contexto = {}) {
   }
 }
 
+function blocosAliExpressPorOcorrencia(doc, contexto) {
+  if (!marketplaceAliExpress(doc.marketplace)) return null;
+  const origem = String(contexto.textoOriginal || "");
+  const urls = [...origem.matchAll(/https?:\/\/[^\s]+/g)];
+  const comerciais = urls.filter(match => {
+    try { const h = new URL(match[0]).hostname; return h === "aliexpress.com" || h.endsWith(".aliexpress.com"); } catch { return false; }
+  });
+  if (comerciais.length < 2) return null;
+  const repetidas = new Set(comerciais.map(match => match[0])).size < comerciais.length;
+  const alternativas = /(?:^|\n)\s*Pix\s*\d+\s*:/i.test(origem) || (comerciais.length >= 4 && /parcelado|\d+x\s+sem\s+juros/i.test(origem));
+  if (!repetidas && !alternativas && !/\blink\s+site\s*:/i.test(origem)) return null;
+  const aprovados = lista(doc.linksComerciais).filter(item => item.renderizavel !== false && item.urlAfiliada && item.url === item.urlAfiliada);
+  const usados = new Set();
+  const blocos = [];
+  let ordem = 0;
+  for (const linha of origem.split(/\r?\n/).filter(line => line.trim())) {
+    let tipo = ordem === 0 ? "titulo" : "beneficio";
+    let invalido = false;
+    const convertido = linha.replace(/https?:\/\/[^\s]+/g, url => {
+      let host;
+      try { host = new URL(url).hostname; } catch { invalido = true; return ""; }
+      if (["youtu.be", "youtube.com", "www.youtube.com"].includes(host)) { tipo = "link_auxiliar"; return url; }
+      const indice = aprovados.findIndex((item, index) => !usados.has(index) && item.urlOriginal === url);
+      if (indice < 0) { invalido = true; return ""; }
+      usados.add(indice);
+      const item = aprovados[indice];
+      tipo = ["pc", "link_pc"].includes(item.papel || item.tipo) ? "link_pc" : ["moedas", "link_moedas"].includes(item.papel || item.tipo) ? "link_moedas" : "link_app";
+      return item.urlAfiliada;
+    });
+    if (invalido) return null; // Nunca promover URL original ou conversão incompleta.
+    ordem++;
+    blocos.push({ tipo, textoOriginal: convertido, ordemSugerida: ordem,
+      origem: "aliexpress_origem_por_ocorrencia_v1", dedupeKey: `ali_origem:${ordem}`,
+      essencial: tipo !== "link_auxiliar", visibilidadePadrao: tipo === "link_auxiliar" ? "padrao" : "obrigatorio" });
+  }
+  return usados.size === comerciais.length ? blocos : null;
+}
+
 function construirBlocosComerciaisCanonicosV26(doc = {}, contexto = {}) {
+  const fieisAliExpress = blocosAliExpressPorOcorrencia(doc, contexto);
+  if (fieisAliExpress) return fieisAliExpress;
   const blocos = [];
   const moedaPadrao = texto(contexto.comercialNormalizado?.moeda || contexto.oferta?.moeda || contexto.ofertaEntrada?.moeda || "");
   const cupomEssencial = cupomNecessarioParaPreco(doc);
@@ -2168,7 +2208,7 @@ function normalizarBlocosCanonicosV26(documento = {}) {
     .map((bloco, indice) => ({
       ...bloco,
       tipo: texto(bloco.tipo),
-      textoOriginal: limparTextoComercial(bloco.textoOriginal),
+      textoOriginal: bloco.origem === "aliexpress_origem_por_ocorrencia_v1" && marketplaceAliExpress(documento.marketplace) ? texto(bloco.textoOriginal) : limparTextoComercial(bloco.textoOriginal),
       dedupeKey: texto(bloco.dedupeKey),
       ordemSugerida: Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : indice + 1000,
       essencial: bloco.essencial === true,
@@ -2219,6 +2259,7 @@ function textoBlocoCanonicoV26(bloco = {}) {
 
 function ordemRenderizacaoBlocoCanonicoV26(bloco = {}, documento = {}) {
   const ordem = Number.isFinite(Number(bloco.ordemSugerida)) ? Number(bloco.ordemSugerida) : 1000;
+  if (marketplaceAliExpress(documento.marketplace) && bloco.origem === "aliexpress_origem_por_ocorrencia_v1") return ordem;
   if (marketplaceShopee(documento.marketplace) && bloco.tipo === "link_resgate") {
     return Math.min(ordem, ORDEM_BLOCOS_COMERCIAIS_V26.link_produto_original - 0.5);
   }
@@ -2240,6 +2281,7 @@ function avaliacaoQuantidadeVisualV26(valor = "") {
 }
 
 function renderizarBlocoCanonicoV26(bloco = {}, contexto = {}) {
+  if (contexto.marketplaceAliExpress && bloco.origem === "aliexpress_origem_por_ocorrencia_v1") return texto(bloco.textoOriginal);
   const valor = textoBlocoCanonicoV26(bloco);
   if (!valor) return "";
   if (bloco.tipo === "titulo") return `🔥 ${valor}`;
@@ -2413,7 +2455,8 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
     const chaveDedupeLink = chaveDedupeVisualLinkV26(bloco, contexto);
     if (chaveDedupeLink && vistos.has(chaveDedupeLink)) continue;
     const linha = renderizarBlocoCanonicoV26(bloco, contexto);
-    const adicionado = adicionarBlocoUnico(linhas, bloco.tipo, linha);
+    const fielAli = contexto.marketplaceAliExpress && bloco.origem === "aliexpress_origem_por_ocorrencia_v1";
+    const adicionado = fielAli && linha ? (linhas.push({ tipo: bloco.tipo, linha }), true) : adicionarBlocoUnico(linhas, bloco.tipo, linha);
     if (adicionado && !/^link_/.test(texto(bloco.tipo)) && chaveDedupe) vistos.add(chaveDedupe);
     if (adicionado && chaveDedupeLink) vistos.add(chaveDedupeLink);
   }
@@ -2440,6 +2483,9 @@ function montarTemplateEspelhoPorBlocosV26(espelho = {}, documento = null, opcoe
 
 function montarTemplateEspelhoShadow(espelho = {}, documento = null, opcoes = {}) {
   const doc = objeto(documento || espelho.documentoComercialCanonico);
+  if (marketplaceAliExpress(doc.marketplace) && lista(doc.blocos).length && doc.blocos.every(bloco => bloco.origem === "aliexpress_origem_por_ocorrencia_v1")) {
+    return montarTemplateEspelhoPorBlocosV26(espelho, doc, opcoes);
+  }
   const blocos = normalizarBlocosTemplateEspelho(objeto(opcoes.template), doc, espelho);
   const linhas = [];
   const contextoBlocos = {

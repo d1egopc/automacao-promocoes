@@ -992,16 +992,20 @@ async function testarMatrizReleaseSemEnvios() {
     { name: "KOOTION", roles: ["link_app", "link_pc"], keys: ["app", "site"], conditions: ["APP", "SITE"] },
     { name: "TeleRadar PC only", roles: ["link_pc"], keys: ["pc"], conditions: ["PC"] }
   ];
+  for (const real of require("./fixtures/aliexpress-release-real.json").offers) {
+    const urls = [...real.text.matchAll(/https?:\/\/[^\s]+/g)].map(match => match[0]).filter(url => new URL(url).hostname.endsWith("aliexpress.com"));
+    cases.push({ ...real, keys: urls.map(url => url.split("/").at(-1)), urls, price: real.name === "Ryzen 5500X3D" ? 1040 : real.name === "Arzopa" ? 833 : 442 });
+  }
   for (const fixture of cases) {
     for (const workspaceId of ["release_workspace_a", "release_workspace_b"]) {
       const credentials = { appKey: `app_${workspaceId}`, secret: "synthetic", trackingId: `tracking_${workspaceId}` };
-      const originals = fixture.keys.map(key => `https://a.aliexpress.com/_${fixture.name.replace(/\W/g, "")}_${key}`);
-      const sourceText = [fixture.name + " Produto fixture", "Por R$ 100", "Cupom: TESTE10", ...originals.map((url, index) => `${fixture.conditions[index]}: ${url}`)].join("\n");
+      const originals = fixture.urls || fixture.keys.map(key => `https://a.aliexpress.com/_${fixture.name.replace(/\W/g, "")}_${key}`);
+      const sourceText = fixture.text || [fixture.name + " Produto fixture", "Por R$ 100", "Cupom: TESTE10", ...originals.map((url, index) => `${fixture.conditions[index]}: ${url}`)].join("\n");
       const converted = (url, role) => `https://s.click.aliexpress.com/e/_${workspaceId}_${fixture.keys[originals.indexOf(url)]}_${role}`;
       const result = await importarAliExpressEngine({
         job: { id: "release-fixture", cliente_id: workspaceId, marketplace: "aliexpress" },
         evento: { texto_original: sourceText, origem_tipo: "telegram" },
-        links: originals.map((url, index) => ({ url_original: url, metadata: { papelLink: fixture.roles[index], papelLinkMotivo: fixture.conditions[index] } })),
+        links: originals.map((url, index) => ({ url_original: url, metadata: { papelLink: fixture.roles[index], papelLinkMotivo: fixture.conditions?.[index] || "fixture_real_owner" } })),
         deps: {
           getIntegracaoCliente: id => id === workspaceId ? { credenciais: credentials } : null,
           importarAliExpress: async (url, config) => {
@@ -1015,7 +1019,7 @@ async function testarMatrizReleaseSemEnvios() {
       assert.equal(result.ok, true, fixture.name);
       assert.equal(result.produtoId, "1005002222222222");
       assert.equal(result.imagem, "https://ae01.alicdn.com/kf/release-fixture.jpg");
-      assert.equal(result.preco, 100);
+      assert.equal(result.preco, fixture.price || 100);
       const occurrences = result.metadata.linksClassificados;
       assert.deepStrictEqual(occurrences.map(item => item.urlOriginal), originals, fixture.name + " order and repeated URLs");
       // Contrato publicado normaliza link_moedas para link_app; preserva cada ocorrência.
@@ -1029,10 +1033,28 @@ async function testarMatrizReleaseSemEnvios() {
         oferta: { ...result, linksComerciais: occurrences.map(item => ({ tipo: item.papelLink, papel: item.papelLink, url: item.urlOriginal, urlAfiliada: item.urlAfiliada, renderizavel: true, convertidoWorkspace: true })) },
         ofertaEntrada: {}, job: { cliente_id: workspaceId, marketplace: "aliexpress" },
         evento: { texto_original: sourceText }, metadata: result.metadata,
-        comercialNormalizado: { marketplace: "aliexpress", precoAtual: 100, precoConfiavel: true }
+        comercialNormalizado: { marketplace: "aliexpress", precoAtual: fixture.price || 100, precoConfiavel: true }
       });
       assert.equal(mirror.ok, true);
       const rendered = mirror.templateEspelhoShadow.mensagem;
+      if (fixture.text) {
+        const faithful = require("../modules/ofc-v2/espelho-comercial").montarTemplateEspelhoPorBlocosV26(mirror.espelhoComercial, mirror.documentoComercialCanonico, { template: { blocos: [{ tipo: "link_auxiliar", ativo: true }, { tipo: "classificacao_visual", ativo: false }] } });
+        let expected = sourceText;
+        for (const url of new Set(originals)) {
+          const replacement = occurrences.find(item => item.urlOriginal === url).urlAfiliada;
+          expected = expected.split(url).join(replacement);
+        }
+        const nonempty = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        assert.deepStrictEqual(nonempty(faithful.mensagem), nonempty(expected), fixture.name + " preserves every source line and condition without invented coupons");
+        const unknown = "https://evil.example/unconverted-product";
+        const unsafe = construirEspelhoComercialV24({
+          oferta: { ...result, linksComerciais: occurrences.map(item => ({ tipo: item.papelLink, papel: item.papelLink, urlOriginal: item.urlOriginal, urlAfiliada: item.urlAfiliada, renderizavel: true, convertidoWorkspace: true })) },
+          evento: { texto_original: sourceText + "\n" + unknown },
+          job: { cliente_id: workspaceId, marketplace: "aliexpress" }, comercialNormalizado: { marketplace: "aliexpress", precoAtual: fixture.price, precoConfiavel: true }
+        });
+        assert.equal(unsafe.documentoComercialCanonico.blocos.some(bloco => bloco.origem === "aliexpress_origem_por_ocorrencia_v1"), false, "unknown URL disables source substitution");
+        assert.equal(unsafe.templateEspelhoShadow.mensagem.includes(unknown), false);
+      }
       if (fixture.name === "Ryzen") {
         for (const condition of ["Pix", "Parcelado", "TESTE10"]) assert.match(rendered, new RegExp(condition, "i"), "Ryzen condition retained: " + condition);
       }

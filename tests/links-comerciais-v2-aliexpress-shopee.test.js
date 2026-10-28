@@ -131,7 +131,8 @@ async function testarAliExpress() {
     assert.deepStrictEqual(papeisRadar, ["app", "pc"], `${fixture.titulo} deve preservar APP + PC no Radar`);
 
     const engine = resumoLinksClassificados(linksRows(fixture.texto, "ali"), { texto_original: fixture.texto, links_extraidos: urls(fixture.texto) }, "aliexpress");
-    assert.deepStrictEqual(engine.map(item => item.papelLink), ["link_app", "link_pc"], `${fixture.titulo} deve preservar link_app + link_pc no Engine`);
+    assert.deepStrictEqual(engine.map(item => item.urlOriginal), urls(fixture.texto), `${fixture.titulo} deve preservar cada ocorrencia original no Engine`);
+    assert.ok(engine.some(item => item.papelLink === "link_app") && engine.some(item => item.papelLink === "link_pc"));
 
     const { resultado } = await importarAliFixture(fixture);
     assert.strictEqual(resultado.ok, true, `${fixture.titulo} deve importar`);
@@ -180,7 +181,7 @@ async function testarAliExpress() {
     "https://a.aliexpress.com/_machenikePc"
   ].join("\n");
   const { resultado: resultadoMachenike } = await importarAliFixture({ titulo: "Machenike G3", texto: machenike });
-  assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 1, "APP repetido deve deduplicar por URL");
+  assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_app").length, 2, "contrato aprovado preserva duas ocorrencias APP e reutiliza somente a conversao tecnica");
   assert.strictEqual(resultadoMachenike.metadata.linksClassificados.filter(item => item.papelLink === "link_pc").length, 1, "PC deve permanecer como papel distinto");
 
   const dareu = [

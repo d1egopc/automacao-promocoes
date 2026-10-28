@@ -158,7 +158,7 @@ function extrairPrecoTextoRadarAliExpress(textoRadar = "") {
     const normalizada = linha.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     if (!/r\$\s*\d/i.test(linha)) continue;
     if (/\b(cupom|off|desconto|cashback|frete|limite|voucher|coupon)\b/i.test(normalizada)) continue;
-    const match = linha.match(/R\$\s*\d{1,3}(?:[\.\s]?\d{3})*(?:,\d{2})?|R\$\s*\d+(?:,\d{2})?/i);
+    const match = linha.match(/R\$\s*(?:\d{1,3}(?:[.\s]\d{3})+|\d+)(?:,\d{2})?(?!\d)/i);
     if (match) return match[0].replace(/\s+/g, " ").trim();
   }
 
