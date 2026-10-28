@@ -188,7 +188,7 @@ test("probe uses the existing upsert callback hook and adds no listener or persi
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   const adminRoutes = source.slice(routeStart, routeEnd);
   const targetConfig = source.slice(source.indexOf("const RADAR_INGRESS_OBSERVATION_TARGET"), routeStart);
-  assert.equal((adminRoutes.match(/exigirAdminMasterEngine\(req, res\)/g) || []).length, 3);
+  assert.equal((adminRoutes.match(/exigirAdminMasterEngine\(req, res\)/g) || []).length, 5);
   assert.match(targetConfig, /workspaceId: "admin"/);
   assert.match(targetConfig, /sessionId: "admin_ZOIAO"/);
   assert.match(targetConfig, /groupRef: "ec288ef5bc72eae2"/);

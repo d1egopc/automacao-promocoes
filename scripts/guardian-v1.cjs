@@ -15,6 +15,7 @@ const NON_RUNTIME_EXACT = new Set([
   "scripts/deploy-backend-vps-manual.sh",
   "scripts/guardian-v1.cjs",
   "scripts/benchmark-gerente-observability-v2.cjs",
+  "scripts/benchmark-garimpei-sensor24h.cjs",
   // Artefatos da extensão: testados no CI, nunca transportados no overlay Docker.
   "optimus-capture/adapters/magalu.js",
   "optimus-capture/local-worker/magalu-identity.js"
@@ -294,6 +295,10 @@ function testMatrix(plan) {
         ["--test", "tests/radar-ingress-observation-v1.test.cjs"]);
       add("radar:garimpei-observation", "tests/radar-garimpei-observation.test.cjs", process.execPath,
         ["--test", "tests/radar-garimpei-observation.test.cjs"], false);
+      if (plan.runtimeFiles.includes("modules/radar/ingress-sensor-journal.js")) {
+        add("radar:garimpei-sensor24h", "tests/radar-garimpei-sensor24h.test.cjs", process.execPath,
+          ["--test", "tests/radar-garimpei-sensor24h.test.cjs"], false);
+      }
     }
     add("contract:rio", "tests/universal-flow-queue-executor.test.js", process.execPath, ["tests/universal-flow-queue-executor.test.js"]);
     add("contract:radar", "tests/radar-cobertura-v1.test.js", process.execPath, ["tests/radar-cobertura-v1.test.js"]);

@@ -22,7 +22,13 @@ const {
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
 const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
-const radarIngressObservation = createRadarIngressObservation();
+const { createSensorJournal } = require("./modules/radar/ingress-sensor-journal");
+let garimpeiSensorEnabled = false;
+const radarIngressObservation = createRadarIngressObservation({
+  sensorEnabled: () => garimpeiSensorEnabled,
+  onSensorStopped: () => { garimpeiSensorEnabled = false; },
+  journal: createSensorJournal({ directory: "/var/log/optimus/garimpei-sensor" })
+});
 const { avaliarFrescorHandoffTeleRadar } = require("./modules/radar/ingress-frescor-retry.candidate");
 const { capturaFactualRadarCandidata } = require("./modules/radar/capture-clock.candidate");
 const { recuperarIntencoesRadarCandidatas } = require("./modules/engine/radar-replay-runtime.candidate");
@@ -25713,6 +25719,26 @@ app.post("/admin/radar/ingress-observation/start", (req, res) => {
 app.post("/admin/radar/ingress-observation/stop", (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
   return responderObservacaoIngressRadar(res, radarIngressObservation.stop("manual"));
+});
+
+// Explicit Admin Master activation only; enabling the flag never starts observation.
+app.post("/admin/radar/ingress-observation/sensor24h/start", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  if (req.body?.confirm !== "GARIMPEI_24H") return responderObservacaoIngressRadar(res, { ok: false, reason: "sensor_confirmation_required" }, 400);
+  const alvo = validarAlvoObservacaoIngressRadar();
+  if (!alvo.ok) return responderObservacaoIngressRadar(res, { ok: false, reason: alvo.reason }, 409);
+  garimpeiSensorEnabled = true;
+  let result;
+  try { result = await radarIngressObservation.startSensor({ ...alvo, sock: alvo.socket,
+    scopeValidated: true, listenerRegistered: true }); }
+  catch { result = { ok: false, reason: "sensor_start_unavailable" }; }
+  if (!result.ok && radarIngressObservation.status().state !== "active") garimpeiSensorEnabled = false;
+  return responderObservacaoIngressRadar(res, result, result.ok ? 200 : 409);
+});
+app.get("/admin/radar/ingress-observation/sensor24h/archive", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  try { return responderObservacaoIngressRadar(res, await radarIngressObservation.archive()); }
+  catch { return responderObservacaoIngressRadar(res, { ok: false, reason: "sensor_archive_unavailable" }, 409); }
 });
 
 app.post("/radar/config", (req, res) => {
