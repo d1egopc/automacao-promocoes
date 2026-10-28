@@ -1,5 +1,19 @@
 # Messenger
 
+## Mensageiro universal por adesao explicita — 28/10/2026
+
+Este contrato sucede a limitacao comercial do canario historico abaixo. A interface V4 e as rotas de configuracao ficam disponiveis a todas as workspaces autenticadas com recurso mensageiro. Nao existe cliente fixo, flag somente por workspace ou dependencia de uma tela administrativa aberta. O canario antigo permanece sem autoridade comercial na montagem universal.
+
+- O cliente cria um perfil inativo, seleciona exclusivamente sessao e grupos da sua workspace, configura/salva os recursos e confirma a ativacao. Perfis antigos nao recebem adesao automatica: ativar exige revisao explicita, CAS e ausencia de conflitos. Copias sao inativas e nao copiam claims/ACKs/programacoes. Nenhuma alteracao de dados em massa ocorre no deploy.
+- A adesao e persistida em profile.execution, campo protegido nao aceito pelos payloads genericos V3/card. Apenas a transacao autenticada de adesao pode cria-lo. Abrir pagina, migrar formato ou alterar configuracao nao inicia envios por si so.
+- O mesmo callback e os handlers existentes continuam sendo usados. O cache limitado de sessoes aderentes e atualizado no boot e apos alteracao de perfil, sem polling. Em falha do cache, o gate V3 impede fallback gratuito de perfis aderentes. Perfil ausente/ambiguo, plano bloqueado, sessao/socket divergente, revisao alterada ou grupo nao autorizado falham fechados.
+- Cada despacho recebe escopo assincrono efemero de workspace/sessao/perfil/card e destinos comprovados. Privado somente para o remetente; boas-vindas/despedidas somente ao grupo configurado ou participantes do evento, conforme configuracao. Aliases LID/PN exigem prova no mapa oficial do socket atual. Nao existe envio arbitrario a outro contato.
+- Programadas reutilizam exclusivamente o scheduler V3. Para perfis aderentes, o adapter financeiro oficial reserva antes do transporte, gera/persiste o ID Baileys, revalida perfil/programacao/destino e liquida pelo ACK. Nao ha novo timer, listener, fila, livro financeiro ou schema PostgreSQL.
+- Cada mensagem/aviso entregue custa 1 credito pelo servico Universal existente. Retorno local/server_ack nao debita. ACK repetido/restart nao gera nova cobranca; resultado incerto nao permite replay. Exclusao de infracao e gratuita; saldo zero bloqueia resposta/aviso, nao exclusao autorizada. Os limites operacionais do journal sao limitados a4096 tuplas pendentes; nenhuma tupla incerta e descartada para admitir outra.
+- Somente eventos notify com timestamp comprovadamente posterior a ativacao e sincronizacao atual entram no novo fluxo. Eventos de participantes durante flush inicial sao recusados antes de qualquer await. receivedPendingNotifications precisa ter sido observado no socket atual. Historico nao produz moderacao, resposta ou credito retroativo.
+- Persistencia/revalidacoes novas executam no worker existente. Sessao sem perfil aderente tem teste em Set, sem consulta, HMAC, timer ou I/O adicional. Radar, TeleRadar, RIO, Clonador, templates comerciais e sessoes sao preservados.
+- Disponibilidade da interface nao equivale a ACK real. A prova produtiva exige perfil e destinatarios autorizados pelo cliente. A telemetria oficial permanece a ferramenta de diagnostico; nenhuma observacao e iniciada pelo editor.
+
 ## Mensageiro V4 — candidata isolada
 
 - Desenvolvimento nas branches `validation/mensageiro-v4-20261025`, derivadas das mains publicadas backend `af56a3af` e frontend `1cc56ad7`. Não substitui o legado em produção antes de homologação e autorização final.

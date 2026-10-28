@@ -12,6 +12,8 @@ function createV4Routes({
   listGroups,
   requireAdminMaster = (_req, res) => res.status(403).json({ ok: false, code: "admin_required" }),
   canary,
+  universal = false,
+  onConfigurationChange = async () => {},
   canUseTarget = (workspaceId, req) => workspaceId === getWorkspace(req) && hasFeature(req, "mensageiro"),
 } = {}) {
   const router = express.Router();
@@ -54,6 +56,9 @@ function createV4Routes({
         "canary_not_found",
         "test_authorization_invalid",
         "migration_required",
+        "activation_confirmation_required",
+        "active_card_required",
+        "legacy_review_required",
       ]);
       const code = known.has(error.message) ? error.message : "v4_unavailable";
       res
@@ -174,6 +179,7 @@ function createV4Routes({
       res.json({
         ok: true,
         source: "mensageiro_v4",
+        universal: universal === true,
         ...(await repository.call("state", { workspaceId: req.v4Workspace })),
         sessions: listSessions(req.v4Workspace),
         catalog: CATALOG,
@@ -243,14 +249,14 @@ function createV4Routes({
               schedule.destinations || [],
             );
         }
-        res.json({
-          ok: true,
-          profile: await repository.call("save", {
+        const saved = await repository.call("save", {
             workspaceId: req.v4Workspace,
             profileId: req.params.id,
             input,
-          }),
-        });
+            universal,
+          });
+        if (universal) await onConfigurationChange();
+        res.json({ ok: true, profile: saved });
       }),
     );
   router.post(
@@ -261,6 +267,7 @@ function createV4Routes({
         profile: await repository.call("duplicate", {
           workspaceId: req.v4Workspace,
           profileId: req.params.id,
+          universal,
         }),
       }),
     ),

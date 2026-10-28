@@ -144,6 +144,10 @@ function createOperationalIngress({ store, bridge, recoveryDisabled = () => fals
       }) : undefined
     });
     if (!selected.profileId) return blocked(selected.reason, { skipV2: true });
+    // An explicitly adopted profile belongs to V4 even while its runtime
+    // admission cache is refreshing. Never fall back to an unbilled handler.
+    if (store.getProfile(workspaceId, selected.profileId)?.execution?.version === 4)
+      return blocked("UNIVERSAL_PROFILE_OWNED");
     const eventId = eventIdentity({ message, event, card, now: clock() });
     if (!eventId) return blocked("EVENTO_NAO_RECEBIDO");
     report("profile_selected", "", selected.profileId);
@@ -177,4 +181,4 @@ function createOperationalIngress({ store, bridge, recoveryDisabled = () => fals
   };
 }
 
-module.exports = { selectProfile, eventIdentity, scheduledPayload, authorizedDestination, createOperationalIngress, diagnosticCode };
+module.exports = { selectProfile, cardActive, allowedGroups, eventIdentity, scheduledPayload, authorizedDestination, createOperationalIngress, diagnosticCode };

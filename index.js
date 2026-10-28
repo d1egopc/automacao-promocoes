@@ -276,7 +276,7 @@ const mensageiro = require("./modules/mensageiro");
 const { appendTrace: appendGerenteTrace, traceEnabled: gerenteTraceEnabled } = require("./modules/mensageiro/gerente-trace");
 const criarRotasMensageiroV3 = require("./modules/mensageiro-v3/routes");
 const { V4Repository } = require("./modules/mensageiro-v4/repository");
-const { Scope: V4Scope } = require("./modules/mensageiro-v4/scope");
+const { ProfileScope: V4ProfileScope } = require("./modules/mensageiro-v4/scope");
 const { Canary: V4Canary } = require("./modules/mensageiro-v4/canary");
 const { Credits: V4Credits } = require("./modules/mensageiro-v4/credits");
 const { V4Engine } = require("./modules/mensageiro-v4/engine");
@@ -26406,16 +26406,20 @@ const mensageiroV3Routes = criarRotasMensageiroV3({
 });
 app.use("/mensageiro-v3", mensageiroV3Routes.router);
 
-// V4 ownership is an exact workspace/session/group/profile/card tuple. OFF by default.
-// The old workspace-only flag intentionally does not activate execution.
-const mensageiroV4Scope = V4Scope.fromEnvironment(process.env.OPTIMUS_MENSAGEIRO_V4_TARGETS);
-const mensageiroV4Canary = new V4Canary({ authorizeTarget: target =>
-  target.workspaceId === "user_k3phmbkf" && target.sessionId === "user_k3phmbkf_ServCel" &&
-  target.profileId === "profile_1e75f63a-9c87-421d-a094-9284f89aa3cd" &&
-  require("node:crypto").createHash("sha256").update(target.groupId).digest("hex") === "fed5da3d29340231db9d6178bc5f29cefbb59b92a857825f29782f827fd31386" });
+// The editor is universal; execution is granted by an explicitly adopted,
+// active profile. Old environment allowlists never enable customer sends.
+const mensageiroV4Scope = new V4ProfileScope();
+// The old administrative canary grants no commercial authority in universal
+// mode. Each workspace explicitly adopts its own profile through the editor.
+const mensageiroV4Canary = new V4Canary({ authorizeTarget: () => false });
 mensageiroV4Scope.canary = mensageiroV4Canary;
 const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?.[sessionId] && canalPertenceAoWorkspace(sessoesMeta[sessionId], workspaceId, { usuarios }));
 const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
+async function atualizarEscopoMensageiroUniversal() {
+  try { mensageiroV4Scope.configure(await mensageiroV4Repository.call("universal_sessions")); }
+  catch (error) { mensageiroV4Scope.ready = false; throw error; }
+}
+atualizarEscopoMensageiroUniversal().catch(() => console.warn("[MENSAGEIRO-V4] configuration_unavailable_fail_closed"));
 const mensageiroV4Diagnostics = new V4Diagnostics({ ownsSession: mensageiroV4OwnsSession,
   authorizeTarget: context => Boolean(mensageiroV4Scope.match(context)),
   getCurrentSocket: sessionId => sessoes[sessionId],
@@ -26433,15 +26437,21 @@ const mensageiroV4Engine = new V4Engine({
   scope: mensageiroV4Scope, credits: mensageiroV4Credits, canary: mensageiroV4Canary,
   actionAllowed: workspaceId => usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
   contextValid: (workspaceId, sessionId, sock) => mensageiroV4OwnsSession(workspaceId, sessionId) && socketEhAtual(sessoes, sessionId, sock),
+  groupAllowed: (workspaceId, sessionId, groupId) => mensageiroV4OwnsSession(workspaceId, sessionId) &&
+    (gruposPorSessao[sessionId] || []).some(g => String(g.id || g.jid || g.grupoId || "") === groupId),
+  participantReady: sock => sock.__optimusMessengerLiveReady === true,
   recoveryDisabled: isMensageiroV3RecoveryDisabled,
   diagnostics: mensageiroV4Diagnostics,
   publicResources: createPublicResources({ dataDir: require("node:path").dirname(require("node:path").dirname(mensageiroV3Routes.store.filePath)), canUse: clienteTemRecursoPlano })
 });
 app.use("/mensageiro-v4", createV4Routes({
   repository: mensageiroV4Repository, engine: mensageiroV4Engine, diagnostics: mensageiroV4Diagnostics, canary: mensageiroV4Canary,
+  universal: true, onConfigurationChange: atualizarEscopoMensageiroUniversal,
   getWorkspace: getClienteId, hasFeature: usuarioTemRecurso, requireAdminMaster: exigirAdminMasterEstrito,
   canUseTarget: workspaceId => usuarioAtivoOperacional(workspaceId) && clienteTemRecursoMensageiro(workspaceId),
-  listSessions: workspaceId => listarSessoesWhatsappCliente(workspaceId).map(s => ({ id: s.id, name: s.nomeAmigavel, connected: s.conectado === true })),
+  listSessions: workspaceId => listarSessoesWhatsappCliente(workspaceId).map(s => ({ id: s.id,
+    name: s.nomeAmigavel, connected: s.conectado === true,
+    liveReady: sessoes[s.id]?.__optimusMessengerLiveReady === true })),
   listGroups: (workspaceId, sessionId) => mensageiroV4OwnsSession(workspaceId, sessionId)
     ? (gruposPorSessao[sessionId] || []).map(g => ({ id: String(g.id || g.jid || g.grupoId || ""), name: String(g.nome || g.name || g.subject || "Grupo") })) : []
 }));
@@ -26534,7 +26544,13 @@ const ingressMensageiroV3 = createOperationalIngress({
   recoveryDisabled: isMensageiroV3RecoveryDisabled,
   diagnostic: diagnosticoMensageiroV3
 });
-async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2 }) {
+async function dispatchMensageiroV3Ingress({ clienteId, sessaoId, card, mensagem, evento, sock, planoLiberado, diagnosticV2, upsertType }) {
+  if (mensageiroV4Scope.universal && card !== "scheduled") {
+    const configured = await mensageiroV4Engine.dispatchConfigured({ workspaceId: clienteId,
+      sessionId: sessaoId, card, message: mensagem, event: evento, sock, upsertType,
+      planAllowed: planoLiberado && usuarioAtivoOperacional(clienteId) });
+    if (configured.handled) return configured.result;
+  }
   const context = { sessionId: sessaoId, groupId: mensagem?.key?.remoteJid || evento?.id || "", card, message: mensagem };
   const dispatchV4 = canaryLease => mensageiroV4Engine.dispatch({ workspaceId: clienteId,
     sessionId: sessaoId, card, message: mensagem, event: evento, sock,
@@ -26598,7 +26614,18 @@ const mensageiroV3Scheduler = new V3Scheduler({
       if (!destinoMensageiroV3Autorizado(workspaceId, sessionId, destination)) throw new Error("destino_v3_nao_autorizado");
       const sock = getSockMensageiroAtual(sessionId);
       if (!sock || !(statusSessao[sessionId] === "open" || statusSessao[sessionId] === "connected")) throw new Error("sessao_v3_indisponivel");
-      const localResult = await sock.sendMessage(destination, payloadProgramacaoV3(content));
+      let localResult;
+      if (profile.execution?.version === 4) {
+        localResult = await require("./modules/mensageiro-v4/scheduled-transport").sendScheduled({
+          store: mensageiroV3Routes.store, repository: mensageiroV4Repository,
+          scope: mensageiroV4Scope, credits: mensageiroV4Credits,
+          workspaceId, sessionId, profileId, destination, claimKey, content: payloadProgramacaoV3(content),
+          authorized: destinoMensageiroV3Autorizado,
+          currentSocket: () => socketEhAtual(sessoes, sessionId, sock),
+          recoveryDisabled: isMensageiroV3RecoveryDisabled,
+          transport: (payload, options) => sock.sendMessage(destination, payload, options)
+        });
+      } else localResult = await sock.sendMessage(destination, payloadProgramacaoV3(content));
       const transportMessageId = messageIdOf(localResult);
       if (!transportMessageId) return { confirmed: false, ambiguous: true, transportState: "local_return_without_message_id" };
       const correlation = mensageiroV3AckCorrelator.register({
@@ -34136,7 +34163,8 @@ registrarListenerUnicoSocket({
           sock,
           mensagem,
           planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
-          diagnosticV2: gerenteDiagnosticV2
+          diagnosticV2: gerenteDiagnosticV2,
+          upsertType: type
         })
       });
       const resultadoGerente = execucaoGerente.resultado;
@@ -34155,7 +34183,8 @@ registrarListenerUnicoSocket({
             card: "commands",
             sock,
             mensagem,
-            planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+            planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
+            upsertType: type
           })
         });
       }
@@ -34169,7 +34198,8 @@ registrarListenerUnicoSocket({
           card: "attendance",
           sock,
           mensagem,
-          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro)
+          planoLiberado: clienteTemRecursoMensageiro(clienteIdMensageiro),
+          upsertType: type
         })
       });
 
@@ -34294,6 +34324,11 @@ sock.ev.on("group-participants.update", async (evento) => {
 
   sock.ev.on("connection.update", async (update) => {
     const { connection, qr, lastDisconnect } = update;
+    if (update.receivedPendingNotifications === true) {
+      sock.__optimusMessengerLiveReady = true;
+      sock.__optimusMessengerOnlineSince = Date.now();
+    }
+    if (connection === "close") sock.__optimusMessengerLiveReady = false;
 
     if (!socketEhAtual(sessoes, id, sock)) {
       console.log("[WHATSAPP-SOCKET-OBSOLETO-IGNORADO]", JSON.stringify({

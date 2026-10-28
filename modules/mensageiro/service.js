@@ -671,7 +671,10 @@ async function resolverJidPrivadoMensageiro(sock, jid, contexto = {}) {
 
   for (const contato of coletarPossiveisContatosMensageiro(sock)) {
     const jidResolvido = extrairJidWhatsappDeContato(contato, jidOriginal);
-    if (jidResolvido) return jidResolvido;
+    if (jidResolvido) {
+      registrarMapeamentoLidMensageiro(sock, jidOriginal, jidResolvido);
+      return jidResolvido;
+    }
   }
 
   const jidOnWhatsApp = await tentarResolverLidViaOnWhatsApp(sock, jidOriginal);
@@ -725,7 +728,7 @@ async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = ""
   const conteudo = String(resposta?.conteudo || "").trim();
   const tipo = String(resposta?.tipo || "texto");
 
-  if (!sock || !jid || !conteudo) return false;
+  if (!sock || !jid || (!conteudo && !resposta?.imagem)) return false;
 
   const jidOriginal = normalizarJidMensageiro(jidOriginalLog || jid);
   const jidFinal = await resolverJidPrivadoMensageiro(sock, jid, { clienteId, sessaoId });
@@ -743,6 +746,13 @@ async function executarRespostaAtendimento({ sock, jid, resposta, clienteId = ""
     await sock.sendPresenceUpdate?.("paused", jidFinal);
   } catch {}
 
+  if (["imagem", "imagem_texto"].includes(tipo) && resposta.imagem) {
+    const payload = montarPayloadPrivadoMensageiro({ imagem: resposta.imagem,
+      texto: tipo === "imagem_texto" ? conteudo : "" });
+    if (!payload) return false;
+    await sock.sendMessage(jidFinal, payload.payload);
+    return true;
+  }
   if (tipo === "imagemUrl") {
     logMensageiroJson("[MENSAGEIRO-ATENDIMENTO-ENVIO-TENTANDO]", {
       clienteId,

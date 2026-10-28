@@ -150,6 +150,8 @@ function normalizeModeration(input = {}) {
 }
 function settings(profile) {
   return {
+    universalEnabled: profile.execution?.version === 4,
+    activatedAt: profile.execution?.activatedAt || null,
     migrationVersion:
       profile.cards?.groupManager?.configuration?.v4?.migrationVersion || 0,
     intelligence: normalizeIntelligence(

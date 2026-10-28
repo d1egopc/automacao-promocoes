@@ -1,7 +1,7 @@
 "use strict";
-const { eventIdentity } = require("../mensageiro-v3/operational-gates");
+const { eventIdentity, cardActive } = require("../mensageiro-v3/operational-gates");
 const {
-  createV3HandlerAdapters,
+  createV3HandlerAdapters, buildV3HandlerConfig,
 } = require("../mensageiro-v3/handler-adapters");
 const { Moderator, body } = require("./moderation");
 const { Scope } = require("./scope");
@@ -20,6 +20,8 @@ class V4Engine {
     maxConcurrent = 4,
     handlers,
     canary,
+    groupAllowed = () => false,
+    participantReady = () => false,
   } = {}) {
     this.repository = repository;
     this.enabled = enabled;
@@ -38,6 +40,51 @@ class V4Engine {
     this.cooldowns = new Map();
     this.handlers = handlers;
     this.canary = canary;
+    this.groupAllowed = groupAllowed;
+    this.participantReady = participantReady;
+    this.admissions = 0;
+  }
+  async dispatchConfigured(args) {
+    const { workspaceId, sessionId, card, message, event, sock } = args;
+    if (!this.scope.universal || !this.scope.configured(workspaceId, sessionId)) return { handled: false };
+    const blocked = reason => ({ handled: true, result: { blocked: true, reason } });
+    if (!args.planAllowed || !this.contextValid(workspaceId, sessionId, sock) || this.recoveryDisabled())
+      return blocked("plan_or_socket_blocked");
+    // Capture synchronously before the first await: a buffered participant
+    // event must not become live just because offline completion races its IO.
+    const liveAtIngress = this.participantReady(sock);
+    if (!liveAtIngress) return blocked("offline_sync_unproven");
+    if (this.admissions >= this.maxConcurrent) return blocked("backpressure");
+    this.admissions++;
+    try {
+      const groupId = message?.key?.remoteJid || event?.id || "";
+      const selected = await this.repository.call("select", { workspaceId, sessionId, card, groupId });
+      const p = selected.profile;
+      if (!p) return blocked(selected.reason || "profile_missing");
+      const settings = p.execution;
+      if (settings?.version !== 4) return { handled: false };
+      if (!Number.isFinite(Date.parse(settings.activatedAt)) || p.sessionId !== sessionId) return blocked("activation_required");
+      const group = groupId.endsWith("@g.us");
+      if (group && !this.groupAllowed(workspaceId, sessionId, groupId)) return blocked("scope_unauthorized");
+      if (!group && !["attendance", "faq", "flows", "quickReplies"].includes(card)) return blocked("scope_unauthorized");
+      if (message) {
+        const raw = message.messageTimestamp;
+        const timestamp = Number(raw?.toNumber ? raw.toNumber() : raw);
+        if (args.upsertType !== "notify" || !Number.isFinite(timestamp) ||
+            timestamp < Math.ceil(Math.max(Date.parse(settings.activatedAt), Number(sock.__optimusMessengerOnlineSince) || 0) / 1000) || timestamp > Date.now() / 1000 + 60)
+          return blocked("historical_or_unproven_event");
+      } else if (!event || !this.participantReady(sock)) return blocked("offline_sync_unproven");
+      const destinations = [groupId];
+      if (["welcome", "farewell"].includes(card) && p.cards[card].configuration?.envio?.destino === "privado") {
+        for (const participant of event?.participants || []) {
+          const id = typeof participant === "string" ? participant : participant.id || participant.lid;
+          if (/^[A-Za-z0-9_:-]+@(?:s\.whatsapp\.net|lid)$/.test(id || "")) destinations.push(id);
+        }
+      }
+      return { handled: true, result: await this.scope.withTarget({ workspaceId, sessionId,
+        profileId: p.id, groupId, cards: [card], destinations }, () => this.dispatch({ ...args, selectedProfile: selected })) };
+    } catch { return blocked("admission_unavailable"); }
+    finally { this.admissions--; }
   }
   owns(workspaceId) {
     return this.enabled(workspaceId) === true && this.scope.owns(workspaceId);
@@ -56,6 +103,7 @@ class V4Engine {
     sock,
     planAllowed,
     canaryLease,
+    selectedProfile,
   }) {
     const trace = this.diagnostics?.trace(message || event) || (() => {});
     if (
@@ -101,7 +149,7 @@ class V4Engine {
     let key = "";
     let claimed = false;
     try {
-      const selected = await this.repository.call("select", {
+      const selected = selectedProfile || await this.repository.call("select", {
         workspaceId,
         sessionId,
         groupId,
@@ -169,13 +217,18 @@ class V4Engine {
             reason: moderation ? "observe_only" : "no_match",
           };
       }
-      if (card === "attendance")
-        intelligent = reply({
+      if (card === "attendance") {
+        const config = buildV3HandlerConfig(p).atendimento;
+        const service = require("../mensageiro/service");
+        const configuredReply = service.encontrarGatilhoAtendimento(body(message), config.gatilhos) ||
+          service.encontrarRespostaRapida(body(message), config.respostasRapidas);
+        intelligent = configuredReply ? null : reply({
           text: body(message),
           configuration: p.cards.attendance.configuration?.v4,
           resources: await this.publicResources(workspaceId),
           group: groupId.endsWith("@g.us"),
         });
+      }
       const eventId = eventIdentity({
         message,
         event: event
@@ -225,12 +278,18 @@ class V4Engine {
       }
       trace("action", "claimed", p.id);
       const revalidate = async () => {
-        const current = await this.repository.call("profile", {
+        const current = this.scope.universal
+          ? (await this.repository.call("authorize", { workspaceId, profileId: p.id,
+              sessionId, card, expectedRevision: p.revision }) ? p : null)
+          : await this.repository.call("profile", {
           workspaceId,
           profileId: p.id,
         });
         if (
-          current.revision !== p.revision || !current.active || !current.cards[card]?.active ||
+          !current || current.revision !== p.revision || !current.active || !cardActive(current, card) ||
+          (this.scope.universal && (current.execution?.version !== 4 ||
+            !current.execution.activatedAt ||
+            current.sessionId !== sessionId || (groupId.endsWith("@g.us") && !this.groupAllowed(workspaceId, sessionId, groupId)))) ||
           (runtime && !this.canary.valid(canaryLease, canaryContext)) ||
           !this.scope.match({ workspaceId, sessionId, groupId, card, profileId: current.id }) ||
           !this.actionAllowed(workspaceId) ||
@@ -242,21 +301,31 @@ class V4Engine {
       };
       await revalidate();
       let slot = 0;
+      const sentIds = new Set();
+      const permittedDestination = destination => this.scope.match({ workspaceId, sessionId,
+        groupId: destination, card, profileId: p.id }) || this.scope.authorizeSocketAlias?.(sock, destination);
       const send = async (destination, content, options) => {
         // All adapters share this fence, including notices and private redirects.
-        if (destination !== groupId || content?.delete) throw new Error("scope_unauthorized");
+        if (!permittedDestination(destination)) throw new Error("scope_unauthorized");
+        if (content?.delete) {
+          if (!this.scope.universal || !sentIds.has(destination + ":" + content.delete.id)) throw new Error("scope_unauthorized");
+          await revalidate();
+          return this.transport(() => sock.sendMessage(destination, content, options));
+        }
         if (runtime) this.canary.takeNotice(canaryLease, canaryContext, message);
         if (!this.credits || ++slot > 8) throw new Error("credit_gate_unavailable");
-        return this.credits.send({ workspaceId, sessionId, profileId: p.id, groupId,
+        const result = await this.credits.send({ workspaceId, sessionId, profileId: p.id, groupId: destination,
           parentKey: key, slot, revalidate, content, options,
           transport: (payload, opts) => this.transport(() => runtime
             ? this.canary.physical(canaryLease, () => sock.sendMessage(groupId, payload, opts))
-            : sock.sendMessage(groupId, payload, opts)) });
+            : sock.sendMessage(destination, payload, opts)) });
+        if (result?.key?.id) sentIds.add(destination + ":" + result.key.id);
+        return result;
       };
       const guardedSocket = new Proxy(sock, { get(object, name) {
         if (name === "sendMessage") return send;
         if (name === "sendPresenceUpdate") return async (presence, destination) => {
-          if (destination !== groupId) throw new Error("scope_unauthorized");
+          if (!permittedDestination(destination)) throw new Error("scope_unauthorized");
           await revalidate();
           return object.sendPresenceUpdate?.(presence, destination);
         };

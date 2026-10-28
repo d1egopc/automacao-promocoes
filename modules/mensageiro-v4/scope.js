@@ -42,4 +42,48 @@ class Scope {
       (!context.profileId || t.profileId === context.profileId) ? t : null;
   }
 }
-module.exports = { Scope };
+// A configured profile grants authority only inside one asynchronous dispatch.
+// No client identifier, permanent wildcard or browser-open requirement.
+class ProfileScope extends Scope {
+  constructor() {
+    super();
+    this.universal = true;
+    this.context = new (require("node:async_hooks").AsyncLocalStorage)();
+    this.sessions = new Set();
+    this.ready = false;
+  }
+  owns(workspaceId) { return /^[\w-]{1,100}$/.test(workspaceId || ""); }
+  configure(sessions) {
+    if (!Array.isArray(sessions) || sessions.length > 10000) throw new Error("v4_scope_invalid");
+    this.sessions = new Set(sessions.map(t => JSON.stringify([t.workspaceId, t.sessionId])));
+    this.ready = true;
+  }
+  configured(workspaceId, sessionId) {
+    return this.ready && this.sessions.has(JSON.stringify([workspaceId, sessionId]));
+  }
+  reserved(c) {
+    const t = this.context.getStore();
+    return t && t.sessionId === c.sessionId && (t.destinations.includes(c.groupId) || t.aliases.has(c.groupId)) &&
+      (!c.card || t.cards.includes(c.card)) ? t : null;
+  }
+  withTarget(t, action) {
+    if (!this.owns(t.workspaceId) || !t.sessionId || !t.profileId || !t.cards?.length ||
+        !t.destinations?.length || t.destinations.length > 101 ||
+        t.destinations.some(d => !/^[A-Za-z0-9_:-]+@(?:g\.us|s\.whatsapp\.net|lid)$/.test(d)))
+      throw new Error("v4_scope_invalid");
+    return this.context.run(Object.freeze({ ...t, cards: Object.freeze([...t.cards]),
+      destinations: Object.freeze([...t.destinations]), aliases: new Set() }), action);
+  }
+  authorizeSocketAlias(sock, destination) {
+    const t = this.context.getStore();
+    if (!t || !/^[A-Za-z0-9_:-]+@s\.whatsapp\.net$/.test(destination) || t.aliases.size >= 100) return false;
+    // The existing handler resolves LID and records this mapping on the
+    // current socket. No network request or client-provided alias is added.
+    if (!t.destinations.some(lid => lid.endsWith("@lid") &&
+        sock.__mensageiroLidMap?.[lid]?.lid === lid &&
+        sock.__mensageiroLidMap[lid].jid === destination)) return false;
+    t.aliases.add(destination);
+    return true;
+  }
+}
+module.exports = { Scope, ProfileScope };

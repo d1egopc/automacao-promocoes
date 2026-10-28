@@ -15,7 +15,7 @@ class Credits {
   remember(target) {
     const { workspaceId, sessionId, groupId, profileId } = target;
     const key = JSON.stringify([workspaceId, sessionId, groupId, profileId]);
-    if (!this.settlementTargets.has(key) && this.settlementTargets.size >= 64)
+    if (!this.settlementTargets.has(key) && this.settlementTargets.size >= 4096)
       throw new Error("credit_scope_blocked");
     this.settlementTargets.set(key, { workspaceId, sessionId, groupId, profileId });
   }

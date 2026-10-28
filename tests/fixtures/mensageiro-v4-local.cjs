@@ -8,6 +8,7 @@ async function main() {
   if (process.env.NODE_ENV === "production")
     throw new Error("fixture_production_forbidden");
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-v4-browser-"));
+  const universal = process.env.MESSENGER_UNIVERSAL_FIXTURE === "true";
   process.env.DATA_DIR = dataDir;
   const express = require("express"),
     jwt = require("jsonwebtoken");
@@ -22,6 +23,7 @@ async function main() {
     secret = crypto.randomBytes(32);
   const users = ["fixture_A", "fixture_B"].map((id, i) => ({
     id,
+    email: id.toLowerCase() + "@example.test",
     nome: "Empresa fictícia " + (i ? "B" : "A"),
     papel: "user",
     ativo: true,
@@ -34,6 +36,7 @@ async function main() {
   }));
   fs.writeFileSync(path.join(dataDir, "usuarios.json"), JSON.stringify(users));
   for (const u of users) {
+    if (universal) continue;
     const p = store.createProfile({
       workspaceId: u.id,
       sessionId: u.id + "_phone",
@@ -64,8 +67,12 @@ async function main() {
   const repository = new V4Repository({ filePath });
   const owns = (w, s) => users.some((u) => u.id === w && s === w + "_phone");
   const diagnostics = new Diagnostics({ ownsSession: owns });
+  const scope = universal ? new (require("../../modules/mensageiro-v4/scope").ProfileScope)() : undefined;
+  const refresh = async () => scope?.configure(await repository.call("universal_sessions"));
+  if (universal) await refresh();
   const engine = new V4Engine({
     repository,
+    ...(scope ? { scope } : {}),
     enabled: (w) => users.some((u) => u.id === w),
     contextValid: () => false,
   });
@@ -73,8 +80,8 @@ async function main() {
   app.use(require("cors")({ origin: "http://127.0.0.1:5180" }));
   app.use(express.json({ limit: "20mb" }));
   app.post("/login", (req, res) => {
-    const user = users.find((u) => u.id === req.body.user);
-    if (!user || req.body.pass !== "fixture-only")
+    const user = users.find((u) => u.id === req.body.user || u.email === req.body.email);
+    if (!user || (req.body.pass || req.body.senha) !== "fixture-only")
       return res.status(401).json({ erro: "fixture_auth" });
     res.json({
       token: jwt.sign({ id: user.id }, secret, { expiresIn: "1h" }),
@@ -103,6 +110,7 @@ async function main() {
       repository,
       engine,
       diagnostics,
+      universal, onConfigurationChange: refresh,
       getWorkspace: (req) => req.clienteId,
       hasFeature: (req) => req.usuario.recursos.mensageiro === true,
       listSessions: (w) => [

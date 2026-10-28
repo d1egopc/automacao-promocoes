@@ -1,7 +1,7 @@
 "use strict";
 const { parentPort, workerData } = require("node:worker_threads");
 const { V3Store } = require("../mensageiro-v3/src/v3/store");
-const { selectProfile } = require("../mensageiro-v3/operational-gates");
+const { selectProfile, cardActive } = require("../mensageiro-v3/operational-gates");
 const { scheduleInput } = require("../mensageiro-v3/legacy-compat");
 const {
   CARDS,
@@ -15,7 +15,7 @@ const {
 } = require("./model");
 const store = new V3Store({ filePath: workerData.filePath });
 const profile = (w, id) => {
-  const p = store.getProfile(w, id);
+  const p = store.state.workspaces[w] ? store.getProfile(w, id) : null;
   if (!p || p.id !== id || p.workspaceId !== w) fail("perfil_nao_encontrado");
   return p;
 };
@@ -24,6 +24,9 @@ function conflict(w, p) {
   for (const other of store.listProfiles(w)) {
     if (other.id === p.id || !other.active || other.sessionId !== p.sessionId)
       continue;
+    const privateCards = ["attendance", "faq", "flows", "quickReplies"];
+    if (privateCards.some(c => p.cards[c]?.active) && privateCards.some(c => other.cards[c]?.active))
+      fail("perfis_conflitantes");
     for (const card of CARDS.filter((c) => c !== "scheduled")) {
       if (!p.cards[card]?.active || !other.cards[card]?.active) continue;
       const groups = (value) =>
@@ -71,6 +74,17 @@ function saveSettings(w, p, input) {
   });
 }
 function execute(operation, a) {
+  if (operation === "universal_sessions") {
+    store.reload();
+    const sessions = new Map();
+    for (const [workspaceId, ws] of Object.entries(store.state.workspaces))
+      for (const p of Object.values(ws.profiles || {}))
+        if (p.workspaceId === workspaceId && p.execution?.version === 4) {
+          sessions.set(JSON.stringify([workspaceId, p.sessionId]), { workspaceId, sessionId: p.sessionId });
+          if (sessions.size > 10000) fail("v4_scope_invalid");
+        }
+    return [...sessions.values()];
+  }
   if (operation === "outbound_targets") {
     // Read-only, bounded result in the existing worker. No runtime activation,
     // replay, refund or new financial authority after a process restart.
@@ -83,7 +97,7 @@ function execute(operation, a) {
             row.identity?.destinationId !== row.groupId || !row.messageId) continue;
         const t = { workspaceId, profileId: row.profileId, sessionId: row.sessionId, groupId: row.groupId };
         targets.set(JSON.stringify(t), t);
-        if (targets.size > 64) fail("v4_ack_backpressure");
+        if (targets.size > 4096) fail("v4_ack_backpressure");
       }
     return [...targets.values()];
   }
@@ -116,6 +130,17 @@ function execute(operation, a) {
     };
   }
   if (operation === "profile") return profile(w, a.profileId);
+  if (operation === "authorize" || operation === "scheduled_authorize") {
+    const p = store.state.workspaces[w]?.profiles[a.profileId];
+    if (!p || p.workspaceId !== w || !p.active || p.sessionId !== a.sessionId ||
+        p.revision !== a.expectedRevision || p.execution?.version !== 4 || !p.execution.activatedAt ||
+        !cardActive(p, a.card)) return false;
+    if (operation === "scheduled_authorize") {
+      const s = store.getSchedule(w, a.scheduleId);
+      return !!(s && s.profileId === p.id && s.active && s.revision === a.scheduleRevision && s.destinations.includes(a.destination));
+    }
+    return true;
+  }
   if (operation === "schedules")
     return store
       .listSchedules(w, { includeInactive: true })
@@ -172,6 +197,9 @@ function execute(operation, a) {
     return store.transaction(() => {
       const body = a.input;
       let p;
+      if (a.universal === true && a.profileId && body.active === true &&
+          profile(w, a.profileId).execution?.version !== 4 && body.confirmLegacyReview !== true)
+        fail("legacy_review_required");
       if (a.profileId) {
         p = profile(w, a.profileId);
         if (body.expectedRevision !== p.revision) fail("conflito_revisao");
@@ -194,6 +222,16 @@ function execute(operation, a) {
       }
       if (!p.name) fail("nome_obrigatorio");
       saveSettings(w, p, body);
+      if (a.universal === true) {
+        const current = profile(w, p.id);
+        const previous = current.execution;
+        if (body.active === true && body.confirmActivation !== true) fail("activation_confirmation_required");
+        if (body.active === true && !Object.values(current.cards).some(c => c.active)) fail("active_card_required");
+        // This field is not accepted by V3 profile/card payloads. Only this
+        // authenticated adoption transaction can create the send authority.
+        store.state.workspaces[w].profiles[p.id].execution = { version: 4,
+          activatedAt: body.active === true ? previous?.activatedAt || new Date().toISOString() : null };
+      }
       conflict(w, profile(w, p.id));
       return lightProfile(profile(w, p.id));
     });
@@ -222,6 +260,7 @@ function execute(operation, a) {
         destinations: original.destinations,
         active: false,
       });
+      if (a.universal === true) store.state.workspaces[w].profiles[p.id].execution = { version: 4, activatedAt: null };
       for (const card of CARDS) {
         const copy = JSON.parse(JSON.stringify(original.cards[card]));
         if (card === "commands" && copy.configuration?.comandos)

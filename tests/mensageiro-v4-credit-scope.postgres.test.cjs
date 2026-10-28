@@ -14,6 +14,9 @@ const { V4Repository } = require("../modules/mensageiro-v4/repository");
 const { V4Engine } = require("../modules/mensageiro-v4/engine");
 const { Credits } = require("../modules/mensageiro-v4/credits");
 const { Scope } = require("../modules/mensageiro-v4/scope");
+const { ProfileScope } = require("../modules/mensageiro-v4/scope");
+const { V3Scheduler } = require("../modules/mensageiro-v3/src/v3/scheduler");
+const { sendScheduled } = require("../modules/mensageiro-v4/scheduled-transport");
 const { Diagnostics } = require("../modules/mensageiro-v4/diagnostics");
 const config = { host: "127.0.0.1", port: 55439, user: "postgres",
   database: "optimus_messenger_v4_fixture", connectionTimeoutMillis: 5000 };
@@ -288,4 +291,65 @@ test("runtime expiry/stop and restart preserve official ACK settlement without r
   await recovered.observe(f.ack()); await recovered.observe(f.ack(4));
   assert.equal((await f.balance()).balance, 0); assert.equal((await f.balance()).reserved, 0);
   assert.equal(f.sent.length, 2); assert.equal(restartedScope.targets.length, 0);
+});
+
+async function universal(f) {
+  f.store.transaction(() => {
+    f.store.state.workspaces[f.w].profiles[f.p.id].execution = { version: 4, activatedAt: new Date(Date.now() - 2000).toISOString() };
+  });
+  f.scope = new ProfileScope(); f.scope.configure(await f.repository.call("universal_sessions"));
+  f.credits = new Credits({ repository: f.repository, scope: f.scope, getPool: () => pool, allowed: () => true });
+  f.sock.__optimusMessengerLiveReady = true;
+  f.engine = new V4Engine({ repository: f.repository, scope: f.scope, enabled: () => true,
+    credits: f.credits, actionAllowed: () => true,
+    contextValid: (w, s, sock) => w === f.w && s === f.s && sock === f.sock,
+    groupAllowed: (_w, _s, g) => g === G, participantReady: () => true,
+    handlers: { commands: args => args.sock.sendMessage(G, { text: "Universal" }) } });
+  f.dispatchUniversal = (card = "commands", id = "universal") => f.engine.dispatchConfigured({
+    workspaceId: f.w, sessionId: f.s, sock: f.sock, planAllowed: true, card, upsertType: "notify",
+    message: { ...f.message(id), messageTimestamp: Math.ceil(Date.now() / 1000) } });
+}
+
+test("universal profiles in two workspaces reserve and debit only their own official ledger on ACK", async t => {
+  const a = await fixture(t, 2), b = await fixture(t, 2);
+  for (const f of [a, b]) {
+    await universal(f); await f.dispatchUniversal();
+    assert.equal(f.sent.length, 1); assert.equal((await f.balance()).reserved, 1);
+    await f.credits.observe(f.ack()); await f.credits.observe(f.ack());
+    await f.dispatchUniversal();
+    assert.equal(f.sent.length, 1); assert.equal((await f.balance()).balance, 1);
+  }
+  const rows = (await pool.query("SELECT cliente_id, count(*)::int AS count FROM financial_credit_ledger WHERE cliente_id=ANY($1::text[]) AND universal_movement_type='TARGET_DEBIT' GROUP BY cliente_id", [[a.w, b.w]])).rows;
+  assert.equal(rows.length, 2); assert.ok(rows.every(r => r.count === 1));
+});
+
+test("universal zero balance keeps deletion free and blocks the warning", async t => {
+  const f = await fixture(t, 0); await universal(f);
+  const r = await f.dispatchUniversal("groupManager");
+  assert.equal(r.result.deleteResult, "local_resolved");
+  assert.equal(f.sent.length, 1); assert.ok(f.sent[0].content.delete);
+  assert.equal((await f.balance()).balance, 0); assert.equal((await f.balance()).reserved, 0);
+});
+
+test("the existing V3 scheduler uses the universal credit adapter, preserves content and never resends on ACK retry", async t => {
+  const f = await fixture(t, 1); await universal(f);
+  f.store.saveCard(f.w, f.p.id, "scheduled", { active: true });
+  const schedule = f.store.createSchedule(f.w, f.p.id, { destinations: [G],
+    nextRunAt: new Date(Date.now() - 1000).toISOString(), content: { text: "Scheduled fixture" } });
+  f.store.activateSchedule(f.w, schedule.id);
+  const scheduler = new V3Scheduler({ store: f.store, transport: {
+    authorizeSend: async () => true,
+    sendMessage: async args => {
+      await sendScheduled({ ...args, store: f.store, repository: f.repository, scope: f.scope,
+        credits: f.credits, content: { text: args.content.text },
+        authorized: (w, s, d) => w === f.w && s === f.s && d === G, currentSocket: () => true,
+        transport: (content, options) => f.sock.sendMessage(G, content, options) });
+      return { confirmed: false, ambiguous: true };
+    }
+  } });
+  const result = await scheduler.tick(); assert.equal(result.ambiguous.length, 1);
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].content.text, "Scheduled fixture");
+  assert.equal((await f.balance()).reserved, 1);
+  await f.credits.observe(f.ack()); await f.credits.observe(f.ack()); await scheduler.tick();
+  assert.equal((await f.balance()).balance, 0); assert.equal(f.sent.length, 1);
 });
