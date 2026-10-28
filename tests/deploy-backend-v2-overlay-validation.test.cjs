@@ -86,7 +86,10 @@ git() {
   case "$1" in
     diff)
       case "$2" in
-        --name-only) printf 'mock_git=diff-deletions\n' >&2; return 0 ;;
+        --name-only)
+          printf 'mock_git=diff-deletions\n' >&2
+          if [[ "$FIXTURE_CHANGE_TYPE" == D ]]; then printf '%s\n' "$FIXTURE_PATH"; fi
+          return 0 ;;
         --name-status)
           printf 'mock_git=diff-runtime-status\n' >&2
           printf '%s\t%s\n' "$FIXTURE_CHANGE_TYPE" "$FIXTURE_APPROVED_PATH"
@@ -144,6 +147,15 @@ case "$MODE" in
   record)
     STEP=runtime_allowlist_classification
     record_runtime_change "$FIXTURE_CHANGE_TYPE" "$FIXTURE_PATH"
+    ;;
+  record-required)
+    STEP=runtime_allowlist_classification
+    record_runtime_change "$FIXTURE_CHANGE_TYPE" "$FIXTURE_PATH"
+    [[ -v 'changed_runtime[$FIXTURE_PATH]' ]]
+    ;;
+  deletions)
+    STEP=global_deletion_guard
+    test -z "$(git -C "$source_dir" diff --name-only --diff-filter=D --no-renames "$BASE_SHA" "$SOURCE_SHA")"
     ;;
   invalid-path)
     STEP=expected_path_rejection
@@ -281,6 +293,23 @@ test("outro arquivo inesperado sob scripts continua bloqueado", () => {
   });
   result.expected = "nonzero exit for any other scripts path";
   assert.notEqual(result.status, 0, processDiagnostic(scenario, result));
+});
+
+test("somente os dois artefatos Magalu exatos são ignorados; runtime backend continua obrigatório", () => {
+  for (const pathValue of ["optimus-capture/adapters/magalu.js", "optimus-capture/local-worker/magalu-identity.js"]) {
+    const result = runCase({ scenario: pathValue, mode: "record", changeType: "M", pathValue });
+    assert.equal(result.status, 0, processDiagnostic(pathValue, result));
+    const deleted = runCase({ scenario: pathValue + "-deleted", mode: "deletions", changeType: "D", pathValue });
+    assert.notEqual(deleted.status, 0, processDiagnostic(pathValue, deleted));
+  }
+  for (const pathValue of ["optimus-capture/adapters/other.js", "optimus-capture/local-worker/magalu-identity.js.bak"]) {
+    const result = runCase({ scenario: pathValue, mode: "record", changeType: "M", pathValue });
+    assert.notEqual(result.status, 0, processDiagnostic(pathValue, result));
+  }
+  const legitimate = runCase({ scenario: "backend-required", mode: "record-required", changeType: "M" });
+  assert.equal(legitimate.status, 0, processDiagnostic("backend-required", legitimate));
+  const excluded = runCase({ scenario: "extension-cannot-replace-backend", mode: "record-required", changeType: "M", pathValue: "optimus-capture/adapters/magalu.js" });
+  assert.notEqual(excluded.status, 0, processDiagnostic("extension-cannot-replace-backend", excluded));
 });
 
 test("caminhos absolutos e com travessia são rejeitados", () => {

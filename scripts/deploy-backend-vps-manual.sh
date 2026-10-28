@@ -74,6 +74,7 @@ record_runtime_change() {
   local status="$1" path="$2"
   case "$path" in
     AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/benchmark-gerente-observability-v2.cjs) return 0 ;;
+    optimus-capture/adapters/magalu.js|optimus-capture/local-worker/magalu-identity.js) return 0 ;;
   esac
   case "$status" in
     A|M) ;;
