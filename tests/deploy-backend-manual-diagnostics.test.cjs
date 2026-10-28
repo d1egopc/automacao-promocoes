@@ -62,6 +62,8 @@ function makeFixture(scenario, { activeMismatch = false, switched = false } = {}
     path.join(root, "scripts", "guardian-v1.cjs"),
     path.join(workspace, "scripts", "guardian-v1.cjs")
   );
+  fs.copyFileSync(path.join(root, "scripts", "garimpei-infra-guard.py"),
+    path.join(workspace, "scripts", "garimpei-infra-guard.py"));
   run("git", ["-C", source, "init", "-q"]);
   run("git", ["-C", source, "config", "user.email", "fixture@example.invalid"]);
   run("git", ["-C", source, "config", "user.name", "Deploy fixture"]);

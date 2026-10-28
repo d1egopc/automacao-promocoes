@@ -37,6 +37,18 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Garimpei infrastructure - closed mount and retention on Linux
+        if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-infra-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          python3 -B tests/garimpei-infra-fixtures.py -v
+          node --test tests/garimpei-infra.test.cjs tests/radar-garimpei-sensor24h.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-ingress-observation-v1.test.cjs
+          node scripts/benchmark-garimpei-sensor24h.cjs
+          git diff --exit-code 711f864885710e03324735abbdef708d2f6f6d19 HEAD -- index.js modules utils marketplaces optimus-capture package.json package-lock.json
+          node --test tests/garimpei-compose-integration.test.cjs
       - name: Garimpei 24h sensor - privacy, bounded journal and on-demand read
         if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028'
         shell: bash
@@ -257,6 +269,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-garimpei-infra-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-garimpei-sensor24h-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-garimpei-observation-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;

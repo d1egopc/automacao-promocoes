@@ -16,6 +16,8 @@ const NON_RUNTIME_EXACT = new Set([
   "scripts/guardian-v1.cjs",
   "scripts/benchmark-gerente-observability-v2.cjs",
   "scripts/benchmark-garimpei-sensor24h.cjs",
+  "scripts/garimpei-infra-guard.py",
+  "scripts/garimpei-journal-cleanup.py",
   // Artefatos da extensão: testados no CI, nunca transportados no overlay Docker.
   "optimus-capture/adapters/magalu.js",
   "optimus-capture/local-worker/magalu-identity.js"
@@ -282,6 +284,10 @@ function testMatrix(plan) {
   const add = (id, file, command, args, compareBaseline = true, requiresBash = false) =>
     specs.set(id, { id, file, command, args, compareBaseline, requiresBash });
   add("syntax:index", "index.js", process.execPath, ["--check", "index.js"]);
+  if (plan.ignoredFiles?.includes("scripts/garimpei-infra-guard.py")) {
+    add("infra:garimpei-closed-mount", "tests/garimpei-infra.test.cjs", process.execPath,
+      ["--test", "tests/garimpei-infra.test.cjs"], false);
+  }
   add("encoding", "scripts/audit-encoding.cjs", process.execPath, ["scripts/audit-encoding.cjs"]);
   // Permanent release/CI gates only. Never imported by a commercial motor.
   add("telemetria:contrato-permanente", "tests/telemetria-permanent-contract.test.cjs", process.execPath,

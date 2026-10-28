@@ -1,0 +1,16 @@
+[Unit]
+Description=Bounded Garimpei diagnostic journal cleanup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=optimus
+Group=optimus
+ExecStart=/usr/bin/python3 /opt/optimus/infra/garimpei-journal-cleanup.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/optimus/observability/garimpei-sensor
+RestrictAddressFamilies=AF_UNIX
+UMask=0077

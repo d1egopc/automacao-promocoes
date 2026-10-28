@@ -1,0 +1,8 @@
+services:
+  backend:
+    volumes:
+      - type: bind
+        source: /opt/optimus/observability/garimpei-sensor
+        target: /var/log/optimus/garimpei-sensor
+        bind:
+          create_host_path: false
