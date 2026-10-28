@@ -43,7 +43,14 @@ function criarRotasMensageiroV3(deps = {}) {
   }
 
   function profileOr404(res, workspaceId, profileId) {
-    const profile = store.getProfile(workspaceId, profileId);
+    let profile;
+    try { profile = store.getProfile(workspaceId, profileId); }
+    catch (error) {
+      // A new authenticated workspace has no store entry yet. It has no
+      // profiles; do not create state or turn this expected miss into HTTP 500.
+      if (error.message !== "workspace_nao_encontrada") throw error;
+      profile = null;
+    }
     if (!profile) {
       res.status(404).json({ ok: false, codigo: "perfil_v3_nao_encontrado" });
       return null;

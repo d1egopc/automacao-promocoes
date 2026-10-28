@@ -37,6 +37,24 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Messenger readiness - isolated HTTP, handlers and persistence
+        if: github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          test -z "${OPTIMUS_MENSAGEIRO_V4_TARGETS:-}"
+          node --test tests/mensageiro-v3-*.test.cjs tests/mensageiro-v4.test.cjs tests/mensageiro-v4-canary.test.cjs tests/mensageiro-v4-ingress-probe.test.cjs tests/mensageiro-release-readiness.test.cjs tests/mensageiro-programacoes.test.cjs tests/mensageiro-bot-comandos.test.cjs tests/mensageiro-gerente-grupo.test.cjs
+          node tests/whatsapp-reconnect-seguro.test.js
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/universal-flow-queue-executor.test.js
+          node tests/radar-cobertura-v1.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/fila-viva-runtime-wiring.test.js
+          test "$(git diff --name-only f9cfc3865ce848c223c84f2e3f916764a25028d2 HEAD -- index.js modules optimus-capture package.json package-lock.json)" = modules/mensageiro-v3/routes.js
       - name: Exact Baileys packaging profile - isolated only
         if: github.ref == 'refs/heads/validation/baileys-buffer-packaging-20261026'
         run: |
@@ -313,7 +331,7 @@ jobs:
           node --test tests/telemetria-operacional.postgres.test.cjs
 
   v4-financial:
-    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026'
+    if: github.ref == 'refs/heads/validation/mensageiro-v4-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-canary-runtime-20261025' || github.ref == 'refs/heads/validation/mensageiro-v4-ingress-probe-20261026' || github.ref == 'refs/heads/validation/v4-admin-observation-20261026' || github.ref == 'refs/heads/validation/guardian-v1-messenger-readiness-20261028'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

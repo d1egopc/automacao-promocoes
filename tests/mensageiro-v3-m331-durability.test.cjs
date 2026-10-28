@@ -113,8 +113,12 @@ test("M3.3.1 — dois processos independentes compartilham o volume sem claim du
       "const { V3Store } = require(process.env.V3_STORE_MODULE);",
       "fs.writeFileSync(process.env.V3_READY, String(process.pid), { flag: 'wx' });",
       "while (!fs.existsSync(process.env.V3_START)) {}",
-      "const claim = new V3Store({ filePath: process.env.V3_STATE }).claimExecution(process.env.V3_WORKSPACE, 'same-event', { source: String(process.pid) });",
-      "process.stdout.write(JSON.stringify({ claim, pid: process.pid }));"
+      "const store = new V3Store({ filePath: process.env.V3_STATE });",
+      "const deadline = Date.now() + 5000;",
+      "async function claimOnce() { for (;;) {",
+      "try { const claim = store.claimExecution(process.env.V3_WORKSPACE, 'same-event', { source: String(process.pid) }); process.stdout.write(JSON.stringify({ claim, pid: process.pid })); return; }",
+      "catch (error) { if (error.code !== 'MENSAGEIRO_V3_LOCK_BUSY' || Date.now() >= deadline) throw error; await new Promise(resolve => setTimeout(resolve, 2)); }",
+      "} } claimOnce().catch(error => { console.error(error); process.exitCode = 1; });"
     ].join("\n");
     const children = ready.map((readyPath) => spawn(process.execPath, ["-e", script], {
       env: {

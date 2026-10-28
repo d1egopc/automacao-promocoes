@@ -145,6 +145,8 @@ async function main() {
     diagnosticarEntradaUpsert: args => diagnosticarEntradaUpsert({ ...args, env: ambienteV2,
       logger: { warn: (tag, payload) => { ordem.push("trace"); logs.push({ tag, payload: JSON.parse(payload) }); } } }),
     diagnosticoMensageiroV3() {},
+    // Existing Radar probe is optional and OFF in this Messenger fixture.
+    radarIngressObservation: { observeWrapper() {}, observeUpsert() {}, recordStage() {} },
     coberturaRadar: { flagAtiva: () => false, registrar() {}, criarCoberturaTraceId: () => "fixture",
       extrairFidelidadeTraceId: () => "", extrairMensagemId: () => "" },
     gerenteTraceEnabled: () => false,

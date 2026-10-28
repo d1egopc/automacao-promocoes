@@ -181,7 +181,7 @@ test("M3.3 — falha de persistência não retorna sucesso nem perde estado conf
   }
 });
 
-test("M3.3 — lock órfão antigo é recuperável e estado temporário não ressuscita configuração", () => {
+test("M3.3 — lock sem identidade falha fechado e temporário não ressuscita configuração", () => {
   const f = fixture();
   try {
     const store = new V3Store({ filePath: f.filePath });
@@ -191,7 +191,13 @@ test("M3.3 — lock órfão antigo é recuperável e estado temporário não res
     fs.writeFileSync(store.lockPath, "");
     const stale = new Date(Date.now() - 11 * 60 * 1000);
     fs.utimesSync(store.lockPath, stale, stale);
-    assert.equal(store.claimExecution("workspace-a", "after-crash"), true);
+    const committed = fs.readFileSync(f.filePath);
+    // The published lock-identity contract supersedes age-only recovery.
+    // An empty old lock does not prove that its original owner terminated.
+    assert.throws(() => store.claimExecution("workspace-a", "after-crash"), error =>
+      error.code === "MENSAGEIRO_V3_LOCK_BUSY" && error.reason === "owner_partial_or_invalid");
+    assert.deepEqual(fs.readFileSync(f.filePath), committed);
+    assert.equal(fs.readFileSync(store.lockPath, "utf8"), "");
     const restarted = new V3Store({ filePath: f.filePath });
     assert.ok(restarted.getProfile("workspace-a", profile.id));
     assert.equal(restarted.snapshot().revision > 0, true);
