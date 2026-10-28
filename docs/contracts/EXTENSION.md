@@ -52,6 +52,12 @@ No evento real Telegram 197029, o job 1007554 pertence a `user_pss60lus`; a task
 
 Validação executável: `tests/local-worker-platform-architecture.test.cjs` exercita Worker pessoal dedicado sem papel Admin Master, claim global, uso da mesma imagem por dois clientes com afiliados distintos e rejeição da loja técnica como afiliado estrangeiro. Reutilizar também os testes existentes de autenticação, idempotência e suporte Mercado Livre. A versão de código testada não comprova a versão da extensão instalada no PC ou a configuração runtime atual.
 
+## Magalu multiloja dinâmico
+
+A afiliação comercial é obtida exclusivamente da integração da workspace solicitante. Slugs de lojas não formam uma allowlist de nomes no código: uma nova loja configurada deve usar o mesmo conversor existente, sem alteração de código ou deploy por cliente. Os exemplos d1egopc, loja_brnofertas e mariadasdores em testes são fictícios para parametrização, não prova de existência de loja ou comissão.
+
+O Worker técnico compartilhado fornece identidade/imagem, nunca um afiliado universal. Workspace sem integração retorna integracao_ausente, sem herdar a loja técnica. Manter validação de host, produto, vendedor, loja esperada e prova por workspace, inclusive nos aliases antigos e na passagem OneLink → identidade canônica. Formato normalizado, link estrutural, página acessível, loja correta e comissão atribuída são níveis distintos de evidência. A prova efetiva de comissão exige confirmação externa e não pode ser presumida pelos testes.
+
 ## Empacotamento
 
 Gere ZIP diretamente da tree comprovada. `manifest.json` fica na raiz. Exclua `.git`, testes, logs, backups, worktrees, tokens/cookies e temporarios. Calcule SHA-256, tamanho e contagem antes de submeter ao gate humano.

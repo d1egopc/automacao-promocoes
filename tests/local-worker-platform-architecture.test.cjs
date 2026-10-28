@@ -5,11 +5,32 @@ const assert = require("node:assert/strict");
 const { criarLocalWorkerService } = require("../modules/local-worker/local-worker.service");
 const { criarLocalWorkerRepository } = require("../modules/local-worker/local-worker.repository");
 const { importarProdutoMagaluEngine } = require("../modules/engine/importer/adapters/magalu.adapter");
+const { gerarLinkAfiliadoMagaluSeguro, linkPertenceLojaMagalu } = require("../modules/marketplaces/magalu/magalu-affiliate-link");
 
 const productId = "123456789";
 const canonicalUrl = `https://www.magazineluiza.com.br/produto-fixture/p/${productId}/ud/poud/`;
 const imageUrl = `https://a-static.mlcdn.com.br/800x560/produto-fixture/loja/${productId}/fixture.jpg`;
 const technicalHref = `https://www.magazinevoce.com.br/magazined1egopc/produto-fixture/p/${productId}/ud/poud/`;
+
+test("the existing converter accepts dynamic stores and legacy aliases while retaining product and seller", () => {
+  const source = canonicalUrl + "?seller_id=vendedor_fixture";
+  for (const promoterId of ["d1egopc", "loja_brnofertas", "mariadasdores", "nova-loja-2026"]) {
+    const converted = gerarLinkAfiliadoMagaluSeguro(source, promoterId);
+    const url = new URL(converted.urlAfiliada);
+    assert.equal(url.hostname, "www.magazinevoce.com.br");
+    assert.equal(url.pathname, `/magazine${promoterId}/produto-fixture/p/${productId}/ud/poud/`);
+    assert.equal(url.searchParams.get("seller_id"), "vendedor_fixture");
+    for (const alias of [promoterId, `magazine${promoterId}`]) {
+      const legacy = `https://www.magazinevoce.com.br/${alias}/produto-fixture/p/${productId}/ud/poud/?seller_id=vendedor_fixture`;
+      assert.equal(linkPertenceLojaMagalu(legacy, promoterId), true);
+      assert.equal(gerarLinkAfiliadoMagaluSeguro(legacy, promoterId).urlAfiliada, legacy);
+      assert.equal(linkPertenceLojaMagalu(legacy, "foreign_workspace_store"), false);
+    }
+    const onelink = gerarLinkAfiliadoMagaluSeguro("https://magazineluiza.onelink.me/589508454/cykrl2vm", promoterId);
+    assert.equal(onelink.comprovado, false, "OneLink alone never establishes store affiliation");
+    assert.equal(onelink.urlAfiliada, "");
+  }
+});
 
 test("an authorized personal worker is dedicated without an Admin Master identity", async () => {
   const registrations = [];
@@ -59,7 +80,7 @@ test("the repository leases technical tasks globally and exposes no commercial w
   for (const key of ["clienteId", "workspaceId", "eventoId", "jobId"]) assert.equal(Object.hasOwn(result.task, key), false);
 });
 
-test("a shared technical image benefits two workspaces with independent affiliations", async () => {
+test("a shared technical image supports dynamic workspace stores without crossing affiliations", async () => {
   let cached;
   const task = { id: "image-task-fixture", marketplace: "magalu", productId, capability: "magalu_image_v1" };
   const service = criarLocalWorkerService({
@@ -81,7 +102,8 @@ test("a shared technical image benefits two workspaces with independent affiliat
     provaTecnica: { productId, skuConfirmado: true, hrefConfirmado: true, origem: "local_first_party", hrefProduto: technicalHref, hostFinal: "a-static.mlcdn.com.br" }
   });
   assert.equal(cached.proof.hrefProduto, technicalHref);
-  const integrations = { workspace_a: "lojaaa", workspace_b: "lojabb" };
+  // Fictional integration values; these do not assert existence or commission.
+  const integrations = { workspace_a: "d1egopc", workspace_b: "loja_brnofertas", workspace_c: "mariadasdores", workspace_new: "nova-loja-2026" };
   const outputs = [];
   for (const [workspaceId, promoter] of Object.entries(integrations)) {
     const ownUrl = `https://www.magazinevoce.com.br/magazine${promoter}/produto-fixture/p/${productId}/ud/poud/`;
@@ -108,10 +130,30 @@ test("a shared technical image benefits two workspaces with independent affiliat
     // The published affiliation contract stores the normalized store path,
     // including the "magazine" prefix, rather than the unnormalized input.
     assert.equal(result.metadata.afiliacaoWorkspace.slugLoja, `magazine${promoter}`);
-    assert.doesNotMatch(JSON.stringify(result), /d1egopc|personal_owner_fixture|personal_pc|fixture-lease/);
+    assert.doesNotMatch(JSON.stringify(result), /personal_owner_fixture|personal_pc|fixture-lease/);
+    if (promoter !== "d1egopc") assert.doesNotMatch(result.linkAfiliado, /d1egopc/);
     outputs.push(result);
   }
-  assert.notEqual(outputs[0].linkAfiliado, outputs[1].linkAfiliado);
+  assert.equal(new Set(outputs.map(result => result.linkAfiliado)).size, Object.keys(integrations).length);
+});
+
+test("a workspace without Magalu integration fails closed before using technical worker affiliation", async () => {
+  for (const integration of [null, {}, { credenciais: {} }, { credenciais: { promoterId: "" } }]) {
+    let resolverCalls = 0;
+    const result = await importarProdutoMagaluEngine({
+      job: { id: "missing-integration-fixture", cliente_id: "workspace_without_integration" },
+      evento: { texto_original: `Produto fixture\nPor R$ 85,41\n${canonicalUrl}`, links_extraidos: [canonicalUrl] },
+      links: [{ url_original: canonicalUrl, marketplace_detectado: "magalu", metadata: {} }],
+      deps: {
+        getIntegracaoCliente: () => integration,
+        resolverFatosMagalu: async () => { resolverCalls++; throw new Error("must_not_resolve_without_integration"); }
+      }
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.motivo, "integracao_ausente");
+    assert.equal(result.linkAfiliado, undefined);
+    assert.equal(resolverCalls, 0);
+  }
 });
 
 test("a technical D1EGOPC page cannot replace another workspace affiliate URL", async () => {
