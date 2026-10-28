@@ -193,6 +193,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
             refs/heads/validation/telemetria-v11-panel-first-20261027) base=ba966b2022a5489e2c794d79513714cb55accf97 ;;
@@ -226,6 +227,19 @@ jobs:
           test "$baseline_status" -eq 1
           test "$(grep -c '^not ok' "$RUNNER_TEMP/magalu-baseline-reproduction.log")" -eq 2
           ! grep -Eq 'unexpected_fixture_query|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND' "$RUNNER_TEMP/magalu-baseline-reproduction.log"
+      - name: Classifier and Copy focal regression - offline only
+        if: github.ref == 'refs/heads/validation/guardian-v1-classifier-copy-focal-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --test tests/classificador-copy-focal.test.cjs tests/classificador-universal-v3.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-v3-magalu-evidencia.test.cjs tests/classificador-v3-legacy-parity.test.cjs
+          node --test tests/copy-inteligente-local-v2.test.js tests/copy-contextual-local.test.js tests/copy-inteligente-c3.test.js tests/copy-c3-contrato-publico.test.js
+          mkdir "$RUNNER_TEMP/classifier-copy-baseline"
+          git archive f800da32e987c740854a9de02d5bcc93d7f149e9 | tar -x -C "$RUNNER_TEMP/classifier-copy-baseline"
+          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classifier-copy-baseline" --benchmark --out "$RUNNER_TEMP/classifier-copy-replay.json"
+          git diff --exit-code f800da32e987c740854a9de02d5bcc93d7f149e9 HEAD -- modules/radar modules/teleradar modules/engine modules/fila modules/executor utils/destinos.js
       - name: Deploy mechanism regressions
         shell: bash
         run: |

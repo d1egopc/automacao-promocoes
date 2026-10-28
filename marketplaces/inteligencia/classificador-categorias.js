@@ -800,7 +800,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
     categoria = CATEGORIA.diversos;
     motivo = "conteudo_adulto_sem_categoria_habilitada";
-  } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate)\b/.test(titulo)) {
+  } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate|parafusadeira|furadeira)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
     categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
@@ -814,7 +814,10 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   } else if (!/^(?:(?:kit|jogo) (?:de )?)?(?:manual|curso|capa|mangueira|adaptador|bico|peca|placa|cabo)\b/.test(titulo) &&
       (/\b(?:maquina (?:inversora )?(?:de )?solda|inversora (?:para |de )?solda)\b/.test(titulo) ||
        /\blavadora (?:de )?alta pressao\b/.test(titulo) ||
-       (/\balicate\b/.test(titulo) && /\b(?:relojoeiro|(?:reparo|conserto) de relogios?)\b/.test(titulo)))) {
+       /\b(?:parafusadeira|furadeira)\b/.test(titulo) ||
+       (/\balicate\b/.test(titulo) && !/\b(?:cuticula|unha|manicure|pedicure)\b/.test(titulo) &&
+        (/\b(?:relojoeiro|(?:reparo|conserto) de relogios?)\b/.test(titulo) ||
+         (/\b(?:fabricacao|reparo|conserto|montagem)\b/.test(titulo) && /\b(?:joias|bijuterias)\b/.test(titulo)))))) {
     categoria = CATEGORIA.ferramentas;
   } else if (/\b(?:edt|edp)\b/.test(titulo) &&
       /\b(?:perfume|fragrancia|eau de toilette|eau de parfum|hugo boss|giorgio armani)\b|\b\d+(?: \d+)?\s*ml\b/.test(titulo) &&
@@ -834,7 +837,8 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
       (/\b(?:graxa|oleo)\b/.test(titulo) && /\b(?:carretilhas?|molinetes?)\b/.test(titulo))) {
     categoria = CATEGORIA.pesca;
   }
-  if (categoria === CATEGORIA.pesca && /\b(?:notebook|smartphone|furadeira|parafusadeira|geladeira|perfume)\b/.test(titulo)) {
+  if ((categoria === CATEGORIA.pesca && /\b(?:notebook|smartphone|furadeira|parafusadeira|geladeira|perfume)\b/.test(titulo)) ||
+      (categoria === CATEGORIA.ferramentas && /\biscas? (?:artificial|artificiais|frog|sapo|jig)\b/.test(titulo))) {
     categoria = CATEGORIA.diversos;
     motivo = "naturezas_produto_conflitantes";
   }

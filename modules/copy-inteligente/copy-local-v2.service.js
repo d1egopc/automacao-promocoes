@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { CATEGORIAS_OPTIMUS, categoriaExiste } = require("../../marketplaces/inteligencia/categorias-globais");
-const { classificarCategoriaOferta } = require("../../marketplaces/inteligencia/classificador-categorias");
+const { classificarCategoriaOferta, avaliarEvidenciaCategoria } = require("../../marketplaces/inteligencia/classificador-categorias");
 const { BANCO_ASSOCIATIVO_V2 } = require("./banco-associativo.v2");
 const { familiaDaCategoriaCopyV2, FAMILIA_OPORTUNIDADE_V2 } = require("./familias-v2");
 const { normalizarSinaisCopy, texto, normalizar } = require("./resolver-intencao");
@@ -242,6 +242,8 @@ function produtoContextualCopyLocalV2(titulo = "") {
   const marcaNike = /\bnike\b/.test(base) ? " Nike" : "";
   const modelo = original.match(/\b[A-Z]{1,6}\d{2,6}[A-Z0-9-]*\b/)?.[0] || "";
   const produtos = [
+    [/\bbrinquedos?\b/, "Brinquedo"],
+    [/\balicate\b/, "Alicate"], [/\bparafusadeira\b/, "Parafusadeira"],
     [/\bcaixa de som\b/, "Caixa de som"], [/\bsmart tv\b|\btelevisao\b|\btv\b/, "TV"],
     [/\brobo aspirador\b|\baspirador\b/, "Aspirador"], [/\bvara de pesca\b|\bvara\b/, "Vara de pesca"],
     [/\bsmartphone\b|\bcelular\b/, `Smartphone${modelo ? ` ${modelo}` : ""}`],
@@ -327,7 +329,7 @@ function construcoesContextuaisCopyLocalV2({ oferta = {}, sinais = {}, familia =
     construcoes = diretas([
       `${nome} por esse valor? Difícil passar reto ${emoji}`, `Por esse preço, ${nome} merece uma olhada 👀`,
       `Olha: ${nome} nesse preço ${emoji}`, `Com esse valor, ${nome} chamou atenção 👀`,
-      `Esse preço combina com ${nome}? Vale o clique ${emoji}`, `Vale abrir: ${nome} por esse valor 👀`,
+      `Confira os detalhes desta oferta 👀`, `Vale abrir: ${nome} por esse valor 👀`,
       `Nesse preço, ${nome} chamou atenção ${emoji}`, `Dá uma conferida em ${nome} nesse valor 👀`,
       `Oferta de ${nome} nesse preço? Merece atenção ${emoji}`, `Se estava de olho em ${nome}, vale conferir 👀`
     ]);
@@ -375,6 +377,12 @@ function categoriaAliasOficialCopyLocalV2(categoria = "") {
 }
 
 function categoriaOficialCopyLocalV2(oferta = {}, sinais = normalizarSinaisCopy(oferta)) {
+  // Reutiliza a mesma prova de natureza do classificador, inclusive para
+  // corrigir categorias antigas; não consulta API nem altera a oferta.
+  const evidencia = avaliarEvidenciaCategoria(oferta, sinais.tituloOriginal || "");
+  if (evidencia) return evidencia.categoria;
+  if (oferta.baixaConfianca === true || oferta.categoriaBaixaConfianca === true)
+    return "Diversos";
   const declarada = texto(sinais.categoria || oferta.categoria || oferta.categoriaProduto);
   if (categoriaExiste(declarada)) return declarada;
   const aliasOficial = categoriaAliasOficialCopyLocalV2(declarada);

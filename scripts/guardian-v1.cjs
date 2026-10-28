@@ -304,6 +304,8 @@ function testMatrix(plan) {
     add("engine:claim-recovery", "tests/engine-validator-claim-recovery.test.js", process.execPath, ["tests/engine-validator-claim-recovery.test.js"]);
   }
   if (plan.runtimeFiles.some(file => file.includes("classificador-categorias") || file.startsWith("modules/inteligencia-universal/") || file === "marketplaces/aliexpress/importar.js" || file.includes("magalu-parser.js"))) {
+    add("categorias:copy-natureza-focal", "tests/classificador-copy-focal.test.cjs", process.execPath,
+      ["--test", "tests/classificador-copy-focal.test.cjs"], false);
     add("categorias:v3-evidencias", "tests/classificador-universal-v3.test.cjs", process.execPath,
       ["--test", "tests/classificador-universal-v3.test.cjs", "tests/classificador-v3-evidencia-marketplace.test.cjs", "tests/classificador-v3-magalu-evidencia.test.cjs", "tests/classificador-v3-legacy-parity.test.cjs"], false);
     for (const name of ["classificador-universal-v2-categorias", "categorias-reducao-diversos", "inteligencia-universal-decisao",
