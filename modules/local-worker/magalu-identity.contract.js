@@ -48,7 +48,9 @@ function sanitizarUrlProdutoMagalu(valor = "") {
   try {
     const url = new URL(texto(valor));
     if (!produtoIdUrlMagalu(url.toString())) return "";
-    return `https://${url.hostname.toLowerCase()}${url.pathname.slice(0, 512)}`;
+    const sellerId = texto(url.searchParams.get("seller_id"));
+    const sellerQuery = /^[a-z0-9_-]{1,80}$/i.test(sellerId) ? "?seller_id=" + encodeURIComponent(sellerId) : "";
+    return "https://" + url.hostname.toLowerCase() + url.pathname.slice(0, 512) + sellerQuery;
   } catch (_) { return ""; }
 }
 

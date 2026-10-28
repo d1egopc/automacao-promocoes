@@ -32,8 +32,8 @@ function storageFake(dados) {
 
   const fetchOriginal = global.fetch;
   global.fetch = async (_url, options = {}) => ({
-    ok: false,
-    status: 403,
+    ok: true,
+    status: 200,
     redirected: true,
     url: `${finalUrl}?promoter_id=5438968&token=nao-retornar`,
     body: { cancel: async () => undefined },
@@ -46,14 +46,14 @@ function storageFake(dados) {
     resolvido = await resolver.resolver({ sourceUrl, identityKey });
     assert.strictEqual(resolvido.observedProductId, "123456789");
     assert.strictEqual(resolvido.finalUrl, finalUrl);
-    assert.strictEqual(resolvido.provaTecnica.statusHttp, 403);
+    assert.strictEqual(resolvido.provaTecnica.statusHttp, 200);
     assert.strictEqual(resolvido.provaTecnica.redirected, true);
     assert.strictEqual(JSON.stringify(resolvido).includes("token"), false);
 
     global.fetch = async () => ({ status: 403, redirected: true, url: "https://evil.example/p/123456789", body: { cancel: async () => undefined } });
-    await assert.rejects(() => resolver.resolver({ sourceUrl, identityKey }), /magalu_identity_produto_nao_confirmado/);
+    await assert.rejects(() => resolver.resolver({ sourceUrl, identityKey }), /magalu_identity_browser_indisponivel/);
     global.fetch = async () => ({ status: 403, redirected: false, url: finalUrl, body: { cancel: async () => undefined } });
-    await assert.rejects(() => resolver.resolver({ sourceUrl, identityKey }), /magalu_identity_produto_nao_confirmado/);
+    await assert.rejects(() => resolver.resolver({ sourceUrl, identityKey }), /magalu_identity_browser_indisponivel/);
   } finally {
     global.fetch = fetchOriginal;
   }

@@ -325,16 +325,19 @@
     return null;
   }
 
-  function precoNoTexto(textoPagina, atual) {
+  function precoNoTexto(_textoPagina, atual, html = "") {
     const candidatos = [];
     const re = /\b(?:de|antes|pre[cç]o\s+anterior|valor\s+anterior)\s*:?(?:\s*R\$)?\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2}|[0-9]+(?:[.,][0-9]{2})?)/gi;
-    let match;
-    while ((match = re.exec(textoPagina))) {
-      const antes = textoPagina.slice(Math.max(0, match.index - 32), match.index);
-      const depois = textoPagina.slice(match.index, match.index + match[0].length + 24);
-      if (/\b\d{1,2}x\s*$/i.test(antes) || /\b(?:em\s+\d{1,2}x|cart[aã]o|cr[eé]dito|d[eé]bito|sem\s+juros)\b/i.test(depois)) continue;
-      const numero = contrato.precoNumero(match[1]);
-      if (numero && numero > (atual || 0) && !candidatos.includes(numero)) candidatos.push(numero);
+    for (const bloco of blocosPrecoEstruturados(html)) {
+      let match;
+      while ((match = re.exec(bloco.texto))) {
+        const antes = bloco.texto.slice(Math.max(0, match.index - 32), match.index);
+        const depois = bloco.texto.slice(match.index, match.index + match[0].length + 24);
+        if (/\b\d{1,2}x\s*$/i.test(antes) || /\b(?:em\s+\d{1,2}x|cart[aã]o|cr[eé]dito|d[eé]bito|sem\s+juros)\b/i.test(depois)) continue;
+        const numero = contrato.precoNumero(match[1]);
+        if (numero && numero > (atual || 0) && !candidatos.includes(numero)) candidatos.push(numero);
+      }
+      re.lastIndex = 0;
     }
     return candidatos[0] || null;
   }
@@ -358,7 +361,7 @@
     const precoAtual = faixaPreco
       ? null
       : primeiroNumero(oferta.price, oferta.lowPrice, oferta.highPrice, meta(htmlTexto, "product:price:amount"));
-    const precoAntigo = precoAnterior(produto, precoAtual, htmlTexto, textoPagina) || precoNoTexto(textoPagina, precoAtual);
+    const precoAntigo = precoAnterior(produto, precoAtual, htmlTexto, textoPagina) || precoNoTexto(textoPagina, precoAtual, htmlTexto);
     let produtoIdUrl = "";
     try {
       produtoIdUrl = detector.produtoIdMagalu?.(new URL(urlOriginal)) || "";

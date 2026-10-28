@@ -128,6 +128,32 @@ function htmlProduto({ id = "afh3e1g80j", imagem = "https://a-static.mlcdn.com.b
   );
   assert.strictEqual(deReal.precoAnterior, 129.9, "DE explicito continua sendo aceito");
 
+  const galaxySemPrecoAnterior = magalu.capturarMagaluDeHtml(
+    `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product",
+      sku: "240466500",
+      name: "Celular Samsung Galaxy A07 128GB",
+      image: ["https://a-static.mlcdn.com.br/galaxy-a07.jpg"],
+      offers: { price: "798.30" }
+    })}</script><div data-testid="product-price"><span>R$ 798,30 no Pix</span></div>
+    <section id="produtos-relacionados">Outro produto: De: R$ 5.000,00</section>`,
+    "https://www.magazineluiza.com.br/celular-samsung-galaxy-a07/p/240466500/te/ga07/"
+  );
+  assert.strictEqual(galaxySemPrecoAnterior.precoAnterior, null,
+    "preco antigo de produto relacionado nao pertence ao Galaxy A07");
+  const galaxyComDeExplicito = magalu.capturarMagaluDeHtml(
+    `<script type="application/ld+json">${JSON.stringify({
+      "@type": "Product",
+      sku: "240466500",
+      name: "Celular Samsung Galaxy A07 128GB",
+      image: ["https://a-static.mlcdn.com.br/galaxy-a07.jpg"],
+      offers: { price: "798.30" }
+    })}</script><div data-testid="product-price"><del>De: R$ 1.099,00</del><span>R$ 798,30 no Pix</span></div>`,
+    "https://www.magazineluiza.com.br/celular-samsung-galaxy-a07/p/240466500/te/ga07/"
+  );
+  assert.strictEqual(galaxyComDeExplicito.precoAnterior, 1099,
+    "DE explicito do bloco principal continua elegivel");
+
   const madesaHtml = `<script type="application/ld+json">${JSON.stringify({
     "@context": "https://schema.org",
     "@type": "Product",

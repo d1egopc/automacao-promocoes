@@ -14,6 +14,7 @@ on:
       - validation/telemetria-operacional-20261027
       - validation/telemetria-v11-panel-first-20261027
       - validation/magalu-recovery-20261027
+      - validation/magalu-firstparty-worker-v3-20261027
       - validation/classificador-universal-v3-20261027
       - feature/landing-page-v1-*
       - validation/landing-v13-media-buttons-20261025
@@ -132,6 +133,20 @@ jobs:
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
+      - name: Magalu first-party Worker - isolated fixtures only
+        if: github.ref == 'refs/heads/validation/magalu-firstparty-worker-v3-20261027'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check optimus-capture/local-worker/magalu-identity.js
+          node --check optimus-capture/adapters/magalu.js
+          node --test tests/magalu-firstparty-identity-fallback.test.cjs tests/magalu-local-worker-identity.test.js tests/optimus-capture-magalu.test.js tests/optimus-capture-magalu-opportunity.test.js tests/magalu-v2-golden-path.test.js tests/magalu-recovery-retry.test.cjs tests/magalu-image-resolver.test.js tests/magalu-identity-engine-importer.test.js tests/local-worker-platform-architecture.test.cjs tests/optimus-capture-extension.test.js tests/manual-v2-import-magalu.test.js > "$RUNNER_TEMP/magalu-firstparty-tests.log" 2>&1 || {
+            tail -n 120 "$RUNNER_TEMP/magalu-firstparty-tests.log"
+            exit 1
+          }
+          tail -n 20 "$RUNNER_TEMP/magalu-firstparty-tests.log"
       - name: Telemetry isolated authorization and read contracts
         if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027'
         run: |
