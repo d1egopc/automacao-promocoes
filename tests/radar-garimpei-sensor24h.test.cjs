@@ -151,3 +151,12 @@ test("new HTTP controls require Admin Master; read calls do not arm or mutate se
   assert.equal((await activate({isAdmin:true,body:{}},{})).reason,"sensor_confirmation_required");
   assert.equal(starts,0);
 });
+test("32 messages rejected before Radar stop the sensor without waiting for missing downstream stages",async()=>{
+  const f=fixture();await f.o.startSensor(f.context);
+  for(let i=0;i<32;i++){
+    const message=f.message(String(i));f.ingest(message);
+    f.o.recordStage({...f.context,message,stage:"listener_gate",decision:"ignored",reason:"buffer_recovery_suppressed"});
+  }
+  assert.equal(f.o.status().state,"stopped");assert.equal(f.o.status().stopReason,"event_limit");
+  assert.equal(f.entries.filter(e=>e.kind==="alert").length,32);
+});

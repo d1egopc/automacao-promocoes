@@ -413,6 +413,7 @@ function createRadarIngressObservation({
       journalEntry("stage", record, last);
       if (stage === "engine_event" || stage === "listener_gate" ||
           (stage === "radar_decision" && engineExpected !== true)) alertRecord(record);
+      if (!run.accepting && run.state === "active" && run.records.every(item => item.alerted)) finish("event_limit");
     }
 
     const eventoConcluido = item => {
