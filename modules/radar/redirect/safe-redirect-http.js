@@ -147,13 +147,15 @@ function umaRequisicao(url, endereco, { deadlineAt, maxBytes, headers, requestIm
 }
 
 async function obterHttpSeguro(urlTexto, { timeout = 4500, maxRedirects = 5, maxBytes = 1024 * 1024,
-  headers = {}, lookup = dns.lookup, requestImpl, deadlineAt: deadlineConfigurado } = {}) {
+  headers = {}, lookup = dns.lookup, requestImpl, deadlineAt: deadlineConfigurado,
+  maxBytesForUrl = null, maxTotalBytes = Infinity } = {}) {
   const prazo = Number.isFinite(Number(deadlineConfigurado))
     ? Number(deadlineConfigurado)
     : performance.now() + Math.max(0, Number(timeout) || 0);
   const visitados = new Set();
   let atual = urlTexto;
   const hops = [];
+  let bytesRead = 0;
   for (let passo = 0; passo <= maxRedirects; passo += 1) {
     const url = validarUrlPublica(atual);
     if (visitados.has(url.href)) throw new Error("REDIRECT_LOOP");
@@ -167,7 +169,12 @@ async function obterHttpSeguro(urlTexto, { timeout = 4500, maxRedirects = 5, max
     ]).finally(() => clearTimeout(timerDns));
     const restante = prazo - performance.now();
     if (restante <= 0) throw new Error("REDIRECT_TIMEOUT");
-    const resposta = await umaRequisicao(url, endereco, { deadlineAt: prazo, maxBytes, headers, requestImpl });
+    const escolhido = maxBytesForUrl ? Number(maxBytesForUrl(url)) : maxBytes;
+    if (!Number.isFinite(escolhido) || escolhido <= 0) throw new Error("REDIRECT_BODY_LIMIT");
+    const limite = Math.min(Number(maxBytes), escolhido, Number(maxTotalBytes) - bytesRead);
+    if (!Number.isFinite(limite) || limite <= 0) throw new Error("REDIRECT_BODY_LIMIT");
+    const resposta = await umaRequisicao(url, endereco, { deadlineAt: prazo, maxBytes: limite, headers, requestImpl });
+    bytesRead += Buffer.byteLength(resposta.data);
     hops.push({ url: url.href, status: resposta.status });
     if (resposta.status >= 300 && resposta.status < 400 && resposta.location) {
       if (passo === maxRedirects) throw new Error("REDIRECT_LIMIT");
@@ -175,7 +182,7 @@ async function obterHttpSeguro(urlTexto, { timeout = 4500, maxRedirects = 5, max
       continue;
     }
     return { status: resposta.status, data: resposta.data,
-      request: { res: { responseUrl: url.href } }, hops };
+      request: { res: { responseUrl: url.href } }, hops, bytesRead };
   }
   throw new Error("REDIRECT_LIMIT");
 }

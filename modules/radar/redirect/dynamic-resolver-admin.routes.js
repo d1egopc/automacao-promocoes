@@ -12,7 +12,7 @@ const {
   chaveIdentidadeMagalu, produtoIdUrlMagalu, validarResultadoMagaluIdentity
 } = require("../../local-worker/magalu-identity.contract");
 const {
-  detectarMarketplaceRedirect, listarResolversRedirect, resolverRedirectUniversal,
+  detectarMarketplaceRedirect, listarResolversRedirect, resolverRedirectUniversal, resolverHttpGenerico,
   urlAmazonComAsinExplicito, urlMercadoLivreComMlbExplicito
 } = require("./redirect-resolver");
 
@@ -24,7 +24,7 @@ const segmentosEstruturais = new Set([
 const papeisPreview = new Set(["nao_informado", "produto", "app", "pc", "moedas", "moda", "resgate"]);
 const metodosPreview = new Set(["http_redirect", "html_contextual", "html_marketplace_url",
   "meta_refresh", "window_location", "parametro_e_html_produto", "http_sem_redirect",
-  "html_static_base64"]);
+  "html_static_base64", "promozone_api"]);
 
 // Completa apenas a classificacao da prévia com o host oficial da Engine.
 // O fallback textual de detectarMarketplaceLink não pode autorizar um host citado em query/path.
@@ -130,6 +130,7 @@ function urlDebugSeguro(valor) {
 }
 
 function tipoResultado(resultado) {
+  if (resultado.produtoConfirmado === true) return "produto";
   const url = resultado.urlExpandida || resultado.urlFinal || "";
   const classificacao = classificarLinkEngine({ marketplace: resultado.marketplaceDetectado, url });
   if (classificacao.papelLink && classificacao.papelLink !== "desconhecido") return classificacao.papelLink;
@@ -145,15 +146,17 @@ function diagnosticoSeguro(entrada, resultado) {
     destino: urlDebugSeguro(final),
     marketplace: resultado.ok ? resultado.marketplaceDetectado : "",
     tipo: resultado.ok ? tipoResultado(resultado) : "nao_determinado",
-    metodo: resultado.metodo || "",
-    motivo: resultado.ok ? "validado" : (resultado.motivo || "destino_invalido"),
+    metodo: metodosPreview.has(resultado.metodo) ? resultado.metodo : "nao_comprovado",
+    motivo: resultado.ok ? "validado" : normalizarMotivoTecnicoRedirect(resultado),
+    statusHttp: Number.isInteger(Number(resultado.statusHttp)) && Number(resultado.statusHttp) > 0
+      ? Number(resultado.statusHttp) : null,
     // O resolvedor não expõe headers, cookies, queries ou credenciais.
     hops: Array.isArray(resultado.hops) ? resultado.hops.map(hop => urlDebugSeguro(hop.url)) : []
   };
 }
 
 function registroPublico(registro) {
-  const { urlExemplo: _privado, ...publico } = registro;
+  const { urlExemplo: _privado, workspaceId: _operador, ...publico } = registro;
   return publico;
 }
 
@@ -161,24 +164,96 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   safeHttpDeps = null, obterIdentidadeMercadoLivre = null, obterIdentidadeMagalu = null } = {}) {
   const router = express.Router();
   const getStore = () => registry || registroDinamicoPadrao();
+  // The universal resolver's explicit administrative strategy uses DNS-pinned
+  // HTTP and existing public destination APIs, never conversion/affiliate APIs.
+  const resolveInspection = resolve;
+  const exigeProvaProduto = resolve === resolverRedirectUniversal;
+  const operador = req => String(req.usuario?.workspaceId || req.usuario?.clienteId || req.usuario?.id || "");
+  const visivel = (registro, req) => registro?.estado !== "investigacao_pendente" ||
+    Boolean(operador(req) && registro.workspaceId === operador(req));
+  function familiaOficial(host) {
+    return Boolean(marketplacePreview(`https://${host}/`)) || listarResolversRedirect().some(item =>
+      item.dominios.some(dominio => host === dominio || host.endsWith(`.${dominio}`)));
+  }
+  async function inspecionar(entrada) {
+    if (typeof entrada !== "string" || entrada !== entrada.trim() || !entrada || entrada.length > 2048)
+      throw new Error("URL_EXEMPLO_INVALIDA");
+    let resultado;
+    try {
+      validarUrlPublica(entrada);
+      resultado = await resolveInspection(entrada, { adminValidation: true, secureDynamic: true, resolucaoEmCamadas: true,
+        dynamicRegistry: { localizar: () => null }, descobertaContextual: true,
+        timeout: 4500, maxRedirects: 5, ...(safeHttpDeps ? { safeHttpDeps } : {}) });
+    } catch (error) {
+      resultado = { ok: false, motivo: error.message === "URL_BLOQUEADA_SEGURANCA"
+        ? "URL_BLOQUEADA_SEGURANCA" : "redirect_bloqueado" };
+    }
+    const final = resultado.urlExpandida || resultado.urlFinal || "";
+    const marketplace = marketplacePreview(final);
+    const candidato = resultado.ok === true && Boolean(marketplace) && marketplace === resultado.marketplaceDetectado;
+    const identidade = candidato && Boolean(resultado.chaveCanonica || tipoResultado(resultado) === "produto");
+    const confirmado = candidato && resultado.produtoConfirmado === true;
+    const resolvido = candidato && identidade && (!exigeProvaProduto || confirmado);
+    const motivo = resolvido ? null : candidato ? "identidade_nao_comprovada" : normalizarMotivoTecnicoRedirect(resultado);
+    const bloqueado = motivo === "URL_BLOQUEADA_SEGURANCA";
+    let familia = null;
+    try { const f = inferirFamiliaRascunho(entrada); familia = { host: f.host, pathPrefix: f.pathPrefix, pathMode: f.pathMode }; } catch {}
+    const host = (() => { try { return new URL(entrada).hostname.toLowerCase(); } catch { return ""; } })();
+    const oficial = familiaOficial(host);
+    const existente = getStore().listar().find(item => item.estado !== "investigacao_pendente" &&
+      item.host === host && (familia ? item.pathPrefix === familia.pathPrefix : true));
+    const debug = diagnosticoSeguro(entrada, resultado);
+    let pistaParametro = "";
+    try {
+      const origem = new URL(entrada);
+      for (const chave of ["url", "destination", "dest", "redirect", "ued"]) {
+        const valor = origem.searchParams.get(chave);
+        if (!valor) continue;
+        const destino = validarUrlPublica(valor);
+        if (marketplacePreview(destino.href)) { pistaParametro = urlDebugSeguro(destino.href); break; }
+      }
+    } catch { /* A hint is never fetched, trusted, or used to authorize a resolver. */ }
+    const etapa = bloqueado ? "seguranca" : resolvido ? "concluido" : candidato ? "identidade" :
+      motivo === "redirect_timeout" || motivo === "redirect_bloqueado" ? "rede" :
+      /^http_status_/.test(motivo || "") || motivo === "REDIRECT_BODY_LIMIT" ? "http" :
+      ["REDIRECT_LOOP", "REDIRECT_LIMIT", "limite_redirect_html", "redirect_destino_nao_permitido"].includes(motivo) ? "redirect" : "html";
+    return { ok: true, resultado: bloqueado ? "bloqueado_seguranca" : resolvido ? "resolvido" : "investigacao_pendente",
+      estado: resolvido ? "oferta_candidata" : candidato ? "link_intermediario" : "falha_resolucao", host,
+      caminhoSanitizado: debug.entrada.slice(host.length) || "/",
+      urlOriginalSanitizada: debug.entrada, urlExpandidaSanitizada: debug.destino,
+      marketplaceReconhecido: marketplacePreview(entrada) || "nao_comprovado",
+      marketplaceCandidato: candidato ? marketplace : "nao_comprovado",
+      metodo: metodosPreview.has(resultado.metodo) ? resultado.metodo : "nao_comprovado",
+      motivoTecnico: motivo, etapa, statusHttp: debug.statusHttp,
+      pistaParametro, coberturaHops: Array.isArray(resultado.hops) ? "registrada" : "indisponivel",
+      hops: (resultado.hops || []).slice(0, 6).map(hop => ({ url: urlDebugSeguro(hop.url), status: Number(hop.status) || null })),
+      destinoHtml: /html|meta_refresh|window_location/.test(resultado.metodo || "") ? debug.destino : "",
+      identidade: confirmado ? "comprovada" : identidade ? "candidata" : "nao_comprovada",
+      evidencia: candidato && resultado.evidencia === "cta_unica_em_produto" ? "cta_unica_em_produto" : "",
+      familia, resolverOficial: oficial,
+      cadastroExistente: existente ? { id: existente.id, ativo: existente.ativo, estado: existente.estado || "legado" } : null,
+      rascunhoElegivel: resolvido && Boolean(familia) && !oficial && !existente,
+      investigacaoElegivel: !bloqueado && !resolvido,
+      produtoConfirmado: confirmado, afiliacaoConfirmada: false, prontoComercial: false };
+  }
   async function descobrir(urlExemplo) {
     const familia = inferirFamiliaRascunho(urlExemplo);
     validarUrlPublica(familia.urlExemplo);
-    if (listarResolversRedirect().some(item => item.dominios.some(host =>
-      familia.host === host || familia.host.endsWith(`.${host}`)))) throw new Error("RESOLVER_HARDCODED");
+    if (familiaOficial(familia.host)) throw new Error("RESOLVER_HARDCODED");
     // O modo administrativo não consulta a allowlist ativa e não a modifica.
     const resultado = await resolve(familia.urlExemplo, {
-      adminValidation: true, dynamicRegistry: { localizar: () => null },
+      adminValidation: true, resolucaoEmCamadas: true, dynamicRegistry: { localizar: () => null },
       descobertaContextual: true, timeout: 4500, maxRedirects: 5,
       ...(safeHttpDeps ? { safeHttpDeps } : {})
     });
     const final = resultado.urlExpandida || resultado.urlFinal || "";
     const marketplace = marketplacePreview(final);
-    const ok = resultado.ok === true && Boolean(marketplace) &&
+    const ok = resultado.ok === true && (!exigeProvaProduto || resultado.produtoConfirmado === true) && Boolean(marketplace) &&
       marketplace === resultado.marketplaceDetectado;
     return { familia, resultado, ok, marketplace: ok ? marketplace : "", metodo: ok ? resultado.metodo : "",
       evidencia: ok && resultado.evidencia === "cta_unica_em_produto" ? resultado.evidencia : "",
-      debug: diagnosticoSeguro(familia.urlExemplo, resultado) };
+      debug: diagnosticoSeguro(familia.urlExemplo, !ok && resultado.ok === true
+        ? { ...resultado, ok: false, motivo: "identidade_nao_comprovada" } : resultado) };
   }
   async function descobrirPreview(urlExemplo) {
     const analise = await descobrir(urlExemplo);
@@ -235,18 +310,23 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
       pathMode: analise.familia.pathMode },
       metodo: analise.metodo, destinoCandidato: analise.ok ? analise.debug.destino : "",
       marketplaceCandidato: analise.marketplace || "nao_comprovado", evidencia: analise.evidencia || "",
-      motivo: analise.debug.motivo, produtoConfirmado: false, afiliacaoConfirmada: false };
+      motivo: analise.debug.motivo, statusHttp: analise.debug.statusHttp,
+      motivoTecnico: analise.ok ? null : normalizarMotivoTecnicoRedirect(analise.resultado),
+      hops: analise.debug.hops, produtoConfirmado: analise.ok && analise.resultado.produtoConfirmado === true, afiliacaoConfirmada: false };
   }
   async function validar(entrada) {
     validarUrlPublica(entrada);
-    const resultado = await resolve(entrada, { adminValidation: true, timeout: 4500, maxRedirects: 5 });
+    const resultado = await resolve(entrada, { adminValidation: true, secureDynamic: true,
+      timeout: 4500, maxRedirects: 5, ...(safeHttpDeps ? { safeHttpDeps } : {}) });
     const final = resultado.urlExpandida || resultado.urlFinal || "";
     const identidadeValida = resultado.marketplaceDetectado === "amazon" ? urlAmazonComAsinExplicito(final) :
       resultado.marketplaceDetectado === "mercadolivre" ? urlMercadoLivreComMlbExplicito(final) :
       resultado.marketplaceDetectado === "awin" ? Boolean(resultado.chaveCanonica) : true;
     if (!resultado.ok || !final || !identidadeValida || !detectarMarketplaceRedirect(final) ||
         detectarMarketplaceRedirect(final) !== resultado.marketplaceDetectado) {
-      return { ok: false, debug: diagnosticoSeguro(entrada, resultado) };
+      return { ok: false, debug: diagnosticoSeguro(entrada, { ...resultado, ok: false,
+        motivo: !resultado.ok ? normalizarMotivoTecnicoRedirect(resultado) : !identidadeValida
+          ? "identidade_nao_comprovada" : "destino_comercial_nao_comprovado" }) };
     }
     return { ok: true, marketplace: resultado.marketplaceDetectado, tipo: tipoResultado(resultado),
       debug: diagnosticoSeguro(entrada, resultado) };
@@ -256,13 +336,26 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
     const publico = new Set(["URL_EXEMPLO_INVALIDA", "FAMILIA_NAO_INFERIVEL", "RESOLVER_DUPLICADO",
       "RESOLVER_NAO_ENCONTRADO", "URL_BLOQUEADA_SEGURANCA", "RESOLVER_HARDCODED", "ATIVO_INVALIDO",
       "RASCUNHO_NAO_HOMOLOGADO", "RASCUNHO_INCOMPATIVEL", "PREVIEW_OCORRENCIAS_INVALIDAS",
-      "PREVIEW_PAPEL_INVALIDO"]);
+      "PREVIEW_PAPEL_INVALIDO", "SEGUNDO_EXEMPLO_OBRIGATORIO", "RASCUNHO_REVALIDACAO_FALHOU",
+      "INVESTIGACAO_INVALIDA", "IDENTIDADE_ADMIN_INDISPONIVEL"]);
     return res.status(codigo === "RESOLVER_DUPLICADO" ? 409 : publico.has(codigo) ? 400 : 500)
       .json({ ok: false, erro: publico.has(codigo) ? codigo : "LINK_RESOLVER_OPERATION_FAILED" });
   }
-  router.get("/", (_req, res) => {
-    try { return res.json({ ok: true, resolvers: getStore().listar().map(registroPublico) }); }
+  router.get("/", (req, res) => {
+    try { return res.json({ ok: true, resolvers: getStore().listar().filter(item => visivel(item, req)).map(registroPublico) }); }
     catch (error) { return erro(res, error); }
+  });
+  router.post("/inspect", async (req, res) => {
+    try { return res.json(await inspecionar(req.body?.urlExemplo)); }
+    catch (error) { return erro(res, error); }
+  });
+  router.post("/investigations", async (req, res) => {
+    try {
+      if (!/^[a-zA-Z0-9_-]{1,100}$/.test(operador(req))) throw new Error("IDENTIDADE_ADMIN_INDISPONIVEL");
+      const analise = await inspecionar(req.body?.urlExemplo);
+      if (analise.resultado === "bloqueado_seguranca") throw new Error("URL_BLOQUEADA_SEGURANCA");
+      return res.status(201).json({ ok: true, resolver: registroPublico(getStore().adicionarInvestigacao(analise, operador(req))) });
+    } catch (error) { return erro(res, error); }
   });
   router.post("/discover", async (req, res) => {
     try { return res.json(projecaoDescoberta(await descobrir(req.body?.urlExemplo))); }
@@ -271,7 +364,9 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   router.post("/drafts", async (req, res) => {
     try {
       const analise = await descobrir(req.body?.urlExemplo);
-      if (!analise.ok) return res.status(422).json({ ...projecaoDescoberta(analise), erro: "DESTINO_NAO_SUPORTADO" });
+      if (!analise.ok || tipoResultado(analise.resultado) !== "produto") return res.status(422).json({
+        ...projecaoDescoberta(analise), erro: "DESTINO_NAO_SUPORTADO",
+        motivoTecnico: analise.ok ? "identidade_nao_comprovada" : normalizarMotivoTecnicoRedirect(analise.resultado) });
       const registro = getStore().adicionarRascunho(analise.familia, {
         marketplace: analise.marketplace, metodo: analise.metodo, debug: analise.debug
       });
@@ -307,18 +402,43 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
           familia.pathMode !== registro.pathMode ||
           familia.urlExemplo === registro.urlExemplo) throw new Error("RASCUNHO_INCOMPATIVEL");
       const analise = await descobrir(familia.urlExemplo);
-      return res.json({ ...projecaoDescoberta(analise), reutilizavel: analise.ok &&
-        analise.metodo === registro.metodoDescoberto });
+      const reutilizavel = analise.ok && analise.metodo === registro.metodoDescoberto &&
+        analise.marketplace === registro.ultimoMarketplaceDetectado;
+      return res.json({ ...projecaoDescoberta(analise), reutilizavel,
+        motivoReutilizacao: reutilizavel ? "mesma_familia_metodo_marketplace" : !analise.ok
+          ? normalizarMotivoTecnicoRedirect(analise.resultado) : "familia_metodo_ou_marketplace_divergente" });
+    } catch (error) { return erro(res, error); }
+  });
+  router.post("/drafts/:id/authorize", async (req, res) => {
+    try {
+      const registro = getStore().buscar(req.params.id);
+      if (!registro || registro.estado !== "rascunho" || registro.ativo !== false) throw new Error("RESOLVER_NAO_ENCONTRADO");
+      if (!req.body?.urlExemplo) throw new Error("SEGUNDO_EXEMPLO_OBRIGATORIO");
+      const familia = inferirFamiliaRascunho(req.body.urlExemplo);
+      if (familia.host !== registro.host || familia.pathPrefix !== registro.pathPrefix ||
+          familia.pathMode !== registro.pathMode || familia.urlExemplo === registro.urlExemplo)
+        throw new Error("RASCUNHO_INCOMPATIVEL");
+      const primeira = await descobrir(registro.urlExemplo);
+      const segunda = await descobrir(familia.urlExemplo);
+      if (!primeira.ok || !segunda.ok || primeira.metodo !== registro.metodoDescoberto ||
+          segunda.metodo !== registro.metodoDescoberto || primeira.marketplace !== registro.ultimoMarketplaceDetectado ||
+          segunda.marketplace !== primeira.marketplace || tipoResultado(primeira.resultado) !== "produto" ||
+          tipoResultado(segunda.resultado) !== "produto") throw new Error("RASCUNHO_REVALIDACAO_FALHOU");
+      return res.json({ ok: true, resolver: registroPublico(getStore().homologar(registro.id, {
+        ok: true, marketplace: primeira.marketplace, metodo: primeira.metodo,
+        tipo: tipoResultado(primeira.resultado), exemplosHomologados: 2,
+        debug: { ...primeira.debug, exemplosHomologados: 2 }
+      })) });
     } catch (error) { return erro(res, error); }
   });
   router.post("/", async (req, res) => {
     try {
       const familia = inferirFamilia(req.body?.urlExemplo);
       validarUrlPublica(familia.urlExemplo);
-      if (listarResolversRedirect().some(item => item.dominios.some(host => familia.host === host || familia.host.endsWith(`.${host}`)))) {
+      if (familiaOficial(familia.host)) {
         throw new Error("RESOLVER_HARDCODED");
       }
-      if (getStore().listar().some(item => item.host === familia.host && item.pathPrefix === familia.pathPrefix)) throw new Error("RESOLVER_DUPLICADO");
+      if (getStore().listar().some(item => item.estado !== "investigacao_pendente" && item.host === familia.host && item.pathPrefix === familia.pathPrefix)) throw new Error("RESOLVER_DUPLICADO");
       const teste = await validar(familia.urlExemplo);
       if (!teste.ok) return res.status(teste.debug.motivo === "URL_BLOQUEADA_SEGURANCA" ? 400 : 422)
         .json({ ok: false, erro: teste.debug.motivo === "URL_BLOQUEADA_SEGURANCA" ? "URL_BLOQUEADA_SEGURANCA" : "DESTINO_NAO_SUPORTADO", debug: teste.debug });
@@ -331,7 +451,7 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   router.post("/:id/test", async (req, res) => {
     try {
       const registro = getStore().buscar(req.params.id);
-      if (!registro) throw new Error("RESOLVER_NAO_ENCONTRADO");
+      if (!registro || registro.estado === "investigacao_pendente") throw new Error("RESOLVER_NAO_ENCONTRADO");
       const teste = await validar(registro.urlExemplo);
       const agora = new Date().toISOString();
       const atualizado = getStore().atualizar(registro.id, {
@@ -350,18 +470,20 @@ function criarRotasResolversDinamicos({ registry = null, resolve = resolverRedir
   router.get("/:id/debug", (req, res) => {
     try {
       const registro = getStore().buscar(req.params.id);
-      if (!registro) return erro(res, new Error("RESOLVER_NAO_ENCONTRADO"));
+      if (!registro || !visivel(registro, req)) return erro(res, new Error("RESOLVER_NAO_ENCONTRADO"));
       return res.json({ ok: true, debug: registro.ultimoDebugSeguro || null });
     } catch (error) { return erro(res, error); }
   });
   router.patch("/:id", (req, res) => {
     try {
+      if (!visivel(getStore().buscar(req.params.id), req)) throw new Error("RESOLVER_NAO_ENCONTRADO");
       if (typeof req.body?.ativo !== "boolean") throw new Error("ATIVO_INVALIDO");
       return res.json({ ok: true, resolver: registroPublico(getStore().atualizar(req.params.id, { ativo: req.body.ativo })) });
     } catch (error) { return erro(res, error); }
   });
   router.delete("/:id", (req, res) => {
-    try { getStore().excluir(req.params.id); return res.json({ ok: true }); }
+    try { if (!visivel(getStore().buscar(req.params.id), req)) throw new Error("RESOLVER_NAO_ENCONTRADO");
+      getStore().excluir(req.params.id); return res.json({ ok: true }); }
     catch (error) { return erro(res, error); }
   });
   return router;
