@@ -34,9 +34,9 @@ jobs:
           node --test tests/whatsapp-ingress-boundary.test.cjs
           node tests/whatsapp-socket-listener-baileys-real.test.cjs
           node tests/whatsapp-socket-listener-lifecycle.test.js
-          node scripts/compare-op-radar-buffer-baseline.cjs > "$RUNNER_TEMP/op-radar-buffer-baseline.json"
+          node tests/compare-op-radar-buffer-baseline.cjs > "$RUNNER_TEMP/op-radar-buffer-baseline.json"
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs
-          node scripts/benchmark-op-radar-ingress.cjs > "$RUNNER_TEMP/op-radar-benchmark.json"
+          node tests/benchmark-op-radar-ingress.cjs > "$RUNNER_TEMP/op-radar-benchmark.json"
       - name: Existing Guardian against production base
         run: node scripts/guardian-v1.cjs validate --base f02b5a590c6f01f8ceb430013990a1c86ddcd522 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/op-radar-guardian.json"
       - uses: actions/upload-artifact@v4
