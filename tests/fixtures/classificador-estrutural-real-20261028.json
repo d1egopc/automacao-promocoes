@@ -1,0 +1,443 @@
+{
+  "sampling": "READ ONLY user_pss60lus, 28/10 BRT so far; unique title per marketplace/origin, deterministic md5(historyId), cap18 per stratum, cap100 total. Selected on persisted Diversos, not a population accuracy sample. Labels curated from factual title, not model output; unconfirmed mappings remain null.",
+  "snapshotCounts": [
+    {
+      "marketplace": "amazon",
+      "source_origin": "optimus",
+      "total": 52,
+      "diversos": 4
+    },
+    {
+      "marketplace": "kabum",
+      "source_origin": "optimus",
+      "total": 1,
+      "diversos": 0
+    },
+    {
+      "marketplace": "magalu",
+      "source_origin": "optimus",
+      "total": 1,
+      "diversos": 1
+    },
+    {
+      "marketplace": "mercadolivre",
+      "source_origin": "clonador_grupos",
+      "total": 55,
+      "diversos": 12
+    },
+    {
+      "marketplace": "mercadolivre",
+      "source_origin": "optimus",
+      "total": 142,
+      "diversos": 21
+    },
+    {
+      "marketplace": "shopee",
+      "source_origin": "optimus",
+      "total": 153,
+      "diversos": 5
+    }
+  ],
+  "real": [
+    {
+      "historyId": 99263,
+      "titulo": "Invicta Speedway Stainless Steel Men's Quartz Watch 42mm",
+      "marketplace": "amazon",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 98356,
+      "titulo": "Oral-B Escova de Dente Elétrica iO4, 1 Cabo 2 Refis Carregador Bivolt",
+      "marketplace": "amazon",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Perfumaria, Farmácia e Beleza",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99086,
+      "titulo": "Philips Colgate Refil Branqueadora para Escova de Dente Elétrica, 2 Unid",
+      "marketplace": "amazon",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Perfumaria, Farmácia e Beleza",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 100438,
+      "titulo": "Chiclete Trident X Gamers Citrus Mix - Caixa com 6 unid de 48,3g",
+      "marketplace": "amazon",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Alimentos e Mercearia",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99246,
+      "titulo": "2x Dentaduras 500g fini",
+      "marketplace": "magalu",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 101233,
+      "titulo": "Kawana Tigon BG 300 Drag 13.5kg 11 Rolamentos Manivela Esquerda",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100558,
+      "titulo": "Facão Tático Militar Full Tang Serrilhado 48cm Com Bainha",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 101200,
+      "titulo": "Vara Saint Plus Tucuna Pro 581bc 1,73m 7-17lbs ( Inteiriça",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Pesca e Camping",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99433,
+      "titulo": "Kit 5 Micro Jig Cromado Pindoquinha + 5 Suporte Hook Premium",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Pesca e Camping",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 100125,
+      "titulo": "Óleo Motores De Popa 2 Tempos Yamalube Tcw3 1 Litro Kit C/2",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 99866,
+      "titulo": "Faca Tática Pescador Aço Inox",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 99011,
+      "titulo": "Relógio Casio Masculino Digital Preto de Resina W-59-1VQ",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 99462,
+      "titulo": "Adesivos Marcas Pescaria Esportiva Pescador Barco Canoa",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 100404,
+      "titulo": "Pistola Airsoft Rossi 1911 V301 Spring Vigor M1911 Bbs 6mm",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100071,
+      "titulo": "Facão Grande Inox Full Tang Com Bainha- Bondu",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 99381,
+      "titulo": "Bandana Balaclava Respirável Uv50 + Luva Longa Fpu50",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 100324,
+      "titulo": "Camisa De Pesca Com Touca E Tube - Uv50 | Secagem Rápida",
+      "marketplace": "mercadolivre",
+      "origin": "clonador_grupos",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 101410,
+      "titulo": "Emblema Tampa Traseira Gm 94724961 - R$ 1",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Automotivo",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99463,
+      "titulo": "Impressora HP Smart Tank 210 com Tanque de Tinta Colorida (3D4L5A)",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Periféricos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 101357,
+      "titulo": "Pastilha Freio Dianteira Cerâmica Sentra 2.0 2006 A 2012",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Automotivo",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99226,
+      "titulo": "Scanner Automotivo ELM 327 Bluetooth Obd2 Android",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Automotivo",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 101620,
+      "titulo": "Suporte De Parede Para Tv Fixa 15 A 95 Amvox Ast 65f Vesa",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 101518,
+      "titulo": "Aparelho de Jantar 20 peças Branco Poppy de Cerâmica - Scalla Cerâmica",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Casa, Móveis e Decoração",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99444,
+      "titulo": "Martelo Demolidor De Concreto Profissional Sdsmax 2450w",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Ferramentas",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99327,
+      "titulo": "Loja Oficial Primacial no ML",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 101193,
+      "titulo": "Depois “Cupons relâmpago do 11.11”",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 100477,
+      "titulo": "O CARA DAS OFERTAS ACHOU PRA VOCÊ! Freeze Riiffs 100mL",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100302,
+      "titulo": "Effervescent Lab 8 Niche 100ml",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100425,
+      "titulo": "Night Caviar Paris Elysees Intense 100ml",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 101366,
+      "titulo": "Emblema Tampa Traseira Gm 94724961",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Automotivo",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 101602,
+      "titulo": "Caixa Amplificada Cm-400-l 400w Rms Preta Mondial Bivolt Preto",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Audio TV",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99220,
+      "titulo": "Carregador Super Rápido 25W Tipo C",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 99597,
+      "titulo": "O CARA DAS OFERTAS ACHOU PRA VOCÊ! Sauvage Dior 100mL",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100751,
+      "titulo": "Loja Oficial Seven Line no ML",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 98720,
+      "titulo": "Loja Oficial Reserva no ML",
+      "marketplace": "mercadolivre",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Diversos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "ambiguity_or_non_product_preserved"
+    },
+    {
+      "historyId": 97885,
+      "titulo": "Kit Delet Vexus e Izer 500ml Vonixx Descontaminação de Rodas",
+      "marketplace": "shopee",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    },
+    {
+      "historyId": 100024,
+      "titulo": "Modelador Cachos Espiral Mondial Em-05 Infinity Bivolt",
+      "marketplace": "shopee",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Perfumaria, Farmácia e Beleza",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 101587,
+      "titulo": "HUAWEI WiFi AX2S | Roteador | WS7000 V2 | Dual Band | 4 Antenas | 5 GHz Wi-Fi 6",
+      "marketplace": "shopee",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Periféricos",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 99354,
+      "titulo": "Jogo de 6 Taças de Cristal 330ml de Brilho Incomparável Linha Premium Decorativa",
+      "marketplace": "shopee",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": "Casa, Móveis e Decoração",
+      "labelStatus": "curated_title_nature_not_independent_blind_label",
+      "labelBasis": "explicit_nature_and_existing_taxonomy"
+    },
+    {
+      "historyId": 97807,
+      "titulo": "Fonte Montech Beta 2, 850W, Preto Beta2850w",
+      "marketplace": "shopee",
+      "origin": "optimus",
+      "persistedCategory": "Diversos",
+      "expected": null,
+      "labelStatus": "unresolved_requires_review",
+      "labelBasis": "insufficient_identity_or_taxonomy_ambiguity"
+    }
+  ]
+}

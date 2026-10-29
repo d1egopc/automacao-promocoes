@@ -1,4 +1,5 @@
 let categoriasDestinos = {};
+const { avaliarFamiliaFuncional } = require("./evidencia-funcional");
 
 try {
   ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
@@ -813,7 +814,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   const titulo = normalizarTextoLocal(String(oferta.titulo || oferta.nome || termo || "").slice(0, 1200));
   const oficial = categoriaMarketplaceComprovada(oferta);
   const declarada = categoriaDeclaradaValida(oferta);
-  let categoria = "", motivo = "natureza_produto_explicita", finalidadePesca = "";
+  let categoria = "", motivo = "natureza_produto_explicita", finalidadePesca = "", funcional = null;
   if (oficial?.adulto || /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(titulo) ||
       (/\badultos?\b/.test(titulo) && (/\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(titulo) ||
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
@@ -847,6 +848,9 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     categoria = CATEGORIA.iluminacao;
   } else if (/\b(?:lampadas? automotivas?|oleo de motor automotivo)\b/.test(titulo)) {
     categoria = CATEGORIA.automotivo;
+  } else if ((funcional = avaliarFamiliaFuncional(oferta, titulo))) {
+    categoria = funcional.categoria;
+    motivo = funcional.motivo;
   } else if ((finalidadePesca = finalidadePesqueiraExplicita(titulo))) {
     categoria = CATEGORIA.pesca;
     motivo = finalidadePesca;
@@ -875,7 +879,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     const final = categoria || (oficial.conflito ? CATEGORIA.diversos : oficial.categoria);
     const divergencia = Boolean(oficial?.conflito || (oficial && oficial.categoria !== final) || (declarada && declarada !== CATEGORIA.diversos && declarada !== final));
     return { categoria: final, origem: categoria && !oficial?.adulto ? "identidade_produto" : "marketplace_oficial",
-      fonteEvidencia: categoria && !oficial?.adulto ? "titulo_tipo_modelo" : oficial.fonte,
+      fonteEvidencia: categoria && !oficial?.adulto ? funcional ? "campos_funcionais_disponiveis" : "titulo_tipo_modelo" : oficial.fonte,
       motivo: categoria ? motivo : oficial.conflito ? "tipo_hierarquia_divergentes" : "hierarquia_oficial_mapeada", confianca: final === CATEGORIA.diversos ? "baixa" : "alta",
       divergencia, baixaConfianca: final === CATEGORIA.diversos };
   }
@@ -943,6 +947,7 @@ module.exports = {
   avaliarEvidenciaCategoria,
   criarEvidenciaCategoriaMarketplace,
   preservarEvidenciaCategoriaMarketplace,
+  categoriaMarketplaceComprovada,
   categoriaPorNaturezaExplicita,
   normalizarTextoLocal
 };
