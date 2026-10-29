@@ -13,6 +13,7 @@ const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 const filaThumbnailService = require("../../fila/fila-thumbnail.service");
 const workspaceRotation = require("./workspace-rotation");
 const { executarGcRelaySeguro } = require("./gc-relay.service");
+const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -2677,6 +2678,7 @@ async function executarAutoCleanShadow(opcoes = {}) {
         execute: mediaPhysical.execute,
         mediaDeleteEnabled: mediaPhysical.execute
       });
+      logger.log("[OPTIMUS-AUTO-CLEAN-GC-DECISION]", JSON.stringify(summarizeGc(gcRelay)));
     } catch {
       gcRelay = { dryRun: true, inspected: 0, errors: 1, reason: "relay_failed" };
     }
@@ -2720,7 +2722,20 @@ async function executarAutoCleanShadowSeguro(opcoes = {}) {
   }
 }
 
+const agendarAutoCleanRecorrente = createRecurringLane({
+  enabled: () => autoCleanRecorrenteAtivo(),
+  intervalMs: () => intervaloAutoCleanRecorrenteMs(),
+  mode: () => process.env.OPTIMUS_AUTO_CLEAN_RECURRING_MODE,
+  validate: () => validateReadOnly({ pool: getEnginePool(), inventory: inventariarPostgres }),
+  execute: async () => {
+    const result = await executarAutoCleanPostgresRecorrenteSeguro();
+    return { ok: result.ok, removed: result.mutacoes || 0,
+      logicalBytesReleased: result.resultado?.espacoLogicoLiberadoBytes || 0 };
+  }
+});
+
 module.exports = {
+  agendarAutoCleanRecorrente,
   ENV_SHADOW,
   ENV_EXECUTE,
   ENV_RECURRING,

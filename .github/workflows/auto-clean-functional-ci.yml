@@ -1,0 +1,49 @@
+name: Auto Clean functional isolated Node24 PG17
+on:
+  push:
+    branches: [validation/guardian-v1-auto-clean-functional-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: auto_clean_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["55443:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d auto_clean_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Synthetic fixtures and unchanged reference safety
+        env:
+          AUTO_CLEAN_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55443/auto_clean_fixture
+        run: |
+          test -z "${DATABASE_URL:-}"
+          node --test tests/auto-clean-recurring-lane.test.cjs
+          node tests/auto-clean-readonly.postgres.cjs
+          node tests/auto-clean-media-physical.postgres.js
+          node tests/optimus-auto-clean-v1-shadow.test.js
+          node tests/auto-clean-media-physical-wiring.test.js
+          node tests/auto-clean-media-physical.test.js
+          for file in tests/auto-clean-gc-reference-index-phase*.test.js tests/auto-clean-gc-relay-phase1.test.js; do node "$file"; done
+      - name: Guardian unchanged baseline comparison
+        run: node scripts/guardian-v1.cjs validate --base f02b5a590c6f01f8ceb430013990a1c86ddcd522 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: auto-clean-guardian
+          path: ${{ runner.temp }}/auto-clean-guardian.json

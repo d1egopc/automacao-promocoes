@@ -18,6 +18,7 @@ const autoGateShadow = createAutoGateShadow();
 const { criarMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
 const {
   autoCleanShadowAtivo,
+  agendarAutoCleanRecorrente,
   executarAutoCleanShadowSeguro
 } = require("./auto-clean/auto-clean.service");
 const {
@@ -426,6 +427,8 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     });
     if (decisaoSolenoide.modo !== "off") resumo.solenoide = decisaoSolenoide;
 
+    // Admission only: retention I/O runs outside the awaited commercial cycle.
+    agendarAutoCleanRecorrente();
     if (autoCleanShadowAtivo()) {
       resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
         loteLimite: 100
