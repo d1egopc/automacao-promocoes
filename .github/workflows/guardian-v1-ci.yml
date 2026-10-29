@@ -37,6 +37,32 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Classificador Diversos - identidade, negativos, replay e preservacao do sensor
+        if: github.ref == 'refs/heads/validation/guardian-v1-classificador-diversos-20261028'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=c9f81baeeaf966fc581b8310d70c0f54ed90fa46
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --exit-code "$base" HEAD -- index.js modules utils optimus-capture package.json package-lock.json .github/workflows/deploy-backend-vps.yml scripts/deploy-backend-vps-manual.sh scripts/garimpei-infra-guard.py scripts/garimpei-journal-cleanup.py docs/infra marketplaces/shopee marketplaces/aliexpress marketplaces/magalu marketplaces/mercadolivre
+          node --test tests/classificador-diversos-20261028.test.cjs tests/classificador-copy-focal.test.cjs tests/classificador-universal-v3.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-v3-magalu-evidencia.test.cjs tests/classificador-v3-legacy-parity.test.cjs
+          # radar-enriquecimento-conservador remains mandatory in Guardian below:
+          # its pre-existing AliExpress dedupe failure is compared to this exact base.
+          node --test tests/radar-guarda-universal-fidelidade.test.js tests/radar-espelho-comercial.test.js tests/radar-precedencia-comercial.test.js tests/teleradar-semantica-comercial.test.js tests/radar-garimpei-sensor24h.test.cjs tests/shopee-contextual-recovery.test.cjs tests/shopee-recovery-limits.test.cjs
+          node --test tests/copy-inteligente-local-v2.test.js tests/copy-contextual-local.test.js tests/copy-inteligente-c3.test.js tests/copy-c3-contrato-publico.test.js
+          mkdir "$RUNNER_TEMP/classificador-diversos-baseline"
+          git archive "$base" | tar -x -C "$RUNNER_TEMP/classificador-diversos-baseline"
+          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/classificador-diversos-baseline" --benchmark --out "$RUNNER_TEMP/classificador-diversos-v3-replay.json"
+          node tests/classificador-diversos-replay.cjs --baseline "$RUNNER_TEMP/classificador-diversos-baseline" --out "$RUNNER_TEMP/classificador-diversos-focal-replay.json"
+      - name: Preserve Classificador Diversos replay
+        if: always() && github.ref == 'refs/heads/validation/guardian-v1-classificador-diversos-20261028'
+        uses: actions/upload-artifact@v4
+        with:
+          name: classificador-diversos-replay
+          path: ${{ runner.temp }}/classificador-diversos-*-replay.json
+          if-no-files-found: error
       - name: Garimpei reconciled release - preserve published Shopee and exact sensor
         if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-release-20261028'
         shell: bash
@@ -296,6 +322,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-classificador-diversos-20261028) base=c9f81baeeaf966fc581b8310d70c0f54ed90fa46 ;;
             refs/heads/validation/guardian-v1-garimpei-release-20261028) base=58ac3d19840bb25c8f72bb29e5ac60128a148bd4 ;;
             refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-garimpei-infra-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
