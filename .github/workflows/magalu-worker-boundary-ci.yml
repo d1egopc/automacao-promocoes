@@ -1,0 +1,50 @@
+name: Magalu Worker boundary isolated Node24
+on:
+  push:
+    branches: [validation/guardian-v1-magalu-worker-boundary-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Exact scope and reproduction against published base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          base=f02b5a590c6f01f8ceb430013990a1c86ddcd522
+          git diff --exit-code "$base" HEAD -- index.js modules marketplaces utils package.json package-lock.json optimus-capture/manifest.json .github/workflows/deploy-backend-vps.yml scripts/guardian-v1.cjs
+          test "$(git diff --name-only "$base" HEAD -- optimus-capture)" = optimus-capture/local-worker/magalu-identity.js
+          mkdir -p "$RUNNER_TEMP/boundary-base"
+          git archive "$base" optimus-capture/local-worker/magalu-identity.js | tar -x -C "$RUNNER_TEMP/boundary-base"
+          if MAGALU_BOUNDARY_BASELINE="$RUNNER_TEMP/boundary-base" node --test --test-name-pattern='late document_idle' tests/magalu-worker-boundary.test.cjs > "$RUNNER_TEMP/boundary-baseline.log" 2>&1; then
+            echo 'Baseline unexpectedly recovered the missing receiver'; exit 1
+          fi
+          grep -q 'Receiving end does not exist' "$RUNNER_TEMP/boundary-baseline.log"
+          node --test tests/magalu-worker-boundary.test.cjs
+      - name: Existing Magalu and six marketplace capture contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in magalu-firstparty-identity-fallback.test.cjs magalu-local-worker-identity.test.js magalu-identity-engine-importer.test.js magalu-v2-golden-path.test.js local-worker-platform-architecture.test.cjs optimus-capture-extension.test.js optimus-capture-magalu.test.js optimus-capture-launcher.test.js optimus-capture-local-worker.test.js optimus-capture-local-worker-auth.test.js optimus-capture-local-worker-cold-restart.test.js optimus-capture-local-worker-ml-identity.test.js optimus-capture-local-worker-ml-image.test.js shopee-afiliacao-workspace.test.js aliexpress-afiliacao-workspace.test.js; do node "tests/$file"; done
+      - name: Existing Guardian baseline comparison
+        run: node scripts/guardian-v1.cjs validate --base f02b5a590c6f01f8ceb430013990a1c86ddcd522 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/magalu-boundary-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: magalu-worker-boundary-evidence
+          path: |
+            ${{ runner.temp }}/boundary-baseline.log
+            ${{ runner.temp }}/magalu-boundary-guardian.json
