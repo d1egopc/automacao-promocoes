@@ -46,13 +46,15 @@ jobs:
           test -z "${DATABASE_URL:-}"
           base=5dd99da80233ab9a49162e02e215b75982e3da28
           git merge-base --is-ancestor "$base" HEAD
-          git diff --exit-code "$base" HEAD -- index.js modules utils optimus-capture marketplaces/shopee marketplaces/amazon marketplaces/aliexpress marketplaces/magalu marketplaces/mercadolivre package.json package-lock.json .github/workflows/deploy-backend-vps.yml scripts/deploy-backend-vps-manual.sh
+          git diff --exit-code "$base" HEAD -- index.js modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/telemetria utils optimus-capture marketplaces/shopee marketplaces/amazon marketplaces/aliexpress marketplaces/magalu marketplaces/mercadolivre package.json package-lock.json .github/workflows/deploy-backend-vps.yml scripts/deploy-backend-vps-manual.sh
+          test "$(git diff --name-only "$base" HEAD -- modules)" = modules/engine/importer/importer.service.js
           node --test tests/diversos-integracao.test.cjs tests/classificador-diversos-20261028.test.cjs
           mkdir -p "$RUNNER_TEMP/diversos-base" "$RUNNER_TEMP/diversos-reports"
           git archive "$base" | tar -x -C "$RUNNER_TEMP/diversos-base"
           node tests/classificador-diversos-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/focal.json"
           node tests/diversos-integracao-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/real40.json"
           node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --benchmark --out "$RUNNER_TEMP/diversos-reports/v3.json"
+          node tests/diversos-engine-materialization-benchmark.cjs --out "$RUNNER_TEMP/diversos-reports/engine-materialization.json"
       - name: Preserve isolated Diversos replays
         if: always() && github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
         uses: actions/upload-artifact@v4

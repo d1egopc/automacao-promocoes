@@ -76,3 +76,48 @@ test("adapter Shopee real reutiliza classificação sem rede e mantém afiliaç�
   assert.equal(result.metadata.afiliacaoWorkspace.conversaoStatus,"convertida");
  }}finally{global.fetch=saved;}
 });
+test("Engine real materializa somente as famílias homologadas até o contrato persistido/RIO",async()=>{
+ const {aplicarSombraInteligenciaUniversalV2}=require("../modules/engine/importer/importer.service");
+ const {montarOfertaUniversalEngine}=require("../modules/engine/oferta-universal.contract");
+ const saved=global.fetch;global.fetch=async()=>{throw Error("NETWORK_FORBIDDEN_IN_FIXTURE");};
+ try{for(const clienteId of ["tenant_a","tenant_b"])for(const origem of ["radar","teleradar","clonador_grupos"])
+ for(const marketplace of ["mercadolivre","shopee","amazon","aliexpress","magalu","kabum","awin"]){
+  for(const [titulo,categoria,anterior]of [
+   ["Kit Ração Pesca Furadinha Pesqueiro","Pesca e Camping","Pet Shop e Fazendinha"],
+   [positives[0][0],"Periféricos","Diversos"],[positives[4][0],"Audio TV","Diversos"],
+   ["Kit Isca Rapala + Furadeira Profissional","Diversos","Ferramentas"]]){
+   const oferta={id:"same-id",titulo,categoria:anterior,marketplace,preco:83.51,precoOriginal:145.90,
+    cupom:"FIXTURE20",linkOriginal:"https://example.test/product",linkAfiliado:`https://example.test/${clienteId}`,
+    origem,clienteId,ttl:900,cadencia:60,dedupeKey:`${clienteId}:same-id`};
+   const before=structuredClone(oferta),job={id:1,cliente_id:clienteId,marketplace};
+   const result=await aplicarSombraInteligenciaUniversalV2(oferta,{...oferta,precoPix:83.51},job,
+    {consultaMemoriaHistoricaPromise:Promise.resolve({ok:true,memoria:[]})});
+   assert.equal(result.oferta.categoria,categoria,`${origem}:${marketplace}:${titulo}`);
+   assert.equal(result.metadata.inteligenciaUniversalV2.categoria,categoria);
+   assert.deepEqual(oferta,before);
+   for(const key of ["titulo","preco","precoOriginal","cupom","linkOriginal","linkAfiliado","clienteId","ttl","cadencia","dedupeKey"])
+    assert.deepEqual(result.oferta[key],before[key],key);
+   const contract=montarOfertaUniversalEngine({oferta:result.oferta,ofertaEntrada:oferta,job,metadata:result.metadata});
+   assert.equal(contract.produto.categoriaNormalizada,categoria);
+   assert.equal(destinoAceitaOferta({ativo:true,marketplaces:[marketplace],categorias:[categoria],origemOfertas:"ambos"},result.oferta),true);
+  }
+ }
+ // Categoria específica fora das famílias aprovadas não é promovida pelo diagnóstico.
+ const outside=await aplicarSombraInteligenciaUniversalV2({titulo:"Furadeira profissional",categoria:"Casa, Móveis e Decoração",marketplace:"amazon",preco:99},
+  {},{cliente_id:"tenant_a"},{consultaMemoriaHistoricaPromise:Promise.resolve({ok:true,memoria:[]})});
+ assert.equal(outside.oferta.categoria,"Casa, Móveis e Decoração");
+ }finally{global.fetch=saved;}
+});
+test("reproduz a lacuna antiga: diagnóstico correto não substituía categoria persistida",async()=>{
+ const Module=require("node:module"),{execFileSync}=require("node:child_process");
+ const file=path.resolve(__dirname,"../modules/engine/importer/importer.service.js");
+ const old=new Module(file,module);old.filename=file;old.paths=Module._nodeModulePaths(path.dirname(file));
+ old._compile(execFileSync("git",["show","5dd99da80233ab9a49162e02e215b75982e3da28:modules/engine/importer/importer.service.js"],{cwd:path.resolve(__dirname,".."),encoding:"utf8",windowsHide:true}),file);
+ const oferta={titulo:"Kit Ração Pesca Furadinha Pesqueiro",categoria:"Pet Shop e Fazendinha",marketplace:"mercadolivre",preco:83.51};
+ const previous=await old.exports.aplicarSombraInteligenciaUniversalV2(oferta,{}, {cliente_id:"tenant_a"},
+  {consultaMemoriaHistoricaPromise:Promise.resolve({ok:true,memoria:[]})});
+ assert.equal(previous.metadata.inteligenciaUniversalV2.categoria,"Pesca e Camping");
+ assert.equal(previous.oferta.categoria,"Pet Shop e Fazendinha");
+ const {montarOfertaUniversalEngine}=require("../modules/engine/oferta-universal.contract");
+ assert.equal(montarOfertaUniversalEngine({oferta:previous.oferta,metadata:previous.metadata}).produto.categoriaNormalizada,"Pet Shop e Fazendinha");
+});

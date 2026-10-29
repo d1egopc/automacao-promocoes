@@ -881,7 +881,10 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     return { categoria: final, origem: categoria && !oficial?.adulto ? "identidade_produto" : "marketplace_oficial",
       fonteEvidencia: categoria && !oficial?.adulto ? funcional ? "campos_funcionais_disponiveis" : "titulo_tipo_modelo" : oficial.fonte,
       motivo: categoria ? motivo : oficial.conflito ? "tipo_hierarquia_divergentes" : "hierarquia_oficial_mapeada", confianca: final === CATEGORIA.diversos ? "baixa" : "alta",
-      divergencia, baixaConfianca: final === CATEGORIA.diversos };
+      divergencia, baixaConfianca: final === CATEGORIA.diversos,
+      ...(funcional || finalidadePesca ||
+        (motivo === "naturezas_produto_conflitantes" && finalidadePesqueiraExplicita(titulo))
+        ? { correcaoFuncionalHomologada: true } : {}) };
   }
   return null;
 }

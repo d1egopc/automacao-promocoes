@@ -7,14 +7,14 @@ Reversibilidade: branch isolada; publicação futura e rollback por imagem ofici
 Contratos: Platform Topology, Production Deployment, Ingress Radar/Clonador, Marketplaces/V3, Multi-tenancy, Performance, destinos e fidelidade comercial.
 Persistência/dados: nenhuma nova persistência, schema, memória, feedback ou consulta por oferta.
 Performance: somente decisão determinística limitada em memória; sem rede ou Worker.
-Superfícies: dois módulos funcionais, testes/fixtures/replay, Guardião aditivo, CI-only e este documento.
+Superfícies: dois módulos funcionais e uma atribuição focal da categoria no importer, testes/fixtures/replay, Guardião aditivo, CI-only e este documento.
 Capacidade mínima segura: revisão transversal do classificador e destinos; sem agentes delegados.
 Justificativa: reaproveitar famílias já homologadas, sem duplicar classificação por motor.
 Condição para escalar: regressão comercial, novos efeitos de persistência ou divergência de consumidores.
 Modo inicial: leitura e desenvolvimento isolado.
 Rollback: não há mudança produtiva nesta missão. Futura publicação deve preservar a imagem-base Links e o overlay para reversão oficial.
-Arquivos permitidos: marketplaces/inteligencia/classificador-categorias.js, evidencia-funcional.js, testes/fixtures, scripts/guardian-v1.cjs, workflow CI-only e documentação.
-Áreas congeladas: index.js, Links, engines/adapters, afiliação, preços, cupons/PIX, títulos comerciais, URLs, sessões, Garimpei, /data, PostgreSQL, fila/TTL/cadência/dedupe/ACK e todos os módulos de laboratório.
+Arquivos permitidos: marketplaces/inteligencia/classificador-categorias.js, evidencia-funcional.js, modules/engine/importer/importer.service.js somente materialização focal de categoria, testes/fixtures, scripts/guardian-v1.cjs, workflow CI-only e documentação.
+Áreas congeladas: index.js, Links, adapters e demais partes da Engine, afiliação, preços, cupons/PIX, títulos comerciais, URLs, sessões, Garimpei, /data, PostgreSQL, fila/TTL/cadência/dedupe/ACK e todos os módulos de laboratório.
 Decisão humana necessária: somente publicação futura, não desenvolvimento/testes/commit/push da branch CI isolada autorizados.
 
 ## Reconciliação
@@ -33,23 +33,29 @@ Radar WhatsApp, TeleRadar e Clonador ingressam na Engine existente: não classif
 
 Frases/Copy: nenhum arquivo de geração de texto é alterado; testes existentes devem preservar entrada comercial e verificar coerência de família. Grupo/workspace/marketplace não determina a categoria. Facas/facões e roupa sem público suficiente continuam conservadores.
 
+### Primeira lacuna comprovada de integração
+
+aplicarSombraInteligenciaUniversalV2 calcula a categoria correta e grava metadata.inteligenciaUniversalV2.categoria, mas retornava a oferta com a categoria antiga. montarOfertaUniversalEngine prioriza oferta.categoria sobre a categoria do diagnóstico. Assim, somente transportar o classificador não garante correção persistida quando o adapter entrega uma categoria específica equivocada (ração de pesca como Pet). A reprodução usa o importer-base real com o classificador funcional atual e confirma diagnóstico Pesca, oferta/contrato Pet.
+
+Correção mínima: o avaliador compartilhado marca somente as famílias homologadas (e seus conflitos conservadores) em um diagnóstico calculado internamente. O importer copia a categoria desse resultado para oferta.categoria somente quando essa marca está presente no log novo de classificação. Não aceita marca de payload nem promove outras categorias do diagnóstico. Não muda prioridade/score existentes ou ativa a hierarquia experimental. O teste usa o importer e o contrato universal reais até categoriaNormalizada, dois tenants, três origens, sete marketplaces, sem consultar memória/banco (promise de fixture) ou rede. Categorias específicas fora do escopo continuam preservadas.
+
 ## Replay e limites
 
 Base atual comparada diretamente (5dd99da8), não números antigos reutilizados. Corpus focal 53 casos: seis mudanças esperadas, incluindo a recusa conservadora do kit de naturezas conflitantes; zero erros. Saint Plus, ração com finalidade de isca e três títulos históricos de Rapala mudam para Pesca e Camping. Frog e graxa de carretilha já são reconhecidos pela base atual: permanecem controles de não regressão, sem chamar sua classificação antiga de regressão atual. Camisa sem gênero e faca tática ambígua continuam conservadoras.
 
 Corpus real estratificado anterior de 40 títulos, 26 com rótulo curado e 14 sem rótulo: três correções (Saint Plus, Huawei AX2S e Mondial CM-400-L); Diversos 40→37; rótulos coincidentes 10→13, sem falso positivo específico ou regressão nova nesses rótulos. Os dez rótulos corretos iniciais eram abstenções Diversos. Isso não é percentual de acurácia populacional nem rótulo independente cego. Os 37 remanescentes incluem abstenções corretas, identidades insuficientes e nichos fora desta missão; lista completa no artefato real40.json. Nenhum caso passa a ser correto simplesmente por sair de Diversos.
 
-Replay V3 amplo:147 casos, zero mudanças/erros, Diversos23→23. Benchmark local sintético, pares alternados: p50 base148.09µs/candidata147.38µs; p95 base152.06µs/candidata155.05µs. Zero I/O de arquivo, chamadas externas ou consultas novas no classificador durante a medição. Não equivale a latência produtiva.
+Replay V3 amplo:147 casos, zero mudanças/erros, Diversos23→23. Benchmark sintético por pares alternados e benchmark separado da materialização assíncrona Engine, comparando a função antiga/nova com o mesmo classificador atual, memória injetada e sem chamadas produtivas. Números temporais no relatório/artefato de cada SHA, não contrato fixo. Zero I/O de arquivo, chamadas externas ou consultas novas no classificador durante a medição. Não equivale a latência produtiva.
 
-73 testes focais (inclui combinações de sete marketplaces, três origens, dois tenants e destinos seletivos), mais122 verificações de regressão direcionadas passaram localmente em Node24. O adapter Shopee real recebe importer injetado e identidade/afiliação de fixture verificável, sem rede real. Uma fixture inicial foi rejeitada antes da classificação pelo filtro de URL/identidade existente; foi corrigida para o formato www.shopee.com.br e afiliação válida, sem alterar o adapter ou flexibilizar filtros. Não declarar teste de callback WhatsApp, RIO ACK ou ingressão produtiva real: essas fronteiras não foram exercitadas nesta missão.
+75 testes focais (inclui combinações de sete marketplaces, três origens, dois tenants, destinos seletivos, materialização real e reprodução da lacuna), mais122 verificações de regressão direcionadas na primeira rodada Node24. Todos devem ser repetidos no SHA final. O adapter Shopee real recebe importer injetado e identidade/afiliação de fixture verificável, sem rede real. Uma fixture inicial foi rejeitada antes da classificação pelo filtro de URL/identidade existente; foi corrigida para o formato www.shopee.com.br e afiliação válida, sem alterar o adapter ou flexibilizar filtros. Não declarar teste de callback WhatsApp, RIO ACK ou ingressão produtiva real: essas fronteiras não foram exercitadas nesta missão.
 
 O uso de descrição/atributos só vale onde o envelope real os disponibiliza (direto ou raw/metadata); adapters que passam só título continuam limitados a esse título. Não implementar aquisição de atributos/identidade ou expandir payloads de outros motores nesta integração focal.
 
 ## Publicação futura — não executada
 
 1. Reconfirmar main=5dd99da80233ab9a49162e02e215b75982e3da28 e imagem realmente ativa=sha256:77d88b2b59d4ced7aea92ed64104c0aa43587250cbfa25754e4b478e40122573. Se divergirem, reconciliar antes de publicar.
-2. Reconfirmar CI Linux/Node24, Guardião e SHA final desta branch. Não promover laboratório: allowlist runtime exata é marketplaces/inteligencia/classificador-categorias.js,marketplaces/inteligencia/evidencia-funcional.js.
+2. Reconfirmar CI Linux/Node24, Guardião e SHA final desta branch. Não promover laboratório: allowlist runtime exata é marketplaces/inteligencia/classificador-categorias.js,marketplaces/inteligencia/evidencia-funcional.js,modules/engine/importer/importer.service.js.
 3. Sob autorização de publicação separada, preservar referência recovery da imagem77d88b2b e overlay vigente; a referência anterior de recuperação Links aponta para3c07f90a e não substitui a base nova. Nenhuma referência Docker foi criada nesta missão.
-4. Somente depois de autorização, fast-forward do candidato e workflow oficial Deploy Backend VPS com source_sha final, base_sha5dd99da8, base_image77d88b2b e garimpei_sensor_mount=false. O Guardião deriva os dois runtime paths; deploy utiliza imagem ativa, sem build do checkout sujo da VPS, sem env/mounts/schema/Worker.
+4. Somente depois de autorização, fast-forward do candidato e workflow oficial Deploy Backend VPS com source_sha final, base_sha5dd99da8, base_image77d88b2b e garimpei_sensor_mount=false. O Guardião deriva os três runtime paths; deploy utiliza imagem ativa, sem build do checkout sujo da VPS, sem env/mounts/schema/Worker.
 5. Validar hashes, HTTP, PostgreSQL/container preservado, oito sessões conforme baseline atual, Radar/TeleRadar, Clonador, RIO e destinos/categorias; não criar oferta artificial. Classificação corrigida não prova entrega/ACK.
 6. Regressão objetiva: rollback homologado para imagem77d88b2b e overlay anterior, backend somente. Não usar reset, apagar dados ou reinstalar dependências. Publicação e qualquer rollback exigem o escopo operacional autorizado da missão futura.

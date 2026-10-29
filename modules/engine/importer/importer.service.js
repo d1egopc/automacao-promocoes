@@ -4021,6 +4021,11 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       ok: okFinalV2,
       oferta: {
         ...oferta,
+        // Somente famílias funcionais homologadas: a categoria diagnosticada
+        // deve chegar ao objeto persistido/roteado, sem promover laboratório.
+        ...((resultadoV2.logs || []).some(log =>
+          log.etapa === "categoria" && log.correcaoFuncionalHomologada === true)
+          ? { categoria: resultadoV2.categoria } : {}),
         score: scoreV2 !== null ? scoreV2 : oferta.score,
         prioridade: prioridadeFinal
       },
