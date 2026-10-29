@@ -1,0 +1,49 @@
+name: OP Radar ingress isolated Node24
+on:
+  push:
+    branches: [validation/guardian-v1-op-radar-ingress-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Preserve published Links, Diversos and commercial engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=f02b5a590c6f01f8ceb430013990a1c86ddcd522
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --exit-code "$base" HEAD -- modules/radar modules/engine modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 modules/telemetria modules/links marketplaces optimus-capture utils package.json package-lock.json scripts/guardian-v1.cjs .github/workflows/deploy-backend-vps.yml
+          test "$(git diff --name-only "$base" HEAD -- modules)" = modules/whatsapp/ingress-boundary-observation.js
+          git diff --exit-code "$base" HEAD -- modules/whatsapp/baileys-buffer-recovery.service.js modules/whatsapp/baileys-buffer-hotfix.service.js modules/whatsapp/socket-listener-lifecycle.service.js
+      - name: Boundary and existing socket contracts
+        run: |
+          node --test tests/whatsapp-ingress-boundary.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node scripts/compare-op-radar-buffer-baseline.cjs > "$RUNNER_TEMP/op-radar-buffer-baseline.json"
+          node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-garimpei-observation.test.cjs tests/radar-garimpei-sensor24h.test.cjs
+          node scripts/benchmark-op-radar-ingress.cjs > "$RUNNER_TEMP/op-radar-benchmark.json"
+      - name: Existing Guardian against production base
+        run: node scripts/guardian-v1.cjs validate --base f02b5a590c6f01f8ceb430013990a1c86ddcd522 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/op-radar-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: op-radar-ingress-evidence
+          path: |
+            ${{ runner.temp }}/op-radar-guardian.json
+            ${{ runner.temp }}/op-radar-benchmark.json
+            ${{ runner.temp }}/op-radar-buffer-baseline.json

@@ -22,6 +22,8 @@ const {
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
 const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
+const { createIngressBoundaryObservation } = require("./modules/whatsapp/ingress-boundary-observation");
+const whatsappIngressBoundary = createIngressBoundaryObservation(); // OFF; explicit Admin Master only.
 const { createSensorJournal } = require("./modules/radar/ingress-sensor-journal");
 let garimpeiSensorEnabled = false;
 const radarIngressObservation = createRadarIngressObservation({
@@ -24097,6 +24099,7 @@ async function processarMensagemRadarAutomatica({ mensagem, sessaoId, sock, upse
     });
   }
   if (!remoteJid.endsWith("@g.us") || mensagem?.key?.fromMe) {
+    try { whatsappIngressBoundary.mark("early", { workspaceId: diagnosticoWorkspaceId, sessionId: sessaoId, sock, message: mensagem, reason: mensagem?.key?.fromMe ? "from_me" : "not_group" }); } catch { /* diagnostics only */ }
     return { ok: false, motivo: "mensagem_nao_monitoravel" };
   }
   const grupoNome = obterNomeGrupoRadar(sessaoId, remoteJid);
@@ -25688,10 +25691,93 @@ function validarAlvoObservacaoIngressRadar() {
   };
 }
 
+const OP_TEST_RADAR_BOUNDARY_TARGET = Object.freeze({
+  workspaceId: "admin", sessionId: "admin_Zoiao Claro", groupRef: "d536bfedf8f3300d"
+});
+
+function validarAlvoObservacaoOpTesteRadar() {
+  const { workspaceId, sessionId: expectedSessionId, groupRef } = OP_TEST_RADAR_BOUNDARY_TARGET;
+  const config = carregarRadarConfigCliente("admin", { falharFechado: true });
+  if (config.monitoramentoAtivo !== true) return { ok: false, reason: "radar_monitoring_inactive" };
+
+  const matchingGroups = (Array.isArray(config.sessoesWhatsappMonitoradas) ? config.sessoesWhatsappMonitoradas : [])
+    .flatMap(item => (Array.isArray(item?.gruposMonitorados) ? item.gruposMonitorados : [])
+      .filter(group => {
+        const jid = obterGrupoWhatsappIdTecnicoRadar(group);
+        const identities = [group?.id, group?.grupoId, group?.remoteJid].filter(Boolean);
+        return group?.ativo !== false && /^\d+(?:-\d+)?@g\.us$/.test(jid) &&
+          identities.every(value => value === jid) &&
+          (!group?.sessaoId || group.sessaoId === expectedSessionId) &&
+          createHash("sha256").update(jid).digest("hex").slice(0, 16) === groupRef;
+      })
+      .map(group => ({ item, group, groupId: obterGrupoWhatsappIdTecnicoRadar(group) })))
+    .filter(item => item.groupId && item.groupId.endsWith("@g.us"));
+  if (matchingGroups.length !== 1) return { ok: false, reason: "radar_target_group_unverified" };
+
+  const { item, groupId } = matchingGroups[0];
+  const sessionInput = String(item?.sessaoId || "").trim();
+  const sessionId = resolverSessaoWhatsappRadarCliente("admin", sessionInput);
+  if (sessionInput !== expectedSessionId || sessionId !== expectedSessionId) return { ok: false, reason: "radar_session_mapping_unverified" };
+
+  const metadata = sessoesMeta?.[sessionId];
+  const workspaceDaSessao = resolverClienteMensageiroPorSessao(sessionId);
+  if (!metadata || metadata.workspaceId !== workspaceId ||
+      (metadata.clienteId && metadata.clienteId !== workspaceId) || workspaceDaSessao.clienteIdMensageiro !== workspaceId) {
+    return { ok: false, reason: "session_workspace_mismatch" };
+  }
+
+  const socket = sessoes?.[sessionId];
+  const status = String(statusSessao?.[sessionId] || "").toLowerCase();
+  if (!socket || !socket.ev || !socketEhAtual(sessoes, sessionId, socket) || !["open", "aberto"].includes(status)) {
+    return { ok: false, reason: "target_socket_not_open" };
+  }
+  const listener = socket.__optimusListeners?.["messages.upsert"];
+  if (!listener || listener.emissor !== socket.ev || listener.evento !== "messages.upsert" || typeof listener.handler !== "function") {
+    return { ok: false, reason: "listener_registration_unverified" };
+  }
+  let attachmentVerified = null;
+  if (typeof socket.ev.listeners === "function") {
+    attachmentVerified = socket.ev.listeners("messages.upsert").includes(listener.handler);
+  }
+  if (attachmentVerified === false) return { ok: false, reason: "listener_attachment_missing" };
+
+  return {
+    ok: true,
+    workspaceId,
+    sessionId,
+    groupId,
+    socket,
+    attachmentVerified,
+    generation: Number(geracoesSocketWhatsapp?.[sessionId] || socket.__optimusSocketGeracao || 0)
+  };
+}
+
 function responderObservacaoIngressRadar(res, payload, statusCode = 200) {
   res.set("Cache-Control", "no-store");
   return res.status(statusCode).json(payload);
 }
+
+app.get("/admin/whatsapp/ingress-boundary", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  const target = validarAlvoObservacaoOpTesteRadar();
+  return responderObservacaoIngressRadar(res, { ...whatsappIngressBoundary.status(), target: {
+    verified: target.ok === true, reason: target.reason || "",
+    generation: target.ok ? target.generation : null,
+    physicalListener: target.ok ? (target.attachmentVerified === true ? "ATTACHED" : "UNKNOWN") : "UNVERIFIED"
+  } });
+});
+app.post("/admin/whatsapp/ingress-boundary/start", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  if (req.body?.confirm !== "OP_TEST_RADAR_BOUNDARY_5M") return responderObservacaoIngressRadar(res, { ok: false, reason: "confirmation_required" }, 400);
+  const target = validarAlvoObservacaoOpTesteRadar();
+  if (!target.ok) return responderObservacaoIngressRadar(res, { ok: false, reason: target.reason }, 409);
+  const result = whatsappIngressBoundary.start({ ...target, sock: target.socket, scopeValidated: true });
+  return responderObservacaoIngressRadar(res, result, result.ok ? 200 : 409);
+});
+app.post("/admin/whatsapp/ingress-boundary/stop", (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  return responderObservacaoIngressRadar(res, whatsappIngressBoundary.stop("manual"));
+});
 
 app.get("/admin/radar/ingress-observation", (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
@@ -33965,6 +34051,7 @@ async function iniciarWhatsApp(id, force = false) {
       motivo: force ? "reconnect_force" : "boot_reconnect"
     });
     socketGeracao = registroSocket.socketGeracao || sock.__optimusSocketGeracao || "";
+    try { whatsappIngressBoundary.trackSocket({ workspaceId: clienteIdMensageiro, sessionId: id, sock, generation: socketGeracao }); } catch { /* diagnostics only */ }
     sock.ev.on("creds.update", async () => {
       registrarTelemetriaCredsUpdate({
         contexto: contextoSocketBaileys,
@@ -34014,6 +34101,7 @@ console.log("[INFO] Cliente mensageiro resolvido:", {
 
 // =============== EVENTO MENSAGEIRO =================
 
+const whatsappIngressEmitter = sock.ev;
 registrarListenerUnicoSocket({
   sock,
   evento: "messages.upsert",
@@ -34023,6 +34111,7 @@ registrarListenerUnicoSocket({
   motivoRegistro: force ? "reconnect" : "boot",
   logger: console,
   onInvoke: ({ emitter, emitterCurrent, callbackCurrent }) => {
+    try { whatsappIngressBoundary.mark("wrapper", { sessionId: id, sock, emitter, current: emitterCurrent && callbackCurrent }); } catch { /* diagnostics only */ }
     mensageiroV4Diagnostics.observeListener({
       sessionId: id, sock, emitter, emitterCurrent, callbackCurrent, generation: socketGeracao
     });
@@ -34033,6 +34122,7 @@ registrarListenerUnicoSocket({
     } catch { /* Optional diagnostics cannot block the shared listener. */ }
   },
   handler: async ({ messages = [], type } = {}) => {
+  try { whatsappIngressBoundary.mark("callback", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, current: socketEhAtual(sessoes, id, sock), messages }); } catch { /* diagnostics only */ }
   try {
     radarIngressObservation.observeUpsert({
       workspaceId: clienteIdMensageiro,
@@ -34077,6 +34167,7 @@ registrarListenerUnicoSocket({
     }
   }
   if (!socketEhAtual(sessoes, id, sock)) {
+    try { whatsappIngressBoundary.mark("early", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, reason: "socket_stale", messages }); } catch { /* diagnostics only */ }
     if (gerenteDiagnosticV2ByMessage) {
       for (const message of messages) gerenteDiagnosticV2ByMessage.get(message)?.("socket_guard", "socket_stale", { result: "blocked" });
     }
@@ -34107,7 +34198,9 @@ registrarListenerUnicoSocket({
   for (let indiceMensagem = 0; indiceMensagem < messages.length; indiceMensagem += 1) {
     try {
       const mensagem = messages[indiceMensagem];
+      try { whatsappIngressBoundary.mark("listener", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem }); } catch { /* diagnostics only */ }
       if (sock.__optimusBufferRecovery?.shouldSuppressMessage(mensagem)) {
+        try { whatsappIngressBoundary.mark("early", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, reason: "buffer_recovery_suppressed", message: mensagem }); } catch { /* diagnostics only */ }
         radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
           message: mensagem, stage: "listener_gate", decision: "ignored", reason: "buffer_recovery_suppressed" });
         continue;
@@ -34155,6 +34248,7 @@ registrarListenerUnicoSocket({
         });
       }
       if (!usuarioAtivoOperacional(clienteIdMensageiro)) {
+        try { whatsappIngressBoundary.mark("early", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, reason: "user_inactive", message: mensagem }); } catch { /* diagnostics only */ }
         radarIngressObservation.recordStage({ workspaceId: clienteIdMensageiro, sessionId: id, sock,
           message: mensagem, stage: "listener_gate", decision: "ignored", reason: "usuario_inativo" });
         gerenteDiagnosticV2?.("card_scope", "user_inactive", { result: "blocked" });
@@ -34170,16 +34264,20 @@ registrarListenerUnicoSocket({
       const execucaoRadar = await executarConsumidorMensagemIsolado({
         consumidor: "radar",
         contexto: contextoListenerCobertura,
-        executar: () => processarMensagemRadarAutomatica({
+        executar: () => {
+          try { whatsappIngressBoundary.mark("radar", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem }); } catch { /* diagnostics only */ }
+          return processarMensagemRadarAutomatica({
           mensagem,
           sessaoId: id,
           sock,
           diagnosticoWorkspaceId: clienteIdMensageiro,
           upsertType: type,
           coberturaTraceId
-        })
+          });
+        }
       });
       const resultadoRadar = execucaoRadar?.resultado;
+      try { whatsappIngressBoundary.mark("result", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem, reason: resultadoRadar?.motivo || (resultadoRadar?.ok ? "accepted" : "other") }); } catch { /* diagnostics only */ }
       radarIngressObservation.recordStage({
         workspaceId: clienteIdMensageiro,
         sessionId: id,
