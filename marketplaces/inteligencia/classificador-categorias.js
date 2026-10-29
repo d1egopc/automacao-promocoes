@@ -1,4 +1,5 @@
 let categoriasDestinos = {};
+const { avaliarFamiliaFuncional } = require("./evidencia-funcional");
 
 try {
   ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
@@ -790,11 +791,30 @@ function preservarEvidenciaCategoriaMarketplace(origem, copia) {
   return copia;
 }
 
+function finalidadePesqueiraExplicita(titulo) {
+  // Identidade e finalidade no produto; origem, loja e workspace não são prova.
+  // Vara técnica exige comprimento E libragem, sem depender de marca/modelo.
+  if (/\bvaras?\b/.test(titulo) &&
+      /\b\d+(?: \d+)? ?(?:m|mts|metros|cm)\b/.test(titulo) && /\b\d+ ?lbs?\b/.test(titulo) &&
+      !/\b(?:cortina|rosqueada|roscada|rosca|aterramento|solda|academia|musculacao|capa|suporte|camisa|camiseta|brinquedo|manual)\b/.test(titulo)) return "vara_tecnica_comprimento_libragem";
+  // Ração para nutrição/criação continua Pet. Pesqueiro sozinho não prova isca.
+  if (/\bracao\b/.test(titulo) && /\bpesca\b/.test(titulo) &&
+      /\b(?:furadinha|furada|anzol|isca|cevadeira)\b/.test(titulo) &&
+      !/\b(?:aquario|ornamentais|ornamental|criacao|alevinos|aquicultura|cachorro|gato|aves|roedores)\b/.test(titulo)) return "racao_isca_finalidade_pesca";
+  // Tipo isca + identidade dedicada ou atributos/finalidade de uma isca física.
+  // Rapala isolada não é evidência; veneno, pet e vestuário nunca herdam a marca.
+  if (/\biscas?\b/.test(titulo) &&
+      (/\b(?:rapala|corrico|trolling|meia agua|superficie|garateias?)\b/.test(titulo) ||
+       (/\b\d+(?: \d+)? ?(?:cm|mm)\b/.test(titulo) && /\b\d+(?: \d+)? ?(?:g|gr|gramas)\b/.test(titulo))) &&
+      !/\b(?:veneno|raticida|formicida|inseticida|ratos?|camundongos?|formigas?|baratas?|cupins?|moscas?|mosquitos?|pragas?|empanada|congelada|frita|frango|carne|culinaria|alimenticia|petisco|brinquedo|cachorro|gato|camisa|camiseta|blusa|regata|calca|bermuda|shorts|vestido|bone|oculos|livro|manual)\b/.test(titulo)) return "isca_identidade_finalidade_pesca";
+  return "";
+}
+
 function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   const titulo = normalizarTextoLocal(String(oferta.titulo || oferta.nome || termo || "").slice(0, 1200));
   const oficial = categoriaMarketplaceComprovada(oferta);
   const declarada = categoriaDeclaradaValida(oferta);
-  let categoria = "", motivo = "natureza_produto_explicita";
+  let categoria = "", motivo = "natureza_produto_explicita", finalidadePesca = "", funcional = null;
   if (oficial?.adulto || /\b(?:sex shop|vibrador(?:es)?|dildos?|masturbador(?:es)?|estimulador sexual|eroticos?|eroticas?)\b/.test(titulo) ||
       (/\badultos?\b/.test(titulo) && (/\b(?:infantil|bebe|juvenil|crianca|meninos?|meninas?)\b/.test(titulo) ||
         [CATEGORIA.bebes, CATEGORIA.infantil, CATEGORIA.brinquedos].includes(oficial?.categoria || declarada)))) {
@@ -828,6 +848,12 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     categoria = CATEGORIA.iluminacao;
   } else if (/\b(?:lampadas? automotivas?|oleo de motor automotivo)\b/.test(titulo)) {
     categoria = CATEGORIA.automotivo;
+  } else if ((funcional = avaliarFamiliaFuncional(oferta, titulo))) {
+    categoria = funcional.categoria;
+    motivo = funcional.motivo;
+  } else if ((finalidadePesca = finalidadePesqueiraExplicita(titulo))) {
+    categoria = CATEGORIA.pesca;
+    motivo = finalidadePesca;
   } else if (/\biscas?\b.{0,60}\b(?:artificial|artificiais|camarao|camaroes|frog|sapo|jig)\b/.test(titulo) ||
       /\blinha shimano kairiki\b|\bvara lori rampage\b/.test(titulo) ||
       (/\blinha\b/.test(titulo) && /\b(?:pesca|fluorocarbono|multifilamento|monofilamento)\b/.test(titulo)) ||
@@ -838,7 +864,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     categoria = CATEGORIA.pesca;
   }
   if ((categoria === CATEGORIA.pesca && /\b(?:notebook|smartphone|furadeira|parafusadeira|geladeira|perfume)\b/.test(titulo)) ||
-      (categoria === CATEGORIA.ferramentas && /\biscas? (?:artificial|artificiais|frog|sapo|jig)\b/.test(titulo))) {
+      (categoria === CATEGORIA.ferramentas && (/\biscas? (?:artificial|artificiais|frog|sapo|jig)\b/.test(titulo) || finalidadePesqueiraExplicita(titulo)))) {
     categoria = CATEGORIA.diversos;
     motivo = "naturezas_produto_conflitantes";
   }
@@ -853,7 +879,7 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     const final = categoria || (oficial.conflito ? CATEGORIA.diversos : oficial.categoria);
     const divergencia = Boolean(oficial?.conflito || (oficial && oficial.categoria !== final) || (declarada && declarada !== CATEGORIA.diversos && declarada !== final));
     return { categoria: final, origem: categoria && !oficial?.adulto ? "identidade_produto" : "marketplace_oficial",
-      fonteEvidencia: categoria && !oficial?.adulto ? "titulo_tipo_modelo" : oficial.fonte,
+      fonteEvidencia: categoria && !oficial?.adulto ? funcional ? "campos_funcionais_disponiveis" : "titulo_tipo_modelo" : oficial.fonte,
       motivo: categoria ? motivo : oficial.conflito ? "tipo_hierarquia_divergentes" : "hierarquia_oficial_mapeada", confianca: final === CATEGORIA.diversos ? "baixa" : "alta",
       divergencia, baixaConfianca: final === CATEGORIA.diversos };
   }

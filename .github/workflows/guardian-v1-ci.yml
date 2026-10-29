@@ -37,6 +37,29 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Diversos integration - isolated replay and commercial invariants
+        if: github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=5dd99da80233ab9a49162e02e215b75982e3da28
+          git merge-base --is-ancestor "$base" HEAD
+          git diff --exit-code "$base" HEAD -- index.js modules utils optimus-capture marketplaces/shopee marketplaces/amazon marketplaces/aliexpress marketplaces/magalu marketplaces/mercadolivre package.json package-lock.json .github/workflows/deploy-backend-vps.yml scripts/deploy-backend-vps-manual.sh
+          node --test tests/diversos-integracao.test.cjs tests/classificador-diversos-20261028.test.cjs
+          mkdir -p "$RUNNER_TEMP/diversos-base" "$RUNNER_TEMP/diversos-reports"
+          git archive "$base" | tar -x -C "$RUNNER_TEMP/diversos-base"
+          node tests/classificador-diversos-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/focal.json"
+          node tests/diversos-integracao-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --out "$RUNNER_TEMP/diversos-reports/real40.json"
+          node --expose-gc tests/classificador-v3-replay.cjs --baseline "$RUNNER_TEMP/diversos-base" --benchmark --out "$RUNNER_TEMP/diversos-reports/v3.json"
+      - name: Preserve isolated Diversos replays
+        if: always() && github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diversos-integration-replays
+          path: ${{ runner.temp }}/diversos-reports/*.json
+          if-no-files-found: error
       - name: Garimpei reconciled release - preserve published Shopee and exact sensor
         if: github.ref == 'refs/heads/validation/guardian-v1-garimpei-release-20261028'
         shell: bash
@@ -296,6 +319,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-diversos-integracao-20261029) base=5dd99da80233ab9a49162e02e215b75982e3da28 ;;
             refs/heads/validation/guardian-v1-garimpei-release-20261028) base=58ac3d19840bb25c8f72bb29e5ac60128a148bd4 ;;
             refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-garimpei-infra-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;

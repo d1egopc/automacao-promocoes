@@ -377,6 +377,8 @@ function testMatrix(plan) {
       add(`imagens:${name}`, `tests/${name}.test.js`, process.execPath, [`tests/${name}.test.js`]);
   }
   if (plan.runtimeFiles.some(file => file.includes("classificador-categorias") || file.startsWith("modules/inteligencia-universal/") || file === "marketplaces/aliexpress/importar.js" || file.includes("magalu-parser.js"))) {
+    add("categorias:diversos-integracao", "tests/diversos-integracao.test.cjs", process.execPath,
+      ["--test", "tests/diversos-integracao.test.cjs", "tests/classificador-diversos-20261028.test.cjs"], false);
     add("categorias:copy-natureza-focal", "tests/classificador-copy-focal.test.cjs", process.execPath,
       ["--test", "tests/classificador-copy-focal.test.cjs"], false);
     add("categorias:v3-evidencias", "tests/classificador-universal-v3.test.cjs", process.execPath,
