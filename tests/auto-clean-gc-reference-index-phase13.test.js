@@ -323,6 +323,7 @@ async function testRestartResumesAndSharedRenderSurvives() {
 
 async function testBoundedCheckpointProjectionAboveFourMiB() {
   const f = fixture("user_gc_checkpoint_projection_size");
+  const previous = process.env.OPTIMUS_AUTO_CLEAN_GC_CHECKPOINT_PROJECTION_6M;
   try {
     writeJson(path.join(f.clientDir, "fila.json"), [{ imagem: renderUrl(f, H1) }]);
     const file = writeProjection(f, H1);
@@ -332,6 +333,11 @@ async function testBoundedCheckpointProjectionAboveFourMiB() {
     fs.utimesSync(file, new Date(Date.now() + 20000), new Date(Date.now() + 20000));
     assert.ok(fs.statSync(file).size > 4 * 1024 * 1024);
     assert.ok(fs.statSync(file).size < 6 * 1024 * 1024);
+    delete process.env.OPTIMUS_AUTO_CLEAN_GC_CHECKPOINT_PROJECTION_6M;
+    const defaultBlocked = await build(f);
+    assert.strictEqual(defaultBlocked.complete, false, "publicar o codigo nao libera GC existente");
+    assert.strictEqual(defaultBlocked.reasonCode, REASON.COMPACT_SOURCE_TOO_LARGE);
+    process.env.OPTIMUS_AUTO_CLEAN_GC_CHECKPOINT_PROJECTION_6M = "true";
     const accepted = await build(f);
     assert.strictEqual(accepted.complete, true, JSON.stringify(accepted.reasonCode));
     assert.ok(accepted.refs.has(H1), "checkpoint validado deve manter a referência viva");
@@ -343,7 +349,11 @@ async function testBoundedCheckpointProjectionAboveFourMiB() {
     const rejected = await build(f);
     assert.strictEqual(rejected.complete, false);
     assert.strictEqual(rejected.reasonCode, REASON.COMPACT_SOURCE_TOO_LARGE);
-  } finally { cleanup(f); }
+  } finally {
+    if (previous === undefined) delete process.env.OPTIMUS_AUTO_CLEAN_GC_CHECKPOINT_PROJECTION_6M;
+    else process.env.OPTIMUS_AUTO_CLEAN_GC_CHECKPOINT_PROJECTION_6M = previous;
+    cleanup(f);
+  }
 }
 
 async function testNoDeletionPrimitive() {
