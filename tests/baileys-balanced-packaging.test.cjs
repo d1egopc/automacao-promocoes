@@ -7,7 +7,7 @@ test("closed balanced profile pins build recipe, installer, version and dependen
   for(const [file,h] of Object.entries({...p.runtimeHashes,...p.unchangedBuildHashes}))
     assert.equal(hash(fs.readFileSync(path.join(root,file))),h,file);
   const patch=require("../modules/whatsapp/baileys-balanced-buffer-patch");
-  const source=fs.readFileSync(path.join(__dirname,"fixtures/baileys-6.7.22-event-buffer.js"),"utf8").replace(/\r\n/g,"\n").trimEnd();
+  const source=require("./fixtures/baileys-6.7.22-event-buffer.json");
   assert.equal(hash(source),p.dependencies["lib/Utils/event-buffer.js"].before);
   assert.equal(hash(patch.transform(source)),p.dependencies["lib/Utils/event-buffer.js"].after);
 });
