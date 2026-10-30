@@ -23,6 +23,11 @@ const DEFAULT_BUILD_BYTES = 16 * 1024 * 1024;
 const DEFAULT_BUILD_DURATION_MS = 750;
 const MAX_INDEX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_QUEUE_PROJECTION_BYTES = 4 * 1024 * 1024;
+// Checkpoint projections can contain commercially required item metadata. The
+// verified 2026-10-30 production-shaped snapshot is 4.66 MB. Keep the compact
+// VIVA-reference projection at its original 4 MiB cap; only the checkpoint
+// projection gets this finite headroom, with proof and coverage still required.
+const MAX_CHECKPOINT_PROJECTION_BYTES = 6 * 1024 * 1024;
 const INDEX_MAX_AGE_MS = 30 * 60 * 1000;
 const HISTORY_DAYS = 7;
 const REASON = Object.freeze({
@@ -234,11 +239,13 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi, validatedQu
     if (newestGuard > projection.mtimeMs) {
       discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_STALE, source: "fila", file: projection.file };
     }
+    if (projection.size > MAX_CHECKPOINT_PROJECTION_BYTES) {
+      discoveryError ||= { reasonCode: REASON.COMPACT_SOURCE_TOO_LARGE, source: "fila", file: projection.file };
+    }
     const legacyGuard = legacyGuards.find(item => item.key === "guard:fila");
     projection.requiresCheckpointCoverage = Boolean(legacyGuard);
     if (legacyGuard && !discoveryError) {
       try {
-        if (projection.size > MAX_QUEUE_PROJECTION_BYTES) throw new Error("projection_too_large");
         const projectionRaw = await fsApi.readFile(projection.absolutePath, "utf8");
         bytesRead += Buffer.byteLength(projectionRaw, "utf8");
         const parsed = JSON.parse(projectionRaw);

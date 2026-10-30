@@ -321,6 +321,31 @@ async function testRestartResumesAndSharedRenderSurvives() {
   } finally { cleanup(f); }
 }
 
+async function testBoundedCheckpointProjectionAboveFourMiB() {
+  const f = fixture("user_gc_checkpoint_projection_size");
+  try {
+    writeJson(path.join(f.clientDir, "fila.json"), [{ imagem: renderUrl(f, H1) }]);
+    const file = writeProjection(f, H1);
+    const valid = JSON.parse(fs.readFileSync(file, "utf8"));
+    valid.padding = "x".repeat(5 * 1024 * 1024);
+    writeJson(file, valid);
+    fs.utimesSync(file, new Date(Date.now() + 20000), new Date(Date.now() + 20000));
+    assert.ok(fs.statSync(file).size > 4 * 1024 * 1024);
+    assert.ok(fs.statSync(file).size < 6 * 1024 * 1024);
+    const accepted = await build(f);
+    assert.strictEqual(accepted.complete, true, JSON.stringify(accepted.reasonCode));
+    assert.ok(accepted.refs.has(H1), "checkpoint validado deve manter a referência viva");
+
+    valid.padding = "x".repeat(6 * 1024 * 1024);
+    writeJson(file, valid);
+    fs.utimesSync(file, new Date(Date.now() + 30000), new Date(Date.now() + 30000));
+    assert.ok(fs.statSync(file).size > 6 * 1024 * 1024);
+    const rejected = await build(f);
+    assert.strictEqual(rejected.complete, false);
+    assert.strictEqual(rejected.reasonCode, REASON.COMPACT_SOURCE_TOO_LARGE);
+  } finally { cleanup(f); }
+}
+
 async function testNoDeletionPrimitive() {
   const files = [
     "../modules/engine/auto-clean/gc-reference-index-builder.js",
@@ -342,6 +367,7 @@ async function main() {
   await testSourceAddedDuringBootstrapNeverOrphansRender();
   await testActiveWorkspaceConverges();
   await testRestartResumesAndSharedRenderSurvives();
+  await testBoundedCheckpointProjectionAboveFourMiB();
   await testNoDeletionPrimitive();
   console.log("AUTO_CLEAN_GC_REFERENCE_INDEX_PHASE13_TESTS_PASS");
 }
