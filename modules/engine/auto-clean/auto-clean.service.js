@@ -637,7 +637,7 @@ function logAutoClean(tag, payload = {}, logger = console) {
 
 function isSessaoOuConfig(rel = "") {
   const texto = String(rel || "").toLowerCase();
-  if (texto === "auto-clean/media-quarantine" || texto.startsWith("auto-clean/media-quarantine/")) return true;
+  if (texto === ".auto-clean-media-quarantine" || texto.startsWith(".auto-clean-media-quarantine/")) return true;
   return /session|sessao|auth|baileys|whatsapp|wpp|config|destino|cred|token|cookie|secret|senha|password|jwt|private/.test(texto);
 }
 

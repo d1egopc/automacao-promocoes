@@ -313,14 +313,15 @@ async function runMediaPhysicalBatch(options = {}) {
     Number(options.maxDelete) || MAX_TOTAL_DELETE_PER_BATCH));
   const maxDurationMs = Math.min(MAX_DURATION_MS, Math.max(50,
     Number(options.maxDurationMs) || MAX_DURATION_MS));
-  const targets = await listTargets(dataDir, fsApi);
+  const scopedOnly = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE === "approved" &&
+    !released(MEDIA_RELEASE);
+  const targets = (await listTargets(dataDir, fsApi))
+    .filter(target => !scopedOnly || scopedRelease(target));
   const state = await loadState(dataDir, fsApi);
   const targetIds = selecionarRoundRobin(targets.map(item => item.id), state.lastTarget, maxTargets).selecionados;
   const summaries = [];
   let removed = 0;
   let quarantined = 0;
-  const scopedOnly = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE === "approved" &&
-    !released(MEDIA_RELEASE);
   let loadThrottled = false;
 
   for (const targetId of targetIds) {
@@ -360,6 +361,10 @@ async function runMediaPhysicalBatch(options = {}) {
       "quarantined", "quarantineBytes", "restored"]) {
       aggregate[key] += Number(item[key] || 0);
     }
+  }
+  if (scopedOnly && targets.length === 0) {
+    aggregate.errors = 1;
+    aggregate.stopReason = "no_scoped_targets_verified";
   }
   aggregate.createdGiB = aggregate.createdBytes / (1024 ** 3);
   aggregate.bytesFreedGiB = aggregate.bytesFreed / (1024 ** 3);

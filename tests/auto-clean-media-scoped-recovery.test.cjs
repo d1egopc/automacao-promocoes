@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { runMediaPhysical, RETENTION_MS, OBSERVATION_DELAY_MS } =
+const { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS } =
   require("../modules/engine/auto-clean/gc-media-physical.service");
 const { HOLD_MS } = require("../modules/engine/auto-clean/gc-media-quarantine");
 
@@ -52,7 +52,7 @@ test("scoped identity media stages, restores new references and physically frees
     assert.equal(staged.quarantined, 1);
     assert.equal(staged.bytesFreed, 0);
     assert.equal(fs.existsSync(f.file), false);
-    const recovery = path.join(f.dataDir, "auto-clean", "media-quarantine", "identity", "user_safe");
+    const recovery = path.join(f.dataDir, ".auto-clean-media-quarantine", "identity", "user_safe");
     assert.equal(fs.readFileSync(path.join(recovery, `${f.name}.bin`), "utf8"), "recovery fixture");
     if (process.platform !== "win32")
       assert.equal(fs.statSync(path.join(recovery, `${f.name}.json`)).mode & 0o077, 0);
@@ -87,10 +87,25 @@ test("no scoped authorization or incomplete references never removes media", asy
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
 
+test("batch scans only released workspaces and rejects an empty scope", async () => {
+  const f = setup();
+  try { await withScoped(async () => {
+    const loaded = [];
+    const onlySafe = await runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: now, execute: true,
+      referenceLoader: async target => { loaded.push(target.id); return { complete: true, refs: new Map() }; } });
+    assert.deepEqual(loaded, [f.target]);
+    assert.deepEqual(onlySafe.targets, [f.target]);
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:user_other";
+    const empty = await runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: now + 1, execute: true });
+    assert.equal(empty.errors, 1);
+    assert.equal(empty.stopReason, "no_scoped_targets_verified");
+  }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+});
+
 test("unexpected quarantine content blocks without deleting either file", async () => {
   const f = setup();
   try { await withScoped(async () => {
-    const recovery = path.join(f.dataDir, "auto-clean", "media-quarantine", "identity", "user_safe");
+    const recovery = path.join(f.dataDir, ".auto-clean-media-quarantine", "identity", "user_safe");
     fs.mkdirSync(recovery, { recursive: true, mode: 0o700 });
     if (process.platform !== "win32") fs.chmodSync(recovery, 0o700);
     const protectedFile = path.join(recovery, "protected-backup.dump");
@@ -112,7 +127,7 @@ test("world-readable quarantine refuses scoped media cleanup", async t => {
   if (process.platform === "win32") { t.skip("POSIX permissions only"); return; }
   const f = setup();
   try { await withScoped(async () => {
-    const recovery = path.join(f.dataDir, "auto-clean", "media-quarantine", "identity", "user_safe");
+    const recovery = path.join(f.dataDir, ".auto-clean-media-quarantine", "identity", "user_safe");
     fs.mkdirSync(recovery, { recursive: true, mode: 0o700 });
     fs.chmodSync(recovery, 0o755);
     const result = await runMediaPhysical({ dataDir: f.dataDir, targetId: f.target,

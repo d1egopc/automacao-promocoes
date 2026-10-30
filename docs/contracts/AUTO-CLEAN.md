@@ -64,7 +64,7 @@ O caminho completo do diretório é verificado contra symlinks. A política espe
 continua em 192 horas, com duas observações separadas por pelo menos 15 minutos.
 
 Em vez de apagar imediatamente, o arquivo vai por rename para
-`/data/auto-clean/media-quarantine/identity/<workspace>` (mesmo filesystem), com manifesto
+`/data/.auto-clean-media-quarantine/identity/<workspace>` (mesmo filesystem), com manifesto
 privado, hash SHA-256 e retenção de 72 horas. Referência nova provoca restauração automática;
 somente uma nova verificação completa e ausência de referência após 72 horas permitem unlink
 físico. Arquivo ou manifesto desconhecido/corrompido bloqueia o alvo. Limites: 32 MiB por

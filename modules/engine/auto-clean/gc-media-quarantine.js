@@ -20,9 +20,9 @@ function safeTarget(target) {
 async function safeDirectory(dataDir, target, io = fs.promises) {
   safeTarget(target);
   const root = path.resolve(dataDir);
-  const parts = [root, path.join(root, "auto-clean"), path.join(root, "auto-clean", "media-quarantine"),
-    path.join(root, "auto-clean", "media-quarantine", target.kind),
-    path.join(root, "auto-clean", "media-quarantine", target.kind, target.workspace)];
+  const privateRoot = path.join(root, ".auto-clean-media-quarantine");
+  const parts = [root, privateRoot, path.join(privateRoot, target.kind),
+    path.join(privateRoot, target.kind, target.workspace)];
   for (const dir of parts) {
     try { await io.mkdir(dir, { mode: 0o700 }); } catch (error) { if (error.code !== "EEXIST") throw error; }
     const stat = await io.lstat(dir);
