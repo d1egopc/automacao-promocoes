@@ -57,8 +57,11 @@ continua bloqueado. Não há aumento do limite nem regravação produtiva autom�
 Permanece OFF até publicação e liberação específica. A via recorrente requer `RECURRING_MODE=execute`,
 `OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE=approved` e lista exata em
 `OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES`, por exemplo `identity:<workspace>`.
-As três liberações globais de DELETE ficam ausentes. A candidata admite somente
-`identity:<workspace>`; mídia social permanece bloqueada até cobertura compartilhada completa.
+As três liberações globais de DELETE ficam ausentes. A candidata admite
+`identity:<workspace>` ou o escopo explícito `identity:*`. O curinga apenas habilita a
+descoberta automática de novos diretórios de identidade; cada workspace passa por seu
+próprio índice de referências e fica bloqueada se a cobertura estiver ausente, stale,
+grande demais ou inconsistente. Mídia social permanece bloqueada até cobertura compartilhada completa.
 O índice de referências deve ser completo para a workspace e é revalidado antes de cada remoção.
 O caminho completo do diretório é verificado contra symlinks. A política específica de mídia
 continua em 192 horas, com duas observações separadas por pelo menos 15 minutos.

@@ -131,7 +131,8 @@ async function testStaleIndexFailsClosed() {
       execute: true, mediaDeleteEnabled: true, referenceLoader: stale
     });
     assert.strictEqual(attempted.removed, 0);
-    assert.strictEqual(attempted.errors, 1);
+    assert.strictEqual(attempted.errors, 0);
+    assert.strictEqual(attempted.blocked, 1);
     assert.ok(fs.existsSync(target), "indice stale deve bloquear exclusao");
   } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 }

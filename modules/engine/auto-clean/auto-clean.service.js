@@ -2773,7 +2773,7 @@ const agendarAutoCleanRecorrente = createRecurringLane({
         maxTargetsPerRun: 4, microBatchSize: 2, maxDelete: 4, maxDurationMs: 2000 }) : null;
     if (!raw && !media) return { ok: false, removed: 0, reason: "AUTO_CLEAN_RECURRING_SCOPE_NOT_RELEASED" };
     return { ok: (raw?.ok !== false) && (media?.errors || 0) === 0,
-      eligible: Number(media?.candidates || 0), blocked: Number(media?.errors || 0),
+      eligible: Number(media?.candidates || 0), blocked: Number(media?.blocked || 0) + Number(media?.errors || 0),
       removed: Number(raw?.removed || 0) + Number(media?.removed || 0),
       logicalBytesReleased: Number(raw?.logicalBytesReleased || 0),
       physicalBytesRecovered: Number(media?.bytesFreed || 0),

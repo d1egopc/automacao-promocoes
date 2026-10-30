@@ -131,7 +131,8 @@ async function loadReferences(target, options) {
 function scopedRelease(target) {
   if (process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE !== "approved" || target?.kind !== "identity") return false;
   const scopes = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES || "").split(",").map(value => value.trim());
-  return scopes.includes(target.id) && /^identity:[A-Za-z0-9_-]+$/.test(target.id);
+  if (!/^identity:[A-Za-z0-9_-]+$/.test(target.id)) return false;
+  return scopes.includes(target.id) || scopes.includes("identity:*");
 }
 
 function deleteEnabled(options, target) {
@@ -160,6 +161,7 @@ async function runMediaPhysical(options = {}) {
   const summary = { target: selectedId, kind: target?.kind || "", workspace: target?.workspace || "",
     scanned: 0, createdSinceLastRun: 0, createdBytes: 0, referenced: 0, young: 0,
     candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0, errors: 0,
+    blocked: 0,
     backlog: 0, backlogBytes: 0, revalidations: 0, microBatches: 1,
     quarantined: 0, quarantineBytes: 0, restored: 0,
     throttled: false, stopReason: "", dryRun: !deleteEnabled(options, target), durationMs: 0 };
@@ -177,7 +179,8 @@ async function runMediaPhysical(options = {}) {
   summary.referenceComplete = references?.complete === true;
   summary.referenceReasonCode = references?.reasonCode || "";
   if (!references?.complete) {
-    summary.errors++;
+    summary.blocked++;
+    summary.stopReason = references?.reasonCode || "media_reference_incomplete";
     await saveState(dataDir, state, fsApi);
     summary.durationMs = Date.now() - started;
     return summary;
@@ -347,6 +350,7 @@ async function runMediaPhysicalBatch(options = {}) {
     targets: summaries.map(item => item.target).filter(Boolean),
     scanned: 0, createdSinceLastRun: 0, createdBytes: 0, referenced: 0, young: 0,
     candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0, errors: 0,
+    blocked: 0,
     backlog: 0, backlogBytes: 0, revalidations: 0, microBatches: summaries.length,
     quarantined: 0, quarantineBytes: 0, restored: 0,
     dryRun: summaries.every(item => item.dryRun !== false),
@@ -357,7 +361,7 @@ async function runMediaPhysicalBatch(options = {}) {
   };
   for (const item of summaries) {
     for (const key of ["scanned", "createdSinceLastRun", "createdBytes", "referenced", "young", "candidates",
-      "candidateBytes", "removed", "bytesFreed", "errors", "backlog", "backlogBytes", "revalidations",
+      "candidateBytes", "removed", "bytesFreed", "errors", "blocked", "backlog", "backlogBytes", "revalidations",
       "quarantined", "quarantineBytes", "restored"]) {
       aggregate[key] += Number(item[key] || 0);
     }

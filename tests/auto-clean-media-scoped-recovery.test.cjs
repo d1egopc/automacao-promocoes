@@ -106,6 +106,42 @@ test("batch scans only released workspaces and rejects an empty scope", async ()
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
 
+test("wildcard scope discovers a new workspace and blocks incomplete references independently", async () => {
+  const f = setup();
+  const newWorkspace = "user_new";
+  const newDir = path.join(f.dataDir, "identidade-visual-ofertas", "clientes", newWorkspace, "renderizados");
+  fs.mkdirSync(newDir, { recursive: true });
+  const newName = `${"b".repeat(64)}.png`;
+  const newFile = path.join(newDir, newName);
+  fs.writeFileSync(newFile, Buffer.from("new workspace fixture"));
+  fs.utimesSync(newFile, old, old);
+  try { await withScoped(async () => {
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:*";
+    const loaded = [];
+    await runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: now,
+      execute: true, referenceLoader: async target => {
+        loaded.push(target.id);
+        return target.workspace === newWorkspace
+          ? { complete: false, refs: new Map(), reasonCode: "REFERENCE_INDEX_STALE" }
+          : { complete: true, refs: new Map() };
+      } });
+    const result = await runMediaPhysicalBatch({ dataDir: f.dataDir,
+      nowMs: now + OBSERVATION_DELAY_MS + 1, execute: true,
+      referenceLoader: async target => {
+        loaded.push(target.id);
+        return target.workspace === newWorkspace
+          ? { complete: false, refs: new Map(), reasonCode: "REFERENCE_INDEX_STALE" }
+          : { complete: true, refs: new Map() };
+      } });
+    assert.ok(loaded.includes(f.target));
+    assert.ok(loaded.includes(`identity:${newWorkspace}`));
+    assert.equal(result.quarantined, 1);
+    assert.equal(result.blocked, 1);
+    assert.equal(fs.existsSync(f.file), false);
+    assert.equal(fs.existsSync(newFile), true);
+  }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+});
+
 test("unexpected quarantine content blocks without deleting either file", async () => {
   const f = setup();
   try { await withScoped(async () => {
