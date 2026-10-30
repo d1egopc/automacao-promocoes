@@ -1,0 +1,49 @@
+name: Diversos V4 Linux Node24
+on:
+  push:
+    branches: [validation/guardian-v1-diversos-v4-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Preserve published runtime outside the exact classifier scope
+        run: |
+          git merge-base --is-ancestor f02b5a590c6f01f8ceb430013990a1c86ddcd522 HEAD
+          git diff --exit-code 97b7020491c89f119e9dc09538af03f8cae87f2a HEAD -- index.js modules/whatsapp modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 modules/local-worker modules/solenoide optimus-capture utils package.json package-lock.json Dockerfile scripts/deploy-backend-vps-manual.sh .github/workflows/deploy-backend-vps.yml
+          expected=marketplaces/inteligencia/classificador-categorias.js,marketplaces/inteligencia/evidencia-funcional.js,modules/engine/importer/importer.service.js
+          actual=$(node scripts/guardian-v1.cjs prepare --base 97b7020491c89f119e9dc09538af03f8cae87f2a --source "$GITHUB_SHA" --format value)
+          test "$actual" = "$expected"
+      - name: Focal contracts and negative controls
+        run: |
+          node --test tests/diversos-v4.test.cjs tests/diversos-integracao.test.cjs tests/classificador-diversos-20261028.test.cjs
+          node --test tests/classificador-copy-focal.test.cjs tests/classificador-universal-v3.test.cjs tests/classificador-v3-evidencia-marketplace.test.cjs tests/classificador-v3-magalu-evidencia.test.cjs tests/classificador-v3-legacy-parity.test.cjs
+      - name: Real sent sample, multiworkspace sample and immutable 147 replay
+        run: node tests/diversos-v4-replay.cjs --out "$RUNNER_TEMP/diversos-v4-replay.json"
+      - name: Official persistence and destination pipeline with fictional IO only
+        run: node tests/diversos-v4-pipeline.cjs --out "$RUNNER_TEMP/diversos-v4-pipeline.json"
+      - name: Preserve consumers and installed buffer correction
+        run: |
+          node --test tests/baileys-balanced-buffer.test.cjs tests/baileys-balanced-artifact.test.cjs
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node tests/destino-geral-distributor.test.js
+      - name: Guardian unchanged baseline debt comparison
+        run: node scripts/guardian-v1.cjs validate --base 97b7020491c89f119e9dc09538af03f8cae87f2a --source "$GITHUB_SHA" --report "$RUNNER_TEMP/diversos-v4-guardian.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diversos-v4-evidence
+          path: |
+            ${{ runner.temp }}/diversos-v4-*.json

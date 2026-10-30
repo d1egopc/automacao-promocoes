@@ -1,5 +1,5 @@
 let categoriasDestinos = {};
-const { avaliarFamiliaFuncional } = require("./evidencia-funcional");
+const { avaliarFamiliaFuncional, avaliarNaturezaFuncional } = require("./evidencia-funcional");
 
 try {
   ({ CATEGORIAS_DESTINOS: categoriasDestinos = {} } = require("./categorias-destinos"));
@@ -822,6 +822,9 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     motivo = "conteudo_adulto_sem_categoria_habilitada";
   } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate|parafusadeira|furadeira)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
+  } else if ((funcional = avaliarNaturezaFuncional(oferta, titulo))) {
+    categoria = funcional.categoria;
+    motivo = funcional.motivo;
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
     categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
       : /\b(?:feminina|feminino|mulher)\b/.test(titulo) ? CATEGORIA.modaFeminina
@@ -911,7 +914,7 @@ function classificarCategoriaLegada(oferta = {}, termo = "") {
   }
 
   const categoriaManual = categoriaDeclaradaValida(oferta);
-  if (categoriaManual && !termo) {
+  if (categoriaManual && categoriaManual !== CATEGORIA.diversos && !termo) {
     return categoriaManual;
   }
 

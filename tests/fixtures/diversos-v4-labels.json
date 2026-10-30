@@ -1,0 +1,46 @@
+{
+  "labelBasis": "Curadoria por identidade/finalidade explícitas e taxonomia existente; anterior ao replay da candidata. Não é revisão cega nem acurácia populacional. Mesmas publicações duplicadas continuam identificadas por sampleId.",
+  "whatsapp": {
+    "1":"Periféricos", "2":"Eletrodomésticos", "6":"Diversos", "8":"Diversos", "11":"Diversos", "13":"Diversos",
+    "19":"Casa, Móveis e Decoração", "21":"Casa, Móveis e Decoração", "29":"Roupas e Moda Masculina", "30":"Pesca e Camping",
+    "40":"Pesca e Camping", "41":"Pesca e Camping", "43":"Pesca e Camping", "50":"Pesca e Camping", "55":"Papelaria e Livros",
+    "61":"Esporte e Suplementos", "62":"Roupas e Moda Masculina", "79":"Casa, Móveis e Decoração", "80":"Iluminação e Elétrica",
+    "81":"Diversos", "84":"Esporte e Suplementos", "86":"Esporte e Suplementos", "90":"Esporte e Suplementos",
+    "122":"Perfumaria, Farmácia e Beleza", "124":"Alimentos e Mercearia", "128":"Pesca e Camping", "131":"Audio TV",
+    "151":"Casa, Móveis e Decoração", "171":"Casa, Móveis e Decoração"
+  },
+  "excluded": {"164":"Instrução de interface, não identidade de produto; não contar como erro de classificação."},
+  "additionalSpecific": {"18":"Iluminação e Elétrica", "24":"Iluminação e Elétrica", "36":"Roupas e Moda Feminina"},
+  "pending": {
+    "6":"Alvo sem modalidade comprovada na taxonomia; não inferir pesca.",
+    "8":"Alvo sem modalidade comprovada; não classificar pela marca.",
+    "11":"Cápsulas sem composição/finalidade comprovadas.",
+    "13":"Tática/Rambo não comprova uso em camping ou pesca; não há categoria tática própria.",
+    "81":"Extratora sem finalidade/superfície comprovada no título; exige atributos disponíveis."
+  },
+  "policyOverrides": {
+    "Faca Picanheira Profissional 30cm Corte Alfa Em Aço Inox":"Casa, Móveis e Decoração",
+    "Camisa De Pesca Com Touca E Tube - Uv50 | Secagem Rápida":"Pesca e Camping",
+    "Camisa de pesca UV50":"Pesca e Camping",
+    "Camisa de pesca unissex UV50":"Pesca e Camping"
+  },
+  "supplemental": [
+    ["Faca Skinner Mini Campeira com bainha","Diversos"],
+    ["Faca Skinner Mini Campeira com bainha para camping e sobrevivência","Pesca e Camping"],
+    ["Kit de lanternas para pesca e acampamento","Pesca e Camping"],
+    ["Lanterna genérica sem contexto outdoor","Iluminação e Elétrica"],
+    ["Terno Oxford Slim Masculino","Roupas e Moda Masculina"],
+    ["Kit de sabonetes líquidos e óleo de banho","Perfumaria, Farmácia e Beleza"],
+    ["Fogão a gás para pesca e disco de arado","Pesca e Camping"],
+    ["Fogão a gás 5 bocas com forno para residência","Eletrodomésticos"],
+    ["Porta-varas de pesca 1,9m","Pesca e Camping"],
+    ["Camisa de pesca com proteção UV50+","Pesca e Camping"],
+    ["Calça de pesca em poliamida","Pesca e Camping"],
+    ["Impressora multifuncional Epson tanque de tinta","Periféricos"],
+    ["Impressora laser Brother multifuncional","Periféricos"],
+    ["Tanquinho semiautomático marca alternativa 12kg","Eletrodomésticos"],
+    ["Kit refletores LED 100W marca alternativa","Iluminação e Elétrica"],
+    ["Máscara capilar tonalizante fabricante alternativo","Perfumaria, Farmácia e Beleza"],
+    ["Tp-Link Deco X10 Roteador Mesh Wifi6 Ax1500","Periféricos"]
+  ]
+}

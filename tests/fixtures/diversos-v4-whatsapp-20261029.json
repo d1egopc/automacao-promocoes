@@ -1,0 +1,1285 @@
+{
+  "source": {
+    "file": "chat.txt in Optimus Promo Geral.zip",
+    "sha256": "39d2039a09f5b9d6e32f37aa20242921bb5818dd6f83a9528988341bcfae4a84",
+    "confirmedSameAs": "chat(6).txt by owner",
+    "date": "2026-10-29",
+    "scope": "182 sent offers, not all captured offers; chat.md excluded; titles and commercial fields only; original workspace not inferred"
+  },
+  "offers": [
+    {
+      "sampleId": 1,
+      "titulo": "Impressora HP Smart Tank 210",
+      "categoriaRegistrada": "Diversos",
+      "preco": 629.27,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 2,
+      "titulo": "Colormaq Tanquinho 15kg Prateado",
+      "categoriaRegistrada": "Diversos",
+      "preco": 430.92,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 3,
+      "titulo": "SINAL GARANTIDO ONDE O CELULAR NÃO CHEGA",
+      "categoriaRegistrada": "Celulares e Smartphones",
+      "preco": 420.59,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 4,
+      "titulo": "Apple Ipad 11 A3354 Wi-fi 128gb e 6GB de ram",
+      "categoriaRegistrada": "Computadores e Notebook",
+      "preco": 2754.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 5,
+      "titulo": "Kit Pesca Esportiva Estojo Anzol Girador Emp 131 Fishing Spo",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 46.97,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 6,
+      "titulo": "Kit 100 Alvos Silhueta Humanoide Fino C/ 200 Obreias",
+      "categoriaRegistrada": "Diversos",
+      "preco": 129.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 7,
+      "titulo": "FEIJÃO PRONTO EM 20 MINUTO",
+      "categoriaRegistrada": "Alimentos e Mercearia",
+      "preco": 178.12,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 8,
+      "titulo": "Alvo Rearmável Com Cinco Pêndulos - Quickshot",
+      "categoriaRegistrada": "Diversos",
+      "preco": 229.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 9,
+      "titulo": "Monitor Viewpro MWV21 LED de 21.5\" Full HD Com HDMI e VGA",
+      "categoriaRegistrada": "Computadores e Notebook",
+      "preco": 234.28,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 10,
+      "titulo": "Produto Amazon",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 83.9,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 11,
+      "titulo": "Testo Essencial 60 Cápsulas",
+      "categoriaRegistrada": "Diversos",
+      "preco": 46.33,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 12,
+      "titulo": "PHILIPS, Fone de Ouvido Sem Fio TWS, TAT1109WT/00, Bluetooth, Com",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 109.88,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 13,
+      "titulo": "Faca Tática Artesanal Facao Rambo Aço Com Tratamento Térmico Cor Prateado",
+      "categoriaRegistrada": "Diversos",
+      "preco": 52.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 14,
+      "titulo": "Smart Tv 32'' Led Hd Weyon Tv 60hz 32wdsnbx 100/240v",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 647.28,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 15,
+      "titulo": "Smart TV 43\" Philco QLED HDR10 Roku TV P43KRB",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 1149.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 16,
+      "titulo": "3x Creatina Monohidratada Pura 500g Dark Lab Unidade",
+      "categoriaRegistrada": "Esporte e Suplementos",
+      "preco": 78.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 17,
+      "titulo": "PLACA DE VIDEO BRX GEFORCE GTX 750 4GB DDR5 128 BITS HDMI/VGA/DVI NVIDIA-GTX750-4G-640SP",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 505.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 18,
+      "titulo": "LANTERNA DE CABEÇA LED COB LCV 120 LUMENS CAPACETE VONDER",
+      "categoriaRegistrada": "Ferramentas",
+      "preco": 36.42,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 19,
+      "titulo": "Faca Profissional Artesanal Churrasco Super Afiada C/ Bainha",
+      "categoriaRegistrada": "Diversos",
+      "preco": 62.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 20,
+      "titulo": "Headset QCY H3 Pro",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 275.76,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 21,
+      "titulo": "Árvore de Natal Decorada 1,5m",
+      "categoriaRegistrada": "Diversos",
+      "preco": 187.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 22,
+      "titulo": "Kit Teclado e Mouse Gamer RGB LED AOC C200, Mouse de 7200 DPI",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 199.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 23,
+      "titulo": "Monitor Acer Gamer Nitro Kg243y G0bi 23.8” Full Hd 120 Hz 1ms",
+      "categoriaRegistrada": "Computadores e Notebook",
+      "preco": 486.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 24,
+      "titulo": "Lanterna Tática Voxo Militar T9 Zoom Ultra Potente Bateria Longa Duração",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 35.72,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 25,
+      "titulo": "Havaianas Chinelo Power 2.0",
+      "categoriaRegistrada": "Tênis e Chinelos",
+      "preco": 65.99,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 26,
+      "titulo": "Monitor Gamer Philips Evnia 27'' Ips 144Hz 0.5ms Fhd27m2n3200nf Preto",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 530.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 27,
+      "titulo": "Conjunto De Panelas Inox Kit 4 Pçs Acampamento Camping Pesca",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 76.62,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 28,
+      "titulo": "Luminária Pendente LED Moderna",
+      "categoriaRegistrada": "Iluminação e Elétrica",
+      "preco": 47.04,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 29,
+      "titulo": "Tech T-shirt Gola V Masculino Insider",
+      "categoriaRegistrada": "Diversos",
+      "preco": 57.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 30,
+      "titulo": "Porta Varas Com Bolso 1,9 Metros Cor Preto Jogá Preto",
+      "categoriaRegistrada": "Diversos",
+      "preco": 66.09,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 31,
+      "titulo": "PROCESSADOR AMD RYZEN 7 5700X 3.4GHz (Turbo 4.6GHz) 36MB Cache AM4",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 979.99,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 32,
+      "titulo": "Chicote Pesca Carpa Cabeçuda Capim Americano 4pçs Summer",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 45.88,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 33,
+      "titulo": "Water Cooler NZXT Kraken Plus 360 RGB Branco Fan F360 Core Tripla Corpo",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 896.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 34,
+      "titulo": "Processador AMD Ryzen 7 7700 Box(AM5/8Cores/16Threads/5.3GHz/40MB",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 1333.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 35,
+      "titulo": "WAP Aspirador Automotivo Portátil 12V, 420ML Sólido, Filto Hepa, cabo de 3,7m CAR 12V3",
+      "categoriaRegistrada": "Eletroportáteis",
+      "preco": 69.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 36,
+      "titulo": "Camiseta Tech Insider, Feminina",
+      "categoriaRegistrada": "Roupas e Moda Masculina",
+      "preco": 51.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 37,
+      "titulo": "Cadeira de escritório com design ergonômico conforme NR-17, suporte",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 329.05,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 38,
+      "titulo": "Apple 2025 MacBook Pro (de 14 polegadas, Chip M5 da Apple com CPU de 10 núcleos e GPU de 10 núcleos., 32GB Memória unificada, 1 TB) - Prateado",
+      "categoriaRegistrada": "Computadores e Notebook",
+      "preco": 19999.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 39,
+      "titulo": "Power Bank Basike 30.000mAh",
+      "categoriaRegistrada": "Celulares e Smartphones",
+      "preco": 138.4,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 40,
+      "titulo": "Camisa De Pesca Mar Negro Com Capuz E Buff By Edu Monteiro",
+      "categoriaRegistrada": "Diversos",
+      "preco": 101.06,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 41,
+      "titulo": "Camisa De Pesca Exclusiva Mar Negro Poliamida Edu Monteiro",
+      "categoriaRegistrada": "Diversos",
+      "preco": 115.89,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 42,
+      "titulo": "Garrafa Térmica Inox 800ml",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 34.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 43,
+      "titulo": "Calça De Pesca Flex Mar Negro Proteção Uv 50+ Envio Imediato",
+      "categoriaRegistrada": "Diversos",
+      "preco": 104.4,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 44,
+      "titulo": "Cadeira de Escritório Ergonômica Estofada Preta com Regulagem de Altura e Rodízios",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 246.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 45,
+      "titulo": "O TIPO DE PERFUME QUE VIRA SUA MARCA REGISTRADA",
+      "categoriaRegistrada": "Perfumaria, Farmácia e Beleza",
+      "preco": 589.99,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 46,
+      "titulo": "Headset Gamer Huginn Warrior Preto - PH701",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 55.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 47,
+      "titulo": "CELULAR NO LUGAR CERTO O TRAJETO INTEIRO",
+      "categoriaRegistrada": "Celulares e Smartphones",
+      "preco": 20.25,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 48,
+      "titulo": "Fonte Gamer Rise Mode Zeus, 500W, PFC Ativo, Selo Teclab, Preto - RM-PSU-01-WT-500",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 177.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 49,
+      "titulo": "Air Fryer Oven Philco PAF16C",
+      "categoriaRegistrada": "Eletroportáteis",
+      "preco": 409.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 50,
+      "titulo": "Camisa Pesca Capuz Camuflada Com Proteção Uv50+ Play Pesca",
+      "categoriaRegistrada": "Diversos",
+      "preco": 83.64,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 51,
+      "titulo": "Creatina Dark Lab Pure 300g",
+      "categoriaRegistrada": "Esporte e Suplementos",
+      "preco": 39.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 52,
+      "titulo": "Tênis Masculino Layup Under Armour",
+      "categoriaRegistrada": "Tênis e Chinelos",
+      "preco": 127.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 53,
+      "titulo": "Calça Resistente Poly Ripstop",
+      "categoriaRegistrada": "Roupas e Moda Feminina",
+      "preco": 90.41,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 54,
+      "titulo": "Kit 3 Bermudas Masculinas Linho",
+      "categoriaRegistrada": "Roupas e Moda Masculina",
+      "preco": 53.2,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 55,
+      "titulo": "Bloco para Educacao Artistica Filipin.Criat.8Cor.A3.120G.32F-Envelope - 67105",
+      "categoriaRegistrada": "Diversos",
+      "preco": 14.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 56,
+      "titulo": "Tênis Kappa Park 2.0 Unissex",
+      "categoriaRegistrada": "Tênis e Chinelos",
+      "preco": 93.1,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 57,
+      "titulo": "Ventoinha Rise Mode Galaxy Motherboard, 120mm, ARGB, Preto - RM-MB-01-5V",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 20.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 58,
+      "titulo": "Placa-Mãe MSI A520M-A PRO, AMD AM4, mATX, DDR4, Preto - A520M-A PRO",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 313.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 59,
+      "titulo": "Kit 4 Capas Travesseiro Vistela",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 49.69,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 60,
+      "titulo": "YESOP Cadeira De Escritório Ergonômica Com Apoio Lombar E De Pernas",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 647.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 61,
+      "titulo": "Meias De Mergulho Antiderrapante Neoprene Para Adultos 3mm",
+      "categoriaRegistrada": "Diversos",
+      "preco": 35.85,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 62,
+      "titulo": "Calças Full Strut Stretch Canvas Pants Field & StreamMasculino",
+      "categoriaRegistrada": "Diversos",
+      "preco": 66.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 63,
+      "titulo": "Kit 2 Sacos Lavagem Tênis",
+      "categoriaRegistrada": "Tênis e Chinelos",
+      "preco": 25.6,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 64,
+      "titulo": "Micro-ondas Agratto AMIC01N-02 Preto 32L",
+      "categoriaRegistrada": "Eletrodomésticos",
+      "preco": 348.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 65,
+      "titulo": "Placa De Vídeo Pcyes Rtx 5060 8gb Gddr7 128bit Gamer",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2663.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 66,
+      "titulo": "Notebook Lenovo IdeaPad Slim 3i 15.3\" - Intel Core i5-13420H, 8GB RAM, 256GB SSD, Linux",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2839.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 67,
+      "titulo": "Lavadora Alta Pressão Kärcher Compacta",
+      "categoriaRegistrada": "Ferramentas",
+      "preco": 295.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 68,
+      "titulo": "WAP Panela de Pressão WPPE3 6L, 10 Receitas Pré-Programada 127V",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 242.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 69,
+      "titulo": "Notebook Positivo Vision R15 AMD® Ryzen 5-5500U Linux 16GB RAM 256GB SSD Full HD 15.6” TELA IPS",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2823.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 70,
+      "titulo": "Retrovisor Z400 Rosca Honda Par",
+      "categoriaRegistrada": "Automotivo",
+      "preco": 25.83,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 71,
+      "titulo": "Carolina Herrera 212 Men NYC Spray",
+      "categoriaRegistrada": "Perfumaria, Farmácia e Beleza",
+      "preco": 152.1,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 72,
+      "titulo": "Flutuador Colete Salva Vidas Pesca Caiaque 15 A 150 Kg",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 71.09,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 73,
+      "titulo": "WAP Aspirador de Pó e Água Barril GTW COMPACT, Compacto, 5,5 Litros, com Filtro Lavável, 150mbar 1400W 220V",
+      "categoriaRegistrada": "Eletroportáteis",
+      "preco": 112.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 74,
+      "titulo": "Air Cooler GamerStorm X Redragon AK400 RD Preto 4 Heatpipes Fan 120 mm R-AK400-BKNNMD-AJG",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 133.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 75,
+      "titulo": "Bone Pesca Marine Sports - De Tela E Regulagem Varios Modelo",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 78.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 76,
+      "titulo": "Câmera Veicular Ddpai N1 Dual",
+      "categoriaRegistrada": "Automotivo",
+      "preco": 450.05,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 77,
+      "titulo": "Óculos De Pesca Daiwa Polarizado Proteção Uv400 Top Preto",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 60.68,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 78,
+      "titulo": "Water Cooler Kalkan Aura Digital 360mm Preto ARGB Display LCD para Monitoramento Bomba 2900 RPM Fans 120mm 71.4 CFM 2.25 mmH2O AMD AM5 Intel LGA1851 KLK00101",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 267.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 79,
+      "titulo": "Universal Aluminum Base Stand with Wheels for Refrigerator Stove and Dishwasher Base Cart up to 200kg",
+      "categoriaRegistrada": "Diversos",
+      "preco": 20.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 80,
+      "titulo": "Kit 5 Refletores LED Bivolt",
+      "categoriaRegistrada": "Diversos",
+      "preco": 70.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 81,
+      "titulo": "Britânia Extratora Portátil 1,9L 1600W BEX20A 220V",
+      "categoriaRegistrada": "Diversos",
+      "preco": 290.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 82,
+      "titulo": "Fisga 5 Ponta Lança Tridente Arpão Cabo 2,1 Mts Pesca Caça",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 99.99,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 83,
+      "titulo": "Perfume Armaf Club De Nuit Intense",
+      "categoriaRegistrada": "Perfumaria, Farmácia e Beleza",
+      "preco": 197.72,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 84,
+      "titulo": "Nadadeira Natação Pé De Pato Ajustável Power Fin Mergulho",
+      "categoriaRegistrada": "Diversos",
+      "preco": 153.26,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 85,
+      "titulo": "Caixa de Som Infinite 1000 Bluetooth 1000W RMS 20h",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 2569.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 86,
+      "titulo": "Nadadeira Natação Pé De Pato Mergulho Bodyboard Snorkeling",
+      "categoriaRegistrada": "Diversos",
+      "preco": 189.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 87,
+      "titulo": "Monitor Gamer Samsung Odyssey G5 32, Resolução QHD, Taxa de atualização de 165Hz & 1ms de tempo de resposta (MPRT), Curvatura com 1000R, HDR 10, AMD FreeSync, Eye Saver Mode & Flicker Free Mode",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 1088.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 88,
+      "titulo": "Mor Life - Colchão Inflável Multiuso King com Fole",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 88.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 89,
+      "titulo": "Linha Pesca Monofilamento Estilo Goiano Silver Pro 0,35-300m",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 39.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 90,
+      "titulo": "Kit Mergulho Snorkel Máscara preta Seasub Dua Adulto",
+      "categoriaRegistrada": "Diversos",
+      "preco": 110.57,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 91,
+      "titulo": "Tênis Kappa Pulse Rx",
+      "categoriaRegistrada": "Tênis e Chinelos",
+      "preco": 143.82,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 92,
+      "titulo": "Monitor Gamer Curvo AOC AGON G4Z 27\" 300Hz 0,3ms HDR10 Base Ajustável C27G4Z/P",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 666.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 93,
+      "titulo": "Air Cooler Gamer Rise Mode Temp 8 White, ARGB, AMD e Intel, 120mm, Branco - RM-ACT8-ARGB-W",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 106.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 94,
+      "titulo": "Gabinete Gamer Redragon Reflect Pro Mid Tower Sem Fans Preto CA-607B",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 151.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 95,
+      "titulo": "Electrolux Liquidificador 3 em 1 1300W 3,2L TriForce EBL1300 127V Preto",
+      "categoriaRegistrada": "Eletroportáteis",
+      "preco": 100.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 96,
+      "titulo": "Liquidificador Forza Agratto LQLF01 Preto Leitoso 1,5L 850W 127V",
+      "categoriaRegistrada": "Eletroportáteis",
+      "preco": 58.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 97,
+      "titulo": "Panela de Pressão Multifunções Digital Agratto APPD01L-01 Inox",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 215.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 98,
+      "titulo": "Placa-Mãe ASUS TUF Gaming B550M-PLUS AM4 mATX — Suporte Ryzen, PCIe 4.0,",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 622.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 99,
+      "titulo": "Gabinete Gamer Rise Mode Wave White, Mid Tower, Lateral em Vidro Fumê,",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 92.89,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 100,
+      "titulo": "MONDIAL, Caixa Amplificada Xsound, Preto, 500W RMS, Bivolt - CM-500-N",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 319.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 101,
+      "titulo": "Gabinete Gamer Geometric Future Model 5 Vent Preto e Amarelo Sem Fans GEO-M5V-BY",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 402.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 102,
+      "titulo": "Smart TV LG 43\" 4K UHD NANO AI 43UN85CBPSA.AWZ",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 1452.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 103,
+      "titulo": "Fonte XPG Core Reactor II VE 850W Fonte de Alimentação ATX –",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 478.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 104,
+      "titulo": "Linha De Pesca Fishermans Multifilamento 8x 150m Cor Oceânica - 0.12mm 10 Libras",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 90.77,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 105,
+      "titulo": "Monitor Gamer AOC AGON G42 27\" 200Hz 0,3ms IPS HDR10 NVIDIA G-Sync 27G42HE",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 615.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 106,
+      "titulo": "Smart TV LG 55\" 4K UHD NANO AI 55UN85CBPSA.BWZ",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 1879.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 107,
+      "titulo": "Linha De Pesca 500m Monofilamento Crown Titanium Resistente",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 53.31,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 108,
+      "titulo": "Placa Mãe PRO A620AM-B EVO",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 339.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 109,
+      "titulo": "Smart TV LG 65\" 4K UHD NANO AI 65UN85CBPSA.BWZ",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 2736.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 110,
+      "titulo": "Linha Monofilamento Crown Pro Tamba Soft 600m Bem Resistente",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 56.16,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 111,
+      "titulo": "Linha De Pesca Multifilamento 100m Pe 4 Fios Supertração",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 19.71,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 112,
+      "titulo": "UGREEN Webcam Full HD 1080P com Microfone, Campo de Visão de 85°,",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 153.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 113,
+      "titulo": "Mouse Pad Grande 90x40 cm Preto com Base Antiderrapante para Teclado e",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 19.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 114,
+      "titulo": "Linha Monofilamento Black Tamba 300m - Maruri 0,33mm",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 46.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 115,
+      "titulo": "Jogo Maleta ferramentas 200 peças profissioal e domestico Completa",
+      "categoriaRegistrada": "Ferramentas",
+      "preco": 70.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 116,
+      "titulo": "Marine Sports Vexter Ultimate 0.37mm azul",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 33.72,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 117,
+      "titulo": "Placa de Vídeo ASRock RX 7600 8GB OC",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 1754.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 118,
+      "titulo": "Sparta Maleta de ferramentas kit com 165 peças",
+      "categoriaRegistrada": "Ferramentas",
+      "preco": 49.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 119,
+      "titulo": "Kit Pesca Alicate Contenção Peixe + Alicate Bico Saca Anzol",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 27.66,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 120,
+      "titulo": "PHILIPS, Smart TV Ambilight 65\" 4K, Titan OS, 65PUG8100/78, Comando de Voz, HDR10+/Dolby Atmos, VRR/ALLM, Bluetooth",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 2719.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 121,
+      "titulo": "PCYES Gabinete Gamer Forcefield Mini White Ghost - Gffmnwg",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 174.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 122,
+      "titulo": "Máscara Let Me Be Champagne Pérola 500g - Tonaliza, Hidrata e Dá Brilho",
+      "categoriaRegistrada": "Diversos",
+      "preco": 1.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 123,
+      "titulo": "Suporte Organizador 11 Iscas Artificiais P/ Barco E Caiaque",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 26.72,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 124,
+      "titulo": "Chocottone Bauducco 400G",
+      "categoriaRegistrada": "Diversos",
+      "preco": 37.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 125,
+      "titulo": "Kit Com 5 Isca Artificial Meia Agua Tucunaré Dourado Traira Cor Conforme Fotos",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 39.97,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 126,
+      "titulo": "Monitor LG UltraGear™ 24G411A-B 24\",FHD, 144Hz, 1ms (MBR), NVIDIA G-SYNC, AMD FreeSync, HDR10",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 526.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 127,
+      "titulo": "iPhone 17 Pro 256GB - Azul-profundo - Distribuidor Autorizado",
+      "categoriaRegistrada": "Celulares e Smartphones",
+      "preco": 7999.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 128,
+      "titulo": "Boia Arremesso Nº 8 - Pacote Com 10u",
+      "categoriaRegistrada": "Diversos",
+      "preco": 42.9,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 129,
+      "titulo": "Isca Artificial Com Hélice Whopper Plopper Importada",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 19.97,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 130,
+      "titulo": "Jogo Scarlet Nexus Ps4 Mídia Física Português",
+      "categoriaRegistrada": "Games e Console",
+      "preco": 49.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 131,
+      "titulo": "Apple EarPods com conector Lightning",
+      "categoriaRegistrada": "Diversos",
+      "preco": 134.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 132,
+      "titulo": "Isca Artificial Camarão Silicone Com Anzol Corvina Kit 5 Un",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 19.97,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 133,
+      "titulo": "Sombras de Assassin's Creed - Ed. Limitado ao PS5 Exclusive",
+      "categoriaRegistrada": "Games e Console",
+      "preco": 179.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 134,
+      "titulo": "Isca Artificial Traíra Tucunaré 11cm 14g Meia Água 3 Ganchos",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 15.95,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 135,
+      "titulo": "02 Isca Artificial Popper Importada Tucunaré Superfície",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 28.99,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 136,
+      "titulo": "Air Cooler MACH1 ARTIC, ARGB, AMD e Intel, 120mm, Preto - A40",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 66.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 137,
+      "titulo": "Air Cooler MACH1 BOREAL, Digital, ARGB, AMD e Intel, 120mm, Preto - B40-DIG-ARGB V2",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 112.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 138,
+      "titulo": "Dissipador SSD M.2 2280 NVMe Delta-CN510 ARGB 5V 3 Pinos Aura Sync",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 31.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 139,
+      "titulo": "Tablet Lenovo Tab K11 Octa-Core 4GB 128GB Wi-Fi Android 13 11\" WUXGA com caneta e capa protetora ZADC0075BR",
+      "categoriaRegistrada": "Tablets, iPads e E-Reader > Tablet Lenovo",
+      "preco": 1699.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 140,
+      "titulo": "Suporte para GPU Rise Mode, ARGB, 500mm, Aura V2, Branco - RM-SPVG-02-ARGB-W",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 44.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 141,
+      "titulo": "Kit 5un Isca Artificial Pesca Jumping Jig 6cm 20g Slow Metal",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 45.52,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 142,
+      "titulo": "Kit Ventoinha Pichau Ventus NX Reverse, ARGB, 3x120mm, Branco, PCH-VTNXR3-WH01",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 69.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 143,
+      "titulo": "Gabinete Gamer Gb1790 Hayom 4 Fans Rgb Micro-atx Vidro Temp Cor Preto",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 212.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 144,
+      "titulo": "Soundbar Gamer Para PC e Notebook Caixa de Som 6W RMS USB P2 ACS-4512",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 39.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 145,
+      "titulo": "Soundbar Samsung HW-B400F, com 2.0 canais, Bluetooth, Subwoofer integrado e HDMI ARC",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 578.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 146,
+      "titulo": "Carretilha Pesca Kawana Luna 186g Drag 8kg 8.2:1 Robusta",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 166.25,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 147,
+      "titulo": "Microfone Gaming GXTrust 25374",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 89.99,
+      "marketplace": null
+    },
+    {
+      "sampleId": 148,
+      "titulo": "Suporte Armador De Vara Emborrachado Para Pesca Reforçado",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 35.1,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 149,
+      "titulo": "Processador AMD Ryzen 7 9800X3D AM5",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2099.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 150,
+      "titulo": "Mousepad Gamer Rise Mode Speed, Extra Grande (900x300mm) Costura Branca - RG-MP-06-ZW",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 18.99,
+      "marketplace": null
+    },
+    {
+      "sampleId": 151,
+      "titulo": "Universal Aluminum Base Stand with Wheels for Refrigerator Stove and Dishwasher Base Cart up to 200kg",
+      "categoriaRegistrada": "Diversos",
+      "preco": 20.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 152,
+      "titulo": "Mousepad Gamer Husky Frost",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 24.99,
+      "marketplace": null
+    },
+    {
+      "sampleId": 153,
+      "titulo": "Processador AMD Ryzen 7 7800X3D",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 1683.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 154,
+      "titulo": "Vara Para Carretilha Hyperion Orange 802h 2,40mts 30-60lbs",
+      "categoriaRegistrada": "Pesca e Camping",
+      "preco": 183.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 155,
+      "titulo": "Intel Core Ultra 5-245KF 14 Núcleos",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 649.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 156,
+      "titulo": "Processador Intel Core i5-12400F LGA 1700",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 699.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 157,
+      "titulo": "Mesa Diretor 1,80m Dynamica Cor Preto Ônix / Est.Preta",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 292.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 158,
+      "titulo": "Mesa Diretor 1,80m Dynamica Cor Preto Ônix / Est.Preta",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 292.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 159,
+      "titulo": "Processador AMD Ryzen 5 8500G",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 699.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 160,
+      "titulo": "Smart Tv Tcl 55 Polegadas Qled 4K P8k WiFi Bluetooth Google Tv 144Hz Hdr10+ Dolby Atmos Vision 55P8k",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 2236.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 161,
+      "titulo": "RTX 5060 Ti EAGLE OC ICE 8G Gigabyte",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 3059.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 162,
+      "titulo": "Placa de Vídeo PNY RTX 5050 STD 8GB GDDR6",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2069.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 163,
+      "titulo": "Placa-Mãe ASUS TUF A620M-PLUS AM5",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 616.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 164,
+      "titulo": "2 - No canto INFERIOR DIREITO vá em \"mais\"",
+      "categoriaRegistrada": "Diversos",
+      "preco": 11.11,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 165,
+      "titulo": "Processador AMD Ryzen 5 9600X, 3.9GHz (5.4GHz Turbo), 6-Cores",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 1057.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 166,
+      "titulo": "Xiaomi Poco X8 5g 512GB / 256GB Nfc Versão Global Original Envio Imediato",
+      "categoriaRegistrada": "Celulares e Smartphones",
+      "preco": 1885.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 167,
+      "titulo": "Smart TV 58\" 4K UHD LED Philips 58PUG7019/78 Wi-Fi Bluetooth Google Assistente 3 HDMI 2 USB",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 2083.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 168,
+      "titulo": "Kit Gamer Ryzen 7 5700X, Asus B550M, Water Cooler",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 1655.0,
+      "marketplace": null
+    },
+    {
+      "sampleId": 169,
+      "titulo": "5700x Processador Ryzen 7 5700x 3.4ghz (4.6ghz Max) - Novo S/Box",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 975.0,
+      "marketplace": "shopee"
+    },
+    {
+      "sampleId": 170,
+      "titulo": "Caixa de Som Portátil Partybox 2000, Modelo DW2000, Conexão Bluetooth",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 585.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 171,
+      "titulo": "Mala Média 23kg Sestini, Polipropileno Super Resistente, Espaçosa De Viagem",
+      "categoriaRegistrada": "Diversos",
+      "preco": 167.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 172,
+      "titulo": "Monitor Gamer Philips EVNIA 27\" IPS FHD, 144Hz, 0,5ms, NVIDIA G-Sync - 27M2N3200NF",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 629.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 173,
+      "titulo": "American Tourister Mala de Viagem Frankfurt Azul Pequena",
+      "categoriaRegistrada": "Casa, Móveis e Decoração",
+      "preco": 274.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 174,
+      "titulo": "Air Cooler GamerStorm X Redragon AK400 RD Preto 4 Heatpipes Fan 120 mm R-AK400-BKNNMD-AJG",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 133.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 175,
+      "titulo": "Final Fantasy Resonance - PlayStation 5 (Exclusivo Amazon)",
+      "categoriaRegistrada": "Games e Console",
+      "preco": 233.92,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 176,
+      "titulo": "God of War Laufey™ - PlayStation 5",
+      "categoriaRegistrada": "Games e Console",
+      "preco": 351.91,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 177,
+      "titulo": "Placa Mãe PRO A620AM-B EVO",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 339.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 178,
+      "titulo": "Mouse Gamer Redragon Cobra V3, Preto, RGB, PMW3327, 10000 DPI",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 42.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 179,
+      "titulo": "Mouse Gamer Titorion Sem Fio Com Sensor Pixart 3311 e 12000 DPI",
+      "categoriaRegistrada": "Periféricos",
+      "preco": 147.0,
+      "marketplace": "mercadolivre"
+    },
+    {
+      "sampleId": 180,
+      "titulo": "Caixa Amplificada Xsound, Mondial, Preto, 220W RMS, Bivolt - CM-220-N",
+      "categoriaRegistrada": "Audio TV",
+      "preco": 159.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 181,
+      "titulo": "Produto Amazon",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 155.0,
+      "marketplace": "amazon"
+    },
+    {
+      "sampleId": 182,
+      "titulo": "Placa de Video INNO3D GeForce RTX 5050 Twin X2, 8GB, GDDR6, 128-bit, N50502-08D6-174071N",
+      "categoriaRegistrada": "Gamer e Hardware",
+      "preco": 2143.0,
+      "marketplace": "shopee"
+    }
+  ]
+}

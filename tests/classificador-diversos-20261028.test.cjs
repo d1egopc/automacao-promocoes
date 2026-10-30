@@ -4,6 +4,7 @@ const test = require("node:test");
 const path = require("node:path"), Module = require("node:module");
 const { execFileSync } = require("node:child_process");
 const fixture = require("./fixtures/classificador-diversos-real-20261028.json");
+const v4 = require("./fixtures/diversos-v4-labels.json").policyOverrides;
 const { classificarCategoriaUniversal: classify } = require("../modules/inteligencia-universal/categoria.service");
 const { classificarCategoriaOferta, avaliarEvidenciaCategoria } = require("../marketplaces/inteligencia/classificador-categorias");
 const copy = require("../modules/copy-inteligente/copy-local-v2.service");
@@ -30,8 +31,8 @@ test("reprodução da primeira decisão incorreta na base publicada, antes do pa
 for(const row of [...fixture.real28,...fixture.historical]) test(`real/referenciado: ${row.titulo}`,()=>{
   // Uma categoria específica errada também deve ser corrigida pela mesma natureza.
   const result=classify({titulo:row.titulo,categoria:row.before});
-  assert.equal(result.categoria,row.categoria);
-  assert.equal(classificarCategoriaOferta({titulo:row.titulo,categoria:row.before}),row.categoria);
+  assert.equal(result.categoria,v4[row.titulo] || row.categoria);
+  assert.equal(classificarCategoriaOferta({titulo:row.titulo,categoria:row.before}),v4[row.titulo] || row.categoria);
   if(row.motivo) {
     assert.equal(result.motivo,row.motivo);
     assert.equal(result.origem,"identidade_produto");
@@ -42,9 +43,9 @@ for(const row of [...fixture.real28,...fixture.historical]) test(`real/referenci
 for(const row of fixture.controls) test(`controle negativo: ${row.titulo}`,()=>{
   const offer={titulo:row.titulo,categoria:"Diversos"};
   const actual=classify(offer).categoria;
-  if(row.categoria)assert.equal(actual,row.categoria);
+  if(row.categoria || v4[row.titulo])assert.equal(actual,v4[row.titulo] || row.categoria);
   if(row.forbidden)assert.notEqual(actual,row.forbidden);
-  assert.equal(baseline.classificarCategoriaOferta(offer,row.titulo),row.before || actual,"controle preservado ou conflito explicitamente conservador");
+  assert.equal(baseline.classificarCategoriaOferta(offer,row.titulo),row.before || (v4[row.titulo] ? row.categoria || "Diversos" : actual),"controle preservado ou mudança V4 de finalidade explicitamente versionada");
 });
 
 test("generaliza comprimento/libragem e consumível de pesca sem marca ou título completo",()=>{
@@ -56,7 +57,7 @@ test("generaliza comprimento/libragem e consumível de pesca sem marca ou títul
 test("grupo de origem não determina categoria ou gênero; marketplace/workspace não são regras",()=>{
   for(const titulo of ["Produto desconhecido", "Faca Tática Pescador Aço Inox", "Camisa de pesca UV50", "Vara"]) {
     for(const grupoNome of ["Optimus Clone", "Promoções do Pescador", "Cozinha", "Pet Shop"]) {
-      assert.equal(classify({titulo,categoria:"Diversos",grupoNome,origemGrupo:grupoNome}).categoria,"Diversos");
+      assert.equal(classify({titulo,categoria:"Diversos",grupoNome,origemGrupo:grupoNome}).categoria,v4[titulo] || "Diversos");
     }
   }
   for(const workspaceId of ["fixture-a","fixture-b"])for(const marketplace of ["mercadolivre","shopee","amazon","aliexpress","magalu","awin"]) {

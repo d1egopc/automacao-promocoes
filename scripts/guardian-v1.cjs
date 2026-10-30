@@ -403,6 +403,10 @@ function testMatrix(plan) {
       add(`imagens:${name}`, `tests/${name}.test.js`, process.execPath, [`tests/${name}.test.js`]);
   }
   if (plan.runtimeFiles.some(file => file.includes("classificador-categorias") || file.startsWith("modules/inteligencia-universal/") || file === "marketplaces/aliexpress/importar.js" || file.includes("magalu-parser.js"))) {
+    add("categorias:diversos-v4", "tests/diversos-v4.test.cjs", process.execPath,
+      ["--test", "tests/diversos-v4.test.cjs"], false);
+    add("categorias:diversos-v4-persistencia-destinos", "tests/diversos-v4-pipeline.cjs", process.execPath,
+      ["tests/diversos-v4-pipeline.cjs"], false);
     add("categorias:diversos-integracao", "tests/diversos-integracao.test.cjs", process.execPath,
       ["--test", "tests/diversos-integracao.test.cjs", "tests/classificador-diversos-20261028.test.cjs"], false);
     add("categorias:copy-natureza-focal", "tests/classificador-copy-focal.test.cjs", process.execPath,

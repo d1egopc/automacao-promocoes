@@ -3936,6 +3936,8 @@ async function aplicarSombraInteligenciaUniversalV2(oferta = {}, ofertaEntrada =
       linkExpandido: oferta.linkExpandido,
       linkAfiliado: oferta.linkAfiliado,
       categoria: oferta.categoria,
+      descricao: ofertaEntrada.descricao || produtoMetadata.descricao || "",
+      atributos: ofertaEntrada.atributos || produtoMetadata.atributos,
       score: oferta.score,
       origem: "engine_importer"
     }, {

@@ -37,6 +37,28 @@ Contrato proposto para próxima etapa: manter uma categoria principal e represen
 
 ## Regra comum
 
+### Diversos V4 — candidata de 29/10/2026, sem publicação
+
+A missão V4 autoriza uma categoria principal Pesca e Camping para vestuário
+explicitamente de pesca com função técnica comprovada (UV50/FPU/UPF, poliamida,
+capuz/buff/touca/tube ou secagem rápida). Isso sucede, somente nesse recorte,
+a decisão anterior de manter Diversos por ausência de gênero. Estampa/tema de
+pesca, roupa infantil e roupa sem finalidade técnica permanecem nos gates
+anteriores. Não cria afinidade, multicategoria ou autorização de destino.
+
+Impressoras usam Periféricos; utensílios culinários e bagagens usam Casa, Móveis
+e Decoração; higiene pessoal usa Perfumaria, Farmácia e Beleza. Não existem
+categorias novas Informática/Impressoras, Cozinha/Churrasco ou Tática nesta
+taxonomia. Faca/facão/tática/Rambo/Skinner/bainha isolados não comprovam camping.
+Lanterna genérica é Iluminação e Elétrica; só finalidade outdoor explícita
+seleciona Pesca e Camping. O grupo nunca é prova suficiente.
+
+O helper funcional compartilhado marca decisões calculadas internamente para a
+materialização focal já homologada. A Engine apenas passa descrição/atributos
+já disponíveis à mesma classificação; não consulta API/Worker/IA. Nenhuma regra
+de distribuição, categoria de destino, preço, cupom, afiliação ou fila é alterada.
+Validação e limites detalhados em DIVERSOS-V4-20261029.md.
+
 Cada marketplace tem identidade, links, prova de afiliacao e semantica de preco proprios. Nao copie fallback de um marketplace para outro. Mudancas devem cobrir adapter do engine, Manual V2, extensao, templates e consumidores afetados.
 
 ## Mercado Livre
