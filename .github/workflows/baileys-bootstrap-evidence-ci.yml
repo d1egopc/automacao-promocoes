@@ -1,0 +1,19 @@
+name: Baileys bootstrap evidence Node24
+on:
+  push:
+    branches: [validation/baileys-bootstrap-evidence-20261030]
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node tests/baileys-bootstrap-production.test.cjs
+      - run: node tests/baileys-balanced-buffer.test.cjs
+      - run: node scripts/guardian-v1.cjs prepare --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA"
