@@ -46,6 +46,11 @@ Backups históricos e de recuperação externos ficam fora desse diretório e n�
 O arquivo permite restauração pontual em PostgreSQL 17 isolado; a janela de 72 horas e o
 procedimento de recuperação devem ser homologados antes da primeira ativação recorrente.
 Esta candidata não altera o limite padrão de **4 MiB** da projeção GC de `user_pss60lus`.
+`fila-projecao-leve.json` passa a ser gravado sem espaços de apresentação, preservando
+todos os campos e a cobertura do checkpoint; os demais JSON continuam com o formato
+anterior. A projeção existente só muda na próxima publicação normal da fila. Até
+comprovar uma projeção atual, íntegra e abaixo de 4 MiB, o GC dessa workspace
+continua bloqueado. Não há aumento do limite nem regravação produtiva automática.
 
 ## Antes de alterar
 

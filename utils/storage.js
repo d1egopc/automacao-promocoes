@@ -360,7 +360,11 @@ function writeJsonFileAtomic(file, dados, opcoes = {}) {
   const tmp = file + ".tmp";
   const bak = file + ".bak";
   const inicioStringify = process.hrtime.bigint();
-  const conteudo = JSON.stringify(dados, null, 2);
+  // The GC reference index has a strict 4 MiB checkpoint limit. Keep every
+  // value, but omit presentation whitespace only for its compact projection.
+  const conteudo = path.basename(file) === "fila-projecao-leve.json"
+    ? JSON.stringify(dados)
+    : JSON.stringify(dados, null, 2);
   const stringifyMs = Math.round(perfStorageMs(inicioStringify));
   const bytes = Buffer.byteLength(conteudo || "", "utf8");
   registrarArquivo("JSON.stringify", file, stringifyMs, bytes);

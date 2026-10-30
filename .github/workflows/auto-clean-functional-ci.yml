@@ -37,6 +37,7 @@ jobs:
           node --test tests/auto-clean-recurring-lane.test.cjs
           node --test tests/auto-clean-delete-lock.test.cjs
           node --test tests/auto-clean-recurring-admin-events.unit.test.cjs
+          node --test tests/auto-clean-projection-compact.test.cjs
           node tests/auto-clean-recurring-admin-events.postgres.test.cjs
           node tests/auto-clean-readonly.postgres.cjs
           node tests/auto-clean-seven-stages.postgres.cjs
