@@ -1,7 +1,7 @@
 name: Auto Clean functional isolated Node24 PG17
 on:
   push:
-    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030]
+    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030, validation/auto-clean-universal-d0d7-20261030]
 permissions:
   contents: read
 jobs:
@@ -38,6 +38,7 @@ jobs:
           node --test tests/auto-clean-delete-lock.test.cjs
           node --test tests/auto-clean-recurring-admin-events.unit.test.cjs
           node --test tests/auto-clean-projection-compact.test.cjs
+          node --test tests/auto-clean-media-scoped-recovery.test.cjs
           node tests/auto-clean-recurring-admin-events.postgres.test.cjs
           node tests/auto-clean-readonly.postgres.cjs
           node tests/auto-clean-seven-stages.postgres.cjs
@@ -59,6 +60,8 @@ jobs:
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-media-physical.service.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/recurring-lane.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/recurring-admin-events.js
+          docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-media-quarantine.js
+          docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-media-physical.service.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/orchestrator.runner.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-pending-proof-recovery-admin.cjs
       - uses: actions/upload-artifact@v4

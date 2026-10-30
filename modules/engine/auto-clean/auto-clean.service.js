@@ -16,6 +16,7 @@ const { executarGcRelaySeguro } = require("./gc-relay.service");
 const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const { DB_RELEASE, FILE_RELEASE, MEDIA_RELEASE, released, requireRelease } = require("./deletion-release");
 const scopedRawAdmin = require("./recurring-admin-events");
+const { runMediaPhysicalBatch } = require("./gc-media-physical.service");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -636,6 +637,7 @@ function logAutoClean(tag, payload = {}, logger = console) {
 
 function isSessaoOuConfig(rel = "") {
   const texto = String(rel || "").toLowerCase();
+  if (texto === "auto-clean/media-quarantine" || texto.startsWith("auto-clean/media-quarantine/")) return true;
   return /session|sessao|auth|baileys|whatsapp|wpp|config|destino|cred|token|cookie|secret|senha|password|jwt|private/.test(texto);
 }
 
@@ -2763,11 +2765,20 @@ const agendarAutoCleanRecorrente = createRecurringLane({
   mode: () => process.env.OPTIMUS_AUTO_CLEAN_RECURRING_MODE,
   validate: () => validateReadOnly({ pool: getEnginePool(), inventory: inventariarPostgres }),
   execute: async () => {
-    if (process.env.OPTIMUS_AUTO_CLEAN_RECURRING_SCOPE !== scopedRawAdmin.SCOPE)
-      return { ok: false, removed: 0, reason: "AUTO_CLEAN_RECURRING_SCOPE_NOT_RELEASED" };
-    const result = await scopedRawAdmin.run({ pool: getEnginePool() });
-    return { ok: result.ok, removed: result.removed || 0,
-      logicalBytesReleased: result.logicalBytesReleased || 0, reason: result.reason || "" };
+    const raw = process.env.OPTIMUS_AUTO_CLEAN_RECURRING_SCOPE === scopedRawAdmin.SCOPE
+      ? await scopedRawAdmin.run({ pool: getEnginePool() }) : null;
+    const media = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE === "approved" &&
+      String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES || "").trim()
+      ? await runMediaPhysicalBatch({ dataDir: DEFAULT_DATA_DIR, execute: true,
+        maxTargetsPerRun: 4, microBatchSize: 2, maxDelete: 4, maxDurationMs: 2000 }) : null;
+    if (!raw && !media) return { ok: false, removed: 0, reason: "AUTO_CLEAN_RECURRING_SCOPE_NOT_RELEASED" };
+    return { ok: (raw?.ok !== false) && (media?.errors || 0) === 0,
+      eligible: Number(media?.candidates || 0), blocked: Number(media?.errors || 0),
+      removed: Number(raw?.removed || 0) + Number(media?.removed || 0),
+      logicalBytesReleased: Number(raw?.logicalBytesReleased || 0),
+      physicalBytesRecovered: Number(media?.bytesFreed || 0),
+      backlog: Number(media?.backlog || 0), backlogBytes: Number(media?.backlogBytes || 0),
+      quarantined: Number(media?.quarantined || 0), reason: raw?.reason || media?.stopReason || "" };
   }
 });
 

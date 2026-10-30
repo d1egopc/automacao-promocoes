@@ -6,6 +6,7 @@ const { selecionarRoundRobin } = require("./workspace-rotation");
 const { buildOrLoadReferenceIndex } = require("./gc-reference-index-builder");
 const { referenciasSocialPostgres } = require("./gc-social-reference-index");
 const { MEDIA_RELEASE, released } = require("./deletion-release");
+const quarantine = require("./gc-media-quarantine");
 
 const STATE_FILE = "auto-clean-media-physical-state.json";
 const RETENTION_MS = 192 * 60 * 60 * 1000;
@@ -81,6 +82,21 @@ function fileAllowed(target, entry) {
     : /^[a-zA-Z0-9_.-]+$/.test(entry.name) && EXT_SOCIAL.test(entry.name);
 }
 
+async function safeTargetDirectory(dataDir, target, fsApi) {
+  const root = path.resolve(dataDir);
+  const dir = path.resolve(target.dir);
+  if (!dir.startsWith(root + path.sep)) return false;
+  let current = root;
+  for (const part of path.relative(root, dir).split(path.sep)) {
+    current = path.join(current, part);
+    try {
+      const stat = await fsApi.lstat(current);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return false;
+    } catch (error) { if (error.code === "ENOENT") return false; throw error; }
+  }
+  return true;
+}
+
 async function loadReferences(target, options) {
   const builder = options.referenceIndexBuilder || buildOrLoadReferenceIndex;
   const common = { dataDir: options.dataDir, nowMs: options.nowMs, fsApi: options.fsApi,
@@ -112,9 +128,16 @@ async function loadReferences(target, options) {
   return { complete: true, refs, generation: generations.join(":"), reasonCode: "" };
 }
 
-function deleteEnabled(options) {
+function scopedRelease(target) {
+  if (process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE !== "approved" || target?.kind !== "identity") return false;
+  const scopes = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES || "").split(",").map(value => value.trim());
+  return scopes.includes(target.id) && /^identity:[A-Za-z0-9_-]+$/.test(target.id);
+}
+
+function deleteEnabled(options, target) {
   const envEnabled = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE || "").toLowerCase() === "true";
-  return released(MEDIA_RELEASE) && options.execute === true && (options.mediaDeleteEnabled === true || envEnabled);
+  return options.execute === true &&
+    ((released(MEDIA_RELEASE) && (options.mediaDeleteEnabled === true || envEnabled)) || scopedRelease(target));
 }
 
 async function runMediaPhysical(options = {}) {
@@ -138,9 +161,16 @@ async function runMediaPhysical(options = {}) {
     scanned: 0, createdSinceLastRun: 0, createdBytes: 0, referenced: 0, young: 0,
     candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0, errors: 0,
     backlog: 0, backlogBytes: 0, revalidations: 0, microBatches: 1,
-    throttled: false, stopReason: "", dryRun: !deleteEnabled(options), durationMs: 0 };
+    quarantined: 0, quarantineBytes: 0, restored: 0,
+    throttled: false, stopReason: "", dryRun: !deleteEnabled(options, target), durationMs: 0 };
   if (!target) return summary;
   state.lastTarget = target.id;
+
+  if (!await safeTargetDirectory(dataDir, target, fsApi)) {
+    summary.errors++;
+    summary.stopReason = "media_target_directory_unsafe";
+    return summary;
+  }
 
   const references = await (options.referenceLoader || loadReferences)(target,
     { ...options, dataDir, nowMs, fsApi });
@@ -151,6 +181,22 @@ async function runMediaPhysical(options = {}) {
     await saveState(dataDir, state, fsApi);
     summary.durationMs = Date.now() - started;
     return summary;
+  }
+
+  if (scopedRelease(target) && options.execute === true) {
+    try {
+      const swept = await quarantine.sweep({ dataDir, target, nowMs,
+        loadRefs: () => (options.referenceLoader || loadReferences)(target,
+          { ...options, dataDir, nowMs: Date.now(), fsApi }) });
+      summary.removed += swept.removed;
+      summary.bytesFreed += swept.bytesFreed;
+      summary.restored += swept.restored;
+    } catch (error) {
+      summary.errors++;
+      summary.stopReason = error.code || "media_recovery_failed";
+      summary.throttled = true;
+      return summary;
+    }
   }
 
   let entries = [];
@@ -194,7 +240,8 @@ async function runMediaPhysical(options = {}) {
         if (Object.keys(state.candidates).length < MAX_STATE_CANDIDATES) {
           state.candidates[candidateId] = { firstSeenAt: nowMs, fingerprint: currentFingerprint, size: stat.size };
         }
-      } else if (nowMs - Number(observed.firstSeenAt || 0) >= OBSERVATION_DELAY_MS && ready.length < maxDelete) {
+      } else if (nowMs - Number(observed.firstSeenAt || 0) >= OBSERVATION_DELAY_MS &&
+          ready.length + (scopedRelease(target) ? 0 : summary.removed) < maxDelete) {
         observed.size = stat.size;
         ready.push({ candidateId, file, key, fingerprint: currentFingerprint, size: stat.size });
       }
@@ -228,10 +275,17 @@ async function runMediaPhysical(options = {}) {
           delete state.candidates[item.candidateId]; summary.errors++; continue;
         }
         // The release can be revoked while reference revalidation is running.
-        if (!deleteEnabled(options)) { summary.throttled = true; summary.stopReason = "delete_release_revoked"; break; }
-        await fsApi.unlink(item.file);
+        if (!deleteEnabled(options, target)) { summary.throttled = true; summary.stopReason = "delete_release_revoked"; break; }
+        if (scopedRelease(target)) {
+          await quarantine.stage({ dataDir, target, item, nowMs, io: fsApi });
+          summary.quarantined++;
+          summary.quarantineBytes += item.size;
+        } else {
+          await fsApi.unlink(item.file);
+          summary.removed++;
+          summary.bytesFreed += item.size;
+        }
         delete state.candidates[item.candidateId];
-        summary.removed++; summary.bytesFreed += item.size;
       } catch (error) { if (error?.code !== "ENOENT") summary.errors++; }
     }
   }
@@ -264,20 +318,25 @@ async function runMediaPhysicalBatch(options = {}) {
   const targetIds = selecionarRoundRobin(targets.map(item => item.id), state.lastTarget, maxTargets).selecionados;
   const summaries = [];
   let removed = 0;
+  let quarantined = 0;
+  const scopedOnly = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE === "approved" &&
+    !released(MEDIA_RELEASE);
   let loadThrottled = false;
 
   for (const targetId of targetIds) {
-    if (Date.now() - started >= maxDurationMs || removed >= maxDelete) break;
+    if (Date.now() - started >= maxDurationMs ||
+        (scopedOnly ? quarantined : removed + quarantined) >= maxDelete) break;
     if (typeof options.loadGuard === "function") {
       const allowed = await options.loadGuard({ elapsedMs: Date.now() - started, removed, targetId });
       if (allowed === false || allowed?.allow === false) { loadThrottled = true; break; }
     }
     const remainingTime = Math.max(50, maxDurationMs - (Date.now() - started));
-    const remainingDeletes = maxDelete - removed;
+    const remainingDeletes = maxDelete - (scopedOnly ? quarantined : removed + quarantined);
     const result = await runMediaPhysical({ ...options, dataDir, fsApi, targetId,
       maxDelete: Math.min(microBatchSize, remainingDeletes), maxDurationMs: remainingTime });
     summaries.push(result);
     removed += Number(result.removed || 0);
+    quarantined += Number(result.quarantined || 0);
     if (result.throttled && result.stopReason === "time_budget") break;
   }
 
@@ -288,6 +347,7 @@ async function runMediaPhysicalBatch(options = {}) {
     scanned: 0, createdSinceLastRun: 0, createdBytes: 0, referenced: 0, young: 0,
     candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0, errors: 0,
     backlog: 0, backlogBytes: 0, revalidations: 0, microBatches: summaries.length,
+    quarantined: 0, quarantineBytes: 0, restored: 0,
     dryRun: summaries.every(item => item.dryRun !== false),
     throttled: loadThrottled || summaries.some(item => item.throttled),
     stopReason: loadThrottled ? "load_guard" : (summaries.find(item => item.stopReason)?.stopReason || ""),
@@ -296,7 +356,8 @@ async function runMediaPhysicalBatch(options = {}) {
   };
   for (const item of summaries) {
     for (const key of ["scanned", "createdSinceLastRun", "createdBytes", "referenced", "young", "candidates",
-      "candidateBytes", "removed", "bytesFreed", "errors", "backlog", "backlogBytes", "revalidations"]) {
+      "candidateBytes", "removed", "bytesFreed", "errors", "backlog", "backlogBytes", "revalidations",
+      "quarantined", "quarantineBytes", "restored"]) {
       aggregate[key] += Number(item[key] || 0);
     }
   }
@@ -308,4 +369,4 @@ async function runMediaPhysicalBatch(options = {}) {
 
 module.exports = { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS, MAX_SCAN_PER_RUN,
   MAX_DELETE_PER_RUN, MAX_TOTAL_DELETE_PER_BATCH, DEFAULT_MICROBATCH_SIZE, DEFAULT_TARGETS_PER_BATCH,
-  MAX_DURATION_MS, STATE_FILE, loadReferences, referenceKey, deleteEnabled };
+  MAX_DURATION_MS, STATE_FILE, loadReferences, referenceKey, deleteEnabled, scopedRelease };

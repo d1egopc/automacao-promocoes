@@ -20,7 +20,9 @@ function createRecurringLane({ enabled, intervalMs, validate, execute, mode,
           blocked: Number(result?.blocked || 0), removed: Number(result?.removed || 0),
           // PostgreSQL row bytes are logical, never filesystem space recovered.
           logicalBytesReleased: Number(result?.logicalBytesReleased || 0),
-          physicalBytesRecovered: 0, durationMs: now() - at
+          physicalBytesRecovered: Number(result?.physicalBytesRecovered || 0),
+          backlog: Number(result?.backlog || 0), backlogBytes: Number(result?.backlogBytes || 0),
+          quarantined: Number(result?.quarantined || 0), durationMs: now() - at
         }));
       }).catch(() => {
         logger.log("[OPTIMUS-AUTO-CLEAN-LANE]", JSON.stringify({

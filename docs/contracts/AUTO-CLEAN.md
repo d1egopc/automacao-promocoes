@@ -52,6 +52,28 @@ anterior. A projeção existente só muda na próxima publicação normal da fil
 comprovar uma projeção atual, íntegra e abaixo de 4 MiB, o GC dessa workspace
 continua bloqueado. Não há aumento do limite nem regravação produtiva automática.
 
+### Candidata de mídia física por workspace
+
+Permanece OFF até publicação e liberação específica. A via recorrente requer `RECURRING_MODE=execute`,
+`OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE=approved` e lista exata em
+`OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES`, por exemplo `identity:<workspace>`.
+As três liberações globais de DELETE ficam ausentes. A candidata admite somente
+`identity:<workspace>`; mídia social permanece bloqueada até cobertura compartilhada completa.
+O índice de referências deve ser completo para a workspace e é revalidado antes de cada remoção.
+O caminho completo do diretório é verificado contra symlinks. A política específica de mídia
+continua em 192 horas, com duas observações separadas por pelo menos 15 minutos.
+
+Em vez de apagar imediatamente, o arquivo vai por rename para
+`/data/auto-clean/media-quarantine/identity/<workspace>` (mesmo filesystem), com manifesto
+privado, hash SHA-256 e retenção de 72 horas. Referência nova provoca restauração automática;
+somente uma nova verificação completa e ausência de referência após 72 horas permitem unlink
+físico. Arquivo ou manifesto desconhecido/corrompido bloqueia o alvo. Limites: 32 MiB por
+arquivo, 2048 arquivos e 8 GiB em quarentena; quatro novos arquivos por ciclo de dez minutos,
+até quatro alvos, com no máximo dois por alvo e orçamento de dois segundos.
+Os bytes físicos só são contabilizados quando o arquivo sai da quarentena. O limpador genérico
+não percorre a quarentena. Rollback de imagem não restaura arquivos já removidos fisicamente;
+o prazo de recuperação deve ser comprovado antes da ativação.
+
 ## Antes de alterar
 
 Mapeie tipo de dado, produtor, consumidores, referencia, TTL atual, volume, custo, comportamento em falha e rollback. Diferencie expiracao comercial, terminalizacao de fila e elegibilidade para GC.
