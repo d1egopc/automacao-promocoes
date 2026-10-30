@@ -1,7 +1,8 @@
 "use strict";
 const test=require("node:test"), assert=require("node:assert/strict"), fs=require("node:fs"), vm=require("node:vm"),{EventEmitter}=require("node:events");
 const patch=require("../modules/whatsapp/baileys-balanced-buffer-patch");
-const source=fs.readFileSync(require("node:path").join(__dirname,"..",patch.FILE),"utf8");
+// Published tarball omits the final newline; fixture has a Git-friendly newline.
+const source=fs.readFileSync(require("node:path").join(__dirname,"fixtures/baileys-6.7.22-event-buffer.js"),"utf8").replace(/\r\n/g,"\n").trimEnd();
 const logger={debug(){},trace(){}};
 function fixture(patched=true) {
   let code=patched?patch.transform(source):source;
