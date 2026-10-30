@@ -137,6 +137,14 @@ function selecionarConteudoVivo(parsed, file, source, nowMs) {
   return parsed;
 }
 
+function oportunidadesSociaisValidas(parsed, workspaceId) {
+  if (Array.isArray(parsed)) return true; // formato legado, ainda coberto integralmente
+  return Boolean(parsed && typeof parsed === "object" &&
+    parsed.clienteId === workspaceId &&
+    parsed.ocultas && typeof parsed.ocultas === "object" && !Array.isArray(parsed.ocultas) &&
+    typeof parsed.atualizadoEm === "string");
+}
+
 async function lerFonte(file, source, workspaceId, refs, budget, fsApi, nowMs) {
   let before;
   try { before = await fsApi.lstat(file); }
@@ -187,7 +195,9 @@ async function lerFonte(file, source, workspaceId, refs, budget, fsApi, nowMs) {
     if (projection && (!parsed || !Array.isArray(parsed.itens))) {
       throw erroReferencia(REFERENCE_REASON.FORMAT_INVALID, file, source);
     }
-    if (source !== "vitrine" && !projection && !Array.isArray(parsed)) {
+    const socialOpportunities = path.basename(file) === "social-oportunidades.json";
+    if (socialOpportunities ? !oportunidadesSociaisValidas(parsed, workspaceId)
+      : source !== "vitrine" && !projection && !Array.isArray(parsed)) {
       throw erroReferencia(REFERENCE_REASON.FORMAT_INVALID, file, source);
     }
     try {
@@ -244,4 +254,4 @@ async function inventariarReferenciasVivas({ dataDir, workspaceId, nowMs = Date.
 
 module.exports = { inventariarReferenciasVivas, hashRenderEmValor, ofertasVitrineVivas,
   selecionarConteudoVivo, DEFAULT_MAX_REFERENCE_BYTES, VITRINE_RETENTION_MS, HISTORY_RETENTION_MS,
-  REFERENCE_REASON, chavesMidiaSocialEmValor };
+  REFERENCE_REASON, chavesMidiaSocialEmValor, oportunidadesSociaisValidas };

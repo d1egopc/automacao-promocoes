@@ -43,6 +43,7 @@ jobs:
           node tests/auto-clean-media-physical-wiring.test.js
           node tests/auto-clean-media-physical.test.js
           node tests/auto-clean-gc-partial-isolation.test.cjs
+          node tests/auto-clean-gc-social-opportunities.test.cjs
           node --test tests/checkpoint-pending-proof-recovery-admin.postgres.test.cjs
           for file in tests/auto-clean-gc-reference-index-phase*.test.js tests/auto-clean-gc-relay-phase1.test.js; do node "$file"; done
       - name: Guardian unchanged baseline comparison

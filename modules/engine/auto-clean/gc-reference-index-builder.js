@@ -6,7 +6,8 @@ const crypto = require("crypto");
 const {
   hashRenderEmValor,
   selecionarConteudoVivo,
-  REFERENCE_REASON
+  REFERENCE_REASON,
+  oportunidadesSociaisValidas
 } = require("./gc-reference-index");
 const {
   FILA_GC_REFERENCES_ARQUIVO,
@@ -211,7 +212,7 @@ async function discoverSources({ dataDir, workspaceId, nowMs, fsApi, validatedQu
     ["compact:social-agendamentos", "social-agendamentos.json", "array", "social"],
     ["compact:social-rascunhos", "social-rascunhos.json", "array", "social"],
     ["compact:social-publicacoes", "social-publicacoes.json", "array", "social"],
-    ["compact:social-oportunidades", "social-oportunidades.json", "array", "social"]
+    ["compact:social-oportunidades", "social-oportunidades.json", "socialOpportunities", "social"]
   ];
   for (const [key, name, kind, source] of compact) {
     const file = path.join(root, name);
@@ -417,6 +418,14 @@ function liveDocument(parsed, source, file, nowMs, workspaceId) {
     return selecionarConteudoVivo(parsed, file, "historico", nowMs);
   }
   if (source.kind === "vitrine") return selecionarConteudoVivo(parsed, file, "vitrine", nowMs);
+  if (source.kind === "socialOpportunities") {
+    if (!oportunidadesSociaisValidas(parsed, workspaceId)) {
+      const error = new Error(REFERENCE_REASON.FORMAT_INVALID);
+      error.code = REFERENCE_REASON.FORMAT_INVALID;
+      throw error;
+    }
+    return parsed;
+  }
   if (!Array.isArray(parsed)) {
     const error = new Error(REFERENCE_REASON.FORMAT_INVALID);
     error.code = REFERENCE_REASON.FORMAT_INVALID;
