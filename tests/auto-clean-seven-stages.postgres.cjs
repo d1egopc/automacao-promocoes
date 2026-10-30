@@ -1,6 +1,7 @@
 "use strict";
 
 // Disposable PostgreSQL 17 fixture only. Never accepts a production URL.
+process.env.OPTIMUS_AUTO_CLEAN_DB_DELETE_RELEASE = "approved"; // disposable PostgreSQL fixture
 const assert = require("node:assert/strict");
 const { Pool } = require("pg");
 const clean = require("../modules/engine/auto-clean/auto-clean.service");

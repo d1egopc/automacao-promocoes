@@ -5,6 +5,7 @@ const path = require("path");
 const { selecionarRoundRobin } = require("./workspace-rotation");
 const { buildOrLoadReferenceIndex } = require("./gc-reference-index-builder");
 const { referenciasSocialPostgres } = require("./gc-social-reference-index");
+const { MEDIA_RELEASE, released } = require("./deletion-release");
 
 const STATE_FILE = "auto-clean-media-physical-state.json";
 const RETENTION_MS = 192 * 60 * 60 * 1000;
@@ -113,7 +114,7 @@ async function loadReferences(target, options) {
 
 function deleteEnabled(options) {
   const envEnabled = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE || "").toLowerCase() === "true";
-  return options.execute === true && (options.mediaDeleteEnabled === true || envEnabled);
+  return released(MEDIA_RELEASE) && options.execute === true && (options.mediaDeleteEnabled === true || envEnabled);
 }
 
 async function runMediaPhysical(options = {}) {
@@ -226,6 +227,8 @@ async function runMediaPhysical(options = {}) {
         if (!stat.isFile() || stat.isSymbolicLink() || fingerprint(stat) !== item.fingerprint) {
           delete state.candidates[item.candidateId]; summary.errors++; continue;
         }
+        // The release can be revoked while reference revalidation is running.
+        if (!deleteEnabled(options)) { summary.throttled = true; summary.stopReason = "delete_release_revoked"; break; }
         await fsApi.unlink(item.file);
         delete state.candidates[item.candidateId];
         summary.removed++; summary.bytesFreed += item.size;

@@ -35,6 +35,7 @@ jobs:
         run: |
           test -z "${DATABASE_URL:-}"
           node --test tests/auto-clean-recurring-lane.test.cjs
+          node --test tests/auto-clean-delete-lock.test.cjs
           node tests/auto-clean-readonly.postgres.cjs
           node tests/auto-clean-seven-stages.postgres.cjs
           node tests/auto-clean-media-physical.postgres.js
@@ -50,6 +51,8 @@ jobs:
         run: |
           docker build -t optimus-auto-clean-candidate:${GITHUB_SHA} .
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/auto-clean.service.js
+          docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/deletion-release.js
+          docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-media-physical.service.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/recurring-lane.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/orchestrator.runner.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-pending-proof-recovery-admin.cjs

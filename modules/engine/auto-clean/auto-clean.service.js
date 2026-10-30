@@ -14,6 +14,7 @@ const filaThumbnailService = require("../../fila/fila-thumbnail.service");
 const workspaceRotation = require("./workspace-rotation");
 const { executarGcRelaySeguro } = require("./gc-relay.service");
 const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
+const { DB_RELEASE, FILE_RELEASE, MEDIA_RELEASE, released, requireRelease } = require("./deletion-release");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -352,6 +353,7 @@ function autoCleanShadowAtivo(opcoes = {}) {
 }
 
 function autoCleanExecuteAtivo(opcoes = {}) {
+  if (!released(DB_RELEASE)) return false;
   if (opcoes.execute === true) return true;
   if (opcoes.execute === false) return false;
   return flagLigada(process.env[ENV_EXECUTE]);
@@ -360,7 +362,7 @@ function autoCleanExecuteAtivo(opcoes = {}) {
 function autoCleanMediaPhysicalAutorizado() {
   const physical = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL || "").trim().toLowerCase() === "true";
   const execute = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE || "").trim().toLowerCase() === "true";
-  return { physical, execute: physical && execute };
+  return { physical, execute: physical && execute && released(MEDIA_RELEASE) };
 }
 
 function autoCleanRecorrenteAtivo(opcoes = {}) {
@@ -1228,6 +1230,7 @@ async function executarBatchJobsPostgresAutoClean(client, {
 }
 
 async function executarJobsPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
@@ -1465,6 +1468,7 @@ async function executarBatchOrfaosPostgresAutoClean(client, {
 }
 
 async function executarOrfaosPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao({ ...opcoes, canarioPostgres: true });
   const tipo = opcoes.tipoOrfaos === "eventos_comerciais" ? "eventos_comerciais" : "processamentos";
   const limiteTotalMutacoes = Number.isFinite(Number(opcoes.limiteTotalMutacoes))
@@ -1611,6 +1615,7 @@ async function executarBatchHistoricoDefinitivoPostgresAutoClean(client, {
 }
 
 async function executarHistoricoDefinitivoPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
@@ -1755,6 +1760,7 @@ async function executarBatchOfertasPostgresAutoClean(client, { loteLimite, horas
 }
 
 async function executarOfertasPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
@@ -1915,6 +1921,7 @@ async function executarBatchLinksPostgresAutoClean(client, { loteLimite, horasMi
 }
 
 async function executarLinksPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
@@ -2039,6 +2046,7 @@ async function executarBatchEventosBrutosPostgresAutoClean(client, { loteLimite,
 }
 
 async function executarEventosBrutosPostgresAutoClean(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const loteLimite = politica.loteLimite;
   const limiteLotesPorCiclo = politica.lotesDbPorCiclo;
@@ -2212,6 +2220,7 @@ function escreverJsonAtomico(fsImpl, arquivo, dados) {
 }
 
 function executarCompactacaoFilaWorkspace(opcoes = {}) {
+  requireRelease(FILE_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
   const fsImpl = opcoes.fs || fs;
@@ -2273,6 +2282,7 @@ function executarCompactacaoFilaWorkspace(opcoes = {}) {
 }
 
 function executarFilaJsonAutoClean(opcoes = {}) {
+  requireRelease(FILE_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const dataDir = path.resolve(politica.dataDir || DEFAULT_DATA_DIR);
   const fsImpl = opcoes.fs || fs;
@@ -2364,6 +2374,7 @@ function coletarArquivosElegiveisAutoClean(opcoes = {}) {
 }
 
 function executarArquivosAutoClean(opcoes = {}) {
+  requireRelease(FILE_RELEASE);
   const politica = opcoes.politica || criarPoliticaRetencao(opcoes);
   const fsImpl = opcoes.fs || fs;
   const arquivos = coletarArquivosElegiveisAutoClean({ ...opcoes, politica });
@@ -2381,6 +2392,7 @@ function executarArquivosAutoClean(opcoes = {}) {
 
   for (const arquivo of arquivos) {
     try {
+      requireRelease(FILE_RELEASE);
       fsImpl.unlinkSync(arquivo.caminho);
       resumo.arquivosRemovidos += 1;
       resumo.bytesLiberados += Number(arquivo.bytes || 0);
@@ -2395,6 +2407,7 @@ function executarArquivosAutoClean(opcoes = {}) {
 }
 
 function executarFilaThumbnailsAutoClean(opcoes = {}) {
+  requireRelease(FILE_RELEASE);
   try {
     return filaThumbnailService.limparOrfas({
       ...opcoes,
@@ -2418,6 +2431,8 @@ function executarFilaThumbnailsAutoClean(opcoes = {}) {
 }
 
 async function executarAutoCleanExecute(opcoes = {}) {
+  if (opcoes.incluirPostgres !== false) requireRelease(DB_RELEASE);
+  if (opcoes.permitirLimpezaArquivos === true && opcoes.incluirArquivos !== false) requireRelease(FILE_RELEASE);
   const inicio = Date.now();
   const politica = criarPoliticaRetencao(opcoes);
   const etapas = [];
@@ -2529,6 +2544,7 @@ function contarMutacoesAutoClean(resumo = {}) {
 }
 
 async function executarAutoCleanPostgresRecorrenteSeguro(opcoes = {}) {
+  requireRelease(DB_RELEASE);
   if (!autoCleanRecorrenteAtivo(opcoes)) {
     return { ok: true, pulado: true, motivo: "recorrente_desligado", aplicouMudancas: false };
   }

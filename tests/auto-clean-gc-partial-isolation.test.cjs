@@ -1,5 +1,6 @@
 "use strict";
 
+process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE = "approved"; // temporary fixture only
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");

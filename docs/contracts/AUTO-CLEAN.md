@@ -13,6 +13,16 @@ Auto Clean vive em `modules/engine/auto-clean` e trabalha com rotacao por worksp
 - Dry-run/shadow, quando existentes, nao autorizam apagar dados.
 - Mudanca de TTL, janela, lote, referencia ou politica de exclusao exige decisao humana.
 
+## Trava de exclusão produtiva
+
+Os caminhos de exclusão do Auto-Clean exigem liberações independentes com valor exato `approved`:
+
+- `OPTIMUS_AUTO_CLEAN_DB_DELETE_RELEASE` para os estágios PostgreSQL, inclusive chamadas diretas e modo recorrente `execute`.
+- `OPTIMUS_AUTO_CLEAN_FILE_DELETE_RELEASE` para compactação da fila, thumbnails e arquivos operacionais.
+- `OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE` para o GC físico de mídia, inclusive quando `OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE=true` já estiver configurado.
+
+Ausência ou qualquer outro valor mantém a exclusão bloqueada. As liberações não substituem as flags, limites, referências e demais condições existentes. O modo `validate` não precisa dessas liberações. A habilitação futura exige recuperação atual testada e autorização explícita para o lote ou origem correspondente.
+
 ## Antes de alterar
 
 Mapeie tipo de dado, produtor, consumidores, referencia, TTL atual, volume, custo, comportamento em falha e rollback. Diferencie expiracao comercial, terminalizacao de fila e elegibilidade para GC.

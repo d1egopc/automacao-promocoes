@@ -1,5 +1,7 @@
 ﻿"use strict";
 
+process.env.OPTIMUS_AUTO_CLEAN_DB_DELETE_RELEASE = "approved"; // isolated fixtures
+process.env.OPTIMUS_AUTO_CLEAN_FILE_DELETE_RELEASE = "approved";
 const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
