@@ -7,6 +7,7 @@ const path = require("node:path");
 const { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS } =
   require("../modules/engine/auto-clean/gc-media-physical.service");
 const { HOLD_MS } = require("../modules/engine/auto-clean/gc-media-quarantine");
+const { coletarArquivosElegiveisAutoClean } = require("../modules/engine/auto-clean/auto-clean.service");
 
 const now = Date.parse("2026-10-30T12:00:00Z");
 const old = new Date(now - RETENTION_MS - 1000);
@@ -54,6 +55,9 @@ test("scoped identity media stages, restores new references and physically frees
     assert.equal(fs.existsSync(f.file), false);
     const recovery = path.join(f.dataDir, ".auto-clean-media-quarantine", "identity", "user_safe");
     assert.equal(fs.readFileSync(path.join(recovery, `${f.name}.bin`), "utf8"), "recovery fixture");
+    assert.equal(coletarArquivosElegiveisAutoClean({ dataDir: f.dataDir,
+      agoraMs: now + HOLD_MS + 10 }).some(item => item.caminho.startsWith(recovery)), false,
+    "o limpador genérico não pode remover a recuperação");
     if (process.platform !== "win32")
       assert.equal(fs.statSync(path.join(recovery, `${f.name}.json`)).mode & 0o077, 0);
     refs = new Map([["a".repeat(64), new Set(["fila"])]]);
@@ -120,6 +124,24 @@ test("unexpected quarantine content blocks without deleting either file", async 
     assert.equal(result.stopReason, "MEDIA_RECOVERY_UNKNOWN_FILE");
     assert.equal(fs.readFileSync(protectedFile, "utf8"), "protected");
     assert.equal(fs.existsSync(f.file), true);
+  }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+});
+
+test("missing quarantine payload never treats an expired manifest as proof of safe deletion", async () => {
+  const f = setup();
+  try { await withScoped(async () => {
+    const options = { dataDir: f.dataDir, targetId: f.target, execute: true,
+      referenceLoader: async () => ({ complete: true, refs: new Map() }) };
+    await runMediaPhysical({ ...options, nowMs: now });
+    await runMediaPhysical({ ...options, nowMs: now + OBSERVATION_DELAY_MS + 1 });
+    const recovery = path.join(f.dataDir, ".auto-clean-media-quarantine", "identity", "user_safe");
+    const manifest = path.join(recovery, `${f.name}.json`);
+    fs.unlinkSync(path.join(recovery, `${f.name}.bin`));
+    const result = await runMediaPhysical({ ...options,
+      nowMs: now + OBSERVATION_DELAY_MS + HOLD_MS + 2 });
+    assert.equal(result.stopReason, "MEDIA_RECOVERY_INCOMPLETE");
+    assert.equal(result.removed, 0);
+    assert.equal(fs.existsSync(manifest), true);
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
 

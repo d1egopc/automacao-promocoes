@@ -12,6 +12,12 @@ const SHA = data => crypto.createHash("sha256").update(data).digest("hex");
 const fingerprint = stat => `${Number(stat.dev || 0)}:${Number(stat.ino || 0)}:${Number(stat.size || 0)}:${Math.trunc(Number(stat.mtimeMs || 0))}`;
 const fail = code => { const error = new Error(code); error.code = code; throw error; };
 
+async function syncDirectory(dir, io) {
+  if (process.platform === "win32") return;
+  const handle = await io.open(dir, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
 function safeTarget(target) {
   if (!/^(identity|social):[A-Za-z0-9_-]+$/.test(target?.id || "") ||
       target.id !== `${target.kind}:${target.workspace}`) fail("MEDIA_RECOVERY_TARGET_INVALID");
@@ -83,7 +89,10 @@ async function stage({ dataDir, target, item, nowMs = Date.now(), io = fs.promis
     archivedAtMs: nowMs, expiresAtMs: nowMs + HOLD_MS };
   const handle = await io.open(manifest, "wx", 0o600);
   try { await handle.writeFile(JSON.stringify(meta)); await handle.sync(); } finally { await handle.close(); }
+  await syncDirectory(dir, io);
   await io.rename(item.file, payload);
+  await syncDirectory(target.dir, io);
+  await syncDirectory(dir, io);
   const saved = await io.lstat(payload);
   if (!saved.isFile() || saved.isSymbolicLink() || saved.size !== stat.size ||
       SHA(await io.readFile(payload)) !== meta.sha256) fail("MEDIA_RECOVERY_VERIFY_FAILED");
@@ -104,11 +113,14 @@ async function sweep({ dataDir, target, loadRefs, nowMs = Date.now(), max = 8, i
     try { stat = await io.lstat(payload); } catch (error) { if (error.code !== "ENOENT") throw error; }
     const original = path.join(target.dir, name);
     if (!stat) {
-      // A crash before the rename leaves the original in place. Preserve it.
+      // A crash before the rename leaves the original in place. Missing both
+      // copies is never evidence that the file was safely purged.
       const source = await io.lstat(original).catch(() => null);
-      if ((!source?.isFile() || source.isSymbolicLink()) && meta.expiresAtMs > nowMs)
+      if (!source?.isFile() || source.isSymbolicLink() || source.size !== meta.size ||
+          SHA(await io.readFile(original)) !== meta.sha256)
         fail("MEDIA_RECOVERY_INCOMPLETE");
       await io.unlink(manifest);
+      await syncDirectory(dir, io);
       continue;
     }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== meta.size) fail("MEDIA_RECOVERY_CORRUPT");
@@ -121,11 +133,14 @@ async function sweep({ dataDir, target, loadRefs, nowMs = Date.now(), max = 8, i
       catch (error) { if (error.code !== "ENOENT") throw error; }
       await io.rename(payload, original);
       await io.unlink(manifest);
+      await syncDirectory(target.dir, io);
+      await syncDirectory(dir, io);
       result.restored++;
     } else if (meta.expiresAtMs <= nowMs) {
       if (SHA(await io.readFile(payload)) !== meta.sha256) fail("MEDIA_RECOVERY_CORRUPT");
       await io.unlink(payload);
       await io.unlink(manifest);
+      await syncDirectory(dir, io);
       result.removed++;
       result.bytesFreed += meta.size;
     } else result.blocked++;
