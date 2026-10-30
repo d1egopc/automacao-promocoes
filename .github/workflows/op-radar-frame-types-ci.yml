@@ -1,0 +1,39 @@
+name: OP Radar frame types Linux Node24
+on:
+  push:
+    branches: [validation/guardian-v1-radar-frame-types-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Preserve published balanced buffer and all consumers
+        run: |
+          git diff --exit-code 5bfbb53f1c2c91b3989215c960b5297388bd7a77 HEAD -- index.js Dockerfile package.json package-lock.json scripts/apply-baileys-retry-hotfix.cjs scripts/deploy-backend-vps-manual.sh scripts/guardian-v1.cjs modules/whatsapp/baileys-balanced-buffer-patch.js modules/whatsapp/baileys-buffer-hotfix.service.js modules/whatsapp/baileys-buffer-recovery.service.js modules/engine modules/radar modules/teleradar modules/clonador-grupos modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 utils marketplaces optimus-capture
+      - name: Frame classification, dispatch equivalence and existing boundaries
+        run: |
+          node --test tests/whatsapp-ingress-frame-types.test.cjs tests/whatsapp-ingress-boundary.test.cjs
+          node --test tests/baileys-balanced-buffer.test.cjs tests/baileys-balanced-artifact.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/benchmark-op-radar-frame-types.cjs > "$RUNNER_TEMP/frame-types-benchmark.json"
+      - name: Guardian
+        run: node scripts/guardian-v1.cjs validate --base 5bfbb53f1c2c91b3989215c960b5297388bd7a77 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/guardian-frame-types.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: radar-frame-types-evidence
+          path: |
+            ${{ runner.temp }}/guardian-frame-types.json
+            ${{ runner.temp }}/frame-types-benchmark.json
