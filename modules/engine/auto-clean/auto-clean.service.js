@@ -13,6 +13,7 @@ const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 const filaThumbnailService = require("../../fila/fila-thumbnail.service");
 const workspaceRotation = require("./workspace-rotation");
 const { executarGcRelaySeguro } = require("./gc-relay.service");
+const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -2475,19 +2476,29 @@ function criarPoolAutoCleanComLimites(pool, {
   return {
     connect: async () => {
       const client = await pool.connect();
-      if (client[AUTO_CLEAN_BOUND_QUERY]) return client;
-      const queryOriginal = client.query.bind(client);
+      if (client[AUTO_CLEAN_BOUND_QUERY]) {
+        client.release();
+        throw new Error("auto_clean_client_ja_reservado");
+      }
+      const queryOriginal = client.query;
+      const releaseOriginal = client.release;
       client[AUTO_CLEAN_BOUND_QUERY] = true;
       client.query = (...args) => {
         const texto = typeof args[0] === "string" ? args[0] : String(args[0]?.text || "");
         if (/^\s*BEGIN\b/i.test(texto)) {
-          return queryOriginal(...args).then(async resultado => {
-            await queryOriginal(`SET LOCAL statement_timeout = '${Math.max(1000, Math.floor(statementTimeoutMs))}ms'`);
-            await queryOriginal(`SET LOCAL lock_timeout = '${Math.max(100, Math.floor(lockTimeoutMs))}ms'`);
+          return queryOriginal.call(client, ...args).then(async resultado => {
+            await queryOriginal.call(client, `SET LOCAL statement_timeout = '${Math.max(1000, Math.floor(statementTimeoutMs))}ms'`);
+            await queryOriginal.call(client, `SET LOCAL lock_timeout = '${Math.max(100, Math.floor(lockTimeoutMs))}ms'`);
             return resultado;
           });
         }
-        return queryOriginal(...args);
+        return queryOriginal.call(client, ...args);
+      };
+      client.release = (...args) => {
+        client.query = queryOriginal;
+        client.release = releaseOriginal;
+        delete client[AUTO_CLEAN_BOUND_QUERY];
+        return releaseOriginal.call(client, ...args);
       };
       return client;
     }
@@ -2677,6 +2688,7 @@ async function executarAutoCleanShadow(opcoes = {}) {
         execute: mediaPhysical.execute,
         mediaDeleteEnabled: mediaPhysical.execute
       });
+      logger.log("[OPTIMUS-AUTO-CLEAN-GC-DECISION]", JSON.stringify(summarizeGc(gcRelay)));
     } catch {
       gcRelay = { dryRun: true, inspected: 0, errors: 1, reason: "relay_failed" };
     }
@@ -2720,7 +2732,20 @@ async function executarAutoCleanShadowSeguro(opcoes = {}) {
   }
 }
 
+const agendarAutoCleanRecorrente = createRecurringLane({
+  enabled: () => autoCleanRecorrenteAtivo(),
+  intervalMs: () => intervaloAutoCleanRecorrenteMs(),
+  mode: () => process.env.OPTIMUS_AUTO_CLEAN_RECURRING_MODE,
+  validate: () => validateReadOnly({ pool: getEnginePool(), inventory: inventariarPostgres }),
+  execute: async () => {
+    const result = await executarAutoCleanPostgresRecorrenteSeguro();
+    return { ok: result.ok, removed: result.mutacoes || 0,
+      logicalBytesReleased: result.resultado?.espacoLogicoLiberadoBytes || 0 };
+  }
+});
+
 module.exports = {
+  agendarAutoCleanRecorrente,
   ENV_SHADOW,
   ENV_EXECUTE,
   ENV_RECURRING,
