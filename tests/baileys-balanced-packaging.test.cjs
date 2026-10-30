@@ -36,6 +36,8 @@ test("tampered Docker recipe, installer, extra runtime and wrong base fail close
   function git(args){const r=spawnSync("git",args,{cwd:dir,encoding:"utf8",windowsHide:true});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
   try {
     git(["clone","--quiet","--shared","--no-checkout",root,"."]);
+    git(["config","core.autocrlf","false"]);
+    git(["config","core.longpaths","true"]);
     git(["checkout","--quiet","--detach",sha()]);
     git(["config","user.name","Fixture"]);git(["config","user.email","fixture@example.invalid"]);
     assert.equal(g.buildPlan(dir,p.baseSha,git(["rev-parse","HEAD"])).validation,"PASS");
