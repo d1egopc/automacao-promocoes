@@ -15,6 +15,7 @@ const workspaceRotation = require("./workspace-rotation");
 const { executarGcRelaySeguro } = require("./gc-relay.service");
 const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const { DB_RELEASE, FILE_RELEASE, MEDIA_RELEASE, released, requireRelease } = require("./deletion-release");
+const scopedRawAdmin = require("./recurring-admin-events");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -2762,9 +2763,11 @@ const agendarAutoCleanRecorrente = createRecurringLane({
   mode: () => process.env.OPTIMUS_AUTO_CLEAN_RECURRING_MODE,
   validate: () => validateReadOnly({ pool: getEnginePool(), inventory: inventariarPostgres }),
   execute: async () => {
-    const result = await executarAutoCleanPostgresRecorrenteSeguro();
-    return { ok: result.ok, removed: result.mutacoes || 0,
-      logicalBytesReleased: result.resultado?.espacoLogicoLiberadoBytes || 0 };
+    if (process.env.OPTIMUS_AUTO_CLEAN_RECURRING_SCOPE !== scopedRawAdmin.SCOPE)
+      return { ok: false, removed: 0, reason: "AUTO_CLEAN_RECURRING_SCOPE_NOT_RELEASED" };
+    const result = await scopedRawAdmin.run({ pool: getEnginePool() });
+    return { ok: result.ok, removed: result.removed || 0,
+      logicalBytesReleased: result.logicalBytesReleased || 0, reason: result.reason || "" };
   }
 });
 
