@@ -21,13 +21,15 @@ require.cache[dbPath]={id:dbPath,filename:dbPath,loaded:true,exports:{queryEngin
 const importer=require("../modules/engine/importer/importer.service"),distributor=require("../modules/engine/distributor/distributor.service");
 const destinos=require("../utils/destinos"),{proximoSlotElegivel}=require("../modules/executor/fila-viva.service");
 const data=require("./fixtures/diversos-v4-whatsapp-20261029.json"),labels=require("./fixtures/diversos-v4-labels.json");
+const realCases=data.offers.filter(x=>(labels.whatsapp[x.sampleId]&&labels.whatsapp[x.sampleId]!=="Diversos")||labels.additionalSpecific[x.sampleId]);
+const supplementalCases=labels.supplemental.map(([titulo,expected],i)=>({sampleId:10000+i,titulo,expected,preco:99,marketplace:"amazon",categoriaRegistrada:"Diversos",synthetic:true})).filter(x=>x.expected!=="Diversos");
 async function run(){
  const originalLog=console.log,originalWarn=console.warn,originalFetch=global.fetch;let networkCalls=0;
  console.log=()=>{};console.warn=()=>{};global.fetch=async()=>{networkCalls++;throw Error("FIXTURE_NETWORK_FORBIDDEN");};
  const report=[];
  try{
- for(const input of data.offers.filter(x=>(labels.whatsapp[x.sampleId]&&labels.whatsapp[x.sampleId]!=="Diversos")||labels.additionalSpecific[x.sampleId])){
-  const expected=labels.whatsapp[input.sampleId]||labels.additionalSpecific[input.sampleId];
+ for(const input of [...realCases,...supplementalCases]){
+  const expected=input.expected||labels.whatsapp[input.sampleId]||labels.additionalSpecific[input.sampleId];
   for(const tenant of tenants){
    current=tenant;
    const produtoUrl=input.marketplace==="amazon"?"https://www.amazon.com.br/dp/B000000001":input.marketplace==="shopee"?"https://shopee.com.br/product/123/456":"https://produto.mercadolivre.com.br/MLB-123456-produto";
@@ -64,7 +66,7 @@ async function run(){
    assert.equal(proximoSlotElegivel(target,slotOffer,now,{dentroHorario:false,limiteDiarioOk:true,proximoHorarioEm:now+3600000,intervalo:{liberado:true}}).liberadoAgora,false);
    assert.equal(proximoSlotElegivel(target,slotOffer,now,{dentroHorario:true,limiteDiarioOk:true,intervalo:{liberado:false,proximoEnvioPermitidoEm:now+60000}}).liberadoAgora,false);
    assert.equal(proximoSlotElegivel(target,{...slotOffer,expiraEm:new Date(now-1).toISOString()},now,{dentroHorario:true,limiteDiarioOk:true,intervalo:{liberado:true}}).slotAntesDoDeadline,false);
-   report.push({sampleId:input.sampleId,tenant,produto:input.titulo,marketplace:input.marketplace,origem:origin,categoriaAntes:input.categoriaRegistrada,categoriaDepois:expected,categoriaPersistida:stored.categoria,destinoNichadoElegivel:true,
+   report.push({sampleId:input.sampleId,synthetic:input.synthetic===true,tenant,produto:input.titulo,marketplace:input.marketplace,origem:origin,categoriaAntes:input.categoriaRegistrada,categoriaDepois:expected,categoriaPersistida:stored.categoria,destinoNichadoElegivel:true,
     outrosFiltros:{workspace:"PASS",marketplace:"PASS",horario:"PASS_FIXTURE_15H_BRT",limite:"PASS_FIXTURE",cadencia:"PASS_FIXTURE",deduplicacao:"DUPLICATA_BLOQUEADA",ttl:"SLOT_ANTES_DO_DEADLINE"},resultado:"SIMULACAO_SQL_CONTRATO_FILA_DESTINO_PASS_SEM_ENVIO"});
   }
  }
