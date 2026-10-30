@@ -91,7 +91,8 @@ test("unexpected quarantine content blocks without deleting either file", async 
   const f = setup();
   try { await withScoped(async () => {
     const recovery = path.join(f.dataDir, "auto-clean", "media-quarantine", "identity", "user_safe");
-    fs.mkdirSync(recovery, { recursive: true });
+    fs.mkdirSync(recovery, { recursive: true, mode: 0o700 });
+    if (process.platform !== "win32") fs.chmodSync(recovery, 0o700);
     const protectedFile = path.join(recovery, "protected-backup.dump");
     fs.writeFileSync(protectedFile, "protected");
     await runMediaPhysical({ dataDir: f.dataDir, targetId: f.target, nowMs: now, execute: true,
@@ -103,6 +104,22 @@ test("unexpected quarantine content blocks without deleting either file", async 
     assert.equal(result.removed, 0);
     assert.equal(result.stopReason, "MEDIA_RECOVERY_UNKNOWN_FILE");
     assert.equal(fs.readFileSync(protectedFile, "utf8"), "protected");
+    assert.equal(fs.existsSync(f.file), true);
+  }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+});
+
+test("world-readable quarantine refuses scoped media cleanup", async t => {
+  if (process.platform === "win32") { t.skip("POSIX permissions only"); return; }
+  const f = setup();
+  try { await withScoped(async () => {
+    const recovery = path.join(f.dataDir, "auto-clean", "media-quarantine", "identity", "user_safe");
+    fs.mkdirSync(recovery, { recursive: true, mode: 0o700 });
+    fs.chmodSync(recovery, 0o755);
+    const result = await runMediaPhysical({ dataDir: f.dataDir, targetId: f.target,
+      nowMs: now, execute: true,
+      referenceLoader: async () => ({ complete: true, refs: new Map() }) });
+    assert.equal(result.stopReason, "MEDIA_RECOVERY_PATH_UNSAFE");
+    assert.equal(result.removed, 0);
     assert.equal(fs.existsSync(f.file), true);
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
