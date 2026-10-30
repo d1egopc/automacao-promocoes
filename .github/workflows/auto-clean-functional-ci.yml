@@ -1,7 +1,7 @@
 name: Auto Clean functional isolated Node24 PG17
 on:
   push:
-    branches: [validation/auto-clean-definitivo-20261030]
+    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030]
 permissions:
   contents: read
 jobs:

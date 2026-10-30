@@ -53,3 +53,9 @@ logging:
 ## Limites para decisão
 
 Wiring corrigido e validação segura são candidatos à homologação. A correção integral do GC permanece parcial, e desempenho no banco/carga comercial real não foi medido. A autorização noturna de 30/10/2026 permite uma publicação única somente em modo não destrutivo após todos os gates; não permite `execute` nem remoção produtiva. Os testes usam fixtures e o CI usa runner GitHub-hosted com PostgreSQL descartável, sem secrets de produção.
+
+### Observação da publicação `15afce77` e candidata subsequente
+
+O único deploy autorizado publicou `15afce77b804bb5f447109c23c590bae4d914357` em `validate`. O primeiro ciclo admitido terminou `lane_failed` sem remoções. Uma transação READ ONLY equivalente, com `statement_timeout=1000ms`, identificou timeout PostgreSQL `57014` no inventário de ofertas; sem a ordenação, a consulta de ofertas completou em cerca de 43 ms, mas jobs passou do limite. Uma amostra READ ONLY sem as seis ordenações completou em aproximadamente 0,3 s no banco real, com 32 linhas por origem. A ordem não influencia a decisão de elegibilidade dessa amostra e permanece no caminho Shadow existente.
+
+A correção subsequente usa `amostraRapida:true` apenas na lane recorrente, exigindo que cada uma das seis consultas tenha o padrão esperado `ORDER BY ... LIMIT`; caso contrário, falha fechada. Ela não altera os DELETEs, os TTLs ou o inventário Shadow. Precisa de CI/Guardião próprios e de autorização de publicação separada, pois a autorização noturna limitou a publicação a uma execução. O GC dos workspaces `user_g3qkc18m` e `user_pss60lus` continua bloqueado por cobertura compacta ausente; `user_b2oogwwl` apareceu consistente na leitura de 30/10. Nenhuma fonte produtiva foi reescrita.

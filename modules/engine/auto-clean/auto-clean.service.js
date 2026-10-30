@@ -932,7 +932,15 @@ async function consultarOrigemDb(nome, sql, params, opcoes) {
   const query = opcoes.queryEngine || queryEngine;
   const limite = politica.loteLimite;
   const registros = [];
-  const retorno = await query(sql, params);
+  // The recurring READ ONLY lane samples bounded eligible/protected rows. An
+  // oldest-first sort forces large production tables to scan/sort every row;
+  // it is unnecessary for this sample and remains unchanged for Shadow.
+  const statement = opcoes.amostraRapida === true
+    ? sql.replace(/\bORDER BY[^\n]*\bASC\s*\n\s*LIMIT\b/i, "LIMIT") : sql;
+  if (opcoes.amostraRapida === true && statement === sql) {
+    throw new Error("auto_clean_amostra_ordenacao_inesperada");
+  }
+  const retorno = await query(statement, params);
   if (!retorno?.ok) {
     return { ...criarResumoOrigem(nome, nome, [], limite), erro: true, motivoEncerramento: retorno?.motivo || "query_indisponivel" };
   }
@@ -2761,6 +2769,7 @@ module.exports = {
   autoCleanMediaPhysicalAutorizado,
   intervaloAutoCleanRecorrenteMs,
   criarPoliticaRetencao,
+  inventariarPostgres,
   avaliarRegistroAutoClean,
   executarAutoCleanShadow,
   executarAutoCleanShadowSeguro,

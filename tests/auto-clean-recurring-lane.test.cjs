@@ -40,6 +40,7 @@ test("validation uses READ ONLY, bounded statements, ROLLBACK and releases on er
     const client = {query:async q => {sql.push(q);return {rows:[]};},release(){released=true;}};
     const work = () => validateReadOnly({pool:{connect:async()=>client},inventory:async options=>{
       assert.equal(options.execute,false); assert.equal(options.loteLimite,32);
+      assert.equal(options.amostraRapida,true);
       await options.queryEngine("SELECT 1",[]);
       if(fail)throw Error("fixture");
       return [{elegiveis:2,protegidos:3},{erro:true}];
@@ -51,6 +52,22 @@ test("validation uses READ ONLY, bounded statements, ROLLBACK and releases on er
     assert.equal(sql[0],"BEGIN READ ONLY");assert.equal(sql.at(-1),"ROLLBACK");
     assert.ok(sql.some(q=>q.includes("statement_timeout")));assert.equal(released,true);
     assert.equal(sql.some(q=>/DELETE|UPDATE|INSERT|TRUNCATE/.test(q)),false);
+  }
+});
+
+test("quick sample removes only the six inventory sorts; normal inventory keeps them", async () => {
+  const {inventariarPostgres}=require("../modules/engine/auto-clean/auto-clean.service");
+  for (const quick of [false,true]) {
+    const statements=[];
+    const rows=await inventariarPostgres({amostraRapida:quick,loteLimite:32,
+      queryEngine:async(sql)=>{statements.push(sql);return {ok:true,resultado:{rows:[]}};}});
+    assert.equal(rows.length,6);
+    assert.equal(statements.length,6);
+    for (const sql of statements) {
+      assert.match(sql,/\bLIMIT\s+\$2\b/i);
+      assert.equal(/\bORDER BY\b/i.test(sql),!quick);
+      assert.doesNotMatch(sql,/\bDELETE\b|\bUPDATE\b|\bINSERT\b/i);
+    }
   }
 });
 

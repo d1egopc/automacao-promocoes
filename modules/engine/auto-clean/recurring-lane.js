@@ -39,7 +39,7 @@ async function validateReadOnly({ pool, inventory }) {
     await client.query("BEGIN READ ONLY");
     await client.query("SET LOCAL statement_timeout = '1000ms'");
     await client.query("SET LOCAL lock_timeout = '100ms'");
-    const rows = await inventory({ loteLimite: 32, execute: false,
+    const rows = await inventory({ loteLimite: 32, execute: false, amostraRapida: true,
       queryEngine: async (sql, params) => ({ ok: true, resultado: await client.query(sql, params) }) });
     return { ok: !rows.some(r => r.erro), eligible: rows.reduce((n, r) => n + Number(r.elegiveis || 0), 0),
       protected: rows.reduce((n, r) => n + Number(r.protegidos || 0), 0),
