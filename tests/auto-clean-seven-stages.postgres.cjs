@@ -81,7 +81,7 @@ async function stage(name, fn, removedField, removedId, protectedId, table) {
 
     await reset();
     await query(`INSERT INTO engine_history_items VALUES
-      (41,'tenant_a',NULL,${old}),(42,'tenant_b',NULL,${recent})`);
+      (41,'tenant_a',NULL,${old}),(42,'tenant_b',NULL,${old})`);
     const history = await clean.executarHistoricoDefinitivoPostgresAutoClean({pool,canarioPostgres:true,
       loteLimite:1,lotesDbPorCiclo:1,limiteTotalMutacoes:1,workspaceId:"tenant_a"});
     assert.equal(history.ok,true,JSON.stringify({motivo:history.motivo,erroTipo:history.erroTipo}));
@@ -106,6 +106,17 @@ async function stage(name, fn, removedField, removedId, protectedId, table) {
     assert.equal(orphanE.ok,true,JSON.stringify({motivo:orphanE.motivo,erroTipo:orphanE.erroTipo}));
     assert.equal(orphanE.eventosComerciaisOrfaosRemovidos,1);
     assert.equal(await count("engine_eventos_comerciais",62),1,"ACK protected");
+
+    // Two workers cannot remove the same row twice; the advisory lock may
+    // cause one to skip, which is a safe concurrent outcome.
+    await reset();
+    await query(`INSERT INTO engine_ofertas(id,status,criada_em,atualizada_em)
+      VALUES (65,'enviado',${old},${old})`);
+    const concurrent = await Promise.all([1,2].map(() => clean.executarOfertasPostgresAutoClean({
+      pool,canarioPostgres:true,loteLimite:1,lotesDbPorCiclo:1,limiteTotalMutacoes:1
+    })));
+    assert.equal(concurrent.reduce((n,r)=>n+Number(r.ofertasRemovidas||0),0),1);
+    assert.equal(await count("engine_ofertas",65),0);
 
     // Exercise the actual recurring dispatcher and its bounded pool wrapper.
     await reset();
