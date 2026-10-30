@@ -30,3 +30,20 @@ test("clean install chain and Docker preinstall use the exact tested patch",()=>
   assert.match(installer,/require\("\.\.\/modules\/whatsapp\/baileys-balanced-buffer-patch"\).applyPatch\(\)/);
   assert.ok(docker.indexOf("COPY modules/whatsapp/baileys-balanced-buffer-patch.js")<docker.indexOf("RUN npm ci"));
 });
+test("tampered Docker recipe, installer, extra runtime and wrong base fail closed",()=>{
+  const parent=path.join(root,"tmp/balanced-negative");fs.mkdirSync(parent,{recursive:true});
+  const dir=fs.mkdtempSync(path.join(parent,"fixture-"));
+  function git(args){const r=spawnSync("git",args,{cwd:dir,encoding:"utf8",windowsHide:true});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
+  try {
+    git(["clone","--quiet","--shared","--no-checkout",root,"."]);
+    git(["checkout","--quiet","--detach",sha()]);
+    git(["config","user.name","Fixture"]);git(["config","user.email","fixture@example.invalid"]);
+    assert.equal(g.buildPlan(dir,p.baseSha,git(["rev-parse","HEAD"])).validation,"PASS");
+    for(const file of ["Dockerfile","scripts/apply-baileys-retry-hotfix.cjs","modules/engine/unapproved-buffer-fixture.js"]){
+      const target=path.join(dir,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.appendFileSync(target,"\n# unapproved fixture\n");
+      git(["add","--",file]);git(["commit","--quiet","-m","negative fixture"]);
+      assert.equal(g.buildPlan(dir,p.baseSha,git(["rev-parse","HEAD"])).validation,"BLOCKED",file);
+    }
+    assert.equal(g.buildPlan(dir,p.hotfixSha,git(["rev-parse","HEAD"])).validation,"BLOCKED");
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});

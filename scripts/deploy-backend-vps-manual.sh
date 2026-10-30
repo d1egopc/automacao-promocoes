@@ -75,7 +75,7 @@ declare -A changed_runtime=()
 declare -A changed_runtime_status=()
 record_runtime_change() {
   local status="$1" path="$2"
-  if [[ "$guardian_mode" == baileys_balanced_buffer_patch && "$path" == Dockerfile ]]; then
+  if [[ "${guardian_mode:-overlay}" == baileys_balanced_buffer_patch && "$path" == Dockerfile ]]; then
     # Exact recipe hash already required by the closed Guardian profile.
     return 0
   fi
