@@ -1,0 +1,49 @@
+name: Baileys balanced buffer Linux Node24
+on:
+  push:
+    branches: [validation/guardian-v1-baileys-balanced-buffer-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Exact installed dependency and buffer contracts
+        run: node --test tests/baileys-balanced-buffer.test.cjs tests/baileys-balanced-artifact.test.cjs tests/baileys-balanced-packaging.test.cjs
+      - name: Published consumer contracts and isolated integration
+        run: |
+          node --test tests/whatsapp-ingress-boundary.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node --test tests/mensageiro-gerente-grupo.test.cjs tests/mensageiro-bot-comandos.test.cjs tests/mensageiro-programacoes.test.cjs
+          git diff --exit-code cecd2e6acdf5df274d19ee87f029389078f141dc HEAD -- index.js modules/engine modules/radar modules/teleradar modules/clonador-grupos modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 modules/fila modules/executor marketplaces optimus-capture utils package.json package-lock.json
+      - name: Guardian and closed derived Docker recipe
+        run: |
+          node scripts/guardian-v1.cjs validate --base cecd2e6acdf5df274d19ee87f029389078f141dc --source "$GITHUB_SHA" --report "$RUNNER_TEMP/guardian-balanced.json"
+          node scripts/guardian-v1.cjs build-dockerfile --base cecd2e6acdf5df274d19ee87f029389078f141dc --source "$GITHUB_SHA" --base-tag local/optimus-deploy-base:fixture > "$RUNNER_TEMP/Dockerfile.balanced"
+      - name: Clean Docker build and tests inside real artifact
+        run: |
+          docker build --no-cache -t local/optimus-balanced-ci:full .
+          docker run --rm --network none --entrypoint node local/optimus-balanced-ci:full --test tests/baileys-balanced-artifact.test.cjs tests/baileys-balanced-buffer.test.cjs
+          docker tag local/optimus-balanced-ci:full local/optimus-deploy-base:fixture
+          docker build --no-cache --network none -f "$RUNNER_TEMP/Dockerfile.balanced" -t local/optimus-balanced-ci:derived .
+          docker run --rm --network none --entrypoint node local/optimus-balanced-ci:derived --test tests/baileys-balanced-artifact.test.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baileys-balanced-gates
+          path: |
+            ${{ runner.temp }}/guardian-balanced.json
+            ${{ runner.temp }}/Dockerfile.balanced

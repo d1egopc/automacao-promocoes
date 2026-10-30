@@ -59,6 +59,25 @@ const BAILEYS_BUFFER_PROFILE = {
   }
 };
 
+const BALANCED_BUFFER_PROFILE = {
+  baseSha: "cecd2e6acdf5df274d19ee87f029389078f141dc",
+  hotfixSha: "426b7ea76211b501326be4ea69d51fb40e0923b9",
+  runtimeHashes: {
+    "modules/whatsapp/baileys-balanced-buffer-patch.js": "86264f0cf9218b5479fab1a2ddf7cab04646408d2cc40d159b74fad44e87e40d",
+    "scripts/apply-baileys-retry-hotfix.cjs": "4d44a77a7bb11a6a060210018265b9ff96b039b1e088f6308461ce0cbf8714e1"
+  },
+  unchangedBuildHashes: {
+    "Dockerfile": "640c5d696b6d341075e0c407fb785c5590b3fcdb03220b0ab8fb80c7cdbe5d26",
+    "package.json": "652ac4577ceea12b785a0ab2cd78058dcc6978d9e7f7063aa84498acbcfcec9b",
+    "package-lock.json": "1b61cdd9a6538e2c0650c5c92382ff551febf84cf58d2d3450c0eb3ec661dbca",
+    ".dockerignore": "93375c6a4e819eacf9abc319c4194b88ffddb798606aafecddec9cffb4eca36a"
+  },
+  dependencies: {"lib/Utils/event-buffer.js": {
+    before: "d2d9a7b26868de3086bf444576f41beb296c0867767cb5782fcd34ab6281a37c",
+    after: "aaee6567218d513a254503b472a3497b0c39e9836e25893247e23db2a548aff4"
+  }}
+};
+
 function contentHash(repo, sha, file) {
   // index.js exceeds spawnSync's default 1 MiB buffer. Hash bounded binary
   // bytes, not truncated/decoded output; an incomplete read fails closed.
@@ -69,8 +88,8 @@ function contentHash(repo, sha, file) {
   return crypto.createHash("sha256").update(result.stdout).digest("hex");
 }
 
-function validateBufferProfile(repo, base, source, runtimeFiles) {
-  const p = BAILEYS_BUFFER_PROFILE, failures = [];
+function validateBufferProfile(repo, base, source, runtimeFiles, p = BAILEYS_BUFFER_PROFILE) {
+  const failures = [];
   const reject = (file, cause) => failures.push({ file, stage: "baileys_buffer_profile", cause });
   if (base !== p.baseSha) reject("BASE_SHA", "unapproved_hotfix_base");
   if (git(repo, ["merge-base", "--is-ancestor", p.hotfixSha, source], { allowFailure: true }).status !== 0)
@@ -89,16 +108,18 @@ function renderDockerfile(plan, baseTag) {
   if (plan.validation !== "PASS" || plan.blocked.length ||
       !/^local\/optimus-deploy-base:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(baseTag))
     throw new Error("unapproved_image_build");
-  if (!["overlay", "baileys_buffer_patch"].includes(plan.deployMode)) throw new Error("unapproved_build_mode");
-  const special = plan.deployMode === "baileys_buffer_patch";
-  if (special && (plan.baseSha !== BAILEYS_BUFFER_PROFILE.baseSha ||
-      JSON.stringify(plan.runtimeFiles) !== JSON.stringify(Object.keys(BAILEYS_BUFFER_PROFILE.runtimeHashes).sort())))
+  if (!["overlay", "baileys_buffer_patch", "baileys_balanced_buffer_patch"].includes(plan.deployMode)) throw new Error("unapproved_build_mode");
+  const balanced = plan.deployMode === "baileys_balanced_buffer_patch";
+  const special = plan.deployMode === "baileys_buffer_patch" || balanced;
+  const profile = balanced ? BALANCED_BUFFER_PROFILE : BAILEYS_BUFFER_PROFILE;
+  if (special && (plan.baseSha !== profile.baseSha ||
+      JSON.stringify(plan.runtimeFiles) !== JSON.stringify(Object.keys(profile.runtimeHashes).sort())))
     throw new Error("exact_hotfix_runtime_set_required");
   if (!special && plan.runtimeFiles.includes("modules/whatsapp/baileys-buffer-hotfix.service.js"))
     throw new Error("dependency_patch_mode_required");
   return [`FROM ${baseTag}`, "USER root",
     ...plan.runtimeFiles.map(file => `COPY --chown=node:node ${normalizeRuntimePath(file)} /app/${normalizeRuntimePath(file)}`),
-    ...(special ? ["RUN node -e \"require('/app/modules/whatsapp/baileys-buffer-hotfix.service.js').applyPatch({rootDir:'/app'})\""] : []),
+    ...(special ? [`RUN node -e "require('/app/modules/whatsapp/${balanced ? "baileys-balanced-buffer-patch" : "baileys-buffer-hotfix.service"}.js').applyPatch({rootDir:'/app'})"`] : []),
     "USER node", ""].join("\n");
 }
 
@@ -215,6 +236,7 @@ function buildPlan(repo, base, source) {
   const dirt = git(repo, ["status", "--porcelain=v1"]).stdout.trim();
   if (dirt) throw new Error("source_checkout_not_clean");
   const changes = parseDiff(repo, base, source);
+  const balancedProfile = changes.some(change => change.file === "modules/whatsapp/baileys-balanced-buffer-patch.js");
   const runtimeFiles = [];
   const ignoredFiles = [];
   const blocked = [];
@@ -232,11 +254,14 @@ function buildPlan(repo, base, source) {
       ignoredFiles.push(file);
       continue;
     }
+    // Build recipe is checked byte-for-byte by this closed profile, never copied
+    // into the running image. All other full-build paths remain forbidden.
+    if (balancedProfile && file === "Dockerfile") { ignoredFiles.push(file); continue; }
     if (FULL_BUILD_PATHS.has(file)) {
       blocked.push({ file, stage: "classify", cause: "full_image_build_not_supported_by_guardian_v1" });
       continue;
     }
-    if (!isOverlayRuntime(file)) {
+    if (!isOverlayRuntime(file) && !(balancedProfile && file === "scripts/apply-baileys-retry-hotfix.cjs")) {
       blocked.push({ file, stage: "classify", cause: "unknown_or_disallowed_runtime_path" });
       continue;
     }
@@ -260,13 +285,14 @@ function buildPlan(repo, base, source) {
   runtimeFiles.sort();
   const bufferProfile = changes.some(change => change.file === "modules/whatsapp/baileys-buffer-hotfix.service.js");
   if (bufferProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles));
+  if (balancedProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles, BALANCED_BUFFER_PROFILE));
   ignoredFiles.sort();
   blocked.sort((a, b) => a.file.localeCompare(b.file));
   return {
     sourceSha: source,
     baseSha: base,
     validation: blocked.length ? "BLOCKED" : "PASS",
-    deployMode: bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
+    deployMode: balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
     runtimeFiles,
     ignoredFiles,
     blocked
@@ -417,6 +443,12 @@ function testMatrix(plan) {
   if (plan.deployMode === "baileys_buffer_patch") {
     add("baileys:buffer", "tests/baileys-initial-buffer-recovery.test.cjs", process.execPath, ["--test", "tests/baileys-initial-buffer-recovery.test.cjs"], false);
     add("baileys:packaging", "tests/guardian-baileys-buffer-packaging.test.cjs", process.execPath, ["--test", "tests/guardian-baileys-buffer-packaging.test.cjs"], false);
+  }
+  if (plan.deployMode === "baileys_balanced_buffer_patch") {
+    add("baileys:balanced", "tests/baileys-balanced-buffer.test.cjs", process.execPath, ["--test", "tests/baileys-balanced-buffer.test.cjs"], false);
+    add("baileys:balanced-packaging", "tests/baileys-balanced-packaging.test.cjs", process.execPath, ["--test", "tests/baileys-balanced-packaging.test.cjs"], false);
+    for (const file of ["mensageiro-gerente-grupo.test.cjs", "mensageiro-bot-comandos.test.cjs", "mensageiro-programacoes.test.cjs", "whatsapp-ingress-boundary.test.cjs"])
+      add(`balanced:${file}`, `tests/${file}`, process.execPath, ["--test", `tests/${file}`]);
   }
   return [...specs.values()];
 }
@@ -578,9 +610,10 @@ function main() {
     if (args.format === "value") console.log(plan.runtimeFiles.join(","));
     else if (args.format === "mode") console.log(plan.deployMode);
     else if (["dependencies-before", "dependencies-after"].includes(args.format)) {
-      if (plan.validation !== "PASS" || plan.deployMode !== "baileys_buffer_patch") throw new Error("dependency_profile_required");
+      if (plan.validation !== "PASS" || !["baileys_buffer_patch", "baileys_balanced_buffer_patch"].includes(plan.deployMode)) throw new Error("dependency_profile_required");
       const key = args.format.endsWith("before") ? "before" : "after";
-      for (const [file, hashes] of Object.entries(BAILEYS_BUFFER_PROFILE.dependencies)) console.log(`${file}\t${hashes[key]}`);
+      const profile = plan.deployMode === "baileys_balanced_buffer_patch" ? BALANCED_BUFFER_PROFILE : BAILEYS_BUFFER_PROFILE;
+      for (const [file, hashes] of Object.entries(profile.dependencies)) console.log(`${file}\t${hashes[key]}`);
     }
     else console.log(JSON.stringify(plan, null, 2));
     if (plan.blocked.length) process.exitCode = 2;
@@ -610,6 +643,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  BALANCED_BUFFER_PROFILE,
   BAILEYS_BUFFER_PROFILE,
   renderDockerfile,
   buildPlan,

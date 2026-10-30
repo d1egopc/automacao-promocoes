@@ -1,0 +1,22 @@
+"use strict";
+const test=require("node:test"),assert=require("node:assert/strict"),fs=require("node:fs"),crypto=require("node:crypto"),path=require("node:path"),{pathToFileURL}=require("node:url");
+test("installed Node24 artifact has exact patched dependency and delivers to the real socket wrapper",async()=>{
+  assert.equal(Number(process.versions.node.split(".")[0]),24);
+  const root=path.resolve(__dirname,"../node_modules/@whiskeysockets/baileys");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root,"package.json"))).version,"6.7.22");
+  const file=path.join(root,"lib/Utils/event-buffer.js");
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"),"aaee6567218d513a254503b472a3497b0c39e9836e25893247e23db2a548aff4");
+  await import(pathToFileURL(path.join(root,"lib/index.js")).href);
+  const {makeEventBuffer}=await import(pathToFileURL(file).href);
+  const {registrarListenerUnicoSocket}=require("../modules/whatsapp/socket-listener-lifecycle.service");
+  const logger={debug(){},trace(){},log(){}};
+  const ev=makeEventBuffer(logger),sock={ev},received=[];
+  registrarListenerUnicoSocket({sock,evento:"messages.upsert",sessaoId:"fixture",logger,handler:({messages})=>received.push(...messages.map(m=>m.key.id))});
+  ev.buffer();ev.flush();
+  const upsert=ev.createBufferedFunction(async id=>ev.emit("messages.upsert",{type:"notify",messages:[{key:{id,remoteJid:"fixture@g.us"}}]}));
+  await Promise.all([upsert("control"),upsert("magalu")]);
+  assert.equal(received.length,0);
+  await new Promise(r=>setTimeout(r,150));
+  assert.deepEqual(received,["control","magalu"]);
+  assert.equal(ev.isBuffering(),false);
+});

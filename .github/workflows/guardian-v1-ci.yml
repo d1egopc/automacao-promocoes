@@ -321,6 +321,7 @@ jobs:
           set -euo pipefail
           base="$(git merge-base origin/main HEAD)"
           case "$GITHUB_REF" in
+            refs/heads/validation/guardian-v1-baileys-balanced-buffer-20261029) base=cecd2e6acdf5df274d19ee87f029389078f141dc ;;
             refs/heads/validation/guardian-v1-diversos-integracao-20261029) base=5dd99da80233ab9a49162e02e215b75982e3da28 ;;
             refs/heads/validation/guardian-v1-garimpei-release-20261028) base=58ac3d19840bb25c8f72bb29e5ac60128a148bd4 ;;
             refs/heads/validation/guardian-v1-shopee-release-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
