@@ -40,6 +40,7 @@ jobs:
           node tests/optimus-auto-clean-v1-shadow.test.js
           node tests/auto-clean-media-physical-wiring.test.js
           node tests/auto-clean-media-physical.test.js
+          node tests/auto-clean-gc-partial-isolation.test.cjs
           for file in tests/auto-clean-gc-reference-index-phase*.test.js tests/auto-clean-gc-relay-phase1.test.js; do node "$file"; done
       - name: Guardian unchanged baseline comparison
         run: node scripts/guardian-v1.cjs validate --base f16d37eb4811d0943bc788ce930fe799ddc4c276 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
