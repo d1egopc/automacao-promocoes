@@ -1186,6 +1186,54 @@ async function recuperarProofFilaVivaPosConfirmacao(clienteId = "admin", dados =
   }, deps);
 }
 
+// One-shot repair for a pending checkpoint whose VIVA proof predates contentHash.
+// It never runs from the scheduler. The pending checkpoint remains pending until
+// the normal coordinated checkpoint path confirms its legacy projection.
+async function recuperarProofFilaVivaPendente(clienteId = "admin", dados = {}, deps = {}) {
+  const cliente = clienteSeguro(clienteId);
+  const expectedRevision = numeroInteiroNaoNegativo(dados.expectedRevision);
+  const expectedGeneration = numeroInteiroNaoNegativo(dados.expectedGeneration);
+  const expectedPendingRevision = textoSeguro(dados.expectedPendingRevision);
+  const expectedFileRevision = textoSeguro(dados.expectedFileRevision);
+  if (expectedRevision === null || expectedGeneration === null ||
+      !expectedPendingRevision || !expectedFileRevision ||
+      typeof dados.publicarProofCoordenado !== "function") {
+    return { ok: false, motivo: "pending_proof_recovery_guard_incompleto", clienteId: cliente };
+  }
+  return comTransacao(async (client) => {
+    await inicializarSchemaQueueManifestState(client);
+    const atual = await garantirLinhaCliente(client, cliente, dados.bootstrapManifest);
+    if (atual.revision !== expectedRevision) {
+      return { ok: false, motivo: "revision_stale", clienteId: cliente, state: atual };
+    }
+    const antigo = normalizarProof(atual.vivaFileProof);
+    if (atual.vivaGeneration !== expectedGeneration ||
+        atual.durableCheckpointGeneration >= expectedGeneration ||
+        atual.dirtyGeneration === null || atual.authorityReady === true ||
+        atual.pendingCheckpointRevision !== expectedPendingRevision ||
+        atual.pendingCheckpointTargetGeneration !== expectedGeneration ||
+        !antigo || antigo.clienteId !== cliente || antigo.arquivo !== "fila-viva.json" ||
+        antigo.generation !== expectedGeneration || antigo.fileRevision !== expectedFileRevision ||
+        antigo.contentHash) {
+      return { ok: false, motivo: "pending_proof_recovery_state_invalido", clienteId: cliente, state: atual };
+    }
+    const publicado = await dados.publicarProofCoordenado({ state: atual });
+    const proof = normalizarProof(publicado?.proof);
+    const camposImutaveis = ["clienteId", "arquivo", "generation", "fileRevision",
+      "size", "mtimeMs", "ctimeMs", "ino", "dev"];
+    if (publicado?.ok !== true || !proof ||
+        !/^[a-f0-9]{64}$/.test(proof.contentHash || "") ||
+        camposImutaveis.some(campo => antigo[campo] !== proof[campo])) {
+      return { ok: false, motivo: publicado?.motivo || "pending_proof_recovery_publicacao_invalida",
+        clienteId: cliente, state: atual };
+    }
+    const atualizado = await atualizarState(client, {
+      ...atual, vivaFileProof: proof, authorityReady: false
+    }, dados.motivo || "viva_proof_pendente_recuperado");
+    return { ...atualizado, recuperado: atualizado.ok === true, proof };
+  }, deps);
+}
+
 async function lerStateObservacional(clienteId = "admin", deps = {}) {
   const cliente = clienteSeguro(clienteId);
   const pool = poolPadrao(deps);
@@ -1346,6 +1394,7 @@ module.exports = {
   normalizarStateDb,
   prepararReadinessAutoridade,
   recuperarProofFilaVivaPosConfirmacao,
+  recuperarProofFilaVivaPendente,
   invalidarAuthorityReady,
   registrarLegacySyncDuravel,
   registrarMutacaoDuravel,

@@ -31,6 +31,7 @@ jobs:
       - name: Synthetic fixtures and unchanged reference safety
         env:
           AUTO_CLEAN_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55443/auto_clean_fixture
+          TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55443/auto_clean_fixture
         run: |
           test -z "${DATABASE_URL:-}"
           node --test tests/auto-clean-recurring-lane.test.cjs
@@ -41,6 +42,7 @@ jobs:
           node tests/auto-clean-media-physical-wiring.test.js
           node tests/auto-clean-media-physical.test.js
           node tests/auto-clean-gc-partial-isolation.test.cjs
+          node --test tests/checkpoint-pending-proof-recovery-admin.postgres.test.cjs
           for file in tests/auto-clean-gc-reference-index-phase*.test.js tests/auto-clean-gc-relay-phase1.test.js; do node "$file"; done
       - name: Guardian unchanged baseline comparison
         run: node scripts/guardian-v1.cjs validate --base f16d37eb4811d0943bc788ce930fe799ddc4c276 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
@@ -50,6 +52,7 @@ jobs:
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/auto-clean.service.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/recurring-lane.js
           docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/orchestrator.runner.js
+          docker run --rm --entrypoint node optimus-auto-clean-candidate:${GITHUB_SHA} --check modules/engine/auto-clean/gc-pending-proof-recovery-admin.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
