@@ -1,0 +1,39 @@
+name: Baileys sync release evidence Linux Node24
+on:
+  push:
+    branches: [validation/guardian-v1-baileys-sync-release-20261029]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Preserve all published runtime and dependency packaging
+        run: git diff --exit-code 97b7020491c89f119e9dc09538af03f8cae87f2a HEAD -- index.js modules utils marketplaces optimus-capture scripts Dockerfile package.json package-lock.json
+      - name: Exact sync lifecycle and published buffer contracts
+        run: node --test tests/baileys-sync-release-contract.test.cjs tests/baileys-balanced-buffer.test.cjs tests/baileys-balanced-artifact.test.cjs
+      - name: Consumers
+        run: |
+          node --test tests/whatsapp-ingress-boundary.test.cjs tests/whatsapp-ingress-frame-types.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/teleradar-handoff.test.js
+          node tests/clonador-grupos-foundation.test.js
+          node --test tests/mensageiro-gerente-grupo.test.cjs tests/mensageiro-bot-comandos.test.cjs tests/mensageiro-programacoes.test.cjs
+      - name: Guardian unchanged
+        run: node scripts/guardian-v1.cjs validate --base 97b7020491c89f119e9dc09538af03f8cae87f2a --source "$GITHUB_SHA" --report "$RUNNER_TEMP/guardian-sync-release.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baileys-sync-release-evidence
+          path: ${{ runner.temp }}/guardian-sync-release.json
