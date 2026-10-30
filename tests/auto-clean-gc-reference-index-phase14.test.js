@@ -46,8 +46,12 @@ function currentFile(f) { return path.join(indexDir(f.dataDir, f.workspace), CUR
 function buildingFile(f) { return path.join(indexDir(f.dataDir, f.workspace), BUILDING_FILE); }
 function readBuilding(f) { return JSON.parse(fs.readFileSync(buildingFile(f), "utf8")); }
 
-function publish(f, entries) {
+function publish(f, entries, stableMtimeMs = null) {
   writeJson(queueFile(f), entries);
+  if (stableMtimeMs !== null) {
+    const timestamp = new Date(stableMtimeMs);
+    fs.utimesSync(queueFile(f), timestamp, timestamp);
+  }
   return writeJson(projectionFile(f), projetarReferenciasFilaViva(entries, f.workspace,
     fs.statSync(queueFile(f), { bigint: true })));
 }
@@ -259,7 +263,9 @@ async function testSameSizeAndMtimeReplacementFailsIdentityWatermark() {
   const f = fixture("user_gc_identity_replaced");
   try {
     const oldEntries = [{ status: "pendente", imagemRef: render(f, H1) }];
-    publish(f, oldEntries);
+    // Whole-second timestamp is represented exactly on Linux and Windows;
+    // a rounded sub-millisecond mtime must not mask the identity assertion.
+    publish(f, oldEntries, NOW - 1000);
     const original = fs.statSync(queueFile(f), { bigint: true });
     const replacement = [{ status: "pendente", imagemRef: render(f, H2) }];
     const temporary = `${queueFile(f)}.replacement`;
