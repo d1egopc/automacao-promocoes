@@ -1,6 +1,6 @@
 "use strict";
 const {randomBytes,createHmac}=require("node:crypto");
-const MAX_MS=300000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000;
+const MAX_MS=300000,NEXT_BOOTSTRAP_ARM_MS=86400000,NEXT_BOOTSTRAP_CAPTURE_MS=1800000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000;
 const REASONS=new Set(["socket_stale","user_inactive","buffer_recovery_suppressed","from_me","not_group","accepted","mensagem_nao_monitoravel","other","group_not_monitored","stale_message","wrong_upsert_type","no_links","marketplace_unidentified","duplicate","ignored","rejected","consumer_error","engine_error","engine_not_awaited","radar_monitoramento_inativo","fora_do_horario_monitoramento","sessao_whatsapp_nao_monitorada","grupo_whatsapp_nao_monitorado","whatsapp_upsert_historico","whatsapp_timestamp_ausente","radar_ativacao_invalida","whatsapp_mensagem_anterior_ativacao","whatsapp_mensagem_anterior_janela","remotejid_ausente","origem_tipo_invalida","grupo_ou_chat_ausente","captura_sem_tempo_factual","tamanho_maximo_atingido","usuario_inativo","workspace_mismatch"]);
 const TARGET_GROUP_ID="120363408782037034@g.us",TARGET_SESSION_ID="admin_Zoiao Claro";
 // Categories describe the public stanza tag, not its private content/purpose.
@@ -17,7 +17,8 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   for(const b of bindings.values())safe(()=>{if(b.wsOriginal&&b.ws.emit===b.wsOriginal.wrapped)b.ws.emit=b.wsOriginal.original;});
   bindings.clear();return status();
  }
- function active(){if(run?.active&&now()>=run.expiresAt)stop("expired");return run?.active===true;}
+ function active(){if(run?.active&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");return run?.active===true;}
+ function scheduleStop(duration){if(timer)clearTimer(timer);timer=setTimer(()=>stop(run?.phase==="armed"?"arm_expired":run?.mode==="next_bootstrap"?"capture_window_expired":"expired"),duration);timer?.unref?.();}
  function add(b,kind){if(run.records.length<MAX_RECORDS)run.records.push({at:now(),generation:b.generation,kind});else run.recordsDropped++;}
  const bootstrapReasons=new Set(["socket_initial_bootstrap","initial_sync_started","process_node","process_node_complete","offline_completion","history_sync_skipped","app_state_sync_complete","history_sync_disabled","initial_sync_timeout","deferred_work_complete","unspecified"]);
  const flushReasons=new Set(["offline_completion","history_sync_skipped","app_state_sync_complete","history_sync_disabled","initial_sync_timeout","process_node_complete","deferred_work_complete","servcel_initial_timeout_recovery","unspecified"]);
@@ -32,6 +33,12 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
  function getBootstrap(generation){let row=run?.bootstrapGenerations?.get(generation);if(!row&&run){row=newBootstrap(generation);run.bootstrapGenerations.set(generation,row);}return row||null;}
  function bootstrapObserver({workspaceId,sessionId,generation}={}){
   if(!active()||workspaceId!==run.workspaceId||sessionId!==run.sessionId||workspaceId!=="admin"||sessionId!==TARGET_SESSION_ID||!Number.isSafeInteger(generation)||generation<1)return null;
+  if(run.mode==="next_bootstrap"){
+   if(run.phase==="armed"){
+    if(generation<=run.armedAfterGeneration)return null;
+    run.phase="capturing";run.captureGeneration=generation;run.captureStartedAt=now();run.expiresAt=run.captureStartedAt+NEXT_BOOTSTRAP_CAPTURE_MS;scheduleStop(NEXT_BOOTSTRAP_CAPTURE_MS);
+   }else if(run.phase!=="capturing"||run.captureGeneration!==generation)return null;
+  }
   const owner=run,row=getBootstrap(generation);
   const record=(kind,fields={})=>safe(()=>{
    if(!active()||run!==owner||!owner.active)return;
@@ -94,6 +101,7 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
  }
  function trackSocket({workspaceId,sessionId,generation,sock}={}) {
   if(!active()||sessionId!==run.sessionId||workspaceId!==run.workspaceId)return false;
+  if(run.mode==="next_bootstrap"&&(run.phase!=="capturing"||run.captureGeneration!==generation))return false;
   if(!sock?.ev||!Number.isSafeInteger(generation)||generation<1)return false;
   if(bindings.has(sock.ev))return true;
   if(bindings.size>=MAX_GENERATIONS){stop("generation_limit");return false;}
@@ -157,20 +165,21 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   messageReceiver,synchronization:{lastPublicSignal:b.lastSyncSignal,pendingNotificationsObserved:typeof b.sock.__optimusMessengerLiveReady==="boolean"?b.sock.__optimusMessengerLiveReady:null,initialSyncState:"UNAVAILABLE_PUBLIC_INTERFACE"},failureCoverage:{decodeFailures:null,decryptFailures:null,reason:"no_dedicated_public_failure_event; socket/stream errors and dispatch throws are distinct"},
   distinction:c.wrapperCalls?c.callbackCalls?c.radarEntries?"radar_reached":c.earlyReturns?"early_return_observed":"callback_without_radar":"wrapper_without_callback":c.emitAttempts?c.emitCompleted>0&&c.bufferedAccepted===c.emitCompleted&&!c.emitErrors&&b.buffering?"buffer_retained_observed":p.state==="ABSENT"?"listener_absent_observed":"emit_without_wrapper_unknown":"no_upsert_emit_observed_not_transport_proof"};}
  function status(){
-  if(run?.active&&now()>=run.expiresAt)stop("expired");
+  if(run?.active&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");
   if(run&&!run.active&&now()-run.finishedAt>=RETENTION_MS)run=null;
   if(!run)return {state:"off"};
-  return {state:run.active?"active":"stopped",startedAt:run.startedAt,expiresAt:run.expiresAt,finishedAt:run.finishedAt||null,reason:run.reason||"",scope:{sessionRef:ref("session",run.sessionId),workspaceRef:ref("workspace",run.workspaceId),groupRef:ref("group",run.groupId)},generations:run.active?run.generations.map(snapshot):run.finalSnapshots||[],records:run.records.map(x=>({...x})),recordsDropped:run.recordsDropped,messages:[...run.messages.values()].map(x=>({...x,stages:x.stages.map(s=>({...s}))})),unkeyed:run.unkeyed,stagesDropped:run.stagesDropped,batchesTruncated:run.batchesTruncated,limits:{durationMs:MAX_MS,calls:MAX_CALLS,generations:MAX_GENERATIONS,records:MAX_RECORDS,messages:MAX_MESSAGES},coverage:"Session-only aggregate public socket counts; target-group key metadata at public upsert/callback. No packet content, participants, private emitter introspection or transport-delivery proof."};
+  const state=run.active?(run.mode==="next_bootstrap"&&run.phase==="armed"?"armed":"active"):"stopped";
+  return {state,startedAt:run.startedAt,expiresAt:run.expiresAt,finishedAt:run.finishedAt||null,reason:run.reason||"",capture:run.mode==="next_bootstrap"?{mode:run.mode,phase:run.phase,armedAfterGeneration:run.armedAfterGeneration,observedGeneration:run.captureGeneration||null,captureStartedAt:run.captureStartedAt||null}:{mode:"current_window"},scope:{sessionRef:ref("session",run.sessionId),workspaceRef:ref("workspace",run.workspaceId),groupRef:ref("group",run.groupId)},generations:run.active?run.generations.map(snapshot):run.finalSnapshots||[],records:run.records.map(x=>({...x})),recordsDropped:run.recordsDropped,messages:[...run.messages.values()].map(x=>({...x,stages:x.stages.map(s=>({...s}))})),unkeyed:run.unkeyed,stagesDropped:run.stagesDropped,batchesTruncated:run.batchesTruncated,limits:{durationMs:run.mode==="next_bootstrap"?(run.phase==="armed"?NEXT_BOOTSTRAP_ARM_MS:NEXT_BOOTSTRAP_CAPTURE_MS):MAX_MS,calls:MAX_CALLS,generations:MAX_GENERATIONS,records:MAX_RECORDS,messages:MAX_MESSAGES,armWaitMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_ARM_MS:0,captureAfterGenerationMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_CAPTURE_MS:0},coverage:"Session-only aggregate public socket counts; target-group key metadata at public upsert/callback. No packet content, participants, private emitter introspection or transport-delivery proof."};
  }
- function start({workspaceId,sessionId,sock,generation,groupId,scopeValidated=false}={}){
+ function start({workspaceId,sessionId,sock,generation,groupId,scopeValidated=false,mode="current_window"}={}){
   if(active()||run)return {ok:false,reason:"observation_exists"};
-  if(scopeValidated!==true||workspaceId!=="admin"||sessionId!==TARGET_SESSION_ID||groupId!==TARGET_GROUP_ID||!sock?.ev||!Number.isSafeInteger(generation)||generation<1)return {ok:false,reason:"target_unverified"};
-  const at=now();run={active:true,workspaceId,sessionId,groupId,messages:new Map(),unkeyed:0,stagesDropped:0,batchesTruncated:0,startedAt:at,expiresAt:at+MAX_MS,records:[],recordsDropped:0,generations:[],bootstrapGenerations:new Map(),calls:0};
-  trackSocket({workspaceId,sessionId,sock,generation});timer=setTimer(()=>stop("expired"),MAX_MS);timer?.unref?.();return {ok:true,...status()};
+  if(!["current_window","next_bootstrap"].includes(mode)||scopeValidated!==true||workspaceId!=="admin"||sessionId!==TARGET_SESSION_ID||groupId!==TARGET_GROUP_ID||!sock?.ev||!Number.isSafeInteger(generation)||generation<1)return {ok:false,reason:"target_unverified"};
+  const at=now(),duration=mode==="next_bootstrap"?NEXT_BOOTSTRAP_ARM_MS:MAX_MS;run={active:true,mode,phase:mode==="next_bootstrap"?"armed":"capturing",armedAfterGeneration:generation,captureGeneration:mode==="current_window"?generation:null,captureStartedAt:mode==="current_window"?at:null,workspaceId,sessionId,groupId,messages:new Map(),unkeyed:0,stagesDropped:0,batchesTruncated:0,startedAt:at,expiresAt:at+duration,records:[],recordsDropped:0,generations:[],bootstrapGenerations:new Map(),calls:0};
+  if(mode==="current_window")trackSocket({workspaceId,sessionId,sock,generation});scheduleStop(duration);return {ok:true,...status()};
  }
  // Preserve immutable snapshots before releasing socket references on stop.
  const finish=stop;
  stop=function(reason="manual"){if(run?.active)run.finalSnapshots=run.generations.map(snapshot);const result=finish(reason);if(run&&!run.active){run.generations=[];run.current=null;}return result;};
  return Object.freeze({start,stop,status,trackSocket,mark,bootstrapObserver});
 }
-module.exports={createIngressBoundaryObservation,MAX_MS,MAX_CALLS,MAX_RECORDS,MAX_GENERATIONS,MAX_MESSAGES,MAX_BOOTSTRAP_SIGNALS,TARGET_GROUP_ID,TARGET_SESSION_ID};
+module.exports={createIngressBoundaryObservation,MAX_MS,NEXT_BOOTSTRAP_ARM_MS,NEXT_BOOTSTRAP_CAPTURE_MS,MAX_CALLS,MAX_RECORDS,MAX_GENERATIONS,MAX_MESSAGES,MAX_BOOTSTRAP_SIGNALS,TARGET_GROUP_ID,TARGET_SESSION_ID};

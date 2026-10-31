@@ -25768,10 +25768,12 @@ app.get("/admin/whatsapp/ingress-boundary", (req, res) => {
 });
 app.post("/admin/whatsapp/ingress-boundary/start", (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
-  if (req.body?.confirm !== "OP_TEST_RADAR_BOUNDARY_5M") return responderObservacaoIngressRadar(res, { ok: false, reason: "confirmation_required" }, 400);
+  const mode = req.body?.mode === undefined ? "current_window" : req.body.mode;
+  const confirmation = mode === "current_window" ? "OP_TEST_RADAR_BOUNDARY_5M" : mode === "next_bootstrap" ? "OP_TEST_RADAR_NEXT_BOOTSTRAP_24H" : null;
+  if (!confirmation || req.body?.confirm !== confirmation) return responderObservacaoIngressRadar(res, { ok: false, reason: "confirmation_required" }, 400);
   const target = validarAlvoObservacaoOpTesteRadar();
   if (!target.ok) return responderObservacaoIngressRadar(res, { ok: false, reason: target.reason }, 409);
-  const result = whatsappIngressBoundary.start({ ...target, sock: target.socket, scopeValidated: true });
+  const result = whatsappIngressBoundary.start({ ...target, sock: target.socket, scopeValidated: true, mode });
   return responderObservacaoIngressRadar(res, result, result.ok ? 200 : 409);
 });
 app.post("/admin/whatsapp/ingress-boundary/stop", (req, res) => {

@@ -110,7 +110,7 @@ test("old emitter wrapper is attributed to its original binding, and retained sn
 });
 test("Admin Master routes are explicit and independent from Garimpei sensor controls",()=>{
  const code=fs.readFileSync(path.resolve(__dirname,"../index.js"),"utf8");const start=code.indexOf('app.get("/admin/whatsapp/ingress-boundary"'),end=code.indexOf('app.get("/admin/radar/ingress-observation"',start);const routes=code.slice(start,end);
- assert.equal((routes.match(/exigirAdminMasterEngine\(req, res\)/g)||[]).length,3);assert.match(routes,/OP_TEST_RADAR_BOUNDARY_5M/);assert.match(routes,/validarAlvoObservacaoOpTesteRadar/);assert.doesNotMatch(routes,/radarIngressObservation\.(start|stop)|garimpeiSensorEnabled\s*=/);
+ assert.equal((routes.match(/exigirAdminMasterEngine\(req, res\)/g)||[]).length,3);assert.match(routes,/OP_TEST_RADAR_BOUNDARY_5M/);assert.match(routes,/OP_TEST_RADAR_NEXT_BOOTSTRAP_24H/);assert.match(routes,/mode === "next_bootstrap"/);assert.match(routes,/validarAlvoObservacaoOpTesteRadar/);assert.doesNotMatch(routes,/radarIngressObservation\.(start|stop)|garimpeiSensorEnabled\s*=/);
 });
 
 test("exact production registration reaches mocked Radar/Engine across generations and isolates early returns",async()=>{

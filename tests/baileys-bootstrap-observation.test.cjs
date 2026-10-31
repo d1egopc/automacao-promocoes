@@ -4,7 +4,7 @@ const {EventEmitter}=require("node:events");
 const retry=require("../scripts/apply-baileys-retry-hotfix.cjs");
 const hotfix=require("../modules/whatsapp/baileys-buffer-hotfix.service");
 const balanced=require("../modules/whatsapp/baileys-balanced-buffer-patch");
-const {createIngressBoundaryObservation,TARGET_GROUP_ID,TARGET_SESSION_ID,MAX_BOOTSTRAP_SIGNALS}=require("../modules/whatsapp/ingress-boundary-observation");
+const {createIngressBoundaryObservation,TARGET_GROUP_ID,TARGET_SESSION_ID,MAX_MS,NEXT_BOOTSTRAP_ARM_MS,NEXT_BOOTSTRAP_CAPTURE_MS,MAX_BOOTSTRAP_SIGNALS}=require("../modules/whatsapp/ingress-boundary-observation");
 const baseEventBuffer=require("./fixtures/baileys-6.7.22-event-buffer.json");
 const sourceRoot=path.resolve(__dirname,"../node_modules/@whiskeysockets/baileys");
 const logger={debug(){},trace(){},info(){},warn(){},error(){}};
@@ -92,6 +92,17 @@ test("bootstrap signal and record caps never retain per-message data",()=>{
  const b=o.status().generations.find(x=>x.generation===2).bootstrap;
  assert.equal(b.observations,MAX_BOOTSTRAP_SIGNALS);assert.equal(b.truncated,true);assert.equal(b.records.length,64);assert.equal(b.recordsDropped,MAX_BOOTSTRAP_SIGNALS-64);
  assert.equal(JSON.stringify(b).includes("message"),false);o.stop();
+});
+
+test("next natural socket generation is armed beyond the legacy five-minute window and self-expires after capture",()=>{
+ let now=1000;const timers=[],o=createIngressBoundaryObservation({now:()=>now,setTimer:(fn,ms)=>{const t={fn,ms,cleared:false,unref(){}};timers.push(t);return t;},clearTimer:t=>{t.cleared=true;}});
+ const first={ev:smallEmitter()},ctx={workspaceId:"admin",sessionId:TARGET_SESSION_ID,sock:first,generation:1,groupId:TARGET_GROUP_ID,scopeValidated:true};
+ assert.equal(o.start({...ctx,mode:"next_bootstrap"}).ok,true);let status=o.status();assert.equal(status.state,"armed");assert.equal(status.capture.armedAfterGeneration,1);assert.equal(status.generations.length,0);assert.equal(status.limits.armWaitMs,NEXT_BOOTSTRAP_ARM_MS);assert.equal(timers.at(-1).ms,NEXT_BOOTSTRAP_ARM_MS);
+ now+=MAX_MS+60000;assert.equal(o.status().state,"armed");assert.equal(o.bootstrapObserver({...ctx,generation:1}),null);
+ const second={ev:smallEmitter()},hook=o.bootstrapObserver({...ctx,sock:second,generation:2});assert.ok(hook);status=o.status();assert.equal(status.state,"active");assert.equal(status.capture.phase,"capturing");assert.equal(status.capture.observedGeneration,2);assert.equal(status.limits.captureAfterGenerationMs,NEXT_BOOTSTRAP_CAPTURE_MS);assert.equal(timers.at(-1).ms,NEXT_BOOTSTRAP_CAPTURE_MS);assert.equal(timers[0].cleared,true);
+ assert.equal(o.trackSocket({...ctx,sock:second,generation:2}),true);assert.equal(o.trackSocket({...ctx,generation:3,sock:{ev:smallEmitter()}}),false);
+ hook.offlineBatch("preview_received");hook.syncState("Syncing");const generation=o.status().generations[0];assert.equal(generation.generation,2);assert.equal(generation.bootstrap.offlineBatch.previewReceived,1);
+ const deadline=status.expiresAt;now+=60000;assert.equal(o.status().expiresAt,deadline);now=deadline;status=o.status();assert.equal(status.state,"stopped");assert.equal(status.reason,"capture_window_expired");assert.equal(status.generations[0].generation,2);
 });
 
 test("instrumented event buffer is behavior-equivalent when observer is absent and reports fixed flush causes when enabled",async()=>{

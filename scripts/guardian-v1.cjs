@@ -82,8 +82,8 @@ const BAILEYS_BOOTSTRAP_OBSERVATION_PROFILE = {
   baseSha: "000aad348eeac113cd75876db2f53a909894e14c",
   hotfixSha: "04ab572c91a31dabf95bf38647fe72db871ba14b",
   runtimeHashes: {
-    "index.js": "46cbf236a5431e5a5284cfb34f572ad55a3db3e545129732199adc79e18d26f8",
-    "modules/whatsapp/ingress-boundary-observation.js": "23f84383f094380731388ce7edef1f6ec64b1a3a3dfc9ff0ff2d2b6c0ea2779a",
+    "index.js": "5cd2c02a44cd4bbd125b3abc74e6b741f666285f9b8502f3774884fc6bb8cf28",
+    "modules/whatsapp/ingress-boundary-observation.js": "558c73c50e0f23bd29626a378d771a54f1b3ac72f33e4ea451fdddd1d59b1ed4",
     "modules/whatsapp/baileys-buffer-hotfix.service.js": "4ae8d1b9876afa81d319dfab583e92ddbf6a63aedbc1b76fb1c4537b9f0e6652",
     "modules/whatsapp/baileys-buffer-recovery.service.js": "7735b38d0067eaf2f717dc60b904efc7be1d4b332a6bca729252a82e8cbbd06d",
     "modules/whatsapp/baileys-balanced-buffer-patch.js": "b5eb01d4f5faae36d27199a0a4a42e4ab96678303414bfd1b2ff9b5512bc5ccc",
