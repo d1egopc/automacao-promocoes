@@ -50,6 +50,8 @@ jobs:
           node tests/aliexpress-afiliacao-workspace.test.js
           node tests/aliexpress-app-moedas-contrato.test.js
           node tests/redirect-resolver-shortlinks-seguros.test.js
+          node tests/magalu-engine-importer.test.js
+          node tests/magalu-v2-golden-path.test.js
       - name: Diversos integration - isolated replay and commercial invariants
         if: github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
         shell: bash
