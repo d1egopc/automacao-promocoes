@@ -45,6 +45,7 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -z "${DATABASE_URL:-}"
           node tests/aliexpress-shortlink-radar-candidate.test.cjs
+          node tests/aliexpress-shortlink-multitenancy-candidate.test.cjs
           node tests/aliexpress-manual-importador.test.js
           node tests/aliexpress-afiliacao-workspace.test.js
           node tests/aliexpress-app-moedas-contrato.test.js
