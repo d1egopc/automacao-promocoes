@@ -294,9 +294,13 @@ const shopeeOffSemCodigo = construirEspelhoComercialV24({
 assert.strictEqual(shopeeOffSemCodigo.documentoComercialCanonico.cupomTexto, null, "R$50 OFF sem codigo nao cria cupomCodigo");
 assert.strictEqual(shopeeOffSemCodigo.documentoComercialCanonico.beneficioTexto, "R$ 50 OFF:", "R$50 OFF permanece como beneficio comercial");
 assert.strictEqual((shopeeOffSemCodigo.templateEspelhoShadow.mensagem.match(/R\$\s*50\s*OFF/gi) || []).length, 1, "R$50 OFF renderiza uma unica vez");
-assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("Resgate:"), "link Resgate permanece renderizado");
+const resgateSemProvaWorkspace = shopeeOffSemCodigo.documentoComercialCanonico.linksComerciais.find(item => item.tipo === "resgate");
+assert.ok(resgateSemProvaWorkspace, "link Resgate capturado permanece no registro comercial canonico");
+assert.strictEqual(resgateSemProvaWorkspace.urlOriginal, "https://s.shopee.com.br/8AUdMMNQf9", "URL original de Resgate permanece preservada");
+assert.strictEqual(resgateSemProvaWorkspace.renderizavel, false, "Resgate sem prova de afiliacao da workspace nao e publicado");
+assert.ok(!shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("Resgate:"), "Resgate sem conversao validada nao atravessa o template publico");
 assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("Confira aqui:"), "link Produto permanece renderizado");
-assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("https://s.shopee.com.br/8AUdMMNQf9"), "URL Resgate preservada");
+assert.ok(!shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("https://s.shopee.com.br/8AUdMMNQf9"), "URL Resgate cru nao e publicada sem prova da workspace");
 assert.ok(shopeeOffSemCodigo.templateEspelhoShadow.mensagem.includes("https://s.shopee.com.br/2qTfCve7iP"), "URL Produto preservada");
 
 const shopeeCupomRealBeneficioDiferente = construirEspelhoComercialV24({
@@ -388,7 +392,7 @@ const personalizadoPixZero = renderizarTemplatePersonalizado({
 
 assert.strictEqual(personalizadoPixZero.ok, true);
 assert.ok(!/Pix:\s*R\$\s*0/i.test(personalizadoPixZero.mensagem), "Pix zero nao renderiza");
-assert.ok(/Cupom:\s*PROMO10/i.test(personalizadoPixZero.mensagem), "cupom textual ML/Amazon nao regride");
+assert.ok(/Cupom:\s*\*?PROMO10\*?/i.test(personalizadoPixZero.mensagem), "cupom textual ML/Amazon permanece mesmo com enfase Markdown");
 
 const personalizadoPixInvalido = renderizarTemplatePersonalizado({
   oferta: {
@@ -436,7 +440,7 @@ const personalizadoPixCanonico = renderizarTemplatePersonalizado({
   canal: "whatsapp"
 });
 
-assert.ok(!/Pix:/i.test(personalizadoPixCanonico.mensagem), "Renderer personalizado nao cria linha Pix propria");
+assert.ok(/Pix:\s*\*?R\$\s*220\s*no Pix\*?/i.test(personalizadoPixCanonico.mensagem), "Renderer personalizado preserva Pix explicitamente capturado");
 
 const ali = gerarTemplateUniversal({
   titulo: "Oferta Ali",
@@ -463,8 +467,8 @@ const shopeeProdutoResgateTemplate = gerarTemplateUniversal({
   ]
 });
 
-assert.ok(shopeeProdutoResgateTemplate.indexOf("*Resgatar cupom:*") < shopeeProdutoResgateTemplate.indexOf("*Produto:*"), "Shopee Resgate vem antes de Produto");
-assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/resgate"), "Shopee Resgate preservado no template");
+assert.ok(!shopeeProdutoResgateTemplate.includes("*Resgatar cupom:*"), "Shopee Resgate sem prova assinada da workspace nao e publicado");
+assert.ok(!shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/resgate"), "Shopee Resgate cru nao contorna a validacao de afiliacao");
 assert.ok(shopeeProdutoResgateTemplate.includes("https://s.shopee.com.br/produto"), "Shopee Produto preservado no template");
 
 const aliAppMoedasPc = gerarTemplateUniversal({

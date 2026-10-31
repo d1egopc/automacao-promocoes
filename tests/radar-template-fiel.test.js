@@ -63,8 +63,12 @@ const ofertaRadarComCupomObrigatorio = {
   linkAfiliado: "https://meli.la/22hdJXT",
   metadata: {
     radarMirror: {
-      cupom: { codigoCapturado: "MELI26TODOSITE", condicaoCapturada: "Com Cupom" },
-      preco: { condicaoTexto: "Com Cupom" }
+      texto: {
+        original: "Chapa Gloss Rose 230°C Bivolt 110V/220V Taiff\nDe R$ 359,90\nPor: R$ 152,32 (Com Cupom)\nCupom: MELI26TODOSITE"
+      },
+      produto: { tituloCapturado: "Chapa Gloss Rose 230°C Bivolt 110V/220V Taiff" },
+      preco: { atualCapturado: 152.32, anteriorCapturado: 359.90, confianca: "alta", condicaoTexto: "Com Cupom" },
+      cupom: { codigoCapturado: "MELI26TODOSITE", condicaoCapturada: "Com Cupom", confianca: "alta" },
     }
   }
 };
@@ -135,7 +139,7 @@ const renderSmartTvShopeeSemPapelDuplicado = renderizarTemplatePersonalizado({
     beneficios: [tituloSmartTvShopee],
     beneficioTexto: tituloSmartTvShopee,
     avaliacao: tituloSmartTvShopee,
-    linkAfiliado: "https://shopee.afiliado/smart-tv"
+    linkAfiliado: "https://s.shopee.com.br/smart-tv"
   },
   template: {
     id: "tpl_smart_tv_sem_papel_duplicado",
@@ -159,9 +163,9 @@ assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Shopee");
 assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Audio TV");
 assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Por:");
 assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "R$ 1.442,00");
-assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Cupom: F3L1Z200");
+assert.ok(/Cupom:\s*\*?F3L1Z200\*?/i.test(textoSaida(renderSmartTvShopeeSemPapelDuplicado.mensagem)), "cupom permanece visivel com a formatacao Markdown configurada");
 assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Frete gratis");
-assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Confira aqui:");
+assertContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Produto:");
 assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, `⭐ ${tituloSmartTvShopee}`);
 assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, `🎁 ${tituloSmartTvShopee}`);
 assertNaoContem(renderSmartTvShopeeSemPapelDuplicado.mensagem, "Avalia");

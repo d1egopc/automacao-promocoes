@@ -72,6 +72,15 @@ test('missing or ambiguous source price is retained and cannot enqueue or render
     assert.throws(() => montarMensagemOferta(o), /radar_preco/);
   }
 });
+test('low prices remain valid when explicitly captured; amount alone is never a rejection rule', () => {
+  for (const preco of [1, 4, 9, 10]) {
+    const titulo = `Produto controle ${preco}`;
+    const texto = `${titulo}\nPor R$ ${preco},00`;
+    const o = resolve(mirror(texto, preco, titulo), 'tenant_a', { titulo });
+    assert.equal(o.preco, preco);
+    assert.equal(validarFidelidadeComercialRadar(o).ok, true);
+  }
+});
 test('actual Shopee event is 2920 for a TV; cart cannot confirm the stand identity', () => {
   const o = resolve(mirror(f.shopeeOriginal, undefined, 'Smart TV HQ QLED 75'), 'tenant_a', { linkExpandido: 'https://shopee.com.br/cart' });
   assert.equal(o.preco, 2920);
@@ -83,6 +92,7 @@ test('actual ML instruction and campaign date are never commercial title/price/c
   for (const t of ['2 - No canto INFERIOR DIREITO vá em mais', '1 - Abra este link no APP', 'Nas primeiras opções Cupons Relâmpago', 'Siga nosso canal de ofertas']) assert.equal(tituloComercialUniversalValido(t), false);
   assert.equal(normalizarCodigoCupomSemantico('e ative o lembrete'), '');
   assert.equal(normalizarCodigoCupomSemantico('Relâmpago do 11.11'), '');
+  assert.equal(tituloComercialUniversalValido('O CARA DAS OFERTAS ACHOU PRA VOCÊ! Perfume Jean Paul Gaultier Le Beau Le Parfum 125 ml'), false);
   const legacy = mirror(f.mlOriginal, 11.11, '2 - No canto INFERIOR DIREITO vá em mais');
   legacy.preco.confianca = 'media';
   const o = resolve(legacy);

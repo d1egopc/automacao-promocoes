@@ -29,7 +29,9 @@ Compatibilidade futura específica/abrangente é apenas projeto: uma relação c
 
 Máquina/inversora de solda, alicate de reparo de relógios e lavadora de alta pressão são Ferramentas pela natureza explícita; marca não é requisito. Lavadora de roupas continua Eletrodomésticos. Peça, mangueira, manual ou brinquedo não herda a categoria da máquina apenas por citá-la. EDT/EDP precisa de volume ou identidade de perfumaria consistente; marca ou sigla isolada não constitui evidência. Os sete relatos iniciais e os cinco relatos posteriores têm fixtures separáveis de controles sintéticos de marcas alternativas e falsos positivos.
 
-Calça de pesca é vestuário: público masculino/feminino/infantil explícito ou já comprovado seleciona a categoria de roupa correspondente. Sem público suficiente (inclusive unissex), a taxonomia atual não permite inferir gênero: manter Diversos. Não confundir finalidade de pesca com equipamento de pesca.
+Calça com finalidade técnica de pesca declarada no produto (por exemplo, “para pesca” junto de material/atributos técnicos como Poly Ripstop) usa Pesca e Camping como categoria principal. Estampa ou tema de pesca, sem finalidade de uso, não basta. Roupa sem público comprovado não pode cair em Moda Feminina por causa da palavra genérica “calça”; quando a finalidade não define outra categoria, manter Diversos ou usar a categoria de vestuário somente com evidência de público. Não confundir finalidade de pesca com equipamento de pesca.
+
+“Lava-roupas líquido” é Limpeza; lavadora/máquina de lavar roupa é Eletrodomésticos. Churrasqueira portátil não elétrica é Casa, Móveis e Decoração; churrasqueira explicitamente elétrica permanece Eletroportáteis. A especificação composta “Lite/Max Drag + peso em kg” pode identificar equipamento de pesca; “drag” ou um peso isolado não classifica.
 
 **NÃO IMPLEMENTADO nesta candidata:** categorias compatíveis, finalidade como afinidade adicional e distribuição multicategoria. Lavadora de alta pressão pode futuramente ter afinidade de limpeza/eletrodomésticos; calça de pesca pode ter finalidade Pesca e Camping além da categoria de vestuário. Isso é proposta, não elegibilidade atual.
 

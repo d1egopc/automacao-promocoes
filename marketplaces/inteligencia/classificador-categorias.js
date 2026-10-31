@@ -82,6 +82,9 @@ function termosEncontrados(texto, palavras = []) {
 
 function palavrasDosDestinos(nomeCategoria) {
   const ignoradasPorCategoria = {
+    // "calça" sem público/identidade não é evidência de gênero.
+    [CATEGORIA.modaFeminina]: new Set(["calca"]),
+    [CATEGORIA.modaMasculina]: new Set(["calca"]),
     [CATEGORIA.pesca]: new Set([
       "cooler",
       "lanterna led",
@@ -303,7 +306,7 @@ const REGRAS = [
     prioridade: 74,
     fortes: [
       "geladeira", "refrigerador", "frigobar", "freezer", "microondas",
-      "micro ondas", "fogao", "cooktop", "lava roupas", "maquina de lavar",
+      "micro ondas", "fogao", "cooktop", "maquina de lavar",
       "lavadora", "lava e seca", "secadora", "lava loucas",
       "ventilador", "ventilador de mesa", "ventilador de coluna",
       "ventilador de teto", "circulador de ar", "ar condicionado",
@@ -326,7 +329,8 @@ const REGRAS = [
       "sanduicheira", "grill", "panela eletrica", "aspirador robo",
       "robo aspirador", "aspirador de po", "ferro de passar", "omeleteira",
       "panificadora", "maquina de pao", "fogareiro eletrico", "panela pressao digital",
-      "panela de pressao digital", "multi cook", "multicook", "vaporizador", "escova eletrica giratoria"
+      "panela de pressao digital", "multi cook", "multicook", "vaporizador", "escova eletrica giratoria",
+      "churrasqueira eletrica"
     ],
     palavras: [
       "pipoqueira", "chaleira eletrica", "torradeira", "maquina waffle",
@@ -471,7 +475,7 @@ const REGRAS = [
   regra(CATEGORIA.casa, {
     prioridade: 58,
     fortes: [
-      "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "faqueiro",
+      "jogo de panelas", "kit panela", "frigideira", "panela", "kit churrasco", "churrasco mestre", "churrasqueira", "faqueiro",
       "talheres", "copos", "jogo de copos", "jogo de pratos", "bolas de natal", "marmitas", "potes",
       "cobertor", "manta", "toalha de banho", "colcha", "tapete",
       "bacia retratil", "tabua de corte", "pote vidro", "copo",
@@ -807,6 +811,12 @@ function finalidadePesqueiraExplicita(titulo) {
       (/\b(?:rapala|corrico|trolling|meia agua|superficie|garateias?)\b/.test(titulo) ||
        (/\b\d+(?: \d+)? ?(?:cm|mm)\b/.test(titulo) && /\b\d+(?: \d+)? ?(?:g|gr|gramas)\b/.test(titulo))) &&
       !/\b(?:veneno|raticida|formicida|inseticida|ratos?|camundongos?|formigas?|baratas?|cupins?|moscas?|mosquitos?|pragas?|empanada|congelada|frita|frango|carne|culinaria|alimenticia|petisco|brinquedo|cachorro|gato|camisa|camiseta|blusa|regata|calca|bermuda|shorts|vestido|bone|oculos|livro|manual)\b/.test(titulo)) return "isca_identidade_finalidade_pesca";
+  // A indicação "Lite/Max Drag + kg" é uma especificação de força de drag
+  // usada em molinetes/carretilhas. A combinação evita classificar "drag" isolado.
+  if (/\b(?:lite|light|max(?:imum)?|front|low profile) drag \d+(?: \d+)? ?kg\b/.test(titulo) &&
+      !/\b(?:automotivo|guincho|academia|musculacao|treino|halter|carga|brinquedo)\b/.test(titulo)) {
+    return "carretilha_especificacao_drag_com_peso";
+  }
   return "";
 }
 
@@ -822,9 +832,16 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     motivo = "conteudo_adulto_sem_categoria_habilitada";
   } else if (/\bbrinquedos?\b/.test(titulo) && /\b(?:pesca|molinetes?|bancada|oficina|ferramentas?|lavadora|inversora|solda|alicate|parafusadeira|furadeira)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
+  } else if (/\b(?:churrasqueira de brinquedo|brinquedo churrasqueira)\b/.test(titulo)) {
+    categoria = CATEGORIA.brinquedos;
   } else if ((funcional = avaliarNaturezaFuncional(oferta, titulo))) {
     categoria = funcional.categoria;
     motivo = funcional.motivo;
+  } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) &&
+      /\b(?:para pesca|pesca mato tatica|pesca camping)\b/.test(titulo) &&
+      /\b(?:ripstop|poliamida|fpu|upf|uv ?\d+|secagem rapida|impermeavel)\b/.test(titulo)) {
+    categoria = CATEGORIA.pesca;
+    motivo = "finalidade_pesqueira_explicita_no_vestuario";
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
     categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
       : /\b(?:feminina|feminino|mulher)\b/.test(titulo) ? CATEGORIA.modaFeminina

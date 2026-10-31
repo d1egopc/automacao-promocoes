@@ -37,6 +37,8 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   const semPrefixoDeEtapa = n.replace(/^(?:\d+\s+)+/, "");
   if (/^(?:abra|abrir|acesse|clique|toque|selecione|resgate|ative|siga|participe)\b/.test(semPrefixoDeEtapa) ||
       /^(?:no|na|nos|nas)\b.*\b(?:canto|rodape|aba|menu|opcoes|tela)\b/.test(semPrefixoDeEtapa)) return false;
+  // Publicidade de terceiros/administradores não constitui identidade do produto.
+  if (/^(?:o cara das ofertas|a equipe de ofertas|o admin(?:istrador)? do grupo|a admin(?:istradora)? do grupo)\b.*\b(?:achou|encontrou|separou|trouxe)\b/.test(semPrefixoDeEtapa)) return false;
   if (
     /^(?:vendido por marketplaces?|vendido por loja oficial (?:no|do) ml|produto amazon|confira na loja|veja o produto)$/.test(n) ||
     /^clique em inicio no rodape do app$/.test(semPrefixoDeEtapa) ||

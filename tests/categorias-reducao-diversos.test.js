@@ -112,6 +112,19 @@ const negativosOnda1 = [
   ["Câmera de Celular 4K", "Celulares e Smartphones"]
 ];
 
+const casosAdendoFidelidadeComercial = [
+  ["Universal Aluminum Base Stand with Wheels for Refrigerator Stove and Dishwasher Base Cart up to 200kg", "Casa, Móveis e Decoração"],
+  ["Lava Roupas Líquido Baby Soft Max Performance Azul 3L", "Limpeza"],
+  ["Pack de 4 latas Red Bull Energy Drink 355 ml", "Bebidas"],
+  ["Paçoca Quadrada Paçoquita, 50 unidades, 1 kg", "Alimentos e Mercearia"],
+  ["Creatina Ultra Pote 300 g FTW", "Esporte e Suplementos"],
+  ["Kawana Lite Drag 7,5 kg", "Pesca e Camping"],
+  ["Carretilha Marine Lite Drag 8 kg", "Pesca e Camping"],
+  ["Carretilha Black Max Drag 12 kg", "Pesca e Camping"],
+  ["Churrasqueira Portátil Galvanizada", "Casa, Móveis e Decoração"],
+  ["Calça Poly Ripstop para pesca/mato/tática", "Pesca e Camping"]
+];
+
 const logOriginal = console.log;
 try {
   console.log = () => {};
@@ -176,6 +189,27 @@ try {
       esperada,
       titulo
     );
+  }
+
+  for (const [titulo, esperada] of casosAdendoFidelidadeComercial) {
+    assert.strictEqual(classificarCategoriaOferta({ titulo, categoria: "Diversos", marketplace: "shopee" }, titulo), esperada, titulo);
+  }
+
+  const negativosAdendoFidelidadeComercial = [
+    ["Lavadora de roupas automática 11kg", "Eletrodomésticos"],
+    ["Máquina de lavar roupas 12kg", "Eletrodomésticos"],
+    ["Grill elétrico Mondial", "Eletroportáteis"],
+    ["Camiseta masculina com estampa de pesca", "Roupas e Moda Masculina"],
+    ["Calça casual Poly Ripstop urbana", "Diversos"],
+    ["Calça para pesca sem atributo técnico", "Diversos"],
+    ["Calça feminina de alfaiataria", "Roupas e Moda Feminina"],
+    ["Calça masculina de sarja", "Roupas e Moda Masculina"],
+    ["Organizador Lite Drag com capacidade para 7,5 kg", "Casa, Móveis e Decoração"],
+    ["Churrasqueira elétrica portátil", "Eletroportáteis"],
+    ["Churrasqueira de brinquedo infantil", "Brinquedos e Artigos Infantis"]
+  ];
+  for (const [titulo, esperada] of negativosAdendoFidelidadeComercial) {
+    assert.strictEqual(classificarCategoriaOferta({ titulo, categoria: "Diversos", marketplace: "shopee" }, titulo), esperada, titulo);
   }
 
   for (const [titulo, esperada] of negativosOnda1) {
