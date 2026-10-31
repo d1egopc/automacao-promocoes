@@ -1,14 +1,23 @@
 "use strict";
 const {randomBytes,createHmac}=require("node:crypto");
-const MAX_MS=300000,NEXT_BOOTSTRAP_ARM_MS=86400000,NEXT_BOOTSTRAP_CAPTURE_MS=1800000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000;
+const MAX_MS=300000,NEXT_BOOTSTRAP_ARM_MS=86400000,NEXT_BOOTSTRAP_CAPTURE_MS=1800000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000,MAX_CONTINUOUS_GENERATIONS=64,MAX_CONTINUOUS_MESSAGES=500,MAX_BOOTSTRAP_ROWS=128,MAX_GROUP_ROWS=128;
 const REASONS=new Set(["socket_stale","user_inactive","buffer_recovery_suppressed","from_me","not_group","accepted","mensagem_nao_monitoravel","other","group_not_monitored","stale_message","wrong_upsert_type","no_links","marketplace_unidentified","duplicate","ignored","rejected","consumer_error","engine_error","engine_not_awaited","radar_monitoramento_inativo","fora_do_horario_monitoramento","sessao_whatsapp_nao_monitorada","grupo_whatsapp_nao_monitorado","whatsapp_upsert_historico","whatsapp_timestamp_ausente","radar_ativacao_invalida","whatsapp_mensagem_anterior_ativacao","whatsapp_mensagem_anterior_janela","remotejid_ausente","origem_tipo_invalida","grupo_ou_chat_ausente","captura_sem_tempo_factual","tamanho_maximo_atingido","usuario_inativo","workspace_mismatch"]);
 const TARGET_GROUP_ID="120363408782037034@g.us",TARGET_SESSION_ID="admin_Zoiao Claro";
+const RADAR_GROUP_IDS=Object.freeze(["120363429821085702@g.us",TARGET_GROUP_ID,"120363428838923822@g.us","120363164512544247@g.us"]);
+const CONTINUOUS_TARGETS=Object.freeze([
+ Object.freeze({workspaceId:"admin",sessionId:TARGET_SESSION_ID,groupIds:RADAR_GROUP_IDS}),
+ Object.freeze({workspaceId:"user_k3phmbkf",sessionId:"user_k3phmbkf_ServCel",groupIds:null})
+]);
 // Categories describe the public stanza tag, not its private content/purpose.
 const CONTROL_TAGS=new Set(["iq","ack","receipt","notification","presence","chatstate","call"]);
 const SYNC_TAGS=new Set(["ib","success"]);
-function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,secret=randomBytes(32)}={}) {
+const UPDATES=new Set(["notify","append","replace","read","other"]);
+const GROUP_COUNTERS=Object.freeze(["upsertNotify","upsertAppend","upsertOther","fromMeTrue","fromMeFalse","fromMeUnknown","buffered","emitCompleted","callback","listener","radar","radarAccepted","radarRejected","mensageiroGerente","mensageiroComando","mensageiroAtendimento"]);
+function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,secret=randomBytes(32),journal=null}={}) {
  let run=null,timer=null;const bindings=new Map();
  const ref=(kind,value)=>createHmac("sha256",secret).update(`${kind}:${value}`).digest("hex").slice(0,16);
+ const sessionReference=(workspaceId,sessionId)=>ref("session",run?.mode==="continuous"?`${workspaceId}:${sessionId}`:sessionId);
+ const groupReference=(workspaceId,sessionId,groupId)=>ref("group",run?.mode==="continuous"?`${workspaceId}:${sessionId}:${groupId}`:groupId);
  const safe=fn=>{try{fn();}catch{/* diagnostic never changes dispatch */}};
  function stop(reason="manual") {
   if(!run?.active)return status();run.active=false;run.finishedAt=now();run.reason=reason;
@@ -17,9 +26,31 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   for(const b of bindings.values())safe(()=>{if(b.wsOriginal&&b.ws.emit===b.wsOriginal.wrapped)b.ws.emit=b.wsOriginal.original;});
   bindings.clear();return status();
  }
- function active(){if(run?.active&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");return run?.active===true;}
+ function active(){if(run?.active&&run.mode!=="continuous"&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");return run?.active===true;}
  function scheduleStop(duration){if(timer)clearTimer(timer);timer=setTimer(()=>stop(run?.phase==="armed"?"arm_expired":run?.mode==="next_bootstrap"?"capture_window_expired":"expired"),duration);timer?.unref?.();}
- function add(b,kind){if(run.records.length<MAX_RECORDS)run.records.push({at:now(),generation:b.generation,kind});else run.recordsDropped++;}
+ function targetFor(workspaceId,sessionId,groupId){
+  if(!run)return null;
+  if(run.mode!=="continuous")return workspaceId===run.workspaceId&&sessionId===run.sessionId&&(!groupId||groupId===run.groupId)?{workspaceId:run.workspaceId,sessionId:run.sessionId,groupIds:[run.groupId]}:null;
+  const target=run.targets.find(item=>item.workspaceId===workspaceId&&item.sessionId===sessionId);
+  if(!target||groupId&&(!String(groupId).endsWith("@g.us")||Array.isArray(target.groupIds)&&!target.groupIds.includes(groupId)))return null;
+  return target;
+ }
+const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",socket_replaced:"listener_removed",listener_registered:"listener_registered",listener_removed:"listener_removed",listeners_removed:"listener_removed",buffer_active:"buffer_state",buffer_released:"buffer_state",emit_attempt:"emit_attempt",emit_completed:"emit_completed",message_node:"message_node",callback:"callback",listener:"listener",radar_entry:"radar",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"});
+ function persist(b,{stage,groupId,messageId,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}={}){
+  if(run?.mode!=="continuous"||!journal?.append)return;
+  const target=targetFor(b.workspaceId,b.sessionId,groupId);if(!target)return;
+  const mapped=JOURNAL_STAGE_MAP[stage]||stage;
+  safe(()=>journal.append({kind:["offline_batch","offline_attribute","offline_task","sync_state","buffer_state"].includes(mapped)?"bootstrap":mapped==="listener_registered"||mapped==="listener_removed"?"listener":mapped==="buffer_state"?"buffer":"stage",
+    at:now(),stage:mapped,workspaceRef:ref("workspace",b.workspaceId),sessionRef:sessionReference(b.workspaceId,b.sessionId),groupRef:groupId?groupReference(b.workspaceId,b.sessionId,groupId):undefined,
+    eventRef:messageId?ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${messageId}`:messageId):undefined,generation:b.generation,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}));
+ }
+ function groupCounter(workspaceId,sessionId,groupId,key,amount=1){
+  if(run?.mode!=="continuous"||!groupId||!GROUP_COUNTERS.includes(key)||!targetFor(workspaceId,sessionId,groupId))return;
+  const mapKey=`${workspaceId}\0${sessionId}\0${groupId}`;let row=run.groupStats.get(mapKey);
+  if(!row){if(run.groupStats.size>=MAX_GROUP_ROWS){run.groupsDropped++;return;}row={workspaceRef:ref("workspace",workspaceId),sessionRef:sessionReference(workspaceId,sessionId),groupRef:groupReference(workspaceId,sessionId,groupId),counts:Object.fromEntries(GROUP_COUNTERS.map(name=>[name,0]))};run.groupStats.set(mapKey,row);}
+  row.counts[key]=Math.min(1000000,row.counts[key]+amount);row.lastAt=now();if(key==="upsertNotify"||key==="upsertAppend"||key==="upsertOther")row.lastIngressAt=row.lastAt;
+ }
+ function add(b,kind){if(run.records.length<MAX_RECORDS)run.records.push({at:now(),generation:b.generation,kind});else run.recordsDropped++;persist(b,{stage:kind});}
  const bootstrapReasons=new Set(["socket_initial_bootstrap","initial_sync_started","process_node","process_node_complete","offline_completion","history_sync_skipped","app_state_sync_complete","history_sync_disabled","initial_sync_timeout","deferred_work_complete","unspecified"]);
  const flushReasons=new Set(["offline_completion","history_sync_skipped","app_state_sync_complete","history_sync_disabled","initial_sync_timeout","process_node_complete","deferred_work_complete","servcel_initial_timeout_recovery","unspecified"]);
  const syncStates=new Set(["Connecting","AwaitingInitialSync","Syncing","Online"]);
@@ -30,22 +61,26 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   synchronization:{state:"NOT_OBSERVED",transitions:0},
   buffer:{buffering:null,explicitHold:null,pendingWorks:null,transitions:0,flushesByReason:{}},
   delivery:{wrapperCalls:0,callbackCalls:0,radarEntries:0}};}
- function getBootstrap(generation){let row=run?.bootstrapGenerations?.get(generation);if(!row&&run){row=newBootstrap(generation);run.bootstrapGenerations.set(generation,row);}return row||null;}
+ function getBootstrap(generation,sessionId=run?.sessionId){const key=run?.mode==="continuous"?`${sessionId}:${generation}`:generation;let row=run?.bootstrapGenerations?.get(key);if(!row&&run){row=newBootstrap(generation);run.bootstrapGenerations.set(key,row);while(run.bootstrapGenerations.size>MAX_BOOTSTRAP_ROWS)run.bootstrapGenerations.delete(run.bootstrapGenerations.keys().next().value);}return row||null;}
  function bootstrapObserver({workspaceId,sessionId,generation}={}){
-  if(!active()||workspaceId!==run.workspaceId||sessionId!==run.sessionId||workspaceId!=="admin"||sessionId!==TARGET_SESSION_ID||!Number.isSafeInteger(generation)||generation<1)return null;
+  if(!active()||!targetFor(workspaceId,sessionId)||!Number.isSafeInteger(generation)||generation<1)return null;
+  if(run.mode!=="continuous"&&(workspaceId!=="admin"||sessionId!==TARGET_SESSION_ID))return null;
   if(run.mode==="next_bootstrap"){
    if(run.phase==="armed"){
     if(generation<=run.armedAfterGeneration)return null;
     run.phase="capturing";run.captureGeneration=generation;run.captureStartedAt=now();run.expiresAt=run.captureStartedAt+NEXT_BOOTSTRAP_CAPTURE_MS;scheduleStop(NEXT_BOOTSTRAP_CAPTURE_MS);
    }else if(run.phase!=="capturing"||run.captureGeneration!==generation)return null;
   }
-  const owner=run,row=getBootstrap(generation);
+  const owner=run,row=getBootstrap(generation,sessionId);
   const record=(kind,fields={})=>safe(()=>{
    if(!active()||run!==owner||!owner.active)return;
    if(row.observations>=MAX_BOOTSTRAP_SIGNALS){row.truncated=true;return;}
    row.observations++;
    const entry={at:now(),generation,kind,...fields};
    if(row.records.length<MAX_RECORDS)row.records.push(entry);else row.recordsDropped++;
+   const stage=kind==="offline_batch"?"offline_batch":kind==="offline_attribute"?"offline_attribute":kind==="offline_task"?"offline_task":kind==="sync_state"?"sync_state":"buffer_state";
+   persist({workspaceId,sessionId,generation},{stage,groupId:fields.groupId,operation:fields.stage,offlineAttribute:fields.class,syncState:fields.state,
+    reason:fields.reason,buffering:fields.buffering,explicitHold:fields.explicitHold,pendingWorks:fields.pendingWorks});
   });
   return Object.freeze({
    offlineBatch(kind){if(!active()||run!==owner||!["preview_received","request_started","request_sent","request_send_failed","completion_signal","connection_failure"].includes(kind))return;record("offline_batch",{stage:kind});if(kind==="preview_received")row.offlineBatch.previewReceived++;if(kind==="request_started"){row.offlineBatch.requestsStarted++;row.offlineBatch.state="STARTED";}if(kind==="request_sent")row.offlineBatch.requestsSent++;if(kind==="request_send_failed"){row.offlineBatch.requestSendFailures++;row.offlineBatch.state="SEND_FAILED";}if(kind==="completion_signal"){row.offlineBatch.completionSignals++;row.offlineBatch.state="COMPLETION_RECEIVED";}if(kind==="connection_failure"){row.offlineBatch.connectionFailureSignals++;if(row.offlineBatch.state==="STARTED")row.offlineBatch.state="CONNECTION_FAILURE_OBSERVED";}},
@@ -65,29 +100,40 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   if(b.invoked)return {state:"ATTACHED",evidence:"wrapper_invocation"};
   return {state:"UNKNOWN",evidence:"private_emitter_no_history"};
  }
- function messageStage(kind,{sock,emitter,sessionId,workspaceId,message,reason}={}) {
+ function messageStage(kind,{sock,emitter,sessionId,workspaceId,message,reason,upsertType,decision,buffering:bufferState}={}) {
   if(!active())return;
   const b=bindings.get(emitter||sock?.ev);
-  if(!b||sessionId!==run.sessionId||workspaceId!==undefined&&workspaceId!==run.workspaceId)return;
-  if(!message||message.key?.remoteJid!==run.groupId)return;
+  if(!b||sessionId!==b.sessionId||workspaceId!==undefined&&workspaceId!==b.workspaceId)return;
+  const groupId=message?.key?.remoteJid;
+  if(!message||!targetFor(b.workspaceId,b.sessionId,groupId))return;
   const id=message.key?.id;
   if(typeof id!=="string"||!id||id.length>200){run.unkeyed++;return;}
-  const messageRef=ref("message",id);let row=run.messages.get(messageRef);
-  if(!row){if(run.messages.size>=MAX_MESSAGES){stop("message_limit");return;}
-   row={messageRef,fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,stages:[]};run.messages.set(messageRef,row);}
+  const messageRef=ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${id}`:id);let row=run.messages.get(messageRef);
+  if(!row){const limit=run.mode==="continuous"?MAX_CONTINUOUS_MESSAGES:MAX_MESSAGES;if(run.messages.size>=limit){if(run.mode!=="continuous"){stop("message_limit");return;}run.messages.delete(run.messages.keys().next().value);run.stagesDropped++;}
+   row={messageRef,fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,upsertType:UPDATES.has(upsertType)?upsertType:"other",groupRef:groupReference(b.workspaceId,b.sessionId,groupId),stages:[]};run.messages.set(messageRef,row);
+   groupCounter(b.workspaceId,b.sessionId,groupId,row.upsertType==="notify"?"upsertNotify":row.upsertType==="append"?"upsertAppend":"upsertOther");
+   groupCounter(b.workspaceId,b.sessionId,groupId,row.fromMe===true?"fromMeTrue":row.fromMe===false?"fromMeFalse":"fromMeUnknown");
+  }
   if(row.stages.length>=12){run.stagesDropped++;return;}
   const safeReason=REASONS.has(reason)?reason:reason?"other":"";
-  row.stages.push({at:now(),generation:b.generation,kind,...(safeReason?{reason:safeReason}:{})});
+  const safeDecision=["received","accepted","ignored","rejected","error","pending","unknown"].includes(decision)?decision:"";
+  row.stages.push({at:now(),generation:b.generation,kind,...(safeReason?{reason:safeReason}:{}),...(safeDecision?{decision:safeDecision}:{})});
+  const counters={emit_completed:"emitCompleted",callback:"callback",listener:"listener",radar_entry:"radar",mensageiro_gerente:"mensageiroGerente",mensageiro_comando:"mensageiroComando",mensageiro_atendimento:"mensageiroAtendimento"};
+  if(counters[kind])groupCounter(b.workspaceId,b.sessionId,groupId,counters[kind]);
+  if(kind==="emit_attempt"&&bufferState===true)groupCounter(b.workspaceId,b.sessionId,groupId,"buffered");
+  if(kind==="radar_result")groupCounter(b.workspaceId,b.sessionId,groupId,decision==="accepted"?"radarAccepted":"radarRejected");
+  const journalStage=({emit_attempt:"emit_attempt",emit_completed:"emit_completed",callback:"callback",listener:"listener",radar:"radar",radar_entry:"radar",result:"radar_result",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"})[kind]||"listener";
+  persist(b,{stage:journalStage,groupId,messageId:id,upsertType:row.upsertType,fromMe:row.fromMe,reason:safeReason||undefined,decision:safeDecision||undefined,buffering:bufferState});
  }
  function packetStage(kind,ctx,packet){
   if(!active()||!Array.isArray(packet?.messages))return;
   if(packet.messages.length>64)run.batchesTruncated++;
-  for(const message of packet.messages.slice(0,64))safe(()=>messageStage(kind,{...ctx,message}));
+  for(const message of packet.messages.slice(0,64))safe(()=>messageStage(kind,{...ctx,message,upsertType:ctx.upsertType}));
  }
- function targetNode(node){
+ function targetNode(node,b){
   const attrs=node&&typeof node==="object"?Object.getOwnPropertyDescriptor(node,"attrs")?.value:null;
   const from=attrs&&typeof attrs==="object"?Object.getOwnPropertyDescriptor(attrs,"from")?.value:undefined;
-  return typeof from==="string"?from===run.groupId:null;
+  return typeof from==="string"?Boolean(b&&targetFor(b.workspaceId,b.sessionId,from)):null;
  }
  function observeFrame(b,frame){
   if(ArrayBuffer.isView(frame)||frame instanceof ArrayBuffer){b.counters.binaryFrames++;return;}
@@ -97,29 +143,35 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   catch{b.counters.frameMetadataUnavailable++;}
   const kind=tag==="message"?"messageFrames":CONTROL_TAGS.has(tag)?"controlFrames":SYNC_TAGS.has(tag)?"syncFrames":"otherFrames";
   b.counters[kind]++;
-  if(kind==="messageFrames")safe(()=>{const target=targetNode(frame);if(target===true)b.counters.targetMessageFrames++;if(target===null)b.counters.messageFramesUnattributed++;});
+  if(kind==="messageFrames")safe(()=>{const target=targetNode(frame,b);if(target===true){b.counters.targetMessageFrames++;const attrs=Object.getOwnPropertyDescriptor(frame,"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;persist(b,{stage:"ws_frame",groupId});}if(target===null)b.counters.messageFramesUnattributed++;});
  }
  function trackSocket({workspaceId,sessionId,generation,sock}={}) {
-  if(!active()||sessionId!==run.sessionId||workspaceId!==run.workspaceId)return false;
+  if(!active()||!targetFor(workspaceId,sessionId))return false;
   if(run.mode==="next_bootstrap"&&(run.phase!=="capturing"||run.captureGeneration!==generation))return false;
   if(!sock?.ev||!Number.isSafeInteger(generation)||generation<1)return false;
   if(bindings.has(sock.ev))return true;
-  if(bindings.size>=MAX_GENERATIONS){stop("generation_limit");return false;}
-  const b={sock,ev:sock.ev,generation,buffering:null,lastSyncSignal:"NOT_OBSERVED",bootstrap:getBootstrap(generation),added:new Set(),removed:new Set(),removedAll:false,invoked:false,originals:{},counters:{wsMessages:0,decodedFrames:0,messageNodes:0,wsOpens:0,wsCloses:0,messageFrames:0,controlFrames:0,syncFrames:0,otherFrames:0,binaryFrames:0,frameMetadataUnavailable:0,socketErrorEvents:0,streamErrorEvents:0,publicDispatchThrows:0,emitAttempts:0,emitCompleted:0,emitErrors:0,bufferedAttempts:0,bufferedAccepted:0,wrapperCalls:0,callbackCalls:0,radarEntries:0,earlyReturns:0,sessionMismatch:0,workspaceMismatch:0,staleSocket:0,bufferTransitions:0,removals:0}};
+  if(run.mode==="continuous")for(const old of [...bindings.values()])if(old.workspaceId===workspaceId&&old.sessionId===sessionId&&old.generation<generation){
+   const snap=snapshot(old);run.finishedGenerations.push(snap);if(run.finishedGenerations.length>MAX_CONTINUOUS_GENERATIONS)run.finishedGenerations.shift();
+   add(old,"socket_replaced");for(const [name,pair]of Object.entries(old.originals))safe(()=>{if(old.ev[name]===pair.wrapped)old.ev[name]=pair.original;});
+   safe(()=>{if(old.wsOriginal&&old.ws.emit===old.wsOriginal.wrapped)old.ws.emit=old.wsOriginal.original;});bindings.delete(old.ev);run.generations=run.generations.filter(item=>item!==old);
+  }
+  const generationLimit=run.mode==="continuous"?MAX_CONTINUOUS_GENERATIONS:MAX_GENERATIONS;
+  if(bindings.size>=generationLimit){if(run.mode!=="continuous")stop("generation_limit");return false;}
+  const b={sock,ev:sock.ev,workspaceId,sessionId,generation,buffering:null,lastSyncSignal:"NOT_OBSERVED",bootstrap:getBootstrap(generation,sessionId),added:new Set(),removed:new Set(),removedAll:false,invoked:false,originals:{},counters:{wsMessages:0,decodedFrames:0,messageNodes:0,wsOpens:0,wsCloses:0,messageFrames:0,controlFrames:0,syncFrames:0,otherFrames:0,binaryFrames:0,frameMetadataUnavailable:0,socketErrorEvents:0,streamErrorEvents:0,publicDispatchThrows:0,emitAttempts:0,emitCompleted:0,emitErrors:0,bufferedAttempts:0,bufferedAccepted:0,wrapperCalls:0,callbackCalls:0,radarEntries:0,offlineCompletionEvents:0,mensageiroGerenteCalls:0,mensageiroComandoCalls:0,mensageiroAtendimentoCalls:0,earlyReturns:0,sessionMismatch:0,workspaceMismatch:0,staleSocket:0,bufferTransitions:0,removals:0}};
   Object.assign(b.counters,{wsBinaryMessages:0,targetMessageFrames:0,targetMessageNodes:0,messageFramesUnattributed:0,frameDispatchThrows:0,messageDispatchThrows:0});
-  bindings.set(b.ev,b);run.generations.push(b);run.current=b;add(b,"socket_current");buffering(b);
+  bindings.set(b.ev,b);run.generations.push(b);run.current=b;run.currentBySession?.set(sessionId,b);add(b,"socket_current");buffering(b);
   for(const name of ["emit","on","off","removeAllListeners","buffer","flush"]){
    const original=b.ev[name];if(typeof original!=="function")continue;
    const wrapped=function(...args){
     const observing=active()&&bindings.get(b.ev)===b;
     let wasBuffered=false;
     if(observing)safe(()=>{
-     if(name==="emit"&&args[0]==="messages.upsert"){b.counters.emitAttempts++;packetStage("emit_attempt",{sock,emitter:b.ev,workspaceId,sessionId},args[1]);if(buffering(b)){b.counters.bufferedAttempts++;wasBuffered=true;}run.calls++;if(run.calls>=MAX_CALLS)stop("call_limit");}
+     if(name==="emit"&&args[0]==="messages.upsert"){b.counters.emitAttempts++;const isBuffered=buffering(b);packetStage("emit_attempt",{sock,emitter:b.ev,workspaceId,sessionId,upsertType:args[1]?.type,buffering:isBuffered},args[1]);if(isBuffered){b.counters.bufferedAttempts++;wasBuffered=true;}run.calls++;if(run.mode!=="continuous"&&run.calls>=MAX_CALLS)stop("call_limit");}
     });
     // Native return, thrown error, receiver and arguments are preserved exactly.
     let result,completed=false;try{result=Reflect.apply(original,this,args);completed=true;}finally{
      if(observing&&active())safe(()=>{
-      if(name==="emit"&&args[0]==="messages.upsert"){if(completed){packetStage("emit_completed",{sock,emitter:b.ev,workspaceId,sessionId},args[1]);b.counters.emitCompleted++;if(wasBuffered)b.counters.bufferedAccepted++;}else b.counters.emitErrors++;}
+      if(name==="emit"&&args[0]==="messages.upsert"){if(completed){packetStage("emit_completed",{sock,emitter:b.ev,workspaceId,sessionId,upsertType:args[1]?.type},args[1]);b.counters.emitCompleted++;if(wasBuffered)b.counters.bufferedAccepted++;}else b.counters.emitErrors++;}
       if(!completed)return;
       if(name==="on"&&args[0]==="messages.upsert"&&b.added.size<8){b.added.add(args[1]);b.removed.delete(args[1]);add(b,"listener_registered");}
       if(name==="off"&&args[0]==="messages.upsert"){b.added.delete(args[1]);if(b.removed.size<8)b.removed.add(args[1]);b.counters.removals++;add(b,"listener_removed");}
@@ -139,37 +191,53 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
     if(counter&&Object.hasOwn(b.counters,counter))b.counters[counter]++;
     if(args[0]==="frame")observeFrame(b,args[1]);
     if(args[0]==="message"&&(ArrayBuffer.isView(args[1])||args[1] instanceof ArrayBuffer))b.counters.wsBinaryMessages++;
-    if(args[0]==="CB:message"&&targetNode(args[1])===true)b.counters.targetMessageNodes++;
-    if(args[0]==="CB:success")b.lastSyncSignal="AUTHENTICATED";
-    if(args[0]==="CB:ib,,offline")b.lastSyncSignal="OFFLINE_COMPLETION_DISPATCHED";
+    if(args[0]==="CB:message"&&targetNode(args[1],b)===true){b.counters.targetMessageNodes++;const attrs=Object.getOwnPropertyDescriptor(args[1],"attrs")?.value;const groupId=Object.getOwnPropertyDescriptor(attrs||{},"from")?.value;persist(b,{stage:"message_node",groupId});}
+   if(args[0]==="CB:success")b.lastSyncSignal="AUTHENTICATED";
+   if(args[0]==="CB:ib,,offline"){b.lastSyncSignal="OFFLINE_COMPLETION_DISPATCHED";b.counters.offlineCompletionEvents++;persist(b,{stage:"offline_batch",operation:"cb_offline_received"});}
    });try{return Reflect.apply(original,this,args);}catch(error){if(observing&&active())safe(()=>{b.counters.publicDispatchThrows++;if(args[0]==="frame")b.counters.frameDispatchThrows++;if(args[0]==="CB:message")b.counters.messageDispatchThrows++;});throw error;}};
    try{ws.emit=wrapped;if(ws.emit===wrapped){b.ws=ws;b.wsOriginal={original,wrapped};}}catch{}
   }
   return true;
  }
- function mark(kind,{sock,emitter,workspaceId,sessionId,current,reason,message,messages}={}){
+ function mark(kind,{sock,emitter,workspaceId,sessionId,current,reason,decision,message,messages,upsertType}={}){
   if(!active())return;const b=bindings.get(emitter||sock?.ev);if(!b)return;
-  if(sessionId!==run.sessionId)b.counters.sessionMismatch++;
-  if(workspaceId!==undefined&&workspaceId!==run.workspaceId)b.counters.workspaceMismatch++;
+  if(sessionId&&sessionId!==b.sessionId){b.counters.sessionMismatch++;if(run.mode==="continuous")return;}
+  if(workspaceId!==undefined&&workspaceId!==b.workspaceId){b.counters.workspaceMismatch++;if(run.mode==="continuous")return;}
   if(current===false)b.counters.staleSocket++;
   if(kind==="wrapper"){b.counters.wrapperCalls++;b.invoked=true;if(b.bootstrap)b.bootstrap.delivery.wrapperCalls++;}
   if(kind==="callback"){b.counters.callbackCalls++;if(b.bootstrap)b.bootstrap.delivery.callbackCalls++;}
   if(kind==="radar"){b.counters.radarEntries++;if(b.bootstrap)b.bootstrap.delivery.radarEntries++;}
   if(kind==="early"){b.counters.earlyReturns++;add(b,["socket_stale","user_inactive","buffer_recovery_suppressed"].includes(reason)?reason:"early_other");}
-  if(kind==="callback")packetStage("callback",{sock,emitter:b.ev,workspaceId,sessionId},{messages});
-  if(kind==="early"&&messages)packetStage("early",{sock,emitter:b.ev,workspaceId,sessionId,reason},{messages});
-  if(message)safe(()=>messageStage(({listener:"listener",radar:"radar_entry",result:"radar_result",early:"early"})[kind]||"other",{sock,emitter:b.ev,workspaceId,sessionId,message,reason}));
+  const observedWorkspace=run.mode==="continuous"?b.workspaceId:workspaceId,observedSession=run.mode==="continuous"?b.sessionId:sessionId;
+  if(kind==="callback")packetStage("callback",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,upsertType},{messages});
+  if(kind==="early"&&messages)packetStage("early",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,reason,upsertType},{messages});
+  if(kind==="mensageiro_gerente")b.counters.mensageiroGerenteCalls++;
+  if(kind==="mensageiro_comando")b.counters.mensageiroComandoCalls++;
+  if(kind==="mensageiro_atendimento")b.counters.mensageiroAtendimentoCalls++;
+  if(message)safe(()=>messageStage(({listener:"listener",radar:"radar_entry",result:"radar_result"})[kind]||kind,{sock,emitter:b.ev,workspaceId:b.workspaceId,sessionId:b.sessionId,message,reason,decision,upsertType}));
+  else if(["wrapper","callback"].includes(kind))persist(b,{stage:kind,decision:"received"});
   buffering(b);
  }
- function snapshot(b){const buffered=buffering(b),c={...b.counters},p=physical(b);let messageReceiver="UNKNOWN";safe(()=>{if(typeof b.sock.ws?.listenerCount==="function")messageReceiver=b.sock.ws.listenerCount("CB:message")>0?"PRESENT":"ABSENT";});return {generation:b.generation,isCurrent:run.current===b,buffering:buffered,listener:p,socketCoverage:b.wsOriginal?"public_emit_observed":"unavailable",counters:c,bootstrap:b.bootstrap?{...b.bootstrap,offlineBatch:{...b.bootstrap.offlineBatch},offlineAttribute:{...b.bootstrap.offlineAttribute},offlineTasks:{...b.bootstrap.offlineTasks},synchronization:{...b.bootstrap.synchronization},buffer:{...b.bootstrap.buffer,flushesByReason:{...b.bootstrap.buffer.flushesByReason}},delivery:{...b.bootstrap.delivery},records:b.bootstrap.records.map(x=>({...x}))}:null,
+ function snapshot(b){const buffered=buffering(b),c={...b.counters},p=physical(b);let messageReceiver="UNKNOWN";safe(()=>{if(typeof b.sock.ws?.listenerCount==="function")messageReceiver=b.sock.ws.listenerCount("CB:message")>0?"PRESENT":"ABSENT";});return {generation:b.generation,workspaceRef:ref("workspace",b.workspaceId),sessionRef:ref("session",b.sessionId),isCurrent:run.mode==="continuous"?run.currentBySession?.get(b.sessionId)===b:run.current===b,buffering:buffered,listener:p,socketCoverage:b.wsOriginal?"public_emit_observed":"unavailable",counters:c,bootstrap:b.bootstrap?{...b.bootstrap,offlineBatch:{...b.bootstrap.offlineBatch},offlineAttribute:{...b.bootstrap.offlineAttribute},offlineTasks:{...b.bootstrap.offlineTasks},synchronization:{...b.bootstrap.synchronization},buffer:{...b.bootstrap.buffer,flushesByReason:{...b.bootstrap.buffer.flushesByReason}},delivery:{...b.bootstrap.delivery},records:b.bootstrap.records.map(x=>({...x}))}:null,
   messageReceiver,synchronization:{lastPublicSignal:b.lastSyncSignal,pendingNotificationsObserved:typeof b.sock.__optimusMessengerLiveReady==="boolean"?b.sock.__optimusMessengerLiveReady:null,initialSyncState:"UNAVAILABLE_PUBLIC_INTERFACE"},failureCoverage:{decodeFailures:null,decryptFailures:null,reason:"no_dedicated_public_failure_event; socket/stream errors and dispatch throws are distinct"},
   distinction:c.wrapperCalls?c.callbackCalls?c.radarEntries?"radar_reached":c.earlyReturns?"early_return_observed":"callback_without_radar":"wrapper_without_callback":c.emitAttempts?c.emitCompleted>0&&c.bufferedAccepted===c.emitCompleted&&!c.emitErrors&&b.buffering?"buffer_retained_observed":p.state==="ABSENT"?"listener_absent_observed":"emit_without_wrapper_unknown":"no_upsert_emit_observed_not_transport_proof"};}
  function status(){
-  if(run?.active&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");
+  if(run?.active&&run.mode!=="continuous"&&now()>=run.expiresAt)stop(run.phase==="armed"?"arm_expired":run.mode==="next_bootstrap"?"capture_window_expired":"expired");
   if(run&&!run.active&&now()-run.finishedAt>=RETENTION_MS)run=null;
   if(!run)return {state:"off"};
   const state=run.active?(run.mode==="next_bootstrap"&&run.phase==="armed"?"armed":"active"):"stopped";
-  return {state,startedAt:run.startedAt,expiresAt:run.expiresAt,finishedAt:run.finishedAt||null,reason:run.reason||"",capture:run.mode==="next_bootstrap"?{mode:run.mode,phase:run.phase,armedAfterGeneration:run.armedAfterGeneration,observedGeneration:run.captureGeneration||null,captureStartedAt:run.captureStartedAt||null}:{mode:"current_window"},scope:{sessionRef:ref("session",run.sessionId),workspaceRef:ref("workspace",run.workspaceId),groupRef:ref("group",run.groupId)},generations:run.active?run.generations.map(snapshot):run.finalSnapshots||[],records:run.records.map(x=>({...x})),recordsDropped:run.recordsDropped,messages:[...run.messages.values()].map(x=>({...x,stages:x.stages.map(s=>({...s}))})),unkeyed:run.unkeyed,stagesDropped:run.stagesDropped,batchesTruncated:run.batchesTruncated,limits:{durationMs:run.mode==="next_bootstrap"?(run.phase==="armed"?NEXT_BOOTSTRAP_ARM_MS:NEXT_BOOTSTRAP_CAPTURE_MS):MAX_MS,calls:MAX_CALLS,generations:MAX_GENERATIONS,records:MAX_RECORDS,messages:MAX_MESSAGES,armWaitMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_ARM_MS:0,captureAfterGenerationMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_CAPTURE_MS:0},coverage:"Session-only aggregate public socket counts; target-group key metadata at public upsert/callback. No packet content, participants, private emitter introspection or transport-delivery proof."};
+  const continuous=run.mode==="continuous";
+  const journalStatus=continuous?journal?.status?.()||{available:false,failed:false,dropped:0,queued:0,bytes:0,maxBytes:0,retentionMs:0}:undefined;
+  const journalOpening=continuous&&run.journalState==="opening"&&!journalStatus.available&&!journalStatus.failed;
+  const coverageState=continuous?(journalOpening?"STARTING_JOURNAL":journalStatus.failed||!journalStatus.available?"DEGRADED_JOURNAL":journalStatus.dropped>0?"DEGRADED_JOURNAL_CAPACITY":run.generations.length?(journalStatus.rotatedSlots>0?"ACTIVE_ROTATING":"ACTIVE"):"WAITING_FOR_SOCKET"):"WINDOWED";
+  return {state,mode:run.mode,startedAt:run.startedAt,expiresAt:run.expiresAt||null,finishedAt:run.finishedAt||null,reason:run.reason||"",journalState:continuous?(journalOpening?"opening":journalStatus.failed||!journalStatus.available?"unavailable":journalStatus.dropped>0?"capacity_limited":journalStatus.rotatedSlots>0?"rotating":"available"):run.journalState||null,coverageState,
+   capture:continuous?{mode:"continuous",retentionMs:journalStatus.retentionMs||0}:run.mode==="next_bootstrap"?{mode:run.mode,phase:run.phase,armedAfterGeneration:run.armedAfterGeneration,observedGeneration:run.captureGeneration||null,captureStartedAt:run.captureStartedAt||null}:{mode:"current_window"},
+   scope:continuous?run.targets.map(target=>({workspaceRef:ref("workspace",target.workspaceId),sessionRef:sessionReference(target.workspaceId,target.sessionId),groups:target.groupIds?.map(groupId=>groupReference(target.workspaceId,target.sessionId,groupId))||"group_jids_hmac_only"})):{sessionRef:ref("session",run.sessionId),workspaceRef:ref("workspace",run.workspaceId),groupRef:ref("group",run.groupId)},
+   generations:run.active?run.generations.map(snapshot):run.finalSnapshots||[],finishedGenerations:continuous?run.finishedGenerations.map(item=>({...item})):[],groupStats:continuous?[...run.groupStats.values()].map(item=>({workspaceRef:item.workspaceRef,sessionRef:item.sessionRef,groupRef:item.groupRef,lastAt:item.lastAt||null,lastIngressAt:item.lastIngressAt||null,counts:{...item.counts}})):[],groupsDropped:continuous?run.groupsDropped:0,
+   records:run.records.map(x=>({...x})),recordsDropped:run.recordsDropped,messages:[...run.messages.values()].map(x=>({...x,stages:x.stages.map(s=>({...s}))})),unkeyed:run.unkeyed,stagesDropped:run.stagesDropped,batchesTruncated:run.batchesTruncated,
+   journal:continuous?journalStatus:undefined,
+   limits:continuous?{generations:MAX_CONTINUOUS_GENERATIONS,messages:MAX_CONTINUOUS_MESSAGES,bootstrapRows:MAX_BOOTSTRAP_ROWS,groupRows:MAX_GROUP_ROWS,journalBytes:journalStatus.maxBytes||0,retentionMs:journalStatus.retentionMs||0}: {durationMs:run.mode==="next_bootstrap"?(run.phase==="armed"?NEXT_BOOTSTRAP_ARM_MS:NEXT_BOOTSTRAP_CAPTURE_MS):MAX_MS,calls:MAX_CALLS,generations:MAX_GENERATIONS,records:MAX_RECORDS,messages:MAX_MESSAGES,armWaitMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_ARM_MS:0,captureAfterGenerationMs:run.mode==="next_bootstrap"?NEXT_BOOTSTRAP_CAPTURE_MS:0},
+   coverage:"Sanitized fixed counters at existing public socket and callback boundaries; group/message references are workspace-scoped HMACs. No message content, participant identifiers, raw JIDs, credential material or additional WhatsApp listeners."};
  }
  function start({workspaceId,sessionId,sock,generation,groupId,scopeValidated=false,mode="current_window"}={}){
   if(active()||run)return {ok:false,reason:"observation_exists"};
@@ -177,9 +245,17 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   const at=now(),duration=mode==="next_bootstrap"?NEXT_BOOTSTRAP_ARM_MS:MAX_MS;run={active:true,mode,phase:mode==="next_bootstrap"?"armed":"capturing",armedAfterGeneration:generation,captureGeneration:mode==="current_window"?generation:null,captureStartedAt:mode==="current_window"?at:null,workspaceId,sessionId,groupId,messages:new Map(),unkeyed:0,stagesDropped:0,batchesTruncated:0,startedAt:at,expiresAt:at+duration,records:[],recordsDropped:0,generations:[],bootstrapGenerations:new Map(),calls:0};
   if(mode==="current_window")trackSocket({workspaceId,sessionId,sock,generation});scheduleStop(duration);return {ok:true,...status()};
  }
+ function startContinuous(){
+  if(run?.active)return run.mode==="continuous"?{ok:true,alreadyActive:true,...status()}:{ok:false,reason:"observation_exists"};
+  if(run)return {ok:false,reason:"observation_retained"};
+  const at=now();run={active:true,mode:"continuous",startedAt:at,targets:CONTINUOUS_TARGETS.map(target=>({workspaceId:target.workspaceId,sessionId:target.sessionId,groupIds:target.groupIds?[...target.groupIds]:null})),journalState:journal?.open?"opening":"unavailable",
+   messages:new Map(),groupStats:new Map(),groupsDropped:0,unkeyed:0,stagesDropped:0,batchesTruncated:0,records:[],recordsDropped:0,generations:[],finishedGenerations:[],bootstrapGenerations:new Map(),currentBySession:new Map(),calls:0};
+  const owner=run;if(journal?.open)Promise.resolve().then(()=>journal.open()).then(ok=>{if(run===owner)owner.journalState=ok===true?"available":"unavailable";}).catch(()=>{if(run===owner)owner.journalState="unavailable";});
+  return {ok:true,...status()};
+ }
  // Preserve immutable snapshots before releasing socket references on stop.
  const finish=stop;
- stop=function(reason="manual"){if(run?.active)run.finalSnapshots=run.generations.map(snapshot);const result=finish(reason);if(run&&!run.active){run.generations=[];run.current=null;}return result;};
- return Object.freeze({start,stop,status,trackSocket,mark,bootstrapObserver});
+ stop=function(reason="manual"){if(run?.active)run.finalSnapshots=run.generations.map(snapshot);const result=finish(reason);if(run&&!run.active){run.generations=[];run.current=null;if(run.mode==="continuous")Promise.resolve(journal?.close?.()).catch(()=>{});}return result;};
+ return Object.freeze({start,startContinuous,stop,status,trackSocket,mark,bootstrapObserver});
 }
-module.exports={createIngressBoundaryObservation,MAX_MS,NEXT_BOOTSTRAP_ARM_MS,NEXT_BOOTSTRAP_CAPTURE_MS,MAX_CALLS,MAX_RECORDS,MAX_GENERATIONS,MAX_MESSAGES,MAX_BOOTSTRAP_SIGNALS,TARGET_GROUP_ID,TARGET_SESSION_ID};
+module.exports={createIngressBoundaryObservation,MAX_MS,NEXT_BOOTSTRAP_ARM_MS,NEXT_BOOTSTRAP_CAPTURE_MS,MAX_CALLS,MAX_RECORDS,MAX_GENERATIONS,MAX_MESSAGES,MAX_BOOTSTRAP_SIGNALS,MAX_CONTINUOUS_GENERATIONS,MAX_CONTINUOUS_MESSAGES,MAX_GROUP_ROWS,CONTINUOUS_TARGETS,TARGET_GROUP_ID,TARGET_SESSION_ID};

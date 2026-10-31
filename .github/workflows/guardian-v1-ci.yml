@@ -274,6 +274,25 @@ jobs:
           node --check index.js
           node --check modules/radar/ingress-observation-v1.js
           node --test tests/radar-ingress-observation-v1.test.cjs tests/radar-whatsapp-capture-gate.test.js
+      - name: Continuous WhatsApp ingress observation - isolated boundaries and bounded journal
+        if: github.ref == 'refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          base=7708855e014d54a48825b0d3ae1f77da43294ad0
+          git merge-base --is-ancestor "$base" HEAD
+          test "$(git diff --name-only "$base" HEAD -- modules)" = $'modules/whatsapp/ingress-boundary-observation.js\nmodules/whatsapp/ingress-observation-journal.js'
+          git diff --exit-code "$base" HEAD -- modules/radar modules/teleradar modules/clonador-grupos modules/engine modules/fila modules/executor modules/mensageiro modules/mensageiro-v3 modules/mensageiro-v4 marketplaces utils
+          node --check index.js
+          node --check modules/whatsapp/ingress-boundary-observation.js
+          node --check modules/whatsapp/ingress-observation-journal.js
+          node --test tests/whatsapp-ingress-boundary.test.cjs tests/whatsapp-ingress-continuous.test.cjs tests/whatsapp-ingress-observation-journal.test.cjs tests/baileys-bootstrap-observation.test.cjs tests/baileys-bootstrap-production.test.cjs
+          node tests/whatsapp-socket-listener-baileys-real.test.cjs
+          node tests/whatsapp-socket-listener-lifecycle.test.js
+          node tests/benchmark-whatsapp-ingress-continuous.cjs
+          node tests/guardian-v1.test.cjs
       - name: Guardião V1 self-tests
         run: node tests/guardian-v1.test.cjs
       - name: AliExpress real source fidelity and marketplace regressions
@@ -345,6 +364,7 @@ jobs:
             refs/heads/validation/guardian-v1-garimpei-observation-20261028) base=12589a07843954fb6ea858f34da4c56861e64f8a ;;
             refs/heads/validation/guardian-v1-ml-identity-images-20261028) base=b8f5746e4d562deaa5c4081738de89e0bf5fc508 ;;
             refs/heads/validation/guardian-v1-classifier-copy-focal-20261027) base=f800da32e987c740854a9de02d5bcc93d7f149e9 ;;
+            refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031) base=7708855e014d54a48825b0d3ae1f77da43294ad0 ;;
             refs/heads/validation/classificador-universal-v3-20261027) base=3ab4f29d7812cf0f9e996f210762fd94c1296322 ;;
             refs/heads/validation/telemetria-operacional-20261027) base=227c860e43d1d31904bd5a1332fa29b629a5b3de ;;
             refs/heads/validation/telemetria-v11-panel-first-20261027) base=ba966b2022a5489e2c794d79513714cb55accf97 ;;

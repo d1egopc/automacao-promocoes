@@ -23,7 +23,10 @@ const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
 const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
 const { createIngressBoundaryObservation } = require("./modules/whatsapp/ingress-boundary-observation");
-const whatsappIngressBoundary = createIngressBoundaryObservation(); // OFF; explicit Admin Master only.
+const { createIngressObservationJournal } = require("./modules/whatsapp/ingress-observation-journal");
+const whatsappIngressJournal = createIngressObservationJournal({ directory: "/var/log/optimus/garimpei-sensor" });
+const whatsappIngressBoundary = createIngressBoundaryObservation({ journal: whatsappIngressJournal });
+whatsappIngressBoundary.startContinuous(); // Fixed, sanitized scope: current Radar sources plus the authorized SERVMAQ session.
 const { createSensorJournal } = require("./modules/radar/ingress-sensor-journal");
 let garimpeiSensorEnabled = false;
 const radarIngressObservation = createRadarIngressObservation({
@@ -25766,6 +25769,15 @@ app.get("/admin/whatsapp/ingress-boundary", (req, res) => {
     physicalListener: target.ok ? (target.attachmentVerified === true ? "ATTACHED" : "UNKNOWN") : "UNVERIFIED"
   } });
 });
+app.get("/admin/whatsapp/ingress-boundary/journal", async (req, res) => {
+  if (!exigirAdminMasterEngine(req, res)) return;
+  try {
+    const archive = await whatsappIngressJournal.read();
+    return responderObservacaoIngressRadar(res, { journal: { ...archive, records: archive.records.slice(-1000) } });
+  } catch {
+    return responderObservacaoIngressRadar(res, { journal: { state: "unavailable", records: [] } }, 503);
+  }
+});
 app.post("/admin/whatsapp/ingress-boundary/start", (req, res) => {
   if (!exigirAdminMasterEngine(req, res)) return;
   const mode = req.body?.mode === undefined ? "current_window" : req.body.mode;
@@ -34128,7 +34140,7 @@ registrarListenerUnicoSocket({
     } catch { /* Optional diagnostics cannot block the shared listener. */ }
   },
   handler: async ({ messages = [], type } = {}) => {
-  try { whatsappIngressBoundary.mark("callback", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, current: socketEhAtual(sessoes, id, sock), messages }); } catch { /* diagnostics only */ }
+  try { whatsappIngressBoundary.mark("callback", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, current: socketEhAtual(sessoes, id, sock), messages, upsertType: type }); } catch { /* diagnostics only */ }
   try {
     radarIngressObservation.observeUpsert({
       workspaceId: clienteIdMensageiro,
@@ -34283,7 +34295,7 @@ registrarListenerUnicoSocket({
         }
       });
       const resultadoRadar = execucaoRadar?.resultado;
-      try { whatsappIngressBoundary.mark("result", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem, reason: resultadoRadar?.motivo || (resultadoRadar?.ok ? "accepted" : "other") }); } catch { /* diagnostics only */ }
+      try { whatsappIngressBoundary.mark("result", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem, reason: resultadoRadar?.motivo || (resultadoRadar?.ok ? "accepted" : "other"), decision: execucaoRadar?.ok === false ? "error" : resultadoRadar?.ok === true ? "accepted" : resultadoRadar?.ignorada ? "ignored" : "rejected" }); } catch { /* diagnostics only */ }
       radarIngressObservation.recordStage({
         workspaceId: clienteIdMensageiro,
         sessionId: id,
@@ -34314,13 +34326,16 @@ registrarListenerUnicoSocket({
         })
       });
       const resultadoGerente = execucaoGerente.resultado;
+      try { whatsappIngressBoundary.mark("mensageiro_gerente", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem,
+        decision: execucaoGerente?.ok === false ? "error" : resultadoGerente?.ok === true ? "accepted" : resultadoGerente?.ignorada ? "ignored" : "rejected",
+        reason: execucaoGerente?.ok === false ? "consumer_error" : resultadoGerente?.motivo || "other" }); } catch { /* diagnostics only */ }
       gerenteDiagnosticV2?.("card_scope", "manager_dispatch_completed", {
         result: execucaoGerente.ok === false ? "blocked" : "ok",
         durationMs: gerenteDispatchStartedAtV2 ? Date.now() - gerenteDispatchStartedAtV2 : undefined
       });
 
       if (resultadoGerente?.bloqueada !== true) {
-        await executarConsumidorMensagemIsolado({
+        const execucaoComando = await executarConsumidorMensagemIsolado({
           consumidor: "mensageiro_comando",
           contexto: contextoListenerCobertura,
           executar: () => mensagemGrupoV3 && dispatchMensageiroV3Ingress({
@@ -34333,9 +34348,12 @@ registrarListenerUnicoSocket({
             upsertType: type
           })
         });
+        try { whatsappIngressBoundary.mark("mensageiro_comando", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem,
+          decision: execucaoComando?.ok === false ? "error" : execucaoComando?.resultado?.ok === true ? "accepted" : execucaoComando?.resultado?.ignorada ? "ignored" : "rejected",
+          reason: execucaoComando?.ok === false ? "consumer_error" : execucaoComando?.resultado?.motivo || "other" }); } catch { /* diagnostics only */ }
       }
 
-      await executarConsumidorMensagemIsolado({
+      const execucaoAtendimento = await executarConsumidorMensagemIsolado({
         consumidor: "mensageiro_atendimento",
         contexto: contextoListenerCobertura,
         executar: () => !mensagemGrupoV3 && dispatchMensageiroV3Ingress({
@@ -34348,6 +34366,9 @@ registrarListenerUnicoSocket({
           upsertType: type
         })
       });
+      if (!mensagemGrupoV3) try { whatsappIngressBoundary.mark("mensageiro_atendimento", { workspaceId: clienteIdMensageiro, sessionId: id, sock, emitter: whatsappIngressEmitter, message: mensagem,
+        decision: execucaoAtendimento?.ok === false ? "error" : execucaoAtendimento?.resultado?.ok === true ? "accepted" : execucaoAtendimento?.resultado?.ignorada ? "ignored" : "rejected",
+        reason: execucaoAtendimento?.ok === false ? "consumer_error" : execucaoAtendimento?.resultado?.motivo || "other" }); } catch { /* diagnostics only */ }
 
       await executarConsumidorMensagemIsolado({
         consumidor: "clonador_grupos",

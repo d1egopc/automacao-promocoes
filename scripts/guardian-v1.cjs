@@ -509,6 +509,11 @@ function testMatrix(plan) {
     add("baileys:bootstrap-regression", "tests/baileys-bootstrap-production.test.cjs", process.execPath, ["tests/baileys-bootstrap-production.test.cjs"], false);
     add("whatsapp:ingress-boundary", "tests/whatsapp-ingress-boundary.test.cjs", process.execPath, ["--test", "tests/whatsapp-ingress-boundary.test.cjs"], false);
   }
+  if (plan.runtimeFiles.includes("modules/whatsapp/ingress-observation-journal.js") || plan.runtimeFiles.includes("modules/whatsapp/ingress-boundary-observation.js")) {
+    add("whatsapp:ingress-continuous", "tests/whatsapp-ingress-continuous.test.cjs", process.execPath, ["--test", "tests/whatsapp-ingress-continuous.test.cjs"], false);
+    add("whatsapp:ingress-journal", "tests/whatsapp-ingress-observation-journal.test.cjs", process.execPath, ["--test", "tests/whatsapp-ingress-observation-journal.test.cjs"], false);
+    add("whatsapp:listener-baileys", "tests/whatsapp-socket-listener-baileys-real.test.cjs", process.execPath, ["tests/whatsapp-socket-listener-baileys-real.test.cjs"], false);
+  }
   return [...specs.values()];
 }
 
