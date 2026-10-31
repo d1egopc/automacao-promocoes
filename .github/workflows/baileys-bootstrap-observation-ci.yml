@@ -27,12 +27,12 @@ jobs:
       - name: Closed Guardian profile and derived image recipe
         run: |
           node scripts/guardian-v1.cjs validate --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --report "$RUNNER_TEMP/guardian-bootstrap.json"
-          node scripts/guardian-v1.cjs build-dockerfile --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --base-tag local/optimus-bootstrap-base:ci > "$RUNNER_TEMP/Dockerfile.bootstrap"
+          node scripts/guardian-v1.cjs build-dockerfile --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --base-tag local/optimus-deploy-base:ci > "$RUNNER_TEMP/Dockerfile.bootstrap"
       - name: Clean build and instrumented dependency artifact
         run: |
           docker build --no-cache -t local/optimus-bootstrap-full:ci .
           docker run --rm --network none --entrypoint node local/optimus-bootstrap-full:ci tests/baileys-bootstrap-observation.test.cjs
-          docker tag local/optimus-bootstrap-full:ci local/optimus-bootstrap-base:ci
+          docker tag local/optimus-bootstrap-full:ci local/optimus-deploy-base:ci
           docker build --pull=false --network=none -f "$RUNNER_TEMP/Dockerfile.bootstrap" -t local/optimus-bootstrap-derived:ci .
           docker run --rm --network none --entrypoint node local/optimus-bootstrap-derived:ci tests/baileys-bootstrap-observation.test.cjs
           node scripts/guardian-v1.cjs prepare --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --format dependencies-after | while IFS=$'\t' read -r dependency expected; do
