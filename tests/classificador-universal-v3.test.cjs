@@ -27,3 +27,9 @@ test("identidades conflitantes permanecem incertas e público adulto não herda 
   assert.equal(classificarCategoriaUniversal({titulo:"Kit Isca Artificial + Furadeira Profissional",categoria:"Diversos"}).categoria,"Diversos");
   assert.equal(classificarCategoriaUniversal({titulo:"Calça para adultos",categoria:"Roupas e Calçados Infantil"}).categoria,"Diversos");
 });
+test("gênero explícito protege vestuário de conflito contextual e finalidade outdoor técnica vence gênero", () => {
+  assert.equal(classificarCategoriaOferta({ titulo: "Calça masculina / sensor de presença ORIGINAL" }), "Roupas e Moda Masculina");
+  assert.equal(classificarCategoriaUniversal({ titulo: "Calça masculina / sensor de presença ORIGINAL" }).categoria, "Roupas e Moda Masculina");
+  assert.equal(classificarCategoriaOferta({ titulo: "Calça feminina ripstop para pesca com proteção UV50" }), "Pesca e Camping");
+  assert.equal(classificarCategoriaOferta({ titulo: "Calça casual para pesca" }), "Diversos");
+});

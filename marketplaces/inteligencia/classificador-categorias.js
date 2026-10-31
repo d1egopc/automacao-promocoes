@@ -822,6 +822,10 @@ function finalidadePesqueiraExplicita(titulo) {
 
 function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
   const titulo = normalizarTextoLocal(String(oferta.titulo || oferta.nome || termo || "").slice(0, 1200));
+  const textoVestuario = normalizarTextoLocal([
+    titulo,
+    typeof oferta.descricao === "string" ? oferta.descricao.slice(0, 800) : ""
+  ].filter(Boolean).join(" "));
   const oficial = categoriaMarketplaceComprovada(oferta);
   const declarada = categoriaDeclaradaValida(oferta);
   let categoria = "", motivo = "natureza_produto_explicita", finalidadePesca = "", funcional = null;
@@ -834,14 +838,26 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
     categoria = CATEGORIA.brinquedos;
   } else if (/\b(?:churrasqueira de brinquedo|brinquedo churrasqueira)\b/.test(titulo)) {
     categoria = CATEGORIA.brinquedos;
-  } else if ((funcional = avaliarNaturezaFuncional(oferta, titulo))) {
-    categoria = funcional.categoria;
-    motivo = funcional.motivo;
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) &&
       /\b(?:para pesca|pesca mato tatica|pesca camping)\b/.test(titulo) &&
       /\b(?:ripstop|poliamida|fpu|upf|uv ?\d+|secagem rapida|impermeavel)\b/.test(titulo)) {
     categoria = CATEGORIA.pesca;
     motivo = "finalidade_pesqueira_explicita_no_vestuario";
+  } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) &&
+      /\b(?:infantil|juvenil|crianca)\b/.test(textoVestuario)) {
+    categoria = CATEGORIA.infantil;
+    motivo = "vestuario_com_publico_infantil_explicito";
+  } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) &&
+      /\b(?:masculina|masculino|homem)\b/.test(textoVestuario)) {
+    categoria = CATEGORIA.modaMasculina;
+    motivo = "vestuario_com_publico_masculino_explicito";
+  } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) &&
+      /\b(?:feminina|feminino|mulher)\b/.test(textoVestuario)) {
+    categoria = CATEGORIA.modaFeminina;
+    motivo = "vestuario_com_publico_feminino_explicito";
+  } else if ((funcional = avaliarNaturezaFuncional(oferta, titulo))) {
+    categoria = funcional.categoria;
+    motivo = funcional.motivo;
   } else if (/\b(?:calcas?|camisas?|camisetas?|bermudas?|shorts?)\b/.test(titulo) && /\bpesca\b/.test(titulo)) {
     categoria = /\b(?:infantil|juvenil|crianca)\b/.test(titulo) ? CATEGORIA.infantil
       : /\b(?:feminina|feminino|mulher)\b/.test(titulo) ? CATEGORIA.modaFeminina
@@ -912,6 +928,11 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
 function classificarCategoriaOferta(oferta = {}, termo = "") {
   const evidencia = avaliarEvidenciaCategoria(oferta, termo);
   if (evidencia) return evidencia.categoria;
+  const titulo = normalizarTextoLocal(String(oferta.titulo || oferta.nome || termo || "").slice(0, 1200));
+  if (/\bcalcas?\b/.test(titulo) &&
+      !/\b(?:masculina|masculino|homem|feminina|feminino|mulher|infantil|juvenil|crianca|para pesca|pesca mato tatica|pesca camping)\b/.test(titulo)) {
+    return CATEGORIA.diversos;
+  }
   return classificarCategoriaLegada(oferta, termo);
 }
 
