@@ -919,6 +919,8 @@ function avaliarEvidenciaCategoria(oferta = {}, termo = "") {
       motivo: categoria ? motivo : oficial.conflito ? "tipo_hierarquia_divergentes" : "hierarquia_oficial_mapeada", confianca: final === CATEGORIA.diversos ? "baixa" : "alta",
       divergencia, baixaConfianca: final === CATEGORIA.diversos,
       ...(funcional || finalidadePesca ||
+        ["finalidade_pesqueira_explicita_no_vestuario", "vestuario_com_publico_infantil_explicito",
+          "vestuario_com_publico_masculino_explicito", "vestuario_com_publico_feminino_explicito"].includes(motivo) ||
         (motivo === "naturezas_produto_conflitantes" && finalidadePesqueiraExplicita(titulo))
         ? { correcaoFuncionalHomologada: true } : {}) };
   }
