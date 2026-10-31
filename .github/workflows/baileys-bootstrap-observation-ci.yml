@@ -1,0 +1,48 @@
+name: Baileys bootstrap observation Linux Node24
+on:
+  push:
+    branches: [validation/baileys-bootstrap-observation-20261030]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Bootstrap instrumentation and compatibility contracts
+        run: |
+          node tests/baileys-bootstrap-observation.test.cjs
+          node --test tests/baileys-balanced-buffer.test.cjs
+          node tests/baileys-bootstrap-production.test.cjs
+          node --test tests/whatsapp-ingress-boundary.test.cjs
+      - name: Closed Guardian profile and derived image recipe
+        run: |
+          node scripts/guardian-v1.cjs validate --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --report "$RUNNER_TEMP/guardian-bootstrap.json"
+          node scripts/guardian-v1.cjs build-dockerfile --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --base-tag local/optimus-bootstrap-base:ci > "$RUNNER_TEMP/Dockerfile.bootstrap"
+      - name: Clean build and instrumented dependency artifact
+        run: |
+          docker build --no-cache -t local/optimus-bootstrap-full:ci .
+          docker run --rm --network none --entrypoint node local/optimus-bootstrap-full:ci tests/baileys-bootstrap-observation.test.cjs
+          docker tag local/optimus-bootstrap-full:ci local/optimus-bootstrap-base:ci
+          docker build --pull=false --network=none -f "$RUNNER_TEMP/Dockerfile.bootstrap" -t local/optimus-bootstrap-derived:ci .
+          docker run --rm --network none --entrypoint node local/optimus-bootstrap-derived:ci tests/baileys-bootstrap-observation.test.cjs
+          node scripts/guardian-v1.cjs prepare --base 000aad348eeac113cd75876db2f53a909894e14c --source "$GITHUB_SHA" --format dependencies-after | while IFS=$'\t' read -r dependency expected; do
+            actual="$(docker run --rm --network none --entrypoint sha256sum local/optimus-bootstrap-derived:ci "/app/node_modules/@whiskeysockets/baileys/$dependency" | cut -d' ' -f1)"
+            test "$actual" = "$expected"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baileys-bootstrap-observation-gates
+          path: |
+            ${{ runner.temp }}/guardian-bootstrap.json
+            ${{ runner.temp }}/Dockerfile.bootstrap

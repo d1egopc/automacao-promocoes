@@ -114,6 +114,7 @@ function aplicarPatch({ rootDir = process.cwd(), log = console.log } = {}) {
 if (require.main === module) {
   try {
     aplicarPatch();
+    require("../modules/whatsapp/baileys-buffer-hotfix.service").applyPatch();
     require("../modules/whatsapp/baileys-balanced-buffer-patch").applyPatch();
   } catch (error) {
     console.error(`[BAILEYS-RETRY-HOTFIX] failed: ${error.message}`);

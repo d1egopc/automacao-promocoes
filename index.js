@@ -34025,11 +34025,15 @@ async function iniciarWhatsApp(id, force = false) {
       isCurrent: emitter => Boolean(sock && socketEhAtual(sessoes, id, sock) && sock.ev === emitter),
       report: stage => console.log("[WHATSAPP-BUFFER-RECOVERY]", JSON.stringify({ session: "servcel_target", stage }))
     });
+    const bootstrapObserver = whatsappIngressBoundary.bootstrapObserver({
+      workspaceId: clienteIdMensageiro, sessionId: id, generation: socketGeracaoPrevista
+    });
     sock = makeWASocket({
       version,
       auth: state,
       logger: loggerBaileys,
       optimusInitialBufferRecovery: bufferRecovery,
+      optimusBootstrapObserver: bootstrapObserver,
       makeSignalRepository: criarFabricaRepositorioSignalContextual({
         criarRepositorio: DEFAULT_CONNECTION_CONFIG.makeSignalRepository,
         contexto: contextoSocketBaileys,

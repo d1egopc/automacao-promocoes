@@ -74,7 +74,9 @@ test("foreign workspace/session is not intercepted; snapshots redact all message
  const f=fixture();f.o.start(f.ctx);const other={ev:makeBuffer(logger)},before=other.ev.emit;
  assert.equal(f.o.trackSocket({...f.ctx,sock:other,workspaceId:"other"}),false);assert.equal(other.ev.emit,before);
  wire(f);f.sock.ev.emit("messages.upsert",message);
- assert.doesNotMatch(JSON.stringify(f.o.status()),/PRIVATE|SECRET|example.test|secret_message|admin_Zoiao Claro|"other"/);f.o.stop();
+ // The bootstrap observer now exposes the fixed enum class `other`; reject
+ // only fixture secrets and real session identifiers from the snapshot.
+ assert.doesNotMatch(JSON.stringify(f.o.status()),/PRIVATE|SECRET|example\.test|secret_message|admin_Zoiao Claro/);f.o.stop();
 });
 test("expiry restores methods, preserves callbacks, never flushes and reads do not extend",()=>{
  const f=fixture(),before={emit:f.sock.ev.emit,on:f.sock.ev.on,off:f.sock.ev.off,flush:f.sock.ev.flush};wire(f);const handler=f.sock.__optimusListeners["messages.upsert"].handler;

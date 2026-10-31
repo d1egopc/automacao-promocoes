@@ -29,7 +29,7 @@ function createBufferRecovery({ workspaceId, sessionId, isCurrent,
     // Pending decrypt/upsert work remains historical by timestamp/type/context.
     endPending(); recovered = true;
     try {
-      if (ev?.isBuffering?.() === true) { emit("initial_timeout_recovery"); ev.flush(); }
+      if (ev?.isBuffering?.() === true) { emit("initial_timeout_recovery"); ev.flush("servcel_initial_timeout_recovery"); }
       else emit("initial_buffer_already_released");
     } catch { closed = true; emit("recovery_failed_closed"); }
   };
