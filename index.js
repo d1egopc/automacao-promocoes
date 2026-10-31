@@ -22,11 +22,15 @@ const {
 const fidelidadeObs = require("./modules/fidelidade/observabilidade-v1");
 const coberturaRadar = require("./modules/radar/cobertura-v1");
 const { createRadarIngressObservation } = require("./modules/radar/ingress-observation-v1");
-const { createIngressBoundaryObservation } = require("./modules/whatsapp/ingress-boundary-observation");
+const { createIngressBoundaryObservation, resolveConfiguredObservationGroups } = require("./modules/whatsapp/ingress-boundary-observation");
 const { createIngressObservationJournal } = require("./modules/whatsapp/ingress-observation-journal");
+const whatsappIngressScopeCache = new Map();
+const whatsappIngressRadarRevision = new Map();
+const MAX_WHATSAPP_INGRESS_SCOPE_CACHE = 2048;
+const MAX_WHATSAPP_INGRESS_RADAR_REVISIONS = 2048;
 const whatsappIngressJournal = createIngressObservationJournal({ directory: "/var/log/optimus/garimpei-sensor" });
-const whatsappIngressBoundary = createIngressBoundaryObservation({ journal: whatsappIngressJournal });
-whatsappIngressBoundary.startContinuous(); // Fixed, sanitized scope: current Radar sources plus the authorized SERVMAQ session.
+const whatsappIngressBoundary = createIngressBoundaryObservation({ journal: whatsappIngressJournal, resolveContinuousScope: resolverEscopoContinuoObservacaoIngressWhatsapp });
+whatsappIngressBoundary.startContinuous(); // Dynamic scope is resolved from each owned session's current Radar/Messenger configuration.
 const { createSensorJournal } = require("./modules/radar/ingress-sensor-journal");
 let garimpeiSensorEnabled = false;
 const radarIngressObservation = createRadarIngressObservation({
@@ -18241,6 +18245,89 @@ function carregarRadarConfigCliente(clienteId = "admin", { falharFechado = false
   }
 }
 
+function invalidarEscopoObservacaoIngressWhatsapp(clienteId = "", sessaoId = "") {
+  if (clienteId && sessaoId) {
+    whatsappIngressScopeCache.delete(JSON.stringify([String(clienteId), String(sessaoId)]));
+    return;
+  }
+  for (const key of whatsappIngressScopeCache.keys()) {
+    let identity;
+    try { identity = JSON.parse(key); } catch { whatsappIngressScopeCache.delete(key); continue; }
+    if (!clienteId || identity[0] === String(clienteId)) whatsappIngressScopeCache.delete(key);
+  }
+}
+
+function resolverEscopoContinuoObservacaoIngressWhatsapp({ workspaceId, sessionId } = {}) {
+  const workspace = String(workspaceId || "").trim();
+  const session = String(sessionId || "").trim();
+  if (!workspace || !session || session.length > 150 || /[\u0000-\u001f\u007f]/.test(session)) return { verified: false, groupIds: [] };
+  const meta = sessoesMeta?.[session];
+  if (!meta || !canalPertenceAoWorkspace(meta, workspace, { usuarios })) return { verified: false, groupIds: [] };
+  const explicitWorkspace = String(meta.workspaceId || meta.clienteId || "").trim();
+  if (explicitWorkspace && explicitWorkspace !== workspace) return { verified: false, groupIds: [] };
+
+  const actualGroups = gruposPorSessao?.[session];
+  const radarRevision = whatsappIngressRadarRevision.get(workspace) || 0;
+  const messengerRevision = Number.isSafeInteger(mensageiroV3Routes?.store?.state?.revision)
+    ? mensageiroV3Routes.store.state.revision : -1;
+  const key = JSON.stringify([workspace, session]);
+  const cached = whatsappIngressScopeCache.get(key);
+  if (cached && cached.meta === meta && cached.actualGroups === actualGroups &&
+      cached.radarRevision === radarRevision && cached.messengerRevision === messengerRevision) {
+    whatsappIngressScopeCache.delete(key);
+    whatsappIngressScopeCache.set(key, cached);
+    return cached.scope;
+  }
+
+  // Read the persisted workspace file directly. The legacy Radar normalizer
+  // resolves session labels with an admin default, which is unsafe for a
+  // multi-workspace observer. This path never broadens that business flow.
+  let radarConfig = { monitoramentoAtivo: false, sessoesWhatsappMonitoradas: [], gruposMonitorados: [] };
+  try {
+    const persisted = readClienteJson(workspace, "radar-config.json", null);
+    if (persisted && typeof persisted === "object" && !Array.isArray(persisted)) radarConfig = {
+      monitoramentoAtivo: persisted.monitoramentoAtivo === true,
+      sessaoWhatsappId: String(persisted.sessaoWhatsappId || ""),
+      sessoesWhatsappMonitoradas: Array.isArray(persisted.sessoesWhatsappMonitoradas) ? persisted.sessoesWhatsappMonitoradas : [],
+      gruposMonitorados: Array.isArray(persisted.gruposMonitorados) ? persisted.gruposMonitorados : []
+    };
+  }
+  catch { /* O resolver contínuo falha fechado apenas para essa fonte. */ }
+
+  let messengerProfiles = [];
+  try {
+    const workspaceState = mensageiroV3Routes?.store?.state?.workspaces?.[workspace];
+    messengerProfiles = Object.values(workspaceState?.profiles || {});
+  } catch { messengerProfiles = []; }
+
+  const sessionBelongsToWorkspace = canalPertenceAoWorkspace(meta, workspace, { usuarios });
+  const scopeWorkspaceId = explicitWorkspace || workspace;
+  const scope = {
+    verified: sessionBelongsToWorkspace && scopeWorkspaceId === workspace,
+    groupIds: resolveConfiguredObservationGroups({
+      workspaceId: workspace,
+      sessionId: session,
+      sessionBelongsToWorkspace,
+      sessionWorkspaceId: scopeWorkspaceId,
+      actualGroupIds: Array.isArray(actualGroups) ? actualGroups : [],
+      radarConfig,
+      resolveRadarSessionId: configuredSessionId => {
+        const input = String(configuredSessionId || "").trim();
+        if (!input) return "";
+        const candidates = new Set([input, normalizarSessaoId(workspace, input), `${workspace}_${normalizarSessaoId(workspace, input)}`]
+          .filter(candidate => candidate && sessoesMeta?.[candidate] && canalPertenceAoWorkspace(sessoesMeta[candidate], workspace, { usuarios }) &&
+            (!String(sessoesMeta[candidate].workspaceId || sessoesMeta[candidate].clienteId || "").trim() ||
+              String(sessoesMeta[candidate].workspaceId || sessoesMeta[candidate].clienteId).trim() === workspace)));
+        return candidates.size === 1 ? [...candidates][0] : "";
+      },
+      messengerProfiles
+    })
+  };
+  whatsappIngressScopeCache.set(key, { meta, actualGroups, radarRevision, messengerRevision, scope });
+  while (whatsappIngressScopeCache.size > MAX_WHATSAPP_INGRESS_SCOPE_CACHE) whatsappIngressScopeCache.delete(whatsappIngressScopeCache.keys().next().value);
+  return scope;
+}
+
 function obterGrupoWhatsappIdTecnicoRadar(grupo = {}) {
   if (typeof grupo === "string" || typeof grupo === "number") {
     const id = textoRadarId(grupo);
@@ -18528,6 +18615,9 @@ logDebug("ðŸ§ª RADAR PAYLOAD FINAL", {
 
 
 writeClienteJson(clienteId, "radar-config.json", payload);
+  whatsappIngressRadarRevision.set(String(clienteId), (whatsappIngressRadarRevision.get(String(clienteId)) || 0) + 1);
+  while (whatsappIngressRadarRevision.size > MAX_WHATSAPP_INGRESS_RADAR_REVISIONS) whatsappIngressRadarRevision.delete(whatsappIngressRadarRevision.keys().next().value);
+  invalidarEscopoObservacaoIngressWhatsapp(String(clienteId));
 
   return payload;
 }
@@ -26552,7 +26642,11 @@ mensageiroV4Scope.canary = mensageiroV4Canary;
 const mensageiroV4OwnsSession = (workspaceId, sessionId) => Boolean(sessoesMeta?.[sessionId] && canalPertenceAoWorkspace(sessoesMeta[sessionId], workspaceId, { usuarios }));
 const mensageiroV4Repository = new V4Repository({ filePath: mensageiroV3Routes.store.filePath });
 async function atualizarEscopoMensageiroUniversal() {
-  try { mensageiroV4Scope.configure(await mensageiroV4Repository.call("universal_sessions")); }
+  try {
+    mensageiroV4Scope.configure(await mensageiroV4Repository.call("universal_sessions"));
+    try { mensageiroV3Routes.store.reload(); } catch { /* Observability remains fail-closed; Messenger authority stays on its worker. */ }
+    invalidarEscopoObservacaoIngressWhatsapp();
+  }
   catch (error) { mensageiroV4Scope.ready = false; throw error; }
 }
 atualizarEscopoMensageiroUniversal().catch(() => console.warn("[MENSAGEIRO-V4] configuration_unavailable_fail_closed"));

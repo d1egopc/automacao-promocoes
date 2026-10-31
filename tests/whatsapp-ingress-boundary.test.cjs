@@ -19,7 +19,7 @@ function wire(f,sock=f.sock,{sessionId="admin_Zoiao Claro",workspaceId="admin",e
  },onInvoke:()=>f.o.mark("wrapper",{sock,sessionId}),logger});
  return ()=>radar;
 }
-const message={type:"notify",messages:[{key:{remoteJid:"PRIVATE_PHONE@g.us",id:"PRIVATE_ID"},message:{conversation:"https://example.test/SECRET token secret_message"}}]};
+const message={type:"notify",messages:[{key:{remoteJid:"120363408782037034@g.us",id:"PRIVATE_ID"},message:{conversation:"https://example.test/SECRET token secret_message"}}]};
 test("OFF leaves emitter untouched and performs no metadata reads or timers",()=>{
  let reads=0;const sock={get ev(){reads++;throw Error("must_not_read");}};const o=createIngressBoundaryObservation({setTimer:()=>{throw Error("timer_off");}});
  for(let i=0;i<10000;i++){o.trackSocket({sock});o.mark("wrapper",{sock});}
@@ -138,7 +138,7 @@ test("exact production registration reaches mocked Radar/Engine across generatio
    resolverClienteClonePorSessao:()=>({valido:false}),clonadorGruposService:{},console:logger});
  }
  const emit=async(sock)=>{for(const kind of ["magalu","mercadolivre","shopee"]){
-  sock.ev.emit("messages.upsert",{type:"notify",messages:[{fixtureKind:kind,key:{id:kind,remoteJid:"fixture@g.us",fromMe:false},message:{conversation:"local fixture"}}]});await tick();await tick();
+  sock.ev.emit("messages.upsert",{type:"notify",messages:[{fixtureKind:kind,key:{id:kind,remoteJid:"120363408782037034@g.us",fromMe:false},message:{conversation:"local fixture"}}]});await tick();await tick();
  }};
  install(f.sock);f.o.start(f.ctx);await emit(f.sock);assert.equal(engine.length,3);
  const second={ev:makeBuffer(logger)};install(second);second.ev.buffer();await emit(second);

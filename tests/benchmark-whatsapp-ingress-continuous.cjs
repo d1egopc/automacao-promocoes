@@ -2,24 +2,25 @@
 
 const { performance } = require("node:perf_hooks");
 const { EventEmitter } = require("node:events");
-const { createIngressBoundaryObservation, TARGET_SESSION_ID, CONTINUOUS_TARGETS } = require("../modules/whatsapp/ingress-boundary-observation");
+const { createIngressBoundaryObservation } = require("../modules/whatsapp/ingress-boundary-observation");
 
 const N = 5000;
-const workspaceId = "admin";
-const groupId = CONTINUOUS_TARGETS[0].groupIds[0];
+const workspaceId = "benchmark-workspace";
+const sessionId = "benchmark-session";
+const groupId = "120363408782037034@g.us";
 const packet = { type: "notify", messages: [{ key: { id: "benchmark-id", remoteJid: groupId, fromMe: false } }] };
 
 function fixture(observer) {
   const ev = new EventEmitter();
   ev.isBuffering = () => false;
   const sock = { ev, ws: new EventEmitter(), __optimusListeners: { "messages.upsert": { emissor: ev, handler: () => {} } } };
-  if (observer) observer.trackSocket({ workspaceId, sessionId: TARGET_SESSION_ID, generation: 1, sock });
+  if (observer) observer.trackSocket({ workspaceId, sessionId, generation: 1, sock });
   ev.on("messages.upsert", ({ messages, type }) => {
-    observer?.mark("callback", { workspaceId, sessionId: TARGET_SESSION_ID, sock, emitter: ev, messages, upsertType: type });
+    observer?.mark("callback", { workspaceId, sessionId, sock, emitter: ev, messages, upsertType: type });
     for (const message of messages) {
-      observer?.mark("listener", { workspaceId, sessionId: TARGET_SESSION_ID, sock, emitter: ev, message });
-      observer?.mark("radar", { workspaceId, sessionId: TARGET_SESSION_ID, sock, emitter: ev, message });
-      observer?.mark("mensageiro_gerente", { workspaceId, sessionId: TARGET_SESSION_ID, sock, emitter: ev, message, decision: "ignored", reason: "ignored" });
+      observer?.mark("listener", { workspaceId, sessionId, sock, emitter: ev, message });
+      observer?.mark("radar", { workspaceId, sessionId, sock, emitter: ev, message });
+      observer?.mark("mensageiro_gerente", { workspaceId, sessionId, sock, emitter: ev, message, decision: "ignored", reason: "ignored" });
     }
   });
   return ev;
@@ -33,7 +34,8 @@ function run() {
   const offMs = performance.now() - offStart;
 
   const journal = { append: () => true, status: () => ({ available: true, maxBytes: 2 * 1024 * 1024, retentionMs: 72 * 60 * 60 * 1000 }) };
-  const continuous = createIngressBoundaryObservation({ journal });
+  const continuous = createIngressBoundaryObservation({ journal, resolveContinuousScope: ({ workspaceId: w, sessionId: s }) =>
+    w === workspaceId && s === sessionId ? { verified: true, groupIds: [groupId] } : { verified: false, groupIds: [] } });
   continuous.startContinuous();
   const activeEmitter = fixture(continuous);
   const activeStart = performance.now();
