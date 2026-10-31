@@ -143,12 +143,12 @@ function testarPrecoAltaDivergente() {
   assert.strictEqual(deveLogarDivergenciaComercial(r), true);
 }
 
-function testarSemPrecoRadarUsaImportador() {
+function testarSemPrecoRadarNaoUsaImportador() {
   const m = mirrorSemPreco({ comercial: { cupom: {} } });
   const r = resolver(oferta({ preco: 88.8, precoAtual: 88.8 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.precoPublicacao, null);
-  assert.strictEqual(r.oferta.preco, 88.8);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarMediaComMarcador() {
@@ -178,12 +178,13 @@ function testarMediaSemMarcadorAplicaCloneRadar() {
 
 function testarParcelaNaoViraTotal() {
   const m = mirrorSemPreco({ comercial: { cupom: {} } });
+  m.texto = { original: "Produto de teste\n10x R$ 19,99 sem juros" };
   m.comercial.precoParcelado = campo(19.99, "alta", "10x R$ 19,99", { tipo: "parcela" });
-  m.comercial.parcelamento = { quantidade: 10, valorParcela: 19.99, semJuros: true, confianca: "alta" };
+  m.comercial.parcelamento = { quantidade: 10, valorParcela: 19.99, semJuros: true, confianca: "alta", evidencia: "10x R$ 19,99 sem juros" };
   const r = resolver(oferta({ preco: 199.9, precoAtual: 199.9 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.condicoesComerciais.parcelamento.quantidade, 10);
-  assert.strictEqual(r.oferta.preco, 199.9);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarPercentualNaoViraPreco() {
@@ -199,7 +200,7 @@ function testarCupomRadarClaro() {
   assert.strictEqual(r.oferta.cupom, "PROMO10");
 }
 
-function testarCupomImportadorFallback() {
+function testarCupomImportadorNaoViraFallback() {
   const m = mirror();
   m.cupom.codigoCapturado = null;
   m.cupom.confianca = "ausente";
@@ -207,7 +208,7 @@ function testarCupomImportadorFallback() {
   const r = resolver(oferta({ cupom: "IMP10" }), m);
   assert.strictEqual(r.resolucao.origemCupom, "ausente");
   assert.strictEqual(r.resolucao.cupomPublicacao, null);
-  assert.strictEqual(r.oferta.cupom, "IMP10");
+  assert.strictEqual(r.oferta.cupom, undefined);
 }
 
 function testarCupomProvavelNaoAplica() {
@@ -231,15 +232,19 @@ function testarLinksProdutoEResgate() {
 }
 
 function testarAmazonPix() {
-  const m = mirrorSemPreco(); m.comercial.precoPix = campo(299.9, "alta", "No Pix R$ 299,90");
+  const m = mirrorSemPreco();
+  m.texto = { original: "No Pix R$ 299,90" };
+  m.comercial.precoPix = campo(299.9, "alta", "No Pix R$ 299,90");
   const r = resolver(oferta({ marketplace: "amazon", preco: 329.9, precoAtual: 329.9 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.oferta.preco, 329.9);
+  assert.strictEqual(r.oferta.preco, undefined);
   assert.strictEqual(r.resolucao.condicoesComerciais.pix.valor, 299.9);
 }
 
 function testarMercadoLivreCupom() {
-  const r = resolver(oferta({ marketplace: "Mercado Livre", cupom: "" }), mirror());
+  const m = mirror();
+  m.texto = { original: "De R$ 149,90\nPor R$ 99,90\nCupom PROMO10\nFrete grátis" };
+  const r = resolver(oferta({ marketplace: "Mercado Livre", cupom: "" }), m);
   assert.strictEqual(r.resolucao.cupomPublicacao, "PROMO10");
   assert.strictEqual(r.resolucao.condicoesComerciais.freteGratis.valor, true);
 }
@@ -294,11 +299,12 @@ function testarPrecoRadarInvalidoNaoAplica() {
   const r = resolver(oferta({ preco: 55.5, precoAtual: 55.5 }), m);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.statusComparacaoPreco, "radar_invalido");
-  assert.strictEqual(r.oferta.preco, 55.5);
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarAmazonCloneComercialUniversal() {
   const m = removerCupomRadar(aplicarPrecoRadar(mirror(), 2249, "alta", "Por R$ 2.249"));
+  m.texto = { original: "Produto Amazon\nPor R$ 2.249\nCupom TUDOAMAZON\n10x de R$ 224,90 sem juros" };
   m.origem = { clienteId: "workspace_amazon", tipo: "telegram" };
   m.preco.anteriorCapturado = null;
   m.cupom = {
@@ -396,6 +402,7 @@ function testarCasosReaisMediaSemMarcadorPreservamValorRadar() {
 
 function testarPrecoCupomPixParcelamentoPreservadosDoRadar() {
   const m = mirrorSemPreco();
+  m.texto = { original: "Produto de teste\nR$ 140 PIX\n10x de R$ 14 sem juros\nCupom PIX140" };
   m.preco.atualCapturado = "R$ 140";
   m.preco.confianca = "media";
   m.preco.evidenciaCapturada = "R$ 140 PIX";
@@ -424,7 +431,7 @@ function testarAusenciaRealDePrecoNaoInventaValor() {
   const r = resolver(oferta({ preco: "", precoAtual: "", valor: "" }), mirrorSemPreco({ comercial: { cupom: {} } }));
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
   assert.strictEqual(r.resolucao.precoPublicacao, null);
-  assert.strictEqual(r.oferta.preco, "");
+  assert.strictEqual(r.oferta.preco, undefined);
 }
 
 function testarInteligenciaUniversalComPrecoCanonicoNaoMantemPrecoInvalido() {
@@ -688,13 +695,13 @@ function testarLoggingModoFielEmite() {
 const testes = [
   testarPrecoAltaCoerente,
   testarPrecoAltaDivergente,
-  testarSemPrecoRadarUsaImportador,
+  testarSemPrecoRadarNaoUsaImportador,
   testarMediaComMarcador,
   testarMediaSemMarcadorAplicaCloneRadar,
   testarParcelaNaoViraTotal,
   testarPercentualNaoViraPreco,
   testarCupomRadarClaro,
-  testarCupomImportadorFallback,
+  testarCupomImportadorNaoViraFallback,
   testarCupomProvavelNaoAplica,
   testarLinksProdutoEResgate,
   testarAmazonPix,

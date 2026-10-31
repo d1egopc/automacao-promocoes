@@ -14,6 +14,7 @@ const { prepararDadosOficiaisTemplate } = require("../modules/templates-clientes
 const fidelidadeObs = require("../modules/fidelidade/observabilidade-v1");
 const { selecionarTemplateEspelhoPiloto } = require("../modules/ofc-v2/espelho-piloto");
 const copyInteligente = require("../modules/copy-inteligente");
+const { validarFidelidadeComercialRadar } = require("../modules/radar/comercial-precedencia");
 
 function normalizarTextoLocal(valor = "") {
   return String(valor || "").trim();
@@ -831,7 +832,7 @@ function montarOfertaRenderizacaoOficial(oferta = {}) {
   const linkAfiliado = dadosUniversal.linkAfiliado || dadosPersonalizado.linkAfiliado || oferta.linkAfiliado || oferta.linkFinal || oferta.link || "";
   const cupom = dadosUniversal.cupom || dadosPersonalizado.cupom || oferta.cupom || "";
 
-  return {
+  const final = {
     ...oferta,
     ...dadosPersonalizado,
     ...dadosUniversal,
@@ -852,6 +853,13 @@ function montarOfertaRenderizacaoOficial(oferta = {}) {
     fonteDadosMensagem: "dados_oficiais_template",
     ...camposTituloProdutoGanchoLocal(oferta)
   };
+  const fidelidade = validarFidelidadeComercialRadar(final);
+  if (!fidelidade.ok) {
+    const erro = new Error(fidelidade.motivos[0]);
+    erro.code = "RADAR_FIDELIDADE_COMERCIAL_INVALIDA";
+    throw erro;
+  }
+  return final;
 }
 
 function tentarTemplateUniversalOficial(oferta = {}, opcoes = {}) {
@@ -1006,6 +1014,12 @@ function montarLegendaShopee(oferta = {}) {
 }
 
 function montarMensagemOferta(oferta = {}, opcoes = {}) {
+  const fidelidadeRadar = validarFidelidadeComercialRadar(oferta);
+  if (!fidelidadeRadar.ok) {
+    const erro = new Error(fidelidadeRadar.motivos[0]);
+    erro.code = "RADAR_FIDELIDADE_COMERCIAL_INVALIDA";
+    throw erro;
+  }
   const clienteId = opcoes.clienteId || oferta.clienteId || "admin";
   const destino = opcoes.destino || {};
   let resolucaoTemplate = null;

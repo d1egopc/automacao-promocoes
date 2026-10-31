@@ -1,4 +1,5 @@
 const path = require("path");
+const { validarFidelidadeComercialRadar } = require("../../radar/comercial-precedencia");
 const { getEnginePool, engineDbHabilitado } = require("../database");
 const { sqlFiltroEpochReal } = require("../universal-ingress-fence");
 const { limitarJobs } = require("../processor.service");
@@ -1235,6 +1236,9 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
     };
   };
 
+  const fidelidadeRadar = validarFidelidadeComercialRadar(oferta);
+  if (!fidelidadeRadar.ok) return rejeitar(fidelidadeRadar.motivos[0], { fidelidadeRadar });
+
   if (!usuarioAtivo(clienteId)) {
     logUsuarioInativoIgnorado({ clienteId, fluxo: "engine_distributor_validacao" });
     return rejeitar("usuario_inativo");
@@ -1293,6 +1297,8 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
 }
 
 async function adicionarOfertaNaFilaCliente(oferta = {}, contexto = {}) {
+  const fidelidadeRadar = validarFidelidadeComercialRadar(oferta);
+  if (!fidelidadeRadar.ok) return { ok: false, motivo: fidelidadeRadar.motivos[0] };
   const clienteId = normalizarTexto(oferta.cliente_id);
   const deps = contexto.deps || {};
   const registrarSnapshotFila = async (item = {}) => {

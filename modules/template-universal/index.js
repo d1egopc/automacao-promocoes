@@ -13,6 +13,9 @@ const {
 const {
   marketplacePermiteLinkResgate
 } = require("../templates-clientes/link-resgate-publicavel");
+const {
+  normalizarCuponsSemanticos
+} = require("../radar/cupom-semantico");
 
 const CAMPOS_TEXTO_COMERCIAL_EXPLICITOS = [
   "texto",
@@ -387,7 +390,17 @@ function selecionarCamposUniversais(oferta = {}) {
   const ofertaNormalizada = normalizarApresentacaoComercial(oferta);
   const ofertaApresentacao = resolverContratoComercialFinal(ofertaNormalizada);
   const contratoFinal = ofertaApresentacao.contratoComercialFinal || {};
-  const cupom = normalizarTexto(contratoFinal.cupomCodigo || ofertaApresentacao.cupom);
+  const radarComercial = oferta.origemComercialRadar === true || oferta.fonteComercial === "radar_mirror" ||
+    Boolean(oferta.radarMirror || oferta.metadata?.radarMirror || oferta.metadata?.radarEspelhoComercial?.radarMirror);
+  const cuponsRadar = radarComercial
+    ? normalizarCuponsSemanticos([
+      ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+      ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
+    ])
+    : [];
+  const cupom = radarComercial && cuponsRadar.length > 1
+    ? cuponsRadar.join(" ou ")
+    : normalizarTexto(contratoFinal.cupomCodigo || ofertaApresentacao.cupom);
 
   return {
     titulo: normalizarTexto(ofertaApresentacao.titulo),

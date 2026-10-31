@@ -143,7 +143,7 @@ function pareceInstrucaoImperativaSemMarcador(valor = "") {
   const original = texto(valor);
   if (!original) return false;
   if (/\b(?:cupom|cupons|codigo|c[oó]digo|codigos|voucher|coupon|promocode)\b/i.test(original)) return false;
-  return /^\s*(?:abra|abrir|acesse|clique|toque|confira|veja|vai\s+aparecer|aparecer[aá]?)\b/i.test(original);
+  return /^\s*(?:e\s+)?(?:abra|abrir|acesse|clique|toque|confira|veja|ative|ativar|selecione|procure|vai\s+aparecer|aparecer[aá]?)\b/i.test(original);
 }
 
 function pareceFraseNaturalSemCodigo(valor = "") {
@@ -168,6 +168,7 @@ function normalizarCodigoCupomSemantico(candidato = "") {
   const original = texto(candidato);
   if (!original) return "";
   if (/\r?\n/.test(original)) return "";
+  if (/\s+(?:do|da|dos|das|no|na|nos|nas)\s+/i.test(original)) return "";
   if (pareceUrlOuParametro(original)) return "";
   if (/^(?:no|na|nos|nas|do|da|dos|das)\s+(?:p[aá]gina|an[uú]ncio|site|app|aplicativo|produto)\b/i.test(original)) return "";
   if (/\b(?:selecione|pagamento|pague)\s+(?:o\s+)?pix\b/i.test(original)) return "";

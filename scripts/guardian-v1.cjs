@@ -412,6 +412,24 @@ function testMatrix(plan) {
     add("contract:clonador", "tests/clonador-grupos-foundation.test.js", process.execPath, ["tests/clonador-grupos-foundation.test.js"]);
     add("contract:fila-viva", "tests/fila-viva-runtime-wiring.test.js", process.execPath, ["tests/fila-viva-runtime-wiring.test.js"]);
   }
+  if (plan.runtimeFiles.some(file => [
+    "modules/radar/comercial-precedencia.js",
+    "modules/radar/cupom-semantico.js",
+    "modules/radar/preco-semantico.js",
+    "modules/engine/importer/importer.service.js",
+    "modules/engine/distributor/distributor.service.js",
+    "modules/templates-clientes/dados-oficiais.js",
+    "modules/templates-clientes/renderer.js",
+    "modules/template-universal/index.js",
+    "utils/mensagens-ofertas.js"
+  ].includes(file))) {
+    add("radar:commercial-fidelity", "tests/radar-commercial-fidelity.test.cjs", process.execPath,
+      ["--test", "tests/radar-commercial-fidelity.test.cjs"], false);
+    add("radar:faithful-mirror", "tests/radar-espelho-fiel.test.js", process.execPath, ["tests/radar-espelho-fiel.test.js"]);
+    add("radar:mirror-propagation", "tests/radar-espelho-propagacao.test.js", process.execPath, ["tests/radar-espelho-propagacao.test.js"]);
+    add("radar:commercial-precedence", "tests/radar-precedencia-comercial.test.js", process.execPath, ["tests/radar-precedencia-comercial.test.js"]);
+    add("radar:semantic-price", "tests/radar-preco-semantico.test.js", process.execPath, ["tests/radar-preco-semantico.test.js"]);
+  }
   if (plan.runtimeFiles.some(file => file === "index.js" || file.startsWith("modules/mensageiro"))) {
     add("mensageiro:backend-definitivo", "tests/mensageiro-backend-definitivo.test.cjs", process.execPath,
       ["--test", "tests/mensageiro-backend-definitivo.test.cjs"], false);

@@ -162,6 +162,12 @@ function classificarTipo(base = {}) {
   const contextoNormalizado = semAcentos(`${base.trechoOrigem} ${base.textoOriginal}`);
   const motivos = [];
 
+  if (!base.possuiCifrao && !["preco_final", "com_cupom", "por", "total"].includes(anterior) &&
+      /\b(?:cupons?|campanha|festival|evento)\b/.test(contextoNormalizado) &&
+      /^\d{1,2}[.]\d{1,2}$/.test(String(base.textoOriginal || "").trim())) {
+    return { tipo: TIPOS_CANDIDATO.IDENTIFICADOR, motivos: ["identificador_de_campanha_sem_evidencia_monetaria"] };
+  }
+
   if (posterior === "percentual" || /%/.test(base.textoOriginal)) {
     motivos.push("candidato_classificado_como_percentual");
     return { tipo: TIPOS_CANDIDATO.PERCENTUAL, motivos };

@@ -236,7 +236,7 @@ function testarMetadataPrecedencia() {
   assert.strictEqual(resultado.metadata.precedenciaComercial.tipoCandidatoEscolhido, "preco_atual");
 }
 
-function testarBeneficioOffNaoSobrescrevePrecoImportador() {
+function testarBeneficioOffSemPrecoRadarNaoPublicaFallback() {
   const textoOriginal = "R$200 OFF em compras a partir de R$1.500";
   const comercial = extrair(textoOriginal, { marketplaceDetectado: "shopee" });
   const mirror = criarRadarMirror({ textoOriginal, links: [], extracaoRadarLocal: { precoAtual: comercial.precoAtual, comercial }, marketplace: "shopee" });
@@ -247,7 +247,7 @@ function testarBeneficioOffNaoSobrescrevePrecoImportador() {
   });
   assert.strictEqual(resultado.resolucao.origemPreco, "ausente");
   assert.strictEqual(resultado.resolucao.precoPublicacao, null);
-  assert.strictEqual(resultado.oferta.preco, 1967);
+  assert.strictEqual(resultado.oferta.preco, undefined);
   const template = gerarTemplateUniversal({
     ...resultado.oferta,
     titulo: "Oferta Shopee com beneficio",
@@ -256,7 +256,7 @@ function testarBeneficioOffNaoSobrescrevePrecoImportador() {
     linkAfiliado: "https://s.shopee.com.br/produto"
   });
   assert.ok(!template.includes("Por: *R$ 200,00*"), "template final nao publica beneficio como preco");
-  assert.ok(template.includes("Por: *R$ 1.967,00*"), "template final preserva fallback tecnico legitimo");
+  assert.ok(!template.includes("Por: *R$ 1.967,00*"), "preco do importador nao substitui preco Radar ausente");
 }
 
 function testarMagaluM56DePorSemCifrao() {
@@ -340,7 +340,7 @@ const testes = [
   testarManualSemRadar,
   testarRadarMirrorFielPadrao,
   testarMetadataPrecedencia,
-  testarBeneficioOffNaoSobrescrevePrecoImportador,
+  testarBeneficioOffSemPrecoRadarNaoPublicaFallback,
   testarMagaluM56DePorSemCifrao,
   testarMagaluM56DecimalPontoCupomParcelaAvaliacao,
   testarMagaluM561MarkdownDePor,

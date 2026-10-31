@@ -1,0 +1,14 @@
+{
+  "provenance": {
+    "shopeeEvent": 199692,
+    "shopeeOffer": 171109,
+    "shopeeOriginalSha256": "c09242fb274a771b476e261b4931460fe8e2f79cf4d201b78b11902a340c5bd3",
+    "mlEvent": 202911,
+    "mlOffer": 175542,
+    "mlOriginalSha256": "eb74efaab424e8341b95af3aa5d4459a1de15be1ece7c7d6ffb6ddfe5cb63c52",
+    "note": "Sanitized commercial excerpts. R$32 is a requested synthetic regression, not the proven price of event 199692."
+  },
+  "shopeeOriginal": "Smart TV HQ QLED 75 Polegadas HQ-QLED75SM 4K\nPreço: R$ 2920\nCupom: 3SQU3NT411\nLink produto: https://shopee.com.br/product/123/456",
+  "mlOriginal": "Cupom 20% OFF Mercado Livre (APP)\nResgate agora para usar 00:00\n1 - Abra este link no APP: https://example.invalid/resgate\n2 - No canto INFERIOR DIREITO vá em mais\n3 - Nas primeiras opções Cupons Relâmpago do 11.11\n4 - Resgate o cupom e ative o lembrete para o horário citado!",
+  "price32Control": "Suporte com rodas para eletrodomésticos\nDe R$ 59,90 por R$ 32,00\nCupom: 3SQU3NT411 ou CASA10\nLink produto: https://shopee.com.br/product/123/456"
+}

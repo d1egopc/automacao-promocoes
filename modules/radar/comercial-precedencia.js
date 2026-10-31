@@ -1,4 +1,5 @@
 const { normalizarNumeroMoeda } = require("../../utils/moeda");
+const { resolverPrecoSemantico } = require("./preco-semantico");
 const {
   normalizarCodigoCupomSemantico,
   normalizarCuponsSemanticos
@@ -34,6 +35,8 @@ function tituloComercialUniversalValido(titulo = "", contexto = {}) {
   const n = normalizarPapelComercial(limpo);
   if (!n) return false;
   const semPrefixoDeEtapa = n.replace(/^(?:\d+\s+)+/, "");
+  if (/^(?:abra|abrir|acesse|clique|toque|selecione|resgate|ative|siga|participe)\b/.test(semPrefixoDeEtapa) ||
+      /^(?:no|na|nos|nas)\b.*\b(?:canto|rodape|aba|menu|opcoes|tela)\b/.test(semPrefixoDeEtapa)) return false;
   if (
     /^(?:vendido por marketplaces?|vendido por loja oficial (?:no|do) ml|produto amazon|confira na loja|veja o produto)$/.test(n) ||
     /^clique em inicio no rodape do app$/.test(semPrefixoDeEtapa) ||
@@ -220,6 +223,7 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
   let precoPublicacao = null;
   let statusComparacaoPreco = "sem_radar";
   let motivo = "radar_ausente";
+  let precoAnteriorComprovado = null;
 
   if (precoRadar !== null) {
     const divergenciaExtrema = divergenciaPercentual !== null && divergenciaPercentual >= DIVERGENCIA_PERCENTUAL_SUSPEITA;
@@ -253,11 +257,27 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
     motivo = "radar_preco_invalido";
   }
 
+  // Revalidate the captured evidence, never replace it with a marketplace value.
+  const original = texto(radarMirror?.texto?.original || radarMirror?.texto?.limpo || "");
+  if (original && precoPublicacao !== null) {
+    const semanticaOriginal = original.length <= 20000 ? resolverPrecoSemantico(original) : null;
+    const comprovado = semanticaOriginal?.precoAtual || null;
+    precoAnteriorComprovado = precoValido(semanticaOriginal?.precoAntigo?.valor);
+    if (!comprovado || Math.abs(Number(comprovado.valor) - precoPublicacao) > 0.005) {
+      origemPreco = "ausente";
+      precoPublicacao = null;
+      precoAnteriorComprovado = null;
+      statusComparacaoPreco = "radar_invalido";
+      motivo = "radar_preco_nao_comprovado_no_original";
+    }
+  }
+
   return {
     precoPublicacao,
     origemPreco,
     precoRadar,
     precoImportador,
+    precoAnteriorComprovado,
     confiancaPrecoRadar: radar.confianca,
     divergenciaPercentual,
     statusComparacaoPreco,
@@ -276,15 +296,17 @@ function resolverPreco({ ofertaImportador = {}, radarMirror = {}, cupomRadarConf
 function resolverCupom({ ofertaImportador = {}, radarMirror = {} } = {}) {
   const cupomComercial = radarMirror?.comercial?.cupom || {};
   const cupomProvavel = cupomComercial.provavel === true;
+  const textoOriginal = texto(radarMirror?.texto?.original || radarMirror?.texto?.limpo || "");
+  const cuponsPresentesNoOriginal = new Set(normalizarCuponsSemanticos(textoOriginal));
   const cuponsExplicitosRadar = normalizarCupons([
     ...(Array.isArray(radarMirror?.cupom?.codigosCapturados) ? radarMirror.cupom.codigosCapturados : []),
     ...(Array.isArray(cupomComercial?.codigos) ? cupomComercial.codigos : []),
     ...(Array.isArray(cupomComercial?.cupons) ? cupomComercial.cupons : []),
     radarMirror?.cupom?.codigoCapturado || "",
     cupomComercial?.codigo || ""
-  ]);
+  ]).filter(codigo => !textoOriginal || cuponsPresentesNoOriginal.has(codigo));
   const cuponsTextoRadar = cuponsExplicitosRadar.length ? [] : normalizarCupons([
-    cupomProvavel ? "" : (radarMirror?.texto?.original || radarMirror?.texto?.limpo || "")
+    cupomProvavel ? "" : textoOriginal
   ]);
   const cuponsRadar = [...cuponsExplicitosRadar, ...cuponsTextoRadar];
   const cupomRadar = cuponsRadar[0] || null;
@@ -347,25 +369,78 @@ function parcelamentoProtegido(parcelamento = {}) {
 function montarCondicoesComerciais(radarMirror = {}) {
   const comercial = radarMirror?.comercial || {};
   const cupom = comercial.cupom || {};
+  const originalBruto = texto(radarMirror?.texto?.original || radarMirror?.texto?.limpo || "");
+  const original = originalBruto.length <= 20000 ? originalBruto : "";
+  const semantica = original ? resolverPrecoSemantico(original) : null;
+  const normalizarEvidencia = valor => texto(valor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const evidencias = Array.isArray(semantica?.candidatos) ? semantica.candidatos : [];
+  const numeroNaFonte = valor => {
+    const numero = precoValido(valor);
+    return numero !== null && evidencias.some(item => {
+      const candidato = precoValido(item.valor);
+      return candidato !== null && Math.abs(candidato - numero) <= 0.005;
+    });
+  };
+  const textoNaFonte = valor => {
+    const trecho = normalizarEvidencia(valor);
+    const fonte = normalizarEvidencia(original);
+    return Boolean(trecho && fonte.includes(trecho));
+  };
+  const condicaoValidada = (campo, tipo) => {
+    const resultado = campoCondicao(campo);
+    if (resultado.valor === null || resultado.valor === "") return resultado;
+    const evidencia = texto(campo?.evidencia || "");
+    if (textoNaFonte(evidencia)) return resultado;
+    let confirmada = false;
+    if (tipo === "pix") confirmada = numeroNaFonte(resultado.valor) && /\bpix\b/i.test(original);
+    else if (tipo === "boleto") confirmada = numeroNaFonte(resultado.valor) && /\bboleto\b/i.test(original);
+    else if (tipo === "cartao") confirmada = numeroNaFonte(resultado.valor) && /\b(?:cart[aã]o|cr[eé]dito)\b/i.test(original);
+    else if (tipo === "unitario") confirmada = numeroNaFonte(resultado.valor) && /\b(?:cada|unidade|unit[aá]rio|\/\s*un)\b/i.test(original);
+    else if (tipo === "cashback") confirmada = numeroNaFonte(resultado.valor) && /\bcashback\b/i.test(original);
+    else if (tipo === "desconto") confirmada = numeroNaFonte(resultado.valor) && /\b(?:off|desconto)\b/i.test(original);
+    else if (tipo === "freteGratis") confirmada = resultado.valor === true && /frete\s+gr[aá]tis/i.test(original);
+    else if (tipo === "moedas") confirmada = textoNaFonte(evidencia || resultado.valor);
+    if (confirmada) return resultado;
+    return { ...resultado, valor: null, confianca: "ausente", evidencia: null };
+  };
+  const parcelamento = comercial.parcelamento || {};
+  const parcelaValorComprovado = !parcelamento.valorParcela ||
+    (numeroNaFonte(parcelamento.valorParcela) && /\b\d{1,2}\s*x\b|\bparcel/i.test(original));
+  const quantidadeParcelasComprovada = !parcelamento.quantidade ||
+    new RegExp(`\\b${Number(parcelamento.quantidade)}\\s*x\\b`, "i").test(original);
+  const parcelamentoComprovado = textoNaFonte(parcelamento.evidencia || "") ||
+    (parcelaValorComprovado && quantidadeParcelasComprovada && Number(parcelamento.quantidade) > 0);
+  const condicoesEspeciais = Array.isArray(comercial.condicoesEspeciais)
+    ? comercial.condicoesEspeciais.filter(item => textoNaFonte(item)).slice(0, 20)
+    : [];
+  const brindes = Array.isArray(comercial.brindes)
+    ? comercial.brindes.filter(item => textoNaFonte(item)).slice(0, 10)
+    : [];
+  const instrucaoCupom = texto(cupom.instrucao || radarMirror?.cupom?.condicaoCapturada || "");
   return {
-    pix: campoCondicao(comercial.precoPix),
-    boleto: campoCondicao(comercial.precoBoleto),
-    cartao: campoCondicao(comercial.precoCartao),
-    unitario: campoCondicao(comercial.precoUnitario),
+    pix: condicaoValidada(comercial.precoPix, "pix"),
+    boleto: condicaoValidada(comercial.precoBoleto, "boleto"),
+    cartao: condicaoValidada(comercial.precoCartao, "cartao"),
+    unitario: condicaoValidada(comercial.precoUnitario, "unitario"),
     parcelamento: {
-      quantidade: comercial.parcelamento?.quantidade ?? null,
-      valorParcela: precoValido(comercial.parcelamento?.valorParcela) ?? null,
-      semJuros: comercial.parcelamento?.semJuros === true,
-      confianca: confianca(comercial.parcelamento?.confianca || "ausente"),
-      evidencia: textoOuNull(comercial.parcelamento?.evidencia || "")
+      quantidade: parcelamentoComprovado ? (parcelamento.quantidade ?? null) : null,
+      valorParcela: parcelamentoComprovado ? (precoValido(parcelamento.valorParcela) ?? null) : null,
+      semJuros: parcelamentoComprovado && parcelamento.semJuros === true,
+      confianca: parcelamentoComprovado ? confianca(parcelamento.confianca || "ausente") : "ausente",
+      evidencia: parcelamentoComprovado ? textoOuNull(parcelamento.evidencia || "") : null
     },
-    cashback: campoCondicao(comercial.cashback),
-    freteGratis: campoCondicao(comercial.freteGratis),
-    moedas: campoCondicao(comercial.moedasShopee),
-    brindes: Array.isArray(comercial.brindes) ? comercial.brindes.filter(Boolean).slice(0, 10) : [],
-    descontoPercentual: campoCondicao(comercial.descontoPercentual),
-    instrucaoCupom: textoOuNull(cupom.instrucao || radarMirror?.cupom?.condicaoCapturada || ""),
-    condicoesEspeciais: Array.isArray(comercial.condicoesEspeciais) ? comercial.condicoesEspeciais.filter(Boolean).slice(0, 20) : []
+    cashback: condicaoValidada(comercial.cashback, "cashback"),
+    freteGratis: condicaoValidada(comercial.freteGratis, "freteGratis"),
+    moedas: condicaoValidada(comercial.moedasShopee, "moedas"),
+    brindes,
+    descontoPercentual: condicaoValidada(comercial.descontoPercentual, "desconto"),
+    instrucaoCupom: instrucaoCupom && textoNaFonte(instrucaoCupom) ? instrucaoCupom : null,
+    condicoesEspeciais
   };
 }
 
@@ -447,6 +522,8 @@ function limparCamposComerciaisImportador(oferta = {}) {
     "preco_atual",
     "precoAtual",
     "precoPublicacao",
+    "precoPor",
+    "preco_por",
     "preco_publicacao",
     "precoOriginal",
     "preco_original",
@@ -460,6 +537,11 @@ function limparCamposComerciaisImportador(oferta = {}) {
     "cupom",
     "codigoCupom",
     "codigo_cupom",
+    "cupomTexto",
+    "cupomCodigo",
+    "cupons",
+    "codigosCupom",
+    "instrucaoCupom",
     "avisoCupom",
     "aviso_cupom",
     "tipoCupom",
@@ -484,7 +566,8 @@ function limparCamposComerciaisImportador(oferta = {}) {
     "precoCartao",
     "cashback",
     "cashbackValor",
-    "cashbackPercentual"
+    "cashbackPercentual",
+    "parcelamento", "quantidadeParcelas", "valorParcela", "frete", "condicaoPix", "descontoPercentual", "descontoPercentualOrigem"
   ]) {
     delete proxima[campo];
   }
@@ -495,7 +578,12 @@ function limparCamposComerciaisImportador(oferta = {}) {
 }
 
 function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
-  const proxima = { ...oferta };
+  const proxima = limparCamposComerciaisImportador(oferta);
+  // Technical enrichment remains usable; commercial fields are rebuilt only from Radar.
+  if (tituloComercialUniversalValido(oferta.titulo || oferta.nome || "")) {
+    proxima.titulo = oferta.titulo || oferta.nome;
+    proxima.nome = proxima.titulo;
+  }
   const condicoes = resolucao.condicoesComerciais || {};
 
   if (resolucao.tituloRadar) {
@@ -572,6 +660,172 @@ function aplicarRadarMirrorFiel(oferta = {}, resolucao = {}) {
   return proxima;
 }
 
+function extrairRadarMirrorFidelidade(oferta = {}, metadata = {}) {
+  const metadataOferta = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const fontes = [metadata, metadataOferta, oferta].filter(item => item && typeof item === "object");
+  for (const fonte of fontes) {
+    if (fonte.radarMirror && typeof fonte.radarMirror === "object") return fonte.radarMirror;
+    if (fonte.radarEspelhoComercial?.radarMirror && typeof fonte.radarEspelhoComercial.radarMirror === "object") {
+      return fonte.radarEspelhoComercial.radarMirror;
+    }
+  }
+  return null;
+}
+
+function identidadeOficialRadarConfirmada(oferta = {}, metadata = {}) {
+  const metadataOferta = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const fontes = [metadata, metadataOferta, oferta].filter(item => item && typeof item === "object");
+  for (const fonte of fontes) {
+    const ml = fonte.identidadeCanonicaMl || fonte.revalidacaoMeliLa;
+    if (ml?.status === "consistente" && (
+      (ml.mlbForteConfirmado === true && Boolean(ml.mlbProduto) && ml.mlbProduto === ml.mlbRevalidado) ||
+      (ml.transporteShowProductConfirmado === true && Boolean(ml.urlCanonicaRevalidada))
+    )) return true;
+
+    const shopee = fonte.identidadeProdutoValidada || fonte.produto?.identidadeProdutoValidada;
+    if (shopee?.fonte === "api.productOfferV2" && String(shopee.shopId || "").trim() && String(shopee.itemId || "").trim()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validarFidelidadeComercialRadar(oferta = {}, metadata = oferta.metadata || {}) {
+  const metadataOferta = oferta.metadata && typeof oferta.metadata === "object" ? oferta.metadata : {};
+  const metadados = metadata && typeof metadata === "object" ? { ...metadataOferta, ...metadata } : metadataOferta;
+  const mirror = extrairRadarMirrorFidelidade(oferta, metadados);
+  const origem = texto(metadados?.origemFluxo || oferta.origemFluxo || oferta.origem).toLowerCase();
+  const fonteComercial = texto(metadados?.fonteComercial || oferta.fonteComercial).toLowerCase();
+  const origemMirror = texto(metadados?.radarEspelhoComercial?.origem || oferta.metadata?.radarEspelhoComercial?.origem).toLowerCase();
+  const sinalRadar = Boolean(
+    oferta.radar === true || metadados.radar === true ||
+    ["radar", "teleradar", "radar_whatsapp", "radar_telegram"].includes(origem) ||
+    ["radar_mirror", "radar_espelho_comercial"].includes(fonteComercial) ||
+    origemMirror === "radar_mirror"
+  );
+  if (!mirror && !sinalRadar) {
+    return { aplicavel: false, ok: true, motivos: [] };
+  }
+  const motivos = [];
+  if (!mirror || typeof mirror !== "object") return { aplicavel: true, ok: false, motivos: ["radar_contrato_original_ausente"] };
+  const identidadeOficialConfirmada = identidadeOficialRadarConfirmada(oferta, metadados);
+  const preco = resolverPreco({ radarMirror: mirror });
+  const cupom = resolverCupom({ radarMirror: mirror });
+  if (preco.origemPreco !== "radar" || preco.precoPublicacao === null) motivos.push("radar_preco_original_nao_comprovado");
+  else {
+    for (const campo of ["preco", "precoAtual", "preco_atual", "precoPor", "precoPublicacao", "valor"]) {
+      if (oferta[campo] == null || oferta[campo] === "") continue;
+      const atual = precoValido(oferta[campo]);
+      if (atual === null || Math.abs(atual - preco.precoPublicacao) > 0.005) motivos.push("radar_preco_divergente");
+    }
+    if (precoValido(oferta.precoAtual ?? oferta.preco) === null) motivos.push("radar_preco_publicacao_ausente");
+  }
+  const anterior = preco.precoAnteriorComprovado;
+  for (const campo of ["precoOriginal", "preco_original", "precoAnterior", "precoAntigo", "precoDe"]) {
+    if (oferta[campo] == null || oferta[campo] === "") continue;
+    const valor = precoValido(oferta[campo]);
+    if (anterior === null) motivos.push("radar_preco_anterior_nao_comprovado");
+    else if (valor === null || Math.abs(valor - anterior) > 0.005) motivos.push("radar_preco_anterior_divergente");
+  }
+  const esperados = normalizarCupons(cupom.cupomPublicacao || "").sort();
+  const publicados = normalizarCupons([
+    oferta.cupom,
+    oferta.codigoCupom,
+    oferta.codigo_cupom,
+    ...(Array.isArray(oferta.cupons) ? oferta.cupons : []),
+    ...(Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : [])
+  ].filter(Boolean));
+  if (JSON.stringify([...new Set(publicados)].sort()) !== JSON.stringify(esperados)) motivos.push("radar_cupom_divergente");
+  const textoOriginal = texto(mirror.texto?.original || mirror.texto?.limpo || "");
+  const textoOriginalNormalizado = normalizarPapelComercial(textoOriginal);
+  const instrucaoCupom = texto(oferta.instrucaoCupom || oferta.avisoCupom || oferta.cupomTexto || "");
+  if (instrucaoCupom && !textoOriginalNormalizado.includes(normalizarPapelComercial(instrucaoCupom))) {
+    motivos.push("radar_instrucao_cupom_divergente");
+  }
+  const condicoesComerciais = montarCondicoesComerciais(mirror);
+  const verificarCondicaoTextual = (campos, esperado) => {
+    for (const campo of campos) {
+      if (oferta[campo] == null || oferta[campo] === "") continue;
+      if (!esperado || normalizarPapelComercial(oferta[campo]) !== normalizarPapelComercial(esperado)) {
+        motivos.push("radar_condicao_comercial_divergente");
+        return;
+      }
+    }
+  };
+  const pixEsperado = condicoesComerciais.pix;
+  const pixEsperadoNumero = precoValido(pixEsperado?.valor);
+  const fonteTemPix = /\bpix\b/i.test(textoOriginal) && pixEsperadoNumero !== null;
+  const verificarPrecoPix = () => {
+    const valor = oferta.precoPix;
+    if (valor == null || valor === "") return;
+    const numero = precoValido(valor);
+    const normalizado = normalizarPapelComercial(valor);
+    const marcadorPagamentoDivergente = /\b(?:boleto|cartao|credito|debito|parcelad[oa])\b/.test(normalizado);
+    if (!fonteTemPix || numero === null || Math.abs(numero - pixEsperadoNumero) > 0.005 || marcadorPagamentoDivergente) {
+      motivos.push("radar_condicao_comercial_divergente");
+    }
+  };
+  const verificarRotuloPix = () => {
+    const valor = oferta.condicaoPix;
+    if (valor == null || valor === "") return;
+    const normalizado = normalizarPapelComercial(valor);
+    const marcadorPix = /\bpix\b/.test(normalizado);
+    const marcadorPagamentoDivergente = /\b(?:boleto|cartao|credito|debito|parcelad[oa])\b/.test(normalizado);
+    const numero = precoValido(valor);
+    if (!fonteTemPix || !marcadorPix || marcadorPagamentoDivergente ||
+        (numero !== null && Math.abs(numero - pixEsperadoNumero) > 0.005)) {
+      motivos.push("radar_condicao_comercial_divergente");
+    }
+  };
+  verificarPrecoPix();
+  verificarRotuloPix();
+  verificarCondicaoTextual(["precoBoleto"], valorCondicaoTexto(condicoesComerciais.boleto, "Preco boleto"));
+  verificarCondicaoTextual(["precoCartao"], valorCondicaoTexto(condicoesComerciais.cartao, "Preco cartao"));
+  verificarCondicaoTextual(["precoUnitario"], valorCondicaoTexto(condicoesComerciais.unitario, "Preco unitario"));
+  verificarCondicaoTextual(["parcelamento"], textoParcelamentoRadar(condicoesComerciais.parcelamento));
+  verificarCondicaoTextual(["cashback"], valorCondicaoTexto(condicoesComerciais.cashback, "Cashback"));
+  verificarCondicaoTextual(["descontoRadar"], valorCondicaoTexto(condicoesComerciais.descontoPercentual, "Desconto"));
+  verificarCondicaoTextual(["moedas", "moedasTexto"], valorCondicaoTexto(condicoesComerciais.moedas, ""));
+  if (oferta.freteGratis === true && condicoesComerciais.freteGratis?.valor !== true) {
+    motivos.push("radar_condicao_comercial_divergente");
+  }
+  const condicoesOferta = oferta.condicoesComerciais;
+  if (condicoesOferta && typeof condicoesOferta === "object") {
+    for (const campo of ["pix", "boleto", "cartao", "unitario", "parcelamento", "cashback", "freteGratis", "moedas", "descontoPercentual"]) {
+      const atual = condicoesOferta[campo];
+      if (!atual || typeof atual !== "object") continue;
+      const esperado = condicoesComerciais[campo];
+      if (campo !== "parcelamento" && (atual.valor == null || atual.valor === "")) continue;
+      const mesmoValor = campo === "parcelamento"
+        ? Boolean(esperado && atual.quantidade === esperado.quantidade &&
+          precoValido(atual.valorParcela) === precoValido(esperado.valorParcela) &&
+          atual.semJuros === esperado.semJuros)
+        : Boolean(esperado && atual.valor === esperado.valor);
+      if (!esperado || !mesmoValor ||
+          normalizarPapelComercial(atual.evidencia || "") !== normalizarPapelComercial(esperado.evidencia || "")) {
+        motivos.push("radar_condicao_comercial_divergente");
+        break;
+      }
+    }
+  }
+  const tituloOferta = texto(oferta.titulo || oferta.nome || "");
+  const tituloRadar = texto(mirror.produto?.tituloCapturado || "");
+  if (!tituloComercialUniversalValido(tituloOferta, { cupons: esperados, marketplace: oferta.marketplace })) {
+    motivos.push("radar_titulo_operacional_ou_ausente");
+  } else if (!tituloComercialUniversalValido(tituloRadar, { cupons: esperados, marketplace: oferta.marketplace }) && !identidadeOficialConfirmada) {
+    motivos.push("radar_identidade_titulo_nao_confirmada");
+  } else if (tituloComercialUniversalValido(tituloRadar, { cupons: esperados, marketplace: oferta.marketplace }) &&
+      normalizarPapelComercial(tituloOferta) !== normalizarPapelComercial(tituloRadar) && !identidadeOficialConfirmada) {
+    motivos.push("radar_titulo_divergente_sem_identidade");
+  }
+  // A cart/checkout is not proof of the product that appeared in the captured message.
+  const expandido = texto(oferta.linkExpandido || oferta.link_expandido || metadata.url_expandida || "");
+  try {
+    if (/^\/(?:cart|checkout)(?:\/|$)/i.test(new URL(expandido).pathname)) motivos.push("radar_identidade_destino_nao_produto");
+  } catch { /* Absence is handled by existing marketplace identity gates. */ }
+  return { aplicavel: true, ok: motivos.length === 0, motivos: [...new Set(motivos)] };
+}
+
 function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror = null, metadata = {}, clienteId = "", marketplace = "" } = {}) {
   const mirror = radarMirror || metadata?.radarMirror || null;
   const metadataBase = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {};
@@ -594,7 +848,11 @@ function resolverPrecedenciaComercialRadar({ ofertaImportador = {}, radarMirror 
   const condicoesComerciais = montarCondicoesComerciais(mirror);
   const confiancaComercial = montarConfiancaComercial(mirror, preco, cupom);
   const resolucaoPrecoComercial = mirror?.comercial?.resolucaoPreco || {};
-  const precoAnteriorRadar = precoValido(mirror?.preco?.anteriorCapturado ?? mirror?.comercial?.precoAntigo?.valor);
+  const precoAnteriorCapturado = precoValido(mirror?.preco?.anteriorCapturado ?? mirror?.comercial?.precoAntigo?.valor);
+  const precoAnteriorRadar = precoAnteriorCapturado !== null && preco.precoAnteriorComprovado !== null &&
+    Math.abs(precoAnteriorCapturado - preco.precoAnteriorComprovado) <= 0.005
+    ? precoAnteriorCapturado
+    : null;
   const camposProtegidos = {
     preco: preco.origemPreco === "radar" && preco.precoPublicacao !== null,
     precoAnterior: precoAnteriorRadar !== null,
@@ -782,5 +1040,7 @@ module.exports = {
   emitirLogRadarPrecoSuspeito,
   resolverPreco,
   resolverCupom,
+  extrairRadarMirrorFidelidade,
+  validarFidelidadeComercialRadar,
   tituloComercialUniversalValido
 };

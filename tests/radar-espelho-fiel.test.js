@@ -112,7 +112,7 @@ function resolver(mirror, oferta = ofertaImportador()) {
   return resolverPrecedenciaComercialRadar({
     ofertaImportador: oferta,
     radarMirror: mirror,
-    metadata: oferta.metadata || {},
+    metadata: { ...(oferta.metadata || {}), radarMirror: mirror },
     clienteId: "user_teste",
     marketplace: oferta.marketplace
   });
@@ -138,16 +138,16 @@ function testarRadarMirrorAssumeCamposComerciais() {
   assert.strictEqual(r.oferta.imagem, "https://cdn.exemplo/produto.jpg");
 }
 
-function testarCupomDaPaginaPreencheQuandoRadarAusente() {
+function testarCupomDaPaginaNaoPreencheQuandoRadarAusente() {
   const mirror = mirrorBase();
   mirror.cupom = { codigoCapturado: null, textoCapturado: null, condicaoCapturada: null, confianca: "ausente" };
   mirror.comercial.cupom = { codigo: null, texto: null, instrucao: null, confianca: "ausente", provavel: false };
   const r = resolver(mirror);
   assert.strictEqual(r.resolucao.origemCupom, "ausente");
-  assert.strictEqual(r.oferta.cupom, "PAGINA10");
-  assert.strictEqual(r.oferta.codigoCupom, "PAGINA10");
-  assert.strictEqual(r.oferta.codigo_cupom, "PAGINA10");
-  assert.strictEqual(r.oferta.avisoCupom, "Cupom encontrado na pagina");
+  assert.strictEqual(r.oferta.cupom, undefined);
+  assert.strictEqual(r.oferta.codigoCupom, undefined);
+  assert.strictEqual(r.oferta.codigo_cupom, undefined);
+  assert.strictEqual(r.oferta.avisoCupom, undefined);
 }
 
 function testarPrecoPaginaNaoSubstituiRadar() {
@@ -158,7 +158,7 @@ function testarPrecoPaginaNaoSubstituiRadar() {
   assert.strictEqual(r.oferta.precoOriginal, 59.9);
 }
 
-function testarPrecoPixFicaCondicaoSeparada() {
+function testarPrecoPixSemEvidenciaNoTextoNaoCompletaOferta() {
   const mirror = mirrorBase();
   mirror.preco.atualCapturado = null;
   mirror.preco.anteriorCapturado = null;
@@ -168,18 +168,18 @@ function testarPrecoPixFicaCondicaoSeparada() {
   mirror.comercial.precoPix = campo(47.9, "alta", "No Pix R$ 47,90");
   const r = resolver(mirror);
   assert.strictEqual(r.resolucao.origemPreco, "ausente");
-  assert.strictEqual(r.oferta.preco, 69.9);
-  assert.strictEqual(r.oferta.precoPix, "No Pix R$ 47,90");
-  assert.strictEqual(r.resolucao.condicoesComerciais.pix.valor, 47.9);
+  assert.strictEqual(r.oferta.preco, undefined);
+  assert.strictEqual(r.oferta.precoPix, undefined);
+  assert.strictEqual(r.resolucao.condicoesComerciais.pix.valor, null);
 }
 
-function testarPrecoDeSoMaiorQuePor() {
+function testarPrecoAnteriorInferiorNaoPreservaPrecoImportador() {
   const mirror = mirrorBase();
   mirror.preco.anteriorCapturado = 39.9;
   mirror.comercial.precoAntigo = campo(39.9, "media", "De R$ 39,90");
   const r = resolver(mirror);
   assert.strictEqual(r.oferta.preco, 49.9);
-  assert.strictEqual(r.oferta.precoOriginal, 99.9);
+  assert.strictEqual(r.oferta.precoOriginal, undefined);
   assert.strictEqual(r.oferta.precoAnterior, undefined);
 }
 
@@ -310,11 +310,12 @@ function testarCupomUnicoRenderizado() {
 
 function testarDoisCuponsSeparadosPorOu() {
   const mirror = mirrorBase();
+  mirror.texto.original = mirror.texto.original.replace("Use o cupom RADAR10", "Use os cupons MODA10 ou MODA20");
   mirror.cupom.codigoCapturado = "MODA10";
   mirror.cupom.codigosCapturados = ["MODA10", "MODA20"];
-  mirror.cupom.textoCapturado = "Cupom: MODA10 ou MODA20";
-  mirror.cupom.condicaoCapturada = "Cupom: MODA10 ou MODA20";
-  mirror.comercial.cupom = { codigo: "MODA10 ou MODA20", codigos: ["MODA10", "MODA20"], texto: "Cupom: MODA10 ou MODA20", instrucao: "Cupom: MODA10 ou MODA20", confianca: "alta", provavel: false };
+  mirror.cupom.textoCapturado = "Use os cupons MODA10 ou MODA20";
+  mirror.cupom.condicaoCapturada = "Use os cupons MODA10 ou MODA20";
+  mirror.comercial.cupom = { codigo: "MODA10 ou MODA20", codigos: ["MODA10", "MODA20"], texto: "Use os cupons MODA10 ou MODA20", instrucao: "Use os cupons MODA10 ou MODA20", confianca: "alta", provavel: false };
   const { resultado, mensagem } = renderizarOfertaRadar(mirror);
   assert.deepStrictEqual(resultado.oferta.codigosCupom, ["MODA10", "MODA20"]);
   assert.ok(mensagem.includes("MODA10 ou MODA20"));
@@ -322,6 +323,7 @@ function testarDoisCuponsSeparadosPorOu() {
 
 function testarCupomComInstrucao() {
   const mirror = mirrorBase();
+  mirror.texto.original = mirror.texto.original.replace("Use o cupom RADAR10", "Use o cupom RADAR10 no carrinho");
   mirror.cupom.condicaoCapturada = "Use o cupom RADAR10 no carrinho";
   mirror.comercial.cupom.instrucao = "Use o cupom RADAR10 no carrinho";
   const { mensagem } = renderizarOfertaRadar(mirror);
@@ -330,11 +332,11 @@ function testarCupomComInstrucao() {
   assert.ok(!mensagem.includes("RADAR10 ou CARRINHO"));
 }
 
-function testarPrecoPixEParceladoRenderizados() {
+function testarCondicoesComerciaisNaoEncontradasNoOriginalNaoRenderizadas() {
   const { mensagem } = renderizarOfertaRadar(mirrorBase());
-  assert.ok(/Pix/i.test(mensagem));
-  assert.ok(mensagem.includes("16,63"));
-  assert.ok(mensagem.includes("3x"));
+  assert.ok(!/Pix/i.test(mensagem));
+  assert.ok(!mensagem.includes("16,63"));
+  assert.ok(!mensagem.includes("3x"));
 }
 
 function testarOfertaSemCupomNaoInventaCupom() {
@@ -377,16 +379,16 @@ function testarAvaliacaoSemFallbackInventado() {
 
 const testes = [
   testarRadarMirrorAssumeCamposComerciais,
-  testarCupomDaPaginaPreencheQuandoRadarAusente,
+  testarCupomDaPaginaNaoPreencheQuandoRadarAusente,
   testarPrecoPaginaNaoSubstituiRadar,
-  testarPrecoPixFicaCondicaoSeparada,
-  testarPrecoDeSoMaiorQuePor,
+  testarPrecoPixSemEvidenciaNoTextoNaoCompletaOferta,
+  testarPrecoAnteriorInferiorNaoPreservaPrecoImportador,
   testarMensagemPumaPreservaCupomPixParcelamento,
   testarChapaTaiffPreservaPrecoAntigoECupom,
   testarCupomUnicoRenderizado,
   testarDoisCuponsSeparadosPorOu,
   testarCupomComInstrucao,
-  testarPrecoPixEParceladoRenderizados,
+  testarCondicoesComerciaisNaoEncontradasNoOriginalNaoRenderizadas,
   testarOfertaSemCupomNaoInventaCupom,
   testarImportadorDiferenteNaoApagaRadar,
   testarRendererNaoApagaRadarMirror,

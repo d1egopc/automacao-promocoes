@@ -78,6 +78,15 @@ function listaTexto(...valores) {
 }
 
 function valorCupomTemplate(oferta = {}) {
+  const radarComercial = oferta.fonteComercial === "radar_mirror" ||
+    Boolean(oferta.radarMirror || oferta.metadata?.radarMirror || oferta.metadata?.radarEspelhoComercial?.radarMirror);
+  if (radarComercial) {
+    const cuponsRadar = normalizarCuponsSemanticos(listaTexto(
+      Array.isArray(oferta.cupons) ? oferta.cupons : [],
+      Array.isArray(oferta.codigosCupom) ? oferta.codigosCupom : []
+    ));
+    if (cuponsRadar.length > 1) return cuponsRadar.join(" ou ");
+  }
   if (oferta.contratoComercialFinal?.cupomCodigo !== undefined) return textoUtil(oferta.contratoComercialFinal.cupomCodigo);
   const cupons = normalizarCuponsSemanticos(listaTexto(
     Array.isArray(oferta.cupons) ? oferta.cupons : [],

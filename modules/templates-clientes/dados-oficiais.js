@@ -181,7 +181,15 @@ function beneficiosUniversais(oferta = {}, v2 = {}) {
   if (oferta.voltagem) beneficios.push(`Voltagem: ${oferta.voltagem}`);
   if (oferta.cashback) beneficios.push(oferta.cashback);
 
-  return [...new Set(beneficios.map(texto).filter(item => item && !inferenciaComercialProibida(item)))].slice(0, 5);
+  const radarEspelho = oferta.origemComercialRadar === true ||
+    oferta.fonteComercial === "radar_mirror" ||
+    oferta.fonteComercial === "radar_espelho_comercial" ||
+    Boolean(oferta.metadata?.radarMirror || oferta.metadata?.radarEspelhoComercial?.radarMirror);
+  return [...new Set(beneficios.map(texto).filter(item => {
+    if (!item || inferenciaComercialProibida(item)) return false;
+    if (radarEspelho && ["pix", "no pix", "pagamento pix"].includes(normalizarComparacao(item))) return false;
+    return true;
+  }))].slice(0, 5);
 }
 
 function inferenciaComercialProibida(valor = "") {
@@ -339,6 +347,20 @@ function ofertaRadarEspelhoComercial(oferta = {}) {
     Boolean(oferta.metadata?.radarEspelhoComercial?.contratoComercial);
 }
 
+function preservarCuponsRadarNaApresentacao(dados = {}, oferta = {}) {
+  if (!ofertaRadarEspelhoComercial(oferta)) return dados;
+  const cupons = cuponsOficiais(oferta);
+  if (!cupons.length) return dados;
+  const cupomApresentacao = cupons.join(" ou ");
+  return {
+    ...dados,
+    cupom: cupomApresentacao,
+    cupomTexto: cupomApresentacao,
+    cupons,
+    codigosCupom: cupons
+  };
+}
+
 function condicaoPixCapture(oferta = {}) {
   if (ofertaRadarEspelhoComercial(oferta)) return false;
   const marketplace = normalizarComparacao(oferta.marketplace).replace(/[^a-z0-9]+/g, "");
@@ -375,6 +397,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     workspaceId: oferta.workspaceId || "",
     clienteId: oferta.clienteId || oferta.cliente_id || "",
     marketplace: oferta.marketplace || "",
+    origemComercialRadar: radarEspelho,
     precoAtual: oferta.precoAtual ?? oferta.preco,
     precoOriginal,
     economia: oferta.economia ?? oferta.economiaValor ?? oferta.valorEconomia,
@@ -426,7 +449,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     );
   }
 
-  return resolverContratoComercialFinal(normalizarApresentacaoComercial({
+  return preservarCuponsRadarNaApresentacao(resolverContratoComercialFinal(normalizarApresentacaoComercial({
     ...dados,
     cupomTexto: oferta.cupomTexto || cupom,
     codigoCupom: cupom,
@@ -460,7 +483,7 @@ function prepararDadosUniversaisTemplate(oferta = {}) {
     avaliacao: oferta.avaliacao || oferta.rating || oferta.nota || "",
     rating: oferta.rating,
     nota: oferta.nota
-  }, oferta));
+  }, oferta)), oferta);
 }
 
 function prepararDadosPersonalizadosTemplate(oferta = {}) {
@@ -536,7 +559,10 @@ function prepararDadosPersonalizadosTemplate(oferta = {}) {
   dados.precoExibido = dados.precoAtual;
   dados.fontePrecoExibido = "preco_atual";
   return preservarCondicaoPixCapture(
-    resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
+    preservarCuponsRadarNaApresentacao(
+      resolverContratoComercialFinal(normalizarApresentacaoComercial(dados, oferta)),
+      oferta
+    ),
     oferta
   );
 }

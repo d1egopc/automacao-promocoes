@@ -185,7 +185,9 @@ function montarOfertaFila(mirror, extras = {}) {
   const dados = prepararDadosOficiaisTemplate(item, { modo: "universal" });
   assert.strictEqual(dados.precoAtual, 165.59);
   assert.strictEqual(dados.precoOriginal, 549.9);
-  assert.strictEqual(dados.precoPix, "R$ 165,59 no Pix");
+  assert.strictEqual(dados.precoPix, "");
+  assert.strictEqual(dados.condicaoPrecoPor, "pix");
+  assert.ok(!dados.beneficios.includes("no Pix"));
   assert.strictEqual(dados.parcelamento, "R$ 220,79 ate 5x");
   assert.strictEqual(dados.instrucaoCupom, "Aplique o Cupom de 20% OFF no Anuncio.");
 
@@ -195,21 +197,22 @@ function montarOfertaFila(mirror, extras = {}) {
   assertContem(mensagem, "R$ 165,59");
   assertContem(mensagem, "no Pix");
   assertContem(mensagem, "R$ 220,79 ate 5x");
-  assertContem(mensagem, "Aplique o Cupom de 20% OFF no Anuncio.");
+  assertNaoContem(mensagem, "Cupom:");
+  assertNaoContem(mensagem, "🎁 no Pix");
   assertContem(mensagem, "Oferta Relampago");
-  assertContem(mensagem, "40, 41 e 42");
+  assertContem(mensagem, "40, 41, 42");
   assertNaoContem(mensagem, "ANUNCIO");
   assertNaoContem(mensagem, "OCUPOMDE20");
 }
 
 {
   const item = montarOfertaFila(montarMirrorDoisLinks());
-  assert.strictEqual(item.linksComerciais.length, 2);
+  assert.strictEqual(item.linksComerciais.length, 1, "resgate Mercado Livre sem contrato publicavel fica fora do envio");
   assert.strictEqual(item.linksComerciais[0].afiliado, "https://meli.la/afiliado-produto");
-  assert.strictEqual(item.linksComerciais[1].afiliado, "https://meli.la/afiliado-resgate");
+  assert.strictEqual(item.metadata.radarMirror.links.resgateCupom, "https://mercadolivre.com.br/cupons/resgate", "a URL capturada permanece na evidência Radar");
   const mensagem = gerarTemplateUniversal(prepararDadosOficiaisTemplate(item, { modo: "universal" }));
   assertContem(mensagem, "https://meli.la/afiliado-produto");
-  assertContem(mensagem, "https://meli.la/afiliado-resgate");
+  assertNaoContem(mensagem, "https://meli.la/afiliado-resgate");
 }
 
 {

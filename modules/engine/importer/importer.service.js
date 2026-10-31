@@ -50,7 +50,8 @@ const {
   resumirPrecedenciaComercialLog,
   deveLogarDivergenciaComercial,
   emitirLogRadarPrecoSuspeito,
-  tituloComercialUniversalValido
+  tituloComercialUniversalValido,
+  validarFidelidadeComercialRadar
 } = require("../../radar/comercial-precedencia");
 const { validarCoerenciaPreco } = require("../../inteligencia-universal/preco-coerencia.service");
 const {
@@ -3474,7 +3475,7 @@ function textoEventoComercial(evento = {}, metadata = {}) {
 }
 
 function evidenciaComercialRadar({ evento = {}, metadata = {}, radarMirror = null } = {}) {
-  const mirror = radarMirror || metadata?.radarMirror || {};
+  const mirror = radarMirror || metadata?.radarMirror || metadata?.radarEspelhoComercial?.radarMirror || {};
   const comercial = objetoSeguro(mirror.comercial);
   const cupom = objetoSeguro(comercial.cupom || mirror.cupom);
   const textoOriginal = textoEventoComercial(evento, metadata);
@@ -3498,7 +3499,7 @@ function evidenciaComercialRadar({ evento = {}, metadata = {}, radarMirror = nul
 }
 
 function origemRadarComercial({ evento = {}, metadata = {}, radarMirror = null } = {}) {
-  const mirror = radarMirror || metadata?.radarMirror || null;
+  const mirror = radarMirror || metadata?.radarMirror || metadata?.radarEspelhoComercial?.radarMirror || null;
   if (mirror && typeof mirror === "object" && Object.keys(mirror).length > 0) return true;
   if (textoEventoComercial(evento, metadata)) return true;
   if (Array.isArray(evento?.links_extraidos) && evento.links_extraidos.length > 0) return true;
@@ -3553,7 +3554,11 @@ function aplicarProtecaoCamposComerciaisRadar({ oferta = {}, metadata = {}, come
 function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, metadata = {}, comercialNormalizado = null, evento = {}, radarMirror = null } = {}) {
   const precoAtual = normalizarNumero(comercialNormalizado?.precoAtual);
   const precoExistente = normalizarNumero(oferta.preco);
-  const precoConfiavel = comercialNormalizado?.precoConfiavel === true && precoAtual !== null;
+  const mirrorFonteRadar = radarMirror || metadata.radarMirror || metadata.radarEspelhoComercial?.radarMirror;
+  const radarAplicavel = Boolean(mirrorFonteRadar);
+  const precoConfiavel = comercialNormalizado?.precoConfiavel === true && precoAtual !== null &&
+    (!radarAplicavel || (metadata.precedenciaComercial?.origemPreco === "radar" &&
+      metadata.precedenciaComercial.precoPublicacao === precoAtual));
   const origemPreco = normalizarTexto(
     comercialNormalizado?.precoOrigem
     || ofertaEntrada.precoOrigem
@@ -3566,7 +3571,7 @@ function aplicarPonteIntegridadeComercial({ oferta = {}, ofertaEntrada = {}, met
     metadata,
     comercialNormalizado,
     evento,
-    radarMirror
+    radarMirror: mirrorFonteRadar
   });
   const ofertaProtegida = protecaoRadar.oferta || oferta;
   const linksColetados = coletarLinksIntegridadeComercial({ oferta: ofertaProtegida, ofertaEntrada, metadata });
@@ -4862,9 +4867,13 @@ async function gravarOfertaEngine(job = {}, evento = {}, link = {}, ofertaEntrad
       mlbProduto: gateIdentidadeMercadoLivre.mlbProduto || ""
     }));
   }
-  const retidaV2 = gateQualidadeAliExpressImagem.retida === true || gateIdentidadeMercadoLivre.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
+  const fidelidadeRadar = validarFidelidadeComercialRadar(oferta, metadataFinal);
+  if (fidelidadeRadar.aplicavel) metadataFinal = { ...metadataFinal, fidelidadeComercialRadar: fidelidadeRadar };
+  const retidaV2 = !fidelidadeRadar.ok || gateQualidadeAliExpressImagem.retida === true || gateIdentidadeMercadoLivre.retida === true || inteligenciaV2.status === "retida" || sombraV2.ok === false;
   const statusPersistencia = retidaV2 ? "retida_v2" : "importada";
-  const motivoPersistencia = gateQualidadeAliExpressImagem.retida
+  const motivoPersistencia = !fidelidadeRadar.ok
+    ? fidelidadeRadar.motivos[0]
+    : gateQualidadeAliExpressImagem.retida
     ? gateQualidadeAliExpressImagem.motivo
     : gateIdentidadeMercadoLivre.retida
     ? gateIdentidadeMercadoLivre.motivo

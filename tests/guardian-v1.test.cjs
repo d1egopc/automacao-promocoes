@@ -178,6 +178,9 @@ test("matriz distingue contratos afetados e mantém críticos", () => {
   const tests = testMatrix({ runtimeFiles: ["modules/mensageiro/demo.js"], ignoredFiles: [] }).map(item => item.id);
   for (const required of ["contract:rio", "contract:radar", "contract:teleradar", "contract:clonador", "contract:fila-viva", "mensageiro:gerente", "mensageiro:comandos", "mensageiro:programadas"])
     assert.ok(tests.includes(required), required);
+  const radar = testMatrix({ runtimeFiles: ["modules/radar/comercial-precedencia.js"], ignoredFiles: [] }).map(item => item.id);
+  for (const required of ["radar:commercial-fidelity", "radar:faithful-mirror", "radar:mirror-propagation", "radar:commercial-precedence", "radar:semantic-price"])
+    assert.ok(radar.includes(required), required);
   const infra = testMatrix({ runtimeFiles: [], ignoredFiles: ["scripts/guardian-v1.cjs"] });
   assert.equal(infra.find(item => item.id === "deploy:syntax").requiresBash, true);
   assert.equal(infra.find(item => item.id === "guardian:v1").requiresBash, false);
