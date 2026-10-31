@@ -37,6 +37,18 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: AliExpress Radar shortlink candidate - isolated importer and workspace proof
+        if: github.ref == 'refs/heads/validation/guardian-v1-ali-magalu-recovery-20261031'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node tests/aliexpress-shortlink-radar-candidate.test.cjs
+          node tests/aliexpress-manual-importador.test.js
+          node tests/aliexpress-afiliacao-workspace.test.js
+          node tests/aliexpress-app-moedas-contrato.test.js
+          node tests/redirect-resolver-shortlinks-seguros.test.js
       - name: Diversos integration - isolated replay and commercial invariants
         if: github.ref == 'refs/heads/validation/guardian-v1-diversos-integracao-20261029'
         shell: bash

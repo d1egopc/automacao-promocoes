@@ -385,6 +385,19 @@ function classificarAliExpress(candidato = {}, evento = {}) {
     return { papelLink: PAPEL_LINK.LINK_APP, motivo: "aliexpress_link_antes_marcador_pc", confianca: "alta" };
   }
 
+  // AliExpress shortlinks are only candidates at this boundary. The existing
+  // importer expands them with its HTTPS/host/redirect checks and confirms the
+  // product through the official workspace API before an offer can be created.
+  if (ehShortlinkAliExpressComIdentidadePendente(url)) {
+    return porContexto
+      ? { ...porContexto, confianca: "media" }
+      : {
+          papelLink: PAPEL_LINK.PRODUTO,
+          motivo: "aliexpress_shortlink_requer_confirmacao_no_importador",
+          confianca: "media"
+        };
+  }
+
   if (/\/item\/\d+\.html|\/i\/\d+\.html|product_id=\d+/i.test(url)) {
     return { papelLink: PAPEL_LINK.PRODUTO, motivo: "aliexpress_id_produto_url", confianca: "alta" };
   }
@@ -412,6 +425,19 @@ function classificarAliExpress(candidato = {}, evento = {}) {
   if (porContexto) return { ...porContexto, confianca: "media" };
 
   return { papelLink: PAPEL_LINK.DESCONHECIDO, motivo: "aliexpress_sem_papel_confirmado", confianca: "baixa" };
+}
+
+function ehShortlinkAliExpressComIdentidadePendente(urlEntrada = "") {
+  try {
+    const url = new URL(texto(urlEntrada));
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "a.aliexpress.com") return /^\/_[a-z0-9]+$/i.test(url.pathname);
+    if (host === "s.click.aliexpress.com") return /^\/(?:e|s)\/_[a-z0-9]+$/i.test(url.pathname);
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function classificarAwinKabum(candidato = {}, evento = {}) {
