@@ -382,7 +382,11 @@ jobs:
             refs/heads/validation/landing-v13-media-buttons-20261025) base=eda20ff6b69449c69a00ac7777beb3b868e1da80 ;;
           esac
           source="$(git rev-parse HEAD)"
-          node scripts/guardian-v1.cjs validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json"
+          guardian_args=(validate --base "$base" --source "$source" --report "$RUNNER_TEMP/guardian-v1-report.json")
+          if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031 ]]; then
+            guardian_args+=(--release-mode full_image)
+          fi
+          node scripts/guardian-v1.cjs "${guardian_args[@]}"
       - name: Magalu identity-to-image recovery - isolated fixtures only
         if: github.ref == 'refs/heads/validation/magalu-recovery-20261027'
         shell: bash

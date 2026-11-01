@@ -625,8 +625,8 @@ function executeSpec(spec, cwd, repoNodeModules) {
   return run(spec.command, spec.args, { cwd, env });
 }
 
-function validate(repo, base, source) {
-  const plan = buildPlan(repo, base, source);
+function validate(repo, base, source, { releaseMode = "" } = {}) {
+  const plan = buildPlan(repo, base, source, { releaseMode });
   if (plan.blocked.length) return { ...plan, result: "BLOCKED", tests: [] };
   const specs = testMatrix(plan);
   const results = [];
@@ -722,7 +722,7 @@ function main() {
       "Guardian Optimus V1",
       "  node scripts/guardian-v1.cjs bootstrap [--repo PATH]",
       "  node scripts/guardian-v1.cjs prepare --base SHA --source SHA [--release-mode full_image] [--format json|value|mode|full-image-changes]",
-      "  node scripts/guardian-v1.cjs validate --base SHA --source SHA [--report FILE]",
+      "  node scripts/guardian-v1.cjs validate --base SHA --source SHA [--release-mode full_image] [--report FILE]",
       "  node scripts/guardian-v1.cjs full-image-dockerfile --base SHA --source SHA --base-tag TAG",
       "Publicação continua exclusiva do workflow manual deploy-backend-vps.yml."
     ].join("\n"));
@@ -761,7 +761,7 @@ function main() {
     return;
   }
   if (command === "validate") {
-    const report = validate(repo, base, source);
+    const report = validate(repo, base, source, { releaseMode: args["release-mode"] || "" });
     if (args.report) fs.writeFileSync(args.report, `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify(report, null, 2));
     if (report.result === "FAIL" || report.result === "BLOCKED") process.exitCode = 1;

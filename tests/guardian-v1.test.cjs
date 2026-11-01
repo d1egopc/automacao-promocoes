@@ -187,6 +187,16 @@ test("perfil full_image aceita apenas os três arquivos e modos aprovados, usand
   } finally { cleanup(repo); }
 });
 
+test("CI da observabilidade contínua passa explicitamente o perfil full_image ao Guardião", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "guardian-v1-ci.yml"), "utf8");
+  assert.ok(workflow.includes(
+    'if [[ "$GITHUB_REF" == refs/heads/validation/guardian-v1-radar-ingress-continuous-20261031 ]]; then\n' +
+    "            guardian_args+=(--release-mode full_image)\n" +
+    "          fi"
+  ));
+  assert.match(workflow, /node scripts\/guardian-v1\.cjs "\$\{guardian_args\[@\]\}"/);
+});
+
 test("remoção de runtime falha fechada", () => {
   const repo = createRepo();
   try {
