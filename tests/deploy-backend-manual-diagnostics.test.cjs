@@ -166,6 +166,7 @@ docker() {
       '{{.State.StartedAt}}') printf '2026-10-24T00:00:00Z' ;;
       '{{.State.Health.Status}}') printf healthy ;;
       '{{.State.Status}}') printf running ;;
+      '{{.State.OOMKilled}}') printf false ;;
       '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}') printf bind ;;
       '{{json .Config.Env}}') printf '["FIXTURE=value"]' ;;
       '{{json .Mounts}}') printf '[{"Type":"bind","Source":"/fixture/data","Destination":"/data","RW":true}]' ;;
