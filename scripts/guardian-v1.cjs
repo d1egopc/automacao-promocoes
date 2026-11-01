@@ -201,11 +201,14 @@ function renderFullImageDockerfile(plan, baseTag) {
   if (plan.validation !== "PASS" || plan.blocked.length || plan.deployMode !== "full_image" ||
       !/^local\/optimus-deploy-base:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(baseTag))
     throw new Error("unapproved_full_image_build");
-  // Copy the entire clean source tree. The image inherits only the already
-  // verified production runtime/dependencies; manifest parity gates the copy.
+  // Production images are cumulative, immutable releases. Keep every
+  // unapproved runtime byte from the verified active image and copy only the
+  // closed, hash-pinned files from the clean candidate checkout. The manifest
+  // gate proves active container == active image and candidate == active image
+  // plus exactly this profile before Compose can switch.
   return [`FROM ${baseTag}`, "USER root",
-    "RUN if [ -d /app/data ] && [ -n \"$(find /app/data -mindepth 1 -print -quit)\" ]; then exit 1; fi; find /app -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf -- {} +",
-    "COPY --chown=node:node . /app", "USER node", ""].join("\n");
+    ...plan.runtimeFiles.map(file => `COPY --chown=node:node ${normalizeRuntimePath(file)} /app/${normalizeRuntimePath(file)}`),
+    "USER node", ""].join("\n");
 }
 
 function parseArgs(argv) {

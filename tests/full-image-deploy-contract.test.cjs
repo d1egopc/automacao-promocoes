@@ -38,8 +38,8 @@ test("equivalência integral e estado da imagem base são verificados antes da t
 });
 
 test("build herda dependências sem npm/postinstall e preserva rollback sem sobrescrever tag", () => {
-  assert.match(guardian, /! -name node_modules -exec rm -rf/);
-  assert.match(guardian, /COPY --chown=node:node \. \/app/);
+  assert.match(guardian, /plan\.runtimeFiles\.map\(file => `COPY --chown=node:node/);
+  assert.doesNotMatch(guardian, /COPY --chown=node:node \. \/app|find \/app -mindepth|rm -rf/);
   assert.doesNotMatch(guardian, /renderFullImageDockerfile[\s\S]{0,900}npm ci/);
   assert.match(deploy, /if docker image inspect "\$recovery_tag"[\s\S]{0,250}test "\$\(docker image inspect -f '\{\{\.Id\}\}' "\$recovery_tag"\)" = "\$BASE_IMAGE"/);
   assert.match(deploy, /Refusing to replace an existing build tag/);

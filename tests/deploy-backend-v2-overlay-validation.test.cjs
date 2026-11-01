@@ -355,12 +355,13 @@ test("ancestralidade, imagem ativa, Compose, mounts, ambiente e rollback continu
   ]) assert.ok(deployScript.includes(guard), guard);
 });
 
-test("full_image reconstrói e compara active/base/candidate antes de trocar, sem usar validador de overlay", () => {
+test("full_image compara container/imagem ativa/candidata antes de trocar, sem usar validador de overlay", () => {
   const fullImageGate = deployScript.indexOf("deploy_stage=verify_full_image_runtime_equivalence");
   const backendSwitch = deployScript.indexOf("deploy_stage=switch_backend");
   assert.ok(fullImageGate >= 0 && backendSwitch > fullImageGate, "equivalência deve preceder a troca do backend");
-  assert.match(deployScript, /docker build --pull=false --network=none -f "\$scratch\/Dockerfile" -t "\$base_full_tag" "\$base_source"/);
   assert.match(deployScript, /docker build --pull=false --network=none -f "\$scratch\/Dockerfile" -t "\$candidate_tag" "\$source_dir"/);
+  assert.match(deployScript, /manifest_from_image "\$BASE_IMAGE" "\$scratch\/base-runtime\.json"/);
+  assert.doesNotMatch(deployScript, /base_full_tag|base_source|git -C "\$source_dir" archive/);
   assert.match(deployScript, /verify-full-image-equivalence\.cjs/);
   assert.match(deployScript, /guardian_mode" == full_image/);
   assert.match(deployScript, /IMAGE_STRATEGY/);

@@ -141,7 +141,7 @@ test("dependência e Dockerfile exigem fluxo futuro de imagem completa", () => {
   }
 });
 
-test("perfil full_image aceita apenas os três arquivos e modos aprovados, usando fonte completa e runtime herdado", () => {
+test("perfil full_image aceita apenas os três arquivos e modos aprovados sobre runtime ativo imutável", () => {
   delete require.cache[require.resolve(guardian)];
   const api = require(guardian);
   const crypto = require("node:crypto");
@@ -176,8 +176,8 @@ test("perfil full_image aceita apenas os três arquivos e modos aprovados, usand
     assert.equal(plan.validation, "PASS", JSON.stringify(plan.blocked));
     assert.equal(plan.deployMode, "full_image");
     const dockerfile = api.renderFullImageDockerfile(plan, "local/optimus-deploy-base:test");
-    assert.match(dockerfile, /find \/app -mindepth 1 -maxdepth 1 ! -name node_modules/);
-    assert.match(dockerfile, /COPY --chown=node:node \. \/app/);
+    for (const file of approvedFiles) assert.match(dockerfile, new RegExp(`COPY --chown=node:node ${file.replaceAll("/", "\\/")} \\/app\\/${file.replaceAll("/", "\\/")}`));
+    assert.doesNotMatch(dockerfile, /COPY --chown=node:node \. \/app|find \/app|rm -rf/);
     assert.doesNotMatch(dockerfile, /npm ci|postinstall|apt-get/);
 
     const wrongHash = { ...profile, runtimeHashes: { ...runtimeHashes, "index.js": "0".repeat(64) } };

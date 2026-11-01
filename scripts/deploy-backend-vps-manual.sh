@@ -289,19 +289,12 @@ fi
 test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
 if [[ "$guardian_mode" == full_image ]]; then
   deploy_stage=build_and_compare_full_image
-  base_full_tag="local/optimus-deploy-baseline:$run_key"
   docker inspect -f '{{json .Mounts}}' optimus-backend | python3 -c 'import json,sys; mounts=json.load(sys.stdin); assert not any(item["Destination"] == "/app" or item["Destination"].startswith("/app/") for item in mounts)'
-  for build_tag in "$base_full_tag" "$candidate_tag"; do
-    if docker image inspect "$build_tag" >/dev/null 2>&1; then
-      echo 'Refusing to replace an existing build tag' >&2
-      false
-    fi
-  done
-  base_source="$scratch/base-source"
-  mkdir -m 700 "$base_source"
-  git -C "$source_dir" archive "$BASE_SHA" | tar -x -C "$base_source"
+  if docker image inspect "$candidate_tag" >/dev/null 2>&1; then
+    echo 'Refusing to replace an existing build tag' >&2
+    false
+  fi
   node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" full-image-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
-  docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$base_full_tag" "$base_source"
   docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$candidate_tag" "$source_dir"
 else
   node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" build-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
@@ -319,7 +312,7 @@ if [[ "$guardian_mode" == full_image ]]; then
     cat "$manifest_script" | docker run --rm -i --network none --entrypoint node "$image" - > "$destination"
   }
   cat "$manifest_script" | docker exec -i optimus-backend node - > "$scratch/active-runtime.json"
-  manifest_from_image "$base_full_tag" "$scratch/base-runtime.json"
+  manifest_from_image "$BASE_IMAGE" "$scratch/base-runtime.json"
   manifest_from_image "$candidate_tag" "$scratch/candidate-runtime.json"
   approved_full_changes="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --release-mode full_image --format full-image-changes)"
   node "$source_dir/scripts/verify-full-image-equivalence.cjs" \
