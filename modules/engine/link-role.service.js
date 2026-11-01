@@ -534,9 +534,14 @@ function classificarLinkEngine({ marketplace = "", evento = {}, link = {}, url =
     }
   }
   if (metadata.papelLink) {
-    const papelMetadata = mp === "aliexpress" && metadata.papelLink === PAPEL_LINK.LINK_MOEDAS
+    const papelMetadataOriginal = minusculo(metadata.papelLink);
+    const papelMetadata = mp === "aliexpress" && [
+      PAPEL_LINK.LINK_MOEDAS,
+      PAPEL_LINK.MOEDAS,
+      "coins"
+    ].includes(papelMetadataOriginal)
       ? PAPEL_LINK.LINK_APP
-      : metadata.papelLink;
+      : papelMetadataOriginal;
     return {
       papelLink: papelMetadata,
       motivo: metadata.papelLinkMotivo || "metadata_papel_link",

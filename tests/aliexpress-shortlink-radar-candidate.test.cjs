@@ -117,7 +117,8 @@ async function main() {
   const moedasLink = {
     ...linkRow(moedasUrl),
     metadata: {
-      papelLink: "link_moedas",
+      // Exact legacy alias persisted by natural event 204594.
+      papelLink: "moedas",
       papelLinkMotivo: "contexto_moedas",
       papelLinkConfianca: "media"
     }
