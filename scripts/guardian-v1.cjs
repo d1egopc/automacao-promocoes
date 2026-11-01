@@ -30,22 +30,16 @@ const RUNTIME_ROOTS = new Set([
 ]);
 const FULL_BUILD_PATHS = new Set(["Dockerfile", ".dockerignore", "package.json", "package-lock.json"]);
 const RADAR_INGRESS_FULL_IMAGE_PROFILE = Object.freeze({
-  baseSha: "7708855e014d54a48825b0d3ae1f77da43294ad0",
-  requiredAncestor: "41c8140772986a6687252851a9af7d0dc2512b56",
+  baseSha: "00d2cd800216f6a772177ed34a92251ae5f0cb37",
+  requiredAncestor: "00d2cd800216f6a772177ed34a92251ae5f0cb37",
   runtimeFiles: Object.freeze([
-    "index.js",
-    "modules/whatsapp/ingress-boundary-observation.js",
-    "modules/whatsapp/ingress-observation-journal.js"
+    "index.js"
   ]),
   runtimeChanges: Object.freeze({
-    "index.js": "M",
-    "modules/whatsapp/ingress-boundary-observation.js": "M",
-    "modules/whatsapp/ingress-observation-journal.js": "A"
+    "index.js": "M"
   }),
   runtimeHashes: Object.freeze({
-    "index.js": "dcc9aa941946987e15fe1c8445d94eb2a89cf55aaa637184ba34d1f240e6b4fc",
-    "modules/whatsapp/ingress-boundary-observation.js": "a785db4d5cc59676e3b1d27fbf37f1cc855f6a5f7aadd5f545033a062be00daf",
-    "modules/whatsapp/ingress-observation-journal.js": "614cd0c3a13f4cf32ab48689da174aa057e7b68245f45ce00776becba3f97dc6"
+    "index.js": "94434a6567ca3dc9b86d103795aee7c660cfe9c34b80e78f80b9c7346e55569a"
   })
 });
 // One reviewed dependency repair, never a general RUN/npm/build exception.
