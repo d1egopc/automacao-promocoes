@@ -288,7 +288,11 @@ jobs:
           node --check index.js
           node --check modules/whatsapp/ingress-boundary-observation.js
           node --check modules/whatsapp/ingress-observation-journal.js
+          node --check scripts/full-image-runtime-manifest.cjs
+          node --check scripts/verify-full-image-equivalence.cjs
+          bash -n scripts/deploy-backend-vps-manual.sh
           node --test tests/whatsapp-ingress-boundary.test.cjs tests/whatsapp-ingress-continuous.test.cjs tests/whatsapp-ingress-observation-journal.test.cjs tests/baileys-bootstrap-observation.test.cjs tests/baileys-bootstrap-production.test.cjs
+          node --test tests/full-image-equivalence.test.cjs tests/full-image-deploy-contract.test.cjs
           node tests/whatsapp-socket-listener-baileys-real.test.cjs
           node tests/whatsapp-socket-listener-lifecycle.test.js
           node tests/benchmark-whatsapp-ingress-continuous.cjs

@@ -87,7 +87,7 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 
 - Confirme repositorio, branch, worktree, base e status antes de editar.
 - Push em `main` executa somente CI; nunca presuma deploy automatico. O deploy backend exige `workflow_dispatch` explicito de `.github/workflows/deploy-backend-vps.yml`, com SHA de fonte, SHA-base, ID completo da imagem ativa e lista exata de arquivos runtime autorizados. Veja [PRODUCTION-DEPLOYMENT.md](docs/contracts/PRODUCTION-DEPLOYMENT.md).
-- O workflow de publicacao usa checkout limpo do SHA no runner e overlay sobre a imagem ativa verificada; nao usa `/opt/optimus/backend` (HEAD destacado/sujo), nao faz `git pull` nem `docker compose build` no Compose produtivo. A selecao persistente de imagem fica em `backend-release.yml` separado do Compose-base.
+- O workflow de publicacao usa checkout limpo do SHA no runner; nunca usa `/opt/optimus/backend` (HEAD destacado/sujo), nao faz `git pull` nem `docker compose build` no Compose produtivo. O caminho `overlay` e o padrao para perfis autorizados. O caminho `full_image` so pode ser usado por perfil fechado no Guardiao: reconstrua base e candidata a partir de checkout limpo, herde a imagem produtiva verificada para preservar dependencias, compare manifesto integral de runtime e bloqueie antes da troca se a base reconstruida divergir da imagem ativa ou se a candidata exceder os arquivos/perfis autorizados. A selecao persistente de imagem fica em `backend-release.yml` separado do Compose-base.
 - Use `git add` seletivo. Nunca use `git add .` ou `git add -A`.
 - Informe SHA completo e rollback conhecido.
 - Nunca chame gate local de "CI remoto verde".
@@ -95,7 +95,7 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 - Nunca use `docker compose down`, remova volumes, recrie PostgreSQL ou toque `/data` sem plano explicito.
 - Nao altere env/flags durante deploy fora do escopo aprovado.
 - Sempre registre baseline e prove saude depois do deploy.
-- O overlay de tres arquivos do deploy manual de outubro/2026 e exclusivo do hotfix do Mensageiro aprovado no SHA 4db00b0b. Nao o reutilize como procedimento geral: qualquer publicacao futura que modifique dependencias ou outros modulos exige imagem completa construida de checkout limpo pelo SHA autorizado, com comparacao da base produtiva, CI, rollback e deploy manual controlado.
+- O overlay de tres arquivos do deploy manual de outubro/2026 e exclusivo do hotfix do Mensageiro aprovado no SHA 4db00b0b. Nao o reutilize como procedimento geral. Publicacoes fora desse hotfix devem usar somente um perfil de imagem completa aceito pelo Guardiao, com comparacao de runtime contra a base ativa, CI, rollback e deploy manual controlado. Alteracoes de dependencia seguem a excecao hash-pinned abaixo, nunca `npm ci`/postinstall genérico no runner de producao.
 - Frontend: Preview `READY` -> gate humano -> promover o mesmo SHA -> provar Production 200.
 - Exceção fechada de dependência: somente o perfil hash-pinned `baileys_buffer_patch` descrito em `PRODUCTION-DEPLOYMENT.md` pode executar o instalador Baileys 6.7.22 durante o build derivado da imagem ativa. Não autoriza npm/postinstall genérico, Dockerfile modificado ou outros scripts; source/base/hashes/Compose/rollback continuam obrigatórios.
 - Extensao: distribua somente artefato versionado, verificado por hash e aprovado por humano.

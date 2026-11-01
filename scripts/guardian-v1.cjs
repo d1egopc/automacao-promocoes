@@ -13,6 +13,8 @@ const WINDOWS_BACKEND = "C:\\Users\\Liva D1EGOPC\\Documents\\BACKEND-OFICIAL-202
 const NON_RUNTIME_EXACT = new Set([
   "AGENTS.md",
   "scripts/deploy-backend-vps-manual.sh",
+  "scripts/full-image-runtime-manifest.cjs",
+  "scripts/verify-full-image-equivalence.cjs",
   "scripts/guardian-v1.cjs",
   "scripts/benchmark-gerente-observability-v2.cjs",
   "scripts/benchmark-garimpei-sensor24h.cjs",
@@ -27,6 +29,25 @@ const RUNTIME_ROOTS = new Set([
   "modules", "utils", "marketplaces", "templates", "bootstrap", "campanhas", "assets"
 ]);
 const FULL_BUILD_PATHS = new Set(["Dockerfile", ".dockerignore", "package.json", "package-lock.json"]);
+const RADAR_INGRESS_FULL_IMAGE_PROFILE = Object.freeze({
+  baseSha: "7708855e014d54a48825b0d3ae1f77da43294ad0",
+  requiredAncestor: "41c8140772986a6687252851a9af7d0dc2512b56",
+  runtimeFiles: Object.freeze([
+    "index.js",
+    "modules/whatsapp/ingress-boundary-observation.js",
+    "modules/whatsapp/ingress-observation-journal.js"
+  ]),
+  runtimeChanges: Object.freeze({
+    "index.js": "M",
+    "modules/whatsapp/ingress-boundary-observation.js": "M",
+    "modules/whatsapp/ingress-observation-journal.js": "A"
+  }),
+  runtimeHashes: Object.freeze({
+    "index.js": "dcc9aa941946987e15fe1c8445d94eb2a89cf55aaa637184ba34d1f240e6b4fc",
+    "modules/whatsapp/ingress-boundary-observation.js": "a785db4d5cc59676e3b1d27fbf37f1cc855f6a5f7aadd5f545033a062be00daf",
+    "modules/whatsapp/ingress-observation-journal.js": "614cd0c3a13f4cf32ab48689da174aa057e7b68245f45ce00776becba3f97dc6"
+  })
+});
 // One reviewed dependency repair, never a general RUN/npm/build exception.
 const BAILEYS_BUFFER_PROFILE = {
   "baseSha": "f50e8a294f839249e5427619e500e37332423363",
@@ -151,6 +172,42 @@ function renderDockerfile(plan, baseTag) {
     "USER node", ""].join("\n");
 }
 
+function validateFullImageProfile(repo, base, source, runtimeFiles, profile = RADAR_INGRESS_FULL_IMAGE_PROFILE) {
+  const failures = [];
+  const reject = (file, cause) => failures.push({ file, stage: "full_image_profile", cause });
+  const sortedRuntime = [...runtimeFiles].sort();
+  if (base !== profile.baseSha) reject("BASE_SHA", "unapproved_full_image_base");
+  if (git(repo, ["merge-base", "--is-ancestor", profile.requiredAncestor, source], { allowFailure: true }).status !== 0)
+    reject("SOURCE_SHA", "approved_runtime_ancestry_required");
+  if (JSON.stringify(sortedRuntime) !== JSON.stringify([...profile.runtimeFiles].sort()))
+    reject("runtime_files", "exact_full_image_runtime_set_required");
+  const actualRuntime = parseDiff(repo, base, source).filter(({ file }) => !isNonRuntime(file) && isOverlayRuntime(file));
+  const actualChanges = Object.fromEntries(actualRuntime.map(({ status, file }) => [file, status]));
+  if (JSON.stringify(Object.entries(actualChanges).sort(([a], [b]) => a.localeCompare(b))) !==
+      JSON.stringify(Object.entries(profile.runtimeChanges || {}).sort(([a], [b]) => a.localeCompare(b))))
+    reject("runtime_changes", "exact_full_image_change_types_required");
+  for (const [file, hash] of Object.entries(profile.runtimeHashes)) {
+    try {
+      if (contentHash(repo, source, file) !== hash) reject(file, "unapproved_full_image_content");
+    } catch { reject(file, "unapproved_full_image_content"); }
+  }
+  const buildInputs = ["Dockerfile", ".dockerignore", "package.json", "package-lock.json"];
+  const buildDiff = git(repo, ["diff", "--quiet", base, source, "--", ...buildInputs], { allowFailure: true });
+  if (buildDiff.status !== 0) reject("build_inputs", "build_inputs_must_match_production_base");
+  return failures;
+}
+
+function renderFullImageDockerfile(plan, baseTag) {
+  if (plan.validation !== "PASS" || plan.blocked.length || plan.deployMode !== "full_image" ||
+      !/^local\/optimus-deploy-base:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(baseTag))
+    throw new Error("unapproved_full_image_build");
+  // Copy the entire clean source tree. The image inherits only the already
+  // verified production runtime/dependencies; manifest parity gates the copy.
+  return [`FROM ${baseTag}`, "USER root",
+    "RUN if [ -d /app/data ] && [ -n \"$(find /app/data -mindepth 1 -print -quit)\" ]; then exit 1; fi; find /app -mindepth 1 -maxdepth 1 ! -name node_modules -exec rm -rf -- {} +",
+    "COPY --chown=node:node . /app", "USER node", ""].join("\n");
+}
+
 function parseArgs(argv) {
   const result = { _: [] };
   for (let index = 0; index < argv.length; index += 1) {
@@ -258,7 +315,7 @@ function parseDiff(repo, base, source) {
   });
 }
 
-function buildPlan(repo, base, source) {
+function buildPlan(repo, base, source, { releaseMode = "", fullImageProfile = RADAR_INGRESS_FULL_IMAGE_PROFILE } = {}) {
   const head = git(repo, ["rev-parse", "HEAD"]).stdout.trim();
   if (head !== source) throw new Error(`source_checkout_mismatch:${head}`);
   const dirt = git(repo, ["status", "--porcelain=v1"]).stdout.trim();
@@ -266,6 +323,7 @@ function buildPlan(repo, base, source) {
   const changes = parseDiff(repo, base, source);
   const bootstrapObservationProfile = changes.some(change => change.file === "modules/whatsapp/baileys-balanced-buffer-patch.js") &&
     changes.some(change => change.file === "modules/whatsapp/ingress-boundary-observation.js");
+  const continuousIngressFullImage = changes.some(change => change.file === "modules/whatsapp/ingress-observation-journal.js");
   const balancedProfile = !bootstrapObservationProfile && changes.some(change => change.file === "modules/whatsapp/baileys-balanced-buffer-patch.js");
   const runtimeFiles = [];
   const ignoredFiles = [];
@@ -317,13 +375,18 @@ function buildPlan(repo, base, source) {
   if (bootstrapObservationProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles, BAILEYS_BOOTSTRAP_OBSERVATION_PROFILE));
   else if (bufferProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles));
   if (balancedProfile) blocked.push(...validateBufferProfile(repo, base, source, runtimeFiles, BALANCED_BUFFER_PROFILE));
+  if (releaseMode && !["overlay", "full_image"].includes(releaseMode))
+    blocked.push({ file: "release_mode", stage: "classify", cause: "unsupported_release_mode" });
+  if (continuousIngressFullImage && releaseMode !== "full_image")
+    blocked.push({ file: "release_mode", stage: "classify", cause: "full_image_strategy_required" });
+  if (releaseMode === "full_image") blocked.push(...validateFullImageProfile(repo, base, source, runtimeFiles, fullImageProfile));
   ignoredFiles.sort();
   blocked.sort((a, b) => a.file.localeCompare(b.file));
   return {
     sourceSha: source,
     baseSha: base,
     validation: blocked.length ? "BLOCKED" : "PASS",
-    deployMode: bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
+    deployMode: releaseMode === "full_image" ? "full_image" : bootstrapObservationProfile ? "baileys_bootstrap_observation" : balancedProfile ? "baileys_balanced_buffer_patch" : bufferProfile ? "baileys_buffer_patch" : runtimeFiles.length ? "overlay" : "none",
     runtimeFiles,
     ignoredFiles,
     blocked
@@ -658,8 +721,9 @@ function main() {
     console.log([
       "Guardian Optimus V1",
       "  node scripts/guardian-v1.cjs bootstrap [--repo PATH]",
-      "  node scripts/guardian-v1.cjs prepare --base SHA --source SHA [--format json|value]",
+      "  node scripts/guardian-v1.cjs prepare --base SHA --source SHA [--release-mode full_image] [--format json|value|mode|full-image-changes]",
       "  node scripts/guardian-v1.cjs validate --base SHA --source SHA [--report FILE]",
+      "  node scripts/guardian-v1.cjs full-image-dockerfile --base SHA --source SHA --base-tag TAG",
       "Publicação continua exclusiva do workflow manual deploy-backend-vps.yml."
     ].join("\n"));
     return;
@@ -669,10 +733,14 @@ function main() {
   const source = args.source === "HEAD" || !args.source ? git(repo, ["rev-parse", "HEAD"]).stdout.trim() : args.source;
   const base = args.base;
   if (command === "prepare") {
-    const plan = buildPlan(repo, base, source);
+    const plan = buildPlan(repo, base, source, { releaseMode: args["release-mode"] || "" });
     if (args["github-output"]) writeGithubOutput(args["github-output"], plan);
     if (args.format === "value") console.log(plan.runtimeFiles.join(","));
     else if (args.format === "mode") console.log(plan.deployMode);
+    else if (args.format === "full-image-changes") {
+      if (plan.validation !== "PASS" || plan.deployMode !== "full_image") throw new Error("full_image_profile_required");
+      console.log(Object.entries(RADAR_INGRESS_FULL_IMAGE_PROFILE.runtimeChanges).map(([file, status]) => `${file}=${status}`).join(","));
+    }
     else if (["dependencies-before", "dependencies-after"].includes(args.format)) {
       if (plan.validation !== "PASS" || !["baileys_buffer_patch", "baileys_balanced_buffer_patch", "baileys_bootstrap_observation"].includes(plan.deployMode)) throw new Error("dependency_profile_required");
       const key = args.format.endsWith("before") ? "before" : "after";
@@ -685,6 +753,11 @@ function main() {
   }
   if (command === "build-dockerfile") {
     process.stdout.write(renderDockerfile(buildPlan(repo, base, source), args["base-tag"] || ""));
+    return;
+  }
+  if (command === "full-image-dockerfile") {
+    const plan = buildPlan(repo, base, source, { releaseMode: "full_image" });
+    process.stdout.write(renderFullImageDockerfile(plan, args["base-tag"] || ""));
     return;
   }
   if (command === "validate") {
@@ -708,9 +781,12 @@ if (require.main === module) {
 
 module.exports = {
   BALANCED_BUFFER_PROFILE,
+  RADAR_INGRESS_FULL_IMAGE_PROFILE,
   BAILEYS_BOOTSTRAP_OBSERVATION_PROFILE,
   BAILEYS_BUFFER_PROFILE,
   renderDockerfile,
+  renderFullImageDockerfile,
+  validateFullImageProfile,
   buildPlan,
   isNonRuntime,
   isOverlayRuntime,

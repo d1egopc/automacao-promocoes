@@ -24,6 +24,8 @@ deploy_stage=validate_inputs
 [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$BASE_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+image_strategy="${IMAGE_STRATEGY:-overlay}"
+[[ "$image_strategy" == overlay || "$image_strategy" == full_image ]]
 test "$GITHUB_EVENT_NAME" = workflow_dispatch
 test "$GITHUB_REF" = refs/heads/main
 sensor_mount_approved="${GARIMPEI_SENSOR_MOUNT_APPROVED:-false}"
@@ -49,9 +51,9 @@ git -C "$source_dir" diff --check "$BASE_SHA" "$SOURCE_SHA"
 # Every runtime delta must be named in the manual authorization. Documentation
 # and tests are excluded from the image, and deleted runtime files fail closed.
 deploy_stage=validate_runtime_allowlist
-guardian_runtime="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format value)"
-guardian_mode="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --format mode)"
-[[ "$guardian_mode" == overlay || "$guardian_mode" == baileys_buffer_patch || "$guardian_mode" == baileys_balanced_buffer_patch || "$guardian_mode" == baileys_bootstrap_observation ]]
+guardian_runtime="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --release-mode "$image_strategy" --format value)"
+guardian_mode="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --release-mode "$image_strategy" --format mode)"
+[[ "$guardian_mode" == overlay || "$guardian_mode" == full_image || "$guardian_mode" == baileys_buffer_patch || "$guardian_mode" == baileys_balanced_buffer_patch || "$guardian_mode" == baileys_bootstrap_observation ]]
 test -n "$guardian_runtime"
 test "$RUNTIME_FILES" = "$guardian_runtime"
 IFS=, read -r -a approved <<< "$RUNTIME_FILES"
@@ -158,9 +160,18 @@ docker inspect -f '{{json .HostConfig.Ulimits}}' optimus-backend | python3 -c 'i
 # accepted only when absent from both that base tree and the active image.
 # Every candidate path must match the authorized source commit.
 deploy_stage=validate_runtime_hashes
-for path in "${approved[@]}"; do
-  validate_runtime_overlay_path "$path" "${changed_runtime_status[$path]}"
-done
+if [[ "$guardian_mode" == full_image ]]; then
+  for path in "${approved[@]}"; do
+    source_hash="$(git -C "$source_dir" show "$SOURCE_SHA:$path" | sha256sum | cut -d' ' -f1)"
+    checkout_hash="$(sha256sum "$source_dir/$path" | cut -d' ' -f1)"
+    [[ "${changed_runtime_status[$path]}" == A || "${changed_runtime_status[$path]}" == M ]]
+    [[ "$source_hash" =~ ^[0-9a-f]{64}$ && "$checkout_hash" == "$source_hash" ]]
+  done
+else
+  for path in "${approved[@]}"; do
+    validate_runtime_overlay_path "$path" "${changed_runtime_status[$path]}"
+  done
+fi
 
 # The exceptional dependency build is authorized by exact Guardian hashes.
 # Only inspect these three fixed library files; never read auth/env or /data.
@@ -265,14 +276,56 @@ deploy_stage=build_candidate_image
 base_tag="local/optimus-deploy-base:$run_key"
 recovery_tag="local/optimus-backend-recovery:$run_key"
 candidate_tag="local/optimus-backend:$SOURCE_SHA-$run_key"
-docker tag "$BASE_IMAGE" "$base_tag"
-docker tag "$BASE_IMAGE" "$recovery_tag"
+if docker image inspect "$base_tag" >/dev/null 2>&1; then
+  test "$(docker image inspect -f '{{.Id}}' "$base_tag")" = "$BASE_IMAGE"
+else
+  docker tag "$BASE_IMAGE" "$base_tag"
+fi
+if docker image inspect "$recovery_tag" >/dev/null 2>&1; then
+  test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
+else
+  docker tag "$BASE_IMAGE" "$recovery_tag"
+fi
 test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
-node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" build-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
-docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$candidate_tag" "$source_dir"
+if [[ "$guardian_mode" == full_image ]]; then
+  deploy_stage=build_and_compare_full_image
+  base_full_tag="local/optimus-deploy-baseline:$run_key"
+  docker inspect -f '{{json .Mounts}}' optimus-backend | python3 -c 'import json,sys; mounts=json.load(sys.stdin); assert not any(item["Destination"] == "/app" or item["Destination"].startswith("/app/") for item in mounts)'
+  for build_tag in "$base_full_tag" "$candidate_tag"; do
+    if docker image inspect "$build_tag" >/dev/null 2>&1; then
+      echo 'Refusing to replace an existing build tag' >&2
+      false
+    fi
+  done
+  base_source="$scratch/base-source"
+  mkdir -m 700 "$base_source"
+  git -C "$source_dir" archive "$BASE_SHA" | tar -x -C "$base_source"
+  node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" full-image-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
+  docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$base_full_tag" "$base_source"
+  docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$candidate_tag" "$source_dir"
+else
+  node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" build-dockerfile --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --base-tag "$base_tag" > "$scratch/Dockerfile"
+  docker build --pull=false --network=none -f "$scratch/Dockerfile" -t "$candidate_tag" "$source_dir"
+fi
 candidate_id="$(docker image inspect -f '{{.Id}}' "$candidate_tag")"
 [[ "$candidate_id" =~ ^sha256:[0-9a-f]{64}$ ]]
 docker run --rm --network none --entrypoint node "$candidate_tag" --check /app/index.js
+if [[ "$guardian_mode" == full_image ]]; then
+  deploy_stage=verify_full_image_runtime_equivalence
+  manifest_script="$source_dir/scripts/full-image-runtime-manifest.cjs"
+  test -f "$manifest_script"
+  manifest_from_image() {
+    local image="$1" destination="$2"
+    cat "$manifest_script" | docker run --rm -i --network none --entrypoint node "$image" - > "$destination"
+  }
+  cat "$manifest_script" | docker exec -i optimus-backend node - > "$scratch/active-runtime.json"
+  manifest_from_image "$base_full_tag" "$scratch/base-runtime.json"
+  manifest_from_image "$candidate_tag" "$scratch/candidate-runtime.json"
+  approved_full_changes="$(node "$GITHUB_WORKSPACE/scripts/guardian-v1.cjs" prepare --repo "$source_dir" --base "$BASE_SHA" --source "$SOURCE_SHA" --release-mode full_image --format full-image-changes)"
+  node "$source_dir/scripts/verify-full-image-equivalence.cjs" \
+    --active "$scratch/active-runtime.json" --base "$scratch/base-runtime.json" \
+    --candidate "$scratch/candidate-runtime.json" --changes "$approved_full_changes"
+fi
 if [[ "$guardian_mode" == baileys_buffer_patch || "$guardian_mode" == baileys_balanced_buffer_patch || "$guardian_mode" == baileys_bootstrap_observation ]]; then
   deploy_stage=verify_baileys_dependency_image
   dependency_count=0
@@ -314,6 +367,15 @@ if test -f "$release"; then
   cp -p -- "$release" "$backup"
   had_release=1
 fi
+
+deploy_stage=final_pre_switch_check
+test "$(docker inspect -f '{{.Image}}' optimus-backend)" = "$BASE_IMAGE"
+test "$(docker image inspect -f '{{.Id}}' "$BASE_IMAGE")" = "$BASE_IMAGE"
+test "$(docker image inspect -f '{{.Id}}' "$recovery_tag")" = "$BASE_IMAGE"
+test "$(docker inspect -f '{{.State.Status}}' optimus-backend)" = running
+test "$(docker inspect -f '{{.State.OOMKilled}}' optimus-backend)" = false
+test "$(docker compose -f "$compose" ps -q postgres)" = "$postgres_id"
+test "$(docker inspect -f '{{.State.Health.Status}}' "$postgres_id")" = healthy
 
 deploy_stage=switch_backend
 switched=1

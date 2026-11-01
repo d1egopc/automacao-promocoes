@@ -10,6 +10,14 @@ on:
         type: boolean
         required: false
         default: false
+      image_strategy:
+        description: Official image packaging path; full_image is required for this approved continuous observer release
+        type: choice
+        required: false
+        default: overlay
+        options:
+          - overlay
+          - full_image
       source_sha:
         description: Full authorized source commit SHA
         required: true
@@ -45,11 +53,13 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
           BASE_IMAGE: ${{ inputs.base_image }}
+          IMAGE_STRATEGY: ${{ inputs.image_strategy }}
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$BASE_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$IMAGE_STRATEGY" == overlay || "$IMAGE_STRATEGY" == full_image ]]
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_sha || github.sha }}
@@ -60,18 +70,18 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Derive and validate runtime overlay
+      - name: Derive and validate Guardian release plan
         id: guardian
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
-        run: node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$SOURCE_SHA" --github-output "$GITHUB_OUTPUT"
+          IMAGE_STRATEGY: ${{ inputs.image_strategy }}
+        run: node scripts/guardian-v1.cjs prepare --base "$BASE_SHA" --source "$SOURCE_SHA" --release-mode "$IMAGE_STRATEGY" --github-output "$GITHUB_OUTPUT"
       - run: node --check index.js
       - run: npm run audit:encoding
       - name: Validate manual deploy script syntax
-        if: github.event_name == 'push'
         run: bash -n scripts/deploy-backend-vps-manual.sh
       - name: Critical tests
         run: |
@@ -81,6 +91,8 @@ jobs:
           node tests/deploy-backend-v2-overlay-validation.test.cjs
           node tests/deploy-backend-compose-image-validation.test.cjs
           node tests/deploy-backend-manual-diagnostics.test.cjs
+          node --test tests/full-image-equivalence.test.cjs
+          node --test tests/full-image-deploy-contract.test.cjs
           node tests/clean-install-bootstrap.test.js
           node tests/financeiro-bootstrap-schema.test.js
           node tests/platform-variables-v1.test.js
@@ -96,7 +108,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64]
     needs: ci
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,4 +129,5 @@ jobs:
           BASE_IMAGE: ${{ inputs.base_image }}
           RUNTIME_FILES: ${{ needs.ci.outputs.runtime_files }}
           GARIMPEI_SENSOR_MOUNT_APPROVED: ${{ inputs.garimpei_sensor_mount }}
+          IMAGE_STRATEGY: ${{ inputs.image_strategy }}
         run: bash scripts/deploy-backend-vps-manual.sh

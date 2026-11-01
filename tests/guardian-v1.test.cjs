@@ -141,6 +141,52 @@ test("dependência e Dockerfile exigem fluxo futuro de imagem completa", () => {
   }
 });
 
+test("perfil full_image aceita apenas os três arquivos e modos aprovados, usando fonte completa e runtime herdado", () => {
+  delete require.cache[require.resolve(guardian)];
+  const api = require(guardian);
+  const crypto = require("node:crypto");
+  const repo = createRepo();
+  try {
+    const observer = path.join(repo.dir, "modules", "whatsapp", "ingress-boundary-observation.js");
+    const journal = path.join(repo.dir, "modules", "whatsapp", "ingress-observation-journal.js");
+    fs.mkdirSync(path.dirname(observer), { recursive: true });
+    fs.writeFileSync(observer, "module.exports = 'base';\n");
+    let base = commit(repo, "full-image-base");
+    fs.writeFileSync(path.join(repo.dir, "index.js"), "console.log('approved');\n");
+    fs.writeFileSync(observer, "module.exports = 'approved';\n");
+    fs.writeFileSync(journal, "module.exports = 'new-approved-file';\n");
+    const source = commit(repo, "full-image-candidate");
+    const approvedFiles = [
+      "index.js",
+      "modules/whatsapp/ingress-boundary-observation.js",
+      "modules/whatsapp/ingress-observation-journal.js"
+    ];
+    const runtimeChanges = {
+      "index.js": "M",
+      "modules/whatsapp/ingress-boundary-observation.js": "M",
+      "modules/whatsapp/ingress-observation-journal.js": "A"
+    };
+    const runtimeHashes = Object.fromEntries(approvedFiles.map(file => [file,
+      crypto.createHash("sha256").update(fs.readFileSync(path.join(repo.dir, ...file.split("/")))).digest("hex")]));
+    const profile = { baseSha: base, requiredAncestor: base, runtimeFiles: approvedFiles, runtimeChanges, runtimeHashes };
+    const overlayPlan = api.buildPlan(repo.dir, base, source);
+    assert.equal(overlayPlan.validation, "BLOCKED");
+    assert.ok(overlayPlan.blocked.some(item => item.cause === "full_image_strategy_required"));
+    const plan = api.buildPlan(repo.dir, base, source, { releaseMode: "full_image", fullImageProfile: profile });
+    assert.equal(plan.validation, "PASS", JSON.stringify(plan.blocked));
+    assert.equal(plan.deployMode, "full_image");
+    const dockerfile = api.renderFullImageDockerfile(plan, "local/optimus-deploy-base:test");
+    assert.match(dockerfile, /find \/app -mindepth 1 -maxdepth 1 ! -name node_modules/);
+    assert.match(dockerfile, /COPY --chown=node:node \. \/app/);
+    assert.doesNotMatch(dockerfile, /npm ci|postinstall|apt-get/);
+
+    const wrongHash = { ...profile, runtimeHashes: { ...runtimeHashes, "index.js": "0".repeat(64) } };
+    const rejectedContent = api.buildPlan(repo.dir, base, source, { releaseMode: "full_image", fullImageProfile: wrongHash });
+    assert.equal(rejectedContent.validation, "BLOCKED");
+    assert.ok(rejectedContent.blocked.some(item => item.cause === "unapproved_full_image_content"));
+  } finally { cleanup(repo); }
+});
+
 test("remoção de runtime falha fechada", () => {
   const repo = createRepo();
   try {

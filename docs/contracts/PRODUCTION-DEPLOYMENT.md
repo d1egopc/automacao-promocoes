@@ -25,6 +25,14 @@ O workflow `.github/workflows/deploy-backend-vps.yml` executa **somente CI** em 
 7. Antes da troca, uma tag de recovery referencia o mesmo ID da imagem ativa. Em falha de publicacao/health, o workflow restaura o overlay anterior (ou remove somente o overlay novo) e recria **apenas backend** na imagem anterior. Confirme IMAGE ID, HTTP e PostgreSQL depois; se a recuperacao falhar, trate como incidente e nao repita cegamente.
 8. Depois do deploy, prove IMAGE ID ativo, HTTP local/publico, PostgreSQL no mesmo container, sessao/mount `/data`, RIO e contratos afetados. Nao remova imagens de recovery. Para operacoes manuais futuras de Compose, inclua sempre `backend-release.yml` quando ele existir, evitando reverter acidentalmente a imagem.
 
+### Caminho `full_image` por perfil fechado do Guardiao
+
+Use esta estrategia somente quando o perfil do Guardiao a exigir e o `workflow_dispatch` indicar `image_strategy=full_image`. O perfil atual de observabilidade de ingresso fixa base, ancestralidade e o conjunto/tipo/hash dos tres arquivos runtime autorizados. O deploy cria dois contextos limpos (`git archive` da base e checkout do candidato) e constroi ambos sobre uma tag da imagem ativa que ja passou no preflight. A imagem-base preserva o `node_modules` e o sistema operacional existentes; o build nao roda `npm ci`, `postinstall`, `apt` ou downloads.
+
+Antes de copiar a fonte, o Dockerfile de release recusa qualquer conteudo em `/app/data`, preserva `/app/node_modules` e substitui o restante de `/app` pelo checkout limpo. Um manifesto sanitizado compara: imagem ativa versus imagem de base reconstruida, e base versus candidata. O manifesto inclui arquivos runtime, hashes/modos, symlinks, arvore completa de dependencias, Node/npm e inventario Debian. A troca do Compose so ocorre se a primeira comparacao for identica e a segunda contiver exatamente o delta runtime permitido pelo perfil. Falha de leitura, dado inesperado em `/app/data`, dependencia diferente ou delta adicional bloqueia antes da troca. Manifestos ficam apenas no scratch protegido do runner e nao incluem conteudo de arquivos.
+
+O `backend-release.yml` continua selecionando somente a imagem do backend; env, mounts, PostgreSQL, `/data` e outros servicos preservam os mesmos gates e rollback descritos acima. Nao converta um perfil `full_image` em overlay nem amplie o conjunto aprovado por argumento manual.
+
 O checkout `/opt/optimus/backend` e referencia historica e pode estar em HEAD destacado com modificacoes locais; `git pull` ou build dele sao proibidos nesse caminho. O overlay de imagem nao autoriza mudar `/data`, PostgreSQL, flags ou estado do Mensageiro.
 
 Nunca:
