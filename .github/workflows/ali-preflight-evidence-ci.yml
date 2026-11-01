@@ -41,5 +41,7 @@ jobs:
       - name: PostgreSQL 17 atomic evidence, concurrency and expiry
         env:
           UF_TEST_PG_PORT: "55433"
+          UF_TEST_PG_EXPECTED_SERVER_HOST: private-container
+          UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
           UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
         run: node tests/universal-flow-queue-epoch.postgres.js

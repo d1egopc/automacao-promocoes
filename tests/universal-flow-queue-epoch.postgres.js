@@ -62,8 +62,14 @@ async function main() {
       host(inet_server_addr()) AS host,inet_server_port() AS port,
       current_setting('data_directory') AS data_dir`)).rows[0];
     assert.equal(identity.db, config.database);
-    assert.equal(identity.host, config.host);
-    assert.equal(identity.port, config.port);
+    if (process.env.UF_TEST_PG_EXPECTED_SERVER_HOST === "private-container") {
+      assert.match(identity.host,
+        /^(?:127\.0\.0\.1|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)$/);
+    } else {
+      assert.equal(identity.host, config.host);
+    }
+    assert.equal(identity.port,
+      Number(process.env.UF_TEST_PG_EXPECTED_SERVER_PORT || config.port));
     const expectedDataDir = process.env.UF_TEST_PG_EXPECTED_DATA_DIR ||
       path.join(__dirname, "..", ".local-postgres", "data");
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
