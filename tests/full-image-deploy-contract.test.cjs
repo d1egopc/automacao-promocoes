@@ -45,3 +45,9 @@ test("build herda dependências sem npm/postinstall e preserva rollback sem sobr
   assert.match(deploy, /Refusing to replace an existing build tag/);
   assert.match(deploy, /docker image inspect -f '\{\{\.Id\}\}' "\$recovery_tag"\)" = "\$BASE_IMAGE"/);
 });
+
+test("ferramentas de equivalência são release tooling, não runtime alterado", () => {
+  assert.match(deploy, /scripts\/full-image-runtime-manifest\.cjs\|scripts\/verify-full-image-equivalence\.cjs/);
+  assert.match(manifest, /"scripts\/full-image-runtime-manifest\.cjs"/);
+  assert.match(manifest, /"scripts\/verify-full-image-equivalence\.cjs"/);
+});

@@ -82,7 +82,7 @@ record_runtime_change() {
     return 0
   fi
   case "$path" in
-    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/benchmark-gerente-observability-v2.cjs|scripts/benchmark-garimpei-sensor24h.cjs|scripts/garimpei-infra-guard.py|scripts/garimpei-journal-cleanup.py) return 0 ;;
+    AGENTS.md|docs/*|tests/*|.github/*|scripts/deploy-backend-vps-manual.sh|scripts/guardian-v1.cjs|scripts/full-image-runtime-manifest.cjs|scripts/verify-full-image-equivalence.cjs|scripts/benchmark-gerente-observability-v2.cjs|scripts/benchmark-garimpei-sensor24h.cjs|scripts/garimpei-infra-guard.py|scripts/garimpei-journal-cleanup.py) return 0 ;;
     optimus-capture/adapters/magalu.js|optimus-capture/local-worker/magalu-identity.js) return 0 ;;
   esac
   case "$status" in
