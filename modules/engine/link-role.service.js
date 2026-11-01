@@ -440,6 +440,22 @@ function ehShortlinkAliExpressComIdentidadePendente(urlEntrada = "") {
   }
 }
 
+function ehDestinoAliExpressComIdentidadePendente(urlEntrada = "") {
+  try {
+    const url = new URL(texto(urlEntrada));
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const hostOficial = host === "aliexpress.com" || host.endsWith(".aliexpress.com");
+    if (!hostOficial) return false;
+    if (/^\/item\/\d{12,20}\.html$/i.test(url.pathname)) return true;
+    const productIds = url.searchParams.get("productIds") || "";
+    return ["m.aliexpress.com", "best.aliexpress.com"].includes(host) &&
+      /^\d{12,20}$/.test(productIds);
+  } catch {
+    return false;
+  }
+}
+
 function classificarAwinKabum(candidato = {}, evento = {}) {
   const url = urlEstrutural(candidato);
   const urlKabum = extrairUrlKabumDeAwin(url) || url;
@@ -591,11 +607,31 @@ function classificarCandidatosLinks(candidatos = [], marketplace = "", evento = 
 function escolherProdutoPrincipal(candidatos = [], marketplace = "", evento = {}) {
   const classificados = classificarCandidatosLinks(candidatos, marketplace, evento)
     .filter(candidato => texto(candidato.url));
+  const mp = minusculo(marketplace);
   const produtos = classificados
-    .filter(candidatoEhProduto)
+    .filter(candidato => mp === "aliexpress"
+      ? [PAPEL_LINK.PRODUTO, PAPEL_LINK.LINK_PC].includes(candidato.papelLink)
+      : candidatoEhProduto(candidato))
     .sort((a, b) => scoreCandidatoProduto(b) - scoreCandidatoProduto(a));
 
-  return produtos[0] || {
+  if (produtos[0]) return produtos[0];
+
+  if (mp === "aliexpress") {
+    const auxiliarIdentificavel = classificados
+      .filter(candidato => [PAPEL_LINK.LINK_APP, PAPEL_LINK.LINK_MOEDAS]
+        .includes(candidato.papelLink))
+      .filter(candidato => ehShortlinkAliExpressComIdentidadePendente(candidato.url) ||
+        ehDestinoAliExpressComIdentidadePendente(candidato.url))
+      .sort((a, b) => scoreCandidatoProduto(b) - scoreCandidatoProduto(a))[0];
+    if (auxiliarIdentificavel) {
+      return {
+        ...auxiliarIdentificavel,
+        identidadePendenteImportador: true
+      };
+    }
+  }
+
+  return {
     url: "",
     link: null,
     campo: "",

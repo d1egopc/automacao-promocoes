@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { criarExecutorFilaUniversal } =
+const { criarExecutorFilaUniversal, sanitizarMotivoPreflight } =
   require("../modules/engine/universal-queue-executor.adapter");
 
 const pool = { connect() {} };
@@ -40,6 +40,7 @@ test("commercial preflight denial never crosses the provider boundary", async ()
   assert.deepEqual(await run("ws_A"), { ok: false,
     reason: "commercial_deadline", released: true });
   assert.equal(calls.length, 1);
+  assert.equal(calls[0][1].preflightReason, "commercial_deadline");
 });
 
 test("temporary destination closure defers only this target without provider", async () => {
@@ -56,6 +57,16 @@ test("temporary destination closure defers only this target without provider", a
     dispatch: async () => { throw new Error("must_not_send"); } });
   assert.equal((await run("ws_A")).released, true);
   assert.equal(calls[0].retryAt, "2099-01-01T00:00:00.000Z");
+  assert.equal(calls[0].preflightReason, "destination_window_closed");
+});
+
+test("preflight reason is bounded to sanitized fixed metadata", () => {
+  assert.equal(sanitizarMotivoPreflight("destination_session_unavailable"),
+    "destination_session_unavailable");
+  assert.equal(sanitizarMotivoPreflight("session failed for +5511999999999"),
+    "send_preflight_denied");
+  assert.equal(sanitizarMotivoPreflight("x".repeat(97)),
+    "send_preflight_denied");
 });
 
 test("factual non-technical terminal does not become provider failure", async () => {

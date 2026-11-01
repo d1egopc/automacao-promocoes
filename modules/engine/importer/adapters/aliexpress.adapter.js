@@ -391,7 +391,12 @@ function preservarOcorrenciaPrincipalExpandidaFactualAliExpress({
 } = {}) {
   const papel = texto(papelLink);
   if (!["link_app", "link_moedas"].includes(papel)) return false;
-  if (!texto(urlOriginal) || urlOriginalAliExpressSegura(urlOriginal)) return false;
+  if (!texto(urlOriginal)) return false;
+  if (urlOriginalAliExpressSegura(urlOriginal)) {
+    if (texto(urlOriginal) !== texto(urlPrincipal)) return false;
+    if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
+    return Boolean(resolverProdutoCanonicoAliExpress(produtoPrincipal, urlPrincipal).produtoId);
+  }
   if (!urlExpandidaAliExpressSegura(urlExpandida) || texto(urlExpandida) !== texto(urlPrincipal)) return false;
   if (!urlAliExpressConvertidaSegura(urlAfiliada, urlOriginal)) return false;
 

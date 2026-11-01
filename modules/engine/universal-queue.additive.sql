@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS engine_universal_queue_destinations (
   terminal_evidence text,
   resolved_at timestamptz,
   resolution_source text,
+  last_preflight_reason text,
+  last_preflight_at timestamptz,
+  preflight_denial_count bigint NOT NULL DEFAULT 0,
   revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -105,6 +108,11 @@ CREATE TABLE IF NOT EXISTS engine_universal_queue_destinations (
       AND btrim(confirmation_key) <> '' AND credit_debited IS NOT NULL)),
   CHECK (status NOT IN ('claimed','send_started') OR
     (lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+  CONSTRAINT engine_uq_preflight_reason_check
+  CHECK (last_preflight_reason IS NULL OR
+    last_preflight_reason ~ '^[a-z0-9_]{1,96}$'),
+  CONSTRAINT engine_uq_preflight_denial_count_check
+  CHECK (preflight_denial_count >= 0),
   CHECK (status <> 'discarded_without_replay' OR
     (terminal_status='discarded_without_replay' AND
      btrim(COALESCE(terminal_reason,''))<>'' AND
@@ -130,6 +138,29 @@ ALTER TABLE engine_universal_queue_destinations
   ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
 ALTER TABLE engine_universal_queue_destinations
   ADD COLUMN IF NOT EXISTS resolution_source text;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS last_preflight_reason text;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS last_preflight_at timestamptz;
+ALTER TABLE engine_universal_queue_destinations
+  ADD COLUMN IF NOT EXISTS preflight_denial_count bigint NOT NULL DEFAULT 0;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+    WHERE conrelid='engine_universal_queue_destinations'::regclass
+      AND conname='engine_uq_preflight_reason_check') THEN
+    ALTER TABLE engine_universal_queue_destinations
+      ADD CONSTRAINT engine_uq_preflight_reason_check
+      CHECK (last_preflight_reason IS NULL OR
+        last_preflight_reason ~ '^[a-z0-9_]{1,96}$') NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+    WHERE conrelid='engine_universal_queue_destinations'::regclass
+      AND conname='engine_uq_preflight_denial_count_check') THEN
+    ALTER TABLE engine_universal_queue_destinations
+      ADD CONSTRAINT engine_uq_preflight_denial_count_check
+      CHECK (preflight_denial_count >= 0) NOT VALID;
+  END IF;
+END $$;
 DO $$ DECLARE item record; BEGIN
   -- An older additive bootstrap created an unnamed status CHECK. Replace only
   -- that narrow constraint so the new terminal quarantine state is additive.

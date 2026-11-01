@@ -1,0 +1,45 @@
+name: AliExpress and preflight evidence validation
+
+on:
+  push:
+    branches:
+      - validation/guardian-v1-ali-preflight-evidence-20261101
+
+permissions:
+  contents: read
+
+jobs:
+  node24-postgres17:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: AliExpress focal and marketplace contracts
+        run: |
+          node tests/aliexpress-shortlink-radar-candidate.test.cjs
+          node --test tests/aliexpress-app-moedas-contrato.test.js tests/aliexpress-moedas-productdetail-engine.test.js tests/aliexpress-manual-importador.test.js
+      - name: Executor preflight unit contract
+        run: node --test tests/universal-flow-queue-executor.test.js
+      - name: PostgreSQL 17 atomic evidence, concurrency and expiry
+        env:
+          UF_TEST_PG_PORT: "55433"
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: node tests/universal-flow-queue-epoch.postgres.js

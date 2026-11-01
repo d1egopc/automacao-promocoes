@@ -543,6 +543,7 @@ async function markSendStarted({ pool, destinationId, leaseToken,
     const row = (await client.query(`UPDATE engine_universal_queue_destinations
       SET status='send_started',send_started_at=clock_timestamp(),
           commercial_cta=$4::jsonb,
+          last_preflight_reason=NULL,last_preflight_at=NULL,
           revision=revision+1,updated_at=clock_timestamp()
       WHERE id=$1 AND operation_epoch_started_at=$3 AND lease_token=$2
         AND status='claimed' AND lease_until>clock_timestamp()
@@ -558,10 +559,17 @@ async function markSendStarted({ pool, destinationId, leaseToken,
   });
 }
 
-async function releaseUnstarted({ pool, destinationId, leaseToken, retryAt }) {
+async function releaseUnstarted({ pool, destinationId, leaseToken, retryAt,
+  preflightReason = null }) {
   const availableAt = retryAt == null ? null : new Date(retryAt);
   if (availableAt && !Number.isFinite(availableAt.getTime())) {
     throw new Error("queue_retry_at_invalid");
+  }
+  const denialReason = preflightReason == null
+    ? null
+    : String(preflightReason || "").trim();
+  if (denialReason !== null && !/^[a-z0-9_]{1,96}$/.test(denialReason)) {
+    throw new Error("queue_preflight_reason_invalid");
   }
   return transaction(pool, async client => {
     const state = await activeEpoch(client);
@@ -577,11 +585,16 @@ async function releaseUnstarted({ pool, destinationId, leaseToken, retryAt }) {
     const released = (await client.query(`UPDATE engine_universal_queue_destinations
       SET status='pending',lease_token=NULL,lease_until=NULL,
           available_at=COALESCE($4::timestamptz,clock_timestamp()),
+          last_preflight_reason=COALESCE($5,last_preflight_reason),
+          last_preflight_at=CASE WHEN $5 IS NULL THEN last_preflight_at
+            ELSE clock_timestamp() END,
+          preflight_denial_count=preflight_denial_count+
+            CASE WHEN $5 IS NULL THEN 0 ELSE 1 END,
           revision=revision+1,updated_at=clock_timestamp()
       WHERE id=$1 AND operation_epoch_started_at=$2
         AND status='claimed' AND lease_token=$3 AND send_started_at IS NULL
       RETURNING workspace_id`, [destinationId, epoch, leaseToken,
-      availableAt?.toISOString() || null])).rows[0];
+      availableAt?.toISOString() || null, denialReason])).rows[0];
     if (!released) return { ok: false, reason: "claim_not_releasable" };
     await client.query(`UPDATE engine_universal_queue_workspace_state
       SET revision=revision+1,checkpoint_revision=revision+1,

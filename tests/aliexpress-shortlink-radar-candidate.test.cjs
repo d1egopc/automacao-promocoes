@@ -109,6 +109,88 @@ async function main() {
   assert.equal(resultado.ok, true);
   assert.equal(resultado.produtoId, "1005001234567890");
   assert.equal(resultado.metadata.linkOriginalEngine, url);
+
+  const moedasUrl = "https://s.click.aliexpress.com/e/_CoinsIdentity123";
+  const moedasEvento = {
+    texto_original: `Produto AliExpress com moedas\nPor R$ 39,90\nLink com moedas: ${moedasUrl}`
+  };
+  const moedasLink = {
+    ...linkRow(moedasUrl),
+    metadata: {
+      papelLink: "link_moedas",
+      papelLinkMotivo: "contexto_moedas",
+      papelLinkConfianca: "media"
+    }
+  };
+  const moedasClassificado = classificarLinkEngine({
+    marketplace: "aliexpress", evento: moedasEvento, link: moedasLink
+  });
+  // The published AliExpress contract canonicalizes a coins CTA as link_app
+  // while retaining its contextual reason and commercial occurrence.
+  assert.equal(moedasClassificado.papelLink, "link_app");
+  assert.equal(moedasClassificado.motivo, "contexto_moedas");
+  const moedasEscolhido = escolherProdutoPrincipal([
+    { url: moedasUrl, link: moedasLink, campo: "url_original" }
+  ], "aliexpress", moedasEvento);
+  assert.equal(moedasEscolhido.url, moedasUrl);
+  assert.equal(moedasEscolhido.papelLink, "link_app");
+  assert.equal(moedasEscolhido.identidadePendenteImportador, true);
+
+  async function importarMoedas(workspace, provaWorkspace = workspace) {
+    const workspaceCredentials = {
+      appKey: `app_${workspace}`,
+      secret: `secret_${workspace}`,
+      trackingId: `track_${workspace}`
+    };
+    const workspaceAffiliate = `https://s.click.aliexpress.com/e/_Affiliate_${workspace}`;
+    return importarAliExpressEngine({
+      job: { id: `coins-${workspace}`, evento_id: 9002,
+        cliente_id: workspace, marketplace: "aliexpress" },
+      evento: moedasEvento,
+      links: [moedasLink],
+      deps: {
+        getIntegracaoCliente: () => ({ credenciais: workspaceCredentials }),
+        importarAliExpress: async (_urlImportada, config = {}) => ({
+          marketplace: "aliexpress",
+          titulo: "Produto AliExpress confirmado por identidade oficial",
+          productId: "1005010148896613",
+          precoAtual: "129.90",
+          linkOriginal: "https://www.aliexpress.com/item/1005010148896613.html",
+          linkExpandido: "https://best.aliexpress.com/?productIds=1005010148896613",
+          linkAfiliado: workspaceAffiliate,
+          imagem: "https://ae01.alicdn.com/kf/coins-fixture.jpg",
+          categoria: "Eletronicos",
+          metadata: {
+            papelLink: config.contextoEngine?.papelLink,
+            afiliacaoWorkspace: {
+              workspaceId: provaWorkspace,
+              appKey: workspaceCredentials.appKey,
+              trackingIdEnviado: workspaceCredentials.trackingId,
+              origemConversao: "workspace_api",
+              conversaoStatus: "convertida",
+              urlAfiliadaWorkspace: workspaceAffiliate,
+              motivoConversao: "fixture_convertida"
+            }
+          }
+        })
+      }
+    });
+  }
+
+  const moedasA = await importarMoedas("workspace_A");
+  const moedasB = await importarMoedas("workspace_B");
+  assert.equal(moedasA.ok, true);
+  assert.equal(moedasB.ok, true);
+  assert.equal(moedasA.preco, 39.9, "preço factual do Radar prevalece");
+  assert.equal(moedasA.metadata.papelLinkEscolhido, "link_app");
+  assert.equal(moedasA.metadata.linksClassificados[0].papelLink, "link_app");
+  assert.notEqual(moedasA.linkAfiliado, moedasB.linkAfiliado,
+    "cada workspace mantém sua própria conversão");
+
+  const terceiroComoCliente = await importarMoedas("workspace_A", "affiliate_origin_third_party");
+  assert.equal(terceiroComoCliente.ok, false);
+  assert.equal(terceiroComoCliente.motivo, "afiliacao_workspace_incompleta",
+    "link afiliado da origem nunca prova conversão da workspace");
   console.log("aliexpress-shortlink-radar-candidate.test.cjs OK");
 }
 

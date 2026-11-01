@@ -17,7 +17,7 @@ const { consultarHistoricoUniversal, consultarFilaPublicaUniversal,
   consultarDetalheUniversal } =
   require("../modules/engine/universal-history.read-model");
 
-const config = { host: "127.0.0.1", port: 55433, user: "postgres",
+const config = { host: "127.0.0.1", port: Number(process.env.UF_TEST_PG_PORT || 55433), user: "postgres",
   database: "optimus_universal_fixture", connectionTimeoutMillis: 5000 };
 const schema = `uf_queue_${crypto.randomBytes(6).toString("hex")}`;
 const epoch = "2026-10-09T12:00:00.000Z";
@@ -64,8 +64,10 @@ async function main() {
     assert.equal(identity.db, config.database);
     assert.equal(identity.host, config.host);
     assert.equal(identity.port, config.port);
+    const expectedDataDir = process.env.UF_TEST_PG_EXPECTED_DATA_DIR ||
+      path.join(__dirname, "..", ".local-postgres", "data");
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
-      path.join(__dirname, "..", ".local-postgres", "data").toLowerCase());
+      path.normalize(expectedDataDir).toLowerCase());
     await admin.query(`CREATE SCHEMA ${schema}`);
     created = true;
     await admin.query(`SET search_path TO ${schema},public`);
@@ -165,9 +167,23 @@ async function main() {
     const parallelDifferentDestination = await queue.claimDestination({ pool,
       workspaceId: "ws_A" });
     assert.equal(parallelDifferentDestination.destination_id, "a_tg");
+    await assert.rejects(queue.releaseUnstarted({ pool,
+      destinationId: parallelDifferentDestination.id,
+      leaseToken: parallelDifferentDestination.leaseToken,
+      preflightReason: "session failed for private target" }),
+    /queue_preflight_reason_invalid/);
     assert.equal((await queue.releaseUnstarted({ pool,
       destinationId: parallelDifferentDestination.id,
-      leaseToken: parallelDifferentDestination.leaseToken })).ok, true);
+      leaseToken: parallelDifferentDestination.leaseToken,
+      preflightReason: "destination_session_unavailable" })).ok, true);
+    const deniedPreflight = (await admin.query(`SELECT last_preflight_reason,
+      last_preflight_at,preflight_denial_count
+      FROM engine_universal_queue_destinations WHERE id=$1`,
+    [parallelDifferentDestination.id])).rows[0];
+    assert.equal(deniedPreflight.last_preflight_reason,
+      "destination_session_unavailable");
+    assert.ok(deniedPreflight.last_preflight_at);
+    assert.equal(Number(deniedPreflight.preflight_denial_count), 1);
     assert.equal((await queue.markSendStarted({ pool,
       destinationId: firstA.id, leaseToken: firstA.leaseToken })).ok, true);
     const ackA1 = await durableAck(admin, firstA, "wa_1");
@@ -194,6 +210,12 @@ async function main() {
     assert.equal(thirdA.target_key, "a_chat_1");
     assert.equal((await queue.markSendStarted({ pool,
       destinationId: thirdA.id, leaseToken: thirdA.leaseToken })).ok, true);
+    const startedAfterDenial = (await admin.query(`SELECT last_preflight_reason,
+      last_preflight_at,preflight_denial_count
+      FROM engine_universal_queue_destinations WHERE id=$1`, [thirdA.id])).rows[0];
+    assert.equal(startedAfterDenial.last_preflight_reason, null);
+    assert.equal(startedAfterDenial.last_preflight_at, null);
+    assert.equal(Number(startedAfterDenial.preflight_denial_count), 1);
     const ackA3 = await durableAck(admin, thirdA, "tg_3");
     const confirmedA3 = await queue.confirmSend({ pool,
       destinationId: thirdA.id, leaseToken: thirdA.leaseToken, ...ackA3 });

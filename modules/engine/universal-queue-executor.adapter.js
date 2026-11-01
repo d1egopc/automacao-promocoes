@@ -5,6 +5,13 @@
 // This is intentionally not installed in the production scheduler yet.
 const queue = require("./universal-queue.repository");
 
+function sanitizarMotivoPreflight(reason = "") {
+  const value = String(reason || "").trim();
+  return /^[a-z0-9_]{1,96}$/.test(value)
+    ? value
+    : "send_preflight_denied";
+}
+
 function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, checkWorkspace,
   repository = queue, oneShot = false }) {
   if (!pool || typeof pool.connect !== "function" ||
@@ -58,6 +65,7 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
       }
       const released = await repository.releaseUnstarted({ pool: poolAtual(),
         destinationId: claim.id, leaseToken: claim.leaseToken,
+        preflightReason: sanitizarMotivoPreflight(prepared?.reason),
         // A denied preflight is not a free destination. Without an explicit
         // reopening time, bound the retry loop; an actually free destination
         // never enters this branch and has no artificial wait.
@@ -120,4 +128,4 @@ function criarExecutorFilaUniversal({ pool, getPool = null, prepare, dispatch, c
   };
 }
 
-module.exports = { criarExecutorFilaUniversal };
+module.exports = { criarExecutorFilaUniversal, sanitizarMotivoPreflight };
