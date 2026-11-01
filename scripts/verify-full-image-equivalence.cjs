@@ -3,14 +3,19 @@
 
 const fs = require("node:fs");
 
+function isSafeManifestPath(value) {
+  if (typeof value !== "string" || !value || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) ||
+      value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return false;
+  return value.split("/").every(segment => segment && segment !== "." && segment !== "..");
+}
+
 function load(file) {
   const value = JSON.parse(fs.readFileSync(file, "utf8"));
   if (value.schemaVersion !== 1 || !value.metadata || !Array.isArray(value.entries))
     throw new Error("invalid_manifest");
   const paths = new Set();
   for (const entry of value.entries) {
-    if (!entry || typeof entry.path !== "string" || !/^[A-Za-z0-9._/-]+$/.test(entry.path) || entry.path.startsWith("/") ||
-        entry.path.split("/").some(segment => !segment || segment === "." || segment === "..") || paths.has(entry.path))
+    if (!entry || !isSafeManifestPath(entry.path) || paths.has(entry.path))
       throw new Error("invalid_manifest_path");
     if (!Number.isInteger(entry.mode) || !["file", "symlink", "directory"].includes(entry.type) ||
         !Number.isInteger(entry.uid) || !Number.isInteger(entry.gid)) throw new Error("invalid_manifest_entry");
@@ -77,4 +82,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { compare, load, changedPaths };
+module.exports = { compare, load, changedPaths, isSafeManifestPath };

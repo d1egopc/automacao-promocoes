@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createManifest, shouldRunAsCli } = require("../scripts/full-image-runtime-manifest.cjs");
-const { compare } = require("../scripts/verify-full-image-equivalence.cjs");
+const { compare, isSafeManifestPath } = require("../scripts/verify-full-image-equivalence.cjs");
 const tempRoot = path.join(__dirname, "..", "tmp", "test-tmp");
 fs.mkdirSync(tempRoot, { recursive: true });
 const fixtures = [];
@@ -117,6 +117,14 @@ test("manifesto rejeita caminhos maliciosos e entradas duplicadas", () => {
   const dir = fixture();
   const badPath = writeManifest(dir, "bad-path", manifest([{ ...file("../outside", "x") }]));
   assert.throws(() => compare({ active: badPath, base: badPath, candidate: badPath, approvedChanges: [] }), /invalid_manifest_path/);
+  for (const [index, relative] of ["/absolute/file.js", "C:/absolute/file.js", "folder/../escape.js", "folder\\escape.js", "folder/line\nfeed.js"].entries()) {
+    const invalid = writeManifest(dir, `bad-path-${index}`, manifest([file(relative, "x")]));
+    assert.throws(() => compare({ active: invalid, base: invalid, candidate: invalid, approvedChanges: [] }), /invalid_manifest_path/);
+  }
+  const validSpecialPath = "@scope/Pasta café/arquivo final.js";
+  assert.equal(isSafeManifestPath(validSpecialPath), true);
+  const validManifest = writeManifest(dir, "valid-special-path", manifest([file(validSpecialPath, "x")]));
+  assert.doesNotThrow(() => compare({ active: validManifest, base: validManifest, candidate: validManifest, approvedChanges: [] }));
   const duplicate = writeManifest(dir, "duplicate", {
     schemaVersion: 1,
     metadata: {},
