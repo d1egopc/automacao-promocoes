@@ -789,7 +789,7 @@ async function importarAliExpress(urlEntrada, config = {}) {
     try {
       const landing = new URL(urlCanonicaProduto);
       landingMoedasComProdutoFactual = landing.protocol === "https:" &&
-        landing.hostname === "m.aliexpress.com" &&
+        ["m.aliexpress.com", "best.aliexpress.com"].includes(landing.hostname.toLowerCase()) &&
         landing.pathname === "/p/coin-index/index.html" &&
         landing.searchParams.get("productIds") === productId;
     } catch (_) { /* URL invalida continua no tratamento existente. */ }

@@ -3,6 +3,7 @@ const { importarMercadoLivreEngine } = require("../modules/engine/importer/adapt
 const { importarAmazonEngine } = require("../modules/engine/importer/adapters/amazon.adapter");
 const { importarAwinEngine } = require("../modules/engine/importer/adapters/awin.adapter");
 const { importarAliExpressEngine } = require("../modules/engine/importer/adapters/aliexpress.adapter");
+const { criarProvaAfiliacaoWorkspaceAliExpress } = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
 
 function ocorrencia(url, ordem, papel = "produto") {
   return {
@@ -480,6 +481,7 @@ async function testarAliExpressAppPcProduto() {
   const afiliadoApp = "https://s.click.aliexpress.com/e/_APPD1";
   const afiliadoPc = "https://s.click.aliexpress.com/e/_PCD1";
   const afiliadoProduto = "https://s.click.aliexpress.com/e/_PRODUTOD1";
+  const credenciais = { appKey: "app", secret: "secret", trackingId: "d1" };
   const chamadas = [];
 
   const resultado = await importarAliExpressEngine({
@@ -500,17 +502,26 @@ async function testarAliExpressAppPcProduto() {
       { url_original: produto, metadata: { papelLink: "produto", papelLinkMotivo: "produto_explicito" } }
     ],
     deps: {
-      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "d1" } }),
+      getIntegracaoCliente: () => ({ credenciais }),
       importarAliExpress: async (url, config = {}) => {
         chamadas.push(url);
+        const urlAfiliada = url === app ? afiliadoApp : url === pc ? afiliadoPc : afiliadoProduto;
+        const papel = config.contextoEngine?.papelLink || "produto";
         return {
           marketplace: "aliexpress",
           titulo: "AliExpress APP PC Produto",
           productId: "1005001234567890",
           precoAtual: "120.00",
           linkOriginal: url,
-          linkAfiliado: url === app ? afiliadoApp : url === pc ? afiliadoPc : afiliadoProduto,
-          metadata: { papelLink: config.contextoEngine?.papelLink || "" }
+          linkAfiliado: urlAfiliada,
+          metadata: {
+            papelLink: papel,
+            afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceAliExpress({
+              clienteId: "D1", credenciais, urlOriginal: url,
+              urlAfiliadaWorkspace: urlAfiliada, papel,
+              conversaoStatus: "convertida", motivoConversao: "fixture"
+            })
+          }
         };
       }
     }
@@ -541,6 +552,7 @@ async function testarAliExpressQuatroOcorrenciasPreservamUrlOriginal() {
     [produtoTpm]: "1005007777777777",
     [pcTpm]: "1005007777777777"
   };
+  const credenciais = { appKey: "app", secret: "secret", trackingId: "d1" };
   const chamadas = [];
 
   const resultado = await importarAliExpressEngine({
@@ -562,7 +574,7 @@ async function testarAliExpressQuatroOcorrenciasPreservamUrlOriginal() {
       { url_original: pcTpm, ordemCaptura: 4, metadata: { papelLink: "link_pc", papelLinkMotivo: "pc_explicito" } }
     ],
     deps: {
-      getIntegracaoCliente: () => ({ credenciais: { appKey: "app", secret: "secret", trackingId: "d1" } }),
+      getIntegracaoCliente: () => ({ credenciais }),
       importarAliExpress: async (url, config = {}) => {
         chamadas.push({ url, papel: config.contextoEngine?.papelLink || "" });
         return {
@@ -577,14 +589,22 @@ async function testarAliExpressQuatroOcorrenciasPreservamUrlOriginal() {
             papelLink: config.contextoEngine?.papelLink || "",
             conversaoPapel: config.contextoEngine?.papelLink || "",
             conversaoLinkAlternativo: config.contextoEngine?.conversaoLinkAlternativo === true,
-            sourceValuesUsado: url
+            sourceValuesUsado: url,
+            afiliacaoWorkspace: criarProvaAfiliacaoWorkspaceAliExpress({
+              clienteId: "D1", credenciais, urlOriginal: url,
+              urlAfiliadaWorkspace: afiliados[url],
+              papel: config.contextoEngine?.papelLink || "produto",
+              conversaoStatus: "convertida", motivoConversao: "fixture"
+            })
           }
         };
       }
     }
   });
 
-  assert.strictEqual(resultado.ok, true);
+  // Produtos distintos não podem ser combinados silenciosamente na mesma oferta;
+  // a ocorrência divergente deve reter o conjunto com motivo auditável.
+  assert.strictEqual(resultado.ok, false);
   assert.deepStrictEqual(chamadas.map(item => item.url), [pcPlaca, appPlaca, produtoTpm, pcTpm]);
 
   const links = resultado.metadata.linksClassificados;

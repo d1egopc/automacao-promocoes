@@ -345,8 +345,10 @@ function urlOriginalAliExpressSegura(url = "") {
 function urlExpandidaAliExpressSegura(url = "") {
   try {
     const parsed = new URL(texto(url));
+    const host = parsed.hostname.replace(/^www\./i, "").toLowerCase();
+    const hostAliExpress = host === "aliexpress.com" || urlOriginalAliExpressSegura(parsed.href);
     return parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.port &&
-      urlOriginalAliExpressSegura(parsed.href);
+      hostAliExpress;
   } catch {
     return false;
   }
@@ -358,7 +360,7 @@ function produtoIdFactualUrlExpandidaAliExpress(url = "") {
     if (!urlExpandidaAliExpressSegura(parsed.href)) return "";
     const itemId = parsed.pathname.match(/^\/item\/(\d{12,20})\.html$/i)?.[1] || "";
     if (itemId) return itemId;
-    if (parsed.hostname.toLowerCase() === "m.aliexpress.com" &&
+    if (["m.aliexpress.com", "best.aliexpress.com"].includes(parsed.hostname.toLowerCase()) &&
       parsed.pathname === "/p/coin-index/index.html") {
       const productIds = parsed.searchParams.get("productIds") || "";
       return /^\d{12,20}$/.test(productIds) ? productIds : "";

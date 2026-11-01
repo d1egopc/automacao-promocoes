@@ -10,6 +10,7 @@ const PRODUCT_ID = "1005005325013777";
 const COIN_ORIGINAL = "https://seuhardware.com/s/atrfdtR";
 const PC_ORIGINAL = "https://seuhardware.com/s/KGJNd8h";
 const COIN_EXPANDED = `https://m.aliexpress.com/p/coin-index/index.html?productIds=${PRODUCT_ID}`;
+const BEST_COIN_EXPANDED = `https://best.aliexpress.com/p/coin-index/index.html?productIds=${PRODUCT_ID}`;
 const WORKSPACE_ID = "workspace_movespeed_fixture";
 const CREDENTIALS = {
   appKey: "app_movespeed_fixture",
@@ -129,6 +130,29 @@ async function testCoinLandingUsesOfficialProductDetailOnce() {
     ]);
     assert.equal(calls[0].productIds, PRODUCT_ID);
     assert.equal(calls[1].sourceValues, COIN_EXPANDED);
+  } finally {
+    restore();
+  }
+}
+
+async function testBestCoinLandingUsesOfficialProductDetailOnce() {
+  const calls = [];
+  const restore = installFetch([
+    { method: "aliexpress.affiliate.productdetail.get", response: detailResponse() },
+    { method: "aliexpress.affiliate.link.generate", response: linkResponse("BEST_COIN_WORKSPACE") }
+  ], calls);
+
+  try {
+    const product = await importarAliExpress(BEST_COIN_EXPANDED, importerConfig());
+    assert.equal(product.productId, PRODUCT_ID);
+    assert.equal(product.metadata.sourceValuesUsado, BEST_COIN_EXPANDED);
+    assert.equal(product.metadata.afiliacaoWorkspace.workspaceId, WORKSPACE_ID);
+    assert.deepEqual(calls.map(call => call.method), [
+      "aliexpress.affiliate.productdetail.get",
+      "aliexpress.affiliate.link.generate"
+    ]);
+    assert.equal(calls[0].productIds, PRODUCT_ID);
+    assert.equal(calls[1].sourceValues, BEST_COIN_EXPANDED);
   } finally {
     restore();
   }
@@ -257,6 +281,7 @@ async function testMismatchedDetailFallsBackOnlyToExactQueryProduct() {
 
 (async () => {
   await testCoinLandingUsesOfficialProductDetailOnce();
+  await testBestCoinLandingUsesOfficialProductDetailOnce();
   await testEvent148876CoinOccurrenceBecomesSafeWithoutPcFabrication();
   await testUnresolvedCapturedPcStillBlocksIntegralContract();
   await testMismatchedDetailFallsBackOnlyToExactQueryProduct();
