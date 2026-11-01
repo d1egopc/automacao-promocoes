@@ -6,17 +6,17 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const { createManifest, parseArgs } = require("../scripts/full-image-runtime-manifest.cjs");
+const { createManifest, shouldRunAsCli } = require("../scripts/full-image-runtime-manifest.cjs");
 const { compare } = require("../scripts/verify-full-image-equivalence.cjs");
 const tempRoot = path.join(__dirname, "..", "tmp", "test-tmp");
 fs.mkdirSync(tempRoot, { recursive: true });
 const fixtures = [];
 test.after(() => { for (const item of fixtures) fs.rmSync(item, { recursive: true, force: true }); });
 
-test("manifesto aceita execução pelo stdin Node com argumento '-'", () => {
-  assert.deepEqual(parseArgs(["-"]), {});
-  assert.deepEqual(parseArgs(["-", "--root", "/app"]), { root: "/app" });
-  assert.throws(() => parseArgs(["--unknown"]), /invalid_manifest_argument/);
+test("manifesto executa ao receber código via node stdin", () => {
+  assert.equal(shouldRunAsCli({ isMainModule: false, stdinMarker: "-" }), true);
+  assert.equal(shouldRunAsCli({ isMainModule: true, stdinMarker: undefined }), true);
+  assert.equal(shouldRunAsCli({ isMainModule: false, stdinMarker: "scripts/full-image-runtime-manifest.cjs" }), false);
 });
 
 function fixture() {

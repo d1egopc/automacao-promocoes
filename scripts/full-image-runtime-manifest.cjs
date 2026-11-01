@@ -124,19 +124,22 @@ async function createManifest({ root = "/app", osReleasePath = "/etc/os-release"
 
 function parseArgs(argv) {
   const result = {};
-  const args = argv[0] === "-" ? argv.slice(1) : argv;
-  for (let index = 0; index < args.length; index += 1) {
-    const key = args[index];
-    if (key === "--root" && args[index + 1]) result.root = args[++index];
+  for (let index = 0; index < argv.length; index += 1) {
+    const key = argv[index];
+    if (key === "--root" && argv[index + 1]) result.root = argv[++index];
     else throw new Error("invalid_manifest_argument");
   }
   return result;
 }
 
-if (require.main === module) {
+function shouldRunAsCli({ isMainModule, stdinMarker } = {}) {
+  return isMainModule === true || stdinMarker === "-";
+}
+
+if (shouldRunAsCli({ isMainModule: require.main === module, stdinMarker: process.argv[1] })) {
   createManifest(parseArgs(process.argv.slice(2)))
     .then(manifest => process.stdout.write(`${JSON.stringify(manifest)}\n`))
     .catch(() => { process.stderr.write("full_image_manifest_failed\n"); process.exitCode = 1; });
 }
 
-module.exports = { createManifest, installedDpkgDigest, walkFiles, isExcluded, readNpmVersion, parseArgs };
+module.exports = { createManifest, installedDpkgDigest, walkFiles, isExcluded, readNpmVersion, shouldRunAsCli };
