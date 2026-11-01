@@ -124,9 +124,10 @@ async function createManifest({ root = "/app", osReleasePath = "/etc/os-release"
 
 function parseArgs(argv) {
   const result = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const key = argv[index];
-    if (key === "--root" && argv[index + 1]) result.root = argv[++index];
+  const args = argv[0] === "-" ? argv.slice(1) : argv;
+  for (let index = 0; index < args.length; index += 1) {
+    const key = args[index];
+    if (key === "--root" && args[index + 1]) result.root = args[++index];
     else throw new Error("invalid_manifest_argument");
   }
   return result;
@@ -138,4 +139,4 @@ if (require.main === module) {
     .catch(() => { process.stderr.write("full_image_manifest_failed\n"); process.exitCode = 1; });
 }
 
-module.exports = { createManifest, installedDpkgDigest, walkFiles, isExcluded, readNpmVersion };
+module.exports = { createManifest, installedDpkgDigest, walkFiles, isExcluded, readNpmVersion, parseArgs };
