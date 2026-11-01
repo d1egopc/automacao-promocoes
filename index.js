@@ -33299,6 +33299,25 @@ async function carregarGruposSessao(id, opcoes = {}) {
     const { lista, gruposNovos } = mesclarGrupos(cacheAntes, listaRefresh);
     salvarCacheGrupos(lista);
 
+    // The observer is started before the socket's group cache is populated.
+    // Retry attachment after the authoritative group refresh so a valid
+    // generation cannot remain invisible merely because scope resolution was
+    // temporarily unavailable during socket creation.  Do not touch stale
+    // sockets or alter the productive listener path.
+    try {
+      const generation = Number(geracoesSocketWhatsapp[id] || sock.__optimusSocketGeracao || 0);
+      if (socketEhAtual(sessoes, id, sock) && Number.isSafeInteger(generation) && generation > 0) {
+        whatsappIngressBoundary.trackSocket({
+          workspaceId: clienteId,
+          sessionId: id,
+          sock,
+          generation
+        });
+      }
+    } catch {
+      // Observability is best-effort and must never affect group loading.
+    }
+
     console.log(`[OK] Grupos carregados automaticamente: ${lista.length}`);
 
     return registrarRefresh({

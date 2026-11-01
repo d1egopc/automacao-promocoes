@@ -174,6 +174,35 @@ test("an owned session with no active group selection remains uninstrumented", (
   observer.stop("test_complete");
 });
 
+test("a generation initially outside the resolved scope is attached after group refresh", () => {
+  let resolved = false;
+  const persisted = [];
+  const observer = createIngressBoundaryObservation({
+    journal: { append: value => persisted.push(value), status: () => ({ available: true, failed: false, dropped: 0, maxBytes: 2 * 1024 * 1024, retentionMs: 72 * 60 * 60 * 1000 }) },
+    resolveContinuousScope: ({ workspaceId, sessionId }) =>
+      workspaceId === "tenant-a" && sessionId === "wa-a" && resolved
+        ? { verified: true, groupIds: [GROUP_A] }
+        : { verified: false, groupIds: [] }
+  });
+  observer.startContinuous();
+  const sock = socket();
+  assert.equal(observer.trackSocket({ workspaceId: "tenant-a", sessionId: "wa-a", generation: 1, sock }), false);
+  assert.equal(observer.status().generations.length, 0);
+
+  // This models the post-connect group refresh in carregarGruposSessao.
+  resolved = true;
+  assert.equal(observer.trackSocket({ workspaceId: "tenant-a", sessionId: "wa-a", generation: 1, sock }), true);
+  sock.ev.on("messages.upsert", ({ messages, type }) => {
+    observer.mark("callback", { workspaceId: "tenant-a", sessionId: "wa-a", sock, emitter: sock.ev, messages, upsertType: type });
+  });
+  sock.ev.emit("messages.upsert", { type: "notify", messages: [message("late-scope", GROUP_A)] });
+  const status = observer.status();
+  assert.equal(status.generations[0].generation, 1);
+  assert.equal(status.generations[0].counters.callbackCalls, 1);
+  assert.ok(persisted.some(row => row.stage === "callback"));
+  observer.stop("test_complete");
+});
+
 test("dynamic group changes apply without restart and socket replacement detaches old wrappers", () => {
   let now = 1000;
   let groups = [GROUP_A];
