@@ -42,7 +42,11 @@ function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 function compare({ active, base, candidate, approvedChanges }) {
   const activeManifest = load(active), baseManifest = load(base), candidateManifest = load(candidate);
   if (!same(activeManifest.metadata, baseManifest.metadata)) throw new Error("active_base_runtime_metadata_mismatch");
-  if (!same(activeManifest.entries, baseManifest.entries)) throw new Error("active_base_runtime_tree_mismatch");
+  const activeBaseChanges = changedPaths(activeManifest, baseManifest);
+  if (activeBaseChanges.length) {
+    const sample = activeBaseChanges.slice(0, 20).map(({ status, path }) => `${status}:${path}`);
+    throw new Error(`active_base_runtime_tree_mismatch count=${activeBaseChanges.length} sample=${JSON.stringify(sample)}`);
+  }
   if (!same(baseManifest.metadata, candidateManifest.metadata)) throw new Error("candidate_runtime_metadata_mismatch");
   const actual = changedPaths(baseManifest, candidateManifest);
   const expected = [...approvedChanges].sort((a, b) => a.path.localeCompare(b.path));

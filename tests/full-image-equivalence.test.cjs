@@ -100,7 +100,12 @@ test("divergência active/base, alteração extra, exclusão e dependências dif
     ...paths,
     active: writeManifest(dir, "active-mismatch", manifest([file("index.js", "other")], meta)),
     approvedChanges: approved
-  }), /active_base_runtime_tree_mismatch/);
+  }), error => {
+    assert.match(error.message, /active_base_runtime_tree_mismatch count=1/);
+    assert.match(error.message, /M:index\.js/);
+    assert.doesNotMatch(error.message, /"sha256"|"content"|other/);
+    return true;
+  });
   assert.throws(() => compare({
     ...paths,
     candidate: writeManifest(dir, "candidate-dependency-mismatch", manifest([file("index.js", "candidate")], { ...meta, dependencyTreeSha256: "c".repeat(64) })),
