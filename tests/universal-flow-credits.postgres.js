@@ -175,16 +175,11 @@ async function main() {
     const heldGoogleWorkspace = "ws_google_hold";
     await credits.openBalance({ pool, workspaceId: heldGoogleWorkspace,
       operationEpochStartedAt: epoch, openingBalance: 7, sourceHash });
-    await admin.query("BEGIN");
-    try {
-      assert.equal((await credits.holdForTargetTx(admin, { epoch,
-        workspaceId: heldGoogleWorkspace,
-        targetId: 9000001 })).ok, true);
-      await admin.query("COMMIT");
-    } catch (error) {
-      await admin.query("ROLLBACK");
-      throw error;
-    }
+    const [heldGoogleTarget] = await addTargets(admin, pool,
+      heldGoogleWorkspace, 1);
+    assert.equal((await queue.markSendStarted({ pool,
+      destinationId: heldGoogleTarget.id,
+      leaseToken: heldGoogleTarget.leaseToken })).ok, true);
     const renewalDeferred = await credits.setAdminBalance({ pool,
       workspaceId: heldGoogleWorkspace, amount: 0,
       idempotencyKey: "universal:policy:google-auth-hold-fixture",
