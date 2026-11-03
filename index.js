@@ -28181,6 +28181,7 @@ app.post("/limpar-sessao/:id", async (req, res) => {
 
 app.get("/me", async (req, res) => {
   const perf = criarPerfTimer("PERF ME", contextoPerfHttp(req));
+  try {
   const clienteId = perf.etapaSync("cliente", () => getClienteId(req));
 
   const usuario = perf.etapaSync("buscar_usuario", () => buscarUsuarioPorIdSeguro(usuarios, clienteId));
@@ -28193,8 +28194,19 @@ app.get("/me", async (req, res) => {
     });
   }
 
-  perf.etapaSync("renovar_creditos", () => renovarCreditosSeNecessario(usuario));
-  const saldoCreditos = await saldoCreditosParaExibicao(clienteId, usuario);
+  let saldoCreditos = null;
+  let creditosEstado = "disponivel";
+  try {
+    saldoCreditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
+  } catch (erro) {
+    creditosEstado = "indisponivel";
+    registrarErroSaas({
+      req,
+      etapa: "me.credit_balance_read",
+      erro,
+      codigoFallback: "saldo_perfil_indisponivel"
+    });
+  }
 
   const usoConexoes = perf.etapaSync("conexoes", () => contarConexoesWorkspace(clienteId));
 
@@ -28233,6 +28245,7 @@ app.get("/me", async (req, res) => {
       proximaRenovacao: usuario.proximaRenovacao || "",
       pagamentoUltimoStatus: usuario.pagamentoUltimoStatus || "",
       creditos: saldoCreditos,
+      creditosEstado,
       papel: usuario.papel,
       ativo: usuario.ativo,
       marketplacesLiberados: planoAtual.marketplaces || [],
@@ -28269,6 +28282,22 @@ app.get("/me", async (req, res) => {
     fila: filaUsuario.length
   });
   return res.json(payload);
+  } catch (erro) {
+    const diagnostico = registrarErroSaas({
+      req,
+      etapa: "me.profile_build",
+      erro,
+      codigoFallback: "perfil_indisponivel"
+    });
+    perf.fim({ statusCode: 503, erro: true });
+    if (res.headersSent) return res.end();
+    return res.status(503).json({
+      ok: false,
+      codigo: "perfil_indisponivel",
+      erro: "Falha ao carregar perfil",
+      requestId: diagnostico.requestId
+    });
+  }
 });
 
 // ================= INTEGRAÃ‡Ã•ES =================
