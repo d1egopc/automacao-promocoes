@@ -179,7 +179,7 @@ async function main() {
     try {
       assert.equal((await credits.holdForTargetTx(admin, { epoch,
         workspaceId: heldGoogleWorkspace,
-        targetId: "google_auth_hold_fixture" })).ok, true);
+        targetId: 9000001 })).ok, true);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");
