@@ -47,6 +47,14 @@ Consumidores:
 
 Uma mudanca em produtor ou transformador pode atingir fila, envio, Historico, Achados, Vitrine e Social. Antes de alterar contratos transversais, liste todos os consumidores e execute os smokes correspondentes.
 
+## Fronteira de autenticacao e autoridade financeira
+
+- Login e perfil autenticado nao dependem de saldo, ciclo, pagamento ou renovacao de creditos.
+- `/me` usa somente leitura autoritativa do ledger. Falha dessa leitura retorna credito explicitamente indisponivel, sem impedir o perfil e sem conceder permissao de consumo.
+- Toda automacao que consome credito permanece fail-closed quando a autoridade financeira nao pode ser comprovada.
+- Pagamento aprovado e processado pelo webhook Mercado Pago no fluxo idempotente de renovacao/concessao e retomada da automacao; login e read models nunca executam esse papel.
+- O Guardian deve cobrir login e `/me` contra renovacao, grant, debito, liberacao de hold e outras escritas financeiras acidentais.
+
 ## Fontes de verificacao
 
 - Entrada/orquestracao: `index.js`, `modules/engine`, `modules/radar`, `modules/teleradar`, `modules/clonador-grupos`.

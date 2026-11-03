@@ -42,6 +42,12 @@ Preserve, quando existirem e forem comprovados:
 - Captura direta para Lista nao cria Oferta normal nem entra no Auto Dispatcher.
 - Mensagem final continua sendo renderizada pelo template do destino.
 
+## RIO como fluxo vivo
+
+RIO nao e um arquivo de ofertas: e o fluxo captura -> processamento -> distribuicao -> ACK -> expiracao segura. Cada etapa precisa de evidencia propria; ingresso persistido nao prova elegibilidade, job nao prova envio e `send_started` nao substitui ACK.
+
+TTL, cadencia, deduplicacao, retencoes e referencias ativas limitam a vida comercial. Expiracao terminal impede reenvio; Historico, Achados, Vitrine ou qualquer outra projecao nao podem ressuscitar a oferta. Ausencia de oferta elegivel deve permanecer distinta de falha de distribuicao.
+
 ## Mudanca segura
 
 Qualquer adicao de campo deve mapear produtor, transporte, persistencia, consumidores, compatibilidade legada e teste de round-trip. Alteracao de semantica comercial exige decisao humana.
