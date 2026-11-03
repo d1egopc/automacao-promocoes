@@ -85,7 +85,7 @@ async function main() {
     await admin.query(`UPDATE engine_operation_state SET mode='UNIVERSAL',
       operation_epoch_started_at=$1 WHERE id=1`, [epoch]);
 
-    const targets = Array.from({ length: 19 }, (_, index) => `hold-${index + 1}`);
+    const targets = Array.from({ length: 19 }, (_, index) => index + 1);
     await transaction(pool, async client => {
       for (const targetId of targets) {
         const held = await credits.holdForTargetTx(client, {
