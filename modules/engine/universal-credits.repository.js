@@ -242,7 +242,11 @@ async function readBalance({ pool, workspaceId }) {
     JOIN engine_universal_credit_balances b
       ON b.operation_epoch_started_at=s.operation_epoch_started_at
     WHERE s.id=1 AND s.mode='UNIVERSAL' AND b.workspace_id=$1`, [workspace]);
-  if (result.rowCount !== 1) throw new Error("universal_credit_opening_missing");
+  if (result.rowCount !== 1) {
+    const erro = new Error("universal_credit_opening_missing");
+    erro.codigo = "universal_credit_opening_missing";
+    throw erro;
+  }
   const row = result.rows[0];
   return { balance: Number(row.balance), reserved: Number(row.reserved),
     available: Number(row.balance) - Number(row.reserved),
