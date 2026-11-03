@@ -32,7 +32,8 @@ const paidPlan = { nome: "Pro", creditosModelo: "ciclo",
   renovacaoCreditos: "pagamento", creditosPorCiclo: 20, cicloDias: 30 };
 
 function user(overrides = {}) {
-  return { assinaturaStatus: "ativa", pagamentoUltimoStatus: "aprovado",
+  return { id: "fixture-workspace", assinaturaStatus: "ativa",
+    pagamentoUltimoStatus: "aprovado",
     ultimoCicloCreditoId: "payment-before-fixture",
     cicloAtualInicio: "2026-11-01T00:00:00.000Z",
     cicloAtualFim: "2026-12-01T00:00:00.000Z", ...overrides };
@@ -122,7 +123,7 @@ async function main() {
       readBalance: async () => { throw new Error("fixture_ledger_unavailable"); }
     }), /fixture_ledger_unavailable/);
 
-    const paymentUser = user({ assinaturaStatus: "suspensa",
+    const paymentUser = user({ id: "payment", assinaturaStatus: "suspensa",
       pagamentoUltimoStatus: "vencido_sem_pagamento",
       ultimoCicloCreditoId: "old-payment",
       cicloAtualFim: "2026-11-01T00:00:00.000Z" });

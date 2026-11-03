@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   saas-fix1-postgres:
-    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-rio-p0-') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -107,7 +107,57 @@ jobs:
           test -z "${DATABASE_URL:-}"
           export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
-          node --test tests/universal-credit-preflight.test.cjs
+          node tests/universal-flow-credits.postgres.js
+
+  rio-p0-postgres:
+    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-rio-p0-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Read-only preflight and financial contract regressions
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          node --check index.js
+          node --check modules/engine/universal-credit-eligibility.service.js
+          node --test tests/universal-credit-preflight.test.cjs \
+            tests/saas-fundacao-v1.test.js \
+            tests/saas-renovacao-assinatura-v1.test.js \
+            tests/financeiro-mercadopago-pix-v1.test.js \
+            tests/universal-flow-queue-executor.test.js \
+            tests/universal-flow-queue-preflight.test.js
+      - name: Universal preflight, ledger, concurrency and expiry on PostgreSQL 17
+        env:
+          UF_TEST_PG_PORT: "55433"
+          UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -z "${DATABASE_URL:-}"
+          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
+          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
           node tests/universal-credit-preflight.postgres.js
           node tests/universal-flow-credits.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
