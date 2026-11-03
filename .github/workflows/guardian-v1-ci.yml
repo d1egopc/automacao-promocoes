@@ -82,9 +82,11 @@ jobs:
 
       - name: Password recovery HTTP integration
         if: ${{ !cancelled() }}
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          PGSSLMODE: disable
         run: |
           set -euo pipefail
-          test -z "${DATABASE_URL:-}"
           mkdir -p "$RUNNER_TEMP/saas-fix1-recovery-v3"
           MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-recovery-v3" \
           node tests/saas-recuperacao-senha-v1.test.js
