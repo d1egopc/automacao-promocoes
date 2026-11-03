@@ -374,6 +374,8 @@ const {
 } = require("./utils/cotas-flexiveis-planos");
 const saasFundacao = require("./utils/saas-fundacao");
 const creditBalanceService = require("./modules/saas/credit-balance.service");
+const universalCreditEligibility =
+  require("./modules/engine/universal-credit-eligibility.service");
 const { listarUsuariosAdminSomenteLeitura } = require("./modules/saas/admin-users-read-model");
 const { registrarErroSaas, obterRequestIdSaas } = require("./modules/saas/error-diagnostics");
 const { autenticarUsuarioGoogleExistente } = require("./modules/auth/google-existing-login.service");
@@ -5333,10 +5335,19 @@ async function creditoDisponivelParaEnvio(clienteId, quantidade = 1,
   }
   if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
   if (!usuarioAtivoOperacional(clienteId)) return false;
-  await renovarCreditosUniversalSeNecessario(obterUsuario(clienteId));
-  const credit = await lerSaldoUniversal({ pool: getEnginePool(),
-    workspaceId: clienteId });
-  return credit.available >= quantidade;
+  const usuario = obterUsuario(clienteId);
+  const plano = obterPlanoUsuarioObjeto(usuario);
+  const elegibilidade = await universalCreditEligibility
+    .creditoDisponivelSomenteLeitura({
+      usuario,
+      plano,
+      workspaceId: clienteId,
+      quantidade,
+      readBalance: ({ workspaceId }) => lerSaldoUniversal({
+        pool: getEnginePool(), workspaceId
+      })
+    });
+  return elegibilidade.ok;
 }
 
 async function saldoCreditosParaExibicao(clienteId, usuario = null,

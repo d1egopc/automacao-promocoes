@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   saas-fix1-postgres:
-    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-rio-p0-') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -107,7 +107,10 @@ jobs:
           test -z "${DATABASE_URL:-}"
           export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
+          node --test tests/universal-credit-preflight.test.cjs
+          node tests/universal-credit-preflight.postgres.js
           node tests/universal-flow-credits.postgres.js
+          node tests/universal-flow-expired-fresh.postgres.js
 
   validate:
     runs-on: ubuntu-latest
