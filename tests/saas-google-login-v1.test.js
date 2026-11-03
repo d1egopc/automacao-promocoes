@@ -26,6 +26,79 @@ function assertSemSegredo(payload, contexto) {
   assert.ok(!/google.*token|idToken|credential|senhaHash|passwordHash|tokenHash|accessToken|refreshToken|\"senha\"\s*:|\"password\"\s*:/i.test(texto), `${contexto} nao deve expor segredo`);
 }
 
+function sanitizarLinhaDiagnostico(linha) {
+  return String(linha || "")
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"`]+/gi, "[url-redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token-redacted]")
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----/gi, "[private-key-redacted]")
+    .replace(/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/g, "[password-hash-redacted]")
+    .replace(/((?:DATABASE_URL|JWT_SECRET|GOOGLE_[A-Z0-9_]+|[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|SENHA|CREDENTIAL|API_KEY)[A-Z0-9_]*|accessToken|refreshToken|idToken|credential|privateKey|clientSecret|apiKey|senhaHash|passwordHash)\s*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}]+)/gi, "$1[redacted]")
+    .replace(/(["']?(?:email|nome|name|phone|telefone|user|usuario|clienteId|workspaceId)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^,\s}]+)/gi, "$1[redacted]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email-redacted]")
+    .replace(/C:\\Users\\[^\\\s]+/gi, "C:\\Users\\[redacted]")
+    .replace(/\/home\/[^/\s]+/gi, "/home/[redacted]")
+    .slice(0, 400);
+}
+
+const PADRAO_LOG_INICIALIZACAO = /(?:\[API\]|\[ENGINE-DB|\[PERF DB|\[LOCAL-WORKER-SCHEMA\]|\[ENGINE-V2-PIPELINE|\[OK\].*\/data|MODULE_NOT_FOUND|ERR_REQUIRE|ERR_[A-Z_]+|ECONN[A-Z]+|EAI_AGAIN|ETIMEDOUT|EACCES|EPERM|ENOTFOUND|\b(?:error|erro|fatal|warning|warn|exception|falha|failed|timeout|listening|online)\b)/i;
+
+function linhasDiagnosticoStartup(texto = "") {
+  const linhas = String(texto).split(/\r?\n/);
+  const indices = new Set();
+  linhas.forEach((linha, indice) => {
+    if (!PADRAO_LOG_INICIALIZACAO.test(linha)) return;
+    for (let i = Math.max(0, indice - 1); i <= Math.min(linhas.length - 1, indice + 2); i += 1) {
+      indices.add(i);
+    }
+  });
+  return [...indices]
+    .sort((a, b) => a - b)
+    .slice(-16)
+    .map(indice => sanitizarLinhaDiagnostico(linhas[indice]))
+    .filter(Boolean)
+    .join("\n") || "(nenhuma linha de inicializacao/erro reconhecida)";
+}
+
+function etapaInicializacaoDaLinha(linha = "") {
+  if (/\[API\].*API ONLINE/i.test(linha)) return "http_listener_started";
+  if (/\[ENGINE-DB-ERRO\]/i.test(linha)) return "engine_database_error";
+  if (/\[ENGINE-DB-OK\]/i.test(linha)) return "engine_database_ready";
+  if (/\[PERF DB POOL\].*connect/i.test(linha)) return "postgres_connection_acquired";
+  if (/\[PERF DB POOL\]/i.test(linha)) return "postgres_pool_created";
+  if (/\[PERF DB\].*initEngineDatabase/i.test(linha)) return "engine_schema_ready";
+  if (/\[LOCAL-WORKER-SCHEMA\]/i.test(linha)) return "local_worker_schema_checked";
+  if (/\[ENGINE-V2-PIPELINE-AUTOMATICO-UNICO\]/i.test(linha)) return "engine_pipeline_configured";
+  if (/MODULE_NOT_FOUND|ERR_REQUIRE/i.test(linha)) return "module_load_error";
+  if (/\b(?:error|erro|fatal|exception|falha|failed|timeout|ECONN[A-Z]+|ETIMEDOUT|EACCES|EPERM|ENOTFOUND)\b/i.test(linha)) return "startup_error_output";
+  return "";
+}
+
+function diagnosticarDiretorio(caminho, configurado = false) {
+  if (!caminho) return { configurado, existe: false, diretorio: false, gravavel: false };
+  try {
+    const stat = fs.statSync(caminho);
+    const diretorio = stat.isDirectory();
+    if (diretorio) fs.accessSync(caminho, fs.constants.W_OK);
+    return { configurado, existe: true, diretorio, gravavel: diretorio };
+  } catch (erro) {
+    return {
+      configurado,
+      existe: fs.existsSync(caminho),
+      diretorio: false,
+      gravavel: false,
+      codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : "filesystem_error"
+    };
+  }
+}
+
+function resumoDatabaseUrl(valor = "") {
+  const texto = String(valor || "").trim();
+  const esquema = texto.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() || null;
+  return { presente: Boolean(texto), esquema };
+}
+
 function request({ method = "GET", port, path: urlPath, body, token }) {
   return new Promise((resolve, reject) => {
     const dados = body ? Buffer.from(JSON.stringify(body)) : null;
@@ -53,19 +126,95 @@ function request({ method = "GET", port, path: urlPath, body, token }) {
   });
 }
 
-async function esperarServidor(port, proc) {
-  const limite = Date.now() + 20000;
+async function esperarServidor(port, proc, estadoInicializacao, obterDiagnostico) {
+  const inicio = Date.now();
+  const limite = inicio + 20000;
+  let tentativas = 0;
+  let ultimaSonda = { tipo: "nao_iniciada" };
+  estadoInicializacao.ultimaEtapa = "aguardando_http_root_200";
+
+  function emitirDiagnostico(motivo) {
+    const dados = obterDiagnostico({
+      motivo,
+      porta: port,
+      tempoDecorridoMs: Date.now() - inicio,
+      tentativas,
+      ultimaSonda,
+      processo: {
+        pid: proc.pid || null,
+        exitCode: proc.exitCode,
+        signalCode: proc.signalCode,
+        killed: proc.killed,
+        erroSpawn: estadoInicializacao.erroSpawn
+      }
+    });
+    console.error("[SAAS-GOOGLE-STARTUP-DIAGNOSTIC]", JSON.stringify(dados));
+    throw new Error(motivo);
+  }
+
   while (Date.now() < limite) {
-    if (proc.exitCode !== null) {
-      throw new Error(`servidor encerrou antes de subir: ${proc.exitCode}`);
-    }
+    if (proc.exitCode !== null) emitirDiagnostico("servidor encerrou antes de subir");
+    tentativas += 1;
     try {
       const res = await request({ port, path: "/" });
-      if (res.status === 200) return;
-    } catch {}
+      ultimaSonda = { tipo: "http", status: res.status };
+      if (res.status === 200) {
+        estadoInicializacao.ultimaEtapa = "http_root_ready";
+        return;
+      }
+    } catch (erro) {
+      ultimaSonda = {
+        tipo: "socket_error",
+        classe: String(erro?.name || "Error").slice(0, 40),
+        codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : null
+      };
+    }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error("timeout aguardando servidor");
+  emitirDiagnostico("timeout aguardando servidor");
+}
+
+function aguardarSaidaProcesso(proc, timeoutMs) {
+  if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const aoSair = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      proc.removeListener("exit", aoSair);
+      resolve(false);
+    }, timeoutMs);
+    proc.once("exit", aoSair);
+  });
+}
+
+async function encerrarProcessoFilho(proc) {
+  const estado = {
+    processoIniciado: Boolean(proc.pid),
+    killSolicitado: false,
+    killAceito: null,
+    encerramentoForcado: false,
+    killForcadoAceito: null,
+    terminou: false,
+    exitCode: proc.exitCode,
+    signalCode: proc.signalCode
+  };
+  if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
+    estado.killSolicitado = true;
+    try { estado.killAceito = proc.kill("SIGTERM"); } catch {}
+    estado.terminou = await aguardarSaidaProcesso(proc, 2500);
+    if (!estado.terminou && proc.exitCode === null && proc.signalCode === null) {
+      estado.encerramentoForcado = true;
+      try { estado.killForcadoAceito = proc.kill("SIGKILL"); } catch {}
+      estado.terminou = await aguardarSaidaProcesso(proc, 2500);
+    }
+  } else {
+    estado.terminou = true;
+  }
+  estado.exitCode = proc.exitCode;
+  estado.signalCode = proc.signalCode;
+  return estado;
 }
 
 function tokenGoogle({ privateKey, kid, clientId, sub, email, emailVerified = true, aud = clientId, expiresIn = "5m" }) {
@@ -286,27 +435,86 @@ function trechoEntre(inicio, fim) {
     user_existente: { workspace: "preservado", nested: { valor: 1 } }
   });
 
+  const envFilho = {
+    ...process.env,
+    DATA_DIR: dataDir,
+    PORT: String(port),
+    JWT_SECRET: jwtSecret,
+    PERF_DIAGNOSTICO: "0",
+    GOOGLE_CLIENT_ID: clientId,
+    GOOGLE_JWKS_JSON: JSON.stringify({ keys: [jwk] })
+  };
   const proc = spawn(process.execPath, ["index.js"], {
     cwd: raiz,
-    env: {
-      ...process.env,
-      DATA_DIR: dataDir,
-      PORT: String(port),
-      JWT_SECRET: jwtSecret,
-      PERF_DIAGNOSTICO: "0",
-      GOOGLE_CLIENT_ID: clientId,
-      GOOGLE_JWKS_JSON: JSON.stringify({ keys: [jwk] })
-    },
+    env: envFilho,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
   let stdout = "";
   let stderr = "";
-  proc.stdout.on("data", chunk => { stdout += chunk.toString(); });
-  proc.stderr.on("data", chunk => { stderr += chunk.toString(); });
+  const estadoInicializacao = {
+    ultimaEtapa: "processo_filho_iniciado",
+    ultimoCanalEtapa: "fixture",
+    erroSpawn: null
+  };
+  proc.once("error", erro => {
+    estadoInicializacao.erroSpawn = {
+      classe: String(erro?.name || "Error").slice(0, 40),
+      codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : null
+    };
+    estadoInicializacao.ultimaEtapa = "spawn_error";
+    estadoInicializacao.ultimoCanalEtapa = "fixture";
+  });
+
+  function acompanharSaida(stream, canal) {
+    let parcial = "";
+    stream.on("data", chunk => {
+      const texto = chunk.toString();
+      if (canal === "stdout") stdout += texto;
+      else stderr += texto;
+      const partes = (parcial + texto).split(/\r?\n/);
+      parcial = partes.pop() || "";
+      for (const linha of partes) {
+        const etapa = etapaInicializacaoDaLinha(linha);
+        if (etapa) {
+          estadoInicializacao.ultimaEtapa = etapa;
+          estadoInicializacao.ultimoCanalEtapa = canal;
+        }
+      }
+    });
+    stream.on("end", () => {
+      const etapa = etapaInicializacaoDaLinha(parcial);
+      if (etapa) {
+        estadoInicializacao.ultimaEtapa = etapa;
+        estadoInicializacao.ultimoCanalEtapa = canal;
+      }
+    });
+  }
+  acompanharSaida(proc.stdout, "stdout");
+  acompanharSaida(proc.stderr, "stderr");
+
+  function obterDiagnosticoInicializacao(probe) {
+    const dataDirMensageiroV3 = envFilho.MENSAGEIRO_V3_DATA_DIR || "/data/mensageiro-v3";
+    return {
+      ...probe,
+      ultimaEtapaInicializacao: estadoInicializacao.ultimaEtapa,
+      canalUltimaEtapa: estadoInicializacao.ultimoCanalEtapa,
+      ambiente: {
+        node: process.version,
+        plataforma: process.platform,
+        databaseUrl: { herdadaPeloFilho: Boolean(envFilho.DATABASE_URL), ...resumoDatabaseUrl(envFilho.DATABASE_URL) },
+        dataDirDoTeste: diagnosticarDiretorio(dataDir, true),
+        dataRoot: diagnosticarDiretorio("/data", false),
+        mensageiroV3DataDir: diagnosticarDiretorio(dataDirMensageiroV3, Boolean(envFilho.MENSAGEIRO_V3_DATA_DIR)),
+        googleJwksInjetado: Boolean(envFilho.GOOGLE_JWKS_JSON)
+      },
+      stdoutSanitizado: linhasDiagnosticoStartup(stdout),
+      stderrSanitizado: linhasDiagnosticoStartup(stderr)
+    };
+  }
 
   try {
-    await esperarServidor(port, proc);
+    await esperarServidor(port, proc, estadoInicializacao, obterDiagnosticoInicializacao);
 
     const configPublica = await request({
       method: "GET",
@@ -932,8 +1140,10 @@ function trechoEntre(inicio, fim) {
 
     console.log("saas-google-login-v1.test.js OK");
   } finally {
-    proc.kill();
+    const encerramentoFilho = await encerrarProcessoFilho(proc);
+    console.log("[SAAS-GOOGLE-CHILD-CLEANUP]", JSON.stringify(encerramentoFilho));
     fs.rmSync(dataDir, { recursive: true, force: true });
+    if (!encerramentoFilho.terminou) throw new Error("processo filho nao encerrou apos SIGTERM/SIGKILL");
   }
 })().catch(e => {
   console.error(e);
