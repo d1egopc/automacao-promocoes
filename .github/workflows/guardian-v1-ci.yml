@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   saas-fix1-postgres:
-    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/heads/validation/guardian-v1-saas-fix1-') || startsWith(github.ref, 'refs/heads/validation/guardian-v1-me-hotfix-') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -58,7 +58,10 @@ jobs:
             tests/saas-beta-config-v1.test.js \
             tests/saas-jornada-cadastro-v1.test.js \
             tests/saas-assinatura-v1.test.js \
+            tests/saas-renovacao-assinatura-v1.test.js \
             tests/saas-paywall-pre-dashboard-v1.test.js \
+            tests/financeiro-mercadopago-pix-v1.test.js \
+            tests/financeiro-checkout-pix-publico-v1.test.js \
             tests/admin-auth-estrito.test.js \
             tests/admin-credit-topup-contract.test.js \
             tests/higiene-saas-conservadora.test.js \
@@ -79,6 +82,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/saas-fix1-google-v3"
           MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-google-v3" \
           node tests/saas-google-login-v1.test.js
+          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-google-v3" \
+          node tests/saas-me-readonly-v1.test.js
 
       - name: Password recovery HTTP integration
         if: ${{ !cancelled() }}
