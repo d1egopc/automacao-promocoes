@@ -5339,15 +5339,17 @@ async function creditoDisponivelParaEnvio(clienteId, quantidade = 1,
   return credit.available >= quantidade;
 }
 
-async function saldoCreditosParaExibicao(clienteId, usuario = null) {
+async function saldoCreditosParaExibicao(clienteId, usuario = null,
+  { onStage = () => {} } = {}) {
   return creditBalanceService.lerSaldoCreditosOperacional({
     mode: modoMotorReal,
     workspaceId: clienteId,
     usuario,
-    renew: renovarCreditosUniversalSeNecessario,
+    renew: (user, options) => renovarCreditosUniversalSeNecessario(user, options),
     readBalance: ({ workspaceId }) => lerSaldoUniversal({
       pool: getEnginePool(), workspaceId
-    })
+    }),
+    onStage
   });
 }
 
@@ -5360,6 +5362,12 @@ async function saldoCreditosSomenteLeitura(clienteId, usuario = null) {
       pool: getEnginePool(), workspaceId
     })
   });
+}
+
+async function saldoCreditosGoogleSomenteLeitura(clienteId, usuario = null,
+  { onStage = () => {} } = {}) {
+  onStage("credit.ledger_read");
+  return saldoCreditosSomenteLeitura(clienteId, usuario);
 }
 
 async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId, destinationId } = {}) {
@@ -5387,20 +5395,26 @@ async function liberarCreditoEnvioManualV2(reserva = {}) {
   return liberarCreditoManualUniversal({ pool: getEnginePool(), reserva });
 }
 
-async function renovarCreditosUniversalSeNecessario(usuario) {
+async function renovarCreditosUniversalSeNecessario(usuario,
+  { onStage = () => {} } = {}) {
   if (modoMotorReal !== "UNIVERSAL" || !usuario) return;
   const plano = obterPlanoUsuarioObjeto(usuario);
   if (!plano) return;
+  onStage("credit.renewal.ledger_read");
   const current = await lerSaldoUniversal({ pool: getEnginePool(),
     workspaceId: usuario.id });
   const candidato = { ...structuredClone(usuario), creditos: current.balance };
+  onStage("credit.renewal.policy_evaluate");
   const resultado = saasFundacao.renovarCreditosPorPlano(candidato, plano);
   if (resultado?.alterou !== true) return;
   const next = Number(candidato.creditos);
   if (!Number.isSafeInteger(next) || next < 0) {
-    throw new Error("universal_credit_policy_amount_invalid");
+    const erro = new Error("universal_credit_policy_amount_invalid");
+    erro.codigo = "universal_credit_policy_amount_invalid";
+    throw erro;
   }
   if (next !== current.balance) {
+    onStage("credit.renewal.policy_write");
     const policyIdentity = createHash("sha256").update(JSON.stringify([
       usuario.id, usuario.proximaRenovacao || usuario.cicloAtualFim || "",
       resultado.motivo, next
@@ -5409,11 +5423,20 @@ async function renovarCreditosUniversalSeNecessario(usuario) {
       workspaceId: usuario.id, amount: next,
       idempotencyKey: `universal:policy:${policyIdentity}`,
       reason: resultado.motivo, movementType: "POLICY_BALANCE_SET" });
-    if (!movement.ok) throw new Error(movement.reason || "universal_credit_policy_deferred");
+    if (!movement.ok) {
+      const reason = String(movement.reason || "");
+      const codigo = /^universal_credit_[a-z0-9_]+$/.test(reason)
+        ? reason
+        : "universal_credit_policy_deferred";
+      const erro = new Error(codigo);
+      erro.codigo = codigo;
+      throw erro;
+    }
   }
   for (const [campo, valor] of Object.entries(candidato)) {
     if (campo !== "creditos") usuario[campo] = valor;
   }
+  onStage("credit.renewal.user_persist");
   salvarUsuarios();
 }
 
@@ -27892,7 +27915,9 @@ async function autenticarGoogleOptimus(idToken = "", body = {}, contexto = {}) {
     // leaves a valid, retryable account rather than a partially linked user.
     const token = cadastroGoogle.token;
     marcarEtapa("google.balance_read");
-    const creditos = await saldoCreditosParaExibicao(usuario.id, usuario);
+    const creditos = await saldoCreditosParaExibicao(usuario.id, usuario, {
+      onStage: etapa => marcarEtapa(`google.${etapa}`)
+    });
     return payloadLoginUsuario(usuario, token, creditos);
   }
 
@@ -27903,7 +27928,10 @@ async function autenticarGoogleOptimus(idToken = "", body = {}, contexto = {}) {
     resolverUsuarioAtual: resolverUsuarioGoogleExistente,
     serializar: executarCadastroSaasSerializado,
     emitirJwt: emitirJwtOptimusUsuario,
-    lerSaldo: saldoCreditosParaExibicao,
+    // Authentication reads the authoritative ledger but never performs a
+    // renewal. Open delivery holds can legitimately defer a policy write and
+    // must not prevent an existing account from proving its identity.
+    lerSaldo: saldoCreditosGoogleSomenteLeitura,
     vincular: vincularGoogleUsuario,
     salvarUsuarios: usuariosAtualizados => salvarUsuariosSnapshot(usuariosAtualizados),
     onStage: marcarEtapa
@@ -27933,9 +27961,12 @@ app.post("/auth/google", googleAuthRateLimit, async (req, res) => {
       codigoFallback: "google_auth_falhou"
     });
     const statusCode = erro.statusCode || 503;
+    const codigoResposta = statusCode < 500
+      ? erro.codigo || "google_auth_falhou"
+      : "google_auth_falhou";
     return res.status(statusCode).json({
       ok: false,
-      codigo: erro.codigo || "google_auth_falhou",
+      codigo: codigoResposta,
       erro: statusCode < 500
         ? erro.message
         : "Falha ao autenticar com Google",

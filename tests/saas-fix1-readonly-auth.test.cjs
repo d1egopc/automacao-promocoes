@@ -112,6 +112,11 @@ function criarAuthGoogle({ usuarios, falhaSaldo, falhaJwt, falhaPersistencia, lo
     emailVerificado: true,
     nome: "Cliente Fixture"
   };
+  const lerSaldoGoogleFixture = async () => {
+    leiturasSaldo++;
+    if (falhaSaldo) throw falhaSaldo;
+    return usuarios[1].creditos;
+  };
   const funcao = carregarFuncao(
     "async function autenticarGoogleOptimus(idToken = \"\", body = {}, contexto = {})",
     "app.post(\"/auth/google\"",
@@ -133,11 +138,8 @@ function criarAuthGoogle({ usuarios, falhaSaldo, falhaJwt, falhaPersistencia, lo
         if (falhaJwt) throw new TypeError("jwt_secret_internal_only");
         return "jwt-sintetico";
       },
-      saldoCreditosParaExibicao: async () => {
-        leiturasSaldo++;
-        if (falhaSaldo) throw falhaSaldo;
-        return usuarios[1].creditos;
-      },
+      saldoCreditosParaExibicao: lerSaldoGoogleFixture,
+      saldoCreditosGoogleSomenteLeitura: lerSaldoGoogleFixture,
       vincularGoogleUsuario: (usuario, id) => {
         usuario.googleSub = usuario.googleSub || id.sub;
         usuario.googleEmail = id.email;

@@ -36,7 +36,9 @@ async function autenticarUsuarioGoogleExistente({
     onStage("google.jwt_issue");
     const token = emitirJwt(usuarioAtual);
     onStage("google.balance_read");
-    const creditos = await lerSaldo(usuarioAtual.id, usuarioAtual);
+    const creditos = await lerSaldo(usuarioAtual.id, usuarioAtual, {
+      onStage: etapa => onStage(`google.${etapa}`)
+    });
     const indice = usuarios.indexOf(usuarioAtual);
     if (indice < 0) throw new Error("google_existing_user_not_in_registry");
 

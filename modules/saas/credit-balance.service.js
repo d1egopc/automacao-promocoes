@@ -21,7 +21,8 @@ async function lerSaldoCreditosOperacional({
   workspaceId,
   usuario,
   renew,
-  readBalance
+  readBalance,
+  onStage = () => {}
 } = {}) {
   if (mode === "LEGACY") return usuario?.creditos ?? null;
   if (mode !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
@@ -29,9 +30,11 @@ async function lerSaldoCreditosOperacional({
     if (typeof renew !== "function") {
       throw new Error("universal_credit_renewer_required");
     }
-    await renew(usuario);
+    onStage("credit.renewal");
+    await renew(usuario, { onStage });
   }
 
+  onStage("credit.ledger_read");
   return lerSaldoCreditosSomenteLeitura({
     mode,
     workspaceId,

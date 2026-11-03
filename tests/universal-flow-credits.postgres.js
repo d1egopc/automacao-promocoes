@@ -12,6 +12,9 @@ const { SQL_SCHEMA_FINANCEIRO_V1 } =
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
+const creditBalance = require("../modules/saas/credit-balance.service");
+const { autenticarUsuarioGoogleExistente } =
+  require("../modules/auth/google-existing-login.service");
 const saas = require("../utils/saas-fundacao");
 const queue = require("../modules/engine/universal-queue.repository");
 const { consultarHistoricoUniversal } =
@@ -131,6 +134,135 @@ async function main() {
     /opening_conflict/);
     await admin.query(`UPDATE engine_operation_state SET mode='UNIVERSAL',
       operation_epoch_started_at=$1 WHERE id=1`, [epoch]);
+
+    // Google existing-account login must use the Universal ledger as the
+    // authority. Missing opening data fails closed before any Google link is
+    // persisted; a valid opening returns the exact ledger balance.
+    const googleStages = [];
+    const missingGoogleUser = { id: "ws_google_missing", creditos: 91 };
+    let missingGooglePersistCount = 0;
+    await assert.rejects(autenticarUsuarioGoogleExistente({
+      usuario: missingGoogleUser,
+      identidade: { sub: "sub_google_missing", email: "missing@example.test" },
+      usuarios: [missingGoogleUser],
+      resolverUsuarioAtual: () => missingGoogleUser,
+      serializar: fn => fn(),
+      emitirJwt: () => "fixture-jwt",
+      lerSaldo: (workspaceId, usuario, { onStage }) =>
+        creditBalance.lerSaldoCreditosOperacional({
+          mode: "UNIVERSAL", workspaceId, usuario,
+          renew: async (_user, options) => {
+            options.onStage("credit.renewal.ledger_read");
+            await credits.readBalance({ pool, workspaceId });
+          },
+          readBalance: ({ workspaceId: id }) => credits.readBalance({
+            pool, workspaceId: id
+          }),
+          onStage
+        }),
+      vincular: (user, identity) => { user.googleSub = identity.sub; },
+      salvarUsuarios: async () => { missingGooglePersistCount += 1; },
+      onStage: etapa => googleStages.push(etapa)
+    }), /opening_missing/);
+    assert.deepEqual(googleStages.slice(-2), [
+      "google.credit.renewal",
+      "google.credit.renewal.ledger_read"
+    ]);
+    assert.equal(missingGooglePersistCount, 0);
+    assert.equal(missingGoogleUser.googleSub, undefined);
+    assert.equal(missingGoogleUser.creditos, 91);
+
+    const heldGoogleWorkspace = "ws_google_hold";
+    await credits.openBalance({ pool, workspaceId: heldGoogleWorkspace,
+      operationEpochStartedAt: epoch, openingBalance: 7, sourceHash });
+    const [heldGoogleTarget] = await addTargets(admin, pool,
+      heldGoogleWorkspace, 1);
+    assert.equal((await queue.markSendStarted({ pool,
+      destinationId: heldGoogleTarget.id,
+      leaseToken: heldGoogleTarget.leaseToken })).ok, true);
+    const renewalDeferred = await credits.setAdminBalance({ pool,
+      workspaceId: heldGoogleWorkspace, amount: 0,
+      idempotencyKey: "universal:policy:google-auth-hold-fixture",
+      reason: "credito_admin_manual_expirado",
+      movementType: "POLICY_BALANCE_SET" });
+    assert.deepEqual(renewalDeferred, {
+      ok: false, reason: "universal_admin_credit_holds_open"
+    });
+    const heldGoogleUser = { id: heldGoogleWorkspace, creditos: 999,
+      provedoresAuth: {} };
+    let heldGooglePersistCount = 0;
+    const heldGoogleLogin = await autenticarUsuarioGoogleExistente({
+      usuario: heldGoogleUser,
+      identidade: { sub: "sub_google_hold", email: "hold@example.test" },
+      usuarios: [heldGoogleUser],
+      resolverUsuarioAtual: () => heldGoogleUser,
+      serializar: fn => fn(),
+      emitirJwt: () => "fixture-jwt",
+      lerSaldo: (workspaceId, usuario, { onStage }) => {
+        onStage("credit.ledger_read");
+        return creditBalance.lerSaldoCreditosSomenteLeitura({
+          mode: "UNIVERSAL", workspaceId, usuario,
+          readBalance: ({ workspaceId: id }) => credits.readBalance({
+            pool, workspaceId: id
+          })
+        });
+      },
+      vincular: (user, identity) => { user.googleSub = identity.sub; },
+      salvarUsuarios: async () => { heldGooglePersistCount += 1; }
+    });
+    assert.equal(heldGoogleLogin.creditos, 7);
+    assert.equal(heldGooglePersistCount, 1);
+    assert.equal(heldGoogleUser.googleSub, "sub_google_hold");
+    const heldBalanceAfterLogin = await credits.readBalance({ pool,
+      workspaceId: heldGoogleWorkspace });
+    assert.equal(heldBalanceAfterLogin.balance, 7);
+    assert.equal(heldBalanceAfterLogin.reserved, 1);
+    assert.equal((await counts(admin, heldGoogleWorkspace)).POLICY_BALANCE_SET,
+      undefined);
+
+    const googleUser = { id: "ws_A", creditos: 432, provedoresAuth: {} };
+    const googleUsers = [googleUser];
+    let googlePersistCount = 0;
+    let googlePersistedSnapshot;
+    const balanceBeforeGoogleLogin = await credits.readBalance({
+      pool, workspaceId: "ws_A"
+    });
+    const googleLogin = await autenticarUsuarioGoogleExistente({
+      usuario: googleUser,
+      identidade: { sub: "sub_google_ws_a", email: "ws-a@example.test" },
+      usuarios: googleUsers,
+      resolverUsuarioAtual: () => googleUser,
+      serializar: fn => fn(),
+      emitirJwt: () => "fixture-jwt",
+      lerSaldo: (workspaceId, usuario, { onStage }) => {
+        onStage("credit.ledger_read");
+        return creditBalance.lerSaldoCreditosSomenteLeitura({
+          mode: "UNIVERSAL", workspaceId, usuario,
+          readBalance: ({ workspaceId: id }) => credits.readBalance({
+            pool, workspaceId: id
+          })
+        });
+      },
+      vincular: (user, identity) => {
+        user.googleSub = identity.sub;
+        user.provedoresAuth.google = { sub: identity.sub };
+      },
+      salvarUsuarios: async snapshot => {
+        googlePersistCount += 1;
+        googlePersistedSnapshot = structuredClone(snapshot);
+      }
+    });
+    const balanceAfterGoogleLogin = await credits.readBalance({
+      pool, workspaceId: "ws_A"
+    });
+    assert.equal(googleLogin.creditos, balanceBeforeGoogleLogin.balance);
+    assert.equal(balanceAfterGoogleLogin.balance, balanceBeforeGoogleLogin.balance);
+    assert.equal(googlePersistCount, 1);
+    assert.equal(googlePersistedSnapshot.length, 1);
+    assert.equal(googlePersistedSnapshot[0].googleSub, "sub_google_ws_a");
+    assert.equal(googleUser.googleSub, "sub_google_ws_a");
+    assert.equal(googleUsers.length, 1);
+    assert.equal((await counts(admin, "ws_A")).OPENING_BALANCE, 1);
 
     // Registration intent survives the JSON/PG boundary. No opening exists
     // before the account is actually persisted; recovery opens it once.

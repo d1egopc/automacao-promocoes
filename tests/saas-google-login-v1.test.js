@@ -9,6 +9,8 @@ const { spawn } = require("child_process");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const { run: runGoogleAuthCreditBalanceRegression } =
+  require("./google-auth-credit-balance.test");
 
 const raiz = path.resolve(__dirname, "..");
 const indexFonte = fs.readFileSync(path.join(raiz, "index.js"), "utf8");
@@ -1137,7 +1139,10 @@ function trechoEntre(inicio, fim) {
     assert.ok(blocoGoogle.includes('algorithms: ["RS256"]'), "validacao deve restringir algoritmo");
     assert.ok(blocoGoogle.includes("await getGoogleClientId()"), "Google deve resolver Client ID em runtime por requisicao");
     assert.ok(!/if\s*\([^)]*plano\s*===|free|premium|enterprise|ultimate/i.test(blocoGoogle), "Google Login nao pode hardcodar plano");
+    assert.ok(blocoGoogle.includes("lerSaldo: saldoCreditosGoogleSomenteLeitura"),
+      "Google existente deve consultar ledger sem renovar creditos no login");
 
+    await runGoogleAuthCreditBalanceRegression();
     console.log("saas-google-login-v1.test.js OK");
   } finally {
     const encerramentoFilho = await encerrarProcessoFilho(proc);
