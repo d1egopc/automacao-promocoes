@@ -23,7 +23,8 @@ function pos(trecho, marcador) {
 function comAgoraLocal(hora, fn) {
   const DateOriginal = global.Date;
   const [h, m] = hora.split(":").map(Number);
-  const instante = new DateOriginal(2026, 8, 6, h, m, 0);
+  // The fixed date 2026-09-06 is UTC-03:00 in São Paulo; avoid the runner's TZ.
+  const instante = new DateOriginal(DateOriginal.UTC(2026, 8, 6, h + 3, m, 0));
 
   class DateFake extends DateOriginal {
     constructor(...args) {
