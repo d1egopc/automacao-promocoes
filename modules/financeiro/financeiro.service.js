@@ -460,15 +460,24 @@ function projetarLedgerEmUsuario(usuario = {}, ledger = {}, agora = new Date()) 
     usuario.creditosModelo = "ciclo";
     usuario.plano = snapshot.planoId || metadata.planoId || usuario.plano;
     usuario.planoAssinatura = snapshot.planoId || metadata.planoId || usuario.planoAssinatura || usuario.plano;
-    usuario.assinaturaStatus = "ativa";
+    const cortesia = metadata.origin === "admin_courtesy";
+    usuario.assinaturaStatus = cortesia ? "cortesia_ativa" : "ativa";
     usuario.statusConta = "ativa";
-    usuario.pagamentoUltimoId = metadata.externalPaymentId || metadata.pagamentoId || usuario.pagamentoUltimoId || "";
-    usuario.pagamentoUltimoStatus = metadata.paymentStatus || "approved";
+    if (!cortesia) {
+      usuario.pagamentoUltimoId = metadata.externalPaymentId || metadata.pagamentoId || usuario.pagamentoUltimoId || "";
+      usuario.pagamentoUltimoStatus = metadata.paymentStatus || "approved";
+    }
     usuario.cicloAtualInicio = ledger.cycle_start || ledger.cycleStart || usuario.cicloAtualInicio || iso(agora);
     usuario.cicloAtualFim = ledger.cycle_end || ledger.cycleEnd || usuario.cicloAtualFim;
     usuario.proximaRenovacao = ledger.cycle_end || ledger.cycleEnd || usuario.proximaRenovacao;
-    usuario.ultimoCicloCreditoId = ledger.idempotency_key || ledger.idempotencyKey || ledgerId;
-    usuario.ultimoCicloCreditoIdempotencyKey = ledger.idempotency_key || ledger.idempotencyKey || ledgerId;
+    if (cortesia) {
+      usuario.cortesiaUltimoCicloLedgerId = ledgerId;
+      usuario.cortesiaUltimoCicloInicio = usuario.cicloAtualInicio;
+      usuario.cortesiaUltimoCicloFim = usuario.cicloAtualFim;
+    } else {
+      usuario.ultimoCicloCreditoId = ledger.idempotency_key || ledger.idempotencyKey || ledgerId;
+      usuario.ultimoCicloCreditoIdempotencyKey = ledger.idempotency_key || ledger.idempotencyKey || ledgerId;
+    }
   } else if (tipo === "admin_credit" || tipo === "adjustment" || tipo === "refund_adjustment") {
     const atual = numeroInteiro(usuario.creditos, 0);
     usuario.creditos = Math.max(0, atual + amount);
@@ -491,20 +500,29 @@ function projetarMetadadosFinanceirosUniversal(usuario = {}, ledger = {}, agora 
     usuario.plano = snapshot.planoId || metadata.planoId || usuario.plano;
     usuario.planoAssinatura = snapshot.planoId || metadata.planoId ||
       usuario.planoAssinatura || usuario.plano;
-    usuario.assinaturaStatus = "ativa";
+    const cortesia = metadata.origin === "admin_courtesy";
+    usuario.assinaturaStatus = cortesia ? "cortesia_ativa" : "ativa";
     usuario.statusConta = "ativa";
-    usuario.pagamentoUltimoId = metadata.externalPaymentId ||
-      metadata.pagamentoId || usuario.pagamentoUltimoId || "";
-    usuario.pagamentoUltimoStatus = metadata.paymentStatus || "approved";
+    if (!cortesia) {
+      usuario.pagamentoUltimoId = metadata.externalPaymentId ||
+        metadata.pagamentoId || usuario.pagamentoUltimoId || "";
+      usuario.pagamentoUltimoStatus = metadata.paymentStatus || "approved";
+    }
     usuario.cicloAtualInicio = ledger.cycle_start || ledger.cycleStart ||
       usuario.cicloAtualInicio || iso(agora);
     usuario.cicloAtualFim = ledger.cycle_end || ledger.cycleEnd || usuario.cicloAtualFim;
     usuario.proximaRenovacao = ledger.cycle_end || ledger.cycleEnd ||
       usuario.proximaRenovacao;
-    usuario.ultimoCicloCreditoId = ledger.idempotency_key ||
-      ledger.idempotencyKey || ledgerId;
-    usuario.ultimoCicloCreditoIdempotencyKey = ledger.idempotency_key ||
-      ledger.idempotencyKey || ledgerId;
+    if (cortesia) {
+      usuario.cortesiaUltimoCicloLedgerId = ledgerId;
+      usuario.cortesiaUltimoCicloInicio = usuario.cicloAtualInicio;
+      usuario.cortesiaUltimoCicloFim = usuario.cicloAtualFim;
+    } else {
+      usuario.ultimoCicloCreditoId = ledger.idempotency_key ||
+        ledger.idempotencyKey || ledgerId;
+      usuario.ultimoCicloCreditoIdempotencyKey = ledger.idempotency_key ||
+        ledger.idempotencyKey || ledgerId;
+    }
     if (metadata.origin === "admin_simulated_payment") {
       usuario.ultimoCicloCreditoId = metadata.externalPaymentId;
       usuario.ultimoCicloCreditoIdempotencyKey = metadata.externalPaymentId;

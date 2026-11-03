@@ -142,6 +142,7 @@ jobs:
           node --check index.js
           node --check modules/engine/universal-credit-eligibility.service.js
           node --test tests/universal-credit-preflight.test.cjs \
+            tests/saas-cortesia-v1.test.cjs \
             tests/saas-fundacao-v1.test.js \
             tests/saas-renovacao-assinatura-v1.test.js \
             tests/financeiro-mercadopago-pix-v1.test.js \
@@ -159,6 +160,7 @@ jobs:
           export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
           test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
           node tests/universal-credit-preflight.postgres.js
+          node tests/saas-cortesia-v1.postgres.js
           node tests/universal-flow-credits.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
 

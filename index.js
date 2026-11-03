@@ -130,6 +130,8 @@ const { criarRepositorioFinanceiroPostgres } =
   require("./modules/financeiro/financeiro.repository");
 const { reconciliarLedgerFinanceiroPendente } =
   require("./modules/financeiro/financeiro.service");
+const { ORIGEM_CORTESIA, registrarCicloCortesia, desativarCortesiaPendente,
+  criarAgendadorCortesia } = require("./modules/financeiro/cortesia.service");
 
 let modoMotorReal = "BOOTSTRAPPING";
 let writerFilaUniversalReal = null;
@@ -15224,6 +15226,64 @@ async function executarPagamentoSimuladoAssinaturaAdmin(usuarioId = "", body = {
   };
 }
 
+async function processarCortesiaUsuario(usuario, {
+  operador = "scheduler", agora = new Date(), forcarNovoPlano = false
+} = {}) {
+  if (modoMotorReal !== "UNIVERSAL") {
+    return { ok: false, created: false, reason: "courtesy_universal_required" };
+  }
+  if (!usuario || usuario.cortesiaAutomatica !== true) {
+    return { ok: true, created: false, reason: "courtesy_disabled" };
+  }
+  const plano = getPlanoPorNome(usuario.plano);
+  if (!plano) return { ok: false, created: false,
+    reason: "courtesy_plan_missing" };
+  const repositorio = criarRepositorioFinanceiroPostgres({ pool: getEnginePool() });
+  const registro = await registrarCicloCortesia({ repositorio, usuario, plano,
+    operador, agora, forcarNovoPlano });
+  if (!registro.ledgerId) return registro;
+  const projection = await reconciliarLedgerFinanceiroPendente({
+    repositorio,
+    lerUsuarios: async () => usuarios,
+    salvarUsuarios: async () => salvarUsuarios(),
+    limite: 1,
+    filtro: { ledgerId: registro.ledgerId, origin: ORIGEM_CORTESIA },
+    agora
+  });
+  return { ...registro, projected: projection.projetados === 1,
+    deferred: projection.falhas > 0 };
+}
+
+async function processarCortesiasAutomaticas() {
+  if (modoMotorReal !== "UNIVERSAL") {
+    return { ok: true, processados: 0, reason: "courtesy_universal_inactive" };
+  }
+  const elegiveis = usuarios.filter(usuario =>
+    usuario?.ativo !== false && usuario?.cortesiaAutomatica === true);
+  let criados = 0;
+  let projetados = 0;
+  let pendentes = 0;
+  for (const usuario of elegiveis) {
+    const resultado = await processarCortesiaUsuario(usuario);
+    if (resultado.created) criados += 1;
+    if (resultado.projected) projetados += 1;
+    if (resultado.pending || resultado.deferred) pendentes += 1;
+  }
+  return { ok: true, processados: elegiveis.length, criados, projetados,
+    pendentes };
+}
+
+let agendadorCortesia = null;
+function iniciarAgendadorCortesia() {
+  if (agendadorCortesia) return agendadorCortesia;
+  agendadorCortesia = criarAgendadorCortesia({
+    executar: processarCortesiasAutomaticas,
+    intervaloMs: Number(process.env.CORTESIA_FINANCEIRA_INTERVALO_MS ||
+      5 * 60 * 1000)
+  });
+  return agendadorCortesia;
+}
+
 app.get("/public/saas-config", async (req, res) => {
   const configPublica = payloadSaasConfigPublico();
   return res.json({
@@ -15942,11 +16002,38 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
 
   const body = req.body || {};
   const ativoAntes = usuario.ativo !== false;
-  const creditosAntes = Number(await saldoCreditosParaExibicao(id, usuario) ?? 0);
+  const cortesiaAntes = usuario.cortesiaAutomatica === true;
+  const cortesiaInformada = Object.prototype.hasOwnProperty.call(body,
+    "cortesiaAutomatica");
+  const cortesiaDepois = cortesiaInformada
+    ? body.cortesiaAutomatica === true
+    : cortesiaAntes;
+  const creditosAntes = Number(await saldoCreditosSomenteLeitura(id, usuario) ?? 0);
   const planoAntes = String(usuario.plano || "").trim();
   const planoInformado = Object.prototype.hasOwnProperty.call(body, "plano");
   const planoNovoValor = planoInformado ? String(body.plano || "").trim() : planoAntes;
   const planoMudou = planoInformado && !!planoNovoValor && planoNovoValor !== planoAntes;
+  let cortesiaResultado = null;
+
+  // OFF deve primeiro neutralizar somente concessoes ainda pendentes. Se o
+  // ledger nao puder confirmar a operacao, nenhuma alteracao do usuario e
+  // persistida; ciclos ja projetados permanecem legitimos e intocados.
+  if (cortesiaInformada && cortesiaDepois === false && cortesiaAntes === true &&
+      modoMotorReal === "UNIVERSAL") {
+    try {
+      cortesiaResultado = await desativarCortesiaPendente({
+        repositorio: criarRepositorioFinanceiroPostgres({ pool: getEnginePool() }),
+        workspaceId: id
+      });
+    } catch (erro) {
+      return res.status(503).json({
+        ok: false,
+        erro: "Nao foi possivel desativar a cortesia com seguranca",
+        codigo: String(erro?.codigo || erro?.message ||
+          "courtesy_disable_failed")
+      });
+    }
+  }
 
   usuario.nome = body.nome || usuario.nome;
 
@@ -15991,7 +16078,14 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   const sujeitoCredito = creditoUniversal
     ? { ...structuredClone(usuario), creditos: creditosAntes }
     : usuario;
-  if (planoMudou) {
+  if (planoMudou && cortesiaDepois) {
+    const planoNovoUsuario = getPlanoPorNome(usuario.plano);
+    if (planoNovoUsuario) {
+      sujeitoCredito.planoAssinatura = usuario.plano;
+      sujeitoCredito.creditosModelo = saasFundacao
+        .politicaCreditosPlano(planoNovoUsuario).creditosModelo;
+    }
+  } else if (planoMudou) {
     const planoNovoUsuario = getPlanoPorNome(usuario.plano);
     if (planoNovoUsuario) {
       saasFundacao.aplicarTrocaManualPlanoAdmin({
@@ -16048,10 +16142,38 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
     usuario.ativo = body.ativo;
   }
 
+  if (cortesiaInformada) {
+    usuario.cortesiaAutomatica = cortesiaDepois;
+    if (cortesiaDepois !== cortesiaAntes) {
+      usuario.auditoriaCortesia = Array.isArray(usuario.auditoriaCortesia)
+        ? usuario.auditoriaCortesia : [];
+      usuario.auditoriaCortesia.push({
+        ativo: cortesiaDepois,
+        operador: getClienteId(req) || "admin",
+        data: new Date().toISOString(),
+        origem: "admin_master"
+      });
+    }
+  }
+
   usuario.atualizadoEm =
     new Date().toISOString();
 
   salvarUsuarios();
+
+  if (usuario.cortesiaAutomatica === true &&
+      (cortesiaInformada || planoMudou)) {
+    try {
+      cortesiaResultado = await processarCortesiaUsuario(usuario, {
+        operador: getClienteId(req) || "admin",
+        forcarNovoPlano: planoMudou
+      });
+    } catch (erro) {
+      cortesiaResultado = { ok: false,
+        reason: String(erro?.codigo || erro?.message ||
+          "courtesy_processing_failed") };
+    }
+  }
 
   if (body.ativo === true && ativoAntes === false) {
     if (!(await garantirFilaClienteInicializadaHttp(res, id, "reativacao_usuario"))) return;
@@ -16060,7 +16182,8 @@ app.put("/admin/usuarios/:id", exigirAdminMasterEstrito, async (req, res) => {
   return res.json({
     ok: true,
     usuario: { ...sanitizarUsuarioAdmin(usuario),
-      creditos: await saldoCreditosParaExibicao(id, usuario) }
+      creditos: await saldoCreditosSomenteLeitura(id, usuario) },
+    cortesia: cortesiaResultado
   });
 });
 
@@ -35459,6 +35582,7 @@ app.listen(PORT, () => {
   }
   iniciarMensageiroV3Scheduler();
   iniciarInfraMemoryTelemetryOperacional();
+  iniciarAgendadorCortesia();
 
 decairConfiancaCupons();
 

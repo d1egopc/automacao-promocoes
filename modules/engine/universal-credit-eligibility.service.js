@@ -8,7 +8,8 @@ const STATUS_CICLO_INTERNO = new Set([
   "teste_ciclo_autorizado",
   "trial_autorizado",
   "ativa_legacy",
-  "manual"
+  "manual",
+  "cortesia_ativa"
 ]);
 
 function texto(valor = "") {
