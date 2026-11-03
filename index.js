@@ -373,6 +373,10 @@ const {
   avaliarMarketplacePlano
 } = require("./utils/cotas-flexiveis-planos");
 const saasFundacao = require("./utils/saas-fundacao");
+const creditBalanceService = require("./modules/saas/credit-balance.service");
+const { listarUsuariosAdminSomenteLeitura } = require("./modules/saas/admin-users-read-model");
+const { registrarErroSaas, obterRequestIdSaas } = require("./modules/saas/error-diagnostics");
+const { autenticarUsuarioGoogleExistente } = require("./modules/auth/google-existing-login.service");
 const {
   resolverFinanceiroUsuarioSaas
 } = require("./utils/saas-financeiro-estado");
@@ -5212,6 +5216,10 @@ function salvarUsuarios() {
   writeGlobalJson("usuarios.json", usuarios);
 }
 
+function salvarUsuariosSnapshot(listaUsuarios = []) {
+  writeGlobalJson("usuarios.json", listaUsuarios);
+}
+
 // ================= CREDITOS =================
 
 function buscarUsuarioPorIdSeguro(listaUsuarios = [], clienteId = "") {
@@ -5332,12 +5340,26 @@ async function creditoDisponivelParaEnvio(clienteId, quantidade = 1,
 }
 
 async function saldoCreditosParaExibicao(clienteId, usuario = null) {
-  if (modoMotorReal === "LEGACY") return usuario?.creditos ?? null;
-  if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
-  if (usuario) await renovarCreditosUniversalSeNecessario(usuario);
-  const credit = await lerSaldoUniversal({ pool: getEnginePool(),
-    workspaceId: clienteId });
-  return credit.balance;
+  return creditBalanceService.lerSaldoCreditosOperacional({
+    mode: modoMotorReal,
+    workspaceId: clienteId,
+    usuario,
+    renew: renovarCreditosUniversalSeNecessario,
+    readBalance: ({ workspaceId }) => lerSaldoUniversal({
+      pool: getEnginePool(), workspaceId
+    })
+  });
+}
+
+async function saldoCreditosSomenteLeitura(clienteId, usuario = null) {
+  return creditBalanceService.lerSaldoCreditosSomenteLeitura({
+    mode: modoMotorReal,
+    workspaceId: clienteId,
+    usuario,
+    readBalance: ({ workspaceId }) => lerSaldoUniversal({
+      pool: getEnginePool(), workspaceId
+    })
+  });
 }
 
 async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId, destinationId } = {}) {
@@ -14960,6 +14982,15 @@ async function usuarioAdminComSaldoOperacional(usuario) {
     creditos: await saldoCreditosParaExibicao(usuario.id, usuario) };
 }
 
+async function listarUsuariosAdminSomenteLeituraAtual() {
+  return listarUsuariosAdminSomenteLeitura({
+    usuarios,
+    mode: modoMotorReal,
+    sanitizar: sanitizarUsuarioAdmin,
+    lerSaldo: saldoCreditosSomenteLeitura
+  });
+}
+
 async function executarCadastroPublicoAtomico(body = {}) {
   return executarCadastroSaasSerializado(async () => {
     const saasConfig = obterConfigSaasAtual();
@@ -14980,34 +15011,55 @@ async function executarCadastroPublicoAtomico(body = {}) {
   });
 }
 
-async function executarCadastroGooglePublicoAtomico(identidade = {}, body = {}) {
+async function executarCadastroGooglePublicoAtomico(identidade = {}, body = {}, contexto = {}) {
   return executarCadastroSaasSerializado(async () => {
     const usuarioExistente = resolverUsuarioGoogleExistente(identidade);
-    if (usuarioExistente) {
-      vincularGoogleUsuario(usuarioExistente, identidade);
-      salvarUsuarios();
-      return usuarioExistente;
-    }
+    if (usuarioExistente) return { usuario: usuarioExistente, criado: false };
 
     const saasConfig = obterConfigSaasAtual();
-    return saasFundacao.executarCadastroAtomico({
-      body: {
-        ...body,
-        authProvider: "google",
-        nome: identidade.nome || identidade.email,
-        email: identidade.email,
-        identidadeGoogle: identidade
-      },
+    const bodyCadastro = {
+      ...body,
+      authProvider: "google",
+      nome: identidade.nome || identidade.email,
+      email: identidade.email,
+      identidadeGoogle: identidade
+    };
+    contexto.etapa = "google.signup_validate";
+    const validacao = saasFundacao.validarCadastro({
+      body: bodyCadastro,
+      planos,
+      usuarios,
+      saasConfig,
+      contexto: "publico"
+    });
+    if (!validacao.ok) {
+      const erro = new Error(validacao.erro || "Cadastro invalido");
+      erro.statusCode = validacao.status || 400;
+      erro.codigo = validacao.codigo || "cadastro_invalido";
+      throw erro;
+    }
+
+    const idNovoUsuario = gerarId();
+    contexto.etapa = "google.jwt_issue";
+    const token = emitirJwtOptimusUsuario({
+      id: idNovoUsuario,
+      papel: "cliente",
+      plano: validacao.plano.nome
+    });
+    contexto.etapa = "google.signup_persist";
+    const novoUsuario = await saasFundacao.executarCadastroAtomico({
+      body: bodyCadastro,
       planos,
       usuarios,
       configsPorCliente,
       saasConfig,
-      gerarId,
+      gerarId: () => idNovoUsuario,
       prepararConfig: (configAtual) => aplicarArquiteturaComercialRioOficial(configAtual),
       salvarUsuarios,
       salvarConfigsClientes,
       ...transicaoCadastroCreditosUniversal()
     });
+    return { usuario: novoUsuario, criado: true, token };
   });
 }
 
@@ -15299,10 +15351,18 @@ app.get("/admin/usuarios", exigirAdminMasterEstrito, async (req, res) => {
 
   try {
     return res.json({ ok: true,
-      usuarios: await Promise.all(usuarios.map(usuarioAdminComSaldoOperacional)) });
+      usuarios: await listarUsuariosAdminSomenteLeituraAtual() });
   } catch (erro) {
+    const diagnostico = registrarErroSaas({
+      req,
+      etapa: "admin_users.list_read_model",
+      erro,
+      codigoFallback: "saldo_operacional_indisponivel"
+    });
     return res.status(503).json({ ok: false,
-      codigo: "saldo_operacional_indisponivel" });
+      codigo: "saldo_operacional_indisponivel",
+      erro: "Listagem incompleta; falha ao consultar saldo",
+      requestId: diagnostico.requestId });
   }
 });
 
@@ -27740,8 +27800,10 @@ function emitirJwtOptimusUsuario(usuario = {}) {
   );
 }
 
-async function payloadLoginUsuario(usuario = {}, token = "") {
-  const creditos = await saldoCreditosParaExibicao(usuario.id, usuario);
+async function payloadLoginUsuario(usuario = {}, token = "", saldoComputado) {
+  const creditos = arguments.length >= 3
+    ? saldoComputado
+    : await saldoCreditosParaExibicao(usuario.id, usuario);
   return {
     ok: true,
     token,
@@ -27783,7 +27845,10 @@ function resolverUsuarioGoogleExistente(identidade = {}) {
     throw erro;
   }
 
-  if (usuario.googleSub && usuario.googleSub !== identidade.sub) {
+  const googleSubVinculado = String(
+    usuario.googleSub || usuario.provedoresAuth?.google?.sub || ""
+  ).trim();
+  if (googleSubVinculado && googleSubVinculado !== identidade.sub) {
     const erro = new Error("Conta ja vinculada a outro Google");
     erro.codigo = "google_sub_divergente";
     erro.statusCode = 409;
@@ -27793,7 +27858,9 @@ function resolverUsuarioGoogleExistente(identidade = {}) {
   return usuario;
 }
 
-async function autenticarGoogleOptimus(idToken = "", body = {}) {
+async function autenticarGoogleOptimus(idToken = "", body = {}, contexto = {}) {
+  const marcarEtapa = etapa => { contexto.etapa = etapa; };
+  marcarEtapa("google.token_validate");
   const identidade = await validarGoogleIdToken(idToken);
   if (!identidade.sub || !identidade.email) {
     const erro = new Error("Token Google invalido");
@@ -27808,35 +27875,71 @@ async function autenticarGoogleOptimus(idToken = "", body = {}) {
     throw erro;
   }
 
+  marcarEtapa("google.user_resolve");
   let usuario = resolverUsuarioGoogleExistente(identidade);
+  let cadastroGoogle = null;
+  let contaGoogleCriada = false;
   if (!usuario) {
-    usuario = await executarCadastroGooglePublicoAtomico(identidade, body);
+    marcarEtapa("google.public_signup");
+    cadastroGoogle = await executarCadastroGooglePublicoAtomico(identidade, body, contexto);
+    usuario = cadastroGoogle.usuario;
+    contaGoogleCriada = cadastroGoogle.criado === true;
   }
 
-  vincularGoogleUsuario(usuario, identidade);
-  salvarUsuarios();
+  if (contaGoogleCriada) {
+    // The new account and its Google identity were committed as one signup.
+    // Issue credentials before any further fallible read; a later read failure
+    // leaves a valid, retryable account rather than a partially linked user.
+    const token = cadastroGoogle.token;
+    marcarEtapa("google.balance_read");
+    const creditos = await saldoCreditosParaExibicao(usuario.id, usuario);
+    return payloadLoginUsuario(usuario, token, creditos);
+  }
 
-  console.log("[AUTH-GOOGLE-LOGIN]", {
-    usuario: usuario.id || "",
-    email: normalizarEmailAuth(usuario.email),
-    vinculado: true
+  const login = await autenticarUsuarioGoogleExistente({
+    usuario,
+    identidade,
+    usuarios,
+    resolverUsuarioAtual: resolverUsuarioGoogleExistente,
+    serializar: executarCadastroSaasSerializado,
+    emitirJwt: emitirJwtOptimusUsuario,
+    lerSaldo: saldoCreditosParaExibicao,
+    vincular: vincularGoogleUsuario,
+    salvarUsuarios: usuariosAtualizados => salvarUsuariosSnapshot(usuariosAtualizados),
+    onStage: marcarEtapa
   });
-
-  const token = emitirJwtOptimusUsuario(usuario);
-  return await payloadLoginUsuario(usuario, token);
+  console.log("[AUTH-GOOGLE-LOGIN]", JSON.stringify({
+    requestId: contexto.requestId || "",
+    usuario: usuario.id || "",
+    vinculado: true
+  }));
+  return payloadLoginUsuario(login.usuario, login.token, login.creditos);
 }
 
 app.post("/auth/google", googleAuthRateLimit, async (req, res) => {
+  const contexto = { requestId: obterRequestIdSaas(req), etapa: "google.token_validate" };
   try {
-    const payload = await autenticarGoogleOptimus(req.body?.idToken || req.body?.credential || "", req.body || {});
+    const payload = await autenticarGoogleOptimus(
+      req.body?.idToken || req.body?.credential || "",
+      req.body || {},
+      contexto
+    );
     return res.json(payload);
   } catch (erro) {
-    return res.status(erro.statusCode || 401).json({
+    const diagnostico = registrarErroSaas({
+      req,
+      etapa: contexto.etapa,
+      erro,
+      codigoFallback: "google_auth_falhou"
+    });
+    const statusCode = erro.statusCode || 503;
+    return res.status(statusCode).json({
       ok: false,
       codigo: erro.codigo || "google_auth_falhou",
-      erro: erro.statusCode && erro.statusCode < 500
+      erro: statusCode < 500
         ? erro.message
-        : "Falha ao autenticar com Google"
+        : "Falha ao autenticar com Google",
+      requestId: diagnostico.requestId
     });
   }
 });

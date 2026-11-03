@@ -18,8 +18,13 @@ const { consultarHistoricoUniversal } =
   require("../modules/engine/universal-history.read-model");
 
 const root = path.join(__dirname, "..");
-const config = { host: "127.0.0.1", port: 55433, user: "postgres",
+const config = { host: "127.0.0.1",
+  port: Number(process.env.UF_TEST_PG_PORT || 55433), user: "postgres",
   database: "optimus_universal_fixture", connectionTimeoutMillis: 5000 };
+const expectedServerHost = process.env.UF_TEST_PG_EXPECTED_SERVER_HOST || config.host;
+const expectedServerPort = Number(process.env.UF_TEST_PG_EXPECTED_SERVER_PORT || config.port);
+const expectedDataDir = process.env.UF_TEST_PG_EXPECTED_DATA_DIR ||
+  path.join(root, ".local-postgres", "data");
 const schema = `uf_credit_${crypto.randomBytes(6).toString("hex")}`;
 const epoch = "2026-10-09T12:00:00.000Z";
 const sourceHash = crypto.createHash("sha256").update("local-opening-snapshot")
@@ -86,15 +91,19 @@ async function main() {
   let pool;
   let created = false;
   try {
+    assert.ok(!process.env.DATABASE_URL,
+      "Disposable PostgreSQL test refuses inherited DATABASE_URL");
     await admin.connect();
     const identity = (await admin.query(`SELECT current_database() AS db,
       host(inet_server_addr()) AS host,inet_server_port() AS port,
-      current_setting('data_directory') AS data_dir`)).rows[0];
+      current_setting('data_directory') AS data_dir,
+      current_setting('server_version') AS version`)).rows[0];
     assert.equal(identity.db, config.database);
-    assert.equal(identity.host, config.host);
-    assert.equal(identity.port, config.port);
+    assert.equal(identity.host, expectedServerHost);
+    assert.equal(identity.port, expectedServerPort);
+    assert.match(identity.version, /^17\./);
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
-      path.join(root, ".local-postgres", "data").toLowerCase());
+      path.normalize(expectedDataDir).toLowerCase());
     await admin.query(`CREATE SCHEMA ${schema}`);
     created = true;
     await admin.query(`SET search_path TO ${schema},public`);

@@ -17,6 +17,87 @@ function assertSemSegredo(payload, contexto) {
   assert.ok(!/senhaHash|passwordHash|tokenHash|senha"\s*:|password"\s*:|pass"\s*:/i.test(texto), `${contexto} nao deve expor senha/hash`);
 }
 
+function sanitizarLinhaDiagnostico(linha, segredos = []) {
+  let texto = String(linha || "").replace(/\u001b\[[0-9;]*m/g, "");
+  for (const segredo of segredos.filter(valor => typeof valor === "string" && valor.length >= 4).sort((a, b) => b.length - a.length)) {
+    texto = texto.split(segredo).join("[redacted]");
+  }
+  return texto
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi, "[url-redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, "Bearer [redacted]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[token-redacted]")
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----/gi, "[private-key-redacted]")
+    .replace(/\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}/g, "[password-hash-redacted]")
+    .replace(/((?:DATABASE_URL|JWT_SECRET|[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|SENHA|CREDENTIAL|API_KEY)[A-Z0-9_]*|accessToken|refreshToken|credential|senhaHash|passwordHash)\s*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,}]+)/gi, "$1[redacted]")
+    .replace(/(["']?(?:email|nome|name|phone|telefone|user|usuario|clienteId|workspaceId)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^,\s}]+)/gi, "$1[redacted]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[email-redacted]")
+    .replace(/(?:[A-Z]:\\|\/)(?:[^\\/\s]+[\\/]){2,}[^\\/\s]*/gi, "[path-redacted]")
+    .slice(0, 400);
+}
+
+const PADRAO_LOG_INICIALIZACAO = /(?:\[API\]|\[ENGINE-DB|\[PERF DB|\[LOCAL-WORKER-SCHEMA\]|\[ENGINE-V2-PIPELINE|\[OK\].*\/data|MODULE_NOT_FOUND|ERR_REQUIRE|ERR_[A-Z_]+|ECONN[A-Z]+|EAI_AGAIN|ETIMEDOUT|EACCES|EPERM|ENOTFOUND|\b(?:error|erro|fatal|warning|warn|exception|falha|failed|timeout|listening|online|database_url_ausente|engine_database_unavailable)\b)/i;
+
+function linhasDiagnosticoStartup(texto = "", segredos = []) {
+  return String(texto)
+    .split(/\r?\n/)
+    .filter(linha => PADRAO_LOG_INICIALIZACAO.test(linha))
+    .slice(-16)
+    .map(linha => sanitizarLinhaDiagnostico(linha, segredos))
+    .filter(Boolean)
+    .join("\n") || "(nenhuma linha de inicializacao/erro reconhecida)";
+}
+
+function etapaInicializacaoDaLinha(linha = "") {
+  if (/\[API\].*API ONLINE/i.test(linha)) return "http_listener_started";
+  if (/database_url_ausente|engine_database_unavailable/i.test(linha)) return "engine_database_missing_block";
+  if (/\[ENGINE-DB-ERRO\]/i.test(linha)) return "engine_database_error";
+  if (/\[ENGINE-DB-OK\]/i.test(linha)) return "engine_database_ready";
+  if (/\[PERF DB POOL\].*connect/i.test(linha)) return "postgres_connection_acquired";
+  if (/\[PERF DB POOL\]/i.test(linha)) return "postgres_pool_created";
+  if (/\[PERF DB\].*initEngineDatabase/i.test(linha)) return "engine_schema_ready";
+  if (/\[LOCAL-WORKER-SCHEMA\]/i.test(linha)) return "local_worker_schema_checked";
+  if (/MODULE_NOT_FOUND|ERR_REQUIRE/i.test(linha)) return "module_load_error";
+  if (/\b(?:error|erro|fatal|exception|falha|failed|timeout|ECONN[A-Z]+|ETIMEDOUT|EACCES|EPERM|ENOTFOUND)\b/i.test(linha)) return "startup_error_output";
+  return "";
+}
+
+function diagnosticarDiretorio(caminho, configurado = false) {
+  if (!caminho) return { configurado, existe: false, diretorio: false, gravavel: false };
+  try {
+    const stat = fs.statSync(caminho);
+    const diretorio = stat.isDirectory();
+    if (diretorio) fs.accessSync(caminho, fs.constants.W_OK);
+    return { configurado, existe: true, diretorio, gravavel: diretorio };
+  } catch (erro) {
+    return {
+      configurado,
+      existe: fs.existsSync(caminho),
+      diretorio: false,
+      gravavel: false,
+      codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : "filesystem_error"
+    };
+  }
+}
+
+function resumoDatabaseUrl(valor = "") {
+  const texto = String(valor || "").trim();
+  const esquema = texto.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() || null;
+  return { presente: Boolean(texto), esquema };
+}
+
+function validarSanitizadorDiagnostico() {
+  const senha = "SenhaNova123";
+  const amostra = "[ENGINE-DB-ERRO] DATABASE_URL=postgresql://ci:password@db/test https://identity.test/path Authorization: Bearer eyJhbGci.eyJzdWIi.signature raw eyJhbGci.eyJzdWIi.signature email=qa@example.test contact qa@example.test " + senha + " /home/runner/work/project/index.js";
+  const limpo = sanitizarLinhaDiagnostico(amostra, [senha]);
+  assert.ok(limpo.includes("[url-redacted]"), "URL deve ser removida do diagnostico");
+  assert.ok(limpo.includes("[email-redacted]"), "email deve ser removido do diagnostico");
+  assert.ok(limpo.includes("[token-redacted]"), "token deve ser removido do diagnostico");
+  assert.ok(limpo.includes("[redacted]"), "segredos conhecidos devem ser removidos do diagnostico");
+  assert.ok(!/postgresql:\/\/|password@db|qa@example\.test|eyJhbGci|SenhaNova123|\/home\/runner/i.test(limpo), "diagnostico nao pode conter valores sensiveis ou caminhos pessoais");
+}
+
+validarSanitizadorDiagnostico();
+
 function request({ method = "GET", port, path: urlPath, body, token }) {
   return new Promise((resolve, reject) => {
     const dados = body ? Buffer.from(JSON.stringify(body)) : null;
@@ -44,19 +125,100 @@ function request({ method = "GET", port, path: urlPath, body, token }) {
   });
 }
 
-async function esperarServidor(port, proc) {
-  const limite = Date.now() + 20000;
+async function esperarServidor(port, proc, estadoInicializacao, obterDiagnostico, segredos) {
+  const inicio = Date.now();
+  const limite = inicio + 20000;
+  let tentativas = 0;
+  let ultimaSonda = { tipo: "nao_iniciada" };
+  estadoInicializacao.ultimaEtapa = "aguardando_http_root_200";
+
+  function emitirDiagnostico(motivo) {
+    const dados = obterDiagnostico({
+      motivo,
+      porta: port,
+      tempoDecorridoMs: Date.now() - inicio,
+      tentativas,
+      ultimaSonda,
+      processo: {
+        pid: proc.pid || null,
+        exitCode: proc.exitCode,
+        signalCode: proc.signalCode,
+        killed: proc.killed,
+        erroSpawn: estadoInicializacao.erroSpawn
+      }
+    }, segredos);
+    console.error("[SAAS-RECOVERY-STARTUP-DIAGNOSTIC]", JSON.stringify(dados));
+    throw new Error(motivo);
+  }
+
   while (Date.now() < limite) {
-    if (proc.exitCode !== null) {
-      throw new Error(`servidor encerrou antes de subir: ${proc.exitCode}`);
+    if (estadoInicializacao.erroSpawn) {
+      emitirDiagnostico("falha ao iniciar processo filho");
     }
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      emitirDiagnostico("servidor encerrou antes de subir");
+    }
+    tentativas += 1;
     try {
       const res = await request({ port, path: "/" });
-      if (res.status === 200) return;
-    } catch {}
+      ultimaSonda = { tipo: "http", status: res.status };
+      if (res.status === 200) {
+        estadoInicializacao.ultimaEtapa = "http_root_ready";
+        return;
+      }
+    } catch (erro) {
+      ultimaSonda = {
+        tipo: "socket_error",
+        classe: String(erro?.name || "Error").slice(0, 40),
+        codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : null
+      };
+    }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  throw new Error("timeout aguardando servidor");
+  emitirDiagnostico("timeout aguardando servidor");
+}
+
+function aguardarSaidaProcesso(proc, timeoutMs) {
+  if (proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const aoSair = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      proc.removeListener("exit", aoSair);
+      resolve(false);
+    }, timeoutMs);
+    proc.once("exit", aoSair);
+  });
+}
+
+async function encerrarProcessoFilho(proc) {
+  const estado = {
+    processoIniciado: Boolean(proc.pid),
+    killSolicitado: false,
+    killAceito: null,
+    encerramentoForcado: false,
+    killForcadoAceito: null,
+    terminou: false,
+    exitCode: proc.exitCode,
+    signalCode: proc.signalCode
+  };
+  if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
+    estado.killSolicitado = true;
+    try { estado.killAceito = proc.kill("SIGTERM"); } catch {}
+    estado.terminou = await aguardarSaidaProcesso(proc, 2500);
+    if (!estado.terminou && proc.exitCode === null && proc.signalCode === null) {
+      estado.encerramentoForcado = true;
+      try { estado.killForcadoAceito = proc.kill("SIGKILL"); } catch {}
+      estado.terminou = await aguardarSaidaProcesso(proc, 2500);
+    }
+  } else {
+    estado.terminou = !proc.pid || proc.exitCode !== null || proc.signalCode !== null;
+  }
+  estado.exitCode = proc.exitCode;
+  estado.signalCode = proc.signalCode;
+  return estado;
 }
 
 function readJson(file, fallback) {
@@ -122,25 +284,101 @@ function trechoEntre(inicio, fim) {
     pro: { nome: "pro", limites: { creditos: 100 }, recursos: {}, marketplaces: [] }
   });
 
+  const envFilho = {
+    ...process.env,
+    DATA_DIR: dataDir,
+    PORT: String(port),
+    JWT_SECRET: jwtSecret,
+    PERF_DIAGNOSTICO: "0"
+  };
+  const segredosDiagnostico = [jwtSecret, email, senhaAntiga, senhaNova, "AdminSenha123"];
   const proc = spawn(process.execPath, ["index.js"], {
     cwd: raiz,
-    env: {
-      ...process.env,
-      DATA_DIR: dataDir,
-      PORT: String(port),
-      JWT_SECRET: jwtSecret,
-      PERF_DIAGNOSTICO: "0"
-    },
+    env: envFilho,
     stdio: ["ignore", "pipe", "pipe"]
   });
 
   let stdout = "";
   let stderr = "";
-  proc.stdout.on("data", chunk => { stdout += chunk.toString(); });
-  proc.stderr.on("data", chunk => { stderr += chunk.toString(); });
+  const estadoInicializacao = {
+    ultimaEtapa: "processo_filho_iniciado",
+    ultimoCanalEtapa: "fixture",
+    erroSpawn: null
+  };
+  proc.once("error", erro => {
+    estadoInicializacao.erroSpawn = {
+      classe: String(erro?.name || "Error").slice(0, 40),
+      codigo: /^[A-Z0-9_]{2,32}$/.test(String(erro?.code || "")) ? erro.code : null
+    };
+    estadoInicializacao.ultimaEtapa = "spawn_error";
+    estadoInicializacao.ultimoCanalEtapa = "fixture";
+  });
+
+  function acompanharSaida(stream, canal) {
+    let parcial = "";
+    stream.on("data", chunk => {
+      const texto = chunk.toString();
+      if (canal === "stdout") stdout += texto;
+      else stderr += texto;
+      const partes = (parcial + texto).split(/\r?\n/);
+      parcial = partes.pop() || "";
+      for (const linha of partes) {
+        const etapa = etapaInicializacaoDaLinha(linha);
+        if (etapa) {
+          estadoInicializacao.ultimaEtapa = etapa;
+          estadoInicializacao.ultimoCanalEtapa = canal;
+        }
+      }
+    });
+    stream.on("end", () => {
+      const etapa = etapaInicializacaoDaLinha(parcial);
+      if (etapa) {
+        estadoInicializacao.ultimaEtapa = etapa;
+        estadoInicializacao.ultimoCanalEtapa = canal;
+      }
+    });
+  }
+  acompanharSaida(proc.stdout, "stdout");
+  acompanharSaida(proc.stderr, "stderr");
+
+  function moduloDisponivel(nome) {
+    try {
+      require.resolve(nome, { paths: [raiz] });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function obterDiagnosticoInicializacao(probe, segredos = []) {
+    const dataDirMensageiroV3 = envFilho.MENSAGEIRO_V3_DATA_DIR || "/data/mensageiro-v3";
+    return {
+      ...probe,
+      ultimaEtapaInicializacao: estadoInicializacao.ultimaEtapa,
+      canalUltimaEtapa: estadoInicializacao.ultimoCanalEtapa,
+      ambiente: {
+        node: process.version,
+        plataforma: process.platform,
+        databaseUrl: { herdadaPeloFilho: Boolean(envFilho.DATABASE_URL), ...resumoDatabaseUrl(envFilho.DATABASE_URL) },
+        pgSslMode: !envFilho.PGSSLMODE ? "unset" : String(envFilho.PGSSLMODE).toLowerCase() === "disable" ? "disable" : "configured",
+        dataDirDoTeste: diagnosticarDiretorio(dataDir, true),
+        dataRoot: diagnosticarDiretorio("/data", false),
+        mensageiroV3DataDir: diagnosticarDiretorio(dataDirMensageiroV3, Boolean(envFilho.MENSAGEIRO_V3_DATA_DIR)),
+        jwtSecretConfigurado: Boolean(envFilho.JWT_SECRET),
+        modulos: {
+          express: moduloDisponivel("express"),
+          pg: moduloDisponivel("pg"),
+          jsonwebtoken: moduloDisponivel("jsonwebtoken"),
+          bcryptjs: moduloDisponivel("bcryptjs")
+        }
+      },
+      stdoutSanitizado: linhasDiagnosticoStartup(stdout, segredos),
+      stderrSanitizado: linhasDiagnosticoStartup(stderr, segredos)
+    };
+  }
 
   try {
-    await esperarServidor(port, proc);
+    await esperarServidor(port, proc, estadoInicializacao, obterDiagnosticoInicializacao, segredosDiagnostico);
 
     const existente = await request({
       method: "POST",
@@ -333,8 +571,10 @@ function trechoEntre(inicio, fim) {
 
     console.log("saas-recuperacao-senha-v1.test.js OK");
   } finally {
-    proc.kill();
+    const encerramentoFilho = await encerrarProcessoFilho(proc);
+    console.log("[SAAS-RECOVERY-CHILD-CLEANUP]", JSON.stringify(encerramentoFilho));
     fs.rmSync(dataDir, { recursive: true, force: true });
+    if (!encerramentoFilho.terminou) throw new Error("processo filho nao encerrou apos SIGTERM/SIGKILL");
   }
 })().catch(e => {
   console.error(e);
