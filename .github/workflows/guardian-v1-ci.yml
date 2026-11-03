@@ -65,9 +65,11 @@ jobs:
             tests/workspace-registry-engine-v2.test.js \
             tests/executor-relogio-multiworkspace.test.js
           node --check index.js
-      - name: Google Auth and password recovery HTTP integration
+      - name: Google Auth HTTP integration
+        if: ${{ !cancelled() }}
         env:
           DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          PGSSLMODE: disable
         run: |
           set -euo pipefail
           if [[ ! -e /data ]]; then
@@ -77,10 +79,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/saas-fix1-google-v3"
           MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-google-v3" \
           node tests/saas-google-login-v1.test.js
+
+      - name: Password recovery HTTP integration
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
           mkdir -p "$RUNNER_TEMP/saas-fix1-recovery-v3"
           MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-fix1-recovery-v3" \
           node tests/saas-recuperacao-senha-v1.test.js
+
       - name: Universal credit ledger regression on PostgreSQL 17
+        if: ${{ !cancelled() }}
         env:
           UF_TEST_PG_PORT: "55433"
           UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
