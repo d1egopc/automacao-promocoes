@@ -14,6 +14,7 @@ const { registrarCicloCortesia } =
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
+const queue = require("../modules/engine/universal-queue.repository");
 
 const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1",
@@ -44,6 +45,41 @@ async function transaction(pool, callback) {
   } finally {
     client.release();
   }
+}
+
+async function offer(client, workspace) {
+  const eventId = (await client.query(`INSERT INTO engine_eventos_brutos
+    (origem,fonte,capturado_em,metadata)
+    VALUES ('radar','radar',$1,'{}'::jsonb) RETURNING id`,
+  ["2026-11-03T12:05:00.000Z"])).rows[0].id;
+  const offerId = (await client.query(`INSERT INTO engine_ofertas
+    (evento_id,origem,status) VALUES ($1,'radar','oferta_criada') RETURNING id`,
+  [eventId])).rows[0].id;
+  const jobId = (await client.query(`INSERT INTO engine_jobs_cliente
+    (evento_id,oferta_id,cliente_id,status,metadata)
+    VALUES ($1,$2,$3,'oferta_criada','{}'::jsonb) RETURNING id`,
+  [eventId, offerId, workspace])).rows[0].id;
+  return { offerId, jobId };
+}
+
+async function addTargets(client, pool, workspace, count) {
+  const { offerId, jobId } = await offer(client, workspace);
+  await queue.enqueue({ pool, workspaceId: workspace, jobId, ofertaId: offerId,
+    itemPayload: { title: "courtesy fixture" },
+    destinations: Array.from({ length: count }, (_, index) => ({
+      destinationId: `${workspace}_destination_${index}`,
+      targetKey: `${workspace}_target_${index}`, channel: "whatsapp"
+    })) });
+  assert.equal((await queue.preflightWorkspace({ pool,
+    workspaceId: workspace })).ok, true);
+  const claims = [];
+  for (let index = 0; index < count; index++) {
+    const claim = await queue.claimDestination({ pool, workspaceId: workspace });
+    assert.equal(claim.ok, true);
+    assert.equal(claim.empty, false);
+    claims.push(claim);
+  }
+  return claims;
 }
 
 async function main() {
@@ -85,7 +121,8 @@ async function main() {
     await admin.query(`UPDATE engine_operation_state SET mode='UNIVERSAL',
       operation_epoch_started_at=$1 WHERE id=1`, [epoch]);
 
-    const targets = Array.from({ length: 19 }, (_, index) => index + 1);
+    const targets = (await addTargets(admin, pool, "diego-fixture", 19))
+      .map(claim => claim.id);
     await transaction(pool, async client => {
       for (const targetId of targets) {
         const held = await credits.holdForTargetTx(client, {
