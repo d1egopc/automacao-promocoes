@@ -5389,7 +5389,6 @@ async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId,
   }
   if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
   if (!usuarioAtivoOperacional(clienteId)) return { ok: false, reason: "workspace_inativo" };
-  await renovarCreditosUniversalSeNecessario(obterUsuario(clienteId));
   return reservarCreditoManualUniversal({
     pool: getEnginePool(),
     workspaceId: clienteId,
@@ -17334,6 +17333,11 @@ function lerHistoricoRadar(clienteId = "admin") {
 }
 
 async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
+  if (modoMotorReal !== "LEGACY") {
+    return { ok: false, statusHttp: 409,
+      codigo: "fila_legacy_envio_universal_bloqueado",
+      erro: "Envio direto da fila legada indisponivel no motor Universal" };
+  }
   const configCliente = configsPorCliente?.[clienteId] || config;
 
   if (!oferta || typeof oferta !== "object") {
@@ -17389,11 +17393,8 @@ async function enviarOfertaAgoraDireto(oferta = {}, clienteId = "admin") {
   const estavaExpirada = ofertaExpiradaParaEnvio(oferta);
 
   if (estavaExpirada) {
-    logOptimus("FILA", "Enviar Agora ignorou expiracao por acao manual", {
-      clienteId,
-      titulo: oferta.titulo || oferta.nome || "",
-      expiraEm: oferta.expiraEm || ""
-    });
+    return { ok: false, statusHttp: 409,
+      codigo: "fila_item_expirado", erro: "Oferta comercialmente expirada" };
   }
 
   const analiseDestinos = analisarDestinosCompativeisFila(clienteId, oferta, configCliente);

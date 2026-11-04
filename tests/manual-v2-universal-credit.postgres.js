@@ -19,8 +19,12 @@ const { enviarOfertaManualV2 } =
   require("../modules/manual-v2/manual-dispatcher");
 
 const root = path.join(__dirname, "..");
-const config = { host: "127.0.0.1", port: 55433, user: "postgres",
+const config = { host: "127.0.0.1", port: Number(process.env.UF_TEST_PG_PORT || 55433), user: "postgres",
   database: "optimus_universal_fixture", connectionTimeoutMillis: 5000 };
+const expectedHost = process.env.UF_TEST_PG_EXPECTED_SERVER_HOST || config.host;
+const expectedPort = Number(process.env.UF_TEST_PG_EXPECTED_SERVER_PORT || config.port);
+const expectedDataDir = process.env.UF_TEST_PG_EXPECTED_DATA_DIR ||
+  path.join(root, ".local-postgres", "data");
 const schema = `manual_credit_${crypto.randomBytes(6).toString("hex")}`;
 const epoch = "2026-10-12T12:00:00.000Z";
 const sourceHash = crypto.createHash("sha256")
@@ -74,6 +78,8 @@ function depsDispatcher(pool, workspaceId, providerCalls) {
 }
 
 async function main() {
+  assert.ok(!process.env.DATABASE_URL,
+    "Disposable manual credit test refuses inherited DATABASE_URL");
   const admin = new Client(config);
   let pool;
   let created = false;
@@ -84,11 +90,11 @@ async function main() {
       current_setting('data_directory') AS data_dir,
       current_setting('server_version') AS version`)).rows[0];
     assert.equal(identity.db, config.database);
-    assert.equal(identity.host, config.host);
-    assert.equal(identity.port, config.port);
+    assert.equal(identity.host, expectedHost);
+    assert.equal(Number(identity.port), expectedPort);
     assert.match(identity.version, /^17\./);
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
-      path.join(root, ".local-postgres", "data").toLowerCase());
+      path.normalize(expectedDataDir).toLowerCase());
 
     await admin.query(`CREATE SCHEMA ${schema}`);
     created = true;

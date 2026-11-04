@@ -1,0 +1,58 @@
+name: RIO R1.7B isolated validation
+on:
+  push:
+    branches:
+      - 'validation/rio-r1-7b-*'
+  workflow_dispatch:
+
+jobs:
+  manual-source-and-links:
+    if: startsWith(github.ref, 'refs/heads/validation/rio-r1-7b-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Contracts and isolated HTTP routes
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node --check index.js
+          node --check modules/manual-v2/manual-universal-credit.js
+          node tests/ofertas-v2-achados-listas.test.js
+          node tests/manual-v2-send-route.test.js
+          node tests/manual-v2-scheduler.test.js
+          node tests/manual-v2-dispatcher.test.js
+          node tests/extension-oportunidades-ux.test.js
+          node --test tests/universal-flow-queue-executor.test.js tests/universal-flow-queue-preflight.test.js
+      - name: Ledger and source reservation on PostgreSQL 17
+        env:
+          UF_TEST_PG_PORT: '55433'
+          UF_TEST_PG_EXPECTED_SERVER_PORT: '5432'
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
+          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
+          node tests/manual-v2-universal-credit.postgres.js
+          node tests/universal-credit-sources.postgres.js
+          node tests/saas-cortesia-v1.postgres.js
+          node tests/universal-flow-credits.postgres.js

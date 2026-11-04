@@ -14,6 +14,7 @@ const { prepararModoOperacionalReal } =
 const credits = require("../modules/engine/universal-credits.repository");
 const sources = require("../modules/engine/universal-credit-sources.repository");
 const queue = require("../modules/engine/universal-queue.repository");
+const manualCredits = require("../modules/manual-v2/manual-universal-credit");
 
 const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1",
@@ -478,6 +479,26 @@ async function main() {
       spendable: segregatedBalance.spendable,
       legacy: segregatedBalance.legacySegregated },
     { balance: 19427, reserved: 19, spendable: 4000, legacy: 15427 });
+
+    const directArgs = { pool, workspaceId: "ws-segregated",
+      operationId: "extension-direct-once", destinationId: "destination-a" };
+    const directRace = await Promise.all(Array.from({ length: 4 }, () =>
+      manualCredits.reservarCreditoManualUniversal(directArgs)));
+    assert.equal(directRace.filter(item => item.ok && !item.duplicate).length, 1);
+    assert.equal(directRace.filter(item => item.ok && item.duplicate).length, 3);
+    assert.ok(directRace[0].sourceId || directRace[0].duplicate);
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.equal(segregatedBalance.spendable, 3999);
+    assert.equal(segregatedBalance.legacySegregated, 15427);
+    const directHold = (await admin.query(`SELECT universal_credit_source_id
+      FROM financial_credit_ledger WHERE idempotency_key=$1`,
+    [directRace[0].idempotencyKey])).rows[0];
+    assert.ok(directHold.universal_credit_source_id);
+    assert.equal((await manualCredits.liberarCreditoManualUniversal({
+      pool, reserva: directRace[0] })).released, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" })).spendable, 4000);
 
     await enqueueOne(admin, pool, "ws-segregated", "new-courtesy", 70);
     const segregatedCurrent = await claimAndStart(pool, "ws-segregated");

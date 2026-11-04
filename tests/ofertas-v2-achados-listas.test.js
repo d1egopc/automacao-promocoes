@@ -91,6 +91,16 @@ async function main() {
       linksComerciais: shopeeAchado.linksComerciais } }).ok, true);
   const shopProjetado = await listas.ofertaDoAchado(achados.buscarAchado(workspace, "shop_assinado"), workspace, depsShop);
   assert.strictEqual(shopProjetado.linkResgate, shopeeResgate, "projeção compacta preserva HMAC");
+  const shopCard = achados.listarAchados(workspace, {
+    marketplace: "shopee", resolverLinkProduto: item => listas.linkAfiliadoAchado(item, workspace, depsShop)
+  }).find(item => item.id === "shop_assinado");
+  assert.strictEqual(shopCard.urlProduto, shopeeProduto, "API projeta produto afiliado verificado");
+  assert.strictEqual(shopCard.urlProdutoMotivo, "");
+  const semProva = achados.listarAchados(workspace, {
+    marketplace: "shopee", resolverLinkProduto: item => listas.linkAfiliadoAchado(item, workspace, depsShop)
+  }).find(item => item.id === "shop1");
+  assert.strictEqual(semProva.urlProduto, "", "link sem prova não aparece no card");
+  assert.strictEqual(semProva.urlProdutoMotivo, "achado_link_afiliado_indisponivel");
   writeClienteJson(workspace, "integracoes.json", { shopee: { credenciais: shopeeCred } });
   assert.strictEqual(resolverContratoComercialFinal(ofertaShop).linksResgate[0]?.urlAfiliadaWorkspace,
     shopeeResgate, "renderer aceita resgate com HMAC válido");
