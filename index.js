@@ -9366,13 +9366,14 @@ function criarPreflightFilaUniversalReal(pool, { oneShotId = null,
     },
     checkCredits: async ({ workspaceId, claim }) => {
       if (oneShotId) {
-        const balance = (await resolvePool().query(`SELECT balance,reserved
-          FROM engine_universal_credit_balances
-          WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
-        [claim.operationEpochStartedAt,workspaceId])).rows[0];
-        return { ok: balance &&
-          Number(balance.balance)-Number(balance.reserved)>=1,
-        reason: "workspace_credits_unavailable" };
+        try {
+          const balance = await lerSaldoUniversal({ pool: resolvePool(),
+            workspaceId });
+          return { ok: balance && Number(balance.available) >= 1,
+            reason: "workspace_credits_unavailable" };
+        } catch {
+          return { ok: false, reason: "workspace_credits_unavailable" };
+        }
       }
       return { ok: await creditoDisponivelParaEnvio(workspaceId, 1),
         reason: "workspace_credits_unavailable" };

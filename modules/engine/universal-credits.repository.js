@@ -4,6 +4,7 @@
 // ledger. No JSON balance is read or written here. A hold protects capacity
 // before transport but is not a financial debit.
 const { createHash } = require("node:crypto");
+const sourceCredits = require("./universal-credit-sources.repository");
 
 function text(value) { return String(value ?? "").trim(); }
 function integer(value) {
@@ -43,7 +44,7 @@ async function transaction(pool, action) {
 }
 
 async function openBalance({ pool, workspaceId, operationEpochStartedAt,
-  openingBalance, sourceHash }) {
+  openingBalance, sourceHash, activateSources = false }) {
   const workspace = text(workspaceId);
   const epoch = epochIso(operationEpochStartedAt);
   const amount = integer(openingBalance);
@@ -82,7 +83,8 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
     if (!row || Number(row.opening_balance) !== amount || row.source_hash !== hash) {
       throw new Error("universal_credit_opening_conflict");
     }
-    const ledger = await client.query(`SELECT amount,metadata->>'sourceHash' AS source_hash
+    const ledger = await client.query(`SELECT id,amount,
+        metadata->>'sourceHash' AS source_hash,universal_credit_source_id
       FROM financial_credit_ledger WHERE operation_epoch_started_at=$1
         AND cliente_id=$2 AND universal_movement_type='OPENING_BALANCE'`,
     [epoch, workspace]);
@@ -90,8 +92,17 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
         ledger.rows[0].source_hash !== hash) {
       throw new Error("universal_credit_opening_ledger_missing_or_conflicting");
     }
+    let sourceActivation = null;
+    if (activateSources === true) {
+      sourceActivation = await sourceCredits.activateNewWorkspaceTx(client, {
+        epoch, workspaceId: workspace, openingBalance: amount,
+        sourceHash: hash, ledgerId: ledger.rows[0].id,
+        allowCreate: inserted.rowCount === 1
+      });
+    }
     return { ok: true, created: inserted.rowCount === 1,
-      balance: Number(row.balance), reserved: Number(row.reserved) };
+      balance: Number(row.balance), reserved: Number(row.reserved),
+      sourceMode: sourceActivation?.mode || null };
   });
 }
 
@@ -145,7 +156,8 @@ async function reconcileRegistrationOpening({ pool, workspaceId,
   if (userExists !== true) return { ok: false, reason: "registration_not_persisted" };
   await openBalance({ pool, workspaceId: workspace,
     operationEpochStartedAt: intent.operation_epoch_started_at,
-    openingBalance: Number(intent.opening_balance), sourceHash: intent.source_hash });
+    openingBalance: Number(intent.opening_balance), sourceHash: intent.source_hash,
+    activateSources: true });
   await pool.query(`UPDATE engine_universal_credit_opening_intents
     SET state='completed',completed_at=clock_timestamp()
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND state='pending'`,
@@ -237,10 +249,34 @@ async function readBalance({ pool, workspaceId }) {
     throw new Error("universal_credit_read_identity_invalid");
   }
   const result = await pool.query(`SELECT b.balance,b.reserved,b.opening_balance,
-      b.operation_epoch_started_at,b.revision
+      b.operation_epoch_started_at,b.revision,sw.mode AS source_mode,
+      COALESCE(src.active_available,0)::bigint AS source_available,
+      COALESCE(src.has_current_entitlement,false) AS has_current_entitlement,
+      COALESCE(src.legacy_segregated,0)::bigint AS legacy_segregated
     FROM engine_operation_state s
     JOIN engine_universal_credit_balances b
       ON b.operation_epoch_started_at=s.operation_epoch_started_at
+    LEFT JOIN engine_universal_credit_source_workspaces sw
+      ON sw.operation_epoch_started_at=b.operation_epoch_started_at
+     AND sw.workspace_id=b.workspace_id
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE(SUM(available) FILTER (WHERE state='active'
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),0)
+          AS active_available,
+        COALESCE(BOOL_OR(source_kind IN ('cycle','opening') AND state='active'
+          AND granted>0
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),false)
+          AS has_current_entitlement,
+        COALESCE(SUM(available+reserved) FILTER
+          (WHERE source_kind IN ('legacy_escrow','legacy_unclassified')),0)
+          AS legacy_segregated
+      FROM engine_universal_credit_sources cs
+      WHERE cs.operation_epoch_started_at=b.operation_epoch_started_at
+        AND cs.workspace_id=b.workspace_id
+    ) src ON true
     WHERE s.id=1 AND s.mode='UNIVERSAL' AND b.workspace_id=$1`, [workspace]);
   if (result.rowCount !== 1) {
     const erro = new Error("universal_credit_opening_missing");
@@ -248,14 +284,24 @@ async function readBalance({ pool, workspaceId }) {
     throw erro;
   }
   const row = result.rows[0];
+  const aggregateAvailable = Number(row.balance) - Number(row.reserved);
+  const sourceAuthority = sourceCredits.sourceAuthorityActive(row.source_mode);
+  const spendable = sourceAuthority && row.has_current_entitlement === true
+    ? Number(row.source_available) : (sourceAuthority ? 0 : aggregateAvailable);
   return { balance: Number(row.balance), reserved: Number(row.reserved),
-    available: Number(row.balance) - Number(row.reserved),
+    available: spendable, spendable, aggregateAvailable,
+    legacySegregated: Number(row.legacy_segregated),
+    sourceMode: row.source_mode || null,
     openingBalance: Number(row.opening_balance),
     operationEpochStartedAt: epochIso(row.operation_epoch_started_at),
     revision: Number(row.revision) };
 }
 
 async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.holdForTargetTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -278,6 +324,10 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
 }
 
 async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.settleConfirmedTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -313,6 +363,10 @@ async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
 }
 
 async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.releaseForTargetTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT reserved FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -346,8 +400,8 @@ async function applyFinancialLedger({ pool, ledgerId }) {
       throw new Error("universal_financial_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
-    const movement = (await client.query(`SELECT id,cliente_id,amount,
-        balance_policy,created_at,projection_status,
+    const movement = (await client.query(`SELECT id,cliente_id,ledger_type,amount,
+        balance_policy,cycle_start,cycle_end,created_at,projection_status,
         universal_movement_type,operation_epoch_started_at
       FROM financial_credit_ledger WHERE id=$1 FOR UPDATE`, [id])).rows[0];
     if (!movement) throw new Error("universal_financial_ledger_missing");
@@ -360,6 +414,10 @@ async function applyFinancialLedger({ pool, ledgerId }) {
         new Date(movement.created_at).getTime() < new Date(epoch).getTime()) {
       throw new Error("universal_financial_movement_epoch_conflict");
     }
+    const sourceApplied = await sourceCredits.applyLedgerTx(client, {
+      epoch, movement
+    });
+    if (sourceApplied.handled) return sourceApplied;
     const row = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -411,6 +469,13 @@ async function setAdminBalance({ pool, workspaceId, amount,
       throw new Error("universal_admin_credit_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
+    const sourceMode = await sourceCredits.workspaceModeTx(client, {
+      epoch, workspaceId: workspace, lock: true
+    });
+    if (sourceCredits.sourceAuthorityActive(sourceMode?.mode)) {
+      return { ok: false,
+        reason: "universal_credit_source_set_requires_financial_ledger" };
+    }
     const balance = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -472,6 +537,11 @@ async function addAdminBalance({ pool, workspaceId, amount,
       throw new Error("universal_admin_credit_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
+    const sourceTopup = await sourceCredits.addAdminTopupTx(client, {
+      epoch, workspaceId: workspace, amount: delta, idempotencyKey: key,
+      reason, operatorId
+    });
+    if (sourceTopup.handled) return sourceTopup;
     const balance = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,

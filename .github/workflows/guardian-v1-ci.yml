@@ -161,6 +161,7 @@ jobs:
           test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
           node tests/universal-credit-preflight.postgres.js
           node tests/saas-cortesia-v1.postgres.js
+          node tests/universal-credit-sources.postgres.js
           node tests/universal-flow-credits.postgres.js
           node tests/universal-flow-expired-fresh.postgres.js
 

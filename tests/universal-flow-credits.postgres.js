@@ -306,6 +306,16 @@ async function main() {
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws_signup" })).balance, 4);
     assert.equal((await counts(admin, "ws_signup")).OPENING_BALANCE, 1);
+    assert.equal((await admin.query(`SELECT mode FROM
+      engine_universal_credit_source_workspaces
+      WHERE operation_epoch_started_at=$1 AND workspace_id='ws_signup'`,
+    [epoch])).rows[0].mode, "ACTIVE",
+    "new SaaS workspace must enter source authority without SHADOW");
+    assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n FROM
+      engine_universal_credit_sources WHERE operation_epoch_started_at=$1
+        AND workspace_id='ws_signup' AND source_kind='opening'`,
+    [epoch])).rows[0].n), 1,
+    "registration recovery must create exactly one opening source");
     await assert.rejects(credits.prepareRegistrationOpening({ pool,
       workspaceId: "ws_signup", openingBalance: 5, planId: "Local" }),
     /opening_conflict/);
