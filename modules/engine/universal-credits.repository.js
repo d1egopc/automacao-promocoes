@@ -4,6 +4,7 @@
 // ledger. No JSON balance is read or written here. A hold protects capacity
 // before transport but is not a financial debit.
 const { createHash } = require("node:crypto");
+const sourceCredits = require("./universal-credit-sources.repository");
 
 function text(value) { return String(value ?? "").trim(); }
 function integer(value) {
@@ -256,6 +257,10 @@ async function readBalance({ pool, workspaceId }) {
 }
 
 async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.holdForTargetTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -278,6 +283,10 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
 }
 
 async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.settleConfirmedTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -313,6 +322,10 @@ async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
 }
 
 async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
+  const sourceResult = await sourceCredits.releaseForTargetTx(client, {
+    epoch, workspaceId, targetId
+  });
+  if (sourceResult.handled) return sourceResult;
   const row = (await client.query(`SELECT reserved FROM
     engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -346,8 +359,8 @@ async function applyFinancialLedger({ pool, ledgerId }) {
       throw new Error("universal_financial_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
-    const movement = (await client.query(`SELECT id,cliente_id,amount,
-        balance_policy,created_at,projection_status,
+    const movement = (await client.query(`SELECT id,cliente_id,ledger_type,amount,
+        balance_policy,cycle_start,cycle_end,created_at,projection_status,
         universal_movement_type,operation_epoch_started_at
       FROM financial_credit_ledger WHERE id=$1 FOR UPDATE`, [id])).rows[0];
     if (!movement) throw new Error("universal_financial_ledger_missing");
@@ -360,6 +373,10 @@ async function applyFinancialLedger({ pool, ledgerId }) {
         new Date(movement.created_at).getTime() < new Date(epoch).getTime()) {
       throw new Error("universal_financial_movement_epoch_conflict");
     }
+    const sourceApplied = await sourceCredits.applyLedgerTx(client, {
+      epoch, movement
+    });
+    if (sourceApplied.handled) return sourceApplied;
     const row = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -411,6 +428,13 @@ async function setAdminBalance({ pool, workspaceId, amount,
       throw new Error("universal_admin_credit_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
+    const sourceMode = await sourceCredits.workspaceModeTx(client, {
+      epoch, workspaceId: workspace, lock: true
+    });
+    if (sourceMode?.mode === "ACTIVE") {
+      return { ok: false,
+        reason: "universal_credit_source_set_requires_financial_ledger" };
+    }
     const balance = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -472,6 +496,11 @@ async function addAdminBalance({ pool, workspaceId, amount,
       throw new Error("universal_admin_credit_mode_required");
     }
     const epoch = epochIso(state.operation_epoch_started_at);
+    const sourceTopup = await sourceCredits.addAdminTopupTx(client, {
+      epoch, workspaceId: workspace, amount: delta, idempotencyKey: key,
+      reason, operatorId
+    });
+    if (sourceTopup.handled) return sourceTopup;
     const balance = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,

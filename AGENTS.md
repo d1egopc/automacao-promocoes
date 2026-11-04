@@ -147,6 +147,7 @@ Este texto nao substitui testes executaveis; o gate documental e a regressao aut
 - [Social](docs/contracts/SOCIAL.md)
 - [Multi-tenancy](docs/contracts/MULTITENANCY.md)
 - [Performance](docs/contracts/PERFORMANCE.md)
+- [Fontes financeiras Universal](docs/contracts/UNIVERSAL-CREDIT-SOURCES.md)
 - [Roteamento de capacidade](docs/contracts/MODEL-ROUTING.md)
 - [Evidencias temporais](docs/contracts/EVIDENCE-REGISTER.md)
 
