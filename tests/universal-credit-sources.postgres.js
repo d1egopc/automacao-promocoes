@@ -154,7 +154,7 @@ async function main() {
       ["ws-race-courtesy", 0], ["ws-race-prepare", 0],
       ["ws-race-concurrent", 0], ["ws-segregated", 15427],
       ["ws-segregated-rollback", 9], ["ws-segregated-diverged", 10],
-      ["ws-segregated-new", 0]]) {
+      ["ws-segregated-new", 0], ["ws-v2-transition", 100]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
@@ -783,6 +783,78 @@ async function main() {
     assert.equal(mixedBalance.reserved, mixedHolds.length);
     assert.equal(mixedBalance.spendable, 5 - mixedHolds.length);
 
+    // Full migration path: a historical top-up proves that a grant happened,
+    // not how much remains after unattributed legacy debits. Preserve it in
+    // unclassified history until a new source is legitimately granted.
+    await enqueueOne(admin, pool, "ws-v2-transition", "legacy-destination", 80);
+    const historicalClaim = await claimAndStart(pool, "ws-v2-transition");
+    await makeAmbiguous(admin, pool, "ws-v2-transition", historicalClaim);
+    const historicalTopup = await credits.addAdminBalance({ pool,
+      workspaceId: "ws-v2-transition", amount: 30,
+      idempotencyKey: "v2-historical-topup", operatorId: "fixture" });
+    assert.equal(historicalTopup.ok, true);
+    const transitionShadow = (await prepareShadow(pool,
+      "ws-v2-transition")).shadow;
+    assert.equal(transitionShadow.reserved, 1);
+    assert.equal(transitionShadow.unclassifiedAvailable, 129);
+    await sources.activateWorkspaceSegregated({ pool,
+      workspaceId: "ws-v2-transition",
+      baselineHash: transitionShadow.baselineHash });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).spendable, 0);
+    const currentCourtesy = await insertCycle(admin, {
+      workspace: "ws-v2-transition", value: 4,
+      origin: "admin_courtesy", suffix: "v2-current" });
+    const [courtesyFirst, courtesyRetry, newTopup] = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: currentCourtesy }),
+      credits.applyFinancialLedger({ pool, ledgerId: currentCourtesy }),
+      credits.addAdminBalance({ pool, workspaceId: "ws-v2-transition",
+        amount: 2, idempotencyKey: "v2-current-topup",
+        operatorId: "fixture" })
+    ]);
+    assert.equal([courtesyFirst, courtesyRetry]
+      .filter(item => item.applied === true).length, 1);
+    assert.equal(newTopup.ok, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).spendable, 6);
+    const migratedContenders = await Promise.all(Array.from({ length: 10 },
+      (_, index) => manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-v2-transition", operationId: `new-offer-${index}`,
+        destinationId: `new-destination-${index}` })));
+    const migratedHolds = migratedContenders.filter(item => item.ok);
+    assert.ok(migratedHolds.length > 0 && migratedHolds.length <= 6);
+    assert.ok(migratedHolds.every(item => item.sourceId));
+    const migratedAck = await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: migratedHolds[0] });
+    assert.equal(migratedAck.debited, true);
+    const transitionOldAck = await durableAck(admin, historicalClaim,
+      "provider-v2-historical-ack");
+    await queue.confirmSend({ pool, destinationId: historicalClaim.id,
+      leaseToken: historicalClaim.leaseToken, ...transitionOldAck });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).legacySegregated, 129);
+    await assert.rejects(sources.rollbackSegregatedWorkspace({ pool,
+      workspaceId: "ws-v2-transition",
+      baselineHash: transitionShadow.baselineHash }),
+    /rollback_balance_changed|rollback_movements_exist/);
+    const pixWhileSending = await insertCycle(admin, {
+      workspace: "ws-v2-transition", value: 3,
+      origin: "financial_event_v1", suffix: "v2-pix" });
+    const [pixResult, concurrentSend] = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: pixWhileSending }),
+      manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-v2-transition", operationId: "pix-race-offer",
+        destinationId: "pix-race-destination" })
+    ]);
+    assert.equal(pixResult.ok, true);
+    assert.ok(concurrentSend.ok === true ||
+      concurrentSend.reason === "sem_creditos");
+    const v2Conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
+      FROM engine_universal_credit_sources
+      WHERE workspace_id='ws-v2-transition'
+        AND granted<>available+reserved+consumed+expired`)).rows[0];
+    assert.equal(v2Conservation.bad, 0);
+
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
       sourceScopedHolds: true,
       oldEscrowPreserved: true,
@@ -810,7 +882,8 @@ async function main() {
       segregatedRollbackBeforeMovement: true,
       segregatedPixAndCourtesyIdempotent: true,
       restartSafe: true,
-      multiworkspaceIsolated: true
+      multiworkspaceIsolated: true,
+      fullLegacyToSegregatedFlow: true
     }));
   } finally {
     if (pool) await pool.end().catch(() => {});
