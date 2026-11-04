@@ -52,10 +52,14 @@ function request({ port, method = "GET", route = "/", token, body }) {
   });
 }
 
-async function waitServer(port, proc, timeoutMs = 20000) {
+async function waitServer(port, proc, getStderr = () => "", timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (proc.exitCode !== null) throw new Error("me_fixture_backend_exited");
+    if (proc.exitCode !== null) {
+      const diagnostic = String(getStderr()).match(/(?:Error|error):\s*([A-Za-z0-9_.-]+)/)?.[1]
+        || "unknown";
+      throw new Error(`me_fixture_backend_exited:${diagnostic}`);
+    }
     try {
       const response = await request({ port });
       if (response.status === 200) return;
@@ -213,7 +217,7 @@ function assertNoSecret(text, secrets) {
     });
     proc.stdout.on("data", chunk => { stdout += chunk.toString(); });
     proc.stderr.on("data", chunk => { stderr += chunk.toString(); });
-    await waitServer(port, proc);
+    await waitServer(port, proc, () => stderr);
 
     async function snapshotFinanceiro(workspaceId) {
       const saldo = (await pool.query(`SELECT opening_balance,balance,reserved,revision
@@ -241,6 +245,16 @@ function assertNoSecret(text, secrets) {
     assert.strictEqual(me.body.usuario.id, "user_existente");
     assert.strictEqual(me.body.usuario.creditos, 432);
     assert.strictEqual(me.body.usuario.creditosEstado, "disponivel");
+    const statusAntes = await snapshotFinanceiro("user_existente");
+    const statuses = await Promise.all(Array.from({ length: 8 }, () => request({
+      port, route: "/automacao/status", token: google.body.token
+    })));
+    for (const status of statuses) {
+      assert.strictEqual(status.status, 200, JSON.stringify(status.body));
+      assert.strictEqual(status.body.creditos, 432);
+    }
+    assert.deepStrictEqual(await snapshotFinanceiro("user_existente"), statusAntes,
+      "GET /automacao/status concorrente nao altera saldo, reservas ou revisao");
     assert.deepStrictEqual(await snapshotFinanceiro("user_existente"), financeiroAntes,
       "/me nao pode renovar, conceder, debitar ou liberar reserva");
     const usuarioAposMe = readJson(path.join(dataDir, "usuarios.json"), [])
@@ -259,6 +273,12 @@ function assertNoSecret(text, secrets) {
     assert.strictEqual(meSemLedger.status, 200, JSON.stringify(meSemLedger.body));
     assert.strictEqual(meSemLedger.body.usuario.creditos, null);
     assert.strictEqual(meSemLedger.body.usuario.creditosEstado, "indisponivel");
+    const statusSemLedger = await request({ port, route: "/automacao/status",
+      token: tokenSemLedger });
+    assert.strictEqual(statusSemLedger.status, 503);
+    assert.strictEqual(statusSemLedger.body.codigo, "automacao_status_indisponivel");
+    assert.strictEqual(proc.exitCode, null,
+      "falha de leitura do status nao pode derrubar o Node");
     assert.strictEqual(Number((await pool.query(
       "SELECT count(*) AS total FROM financial_credit_ledger WHERE cliente_id=$1",
       ["user_ledger_indisponivel"]
@@ -278,12 +298,18 @@ function assertNoSecret(text, secrets) {
     assert.ok(blocoMe.includes('creditosEstado = "indisponivel"'));
     assert.ok(blocoMe.includes('etapa: "me.credit_balance_read"'));
     assert.ok(blocoMe.includes('etapa: "me.profile_build"'));
+    const inicioStatus = fonte.indexOf('app.get("/automacao/status"');
+    const fimStatus = fonte.indexOf('app.get("/automacao"', inicioStatus);
+    const blocoStatus = fonte.slice(inicioStatus, fimStatus);
+    assert.ok(blocoStatus.includes("saldoCreditosSomenteLeitura"));
+    assert.ok(!blocoStatus.includes("saldoCreditosParaExibicao"));
+    assert.ok(!blocoStatus.includes("garantirFilaClienteInicializadaHttp"));
     assertNoSecret(stdout + stderr, [idToken, google.body.token, jwtSecret]);
     console.log("saas-me-readonly-v1.test.js OK");
   } finally {
     await stopProcess(proc);
     if (pool) await pool.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`)
+    await adminPool.query(`DROP DATABASE IF EXISTS "${database}"`)
       .catch(() => {});
     await adminPool.end().catch(() => {});
     fs.rmSync(dataDir, { recursive: true, force: true });

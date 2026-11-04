@@ -42,6 +42,9 @@ jobs:
           node tests/manual-v2-scheduler.test.js
           node tests/manual-v2-dispatcher.test.js
           node tests/extension-oportunidades-ux.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/admin-credit-topup-contract.test.js
           node tests/fila-advisory-functional.test.js
           node --test tests/manual-v2-legacy-no-renew.test.cjs tests/universal-credit-preflight.test.cjs
           node --test tests/universal-flow-queue-executor.test.js tests/universal-flow-queue-preflight.test.js
@@ -58,4 +61,18 @@ jobs:
           node tests/manual-v2-universal-credit.postgres.js
           node tests/universal-credit-sources.postgres.js
           node tests/saas-cortesia-v1.postgres.js
+          node tests/universal-admin-topup.postgres.js
           node tests/universal-flow-credits.postgres.js
+      - name: Read-only automation status on PostgreSQL 17
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          if [[ ! -e /data ]]; then
+            sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /data
+          fi
+          test -w /data
+          mkdir -p "$RUNNER_TEMP/r17b-status-mensageiro"
+          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/r17b-status-mensageiro" \
+          node tests/saas-me-readonly-v1.test.js
