@@ -5271,7 +5271,8 @@ function renovarCreditosSeNecessario(usuario) {
 
 // ================ FUNCAO USUARIO TEM CRÃ‰DITO ==================
 
-function usuarioTemCreditos(clienteId, quantidade = 1) {
+function usuarioTemCreditos(clienteId, quantidade = 1, { renovar = true,
+  exigirDireitoVigente = false } = {}) {
   if (modoMotorReal !== "LEGACY") return false;
   if (!usuarioAtivoOperacional(clienteId)) {
     logUsuarioInativoOperacional(clienteId, "creditos_validacao");
@@ -5282,12 +5283,21 @@ function usuarioTemCreditos(clienteId, quantidade = 1) {
 
   if (!usuario) return false;
 
-  renovarCreditosSeNecessario(usuario);
+  if (renovar) renovarCreditosSeNecessario(usuario);
+
+  if (exigirDireitoVigente) {
+    const plano = obterPlanoUsuarioObjeto(usuario);
+    return universalCreditEligibility.avaliarDireitoConsumoUniversal({
+      usuario, plano, quantidade,
+      saldo: { available: Number(usuario.creditos || 0) }
+    }).ok;
+  }
 
   return Number(usuario.creditos || 0) >= quantidade;
 }
 
-function debitarCreditos(clienteId, quantidade = 1) {
+function debitarCreditos(clienteId, quantidade = 1, { renovar = true,
+  exigirDireitoVigente = false } = {}) {
   if (modoMotorReal !== "LEGACY") {
     throw new Error("universal_json_credit_debit_forbidden");
   }
@@ -5300,7 +5310,13 @@ function debitarCreditos(clienteId, quantidade = 1) {
 
   if (!usuario) return false;
 
-  renovarCreditosSeNecessario(usuario);
+  if (renovar) renovarCreditosSeNecessario(usuario);
+
+  if (exigirDireitoVigente && !universalCreditEligibility
+    .avaliarDireitoConsumoUniversal({
+      usuario, plano: obterPlanoUsuarioObjeto(usuario), quantidade,
+      saldo: { available: Number(usuario.creditos || 0) }
+    }).ok) return false;
 
   if (Number(usuario.creditos || 0) < quantidade) {
     return false;
@@ -5385,7 +5401,8 @@ async function saldoCreditosGoogleSomenteLeitura(clienteId, usuario = null,
 
 async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId, destinationId } = {}) {
   if (modoMotorReal === "LEGACY") {
-    return { ok: usuarioTemCreditos(clienteId, 1), legacy: true, clienteId };
+    return { ok: usuarioTemCreditos(clienteId, 1, { renovar: false,
+      exigirDireitoVigente: true }), legacy: true, clienteId };
   }
   if (modoMotorReal !== "UNIVERSAL") throw new Error("credit_mode_not_ready");
   if (!usuarioAtivoOperacional(clienteId)) return { ok: false, reason: "workspace_inativo" };
@@ -5398,7 +5415,8 @@ async function reservarCreditoEnvioManualV2({ clienteId, operationId, destinoId,
 }
 
 async function confirmarCreditoEnvioManualV2(reserva = {}) {
-  if (reserva.legacy === true) return { ok: debitarCreditos(reserva.clienteId, 1) === true };
+  if (reserva.legacy === true) return { ok: debitarCreditos(reserva.clienteId, 1,
+    { renovar: false, exigirDireitoVigente: true }) === true };
   return confirmarCreditoManualUniversal({ pool: getEnginePool(), reserva });
 }
 
