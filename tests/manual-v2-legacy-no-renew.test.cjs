@@ -66,3 +66,18 @@ test("LEGACY renewal remains available outside Manual V2", () => {
   assert.equal(context.usuarioTemCreditos("fixture", 1), true);
   assert.equal(counters().renewals, 1);
 });
+
+test("characterization: two LEGACY offers can pass the same one-credit preflight", async () => {
+  const user = { ...validUser(), creditos: 1 };
+  const { context, counters } = fixture(user);
+  const [first, second] = await Promise.all([
+    context.reservarCreditoEnvioManualV2({ clienteId: "fixture",
+      operationId: "offer-a:destination-a" }),
+    context.reservarCreditoEnvioManualV2({ clienteId: "fixture",
+      operationId: "offer-b:destination-b" })
+  ]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(user.creditos, 1, "neither preflight persists a hold");
+  assert.deepEqual(counters(), { renewals: 0, saves: 0 });
+});
