@@ -579,6 +579,22 @@ async function main() {
     await credits.applyFinancialLedger({ pool, ledgerId: newCourtesy });
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-segregated-new" })).spendable, 100);
+    const directConfirmed = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-segregated-new", operationId: "manual-ack",
+      destinationId: "destination-one" });
+    assert.equal(directConfirmed.ok, true);
+    assert.ok(directConfirmed.sourceId);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: directConfirmed })).debited, true);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: directConfirmed })).duplicate, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated-new" })).spendable, 99);
+    const directDebit = (await admin.query(`SELECT amount,universal_credit_source_id
+      FROM financial_credit_ledger WHERE idempotency_key=$1`,
+    [directConfirmed.idempotencyKey])).rows[0];
+    assert.equal(Number(directDebit.amount), -1);
+    assert.equal(directDebit.universal_credit_source_id, directConfirmed.sourceId);
 
     const conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
