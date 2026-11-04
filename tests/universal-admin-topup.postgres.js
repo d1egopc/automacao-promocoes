@@ -81,11 +81,16 @@ async function main() {
       current_setting('data_directory') AS data_dir,
       current_setting('server_version') AS version`)).rows[0];
     assert.equal(identity.db, config.database);
-    assert.equal(identity.host, config.host);
-    assert.equal(identity.port, config.port);
+    // TCP client uses the published loopback port; the server identifies its
+    // own Docker-network address and internal port.
+    assert.ok(process.env.UF_TEST_PG_EXPECTED_SERVER_HOST,
+      "Docker service identity is required for this disposable test");
+    assert.equal(identity.host, process.env.UF_TEST_PG_EXPECTED_SERVER_HOST);
+    assert.equal(identity.port,
+      Number(process.env.UF_TEST_PG_EXPECTED_SERVER_PORT));
     assert.match(identity.version, /^17\./);
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
-      path.join(root, ".local-postgres", "data").toLowerCase());
+      path.normalize(process.env.UF_TEST_PG_EXPECTED_DATA_DIR).toLowerCase());
 
     await admin.query(`CREATE SCHEMA ${schema}`);
     created = true;
