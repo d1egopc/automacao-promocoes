@@ -14449,6 +14449,7 @@ app.delete("/destinos/:id", (req, res) => {
 // ================= AUTOMAÃ‡ÃƒO POR CLIENTE =================
 
 app.get("/automacao/status", async (req, res) => {
+  try {
   painelLatencia.marcarEntradaHandler(req);
   const clienteId = getClienteId(req);
 
@@ -14459,7 +14460,9 @@ app.get("/automacao/status", async (req, res) => {
     });
   }
 
-  if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_automacao_status"))) return;
+  if (estadoFilaClienteInicializacao(clienteId) !== ESTADO_FILA_CLIENTE_INICIALIZADO) {
+    return res.status(503).json({ ok: false, codigo: "fila_nao_inicializada" });
+  }
 
   const configCliente = configsPorCliente?.[clienteId] || {};
   const configFinal = {
@@ -14552,7 +14555,7 @@ app.get("/automacao/status", async (req, res) => {
     })
     .length;
 
-  const saldoCreditos = await saldoCreditosParaExibicao(clienteId, usuario);
+  const saldoCreditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
   return res.json({
     ok: true,
     clienteId,
@@ -14581,6 +14584,12 @@ app.get("/automacao/status", async (req, res) => {
       statusMarketplaces: statusOrquestradorMarketplaces
     }
   });
+  } catch (erro) {
+    const diagnostico = registrarErroSaas({ req, etapa: "automacao_status.read", erro,
+      codigoFallback: "automacao_status_indisponivel" });
+    return res.status(503).json({ ok: false, codigo: "automacao_status_indisponivel",
+      erro: "Status indisponivel", requestId: diagnostico.requestId });
+  }
 });
 
 app.get("/automacao", (req, res) => {

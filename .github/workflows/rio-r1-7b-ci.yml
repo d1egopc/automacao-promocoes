@@ -59,3 +59,10 @@ jobs:
           node tests/universal-credit-sources.postgres.js
           node tests/saas-cortesia-v1.postgres.js
           node tests/universal-flow-credits.postgres.js
+      - name: Read-only automation status on PostgreSQL 17
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          node tests/saas-me-readonly-v1.test.js
