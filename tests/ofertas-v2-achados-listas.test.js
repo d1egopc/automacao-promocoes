@@ -2,12 +2,14 @@ const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const express = require("express");
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-ofertas-v2-"));
 
 const { readClienteJson, writeClienteJson } = require("../utils/storage");
 const manual = require("../modules/manual-v2/manual-offers.storage");
 const achados = require("../modules/manual-v2/ofertas-v2-achados");
 const listas = require("../modules/manual-v2/ofertas-v2-listas");
+const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
 const { ordenarElegiveis } = require("../modules/manual-v2/manual-auto-dispatch");
 const { selecionarConteudoVivo } = require("../modules/engine/auto-clean/gc-reference-index");
 const { criarProvaAfiliacaoWorkspaceShopee } = require("../modules/marketplaces/shopee/afiliacao-workspace");
@@ -91,6 +93,43 @@ async function main() {
       linksComerciais: shopeeAchado.linksComerciais } }).ok, true);
   const shopProjetado = await listas.ofertaDoAchado(achados.buscarAchado(workspace, "shop_assinado"), workspace, depsShop);
   assert.strictEqual(shopProjetado.linkResgate, shopeeResgate, "projeção compacta preserva HMAC");
+  const shopCard = achados.listarAchados(workspace, {
+    marketplace: "shopee", resolverLinkProduto: item => listas.linkAfiliadoAchado(item, workspace, depsShop)
+  }).find(item => item.id === "shop_assinado");
+  assert.strictEqual(shopCard.urlProduto, shopeeProduto, "API projeta produto afiliado verificado");
+  assert.strictEqual(shopCard.urlProdutoMotivo, "");
+  const semProva = achados.listarAchados(workspace, {
+    marketplace: "shopee", resolverLinkProduto: item => listas.linkAfiliadoAchado(item, workspace, depsShop)
+  }).find(item => item.id === "shop1");
+  assert.strictEqual(semProva.urlProduto, "", "link sem prova não aparece no card");
+  assert.strictEqual(semProva.urlProdutoMotivo, "achado_link_afiliado_indisponivel");
+  const appAchados = express();
+  appAchados.use("/manual-v2", criarRotasManualV2({
+    getClienteId: req => req.header("x-cliente-id"),
+    getIntegracaoCliente: () => ({ credenciais: shopeeCred })
+  }));
+  const serverAchados = await new Promise(resolve => {
+    const listening = appAchados.listen(0, "127.0.0.1", () => resolve(listening));
+  });
+  try {
+    const base = `http://127.0.0.1:${serverAchados.address().port}`;
+    const resposta = await fetch(`${base}/manual-v2/achados?marketplace=shopee`, {
+      headers: { "x-cliente-id": workspace }
+    });
+    assert.strictEqual(resposta.status, 200);
+    const cards = (await resposta.json()).achados;
+    assert.strictEqual(cards.find(item => item.id === "shop_assinado").urlProduto,
+      shopeeProduto, "GET Achados exposes only the verified workspace link");
+    assert.strictEqual(cards.find(item => item.id === "shop1").urlProdutoMotivo,
+      "achado_link_afiliado_indisponivel");
+    const isolado = await fetch(`${base}/manual-v2/achados?marketplace=shopee`, {
+      headers: { "x-cliente-id": outro }
+    });
+    assert.deepStrictEqual((await isolado.json()).achados, [],
+      "GET Achados cannot leak another workspace's links");
+  } finally {
+    await new Promise(resolve => serverAchados.close(resolve));
+  }
   writeClienteJson(workspace, "integracoes.json", { shopee: { credenciais: shopeeCred } });
   assert.strictEqual(resolverContratoComercialFinal(ofertaShop).linksResgate[0]?.urlAfiliadaWorkspace,
     shopeeResgate, "renderer aceita resgate com HMAC válido");

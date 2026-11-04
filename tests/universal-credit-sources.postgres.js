@@ -14,6 +14,11 @@ const { prepararModoOperacionalReal } =
 const credits = require("../modules/engine/universal-credits.repository");
 const sources = require("../modules/engine/universal-credit-sources.repository");
 const queue = require("../modules/engine/universal-queue.repository");
+const manualCredits = require("../modules/manual-v2/manual-universal-credit");
+const express = require("express");
+const manualStorage = require("../modules/manual-v2/manual-offers.storage");
+const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
+const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
 
 const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1",
@@ -149,7 +154,7 @@ async function main() {
       ["ws-race-courtesy", 0], ["ws-race-prepare", 0],
       ["ws-race-concurrent", 0], ["ws-segregated", 15427],
       ["ws-segregated-rollback", 9], ["ws-segregated-diverged", 10],
-      ["ws-segregated-new", 0]]) {
+      ["ws-segregated-new", 0], ["ws-v2-transition", 100]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
@@ -464,6 +469,11 @@ async function main() {
       mode: segregatedBalance.sourceMode },
     { balance: 15427, reserved: 19, spendable: 0,
       legacy: 15427, mode: "ACTIVE_SEGREGATED" });
+    const noCurrentCycle = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-segregated", operationId: "before-courtesy",
+      destinationId: "destination-a" });
+    assert.equal(noCurrentCycle.ok, false,
+      "historical segregated credit cannot fund a direct send");
 
     const segregatedCourtesy = await insertCycle(admin, {
       workspace: "ws-segregated", value: 4000, origin: "admin_courtesy",
@@ -478,6 +488,26 @@ async function main() {
       spendable: segregatedBalance.spendable,
       legacy: segregatedBalance.legacySegregated },
     { balance: 19427, reserved: 19, spendable: 4000, legacy: 15427 });
+
+    const directArgs = { pool, workspaceId: "ws-segregated",
+      operationId: "extension-direct-once", destinationId: "destination-a" };
+    const directRace = await Promise.all(Array.from({ length: 4 }, () =>
+      manualCredits.reservarCreditoManualUniversal(directArgs)));
+    assert.equal(directRace.filter(item => item.ok && !item.duplicate).length, 1);
+    assert.equal(directRace.filter(item => item.ok && item.duplicate).length, 3);
+    assert.ok(directRace[0].sourceId || directRace[0].duplicate);
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.equal(segregatedBalance.spendable, 3999);
+    assert.equal(segregatedBalance.legacySegregated, 15427);
+    const directHold = (await admin.query(`SELECT universal_credit_source_id
+      FROM financial_credit_ledger WHERE idempotency_key=$1`,
+    [directRace[0].idempotencyKey])).rows[0];
+    assert.ok(directHold.universal_credit_source_id);
+    assert.equal((await manualCredits.liberarCreditoManualUniversal({
+      pool, reserva: directRace[0] })).released, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" })).spendable, 4000);
 
     await enqueueOne(admin, pool, "ws-segregated", "new-courtesy", 70);
     const segregatedCurrent = await claimAndStart(pool, "ws-segregated");
@@ -558,6 +588,29 @@ async function main() {
     await credits.applyFinancialLedger({ pool, ledgerId: newCourtesy });
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-segregated-new" })).spendable, 100);
+    const directConfirmed = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-segregated-new", operationId: "manual-ack",
+      destinationId: "destination-one" });
+    assert.equal(directConfirmed.ok, true);
+    assert.ok(directConfirmed.sourceId);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: directConfirmed })).debited, true);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: directConfirmed })).duplicate, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated-new" })).spendable, 99);
+    const activeManual = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-onboard-paid", operationId: "active-direct",
+      destinationId: "destination-b" });
+    assert.equal(activeManual.ok, true);
+    assert.ok(activeManual.sourceId);
+    assert.equal((await manualCredits.liberarCreditoManualUniversal({
+      pool, reserva: activeManual })).returned, true);
+    const directDebit = (await admin.query(`SELECT amount,universal_credit_source_id
+      FROM financial_credit_ledger WHERE idempotency_key=$1`,
+    [directConfirmed.idempotencyKey])).rows[0];
+    assert.equal(Number(directDebit.amount), -1);
+    assert.equal(directDebit.universal_credit_source_id, directConfirmed.sourceId);
 
     const conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
@@ -605,6 +658,203 @@ async function main() {
       legacy: 15426, mode: "ACTIVE_SEGREGATED" },
     "restart must preserve segregated legacy and eligible new source exactly");
 
+    // The HTTP route used by the official extension must exercise the real
+    // dispatcher and PostgreSQL authority together, without a live provider.
+    const workspaceHttp = "ws-segregated";
+    const memory = new Map();
+    const storageOptions = {
+      now: () => new Date().toISOString(),
+      idFactory: () => "source_http_offer",
+      readClienteJson: (workspace, file, fallback) =>
+        memory.get(`${workspace}:${file}`) ?? fallback,
+      writeClienteJson: (workspace, file, value) => {
+        memory.set(`${workspace}:${file}`, value);
+        return value;
+      }
+    };
+    const offerHttp = manualStorage.criarOfertaManualV2(workspaceHttp, {
+      marketplace: "mercadolivre", titulo: "Synthetic source route",
+      urlOriginal: "https://produto.mercadolivre.com.br/MLB-123",
+      urlAfiliada: "https://meli.la/source-route", precoAtual: 99.9
+    }, storageOptions);
+    let providerCalls = 0;
+    const destination = { id: "wa_pg", nome: "WA synthetic", tipo: "whatsapp",
+      ativo: true, conexaoId: "session_pg", gruposWhatsapp: ["synthetic@g.us"] };
+    const app = express();
+    app.use(express.json());
+    app.use("/manual-v2", criarRotasManualV2({
+      getClienteId: req => req.header("x-cliente-id"),
+      storageOptions, destinosPorCliente: { [workspaceHttp]: [destination] },
+      configsPorCliente: {}, sessoes: { session_pg: {} },
+      statusSessao: { session_pg: "open" },
+      getPlanoUsuario: () => ({ recursos: { whatsapp: true } }),
+      enviarOfertaManualV2, montarMensagemOferta: offer => offer.titulo,
+      enviarWhatsApp: async () => { providerCalls += 1; },
+      reservarCreditoEnvio: entry => manualCredits.reservarCreditoManualUniversal({
+        pool, workspaceId: entry.clienteId, operationId: entry.operationId,
+        destinationId: entry.destinoId }),
+      confirmarCreditoEnvio: reserva =>
+        manualCredits.confirmarCreditoManualUniversal({ pool, reserva }),
+      liberarCreditoEnvio: reserva =>
+        manualCredits.liberarCreditoManualUniversal({ pool, reserva })
+    }));
+    const server = await new Promise(resolve => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    try {
+      const route = `/manual-v2/ofertas/${offerHttp.id}/enviar-agora`;
+      const send = async workspace => {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}${route}`, {
+          method: "POST", headers: { "content-type": "application/json",
+            "x-cliente-id": workspace, "Idempotency-Key": "a".repeat(64) },
+          body: JSON.stringify({ destinosIds: [destination.id] })
+        });
+        return { status: response.status, body: await response.json() };
+      };
+      const first = await send(workspaceHttp);
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      assert.equal(first.body.envio.creditosDebitados, 1);
+      assert.equal(providerCalls, 1);
+      assert.equal((await credits.readBalance({ pool,
+        workspaceId: workspaceHttp })).spendable, 3999);
+      const retry = await send(workspaceHttp);
+      assert.equal(retry.body.idempotencyReplayed, true);
+      assert.equal(providerCalls, 1, "HTTP retry cannot send twice");
+      const other = await send("ws-onboard-paid");
+      assert.equal(other.status, 404, "other workspace cannot access the offer");
+      assert.equal(providerCalls, 1);
+      const ledgerRoute = (await admin.query(`SELECT universal_credit_source_id,
+          universal_movement_type FROM financial_credit_ledger
+        WHERE cliente_id=$1 AND universal_movement_type='TARGET_DEBIT'
+        ORDER BY created_at DESC LIMIT 1`, [workspaceHttp])).rows[0];
+      assert.ok(ledgerRoute.universal_credit_source_id,
+        "HTTP debit must retain the original source");
+      assert.equal(ledgerRoute.universal_movement_type, "TARGET_DEBIT");
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+
+    // Distinct operations must compete for the same source balance, even
+    // when the caller retries concurrently from different destinations.
+    await credits.prepareRegistrationOpening({ pool,
+      workspaceId: "ws-ten-contenders", openingBalance: 0, planId: "ultimate" });
+    await credits.reconcileRegistrationOpening({ pool,
+      workspaceId: "ws-ten-contenders", userExists: true });
+    const oneCredit = await insertCycle(admin, {
+      workspace: "ws-ten-contenders", value: 1,
+      origin: "financial_event_v1", suffix: "ten-contenders" });
+    await credits.applyFinancialLedger({ pool, ledgerId: oneCredit });
+    const contenders = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-ten-contenders", operationId: `offer-${index}`,
+        destinationId: `destination-${index}` })));
+    assert.equal(contenders.filter(item => item.ok && !item.duplicate).length, 1);
+    assert.equal(contenders.filter(item => !item.ok).length, 9);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" })).spendable, 0);
+    const winner = contenders.find(item => item.ok);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: winner })).debited, true);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: winner })).duplicate, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" })).balance, 0);
+    const contenderNextCycle = await insertCycle(admin, {
+      workspace: "ws-ten-contenders", value: 2,
+      origin: "admin_courtesy", suffix: "concurrent-next-cycle" });
+    const mixed = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: contenderNextCycle }),
+      credits.addAdminBalance({ pool, workspaceId: "ws-ten-contenders",
+        amount: 3, idempotencyKey: "concurrent-admin-topup",
+        operatorId: "synthetic-admin" }),
+      ...Array.from({ length: 10 }, (_, index) =>
+        manualCredits.reservarCreditoManualUniversal({ pool,
+          workspaceId: "ws-ten-contenders", operationId: `mixed-${index}`,
+          destinationId: `destination-${index}` }))
+    ]);
+    assert.equal(mixed[0].ok, true);
+    assert.equal(mixed[1].ok, true);
+    const mixedHolds = mixed.slice(2).filter(item => item.ok);
+    assert.ok(mixedHolds.length <= 5,
+      "concurrent sends cannot reserve more than the new cycle and top-up");
+    const mixedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" });
+    assert.equal(mixedBalance.balance, 5);
+    assert.equal(mixedBalance.reserved, mixedHolds.length);
+    assert.equal(mixedBalance.spendable, 5 - mixedHolds.length);
+
+    // Full migration path: a historical top-up proves that a grant happened,
+    // not how much remains after unattributed legacy debits. Preserve it in
+    // unclassified history until a new source is legitimately granted.
+    await enqueueOne(admin, pool, "ws-v2-transition", "legacy-destination", 80);
+    const historicalClaim = await claimAndStart(pool, "ws-v2-transition");
+    await makeAmbiguous(admin, pool, "ws-v2-transition", historicalClaim);
+    const historicalTopup = await credits.addAdminBalance({ pool,
+      workspaceId: "ws-v2-transition", amount: 30,
+      idempotencyKey: "v2-historical-topup", operatorId: "fixture" });
+    assert.equal(historicalTopup.ok, true);
+    const transitionShadow = (await prepareShadow(pool,
+      "ws-v2-transition")).shadow;
+    assert.equal(transitionShadow.reserved, 1);
+    assert.equal(transitionShadow.unclassifiedAvailable, 129);
+    await sources.activateWorkspaceSegregated({ pool,
+      workspaceId: "ws-v2-transition",
+      baselineHash: transitionShadow.baselineHash });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).spendable, 0);
+    const currentCourtesy = await insertCycle(admin, {
+      workspace: "ws-v2-transition", value: 4,
+      origin: "admin_courtesy", suffix: "v2-current" });
+    const [courtesyFirst, courtesyRetry, newTopup] = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: currentCourtesy }),
+      credits.applyFinancialLedger({ pool, ledgerId: currentCourtesy }),
+      credits.addAdminBalance({ pool, workspaceId: "ws-v2-transition",
+        amount: 2, idempotencyKey: "v2-current-topup",
+        operatorId: "fixture" })
+    ]);
+    assert.equal([courtesyFirst, courtesyRetry]
+      .filter(item => item.applied === true).length, 1);
+    assert.equal(newTopup.ok, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).spendable, 6);
+    const migratedContenders = await Promise.all(Array.from({ length: 10 },
+      (_, index) => manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-v2-transition", operationId: `new-offer-${index}`,
+        destinationId: `new-destination-${index}` })));
+    const migratedHolds = migratedContenders.filter(item => item.ok);
+    assert.ok(migratedHolds.length > 0 && migratedHolds.length <= 6);
+    assert.ok(migratedHolds.every(item => item.sourceId));
+    const migratedAck = await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: migratedHolds[0] });
+    assert.equal(migratedAck.debited, true);
+    const transitionOldAck = await durableAck(admin, historicalClaim,
+      "provider-v2-historical-ack");
+    await queue.confirmSend({ pool, destinationId: historicalClaim.id,
+      leaseToken: historicalClaim.leaseToken, ...transitionOldAck });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-v2-transition" })).legacySegregated, 129);
+    await assert.rejects(sources.rollbackSegregatedWorkspace({ pool,
+      workspaceId: "ws-v2-transition",
+      baselineHash: transitionShadow.baselineHash }),
+    /rollback_balance_changed|rollback_movements_exist/);
+    const pixWhileSending = await insertCycle(admin, {
+      workspace: "ws-v2-transition", value: 3,
+      origin: "financial_event_v1", suffix: "v2-pix" });
+    const [pixResult, concurrentSend] = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: pixWhileSending }),
+      manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-v2-transition", operationId: "pix-race-offer",
+        destinationId: "pix-race-destination" })
+    ]);
+    assert.equal(pixResult.ok, true);
+    assert.ok(concurrentSend.ok === true ||
+      concurrentSend.reason === "sem_creditos");
+    const v2Conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
+      FROM engine_universal_credit_sources
+      WHERE workspace_id='ws-v2-transition'
+        AND granted<>available+reserved+consumed+expired`)).rows[0];
+    assert.equal(v2Conservation.bad, 0);
+
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
       sourceScopedHolds: true,
       oldEscrowPreserved: true,
@@ -632,7 +882,8 @@ async function main() {
       segregatedRollbackBeforeMovement: true,
       segregatedPixAndCourtesyIdempotent: true,
       restartSafe: true,
-      multiworkspaceIsolated: true
+      multiworkspaceIsolated: true,
+      fullLegacyToSegregatedFlow: true
     }));
   } finally {
     if (pool) await pool.end().catch(() => {});

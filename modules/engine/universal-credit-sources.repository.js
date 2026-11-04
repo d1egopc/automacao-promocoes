@@ -137,10 +137,26 @@ async function totalsTx(client, { epoch, workspaceId }) {
     FROM engine_universal_credit_holds
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
   [epoch, workspaceId])).rows[0];
+  // Manual V2 and Mensageiro V4 reserve in the same ledger/source authority,
+  // but do not create engine_universal_credit_holds rows. Include their live
+  // durable holds when reconciling a later Pix/courtesy/top-up movement.
+  const manual = (await client.query(`SELECT
+      COUNT(*)::int AS held,
+      COUNT(*) FILTER (WHERE universal_credit_source_id IS NULL)::int
+        AS held_without_source
+    FROM financial_credit_ledger
+    WHERE operation_epoch_started_at=$1 AND cliente_id=$2
+      AND amount=0 AND projection_status='ignored'
+      AND metadata->>'authority'='postgresql_universal'
+      AND metadata->>'reservationState'='held'
+      AND metadata->>'origin' IN ('manual_v2','mensageiro_v4')`,
+  [epoch, workspaceId])).rows[0];
   return { backed: Number(sources.backed), reserved: Number(sources.reserved),
     unclassifiedAvailable: Number(sources.unclassified_available),
     unclassifiedSources: Number(sources.unclassified_sources),
-    held: Number(holds.held), heldWithoutSource: Number(holds.held_without_source) };
+    held: Number(holds.held) + Number(manual.held),
+    heldWithoutSource: Number(holds.held_without_source) +
+      Number(manual.held_without_source) };
 }
 
 async function legacySnapshotTx(client, { epoch, workspaceId, lock = false }) {

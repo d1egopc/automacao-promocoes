@@ -5,6 +5,7 @@
 // A linha amount=0/projection_status=ignored e somente uma reserva duravel; ela
 // vira TARGET_DEBIT apenas depois de confirmacao factual do transporte.
 const { createHash } = require("node:crypto");
+const sourceCredits = require("../engine/universal-credit-sources.repository");
 
 function texto(valor) { return String(valor ?? "").trim(); }
 
@@ -74,6 +75,10 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
   const id = identidade({ workspaceId, operationId, destinationId, origin });
   return transacao(pool, async (client) => {
     const epoch = await estadoUniversal(client);
+    const sourceMode = await sourceCredits.workspaceModeTx(client, {
+      epoch, workspaceId: id.workspaceId, lock: true
+    });
+    const sourced = sourceCredits.sourceAuthorityActive(sourceMode?.mode);
     const saldo = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
@@ -81,11 +86,15 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
     if (!saldo) throw new Error("universal_credit_opening_missing");
 
     const existente = (await client.query(`SELECT cliente_id,amount,
-        operation_epoch_started_at,universal_movement_type,metadata
+        operation_epoch_started_at,universal_movement_type,metadata,
+        universal_credit_source_id
       FROM financial_credit_ledger WHERE idempotency_key=$1 FOR UPDATE`,
     [id.idempotencyKey])).rows[0];
     validarReservaExistente(existente, id, epoch);
     if (existente) {
+      if (sourced && !existente.universal_credit_source_id) {
+        throw new Error("manual_universal_credit_source_missing");
+      }
       const estado = texto(existente.metadata?.reservationState);
       if (existente.universal_movement_type === "TARGET_DEBIT" && Number(existente.amount) === -1) {
         return { ok: true, duplicate: true, consumed: true, epoch, ...id };
@@ -93,8 +102,30 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
       if (estado === "held") return { ok: true, duplicate: true, held: true, epoch, ...id };
       return { ok: false, reason: "manual_credit_reservation_terminal", epoch, ...id };
     }
-    if (Number(saldo.balance) - Number(saldo.reserved) < 1) {
+    if (!sourced && Number(saldo.balance) - Number(saldo.reserved) < 1) {
       return { ok: false, reason: "sem_creditos", epoch, ...id };
+    }
+    let sourceId = null;
+    if (sourced) {
+      const entitlement = (await client.query(`SELECT 1 FROM engine_universal_credit_sources
+        WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+          AND source_kind IN ('cycle','opening') AND state='active' AND granted>0
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp()) LIMIT 1`,
+      [epoch, id.workspaceId])).rows[0];
+      if (!entitlement) return { ok: false, reason: "sem_creditos", epoch, ...id };
+      const source = (await client.query(`SELECT id FROM engine_universal_credit_sources
+        WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+          AND state='active' AND available>0
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())
+        ORDER BY cycle_end ASC NULLS LAST,created_at,id
+        LIMIT 1 FOR UPDATE SKIP LOCKED`, [epoch, id.workspaceId])).rows[0];
+      if (!source) return { ok: false, reason: "sem_creditos", epoch, ...id };
+      sourceId = source.id;
+      await client.query(`UPDATE engine_universal_credit_sources SET
+        available=available-1,reserved=reserved+1,revision=revision+1,
+        updated_at=clock_timestamp() WHERE id=$1`, [sourceId]);
     }
 
     const metadata = {
@@ -107,15 +138,15 @@ async function reservarCreditoManualUniversal({ pool, workspaceId, operationId, 
     };
     await client.query(`INSERT INTO financial_credit_ledger
       (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
-       projection_status,metadata,operation_epoch_started_at)
+       projection_status,metadata,operation_epoch_started_at,universal_credit_source_id)
       VALUES ($1,'adjustment',0,'subtract',$5,$2,
-        'ignored',$3::jsonb,$4)`,
-    [id.workspaceId, id.idempotencyKey, JSON.stringify(metadata), epoch, `${id.origin}_credit_hold`]);
+        'ignored',$3::jsonb,$4,$6)`,
+    [id.workspaceId, id.idempotencyKey, JSON.stringify(metadata), epoch, `${id.origin}_credit_hold`, sourceId]);
     await client.query(`UPDATE engine_universal_credit_balances
       SET reserved=reserved+1,revision=revision+1,updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
     [epoch, id.workspaceId]);
-    return { ok: true, held: true, duplicate: false, epoch, ...id };
+    return { ok: true, held: true, duplicate: false, epoch, sourceId, ...id };
   });
 }
 
@@ -123,12 +154,17 @@ async function confirmarCreditoManualUniversal({ pool, reserva }) {
   const id = identidade(reserva || {});
   return transacao(pool, async (client) => {
     const epoch = await estadoUniversal(client);
+    const sourceMode = await sourceCredits.workspaceModeTx(client, {
+      epoch, workspaceId: id.workspaceId, lock: true
+    });
+    const sourced = sourceCredits.sourceAuthorityActive(sourceMode?.mode);
     const saldo = (await client.query(`SELECT balance,reserved,revision
       FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
     [epoch, id.workspaceId])).rows[0];
     const movimento = (await client.query(`SELECT cliente_id,amount,
-        operation_epoch_started_at,universal_movement_type,metadata
+        operation_epoch_started_at,universal_movement_type,metadata,
+        universal_credit_source_id
       FROM financial_credit_ledger WHERE idempotency_key=$1 FOR UPDATE`,
     [id.idempotencyKey])).rows[0];
     validarReservaExistente(movimento, id, epoch);
@@ -138,6 +174,18 @@ async function confirmarCreditoManualUniversal({ pool, reserva }) {
     if (!saldo || !movimento || texto(movimento.metadata?.reservationState) !== "held" ||
         Number(saldo.balance) < 1 || Number(saldo.reserved) < 1) {
       throw new Error("manual_universal_credit_confirmed_hold_missing");
+    }
+    if (sourced) {
+      if (!movimento.universal_credit_source_id) throw new Error("manual_universal_credit_source_missing");
+      const source = (await client.query(`SELECT reserved FROM engine_universal_credit_sources
+        WHERE id=$1 AND operation_epoch_started_at=$2 AND workspace_id=$3 FOR UPDATE`,
+      [movimento.universal_credit_source_id, epoch, id.workspaceId])).rows[0];
+      if (!source || Number(source.reserved) < 1) {
+        throw new Error("manual_universal_credit_source_hold_missing");
+      }
+      await client.query(`UPDATE engine_universal_credit_sources SET
+        reserved=reserved-1,consumed=consumed+1,revision=revision+1,
+        updated_at=clock_timestamp() WHERE id=$1`, [movimento.universal_credit_source_id]);
     }
     const revision = Number(saldo.revision) + 1;
     const balanceAfter = Number(saldo.balance) - 1;
@@ -161,11 +209,16 @@ async function liberarCreditoManualUniversal({ pool, reserva }) {
   const id = identidade(reserva || {});
   return transacao(pool, async (client) => {
     const epoch = await estadoUniversal(client);
-    const saldo = (await client.query(`SELECT reserved FROM engine_universal_credit_balances
+    const sourceMode = await sourceCredits.workspaceModeTx(client, {
+      epoch, workspaceId: id.workspaceId, lock: true
+    });
+    const sourced = sourceCredits.sourceAuthorityActive(sourceMode?.mode);
+    const saldo = (await client.query(`SELECT balance,reserved,revision FROM engine_universal_credit_balances
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
     [epoch, id.workspaceId])).rows[0];
     const movimento = (await client.query(`SELECT cliente_id,amount,
-        operation_epoch_started_at,universal_movement_type,metadata
+        operation_epoch_started_at,universal_movement_type,metadata,
+        universal_credit_source_id
       FROM financial_credit_ledger WHERE idempotency_key=$1 FOR UPDATE`,
     [id.idempotencyKey])).rows[0];
     validarReservaExistente(movimento, id, epoch);
@@ -178,14 +231,42 @@ async function liberarCreditoManualUniversal({ pool, reserva }) {
     if (!saldo || texto(movimento.metadata?.reservationState) !== "held" || Number(saldo.reserved) < 1) {
       throw new Error("manual_universal_credit_release_conflict");
     }
+    let returnable = true;
+    if (sourced) {
+      if (!movimento.universal_credit_source_id) throw new Error("manual_universal_credit_source_missing");
+      const source = (await client.query(`SELECT state,cycle_end,reserved,
+          (cycle_end IS NULL OR cycle_end>clock_timestamp()) AS cycle_current
+        FROM engine_universal_credit_sources WHERE id=$1
+          AND operation_epoch_started_at=$2 AND workspace_id=$3 FOR UPDATE`,
+      [movimento.universal_credit_source_id, epoch, id.workspaceId])).rows[0];
+      if (!source || Number(source.reserved) < 1) {
+        throw new Error("manual_universal_credit_source_hold_missing");
+      }
+      returnable = source.state === "active" && source.cycle_current === true;
+      await client.query(`UPDATE engine_universal_credit_sources SET
+        reserved=reserved-1,${returnable ? "available=available+1" : "expired=expired+1"},
+        revision=revision+1,updated_at=clock_timestamp() WHERE id=$1`,
+      [movimento.universal_credit_source_id]);
+    }
+    const revision = Number(saldo.revision) + 1;
     await client.query(`UPDATE engine_universal_credit_balances
-      SET reserved=reserved-1,revision=revision+1,updated_at=clock_timestamp()
+      SET balance=balance-$3,reserved=reserved-1,revision=$4,updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
-    [epoch, id.workspaceId]);
-    await client.query(`UPDATE financial_credit_ledger SET
-        metadata=metadata || '{"reservationState":"released"}'::jsonb
-      WHERE idempotency_key=$1`, [id.idempotencyKey]);
-    return { ok: true, released: true };
+    [epoch, id.workspaceId, returnable ? 0 : 1, revision]);
+    if (returnable) {
+      await client.query(`UPDATE financial_credit_ledger SET
+          metadata=metadata || '{"reservationState":"released"}'::jsonb
+        WHERE idempotency_key=$1`, [id.idempotencyKey]);
+    } else {
+      await client.query(`UPDATE financial_credit_ledger SET
+          metadata=metadata || '{"reservationState":"released"}'::jsonb,
+          amount=-1,projection_status='projected',projected_at=clock_timestamp(),
+          universal_movement_type='HOLD_EXPIRED_RELEASE',universal_target_id=$2,
+          universal_balance_revision=$3,universal_balance_after=$4
+        WHERE idempotency_key=$1`,
+      [id.idempotencyKey, id.targetId, revision, Number(saldo.balance) - 1]);
+    }
+    return { ok: true, released: true, returned: returnable };
   });
 }
 
