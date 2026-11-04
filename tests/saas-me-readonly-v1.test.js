@@ -309,7 +309,7 @@ function assertNoSecret(text, secrets) {
   } finally {
     await stopProcess(proc);
     if (pool) await pool.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`)
+    await adminPool.query(`DROP DATABASE IF EXISTS "${database}"`)
       .catch(() => {});
     await adminPool.end().catch(() => {});
     fs.rmSync(dataDir, { recursive: true, force: true });
