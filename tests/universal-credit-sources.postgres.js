@@ -15,6 +15,10 @@ const credits = require("../modules/engine/universal-credits.repository");
 const sources = require("../modules/engine/universal-credit-sources.repository");
 const queue = require("../modules/engine/universal-queue.repository");
 const manualCredits = require("../modules/manual-v2/manual-universal-credit");
+const express = require("express");
+const manualStorage = require("../modules/manual-v2/manual-offers.storage");
+const criarRotasManualV2 = require("../modules/manual-v2/manual-offers.routes");
+const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
 
 const root = path.join(__dirname, "..");
 const config = { host: "127.0.0.1",
@@ -653,6 +657,82 @@ async function main() {
     { balance: 19426, reserved: 17, spendable: 4000,
       legacy: 15426, mode: "ACTIVE_SEGREGATED" },
     "restart must preserve segregated legacy and eligible new source exactly");
+
+    // The HTTP route used by the official extension must exercise the real
+    // dispatcher and PostgreSQL authority together, without a live provider.
+    const workspaceHttp = "ws-segregated";
+    const memory = new Map();
+    const storageOptions = {
+      now: () => new Date().toISOString(),
+      idFactory: () => "source_http_offer",
+      readClienteJson: (workspace, file, fallback) =>
+        memory.get(`${workspace}:${file}`) ?? fallback,
+      writeClienteJson: (workspace, file, value) => {
+        memory.set(`${workspace}:${file}`, value);
+        return value;
+      }
+    };
+    const offerHttp = manualStorage.criarOfertaManualV2(workspaceHttp, {
+      marketplace: "mercadolivre", titulo: "Synthetic source route",
+      urlOriginal: "https://produto.mercadolivre.com.br/MLB-123",
+      urlAfiliada: "https://meli.la/source-route", precoAtual: 99.9
+    }, storageOptions);
+    let providerCalls = 0;
+    const destination = { id: "wa_pg", nome: "WA synthetic", tipo: "whatsapp",
+      ativo: true, conexaoId: "session_pg", gruposWhatsapp: ["synthetic@g.us"] };
+    const app = express();
+    app.use(express.json());
+    app.use("/manual-v2", criarRotasManualV2({
+      getClienteId: req => req.header("x-cliente-id"),
+      storageOptions, destinosPorCliente: { [workspaceHttp]: [destination] },
+      configsPorCliente: {}, sessoes: { session_pg: {} },
+      statusSessao: { session_pg: "open" },
+      getPlanoUsuario: () => ({ recursos: { whatsapp: true } }),
+      enviarOfertaManualV2, montarMensagemOferta: offer => offer.titulo,
+      enviarWhatsApp: async () => { providerCalls += 1; },
+      reservarCreditoEnvio: entry => manualCredits.reservarCreditoManualUniversal({
+        pool, workspaceId: entry.clienteId, operationId: entry.operationId,
+        destinationId: entry.destinoId }),
+      confirmarCreditoEnvio: reserva =>
+        manualCredits.confirmarCreditoManualUniversal({ pool, reserva }),
+      liberarCreditoEnvio: reserva =>
+        manualCredits.liberarCreditoManualUniversal({ pool, reserva })
+    }));
+    const server = await new Promise(resolve => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    try {
+      const route = `/manual-v2/ofertas/${offerHttp.id}/enviar-agora`;
+      const send = async workspace => {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}${route}`, {
+          method: "POST", headers: { "content-type": "application/json",
+            "x-cliente-id": workspace, "Idempotency-Key": "a".repeat(64) },
+          body: JSON.stringify({ destinosIds: [destination.id] })
+        });
+        return { status: response.status, body: await response.json() };
+      };
+      const first = await send(workspaceHttp);
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      assert.equal(first.body.envio.creditosDebitados, 1);
+      assert.equal(providerCalls, 1);
+      assert.equal((await credits.readBalance({ pool,
+        workspaceId: workspaceHttp })).spendable, 3999);
+      const retry = await send(workspaceHttp);
+      assert.equal(retry.body.idempotencyReplayed, true);
+      assert.equal(providerCalls, 1, "HTTP retry cannot send twice");
+      const other = await send("ws-onboard-paid");
+      assert.equal(other.status, 404, "other workspace cannot access the offer");
+      assert.equal(providerCalls, 1);
+      const ledgerRoute = (await admin.query(`SELECT universal_credit_source_id,
+          universal_movement_type FROM financial_credit_ledger
+        WHERE cliente_id=$1 AND universal_movement_type='TARGET_DEBIT'
+        ORDER BY created_at DESC LIMIT 1`, [workspaceHttp])).rows[0];
+      assert.ok(ledgerRoute.universal_credit_source_id,
+        "HTTP debit must retain the original source");
+      assert.equal(ledgerRoute.universal_movement_type, "TARGET_DEBIT");
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
 
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
       sourceScopedHolds: true,
