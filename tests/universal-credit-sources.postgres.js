@@ -156,6 +156,52 @@ async function main() {
     await admin.query(`UPDATE engine_operation_state SET mode='UNIVERSAL',
       operation_epoch_started_at=$1 WHERE id=1`, [epoch]);
 
+    // New SaaS workspaces have no historical ambiguity: registration opens
+    // source authority atomically and never requires a manual SHADOW cutover.
+    for (const [workspace, opening, plan] of [["ws-onboard-free", 12, "free-beta"],
+      ["ws-onboard-paid", 0, "ultimate"]]) {
+      await credits.prepareRegistrationOpening({ pool, workspaceId: workspace,
+        openingBalance: opening, planId: plan });
+      await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
+        userExists: true });
+      await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
+        userExists: true });
+      const state = (await admin.query(`SELECT mode FROM
+        engine_universal_credit_source_workspaces
+        WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+      [epoch, workspace])).rows[0];
+      assert.equal(state.mode, "ACTIVE");
+      assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n FROM
+        engine_universal_credit_sources WHERE operation_epoch_started_at=$1
+          AND workspace_id=$2 AND source_kind='opening'`,
+      [epoch, workspace])).rows[0].n), 1,
+      "registration retry must not duplicate the opening source");
+    }
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-free" })).available, 12);
+    await enqueueOne(admin, pool, "ws-onboard-free", "onboard-free", 1);
+    const onboardClaim = await claimAndStart(pool, "ws-onboard-free");
+    assert.ok(onboardClaim.id, "new workspace must reach source-scoped hold");
+
+    await credits.addAdminBalance({ pool, workspaceId: "ws-onboard-paid",
+      amount: 25, idempotencyKey: "onboard-paid-admin-only",
+      operatorId: "fixture" });
+    let onboardPaid = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-paid" });
+    assert.equal(onboardPaid.aggregateAvailable, 25);
+    assert.equal(onboardPaid.available, 0,
+      "zero opening plus admin top-up does not create plan entitlement");
+    const onboardPix = await insertCycle(admin, { workspace: "ws-onboard-paid",
+      value: 40, origin: "financial_event_v1", suffix: "onboard-pix" });
+    await credits.applyFinancialLedger({ pool, ledgerId: onboardPix });
+    onboardPaid = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-paid" });
+    assert.equal(onboardPaid.available, 65,
+      "valid Pix entitlement makes its cycle and preserved admin source eligible");
+    assert.equal((await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-other" })).mode, "LEGACY",
+    "an existing unmigrated workspace remains independently legacy");
+
     const expiredCourtesy = await insertCycle(admin, { workspace: "ws-cycle",
       value: 100, origin: "admin_courtesy", suffix: "expired-courtesy",
       startOffsetDays: -60 });
@@ -576,6 +622,10 @@ async function main() {
       nineteenSyntheticHoldsPreserved: true,
       paymentAndCourtesyRaceBlockCutover: true,
       preActiveRollbackSafe: true,
+      newWorkspaceAutomaticActive: true,
+      newWorkspaceRegistrationIdempotent: true,
+      legacyAndActiveCoexist: true,
+      zeroOpeningAdminFailClosed: true,
       segregatedLegacyNonspendable: true,
       segregatedNewCycleSpendable: true,
       segregatedLateResolutionSafe: true,

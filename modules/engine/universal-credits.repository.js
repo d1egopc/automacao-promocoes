@@ -44,7 +44,7 @@ async function transaction(pool, action) {
 }
 
 async function openBalance({ pool, workspaceId, operationEpochStartedAt,
-  openingBalance, sourceHash }) {
+  openingBalance, sourceHash, activateSources = false }) {
   const workspace = text(workspaceId);
   const epoch = epochIso(operationEpochStartedAt);
   const amount = integer(openingBalance);
@@ -83,7 +83,8 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
     if (!row || Number(row.opening_balance) !== amount || row.source_hash !== hash) {
       throw new Error("universal_credit_opening_conflict");
     }
-    const ledger = await client.query(`SELECT amount,metadata->>'sourceHash' AS source_hash
+    const ledger = await client.query(`SELECT id,amount,
+        metadata->>'sourceHash' AS source_hash,universal_credit_source_id
       FROM financial_credit_ledger WHERE operation_epoch_started_at=$1
         AND cliente_id=$2 AND universal_movement_type='OPENING_BALANCE'`,
     [epoch, workspace]);
@@ -91,8 +92,17 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
         ledger.rows[0].source_hash !== hash) {
       throw new Error("universal_credit_opening_ledger_missing_or_conflicting");
     }
+    let sourceActivation = null;
+    if (activateSources === true) {
+      sourceActivation = await sourceCredits.activateNewWorkspaceTx(client, {
+        epoch, workspaceId: workspace, openingBalance: amount,
+        sourceHash: hash, ledgerId: ledger.rows[0].id,
+        allowCreate: inserted.rowCount === 1
+      });
+    }
     return { ok: true, created: inserted.rowCount === 1,
-      balance: Number(row.balance), reserved: Number(row.reserved) };
+      balance: Number(row.balance), reserved: Number(row.reserved),
+      sourceMode: sourceActivation?.mode || null };
   });
 }
 
@@ -146,7 +156,8 @@ async function reconcileRegistrationOpening({ pool, workspaceId,
   if (userExists !== true) return { ok: false, reason: "registration_not_persisted" };
   await openBalance({ pool, workspaceId: workspace,
     operationEpochStartedAt: intent.operation_epoch_started_at,
-    openingBalance: Number(intent.opening_balance), sourceHash: intent.source_hash });
+    openingBalance: Number(intent.opening_balance), sourceHash: intent.source_hash,
+    activateSources: true });
   await pool.query(`UPDATE engine_universal_credit_opening_intents
     SET state='completed',completed_at=clock_timestamp()
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND state='pending'`,
@@ -255,6 +266,7 @@ async function readBalance({ pool, workspaceId }) {
           AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),0)
           AS active_available,
         COALESCE(BOOL_OR(source_kind IN ('cycle','opening') AND state='active'
+          AND granted>0
           AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
           AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),false)
           AS has_current_entitlement,

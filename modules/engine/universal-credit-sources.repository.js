@@ -49,6 +49,77 @@ async function workspaceModeTx(client, { epoch, workspaceId, lock = false }) {
   return result.rows[0] || null;
 }
 
+// A newly registered workspace has no historical value to classify. It may
+// enter source authority atomically with its opening ledger row, without a
+// SHADOW stage. Existing balances without source state are legacy and are
+// deliberately rejected here so onboarding can never become a bulk cutover.
+async function activateNewWorkspaceTx(client, { epoch, workspaceId,
+  openingBalance, sourceHash, ledgerId, allowCreate = false }) {
+  const workspace = text(workspaceId);
+  const amount = Number(openingBalance);
+  const hash = text(sourceHash);
+  const ledger = text(ledgerId);
+  if (!workspace || !Number.isSafeInteger(amount) || amount < 0 ||
+      !/^[0-9a-f]{64}$/.test(hash) || !ledger) {
+    throw new Error("universal_credit_source_onboarding_identity_invalid");
+  }
+  const existingMode = await workspaceModeTx(client, { epoch,
+    workspaceId: workspace, lock: true });
+  if (existingMode) {
+    const existingSource = (await client.query(`SELECT id,granted,available,
+        reserved,consumed,expired,state,ledger_id FROM
+      engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+        AND source_key=$3 FOR UPDATE`,
+    [epoch, workspace, `opening:${ledger}`])).rows[0];
+    if (existingMode.mode !== "ACTIVE" || !existingSource ||
+        String(existingSource.ledger_id) !== ledger ||
+        Number(existingSource.granted) !== amount) {
+      throw new Error("universal_credit_source_onboarding_conflict");
+    }
+    return { ok: true, duplicate: true, mode: "ACTIVE",
+      sourceId: existingSource.id };
+  }
+  if (allowCreate !== true) {
+    throw new Error("universal_credit_source_onboarding_legacy_conflict");
+  }
+  const balance = (await client.query(`SELECT opening_balance,balance,reserved,
+      revision,source_hash FROM engine_universal_credit_balances
+    WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
+  [epoch, workspace])).rows[0];
+  const holds = (await client.query(`SELECT COUNT(*)::int AS n FROM
+    engine_universal_credit_holds WHERE operation_epoch_started_at=$1
+      AND workspace_id=$2`, [epoch, workspace])).rows[0];
+  if (!balance || Number(balance.opening_balance) !== amount ||
+      Number(balance.balance) !== amount || Number(balance.reserved) !== 0 ||
+      Number(balance.revision) !== 0 || balance.source_hash !== hash ||
+      Number(holds.n) !== 0) {
+    throw new Error("universal_credit_source_onboarding_not_pristine");
+  }
+  const source = (await client.query(`INSERT INTO engine_universal_credit_sources
+    (operation_epoch_started_at,workspace_id,source_key,ledger_id,source_kind,
+     state,granted,available,reserved,consumed,expired,metadata)
+    VALUES ($1,$2,$3,$4,'opening','active',$5,$5,0,0,0,$6::jsonb)
+    RETURNING id`, [epoch, workspace, `opening:${ledger}`, ledger, amount,
+    JSON.stringify({ authority: "financial_credit_ledger",
+      origin: "workspace_registration", sourceHash: hash })])).rows[0];
+  const baselineHash = stableHash(["new_workspace", epoch, workspace, amount,
+    hash, ledger]);
+  await client.query(`INSERT INTO engine_universal_credit_source_workspaces
+    (operation_epoch_started_at,workspace_id,mode,baseline_hash,
+     baseline_balance,baseline_reserved,activated_at)
+    VALUES ($1,$2,'ACTIVE',$3,$4,0,clock_timestamp())`,
+  [epoch, workspace, baselineHash, amount]);
+  const linked = await client.query(`UPDATE financial_credit_ledger
+    SET universal_credit_source_id=$2 WHERE id=$1
+      AND universal_credit_source_id IS NULL`, [ledger, source.id]);
+  if (linked.rowCount !== 1) {
+    throw new Error("universal_credit_source_onboarding_ledger_conflict");
+  }
+  return { ok: true, duplicate: false, mode: "ACTIVE",
+    sourceId: source.id };
+}
+
 async function totalsTx(client, { epoch, workspaceId }) {
   const sources = (await client.query(`SELECT
       COALESCE(SUM(available+reserved),0)::int AS backed,
@@ -735,7 +806,7 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
   const entitlement = (await client.query(`SELECT 1 FROM
     engine_universal_credit_sources
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2
-      AND source_kind IN ('cycle','opening') AND state='active'
+      AND source_kind IN ('cycle','opening') AND state='active' AND granted>0
       AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
       AND (cycle_end IS NULL OR cycle_end>clock_timestamp())
     LIMIT 1`, [epoch, workspaceId])).rows[0];
@@ -905,7 +976,8 @@ async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
     legacyPreserved: legacyEscrow, sourceId: hold.source_id };
 }
 
-module.exports = { workspaceModeTx, sourceAuthorityActive, totalsTx, legacySnapshotTx,
+module.exports = { workspaceModeTx, sourceAuthorityActive,
+  activateNewWorkspaceTx, totalsTx, legacySnapshotTx,
   ledgerProvenanceTx, inspectShadowWorkspace, shadowComparisonTx,
   prepareShadowWorkspace, classifyLegacyAvailable, activateWorkspaceSources,
   activateWorkspaceSegregated, rollbackShadowWorkspace,

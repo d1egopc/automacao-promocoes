@@ -111,6 +111,30 @@ This transition is not a provenance classification: it does not call the
 historical value administrative, expired or current, and it does not authorize
 its use. The unresolved value is retained for a future accounting decision.
 
+### SaaS onboarding and coexistence
+
+A workspace created after this model is published has no historical ambiguity.
+Its registration intent, aggregate opening, opening ledger row, opening source
+and `ACTIVE` workspace state are created atomically. A registration retry
+reuses the same ledger/source identity. It never enters SHADOW and requires no
+manual activation. A zero opening creates no entitlement; a later Pix,
+courtesy or other authorized financial movement must create the eligible source
+before sending is possible.
+
+This automatic path is restricted to a balance inserted by that same new-user
+transaction, with revision zero, no reservation and no hold. If a balance
+already exists without source state it is historical `LEGACY`; onboarding fails
+closed instead of converting it. Existing workspaces therefore migrate one at
+a time through `LEGACY -> SHADOW -> ACTIVE` or `ACTIVE_SEGREGATED`, while other
+LEGACY and already-active workspaces continue independently.
+
+Operational state is always the left join of current Universal balances with
+`engine_universal_credit_source_workspaces`: no state row is `LEGACY`; explicit
+rows report `SHADOW`, `ACTIVE` or `ACTIVE_SEGREGATED`. Names, customer IDs and
+plan labels do not select a path. After activation, future Pix/courtesy cycles
+and administrative top-ups use source authority automatically; no recurring
+cutover is needed.
+
 Preparation and classification are writes, but are not authority changes. They
 must still be separately authorized and must never be invoked by startup,
 login, `/me`, Executor preflight, payment handling or the courtesy scheduler.
