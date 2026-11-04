@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS engine_universal_credit_sources_spendable_idx
 CREATE TABLE IF NOT EXISTS engine_universal_credit_source_workspaces (
   operation_epoch_started_at timestamptz NOT NULL,
   workspace_id text NOT NULL CHECK (btrim(workspace_id) <> ''),
-  mode text NOT NULL CHECK (mode IN ('SHADOW','ACTIVE')),
+  mode text NOT NULL CHECK (mode IN ('SHADOW','ACTIVE','ACTIVE_SEGREGATED')),
   baseline_hash text NOT NULL CHECK (baseline_hash ~ '^[0-9a-f]{64}$'),
   baseline_balance integer NOT NULL CHECK (baseline_balance >= 0),
   baseline_reserved integer NOT NULL CHECK (baseline_reserved >= 0),
@@ -103,8 +103,26 @@ CREATE TABLE IF NOT EXISTS engine_universal_credit_source_workspaces (
     REFERENCES engine_universal_credit_balances
       (operation_epoch_started_at,workspace_id),
   CHECK ((mode='SHADOW' AND activated_at IS NULL) OR
-    (mode='ACTIVE' AND activated_at IS NOT NULL))
+    (mode IN ('ACTIVE','ACTIVE_SEGREGATED') AND activated_at IS NOT NULL))
 );
+
+-- Existing R1.3 installations already have the table, so CREATE IF NOT EXISTS
+-- cannot widen its checks. Replace only these two authority-state constraints.
+ALTER TABLE engine_universal_credit_source_workspaces
+  DROP CONSTRAINT IF EXISTS engine_universal_credit_source_workspaces_mode_check;
+ALTER TABLE engine_universal_credit_source_workspaces
+  DROP CONSTRAINT IF EXISTS engine_universal_credit_source_workspaces_check;
+ALTER TABLE engine_universal_credit_source_workspaces
+  DROP CONSTRAINT IF EXISTS engine_universal_credit_source_workspaces_mode_r15_check;
+ALTER TABLE engine_universal_credit_source_workspaces
+  DROP CONSTRAINT IF EXISTS engine_universal_credit_source_workspaces_activation_r15_check;
+ALTER TABLE engine_universal_credit_source_workspaces
+  ADD CONSTRAINT engine_universal_credit_source_workspaces_mode_r15_check
+    CHECK (mode IN ('SHADOW','ACTIVE','ACTIVE_SEGREGATED'));
+ALTER TABLE engine_universal_credit_source_workspaces
+  ADD CONSTRAINT engine_universal_credit_source_workspaces_activation_r15_check
+    CHECK ((mode='SHADOW' AND activated_at IS NULL) OR
+      (mode IN ('ACTIVE','ACTIVE_SEGREGATED') AND activated_at IS NOT NULL));
 
 CREATE TABLE IF NOT EXISTS engine_universal_credit_holds (
   operation_epoch_started_at timestamptz NOT NULL,

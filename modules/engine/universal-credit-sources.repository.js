@@ -19,6 +19,9 @@ function stableHash(value) {
 function movementKey(kind, epoch, workspaceId, targetId = "") {
   return `universal:${stableHash([kind, epoch, workspaceId, String(targetId)])}`;
 }
+function sourceAuthorityActive(mode) {
+  return mode === "ACTIVE" || mode === "ACTIVE_SEGREGATED";
+}
 
 async function transaction(pool, action) {
   if (!pool || typeof pool.connect !== "function") {
@@ -431,6 +434,131 @@ async function activateWorkspaceSources({ pool, workspaceId, baselineHash }) {
   });
 }
 
+// Explicit R1.5 transition: legacy value remains unclassified and
+// non-spendable. Only later ledger-backed cycle sources can fund new holds.
+async function activateWorkspaceSegregated({ pool, workspaceId, baselineHash }) {
+  const workspace = text(workspaceId);
+  const hash = text(baselineHash);
+  if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new Error("universal_credit_source_activation_identity_invalid");
+  }
+  return transaction(pool, async client => {
+    const operation = (await client.query(`SELECT operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1 AND mode='UNIVERSAL' FOR SHARE`)).rows[0];
+    if (!operation) throw new Error("universal_credit_source_mode_required");
+    const epoch = new Date(operation.operation_epoch_started_at).toISOString();
+    const state = await workspaceModeTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+    if (!state || state.baseline_hash !== hash) {
+      throw new Error("universal_credit_source_baseline_conflict");
+    }
+    if (state.mode === "ACTIVE_SEGREGATED") {
+      return { ok: true, duplicate: true, mode: state.mode };
+    }
+    if (state.mode !== "SHADOW") {
+      throw new Error("universal_credit_source_transition_mode_conflict");
+    }
+    const comparison = await shadowComparisonTx(client, { epoch,
+      workspaceId: workspace, state, lock: true });
+    if (!comparison.ok || comparison.projectedBalance !== comparison.snapshot.balance ||
+        comparison.projectedReserved !== comparison.snapshot.reserved) {
+      throw new Error(`universal_credit_source_transition_blocked:${[
+        ...comparison.divergences,
+        ...(comparison.projectedBalance !== comparison.snapshot.balance ?
+          ["legacy_balance_changed"] : []),
+        ...(comparison.projectedReserved !== comparison.snapshot.reserved ?
+          ["legacy_reserved_changed"] : [])
+      ].join(",")}`);
+    }
+    const nonLegacy = (await client.query(`SELECT COUNT(*)::int AS n
+      FROM engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+        AND source_kind NOT IN ('legacy_escrow','legacy_unclassified')`,
+    [epoch, workspace])).rows[0];
+    if (Number(nonLegacy.n) !== 0) {
+      throw new Error("universal_credit_source_transition_nonlegacy_source");
+    }
+    const mapped = await client.query(`UPDATE engine_universal_credit_holds h
+      SET source_id=m.source_id,updated_at=clock_timestamp()
+      FROM engine_universal_credit_shadow_hold_sources m
+      WHERE h.operation_epoch_started_at=$1 AND h.workspace_id=$2
+        AND h.state='held' AND h.source_id IS NULL
+        AND m.operation_epoch_started_at=h.operation_epoch_started_at
+        AND m.workspace_id=h.workspace_id AND m.target_id=h.target_id`,
+    [epoch, workspace]);
+    if (mapped.rowCount !== comparison.snapshot.holds.length) {
+      throw new Error("universal_credit_source_hold_cutover_conflict");
+    }
+    await client.query(`UPDATE engine_universal_credit_source_workspaces
+      SET mode='ACTIVE_SEGREGATED',activated_at=clock_timestamp(),
+          revision=revision+1,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND mode='SHADOW'`,
+    [epoch, workspace]);
+    return { ok: true, duplicate: false, mode: "ACTIVE_SEGREGATED",
+      historicalBalance: comparison.snapshot.balance,
+      historicalReserved: comparison.snapshot.reserved,
+      spendable: 0 };
+  });
+}
+
+async function rollbackSegregatedWorkspace({ pool, workspaceId, baselineHash }) {
+  const workspace = text(workspaceId);
+  const hash = text(baselineHash);
+  if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new Error("universal_credit_source_rollback_identity_invalid");
+  }
+  return transaction(pool, async client => {
+    const operation = (await client.query(`SELECT operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1 AND mode='UNIVERSAL' FOR SHARE`)).rows[0];
+    if (!operation) throw new Error("universal_credit_source_mode_required");
+    const epoch = new Date(operation.operation_epoch_started_at).toISOString();
+    const state = await workspaceModeTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+    if (!state || state.mode !== "ACTIVE_SEGREGATED" ||
+        state.baseline_hash !== hash) {
+      throw new Error("universal_credit_source_rollback_blocked");
+    }
+    const balance = (await client.query(`SELECT balance,reserved FROM
+      engine_universal_credit_balances WHERE operation_epoch_started_at=$1
+        AND workspace_id=$2 FOR UPDATE`, [epoch, workspace])).rows[0];
+    if (!balance || Number(balance.balance) !== Number(state.baseline_balance) ||
+        Number(balance.reserved) !== Number(state.baseline_reserved)) {
+      throw new Error("universal_credit_source_rollback_balance_changed");
+    }
+    const mutations = (await client.query(`SELECT COUNT(*)::int AS n FROM
+      financial_credit_ledger WHERE operation_epoch_started_at=$1
+        AND cliente_id=$2 AND universal_credit_source_id IS NOT NULL`,
+    [epoch, workspace])).rows[0];
+    if (Number(mutations.n) !== 0) {
+      throw new Error("universal_credit_source_rollback_movements_exist");
+    }
+    const holds = (await client.query(`SELECT COUNT(*)::int AS held,
+        COUNT(*) FILTER (WHERE h.source_id=m.source_id)::int AS mapped
+      FROM engine_universal_credit_holds h
+      LEFT JOIN engine_universal_credit_shadow_hold_sources m
+        ON m.operation_epoch_started_at=h.operation_epoch_started_at
+       AND m.workspace_id=h.workspace_id AND m.target_id=h.target_id
+      WHERE h.operation_epoch_started_at=$1 AND h.workspace_id=$2
+        AND h.state='held'`, [epoch, workspace])).rows[0];
+    if (Number(holds.held) !== Number(state.baseline_reserved) ||
+        Number(holds.mapped) !== Number(holds.held)) {
+      throw new Error("universal_credit_source_rollback_holds_changed");
+    }
+    await client.query(`UPDATE engine_universal_credit_holds
+      SET source_id=NULL,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND state='held'`,
+    [epoch, workspace]);
+    await client.query(`DELETE FROM engine_universal_credit_shadow_hold_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`, [epoch, workspace]);
+    await client.query(`DELETE FROM engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`, [epoch, workspace]);
+    await client.query(`DELETE FROM engine_universal_credit_source_workspaces
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2
+        AND mode='ACTIVE_SEGREGATED'`, [epoch, workspace]);
+    return { ok: true, rolledBack: true, legacyAuthorityRestored: true };
+  });
+}
+
 async function rollbackShadowWorkspace({ pool, workspaceId, baselineHash }) {
   const workspace = text(workspaceId);
   const hash = text(baselineHash);
@@ -481,7 +609,7 @@ async function recomputeAggregateTx(client, { epoch, workspaceId }) {
 async function applyLedgerTx(client, { epoch, movement }) {
   const workspaceId = movement.cliente_id;
   const mode = await workspaceModeTx(client, { epoch, workspaceId, lock: true });
-  if (mode?.mode !== "ACTIVE") return { handled: false };
+  if (!sourceAuthorityActive(mode?.mode)) return { handled: false };
   const balance = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances WHERE operation_epoch_started_at=$1
       AND workspace_id=$2 FOR UPDATE`, [epoch, workspaceId])).rows[0];
@@ -541,7 +669,7 @@ async function applyLedgerTx(client, { epoch, movement }) {
 async function addAdminTopupTx(client, { epoch, workspaceId, amount: delta,
   idempotencyKey, reason, operatorId }) {
   const mode = await workspaceModeTx(client, { epoch, workspaceId, lock: true });
-  if (mode?.mode !== "ACTIVE") return { handled: false };
+  if (!sourceAuthorityActive(mode?.mode)) return { handled: false };
   const balance = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances WHERE operation_epoch_started_at=$1
       AND workspace_id=$2 FOR UPDATE`, [epoch, workspaceId])).rows[0];
@@ -594,7 +722,7 @@ async function addAdminTopupTx(client, { epoch, workspaceId, amount: delta,
 
 async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
   const mode = await workspaceModeTx(client, { epoch, workspaceId, lock: true });
-  if (mode?.mode !== "ACTIVE") return { handled: false };
+  if (!sourceAuthorityActive(mode?.mode)) return { handled: false };
   await client.query(`SELECT 1 FROM engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
   [epoch, workspaceId]);
@@ -638,7 +766,7 @@ async function holdForTargetTx(client, { epoch, workspaceId, targetId }) {
 
 async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
   const mode = await workspaceModeTx(client, { epoch, workspaceId, lock: true });
-  if (mode?.mode !== "ACTIVE") return { handled: false };
+  if (!sourceAuthorityActive(mode?.mode)) return { handled: false };
   const balance = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances WHERE operation_epoch_started_at=$1
       AND workspace_id=$2 FOR UPDATE`, [epoch, workspaceId])).rows[0];
@@ -688,7 +816,7 @@ async function settleConfirmedTx(client, { epoch, workspaceId, targetId }) {
 
 async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
   const mode = await workspaceModeTx(client, { epoch, workspaceId, lock: true });
-  if (mode?.mode !== "ACTIVE") return { handled: false };
+  if (!sourceAuthorityActive(mode?.mode)) return { handled: false };
   const balance = (await client.query(`SELECT balance,reserved,revision FROM
     engine_universal_credit_balances WHERE operation_epoch_started_at=$1
       AND workspace_id=$2 FOR UPDATE`, [epoch, workspaceId])).rows[0];
@@ -698,12 +826,14 @@ async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
   [epoch, workspaceId, targetId])).rows[0];
   if (!hold?.source_id) return { handled: false };
   if (hold.state !== "held") throw new Error("universal_credit_release_conflict");
-  const source = (await client.query(`SELECT state,cycle_end,reserved,
+  const source = (await client.query(`SELECT source_kind,state,cycle_end,reserved,
       (cycle_end IS NULL OR cycle_end>clock_timestamp()) AS cycle_current FROM
     engine_universal_credit_sources WHERE id=$1 FOR UPDATE`,
   [hold.source_id])).rows[0];
   if (!balance || !source || Number(source.reserved) < 1 ||
       Number(balance.reserved) < 1) throw new Error("universal_credit_release_conflict");
+  const legacyEscrow = mode.mode === "ACTIVE_SEGREGATED" &&
+    source.source_kind === "legacy_escrow";
   const returnable = source.state === "active" && source.cycle_current === true;
   if (returnable) {
     await client.query(`UPDATE engine_universal_credit_sources
@@ -713,6 +843,35 @@ async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
       SET reserved=reserved-1,revision=revision+1,updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
     [epoch, workspaceId]);
+  } else if (legacyEscrow) {
+    // A factual failure of a legacy ambiguous send removes only the escrow
+    // reservation. The historical obligation remains non-spendable until a
+    // future, evidence-backed accounting decision classifies it.
+    const revision = Number(balance.revision) + 1;
+    const ledger = await client.query(`INSERT INTO financial_credit_ledger
+      (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
+       projection_status,metadata,operation_epoch_started_at,
+       universal_movement_type,universal_target_id,universal_balance_revision,
+       universal_balance_after,universal_credit_source_id)
+      VALUES ($1,'adjustment',0,'add','universal_legacy_hold_released',$2,
+        'projected',$3::jsonb,$4,'LEGACY_HOLD_RELEASE',$5,$6,$7,$8)
+      ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
+    [workspaceId, movementKey("LEGACY_HOLD_RELEASE", epoch, workspaceId, targetId),
+      JSON.stringify({ authority: "postgresql_universal",
+        targetId: String(targetId), sourceId: String(hold.source_id),
+        disposition: "legacy_unclassified_nonspendable" }), epoch,
+      targetId, revision, Number(balance.balance), hold.source_id]);
+    if (ledger.rowCount !== 1) {
+      throw new Error("universal_credit_legacy_release_conflict");
+    }
+    await client.query(`UPDATE engine_universal_credit_sources
+      SET reserved=reserved-1,available=available+1,revision=revision+1,
+          state=CASE WHEN reserved=1 THEN 'unclassified' ELSE state END,
+          updated_at=clock_timestamp() WHERE id=$1`, [hold.source_id]);
+    await client.query(`UPDATE engine_universal_credit_balances
+      SET reserved=reserved-1,revision=$3,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+    [epoch, workspaceId, revision]);
   } else {
     const revision = Number(balance.revision) + 1;
     const ledger = await client.query(`INSERT INTO financial_credit_ledger
@@ -743,12 +902,13 @@ async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND target_id=$3`,
   [epoch, workspaceId, targetId]);
   return { handled: true, ok: true, released: true, returned: returnable,
-    sourceId: hold.source_id };
+    legacyPreserved: legacyEscrow, sourceId: hold.source_id };
 }
 
-module.exports = { workspaceModeTx, totalsTx, legacySnapshotTx,
+module.exports = { workspaceModeTx, sourceAuthorityActive, totalsTx, legacySnapshotTx,
   ledgerProvenanceTx, inspectShadowWorkspace, shadowComparisonTx,
   prepareShadowWorkspace, classifyLegacyAvailable, activateWorkspaceSources,
-  rollbackShadowWorkspace,
+  activateWorkspaceSegregated, rollbackShadowWorkspace,
+  rollbackSegregatedWorkspace,
   recomputeAggregateTx, applyLedgerTx, addAdminTopupTx, holdForTargetTx,
   settleConfirmedTx, releaseForTargetTx };

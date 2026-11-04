@@ -238,10 +238,33 @@ async function readBalance({ pool, workspaceId }) {
     throw new Error("universal_credit_read_identity_invalid");
   }
   const result = await pool.query(`SELECT b.balance,b.reserved,b.opening_balance,
-      b.operation_epoch_started_at,b.revision
+      b.operation_epoch_started_at,b.revision,sw.mode AS source_mode,
+      COALESCE(src.active_available,0)::bigint AS source_available,
+      COALESCE(src.has_current_entitlement,false) AS has_current_entitlement,
+      COALESCE(src.legacy_segregated,0)::bigint AS legacy_segregated
     FROM engine_operation_state s
     JOIN engine_universal_credit_balances b
       ON b.operation_epoch_started_at=s.operation_epoch_started_at
+    LEFT JOIN engine_universal_credit_source_workspaces sw
+      ON sw.operation_epoch_started_at=b.operation_epoch_started_at
+     AND sw.workspace_id=b.workspace_id
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE(SUM(available) FILTER (WHERE state='active'
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),0)
+          AS active_available,
+        COALESCE(BOOL_OR(source_kind IN ('cycle','opening') AND state='active'
+          AND (cycle_start IS NULL OR cycle_start<=clock_timestamp())
+          AND (cycle_end IS NULL OR cycle_end>clock_timestamp())),false)
+          AS has_current_entitlement,
+        COALESCE(SUM(available+reserved) FILTER
+          (WHERE source_kind IN ('legacy_escrow','legacy_unclassified')),0)
+          AS legacy_segregated
+      FROM engine_universal_credit_sources cs
+      WHERE cs.operation_epoch_started_at=b.operation_epoch_started_at
+        AND cs.workspace_id=b.workspace_id
+    ) src ON true
     WHERE s.id=1 AND s.mode='UNIVERSAL' AND b.workspace_id=$1`, [workspace]);
   if (result.rowCount !== 1) {
     const erro = new Error("universal_credit_opening_missing");
@@ -249,8 +272,14 @@ async function readBalance({ pool, workspaceId }) {
     throw erro;
   }
   const row = result.rows[0];
+  const aggregateAvailable = Number(row.balance) - Number(row.reserved);
+  const sourceAuthority = sourceCredits.sourceAuthorityActive(row.source_mode);
+  const spendable = sourceAuthority && row.has_current_entitlement === true
+    ? Number(row.source_available) : (sourceAuthority ? 0 : aggregateAvailable);
   return { balance: Number(row.balance), reserved: Number(row.reserved),
-    available: Number(row.balance) - Number(row.reserved),
+    available: spendable, spendable, aggregateAvailable,
+    legacySegregated: Number(row.legacy_segregated),
+    sourceMode: row.source_mode || null,
     openingBalance: Number(row.opening_balance),
     operationEpochStartedAt: epochIso(row.operation_epoch_started_at),
     revision: Number(row.revision) };
@@ -431,7 +460,7 @@ async function setAdminBalance({ pool, workspaceId, amount,
     const sourceMode = await sourceCredits.workspaceModeTx(client, {
       epoch, workspaceId: workspace, lock: true
     });
-    if (sourceMode?.mode === "ACTIVE") {
+    if (sourceCredits.sourceAuthorityActive(sourceMode?.mode)) {
       return { ok: false,
         reason: "universal_credit_source_set_requires_financial_ledger" };
     }

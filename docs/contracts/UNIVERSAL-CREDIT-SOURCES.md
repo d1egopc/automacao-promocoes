@@ -12,6 +12,11 @@ The aggregate `engine_universal_credit_balances` remains a compatibility read
 model and must equal the sum of `available + reserved` from all sources for the
 workspace. A divergence blocks activation and financial writes.
 
+`balance` is the total backed accounting obligation. `available` exposed to
+the Executor is the independently calculated spendable amount. In segregated
+mode those values intentionally differ: preserved legacy value remains in the
+total but can never satisfy a new reservation.
+
 ## Sources
 
 - `cycle`: Pix/payment or courtesy cycle, with the plan's real window;
@@ -53,6 +58,12 @@ and read-only.
   and records the expiration adjustment; it never becomes current availability;
 - no factual result: remains held in escrow without replay or age-based release.
 
+For `ACTIVE_SEGREGATED`, a factual no-effect result on a legacy hold removes
+only its reservation and returns the unit to `legacy_unclassified`. The total
+historical obligation is unchanged and remains non-spendable. A late ACK still
+consumes exactly the original escrow source. Neither result can debit or refund
+a later Pix/courtesy source.
+
 Commercial TTL may remove an offer from scheduling, but it does not rewrite the
 financial result. Old `AMBIGUOUS` targets are already excluded from claiming and
 do not own a destination slot. Reconciliation may inspect them in bounded
@@ -81,6 +92,25 @@ row means legacy authority. The stages are deliberately separate:
 5. after activation, all source and aggregate mutations use the lock order:
    workspace source state, aggregate balance, hold and source.
 
+### Transition without historical classification
+
+`activateWorkspaceSegregated()` is a separate, explicit cutover for a workspace
+whose historical provenance cannot be proved. It requires an unchanged SHADOW
+snapshot, accepts only `legacy_escrow` and `legacy_unclassified` projection
+rows, binds the old holds and switches to `ACTIVE_SEGREGATED` without changing
+aggregate balance, reservations or ledger history.
+
+The historical projection then remains fully backed and non-spendable. Only a
+later, valid `financial_credit_ledger` cycle movement (Pix/payment or courtesy)
+creates an active source and current entitlement. Cycle replacement expires
+only eligible earlier cycle/opening availability; it never consumes, releases
+or relabels segregated legacy value. A workspace has zero spendable new credit
+until that valid movement exists.
+
+This transition is not a provenance classification: it does not call the
+historical value administrative, expired or current, and it does not authorize
+its use. The unresolved value is retained for a future accounting decision.
+
 Preparation and classification are writes, but are not authority changes. They
 must still be separately authorized and must never be invoked by startup,
 login, `/me`, Executor preflight, payment handling or the courtesy scheduler.
@@ -102,6 +132,13 @@ Rollback after `ACTIVE` is not a flag flip. It requires reconstructing the
 aggregate from the authoritative ledger, proving zero open source-scoped holds
 or reconciling them factually, and comparing every movement revision. Any
 divergence blocks rollback. No ACTIVE source or ledger row is deleted.
+
+`ACTIVE_SEGREGATED` has one narrow pre-movement rollback: while aggregate
+balance/reservations still equal the baseline, every old held row still matches
+its shadow map and no source-scoped ledger movement exists, the old bindings
+and inert projection may be removed atomically. Once any Pix, courtesy, top-up,
+ACK, factual failure or new reservation is recorded, this rollback fails
+closed and the normal ledger reconstruction rule applies.
 
 ## Performance
 

@@ -147,7 +147,9 @@ async function main() {
       ["ws-pix", 0], ["ws-blocked", 7], ["ws-admin-only", 0],
       ["ws-other", 25], ["ws-race-pix", 0],
       ["ws-race-courtesy", 0], ["ws-race-prepare", 0],
-      ["ws-race-concurrent", 0]]) {
+      ["ws-race-concurrent", 0], ["ws-segregated", 15427],
+      ["ws-segregated-rollback", 9], ["ws-segregated-diverged", 10],
+      ["ws-segregated-new", 0]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
@@ -285,7 +287,9 @@ async function main() {
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
     assert.equal(balance.balance, 267,
       "new cycle replaces old cycle availability but preserves admin source");
-    assert.equal(balance.available, 250);
+    assert.equal(balance.aggregateAvailable, 250);
+    assert.equal(balance.available, 0,
+      "future cycle cannot make administrative value spendable before its window");
 
     await enqueueOne(admin, pool, "ws-pix", "pix-old", 5);
     const pixOld = await claimAndStart(pool, "ws-pix");
@@ -387,10 +391,145 @@ async function main() {
       assert.equal((await credits.readBalance({ pool, workspaceId: workspace })).balance, 40);
     }
 
+    // R1.5: indeterminate history remains fully backed but cannot fund new
+    // sends. A legitimate later cycle is independently spendable.
+    const segregatedClaims = [];
+    for (let index = 0; index < 19; index += 1) {
+      await enqueueOne(admin, pool, "ws-segregated", `legacy-${index + 1}`,
+        index + 40);
+      const claim = await claimAndStart(pool, "ws-segregated");
+      await makeAmbiguous(admin, pool, "ws-segregated", claim);
+      segregatedClaims.push(claim);
+    }
+    const segregatedShadow = (await prepareShadow(pool, "ws-segregated")).shadow;
+    assert.equal(segregatedShadow.reserved, 19);
+    assert.equal(segregatedShadow.unclassifiedAvailable, 15408);
+    const segregatedActivation = await sources.activateWorkspaceSegregated({
+      pool, workspaceId: "ws-segregated",
+      baselineHash: segregatedShadow.baselineHash
+    });
+    assert.equal(segregatedActivation.mode, "ACTIVE_SEGREGATED");
+    let segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.deepEqual({ balance: segregatedBalance.balance,
+      reserved: segregatedBalance.reserved,
+      spendable: segregatedBalance.spendable,
+      legacy: segregatedBalance.legacySegregated,
+      mode: segregatedBalance.sourceMode },
+    { balance: 15427, reserved: 19, spendable: 0,
+      legacy: 15427, mode: "ACTIVE_SEGREGATED" });
+
+    const segregatedCourtesy = await insertCycle(admin, {
+      workspace: "ws-segregated", value: 4000, origin: "admin_courtesy",
+      suffix: "segregated-courtesy" });
+    const courtesyRace = await Promise.all(Array.from({ length: 8 }, () =>
+      credits.applyFinancialLedger({ pool, ledgerId: segregatedCourtesy })));
+    assert.equal(courtesyRace.filter(item => item.applied === true).length, 1);
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.deepEqual({ balance: segregatedBalance.balance,
+      reserved: segregatedBalance.reserved,
+      spendable: segregatedBalance.spendable,
+      legacy: segregatedBalance.legacySegregated },
+    { balance: 19427, reserved: 19, spendable: 4000, legacy: 15427 });
+
+    await enqueueOne(admin, pool, "ws-segregated", "new-courtesy", 70);
+    const segregatedCurrent = await claimAndStart(pool, "ws-segregated");
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.equal(segregatedBalance.spendable, 3999);
+    assert.equal(segregatedBalance.reserved, 20);
+
+    const lateAck = await durableAck(admin, segregatedClaims[0],
+      "provider-segregated-old-ack");
+    await queue.confirmSend({ pool, destinationId: segregatedClaims[0].id,
+      leaseToken: segregatedClaims[0].leaseToken, ...lateAck });
+    await queue.confirmFailure({ pool, destinationId: segregatedClaims[1].id,
+      leaseToken: segregatedClaims[1].leaseToken,
+      reason: "provider_no_effect_confirmed",
+      evidence: "provider_no_effect_confirmed" });
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.deepEqual({ balance: segregatedBalance.balance,
+      reserved: segregatedBalance.reserved,
+      spendable: segregatedBalance.spendable,
+      legacy: segregatedBalance.legacySegregated },
+    { balance: 19426, reserved: 18, spendable: 3999, legacy: 15426 },
+    "late legacy ACK debits escrow; factual failure preserves nonspendable history");
+
+    const segregatedCurrentAck = await durableAck(admin, segregatedCurrent,
+      "provider-segregated-current-ack");
+    await queue.confirmSend({ pool, destinationId: segregatedCurrent.id,
+      leaseToken: segregatedCurrent.leaseToken, ...segregatedCurrentAck });
+    const segregatedPix = await insertCycle(admin, {
+      workspace: "ws-segregated", value: 4000, origin: "financial_event_v1",
+      suffix: "segregated-pix" });
+    const pixRace = await Promise.all(Array.from({ length: 8 }, () =>
+      credits.applyFinancialLedger({ pool, ledgerId: segregatedPix })));
+    assert.equal(pixRace.filter(item => item.applied === true).length, 1);
+    segregatedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.deepEqual({ balance: segregatedBalance.balance,
+      reserved: segregatedBalance.reserved,
+      spendable: segregatedBalance.spendable,
+      legacy: segregatedBalance.legacySegregated },
+    { balance: 19426, reserved: 17, spendable: 4000, legacy: 15426 });
+
+    const rollbackShadow = (await prepareShadow(pool,
+      "ws-segregated-rollback")).shadow;
+    await sources.activateWorkspaceSegregated({ pool,
+      workspaceId: "ws-segregated-rollback",
+      baselineHash: rollbackShadow.baselineHash });
+    const rolledSegregated = await sources.rollbackSegregatedWorkspace({ pool,
+      workspaceId: "ws-segregated-rollback",
+      baselineHash: rollbackShadow.baselineHash });
+    assert.equal(rolledSegregated.legacyAuthorityRestored, true);
+    assert.deepEqual(await credits.readBalance({ pool,
+      workspaceId: "ws-segregated-rollback" }).then(item => ({
+      balance: item.balance, reserved: item.reserved, sourceMode: item.sourceMode
+    })), { balance: 9, reserved: 0, sourceMode: null });
+
+    const divergentShadow = (await prepareShadow(pool,
+      "ws-segregated-diverged")).shadow;
+    await credits.addAdminBalance({ pool, workspaceId: "ws-segregated-diverged",
+      amount: 2, idempotencyKey: "segregated-diverged-write",
+      operatorId: "fixture" });
+    await assert.rejects(sources.activateWorkspaceSegregated({ pool,
+      workspaceId: "ws-segregated-diverged",
+      baselineHash: divergentShadow.baselineHash }), /snapshot_changed/);
+    await sources.rollbackShadowWorkspace({ pool,
+      workspaceId: "ws-segregated-diverged",
+      baselineHash: divergentShadow.baselineHash });
+
+    const newShadow = (await prepareShadow(pool, "ws-segregated-new")).shadow;
+    await sources.activateWorkspaceSegregated({ pool,
+      workspaceId: "ws-segregated-new", baselineHash: newShadow.baselineHash });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated-new" })).spendable, 0);
+    const newCourtesy = await insertCycle(admin, {
+      workspace: "ws-segregated-new", value: 100,
+      origin: "admin_courtesy", suffix: "new-workspace-courtesy" });
+    await credits.applyFinancialLedger({ pool, ledgerId: newCourtesy });
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-segregated-new" })).spendable, 100);
+
     const conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
       WHERE granted<>available+reserved+consumed+expired`)).rows[0];
     assert.equal(conservation.bad, 0);
+    const aggregateConservation = (await admin.query(`SELECT COUNT(*)::int AS bad
+      FROM engine_universal_credit_source_workspaces w
+      JOIN engine_universal_credit_balances b
+        USING (operation_epoch_started_at,workspace_id)
+      JOIN LATERAL (SELECT COALESCE(SUM(available+reserved),0)::int AS backed,
+        COALESCE(SUM(reserved),0)::int AS reserved
+        FROM engine_universal_credit_sources s
+        WHERE s.operation_epoch_started_at=w.operation_epoch_started_at
+          AND s.workspace_id=w.workspace_id) totals ON true
+      WHERE w.mode IN ('ACTIVE','ACTIVE_SEGREGATED')
+        AND (b.balance<>totals.backed OR b.reserved<>totals.reserved)`)).rows[0];
+    assert.equal(aggregateConservation.bad, 0,
+      "aggregate compatibility projection must equal the single source authority");
     const expiredRelease = (await admin.query(`SELECT COUNT(*)::int AS n
       FROM financial_credit_ledger
       WHERE universal_movement_type='HOLD_EXPIRED_RELEASE'`)).rows[0];
@@ -409,6 +548,16 @@ async function main() {
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-cycle" })).balance, 267,
     "restart must preserve source projection exactly");
+    const segregatedAfterRestart = await credits.readBalance({ pool,
+      workspaceId: "ws-segregated" });
+    assert.deepEqual({ balance: segregatedAfterRestart.balance,
+      reserved: segregatedAfterRestart.reserved,
+      spendable: segregatedAfterRestart.spendable,
+      legacy: segregatedAfterRestart.legacySegregated,
+      mode: segregatedAfterRestart.sourceMode },
+    { balance: 19426, reserved: 17, spendable: 4000,
+      legacy: 15426, mode: "ACTIVE_SEGREGATED" },
+    "restart must preserve segregated legacy and eligible new source exactly");
 
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
       sourceScopedHolds: true,
@@ -427,6 +576,11 @@ async function main() {
       nineteenSyntheticHoldsPreserved: true,
       paymentAndCourtesyRaceBlockCutover: true,
       preActiveRollbackSafe: true,
+      segregatedLegacyNonspendable: true,
+      segregatedNewCycleSpendable: true,
+      segregatedLateResolutionSafe: true,
+      segregatedRollbackBeforeMovement: true,
+      segregatedPixAndCourtesyIdempotent: true,
       restartSafe: true,
       multiworkspaceIsolated: true
     }));
