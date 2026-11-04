@@ -87,9 +87,9 @@ async function durableAck(client, claim, messageId) {
 }
 
 async function insertCycle(client, { workspace, value, origin, suffix,
-  startOffsetDays = 0 }) {
+  startOffsetDays = 0, durationDays = 30 }) {
   const start = new Date(now + startOffsetDays * 86400000);
-  const end = new Date(start.getTime() + 30 * 86400000);
+  const end = new Date(start.getTime() + durationDays * 86400000);
   return (await client.query(`INSERT INTO financial_credit_ledger
     (cliente_id,ledger_type,amount,balance_policy,cycle_start,cycle_end,
      reason,idempotency_key,projection_status,metadata)
@@ -102,19 +102,15 @@ async function insertCycle(client, { workspace, value, origin, suffix,
         cicloDias: 30 } })])).rows[0].id;
 }
 
-async function prepareActiveWorkspace(pool, workspace, policy = "expire") {
-  const shadow = await sources.prepareShadowWorkspace({ pool,
+async function prepareShadow(pool, workspace) {
+  const inspection = await sources.inspectShadowWorkspace({ pool,
     workspaceId: workspace });
+  assert.equal(inspection.readOnly, true);
+  const shadow = await sources.prepareShadowWorkspace({ pool,
+    workspaceId: workspace, expectedSnapshotHash: inspection.snapshotHash });
   assert.equal(shadow.ok, true);
-  if (shadow.unclassifiedSources) {
-    await sources.classifyLegacyAvailable({ pool, workspaceId: workspace,
-      baselineHash: shadow.baselineHash, policy,
-      reason: `fixture_${policy}_approved` });
-  }
-  const active = await sources.activateWorkspaceSources({ pool,
-    workspaceId: workspace, baselineHash: shadow.baselineHash });
-  assert.equal(active.ok, true);
-  return shadow;
+  assert.equal(shadow.legacyAuthorityUntouched, true);
+  return { inspection, shadow };
 }
 
 async function main() {
@@ -147,35 +143,90 @@ async function main() {
       WHERE id=1`);
     pool = new Pool({ ...config, max: 12,
       options: `-c search_path=${schema},public` });
-    for (const [workspace, opening] of [["ws-cycle", 100],
-      ["ws-pix", 10], ["ws-blocked", 7], ["ws-admin-only", 20],
-      ["ws-other", 25]]) {
+    for (const [workspace, opening] of [["ws-cycle", 0],
+      ["ws-pix", 0], ["ws-blocked", 7], ["ws-admin-only", 0],
+      ["ws-other", 25], ["ws-race-pix", 0],
+      ["ws-race-courtesy", 0], ["ws-race-prepare", 0],
+      ["ws-race-concurrent", 0]]) {
       await credits.openBalance({ pool, workspaceId: workspace,
         operationEpochStartedAt: epoch, openingBalance: opening, sourceHash });
     }
     await admin.query(`UPDATE engine_operation_state SET mode='UNIVERSAL',
       operation_epoch_started_at=$1 WHERE id=1`, [epoch]);
 
-    await enqueueOne(admin, pool, "ws-cycle", "old-a", 2);
-    await enqueueOne(admin, pool, "ws-cycle", "old-b", 3);
-    await enqueueOne(admin, pool, "ws-cycle", "new-c", 4);
-    const oldA = await claimAndStart(pool, "ws-cycle");
-    await makeAmbiguous(admin, pool, "ws-cycle", oldA);
-    const oldB = await claimAndStart(pool, "ws-cycle");
-    await makeAmbiguous(admin, pool, "ws-cycle", oldB);
+    const expiredCourtesy = await insertCycle(admin, { workspace: "ws-cycle",
+      value: 100, origin: "admin_courtesy", suffix: "expired-courtesy",
+      startOffsetDays: -60 });
+    await credits.applyFinancialLedger({ pool, ledgerId: expiredCourtesy });
+    const expiredPix = await insertCycle(admin, { workspace: "ws-pix",
+      value: 10, origin: "financial_event_v1", suffix: "expired-pix",
+      startOffsetDays: -60 });
+    await credits.applyFinancialLedger({ pool, ledgerId: expiredPix });
+    await credits.addAdminBalance({ pool, workspaceId: "ws-admin-only",
+      amount: 20, idempotencyKey: "fixture-admin-only", operatorId: "fixture" });
+    const adminOnlyLedger = (await admin.query(`SELECT id FROM
+      financial_credit_ledger WHERE idempotency_key='fixture-admin-only'`)).rows[0];
 
-    const shadow = await sources.prepareShadowWorkspace({ pool,
+    const beforeReadOnly = (await admin.query(`SELECT
+      (SELECT COUNT(*) FROM engine_universal_credit_sources)::int AS sources,
+      (SELECT COUNT(*) FROM engine_universal_credit_source_workspaces)::int AS states,
+      (SELECT COUNT(*) FROM engine_universal_credit_shadow_hold_sources)::int AS maps`)).rows[0];
+    const readOnly = await sources.inspectShadowWorkspace({ pool,
       workspaceId: "ws-cycle" });
-    assert.equal(shadow.reserved, 2);
-    assert.equal(shadow.unclassifiedAvailable, 98);
+    const afterReadOnly = (await admin.query(`SELECT
+      (SELECT COUNT(*) FROM engine_universal_credit_sources)::int AS sources,
+      (SELECT COUNT(*) FROM engine_universal_credit_source_workspaces)::int AS states,
+      (SELECT COUNT(*) FROM engine_universal_credit_shadow_hold_sources)::int AS maps`)).rows[0];
+    assert.deepEqual(afterReadOnly, beforeReadOnly,
+      "read-only preflight must not create any shadow state");
+
+    const oldClaims = [];
+    for (let index = 0; index < 19; index += 1) {
+      await enqueueOne(admin, pool, "ws-cycle", `old-${index + 1}`, index + 2);
+    }
+    await enqueueOne(admin, pool, "ws-cycle", "new-current", 30);
+    for (let index = 0; index < 19; index += 1) {
+      const claim = await claimAndStart(pool, "ws-cycle");
+      await makeAmbiguous(admin, pool, "ws-cycle", claim);
+      oldClaims.push(claim);
+    }
+    const cycleInspection = await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-cycle" });
+    assert.notEqual(cycleInspection.snapshotHash, readOnly.snapshotHash,
+      "new reservations must invalidate an earlier read-only snapshot");
+    const { shadow } = await prepareShadow(pool, "ws-cycle");
+    assert.equal(shadow.reserved, 19);
+    assert.equal(shadow.unclassifiedAvailable, 81);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-cycle" })).balance, 100);
+    assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n FROM
+      engine_universal_credit_holds WHERE workspace_id='ws-cycle'
+        AND state='held' AND source_id IS NOT NULL`)).rows[0].n), 0,
+    "SHADOW must not bind live holds");
     await assert.rejects(sources.activateWorkspaceSources({ pool,
       workspaceId: "ws-cycle", baselineHash: shadow.baselineHash }),
     /legacy_unclassified/);
     await sources.classifyLegacyAvailable({ pool, workspaceId: "ws-cycle",
-      baselineHash: shadow.baselineHash, policy: "expire",
+      baselineHash: shadow.baselineHash, classification: "expired_cycle",
+      evidenceLedgerIds: [expiredCourtesy],
       reason: "fixture_expired_cycle" });
-    await sources.activateWorkspaceSources({ pool, workspaceId: "ws-cycle",
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-cycle" })).balance, 100,
+    "classification must not mutate legacy aggregate balance");
+
+    await pool.end();
+    pool = new Pool({ ...config, max: 12,
+      options: `-c search_path=${schema},public` });
+    const afterRestart = await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-cycle" });
+    assert.equal(afterRestart.mode, "SHADOW");
+    const activation = await sources.activateWorkspaceSources({ pool,
+      workspaceId: "ws-cycle",
       baselineHash: shadow.baselineHash });
+    assert.equal(activation.cutoverDelta, -81);
+    assert.equal(Number((await admin.query(`SELECT COUNT(*)::int AS n FROM
+      engine_universal_credit_holds WHERE workspace_id='ws-cycle'
+        AND state='held' AND source_id IS NOT NULL`)).rows[0].n), 19);
 
     const courtesyId = await insertCycle(admin, { workspace: "ws-cycle",
       value: 300, origin: "admin_courtesy", suffix: "courtesy" });
@@ -183,21 +234,23 @@ async function main() {
       credits.applyFinancialLedger({ pool, ledgerId: courtesyId })));
     assert.equal(concurrent.filter(item => item.applied === true).length, 1);
     let balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
-    assert.equal(balance.balance, 302);
-    assert.equal(balance.reserved, 2);
+    assert.equal(balance.balance, 319);
+    assert.equal(balance.reserved, 19);
     assert.equal(balance.available, 300);
 
     const current = await claimAndStart(pool, "ws-cycle");
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
     assert.equal(balance.available, 299);
-    assert.equal(balance.reserved, 3);
+    assert.equal(balance.reserved, 20);
 
+    const oldA = oldClaims[0];
+    const oldB = oldClaims[1];
     const oldAck = await durableAck(admin, oldA, "provider-old-a");
     await queue.confirmSend({ pool, destinationId: oldA.id,
       leaseToken: oldA.leaseToken, ...oldAck });
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
-    assert.equal(balance.balance, 301);
-    assert.equal(balance.reserved, 2);
+    assert.equal(balance.balance, 318);
+    assert.equal(balance.reserved, 19);
     assert.equal(balance.available, 299,
       "late ACK from old source must not consume current-cycle availability");
 
@@ -205,8 +258,8 @@ async function main() {
       leaseToken: oldB.leaseToken, reason: "provider_no_effect_confirmed",
       evidence: "provider_no_effect_confirmed" });
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
-    assert.equal(balance.balance, 300);
-    assert.equal(balance.reserved, 1);
+    assert.equal(balance.balance, 317);
+    assert.equal(balance.reserved, 18);
     assert.equal(balance.available, 299,
       "expired hold release must not return credit to the new cycle");
 
@@ -214,13 +267,13 @@ async function main() {
     await queue.confirmSend({ pool, destinationId: current.id,
       leaseToken: current.leaseToken, ...currentAck });
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
-    assert.equal(balance.balance, 299);
-    assert.equal(balance.reserved, 0);
+    assert.equal(balance.balance, 316);
+    assert.equal(balance.reserved, 17);
 
     const topup = await credits.addAdminBalance({ pool,
       workspaceId: "ws-cycle", amount: 50,
       idempotencyKey: "fixture-admin-topup", operatorId: "fixture" });
-    assert.equal(topup.balance, 349);
+    assert.equal(topup.balance, 366);
     assert.equal((await credits.addAdminBalance({ pool,
       workspaceId: "ws-cycle", amount: 50,
       idempotencyKey: "fixture-admin-topup", operatorId: "fixture" })).duplicate,
@@ -230,14 +283,19 @@ async function main() {
       startOffsetDays: 31 });
     await credits.applyFinancialLedger({ pool, ledgerId: nextCycle });
     balance = await credits.readBalance({ pool, workspaceId: "ws-cycle" });
-    assert.equal(balance.balance, 250,
+    assert.equal(balance.balance, 267,
       "new cycle replaces old cycle availability but preserves admin source");
     assert.equal(balance.available, 250);
 
     await enqueueOne(admin, pool, "ws-pix", "pix-old", 5);
     const pixOld = await claimAndStart(pool, "ws-pix");
     await makeAmbiguous(admin, pool, "ws-pix", pixOld);
-    await prepareActiveWorkspace(pool, "ws-pix", "expire");
+    const pixShadow = (await prepareShadow(pool, "ws-pix")).shadow;
+    await sources.classifyLegacyAvailable({ pool, workspaceId: "ws-pix",
+      baselineHash: pixShadow.baselineHash, classification: "expired_cycle",
+      evidenceLedgerIds: [expiredPix], reason: "fixture_expired_pix_cycle" });
+    await sources.activateWorkspaceSources({ pool, workspaceId: "ws-pix",
+      baselineHash: pixShadow.baselineHash });
     const pixLedger = await insertCycle(admin, { workspace: "ws-pix",
       value: 75, origin: "financial_event_v1", suffix: "pix" });
     await credits.applyFinancialLedger({ pool, ledgerId: pixLedger });
@@ -246,8 +304,13 @@ async function main() {
     assert.equal(pixBalance.reserved, 1);
     assert.equal(pixBalance.available, 75);
 
-    await enqueueOne(admin, pool, "ws-admin-only", "admin-only", 6);
-    await prepareActiveWorkspace(pool, "ws-admin-only", "preserve_admin");
+    await enqueueOne(admin, pool, "ws-admin-only", "admin-only", 31);
+    const adminShadow = (await prepareShadow(pool, "ws-admin-only")).shadow;
+    await sources.classifyLegacyAvailable({ pool, workspaceId: "ws-admin-only",
+      baselineHash: adminShadow.baselineHash, classification: "admin_topup",
+      evidenceLedgerIds: [adminOnlyLedger.id], reason: "fixture_admin_proven" });
+    await sources.activateWorkspaceSources({ pool,
+      workspaceId: "ws-admin-only", baselineHash: adminShadow.baselineHash });
     const adminTarget = (await admin.query(`SELECT id FROM
       engine_universal_queue_destinations
       WHERE workspace_id='ws-admin-only' ORDER BY created_at DESC LIMIT 1`)).rows[0];
@@ -265,14 +328,64 @@ async function main() {
       sourceClient.release();
     }
 
-    const blockedShadow = await sources.prepareShadowWorkspace({ pool,
-      workspaceId: "ws-blocked" });
+    const blockedShadow = (await prepareShadow(pool, "ws-blocked")).shadow;
+    await assert.rejects(sources.classifyLegacyAvailable({ pool,
+      workspaceId: "ws-blocked", baselineHash: blockedShadow.baselineHash,
+      classification: "admin_topup", evidenceLedgerIds: [adminOnlyLedger.id],
+      reason: "must_not_cross_workspace" }), /provenance_missing/);
     await assert.rejects(sources.activateWorkspaceSources({ pool,
       workspaceId: "ws-blocked", baselineHash: blockedShadow.baselineHash }),
     /legacy_unclassified/);
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-other" })).balance, 25,
     "unrelated workspace must remain on legacy authority unchanged");
+
+    const prepareRaceInspection = await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-race-prepare" });
+    await credits.addAdminBalance({ pool, workspaceId: "ws-race-prepare",
+      amount: 3, idempotencyKey: "race-before-prepare", operatorId: "fixture" });
+    await assert.rejects(sources.prepareShadowWorkspace({ pool,
+      workspaceId: "ws-race-prepare",
+      expectedSnapshotHash: prepareRaceInspection.snapshotHash }),
+    /snapshot_changed/);
+
+    const concurrentInspection = await sources.inspectShadowWorkspace({ pool,
+      workspaceId: "ws-race-concurrent" });
+    const concurrentPrepare = sources.prepareShadowWorkspace({ pool,
+      workspaceId: "ws-race-concurrent",
+      expectedSnapshotHash: concurrentInspection.snapshotHash });
+    const concurrentLegacyWrite = credits.addAdminBalance({ pool,
+      workspaceId: "ws-race-concurrent", amount: 4,
+      idempotencyKey: "race-during-prepare", operatorId: "fixture" });
+    const [prepareOutcome, writeOutcome] = await Promise.allSettled([
+      concurrentPrepare, concurrentLegacyWrite
+    ]);
+    assert.equal(writeOutcome.status, "fulfilled");
+    if (prepareOutcome.status === "fulfilled") {
+      await assert.rejects(sources.activateWorkspaceSources({ pool,
+        workspaceId: "ws-race-concurrent",
+        baselineHash: prepareOutcome.value.baselineHash }), /snapshot_changed/);
+      await sources.rollbackShadowWorkspace({ pool,
+        workspaceId: "ws-race-concurrent",
+        baselineHash: prepareOutcome.value.baselineHash });
+    } else {
+      assert.match(String(prepareOutcome.reason?.message), /snapshot_changed/);
+    }
+
+    for (const [workspace, origin] of [["ws-race-pix", "financial_event_v1"],
+      ["ws-race-courtesy", "admin_courtesy"]]) {
+      const raceShadow = (await prepareShadow(pool, workspace)).shadow;
+      const concurrentLedger = await insertCycle(admin, { workspace, value: 40,
+        origin, suffix: `concurrent-${origin}` });
+      await credits.applyFinancialLedger({ pool, ledgerId: concurrentLedger });
+      await assert.rejects(sources.activateWorkspaceSources({ pool, workspaceId: workspace,
+        baselineHash: raceShadow.baselineHash }), /snapshot_changed/);
+      const rolledBack = await sources.rollbackShadowWorkspace({ pool,
+        workspaceId: workspace, baselineHash: raceShadow.baselineHash });
+      assert.equal(rolledBack.legacyAuthorityUntouched, true);
+      assert.equal(rolledBack.snapshotDiverged, true);
+      assert.equal((await credits.readBalance({ pool, workspaceId: workspace })).balance, 40);
+    }
 
     const conservation = (await admin.query(`SELECT COUNT(*)::int AS bad
       FROM engine_universal_credit_sources
@@ -288,13 +401,13 @@ async function main() {
     assert.deepEqual({ consumed: Number(oldEscrow.consumed),
       expired: Number(oldEscrow.expired), reserved: Number(oldEscrow.reserved),
       state: oldEscrow.state },
-    { consumed: 1, expired: 1, reserved: 0, state: "closed" });
+    { consumed: 1, expired: 1, reserved: 17, state: "escrow" });
 
     await pool.end();
     pool = new Pool({ ...config, max: 4,
       options: `-c search_path=${schema},public` });
     assert.equal((await credits.readBalance({ pool,
-      workspaceId: "ws-cycle" })).balance, 250,
+      workspaceId: "ws-cycle" })).balance, 267,
     "restart must preserve source projection exactly");
 
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
@@ -308,6 +421,12 @@ async function main() {
       adminTopupDoesNotCreateEntitlement: true,
       concurrentIdempotency: true,
       shadowDivergenceBlocksCutover: true,
+      readOnlyPreflightNoWrites: true,
+      shadowDoesNotBindLiveHolds: true,
+      classificationDoesNotMutateLegacyBalance: true,
+      nineteenSyntheticHoldsPreserved: true,
+      paymentAndCourtesyRaceBlockCutover: true,
+      preActiveRollbackSafe: true,
       restartSafe: true,
       multiworkspaceIsolated: true
     }));

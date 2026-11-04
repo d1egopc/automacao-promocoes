@@ -61,35 +61,47 @@ batches; age only makes an item diagnosable.
 ## Shadow and cutover
 
 Additive DDL does not activate this model. Absence of a workspace source-state
-row means legacy authority. The only allowed sequence is:
+row means legacy authority. The stages are deliberately separate:
 
-1. lock one workspace and capture balance, reserved, revision and ordered held
-   target identities;
-2. hash that exact baseline;
-3. create `legacy_escrow` for held targets and `legacy_unclassified` for the
-   remaining available value;
-4. compare source totals, aggregate balance, reserved and held count;
-5. classify every non-zero `legacy_unclassified` source under an approved
-   contract; never infer historical validity;
-6. repeat comparison and activate only when there are no divergences;
-7. after activation, all source and aggregate mutations occur in the same
-   PostgreSQL transaction and lock order: workspace source state, aggregate
-   balance, hold and source.
+1. `inspectShadowWorkspace()` runs in a repeatable-read, read-only transaction.
+   It captures balance, reserved, revision, ordered hold identities and their
+   bindings, hashes that snapshot and reports ledger provenance.
+2. `prepareShadowWorkspace()` requires that preflight hash, locks the same
+   snapshot and aborts if it changed. It writes only inert source projection
+   rows, SHADOW state and a separate shadow hold map. It never changes live
+   `source_id`, aggregate balance, ledger or legacy authority.
+3. `classifyLegacyAvailable()` requires explicit ledger row identities and
+   proves their origin and exact relationship with the current balance. It
+   changes only the inert projection. Unknown, mixed or incomplete provenance
+   remains `legacy_unclassified` and blocks activation.
+4. `activateWorkspaceSources()` locks and hashes the live snapshot again. Any
+   intervening ledger, hold, Pix or courtesy movement blocks cutover. Only in
+   this transaction are live holds bound, an evidenced expiration adjustment
+   recorded when necessary, the aggregate changed and mode switched to ACTIVE.
+5. after activation, all source and aggregate mutations use the lock order:
+   workspace source state, aggregate balance, hold and source.
 
-Shadow preparation, classification and activation are explicit functions.
-Startup, login, `/me`, Executor preflight and the courtesy scheduler never call
-them.
+Preparation and classification are writes, but are not authority changes. They
+must still be separately authorized and must never be invoked by startup,
+login, `/me`, Executor preflight, payment handling or the courtesy scheduler.
+
+Historical provenance is per ledger movement. Courtesy and Pix cycles require
+their explicit origin and window. Administrative top-up provenance is accepted
+only when a zero opening plus the complete movement chain proves the entire
+available value. Current balance, age, plan name and operator convenience are
+never provenance.
 
 ## Rollback
 
-Before any future cutover, preserve the exact source-state baseline and verify
-that no source-scoped mutation occurred. Rollback from `SHADOW` is omission of
-activation; the legacy authority remains unchanged.
+Before any future cutover, preserve the exact source-state baseline. Rollback
+from `SHADOW` may discard only inert shadow maps, sources and state, including
+after the live snapshot diverges; it cannot touch live holds, aggregate balance
+or ledger. The legacy authority therefore remains unchanged.
 
 Rollback after `ACTIVE` is not a flag flip. It requires reconstructing the
 aggregate from the authoritative ledger, proving zero open source-scoped holds
 or reconciling them factually, and comparing every movement revision. Any
-divergence blocks rollback. No source or ledger row is deleted.
+divergence blocks rollback. No ACTIVE source or ledger row is deleted.
 
 ## Performance
 

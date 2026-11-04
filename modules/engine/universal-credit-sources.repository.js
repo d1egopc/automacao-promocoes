@@ -69,27 +69,155 @@ async function totalsTx(client, { epoch, workspaceId }) {
     held: Number(holds.held), heldWithoutSource: Number(holds.held_without_source) };
 }
 
-async function compareWorkspaceSourcesTx(client, { epoch, workspaceId,
-  lockBalance = false }) {
-  const balance = (await client.query(`SELECT balance,reserved,revision
-    FROM engine_universal_credit_balances
+async function legacySnapshotTx(client, { epoch, workspaceId, lock = false }) {
+  const balance = (await client.query(`SELECT balance,reserved,revision,
+      opening_balance FROM engine_universal_credit_balances
     WHERE operation_epoch_started_at=$1 AND workspace_id=$2
-    ${lockBalance ? "FOR UPDATE" : ""}`, [epoch, workspaceId])).rows[0];
+    ${lock ? "FOR UPDATE" : ""}`, [epoch, workspaceId])).rows[0];
   if (!balance) throw new Error("universal_credit_source_balance_missing");
-  const totals = await totalsTx(client, { epoch, workspaceId });
-  const divergences = [];
-  if (totals.backed !== Number(balance.balance)) divergences.push("balance");
-  if (totals.reserved !== Number(balance.reserved)) divergences.push("reserved");
-  if (totals.held !== Number(balance.reserved)) divergences.push("held_count");
-  if (totals.heldWithoutSource !== 0) divergences.push("held_without_source");
-  return { ok: divergences.length === 0, divergences,
-    balance: Number(balance.balance), reserved: Number(balance.reserved),
-    balanceRevision: Number(balance.revision), ...totals };
+  const holds = (await client.query(`SELECT target_id,source_id
+    FROM engine_universal_credit_holds
+    WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND state='held'
+    ORDER BY target_id ${lock ? "FOR UPDATE" : ""}`,
+  [epoch, workspaceId])).rows;
+  const snapshot = {
+    epoch, workspaceId, balance: Number(balance.balance),
+    reserved: Number(balance.reserved), revision: Number(balance.revision),
+    openingBalance: Number(balance.opening_balance),
+    holds: holds.map(row => ({ targetId: String(row.target_id),
+      sourceId: row.source_id || null }))
+  };
+  snapshot.hash = stableHash([snapshot.epoch, snapshot.workspaceId,
+    snapshot.balance, snapshot.reserved, snapshot.revision, snapshot.holds]);
+  return snapshot;
 }
 
-async function prepareShadowWorkspace({ pool, workspaceId }) {
+async function ledgerProvenanceTx(client, { epoch, workspaceId }) {
+  const rows = (await client.query(`SELECT id,ledger_type,amount,balance_policy,
+      cycle_start,cycle_end,projection_status,universal_movement_type,
+      universal_balance_revision,universal_balance_after,metadata
+    FROM financial_credit_ledger
+    WHERE cliente_id=$1 AND operation_epoch_started_at=$2
+      AND universal_movement_type IS NOT NULL
+    ORDER BY universal_balance_revision NULLS LAST,id`,
+  [workspaceId, epoch])).rows;
+  return rows.map(row => {
+    const origin = text(row.metadata?.origin);
+    let provenance = "indeterminate";
+    if (row.ledger_type === "cycle_credit" && origin === "admin_courtesy") {
+      provenance = "courtesy_cycle";
+    } else if (row.ledger_type === "cycle_credit" &&
+        ["financial_event_v1", "payment_approved", "mercadopago_pix"].includes(origin)) {
+      provenance = "pix_cycle";
+    } else if (row.ledger_type === "admin_credit" &&
+        row.balance_policy === "add" && origin === "admin_credit_topup") {
+      provenance = "admin_topup";
+    } else if (row.universal_movement_type === "OPENING_BALANCE") {
+      provenance = "opening_unclassified";
+    } else if (row.universal_movement_type === "TARGET_DEBIT") {
+      provenance = "target_debit";
+    }
+    return { id: row.id, provenance, ledgerType: row.ledger_type,
+      amount: Number(row.amount), balancePolicy: row.balance_policy,
+      cycleStart: row.cycle_start, cycleEnd: row.cycle_end,
+      projectionStatus: row.projection_status,
+      movementType: row.universal_movement_type,
+      revision: row.universal_balance_revision === null ? null :
+        Number(row.universal_balance_revision),
+      balanceAfter: row.universal_balance_after === null ? null :
+        Number(row.universal_balance_after), origin };
+  });
+}
+
+async function readOnlyTransaction(pool, action) {
+  if (!pool || typeof pool.connect !== "function") {
+    throw new Error("universal_credit_source_pool_required");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const result = await action(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}
+
+async function shadowComparisonTx(client, { epoch, workspaceId,
+  state = null, lock = false }) {
+  const sourceState = state || await workspaceModeTx(client, { epoch,
+    workspaceId, lock });
+  if (!sourceState) throw new Error("universal_credit_source_shadow_missing");
+  const snapshot = await legacySnapshotTx(client, { epoch, workspaceId, lock });
+  const totals = await totalsTx(client, { epoch, workspaceId });
+  const mapping = (await client.query(`SELECT
+      COUNT(*)::int AS mapped,
+      COUNT(*) FILTER (WHERE h.state='held')::int AS mapped_held,
+      COUNT(*) FILTER (WHERE h.target_id IS NULL OR h.state<>'held')::int AS stale
+    FROM engine_universal_credit_shadow_hold_sources m
+    LEFT JOIN engine_universal_credit_holds h
+      ON h.operation_epoch_started_at=m.operation_epoch_started_at
+     AND h.workspace_id=m.workspace_id AND h.target_id=m.target_id
+    WHERE m.operation_epoch_started_at=$1 AND m.workspace_id=$2`,
+  [epoch, workspaceId])).rows[0];
+  const missing = (await client.query(`SELECT COUNT(*)::int AS n
+    FROM engine_universal_credit_holds h
+    LEFT JOIN engine_universal_credit_shadow_hold_sources m
+      ON m.operation_epoch_started_at=h.operation_epoch_started_at
+     AND m.workspace_id=h.workspace_id AND m.target_id=h.target_id
+    WHERE h.operation_epoch_started_at=$1 AND h.workspace_id=$2
+      AND h.state='held' AND m.target_id IS NULL`,
+  [epoch, workspaceId])).rows[0];
+  const divergences = [];
+  if (snapshot.hash !== sourceState.baseline_hash) divergences.push("snapshot_changed");
+  if (snapshot.reserved !== snapshot.holds.length) divergences.push("held_count");
+  if (snapshot.holds.some(hold => hold.sourceId !== null)) {
+    divergences.push("legacy_hold_already_bound");
+  }
+  if (totals.reserved !== snapshot.reserved) divergences.push("reserved");
+  if (Number(mapping.mapped) !== snapshot.holds.length ||
+      Number(mapping.mapped_held) !== snapshot.holds.length ||
+      Number(mapping.stale) !== 0 || Number(missing.n) !== 0) {
+    divergences.push("shadow_hold_mapping");
+  }
+  if (totals.backed > snapshot.balance) divergences.push("source_value_created");
+  return { ok: divergences.length === 0, divergences, snapshot,
+    projectedBalance: totals.backed, projectedReserved: totals.reserved,
+    mappedHolds: Number(mapping.mapped), ...totals };
+}
+
+async function inspectShadowWorkspace({ pool, workspaceId }) {
   const workspace = text(workspaceId);
   if (!workspace) throw new Error("universal_credit_source_workspace_required");
+  return readOnlyTransaction(pool, async client => {
+    const operation = (await client.query(`SELECT mode,operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1`)).rows[0];
+    if (operation?.mode !== "UNIVERSAL" || !operation.operation_epoch_started_at) {
+      throw new Error("universal_credit_source_mode_required");
+    }
+    const epoch = new Date(operation.operation_epoch_started_at).toISOString();
+    const snapshot = await legacySnapshotTx(client, { epoch,
+      workspaceId: workspace, lock: false });
+    const state = await workspaceModeTx(client, { epoch,
+      workspaceId: workspace, lock: false });
+    const provenance = await ledgerProvenanceTx(client, { epoch,
+      workspaceId: workspace });
+    return { ok: snapshot.reserved === snapshot.holds.length &&
+      snapshot.holds.every(hold => hold.sourceId === null),
+    readOnly: true, snapshotHash: snapshot.hash, snapshot,
+    mode: state?.mode || "LEGACY", provenance };
+  });
+}
+
+async function prepareShadowWorkspace({ pool, workspaceId,
+  expectedSnapshotHash }) {
+  const workspace = text(workspaceId);
+  const expected = text(expectedSnapshotHash);
+  if (!workspace || !/^[0-9a-f]{64}$/.test(expected)) {
+    throw new Error("universal_credit_source_shadow_preflight_required");
+  }
   return transaction(pool, async client => {
     const operation = (await client.query(`SELECT mode,operation_epoch_started_at
       FROM engine_operation_state WHERE id=1 FOR SHARE`)).rows[0];
@@ -100,43 +228,31 @@ async function prepareShadowWorkspace({ pool, workspaceId }) {
     const existing = await workspaceModeTx(client, { epoch,
       workspaceId: workspace, lock: true });
     if (existing) {
-      const comparison = await compareWorkspaceSourcesTx(client, { epoch,
-        workspaceId: workspace, lockBalance: true });
+      const comparison = await shadowComparisonTx(client, { epoch,
+        workspaceId: workspace, state: existing, lock: true });
       return { ok: comparison.ok, duplicate: true, mode: existing.mode,
         baselineHash: existing.baseline_hash, ...comparison };
     }
-    const balance = (await client.query(`SELECT balance,reserved,revision
-      FROM engine_universal_credit_balances
-      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
-    [epoch, workspace])).rows[0];
-    if (!balance) throw new Error("universal_credit_source_balance_missing");
-    const holds = (await client.query(`SELECT target_id
-      FROM engine_universal_credit_holds
-      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND state='held'
-      ORDER BY target_id FOR UPDATE`, [epoch, workspace])).rows;
-    if (holds.length !== Number(balance.reserved)) {
+    const snapshot = await legacySnapshotTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+    if (snapshot.hash !== expected) {
+      throw new Error("universal_credit_source_snapshot_changed");
+    }
+    if (snapshot.holds.length !== snapshot.reserved ||
+        snapshot.holds.some(hold => hold.sourceId !== null)) {
       throw new Error("universal_credit_source_held_count_divergence");
     }
-    const available = Number(balance.balance) - Number(balance.reserved);
-    const baselineHash = stableHash([epoch, workspace, Number(balance.balance),
-      Number(balance.reserved), Number(balance.revision),
-      holds.map(row => String(row.target_id))]);
+    const available = snapshot.balance - snapshot.reserved;
+    const baselineHash = snapshot.hash;
     let escrowId = null;
-    if (holds.length) {
+    if (snapshot.holds.length) {
       escrowId = (await client.query(`INSERT INTO engine_universal_credit_sources
         (operation_epoch_started_at,workspace_id,source_key,source_kind,state,
          granted,available,reserved,consumed,expired,metadata)
         VALUES ($1,$2,$3,'legacy_escrow','escrow',$4,0,$4,0,0,$5::jsonb)
         RETURNING id`, [epoch, workspace, `legacy-escrow:${baselineHash}`,
-        holds.length, JSON.stringify({ authority: "shadow_backfill",
+        snapshot.holds.length, JSON.stringify({ authority: "shadow_backfill",
           origin: "legacy_indeterminate" })])).rows[0].id;
-      const mapped = await client.query(`UPDATE engine_universal_credit_holds
-        SET source_id=$3,updated_at=clock_timestamp()
-        WHERE operation_epoch_started_at=$1 AND workspace_id=$2
-          AND state='held' AND source_id IS NULL`, [epoch, workspace, escrowId]);
-      if (mapped.rowCount !== holds.length) {
-        throw new Error("universal_credit_source_hold_backfill_conflict");
-      }
     }
     if (available > 0) {
       await client.query(`INSERT INTO engine_universal_credit_sources
@@ -151,24 +267,34 @@ async function prepareShadowWorkspace({ pool, workspaceId }) {
       (operation_epoch_started_at,workspace_id,mode,baseline_hash,
        baseline_balance,baseline_reserved)
       VALUES ($1,$2,'SHADOW',$3,$4,$5)`, [epoch, workspace, baselineHash,
-      Number(balance.balance), Number(balance.reserved)]);
-    const comparison = await compareWorkspaceSourcesTx(client, { epoch,
+      snapshot.balance, snapshot.reserved]);
+    if (escrowId) {
+      for (const hold of snapshot.holds) {
+        await client.query(`INSERT INTO engine_universal_credit_shadow_hold_sources
+          (operation_epoch_started_at,workspace_id,target_id,source_id)
+          VALUES ($1,$2,$3,$4)`, [epoch, workspace, hold.targetId, escrowId]);
+      }
+    }
+    const comparison = await shadowComparisonTx(client, { epoch,
       workspaceId: workspace });
     if (!comparison.ok) throw new Error(
       `universal_credit_source_shadow_divergence:${comparison.divergences.join(",")}`);
     return { ok: true, duplicate: false, mode: "SHADOW", baselineHash,
-      escrowSourceId: escrowId, ...comparison };
+      escrowSourceId: escrowId, legacyAuthorityUntouched: true, ...comparison };
   });
 }
 
 async function classifyLegacyAvailable({ pool, workspaceId, baselineHash,
-  policy, reason }) {
+  classification, evidenceLedgerIds, reason }) {
   const workspace = text(workspaceId);
   const hash = text(baselineHash);
-  const decision = text(policy);
+  const decision = text(classification);
   const auditReason = text(reason);
+  const evidence = [...new Set((Array.isArray(evidenceLedgerIds) ?
+    evidenceLedgerIds : []).map(text).filter(Boolean))];
   if (!workspace || !/^[0-9a-f]{64}$/.test(hash) ||
-      !["preserve_admin", "expire"].includes(decision) || !auditReason) {
+      !["admin_topup", "expired_cycle"].includes(decision) || !auditReason ||
+      evidence.length === 0) {
     throw new Error("universal_credit_source_classification_required");
   }
   return transaction(pool, async client => {
@@ -181,39 +307,61 @@ async function classifyLegacyAvailable({ pool, workspaceId, baselineHash,
     if (!state || state.mode !== "SHADOW" || state.baseline_hash !== hash) {
       throw new Error("universal_credit_source_baseline_conflict");
     }
-    await client.query(`SELECT 1 FROM engine_universal_credit_balances
-      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 FOR UPDATE`,
-    [epoch, workspace]);
+    const snapshot = await legacySnapshotTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+    if (snapshot.hash !== state.baseline_hash) {
+      throw new Error("universal_credit_source_snapshot_changed");
+    }
     const rows = (await client.query(`SELECT id,available,reserved
       FROM engine_universal_credit_sources
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2
         AND source_kind='legacy_unclassified' AND state='unclassified'
       FOR UPDATE`, [epoch, workspace])).rows;
+    const movements = await ledgerProvenanceTx(client, { epoch,
+      workspaceId: workspace });
+    const selected = movements.filter(item => evidence.includes(String(item.id)));
+    if (selected.length !== evidence.length) {
+      throw new Error("universal_credit_source_provenance_missing");
+    }
+    const latestRevision = Math.max(...movements
+      .map(item => item.revision).filter(Number.isSafeInteger));
+    const latestSelected = Math.max(...selected
+      .map(item => item.revision).filter(Number.isSafeInteger));
+    let proven = false;
+    if (decision === "admin_topup") {
+      const nonOpening = movements.filter(item =>
+        item.movementType !== "OPENING_BALANCE");
+      proven = snapshot.openingBalance === 0 && snapshot.reserved === 0 &&
+        nonOpening.length === selected.length &&
+        selected.every(item => item.provenance === "admin_topup" && item.amount > 0) &&
+        selected.reduce((sum, item) => sum + item.amount, 0) === snapshot.balance &&
+        latestSelected === latestRevision;
+    } else {
+      proven = selected.length === 1 &&
+        ["pix_cycle", "courtesy_cycle"].includes(selected[0].provenance) &&
+        selected[0].balanceAfter === snapshot.balance &&
+        selected[0].revision === latestRevision && selected[0].cycleEnd &&
+        new Date(selected[0].cycleEnd).getTime() <= Date.now();
+    }
+    if (!proven) throw new Error("universal_credit_source_provenance_unproven");
     for (const row of rows) {
-      if (decision === "preserve_admin") {
+      if (decision === "admin_topup") {
         await client.query(`UPDATE engine_universal_credit_sources
           SET source_kind='admin_topup',state='active',revision=revision+1,
               metadata=metadata||$2::jsonb,updated_at=clock_timestamp()
           WHERE id=$1`, [row.id, JSON.stringify({ classification: decision,
-          reason: auditReason })]);
+          reason: auditReason, evidenceLedgerIds: evidence })]);
       } else {
         await client.query(`UPDATE engine_universal_credit_sources
           SET state=CASE WHEN reserved>0 THEN 'escrow' ELSE 'expired' END,
               expired=expired+available,available=0,revision=revision+1,
               metadata=metadata||$2::jsonb,updated_at=clock_timestamp()
           WHERE id=$1`, [row.id, JSON.stringify({ classification: decision,
-          reason: auditReason })]);
+          reason: auditReason, evidenceLedgerIds: evidence })]);
       }
     }
-    if (decision === "expire") {
-      const totals = await totalsTx(client, { epoch, workspaceId: workspace });
-      await client.query(`UPDATE engine_universal_credit_balances
-        SET balance=$3,reserved=$4,revision=revision+1,
-            updated_at=clock_timestamp()
-        WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
-      [epoch, workspace, totals.backed, totals.reserved]);
-    }
-    return { ok: true, classified: rows.length, policy: decision };
+    return { ok: true, classified: rows.length, classification: decision,
+      legacyBalanceUnchanged: snapshot.balance };
   });
 }
 
@@ -234,20 +382,86 @@ async function activateWorkspaceSources({ pool, workspaceId, baselineHash }) {
       throw new Error("universal_credit_source_baseline_conflict");
     }
     if (state.mode === "ACTIVE") return { ok: true, duplicate: true };
-    const comparison = await compareWorkspaceSourcesTx(client, { epoch,
-      workspaceId: workspace, lockBalance: true });
+    const comparison = await shadowComparisonTx(client, { epoch,
+      workspaceId: workspace, state, lock: true });
     if (!comparison.ok || comparison.unclassifiedSources > 0) {
       throw new Error(`universal_credit_source_cutover_blocked:${[
         ...comparison.divergences,
         ...(comparison.unclassifiedSources ? ["legacy_unclassified"] : [])
       ].join(",")}`);
     }
+    const projected = comparison.projectedBalance;
+    const delta = projected - comparison.snapshot.balance;
+    if (delta > 0) throw new Error("universal_credit_source_cutover_value_created");
+    const mapped = await client.query(`UPDATE engine_universal_credit_holds h
+      SET source_id=m.source_id,updated_at=clock_timestamp()
+      FROM engine_universal_credit_shadow_hold_sources m
+      WHERE h.operation_epoch_started_at=$1 AND h.workspace_id=$2
+        AND h.state='held' AND h.source_id IS NULL
+        AND m.operation_epoch_started_at=h.operation_epoch_started_at
+        AND m.workspace_id=h.workspace_id AND m.target_id=h.target_id`,
+    [epoch, workspace]);
+    if (mapped.rowCount !== comparison.snapshot.holds.length) {
+      throw new Error("universal_credit_source_hold_cutover_conflict");
+    }
+    const revision = comparison.snapshot.revision + 1;
+    if (delta < 0) {
+      await client.query(`INSERT INTO financial_credit_ledger
+        (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
+         projection_status,metadata,operation_epoch_started_at,
+         universal_movement_type,universal_balance_revision,
+         universal_balance_after)
+        VALUES ($1,'adjustment',$2,'add','source_cutover_classification',$3,
+          'projected',$4::jsonb,$5,'SOURCE_CUTOVER',$6,$7)`,
+      [workspace, delta, movementKey("SOURCE_CUTOVER", epoch, workspace, hash),
+        JSON.stringify({ authority: "financial_credit_ledger",
+          baselineHash: hash }), epoch, revision, projected]);
+    }
+    await client.query(`UPDATE engine_universal_credit_balances
+      SET balance=$3,reserved=$4,revision=$5,updated_at=clock_timestamp()
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
+    [epoch, workspace, projected, comparison.projectedReserved, revision]);
     await client.query(`UPDATE engine_universal_credit_source_workspaces
       SET mode='ACTIVE',activated_at=clock_timestamp(),revision=revision+1,
           updated_at=clock_timestamp()
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND mode='SHADOW'`,
     [epoch, workspace]);
-    return { ok: true, duplicate: false, ...comparison };
+    return { ok: true, duplicate: false, cutoverDelta: delta,
+      balance: projected, ...comparison };
+  });
+}
+
+async function rollbackShadowWorkspace({ pool, workspaceId, baselineHash }) {
+  const workspace = text(workspaceId);
+  const hash = text(baselineHash);
+  if (!workspace || !/^[0-9a-f]{64}$/.test(hash)) {
+    throw new Error("universal_credit_source_rollback_identity_invalid");
+  }
+  return transaction(pool, async client => {
+    const operation = (await client.query(`SELECT operation_epoch_started_at
+      FROM engine_operation_state WHERE id=1 AND mode='UNIVERSAL' FOR SHARE`)).rows[0];
+    if (!operation) throw new Error("universal_credit_source_mode_required");
+    const epoch = new Date(operation.operation_epoch_started_at).toISOString();
+    const state = await workspaceModeTx(client, { epoch,
+      workspaceId: workspace, lock: true });
+    if (!state || state.mode !== "SHADOW" || state.baseline_hash !== hash) {
+      throw new Error("universal_credit_source_rollback_blocked");
+    }
+    const comparison = await shadowComparisonTx(client, { epoch,
+      workspaceId: workspace, state, lock: true });
+    if (comparison.snapshot.holds.some(hold => hold.sourceId !== null)) {
+      throw new Error("universal_credit_source_rollback_live_binding_detected");
+    }
+    await client.query(`DELETE FROM engine_universal_credit_shadow_hold_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`, [epoch, workspace]);
+    await client.query(`DELETE FROM engine_universal_credit_sources
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2`, [epoch, workspace]);
+    await client.query(`DELETE FROM engine_universal_credit_source_workspaces
+      WHERE operation_epoch_started_at=$1 AND workspace_id=$2 AND mode='SHADOW'`,
+    [epoch, workspace]);
+    return { ok: true, rolledBack: true, legacyAuthorityUntouched: true,
+      snapshotDiverged: !comparison.ok,
+      divergencesObserved: comparison.divergences };
   });
 }
 
@@ -532,7 +746,9 @@ async function releaseForTargetTx(client, { epoch, workspaceId, targetId }) {
     sourceId: hold.source_id };
 }
 
-module.exports = { workspaceModeTx, totalsTx, compareWorkspaceSourcesTx,
+module.exports = { workspaceModeTx, totalsTx, legacySnapshotTx,
+  ledgerProvenanceTx, inspectShadowWorkspace, shadowComparisonTx,
   prepareShadowWorkspace, classifyLegacyAvailable, activateWorkspaceSources,
+  rollbackShadowWorkspace,
   recomputeAggregateTx, applyLedgerTx, addAdminTopupTx, holdForTargetTx,
   settleConfirmedTx, releaseForTargetTx };

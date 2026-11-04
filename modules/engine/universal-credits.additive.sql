@@ -138,6 +138,27 @@ CREATE INDEX IF NOT EXISTS engine_universal_credit_holds_source_idx
     (operation_epoch_started_at,workspace_id,source_id,state,target_id)
   WHERE source_id IS NOT NULL;
 
+-- SHADOW never writes the live hold binding. This audit mapping is inert until
+-- activateWorkspaceSources() validates the original snapshot again and binds
+-- all still-held targets atomically with the authority switch.
+CREATE TABLE IF NOT EXISTS engine_universal_credit_shadow_hold_sources (
+  operation_epoch_started_at timestamptz NOT NULL,
+  workspace_id text NOT NULL CHECK (btrim(workspace_id) <> ''),
+  target_id bigint NOT NULL,
+  source_id uuid NOT NULL REFERENCES engine_universal_credit_sources(id),
+  prepared_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (operation_epoch_started_at,workspace_id,target_id),
+  FOREIGN KEY (operation_epoch_started_at,workspace_id)
+    REFERENCES engine_universal_credit_source_workspaces
+      (operation_epoch_started_at,workspace_id),
+  FOREIGN KEY (operation_epoch_started_at,workspace_id,target_id)
+    REFERENCES engine_universal_credit_holds
+      (operation_epoch_started_at,workspace_id,target_id)
+);
+CREATE INDEX IF NOT EXISTS engine_universal_credit_shadow_hold_source_idx
+  ON engine_universal_credit_shadow_hold_sources
+    (operation_epoch_started_at,workspace_id,source_id,target_id);
+
 DO $$
 BEGIN
   IF NOT EXISTS (
