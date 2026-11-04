@@ -759,11 +759,11 @@ async function main() {
       pool, reserva: winner })).duplicate, true);
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-ten-contenders" })).balance, 0);
-    const nextCycle = await insertCycle(admin, {
+    const contenderNextCycle = await insertCycle(admin, {
       workspace: "ws-ten-contenders", value: 2,
       origin: "admin_courtesy", suffix: "concurrent-next-cycle" });
     const mixed = await Promise.all([
-      credits.applyFinancialLedger({ pool, ledgerId: nextCycle }),
+      credits.applyFinancialLedger({ pool, ledgerId: contenderNextCycle }),
       credits.addAdminBalance({ pool, workspaceId: "ws-ten-contenders",
         amount: 3, idempotencyKey: "concurrent-admin-topup",
         operatorId: "synthetic-admin" }),
