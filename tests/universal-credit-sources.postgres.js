@@ -734,6 +734,55 @@ async function main() {
       await new Promise(resolve => server.close(resolve));
     }
 
+    // Distinct operations must compete for the same source balance, even
+    // when the caller retries concurrently from different destinations.
+    await credits.prepareRegistrationOpening({ pool,
+      workspaceId: "ws-ten-contenders", openingBalance: 0, planId: "ultimate" });
+    await credits.reconcileRegistrationOpening({ pool,
+      workspaceId: "ws-ten-contenders", userExists: true });
+    const oneCredit = await insertCycle(admin, {
+      workspace: "ws-ten-contenders", value: 1,
+      origin: "financial_event_v1", suffix: "ten-contenders" });
+    await credits.applyFinancialLedger({ pool, ledgerId: oneCredit });
+    const contenders = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      manualCredits.reservarCreditoManualUniversal({ pool,
+        workspaceId: "ws-ten-contenders", operationId: `offer-${index}`,
+        destinationId: `destination-${index}` })));
+    assert.equal(contenders.filter(item => item.ok && !item.duplicate).length, 1);
+    assert.equal(contenders.filter(item => !item.ok).length, 9);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" })).spendable, 0);
+    const winner = contenders.find(item => item.ok);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: winner })).debited, true);
+    assert.equal((await manualCredits.confirmarCreditoManualUniversal({
+      pool, reserva: winner })).duplicate, true);
+    assert.equal((await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" })).balance, 0);
+    const nextCycle = await insertCycle(admin, {
+      workspace: "ws-ten-contenders", value: 2,
+      origin: "admin_courtesy", suffix: "concurrent-next-cycle" });
+    const mixed = await Promise.all([
+      credits.applyFinancialLedger({ pool, ledgerId: nextCycle }),
+      credits.addAdminBalance({ pool, workspaceId: "ws-ten-contenders",
+        amount: 3, idempotencyKey: "concurrent-admin-topup",
+        operatorId: "synthetic-admin" }),
+      ...Array.from({ length: 10 }, (_, index) =>
+        manualCredits.reservarCreditoManualUniversal({ pool,
+          workspaceId: "ws-ten-contenders", operationId: `mixed-${index}`,
+          destinationId: `destination-${index}` }))
+    ]);
+    assert.equal(mixed[0].ok, true);
+    assert.equal(mixed[1].ok, true);
+    const mixedHolds = mixed.slice(2).filter(item => item.ok);
+    assert.ok(mixedHolds.length <= 5,
+      "concurrent sends cannot reserve more than the new cycle and top-up");
+    const mixedBalance = await credits.readBalance({ pool,
+      workspaceId: "ws-ten-contenders" });
+    assert.equal(mixedBalance.balance, 5);
+    assert.equal(mixedBalance.reserved, mixedHolds.length);
+    assert.equal(mixedBalance.spendable, 5 - mixedHolds.length);
+
     console.log("UNIVERSAL_CREDIT_SOURCES_PG17_PASS", JSON.stringify({
       sourceScopedHolds: true,
       oldEscrowPreserved: true,

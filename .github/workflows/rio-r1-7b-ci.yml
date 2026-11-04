@@ -3,11 +3,12 @@ on:
   push:
     branches:
       - 'validation/rio-r1-7b-*'
+      - 'validation/financeiro-universal-v2-*'
   workflow_dispatch:
 
 jobs:
   manual-source-and-links:
-    if: startsWith(github.ref, 'refs/heads/validation/rio-r1-7b-')
+    if: startsWith(github.ref, 'refs/heads/validation/rio-r1-7b-') || startsWith(github.ref, 'refs/heads/validation/financeiro-universal-v2-')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
