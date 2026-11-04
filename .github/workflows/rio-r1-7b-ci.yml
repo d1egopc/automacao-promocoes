@@ -69,4 +69,10 @@ jobs:
           PGSSLMODE: disable
         run: |
           set -euo pipefail
+          if [[ ! -e /data ]]; then
+            sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /data
+          fi
+          test -w /data
+          mkdir -p "$RUNNER_TEMP/r17b-status-mensageiro"
+          MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/r17b-status-mensageiro" \
           node tests/saas-me-readonly-v1.test.js
