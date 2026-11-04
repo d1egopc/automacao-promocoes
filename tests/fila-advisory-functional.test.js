@@ -152,6 +152,15 @@ function criarRepository({ adquirir, liberar } = {}) {
   const inicioRotaIndice = fonte.indexOf('app.post("/fila/:index/enviar-agora"');
   const rotaIndice = fonte.slice(inicioRotaIndice, fonte.indexOf("app.get(\"/config\"", inicioRotaIndice));
   assert(!rotaIndice.includes("enviar_agora_reordenar"), "rota por indice nao pode mutar antes da catraca");
+  for (const rota of [
+    fonte.slice(fonte.indexOf('app.post("/fila/item/:id/enviar-agora"'), inicioRotaIndice),
+    rotaIndice
+  ]) {
+    assert(rota.includes('codigo: "fila_legacy_envio_universal_bloqueado"'));
+    assert(rota.indexOf('modoMotorReal !== "LEGACY"') <
+      rota.indexOf("garantirFilaClienteInicializadaHttp"),
+    "old direct route must fail closed before queue initialization in UNIVERSAL");
+  }
 
   console.log("fila-advisory-functional.test.js OK");
 })().catch(erro => {

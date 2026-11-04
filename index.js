@@ -14790,6 +14790,11 @@ app.post("/fila/:id/reprocessar", auth, async (req, res) => {
 // ============== POST FILA INDEX ===========================
 
 app.post("/fila/item/:id/enviar-agora", auth, async (req, res) => {
+  if (modoMotorReal !== "LEGACY") {
+    return res.status(409).json({ ok: false,
+      codigo: "fila_legacy_envio_universal_bloqueado",
+      erro: "Envio direto da fila legada indisponivel no motor Universal" });
+  }
   const id = String(req.params.id || "").trim();
   const clienteId = getClienteId(req);
   if (!(await garantirFilaClienteInicializadaHttp(res, clienteId, "rota_enviar_agora_id"))) return;
@@ -14810,6 +14815,11 @@ app.post("/fila/item/:id/enviar-agora", auth, async (req, res) => {
 });
 
 app.post("/fila/:index/enviar-agora", auth, async (req, res) => {
+  if (modoMotorReal !== "LEGACY") {
+    return res.status(409).json({ ok: false,
+      codigo: "fila_legacy_envio_universal_bloqueado",
+      erro: "Envio direto da fila legada indisponivel no motor Universal" });
+  }
   const index = Number(req.params.index);
 const clienteIdReq = getClienteId(req);
 const idBody = String(req.body?.id || req.body?.ofertaId || "").trim();

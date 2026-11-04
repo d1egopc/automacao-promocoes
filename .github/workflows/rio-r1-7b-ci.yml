@@ -41,6 +41,7 @@ jobs:
           node tests/manual-v2-scheduler.test.js
           node tests/manual-v2-dispatcher.test.js
           node tests/extension-oportunidades-ux.test.js
+          node tests/fila-advisory-functional.test.js
           node --test tests/universal-flow-queue-executor.test.js tests/universal-flow-queue-preflight.test.js
       - name: Ledger and source reservation on PostgreSQL 17
         env:
