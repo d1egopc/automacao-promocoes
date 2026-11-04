@@ -465,6 +465,11 @@ async function main() {
       mode: segregatedBalance.sourceMode },
     { balance: 15427, reserved: 19, spendable: 0,
       legacy: 15427, mode: "ACTIVE_SEGREGATED" });
+    const noCurrentCycle = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-segregated", operationId: "before-courtesy",
+      destinationId: "destination-a" });
+    assert.equal(noCurrentCycle.ok, false,
+      "historical segregated credit cannot fund a direct send");
 
     const segregatedCourtesy = await insertCycle(admin, {
       workspace: "ws-segregated", value: 4000, origin: "admin_courtesy",
@@ -590,6 +595,13 @@ async function main() {
       pool, reserva: directConfirmed })).duplicate, true);
     assert.equal((await credits.readBalance({ pool,
       workspaceId: "ws-segregated-new" })).spendable, 99);
+    const activeManual = await manualCredits.reservarCreditoManualUniversal({
+      pool, workspaceId: "ws-onboard-paid", operationId: "active-direct",
+      destinationId: "destination-b" });
+    assert.equal(activeManual.ok, true);
+    assert.ok(activeManual.sourceId);
+    assert.equal((await manualCredits.liberarCreditoManualUniversal({
+      pool, reserva: activeManual })).returned, true);
     const directDebit = (await admin.query(`SELECT amount,universal_credit_source_id
       FROM financial_credit_ledger WHERE idempotency_key=$1`,
     [directConfirmed.idempotencyKey])).rows[0];
