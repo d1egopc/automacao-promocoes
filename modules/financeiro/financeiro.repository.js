@@ -66,6 +66,69 @@ async function executarTransacaoFinanceira(fn, { pool = getFinanceiroPool } = {}
 
 function criarTransacaoFinanceira(client) {
   return {
+    async bloquearChave(chave) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [String(chave)]);
+    },
+
+    async buscarLedgerPorIdempotencyKey(idempotencyKey) {
+      const resultado = await client.query(
+        `SELECT * FROM financial_credit_ledger
+         WHERE idempotency_key = $1
+         FOR UPDATE`,
+        [idempotencyKey]
+      );
+      return linhaUnica(resultado);
+    },
+
+    async reativarLedgerCortesiaIgnorado(ledgerId) {
+      const resultado = await client.query(
+        `UPDATE financial_credit_ledger
+         SET projection_status = 'pending', projection_error = NULL
+         WHERE id = $1
+           AND projection_status = 'ignored'
+           AND metadata->>'origin' = 'admin_courtesy'
+         RETURNING *`,
+        [ledgerId]
+      );
+      return linhaUnica(resultado);
+    },
+
+    async buscarCicloCortesiaMaisRecente(clienteId) {
+      const resultado = await client.query(
+        `SELECT * FROM financial_credit_ledger
+         WHERE cliente_id = $1
+           AND ledger_type = 'cycle_credit'
+           AND metadata->>'origin' = 'admin_courtesy'
+           AND projection_status IN ('pending', 'projected')
+         ORDER BY cycle_start DESC NULLS LAST, created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [clienteId]
+      );
+      return linhaUnica(resultado);
+    },
+
+    async ignorarCiclosCortesiaPendentes(clienteId, planoId = "") {
+      const params = [clienteId];
+      const planoDivergente = planoId
+        ? `AND COALESCE(metadata->'planSnapshot'->>'planoId', '') <> $2`
+        : "";
+      if (planoId) params.push(planoId);
+      const resultado = await client.query(
+        `UPDATE financial_credit_ledger
+         SET projection_status = 'ignored',
+             projection_error = 'courtesy_disabled_or_plan_changed'
+         WHERE cliente_id = $1
+           AND ledger_type = 'cycle_credit'
+           AND projection_status = 'pending'
+           AND metadata->>'origin' = 'admin_courtesy'
+           ${planoDivergente}
+         RETURNING id`,
+        params
+      );
+      return resultado.rowCount;
+    },
+
     async inserirEvento(evento) {
       const resultado = await client.query(
         `INSERT INTO financial_payment_events (
@@ -425,6 +488,10 @@ function criarRepositorioFinanceiroPostgres({ pool } = {}) {
         joinPayment = true;
         params.push(String(filtros.externalPaymentId));
         where.push(`p.external_payment_id = $${params.length}`);
+      }
+      if (filtros.origin) {
+        params.push(String(filtros.origin));
+        where.push(`l.metadata->>'origin' = $${params.length}`);
       }
 
       const resultado = await queryRepositorio(

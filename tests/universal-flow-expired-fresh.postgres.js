@@ -15,6 +15,12 @@ const { SQL_SCHEMA_FINANCEIRO_V1 } =
 
 const config = { host: "127.0.0.1", port: 55433, user: "postgres",
   database: "optimus_universal_fixture", connectionTimeoutMillis: 5000 };
+const expectedServerHost = process.env.UF_TEST_PG_EXPECTED_SERVER_HOST ||
+  config.host;
+const expectedServerPort = Number(process.env.UF_TEST_PG_EXPECTED_SERVER_PORT ||
+  config.port);
+const expectedDataDir = process.env.UF_TEST_PG_EXPECTED_DATA_DIR ||
+  path.join(__dirname, "..", ".local-postgres", "data");
 const schema = `uf_expired_fresh_${crypto.randomBytes(6).toString("hex")}`;
 const epoch = new Date(Date.now() - 60_000).toISOString();
 const workspace = "ws_expired_fresh";
@@ -43,10 +49,10 @@ async function main() {
       host(inet_server_addr()) AS host,inet_server_port() AS port,
       current_setting('data_directory') AS data_dir`)).rows[0];
     assert.equal(identity.db, config.database);
-    assert.equal(identity.host, config.host);
-    assert.equal(identity.port, config.port);
+    assert.equal(identity.host, expectedServerHost);
+    assert.equal(identity.port, expectedServerPort);
     assert.equal(path.normalize(identity.data_dir).toLowerCase(),
-      path.join(__dirname, "..", ".local-postgres", "data").toLowerCase());
+      path.normalize(expectedDataDir).toLowerCase());
     await admin.query(`CREATE SCHEMA ${schema}`);
     await admin.query(`SET search_path TO ${schema},public`);
     await admin.query(fs.readFileSync(path.join(__dirname, "..", "modules",

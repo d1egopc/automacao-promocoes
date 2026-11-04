@@ -29,6 +29,8 @@
 
 Quando imagem, link ou cupom deixam de ser validos, preserve o fato historico e aplique somente o contrato de validade da superficie. Nao recapture ou substitua automaticamente em read path. Mudanca de frescor/expiracao exige auditoria dos produtores e consumidores, incluindo Social.
 
+Achados e Vitrine mantem retencao propria e estoque vivo, limitado pelo contrato de cada superficie. Nao sao depositos infinitos, fila de retry nem fonte de verdade para reenvio. Uma oferta expirada no fluxo operacional nao volta a ser elegivel por continuar visivel nessas projecoes; limpeza so pode remover o que nao estiver protegido por referencia ativa.
+
 ## Gate
 
 Teste Achados, Minha Vitrine, Vitrine publica e modal; valide origem, marketplace, imagem, preco, cupom, links e isolamento de workspace. Alteracao de criterio de entrada/saida e contrato comercial, nao simples UX.

@@ -135,3 +135,17 @@ Na prova, `main` dos dois repositorios retornou `protected=false`. Ativar bloque
 - Os pequenos deltas de resposta leve, status de administrador e diagnostico delimitado foram aplicados depois das bases acima. Confirmacao independente de source SHA do deployment Vercel Production ainda pendente; branch Git nao prova Production.
 
 Ao atualizar esta fotografia, registre data, fonte do dado e apenas informacao nao sensivel. Nunca cole token, cookie, senha, chave privada ou valor de secret/env.
+
+## RIO fluxo vivo - auditoria READ-ONLY de 2026-11-03
+
+- Fonte: PostgreSQL 17 em transacoes `READ ONLY` com timeout, metadados Docker e logs sanitizados via SSH oficial. Nenhuma fila, credito, sessao, configuracao ou limpeza foi alterada.
+- Runtime observado: backend `bc1ead6f53d064d5928181e3e9c6ab54867f233a`, imagem `sha256:50d7638ab8845614bfbd41cf67df42d97e779f2d6fef836521b87268f4bbcb9d`, Engine `UNIVERSAL`; PostgreSQL saudavel.
+- Janela recente encerrada aproximadamente em `2026-11-03T20:42Z`: 494 eventos persistidos para `user_pss60lus`, oriundos de nove grupos sanitizados (TeleRadar 375 em sete grupos; Clonador 119 em dois). Nao houve evento persistido atribuivel a Radar WhatsApp direto; isso nao prova ausencia antes da persistencia.
+- Pesca: 193 adicoes a fila no workspace; snapshot do destino Pesca continha 62 alvos recentes, 60 ja `skipped/not_sent` por `commercially_expired_before_claim`, dois `pending`, zero `send_started` e zero ACK.
+- Janela saudavel comparavel e agora documentada: `2026-10-17T18:00Z` a `2026-10-18T00:00Z`, com 52 ACKs no destino Pesca (27 Clonador/Mercado Livre, 20 Optimus/Mercado Livre, 3 Optimus/Shopee e 2 Optimus/Amazon Pet).
+- Causa operacional comprovada: o Executor registrou repetidamente `universal_credit_policy_deferred` antes de `send_started` (416 ocorrencias desde o restart observado). O ledger tinha saldo autoritativo 15427, reservado 19 e 19 holds `held`; a renovacao operacional indireta tentou aplicar politica com holds ativos e a excecao impediu a leitura de disponibilidade/claim, embora o consumo permanecesse protegido.
+- AliExpress: 68 eventos, 108 links persistidos, 14 ofertas enfileiradas, 54 alvos e zero ACK. Dez ofertas preservaram `link_pc` e `link_app`; 17 jobs falharam antes da oferta por `afiliacao_workspace_incompleta`. As 14 ofertas validas tambem encontraram o bloqueio comum do Executor.
+- Magalu: um evento/OneLink persistido, um link sem resolucao final, job terminal `sem_link_produto_confirmado`, zero oferta/fila/ACK.
+- Performance: evento->fila p50 165863 ms e p95 529423 ms; envio/ACK nao mensuravel por ausencia de `send_started`. Pool observado 2-3 conexoes, zero espera, maximo 10; PostgreSQL estava em 0,02% CPU. Backend apresentou 126,5% CPU no snapshot e event-loop medio 20-23 ms, com picos 157-551 ms.
+- Backlog: legado pre-epoch separado (178221 `pendente`, 17 `processando`) e nunca autorizado para replay. No epoch atual havia 3919 `pronto_para_importar`, 29 `importando` e poucos pendentes novos; a fila Universal tinha 9 itens e 11 alvos `pending` no primeiro snapshot, alem de 35 alvos `ambiguous` globais preservados.
+- Auto-Clean nao foi executado nesta auditoria. O estado GC registrava ciclo em `2026-11-03T20:40:55.054Z`; o inventario fisico permanecia limitado a 12000 candidatos, sem inferencia de espaco liberado.

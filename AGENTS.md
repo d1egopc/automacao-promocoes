@@ -104,6 +104,16 @@ Pare e solicite decisao para mudanca irreversivel, exclusao de dados, schema/mig
 
 Considere Turbo, Historico, VIVA/recovery, Solenoide, Auto Clean, fila operacional e contratos comerciais congelados quando nao forem o escopo explicitamente autorizado.
 
+## Auth, creditos e RIO - invariantes permanentes
+
+- Login e identificacao autenticada nao dependem de saldo, ciclo, pagamento ou renovacao de creditos.
+- `/me` e estritamente read-only para creditos: pode consultar o ledger, mas nunca renovar ciclo, conceder, debitar, liberar hold ou gravar estado financeiro.
+- Ledger indisponivel nao bloqueia acesso autenticado: o perfil permanece acessivel com credito explicitamente indisponivel, sem saldo inventado. Consumo financeiro continua fail-closed.
+- Webhook Mercado Pago preserva o fluxo pagamento aprovado -> renovacao/concessao idempotente -> retomada da automacao. Read paths nao substituem esse fluxo.
+- O Guardian deve manter regressao executavel que prove que login e leitura de perfil nao acionam renovacao nem mutacao financeira.
+- RIO e fluxo vivo: captura -> processamento -> distribuicao -> ACK -> expiracao segura. Registro de captura sem ACK nao prova entrega; item expirado nao pode ser reenviado por existir em uma projecao.
+- Achados e Vitrine possuem retencao propria e estoque vivo. Nao sao depositos infinitos nem autoridade para ressuscitar ou reenviar oferta vencida.
+
 ## Extension Golden Regression Gate
 
 Antes de alterar Launcher, Side Panel, captura compartilhada, registry, product-contract, marketplace-detector, empacotamento da extensao ou implementar Modo Selecao:

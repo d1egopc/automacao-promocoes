@@ -30,6 +30,9 @@ Invariantes:
 - Recovery deve falhar fechado em hash/generation/manifest incoerente.
 - Terminal deve aparecer exatamente uma vez; item removido nao ressuscita.
 - Decisoes de prioridade sao monotonicas quando ha piso comercial comprovado.
+- `send_started` registra tentativa, nao confirmacao; entrega exige ACK/proof contratual por destino.
+- Item terminal ou comercialmente expirado nao pode ser reativado por recovery, projecao, Historico, Achados ou Vitrine.
+- Backlog legado e estoque operacional atual devem ser medidos separadamente; contagem historica nao autoriza reprocessamento.
 
 ## Listas
 
