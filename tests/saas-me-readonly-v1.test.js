@@ -52,10 +52,14 @@ function request({ port, method = "GET", route = "/", token, body }) {
   });
 }
 
-async function waitServer(port, proc, timeoutMs = 20000) {
+async function waitServer(port, proc, getStderr = () => "", timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (proc.exitCode !== null) throw new Error("me_fixture_backend_exited");
+    if (proc.exitCode !== null) {
+      const diagnostic = String(getStderr()).match(/(?:Error|error):\s*([A-Za-z0-9_.-]+)/)?.[1]
+        || "unknown";
+      throw new Error(`me_fixture_backend_exited:${diagnostic}`);
+    }
     try {
       const response = await request({ port });
       if (response.status === 200) return;
@@ -213,7 +217,7 @@ function assertNoSecret(text, secrets) {
     });
     proc.stdout.on("data", chunk => { stdout += chunk.toString(); });
     proc.stderr.on("data", chunk => { stderr += chunk.toString(); });
-    await waitServer(port, proc);
+    await waitServer(port, proc, () => stderr);
 
     async function snapshotFinanceiro(workspaceId) {
       const saldo = (await pool.query(`SELECT opening_balance,balance,reserved,revision
