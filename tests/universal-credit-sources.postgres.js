@@ -146,7 +146,37 @@ async function main() {
     await admin.query(fs.readFileSync(path.join(root, "modules", "engine",
       "schema.sql"), "utf8"));
     for (const statement of SQL_SCHEMA_FINANCEIRO_V1) await admin.query(statement);
+    // Reproduce the existing productive table before applying additive DDL.
+    await admin.query(`CREATE TABLE engine_universal_credit_opening_intents (
+      operation_epoch_started_at timestamptz NOT NULL,
+      workspace_id text NOT NULL CHECK (btrim(workspace_id) <> ''),
+      opening_balance integer NOT NULL CHECK (opening_balance >= 0),
+      source_hash text NOT NULL CHECK (source_hash ~ '^[0-9a-f]{64}$'),
+      state text NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending','completed','orphaned')),
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+      completed_at timestamptz,
+      PRIMARY KEY (operation_epoch_started_at,workspace_id)
+    )`);
+    await admin.query(`INSERT INTO engine_universal_credit_opening_intents
+      (operation_epoch_started_at,workspace_id,opening_balance,source_hash)
+      VALUES ('2026-01-01T00:00:00Z','preexisting-intent',300,$1)`,
+    ["a".repeat(64)]);
     await prepararModoOperacionalReal({ pool: admin });
+    const migratedIntent = (await admin.query(`SELECT opening_balance,
+      source_hash,state,opening_cycle_end FROM
+      engine_universal_credit_opening_intents
+      WHERE workspace_id='preexisting-intent'`)).rows[0];
+    assert.deepEqual(migratedIntent, { opening_balance: 300,
+      source_hash: "a".repeat(64), state: "pending", opening_cycle_end: null },
+    "additive DDL preserves pre-existing intent and leaves expiry unknown");
+    await admin.query(`ALTER TABLE engine_universal_credit_opening_intents
+      ADD COLUMN IF NOT EXISTS opening_cycle_end timestamptz`);
+    assert.equal((await admin.query(`SELECT COUNT(*)::int AS n FROM
+      engine_universal_credit_opening_intents
+      WHERE workspace_id='preexisting-intent' AND opening_balance=300
+        AND opening_cycle_end IS NULL`)).rows[0].n, 1,
+    "repeated DDL must preserve the previous row exactly");
     await admin.query(`UPDATE engine_operation_state SET mode='CUTOVER_PREPARED'
       WHERE id=1`);
     pool = new Pool({ ...config, max: 12,
