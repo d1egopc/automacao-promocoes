@@ -591,7 +591,8 @@ function fechar(server) {
       pro: { ...planoPro, id: "pro", nome: "Premium", preco: "R$ 39,90",
         limites: { creditosPorCiclo: 2500, cicloDias: 30 } }
     };
-    const canonico = criarApp({ usuarios, planos: planosCanonicos });
+    const usuariosCanonicos = usuarios.map(usuario => ({ ...usuario }));
+    const canonico = criarApp({ usuarios: usuariosCanonicos, planos: planosCanonicos });
     const serverCanonico = await escutar(canonico.app);
     try {
       const planoLoja = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
@@ -613,6 +614,40 @@ function fechar(server) {
       });
       assert.strictEqual(alias.status, 404, "checkout publico exige ID imutavel, nao nome comercial");
       assert.strictEqual(canonico.repo.state.payments.length, 2);
+      for (const [clienteId, resposta, planoId, creditosPorCiclo] of [
+        ["user_a", planoLoja, "plano_loja", 1500],
+        ["user_b", premium, "pro", 2500]
+      ]) {
+        const evento = {
+          type: "payment.approved", provider: "mercadopago",
+          providerEventId: `evt_${clienteId}_${planoId}`,
+          externalPaymentId: resposta.body.externalPaymentId,
+          clienteId, planoId,
+          amountCents: resposta.body.valor.amountCents, currency: "BRL",
+          receivedAt: new Date("2026-08-23T10:05:00.000Z")
+        };
+        const confirmado = await financeiro.processarFinancialPaymentEvent(evento, {
+          repositorio: canonico.repo,
+          agora: new Date("2026-08-23T10:05:00.000Z")
+        });
+        assert.strictEqual(confirmado.ledgerInserido, true);
+        assert.strictEqual((await financeiro.processarFinancialPaymentEvent(evento, {
+          repositorio: canonico.repo,
+          agora: new Date("2026-08-23T10:05:00.000Z")
+        })).idempotente, true);
+        await financeiro.reconciliarLedgerFinanceiroPendente({
+          repositorio: canonico.repo,
+          lerUsuarios: async () => usuariosCanonicos,
+          salvarUsuarios: async () => {},
+          filtro: { provider: "mercadopago",
+            externalPaymentId: resposta.body.externalPaymentId, clienteId }
+        });
+        const usuarioCanonico = usuariosCanonicos.find(usuario => usuario.id === clienteId);
+        assert.strictEqual(usuarioCanonico.plano, planoId,
+          "webhook aprovado preserva ID canonico no mesmo usuario");
+        assert.strictEqual(usuarioCanonico.creditos, creditosPorCiclo,
+          "webhook concede exatamente a franquia do plano canonico");
+      }
     } finally {
       await fechar(serverCanonico);
     }
