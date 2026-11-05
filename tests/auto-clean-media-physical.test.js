@@ -230,6 +230,58 @@ async function testLoadGuardStopsWithoutStarvation() {
   } finally { fs.rmSync(dataDir, { recursive: true, force: true }); }
 }
 
+async function testPaginatedCensusHasNoSkipsOrDuplicates() {
+  const f = fixture();
+  try {
+    const names = [];
+    for (let index = 1; index <= 7; index += 1) {
+      const hash = index.toString(16).padStart(64, "0");
+      names.push(`${hash}.png`);
+      file(f.identity, `${hash}.png`, index !== 7);
+    }
+    const refs = new Map([[names[1].slice(0, -4), new Set(["fila"])],
+      [names[3].slice(0, -4), new Set(["historico"])]]);
+    let result = await runMediaPhysical({ dataDir: f.dataDir, nowMs: NOW, targetId: `identity:${f.workspace}`,
+      maxScan: 2, maxDurationMs: 2000, referenceLoader: loader(refs) });
+    assert.strictEqual(result.censusCompletedThisRun, undefined);
+
+    // Delete an already-counted file and insert a lexically earlier upload.
+    // A numeric offset would skip a live entry here; the stable name cursor must not.
+    fs.unlinkSync(path.join(f.identity, names[0]));
+    file(f.identity, `${"0".repeat(64)}.png`);
+    for (let page = 0; page < 6 && result.censusCompletedThisRun !== true; page += 1) {
+      result = await runMediaPhysical({ dataDir: f.dataDir, nowMs: NOW + page + 1,
+        targetId: `identity:${f.workspace}`, maxScan: 2, maxDurationMs: 2000,
+        referenceLoader: loader(refs) });
+    }
+    assert.strictEqual(result.censusCompletedThisRun, true);
+    assert.strictEqual(result.censusScanned, 7, "cada arquivo do snapshot monotono e contado uma vez");
+    assert.strictEqual(result.censusProtected, 3, "duas referencias e um arquivo jovem");
+    assert.strictEqual(result.censusEligible, 4);
+    assert.strictEqual(result.censusEligibleBytes, 64);
+    assert.ok(result.backlog <= result.censusEligible,
+      "fila de trabalho limitada nao pode ser apresentada como censo universal");
+  } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+}
+
+async function testPhysicalBatchSingleFlight() {
+  const f = fixture();
+  try {
+    file(f.identity, `${"8".repeat(64)}.png`);
+    let release;
+    const first = runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: NOW, maxTargetsPerRun: 1,
+      referenceLoader: loader(), loadGuard: async () => new Promise(resolve => { release = resolve; }) });
+    while (!release) await new Promise(resolve => setImmediate(resolve));
+    const concurrent = await runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: NOW,
+      maxTargetsPerRun: 1, referenceLoader: loader() });
+    assert.strictEqual(concurrent.stopReason, "media_batch_single_flight");
+    assert.strictEqual(concurrent.blocked, 1);
+    assert.strictEqual(concurrent.removed, 0);
+    release(true);
+    await first;
+  } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+}
+
 async function main() {
   await testIdentityProtectionExpiryAndGate();
   await testConcurrentReferenceAndRewriteFailClosed();
@@ -240,6 +292,8 @@ async function main() {
   await testBatchLimit();
   await testTenWorkspaceMicroBatchesAndMetrics();
   await testLoadGuardStopsWithoutStarvation();
+  await testPaginatedCensusHasNoSkipsOrDuplicates();
+  await testPhysicalBatchSingleFlight();
   console.log("AUTO_CLEAN_MEDIA_PHYSICAL_TESTS_PASS");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

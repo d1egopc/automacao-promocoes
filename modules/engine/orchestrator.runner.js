@@ -18,8 +18,8 @@ const autoGateShadow = createAutoGateShadow();
 const { criarMedidorCiclo } = require("../telemetria/ciclo-observabilidade");
 const {
   autoCleanShadowAtivo,
+  agendarAutoCleanShadow,
   agendarAutoCleanRecorrente,
-  executarAutoCleanShadowSeguro
 } = require("./auto-clean/auto-clean.service");
 const {
   criarMedidorEngineMemoryStage,
@@ -430,9 +430,7 @@ async function executarRodadaEngineOrquestrador(opcoes = {}) {
     // Admission only: retention I/O runs outside the awaited commercial cycle.
     agendarAutoCleanRecorrente();
     if (autoCleanShadowAtivo()) {
-      resumo.etapas.autoCleanShadow = await executarEtapaRastreada("auto_clean_shadow", executarAutoCleanShadowSeguro, {
-        loteLimite: 100
-      }, { rodadaId, medidorCiclo });
+      resumo.etapas.autoCleanShadow = agendarAutoCleanShadow({ scope: "global", rodadaId });
     }
 
     let inicioFornecedorMs = Date.now();

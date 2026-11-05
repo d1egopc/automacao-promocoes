@@ -10,7 +10,7 @@ const {
   executarAutoCleanShadow
 } = require("../modules/engine/auto-clean/auto-clean.service");
 
-async function capture(physical, execute) {
+async function capture(physical, execute, shadowReadOnly = false) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "optimus-media-wiring-"));
   const oldPhysical = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL;
   const oldExecute = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE;
@@ -24,6 +24,7 @@ async function capture(physical, execute) {
       dataDir,
       incluirPostgres: false,
       incluirArquivos: true,
+      shadowReadOnly,
       // Deliberately attempt to bypass the gates; the wiring must override it.
       gcRelayOptions: { mediaPhysicalEnabled: true, execute: true, mediaDeleteEnabled: true },
       gcRelay: async options => { captured = options; return { dryRun: true, mediaPhysical: { dryRun: true } }; },
@@ -54,6 +55,11 @@ async function run() {
   await assertCase("1", "true", false, false);
   await assertCase("true", "1", true, false);
   await assertCase("true", "true", true, true);
+  const detachedShadow = await capture("true", "true", true);
+  assert.equal(detachedShadow.mediaPhysicalEnabled, true);
+  assert.equal(detachedShadow.execute, false,
+    "detached Shadow never inherits physical delete authorization");
+  assert.equal(detachedShadow.mediaDeleteEnabled, false);
   console.log("AUTO_CLEAN_MEDIA_PHYSICAL_WIRING_TESTS_PASS");
 }
 

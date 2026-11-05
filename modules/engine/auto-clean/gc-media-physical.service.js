@@ -18,20 +18,22 @@ const DEFAULT_MICROBATCH_SIZE = 16;
 const DEFAULT_TARGETS_PER_BATCH = 4;
 const MAX_TARGETS_PER_BATCH = 10;
 const MAX_DURATION_MS = 2000;
-const MAX_STATE_CANDIDATES = 12000;
+// Bounded deletion working set. Universal totals come from the independent,
+// paginated census below and are never truncated by this queue capacity.
+const MAX_WORKING_SET_CANDIDATES = 12000;
 const EXT_SOCIAL = /\.(?:jpe?g|png|webp|mp4|mov|webm)$/i;
 
 function emptyState() {
-  return { version: 1, lastTarget: "", cursors: {}, candidates: {}, lastObservedAt: {} };
+  return { version: 2, lastTarget: "", cursors: {}, cursorNames: {}, candidates: {}, lastObservedAt: {}, census: {} };
 }
 
 async function loadState(dataDir, fsApi) {
   try {
     const parsed = JSON.parse(await fsApi.readFile(path.join(dataDir, STATE_FILE), "utf8"));
-    if (parsed?.version !== 1 || !parsed.cursors || !parsed.candidates || !parsed.lastObservedAt) {
+    if (![1, 2].includes(parsed?.version) || !parsed.cursors || !parsed.candidates || !parsed.lastObservedAt) {
       throw new Error("GC_MEDIA_STATE_INVALID");
     }
-    return parsed;
+    return { ...parsed, version: 2, cursorNames: parsed.cursorNames || {}, census: parsed.census || {} };
   } catch (error) {
     if (error?.code === "ENOENT") return emptyState();
     throw error;
@@ -141,6 +143,24 @@ function deleteEnabled(options, target) {
     ((released(MEDIA_RELEASE) && (options.mediaDeleteEnabled === true || envEnabled)) || scopedRelease(target));
 }
 
+function censusState(state, targetId, nowMs, startingNewPass) {
+  if (startingNewPass || !state.census[targetId] || state.census[targetId].complete === true) {
+    const previous = state.census[targetId]?.lastComplete || null;
+    state.census[targetId] = {
+      generation: Number(state.census[targetId]?.generation || 0) + 1,
+      startedAtMs: nowMs,
+      scanned: 0,
+      eligible: 0,
+      eligibleBytes: 0,
+      protected: 0,
+      blocked: 0,
+      complete: false,
+      lastComplete: previous
+    };
+  }
+  return state.census[targetId];
+}
+
 async function runMediaPhysical(options = {}) {
   const started = Date.now();
   const fsApi = options.fsApi || fs.promises;
@@ -211,36 +231,49 @@ async function runMediaPhysical(options = {}) {
     return summary;
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  const startAt = Math.min(Number(state.cursors[target.id] || 0), entries.length);
-  const slice = entries.slice(startAt, startAt + maxScan);
-  state.cursors[target.id] = startAt + slice.length >= entries.length ? 0 : startAt + slice.length;
+  const lastName = String(state.cursorNames[target.id] || "");
+  // A name cursor is stable if files are added or deleted while a census is in
+  // progress. New names before the cursor are intentionally picked up by the
+  // next generation rather than causing skips or duplicate page counts.
+  const startAt = lastName
+    ? entries.findIndex(entry => entry.name.localeCompare(lastName) > 0)
+    : 0;
+  const normalizedStart = startAt < 0 ? entries.length : startAt;
+  const slice = entries.slice(normalizedStart, normalizedStart + maxScan);
+  const census = censusState(state, target.id, nowMs, !lastName);
   const previousObservedAt = Number(state.lastObservedAt[target.id] || 0);
   state.lastObservedAt[target.id] = nowMs;
   const ready = [];
+  let processedInPage = 0;
+  let lastProcessedName = lastName;
   for (const entry of slice) {
     if (hasBudget()) { summary.throttled = true; summary.stopReason = "time_budget"; break; }
+    processedInPage += 1;
+    lastProcessedName = entry.name;
     const file = path.resolve(target.dir, entry.name);
     if (!file.startsWith(path.resolve(target.dir) + path.sep)) { summary.errors++; continue; }
     try {
       const stat = await fsApi.lstat(file);
       if (!stat.isFile() || stat.isSymbolicLink()) { summary.errors++; continue; }
       summary.scanned++;
+      census.scanned++;
       if (previousObservedAt > 0 && stat.mtimeMs > previousObservedAt && stat.mtimeMs <= nowMs) {
         summary.createdSinceLastRun++; summary.createdBytes += stat.size;
       }
       const candidateId = `${target.id}/${entry.name}`;
       const key = referenceKey(target, entry.name);
       if (references.refs.has(key)) {
-        summary.referenced++; delete state.candidates[candidateId]; continue;
+        summary.referenced++; census.protected++; delete state.candidates[candidateId]; continue;
       }
       if (nowMs - stat.mtimeMs <= RETENTION_MS) {
-        summary.young++; delete state.candidates[candidateId]; continue;
+        summary.young++; census.protected++; delete state.candidates[candidateId]; continue;
       }
       summary.candidates++; summary.candidateBytes += stat.size;
+      census.eligible++; census.eligibleBytes += stat.size;
       const observed = state.candidates[candidateId];
       const currentFingerprint = fingerprint(stat);
       if (!observed || observed.fingerprint !== currentFingerprint) {
-        if (Object.keys(state.candidates).length < MAX_STATE_CANDIDATES) {
+        if (Object.keys(state.candidates).length < MAX_WORKING_SET_CANDIDATES) {
           state.candidates[candidateId] = { firstSeenAt: nowMs, fingerprint: currentFingerprint, size: stat.size };
         }
       } else if (nowMs - Number(observed.firstSeenAt || 0) >= OBSERVATION_DELAY_MS &&
@@ -250,6 +283,32 @@ async function runMediaPhysical(options = {}) {
       }
     } catch { summary.errors++; }
   }
+  const completedPage = normalizedStart + processedInPage >= entries.length;
+  state.cursors[target.id] = completedPage ? 0 : normalizedStart + processedInPage;
+  state.cursorNames[target.id] = completedPage ? "" : lastProcessedName;
+  if (completedPage && !summary.throttled) {
+    census.complete = true;
+    census.completedAtMs = nowMs;
+    census.lastComplete = {
+      generation: census.generation,
+      startedAtMs: census.startedAtMs,
+      completedAtMs: nowMs,
+      scanned: census.scanned,
+      eligible: census.eligible,
+      eligibleBytes: census.eligibleBytes,
+      protected: census.protected,
+      blocked: census.blocked
+    };
+    summary.censusCompletedThisRun = true;
+  }
+  const censusReport = census.lastComplete || census;
+  summary.censusComplete = census.complete === true;
+  summary.censusGeneration = Number(censusReport.generation || census.generation || 0);
+  summary.censusScanned = Number(censusReport.scanned || 0);
+  summary.censusEligible = Number(censusReport.eligible || 0);
+  summary.censusEligibleBytes = Number(censusReport.eligibleBytes || 0);
+  summary.censusProtected = Number(censusReport.protected || 0);
+  summary.censusBlocked = Number(censusReport.blocked || 0);
   const targetCandidates = Object.entries(state.candidates)
     .filter(([key]) => key.startsWith(`${target.id}/`));
   summary.backlog = targetCandidates.length;
@@ -304,7 +363,7 @@ async function runMediaPhysical(options = {}) {
   return summary;
 }
 
-async function runMediaPhysicalBatch(options = {}) {
+async function runMediaPhysicalBatchInternal(options = {}) {
   const started = Date.now();
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || "/data");
   const fsApi = options.fsApi || fs.promises;
@@ -357,6 +416,15 @@ async function runMediaPhysicalBatch(options = {}) {
     throttled: loadThrottled || summaries.some(item => item.throttled),
     stopReason: loadThrottled ? "load_guard" : (summaries.find(item => item.stopReason)?.stopReason || ""),
     targetResults: summaries,
+    censusResults: summaries.filter(item => item.censusCompletedThisRun === true).map(item => ({
+      target: item.target,
+      generation: item.censusGeneration,
+      candidates: item.censusScanned,
+      eligible: item.censusEligible,
+      eligibleBytes: item.censusEligibleBytes,
+      protected: item.censusProtected,
+      blocked: item.censusBlocked
+    })),
     durationMs: Date.now() - started
   };
   for (const item of summaries) {
@@ -376,6 +444,26 @@ async function runMediaPhysicalBatch(options = {}) {
   return aggregate;
 }
 
+let mediaBatchActive = false;
+async function runMediaPhysicalBatch(options = {}) {
+  if (mediaBatchActive) {
+    return {
+      target: "", kind: "batch", workspace: "", targetsProcessed: 0, targets: [],
+      scanned: 0, candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0,
+      blocked: 1, errors: 0, backlog: 0, backlogBytes: 0, quarantined: 0,
+      dryRun: true, throttled: true, stopReason: "media_batch_single_flight",
+      targetResults: [], censusResults: [], durationMs: 0
+    };
+  }
+  mediaBatchActive = true;
+  try {
+    return await runMediaPhysicalBatchInternal(options);
+  } finally {
+    mediaBatchActive = false;
+  }
+}
+
 module.exports = { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS, MAX_SCAN_PER_RUN,
   MAX_DELETE_PER_RUN, MAX_TOTAL_DELETE_PER_BATCH, DEFAULT_MICROBATCH_SIZE, DEFAULT_TARGETS_PER_BATCH,
-  MAX_DURATION_MS, STATE_FILE, loadReferences, referenceKey, deleteEnabled, scopedRelease };
+  MAX_DURATION_MS, MAX_WORKING_SET_CANDIDATES, STATE_FILE,
+  loadReferences, referenceKey, deleteEnabled, scopedRelease };

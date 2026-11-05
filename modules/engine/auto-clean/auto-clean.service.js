@@ -13,7 +13,7 @@ const filaHistoricoPolicy = require("../../../utils/fila-historico-policy");
 const filaThumbnailService = require("../../fila/fila-thumbnail.service");
 const workspaceRotation = require("./workspace-rotation");
 const { executarGcRelaySeguro } = require("./gc-relay.service");
-const { createRecurringLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
+const { createRecurringLane, createShadowLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const { DB_RELEASE, FILE_RELEASE, MEDIA_RELEASE, released, requireRelease } = require("./deletion-release");
 const scopedRawAdmin = require("./recurring-admin-events");
 const { runMediaPhysicalBatch } = require("./gc-media-physical.service");
@@ -2671,18 +2671,29 @@ async function executarAutoCleanShadow(opcoes = {}) {
     ? false
     : opcoes.incluirArquivos !== false;
 
+  const abortarSeNecessario = () => {
+    if (opcoes.signal?.aborted || (Number.isFinite(opcoes.deadlineAt) && Date.now() >= opcoes.deadlineAt)) {
+      const erro = new Error("AUTO_CLEAN_SHADOW_ABORTED");
+      erro.code = "AUTO_CLEAN_SHADOW_ABORTED";
+      throw erro;
+    }
+  };
+
+  abortarSeNecessario();
   if (executarDb) origens.push(...await inventariarPostgres({ ...opcoes, politica }));
+  abortarSeNecessario();
   if (executarArquivos) {
     origens.push(auditarOrphanWorkspaces({ ...opcoes, politica }));
     origens.push(auditarFilaJson({ ...opcoes, politica }));
     origens.push(...inventariarArquivosPorCategoria({ ...opcoes, politica }));
     origens.push(memoriaComercialStatus({ ...opcoes, politica }));
   }
+  abortarSeNecessario();
 
   for (const origem of origens) logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-SHADOW]", origem, logger);
 
   let execute = null;
-  if (autoCleanExecuteAtivo(opcoes)) {
+  if (opcoes.shadowReadOnly !== true && autoCleanExecuteAtivo(opcoes)) {
     try {
       execute = await executarAutoCleanExecute({ ...opcoes, politica });
       for (const etapa of execute.etapas || []) logAutoClean("[OPTIMUS-AUTO-CLEAN-V1-EXECUTE]", etapa, logger);
@@ -2705,6 +2716,7 @@ async function executarAutoCleanShadow(opcoes = {}) {
   if (executarArquivos) {
     try {
       const mediaPhysical = autoCleanMediaPhysicalAutorizado();
+      const shadowReadOnly = opcoes.shadowReadOnly === true;
       gcRelay = await (opcoes.gcRelay || executarGcRelaySeguro)({
         dataDir: politica.dataDir,
         logger,
@@ -2712,8 +2724,8 @@ async function executarAutoCleanShadow(opcoes = {}) {
         // Environment flags are the only production authorization.  Explicit
         // caller options cannot bypass either gate or enable deletion alone.
         mediaPhysicalEnabled: mediaPhysical.physical,
-        execute: mediaPhysical.execute,
-        mediaDeleteEnabled: mediaPhysical.execute
+        execute: shadowReadOnly ? false : mediaPhysical.execute,
+        mediaDeleteEnabled: shadowReadOnly ? false : mediaPhysical.execute
       });
       logger.log("[OPTIMUS-AUTO-CLEAN-GC-DECISION]", JSON.stringify(summarizeGc(gcRelay)));
     } catch {
@@ -2782,7 +2794,15 @@ const agendarAutoCleanRecorrente = createRecurringLane({
   }
 });
 
+const agendarAutoCleanShadow = createShadowLane({
+  enabled: () => autoCleanShadowAtivo(),
+  deadlineMs: () => Number(process.env.OPTIMUS_AUTO_CLEAN_SHADOW_DEADLINE_MS) || 30000,
+  maxGlobal: 1,
+  run: opcoes => executarAutoCleanShadowSeguro({ ...opcoes, loteLimite: 100 })
+});
+
 module.exports = {
+  agendarAutoCleanShadow,
   agendarAutoCleanRecorrente,
   ENV_SHADOW,
   ENV_EXECUTE,

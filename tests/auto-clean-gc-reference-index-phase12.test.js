@@ -164,9 +164,9 @@ async function testBootstrapCursorAndPromotion() {
     const secondLine = `${JSON.stringify({ imagemRef: renderUrl(f, H2) })}\n`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, firstLine + secondLine);
-    // Discovery validates the compact projection content before processing it;
-    // account for that guarded read and the source pass in this budget fixture.
-    const budget = fs.statSync(projectionFile).size * 2 + Buffer.byteLength(firstLine);
+    // Discovery validation has a separate bounded budget; the build budget is
+    // reserved for the source pass and one JSONL line.
+    const budget = fs.statSync(projectionFile).size + Buffer.byteLength(firstLine);
     const first = await build(f, { maxBytesPerRun: budget });
     assert.strictEqual(first.complete, false);
     assert.strictEqual(first.reasonCode, REASON.BUILD_BUDGET);

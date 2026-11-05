@@ -21,6 +21,7 @@ const INDEX_ROOT = path.join("auto-clean", "gc-references");
 const CURRENT_FILE = "current.json";
 const BUILDING_FILE = "building.json";
 const DEFAULT_BUILD_BYTES = 16 * 1024 * 1024;
+const DEFAULT_DISCOVERY_BYTES = 12 * 1024 * 1024;
 const DEFAULT_BUILD_DURATION_MS = 750;
 const MAX_INDEX_FILE_BYTES = 16 * 1024 * 1024;
 const MAX_QUEUE_PROJECTION_BYTES = 4 * 1024 * 1024;
@@ -665,6 +666,7 @@ function sanitizedBuild(result) {
     generation: result.generation || "",
     source: result.source || "",
     bytesProcessed: result.bytesProcessed || 0,
+    discoveryBytesProcessed: result.discoveryBytesProcessed || 0,
     refsFound: result.refsFound || 0,
     complete: result.complete === true,
     durationMs: result.durationMs || 0,
@@ -681,6 +683,11 @@ async function buildOrLoadReferenceIndex(options = {}) {
   const workspaceId = String(options.workspaceId || "");
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
   const maxBytes = Math.max(1, Number(options.maxBytesPerRun) || DEFAULT_BUILD_BYTES);
+  // Discovery validates compact projections and their guards. It has its own
+  // bounded budget so validation I/O cannot permanently starve the incremental
+  // source cursor from its build budget.
+  const maxDiscoveryBytes = Math.max(1,
+    Number(options.maxDiscoveryBytesPerRun) || DEFAULT_DISCOVERY_BYTES);
   const maxDurationMs = Math.max(1, Number(options.maxDurationMs) || DEFAULT_BUILD_DURATION_MS);
   const logger = options.logger || console;
   if (!/^[a-zA-Z0-9_-]+$/.test(workspaceId)) {
@@ -696,11 +703,12 @@ async function buildOrLoadReferenceIndex(options = {}) {
   if (discovery.error) {
     return { complete: false, refs: new Map(), ...discovery.error,
       generation: persisted.ok ? persisted.value.generation : "", sourceSnapshot: discovery.snapshot,
-      bytesProcessed: discovery.bytesRead || 0 };
+      bytesProcessed: 0, discoveryBytesProcessed: discovery.bytesRead || 0 };
   }
-  if ((discovery.bytesRead || 0) > maxBytes) {
+  if ((discovery.bytesRead || 0) > maxDiscoveryBytes) {
     return { complete: false, refs: new Map(), workspaceId, reasonCode: REASON.BUILD_BUDGET,
-      bytesProcessed: discovery.bytesRead, sourcesRead: discovery.validatedQueueProjection ? 1 : 0,
+      bytesProcessed: 0, discoveryBytesProcessed: discovery.bytesRead,
+      sourcesRead: discovery.validatedQueueProjection ? 1 : 0,
       durationMs: clock() - started, sourceSnapshot: discovery.snapshot };
   }
 
@@ -712,7 +720,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
     if (currentFresh && !reusable.dangerous && !hasPendingSources(probe) &&
         sameSnapshot(current.value.sourceSnapshot, discovery.snapshot)) {
       return { complete: true, refs: refsToMap(current.value.refs), generation: current.value.generation,
-        refsCount: Object.keys(current.value.refs).length, bytesProcessed: discovery.bytesRead || 0,
+        refsCount: Object.keys(current.value.refs).length, bytesProcessed: 0,
+        discoveryBytesProcessed: discovery.bytesRead || 0,
         sourcesRead: discovery.validatedQueueProjection ? 1 : 0,
         reasonCode: "", sourceSnapshot: discovery.snapshot };
     }
@@ -739,7 +748,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
     try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(changed))); } catch {}
     return changed;
   }
-  let bytesProcessed = discovery.bytesRead || 0;
+  let bytesProcessed = 0;
+  let discoveryBytesProcessed = discovery.bytesRead || 0;
   let sourcesRead = discovery.validatedQueueProjection ? 1 : 0;
   let lastSource = "";
   let lastFile = "";
@@ -772,12 +782,12 @@ async function buildOrLoadReferenceIndex(options = {}) {
     if (result.dangerous) {
       const latest = await discoverSources({ dataDir, workspaceId, nowMs, fsApi,
         validatedQueueProjection: discovery.validatedQueueProjection });
-      bytesProcessed += latest.bytesRead || 0;
+      discoveryBytesProcessed += latest.bytesRead || 0;
       const restarted = newBuilding(workspaceId, latest.error ? discovery : latest, nowMs);
       await atomicWriteJson(buildingFile, restarted, fsApi);
       const changed = { complete: false, refs: new Map(), workspaceId, generation: restarted.generation,
         source: source.source, referenceFile: source.file,
-        reasonCode: result.reasonCode || REASON.SOURCE_CHANGED, bytesProcessed,
+        reasonCode: result.reasonCode || REASON.SOURCE_CHANGED, bytesProcessed, discoveryBytesProcessed,
         sourcesRead, refsFound: 0, nextCursor: 0, durationMs: clock() - started };
       try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(changed))); } catch {}
       return changed;
@@ -788,7 +798,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
       await atomicWriteJson(buildingFile, state, fsApi);
       const failed = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
         source: source.source, referenceFile: source.file, reasonCode: result.reasonCode,
-        lineNumber: result.lineNumber, bytesProcessed, refsFound: Object.keys(state.refs).length,
+        lineNumber: result.lineNumber, bytesProcessed, discoveryBytesProcessed,
+        refsFound: Object.keys(state.refs).length,
         sourcesRead, nextCursor: progress.cursor, durationMs: clock() - started };
       try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(failed))); } catch {}
       return failed;
@@ -816,7 +827,7 @@ async function buildOrLoadReferenceIndex(options = {}) {
   if (hasPendingSources(state)) {
     await atomicWriteJson(buildingFile, state, fsApi);
     const partial = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
-      source: lastSource, referenceFile: lastFile, reasonCode: stopReason, bytesProcessed,
+      source: lastSource, referenceFile: lastFile, reasonCode: stopReason, bytesProcessed, discoveryBytesProcessed,
       sourcesRead, refsFound: Object.keys(state.refs).length,
       nextCursor: state.sourceStates[state.sourceOrder[state.sourceIndex]]?.cursor || state.sourceCursor,
       durationMs: clock() - started };
@@ -826,23 +837,23 @@ async function buildOrLoadReferenceIndex(options = {}) {
 
   const finalDiscovery = await discoverSources({ dataDir, workspaceId, nowMs, fsApi,
     validatedQueueProjection: discovery.validatedQueueProjection });
-  bytesProcessed += finalDiscovery.bytesRead || 0;
+  discoveryBytesProcessed += finalDiscovery.bytesRead || 0;
   if (finalDiscovery.error) {
     await atomicWriteJson(buildingFile, state, fsApi);
     const changed = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
       source: finalDiscovery.error.source || "validation",
       referenceFile: finalDiscovery.error.file || "",
-      reasonCode: finalDiscovery.error.reasonCode, bytesProcessed, sourcesRead,
+      reasonCode: finalDiscovery.error.reasonCode, bytesProcessed, discoveryBytesProcessed, sourcesRead,
       refsFound: Object.keys(state.refs).length, nextCursor: state.sourceCursor,
       durationMs: clock() - started };
     try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(changed))); } catch {}
     return changed;
   }
-  if (bytesProcessed > maxBytes) {
+  if ((finalDiscovery.bytesRead || 0) > maxDiscoveryBytes) {
     state.updatedAtMs = nowMs;
     await atomicWriteJson(buildingFile, state, fsApi);
     const limited = { complete: false, refs: new Map(), workspaceId, generation: state.generation,
-      source: "validation", reasonCode: REASON.BUILD_BUDGET, bytesProcessed, sourcesRead,
+      source: "validation", reasonCode: REASON.BUILD_BUDGET, bytesProcessed, discoveryBytesProcessed, sourcesRead,
       refsFound: Object.keys(state.refs).length, nextCursor: state.sourceCursor,
       durationMs: clock() - started };
     try { logger.log("[GC-REFERENCE-INDEX-BUILD]", JSON.stringify(sanitizedBuild(limited))); } catch {}
@@ -888,7 +899,8 @@ async function buildOrLoadReferenceIndex(options = {}) {
   await atomicWriteJson(currentFile, ready, fsApi);
   await atomicWriteJson(buildingFile, buildingFromCurrent(ready, finalDiscovery, nowMs), fsApi);
   const completed = { complete: true, refs: refsToMap(state.refs), workspaceId, generation: state.generation,
-    refsCount: Object.keys(state.refs).length, bytesProcessed, sourcesRead, durationMs: clock() - started,
+    refsCount: Object.keys(state.refs).length, bytesProcessed, discoveryBytesProcessed,
+    sourcesRead, durationMs: clock() - started,
     sourceSnapshot: state.sourceSnapshot };
   try {
     logger.log("[GC-REFERENCE-INDEX-READY]", JSON.stringify({ workspace: workspaceId,
@@ -905,6 +917,7 @@ module.exports = {
   CURRENT_FILE,
   BUILDING_FILE,
   DEFAULT_BUILD_BYTES,
+  DEFAULT_DISCOVERY_BYTES,
   DEFAULT_BUILD_DURATION_MS,
   INDEX_MAX_AGE_MS,
   SCHEMA_VERSION,
