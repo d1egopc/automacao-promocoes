@@ -585,6 +585,38 @@ function fechar(server) {
     const semAuth = await request(server, "GET", "/financeiro/assinatura", { clienteId: "" });
     assert.strictEqual(semAuth.status, 401);
 
+    const planosCanonicos = {
+      plano_loja: { ...planoPro, id: "plano_loja", nome: "Pro", preco: "R$ 29,90",
+        limites: { creditosPorCiclo: 1500, cicloDias: 30 } },
+      pro: { ...planoPro, id: "pro", nome: "Premium", preco: "R$ 39,90",
+        limites: { creditosPorCiclo: 2500, cicloDias: 30 } }
+    };
+    const canonico = criarApp({ usuarios, planos: planosCanonicos });
+    const serverCanonico = await escutar(canonico.app);
+    try {
+      const planoLoja = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_a", body: { planoId: "plano_loja" }
+      });
+      const premium = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_b", body: { planoId: "pro" }
+      });
+      assert.strictEqual(planoLoja.status, 201);
+      assert.strictEqual(premium.status, 201);
+      assert.deepStrictEqual([planoLoja.body.plano.id, premium.body.plano.id], ["plano_loja", "pro"]);
+      assert.deepStrictEqual(
+        canonico.repo.state.payments.map(payment => [payment.plano_id, payment.plan_snapshot.creditosPorCiclo]),
+        [["plano_loja", 1500], ["pro", 2500]],
+        "nome Pro nao pode selecionar Premium por alias"
+      );
+      const alias = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_c", body: { planoId: "Premium" }
+      });
+      assert.strictEqual(alias.status, 404, "checkout publico exige ID imutavel, nao nome comercial");
+      assert.strictEqual(canonico.repo.state.payments.length, 2);
+    } finally {
+      await fechar(serverCanonico);
+    }
+
     console.log("financeiro-checkout-pix-publico-v1.test.js OK");
   } finally {
     await fechar(server);

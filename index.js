@@ -15036,7 +15036,9 @@ function transicaoCadastroCreditosUniversal() {
     antesDePersistir: async usuario => {
       await prepararAberturaCadastroUniversal({ pool: getEnginePool(),
         workspaceId: usuario.id, openingBalance: usuario.creditos,
-        planId: usuario.plano });
+        planId: usuario.plano,
+        openingCycleEnd: usuario.creditosModelo === "ciclo"
+          ? usuario.cicloAtualFim : null });
       delete usuario.creditos;
     },
     depoisDePersistir: async usuario => {
@@ -16832,8 +16834,7 @@ app.get("/extension/oportunidades/resumo", async (req, res) => {
 });
 app.use("/financeiro", criarRotasCheckoutFinanceiro({
   getPlanos: () => planos,
-  renovarFinanceiroUsuario: renovarCreditosSeNecessario,
-  lerSaldoCreditos: saldoCreditosParaExibicao,
+  lerSaldoCreditos: saldoCreditosSomenteLeitura,
   resolverFinanceiroUsuario: resolverFinanceiroUsuarioMe
 }));
 app.use(criarRotasAjudaContextual({

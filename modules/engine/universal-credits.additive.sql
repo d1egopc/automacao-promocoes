@@ -204,6 +204,10 @@ CREATE TABLE IF NOT EXISTS engine_universal_credit_opening_intents (
   completed_at timestamptz,
   PRIMARY KEY (operation_epoch_started_at,workspace_id)
 );
+-- Only newly prepared registrations receive a source expiry. Existing
+-- openings retain their historical contract (NULL) without backfill.
+ALTER TABLE engine_universal_credit_opening_intents
+  ADD COLUMN IF NOT EXISTS opening_cycle_end timestamptz;
 CREATE INDEX IF NOT EXISTS engine_universal_credit_opening_pending_idx
   ON engine_universal_credit_opening_intents (created_at,workspace_id)
   WHERE state='pending';

@@ -1,7 +1,6 @@
 "use strict";
 
 const express = require("express");
-const { buscarEntradaPlano } = require("../../utils/saas-fundacao");
 const { resolverFinanceiroUsuarioSaas } = require("../../utils/saas-financeiro-estado");
 const { capturarPlanSnapshot } = require("./financeiro.service");
 const { criarRepositorioFinanceiroPostgres } = require("./financeiro.repository");
@@ -173,7 +172,6 @@ function criarRotasCheckoutFinanceiro({
   env = process.env,
   getPlatformVariableImpl,
   agora = () => new Date(),
-  renovarFinanceiroUsuario = null,
   lerSaldoCreditos = null,
   resolverFinanceiroUsuario = null
 } = {}) {
@@ -191,7 +189,12 @@ function criarRotasCheckoutFinanceiro({
       if (!planoId) return erroHttp(res, "plano_id_obrigatorio", 400);
 
       return await executarComLockCheckout(`${clienteId}:${planoId}`, async () => {
-        const entrada = buscarEntradaPlano(getPlanos(), planoId);
+        const planos = getPlanos();
+        // Checkout publico aceita somente a identidade canonica publicada.
+        // Aliases e nomes continuam validos para contratos historicos, nao para novas cobrancas.
+        const entrada = Object.prototype.hasOwnProperty.call(planos, planoId)
+          ? { chave: planoId, plano: planos[planoId] }
+          : null;
         if (!entrada) return erroHttp(res, "plano_nao_encontrado", 404);
 
         let snapshot;
@@ -201,6 +204,9 @@ function criarRotasCheckoutFinanceiro({
           });
         } catch (e) {
           return erroHttp(res, e.codigo || "plano_invalido_para_cobranca", statusErroPlano(e.codigo));
+        }
+        if (snapshot.planoId !== entrada.chave) {
+          return erroHttp(res, "plano_id_inconsistente", 409);
         }
 
         const existente = typeof repositorio.buscarPaymentPendenteClientePlano === "function"
@@ -219,8 +225,8 @@ function criarRotasCheckoutFinanceiro({
 
         const resultado = await criarCobrancaMercadoPagoPix({
           clienteId,
-          planoId,
-          planos: getPlanos(),
+          planoId: snapshot.planoId,
+          planos,
           usuario,
           repositorio,
           client,
@@ -272,19 +278,16 @@ function criarRotasCheckoutFinanceiro({
   });
 
   router.get("/assinatura", async (req, res) => {
-    const usuario = req.usuario;
-    if (!req.clienteId || !usuario || usuario.ativo === false) {
-      return erroHttp(res, "usuario_nao_autenticado", 401);
-    }
+    try {
+      const usuario = req.usuario;
+      if (!req.clienteId || !usuario || usuario.ativo === false) {
+        return erroHttp(res, "usuario_nao_autenticado", 401);
+      }
 
-    if (typeof renovarFinanceiroUsuario === "function") {
-      renovarFinanceiroUsuario(usuario);
-    }
-
-    const creditos = typeof lerSaldoCreditos === "function"
-      ? await lerSaldoCreditos(req.clienteId, usuario)
-      : numeroInteiro(usuario.creditos, 0);
-    return res.json({
+      const creditos = typeof lerSaldoCreditos === "function"
+        ? await lerSaldoCreditos(req.clienteId, usuario)
+        : numeroInteiro(usuario.creditos, 0);
+      return res.json({
       ok: true,
       clienteId: "self",
       plano: texto(usuario.plano),
@@ -300,7 +303,10 @@ function criarRotasCheckoutFinanceiro({
         planos: getPlanos(),
         resolverFinanceiroUsuario
       })
-    });
+      });
+    } catch (erro) {
+      return res.status(503).json({ ok: false, codigo: "assinatura_leitura_indisponivel" });
+    }
   });
 
   return router;

@@ -1,0 +1,83 @@
+name: SaaS Comercial V2 CI only
+
+on:
+  push:
+    branches:
+      - validation/saas-comercial-v2-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  commercial-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: optimus_universal_fixture
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optimus_universal_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Exact baseline and syntax
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 8d94ec2becd070179eccf08408d2a78725e16043 HEAD
+          git diff --check 8d94ec2becd070179eccf08408d2a78725e16043 HEAD
+          node --check index.js
+          node --check modules/financeiro/checkout.routes.js
+          node --check modules/engine/universal-credits.repository.js
+          node --check modules/engine/universal-credit-sources.repository.js
+      - name: Free signup, canonical checkout, GET read-only and payment contracts
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          node tests/saas-jornada-cadastro-v1.test.js
+          node tests/saas-renovacao-assinatura-v1.test.js
+          node tests/financeiro-assinatura-readonly-v2.test.cjs
+          node tests/financeiro-checkout-pix-publico-v1.test.js
+          node tests/financeiro-mercadopago-pix-v1.test.js
+          node tests/saas-cortesia-v1.test.cjs
+          node tests/manual-v2-legacy-no-renew.test.cjs
+      - name: Auth and profile HTTP on disposable PostgreSQL 17
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:55433/optimus_universal_fixture
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          if [[ ! -e /data ]]; then
+            sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /data
+          fi
+          mkdir -p "$RUNNER_TEMP/saas-comercial-v2-http"
+          export MENSAGEIRO_V3_DATA_DIR="$RUNNER_TEMP/saas-comercial-v2-http"
+          node tests/saas-google-login-v1.test.js
+          node tests/saas-me-readonly-v1.test.js
+      - name: Source-scoped Free expiry, Pix, holds and concurrency on PostgreSQL 17
+        env:
+          UF_TEST_PG_PORT: "55433"
+          UF_TEST_PG_EXPECTED_SERVER_PORT: "5432"
+          UF_TEST_PG_EXPECTED_DATA_DIR: /var/lib/postgresql/data
+        run: |
+          set -euo pipefail
+          test -z "${DATABASE_URL:-}"
+          export UF_TEST_PG_EXPECTED_SERVER_HOST="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' '${{ job.services.postgres.id }}')"
+          test -n "$UF_TEST_PG_EXPECTED_SERVER_HOST"
+          node tests/universal-credit-sources.postgres.js
+          node tests/saas-cortesia-v1.postgres.js
+          node tests/universal-admin-topup.postgres.js
+          node tests/universal-flow-credits.postgres.js

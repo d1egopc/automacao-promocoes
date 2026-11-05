@@ -163,10 +163,12 @@ async function main() {
 
     // New SaaS workspaces have no historical ambiguity: registration opens
     // source authority atomically and never requires a manual SHADOW cutover.
-    for (const [workspace, opening, plan] of [["ws-onboard-free", 12, "free-beta"],
-      ["ws-onboard-paid", 0, "ultimate"]]) {
+    for (const [workspace, opening, plan, cycleEnd] of [
+      ["ws-onboard-free", 12, "free-beta", new Date(now + 30 * 86400000).toISOString()],
+      ["ws-onboard-free-expired", 300, "free-beta", new Date(now - 86400000).toISOString()],
+      ["ws-onboard-paid", 0, "ultimate", null]]) {
       await credits.prepareRegistrationOpening({ pool, workspaceId: workspace,
-        openingBalance: opening, planId: plan });
+        openingBalance: opening, planId: plan, openingCycleEnd: cycleEnd });
       await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
         userExists: true });
       await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
@@ -187,6 +189,27 @@ async function main() {
     await enqueueOne(admin, pool, "ws-onboard-free", "onboard-free", 1);
     const onboardClaim = await claimAndStart(pool, "ws-onboard-free");
     assert.ok(onboardClaim.id, "new workspace must reach source-scoped hold");
+
+    const expiredFree = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-free-expired" });
+    assert.equal(expiredFree.balance, 300, "historical Free balance stays in ledger");
+    assert.equal(expiredFree.available, 0,
+      "expired Free opening cannot fund new sends even with positive aggregate");
+    const upgradePix = await insertCycle(admin, {
+      workspace: "ws-onboard-free-expired", value: 1500,
+      origin: "financial_event_v1", suffix: "free-to-pro-pix" });
+    await credits.applyFinancialLedger({ pool, ledgerId: upgradePix });
+    const upgradedFree = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-free-expired" });
+    assert.equal(upgradedFree.available, 1500,
+      "approved Pix opens only its own spendable source, not expired Free credits");
+    await enqueueOne(admin, pool, "ws-onboard-free-expired", "upgrade-pro", 1);
+    const upgradedClaim = await claimAndStart(pool, "ws-onboard-free-expired");
+    const upgradedHold = (await admin.query(`SELECT s.source_kind,s.cycle_end
+      FROM engine_universal_credit_holds h JOIN engine_universal_credit_sources s
+        ON s.id=h.source_id WHERE h.target_id=$1`, [upgradedClaim.id])).rows[0];
+    assert.equal(upgradedHold.source_kind, "cycle",
+      "new reservation must bind to Pix cycle, never old Free opening");
 
     await credits.addAdminBalance({ pool, workspaceId: "ws-onboard-paid",
       amount: 25, idempotencyKey: "onboard-paid-admin-only",
