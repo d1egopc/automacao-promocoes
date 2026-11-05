@@ -9,6 +9,9 @@ const path = require("node:path");
 const { Client, Pool } = require("pg");
 const { SQL_SCHEMA_FINANCEIRO_V1 } =
   require("../modules/financeiro/financeiro.schema");
+const financialService = require("../modules/financeiro/financeiro.service");
+const { criarRepositorioFinanceiroPostgres } =
+  require("../modules/financeiro/financeiro.repository");
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
@@ -143,7 +146,37 @@ async function main() {
     await admin.query(fs.readFileSync(path.join(root, "modules", "engine",
       "schema.sql"), "utf8"));
     for (const statement of SQL_SCHEMA_FINANCEIRO_V1) await admin.query(statement);
+    // Reproduce the existing productive table before applying additive DDL.
+    await admin.query(`CREATE TABLE engine_universal_credit_opening_intents (
+      operation_epoch_started_at timestamptz NOT NULL,
+      workspace_id text NOT NULL CHECK (btrim(workspace_id) <> ''),
+      opening_balance integer NOT NULL CHECK (opening_balance >= 0),
+      source_hash text NOT NULL CHECK (source_hash ~ '^[0-9a-f]{64}$'),
+      state text NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending','completed','orphaned')),
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+      completed_at timestamptz,
+      PRIMARY KEY (operation_epoch_started_at,workspace_id)
+    )`);
+    await admin.query(`INSERT INTO engine_universal_credit_opening_intents
+      (operation_epoch_started_at,workspace_id,opening_balance,source_hash)
+      VALUES ('2026-01-01T00:00:00Z','preexisting-intent',300,$1)`,
+    ["a".repeat(64)]);
     await prepararModoOperacionalReal({ pool: admin });
+    const migratedIntent = (await admin.query(`SELECT opening_balance,
+      source_hash,state,opening_cycle_end FROM
+      engine_universal_credit_opening_intents
+      WHERE workspace_id='preexisting-intent'`)).rows[0];
+    assert.deepEqual(migratedIntent, { opening_balance: 300,
+      source_hash: "a".repeat(64), state: "pending", opening_cycle_end: null },
+    "additive DDL preserves pre-existing intent and leaves expiry unknown");
+    await admin.query(`ALTER TABLE engine_universal_credit_opening_intents
+      ADD COLUMN IF NOT EXISTS opening_cycle_end timestamptz`);
+    assert.equal((await admin.query(`SELECT COUNT(*)::int AS n FROM
+      engine_universal_credit_opening_intents
+      WHERE workspace_id='preexisting-intent' AND opening_balance=300
+        AND opening_cycle_end IS NULL`)).rows[0].n, 1,
+    "repeated DDL must preserve the previous row exactly");
     await admin.query(`UPDATE engine_operation_state SET mode='CUTOVER_PREPARED'
       WHERE id=1`);
     pool = new Pool({ ...config, max: 12,
@@ -163,10 +196,12 @@ async function main() {
 
     // New SaaS workspaces have no historical ambiguity: registration opens
     // source authority atomically and never requires a manual SHADOW cutover.
-    for (const [workspace, opening, plan] of [["ws-onboard-free", 12, "free-beta"],
-      ["ws-onboard-paid", 0, "ultimate"]]) {
+    for (const [workspace, opening, plan, cycleEnd] of [
+      ["ws-onboard-free", 12, "free-beta", new Date(now + 30 * 86400000).toISOString()],
+      ["ws-onboard-free-expired", 300, "free-beta", new Date(now - 86400000).toISOString()],
+      ["ws-onboard-paid", 0, "ultimate", null]]) {
       await credits.prepareRegistrationOpening({ pool, workspaceId: workspace,
-        openingBalance: opening, planId: plan });
+        openingBalance: opening, planId: plan, openingCycleEnd: cycleEnd });
       await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
         userExists: true });
       await credits.reconcileRegistrationOpening({ pool, workspaceId: workspace,
@@ -187,6 +222,55 @@ async function main() {
     await enqueueOne(admin, pool, "ws-onboard-free", "onboard-free", 1);
     const onboardClaim = await claimAndStart(pool, "ws-onboard-free");
     assert.ok(onboardClaim.id, "new workspace must reach source-scoped hold");
+
+    const expiredFree = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-free-expired" });
+    assert.equal(expiredFree.balance, 300, "historical Free balance stays in ledger");
+    assert.equal(expiredFree.available, 0,
+      "expired Free opening cannot fund new sends even with positive aggregate");
+    const financialRepo = criarRepositorioFinanceiroPostgres({ pool });
+    const planPro = { id: "plano_loja", nome: "Pro", preco: "R$ 29,90",
+      visivelPublicamente: true, contratavel: true, emBreve: false,
+      entradaBeta: false, renovacaoCreditos: "pagamento",
+      creditosModelo: "ciclo", limites: { creditosPorCiclo: 1500, cicloDias: 30 } };
+    const charge = await financialService.criarCobrancaFinanceira({
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      planos: { plano_loja: planPro }, provider: "mercadopago",
+      externalPaymentId: "pix-sintetico-free-pro", repositorio: financialRepo,
+      agora: new Date()
+    });
+    assert.equal(charge.ok, true);
+    const approval = await financialService.processarFinancialPaymentEvent({
+      type: "payment.approved", provider: "mercadopago",
+      providerEventId: "evt-sintetico-free-pro",
+      externalPaymentId: "pix-sintetico-free-pro",
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      amountCents: charge.planSnapshot.amountCents, currency: "BRL",
+      receivedAt: new Date()
+    }, { repositorio: financialRepo, agora: new Date() });
+    assert.equal(approval.ledgerInserido, true);
+    assert.equal((await financialService.processarFinancialPaymentEvent({
+      type: "payment.approved", provider: "mercadopago",
+      providerEventId: "evt-sintetico-free-pro",
+      externalPaymentId: "pix-sintetico-free-pro",
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      amountCents: charge.planSnapshot.amountCents, currency: "BRL",
+      receivedAt: new Date()
+    }, { repositorio: financialRepo, agora: new Date() })).idempotente, true);
+    await credits.applyFinancialLedger({ pool, ledgerId: approval.ledgerId });
+    assert.equal((await credits.applyFinancialLedger({ pool,
+      ledgerId: approval.ledgerId })).applied, false);
+    const upgradedFree = await credits.readBalance({ pool,
+      workspaceId: "ws-onboard-free-expired" });
+    assert.equal(upgradedFree.available, 1500,
+      "approved Pix opens only its own spendable source, not expired Free credits");
+    await enqueueOne(admin, pool, "ws-onboard-free-expired", "upgrade-pro", 1);
+    const upgradedClaim = await claimAndStart(pool, "ws-onboard-free-expired");
+    const upgradedHold = (await admin.query(`SELECT s.source_kind,s.cycle_end
+      FROM engine_universal_credit_holds h JOIN engine_universal_credit_sources s
+        ON s.id=h.source_id WHERE h.target_id=$1`, [upgradedClaim.id])).rows[0];
+    assert.equal(upgradedHold.source_kind, "cycle",
+      "new reservation must bind to Pix cycle, never old Free opening");
 
     await credits.addAdminBalance({ pool, workspaceId: "ws-onboard-paid",
       amount: 25, idempotencyKey: "onboard-paid-admin-only",

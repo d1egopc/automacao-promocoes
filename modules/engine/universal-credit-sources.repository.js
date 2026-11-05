@@ -54,27 +54,33 @@ async function workspaceModeTx(client, { epoch, workspaceId, lock = false }) {
 // SHADOW stage. Existing balances without source state are legacy and are
 // deliberately rejected here so onboarding can never become a bulk cutover.
 async function activateNewWorkspaceTx(client, { epoch, workspaceId,
-  openingBalance, sourceHash, ledgerId, allowCreate = false }) {
+  openingBalance, sourceHash, ledgerId, openingCycleEnd = null,
+  allowCreate = false }) {
   const workspace = text(workspaceId);
   const amount = Number(openingBalance);
   const hash = text(sourceHash);
   const ledger = text(ledgerId);
+  const cycleEnd = openingCycleEnd == null || openingCycleEnd === ""
+    ? null : new Date(openingCycleEnd);
   if (!workspace || !Number.isSafeInteger(amount) || amount < 0 ||
-      !/^[0-9a-f]{64}$/.test(hash) || !ledger) {
+      !/^[0-9a-f]{64}$/.test(hash) || !ledger ||
+      (cycleEnd && !Number.isFinite(cycleEnd.getTime()))) {
     throw new Error("universal_credit_source_onboarding_identity_invalid");
   }
   const existingMode = await workspaceModeTx(client, { epoch,
     workspaceId: workspace, lock: true });
   if (existingMode) {
     const existingSource = (await client.query(`SELECT id,granted,available,
-        reserved,consumed,expired,state,ledger_id FROM
+        reserved,consumed,expired,state,ledger_id,cycle_end FROM
       engine_universal_credit_sources
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2
         AND source_key=$3 FOR UPDATE`,
     [epoch, workspace, `opening:${ledger}`])).rows[0];
     if (existingMode.mode !== "ACTIVE" || !existingSource ||
         String(existingSource.ledger_id) !== ledger ||
-        Number(existingSource.granted) !== amount) {
+        Number(existingSource.granted) !== amount ||
+        (existingSource.cycle_end?.toISOString() || null) !==
+          (cycleEnd?.toISOString() || null)) {
       throw new Error("universal_credit_source_onboarding_conflict");
     }
     return { ok: true, duplicate: true, mode: "ACTIVE",
@@ -98,9 +104,10 @@ async function activateNewWorkspaceTx(client, { epoch, workspaceId,
   }
   const source = (await client.query(`INSERT INTO engine_universal_credit_sources
     (operation_epoch_started_at,workspace_id,source_key,ledger_id,source_kind,
-     state,granted,available,reserved,consumed,expired,metadata)
-    VALUES ($1,$2,$3,$4,'opening','active',$5,$5,0,0,0,$6::jsonb)
-    RETURNING id`, [epoch, workspace, `opening:${ledger}`, ledger, amount,
+     state,cycle_end,granted,available,reserved,consumed,expired,metadata)
+    VALUES ($1,$2,$3,$4,'opening','active',$5,$6,$6,0,0,0,$7::jsonb)
+    RETURNING id`, [epoch, workspace, `opening:${ledger}`, ledger,
+    cycleEnd?.toISOString() || null, amount,
     JSON.stringify({ authority: "financial_credit_ledger",
       origin: "workspace_registration", sourceHash: hash })])).rows[0];
   const baselineHash = stableHash(["new_workspace", epoch, workspace, amount,

@@ -44,7 +44,7 @@ async function transaction(pool, action) {
 }
 
 async function openBalance({ pool, workspaceId, operationEpochStartedAt,
-  openingBalance, sourceHash, activateSources = false }) {
+  openingBalance, sourceHash, openingCycleEnd = null, activateSources = false }) {
   const workspace = text(workspaceId);
   const epoch = epochIso(operationEpochStartedAt);
   const amount = integer(openingBalance);
@@ -66,15 +66,16 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
     [epoch, workspace, amount, hash]);
     if (inserted.rowCount) {
       const ledger = await client.query(`INSERT INTO financial_credit_ledger
-        (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,
+        (cliente_id,ledger_type,amount,balance_policy,reason,idempotency_key,cycle_end,
          projection_status,metadata,operation_epoch_started_at,
          universal_movement_type,universal_balance_revision,
          universal_balance_after)
-        VALUES ($1,'adjustment',$2,'set','universal_epoch_opening',$3,
+        VALUES ($1,'adjustment',$2,'set','universal_epoch_opening',$3,$6,
           'projected',$4::jsonb,$5,'OPENING_BALANCE',0,$2)
         ON CONFLICT (idempotency_key) DO NOTHING RETURNING id`,
       [workspace, amount, movementKey("OPENING_BALANCE", epoch, workspace),
-        JSON.stringify({ authority: "postgresql_universal", sourceHash: hash }), epoch]);
+        JSON.stringify({ authority: "postgresql_universal", sourceHash: hash }), epoch,
+        openingCycleEnd]);
       if (ledger.rowCount !== 1) throw new Error("universal_credit_opening_ledger_conflict");
     }
     const row = (await client.query(`SELECT opening_balance,balance,reserved,source_hash
@@ -97,6 +98,7 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
       sourceActivation = await sourceCredits.activateNewWorkspaceTx(client, {
         epoch, workspaceId: workspace, openingBalance: amount,
         sourceHash: hash, ledgerId: ledger.rows[0].id,
+        openingCycleEnd,
         allowCreate: inserted.rowCount === 1
       });
     }
@@ -107,9 +109,15 @@ async function openBalance({ pool, workspaceId, operationEpochStartedAt,
 }
 
 async function prepareRegistrationOpening({ pool, workspaceId, openingBalance,
-  planId = "" }) {
+  planId = "", openingCycleEnd = null }) {
   const workspace = text(workspaceId);
   const amount = integer(openingBalance);
+  const cycleEnd = openingCycleEnd == null || openingCycleEnd === ""
+    ? null : new Date(openingCycleEnd);
+  if (cycleEnd && !Number.isFinite(cycleEnd.getTime())) {
+    throw new Error("universal_registration_cycle_end_invalid");
+  }
+  const cycleEndIso = cycleEnd?.toISOString() || null;
   if (!workspace) throw new Error("universal_registration_workspace_required");
   return transaction(pool, async client => {
     const state = (await client.query(`SELECT mode,operation_epoch_started_at
@@ -119,22 +127,23 @@ async function prepareRegistrationOpening({ pool, workspaceId, openingBalance,
     }
     const epoch = epochIso(state.operation_epoch_started_at);
     const hash = createHash("sha256").update(JSON.stringify([
-      "registration", epoch, workspace, amount, text(planId)
+      "registration", epoch, workspace, amount, text(planId), cycleEndIso
     ])).digest("hex");
     await client.query(`INSERT INTO engine_universal_credit_opening_intents
-      (operation_epoch_started_at,workspace_id,opening_balance,source_hash)
-      VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-    [epoch, workspace, amount, hash]);
-    const row = (await client.query(`SELECT opening_balance,source_hash,state
+      (operation_epoch_started_at,workspace_id,opening_balance,source_hash,opening_cycle_end)
+      VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+    [epoch, workspace, amount, hash, cycleEndIso]);
+    const row = (await client.query(`SELECT opening_balance,source_hash,state,opening_cycle_end
       FROM engine_universal_credit_opening_intents
       WHERE operation_epoch_started_at=$1 AND workspace_id=$2`,
     [epoch, workspace])).rows[0];
     if (!row || Number(row.opening_balance) !== amount ||
-        row.source_hash !== hash || row.state === "orphaned") {
+        row.source_hash !== hash || row.state === "orphaned" ||
+        (row.opening_cycle_end?.toISOString() || null) !== cycleEndIso) {
       throw new Error("universal_registration_opening_conflict");
     }
     return { workspaceId: workspace, operationEpochStartedAt: epoch,
-      openingBalance: amount, sourceHash: hash };
+      openingBalance: amount, sourceHash: hash, openingCycleEnd: cycleEndIso };
   });
 }
 
@@ -143,7 +152,7 @@ async function reconcileRegistrationOpening({ pool, workspaceId,
   const workspace = text(workspaceId);
   if (!workspace) throw new Error("universal_registration_workspace_required");
   const result = await pool.query(`SELECT i.operation_epoch_started_at,
-      i.opening_balance,i.source_hash,i.state
+      i.opening_balance,i.source_hash,i.state,i.opening_cycle_end
     FROM engine_operation_state s
     JOIN engine_universal_credit_opening_intents i
       ON i.operation_epoch_started_at=s.operation_epoch_started_at
@@ -157,6 +166,7 @@ async function reconcileRegistrationOpening({ pool, workspaceId,
   await openBalance({ pool, workspaceId: workspace,
     operationEpochStartedAt: intent.operation_epoch_started_at,
     openingBalance: Number(intent.opening_balance), sourceHash: intent.source_hash,
+    openingCycleEnd: intent.opening_cycle_end,
     activateSources: true });
   await pool.query(`UPDATE engine_universal_credit_opening_intents
     SET state='completed',completed_at=clock_timestamp()

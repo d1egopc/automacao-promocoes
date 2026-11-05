@@ -115,8 +115,8 @@ assert.ok(!/creditos\s*(?:===|==|<=|<)\s*0|Number\(usuario\.creditos/.test(helpe
 assert.ok(!/pagamentoUltimoStatus === \"vencido_sem_pagamento\"[\s\S]*requerRenovacaoPagamento =[^&]*;/.test(helperFonte), "pagamentoUltimoStatus sozinho nao deve ser autoridade unica");
 
 assert.ok(index.includes("resolverFinanceiroUsuarioSaas"), "/me deve usar helper financeiro compartilhado");
-assert.ok(index.includes("renovarFinanceiroUsuario: renovarCreditosSeNecessario"), "/financeiro deve receber virada de ciclo existente");
-assert.ok(checkout.includes("renovarFinanceiroUsuario(usuario)"), "/financeiro/assinatura deve refletir vencimento antes do payload");
+assert.ok(index.includes("lerSaldoCreditos: saldoCreditosSomenteLeitura"), "/financeiro deve receber leitor sem renovacao");
+assert.ok(!checkout.includes("renovarFinanceiroUsuario(usuario)"), "/financeiro/assinatura nao pode renovar durante GET");
 assert.ok(checkout.includes("financeiro: financeiroUsuarioSanitizado"), "/financeiro/assinatura deve expor mesmo contrato financeiro");
 
 console.log("saas-renovacao-assinatura-v1.test.js OK");

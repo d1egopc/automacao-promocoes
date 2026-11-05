@@ -130,6 +130,26 @@ async function cadastrar(env, body, opcoes = {}) {
   assert.strictEqual(usuario.origemCadastro, "publico");
   assert.strictEqual(usuario.plano, "Teste Dinamico");
   assert.strictEqual(usuario.creditos, 100);
+  const envFreeConfiguravel = criarAmbiente();
+  envFreeConfiguravel.planos.teste.limites = {
+    ...envFreeConfiguravel.planos.teste.limites,
+    creditosPorCiclo: 300,
+    cicloDias: 30
+  };
+  const freeNovo = await cadastrar(envFreeConfiguravel, {
+    nome: "Free Novo", email: "free-novo@example.com",
+    senha: "12345678", plano: "teste"
+  });
+  assert.strictEqual(freeNovo.creditos, 300);
+  assert.strictEqual(freeNovo.cicloAtualFim, "2026-09-20T00:00:00.000Z");
+  const freeHistorico = {
+    creditos: 300, creditosInicializadosEm: "2026-01-01T00:00:00.000Z",
+    cicloAtualFim: "2027-07-14T00:00:00.000Z"
+  };
+  saas.inicializarCreditosUsuario({ usuario: freeHistorico,
+    plano: envFreeConfiguravel.planos.teste });
+  assert.strictEqual(freeHistorico.cicloAtualFim, "2027-07-14T00:00:00.000Z",
+    "configuracao nova nao altera ciclo historico");
   assert.strictEqual(usuario.creditosModelo, "ciclo");
   assert.ok(usuario.senhaHash, "senhaHash deve ser persistido");
   assert.ok(!usuario.senha, "senha plaintext nunca deve ser persistida");

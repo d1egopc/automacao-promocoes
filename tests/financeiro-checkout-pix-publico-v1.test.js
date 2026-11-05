@@ -585,6 +585,73 @@ function fechar(server) {
     const semAuth = await request(server, "GET", "/financeiro/assinatura", { clienteId: "" });
     assert.strictEqual(semAuth.status, 401);
 
+    const planosCanonicos = {
+      plano_loja: { ...planoPro, id: "plano_loja", nome: "Pro", preco: "R$ 29,90",
+        limites: { creditosPorCiclo: 1500, cicloDias: 30 } },
+      pro: { ...planoPro, id: "pro", nome: "Premium", preco: "R$ 39,90",
+        limites: { creditosPorCiclo: 2500, cicloDias: 30 } }
+    };
+    const usuariosCanonicos = usuarios.map(usuario => ({ ...usuario }));
+    const canonico = criarApp({ usuarios: usuariosCanonicos, planos: planosCanonicos });
+    const serverCanonico = await escutar(canonico.app);
+    try {
+      const planoLoja = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_a", body: { planoId: "plano_loja" }
+      });
+      const premium = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_b", body: { planoId: "pro" }
+      });
+      assert.strictEqual(planoLoja.status, 201);
+      assert.strictEqual(premium.status, 201);
+      assert.deepStrictEqual([planoLoja.body.plano.id, premium.body.plano.id], ["plano_loja", "pro"]);
+      assert.deepStrictEqual(
+        canonico.repo.state.payments.map(payment => [payment.plano_id, payment.plan_snapshot.creditosPorCiclo]),
+        [["plano_loja", 1500], ["pro", 2500]],
+        "nome Pro nao pode selecionar Premium por alias"
+      );
+      const alias = await request(serverCanonico, "POST", "/financeiro/checkout/pix", {
+        clienteId: "user_c", body: { planoId: "Premium" }
+      });
+      assert.strictEqual(alias.status, 404, "checkout publico exige ID imutavel, nao nome comercial");
+      assert.strictEqual(canonico.repo.state.payments.length, 2);
+      for (const [clienteId, resposta, planoId, creditosPorCiclo] of [
+        ["user_a", planoLoja, "plano_loja", 1500],
+        ["user_b", premium, "pro", 2500]
+      ]) {
+        const evento = {
+          type: "payment.approved", provider: "mercadopago",
+          providerEventId: `evt_${clienteId}_${planoId}`,
+          externalPaymentId: resposta.body.externalPaymentId,
+          clienteId, planoId,
+          amountCents: resposta.body.valor.amountCents, currency: "BRL",
+          receivedAt: new Date("2026-08-23T10:05:00.000Z")
+        };
+        const confirmado = await financeiro.processarFinancialPaymentEvent(evento, {
+          repositorio: canonico.repo,
+          agora: new Date("2026-08-23T10:05:00.000Z")
+        });
+        assert.strictEqual(confirmado.ledgerInserido, true);
+        assert.strictEqual((await financeiro.processarFinancialPaymentEvent(evento, {
+          repositorio: canonico.repo,
+          agora: new Date("2026-08-23T10:05:00.000Z")
+        })).idempotente, true);
+        await financeiro.reconciliarLedgerFinanceiroPendente({
+          repositorio: canonico.repo,
+          lerUsuarios: async () => usuariosCanonicos,
+          salvarUsuarios: async () => {},
+          filtro: { provider: "mercadopago",
+            externalPaymentId: resposta.body.externalPaymentId, clienteId }
+        });
+        const usuarioCanonico = usuariosCanonicos.find(usuario => usuario.id === clienteId);
+        assert.strictEqual(usuarioCanonico.plano, planoId,
+          "webhook aprovado preserva ID canonico no mesmo usuario");
+        assert.strictEqual(usuarioCanonico.creditos, creditosPorCiclo,
+          "webhook concede exatamente a franquia do plano canonico");
+      }
+    } finally {
+      await fechar(serverCanonico);
+    }
+
     console.log("financeiro-checkout-pix-publico-v1.test.js OK");
   } finally {
     await fechar(server);
