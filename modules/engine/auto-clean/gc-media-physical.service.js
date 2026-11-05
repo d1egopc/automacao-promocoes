@@ -170,10 +170,27 @@ async function loadReferences(target, options) {
 }
 
 function scopedRelease(target) {
-  if (process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE !== "approved" || target?.kind !== "identity") return false;
-  const scopes = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES || "").split(",").map(value => value.trim());
+  if (!scopedReleaseConfigured() || target?.kind !== "identity") return false;
   if (!/^identity:[A-Za-z0-9_-]+$/.test(target.id)) return false;
-  return scopes.includes(target.id) || scopes.includes("identity:*");
+  return explicitIdentityScopes("OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES").has(target.id);
+}
+
+function explicitIdentityScopes(envName) {
+  const values = String(process.env[envName] || "").split(",")
+    .map(value => value.trim()).filter(Boolean);
+  if (!values.length || values.some(value => !/^identity:[A-Za-z0-9_-]+$/.test(value))) return new Set();
+  return new Set(values);
+}
+
+function scopedReleaseConfigured() {
+  return process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE === "approved" &&
+    explicitIdentityScopes("OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES").size > 0;
+}
+
+function scopedUnlinkRelease(target) {
+  if (!scopedRelease(target) ||
+      process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_UNLINK_RELEASE !== "approved") return false;
+  return explicitIdentityScopes("OPTIMUS_AUTO_CLEAN_MEDIA_UNLINK_SCOPES").has(target.id);
 }
 
 function deleteEnabled(options, target) {
@@ -291,6 +308,7 @@ async function runMediaPhysical(options = {}) {
   if (scopedRelease(target) && options.execute === true) {
     try {
       const swept = await quarantine.sweep({ dataDir, target, nowMs,
+        allowUnlink: released(MEDIA_RELEASE) || scopedUnlinkRelease(target),
         loadRefs: () => (options.referenceLoader || loadReferences)(target,
           { ...options, dataDir, nowMs: Date.now(), fsApi }) });
       summary.removed += swept.removed;
@@ -403,12 +421,23 @@ async function runMediaPhysical(options = {}) {
   summary.censusEligibleBytes = Number(censusReport.eligibleBytes || 0);
   summary.censusProtected = Number(censusReport.protected || 0);
   summary.censusBlocked = Number(censusReport.blocked || 0);
+  const scopedCensusReady = !scopedRelease(target) || (
+    Number.isSafeInteger(Number(census.lastComplete?.completedAtMs)) &&
+    Number(census.lastComplete?.scanned || 0) > 0 &&
+    Number(census.lastComplete?.blocked || 0) === 0 &&
+    Number(census.lastComplete?.scanned || 0) ===
+      Number(census.lastComplete?.eligible || 0) + Number(census.lastComplete?.protected || 0)
+  );
+  if (!scopedCensusReady) {
+    summary.blocked++;
+    summary.stopReason = "media_census_incomplete";
+  }
   const targetCandidates = Object.entries(state.candidates)
     .filter(([key]) => key.startsWith(`${target.id}/`));
   summary.backlog = targetCandidates.length;
   summary.backlogBytes = targetCandidates.reduce((sum, [, value]) => sum + Number(value?.size || 0), 0);
 
-  if (!summary.dryRun && ready.length) {
+  if (!summary.dryRun && scopedCensusReady && ready.length) {
     for (const item of ready) {
       if (hasBudget()) { summary.throttled = true; summary.stopReason = "time_budget"; break; }
       if (typeof options.beforeRevalidate === "function") {
@@ -560,4 +589,4 @@ async function runMediaPhysicalBatch(options = {}) {
 module.exports = { runMediaPhysical, runMediaPhysicalBatch, RETENTION_MS, OBSERVATION_DELAY_MS, MAX_SCAN_PER_RUN,
   MAX_DELETE_PER_RUN, MAX_TOTAL_DELETE_PER_BATCH, DEFAULT_MICROBATCH_SIZE, DEFAULT_TARGETS_PER_BATCH,
   MAX_DURATION_MS, MAX_WORKING_SET_CANDIDATES, STATE_FILE,
-  loadReferences, referenceKey, deleteEnabled, scopedRelease };
+  loadReferences, referenceKey, deleteEnabled, scopedRelease, scopedReleaseConfigured, scopedUnlinkRelease };

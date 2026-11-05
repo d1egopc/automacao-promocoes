@@ -29,19 +29,25 @@ async function withScoped(f) {
   const oldRelease = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE;
   const oldScopes = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES;
   const oldGlobal = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE;
+  const oldUnlink = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_UNLINK_RELEASE;
+  const oldUnlinkScopes = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_UNLINK_SCOPES;
   process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE = "approved";
   process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:user_safe";
   delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE;
+  delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_UNLINK_RELEASE;
+  delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_UNLINK_SCOPES;
   try { await f(); } finally {
     for (const [key, value] of [["OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE", oldRelease],
       ["OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES", oldScopes],
-      ["OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE", oldGlobal]]) {
+      ["OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE", oldGlobal],
+      ["OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_UNLINK_RELEASE", oldUnlink],
+      ["OPTIMUS_AUTO_CLEAN_MEDIA_UNLINK_SCOPES", oldUnlinkScopes]]) {
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   }
 }
 
-test("scoped identity media stages, restores new references and physically frees only after 72h", async () => {
+test("scoped identity stages and restores, while unlink needs a separate exact release", async () => {
   const f = setup();
   try { await withScoped(async () => {
     let refs = new Map();
@@ -67,7 +73,16 @@ test("scoped identity media stages, restores new references and physically frees
     refs = new Map();
     await runMediaPhysical({ ...options, nowMs: now + OBSERVATION_DELAY_MS + 3 });
     await runMediaPhysical({ ...options, nowMs: now + 2 * OBSERVATION_DELAY_MS + 4 });
-    const purged = await runMediaPhysical({ ...options, nowMs: now + 2 * OBSERVATION_DELAY_MS + HOLD_MS + 5 });
+    const stillHeld = await runMediaPhysical({ ...options,
+      nowMs: now + 2 * OBSERVATION_DELAY_MS + HOLD_MS + 5 });
+    assert.equal(stillHeld.removed, 0);
+    assert.equal(stillHeld.bytesFreed, 0);
+    assert.equal(fs.existsSync(path.join(recovery, `${f.name}.bin`)), true,
+      "quarantine authorization alone never unlinks an expired payload");
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_UNLINK_RELEASE = "approved";
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_UNLINK_SCOPES = f.target;
+    const purged = await runMediaPhysical({ ...options,
+      nowMs: now + 2 * OBSERVATION_DELAY_MS + HOLD_MS + 6 });
     assert.equal(purged.removed, 1);
     assert.equal(purged.bytesFreed, Buffer.byteLength("recovery fixture"));
     assert.equal(fs.existsSync(path.join(recovery, `${f.name}.bin`)), false);
@@ -106,7 +121,7 @@ test("batch scans only released workspaces and rejects an empty scope", async ()
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
 
-test("wildcard scope discovers a new workspace and blocks incomplete references independently", async () => {
+test("wildcard scope never grants physical authorization", async () => {
   const f = setup();
   const newWorkspace = "user_new";
   const newDir = path.join(f.dataDir, "identidade-visual-ofertas", "clientes", newWorkspace, "renderizados");
@@ -118,27 +133,43 @@ test("wildcard scope discovers a new workspace and blocks incomplete references 
   try { await withScoped(async () => {
     process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:*";
     const loaded = [];
-    await runMediaPhysicalBatch({ dataDir: f.dataDir, nowMs: now,
-      execute: true, referenceLoader: async target => {
-        loaded.push(target.id);
-        return target.workspace === newWorkspace
-          ? { complete: false, refs: new Map(), reasonCode: "REFERENCE_INDEX_STALE" }
-          : { complete: true, refs: new Map() };
-      } });
     const result = await runMediaPhysicalBatch({ dataDir: f.dataDir,
       nowMs: now + OBSERVATION_DELAY_MS + 1, execute: true,
       referenceLoader: async target => {
         loaded.push(target.id);
-        return target.workspace === newWorkspace
-          ? { complete: false, refs: new Map(), reasonCode: "REFERENCE_INDEX_STALE" }
-          : { complete: true, refs: new Map() };
+        return { complete: true, refs: new Map() };
       } });
-    assert.ok(loaded.includes(f.target));
-    assert.ok(loaded.includes(`identity:${newWorkspace}`));
-    assert.equal(result.quarantined, 1);
-    assert.equal(result.blocked, 1);
-    assert.equal(fs.existsSync(f.file), false);
+    assert.deepEqual(loaded, []);
+    assert.equal(result.quarantined, 0);
+    assert.equal(result.errors, 1);
+    assert.equal(result.stopReason, "no_scoped_targets_verified");
+    assert.equal(fs.existsSync(f.file), true);
     assert.equal(fs.existsSync(newFile), true);
+  }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
+});
+
+test("scoped quarantine requires a coherent completed census", async () => {
+  const f = setup();
+  const otherName = `${"b".repeat(64)}.png`;
+  const otherFile = path.join(f.dir, otherName);
+  fs.writeFileSync(otherFile, Buffer.from("second census fixture"));
+  fs.utimesSync(otherFile, old, old);
+  const stat = fs.statSync(f.file);
+  const candidateId = `${f.target}/${f.name}`;
+  const fingerprint = `${Number(stat.dev || 0)}:${Number(stat.ino || 0)}:${Number(stat.size || 0)}:${Math.trunc(Number(stat.mtimeMs || 0))}`;
+  fs.writeFileSync(path.join(f.dataDir, "auto-clean-media-physical-state.json"), JSON.stringify({
+    version: 2, lastTarget: "", cursors: {}, cursorNames: {},
+    candidates: { [candidateId]: { firstSeenAt: now - OBSERVATION_DELAY_MS - 1,
+      fingerprint, size: stat.size } }, lastObservedAt: {}, census: {}
+  }));
+  try { await withScoped(async () => {
+    const result = await runMediaPhysical({ dataDir: f.dataDir, targetId: f.target,
+      nowMs: now, maxScan: 1, execute: true,
+      referenceLoader: async () => ({ complete: true, refs: new Map(), generation: "ready" }) });
+    assert.equal(result.quarantined, 0);
+    assert.equal(result.stopReason, "media_census_incomplete");
+    assert.equal(result.blocked, 1);
+    assert.equal(fs.existsSync(f.file), true);
   }); } finally { fs.rmSync(f.dataDir, { recursive: true, force: true }); }
 });
 

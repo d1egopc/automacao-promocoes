@@ -60,6 +60,34 @@ async function run() {
   assert.equal(detachedShadow.execute, false,
     "detached Shadow never inherits physical delete authorization");
   assert.equal(detachedShadow.mediaDeleteEnabled, false);
+
+  const oldGlobal = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE;
+  const oldScoped = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE;
+  const oldScopes = process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES;
+  try {
+    delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE;
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE = "approved";
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:user_safe";
+    const scoped = await capture("true", "true");
+    assert.equal(scoped.execute, true, "explicit workspace release reaches the recurring relay");
+    assert.equal(scoped.mediaDeleteEnabled, true);
+
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:*";
+    const wildcard = await capture("true", "true");
+    assert.equal(wildcard.execute, false, "wildcard never grants physical authorization");
+    assert.equal(wildcard.mediaDeleteEnabled, false);
+
+    process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = "identity:user_safe,identity:*";
+    assert.equal((await capture("true", "true")).execute, false,
+      "a malformed mixed scope list fails closed");
+  } finally {
+    if (oldGlobal === undefined) delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE;
+    else process.env.OPTIMUS_AUTO_CLEAN_MEDIA_DELETE_RELEASE = oldGlobal;
+    if (oldScoped === undefined) delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE;
+    else process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPED_RELEASE = oldScoped;
+    if (oldScopes === undefined) delete process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES;
+    else process.env.OPTIMUS_AUTO_CLEAN_MEDIA_SCOPES = oldScopes;
+  }
   console.log("AUTO_CLEAN_MEDIA_PHYSICAL_WIRING_TESTS_PASS");
 }
 
