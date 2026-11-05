@@ -99,6 +99,45 @@ async function safeTargetDirectory(dataDir, target, fsApi) {
   return true;
 }
 
+// A concurrent cycle can load an older state snapshot while another cycle
+// stages a candidate into quarantine. The source then disappears from the
+// target directory, but the older writer could otherwise persist the stale
+// candidate again. Reconcile only missing/invalid source files; never infer
+// eligibility from age and never touch quarantine payloads here.
+async function pruneMissingCandidates(state, target, fsApi) {
+  const prefix = `${target.id}/`;
+  const candidates = Object.keys(state?.candidates || {})
+    .filter(candidateId => candidateId.startsWith(prefix));
+  if (!candidates.length) return 0;
+
+  let entries;
+  try {
+    entries = await fsApi.readdir(target.dir, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code !== "ENOENT") return 0;
+    for (const candidateId of candidates) delete state.candidates[candidateId];
+    return candidates.length;
+  }
+
+  const present = new Set(entries.filter(entry => fileAllowed(target, entry)).map(entry => entry.name));
+  let removed = 0;
+  for (const candidateId of candidates) {
+    const name = candidateId.slice(prefix.length);
+    if (present.has(name)) continue;
+    const file = path.resolve(target.dir, name);
+    if (path.dirname(file) !== path.resolve(target.dir)) continue;
+    try {
+      const stat = await fsApi.lstat(file);
+      if (stat.isFile() && !stat.isSymbolicLink()) continue;
+    } catch (error) {
+      if (error?.code !== "ENOENT") continue;
+    }
+    delete state.candidates[candidateId];
+    removed += 1;
+  }
+  return removed;
+}
+
 async function loadReferences(target, options) {
   const builder = options.referenceIndexBuilder || buildOrLoadReferenceIndex;
   const common = { dataDir: options.dataDir, nowMs: options.nowMs, fsApi: options.fsApi,
@@ -233,6 +272,10 @@ async function runMediaPhysical(options = {}) {
     return summary;
   }
 
+  // Reconcile stale observations before any reference gate. This keeps a
+  // candidate that was atomically moved to quarantine out of later snapshots.
+  summary.staleCandidatesPruned = await pruneMissingCandidates(state, target, fsApi);
+
   const references = await (options.referenceLoader || loadReferences)(target,
     { ...options, dataDir, nowMs, fsApi });
   summary.referenceComplete = references?.complete === true;
@@ -330,6 +373,10 @@ async function runMediaPhysical(options = {}) {
       }
     } catch { summary.errors++; }
   }
+  // A concurrent stage may happen after the initial reconciliation but before
+  // this cycle reaches its final save. Reconcile once more immediately before
+  // persisting state so an older snapshot cannot reintroduce the candidate.
+  summary.staleCandidatesPruned += await pruneMissingCandidates(state, target, fsApi);
   const completedPage = normalizedStart + processedInPage >= entries.length;
   state.cursors[target.id] = completedPage ? 0 : normalizedStart + processedInPage;
   state.cursorNames[target.id] = completedPage ? "" : lastProcessedName;
