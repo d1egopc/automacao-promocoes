@@ -23,6 +23,15 @@ async function count(table, id) {
   const result = await query(`SELECT count(*)::int AS n FROM ${table} WHERE id = ${Number(id)}`);
   return result.rows[0].n;
 }
+async function financialChecksum() {
+  const result = await query(`SELECT md5(jsonb_build_object(
+    'ledger',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb) FROM financial_credit_ledger t),
+    'sources',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb) FROM engine_universal_credit_sources t),
+    'holds',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb) FROM engine_universal_credit_holds t),
+    'modes',(SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY workspace_id),'[]'::jsonb) FROM engine_universal_credit_source_workspaces t)
+  )::text) AS checksum`);
+  return result.rows[0].checksum;
+}
 async function stage(name, fn, removedField, removedId, protectedId, table) {
   const result = await fn({ pool, canarioPostgres: true, loteLimite: 1, lotesDbPorCiclo: 1,
     limiteTotalMutacoes: 1, pularExpiracaoLeases: true, incluirOrfaosNoCanario: false });
@@ -58,7 +67,24 @@ async function stage(name, fn, removedField, removedId, protectedId, table) {
       CREATE TABLE engine_history_items(history_id bigint PRIMARY KEY, workspace_id text,
         universal_item_id bigint, finalized_at timestamptz);
       CREATE TABLE engine_history_targets(history_id bigint, workspace_id text);
+      CREATE TABLE financial_credit_ledger(id bigint PRIMARY KEY, cliente_id text, delta bigint, metadata jsonb);
+      CREATE TABLE engine_universal_credit_sources(id bigint PRIMARY KEY, workspace_id text,
+        available bigint, reserved bigint, source_type text);
+      CREATE TABLE engine_universal_credit_holds(id bigint PRIMARY KEY, workspace_id text,
+        source_id bigint, state text, amount bigint);
+      CREATE TABLE engine_universal_credit_source_workspaces(workspace_id text PRIMARY KEY, mode text);
     `);
+    await query(`INSERT INTO financial_credit_ledger VALUES
+      (1,'legacy_ws',300,'{"mode":"LEGACY"}'),
+      (2,'active_ws',1500,'{"mode":"ACTIVE"}'),
+      (3,'segregated_ws',4000,'{"mode":"ACTIVE_SEGREGATED"}');
+      INSERT INTO engine_universal_credit_sources VALUES
+      (1,'active_ws',1499,1,'cycle'),(2,'segregated_ws',3981,19,'cycle');
+      INSERT INTO engine_universal_credit_holds VALUES
+      (1,'active_ws',1,'ACK_PENDING',1),(2,'segregated_ws',2,'AMBIGUOUS',19);
+      INSERT INTO engine_universal_credit_source_workspaces VALUES
+      ('active_ws','ACTIVE'),('segregated_ws','ACTIVE_SEGREGATED');`);
+    const financialBefore = await financialChecksum();
 
     await reset();
     await query(`INSERT INTO engine_jobs_cliente VALUES
@@ -132,6 +158,14 @@ async function stage(name, fn, removedField, removedId, protectedId, table) {
     try { assert.equal((await returned.query("SELECT 1 AS n")).rows[0].n,1); }
     finally { returned.release(); }
 
+    assert.equal(await financialChecksum(), financialBefore,
+      "Auto-Clean must not mutate ledger, sources, credits or AMBIGUOUS holds in any financial mode");
+
     console.log("AUTO_CLEAN_SEVEN_STAGES_POSTGRES17_PASS");
-  } finally { await pool.end(); }
+  } finally {
+    try { await query(`DROP TABLE IF EXISTS engine_universal_credit_holds,
+      engine_universal_credit_sources, engine_universal_credit_source_workspaces,
+      financial_credit_ledger`); } catch {}
+    await pool.end();
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

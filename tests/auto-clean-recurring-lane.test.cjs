@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { createRecurringLane, validateReadOnly, summarizeGc } = require("../modules/engine/auto-clean/recurring-lane");
+const { createRecurringLane, createShadowLane, validateReadOnly, summarizeGc } = require("../modules/engine/auto-clean/recurring-lane");
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 test("flag OFF has no work; default validation is detached, single-flight and respects ten minutes", async () => {
@@ -94,10 +94,44 @@ test("GC missing/stale references remain blocked; metadata contains no workspace
   assert.equal(JSON.stringify(result).includes("private"),false);
 });
 
-test("wiring is admitted outside shadow flag and never awaited by commercial cycle",()=>{
+test("wiring admits recurring and shadow lanes without awaiting commercial cycle",()=>{
   const source=require("node:fs").readFileSync(require.resolve("../modules/engine/orchestrator.runner"),"utf8");
   assert.match(source,/agendarAutoCleanRecorrente\(\);\s*if \(autoCleanShadowAtivo\(\)\)/);
   assert.doesNotMatch(source,/await agendarAutoCleanRecorrente/);
+  assert.match(source,/autoCleanShadow = agendarAutoCleanShadow/);
+  assert.doesNotMatch(source,/await executarEtapaRastreada\("auto_clean_shadow"/);
+});
+
+test("shadow lane is detached, read-only, scope single-flight and globally bounded", async()=>{
+  const deferred=[]; const releases=[]; const calls=[];
+  const lane=createShadowLane({enabled:()=>true,maxGlobal:1,deadlineMs:()=>5000,
+    defer:cb=>deferred.push(cb),run:async options=>{calls.push(options);await new Promise(r=>releases.push(r));return {ok:true};},
+    logger:{log(){}}});
+  assert.equal(lane({scope:"identity:a"}).accepted,true);
+  assert.equal(lane({scope:"identity:a"}).reason,"scope_busy");
+  assert.equal(lane({scope:"identity:b"}).reason,"global_concurrency_limit");
+  assert.equal(calls.length,0);
+  deferred.shift()(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].execute,false);
+  assert.equal(calls[0].shadowReadOnly,true);
+  assert.ok(calls[0].signal instanceof AbortSignal);
+  releases.shift()(); await flush(); await flush();
+  assert.equal(lane.status().active,0);
+  assert.equal(lane({scope:"identity:b"}).accepted,true);
+});
+
+test("shadow deadline aborts cooperatively and failures never admit a destructive option", async()=>{
+  const deferred=[]; const timers=[]; let observed;
+  const lane=createShadowLane({enabled:()=>true,deadlineMs:()=>100,
+    defer:cb=>deferred.push(cb),setTimer:cb=>{timers.push(cb);return 1;},clearTimer(){},
+    run:async options=>{observed=options;await new Promise((resolve,reject)=>options.signal.addEventListener("abort",()=>reject(options.signal.reason)));},
+    logger:{log(){}}});
+  assert.equal(lane({scope:"global",execute:true}).accepted,true);
+  deferred.shift()(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(observed.execute,false);
+  timers.shift()(); await flush(); await flush();
+  assert.equal(lane.status().active,0);
 });
 
 test("100k disabled admissions have bounded local CPU cost",()=>{

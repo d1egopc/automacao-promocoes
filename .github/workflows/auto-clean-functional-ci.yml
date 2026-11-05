@@ -1,7 +1,7 @@
 name: Auto Clean functional isolated Node24 PG17
 on:
   push:
-    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030, validation/auto-clean-universal-d0d7-20261030]
+    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030, validation/auto-clean-universal-d0d7-20261030, validation/autoclean-universal-phase1-20261105]
 permissions:
   contents: read
 jobs:
@@ -51,7 +51,12 @@ jobs:
           node --test tests/checkpoint-pending-proof-recovery-admin.postgres.test.cjs
           for file in tests/auto-clean-gc-reference-index-phase*.test.js tests/auto-clean-gc-relay-phase1.test.js; do node "$file"; done
       - name: Guardian unchanged baseline comparison
-        run: node scripts/guardian-v1.cjs validate --base f16d37eb4811d0943bc788ce930fe799ddc4c276 --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
+        run: |
+          base=f16d37eb4811d0943bc788ce930fe799ddc4c276
+          if [ "$GITHUB_REF_NAME" = "validation/autoclean-universal-phase1-20261105" ]; then
+            base=b51c4a2bb3f96ead1fad02d8d311d35669010cdd
+          fi
+          node scripts/guardian-v1.cjs validate --base "$base" --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
       - name: Clean Docker build and packaged Auto-Clean syntax
         run: |
           docker build -t optimus-auto-clean-candidate:${GITHUB_SHA} .

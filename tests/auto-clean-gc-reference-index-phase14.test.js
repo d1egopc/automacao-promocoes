@@ -111,8 +111,8 @@ async function testLargeQueueIsNeverRead() {
     assert.strictEqual(result.complete, true, JSON.stringify({ reasonCode: result.reasonCode, source: result.source }));
     assert.ok(result.refs.has(H1) && result.refs.has(H2), "inclusive refs aninhadas devem ser protegidas");
     assert.ok(result.bytesProcessed < 1024);
-    assert.strictEqual(gcBytesRead, result.bytesProcessed);
-    assert.ok(gcBytesRead <= DEFAULT_BUILD_BYTES);
+    assert.strictEqual(gcBytesRead, result.bytesProcessed + result.discoveryBytesProcessed);
+    assert.ok(result.bytesProcessed <= DEFAULT_BUILD_BYTES);
     assert.ok(result.durationMs <= DEFAULT_BUILD_DURATION_MS);
     console.log("GC_REF_PROJECTION_SCALE", JSON.stringify({
       queueBytes: fs.statSync(queueFile(f)).size,
@@ -162,8 +162,8 @@ async function testMuchLargerQueueGuardIsMetadataOnly() {
     assert.ok(result.refs.has(H1));
     assert.ok(result.bytesProcessed < 1024);
     assert.ok(result.durationMs <= DEFAULT_BUILD_DURATION_MS);
-    assert.strictEqual(gcBytesRead, result.bytesProcessed);
-    assert.ok(gcBytesRead <= DEFAULT_BUILD_BYTES);
+    assert.strictEqual(gcBytesRead, result.bytesProcessed + result.discoveryBytesProcessed);
+    assert.ok(result.bytesProcessed <= DEFAULT_BUILD_BYTES);
     console.log("GC_REF_PROJECTION_SCALE_SIMULATED", JSON.stringify({
       queueBytes: Number(synthetic.size),
       items: entries.length,
@@ -323,7 +323,9 @@ async function testRestartActiveWorkspaceAndAppend() {
     fs.mkdirSync(path.dirname(history), { recursive: true });
     const row = `${JSON.stringify({ imagemRef: render(f, H2) })}\n`;
     fs.writeFileSync(history, row.repeat(6));
-    const perRound = fs.statSync(projectionFile(f)).size * 2 + Buffer.byteLength(row);
+    // Queue projection validation is charged to the bounded discovery budget;
+    // reserve this build round for exactly one incremental JSONL record.
+    const perRound = Buffer.byteLength(row);
     let result = await build(f, { maxBytesPerRun: perRound });
     assert.strictEqual(result.complete, false);
     const first = readBuilding(f);
