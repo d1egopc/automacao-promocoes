@@ -161,6 +161,45 @@ function censusState(state, targetId, nowMs, startingNewPass) {
   return state.census[targetId];
 }
 
+function candidateScope(candidateId = "") {
+  const value = String(candidateId || "");
+  const separator = value.indexOf("/");
+  return separator > 0 ? value.slice(0, separator) : value;
+}
+
+function reservarSlotCandidato(state, targetId) {
+  const candidates = state?.candidates && typeof state.candidates === "object"
+    ? state.candidates : {};
+  const entries = Object.entries(candidates);
+  if (entries.length < MAX_WORKING_SET_CANDIDATES) return { ok: true, evicted: null };
+
+  const counts = new Map();
+  for (const [candidateId] of entries) {
+    const scope = candidateScope(candidateId);
+    counts.set(scope, (counts.get(scope) || 0) + 1);
+  }
+  const scopes = new Set([...counts.keys(), String(targetId || "")]);
+  const quota = Math.max(1, Math.floor(MAX_WORKING_SET_CANDIDATES / Math.max(1, scopes.size)));
+  if ((counts.get(String(targetId || "")) || 0) >= quota) {
+    return { ok: false, evicted: null, motivo: "candidate_scope_quota_full", quota };
+  }
+
+  // Preserve mature observations. Only the newest entry from an over-represented
+  // scope may yield one slot, and only to let an under-quota scope make progress.
+  const evictable = entries
+    .filter(([candidateId]) => {
+      const scope = candidateScope(candidateId);
+      return scope !== String(targetId || "") && (counts.get(scope) || 0) > quota;
+    })
+    .sort((a, b) => Number(b[1]?.firstSeenAt || 0) - Number(a[1]?.firstSeenAt || 0));
+  if (!evictable.length) {
+    return { ok: false, evicted: null, motivo: "candidate_global_capacity_fairness_blocked", quota };
+  }
+  const [evictedId] = evictable[0];
+  delete candidates[evictedId];
+  return { ok: true, evicted: evictedId, quota };
+}
+
 async function runMediaPhysical(options = {}) {
   const started = Date.now();
   const fsApi = options.fsApi || fs.promises;
@@ -181,7 +220,7 @@ async function runMediaPhysical(options = {}) {
   const summary = { target: selectedId, kind: target?.kind || "", workspace: target?.workspace || "",
     scanned: 0, createdSinceLastRun: 0, createdBytes: 0, referenced: 0, young: 0,
     candidates: 0, candidateBytes: 0, removed: 0, bytesFreed: 0, errors: 0,
-    blocked: 0,
+    blocked: 0, candidateCapacityEvictions: 0, candidateCapacityBlocked: 0,
     backlog: 0, backlogBytes: 0, revalidations: 0, microBatches: 1,
     quarantined: 0, quarantineBytes: 0, restored: 0,
     throttled: false, stopReason: "", dryRun: !deleteEnabled(options, target), durationMs: 0 };
@@ -272,10 +311,18 @@ async function runMediaPhysical(options = {}) {
       census.eligible++; census.eligibleBytes += stat.size;
       const observed = state.candidates[candidateId];
       const currentFingerprint = fingerprint(stat);
-      if (!observed || observed.fingerprint !== currentFingerprint) {
-        if (Object.keys(state.candidates).length < MAX_WORKING_SET_CANDIDATES) {
+      if (!observed) {
+        const slot = reservarSlotCandidato(state, target.id);
+        if (slot.ok) {
           state.candidates[candidateId] = { firstSeenAt: nowMs, fingerprint: currentFingerprint, size: stat.size };
+          if (slot.evicted) summary.candidateCapacityEvictions++;
+        } else {
+          summary.candidateCapacityBlocked++;
         }
+      } else if (observed.fingerprint !== currentFingerprint) {
+        observed.firstSeenAt = nowMs;
+        observed.fingerprint = currentFingerprint;
+        observed.size = stat.size;
       } else if (nowMs - Number(observed.firstSeenAt || 0) >= OBSERVATION_DELAY_MS &&
           ready.length + (scopedRelease(target) ? 0 : summary.removed) < maxDelete) {
         observed.size = stat.size;
