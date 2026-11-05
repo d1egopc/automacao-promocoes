@@ -1,7 +1,7 @@
 name: Auto Clean functional isolated Node24 PG17
 on:
   push:
-    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030, validation/auto-clean-universal-d0d7-20261030, validation/autoclean-universal-phase1-20261105]
+    branches: [validation/auto-clean-definitivo-20261030, validation/auto-clean-validate-fast-sample-20261030, validation/auto-clean-execute-readiness-20261030, validation/auto-clean-recurring-admin-events-20261030, validation/auto-clean-universal-d0d7-20261030, validation/autoclean-universal-phase1-20261105, validation/autoclean-scoped-auth-hotfix-20261105]
 permissions:
   contents: read
 jobs:
@@ -57,6 +57,8 @@ jobs:
           base=f16d37eb4811d0943bc788ce930fe799ddc4c276
           if [ "$GITHUB_REF_NAME" = "validation/autoclean-universal-phase1-20261105" ]; then
             base=b51c4a2bb3f96ead1fad02d8d311d35669010cdd
+          elif [ "$GITHUB_REF_NAME" = "validation/autoclean-scoped-auth-hotfix-20261105" ]; then
+            base=17fdc8436b30e79bcd2cdae3f8fbcda50342f213
           fi
           node scripts/guardian-v1.cjs validate --base "$base" --source "$GITHUB_SHA" --report "$RUNNER_TEMP/auto-clean-guardian.json"
       - name: Clean Docker build and packaged Auto-Clean syntax

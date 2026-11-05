@@ -16,7 +16,7 @@ const { executarGcRelaySeguro } = require("./gc-relay.service");
 const { createRecurringLane, createShadowLane, validateReadOnly, summarizeGc } = require("./recurring-lane");
 const { DB_RELEASE, FILE_RELEASE, MEDIA_RELEASE, released, requireRelease } = require("./deletion-release");
 const scopedRawAdmin = require("./recurring-admin-events");
-const { runMediaPhysicalBatch } = require("./gc-media-physical.service");
+const { runMediaPhysicalBatch, scopedReleaseConfigured } = require("./gc-media-physical.service");
 const {
   criarMedidorEngineMemoryStage
 } = require("../../telemetria/engine-memory-stage");
@@ -364,7 +364,8 @@ function autoCleanExecuteAtivo(opcoes = {}) {
 function autoCleanMediaPhysicalAutorizado() {
   const physical = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_PHYSICAL || "").trim().toLowerCase() === "true";
   const execute = String(process.env.OPTIMUS_AUTO_CLEAN_MEDIA_EXECUTE || "").trim().toLowerCase() === "true";
-  return { physical, execute: physical && execute && released(MEDIA_RELEASE) };
+  return { physical, execute: physical && execute &&
+    (released(MEDIA_RELEASE) || scopedReleaseConfigured()) };
 }
 
 function autoCleanRecorrenteAtivo(opcoes = {}) {

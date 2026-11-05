@@ -99,7 +99,8 @@ async function stage({ dataDir, target, item, nowMs = Date.now(), io = fs.promis
   return { bytes: stat.size };
 }
 
-async function sweep({ dataDir, target, loadRefs, nowMs = Date.now(), max = 8, io = fs.promises }) {
+async function sweep({ dataDir, target, loadRefs, nowMs = Date.now(), max = 8,
+  allowUnlink = false, io = fs.promises }) {
   const dir = await safeDirectory(dataDir, target, io);
   const current = await inventory(dir, io);
   const result = { removed: 0, bytesFreed: 0, restored: 0, blocked: 0 };
@@ -136,7 +137,7 @@ async function sweep({ dataDir, target, loadRefs, nowMs = Date.now(), max = 8, i
       await syncDirectory(target.dir, io);
       await syncDirectory(dir, io);
       result.restored++;
-    } else if (meta.expiresAtMs <= nowMs) {
+    } else if (meta.expiresAtMs <= nowMs && allowUnlink === true) {
       if (SHA(await io.readFile(payload)) !== meta.sha256) fail("MEDIA_RECOVERY_CORRUPT");
       await io.unlink(payload);
       await io.unlink(manifest);
