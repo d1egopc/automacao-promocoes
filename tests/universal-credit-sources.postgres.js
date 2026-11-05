@@ -9,6 +9,9 @@ const path = require("node:path");
 const { Client, Pool } = require("pg");
 const { SQL_SCHEMA_FINANCEIRO_V1 } =
   require("../modules/financeiro/financeiro.schema");
+const financialService = require("../modules/financeiro/financeiro.service");
+const { criarRepositorioFinanceiroPostgres } =
+  require("../modules/financeiro/financeiro.repository");
 const { prepararModoOperacionalReal } =
   require("../modules/engine/universal-runtime-bootstrap");
 const credits = require("../modules/engine/universal-credits.repository");
@@ -195,10 +198,38 @@ async function main() {
     assert.equal(expiredFree.balance, 300, "historical Free balance stays in ledger");
     assert.equal(expiredFree.available, 0,
       "expired Free opening cannot fund new sends even with positive aggregate");
-    const upgradePix = await insertCycle(admin, {
-      workspace: "ws-onboard-free-expired", value: 1500,
-      origin: "financial_event_v1", suffix: "free-to-pro-pix" });
-    await credits.applyFinancialLedger({ pool, ledgerId: upgradePix });
+    const financialRepo = criarRepositorioFinanceiroPostgres({ pool });
+    const planPro = { id: "plano_loja", nome: "Pro", preco: "R$ 29,90",
+      visivelPublicamente: true, contratavel: true, emBreve: false,
+      entradaBeta: false, renovacaoCreditos: "pagamento",
+      creditosModelo: "ciclo", limites: { creditosPorCiclo: 1500, cicloDias: 30 } };
+    const charge = await financialService.criarCobrancaFinanceira({
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      planos: { plano_loja: planPro }, provider: "mercadopago",
+      externalPaymentId: "pix-sintetico-free-pro", repositorio: financialRepo,
+      agora: new Date()
+    });
+    assert.equal(charge.ok, true);
+    const approval = await financialService.processarFinancialPaymentEvent({
+      type: "payment.approved", provider: "mercadopago",
+      providerEventId: "evt-sintetico-free-pro",
+      externalPaymentId: "pix-sintetico-free-pro",
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      amountCents: charge.planSnapshot.amountCents, currency: "BRL",
+      receivedAt: new Date()
+    }, { repositorio: financialRepo, agora: new Date() });
+    assert.equal(approval.ledgerInserido, true);
+    assert.equal((await financialService.processarFinancialPaymentEvent({
+      type: "payment.approved", provider: "mercadopago",
+      providerEventId: "evt-sintetico-free-pro",
+      externalPaymentId: "pix-sintetico-free-pro",
+      clienteId: "ws-onboard-free-expired", planoId: "plano_loja",
+      amountCents: charge.planSnapshot.amountCents, currency: "BRL",
+      receivedAt: new Date()
+    }, { repositorio: financialRepo, agora: new Date() })).idempotente, true);
+    await credits.applyFinancialLedger({ pool, ledgerId: approval.ledgerId });
+    assert.equal((await credits.applyFinancialLedger({ pool,
+      ledgerId: approval.ledgerId })).applied, false);
     const upgradedFree = await credits.readBalance({ pool,
       workspaceId: "ws-onboard-free-expired" });
     assert.equal(upgradedFree.available, 1500,
