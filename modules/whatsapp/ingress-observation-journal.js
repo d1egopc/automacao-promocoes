@@ -3,6 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { constants } = require("node:fs");
+const { sanitizarTraceRef } = require("../telemetria/trace-ref");
 
 const PREFIX = "radar-whatsapp-ingress-slot-";
 const SLOT_COUNT = 4;
@@ -46,6 +47,8 @@ function sanitizeRecord(value = {}) {
   const out = { kind: value.kind, at: Number.isSafeInteger(value.at) && value.at > 0 ? value.at : Date.now(), stage: value.stage };
   for (const key of ["workspaceRef", "sessionRef", "groupRef", "eventRef"])
     if (/^[a-f0-9]{16}$/.test(value[key] || "")) out[key] = value[key];
+  const traceRef = sanitizarTraceRef(value.traceRef);
+  if (traceRef) out.traceRef = traceRef;
   if (Number.isSafeInteger(value.generation) && value.generation > 0) out.generation = value.generation;
   if (UPDATES.has(value.upsertType)) out.upsertType = value.upsertType;
   if (typeof value.fromMe === "boolean") out.fromMe = value.fromMe;

@@ -50,7 +50,8 @@ const {
 } = require("./modules/observabilidade/admin.routes");
 const {
   intervaloConfiguradoMs,
-  iniciarInfraMemoryTelemetry
+  iniciarInfraMemoryTelemetry,
+  criarInfraMemorySnapshot
 } = require("./modules/telemetria/infra-memory-snapshot");
 const {
   criarMedidorEngineMemoryStage,
@@ -16784,7 +16785,54 @@ app.use("/telemetria", criarRotasTelemetria({
   getProbeStatus: () => radarIngressObservation.status(),
   validateProbeTarget: () => validarAlvoObservacaoIngressRadar(),
   startProbe: target => radarIngressObservation.start(target),
-  stopProbe: () => radarIngressObservation.stop("manual")
+  stopProbe: () => radarIngressObservation.stop("manual"),
+  getInfrastructureHealth: ({ escopo } = {}) => {
+    if (escopo?.tipo === "workspace") {
+      return { available: false, state: "INDISPONIVEL", reason: "infra_workspace_isolation_required" };
+    }
+    return {
+      available: true,
+      state: "COMPROVADO",
+      source: "infra-memory-snapshot",
+      snapshot: criarInfraMemorySnapshot(() => ({
+        sessoes,
+        statusSessao,
+        sessoesMeta,
+        fila,
+        usuarios,
+        configsPorCliente,
+        destinosPorCliente,
+        integracoesPorCliente,
+        estruturas: { radarListenerRecentes, radarBloqueiosRecentes, geracoesSocketWhatsapp },
+        timers: { infraMemorySnapshot: { ativo: true, intervaloMs: intervaloConfiguradoMs() } }
+      }))
+    };
+  },
+  getFinancialState: async ({ escopo, clienteId } = {}) => {
+    if (escopo?.tipo !== "workspace" || !clienteId) {
+      return { available: false, state: "INDISPONIVEL", reason: "financial_workspace_scope_required" };
+    }
+    const usuario = buscarUsuarioPorIdSeguro(usuarios, clienteId);
+    if (!usuario || usuario.ativo === false) {
+      return { available: false, state: "INDISPONIVEL", reason: "workspace_not_available" };
+    }
+    try {
+      const creditos = await saldoCreditosSomenteLeitura(clienteId, usuario);
+      return {
+        available: true,
+        state: "COMPROVADO",
+        source: "saldoCreditosSomenteLeitura",
+        creditos: Number.isFinite(Number(creditos)) ? Number(creditos) : null,
+        direitoFinanceiro: "DESCONHECIDO"
+      };
+    } catch {
+      return { available: false, state: "INDISPONIVEL", reason: "financial_read_failed" };
+    }
+  },
+  // The journal is already sanitized at write time. Platform grants may read
+  // its bounded retention window; workspace grants stay fail-closed because
+  // the journal refs are intentionally not reversible to a tenant ID.
+  getIngressJournal: () => whatsappIngressJournal.read()
 }));
 app.use(criarRotasVitrine({
   publico: true,

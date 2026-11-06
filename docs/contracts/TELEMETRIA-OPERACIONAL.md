@@ -66,6 +66,21 @@ GETs delegados: /saude, /eventos, /rastrear/:eventoId (legados), /operacional, /
 - Rastreios operacionais limitam metadata já no SELECT a campos técnicos e de prova conhecidos, com comprimento máximo. /saude delegado usa o snapshot limitado; não executa o gate legado que lê filas. /eventos e /rastrear delegados usam o pool shadow e os mesmos limites operacionais. O comportamento legado Admin permanece compatível.
 - Tarefas Magalu são globais e não têm coluna de propriedade por workspace: não listar a amostra global para um grant de workspace. No rastreio, uma tarefa só é mostrada por igualdade exata de URL já ligada ao evento autorizado; não expor URL, worker, lease ou credenciais.
 - Uso de auditoria: ultimoUsoEm/contador ficam em Map de até 200 entradas, sem escrita em GET. São consolidados na próxima ativação/revogação. Após crash, o último uso ainda não consolidado pode ser perdido; expiração e revogação não dependem desse contador. A leitura do arquivo por autenticação é preservada para não atrasar revogações externas; não é chamada pelo caminho comercial.
+
+### Descoberta estável do Gate A
+
+Uma nova sessão Codex pode consultar `GET /telemetria/auditoria/descoberta` sem
+credencial. A resposta descreve somente o protocolo já existente (emissão,
+aprovação, revogação, TTL, escopos e GETs permitidos); nunca contém `tel_`,
+JWT, cookie, segredo ou dado de workspace. O consumo operacional continua
+exigindo `Authorization: Bearer tel_<grant>`, com escopo aplicado no backend.
+Consultas sem adaptador seguro retornam `state=INDISPONIVEL` e `reason`, sem
+simular saúde ou abrir shell/SQL arbitrário. O endpoint de descoberta não
+concede acesso e não substitui a autorização do Admin Master.
+
+O contrato de correlação usa `traceRef` sanitizado, determinístico e separado
+dos IDs comerciais. Ele pode aparecer nos eventos e no journal já sanitizado;
+o valor bruto de `coberturaTraceId`, mensagem, JID e conteúdo nunca é exposto.
 - Nenhum timer de Telemetria fica rodando com a ferramenta ociosa. Interface atualiza uma vez ao abrir; mudanças de filtro exigem Atualizar. Modo periódico é opcional, 30s e suspenso em aba oculta. Contagem regressiva é local; expiração faz uma consulta GET, sem reativação.
 
 ## Sonda Radar

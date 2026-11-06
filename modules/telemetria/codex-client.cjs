@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const readline = require("node:readline/promises");
 const { readPreparedToken } = require("./prepared-token-input.cjs");
 const ALLOWED =
-  /^\/(?:operacional|workspaces|problemas|sonda-radar|eventos|saude|rastreio\/(?:evento|job|oferta)\/\d{1,20})(?:\?[^#]*)?$/;
+  /^\/(?:auditoria\/descoberta|operacional|workspaces|problemas|sonda-radar|eventos|saude|rastreio\/(?:evento|job|oferta)\/\d{1,20})(?:\?[^#]*)?$/;
 
 function collectorErrorCode(error) {
   const message = typeof error?.message === "string" ? error.message : "";

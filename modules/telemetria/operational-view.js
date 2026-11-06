@@ -60,6 +60,7 @@ function project(value, key = "", depth = 0) {
   const allowed = new Set([
     "ok",
     "readOnly",
+    "available",
     "state",
     "status",
     "statusTelemetria",
@@ -123,11 +124,57 @@ function project(value, key = "", depth = 0) {
     "importando",
     "emCurso",
     "autoClean",
+    "ingressJournal",
+    "snapshot",
+    "versao",
+    "coletadoEm",
+    "memoria",
+    "cpu",
+    "whatsapp",
+    "sessoes",
+    "open",
+    "connecting",
+    "closedLoggedOut",
+    "desconhecido",
+    "sockets",
+    "estruturas",
+    "fila",
+    "clientes",
+    "timers",
+    "conhecidos",
+    "ativos",
+    "itens",
+    "ativo",
+    "intervaloMs",
+    "rss",
+    "heapUsed",
+    "heapTotal",
+    "external",
+    "arrayBuffers",
+    "rssMb",
+    "heapUsedMb",
+    "heapTotalMb",
+    "externalMb",
+    "arrayBuffersMb",
+    "records",
+    "lines",
+    "bytes",
+    "queued",
+    "dropped",
+    "rotatedLines",
+    "rotatedSlots",
+    "maxBytes",
+    "retentionMs",
     "fontes",
     "escopo",
     "tipo",
     "origemPipeline",
     "linkId",
+    "traceRef",
+    "adapters",
+    "infraestrutura",
+    "financeiro",
+    "mensageiro",
   ]);
   const out = {};
   for (const field of [
@@ -160,7 +207,86 @@ function createOperationalView({
   validateProbeTarget,
   startProbe,
   stopProbe,
+  getInfrastructureHealth,
+  getFinancialState,
+  getAutoCleanState,
+  getMessengerState,
+  getIngressJournal,
 } = {}) {
+  async function readAdapter(name, getter, scope, clienteId) {
+    const unavailable = reason => ({
+      available: false,
+      readOnly: true,
+      state: "INDISPONIVEL",
+      reason,
+      scope: scope.tipo || "plataforma",
+      clienteId: scope.tipo === "workspace" ? clienteId : null,
+    });
+    if (typeof getter !== "function")
+      return unavailable(`${name}_adapter_unavailable`);
+    try {
+      const value = await getter({
+        readOnly: true,
+        escopo: scope,
+        clienteId: clienteId || null,
+      });
+      if (!value || typeof value !== "object")
+        return unavailable(`${name}_adapter_invalid`);
+      return {
+        ...project(value),
+        available: value.available !== false,
+        readOnly: true,
+        scope: scope.tipo || "plataforma",
+        clienteId: scope.tipo === "workspace" ? clienteId : null,
+      };
+    } catch {
+      return unavailable(`${name}_adapter_failed`);
+    }
+  }
+  async function readIngress(scope) {
+    if (scope.tipo === "workspace") {
+      return {
+        available: false,
+        readOnly: true,
+        state: "INDISPONIVEL",
+        reason: "journal_workspace_binding_unavailable",
+      };
+    }
+    if (typeof getIngressJournal !== "function") {
+      return {
+        available: false,
+        readOnly: true,
+        state: "INDISPONIVEL",
+        reason: "journal_adapter_unavailable",
+      };
+    }
+    try {
+      const result = await getIngressJournal();
+      if (!result || typeof result !== "object") throw new Error("invalid_journal");
+      return {
+        available: result.state === "available",
+        readOnly: true,
+        state: result.state === "available" ? "COMPROVADO" : "INDISPONIVEL",
+        reason: result.state === "available" ? "sanitized_journal_read" : "journal_unavailable",
+        records: Array.isArray(result.records) ? result.records.slice(-1000) : [],
+        lines: Number(result.lines) || 0,
+        bytes: Number(result.bytes) || 0,
+        queued: Number(result.queued) || 0,
+        dropped: Number(result.dropped) || 0,
+        rotatedLines: Number(result.rotatedLines) || 0,
+        rotatedSlots: Number(result.rotatedSlots) || 0,
+        maxBytes: Number(result.maxBytes) || 0,
+        retentionMs: Number(result.retentionMs) || 0,
+      };
+    } catch {
+      return {
+        available: false,
+        readOnly: true,
+        state: "INDISPONIVEL",
+        reason: "journal_read_failed",
+      };
+    }
+  }
   function probe(scope = { tipo: "plataforma" }) {
     if (scope.tipo === "workspace" && scope.clienteId !== "admin")
       return {
@@ -241,7 +367,7 @@ function createOperationalView({
       Math.max(1, Number(filters.janelaMinutos) || 15),
     );
     const at = new Date().toISOString();
-    const [events, ingress, workers] = await Promise.all([
+    const [events, ingress, workers, infraestrutura, financeiro, autoClean, mensageiro, ingressJournal] = await Promise.all([
       telemetry.consultarEventosTelemetria({
         ...filters,
         clienteId: client,
@@ -266,6 +392,11 @@ function createOperationalView({
         AND updated_at >= NOW() - ($1::int * INTERVAL '1 minute') ORDER BY id DESC LIMIT 20`,
             [window],
           ),
+      readAdapter("infraestrutura", getInfrastructureHealth, scope, client),
+      readAdapter("financeiro", getFinancialState, scope, client),
+      readAdapter("autoClean", getAutoCleanState, scope, client),
+      readAdapter("mensageiro", getMessengerState, scope, client),
+      readIngress(scope),
     ]);
     const ingressRows = rows(ingress);
     const motors = ["radar", "teleradar", "clonador"].map((motor) => {
@@ -350,6 +481,13 @@ function createOperationalView({
       readOnly: true,
       generatedAt: at,
       workspace: client,
+      adapters: {
+        infraestrutura,
+        financeiro,
+        autoClean,
+        mensageiro,
+        ingressJournal,
+      },
       windowMinutes: window,
       coverage: {
         sampleLimit: 100,

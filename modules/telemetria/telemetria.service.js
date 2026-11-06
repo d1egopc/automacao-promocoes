@@ -6,6 +6,7 @@ const { criarGateAbsorcaoShadowOfc } = require("../engine/ofc/absorption-gate.se
 const { TTL_NORMAL_MS, TTL_TURBO_MS } = require("../engine/flow-manager/flow-manager.service");
 const { minutosLeaseJobsAtivos } = require("../engine/jobs.service");
 const { readGlobalJson, writeGlobalJson } = require("../../utils/storage");
+const { extrairTraceRef } = require("./trace-ref");
 
 const AUDITORIAS_ARQUIVO = "telemetria-auditorias.json";
 const TTL_VALIDOS = new Set([15, 30, 60]);
@@ -16,9 +17,11 @@ const STATUS_JOBS_EM_CURSO_TELEMETRIA = ["processando", "importando"];
 const ROTAS_TOKEN_READ_ONLY = new Set([
   "/telemetria/saude",
   "/telemetria/eventos",
+  "/telemetria/auditoria/descoberta",
   "/telemetria/operacional", "/telemetria/workspaces", "/telemetria/problemas", "/telemetria/sonda-radar",
   "/operacional", "/workspaces", "/problemas", "/sonda-radar",
   "/saude",
+  "/auditoria/descoberta",
   "/eventos"
 ]);
 const SEGREDO_PEPPER = "optimus_telemetria_v1";
@@ -289,6 +292,11 @@ function sanitizarValor(valor, profundidade = 0) {
 
   const saida = {};
   for (const [chave, item] of Object.entries(valor)) {
+    if (/^(?:cobertura_?trace_?id|trace_?ref)$/i.test(chave)) {
+      const traceRef = extrairTraceRef({ [chave]: item });
+      if (traceRef) saida.traceRef = traceRef;
+      continue;
+    }
     if (CHAVES_SENSIVEIS.test(chave)) {
       saida[chave] = item ? "***" : item;
       continue;
@@ -742,6 +750,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
               'radar' AS etapa,
               'capturado' AS status,
               NULL::text AS motivo,
+              e.metadata AS metadata,
               e.capturado_em AS timestamp
          FROM engine_eventos_brutos e
         WHERE e.capturado_em >= NOW() - ($1::int * INTERVAL '1 minute')
@@ -754,6 +763,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
               'job' AS etapa,
               LOWER(COALESCE(j.status, '')) AS status,
               j.motivo_final AS motivo,
+              j.metadata AS metadata,
               COALESCE(j.atualizado_em, j.criado_em) AS timestamp
          FROM engine_jobs_cliente j
         WHERE j.criado_em >= NOW() - ($1::int * INTERVAL '1 minute')
@@ -766,6 +776,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
               'oferta_universal' AS etapa,
               LOWER(COALESCE(o.status, '')) AS status,
               o.motivo_status AS motivo,
+              o.metadata AS metadata,
               COALESCE(o.atualizada_em, o.criada_em) AS timestamp
          FROM engine_ofertas o
          LEFT JOIN engine_jobs_cliente jof ON jof.oferta_id = o.id
@@ -779,6 +790,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
               LOWER(COALESCE(c.tipo_evento, 'evento_comercial')) AS etapa,
               LOWER(COALESCE(c.metadata->>'status', c.tipo_evento, 'registrado')) AS status,
               COALESCE(c.metadata->>'motivoCodigo', c.metadata->>'motivo', c.metadata->>'erroTipo') AS motivo,
+              c.metadata AS metadata,
               c.ocorrido_em AS timestamp
          FROM engine_eventos_comerciais c
          LEFT JOIN engine_jobs_cliente j ON j.id = c.job_id
@@ -793,6 +805,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
             etapa,
             status,
             motivo,
+            metadata,
             timestamp
        FROM eventos
       WHERE ${filtros.join(" AND ")}
@@ -822,6 +835,7 @@ async function consultarEventosTelemetria(opcoes = {}) {
     etapa: item.etapa,
     status: item.status,
     motivo: item.motivo,
+    traceRef: extrairTraceRef(item.metadata),
     timestamp: item.timestamp
   }));
 
@@ -850,6 +864,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
     'erroTipo', LEFT(${column}->>'erroTipo', 120),
     'status', LEFT(${column}->>'status', 120),
     'decisao', LEFT(${column}->>'decisao', 120),
+    'coberturaTraceId', LEFT(${column}->>'coberturaTraceId', 160),
     'provaAfiliado', jsonb_build_object(
       'conversaoStatus', LEFT(COALESCE(${column}->'provaAfiliado'->>'conversaoStatus', ${column}->'afiliacaoWorkspace'->>'conversaoStatus'), 40),
       'proofType', LEFT(COALESCE(${column}->'provaAfiliado'->>'proofType', ${column}->'afiliacaoWorkspace'->>'proofType'), 80),
@@ -858,7 +873,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
   const [evento, links, jobs, ofertas, processamentos, comerciais] = await Promise.all([
     executarQuery(
       `SELECT id, origem, origem_tipo, grupo_id, grupo_nome, marketplace_detectado,
-              ${opcoes.closedMetadata ? "NULL::jsonb" : "links_extraidos"} AS links_extraidos, capturado_em, criado_em, ${opcoes.closedMetadata ? "'{}'::jsonb" : "metadata"} AS metadata
+              ${opcoes.closedMetadata ? "NULL::jsonb" : "links_extraidos"} AS links_extraidos, capturado_em, criado_em, ${opcoes.closedMetadata ? "jsonb_build_object('coberturaTraceId', LEFT(metadata->>'coberturaTraceId', 160))" : "metadata"} AS metadata
          FROM engine_eventos_brutos
         WHERE id = $1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM engine_jobs_cliente j WHERE j.evento_id=engine_eventos_brutos.id AND j.cliente_id=$2))`,
       [id, cliente]
@@ -951,6 +966,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
     readOnly: true,
     eventoId: id,
     statusTelemetria: "disponivel",
+    traceRef: extrairTraceRef(eventoRow.metadata),
     cobertura: {
       evento: evento.ok ? "COMPROVADO" : "INDISPONIVEL",
       links: links.ok ? "COMPROVADO" : "INDISPONIVEL",
@@ -983,6 +999,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
       redirectOk: link.redirect_ok,
       motivoRedirect: link.motivo_redirect,
       metadata: sanitizarValor(link.metadata || {}),
+      traceRef: extrairTraceRef(link.metadata),
       criadoEm: link.criado_em
     })),
     jobs: jobsRows.map(job => ({
@@ -995,6 +1012,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
       tentativas: job.tentativas,
       criadoEm: job.criado_em,
       atualizadoEm: job.atualizado_em,
+      traceRef: extrairTraceRef(job.metadata),
       metadata: sanitizarValor(job.metadata || {})
     })),
     importer: linhas(processamentos)
@@ -1006,6 +1024,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
         status: proc.status,
         motivo: proc.motivo,
         detalhes: sanitizarValor(proc.detalhes || {}),
+        traceRef: extrairTraceRef(proc.detalhes),
         criadoEm: proc.criado_em
       })),
     ofertaUniversal: ofertasRows.map(oferta => ({
@@ -1018,6 +1037,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
       score: oferta.score,
       criadaEm: oferta.criada_em,
       atualizadaEm: oferta.atualizada_em,
+      traceRef: extrairTraceRef(oferta.metadata),
       metadata: sanitizarValor(oferta.metadata || {})
     })),
     eventosComerciais: linhas(comerciais)
@@ -1041,6 +1061,7 @@ async function consultarRastreioTelemetria(eventoId = "", opcoes = {}) {
         marketplace: item.marketplace,
         timestamp: item.ocorrido_em,
         origemPipeline: item.origem_pipeline,
+        traceRef: extrairTraceRef(item.metadata),
         metadata: sanitizarValor(item.metadata || {})
       }))
   };

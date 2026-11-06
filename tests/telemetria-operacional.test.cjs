@@ -811,3 +811,37 @@ test("aborted HTTP reads retain their SQL permits until the work settles", async
     await f.close();
   }
 });
+
+test("Gate A exposes stable discovery and explicit adapter availability without widening scope", async () => {
+  const f = await fixture({
+    getInfrastructureHealth: async () => ({ available: true, state: "COMPROVADO", version: "fixture" }),
+    getFinancialState: async () => { throw new Error("financial_adapter_not_injected"); },
+    getIngressJournal: async () => ({
+      state: "available",
+      records: [{ kind: "stage", stage: "callback", traceRef: "tr_0123456789abcdef01234567" }],
+      lines: 1,
+      bytes: 120,
+      retentionMs: 1000,
+    }),
+  });
+  try {
+    const discovery = await f.call("/auditoria/descoberta");
+    assert.equal(discovery.status, 200);
+    assert.equal(discovery.body.protocolo, "resonancia-gate-a-v1");
+    assert.deepEqual(discovery.body.autenticacao.escopos, ["plataforma", "workspace"]);
+    assert.equal(JSON.stringify(discovery.body).includes("tel_"), false);
+
+    const platform = await f.call("/operacional", grant("plataforma").codigo);
+    assert.equal(platform.status, 200);
+    assert.equal(platform.body.adapters.infraestrutura.state, "COMPROVADO");
+    assert.equal(platform.body.adapters.financeiro.state, "INDISPONIVEL");
+    assert.equal(platform.body.adapters.ingressJournal.records[0].traceRef, "tr_0123456789abcdef01234567");
+
+    const workspace = await f.call("/operacional", grant("workspace").codigo);
+    assert.equal(workspace.status, 200);
+    assert.equal(workspace.body.adapters.ingressJournal.state, "INDISPONIVEL");
+    assert.equal(workspace.body.adapters.ingressJournal.reason, "journal_workspace_binding_unavailable");
+  } finally {
+    await f.close();
+  }
+});

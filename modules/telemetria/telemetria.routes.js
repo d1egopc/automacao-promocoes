@@ -109,6 +109,43 @@ function criarRotasTelemetria(opcoes = {}) {
     res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" });
     next();
   });
+  // Stable, credential-free discovery for a new Codex session. This route
+  // describes the already-published grant protocol only; it never issues or
+  // reflects a token and is not an operational data read.
+  router.get("/auditoria/descoberta", (req, res) => {
+    return res.json({
+      ok: true,
+      readOnly: true,
+      protocolo: "resonancia-gate-a-v1",
+      autenticacao: {
+        emissao: ["POST /telemetria/auditoria/solicitar", "POST /telemetria/auditoria/autorizar"],
+        consumo: "Authorization: Bearer <temporary-grant>",
+        revogacao: "POST /telemetria/auditoria/revogar",
+        ttlMinutos: [15, 30, 60],
+        escopos: ["plataforma", "workspace"],
+        metodoConsulta: "GET-only",
+      },
+      consultas: [
+        "GET /telemetria/saude",
+        "GET /telemetria/eventos",
+        "GET /telemetria/operacional",
+        "GET /telemetria/workspaces",
+        "GET /telemetria/problemas",
+        "GET /telemetria/rastrear/:eventoId",
+        "GET /telemetria/rastreio/:tipo/:id",
+        "GET /telemetria/sonda-radar",
+      ],
+      limites: {
+        tokenPorUrl: false,
+        shell: false,
+        sqlArbitrario: false,
+        segredos: false,
+        escritaOperacional: false,
+      },
+      isolamento: "workspace enforced server-side; platform requires Admin Master grant",
+      ausencia: "Sources without a safe adapter return state=INDISPONIVEL with a reason.",
+    });
+  });
   router.post("/auditoria/solicitar", (req, res) => {
     const now = Date.now();
     for (const [key, b] of requestBuckets) if (now - b.at > 60000) requestBuckets.delete(key);

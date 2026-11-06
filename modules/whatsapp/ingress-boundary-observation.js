@@ -1,5 +1,6 @@
 "use strict";
 const {randomBytes,createHmac}=require("node:crypto");
+const {sanitizarTraceRef}=require("../telemetria/trace-ref");
 const MAX_MS=300000,NEXT_BOOTSTRAP_ARM_MS=86400000,NEXT_BOOTSTRAP_CAPTURE_MS=1800000,MAX_CALLS=1000,MAX_RECORDS=64,MAX_GENERATIONS=4,RETENTION_MS=900000,MAX_MESSAGES=10,MAX_BOOTSTRAP_SIGNALS=1000,MAX_CONTINUOUS_GENERATIONS=512,MAX_CONTINUOUS_MESSAGES=500,MAX_BOOTSTRAP_ROWS=512,MAX_GROUP_ROWS=512;
 const REASONS=new Set(["socket_stale","user_inactive","buffer_recovery_suppressed","from_me","not_group","accepted","mensagem_nao_monitoravel","other","group_not_monitored","stale_message","wrong_upsert_type","no_links","marketplace_unidentified","duplicate","ignored","rejected","consumer_error","engine_error","engine_not_awaited","radar_monitoramento_inativo","fora_do_horario_monitoramento","sessao_whatsapp_nao_monitorada","grupo_whatsapp_nao_monitorado","whatsapp_upsert_historico","whatsapp_timestamp_ausente","radar_ativacao_invalida","whatsapp_mensagem_anterior_ativacao","whatsapp_mensagem_anterior_janela","remotejid_ausente","origem_tipo_invalida","grupo_ou_chat_ausente","captura_sem_tempo_factual","tamanho_maximo_atingido","usuario_inativo","workspace_mismatch"]);
 const TARGET_GROUP_ID="120363408782037034@g.us",TARGET_SESSION_ID="admin_Zoiao Claro";
@@ -96,13 +97,13 @@ function createIngressBoundaryObservation({now=Date.now,setTimer=setTimeout,clea
   return target;
  }
 const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",socket_replaced:"listener_removed",listener_registered:"listener_registered",listener_removed:"listener_removed",listeners_removed:"listener_removed",buffer_active:"buffer_state",buffer_released:"buffer_state",emit_attempt:"emit_attempt",emit_completed:"emit_completed",message_node:"message_node",callback:"callback",listener:"listener",radar_entry:"radar",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"});
- function persist(b,{stage,groupId,messageId,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}={}){
+ function persist(b,{stage,groupId,messageId,traceRef,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}={}){
   if(run?.mode!=="continuous"||!journal?.append)return;
   const target=targetFor(b.workspaceId,b.sessionId,groupId);if(!target)return;
   const mapped=JOURNAL_STAGE_MAP[stage]||stage;
   safe(()=>journal.append({kind:["offline_batch","offline_attribute","offline_task","sync_state","buffer_state"].includes(mapped)?"bootstrap":mapped==="listener_registered"||mapped==="listener_removed"?"listener":mapped==="buffer_state"?"buffer":"stage",
     at:now(),stage:mapped,workspaceRef:ref("workspace",b.workspaceId),sessionRef:sessionReference(b.workspaceId,b.sessionId),groupRef:groupId?groupReference(b.workspaceId,b.sessionId,groupId):undefined,
-    eventRef:messageId?ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${messageId}`:messageId):undefined,generation:b.generation,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}));
+    eventRef:messageId?ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${messageId}`:messageId):undefined,traceRef:sanitizarTraceRef(traceRef,{messageId}),generation:b.generation,upsertType,fromMe,reason,decision,operation,offlineAttribute,syncState,count,buffering,explicitHold,pendingWorks}));
  }
  function groupCounter(workspaceId,sessionId,groupId,key,amount=1){
   if(run?.mode!=="continuous"||!groupId||!GROUP_COUNTERS.includes(key)||!targetFor(workspaceId,sessionId,groupId))return;
@@ -160,7 +161,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   if(b.invoked)return {state:"ATTACHED",evidence:"wrapper_invocation"};
   return {state:"UNKNOWN",evidence:"private_emitter_no_history"};
  }
- function messageStage(kind,{sock,emitter,sessionId,workspaceId,message,reason,upsertType,decision,buffering:bufferState}={}) {
+ function messageStage(kind,{sock,emitter,sessionId,workspaceId,message,reason,upsertType,decision,buffering:bufferState,traceRef}={}) {
   if(!active())return;
   const b=bindings.get(emitter||sock?.ev);
   if(!b||sessionId!==b.sessionId||workspaceId!==undefined&&workspaceId!==b.workspaceId)return;
@@ -170,20 +171,21 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   if(typeof id!=="string"||!id||id.length>200){run.unkeyed++;return;}
   const messageRef=ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${id}`:id);let row=run.messages.get(messageRef);
   if(!row){const limit=run.mode==="continuous"?MAX_CONTINUOUS_MESSAGES:MAX_MESSAGES;if(run.messages.size>=limit){if(run.mode!=="continuous"){stop("message_limit");return;}run.messages.delete(run.messages.keys().next().value);run.stagesDropped++;}
-   row={messageRef,fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,upsertType:UPDATES.has(upsertType)?upsertType:"other",groupRef:groupReference(b.workspaceId,b.sessionId,groupId),stages:[]};run.messages.set(messageRef,row);
+  row={messageRef,traceRef:sanitizarTraceRef(traceRef,{messageId:id}),fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,upsertType:UPDATES.has(upsertType)?upsertType:"other",groupRef:groupReference(b.workspaceId,b.sessionId,groupId),stages:[]};run.messages.set(messageRef,row);
    groupCounter(b.workspaceId,b.sessionId,groupId,row.upsertType==="notify"?"upsertNotify":row.upsertType==="append"?"upsertAppend":"upsertOther");
    groupCounter(b.workspaceId,b.sessionId,groupId,row.fromMe===true?"fromMeTrue":row.fromMe===false?"fromMeFalse":"fromMeUnknown");
   }
   if(row.stages.length>=12){run.stagesDropped++;return;}
   const safeReason=REASONS.has(reason)?reason:reason?"other":"";
   const safeDecision=["received","accepted","ignored","rejected","error","pending","unknown"].includes(decision)?decision:"";
-  row.stages.push({at:now(),generation:b.generation,kind,...(safeReason?{reason:safeReason}:{}),...(safeDecision?{decision:safeDecision}:{})});
+  if(!row.traceRef)row.traceRef=sanitizarTraceRef(traceRef,{messageId:id});
+  row.stages.push({at:now(),generation:b.generation,kind,traceRef:row.traceRef,...(safeReason?{reason:safeReason}:{}),...(safeDecision?{decision:safeDecision}:{})});
   const counters={emit_completed:"emitCompleted",callback:"callback",listener:"listener",radar_entry:"radar",mensageiro_gerente:"mensageiroGerente",mensageiro_comando:"mensageiroComando",mensageiro_atendimento:"mensageiroAtendimento"};
   if(counters[kind])groupCounter(b.workspaceId,b.sessionId,groupId,counters[kind]);
   if(kind==="emit_attempt"&&bufferState===true)groupCounter(b.workspaceId,b.sessionId,groupId,"buffered");
   if(kind==="radar_result")groupCounter(b.workspaceId,b.sessionId,groupId,decision==="accepted"?"radarAccepted":"radarRejected");
   const journalStage=({emit_attempt:"emit_attempt",emit_completed:"emit_completed",callback:"callback",listener:"listener",radar:"radar",radar_entry:"radar",result:"radar_result",radar_result:"radar_result",early:"listener_gate",mensageiro_gerente:"mensageiro_gerente",mensageiro_comando:"mensageiro_comando",mensageiro_atendimento:"mensageiro_atendimento"})[kind]||"listener";
-  persist(b,{stage:journalStage,groupId,messageId:id,upsertType:row.upsertType,fromMe:row.fromMe,reason:safeReason||undefined,decision:safeDecision||undefined,buffering:bufferState});
+  persist(b,{stage:journalStage,groupId,messageId:id,traceRef:row.traceRef,upsertType:row.upsertType,fromMe:row.fromMe,reason:safeReason||undefined,decision:safeDecision||undefined,buffering:bufferState});
  }
  function packetStage(kind,ctx,packet){
   if(!active()||!Array.isArray(packet?.messages))return;
@@ -268,7 +270,7 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   }
   return true;
  }
- function mark(kind,{sock,emitter,workspaceId,sessionId,current,reason,decision,message,messages,upsertType}={}){
+ function mark(kind,{sock,emitter,workspaceId,sessionId,current,reason,decision,message,messages,upsertType,traceRef}={}){
   if(!active())return;const b=bindings.get(emitter||sock?.ev);if(!b)return;
   if(sessionId&&sessionId!==b.sessionId){b.counters.sessionMismatch++;if(run.mode==="continuous")return;}
   if(workspaceId!==undefined&&workspaceId!==b.workspaceId){b.counters.workspaceMismatch++;if(run.mode==="continuous")return;}
@@ -278,12 +280,12 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   if(kind==="radar"){b.counters.radarEntries++;if(b.bootstrap)b.bootstrap.delivery.radarEntries++;}
   if(kind==="early"){b.counters.earlyReturns++;add(b,["socket_stale","user_inactive","buffer_recovery_suppressed"].includes(reason)?reason:"early_other");}
   const observedWorkspace=run.mode==="continuous"?b.workspaceId:workspaceId,observedSession=run.mode==="continuous"?b.sessionId:sessionId;
-  if(kind==="callback")packetStage("callback",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,upsertType},{messages});
-  if(kind==="early"&&messages)packetStage("early",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,reason,upsertType},{messages});
+  if(kind==="callback")packetStage("callback",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,upsertType,traceRef},{messages});
+  if(kind==="early"&&messages)packetStage("early",{sock,emitter:b.ev,workspaceId:observedWorkspace,sessionId:observedSession,reason,upsertType,traceRef},{messages});
   if(kind==="mensageiro_gerente")b.counters.mensageiroGerenteCalls++;
   if(kind==="mensageiro_comando")b.counters.mensageiroComandoCalls++;
   if(kind==="mensageiro_atendimento")b.counters.mensageiroAtendimentoCalls++;
-  if(message)safe(()=>messageStage(({listener:"listener",radar:"radar_entry",result:"radar_result"})[kind]||kind,{sock,emitter:b.ev,workspaceId:b.workspaceId,sessionId:b.sessionId,message,reason,decision,upsertType}));
+  if(message)safe(()=>messageStage(({listener:"listener",radar:"radar_entry",result:"radar_result"})[kind]||kind,{sock,emitter:b.ev,workspaceId:b.workspaceId,sessionId:b.sessionId,message,reason,decision,upsertType,traceRef}));
   else if(["wrapper","callback"].includes(kind))persist(b,{stage:kind,decision:"received"});
   buffering(b);
  }
