@@ -75,13 +75,19 @@ function diagnosticarEntradaUpsert({ workspaceId = "", sessaoId = "", socketGera
       const groupHash = grupoId.endsWith("@g.us")
         ? createHash("sha256").update(grupoId).digest("hex").slice(0, 12)
         : "";
+      const messageId = String(mensagem?.key?.id || "");
+      const messageHash = messageId
+        ? createHash("sha256").update(messageId).digest("hex").slice(0, 12)
+        : "";
       logger?.warn?.("[MENSAGEIRO-V3-UPSERT-INGRESS]", JSON.stringify({
+        at: new Date(agoraMs).toISOString(),
         workspaceId,
         sessaoId,
         socketGeracao,
         tipoEvento,
         totalMensagens,
         groupHash,
+        messageHash,
         fromMe: typeof mensagem?.key?.fromMe === "boolean" ? mensagem.key.fromMe : null,
         stage: "listener_entry",
         reason: "before_filters"
