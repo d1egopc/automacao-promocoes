@@ -122,7 +122,7 @@ async function observarOfertaClonador(contexto = {}, job = {}, oferta = {}, ofer
 }
 
 function detalhesObservabilidadeMagalu(marketplace = "", resultadoAdapter = {}) {
-  if (marketplace !== "magalu") return {};
+  if (!["magalu", "aliexpress"].includes(marketplace)) return {};
   const diagnostico = resultadoAdapter?.metadata?.afiliacaoWorkspaceDiagnostico;
   return diagnostico && typeof diagnostico === "object"
     ? { afiliacaoWorkspaceDiagnostico: diagnostico }

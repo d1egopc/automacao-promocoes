@@ -651,6 +651,45 @@ async function testarTituloDaPaginaNaoSubstituiTituloRadarAusente() {
   assert.strictEqual(resultado.linkAfiliado, undefined);
 }
 
+async function testarTituloDaPaginaComIdentidadeConfirmadaPodeSerUsado() {
+  const url = urlRealA07;
+  const pacote = deps({
+    resolverFatosMagalu: async () => ({
+      ok: true,
+      produtoId: "240466500",
+      sellerIdOriginal: "magazineluiza",
+      fonteUsada: "magazinevoce_magazine_promoter",
+      fatos: {
+        urlOriginal: url,
+        urlCanonica: url,
+        urlAfiliavelComprovada: url,
+        magaluWorkspaceValidado: true,
+        produtoId: "240466500",
+        codigo: "240466500",
+        titulo: "Smartphone Samsung A07 128GB Preto",
+        imagem: "https://a-static.mlcdn.com.br/800x560/samsung-a07.jpg",
+        avisos: []
+      },
+      avisos: []
+    })
+  });
+  const resultado = await importarProdutoMagaluEngine({
+    job: { id: 5082, evento_id: 6082, cliente_id: "workspace_magalu", marketplace: "magalu" },
+    evento: {
+      texto_original: "Por R$ 777,00\nLink: " + url,
+      links_extraidos: [url]
+    },
+    links: [linkRow(82, url)],
+    deps: pacote.deps
+  });
+
+  assert.strictEqual(resultado.ok, true);
+  assert.strictEqual(resultado.titulo, "Smartphone Samsung A07 128GB Preto");
+  assert.strictEqual(resultado.metadata.fallbackRadar.tituloPaginaUsado, true);
+  assert.strictEqual(resultado.metadata.fallbackRadar.identidadeProdutoConfirmada, true);
+  assert.strictEqual(resultado.precoAtual, 777);
+}
+
 async function testarRadarSemPrecoNaoContinuaPipeline() {
   const pacote = deps({
     html: "<html><head><title>Captcha Magalu</title></head><body>Complete o CAPTCHA</body></html>",
@@ -1064,6 +1103,7 @@ function testarRegistriesPipelineUnico() {
   await testarResolverFalhaComRadarSuficienteContinuaPipeline();
   await testarRadarSemTituloNaoContinuaPipeline();
   await testarTituloDaPaginaNaoSubstituiTituloRadarAusente();
+  await testarTituloDaPaginaComIdentidadeConfirmadaPodeSerUsado();
   await testarRadarSemPrecoNaoContinuaPipeline();
   await testarDeepLinkOutraLojaNaoContinuaPipeline();
   await testarOfertaUniversalValida();

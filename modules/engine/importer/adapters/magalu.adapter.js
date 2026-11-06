@@ -256,6 +256,19 @@ function extrairTituloRadarSeguroMagalu(evento = {}) {
   return extrairTituloTextoRadarMagalu(textoOriginalEvento(evento));
 }
 
+function identidadeProdutoMagaluConfirmada({ produto = {}, urlOriginal = "", produtoIdRadar = "" } = {}) {
+  const esperado = texto(produtoIdRadar || produtoIdPorUrl(urlOriginal)).toLowerCase();
+  if (!esperado) return false;
+  const idsProduto = [produto.produtoId, produto.codigo, produto.idExterno]
+    .map(valor => texto(valor).toLowerCase())
+    .filter(Boolean);
+  if (!idsProduto.includes(esperado)) return false;
+  const idsUrl = [produto.urlCanonica, produto.urlOriginal, produto.urlAfiliavelComprovada]
+    .map(url => texto(produtoIdPorUrl(url)).toLowerCase())
+    .filter(Boolean);
+  return idsUrl.length > 0 && idsUrl.every(id => id === esperado);
+}
+
 function escolherLinkMagalu(links = [], evento = {}) {
   const candidatos = [];
 
@@ -729,7 +742,15 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
   const urlCanonica = primeiroValor(urlWorkspaceValidada, produto.urlOriginal, urlOriginalEngine);
   const linkAfiliado = provaAfiliado.conversaoStatus === "convertida" ? texto(provaAfiliado.urlAfiliadaWorkspace) : "";
   const tituloRadarSeguro = extrairTituloRadarSeguroMagalu(evento);
-  const tituloFinal = tituloRadarSeguro;
+  const identidadeProdutoConfirmada = identidadeProdutoMagaluConfirmada({
+    produto,
+    urlOriginal: urlOriginalEngine,
+    produtoIdRadar
+  });
+  const tituloPaginaSeguro = identidadeProdutoConfirmada
+    ? tituloRadarSeguroMagalu(produto.titulo || produto.nome)
+    : "";
+  const tituloFinal = tituloRadarSeguro || tituloPaginaSeguro;
   const precoRadarSeguro = extrairPrecoRadarSeguroMagalu(evento);
   const radarDefiniuPreco = numeroPreco(precoRadarSeguro) !== null;
   const precoAtual = radarDefiniuPreco ? precoRadarSeguro : "";
@@ -1052,6 +1073,8 @@ async function importarProdutoMagaluEngine({ job = {}, evento = {}, links = [], 
       fallbackRadar: {
         usado: !texto(produto.titulo) || erroResolver !== null || produto.ok === false,
         tituloRadarUsado: !texto(produto.titulo) && Boolean(tituloRadarSeguro),
+        tituloPaginaUsado: !Boolean(tituloRadarSeguro) && Boolean(tituloPaginaSeguro),
+        identidadeProdutoConfirmada,
         resolverFalhou: erroResolver !== null,
         motivoResolver: produto?.motivo || "",
         avisos: avisosProduto

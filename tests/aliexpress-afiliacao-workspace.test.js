@@ -7,7 +7,8 @@ const { importarAliExpressEngine } = require("../modules/engine/importer/adapter
 const {
   criarProvaAfiliacaoWorkspaceAliExpress,
   validarProvaAfiliacaoWorkspaceAliExpress,
-  validarOfertaAfiliacaoWorkspaceAliExpress
+  validarOfertaAfiliacaoWorkspaceAliExpress,
+  diagnosticarProvaAfiliacaoWorkspaceAliExpress
 } = require("../modules/marketplaces/aliexpress/afiliacao-workspace");
 const { enviarOfertaManualV2 } = require("../modules/manual-v2/manual-dispatcher");
 
@@ -102,6 +103,8 @@ async function testarPcFalhaAppConverte() {
   assert.strictEqual(app.papelLink, "link_app");
   assert.strictEqual(pc.papelLink, "link_pc");
   assert.deepStrictEqual(resultado.metadata.linksFalhosWorkspace.map(item => item.papelLink), ["link_pc"]);
+  assert.ok(resultado.metadata.afiliacaoWorkspaceDiagnostico, "falha deve carregar diagnostico sanitizado");
+  assert.ok(!JSON.stringify(resultado.metadata.afiliacaoWorkspaceDiagnostico).includes(CREDENCIAIS.secret));
   assert.strictEqual(validarOfertaAfiliacaoWorkspaceAliExpress({ marketplace: "aliexpress", metadata: resultado.metadata }, {
     clienteId: "workspace_a",
     credenciais: CREDENCIAIS
@@ -195,6 +198,14 @@ function testarGateFinalEIsolamentoPorWorkspace() {
     clienteId: "workspace_a",
     credenciais: CREDENCIAIS
   }).ok, false);
+  const diagnostico = diagnosticarProvaAfiliacaoWorkspaceAliExpress(prova("https://s.click.aliexpress.com/e/_x", "falhou"), {
+    clienteId: "workspace_a",
+    credenciais: CREDENCIAIS
+  });
+  assert.strictEqual(diagnostico.valida, false);
+  assert.ok(diagnostico.missing.includes("conversaoStatus"));
+  assert.ok(diagnostico.missing.includes("urlAfiliadaWorkspace"));
+  assert.ok(!JSON.stringify(diagnostico).includes(CREDENCIAIS.secret));
 
   const ofertaAppConvertidoPcFalhou = {
     marketplace: "aliexpress",
