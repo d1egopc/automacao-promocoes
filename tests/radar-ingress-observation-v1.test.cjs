@@ -190,8 +190,8 @@ test("probe uses the existing upsert callback hook and adds no listener or persi
   const targetConfig = source.slice(source.indexOf("const RADAR_INGRESS_OBSERVATION_TARGET"), routeStart);
   assert.equal((adminRoutes.match(/exigirAdminMasterEngine\(req, res\)/g) || []).length, 5);
   assert.match(targetConfig, /workspaceId: "admin"/);
-  assert.match(targetConfig, /sessionId: "admin_ZOIAO"/);
-  assert.match(targetConfig, /groupRef: "ec288ef5bc72eae2"/);
+  assert.match(targetConfig, /sessionId: "admin_Zoiao Claro"/);
+  assert.match(targetConfig, /groupRef: "d536bfedf8f3300d"/);
   assert.doesNotMatch(targetConfig, /sessionId:.*ClaroTeste|sessionId:.*ServCel/);
   assert.match(targetConfig, /item\?\.sessaoId/);
   assert.match(targetConfig, /resolverSessaoWhatsappRadarCliente\("admin", sessionInput\)/);
@@ -200,13 +200,13 @@ test("probe uses the existing upsert callback hook and adds no listener or persi
   assert.match(targetConfig, /listener_attachment_missing/);
 });
 
-test("target binding uses the pinned Garimpei JID/session and rejects a different workspace", () => {
+test("target binding uses the pinned OP Teste Radar JID/session and rejects a different workspace", () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
   const start = source.indexOf("const RADAR_INGRESS_OBSERVATION_TARGET");
   const end = source.indexOf("function responderObservacaoIngressRadar", start);
   assert.ok(start >= 0 && end > start);
 
-  const configuredSessionId = "admin_ZOIAO";
+  const configuredSessionId = "admin_Zoiao Claro";
   const socket = { ev: {} };
   socket.__optimusListeners = {
     "messages.upsert": { emissor: socket.ev, evento: "messages.upsert", handler() {} }
@@ -216,9 +216,9 @@ test("target binding uses the pinned Garimpei JID/session and rejects a differen
     sessoesWhatsappMonitoradas: [{
       sessaoId: configuredSessionId,
       gruposMonitorados: [{
-        nome: "Garimpei renamed",
+        nome: "OP Teste Radar renamed",
         ativo: true,
-        remoteJid: "123456789@g.us"
+        remoteJid: "120363408782037034@g.us"
       }]
     }]
   };
@@ -226,7 +226,7 @@ test("target binding uses the pinned Garimpei JID/session and rejects a differen
   function validate(workspaceId) {
     const metadata = { workspaceId, clienteId: workspaceId };
     const context = {
-      createHash: () => ({ update: () => ({ digest: () => "ec288ef5bc72eae2" }) }),
+      createHash: () => ({ update: () => ({ digest: () => "d536bfedf8f3300d" }) }),
       carregarRadarConfigCliente: () => config,
       normalizarTexto: value => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, ""),
       obterGrupoWhatsappIdTecnicoRadar: group => group.remoteJid,
@@ -245,7 +245,7 @@ test("target binding uses the pinned Garimpei JID/session and rejects a differen
   const valid = validate("admin");
   assert.equal(valid.ok, true);
   assert.equal(valid.sessionId, configuredSessionId);
-  assert.equal(valid.groupId, "123456789@g.us");
+  assert.equal(valid.groupId, "120363408782037034@g.us");
 
   const mismatch = validate("user_k3phmbkf");
   assert.deepEqual(

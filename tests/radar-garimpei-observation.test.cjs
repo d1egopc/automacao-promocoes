@@ -6,16 +6,16 @@ const vm = require("node:vm");
 const crypto = require("node:crypto");
 const { createRadarIngressObservation } = require("../modules/radar/ingress-observation-v1");
 const source = fs.readFileSync(require.resolve("../index.js"), "utf8");
-const jid = "123456789@g.us", session = "admin_ZOIAO";
+const jid = "120363408782037034@g.us", session = "admin_Zoiao Claro";
 function validate(change = () => {}) {
   const sock = { ev: {} };
   sock.__optimusListeners = { "messages.upsert": { emissor: sock.ev, evento: "messages.upsert", handler() {} } };
   const config = { monitoramentoAtivo: true, sessoesWhatsappMonitoradas: [{ sessaoId: session,
     gruposMonitorados: [{ id: jid, grupoId: jid, remoteJid: jid, sessaoId: session, ativo: true, nome: "renamed" }] }] };
   const ctx = {
-    // Synthetic JID substitutes the approved identity; all other inputs use real SHA-256.
+    // Synthetic JID substitutes the approved OP Teste Radar identity; all other inputs use real SHA-256.
     createHash: algorithm => { let value; return { update(input) { value = input; return this; },
-      digest(format) { return value === jid ? "ec288ef5bc72eae2" : crypto.createHash(algorithm).update(value).digest(format); } }; },
+      digest(format) { return value === jid ? "d536bfedf8f3300d" : crypto.createHash(algorithm).update(value).digest(format); } }; },
     carregarRadarConfigCliente: () => config,
     obterGrupoWhatsappIdTecnicoRadar: g => g.remoteJid || g.grupoId || g.id,
     resolverSessaoWhatsappRadarCliente: (_, id) => id,
@@ -30,9 +30,9 @@ function validate(change = () => {}) {
     ";this.validate=validarAlvoObservacaoIngressRadar", ctx);
   return ctx.validate();
 }
-test("target uses approved identity regardless of display name and rejects spoofed title", () => {
+test("OP Teste Radar target uses approved identity regardless of display name and rejects spoofed title", () => {
   assert.equal(validate().ok, true);
-  assert.equal(validate(({ group }) => { group.nome = "Garimpei #176"; group.remoteJid = group.id = group.grupoId = "999999999@g.us"; }).ok, false);
+  assert.equal(validate(({ group }) => { group.nome = "OP Teste Radar #176"; group.remoteJid = group.id = group.grupoId = "999999999@g.us"; }).ok, false);
 });
 test("inactive, duplicate, inconsistent identity, session and tenant fail closed", () => {
   for (const change of [
