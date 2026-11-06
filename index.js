@@ -25981,8 +25981,8 @@ app.get("/radar/config", (req, res) => {
 
 const RADAR_INGRESS_OBSERVATION_TARGET = Object.freeze({
   workspaceId: "admin",
-  sessionId: "admin_ZOIAO",
-  groupRef: "ec288ef5bc72eae2"
+  sessionId: "admin_Zoiao Claro",
+  groupRef: "d536bfedf8f3300d"
 });
 
 function validarAlvoObservacaoIngressRadar() {
