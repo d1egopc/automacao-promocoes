@@ -106,6 +106,7 @@ require.cache[databasePath] = {
               etapa: "job",
               status: "pendente",
               motivo: null,
+              metadata: { coberturaTraceId: "cov_0123456789abcdef" },
               timestamp: "2026-08-13T10:00:00.000Z"
             }
           ]
@@ -349,6 +350,7 @@ async function request(app, method, url, { token = "", body } = {}) {
   });
   assert.strictEqual(eventosWorkspace.ok, true);
   assert.strictEqual(eventosWorkspace.items[0].clienteId, "user_a");
+  assert.match(eventosWorkspace.items[0].traceRef, /^tr_[a-f0-9]{24}$/);
   assert(queriesDb[0].params.includes("user_a"), "escopo workspace deve forcar clienteId autorizado");
   assert(!queriesDb[0].params.includes("user_b"), "query nao pode escapar para clienteId solicitado");
 
@@ -406,6 +408,13 @@ async function request(app, method, url, { token = "", body } = {}) {
   app.get("/me", (req, res) => res.json({ ok: true }));
   app.get("/fila", (req, res) => res.json({ ok: true }));
   app.post("/engine/processar-pendentes", (req, res) => res.json({ ok: true }));
+
+  const descoberta = await request(app, "GET", "/telemetria/auditoria/descoberta");
+  assert.strictEqual(descoberta.status, 200);
+  assert.strictEqual(descoberta.body.protocolo, "resonancia-gate-a-v1");
+  assert.deepStrictEqual(descoberta.body.autenticacao.ttlMinutos, [15, 30, 60]);
+  assert.strictEqual(JSON.stringify(descoberta.body).includes("tel_"), false);
+  assert.strictEqual(descoberta.body.limites.shell, false);
 
   const novo = await request(app, "POST", "/telemetria/auditoria/ativar", {
     body: { ttlMinutos: 30, escopo: "workspace", clienteId: "user_b" }
