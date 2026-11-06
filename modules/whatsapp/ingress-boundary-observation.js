@@ -171,14 +171,14 @@ const JOURNAL_STAGE_MAP=Object.freeze({socket_current:"listener_registered",sock
   if(typeof id!=="string"||!id||id.length>200){run.unkeyed++;return;}
   const messageRef=ref("message",run.mode==="continuous"?`${b.workspaceId}:${b.sessionId}:${id}`:id);let row=run.messages.get(messageRef);
   if(!row){const limit=run.mode==="continuous"?MAX_CONTINUOUS_MESSAGES:MAX_MESSAGES;if(run.messages.size>=limit){if(run.mode!=="continuous"){stop("message_limit");return;}run.messages.delete(run.messages.keys().next().value);run.stagesDropped++;}
-  row={messageRef,traceRef:sanitizarTraceRef(traceRef,{messageId:id}),fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,upsertType:UPDATES.has(upsertType)?upsertType:"other",groupRef:groupReference(b.workspaceId,b.sessionId,groupId),stages:[]};run.messages.set(messageRef,row);
+  row={messageRef,traceRef:sanitizarTraceRef(messageRef),fromMe:typeof message.key.fromMe==="boolean"?message.key.fromMe:null,upsertType:UPDATES.has(upsertType)?upsertType:"other",groupRef:groupReference(b.workspaceId,b.sessionId,groupId),stages:[]};run.messages.set(messageRef,row);
    groupCounter(b.workspaceId,b.sessionId,groupId,row.upsertType==="notify"?"upsertNotify":row.upsertType==="append"?"upsertAppend":"upsertOther");
    groupCounter(b.workspaceId,b.sessionId,groupId,row.fromMe===true?"fromMeTrue":row.fromMe===false?"fromMeFalse":"fromMeUnknown");
   }
   if(row.stages.length>=12){run.stagesDropped++;return;}
   const safeReason=REASONS.has(reason)?reason:reason?"other":"";
   const safeDecision=["received","accepted","ignored","rejected","error","pending","unknown"].includes(decision)?decision:"";
-  if(!row.traceRef)row.traceRef=sanitizarTraceRef(traceRef,{messageId:id});
+  if(!row.traceRef)row.traceRef=sanitizarTraceRef(messageRef);
   row.stages.push({at:now(),generation:b.generation,kind,traceRef:row.traceRef,...(safeReason?{reason:safeReason}:{}),...(safeDecision?{decision:safeDecision}:{})});
   const counters={emit_completed:"emitCompleted",callback:"callback",listener:"listener",radar_entry:"radar",mensageiro_gerente:"mensageiroGerente",mensageiro_comando:"mensageiroComando",mensageiro_atendimento:"mensageiroAtendimento"};
   if(counters[kind])groupCounter(b.workspaceId,b.sessionId,groupId,counters[kind]);

@@ -23,7 +23,7 @@ test("traceRef is deterministic, opaque and compatible with coverage IDs", () =>
   assert.equal(fromMessage.includes(coverage), false);
 });
 
-test("journal accepts only sanitized traceRef and retains no private fields", () => {
+test("journal keeps the existing opaque eventRef and retains no private fields", () => {
   const record = sanitizeRecord({
     kind: "stage",
     stage: "callback",
@@ -37,7 +37,8 @@ test("journal accepts only sanitized traceRef and retains no private fields", ()
     content: "PRIVATE_CONTENT",
   });
   assert.ok(record);
-  assert.match(record.traceRef, /^tr_[a-f0-9]{24}$/);
+  assert.equal("traceRef" in record, false);
+  assert.equal(extrairTraceRef(record), sanitizarTraceRef(record.eventRef));
   assert.equal("messageId" in record, false);
   assert.equal("content" in record, false);
 });

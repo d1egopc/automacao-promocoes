@@ -42,6 +42,10 @@ function extrairTraceRef(...sources) {
       source.coberturaTraceId || source.cobertura_trace_id || "",
     );
     if (coverage) return sanitizarTraceRef(coverage);
+    // Existing ingress journals persist only the opaque eventRef. Reusing it
+    // keeps old records correlatable without changing the journal schema.
+    const eventRef = texto(source.eventRef || source.event_ref || "");
+    if (/^[a-f0-9]{16}$/.test(eventRef)) return sanitizarTraceRef(eventRef);
     const metadata = source.metadata && typeof source.metadata === "object"
       ? source.metadata
       : source.detalhes && typeof source.detalhes === "object"

@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const telemetry = require("./telemetria.service");
 const admin = require("../observabilidade/admin.service");
 const { queryEngineShadow } = require("../engine/database");
+const { extrairTraceRef } = require("./trace-ref");
 const salt = crypto.randomBytes(32);
 const ref = (value) =>
   value
@@ -268,7 +269,12 @@ function createOperationalView({
         readOnly: true,
         state: result.state === "available" ? "COMPROVADO" : "INDISPONIVEL",
         reason: result.state === "available" ? "sanitized_journal_read" : "journal_unavailable",
-        records: Array.isArray(result.records) ? result.records.slice(-1000) : [],
+        records: Array.isArray(result.records)
+          ? result.records.slice(-1000).map((record) => ({
+              ...record,
+              ...(extrairTraceRef(record) ? { traceRef: extrairTraceRef(record) } : {}),
+            }))
+          : [],
         lines: Number(result.lines) || 0,
         bytes: Number(result.bytes) || 0,
         queued: Number(result.queued) || 0,
