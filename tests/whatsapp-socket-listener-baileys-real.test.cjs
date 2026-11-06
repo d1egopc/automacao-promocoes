@@ -184,7 +184,11 @@ async function main() {
   assert.equal(logs[0].payload.fromMe, false);
   assert.equal(logs[0].payload.tipoEvento, "notify");
   assert.equal(logs[0].payload.groupHash.length, 12);
+  assert.equal(logs[0].payload.messageHash.length, 12, "ID da mensagem deve ser pseudonimizado");
+  assert.match(logs[0].payload.at, /^20\d\d-\d\d-\d\dT/);
+  assert.equal(logs[0].payload.stage, "listener_entry");
   assert.ok(!JSON.stringify(logs).includes(grupo));
+  assert.ok(!JSON.stringify(logs).includes("fixture-real-buffer"));
   assert.ok(!JSON.stringify(logs).includes("SEGREDO_NAO_LOGAR"));
   const v2InitialEvents = gerenteObservabilityV2.readEvents(v2RunId);
   assert.deepEqual(v2InitialEvents.slice(0, 4).map(event => event.stage), [
