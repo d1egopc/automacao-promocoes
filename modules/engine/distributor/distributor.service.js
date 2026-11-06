@@ -420,16 +420,25 @@ function detalhesDestinoAnalise(item = {}) {
   const ativo = destino?.ativo !== false;
   const aceitaMarketplace = analise.aceitaMarketplace === true;
   const aceitaCategoria = analise.aceitaCategoria === true;
+  const geracao = normalizarTexto(
+    destino.generation || destino.geracao || destino.configGeneration || destino.configVersion || destino.version || ""
+  );
 
   return {
     destinoId: normalizarTexto(destino.id || destino.destinoId || ""),
     destinoNome: normalizarTexto(destino.nome || destino.name || ""),
+    geracao,
     ativo,
+    marketplaceSolicitado: normalizarTexto(analise.marketplaceOferta || ""),
     marketplaceCompativel: aceitaMarketplace,
+    marketplacePermitido: aceitaMarketplace,
     marketplacesPermitidos,
     categoriaOferta: normalizarTexto(analise.categoriaUsada || analise.categoriaOferta || ""),
     categoriasPermitidas,
     aceitaCategoria,
+    origemOferta: normalizarTexto(analise.origemOferta || ""),
+    origemConfigurada: normalizarTexto(analise.origemOfertasDestino || ""),
+    origemPermitida: analise.aceitaOrigem === true,
     aceito: analise.aceita === true,
     motivoFinal: analise.aceita === true
       ? "destino_compativel"
@@ -1251,8 +1260,18 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
     return rejeitar("cliente_invalido");
   }
 
-  if (!marketplaceAtivoClienteEngine(clienteId, marketplace, contexto.marketplacesAtivosPorCliente || {})) {
-    return rejeitar("marketplace_bloqueado");
+  const marketplaceGlobalAtivo = marketplaceAtivoClienteEngine(clienteId, marketplace, contexto.marketplacesAtivosPorCliente || {});
+  if (!marketplaceGlobalAtivo) {
+    return rejeitar("marketplace_bloqueado", {
+      elegibilidadeTrace: {
+        escopo: "workspace",
+        marketplace,
+        globalMarketplaceAtivo: false,
+        origem: normalizarTexto(oferta.origem || resolverOrigemFluxo(oferta) || ""),
+        categoria: normalizarTexto(oferta.categoria || oferta.categoriaProduto || ""),
+        motivo: "marketplace_bloqueado"
+      }
+    });
   }
 
   if (!normalizarTexto(oferta.categoria)) {
@@ -1272,7 +1291,24 @@ async function validarOfertaParaDistribuicao(oferta = {}, contexto = {}) {
         destinosTotal: destinos.destinos.length,
         destinosCompativeis: 0,
         rejeitados: destinos.rejeitados.map(item => item.analise?.motivo || ""),
-        destinosDiagnostico,
+        destinosDiagnostico: destinosDiagnostico.map(item => ({
+          ...item,
+          globalMarketplaceAtivo: marketplaceGlobalAtivo
+        })),
+        elegibilidadeTrace: {
+          escopo: "destinos",
+          marketplace,
+          globalMarketplaceAtivo: marketplaceGlobalAtivo,
+          origem: normalizarTexto(oferta.origem || resolverOrigemFluxo(oferta) || ""),
+          categoria: normalizarTexto(oferta.categoria || oferta.categoriaProduto || ""),
+          destinos: destinosDiagnostico.map(item => ({
+            destinoId: item.destinoId,
+            geracao: item.geracao,
+            marketplacePermitido: item.marketplacePermitido,
+            origemPermitida: item.origemPermitida,
+            motivo: item.motivoFinal
+          }))
+        },
         categoriaOferta: destinosDiagnostico.map(item => item.categoriaOferta).find(Boolean) || normalizarTexto(oferta.categoria || ""),
         categoriasDestino: destinosDiagnostico.flatMap(item => item.categoriasPermitidas || []).filter(Boolean)
     });

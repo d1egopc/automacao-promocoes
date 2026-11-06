@@ -650,6 +650,23 @@ function provenienciaAfiliacaoWorkspaceAliExpress(produto = {}, clienteId = "", 
   );
 }
 
+function diagnosticoAfiliacaoWorkspaceAliExpress({ afiliacaoPrincipal = {}, linksFalhosWorkspace = [], clienteId = "", credenciais = {} } = {}) {
+  return {
+    escopo: "workspace",
+    principal: afiliacaoPrincipal.diagnostico || null,
+    linksFalhos: linksFalhosWorkspace.map(item => {
+      const validacao = validarProvaAfiliacaoWorkspaceAliExpress(
+        item.conversaoWorkspace || item.afiliacaoWorkspace || {},
+        { clienteId, credenciais }
+      );
+      return {
+        papel: texto(item.papelLink || item.tipo),
+        diagnostico: validacao.diagnostico
+      };
+    }).slice(0, 20)
+  };
+}
+
 function provaAssinadaDaConversaoAliExpress(prova = {}, { clienteId = "", credenciais = {}, urlOriginal = "", urlAfiliada = "", papel = "" } = {}) {
   if (!validarProvaAfiliacaoWorkspaceAliExpress(prova, { clienteId, credenciais }).valida ||
       !texto(urlOriginal) || !texto(urlAfiliada) ||
@@ -1094,6 +1111,12 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
   const motivoBloqueioAfiliacao = falhaAppPcObrigatoria
     ? "afiliacao_workspace_incompleta"
     : (afiliacaoPrincipal.valida ? "link_afiliado_vazio" : "afiliacao_workspace_incompleta");
+  const afiliacaoWorkspaceDiagnostico = diagnosticoAfiliacaoWorkspaceAliExpress({
+    afiliacaoPrincipal,
+    linksFalhosWorkspace,
+    clienteId,
+    credenciais
+  });
 
   if (!linksSeguros.length || falhaAppPcObrigatoria) {
     logAliExpressTravessiaV272({
@@ -1114,7 +1137,8 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       linkOriginal: urlOriginalEngine,
       metadata: {
         linksClassificados: linksClassificadosComConversao,
-        linksFalhosWorkspace
+        linksFalhosWorkspace,
+        afiliacaoWorkspaceDiagnostico
       }
     };
   }
@@ -1181,6 +1205,7 @@ async function importarAliExpressEngine({ job = {}, evento = {}, links = [], dep
       papelLinkMotivo: linkEscolhido.papelLinkMotivo || "",
       linksClassificados: linksClassificadosComConversao,
       linksFalhosWorkspace,
+      afiliacaoWorkspaceDiagnostico,
       afiliacaoWorkspace: provaPrincipalAssinada,
       textoRadarTemCupom: Boolean(cupomTexto),
       moedasTexto,

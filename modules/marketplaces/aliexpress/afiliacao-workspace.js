@@ -35,6 +35,29 @@ function assinaturaProvaAliExpressValida(prova = {}, credenciais = {}) {
   return crypto.timingSafeEqual(Buffer.from(recebida), Buffer.from(esperada));
 }
 
+// Diagnóstico sanitizado: expõe somente quais partes do contrato faltam,
+// nunca valores de credenciais, tracking ou URLs afiliadas.
+function diagnosticarProvaAfiliacaoWorkspaceAliExpress(prova = {}, {
+  clienteId = "",
+  credenciais = {},
+  exigirAssinatura = false
+} = {}) {
+  const checks = {
+    workspaceId: Boolean(texto(clienteId) && prova.workspaceId === clienteId),
+    appKey: Boolean(texto(credenciais.appKey) && prova.appKey === texto(credenciais.appKey)),
+    trackingIdEnviado: Boolean(texto(credenciais.trackingId) && prova.trackingIdEnviado === texto(credenciais.trackingId)),
+    origemConversao: prova.origemConversao === "workspace_api",
+    conversaoStatus: prova.conversaoStatus === "convertida",
+    urlAfiliadaWorkspace: Boolean(texto(prova.urlAfiliadaWorkspace)),
+    assinatura: !exigirAssinatura || assinaturaProvaAliExpressValida(prova, credenciais)
+  };
+  return {
+    valida: Object.values(checks).every(Boolean),
+    missing: Object.entries(checks).filter(([, ok]) => !ok).map(([campo]) => campo),
+    checks
+  };
+}
+
 function criarProvaAfiliacaoWorkspaceAliExpress({ clienteId = "", credenciais = {}, urlOriginal = "", urlAfiliadaWorkspace = "", papel = "produto", conversaoStatus = "falhou", motivoConversao = "" } = {}) {
   const prova = {
     workspaceId: texto(clienteId),
@@ -72,23 +95,15 @@ function validarProvaAfiliacaoWorkspaceAliExpress(prova = {}, {
   credenciais = {},
   exigirAssinatura = false
 } = {}) {
-  const appKey = texto(credenciais.appKey);
-  const trackingId = texto(credenciais.trackingId);
+  const diagnostico = diagnosticarProvaAfiliacaoWorkspaceAliExpress(prova, {
+    clienteId, credenciais, exigirAssinatura
+  });
   const urlAfiliadaWorkspace = texto(prova.urlAfiliadaWorkspace);
-  const valida = Boolean(
-    texto(clienteId) &&
-    prova.workspaceId === clienteId &&
-    prova.appKey === appKey &&
-    prova.trackingIdEnviado === trackingId &&
-    prova.origemConversao === "workspace_api" &&
-    prova.conversaoStatus === "convertida" &&
-    urlAfiliadaWorkspace &&
-    (!exigirAssinatura || assinaturaProvaAliExpressValida(prova, credenciais))
-  );
 
   return {
-    valida,
-    prova: { ...prova, urlAfiliadaWorkspace }
+    valida: diagnostico.valida,
+    prova: { ...prova, urlAfiliadaWorkspace },
+    diagnostico
   };
 }
 
@@ -124,7 +139,12 @@ function validarOfertaAfiliacaoWorkspaceAliExpress(oferta = {}, {
     return prova.valida;
   });
   if (!principal.valida && !possuiLinkContextualSeguro) {
-    return { ok: false, motivo: "afiliacao_workspace_incompleta", papel: "principal" };
+    return {
+      ok: false,
+      motivo: "afiliacao_workspace_incompleta",
+      papel: "principal",
+      diagnostico: principal.diagnostico
+    };
   }
 
   if (exigirAssinatura) {
@@ -137,21 +157,31 @@ function validarOfertaAfiliacaoWorkspaceAliExpress(oferta = {}, {
   const exigeAppPcIntegral = papeisCapturados.has("link_app") && papeisCapturados.has("link_pc");
   for (const link of links) {
     const papel = texto(link.papelLink || link.tipo);
-    if (link.renderizavel === false) {
-      if (exigeAppPcIntegral && ["link_app", "link_pc"].includes(papel)) {
-        return { ok: false, motivo: "afiliacao_workspace_incompleta", papel };
-      }
-      continue;
-    }
-    if (!papelExigeAfiliacaoWorkspaceAliExpress(papel)) continue;
     const prova = validarProvaAfiliacaoWorkspaceAliExpress(
       exigirAssinatura
         ? provasLinksVerificadas.find((item) => texto(item?.papel) === papel && texto(item?.urlAfiliadaWorkspace) === texto(link.urlAfiliada || link.linkAfiliado || link.url || link.href)) || {}
         : (link.conversaoWorkspace || link.afiliacaoWorkspace || {}),
       { clienteId, credenciais, exigirAssinatura }
     );
+    if (link.renderizavel === false) {
+      if (exigeAppPcIntegral && ["link_app", "link_pc"].includes(papel)) {
+        return {
+          ok: false,
+          motivo: "afiliacao_workspace_incompleta",
+          papel,
+          diagnostico: prova.diagnostico
+        };
+      }
+      continue;
+    }
+    if (!papelExigeAfiliacaoWorkspaceAliExpress(papel)) continue;
     if (!prova.valida) {
-      return { ok: false, motivo: "afiliacao_workspace_incompleta", papel };
+      return {
+        ok: false,
+        motivo: "afiliacao_workspace_incompleta",
+        papel,
+        diagnostico: prova.diagnostico
+      };
     }
   }
 
@@ -162,6 +192,7 @@ module.exports = {
   papelExigeAfiliacaoWorkspaceAliExpress,
   criarProvaAfiliacaoWorkspaceAliExpress,
   validarProvaAfiliacaoWorkspaceAliExpress,
+  diagnosticarProvaAfiliacaoWorkspaceAliExpress,
   validarOfertaAfiliacaoWorkspaceAliExpress,
   assinaturaProvaAliExpressValida
 };

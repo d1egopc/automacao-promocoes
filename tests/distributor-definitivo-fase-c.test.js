@@ -146,6 +146,27 @@ async function validarDistributorClassificaSemFila() {
   assert.strictEqual(semDestino.ok, false);
   assert.strictEqual(semDestino.motivo, "sem_destino");
   assert.strictEqual(semDestino.detalhes.definitivoOperacional, true);
+
+  const contextoMagalu = contexto({
+    [WORKSPACE_A]: [destino({
+      id: "destino_magalu_trace",
+      generation: "g17",
+      marketplaces: ["mercadolivre"],
+      categorias: ["Eletrônicos"],
+      origemOfertas: "optimus"
+    })]
+  });
+  contextoMagalu.marketplacesAtivosPorCliente[WORKSPACE_A].magalu = true;
+  const magaluBloqueada = await distributorService.validarOfertaParaDistribuicao(
+    oferta({ marketplace: "magalu", categoria: "Eletrônicos", origem: "optimus" }),
+    contextoMagalu
+  );
+  assert.strictEqual(magaluBloqueada.ok, false);
+  assert.strictEqual(magaluBloqueada.motivo, "marketplace_bloqueado");
+  assert.strictEqual(magaluBloqueada.detalhes.elegibilidadeTrace.destinos[0].destinoId, "destino_magalu_trace");
+  assert.strictEqual(magaluBloqueada.detalhes.elegibilidadeTrace.destinos[0].geracao, "g17");
+  assert.strictEqual(magaluBloqueada.detalhes.elegibilidadeTrace.destinos[0].marketplacePermitido, false);
+  assert.strictEqual(magaluBloqueada.detalhes.elegibilidadeTrace.destinos[0].origemPermitida, true);
 }
 
 async function executarRunnerComMock({ ofertas, validar, gate }) {
