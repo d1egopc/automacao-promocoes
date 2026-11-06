@@ -626,7 +626,7 @@ jobs:
           if-no-files-found: error
 
   telemetry-postgres:
-    if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027'
+    if: github.ref == 'refs/heads/validation/telemetria-operacional-20261027' || github.ref == 'refs/heads/validation/telemetria-v11-panel-first-20261027' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/validation/resonancia-gate-a-pg17-20261106')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
