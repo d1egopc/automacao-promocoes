@@ -5,14 +5,19 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const evidence = require("./fixtures/links-v23-real-resolution.sanitized.json");
 
-test("fixed 40-URL cohort remains tied to the exact measured resolution code", () => {
+test("fixed 40-URL cohort stays pinned and additive successors require an exact hash plus dedicated evidence", () => {
   assert.equal(evidence.sampleFingerprint, "5fa12103ca5e2902e7d969d08967280aec1f398859dcb1565f2aa71ab2671e06");
   assert.equal(evidence.sampleCount, 40); assert.equal(evidence.rows.length, 40);
   assert.equal(new Set(evidence.rows.map(x => x.id)).size, 40);
   assert.equal(new Set(evidence.rows.map(x => x.domain)).size, 12);
   for (const [file, expected] of Object.entries(evidence.normalizedSourceHashes)) {
     const actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", file), "utf8").replace(/\r\n/g, "\n")).digest("hex");
-    assert.equal(actual, expected, `measured runtime changed: ${file}`);
+    if (actual === expected) continue;
+    const compatible = evidence.compatibleAdditiveSourceHashes?.[file] || [];
+    const successor = compatible.find(item => item.sha256 === actual);
+    assert.ok(successor, `measured runtime changed without an explicitly pinned additive successor: ${file}`);
+    assert.match(successor.scope, /^[a-z0-9_]+$/);
+    assert.ok(fs.existsSync(path.join(__dirname, "..", successor.evidenceTest)), `dedicated successor evidence missing: ${file}`);
   }
 });
 

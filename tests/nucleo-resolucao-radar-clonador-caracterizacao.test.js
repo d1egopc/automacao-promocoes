@@ -90,7 +90,7 @@ const URLs = Object.freeze({
   kabum: "https://www.kabum.com.br/produto/123456/teclado",
   magalu: "https://www.magazineluiza.com.br/produto/p/abc123",
   magaluAfiliado: "https://www.magazinevoce.com.br/magazineparceiro/p/abc123",
-  magaluAmbiguo: "https://magazineluiza.onelink.me/ambiguous"
+  magaluOneLink: "https://magazineluiza.onelink.me/589508454/fixturemagalu"
 });
 
 // Equivale aos resultados ja cobertos pelo resolver. Links sociais ML
@@ -109,6 +109,11 @@ function resolverFixture(url) {
   if (url === URLs.divulgador) return respostaResolvida(url, produtoAmazon("B0D4T5MFNN"), "amazon");
   if (url === URLs.amzlink) return respostaResolvida(url, produtoAmazon("B0E5T6MFPP"), "amazon");
   if (url === URLs.amazonSemAsin) return respostaFalha(url, "amazon_shortlink_sem_asin_resolvido");
+  if (url === URLs.magaluOneLink) return respostaResolvida(url, URLs.magalu, "magalu", {
+    chaveCanonica: "magalu:abc123",
+    produtoIdCanonico: "abc123",
+    marketplaceCanonico: "magalu"
+  });
   return respostaFalha(url, "dominio_redirect_nao_permitido");
 }
 
@@ -152,7 +157,7 @@ const fixtures = [
   { nome: "KaBuM nativo", marketplace: "kabum", links: [URLs.kabum], esperados: { radar: [URLs.kabum], clone: [URLs.kabum], papeis: ["produto"], radarCanonica: "kabum:123456" } },
   { nome: "Magalu produto", marketplace: "magalu", links: [URLs.magalu], esperados: { radar: [URLs.magalu], clone: [URLs.magalu], papeis: ["produto"] } },
   { nome: "Magalu afiliado", marketplace: "magalu", links: [URLs.magaluAfiliado], esperados: { radar: [URLs.magaluAfiliado], clone: [URLs.magaluAfiliado], papeis: ["produto"] } },
-  { nome: "Magalu ambiguo", marketplace: "magalu", links: [URLs.magaluAmbiguo], esperados: { radar: [URLs.magaluAmbiguo], clone: [URLs.magaluAmbiguo], papeis: ["desconhecido"] } }
+  { nome: "Magalu OneLink oficial", marketplace: "magalu", links: [URLs.magaluOneLink], esperados: { radar: [URLs.magalu], clone: [URLs.magalu], papeis: ["produto"], redirectsRadar: 1 } }
 ];
 
 (async function main() {

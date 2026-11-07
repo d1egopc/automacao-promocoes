@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const express = require("express");
 const { classificarLinkEngine } = require("../modules/engine/link-role.service");
@@ -496,4 +497,13 @@ const lookupPublico = async () => [{ address: "8.8.8.8", family: 4 }];
     if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error("TEMP_PATH_INVALID");
     fs.rmSync(resolved, { recursive: true, force: true });
   }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().then(() => {
+  const focal = spawnSync(process.execPath, [path.join(__dirname, "magalu-clonador-universal-e2e.test.js")], {
+    cwd: path.join(__dirname, ".."),
+    env: process.env,
+    encoding: "utf8"
+  });
+  if (focal.stdout) process.stdout.write(focal.stdout);
+  if (focal.stderr) process.stderr.write(focal.stderr);
+  assert.equal(focal.status, 0, "Magalu Clonador Universal E2E must pass inside the guarded resolver suite");
+}).catch(error => { console.error(error); process.exitCode = 1; });
