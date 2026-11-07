@@ -68,7 +68,7 @@ jobs:
           git merge-base --is-ancestor "$PHASE_B_SHA" "$PHASE_C_SHA"
           git merge-base --is-ancestor "$PHASE_C_SHA" "$PHASE_D_SHA"
           git merge-base --is-ancestor "$PHASE_D_SHA" HEAD
-          test "$(git rev-list --count "$PHASE_D_SHA"..HEAD)" = "1"
+          test "$(git rev-list --count "$PHASE_D_SHA"..HEAD)" = "2"
           changed="$(git diff --name-only "$PHASE_D_SHA"..HEAD | sort)"
           expected="$(printf '%s\n' \
             .github/workflows/intelligence-v1-release-candidate-ci.yml \
@@ -112,10 +112,15 @@ jobs:
         run: node --test tests/auto-clean-candidate-fairness.test.js
       - name: Guardian for every stacked phase
         run: |
+          git checkout --detach "$PHASE_A_SHA"
           node scripts/guardian-v1.cjs validate --base "$MAIN_BASE_SHA" --source "$PHASE_A_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-a-guardian.json"
+          git checkout --detach "$PHASE_B_SHA"
           node scripts/guardian-v1.cjs validate --base "$PHASE_A_SHA" --source "$PHASE_B_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-b-guardian.json"
+          git checkout --detach "$PHASE_C_SHA"
           node scripts/guardian-v1.cjs validate --base "$PHASE_B_SHA" --source "$PHASE_C_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-c-guardian.json"
+          git checkout --detach "$PHASE_D_SHA"
           node scripts/guardian-v1.cjs validate --base "$PHASE_C_SHA" --source "$PHASE_D_SHA" --report "$RUNNER_TEMP/intelligence-v1-phase-d-guardian.json"
+          git checkout --detach "$GITHUB_SHA"
           node scripts/guardian-v1.cjs validate --base "$PHASE_D_SHA" --source "$GITHUB_SHA" --report "$RUNNER_TEMP/intelligence-v1-release-candidate-guardian.json"
       - uses: actions/upload-artifact@v4
         if: always()
