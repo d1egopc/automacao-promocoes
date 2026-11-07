@@ -25,6 +25,16 @@ const {
   canonicalCategoryId,
   classifyMulticategoryShadow
 } = require("./classification-v1.service");
+const {
+  ROUTING_MODES,
+  ROUTING_BRIDGE_VERSION,
+  ROUTING_ACTIVE_RELEASED,
+  routingMode,
+  buildRoutingBridge,
+  bridgeFromOffer,
+  validateRoutingBridge,
+  projectedCategoryCandidates
+} = require("./routing-shadow-v1.service");
 
 module.exports = {
   avaliarOfertaUniversal,
@@ -50,5 +60,13 @@ module.exports = {
   CLASSIFIER_VERSION,
   CANONICAL_CATEGORY_IDS,
   canonicalCategoryId,
-  classifyMulticategoryShadow
+  classifyMulticategoryShadow,
+  ROUTING_MODES,
+  ROUTING_BRIDGE_VERSION,
+  ROUTING_ACTIVE_RELEASED,
+  routingMode,
+  buildRoutingBridge,
+  bridgeFromOffer,
+  validateRoutingBridge,
+  projectedCategoryCandidates
 };

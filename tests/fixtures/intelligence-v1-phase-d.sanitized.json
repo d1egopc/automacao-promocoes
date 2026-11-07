@@ -1,0 +1,38 @@
+{
+  "splitAirConditioner": {
+    "offer": {
+      "marketplace": "mercadolivre",
+      "tituloOficial": "Ar-condicionado Split Inverter Samsung WindFree 12000 BTU 220V",
+      "productId": "MLB900001",
+      "identityConfirmed": true,
+      "identitySource": "api_oficial",
+      "categoria": "Climatização e Ventilação",
+      "origem": "radar"
+    },
+    "destinations": [
+      { "id": "whatsapp-clima", "tipo": "whatsapp", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Climatização e Ventilação"] },
+      { "id": "telegram-eletro-a", "tipo": "telegram", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Eletrodomésticos"] },
+      { "id": "discord-eletro-b", "tipo": "discord", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Eletrodomésticos"] },
+      { "id": "whatsapp-eletro-a", "tipo": "whatsapp", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Eletrodomésticos"] },
+      { "id": "whatsapp-eletro-b", "tipo": "whatsapp", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Eletrodomésticos"] },
+      { "id": "whatsapp-multi", "tipo": "whatsapp", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["mercadolivre"], "categorias": ["Climatização e Ventilação", "Eletrodomésticos"] },
+      { "id": "telegram-wrong-marketplace", "tipo": "telegram", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["amazon"], "categorias": ["Eletrodomésticos"] },
+      { "id": "discord-wrong-origin", "tipo": "discord", "ativo": true, "origemOfertas": "clonador", "marketplaces": ["mercadolivre"], "categorias": ["Eletrodomésticos"] }
+    ]
+  },
+  "adult": {
+    "offer": {
+      "marketplace": "amazon",
+      "tituloOficial": "Vibrador adulto recarregável em silicone",
+      "productId": "B0ADULTD01",
+      "identityConfirmed": true,
+      "identitySource": "pagina_oficial",
+      "categoria": "Diversos",
+      "origem": "radar"
+    },
+    "destinations": [
+      { "id": "whatsapp-all", "tipo": "whatsapp", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["amazon"], "todasCategorias": true },
+      { "id": "telegram-diversos", "tipo": "telegram", "ativo": true, "origemOfertas": "optimus", "marketplaces": ["amazon"], "categorias": ["Diversos"] }
+    ]
+  }
+}
